@@ -46,7 +46,10 @@ fn the_ledger_agrees_with_the_episodes_own_columns() {
         ledger.served[LITTER] + ledger.served[CARRION],
         episode.intake_detritus
     );
-    assert!(ledger.served[FOLIAGE] > 0.0, "a stationary grazer on its patch ate nothing");
+    assert!(
+        ledger.served[FOLIAGE] > 0.0,
+        "a stationary grazer on its patch ate nothing"
+    );
 
     // The episode reconstructs the upkeep price tick by tick from the same `MotorBill`; the
     // ledger books it where the world levies it. They must be the same number.
@@ -59,8 +62,16 @@ fn the_ledger_agrees_with_the_episodes_own_columns() {
     );
 
     // And the identities close for this body over this life.
-    assert!(ledger.material_residual().abs() < 1e-10, "{:e}", ledger.material_residual());
-    assert!(ledger.energy_residual().abs() < 1e-10, "{:e}", ledger.energy_residual());
+    assert!(
+        ledger.material_residual().abs() < 1e-10,
+        "{:e}",
+        ledger.material_residual()
+    );
+    assert!(
+        ledger.energy_residual().abs() < 1e-10,
+        "{:e}",
+        ledger.energy_residual()
+    );
 
     // One trace entry per simulated tick, both series non-decreasing.
     assert_eq!(trace.len() as u64, episode.ticks);
@@ -92,8 +103,15 @@ fn the_reported_window_is_the_trace_differenced_by_hand() {
 
     let (i1, b1) = trace[trace.len() - 1];
     // `ratios` differences from the tick *before* the window opens; reproduce that.
-    let (i0, b0) = if trace.len() == w { (0.0, 0.0) } else { trace[trace.len() - w - 1] };
+    let (i0, b0) = if trace.len() == w {
+        (0.0, 0.0)
+    } else {
+        trace[trace.len() - w - 1]
+    };
     let expected = (i1 - i0) / (b1 - b0);
     assert!((last - expected).abs() < 1e-12, "{last} against {expected}");
-    assert!(best >= last - 1e-12, "the best window cannot be worse than the last one");
+    assert!(
+        best >= last - 1e-12,
+        "the best window cannot be worse than the last one"
+    );
 }

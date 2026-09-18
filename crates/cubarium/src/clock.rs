@@ -195,7 +195,9 @@ impl Clock {
                 // A single late frame does not turn into a burst of catch-up frames.
                 self.reschedule_renders(now);
             }
-            return Step::Render { f: self.fraction(now) };
+            return Step::Render {
+                f: self.fraction(now),
+            };
         }
 
         let due = self.next_tick.min(self.render_at(self.render_index));
@@ -231,7 +233,10 @@ mod tests {
         assert!((DT - 0.05).abs() < 1e-12);
         assert_eq!(tick_period(), Duration::from_millis(50));
         // Three render frames per tick at the default rate.
-        assert_eq!(tick_period().as_nanos() / render_period(RENDER_HZ).as_nanos(), 3);
+        assert_eq!(
+            tick_period().as_nanos() / render_period(RENDER_HZ).as_nanos(),
+            3
+        );
         assert_eq!(clamp_fps(0), MIN_FPS);
         assert_eq!(clamp_fps(10_000), MAX_FPS);
     }
@@ -264,7 +269,10 @@ mod tests {
         assert!((599..=602).contains(&renders), "renders {renders}");
         // Every tick boundary is also a frame boundary at 60 fps, so there are as many
         // sleeps as there are distinct instants: one per frame.
-        assert!(sleeps >= 500, "the loop must sleep between events, got {sleeps}");
+        assert!(
+            sleeps >= 500,
+            "the loop must sleep between events, got {sleeps}"
+        );
         assert_eq!(c.tick(), u64::from(ticks));
     }
 
@@ -404,6 +412,9 @@ mod tests {
                 other => panic!("unexpected {other:?}"),
             }
         }
-        assert!(renders <= 1, "a late frame must not replay missed frames, got {renders}");
+        assert!(
+            renders <= 1,
+            "a late frame must not replay missed frames, got {renders}"
+        );
     }
 }

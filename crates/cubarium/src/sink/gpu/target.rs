@@ -58,12 +58,10 @@ impl GpuTarget {
                     .context("attaching to cube-screen-shim's frame socket")?;
                 Ok(GpuTarget::Shim(Box::new(shim)))
             }
-            GpuTargetKind::Window => {
-                Ok(GpuTarget::Window(Box::new(WindowTarget::open(gpu, src, title)?)))
-            }
-            GpuTargetKind::Headless => {
-                Ok(GpuTarget::Headless(Box::new(Headless::new(gpu, src)?)))
-            }
+            GpuTargetKind::Window => Ok(GpuTarget::Window(Box::new(WindowTarget::open(
+                gpu, src, title,
+            )?))),
+            GpuTargetKind::Headless => Ok(GpuTarget::Headless(Box::new(Headless::new(gpu, src)?))),
         }
     }
 
@@ -126,9 +124,8 @@ impl WindowTarget {
         // integer, exactly as the panel gets it.
         let zoom = ((1600 / w).min(900 / h)).max(1);
         let size = (w * zoom, h * zoom);
-        let window =
-            minifb::Window::new(title, size.0, size.1, minifb::WindowOptions::default())
-                .context("opening the --gpu-target window")?;
+        let window = minifb::Window::new(title, size.0, size.1, minifb::WindowOptions::default())
+            .context("opening the --gpu-target window")?;
         Ok(WindowTarget {
             window,
             headless: Headless::new(gpu, src)?,
@@ -139,12 +136,7 @@ impl WindowTarget {
         })
     }
 
-    fn draw<S: FrameSource>(
-        &mut self,
-        gpu: &Gpu,
-        src: &mut S,
-        frame: S::Frame<'_>,
-    ) -> Result<f64> {
+    fn draw<S: FrameSource>(&mut self, gpu: &Gpu, src: &mut S, frame: S::Frame<'_>) -> Result<f64> {
         let ms = self.headless.draw(gpu, src, frame)?;
         let rgba = src.read_raster(gpu)?;
         let w = src.raster_size().0 as usize;
@@ -152,9 +144,8 @@ impl WindowTarget {
             let sy = y / self.zoom;
             for x in 0..self.size.0 {
                 let i = (sy * w + x / self.zoom) * 4;
-                self.buffer[y * self.size.0 + x] = u32::from(rgba[i]) << 16
-                    | u32::from(rgba[i + 1]) << 8
-                    | u32::from(rgba[i + 2]);
+                self.buffer[y * self.size.0 + x] =
+                    u32::from(rgba[i]) << 16 | u32::from(rgba[i + 1]) << 8 | u32::from(rgba[i + 2]);
             }
         }
         if !self.window.is_open() || self.window.is_key_down(minifb::Key::Escape) {

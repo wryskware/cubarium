@@ -62,7 +62,10 @@ impl Projection {
         raster_height: u16,
         world: &WorldConfig,
     ) -> Result<Projection> {
-        ensure!(world.width > 0 && world.height > 0 && world.depth > 0, "an empty world");
+        ensure!(
+            world.width > 0 && world.height > 0 && world.depth > 0,
+            "an empty world"
+        );
         let s = px_per_voxel.max(1);
         ensure!(
             tilt_degrees.is_finite() && tilt_degrees > 0.0 && tilt_degrees < 90.0,
@@ -78,12 +81,17 @@ impl Projection {
             "the strip is {raster_w} pixels wide at {s} px per voxel; \
              lower px_per_voxel or the world width"
         );
-        let full_h = u64::from(world.height) * u64::from(s) + u64::from(world.depth) * u64::from(rise);
+        let full_h =
+            u64::from(world.height) * u64::from(s) + u64::from(world.depth) * u64::from(rise);
         ensure!(
             full_h <= u64::from(u16::MAX),
             "the projected strip is {full_h} pixels tall; lower px_per_voxel or the tilt"
         );
-        let raster_h = if raster_height == 0 { full_h as u16 } else { raster_height };
+        let raster_h = if raster_height == 0 {
+            full_h as u16
+        } else {
+            raster_height
+        };
 
         Ok(Projection {
             s,
@@ -120,7 +128,12 @@ impl Projection {
     /// directly above the front face.
     #[inline]
     pub fn top_rect(&self, x: i64, y: u32, z: u32) -> (i32, i32, u32, u32) {
-        (self.col(x), self.front_row(y, z) - self.rise as i32, self.s, self.rise)
+        (
+            self.col(x),
+            self.front_row(y, z) - self.rise as i32,
+            self.s,
+            self.rise,
+        )
     }
 
     /// The projected height of the whole strip, before any crop.
@@ -134,7 +147,12 @@ mod tests {
     use super::*;
 
     fn world(width: u32, height: u32, depth: u32) -> WorldConfig {
-        WorldConfig { width, height, depth, ..WorldConfig::default() }
+        WorldConfig {
+            width,
+            height,
+            depth,
+            ..WorldConfig::default()
+        }
     }
 
     /// The documented defaults, on the documented world, land on documented pixels.
@@ -215,9 +233,14 @@ mod tests {
     /// Tilt reaches the picture only through a whole-pixel `rise`, clamped into `1..=s`.
     #[test]
     fn the_depth_step_is_a_whole_number_of_pixels_in_range() {
-        for &(tilt, s, want) in
-            &[(30.0, 4, 2u32), (35.0, 4, 3), (25.0, 4, 2), (30.0, 3, 2), (5.0, 4, 1), (80.0, 4, 4)]
-        {
+        for &(tilt, s, want) in &[
+            (30.0, 4, 2u32),
+            (35.0, 4, 3),
+            (25.0, 4, 2),
+            (30.0, 3, 2),
+            (5.0, 4, 1),
+            (80.0, 4, 4),
+        ] {
             let p = Projection::new(tilt, s, 0, &world(16, 8, 4)).unwrap();
             assert_eq!(p.rise, want, "tilt {tilt} at {s} px");
             assert!((1..=p.s).contains(&p.rise));

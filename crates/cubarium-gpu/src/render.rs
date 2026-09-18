@@ -68,10 +68,23 @@ pub struct PresentTransform {
 impl PresentTransform {
     /// The largest integer upscale of `raster` that fits `target` at this rotation,
     /// or `None` if even 1× does not fit.
-    pub fn fit(raster: (u32, u32), target: (u32, u32), quarter_turns: u32, encode_srgb: bool) -> Option<PresentTransform> {
-        let (rw, rh) = if quarter_turns % 2 == 0 { raster } else { (raster.1, raster.0) };
+    pub fn fit(
+        raster: (u32, u32),
+        target: (u32, u32),
+        quarter_turns: u32,
+        encode_srgb: bool,
+    ) -> Option<PresentTransform> {
+        let (rw, rh) = if quarter_turns % 2 == 0 {
+            raster
+        } else {
+            (raster.1, raster.0)
+        };
         let factor = (target.0 / rw).min(target.1 / rh);
-        (factor >= 1).then_some(PresentTransform { factor, quarter_turns, encode_srgb })
+        (factor >= 1).then_some(PresentTransform {
+            factor,
+            quarter_turns,
+            encode_srgb,
+        })
     }
 
     /// The push constants: two columns of the panel→raster matrix, then its offset.
@@ -85,7 +98,16 @@ impl PresentTransform {
             2 => ([-k, 0.0], [0.0, -k], [(pw - 1.0) * k, (ph - 1.0) * k]),
             _ => ([0.0, k], [-k, 0.0], [(ph - 1.0) * k, 0.0]),
         };
-        [col0[0], col0[1], col1[0], col1[1], off[0], off[1], if self.encode_srgb { 1.0 } else { 0.0 }, 0.0]
+        [
+            col0[0],
+            col0[1],
+            col1[0],
+            col1[1],
+            off[0],
+            off[1],
+            if self.encode_srgb { 1.0 } else { 0.0 },
+            0.0,
+        ]
     }
 }
 
@@ -216,7 +238,10 @@ impl Renderer {
     /// Build every pipeline and upload the atlas. One call per process.
     pub fn new(gpu: &Gpu, atlas: &Atlas, layout: RingLayout) -> Result<Renderer> {
         if !layout.is_valid() {
-            bail!("{layout:?} does not divide into whole {}-pixel cells", 4 * layout.scale);
+            bail!(
+                "{layout:?} does not divide into whole {}-pixel cells",
+                4 * layout.scale
+            );
         }
         let d = &gpu.device;
         let command_pool = unsafe {
@@ -263,10 +288,17 @@ impl Renderer {
             vk::ImageTiling::OPTIMAL,
             vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST,
         )?;
-        let staging = gpu.host_buffer(atlas.rgba.len() as u64, vk::BufferUsageFlags::TRANSFER_SRC)?;
+        let staging =
+            gpu.host_buffer(atlas.rgba.len() as u64, vk::BufferUsageFlags::TRANSFER_SRC)?;
         staging.write(&atlas.rgba);
         gpu.one_shot(command_pool, |cb| unsafe {
-            barrier(d, cb, atlas_image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
+            barrier(
+                d,
+                cb,
+                atlas_image,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            );
             d.cmd_copy_buffer_to_image(
                 cb,
                 staging.buffer,
@@ -278,9 +310,19 @@ impl Renderer {
                             .aspect_mask(vk::ImageAspectFlags::COLOR)
                             .layer_count(1),
                     )
-                    .image_extent(vk::Extent3D { width: atlas.width, height: atlas.height, depth: 1 })],
+                    .image_extent(vk::Extent3D {
+                        width: atlas.width,
+                        height: atlas.height,
+                        depth: 1,
+                    })],
             );
-            barrier(d, cb, atlas_image, vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+            barrier(
+                d,
+                cb,
+                atlas_image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            );
         })?;
         staging.destroy(gpu);
         let atlas_view = gpu.view(atlas_image, vk::Format::R8G8B8A8_SRGB)?;
@@ -299,7 +341,13 @@ impl Renderer {
             vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST,
         )?;
         gpu.one_shot(command_pool, |cb| unsafe {
-            barrier(d, cb, scratch_image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+            barrier(
+                d,
+                cb,
+                scratch_image,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            );
         })?;
         let scratch_view = gpu.view(scratch_image, vk::Format::R16G16B16A16_SFLOAT)?;
         let scratch_staging = gpu.host_buffer(
@@ -321,7 +369,13 @@ impl Renderer {
                 vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST,
             )?;
             gpu.one_shot(command_pool, |cb| unsafe {
-                barrier(d, cb, image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+                barrier(
+                    d,
+                    cb,
+                    image,
+                    vk::ImageLayout::UNDEFINED,
+                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                );
             })?;
             field_images[i] = image;
             field_memory[i] = memory;
@@ -379,12 +433,18 @@ impl Renderer {
             )
         }?;
         let sizes = [
-            vk::DescriptorPoolSize::default().ty(vk::DescriptorType::UNIFORM_BUFFER).descriptor_count(1),
-            vk::DescriptorPoolSize::default().ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER).descriptor_count(4),
+            vk::DescriptorPoolSize::default()
+                .ty(vk::DescriptorType::UNIFORM_BUFFER)
+                .descriptor_count(1),
+            vk::DescriptorPoolSize::default()
+                .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .descriptor_count(4),
         ];
         let descriptor_pool = unsafe {
             d.create_descriptor_pool(
-                &vk::DescriptorPoolCreateInfo::default().max_sets(1).pool_sizes(&sizes),
+                &vk::DescriptorPoolCreateInfo::default()
+                    .max_sets(1)
+                    .pool_sizes(&sizes),
                 None,
             )
         }?;
@@ -442,9 +502,24 @@ impl Renderer {
         let water_fs = gpu.shader(WATER_FRAG)?;
         let sprite_vs = gpu.shader(SPRITE_VERT)?;
         let sprite_fs = gpu.shader(SPRITE_FRAG)?;
-        let background_pipeline = fullscreen_pipeline(d, scene_pass, scene_pipeline_layout, fullscreen, background_fs, false)?;
-        let water_pipeline = fullscreen_pipeline(d, scene_pass, scene_pipeline_layout, fullscreen, water_fs, true)?;
-        let sprite_pipeline = sprite_pipeline(d, scene_pass, scene_pipeline_layout, sprite_vs, sprite_fs)?;
+        let background_pipeline = fullscreen_pipeline(
+            d,
+            scene_pass,
+            scene_pipeline_layout,
+            fullscreen,
+            background_fs,
+            false,
+        )?;
+        let water_pipeline = fullscreen_pipeline(
+            d,
+            scene_pass,
+            scene_pipeline_layout,
+            fullscreen,
+            water_fs,
+            true,
+        )?;
+        let sprite_pipeline =
+            sprite_pipeline(d, scene_pass, scene_pipeline_layout, sprite_vs, sprite_fs)?;
         unsafe {
             d.destroy_shader_module(fullscreen, None);
             d.destroy_shader_module(background_fs, None);
@@ -534,7 +609,11 @@ impl Renderer {
         }
         // Each region is staged at its own byte offset and copied as its own rect, so
         // the staging buffer is written densely and the page never needs a full upload.
-        let offset = self.scratch_regions.iter().map(|r| u64::from(r.2) * u64::from(r.3) * 8).sum();
+        let offset = self
+            .scratch_regions
+            .iter()
+            .map(|r| u64::from(r.2) * u64::from(r.3) * 8)
+            .sum();
         let mut halves = vec![0u16; (w * h * 4) as usize];
         for (i, p) in pixels[..(w * h) as usize].iter().enumerate() {
             for c in 0..4 {
@@ -580,7 +659,11 @@ impl Renderer {
         target: Option<TargetSlot<'_>>,
     ) -> Result<usize> {
         if scene.layout != self.layout {
-            bail!("scene layout {:?} is not the renderer's {:?}", scene.layout, self.layout);
+            bail!(
+                "scene layout {:?} is not the renderer's {:?}",
+                scene.layout,
+                self.layout
+            );
         }
         let d = &gpu.device;
         self.uniforms.write(&[SceneUniforms::new(
@@ -611,8 +694,10 @@ impl Renderer {
             );
         }
         for layer in LAYERS {
-            self.instances
-                .write_at(offsets[layer as usize].0 as usize, &scene.layers[layer as usize]);
+            self.instances.write_at(
+                offsets[layer as usize].0 as usize,
+                &scene.layers[layer as usize],
+            );
         }
         if self.fill_profile {
             self.fill = self.profile(scene);
@@ -645,7 +730,13 @@ impl Renderer {
                 let (cx, cy) = (self.layout.cells_x(), self.layout.cells_y());
                 let plane = u64::from(cx) * u64::from(cy) * 8;
                 for i in 0..2 {
-                    barrier(d, cb, self.field_images[i], vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
+                    barrier(
+                        d,
+                        cb,
+                        self.field_images[i],
+                        vk::ImageLayout::UNDEFINED,
+                        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    );
                     d.cmd_copy_buffer_to_image(
                         cb,
                         self.field_staging.buffer,
@@ -658,9 +749,19 @@ impl Renderer {
                                     .aspect_mask(vk::ImageAspectFlags::COLOR)
                                     .layer_count(1),
                             )
-                            .image_extent(vk::Extent3D { width: cx, height: cy, depth: 1 })],
+                            .image_extent(vk::Extent3D {
+                                width: cx,
+                                height: cy,
+                                depth: 1,
+                            })],
                     );
-                    barrier(d, cb, self.field_images[i], vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+                    barrier(
+                        d,
+                        cb,
+                        self.field_images[i],
+                        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                    );
                 }
             }
 
@@ -673,16 +774,30 @@ impl Renderer {
                             .buffer_offset(offset)
                             .buffer_row_length(w)
                             .buffer_image_height(h)
-                            .image_offset(vk::Offset3D { x: x as i32, y: y as i32, z: 0 })
+                            .image_offset(vk::Offset3D {
+                                x: x as i32,
+                                y: y as i32,
+                                z: 0,
+                            })
                             .image_subresource(
                                 vk::ImageSubresourceLayers::default()
                                     .aspect_mask(vk::ImageAspectFlags::COLOR)
                                     .layer_count(1),
                             )
-                            .image_extent(vk::Extent3D { width: w, height: h, depth: 1 })
+                            .image_extent(vk::Extent3D {
+                                width: w,
+                                height: h,
+                                depth: 1,
+                            })
                     })
                     .collect();
-                barrier(d, cb, self.scratch_image, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
+                barrier(
+                    d,
+                    cb,
+                    self.scratch_image,
+                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                );
                 d.cmd_copy_buffer_to_image(
                     cb,
                     self.scratch_staging.buffer,
@@ -690,12 +805,25 @@ impl Renderer {
                     vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                     &copies,
                 );
-                barrier(d, cb, self.scratch_image, vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+                barrier(
+                    d,
+                    cb,
+                    self.scratch_image,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                );
             }
 
             // --- the world raster ---
             d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, 1);
-            begin(d, cb, self.scene_pass, self.raster_framebuffer, self.layout.w, self.layout.h);
+            begin(
+                d,
+                cb,
+                self.scene_pass,
+                self.raster_framebuffer,
+                self.layout.w,
+                self.layout.h,
+            );
             d.cmd_bind_descriptor_sets(
                 cb,
                 vk::PipelineBindPoint::GRAPHICS,
@@ -704,7 +832,11 @@ impl Renderer {
                 &[self.scene_set],
                 &[],
             );
-            d.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, self.background_pipeline);
+            d.cmd_bind_pipeline(
+                cb,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.background_pipeline,
+            );
             d.cmd_draw(cb, 3, 1, 0, 0);
 
             d.cmd_bind_vertex_buffers(cb, 0, &[self.instances.buffer], &[0]);
@@ -727,7 +859,8 @@ impl Renderer {
 
             // --- the panel ---
             if let Some((image, extent, xform, pass, pipeline)) = target {
-                self.present.record(d, cb, image, extent, xform, pass, pipeline);
+                self.present
+                    .record(d, cb, image, extent, xform, pass, pipeline);
             }
 
             d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, 3);
@@ -751,7 +884,10 @@ impl Renderer {
     /// so the areas are raster pixels and comparable across rungs.
     fn profile(&self, scene: &Scene) -> FillProfile {
         let world = self.layout.scale as f32 * self.art_scale;
-        let mut p = FillProfile { instances: scene.instance_count(), ..FillProfile::default() };
+        let mut p = FillProfile {
+            instances: scene.instance_count(),
+            ..FillProfile::default()
+        };
         for layer in LAYERS {
             for i in &scene.layers[layer as usize] {
                 let k = f64::from((world * i.scale.max(1e-3)).powi(2));
@@ -795,8 +931,12 @@ impl Renderer {
     pub fn gpu_split(&self, gpu: &Gpu) -> Option<[f64; 3]> {
         let mut ts = [0u64; QUERY_SLOTS as usize];
         if unsafe {
-            gpu.device
-                .get_query_pool_results(self.queries, 0, &mut ts, vk::QueryResultFlags::TYPE_64)
+            gpu.device.get_query_pool_results(
+                self.queries,
+                0,
+                &mut ts,
+                vk::QueryResultFlags::TYPE_64,
+            )
         }
         .is_err()
         {
@@ -817,7 +957,13 @@ impl Renderer {
         let host = gpu.host_buffer(size, vk::BufferUsageFlags::TRANSFER_DST)?;
         let d = &gpu.device;
         gpu.one_shot(self.command_pool, |cb| unsafe {
-            barrier(d, cb, self.raster_image, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
+            barrier(
+                d,
+                cb,
+                self.raster_image,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            );
             d.cmd_copy_image_to_buffer(
                 cb,
                 self.raster_image,
@@ -831,9 +977,19 @@ impl Renderer {
                             .aspect_mask(vk::ImageAspectFlags::COLOR)
                             .layer_count(1),
                     )
-                    .image_extent(vk::Extent3D { width: self.layout.w, height: self.layout.h, depth: 1 })],
+                    .image_extent(vk::Extent3D {
+                        width: self.layout.w,
+                        height: self.layout.h,
+                        depth: 1,
+                    })],
             );
-            barrier(d, cb, self.raster_image, vk::ImageLayout::TRANSFER_SRC_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+            barrier(
+                d,
+                cb,
+                self.raster_image,
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            );
         })?;
         let bytes = unsafe { host.bytes() }[..size as usize].to_vec();
         host.destroy(gpu);
@@ -922,7 +1078,9 @@ fn f16(value: f32) -> u16 {
         return sign | (half + round as u16);
     }
     let half = ((unbiased as u32) << 10) as u16 | (mantissa >> 13) as u16;
-    let round = u16::from((mantissa >> 12) & 1 == 1 && (mantissa & 0x0FFF != 0 || (mantissa >> 13) & 1 == 1));
+    let round = u16::from(
+        (mantissa >> 12) & 1 == 1 && (mantissa & 0x0FFF != 0 || (mantissa >> 13) & 1 == 1),
+    );
     sign | (half + round)
 }
 
@@ -969,7 +1127,9 @@ pub(crate) fn colour_pass(
         .color_attachments(&refs)];
     Ok(unsafe {
         d.create_render_pass(
-            &vk::RenderPassCreateInfo::default().attachments(&attachments).subpasses(&subpasses),
+            &vk::RenderPassCreateInfo::default()
+                .attachments(&attachments)
+                .subpasses(&subpasses),
             None,
         )
     }?)
@@ -1008,21 +1168,41 @@ pub(crate) unsafe fn begin(
     h: u32,
 ) {
     unsafe {
-        let extent = vk::Extent2D { width: w, height: h };
+        let extent = vk::Extent2D {
+            width: w,
+            height: h,
+        };
         d.cmd_begin_render_pass(
             cb,
             &vk::RenderPassBeginInfo::default()
                 .render_pass(pass)
                 .framebuffer(fb)
-                .render_area(vk::Rect2D { offset: vk::Offset2D { x: 0, y: 0 }, extent }),
+                .render_area(vk::Rect2D {
+                    offset: vk::Offset2D { x: 0, y: 0 },
+                    extent,
+                }),
             vk::SubpassContents::INLINE,
         );
         d.cmd_set_viewport(
             cb,
             0,
-            &[vk::Viewport { x: 0.0, y: 0.0, width: w as f32, height: h as f32, min_depth: 0.0, max_depth: 1.0 }],
+            &[vk::Viewport {
+                x: 0.0,
+                y: 0.0,
+                width: w as f32,
+                height: h as f32,
+                min_depth: 0.0,
+                max_depth: 1.0,
+            }],
         );
-        d.cmd_set_scissor(cb, 0, &[vk::Rect2D { offset: vk::Offset2D { x: 0, y: 0 }, extent }]);
+        d.cmd_set_scissor(
+            cb,
+            0,
+            &[vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent,
+            }],
+        );
     }
 }
 
@@ -1049,7 +1229,16 @@ pub(crate) fn fullscreen_pipeline(
     blend: bool,
 ) -> Result<vk::Pipeline> {
     let vi = vk::PipelineVertexInputStateCreateInfo::default();
-    build_pipeline(d, pass, layout, vs, fs, vi, vk::PrimitiveTopology::TRIANGLE_LIST, blend)
+    build_pipeline(
+        d,
+        pass,
+        layout,
+        vs,
+        fs,
+        vi,
+        vk::PrimitiveTopology::TRIANGLE_LIST,
+        blend,
+    )
 }
 
 fn sprite_pipeline(
@@ -1073,22 +1262,31 @@ fn sprite_pipeline(
             .offset(offset)
     };
     let attributes = [
-        attribute(0, F::R32G32_SFLOAT, 0),              // anchor
-        attribute(1, F::R32G32_SFLOAT, 8),              // heading
-        attribute(2, F::R16G16B16A16_UINT, 16),         // frames 0 and 1, by origin
-        attribute(3, F::R16G16B16A16_UINT, 24),         // frames 2 and 3
-        attribute(4, F::R16G16B16A16_UINT, 32),         // size w, h + pivot x, y
-        attribute(5, F::R32G32B32A32_SFLOAT, 40),       // the four frame weights
-        attribute(6, F::R32G32B32A32_SFLOAT, 56),       // bend amplitude, base, root, length
-        attribute(7, F::R32G32B32A32_SFLOAT, 72),       // mask floor, reveal, flags, opacity
-        attribute(8, F::R32G32B32A32_SFLOAT, 88),       // tone colour rgb + tone mix
-        attribute(9, F::R32G32B32A32_SFLOAT, 104),      // shade floor, reference, scale, source
-        attribute(10, F::R32G32B32A32_SFLOAT, 120),     // the opaque box, x0 y0 x1 y1
+        attribute(0, F::R32G32_SFLOAT, 0),          // anchor
+        attribute(1, F::R32G32_SFLOAT, 8),          // heading
+        attribute(2, F::R16G16B16A16_UINT, 16),     // frames 0 and 1, by origin
+        attribute(3, F::R16G16B16A16_UINT, 24),     // frames 2 and 3
+        attribute(4, F::R16G16B16A16_UINT, 32),     // size w, h + pivot x, y
+        attribute(5, F::R32G32B32A32_SFLOAT, 40),   // the four frame weights
+        attribute(6, F::R32G32B32A32_SFLOAT, 56),   // bend amplitude, base, root, length
+        attribute(7, F::R32G32B32A32_SFLOAT, 72),   // mask floor, reveal, flags, opacity
+        attribute(8, F::R32G32B32A32_SFLOAT, 88),   // tone colour rgb + tone mix
+        attribute(9, F::R32G32B32A32_SFLOAT, 104),  // shade floor, reference, scale, source
+        attribute(10, F::R32G32B32A32_SFLOAT, 120), // the opaque box, x0 y0 x1 y1
     ];
     let vi = vk::PipelineVertexInputStateCreateInfo::default()
         .vertex_binding_descriptions(&bindings)
         .vertex_attribute_descriptions(&attributes);
-    build_pipeline(d, pass, layout, vs, fs, vi, vk::PrimitiveTopology::TRIANGLE_STRIP, true)
+    build_pipeline(
+        d,
+        pass,
+        layout,
+        vs,
+        fs,
+        vi,
+        vk::PrimitiveTopology::TRIANGLE_STRIP,
+        true,
+    )
 }
 
 fn build_pipeline(
@@ -1112,7 +1310,9 @@ fn build_pipeline(
             .name(c"main"),
     ];
     let ia = vk::PipelineInputAssemblyStateCreateInfo::default().topology(topology);
-    let vp = vk::PipelineViewportStateCreateInfo::default().viewport_count(1).scissor_count(1);
+    let vp = vk::PipelineViewportStateCreateInfo::default()
+        .viewport_count(1)
+        .scissor_count(1);
     let rs = vk::PipelineRasterizationStateCreateInfo::default()
         .polygon_mode(vk::PolygonMode::FILL)
         .cull_mode(vk::CullModeFlags::NONE)
@@ -1123,7 +1323,8 @@ fn build_pipeline(
     let attachments = [if blend {
         premultiplied_blend()
     } else {
-        vk::PipelineColorBlendAttachmentState::default().color_write_mask(vk::ColorComponentFlags::RGBA)
+        vk::PipelineColorBlendAttachmentState::default()
+            .color_write_mask(vk::ColorComponentFlags::RGBA)
     }];
     let cb = vk::PipelineColorBlendStateCreateInfo::default().attachments(&attachments);
     let dynamic = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
@@ -1180,7 +1381,11 @@ mod tests {
     #[test]
     fn the_quarter_turn_maps_the_rings_corners_onto_the_portrait_panel() {
         // 320x180 at k = 6 is 1920x1080; the panel is 1080x1920, so one quarter turn.
-        let x = PresentTransform { factor: 6, quarter_turns: 1, encode_srgb: false };
+        let x = PresentTransform {
+            factor: 6,
+            quarter_turns: 1,
+            encode_srgb: false,
+        };
         let p = x.push((1080, 1920));
         let map = |px: f32, py: f32| {
             (
@@ -1188,7 +1393,11 @@ mod tests {
                 (p[1] * px + p[3] * py + p[5]).floor(),
             )
         };
-        assert_eq!(map(0.0, 0.0), (0.0, 179.0), "panel top-left is the raster's bottom-left");
+        assert_eq!(
+            map(0.0, 0.0),
+            (0.0, 179.0),
+            "panel top-left is the raster's bottom-left"
+        );
         assert_eq!(map(1079.0, 0.0), (0.0, 0.0));
         assert_eq!(map(0.0, 1919.0), (319.0, 179.0));
         assert_eq!(map(1079.0, 1919.0), (319.0, 0.0));

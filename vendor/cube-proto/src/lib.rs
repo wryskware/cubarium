@@ -38,13 +38,8 @@ pub enum Face {
 }
 
 impl Face {
-    pub const ALL: [Face; NUM_FACES] = [
-        Face::Front,
-        Face::Right,
-        Face::Back,
-        Face::Left,
-        Face::Top,
-    ];
+    pub const ALL: [Face; NUM_FACES] =
+        [Face::Front, Face::Right, Face::Back, Face::Left, Face::Top];
 
     #[inline]
     pub fn index(self) -> usize {

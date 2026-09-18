@@ -27,7 +27,7 @@ fn doc_header(format_code: u8, face_byte: u8, seq: u32) -> [u8; 16] {
     h[5] = format_code;
     h[6] = face_byte;
     h[7] = 0; // flags
-    // seq, little-endian
+              // seq, little-endian
     h[8] = (seq & 0xFF) as u8;
     h[9] = ((seq >> 8) & 0xFF) as u8;
     h[10] = ((seq >> 16) & 0xFF) as u8;

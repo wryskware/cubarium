@@ -59,9 +59,15 @@ mod tests {
 
     #[test]
     fn is_deterministic_per_seed_and_differs_between_seeds() {
-        let a: Vec<u64> = (0..8).scan(SplitMix64::new(7), |r, _| Some(r.next_u64())).collect();
-        let b: Vec<u64> = (0..8).scan(SplitMix64::new(7), |r, _| Some(r.next_u64())).collect();
-        let c: Vec<u64> = (0..8).scan(SplitMix64::new(8), |r, _| Some(r.next_u64())).collect();
+        let a: Vec<u64> = (0..8)
+            .scan(SplitMix64::new(7), |r, _| Some(r.next_u64()))
+            .collect();
+        let b: Vec<u64> = (0..8)
+            .scan(SplitMix64::new(7), |r, _| Some(r.next_u64()))
+            .collect();
+        let c: Vec<u64> = (0..8)
+            .scan(SplitMix64::new(8), |r, _| Some(r.next_u64()))
+            .collect();
         assert_eq!(a, b);
         assert_ne!(a, c);
     }
@@ -81,8 +87,20 @@ mod tests {
             nsum += n;
             nsq += n * n;
         }
-        assert!((sum / 20_000.0 - 0.5).abs() < 0.02, "uniform mean {}", sum / 20_000.0);
-        assert!((nsum / 20_000.0).abs() < 0.05, "normal mean {}", nsum / 20_000.0);
-        assert!((nsq / 20_000.0 - 1.0).abs() < 0.1, "normal variance {}", nsq / 20_000.0);
+        assert!(
+            (sum / 20_000.0 - 0.5).abs() < 0.02,
+            "uniform mean {}",
+            sum / 20_000.0
+        );
+        assert!(
+            (nsum / 20_000.0).abs() < 0.05,
+            "normal mean {}",
+            nsum / 20_000.0
+        );
+        assert!(
+            (nsq / 20_000.0 - 1.0).abs() < 0.1,
+            "normal variance {}",
+            nsq / 20_000.0
+        );
     }
 }

@@ -13,21 +13,21 @@ use std::time::Instant;
 
 use cubarium_core::encounter::ApexEncounterEvent;
 use cubarium_core::fields::CellClass;
+use cubarium_core::habitat::Habitat;
 use cubarium_core::hunter::{FixedHunterProfile, HunterEvent, HunterTarget};
 use cubarium_core::organism::{DeathCause, Mode};
-use cubarium_core::habitat::Habitat;
 use cubarium_core::{ApexDormancyEvent, FOLIAGE, LifeEvent, OrganismId, World, WorldConfig};
 use cubarium_surface::cell_of;
 use serde::{Deserialize, Serialize};
 
 use crate::depletion::{DepletionTracker, PlantConstants, ServedAttributor, monod_reference};
-use crate::plant_budget::{CellSample, PlantBudgetTracker};
 use crate::metrics::{Components, EcoMeasures, FORMS_POSSIBLE, Sample, guild_of};
 use crate::movement::{
     BodyTrack, CensusBuilder, CensusKey, CrossingCounter, CrossingKind, FormSpatial, FounderBroods,
     MarginAccumulator, Movement, SKIMMER_FORM, SpatialAccumulator, StoreSum, Stores, diet_bin,
 };
 use crate::params;
+use crate::plant_budget::{CellSample, PlantBudgetTracker};
 use crate::rng;
 
 /// How often the recorder walks the cells for foliage depletion and the organisms for their
@@ -194,7 +194,13 @@ pub struct Evaluation {
 }
 
 impl Evaluation {
-    fn refused(status: Status, reason: String, seed: u64, protocol: Protocol, elapsed: u64) -> Self {
+    fn refused(
+        status: Status,
+        reason: String,
+        seed: u64,
+        protocol: Protocol,
+        elapsed: u64,
+    ) -> Self {
         Evaluation {
             status,
             reason: Some(reason),
@@ -216,7 +222,10 @@ impl Evaluation {
 /// event log off. Founders, capacities and initial stocks are untouched, so every candidate
 /// gets the same starting resources and the same landscape for a given seed.
 pub fn base_config(seed: u64) -> WorldConfig {
-    let mut config = WorldConfig { seed, ..WorldConfig::default() };
+    let mut config = WorldConfig {
+        seed,
+        ..WorldConfig::default()
+    };
     config.capacity.event_log = false;
     config
 }
@@ -348,9 +357,12 @@ pub fn precondition(world: &mut World, ticks: u64, check_every: u64) -> Result<(
         world.drain_apex_encounter_events();
         world.drain_quiet_events();
         if world.tick() % every == 0 {
-            world
-                .check_invariants()
-                .map_err(|e| format!("invariant violated while preconditioning at tick {}: {e}", world.tick()))?;
+            world.check_invariants().map_err(|e| {
+                format!(
+                    "invariant violated while preconditioning at tick {}: {e}",
+                    world.tick()
+                )
+            })?;
         }
     }
     Ok(())
@@ -370,8 +382,9 @@ pub fn evaluate_with(
     options: RunOptions,
 ) -> Evaluation {
     let start = Instant::now();
-    match std::panic::catch_unwind(AssertUnwindSafe(|| run(values, seed, protocol, options, start)))
-    {
+    match std::panic::catch_unwind(AssertUnwindSafe(|| {
+        run(values, seed, protocol, options, start)
+    })) {
         Ok(evaluation) => evaluation,
         Err(payload) => {
             let what = payload
@@ -537,7 +550,9 @@ fn run(
                     apex_introduced = n;
                     recorder.apex_introduced = n;
                 }
-                Err(e) => return Evaluation::refused(Status::Invalid, e, seed, protocol, ms(start)),
+                Err(e) => {
+                    return Evaluation::refused(Status::Invalid, e, seed, protocol, ms(start));
+                }
             }
         }
         recorder.absorb(&mut world);
@@ -720,8 +735,7 @@ impl Recorder {
         }
         let alive_min = world.config().plant.alive_min;
         let p_ref: Vec<f64> = world.state.fields.p.clone();
-        let crossings =
-            CrossingCounter::new(&p_ref, DEPLETION_FRACTION, RECOVERY_FRACTION);
+        let crossings = CrossingCounter::new(&p_ref, DEPLETION_FRACTION, RECOVERY_FRACTION);
         let watched_cells = crossings.watched();
 
         // The static habitat, rebuilt from the same `(config.habitat, seed)` pair `World::new`
@@ -844,7 +858,10 @@ impl Recorder {
             match event {
                 // Paid attempts only: an unpaid refusal consumes no counter and is not a
                 // hunt the ecology had to fund.
-                HunterEvent::Attempt { attack_counter: Some(_), .. } => self.apex_attacks += 1,
+                HunterEvent::Attempt {
+                    attack_counter: Some(_),
+                    ..
+                } => self.apex_attacks += 1,
                 HunterEvent::Capture { .. } => self.apex_captures += 1,
                 HunterEvent::Offspring { child, .. } => {
                     self.apex_ids.insert(child);
@@ -872,7 +889,9 @@ impl Recorder {
 
         for event in world.drain_events() {
             match event {
-                LifeEvent::Birth { tick, id, parent, .. } => {
+                LifeEvent::Birth {
+                    tick, id, parent, ..
+                } => {
                     self.parent_of.insert(id, parent);
                     self.parents_seen.insert(parent);
                     if self.apex_ids.contains(&id) {
@@ -886,12 +905,17 @@ impl Recorder {
                         // The child's guild and diet bin are read from the phenotype the
                         // world just decoded, not from the parent's: `diet` mutates at
                         // conception, and that is exactly how a guild census changes.
-                        let key = world
-                            .state
-                            .organisms
-                            .get(id)
-                            .map(census_key)
-                            .unwrap_or(CensusKey { form: 0, diet_bin: 1, guild: 2 });
+                        let key =
+                            world
+                                .state
+                                .organisms
+                                .get(id)
+                                .map(census_key)
+                                .unwrap_or(CensusKey {
+                                    form: 0,
+                                    diet_bin: 1,
+                                    guild: 2,
+                                });
                         self.key_of_id.insert(id, key);
                         self.census.born(key);
                         self.prey_births_guild[usize::from(key.guild)] += 1;
@@ -908,7 +932,13 @@ impl Recorder {
                         }
                     }
                 }
-                LifeEvent::Death { id, cause, tick, age_ticks, .. } => {
+                LifeEvent::Death {
+                    id,
+                    cause,
+                    tick,
+                    age_ticks,
+                    ..
+                } => {
                     let slot = match cause {
                         DeathCause::Starvation => 0,
                         DeathCause::Age => 1,
@@ -980,13 +1010,17 @@ impl Recorder {
                 continue;
             }
             let cell = cell_of(Topology::Cube, Scale::ONE, &o.pos).index() as u16;
-            self.tracks.entry(id).or_default().observe(probe_index, cell);
+            self.tracks
+                .entry(id)
+                .or_default()
+                .observe(probe_index, cell);
             *occupancy.entry(cell).or_insert(0) += 1;
             self.last_cell.insert(id, cell);
             if self.options.ledger
                 && let Some(budget) = world.body_budget(id)
             {
-                self.served.observe(id, cell, budget.served[FOLIAGE], &mut served);
+                self.served
+                    .observe(id, cell, budget.served[FOLIAGE], &mut served);
             }
             self.last_stores.insert(
                 id,
@@ -1014,18 +1048,19 @@ impl Recorder {
             && let Some(rec) = world.plant_budget()
         {
             self.plant_scratch.clear();
-            self.plant_scratch.extend(rec.cells.iter().map(|c| CellSample {
-                foliage_in: c.foliage_in(),
-                foliage_out: c.foliage_out(),
-                withdrawal: c.withdrawal_foliage,
-                income: c.income,
-                maintenance_unpaid: c.maintenance_unpaid,
-                death_foliage: c.death_foliage,
-                wood_sum: c.w_sum,
-                light_sum: c.light_effective_sum,
-                nutrient_sum: c.nutrient_sum,
-                ticks_alive: c.ticks_alive,
-            }));
+            self.plant_scratch
+                .extend(rec.cells.iter().map(|c| CellSample {
+                    foliage_in: c.foliage_in(),
+                    foliage_out: c.foliage_out(),
+                    withdrawal: c.withdrawal_foliage,
+                    income: c.income,
+                    maintenance_unpaid: c.maintenance_unpaid,
+                    death_foliage: c.death_foliage,
+                    wood_sum: c.w_sum,
+                    light_sum: c.light_effective_sum,
+                    nutrient_sum: c.nutrient_sum,
+                    ticks_alive: c.ticks_alive,
+                }));
             self.plant_occupied.clear();
             self.plant_occupied.extend(occupancy.keys().copied());
             plant.observe(tick, &self.plant_scratch, &self.plant_occupied);
@@ -1082,7 +1117,8 @@ impl Recorder {
                 ),
                 None => self.served.forget(budget.id),
             }
-            self.margins.add(key, &budget, self.e_r, now, cubarium_core::DT, false);
+            self.margins
+                .add(key, &budget, self.e_r, now, cubarium_core::DT, false);
         }
     }
 
@@ -1244,7 +1280,11 @@ impl Recorder {
             feeding,
             seeking,
             resting,
-            mean_hunger: if population > 0 { hunger / f64::from(population) } else { 0.0 },
+            mean_hunger: if population > 0 {
+                hunger / f64::from(population)
+            } else {
+                0.0
+            },
             mass_residual: mass,
             water_residual: water,
             energy_residual: energy,
@@ -1333,7 +1373,8 @@ impl Recorder {
             for (id, key) in live {
                 if let Some(budget) = world.body_budget(id) {
                     let budget = *budget;
-                    self.margins.add(key, &budget, self.e_r, now, cubarium_core::DT, true);
+                    self.margins
+                        .add(key, &budget, self.e_r, now, cubarium_core::DT, true);
                 }
             }
         }
@@ -1398,7 +1439,10 @@ impl Recorder {
             .last()
             .map(|m| {
                 m.iter()
-                    .map(|(form, acc)| FormSpatial { form: *form, spatial: acc.finish(dt) })
+                    .map(|(form, acc)| FormSpatial {
+                        form: *form,
+                        spatial: acc.finish(dt),
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -1408,7 +1452,12 @@ impl Recorder {
             .organisms
             .iter()
             .filter(|(id, _)| !self.apex_ids.contains(id))
-            .map(|(id, o)| self.key_of_id.get(&id).copied().unwrap_or_else(|| census_key(o)))
+            .map(|(id, o)| {
+                self.key_of_id
+                    .get(&id)
+                    .copied()
+                    .unwrap_or_else(|| census_key(o))
+            })
             .collect();
         let margins = self.margins.clone().finish(self.options.ledger);
         let depletion = self.depletion.clone().finish(&world.state.fields.p);
@@ -1458,13 +1507,12 @@ impl Recorder {
         };
 
         let apex_active_samples = self.samples.iter().filter(|s| s.apex_active > 0).count() as f64;
-        let recovery = if self.first_predation_tick.is_some()
-            && self.prey_min_after_predation < u32::MAX
-        {
-            f64::from(last.prey) / f64::from(self.prey_min_after_predation.max(1))
-        } else {
-            0.0
-        };
+        let recovery =
+            if self.first_predation_tick.is_some() && self.prey_min_after_predation < u32::MAX {
+                f64::from(last.prey) / f64::from(self.prey_min_after_predation.max(1))
+            } else {
+                0.0
+            };
 
         let components = Components {
             horizon_ticks: self.protocol.horizon_ticks,
@@ -1503,17 +1551,34 @@ impl Recorder {
             distinct_parents: self.parents_seen.len() as u64,
 
             mean_form_evenness: mean(|s| s.form_evenness),
-            min_forms_present: self.samples.iter().map(|s| s.forms_present).min().unwrap_or(0),
+            min_forms_present: self
+                .samples
+                .iter()
+                .map(|s| s.forms_present)
+                .min()
+                .unwrap_or(0),
             final_forms_present: last.forms_present,
 
             feeding_fraction: mean(|s| {
-                if s.population > 0 { f64::from(s.feeding) / f64::from(s.population) } else { 0.0 }
+                if s.population > 0 {
+                    f64::from(s.feeding) / f64::from(s.population)
+                } else {
+                    0.0
+                }
             }),
             seeking_fraction: mean(|s| {
-                if s.population > 0 { f64::from(s.seeking) / f64::from(s.population) } else { 0.0 }
+                if s.population > 0 {
+                    f64::from(s.seeking) / f64::from(s.population)
+                } else {
+                    0.0
+                }
             }),
             resting_fraction: mean(|s| {
-                if s.population > 0 { f64::from(s.resting) / f64::from(s.population) } else { 0.0 }
+                if s.population > 0 {
+                    f64::from(s.resting) / f64::from(s.population)
+                } else {
+                    0.0
+                }
             }),
             mean_hunger: mean(|s| s.mean_hunger),
 

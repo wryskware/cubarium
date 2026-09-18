@@ -1,6 +1,6 @@
-use cubarium_surface::{Scale, Topology};
 use super::*;
 use crate::present::Presenter;
+use cubarium_surface::{Scale, Topology};
 use cube_proto::Face;
 use std::path::Path;
 
@@ -828,7 +828,11 @@ fn a_quiet_interval_draws_the_windless_image_and_a_packet_does_not() {
                 deg <= wind_response(&plant.name).spin_deg * (1.0 + WIND_SLOT_VARIATION) + 1e-9,
                 "{cell:?} turned {deg}°"
             );
-            assert_eq!(cell.face(Topology::Cube, Scale::ONE), Face::Top, "only a radial plant turns");
+            assert_eq!(
+                cell.face(Topology::Cube, Scale::ONE),
+                Face::Top,
+                "only a radial plant turns"
+            );
         }
     }
     assert!(moved > 100, "only {moved} slots bend at the packet's peak");
@@ -1589,12 +1593,23 @@ fn a_pivot_with_no_travel_is_spent_over_the_ticks_frames() {
 
     // And spending it sweeps continuously from the previous tick's heading onto the new one.
     let angle_at = |f: f64| turn_heading(after, memory.turn, f).screen_angle();
-    assert!((angle_at(0.0) - before.screen_angle()).abs() < 1e-12, "{}", angle_at(0.0));
-    assert!((angle_at(1.0) - after.screen_angle()).abs() < 1e-12, "{}", angle_at(1.0));
+    assert!(
+        (angle_at(0.0) - before.screen_angle()).abs() < 1e-12,
+        "{}",
+        angle_at(0.0)
+    );
+    assert!(
+        (angle_at(1.0) - after.screen_angle()).abs() < 1e-12,
+        "{}",
+        angle_at(1.0)
+    );
     let mut previous = angle_at(0.0);
     for step in 1..=20 {
         let now = angle_at(f64::from(step) / 20.0);
-        assert!(now > previous, "the sweep reversed at {step}: {previous} -> {now}");
+        assert!(
+            now > previous,
+            "the sweep reversed at {step}: {previous} -> {now}"
+        );
         assert!(
             now - previous < 0.4,
             "the sweep popped at {step}: {previous} -> {now}"
@@ -1680,7 +1695,11 @@ fn a_ring_s_bands_are_rows_from_the_topology_s_height() {
         // Every column of the same row is in the same band, and the bands run top to
         // bottom in one block each: canopy, then foliage, then soil, never back.
         for cx in 0..nx {
-            assert_eq!(geom.band_of(geom.cell(Face::Front, cx, cy)), band, "row {cy}");
+            assert_eq!(
+                geom.band_of(geom.cell(Face::Front, cx, cy)),
+                band,
+                "row {cy}"
+            );
         }
         let rank = match band {
             Band::Canopy => 0,
@@ -1708,7 +1727,10 @@ fn a_ring_s_canopy_slots_are_radial_and_the_rest_stand_up() {
         assert_eq!(slot.radial, geom.band_of(cell) == Band::Canopy);
         // `up` is the constant (0, -1): height falls with v everywhere on a ring.
         let up = geom.up_of(cell).expect("a ring has no level chart");
-        assert!((up.x - 0.0).abs() < 1e-12 && (up.y + 1.0).abs() < 1e-12, "{up:?}");
+        assert!(
+            (up.x - 0.0).abs() < 1e-12 && (up.y + 1.0).abs() < 1e-12,
+            "{up:?}"
+        );
         if slot.radial {
             free_headings.insert(slot.heading.screen_angle().to_bits());
         } else {
@@ -1730,7 +1752,10 @@ fn a_ring_s_canopy_slots_are_radial_and_the_rest_stand_up() {
 #[test]
 fn ring_columns_run_along_u_and_fill_their_band() {
     let geom = ring_geom();
-    assert_eq!(ArtGeometry::CUBE.tall_max_segments(Face::Front), TALL_MAX_SEGMENTS);
+    assert_eq!(
+        ArtGeometry::CUBE.tall_max_segments(Face::Front),
+        TALL_MAX_SEGMENTS
+    );
     assert_eq!(ArtGeometry::CUBE.tall_step(Face::Front), TALL_STEP);
     assert_eq!(geom.foliage_rows(Face::Front), Some((7, 29)));
     assert_eq!(geom.tall_max_segments(Face::Front), 21);
@@ -1752,9 +1777,15 @@ fn ring_columns_run_along_u_and_fill_their_band() {
     // of cells at `W_max` is tall enough to get there.
     let crown = geom.tall_anchor(Face::Front, 0, geom.tall_max_segments(Face::Front) + 1);
     let top_row = geom.center_of(geom.cell(Face::Front, 0, 7));
-    assert!((crown.v - top_row.v).abs() < 1e-9, "{crown:?} vs {top_row:?}");
+    assert!(
+        (crown.v - top_row.v).abs() < 1e-9,
+        "{crown:?} vs {top_row:?}"
+    );
     assert!(geom.tall_rise(Face::Front, geom.tall_max_segments(Face::Front)) <= 1.0);
-    assert_eq!(geom.next_tall(Face::Front, 0, 1.0), geom.tall_max_segments(Face::Front));
+    assert_eq!(
+        geom.next_tall(Face::Front, 0, 1.0),
+        geom.tall_max_segments(Face::Front)
+    );
 }
 
 /// A stamp anchored beside `u = 0` reaches the far side of the world. The presenter's own
@@ -1810,7 +1841,10 @@ fn a_slot_beside_the_wrap_draws_on_both_sides() {
     }
     assert!(both > 0, "the stamp drew something");
     let lit = |c: &Canvas, x: u16| (0..180u16).any(|y| c.get(Face::Front, x, y) != [0.0; 3]);
-    assert!((0..4).any(|x| lit(&at_wrap, x)), "ink on the near side of u = 0");
+    assert!(
+        (0..4).any(|x| lit(&at_wrap, x)),
+        "ink on the near side of u = 0"
+    );
     assert!(
         (316..320).any(|x| lit(&at_wrap, x)),
         "and the same stamp's ink on the far side of the wrap"
@@ -1874,7 +1908,11 @@ fn a_cube_presenter_handed_a_ring_view_refits() {
     presenter.draw(&cube, 0.0, &mut cube_canvas);
     let mut fresh = Canvas::cube();
     ArtPresenter::new(pack()).draw(&cube, 0.0, &mut fresh);
-    assert_eq!(cube_canvas.pixels(), fresh.pixels(), "the refit cube is the cube");
+    assert_eq!(
+        cube_canvas.pixels(),
+        fresh.pixels(),
+        "the refit cube is the cube"
+    );
 }
 
 /// `canopy_top` is a presenter setting, validated on the way in.
@@ -1911,7 +1949,12 @@ fn a_cubes_bend_budgets_are_the_nine_pixel_ones_and_a_rings_scale_with_its_stamp
     let cube = ArtGeometry::CUBE;
     assert_eq!(cube.bend_footprint(), cubarium_surface::FOOTPRINT_PIXELS);
     for p in &pack.plants {
-        assert_eq!(cube.plant_bend_budget(p), plant_bend_budget(p), "{}", p.name);
+        assert_eq!(
+            cube.plant_bend_budget(p),
+            plant_bend_budget(p),
+            "{}",
+            p.name
+        );
     }
     for p in &pack.tall {
         assert_eq!(cube.tall_bend_budget(p), tall_bend_budget(p), "{}", p.name);
@@ -1922,7 +1965,12 @@ fn a_cubes_bend_budgets_are_the_nine_pixel_ones_and_a_rings_scale_with_its_stamp
     let small = ArtGeometry::new(Topology::Ring { w: 320, h: 180 }, Scale::ONE);
     assert_eq!(small.bend_footprint(), 9.0);
     for p in &pack.plants {
-        assert_eq!(small.plant_bend_budget(p), plant_bend_budget(p), "{}", p.name);
+        assert_eq!(
+            small.plant_bend_budget(p),
+            plant_bend_budget(p),
+            "{}",
+            p.name
+        );
     }
 
     // The panel's rung: `9·S = 18`, still well inside the ring's 180, and every clip of
@@ -1934,12 +1982,22 @@ fn a_cubes_bend_budgets_are_the_nine_pixel_ones_and_a_rings_scale_with_its_stamp
     for p in &pack.plants {
         let (budget, want) = (panel.plant_bend_budget(p), wind_response(&p.name).tip_px);
         assert!(budget > 10.0, "{} has {budget} px of room at S = 2", p.name);
-        assert_eq!(effective_tip(want, budget), want, "{} is no longer clipped", p.name);
+        assert_eq!(
+            effective_tip(want, budget),
+            want,
+            "{} is no longer clipped",
+            p.name
+        );
     }
     for p in &pack.tall {
         let (budget, want) = (panel.tall_bend_budget(p), wind_response(&p.name).tip_px);
         assert!(budget > 10.0, "{} has {budget} px of room at S = 2", p.name);
-        assert_eq!(effective_tip(want, budget), want, "{} is no longer clipped", p.name);
+        assert_eq!(
+            effective_tip(want, budget),
+            want,
+            "{} is no longer clipped",
+            p.name
+        );
     }
 
     // And a presenter built for a cube and *fitted* to the panel's ring re-measures them:

@@ -17,7 +17,7 @@
 
 use std::sync::atomic::AtomicBool;
 
-use cubarium_core::{CARRION, CHANNELS, FOLIAGE, FRUIT, IntakeLimit, LITTER, MOUTHS, MOUTH_GRAZE};
+use cubarium_core::{CARRION, CHANNELS, FOLIAGE, FRUIT, IntakeLimit, LITTER, MOUTH_GRAZE, MOUTHS};
 use cubarium_search::es::budget::NamedDriver;
 use cubarium_search::es::episode::{Control, Driver, Limits};
 use cubarium_search::es::fixture::{self, Ecology};
@@ -43,9 +43,16 @@ fn the_trace_sums_to_the_ledger() {
         name: "mobile-script".into(),
         driver: Driver::Control(Control::MobileScript),
     };
-    let (_, row, kept) =
-        intake::measure(&layout, &named, TICKS, Limits::new(&cancel), e_r, eta_ox, true)
-            .expect("measured");
+    let (_, row, kept) = intake::measure(
+        &layout,
+        &named,
+        TICKS,
+        Limits::new(&cancel),
+        e_r,
+        eta_ox,
+        true,
+    )
+    .expect("measured");
     let kept = kept.expect("the per-tick rows were asked for");
 
     assert_eq!(row.ticks, TICKS, "one row per tick the body was alive");
@@ -71,8 +78,14 @@ fn the_trace_sums_to_the_ledger() {
         "trace bill {billed} against ledger {}",
         row.budget.bill_total
     );
-    assert!(row.served_total[FOLIAGE] > 0.0, "the mobile script eats foliage");
-    assert_eq!(row.served_total[FRUIT], 0.0, "the script's mouth is grazing only");
+    assert!(
+        row.served_total[FOLIAGE] > 0.0,
+        "the mobile script eats foliage"
+    );
+    assert_eq!(
+        row.served_total[FRUIT], 0.0,
+        "the script's mouth is grazing only"
+    );
     assert_eq!(row.served_total[LITTER] + row.served_total[CARRION], 0.0);
 }
 
@@ -89,17 +102,30 @@ fn the_counts_are_what_the_columns_say_on_a_disclosed_driver() {
         name: "stationary-grazing".into(),
         driver: Driver::Control(Control::StationaryGrazing),
     };
-    let (_, row, kept) =
-        intake::measure(&layout, &named, TICKS, Limits::new(&cancel), e_r, eta_ox, true)
-            .expect("measured");
+    let (_, row, kept) = intake::measure(
+        &layout,
+        &named,
+        TICKS,
+        Limits::new(&cancel),
+        e_r,
+        eta_ox,
+        true,
+    )
+    .expect("measured");
     let kept = kept.expect("rows");
 
     // One cell, for the whole episode.
     assert_eq!(row.episode.distinct_cells, 1);
-    assert!(kept.windows(2).all(|w| w[0].cell == w[1].cell), "the grazer moved");
+    assert!(
+        kept.windows(2).all(|w| w[0].cell == w[1].cell),
+        "the grazer moved"
+    );
 
     // The script's mouth is open on every tick, and only the grazing one.
-    assert_eq!(row.open_ticks, row.ticks, "a scripted `graze_effort = 1` is open every tick");
+    assert_eq!(
+        row.open_ticks, row.ticks,
+        "a scripted `graze_effort = 1` is open every tick"
+    );
     assert_eq!(row.wide_open_ticks, row.ticks);
     assert!((row.mean_effort[MOUTH_GRAZE] - 1.0).abs() < 1e-15);
     assert_eq!(row.mean_effort[1], 0.0);
@@ -121,13 +147,18 @@ fn the_counts_are_what_the_columns_say_on_a_disclosed_driver() {
     assert_eq!(on_food, row.on_food);
     let open_on_food = kept
         .iter()
-        .filter(|r| r.on_food() && (0..CHANNELS).any(|c| r.above_threshold[c] && r.mouth_open(c, OPEN)))
+        .filter(|r| {
+            r.on_food() && (0..CHANNELS).any(|c| r.above_threshold[c] && r.mouth_open(c, OPEN))
+        })
         .count() as u64;
     assert_eq!(open_on_food, row.open_on_food);
     let mut limits = [[0u64; 6]; MOUTHS];
     for r in &kept {
         for (m, bin) in limits.iter_mut().enumerate() {
-            let i = LIMITS.iter().position(|x| *x == r.limit[m]).expect("a known term");
+            let i = LIMITS
+                .iter()
+                .position(|x| *x == r.limit[m])
+                .expect("a known term");
             bin[i] += 1;
         }
     }
@@ -138,9 +169,20 @@ fn the_counts_are_what_the_columns_say_on_a_disclosed_driver() {
     // reserve fills only at the very end if at all.
     let counts = row.limits[MOUTH_GRAZE];
     let i = |l: IntakeLimit| LIMITS.iter().position(|x| *x == l).expect("known");
-    assert_eq!(counts[i(IntakeLimit::EffortZero)], 0, "the script never shuts the mouth");
-    assert_eq!(counts[i(IntakeLimit::CapabilityZero)], 0, "the fixture body grazes");
-    assert!(counts[i(IntakeLimit::MouthRate)] > 0, "it starts on food and eats at its own rate");
+    assert_eq!(
+        counts[i(IntakeLimit::EffortZero)],
+        0,
+        "the script never shuts the mouth"
+    );
+    assert_eq!(
+        counts[i(IntakeLimit::CapabilityZero)],
+        0,
+        "the fixture body grazes"
+    );
+    assert!(
+        counts[i(IntakeLimit::MouthRate)] > 0,
+        "it starts on food and eats at its own rate"
+    );
     assert!(
         counts[i(IntakeLimit::StockBelowThreshold)] > 0,
         "it crops the cell below `feed_min` within {TICKS} ticks"
@@ -162,8 +204,10 @@ fn a_shut_mouthed_policy_reads_as_the_effort_and_not_the_cell() {
     for i in 2..5 {
         w.b_o[i] = -8.0;
     }
-    let named =
-        NamedDriver { name: "shut".into(), driver: Driver::Policy(Box::new(Policy::new(w))) };
+    let named = NamedDriver {
+        name: "shut".into(),
+        driver: Driver::Policy(Box::new(Policy::new(w))),
+    };
     let (_, row, _) = intake::measure(
         &layout,
         &named,
@@ -176,12 +220,23 @@ fn a_shut_mouthed_policy_reads_as_the_effort_and_not_the_cell() {
     .expect("measured");
 
     assert_eq!(row.open_ticks, 0, "every mouth is inside the deadband");
-    assert_eq!(row.served_total.iter().sum::<f64>(), 0.0, "a shut mouth ate something");
-    assert!(row.on_food > 0, "the fixture starts the body on its opening patch");
-    assert_eq!(row.open_on_food, 0);
-    let i = LIMITS.iter().position(|x| *x == IntakeLimit::EffortZero).expect("known");
     assert_eq!(
-        row.limits_on_its_food[MOUTH_GRAZE][i], row.limits_on_its_food[MOUTH_GRAZE].iter().sum::<u64>(),
+        row.served_total.iter().sum::<f64>(),
+        0.0,
+        "a shut mouth ate something"
+    );
+    assert!(
+        row.on_food > 0,
+        "the fixture starts the body on its opening patch"
+    );
+    assert_eq!(row.open_on_food, 0);
+    let i = LIMITS
+        .iter()
+        .position(|x| *x == IntakeLimit::EffortZero)
+        .expect("known");
+    assert_eq!(
+        row.limits_on_its_food[MOUTH_GRAZE][i],
+        row.limits_on_its_food[MOUTH_GRAZE].iter().sum::<u64>(),
         "standing on food with a shut mouth must read as the effort"
     );
 }

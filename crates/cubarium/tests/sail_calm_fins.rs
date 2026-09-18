@@ -16,7 +16,9 @@ fn atelier() -> std::path::PathBuf {
 }
 
 fn rgba(path: &Path) -> (usize, usize, Vec<u8>) {
-    let mut reader = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).unwrap())).read_info().unwrap();
+    let mut reader = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).unwrap()))
+        .read_info()
+        .unwrap();
     let mut buf = vec![0; reader.output_buffer_size().unwrap()];
     let info = reader.next_frame(&mut buf).unwrap();
     assert_eq!(info.color_type, png::ColorType::Rgba, "{}", path.display());
@@ -49,7 +51,10 @@ fn rest_holds_its_fins_still_except_one_late_symmetric_adjustment() {
         assert_eq!(rest[f], rest[0], "rest frame {f} must be the held pose");
     }
     let peak = differing(&rest[12], &rest[0]);
-    assert!((8..=24).contains(&peak), "one visible adjustment of a few fin texels: {peak}");
+    assert!(
+        (8..=24).contains(&peak),
+        "one visible adjustment of a few fin texels: {peak}"
+    );
 }
 
 #[test]
@@ -65,18 +70,43 @@ fn feed_keeps_its_fins_braced_while_the_body_chews() {
     // Every non-still frame changes the same texels: one chew, nothing else moving. On
     // the adopted bake that set is 23 body texels; a fin flick would add texels outside it
     // and vary the set from frame to frame.
-    let changed_set = |f: usize| -> Vec<usize> { feed[f].iter().zip(&feed[0]).enumerate().filter(|(_, (p, q))| p != q).map(|(i, _)| i).collect() };
+    let changed_set = |f: usize| -> Vec<usize> {
+        feed[f]
+            .iter()
+            .zip(&feed[0])
+            .enumerate()
+            .filter(|(_, (p, q))| p != q)
+            .map(|(i, _)| i)
+            .collect()
+    };
     let chew = changed_set(1);
-    assert!((8..=32).contains(&chew.len()), "the body still chews, by a few texels: {}", chew.len());
+    assert!(
+        (8..=32).contains(&chew.len()),
+        "the body still chews, by a few texels: {}",
+        chew.len()
+    );
     for f in 1..8 {
-        assert_eq!(changed_set(f), chew, "feed frame {f} must move only the chew texels");
+        assert_eq!(
+            changed_set(f),
+            chew,
+            "feed frame {f} must move only the chew texels"
+        );
     }
     // The rest adjustment's fin texels and the chew's body texels are disjoint sets on
     // this art, as measured; recorded so a future bake that lets the fins move while
     // feeding is caught here.
     let rest: Vec<Vec<[u8; 4]>> = (0..FRAMES).map(|f| tile(&atlas, 4, f)).collect();
-    let fins: Vec<usize> = rest[12].iter().zip(&rest[0]).enumerate().filter(|(_, (p, q))| p != q).map(|(i, _)| i).collect();
-    assert!(fins.iter().all(|i| !chew.contains(i)), "chew texels overlap the fin adjustment texels");
+    let fins: Vec<usize> = rest[12]
+        .iter()
+        .zip(&rest[0])
+        .enumerate()
+        .filter(|(_, (p, q))| p != q)
+        .map(|(i, _)| i)
+        .collect();
+    assert!(
+        fins.iter().all(|i| !chew.contains(i)),
+        "chew texels overlap the fin adjustment texels"
+    );
 }
 
 #[test]
@@ -85,14 +115,31 @@ fn the_pack_loads_with_sixteen_frame_sail_clips_and_keeps_every_selector() {
     for clip in &art.clips {
         assert_eq!(clip.frames.len(), FRAMES);
     }
-    let meta: serde_json::Value = serde_json::from_slice(&std::fs::read(atelier().join("pack.json")).unwrap()).unwrap();
+    let meta: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(atelier().join("pack.json")).unwrap()).unwrap();
     assert_eq!(meta["creature_names"][1], "sail");
     let tall = meta["tall"].as_array().unwrap();
     let selector = |name: &str, part: &str, key: &str| -> Option<String> {
-        tall.iter().find(|r| r["name"] == name && r["part"] == part).and_then(|r| r.get(key)).and_then(|v| v.as_str()).map(String::from)
+        tall.iter()
+            .find(|r| r["name"] == name && r["part"] == part)
+            .and_then(|r| r.get(key))
+            .and_then(|v| v.as_str())
+            .map(String::from)
     };
-    assert_eq!(selector("vinecoil", "trunk", "vine_strips").as_deref(), Some("period4_endpoint_v1"));
-    assert_eq!(selector("spiretree", "crown", "corner_cap_owner").as_deref(), Some("final_position_v1"));
-    assert_eq!(selector("glasscane", "crown", "corner_cap_owner").as_deref(), Some("final_position_v1"));
-    assert!(art.tall_plant("spiretree").unwrap().corner_cap_owner && art.tall_plant("glasscane").unwrap().corner_cap_owner);
+    assert_eq!(
+        selector("vinecoil", "trunk", "vine_strips").as_deref(),
+        Some("period4_endpoint_v1")
+    );
+    assert_eq!(
+        selector("spiretree", "crown", "corner_cap_owner").as_deref(),
+        Some("final_position_v1")
+    );
+    assert_eq!(
+        selector("glasscane", "crown", "corner_cap_owner").as_deref(),
+        Some("final_position_v1")
+    );
+    assert!(
+        art.tall_plant("spiretree").unwrap().corner_cap_owner
+            && art.tall_plant("glasscane").unwrap().corner_cap_owner
+    );
 }

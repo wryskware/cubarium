@@ -35,8 +35,11 @@ struct Envelope {
 }
 
 pub fn encode(fauna: &Fauna) -> Vec<u8> {
-    postcard::to_stdvec(&Envelope { schema: SCHEMA, fauna: fauna.clone() })
-        .expect("a Fauna always serializes")
+    postcard::to_stdvec(&Envelope {
+        schema: SCHEMA,
+        fauna: fauna.clone(),
+    })
+    .expect("a Fauna always serializes")
 }
 
 pub fn decode(bytes: &[u8]) -> anyhow::Result<Fauna> {
@@ -71,9 +74,12 @@ fn validate(fauna: &Fauna) -> Result<(), String> {
     let v = fauna.view();
     let mut last: Option<u64> = None;
     for a in v.animals {
-        for (field, value) in
-            [("body", a.body), ("reserve", a.reserve), ("mineral", a.mineral), ("energy", a.energy)]
-        {
+        for (field, value) in [
+            ("body", a.body),
+            ("reserve", a.reserve),
+            ("mineral", a.mineral),
+            ("energy", a.energy),
+        ] {
             if !value.is_finite() || value < 0.0 {
                 return Err(format!(
                     "animal #{}'s {field} is {value}, not a finite nonnegative stock",
@@ -111,7 +117,10 @@ mod tests {
     /// refuse: a live layer's own bytes cannot fail these checks.
     fn layer(animals: Vec<Animal>, births: u64) -> Fauna {
         let mut fauna = Fauna::new(FaunaConfig::default());
-        fauna.ledger = FaunaLedger { births, ..FaunaLedger::default() };
+        fauna.ledger = FaunaLedger {
+            births,
+            ..FaunaLedger::default()
+        };
         fauna.animals = animals;
         fauna
     }
@@ -151,11 +160,20 @@ mod tests {
                 a.energy = f64::INFINITY;
                 layer(vec![a], 1)
             }),
-            ("sorted and unique", layer(vec![animal(3, 0.02), animal(1, 0.02)], 4)),
-            ("never reused", layer(vec![animal(0, 0.02), animal(3, 0.02)], 3)),
+            (
+                "sorted and unique",
+                layer(vec![animal(3, 0.02), animal(1, 0.02)], 4),
+            ),
+            (
+                "never reused",
+                layer(vec![animal(0, 0.02), animal(3, 0.02)], 3),
+            ),
         ];
         for (what, fauna) in cases {
-            let err = format!("{:#}", decode(&encode(&fauna)).expect_err("a refusable layer"));
+            let err = format!(
+                "{:#}",
+                decode(&encode(&fauna)).expect_err("a refusable layer")
+            );
             assert!(err.contains(what), "{what}: {err}");
         }
 

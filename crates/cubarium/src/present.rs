@@ -17,15 +17,14 @@
 use cubarium_surface::{Scale, Topology};
 use std::sync::LazyLock;
 
-use cubarium_core::view::{OrganismView, RenderView};
-use cubarium_core::organism::Mode;
 use cubarium_core::OrganismId;
+use cubarium_core::organism::Mode;
+use cubarium_core::view::{OrganismView, RenderView};
 use cubarium_render::{
     BodyShape, Canvas, Lobe, PixelCells, Trail, draw_field, draw_trail, srgb_decode, stamp_body,
 };
 use cubarium_surface::{
-    Edge, PathSegment, PixelImage, ScalarField, SurfacePoint, Travel, Vec2, cell_of,
-    pixel_neighbor,
+    Edge, PathSegment, PixelImage, ScalarField, SurfacePoint, Travel, Vec2, cell_of, pixel_neighbor,
 };
 use cube_proto::Face;
 use std::collections::HashMap;
@@ -122,7 +121,11 @@ pub fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     if t >= 1.0 {
         return b;
     }
-    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+    ]
 }
 
 /// The body hue ramp: magenta at hue 0, cyan at hue 1, blended in linear light.
@@ -178,13 +181,21 @@ pub fn draw_ramp_field(
     for &face in canvas.charts() {
         for y in canvas.rows_of(face) {
             for x in 0..width {
-                let own = field.get(cell_of(topo, world, &SurfacePoint::pixel_center(topo, face, x, y)));
+                let own = field.get(cell_of(
+                    topo,
+                    world,
+                    &SurfacePoint::pixel_center(topo, face, x, y),
+                ));
                 let value = if filter {
                     let mut sum = own * 4.0;
                     let mut weight = 4.0;
                     for edge in Edge::ALL {
                         if let Some((nf, nx, ny)) = pixel_neighbor(topo, face, x, y, edge) {
-                            sum += field.get(cell_of(topo, world, &SurfacePoint::pixel_center(topo, nf, nx, ny)));
+                            sum += field.get(cell_of(
+                                topo,
+                                world,
+                                &SurfacePoint::pixel_center(topo, nf, nx, ny),
+                            ));
                             weight += 1.0;
                         }
                     }
@@ -198,7 +209,8 @@ pub fn draw_ramp_field(
                     // Hue follows density linearly; brightness follows its square so the
                     // ordinary standing crop stays a dim floor and only rich patches glow.
                     let c = mix(low, high, t);
-                    let b = RAMP_MIN_BRIGHTNESS + (RAMP_MAX_BRIGHTNESS - RAMP_MIN_BRIGHTNESS) * t * t;
+                    let b =
+                        RAMP_MIN_BRIGHTNESS + (RAMP_MAX_BRIGHTNESS - RAMP_MIN_BRIGHTNESS) * t * t;
                     canvas.add(face, x, y, [c[0] * b, c[1] * b, c[2] * b]);
                 }
             }
@@ -236,7 +248,8 @@ pub fn draw_ramp_field_with(
                 if t != 0.0 {
                     let t = t as f32;
                     let c = mix(low, high, t);
-                    let b = RAMP_MIN_BRIGHTNESS + (RAMP_MAX_BRIGHTNESS - RAMP_MIN_BRIGHTNESS) * t * t;
+                    let b =
+                        RAMP_MIN_BRIGHTNESS + (RAMP_MAX_BRIGHTNESS - RAMP_MIN_BRIGHTNESS) * t * t;
                     canvas.add(face, x, y, [c[0] * b, c[1] * b, c[2] * b]);
                 }
             }
@@ -251,7 +264,10 @@ pub fn body_shape(view: &OrganismView) -> BodyShape {
         lobes: view
             .lobes
             .iter()
-            .map(|&(x, y, r)| Lobe { offset: Vec2::new(x * s, y * s), radius: r * s })
+            .map(|&(x, y, r)| Lobe {
+                offset: Vec2::new(x * s, y * s),
+                radius: r * s,
+            })
             .collect(),
     }
 }
@@ -298,7 +314,11 @@ pub fn interpolate_on(
     if moved.is_empty() {
         return (pos, heading);
     }
-    let f = if f.is_finite() { f.clamp(0.0, 1.0) } else { 0.0 };
+    let f = if f.is_finite() {
+        f.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
     let total: f64 = moved.iter().map(PathSegment::length).sum();
     if total.is_nan() || total <= 0.0 {
         return (anchor_on(topo, moved[0].face, moved[0].from), heading);
@@ -309,7 +329,11 @@ pub fn interpolate_on(
         let len = seg.length();
         let last = i + 1 == moved.len();
         if walked + len >= target || last {
-            let t = if len > 0.0 { ((target - walked) / len).clamp(0.0, 1.0) } else { 0.0 };
+            let t = if len > 0.0 {
+                ((target - walked) / len).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
             let delta = seg.to - seg.from;
             let point = seg.from + delta * t;
             let dir = delta.normalized().unwrap_or(heading);
@@ -325,7 +349,13 @@ pub fn interpolate_on(
 /// transient coordinate, not a canonical one.
 fn anchor_on(topo: Topology, face: Face, p: Vec2) -> SurfacePoint {
     let (w, h) = topo.extent(face);
-    let clamp = |c: f64, extent: f64| if c.is_finite() { c.clamp(0.0, extent) } else { 0.0 };
+    let clamp = |c: f64, extent: f64| {
+        if c.is_finite() {
+            c.clamp(0.0, extent)
+        } else {
+            0.0
+        }
+    };
     SurfacePoint::new(face, clamp(p.x, w), clamp(p.y, h)).canonicalize(topo)
 }
 
@@ -370,7 +400,10 @@ impl Presenter {
         self.live.clear();
         for o in &view.organisms {
             self.live.push(o.id);
-            let trail = self.trails.entry(o.id).or_insert_with(|| Trail::new(TRAIL_SEGMENTS));
+            let trail = self
+                .trails
+                .entry(o.id)
+                .or_insert_with(|| Trail::new(TRAIL_SEGMENTS));
             if !o.moved.is_empty() {
                 // `Trail` takes a whole travel; the view already carries this tick's
                 // per-chart segments, so the other travel fields are irrelevant here.
@@ -429,7 +462,13 @@ impl Presenter {
 
         // Detritus: flecks only, at cell level, nearest, nothing below the threshold.
         threshold_field(&mut self.detritus, &view.detritus, DETRITUS_THRESHOLD);
-        draw_field(canvas, &self.detritus, DETRITUS_SCALE, PALETTE.detritus, false);
+        draw_field(
+            canvas,
+            &self.detritus,
+            DETRITUS_SCALE,
+            PALETTE.detritus,
+            false,
+        );
 
         for o in &view.organisms {
             let color = hue_color(o.hue);
@@ -457,7 +496,9 @@ impl Presenter {
                 scale(color, mode_brightness(o.mode)),
                 &mut self.scratch,
             );
-            if o.fed && let Some(core) = shape.lobes.first() {
+            if o.fed
+                && let Some(core) = shape.lobes.first()
+            {
                 // A feeding organism's core flashes warm; only the core lobe is restamped.
                 let core_only = BodyShape { lobes: vec![*core] };
                 stamp_body(
@@ -497,7 +538,10 @@ mod tests {
 
     fn organism(id: u32, hue: f32, mode: Mode) -> OrganismView {
         OrganismView {
-            id: OrganismId { slot: id, generation: 1 },
+            id: OrganismId {
+                slot: id,
+                generation: 1,
+            },
             pos: SurfacePoint::new(Face::Front, 32.0, 32.0),
             heading: Vec2::new(1.0, 0.0),
             lobes: vec![(0.0, 0.0, 1.4), (2.0, 0.0, 0.9)],
@@ -535,7 +579,11 @@ mod tests {
     /// it before looking.
     fn above_floor(canvas: &Canvas, face: Face, x: u16, y: u16) -> [f32; 3] {
         let px = canvas.get(face, x, y);
-        [px[0] - PALETTE.floor[0], px[1] - PALETTE.floor[1], px[2] - PALETTE.floor[2]]
+        [
+            px[0] - PALETTE.floor[0],
+            px[1] - PALETTE.floor[1],
+            px[2] - PALETTE.floor[2],
+        ]
     }
 
     fn floor_total() -> f64 {
@@ -581,7 +629,11 @@ mod tests {
         assert!((PALETTE.hue_magenta[1] - srgb_decode(0x2A)).abs() < 1e-9);
         // The floor is dim: 12 % of an already dark indigo.
         for c in PALETTE.floor {
-            assert!(c < 0.01, "the floor must stay a night floor: {:?}", PALETTE.floor);
+            assert!(
+                c < 0.01,
+                "the floor must stay a night floor: {:?}",
+                PALETTE.floor
+            );
         }
         // The producer ramp gets brighter and bluer-to-cyan with density.
         assert!(PALETTE.producer_high[1] > PALETTE.producer_low[1]);
@@ -636,7 +688,15 @@ mod tests {
                     if px.iter().any(|&c| c.abs() > 1e-9) {
                         lit += 1;
                         assert_eq!(face, Face::Front);
-                        assert_eq!(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y)).index(), cell);
+                        assert_eq!(
+                            cell_of(
+                                Topology::Cube,
+                                Scale::ONE,
+                                &SurfacePoint::pixel_center(Topology::Cube, face, x, y)
+                            )
+                            .index(),
+                            cell
+                        );
                         let want = PALETTE.detritus[0] * (0.5 / DETRITUS_SCALE) as f32;
                         assert!((px[0] - want).abs() < 1e-6, "{px:?}");
                     }
@@ -682,7 +742,10 @@ mod tests {
         for i in 0..3 {
             assert!((px[i] - want[i] * b).abs() < 1e-6, "{px:?} vs {want:?}");
         }
-        assert!(px[2] > px[1], "at half density the substrate is still blue: {px:?}");
+        assert!(
+            px[2] > px[1],
+            "at half density the substrate is still blue: {px:?}"
+        );
     }
 
     #[test]
@@ -758,7 +821,10 @@ mod tests {
             view.organisms = vec![o.clone()];
             p.observe(&view);
         }
-        let id = OrganismId { slot: 0, generation: 1 };
+        let id = OrganismId {
+            slot: 0,
+            generation: 1,
+        };
         assert_eq!(p.trails[&id].len(), TRAIL_SEGMENTS);
         // Everything held is inside the fade window.
         for s in p.trails[&id].segments() {
@@ -771,13 +837,21 @@ mod tests {
         let mut p = Presenter::new();
         let mut canvas = Canvas::cube();
         p.draw(&empty_view(), 0.0, &mut canvas);
-        assert!((total(&canvas) - floor_total()).abs() < 1e-3, "{}", total(&canvas));
+        assert!(
+            (total(&canvas) - floor_total()).abs() < 1e-3,
+            "{}",
+            total(&canvas)
+        );
     }
 
     // --- Interpolation along the transported path ----------------------------------
 
     fn seg(face: Face, from: (f64, f64), to: (f64, f64)) -> PathSegment {
-        PathSegment { face, from: Vec2::new(from.0, from.1), to: Vec2::new(to.0, to.1) }
+        PathSegment {
+            face,
+            from: Vec2::new(from.0, from.1),
+            to: Vec2::new(to.0, to.1),
+        }
     }
 
     #[test]
@@ -806,7 +880,10 @@ mod tests {
 
         // Just below 1 lands within 1e-9 of the end of the path, which is `pos`.
         let (end, _) = interpolate(&o.moved, o.pos, o.heading, 1.0f64.next_down());
-        assert!((end.u - o.pos.u).abs() < 1e-9 && (end.v - o.pos.v).abs() < 1e-9, "{end:?}");
+        assert!(
+            (end.u - o.pos.u).abs() < 1e-9 && (end.v - o.pos.v).abs() < 1e-9,
+            "{end:?}"
+        );
         assert_eq!(end.face, o.pos.face);
     }
 
@@ -826,7 +903,11 @@ mod tests {
         assert!((a.u - 63.0).abs() < 1e-12, "{a:?}");
 
         let (a, _) = interpolate(&moved, pos, heading, 0.9);
-        assert_eq!(a.face, Face::Right, "past the seam the anchor is on the next chart");
+        assert_eq!(
+            a.face,
+            Face::Right,
+            "past the seam the anchor is on the next chart"
+        );
         assert!((a.u - 0.6).abs() < 1e-9, "{a:?}");
     }
 
@@ -841,20 +922,38 @@ mod tests {
         for i in 0..=100 {
             let f = f64::from(i) / 101.0;
             let (a, h) = interpolate(&t.segments, t.end, heading, f);
-            assert!(a.is_canonical(Topology::Cube), "f {f}: non-canonical anchor {a:?}");
-            assert!((h.length() - 1.0).abs() < 1e-9, "f {f}: heading {h:?} is not a unit vector");
+            assert!(
+                a.is_canonical(Topology::Cube),
+                "f {f}: non-canonical anchor {a:?}"
+            );
+            assert!(
+                (h.length() - 1.0).abs() < 1e-9,
+                "f {f}: heading {h:?} is not a unit vector"
+            );
             faces.insert(a.face);
         }
-        assert!(faces.len() >= 2, "a seam-crossing path must anchor on both charts: {faces:?}");
-        assert!(faces.contains(&Face::Front) && faces.contains(&Face::Right), "{faces:?}");
+        assert!(
+            faces.len() >= 2,
+            "a seam-crossing path must anchor on both charts: {faces:?}"
+        );
+        assert!(
+            faces.contains(&Face::Front) && faces.contains(&Face::Right),
+            "{faces:?}"
+        );
 
         // The end of the walk is the end of the path, which is where the tick left the
         // organism: `f → 1` converges on `pos` and never past it.
         let (end, _) = interpolate(&t.segments, t.end, heading, 1.0f64.next_down());
         assert_eq!(end.face, t.end.face);
-        assert!((end.u - t.end.u).abs() < 1e-9 && (end.v - t.end.v).abs() < 1e-9, "{end:?}");
+        assert!(
+            (end.u - t.end.u).abs() < 1e-9 && (end.v - t.end.v).abs() < 1e-9,
+            "{end:?}"
+        );
         let last = t.segments.last().unwrap();
-        assert!((end.u - last.to.x).abs() < 1e-9 || (last.to.x - cubarium_surface::FACE_EXTENT).abs() < 1e-9);
+        assert!(
+            (end.u - last.to.x).abs() < 1e-9
+                || (last.to.x - cubarium_surface::FACE_EXTENT).abs() < 1e-9
+        );
     }
 
     #[test]
@@ -875,7 +974,10 @@ mod tests {
                 for i in 0..=32 {
                     let f = f64::from(i) / 33.0;
                     let (a, _) = interpolate(&t.segments, t.end, heading, f);
-                    assert!(a.is_canonical(Topology::Cube), "{start:?} angle {angle} f {f}: {a:?}");
+                    assert!(
+                        a.is_canonical(Topology::Cube),
+                        "{start:?} angle {angle} f {f}: {a:?}"
+                    );
                 }
                 // Out-of-range fractions are clamped, never extrapolated.
                 for f in [-1.0, 1.0, 2.0, f64::NAN] {
@@ -917,8 +1019,17 @@ mod tests {
         p.draw(&view, 1.0f64.next_down(), &mut canvas);
         let at_end = centroid(&canvas);
 
-        assert!((at_start - 20.0).abs() < 1.0, "f=0 draws at the start of the tick: {at_start}");
-        assert!((halfway - 30.0).abs() < 1.0, "f=0.5 draws halfway: {halfway}");
-        assert!((at_end - 40.0).abs() < 1.0, "f→1 approaches the tick's end: {at_end}");
+        assert!(
+            (at_start - 20.0).abs() < 1.0,
+            "f=0 draws at the start of the tick: {at_start}"
+        );
+        assert!(
+            (halfway - 30.0).abs() < 1.0,
+            "f=0.5 draws halfway: {halfway}"
+        );
+        assert!(
+            (at_end - 40.0).abs() < 1.0,
+            "f→1 approaches the tick's end: {at_end}"
+        );
     }
 }

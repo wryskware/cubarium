@@ -145,7 +145,9 @@ fn nutrient_everywhere(world: &mut World) {
 
 fn restage(world: World) -> World {
     let world = World::from_state(world.state).expect("the staged state is a valid world");
-    world.check_invariants().expect("the staged world is consistent");
+    world
+        .check_invariants()
+        .expect("the staged world is consistent");
     world
 }
 
@@ -181,8 +183,18 @@ impl Stand {
     /// The §11 hand table's "mature stand", for comparison only.
     fn hand(class: Class) -> Stand {
         match class {
-            Class::Average => Stand { p: 0.50, w: 0.33, q: 0.16, f: 0.03 },
-            Class::Bright => Stand { p: 0.56, w: 0.60, q: 0.30, f: 0.16 },
+            Class::Average => Stand {
+                p: 0.50,
+                w: 0.33,
+                q: 0.16,
+                f: 0.03,
+            },
+            Class::Bright => Stand {
+                p: 0.56,
+                w: 0.60,
+                q: 0.30,
+                f: 0.16,
+            },
         }
     }
 
@@ -264,8 +276,16 @@ fn place_genome(
     let phenotype = decode(&genome, &cfg.organism);
     let centre = cell.center(Topology::Cube, Scale::ONE);
     let offset = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)][nth % 4];
-    let pos = SurfacePoint::new(cell.face(Topology::Cube, Scale::ONE), centre.u + offset.0, centre.v + offset.1);
-    assert_eq!(cell_of(Topology::Cube, Scale::ONE, &pos), cell, "the body landed outside its cell");
+    let pos = SurfacePoint::new(
+        cell.face(Topology::Cube, Scale::ONE),
+        centre.u + offset.0,
+        centre.v + offset.1,
+    );
+    assert_eq!(
+        cell_of(Topology::Cube, Scale::ONE, &pos),
+        cell,
+        "the body landed outside its cell"
+    );
     let id = world.state.organisms.insert(Organism {
         pos,
         heading: Vec2::new(1.0, 0.0),
@@ -396,7 +416,11 @@ fn run_b0_arm(class: Class, propagules: bool, verbose: bool) -> Baseline {
             "propagules: {}. §13.2 holds them **off** for B0, because the §11 table has no \
              propagule sink and a lone stand in a stripped world would otherwise export into \
              its bare neighbours; B0x is the same fixture with them on.",
-            if propagules { "on (B0x)" } else { "off (`propagule_rate = 0`)" }
+            if propagules {
+                "on (B0x)"
+            } else {
+                "off (`propagule_rate = 0`)"
+            }
         );
         row_header();
     }
@@ -417,8 +441,8 @@ fn run_b0_arm(class: Class, propagules: bool, verbose: bool) -> Baseline {
             // Senescence and ripening are not recorded separately, so they are reconstructed
             // from the identity the tick applies: what the cell gained and what it kept.
             let senescence = world.config().producer.mortality * now.p;
-            let over = (now.p / world.config().producer.max - world.config().fruit.fruit_min)
-                .max(0.0);
+            let over =
+                (now.p / world.config().producer.max - world.config().fruit.fruit_min).max(0.0);
             let ripening = world.config().fruit.ripen * now.p * over * class.light();
             if verbose {
                 row(tick, now, income, senescence, ripening);
@@ -438,7 +462,11 @@ fn run_b0_arm(class: Class, propagules: bool, verbose: bool) -> Baseline {
     let propagule_sent = world.intake_diagnostics().propagule_sent;
 
     if verbose {
-        compare(&format!("B0 {}", class.name()), terminal, Stand::hand(class));
+        compare(
+            &format!("B0 {}", class.name()),
+            terminal,
+            Stand::hand(class),
+        );
         println!(
             "- still moving at the horizon: |ΔP| {drift_p:.3e} m/s, |ΔW| {drift_w:.3e} m/s over \
              the last {SAMPLE} ticks. **This is a finite-horizon baseline, not proof of \
@@ -450,7 +478,13 @@ fn run_b0_arm(class: Class, propagules: bool, verbose: bool) -> Baseline {
         );
     }
 
-    Baseline { terminal, drift_p, drift_w, established, propagule_sent }
+    Baseline {
+        terminal,
+        drift_p,
+        drift_w,
+        established,
+        propagule_sent,
+    }
 }
 
 fn b0() {
@@ -539,7 +573,13 @@ fn b1a() {
     let grazer = place(&mut world, cell, 0.85, 0);
     let mut world = restage(world);
 
-    let reserve_max = world.state.organisms.get(grazer).expect("alive").phenotype.reserve_max;
+    let reserve_max = world
+        .state
+        .organisms
+        .get(grazer)
+        .expect("alive")
+        .phenotype
+        .reserve_max;
     println!();
     println!(
         "{:>7} {:>8} {:>8} {:>8} {:>8} {:>9} {:>10} {:>10} {:>8}",
@@ -630,12 +670,21 @@ fn b1a() {
 
 fn region(centre: CellId, half: i32) -> Vec<CellId> {
     let mut out = Vec::new();
-    let (cu, cv) = (i32::from(centre.cx(Topology::Cube, Scale::ONE)), i32::from(centre.cy(Topology::Cube, Scale::ONE)));
+    let (cu, cv) = (
+        i32::from(centre.cx(Topology::Cube, Scale::ONE)),
+        i32::from(centre.cy(Topology::Cube, Scale::ONE)),
+    );
     for du in -half..=half {
         for dv in -half..=half {
             let (u, v) = (cu + du, cv + dv);
             if (0..16).contains(&u) && (0..16).contains(&v) {
-                out.push(CellId::new(Topology::Cube, Scale::ONE, centre.face(Topology::Cube, Scale::ONE), u as u16, v as u16));
+                out.push(CellId::new(
+                    Topology::Cube,
+                    Scale::ONE,
+                    centre.face(Topology::Cube, Scale::ONE),
+                    u as u16,
+                    v as u16,
+                ));
             }
         }
     }
@@ -698,8 +747,15 @@ fn run_b1b(class: Class) {
                 .iter()
                 .map(|c| world.state.fields.p[c.index()])
                 .fold(f64::INFINITY, f64::min);
-            let w_total: f64 = cells.iter().map(|c| world.state.ecology.wood[c.index()]).sum();
-            let reserve = world.state.organisms.get(grazer).map_or(f64::NAN, |o| o.reserve);
+            let w_total: f64 = cells
+                .iter()
+                .map(|c| world.state.ecology.wood[c.index()])
+                .sum();
+            let reserve = world
+                .state
+                .organisms
+                .get(grazer)
+                .map_or(f64::NAN, |o| o.reserve);
             let diag = world.intake_diagnostics();
             println!(
                 "{tick:>7} {p_total:>10.4} {plant_total:>12.4} {p_min:>9.4} {reserve:>9.4} \
@@ -803,7 +859,8 @@ fn b2() {
             let index = stands.iter().position(|c| *c == here);
             if index != on {
                 if let Some(left) = on {
-                    q_at_departure[left] = Some(world.state.ecology.plant_reserve[stands[left].index()]);
+                    q_at_departure[left] =
+                        Some(world.state.ecology.plant_reserve[stands[left].index()]);
                 }
                 on = index;
             }
@@ -830,7 +887,11 @@ fn b2() {
     for (i, c) in stands.iter().enumerate() {
         println!(
             "{:<10} {:>10} {:>10.4} {:>12} {:>10.4} {:>10.4}",
-            format!("({},{})", c.cx(Topology::Cube, Scale::ONE), c.cy(Topology::Cube, Scale::ONE)),
+            format!(
+                "({},{})",
+                c.cx(Topology::Cube, Scale::ONE),
+                c.cy(Topology::Cube, Scale::ONE)
+            ),
             ticks_on[i],
             minima[i],
             q_at_departure[i].map_or("—".to_string(), |q| format!("{q:.4}")),
@@ -931,8 +992,7 @@ fn run_b3(class: Class, stand: Stand, label: &str, verbose: bool) -> (Option<u64
         println!(
             "- reserve dipped to {q_min:.4} of the painted {:.4} and now holds {:.4}; `N` \
              bottomed at {n_min:.4} from {n0:.4}.",
-            stand.q,
-            world.state.ecology.plant_reserve[i]
+            stand.q, world.state.ecology.plant_reserve[i]
         );
     }
     (half, nine)
@@ -1061,9 +1121,7 @@ fn run_b4a(verbose: bool) -> Killed {
         );
         println!(
             "- dead wood left standing: {:.4} m. Living `W` {:.4}, `P` {:.4}.",
-            out.dead_wood,
-            world.state.ecology.wood[i],
-            world.state.fields.p[i]
+            out.dead_wood, world.state.ecology.wood[i], world.state.fields.p[i]
         );
         // §13.2 (repair cycle 1) asks for the decline rate rather than a death tick.
         let seconds = out.decline_ticks as f64 * DT;
@@ -1111,7 +1169,10 @@ fn run_b4b(killed: &Killed, stand: Stand, label: &str) {
     let mut world = World::new(cfg.clone()).expect("valid");
     nutrient_everywhere(&mut world);
     let centre = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8);
-    let ring: Vec<CellId> = region(centre, 1).into_iter().filter(|c| *c != centre).collect();
+    let ring: Vec<CellId> = region(centre, 1)
+        .into_iter()
+        .filter(|c| *c != centre)
+        .collect();
     for c in &ring {
         paint(&mut world, *c, stand);
     }
@@ -1161,7 +1222,10 @@ fn run_b4b(killed: &Killed, stand: Stand, label: &str) {
     let w = world.state.ecology.wood[i];
     let p = world.state.fields.p[i];
     println!();
-    println!("- established (crossed `W_min`) at {}.", censored(established));
+    println!(
+        "- established (crossed `W_min`) at {}.",
+        censored(established)
+    );
     println!(
         "- at the horizon: W {:.4} = {:.1}% of the B0 bright value {:.4}; P {:.4} = {:.1}% of \
          {:.4}. Rebuilding beyond that is **censored at 30 min**.",
@@ -1189,7 +1253,11 @@ fn b4b() {
     );
     let killed = run_b4a(false);
     run_b4b(&killed, mature(Class::Bright), "B0's measured bright stand");
-    run_b4b(&killed, Stand::hand(Class::Bright), "the §11 hand table's bright stand");
+    run_b4b(
+        &killed,
+        Stand::hand(Class::Bright),
+        "the §11 hand table's bright stand",
+    );
 }
 
 // ------------------------------------------------------------------------------- B5
@@ -1201,8 +1269,12 @@ fn b5() {
          food keeps its identity for the whole run, and every body is pinned. This tests \
          **dependence**, not desirability."
     );
-    let kinds: [(&str, f32); 4] =
-        [("burrower", 0.10), ("grazer", 0.85), ("glider", 0.90), ("skimmer", 0.60)];
+    let kinds: [(&str, f32); 4] = [
+        ("burrower", 0.10),
+        ("grazer", 0.85),
+        ("glider", 0.90),
+        ("skimmer", 0.60),
+    ];
     let foods = ["a: foliage", "b: charged litter", "c: a placed carcass"];
 
     println!();
@@ -1439,7 +1511,11 @@ fn run_b6(renewal: bool, half: i32, label: &str) {
                     world.population(),
                     world.state.births_total,
                     world.state.deaths_total.iter().sum::<u64>(),
-                    if need > 0.0 { window_income / need } else { f64::NAN },
+                    if need > 0.0 {
+                        window_income / need
+                    } else {
+                        f64::NAN
+                    },
                     escrows.open.len(),
                 );
             }
@@ -1477,9 +1553,17 @@ fn run_b6(renewal: bool, half: i32, label: &str) {
          ≤ escrows opened, which is {}. Material debited into escrow over the run: {:.4} m \
          ({:.4} m per escrow).",
         escrows.opened,
-        if births <= escrows.opened { "true" } else { "FALSE" },
+        if births <= escrows.opened {
+            "true"
+        } else {
+            "FALSE"
+        },
         escrows.debited,
-        if escrows.opened > 0 { escrows.debited / escrows.opened as f64 } else { f64::NAN }
+        if escrows.opened > 0 {
+            escrows.debited / escrows.opened as f64
+        } else {
+            f64::NAN
+        }
     );
     let seconds = HORIZON as f64 * DT;
     let owed = last_owed - opening_owed;
@@ -1502,9 +1586,12 @@ fn run_b6(renewal: bool, half: i32, label: &str) {
     println!(
         "- mean plant income {income_rate:.3e} m/s against that mean need: ratio {:.2}. The \
          foliage the mouths actually took was {:.3e} m/s.",
-        if need > 0.0 { income_rate / need } else { f64::NAN },
-        (diag.producer_eaten + diag.fruit_eaten + diag.litter_eaten + diag.carrion_eaten)
-            / seconds
+        if need > 0.0 {
+            income_rate / need
+        } else {
+            f64::NAN
+        },
+        (diag.producer_eaten + diag.fruit_eaten + diag.litter_eaten + diag.carrion_eaten) / seconds
     );
     println!(
         "- first doubling of the population ({} → {}): {}.",
@@ -1525,7 +1612,11 @@ fn run_b6(renewal: bool, half: i32, label: &str) {
     let net = world.state.net_energy_in_corrected() - opening_u;
     println!(
         "- cumulative `light_in − heat_out` over the run: {net:+.4} e{}",
-        if renewal { "" } else { " — with renewal off this must not be positive" }
+        if renewal {
+            ""
+        } else {
+            " — with renewal off this must not be positive"
+        }
     );
     if renewal {
         // §11's own hand figure, kept only as the prediction the measurement above replaces.
@@ -1583,7 +1674,11 @@ fn run_b7(dim: bool, stand: Stand, label: &str) {
     // finding 3).
     let (donor_light, donor_moisture) = (Class::Bright.light(), Class::Bright.moisture());
     // `L_eff · μ = 0.2` for the dim recipient, as §13.2 names it.
-    let (light, moisture) = if dim { (0.4, 0.5) } else { (donor_light, donor_moisture) };
+    let (light, moisture) = if dim {
+        (0.4, 0.5)
+    } else {
+        (donor_light, donor_moisture)
+    };
     let mut cfg = staged(donor_light, donor_moisture);
     cfg.plant.propagule_rate = WorldConfig::default().plant.propagule_rate;
     let mut world = World::new(cfg).expect("valid");
@@ -1602,7 +1697,11 @@ fn run_b7(dim: bool, stand: Stand, label: &str) {
     println!(
         "### B7 {} — one bright mature donor ({label}, pinned L·μ = {:.2}) beside one bare cell \
          (pinned L·μ = {:.2})",
-        if dim { "dim recipient" } else { "bright recipient" },
+        if dim {
+            "dim recipient"
+        } else {
+            "bright recipient"
+        },
         donor_light * donor_moisture,
         light * moisture
     );
@@ -1695,7 +1794,9 @@ fn main() {
         );
         std::process::exit(2);
     }
-    let all = ["b0", "b1a", "b1b", "b2", "b3", "b4a", "b4b", "b5", "b6a", "b6b", "b7"];
+    let all = [
+        "b0", "b1a", "b1b", "b2", "b3", "b4a", "b4b", "b5", "b6a", "b6b", "b7",
+    ];
     let names: Vec<String> = if which.iter().any(|w| w == "all") {
         all.iter().map(|s| (*s).to_string()).collect()
     } else {

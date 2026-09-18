@@ -26,7 +26,16 @@ fn plant() -> Sprite {
     for y in 3..h {
         put(4, y, [40, (200 - y * 8) as u8, 60, 255]);
     }
-    for (x, y) in [(2, 4), (3, 3), (5, 3), (6, 5), (3, 8), (6, 9), (4, 2), (5, 7)] {
+    for (x, y) in [
+        (2, 4),
+        (3, 3),
+        (5, 3),
+        (6, 5),
+        (3, 8),
+        (6, 9),
+        (4, 2),
+        (5, 7),
+    ] {
         put(x, y, [(30 + x * 20) as u8, 180, (90 + y * 6) as u8, 255]);
     }
     Sprite::from_rgba(w, h, Vec2::new(4.5, 8.0), &bytes).expect("inside the nine-pixel budget")
@@ -39,7 +48,13 @@ fn anchors(topo: Topology) -> Vec<SurfacePoint> {
         Topology::Cube => {
             let mut v = Vec::new();
             for face in Face::ALL {
-                for (u, w) in [(0.5, 0.5), (63.5, 0.5), (0.5, 63.5), (63.5, 63.5), (31.5, 47.5)] {
+                for (u, w) in [
+                    (0.5, 0.5),
+                    (63.5, 0.5),
+                    (0.5, 63.5),
+                    (63.5, 63.5),
+                    (31.5, 47.5),
+                ] {
                     v.push(SurfacePoint::new(face, u, w));
                 }
             }
@@ -51,7 +66,13 @@ fn anchors(topo: Topology) -> Vec<SurfacePoint> {
         }
         Topology::Ring { w, h } => {
             let mut v = Vec::new();
-            for y in [0.5, 1.5, f64::from(h) / 2.0 + 0.5, f64::from(h) - 1.5, f64::from(h) - 0.5] {
+            for y in [
+                0.5,
+                1.5,
+                f64::from(h) / 2.0 + 0.5,
+                f64::from(h) - 1.5,
+                f64::from(h) - 0.5,
+            ] {
                 for x in [0.5, 1.5, 7.5, f64::from(w) / 2.0, f64::from(w) - 0.5] {
                     v.push(SurfacePoint::new(Face::Front, x, y));
                 }
@@ -78,10 +99,17 @@ fn draw_plants(canvas: &mut Canvas) {
     for (i, anchor) in anchors(topo).into_iter().enumerate() {
         let tone = Tone {
             colour: [0.4, 0.25, 0.1],
-            shade: Shade { floor: 0.2, reference: 0.6 },
+            shade: Shade {
+                floor: 0.2,
+                reference: 0.6,
+            },
             mix: if i % 3 == 0 { 0.5 } else { 0.0 },
         };
-        let mask = if i % 4 == 0 { Mask::Axial { reveal: 9.0 } } else { Mask::None };
+        let mask = if i % 4 == 0 {
+            Mask::Axial { reveal: 9.0 }
+        } else {
+            Mask::None
+        };
         stamp_layers_bent_toned(
             canvas,
             anchor,
@@ -104,10 +132,17 @@ fn draw_plants_cached(canvas: &mut Canvas, unfolds: &mut Unfolds) {
     for (i, anchor) in anchors(topo).into_iter().enumerate() {
         let tone = Tone {
             colour: [0.4, 0.25, 0.1],
-            shade: Shade { floor: 0.2, reference: 0.6 },
+            shade: Shade {
+                floor: 0.2,
+                reference: 0.6,
+            },
             mix: if i % 3 == 0 { 0.5 } else { 0.0 },
         };
-        let mask = if i % 4 == 0 { Mask::Axial { reveal: 9.0 } } else { Mask::None };
+        let mask = if i % 4 == 0 {
+            Mask::Axial { reveal: 9.0 }
+        } else {
+            Mask::None
+        };
         stamp_layers_cached(
             canvas,
             anchor,
@@ -171,7 +206,11 @@ fn a_band_reads_the_background_the_serial_canvas_would_have() {
         let mut bands = split.bands(4);
         split.for_each_band(&mut bands, draw_plants);
         split.for_each_band(&mut bands, draw_plants);
-        assert_eq!(split.pixels(), serial.pixels(), "{topo:?}: two passes over four bands");
+        assert_eq!(
+            split.pixels(),
+            serial.pixels(),
+            "{topo:?}: two passes over four bands"
+        );
     }
 }
 
@@ -188,11 +227,22 @@ fn a_cached_footprint_draws_the_uncached_image() {
         for frame in 0..4 {
             let mut cached = Canvas::new(topo, Scale::ONE);
             draw_plants_cached(&mut cached, &mut unfolds);
-            assert_eq!(cached.pixels(), plain.pixels(), "{topo:?}: frame {frame} differs");
+            assert_eq!(
+                cached.pixels(),
+                plain.pixels(),
+                "{topo:?}: frame {frame} differs"
+            );
         }
         let (hits, misses, entries, pixels) = unfolds.stats();
-        assert!(hits >= 3 * misses, "{topo:?}: {hits} hits against {misses} misses");
-        assert_eq!(entries, anchors(topo).len(), "{topo:?}: one entry per anchor");
+        assert!(
+            hits >= 3 * misses,
+            "{topo:?}: {hits} hits against {misses} misses"
+        );
+        assert_eq!(
+            entries,
+            anchors(topo).len(),
+            "{topo:?}: one entry per anchor"
+        );
         assert!(pixels > 0, "{topo:?}: {pixels} pooled");
 
         // And the cache composes with the split: same image again, four bands, cached.
@@ -204,7 +254,11 @@ fn a_cached_footprint_draws_the_uncached_image() {
             draw_plants_cached(band, unfolds);
         }
         split.gather(&bands);
-        assert_eq!(split.pixels(), plain.pixels(), "{topo:?}: cached, four bands");
+        assert_eq!(
+            split.pixels(),
+            plain.pixels(),
+            "{topo:?}: cached, four bands"
+        );
     }
 }
 
@@ -214,9 +268,23 @@ fn a_cached_footprint_draws_the_uncached_image() {
 fn a_widened_entry_still_draws_the_narrow_image() {
     let sprite = plant();
     let anchor = SurfacePoint::new(Face::Front, 63.5, 63.5);
-    let narrow = Bend { amplitude: 0.0, base: 0.0, root: 1.0, length: 10.0 };
-    let wide = Bend { amplitude: 1.6, base: 0.0, root: 1.0, length: 10.0 };
-    let flat = Tone { colour: [0.0; 3], shade: Shade::FLAT, mix: 0.0 };
+    let narrow = Bend {
+        amplitude: 0.0,
+        base: 0.0,
+        root: 1.0,
+        length: 10.0,
+    };
+    let wide = Bend {
+        amplitude: 1.6,
+        base: 0.0,
+        root: 1.0,
+        length: 10.0,
+    };
+    let flat = Tone {
+        colour: [0.0; 3],
+        shade: Shade::FLAT,
+        mix: 0.0,
+    };
 
     let mut want = Canvas::cube();
     stamp_layers_bent_toned(
@@ -261,5 +329,9 @@ fn a_widened_entry_still_draws_the_narrow_image() {
         &mut unfolds,
     );
     assert_eq!(unfolds.stats().0, 1, "the narrow stamp hit the wide entry");
-    assert_eq!(got.pixels(), want.pixels(), "a widened entry drew a different narrow image");
+    assert_eq!(
+        got.pixels(),
+        want.pixels(),
+        "a widened entry drew a different narrow image"
+    );
 }

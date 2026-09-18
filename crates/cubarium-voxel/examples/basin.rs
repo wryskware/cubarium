@@ -6,7 +6,7 @@
 use std::fs::File;
 use std::io::BufWriter;
 
-use cubarium_voxel::{Command, Config, Material, World, TICK_HZ};
+use cubarium_voxel::{Command, Config, Material, TICK_HZ, World};
 
 const TICKS: u32 = 300;
 const SCALE: usize = 4;
@@ -32,7 +32,10 @@ fn main() -> anyhow::Result<()> {
 
     world.apply(Command::ChargeAquifer { volume_m3: 80.0 });
     let pulse = world.apply(Command::RainPulse { volume_m3: 30.0 });
-    println!("rain pulse accepted {pulse:.3} m3, aquifer head {:.2} m", world.aquifer_head_m());
+    println!(
+        "rain pulse accepted {pulse:.3} m3, aquifer head {:.2} m",
+        world.aquifer_head_m()
+    );
 
     for tick in 1..=TICKS {
         if tick == TICKS / 2 {
@@ -88,7 +91,11 @@ fn report(world: &World) {
             o.1,
             o.2,
             v.free_at(o.0 as i64, o.1, o.2),
-            if world.outlet_open() { "open" } else { "closed" }
+            if world.outlet_open() {
+                "open"
+            } else {
+                "closed"
+            }
         );
     }
 }
@@ -135,7 +142,11 @@ fn write_png(world: &World, path: &str) -> anyhow::Result<()> {
                 let fill = v.free_at(x, y, z);
                 if fill > 0.02 && sub < fill {
                     let top = fill - sub < 1.0 / SCALE as f64;
-                    let water = if top { [120u8, 196, 236] } else { [46, 104, 176] };
+                    let water = if top {
+                        [120u8, 196, 236]
+                    } else {
+                        [46, 104, 176]
+                    };
                     rgb = tint(water, shade);
                     break;
                 }

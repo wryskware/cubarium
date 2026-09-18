@@ -226,7 +226,12 @@ impl PlantBudgetSummary {
     /// The cells that crossed in both summaries, ascending.
     pub fn overlap(&self, other: &PlantBudgetSummary) -> Vec<u16> {
         let mine: std::collections::BTreeSet<u16> = self.crossing_cells.iter().copied().collect();
-        other.crossing_cells.iter().copied().filter(|c| mine.contains(c)).collect()
+        other
+            .crossing_cells
+            .iter()
+            .copied()
+            .filter(|c| mine.contains(c))
+            .collect()
     }
 }
 

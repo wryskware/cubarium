@@ -47,8 +47,16 @@ fn swept(t: &Travel) -> f64 {
 #[track_caller]
 fn assert_sound(t: &Travel, topo: Topology, displacement: Vec2, what: &str) {
     assert!(!t.fallback, "{what}: the forward-progress fallback fired");
-    assert!(t.end.is_canonical(topo), "{what}: end {:?} is not canonical", t.end);
-    assert_close(swept(t), displacement.length(), &format!("{what}: swept length"));
+    assert!(
+        t.end.is_canonical(topo),
+        "{what}: end {:?} is not canonical",
+        t.end
+    );
+    assert_close(
+        swept(t),
+        displacement.length(),
+        &format!("{what}: swept length"),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -62,11 +70,19 @@ fn self_seam_exit_at_w_enters_at_zero() {
     let t = travel(ring(), front(319.5, 90.5), d);
     assert_sound(&t, ring(), d, "wrap east");
     assert_close(t.end.u, 0.5, "end u");
-    assert_close(t.end.v, 90.5, "end v (the along-edge parameter is unchanged)");
+    assert_close(
+        t.end.v,
+        90.5,
+        "end v (the along-edge parameter is unchanged)",
+    );
     assert_eq!(t.crossings, 1, "one seam crossing");
     assert_eq!(t.reflections, 0, "the wrap is not a reflection");
     assert_eq!(t.ties, 0);
-    assert_eq!(t.map, TangentMap::IDENTITY, "zero quarter turns across the self-seam");
+    assert_eq!(
+        t.map,
+        TangentMap::IDENTITY,
+        "zero quarter turns across the self-seam"
+    );
     assert_eq!(t.segments.len(), 2, "one segment per chart visit");
     assert_close(t.segments[0].to.x, W, "the first segment ends on the seam");
     assert_close(t.segments[1].from.x, 0.0, "and the second starts at u = 0");
@@ -140,14 +156,25 @@ fn a_long_vertical_sweep_bounces_between_both_rims() {
     let t = travel(ring(), front(160.5, 90.0), d);
     assert_sound(&t, ring(), d, "long vertical sweep");
     assert_eq!(t.crossings, 0, "a vertical sweep never reaches the seam");
-    assert!(t.reflections >= 5, "1000 px over a 180 px chart is at least five bounces");
+    assert!(
+        t.reflections >= 5,
+        "1000 px over a 180 px chart is at least five bounces"
+    );
     // 90 px to the bottom rim, then a full 180 px chart per bounce: 90 + 5·180 = 990 < 1000,
     // so six bounces, and an even number of REFLECT_Y composes back to the identity.
     assert_eq!(t.reflections, 6, "bounces");
-    assert_eq!(t.map, TangentMap::IDENTITY, "an even number of bounces composes to identity");
+    assert_eq!(
+        t.map,
+        TangentMap::IDENTITY,
+        "an even number of bounces composes to identity"
+    );
     // Unfolded, a billiard in [0, h] is the triangle wave of `v0 + s` with period 2h.
     let x = (90.0 + 1000.0) % (2.0 * H);
-    assert_close(t.end.v, if x <= H { x } else { 2.0 * H - x }, "end v after the bounces");
+    assert_close(
+        t.end.v,
+        if x <= H { x } else { 2.0 * H - x },
+        "end v after the bounces",
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -174,26 +201,52 @@ fn assert_corner(
         (1, 1, 1),
         "{label}: (crossings, reflections, ties)"
     );
-    assert_eq!(t.map, TangentMap::REFLECT_Y, "{label}: one reflection, no quarter turns");
-    assert_eq!(t.segments.len(), 2, "{label}: two charts visited, no zero-length segment");
+    assert_eq!(
+        t.map,
+        TangentMap::REFLECT_Y,
+        "{label}: one reflection, no quarter turns"
+    );
+    assert_eq!(
+        t.segments.len(),
+        2,
+        "{label}: two charts visited, no zero-length segment"
+    );
 }
 
 #[test]
 fn exact_tie_at_the_top_left_corner() {
     // Top (0) beats Left (3): the rim bounce resolves the tie, then the wrap follows.
-    assert_corner("top-left", ring(), front(1.0, 1.0), Vec2::new(-2.0, -2.0), (319.0, 1.0));
+    assert_corner(
+        "top-left",
+        ring(),
+        front(1.0, 1.0),
+        Vec2::new(-2.0, -2.0),
+        (319.0, 1.0),
+    );
 }
 
 #[test]
 fn exact_tie_at_the_top_right_corner() {
     // Top (0) beats Right (1).
-    assert_corner("top-right", ring(), front(319.0, 1.0), Vec2::new(2.0, -2.0), (1.0, 1.0));
+    assert_corner(
+        "top-right",
+        ring(),
+        front(319.0, 1.0),
+        Vec2::new(2.0, -2.0),
+        (1.0, 1.0),
+    );
 }
 
 #[test]
 fn exact_tie_at_the_bottom_left_corner() {
     // Bottom (2) beats Left (3).
-    assert_corner("bottom-left", ring(), front(1.0, 179.0), Vec2::new(-2.0, 2.0), (319.0, 179.0));
+    assert_corner(
+        "bottom-left",
+        ring(),
+        front(1.0, 179.0),
+        Vec2::new(-2.0, 2.0),
+        (319.0, 179.0),
+    );
 }
 
 #[test]
@@ -201,7 +254,13 @@ fn exact_tie_at_the_bottom_right_corner() {
     // Right (1) beats Bottom (2): this is the one corner where the seam crossing is the
     // first event. The outcome is the same as the other three because a ring's rim
     // reflection and its wrap commute (see the report accompanying this file).
-    assert_corner("bottom-right", ring(), front(319.0, 179.0), Vec2::new(2.0, 2.0), (1.0, 179.0));
+    assert_corner(
+        "bottom-right",
+        ring(),
+        front(319.0, 179.0),
+        Vec2::new(2.0, 2.0),
+        (1.0, 179.0),
+    );
 }
 
 /// Skewing either component by 2% breaks the tie, and the step still costs exactly one
@@ -249,7 +308,11 @@ fn one_step_wraps_and_then_reflects() {
     assert_sound(&t, ring(), d, "wrap then reflect");
     assert_eq!((t.crossings, t.reflections, t.ties), (1, 1, 0));
     assert_eq!(t.map, TangentMap::REFLECT_Y);
-    assert_eq!(t.segments.len(), 3, "three chart visits: before, after, after the bounce");
+    assert_eq!(
+        t.segments.len(),
+        3,
+        "three chart visits: before, after, after the bounce"
+    );
     assert_close(t.end.u, 8.0, "end u");
     assert_close(t.end.v, 178.0, "end v: 2 px past the rim, bounced back");
     // The seam crossing preserved the along-edge parameter.
@@ -265,7 +328,11 @@ fn a_displacement_longer_than_the_circumference_wraps_twice() {
     assert_sound(&t, ring(), d, "two wraps");
     assert_eq!(t.crossings, 2, "700 px from u = 10.5 crosses u = w twice");
     assert_eq!(t.reflections, 0);
-    assert_eq!(t.map, TangentMap::IDENTITY, "two identity transports compose to identity");
+    assert_eq!(
+        t.map,
+        TangentMap::IDENTITY,
+        "two identity transports compose to identity"
+    );
     assert_close(t.end.u, 10.5 + 700.0 - 2.0 * W, "end u");
     assert_close(t.end.v, 90.5, "end v");
     assert_eq!(t.segments.len(), 3);
@@ -313,6 +380,10 @@ fn the_double_size_ring_doubles_every_coordinate() {
     let t = travel(ring_2x(), front(21.0, 181.0), d);
     assert_sound(&t, ring_2x(), d, "two wraps at 2x");
     assert_eq!(t.crossings, 2);
-    assert_close(t.end.u, 2.0 * (10.5 + 700.0 - 2.0 * W), "end u is twice the S = 1 end u");
+    assert_close(
+        t.end.u,
+        2.0 * (10.5 + 700.0 - 2.0 * W),
+        "end u is twice the S = 1 end u",
+    );
     assert_close(t.end.v, 2.0 * 90.5, "end v is twice the S = 1 end v");
 }

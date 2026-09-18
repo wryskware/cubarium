@@ -25,7 +25,6 @@
 use cubarium_surface::{Scale, Topology};
 use std::path::{Path, PathBuf};
 
-use cube_proto::{FACE_SIZE, Face};
 use cubarium::art::{ArtPack, Band};
 use cubarium::art_present::{
     ArtPresenter, PLANT_BEND_LENGTH, PLANT_BEND_ROOT, REED_DEPTH, REED_SCALE, REED_STAGES,
@@ -33,13 +32,13 @@ use cubarium::art_present::{
     WIND_TRAVEL_SECONDS, band_of, band_opacity, canopy_heading, cell_band, effective_tip,
     next_stage, placement_of, plant_bend, plant_bend_budget, plant_cap, plant_phase_of,
     present_seconds, slot_of, slot_wind, species_of, stage_opacity, stage_thresholds, up_of,
-    wind_at, wind_chart, wind_phase, wind_response, wind_strength,
-    wood_from_producer,
+    wind_at, wind_chart, wind_phase, wind_response, wind_strength, wood_from_producer,
 };
 use cubarium::present::PRODUCER_SATURATION;
 use cubarium_core::view::RenderView;
 use cubarium_render::{Bend, Canvas, Mask, stamp_layers_bent};
 use cubarium_surface::{CUBE_CELL_COUNT, CellId, SurfacePoint, Vec2};
+use cube_proto::{FACE_SIZE, Face};
 
 // ---------------------------------------------------------------------------
 // fixtures
@@ -158,9 +157,7 @@ fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
 fn window(at: SurfacePoint) -> Vec<(Face, u16, u16)> {
     (0..FACE_SIZE as u16)
         .flat_map(|y| (0..FACE_SIZE as u16).map(move |x| (at.face, x, y)))
-        .filter(|&(_, x, y)| {
-            (f64::from(x) + 0.5 - at.u).hypot(f64::from(y) + 0.5 - at.v) <= 12.0
-        })
+        .filter(|&(_, x, y)| (f64::from(x) + 0.5 - at.u).hypot(f64::from(y) + 0.5 - at.v) <= 12.0)
         .collect()
 }
 
@@ -175,11 +172,17 @@ fn max_diff_at(a: &Canvas, b: &Canvas, pixels: &[(Face, u16, u16)]) -> f32 {
 }
 
 fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u16, u16)> {
-    every_pixel().filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y)).collect()
+    every_pixel()
+        .filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y))
+        .collect()
 }
 
 fn differing_at(a: &Canvas, b: &Canvas, pixels: &[(Face, u16, u16)]) -> Vec<(Face, u16, u16)> {
-    pixels.iter().copied().filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y)).collect()
+    pixels
+        .iter()
+        .copied()
+        .filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y))
+        .collect()
 }
 
 fn assert_same_canvas(a: &Canvas, b: &Canvas, what: &str) {
@@ -208,7 +211,8 @@ fn tile_at(at: SurfacePoint, heading: Vec2, x: u16, y: u16) -> Vec2 {
 /// centre and a stamp reaches at most 9 px, so 3..=12 in both cell axes keeps every painted
 /// pixel on the cell's own face — which is what makes [`tile_at`] and [`window`] meaningful.
 fn interior(cell: CellId) -> bool {
-    (3..=12).contains(&cell.cx(Topology::Cube, Scale::ONE)) && (3..=12).contains(&cell.cy(Topology::Cube, Scale::ONE))
+    (3..=12).contains(&cell.cx(Topology::Cube, Scale::ONE))
+        && (3..=12).contains(&cell.cy(Topology::Cube, Scale::ONE))
 }
 
 // ---------------------------------------------------------------------------
@@ -219,7 +223,11 @@ fn interior(cell: CellId) -> bool {
 /// breeze is at full envelope.
 fn peak_seconds() -> f64 {
     let s = present_seconds(WIND_PEAK_TICK, 0.0);
-    assert!(wind_strength(s) > 0.5, "{WIND_PEAK_TICK} is not inside a gust ({})", wind_strength(s));
+    assert!(
+        wind_strength(s) > 0.5,
+        "{WIND_PEAK_TICK} is not inside a gust ({})",
+        wind_strength(s)
+    );
     s
 }
 
@@ -227,7 +235,11 @@ fn peak_seconds() -> f64 {
 /// the sampler is **exactly** 0 for every root on the cube — the identity path.
 fn quiet_seconds() -> f64 {
     let s = present_seconds(WIND_QUIET_TICK, 0.0);
-    assert_eq!(wind_strength(s), 0.0, "{WIND_QUIET_TICK} is not exactly calm");
+    assert_eq!(
+        wind_strength(s),
+        0.0,
+        "{WIND_QUIET_TICK} is not exactly calm"
+    );
     s
 }
 
@@ -250,7 +262,9 @@ fn reed_cell() -> CellId {
     let seconds = peak_seconds();
     let best = CellId::all(Topology::Cube, Scale::ONE)
         .filter(|&c| {
-            c.face(Topology::Cube, Scale::ONE) == Face::Top && interior(c) && plant_cap(Band::Water, c) == Some(2)
+            c.face(Topology::Cube, Scale::ONE) == Face::Top
+                && interior(c)
+                && plant_cap(Band::Water, c) == Some(2)
         })
         .map(|c| {
             let slot = slot_of(c);
@@ -258,25 +272,46 @@ fn reed_cell() -> CellId {
             let tip = effective_tip(response.tip_px, budget) * slot.wind;
             (plant_bend(tip, w, slot.heading).amplitude.abs(), c)
         })
-        .fold((0.0f64, None), |m, v| if v.0 > m.0 { (v.0, Some(v.1)) } else { m });
+        .fold(
+            (0.0f64, None),
+            |m, v| if v.0 > m.0 { (v.0, Some(v.1)) } else { m },
+        );
     let cell = best.1.expect("the cube has an interior rank-2 slot on Top");
-    println!("  reed at {cell:?}: |amplitude| {:.4} px at the gust peak", best.0);
+    println!(
+        "  reed at {cell:?}: |amplitude| {:.4} px at the gust peak",
+        best.0
+    );
     assert!(
         best.0 > 0.2,
         "the windiest interior Top slot bends by only {:.4} px, which cannot move a texel",
         best.0
     );
     // The flooding really does make it a reed whose rank allows stage 2.
-    assert_eq!(cell_band(cell, Some(POOL)), Band::Water, "the pool must change the band");
-    assert_eq!(species_of(Band::Water, cell), WATER_PLANT, "a pool grows a reed");
+    assert_eq!(
+        cell_band(cell, Some(POOL)),
+        Band::Water,
+        "the pool must change the band"
+    );
+    assert_eq!(
+        species_of(Band::Water, cell),
+        WATER_PLANT,
+        "a pool grows a reed"
+    );
     assert_eq!(
         next_stage(None, POOL / REED_SCALE, &stage_thresholds(Band::Water), 2),
         Some(2),
         "{POOL} deep must warrant a full-grown reed"
     );
     assert!(POOL > REED_DEPTH, "{POOL} is not deeper than the reed line");
-    assert_eq!(REED_STAGES, stage_thresholds(Band::Water), "the water band's thresholds");
-    assert!(up_of(cell).is_none(), "a top-face cell has no 'up toward the canopy'");
+    assert_eq!(
+        REED_STAGES,
+        stage_thresholds(Band::Water),
+        "the water band's thresholds"
+    );
+    assert!(
+        up_of(cell).is_none(),
+        "a top-face cell has no 'up toward the canopy'"
+    );
     cell
 }
 
@@ -298,10 +333,22 @@ fn canopy_cell(species: &str) -> CellId {
             let slot = slot_of(c);
             (wind_at(slot.at, seconds, response.lag_seconds).length(), c)
         })
-        .fold((0.0f64, None), |m, v| if v.0 > m.0 { (v.0, Some(v.1)) } else { m });
-    let cell = best.1.unwrap_or_else(|| panic!("no interior rank-2 {species} slot on Top"));
-    println!("  {species} at {cell:?}: |w| {:.4} at the gust peak", best.0);
-    assert!(best.0 > 0.05, "{species}'s windiest interior Top slot feels only {:.4}", best.0);
+        .fold(
+            (0.0f64, None),
+            |m, v| if v.0 > m.0 { (v.0, Some(v.1)) } else { m },
+        );
+    let cell = best
+        .1
+        .unwrap_or_else(|| panic!("no interior rank-2 {species} slot on Top"));
+    println!(
+        "  {species} at {cell:?}: |w| {:.4} at the gust peak",
+        best.0
+    );
+    assert!(
+        best.0 > 0.05,
+        "{species}'s windiest interior Top slot feels only {:.4}",
+        best.0
+    );
     cell
 }
 
@@ -322,16 +369,24 @@ fn expected_plant(
     seconds: f64,
     wind: (Bend, Vec2),
 ) -> Canvas {
-    let plant = art.plant(species).unwrap_or_else(|| panic!("{species} is in the pack"));
+    let plant = art
+        .plant(species)
+        .unwrap_or_else(|| panic!("{species} is in the pack"));
     let slot = slot_of(cell);
     let (at, heading) = placement_of(cell);
     assert_eq!(at, slot.at, "the slot's anchor is where the plant stands");
-    assert_eq!(heading, slot.heading, "the slot's heading is the plant's authored one");
+    assert_eq!(
+        heading, slot.heading,
+        "the slot's heading is the plant's authored one"
+    );
     let clip = &plant.stages[2];
     let pose = clip.sample(seconds + plant_phase_of(cell, clip.seconds));
-    let opacity =
-        stage_opacity(2, density, &stage_thresholds(band), band_opacity(band));
-    assert_eq!(opacity, band_opacity(band), "a full-grown plant is at its band's ceiling");
+    let opacity = stage_opacity(2, density, &stage_thresholds(band), band_opacity(band));
+    assert_eq!(
+        opacity,
+        band_opacity(band),
+        "a full-grown plant is at its band's ceiling"
+    );
     let mut canvas = bg.clone();
     stamp_layers_bent(
         &mut canvas,
@@ -355,7 +410,16 @@ fn expected_reed(
     seconds: f64,
     wind: (Bend, Vec2),
 ) -> Canvas {
-    expected_plant(art, bg, cell, Band::Water, WATER_PLANT, POOL / REED_SCALE, seconds, wind)
+    expected_plant(
+        art,
+        bg,
+        cell,
+        Band::Water,
+        WATER_PLANT,
+        POOL / REED_SCALE,
+        seconds,
+        wind,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -379,12 +443,22 @@ fn slot_wind_bends_a_top_face_reed_along_its_own_heading_and_rests_exactly_when_
     let plant = art.plant(WATER_PLANT).expect("the pack carries the reed");
     let budget = plant_bend_budget(plant);
     let response = wind_response(WATER_PLANT);
-    assert!(response.tip_px > 0.0, "a reed that wants no tip travel cannot bend");
-    assert_eq!(response.spin_deg, 0.0, "a reed is not radial; only a spin turns in place");
+    assert!(
+        response.tip_px > 0.0,
+        "a reed that wants no tip travel cannot bend"
+    );
+    assert_eq!(
+        response.spin_deg, 0.0,
+        "a reed is not radial; only a spin turns in place"
+    );
 
     let cell = reed_cell();
     let slot = slot_of(cell);
-    assert_eq!(slot.at.face, Face::Top, "the fixture reed must stand on the top face");
+    assert_eq!(
+        slot.at.face,
+        Face::Top,
+        "the fixture reed must stand on the top face"
+    );
 
     // At the gust peak: the documented bend, and the slot's own heading.
     let seconds = peak_seconds();
@@ -398,24 +472,53 @@ fn slot_wind_bends_a_top_face_reed_along_its_own_heading_and_rests_exactly_when_
         (w - want_w).length() < 1e-12,
         "wind_at is {w:?}, not the documented {want_w:?}"
     );
-    assert!(w.length() <= WIND_CHART_MAX + 1e-12, "the breeze escaped its chart maximum");
+    assert!(
+        w.length() <= WIND_CHART_MAX + 1e-12,
+        "the breeze escaped its chart maximum"
+    );
     let tip = effective_tip(response.tip_px, budget) * slot.wind;
     assert_eq!(
         effective_tip(response.tip_px, budget),
-        response.tip_px.min(budget / (1.0 + WIND_SLOT_VARIATION)).max(0.0),
+        response
+            .tip_px
+            .min(budget / (1.0 + WIND_SLOT_VARIATION))
+            .max(0.0),
         "the admitted family tip is not the documented min"
     );
-    assert_eq!(bend, plant_bend(tip, w, slot.heading), "the reed did not take the plant bend");
-    assert_eq!(bend.root, PLANT_BEND_ROOT, "a reed is rooted at its ripple row");
-    assert_eq!(bend.length, PLANT_BEND_LENGTH, "a reed takes the small-plant bend length");
-    assert_eq!(bend.base, 0.0, "a small plant's tile stands on the root line");
+    assert_eq!(
+        bend,
+        plant_bend(tip, w, slot.heading),
+        "the reed did not take the plant bend"
+    );
+    assert_eq!(
+        bend.root, PLANT_BEND_ROOT,
+        "a reed is rooted at its ripple row"
+    );
+    assert_eq!(
+        bend.length, PLANT_BEND_LENGTH,
+        "a reed takes the small-plant bend length"
+    );
+    assert_eq!(
+        bend.base, 0.0,
+        "a small plant's tile stands on the root line"
+    );
     assert!(
         (bend.amplitude - tip * w.dot(slot.heading)).abs() < 1e-15,
         "the amplitude is not the breeze projected onto the tile's own horizontal axis"
     );
-    assert!(!bend.is_identity(), "the reed must really bend at the gust peak: {bend:?}");
-    assert!(bend.amplitude.abs() > 0.2, "the reed bends only {} px", bend.amplitude);
-    assert_eq!(heading, slot.heading, "a bending reed is never turned; it is not radial");
+    assert!(
+        !bend.is_identity(),
+        "the reed must really bend at the gust peak: {bend:?}"
+    );
+    assert!(
+        bend.amplitude.abs() > 0.2,
+        "the reed bends only {} px",
+        bend.amplitude
+    );
+    assert_eq!(
+        heading, slot.heading,
+        "a bending reed is never turned; it is not radial"
+    );
     // And the root line really is fixed while the tip really moves.
     assert_eq!(
         bend.displacement(16.0, 16.0 - PLANT_BEND_ROOT),
@@ -436,10 +539,23 @@ fn slot_wind_bends_a_top_face_reed_along_its_own_heading_and_rests_exactly_when_
         Vec2::ZERO,
         "the shared quiet interval must reach this root too"
     );
-    assert!(bend.is_identity(), "a calm reed must take the identity path, not {bend:?}");
-    assert_eq!(bend.amplitude, 0.0, "a calm reed's amplitude must be exactly 0");
-    assert_eq!(bend.displacement(16.0, 0.0), 0.0, "the identity displaces nothing anywhere");
-    assert_eq!(heading, slot.heading, "a calm reed keeps its authored heading bit for bit");
+    assert!(
+        bend.is_identity(),
+        "a calm reed must take the identity path, not {bend:?}"
+    );
+    assert_eq!(
+        bend.amplitude, 0.0,
+        "a calm reed's amplitude must be exactly 0"
+    );
+    assert_eq!(
+        bend.displacement(16.0, 0.0),
+        0.0,
+        "the identity displaces nothing anywhere"
+    );
+    assert_eq!(
+        heading, slot.heading,
+        "a calm reed keeps its authored heading bit for bit"
+    );
     println!("  quiet: bend {bend:?}, heading {heading:?}");
 }
 
@@ -470,7 +586,11 @@ fn a_flooded_top_face_reed_moves_at_a_gust_but_its_root_line_is_bit_identical() 
     let v = flooded_view(WIND_PEAK_TICK, cell);
     let f = 0.0;
     let seconds = present_seconds(v.tick, f);
-    assert_eq!(seconds, peak_seconds(), "the fixture instant must be the gust peak");
+    assert_eq!(
+        seconds,
+        peak_seconds(),
+        "the fixture instant must be the gust peak"
+    );
     let (bend, heading) = slot_wind(&slot, WATER_PLANT, budget, seconds);
     assert!(!bend.is_identity(), "the fixture instant must be windy");
 
@@ -495,8 +615,16 @@ fn a_flooded_top_face_reed_moves_at_a_gust_but_its_root_line_is_bit_identical() 
         "the reed looks the same windy and calm: the top-face rule moves nothing"
     );
     let moved = differing_at(&actual, &calm, &near);
-    println!("  the gust moved {} of the reed's {} window pixels", moved.len(), near.len());
-    assert!(moved.len() >= 4, "only {} pixels moved; that is not a bend", moved.len());
+    println!(
+        "  the gust moved {} of the reed's {} window pixels",
+        moved.len(),
+        near.len()
+    );
+    assert!(
+        moved.len() >= 4,
+        "only {} pixels moved; that is not a bend",
+        moved.len()
+    );
 
     // The root line: destination pixels whose tile row lies in 14.5..15.5, whose whole
     // bilinear support is at or below the root line and whose displacement is therefore
@@ -511,8 +639,16 @@ fn a_flooded_top_face_reed_moves_at_a_gust_but_its_root_line_is_bit_identical() 
         .copied()
         .filter(|&(_, x, y)| tile_at(slot.at, slot.heading, x, y).y >= 15.5)
         .collect();
-    assert!(root_line.len() >= 8, "the fixture found only {} root-line pixels", root_line.len());
-    assert!(below.len() >= 8, "the fixture found only {} pixels below the reed", below.len());
+    assert!(
+        root_line.len() >= 8,
+        "the fixture found only {} root-line pixels",
+        root_line.len()
+    );
+    assert!(
+        below.len() >= 8,
+        "the fixture found only {} pixels below the reed",
+        below.len()
+    );
     for &(fc, x, y) in &root_line {
         let h = 16.0 - tile_at(slot.at, slot.heading, x, y).y;
         assert_eq!(
@@ -537,9 +673,15 @@ fn a_flooded_top_face_reed_moves_at_a_gust_but_its_root_line_is_bit_identical() 
         !painted.is_empty(),
         "the reed paints nothing on its root line, so 'the root does not skate' is vacuous"
     );
-    println!("  {} root-line pixels painted, all bit-identical windy or calm", painted.len());
+    println!(
+        "  {} root-line pixels painted, all bit-identical windy or calm",
+        painted.len()
+    );
     let leak = max_diff_at(&actual, &bg, &below);
-    assert!(leak == 0.0, "the reed painted {leak} below its own root line");
+    assert!(
+        leak == 0.0,
+        "the reed painted {leak} below its own root line"
+    );
 }
 
 /// The gust moves the **reed** and nothing else: every pixel that differs between the drawn
@@ -570,7 +712,11 @@ fn the_gust_moves_only_the_reeds_own_pixels_not_the_water_or_the_ground_under_it
     let bg = background(&v, f);
     // Removing the one plant the picture has is the same as removing them all, which is what
     // makes the plant-free background a legitimate stand-in for the reed's own exclusion.
-    assert_same_canvas(&reedless, &bg, "a pack without the reed drew some other plant");
+    assert_same_canvas(
+        &reedless,
+        &bg,
+        "a pack without the reed drew some other plant",
+    );
     // The flooded cell really does have water in it under the reed.
     let dry = bare_view(v.tick);
     let dry_image = draw(&mut snapped(no_plants(), &dry), &dry, f);
@@ -583,7 +729,10 @@ fn the_gust_moves_only_the_reeds_own_pixels_not_the_water_or_the_ground_under_it
     let moved = differing(&actual, &calm);
     assert!(!moved.is_empty(), "the gust moved nothing at all");
     for &(fc, x, y) in &moved {
-        assert_eq!(fc, slot.at.face, "the gust changed a pixel on {fc:?}, off the reed's face");
+        assert_eq!(
+            fc, slot.at.face,
+            "the gust changed a pixel on {fc:?}, off the reed's face"
+        );
         let d = (f64::from(x) + 0.5 - slot.at.u).hypot(f64::from(y) + 0.5 - slot.at.v);
         assert!(
             d <= 9.5,
@@ -613,7 +762,10 @@ fn the_gust_moves_only_the_reeds_own_pixels_not_the_water_or_the_ground_under_it
         slot.at.face,
         untouched.len()
     );
-    assert_eq!(heading, slot.heading, "the reed's heading must not have turned");
+    assert_eq!(
+        heading, slot.heading,
+        "the reed's heading must not have turned"
+    );
 }
 
 /// A calm instant is the image from **before** this rule existed, bit for bit: the reed takes
@@ -629,9 +781,16 @@ fn a_calm_instant_draws_the_windless_top_face_reed_bit_for_bit() {
     let v = flooded_view(WIND_QUIET_TICK, cell);
     let f = 0.0;
     let seconds = present_seconds(v.tick, f);
-    assert_eq!(seconds, quiet_seconds(), "the fixture instant must be exactly calm");
+    assert_eq!(
+        seconds,
+        quiet_seconds(),
+        "the fixture instant must be exactly calm"
+    );
     let (bend, heading) = slot_wind(&slot, WATER_PLANT, budget, seconds);
-    assert!(bend.is_identity(), "the fixture instant must be calm, not {bend:?}");
+    assert!(
+        bend.is_identity(),
+        "the fixture instant must be calm, not {bend:?}"
+    );
     assert_eq!(heading, slot.heading);
 
     let actual = draw(&mut snapped(plants_only(), &v), &v, f);
@@ -663,11 +822,16 @@ fn the_two_canopy_species_on_top_still_turn_in_place_and_are_never_carried_sidew
     let art = plants_only();
     for species in ["umbrellafrond", "bloomcrown"] {
         let response = wind_response(species);
-        let plant = art.plant(species).unwrap_or_else(|| panic!("{species} is in the pack"));
+        let plant = art
+            .plant(species)
+            .unwrap_or_else(|| panic!("{species} is in the pack"));
         let budget = plant_bend_budget(plant);
         let cell = canopy_cell(species);
         let slot = slot_of(cell);
-        assert!(up_of(cell).is_none(), "{species}: a top-face cell is radial");
+        assert!(
+            up_of(cell).is_none(),
+            "{species}: a top-face cell is radial"
+        );
 
         // At the gust peak: no bend, a turned heading, the documented angle.
         let v = lit_view(WIND_PEAK_TICK, cell);
@@ -675,13 +839,20 @@ fn the_two_canopy_species_on_top_still_turn_in_place_and_are_never_carried_sidew
         let seconds = present_seconds(v.tick, f);
         let (bend, heading) = slot_wind(&slot, species, budget, seconds);
         let w = wind_at(slot.at, seconds, response.lag_seconds);
-        assert_eq!(bend, Bend::NONE, "{species}: a radial plant must never be bent");
+        assert_eq!(
+            bend,
+            Bend::NONE,
+            "{species}: a radial plant must never be bent"
+        );
         assert_eq!(
             heading,
             canopy_heading(slot.heading, response.spin_deg * slot.wind, w),
             "{species}: not the documented rotation"
         );
-        assert!((heading.length() - 1.0).abs() < 1e-12, "{species}: the heading lost its length");
+        assert!(
+            (heading.length() - 1.0).abs() < 1e-12,
+            "{species}: the heading lost its length"
+        );
         let turned = heading.screen_angle() - slot.heading.screen_angle();
         let want = (response.spin_deg * slot.wind * w.length() / WIND_CHART_MAX).to_radians();
         assert!(
@@ -690,13 +861,23 @@ fn the_two_canopy_species_on_top_still_turn_in_place_and_are_never_carried_sidew
                 < 1e-9,
             "{species}: turned {turned} rad, not the documented {want}"
         );
-        assert!(want > 1e-4, "{species}: the fixture barely turns ({want} rad)");
-        assert_ne!(heading, slot.heading, "{species}: the gust turned the crown by nothing");
+        assert!(
+            want > 1e-4,
+            "{species}: the fixture barely turns ({want} rad)"
+        );
+        assert_ne!(
+            heading, slot.heading,
+            "{species}: the gust turned the crown by nothing"
+        );
 
         // The drawn cube: the same pose, at the same anchor, with the turned heading. A
         // translated crown — or a bent one — differs from this.
         let mut p = snapped(plants_only(), &v);
-        assert_eq!(p.stage_of(cell), Some(2), "{species}: the fixture must be full-grown");
+        assert_eq!(
+            p.stage_of(cell),
+            Some(2),
+            "{species}: the fixture must be full-grown"
+        );
         let actual = draw(&mut p, &v, f);
         let bg = background(&v, f);
         let expected = expected_plant(
@@ -709,7 +890,11 @@ fn the_two_canopy_species_on_top_still_turn_in_place_and_are_never_carried_sidew
             seconds,
             (Bend::NONE, heading),
         );
-        assert_same_canvas(&actual, &expected, &format!("{species} turning in place on Top"));
+        assert_same_canvas(
+            &actual,
+            &expected,
+            &format!("{species} turning in place on Top"),
+        );
         let unturned = expected_plant(
             &art,
             &bg,

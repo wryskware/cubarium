@@ -5,8 +5,8 @@
 use std::net::UdpSocket;
 use std::time::Duration;
 
-use cube_proto::{FRAME_BYTES, Face, Format, Frame, HEADER_BYTES, decode};
 use cubarium::sink::{FrameSink, Output, ShimSink};
+use cube_proto::{FRAME_BYTES, Face, Format, Frame, HEADER_BYTES, decode};
 
 /// Build a frame whose bytes are unique per index, touching all five faces.
 fn distinctive(i: u8) -> Frame {
@@ -31,7 +31,8 @@ fn the_shim_sink_sends_the_exact_encoded_frame_bytes_with_increasing_sequence() 
 
     for i in 0..6u8 {
         let frame = distinctive(i);
-        sink.submit(Output::Cube(&frame)).expect("submit never fails");
+        sink.submit(Output::Cube(&frame))
+            .expect("submit never fails");
 
         // Receive before submitting the next frame, so the newest-frame mailbox has no
         // chance to coalesce and every submitted frame reaches the wire.
@@ -40,19 +41,33 @@ fn the_shim_sink_sends_the_exact_encoded_frame_bytes_with_increasing_sequence() 
 
         assert_eq!(header.format, Format::FullFrame, "frame {i}");
         assert_eq!(header.face, None, "a full frame carries no face index");
-        assert_eq!(header.seq, u32::from(i) + 1, "sequence numbers start at 1 and increase");
+        assert_eq!(
+            header.seq,
+            u32::from(i) + 1,
+            "sequence numbers start at 1 and increase"
+        );
         assert_eq!(payload.len(), FRAME_BYTES, "frame {i} payload length");
-        assert_eq!(payload, frame.as_bytes().as_slice(), "frame {i} payload bytes");
+        assert_eq!(
+            payload,
+            frame.as_bytes().as_slice(),
+            "frame {i} payload bytes"
+        );
     }
 
-    assert_eq!(sink.errors(), 0, "a listening receiver must produce no send errors");
+    assert_eq!(
+        sink.errors(),
+        0,
+        "a listening receiver must produce no send errors"
+    );
     sink.finish().expect("clean shutdown");
 }
 
 #[test]
 fn the_mailbox_coalesces_without_inventing_or_corrupting_frames() {
     let server = UdpSocket::bind("127.0.0.1:0").expect("binding the test receiver");
-    server.set_read_timeout(Some(Duration::from_millis(300))).unwrap();
+    server
+        .set_read_timeout(Some(Duration::from_millis(300)))
+        .unwrap();
     let addr = server.local_addr().unwrap();
 
     // Drain continuously on another thread so the kernel receive buffer never overflows.
@@ -81,20 +96,31 @@ fn the_mailbox_coalesces_without_inventing_or_corrupting_frames() {
     for f in &submitted {
         sink.submit(Output::Cube(f)).unwrap();
     }
-    assert!(sink.wait_for_sent(1, Duration::from_secs(3)), "the worker sent nothing");
+    assert!(
+        sink.wait_for_sent(1, Duration::from_secs(3)),
+        "the worker sent nothing"
+    );
     sink.finish().unwrap();
 
     let got = collector.join().expect("collector thread");
     assert!(!got.is_empty(), "at least one datagram arrives");
-    assert!(got.len() <= submitted.len(), "the mailbox must not invent frames");
+    assert!(
+        got.len() <= submitted.len(),
+        "the mailbox must not invent frames"
+    );
     let seqs: Vec<u32> = got.iter().map(|(s, _)| *s).collect();
     assert_eq!(seqs[0], 1, "sequence numbers start at 1");
-    assert!(seqs.windows(2).all(|w| w[1] > w[0]), "sequence numbers increase: {seqs:?}");
+    assert!(
+        seqs.windows(2).all(|w| w[1] > w[0]),
+        "sequence numbers increase: {seqs:?}"
+    );
     // Every datagram is byte-identical to one of the frames that was submitted: the
     // mailbox replaces whole frames, it never blends or truncates them.
     for (seq, payload) in &got {
         assert!(
-            submitted.iter().any(|f| f.as_bytes().as_slice() == payload.as_slice()),
+            submitted
+                .iter()
+                .any(|f| f.as_bytes().as_slice() == payload.as_slice()),
             "datagram seq {seq} does not match any submitted frame"
         );
     }
@@ -107,8 +133,12 @@ fn a_dead_shim_is_not_fatal() {
     let frame = Frame::black();
     let t0 = std::time::Instant::now();
     for _ in 0..100 {
-        sink.submit(Output::Cube(&frame)).expect("submit never fails when the shim is down");
+        sink.submit(Output::Cube(&frame))
+            .expect("submit never fails when the shim is down");
     }
-    assert!(t0.elapsed() < Duration::from_secs(1), "submit must not block on the socket");
+    assert!(
+        t0.elapsed() < Duration::from_secs(1),
+        "submit must not block on the socket"
+    );
     sink.finish().expect("clean shutdown with a dead shim");
 }

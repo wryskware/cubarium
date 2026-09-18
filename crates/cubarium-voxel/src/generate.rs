@@ -133,7 +133,8 @@ pub fn landform(world: &mut World) {
     for z in 0..d {
         for x in 0..w {
             let th = TAU * x as f64 / w as f64;
-            let mut e = front + amp1 * (th - ridge_phase).cos() + amp2 * (2.0 * th - second_phase).cos();
+            let mut e =
+                front + amp1 * (th - ridge_phase).cos() + amp2 * (2.0 * th - second_phase).cos();
             // A receiving basin, not a smooth trough: the bottom flattens into a floor,
             // low and at the front, with its flanks carried up by the climb.
             if e < basin_floor {
@@ -205,7 +206,11 @@ pub fn landform(world: &mut World) {
         let cx = rng.unit() * w as f64;
         let cz = rng.range(0.0, d as f64);
         let cy = rng.range(2.0, (hf * 0.5).max(3.0));
-        let (rx, ry, rz) = (rng.range(2.0, 5.0), rng.range(1.5, 3.0), rng.range(1.5, 4.0));
+        let (rx, ry, rz) = (
+            rng.range(2.0, 5.0),
+            rng.range(1.5, 3.0),
+            rng.range(1.5, 4.0),
+        );
         for z in 0..d {
             for x in 0..w {
                 let dx = wrapped_delta(x as f64, cx, w as f64) / rx;
@@ -322,7 +327,9 @@ pub fn isolated_voids(world: &World) -> Vec<usize> {
             push(c.index(x, y, z + 1), &mut seen, &mut stack);
         }
     }
-    (0..n).filter(|&i| !world.material[i].is_solid() && !seen[i]).collect()
+    (0..n)
+        .filter(|&i| !world.material[i].is_solid() && !seen[i])
+        .collect()
 }
 
 /// Fill every void the sky cannot reach with rock. Run after every carve.
@@ -360,7 +367,10 @@ mod tests {
     #[test]
     fn no_surface_cell_is_hidden_by_a_nearer_one() {
         for seed in SEEDS {
-            let world = World::new(Config { seed, ..Config::default() });
+            let world = World::new(Config {
+                seed,
+                ..Config::default()
+            });
             for x in 0..world.config().width as i64 {
                 let ys = column(&world, x);
                 for z1 in 0..ys.len() {
@@ -381,24 +391,36 @@ mod tests {
     #[test]
     fn the_front_stands_below_the_back_in_every_column() {
         for seed in SEEDS {
-            let world = World::new(Config { seed, ..Config::default() });
+            let world = World::new(Config {
+                seed,
+                ..Config::default()
+            });
             let w = world.config().width as i64;
             let mut total = 0i64;
             for x in 0..w {
                 let ys = column(&world, x);
                 let (front, back) = (ys[0], ys[ys.len() - 1]);
-                assert!(front < back, "seed {seed}, x {x}: front {front} not below back {back}");
+                assert!(
+                    front < back,
+                    "seed {seed}, x {x}: front {front} not below back {back}"
+                );
                 total += (back - front) as i64;
             }
             let mean = total as f64 / w as f64;
-            assert!(mean >= 4.0, "seed {seed}: the surface only climbs {mean:.1} voxels on average");
+            assert!(
+                mean >= 4.0,
+                "seed {seed}: the surface only climbs {mean:.1} voxels on average"
+            );
         }
     }
 
     #[test]
     fn the_default_landform_has_no_overhang() {
         for seed in SEEDS {
-            let world = World::new(Config { seed, ..Config::default() });
+            let world = World::new(Config {
+                seed,
+                ..Config::default()
+            });
             let v = world.view();
             for z in 0..v.config.depth {
                 for x in 0..v.config.width as i64 {
@@ -418,7 +440,12 @@ mod tests {
     /// hand-built: a shaft down to a roofed slot stays, a sealed pocket is filled.
     #[test]
     fn a_reachable_roofed_slot_survives_repair_and_a_sealed_pocket_does_not() {
-        let config = Config { width: 8, height: 8, depth: 2, ..Config::default() };
+        let config = Config {
+            width: 8,
+            height: 8,
+            depth: 2,
+            ..Config::default()
+        };
         let mut world = World::empty(config.clone());
         for z in 0..config.depth {
             for x in 0..config.width as i64 {
@@ -440,12 +467,27 @@ mod tests {
         // And one pocket the sky cannot reach.
         air(&mut world, 1, 2);
 
-        assert_eq!(isolated_voids(&world).len(), config.depth as usize, "only the pocket is sealed");
+        assert_eq!(
+            isolated_voids(&world).len(),
+            config.depth as usize,
+            "only the pocket is sealed"
+        );
         assert_eq!(repair_isolated(&mut world), config.depth as usize);
         for z in 0..config.depth {
-            assert_eq!(world.material[config.index(4, 3, z)], Material::Air, "the roofed slot stays");
-            assert!(world.material[config.index(4, 4, z)].is_solid(), "its roof stays");
-            assert_eq!(world.material[config.index(1, 2, z)], Material::Rock, "the pocket is filled");
+            assert_eq!(
+                world.material[config.index(4, 3, z)],
+                Material::Air,
+                "the roofed slot stays"
+            );
+            assert!(
+                world.material[config.index(4, 4, z)].is_solid(),
+                "its roof stays"
+            );
+            assert_eq!(
+                world.material[config.index(1, 2, z)],
+                Material::Rock,
+                "the pocket is filled"
+            );
         }
         assert!(isolated_voids(&world).is_empty());
     }
@@ -455,9 +497,15 @@ mod tests {
         // hidden iff 2 * (y1 - y2) >= dz, so the drop the camera hides is (dz - 1) / 2.
         for dz in 1..12u32 {
             let d = allowed_drop(dz);
-            assert!(2 * d < dz as i32, "a drop of {d} over {dz} would already be hidden");
-            assert!(2 * (d + 1) >= dz as i32, "a drop of {} over {dz} is still visible", d + 1);
+            assert!(
+                2 * d < dz as i32,
+                "a drop of {d} over {dz} would already be hidden"
+            );
+            assert!(
+                2 * (d + 1) >= dz as i32,
+                "a drop of {} over {dz} is still visible",
+                d + 1
+            );
         }
     }
 }
-

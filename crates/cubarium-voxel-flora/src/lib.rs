@@ -57,7 +57,7 @@ pub use cubarium_voxel::{DT, TICK_HZ};
 pub use step::can_establish;
 /// The same predicate, gate by gate, for a caller that needs to know **which** gate shut:
 /// `Gates::passes()` is exactly `can_establish`.
-pub use step::{establishment_gates, establishment_gates_on_substrate, Gates};
+pub use step::{Gates, establishment_gates, establishment_gates_on_substrate};
 
 /// The **stands** of the voxel ecology, each one a role: see the preset that carries its
 /// numbers ([`SpeciesConfig::bloomcrown`] and the five after it) for the sentence of
@@ -368,12 +368,20 @@ impl Ground {
     /// The organic matter this site's seed bank holds of one species: what germination
     /// pools and measures against `alive_min / w_frac`.
     pub fn seed_organic(&self, species: Species) -> f64 {
-        self.seeds.iter().filter(|c| c.species == species).map(|c| c.organic).sum()
+        self.seeds
+            .iter()
+            .filter(|c| c.species == species)
+            .map(|c| c.organic)
+            .sum()
     }
 
     /// The mineral the same cohorts hold.
     pub fn seed_mineral(&self, species: Species) -> f64 {
-        self.seeds.iter().filter(|c| c.species == species).map(|c| c.mineral).sum()
+        self.seeds
+            .iter()
+            .filter(|c| c.species == species)
+            .map(|c| c.mineral)
+            .sum()
     }
 
     /// Which species' cohorts hold the most organic matter here, for a picture with one
@@ -641,13 +649,15 @@ impl SpeciesConfig {
     /// Height of the crown top above the support face, in voxels.
     pub fn crown_height(&self, wood: f64) -> f64 {
         let t = (wood / self.wood_max).clamp(0.0, 1.0);
-        self.crown_height_voxels[0] + t * (self.crown_height_voxels[1] - self.crown_height_voxels[0])
+        self.crown_height_voxels[0]
+            + t * (self.crown_height_voxels[1] - self.crown_height_voxels[0])
     }
 
     /// Half-width of the crown, in voxels.
     pub fn crown_radius(&self, wood: f64) -> f64 {
         let t = (wood / self.wood_max).clamp(0.0, 1.0);
-        self.crown_radius_voxels[0] + t * (self.crown_radius_voxels[1] - self.crown_radius_voxels[0])
+        self.crown_radius_voxels[0]
+            + t * (self.crown_radius_voxels[1] - self.crown_radius_voxels[0])
     }
 
     /// How many voxels above its support face the crown's **cells** sit:
@@ -1163,7 +1173,9 @@ impl SpeciesConfig {
         let [w_frac, p_frac, q_frac] = self.propagule_split;
         for (label, v) in [("w_frac", w_frac), ("p_frac", p_frac), ("q_frac", q_frac)] {
             if !v.is_finite() || v < 0.0 {
-                return fail(&format!("propagule_split {label} is {v}, not finite and nonnegative"));
+                return fail(&format!(
+                    "propagule_split {label} is {v}, not finite and nonnegative"
+                ));
             }
         }
         let sum = w_frac + p_frac + q_frac;
@@ -1181,10 +1193,16 @@ impl SpeciesConfig {
             ));
         }
         if !(self.wood_max > 0.0 && self.wood_max.is_finite()) {
-            return fail(&format!("wood_max is {}, not finite and positive", self.wood_max));
+            return fail(&format!(
+                "wood_max is {}, not finite and positive",
+                self.wood_max
+            ));
         }
         if !(self.alive_min.is_finite() && self.alive_min >= 0.0) {
-            return fail(&format!("alive_min is {}, not finite and nonnegative", self.alive_min));
+            return fail(&format!(
+                "alive_min is {}, not finite and nonnegative",
+                self.alive_min
+            ));
         }
         if self.alive_min > self.wood_max {
             return fail(&format!(
@@ -1596,11 +1614,17 @@ pub struct FloraView<'a> {
 
 impl<'a> FloraView<'a> {
     pub fn stand_at(&self, site: Site) -> Option<&'a Stand> {
-        self.stands.binary_search_by_key(&site, |s| s.site).ok().map(|i| &self.stands[i])
+        self.stands
+            .binary_search_by_key(&site, |s| s.site)
+            .ok()
+            .map(|i| &self.stands[i])
     }
 
     pub fn ground_at(&self, site: Site) -> Option<&'a Ground> {
-        self.ground.binary_search_by_key(&site, |g| g.site).ok().map(|i| &self.ground[i])
+        self.ground
+            .binary_search_by_key(&site, |g| g.site)
+            .ok()
+            .map(|i| &self.ground[i])
     }
 
     /// Organic matter in every living and dead stock, the seed banks included. The site's
@@ -1715,12 +1739,7 @@ impl<'a> FloraView<'a> {
     /// sideways, `x` wrapped and `z` clipped, read as **support sites** rather than as soil
     /// voxels, because a ground stock lives one per support face. Its vertical reach is its
     /// own species field and not the soil-water root box's (Astra R9.3).
-    pub fn dead_wood_in_box(
-        &self,
-        world: &VoxelView<'_>,
-        from: Site,
-        sc: &SpeciesConfig,
-    ) -> f64 {
+    pub fn dead_wood_in_box(&self, world: &VoxelView<'_>, from: Site, sc: &SpeciesConfig) -> f64 {
         step::substrate_in_box(world, self.ground, from, sc)
     }
 
@@ -1778,7 +1797,12 @@ pub enum Command {
     /// `wood`, full foliage `α·W` and full reserve. Refused if the column has no
     /// support, the site already holds a stand, or `wood` is below the species'
     /// `alive_min`.
-    Seed { x: i64, z: u32, species: Species, wood: f64 },
+    Seed {
+        x: i64,
+        z: u32,
+        species: Species,
+        wood: f64,
+    },
     /// Remove the stand on the highest support face of column `(x, z)`, booking its
     /// material and energy as removed. Refused if there is none.
     Clear { x: i64, z: u32 },
@@ -1959,7 +1983,11 @@ impl Flora {
         for z in 0..c.depth {
             for x in 0..c.width as i64 {
                 for y in view.supports_in_column(x, z) {
-                    let site = Site { x: x.rem_euclid(c.width as i64) as u32, y, z };
+                    let site = Site {
+                        x: x.rem_euclid(c.width as i64) as u32,
+                        y,
+                        z,
+                    };
                     ground.push(Ground::new(site, mineral));
                     self.ledger.seeded_mineral_in += mineral;
                 }
@@ -2028,13 +2056,22 @@ impl Flora {
     pub fn apply(&mut self, world: &World, command: Command) -> bool {
         let view = world.view();
         match command {
-            Command::Seed { x, z, species, wood } => {
-                let Some(site) = highest_support(&view, x, z) else { return false };
+            Command::Seed {
+                x,
+                z,
+                species,
+                wood,
+            } => {
+                let Some(site) = highest_support(&view, x, z) else {
+                    return false;
+                };
                 let sc = self.config.species(species);
                 if !(wood.is_finite() && wood >= sc.alive_min) {
                     return false;
                 }
-                let Err(at) = self.stands.binary_search_by_key(&site, |s| s.site) else { return false };
+                let Err(at) = self.stands.binary_search_by_key(&site, |s| s.site) else {
+                    return false;
+                };
                 let mut stand = Stand {
                     id: self.ledger.births,
                     site,
@@ -2061,24 +2098,32 @@ impl Flora {
                 self.stands.insert(at, stand);
                 if let Err(g) = self.ground.binary_search_by_key(&site, |g| g.site) {
                     self.ledger.seeded_mineral_in += self.config.initial_mineral;
-                    self.ground.insert(g, Ground::new(site, self.config.initial_mineral));
+                    self.ground
+                        .insert(g, Ground::new(site, self.config.initial_mineral));
                 }
                 true
             }
             Command::Clear { x, z } => {
-                let Some(site) = highest_support(&view, x, z) else { return false };
-                let Ok(at) = self.stands.binary_search_by_key(&site, |s| s.site) else { return false };
+                let Some(site) = highest_support(&view, x, z) else {
+                    return false;
+                };
+                let Ok(at) = self.stands.binary_search_by_key(&site, |s| s.site) else {
+                    return false;
+                };
                 let s = self.stands.remove(at);
                 // The parcel goes out with the stand: it is organic matter this layer
                 // holds, and a `Clear` removes everything the site held.
                 let organic = s.material();
                 self.ledger.removed_organic_out += organic;
                 self.ledger.removed_mineral_out += s.mineral;
-                self.ledger.removed_energy_out += self.config.species(s.species).energy_density * organic;
+                self.ledger.removed_energy_out +=
+                    self.config.species(s.species).energy_density * organic;
                 true
             }
             Command::ClearBank { x, z, species } => {
-                let Some(site) = highest_support(&view, x, z) else { return false };
+                let Some(site) = highest_support(&view, x, z) else {
+                    return false;
+                };
                 let Ok(gi) = self.ground.binary_search_by_key(&site, |g| g.site) else {
                     return false;
                 };
@@ -2136,7 +2181,11 @@ impl Flora {
         let before = self.stands[i].material();
         self.stands[i].foliage -= organic;
         let mineral = step::pull_mineral(&mut self.stands[i], before, organic);
-        Some(self.book_consumed(Taken { organic, mineral, energy: e_v * organic }))
+        Some(self.book_consumed(Taken {
+            organic,
+            mineral,
+            energy: e_v * organic,
+        }))
     }
 
     /// A consumer eats **dead wood** off the site's ground, up to `want`, with its mineral
@@ -2149,8 +2198,12 @@ impl Flora {
     pub fn take_dead_wood(&mut self, site: Site, want: f64) -> Option<Taken> {
         let i = self.ground.binary_search_by_key(&site, |g| g.site).ok()?;
         let g = &mut self.ground[i];
-        let taken =
-            take_pool(&mut g.dead_wood, &mut g.dead_wood_mineral, &mut g.dead_wood_energy, want)?;
+        let taken = take_pool(
+            &mut g.dead_wood,
+            &mut g.dead_wood_mineral,
+            &mut g.dead_wood_energy,
+            want,
+        )?;
         Some(self.book_consumed(taken))
     }
 
@@ -2159,7 +2212,12 @@ impl Flora {
     pub fn take_litter(&mut self, site: Site, want: f64) -> Option<Taken> {
         let i = self.ground.binary_search_by_key(&site, |g| g.site).ok()?;
         let g = &mut self.ground[i];
-        let taken = take_pool(&mut g.litter, &mut g.litter_mineral, &mut g.litter_energy, want)?;
+        let taken = take_pool(
+            &mut g.litter,
+            &mut g.litter_mineral,
+            &mut g.litter_energy,
+            want,
+        )?;
         Some(self.book_consumed(taken))
     }
 
@@ -2197,7 +2255,12 @@ impl Flora {
     /// it, because it is not in this one's snapshot (Astra R8.5 — the two were equated here,
     /// and they are one tick apart).
     pub fn deposit(&mut self, site: Site, deposit: Deposit) -> bool {
-        let Deposit { kind, organic, mineral, energy } = deposit;
+        let Deposit {
+            kind,
+            organic,
+            mineral,
+            energy,
+        } = deposit;
         for v in [organic, mineral, energy] {
             if !v.is_finite() || v < 0.0 {
                 return false;
@@ -2210,7 +2273,8 @@ impl Flora {
             Ok(i) => i,
             Err(i) => {
                 self.ledger.seeded_mineral_in += self.config.initial_mineral;
-                self.ground.insert(i, Ground::new(site, self.config.initial_mineral));
+                self.ground
+                    .insert(i, Ground::new(site, self.config.initial_mineral));
                 i
             }
         };
@@ -2280,12 +2344,7 @@ impl Flora {
 /// most, with the mineral and the energy that were in it at the stock's **current
 /// density**, which is `decompose`'s own rule. `None` when nothing can be taken, so the
 /// caller books nothing.
-fn take_pool(
-    organic: &mut f64,
-    mineral: &mut f64,
-    energy: &mut f64,
-    want: f64,
-) -> Option<Taken> {
+fn take_pool(organic: &mut f64, mineral: &mut f64, energy: &mut f64, want: f64) -> Option<Taken> {
     if !(want > 0.0) || !want.is_finite() || !(*organic > 0.0) {
         return None;
     }
@@ -2293,12 +2352,24 @@ fn take_pool(
     // `f` is 1.0 exactly when the pool is emptied, so an emptied pool hands over every
     // unit of its mineral and its energy and keeps no float dust claiming to be a stock.
     let f = out / *organic;
-    let m = if f >= 1.0 { *mineral } else { (*mineral * f).min(*mineral) };
-    let e = if f >= 1.0 { *energy } else { (*energy * f).min(*energy) };
+    let m = if f >= 1.0 {
+        *mineral
+    } else {
+        (*mineral * f).min(*mineral)
+    };
+    let e = if f >= 1.0 {
+        *energy
+    } else {
+        (*energy * f).min(*energy)
+    };
     *organic -= out;
     *mineral -= m;
     *energy -= e;
-    Some(Taken { organic: out, mineral: m, energy: e })
+    Some(Taken {
+        organic: out,
+        mineral: m,
+        energy: e,
+    })
 }
 
 /// The highest support face in a column: the skyline solid, if the void above it is
@@ -2313,5 +2384,9 @@ pub fn highest_support(view: &VoxelView<'_>, x: i64, z: u32) -> Option<Site> {
     if y + 1 >= c.height {
         return None;
     }
-    Some(Site { x: x.rem_euclid(c.width as i64) as u32, y, z })
+    Some(Site {
+        x: x.rem_euclid(c.width as i64) as u32,
+        y,
+        z,
+    })
 }

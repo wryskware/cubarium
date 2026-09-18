@@ -152,27 +152,45 @@ pub struct Header {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProtoError {
     /// Fewer than `HEADER_BYTES` bytes received.
-    TooShort { len: usize },
+    TooShort {
+        len: usize,
+    },
     BadMagic([u8; 4]),
     BadVersion(u8),
     BadFormat(u8),
     /// Face byte is neither a valid index (format 1) nor `0xFF` (format 0).
     BadFace(u8),
     BadFlags(u8),
-    BadPayloadLen { expected: usize, got: usize },
+    BadPayloadLen {
+        expected: usize,
+        got: usize,
+    },
     /// A raster strip naming an image size outside `1..=4096` on either axis.
-    BadRasterSize { width: u16, height: u16 },
+    BadRasterSize {
+        width: u16,
+        height: u16,
+    },
     /// A raster strip whose rows fall outside the image it names.
-    BadStripRange { y0: u16, rows: u16, height: u16 },
+    BadStripRange {
+        y0: u16,
+        rows: u16,
+        height: u16,
+    },
     /// A datagram larger than one UDP payload can hold.
-    DatagramTooLarge { len: usize, max: usize },
+    DatagramTooLarge {
+        len: usize,
+        max: usize,
+    },
 }
 
 impl std::fmt::Display for ProtoError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ProtoError::TooShort { len } => {
-                write!(f, "datagram too short: {len} bytes, need at least {HEADER_BYTES}")
+                write!(
+                    f,
+                    "datagram too short: {len} bytes, need at least {HEADER_BYTES}"
+                )
             }
             ProtoError::BadMagic(m) => write!(f, "bad magic {m:02x?}, expected {MAGIC:02x?}"),
             ProtoError::BadVersion(v) => write!(f, "unsupported version {v}, expected {VERSION}"),
@@ -337,7 +355,9 @@ pub fn decode(datagram: &[u8]) -> Result<(Header, &[u8]), ProtoError> {
             }
             None
         }
-        Format::SingleFace => Some(Face::from_index(face_byte).ok_or(ProtoError::BadFace(face_byte))?),
+        Format::SingleFace => {
+            Some(Face::from_index(face_byte).ok_or(ProtoError::BadFace(face_byte))?)
+        }
     };
 
     let payload = &datagram[HEADER_BYTES..];

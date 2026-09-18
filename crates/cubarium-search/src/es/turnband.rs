@@ -122,22 +122,46 @@ impl SignTest {
 /// [`SignTest`] over a set of paired differences. A difference that is not finite is a tie:
 /// there is no direction in it.
 pub fn sign_test(differences: &[f64]) -> SignTest {
-    let positive = differences.iter().filter(|d| d.is_finite() && **d > 0.0).count();
-    let negative = differences.iter().filter(|d| d.is_finite() && **d < 0.0).count();
+    let positive = differences
+        .iter()
+        .filter(|d| d.is_finite() && **d > 0.0)
+        .count();
+    let negative = differences
+        .iter()
+        .filter(|d| d.is_finite() && **d < 0.0)
+        .count();
     let ties = differences.len() - positive - negative;
     let n = positive + negative;
-    let p_value = if n == 0 { 1.0 } else { two_sided_binomial(positive, n) };
-    let mut nonzero: Vec<f64> =
-        differences.iter().copied().filter(|d| d.is_finite() && *d != 0.0).collect();
+    let p_value = if n == 0 {
+        1.0
+    } else {
+        two_sided_binomial(positive, n)
+    };
+    let mut nonzero: Vec<f64> = differences
+        .iter()
+        .copied()
+        .filter(|d| d.is_finite() && *d != 0.0)
+        .collect();
     nonzero.sort_by(|a, b| a.partial_cmp(b).expect("finite"));
     let median_difference = median(&nonzero);
-    let finite: Vec<f64> = differences.iter().copied().filter(|d| d.is_finite()).collect();
+    let finite: Vec<f64> = differences
+        .iter()
+        .copied()
+        .filter(|d| d.is_finite())
+        .collect();
     let mean_difference = if finite.is_empty() {
         0.0
     } else {
         finite.iter().sum::<f64>() / finite.len() as f64
     };
-    SignTest { positive, negative, ties, p_value, median_difference, mean_difference }
+    SignTest {
+        positive,
+        negative,
+        ties,
+        p_value,
+        median_difference,
+        mean_difference,
+    }
 }
 
 fn median(sorted: &[f64]) -> f64 {
@@ -145,7 +169,11 @@ fn median(sorted: &[f64]) -> f64 {
         return 0.0;
     }
     let m = sorted.len();
-    if m % 2 == 1 { sorted[m / 2] } else { 0.5 * (sorted[m / 2 - 1] + sorted[m / 2]) }
+    if m % 2 == 1 {
+        sorted[m / 2]
+    } else {
+        0.5 * (sorted[m / 2 - 1] + sorted[m / 2])
+    }
 }
 
 /// `min(1, 2·min(P(X ≤ k), P(X ≥ k)))` for `X ~ Binomial(n, ½)`.
@@ -369,7 +397,10 @@ pub fn run_replay(
     // of workstream XY2's 2x2 of weights x adapter.
     file.check_adapter(checkpoint.protocol.adapter)?;
     if file.generation != generation {
-        return Err(Boxed::from(format!("that file is generation {}", file.generation)));
+        return Err(Boxed::from(format!(
+            "that file is generation {}",
+            file.generation
+        )));
     }
     let theta = file.theta.clone();
     let n = checkpoint.protocol.pairs;
@@ -385,7 +416,11 @@ pub fn run_replay(
         for (c, sign) in [(Candidate::Plus(p), 1.0f64), (Candidate::Minus(p), -1.0)] {
             thetas.push((
                 c.label(),
-                theta.iter().zip(&eps).map(|(t, e)| t + sign * sigma * e).collect(),
+                theta
+                    .iter()
+                    .zip(&eps)
+                    .map(|(t, e)| t + sign * sigma * e)
+                    .collect(),
             ));
         }
     }
@@ -403,7 +438,10 @@ pub fn run_replay(
     let layouts_of = |adapter: ActionAdapter| -> Vec<Layout> {
         fixture::training_layouts_on(&eco)
             .into_iter()
-            .map(|l| l.with_motor(checkpoint.protocol.motor).with_adapter(adapter))
+            .map(|l| {
+                l.with_motor(checkpoint.protocol.motor)
+                    .with_adapter(adapter)
+            })
             .collect()
     };
     let one = layouts_of(ActionAdapter::CubAct1);
@@ -419,9 +457,14 @@ pub fn run_replay(
             scope.spawn(|| {
                 loop {
                     let next = cursor.fetch_add(1, Ordering::Relaxed);
-                    let Some((adapter, c, l)) = jobs.get(next).copied() else { return };
-                    let layout =
-                        if adapter == ActionAdapter::CubAct1 { &one[l] } else { &two[l] };
+                    let Some((adapter, c, l)) = jobs.get(next).copied() else {
+                        return;
+                    };
+                    let layout = if adapter == ActionAdapter::CubAct1 {
+                        &one[l]
+                    } else {
+                        &two[l]
+                    };
                     let (label, theta_c) = &thetas[c];
                     let policy = match tensor::policy_in(theta_c, adapter) {
                         Ok(p) => p,
@@ -453,7 +496,12 @@ pub fn run_replay(
         return Err(Boxed::from(format!(
             "{} episode(s) failed: {}",
             failures.len(),
-            failures.iter().take(4).cloned().collect::<Vec<_>>().join("; ")
+            failures
+                .iter()
+                .take(4)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("; ")
         )));
     }
     let mut done = done.into_inner().expect("d");
@@ -519,8 +567,13 @@ fn reduce_replay(
         for layout in &layouts {
             let a = find(ActionAdapter::CubAct1.name(), label, layout);
             let b = find(ActionAdapter::CubAct2.name(), label, layout);
-            let opening =
-                |r: &ReplayRow| if r.ticks == 0 { 0.0 } else { r.ticks_in_opening as f64 / r.ticks as f64 };
+            let opening = |r: &ReplayRow| {
+                if r.ticks == 0 {
+                    0.0
+                } else {
+                    r.ticks_in_opening as f64 / r.ticks as f64
+                }
+            };
             paired_trajectories.push(PairedTrajectory {
                 candidate: label.clone(),
                 layout: layout.clone(),
@@ -576,26 +629,57 @@ fn reduce_replay(
         paired_trajectories.iter().map(f).collect()
     };
     let tests = vec![
-        named("turn_active_fraction", "trajectory", &col(|p| p.d_turn_active_fraction)),
+        named(
+            "turn_active_fraction",
+            "trajectory",
+            &col(|p| p.d_turn_active_fraction),
+        ),
         named("mean_abs_omega", "trajectory", &col(|p| p.d_mean_abs_omega)),
-        named("on_food_fraction", "trajectory", &col(|p| p.d_on_food_fraction)),
-        named("mean_dwell_bout", "trajectory", &col(|p| p.d_mean_dwell_bout)),
+        named(
+            "on_food_fraction",
+            "trajectory",
+            &col(|p| p.d_on_food_fraction),
+        ),
+        named(
+            "mean_dwell_bout",
+            "trajectory",
+            &col(|p| p.d_mean_dwell_bout),
+        ),
         named("ticks", "trajectory", &col(|p| p.d_ticks)),
-        named("intake_producer", "trajectory", &col(|p| p.d_intake_producer)),
-        named("opening_fraction", "trajectory", &col(|p| p.d_opening_fraction)),
+        named(
+            "intake_producer",
+            "trajectory",
+            &col(|p| p.d_intake_producer),
+        ),
+        named(
+            "opening_fraction",
+            "trajectory",
+            &col(|p| p.d_opening_fraction),
+        ),
         named(
             "t_min",
             "candidate",
-            &paired_candidates.iter().map(|c| c.d_t_min).collect::<Vec<_>>(),
+            &paired_candidates
+                .iter()
+                .map(|c| c.d_t_min)
+                .collect::<Vec<_>>(),
         ),
         named(
             "score",
             "candidate",
-            &paired_candidates.iter().map(|c| c.d_score).collect::<Vec<_>>(),
+            &paired_candidates
+                .iter()
+                .map(|c| c.d_score)
+                .collect::<Vec<_>>(),
         ),
     ];
 
-    let get = |metric: &str| tests.iter().find(|t| t.metric == metric).expect("named above");
+    let get = |metric: &str| {
+        tests
+            .iter()
+            .find(|t| t.metric == metric)
+            .expect("named above")
+    };
     let turn = get("turn_active_fraction");
     let on_food = get("on_food_fraction");
     let dwell = get("mean_dwell_bout");
@@ -606,9 +690,17 @@ fn reduce_replay(
             format!(
                 "on-food fraction {} (p = {:.4}) and t_min {} (p = {:.4}): the rule's \
                  support branch is met.",
-                if on_food.rises { "rises" } else { "does not rise" },
+                if on_food.rises {
+                    "rises"
+                } else {
+                    "does not rise"
+                },
                 on_food.test.p_value,
-                if t_min.rises { "rises" } else { "does not rise" },
+                if t_min.rises {
+                    "rises"
+                } else {
+                    "does not rise"
+                },
                 t_min.test.p_value,
             ),
         )
@@ -622,10 +714,7 @@ fn reduce_replay(
             format!(
                 "turn activity rises (p = {:.4}) while on-food fraction (p = {:.4}), mean \
                  dwell bout (p = {:.4}) and t_min (p = {:.4}) all stay above 0.1.",
-                turn.test.p_value,
-                on_food.test.p_value,
-                dwell.test.p_value,
-                t_min.test.p_value,
+                turn.test.p_value, on_food.test.p_value, dwell.test.p_value, t_min.test.p_value,
             ),
         )
     } else {
@@ -804,8 +893,10 @@ pub fn run_stability(
             .cloned()
             .ok_or_else(|| Boxed::from("that file has no `pairs` array"))?,
     )?;
-    let mut rows: Vec<PairRow> =
-        all.into_iter().filter(|p| p.generation == generation).collect();
+    let mut rows: Vec<PairRow> = all
+        .into_iter()
+        .filter(|p| p.generation == generation)
+        .collect();
     rows.sort_by_key(|p| p.pair);
     let n = checkpoint.protocol.pairs;
     if rows.len() != n {
@@ -895,7 +986,11 @@ pub fn run_stability(
     // 2. The recorded update, from the run's own centre files.
     let theta_g = read_center(run, generation)?;
     let theta_next = read_center(run, generation + 1)?;
-    let update: Vec<f64> = theta_next.iter().zip(&theta_g).map(|(a, b)| a - b).collect();
+    let update: Vec<f64> = theta_next
+        .iter()
+        .zip(&theta_g)
+        .map(|(a, b)| a - b)
+        .collect();
     let update_norm = update.iter().map(|x| x * x).sum::<f64>().sqrt();
     // `<w_i eps_i, update>` per pair, so a resampled direction's inner product with the update
     // is again a weighted sum of sixteen numbers.
@@ -986,10 +1081,19 @@ fn write_json<T: Serialize>(out: &Path, value: &T) -> Result<(), Boxed> {
 }
 
 fn print_replay(r: &ReplayReport) {
-    println!("# the turn-deadband replay on {} generation {} ({})", r.run, r.generation, r.build);
+    println!(
+        "# the turn-deadband replay on {} generation {} ({})",
+        r.run, r.generation, r.build
+    );
     println!(
         "# config {} ({}), protocol {:#018x}, seed {}, sigma {}, {} pairs, aggregate {}, motor {}",
-        r.config, r.config_hash, r.protocol_hash, r.train_seed, r.sigma, r.pairs, r.aggregate,
+        r.config,
+        r.config_hash,
+        r.protocol_hash,
+        r.train_seed,
+        r.sigma,
+        r.pairs,
+        r.aggregate,
         r.motor
     );
     println!(
@@ -1021,7 +1125,10 @@ fn print_replay(r: &ReplayReport) {
 }
 
 fn print_stability(r: &StabilityReport) {
-    println!("# gradient-direction stability, generation {} of {} ({})", r.generation, r.run, r.build);
+    println!(
+        "# gradient-direction stability, generation {} of {} ({})",
+        r.generation, r.run, r.build
+    );
     println!(
         "# {} pairs ({} with exactly zero weight), sigma {}, seed {}, pairs from {}",
         r.pairs, r.zero_weight_pairs, r.sigma, r.train_seed, r.pairs_file

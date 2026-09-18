@@ -6,30 +6,35 @@
 use cubarium_surface::{Scale, Topology};
 use std::path::Path;
 
-use cube_proto::{FACE_SIZE, Face};
 use cubarium::art::{ArtPack, Band};
 use cubarium::art_present::{
     ArtPresenter, FOLIAGE_STAGES, GROUND_LATTICE, GROUND_OPACITY, MOTIF_OPACITY, RAIN_BLINK,
-    RAIN_DENSITY, RAIN_MAX_STREAKS, RAIN_PERIOD, RAIN_SPEED, TALL_COLUMN_P, TALL_MAX_SEGMENTS,
-    TALL_PLANTS, TALL_STEP, WATER_FILM, WATER_SHIMMER_SECONDS, band_of, column_density,
-    foliage_rows, ground_pose, ground_opacity, ground_phase_of, ground_points, ground_weight,
-    TALL_HYST, next_tall, rain_blink, rain_blink_on, tall_rise, rain_fall, rain_marks, rain_origin, rain_streaks, soil_weight,
-    stage_thresholds, tall_anchor, tall_column_of, tall_columns, tall_target, up_of,
-    water_brightness, water_coverage, present_seconds,
-    WIND_QUIET_TICK, plant_bend_budget, slot_of, slot_wind,
-    wood_from_producer,
+    RAIN_DENSITY, RAIN_MAX_STREAKS, RAIN_PERIOD, RAIN_SPEED, TALL_COLUMN_P, TALL_HYST,
+    TALL_MAX_SEGMENTS, TALL_PLANTS, TALL_STEP, WATER_FILM, WATER_SHIMMER_SECONDS, WIND_QUIET_TICK,
+    band_of, column_density, foliage_rows, ground_opacity, ground_phase_of, ground_points,
+    ground_pose, ground_weight, next_tall, plant_bend_budget, present_seconds, rain_blink,
+    rain_blink_on, rain_fall, rain_marks, rain_origin, rain_streaks, slot_of, slot_wind,
+    soil_weight, stage_thresholds, tall_anchor, tall_column_of, tall_columns, tall_rise,
+    tall_target, up_of, water_brightness, water_coverage, wood_from_producer,
+};
+use cubarium::art_present::{
+    algae_water_color, band_opacity, next_stage, placement_of, plant_density, plant_phase_of,
+    rank_cap_of, species_of, stage_opacity, water_color,
 };
 use cubarium::clock::DT;
 use cubarium::present::PRODUCER_SATURATION;
 use cubarium_core::view::RenderView;
 use cubarium_render::{Canvas, Mask, stamp_layers_bent, stamp_pose};
-use cubarium::art_present::{algae_water_color, water_color, band_opacity, next_stage, placement_of, plant_density, plant_phase_of, rank_cap_of, species_of, stage_opacity};
-use cubarium_surface::{CUBE_CELL_COUNT, CELLS_PER_FACE_EDGE, CellId, PixelImage, SurfacePoint, Vec2, cell_of};
+use cubarium_surface::{
+    CELLS_PER_FACE_EDGE, CUBE_CELL_COUNT, CellId, PixelImage, SurfacePoint, Vec2, cell_of,
+};
+use cube_proto::{FACE_SIZE, Face};
 
 const PRODUCER_MAX: f64 = 10.0;
 
 fn pack() -> ArtPack {
-    ArtPack::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/atelier")).expect("pack")
+    ArtPack::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/atelier"))
+        .expect("pack")
 }
 
 fn saturation() -> f64 {
@@ -40,7 +45,13 @@ fn flat(v: f64) -> Vec<f64> {
     vec![v; CUBE_CELL_COUNT]
 }
 
-fn view(tick: u64, producer: Vec<f64>, detritus: Vec<f64>, water: Vec<f64>, rain: Vec<f32>) -> RenderView {
+fn view(
+    tick: u64,
+    producer: Vec<f64>,
+    detritus: Vec<f64>,
+    water: Vec<f64>,
+    rain: Vec<f32>,
+) -> RenderView {
     let mut v = RenderView {
         topology: cubarium_surface::Topology::Cube,
         scale: cubarium_surface::Scale::ONE,
@@ -75,13 +86,15 @@ fn draw(v: &RenderView) -> Canvas {
 }
 
 fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
-    Face::ALL
-        .into_iter()
-        .flat_map(|f| (0..FACE_SIZE as u16).flat_map(move |y| (0..FACE_SIZE as u16).map(move |x| (f, x, y))))
+    Face::ALL.into_iter().flat_map(|f| {
+        (0..FACE_SIZE as u16).flat_map(move |y| (0..FACE_SIZE as u16).map(move |x| (f, x, y)))
+    })
 }
 
 fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u16, u16)> {
-    every_pixel().filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y)).collect()
+    every_pixel()
+        .filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y))
+        .collect()
 }
 
 fn side_faces() -> impl Iterator<Item = Face> {
@@ -107,29 +120,53 @@ fn coverage_follows_the_film_rule_and_a_dry_cell_has_none() {
 #[test]
 fn a_dry_world_draws_exactly_the_dry_image_whether_water_is_empty_or_zero() {
     let producer = flat(saturation() * 0.5);
-    let zero = view(9, producer.clone(), flat(0.4), flat(0.0), vec![0.0; CUBE_CELL_COUNT]);
+    let zero = view(
+        9,
+        producer.clone(),
+        flat(0.4),
+        flat(0.0),
+        vec![0.0; CUBE_CELL_COUNT],
+    );
     let mut empty = view(9, producer, flat(0.4), Vec::new(), Vec::new());
     empty.water = Vec::new();
     empty.rain = Vec::new();
     let a = draw(&zero);
     let b = draw(&empty);
-    assert!(differing(&a, &b).is_empty(), "an empty water vector must draw as dry");
+    assert!(
+        differing(&a, &b).is_empty(),
+        "an empty water vector must draw as dry"
+    );
 }
 
 #[test]
 fn deep_water_is_blue_cyan_brighter_than_the_ground_and_local() {
-    let dry = view(3, flat(0.0), flat(0.0), flat(0.0), vec![0.0; CUBE_CELL_COUNT]);
+    let dry = view(
+        3,
+        flat(0.0),
+        flat(0.0),
+        flat(0.0),
+        vec![0.0; CUBE_CELL_COUNT],
+    );
     let mut water = flat(0.0);
     let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 5);
     water[cell.index()] = 5.0;
     let wet = view(3, flat(0.0), flat(0.0), water, vec![0.0; CUBE_CELL_COUNT]);
     let a = draw(&dry);
     let b = draw(&wet);
-    let (cx, cy) = (cell.cx(Topology::Cube, Scale::ONE) as i32, cell.cy(Topology::Cube, Scale::ONE) as i32);
+    let (cx, cy) = (
+        cell.cx(Topology::Cube, Scale::ONE) as i32,
+        cell.cy(Topology::Cube, Scale::ONE) as i32,
+    );
     let center = b.get(Face::Front, (cx * 4 + 1) as u16, (cy * 4 + 1) as u16);
     let under = a.get(Face::Front, (cx * 4 + 1) as u16, (cy * 4 + 1) as u16);
-    assert!(center[2] > center[1] && center[1] > center[0], "not blue-cyan: {center:?}");
-    assert!(center.iter().sum::<f32>() > under.iter().sum::<f32>(), "water darker than bare ground");
+    assert!(
+        center[2] > center[1] && center[1] > center[0],
+        "not blue-cyan: {center:?}"
+    );
+    assert!(
+        center.iter().sum::<f32>() > under.iter().sum::<f32>(),
+        "water darker than bare ground"
+    );
     // The water itself spreads one pixel (the filter); the cell, now a pool, also grows a
     // reed whose 16-px tile reaches up to 9 px from its anchor within ±1 px of the center.
     let center = cell.center(Topology::Cube, Scale::ONE);
@@ -143,15 +180,33 @@ fn deep_water_is_blue_cyan_brighter_than_the_ground_and_local() {
 
 #[test]
 fn a_thin_film_changes_the_ground_by_its_coverage() {
-    let dry = view(3, flat(0.0), flat(0.0), flat(0.0), vec![0.0; CUBE_CELL_COUNT]);
-    let wet = view(3, flat(0.0), flat(0.0), flat(0.05), vec![0.0; CUBE_CELL_COUNT]);
+    let dry = view(
+        3,
+        flat(0.0),
+        flat(0.0),
+        flat(0.0),
+        vec![0.0; CUBE_CELL_COUNT],
+    );
+    let wet = view(
+        3,
+        flat(0.0),
+        flat(0.0),
+        flat(0.05),
+        vec![0.0; CUBE_CELL_COUNT],
+    );
     let a = draw(&dry);
     let b = draw(&wet);
     // Far from the horizon and away from seams, the filtered depth is exactly 0.05.
     let (x, y) = (20u16, 20u16);
     let cover = f64::from(water_coverage(0.05));
-    assert!((cover - (1.0 - (-0.05 / WATER_FILM).exp())).abs() < 1e-6, "{cover}");
-    assert!(cover > 0.05 && cover < 0.25, "a 0.05 film should be faint but visible: {cover}");
+    assert!(
+        (cover - (1.0 - (-0.05 / WATER_FILM).exp())).abs() < 1e-6,
+        "{cover}"
+    );
+    assert!(
+        cover > 0.05 && cover < 0.25,
+        "a 0.05 film should be faint but visible: {cover}"
+    );
     let before = a.get(Face::Front, x, y);
     let after = b.get(Face::Front, x, y);
     // The ground component is scaled by (1 − a): each channel is at most the ground plus
@@ -168,23 +223,55 @@ fn the_shimmer_repeats_on_its_period_and_is_still_within_a_tick() {
     assert!((ticks as f64 * DT - WATER_SHIMMER_SECONDS).abs() < 1e-9);
     // Half a unit deep: solid water, but under the reed line so nothing else animates.
     let water = flat(0.5);
-    let v0 = view(40, flat(0.0), flat(0.0), water.clone(), vec![0.0; CUBE_CELL_COUNT]);
-    let v1 = view(40 + ticks, flat(0.0), flat(0.0), water.clone(), vec![0.0; CUBE_CELL_COUNT]);
-    let vh = view(40 + ticks / 2, flat(0.0), flat(0.0), water, vec![0.0; CUBE_CELL_COUNT]);
+    let v0 = view(
+        40,
+        flat(0.0),
+        flat(0.0),
+        water.clone(),
+        vec![0.0; CUBE_CELL_COUNT],
+    );
+    let v1 = view(
+        40 + ticks,
+        flat(0.0),
+        flat(0.0),
+        water.clone(),
+        vec![0.0; CUBE_CELL_COUNT],
+    );
+    let vh = view(
+        40 + ticks / 2,
+        flat(0.0),
+        flat(0.0),
+        water,
+        vec![0.0; CUBE_CELL_COUNT],
+    );
     let mut p = ArtPresenter::new(pack());
     let a = draw_at(&mut p, &v0, 0.0);
     let a_again = draw_at(&mut p, &v0, 0.0);
     let a_between = draw_at(&mut p, &v0, 0.7);
     let b = draw_at(&mut p, &v1, 0.0);
     let h = draw_at(&mut p, &vh, 0.0);
-    assert!(differing(&a, &a_again).is_empty(), "the same frame must draw the same water");
+    assert!(
+        differing(&a, &a_again).is_empty(),
+        "the same frame must draw the same water"
+    );
     // The shimmer runs on presentation time, which includes the frame fraction: a frame
     // part-way through the tick shows the glints slid part-way, not held.
-    assert!(!differing(&a, &a_between).is_empty(), "the frame fraction must slide the shimmer");
-    assert!(differing(&a, &b).is_empty(), "a whole shimmer period later the water differs");
-    assert!(!differing(&a, &h).is_empty(), "half a period later nothing shimmered");
+    assert!(
+        !differing(&a, &a_between).is_empty(),
+        "the frame fraction must slide the shimmer"
+    );
+    assert!(
+        differing(&a, &b).is_empty(),
+        "a whole shimmer period later the water differs"
+    );
+    assert!(
+        !differing(&a, &h).is_empty(),
+        "half a period later nothing shimmered"
+    );
     let phase = 1.0;
-    assert!((water_brightness(0.0, phase) - water_brightness(ticks as f64 * DT, phase)).abs() < 1e-6);
+    assert!(
+        (water_brightness(0.0, phase) - water_brightness(ticks as f64 * DT, phase)).abs() < 1e-6
+    );
 }
 
 #[test]
@@ -205,12 +292,19 @@ fn reeds_leave_half_of_a_pool_open() {
             }
         }
         for band in [Band::Soil, Band::Foliage, Band::Canopy] {
-            let expected = match rank_cap_of(cell) { 0 => None, cap => Some(cap) };
+            let expected = match rank_cap_of(cell) {
+                0 => None,
+                cap => Some(cap),
+            };
             assert_eq!(plant_cap(band, cell), expected, "{band:?} {cell:?}");
         }
     }
     let share = bare as f64 / CUBE_CELL_COUNT as f64;
-    assert!((0.4..0.6).contains(&share), "{bare} bare of {}", bare + grow);
+    assert!(
+        (0.4..0.6).contains(&share),
+        "{bare} bare of {}",
+        bare + grow
+    );
     // A flooded floor row grows reeds only in its growing slots.
     let mut water = flat(0.0);
     for cx in 0..CELLS_PER_FACE_EDGE as u16 {
@@ -221,7 +315,11 @@ fn reeds_leave_half_of_a_pool_open() {
     p.observe(&v);
     for cx in 0..CELLS_PER_FACE_EDGE as u16 {
         let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Right, cx, 15);
-        assert_eq!(p.stage_of(cell).is_some(), plant_cap(Band::Water, cell).is_some(), "{cell:?}");
+        assert_eq!(
+            p.stage_of(cell).is_some(),
+            plant_cap(Band::Water, cell).is_some(),
+            "{cell:?}"
+        );
     }
 }
 
@@ -254,8 +352,13 @@ fn a_streak_falls_downhill_and_wraps_within_its_cell() {
     // One pixel of fall later the head moved one pixel downhill (−up), still in the cell.
     let one_px = 1.0 / RAIN_SPEED;
     let (x1, y1) = head_at(one_px + 1e-9);
-    let expected_y = i32::from(cell.cy(Topology::Cube, Scale::ONE)) * 4 + (i32::from(dy) + if up.y < 0.0 { 1 } else { -1 }).rem_euclid(4);
-    assert_eq!((i32::from(x1), i32::from(y1)), (i32::from(x0), expected_y), "the streak did not fall one pixel downhill");
+    let expected_y = i32::from(cell.cy(Topology::Cube, Scale::ONE)) * 4
+        + (i32::from(dy) + if up.y < 0.0 { 1 } else { -1 }).rem_euclid(4);
+    assert_eq!(
+        (i32::from(x1), i32::from(y1)),
+        (i32::from(x0), expected_y),
+        "the streak did not fall one pixel downhill"
+    );
     // Every head stays inside the cell's column and the face; the fall wraps; a streak is
     // at most three weighted pixels (head, body, tail) whose weights sum to the 1×2 mark.
     for k in 0..RAIN_MAX_STREAKS {
@@ -264,15 +367,29 @@ fn a_streak_falls_downhill_and_wraps_within_its_cell() {
             let marks = rain_marks(cell, k, seconds);
             assert!(!marks.is_empty() && marks.len() <= 3);
             let head = marks[0].0;
-            assert_eq!(head.0 / 4, cell.cx(Topology::Cube, Scale::ONE), "head left its cell column");
-            assert_eq!(head.1 / 4, cell.cy(Topology::Cube, Scale::ONE), "head left its cell row");
+            assert_eq!(
+                head.0 / 4,
+                cell.cx(Topology::Cube, Scale::ONE),
+                "head left its cell column"
+            );
+            assert_eq!(
+                head.1 / 4,
+                cell.cy(Topology::Cube, Scale::ONE),
+                "head left its cell row"
+            );
             if marks.len() == 3 {
                 let total: f32 = marks.iter().map(|m| m.1).sum();
-                assert!((total - 2.0).abs() < 1e-5, "a whole streak weighs 2, got {total}");
+                assert!(
+                    (total - 2.0).abs() < 1e-5,
+                    "a whole streak weighs 2, got {total}"
+                );
             }
         }
     }
-    assert!((rain_fall(RAIN_PERIOD + 0.1) - RAIN_SPEED * 0.1).abs() < 1e-9, "the fall wraps every period");
+    assert!(
+        (rain_fall(RAIN_PERIOD + 0.1) - RAIN_SPEED * 0.1).abs() < 1e-9,
+        "the fall wraps every period"
+    );
 }
 
 #[test]
@@ -282,8 +399,20 @@ fn top_face_streaks_blink_instead_of_falling() {
     let (dx, dy) = rain_origin(cell, 1);
     let on = rain_marks(cell, 1, 0.01);
     assert!(rain_blink_on(0.01));
-    assert_eq!(on, vec![((cell.cx(Topology::Cube, Scale::ONE) * 4 + u16::from(dx), cell.cy(Topology::Cube, Scale::ONE) * 4 + u16::from(dy)), rain_blink(0.01))]);
-    assert!(rain_blink(0.01) > 0.0 && rain_blink(0.01) < 1.0, "a sparkle swells rather than switching on");
+    assert_eq!(
+        on,
+        vec![(
+            (
+                cell.cx(Topology::Cube, Scale::ONE) * 4 + u16::from(dx),
+                cell.cy(Topology::Cube, Scale::ONE) * 4 + u16::from(dy)
+            ),
+            rain_blink(0.01)
+        )]
+    );
+    assert!(
+        rain_blink(0.01) > 0.0 && rain_blink(0.01) < 1.0,
+        "a sparkle swells rather than switching on"
+    );
     let off_time = RAIN_BLINK + 0.01;
     assert!(!rain_blink_on(off_time));
     assert!(rain_marks(cell, 1, off_time).is_empty());
@@ -291,7 +420,13 @@ fn top_face_streaks_blink_instead_of_falling() {
 
 #[test]
 fn rain_adds_a_few_pixels_in_its_cell_and_nothing_without_rain() {
-    let dry = view(12, flat(0.0), flat(0.0), flat(0.0), vec![0.0; CUBE_CELL_COUNT]);
+    let dry = view(
+        12,
+        flat(0.0),
+        flat(0.0),
+        flat(0.0),
+        vec![0.0; CUBE_CELL_COUNT],
+    );
     let mut rain = vec![0.0f32; CUBE_CELL_COUNT];
     let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 6, 4);
     rain[cell.index()] = 1.0;
@@ -302,12 +437,27 @@ fn rain_adds_a_few_pixels_in_its_cell_and_nothing_without_rain() {
     let diff = differing(&a, &b);
     assert!(!diff.is_empty(), "rain drew nothing");
     // A streak sliding between pixels touches up to three of them.
-    assert!(diff.len() <= 3 * RAIN_DENSITY.ceil() as usize, "{} pixels for one raining cell", diff.len());
+    assert!(
+        diff.len() <= 3 * RAIN_DENSITY.ceil() as usize,
+        "{} pixels for one raining cell",
+        diff.len()
+    );
     for (f, x, y) in &diff {
         assert_eq!(*f, Face::Front);
-        let c = cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, *f, *x, *y));
+        let c = cell_of(
+            Topology::Cube,
+            Scale::ONE,
+            &SurfacePoint::pixel_center(Topology::Cube, *f, *x, *y),
+        );
         assert!(
-            (i32::from(c.cx(Topology::Cube, Scale::ONE)) - i32::from(cell.cx(Topology::Cube, Scale::ONE))).abs() <= 0 && (i32::from(c.cy(Topology::Cube, Scale::ONE)) - i32::from(cell.cy(Topology::Cube, Scale::ONE))).abs() <= 1,
+            (i32::from(c.cx(Topology::Cube, Scale::ONE))
+                - i32::from(cell.cx(Topology::Cube, Scale::ONE)))
+            .abs()
+                <= 0
+                && (i32::from(c.cy(Topology::Cube, Scale::ONE))
+                    - i32::from(cell.cy(Topology::Cube, Scale::ONE)))
+                .abs()
+                    <= 1,
             "({x}, {y}) is not in the raining cell's column"
         );
     }
@@ -315,11 +465,20 @@ fn rain_adds_a_few_pixels_in_its_cell_and_nothing_without_rain() {
     // draws a different image, and the frame fraction advances the fall continuously.
     let mut next = raining.clone();
     next.tick += 1;
-    assert!(!differing(&b, &draw_at(&mut p, &next, 0.0)).is_empty(), "a tick later the rain has not moved");
+    assert!(
+        !differing(&b, &draw_at(&mut p, &next, 0.0)).is_empty(),
+        "a tick later the rain has not moved"
+    );
     let t = 12.0 * DT;
     assert!((rain_fall(t + 0.5 * DT) - rain_fall(t) - 0.5 * RAIN_SPEED * DT).abs() < 1e-9);
     // Zero rain draws exactly the dry image.
-    let none = view(12, flat(0.0), flat(0.0), flat(0.0), vec![0.0; CUBE_CELL_COUNT]);
+    let none = view(
+        12,
+        flat(0.0),
+        flat(0.0),
+        flat(0.0),
+        vec![0.0; CUBE_CELL_COUNT],
+    );
     assert!(differing(&a, &draw_at(&mut p, &none, 0.0)).is_empty());
 }
 
@@ -359,14 +518,22 @@ fn ground_opacity_starts_at_the_first_threshold_and_saturates() {
 fn each_band_lays_its_own_tile_at_the_lattice_point() {
     let art = pack();
     // A lattice point deep in the soil of Front, one on the canopy.
-    let soil_point = ground_points(Face::Front).find(|&(_, _, y)| y >= 56).expect("a soil point");
-    let canopy_point = ground_points(Face::Top).find(|&(_, x, y)| x == 28 && y == 28).expect("a canopy point");
+    let soil_point = ground_points(Face::Front)
+        .find(|&(_, _, y)| y >= 56)
+        .expect("a soil point");
+    let canopy_point = ground_points(Face::Top)
+        .find(|&(_, x, y)| x == 28 && y == 28)
+        .expect("a canopy point");
     for (point, band, detritus, producer) in [
         (soil_point, Band::Soil, 1.5, 0.0),
         (canopy_point, Band::Canopy, 0.0, saturation()),
     ] {
         let (face, x, y) = point;
-        let cell = cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y));
+        let cell = cell_of(
+            Topology::Cube,
+            Scale::ONE,
+            &SurfacePoint::pixel_center(Topology::Cube, face, x, y),
+        );
         assert_eq!(band_of(cell), band);
         let mut d = flat(0.0);
         let mut pr = flat(0.0);
@@ -390,8 +557,20 @@ fn each_band_lays_its_own_tile_at_the_lattice_point() {
         assert!(opacity > 0.0);
         let mut expected = a.clone();
         let mut scratch: Vec<PixelImage> = Vec::new();
-        stamp_pose(&mut expected, SurfacePoint::pixel_center(Topology::Cube, face, x, y), Vec2::new(1.0, 0.0), pose, 1.0, opacity, Mask::None, &mut scratch);
-        assert!(!differing(&a, &expected).is_empty(), "{band:?} tile painted nothing");
+        stamp_pose(
+            &mut expected,
+            SurfacePoint::pixel_center(Topology::Cube, face, x, y),
+            Vec2::new(1.0, 0.0),
+            pose,
+            1.0,
+            opacity,
+            Mask::None,
+            &mut scratch,
+        );
+        assert!(
+            !differing(&a, &expected).is_empty(),
+            "{band:?} tile painted nothing"
+        );
         let t = plant_density(&rich, cell.index(), band);
         if let Some(stage) = next_stage(None, t, &stage_thresholds(band), rank_cap_of(cell)) {
             let plant = art.plant(species_of(band, cell)).expect("plant");
@@ -401,8 +580,12 @@ fn each_band_lays_its_own_tile_at_the_lattice_point() {
             let po = stage_opacity(stage, t, &stage_thresholds(band), band_opacity(band));
             // The slot's share of the shared breeze: a bend on a side face, a rotation
             // about the stationary centre on the top one.
-            let (bend, heading) =
-                slot_wind(&slot_of(cell), &plant.name, plant_bend_budget(plant), seconds);
+            let (bend, heading) = slot_wind(
+                &slot_of(cell),
+                &plant.name,
+                plant_bend_budget(plant),
+                seconds,
+            );
             stamp_layers_bent(
                 &mut expected,
                 at,
@@ -416,23 +599,51 @@ fn each_band_lays_its_own_tile_at_the_lattice_point() {
             );
         }
         let diff = differing(&b, &expected);
-        assert!(diff.is_empty(), "{band:?}: {} pixels differ from tile-then-plant, first {:?}", diff.len(), diff.first());
+        assert!(
+            diff.is_empty(),
+            "{band:?}: {} pixels differ from tile-then-plant, first {:?}",
+            diff.len(),
+            diff.first()
+        );
         // The other bands' tiles at the same point would be a different image.
-        let other = art.ground_for(if band == Band::Soil { Band::Canopy } else { Band::Soil }).unwrap();
+        let other = art
+            .ground_for(if band == Band::Soil {
+                Band::Canopy
+            } else {
+                Band::Soil
+            })
+            .unwrap();
         let mut wrong = a.clone();
         let wf = ground_pose(other, seconds + ground_phase_of(face, x, y, other.seconds));
-        stamp_pose(&mut wrong, SurfacePoint::pixel_center(Topology::Cube, face, x, y), Vec2::new(1.0, 0.0), wf, 1.0, opacity, Mask::None, &mut scratch);
-        assert!(!differing(&wrong, &expected).is_empty() || differing(&a, &wrong).is_empty(), "the two tiles draw alike");
+        stamp_pose(
+            &mut wrong,
+            SurfacePoint::pixel_center(Topology::Cube, face, x, y),
+            Vec2::new(1.0, 0.0),
+            wf,
+            1.0,
+            opacity,
+            Mask::None,
+            &mut scratch,
+        );
+        assert!(
+            !differing(&wrong, &expected).is_empty() || differing(&a, &wrong).is_empty(),
+            "the two tiles draw alike"
+        );
     }
 }
 
 #[test]
 fn ground_cover_is_absent_in_a_quiet_world() {
-    let quiet = flat(saturation() * (FOLIAGE_STAGES[0].min(stage_thresholds(Band::Canopy)[0]) - 0.01));
+    let quiet =
+        flat(saturation() * (FOLIAGE_STAGES[0].min(stage_thresholds(Band::Canopy)[0]) - 0.01));
     let v = view(2, quiet, flat(0.0), flat(0.0), vec![0.0; CUBE_CELL_COUNT]);
     for face in Face::ALL {
         for (face, x, y) in ground_points(face) {
-            let cell = cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y));
+            let cell = cell_of(
+                Topology::Cube,
+                Scale::ONE,
+                &SurfacePoint::pixel_center(Topology::Cube, face, x, y),
+            );
             let band = band_of(cell);
             let t = cubarium::art_present::ground_density(&v, cell.index(), band);
             assert_eq!(ground_opacity(t, band), 0.0, "{face:?} ({x}, {y})");
@@ -460,7 +671,11 @@ fn tall_columns_are_a_deterministic_fifth_of_the_side_columns_and_never_on_top()
         assert!(tall_column_of(Face::Top, cx).is_none());
     }
     let share = columns.len() as f64 / (4 * CELLS_PER_FACE_EDGE) as f64;
-    assert!((share - TALL_COLUMN_P).abs() <= 0.06, "{} columns = {share}", columns.len());
+    assert!(
+        (share - TALL_COLUMN_P).abs() <= 0.06,
+        "{} columns = {share}",
+        columns.len()
+    );
     assert!(columns.iter().any(|c| c.pick == 0) && columns.iter().any(|c| c.pick == 1));
 }
 
@@ -481,7 +696,12 @@ fn column_height_follows_the_foliage_density_with_hysteresis() {
     assert_eq!(tall_target(tall_rise(5)), 5);
     assert_eq!(tall_target(1.0), TALL_MAX_SEGMENTS);
     assert_eq!(tall_target(f64::NAN), 0);
-    const { assert!(TALL_HYST > 0.5 * TALL_STEP && TALL_HYST < TALL_STEP, "one segment below holds, two let go") };
+    const {
+        assert!(
+            TALL_HYST > 0.5 * TALL_STEP && TALL_HYST < TALL_STEP,
+            "one segment below holds, two let go"
+        )
+    };
     // Rises at once, holds one segment below, falls at two, idempotent.
     let level = |n: u8| FOLIAGE_STAGES[0] + TALL_STEP * f64::from(n);
     assert_eq!(next_tall(0, level(5)), 5);
@@ -489,62 +709,118 @@ fn column_height_follows_the_foliage_density_with_hysteresis() {
     assert_eq!(next_tall(5, level(3)), 4, "two below falls");
     assert_eq!(next_tall(4, level(3)), 4);
     assert_eq!(next_tall(next_tall(5, level(3)), level(3)), 4);
-    assert_eq!(next_tall(7, 0.0), 0, "a bare column falls all the way in one tick");
+    assert_eq!(
+        next_tall(7, 0.0),
+        0,
+        "a bare column falls all the way in one tick"
+    );
     assert_eq!(next_tall(3, f64::NAN), 0);
     // Against a view: a saturated column reaches the max; a bare one nothing.
     let face = Face::Right;
-    let rich = view(0, flat(saturation()), flat(0.0), flat(0.0), vec![0.0; CUBE_CELL_COUNT]);
+    let rich = view(
+        0,
+        flat(saturation()),
+        flat(0.0),
+        flat(0.0),
+        vec![0.0; CUBE_CELL_COUNT],
+    );
     assert!((column_density(&rich, face, 3) - 1.0).abs() < 1e-9);
-    let bare = view(0, flat(0.0), flat(0.0), flat(0.0), vec![0.0; CUBE_CELL_COUNT]);
+    let bare = view(
+        0,
+        flat(0.0),
+        flat(0.0),
+        flat(0.0),
+        vec![0.0; CUBE_CELL_COUNT],
+    );
     assert_eq!(column_density(&bare, face, 3), 0.0);
 }
 
 #[test]
 fn a_full_column_stacks_to_the_rim_and_its_crown_reaches_the_top_face() {
     let art = pack();
-    let column = tall_columns().into_iter().find(|c| c.face == Face::Front).expect("a front column");
+    let column = tall_columns()
+        .into_iter()
+        .find(|c| c.face == Face::Front)
+        .expect("a front column");
     let plant = art.tall_plant(TALL_PLANTS[column.pick]).expect("species");
     assert!(plant.crown.is_some());
     // The anchors climb the face 4 px at a time from the horizon cell's center.
     let base = tall_anchor(column.face, column.cx, 0);
-    let horizon = CellId::new(Topology::Cube, Scale::ONE, column.face, column.cx, 10).center(Topology::Cube, Scale::ONE);
+    let horizon = CellId::new(Topology::Cube, Scale::ONE, column.face, column.cx, 10)
+        .center(Topology::Cube, Scale::ONE);
     assert!((base.u - horizon.u).abs() < 1e-9 && (base.v - horizon.v).abs() < 1e-9);
     for i in 1..=TALL_MAX_SEGMENTS + 1 {
         let a = tall_anchor(column.face, column.cx, i - 1);
         let b = tall_anchor(column.face, column.cx, i);
         let step = ((b.u - a.u).powi(2) + (b.v - a.v).powi(2)).sqrt();
         assert!((step - 4.0).abs() < 1e-9);
-        assert!(Topology::Cube.embed(Scale::ONE, &b)[1] > Topology::Cube.embed(Scale::ONE, &a)[1], "tile {i} is not higher than tile {}", i - 1);
+        assert!(
+            Topology::Cube.embed(Scale::ONE, &b)[1] > Topology::Cube.embed(Scale::ONE, &a)[1],
+            "tile {i} is not higher than tile {}",
+            i - 1
+        );
     }
     let crown = tall_anchor(column.face, column.cx, TALL_MAX_SEGMENTS + 1);
-    let rim = CellId::new(Topology::Cube, Scale::ONE, column.face, column.cx, 0).center(Topology::Cube, Scale::ONE);
-    assert!((crown.u - rim.u).abs() < 1e-9 && (crown.v - rim.v).abs() < 1e-9, "the crown sits on the rim cell");
+    let rim = CellId::new(Topology::Cube, Scale::ONE, column.face, column.cx, 0)
+        .center(Topology::Cube, Scale::ONE);
+    assert!(
+        (crown.u - rim.u).abs() < 1e-9 && (crown.v - rim.v).abs() < 1e-9,
+        "the crown sits on the rim cell"
+    );
 
     // Only this column's cells are rich, so only it grows; the crown lights the top face.
     let mut producer = flat(0.0);
     for cy in 0..=10u16 {
-        producer[CellId::new(Topology::Cube, Scale::ONE, column.face, column.cx, cy).index()] = saturation();
+        producer[CellId::new(Topology::Cube, Scale::ONE, column.face, column.cx, cy).index()] =
+            saturation();
     }
     // Inside a wind packet's quiet interval, where the shared breeze is exactly zero, so
     // what this test measures is the column's own pulse and nothing else.
     let quiet = WIND_QUIET_TICK;
-    let v = view(quiet, producer, flat(0.0), flat(0.0), vec![0.0; CUBE_CELL_COUNT]);
+    let v = view(
+        quiet,
+        producer,
+        flat(0.0),
+        flat(0.0),
+        vec![0.0; CUBE_CELL_COUNT],
+    );
     let mut p = ArtPresenter::new(pack());
     let with = draw_at(&mut p, &v, 0.0);
     let index = p.columns().iter().position(|c| *c == column).unwrap();
     assert_eq!(p.segments_of(index), TALL_MAX_SEGMENTS);
-    let bare = draw(&view(quiet, flat(0.0), flat(0.0), flat(0.0), vec![0.0; CUBE_CELL_COUNT]));
+    let bare = draw(&view(
+        quiet,
+        flat(0.0),
+        flat(0.0),
+        flat(0.0),
+        vec![0.0; CUBE_CELL_COUNT],
+    ));
     let diff = differing(&bare, &with);
-    assert!(diff.iter().any(|&(f, _, _)| f == Face::Top), "the crown did not reach the top face");
-    assert!(diff.iter().any(|&(f, _, y)| f == column.face && y > 44), "the base did not reach below the horizon");
+    assert!(
+        diff.iter().any(|&(f, _, _)| f == Face::Top),
+        "the crown did not reach the top face"
+    );
+    assert!(
+        diff.iter().any(|&(f, _, y)| f == column.face && y > 44),
+        "the base did not reach below the horizon"
+    );
     // Nothing on the other side faces.
-    assert!(diff.iter().all(|&(f, _, _)| f == Face::Top || f == column.face), "another face changed");
+    assert!(
+        diff.iter()
+            .all(|&(f, _, _)| f == Face::Top || f == column.face),
+        "another face changed"
+    );
     // Two draws of one frame agree; a frame part-way through the tick has moved (the pulse
     // runs on presentation time); a column period later the pulse repeats.
     let again = draw_at(&mut p, &v, 0.0);
     assert!(differing(&with, &again).is_empty());
-    assert!(!differing(&with, &draw_at(&mut p, &v, 0.3)).is_empty(), "the frame fraction must move the pulse");
-    fn gcd(a: u64, b: u64) -> u64 { if b == 0 { a } else { gcd(b, a % b) } }
+    assert!(
+        !differing(&with, &draw_at(&mut p, &v, 0.3)).is_empty(),
+        "the frame fraction must move the pulse"
+    );
+    fn gcd(a: u64, b: u64) -> u64 {
+        if b == 0 { a } else { gcd(b, a % b) }
+    }
     let mut period = (plant.trunk.seconds / DT).round() as u64;
     for tile in &art.ground {
         let g = (tile.seconds / DT).round() as u64;
@@ -554,8 +830,17 @@ fn a_full_column_stacks_to_the_rim_and_its_crown_reaches_the_top_face() {
         let g = (plant.stages[2].seconds / DT).round() as u64;
         period = period / gcd(period, g) * g;
     }
-    let later = view(quiet + period, v.producer.clone(), flat(0.0), flat(0.0), vec![0.0; CUBE_CELL_COUNT]);
-    assert!(differing(&with, &draw_at(&mut p, &later, 0.0)).is_empty(), "the pulse did not repeat");
+    let later = view(
+        quiet + period,
+        v.producer.clone(),
+        flat(0.0),
+        flat(0.0),
+        vec![0.0; CUBE_CELL_COUNT],
+    );
+    assert!(
+        differing(&with, &draw_at(&mut p, &later, 0.0)).is_empty(),
+        "the pulse did not repeat"
+    );
 }
 
 #[test]
@@ -567,9 +852,16 @@ fn a_bare_column_draws_nothing_tall_and_hysteresis_holds_one_segment() {
     let column_view = |t: f64| {
         let mut producer = flat(0.0);
         for cy in 0..=10u16 {
-            producer[CellId::new(Topology::Cube, Scale::ONE, column.face, column.cx, cy).index()] = saturation() * t;
+            producer[CellId::new(Topology::Cube, Scale::ONE, column.face, column.cx, cy).index()] =
+                saturation() * t;
         }
-        view(1, producer, flat(0.0), flat(0.0), vec![0.0; CUBE_CELL_COUNT])
+        view(
+            1,
+            producer,
+            flat(0.0),
+            flat(0.0),
+            vec![0.0; CUBE_CELL_COUNT],
+        )
     };
     p.observe(&column_view(0.0));
     assert_eq!(p.segments_of(index), 0);
@@ -607,23 +899,48 @@ fn a_pool_with_a_mat_leans_mint_and_a_bare_pool_stays_blue() {
     let bare = algae_water_color(1.0, 0.0);
     assert_eq!(bare, water_color(1.0));
     let mat = algae_water_color(1.0, 1.0);
-    assert!(mat[1] > bare[1], "green rises with a mat: {mat:?} vs {bare:?}");
-    assert!(mat[2] / mat[1] < bare[2] / bare[1], "blue falls relative to green");
-    assert_eq!(algae_water_color(1.0, 7.0), algae_water_color(1.0, 1.0), "density clamps at 1");
+    assert!(
+        mat[1] > bare[1],
+        "green rises with a mat: {mat:?} vs {bare:?}"
+    );
+    assert!(
+        mat[2] / mat[1] < bare[2] / bare[1],
+        "blue falls relative to green"
+    );
+    assert_eq!(
+        algae_water_color(1.0, 7.0),
+        algae_water_color(1.0, 1.0),
+        "density clamps at 1"
+    );
 
     // Drawn: a wet soil cell with producers is greener than the same cell bare.
     let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 13);
     let mut water = flat(0.0);
     water[cell.index()] = 1.0;
-    let bare_view = view(3, flat(0.0), flat(0.0), water.clone(), vec![0.0; CUBE_CELL_COUNT]);
+    let bare_view = view(
+        3,
+        flat(0.0),
+        flat(0.0),
+        water.clone(),
+        vec![0.0; CUBE_CELL_COUNT],
+    );
     let mut producer = flat(0.0);
     producer[cell.index()] = 0.5 * PRODUCER_MAX * PRODUCER_SATURATION;
     let mat_view = view(3, producer, flat(0.0), water, vec![0.0; CUBE_CELL_COUNT]);
     let a = draw(&bare_view);
     let b = draw(&mat_view);
-    let (x, y) = (cell.cx(Topology::Cube, Scale::ONE) * 4 + 1, cell.cy(Topology::Cube, Scale::ONE) * 4 + 1);
+    let (x, y) = (
+        cell.cx(Topology::Cube, Scale::ONE) * 4 + 1,
+        cell.cy(Topology::Cube, Scale::ONE) * 4 + 1,
+    );
     let bare_px = a.get(Face::Front, x, y);
     let mat_px = b.get(Face::Front, x, y);
-    assert!(mat_px[1] > bare_px[1], "greener with algae: {mat_px:?} vs {bare_px:?}");
-    assert!(mat_px[2] / mat_px[1] < bare_px[2] / bare_px[1], "relatively less blue");
+    assert!(
+        mat_px[1] > bare_px[1],
+        "greener with algae: {mat_px:?} vs {bare_px:?}"
+    );
+    assert!(
+        mat_px[2] / mat_px[1] < bare_px[2] / bare_px[1],
+        "relatively less blue"
+    );
 }

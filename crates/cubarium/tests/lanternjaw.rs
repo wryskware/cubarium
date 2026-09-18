@@ -30,11 +30,11 @@
 //! correct geometry. `heading_minus_x_is_a_half_turn_about_the_anchor` tests the half turn and
 //! records that the column mirror does *not* hold.
 
-use cubarium_surface::Topology;
-use cube_proto::Face;
 use cubarium::lanternjaw::*;
 use cubarium_render::{Canvas, RigPart, Sprite, rig_radius, stamp_rig};
+use cubarium_surface::Topology;
 use cubarium_surface::{SurfacePoint, Vec2};
+use cube_proto::Face;
 
 // ---------------------------------------------------------------------------
 // sampling and canvas helpers
@@ -59,7 +59,11 @@ fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
 
 fn assert_identical(a: &Canvas, b: &Canvas, what: &str) {
     if let Some((f, x, y)) = every_pixel().find(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y)) {
-        panic!("{what}: ({f:?}, {x}, {y}) is {:?} vs {:?}", a.get(f, x, y), b.get(f, x, y));
+        panic!(
+            "{what}: ({f:?}, {x}, {y}) is {:?} vs {:?}",
+            a.get(f, x, y),
+            b.get(f, x, y)
+        );
     }
 }
 
@@ -122,14 +126,29 @@ fn stamp_only(
     opacity: f32,
     background: [f32; 3],
 ) -> Canvas {
-    let rig: Vec<RigPart<'_>> =
-        parts.iter().filter(|p| keep.contains(&p.name)).map(Part::rig_part).collect();
+    let rig: Vec<RigPart<'_>> = parts
+        .iter()
+        .filter(|p| keep.contains(&p.name))
+        .map(Part::rig_part)
+        .collect();
     let mut canvas = filled(background);
-    stamp_rig(&mut canvas, anchor, heading, &[(&rig[..], 1.0)], opacity, &mut Vec::new());
+    stamp_rig(
+        &mut canvas,
+        anchor,
+        heading,
+        &[(&rig[..], 1.0)],
+        opacity,
+        &mut Vec::new(),
+    );
     canvas
 }
 
-const HULL: [PartName; 4] = [PartName::Tail, PartName::Abdomen, PartName::Thorax, PartName::Head];
+const HULL: [PartName; 4] = [
+    PartName::Tail,
+    PartName::Abdomen,
+    PartName::Thorax,
+    PartName::Head,
+];
 
 /// The parts that share the **body lattice** per the module doc: "The hull pieces, the underside
 /// and the glow … their `offset`s and their sprites' pivots have integer coordinates".
@@ -143,7 +162,10 @@ const ON_LATTICE: [PartName; 6] = [
 ];
 
 fn part_of<'a>(parts: &'a [Part], name: PartName) -> &'a Part {
-    parts.iter().find(|p| p.name == name).expect("every frame carries every part")
+    parts
+        .iter()
+        .find(|p| p.name == name)
+        .expect("every frame carries every part")
 }
 
 /// The body-local centre of texel `(tx, ty)` of `part`: `offset + (texel centre − pivot)`, the
@@ -212,8 +234,7 @@ fn hunt_reference(t_h: f64) -> HuntState {
         s.lunge = 1.1 * (1.0 - u);
     }
     if t_h >= T_SNAP {
-        s.charge =
-            (-(t_h - T_SNAP) / 0.9).exp() * smoothstep((HUNT_PERIOD - t_h) / 0.6);
+        s.charge = (-(t_h - T_SNAP) / 0.9).exp() * smoothstep((HUNT_PERIOD - t_h) / 0.6);
     }
     s.accent = envelope_reference((t_h - (T_SNAP - 0.02)) / ACCENT_SECONDS);
     s.blink = envelope_reference((t_h - (T_END + 0.3)) / BLINK_SECONDS);
@@ -310,14 +331,23 @@ fn the_accent_envelope_is_the_studys_raised_cosine() {
             envelope_reference(u)
         );
         // Symmetric about the middle of its window.
-        assert!((v - envelope(1.0 - u)).abs() < 1e-12, "envelope is not symmetric at {u}");
+        assert!(
+            (v - envelope(1.0 - u)).abs() < 1e-12,
+            "envelope is not symmetric at {u}"
+        );
     }
     // Zero slope at both ends: the first and last hundredth move far less than the steepest
     // hundredth in the middle of a ramp.
     let step = |u: f64| (envelope(u + 0.01) - envelope(u)).abs();
     let steep = step(0.2);
-    assert!(step(0.0) < steep / 10.0, "the envelope has a kink at its start");
-    assert!(step(0.99) < steep / 10.0, "the envelope has a kink at its end");
+    assert!(
+        step(0.0) < steep / 10.0,
+        "the envelope has a kink at its start"
+    );
+    assert!(
+        step(0.99) < steep / 10.0,
+        "the envelope has a kink at its end"
+    );
 }
 
 /// `hunt_state` is the study's `huntState`, "unrounded": the coil's smoothstep, the snap's cubic
@@ -328,8 +358,24 @@ fn the_accent_envelope_is_the_studys_raised_cosine() {
 #[test]
 fn the_hunt_schedule_is_the_studys_hunt_state() {
     let probes = [
-        0.0, 1.0, 3.0, T_COIL, 3.16, T_SNAP - 1e-9, T_SNAP, 3.28, T_OPEN - 1e-9, T_OPEN, 3.44,
-        T_END - 1e-9, T_END, 3.84, 4.5, 5.9, 5.999, HUNT_PERIOD - 1e-9,
+        0.0,
+        1.0,
+        3.0,
+        T_COIL,
+        3.16,
+        T_SNAP - 1e-9,
+        T_SNAP,
+        3.28,
+        T_OPEN - 1e-9,
+        T_OPEN,
+        3.44,
+        T_END - 1e-9,
+        T_END,
+        3.84,
+        4.5,
+        5.9,
+        5.999,
+        HUNT_PERIOD - 1e-9,
     ];
     for t in probes {
         let got = hunt_state(t);
@@ -354,9 +400,18 @@ fn the_hunt_schedule_is_the_studys_hunt_state() {
 
     // The named beats really are what the schedule says: cocked at the coil, fully extended at
     // full extension, folded and quiet again by the end.
-    assert!(hunt_state(3.0).reach == 0.0 && hunt_state(3.0).lunge == 0.0, "stalking is still");
-    assert!(hunt_state(3.16).reach < -0.1, "the coil pulls the limbs back");
-    assert!((hunt_state(T_OPEN).reach - 1.0).abs() < 1e-9, "full extension is reach 1");
+    assert!(
+        hunt_state(3.0).reach == 0.0 && hunt_state(3.0).lunge == 0.0,
+        "stalking is still"
+    );
+    assert!(
+        hunt_state(3.16).reach < -0.1,
+        "the coil pulls the limbs back"
+    );
+    assert!(
+        (hunt_state(T_OPEN).reach - 1.0).abs() < 1e-9,
+        "full extension is reach 1"
+    );
     assert_eq!(hunt_state(T_END).reach, 0.0, "the recoil ends folded");
     // "forced to zero before the cycle wraps so the loop has no step".
     assert!(
@@ -368,7 +423,10 @@ fn the_hunt_schedule_is_the_studys_hunt_state() {
     assert_eq!(hunt_state(T_SNAP - 0.02).accent, 0.0);
     assert!(hunt_state(T_SNAP + 0.1).accent > 0.5);
     assert_eq!(hunt_state(T_SNAP - 0.02 + ACCENT_SECONDS).accent, 0.0);
-    assert!(T_SNAP - 0.02 + ACCENT_SECONDS < T_END, "the accent ends before the recoil does");
+    assert!(
+        T_SNAP - 0.02 + ACCENT_SECONDS < T_END,
+        "the accent ends before the recoil does"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -395,7 +453,10 @@ fn every_frame_carries_the_eight_parts_in_painting_order_at_their_own_layers() {
             rig.parts(seconds, mode, &mut out);
             assert_eq!(out.len(), 8, "{mode:?} at {seconds}: {} parts", out.len());
             for (part, name) in out.iter().zip(PartName::ALL) {
-                assert_eq!(part.name, name, "{mode:?} at {seconds}: out of painting order");
+                assert_eq!(
+                    part.name, name,
+                    "{mode:?} at {seconds}: out of painting order"
+                );
                 assert_eq!(
                     part.rig_part().layer,
                     name.layer(),
@@ -410,13 +471,20 @@ fn every_frame_carries_the_eight_parts_in_painting_order_at_their_own_layers() {
     assert_eq!(PartName::FarLimb.layer(), 0);
     assert_eq!(PartName::Underside.layer(), 1);
     for hull in HULL {
-        assert_eq!(hull.layer(), 2, "{hull:?} is a hull piece and must share one layer");
+        assert_eq!(
+            hull.layer(),
+            2,
+            "{hull:?} is a hull piece and must share one layer"
+        );
     }
     assert_eq!(PartName::Glow.layer(), 3);
     assert_eq!(PartName::NearLimb.layer(), 4);
     // Ascending painting order is ascending depth.
     let layers: Vec<u8> = PartName::ALL.into_iter().map(PartName::layer).collect();
-    assert!(layers.windows(2).all(|w| w[0] <= w[1]), "painting order must ascend in depth: {layers:?}");
+    assert!(
+        layers.windows(2).all(|w| w[0] <= w[1]),
+        "painting order must ascend in depth: {layers:?}"
+    );
 }
 
 /// The **body lattice** rule: "The hull pieces, the underside and the glow share the body
@@ -436,9 +504,7 @@ fn the_hull_the_underside_and_the_glow_stay_on_the_body_lattice() {
         for seconds in frames() {
             rig.parts(seconds, mode, &mut out);
             for part in out.iter().filter(|p| ON_LATTICE.contains(&p.name)) {
-                for (label, v) in
-                    [("offset", part.offset), ("pivot", part.sprite.pivot())]
-                {
+                for (label, v) in [("offset", part.offset), ("pivot", part.sprite.pivot())] {
                     assert_eq!(
                         (v.x.fract(), v.y.fract()),
                         (0.0, 0.0),
@@ -551,7 +617,10 @@ fn every_frame_of_every_mode_holds_the_footprint_the_extent_and_the_query_radius
         worst_x.0 < -8.0 && worst_x.1 > 8.0,
         "the sweep only reached body x {worst_x:?}; the hull alone spans −9 … +8"
     );
-    assert!(worst_y.0 < -2.0 && worst_y.1 > 2.0, "the sweep only reached body y {worst_y:?}");
+    assert!(
+        worst_y.0 < -2.0 && worst_y.1 > 2.0,
+        "the sweep only reached body y {worst_y:?}"
+    );
     eprintln!(
         "footprint over 4 modes x {SWEEP_SECONDS} s at {FPS} fps: x {worst_x:?} y {worst_y:?}, \
          extent {worst_extent:.3} / {PART_EXTENT_MAX}, radius {worst_radius:.3} / \
@@ -610,13 +679,43 @@ fn parts_and_draw_are_pure_functions_of_the_time_and_the_mode() {
         let mut scratch = Vec::new();
         let mut first = filled([0.03, 0.02, 0.07]);
         let mut second = filled([0.03, 0.02, 0.07]);
-        rig.draw(&mut first, anchor, Vec2::new(0.6, -0.8), 3.32, Mode::Hunt, 0.9, &mut parts, &mut scratch);
+        rig.draw(
+            &mut first,
+            anchor,
+            Vec2::new(0.6, -0.8),
+            3.32,
+            Mode::Hunt,
+            0.9,
+            &mut parts,
+            &mut scratch,
+        );
         // Draw something else with the same buffers, then repeat the original.
         let mut junk = Canvas::cube();
-        rig.draw(&mut junk, mid(), forward(), 1.0, Mode::Bud, 1.0, &mut parts, &mut scratch);
-        rig.draw(&mut second, anchor, Vec2::new(0.6, -0.8), 3.32, Mode::Hunt, 0.9, &mut parts, &mut scratch);
+        rig.draw(
+            &mut junk,
+            mid(),
+            forward(),
+            1.0,
+            Mode::Bud,
+            1.0,
+            &mut parts,
+            &mut scratch,
+        );
+        rig.draw(
+            &mut second,
+            anchor,
+            Vec2::new(0.6, -0.8),
+            3.32,
+            Mode::Hunt,
+            0.9,
+            &mut parts,
+            &mut scratch,
+        );
         assert_identical(&first, &second, &format!("a repeated draw at {what}"));
-        assert!(max_diff(&first, &filled([0.03, 0.02, 0.07])) > 0.01, "{what}: nothing was drawn");
+        assert!(
+            max_diff(&first, &filled([0.03, 0.02, 0.07])) > 0.01,
+            "{what}: nothing was drawn"
+        );
     }
 }
 
@@ -625,7 +724,12 @@ fn assert_parts_identical(a: &[Part], b: &[Part], what: &str) {
     for (p, q) in a.iter().zip(b) {
         assert_eq!(p.name, q.name, "{what}");
         assert_eq!(p.offset, q.offset, "{what}: {:?}'s offset", p.name);
-        assert_eq!(p.sprite.pivot(), q.sprite.pivot(), "{what}: {:?}'s pivot", p.name);
+        assert_eq!(
+            p.sprite.pivot(),
+            q.sprite.pivot(),
+            "{what}: {:?}'s pivot",
+            p.name
+        );
         assert_eq!(
             (p.sprite.width(), p.sprite.height()),
             (q.sprite.width(), q.sprite.height()),
@@ -736,8 +840,14 @@ fn the_warm_strike_accent_appears_only_inside_the_hunts_strike_envelope() {
             warm_frames.push((t, w));
         }
     }
-    assert!(peak > 0.2, "the accent never reached its plateau: peak {peak}");
-    assert!(!warm_frames.is_empty(), "the hunt never showed the warm accent at all");
+    assert!(
+        peak > 0.2,
+        "the accent never reached its plateau: peak {peak}"
+    );
+    assert!(
+        !warm_frames.is_empty(),
+        "the hunt never showed the warm accent at all"
+    );
     for &(t, w) in &warm_frames {
         assert!(
             t > T_SNAP - 0.02 && t < T_SNAP - 0.02 + ACCENT_SECONDS,
@@ -756,7 +866,10 @@ fn the_warm_strike_accent_appears_only_inside_the_hunts_strike_envelope() {
         "the accent showed on only {} frames of a 240 ms envelope",
         warm_frames.len()
     );
-    assert!(easing >= 4, "only {easing} of the accent's frames are part-way up its ramp");
+    assert!(
+        easing >= 4,
+        "only {easing} of the accent's frames are part-way up its ramp"
+    );
     eprintln!(
         "strike accent: {} warm frames from {:.3} to {:.3} s, peak {peak:.3}, {easing} easing",
         warm_frames.len(),
@@ -825,7 +938,10 @@ fn the_blink_eases_through_intermediate_values_at_sixty_frames_a_second() {
             "{mode:?}: only {middle} frames of {SWEEP_SECONDS} s sit part-way through the \
              blink; a 280 ms raised cosine should show about 17 per blink"
         );
-        eprintln!("{mode:?} blink: swing {swing:.3}, largest step {step:.4} ({:.3} of the swing), {middle} intermediate frames", step / swing);
+        eprintln!(
+            "{mode:?} blink: swing {swing:.3}, largest step {step:.4} ({:.3} of the swing), {middle} intermediate frames",
+            step / swing
+        );
     }
 }
 
@@ -866,15 +982,42 @@ fn at_the_strike_the_near_limb_is_over_the_hull_and_the_far_limb_under_it() {
     };
 
     let whole_body = stamp_only(&parts, &all, anchor, heading, 1.0, [0.0; 3]);
-    let no_far = stamp_only(&parts, &without(PartName::FarLimb), anchor, heading, 1.0, [0.0; 3]);
-    let no_near = stamp_only(&parts, &without(PartName::NearLimb), anchor, heading, 1.0, [0.0; 3]);
+    let no_far = stamp_only(
+        &parts,
+        &without(PartName::FarLimb),
+        anchor,
+        heading,
+        1.0,
+        [0.0; 3],
+    );
+    let no_near = stamp_only(
+        &parts,
+        &without(PartName::NearLimb),
+        anchor,
+        heading,
+        1.0,
+        [0.0; 3],
+    );
     let far_only = stamp_only(&parts, &[PartName::FarLimb], anchor, heading, 1.0, [0.0; 3]);
-    let near_only = stamp_only(&parts, &[PartName::NearLimb], anchor, heading, 1.0, [0.0; 3]);
+    let near_only = stamp_only(
+        &parts,
+        &[PartName::NearLimb],
+        anchor,
+        heading,
+        1.0,
+        [0.0; 3],
+    );
     let hull_black = stamp_only(&parts, &HULL, anchor, heading, 1.0, [0.0; 3]);
     let hull_white = stamp_only(&parts, &HULL, anchor, heading, 1.0, [1.0; 3]);
 
-    assert!(max_diff(&far_only, &Canvas::cube()) > 0.01, "the far limb painted nothing");
-    assert!(max_diff(&near_only, &Canvas::cube()) > 0.01, "the near limb painted nothing");
+    assert!(
+        max_diff(&far_only, &Canvas::cube()) > 0.01,
+        "the far limb painted nothing"
+    );
+    assert!(
+        max_diff(&near_only, &Canvas::cube()) > 0.01,
+        "the near limb painted nothing"
+    );
 
     // The hull's coverage, exactly: over black the pixel is `c`, over white it is
     // `c + (1 − c.a)`, so `c.a = 1 − (white − black)`.
@@ -891,7 +1034,10 @@ fn at_the_strike_the_near_limb_is_over_the_hull_and_the_far_limb_under_it() {
             (0..3).map(|c| t[c]).fold(0.0f32, f32::max)
         })
         .fold(0.0f32, f32::max);
-    assert!(l_far > 0.02, "the far limb carries only {l_far} of light, so hiding it proves little");
+    assert!(
+        l_far > 0.02,
+        "the far limb carries only {l_far} of light, so hiding it proves little"
+    );
 
     // The wrong depth, as a control: the very same far-limb sprite handed to the renderer at a
     // layer above everything else.
@@ -906,7 +1052,14 @@ fn at_the_strike_the_near_limb_is_over_the_hull_and_the_far_limb_under_it() {
         layer: 9,
     });
     let mut far_on_top = Canvas::cube();
-    stamp_rig(&mut far_on_top, anchor, heading, &[(&wrong_depth[..], 1.0)], 1.0, &mut Vec::new());
+    stamp_rig(
+        &mut far_on_top,
+        anchor,
+        heading,
+        &[(&wrong_depth[..], 1.0)],
+        1.0,
+        &mut Vec::new(),
+    );
 
     let mut hidden = 0usize;
     let mut worst_right = 0.0f32;
@@ -961,14 +1114,26 @@ fn at_the_strike_the_near_limb_is_over_the_hull_and_the_far_limb_under_it() {
         .map(Part::rig_part)
         .collect();
     let near_part = part_of(&parts, PartName::NearLimb);
-    behind.insert(0, RigPart { sprite: &near_part.sprite, offset: near_part.offset, layer: 0 });
+    behind.insert(
+        0,
+        RigPart {
+            sprite: &near_part.sprite,
+            offset: near_part.offset,
+            layer: 0,
+        },
+    );
     let mut near_at_back = Canvas::cube();
-    stamp_rig(&mut near_at_back, anchor, heading, &[(&behind[..], 1.0)], 1.0, &mut Vec::new());
+    stamp_rig(
+        &mut near_at_back,
+        anchor,
+        heading,
+        &[(&behind[..], 1.0)],
+        1.0,
+        &mut Vec::new(),
+    );
 
     let overlap: Vec<(Face, u16, u16)> = every_pixel()
-        .filter(|&(f, x, y)| {
-            near_only.get(f, x, y) != [0.0; 3] && hull_coverage(f, x, y) > 0.5
-        })
+        .filter(|&(f, x, y)| near_only.get(f, x, y) != [0.0; 3] && hull_coverage(f, x, y) > 0.5)
         .collect();
     assert!(
         overlap.len() >= 3,
@@ -979,7 +1144,11 @@ fn at_the_strike_the_near_limb_is_over_the_hull_and_the_far_limb_under_it() {
         .iter()
         .max_by(|&&a, &&b| {
             let l = |p: (Face, u16, u16)| {
-                near_only.get(p.0, p.1, p.2).into_iter().map(f64::from).sum::<f64>()
+                near_only
+                    .get(p.0, p.1, p.2)
+                    .into_iter()
+                    .map(f64::from)
+                    .sum::<f64>()
             };
             l(a).partial_cmp(&l(b)).unwrap()
         })
@@ -1009,26 +1178,54 @@ fn at_the_strike_the_near_limb_is_over_the_hull_and_the_far_limb_under_it() {
     );
 
     // Ascending layer order *is* the composite: at opacity 1, seven parts then the eighth.
-    let mut staged = stamp_only(&parts, &without(PartName::NearLimb), anchor, heading, 1.0, [0.0; 3]);
+    let mut staged = stamp_only(
+        &parts,
+        &without(PartName::NearLimb),
+        anchor,
+        heading,
+        1.0,
+        [0.0; 3],
+    );
     let near: Vec<RigPart<'_>> = parts
         .iter()
         .filter(|p| p.name == PartName::NearLimb)
         .map(Part::rig_part)
         .collect();
-    stamp_rig(&mut staged, anchor, heading, &[(&near[..], 1.0)], 1.0, &mut Vec::new());
+    stamp_rig(
+        &mut staged,
+        anchor,
+        heading,
+        &[(&near[..], 1.0)],
+        1.0,
+        &mut Vec::new(),
+    );
     assert!(
         max_diff(&staged, &whole_body) <= 1e-6,
         "the body is not its first seven parts with the near limb stamped over them: {}",
         max_diff(&staged, &whole_body)
     );
     // Stamping the near limb *first* is a different picture, so the order is observable.
-    let mut wrong = stamp_only(&parts, &[PartName::NearLimb], anchor, heading, 1.0, [0.0; 3]);
+    let mut wrong = stamp_only(
+        &parts,
+        &[PartName::NearLimb],
+        anchor,
+        heading,
+        1.0,
+        [0.0; 3],
+    );
     let rest: Vec<RigPart<'_>> = parts
         .iter()
         .filter(|p| p.name != PartName::NearLimb)
         .map(Part::rig_part)
         .collect();
-    stamp_rig(&mut wrong, anchor, heading, &[(&rest[..], 1.0)], 1.0, &mut Vec::new());
+    stamp_rig(
+        &mut wrong,
+        anchor,
+        heading,
+        &[(&rest[..], 1.0)],
+        1.0,
+        &mut Vec::new(),
+    );
     assert!(
         max_diff(&wrong, &whole_body) > 0.005,
         "the near limb's depth is unobservable in this frame, so the test proves nothing"
@@ -1053,9 +1250,11 @@ fn at_the_strike_the_near_limb_is_over_the_hull_and_the_far_limb_under_it() {
 /// 0.5 anywhere, and must reach it wherever the body is opaque.
 #[test]
 fn opacity_fades_the_assembled_body_once_and_never_ridges_an_overlap() {
-    for (what, seconds, mode) in
-        [("the strike", T_OPEN, Mode::Hunt), ("a gait", 0.4, Mode::Move), ("a cocoon", 1.3, Mode::Bud)]
-    {
+    for (what, seconds, mode) in [
+        ("the strike", T_OPEN, Mode::Hunt),
+        ("a gait", 0.4, Mode::Move),
+        ("a cocoon", 1.3, Mode::Bud),
+    ] {
         // First: the body really does have overlapping material at different depths, or a
         // per-part fade could not ridge and the test would be vacuous. Each layer's own
         // coverage is measured exactly (over black the pixel is `c`, over white it is
@@ -1176,8 +1375,16 @@ fn the_body_frame_puts_the_glow_above_the_mid_line_and_the_legs_below_it() {
         for seconds in frames() {
             rig.parts(seconds, mode, &mut out);
             for (name, sign, why) in [
-                (PartName::Glow, -1.0f64, "the lantern halo is one row up and its glow two"),
-                (PartName::Underside, 1.0, "the walking legs and the cocoon are under the hull"),
+                (
+                    PartName::Glow,
+                    -1.0f64,
+                    "the lantern halo is one row up and its glow two",
+                ),
+                (
+                    PartName::Underside,
+                    1.0,
+                    "the walking legs and the cocoon are under the hull",
+                ),
             ] {
                 let part = part_of(&out, name);
                 for (tx, ty) in painted(&part.sprite) {
@@ -1215,18 +1422,30 @@ fn the_body_frame_puts_the_glow_above_the_mid_line_and_the_legs_below_it() {
         let mut moment = 0.0f64;
         for (f, x, y) in every_pixel() {
             let l: f64 = image.get(f, x, y).into_iter().map(f64::from).sum();
-            assert!(l == 0.0 || f == Face::Front, "the mid-face part reached {f:?}");
+            assert!(
+                l == 0.0 || f == Face::Front,
+                "the mid-face part reached {f:?}"
+            );
             light += l;
             moment += l * f64::from(y);
         }
-        assert!(light > 1e-3, "{name:?} painted nothing, so its centroid proves nothing");
+        assert!(
+            light > 1e-3,
+            "{name:?} painted nothing, so its centroid proves nothing"
+        );
         moment / light
     };
     let glow = centroid(PartName::Glow);
     let legs = centroid(PartName::Underside);
     // The anchor sits at the centre of pixel row 32.
-    assert!(glow < 32.0, "the glow's light is centred on chart row {glow}, not above the anchor");
-    assert!(legs > 32.0, "the legs' light is centred on chart row {legs}, not below the anchor");
+    assert!(
+        glow < 32.0,
+        "the glow's light is centred on chart row {glow}, not above the anchor"
+    );
+    assert!(
+        legs > 32.0,
+        "the legs' light is centred on chart row {legs}, not below the anchor"
+    );
     eprintln!("body frame: glow centred on chart row {glow:.2}, underside on {legs:.2}");
 }
 
@@ -1242,7 +1461,12 @@ fn the_body_frame_puts_the_glow_above_the_mid_line_and_the_legs_below_it() {
 /// written that way would reject correct transport.
 #[test]
 fn heading_minus_x_is_a_half_turn_about_the_anchor() {
-    for (seconds, mode) in [(0.0, Mode::Rest), (0.4, Mode::Move), (T_OPEN, Mode::Hunt), (1.3, Mode::Bud)] {
+    for (seconds, mode) in [
+        (0.0, Mode::Rest),
+        (0.4, Mode::Move),
+        (T_OPEN, Mode::Hunt),
+        (1.3, Mode::Bud),
+    ] {
         let ahead = drawn(seconds, mode, mid(), forward(), 1.0);
         let behind = drawn(seconds, mode, mid(), Vec2::new(-1.0, 0.0), 1.0);
         // Everything stays on Front: the body is 14 px from a mid-face anchor.
@@ -1270,11 +1494,15 @@ fn heading_minus_x_is_a_half_turn_about_the_anchor() {
                 }
             }
         }
-        assert!(turned > 40, "{mode:?} at {seconds}: only {turned} pixels were compared");
+        assert!(
+            turned > 40,
+            "{mode:?} at {seconds}: only {turned} pixels were compared"
+        );
 
         // The column-only mirror the brief asked for is a different picture.
-        let mirrored_differs = (1..64u16)
-            .any(|y| (1..64u16).any(|x| behind.get(Face::Front, x, y) != ahead.get(Face::Front, 64 - x, y)));
+        let mirrored_differs = (1..64u16).any(|y| {
+            (1..64u16).any(|x| behind.get(Face::Front, x, y) != ahead.get(Face::Front, 64 - x, y))
+        });
         assert!(
             mirrored_differs,
             "{mode:?} at {seconds}: reversing the heading happened to mirror the body about the \
@@ -1311,7 +1539,15 @@ fn a_fractional_anchor_moves_the_body_by_sub_pixel_brightness_only() {
     let mode = Mode::Move;
 
     // A whole pixel across is a whole pixel across.
-    let at = |u: f64| drawn(seconds, mode, SurfacePoint::new(Face::Front, u, 32.5), forward(), 1.0);
+    let at = |u: f64| {
+        drawn(
+            seconds,
+            mode,
+            SurfacePoint::new(Face::Front, u, 32.5),
+            forward(),
+            1.0,
+        )
+    };
     let (base, shifted) = (at(32.5), at(33.5));
     for y in 0..64u16 {
         for x in 1..64u16 {
@@ -1368,7 +1604,10 @@ fn a_fractional_anchor_moves_the_body_by_sub_pixel_brightness_only() {
             "{name:?}: a half-pixel anchor shift moved a pixel by {moved}, more than half its \
              sprite's largest adjacent-texel step of {jump}"
         );
-        assert!(moved > 1e-4, "{name:?}: a half-pixel shift moved nothing ({moved})");
+        assert!(
+            moved > 1e-4,
+            "{name:?}: a half-pixel shift moved nothing ({moved})"
+        );
     }
 }
 
@@ -1402,7 +1641,13 @@ fn a_degenerate_heading_or_opacity_draws_nothing() {
     // The heading's length is not its magnitude of anything: only its direction is used.
     for scale in [0.1f64, 1.0, 25.0] {
         assert_identical(
-            &drawn(0.4, Mode::Move, mid(), Vec2::new(0.6 * scale, -0.8 * scale), 1.0),
+            &drawn(
+                0.4,
+                Mode::Move,
+                mid(),
+                Vec2::new(0.6 * scale, -0.8 * scale),
+                1.0,
+            ),
             &drawn(0.4, Mode::Move, mid(), Vec2::new(0.6, -0.8), 1.0),
             "the heading's length must not change the picture",
         );
@@ -1451,7 +1696,16 @@ fn move_never_jumps_more_than_the_wave_and_the_gait_allow_in_one_frame() {
 
     for seconds in frames() {
         let mut canvas = Canvas::cube();
-        rig.draw(&mut canvas, mid(), forward(), seconds, Mode::Move, 1.0, &mut parts, &mut scratch);
+        rig.draw(
+            &mut canvas,
+            mid(),
+            forward(),
+            seconds,
+            Mode::Move,
+            1.0,
+            &mut parts,
+            &mut scratch,
+        );
         for face in Face::ALL {
             if face == Face::Front {
                 continue;
@@ -1472,10 +1726,15 @@ fn move_never_jumps_more_than_the_wave_and_the_gait_allow_in_one_frame() {
                         continue;
                     }
                     painted += 1;
-                    sum += (0..3).map(|c| f64::from((a[c] - b[c]).abs())).fold(0.0, f64::max);
+                    sum += (0..3)
+                        .map(|c| f64::from((a[c] - b[c]).abs()))
+                        .fold(0.0, f64::max);
                 }
             }
-            assert!(painted > 30, "at {seconds} the body painted only {painted} pixels");
+            assert!(
+                painted > 30,
+                "at {seconds} the body painted only {painted} pixels"
+            );
             let mean = sum / painted as f64;
             if mean > worst {
                 worst = mean;
@@ -1501,4 +1760,3 @@ fn move_never_jumps_more_than_the_wave_and_the_gait_allow_in_one_frame() {
         total / counted as f64
     );
 }
-

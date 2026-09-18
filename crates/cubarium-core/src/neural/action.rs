@@ -63,7 +63,9 @@ impl ActionAdapter {
         match s {
             "cub-act-1" => Ok(ActionAdapter::CubAct1),
             "cub-act-2" => Ok(ActionAdapter::CubAct2),
-            other => Err(format!("adapter must be `cub-act-1` or `cub-act-2`, not `{other}`")),
+            other => Err(format!(
+                "adapter must be `cub-act-1` or `cub-act-2`, not `{other}`"
+            )),
         }
     }
 
@@ -260,7 +262,11 @@ impl Envelope {
         let omega_max = non_negative(self.turn_rate_max);
         let u = non_negative(self.u_full);
         let r = non_negative(self.radius_px);
-        if r <= 0.0 { omega_max } else { omega_max.min(u / r) }
+        if r <= 0.0 {
+            omega_max
+        } else {
+            omega_max.min(u / r)
+        }
     }
 
     /// `v_req = a₀ · v_max / wading`, px/s: the requested centre speed along the heading.
@@ -275,7 +281,11 @@ impl Envelope {
 
     /// `ω_req = a₁ · ω_attain`, rad/s, positive clockwise in the body frame.
     pub fn requested_omega(&self, turn: f64) -> f64 {
-        let turn = if turn.is_finite() { turn.clamp(-1.0, 1.0) } else { 0.0 };
+        let turn = if turn.is_finite() {
+            turn.clamp(-1.0, 1.0)
+        } else {
+            0.0
+        };
         turn * self.omega_attain()
     }
 
@@ -408,7 +418,11 @@ mod tests {
         assert!(!a.active());
         assert_eq!(a.effort(), 0.0);
         let e = adult();
-        let motion = motor::resolve(Vec2::new(1.0, 0.0), &e.request(Vec2::new(1.0, 0.0), &a), &limits(&e, a.effort()));
+        let motion = motor::resolve(
+            Vec2::new(1.0, 0.0),
+            &e.request(Vec2::new(1.0, 0.0), &a),
+            &limits(&e, a.effort()),
+        );
         assert_eq!(motion.speed, 0.0);
         assert_eq!(motion.turn, 0.0);
         assert_eq!(motion.sweep, 0.0);
@@ -422,14 +436,22 @@ mod tests {
         assert!(a.active(), "turning alone activates the body");
         // ω_attain = min(90°/s, 5.0/2.5 = 2 rad/s) = 90°/s: at the R0d pace the genome binds.
         assert!((e.omega_attain() - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
-        let motion = motor::resolve(Vec2::new(1.0, 0.0), &e.request(Vec2::new(1.0, 0.0), &a), &limits(&e, a.effort()));
+        let motion = motor::resolve(
+            Vec2::new(1.0, 0.0),
+            &e.request(Vec2::new(1.0, 0.0), &a),
+            &limits(&e, a.effort()),
+        );
         assert_eq!(motion.speed, 0.0, "no thrust was requested");
         assert!(
             resolved_turn(&motion) > 0.0,
             "the body turned clockwise: {}",
             resolved_turn(&motion)
         );
-        assert!(motion.sweep > 0.0, "and paid for the sweep: {}", motion.sweep);
+        assert!(
+            motion.sweep > 0.0,
+            "and paid for the sweep: {}",
+            motion.sweep
+        );
         assert!(
             (resolved_omega(&motion, DT) - std::f64::consts::FRAC_PI_2).abs() < 1e-9,
             "ω = {} rad/s",
@@ -445,7 +467,11 @@ mod tests {
         let truth = 5.0 + 2.5 * std::f64::consts::FRAC_PI_2;
         assert!((e.requested_magnitude(&a) - truth).abs() < 1e-9);
         assert!(e.requested_magnitude(&a) < 2.0 * e.u_full);
-        let motion = motor::resolve(Vec2::new(1.0, 0.0), &e.request(Vec2::new(1.0, 0.0), &a), &limits(&e, a.effort()));
+        let motion = motor::resolve(
+            Vec2::new(1.0, 0.0),
+            &e.request(Vec2::new(1.0, 0.0), &a),
+            &limits(&e, a.effort()),
+        );
         assert!(
             motion.motor_magnitude() <= e.u_full + 1e-12,
             "the envelope still binds: {} > {}",
@@ -462,8 +488,15 @@ mod tests {
         e.u_full = 1.0;
         assert!((e.omega_attain() - 0.4).abs() < 1e-12, "1.0 / 2.5 rad/s");
         let a = held([0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
-        assert!((e.requested_magnitude(&a) - 1.0).abs() < 1e-12, "exactly the budget");
-        let motion = motor::resolve(Vec2::new(1.0, 0.0), &e.request(Vec2::new(1.0, 0.0), &a), &limits(&e, a.effort()));
+        assert!(
+            (e.requested_magnitude(&a) - 1.0).abs() < 1e-12,
+            "exactly the budget"
+        );
+        let motion = motor::resolve(
+            Vec2::new(1.0, 0.0),
+            &e.request(Vec2::new(1.0, 0.0), &a),
+            &limits(&e, a.effort()),
+        );
         assert!((motion.motor_magnitude() - 1.0).abs() < 1e-9);
     }
 
@@ -513,7 +546,10 @@ mod tests {
     fn the_mouth_is_shared_and_never_exceeds_one_mouth_tick() {
         let a = Action7::squash(&[0.0, 0.0, 4.0, 4.0, 4.0, 0.0, 0.0], &grazer());
         let sum: f64 = MOUTH_CHANNELS.iter().map(|i| a.0[*i]).sum();
-        assert!((sum - 1.0).abs() < 1e-12, "three saturated mouths sum to {sum}");
+        assert!(
+            (sum - 1.0).abs() < 1e-12,
+            "three saturated mouths sum to {sum}"
+        );
     }
 
     #[test]
@@ -601,7 +637,11 @@ mod tests {
                 &poor.request(Vec2::new(1.0, 0.0), &a),
                 &limits(&poor, a.effort()),
             );
-            assert!((motion.speed - want_v).abs() < 1e-9, "{raw:?}: v = {}", motion.speed);
+            assert!(
+                (motion.speed - want_v).abs() < 1e-9,
+                "{raw:?}: v = {}",
+                motion.speed
+            );
             assert!(
                 (resolved_omega(&motion, DT) - want_omega).abs() < 1e-9,
                 "{raw:?}: ω = {}",

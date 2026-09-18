@@ -118,7 +118,10 @@ mod tests {
         for &s in &STREAMS {
             for key in 0..40u64 {
                 for c in 0..40u64 {
-                    assert!(seen.insert(draw(12345, s, key, c)), "collision at {s:?} {key} {c}");
+                    assert!(
+                        seen.insert(draw(12345, s, key, c)),
+                        "collision at {s:?} {key} {c}"
+                    );
                 }
             }
         }

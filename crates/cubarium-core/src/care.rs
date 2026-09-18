@@ -104,12 +104,18 @@ impl CareDose {
     /// every `x`, and a world that takes no nonstandard dose must step exactly as it did before
     /// this field existed.
     pub fn scale(self, nominal: f64) -> f64 {
-        if self.is_standard() { nominal } else { nominal * f64::from(self.0) / 1000.0 }
+        if self.is_standard() {
+            nominal
+        } else {
+            nominal * f64::from(self.0) / 1000.0
+        }
     }
 
     /// Range check for a dose that came off a snapshot rather than through [`CareDose::new`].
     pub fn validate(self, what: &str) -> Result<(), String> {
-        CareDose::new(self.0).map(|_| ()).map_err(|e| format!("{what}: {e}"))
+        CareDose::new(self.0)
+            .map(|_| ())
+            .map_err(|e| format!("{what}: {e}"))
     }
 }
 
@@ -175,7 +181,11 @@ impl CareTarget {
         if self.u < 0.0 || self.u >= ext_u || self.v < 0.0 || self.v >= ext_v {
             return None;
         }
-        Some(cell_of(topo, scale, &SurfacePoint::new(face, self.u, self.v)))
+        Some(cell_of(
+            topo,
+            scale,
+            &SurfacePoint::new(face, self.u, self.v),
+        ))
     }
 }
 
@@ -196,8 +206,19 @@ pub struct CareCommand {
 
 impl CareCommand {
     /// A command at the standard dose — what every pre-dose caller meant.
-    pub fn standard(seq: u64, apply_after_tick: u64, kind: CareKind, target: CareTarget) -> CareCommand {
-        CareCommand { seq, apply_after_tick, kind, target, dose: CareDose::STANDARD }
+    pub fn standard(
+        seq: u64,
+        apply_after_tick: u64,
+        kind: CareKind,
+        target: CareTarget,
+    ) -> CareCommand {
+        CareCommand {
+            seq,
+            apply_after_tick,
+            kind,
+            target,
+            dose: CareDose::STANDARD,
+        }
     }
 }
 
@@ -335,10 +356,16 @@ impl CareState {
         // The booked allowance is the actual f64 sum of the per-cell deposits, which may
         // miss the nominal dose by rounding; the bound is the dose, not the sum.
         if self.allowance_used > FEED_ALLOWANCE + ALLOWANCE_TOLERANCE {
-            return Err(format!("care allowance_used {} exceeds {FEED_ALLOWANCE}", self.allowance_used));
+            return Err(format!(
+                "care allowance_used {} exceeds {FEED_ALLOWANCE}",
+                self.allowance_used
+            ));
         }
         if self.showers.len() > 1 {
-            return Err(format!("care holds {} showers, at most one is allowed", self.showers.len()));
+            return Err(format!(
+                "care holds {} showers, at most one is allowed",
+                self.showers.len()
+            ));
         }
         for s in &self.showers {
             if s.cells.is_empty() || s.cells.len() != s.weights.len() {
@@ -350,7 +377,10 @@ impl CareState {
                 ));
             }
             if s.cells.len() > cells {
-                return Err(format!("care shower {} covers more cells than the surface has", s.seq));
+                return Err(format!(
+                    "care shower {} covers more cells than the surface has",
+                    s.seq
+                ));
             }
             // The persisted dose is range-checked like every other decoded value: a shower
             // whose dose is outside the documented bounds is refused, never clamped.
@@ -360,7 +390,10 @@ impl CareState {
             for &c in &s.cells {
                 let i = usize::from(c);
                 if i >= cells {
-                    return Err(format!("care shower {} names cell {c}, out of range", s.seq));
+                    return Err(format!(
+                        "care shower {} names cell {c}, out of range",
+                        s.seq
+                    ));
                 }
                 if seen[i] {
                     return Err(format!("care shower {} names cell {c} twice", s.seq));
@@ -380,10 +413,16 @@ impl CareState {
                 return Err(format!("care shower {} weights sum to {sum}", s.seq));
             }
             if s.delivered >= RAIN_TICKS {
-                return Err(format!("care shower {} has delivered {} of {RAIN_TICKS}", s.seq, s.delivered));
+                return Err(format!(
+                    "care shower {} has delivered {} of {RAIN_TICKS}",
+                    s.seq, s.delivered
+                ));
             }
             if s.apply_after_tick > tick {
-                return Err(format!("care shower {} starts at {} after tick {tick}", s.seq, s.apply_after_tick));
+                return Err(format!(
+                    "care shower {} starts at {} after tick {tick}",
+                    s.seq, s.apply_after_tick
+                ));
             }
             // Progress is not free-standing: one sample is delivered per step, so a shower
             // admitted at `B` and alive at `tick` has delivered exactly `tick − B`. A
@@ -396,7 +435,10 @@ impl CareState {
                 ));
             }
             if s.seq == 0 || s.seq > self.admitted_seq {
-                return Err(format!("care shower {} was never admitted (cursor {})", s.seq, self.admitted_seq));
+                return Err(format!(
+                    "care shower {} was never admitted (cursor {})",
+                    s.seq, self.admitted_seq
+                ));
             }
         }
         Ok(())
@@ -462,11 +504,17 @@ mod tests {
         let e = rain_envelope();
         assert_eq!(e.len(), 120);
         let total: f64 = e.iter().sum::<f64>() * DT;
-        assert!((total - 1.0).abs() < WEIGHT_TOLERANCE, "envelope integrates to {total}");
+        assert!(
+            (total - 1.0).abs() < WEIGHT_TOLERANCE,
+            "envelope integrates to {total}"
+        );
         assert!(e.iter().all(|&x| x > 0.0 && x.is_finite()));
         // A raised cosine: the ends are the smallest samples and the middle the largest.
         assert!(e[0] < e[60] && e[119] < e[60]);
-        assert!((e[0] - e[119]).abs() < 1e-12, "the envelope is not symmetric");
+        assert!(
+            (e[0] - e[119]).abs() < 1e-12,
+            "the envelope is not symmetric"
+        );
     }
 
     #[test]
@@ -474,17 +522,32 @@ mod tests {
         let graph = FieldGraph::new(Topology::Cube, Scale::ONE);
         let center = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 8);
         let fp = footprint(&graph, center, FEED_HOPS);
-        assert_eq!(fp.len(), 5, "an interior 1-hop footprint is the cell and four neighbours");
+        assert_eq!(
+            fp.len(),
+            5,
+            "an interior 1-hop footprint is the cell and four neighbours"
+        );
         let sum: f64 = fp.iter().map(|(_, w)| w).sum();
         assert!((sum - 1.0).abs() < WEIGHT_TOLERANCE, "weights sum to {sum}");
-        let w_center = fp.iter().find(|(c, _)| *c == center).expect("the centre is in it").1;
+        let w_center = fp
+            .iter()
+            .find(|(c, _)| *c == center)
+            .expect("the centre is in it")
+            .1;
         // Raw weights 1 + 4·(1/2) = 3, so the centre keeps a third.
         assert!((w_center - 1.0 / 3.0).abs() < 1e-15, "{w_center}");
 
         let fp2 = footprint(&graph, center, RAIN_HOPS);
-        assert_eq!(fp2.len(), 13, "an interior 2-hop footprint is a diamond of 13 cells");
+        assert_eq!(
+            fp2.len(),
+            13,
+            "an interior 2-hop footprint is a diamond of 13 cells"
+        );
         let sum2: f64 = fp2.iter().map(|(_, w)| w).sum();
-        assert!((sum2 - 1.0).abs() < WEIGHT_TOLERANCE, "weights sum to {sum2}");
+        assert!(
+            (sum2 - 1.0).abs() < WEIGHT_TOLERANCE,
+            "weights sum to {sum2}"
+        );
         // Index order, so the same surface always sums the doses in the same order.
         assert!(fp2.windows(2).all(|p| p[0].0.index() < p[1].0.index()));
     }
@@ -493,10 +556,22 @@ mod tests {
     fn a_footprint_never_repeats_a_cell_across_a_seam_and_always_normalizes() {
         let graph = FieldGraph::new(Topology::Cube, Scale::ONE);
         for (name, center) in [
-            ("seam", CellId::new(Topology::Cube, Scale::ONE, Face::Front, 15, 8)),
-            ("rim", CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 15)),
-            ("corner", CellId::new(Topology::Cube, Scale::ONE, Face::Front, 15, 15)),
-            ("top", CellId::new(Topology::Cube, Scale::ONE, Face::Top, 0, 0)),
+            (
+                "seam",
+                CellId::new(Topology::Cube, Scale::ONE, Face::Front, 15, 8),
+            ),
+            (
+                "rim",
+                CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 15),
+            ),
+            (
+                "corner",
+                CellId::new(Topology::Cube, Scale::ONE, Face::Front, 15, 15),
+            ),
+            (
+                "top",
+                CellId::new(Topology::Cube, Scale::ONE, Face::Top, 0, 0),
+            ),
         ] {
             for hops in [FEED_HOPS, RAIN_HOPS] {
                 let fp = footprint(&graph, center, hops);
@@ -506,19 +581,70 @@ mod tests {
                 ids.dedup();
                 assert_eq!(ids.len(), before, "{name} at {hops} hops repeats a cell");
                 let sum: f64 = fp.iter().map(|(_, w)| w).sum();
-                assert!((sum - 1.0).abs() < WEIGHT_TOLERANCE, "{name} at {hops} hops sums to {sum}");
+                assert!(
+                    (sum - 1.0).abs() < WEIGHT_TOLERANCE,
+                    "{name} at {hops} hops sums to {sum}"
+                );
             }
         }
     }
 
     #[test]
     fn a_target_resolves_only_inside_the_charts() {
-        assert_eq!(CareTarget { face: 0, u: 0.0, v: 0.0 }.resolve(Topology::Cube, Scale::ONE), Some(CellId::new(Topology::Cube, Scale::ONE, Face::Front, 0, 0)));
-        assert_eq!(CareTarget { face: 4, u: 63.9, v: 63.9 }.resolve(Topology::Cube, Scale::ONE), Some(CellId::new(Topology::Cube, Scale::ONE, Face::Top, 15, 15)));
-        assert_eq!(CareTarget { face: 5, u: 1.0, v: 1.0 }.resolve(Topology::Cube, Scale::ONE), None);
-        assert_eq!(CareTarget { face: 0, u: 64.0, v: 1.0 }.resolve(Topology::Cube, Scale::ONE), None);
-        assert_eq!(CareTarget { face: 0, u: -1e-9, v: 1.0 }.resolve(Topology::Cube, Scale::ONE), None);
-        assert_eq!(CareTarget { face: 0, u: f64::NAN, v: 1.0 }.resolve(Topology::Cube, Scale::ONE), None);
+        assert_eq!(
+            CareTarget {
+                face: 0,
+                u: 0.0,
+                v: 0.0
+            }
+            .resolve(Topology::Cube, Scale::ONE),
+            Some(CellId::new(Topology::Cube, Scale::ONE, Face::Front, 0, 0))
+        );
+        assert_eq!(
+            CareTarget {
+                face: 4,
+                u: 63.9,
+                v: 63.9
+            }
+            .resolve(Topology::Cube, Scale::ONE),
+            Some(CellId::new(Topology::Cube, Scale::ONE, Face::Top, 15, 15))
+        );
+        assert_eq!(
+            CareTarget {
+                face: 5,
+                u: 1.0,
+                v: 1.0
+            }
+            .resolve(Topology::Cube, Scale::ONE),
+            None
+        );
+        assert_eq!(
+            CareTarget {
+                face: 0,
+                u: 64.0,
+                v: 1.0
+            }
+            .resolve(Topology::Cube, Scale::ONE),
+            None
+        );
+        assert_eq!(
+            CareTarget {
+                face: 0,
+                u: -1e-9,
+                v: 1.0
+            }
+            .resolve(Topology::Cube, Scale::ONE),
+            None
+        );
+        assert_eq!(
+            CareTarget {
+                face: 0,
+                u: f64::NAN,
+                v: 1.0
+            }
+            .resolve(Topology::Cube, Scale::ONE),
+            None
+        );
     }
 
     #[test]
@@ -527,6 +653,7 @@ mod tests {
         assert_eq!(care.admitted_seq, 0);
         assert!(care.showers.is_empty());
         assert_eq!(care.allowance_used, 0.0);
-        care.validate(0, cubarium_surface::CUBE_CELL_COUNT).expect("the default state is valid");
+        care.validate(0, cubarium_surface::CUBE_CELL_COUNT)
+            .expect("the default state is valid");
     }
 }

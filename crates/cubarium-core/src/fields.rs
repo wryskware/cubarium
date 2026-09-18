@@ -308,7 +308,11 @@ impl PlantCellBudget {
 
     /// Mean over `ticks_alive`, or `0.0` for a cell that was never alive.
     pub fn mean(&self, sum: f64) -> f64 {
-        if self.ticks_alive == 0 { 0.0 } else { sum / self.ticks_alive as f64 }
+        if self.ticks_alive == 0 {
+            0.0
+        } else {
+            sum / self.ticks_alive as f64
+        }
     }
 }
 
@@ -357,7 +361,8 @@ impl PlantBudgetRecord {
         let mut worst = 0.0f64;
         for i in 0..self.cells.len() {
             let c = &self.cells[i];
-            let rp = (p[i] - self.p_open[i]) - (c.foliage_in() - c.foliage_out() - c.withdrawal_foliage);
+            let rp =
+                (p[i] - self.p_open[i]) - (c.foliage_in() - c.foliage_out() - c.withdrawal_foliage);
             let rq = (q[i] - self.q_open[i])
                 - (c.reserve_share + c.reserve_refill + c.reserve_from_propagule
                     - c.maintenance_from_reserve
@@ -579,8 +584,14 @@ impl Fields {
             let c0 = eco.carrion[i];
             let ce0 = eco.carrion_energy[i];
             debug_assert!(
-                n0.is_finite() && p0.is_finite() && d0.is_finite() && de0.is_finite()
-                    && w0.is_finite() && q0.is_finite() && wd0.is_finite() && c0.is_finite(),
+                n0.is_finite()
+                    && p0.is_finite()
+                    && d0.is_finite()
+                    && de0.is_finite()
+                    && w0.is_finite()
+                    && q0.is_finite()
+                    && wd0.is_finite()
+                    && c0.is_finite(),
                 "non-finite field at cell {i}"
             );
             work.pre_d[i] = d0;
@@ -603,7 +614,11 @@ impl Fields {
 
             if class == CellClass::Alive {
                 // --- 3a: income (§4.1), demands (§4.2), maintenance (§4.3), growth (§4.4).
-                let monod = if n0 > 0.0 { n0 / (n0 + nc.half_saturation) } else { 0.0 };
+                let monod = if n0 > 0.0 {
+                    n0 / (n0 + nc.half_saturation)
+                } else {
+                    0.0
+                };
                 let (wet, drown) = water_factors(self.w[i], moisture[i], cfg);
                 let lit = algae_light(self.w[i], light[i], cfg);
                 let a_pot = (pc.growth * lit * wet * p0 * monod * drown * DT)
@@ -730,7 +745,11 @@ impl Fields {
 
             // --- 3c: ripening and drop, on every cell, today's rule. Ripening reads the
             //     pre-tick `P⁻` for its trigger and is capped by what 3b left.
-            let over = if pc.max > 0.0 { (p0 / pc.max - fc.fruit_min).max(0.0) } else { 0.0 };
+            let over = if pc.max > 0.0 {
+                (p0 / pc.max - fc.fruit_min).max(0.0)
+            } else {
+                0.0
+            };
             let ripened = (fc.ripen * p0 * over * light[i] * DT).clamp(0.0, p.max(0.0));
             let dropped = (fc.drop * f0 * DT).clamp(0.0, f0);
             ledger.light_in += (e_f - e_v) * ripened;
@@ -844,7 +863,9 @@ impl Fields {
             let left_d = 1.0 - (dc.decomposition * DT).min(1.0);
             let left_c = 1.0 - (dc.carrion_decomposition * DT).min(1.0);
             for cell in CellId::all(graph.topology(), graph.scale()) {
-                let Some(down) = graph.downhill(cell) else { continue };
+                let Some(down) = graph.downhill(cell) else {
+                    continue;
+                };
                 let (here, there) = (cell.index(), down.index());
                 let out_d = (fall * left_d * work.pre_d[here]).clamp(0.0, work.d5[here]);
                 if out_d > 0.0 {
@@ -966,9 +987,13 @@ impl Fields {
     pub fn check(&self, energy_cap: f64) -> Result<(), String> {
         let cells = self.n.len();
         crate::water::check(&self.w, cells)?;
-        for (name, v) in
-            [("N", &self.n), ("P", &self.p), ("D", &self.d), ("De", &self.de), ("F", &self.f)]
-        {
+        for (name, v) in [
+            ("N", &self.n),
+            ("P", &self.p),
+            ("D", &self.d),
+            ("De", &self.de),
+            ("F", &self.f),
+        ] {
             if v.len() != cells {
                 return Err(format!("{name} has {} cells, expected {cells}", v.len()));
             }
@@ -1004,7 +1029,11 @@ pub fn algae_light(w: f64, light: f64, cfg: &WorldConfig) -> f64 {
         return light;
     }
     let wc = &cfg.water;
-    let depth = if wc.algae_depth > 0.0 { (w / wc.algae_depth).min(1.0) } else { 1.0 };
+    let depth = if wc.algae_depth > 0.0 {
+        (w / wc.algae_depth).min(1.0)
+    } else {
+        1.0
+    };
     light.max(wc.algae_light * depth)
 }
 
@@ -1017,7 +1046,11 @@ pub fn water_factors(w: f64, moisture: f64, cfg: &WorldConfig) -> (f64, f64) {
     }
     let wc = &cfg.water;
     let wet = (moisture + wc.wet_gain * w.min(1.0)).clamp(cfg.habitat.moisture_min, 1.0);
-    let drown = if w > wc.flood { (1.0 - (w - wc.flood) / wc.flood).max(0.0) } else { 1.0 };
+    let drown = if w > wc.flood {
+        (1.0 - (w - wc.flood) / wc.flood).max(0.0)
+    } else {
+        1.0
+    };
     (wet, drown)
 }
 
@@ -1064,7 +1097,10 @@ mod tests {
                 light: habitat.light_base.clone(),
                 moisture: habitat.moisture_base.clone(),
                 graph: FieldGraph::new(Topology::Cube, Scale::ONE),
-                scratch: (ScalarField::zeros(Topology::Cube, Scale::ONE), ScalarField::zeros(Topology::Cube, Scale::ONE)),
+                scratch: (
+                    ScalarField::zeros(Topology::Cube, Scale::ONE),
+                    ScalarField::zeros(Topology::Cube, Scale::ONE),
+                ),
                 work: EcoScratch::new(CUBE_CELL_COUNT),
                 eco,
             }
@@ -1136,7 +1172,11 @@ mod tests {
         h.react(&mut wet);
         h.react(&mut flooded);
         assert_eq!(dry.p[cell], 0.3, "a dark dry cell grows nothing");
-        assert!(wet.p[cell] > 0.3, "a dark pool grows a mat: {}", wet.p[cell]);
+        assert!(
+            wet.p[cell] > 0.3,
+            "a dark pool grows a mat: {}",
+            wet.p[cell]
+        );
         assert_eq!(flooded.p[cell], 0.3, "deep water still drowns growth");
         // No algae light: the pool is as dark as the sky.
         h.cfg.water.algae_light = 0.0;
@@ -1168,19 +1208,31 @@ mod tests {
                 assert_eq!(eco.plant_reserve[i], 0.5 * cfg.plant.reserve_cap * want_w);
                 let p_cap = cfg.producer.max.min(cfg.plant.alpha * want_w);
                 assert_eq!(f.p[i], cfg.producer.initial_fraction * p_cap);
-                assert_eq!(CellClass::of(eco.wood[i], cfg.plant.alive_min), CellClass::Alive);
+                assert_eq!(
+                    CellClass::of(eco.wood[i], cfg.plant.alive_min),
+                    CellClass::Alive
+                );
             } else {
                 bare += 1;
                 assert_eq!((eco.wood[i], eco.plant_reserve[i], f.p[i]), (0.0, 0.0, 0.0));
-                assert_eq!(CellClass::of(eco.wood[i], cfg.plant.alive_min), CellClass::Bare);
+                assert_eq!(
+                    CellClass::of(eco.wood[i], cfg.plant.alive_min),
+                    CellClass::Bare
+                );
             }
             let litter = cfg.detritus.initial_dark * (1.0 - l);
             assert_eq!(f.d[i], litter);
             assert_eq!(f.de[i], cfg.detritus.energy_cap * litter);
             assert_eq!(f.f[i], 0.0);
-            assert_eq!((eco.dead_wood[i], eco.carrion[i], eco.carrion_energy[i]), (0.0, 0.0, 0.0));
+            assert_eq!(
+                (eco.dead_wood[i], eco.carrion[i], eco.carrion_energy[i]),
+                (0.0, 0.0, 0.0)
+            );
         }
-        assert!(alive > 0 && bare > 0, "the default habitat has both: {alive} alive, {bare} bare");
+        assert!(
+            alive > 0 && bare > 0,
+            "the default habitat has both: {alive} alive, {bare} bare"
+        );
         assert_eq!((eco.plant_deaths_total, eco.recolonisations_total), (0, 0));
         f.check(cfg.detritus.energy_cap).unwrap();
         eco.check(cfg.detritus.carrion_energy_cap).unwrap();
@@ -1201,10 +1253,19 @@ mod tests {
         assert_eq!(f.d[0], 0.0, "a fully lit cell gets no litter");
         assert_eq!(f.d[1], 1.2, "a dark cell gets initial_dark");
         assert_eq!(f.d[2], 1.2 * 0.75);
-        assert_eq!(f.de[2], cfg.detritus.energy_cap * f.d[2], "the litter is fully charged");
+        assert_eq!(
+            f.de[2],
+            cfg.detritus.energy_cap * f.d[2],
+            "the litter is fully charged"
+        );
         let litter: f64 = f.d.iter().sum();
         assert!(litter > 0.0);
-        assert!((f.total_material() - (f.n.iter().sum::<f64>() + f.p.iter().sum::<f64>() + litter)).abs() < 1e-9, "the litter is initial material");
+        assert!(
+            (f.total_material() - (f.n.iter().sum::<f64>() + f.p.iter().sum::<f64>() + litter))
+                .abs()
+                < 1e-9,
+            "the litter is initial material"
+        );
         let mut clean = cfg.clone();
         clean.detritus.initial_dark = 0.0;
         let g = Fields::new(&clean, &light, &moisture);
@@ -1282,7 +1343,10 @@ mod tests {
             let after = stored_energy(&h, &f);
             let residual = (ledger.light_in - ledger.heat_out) - (after - before);
             worst = worst.max(residual.abs());
-            assert!(residual.abs() < 1e-9, "tick {tick}: energy residual {residual}");
+            assert!(
+                residual.abs() < 1e-9,
+                "tick {tick}: energy residual {residual}"
+            );
             assert!(ledger.light_in >= 0.0 && ledger.heat_out >= 0.0);
         }
         println!("worst per-tick energy residual over 600 ticks: {worst:e}");
@@ -1425,10 +1489,19 @@ mod tests {
             assert_eq!(ledger, FieldLedger::default(), "tick {tick}");
             let d: f64 = f.d.iter().sum();
             let de: f64 = f.de.iter().sum();
-            assert!((d - d0).abs() / d0 < 1e-12, "tick {tick}: D drifted to {d} from {d0}");
-            assert!((de - de0).abs() / de0 < 1e-12, "tick {tick}: De drifted to {de} from {de0}");
+            assert!(
+                (d - d0).abs() / d0 < 1e-12,
+                "tick {tick}: D drifted to {d} from {d0}"
+            );
+            assert!(
+                (de - de0).abs() / de0 < 1e-12,
+                "tick {tick}: De drifted to {de} from {de0}"
+            );
             for i in 0..CUBE_CELL_COUNT {
-                assert!(f.d[i] >= 0.0 && f.de[i] >= 0.0, "tick {tick} cell {i} went negative");
+                assert!(
+                    f.d[i] >= 0.0 && f.de[i] >= 0.0,
+                    "tick {tick} cell {i} went negative"
+                );
                 assert!(
                     f.de[i] <= cap * f.d[i] + 1e-12,
                     "tick {tick} cell {i}: De {} above the cap {}",
@@ -1439,7 +1512,10 @@ mod tests {
             f.check(cap).unwrap();
         }
         let drift = (h.material(&f) - start_material).abs() / start_material;
-        assert!(drift < 1e-12, "400 ticks of falling drifted {drift} relative");
+        assert!(
+            drift < 1e-12,
+            "400 ticks of falling drifted {drift} relative"
+        );
     }
 
     #[test]
@@ -1492,7 +1568,11 @@ mod tests {
             "the bottom of the column holds {} of the 1.0 seeded",
             f.d[sink.index()]
         );
-        assert!(f.de[sink.index()] > cap - 1e-9, "its energy came with it: {}", f.de[sink.index()]);
+        assert!(
+            f.de[sink.index()] > cap - 1e-9,
+            "its energy came with it: {}",
+            f.de[sink.index()]
+        );
         for cell in CellId::all(Topology::Cube, Scale::ONE) {
             if cell == sink {
                 continue;
@@ -1515,8 +1595,11 @@ mod tests {
         f.d.iter_mut().for_each(|d| *d = 0.0);
         f.de.iter_mut().for_each(|de| *de = 0.0);
         // A canopy cell against the seam, a canopy cell in the middle, and a rim cell.
-        let stayers =
-            [CellId::new(Topology::Cube, Scale::ONE, Face::Top, 0, 0), CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8), CellId::new(Topology::Cube, Scale::ONE, Face::Front, 3, 15)];
+        let stayers = [
+            CellId::new(Topology::Cube, Scale::ONE, Face::Top, 0, 0),
+            CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8),
+            CellId::new(Topology::Cube, Scale::ONE, Face::Front, 3, 15),
+        ];
         for c in stayers {
             f.d[c.index()] = 1.0;
         }
@@ -1586,19 +1669,30 @@ mod tests {
         h.react(&mut half_drowned);
         let grow = |f: &Fields| n0 - f.n[cell];
         assert!(grow(&dry) > 0.0);
-        assert!(grow(&wet) > grow(&dry), "wet {} vs dry {}", grow(&wet), grow(&dry));
+        assert!(
+            grow(&wet) > grow(&dry),
+            "wet {} vs dry {}",
+            grow(&wet),
+            grow(&dry)
+        );
         let (w_eff, _) = water_factors(1.0, h.moisture[cell], &h.cfg);
         assert!((grow(&wet) / grow(&dry) - w_eff / h.moisture[cell]).abs() < 1e-9);
         assert_eq!(grow(&drowned), 0.0, "a flooded cell grows nothing");
         // Halfway between `flood` and `2·flood` the drowning factor is one half; the cell is
         // also fully wetted (`min(w, 1) = 1`), so the comparison is against the wet cell.
-        assert!((grow(&half_drowned) / grow(&wet) - 0.5).abs() < 1e-9, "halfway to full drowning halves growth");
+        assert!(
+            (grow(&half_drowned) / grow(&wet) - 0.5).abs() < 1e-9,
+            "halfway to full drowning halves growth"
+        );
         // A dry cell's factors are the identity, exactly.
         assert_eq!(water_factors(0.0, 0.42, &h.cfg), (0.42, 1.0));
         // Wetting saturates at one unit of depth and never lifts moisture above one.
         let (deep, _) = water_factors(5.0, 0.9, &h.cfg);
         assert_eq!(deep, 1.0);
-        assert_eq!(water_factors(3.0, 0.5, &h.cfg).0, water_factors(1.0, 0.5, &h.cfg).0);
+        assert_eq!(
+            water_factors(3.0, 0.5, &h.cfg).0,
+            water_factors(1.0, 0.5, &h.cfg).0
+        );
     }
 
     #[test]

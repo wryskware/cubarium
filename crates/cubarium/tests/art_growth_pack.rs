@@ -31,22 +31,20 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::ptr;
 
-use cube_proto::{FACE_SIZE, Face};
 use cubarium::art::{ArtPack, Band, Clip, Plant};
 use cubarium::art_present::{
     ArtPresenter, GROW_BLEND, GrowthStep, PLANT_REVEAL_PX, REED_DEPTH, REED_SCALE, SOIL_SCALE,
-    WIND_PEAK_TICK, WIND_PERIOD,
-    WIND_SLOT_VARIATION, band_of, band_opacity, effective_tip, growth_between,
-    growth_step, growth_weights, next_stage, plant_bend_budget, plant_cap, plant_phase_of,
-    present_seconds, slot_of, slot_wind, species_of, stage_opacity, stage_thresholds, up_of,
-    wind_response,
-    wood_from_producer,
+    WIND_PEAK_TICK, WIND_PERIOD, WIND_SLOT_VARIATION, band_of, band_opacity, effective_tip,
+    growth_between, growth_step, growth_weights, next_stage, plant_bend_budget, plant_cap,
+    plant_phase_of, present_seconds, slot_of, slot_wind, species_of, stage_opacity,
+    stage_thresholds, up_of, wind_response, wood_from_producer,
 };
 use cubarium::clock::DT;
 use cubarium::present::PRODUCER_SATURATION;
 use cubarium_core::view::RenderView;
 use cubarium_render::{Bend, Canvas, Mask, Pose, Sprite, stamp_layers_bent};
 use cubarium_surface::{CUBE_CELL_COUNT, CellId, Vec2};
+use cube_proto::{FACE_SIZE, Face};
 
 // ---------------------------------------------------------------------------
 // fixtures (the patterns of `art_growth_clip.rs` and `art_water.rs`, copied so this file
@@ -184,7 +182,9 @@ fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
 }
 
 fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u16, u16)> {
-    every_pixel().filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y)).collect()
+    every_pixel()
+        .filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y))
+        .collect()
 }
 
 fn assert_same_canvas(a: &Canvas, b: &Canvas, what: &str) {
@@ -219,7 +219,11 @@ fn background(v: &RenderView, f: f64) -> Canvas {
 // ---------------------------------------------------------------------------
 
 fn distinct_frames(clip: &Clip) -> usize {
-    clip.frames.iter().map(|s| format!("{s:?}")).collect::<HashSet<_>>().len()
+    clip.frames
+        .iter()
+        .map(|s| format!("{s:?}"))
+        .collect::<HashSet<_>>()
+        .len()
 }
 
 /// The alpha plane of a sprite: one premultiplied-linear alpha per texel, row-major.
@@ -314,8 +318,14 @@ fn drive_to(
     observes: u64,
     tick: u64,
 ) -> RenderView {
-    assert!(gap * 20 >= 20, "a gap of {gap} ticks is under one MAX_STEP_SECONDS");
-    assert!(tick >= observes * gap, "tick {tick} leaves no room for {observes} observes");
+    assert!(
+        gap * 20 >= 20,
+        "a gap of {gap} ticks is under one MAX_STEP_SECONDS"
+    );
+    assert!(
+        tick >= observes * gap,
+        "tick {tick} leaves no room for {observes} observes"
+    );
     let first = tick - observes * gap;
     p.observe(&bare_view(first));
     let mut last = bare_view(first);
@@ -361,7 +371,9 @@ fn expected_step(
     let opacity_of = |stage: u8| stage_opacity(stage, density, &thresholds, ceiling);
     let mut canvas = background.clone();
     let scratch = &mut Vec::new();
-    let clip = step.lower.and_then(|low| plant.transition(low, step.upper).map(|c| (low, c)));
+    let clip = step
+        .lower
+        .and_then(|low| plant.transition(low, step.upper).map(|c| (low, c)));
     match clip {
         Some((low, clip)) => {
             let under = opacity_of(low);
@@ -401,8 +413,12 @@ fn expected_step(
             }
             let layers = [(idle_pose(plant, step.upper, cell, seconds), 1.0)];
             let mask = match up_of(cell) {
-                Some(_) => Mask::Axial { reveal: step.t * PLANT_REVEAL_PX },
-                None => Mask::Radial { reveal: step.t * (layers[0].0.extent() + 0.5) },
+                Some(_) => Mask::Axial {
+                    reveal: step.t * PLANT_REVEAL_PX,
+                },
+                None => Mask::Radial {
+                    reveal: step.t * (layers[0].0.extent() + 0.5),
+                },
             };
             stamp_layers_bent(
                 &mut canvas,
@@ -432,7 +448,10 @@ fn expected_step(
 fn every_authored_transition_is_one_non_looping_step_of_the_packs_own_sample_count() {
     let art = pack();
     let frames = art.plant_frames();
-    assert!(frames >= 2, "a pack with {frames} plant samples cannot blend");
+    assert!(
+        frames >= 2,
+        "a pack with {frames} plant samples cannot blend"
+    );
     let mut total = 0;
     for plant in &art.plants {
         let pairs: Vec<(u8, u8)> = plant.transitions.iter().map(|t| (t.from, t.to)).collect();
@@ -445,13 +464,25 @@ fn every_authored_transition_is_one_non_looping_step_of_the_packs_own_sample_cou
             let clip = &transition.clip;
             assert!(!clip.looping, "{what}: a growth transition never loops");
             assert_eq!(clip.frames.len(), frames, "{what}: samples");
-            assert!(clip.seconds > 0.0 && clip.seconds.is_finite(), "{what}: {} s", clip.seconds);
+            assert!(
+                clip.seconds > 0.0 && clip.seconds.is_finite(),
+                "{what}: {} s",
+                clip.seconds
+            );
             let distinct = distinct_frames(clip);
-            assert!(distinct >= 8, "{what}: only {distinct} distinct frames of {frames}");
+            assert!(
+                distinct >= 8,
+                "{what}: only {distinct} distinct frames of {frames}"
+            );
 
             // `Plant::transition` finds exactly this clip, and no other pair finds it.
-            let found = plant.transition(from, to).unwrap_or_else(|| panic!("{what}: not found"));
-            assert!(ptr::eq(found, clip), "{what}: `transition` returned a different clip");
+            let found = plant
+                .transition(from, to)
+                .unwrap_or_else(|| panic!("{what}: not found"));
+            assert!(
+                ptr::eq(found, clip),
+                "{what}: `transition` returned a different clip"
+            );
             assert_eq!(
                 pairs.iter().filter(|p| **p == (from, to)).count(),
                 1,
@@ -461,20 +492,42 @@ fn every_authored_transition_is_one_non_looping_step_of_the_packs_own_sample_cou
             // Inclusive sampling: the endpoints are held, nothing wraps, nonsense is the
             // first frame.
             let first = clip.sample(0.0);
-            assert!(ptr::eq(first.first, &clip.frames[0]), "{what}: sample(0) is not frame 0");
+            assert!(
+                ptr::eq(first.first, &clip.frames[0]),
+                "{what}: sample(0) is not frame 0"
+            );
             assert_eq!(first.mix, 0.0, "{what}: sample(0) must not blend");
             let last = clip.sample(clip.seconds);
             let tail = clip.frames.last().unwrap();
-            assert!(ptr::eq(last.first, tail), "{what}: sample(seconds) is not the last frame");
-            assert!(ptr::eq(last.second, tail), "{what}: the end wrapped into the start");
-            assert_eq!(last.mix, 0.0, "{what}: sample(seconds) must hold the last frame");
+            assert!(
+                ptr::eq(last.first, tail),
+                "{what}: sample(seconds) is not the last frame"
+            );
+            assert!(
+                ptr::eq(last.second, tail),
+                "{what}: the end wrapped into the start"
+            );
+            assert_eq!(
+                last.mix, 0.0,
+                "{what}: sample(seconds) must hold the last frame"
+            );
             for seconds in [clip.seconds * 1.5, clip.seconds + 1.0] {
-                assert!(ptr::eq(clip.sample(seconds).first, tail), "{what}: {seconds} s");
+                assert!(
+                    ptr::eq(clip.sample(seconds).first, tail),
+                    "{what}: {seconds} s"
+                );
             }
             for seconds in [-1.0, 0.0, f64::NAN] {
-                assert!(ptr::eq(clip.sample(seconds).first, &clip.frames[0]), "{what}: {seconds} s");
+                assert!(
+                    ptr::eq(clip.sample(seconds).first, &clip.frames[0]),
+                    "{what}: {seconds} s"
+                );
             }
-            assert_eq!(i, pairs.iter().position(|p| *p == (from, to)).unwrap(), "{what}: order");
+            assert_eq!(
+                i,
+                pairs.iter().position(|p| *p == (from, to)).unwrap(),
+                "{what}: order"
+            );
             total += 1;
         }
         // No pair the plant does not declare resolves to a clip, and a transition never runs
@@ -488,7 +541,10 @@ fn every_authored_transition_is_one_non_looping_step_of_the_packs_own_sample_cou
             );
         }
     }
-    println!("  {total} authored transition(s) over {} plants", art.plants.len());
+    println!(
+        "  {total} authored transition(s) over {} plants",
+        art.plants.len()
+    );
     assert!(total >= 1, "the pack carries no authored growth at all");
 }
 
@@ -546,7 +602,10 @@ fn each_growth_clip_starts_and_ends_on_its_neighbouring_stages_neutral_pose() {
                     stage_clip.frames.iter().map(|s| alpha_plane(s)).collect();
                 let e = alpha_plane(frame);
                 let n = e.len();
-                assert!(planes.iter().all(|p| p.len() == n), "{what}: {end} frame is a size apart");
+                assert!(
+                    planes.iter().all(|p| p.len() == n),
+                    "{what}: {end} frame is a size apart"
+                );
 
                 // (a) The stationary material: same alpha in every sample of the loop.
                 let stationary: Vec<usize> = (0..n)
@@ -605,7 +664,11 @@ fn each_growth_clip_starts_and_ends_on_its_neighbouring_stages_neutral_pose() {
                     "  {what:<22} {end:5} vs stage{stage}: {} of {n} texels stationary ({}), \
                      {always} always painted, phase-0 residual {phase0}",
                     stationary.len(),
-                    if stationary.len() == n { "strict" } else { "swept" },
+                    if stationary.len() == n {
+                        "strict"
+                    } else {
+                        "swept"
+                    },
                 );
             }
             // The clip has to have grown *something*: the two endpoints differ in colour or
@@ -626,7 +689,10 @@ fn each_growth_clip_starts_and_ends_on_its_neighbouring_stages_neutral_pose() {
                  climbing 0 → 1 → 2 jumps at the handover",
                 plant.name
             );
-            println!("  {:<14} grow01 and grow12 join on one stage-1 image", plant.name);
+            println!(
+                "  {:<14} grow01 and grow12 join on one stage-1 image",
+                plant.name
+            );
         }
         // Decision 4, as far as pixel arithmetic can separate it: the texels only the `fruit`
         // clip ever paints. A growing part legitimately sweeps through positions no stage
@@ -634,7 +700,10 @@ fn each_growth_clip_starts_and_ends_on_its_neighbouring_stages_neutral_pose() {
         // 8× strip, not for the atlas.
         if let Some(fruit) = &plant.fruit {
             let stage_painted = |i: usize| {
-                plant.stages.iter().any(|c| c.frames.iter().any(|s| alpha_of(s, i) > 0.0))
+                plant
+                    .stages
+                    .iter()
+                    .any(|c| c.frames.iter().any(|s| alpha_of(s, i) > 0.0))
             };
             let only: Vec<usize> = (0..256)
                 .filter(|&i| fruit.frames.iter().all(|s| alpha_of(s, i) > 0.0) && !stage_painted(i))
@@ -711,7 +780,9 @@ fn a_growth_clip_keeps_its_root_between_the_two_stages_rows_and_moves_it_at_most
                     for y in 0..s.height() as i32 {
                         for x in 0..s.width() as i32 {
                             if s.texel(x, y)[3] > 0.0 {
-                                r = r.max((f64::from(x) + 0.5 - 8.0).hypot(f64::from(y) + 0.5 - 8.0));
+                                r = r.max(
+                                    (f64::from(x) + 0.5 - 8.0).hypot(f64::from(y) + 0.5 - 8.0),
+                                );
                             }
                         }
                     }
@@ -730,7 +801,10 @@ fn a_growth_clip_keeps_its_root_between_the_two_stages_rows_and_moves_it_at_most
                 };
                 let lo = reach(&plant.stages[usize::from(from)].frames[0]);
                 let hi = reach(&plant.stages[usize::from(to)].frames[0]);
-                assert!(lo < hi, "{what}: stage {to} reaches no further than stage {from}");
+                assert!(
+                    lo < hi,
+                    "{what}: stage {to} reaches no further than stage {from}"
+                );
                 let mut reaches = Vec::with_capacity(lows.len());
                 for (i, frame) in transition.clip.frames.iter().enumerate() {
                     assert!(
@@ -804,7 +878,11 @@ fn a_growth_clip_keeps_its_root_between_the_two_stages_rows_and_moves_it_at_most
         }
     }
     println!("  {checked} transition(s) checked (side species by root row, canopy by centre)");
-    assert_eq!(checked, art.plants.len() * 2, "every plant's two steps must be checked");
+    assert_eq!(
+        checked,
+        art.plants.len() * 2,
+        "every plant's two steps must be checked"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -884,7 +962,10 @@ fn every_growth_frame_fits_the_footprint_and_no_pose_narrows_the_admitted_wind()
         }
     }
     println!("  clamped by the pack's own art: {clamped:?}");
-    assert!(!clamped.is_empty(), "no species is bounded by the pack, so the rule is untested");
+    assert!(
+        !clamped.is_empty(),
+        "no species is bounded by the pack, so the rule is untested"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -910,17 +991,28 @@ fn a_canopy_step_on_the_rim_of_the_top_face_opens_as_one_stamp_on_two_faces() {
         let cell = CellId::all(Topology::Cube, Scale::ONE)
             .find(|&c| {
                 c.face(Topology::Cube, Scale::ONE) == Face::Top
-                    && (c.cx(Topology::Cube, Scale::ONE) == 0 || c.cx(Topology::Cube, Scale::ONE) == 15 || c.cy(Topology::Cube, Scale::ONE) == 0 || c.cy(Topology::Cube, Scale::ONE) == 15)
+                    && (c.cx(Topology::Cube, Scale::ONE) == 0
+                        || c.cx(Topology::Cube, Scale::ONE) == 15
+                        || c.cy(Topology::Cube, Scale::ONE) == 0
+                        || c.cy(Topology::Cube, Scale::ONE) == 15)
                     && band_of(c) == Band::Canopy
                     && plant_cap(Band::Canopy, c) == Some(2)
                     && species_of(Band::Canopy, c) == species
             })
             .unwrap_or_else(|| panic!("the top face's rim has no rank-2 {species} slot"));
-        let site = Site { cell, band: Band::Canopy, species };
+        let site = Site {
+            cell,
+            band: Band::Canopy,
+            species,
+        };
         let budget = plant_bend_budget(plant);
         for transition in &plant.transitions {
             let (from, to) = (transition.from, transition.to);
-            let what = format!("{species} grow{from}{to} at Top cell ({}, {})", cell.cx(Topology::Cube, Scale::ONE), cell.cy(Topology::Cube, Scale::ONE));
+            let what = format!(
+                "{species} grow{from}{to} at Top cell ({}, {})",
+                cell.cx(Topology::Cube, Scale::ONE),
+                cell.cy(Topology::Cube, Scale::ONE)
+            );
             let density = density_for(Band::Canopy, to);
             // Three observes into the sprout's step (t = 0.75, the petals out and the ribs
             // long enough to reach a seam two pixels off), two into the wider one.
@@ -932,15 +1024,26 @@ fn a_canopy_step_on_the_rim_of_the_top_face_opens_as_one_stamp_on_two_faces() {
             let seconds = present_seconds(v.tick, f);
             let step = drawn_step(&p, site.cell, f)
                 .unwrap_or_else(|| panic!("{what}: the fixture is not in flight"));
-            assert_eq!((step.lower, step.upper), (Some(from), to), "{what}: wrong step");
-            assert!(step.t > GROW_BLEND && step.t < 1.0 - GROW_BLEND, "{what}: t = {}", step.t);
+            assert_eq!(
+                (step.lower, step.upper),
+                (Some(from), to),
+                "{what}: wrong step"
+            );
+            assert!(
+                step.t > GROW_BLEND && step.t < 1.0 - GROW_BLEND,
+                "{what}: t = {}",
+                step.t
+            );
             let wind = wind_of(site, budget, seconds);
             assert_eq!(wind.0, Bend::NONE, "{what}: a radial species never bends");
             let bg = background(&v, f);
             let actual = draw(&mut p, &v, f);
             let expected = expected_step(&art, &bg, site, density, seconds, wind, step);
             assert_same_canvas(&actual, &expected, &what);
-            let lit: HashSet<Face> = differing(&actual, &bg).into_iter().map(|(f, _, _)| f).collect();
+            let lit: HashSet<Face> = differing(&actual, &bg)
+                .into_iter()
+                .map(|(f, _, _)| f)
+                .collect();
             assert!(
                 lit.contains(&Face::Top) && lit.len() >= 2,
                 "{what}: the crown on the rim lights {lit:?}, not the top face and a side face"
@@ -956,7 +1059,10 @@ fn a_canopy_step_on_the_rim_of_the_top_face_opens_as_one_stamp_on_two_faces() {
             checked += 1;
         }
     }
-    assert_eq!(checked, 4, "both clips of both canopy species must be drawn on the rim");
+    assert_eq!(
+        checked, 4,
+        "both clips of both canopy species must be drawn on the rim"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -983,13 +1089,21 @@ fn every_grow_row_sits_after_its_plants_own_rows_and_is_loaded_as_a_transition()
         std::fs::File::open(atelier().join("pack.json")).expect("pack.json"),
     )
     .expect("pack.json must parse");
-    assert!(meta["version"].as_u64().unwrap() >= 5, "a v5 pack is needed for growth rows");
-    let rows = meta["plants"].as_array().expect("a v2+ pack has a plants array");
+    assert!(
+        meta["version"].as_u64().unwrap() >= 5,
+        "a v5 pack is needed for growth rows"
+    );
+    let rows = meta["plants"]
+        .as_array()
+        .expect("a v2+ pack has a plants array");
 
     // Contiguous, one block per plant, in the order the loader produced.
     let mut order: Vec<String> = Vec::new();
     for row in rows {
-        let name = row["name"].as_str().expect("a plant row has a name").to_string();
+        let name = row["name"]
+            .as_str()
+            .expect("a plant row has a name")
+            .to_string();
         if order.last() != Some(&name) {
             assert!(!order.contains(&name), "{name}'s rows are not contiguous");
             order.push(name);
@@ -997,14 +1111,19 @@ fn every_grow_row_sits_after_its_plants_own_rows_and_is_loaded_as_a_transition()
     }
     assert_eq!(
         order,
-        art.plants.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
+        art.plants
+            .iter()
+            .map(|p| p.name.clone())
+            .collect::<Vec<_>>(),
         "the loaded plants are not the atlas's own plant-major order"
     );
 
     let mut grow_rows = 0;
     for plant in &art.plants {
-        let mine: Vec<&serde_json::Value> =
-            rows.iter().filter(|r| r["name"] == plant.name.as_str()).collect();
+        let mine: Vec<&serde_json::Value> = rows
+            .iter()
+            .filter(|r| r["name"] == plant.name.as_str())
+            .collect();
         let row_of = |r: &serde_json::Value| r["row"].as_u64().expect("a plant row has a row");
         let grows: Vec<&&serde_json::Value> =
             mine.iter().filter(|r| r["stage"] == "grow").collect();
@@ -1020,7 +1139,11 @@ fn every_grow_row_sits_after_its_plants_own_rows_and_is_loaded_as_a_transition()
             .collect();
         assert_eq!(kinds, want, "{}: the v4 rows are out of order", plant.name);
 
-        let last_other = others.iter().map(|r| row_of(r)).max().expect("three stage rows");
+        let last_other = others
+            .iter()
+            .map(|r| row_of(r))
+            .max()
+            .expect("three stage rows");
         for g in &grows {
             assert!(
                 row_of(g) > last_other,
@@ -1031,7 +1154,11 @@ fn every_grow_row_sits_after_its_plants_own_rows_and_is_loaded_as_a_transition()
         }
 
         assert_eq!(
-            plant.transitions.iter().map(|t| (t.from, t.to)).collect::<Vec<_>>(),
+            plant
+                .transitions
+                .iter()
+                .map(|t| (t.from, t.to))
+                .collect::<Vec<_>>(),
             grows
                 .iter()
                 .map(|r| (
@@ -1044,9 +1171,17 @@ fn every_grow_row_sits_after_its_plants_own_rows_and_is_loaded_as_a_transition()
         );
         for (transition, row) in plant.transitions.iter().zip(&grows) {
             let what = format!("{} grow{}{}", plant.name, transition.from, transition.to);
-            assert_eq!(row["loop"].as_bool(), Some(false), "{what}: must be marked loop: false");
+            assert_eq!(
+                row["loop"].as_bool(),
+                Some(false),
+                "{what}: must be marked loop: false"
+            );
             assert_eq!(row["band"], plant.band.name(), "{what}: band");
-            assert_eq!(transition.clip.seconds, row["seconds"].as_f64().unwrap(), "{what}: seconds");
+            assert_eq!(
+                transition.clip.seconds,
+                row["seconds"].as_f64().unwrap(),
+                "{what}: seconds"
+            );
             assert_eq!(
                 transition.clip.frames.len(),
                 row["frames"].as_u64().unwrap() as usize,
@@ -1056,6 +1191,12 @@ fn every_grow_row_sits_after_its_plants_own_rows_and_is_loaded_as_a_transition()
         }
     }
     let declared = rows.iter().filter(|r| r["stage"] == "grow").count();
-    assert_eq!(grow_rows, declared, "{declared} growth rows in the atlas, {grow_rows} loaded");
-    println!("  {grow_rows} growth row(s) of {} plant rows loaded", rows.len());
+    assert_eq!(
+        grow_rows, declared,
+        "{declared} growth rows in the atlas, {grow_rows} loaded"
+    );
+    println!(
+        "  {grow_rows} growth row(s) of {} plant rows loaded",
+        rows.len()
+    );
 }

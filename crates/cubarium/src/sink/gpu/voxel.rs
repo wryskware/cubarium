@@ -35,17 +35,16 @@ use anyhow::{Context, Result, bail};
 use cubarium_gpu::vk::Gpu;
 use cubarium_gpu::voxel::{
     MAX_STYLES, PART_ANIMAL_INTERIM, PART_CROWN, PART_CROWN_HEART, PART_NONE, PART_SPROUT,
-    PART_TRUNK, VoxelParams,
-    VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel,
+    PART_TRUNK, VoxelParams, VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel,
 };
-use cubarium_voxel::{World, VoxelView};
+use cubarium_voxel::{VoxelView, World};
 use cubarium_voxel_flora::Flora;
 
 use crate::sink::{FrameSink, Output, WebSink};
 use crate::voxel::VoxelConfig;
+use crate::voxel::animal::{AnimalPart, Animals};
 use crate::voxel::present as cpu;
 use crate::voxel::project::Projection;
-use crate::voxel::animal::{AnimalPart, Animals};
 use crate::voxel::stand::{Part, Stands, Style};
 use cubarium_voxel_fauna::Fauna;
 
@@ -272,10 +271,15 @@ impl VoxelGpuSink {
 
     /// Hand the viewer this frame if enough time has passed since the last one.
     fn feed_web(&mut self) -> Result<()> {
-        let Some((_, period)) = &self.web else { return Ok(()) };
+        let Some((_, period)) = &self.web else {
+            return Ok(());
+        };
         let period = *period;
         let now = Instant::now();
-        if self.web_last.is_some_and(|t| (now - t).as_secs_f64() < period) {
+        if self
+            .web_last
+            .is_some_and(|t| (now - t).as_secs_f64() < period)
+        {
             return Ok(());
         }
         self.web_last = Some(now);
@@ -284,7 +288,11 @@ impl VoxelGpuSink {
         let raster = self
             .web_raster
             .get_or_insert_with(|| cube_proto::Raster::black(p.raster_w as u16, p.raster_h as u16));
-        for (rgb, px) in raster.as_bytes_mut().chunks_exact_mut(3).zip(rgba.chunks_exact(4)) {
+        for (rgb, px) in raster
+            .as_bytes_mut()
+            .chunks_exact_mut(3)
+            .zip(rgba.chunks_exact(4))
+        {
             rgb.copy_from_slice(&px[..3]);
         }
         if let Some((web, _)) = self.web.as_mut() {
@@ -323,7 +331,11 @@ impl VoxelGpuSink {
             self.pack_ms / t,
             self.ticks_staged,
             p.upload_bytes() as f64 / 1024.0,
-            if p.roof_from_texture { "the uploaded table" } else { "a column walk in the shader" },
+            if p.roof_from_texture {
+                "the uploaded table"
+            } else {
+                "a column walk in the shader"
+            },
         );
         if self.capture.is_some() {
             eprintln!(
@@ -389,7 +401,9 @@ fn slot_for(
     if let Some(slot) = slot_of[index] {
         return slot;
     }
-    let Some(style) = stands.style(part) else { return 0 };
+    let Some(style) = stands.style(part) else {
+        return 0;
+    };
     let slot = match styles.iter().position(|s| *s == style) {
         Some(at) => at as u8,
         None if styles.len() < MAX_STYLES => {

@@ -25,7 +25,12 @@ pub fn total_material(world: &World) -> f64 {
         + eco.plant_reserve.iter().sum::<f64>()
         + eco.dead_wood.iter().sum::<f64>()
         + eco.carrion.iter().sum::<f64>();
-    let organisms: f64 = world.state.organisms.iter().map(|(_, o)| o.material()).sum();
+    let organisms: f64 = world
+        .state
+        .organisms
+        .iter()
+        .map(|(_, o)| o.material())
+        .sum();
     cells + organisms
 }
 

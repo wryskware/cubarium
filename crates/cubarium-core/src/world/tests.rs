@@ -1,5 +1,5 @@
-use cubarium_surface::{Scale, Topology};
 use cubarium_surface::{CUBE_CELL_COUNT, CellId, Face, FieldGraph, SurfacePoint, Vec2, cell_of};
+use cubarium_surface::{Scale, Topology};
 
 use crate::DT;
 use crate::config::WorldConfig;
@@ -36,7 +36,11 @@ fn crowd_onto_cell(world: &mut World, cell: CellId, producer: f64) -> Vec<Organi
         o.reserve = 0.0;
         o.hunger_memory = 1.0;
         o.mode = Mode::Seeking;
-        assert_eq!(cell_of(Topology::Cube, Scale::ONE, &o.pos), cell, "test bodies must share the cell");
+        assert_eq!(
+            cell_of(Topology::Cube, Scale::ONE, &o.pos),
+            cell,
+            "test bodies must share the cell"
+        );
     }
     world.state.fields.p[cell.index()] = producer;
     ids
@@ -158,7 +162,10 @@ fn contested_feeding_splits_the_cell_and_conserves_material() {
         .1
         .phenotype
         .cap_foliage;
-    assert!(cap_h > 0.0 && cap_h < 1.0, "the default founder is a partial digester");
+    assert!(
+        cap_h > 0.0 && cap_h < 1.0,
+        "the default founder is a partial digester"
+    );
     // Against the **served** material, not against what was painted: subphase 3a reflushes a
     // little foliage out of the stand's reserve before settlement runs, so the painted 0.004
     // is no longer the whole meal. `IntakeDiagnostics` records what actually left `P`.
@@ -335,7 +342,8 @@ fn a_completed_gestation_places_a_child() {
     assert_eq!(child.1.reserve, 0.2);
     assert!((child.1.heading.length() - 1.0).abs() < 1e-12);
     let parent_pos = world.state.organisms.get(parent).expect("alive").pos;
-    let offset = cubarium_surface::surface_distance(Topology::Cube, parent_pos, child.1.pos, 16.0).expect("nearby");
+    let offset = cubarium_surface::surface_distance(Topology::Cube, parent_pos, child.1.pos, 16.0)
+        .expect("nearby");
     assert!((offset - 2.5).abs() < 0.1, "child placed {offset} px away");
     assert!((world.mass_residual() - residual).abs() < 1e-9);
 }
@@ -832,7 +840,10 @@ fn wading_halves_the_motor_budget_at_unit_depth() {
     let wading = motion(1.0);
     let deep = motion(3.0);
     assert!(dry.0 > 0.0, "a seeking organism moves");
-    assert!(dry.1 > 0.0, "and this fixture's organism also turns, so the budget is shared");
+    assert!(
+        dry.1 > 0.0,
+        "and this fixture's organism also turns, so the budget is shared"
+    );
     assert!(
         (budget(dry) / budget(wading) - 2.0).abs() < 1e-9,
         "dry {dry:?} wading {wading:?}"
@@ -843,8 +854,14 @@ fn wading_halves_the_motor_budget_at_unit_depth() {
     );
     // Turning is throttled by the water too, which is the behaviour the old envelope's
     // independent rotation allowance hid.
-    assert!(wading.1 < dry.1, "wading did not slow the turn: {wading:?} vs {dry:?}");
-    assert!(deep.1 < wading.1, "deeper water did not slow the turn further");
+    assert!(
+        wading.1 < dry.1,
+        "wading did not slow the turn: {wading:?} vs {dry:?}"
+    );
+    assert!(
+        deep.1 < wading.1,
+        "deeper water did not slow the turn further"
+    );
 }
 
 // --- Fauna v2 (`design/fauna-v2.md`) -------------------------------------------------
@@ -1120,7 +1137,10 @@ fn frugivory_comes_first_and_the_diet_gates_hold() {
     let o = world.state.organisms.get(id).expect("alive");
     assert_eq!(o.mode, Mode::Feeding);
     assert!((o.phenotype.cap_foliage - 0.4f32 as f64).abs() < 1e-12);
-    assert!(world.state.fields.f[c] < 1.0, "fruit is foliage machinery's food too");
+    assert!(
+        world.state.fields.f[c] < 1.0,
+        "fruit is foliage machinery's food too"
+    );
     assert!(world.state.fields.p[c] < 1.0);
 }
 
@@ -1207,7 +1227,10 @@ fn the_depth_term_points_up_the_side_faces_and_vanishes_on_top() {
         // Moving along `up` really raises the embedded height.
         let low = SurfacePoint::new(face, 32.0, 40.0);
         let higher = SurfacePoint::new(face, 32.0 + up.x * 4.0, 40.0 + up.y * 4.0);
-        assert!(Topology::Cube.embed(Scale::ONE, &higher)[1] > Topology::Cube.embed(Scale::ONE, &low)[1]);
+        assert!(
+            Topology::Cube.embed(Scale::ONE, &higher)[1]
+                > Topology::Cube.embed(Scale::ONE, &low)[1]
+        );
     }
     // The ring's `up` is the constant `−v`, because `height = 1 − 2v/h` falls with `v`
     // (`design/flat-world-plan-2026-09-16.md` §5). The same two checks, on the same rule.
@@ -1289,7 +1312,8 @@ fn sensing_reaches_the_configured_depth_and_finds_food_two_cells_out() {
     assert_eq!(rings[origin.index()][2].len(), 12);
     for (d, ring) in rings[origin.index()].iter().enumerate() {
         for c in ring {
-            let dist = (i32::from(c.cx(Topology::Cube, Scale::ONE)) - 8).abs() + (i32::from(c.cy(Topology::Cube, Scale::ONE)) - 8).abs();
+            let dist = (i32::from(c.cx(Topology::Cube, Scale::ONE)) - 8).abs()
+                + (i32::from(c.cy(Topology::Cube, Scale::ONE)) - 8).abs();
             assert_eq!(
                 dist as usize,
                 d + 1,
@@ -1355,7 +1379,8 @@ fn sensing_reaches_the_configured_depth_and_finds_food_two_cells_out() {
             o.mode = Mode::Seeking;
         }
         // Rich cells straight "up" the chart, two hops away, nothing at one hop.
-        world.state.fields.p[CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 6).index()] = 1.5;
+        world.state.fields.p[CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 6).index()] =
+            1.5;
         let (extent, speed_max) = {
             let o = world.state.organisms.get(id).expect("alive");
             (o.phenotype.extent, o.phenotype.speed_max)
@@ -1537,17 +1562,41 @@ fn the_training_body_is_the_unit_adult_the_fixtures_founded() {
 
     // The pinned numbers. `structure_adult`, `0.5 · reserve_max` and `0.75 · energy_max`
     // for this genotype under the default organism config.
-    assert_eq!(o.structure.to_bits(), TRAINING_STRUCTURE.to_bits(), "structure {}", o.structure);
-    assert_eq!(o.reserve.to_bits(), TRAINING_RESERVE.to_bits(), "reserve {}", o.reserve);
-    assert_eq!(o.energy.to_bits(), TRAINING_ENERGY.to_bits(), "energy {}", o.energy);
+    assert_eq!(
+        o.structure.to_bits(),
+        TRAINING_STRUCTURE.to_bits(),
+        "structure {}",
+        o.structure
+    );
+    assert_eq!(
+        o.reserve.to_bits(),
+        TRAINING_RESERVE.to_bits(),
+        "reserve {}",
+        o.reserve
+    );
+    assert_eq!(
+        o.energy.to_bits(),
+        TRAINING_ENERGY.to_bits(),
+        "energy {}",
+        o.energy
+    );
     assert_eq!(o.structure, phenotype.structure_adult);
     assert_eq!(o.reserve, TRAINING_START_RESERVE * phenotype.reserve_max);
     assert_eq!(o.energy, TRAINING_START_ENERGY * phenotype.energy_max);
 
     // Booked as an import, so the material box still closes.
-    assert_eq!(world.state.external_material_in - before, o.structure + o.reserve);
-    assert!(world.mass_residual().abs() < 1e-9, "residual {}", world.mass_residual());
-    world.check_invariants().expect("the world stays consistent");
+    assert_eq!(
+        world.state.external_material_in - before,
+        o.structure + o.reserve
+    );
+    assert!(
+        world.mass_residual().abs() < 1e-9,
+        "residual {}",
+        world.mass_residual()
+    );
+    world
+        .check_invariants()
+        .expect("the world stays consistent");
 }
 
 /// Measured on this build; see the test above for why they are written down. `S_adult` is
@@ -1576,12 +1625,24 @@ fn a_refused_neural_founding_leaves_the_world_exactly_as_it_was() {
     world.state.quiet.policy = crate::quiet::QuietPolicy::PostBirthPauseV1;
     let policy = crate::neural::Policy::new(crate::neural::Gru32::zeros());
     let err = world
-        .found_neural_animal(CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8).center(Topology::Cube, Scale::ONE), Vec2::new(1.0, 0.0), policy)
+        .found_neural_animal(
+            CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8)
+                .center(Topology::Cube, Scale::ONE),
+            Vec2::new(1.0, 0.0),
+            policy,
+        )
         .expect_err("the quiet extension refuses a neural animal");
     assert!(err.contains("quiet extension"), "{err}");
     world.state.quiet.policy = crate::quiet::QuietPolicy::Off;
-    assert_eq!(world.state.organisms.len(), before.0, "no body was left behind");
-    assert_eq!(world.state.external_material_in, before.1, "no material was booked");
+    assert_eq!(
+        world.state.organisms.len(),
+        before.0,
+        "no body was left behind"
+    );
+    assert_eq!(
+        world.state.external_material_in, before.1,
+        "no material was booked"
+    );
     assert_eq!(crate::snapshot::state_hash(&world.state), before.2);
 }
 
@@ -1596,12 +1657,22 @@ fn founding_past_the_capacity_cap_is_refused_by_name() {
     let mut world = World::new(cfg).expect("a tiny world");
     for _ in 0..2 {
         world
-            .found_training_animal(CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8).center(Topology::Cube, Scale::ONE), Vec2::new(1.0, 0.0))
+            .found_training_animal(
+                CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8)
+                    .center(Topology::Cube, Scale::ONE),
+                Vec2::new(1.0, 0.0),
+            )
             .expect("inside the cap");
     }
     let err = world
-        .found_training_animal(CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8).center(Topology::Cube, Scale::ONE), Vec2::new(1.0, 0.0))
+        .found_training_animal(
+            CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8)
+                .center(Topology::Cube, Scale::ONE),
+            Vec2::new(1.0, 0.0),
+        )
         .expect_err("the third exceeds the cap");
     assert!(err.contains("2 of its 2 organisms"), "{err}");
-    world.check_invariants().expect("the world stays consistent");
+    world
+        .check_invariants()
+        .expect("the world stays consistent");
 }

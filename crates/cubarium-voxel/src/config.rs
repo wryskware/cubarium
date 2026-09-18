@@ -98,10 +98,19 @@ impl Config {
             .checked_mul(self.height as usize)
             .and_then(|n| n.checked_mul(self.depth as usize))
             .with_context(|| {
-                format!("{}x{}x{} voxels overflows a cell count", self.width, self.height, self.depth)
+                format!(
+                    "{}x{}x{} voxels overflows a cell count",
+                    self.width, self.height, self.depth
+                )
             })?;
-        for (name, value) in [("voxel_m", self.voxel_m), ("aquifer_porosity", self.aquifer_porosity)] {
-            ensure!(value.is_finite() && value > 0.0, "{name} must be positive and finite, not {value}");
+        for (name, value) in [
+            ("voxel_m", self.voxel_m),
+            ("aquifer_porosity", self.aquifer_porosity),
+        ] {
+            ensure!(
+                value.is_finite() && value > 0.0,
+                "{name} must be positive and finite, not {value}"
+            );
         }
         for (name, rate) in [
             ("rain_m_per_s", self.rain_m_per_s),
@@ -111,9 +120,15 @@ impl Config {
             ("free_transfer_cap", self.free_transfer_cap),
             ("initial_aquifer_head_m", self.initial_aquifer_head_m),
         ] {
-            ensure!(rate.is_finite() && rate >= 0.0, "{name} must be finite and not negative, not {rate}");
+            ensure!(
+                rate.is_finite() && rate >= 0.0,
+                "{name} must be finite and not negative, not {rate}"
+            );
         }
-        ensure!(self.water_substeps >= 1, "water_substeps must be at least 1, not 0");
+        ensure!(
+            self.water_substeps >= 1,
+            "water_substeps must be at least 1, not 0"
+        );
         Ok(())
     }
 

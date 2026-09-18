@@ -346,10 +346,10 @@ impl Journal {
 
         let truncated = raw.len() as u64 - verified.prefix as u64;
         if truncated > 0 {
-            file.set_len(verified.prefix as u64).with_context(|| {
-                format!("truncating the torn tail of {}", path.display())
-            })?;
-            file.sync_all().with_context(|| format!("syncing {}", path.display()))?;
+            file.set_len(verified.prefix as u64)
+                .with_context(|| format!("truncating the torn tail of {}", path.display()))?;
+            file.sync_all()
+                .with_context(|| format!("syncing {}", path.display()))?;
             eprintln!(
                 "cubarium: {}: a torn final line of {truncated} byte(s) was truncated back to the \
                  last complete record; the verified prefix is unchanged",
@@ -383,7 +383,9 @@ impl Journal {
         hooks.dir_syncs.fetch_add(1, Ordering::Relaxed);
 
         let status = Arc::new(JournalStatus::default());
-        status.bytes.store(verified.prefix as u64, Ordering::Relaxed);
+        status
+            .bytes
+            .store(verified.prefix as u64, Ordering::Relaxed);
         let owing = verified
             .accepted
             .iter()
@@ -512,7 +514,9 @@ impl Journal {
         let result = self.append(&text);
         // Counted as owed whatever the writer said: an ambiguous failure may still have
         // left the record on disk, and the reserve must cover it either way.
-        self.status.outstanding.fetch_add(records.len() as u64, Ordering::Relaxed);
+        self.status
+            .outstanding
+            .fetch_add(records.len() as u64, Ordering::Relaxed);
         for record in records {
             self.accepted.push(record.clone());
         }
@@ -534,7 +538,10 @@ impl Journal {
             text.push_str(&outcome_line(record));
             text.push('\n');
         }
-        let reserve_for = self.status.outstanding().saturating_sub(records.len() as u64);
+        let reserve_for = self
+            .status
+            .outstanding()
+            .saturating_sub(records.len() as u64);
         if !self.fits(text.len() as u64, reserve_for) {
             return Err(JournalError::Full(format!(
                 "{}: no room even for the outcome records the bound reserved space for",
@@ -566,9 +573,17 @@ impl Journal {
     /// Sequence numbers reserved by the previous process whose records did not survive
     /// simply are not here. They were never applied, so they are never consumed; the
     /// restarted process allocates after [`Journal::max_seq`].
-    pub fn replay_plan(&self, admitted_seq: u64, snapshot_tick: u64) -> Result<Vec<PlannedCommand>> {
-        let mut plan: Vec<PlannedCommand> =
-            self.accepted.iter().filter(|c| c.seq > admitted_seq).cloned().collect();
+    pub fn replay_plan(
+        &self,
+        admitted_seq: u64,
+        snapshot_tick: u64,
+    ) -> Result<Vec<PlannedCommand>> {
+        let mut plan: Vec<PlannedCommand> = self
+            .accepted
+            .iter()
+            .filter(|c| c.seq > admitted_seq)
+            .cloned()
+            .collect();
         plan.sort_by_key(|c| c.seq);
 
         let mut previous_boundary = 0u64;
@@ -644,7 +659,8 @@ impl Journal {
             // Sliced as bytes, not as `str`: a short write lands wherever the disk stopped,
             // which is not obliged to be a character boundary.
             let partial = &text.as_bytes()[..short.min(text.len())];
-            self.write_durably(partial).inspect_err(|e| self.poison(e))?;
+            self.write_durably(partial)
+                .inspect_err(|e| self.poison(e))?;
             let e = JournalError::Uncertain(
                 "injected short journal write (test hook); the partial record is durable"
                     .to_string(),
@@ -652,7 +668,8 @@ impl Journal {
             self.poison(&e);
             return Err(e);
         }
-        self.write_durably(text.as_bytes()).inspect_err(|e| self.poison(e))?;
+        self.write_durably(text.as_bytes())
+            .inspect_err(|e| self.poison(e))?;
         if take_one(&self.hooks.fail_after_sync) {
             // The bytes above are on disk. This is the case the review named: the writer
             // reported a failure and the record survives anyway.
@@ -702,7 +719,9 @@ impl Journal {
             // exactly what nobody can know, so it is uncertain — never a capacity refusal.
             let _ = self.file.write_all(&bytes[..bytes.len() / 2]);
             let _ = self.file.sync_all();
-            self.status.bytes.fetch_add((bytes.len() / 2) as u64, Ordering::Relaxed);
+            self.status
+                .bytes
+                .fetch_add((bytes.len() / 2) as u64, Ordering::Relaxed);
             return Err(uncertain(io::Error::new(
                 io::ErrorKind::StorageFull,
                 "injected ENOSPC part-way through a journal append (test hook)",
@@ -710,17 +729,20 @@ impl Journal {
         }
         self.file.write_all(bytes).map_err(uncertain)?;
         self.file.sync_all().map_err(uncertain)?;
-        self.status.bytes.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+        self.status
+            .bytes
+            .fetch_add(bytes.len() as u64, Ordering::Relaxed);
         Ok(())
     }
 
     /// A record that owed an outcome no longer does.
     fn settle(&self, n: u64) {
-        let _ = self.status.outstanding.fetch_update(
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-            |owed| Some(owed.saturating_sub(n)),
-        );
+        let _ =
+            self.status
+                .outstanding
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |owed| {
+                    Some(owed.saturating_sub(n))
+                });
     }
 }
 
@@ -742,12 +764,21 @@ fn take_one(counter: &AtomicU64) -> bool {
 fn accepted_line(c: &PlannedCommand) -> String {
     if c.kind == CareKind::SpawnApex {
         let second = c.second_target.map_or_else(String::new, |target| {
-            format!(r#",{{"face":{},"u":{},"v":{}}}"#, target.face, target.u, target.v)
+            format!(
+                r#",{{"face":{},"u":{},"v":{}}}"#,
+                target.face, target.u, target.v
+            )
         });
         return format!(
             r#"{{"rec":"accepted_apex_v1","seq":{},"apply_after_tick":{},"client":{},"request":{},"kind":"spawn_apex","targets":[{{"face":{},"u":{},"v":{}}}{}]}}"#,
-            c.seq, c.apply_after_tick, serde_json::Value::from(c.client.as_str()), c.request,
-            c.target.face, c.target.u, c.target.v, second,
+            c.seq,
+            c.apply_after_tick,
+            serde_json::Value::from(c.client.as_str()),
+            c.request,
+            c.target.face,
+            c.target.u,
+            c.target.v,
+            second,
         );
     }
     if c.dose.is_standard() {
@@ -819,7 +850,11 @@ fn verify(raw: &[u8], topology: Topology) -> std::result::Result<Verified, Strin
     // Bytes after the last newline were never terminated: a torn tail by definition.
     let prefix = start;
 
-    let mut out = Verified { prefix, accepted: Vec::new(), outcomes: HashSet::new() };
+    let mut out = Verified {
+        prefix,
+        accepted: Vec::new(),
+        outcomes: HashSet::new(),
+    };
     for (index, &(from, to)) in complete.iter().enumerate() {
         let line = &raw[from..to];
         if line.iter().all(|b| b.is_ascii_whitespace()) {
@@ -854,8 +889,13 @@ enum Record {
 fn parse_record(line: &[u8], topology: Topology) -> std::result::Result<Record, String> {
     let value: serde_json::Value =
         serde_json::from_slice(line).map_err(|e| format!("not JSON: {e}"))?;
-    let object = value.as_object().ok_or_else(|| "not a JSON object".to_string())?;
-    let rec = object.get("rec").and_then(|v| v.as_str()).ok_or("no `rec` string")?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| "not a JSON object".to_string())?;
+    let rec = object
+        .get("rec")
+        .and_then(|v| v.as_str())
+        .ok_or("no `rec` string")?;
     let u64_field = |key: &str| -> std::result::Result<u64, String> {
         object
             .get(key)
@@ -864,7 +904,10 @@ fn parse_record(line: &[u8], topology: Topology) -> std::result::Result<Record, 
     };
     match rec {
         "epoch" => {
-            object.get("epoch").and_then(|v| v.as_str()).ok_or("no `epoch` string")?;
+            object
+                .get("epoch")
+                .and_then(|v| v.as_str())
+                .ok_or("no `epoch` string")?;
             Ok(Record::Epoch)
         }
         "accepted" | "accepted_dose_v1" | "accepted_apex_v1" => {
@@ -905,7 +948,10 @@ fn parse_record(line: &[u8], topology: Topology) -> std::result::Result<Record, 
                 }
                 _ => unreachable!(),
             };
-            let kind = object.get("kind").and_then(|v| v.as_str()).ok_or("no `kind` string")?;
+            let kind = object
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .ok_or("no `kind` string")?;
             let kind = CareKind::parse(kind).ok_or_else(|| format!("unknown kind `{kind}`"))?;
             if (rec == "accepted_apex_v1") != (kind == CareKind::SpawnApex) {
                 return Err("the record kind and command kind disagree".to_string());
@@ -913,33 +959,45 @@ fn parse_record(line: &[u8], topology: Topology) -> std::result::Result<Record, 
             // `u` and `v` are JSON numbers and always were: widening them from `u8` to
             // `u16` changes no byte a journal ever carried, so every pre-widening record
             // (0..=63 on a cube) parses to exactly the target it always parsed to.
-            let component = |target: &serde_json::Value, key: &str| -> std::result::Result<u16, String> {
-                let n = target
-                    .get(key)
-                    .and_then(serde_json::Value::as_u64)
-                    .ok_or_else(|| format!("target has no `{key}`"))?;
-                u16::try_from(n).map_err(|_| format!("target `{key}` is out of range: {n}"))
-            };
+            let component =
+                |target: &serde_json::Value, key: &str| -> std::result::Result<u16, String> {
+                    let n = target
+                        .get(key)
+                        .and_then(serde_json::Value::as_u64)
+                        .ok_or_else(|| format!("target has no `{key}`"))?;
+                    u16::try_from(n).map_err(|_| format!("target `{key}` is out of range: {n}"))
+                };
             let chart = |target: &serde_json::Value| -> std::result::Result<u8, String> {
                 let n = component(target, "face")?;
                 u8::try_from(n).map_err(|_| format!("target `face` is out of range: {n}"))
             };
-            let read_target = |target: &serde_json::Value| -> std::result::Result<CareTarget, String> {
-                let target = CareTarget {
-                    face: chart(target)?, u: component(target, "u")?, v: component(target, "v")?,
+            let read_target =
+                |target: &serde_json::Value| -> std::result::Result<CareTarget, String> {
+                    let target = CareTarget {
+                        face: chart(target)?,
+                        u: component(target, "u")?,
+                        v: component(target, "v")?,
+                    };
+                    target.validate_on(topology).map_err(|e| e.to_string())?;
+                    Ok(target)
                 };
-                target.validate_on(topology).map_err(|e| e.to_string())?;
-                Ok(target)
-            };
             let (target, second_target) = if rec == "accepted_apex_v1" {
-                let targets = object.get("targets").and_then(serde_json::Value::as_array)
+                let targets = object
+                    .get("targets")
+                    .and_then(serde_json::Value::as_array)
                     .ok_or("an `accepted_apex_v1` record must carry a `targets` array")?;
                 if !(1..=2).contains(&targets.len()) {
                     return Err("an apex command must carry one or two targets".to_string());
                 }
-                (read_target(&targets[0])?, targets.get(1).map(read_target).transpose()?)
+                (
+                    read_target(&targets[0])?,
+                    targets.get(1).map(read_target).transpose()?,
+                )
             } else {
-                (read_target(object.get("target").ok_or("no `target`")?)?, None)
+                (
+                    read_target(object.get("target").ok_or("no `target`")?)?,
+                    None,
+                )
             };
             Ok(Record::Accepted(PlannedCommand {
                 seq: u64_field("seq")?,
@@ -956,7 +1014,9 @@ fn parse_record(line: &[u8], topology: Topology) -> std::result::Result<Record, 
                 request: u64_field("request")?,
             }))
         }
-        "outcome" => Ok(Record::Outcome { seq: u64_field("seq")? }),
+        "outcome" => Ok(Record::Outcome {
+            seq: u64_field("seq")?,
+        }),
         other => Err(format!("unknown record kind `{other}`")),
     }
 }
@@ -966,8 +1026,8 @@ mod tests {
     use super::*;
 
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir()
-            .join(format!("cubarium-journal-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("cubarium-journal-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -978,7 +1038,11 @@ mod tests {
             seq,
             boundary,
             kind,
-            CareTarget { face: 1, u: 12, v: 34 },
+            CareTarget {
+                face: 1,
+                u: 12,
+                v: 34,
+            },
             "epoch-1.7",
             seq,
         )
@@ -1001,17 +1065,25 @@ mod tests {
         let dir = scratch("epoch");
         {
             let mut j = Journal::open(&dir, "stamp-1", "0.1.0+abc", Topology::Cube).unwrap();
-            j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap();
+            j.append_accepted(&[command(1, 100, CareKind::Feed)])
+                .unwrap();
         }
         let text = contents(&dir);
         assert!(text.starts_with(r#"{"rec":"epoch""#), "{text}");
         assert!(text.contains(r#""epoch":"stamp-1""#), "{text}");
         assert!(text.contains(r#""build":"0.1.0+abc""#), "{text}");
-        assert!(text.contains(r#""rec":"accepted","seq":1,"apply_after_tick":100"#), "{text}");
+        assert!(
+            text.contains(r#""rec":"accepted","seq":1,"apply_after_tick":100"#),
+            "{text}"
+        );
         assert!(text.contains(r#""kind":"feed""#), "{text}");
 
         let j = Journal::open(&dir, "stamp-2", "0.1.0+abc", Topology::Cube).unwrap();
-        assert_eq!(j.accepted_records().len(), 1, "the earlier run's record survives");
+        assert_eq!(
+            j.accepted_records().len(),
+            1,
+            "the earlier run's record survives"
+        );
         assert_eq!(j.truncated_bytes(), 0);
         assert_eq!(contents(&dir).lines().count(), 3, "epoch, accepted, epoch");
         std::fs::remove_dir_all(&dir).unwrap();
@@ -1041,28 +1113,66 @@ mod tests {
         std::fs::write(dir.join(JOURNAL_NAME), history).unwrap();
 
         let j = Journal::open(&dir, "stamp-1", "b", Topology::Cube).unwrap();
-        assert_eq!(j.truncated_bytes(), 0, "every line is complete; nothing may be dropped");
+        assert_eq!(
+            j.truncated_bytes(),
+            0,
+            "every line is complete; nothing may be dropped"
+        );
         let recovered = j.accepted_records();
         assert_eq!(recovered.len(), 3);
 
-        assert_eq!(recovered[0].target, CareTarget { face: 0, u: 0, v: 0 });
+        assert_eq!(
+            recovered[0].target,
+            CareTarget {
+                face: 0,
+                u: 0,
+                v: 0
+            }
+        );
         assert_eq!(recovered[0].kind, CareKind::Feed);
         assert_eq!((recovered[0].seq, recovered[0].apply_after_tick), (1, 100));
-        assert_eq!(recovered[0].dose, CareDose::STANDARD, "a bare `accepted` is standard");
+        assert_eq!(
+            recovered[0].dose,
+            CareDose::STANDARD,
+            "a bare `accepted` is standard"
+        );
         assert_eq!(recovered[0].client, "c-7");
 
         // The far corner of the cube's last chart: the largest target the old byte could
         // hold, and the one a narrowing mistake would have wrapped to 0.
-        assert_eq!(recovered[1].target, CareTarget { face: 4, u: 63, v: 63 });
+        assert_eq!(
+            recovered[1].target,
+            CareTarget {
+                face: 4,
+                u: 63,
+                v: 63
+            }
+        );
         assert_eq!(recovered[1].dose.permille(), 1500);
 
-        assert_eq!(recovered[2].target, CareTarget { face: 1, u: 12, v: 34 });
-        assert_eq!(recovered[2].second_target, Some(CareTarget { face: 3, u: 52, v: 8 }));
+        assert_eq!(
+            recovered[2].target,
+            CareTarget {
+                face: 1,
+                u: 12,
+                v: 34
+            }
+        );
+        assert_eq!(
+            recovered[2].second_target,
+            Some(CareTarget {
+                face: 3,
+                u: 52,
+                v: 8
+            })
+        );
 
         // And the whole schedule replays, in order, at the boundaries it was written with.
         let plan = j.replay_plan(0, 0).expect("a contiguous schedule");
         assert_eq!(
-            plan.iter().map(|c| (c.seq, c.apply_after_tick)).collect::<Vec<_>>(),
+            plan.iter()
+                .map(|c| (c.seq, c.apply_after_tick))
+                .collect::<Vec<_>>(),
             vec![(1, 100), (2, 140), (3, 180)]
         );
         std::fs::remove_dir_all(&dir).unwrap();
@@ -1075,7 +1185,11 @@ mod tests {
     fn a_ring_target_past_the_cubes_63_round_trips_and_a_cube_refuses_it() {
         let ring = Topology::Ring { w: 320, h: 180 };
         let dir = scratch("ring-target");
-        let far = CareTarget { face: 0, u: 300, v: 170 };
+        let far = CareTarget {
+            face: 0,
+            u: 300,
+            v: 170,
+        };
         {
             let mut j = Journal::open(&dir, "s", "b", ring).unwrap();
             j.append_accepted(&[PlannedCommand::standard(
@@ -1088,14 +1202,21 @@ mod tests {
             )])
             .unwrap();
         }
-        assert!(contents(&dir).contains(r#""target":{"face":0,"u":300,"v":170}"#), "{}", contents(&dir));
+        assert!(
+            contents(&dir).contains(r#""target":{"face":0,"u":300,"v":170}"#),
+            "{}",
+            contents(&dir)
+        );
 
         let j = Journal::open(&dir, "s2", "b", ring).unwrap();
         assert_eq!(j.accepted_records()[0].target, far);
 
         // The same file against a cube world: the target is outside every cube chart, so
         // the history is refused rather than silently landing on some other cell.
-        let err = format!("{:#}", Journal::open(&dir, "s3", "b", Topology::Cube).unwrap_err());
+        let err = format!(
+            "{:#}",
+            Journal::open(&dir, "s3", "b", Topology::Cube).unwrap_err()
+        );
         assert!(err.contains("pixel extent"), "{err}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -1105,8 +1226,11 @@ mod tests {
         let dir = scratch("torn");
         {
             let mut j = Journal::open(&dir, "stamp-1", "b", Topology::Cube).unwrap();
-            j.append_accepted(&[command(1, 100, CareKind::Feed), command(2, 100, CareKind::Rain)])
-                .unwrap();
+            j.append_accepted(&[
+                command(1, 100, CareKind::Feed),
+                command(2, 100, CareKind::Rain),
+            ])
+            .unwrap();
         }
         let intact = contents(&dir);
         let verified_prefix = intact.clone();
@@ -1127,7 +1251,11 @@ mod tests {
         );
         // And the new epoch record went after the prefix, not after the torn tail.
         assert!(!after.contains("\"apply\n"), "{after}");
-        assert_eq!(after.lines().count(), 4, "epoch, two accepted, epoch: {after}");
+        assert_eq!(
+            after.lines().count(),
+            4,
+            "epoch, two accepted, epoch: {after}"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -1136,7 +1264,8 @@ mod tests {
         let dir = scratch("interior");
         {
             let mut j = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
-            j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap();
+            j.append_accepted(&[command(1, 100, CareKind::Feed)])
+                .unwrap();
         }
         let mut lines: Vec<String> = contents(&dir).lines().map(str::to_string).collect();
         lines.insert(1, "{\"rec\":\"accepted\",\"seq\":".to_string());
@@ -1145,7 +1274,10 @@ mod tests {
         let err = Journal::open(&dir, "s2", "b", Topology::Cube).unwrap_err();
         let text = format!("{err:#}");
         assert!(text.contains("line 2"), "{text}");
-        assert!(text.contains(JOURNAL_NAME), "the refusal names the file: {text}");
+        assert!(
+            text.contains(JOURNAL_NAME),
+            "the refusal names the file: {text}"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -1154,7 +1286,8 @@ mod tests {
         let dir = scratch("unknown-kind");
         {
             let mut j = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
-            j.append_accepted(&[command(1, 10, CareKind::Clean)]).unwrap();
+            j.append_accepted(&[command(1, 10, CareKind::Clean)])
+                .unwrap();
             j.append_outcomes(&[OutcomeRecord {
                 seq: 1,
                 tick: 10,
@@ -1185,10 +1318,16 @@ mod tests {
         // Nothing admitted yet, snapshot at 100.
         let plan = j.replay_plan(0, 100).unwrap();
         assert_eq!(
-            plan.iter().map(|c| (c.seq, c.apply_after_tick)).collect::<Vec<_>>(),
+            plan.iter()
+                .map(|c| (c.seq, c.apply_after_tick))
+                .collect::<Vec<_>>(),
             vec![(1, 100), (2, 100), (3, 140)]
         );
-        assert_eq!(j.max_seq(), Some(3), "new commands allocate after the journal maximum");
+        assert_eq!(
+            j.max_seq(),
+            Some(3),
+            "new commands allocate after the journal maximum"
+        );
 
         // A snapshot that already admitted the first two leaves only the third.
         let plan = j.replay_plan(2, 100).unwrap();
@@ -1206,8 +1345,10 @@ mod tests {
         let dir = scratch("replay-holes");
         let mut j = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
         // seq 1 then seq 3: the reserved seq 2 never reached the file.
-        j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap();
-        j.append_accepted(&[command(3, 140, CareKind::Rain)]).unwrap();
+        j.append_accepted(&[command(1, 100, CareKind::Feed)])
+            .unwrap();
+        j.append_accepted(&[command(3, 140, CareKind::Rain)])
+            .unwrap();
         let err = j.replay_plan(0, 100).unwrap_err().to_string();
         assert!(err.contains("not contiguous"), "{err}");
         assert!(err.contains("recovery error"), "{err}");
@@ -1215,8 +1356,11 @@ mod tests {
 
         let dir2 = scratch("replay-backwards");
         let mut j = Journal::open(&dir2, "s", "b", Topology::Cube).unwrap();
-        j.append_accepted(&[command(1, 140, CareKind::Feed), command(2, 100, CareKind::Clean)])
-            .unwrap();
+        j.append_accepted(&[
+            command(1, 140, CareKind::Feed),
+            command(2, 100, CareKind::Clean),
+        ])
+        .unwrap();
         let err = j.replay_plan(0, 100).unwrap_err().to_string();
         assert!(err.contains("must not go backwards"), "{err}");
         std::fs::remove_dir_all(&dir).unwrap();
@@ -1231,20 +1375,39 @@ mod tests {
         let dir = scratch("short-mid-json");
         let hooks = JournalHooks::default();
         {
-            let mut j = Journal::open_with_hooks(&dir, "s", "b", Topology::Cube, hooks.clone()).unwrap();
-            j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap();
+            let mut j =
+                Journal::open_with_hooks(&dir, "s", "b", Topology::Cube, hooks.clone()).unwrap();
+            j.append_accepted(&[command(1, 100, CareKind::Feed)])
+                .unwrap();
             hooks.short_write(40);
-            let err = j.append_accepted(&[command(2, 100, CareKind::Rain)]).unwrap_err();
+            let err = j
+                .append_accepted(&[command(2, 100, CareKind::Rain)])
+                .unwrap_err();
             assert!(err.to_string().contains("short journal write"), "{err}");
         }
         let raw = std::fs::read_to_string(dir.join(JOURNAL_NAME)).unwrap();
-        assert!(!raw.ends_with('\n'), "the injected write stopped mid-record: {raw:?}");
+        assert!(
+            !raw.ends_with('\n'),
+            "the injected write stopped mid-record: {raw:?}"
+        );
 
         let j = Journal::open(&dir, "s2", "b", Topology::Cube).unwrap();
-        assert_eq!(j.truncated_bytes(), 40, "exactly the torn suffix is dropped");
-        assert_eq!(j.accepted_records().len(), 1, "only the complete record survives");
+        assert_eq!(
+            j.truncated_bytes(),
+            40,
+            "exactly the torn suffix is dropped"
+        );
+        assert_eq!(
+            j.accepted_records().len(),
+            1,
+            "only the complete record survives"
+        );
         assert_eq!(j.accepted_records()[0].seq, 1);
-        assert_eq!(j.max_seq(), Some(1), "seq 2 was reserved but never applied, so it is free");
+        assert_eq!(
+            j.max_seq(),
+            Some(1),
+            "seq 2 was reserved but never applied, so it is free"
+        );
         // The surviving schedule is exactly the one complete record.
         let plan = j.replay_plan(0, 100).unwrap();
         assert_eq!(plan.len(), 1);
@@ -1258,15 +1421,22 @@ mod tests {
     fn a_short_write_between_two_batch_records_keeps_only_the_first() {
         let dir = scratch("short-between");
         let hooks = JournalHooks::default();
-        let batch = [command(1, 100, CareKind::Feed), command(2, 100, CareKind::Clean)];
+        let batch = [
+            command(1, 100, CareKind::Feed),
+            command(2, 100, CareKind::Clean),
+        ];
         let first_len = accepted_line(&batch[0]).len() + 1;
         {
-            let mut j = Journal::open_with_hooks(&dir, "s", "b", Topology::Cube, hooks.clone()).unwrap();
+            let mut j =
+                Journal::open_with_hooks(&dir, "s", "b", Topology::Cube, hooks.clone()).unwrap();
             hooks.short_write(first_len as u64);
             assert!(j.append_accepted(&batch).is_err());
         }
         let raw = std::fs::read_to_string(dir.join(JOURNAL_NAME)).unwrap();
-        assert!(raw.ends_with('\n'), "the write stopped exactly on a record boundary");
+        assert!(
+            raw.ends_with('\n'),
+            "the write stopped exactly on a record boundary"
+        );
 
         let j = Journal::open(&dir, "s2", "b", Topology::Cube).unwrap();
         assert_eq!(j.truncated_bytes(), 0, "there was no torn suffix to drop");
@@ -1289,8 +1459,13 @@ mod tests {
         assert!(!status.would_overflow(1), "an empty journal has room");
         assert_eq!(status.outstanding(), 0);
 
-        j.append_accepted(&[command(1, 10, CareKind::Feed)]).unwrap();
-        assert_eq!(status.outstanding(), 1, "an accepted record owes an outcome");
+        j.append_accepted(&[command(1, 10, CareKind::Feed)])
+            .unwrap();
+        assert_eq!(
+            status.outstanding(),
+            1,
+            "an accepted record owes an outcome"
+        );
         assert!(status.bytes() > 0);
         j.append_outcomes(&[OutcomeRecord {
             seq: 1,
@@ -1305,8 +1480,13 @@ mod tests {
         // Right at the bound, accepting more is refused while the file is still writable.
         let debt = 300u64;
         status.outstanding.store(debt, Ordering::Relaxed);
-        status.bytes.store(JOURNAL_LIMIT - debt * OUTCOME_RESERVE, Ordering::Relaxed);
-        assert!(status.would_overflow(1), "the reserve for outstanding outcomes must bind");
+        status
+            .bytes
+            .store(JOURNAL_LIMIT - debt * OUTCOME_RESERVE, Ordering::Relaxed);
+        assert!(
+            status.would_overflow(1),
+            "the reserve for outstanding outcomes must bind"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -1316,10 +1496,17 @@ mod tests {
         let hooks = JournalHooks::default();
         hooks.fail_after_sync(1);
         {
-            let mut j = Journal::open_with_hooks(&dir, "s", "b", Topology::Cube, hooks.clone()).unwrap();
-            let err = j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap_err();
+            let mut j =
+                Journal::open_with_hooks(&dir, "s", "b", Topology::Cube, hooks.clone()).unwrap();
+            let err = j
+                .append_accepted(&[command(1, 100, CareKind::Feed)])
+                .unwrap_err();
             assert!(err.to_string().contains("durable"), "{err}");
-            assert_eq!(j.status().outstanding(), 1, "an ambiguous write still owes an outcome");
+            assert_eq!(
+                j.status().outstanding(),
+                1,
+                "an ambiguous write still owes an outcome"
+            );
         }
         // The whole point: reopening finds the record the writer reported a failure for.
         let j = Journal::open(&dir, "s2", "b", Topology::Cube).unwrap();
@@ -1335,7 +1522,10 @@ mod tests {
         hooks.fail_before_write(1);
         {
             let mut j = Journal::open_with_hooks(&dir, "s", "b", Topology::Cube, hooks).unwrap();
-            assert!(j.append_accepted(&[command(1, 100, CareKind::Rain)]).is_err());
+            assert!(
+                j.append_accepted(&[command(1, 100, CareKind::Rain)])
+                    .is_err()
+            );
         }
         let j = Journal::open(&dir, "s2", "b", Topology::Cube).unwrap();
         assert!(j.accepted_records().is_empty(), "nothing was written");
@@ -1350,7 +1540,8 @@ mod tests {
             let dir = scratch(name);
             {
                 let mut j = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
-                j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap();
+                j.append_accepted(&[command(1, 100, CareKind::Feed)])
+                    .unwrap();
             }
             dir
         };
@@ -1358,7 +1549,10 @@ mod tests {
         // (a) Unterminated partial JSON: an interrupted append. Repaired, recovery proceeds.
         let dir = base("final-unterminated");
         let intact = contents(&dir);
-        let mut f = std::fs::OpenOptions::new().append(true).open(dir.join(JOURNAL_NAME)).unwrap();
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(dir.join(JOURNAL_NAME))
+            .unwrap();
         let suffix = br#"{"rec":"accepted","seq":2,"app"#;
         f.write_all(suffix).unwrap();
         drop(f);
@@ -1374,9 +1568,16 @@ mod tests {
         let before = contents(&dir);
         let damaged = format!("{before}{{\"rec\":\"accepted\",\"seq\":\n");
         std::fs::write(dir.join(JOURNAL_NAME), &damaged).unwrap();
-        let err = format!("{:#}", Journal::open(&dir, "s2", "b", Topology::Cube).unwrap_err());
+        let err = format!(
+            "{:#}",
+            Journal::open(&dir, "s2", "b", Topology::Cube).unwrap_err()
+        );
         assert!(err.contains("not an interrupted write"), "{err}");
-        assert_eq!(contents(&dir), damaged, "the evidence must be preserved, not repaired");
+        assert_eq!(
+            contents(&dir),
+            damaged,
+            "the evidence must be preserved, not repaired"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
 
         // (c) Valid JSON, unknown record type, last line. Could be a future version's
@@ -1385,7 +1586,10 @@ mod tests {
         let before = contents(&dir);
         let damaged = format!("{before}{{\"rec\":\"scheduled\",\"seq\":2}}\n");
         std::fs::write(dir.join(JOURNAL_NAME), &damaged).unwrap();
-        let err = format!("{:#}", Journal::open(&dir, "s2", "b", Topology::Cube).unwrap_err());
+        let err = format!(
+            "{:#}",
+            Journal::open(&dir, "s2", "b", Topology::Cube).unwrap_err()
+        );
         assert!(err.contains("unknown record kind"), "{err}");
         assert_eq!(contents(&dir), damaged);
         std::fs::remove_dir_all(&dir).unwrap();
@@ -1398,17 +1602,21 @@ mod tests {
         let dir = scratch("at-capacity");
         {
             let mut j = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
-            j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap();
+            j.append_accepted(&[command(1, 100, CareKind::Feed)])
+                .unwrap();
         }
         // Pad to exactly the bound with a comment-free filler line that still parses.
         let text = contents(&dir);
-        let filler_line = format!("{}\n", outcome_line(&OutcomeRecord {
-            seq: 1,
-            tick: 100,
-            outcome: "applied",
-            reason: "x".repeat(200),
-            applied: serde_json::json!({}),
-        }));
+        let filler_line = format!(
+            "{}\n",
+            outcome_line(&OutcomeRecord {
+                seq: 1,
+                tick: 100,
+                outcome: "applied",
+                reason: "x".repeat(200),
+                applied: serde_json::json!({}),
+            })
+        );
         let mut padded = text.clone();
         while (padded.len() + filler_line.len()) as u64 <= JOURNAL_LIMIT {
             padded.push_str(&filler_line);
@@ -1431,7 +1639,9 @@ mod tests {
         assert_eq!(plan[0].seq, 1);
         // And a new command is refused as *full*, never as uncertain: nothing was attempted,
         // so the runner keeps stepping.
-        let err = j.append_accepted(&[command(2, 100, CareKind::Rain)]).unwrap_err();
+        let err = j
+            .append_accepted(&[command(2, 100, CareKind::Rain)])
+            .unwrap_err();
         assert!(err.is_full(), "{err:?}");
         assert!(!matches!(err, JournalError::Uncertain(_)));
         assert_eq!(
@@ -1452,7 +1662,10 @@ mod tests {
             file.write_all(&chunk).unwrap();
         }
         drop(file);
-        let err = format!("{:#}", Journal::open(&dir, "s", "b", Topology::Cube).unwrap_err());
+        let err = format!(
+            "{:#}",
+            Journal::open(&dir, "s", "b", Topology::Cube).unwrap_err()
+        );
         assert!(err.contains("larger than its"), "{err}");
         assert!(err.contains("Move it aside deliberately"), "{err}");
         std::fs::remove_dir_all(&dir).unwrap();
@@ -1466,14 +1679,15 @@ mod tests {
         let mut j = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
         // Claim the file is one byte short of the bound without touching the disk.
         j.status().set_for_test(JOURNAL_LIMIT - 1, 0);
-        let err = j.append_outcomes(&[OutcomeRecord {
-            seq: 1,
-            tick: 1,
-            outcome: "applied",
-            reason: String::new(),
-            applied: serde_json::json!({}),
-        }])
-        .unwrap_err();
+        let err = j
+            .append_outcomes(&[OutcomeRecord {
+                seq: 1,
+                tick: 1,
+                outcome: "applied",
+                reason: String::new(),
+                applied: serde_json::json!({}),
+            }])
+            .unwrap_err();
         assert!(err.is_full(), "{err:?}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -1487,12 +1701,18 @@ mod tests {
         let dir = scratch("enospc-partial");
         let hooks = JournalHooks::default();
         {
-            let mut j = Journal::open_with_hooks(&dir, "s", "b", Topology::Cube, hooks.clone()).unwrap();
+            let mut j =
+                Journal::open_with_hooks(&dir, "s", "b", Topology::Cube, hooks.clone()).unwrap();
             // Armed after the open, so the epoch record lands normally and the injected
             // failure is squarely on the care write.
             hooks.enospc(1);
-            let err = j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap_err();
-            assert!(!err.is_full(), "ENOSPC from a write in progress is not a capacity refusal");
+            let err = j
+                .append_accepted(&[command(1, 100, CareKind::Feed)])
+                .unwrap_err();
+            assert!(
+                !err.is_full(),
+                "ENOSPC from a write in progress is not a capacity refusal"
+            );
             assert!(matches!(err, JournalError::Uncertain(_)), "{err:?}");
             assert!(j.poisoned().is_some(), "the writer must be poisoned");
 
@@ -1508,7 +1728,9 @@ mod tests {
                 }])
                 .unwrap_err();
             assert!(matches!(e, JournalError::Uncertain(_)), "{e:?}");
-            let e = j.append_accepted(&[command(2, 100, CareKind::Clean)]).unwrap_err();
+            let e = j
+                .append_accepted(&[command(2, 100, CareKind::Clean)])
+                .unwrap_err();
             assert!(matches!(e, JournalError::Uncertain(_)), "{e:?}");
             assert_eq!(
                 std::fs::read(dir.join(JOURNAL_NAME)).unwrap(),
@@ -1518,8 +1740,15 @@ mod tests {
         }
         let j = Journal::open(&dir, "s2", "b", Topology::Cube).unwrap();
         assert!(j.truncated_bytes() > 0, "the half record is repaired away");
-        assert!(j.accepted_records().is_empty(), "no complete record survived");
-        assert_eq!(j.max_seq(), None, "seq 1 was never applied, and is not consumed");
+        assert!(
+            j.accepted_records().is_empty(),
+            "no complete record survived"
+        );
+        assert_eq!(
+            j.max_seq(),
+            None,
+            "seq 1 was never applied, and is not consumed"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
 
         // (b) The complete record reached the file and the failure came at the sync. The
@@ -1527,9 +1756,12 @@ mod tests {
         let dir = scratch("enospc-complete");
         let hooks = JournalHooks::default();
         {
-            let mut j = Journal::open_with_hooks(&dir, "s", "b", Topology::Cube, hooks.clone()).unwrap();
+            let mut j =
+                Journal::open_with_hooks(&dir, "s", "b", Topology::Cube, hooks.clone()).unwrap();
             hooks.fail_after_sync(1);
-            let err = j.append_accepted(&[command(7, 100, CareKind::Rain)]).unwrap_err();
+            let err = j
+                .append_accepted(&[command(7, 100, CareKind::Rain)])
+                .unwrap_err();
             assert!(!err.is_full(), "{err:?}");
             assert!(j.poisoned().is_some());
         }
@@ -1552,14 +1784,20 @@ mod tests {
         let before = std::fs::read(dir.join(JOURNAL_NAME)).unwrap();
         j.status().set_for_test(JOURNAL_LIMIT - 1, 0);
 
-        let err = j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap_err();
+        let err = j
+            .append_accepted(&[command(1, 100, CareKind::Feed)])
+            .unwrap_err();
         assert!(err.is_full(), "{err:?}");
-        assert!(j.poisoned().is_none(), "a capacity refusal must not poison the writer");
+        assert!(
+            j.poisoned().is_none(),
+            "a capacity refusal must not poison the writer"
+        );
         assert_eq!(std::fs::read(dir.join(JOURNAL_NAME)).unwrap(), before);
 
         // And once there is room again the same writer still works: nothing was broken.
         j.status().set_for_test(before.len() as u64, 0);
-        j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap();
+        j.append_accepted(&[command(1, 100, CareKind::Feed)])
+            .unwrap();
         assert_eq!(j.accepted_records().len(), 1);
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -1572,13 +1810,15 @@ mod tests {
         let dir = scratch("dir-barrier");
         let hooks = JournalHooks::default();
         assert_eq!(hooks.dir_sync_count(), 0);
-        let mut j = Journal::open_with_hooks(&dir, "s", "b", Topology::Cube, hooks.clone()).unwrap();
+        let mut j =
+            Journal::open_with_hooks(&dir, "s", "b", Topology::Cube, hooks.clone()).unwrap();
         assert_eq!(
             hooks.dir_sync_count(),
             1,
             "the directory must be synced at open, which is before any append is possible"
         );
-        j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap();
+        j.append_accepted(&[command(1, 100, CareKind::Feed)])
+            .unwrap();
         assert_eq!(hooks.dir_sync_count(), 1, "one barrier per run is enough");
         drop(j);
 
@@ -1587,8 +1827,14 @@ mod tests {
         let dir2 = scratch("dir-barrier-fails");
         let hooks = JournalHooks::default();
         hooks.fail_dir_sync(1);
-        let err = format!("{:#}", Journal::open_with_hooks(&dir2, "s", "b", Topology::Cube, hooks).unwrap_err());
-        assert!(err.contains("no \ncommand may be accepted") || err.contains("command may be accepted"), "{err}");
+        let err = format!(
+            "{:#}",
+            Journal::open_with_hooks(&dir2, "s", "b", Topology::Cube, hooks).unwrap_err()
+        );
+        assert!(
+            err.contains("no \ncommand may be accepted") || err.contains("command may be accepted"),
+            "{err}"
+        );
         assert!(
             !dir2.join(JOURNAL_NAME).exists()
                 || std::fs::read(dir2.join(JOURNAL_NAME)).unwrap().is_empty(),
@@ -1631,13 +1877,21 @@ mod tests {
         }
         let text = contents(&dir);
         let lines: Vec<&str> = text.lines().collect();
-        assert!(lines[1].contains(r#""rec":"accepted","seq":1"#), "{}", lines[1]);
+        assert!(
+            lines[1].contains(r#""rec":"accepted","seq":1"#),
+            "{}",
+            lines[1]
+        );
         assert!(
             !lines[1].contains("dose_permille"),
             "a standard command must carry no amount at all: {}",
             lines[1]
         );
-        assert!(lines[2].contains(r#""rec":"accepted_dose_v1","seq":2"#), "{}", lines[2]);
+        assert!(
+            lines[2].contains(r#""rec":"accepted_dose_v1","seq":2"#),
+            "{}",
+            lines[2]
+        );
         assert!(lines[2].contains(r#""dose_permille":1500"#), "{}", lines[2]);
         assert!(lines[3].contains(r#""dose_permille":250"#), "{}", lines[3]);
 
@@ -1646,10 +1900,15 @@ mod tests {
         let j = Journal::open(&dir, "s2", "b", Topology::Cube).unwrap();
         let plan = j.replay_plan(0, 100).unwrap();
         assert_eq!(
-            plan.iter().map(|c| (c.seq, c.dose.permille())).collect::<Vec<_>>(),
+            plan.iter()
+                .map(|c| (c.seq, c.dose.permille()))
+                .collect::<Vec<_>>(),
             vec![(1, 1000), (2, 1500), (3, 250)]
         );
-        assert!(plan[0].dose.is_standard(), "a legacy record means the standard dose");
+        assert!(
+            plan[0].dose.is_standard(),
+            "a legacy record means the standard dose"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -1667,7 +1926,10 @@ mod tests {
         }
         let j = Journal::open(&dir, "s2", "b", Topology::Cube).unwrap();
         assert_eq!(
-            j.accepted_records().iter().map(|c| c.dose.permille()).collect::<Vec<_>>(),
+            j.accepted_records()
+                .iter()
+                .map(|c| c.dose.permille())
+                .collect::<Vec<_>>(),
             vec![CareDose::MIN_PERMILLE, CareDose::MAX_PERMILLE]
         );
         std::fs::remove_dir_all(&dir).unwrap();
@@ -1721,11 +1983,15 @@ mod tests {
             let dir = scratch(name);
             {
                 let mut j = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
-                j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap();
+                j.append_accepted(&[command(1, 100, CareKind::Feed)])
+                    .unwrap();
             }
             let damaged = format!("{}{line}\n", contents(&dir));
             std::fs::write(dir.join(JOURNAL_NAME), &damaged).unwrap();
-            let err = format!("{:#}", Journal::open(&dir, "s2", "b", Topology::Cube).unwrap_err());
+            let err = format!(
+                "{:#}",
+                Journal::open(&dir, "s2", "b", Topology::Cube).unwrap_err()
+            );
             assert!(err.contains("cannot be trusted"), "{name}: {err}");
             assert_eq!(
                 contents(&dir),
@@ -1743,18 +2009,26 @@ mod tests {
         let dir = scratch("dose-torn");
         {
             let mut j = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
-            j.append_accepted(&[dosed(1, 100, CareKind::Rain, 1500)]).unwrap();
+            j.append_accepted(&[dosed(1, 100, CareKind::Rain, 1500)])
+                .unwrap();
         }
         let intact = contents(&dir);
         let suffix = br#"{"rec":"accepted_dose_v1","seq":2,"apply_after_tick":100,"dose_per"#;
-        let mut f = std::fs::OpenOptions::new().append(true).open(dir.join(JOURNAL_NAME)).unwrap();
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(dir.join(JOURNAL_NAME))
+            .unwrap();
         f.write_all(suffix).unwrap();
         drop(f);
 
         let j = Journal::open(&dir, "s2", "b", Topology::Cube).unwrap();
         assert_eq!(j.truncated_bytes(), suffix.len() as u64);
         assert_eq!(j.accepted_records().len(), 1);
-        assert_eq!(j.accepted_records()[0].dose.permille(), 1500, "the complete record is intact");
+        assert_eq!(
+            j.accepted_records()[0].dose.permille(),
+            1500,
+            "the complete record is intact"
+        );
         assert!(contents(&dir).starts_with(&intact));
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -1788,8 +2062,16 @@ mod tests {
     fn an_atomic_apex_pair_round_trips_as_one_replay_command() {
         let dir = scratch("apex-pair");
         let mut apex = command(1, 77, CareKind::SpawnApex);
-        apex.target = CareTarget { face: 0, u: 3, v: 61 };
-        apex.second_target = Some(CareTarget { face: 4, u: 52, v: 8 });
+        apex.target = CareTarget {
+            face: 0,
+            u: 3,
+            v: 61,
+        };
+        apex.second_target = Some(CareTarget {
+            face: 4,
+            u: 52,
+            v: 8,
+        });
         {
             let mut journal = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
             journal.append_accepted(&[apex.clone()]).unwrap();

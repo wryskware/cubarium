@@ -46,7 +46,11 @@ fn reference(linear: f32) -> u8 {
         return 255;
     }
     let c = f64::from(linear);
-    let s = if c <= 0.003_130_8 { 12.92 * c } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 };
+    let s = if c <= 0.003_130_8 {
+        12.92 * c
+    } else {
+        1.055 * c.powf(1.0 / 2.4) - 0.055
+    };
     (s * 255.0).round().clamp(0.0, 255.0) as u8
 }
 
@@ -117,7 +121,11 @@ static TABLE: LazyLock<Table> = LazyLock::new(|| {
             );
         }
     }
-    assert_eq!(next, thresholds.len(), "every sRGB code step must land in a bucket");
+    assert_eq!(
+        next,
+        thresholds.len(),
+        "every sRGB code step must land in a bucket"
+    );
     Table { code, step }
 });
 
@@ -133,7 +141,11 @@ pub fn srgb_encode(linear: f32) -> u8 {
 /// Inverse of [`srgb_encode`] on the 8-bit lattice.
 pub fn srgb_decode(encoded: u8) -> f32 {
     let c = f64::from(encoded) / 255.0;
-    let l = if c <= 0.040_45 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) };
+    let l = if c <= 0.040_45 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    };
     l as f32
 }
 
@@ -162,7 +174,11 @@ mod tests {
             for d in -4i64..=4 {
                 let b = (t as i64 + d).clamp(0, 1.0f32.to_bits() as i64) as u32;
                 let v = f32::from_bits(b);
-                assert_eq!(srgb_encode(v), reference(v), "at {v} ({b:#x}), {d} from step {c}");
+                assert_eq!(
+                    srgb_encode(v),
+                    reference(v),
+                    "at {v} ({b:#x}), {d} from step {c}"
+                );
             }
         }
     }
@@ -182,12 +198,19 @@ mod tests {
             let v = i as f32 / 100_000.0;
             assert_eq!(srgb_encode(v), reference(v), "at {v}");
         }
-        for v in [f32::MIN_POSITIVE, f32::from_bits(1), 1e-30, 1.5177e-4, 0.003_130_8, 1.0, 2.0] {
+        for v in [
+            f32::MIN_POSITIVE,
+            f32::from_bits(1),
+            1e-30,
+            1.5177e-4,
+            0.003_130_8,
+            1.0,
+            2.0,
+        ] {
             assert_eq!(srgb_encode(v), reference(v), "at {v}");
         }
         assert_eq!(srgb_encode(f32::NAN), reference(f32::NAN));
         assert_eq!(srgb_encode(-0.0), 0);
         assert_eq!(srgb_encode(f32::INFINITY), 255);
     }
-
 }

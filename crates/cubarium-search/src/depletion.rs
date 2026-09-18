@@ -262,8 +262,16 @@ pub struct DepletionTracker {
 impl DepletionTracker {
     /// `p_ref` is each cell's tick-0 foliage, `light`/`moisture` the reconstructed static
     /// habitat, `w0` the world's own tick-0 wood.
-    pub fn new(p_ref: &[f64], light: &[f64], moisture: &[f64], w0: &[f64], k: &PlantConstants) -> Self {
-        let crit = (0..p_ref.len()).map(|i| l_mu_crit(p_ref[i], w0[i], k)).collect();
+    pub fn new(
+        p_ref: &[f64],
+        light: &[f64],
+        moisture: &[f64],
+        w0: &[f64],
+        k: &PlantConstants,
+    ) -> Self {
+        let crit = (0..p_ref.len())
+            .map(|i| l_mu_crit(p_ref[i], w0[i], k))
+            .collect();
         DepletionTracker {
             p_ref: p_ref.to_vec(),
             w0: w0.to_vec(),
@@ -423,7 +431,11 @@ impl DepletionTracker {
         let mut latency_sum = 0.0;
         let mut recovered = 0u32;
         for r in &mut self.records {
-            r.post_served_over_p0 = if r.p0 > 0.0 { r.post_served_foliage / r.p0 } else { 0.0 };
+            r.post_served_over_p0 = if r.p0 > 0.0 {
+                r.post_served_foliage / r.p0
+            } else {
+                0.0
+            };
             r.p_final_over_p0 = if r.p0 > 0.0 {
                 p_final.get(usize::from(r.cell)).copied().unwrap_or(0.0) / r.p0
             } else {
@@ -498,7 +510,13 @@ pub struct ServedAttributor {
 
 impl ServedAttributor {
     /// A live body observed in `cell` with lifetime served foliage `served_now`.
-    pub fn observe(&mut self, id: OrganismId, cell: u16, served_now: f64, out: &mut BTreeMap<u16, f64>) {
+    pub fn observe(
+        &mut self,
+        id: OrganismId,
+        cell: u16,
+        served_now: f64,
+        out: &mut BTreeMap<u16, f64>,
+    ) {
         let previous = self.last.insert(id, served_now).unwrap_or(0.0);
         let delta = served_now - previous;
         if delta > 0.0 {
@@ -508,7 +526,13 @@ impl ServedAttributor {
 
     /// A body whose record closed, with its final lifetime served foliage, credited to the
     /// cell it was last observed in.
-    pub fn close(&mut self, id: OrganismId, last_cell: u16, served_final: f64, out: &mut BTreeMap<u16, f64>) {
+    pub fn close(
+        &mut self,
+        id: OrganismId,
+        last_cell: u16,
+        served_final: f64,
+        out: &mut BTreeMap<u16, f64>,
+    ) {
         // `remove`, not `get`: a closed body is forgotten, so a reused slot cannot inherit its
         // reading and a second close credits nothing.
         let Some(previous) = self.last.remove(&id) else {

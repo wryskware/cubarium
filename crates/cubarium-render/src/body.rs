@@ -20,7 +20,10 @@ pub struct BodyShape {
 
 impl BodyShape {
     pub fn extent(&self) -> f64 {
-        self.lobes.iter().map(|l| l.offset.length() + l.radius).fold(0.0, f64::max)
+        self.lobes
+            .iter()
+            .map(|l| l.offset.length() + l.radius)
+            .fold(0.0, f64::max)
     }
 
     /// Coverage of a body-frame point in `[0, 1]`: the maximum over lobes of a soft disc
@@ -54,7 +57,14 @@ impl BodyShape {
 /// quarter turn clockwise on screen; add `color · coverage` when coverage > 0. Because
 /// each pixel appears once, a body straddling a seam or vertex is never double-lit; the
 /// documented localized discontinuity at a top vertex comes from ownership changes.
-pub fn stamp_body(canvas: &mut Canvas, anchor: SurfacePoint, heading: Vec2, shape: &BodyShape, color: [f32; 3], scratch: &mut Vec<PixelImage>) {
+pub fn stamp_body(
+    canvas: &mut Canvas,
+    anchor: SurfacePoint,
+    heading: Vec2,
+    shape: &BodyShape,
+    color: [f32; 3],
+    scratch: &mut Vec<PixelImage>,
+) {
     let Some(h) = heading.normalized() else {
         scratch.clear();
         return;
@@ -73,7 +83,12 @@ pub fn stamp_body(canvas: &mut Canvas, anchor: SurfacePoint, heading: Vec2, shap
         let cov = shape.coverage(body);
         if cov > 0.0 {
             let c = cov as f32;
-            canvas.add(img.face, img.x, img.y, [color[0] * c, color[1] * c, color[2] * c]);
+            canvas.add(
+                img.face,
+                img.x,
+                img.y,
+                [color[0] * c, color[1] * c, color[2] * c],
+            );
         }
     }
 }
@@ -81,21 +96,35 @@ pub fn stamp_body(canvas: &mut Canvas, anchor: SurfacePoint, heading: Vec2, shap
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cube_proto::Face;
     use cubarium_surface::Topology;
+    use cube_proto::Face;
     use std::collections::HashSet;
 
     fn one_lobe(radius: f64) -> BodyShape {
-        BodyShape { lobes: vec![Lobe { offset: Vec2::ZERO, radius }] }
+        BodyShape {
+            lobes: vec![Lobe {
+                offset: Vec2::ZERO,
+                radius,
+            }],
+        }
     }
 
     /// The asymmetric fixture body from the host `body` scene.
     fn asymmetric() -> BodyShape {
         BodyShape {
             lobes: vec![
-                Lobe { offset: Vec2::new(0.0, 0.0), radius: 1.6 },
-                Lobe { offset: Vec2::new(2.4, 0.0), radius: 1.0 },
-                Lobe { offset: Vec2::new(-1.4, 1.3), radius: 0.9 },
+                Lobe {
+                    offset: Vec2::new(0.0, 0.0),
+                    radius: 1.6,
+                },
+                Lobe {
+                    offset: Vec2::new(2.4, 0.0),
+                    radius: 1.0,
+                },
+                Lobe {
+                    offset: Vec2::new(-1.4, 1.3),
+                    radius: 0.9,
+                },
             ],
         }
     }
@@ -138,8 +167,14 @@ mod tests {
         // Two coincident lobes never sum past 1.
         let two = BodyShape {
             lobes: vec![
-                Lobe { offset: Vec2::ZERO, radius: 2.0 },
-                Lobe { offset: Vec2::new(0.2, 0.0), radius: 2.0 },
+                Lobe {
+                    offset: Vec2::ZERO,
+                    radius: 2.0,
+                },
+                Lobe {
+                    offset: Vec2::new(0.2, 0.0),
+                    radius: 2.0,
+                },
             ],
         };
         for k in 0..40 {
@@ -155,23 +190,50 @@ mod tests {
     #[test]
     fn body_frame_plus_y_is_clockwise_on_screen() {
         // A tiny lobe offset one pixel along body +y, nothing at the origin.
-        let shape = BodyShape { lobes: vec![Lobe { offset: Vec2::new(0.0, 1.0), radius: 0.3 }] };
+        let shape = BodyShape {
+            lobes: vec![Lobe {
+                offset: Vec2::new(0.0, 1.0),
+                radius: 0.3,
+            }],
+        };
         let mut scratch = Vec::new();
 
         // Heading image-right: the lobe must land one pixel image-down.
         let mut canvas = Canvas::cube();
         let anchor = SurfacePoint::pixel_center(Topology::Cube, Face::Front, 32, 32);
-        stamp_body(&mut canvas, anchor, Vec2::new(1.0, 0.0), &shape, [1.0; 3], &mut scratch);
+        stamp_body(
+            &mut canvas,
+            anchor,
+            Vec2::new(1.0, 0.0),
+            &shape,
+            [1.0; 3],
+            &mut scratch,
+        );
         let l = lit(&canvas);
         assert_eq!(l.len(), 1, "expected exactly one lit pixel, got {l:?}");
-        assert_eq!((l[0].0, l[0].1, l[0].2), (Face::Front, 32, 33), "chart offset (0, +1)");
+        assert_eq!(
+            (l[0].0, l[0].1, l[0].2),
+            (Face::Front, 32, 33),
+            "chart offset (0, +1)"
+        );
 
         // Heading image-up `(0, -1)`: the lobe must land one pixel image-right.
         let mut canvas = Canvas::cube();
-        stamp_body(&mut canvas, anchor, Vec2::new(0.0, -1.0), &shape, [1.0; 3], &mut scratch);
+        stamp_body(
+            &mut canvas,
+            anchor,
+            Vec2::new(0.0, -1.0),
+            &shape,
+            [1.0; 3],
+            &mut scratch,
+        );
         let l = lit(&canvas);
         assert_eq!(l.len(), 1, "expected exactly one lit pixel, got {l:?}");
-        assert_eq!((l[0].0, l[0].1, l[0].2), (Face::Front, 33, 32), "chart offset (+1, 0)");
+        assert_eq!(
+            (l[0].0, l[0].1, l[0].2),
+            (Face::Front, 33, 32),
+            "chart offset (+1, 0)"
+        );
     }
 
     #[test]
@@ -180,12 +242,22 @@ mod tests {
         let mut scratch = Vec::new();
         let mut canvas = Canvas::cube();
         let anchor = SurfacePoint::pixel_center(Topology::Cube, Face::Front, 32, 32);
-        stamp_body(&mut canvas, anchor, Vec2::new(1.0, 0.0), &shape, [1.0; 3], &mut scratch);
+        stamp_body(
+            &mut canvas,
+            anchor,
+            Vec2::new(1.0, 0.0),
+            &shape,
+            [1.0; 3],
+            &mut scratch,
+        );
 
         // Every pixel offered by `unfold_pixels` is offered exactly once.
         let mut seen = HashSet::new();
         for img in &scratch {
-            assert!(seen.insert((img.face, img.x, img.y)), "pixel {img:?} offered twice");
+            assert!(
+                seen.insert((img.face, img.x, img.y)),
+                "pixel {img:?} offered twice"
+            );
         }
         assert_eq!(seen.len(), scratch.len());
 
@@ -203,7 +275,11 @@ mod tests {
         let got = lit(&canvas);
         assert_eq!(got.len(), 13, "expected 13 lit pixels, got {}", got.len());
         for (x, y) in want {
-            assert!(got.iter().any(|g| g.0 == Face::Front && g.1 == x && g.2 == y), "({x},{y})");
+            assert!(
+                got.iter()
+                    .any(|g| g.0 == Face::Front && g.1 == x && g.2 == y),
+                "({x},{y})"
+            );
         }
         // The center pixel is fully covered.
         assert_eq!(canvas.get(Face::Front, 32, 32)[0], 1.0);
@@ -243,7 +319,10 @@ mod tests {
 
         let (a, b) = (total(&mid), total(&seam));
         assert!((a - b).abs() <= 1e-6, "mid {a} vs seam {b}");
-        assert!(a > 5.0, "the fixture body should cover several pixels, got {a}");
+        assert!(
+            a > 5.0,
+            "the fixture body should cover several pixels, got {a}"
+        );
     }
 
     #[test]
@@ -262,13 +341,19 @@ mod tests {
         );
         let mut seen = HashSet::new();
         for img in &scratch {
-            assert!(seen.insert((img.face, img.x, img.y)), "pixel offered twice at a vertex");
+            assert!(
+                seen.insert((img.face, img.x, img.y)),
+                "pixel offered twice at a vertex"
+            );
         }
         for (_, _, _, v) in lit(&canvas) {
             assert!(v <= 1.0 + 1e-6, "pixel brighter than full coverage: {v}");
         }
         let faces: HashSet<Face> = lit(&canvas).into_iter().map(|p| p.0).collect();
-        assert!(faces.len() >= 2, "a vertex stamp should reach more than one chart: {faces:?}");
+        assert!(
+            faces.len() >= 2,
+            "a vertex stamp should reach more than one chart: {faces:?}"
+        );
     }
 
     #[test]

@@ -100,11 +100,17 @@ pub struct Limits<'a> {
 impl<'a> Limits<'a> {
     /// No clock, only the flag.
     pub fn new(cancel: &'a AtomicBool) -> Limits<'a> {
-        Limits { cancel, deadline: None }
+        Limits {
+            cancel,
+            deadline: None,
+        }
     }
 
     pub fn until(cancel: &'a AtomicBool, deadline: Instant) -> Limits<'a> {
-        Limits { cancel, deadline: Some(deadline) }
+        Limits {
+            cancel,
+            deadline: Some(deadline),
+        }
     }
 
     /// True when the run must stop now. A passed deadline *sets* the shared flag, so one
@@ -406,7 +412,16 @@ pub fn run_traced(
     job: &str,
 ) -> Result<(Episode, Trajectory), EpisodeError> {
     let mut trace = Trajectory::default();
-    let episode = run_prepared_traced(layout, driver, horizon, limits, job, None, None, Some(&mut trace))?;
+    let episode = run_prepared_traced(
+        layout,
+        driver,
+        horizon,
+        limits,
+        job,
+        None,
+        None,
+        Some(&mut trace),
+    )?;
     Ok((episode, trace))
 }
 
@@ -446,8 +461,11 @@ pub fn run_prepared_traced(
     let e_r = cfg.organism.reserve_energy_density;
     let leave_below = cfg.drives.feed_min;
     let route = layout.route();
-    let opening: BTreeSet<u16> =
-        layout.patches[0].cells(layout.face()).iter().map(|c| c.0).collect();
+    let opening: BTreeSet<u16> = layout.patches[0]
+        .cells(layout.face())
+        .iter()
+        .map(|c| c.0)
+        .collect();
 
     let (extent, capacity) = {
         let o = world.state.organisms.get(id).expect("the grazer");
@@ -466,32 +484,41 @@ pub fn run_prepared_traced(
             // The only scripted field a candidate rollout uses: births off, equally, in every
             // arm. `apply` is `d.bud = d.bud && false`, so it can suppress a request and can
             // never create one.
-            world.set_scripted_intents(vec![(id, ScriptedIntent {
-                bud: Some(false),
-                ..ScriptedIntent::default()
-            })]);
+            world.set_scripted_intents(vec![(
+                id,
+                ScriptedIntent {
+                    bud: Some(false),
+                    ..ScriptedIntent::default()
+                },
+            )]);
         }
         Driver::Control(Control::NoIntake) => {
-            world.set_scripted_intents(vec![(id, ScriptedIntent {
-                heading: Some(start_heading),
-                effort: Some(0.0),
-                graze_effort: Some(0.0),
-                fruit_effort: Some(0.0),
-                scavenge_effort: Some(0.0),
-                mode: None,
-                bud: Some(false),
-            })]);
+            world.set_scripted_intents(vec![(
+                id,
+                ScriptedIntent {
+                    heading: Some(start_heading),
+                    effort: Some(0.0),
+                    graze_effort: Some(0.0),
+                    fruit_effort: Some(0.0),
+                    scavenge_effort: Some(0.0),
+                    mode: None,
+                    bud: Some(false),
+                },
+            )]);
         }
         Driver::Control(Control::StationaryGrazing) => {
-            world.set_scripted_intents(vec![(id, ScriptedIntent {
-                heading: Some(start_heading),
-                effort: Some(0.0),
-                graze_effort: Some(1.0),
-                fruit_effort: Some(0.0),
-                scavenge_effort: Some(0.0),
-                mode: None,
-                bud: Some(false),
-            })]);
+            world.set_scripted_intents(vec![(
+                id,
+                ScriptedIntent {
+                    heading: Some(start_heading),
+                    effort: Some(0.0),
+                    graze_effort: Some(1.0),
+                    fruit_effort: Some(0.0),
+                    scavenge_effort: Some(0.0),
+                    mode: None,
+                    bud: Some(false),
+                },
+            )]);
         }
         Driver::Control(Control::MobileScript | Control::Dwell(_)) => {}
     }
@@ -548,7 +575,10 @@ pub fn run_prepared_traced(
         if tick > 0 && tick.is_multiple_of(VALIDATE_EVERY_TICKS) {
             episode.validations += 1;
             if let Err(detail) = validate_runtime(&world, job, tick) {
-                return Err(EpisodeError::Invalid { ticks: tick, detail });
+                return Err(EpisodeError::Invalid {
+                    ticks: tick,
+                    detail,
+                });
             }
         }
         let Some(o) = world.state.organisms.get(id) else {
@@ -698,7 +728,10 @@ pub fn run_prepared_traced(
 
     episode.validations += 1;
     if let Err(detail) = validate_runtime(&world, job, episode.ticks) {
-        return Err(EpisodeError::Invalid { ticks: episode.ticks, detail });
+        return Err(EpisodeError::Invalid {
+            ticks: episode.ticks,
+            detail,
+        });
     }
 
     if let Some(o) = world.state.organisms.get(id) {
@@ -718,7 +751,11 @@ pub fn run_prepared_traced(
     episode.route_p_end = route.iter().map(|c| world.state.fields.p[c.index()]).sum();
     episode.motion_billed_partial = episode.turn_unmeasured_ticks > 0;
     episode.distinct_cells = visited.len();
-    episode.body_lengths = if extent > 0.0 { episode.travelled_px / extent } else { 0.0 };
+    episode.body_lengths = if extent > 0.0 {
+        episode.travelled_px / extent
+    } else {
+        0.0
+    };
     Ok(episode)
 }
 
@@ -774,9 +811,22 @@ mod tests {
     fn a_still_body_with_no_intake_eats_nothing_and_keeps_its_stores_falling() {
         let cancel = AtomicBool::new(false);
         let l = &training_layouts()[0];
-        let e = run(l, &Driver::Control(Control::NoIntake), 400, free(&cancel), "t").expect("ok");
-        assert_eq!(e.intake_producer, 0.0, "a closed mouth records exactly zero intake");
-        assert_eq!(e.travelled_px, 0.0, "effort 0 is a genuine request for stillness");
+        let e = run(
+            l,
+            &Driver::Control(Control::NoIntake),
+            400,
+            free(&cancel),
+            "t",
+        )
+        .expect("ok");
+        assert_eq!(
+            e.intake_producer, 0.0,
+            "a closed mouth records exactly zero intake"
+        );
+        assert_eq!(
+            e.travelled_px, 0.0,
+            "effort 0 is a genuine request for stillness"
+        );
         assert!(e.upkeep_billed > 0.0, "living is not free");
         assert!(e.alive, "400 ticks is well inside the starting stores");
         assert!(e.terminal_stores < e.store_capacity);
@@ -786,8 +836,14 @@ mod tests {
     fn a_stationary_grazer_eats_from_its_own_cell_only() {
         let cancel = AtomicBool::new(false);
         let l = &training_layouts()[0];
-        let e = run(l, &Driver::Control(Control::StationaryGrazing), 400, free(&cancel), "t")
-            .expect("ok");
+        let e = run(
+            l,
+            &Driver::Control(Control::StationaryGrazing),
+            400,
+            free(&cancel),
+            "t",
+        )
+        .expect("ok");
         assert!(e.intake_producer > 0.0, "an open mouth on a fed cell eats");
         assert_eq!(e.travelled_px, 0.0);
         assert_eq!(e.distinct_cells, 1, "a stationary body visits one cell");
@@ -797,8 +853,14 @@ mod tests {
     fn the_mobile_script_travels_and_visits_more_than_one_cell() {
         let cancel = AtomicBool::new(false);
         let l = &training_layouts()[0];
-        let e = run(l, &Driver::Control(Control::MobileScript), 600, free(&cancel), "t")
-            .expect("ok");
+        let e = run(
+            l,
+            &Driver::Control(Control::MobileScript),
+            600,
+            free(&cancel),
+            "t",
+        )
+        .expect("ok");
         assert!(e.travelled_px > 0.0, "the script pays for real motion");
         assert!(e.distinct_cells > 1, "the script relocates");
         assert!(e.motion_billed > 0.0, "and pays for it");
@@ -809,7 +871,13 @@ mod tests {
     fn cancellation_stops_an_episode_and_reports_the_ticks_it_had_run() {
         let cancel = AtomicBool::new(true);
         let l = &training_layouts()[0];
-        let out = run(l, &Driver::Control(Control::NoIntake), 36_000, free(&cancel), "t");
+        let out = run(
+            l,
+            &Driver::Control(Control::NoIntake),
+            36_000,
+            free(&cancel),
+            "t",
+        );
         assert_eq!(out.unwrap_err(), EpisodeError::Cancelled { ticks: 0 });
     }
 
@@ -825,10 +893,19 @@ mod tests {
         let out = run(l, &Driver::Control(Control::NoIntake), 36_000, limits, "t");
         let err = out.expect_err("the deadline must stop it");
         assert!(err.is_cancelled());
-        assert!(err.ticks() > 0, "it had already simulated work, and that work is counted");
+        assert!(
+            err.ticks() > 0,
+            "it had already simulated work, and that work is counted"
+        );
         assert!(err.ticks() < 36_000, "it did not run to the horizon");
-        assert!(started.elapsed() < Duration::from_secs(2), "it stopped promptly");
-        assert!(cancel.load(Ordering::Relaxed), "and it told the other workers");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "it stopped promptly"
+        );
+        assert!(
+            cancel.load(Ordering::Relaxed),
+            "and it told the other workers"
+        );
     }
 
     /// Review finding 4: an identical episode must report identical diagnostics, whatever the
@@ -839,8 +916,14 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let l = &training_layouts()[0];
         let policy = tensor::policy(&tensor::initial_center(20_260_915)).expect("valid");
-        let a = run(l, &Driver::Policy(Box::new(policy.clone())), 40, free(&cancel), "a")
-            .expect("ok");
+        let a = run(
+            l,
+            &Driver::Policy(Box::new(policy.clone())),
+            40,
+            free(&cancel),
+            "a",
+        )
+        .expect("ok");
         let b = run(l, &Driver::Policy(Box::new(policy)), 40, free(&cancel), "b").expect("ok");
         assert!(a.upkeep_billed > 0.0, "a living body is billed for living");
         assert!(a.motion_billed > 0.0, "and this policy moves");
@@ -857,7 +940,14 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let l = &training_layouts()[0];
         let policy = tensor::policy(&vec![0.0; tensor::PARAMS]).expect("valid");
-        let e = run(l, &Driver::Policy(Box::new(policy)), 200, free(&cancel), "t").expect("ok");
+        let e = run(
+            l,
+            &Driver::Policy(Box::new(policy)),
+            200,
+            free(&cancel),
+            "t",
+        )
+        .expect("ok");
         assert!(e.alive);
         assert_eq!(e.ticks, 200);
         assert!(e.terminal_stores > 0.0);
@@ -870,9 +960,22 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let l = &training_layouts()[1];
         let policy = tensor::policy(&tensor::initial_center(5)).expect("valid");
-        let a = run(l, &Driver::Policy(Box::new(policy.clone())), 600, free(&cancel), "t")
-            .expect("ok");
-        let b = run(l, &Driver::Policy(Box::new(policy)), 600, free(&cancel), "t").expect("ok");
+        let a = run(
+            l,
+            &Driver::Policy(Box::new(policy.clone())),
+            600,
+            free(&cancel),
+            "t",
+        )
+        .expect("ok");
+        let b = run(
+            l,
+            &Driver::Policy(Box::new(policy)),
+            600,
+            free(&cancel),
+            "t",
+        )
+        .expect("ok");
         assert_eq!(a, b);
     }
 
@@ -905,8 +1008,14 @@ mod tests {
         let err = out.expect_err("an invalid world is an experiment error");
         match err {
             EpisodeError::Invalid { ticks, detail } => {
-                assert_eq!(ticks, VALIDATE_EVERY_TICKS, "caught at the next validation point");
-                assert!(detail.contains("gen7/pair3-/t1-corridor"), "detail was {detail}");
+                assert_eq!(
+                    ticks, VALIDATE_EVERY_TICKS,
+                    "caught at the next validation point"
+                );
+                assert!(
+                    detail.contains("gen7/pair3-/t1-corridor"),
+                    "detail was {detail}"
+                );
                 assert!(detail.contains("world state"), "detail was {detail}");
             }
             other => panic!("expected Invalid, got {other:?}"),
@@ -925,11 +1034,21 @@ mod tests {
             "gen0/center/t1-corridor",
             Some(&late),
         );
-        assert!(matches!(out, Err(EpisodeError::Invalid { .. })), "terminal check must catch it");
+        assert!(
+            matches!(out, Err(EpisodeError::Invalid { .. })),
+            "terminal check must catch it"
+        );
 
         // And the same rollout without a fault is a perfectly ordinary episode.
         assert!(
-            run(l, &Driver::Policy(Box::new(policy)), 1_000, free(&cancel), "t").is_ok(),
+            run(
+                l,
+                &Driver::Policy(Box::new(policy)),
+                1_000,
+                free(&cancel),
+                "t"
+            )
+            .is_ok(),
             "the fault, not the fixture, is what fails"
         );
     }
@@ -962,14 +1081,20 @@ mod tests {
         let flat = run(&layout, &driver, 40, free(&cancel), "flat").expect("ok");
 
         assert!(seam.alive && flat.alive);
-        assert!(seam.seam_crossing_ticks > 0, "the fixture must actually cross a seam");
+        assert!(
+            seam.seam_crossing_ticks > 0,
+            "the fixture must actually cross a seam"
+        );
         assert!(
             seam.turn_unmeasured_ticks >= seam.seam_crossing_ticks,
             "every crossing tick's turn is unknown, not zero: {} crossings, {} unmeasured",
             seam.seam_crossing_ticks,
             seam.turn_unmeasured_ticks
         );
-        assert!(seam.motion_billed_partial, "so its sweep and price are lower bounds");
+        assert!(
+            seam.motion_billed_partial,
+            "so its sweep and price are lower bounds"
+        );
 
         // The interior arm crosses nothing, so its price is not partial and its sweep is the
         // whole rotation. That is what makes the seam arm's label meaningful rather than
@@ -977,7 +1102,9 @@ mod tests {
         assert_eq!(flat.seam_crossing_ticks, 0);
         assert_eq!(flat.turn_unmeasured_ticks, 0);
         assert!(!flat.motion_billed_partial);
-        assert!(flat.turn_sweep_rad > seam.turn_sweep_rad, "the deficit is the dropped turn");
+        assert!(
+            flat.turn_sweep_rad > seam.turn_sweep_rad,
+            "the deficit is the dropped turn"
+        );
     }
-
 }

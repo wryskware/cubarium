@@ -22,7 +22,10 @@ pub struct Trail {
 
 impl Trail {
     pub fn new(max_segments: usize) -> Trail {
-        Trail { segments: VecDeque::with_capacity(max_segments), max_segments }
+        Trail {
+            segments: VecDeque::with_capacity(max_segments),
+            max_segments,
+        }
     }
 
     /// Append every segment of a travel; drops the oldest beyond `max_segments`.
@@ -73,7 +76,13 @@ impl Trail {
 /// the pixel containing each sample; this keeps slow sub-pixel motion from shimmering
 /// and never marks a pixel outside the chart (a coordinate exactly at the chart's
 /// extent belongs to the last pixel).
-pub fn draw_trail(canvas: &mut Canvas, trail: &Trail, now: u64, max_age_ticks: u64, color: [f32; 3]) {
+pub fn draw_trail(
+    canvas: &mut Canvas,
+    trail: &Trail,
+    now: u64,
+    max_age_ticks: u64,
+    color: [f32; 3],
+) {
     let topo = canvas.topology();
     let (w, h) = (usize::from(canvas.width()), usize::from(canvas.height()));
     // Brightness is resolved per pixel as a maximum before anything reaches the canvas,
@@ -143,10 +152,10 @@ fn pixel_of(u: f64, v: f64, w: usize, h: usize) -> (usize, usize) {
 
 #[cfg(test)]
 mod tests {
-    use cube_proto::Face;
-    use cubarium_surface::Topology;
     use super::*;
+    use cubarium_surface::Topology;
     use cubarium_surface::{SurfacePoint, Vec2, travel};
+    use cube_proto::Face;
 
     fn lit(canvas: &Canvas) -> Vec<(Face, u16, u16, f32)> {
         let mut v = Vec::new();
@@ -196,7 +205,11 @@ mod tests {
     #[test]
     fn a_segment_running_into_the_corner_lands_on_pixel_63() {
         let mut trail = Trail::new(8);
-        let tr = travel(Topology::Cube, SurfacePoint::new(cube_proto::Face::Front, 60.0, 60.0), Vec2::new(3.5, 3.5));
+        let tr = travel(
+            Topology::Cube,
+            SurfacePoint::new(cube_proto::Face::Front, 60.0, 60.0),
+            Vec2::new(3.5, 3.5),
+        );
         trail.push_travel(&tr, 0);
         let mut canvas = Canvas::cube();
         draw_trail(&mut canvas, &trail, 0, 160, [1.0, 1.0, 1.0]);
@@ -211,7 +224,11 @@ mod tests {
         let mut trail = Trail::new(16);
         // The same short segment traveled twice, at different ages.
         for tick in [0u64, 100] {
-            let tr = travel(Topology::Cube, SurfacePoint::new(cube_proto::Face::Left, 20.0, 20.0), Vec2::new(2.0, 0.0));
+            let tr = travel(
+                Topology::Cube,
+                SurfacePoint::new(cube_proto::Face::Left, 20.0, 20.0),
+                Vec2::new(2.0, 0.0),
+            );
             trail.push_travel(&tr, tick);
         }
         let mut canvas = Canvas::cube();
@@ -227,7 +244,11 @@ mod tests {
     #[test]
     fn segments_older_than_the_window_are_not_drawn() {
         let mut trail = Trail::new(16);
-        let tr = travel(Topology::Cube, SurfacePoint::new(cube_proto::Face::Back, 10.0, 10.0), Vec2::new(4.0, 0.0));
+        let tr = travel(
+            Topology::Cube,
+            SurfacePoint::new(cube_proto::Face::Back, 10.0, 10.0),
+            Vec2::new(4.0, 0.0),
+        );
         trail.push_travel(&tr, 0);
         let mut canvas = Canvas::cube();
         draw_trail(&mut canvas, &trail, 500, 160, [1.0, 1.0, 1.0]);
@@ -238,7 +259,11 @@ mod tests {
     fn prune_drops_only_the_old_front() {
         let mut trail = Trail::new(64);
         for t in 0..10u64 {
-            let tr = travel(Topology::Cube, SurfacePoint::new(cube_proto::Face::Front, 10.0, 10.0), Vec2::new(1.0, 0.0));
+            let tr = travel(
+                Topology::Cube,
+                SurfacePoint::new(cube_proto::Face::Front, 10.0, 10.0),
+                Vec2::new(1.0, 0.0),
+            );
             trail.push_travel(&tr, t);
         }
         assert_eq!(trail.len(), 10);

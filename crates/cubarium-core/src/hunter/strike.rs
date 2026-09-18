@@ -328,7 +328,9 @@ impl StrikeRecord {
     }
 
     fn classify(&self) -> StrikeClass {
-        if self.target_missing_at_resolution || self.target_changed || self.resolution.target.is_none()
+        if self.target_missing_at_resolution
+            || self.target_changed
+            || self.resolution.target.is_none()
         {
             return StrikeClass::TargetLost;
         }
@@ -445,7 +447,12 @@ impl StrikeRecorder {
             self.open.remove(0);
             self.evicted += 1;
         }
-        self.open.push(OpenAttempt { hunter, intent, strike: None, attack_counter: None });
+        self.open.push(OpenAttempt {
+            hunter,
+            intent,
+            strike: None,
+            attack_counter: None,
+        });
     }
 
     /// The burst was paid for and began: this is where it started from.
@@ -510,7 +517,8 @@ impl StrikeRecorder {
             let (a, b) = (a.normalized()?, b.normalized()?);
             Some(a.dot(b).clamp(-1.0, 1.0).acos())
         };
-        let target_at = |f: Option<StrikeFrame>| f.and_then(|f| Some((f.target_pos?, f.target_heading?)));
+        let target_at =
+            |f: Option<StrikeFrame>| f.and_then(|f| Some((f.target_pos?, f.target_heading?)));
         let mut record = StrikeRecord {
             hunter,
             attack_counter,

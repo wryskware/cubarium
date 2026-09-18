@@ -81,7 +81,11 @@ impl Clip {
             (seconds / self.seconds * f64::from(n)).clamp(0.0, f64::from(n) - 1.0)
         };
         let i = (u.floor() as u32).min(n - 1);
-        let j = if self.looping { (i + 1) % n } else { (i + 1).min(n - 1) };
+        let j = if self.looping {
+            (i + 1) % n
+        } else {
+            (i + 1).min(n - 1)
+        };
         (self.first + i, self.first + j, (u - f64::from(i)) as f32)
     }
 }
@@ -128,11 +132,11 @@ pub struct Atlas {
 impl Atlas {
     /// Load `assets/atelier` (or any pack directory of the same version).
     pub fn load(directory: &Path) -> Result<Atlas> {
-        let meta: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(directory.join("pack.json")).with_context(
-                || format!("read {}", directory.join("pack.json").display()),
-            )?)
-            .context("parse pack.json")?;
+        let meta: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(directory.join("pack.json"))
+                .with_context(|| format!("read {}", directory.join("pack.json").display()))?,
+        )
+        .context("parse pack.json")?;
         let version = meta["version"].as_u64().unwrap_or(1);
         if version < 5 {
             bail!("pack version {version}: this renderer wants v5 (authored growth clips)");
@@ -150,10 +154,18 @@ impl Atlas {
 
         // Five sheets, stacked: the atlas is as wide as the widest and as tall as the
         // sum. No packing cleverness — 384 × 1,016 × 4 = 1.56 MB, uploaded once.
-        let sheets = ["creatures", "plant_atlas", "tall_atlas", "ground_atlas", "habitat"];
+        let sheets = [
+            "creatures",
+            "plant_atlas",
+            "tall_atlas",
+            "ground_atlas",
+            "habitat",
+        ];
         let mut loaded = Vec::new();
         for key in sheets {
-            let Some(name) = meta[key].as_str() else { continue };
+            let Some(name) = meta[key].as_str() else {
+                continue;
+            };
             let (w, h, bytes) = read_rgba(&directory.join(name))?;
             loaded.push((key, w, h, bytes));
         }
@@ -203,7 +215,11 @@ impl Atlas {
         let frames = meta["frames"].as_u64().unwrap_or(16) as u32;
         atlas.creature_names = meta["creature_names"]
             .as_array()
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(str::to_owned))
+                    .collect()
+            })
             .unwrap_or_default();
         let (cx, cy) = *origin.get("creatures").unwrap_or(&(0, 0));
         for clip in meta["clips"].as_array().into_iter().flatten() {
@@ -214,7 +230,9 @@ impl Atlas {
             ) else {
                 continue;
             };
-            let Some(index) = STATES.iter().position(|s| *s == state) else { continue };
+            let Some(index) = STATES.iter().position(|s| *s == state) else {
+                continue;
+            };
             let first =
                 atlas.push_frames(cx, cy + row as u32 * u32::from(tile), tile, frames, tile);
             atlas.creatures.insert(
@@ -297,7 +315,12 @@ impl Atlas {
             );
             atlas.ground.insert(
                 band.to_owned(),
-                Clip { first, count, seconds: row["seconds"].as_f64().unwrap_or(6.0), looping: true },
+                Clip {
+                    first,
+                    count,
+                    seconds: row["seconds"].as_f64().unwrap_or(6.0),
+                    looping: true,
+                },
             );
         }
 
@@ -314,23 +337,38 @@ impl Atlas {
             if part != "trunk" || row["vine_strips"].as_str() != Some(VINE_STRIPS_V1) {
                 continue;
             }
-            let Some(source) = atlas.tall(name, "trunk") else { continue };
-            for (i, (clear, keep)) in
-                [(vec![0usize, usize::from(tile) - 1], None), (Vec::new(), Some(4..8))]
-                    .into_iter()
-                    .enumerate()
+            let Some(source) = atlas.tall(name, "trunk") else {
+                continue;
+            };
+            for (i, (clear, keep)) in [
+                (vec![0usize, usize::from(tile) - 1], None),
+                (Vec::new(), Some(4..8)),
+            ]
+            .into_iter()
+            .enumerate()
             {
                 let y = derived_y + i as u32 * u32::from(tile);
                 let first = atlas.copy_derived(source, 0, y, tile, &clear, keep);
                 atlas.tall.insert(
-                    (name.to_owned(), if i == 0 { "trunk_strip" } else { "endpoint" }.to_owned()),
-                    Clip { first, count: source.count, seconds: source.seconds, looping: true },
+                    (
+                        name.to_owned(),
+                        if i == 0 { "trunk_strip" } else { "endpoint" }.to_owned(),
+                    ),
+                    Clip {
+                        first,
+                        count: source.count,
+                        seconds: source.seconds,
+                        looping: true,
+                    },
                 );
             }
         }
 
         if atlas.plants.is_empty() || atlas.creatures.is_empty() {
-            bail!("pack at {} carries no plants or no creatures", directory.display());
+            bail!(
+                "pack at {} carries no plants or no creatures",
+                directory.display()
+            );
         }
         Ok(atlas)
     }
@@ -353,7 +391,12 @@ impl Atlas {
                 opaque: 0,
             };
             let (extent, bbox, opaque) = self.measure(rect);
-            self.frames.push(FrameRect { extent, bbox, opaque, ..rect });
+            self.frames.push(FrameRect {
+                extent,
+                bbox,
+                opaque,
+                ..rect
+            });
         }
         first
     }
@@ -417,12 +460,16 @@ impl Atlas {
                     let src = (((u32::from(from.y) + row) * self.width + u32::from(from.x) + col)
                         * 4) as usize;
                     let dst = (((y + row) * self.width + to_x + col) * 4) as usize;
-                    let texel = if blank { [0u8; 4] } else { [
-                        self.rgba[src],
-                        self.rgba[src + 1],
-                        self.rgba[src + 2],
-                        self.rgba[src + 3],
-                    ] };
+                    let texel = if blank {
+                        [0u8; 4]
+                    } else {
+                        [
+                            self.rgba[src],
+                            self.rgba[src + 1],
+                            self.rgba[src + 2],
+                            self.rgba[src + 3],
+                        ]
+                    };
                     self.rgba[dst..dst + 4].copy_from_slice(&texel);
                 }
             }
@@ -481,11 +528,20 @@ fn read_rgba(path: &Path) -> Result<(u32, u32, Vec<u8>)> {
     let decoder = png::Decoder::new(std::io::BufReader::new(
         std::fs::File::open(path).with_context(|| format!("open {}", path.display()))?,
     ));
-    let mut reader = decoder.read_info().with_context(|| format!("{}: png header", path.display()))?;
+    let mut reader = decoder
+        .read_info()
+        .with_context(|| format!("{}: png header", path.display()))?;
     let mut buffer = vec![0u8; reader.output_buffer_size().unwrap_or(0)];
-    let info = reader.next_frame(&mut buffer).with_context(|| format!("{}: png data", path.display()))?;
+    let info = reader
+        .next_frame(&mut buffer)
+        .with_context(|| format!("{}: png data", path.display()))?;
     if info.color_type != png::ColorType::Rgba || info.bit_depth != png::BitDepth::Eight {
-        bail!("{}: expected 8-bit RGBA, got {:?}/{:?}", path.display(), info.color_type, info.bit_depth);
+        bail!(
+            "{}: expected 8-bit RGBA, got {:?}/{:?}",
+            path.display(),
+            info.color_type,
+            info.bit_depth
+        );
     }
     buffer.truncate(info.buffer_size());
     Ok((info.width, info.height, buffer))
@@ -511,12 +567,29 @@ mod tests {
                 assert!(a.creature(name, state).is_some(), "{name}/{state}");
             }
         }
-        for name in ["glowcap", "rootveil", "lanternstalk", "tendrilfan", "umbrellafrond", "bloomcrown", "reedspire"] {
+        for name in [
+            "glowcap",
+            "rootveil",
+            "lanternstalk",
+            "tendrilfan",
+            "umbrellafrond",
+            "bloomcrown",
+            "reedspire",
+        ] {
             for stage in 0..3 {
-                assert!(a.plant(name, PlantClip::Stage(stage)).is_some(), "{name} stage {stage}");
+                assert!(
+                    a.plant(name, PlantClip::Stage(stage)).is_some(),
+                    "{name} stage {stage}"
+                );
             }
-            assert!(a.plant(name, PlantClip::Grow(0, 1)).is_some(), "{name} grow 0->1");
-            assert!(a.plant(name, PlantClip::Grow(1, 2)).is_some(), "{name} grow 1->2");
+            assert!(
+                a.plant(name, PlantClip::Grow(0, 1)).is_some(),
+                "{name} grow 0->1"
+            );
+            assert!(
+                a.plant(name, PlantClip::Grow(1, 2)).is_some(),
+                "{name} grow 1->2"
+            );
         }
         for band in ["soil", "foliage", "canopy"] {
             assert!(a.ground(band).is_some(), "ground {band}");
@@ -530,16 +603,23 @@ mod tests {
     #[test]
     fn the_vine_strips_are_derived_from_the_raw_trunk() {
         let a = atelier();
-        let raw = a.tall("vinecoil", "trunk").expect("the pack carries a vine");
-        let strip = a.tall("vinecoil", "trunk_strip").expect("the strip is derived");
-        let end = a.tall("vinecoil", "endpoint").expect("the endpoint is derived");
+        let raw = a
+            .tall("vinecoil", "trunk")
+            .expect("the pack carries a vine");
+        let strip = a
+            .tall("vinecoil", "trunk_strip")
+            .expect("the strip is derived");
+        let end = a
+            .tall("vinecoil", "endpoint")
+            .expect("the endpoint is derived");
         assert_eq!((strip.count, strip.seconds), (raw.count, raw.seconds));
         assert_eq!((end.count, end.seconds), (raw.count, raw.seconds));
         let alpha = |clip: Clip, row: u16, col: u16| {
             let r = a.rect(clip.first);
-            let i = (((u32::from(r.y) + u32::from(row)) * a.width + u32::from(r.x) + u32::from(col))
-                * 4
-                + 3) as usize;
+            let i =
+                (((u32::from(r.y) + u32::from(row)) * a.width + u32::from(r.x) + u32::from(col))
+                    * 4
+                    + 3) as usize;
             a.rgba[i]
         };
         // The strip clears rows 0 and 15 and keeps the rest; the endpoint keeps 4..=7.
@@ -569,11 +649,17 @@ mod tests {
         assert!(stage.looping);
         let (i, j, m) = stage.pose(stage.seconds - 1e-9);
         assert_eq!(i, stage.first + stage.count - 1);
-        assert_eq!(j, stage.first, "the last frame must blend back into the first");
+        assert_eq!(
+            j, stage.first,
+            "the last frame must blend back into the first"
+        );
         assert!(m > 0.99, "{m}");
         let grow = a.plant("lanternstalk", PlantClip::Grow(0, 1)).unwrap();
         assert!(!grow.looping);
         let (i, j, _) = grow.pose(grow.seconds * 4.0);
-        assert_eq!((i, j), (grow.first + grow.count - 1, grow.first + grow.count - 1));
+        assert_eq!(
+            (i, j),
+            (grow.first + grow.count - 1, grow.first + grow.count - 1)
+        );
     }
 }

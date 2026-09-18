@@ -205,7 +205,9 @@ pub fn measure(
     )?;
     let trace = trace.into_inner().expect("trace");
     let budget = last.into_inner().expect("last").ok_or_else(|| {
-        Boxed::from(format!("{job}: the body was never recorded, so there is no ledger"))
+        Boxed::from(format!(
+            "{job}: the body was never recorded, so there is no ledger"
+        ))
     })?;
     Ok((episode, budget, trace))
 }
@@ -239,7 +241,11 @@ pub fn ratios(trace: &[(f64, f64)], window: usize) -> (f64, f64, u64) {
 }
 
 /// Build the four drivers the experiment compares.
-fn drivers(policy_file: &Path, initial_seed: u64, eco: &Ecology) -> Result<Vec<NamedDriver>, Boxed> {
+fn drivers(
+    policy_file: &Path,
+    initial_seed: u64,
+    eco: &Ecology,
+) -> Result<Vec<NamedDriver>, Boxed> {
     let file: PolicyFile = serde_json::from_str(&fs::read_to_string(policy_file)?)?;
     // A policy from another ecology would be answering a different question in a world it
     // never saw: refuse it by name, exactly as `es-evaluate` does.
@@ -284,10 +290,20 @@ pub fn run(
     let e_r = eco.base.organism.reserve_energy_density;
     let eta_ox = eco.base.organism.oxidation_efficiency;
 
-    println!("# matched feasibility experiment on {} (hash {})", eco.label, eco.hex());
+    println!(
+        "# matched feasibility experiment on {} (hash {})",
+        eco.label,
+        eco.hex()
+    );
     println!("# build {BUILD_ID}, {horizon} ticks per episode, window {WINDOW_TICKS} ticks");
-    println!("# {} drivers x {} layouts, {workers} workers", drivers.len(), layouts.len());
-    println!("# income = battery credit + {eta_ox} * {e_r} * reserve credit; bill = the whole MotorBill");
+    println!(
+        "# {} drivers x {} layouts, {workers} workers",
+        drivers.len(),
+        layouts.len()
+    );
+    println!(
+        "# income = battery credit + {eta_ox} * {e_r} * reserve credit; bill = the whole MotorBill"
+    );
 
     let jobs: Vec<(usize, usize)> = (0..drivers.len())
         .flat_map(|d| (0..layouts.len()).map(move |l| (d, l)))
@@ -349,8 +365,12 @@ pub fn run(
         for f in &failures {
             println!("FAILED {f}");
         }
-        return Err(format!("{} of {} episodes did not produce a row", failures.len(), jobs.len())
-            .into());
+        return Err(format!(
+            "{} of {} episodes did not produce a row",
+            failures.len(),
+            jobs.len()
+        )
+        .into());
     }
     let mut rows = rows.into_inner().expect("rows");
     rows.sort_by(|a, b| a.driver.cmp(&b.driver).then(a.layout.cmp(&b.layout)));
@@ -388,7 +408,10 @@ pub fn run(
     }
 
     println!();
-    println!("{:<22} {:>8} {:>9} {:>9} {:>9} {:>11}", "driver", "survived", "mean tick", "mean w", "best w", "max |resid|");
+    println!(
+        "{:<22} {:>8} {:>9} {:>9} {:>9} {:>11}",
+        "driver", "survived", "mean tick", "mean w", "best w", "max |resid|"
+    );
     for d in &drivers {
         let mine: Vec<&BudgetRow> = rows.iter().filter(|r| r.driver == d.name).collect();
         if mine.is_empty() {
@@ -398,7 +421,10 @@ pub fn run(
         let alive = mine.iter().filter(|r| r.episode.alive).count();
         let mean_ticks = mine.iter().map(|r| r.episode.ticks as f64).sum::<f64>() / n;
         let mean_w = mine.iter().map(|r| r.ratio_last_window).sum::<f64>() / n;
-        let best_w = mine.iter().map(|r| r.ratio_best_window).fold(f64::MIN, f64::max);
+        let best_w = mine
+            .iter()
+            .map(|r| r.ratio_best_window)
+            .fold(f64::MIN, f64::max);
         let resid = mine
             .iter()
             .map(|r| r.material_residual.abs().max(r.energy_residual.abs()))
@@ -428,7 +454,11 @@ pub fn run(
     }
     fs::write(&out, serde_json::to_string(&report)?)?;
     println!();
-    println!("wall {:.1} s of {wall_seconds}; wrote {}", report.wall_seconds, out.display());
+    println!(
+        "wall {:.1} s of {wall_seconds}; wrote {}",
+        report.wall_seconds,
+        out.display()
+    );
     Ok(())
 }
 

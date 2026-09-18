@@ -13,11 +13,24 @@ fn the_event_log_is_off_by_default_and_the_option_moves_it() {
     let scratch = Scratch::new("events-off");
     let state = scratch.join("state");
     let out = run(&[
-        "--sink", "none", "--speed", "0", "--seconds", "20", "--fresh",
-        "--state", state.to_str().unwrap(),
+        "--sink",
+        "none",
+        "--speed",
+        "0",
+        "--seconds",
+        "20",
+        "--fresh",
+        "--state",
+        state.to_str().unwrap(),
     ]);
-    assert!(!out.config.capacity.event_log, "the event log must default to off");
-    assert!(!state.join("events.jsonl").exists(), "an off event log writes no file");
+    assert!(
+        !out.config.capacity.event_log,
+        "the event log must default to off"
+    );
+    assert!(
+        !state.join("events.jsonl").exists(),
+        "an off event log writes no file"
+    );
 
     // `--events` decides where the log lives, including a directory that does not exist
     // yet. (A short run may legitimately record nothing, so only the file is asserted;
@@ -26,11 +39,23 @@ fn the_event_log_is_off_by_default_and_the_option_moves_it() {
     let state2 = scratch.join("state2");
     let config = scratch.write("events.toml", EVENT_LOG);
     run(&[
-        "--sink", "none", "--speed", "0", "--seconds", "40", "--fresh",
-        "--config", config.to_str().unwrap(),
-        "--state", state2.to_str().unwrap(),
-        "--events", elsewhere.to_str().unwrap(),
+        "--sink",
+        "none",
+        "--speed",
+        "0",
+        "--seconds",
+        "40",
+        "--fresh",
+        "--config",
+        config.to_str().unwrap(),
+        "--state",
+        state2.to_str().unwrap(),
+        "--events",
+        elsewhere.to_str().unwrap(),
     ]);
     assert!(elsewhere.exists(), "--events must move the log");
-    assert!(!state2.join("events.jsonl").exists(), "the default path must stay untouched");
+    assert!(
+        !state2.join("events.jsonl").exists(),
+        "the default path must stay untouched"
+    );
 }

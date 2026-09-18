@@ -215,13 +215,22 @@ impl Protocol {
 
     /// FNV-1a over the protocol's canonical JSON. Stored in every checkpoint and every result.
     pub fn hash(&self) -> u64 {
-        fnv1a(serde_json::to_string(self).expect("the protocol serializes").as_bytes())
+        fnv1a(
+            serde_json::to_string(self)
+                .expect("the protocol serializes")
+                .as_bytes(),
+        )
     }
 }
 
 impl Default for Protocol {
     fn default() -> Self {
-        Protocol::new(16, HORIZON_TICKS, 20_260_915, &super::fixture::training_layouts())
+        Protocol::new(
+            16,
+            HORIZON_TICKS,
+            20_260_915,
+            &super::fixture::training_layouts(),
+        )
     }
 }
 
@@ -237,15 +246,18 @@ pub fn score(episodes: &[Episode]) -> f64 {
 /// [`score`] under a chosen survival aggregate: `t_min` for [`Aggregate::Min`], the mean
 /// survival ticks over the layouts for [`Aggregate::Mean`]. The stores tiebreak is the same.
 pub fn score_by(aggregate: Aggregate, episodes: &[Episode]) -> f64 {
-    assert!(!episodes.is_empty(), "a candidate is scored on at least one layout");
+    assert!(
+        !episodes.is_empty(),
+        "a candidate is scored on at least one layout"
+    );
     let survival = match aggregate {
         Aggregate::Min => episodes.iter().map(|e| e.ticks).min().expect("nonempty") as f64,
         Aggregate::Mean => {
             episodes.iter().map(|e| e.ticks as f64).sum::<f64>() / episodes.len() as f64
         }
     };
-    let stores: f64 = episodes.iter().map(Episode::normalized_stores).sum::<f64>()
-        / episodes.len() as f64;
+    let stores: f64 =
+        episodes.iter().map(Episode::normalized_stores).sum::<f64>() / episodes.len() as f64;
     survival + STORE_WEIGHT * stores
 }
 
@@ -384,7 +396,10 @@ impl Checkpoint {
 
     pub fn validate(&self) -> Result<(), String> {
         if self.theta.len() != PARAMS {
-            return Err(format!("checkpoint theta has {} values, expected {PARAMS}", self.theta.len()));
+            return Err(format!(
+                "checkpoint theta has {} values, expected {PARAMS}",
+                self.theta.len()
+            ));
         }
         if self.adam.m.len() != PARAMS || self.adam.v.len() != PARAMS {
             return Err("checkpoint Adam moments have the wrong dimension".into());
@@ -439,7 +454,14 @@ impl<'a> Plan<'a> {
         evaluate_center: bool,
         deadline: Option<Instant>,
     ) -> Plan<'a> {
-        Plan { layouts, horizon, workers, evaluate_center, deadline, fault: None }
+        Plan {
+            layouts,
+            horizon,
+            workers,
+            evaluate_center,
+            deadline,
+            fault: None,
+        }
     }
 }
 
@@ -470,7 +492,11 @@ pub enum GenerationError {
     /// the work it did is reported so the budget can account for it.
     Cancelled(Discarded),
     /// A rollout found an invalid world. This is an experiment error, not a low score.
-    Invalid { job: String, detail: String, discarded: Discarded },
+    Invalid {
+        job: String,
+        detail: String,
+        discarded: Discarded,
+    },
 }
 
 impl std::fmt::Display for GenerationError {
@@ -510,15 +536,18 @@ pub fn evaluate(
     generation: u64,
     cancel: &AtomicBool,
 ) -> Result<(f64, Vec<Episode>), GenerationError> {
-    let policy =
-        tensor::policy_in(theta, protocol.adapter).expect("a finite centre is a policy");
+    let policy = tensor::policy_in(theta, protocol.adapter).expect("a finite centre is a policy");
     let names: Vec<String> = plan
         .layouts
         .iter()
         .map(|l| format!("gen{generation}/center/{}", l.name))
         .collect();
     let episodes = dispatch(plan, plan.layouts.len(), cancel, |i| {
-        (Driver::Policy(Box::new(policy.clone())), i, names[i].clone())
+        (
+            Driver::Policy(Box::new(policy.clone())),
+            i,
+            names[i].clone(),
+        )
     })?;
     Ok((score_by(protocol.aggregate, &episodes), episodes))
 }
@@ -543,7 +572,10 @@ where
     let completed = AtomicU64::new(0);
     let ticks = AtomicU64::new(0);
     let failure: Mutex<Option<(String, String)>> = Mutex::new(None);
-    let limits = Limits { cancel, deadline: plan.deadline };
+    let limits = Limits {
+        cancel,
+        deadline: plan.deadline,
+    };
     std::thread::scope(|scope| {
         for _ in 0..plan.workers.max(1).min(jobs_total.max(1)) {
             scope.spawn(|| {
@@ -596,7 +628,11 @@ where
         ticks_run: ticks.load(Ordering::SeqCst),
     };
     if let Some((job, detail)) = failure.into_inner().expect("failure") {
-        return Err(GenerationError::Invalid { job, detail, discarded });
+        return Err(GenerationError::Invalid {
+            job,
+            detail,
+            discarded,
+        });
     }
     let slots = slots.into_inner().expect("slots");
     if slots.iter().any(Option::is_none) {
@@ -620,7 +656,10 @@ pub fn run_generation(
     let started = Instant::now();
     let n = protocol.pairs;
     let layouts = plan.layouts;
-    assert!(n > 0 && !layouts.is_empty(), "a generation needs pairs and layouts");
+    assert!(
+        n > 0 && !layouts.is_empty(),
+        "a generation needs pairs and layouts"
+    );
 
     // 1. Build every candidate's policy up front, in candidate index order, on this thread.
     //    Both signs of a pair use one `epsilon`, regenerated from its position rather than
@@ -636,8 +675,14 @@ pub fn run_generation(
             Candidate::Center => theta.to_vec(),
             Candidate::Plus(p) | Candidate::Minus(p) => {
                 perturbation(protocol.train_seed, generation, *p as u64, &mut eps);
-                let sign = if matches!(c, Candidate::Plus(_)) { 1.0 } else { -1.0 };
-                (0..PARAMS).map(|j| theta[j] + sign * protocol.sigma * eps[j]).collect()
+                let sign = if matches!(c, Candidate::Plus(_)) {
+                    1.0
+                } else {
+                    -1.0
+                };
+                (0..PARAMS)
+                    .map(|j| theta[j] + sign * protocol.sigma * eps[j])
+                    .collect()
             }
         };
         policies.push(
@@ -667,7 +712,10 @@ pub fn run_generation(
 
     // 3. The update is committed only if the run is still inside its limits. A generation that
     //    finished its last episode *after* the deadline has not earned an update.
-    let limits = Limits { cancel, deadline: plan.deadline };
+    let limits = Limits {
+        cancel,
+        deadline: plan.deadline,
+    };
     if limits.expired() {
         return Err(GenerationError::Cancelled(Discarded {
             episodes_attempted: jobs_total as u64,
@@ -700,10 +748,16 @@ pub fn run_generation(
     let g = gradient(&plus, &minus, PARAMS, protocol.sigma, |i, out| {
         perturbation(protocol.train_seed, generation, i as u64, out);
     });
-    assert!(g.iter().all(|x| x.is_finite()), "a non-finite gradient is an experiment error");
+    assert!(
+        g.iter().all(|x| x.is_finite()),
+        "a non-finite gradient is an experiment error"
+    );
     let gradient_norm = g.iter().map(|x| x * x).sum::<f64>().sqrt();
     let update_rms = adam.ascend(theta, &g);
-    assert!(theta.iter().all(|x| x.is_finite()), "the updated centre must stay finite");
+    assert!(
+        theta.iter().all(|x| x.is_finite()),
+        "the updated centre must stay finite"
+    );
 
     let ticks_run: u64 = episodes.iter().map(|e| e.ticks).sum();
     Ok(GenerationReport {
@@ -757,14 +811,20 @@ mod tests {
             route_p_grown: 0.0,
             validations: 0,
         };
-        let long = Episode { ticks: 30, ..base.clone() };
+        let long = Episode {
+            ticks: 30,
+            ..base.clone()
+        };
         let both = [base.clone(), long.clone()];
         assert!((score_by(Aggregate::Min, &both) - 10.0).abs() < 1e-12);
         assert!((score_by(Aggregate::Mean, &both) - 20.0).abs() < 1e-12);
         assert!((score(&both) - score_by(Aggregate::Min, &both)).abs() < 1e-12);
         let p = Protocol::default();
         let json = serde_json::to_string(&p).expect("serializes");
-        assert!(!json.contains("aggregate"), "min must not appear in the hashed JSON: {json}");
+        assert!(
+            !json.contains("aggregate"),
+            "min must not appear in the hashed JSON: {json}"
+        );
         let mean = p.clone().with_aggregate(Aggregate::Mean);
         assert_ne!(p.hash(), mean.hash());
         let back: Protocol = serde_json::from_str(&json).expect("round trip");
@@ -848,7 +908,10 @@ mod tests {
         assert_eq!(report_1.candidate_scores, report_4.candidate_scores);
         assert_eq!(report_1.jobs, report_4.jobs);
         assert_eq!(report_1.gradient_norm, report_4.gradient_norm);
-        assert_eq!(theta_1, theta_4, "the centre must not depend on the worker count");
+        assert_eq!(
+            theta_1, theta_4,
+            "the centre must not depend on the worker count"
+        );
         assert_eq!(adam_1, adam_4);
     }
 
@@ -863,8 +926,12 @@ mod tests {
 
         // And the mirrored candidates are exactly symmetric about the centre.
         let theta = tensor::initial_center(7);
-        let plus: Vec<f64> = (0..PARAMS).map(|j| theta[j] + protocol.sigma * a[j]).collect();
-        let minus: Vec<f64> = (0..PARAMS).map(|j| theta[j] - protocol.sigma * a[j]).collect();
+        let plus: Vec<f64> = (0..PARAMS)
+            .map(|j| theta[j] + protocol.sigma * a[j])
+            .collect();
+        let minus: Vec<f64> = (0..PARAMS)
+            .map(|j| theta[j] - protocol.sigma * a[j])
+            .collect();
         for j in 0..PARAMS {
             assert!(((plus[j] + minus[j]) / 2.0 - theta[j]).abs() < 1e-15);
         }
@@ -998,7 +1065,11 @@ mod tests {
         assert_eq!(b.config, "moved");
         assert_eq!(b.config_hash, eco.hash);
         assert_ne!(a.config_hash, b.config_hash);
-        assert_ne!(a.hash(), b.hash(), "a different ecology is a different protocol");
+        assert_ne!(
+            a.hash(),
+            b.hash(),
+            "a different ecology is a different protocol"
+        );
         assert_ne!(a.layout_hashes, b.layout_hashes);
         // Same ecology, same hash: the record is a pure function of the task.
         let c = Protocol::new(16, HORIZON_TICKS, 20_260_915, &training_layouts_on(&eco));

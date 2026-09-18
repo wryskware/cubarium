@@ -81,7 +81,11 @@ pub fn visits(probes: &[Option<u16>]) -> Vec<Visit> {
                 Some(last) if last.cell == *cell && last.start_probe + last.probes == i => {
                     last.probes += 1;
                 }
-                _ => out.push(Visit { cell: *cell, start_probe: i, probes: 1 }),
+                _ => out.push(Visit {
+                    cell: *cell,
+                    start_probe: i,
+                    probes: 1,
+                }),
             },
         }
     }
@@ -416,13 +420,29 @@ impl SpatialAccumulator {
         let n = self.bodies.max(1) as f64;
         let r = self.with_revisit.max(1) as f64;
         let residence = self.residence / n;
-        let revisit = if self.with_revisit == 0 { 0.0 } else { self.revisit / r };
+        let revisit = if self.with_revisit == 0 {
+            0.0
+        } else {
+            self.revisit / r
+        };
         Spatial {
             bodies: self.bodies,
-            cells_per_body: if self.bodies == 0 { 0.0 } else { self.cells / n },
-            visits_per_body: if self.bodies == 0 { 0.0 } else { self.visits / n },
+            cells_per_body: if self.bodies == 0 {
+                0.0
+            } else {
+                self.cells / n
+            },
+            visits_per_body: if self.bodies == 0 {
+                0.0
+            } else {
+                self.visits / n
+            },
             mean_residence_ticks: if self.bodies == 0 { 0.0 } else { residence },
-            mean_residence_seconds: if self.bodies == 0 { 0.0 } else { residence * dt },
+            mean_residence_seconds: if self.bodies == 0 {
+                0.0
+            } else {
+                residence * dt
+            },
             mean_revisit_ticks: revisit,
             mean_revisit_seconds: revisit * dt,
             bodies_with_revisit: self.with_revisit,
@@ -562,7 +582,14 @@ impl CensusBuilder {
 
     /// A body's death: its key, the cause slot, its exact age in ticks, and the stores it was
     /// last observed with.
-    pub fn died(&mut self, key: CensusKey, cause: usize, cause_name: &str, age_ticks: u64, stores: Option<&Stores>) {
+    pub fn died(
+        &mut self,
+        key: CensusKey,
+        cause: usize,
+        cause_name: &str,
+        age_ticks: u64,
+        stores: Option<&Stores>,
+    ) {
         let cell = self.cells.entry(key).or_default();
         cell.deaths += 1;
         cell.deaths_by_cause[cause.min(3)] += 1;
@@ -600,7 +627,12 @@ impl CensusBuilder {
                     cell.lifetime_ticks as f64 * dt / cell.deaths as f64
                 };
                 cell.mean_terminal = cell.terminal.mean();
-                CensusRow { form: key.form, diet_bin: key.diet_bin, guild: key.guild, cell }
+                CensusRow {
+                    form: key.form,
+                    diet_bin: key.diet_bin,
+                    guild: key.guild,
+                    cell,
+                }
             })
             .collect();
         Census {

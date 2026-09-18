@@ -28,8 +28,8 @@
 
 use anyhow::{Context, Result, anyhow, ensure};
 use clap::{Parser, ValueEnum};
-use cubarium_core::quiet::{QuietEvent, QuietPolicy, QuietState};
 use cubarium_core::organism::DeathCause;
+use cubarium_core::quiet::{QuietEvent, QuietPolicy, QuietState};
 use cubarium_core::{
     CareCommand, CareDose, CareKind, CareTarget, LifeEvent, OrganismId, World, WorldState,
     decode_snapshot,
@@ -51,7 +51,11 @@ use audit::{AccurateSum, Ancestry, WindowAudit, audit_passes, energy, material};
 const BUILD: &str = concat!(env!("CARGO_PKG_VERSION"), "+", env!("CUBARIUM_GIT_HASH"));
 
 /// The quiet diagnosis's own single input: one Standard Feed, here, once.
-const FEED_TARGET: CareTarget = CareTarget { face: 0, u: 32.0, v: 48.0 };
+const FEED_TARGET: CareTarget = CareTarget {
+    face: 0,
+    u: 32.0,
+    v: 48.0,
+};
 const FEED_ELAPSED: u64 = 600;
 const FEED_DOSE_PERMILLE: u16 = 1000;
 
@@ -119,8 +123,15 @@ struct Args {
 
 fn sha256(bytes: &[u8]) -> Result<String> {
     // The host's standard checksum utility, with no shell interpolation and no added dependency.
-    let mut child = Command::new("sha256sum").stdin(Stdio::piped()).stdout(Stdio::piped()).spawn()?;
-    child.stdin.take().context("checksum stdin")?.write_all(bytes)?;
+    let mut child = Command::new("sha256sum")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()?;
+    child
+        .stdin
+        .take()
+        .context("checksum stdin")?
+        .write_all(bytes)?;
     let out = child.wait_with_output()?;
     ensure!(out.status.success(), "sha256sum failed");
     let text = String::from_utf8(out.stdout)?;
@@ -204,8 +215,10 @@ fn load_cohort(dir: &Path) -> Result<(Vec<u8>, Value, Vec<Opening>)> {
             row.remove("telemetry");
             row.insert(
                 "telemetry".into(),
-                json!("in cohort-manifest.json, byte for byte; not re-serialized here because \
-                       serde_json's default decimal parse can move a value by one ULP"),
+                json!(
+                    "in cohort-manifest.json, byte for byte; not re-serialized here because \
+                       serde_json's default decimal parse can move a value by one ULP"
+                ),
             );
         }
         openings.push(Opening { state, source });
@@ -288,9 +301,9 @@ fn inspect(path: &Path) -> Result<Value> {
         organism_material += o.material();
         organism_energy += o.energy
             + reserve_density * o.reserve
-            + o.escrow
-                .as_ref()
-                .map_or(0.0, |e| e.energy + reserve_density * (e.structure + e.reserve));
+            + o.escrow.as_ref().map_or(0.0, |e| {
+                e.energy + reserve_density * (e.structure + e.reserve)
+            });
     }
     let (material_total, energy_total) = (material(&s), energy(&s));
     let water_total = s.fields.w.iter().sum::<f64>();
@@ -363,19 +376,42 @@ fn inspect(path: &Path) -> Result<Value> {
 /// `kind` field of its own rather than inheriting Rust's variant names.
 fn quiet_record(event: &QuietEvent) -> Value {
     match *event {
-        QuietEvent::Begin { tick, parent, child, end_tick, underlying } => json!({
+        QuietEvent::Begin {
+            tick,
+            parent,
+            child,
+            end_tick,
+            underlying,
+        } => json!({
             "kind": "begin", "tick": tick, "parent": parent, "child": child,
             "end_tick": end_tick, "underlying": format!("{underlying:?}")
         }),
-        QuietEvent::Refuse { tick, parent, child, reason } => json!({
+        QuietEvent::Refuse {
+            tick,
+            parent,
+            child,
+            reason,
+        } => json!({
             "kind": "refuse", "tick": tick, "parent": parent, "child": child,
             "reason": reason.as_str()
         }),
-        QuietEvent::End { tick, parent, child, completed_ticks, underlying } => json!({
+        QuietEvent::End {
+            tick,
+            parent,
+            child,
+            completed_ticks,
+            underlying,
+        } => json!({
             "kind": "end", "tick": tick, "parent": parent, "child": child,
             "completed_ticks": completed_ticks, "underlying": format!("{underlying:?}")
         }),
-        QuietEvent::Abort { tick, parent, child, completed_ticks, reason } => json!({
+        QuietEvent::Abort {
+            tick,
+            parent,
+            child,
+            completed_ticks,
+            reason,
+        } => json!({
             "kind": "abort", "tick": tick, "parent": parent, "child": child,
             "completed_ticks": completed_ticks, "reason": reason.as_str()
         }),
@@ -399,7 +435,9 @@ impl Baseline {
     fn read(s: &WorldState) -> Result<Self> {
         let (material, energy, water) = (material(s), energy(s), s.fields.w.iter().sum::<f64>());
         ensure!(
-            [material, energy, water].iter().all(|x| x.is_finite() && *x >= 0.0),
+            [material, energy, water]
+                .iter()
+                .all(|x| x.is_finite() && *x >= 0.0),
             "invalid pre-intervention baseline"
         );
         Ok(Self {
@@ -584,8 +622,14 @@ impl Arm {
         let before_hash = cubarium_core::snapshot::state_hash(opening);
         let after_hash = cubarium_core::snapshot::state_hash(&state);
         if candidate {
-            ensure!(state.quiet.policy == QuietPolicy::PostBirthPauseV1, "the policy is not set");
-            ensure!(before_hash != after_hash, "the candidate choice left the state identical");
+            ensure!(
+                state.quiet.policy == QuietPolicy::PostBirthPauseV1,
+                "the policy is not set"
+            );
+            ensure!(
+                before_hash != after_hash,
+                "the candidate choice left the state identical"
+            );
         } else {
             ensure!(
                 before_hash == after_hash && state.quiet == opening.quiet,
@@ -595,7 +639,10 @@ impl Arm {
         // The candidate changes the policy and nothing else whatsoever.
         let mut rewound = state.clone();
         rewound.quiet = opening.quiet.clone();
-        ensure!(rewound == *opening, "an arm changed something other than the quiet policy");
+        ensure!(
+            rewound == *opening,
+            "an arm changed something other than the quiet policy"
+        );
 
         let world = World::from_state(state.clone()).map_err(|e| anyhow!(e))?;
         json_new(
@@ -629,7 +676,12 @@ impl Arm {
             line(&mut opening_census, &organism_row(id, o, state.tick))?;
             lineage.insert(
                 id,
-                Lineage { cohort: id, depth: 0, form: o.phenotype.form, born_tick: o.born_tick },
+                Lineage {
+                    cohort: id,
+                    depth: 0,
+                    form: o.phenotype.form,
+                    born_tick: o.born_tick,
+                },
             );
         }
         opening_census.flush()?;
@@ -704,7 +756,9 @@ impl Arm {
     /// Step the open shadow alongside the primary's own step, and compare the two. The proof
     /// closes at the end of its window or at the first disagreement, whichever comes first.
     fn advance_shadow(&mut self, life: &[LifeEvent], quiet: &[QuietEvent]) {
-        let Some(shadow) = self.shadow.as_mut() else { return };
+        let Some(shadow) = self.shadow.as_mut() else {
+            return;
+        };
         shadow.world.step();
         let shadow_life = shadow.world.drain_events();
         let shadow_quiet = shadow.world.drain_quiet_events();
@@ -731,7 +785,10 @@ impl Arm {
             && self.shadow.is_none()
             && self.resume_proofs.iter().all(|p| p["complete"] == true)
             && (!self.mid_pause_opportunity
-                || self.resume_proofs.iter().any(|p| p["trigger"] == "mid_pause"))
+                || self
+                    .resume_proofs
+                    .iter()
+                    .any(|p| p["trigger"] == "mid_pause"))
     }
 
     fn step(&mut self, elapsed: u64, sample_every: u64) -> Result<()> {
@@ -745,7 +802,10 @@ impl Arm {
             self.mid_pause_opportunity = true;
         }
         if self.shadow.is_none() && room {
-            let mid_pause_done = self.resume_proofs.iter().any(|p| p["trigger"] == "mid_pause");
+            let mid_pause_done = self
+                .resume_proofs
+                .iter()
+                .any(|p| p["trigger"] == "mid_pause");
             if open_pauses > 0 && !mid_pause_done {
                 self.begin_shadow("mid_pause", RESUME_WINDOW)?;
             } else if elapsed == RESUME_FALLBACK_ELAPSED && self.resume_proofs.is_empty() {
@@ -776,7 +836,10 @@ impl Arm {
                 shadow.world.apply_care(&command);
             }
             let receipt = self.world.apply_care(&command);
-            let booked = receipt.outcome.applied().map_or(0.0, |q| q.energy_in - q.energy_out);
+            let booked = receipt
+                .outcome
+                .applied()
+                .map_or(0.0, |q| q.energy_in - q.energy_out);
             if let Some(q) = receipt.outcome.applied() {
                 self.receipt_energy_in.add(q.energy_in);
                 self.receipt_energy_out.add(q.energy_out);
@@ -858,7 +921,15 @@ impl Arm {
             }
         }
         for event in &life {
-            let LifeEvent::Death { tick, id, age_ticks, cause, births, genome } = event else {
+            let LifeEvent::Death {
+                tick,
+                id,
+                age_ticks,
+                cause,
+                births,
+                genome,
+            } = event
+            else {
                 continue;
             };
             self.deaths[match cause {
@@ -910,14 +981,16 @@ impl Arm {
             - s.energy_ledgers().net_since(self.opening_ledgers)
             - (s.care.feed_energy_in - initial.care.feed_energy_in)
             + (s.care.clean_energy_out - initial.care.clean_energy_out);
-        ensure!(corrected_residual.is_finite(), "nonfinite corrected energy audit");
+        ensure!(
+            corrected_residual.is_finite(),
+            "nonfinite corrected energy audit"
+        );
         self.worst_corrected_energy = self.worst_corrected_energy.max(corrected_residual.abs());
-        let windowed_residual = energy(s)
-            - self.base.energy
-            - (self.windowed.light.value() + transient_light)
-            + (self.windowed.heat.value() + transient_heat)
-            - self.receipt_energy_in.value()
-            + self.receipt_energy_out.value();
+        let windowed_residual =
+            energy(s) - self.base.energy - (self.windowed.light.value() + transient_light)
+                + (self.windowed.heat.value() + transient_heat)
+                - self.receipt_energy_in.value()
+                + self.receipt_energy_out.value();
         ensure!(windowed_residual.is_finite(), "nonfinite windowed audit");
         self.worst_windowed_energy = self.worst_windowed_energy.max(windowed_residual.abs());
         let residuals = [
@@ -930,7 +1003,8 @@ impl Arm {
                 + (s.heat_out_total - initial.heat_out_total)
                 - (s.care.feed_energy_in - initial.care.feed_energy_in)
                 + (s.care.clean_energy_out - initial.care.clean_energy_out),
-            s.fields.w.iter().sum::<f64>() - self.base.water
+            s.fields.w.iter().sum::<f64>()
+                - self.base.water
                 - (s.rain_in_total - initial.rain_in_total)
                 + (s.evap_out_total - initial.evap_out_total),
         ];
@@ -1107,9 +1181,9 @@ fn numerical_success(seeds: &[Value]) -> bool {
             s["technical_complete"] == true
                 && s["arms"].as_array().is_some_and(|arms| {
                     arms.len() == ARMS.len()
-                        && arms.iter().all(|a| {
-                            a["technical_complete"] == true && a["audit_passed"] == true
-                        })
+                        && arms
+                            .iter()
+                            .all(|a| a["technical_complete"] == true && a["audit_passed"] == true)
                 })
         })
 }
@@ -1127,13 +1201,23 @@ fn run_seed(
     let mut failure: Option<String> = None;
     for (name, candidate, feed) in ARMS {
         let arm_dir = dir.join(name);
-        let mut arm = match Arm::new(&opening.state, base, name, candidate, feed, planned, &arm_dir)
-        {
+        let mut arm = match Arm::new(
+            &opening.state,
+            base,
+            name,
+            candidate,
+            feed,
+            planned,
+            &arm_dir,
+        ) {
             Ok(arm) => arm,
             Err(error) => {
                 let text = format!("{name}: initialization_failure: {error:#}");
-                json_new(&arm_dir.join("initialization-failure.json"), &json!({"error": text}))
-                    .ok();
+                json_new(
+                    &arm_dir.join("initialization-failure.json"),
+                    &json!({"error": text}),
+                )
+                .ok();
                 failure.get_or_insert(text.clone());
                 summaries.push(json!({"arm": name, "technical_complete": false,
                     "audit_passed": false, "error": text}));
@@ -1176,8 +1260,14 @@ fn main() -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&inspect(path)?)?);
         return Ok(());
     }
-    let cohort_dir = args.cohort.clone().context("a cohort directory is required")?;
-    let out = args.out.clone().context("an output directory is required")?;
+    let cohort_dir = args
+        .cohort
+        .clone()
+        .context("a cohort directory is required")?;
+    let out = args
+        .out
+        .clone()
+        .context("an output directory is required")?;
     let planned = args.horizon.ticks();
     ensure!(
         planned.is_multiple_of(args.sample_every),
@@ -1259,7 +1349,11 @@ fn main() -> Result<()> {
         }
         eprintln!(
             "seed {seed}/12 {}",
-            if result["technical_complete"] == true { "complete" } else { "RETAINED WITH FAILURE" }
+            if result["technical_complete"] == true {
+                "complete"
+            } else {
+                "RETAINED WITH FAILURE"
+            }
         );
         all.push(result);
     }
@@ -1315,7 +1409,12 @@ mod tests {
         let names: BTreeSet<&str> = ARMS.iter().map(|(n, _, _)| *n).collect();
         assert_eq!(
             names,
-            BTreeSet::from(["off_nocare", "candidate_nocare", "off_feed", "candidate_feed"])
+            BTreeSet::from([
+                "off_nocare",
+                "candidate_nocare",
+                "off_feed",
+                "candidate_feed"
+            ])
         );
         assert_eq!(Horizon::TenMinute.ticks(), 12_000);
         assert_eq!(Horizon::TwoHour.ticks(), 144_000);
@@ -1329,12 +1428,22 @@ mod tests {
             Horizon::SeventyTwoHour,
         ] {
             assert!(h.prescribed());
-            assert!(h.ticks().is_multiple_of(200), "the 200-tick cadence must divide {h:?}");
+            assert!(
+                h.ticks().is_multiple_of(200),
+                "the 200-tick cadence must divide {h:?}"
+            );
         }
         // The care recipe is the quiet diagnosis's own, once, and nothing else.
         assert_eq!(FEED_ELAPSED, 600);
         assert_eq!(FEED_DOSE_PERMILLE, 1000);
-        assert_eq!(FEED_TARGET, CareTarget { face: 0, u: 32.0, v: 48.0 });
+        assert_eq!(
+            FEED_TARGET,
+            CareTarget {
+                face: 0,
+                u: 32.0,
+                v: 48.0
+            }
+        );
     }
 
     /// The Off arm is the copied world bit for bit, and the candidate differs in the policy and
@@ -1351,14 +1460,20 @@ mod tests {
 
         let candidate = arm_state(&o, true);
         assert_eq!(candidate.quiet.policy, QuietPolicy::PostBirthPauseV1);
-        assert!(candidate.quiet.pauses.is_empty(), "a candidate opens with no retroactive pause");
+        assert!(
+            candidate.quiet.pauses.is_empty(),
+            "a candidate opens with no retroactive pause"
+        );
         assert_ne!(
             cubarium_core::snapshot::state_hash(&candidate),
             cubarium_core::snapshot::state_hash(&o)
         );
         let mut rewound = candidate.clone();
         rewound.quiet = o.quiet.clone();
-        assert_eq!(rewound, o, "the candidate changed something other than the policy");
+        assert_eq!(
+            rewound, o,
+            "the candidate changed something other than the policy"
+        );
         assert_eq!(candidate.config, o.config);
         assert_eq!(candidate.fields, o.fields);
         assert_eq!(candidate.organisms, o.organisms);
@@ -1404,7 +1519,10 @@ mod tests {
                     "{name}: diverged at elapsed {elapsed}"
                 );
             }
-            assert_eq!(arm.observer.admissions, 0, "{name}: an Off arm admitted a pause");
+            assert_eq!(
+                arm.observer.admissions, 0,
+                "{name}: an Off arm admitted a pause"
+            );
             assert!(arm.observer.reconciled());
             assert_eq!(arm.fed_at.is_some(), feed);
             if feed {
@@ -1412,17 +1530,32 @@ mod tests {
                 assert!(arm.world.care().feed_material_in > 0.0);
                 assert_eq!(arm.receipts.len(), 1, "the single receipt is retained");
             } else {
-                assert_eq!(arm.world.state.care, o.care, "a no-care arm received nothing");
+                assert_eq!(
+                    arm.world.state.care, o.care,
+                    "a no-care arm received nothing"
+                );
             }
             // An Off arm never pauses, so its proof is the labelled fallback — and it says so
             // rather than claiming a mid-pause restart it never made.
-            assert!(arm.shadow.is_none(), "{name}: the proof closed inside the run");
-            assert!(arm.restart_proofs_pass(), "{name}: the restart proof must run and pass");
+            assert!(
+                arm.shadow.is_none(),
+                "{name}: the proof closed inside the run"
+            );
+            assert!(
+                arm.restart_proofs_pass(),
+                "{name}: the restart proof must run and pass"
+            );
             assert_eq!(arm.resume_proofs.len(), 1, "{name}: exactly one proof");
             assert_eq!(arm.resume_proofs[0]["trigger"], "fixed_boundary");
             assert_eq!(arm.resume_proofs[0]["compared_ticks"], RESUME_WINDOW);
-            assert_eq!(arm.resume_proofs[0]["open_pauses_carried_into_the_shadow"], 0);
-            assert!(!arm.mid_pause_opportunity, "{name}: an Off arm has no pause to interrupt");
+            assert_eq!(
+                arm.resume_proofs[0]["open_pauses_carried_into_the_shadow"],
+                0
+            );
+            assert!(
+                !arm.mid_pause_opportunity,
+                "{name}: an Off arm has no pause to interrupt"
+            );
             fs::remove_dir_all(&dir).ok();
         }
     }
@@ -1433,16 +1566,33 @@ mod tests {
         let o = opening();
         let base = Baseline::read(&o).unwrap();
         let dir = temp("candidate");
-        let mut arm =
-            Arm::new(&o, base, "candidate_nocare", true, false, 3000, &dir.join("arm")).unwrap();
+        let mut arm = Arm::new(
+            &o,
+            base,
+            "candidate_nocare",
+            true,
+            false,
+            3000,
+            &dir.join("arm"),
+        )
+        .unwrap();
         for elapsed in 0..3000 {
             arm.step(elapsed, 200).unwrap();
         }
-        assert!(arm.observer.admissions > 0, "the fixture must admit a pause in 3000 ticks");
+        assert!(
+            arm.observer.admissions > 0,
+            "the fixture must admit a pause in 3000 ticks"
+        );
         assert!(arm.observer.reconciled(), "{}", arm.observer.summary());
         assert_eq!(arm.observer.held_intake_ticks, 0);
-        assert!(arm.restart_proofs_pass(), "the mid-pause restart proof must pass");
-        assert!(arm.mid_pause_opportunity, "a pause was open with a whole window to spare");
+        assert!(
+            arm.restart_proofs_pass(),
+            "the mid-pause restart proof must pass"
+        );
+        assert!(
+            arm.mid_pause_opportunity,
+            "a pause was open with a whole window to spare"
+        );
         let mid = arm
             .resume_proofs
             .iter()
@@ -1454,7 +1604,12 @@ mod tests {
         assert!(arm.bouts_written > 0);
         // Recovery really is separated from the other two classes.
         let rest = arm.observer.summary();
-        assert!(rest["post_birth_recovery"]["organism_ticks"].as_u64().unwrap() > 0);
+        assert!(
+            rest["post_birth_recovery"]["organism_ticks"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
         assert!(rest["newborn_initial"]["bouts"].as_u64().unwrap() > 0);
         fs::remove_dir_all(&dir).ok();
     }
@@ -1473,7 +1628,10 @@ mod tests {
             bad[11]["arms"][3][field] = json!(false);
             assert!(!numerical_success(&bad), "{field} must fail the cohort");
         }
-        assert!(!numerical_success(&good[..11]), "eleven seeds is not the cohort");
+        assert!(
+            !numerical_success(&good[..11]),
+            "eleven seeds is not the cohort"
+        );
         let mut missing = good.clone();
         missing[0]["arms"].as_array_mut().unwrap().pop();
         assert!(!numerical_success(&missing), "three arms is not the family");
@@ -1517,16 +1675,22 @@ mod tests {
     /// refusal before a single world is constructed.
     #[test]
     fn an_incomplete_or_tampered_cohort_is_refused() {
-        let real = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../captures/hunter-openings-2026-09-13");
+        let real =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../captures/hunter-openings-2026-09-13");
         if !real.join("manifest.json").exists() {
             eprintln!("skipping: the prescribed cohort is not present in this checkout");
             return;
         }
-        let (raw, manifest, openings) = load_cohort(&real).expect("the prescribed cohort must load");
+        let (raw, manifest, openings) =
+            load_cohort(&real).expect("the prescribed cohort must load");
         assert_eq!(openings.len(), 12);
         assert_eq!(manifest["opening_tick"], 144_000);
-        assert!(openings.iter().enumerate().all(|(i, o)| o.state.config.seed == i as u64 + 1));
+        assert!(
+            openings
+                .iter()
+                .enumerate()
+                .all(|(i, o)| o.state.config.seed == i as u64 + 1)
+        );
         // The bytes come back unaltered, and the copy a run writes is those bytes.
         assert_eq!(raw, fs::read(real.join("manifest.json")).unwrap());
         assert_ne!(
@@ -1564,8 +1728,12 @@ mod tests {
                 let seed = m["openings"][0]["seed"].clone();
                 m["openings"][1]["seed"] = seed;
             }),
-            ("tampered-checksum", |m| m["openings"][0]["sha256"] = json!("0".repeat(64))),
-            ("tampered-ecology-hash", |m| m["openings"][0]["ecology_hash"] = json!("1")),
+            ("tampered-checksum", |m| {
+                m["openings"][0]["sha256"] = json!("0".repeat(64))
+            }),
+            ("tampered-ecology-hash", |m| {
+                m["openings"][0]["ecology_hash"] = json!("1")
+            }),
         ];
         for (name, damage) in cases {
             let case = dir.join(name);
@@ -1582,13 +1750,20 @@ mod tests {
                 )
                 .unwrap();
             }
-            assert!(load_cohort(&case).is_err(), "{name}: a damaged cohort must be refused");
+            assert!(
+                load_cohort(&case).is_err(),
+                "{name}: a damaged cohort must be refused"
+            );
         }
 
         // And a snapshot whose bytes no longer match its recorded checksum.
         let case = dir.join("flipped-byte");
         fs::create_dir_all(&case).unwrap();
-        fs::write(case.join("manifest.json"), serde_json::to_vec(&rows).unwrap()).unwrap();
+        fs::write(
+            case.join("manifest.json"),
+            serde_json::to_vec(&rows).unwrap(),
+        )
+        .unwrap();
         for seed in 1..=12u64 {
             fs::create_dir_all(case.join(format!("seed-{seed}"))).unwrap();
             fs::copy(
@@ -1597,7 +1772,10 @@ mod tests {
             )
             .unwrap();
         }
-        assert!(load_cohort(&case).is_ok(), "the copy must be faithful first");
+        assert!(
+            load_cohort(&case).is_ok(),
+            "the copy must be faithful first"
+        );
         let path = case.join("seed-1/world-144000.cubw");
         let mut bytes = fs::read(&path).unwrap();
         let last = bytes.len() - 1;
@@ -1613,8 +1791,8 @@ mod tests {
     /// of one.
     #[test]
     fn an_opening_that_already_carries_a_policy_is_refused() {
-        let real = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../captures/hunter-openings-2026-09-13");
+        let real =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../captures/hunter-openings-2026-09-13");
         if !real.join("manifest.json").exists() {
             eprintln!("skipping: the prescribed cohort is not present in this checkout");
             return;
@@ -1688,7 +1866,10 @@ mod tests {
 
         let bytes = cubarium_core::encode_snapshot(&primary.state, BUILD);
         let (_, faithful) = decode_snapshot(&bytes).unwrap();
-        assert!(!faithful.quiet.pauses.is_empty(), "the snapshot must carry the open pause");
+        assert!(
+            !faithful.quiet.pauses.is_empty(),
+            "the snapshot must carry the open pause"
+        );
         let mut dropped = faithful.clone();
         dropped.quiet.pauses.clear();
         let mut rewritten = faithful.clone();
@@ -1697,7 +1878,11 @@ mod tests {
         // hysteresis every held tick, and `Seeking` and `Feeding` converge on the next tick from
         // the same food and hunger, so swapping those two is absorbed. `Resting` is the one the
         // hysteresis keeps, so a shadow given it stays quiet where the primary went back to work.
-        let swapped = if original == Mode::Resting { Mode::Seeking } else { Mode::Resting };
+        let swapped = if original == Mode::Resting {
+            Mode::Seeking
+        } else {
+            Mode::Resting
+        };
         rewritten.quiet.pauses[0].underlying = swapped;
 
         // Two decodes of the damaged bytes, to stand in for the mirror the proof used to build.
@@ -1725,9 +1910,17 @@ mod tests {
         assert!(seen.contains("policy"), "{seen}");
 
         let mut shadows = [
-            ("faithful", World::from_state(faithful).unwrap(), None::<String>),
+            (
+                "faithful",
+                World::from_state(faithful).unwrap(),
+                None::<String>,
+            ),
             ("dropped_pause", World::from_state(dropped).unwrap(), None),
-            ("rewritten_underlying", World::from_state(rewritten).unwrap(), None),
+            (
+                "rewritten_underlying",
+                World::from_state(rewritten).unwrap(),
+                None,
+            ),
         ];
         for _ in 0..RESUME_WINDOW {
             primary.step();
@@ -1765,7 +1958,10 @@ mod tests {
             );
         }
 
-        assert_eq!(shadows[0].2, None, "an undamaged shadow must track the primary exactly");
+        assert_eq!(
+            shadows[0].2, None,
+            "an undamaged shadow must track the primary exactly"
+        );
         let dropped_failure = shadows[1].2.clone().expect("a lost pause must be caught");
         assert!(dropped_failure.contains("pause set"), "{dropped_failure}");
 
@@ -1775,13 +1971,19 @@ mod tests {
         // to the same next ordinary mode and the damage is absorbed within one step. It is caught
         // where it is persisted — at the decode compared above, which is what `begin_shadow`
         // runs — and a stepped comparison is not a general detector of it.
-        assert_ne!(swapped, original, "the rewrite must really change the carried mode");
+        assert_ne!(
+            swapped, original,
+            "the rewrite must really change the carried mode"
+        );
         assert_eq!(
             shadows[2].1.quiet().pauses,
             primary.quiet().pauses,
             "the core re-derives the carried underlying mode every held tick"
         );
-        assert_eq!(shadows[2].2, None, "and so this particular damage leaves no trace to step on");
+        assert_eq!(
+            shadows[2].2, None,
+            "and so this particular damage leaves no trace to step on"
+        );
     }
 
     /// **The reason the cohort manifest is copied byte for byte rather than re-serialized.**
@@ -1796,12 +1998,19 @@ mod tests {
     #[test]
     fn serde_json_can_move_a_cohort_decimal_by_one_ulp() {
         let mut moved = 0;
-        for text in ["212.54356731997558", "0.9785584621020161", "60.830572942452996"] {
+        for text in [
+            "212.54356731997558",
+            "0.9785584621020161",
+            "60.830572942452996",
+        ] {
             // Rust's own parser is correctly rounded; this is the value in the source bytes.
             let exact: f64 = text.parse().expect("a decimal");
             let through_json: f64 = serde_json::from_str(text).expect("a JSON number");
             let drift = through_json.to_bits() as i64 - exact.to_bits() as i64;
-            assert!(drift.abs() <= 1, "{text}: {drift} ULP is more than the known fast path");
+            assert!(
+                drift.abs() <= 1,
+                "{text}: {drift} ULP is more than the known fast path"
+            );
             if drift != 0 {
                 moved += 1;
                 assert_ne!(
@@ -1825,7 +2034,10 @@ mod tests {
         let dir = temp("exclusive");
         let out = dir.join("run");
         fs::create_dir(&out).unwrap();
-        assert!(fs::create_dir(&out).is_err(), "an existing output directory must be refused");
+        assert!(
+            fs::create_dir(&out).is_err(),
+            "an existing output directory must be refused"
+        );
         write_new(&out.join("manifest.json"), b"{}").unwrap();
         assert!(
             write_new(&out.join("manifest.json"), b"{}").is_err(),

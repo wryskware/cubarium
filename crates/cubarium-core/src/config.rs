@@ -414,7 +414,13 @@ impl Default for WorldConfig {
 
 impl Default for ProducerConfig {
     fn default() -> Self {
-        ProducerConfig { growth: 0.008, max: 1.5, uptake_max: 0.5, mortality: 0.001, initial_fraction: 0.4 }
+        ProducerConfig {
+            growth: 0.008,
+            max: 1.5,
+            uptake_max: 0.5,
+            mortality: 0.001,
+            initial_fraction: 0.4,
+        }
     }
 }
 
@@ -459,7 +465,11 @@ impl Default for DetritusConfig {
 
 impl Default for NutrientConfig {
     fn default() -> Self {
-        NutrientConfig { initial: 0.5, diffusion: 0.05, half_saturation: 0.25 }
+        NutrientConfig {
+            initial: 0.5,
+            diffusion: 0.05,
+            half_saturation: 0.25,
+        }
     }
 }
 
@@ -499,13 +509,21 @@ impl Default for WaterConfig {
 
 impl Default for FruitConfig {
     fn default() -> Self {
-        FruitConfig { ripen: 0.02, fruit_min: 0.3, drop: 0.004, energy_density: 3.0 }
+        FruitConfig {
+            ripen: 0.02,
+            fruit_min: 0.3,
+            drop: 0.004,
+            energy_density: 3.0,
+        }
     }
 }
 
 impl Default for MutationConfig {
     fn default() -> Self {
-        MutationConfig { probability: 0.3, step: 0.08 }
+        MutationConfig {
+            probability: 0.3,
+            step: 0.08,
+        }
     }
 }
 
@@ -531,7 +549,10 @@ impl FounderKind {
         };
         // The burrower runs cool (`metabolism` 0.7, `size` 1.0): a scavenger's income from
         // litter is thin, and its upkeep has to fit it.
-        let burrower = FounderKind { metabolism: Some(0.7), ..kind("burrower", 4, 0.10, 0.10, 0.6, 1.0, 0.0, 0.15, 2) };
+        let burrower = FounderKind {
+            metabolism: Some(0.7),
+            ..kind("burrower", 4, 0.10, 0.10, 0.6, 1.0, 0.0, 0.15, 2)
+        };
         vec![
             burrower,
             kind("grazer", 10, 0.85, 0.55, 1.0, 1.0, 0.0, 0.50, 0),
@@ -539,7 +560,10 @@ impl FounderKind {
             // The skimmer runs cool too, and grazes: its food is the algae that standing
             // water grows on the floor (`water.algae_light`), which the wading burrowers
             // reach slowly. As a pure scavenger it boomed on the shared litter and starved.
-            FounderKind { metabolism: Some(0.7), ..kind("skimmer", 5, 0.60, 0.10, 0.9, 0.9, 1.0, 0.65, 3) },
+            FounderKind {
+                metabolism: Some(0.7),
+                ..kind("skimmer", 5, 0.60, 0.10, 0.9, 0.9, 1.0, 0.65, 3)
+            },
         ]
     }
 }
@@ -661,7 +685,11 @@ impl Default for CapacityConfig {
 
 impl Default for MechanismToggles {
     fn default() -> Self {
-        MechanismToggles { grazing: true, scavenging: true, mutation: true }
+        MechanismToggles {
+            grazing: true,
+            scavenging: true,
+            mutation: true,
+        }
     }
 }
 
@@ -875,7 +903,10 @@ impl WorldConfig {
         fraction("organism.oxidation_threshold", o.oxidation_threshold)?;
         fraction("organism.oxidation_efficiency", o.oxidation_efficiency)?;
         fraction("organism.growth_reserve_min", o.growth_reserve_min)?;
-        fraction("organism.child_structure_fraction", o.child_structure_fraction)?;
+        fraction(
+            "organism.child_structure_fraction",
+            o.child_structure_fraction,
+        )?;
         fraction("organism.child_reserve_fraction", o.child_reserve_fraction)?;
         fraction("organism.child_energy_fraction", o.child_energy_fraction)?;
         fraction("organism.rest_turn_fraction", o.rest_turn_fraction)?;
@@ -909,8 +940,8 @@ impl WorldConfig {
         let dr = &self.drives;
         // Escrow is paid out of the parent's reserve at conception, which requires
         // `R >= bud_reserve * R_max`; a child that needs more than that could never be born.
-        let child_material =
-            o.child_structure_fraction * o.structure_adult + o.child_reserve_fraction * o.reserve_max;
+        let child_material = o.child_structure_fraction * o.structure_adult
+            + o.child_reserve_fraction * o.reserve_max;
         let conception_reserve = dr.bud_reserve * o.reserve_max;
         if child_material > conception_reserve {
             return Err(format!(
@@ -951,8 +982,14 @@ impl WorldConfig {
         }
 
         let f = &self.founders;
-        fraction("founders.initial_reserve_fraction", f.initial_reserve_fraction)?;
-        fraction("founders.initial_energy_fraction", f.initial_energy_fraction)?;
+        fraction(
+            "founders.initial_reserve_fraction",
+            f.initial_reserve_fraction,
+        )?;
+        fraction(
+            "founders.initial_energy_fraction",
+            f.initial_energy_fraction,
+        )?;
         for (i, k) in f.kinds.iter().enumerate() {
             let who = |field: &str| format!("founders.kinds[{i}] ({}).{field}", k.name);
             let in_range = |field: &str, v: Option<f32>, lo: f32, hi: f32| -> Result<(), String> {
@@ -973,7 +1010,11 @@ impl WorldConfig {
             if let Some(form) = k.form
                 && form >= crate::genome::MAX_FORMS
             {
-                return Err(format!("{} = {form}, expected below {}", who("form"), crate::genome::MAX_FORMS));
+                return Err(format!(
+                    "{} = {form}, expected below {}",
+                    who("form"),
+                    crate::genome::MAX_FORMS
+                ));
             }
         }
 
@@ -1053,7 +1094,9 @@ mod tests {
 
     #[test]
     fn the_default_config_is_valid() {
-        WorldConfig::default().validate().expect("defaults must be a well-defined world");
+        WorldConfig::default()
+            .validate()
+            .expect("defaults must be a well-defined world");
     }
 
     /// One mutation of a valid config, and the substring its rejection must mention.
@@ -1067,8 +1110,12 @@ mod tests {
             ("producer.growth", |c| c.producer.growth = -1.0),
             ("producer.growth", |c| c.producer.growth = f64::NAN),
             ("producer.max", |c| c.producer.max = 0.0),
-            ("producer.initial_fraction", |c| c.producer.initial_fraction = 1.5),
-            ("detritus.decomposition", |c| c.detritus.decomposition = f64::INFINITY),
+            ("producer.initial_fraction", |c| {
+                c.producer.initial_fraction = 1.5
+            }),
+            ("detritus.decomposition", |c| {
+                c.detritus.decomposition = f64::INFINITY
+            }),
             ("detritus.fall", |c| c.detritus.fall = -0.01),
             ("detritus.fall", |c| c.detritus.fall = f64::NAN),
             // `fall · DT` must stay at or below one: DT = 0.05, so 20/s is the ceiling.
@@ -1082,46 +1129,87 @@ mod tests {
             ("water.algae_light", |c| c.water.algae_light = 1.2),
             ("water.algae_depth", |c| c.water.algae_depth = 0.0),
             ("habitat.moisture_min", |c| c.habitat.moisture_min = 2.0),
-            ("habitat.noise_wavelength[0]", |c| c.habitat.noise_wavelength[0] = 0.0),
-            ("habitat.noise_wavelength", |c| c.habitat.noise_wavelength = [1.4, 0.6]),
+            ("habitat.noise_wavelength[0]", |c| {
+                c.habitat.noise_wavelength[0] = 0.0
+            }),
+            ("habitat.noise_wavelength", |c| {
+                c.habitat.noise_wavelength = [1.4, 0.6]
+            }),
             ("weather.amplitude", |c| c.weather.amplitude = -0.1),
-            ("weather.blob_radius_deg", |c| c.weather.blob_radius_deg = 0.0),
-            ("weather.blob_radius_deg", |c| c.weather.blob_radius_deg = 200.0),
+            ("weather.blob_radius_deg", |c| {
+                c.weather.blob_radius_deg = 0.0
+            }),
+            ("weather.blob_radius_deg", |c| {
+                c.weather.blob_radius_deg = 200.0
+            }),
             ("weather.periods_min", |c| c.weather.periods_min.clear()),
             ("weather.periods_min[1]", |c| c.weather.periods_min[1] = 0.0),
-            ("organism.structure_adult", |c| c.organism.structure_adult = 0.0),
+            ("organism.structure_adult", |c| {
+                c.organism.structure_adult = 0.0
+            }),
             ("organism.maintenance", |c| c.organism.maintenance = -1.0),
-            ("organism.assimilation_material", |c| c.organism.assimilation_material = 1.2),
-            ("organism.assimilation_energy", |c| c.organism.assimilation_energy = -0.01),
-            ("organism.body_extent_max", |c| c.organism.body_extent_max = 64.0),
-            ("child material", |c| c.organism.child_reserve_fraction = 0.9),
+            ("organism.assimilation_material", |c| {
+                c.organism.assimilation_material = 1.2
+            }),
+            ("organism.assimilation_energy", |c| {
+                c.organism.assimilation_energy = -0.01
+            }),
+            ("organism.body_extent_max", |c| {
+                c.organism.body_extent_max = 64.0
+            }),
+            ("child material", |c| {
+                c.organism.child_reserve_fraction = 0.9
+            }),
             ("drives.seek_off", |c| c.drives.seek_off = c.drives.seek_on),
-            ("organism.rest_turn_fraction", |c| c.organism.rest_turn_fraction = 1.5),
-            ("organism.feed_turn_fraction", |c| c.organism.feed_turn_fraction = f64::NAN),
+            ("organism.rest_turn_fraction", |c| {
+                c.organism.rest_turn_fraction = 1.5
+            }),
+            ("organism.feed_turn_fraction", |c| {
+                c.organism.feed_turn_fraction = f64::NAN
+            }),
             ("fruit.energy_density", |c| c.fruit.energy_density = 1.0),
             ("fruit.fruit_min", |c| c.fruit.fruit_min = 1.5),
             ("fruit.drop", |c| c.fruit.drop = 30.0),
             ("mutation.probability", |c| c.mutation.probability = 1.2),
-            ("founders.kinds[0] (burrower).diet", |c| c.founders.kinds[0].diet = Some(1.5)),
-            ("founders.kinds[1] (grazer).form", |c| c.founders.kinds[1].form = Some(9)),
-            ("founders.kinds[2] (glider).speed", |c| c.founders.kinds[2].speed = Some(0.1)),
+            ("founders.kinds[0] (burrower).diet", |c| {
+                c.founders.kinds[0].diet = Some(1.5)
+            }),
+            ("founders.kinds[1] (grazer).form", |c| {
+                c.founders.kinds[1].form = Some(9)
+            }),
+            ("founders.kinds[2] (glider).speed", |c| {
+                c.founders.kinds[2].speed = Some(0.1)
+            }),
             ("detritus.initial_dark", |c| c.detritus.initial_dark = -0.5),
-            ("founders.kinds[0] (burrower).metabolism", |c| c.founders.kinds[0].metabolism = Some(0.1)),
+            ("founders.kinds[0] (burrower).metabolism", |c| {
+                c.founders.kinds[0].metabolism = Some(0.1)
+            }),
             ("drives.seek_off", |c| c.drives.seek_off = 0.9),
-            ("drives.tau_hunger_seconds", |c| c.drives.tau_hunger_seconds = 0.0),
+            ("drives.tau_hunger_seconds", |c| {
+                c.drives.tau_hunger_seconds = 0.0
+            }),
             ("drives.w_food", |c| c.drives.w_food = -1.0),
-            ("founders.initial_reserve_fraction", |c| c.founders.initial_reserve_fraction = 1.1),
+            ("founders.initial_reserve_fraction", |c| {
+                c.founders.initial_reserve_fraction = 1.1
+            }),
             ("founders.count", |c| c.founders.count = 100_000),
             ("capacity.max_organisms", |c| c.capacity.max_organisms = 0),
             ("capacity.max_neighbors", |c| c.capacity.max_neighbors = 0),
-            ("capacity.checkpoint_seconds", |c| c.capacity.checkpoint_seconds = 0.0),
-            ("capacity.telemetry_seconds", |c| c.capacity.telemetry_seconds = -5.0),
+            ("capacity.checkpoint_seconds", |c| {
+                c.capacity.checkpoint_seconds = 0.0
+            }),
+            ("capacity.telemetry_seconds", |c| {
+                c.capacity.telemetry_seconds = -5.0
+            }),
         ];
         for (expect, mutate) in cases {
             let mut cfg = WorldConfig::default();
             mutate(&mut cfg);
             let err = cfg.validate().unwrap_err();
-            assert!(err.contains(expect), "expected an error mentioning {expect}, got: {err}");
+            assert!(
+                err.contains(expect),
+                "expected an error mentioning {expect}, got: {err}"
+            );
         }
     }
 
@@ -1170,16 +1258,36 @@ capacity.telemetry_seconds = 5.0
     fn a_config_toml_without_fauna_v2_takes_the_design_defaults() {
         let cfg: WorldConfig = toml::from_str("seed = 3\nproducer.growth = 0.008\n").unwrap();
         assert_eq!(cfg.fruit, FruitConfig::default());
-        assert_eq!((cfg.fruit.ripen, cfg.fruit.fruit_min, cfg.fruit.drop, cfg.fruit.energy_density), (0.02, 0.3, 0.004, 3.0));
+        assert_eq!(
+            (
+                cfg.fruit.ripen,
+                cfg.fruit.fruit_min,
+                cfg.fruit.drop,
+                cfg.fruit.energy_density
+            ),
+            (0.02, 0.3, 0.004, 3.0)
+        );
         assert_eq!((cfg.mutation.probability, cfg.mutation.step), (0.3, 0.08));
-        assert!(cfg.mechanisms.mutation, "mutation is on by default in fauna v2");
+        assert!(
+            cfg.mechanisms.mutation,
+            "mutation is on by default in fauna v2"
+        );
         assert_eq!(cfg.organism.rest_turn_fraction, 0.0);
         assert_eq!(cfg.organism.feed_turn_fraction, 0.1);
         assert_eq!(cfg.drives.w_depth, 1.0);
         let kinds = &cfg.founders.kinds;
-        assert_eq!(kinds.iter().map(|k| k.name.as_str()).collect::<Vec<_>>(), ["burrower", "grazer", "glider", "skimmer"]);
-        assert_eq!(kinds.iter().map(|k| k.count).collect::<Vec<_>>(), [4, 10, 5, 5]);
-        assert_eq!(kinds.iter().map(|k| k.form).collect::<Vec<_>>(), [Some(2), Some(0), Some(1), Some(3)]);
+        assert_eq!(
+            kinds.iter().map(|k| k.name.as_str()).collect::<Vec<_>>(),
+            ["burrower", "grazer", "glider", "skimmer"]
+        );
+        assert_eq!(
+            kinds.iter().map(|k| k.count).collect::<Vec<_>>(),
+            [4, 10, 5, 5]
+        );
+        assert_eq!(
+            kinds.iter().map(|k| k.form).collect::<Vec<_>>(),
+            [Some(2), Some(0), Some(1), Some(3)]
+        );
         assert_eq!(kinds[3].swim, Some(1.0));
         cfg.validate().unwrap();
 
@@ -1214,7 +1322,8 @@ capacity.telemetry_seconds = 5.0
         assert_eq!(cfg.water.algae_depth, 0.3);
         assert_eq!(cfg.habitat.basin_gain, 0.15);
         cfg.validate().unwrap();
-        let dry: WorldConfig = toml::from_str("water.rain_rate = 0.0\nhabitat.basin_gain = 0.0\n").unwrap();
+        let dry: WorldConfig =
+            toml::from_str("water.rain_rate = 0.0\nhabitat.basin_gain = 0.0\n").unwrap();
         assert_eq!(dry.water.rain_rate, 0.0);
         assert_eq!(dry.habitat.basin_gain, 0.0);
         dry.validate().unwrap();

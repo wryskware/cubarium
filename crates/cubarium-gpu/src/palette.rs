@@ -16,7 +16,11 @@ use bytemuck::{Pod, Zeroable};
 pub fn srgb_linear(hex: u32) -> [f32; 3] {
     let channel = |code: u8| -> f32 {
         let c = f64::from(code) / 255.0;
-        let l = if c <= 0.040_45 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) };
+        let l = if c <= 0.040_45 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        };
         l as f32
     };
     [
@@ -174,14 +178,21 @@ mod tests {
         for code in 0..=255u32 {
             let ours = super::srgb_linear(code << 16)[0];
             let theirs = cubarium_srgb_decode(code as u8);
-            assert!((ours - theirs).abs() < 1e-7, "code {code}: {ours} vs {theirs}");
+            assert!(
+                (ours - theirs).abs() < 1e-7,
+                "code {code}: {ours} vs {theirs}"
+            );
         }
     }
 
     /// `cubarium_render::srgb_decode`, copied so the test does not add a dependency.
     fn cubarium_srgb_decode(encoded: u8) -> f32 {
         let c = f64::from(encoded) / 255.0;
-        let l = if c <= 0.040_45 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) };
+        let l = if c <= 0.040_45 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        };
         l as f32
     }
 }

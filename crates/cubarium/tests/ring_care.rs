@@ -24,7 +24,10 @@ fn ring() -> Topology {
 }
 
 fn ring_world() -> World {
-    let mut cfg = WorldConfig { seed: SEED, ..WorldConfig::default() };
+    let mut cfg = WorldConfig {
+        seed: SEED,
+        ..WorldConfig::default()
+    };
     cfg.topology = ring();
     let mut world = World::new(cfg).expect("legal ring world");
     // One step so the fields are settled and the tick is a real boundary.
@@ -41,14 +44,61 @@ fn ring_world() -> World {
 /// target must still hold afterwards.
 #[test]
 fn the_host_care_target_is_still_the_cube_chart() {
-    assert_eq!(HostCareTarget { face: 0, u: 0, v: 0 }.validate(), Ok(()));
-    assert_eq!(HostCareTarget { face: 4, u: 63, v: 63 }.validate(), Ok(()));
-    assert!(HostCareTarget { face: 5, u: 0, v: 0 }.validate().is_err(), "there is no face 5");
-    assert!(HostCareTarget { face: 0, u: 64, v: 0 }.validate().is_err(), "u is 0..63 today");
-    assert!(HostCareTarget { face: 0, u: 0, v: 64 }.validate().is_err(), "v is 0..63 today");
+    assert_eq!(
+        HostCareTarget {
+            face: 0,
+            u: 0,
+            v: 0
+        }
+        .validate(),
+        Ok(())
+    );
+    assert_eq!(
+        HostCareTarget {
+            face: 4,
+            u: 63,
+            v: 63
+        }
+        .validate(),
+        Ok(())
+    );
+    assert!(
+        HostCareTarget {
+            face: 5,
+            u: 0,
+            v: 0
+        }
+        .validate()
+        .is_err(),
+        "there is no face 5"
+    );
+    assert!(
+        HostCareTarget {
+            face: 0,
+            u: 64,
+            v: 0
+        }
+        .validate()
+        .is_err(),
+        "u is 0..63 today"
+    );
+    assert!(
+        HostCareTarget {
+            face: 0,
+            u: 0,
+            v: 64
+        }
+        .validate()
+        .is_err(),
+        "v is 0..63 today"
+    );
     // The type itself is the thing FW-4 has to widen: `u8` cannot even name pixel 200 of a
     // 320-pixel ring row, let alone 319.
-    assert_eq!(std::mem::size_of::<HostCareTarget>(), 6, "face + u16 + u16, widened by FW-4");
+    assert_eq!(
+        std::mem::size_of::<HostCareTarget>(),
+        6,
+        "face + u16 + u16, widened by FW-4"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -70,21 +120,38 @@ fn feed_rain_and_clean_land_beyond_pixel_63_on_a_ring() {
     let before = world.care().feed_material_in;
     let fed = apply(&mut world, CareKind::Feed, 200.0, 120.0);
     assert!(fed.applied().is_some(), "feed at (200, 120): {fed:?}");
-    assert!(world.care().feed_material_in > before, "the feed ledger moved");
+    assert!(
+        world.care().feed_material_in > before,
+        "the feed ledger moved"
+    );
 
     let before = world.care().rain_depth_in;
     let rained = apply(&mut world, CareKind::Rain, 300.5, 20.5);
-    assert!(rained.applied().is_some(), "rain at (300.5, 20.5): {rained:?}");
+    assert!(
+        rained.applied().is_some(),
+        "rain at (300.5, 20.5): {rained:?}"
+    );
     world.step();
-    assert!(world.care().rain_depth_in > before, "the rain ledger moved once a sample fell");
+    assert!(
+        world.care().rain_depth_in > before,
+        "the rain ledger moved once a sample fell"
+    );
 
     // Clean takes back what feeding put down, at the same place.
     let before = world.care().clean_material_out;
     let cleaned = apply(&mut world, CareKind::Clean, 200.0, 120.0);
-    assert!(cleaned.applied().is_some(), "clean at (200, 120): {cleaned:?}");
-    assert!(world.care().clean_material_out > before, "the clean ledger moved");
+    assert!(
+        cleaned.applied().is_some(),
+        "clean at (200, 120): {cleaned:?}"
+    );
+    assert!(
+        world.care().clean_material_out > before,
+        "the clean ledger moved"
+    );
 
-    world.check_invariants().expect("care on a ring keeps the world's identities");
+    world
+        .check_invariants()
+        .expect("care on a ring keeps the world's identities");
 }
 
 /// A persisted shower's footprint is raw cell indices, and on a ring those may exceed the
@@ -97,7 +164,10 @@ fn a_ring_shower_may_name_cells_beyond_the_cubes_1280() {
     let shower = world.care().showers.first().expect("a shower is in flight");
     assert!(!shower.cells.is_empty());
     for c in &shower.cells {
-        assert!(usize::from(*c) < world.cell_count(), "cell {c} is inside the world");
+        assert!(
+            usize::from(*c) < world.cell_count(),
+            "cell {c} is inside the world"
+        );
     }
     // (300.5, 120.5) is column 75 of row 30, cell 2,475 — an index the cube's 1,280 cells
     // could never name, and one a leftover `CELL_COUNT` bound would have refused.
@@ -106,14 +176,23 @@ fn a_ring_shower_may_name_cells_beyond_the_cubes_1280() {
         "a shower at v = 120.5 must touch cells past the cube's 1,280: {:?}",
         shower.cells
     );
-    world.state.validate().expect("the persisted shower validates against the ring");
+    world
+        .state
+        .validate()
+        .expect("the persisted shower validates against the ring");
 }
 
 /// Off-world targets are refused, not clamped onto some other cell.
 #[test]
 fn off_world_care_is_refused_on_a_ring() {
     let mut world = ring_world();
-    for (u, v) in [(320.0, 90.0), (-1.0, 90.0), (160.0, 180.0), (160.0, -0.5), (f64::NAN, 1.0)] {
+    for (u, v) in [
+        (320.0, 90.0),
+        (-1.0, 90.0),
+        (160.0, 180.0),
+        (160.0, -0.5),
+        (f64::NAN, 1.0),
+    ] {
         let outcome = apply(&mut world, CareKind::Feed, u, v);
         assert!(
             matches!(outcome, CareOutcome::Rejected(_)),
@@ -126,25 +205,41 @@ fn off_world_care_is_refused_on_a_ring() {
         seq,
         world.tick(),
         CareKind::Feed,
-        CareTarget { face: 4, u: 10.0, v: 10.0 },
+        CareTarget {
+            face: 4,
+            u: 10.0,
+            v: 10.0,
+        },
     );
-    assert!(matches!(world.apply_care(&cmd).outcome, CareOutcome::Rejected(_)), "Face::Top");
+    assert!(
+        matches!(world.apply_care(&cmd).outcome, CareOutcome::Rejected(_)),
+        "Face::Top"
+    );
 }
 
 /// The cube is unchanged: the same commands still work there, and the same bounds still
 /// refuse.
 #[test]
 fn the_cube_care_chain_is_unchanged() {
-    let mut world =
-        World::new(WorldConfig { seed: SEED, ..WorldConfig::default() }).expect("legal cube world");
+    let mut world = World::new(WorldConfig {
+        seed: SEED,
+        ..WorldConfig::default()
+    })
+    .expect("legal cube world");
     world.step();
     assert_eq!(world.topology(), Topology::Cube);
     assert_eq!(world.scale(), Scale::ONE);
 
     let outcome = apply(&mut world, CareKind::Feed, 32.0, 32.0);
-    assert!(outcome.applied().is_some(), "feed at the middle of Front: {outcome:?}");
+    assert!(
+        outcome.applied().is_some(),
+        "feed at the middle of Front: {outcome:?}"
+    );
     let outcome = apply(&mut world, CareKind::Feed, 64.0, 32.0);
-    assert!(matches!(outcome, CareOutcome::Rejected(_)), "u = 64 is off a cube chart");
+    assert!(
+        matches!(outcome, CareOutcome::Rejected(_)),
+        "u = 64 is off a cube chart"
+    );
 }
 
 // --- pending FW-4 -----------------------------------------------------------------

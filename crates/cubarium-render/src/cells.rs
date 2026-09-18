@@ -45,7 +45,8 @@ impl PixelCells {
             for y in 0..h {
                 for x in 0..w {
                     let mut entry = [ABSENT; 5];
-                    entry[0] = cell_of(topo, scale, &SurfacePoint::pixel_center(topo, face, x, y)).0;
+                    entry[0] =
+                        cell_of(topo, scale, &SurfacePoint::pixel_center(topo, face, x, y)).0;
                     for (i, edge) in Edge::ALL.into_iter().enumerate() {
                         if let Some((nf, nx, ny)) = pixel_neighbor(topo, face, x, y, edge) {
                             let p = SurfacePoint::pixel_center(topo, nf, nx, ny);
@@ -56,7 +57,13 @@ impl PixelCells {
                 }
             }
         }
-        PixelCells { topo, scale, w, h, table }
+        PixelCells {
+            topo,
+            scale,
+            w,
+            h,
+            table,
+        }
     }
 
     #[inline]
@@ -133,7 +140,8 @@ mod tests {
             for &face in topo.charts() {
                 for y in 0..h as u16 {
                     for x in 0..w as u16 {
-                        let want = cell_of(topo, scale, &SurfacePoint::pixel_center(topo, face, x, y));
+                        let want =
+                            cell_of(topo, scale, &SurfacePoint::pixel_center(topo, face, x, y));
                         assert_eq!(cells.cell(face, x, y), want, "{topo:?} {face:?} ({x}, {y})");
                         let entry = &cells.table[cells.index(face, x, y)];
                         for (i, edge) in Edge::ALL.into_iter().enumerate() {
@@ -166,9 +174,11 @@ mod tests {
         for &face in topo.charts() {
             for y in 0..64u16 {
                 for x in 0..64u16 {
-                    let mut sum = field
-                        .get(cell_of(topo, scale, &SurfacePoint::pixel_center(topo, face, x, y)))
-                        * 4.0;
+                    let mut sum = field.get(cell_of(
+                        topo,
+                        scale,
+                        &SurfacePoint::pixel_center(topo, face, x, y),
+                    )) * 4.0;
                     let mut weight = 4.0;
                     for edge in Edge::ALL {
                         if let Some((nf, nx, ny)) = pixel_neighbor(topo, face, x, y, edge) {

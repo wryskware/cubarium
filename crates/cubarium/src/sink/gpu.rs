@@ -50,9 +50,9 @@ use crate::art_present::{
     TALL_BEND_ROOT, TALL_FIRST_JOIN, TALL_OPACITY, TALL_PLANTS, TILE_ROWS, VINE_PLANT,
     band_opacity, clip_time, dead_wood_density, dead_wood_tone, foliage_fullness, foliage_ramp_at,
     fruit_stage, ground_opacity, growth_between, growth_step, growth_weights, litter_density,
-    living_wood_tone, phase_of, plant_density, plant_phase_of, rain_streaks,
-    rig_of, soil_snag_opacity, stage_opacity, stage_thresholds, structural, tall_bend_base,
-    tall_between, tall_grown_px, trunk_strip, turn_heading, w_soil, wood_shade,
+    living_wood_tone, phase_of, plant_density, plant_phase_of, rain_streaks, rig_of,
+    soil_snag_opacity, stage_opacity, stage_thresholds, structural, tall_bend_base, tall_between,
+    tall_grown_px, trunk_strip, turn_heading, w_soil, wood_shade,
 };
 use crate::lanternjaw::Lanternjaw;
 use crate::sink::{FrameSink, Output, WebSink, WorldShape};
@@ -216,7 +216,11 @@ impl GpuSink {
                  fractional S has no such block"
             );
         }
-        let layout = RingLayout { w: u32::from(w), h: u32::from(h), scale: world_scale as u32 };
+        let layout = RingLayout {
+            w: u32::from(w),
+            h: u32::from(h),
+            scale: world_scale as u32,
+        };
         if !layout.is_valid() {
             bail!("a {w}x{h} ring at S = {world_scale} does not divide into whole cells");
         }
@@ -312,19 +316,26 @@ impl GpuSink {
     /// the copy alone — then one pass turning RGBA into the viewer's RGB. At 2 fps on a
     /// 640x360 raster that is 1.8 MB/s of copy against the 60 Hz the panel is getting.
     fn feed_web(&mut self) -> Result<()> {
-        let Some((_, period)) = &self.web else { return Ok(()) };
+        let Some((_, period)) = &self.web else {
+            return Ok(());
+        };
         let period = *period;
         let now = std::time::Instant::now();
-        if self.web_last.is_some_and(|t| (now - t).as_secs_f64() < period) {
+        if self
+            .web_last
+            .is_some_and(|t| (now - t).as_secs_f64() < period)
+        {
             return Ok(());
         }
         self.web_last = Some(now);
         let rgba = self.renderer.read_raster(&self.gpu)?;
         let (w, h) = (self.layout.w as u16, self.layout.h as u16);
-        let raster = self
-            .web_raster
-            .get_or_insert_with(|| Raster::black(w, h));
-        for (rgb, px) in raster.as_bytes_mut().chunks_exact_mut(3).zip(rgba.chunks_exact(4)) {
+        let raster = self.web_raster.get_or_insert_with(|| Raster::black(w, h));
+        for (rgb, px) in raster
+            .as_bytes_mut()
+            .chunks_exact_mut(3)
+            .zip(rgba.chunks_exact(4))
+        {
             rgb.copy_from_slice(&px[..3]);
         }
         if let Some((web, _)) = self.web.as_mut() {
@@ -339,7 +350,9 @@ impl GpuSink {
     fn snapshot_tall(&mut self) {
         let n = self.presenter.columns().len();
         self.tall_prev = (0..n).map(|i| self.presenter.tall_growth_of(i)).collect();
-        self.tall_dead_prev = (0..n).map(|i| self.presenter.tall_dead_growth_of(i)).collect();
+        self.tall_dead_prev = (0..n)
+            .map(|i| self.presenter.tall_dead_growth_of(i))
+            .collect();
     }
 
     /// The presenter, for a test that wants to compare the two pictures of one view.
@@ -365,7 +378,9 @@ impl GpuSink {
         self.renderer.scratch_begin();
         self.build(view, seconds, f);
         let built = std::time::Instant::now();
-        let ms = self.target.draw(&self.gpu, &mut self.renderer, &self.scene)?;
+        let ms = self
+            .target
+            .draw(&self.gpu, &mut self.renderer, &self.scene)?;
         let done = std::time::Instant::now();
         self.frames += 1;
         self.gpu_ms += ms;
@@ -450,8 +465,12 @@ impl GpuSink {
                 let point = SurfacePoint::pixel_center(geom.topology(), face, x, y);
                 let cell = cell_of(geom.topology(), geom.scale(), &point);
                 let band = geom.band_of(cell);
-                let Some(name) = band_name(band) else { continue };
-                let Some(clip) = self.atlas.ground(name) else { continue };
+                let Some(name) = band_name(band) else {
+                    continue;
+                };
+                let Some(clip) = self.atlas.ground(name) else {
+                    continue;
+                };
                 let t = crate::art_present::ground_density(view, cell.index(), band);
                 // `environment::band_ground_weight` is `pub(super)`; it is the soil weight
                 // for the soil tile and its complement for the others, so the texture
@@ -508,8 +527,7 @@ impl GpuSink {
             let t = plant_density(view, index, band);
             let thresholds = stage_thresholds(band);
             let ceiling = band_opacity(band);
-            let (bend, heading) =
-                geom.slot_wind(&slot, name, self.budget_of(name), seconds);
+            let (bend, heading) = geom.slot_wind(&slot, name, self.budget_of(name), seconds);
             let bend = bend_of(bend);
             let heading = [heading.x as f32, heading.y as f32];
             let anchor = raster_of(slot.at);
@@ -519,8 +537,15 @@ impl GpuSink {
             // `pub(super)`; its three cases are transcribed here against the same
             // `stage_opacity` and `growth_step` the original calls.
             if !dead_bare
-                && let Some((layers, opacity)) =
-                    self.silhouette(name, cell, seconds, dead, dead_wood_density(view, index), &thresholds, ceiling * DEAD_WOOD_OPACITY)
+                && let Some((layers, opacity)) = self.silhouette(
+                    name,
+                    cell,
+                    seconds,
+                    dead,
+                    dead_wood_density(view, index),
+                    &thresholds,
+                    ceiling * DEAD_WOOD_OPACITY,
+                )
             {
                 let stamp = Stamp {
                     anchor,
@@ -568,7 +593,12 @@ impl GpuSink {
                 }
                 continue;
             }
-            let Some(GrowthStep { lower, upper, t: gu }) = growth_step(growth) else {
+            let Some(GrowthStep {
+                lower,
+                upper,
+                t: gu,
+            }) = growth_step(growth)
+            else {
                 continue;
             };
             // An authored growth clip *is* the picture, held between the two idle clips.
@@ -619,9 +649,13 @@ impl GpuSink {
             if opacity > 0.0 {
                 let layers = self.stage_layers(name, upper, cell, seconds, fruit_now);
                 let mask = if slot.radial {
-                    StampMask::Radial { reveal: gu as f32 * (self.layers_extent(&layers) + 0.5) }
+                    StampMask::Radial {
+                        reveal: gu as f32 * (self.layers_extent(&layers) + 0.5),
+                    }
                 } else {
-                    StampMask::Axial { reveal: (gu * PLANT_REVEAL_PX) as f32 }
+                    StampMask::Axial {
+                        reveal: (gu * PLANT_REVEAL_PX) as f32,
+                    }
                 };
                 let stamp = Stamp {
                     anchor,
@@ -661,7 +695,9 @@ impl GpuSink {
                 layers: one(self.stage_pose(name, 0, cell, seconds, 1.0)),
                 bend: bend_of(bend),
                 opacity,
-                mask: StampMask::Axial { reveal: SOIL_SNAG_PX as f32 },
+                mask: StampMask::Axial {
+                    reveal: SOIL_SNAG_PX as f32,
+                },
                 tone: Some(dead_tone()),
                 ..Default::default()
             };
@@ -682,7 +718,10 @@ impl GpuSink {
             let budget = self.presenter.column_budget(column);
             let amplitude = geom.tall_amplitude(column, budget, seconds);
             let height = tall_between(
-                self.tall_prev.get(i).copied().unwrap_or(self.presenter.tall_growth_of(i)),
+                self.tall_prev
+                    .get(i)
+                    .copied()
+                    .unwrap_or(self.presenter.tall_growth_of(i)),
                 self.presenter.tall_growth_of(i),
                 f,
             )
@@ -697,8 +736,10 @@ impl GpuSink {
             )
             .height;
             self.column(name, column, dead, seconds, amplitude, 0.0, true);
-            let cap =
-                foliage_ramp_at(geom.column_fullness(view, column.face, column.cx), foliage_full);
+            let cap = foliage_ramp_at(
+                geom.column_fullness(view, column.face, column.cx),
+                foliage_full,
+            );
             self.column(name, column, height, seconds, amplitude, cap, false);
         }
     }
@@ -763,7 +804,11 @@ impl GpuSink {
         if let Some(trunk) = self.atlas.tall(name, "trunk") {
             for i in 1..=max_segments {
                 let floor = if i == 1 { TALL_FIRST_JOIN } else { strips.0 };
-                let top = if i == max_segments { TILE_ROWS } else { strips.1 };
+                let top = if i == max_segments {
+                    TILE_ROWS
+                } else {
+                    strips.1
+                };
                 let reveal = local(i).min(top);
                 if reveal <= floor {
                     break;
@@ -772,7 +817,10 @@ impl GpuSink {
                     self,
                     trunk,
                     f64::from(i),
-                    StampMask::Strip { floor: floor as f32, reveal: reveal as f32 },
+                    StampMask::Strip {
+                        floor: floor as f32,
+                        reveal: reveal as f32,
+                    },
                     TALL_OPACITY,
                 );
             }
@@ -803,7 +851,9 @@ impl GpuSink {
     ) {
         use crate::art_present::{TALL_VINE_FLOOR, TALL_VINE_TOP};
         let geom = self.geom;
-        let Some(trunk) = self.atlas.tall(VINE_PLANT, "trunk_strip") else { return };
+        let Some(trunk) = self.atlas.tall(VINE_PLANT, "trunk_strip") else {
+            return;
+        };
         let heading = geom.tall_heading(column.face, column.cx);
         let heading = [heading.x as f32, heading.y as f32];
         let bend_at = |i: f64| {
@@ -853,7 +903,9 @@ impl GpuSink {
                     )),
                     bend: bend_at(i),
                     opacity: TALL_OPACITY * fade,
-                    mask: StampMask::Axial { reveal: reveal as f32 },
+                    mask: StampMask::Axial {
+                        reveal: reveal as f32,
+                    },
                     ..Default::default()
                 };
                 self.push(Layer::Tall, &stamp);
@@ -929,7 +981,11 @@ impl GpuSink {
         let pose_of = |st: usize, weight: f32| -> Option<PoseRef> {
             let clip = &pack.clips[form * 4 + st];
             let gpu = self.atlas.creature(&rig, st)?;
-            let gestation = if st == 3 && st != state { Some(1.0) } else { o.gestation };
+            let gestation = if st == 3 && st != state {
+                Some(1.0)
+            } else {
+                o.gestation
+            };
             let at = clip_time(clip, seconds, phase_of(o.id, clip.seconds), gestation);
             Some(pose_at(gpu, at, weight))
         };
@@ -937,7 +993,11 @@ impl GpuSink {
             crate::present::interpolate_on(self.geom.topology(), &o.moved, o.pos, o.heading, f);
         let memory: Option<BodyMemory> = self.presenter.body_of(o.id);
         let heading = turn_heading(dir, memory.as_ref().map_or(0.0, |m| m.turn), f);
-        let scale = if o.juvenile { crate::present::JUVENILE_SCALE } else { 1.0 };
+        let scale = if o.juvenile {
+            crate::present::JUVENILE_SCALE
+        } else {
+            1.0
+        };
         let states = match &memory {
             Some(m) if m.fade_at(seconds) < 1.0 => m.layers_at(seconds),
             _ => vec![(state, 1.0)],
@@ -992,8 +1052,12 @@ impl GpuSink {
     fn hunters(&mut self, view: &RenderView, seconds: f64, f: f64) {
         let _ = seconds;
         for id in self.presenter.hunter_ids() {
-            let Some(o) = view.organisms.iter().find(|o| o.id == id) else { continue };
-            let Some(memory) = self.presenter.hunter_of(id) else { continue };
+            let Some(o) = view.organisms.iter().find(|o| o.id == id) else {
+                continue;
+            };
+            let Some(memory) = self.presenter.hunter_of(id) else {
+                continue;
+            };
             let (anchor, dir) =
                 crate::present::interpolate_on(self.geom.topology(), &o.moved, o.pos, o.heading, f);
             let turn = self.presenter.body_of(id).map_or(0.0, |m| m.turn);
@@ -1020,7 +1084,9 @@ impl GpuSink {
                     }
                     (w, h, sprite.pivot(), texels)
                 };
-                let Some(origin) = self.renderer.scratch_push(w, h, &texels) else { continue };
+                let Some(origin) = self.renderer.scratch_push(w, h, &texels) else {
+                    continue;
+                };
                 let offset = self.parts[index].offset;
                 let at = [
                     root[0] + (scale * (offset.x * heading.x + offset.y * side.x)) as f32,
@@ -1059,7 +1125,12 @@ impl GpuSink {
     fn stage_pose(&self, name: &str, stage: u8, cell: CellId, s: f64, weight: f32) -> PoseRef {
         match self.atlas.plant(name, PlantClip::Stage(stage)) {
             Some(clip) => pose_at(clip, s + plant_phase_of(cell, clip.seconds), weight),
-            None => PoseRef { a: 0, b: 0, mix: 0.0, weight: 0.0 },
+            None => PoseRef {
+                a: 0,
+                b: 0,
+                mix: 0.0,
+                weight: 0.0,
+            },
         }
     }
 
@@ -1072,7 +1143,11 @@ impl GpuSink {
         s: f64,
         fruit: f64,
     ) -> [PoseRef; MAX_POSES] {
-        let q = if fruit.is_finite() { fruit.clamp(0.0, 1.0) as f32 } else { 0.0 };
+        let q = if fruit.is_finite() {
+            fruit.clamp(0.0, 1.0) as f32
+        } else {
+            0.0
+        };
         match self.atlas.plant(name, PlantClip::Fruit) {
             Some(clip) if stage == 2 && q > 0.0 => [
                 self.stage_pose(name, stage, cell, s, 1.0 - q),
@@ -1105,8 +1180,16 @@ impl GpuSink {
             return (opacity > 0.0)
                 .then(|| (one(self.stage_pose(name, stage, cell, s, 1.0)), opacity));
         }
-        let GrowthStep { lower, upper, t: tu } = growth_step(growth)?;
-        let tu = if tu.is_finite() { tu.clamp(0.0, 1.0) } else { 0.0 } as f32;
+        let GrowthStep {
+            lower,
+            upper,
+            t: tu,
+        } = growth_step(growth)?;
+        let tu = if tu.is_finite() {
+            tu.clamp(0.0, 1.0)
+        } else {
+            0.0
+        } as f32;
         let (layers, opacity) = match lower {
             Some(low) => {
                 let under = opacity_of(low);
@@ -1168,7 +1251,12 @@ fn pose_at(clip: GpuClip, at: f64, weight: f32) -> PoseRef {
 }
 
 fn bend_of(b: cubarium_render::Bend) -> [f32; 4] {
-    [b.amplitude as f32, b.base as f32, b.root as f32, b.length as f32]
+    [
+        b.amplitude as f32,
+        b.base as f32,
+        b.root as f32,
+        b.length as f32,
+    ]
 }
 
 fn dead_tone() -> StampTone {
@@ -1295,9 +1383,7 @@ impl FrameSink for GpuSink {
                 );
                 let by_layer: Vec<String> = cubarium_gpu::scene::LAYERS
                     .iter()
-                    .map(|l| {
-                        format!("{l:?} {:.2}", self.fill_layers[*l as usize] / n / 1.0e6)
-                    })
+                    .map(|l| format!("{l:?} {:.2}", self.fill_layers[*l as usize] / n / 1.0e6))
                     .collect();
                 eprintln!(
                     "cubarium: --sink gpu fill by layer, Mpx/frame: {}",

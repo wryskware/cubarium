@@ -235,7 +235,10 @@ static COUNTS: [AtomicU64; Count::COUNT] = [ZERO; Count::COUNT];
 /// Start timing a phase. The time is accumulated when the returned value is dropped, so
 /// the phase is the value's scope.
 pub fn start(phase: Phase) -> Timer {
-    Timer { phase, at: Instant::now() }
+    Timer {
+        phase,
+        at: Instant::now(),
+    }
 }
 
 /// One phase's timing, accumulated on drop.

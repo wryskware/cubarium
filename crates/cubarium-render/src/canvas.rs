@@ -6,8 +6,8 @@
 //! run of global rows is a contiguous slice — which is what makes the deterministic
 //! row-band split of §4 a borrow of the buffer rather than a second rasterization.
 
-use cube_proto::{FACE_SIZE, Face, Frame, NUM_FACES, Raster};
 use cubarium_surface::{PixelImage, Scale, Topology};
+use cube_proto::{FACE_SIZE, Face, Frame, NUM_FACES, Raster};
 
 mod srgb;
 
@@ -125,7 +125,8 @@ impl Canvas {
     pub fn coords(&self) -> impl Iterator<Item = (Face, u16, u16)> + '_ {
         let w = self.w;
         self.charts().iter().flat_map(move |&face| {
-            self.rows_of(face).flat_map(move |y| (0..w).map(move |x| (face, x, y)))
+            self.rows_of(face)
+                .flat_map(move |y| (0..w).map(move |x| (face, x, y)))
         })
     }
 
@@ -323,7 +324,10 @@ impl Canvas {
     /// pool over [`Bands::iter_mut`] can do the same two steps by hand.
     pub fn split_into(&self, bands: &mut Bands) {
         assert!(
-            bands.bands.iter().all(|b| b.topo == self.topo && b.w == self.w && b.h == self.h),
+            bands
+                .bands
+                .iter()
+                .all(|b| b.topo == self.topo && b.w == self.w && b.h == self.h),
             "bands were cut from a differently shaped canvas"
         );
         for band in &mut bands.bands {
@@ -409,7 +413,12 @@ mod tests {
         let mut c = Canvas::cube();
         c.set(Face::Front, 0, 0, [f32::NAN, -3.0, 12.0]);
         c.set(Face::Top, 63, 63, [1.0, 0.0, 0.5]);
-        c.set(Face::Back, 5, 7, [f32::INFINITY, f32::NEG_INFINITY, f32::NAN]);
+        c.set(
+            Face::Back,
+            5,
+            7,
+            [f32::INFINITY, f32::NEG_INFINITY, f32::NAN],
+        );
         let mut f = Frame::black();
         // Prefill with a nonzero pattern so encode must overwrite every byte.
         f.fill([77, 77, 77]);
@@ -452,7 +461,9 @@ mod tests {
         c.add(Face::Right, 2, 3, [0.1, 0.2, 0.3]);
         c.add(Face::Right, 2, 3, [0.1, 0.2, 0.3]);
         let v = c.get(Face::Right, 2, 3);
-        assert!((v[0] - 0.2).abs() < 1e-6 && (v[1] - 0.4).abs() < 1e-6 && (v[2] - 0.6).abs() < 1e-6);
+        assert!(
+            (v[0] - 0.2).abs() < 1e-6 && (v[1] - 0.4).abs() < 1e-6 && (v[2] - 0.6).abs() < 1e-6
+        );
         c.clear();
         assert_eq!(c.get(Face::Right, 2, 3), [0.0; 3]);
     }
@@ -471,7 +482,14 @@ mod tests {
         assert!(!ring.owns(Face::Top, 0), "a ring has no Top chart");
         // Coordinate order is storage order on both.
         let first: Vec<_> = ring.coords().take(3).collect();
-        assert_eq!(first, vec![(Face::Front, 0, 0), (Face::Front, 1, 0), (Face::Front, 2, 0)]);
+        assert_eq!(
+            first,
+            vec![
+                (Face::Front, 0, 0),
+                (Face::Front, 1, 0),
+                (Face::Front, 2, 0)
+            ]
+        );
     }
 
     #[test]
@@ -486,7 +504,10 @@ mod tests {
         for y in 0..3u16 {
             for x in 0..4u16 {
                 let v = c.get(Face::Front, x, y);
-                assert_eq!(r.get(x, y), [srgb_encode(v[0]), srgb_encode(v[1]), srgb_encode(v[2])]);
+                assert_eq!(
+                    r.get(x, y),
+                    [srgb_encode(v[0]), srgb_encode(v[1]), srgb_encode(v[2])]
+                );
             }
         }
         // A 2x raster repeats each pixel exactly.

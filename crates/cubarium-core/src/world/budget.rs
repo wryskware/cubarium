@@ -392,11 +392,10 @@ impl BodyBudget {
     /// `Σ credits − Σ debits − Δ(structure + reserve)`: zero for a correctly recorded life.
     pub fn material_residual(&self) -> f64 {
         let credits = self.reserve_credit_total() + self.gut_reserve_credit;
-        let debits = self.oxidation_reserve_burned
-            + self.reproduction_material
-            + self.injury_structure;
-        let delta = (self.end_structure + self.end_reserve)
-            - (self.start_structure + self.start_reserve);
+        let debits =
+            self.oxidation_reserve_burned + self.reproduction_material + self.injury_structure;
+        let delta =
+            (self.end_structure + self.end_reserve) - (self.start_structure + self.start_reserve);
         credits - debits - delta
     }
 
@@ -404,10 +403,8 @@ impl BodyBudget {
     pub fn energy_residual(&self) -> f64 {
         let credits =
             self.battery_credit_total() + self.gut_battery_credit + self.oxidation_battery_credit;
-        let debits = self.bill_paid
-            + self.other_energy_paid
-            + self.growth_energy
-            + self.reproduction_energy;
+        let debits =
+            self.bill_paid + self.other_energy_paid + self.growth_energy + self.reproduction_energy;
         let delta = self.end_energy - self.start_energy;
         credits - debits - delta
     }

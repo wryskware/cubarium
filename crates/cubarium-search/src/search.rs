@@ -20,14 +20,10 @@ use crate::rng;
 
 /// The fixed training seed schedule. A search takes the first `Budget::seeds` of these; the
 /// rest are held out on purpose, for the separately capped follow-up the handoff asks for.
-pub const TRAINING_SEEDS: [u64; 8] = [
-    1_001, 1_002, 1_003, 1_004, 1_005, 1_006, 1_007, 1_008,
-];
+pub const TRAINING_SEEDS: [u64; 8] = [1_001, 1_002, 1_003, 1_004, 1_005, 1_006, 1_007, 1_008];
 
 /// Seeds deliberately **not** used for training, reserved for retesting a promising candidate.
-pub const HELDOUT_SEEDS: [u64; 8] = [
-    9_001, 9_002, 9_003, 9_004, 9_005, 9_006, 9_007, 9_008,
-];
+pub const HELDOUT_SEEDS: [u64; 8] = [9_001, 9_002, 9_003, 9_004, 9_005, 9_006, 9_007, 9_008];
 
 /// Every hard limit a search runs under. All of them are checked before any work starts, and
 /// every one of them is enforced while it runs.
@@ -77,10 +73,15 @@ impl Budget {
             ));
         }
         if self.population < 2 {
-            return Err(format!("budget.population {} is below two", self.population));
+            return Err(format!(
+                "budget.population {} is below two",
+                self.population
+            ));
         }
         if self.elite == 0 {
-            return Err("budget.elite is zero: without elitism a generation can lose its best".into());
+            return Err(
+                "budget.elite is zero: without elitism a generation can lose its best".into(),
+            );
         }
         if self.elite >= self.population {
             return Err(format!(
@@ -123,7 +124,11 @@ pub struct Variation {
 
 impl Default for Variation {
     fn default() -> Self {
-        Variation { mutation_rate: 0.25, mutation_sigma: 0.15, crossover_rate: 0.5 }
+        Variation {
+            mutation_rate: 0.25,
+            mutation_sigma: 0.15,
+            crossover_rate: 0.5,
+        }
     }
 }
 
@@ -302,7 +307,9 @@ pub fn run(
                         }
                         let (c, s) = jobs[index];
                         let evaluation = evaluate(&generation_values[c], seeds[s], protocol);
-                        done.lock().expect("result mutex").push(((c, s), evaluation));
+                        done.lock()
+                            .expect("result mutex")
+                            .push(((c, s), evaluation));
                     }
                 });
             }
@@ -327,9 +334,18 @@ pub fn run(
                     per_seed.push(e.clone());
                 }
             }
-            let completed = per_seed.iter().filter(|e| e.status == Status::Completed).count();
-            let invalid = per_seed.iter().filter(|e| e.status == Status::Invalid).count();
-            let failed = per_seed.iter().filter(|e| e.status == Status::Failed).count();
+            let completed = per_seed
+                .iter()
+                .filter(|e| e.status == Status::Completed)
+                .count();
+            let invalid = per_seed
+                .iter()
+                .filter(|e| e.status == Status::Invalid)
+                .count();
+            let failed = per_seed
+                .iter()
+                .filter(|e| e.status == Status::Failed)
+                .count();
             let fully_scored = per_seed.len() == seeds.len() && completed == seeds.len();
 
             let per_seed_fitness: Vec<f64> = per_seed
@@ -380,8 +396,12 @@ pub fn run(
                 failed,
                 reason: per_seed.iter().find_map(|e| e.reason.clone()),
                 fitness,
-                worst_seed_fitness: fully_scored
-                    .then(|| per_seed_fitness.iter().copied().fold(f64::INFINITY, f64::min)),
+                worst_seed_fitness: fully_scored.then(|| {
+                    per_seed_fitness
+                        .iter()
+                        .copied()
+                        .fold(f64::INFINITY, f64::min)
+                }),
                 objectives: fully_scored.then(|| mean_objectives(&per_seed_objectives)),
             });
         }
@@ -407,7 +427,8 @@ pub fn run(
             break 'generations;
         }
 
-        let (values, origin) = next_generation(&all, &budget, &variation, search_seed, generation + 1);
+        let (values, origin) =
+            next_generation(&all, &budget, &variation, search_seed, generation + 1);
         generation_values = values;
         generation_origin = origin;
     }
@@ -435,7 +456,11 @@ pub fn run(
         cached_reuses,
         wall_seconds: wall,
         ticks_simulated,
-        ticks_per_second: if wall > 0.0 { ticks_simulated as f64 / wall } else { 0.0 },
+        ticks_per_second: if wall > 0.0 {
+            ticks_simulated as f64 / wall
+        } else {
+            0.0
+        },
         candidates: all,
         nondominated,
         best_by_scalar,
@@ -516,7 +541,12 @@ fn next_generation(
             let b = tournament(&pool, search_seed, g, slot, 1);
             let mut child = a.values.clone();
             for (k, gene) in child.iter_mut().enumerate() {
-                let r = rng::unit(search_seed, rng::stream::CROSSOVER, g * 1000 + slot, k as u64);
+                let r = rng::unit(
+                    search_seed,
+                    rng::stream::CROSSOVER,
+                    g * 1000 + slot,
+                    k as u64,
+                );
                 if r < variation.crossover_rate {
                     *gene = b.values[k];
                 }
@@ -567,7 +597,11 @@ fn tournament<'a>(
     };
     let (a, b) = (pick(0), pick(1));
     // `pool` is sorted best first, so the lower index is the better candidate.
-    if a.fitness.unwrap() >= b.fitness.unwrap() { a } else { b }
+    if a.fitness.unwrap() >= b.fitness.unwrap() {
+        a
+    } else {
+        b
+    }
 }
 
 /// Indices of the candidates no other candidate dominates on all seven objectives.

@@ -114,7 +114,12 @@ pub struct Stamp {
 
 impl PoseRef {
     /// A slot that carries nothing.
-    pub const NONE: PoseRef = PoseRef { a: 0, b: 0, mix: 0.0, weight: 0.0 };
+    pub const NONE: PoseRef = PoseRef {
+        a: 0,
+        b: 0,
+        mix: 0.0,
+        weight: 0.0,
+    };
 }
 
 /// The most poses one stamp can carry: `art_present` never composites more than three
@@ -182,7 +187,11 @@ impl Stamp {
             if !(pose.weight.is_finite() && pose.weight > 0.0) {
                 continue;
             }
-            let mix = if pose.mix.is_finite() { pose.mix.clamp(0.0, 1.0) } else { 0.0 };
+            let mix = if pose.mix.is_finite() {
+                pose.mix.clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
             if mix <= 0.0 {
                 push(pose.a, pose.weight);
             } else if mix >= 1.0 {
@@ -212,7 +221,11 @@ impl Stamp {
         let dropped = flat.len().saturating_sub(4);
         let flat = &flat[..flat.len().min(4)];
         let kept: f32 = flat.iter().map(|(_, w)| *w).sum();
-        let renormalise = if kept > 0.0 && total > 0.0 { total / kept } else { 1.0 };
+        let renormalise = if kept > 0.0 && total > 0.0 {
+            total / kept
+        } else {
+            1.0
+        };
 
         let mut instance = SpriteInstance {
             anchor: self.anchor,
@@ -294,8 +307,16 @@ mod tests {
         assert_eq!((still.used(), dropped), (1, 0));
         let (blend, dropped) = poses(&[(4, 5, 0.25, 1.0)]).instance(&atlas);
         assert_eq!((blend.used(), dropped), (2, 0));
-        assert!((blend.weights[0] - 0.75).abs() < 1e-6, "{:?}", blend.weights);
-        assert!((blend.weights[1] - 0.25).abs() < 1e-6, "{:?}", blend.weights);
+        assert!(
+            (blend.weights[0] - 0.75).abs() < 1e-6,
+            "{:?}",
+            blend.weights
+        );
+        assert!(
+            (blend.weights[1] - 0.25).abs() < 1e-6,
+            "{:?}",
+            blend.weights
+        );
     }
 
     #[test]
@@ -317,7 +338,10 @@ mod tests {
         assert_eq!(dropped, 2, "the third pose's two frames are the lightest");
         assert_eq!(instance.used(), 4);
         let sum: f32 = instance.weights.iter().sum();
-        assert!((sum - 1.0).abs() < 1e-5, "a dropped layer must not dim the stamp: {sum}");
+        assert!(
+            (sum - 1.0).abs() < 1e-5,
+            "a dropped layer must not dim the stamp: {sum}"
+        );
     }
 
     #[test]
@@ -333,14 +357,21 @@ mod tests {
     fn a_scratch_stamp_names_its_own_page_and_keeps_its_pivot() {
         let atlas = atlas();
         let (instance, dropped) = Stamp {
-            scratch: Some(ScratchFrame { origin: [17, 3], size: [11, 9], pivot: [2, 7] }),
+            scratch: Some(ScratchFrame {
+                origin: [17, 3],
+                size: [11, 9],
+                pivot: [2, 7],
+            }),
             scale: 0.75,
             ..Default::default()
         }
         .instance(&atlas);
         assert_eq!(dropped, 0);
         assert_eq!(instance.source, SOURCE_SCRATCH);
-        assert_eq!((instance.frames[0], instance.size, instance.pivot), ([17, 3], [11, 9], [2, 7]));
+        assert_eq!(
+            (instance.frames[0], instance.size, instance.pivot),
+            ([17, 3], [11, 9], [2, 7])
+        );
         assert_eq!(instance.weights, [1.0, 0.0, 0.0, 0.0]);
         assert_eq!(instance.scale, 0.75);
     }
@@ -348,13 +379,29 @@ mod tests {
     #[test]
     fn each_mask_lands_in_the_fields_the_shader_reads() {
         let atlas = atlas();
-        let with = |mask| Stamp { mask, ..poses(&[(4, 4, 0.0, 1.0)]) }.instance(&atlas).0;
+        let with = |mask| {
+            Stamp {
+                mask,
+                ..poses(&[(4, 4, 0.0, 1.0)])
+            }
+            .instance(&atlas)
+            .0
+        };
         let none = with(StampMask::None);
-        assert_eq!((none.mask_floor, none.mask_reveal, none.mask_flags), NO_MASK);
+        assert_eq!(
+            (none.mask_floor, none.mask_reveal, none.mask_flags),
+            NO_MASK
+        );
         assert_eq!(none.source, SOURCE_ATLAS);
         let axial = with(StampMask::Axial { reveal: 6.0 });
-        assert_eq!((axial.mask_floor, axial.mask_reveal, axial.mask_flags), (NO_MASK_FLOOR, 6.0, MASK_AXIAL));
-        let strip = with(StampMask::Strip { floor: 11.0, reveal: 15.0 });
+        assert_eq!(
+            (axial.mask_floor, axial.mask_reveal, axial.mask_flags),
+            (NO_MASK_FLOOR, 6.0, MASK_AXIAL)
+        );
+        let strip = with(StampMask::Strip {
+            floor: 11.0,
+            reveal: 15.0,
+        });
         assert_eq!((strip.mask_floor, strip.mask_reveal), (11.0, 15.0));
         let radial = with(StampMask::Radial { reveal: 4.5 });
         assert_eq!((radial.mask_reveal, radial.mask_flags), (4.5, MASK_RADIAL));
@@ -363,11 +410,18 @@ mod tests {
     #[test]
     fn the_measured_extent_is_inside_the_tile_and_bigger_than_a_bare_sprout() {
         let atlas = atlas();
-        let stage0 = atlas.plant("lanternstalk", crate::PlantClip::Stage(0)).unwrap();
-        let stage2 = atlas.plant("lanternstalk", crate::PlantClip::Stage(2)).unwrap();
+        let stage0 = atlas
+            .plant("lanternstalk", crate::PlantClip::Stage(0))
+            .unwrap();
+        let stage2 = atlas
+            .plant("lanternstalk", crate::PlantClip::Stage(2))
+            .unwrap();
         let e0 = atlas.rect(stage0.first).extent;
         let e2 = atlas.rect(stage2.first).extent;
-        assert!(e0 > 0.0 && e2 > e0, "a grown plant reaches further than a sprout: {e0} vs {e2}");
+        assert!(
+            e0 > 0.0 && e2 > e0,
+            "a grown plant reaches further than a sprout: {e0} vs {e2}"
+        );
         // 16 x 16 with the pivot at the centre: the furthest corner is 8·√2 + √2/2.
         assert!(e2 < 12.0, "extent {e2} is outside the tile");
     }

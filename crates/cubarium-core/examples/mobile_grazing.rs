@@ -128,7 +128,10 @@ fn ring() -> [CellId; 8] {
 fn main() {
     let started = Instant::now();
     println!("# R0b mobile-grazing measurement (corrected motor envelope)");
-    println!("# 3x3 patch on Face::Top around {:?}; every other cell emptied of P/F/D/De,", centre());
+    println!(
+        "# 3x3 patch on Face::Top around {:?}; every other cell emptied of P/F/D/De,",
+        centre()
+    );
     println!("# so world totals are patch totals. Births disabled in every arm.");
     let cfg = fixture_config();
     let unit = decode(&Genome::founder(0.5, &cfg.drives), &cfg.organism);
@@ -156,7 +159,11 @@ fn main() {
     let arms = [&gated, &open, &mobile, &control];
     summary(&arms);
     println!();
-    println!("# wall time {:.1} s of the {} s budget", started.elapsed().as_secs_f64(), WALL_BUDGET.as_secs());
+    println!(
+        "# wall time {:.1} s of the {} s budget",
+        started.elapsed().as_secs_f64(),
+        WALL_BUDGET.as_secs()
+    );
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -239,7 +246,9 @@ fn run(arm: Arm, replay: &[Intent], started: Instant) -> Report {
     strip_to_patch(&mut world);
     let id = place(&mut world);
     let mut world = World::from_state(world.state).expect("the staged state is a valid world");
-    world.check_invariants().expect("the staged world is consistent");
+    world
+        .check_invariants()
+        .expect("the staged world is consistent");
 
     let (bill, extent) = {
         let o = world.state.organisms.get(id).expect("placed");
@@ -256,7 +265,17 @@ fn run(arm: Arm, replay: &[Intent], started: Instant) -> Report {
     println!("## arm `{}`", arm.name());
     println!(
         "{:>7} {:>9} {:>9} {:>9} {:>9} {:>10} {:>10} {:>9} {:>9} {:>9} {:>6}",
-        "tick", "P_here", "P_patch", "P_centre", "N_patch", "grown", "eaten_P", "E", "R", "px", "cell"
+        "tick",
+        "P_here",
+        "P_patch",
+        "P_centre",
+        "N_patch",
+        "grown",
+        "eaten_P",
+        "E",
+        "R",
+        "px",
+        "cell"
     );
 
     let cells = patch();
@@ -313,7 +332,11 @@ fn run(arm: Arm, replay: &[Intent], started: Instant) -> Report {
     let mut closed = [false; 8];
     // A cell only starts recovering once the mouth has actually walked out of it.
     let mut gone = [false; 8];
-    let mut last_cell = cell_of(Topology::Cube, Scale::ONE, &world.state.organisms.get(id).expect("placed").pos);
+    let mut last_cell = cell_of(
+        Topology::Cube,
+        Scale::ONE,
+        &world.state.organisms.get(id).expect("placed").pos,
+    );
 
     for tick in 0..TICKS {
         if started.elapsed() >= WALL_BUDGET {
@@ -330,25 +353,34 @@ fn run(arm: Arm, replay: &[Intent], started: Instant) -> Report {
 
         // The intent this tick.
         let intent = if arm == Arm::NoIntake {
-            replay
-                .get(tick as usize)
-                .copied()
-                .unwrap_or(Intent { heading: heading_before, effort: 0.0 })
+            replay.get(tick as usize).copied().unwrap_or(Intent {
+                heading: heading_before,
+                effort: 0.0,
+            })
         } else if arm.mobile() {
             let goal = ring()[target];
             if here == goal {
                 // Dwelling: stand still and crop. Leaving is the disclosed threshold.
-                Intent { heading: heading_before, effort: 0.0 }
+                Intent {
+                    heading: heading_before,
+                    effort: 0.0,
+                }
             } else {
                 // Travelling: face the goal's centre and walk. `toward` is a *request*; the
                 // resolver decides how much of the turn and how much of the walk happen.
                 let toward = (goal.center(Topology::Cube, Scale::ONE).chart() - pos_before.chart())
                     .normalized()
                     .unwrap_or(heading_before);
-                Intent { heading: toward, effort: 1.0 }
+                Intent {
+                    heading: toward,
+                    effort: 1.0,
+                }
             }
         } else {
-            Intent { heading: heading_before, effort: 0.0 }
+            Intent {
+                heading: heading_before,
+                effort: 0.0,
+            }
         };
         if arm.mobile() {
             report.schedule.push(intent);
@@ -363,8 +395,16 @@ fn run(arm: Arm, replay: &[Intent], started: Instant) -> Report {
                 Arm::OpenStill | Arm::Mobile => Some(1.0),
                 Arm::NoIntake => Some(0.0),
             },
-            fruit_effort: if arm == Arm::NoIntake { Some(0.0) } else { None },
-            scavenge_effort: if arm == Arm::NoIntake { Some(0.0) } else { None },
+            fruit_effort: if arm == Arm::NoIntake {
+                Some(0.0)
+            } else {
+                None
+            },
+            scavenge_effort: if arm == Arm::NoIntake {
+                Some(0.0)
+            } else {
+                None
+            },
             mode: None,
             bud: Some(false),
         };
@@ -385,7 +425,10 @@ fn run(arm: Arm, replay: &[Intent], started: Instant) -> Report {
                 world.state.organisms.get(id).map_or(0.0, |o| o.energy),
                 world.state.organisms.get(id).map_or(0.0, |o| o.reserve),
                 report.travelled_px,
-                ring().iter().position(|c| *c == here).map_or(-1i32, |i| i as i32),
+                ring()
+                    .iter()
+                    .position(|c| *c == here)
+                    .map_or(-1i32, |i| i as i32),
             );
         }
 
@@ -503,7 +546,18 @@ fn summary(arms: &[&Report; 4]) {
     println!("## Summary  (material `m`, energy `e`, world seconds; 20 ticks = 1 s)");
     println!(
         "{:<12} {:>7} {:>8} {:>9} {:>9} {:>9} {:>9} {:>9} {:>9} {:>6} {:>7} {:>9}",
-        "arm", "s", "eaten_P", "grown", "d_store", "upkeep", "travel", "rotate", "px", "cells", "turns", "survival"
+        "arm",
+        "s",
+        "eaten_P",
+        "grown",
+        "d_store",
+        "upkeep",
+        "travel",
+        "rotate",
+        "px",
+        "cells",
+        "turns",
+        "survival"
     );
     for r in arms {
         println!(
@@ -534,7 +588,11 @@ fn summary(arms: &[&Report; 4]) {
         println!(
             "- {:<12} P_patch {start:.4} -> {end:.4} m; centre {:.4} -> {:.4} m; \
              fruit eaten {:.4}; detritus eaten {:.4}",
-            r.name, r.centre_start, r.centre_end, r.intake.fruit_eaten, r.intake.litter_eaten + r.intake.carrion_eaten
+            r.name,
+            r.centre_start,
+            r.centre_end,
+            r.intake.fruit_eaten,
+            r.intake.litter_eaten + r.intake.carrion_eaten
         );
     }
     println!();
@@ -574,7 +632,11 @@ fn summary(arms: &[&Report; 4]) {
             println!(
                 "- tour {}: {secs:>6.0} s, ate {eaten:.4} m of P, usable store {delta:+.4} e{}",
                 i + 1,
-                if *saturated { "  (store at its ceiling for part of it: the yield is censored from above)" } else { "" }
+                if *saturated {
+                    "  (store at its ceiling for part of it: the yield is censored from above)"
+                } else {
+                    ""
+                }
             );
         }
     }
@@ -603,8 +665,16 @@ fn summary(arms: &[&Report; 4]) {
     for (cell, left, now, away, censored) in &mobile.recovery {
         println!(
             "- {cell:?}: left at P {left:.4} m, {away:>6.0} s away, {} at P {now:.4} m{}",
-            if *censored { "found on return" } else { "at the horizon" },
-            if *censored { " (censored: the mouth arrived and it stopped recovering)" } else { "" }
+            if *censored {
+                "found on return"
+            } else {
+                "at the horizon"
+            },
+            if *censored {
+                " (censored: the mouth arrived and it stopped recovering)"
+            } else {
+                ""
+            }
         );
     }
     println!();
@@ -678,7 +748,11 @@ fn place(world: &mut World) -> OrganismId {
     let genome = Genome::founder(0.5, &cfg.drives);
     let phenotype = decode(&genome, &cfg.organism);
     let pos = ring()[0].center(Topology::Cube, Scale::ONE);
-    assert_eq!(cell_of(Topology::Cube, Scale::ONE, &pos), ring()[0], "the grazer landed outside its starting cell");
+    assert_eq!(
+        cell_of(Topology::Cube, Scale::ONE, &pos),
+        ring()[0],
+        "the grazer landed outside its starting cell"
+    );
     let structure = phenotype.structure_adult;
     let reserve = 0.5 * phenotype.reserve_max;
     let organism = Organism {

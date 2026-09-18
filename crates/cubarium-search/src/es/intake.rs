@@ -50,8 +50,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use cubarium_core::{
-    BodyBudget, CARRION, CHANNELS, FOLIAGE, FRUIT, IntakeLimit, IntakeTick, LITTER, MOUTHS,
-    MOUTH_GRAZE, MOUTH_NAMES, World,
+    BodyBudget, CARRION, CHANNELS, FOLIAGE, FRUIT, IntakeLimit, IntakeTick, LITTER, MOUTH_GRAZE,
+    MOUTH_NAMES, MOUTHS, World,
 };
 use serde::{Deserialize, Serialize};
 
@@ -85,11 +85,20 @@ pub const LIMITS: [IntakeLimit; 6] = [
     IntakeLimit::MouthRate,
 ];
 /// Their short names, in the same order.
-pub const LIMIT_NAMES: [&str; 6] =
-    ["capability", "effort_zero", "below_threshold", "reserve_room", "stock_share", "mouth_rate"];
+pub const LIMIT_NAMES: [&str; 6] = [
+    "capability",
+    "effort_zero",
+    "below_threshold",
+    "reserve_room",
+    "stock_share",
+    "mouth_rate",
+];
 
 fn limit_index(l: IntakeLimit) -> usize {
-    LIMITS.iter().position(|x| *x == l).expect("every term is in the table")
+    LIMITS
+        .iter()
+        .position(|x| *x == l)
+        .expect("every term is in the table")
 }
 
 /// One 100-tick window of a life, for a coarse time series that costs nothing to keep.
@@ -247,9 +256,8 @@ impl Fold {
             self.on_food_by_channel[c] += u64::from(row.above_threshold[c]);
         }
         // "The matching effort": the mouth that serves a stock this cell actually holds.
-        let matched = |floor: f64| {
-            (0..CHANNELS).any(|c| row.above_threshold[c] && row.mouth_open(c, floor))
-        };
+        let matched =
+            |floor: f64| (0..CHANNELS).any(|c| row.above_threshold[c] && row.mouth_open(c, floor));
         if on_food {
             self.open_on_food += u64::from(matched(OPEN));
             self.wide_open_on_food += u64::from(matched(WIDE_OPEN));
@@ -305,7 +313,10 @@ impl Fold {
 
         let start = row.tick - row.tick % WINDOW_TICKS;
         if self.windows.last().is_none_or(|w| w.start_tick != start) {
-            self.windows.push(Window { start_tick: start, ..Window::default() });
+            self.windows.push(Window {
+                start_tick: start,
+                ..Window::default()
+            });
         }
         let w = self.windows.last_mut().expect("just pushed");
         w.ticks += 1;
@@ -405,7 +416,10 @@ pub fn measure(
     };
     let watch = |w: &mut World, _tick: u64| {
         let (rows, dropped) = w.drain_intake_trace();
-        assert_eq!(dropped, 0, "a per-tick drain can never overflow the trace cap");
+        assert_eq!(
+            dropped, 0,
+            "a per-tick drain can never overflow the trace cap"
+        );
         let mut fold = fold.lock().expect("fold");
         for row in &rows {
             fold.push(row, e_r, eta_ox);
@@ -440,13 +454,18 @@ pub fn measure(
         Some(&watch),
     )?;
     let budget = last.into_inner().expect("last").ok_or_else(|| {
-        Boxed::from(format!("{job}: the body was never recorded, so there is no ledger"))
+        Boxed::from(format!(
+            "{job}: the body was never recorded, so there is no ledger"
+        ))
     })?;
     let layout_hash = layout.hash(&layout.config());
-    let (row, keep) = fold
-        .into_inner()
-        .expect("fold")
-        .finish(&named.name, layout, layout_hash, episode.clone(), budget);
+    let (row, keep) = fold.into_inner().expect("fold").finish(
+        &named.name,
+        layout,
+        layout_hash,
+        episode.clone(),
+        budget,
+    );
     Ok((episode, row, keep))
 }
 
@@ -475,7 +494,11 @@ pub struct IntakeReport {
 
 /// The three drivers this experiment compares: the disclosed mobile control that survives, the
 /// untrained centre, and generation 9.
-fn drivers(policy_file: &Path, initial_seed: u64, eco: &Ecology) -> Result<Vec<NamedDriver>, Boxed> {
+fn drivers(
+    policy_file: &Path,
+    initial_seed: u64,
+    eco: &Ecology,
+) -> Result<Vec<NamedDriver>, Boxed> {
     let file: PolicyFile = serde_json::from_str(&fs::read_to_string(policy_file)?)?;
     // A policy from another ecology would be answering a different question in a world it never
     // saw: refuse it by name, exactly as `es-evaluate` and `es-budget` do.
@@ -483,7 +506,10 @@ fn drivers(policy_file: &Path, initial_seed: u64, eco: &Ecology) -> Result<Vec<N
     let trained = file.policy()?;
     let initial = tensor::policy(&tensor::initial_center(initial_seed))?;
     Ok(vec![
-        NamedDriver { name: "mobile-script".into(), driver: Driver::Control(Control::MobileScript) },
+        NamedDriver {
+            name: "mobile-script".into(),
+            driver: Driver::Control(Control::MobileScript),
+        },
         NamedDriver {
             name: format!("initial-center-{initial_seed}"),
             driver: Driver::Policy(Box::new(initial)),
@@ -505,7 +531,9 @@ fn csv_line(row: &IntakeTick, out: &mut String) {
     let _ = write!(
         out,
         ",{}",
-        (0..CHANNELS).map(|c| u8::from(row.above_threshold[c]) << c).sum::<u8>()
+        (0..CHANNELS)
+            .map(|c| u8::from(row.above_threshold[c]) << c)
+            .sum::<u8>()
     );
     for m in 0..MOUTHS {
         let _ = write!(out, ",{:.6}", row.effort[m]);
@@ -550,9 +578,17 @@ pub fn run(
     let eta_ox = eco.base.organism.oxidation_efficiency;
     let feed_threshold = eco.base.drives.feed_min;
 
-    println!("# the per-tick intake diagnostic on {} (hash {})", eco.label, eco.hex());
+    println!(
+        "# the per-tick intake diagnostic on {} (hash {})",
+        eco.label,
+        eco.hex()
+    );
     println!("# build {BUILD_ID}, {horizon} ticks per episode, window {WINDOW_TICKS} ticks");
-    println!("# {} drivers x {} layouts, {workers} workers", drivers.len(), layouts.len());
+    println!(
+        "# {} drivers x {} layouts, {workers} workers",
+        drivers.len(),
+        layouts.len()
+    );
     println!("# a mouth is open above {OPEN}, wide open above {WIDE_OPEN}");
     println!("# a stock is food at or above drives.feed_min = {feed_threshold}");
 
@@ -572,7 +608,9 @@ pub fn run(
             scope.spawn(|| {
                 loop {
                     let next = cursor.fetch_add(1, Ordering::Relaxed);
-                    let Some(&(d, l)) = jobs.get(next) else { return };
+                    let Some(&(d, l)) = jobs.get(next) else {
+                        return;
+                    };
                     let (named, layout) = (&drivers[d], &layouts[l]);
                     let keep = per_tick_layouts.contains(&layout.name);
                     match measure(layout, named, horizon, limits, e_r, eta_ox, keep) {
@@ -605,7 +643,11 @@ pub fn run(
 
     let failures = failures.into_inner().expect("failures");
     if !failures.is_empty() {
-        return Err(Boxed::from(format!("{} episodes failed:\n{}", failures.len(), failures.join("\n"))));
+        return Err(Boxed::from(format!(
+            "{} episodes failed:\n{}",
+            failures.len(),
+            failures.join("\n")
+        )));
     }
     let mut rows = rows.into_inner().expect("rows");
     rows.sort_by(|a, b| (&a.driver, &a.layout).cmp(&(&b.driver, &b.layout)));
@@ -635,7 +677,12 @@ pub fn run(
     }
     let mut file = fs::File::create(&out)?;
     file.write_all(serde_json::to_string_pretty(&report)?.as_bytes())?;
-    println!("# wrote {} ({} rows, {:.1} s)", out.display(), report.rows.len(), report.wall_seconds);
+    println!(
+        "# wrote {} ({} rows, {:.1} s)",
+        out.display(),
+        report.rows.len(),
+        report.wall_seconds
+    );
     summarise(&report);
     Ok(())
 }
@@ -648,12 +695,23 @@ pub fn summarise(report: &IntakeReport) {
         }
         v.sort_by(f64::total_cmp);
         let n = v.len();
-        if n % 2 == 1 { v[n / 2] } else { 0.5 * (v[n / 2 - 1] + v[n / 2]) }
+        if n % 2 == 1 {
+            v[n / 2]
+        } else {
+            0.5 * (v[n / 2 - 1] + v[n / 2])
+        }
     }
     println!();
     println!(
         "{:<24} {:>7} {:>8} {:>9} {:>9} {:>9} {:>9} {:>9}",
-        "driver", "ticks", "on_food", "open|food", ">0.5|food", "open_bare", "served/req", "cred/bill"
+        "driver",
+        "ticks",
+        "on_food",
+        "open|food",
+        ">0.5|food",
+        "open_bare",
+        "served/req",
+        "cred/bill"
     );
     for driver in &report.drivers {
         let rows: Vec<&IntakeRow> = report.rows.iter().filter(|r| r.driver == *driver).collect();
@@ -678,11 +736,17 @@ pub fn summarise(report: &IntakeReport) {
     println!();
     for driver in &report.drivers {
         let rows: Vec<&IntakeRow> = report.rows.iter().filter(|r| r.driver == *driver).collect();
-        let total: u64 = rows.iter().map(|r| r.limits[MOUTH_GRAZE].iter().sum::<u64>()).sum();
+        let total: u64 = rows
+            .iter()
+            .map(|r| r.limits[MOUTH_GRAZE].iter().sum::<u64>())
+            .sum();
         print!("{driver:<24}");
         for t in 0..6 {
             let n: u64 = rows.iter().map(|r| r.limits[MOUTH_GRAZE][t]).sum();
-            print!(" {:>16}", format!("{n} ({:.1}%)", 100.0 * n as f64 / total.max(1) as f64));
+            print!(
+                " {:>16}",
+                format!("{n} ({:.1}%)", 100.0 * n as f64 / total.max(1) as f64)
+            );
         }
         println!();
     }
@@ -695,18 +759,29 @@ pub fn summarise(report: &IntakeReport) {
     println!();
     for driver in &report.drivers {
         let rows: Vec<&IntakeRow> = report.rows.iter().filter(|r| r.driver == *driver).collect();
-        let total: u64 =
-            rows.iter().map(|r| r.limits_on_its_food[MOUTH_GRAZE].iter().sum::<u64>()).sum();
+        let total: u64 = rows
+            .iter()
+            .map(|r| r.limits_on_its_food[MOUTH_GRAZE].iter().sum::<u64>())
+            .sum();
         print!("{driver:<24}");
         for t in 0..6 {
-            let n: u64 = rows.iter().map(|r| r.limits_on_its_food[MOUTH_GRAZE][t]).sum();
-            print!(" {:>16}", format!("{n} ({:.1}%)", 100.0 * n as f64 / total.max(1) as f64));
+            let n: u64 = rows
+                .iter()
+                .map(|r| r.limits_on_its_food[MOUTH_GRAZE][t])
+                .sum();
+            print!(
+                " {:>16}",
+                format!("{n} ({:.1}%)", 100.0 * n as f64 / total.max(1) as f64)
+            );
         }
         println!();
     }
     println!();
     println!("served material by channel, summed over the twelve layouts (m):");
-    println!("{:<24} {:>10} {:>10} {:>10} {:>10}", "driver", "foliage", "fruit", "litter", "carrion");
+    println!(
+        "{:<24} {:>10} {:>10} {:>10} {:>10}",
+        "driver", "foliage", "fruit", "litter", "carrion"
+    );
     for driver in &report.drivers {
         let rows: Vec<&IntakeRow> = report.rows.iter().filter(|r| r.driver == *driver).collect();
         let s = |c: usize| rows.iter().map(|r| r.served_total[c]).sum::<f64>();

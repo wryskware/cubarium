@@ -75,7 +75,11 @@ impl Image {
         for y in 0..src.h {
             for x in 0..src.w {
                 let o = (y * src.w + x) * 3;
-                self.set(at.0 + x, at.1 + y, [src.rgb[o], src.rgb[o + 1], src.rgb[o + 2]]);
+                self.set(
+                    at.0 + x,
+                    at.1 + y,
+                    [src.rgb[o], src.rgb[o + 1], src.rgb[o + 2]],
+                );
             }
         }
     }
@@ -296,7 +300,10 @@ fn recovery(cell: CellId, samples: &[u64], horizon: u64) -> Vec<(u64, Frame, [f6
     // what follows is reflush and regrowth rather than a slower strip.
     let strip_to = BRIGHT_P / 7.0;
     println!("# row 4 — the recovery sequence");
-    println!("{:>7} {:>9} {:>8} {:>8} {:>8} {:>8}", "tick", "seconds", "P", "W", "Q", "Wd");
+    println!(
+        "{:>7} {:>9} {:>8} {:>8} {:>8} {:>8}",
+        "tick", "seconds", "P", "W", "Q", "Wd"
+    );
     for tick in 0..=horizon {
         let view = world.render_view();
         presenter.observe(&view);
@@ -332,12 +339,15 @@ fn recovery(cell: CellId, samples: &[u64], horizon: u64) -> Vec<(u64, Frame, [f6
             world.drain_events();
         }
     }
-    world.check_invariants().expect("the recovery run ends consistent");
+    world
+        .check_invariants()
+        .expect("the recovery run ends consistent");
     println!(
         "- the grazer was removed at tick {} ({:.0} s), with Q = {:.4}",
         removed_at.map_or("never".into(), |t| t.to_string()),
         removed_at.map_or(f64::NAN, |t| t as f64 * DT),
-        rows.first().map_or(f64::NAN, |_| world.state.ecology.plant_reserve[i])
+        rows.first()
+            .map_or(f64::NAN, |_| world.state.ecology.plant_reserve[i])
     );
     rows
 }
@@ -364,7 +374,11 @@ fn main() {
     // A tall column reads the mean structure of its whole foliage column, so the synthetic
     // column panels fill that column's cells rather than one of them.
     let column_cells: Vec<CellId> = CellId::all(Topology::Cube, Scale::ONE)
-        .filter(|c| c.face(Topology::Cube, Scale::ONE) == column.face && c.cx(Topology::Cube, Scale::ONE) == column.cx && band_of(*c) == Band::Foliage)
+        .filter(|c| {
+            c.face(Topology::Cube, Scale::ONE) == column.face
+                && c.cx(Topology::Cube, Scale::ONE) == column.cx
+                && band_of(*c) == Band::Foliage
+        })
         .collect();
 
     const CELL_CROP: usize = 22;

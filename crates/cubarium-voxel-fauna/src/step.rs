@@ -107,9 +107,7 @@ pub(crate) fn step(fauna: &mut Fauna, world: &World, flora: &mut Flora, threads:
         let plans = cubarium_voxel::voxel_phase!(FaunaSense, {
             sense(fauna, &view, flora, seed, tick, threads)
         });
-        cubarium_voxel::voxel_phase!(FaunaAct, {
-            act(fauna, &view, flora, &plans, seed, tick)
-        });
+        cubarium_voxel::voxel_phase!(FaunaAct, { act(fauna, &view, flora, &plans, seed, tick) });
         cubarium_voxel::voxel_phase!(FaunaBirths, { births(fauna) });
         cubarium_voxel::voxel_phase!(FaunaDeaths, { deaths(fauna, &view, flora) });
         #[cfg(feature = "profile")]
@@ -122,7 +120,11 @@ pub(crate) fn step(fauna: &mut Fauna, world: &World, flora: &mut Flora, threads:
 
 /// Step 1: an animal standing on what is no longer a support face leaves the world.
 fn terrain(fauna: &mut Fauna, view: &VoxelView<'_>) {
-    if fauna.animals.iter().all(|a| view.is_support(i64::from(a.site.x), a.site.y, a.site.z)) {
+    if fauna
+        .animals
+        .iter()
+        .all(|a| view.is_support(i64::from(a.site.x), a.site.y, a.site.z))
+    {
         return;
     }
     let gone: Vec<Animal> = fauna
@@ -131,7 +133,9 @@ fn terrain(fauna: &mut Fauna, view: &VoxelView<'_>) {
         .filter(|a| !view.is_support(i64::from(a.site.x), a.site.y, a.site.z))
         .copied()
         .collect();
-    fauna.animals.retain(|a| view.is_support(i64::from(a.site.x), a.site.y, a.site.z));
+    fauna
+        .animals
+        .retain(|a| view.is_support(i64::from(a.site.x), a.site.y, a.site.z));
     for a in &gone {
         fauna.book_removed(a);
     }
@@ -160,7 +164,11 @@ fn maintenance(fauna: &mut Fauna) {
         // is the rule the plant layer's dead pools use: a body half respired is the same
         // stuff it was. An animal respired down to nothing hands over every unit of its
         // energy rather than keeping float dust.
-        let e = if paid >= before { a.energy } else { (a.energy * (paid / before)).min(a.energy) };
+        let e = if paid >= before {
+            a.energy
+        } else {
+            (a.energy * (paid / before)).min(a.energy)
+        };
         a.energy -= e;
         fauna.ledger.respired_out += paid;
         fauna.ledger.heat_out += e;
@@ -201,7 +209,9 @@ fn sense(
         // pass builds. `act` still applies them in id order.
         let per = fauna.animals.len().div_ceil(threads);
         let pool = bevy_tasks::ComputeTaskPool::get_or_init(|| {
-            bevy_tasks::TaskPoolBuilder::new().num_threads(threads).build()
+            bevy_tasks::TaskPoolBuilder::new()
+                .num_threads(threads)
+                .build()
         });
         let mut parts: Vec<(usize, Vec<Plan>)> = pool.scope(|scope| {
             for (k, chunk) in fauna.animals.chunks(per).enumerate() {
@@ -269,7 +279,11 @@ fn plan_for(
         let sense = i64::from(sc.sense_radius);
         let mut candidates: Vec<Site> = Vec::new();
         for stand in fv.stands.iter().filter(|s| s.foliage > 0.0) {
-            let crown = fv.config.species(stand.species).crown_radius(stand.wood).max(0.0);
+            let crown = fv
+                .config
+                .species(stand.species)
+                .crown_radius(stand.wood)
+                .max(0.0);
             let span = i64::from(sc.reach.horizontal) + crown.floor() as i64;
             for dz in -span..=span {
                 let z = i64::from(stand.site.z) + dz;
@@ -301,7 +315,11 @@ fn plan_for(
             if face == a.site {
                 continue;
             }
-            let t: f64 = fv.reachable_foliage(view, face, sc.reach).iter().map(|&(_, f)| f).sum();
+            let t: f64 = fv
+                .reachable_foliage(view, face, sc.reach)
+                .iter()
+                .map(|&(_, f)| f)
+                .sum();
             if t < bite {
                 continue;
             }
@@ -315,7 +333,7 @@ fn plan_for(
         }
         #[cfg(feature = "profile")]
         {
-            use cubarium_voxel::profile::{add, Count};
+            use cubarium_voxel::profile::{Count, add};
             add(Count::ReachQueries, 1 + candidates.len() as u64);
             add(Count::CandidateFaces, candidates.len() as u64);
         }
@@ -327,7 +345,11 @@ fn plan_for(
                 Some(best[rng.below(n)])
             }
         };
-        Plan { reach, total, target }
+        Plan {
+            reach,
+            total,
+            target,
+        }
     }
 }
 
@@ -341,7 +363,11 @@ fn faces_in_column(view: &VoxelView<'_>, x: i64, z: u32, sc: &SpeciesConfig) -> 
     let mut out = Vec::new();
     for y in 0..c.height {
         if view.is_support(x, y, z) && view.water_depth_m(x, y, z) <= sc.wade_depth_m {
-            out.push(Site { x: x.rem_euclid(i64::from(c.width)) as u32, y, z });
+            out.push(Site {
+                x: x.rem_euclid(i64::from(c.width)) as u32,
+                y,
+                z,
+            });
         }
     }
     out
@@ -399,7 +425,9 @@ fn crop(
         // Whose foliage this is, read before the withdrawal, so the report can say which
         // species was eaten rather than which species is in principle edible.
         let plant = flora.view().stand_at(site).map(|s| s.species);
-        let Some(taken) = flora.take_foliage(site, left) else { continue };
+        let Some(taken) = flora.take_foliage(site, left) else {
+            continue;
+        };
         let taken = fauna.book_eaten(taken);
         if let Some(plant) = plant {
             fauna.ledger.bites_by_plant[plant.index()] += 1;
@@ -431,8 +459,11 @@ fn crop(
 fn assimilate(fauna: &mut Fauna, flora: &mut Flora, i: usize, sc: &SpeciesConfig, t: Taken) {
     let a = &mut fauna.animals[i];
     // What the yield would build, and what this bite's mineral can actually pay for.
-    let funded =
-        if sc.n_tissue > 0.0 { (t.mineral / sc.n_tissue).max(0.0) } else { f64::INFINITY };
+    let funded = if sc.n_tissue > 0.0 {
+        (t.mineral / sc.n_tissue).max(0.0)
+    } else {
+        f64::INFINITY
+    };
     let assimilated = (sc.yield_fraction * t.organic).min(funded);
     let mut respired = t.organic - assimilated;
 
@@ -450,7 +481,11 @@ fn assimilate(fauna: &mut Fauna, flora: &mut Flora, i: usize, sc: &SpeciesConfig
     let placed = to_body + to_reserve;
 
     // Energy: the density of what was eaten, so nothing is created for any food.
-    let kept_energy = if t.organic > 0.0 { t.energy * (placed / t.organic) } else { 0.0 };
+    let kept_energy = if t.organic > 0.0 {
+        t.energy * (placed / t.organic)
+    } else {
+        0.0
+    };
     let kept_energy = kept_energy.min(t.energy);
     a.energy += kept_energy;
     let heat = t.energy - kept_energy;
@@ -469,7 +504,11 @@ fn assimilate(fauna: &mut Fauna, flora: &mut Flora, i: usize, sc: &SpeciesConfig
             flora,
             site,
             DepositKind::Litter,
-            Taken { organic: 0.0, mineral: excess, energy: 0.0 },
+            Taken {
+                organic: 0.0,
+                mineral: excess,
+                energy: 0.0,
+            },
         );
     }
 }
@@ -607,7 +646,11 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
             flora,
             a.site,
             DepositKind::Carrion,
-            Taken { organic: a.organic(), mineral: a.mineral, energy: a.energy },
+            Taken {
+                organic: a.organic(),
+                mineral: a.mineral,
+                energy: a.energy,
+            },
         );
         fauna.ledger.deaths += 1;
     }

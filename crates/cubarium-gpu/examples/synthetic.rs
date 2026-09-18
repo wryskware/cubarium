@@ -57,12 +57,17 @@ fn parse() -> Result<Args> {
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
-        let mut value = || it.next().ok_or_else(|| anyhow::anyhow!("{flag} wants a value"));
+        let mut value = || {
+            it.next()
+                .ok_or_else(|| anyhow::anyhow!("{flag} wants a value"))
+        };
         match flag.as_str() {
             "--art" => a.art = value()?.into(),
             "--ring" => {
                 let v = value()?;
-                let (w, h) = v.split_once('x').ok_or_else(|| anyhow::anyhow!("--ring WxH"))?;
+                let (w, h) = v
+                    .split_once('x')
+                    .ok_or_else(|| anyhow::anyhow!("--ring WxH"))?;
                 a.layout.w = w.parse()?;
                 a.layout.h = h.parse()?;
             }
@@ -140,7 +145,10 @@ fn headless(args: &Args, atlas: &Atlas) -> Result<()> {
         }
     }
     let elapsed = wall.elapsed().as_secs_f64();
-    println!("headless CPU: {:.3} core-seconds per second", (cpu_seconds() - cpu0) / elapsed);
+    println!(
+        "headless CPU: {:.3} core-seconds per second",
+        (cpu_seconds() - cpu0) / elapsed
+    );
     stat("GPU per frame", &gpu_ms);
     println!(
         "{} frames, {instances} instances, {:.1} fps end to end (CPU-bound: this waits on every frame)",
@@ -211,7 +219,10 @@ fn shim(args: &Args, atlas: &Atlas) -> Result<()> {
         // proof that the frame on the wire is the frame that was drawn.
         let (w, h, rgba) = target.read_presented(&gpu, &renderer)?;
         cubarium_gpu::target::write_png(path, w, h, &rgba)?;
-        println!("wrote {} ({w}x{h}, read back from the presented dma-buf)", path.display());
+        println!(
+            "wrote {} ({w}x{h}, read back from the presented dma-buf)",
+            path.display()
+        );
     }
     target.destroy(&gpu);
     renderer.destroy(&gpu);
@@ -274,7 +285,10 @@ fn kms(args: &Args, atlas: &Atlas) -> Result<()> {
     if let Some(path) = &args.png {
         let (w, h, rgba) = target.read_scanout(&gpu, &renderer)?;
         cubarium_gpu::target::write_png(path, w, h, &rgba)?;
-        println!("wrote {} ({w}x{h}, read back from the scanned-out dma-buf)", path.display());
+        println!(
+            "wrote {} ({w}x{h}, read back from the scanned-out dma-buf)",
+            path.display()
+        );
     }
     target.destroy(&gpu);
     renderer.destroy(&gpu);
@@ -306,6 +320,11 @@ fn cpu_seconds() -> f64 {
     let tail = stat.rsplit_once(')').map(|(_, t)| t).unwrap_or("");
     let fields: Vec<&str> = tail.split_whitespace().collect();
     let hz = 100.0;
-    let get = |i: usize| fields.get(i).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
+    let get = |i: usize| {
+        fields
+            .get(i)
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(0.0)
+    };
     (get(11) + get(12)) / hz
 }

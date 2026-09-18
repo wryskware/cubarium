@@ -105,7 +105,12 @@ impl VoxelTexel {
     /// format's.
     pub fn pack(material: u8, part: u8, free: f32, dry: bool, pore: f32, style: u8) -> VoxelTexel {
         let g = if dry { 0 } else { quantise(free).max(1) };
-        VoxelTexel([(material & 0x03) | ((part & 0x07) << 2), g, quantise(pore), style])
+        VoxelTexel([
+            (material & 0x03) | ((part & 0x07) << 2),
+            g,
+            quantise(pore),
+            style,
+        ])
     }
 
     pub fn material(self) -> u8 {
@@ -154,7 +159,11 @@ pub struct VoxelStyle {
 impl VoxelStyle {
     pub fn new(wood: [f32; 3], crown: [f32; 3], heart: [f32; 3]) -> VoxelStyle {
         let v = |c: [f32; 3]| [c[0], c[1], c[2], 1.0];
-        VoxelStyle { wood: v(wood), crown: v(crown), heart: v(heart) }
+        VoxelStyle {
+            wood: v(wood),
+            crown: v(crown),
+            heart: v(heart),
+        }
     }
 }
 
@@ -215,10 +224,19 @@ pub struct VoxelParams {
 impl VoxelParams {
     fn validate(&self) -> Result<()> {
         if self.s == 0 || self.rise == 0 || self.rise > self.s {
-            bail!("px_per_voxel {} and rise {} are not a projection", self.s, self.rise);
+            bail!(
+                "px_per_voxel {} and rise {} are not a projection",
+                self.s,
+                self.rise
+            );
         }
         if self.width == 0 || self.height == 0 || self.depth == 0 {
-            bail!("an empty world: {}x{}x{}", self.width, self.height, self.depth);
+            bail!(
+                "an empty world: {}x{}x{}",
+                self.width,
+                self.height,
+                self.depth
+            );
         }
         if self.raster_w != self.width * self.s {
             bail!(
@@ -249,7 +267,12 @@ impl VoxelParams {
     fn uniforms(&self) -> VoxelUniforms {
         let v = |c: [f32; 3]| [c[0], c[1], c[2], 0.0];
         VoxelUniforms {
-            geom: [self.s as i32, self.rise as i32, self.base, i32::from(self.roof_from_texture)],
+            geom: [
+                self.s as i32,
+                self.rise as i32,
+                self.base,
+                i32::from(self.roof_from_texture),
+            ],
             extent: [self.width as i32, self.height as i32, self.depth as i32, 0],
             knobs: [self.haze, self.water_alpha, 0.0, 0.0],
             sky: v(self.sky),
@@ -264,7 +287,12 @@ impl VoxelParams {
             shade_b: [self.edge_dark, self.top_edge, self.riser_lean, self.wet],
             roof: [self.roof_light, self.roof_falloff, 0.0, 0.0],
             water: [self.skin_alpha_gain, self.water_top_alpha, 0.0, 0.0],
-            plant_a: [self.plant_top_gain, self.plant_top_tint, self.plant_rim, self.crown_edge],
+            plant_a: [
+                self.plant_top_gain,
+                self.plant_top_tint,
+                self.plant_rim,
+                self.crown_edge,
+            ],
             plant_b: [
                 self.crown_under,
                 self.trunk_shade[0],
@@ -396,8 +424,13 @@ impl VoxelRenderer {
                 | vk::ImageUsageFlags::TRANSFER_SRC,
         )?;
         let raster_view = gpu.view(raster_image, RASTER_FORMAT)?;
-        let raster_framebuffer =
-            framebuffer(d, raster_pass, raster_view, params.raster_w, params.raster_h)?;
+        let raster_framebuffer = framebuffer(
+            d,
+            raster_pass,
+            raster_view,
+            params.raster_w,
+            params.raster_h,
+        )?;
 
         let limit = unsafe { gpu.instance.get_physical_device_properties(gpu.pdev) }
             .limits
@@ -418,8 +451,13 @@ impl VoxelRenderer {
             params.depth,
             vk::Format::R8G8B8A8_UINT,
         )?;
-        let (roof_image, roof_memory) =
-            image_3d(gpu, params.width, params.height, params.depth, vk::Format::R8_UINT)?;
+        let (roof_image, roof_memory) = image_3d(
+            gpu,
+            params.width,
+            params.height,
+            params.depth,
+            vk::Format::R8_UINT,
+        )?;
         let (style_image, style_memory) = gpu.image(
             3,
             MAX_STYLES as u32,
@@ -448,8 +486,13 @@ impl VoxelRenderer {
         let style_bytes = (MAX_STYLES * std::mem::size_of::<VoxelStyle>()) as u64;
         // Each plane starts on a 16-byte boundary: `vkCmdCopyBufferToImage` wants the
         // offset to be a multiple of the texel size, and the style texels are 16 bytes.
-        let offsets = (0, align16(voxel_bytes), align16(voxel_bytes) + align16(roof_bytes));
-        let staging = gpu.host_buffer(offsets.2 + style_bytes, vk::BufferUsageFlags::TRANSFER_SRC)?;
+        let offsets = (
+            0,
+            align16(voxel_bytes),
+            align16(voxel_bytes) + align16(roof_bytes),
+        );
+        let staging =
+            gpu.host_buffer(offsets.2 + style_bytes, vk::BufferUsageFlags::TRANSFER_SRC)?;
         let uniforms = gpu.host_buffer(
             std::mem::size_of::<VoxelUniforms>() as u64,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
@@ -498,7 +541,9 @@ impl VoxelRenderer {
         ];
         let pool = unsafe {
             d.create_descriptor_pool(
-                &vk::DescriptorPoolCreateInfo::default().max_sets(1).pool_sizes(&sizes),
+                &vk::DescriptorPoolCreateInfo::default()
+                    .max_sets(1)
+                    .pool_sizes(&sizes),
                 None,
             )
         }?;
@@ -519,7 +564,11 @@ impl VoxelRenderer {
                 .image_view(view)
                 .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]
         };
-        let (iv, ir, is) = (image_info(voxel_view), image_info(roof_view), image_info(style_view));
+        let (iv, ir, is) = (
+            image_info(voxel_view),
+            image_info(roof_view),
+            image_info(style_view),
+        );
         unsafe {
             d.update_descriptor_sets(
                 &[
@@ -543,7 +592,9 @@ impl VoxelRenderer {
             )
         }?;
         let vs = gpu.shader(FULLSCREEN_VERT)?;
-        let fs = gpu.shader(VOXEL_FRAG).context("the voxel fragment shader")?;
+        let fs = gpu
+            .shader(VOXEL_FRAG)
+            .context("the voxel fragment shader")?;
         let pipeline =
             crate::render::fullscreen_pipeline(d, raster_pass, pipeline_layout, vs, fs, false)?;
         unsafe {
@@ -593,7 +644,9 @@ impl VoxelRenderer {
     /// the world's extent are fixed at construction and are refused here.
     pub fn set_params(&mut self, params: VoxelParams) -> Result<()> {
         let fixed = |p: &VoxelParams| {
-            (p.s, p.rise, p.base, p.width, p.height, p.depth, p.raster_w, p.raster_h)
+            (
+                p.s, p.rise, p.base, p.width, p.height, p.depth, p.raster_w, p.raster_h,
+            )
         };
         if fixed(&params) != fixed(&self.params) {
             bail!("the projection and the world's extent are fixed for a VoxelRenderer");
@@ -625,7 +678,11 @@ impl VoxelRenderer {
             )
         };
         styles.fill(VoxelStyle::default());
-        fill(VoxelStaging { voxels, roof, styles });
+        fill(VoxelStaging {
+            voxels,
+            roof,
+            styles,
+        });
         self.dirty = true;
         self.staged = true;
     }
@@ -693,7 +750,11 @@ impl VoxelRenderer {
                                     .aspect_mask(vk::ImageAspectFlags::COLOR)
                                     .layer_count(1),
                             )
-                            .image_extent(vk::Extent3D { width: pw, height: ph, depth: pd })],
+                            .image_extent(vk::Extent3D {
+                                width: pw,
+                                height: ph,
+                                depth: pd,
+                            })],
                     );
                     barrier(
                         d,
@@ -728,7 +789,8 @@ impl VoxelRenderer {
             d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, 2);
 
             if let Some((image, extent, xform, pass, pipeline)) = target {
-                self.present.record(d, cb, image, extent, xform, pass, pipeline);
+                self.present
+                    .record(d, cb, image, extent, xform, pass, pipeline);
             }
             d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, 3);
             d.end_command_buffer(cb)?;
@@ -741,8 +803,12 @@ impl VoxelRenderer {
     pub fn gpu_split(&self, gpu: &Gpu) -> Option<[f64; 3]> {
         let mut ts = [0u64; QUERY_SLOTS as usize];
         if unsafe {
-            gpu.device
-                .get_query_pool_results(self.queries, 0, &mut ts, vk::QueryResultFlags::TYPE_64)
+            gpu.device.get_query_pool_results(
+                self.queries,
+                0,
+                &mut ts,
+                vk::QueryResultFlags::TYPE_64,
+            )
         }
         .is_err()
         {
@@ -783,7 +849,11 @@ impl VoxelRenderer {
                             .aspect_mask(vk::ImageAspectFlags::COLOR)
                             .layer_count(1),
                     )
-                    .image_extent(vk::Extent3D { width: w, height: h, depth: 1 })],
+                    .image_extent(vk::Extent3D {
+                        width: w,
+                        height: h,
+                        depth: 1,
+                    })],
             );
             barrier(
                 d,
@@ -918,7 +988,10 @@ pub fn slab_hit(params: &VoxelParams, sy: i32, z: u32) -> Option<SlabHit> {
         return None;
     }
     let s = params.s as i32;
-    Some(SlabHit { level: q / s, r: (q % s) as u32 })
+    Some(SlabHit {
+        level: q / s,
+        r: (q % s) as u32,
+    })
 }
 
 // --- helpers --------------------------------------------------------------------------
@@ -940,7 +1013,11 @@ fn image_3d(
             &vk::ImageCreateInfo::default()
                 .image_type(vk::ImageType::TYPE_3D)
                 .format(format)
-                .extent(vk::Extent3D { width, height, depth })
+                .extent(vk::Extent3D {
+                    width,
+                    height,
+                    depth,
+                })
                 .mip_levels(1)
                 .array_layers(1)
                 .samples(vk::SampleCountFlags::TYPE_1)
@@ -1067,7 +1144,11 @@ mod tests {
         for &free in &[0.125f32, 0.375, 0.5, 0.875, 1.0] {
             let t = VoxelTexel::pack(0, PART_NONE, free, false, 0.0, 0);
             // Half a step of the 8-bit channel: the quantisation's whole error.
-            assert!((t.free() - free).abs() <= 1.0 / 509.0, "{free} -> {}", t.free());
+            assert!(
+                (t.free() - free).abs() <= 1.0 / 509.0,
+                "{free} -> {}",
+                t.free()
+            );
         }
         // Every part class survives beside a full material and a top style index — the
         // fauna range included, and the two ids past it that nothing draws yet, because
@@ -1113,7 +1194,10 @@ mod tests {
             assert_eq!(hit.cap_row(p.rise), None);
         }
         // One slab back lifts everything by `rise`.
-        assert_eq!(slab_hit(&p, 236 - 2, 1).unwrap(), slab_hit(&p, 236, 0).unwrap());
+        assert_eq!(
+            slab_hit(&p, 236 - 2, 1).unwrap(),
+            slab_hit(&p, 236, 0).unwrap()
+        );
         // Below the floor line there is nothing, in this slab or any deeper one.
         assert_eq!(slab_hit(&p, 240, 0), None);
     }

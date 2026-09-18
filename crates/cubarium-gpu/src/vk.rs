@@ -67,10 +67,15 @@ impl Gpu {
             .to_string_lossy()
             .into_owned();
 
-        let available: Vec<String> = unsafe { instance.enumerate_device_extension_properties(pdev) }?
-            .iter()
-            .map(|e| unsafe { CStr::from_ptr(e.extension_name.as_ptr()) }.to_string_lossy().into_owned())
-            .collect();
+        let available: Vec<String> =
+            unsafe { instance.enumerate_device_extension_properties(pdev) }?
+                .iter()
+                .map(|e| {
+                    unsafe { CStr::from_ptr(e.extension_name.as_ptr()) }
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .collect();
         // No `image_drm_format_modifier`: see the module comment.
         let wanted = [
             ash::khr::external_memory::NAME,
@@ -84,7 +89,11 @@ impl Gpu {
         ];
         let enabled: Vec<&CStr> = wanted
             .into_iter()
-            .filter(|n| available.iter().any(|a| a.as_str() == n.to_str().unwrap_or("")))
+            .filter(|n| {
+                available
+                    .iter()
+                    .any(|a| a.as_str() == n.to_str().unwrap_or(""))
+            })
             .collect();
         let has_dma_buf = enabled.contains(&ash::ext::external_memory_dma_buf::NAME)
             && enabled.contains(&ash::khr::external_memory_fd::NAME);
@@ -129,7 +138,9 @@ impl Gpu {
         (0..self.memory.memory_type_count)
             .find(|i| {
                 bits & (1 << i) != 0
-                    && self.memory.memory_types[*i as usize].property_flags.contains(want)
+                    && self.memory.memory_types[*i as usize]
+                        .property_flags
+                        .contains(want)
             })
             .ok_or_else(|| anyhow!("no memory type for bits={bits:#x} want={want:?}"))
     }
@@ -149,7 +160,11 @@ impl Gpu {
                 &vk::ImageCreateInfo::default()
                     .image_type(vk::ImageType::TYPE_2D)
                     .format(format)
-                    .extent(vk::Extent3D { width, height, depth: 1 })
+                    .extent(vk::Extent3D {
+                        width,
+                        height,
+                        depth: 1,
+                    })
                     .mip_levels(1)
                     .array_layers(1)
                     .samples(vk::SampleCountFlags::TYPE_1)
@@ -165,9 +180,10 @@ impl Gpu {
             d.allocate_memory(
                 &vk::MemoryAllocateInfo::default()
                     .allocation_size(req.size)
-                    .memory_type_index(
-                        self.memory_type(req.memory_type_bits, vk::MemoryPropertyFlags::DEVICE_LOCAL)?,
-                    ),
+                    .memory_type_index(self.memory_type(
+                        req.memory_type_bits,
+                        vk::MemoryPropertyFlags::DEVICE_LOCAL,
+                    )?),
                 None,
             )
         }?;
@@ -219,7 +235,12 @@ impl Gpu {
         }?;
         unsafe { d.bind_buffer_memory(buffer, memory, 0) }?;
         let ptr = unsafe { d.map_memory(memory, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty()) }?;
-        Ok(HostBuffer { buffer, memory, ptr: ptr as *mut u8, size: req.size })
+        Ok(HostBuffer {
+            buffer,
+            memory,
+            ptr: ptr as *mut u8,
+            size: req.size,
+        })
     }
 
     /// Run a one-shot command buffer to completion.
@@ -227,7 +248,9 @@ impl Gpu {
         let d = &self.device;
         let cb = unsafe {
             d.allocate_command_buffers(
-                &vk::CommandBufferAllocateInfo::default().command_pool(pool).command_buffer_count(1),
+                &vk::CommandBufferAllocateInfo::default()
+                    .command_pool(pool)
+                    .command_buffer_count(1),
             )
         }?[0];
         unsafe {
@@ -239,7 +262,11 @@ impl Gpu {
             f(cb);
             d.end_command_buffer(cb)?;
             let one = [cb];
-            d.queue_submit(self.queue, &[vk::SubmitInfo::default().command_buffers(&one)], vk::Fence::null())?;
+            d.queue_submit(
+                self.queue,
+                &[vk::SubmitInfo::default().command_buffers(&one)],
+                vk::Fence::null(),
+            )?;
             d.queue_wait_idle(self.queue)?;
             d.free_command_buffers(pool, &one);
         }

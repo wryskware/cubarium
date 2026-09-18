@@ -106,7 +106,10 @@ fn encoding_is_byte_for_byte_deterministic() {
     let (meta, back) = decode_snapshot(&first).expect("round trip");
     assert_eq!(meta.schema, SCHEMA_VERSION);
     assert_eq!(meta.build_id, BUILD);
-    assert_eq!(meta.payload_len as usize, first.len() - HEADER_FIXED_BYTES - BUILD.len());
+    assert_eq!(
+        meta.payload_len as usize,
+        first.len() - HEADER_FIXED_BYTES - BUILD.len()
+    );
     assert_eq!(back, world.state);
 }
 
@@ -116,7 +119,10 @@ fn a_corrupt_magic_is_rejected() {
     let mut bytes = encode_snapshot(&world.state, BUILD);
     bytes[0] ^= 0xff;
     assert_eq!(decode_snapshot(&bytes), Err(SnapshotError::BadMagic));
-    assert_eq!(decode_snapshot(b"NOPE and then some"), Err(SnapshotError::BadMagic));
+    assert_eq!(
+        decode_snapshot(b"NOPE and then some"),
+        Err(SnapshotError::BadMagic)
+    );
 }
 
 #[test]
@@ -154,7 +160,12 @@ fn a_flipped_payload_byte_fails_the_checksum() {
     let bytes = encode_snapshot(&world.state, BUILD);
     let payload_start = HEADER_FIXED_BYTES + BUILD.len();
 
-    for offset in [0usize, 1, (bytes.len() - payload_start) / 2, bytes.len() - payload_start - 1] {
+    for offset in [
+        0usize,
+        1,
+        (bytes.len() - payload_start) / 2,
+        bytes.len() - payload_start - 1,
+    ] {
         let mut corrupt = bytes.clone();
         corrupt[payload_start + offset] ^= 0x01;
         assert_eq!(
@@ -171,11 +182,17 @@ fn a_foreign_schema_is_rejected_with_its_version() {
     let mut bytes = encode_snapshot(&world.state, BUILD);
     let foreign = SCHEMA_VERSION + 1;
     bytes[4..8].copy_from_slice(&foreign.to_le_bytes());
-    assert_eq!(decode_snapshot(&bytes), Err(SnapshotError::UnsupportedSchema(foreign)));
+    assert_eq!(
+        decode_snapshot(&bytes),
+        Err(SnapshotError::UnsupportedSchema(foreign))
+    );
 
     let mut older = encode_snapshot(&world.state, BUILD);
     older[4..8].copy_from_slice(&0u32.to_le_bytes());
-    assert_eq!(decode_snapshot(&older), Err(SnapshotError::UnsupportedSchema(0)));
+    assert_eq!(
+        decode_snapshot(&older),
+        Err(SnapshotError::UnsupportedSchema(0))
+    );
 
     // The pre-water schema in particular: postcard is not self-describing, so a version-5
     // payload cannot be read as "dry"; it is refused and the host starts fresh
@@ -183,13 +200,19 @@ fn a_foreign_schema_is_rejected_with_its_version() {
     // self-describing configs, not to binary snapshots).
     let mut pre_water = encode_snapshot(&world.state, BUILD);
     pre_water[4..8].copy_from_slice(&5u32.to_le_bytes());
-    assert_eq!(decode_snapshot(&pre_water), Err(SnapshotError::UnsupportedSchema(5)));
+    assert_eq!(
+        decode_snapshot(&pre_water),
+        Err(SnapshotError::UnsupportedSchema(5))
+    );
 
     // Likewise the pre-fauna-v2 schema (version 6): genome v2 loci, founder kinds and the
     // fruit field all changed the encoding, so it is refused rather than misread.
     let mut pre_fauna = encode_snapshot(&world.state, BUILD);
     pre_fauna[4..8].copy_from_slice(&6u32.to_le_bytes());
-    assert_eq!(decode_snapshot(&pre_fauna), Err(SnapshotError::UnsupportedSchema(6)));
+    assert_eq!(
+        decode_snapshot(&pre_fauna),
+        Err(SnapshotError::UnsupportedSchema(6))
+    );
 }
 
 /// Spec: "Load validates magic, version, length, CRC, then value ranges". A header that is
@@ -243,7 +266,10 @@ fn a_full_world_round_trips() {
     // The v1 founder path fills the cap exactly; the default kinds place 24.
     config.founders.kinds.clear();
     config.founders.count = 512;
-    assert_eq!(config.capacity.max_organisms, 512, "the default cap is the spec's 512");
+    assert_eq!(
+        config.capacity.max_organisms, 512,
+        "the default cap is the spec's 512"
+    );
     let mut world = World::new(config).expect("a world at its cap is valid");
     assert_eq!(world.population(), 512);
     for _ in 0..50 {
@@ -254,9 +280,14 @@ fn a_full_world_round_trips() {
     let (meta, state) = decode_snapshot(&bytes).expect("a full world must decode");
     assert_eq!(meta.build_id, BUILD);
     assert_eq!(state.organisms.len(), world.population());
-    assert_eq!(state, world.state, "a full world did not survive the round trip");
+    assert_eq!(
+        state, world.state,
+        "a full world did not survive the round trip"
+    );
 
     let restored = World::from_state(state).expect("a full world must rebuild");
     assert_eq!(restored.population(), 512);
-    restored.check_invariants().expect("a restored full world satisfies its invariants");
+    restored
+        .check_invariants()
+        .expect("a restored full world satisfies its invariants");
 }

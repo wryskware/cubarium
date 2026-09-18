@@ -63,17 +63,21 @@ pub fn run(args: &[&str]) -> RunOutcome {
 
 /// Every JSON line of a telemetry file, parsed. Panics on a line that is not JSON.
 pub fn telemetry_lines(path: &Path) -> Vec<serde_json::Value> {
-    let text = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
+    let text =
+        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
     text.lines()
         .filter(|l| !l.trim().is_empty())
         .map(|l| {
-            serde_json::from_str(l).unwrap_or_else(|e| panic!("telemetry line is not JSON: {e}\n{l}"))
+            serde_json::from_str(l)
+                .unwrap_or_else(|e| panic!("telemetry line is not JSON: {e}\n{l}"))
         })
         .collect()
 }
 
 /// Snapshot ticks present in a state directory, newest first.
 pub fn snapshot_ticks(dir: &Path) -> Vec<u64> {
-    cubarium::state::list_snapshots(dir).into_iter().map(|(t, _)| t).collect()
+    cubarium::state::list_snapshots(dir)
+        .into_iter()
+        .map(|(t, _)| t)
+        .collect()
 }

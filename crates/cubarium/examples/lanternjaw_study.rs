@@ -38,7 +38,6 @@
 //! contact sheet that claims to show t = 1.55 s has to read the instant the frame was drawn
 //! at rather than assume one. The frame files themselves are `frame_NNNNNN.png` in `--out`.
 
-use cubarium_surface::Topology;
 use anyhow::{Result, ensure};
 use clap::{Parser, ValueEnum};
 use cubarium::{
@@ -53,6 +52,7 @@ use cubarium::{
     sink::{FrameSink, Output, PngSink, PreviewSink, ShimSink, WebSink, WorldShape},
 };
 use cubarium_render::{Canvas, stamp_sprite};
+use cubarium_surface::Topology;
 use cubarium_surface::{PathSegment, SurfacePoint, Vec2, travel};
 use cube_proto::{Face, Frame};
 use std::{
@@ -543,7 +543,11 @@ fn main() -> Result<()> {
                         // The same shared transport the world's bodies use: the root
                         // trajectory travels, its heading is mapped, and the frame fraction
                         // interpolates along the path actually walked.
-                        let step = travel(Topology::Cube, body.anchor, body.heading * (body.speed * DT));
+                        let step = travel(
+                            Topology::Cube,
+                            body.anchor,
+                            body.heading * (body.speed * DT),
+                        );
                         body.anchor = step.end;
                         body.heading = step.map.apply(body.heading);
                         body.moved = step.segments;

@@ -9,11 +9,11 @@
 //! embedding (`face_frame` / `SurfacePoint::embed`), never from a seam table, so a wrong
 //! seam table cannot make a rotated run agree with itself.
 
-use cubarium_surface::{Scale, Topology};
 use cubarium_surface::{
-    CUBE_CELL_COUNT, CELL_PIXELS, CELLS_PER_FACE_EDGE, CellId, Edge, Face, FieldGraph, ScalarField,
+    CELL_PIXELS, CELLS_PER_FACE_EDGE, CUBE_CELL_COUNT, CellId, Edge, Face, FieldGraph, ScalarField,
     SurfacePoint, cell_of, cross_seam, deposit, diffuse, face_frame,
 };
+use cubarium_surface::{Scale, Topology};
 
 const N: usize = CUBE_CELL_COUNT;
 const SIDE_FACES: [Face; 4] = [Face::Front, Face::Right, Face::Back, Face::Left];
@@ -53,20 +53,25 @@ fn rotate_cell(cell: CellId, rot: fn([f64; 3]) -> [f64; 3]) -> Option<CellId> {
         if dot(f.normal, q) > 1.0 - 1e-9 {
             let a = dot(sub(q, f.center), f.tangent_u);
             let b = dot(sub(q, f.center), f.tangent_v);
-            return Some(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::new(
-                face,
-                (a + 1.0) * 32.0,
-                (b + 1.0) * 32.0,
-            )));
+            return Some(cell_of(
+                Topology::Cube,
+                Scale::ONE,
+                &SurfacePoint::new(face, (a + 1.0) * 32.0, (b + 1.0) * 32.0),
+            ));
         }
     }
     // The only direction with no face is -Y.
-    assert!(q[1] < -1.0 + 1e-9, "rotated cell centre {q:?} is not on any face");
+    assert!(
+        q[1] < -1.0 + 1e-9,
+        "rotated cell centre {q:?} is not on any face"
+    );
     None
 }
 
 fn permutation(rot: fn([f64; 3]) -> [f64; 3]) -> Vec<Option<CellId>> {
-    let perm: Vec<Option<CellId>> = CellId::all(Topology::Cube, Scale::ONE).map(|c| rotate_cell(c, rot)).collect();
+    let perm: Vec<Option<CellId>> = CellId::all(Topology::Cube, Scale::ONE)
+        .map(|c| rotate_cell(c, rot))
+        .collect();
     let mut seen = vec![false; N];
     for c in perm.iter().flatten() {
         assert!(!seen[c.index()], "cell permutation is not injective");
@@ -87,7 +92,8 @@ fn edge_cell(face: Face, edge: Edge, k: u16) -> CellId {
 }
 
 fn is_rim_cell(c: CellId) -> bool {
-    c.face(Topology::Cube, Scale::ONE) != Face::Top && c.cy(Topology::Cube, Scale::ONE) == (CELLS_PER_FACE_EDGE - 1) as u16
+    c.face(Topology::Cube, Scale::ONE) != Face::Top
+        && c.cy(Topology::Cube, Scale::ONE) == (CELLS_PER_FACE_EDGE - 1) as u16
 }
 
 // --- the graph ---------------------------------------------------------------------------
@@ -108,7 +114,11 @@ fn graph_is_reciprocal_with_the_documented_degrees_and_edge_count() {
         if is_rim_cell(c) {
             rim += 1;
             assert_eq!(degree, 3, "{c:?} on the open rim");
-            assert_eq!(g.neighbor(c, Edge::Bottom), None, "{c:?} has flux through the rim");
+            assert_eq!(
+                g.neighbor(c, Edge::Bottom),
+                None,
+                "{c:?} has flux through the rim"
+            );
         } else {
             assert_eq!(degree, 4, "{c:?}");
         }
@@ -126,11 +136,18 @@ fn graph_is_reciprocal_with_the_documented_degrees_and_edge_count() {
         }
     }
     assert_eq!(rim, 64, "16 cells on each of the four open edges");
-    assert_eq!(undirected, 2 * 2528, "each undirected edge counted from both ends");
+    assert_eq!(
+        undirected,
+        2 * 2528,
+        "each undirected edge counted from both ends"
+    );
 
     let edges = g.edges();
     assert_eq!(edges.len(), 2528, "2400 inside charts + 128 across seams");
-    assert!(edges.windows(2).all(|w| w[0] < w[1]), "edges are sorted and unique");
+    assert!(
+        edges.windows(2).all(|w| w[0] < w[1]),
+        "edges are sorted and unique"
+    );
     for &(a, b) in edges {
         assert!(a < b, "edges are stored with a < b");
         assert!(
@@ -140,7 +157,10 @@ fn graph_is_reciprocal_with_the_documented_degrees_and_edge_count() {
     }
     // Counting the two populations separately: a within-chart edge joins two cells of the
     // same face, and there must be 128 seam edges (8 seams x 16 cells).
-    let seam_edges = edges.iter().filter(|(a, b)| a.face(Topology::Cube, Scale::ONE) != b.face(Topology::Cube, Scale::ONE)).count();
+    let seam_edges = edges
+        .iter()
+        .filter(|(a, b)| a.face(Topology::Cube, Scale::ONE) != b.face(Topology::Cube, Scale::ONE))
+        .count();
     assert_eq!(seam_edges, 128);
     assert_eq!(edges.len() - seam_edges, 2400);
 }
@@ -160,11 +180,11 @@ fn seam_neighbours_come_out_of_cross_seam_at_cell_resolution() {
             for k in 0..16u16 {
                 let cell = edge_cell(face, edge, k);
                 let (nf, nx, ny, _) = cross_seam(face, edge, (k * 4) as u8).expect("connected");
-                let want = cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::new(
-                    nf,
-                    f64::from(nx) + 0.5,
-                    f64::from(ny) + 0.5,
-                ));
+                let want = cell_of(
+                    Topology::Cube,
+                    Scale::ONE,
+                    &SurfacePoint::new(nf, f64::from(nx) + 0.5, f64::from(ny) + 0.5),
+                );
                 assert_eq!(
                     g.neighbor(cell, edge),
                     Some(want),
@@ -177,12 +197,24 @@ fn seam_neighbours_come_out_of_cross_seam_at_cell_resolution() {
     for k in 0..16u16 {
         assert_eq!(
             g.neighbor(edge_cell(Face::Right, Edge::Top, k), Edge::Top),
-            Some(CellId::new(Topology::Cube, Scale::ONE, Face::Top, 15, 15 - k)),
+            Some(CellId::new(
+                Topology::Cube,
+                Scale::ONE,
+                Face::Top,
+                15,
+                15 - k
+            )),
             "Right/Top is reversed"
         );
         assert_eq!(
             g.neighbor(edge_cell(Face::Back, Edge::Top, k), Edge::Top),
-            Some(CellId::new(Topology::Cube, Scale::ONE, Face::Top, 15 - k, 0)),
+            Some(CellId::new(
+                Topology::Cube,
+                Scale::ONE,
+                Face::Top,
+                15 - k,
+                0
+            )),
             "Back/Top is reversed"
         );
         assert_eq!(
@@ -218,7 +250,10 @@ fn a_constant_field_stays_bit_identical() {
         let substeps = diffuse(&mut f, &mut scratch, &g, 0.9);
         assert_eq!(substeps, 4, "rate 0.9 needs ceil(0.9 / 0.25) = 4 substeps");
     }
-    assert_eq!(*f.values, [1.0f64; CUBE_CELL_COUNT], "a constant field drifted");
+    assert_eq!(
+        *f.values, [1.0f64; CUBE_CELL_COUNT],
+        "a constant field drifted"
+    );
 }
 
 #[test]
@@ -290,7 +325,11 @@ fn the_field_random_walk_is_doubly_stochastic_and_mixes_to_uniform() {
         let row: f64 = p[i * N..(i + 1) * N].iter().sum();
         assert!((row - 1.0).abs() <= 1e-15, "row {i} sums to {row}");
         for j in 0..N {
-            assert_eq!(p[i * N + j], p[j * N + i], "P is not symmetric at ({i}, {j})");
+            assert_eq!(
+                p[i * N + j],
+                p[j * N + i],
+                "P is not symmetric at ({i}, {j})"
+            );
         }
     }
     // Symmetric + row-stochastic implies column-stochastic, i.e. uniform is stationary.
@@ -327,7 +366,10 @@ fn the_field_random_walk_is_doubly_stochastic_and_mixes_to_uniform() {
         worst <= 1e-6,
         "the walk did not reach uniform occupancy: worst deviation {worst} (uniform {uniform})"
     );
-    assert!((cur.iter().sum::<f64>() - 1.0).abs() <= 1e-9, "probability leaked");
+    assert!(
+        (cur.iter().sum::<f64>() - 1.0).abs() <= 1e-9,
+        "probability leaked"
+    );
 }
 
 /// "Check diffusion equivariance under cube rotations that preserve the open bottom."
@@ -337,12 +379,35 @@ fn diffusion_commutes_with_the_yaw_rotations() {
     let perm = permutation(yaw);
     // The permutation is the documented one: Front -> Right -> Back -> Left and Top spins.
     let yawed = |c: CellId| rotate_cell(c, yaw).expect("yaw keeps every cell on the surface");
-    assert_eq!(yawed(CellId::new(Topology::Cube, Scale::ONE, Face::Front, 3, 5)).face(Topology::Cube, Scale::ONE), Face::Right);
-    assert_eq!(yawed(CellId::new(Topology::Cube, Scale::ONE, Face::Right, 3, 5)).face(Topology::Cube, Scale::ONE), Face::Back);
-    assert_eq!(yawed(CellId::new(Topology::Cube, Scale::ONE, Face::Back, 3, 5)).face(Topology::Cube, Scale::ONE), Face::Left);
-    assert_eq!(yawed(CellId::new(Topology::Cube, Scale::ONE, Face::Left, 3, 5)).face(Topology::Cube, Scale::ONE), Face::Front);
-    assert_eq!(yawed(CellId::new(Topology::Cube, Scale::ONE, Face::Top, 3, 5)).face(Topology::Cube, Scale::ONE), Face::Top);
-    assert!(perm.iter().all(|c| c.is_some()), "a yaw maps the surface onto itself");
+    assert_eq!(
+        yawed(CellId::new(Topology::Cube, Scale::ONE, Face::Front, 3, 5))
+            .face(Topology::Cube, Scale::ONE),
+        Face::Right
+    );
+    assert_eq!(
+        yawed(CellId::new(Topology::Cube, Scale::ONE, Face::Right, 3, 5))
+            .face(Topology::Cube, Scale::ONE),
+        Face::Back
+    );
+    assert_eq!(
+        yawed(CellId::new(Topology::Cube, Scale::ONE, Face::Back, 3, 5))
+            .face(Topology::Cube, Scale::ONE),
+        Face::Left
+    );
+    assert_eq!(
+        yawed(CellId::new(Topology::Cube, Scale::ONE, Face::Left, 3, 5))
+            .face(Topology::Cube, Scale::ONE),
+        Face::Front
+    );
+    assert_eq!(
+        yawed(CellId::new(Topology::Cube, Scale::ONE, Face::Top, 3, 5))
+            .face(Topology::Cube, Scale::ONE),
+        Face::Top
+    );
+    assert!(
+        perm.iter().all(|c| c.is_some()),
+        "a yaw maps the surface onto itself"
+    );
 
     let sources = [
         CellId::new(Topology::Cube, Scale::ONE, Face::Front, 6, 9),
@@ -371,7 +436,10 @@ fn diffusion_commutes_with_the_yaw_rotations() {
             // Rotating the already-diffused field must give the same thing.
             let mut want = ScalarField::zeros(Topology::Cube, Scale::ONE);
             for c in CellId::all(Topology::Cube, Scale::ONE) {
-                want.set(perm[c.index()].expect("yaw stays on the surface"), rotated_base.get(c));
+                want.set(
+                    perm[c.index()].expect("yaw stays on the surface"),
+                    rotated_base.get(c),
+                );
             }
             rotated_base = want.clone();
             for c in CellId::all(Topology::Cube, Scale::ONE) {
@@ -414,7 +482,10 @@ fn a_vertex_neighbourhood_is_three_fold_symmetric() {
     assert!((f.total() - 3.0).abs() <= 1e-12);
 
     let near = |c: CellId| -> Option<u16> {
-        let (cx, cy) = (c.cx(Topology::Cube, Scale::ONE), c.cy(Topology::Cube, Scale::ONE));
+        let (cx, cy) = (
+            c.cx(Topology::Cube, Scale::ONE),
+            c.cy(Topology::Cube, Scale::ONE),
+        );
         match c.face(Topology::Cube, Scale::ONE) {
             Face::Front => Some((15 - cx).max(cy)),
             Face::Right => Some(cx.max(cy)),
@@ -448,12 +519,30 @@ fn a_vertex_neighbourhood_is_three_fold_symmetric() {
 fn deposit_conserves_its_amount_everywhere() {
     let cases = [
         ("mid face", SurfacePoint::new(Face::Front, 32.0, 32.0)),
-        ("on a vertical seam", SurfacePoint::new(Face::Front, 63.5, 30.0)),
-        ("on the Front/Top seam", SurfacePoint::new(Face::Front, 30.0, 0.5)),
-        ("on the twisted Right/Top seam", SurfacePoint::new(Face::Right, 30.0, 0.5)),
-        ("straddling a top vertex", SurfacePoint::new(Face::Front, 62.0, 2.0)),
-        ("on Top at a vertex", SurfacePoint::new(Face::Top, 63.0, 63.0)),
-        ("clipped at the rim", SurfacePoint::new(Face::Front, 30.0, 62.0)),
+        (
+            "on a vertical seam",
+            SurfacePoint::new(Face::Front, 63.5, 30.0),
+        ),
+        (
+            "on the Front/Top seam",
+            SurfacePoint::new(Face::Front, 30.0, 0.5),
+        ),
+        (
+            "on the twisted Right/Top seam",
+            SurfacePoint::new(Face::Right, 30.0, 0.5),
+        ),
+        (
+            "straddling a top vertex",
+            SurfacePoint::new(Face::Front, 62.0, 2.0),
+        ),
+        (
+            "on Top at a vertex",
+            SurfacePoint::new(Face::Top, 63.0, 63.0),
+        ),
+        (
+            "clipped at the rim",
+            SurfacePoint::new(Face::Front, 30.0, 62.0),
+        ),
         ("in a rim corner", SurfacePoint::new(Face::Left, 63.0, 63.0)),
     ];
     for (what, center) in cases {
@@ -489,9 +578,23 @@ fn a_footprint_carried_across_a_flat_seam_keeps_its_weights() {
     let mut here = ScalarField::zeros(Topology::Cube, Scale::ONE);
     // Front (34, 34) sits on a cell centre; adding 32 pixels of u (eight whole cells)
     // carries it across the flat Front/Right seam to Right (2, 34).
-    deposit(Topology::Cube, Scale::ONE, &mut here, SurfacePoint::new(Face::Front, 34.0, 34.0), 9.0, 1.0);
+    deposit(
+        Topology::Cube,
+        Scale::ONE,
+        &mut here,
+        SurfacePoint::new(Face::Front, 34.0, 34.0),
+        9.0,
+        1.0,
+    );
     let mut there = ScalarField::zeros(Topology::Cube, Scale::ONE);
-    deposit(Topology::Cube, Scale::ONE, &mut there, SurfacePoint::new(Face::Right, 2.0, 34.0), 9.0, 1.0);
+    deposit(
+        Topology::Cube,
+        Scale::ONE,
+        &mut there,
+        SurfacePoint::new(Face::Right, 2.0, 34.0),
+        9.0,
+        1.0,
+    );
 
     let mut a: Vec<f64> = here.values.iter().copied().filter(|x| *x > 0.0).collect();
     let mut b: Vec<f64> = there.values.iter().copied().filter(|x| *x > 0.0).collect();
@@ -499,7 +602,10 @@ fn a_footprint_carried_across_a_flat_seam_keeps_its_weights() {
     a.sort_by(|x, y| x.total_cmp(y));
     b.sort_by(|x, y| x.total_cmp(y));
     for (x, y) in a.iter().zip(&b) {
-        assert!((x - y).abs() <= 1e-9, "weight {x} became {y} across the seam");
+        assert!(
+            (x - y).abs() <= 1e-9,
+            "weight {x} became {y} across the seam"
+        );
     }
     assert!((here.total() - there.total()).abs() <= 1e-9);
 }
@@ -511,8 +617,18 @@ fn cell_indexing_matches_the_documented_layout() {
         for cy in 0..16u16 {
             for cx in 0..16u16 {
                 let c = CellId::new(Topology::Cube, Scale::ONE, face, cx, cy);
-                assert_eq!(c.index(), face.index() * 256 + usize::from(cy) * 16 + usize::from(cx));
-                assert_eq!((c.face(Topology::Cube, Scale::ONE), c.cx(Topology::Cube, Scale::ONE), c.cy(Topology::Cube, Scale::ONE)), (face, cx, cy));
+                assert_eq!(
+                    c.index(),
+                    face.index() * 256 + usize::from(cy) * 16 + usize::from(cx)
+                );
+                assert_eq!(
+                    (
+                        c.face(Topology::Cube, Scale::ONE),
+                        c.cx(Topology::Cube, Scale::ONE),
+                        c.cy(Topology::Cube, Scale::ONE)
+                    ),
+                    (face, cx, cy)
+                );
                 let centre = c.center(Topology::Cube, Scale::ONE);
                 assert_eq!(centre.u, f64::from(cx) * CELL_PIXELS + 2.0);
                 assert_eq!(centre.v, f64::from(cy) * CELL_PIXELS + 2.0);
@@ -520,7 +636,12 @@ fn cell_indexing_matches_the_documented_layout() {
                 // Every pixel of the cell maps back to it.
                 for dy in 0..4u16 {
                     for dx in 0..4u16 {
-                        let p = SurfacePoint::pixel_center(Topology::Cube, face, cx * 4 + dx, cy * 4 + dy);
+                        let p = SurfacePoint::pixel_center(
+                            Topology::Cube,
+                            face,
+                            cx * 4 + dx,
+                            cy * 4 + dy,
+                        );
                         assert_eq!(cell_of(Topology::Cube, Scale::ONE, &p), c);
                     }
                 }
@@ -529,6 +650,12 @@ fn cell_indexing_matches_the_documented_layout() {
     }
     assert_eq!(CellId::all(Topology::Cube, Scale::ONE).count(), N);
     for f in SIDE_FACES {
-        assert!(is_rim_cell(CellId::new(Topology::Cube, Scale::ONE, f, 5, 15)));
+        assert!(is_rim_cell(CellId::new(
+            Topology::Cube,
+            Scale::ONE,
+            f,
+            5,
+            15
+        )));
     }
 }

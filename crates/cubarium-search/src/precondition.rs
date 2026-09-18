@@ -210,7 +210,9 @@ pub struct StagePlan {
 }
 
 fn half_space_name() -> String {
-    cubarium_core::hunter::PursuitStop::ForwardHalfSpace.as_str().to_string()
+    cubarium_core::hunter::PursuitStop::ForwardHalfSpace
+        .as_str()
+        .to_string()
 }
 
 fn sweep_name() -> String {
@@ -238,9 +240,11 @@ fn peak_rss_mib() -> f64 {
     std::fs::read_to_string("/proc/self/status")
         .ok()
         .and_then(|s| {
-            s.lines()
-                .find(|l| l.starts_with("VmHWM:"))
-                .and_then(|l| l.split_whitespace().nth(1).and_then(|v| v.parse::<f64>().ok()))
+            s.lines().find(|l| l.starts_with("VmHWM:")).and_then(|l| {
+                l.split_whitespace()
+                    .nth(1)
+                    .and_then(|v| v.parse::<f64>().ok())
+            })
         })
         .map_or(0.0, |kib| kib / 1024.0)
 }
@@ -265,15 +269,28 @@ fn spread(values: &[f64]) -> (f64, f64, f64, f64, f64) {
     let n = sorted.len() as f64;
     let mean = total / n;
     let var = sorted.iter().map(|v| (v - mean) * (v - mean)).sum::<f64>() / n;
-    let cv = if mean.abs() > 1e-12 { var.sqrt() / mean } else { 0.0 };
-    (total, quantile(&sorted, 0.5), quantile(&sorted, 0.1), quantile(&sorted, 0.9), cv)
+    let cv = if mean.abs() > 1e-12 {
+        var.sqrt() / mean
+    } else {
+        0.0
+    };
+    (
+        total,
+        quantile(&sorted, 0.5),
+        quantile(&sorted, 0.1),
+        quantile(&sorted, 0.9),
+        cv,
+    )
 }
 
 /// One stock's settling between two whole-field vectors.
 fn stock(now: &[f64], then: Option<&Vec<f64>>) -> StockReading {
     let total: f64 = now.iter().sum();
     let Some(then) = then else {
-        return StockReading { total, ..StockReading::default() };
+        return StockReading {
+            total,
+            ..StockReading::default()
+        };
     };
     let before: f64 = then.iter().sum();
     let moved: f64 = now.iter().zip(then).map(|(a, b)| (a - b).abs()).sum();
@@ -285,8 +302,16 @@ fn stock(now: &[f64], then: Option<&Vec<f64>>) -> StockReading {
     StockReading {
         total,
         delta_total: total - before,
-        relative_total: if total.abs() > 1e-12 { (total - before) / total } else { 0.0 },
-        cell_change_rate: if total.abs() > 1e-12 { moved / total } else { 0.0 },
+        relative_total: if total.abs() > 1e-12 {
+            (total - before) / total
+        } else {
+            0.0
+        },
+        cell_change_rate: if total.abs() > 1e-12 {
+            moved / total
+        } else {
+            0.0
+        },
         cells_moving,
     }
 }
@@ -340,12 +365,20 @@ fn sum_cells(cells: &[CellSample], of: fn(&CellSample) -> f64) -> f64 {
 fn plant_only_config(
     c: &Candidate,
     seed: u64,
-) -> Result<(cubarium_core::WorldConfig, cubarium_core::config::FounderConfig), String> {
+) -> Result<
+    (
+        cubarium_core::WorldConfig,
+        cubarium_core::config::FounderConfig,
+    ),
+    String,
+> {
     let mut config = c.config(seed)?;
     let roster = config.founders.clone();
     config.founders.kinds.clear();
     config.founders.count = 0;
-    config.validate().map_err(|e| format!("config rejected: {e}"))?;
+    config
+        .validate()
+        .map_err(|e| format!("config rejected: {e}"))?;
     Ok((config, roster))
 }
 
@@ -376,57 +409,64 @@ pub fn field_run(c: &Candidate, seed: u64, ages: &[u64], out: &Path) -> Result<F
     let mut last_crossings = 0u64;
 
     let horizon = ages.iter().copied().max().unwrap_or(0);
-    let reading = |world: &World, ring: &[Boundary], crossings: &CrossingCounter, last: &mut u64| {
-        let now = boundary_of(world);
-        // The newest boundary a whole window back, or — before the run is a window old — the
-        // oldest boundary there is, with the window's *actual* length reported beside it.
-        // Workstream M's tracker reports a shortened window the same way rather than
-        // pretending the interval was the nominal one.
-        let then = ring
-            .iter()
-            .filter(|b| b.tick < now.tick)
-            .filter(|b| b.tick + WINDOW_TICKS >= now.tick)
-            .min_by_key(|b| b.tick)
-            .or_else(|| ring.iter().filter(|b| b.tick < now.tick).max_by_key(|b| b.tick));
-        let window_ticks = then.map_or(0, |b| now.tick - b.tick);
-        let flows = |of: fn(&CellSample) -> f64| match then {
-            Some(b) => sum_cells(&now.cells, of) - sum_cells(&b.cells, of),
-            None => 0.0,
-        };
-        let foliage: Vec<f64> = watched.iter().map(|i| now.p[*i]).collect();
-        let (_, median, p10, p90, cv) = spread(&foliage);
-        let total = crossings.depletions();
-        let row = FieldReading {
-            tick: now.tick,
-            window_ticks,
-            foliage: stock(&now.p, then.map(|b| &b.p)),
-            wood: stock(&now.w, then.map(|b| &b.w)),
-            plant_reserve: stock(&now.q, then.map(|b| &b.q)),
-            nutrient: stock(&now.n, then.map(|b| &b.n)),
-            income: flows(|c| c.income),
-            foliage_in: flows(|c| c.foliage_in),
-            foliage_out: flows(|c| c.foliage_out),
-            withdrawal: flows(|c| c.withdrawal),
-            crossings_total: total,
-            crossings_in_window: total - *last,
-            recoveries_total: crossings.recoveries(),
-            depleted_now: crossings.depleted_now(),
-            foliage_median: median,
-            foliage_p10: p10,
-            foliage_p90: p90,
-            foliage_cv: cv,
-            alive_cells: world
-                .state
-                .ecology
-                .wood
+    let reading =
+        |world: &World, ring: &[Boundary], crossings: &CrossingCounter, last: &mut u64| {
+            let now = boundary_of(world);
+            // The newest boundary a whole window back, or — before the run is a window old — the
+            // oldest boundary there is, with the window's *actual* length reported beside it.
+            // Workstream M's tracker reports a shortened window the same way rather than
+            // pretending the interval was the nominal one.
+            let then = ring
                 .iter()
-                .filter(|w| cubarium_core::fields::CellClass::of(**w, alive_min)
-                    == cubarium_core::fields::CellClass::Alive)
-                .count() as u32,
+                .filter(|b| b.tick < now.tick)
+                .filter(|b| b.tick + WINDOW_TICKS >= now.tick)
+                .min_by_key(|b| b.tick)
+                .or_else(|| {
+                    ring.iter()
+                        .filter(|b| b.tick < now.tick)
+                        .max_by_key(|b| b.tick)
+                });
+            let window_ticks = then.map_or(0, |b| now.tick - b.tick);
+            let flows = |of: fn(&CellSample) -> f64| match then {
+                Some(b) => sum_cells(&now.cells, of) - sum_cells(&b.cells, of),
+                None => 0.0,
+            };
+            let foliage: Vec<f64> = watched.iter().map(|i| now.p[*i]).collect();
+            let (_, median, p10, p90, cv) = spread(&foliage);
+            let total = crossings.depletions();
+            let row = FieldReading {
+                tick: now.tick,
+                window_ticks,
+                foliage: stock(&now.p, then.map(|b| &b.p)),
+                wood: stock(&now.w, then.map(|b| &b.w)),
+                plant_reserve: stock(&now.q, then.map(|b| &b.q)),
+                nutrient: stock(&now.n, then.map(|b| &b.n)),
+                income: flows(|c| c.income),
+                foliage_in: flows(|c| c.foliage_in),
+                foliage_out: flows(|c| c.foliage_out),
+                withdrawal: flows(|c| c.withdrawal),
+                crossings_total: total,
+                crossings_in_window: total - *last,
+                recoveries_total: crossings.recoveries(),
+                depleted_now: crossings.depleted_now(),
+                foliage_median: median,
+                foliage_p10: p10,
+                foliage_p90: p90,
+                foliage_cv: cv,
+                alive_cells: world
+                    .state
+                    .ecology
+                    .wood
+                    .iter()
+                    .filter(|w| {
+                        cubarium_core::fields::CellClass::of(**w, alive_min)
+                            == cubarium_core::fields::CellClass::Alive
+                    })
+                    .count() as u32,
+            };
+            *last = total;
+            row
         };
-        *last = total;
-        row
-    };
 
     // The opening reading, before a single tick: this is the §11 seeding itself, and the
     // opening distribution the status-quo arm founds into.
@@ -489,7 +529,9 @@ fn save_age(
     let mut clone = World::from_state(world.state.clone())
         .map_err(|e| format!("rebuilding the state at age {age}: {e}"))?;
     clone.state.config.founders = roster.clone();
-    clone.found_roster().map_err(|e| format!("founding at age {age}: {e}"))?;
+    clone
+        .found_roster()
+        .map_err(|e| format!("founding at age {age}: {e}"))?;
     let founding_state_hash = state_hash(&clone.state);
 
     let dir = out.join("states");
@@ -528,8 +570,10 @@ pub fn run_field(
     out: &Path,
 ) -> Result<StageReport, String> {
     let (chosen, seeds, ages) = plan_inputs(names, seed_set, seed_count, ages, workers)?;
-    let jobs: Vec<(&'static Candidate, u64)> =
-        chosen.iter().flat_map(|c| seeds.iter().map(move |s| (*c, *s))).collect();
+    let jobs: Vec<(&'static Candidate, u64)> = chosen
+        .iter()
+        .flat_map(|c| seeds.iter().map(move |s| (*c, *s)))
+        .collect();
 
     std::fs::create_dir_all(out).map_err(|e| format!("creating {}: {e}", out.display()))?;
     let rows_path = out.join("field.jsonl");
@@ -583,7 +627,9 @@ pub fn run_field(
     if let Ok(mut w) = writer.lock() {
         let _ = w.flush();
     }
-    let failures = failed.into_inner().map_err(|e| format!("failure mutex: {e}"))?;
+    let failures = failed
+        .into_inner()
+        .map_err(|e| format!("failure mutex: {e}"))?;
     for f in &failures {
         eprintln!("field run failed — {f}");
     }
@@ -602,7 +648,9 @@ pub fn run_field(
             trials: jobs.len(),
             workers,
             wall_seconds_cap: wall_seconds,
-            pursuit_stop: cubarium_core::hunter::PursuitStop::default().as_str().to_string(),
+            pursuit_stop: cubarium_core::hunter::PursuitStop::default()
+                .as_str()
+                .to_string(),
             motor: sweep_name(),
         },
         wall_seconds: wall,
@@ -610,7 +658,11 @@ pub fn run_field(
         skipped: skipped.load(Ordering::SeqCst),
         failed: failures.len(),
         simulated_ticks: simulated,
-        ticks_per_second: if wall > 0.0 { simulated as f64 / wall } else { 0.0 },
+        ticks_per_second: if wall > 0.0 {
+            simulated as f64 / wall
+        } else {
+            0.0
+        },
         peak_rss_mib: peak_rss_mib(),
     };
     write_report(out, &report)?;
@@ -647,7 +699,12 @@ pub fn run_compare(
         let values = c.vector()?;
         for seed in &seeds {
             for age in &ages {
-                jobs.push(Job { candidate: c, values: values.clone(), seed: *seed, age: *age });
+                jobs.push(Job {
+                    candidate: c,
+                    values: values.clone(),
+                    seed: *seed,
+                    age: *age,
+                });
             }
         }
     }
@@ -711,7 +768,8 @@ pub fn run_compare(
                         );
                     }
                     ticks.fetch_add(
-                        evaluation.metrics.as_ref().map_or(0, |m| m.ticks_run) as usize + job.age as usize,
+                        evaluation.metrics.as_ref().map_or(0, |m| m.ticks_run) as usize
+                            + job.age as usize,
                         Ordering::SeqCst,
                     );
                     let row = CompareRow {
@@ -757,7 +815,11 @@ pub fn run_compare(
         skipped: skipped.load(Ordering::SeqCst),
         failed: failed.load(Ordering::SeqCst),
         simulated_ticks: simulated,
-        ticks_per_second: if wall > 0.0 { simulated as f64 / wall } else { 0.0 },
+        ticks_per_second: if wall > 0.0 {
+            simulated as f64 / wall
+        } else {
+            0.0
+        },
         peak_rss_mib: peak_rss_mib(),
     };
     write_report(out, &report)?;
@@ -1049,9 +1111,11 @@ pub struct GrazedBurnInRun {
 /// found is not the arm the comparison declared.
 pub fn burn_in(world: &mut World, ticks: u64, check_every: u64) -> Result<(), String> {
     if ticks > 0 && world.population() == 0 {
-        return Err("a coupled burn-in needs the ordinary roster in the world, and this one \
+        return Err(
+            "a coupled burn-in needs the ordinary roster in the world, and this one \
                     holds nobody"
-            .to_string());
+                .to_string(),
+        );
     }
     let every = check_every.max(1);
     for _ in 0..ticks {
@@ -1070,7 +1134,10 @@ pub fn burn_in(world: &mut World, ticks: u64, check_every: u64) -> Result<(), St
         }
         if world.tick() % every == 0 {
             world.check_invariants().map_err(|e| {
-                format!("invariant violated while burning in at tick {}: {e}", world.tick())
+                format!(
+                    "invariant violated while burning in at tick {}: {e}",
+                    world.tick()
+                )
             })?;
         }
     }
@@ -1163,7 +1230,12 @@ impl ArmRecorder {
     fn new(world: &World, seeding: &[f64], horizon_ticks: u64, sample_every: u64) -> ArmRecorder {
         let p_ref: Vec<f64> = world.state.fields.p.clone();
         let cfg = world.config().clone();
-        let habitat = cubarium_core::habitat::Habitat::new(&cfg.habitat, cfg.seed, cfg.topology, cfg.world_scale);
+        let habitat = cubarium_core::habitat::Habitat::new(
+            &cfg.habitat,
+            cfg.seed,
+            cfg.topology,
+            cfg.world_scale,
+        );
         let l_mu: Vec<f64> = habitat
             .light_base
             .iter()
@@ -1231,7 +1303,9 @@ impl ArmRecorder {
     fn absorb(&mut self, world: &mut World) {
         for event in world.drain_events() {
             match event {
-                LifeEvent::Birth { tick, id, parent, .. } => {
+                LifeEvent::Birth {
+                    tick, id, parent, ..
+                } => {
                     self.parent_of.insert(id, parent);
                     self.prey_births += 1;
                     let key = world
@@ -1244,7 +1318,11 @@ impl ArmRecorder {
                             guild: guild_of(o.phenotype.cap_foliage, o.phenotype.cap_detrital)
                                 as u8,
                         })
-                        .unwrap_or(CensusKey { form: 0, diet_bin: 1, guild: 2 });
+                        .unwrap_or(CensusKey {
+                            form: 0,
+                            diet_bin: 1,
+                            guild: 2,
+                        });
                     self.key_of_id.insert(id, key);
                     // A `Birth` is emitted when gestation completes and the child is
                     // committed, so this **is** a completed brood. The parent's own form is
@@ -1252,7 +1330,8 @@ impl ArmRecorder {
                     if self.founders.contains(&parent) {
                         let form = self.key_of_id.get(&parent).map_or(0, |k| k.form);
                         let first = self.founder_parents.insert(parent);
-                        self.broods.brood(form, tick.saturating_sub(self.origin_tick), first);
+                        self.broods
+                            .brood(form, tick.saturating_sub(self.origin_tick), first);
                     }
                 }
                 LifeEvent::Death { cause, .. } => {
@@ -1281,31 +1360,38 @@ impl ArmRecorder {
         let p = &world.state.fields.p;
         let mut occupancy: BTreeSet<u16> = BTreeSet::new();
         for (_, o) in world.state.organisms.iter() {
-            occupancy.insert(cubarium_surface::cell_of(world.topology(), world.scale(), &o.pos).index() as u16);
+            occupancy.insert(
+                cubarium_surface::cell_of(world.topology(), world.scale(), &o.pos).index() as u16,
+            );
         }
         if let Some(rec) = world.plant_budget() {
             self.plant_scratch.clear();
-            self.plant_scratch.extend(rec.cells.iter().map(|c| CellSample {
-                foliage_in: c.foliage_in(),
-                foliage_out: c.foliage_out(),
-                withdrawal: c.withdrawal_foliage,
-                income: c.income,
-                maintenance_unpaid: c.maintenance_unpaid,
-                death_foliage: c.death_foliage,
-                wood_sum: c.w_sum,
-                light_sum: c.light_effective_sum,
-                nutrient_sum: c.nutrient_sum,
-                ticks_alive: c.ticks_alive,
-            }));
+            self.plant_scratch
+                .extend(rec.cells.iter().map(|c| CellSample {
+                    foliage_in: c.foliage_in(),
+                    foliage_out: c.foliage_out(),
+                    withdrawal: c.withdrawal_foliage,
+                    income: c.income,
+                    maintenance_unpaid: c.maintenance_unpaid,
+                    death_foliage: c.death_foliage,
+                    wood_sum: c.w_sum,
+                    light_sum: c.light_effective_sum,
+                    nutrient_sum: c.nutrient_sum,
+                    ticks_alive: c.ticks_alive,
+                }));
             self.plant_occupied.clear();
             self.plant_occupied.extend(occupancy.iter().copied());
-            self.plant.observe(tick, &self.plant_scratch, &self.plant_occupied);
+            self.plant
+                .observe(tick, &self.plant_scratch, &self.plant_occupied);
         }
         let plant = &mut self.plant;
-        self.crossings.observe_reporting(p, |cell, kind| match kind {
-            CrossingKind::Depleted => plant.depleted(cell, tick, p.get(cell).copied().unwrap_or(0.0)),
-            CrossingKind::Recovered => plant.recovered(cell, tick),
-        });
+        self.crossings
+            .observe_reporting(p, |cell, kind| match kind {
+                CrossingKind::Depleted => {
+                    plant.depleted(cell, tick, p.get(cell).copied().unwrap_or(0.0))
+                }
+                CrossingKind::Recovered => plant.recovered(cell, tick),
+            });
         // The common §11 reference is a second reading of the same foliage against a fixed
         // reference; it drives no per-cell record of its own, because the record's crossing
         // rows belong to the counter the rest of the campaign reports.
@@ -1427,8 +1513,11 @@ impl ArmRecorder {
             .copied()
             .unwrap_or_default();
         let final_foliage: f64 = p.iter().sum();
-        let late_mean =
-            if self.late_n > 0 { self.late_sum / self.late_n as f64 } else { final_foliage };
+        let late_mean = if self.late_n > 0 {
+            self.late_sum / self.late_n as f64
+        } else {
+            final_foliage
+        };
         GrazedHorizon {
             ticks_run: world.tick() - self.origin_tick,
             collapsed: self.collapsed_at.is_some(),
@@ -1531,8 +1620,7 @@ pub fn grazed_run(
         Ok(w) => w,
         Err(e) => return refused(e, ms(start)),
     };
-    let founders0: BTreeSet<OrganismId> =
-        world.state.organisms.iter().map(|(id, _)| id).collect();
+    let founders0: BTreeSet<OrganismId> = world.state.organisms.iter().map(|(id, _)| id).collect();
 
     // --- the burn-in, the removal and the second founding --------------------------------
     let mut burn = None;
@@ -1601,8 +1689,10 @@ pub fn grazed_run(
             .ecology
             .wood
             .iter()
-            .filter(|w| cubarium_core::fields::CellClass::of(**w, alive_min)
-                == cubarium_core::fields::CellClass::Alive)
+            .filter(|w| {
+                cubarium_core::fields::CellClass::of(**w, alive_min)
+                    == cubarium_core::fields::CellClass::Alive
+            })
             .count() as u32,
         watched_cells: watched.len() as u32,
     };
@@ -1626,7 +1716,10 @@ pub fn grazed_run(
         rec.absorb(&mut world);
         if (world.tick() - rec.origin_tick) % rec.sample_every == 0 {
             if let Err(e) = world.check_invariants() {
-                return refused(format!("invariant violated at tick {}: {e}", world.tick()), ms(start));
+                return refused(
+                    format!("invariant violated at tick {}: {e}", world.tick()),
+                    ms(start),
+                );
             }
             rec.sample(&world);
         }
@@ -1677,8 +1770,7 @@ pub fn grazed_burn_in_run(
     let start = Instant::now();
     let mut world = coupled_world(c, seed, pursuit_stop)?;
     world.record_plant_budgets(true);
-    let founders0: BTreeSet<OrganismId> =
-        world.state.organisms.iter().map(|(id, _)| id).collect();
+    let founders0: BTreeSet<OrganismId> = world.state.organisms.iter().map(|(id, _)| id).collect();
 
     let p_ref: Vec<f64> = world.state.fields.p.clone();
     let alive_min = world.config().plant.alive_min;
@@ -1693,53 +1785,60 @@ pub fn grazed_burn_in_run(
     let mut last_crossings = 0u64;
     let horizon = ages.iter().copied().max().unwrap_or(0);
 
-    let reading = |world: &World, ring: &[Boundary], crossings: &CrossingCounter, last: &mut u64| {
-        let now = boundary_of(world);
-        let then = ring
-            .iter()
-            .filter(|b| b.tick < now.tick)
-            .filter(|b| b.tick + WINDOW_TICKS >= now.tick)
-            .min_by_key(|b| b.tick)
-            .or_else(|| ring.iter().filter(|b| b.tick < now.tick).max_by_key(|b| b.tick));
-        let window_ticks = then.map_or(0, |b| now.tick - b.tick);
-        let flows = |of: fn(&CellSample) -> f64| match then {
-            Some(b) => sum_cells(&now.cells, of) - sum_cells(&b.cells, of),
-            None => 0.0,
-        };
-        let foliage: Vec<f64> = watched.iter().map(|i| now.p[*i]).collect();
-        let (_, median, p10, p90, cv) = spread(&foliage);
-        let total = crossings.depletions();
-        let row = FieldReading {
-            tick: now.tick,
-            window_ticks,
-            foliage: stock(&now.p, then.map(|b| &b.p)),
-            wood: stock(&now.w, then.map(|b| &b.w)),
-            plant_reserve: stock(&now.q, then.map(|b| &b.q)),
-            nutrient: stock(&now.n, then.map(|b| &b.n)),
-            income: flows(|c| c.income),
-            foliage_in: flows(|c| c.foliage_in),
-            foliage_out: flows(|c| c.foliage_out),
-            withdrawal: flows(|c| c.withdrawal),
-            crossings_total: total,
-            crossings_in_window: total - *last,
-            recoveries_total: crossings.recoveries(),
-            depleted_now: crossings.depleted_now(),
-            foliage_median: median,
-            foliage_p10: p10,
-            foliage_p90: p90,
-            foliage_cv: cv,
-            alive_cells: world
-                .state
-                .ecology
-                .wood
+    let reading =
+        |world: &World, ring: &[Boundary], crossings: &CrossingCounter, last: &mut u64| {
+            let now = boundary_of(world);
+            let then = ring
                 .iter()
-                .filter(|w| cubarium_core::fields::CellClass::of(**w, alive_min)
-                    == cubarium_core::fields::CellClass::Alive)
-                .count() as u32,
+                .filter(|b| b.tick < now.tick)
+                .filter(|b| b.tick + WINDOW_TICKS >= now.tick)
+                .min_by_key(|b| b.tick)
+                .or_else(|| {
+                    ring.iter()
+                        .filter(|b| b.tick < now.tick)
+                        .max_by_key(|b| b.tick)
+                });
+            let window_ticks = then.map_or(0, |b| now.tick - b.tick);
+            let flows = |of: fn(&CellSample) -> f64| match then {
+                Some(b) => sum_cells(&now.cells, of) - sum_cells(&b.cells, of),
+                None => 0.0,
+            };
+            let foliage: Vec<f64> = watched.iter().map(|i| now.p[*i]).collect();
+            let (_, median, p10, p90, cv) = spread(&foliage);
+            let total = crossings.depletions();
+            let row = FieldReading {
+                tick: now.tick,
+                window_ticks,
+                foliage: stock(&now.p, then.map(|b| &b.p)),
+                wood: stock(&now.w, then.map(|b| &b.w)),
+                plant_reserve: stock(&now.q, then.map(|b| &b.q)),
+                nutrient: stock(&now.n, then.map(|b| &b.n)),
+                income: flows(|c| c.income),
+                foliage_in: flows(|c| c.foliage_in),
+                foliage_out: flows(|c| c.foliage_out),
+                withdrawal: flows(|c| c.withdrawal),
+                crossings_total: total,
+                crossings_in_window: total - *last,
+                recoveries_total: crossings.recoveries(),
+                depleted_now: crossings.depleted_now(),
+                foliage_median: median,
+                foliage_p10: p10,
+                foliage_p90: p90,
+                foliage_cv: cv,
+                alive_cells: world
+                    .state
+                    .ecology
+                    .wood
+                    .iter()
+                    .filter(|w| {
+                        cubarium_core::fields::CellClass::of(**w, alive_min)
+                            == cubarium_core::fields::CellClass::Alive
+                    })
+                    .count() as u32,
+            };
+            *last = total;
+            row
         };
-        *last = total;
-        row
-    };
 
     readings.push(reading(&world, &ring, &crossings, &mut last_crossings));
     ring.push(boundary_of(&world));
@@ -1816,7 +1915,9 @@ fn save_grazed_age(
             .map(|o| {
                 o.energy
                     + e_r * o.reserve
-                    + o.escrow.as_ref().map_or(0.0, |e| e_r * (e.structure + e.reserve) + e.energy)
+                    + o.escrow
+                        .as_ref()
+                        .map_or(0.0, |e| e_r * (e.structure + e.reserve) + e.energy)
             })
             .sum(),
         // `from_state` re-derives the residual baseline so it reads zero at the rebuild; what
@@ -1826,7 +1927,9 @@ fn save_grazed_age(
         births_total,
         deaths_total,
     };
-    clone.found_roster().map_err(|e| format!("founding at age {age}: {e}"))?;
+    clone
+        .found_roster()
+        .map_err(|e| format!("founding at age {age}: {e}"))?;
     let founding_state_hash = state_hash(&clone.state);
 
     let dir = out.join("states");
@@ -1887,8 +1990,10 @@ pub fn run_grazed(
 
     // --- phase 1: the burn-ins ------------------------------------------------------------
     if !burn_ages.is_empty() {
-        let jobs: Vec<(&'static Candidate, u64)> =
-            chosen.iter().flat_map(|c| seeds.iter().map(move |s| (*c, *s))).collect();
+        let jobs: Vec<(&'static Candidate, u64)> = chosen
+            .iter()
+            .flat_map(|c| seeds.iter().map(move |s| (*c, *s)))
+            .collect();
         let path = out.join("burn-in.jsonl");
         let file = std::fs::File::create(&path)
             .map_err(|e| format!("creating {}: {e}", path.display()))?;
@@ -1932,7 +2037,10 @@ pub fn run_grazed(
         if let Ok(mut w) = writer.lock() {
             let _ = w.flush();
         }
-        for f in failures.into_inner().map_err(|e| format!("failure mutex: {e}"))? {
+        for f in failures
+            .into_inner()
+            .map_err(|e| format!("failure mutex: {e}"))?
+        {
             eprintln!("grazed burn-in failed — {f}");
         }
     }
@@ -1947,7 +2055,11 @@ pub fn run_grazed(
     for c in &chosen {
         for seed in &seeds {
             for age in &ages {
-                jobs.push(Job { candidate: c, seed: *seed, age: *age });
+                jobs.push(Job {
+                    candidate: c,
+                    seed: *seed,
+                    age: *age,
+                });
             }
         }
     }
@@ -2033,7 +2145,11 @@ pub fn run_grazed(
         skipped: skipped.load(Ordering::SeqCst),
         failed: failed.load(Ordering::SeqCst),
         simulated_ticks: simulated,
-        ticks_per_second: if wall > 0.0 { simulated as f64 / wall } else { 0.0 },
+        ticks_per_second: if wall > 0.0 {
+            simulated as f64 / wall
+        } else {
+            0.0
+        },
         peak_rss_mib: peak_rss_mib(),
     };
     write_report(out, &report)?;

@@ -17,20 +17,20 @@
 use cubarium_surface::{Scale, Topology};
 use std::path::Path;
 
-use cube_proto::{FACE_SIZE, Face};
 use cubarium::art::{ArtPack, Band};
 use cubarium::art_present::{
-    ArtPresenter, CANOPY_STAGES, DEAD_WOOD_OPACITY, FOLIAGE_FULL, FOLIAGE_PER_WOOD,
-    FOLIAGE_FULL_RANGE, FOLIAGE_STAGES, SOIL_SCALE, STAGE_HYST, TallColumn, WOOD_SHAPE, band_of,
-    column_dead_density, dead_wood_density, dead_wood_tone, foliage_fullness, foliage_full_default,
-    foliage_full_from_env, foliage_ramp, foliage_ramp_at, foliage_rows, litter_density,
-    living_wood_tone, next_stage, plant_cap, plant_density, rank_cap_of, soil_snag,
+    ArtPresenter, CANOPY_STAGES, DEAD_WOOD_OPACITY, FOLIAGE_FULL, FOLIAGE_FULL_RANGE,
+    FOLIAGE_PER_WOOD, FOLIAGE_STAGES, SOIL_SCALE, STAGE_HYST, TallColumn, WOOD_SHAPE, band_of,
+    column_dead_density, dead_wood_density, dead_wood_tone, foliage_full_default,
+    foliage_full_from_env, foliage_fullness, foliage_ramp, foliage_ramp_at, foliage_rows,
+    litter_density, living_wood_tone, next_stage, plant_cap, plant_density, rank_cap_of, soil_snag,
     stage_thresholds, structural, tall_columns, tall_target, wood_density, wood_for_density,
     wood_fraction,
 };
 use cubarium_core::view::RenderView;
 use cubarium_render::Canvas;
 use cubarium_surface::{CUBE_CELL_COUNT, CellId};
+use cube_proto::{FACE_SIZE, Face};
 
 // ---------------------------------------------------------------------------
 // the measured stands of B0, and the contract's constants
@@ -307,10 +307,8 @@ fn five_states(tick: u64, cell: CellId) -> [(&'static str, RenderView); 5] {
 fn the_five_states_of_a_cell_are_pairwise_distinguishable() {
     for cell in [pilot(), canopy_pilot()] {
         let states = five_states(7, cell);
-        let drawn: Vec<(&str, Canvas)> = states
-            .iter()
-            .map(|(name, v)| (*name, snapped(v)))
-            .collect();
+        let drawn: Vec<(&str, Canvas)> =
+            states.iter().map(|(name, v)| (*name, snapped(v))).collect();
         for i in 0..drawn.len() {
             for j in i + 1..drawn.len() {
                 let d = differing(&drawn[i].1, &drawn[j].1);
@@ -420,7 +418,10 @@ fn growth_does_not_mask_depletion_the_stage_falls_with_the_wood_that_carries_it(
         );
         prev = light;
     }
-    assert!(prev.abs() < 1e-9, "a stand with no wood still paints {prev}");
+    assert!(
+        prev.abs() < 1e-9,
+        "a stand with no wood still paints {prev}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -471,7 +472,10 @@ fn dead_wood_is_quieter_and_a_different_colour_from_the_living_structure_it_repl
     let b = differing(&dead, &bare);
     assert_eq!(a, b, "the dead stand is not the living stand's shape");
     // Quieter, by the documented factor's worth.
-    let (lit, lost) = (painted(&stand(7, cell, w, 0.0, 0.0), &bare), painted(&stand(7, cell, 0.0, 0.0, w), &bare));
+    let (lit, lost) = (
+        painted(&stand(7, cell, w, 0.0, 0.0), &bare),
+        painted(&stand(7, cell, 0.0, 0.0, w), &bare),
+    );
     assert!(
         lost < lit,
         "dead wood ({lost}) is not quieter than living structure ({lit})"
@@ -487,7 +491,10 @@ fn dead_wood_is_quieter_and_a_different_colour_from_the_living_structure_it_repl
         "the dead tone is not much less saturated than the living one: {gone:?} vs {alive:?}"
     );
     assert!(gone[2] > gone[0], "the dead tone is not cool: {gone:?}");
-    assert!(alive[0] > alive[2], "the living tone is not warm: {alive:?}");
+    assert!(
+        alive[0] > alive[2],
+        "the living tone is not warm: {alive:?}"
+    );
     assert_eq!(
         dead_wood_density(&stand(7, cell, 0.0, 0.0, w), cell.index()),
         wood_fraction(w, W_MAX),
@@ -690,7 +697,9 @@ fn the_structural_read_does_not_disturb_the_soil_or_the_water_band() {
     // litter draws nothing; the same cell with litter draws its litter plant.
     let soil = CellId::all(Topology::Cube, Scale::ONE)
         .find(|&c| {
-            band_of(c) == Band::Soil && rank_cap_of(c) == 2 && (4..=11).contains(&c.cx(Topology::Cube, Scale::ONE))
+            band_of(c) == Band::Soil
+                && rank_cap_of(c) == 2
+                && (4..=11).contains(&c.cx(Topology::Cube, Scale::ONE))
         })
         .expect("a rank-2 soil slot");
     let bare = snapped(&empty_view(7));
@@ -729,7 +738,11 @@ fn the_structural_read_does_not_disturb_the_soil_or_the_water_band() {
 /// and whose tile stays well inside one face.
 fn soil_pilot() -> CellId {
     CellId::all(Topology::Cube, Scale::ONE)
-        .find(|&c| band_of(c) == Band::Soil && rank_cap_of(c) == 2 && (4..=11).contains(&c.cx(Topology::Cube, Scale::ONE)))
+        .find(|&c| {
+            band_of(c) == Band::Soil
+                && rank_cap_of(c) == 2
+                && (4..=11).contains(&c.cx(Topology::Cube, Scale::ONE))
+        })
         .expect("a rank-2 soil slot away from the edges")
 }
 
@@ -880,11 +893,21 @@ fn the_soil_mark_is_pairwise_distinct_from_litter_alone_and_from_empty_ground() 
         v.dead_wood[i] = wd;
         v
     };
-    let names = ["empty", "litter only", "dead wood only", "litter and dead wood"];
-    let images: Vec<Canvas> = [(0.0, 0.0), (litter, 0.0), (0.0, BRIGHT.1), (litter, BRIGHT.1)]
-        .into_iter()
-        .map(|(d, wd)| snapped(&view(d, wd)))
-        .collect();
+    let names = [
+        "empty",
+        "litter only",
+        "dead wood only",
+        "litter and dead wood",
+    ];
+    let images: Vec<Canvas> = [
+        (0.0, 0.0),
+        (litter, 0.0),
+        (0.0, BRIGHT.1),
+        (litter, BRIGHT.1),
+    ]
+    .into_iter()
+    .map(|(d, wd)| snapped(&view(d, wd)))
+    .collect();
     for a in 0..images.len() {
         for b in (a + 1)..images.len() {
             assert!(
@@ -929,7 +952,11 @@ fn the_soil_mark_never_shows_under_a_living_stand_and_fades_in_as_one_dies() {
     // `the_structural_read_does_not_disturb_the_soil_or_the_water_band` true.
     for w in [BRIGHT.1, 2.0 * BRIGHT.1] {
         let v = stand(7, cell, w, BRIGHT.0, BRIGHT.1);
-        assert_eq!(soil_snag(&v, i), 0.0, "a living stand of W = {w} still marked");
+        assert_eq!(
+            soil_snag(&v, i),
+            0.0,
+            "a living stand of W = {w} still marked"
+        );
         assert!(
             differing(&snapped(&v), &bare).is_empty(),
             "a living stand of W = {w} drew a mark in the soil band"
@@ -972,7 +999,10 @@ fn a_dead_tall_column_stands_in_ash_at_a_height_from_its_dead_wood() {
     let heights_of = |v: &RenderView| {
         let mut p = ArtPresenter::new(pack());
         p.observe(v);
-        (p.tall_growth_of(index).target, p.tall_dead_growth_of(index).target)
+        (
+            p.tall_growth_of(index).target,
+            p.tall_dead_growth_of(index).target,
+        )
     };
 
     // Distinct from empty ground, and standing at the height the stock earns.
@@ -1006,7 +1036,10 @@ fn a_dead_tall_column_stands_in_ash_at_a_height_from_its_dead_wood() {
         "the dead column is the living column's image"
     );
     assert!(
-        !strip.is_empty() && strip.iter().any(|&(f, x, y)| dead_img.get(f, x, y) != bare.get(f, x, y)),
+        !strip.is_empty()
+            && strip
+                .iter()
+                .any(|&(f, x, y)| dead_img.get(f, x, y) != bare.get(f, x, y)),
         "the dead column painted nothing in its own strip"
     );
 
@@ -1051,7 +1084,10 @@ fn a_dead_tall_column_stands_in_ash_at_a_height_from_its_dead_wood() {
     // cool and much less saturated than the living column's over the same pixels.
     let ash = mean_delta(&dead_img, &short, &grew_dead);
     let alive = mean_delta(&living_img, &live_short, &grew_dead);
-    assert!(ash[2] > ash[0], "the dead column's light is not cool: {ash:?}");
+    assert!(
+        ash[2] > ash[0],
+        "the dead column's light is not cool: {ash:?}"
+    );
     assert!(
         saturation(ash) < 0.5 * saturation(alive),
         "the dead column ({ash:?}, {}) is not much less saturated than the living one \
@@ -1104,13 +1140,19 @@ fn the_foliage_shoulder_is_overridable_for_a_study_and_ships_unchanged() {
             foliage_ramp_at(f, 0.95),
             foliage_ramp_at(f, 1.0),
         );
-        assert!(a >= b && b >= c, "the ramp rose with the shoulder at f = {f}");
+        assert!(
+            a >= b && b >= c,
+            "the ramp rose with the shoulder at f = {f}"
+        );
     }
     assert!(foliage_ramp_at(0.9, 0.85) == 1.0 && foliage_ramp_at(0.9, 1.0) < 1.0);
     // A nonsense shoulder is a stripped stand rather than a panic or a NaN.
     for full in [0.0, -1.0, f64::NAN, f64::INFINITY] {
         let r = foliage_ramp_at(0.5, full);
-        assert!(r.is_finite() && (0.0..=1.0).contains(&r), "shoulder {full} gave {r}");
+        assert!(
+            r.is_finite() && (0.0..=1.0).contains(&r),
+            "shoulder {full} gave {r}"
+        );
     }
     // The override is a construction-time study hook, and at the shipped value it is the
     // shipped image, pixel for pixel.
@@ -1178,7 +1220,9 @@ fn the_shoulder_environment_variable_moves_the_viewing_session_and_nothing_else(
     assert_eq!(foliage_full_default(), FOLIAGE_FULL);
     let injected = foliage_full_from_env(Some("0.95")).0;
     assert_eq!(
-        ArtPresenter::new(pack()).with_foliage_full(injected).foliage_full(),
+        ArtPresenter::new(pack())
+            .with_foliage_full(injected)
+            .foliage_full(),
         0.95,
         "the constructor did not honour a value from the variable's own code path"
     );

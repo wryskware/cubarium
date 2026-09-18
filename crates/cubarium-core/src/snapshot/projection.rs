@@ -166,21 +166,8 @@ pub fn first_difference(a: &CubeProjection, b: &CubeProjection) -> Option<&'stat
         };
     }
     check_config!(
-        seed,
-        producer,
-        plant,
-        detritus,
-        nutrient,
-        habitat,
-        weather,
-        water,
-        fruit,
-        organism,
-        drives,
-        founders,
-        mutation,
-        capacity,
-        mechanisms,
+        seed, producer, plant, detritus, nutrient, habitat, weather, water, fruit, organism,
+        drives, founders, mutation, capacity, mechanisms,
     );
     check!(
         tick,

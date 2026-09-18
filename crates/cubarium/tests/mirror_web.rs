@@ -11,9 +11,9 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream, UdpSocket};
 use std::time::Duration;
 
-use cube_proto::{FRAME_BYTES, Face, Format, Frame, HEADER_BYTES, decode};
 use cubarium::sink::web::FRAME_BODY_BYTES;
 use cubarium::sink::{FanOutSink, FrameSink, Output, ShimSink, WebSink};
+use cube_proto::{FRAME_BYTES, Face, Format, Frame, HEADER_BYTES, decode};
 
 /// A frame whose bytes are unique per index, touching all five faces. Same shape as the
 /// fixture in `shim_sink.rs`, so a byte comparison here means something.
@@ -30,7 +30,11 @@ fn distinctive(i: u8) -> Frame {
 fn get(addr: SocketAddr, path: &str) -> Vec<u8> {
     let mut s = TcpStream::connect(addr).expect("connecting to the mirrored viewer");
     s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-    write!(s, "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").unwrap();
+    write!(
+        s,
+        "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
     s.flush().unwrap();
     let mut raw = Vec::new();
     s.read_to_end(&mut raw).expect("reading the response");
@@ -44,7 +48,9 @@ fn get(addr: SocketAddr, path: &str) -> Vec<u8> {
 #[test]
 fn the_shim_and_the_viewer_receive_the_identical_frame_bytes() {
     let server = UdpSocket::bind("127.0.0.1:0").expect("binding the test receiver");
-    server.set_read_timeout(Some(Duration::from_secs(5))).expect("setting a read timeout");
+    server
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .expect("setting a read timeout");
     let shim_addr = server.local_addr().expect("receiver address");
 
     let web = WebSink::new(0).expect("binding an ephemeral viewer port");
@@ -58,7 +64,8 @@ fn the_shim_and_the_viewer_receive_the_identical_frame_bytes() {
     let mut rx = vec![0u8; HEADER_BYTES + FRAME_BYTES + 64];
     for i in 0..5u8 {
         let frame = distinctive(i);
-        fan.submit(Output::Cube(&frame)).expect("submit never fails");
+        fan.submit(Output::Cube(&frame))
+            .expect("submit never fails");
 
         // Receive before the next submit, so the shim's newest-frame mailbox has no
         // chance to coalesce and every submitted frame reaches the wire.
@@ -77,8 +84,16 @@ fn the_shim_and_the_viewer_receive_the_identical_frame_bytes() {
 
         // The three-way identity this flag exists for: what the cube gets, what the
         // browser gets, and what the host encoded are one and the same bytes.
-        assert_eq!(payload, &body[8..], "frame {i}: the shim and the viewer disagree");
-        assert_eq!(payload, frame.as_bytes().as_slice(), "frame {i}: the shim altered the frame");
+        assert_eq!(
+            payload,
+            &body[8..],
+            "frame {i}: the shim and the viewer disagree"
+        );
+        assert_eq!(
+            payload,
+            frame.as_bytes().as_slice(),
+            "frame {i}: the shim altered the frame"
+        );
         assert_eq!(
             &body[8..],
             frame.as_bytes().as_slice(),
@@ -105,7 +120,10 @@ fn the_world_tick_reaches_the_mirrored_viewers_status_route() {
         serde_json::from_slice(&body).expect("the status route answers JSON");
     assert_eq!(status["world_tick"], 4242, "{status}");
     // The viewer describes the host, never the other way around.
-    assert_eq!(status["source"]["pid"], serde_json::Value::from(std::process::id()));
+    assert_eq!(
+        status["source"]["pid"],
+        serde_json::Value::from(std::process::id())
+    );
 
     fan.finish().expect("clean shutdown");
 }
@@ -115,7 +133,9 @@ fn mirroring_a_shim_run_renders_frames_and_changes_nothing_about_the_world() {
     // A receiver that is drained, so the shim worker reports no errors and the kernel
     // buffer cannot fill during the run.
     let server = UdpSocket::bind("127.0.0.1:0").expect("binding the test receiver");
-    server.set_read_timeout(Some(Duration::from_millis(200))).unwrap();
+    server
+        .set_read_timeout(Some(Duration::from_millis(200)))
+        .unwrap();
     let shim_addr = server.local_addr().unwrap().to_string();
     let draining = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
     let flag = std::sync::Arc::clone(&draining);
@@ -128,23 +148,48 @@ fn mirroring_a_shim_run_renders_frames_and_changes_nothing_about_the_world() {
 
     let mirrored_state = support::Scratch::new("mirror-web-mirrored");
     let mirrored = support::run(&[
-        "--sink", "shim", "--addr", &shim_addr, "--mirror-web", "--web-port", "0",
-        "--speed", "20", "--seconds", "10", "--fresh", "--seed", "5",
-        "--state", mirrored_state.path().to_str().unwrap(),
+        "--sink",
+        "shim",
+        "--addr",
+        &shim_addr,
+        "--mirror-web",
+        "--web-port",
+        "0",
+        "--speed",
+        "20",
+        "--seconds",
+        "10",
+        "--fresh",
+        "--seed",
+        "5",
+        "--state",
+        mirrored_state.path().to_str().unwrap(),
     ]);
 
     draining.store(false, std::sync::atomic::Ordering::Relaxed);
     drain.join().expect("the drain thread");
 
-    assert!(mirrored.frames > 0, "a mirrored run must have rendered: {mirrored:?}");
+    assert!(
+        mirrored.frames > 0,
+        "a mirrored run must have rendered: {mirrored:?}"
+    );
     assert_eq!(mirrored.final_tick, 200, "10 simulated seconds at 20 Hz");
 
     // The same world, run headless with no rendering at all, must end in the same state:
     // observing is not participating, and mirroring adds no second world.
     let headless_state = support::Scratch::new("mirror-web-headless");
     let headless = support::run(&[
-        "--sink", "none", "--speed", "0", "--seconds", "10", "--fresh", "--seed", "5",
-        "--state", headless_state.path().to_str().unwrap(),
+        "--sink",
+        "none",
+        "--speed",
+        "0",
+        "--seconds",
+        "10",
+        "--fresh",
+        "--seed",
+        "5",
+        "--state",
+        headless_state.path().to_str().unwrap(),
     ]);
     assert_eq!(headless.frames, 0, "a headless run renders nothing");
     assert_eq!(

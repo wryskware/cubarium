@@ -168,8 +168,16 @@ impl Topology {
         match self {
             Topology::Cube => face.neighbor(edge),
             Topology::Ring { .. } => match edge {
-                Edge::Right => Some(Seam { face: Face::Front, edge: Edge::Left, reversed: false }),
-                Edge::Left => Some(Seam { face: Face::Front, edge: Edge::Right, reversed: false }),
+                Edge::Right => Some(Seam {
+                    face: Face::Front,
+                    edge: Edge::Left,
+                    reversed: false,
+                }),
+                Edge::Left => Some(Seam {
+                    face: Face::Front,
+                    edge: Edge::Right,
+                    reversed: false,
+                }),
                 Edge::Top | Edge::Bottom => None,
             },
         }
@@ -200,9 +208,7 @@ impl Topology {
     pub fn max_local_radius(self) -> f64 {
         match self {
             Topology::Cube => crate::MAX_LOCAL_RADIUS,
-            Topology::Ring { w, h } => {
-                (f64::from(h)).min(f64::from(w) - 2.0 * CELL_PIXELS) / 2.0
-            }
+            Topology::Ring { w, h } => (f64::from(h)).min(f64::from(w) - 2.0 * CELL_PIXELS) / 2.0,
         }
     }
 
@@ -210,7 +216,10 @@ impl Topology {
     #[inline]
     pub fn cells(self, scale: Scale, face: Face) -> (u16, u16) {
         match self {
-            Topology::Cube => (crate::CELLS_PER_FACE_EDGE as u16, crate::CELLS_PER_FACE_EDGE as u16),
+            Topology::Cube => (
+                crate::CELLS_PER_FACE_EDGE as u16,
+                crate::CELLS_PER_FACE_EDGE as u16,
+            ),
             Topology::Ring { .. } => {
                 let (w, h) = self.extent(face);
                 let cp = scale.cell_pixels();
@@ -359,14 +368,27 @@ impl Topology {
                 let cp = scale.cell_pixels();
                 let (wf, hf) = (f64::from(w), f64::from(h));
                 if wf % cp != 0.0 || hf % cp != 0.0 {
-                    return Err(TopologyError::ExtentNotCellMultiple { w, h, cell_pixels: cp });
+                    return Err(TopologyError::ExtentNotCellMultiple {
+                        w,
+                        h,
+                        cell_pixels: cp,
+                    });
                 }
                 // Counted in f64 before any narrowing cast, so a world too large to index
                 // cannot hide behind a saturating `as u16`.
                 let wanted = (wf / cp) * (hf / cp);
                 if wanted.is_nan() || wanted > f64::from(u16::MAX) {
-                    let cells = if wanted.is_finite() { wanted as usize } else { usize::MAX };
-                    return Err(TopologyError::TooManyCells { cells, w, h, cell_pixels: cp });
+                    let cells = if wanted.is_finite() {
+                        wanted as usize
+                    } else {
+                        usize::MAX
+                    };
+                    return Err(TopologyError::TooManyCells {
+                        cells,
+                        w,
+                        h,
+                        cell_pixels: cp,
+                    });
                 }
                 // Two images of the chart, `2w` apart, must be the only ones that can ever
                 // lie within a query radius of an observer.
@@ -402,7 +424,12 @@ pub enum TopologyError {
     /// A ring whose sides are not whole numbers of cells.
     ExtentNotCellMultiple { w: u16, h: u16, cell_pixels: f64 },
     /// More cells than a `CellId`'s `u16` can index.
-    TooManyCells { cells: usize, w: u16, h: u16, cell_pixels: f64 },
+    TooManyCells {
+        cells: usize,
+        w: u16,
+        h: u16,
+        cell_pixels: f64,
+    },
     /// A ring narrow enough that a third image of the chart could be the nearest one.
     RingTooNarrow { w: u16, needed: f64 },
     /// A stamp budget larger than the largest query radius the topology accepts.
@@ -425,7 +452,12 @@ impl std::fmt::Display for TopologyError {
                 f,
                 "ring {w}x{h} is not a whole number of {cell_pixels}-pixel cells"
             ),
-            TopologyError::TooManyCells { cells, w, h, cell_pixels } => write!(
+            TopologyError::TooManyCells {
+                cells,
+                w,
+                h,
+                cell_pixels,
+            } => write!(
                 f,
                 "ring {w}x{h} at {cell_pixels} pixels per cell wants {cells} cells, over the \
                  {} a CellId can index",
@@ -527,7 +559,10 @@ mod tests {
         let bottom = SurfacePoint::new(Face::Front, 17.0, 180.0);
         assert_eq!(RING1.height(&top), 1.0);
         assert_eq!(RING1.height(&bottom), -1.0);
-        assert_eq!(RING1.height(&SurfacePoint::new(Face::Front, 17.0, 90.0)), 0.0);
+        assert_eq!(
+            RING1.height(&SurfacePoint::new(Face::Front, 17.0, 90.0)),
+            0.0
+        );
         // height does not vary along the wrap; embed does.
         for u in [0.0, 80.0, 160.0, 240.0] {
             assert_eq!(RING1.height(&SurfacePoint::new(Face::Front, u, 45.0)), 0.5);
@@ -562,7 +597,10 @@ mod tests {
             Err(TopologyError::TooManyCells { cells: 129_600, .. })
         ));
         // At S = 6 the same raster is 320x180 cells = 57,600, which fits.
-        assert_eq!(Topology::Ring { w: 1920, h: 1080 }.validate(Scale::new(6.0)), Ok(()));
+        assert_eq!(
+            Topology::Ring { w: 1920, h: 1080 }.validate(Scale::new(6.0)),
+            Ok(())
+        );
         // Too narrow for two images.
         assert!(matches!(
             Topology::Ring { w: 8, h: 180 }.validate(Scale::ONE),
@@ -583,7 +621,9 @@ mod tests {
         assert_eq!(RING1.max_local_radius(), 90.0);
         assert_eq!(RING2.max_local_radius(), 180.0);
         for (topo, scale) in [(RING1, Scale::ONE), (RING2, S2)] {
-            let Topology::Ring { w, .. } = topo else { unreachable!() };
+            let Topology::Ring { w, .. } = topo else {
+                unreachable!()
+            };
             let r = topo.max_local_radius();
             assert!(scale.footprint_radius() <= r, "{topo:?}");
             assert!(f64::from(w) >= 2.0 * r + 2.0 * CELL_PIXELS, "{topo:?}");
@@ -595,11 +635,19 @@ mod tests {
         for topo in [RING1, RING2] {
             assert_eq!(
                 topo.neighbor(Face::Front, Edge::Right),
-                Some(Seam { face: Face::Front, edge: Edge::Left, reversed: false })
+                Some(Seam {
+                    face: Face::Front,
+                    edge: Edge::Left,
+                    reversed: false
+                })
             );
             assert_eq!(
                 topo.neighbor(Face::Front, Edge::Left),
-                Some(Seam { face: Face::Front, edge: Edge::Right, reversed: false })
+                Some(Seam {
+                    face: Face::Front,
+                    edge: Edge::Right,
+                    reversed: false
+                })
             );
             assert_eq!(topo.neighbor(Face::Front, Edge::Top), None);
             assert_eq!(topo.neighbor(Face::Front, Edge::Bottom), None);

@@ -5,11 +5,11 @@
 
 mod common;
 
-use cubarium_surface::{Scale, Topology};
 use common::total_material;
 use cubarium_core::organism::Mode;
 use cubarium_core::{World, WorldConfig};
 use cubarium_surface::{CellId, Face, Vec2, cell_of};
+use cubarium_surface::{Scale, Topology};
 
 /// The contested cell: Front, cell column 10, row 10.
 fn arena() -> CellId {
@@ -80,10 +80,23 @@ fn contested_producer_is_split_in_equal_proportion() {
     world.step();
     let material_after = total_material(&world);
 
-    let gains: Vec<f64> = world.state.organisms.iter().map(|(_, o)| o.reserve).collect();
-    assert_eq!(gains.len(), 3, "the three founders must all survive the tick");
+    let gains: Vec<f64> = world
+        .state
+        .organisms
+        .iter()
+        .map(|(_, o)| o.reserve)
+        .collect();
+    assert_eq!(
+        gains.len(),
+        3,
+        "the three founders must all survive the tick"
+    );
     for (_, o) in world.state.organisms.iter() {
-        assert_eq!(o.mode, Mode::Feeding, "an organism standing on food is not Feeding");
+        assert_eq!(
+            o.mode,
+            Mode::Feeding,
+            "an organism standing on food is not Feeding"
+        );
         assert_eq!(
             cell_of(Topology::Cube, Scale::ONE, &o.pos),
             arena(),
@@ -170,7 +183,12 @@ fn a_full_organism_requests_nothing() {
 
     world.step();
 
-    let (_, organism) = world.state.organisms.iter().next().expect("the founder survives");
+    let (_, organism) = world
+        .state
+        .organisms
+        .iter()
+        .next()
+        .expect("the founder survives");
     assert_eq!(
         organism.mode,
         Mode::Feeding,

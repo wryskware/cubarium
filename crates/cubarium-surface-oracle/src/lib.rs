@@ -185,12 +185,18 @@ impl FaceSquare {
     /// Chart coordinates of a 3D point assumed to lie in this square's plane.
     pub fn chart(&self, p: P3) -> (f64, f64) {
         let w = sub(p, self.origin);
-        (dot(w, self.du) / dot(self.du, self.du), dot(w, self.dv) / dot(self.dv, self.dv))
+        (
+            dot(w, self.du) / dot(self.du, self.du),
+            dot(w, self.dv) / dot(self.dv, self.dv),
+        )
     }
 
     /// Chart components, in pixels, of a 3D vector lying in this square's plane.
     pub fn chart_dir(&self, d: P3) -> (f64, f64) {
-        (dot(d, self.du) / dot(self.du, self.du), dot(d, self.dv) / dot(self.dv, self.dv))
+        (
+            dot(d, self.du) / dot(self.du, self.du),
+            dot(d, self.dv) / dot(self.dv, self.dv),
+        )
     }
 
     /// A chart vector expressed in 3D (unit-cube units).
@@ -282,13 +288,20 @@ pub fn sweep(face: Face, u: f64, v: f64, du: f64, dv: f64, eps: f64) -> Sweep {
     // The heading is carried separately so it survives the remaining displacement
     // reaching exactly zero on a boundary.
     let len = norm(d);
-    let mut dir = if len > 0.0 { scale(d, 1.0 / len) } else { [0.0; 3] };
+    let mut dir = if len > 0.0 {
+        scale(d, 1.0 / len)
+    } else {
+        [0.0; 3]
+    };
     let mut faces = vec![face];
     let mut reflections = 0u32;
     let mut ties = 0u32;
 
     for event in 0..=256 {
-        assert!(event < 256, "oracle sweep did not terminate in 256 boundary events");
+        assert!(
+            event < 256,
+            "oracle sweep did not terminate in 256 boundary events"
+        );
         let (cu, cv) = sq.chart(p);
         let (ddu, ddv) = sq.chart_dir(d);
         let step = (ddu * ddu + ddv * ddv).sqrt();
@@ -507,11 +520,7 @@ pub fn geodesic(a: (Face, f64, f64), b: (Face, f64, f64), max: f64) -> Option<Ge
 
 /// The straight segment `p0 -> p1` must cross each listed edge image, in order, at
 /// increasing parameters within `[0, 1]`, and within the edge segment itself.
-fn segment_crosses_in_order(
-    p0: (f64, f64),
-    p1: (f64, f64),
-    edges: &[ChartEdge],
-) -> bool {
+fn segment_crosses_in_order(p0: (f64, f64), p1: (f64, f64), edges: &[ChartEdge]) -> bool {
     let dx = p1.0 - p0.0;
     let dy = p1.1 - p0.1;
     let len = (dx * dx + dy * dy).sqrt();
@@ -579,7 +588,10 @@ mod tests {
             assert!(close(dot(sq.du, sq.dv), 0.0, 1e-18));
             assert!(close(norm(sq.normal), 1.0, 1e-15));
             let center = sq.embed(32.0, 32.0);
-            assert!(dot(sq.normal, center) > 0.0, "{face:?} normal points inward");
+            assert!(
+                dot(sq.normal, center) > 0.0,
+                "{face:?} normal points inward"
+            );
             // The embedding must reproduce pixel_direction at every pixel center.
             for &(x, y) in &[(0u8, 0u8), (63, 0), (0, 63), (63, 63), (17, 42)] {
                 let want = pixel_direction(face, x, y);
@@ -612,12 +624,30 @@ mod tests {
         // Hand-derived spot checks, read straight off the unit cube rather than off any
         // adjacency table: Front's top edge and Top's bottom edge are both the segment
         // (-1,1,1)-(1,1,1); Right's top edge and Top's right edge are both (1,1,1)-(1,1,-1).
-        assert_eq!(shared_edge(Face::Front, Edge::Top), Some((Face::Top, Edge::Bottom)));
-        assert_eq!(shared_edge(Face::Right, Edge::Top), Some((Face::Top, Edge::Right)));
-        assert_eq!(shared_edge(Face::Back, Edge::Top), Some((Face::Top, Edge::Top)));
-        assert_eq!(shared_edge(Face::Left, Edge::Top), Some((Face::Top, Edge::Left)));
-        assert_eq!(shared_edge(Face::Front, Edge::Right), Some((Face::Right, Edge::Left)));
-        assert_eq!(shared_edge(Face::Back, Edge::Right), Some((Face::Left, Edge::Left)));
+        assert_eq!(
+            shared_edge(Face::Front, Edge::Top),
+            Some((Face::Top, Edge::Bottom))
+        );
+        assert_eq!(
+            shared_edge(Face::Right, Edge::Top),
+            Some((Face::Top, Edge::Right))
+        );
+        assert_eq!(
+            shared_edge(Face::Back, Edge::Top),
+            Some((Face::Top, Edge::Top))
+        );
+        assert_eq!(
+            shared_edge(Face::Left, Edge::Top),
+            Some((Face::Top, Edge::Left))
+        );
+        assert_eq!(
+            shared_edge(Face::Front, Edge::Right),
+            Some((Face::Right, Edge::Left))
+        );
+        assert_eq!(
+            shared_edge(Face::Back, Edge::Right),
+            Some((Face::Left, Edge::Left))
+        );
     }
 
     #[test]
@@ -650,7 +680,9 @@ mod tests {
         // exactly what would break if the seam rotation were not rigid.
         for face in Face::ALL {
             for edge in Edge::ALL {
-                let Some(_) = shared_edge(face, edge) else { continue };
+                let Some(_) = shared_edge(face, edge) else {
+                    continue;
+                };
                 for t in [0.5f64, 17.3, 63.5] {
                     let (u, v, du, dv) = match edge {
                         Edge::Top => (t, 1.0, 0.0, -2.0),
@@ -692,7 +724,10 @@ mod tests {
             // vector is 32 pixels long in chart units.
             let sq = FaceSquare::of(face);
             let (tu, tv) = sq.chart_dir(s.tangent);
-            assert!(close(tu / 32.0, 0.0, 1e-12) && close(tv / 32.0, -1.0, 1e-12), "{tu} {tv}");
+            assert!(
+                close(tu / 32.0, 0.0, 1e-12) && close(tv / 32.0, -1.0, 1e-12),
+                "{tu} {tv}"
+            );
         }
     }
 
@@ -707,7 +742,10 @@ mod tests {
             for &((au, av), (bu, bv)) in &cases {
                 let want = ((bu - au).powi(2) + (bv - av).powi(2)).sqrt();
                 let g = geodesic((face, au, av), (face, bu, bv), 32.0).expect("in range");
-                assert!(close(g.distance, want, 1e-12), "{face:?}: {g:?} want {want}");
+                assert!(
+                    close(g.distance, want, 1e-12),
+                    "{face:?}: {g:?} want {want}"
+                );
                 assert_eq!(g.faces, vec![face]);
                 assert!(close(g.local.0, bu, 1e-12) && close(g.local.1, bv, 1e-12));
             }
@@ -722,7 +760,10 @@ mod tests {
         let g = geodesic((Face::Front, 60.0, 20.0), (Face::Right, 4.0, 20.0), 32.0).unwrap();
         assert!(close(g.distance, 8.0, 1e-12), "{g:?}");
         assert_eq!(g.faces, vec![Face::Front, Face::Right]);
-        assert!(close(g.local.0, 68.0, 1e-9) && close(g.local.1, 20.0, 1e-9), "{g:?}");
+        assert!(
+            close(g.local.0, 68.0, 1e-9) && close(g.local.1, 20.0, 1e-9),
+            "{g:?}"
+        );
 
         let g = geodesic((Face::Front, 60.0, 10.0), (Face::Right, 4.0, 30.0), 32.0).unwrap();
         assert!(close(g.distance, (64.0f64 + 400.0).sqrt(), 1e-12), "{g:?}");
@@ -730,7 +771,10 @@ mod tests {
         // Front/Top is flat too: Top (u, v) sits at Front (u, v - 64).
         let g = geodesic((Face::Front, 20.0, 3.0), (Face::Top, 20.0, 60.0), 32.0).unwrap();
         assert!(close(g.distance, 7.0, 1e-12), "{g:?}");
-        assert!(close(g.local.0, 20.0, 1e-9) && close(g.local.1, -4.0, 1e-9), "{g:?}");
+        assert!(
+            close(g.local.0, 20.0, 1e-9) && close(g.local.1, -4.0, 1e-9),
+            "{g:?}"
+        );
 
         // Back/Left, hand-checked the same way: Left (u, v) sits at Back (64 + u, v).
         let g = geodesic((Face::Back, 61.5, 40.0), (Face::Left, 2.5, 40.0), 32.0).unwrap();
@@ -749,7 +793,10 @@ mod tests {
         let g = geodesic((Face::Top, 60.0, 50.0), (Face::Right, 10.0, 2.0), 32.0).unwrap();
         let want = ((66.0f64 - 60.0).powi(2) + (54.0f64 - 50.0).powi(2)).sqrt();
         assert!(close(g.distance, want, 1e-9), "{g:?} want {want}");
-        assert!(close(g.local.0, 66.0, 1e-9) && close(g.local.1, 54.0, 1e-9), "{g:?}");
+        assert!(
+            close(g.local.0, 66.0, 1e-9) && close(g.local.1, 54.0, 1e-9),
+            "{g:?}"
+        );
     }
 
     #[test]
@@ -769,14 +816,21 @@ mod tests {
             let b = (fb, next() * 64.0, next() * 64.0);
             let c = chord(a, b);
             if let Some(g) = geodesic(a, b, 32.0) {
-                assert!(c <= g.distance + 1e-9, "chord {c} > geodesic {} for {a:?} {b:?}", g.distance);
+                assert!(
+                    c <= g.distance + 1e-9,
+                    "chord {c} > geodesic {} for {a:?} {b:?}",
+                    g.distance
+                );
                 assert!(g.distance.is_finite() && g.distance >= 0.0);
                 checked += 1;
             } else {
                 // Unreachable within 32 px implies the chord is not a counterexample
                 // either: a chord shorter than 32 px with no geodesic would mean the
                 // enumeration missed a path.
-                assert!(c > 32.0 - 1e-9 || fa != fb, "no geodesic for a near pair {a:?} {b:?}");
+                assert!(
+                    c > 32.0 - 1e-9 || fa != fb,
+                    "no geodesic for a near pair {a:?} {b:?}"
+                );
             }
         }
         assert!(checked > 100, "only {checked} pairs were in range");

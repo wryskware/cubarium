@@ -46,8 +46,11 @@ pub fn linear_export_supported(gpu: &Gpu) -> Result<()> {
         .usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC)
         .push_next(&mut external);
     let mut props = vk::ImageFormatProperties2::default();
-    unsafe { gpu.instance.get_physical_device_image_format_properties2(gpu.pdev, &info, &mut props) }
-        .context("LINEAR + COLOR_ATTACHMENT + dma_buf is not supported on this device")
+    unsafe {
+        gpu.instance
+            .get_physical_device_image_format_properties2(gpu.pdev, &info, &mut props)
+    }
+    .context("LINEAR + COLOR_ATTACHMENT + dma_buf is not supported on this device")
 }
 
 /// Whether the same image can carry a `B8G8R8A8_SRGB` view, which is what lets the
@@ -76,14 +79,23 @@ pub fn srgb_view_supported(gpu: &Gpu) -> bool {
 /// `shader_encode` selects the fallback: `true` makes a plain UNORM image whose view is
 /// UNORM too (the present shader encodes), `false` makes a mutable-format image with an
 /// `_SRGB` view.
-pub fn export_linear(gpu: &Gpu, width: u32, height: u32, shader_encode: bool) -> Result<LinearImage> {
+pub fn export_linear(
+    gpu: &Gpu,
+    width: u32,
+    height: u32,
+    shader_encode: bool,
+) -> Result<LinearImage> {
     let d = &gpu.device;
     let mut external = vk::ExternalMemoryImageCreateInfo::default()
         .handle_types(vk::ExternalMemoryHandleTypeFlags::DMA_BUF_EXT);
     let mut create = vk::ImageCreateInfo::default()
         .image_type(vk::ImageType::TYPE_2D)
         .format(FORMAT)
-        .extent(vk::Extent3D { width, height, depth: 1 })
+        .extent(vk::Extent3D {
+            width,
+            height,
+            depth: 1,
+        })
         .mip_levels(1)
         .array_layers(1)
         .samples(vk::SampleCountFlags::TYPE_1)
@@ -104,9 +116,10 @@ pub fn export_linear(gpu: &Gpu, width: u32, height: u32, shader_encode: bool) ->
         d.allocate_memory(
             &vk::MemoryAllocateInfo::default()
                 .allocation_size(requirements.size)
-                .memory_type_index(
-                    gpu.memory_type(requirements.memory_type_bits, vk::MemoryPropertyFlags::DEVICE_LOCAL)?,
-                )
+                .memory_type_index(gpu.memory_type(
+                    requirements.memory_type_bits,
+                    vk::MemoryPropertyFlags::DEVICE_LOCAL,
+                )?)
                 .push_next(&mut dedicated)
                 .push_next(&mut export),
             None,
@@ -123,7 +136,11 @@ pub fn export_linear(gpu: &Gpu, width: u32, height: u32, shader_encode: bool) ->
                 .array_layer(0),
         )
     };
-    let view_format = if shader_encode { FORMAT } else { vk::Format::B8G8R8A8_SRGB };
+    let view_format = if shader_encode {
+        FORMAT
+    } else {
+        vk::Format::B8G8R8A8_SRGB
+    };
     let view = gpu.view(image, view_format)?;
     let fd_device = ash::khr::external_memory_fd::Device::new(&gpu.instance, d);
     let raw = unsafe {
@@ -162,7 +179,13 @@ pub fn read_back(
     )?;
     let d = &gpu.device;
     gpu.one_shot(pool, |cb| unsafe {
-        crate::vk::barrier(d, cb, image.image, layout, vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
+        crate::vk::barrier(
+            d,
+            cb,
+            image.image,
+            layout,
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+        );
         d.cmd_copy_image_to_buffer(
             cb,
             image.image,
@@ -176,9 +199,19 @@ pub fn read_back(
                         .aspect_mask(vk::ImageAspectFlags::COLOR)
                         .layer_count(1),
                 )
-                .image_extent(vk::Extent3D { width, height, depth: 1 })],
+                .image_extent(vk::Extent3D {
+                    width,
+                    height,
+                    depth: 1,
+                })],
         );
-        crate::vk::barrier(d, cb, image.image, vk::ImageLayout::TRANSFER_SRC_OPTIMAL, layout);
+        crate::vk::barrier(
+            d,
+            cb,
+            image.image,
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            layout,
+        );
     })?;
     let bytes = unsafe { host.bytes() };
     let mut rgba = vec![0u8; (width * height * 4) as usize];

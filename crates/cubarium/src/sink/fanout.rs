@@ -151,7 +151,10 @@ mod tests {
     impl FrameSink for Probe {
         fn submit(&mut self, out: Output<'_>) -> Result<()> {
             self.seen.fetch_add(1, Ordering::Relaxed);
-            self.got.lock().unwrap().push(out.frame().expect("a cube frame").clone());
+            self.got
+                .lock()
+                .unwrap()
+                .push(out.frame().expect("a cube frame").clone());
             match self.fail {
                 Some(m) => Err(anyhow::anyhow!("{m}")),
                 None => Ok(()),
@@ -195,8 +198,15 @@ mod tests {
         assert_eq!(ga.len(), 4);
         assert_eq!(gb.len(), 4);
         for (i, (x, y)) in ga.iter().zip(gb.iter()).enumerate() {
-            assert_eq!(x.as_bytes().as_slice(), frame(i as u8).as_bytes().as_slice());
-            assert_eq!(x.as_bytes().as_slice(), y.as_bytes().as_slice(), "frame {i} differs");
+            assert_eq!(
+                x.as_bytes().as_slice(),
+                frame(i as u8).as_bytes().as_slice()
+            );
+            assert_eq!(
+                x.as_bytes().as_slice(),
+                y.as_bytes().as_slice(),
+                "frame {i} differs"
+            );
         }
     }
 
@@ -212,8 +222,16 @@ mod tests {
 
         let err = fan.submit(Output::Cube(&frame(1))).unwrap_err().to_string();
         assert_eq!(err, "first sink is down", "the first error propagates");
-        assert_eq!(seen_b.load(Ordering::Relaxed), 1, "the second child was still tried");
-        assert_eq!(seen_c.load(Ordering::Relaxed), 1, "the third child was still tried");
+        assert_eq!(
+            seen_b.load(Ordering::Relaxed),
+            1,
+            "the second child was still tried"
+        );
+        assert_eq!(
+            seen_c.load(Ordering::Relaxed),
+            1,
+            "the third child was still tried"
+        );
 
         let err = fan.finish().unwrap_err().to_string();
         assert_eq!(err, "finish first sink is down");

@@ -55,7 +55,10 @@ pub const OFF_B_O: usize = OFF_W_O + OUTPUT * HIDDEN;
 /// `theta` → weights. Exact: no scaling, no clipping, no reordering.
 pub fn unflatten(theta: &[f64]) -> Result<Gru32, String> {
     if theta.len() != PARAMS {
-        return Err(format!("parameter vector has {} values, expected {PARAMS}", theta.len()));
+        return Err(format!(
+            "parameter vector has {} values, expected {PARAMS}",
+            theta.len()
+        ));
     }
     Ok(Gru32 {
         w_i: theta[OFF_W_I..OFF_W_H].to_vec(),
@@ -159,7 +162,10 @@ mod tests {
         let theta = initial_center(20_260_915);
         let weights = unflatten(&theta).expect("shape");
         let back = flatten(&weights);
-        assert_eq!(theta, back, "flatten(unflatten(theta)) must be theta, value for value");
+        assert_eq!(
+            theta, back,
+            "flatten(unflatten(theta)) must be theta, value for value"
+        );
 
         // And the other direction, from a weight set whose every tensor is distinguishable.
         let mut w = Gru32::zeros();
@@ -197,8 +203,13 @@ mod tests {
         assert_eq!(a, b, "the centre is a pure function of the seed");
         assert_ne!(a, c);
         assert!(a.iter().all(|x| x.is_finite()));
-        let max_matrix = a[OFF_W_I..OFF_B_I].iter().fold(0.0f64, |m, x| m.max(x.abs()));
-        assert!(max_matrix < 1.0, "matrix weights should be small, saw {max_matrix}");
+        let max_matrix = a[OFF_W_I..OFF_B_I]
+            .iter()
+            .fold(0.0f64, |m, x| m.max(x.abs()));
+        assert!(
+            max_matrix < 1.0,
+            "matrix weights should be small, saw {max_matrix}"
+        );
         // Biases: zero everywhere except the update-gate rows.
         assert!(a[OFF_B_I..OFF_B_H].iter().all(|x| *x == 0.0));
         assert!(a[OFF_B_O..].iter().all(|x| *x == 0.0));
@@ -214,7 +225,10 @@ mod tests {
         for tau in RETENTION_TAUS {
             let b = retention_bias(tau);
             let z = 1.0 / (1.0 + (-b).exp());
-            assert!((z - (-1.0 / tau).exp()).abs() < 1e-12, "tau {tau} gives z {z}");
+            assert!(
+                (z - (-1.0 / tau).exp()).abs() < 1e-12,
+                "tau {tau} gives z {z}"
+            );
         }
     }
 

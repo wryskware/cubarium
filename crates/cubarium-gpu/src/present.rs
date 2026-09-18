@@ -71,7 +71,9 @@ impl PresentPass {
             .descriptor_count(1)];
         let pool = unsafe {
             d.create_descriptor_pool(
-                &vk::DescriptorPoolCreateInfo::default().max_sets(1).pool_sizes(&sizes),
+                &vk::DescriptorPoolCreateInfo::default()
+                    .max_sets(1)
+                    .pool_sizes(&sizes),
                 None,
             )
         }?;
@@ -108,7 +110,13 @@ impl PresentPass {
                 None,
             )
         }?;
-        Ok(PresentPass { set_layout, set, pool, pipeline_layout, passes: HashMap::new() })
+        Ok(PresentPass {
+            set_layout,
+            set,
+            pool,
+            pipeline_layout,
+            passes: HashMap::new(),
+        })
     }
 
     /// The render pass a target's framebuffers must be built against.
@@ -133,12 +141,8 @@ impl PresentPass {
             return Ok(*entry);
         }
         let d = &gpu.device;
-        let pass = crate::render::colour_pass(
-            d,
-            format,
-            vk::AttachmentLoadOp::DONT_CARE,
-            final_layout,
-        )?;
+        let pass =
+            crate::render::colour_pass(d, format, vk::AttachmentLoadOp::DONT_CARE, final_layout)?;
         let vs = gpu.shader(FULLSCREEN_VERT)?;
         let fs = gpu.shader(PRESENT_FRAG)?;
         let pipeline =

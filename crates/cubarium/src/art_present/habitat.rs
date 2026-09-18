@@ -1,7 +1,7 @@
 //! Plant placement, bands, species selection, and presentation timing.
 
-use cubarium_surface::{Scale, Topology};
 use super::*;
+use cubarium_surface::{Scale, Topology};
 
 // --- Plant constants ---------------------------------------------------------------
 //
@@ -388,7 +388,11 @@ impl ArtGeometry {
             Topology::Cube => CUBE_CANOPY_TOP,
             Topology::Ring { .. } => CANOPY_TOP,
         };
-        ArtGeometry { topology, scale, canopy_top }
+        ArtGeometry {
+            topology,
+            scale,
+            canopy_top,
+        }
     }
 
     /// This geometry with the canopy threshold moved, for a review session.
@@ -516,8 +520,12 @@ impl ArtGeometry {
     /// everywhere, so this is the constant `(0, −1)` and every ring plant is a stalk.
     pub fn up_of(self, cell: CellId) -> Option<Vec2> {
         let center = self.center_of(cell);
-        let du = self.topology.embed_tangent(self.scale, &center, Vec2::new(1.0, 0.0))[1];
-        let dv = self.topology.embed_tangent(self.scale, &center, Vec2::new(0.0, 1.0))[1];
+        let du = self
+            .topology
+            .embed_tangent(self.scale, &center, Vec2::new(1.0, 0.0))[1];
+        let dv = self
+            .topology
+            .embed_tangent(self.scale, &center, Vec2::new(0.0, 1.0))[1];
         Vec2::new(du, dv).normalized()
     }
 
@@ -538,9 +546,7 @@ impl ArtGeometry {
             .to_radians();
         let radial = self.is_radial(cell);
         let heading = match (radial, self.up_of(cell)) {
-            (false, Some(up)) => {
-                Vec2::from_screen_angle(stalk_heading(up).screen_angle() + jitter)
-            }
+            (false, Some(up)) => Vec2::from_screen_angle(stalk_heading(up).screen_angle() + jitter),
             _ => free,
         };
         let wind = hash.range(1.0 - WIND_SLOT_VARIATION, 1.0 + WIND_SLOT_VARIATION);
@@ -551,7 +557,14 @@ impl ArtGeometry {
         } else {
             0
         };
-        Slot { at, heading, pick, rank_cap, wind, radial }
+        Slot {
+            at,
+            heading,
+            pick,
+            rank_cap,
+            wind,
+            radial,
+        }
     }
 
     /// Where a cell's plant stands and which way it faces.
@@ -643,7 +656,8 @@ impl PixelTables {
                     let i = table.index(face, x, y);
                     let p = SurfacePoint::pixel_center(topology, face, x, y);
                     soil[i] = w_soil(topology.height(&p)) as f32;
-                    shimmer[i] = SplitMix64::new(WATER_SEED ^ geom.pixel_key(face, x, y)).next_f64()
+                    shimmer[i] = SplitMix64::new(WATER_SEED ^ geom.pixel_key(face, x, y))
+                        .next_f64()
                         * std::f64::consts::TAU;
                 }
             }

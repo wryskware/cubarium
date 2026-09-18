@@ -117,8 +117,12 @@ impl CareKind {
     }
 
     /// All three, in wire order.
-    pub const ALL: [CareKind; 4] =
-        [CareKind::Feed, CareKind::Rain, CareKind::Clean, CareKind::SpawnApex];
+    pub const ALL: [CareKind; 4] = [
+        CareKind::Feed,
+        CareKind::Rain,
+        CareKind::Clean,
+        CareKind::SpawnApex,
+    ];
 }
 
 /// A canonical surface point: which chart, and which pixel of it.
@@ -280,7 +284,10 @@ impl RowState {
     }
 
     fn is_terminal(self) -> bool {
-        matches!(self, RowState::Applied | RowState::Partial | RowState::Rejected | RowState::Failed)
+        matches!(
+            self,
+            RowState::Applied | RowState::Partial | RowState::Rejected | RowState::Failed
+        )
     }
 }
 
@@ -304,9 +311,7 @@ struct Row {
 
 impl Row {
     fn to_json(&self, duplicate: bool) -> String {
-        let number = |v: Option<u64>| {
-            v.map_or("null".to_string(), |n| n.to_string())
-        };
+        let number = |v: Option<u64>| v.map_or("null".to_string(), |n| n.to_string());
         let count = 1 + usize::from(self.second_target.is_some());
         format!(
             r#"{{"client":{},"request":{},"kind":"{}","target":{{"face":{},"u":{},"v":{}}},"count":{},"dose_permille":{},"seq":{},"apply_after_tick":{},"state":"{}","reason":{},"applied":{},"duplicate":{duplicate}}}"#,
@@ -376,7 +381,10 @@ impl RegisterOutcome {
 #[derive(Clone, Debug)]
 pub enum SubmitOutcome {
     /// Durably journaled at a boundary.
-    Accepted { seq: u64, apply_after_tick: u64 },
+    Accepted {
+        seq: u64,
+        apply_after_tick: u64,
+    },
     /// Still committing after [`ACCEPT_WAIT`]; the client reads its result from
     /// `/care/status`. Not a rejection and not an acceptance — the honest answer.
     Pending,
@@ -411,7 +419,10 @@ impl SubmitOutcome {
     /// The JSON body.
     pub fn body(&self) -> String {
         match self {
-            SubmitOutcome::Accepted { seq, apply_after_tick } => {
+            SubmitOutcome::Accepted {
+                seq,
+                apply_after_tick,
+            } => {
                 format!(r#"{{"seq":{seq},"apply_after_tick":{apply_after_tick}}}"#)
             }
             SubmitOutcome::Pending => r#"{"pending":true}"#.to_string(),
@@ -450,7 +461,9 @@ struct Inner {
 
 impl Inner {
     fn find(&mut self, client: &str, request: u64) -> Option<&mut Row> {
-        self.rows.iter_mut().find(|r| r.client == client && r.request == request)
+        self.rows
+            .iter_mut()
+            .find(|r| r.client == client && r.request == request)
     }
 
     fn find_seq(&mut self, seq: u64) -> Option<&mut Row> {
@@ -508,7 +521,10 @@ impl CareShared {
         inner.issued += 1;
         let client = format!("{}.{}", self.epoch, inner.issued);
         inner.clients.insert(client.clone(), ClientEntry::default());
-        RegisterOutcome::Registered { client, epoch: self.epoch.clone() }
+        RegisterOutcome::Registered {
+            client,
+            epoch: self.epoch.clone(),
+        }
     }
 
     /// [`CareShared::submit_dosed`] at the standard dose — what an omitted `dose_permille`
@@ -549,10 +565,22 @@ impl CareShared {
             return SubmitOutcome::Invalid("`count` must be 1 or 2");
         }
         let (target, second_target) = self.apex_targets(client, request, count);
-        self.submit_command(client, request, CareKind::SpawnApex, target, second_target, CareDose::STANDARD)
+        self.submit_command(
+            client,
+            request,
+            CareKind::SpawnApex,
+            target,
+            second_target,
+            CareDose::STANDARD,
+        )
     }
 
-    fn apex_targets(&self, client: &str, request: u64, count: u8) -> (CareTarget, Option<CareTarget>) {
+    fn apex_targets(
+        &self,
+        client: &str,
+        request: u64,
+        count: u8,
+    ) -> (CareTarget, Option<CareTarget>) {
         // Stable placement entropy: the explicit results are journaled, so replay never
         // regenerates them, while a retry of the same request keeps the same payload.
         let mut state = 0xcbf2_9ce4_8422_2325u64;
@@ -586,7 +614,9 @@ impl CareShared {
                 candidate.u = ((u64::from(candidate.u) + 1) % w) as u16;
             }
             Some(candidate)
-        } else { None };
+        } else {
+            None
+        };
         (first, second)
     }
 
@@ -630,7 +660,11 @@ impl CareShared {
         // The retained receipt answers a retry; a different payload under the same request
         // number is a genuine conflict and must not silently become a second command.
         if let Some(row) = inner.find(client, request) {
-            if row.kind == kind && row.target == target && row.second_target == second_target && row.dose == dose {
+            if row.kind == kind
+                && row.target == target
+                && row.second_target == second_target
+                && row.dose == dose
+            {
                 let receipt = row.to_json(true);
                 return SubmitOutcome::Duplicate(receipt);
             }
@@ -655,7 +689,14 @@ impl CareShared {
             return SubmitOutcome::Limited("cooldown");
         }
 
-        let prepared = Prepared { client: client.to_string(), request, kind, target, second_target, dose };
+        let prepared = Prepared {
+            client: client.to_string(),
+            request,
+            kind,
+            target,
+            second_target,
+            dose,
+        };
         match self.tx.try_send(prepared) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => return SubmitOutcome::Unavailable("intake full"),
@@ -695,9 +736,10 @@ impl CareShared {
                 Some(row) if row.state != RowState::Queued => {
                     return match (row.state, row.seq, row.apply_after_tick) {
                         (RowState::Failed, _, _) => SubmitOutcome::Unavailable("care failed"),
-                        (_, Some(seq), Some(boundary)) => {
-                            SubmitOutcome::Accepted { seq, apply_after_tick: boundary }
-                        }
+                        (_, Some(seq), Some(boundary)) => SubmitOutcome::Accepted {
+                            seq,
+                            apply_after_tick: boundary,
+                        },
                         _ => SubmitOutcome::Pending,
                     };
                 }
@@ -732,14 +774,21 @@ impl CareShared {
             .iter()
             .map(|kind| {
                 let left = inner.last_kind_tick[kind.index()]
-                    .map(|last| last.saturating_add(kind.cooldown_ticks()).saturating_sub(now))
+                    .map(|last| {
+                        last.saturating_add(kind.cooldown_ticks())
+                            .saturating_sub(now)
+                    })
                     .unwrap_or(0);
                 format!(r#""{}":{left}"#, kind.as_str())
             })
             .collect::<Vec<_>>()
             .join(",");
-        let receipts =
-            inner.rows.iter().map(|r| r.to_json(false)).collect::<Vec<_>>().join(",");
+        let receipts = inner
+            .rows
+            .iter()
+            .map(|r| r.to_json(false))
+            .collect::<Vec<_>>()
+            .join(",");
         let reason = match &inner.care {
             CareState::Failed(reason) => serde_json::Value::from(reason.as_str()).to_string(),
             _ => "null".to_string(),
@@ -747,7 +796,9 @@ impl CareShared {
         format!(
             r#"{{"enabled":true,"care":"{}","reason":{reason},"holding_at":{},"epoch":{},"world_tick":{now},"outstanding":{},"cooldowns":{{{cooldowns}}},"dose":{},"journal":{{"bytes":{},"limit":{},"outstanding":{}}},"receipts":[{receipts}]}}"#,
             inner.care.as_str(),
-            inner.holding_at.map_or("null".to_string(), |b| b.to_string()),
+            inner
+                .holding_at
+                .map_or("null".to_string(), |b| b.to_string()),
             serde_json::Value::from(self.epoch.as_str()),
             inner.outstanding,
             CareShared::DOSE_CAPABILITY_JSON,
@@ -1014,8 +1065,13 @@ pub enum JournalJob {
 /// the runner answer the client and keep stepping.
 #[derive(Debug)]
 pub enum JournalAck {
-    Accepted { commands: Vec<PlannedCommand>, result: Result<(), JournalError> },
-    Outcome { result: Result<(), JournalError> },
+    Accepted {
+        commands: Vec<PlannedCommand>,
+        result: Result<(), JournalError>,
+    },
+    Outcome {
+        result: Result<(), JournalError>,
+    },
 }
 
 /// The journal on its own thread, so a slow disk never runs inside the simulation loop.
@@ -1060,9 +1116,9 @@ impl JournalWorker {
                             let result = journal.append_accepted(&commands);
                             JournalAck::Accepted { commands, result }
                         }
-                        JournalJob::Outcome(records) => {
-                            JournalAck::Outcome { result: journal.append_outcomes(&records) }
-                        }
+                        JournalJob::Outcome(records) => JournalAck::Outcome {
+                            result: journal.append_outcomes(&records),
+                        },
                     };
                     if ack_tx.send(ack).is_err() {
                         break;
@@ -1071,7 +1127,12 @@ impl JournalWorker {
                 journal
             })
             .expect("spawning the care journal worker");
-        JournalWorker { jobs, acks, handle, status }
+        JournalWorker {
+            jobs,
+            acks,
+            handle,
+            status,
+        }
     }
 
     /// The size/debt view `/care/status` and the HTTP intake read.
@@ -1106,7 +1167,12 @@ impl JournalWorker {
     /// Stop the thread and take the journal back. Dropping the job channel is what asks
     /// the worker to finish; it drains whatever it was already given first.
     pub fn shutdown(self) -> Option<Journal> {
-        let JournalWorker { jobs, acks, handle, status: _ } = self;
+        let JournalWorker {
+            jobs,
+            acks,
+            handle,
+            status: _,
+        } = self;
         drop(jobs);
         let journal = handle.join().ok();
         drop(acks);
@@ -1123,16 +1189,60 @@ mod tests {
     }
 
     fn target() -> CareTarget {
-        CareTarget { face: 0, u: 10, v: 20 }
+        CareTarget {
+            face: 0,
+            u: 10,
+            v: 20,
+        }
     }
 
     #[test]
     fn a_target_outside_the_charts_is_refused_rather_than_clamped() {
-        assert!(CareTarget { face: 0, u: 0, v: 0 }.validate().is_ok());
-        assert!(CareTarget { face: 4, u: 63, v: 63 }.validate().is_ok());
-        assert!(CareTarget { face: 5, u: 0, v: 0 }.validate().is_err());
-        assert!(CareTarget { face: 0, u: 64, v: 0 }.validate().is_err());
-        assert!(CareTarget { face: 0, u: 0, v: 200 }.validate().is_err());
+        assert!(
+            CareTarget {
+                face: 0,
+                u: 0,
+                v: 0
+            }
+            .validate()
+            .is_ok()
+        );
+        assert!(
+            CareTarget {
+                face: 4,
+                u: 63,
+                v: 63
+            }
+            .validate()
+            .is_ok()
+        );
+        assert!(
+            CareTarget {
+                face: 5,
+                u: 0,
+                v: 0
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            CareTarget {
+                face: 0,
+                u: 64,
+                v: 0
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            CareTarget {
+                face: 0,
+                u: 0,
+                v: 200
+            }
+            .validate()
+            .is_err()
+        );
     }
 
     #[test]
@@ -1145,7 +1255,9 @@ mod tests {
     #[test]
     fn an_unregistered_identity_is_retired_and_never_registered_by_a_post() {
         let care = service();
-        let out = care.shared().submit("someone-elses-id", 1, CareKind::Feed, target());
+        let out = care
+            .shared()
+            .submit("someone-elses-id", 1, CareKind::Feed, target());
         assert!(matches!(out, SubmitOutcome::Conflict("retired")), "{out:?}");
         assert_eq!(out.http_status(), "409 Conflict");
         // And nothing was registered as a side effect.
@@ -1169,7 +1281,10 @@ mod tests {
         }
         assert_eq!(ids.len(), MAX_CLIENTS);
         let full = shared.register();
-        assert!(matches!(full, RegisterOutcome::Limited("too many clients")), "{full:?}");
+        assert!(
+            matches!(full, RegisterOutcome::Limited("too many clients")),
+            "{full:?}"
+        );
         assert_eq!(full.http_status(), "429 Too Many Requests");
     }
 
@@ -1192,19 +1307,37 @@ mod tests {
         let planned = wait_for_planned(&care, 1);
         care.commit_accepted(&planned);
         let first = waiter.join().unwrap();
-        assert!(matches!(first, SubmitOutcome::Accepted { seq: 1, apply_after_tick: 40 }), "{first:?}");
+        assert!(
+            matches!(
+                first,
+                SubmitOutcome::Accepted {
+                    seq: 1,
+                    apply_after_tick: 40
+                }
+            ),
+            "{first:?}"
+        );
 
         // The same identity and payload gets the retained receipt, with no second command.
         let again = shared.submit(&client, 1, CareKind::Feed, target());
-        let SubmitOutcome::Duplicate(receipt) = &again else { panic!("{again:?}") };
+        let SubmitOutcome::Duplicate(receipt) = &again else {
+            panic!("{again:?}")
+        };
         assert_eq!(again.http_status(), "200 OK");
         assert!(receipt.contains(r#""duplicate":true"#), "{receipt}");
         assert!(receipt.contains(r#""seq":1"#), "{receipt}");
 
         // A different payload under the same request number is a conflict.
-        let other = CareTarget { face: 2, u: 1, v: 1 };
+        let other = CareTarget {
+            face: 2,
+            u: 1,
+            v: 1,
+        };
         let clash = shared.submit(&client, 1, CareKind::Clean, other);
-        assert!(matches!(clash, SubmitOutcome::Conflict("conflict")), "{clash:?}");
+        assert!(
+            matches!(clash, SubmitOutcome::Conflict("conflict")),
+            "{clash:?}"
+        );
 
         // A request number at or below the high-water mark with no retained row is stale.
         care.record_outcome(1, "applied", "", serde_json::json!({}));
@@ -1212,7 +1345,10 @@ mod tests {
         inner.rows.clear();
         drop(inner);
         let stale = shared.submit(&client, 1, CareKind::Feed, target());
-        assert!(matches!(stale, SubmitOutcome::Conflict("stale")), "{stale:?}");
+        assert!(
+            matches!(stale, SubmitOutcome::Conflict("stale")),
+            "{stale:?}"
+        );
     }
 
     /// Drain the FIFO from the test thread, standing in for the runner's boundary.
@@ -1235,7 +1371,9 @@ mod tests {
     fn a_burst_past_the_outstanding_limit_is_429() {
         let care = service();
         let shared = care.shared();
-        let RegisterOutcome::Registered { client, .. } = shared.register() else { panic!() };
+        let RegisterOutcome::Registered { client, .. } = shared.register() else {
+            panic!()
+        };
         // Four commands of different kinds would hit the per-kind cooldowns, so the burst
         // uses one kind and the cooldown is disabled by advancing the published tick.
         let mut request = 0u64;
@@ -1275,7 +1413,9 @@ mod tests {
     fn a_cooldown_inside_the_window_is_429_and_outside_it_is_not() {
         let care = service();
         let shared = care.shared();
-        let RegisterOutcome::Registered { client, .. } = shared.register() else { panic!() };
+        let RegisterOutcome::Registered { client, .. } = shared.register() else {
+            panic!()
+        };
         care.publish_tick(1_000);
         let waiter = {
             let shared = Arc::clone(&shared);
@@ -1290,10 +1430,16 @@ mod tests {
         // One tick later: still inside rain's 1200-tick cooldown.
         care.publish_tick(1_001);
         let soon = shared.submit(&client, 2, CareKind::Rain, target());
-        assert!(matches!(soon, SubmitOutcome::Limited("cooldown")), "{soon:?}");
+        assert!(
+            matches!(soon, SubmitOutcome::Limited("cooldown")),
+            "{soon:?}"
+        );
         // And `/care/status` shows how much of the cooldown is left, in ticks.
         let status: serde_json::Value = serde_json::from_str(&shared.status_json()).unwrap();
-        assert_eq!(status["cooldowns"]["rain"], CareKind::Rain.cooldown_ticks() - 1);
+        assert_eq!(
+            status["cooldowns"]["rain"],
+            CareKind::Rain.cooldown_ticks() - 1
+        );
         assert_eq!(status["cooldowns"]["feed"], 0, "another kind is unaffected");
 
         care.publish_tick(1_000 + CareKind::Rain.cooldown_ticks());
@@ -1313,19 +1459,30 @@ mod tests {
         let status = Arc::new(JournalStatus::default());
         let care = CareService::new("epoch-test", Arc::clone(&status));
         let shared = care.shared();
-        let RegisterOutcome::Registered { client, .. } = shared.register() else { panic!() };
+        let RegisterOutcome::Registered { client, .. } = shared.register() else {
+            panic!()
+        };
         status.set_for_test(JOURNAL_LIMIT, 0);
         let refused = shared.submit(&client, 1, CareKind::Feed, target());
-        assert!(matches!(refused, SubmitOutcome::Unavailable("journal full")), "{refused:?}");
+        assert!(
+            matches!(refused, SubmitOutcome::Unavailable("journal full")),
+            "{refused:?}"
+        );
         assert_eq!(refused.http_status(), "503 Service Unavailable");
-        assert!(refused.body().contains("journal full"), "{}", refused.body());
+        assert!(
+            refused.body().contains("journal full"),
+            "{}",
+            refused.body()
+        );
     }
 
     #[test]
     fn a_failed_journal_closes_intake_and_answers_every_waiting_client() {
         let care = service();
         let shared = care.shared();
-        let RegisterOutcome::Registered { client, .. } = shared.register() else { panic!() };
+        let RegisterOutcome::Registered { client, .. } = shared.register() else {
+            panic!()
+        };
         let waiter = {
             let shared = Arc::clone(&shared);
             let client = client.clone();
@@ -1339,11 +1496,20 @@ mod tests {
         }
         care.fail("injected: fsync failed with an uncertain result");
         let answer = waiter.join().unwrap();
-        assert!(matches!(answer, SubmitOutcome::Unavailable("care failed")), "{answer:?}");
-        assert_eq!(care.failure().as_deref(), Some("injected: fsync failed with an uncertain result"));
+        assert!(
+            matches!(answer, SubmitOutcome::Unavailable("care failed")),
+            "{answer:?}"
+        );
+        assert_eq!(
+            care.failure().as_deref(),
+            Some("injected: fsync failed with an uncertain result")
+        );
 
         let after = shared.submit(&client, 2, CareKind::Clean, target());
-        assert!(matches!(after, SubmitOutcome::Unavailable("care failed")), "{after:?}");
+        assert!(
+            matches!(after, SubmitOutcome::Unavailable("care failed")),
+            "{after:?}"
+        );
         let status = shared.status_json();
         assert!(status.contains(r#""care":"failed""#), "{status}");
         assert!(status.contains("uncertain result"), "{status}");
@@ -1400,20 +1566,25 @@ mod tests {
             });
         }
         assert_eq!(inner.rows.len(), RETAINED_RECEIPTS);
-        assert_eq!(inner.rows.front().unwrap().request, RETAINED_RECEIPTS as u64);
+        assert_eq!(
+            inner.rows.front().unwrap().request,
+            RETAINED_RECEIPTS as u64
+        );
     }
 
     #[test]
     fn the_worker_makes_records_durable_and_acknowledges_them() {
-        let dir = std::env::temp_dir()
-            .join(format!("cubarium-care-worker-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cubarium-care-worker-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let journal = Journal::open(&dir, "e", "b", Topology::Cube).unwrap();
         let worker = JournalWorker::spawn(journal);
         let command = PlannedCommand::standard(1, 40, CareKind::Feed, target(), "e.1", 1);
         assert!(worker.submit(JournalJob::Accept(vec![command.clone()])));
-        match worker.wait_ack(Duration::from_secs(5)).expect("an acknowledgement") {
+        match worker
+            .wait_ack(Duration::from_secs(5))
+            .expect("an acknowledgement")
+        {
             JournalAck::Accepted { commands, result } => {
                 result.expect("the append must succeed");
                 assert_eq!(commands, vec![command]);
@@ -1447,7 +1618,10 @@ mod tests {
 
         let disabled: serde_json::Value =
             serde_json::from_str(&CareShared::disabled_status_json()).unwrap();
-        assert!(disabled["dose"].is_null(), "a host with no care advertises no amounts");
+        assert!(
+            disabled["dose"].is_null(),
+            "a host with no care advertises no amounts"
+        );
     }
 
     /// Every retained receipt row carries the amount that was asked for, so the page can say
@@ -1456,7 +1630,9 @@ mod tests {
     fn every_receipt_row_reports_the_amount_that_was_requested() {
         let care = service();
         let shared = care.shared();
-        let RegisterOutcome::Registered { client, .. } = shared.register() else { panic!() };
+        let RegisterOutcome::Registered { client, .. } = shared.register() else {
+            panic!()
+        };
         care.publish_tick(100_000);
 
         let waiter = {
@@ -1473,7 +1649,11 @@ mod tests {
             })
         };
         let planned = wait_for_planned(&care, 1);
-        assert_eq!(planned[0].dose.permille(), 1500, "the amount reaches the planned command");
+        assert_eq!(
+            planned[0].dose.permille(),
+            1500,
+            "the amount reaches the planned command"
+        );
         care.commit_accepted(&planned);
         let _ = waiter.join();
 
@@ -1488,7 +1668,9 @@ mod tests {
     fn the_plain_submit_is_the_standard_dose_and_says_so() {
         let care = service();
         let shared = care.shared();
-        let RegisterOutcome::Registered { client, .. } = shared.register() else { panic!() };
+        let RegisterOutcome::Registered { client, .. } = shared.register() else {
+            panic!()
+        };
         let waiter = {
             let shared = Arc::clone(&shared);
             let client = client.clone();
@@ -1505,14 +1687,27 @@ mod tests {
         // A retry at the *same* amount is the duplicate; the same request number at a
         // different amount is a conflict, never a second command.
         let same = shared.submit(&client, 1, CareKind::Feed, target());
-        let SubmitOutcome::Duplicate(receipt) = &same else { panic!("{same:?}") };
+        let SubmitOutcome::Duplicate(receipt) = &same else {
+            panic!("{same:?}")
+        };
         assert!(receipt.contains(r#""dose_permille":1000"#), "{receipt}");
         let explicit =
             shared.submit_dosed(&client, 1, CareKind::Feed, target(), CareDose::STANDARD);
-        assert!(matches!(explicit, SubmitOutcome::Duplicate(_)), "{explicit:?}");
-        let louder =
-            shared.submit_dosed(&client, 1, CareKind::Feed, target(), CareDose::new(1500).unwrap());
-        assert!(matches!(louder, SubmitOutcome::Conflict("conflict")), "{louder:?}");
+        assert!(
+            matches!(explicit, SubmitOutcome::Duplicate(_)),
+            "{explicit:?}"
+        );
+        let louder = shared.submit_dosed(
+            &client,
+            1,
+            CareKind::Feed,
+            target(),
+            CareDose::new(1500).unwrap(),
+        );
+        assert!(
+            matches!(louder, SubmitOutcome::Conflict("conflict")),
+            "{louder:?}"
+        );
         assert_eq!(louder.http_status(), "409 Conflict");
     }
 
@@ -1523,7 +1718,9 @@ mod tests {
         for permille in [250u16, 500, 1000, 1500, 2000] {
             let care = service();
             let shared = care.shared();
-            let RegisterOutcome::Registered { client, .. } = shared.register() else { panic!() };
+            let RegisterOutcome::Registered { client, .. } = shared.register() else {
+                panic!()
+            };
             let waiter = {
                 let shared = Arc::clone(&shared);
                 let client = client.clone();
@@ -1550,7 +1747,9 @@ mod tests {
     fn apex_requests_choose_replayable_locations_on_all_five_faces() {
         let care = service();
         let shared = care.shared();
-        let RegisterOutcome::Registered { client, .. } = shared.register() else { panic!() };
+        let RegisterOutcome::Registered { client, .. } = shared.register() else {
+            panic!()
+        };
         let mut faces = [false; 5];
         for request in 1..=256 {
             let a = shared.apex_targets(&client, request, 2);
@@ -1571,9 +1770,21 @@ mod tests {
         assert_eq!(planned[0].kind, CareKind::SpawnApex);
         assert!(planned[0].second_target.is_some());
         care.commit_accepted(&planned);
-        assert!(matches!(waiter.join().unwrap(), SubmitOutcome::Accepted { .. }));
-        assert!(matches!(shared.submit_apex(&client, 300, 2), SubmitOutcome::Duplicate(_)));
-        assert!(matches!(shared.submit_apex(&client, 301, 0), SubmitOutcome::Invalid(_)));
-        assert!(matches!(shared.submit_apex(&client, 301, 3), SubmitOutcome::Invalid(_)));
+        assert!(matches!(
+            waiter.join().unwrap(),
+            SubmitOutcome::Accepted { .. }
+        ));
+        assert!(matches!(
+            shared.submit_apex(&client, 300, 2),
+            SubmitOutcome::Duplicate(_)
+        ));
+        assert!(matches!(
+            shared.submit_apex(&client, 301, 0),
+            SubmitOutcome::Invalid(_)
+        ));
+        assert!(matches!(
+            shared.submit_apex(&client, 301, 3),
+            SubmitOutcome::Invalid(_)
+        ));
     }
 }

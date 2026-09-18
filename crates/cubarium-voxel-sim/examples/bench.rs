@@ -45,13 +45,13 @@ use std::time::Instant;
 
 use cubarium_voxel::profile::{self, Count, Phase};
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
-use cubarium_voxel_sim::{Sim, SimConfig};
 use cubarium_voxel_fauna::{
     Command as FaunaCommand, DT, Fauna, FaunaConfig, Species as Beast, TICK_HZ,
 };
 use cubarium_voxel_flora::{
     Command as FloraCommand, Deposit, DepositKind, Flora, FloraConfig, Site, Species,
 };
+use cubarium_voxel_sim::{Sim, SimConfig};
 
 /// `grazed.rs`'s and `two_producers.rs`'s conditioning rain: under the outlet's capacity.
 const HARNESS_RAIN_M_PER_S: f64 = 0.0002;
@@ -153,10 +153,19 @@ fn arg<T: std::str::FromStr>(args: &[String], i: usize) -> Option<T> {
 /// the basin floor, generate the world the run uses with the table a metre above it, open
 /// the outlet, and step it world-only for the warm-up.
 fn prepared_world(seed: u64, warmup_ticks: u64) -> World {
-    let dry = VoxelConfig { seed, rain_m_per_s: HARNESS_RAIN_M_PER_S, ..VoxelConfig::default() };
-    let basin_floor_m =
-        World::new(dry.clone()).outlet_cell().map_or(0.0, |(_, y, _)| y as f64) * dry.voxel_m;
-    let config = VoxelConfig { initial_aquifer_head_m: basin_floor_m + 1.0, ..dry };
+    let dry = VoxelConfig {
+        seed,
+        rain_m_per_s: HARNESS_RAIN_M_PER_S,
+        ..VoxelConfig::default()
+    };
+    let basin_floor_m = World::new(dry.clone())
+        .outlet_cell()
+        .map_or(0.0, |(_, y, _)| y as f64)
+        * dry.voxel_m;
+    let config = VoxelConfig {
+        initial_aquifer_head_m: basin_floor_m + 1.0,
+        ..dry
+    };
     let mut world = World::new(config);
     world.apply(WorldCommand::SetOutlet { open: true });
     for _ in 0..warmup_ticks {
@@ -197,7 +206,10 @@ fn lay_logs(flora: &mut Flora, world: &World) -> usize {
         .into_iter()
         .filter(|&s| {
             world.view().material_at(i64::from(s.x), s.y, s.z) == Material::Soil
-                && flora.view().establishment_gates(&world.view(), s, Species::Glowcap).pore_ok
+                && flora
+                    .view()
+                    .establishment_gates(&world.view(), s, Species::Glowcap)
+                    .pore_ok
         })
         .collect();
     let mut laid = 0;
@@ -233,7 +245,12 @@ fn plant_founders(flora: &mut Flora, world: &World) -> usize {
         for site in strided(&pool, FOUNDERS_PER_SPECIES) {
             if flora.apply(
                 world,
-                FloraCommand::Seed { x: i64::from(site.x), z: site.z, species, wood },
+                FloraCommand::Seed {
+                    x: i64::from(site.x),
+                    z: site.z,
+                    species,
+                    wood,
+                },
             ) {
                 taken.push(site);
                 planted += 1;
@@ -249,7 +266,9 @@ fn introduce(fauna: &mut Fauna, flora: &Flora, world: &World, n: usize) -> usize
         .into_iter()
         .filter(|&s| {
             world.view().material_at(i64::from(s.x), s.y, s.z) == Material::Soil
-                && flora.view().can_establish(&world.view(), s, Species::Springturf)
+                && flora
+                    .view()
+                    .can_establish(&world.view(), s, Species::Springturf)
         })
         .collect();
     let body = fauna.config().species(Beast::Frondgrazer).body_max;
@@ -452,14 +471,23 @@ fn report(
     }
     println!("\n## the active sets, mean over {} samples\n", sets.len());
     let cells = c.cells() as f64;
-    println!("| set | cells or items | share of the {} -cell grid |", c.cells());
+    println!(
+        "| set | cells or items | share of the {} -cell grid |",
+        c.cells()
+    );
     println!("| --- | --- | --- |");
     for (name, value) in [
         ("cells that are not solid (void)", mean(|s| s.void, sets)),
         ("cells holding free water", mean(|s| s.free_wet, sets)),
-        ("of those, with room below (fall can move)", mean(|s| s.fall_movable, sets)),
+        (
+            "of those, with room below (fall can move)",
+            mean(|s| s.fall_movable, sets),
+        ),
         ("cells holding pore water", mean(|s| s.pore_any, sets)),
-        ("of those, over field capacity (drain can move)", mean(|s| s.pore_over_field, sets)),
+        (
+            "of those, over field capacity (drain can move)",
+            mean(|s| s.pore_over_field, sets),
+        ),
         ("sites with a Ground", mean(|s| s.ground, sets)),
         ("stands", mean(|s| s.stands, sets)),
         ("animals", mean(|s| s.animals, sets)),
@@ -468,7 +496,13 @@ fn report(
     }
 
     println!("\n## what the harness observers cost (not the tick)\n");
-    let per = |ns: u64, calls: u64| if calls == 0 { 0.0 } else { 1e-3 * ns as f64 / calls as f64 };
+    let per = |ns: u64, calls: u64| {
+        if calls == 0 {
+            0.0
+        } else {
+            1e-3 * ns as f64 / calls as f64
+        }
+    };
     println!(
         "| observer | µs per observation | as a share of one {:.0} µs tick |",
         1e3 * wall / n * 1e3
@@ -481,9 +515,17 @@ fn report(
             observers.eligible_ns,
             observers.eligible_calls,
         ),
-        ("identity tracking (per animal reach + stand foliage)", observers.identity_ns, observers.identity_calls),
+        (
+            "identity tracking (per animal reach + stand foliage)",
+            observers.identity_ns,
+            observers.identity_calls,
+        ),
     ] {
-        println!("| {name} | {:.1} | {:.2} |", per(ns, calls), per(ns, calls) / tick_us);
+        println!(
+            "| {name} | {:.1} | {:.2} |",
+            per(ns, calls),
+            per(ns, calls) / tick_us
+        );
     }
     println!(
         "\n(the eligible-set scan is {} skyline columns x {} species = {} predicates; \
@@ -496,5 +538,8 @@ fn report(
         "\nsample: the active sets and the observer timings were measured every \
          {sample_every} ticks, outside the phase timers (0 means never)."
     );
-    println!("dt is {DT} s, so {:.0} ticks/s is real time.", f64::from(TICK_HZ));
+    println!(
+        "dt is {DT} s, so {:.0} ticks/s is real time.",
+        f64::from(TICK_HZ)
+    );
 }

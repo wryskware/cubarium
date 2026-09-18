@@ -51,7 +51,10 @@ impl ArtGeometry {
         let (w, h) = self.topology().extent(face);
         let start = |extent: f64| {
             let n = (extent as u16) / GROUND_LATTICE;
-            (n, (extent as u16 - n * GROUND_LATTICE) / 2 + GROUND_LATTICE / 2)
+            (
+                n,
+                (extent as u16 - n * GROUND_LATTICE) / 2 + GROUND_LATTICE / 2,
+            )
         };
         let (nx, x0) = start(w);
         let (ny, y0) = start(h);
@@ -375,9 +378,7 @@ impl ArtGeometry {
         let fall = rain_fall(seconds);
         let phi = (fall - fall.floor()) as f32;
         let steps = fall.floor() as i32;
-        let in_chart = |x: i32, y: i32| {
-            (0..w as i32).contains(&x) && (0..h as i32).contains(&y)
-        };
+        let in_chart = |x: i32, y: i32| (0..w as i32).contains(&x) && (0..h as i32).contains(&y);
         let mut marks = Vec::with_capacity(3);
         let (vertical, sign) = if down.y.abs() >= down.x.abs() {
             (true, if down.y >= 0.0 { 1 } else { -1 })

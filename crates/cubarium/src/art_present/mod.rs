@@ -101,9 +101,7 @@ use cubarium_render::{
     Bend, Canvas, Mask, PixelCells, Pose, Shade, Tone, Unfolds, draw_field_with, stamp_layers,
     stamp_layers_bent, stamp_layers_cached,
 };
-use cubarium_surface::{
-    CUBE_CELL_COUNT, CellId, PixelImage, ScalarField, SurfacePoint, Vec2,
-};
+use cubarium_surface::{CUBE_CELL_COUNT, CellId, PixelImage, ScalarField, SurfacePoint, Vec2};
 use cube_proto::Face;
 
 pub use crate::art::Band;
@@ -312,7 +310,11 @@ struct OutgoingPrey {
 /// A tone that does not travel: `mix = 0` takes exactly the untinted stamp path, bit for
 /// bit and at the same cost, so a pass with no tint can still go through the one cached
 /// stamp entry point.
-const FLAT_TONE: Tone = Tone { colour: [0.0; 3], shade: Shade::FLAT, mix: 0.0 };
+const FLAT_TONE: Tone = Tone {
+    colour: [0.0; 3],
+    shade: Shade::FLAT,
+    mix: 0.0,
+};
 
 /// The live world drawn with the baked art. Holds the pack, the scratch buffers the
 /// field and sprite paths need, the fixed per-cell slots, and the renderer-side history the
@@ -562,7 +564,13 @@ impl ArtPresenter {
         self.slots = geom.all_cells().map(|c| geom.slot_of(c)).collect();
         self.bands = geom.all_cells().map(|c| geom.band_of(c)).collect();
         self.columns = geom.tall_columns();
-        let tall = vec![TallGrowth { height: 0.0, target: 0 }; self.columns.len()];
+        let tall = vec![
+            TallGrowth {
+                height: 0.0,
+                target: 0
+            };
+            self.columns.len()
+        ];
         self.tall_prev = tall.clone();
         self.tall_dead = tall.clone();
         self.tall_dead_prev = tall.clone();
@@ -1210,8 +1218,8 @@ impl ArtPresenter {
                         continue;
                     };
                     let t = ground_density(view, cell.index(), band);
-                    let opacity = ground_opacity(t, band)
-                        * band_ground_weight(tables.soil(face, x, y), band);
+                    let opacity =
+                        ground_opacity(t, band) * band_ground_weight(tables.soil(face, x, y), band);
                     if opacity <= 0.0 {
                         continue;
                     }
@@ -1439,8 +1447,7 @@ impl ArtPresenter {
                         }
                     };
                     stamp_layers_cached(
-                        canvas, slot.at, heading, &layers, 1.0, opacity, mask, bend, tone,
-                        unfolds,
+                        canvas, slot.at, heading, &layers, 1.0, opacity, mask, bend, tone, unfolds,
                     );
                 }
             }

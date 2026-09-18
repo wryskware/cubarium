@@ -214,9 +214,7 @@ impl Shared {
         let (w, h) = self.shape.chart_size();
         match self.shape.topology {
             cubarium_surface::Topology::Cube => FRAME_BODY_BYTES,
-            cubarium_surface::Topology::Ring { .. } => {
-                8 + usize::from(w) * usize::from(h) * 3
-            }
+            cubarium_surface::Topology::Ring { .. } => 8 + usize::from(w) * usize::from(h) * 3,
         }
     }
 }
@@ -401,8 +399,12 @@ impl FrameSink for WebSink {
     }
 
     fn observe_counts(&mut self, population: usize, neural: usize) {
-        self.shared.population.store(population as u64, Ordering::Relaxed);
-        self.shared.neural_animals.store(neural as u64, Ordering::Relaxed);
+        self.shared
+            .population
+            .store(population as u64, Ordering::Relaxed);
+        self.shared
+            .neural_animals
+            .store(neural as u64, Ordering::Relaxed);
     }
 
     fn observe_tick(&mut self, tick: u64) {

@@ -111,11 +111,11 @@
 
 use std::sync::LazyLock;
 
-use cube_proto::Face;
 use cubarium_render::Canvas;
 use cubarium_voxel::{Material, VoxelView};
 use cubarium_voxel_fauna::FaunaView;
 use cubarium_voxel_flora::FloraView;
+use cube_proto::Face;
 
 use crate::present::{mix, srgb_linear};
 
@@ -350,7 +350,10 @@ impl VoxelPresenter {
         }
 
         canvas.pixels_mut().fill(STRATA.sky);
-        let surf = Surface { w: i32::from(canvas.width()), h: i32::from(canvas.height()) };
+        let surf = Surface {
+            w: i32::from(canvas.width()),
+            h: i32::from(canvas.height()),
+        };
         let p = self.proj;
         let water_alpha = self.cfg.water_alpha.clamp(0.0, 1.0);
 
@@ -385,15 +388,22 @@ impl VoxelPresenter {
                     // A plant stands in the void, and the water of its own cell blends
                     // over it: a trunk in a pool is submerged, not painted across the
                     // surface it stands in.
-                    let part = if plants { self.stands.at(x, i64::from(y), z) } else { Part::None };
+                    let part = if plants {
+                        self.stands.at(x, i64::from(y), z)
+                    } else {
+                        Part::None
+                    };
                     if part != Part::None {
                         self.plant(view, canvas, surf, x, y, z, part, shade());
                     }
                     // The animal after the plant in its own cell — a body standing in a
                     // turf covers the turf — and before the water, so one standing in a
                     // pool is submerged under the water's blend like everything else.
-                    let beast =
-                        if beasts { self.animals.at(x, i64::from(y), z) } else { AnimalPart::None };
+                    let beast = if beasts {
+                        self.animals.at(x, i64::from(y), z)
+                    } else {
+                        AnimalPart::None
+                    };
                     if beast != AnimalPart::None {
                         self.animal(view, canvas, surf, x, y, z, beast, shade());
                     }
@@ -457,10 +467,7 @@ impl VoxelPresenter {
             drop_right: open_right && !solid(view, x + 1, yi - 1, z),
             front_hidden: nearer && solid(view, x, yi, z - 1),
             top_hidden: nearer && solid(view, x, yi + 1, z - 1),
-            riser: open_up
-                && nearer
-                && !solid(view, x, yi, z - 1)
-                && solid(view, x, yi - 1, z - 1),
+            riser: open_up && nearer && !solid(view, x, yi, z - 1) && solid(view, x, yi - 1, z - 1),
             back_continues: z + 1 < p.depth
                 && solid(view, x, yi, z + 1)
                 && !solid(view, x, yi + 1, z + 1),
@@ -482,8 +489,11 @@ impl VoxelPresenter {
     ) {
         let p = self.proj;
         let haze = self.haze_at(z as f32);
-        let wet =
-            if m.pore_capacity() > 0.0 { view.pore_at(x, y, z).clamp(0.0, 1.0) as f32 } else { 0.0 };
+        let wet = if m.pore_capacity() > 0.0 {
+            view.pore_at(x, y, z).clamp(0.0, 1.0) as f32
+        } else {
+            0.0
+        };
         let body = mix(strata_of(m), STRATA.water_deep, wet * WET);
         let mut lit = mix(mul(body, TOP_GAIN), STRATA.light, TOP_TINT);
         if shade < 1.0 {
@@ -497,13 +507,16 @@ impl VoxelPresenter {
                 // Ground stepping one voxel into depth: shade it as a slope and let its
                 // haze cross from this slab to the nearer one, with no rim contour.
                 for dy in 0..h as i32 {
-                    let t = if h > 1 { dy as f32 / (h - 1) as f32 } else { 0.0 };
+                    let t = if h > 1 {
+                        dy as f32 / (h - 1) as f32
+                    } else {
+                        0.0
+                    };
                     let slope = mix(lit, body, RISER_LEAN * t);
                     let c = hazed(slope, self.haze_at(z as f32 - t));
                     let e = hazed(mul(slope, EDGE_DARK), self.haze_at(z as f32 - t));
                     for dx in 0..cols {
-                        let on_side =
-                            (dx == 0 && f.open_left) || (dx + 1 == cols && f.open_right);
+                        let on_side = (dx == 0 && f.open_left) || (dx + 1 == cols && f.open_right);
                         surf.put(canvas, c0 + dx, r0 + dy, if on_side { e } else { c });
                     }
                 }
@@ -515,8 +528,7 @@ impl VoxelPresenter {
                 for dy in 0..h as i32 {
                     for dx in 0..cols {
                         let on_cap = dy == 0 && f.open_up;
-                        let on_side =
-                            (dx == 0 && f.open_left) || (dx + 1 == cols && f.open_right);
+                        let on_side = (dx == 0 && f.open_left) || (dx + 1 == cols && f.open_right);
                         let rgb = match (on_cap, on_side) {
                             // The chamfer: a lit corner pixel turns a stair-step into a
                             // slope.
@@ -545,9 +557,13 @@ impl VoxelPresenter {
                 let face = hazed(plane, hz);
                 let bevel = hazed(mix(plane, body, TOP_EDGE), hz);
                 for dx in 0..cols {
-                    let on_drop =
-                        (dx == 0 && f.drop_left) || (dx + 1 == cols && f.drop_right);
-                    surf.put(canvas, c0 + dx, r0 - rise + dy, if on_drop { bevel } else { face });
+                    let on_drop = (dx == 0 && f.drop_left) || (dx + 1 == cols && f.drop_right);
+                    surf.put(
+                        canvas,
+                        c0 + dx,
+                        r0 - rise + dy,
+                        if on_drop { bevel } else { face },
+                    );
                 }
             }
         }
@@ -575,7 +591,9 @@ impl VoxelPresenter {
         part: Part,
         shade: f32,
     ) {
-        let Some(style) = self.stands.style(part) else { return };
+        let Some(style) = self.stands.style(part) else {
+            return;
+        };
         let p = self.proj;
         let (s, rise) = (p.s as i32, p.rise as i32);
         let yi = i64::from(y);
@@ -595,7 +613,11 @@ impl VoxelPresenter {
             let x0 = c0 + (cols - mark) / 2;
             let rows = (s / 2).max(1);
             for dy in 0..rows {
-                let c = if dy == 0 { plant_lit(style.crown, shade) } else { style.crown };
+                let c = if dy == 0 {
+                    plant_lit(style.crown, shade)
+                } else {
+                    style.crown
+                };
                 for dx in 0..mark {
                     surf.put(canvas, x0 + dx, r0 + s - rows + dy, hazed(c, haze));
                 }
@@ -618,17 +640,27 @@ impl VoxelPresenter {
             // `(front, cap)` for one pixel column: a trunk is a cylinder four pixels
             // across, a crown is canopy with a shaded skirt and a silhouette edge.
             let base = if crown {
-                if heart && dx * 2 >= cols - 2 && dx * 2 < cols + 2 { style.heart } else { style.crown }
+                if heart && dx * 2 >= cols - 2 && dx * 2 < cols + 2 {
+                    style.heart
+                } else {
+                    style.crown
+                }
             } else {
                 style.wood
             };
             if crown {
                 let edge = (dx == 0 && open_left) || (dx + 1 == cols && open_right);
                 let k = if edge { CROWN_EDGE } else { 1.0 };
-                (mul(mix(base, style.wood, CROWN_UNDER), k), mul(plant_lit(base, shade), k))
+                (
+                    mul(mix(base, style.wood, CROWN_UNDER), k),
+                    mul(plant_lit(base, shade), k),
+                )
             } else {
                 let k = trunk_shade(dx, p.s);
-                (mul(base, k), mix(plant_lit(base, shade), mul(base, k), TOP_EDGE))
+                (
+                    mul(base, k),
+                    mix(plant_lit(base, shade), mul(base, k), TOP_EDGE),
+                )
             }
         };
 
@@ -636,7 +668,11 @@ impl VoxelPresenter {
             for dx in 0..cols {
                 let (front, cap) = column(dx);
                 // The rim: the lit upper edge of the face, only where the sky is.
-                let c = if dy == 0 && !covered_up { mix(front, cap, PLANT_RIM) } else { front };
+                let c = if dy == 0 && !covered_up {
+                    mix(front, cap, PLANT_RIM)
+                } else {
+                    front
+                };
                 surf.put(canvas, c0 + dx, r0 + dy, hazed(c, haze));
             }
         }
@@ -672,7 +708,9 @@ impl VoxelPresenter {
         part: AnimalPart,
         shade: f32,
     ) {
-        let Some(style) = self.animals.style(part) else { return };
+        let Some(style) = self.animals.style(part) else {
+            return;
+        };
         let p = self.proj;
         let (s, rise) = (p.s as i32, p.rise as i32);
         let yi = i64::from(y);
@@ -689,7 +727,11 @@ impl VoxelPresenter {
         let cap = plant_lit(front, shade);
 
         for dy in 0..s {
-            let c = if dy == 0 && !covered_up { mix(front, cap, PLANT_RIM) } else { front };
+            let c = if dy == 0 && !covered_up {
+                mix(front, cap, PLANT_RIM)
+            } else {
+                front
+            };
             for dx in 0..cols {
                 surf.put(canvas, c0 + dx, r0 + dy, hazed(c, haze));
             }
@@ -743,7 +785,11 @@ impl VoxelPresenter {
                     return false;
                 }
                 let skin = f + s - fill;
-                if water_open_up(view, x, yn, z - 1, self.proj.s) { skin - rise } else { skin }
+                if water_open_up(view, x, yn, z - 1, self.proj.s) {
+                    skin - rise
+                } else {
+                    skin
+                }
             };
             (top..f + s).contains(&row)
         })
@@ -780,7 +826,11 @@ impl VoxelPresenter {
 
         // What the slab one step nearer already owns in these pixel columns.
         let near_solid = z > 0 && solid(view, x, yi, z - 1);
-        let near_fill = if z > 0 { fill_px_at(view, x, yi, z - 1, p.s) } else { 0 };
+        let near_fill = if z > 0 {
+            fill_px_at(view, x, yi, z - 1, p.s)
+        } else {
+            0
+        };
         let near_skin = r0 + rise + s - near_fill;
         let near_open_up = z > 0 && water_open_up(view, x, yi, z - 1, p.s);
 
@@ -808,13 +858,21 @@ impl VoxelPresenter {
         let stop = if near_solid {
             skin_row
         } else if near_fill > 0 {
-            bottom.min(if near_open_up { near_skin - rise } else { near_skin })
+            bottom.min(if near_open_up {
+                near_skin - rise
+            } else {
+                near_skin
+            })
         } else {
             bottom
         };
         for row in skin_row..stop {
             let is_skin = row == skin_row && open_up;
-            let (rgb, a) = if is_skin { (skin, skin_alpha) } else { (body, alpha) };
+            let (rgb, a) = if is_skin {
+                (skin, skin_alpha)
+            } else {
+                (body, alpha)
+            };
             for dx in 0..cols {
                 surf.blend(canvas, c0 + dx, row, rgb, a);
             }
@@ -850,7 +908,9 @@ fn trunk_shade(dx: i32, s: u32) -> f32 {
 /// water at all is visible, and never more than the whole face.
 #[inline]
 fn fill_px(free: f32, s: u32) -> i32 {
-    (free.clamp(0.0, 1.0) * s as f32).round().clamp(1.0, s as f32) as i32
+    (free.clamp(0.0, 1.0) * s as f32)
+        .round()
+        .clamp(1.0, s as f32) as i32
 }
 
 /// Does the water in `(x, y, z)` have air above it — that is, is there a surface to draw?
@@ -875,7 +935,11 @@ fn water_open_up(view: &VoxelView<'_>, x: i64, y: i64, z: u32, s: u32) -> bool {
 #[inline]
 fn fill_px_at(view: &VoxelView<'_>, x: i64, y: i64, z: u32, s: u32) -> i32 {
     let free = free_at(view, x, y, z);
-    if free <= WATER_EPSILON { 0 } else { fill_px(free, s) }
+    if free <= WATER_EPSILON {
+        0
+    } else {
+        fill_px(free, s)
+    }
 }
 
 /// Solidity with the strip's wrap in `x` and out-of-range `y` reading as air, which is
@@ -934,7 +998,12 @@ mod tests {
     use cubarium_voxel_flora::{Command as FloraCommand, Flora, FloraConfig, Species};
 
     fn config() -> Config {
-        Config { width: 32, height: 12, depth: 4, ..Config::default() }
+        Config {
+            width: 32,
+            height: 12,
+            depth: 4,
+            ..Config::default()
+        }
     }
 
     /// No plants: the terrain-and-water picture every test written before the flora
@@ -948,11 +1017,20 @@ mod tests {
     }
 
     fn present_flora(cfg: VoxelConfig, world: &World, flora: &Flora) -> (Canvas, Projection) {
-        let proj =
-            Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, world.config())
-                .unwrap();
-        let mut canvas =
-            Canvas::new(Topology::Ring { w: proj.raster_w, h: proj.raster_h }, Scale::ONE);
+        let proj = Projection::new(
+            cfg.tilt_degrees,
+            cfg.px_per_voxel,
+            cfg.raster_height,
+            world.config(),
+        )
+        .unwrap();
+        let mut canvas = Canvas::new(
+            Topology::Ring {
+                w: proj.raster_w,
+                h: proj.raster_h,
+            },
+            Scale::ONE,
+        );
         VoxelPresenter::new(cfg, proj).draw(&world.view(), flora.view(), &mut canvas);
         (canvas, proj)
     }
@@ -976,14 +1054,27 @@ mod tests {
         let mut flora = Flora::new(FloraConfig::default());
         let wood = flora.config().species(species).wood_max;
         assert!(
-            flora.apply(world, FloraCommand::Seed { x, z, species, wood }),
+            flora.apply(
+                world,
+                FloraCommand::Seed {
+                    x,
+                    z,
+                    species,
+                    wood
+                }
+            ),
             "the fixture must really seed a stand at ({x}, {z})"
         );
         flora
     }
 
     fn set(world: &mut World, x: i64, y: u32, z: u32, m: Material) {
-        world.apply(Command::SetMaterial { x, y, z, material: m });
+        world.apply(Command::SetMaterial {
+            x,
+            y,
+            z,
+            material: m,
+        });
     }
 
     /// Relative luminance, enough to order two shades of the same face.
@@ -1039,7 +1130,12 @@ mod tests {
                 set(&mut world, 4, 6, 0, Material::Rock);
                 set(&mut world, 4, 7, 0, Material::Rock);
             }
-            world.apply(Command::AddWater { x: 4, y: 6, z: 1, volume_m3: c.voxel_volume() });
+            world.apply(Command::AddWater {
+                x: 4,
+                y: 6,
+                z: 1,
+                volume_m3: c.voxel_volume(),
+            });
             world
         };
         assert_ne!(
@@ -1106,19 +1202,32 @@ mod tests {
             let w = i64::from(c.width);
             let vol = c.voxel_volume();
             for x in 0..w {
-                let u =
-                    (x - shift).rem_euclid(w) as f64 / w as f64 * std::f64::consts::TAU;
+                let u = (x - shift).rem_euclid(w) as f64 / w as f64 * std::f64::consts::TAU;
                 let top = (4.0 + 3.0 * u.cos()).round() as u32;
                 for z in 0..c.depth {
                     for y in 1..=top {
-                        let m = if y == top { Material::Soil } else { Material::Rock };
-                        world.apply(Command::SetMaterial { x, y, z, material: m });
+                        let m = if y == top {
+                            Material::Soil
+                        } else {
+                            Material::Rock
+                        };
+                        world.apply(Command::SetMaterial {
+                            x,
+                            y,
+                            z,
+                            material: m,
+                        });
                     }
                     // Translucent water standing in every trough, so the seam is judged
                     // with a blended face crossing it and not only with opaque rock.
                     if top <= 2 {
                         for y in top + 1..=3 {
-                            world.apply(Command::AddWater { x, y, z, volume_m3: vol });
+                            world.apply(Command::AddWater {
+                                x,
+                                y,
+                                z,
+                                volume_m3: vol,
+                            });
                         }
                     }
                 }
@@ -1172,7 +1281,10 @@ mod tests {
     /// one step further back — the depth slices stack upward by `rise`.
     #[test]
     fn free_water_fills_from_the_bottom_of_its_voxel() {
-        let c = Config { depth: 1, ..config() };
+        let c = Config {
+            depth: 1,
+            ..config()
+        };
         let mut world = World::empty(c.clone());
         for y in 1..4 {
             for x in 2..8 {
@@ -1181,7 +1293,12 @@ mod tests {
         }
         let vol = c.voxel_volume();
         for x in 2..8 {
-            world.apply(Command::AddWater { x, y: 4, z: 0, volume_m3: vol * 0.5 });
+            world.apply(Command::AddWater {
+                x,
+                y: 4,
+                z: 0,
+                volume_m3: vol * 0.5,
+            });
         }
         let (canvas, proj) = present(&world);
         let col = proj.col(4) + 1;
@@ -1192,7 +1309,10 @@ mod tests {
         let bottom = r0 + s as i32 - 1;
         let skin_row = r0 + s as i32 - 2;
         assert!(bluer_than_sky(at(bottom)), "the bottom row must be water");
-        assert!(bluer_than_sky(at(skin_row)), "the surface row must be water");
+        assert!(
+            bluer_than_sky(at(skin_row)),
+            "the surface row must be water"
+        );
         assert!(
             at(skin_row)[2] > at(bottom)[2],
             "the surface row is the brighter one: {:?} vs {:?}",
@@ -1213,7 +1333,11 @@ mod tests {
     /// rows (the top face and the skin row it caps), then body all the way to the floor.
     #[test]
     fn a_stacked_water_column_draws_exactly_one_surface() {
-        let c = Config { depth: 1, height: 16, ..config() };
+        let c = Config {
+            depth: 1,
+            height: 16,
+            ..config()
+        };
         let mut world = World::empty(c.clone());
         for x in 2..8 {
             for y in 0..3 {
@@ -1224,20 +1348,34 @@ mod tests {
         for x in 2..8 {
             // Four full cells and a half one on top: one boundary, at y = 7.5.
             for y in 3..7 {
-                world.apply(Command::AddWater { x, y, z: 0, volume_m3: vol });
+                world.apply(Command::AddWater {
+                    x,
+                    y,
+                    z: 0,
+                    volume_m3: vol,
+                });
             }
-            world.apply(Command::AddWater { x, y: 7, z: 0, volume_m3: vol * 0.5 });
+            world.apply(Command::AddWater {
+                x,
+                y: 7,
+                z: 0,
+                volume_m3: vol * 0.5,
+            });
         }
 
         let (canvas, proj) = present(&world);
         let col = proj.col(4) + 1;
         let floor = proj.front_row(2, 0); // the first row below the water column
-        let surface_top = proj.front_row(7, 0) + proj.s as i32 - fill_px(0.5, proj.s) - proj.rise as i32;
+        let surface_top =
+            proj.front_row(7, 0) + proj.s as i32 - fill_px(0.5, proj.s) - proj.rise as i32;
 
         // Classify every row of the column between the sky and the rock floor.
         let body = pixel(&canvas, &proj, col, floor - 1);
         let surface = pixel(&canvas, &proj, col, surface_top);
-        assert!(bluer_than_sky(body) && bluer_than_sky(surface), "both must be water");
+        assert!(
+            bluer_than_sky(body) && bluer_than_sky(surface),
+            "both must be water"
+        );
         assert!(
             surface[1] > body[1] * 1.5,
             "the surface must be distinguishable from the body: {surface:?} vs {body:?}"
@@ -1289,16 +1427,30 @@ mod tests {
         let build = |fars: bool, nears: bool| {
             let mut world = World::empty(c.clone());
             if fars {
-                world.apply(Command::AddWater { x, y, z: 1, volume_m3: vol * 0.5 });
+                world.apply(Command::AddWater {
+                    x,
+                    y,
+                    z: 1,
+                    volume_m3: vol * 0.5,
+                });
             }
             if nears {
-                world.apply(Command::AddWater { x, y, z: 0, volume_m3: vol * 0.75 });
+                world.apply(Command::AddWater {
+                    x,
+                    y,
+                    z: 0,
+                    volume_m3: vol * 0.75,
+                });
             }
             world
         };
 
         let (both, proj) = present(&build(true, true));
-        assert_eq!((proj.s, proj.rise), (4, 2), "the fixture is stated at s = 4, rise = 2");
+        assert_eq!(
+            (proj.s, proj.rise),
+            (4, 2),
+            "the fixture is stated at s = 4, rise = 2"
+        );
         let (far_only, _) = present(&build(true, false));
         let (near_only, _) = present(&build(false, true));
         let r = proj.front_row(y, 1);
@@ -1306,11 +1458,21 @@ mod tests {
         let at = |canvas: &Canvas, row: i32| pixel(canvas, &proj, col, row);
 
         // Both tops really do want row R + 1: alone, each of them blends it.
-        assert!(bluer_than_sky(at(&far_only, r + 1)), "the far top alone covers row R + 1");
-        assert!(bluer_than_sky(at(&near_only, r + 1)), "the near top alone covers row R + 1");
+        assert!(
+            bluer_than_sky(at(&far_only, r + 1)),
+            "the far top alone covers row R + 1"
+        );
+        assert!(
+            bluer_than_sky(at(&near_only, r + 1)),
+            "the near top alone covers row R + 1"
+        );
 
         // Row R is the far top's alone, and survives: clipping is by row, not by band.
-        assert_eq!(at(&both, r), at(&far_only, r), "row R is the far top's, and it keeps it");
+        assert_eq!(
+            at(&both, r),
+            at(&far_only, r),
+            "row R is the far top's, and it keeps it"
+        );
         assert!(bluer_than_sky(at(&both, r)), "row R must still be water");
 
         // Row R + 1 is the nearer top's, blended over sky exactly once. Had the far top
@@ -1340,7 +1502,12 @@ mod tests {
         let build = |water: bool, roof: bool| {
             let mut world = World::empty(c.clone());
             if water {
-                world.apply(Command::AddWater { x, y, z: 1, volume_m3: c.voxel_volume() * 0.25 });
+                world.apply(Command::AddWater {
+                    x,
+                    y,
+                    z: 1,
+                    volume_m3: c.voxel_volume() * 0.25,
+                });
             }
             if roof {
                 set(&mut world, x, y + 1, 0, Material::Rock);
@@ -1349,7 +1516,11 @@ mod tests {
         };
 
         let (both, proj) = present(&build(true, true));
-        assert_eq!((proj.s, proj.rise), (4, 2), "the fixture is stated at s = 4, rise = 2");
+        assert_eq!(
+            (proj.s, proj.rise),
+            (4, 2),
+            "the fixture is stated at s = 4, rise = 2"
+        );
         let (water_only, _) = present(&build(true, false));
         let (roof_only, _) = present(&build(false, true));
         let r = proj.front_row(y, 1);
@@ -1357,11 +1528,25 @@ mod tests {
         let at = |canvas: &Canvas, row: i32| pixel(canvas, &proj, col, row);
 
         // The roof reaches row R + 1 and no further: alone, it leaves R + 2 as sky.
-        assert_ne!(at(&roof_only, r + 1), sky(), "the roof's front covers row R + 1");
-        assert_eq!(at(&roof_only, r + 2), sky(), "the roof's front stops before row R + 2");
+        assert_ne!(
+            at(&roof_only, r + 1),
+            sky(),
+            "the roof's front covers row R + 1"
+        );
+        assert_eq!(
+            at(&roof_only, r + 2),
+            sky(),
+            "the roof's front stops before row R + 2"
+        );
         // The water top alone blends both rows of its band, over sky.
-        assert!(bluer_than_sky(at(&water_only, r + 1)), "the band alone covers row R + 1");
-        assert!(bluer_than_sky(at(&water_only, r + 2)), "the band alone covers row R + 2");
+        assert!(
+            bluer_than_sky(at(&water_only, r + 1)),
+            "the band alone covers row R + 1"
+        );
+        assert!(
+            bluer_than_sky(at(&water_only, r + 2)),
+            "the band alone covers row R + 2"
+        );
 
         // With the roof in front, the row the roof does not own is still that one blend —
         // culling the whole band on the strength of a solid at `(x, y + 1, z − 1)` would
@@ -1374,9 +1559,17 @@ mod tests {
             at(&water_only, r + 2),
         );
         // The row the roof does own is the roof's own opaque front.
-        assert_eq!(at(&both, r + 1), at(&roof_only, r + 1), "row R + 1 is the roof's");
+        assert_eq!(
+            at(&both, r + 1),
+            at(&roof_only, r + 1),
+            "row R + 1 is the roof's"
+        );
         // And the skin row beneath the band, which neither the roof nor the clip touches.
-        assert_eq!(at(&both, r + 3), at(&water_only, r + 3), "the skin row is unchanged");
+        assert_eq!(
+            at(&both, r + 3),
+            at(&water_only, r + 3),
+            "the skin row is unchanged"
+        );
         assert!(bluer_than_sky(at(&both, r + 3)), "the skin row is water");
     }
 
@@ -1386,7 +1579,12 @@ mod tests {
     /// inside it.
     #[test]
     fn a_plateau_receding_in_z_has_no_ruled_bands() {
-        let c = Config { width: 16, height: 12, depth: 8, ..Config::default() };
+        let c = Config {
+            width: 16,
+            height: 12,
+            depth: 8,
+            ..Config::default()
+        };
         let mut world = World::empty(c.clone());
         for x in 0..i64::from(c.width) {
             for z in 0..c.depth {
@@ -1399,11 +1597,18 @@ mod tests {
         let col = proj.col(8) + 2;
         // The plateau's surface band: `depth · rise` rows above the near cut wall.
         let near_top = proj.front_row(5, 0);
-        let rows: Vec<i32> = (1..=(proj.depth * proj.rise) as i32).map(|k| near_top - k).collect();
-        assert!(rows.iter().all(|&r| r >= 0), "the band must be inside the raster");
+        let rows: Vec<i32> = (1..=(proj.depth * proj.rise) as i32)
+            .map(|k| near_top - k)
+            .collect();
+        assert!(
+            rows.iter().all(|&r| r >= 0),
+            "the band must be inside the raster"
+        );
 
-        let lums: Vec<f32> =
-            rows.iter().map(|&r| lum(pixel(&canvas, &proj, col, r))).collect();
+        let lums: Vec<f32> = rows
+            .iter()
+            .map(|&r| lum(pixel(&canvas, &proj, col, r)))
+            .collect();
         // Going up is going back, which is hazier, so the band only ever dims. A ruled
         // shelf is a row that breaks that: darker than the row below *and* than the one
         // above it.
@@ -1433,7 +1638,12 @@ mod tests {
     /// is not, and an open floor is fully lit.
     #[test]
     fn a_roof_shadow_falls_off_with_depth_below_the_roof() {
-        let c = Config { width: 48, height: 24, depth: 1, ..Config::default() };
+        let c = Config {
+            width: 48,
+            height: 24,
+            depth: 1,
+            ..Config::default()
+        };
         let mut world = World::empty(c.clone());
         // One roof at y = 18 over x = 8..28, with sheltered floors at y = 16 (gap 2) and
         // y = 2 (gap 16) under it, and an open floor at y = 2 outside it.
@@ -1456,8 +1666,14 @@ mod tests {
             lum(pixel(&canvas, &proj, c0 + 1, r0 - 1))
         };
         let (under, deep, open) = (cap(12, 16), cap(20, 2), cap(36, 2));
-        assert!(under < deep, "a floor right under the roof must be darker: {under} vs {deep}");
-        assert!(deep < open, "a floor far below the roof must still be lit: {deep} vs {open}");
+        assert!(
+            under < deep,
+            "a floor right under the roof must be darker: {under} vs {deep}"
+        );
+        assert!(
+            deep < open,
+            "a floor far below the roof must still be lit: {deep} vs {open}"
+        );
         assert!(
             deep > under + (open - under) * 0.5,
             "the falloff must be most of the way back to the light by 16 voxels: \
@@ -1480,7 +1696,11 @@ mod tests {
         let cfg = VoxelConfig::default();
         let (with, proj) = present_flora(cfg.clone(), &world, &flora);
         let (without, _) = present_flora(cfg, &world, &bare);
-        assert_ne!(with.pixels(), without.pixels(), "the stand must reach the raster");
+        assert_ne!(
+            with.pixels(),
+            without.pixels(),
+            "the stand must reach the raster"
+        );
 
         // Every pixel the stand changed is strictly above the support's front face: the
         // support's own top row is the lowest row the trunk's front rectangle reaches,
@@ -1606,7 +1826,10 @@ mod tests {
         let rows: Vec<i32> = (0..i32::from(proj.raster_h))
             .filter(|&r| at(&crown_only, r) != at(&bare, r) && at(&water_only, r) != at(&bare, r))
             .collect();
-        assert!(!rows.is_empty(), "the fixture must put the crown and the water in one row");
+        assert!(
+            !rows.is_empty(),
+            "the fixture must put the crown and the water in one row"
+        );
 
         // What "the water owns the row" means exactly. If the water is drawn over the
         // crown with the same colour and the same alpha it uses over the bare picture,
@@ -1622,7 +1845,10 @@ mod tests {
         for &r in &rows {
             let (crown, water, seen) = (at(&crown_only, r), at(&water_only, r), at(&both, r));
             assert_ne!(seen, crown, "row {r} is the water's, not the crown's");
-            assert!(bluer_than_sky(seen), "row {r} must still read as water: {seen:?}");
+            assert!(
+                bluer_than_sky(seen),
+                "row {r} must still read as water: {seen:?}"
+            );
             let bare_px = at(&bare, r);
             let mut ratios = Vec::new();
             for k in 0..3 {
@@ -1631,7 +1857,10 @@ mod tests {
                     ratios.push((seen[k] - water[k]) / behind);
                 }
             }
-            assert!(!ratios.is_empty(), "row {r}: the crown must differ from the ground");
+            assert!(
+                !ratios.is_empty(),
+                "row {r}: the crown must differ from the ground"
+            );
             for &q in &ratios {
                 assert!(
                     (q - ratios[0]).abs() < 1e-3,
@@ -1654,12 +1883,18 @@ mod tests {
     /// The authored fixture really does carry the four features it is for.
     #[test]
     fn the_authored_scene_has_a_ridge_a_hollow_with_water_and_an_overhang() {
-        let c = Config { width: 64, height: 24, depth: 8, ..Config::default() };
+        let c = Config {
+            width: 64,
+            height: 24,
+            depth: 8,
+            ..Config::default()
+        };
         let world = super::super::scene::authored(c.clone());
         let view = world.view();
 
-        let tops: Vec<u32> =
-            (0..i64::from(c.width)).map(|x| view.surface_y(x, 0).unwrap_or(0)).collect();
+        let tops: Vec<u32> = (0..i64::from(c.width))
+            .map(|x| view.surface_y(x, 0).unwrap_or(0))
+            .collect();
         let (lo, hi) = (*tops.iter().min().unwrap(), *tops.iter().max().unwrap());
         assert!(hi >= lo + 6, "a ridge needs relief: {lo}..{hi}");
 
@@ -1692,13 +1927,23 @@ mod tests {
     /// off the top are lost.
     #[test]
     fn a_cropped_raster_keeps_the_bottom_registration() {
-        let c = Config { width: 16, height: 20, depth: 4, ..Config::default() };
+        let c = Config {
+            width: 16,
+            height: 20,
+            depth: 4,
+            ..Config::default()
+        };
         let world = super::super::scene::authored(c.clone());
         let cfg = VoxelConfig::default();
         let (full, fp) = present_with(cfg.clone(), &world);
         let short_h = fp.raster_h / 2;
-        let (short, sp) =
-            present_with(VoxelConfig { raster_height: short_h, ..cfg }, &world);
+        let (short, sp) = present_with(
+            VoxelConfig {
+                raster_height: short_h,
+                ..cfg
+            },
+            &world,
+        );
         assert!(sp.cropped && sp.raster_h == short_h);
 
         let w = usize::from(fp.raster_w);

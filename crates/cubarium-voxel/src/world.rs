@@ -13,13 +13,33 @@ const RAY_FAN: [(f64, f64, f64, f64); 17] = [
     (0.0, 1.0, 0.0, 1.0),
     // Eight azimuths at 60 degrees of elevation, weight sin 60.
     (0.5, 0.8660254037844386, 0.0, 0.8660254037844386),
-    (0.3535533905932738, 0.8660254037844386, 0.3535533905932738, 0.8660254037844386),
+    (
+        0.3535533905932738,
+        0.8660254037844386,
+        0.3535533905932738,
+        0.8660254037844386,
+    ),
     (0.0, 0.8660254037844386, 0.5, 0.8660254037844386),
-    (-0.3535533905932738, 0.8660254037844386, 0.3535533905932738, 0.8660254037844386),
+    (
+        -0.3535533905932738,
+        0.8660254037844386,
+        0.3535533905932738,
+        0.8660254037844386,
+    ),
     (-0.5, 0.8660254037844386, 0.0, 0.8660254037844386),
-    (-0.3535533905932738, 0.8660254037844386, -0.3535533905932738, 0.8660254037844386),
+    (
+        -0.3535533905932738,
+        0.8660254037844386,
+        -0.3535533905932738,
+        0.8660254037844386,
+    ),
     (0.0, 0.8660254037844386, -0.5, 0.8660254037844386),
-    (0.3535533905932738, 0.8660254037844386, -0.3535533905932738, 0.8660254037844386),
+    (
+        0.3535533905932738,
+        0.8660254037844386,
+        -0.3535533905932738,
+        0.8660254037844386,
+    ),
     // The same eight at 30 degrees, weight sin 30.
     (0.8660254037844386, 0.5, 0.0, 0.5),
     (0.6123724356957946, 0.5, 0.6123724356957946, 0.5),
@@ -43,7 +63,12 @@ pub enum Command {
     /// Add free water into one voxel, clipped to its remaining void space. `apply`
     /// returns the volume accepted; the rest is refused, and a non-finite or negative
     /// volume is refused whole with nothing booked.
-    AddWater { x: i64, y: u32, z: u32, volume_m3: f64 },
+    AddWater {
+        x: i64,
+        y: u32,
+        z: u32,
+        volume_m3: f64,
+    },
     /// Replace a voxel's material, preserving the water volume the voxel held.
     ///
     /// Its free and pore water are converted to cubic metres first, then the new
@@ -53,7 +78,12 @@ pub enum Command {
     /// wrapped face-adjacent void path distance, sharing equally among equal-distance
     /// recipients before any farther one — and only volume with no reachable room at all
     /// is booked as `Ledger::displaced_out`.
-    SetMaterial { x: i64, y: u32, z: u32, material: Material },
+    SetMaterial {
+        x: i64,
+        y: u32,
+        z: u32,
+        material: Material,
+    },
     /// Take pore water out of one voxel: the plant layer's one bounded withdrawal.
     ///
     /// Capped by the stock actually in that voxel, so a whole stand of plants asking
@@ -63,7 +93,12 @@ pub enum Command {
     /// transpired water leaves the world. A non-finite or negative volume is refused
     /// whole with nothing booked, and a voxel with no pore capacity (air, bedrock)
     /// accepts nothing and books nothing.
-    WithdrawPore { x: i64, y: u32, z: u32, volume_m3: f64 },
+    WithdrawPore {
+        x: i64,
+        y: u32,
+        z: u32,
+        volume_m3: f64,
+    },
     /// Add to (or, negative, remove from) the aquifer store. A withdrawal is capped by
     /// the stock actually there, and `apply` returns it as a negative volume.
     ChargeAquifer { volume_m3: f64 },
@@ -113,7 +148,9 @@ impl<'a> VoxelView<'a> {
     }
     /// Highest solid voxel in column `(x, z)`, or `None` if the column is all air.
     pub fn surface_y(&self, x: i64, z: u32) -> Option<u32> {
-        (0..self.config.height).rev().find(|&y| self.material_at(x, y, z).is_solid())
+        (0..self.config.height)
+            .rev()
+            .find(|&y| self.material_at(x, y, z).is_solid())
     }
     /// Whether `(x, y, z)` is a **support face**: a solid voxel whose top face is
     /// exposed to void inside the world. Plants stand on these, never on a column's
@@ -132,7 +169,9 @@ impl<'a> VoxelView<'a> {
         if z >= self.config.depth {
             return Vec::new();
         }
-        (0..self.config.height).filter(|&y| self.is_support(x, y, z)).collect()
+        (0..self.config.height)
+            .filter(|&y| self.is_support(x, y, z))
+            .collect()
     }
 
     /// Depth of the free water standing on the support face `(x, y, z)`, in metres, as
@@ -322,7 +361,9 @@ impl World {
             config,
         };
         crate::generate::landform(&mut world);
-        world.aquifer_m3 = world.config.aquifer_volume_for_head(world.config.initial_aquifer_head_m);
+        world.aquifer_m3 = world
+            .config
+            .aquifer_volume_for_head(world.config.initial_aquifer_head_m);
         world.ledger.initial_stored = world.view().stored_m3();
         // The active sets are built here rather than lazily so that a world is never in a
         // state where its cache disagrees with its arrays.
@@ -334,7 +375,9 @@ impl World {
     /// hand-authored scenes. Charged to [`Config::initial_aquifer_head_m`] like any
     /// other world. Panics on a config [`Config::validate`] refuses.
     pub fn empty(config: Config) -> World {
-        config.validate().expect("World::empty needs a valid Config");
+        config
+            .validate()
+            .expect("World::empty needs a valid Config");
         let n = config.cells();
         let mut material = vec![Material::Air; n];
         for x in 0..config.width as i64 {
@@ -357,7 +400,9 @@ impl World {
             material,
             config,
         };
-        world.aquifer_m3 = world.config.aquifer_volume_for_head(world.config.initial_aquifer_head_m);
+        world.aquifer_m3 = world
+            .config
+            .aquifer_volume_for_head(world.config.initial_aquifer_head_m);
         world.ledger.initial_stored = world.view().stored_m3();
         world.rebuild_active_sets();
         world
@@ -499,14 +544,19 @@ impl World {
     pub(crate) fn validate_loaded(&self) -> anyhow::Result<()> {
         self.config.validate()?;
         let n = self.config.cells();
-        for (name, len) in
-            [("material", self.material.len()), ("free", self.free.len()), ("pore", self.pore.len())]
-        {
+        for (name, len) in [
+            ("material", self.material.len()),
+            ("free", self.free.len()),
+            ("pore", self.pore.len()),
+        ] {
             ensure!(len == n, "{name} has {len} entries, not one per cell ({n})");
         }
         for (name, store) in [("free", &self.free), ("pore", &self.pore)] {
-            if let Some((i, bad)) =
-                store.iter().copied().enumerate().find(|&(_, f)| !(0.0..=1.0).contains(&f))
+            if let Some((i, bad)) = store
+                .iter()
+                .copied()
+                .enumerate()
+                .find(|&(_, f)| !(0.0..=1.0).contains(&f))
             {
                 bail!("{name}[{i}] is {bad}, not a fraction in 0..=1");
             }

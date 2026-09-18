@@ -170,10 +170,16 @@ impl TickIndex {
         for event in life {
             match event {
                 LifeEvent::Birth { id, parent, .. } => {
-                    ensure!(index.births.insert(*id, *parent).is_none(), "duplicate birth event for {id:?}");
+                    ensure!(
+                        index.births.insert(*id, *parent).is_none(),
+                        "duplicate birth event for {id:?}"
+                    );
                 }
                 LifeEvent::Death { id, cause, .. } => {
-                    ensure!(index.deaths.insert(*id, *cause).is_none(), "duplicate death event for {id:?}");
+                    ensure!(
+                        index.deaths.insert(*id, *cause).is_none(),
+                        "duplicate death event for {id:?}"
+                    );
                 }
             }
         }
@@ -183,7 +189,10 @@ impl TickIndex {
     /// A parent is dead this tick if **either** channel says so; the two must agree, which is
     /// checked separately against the membership the audit is carrying.
     fn died(&self, id: OrganismId) -> Option<DeathCause> {
-        self.deaths.get(&id).or_else(|| self.hunter_deaths.get(&id)).copied()
+        self.deaths
+            .get(&id)
+            .or_else(|| self.hunter_deaths.get(&id))
+            .copied()
     }
 }
 
@@ -241,10 +250,9 @@ impl ReproductionAudit {
     pub fn new(s: &WorldState) -> Result<Self> {
         let mut sizes = BTreeMap::new();
         for member in &s.hunters.members {
-            let o = s
-                .organisms
-                .get(member.id)
-                .ok_or_else(|| anyhow::anyhow!("hunter member {:?} is not a live organism", member.id))?;
+            let o = s.organisms.get(member.id).ok_or_else(|| {
+                anyhow::anyhow!("hunter member {:?} is not a live organism", member.id)
+            })?;
             ensure!(
                 o.escrow.is_none(),
                 "this opening is mid-gestation: hunter {:?} already holds an escrow started at \
@@ -279,16 +287,20 @@ impl ReproductionAudit {
     ///
     /// Ticks must arrive strictly consecutively. Nothing is committed until the whole tick
     /// validates, so a rejected tick leaves the audit exactly as it was.
-    pub fn observe(&mut self, events: &[HunterEvent], life: &[LifeEvent], state: &WorldState) -> Result<()> {
+    pub fn observe(
+        &mut self,
+        events: &[HunterEvent],
+        life: &[LifeEvent],
+        state: &WorldState,
+    ) -> Result<()> {
         ensure!(
             !state.apex_encounters.active(),
             "the legacy hunter reproduction audit is one-parent only; paired apex encounters require the ApexEncounterEvent stream"
         );
         // Checked, so a world at the end of the `u64` range is an error and not a panic.
-        let expected = self
-            .last_tick
-            .checked_add(1)
-            .ok_or_else(|| anyhow::anyhow!("the tick counter is at its maximum: {}", self.last_tick))?;
+        let expected = self.last_tick.checked_add(1).ok_or_else(|| {
+            anyhow::anyhow!("the tick counter is at its maximum: {}", self.last_tick)
+        })?;
         ensure!(
             state.tick == expected,
             "reproduction audit needs consecutive ticks: expected {expected}, got {}",
@@ -302,16 +314,25 @@ impl ReproductionAudit {
         let tick = state.tick;
 
         // Scratch copies: the tick is committed only if all of it validates.
-        let mut scratch =
-            Scratch { open: self.open.clone(), totals: self.totals, seen: TickDispositions::default() };
+        let mut scratch = Scratch {
+            open: self.open.clone(),
+            totals: self.totals,
+            seen: TickDispositions::default(),
+        };
         let mut sizes = self.sizes.clone();
 
         // Every record in this batch belongs to this tick.
         for event in events {
-            ensure!(event.tick() == tick, "hunter record {event:?} is not from tick {tick}");
+            ensure!(
+                event.tick() == tick,
+                "hunter record {event:?} is not from tick {tick}"
+            );
         }
         for event in life {
-            ensure!(event.tick() == tick, "life event {event:?} is not from tick {tick}");
+            ensure!(
+                event.tick() == tick,
+                "life event {event:?} is not from tick {tick}"
+            );
         }
 
         // The identity records this tick's transactions must reconcile against.
@@ -340,7 +361,9 @@ impl ReproductionAudit {
         // The transactions, in the order core committed them. A funding and its loss can share a
         // tick, so a closure may refer to a key opened earlier in this very batch.
         for event in events {
-            let HunterEvent::Reproduction { hunter, record, .. } = event else { continue };
+            let HunterEvent::Reproduction { hunter, record, .. } = event else {
+                continue;
+            };
             ensure!(
                 *hunter == record.parent(),
                 "record {record:?} is wrapped for hunter {hunter:?} but names parent {:?}",
@@ -558,12 +581,27 @@ impl ReproductionAudit {
             })
             .or_else(|| sizes.get(&key.parent).copied())
             .ok_or_else(|| {
-                anyhow::anyhow!("no known size for {:?}: its funding fractions cannot be checked", key.parent)
+                anyhow::anyhow!(
+                    "no known size for {:?}: its funding fractions cannot be checked",
+                    key.parent
+                )
             })?;
         for (name, reported, expected) in [
-            ("structure", escrow_structure, self.rates.child_structure_fraction * sizes.structure_adult),
-            ("reserve", escrow_reserve, self.rates.child_reserve_fraction * sizes.reserve_max),
-            ("energy", escrow_energy, self.rates.child_energy_fraction * sizes.energy_max),
+            (
+                "structure",
+                escrow_structure,
+                self.rates.child_structure_fraction * sizes.structure_adult,
+            ),
+            (
+                "reserve",
+                escrow_reserve,
+                self.rates.child_reserve_fraction * sizes.reserve_max,
+            ),
+            (
+                "energy",
+                escrow_energy,
+                self.rates.child_energy_fraction * sizes.energy_max,
+            ),
         ] {
             ensure!(
                 close(reported, expected),
@@ -597,7 +635,14 @@ impl ReproductionAudit {
         index: &TickIndex,
     ) -> Result<()> {
         let Scratch { open, totals, seen } = scratch;
-        let Reproduction::Born { key, child, child_structure, child_reserve, child_energy, birth_heat } = record
+        let Reproduction::Born {
+            key,
+            child,
+            child_structure,
+            child_reserve,
+            child_energy,
+            birth_heat,
+        } = record
         else {
             bail!("not a birth: {record:?}")
         };
@@ -624,11 +669,26 @@ impl ReproductionAudit {
         );
 
         // The child is the escrow, and the structural material gave up its reserve energy.
-        ensure!(close(child_structure, held.structure), "child structure {child_structure} is not the escrow's {}", held.structure);
-        ensure!(close(child_reserve, held.reserve), "child reserve {child_reserve} is not the escrow's {}", held.reserve);
-        ensure!(close(child_energy, held.energy), "child energy {child_energy} is not the escrow's {}", held.energy);
         ensure!(
-            close(birth_heat, self.rates.reserve_energy_density * held.structure),
+            close(child_structure, held.structure),
+            "child structure {child_structure} is not the escrow's {}",
+            held.structure
+        );
+        ensure!(
+            close(child_reserve, held.reserve),
+            "child reserve {child_reserve} is not the escrow's {}",
+            held.reserve
+        );
+        ensure!(
+            close(child_energy, held.energy),
+            "child energy {child_energy} is not the escrow's {}",
+            held.energy
+        );
+        ensure!(
+            close(
+                birth_heat,
+                self.rates.reserve_energy_density * held.structure
+            ),
             "birth heat {birth_heat} is not e_r on the escrow's structure"
         );
 
@@ -637,10 +697,20 @@ impl ReproductionAudit {
             .organisms
             .get(child)
             .ok_or_else(|| anyhow::anyhow!("reported child {child:?} is not a live organism"))?;
-        ensure!(o.born_tick == tick, "child {child:?} was born at {}, not {tick}", o.born_tick);
-        ensure!(o.parent == Some(key.parent), "child {child:?} does not name {:?} as its parent", key.parent);
         ensure!(
-            close(o.structure, child_structure) && close(o.reserve, child_reserve) && close(o.energy, child_energy),
+            o.born_tick == tick,
+            "child {child:?} was born at {}, not {tick}",
+            o.born_tick
+        );
+        ensure!(
+            o.parent == Some(key.parent),
+            "child {child:?} does not name {:?} as its parent",
+            key.parent
+        );
+        ensure!(
+            close(o.structure, child_structure)
+                && close(o.reserve, child_reserve)
+                && close(o.energy, child_energy),
             "child {child:?} does not hold the inventory the record reports"
         );
         ensure!(
@@ -662,9 +732,14 @@ impl ReproductionAudit {
 
         totals.born += 1;
         totals.born_material.add(child_structure + child_reserve);
-        totals.born_energy.add(self.rates.reserve_energy_density * child_reserve + child_energy);
+        totals
+            .born_energy
+            .add(self.rates.reserve_energy_density * child_reserve + child_energy);
         totals.birth_heat.add(birth_heat);
-        ensure!(seen.born.insert(child), "two births reported for child {child:?}");
+        ensure!(
+            seen.born.insert(child),
+            "two births reported for child {child:?}"
+        );
         Ok(())
     }
 
@@ -704,7 +779,10 @@ impl ReproductionAudit {
         // A refund hands the escrow back to a **living** parent. A dead one cannot receive it:
         // that transaction is a miscarriage, and core reports it as one.
         if let Some(cause) = index.died(key.parent) {
-            bail!("{:?} cannot be refunded an escrow in the tick it died of {cause:?}", key.parent);
+            bail!(
+                "{:?} cannot be refunded an escrow in the tick it died of {cause:?}",
+                key.parent
+            );
         }
         ensure!(
             state.organisms.get(key.parent).is_some(),
@@ -719,9 +797,18 @@ impl ReproductionAudit {
             "{:?} reported both a due gestation and a new budding decision in one pass",
             key.parent
         );
-        ensure!(close(refunded_structure, held.structure), "refunded structure is not the escrow's");
-        ensure!(close(refunded_reserve, held.reserve), "refunded reserve is not the escrow's");
-        ensure!(close(refunded_energy, held.energy), "refunded energy is not the escrow's");
+        ensure!(
+            close(refunded_structure, held.structure),
+            "refunded structure is not the escrow's"
+        );
+        ensure!(
+            close(refunded_reserve, held.reserve),
+            "refunded reserve is not the escrow's"
+        );
+        ensure!(
+            close(refunded_energy, held.energy),
+            "refunded energy is not the escrow's"
+        );
 
         // Everything went back, and nothing was burned on the way.
         let material = refunded_structure + refunded_reserve;
@@ -738,7 +825,9 @@ impl ReproductionAudit {
 
         totals.refunded += 1;
         totals.refunded_material.add(material);
-        totals.refunded_energy.add(self.rates.reserve_energy_density * material + refunded_energy);
+        totals
+            .refunded_energy
+            .add(self.rates.reserve_energy_density * material + refunded_energy);
         Ok(())
     }
 
@@ -749,7 +838,15 @@ impl ReproductionAudit {
         index: &TickIndex,
     ) -> Result<()> {
         let Scratch { open, totals, seen } = scratch;
-        let Reproduction::Miscarried { key, cause, material, energy, energy_stored, energy_heat } = record else {
+        let Reproduction::Miscarried {
+            key,
+            cause,
+            material,
+            energy,
+            energy_stored,
+            energy_heat,
+        } = record
+        else {
             bail!("not a miscarriage: {record:?}")
         };
         for (name, v) in [
@@ -775,7 +872,10 @@ impl ReproductionAudit {
             close(energy, expected_energy),
             "miscarried energy {energy} is not the escrow's {expected_energy}"
         );
-        ensure!(close(energy_stored + energy_heat, energy), "the exported energy is unaccounted for");
+        ensure!(
+            close(energy_stored + energy_heat, energy),
+            "the exported energy is unaccounted for"
+        );
         let cap = self.rates.detritus_energy_cap * material;
         ensure!(
             close(energy_stored, energy.min(cap)),
@@ -784,14 +884,15 @@ impl ReproductionAudit {
 
         // A miscarriage is the parent's death, with the same cause, in the same tick — and that
         // death must be reported in **both** channels, which were checked to agree above.
-        let ordinary = index
-            .deaths
-            .get(&key.parent)
-            .ok_or_else(|| anyhow::anyhow!("{:?} miscarried without an ordinary death event", key.parent))?;
-        let lineage = index
-            .hunter_deaths
-            .get(&key.parent)
-            .ok_or_else(|| anyhow::anyhow!("{:?} miscarried without a hunter death record", key.parent))?;
+        let ordinary = index.deaths.get(&key.parent).ok_or_else(|| {
+            anyhow::anyhow!(
+                "{:?} miscarried without an ordinary death event",
+                key.parent
+            )
+        })?;
+        let lineage = index.hunter_deaths.get(&key.parent).ok_or_else(|| {
+            anyhow::anyhow!("{:?} miscarried without a hunter death record", key.parent)
+        })?;
         ensure!(
             *ordinary == cause && *lineage == cause,
             "the miscarriage says {cause:?} and the deaths say {ordinary:?} / {lineage:?}"
@@ -807,9 +908,17 @@ impl ReproductionAudit {
 
     /// Record that this parent closed a gestation this tick: exactly one closure per parent,
     /// and a key that closes is finished — it can be neither closed again nor reopened.
-    fn close(&self, seen: &mut TickDispositions, key: cubarium_core::EscrowKey, what: &'static str) -> Result<()> {
+    fn close(
+        &self,
+        seen: &mut TickDispositions,
+        key: cubarium_core::EscrowKey,
+        what: &'static str,
+    ) -> Result<()> {
         if let Some(previous) = seen.closed.insert(key.parent, what) {
-            bail!("{:?} closed a gestation twice in one tick ({previous}, then {what})", key.parent);
+            bail!(
+                "{:?} closed a gestation twice in one tick ({previous}, then {what})",
+                key.parent
+            );
         }
         ensure!(
             seen.closed_keys.insert((key.parent, key.started_tick)),
@@ -825,10 +934,9 @@ impl ReproductionAudit {
         key: cubarium_core::EscrowKey,
         what: &str,
     ) -> Result<Open> {
-        let held = open
-            .get(&key.parent)
-            .copied()
-            .ok_or_else(|| anyhow::anyhow!("{what} closes a gestation this audit never saw funded: {key:?}"))?;
+        let held = open.get(&key.parent).copied().ok_or_else(|| {
+            anyhow::anyhow!("{what} closes a gestation this audit never saw funded: {key:?}")
+        })?;
         ensure!(
             held.started_tick == key.started_tick,
             "{what} names gestation {} of {:?}, which is holding {} instead",
@@ -849,21 +957,33 @@ impl ReproductionAudit {
                 bail!("hunter member {:?} is not a live organism", member.id)
             };
             if let Some(e) = &o.escrow {
-                held.insert(member.id, (e.started_tick, e.structure, e.reserve, e.energy));
+                held.insert(
+                    member.id,
+                    (e.started_tick, e.structure, e.reserve, e.energy),
+                );
             }
         }
         for (parent, escrow) in open {
-            let (started, structure, reserve, energy) = *held
-                .get(parent)
-                .ok_or_else(|| anyhow::anyhow!("{parent:?} owes a gestation the world is not holding"))?;
-            ensure!(started == escrow.started_tick, "{parent:?} holds a gestation from {started}, not {}", escrow.started_tick);
+            let (started, structure, reserve, energy) = *held.get(parent).ok_or_else(|| {
+                anyhow::anyhow!("{parent:?} owes a gestation the world is not holding")
+            })?;
             ensure!(
-                close(structure, escrow.structure) && close(reserve, escrow.reserve) && close(energy, escrow.energy),
+                started == escrow.started_tick,
+                "{parent:?} holds a gestation from {started}, not {}",
+                escrow.started_tick
+            );
+            ensure!(
+                close(structure, escrow.structure)
+                    && close(reserve, escrow.reserve)
+                    && close(energy, escrow.energy),
                 "{parent:?} holds an escrow the audit's numbers do not match"
             );
         }
         for parent in held.keys() {
-            ensure!(open.contains_key(parent), "{parent:?} holds an escrow this audit never saw funded");
+            ensure!(
+                open.contains_key(parent),
+                "{parent:?} holds an escrow this audit never saw funded"
+            );
         }
         Ok(())
     }
@@ -933,7 +1053,6 @@ impl ReproductionAudit {
 
 #[cfg(test)]
 mod tests {
-    use cubarium_surface::Topology;
     use super::*;
     use cubarium_core::genome::{Genome, decode};
     use cubarium_core::hunter::{EscrowKey, FixedHunterProfile, HunterTarget};
@@ -941,9 +1060,14 @@ mod tests {
     use cubarium_core::rng::Counter;
     use cubarium_core::snapshot::state_hash;
     use cubarium_core::{World, WorldConfig};
+    use cubarium_surface::Topology;
     use cubarium_surface::{Face, SurfacePoint, Vec2};
 
-    const SPOT: SurfacePoint = SurfacePoint { face: Face::Top, u: 22.0, v: 34.0 };
+    const SPOT: SurfacePoint = SurfacePoint {
+        face: Face::Top,
+        u: 22.0,
+        v: 34.0,
+    };
 
     /// A world with nothing growing or decaying of its own, so a fixture's mechanics are the
     /// only thing moving. A label for the scenario, never a claim about balance.
@@ -972,11 +1096,18 @@ mod tests {
     }
 
     fn target(pos: SurfacePoint) -> HunterTarget {
-        HunterTarget { face: pos.face.index() as u8, u: pos.u, v: pos.v }
+        HunterTarget {
+            face: pos.face.index() as u8,
+            u: pos.u,
+            v: pos.v,
+        }
     }
 
     fn found(world: &mut World, profile: FixedHunterProfile) -> OrganismId {
-        world.start_hunter_trial(profile, target(SPOT)).expect("the trial starts").id
+        world
+            .start_hunter_trial(profile, target(SPOT))
+            .expect("the trial starts")
+            .id
     }
 
     fn feed_to_full(world: &mut World, id: OrganismId) {
@@ -1028,7 +1159,10 @@ mod tests {
     }
 
     /// Step once and hand the completed tick to the audit, exactly as the harness will.
-    fn feed(world: &mut World, audit: &mut ReproductionAudit) -> Result<(Vec<HunterEvent>, Vec<LifeEvent>)> {
+    fn feed(
+        world: &mut World,
+        audit: &mut ReproductionAudit,
+    ) -> Result<(Vec<HunterEvent>, Vec<LifeEvent>)> {
         world.step();
         let hunter = world.drain_hunter_events();
         let life = world.drain_events();
@@ -1037,7 +1171,12 @@ mod tests {
     }
 
     /// Run until `done`, collecting every hunter record seen, with the audit following along.
-    fn run(world: &mut World, audit: &mut ReproductionAudit, ticks: u64, mut done: impl FnMut(&[HunterEvent]) -> bool) -> Vec<HunterEvent> {
+    fn run(
+        world: &mut World,
+        audit: &mut ReproductionAudit,
+        ticks: u64,
+        mut done: impl FnMut(&[HunterEvent]) -> bool,
+    ) -> Vec<HunterEvent> {
         let mut seen = Vec::new();
         for _ in 0..ticks {
             let (hunter, _) = feed(world, audit).expect("a genuine tick must audit");
@@ -1060,7 +1199,9 @@ mod tests {
     }
 
     fn saw(events: &[HunterEvent], want: &str) -> bool {
-        events.iter().any(|e| matches!(e, HunterEvent::Reproduction { record, .. } if is(record, want)))
+        events
+            .iter()
+            .any(|e| matches!(e, HunterEvent::Reproduction { record, .. } if is(record, want)))
     }
 
     fn count(summary: &Value, what: &str) -> u64 {
@@ -1083,7 +1224,11 @@ mod tests {
 
         run(&mut world, &mut audit, 60, |seen| saw(seen, "funded"));
         assert_eq!(count(&audit.summary(), "funded"), 1);
-        assert_eq!(count(&audit.summary(), "open_at_horizon"), 1, "the gestation is outstanding");
+        assert_eq!(
+            count(&audit.summary(), "open_at_horizon"),
+            1,
+            "the gestation is outstanding"
+        );
 
         run(&mut world, &mut audit, 200, |seen| saw(seen, "born"));
         let s = audit.summary();
@@ -1100,8 +1245,14 @@ mod tests {
         let energy = org.child_energy_fraction * sizes.energy_max;
         assert!(close(number(&s, "material", "funded"), structure + reserve));
         assert!(close(number(&s, "material", "born"), structure + reserve));
-        assert!(close(number(&s, "heat", "build"), org.build_cost * structure));
-        assert!(close(number(&s, "heat", "birth"), org.reserve_energy_density * structure));
+        assert!(close(
+            number(&s, "heat", "build"),
+            org.build_cost * structure
+        ));
+        assert!(close(
+            number(&s, "heat", "birth"),
+            org.reserve_energy_density * structure
+        ));
         assert!(close(
             number(&s, "energy", "funded"),
             org.reserve_energy_density * (structure + reserve) + energy
@@ -1129,7 +1280,10 @@ mod tests {
         assert_eq!(count(&s, "born"), 0);
         assert_eq!(count(&s, "open_at_horizon"), 0);
         // A refund returns the material; it is not a miscarriage and burns nothing.
-        assert!(close(number(&s, "material", "refunded"), number(&s, "material", "funded")));
+        assert!(close(
+            number(&s, "material", "refunded"),
+            number(&s, "material", "funded")
+        ));
         assert_eq!(number(&s, "material", "miscarried"), 0.0);
     }
 
@@ -1142,7 +1296,12 @@ mod tests {
         let parent = found(&mut world, profile);
         feed_to_full(&mut world, parent);
         // Hold the gate shut until the tick it dies on.
-        world.state.hunters.member_mut(parent).expect("a member").next_reproduction_tick = 40;
+        world
+            .state
+            .hunters
+            .member_mut(parent)
+            .expect("a member")
+            .next_reproduction_tick = 40;
         let mut audit = ReproductionAudit::new(&world.state).expect("a fresh opening");
 
         let seen = run(&mut world, &mut audit, 80, |seen| saw(seen, "miscarried"));
@@ -1155,12 +1314,17 @@ mod tests {
         assert_eq!(ticks[0], ticks[1], "this fixture needs them in one tick");
 
         let s = audit.summary();
-        assert_eq!(count(&s, "funded"), 1, "the audit saw the funding it needed to close");
+        assert_eq!(
+            count(&s, "funded"),
+            1,
+            "the audit saw the funding it needed to close"
+        );
         assert_eq!(count(&s, "miscarried"), 1);
         assert_eq!(count(&s, "open_at_horizon"), 0);
         assert!(number(&s, "energy", "miscarried") > 0.0);
         assert!(close(
-            number(&s, "energy", "miscarried_retained_as_detritus") + number(&s, "energy", "miscarried_as_heat"),
+            number(&s, "energy", "miscarried_retained_as_detritus")
+                + number(&s, "energy", "miscarried_as_heat"),
             number(&s, "energy", "miscarried")
         ));
     }
@@ -1183,7 +1347,10 @@ mod tests {
         assert_eq!(count(&s, "miscarried"), 1);
         assert_eq!(count(&s, "born"), 0);
         let exported = number(&s, "material", "miscarried");
-        assert!(exported > 0.0 && exported < body, "the escrow is not the corpse: {exported} vs {body}");
+        assert!(
+            exported > 0.0 && exported < body,
+            "the escrow is not the corpse: {exported} vs {body}"
+        );
         assert!(close(exported, number(&s, "material", "funded")));
     }
 
@@ -1243,16 +1410,27 @@ mod tests {
             let hunter = world.drain_hunter_events();
             let life = world.drain_events();
             if saw(&hunter, "born") {
-                return Staged { world, audit, hunter, life };
+                return Staged {
+                    world,
+                    audit,
+                    hunter,
+                    life,
+                };
             }
-            audit.observe(&hunter, &life, &world.state).expect("a genuine tick must audit");
+            audit
+                .observe(&hunter, &life, &world.state)
+                .expect("a genuine tick must audit");
         }
         panic!("no birth in 400 ticks")
     }
 
     /// The audit is unchanged by a refusal, and still accepts the genuine tick afterwards.
     fn refuses(mut staged: Staged, corrupt: impl Fn(&mut Vec<HunterEvent>), why: &str) {
-        let before = (staged.audit.summary(), staged.audit.last_complete_tick(), staged.audit.open_gestations());
+        let before = (
+            staged.audit.summary(),
+            staged.audit.last_complete_tick(),
+            staged.audit.open_gestations(),
+        );
         let mut broken = staged.hunter.clone();
         corrupt(&mut broken);
         let err = staged
@@ -1260,7 +1438,11 @@ mod tests {
             .observe(&broken, &staged.life, &staged.world.state)
             .expect_err(&format!("{why} must be refused"));
         assert!(!err.to_string().is_empty(), "{why}");
-        let after = (staged.audit.summary(), staged.audit.last_complete_tick(), staged.audit.open_gestations());
+        let after = (
+            staged.audit.summary(),
+            staged.audit.last_complete_tick(),
+            staged.audit.open_gestations(),
+        );
         assert_eq!(before, after, "{why}: the refusal was not atomic");
         // The genuine batch still goes through, which is what "unchanged" has to mean.
         staged
@@ -1274,7 +1456,9 @@ mod tests {
             .iter()
             .enumerate()
             .find_map(|(i, e)| match e {
-                HunterEvent::Reproduction { hunter, record, .. } if is(record, "born") => Some((i, *hunter, *record)),
+                HunterEvent::Reproduction { hunter, record, .. } if is(record, "born") => {
+                    Some((i, *hunter, *record))
+                }
                 _ => None,
             })
             .expect("a birth record")
@@ -1285,7 +1469,9 @@ mod tests {
         // The birth vanishes from the stream: the world is holding no escrow, but the audit is.
         refuses(
             staged_birth(),
-            |events| events.retain(|e| !matches!(e, HunterEvent::Reproduction { record, .. } if is(record, "born"))),
+            |events| {
+                events.retain(|e| !matches!(e, HunterEvent::Reproduction { record, .. } if is(record, "born")))
+            },
             "a birth dropped from the stream",
         );
     }
@@ -1312,7 +1498,12 @@ mod tests {
         let profile = breeder(&world);
         let parent = found(&mut world, profile);
         feed_to_full(&mut world, parent);
-        world.state.hunters.member_mut(parent).expect("a member").next_reproduction_tick = 40;
+        world
+            .state
+            .hunters
+            .member_mut(parent)
+            .expect("a member")
+            .next_reproduction_tick = 40;
         let mut audit = ReproductionAudit::new(&world.state).expect("a fresh opening");
         for _ in 0..80 {
             world.step();
@@ -1325,10 +1516,14 @@ mod tests {
                     .observe(&reversed, &life, &world.state)
                     .expect_err("a closure before its funding must be refused");
                 assert!(err.to_string().contains("never saw funded"), "{err}");
-                audit.observe(&hunter, &life, &world.state).expect("the genuine order audits");
+                audit
+                    .observe(&hunter, &life, &world.state)
+                    .expect("the genuine order audits");
                 return;
             }
-            audit.observe(&hunter, &life, &world.state).expect("a genuine tick must audit");
+            audit
+                .observe(&hunter, &life, &world.state)
+                .expect("a genuine tick must audit");
         }
         panic!("the fixture never produced a same-tick funding and loss");
     }
@@ -1356,10 +1551,14 @@ mod tests {
                     .observe(&doubled, &life, &world.state)
                     .expect_err("two fundings for one parent must be refused");
                 assert!(err.to_string().contains("funded twice"), "{err}");
-                audit.observe(&hunter, &life, &world.state).expect("the genuine batch audits");
+                audit
+                    .observe(&hunter, &life, &world.state)
+                    .expect("the genuine batch audits");
                 return;
             }
-            audit.observe(&hunter, &life, &world.state).expect("a genuine tick must audit");
+            audit
+                .observe(&hunter, &life, &world.state)
+                .expect("a genuine tick must audit");
         }
         panic!("no funding in 60 ticks");
     }
@@ -1371,7 +1570,14 @@ mod tests {
             staged_birth(),
             |events| {
                 let (i, hunter, record) = born_record(events);
-                let Reproduction::Born { key, child, child_structure, child_reserve, child_energy, birth_heat } = record
+                let Reproduction::Born {
+                    key,
+                    child,
+                    child_structure,
+                    child_reserve,
+                    child_energy,
+                    birth_heat,
+                } = record
                 else {
                     unreachable!()
                 };
@@ -1380,7 +1586,10 @@ mod tests {
                     hunter,
                     record: Reproduction::Born {
                         key,
-                        child: OrganismId { slot: child.slot, generation: child.generation + 1 },
+                        child: OrganismId {
+                            slot: child.slot,
+                            generation: child.generation + 1,
+                        },
                         child_structure,
                         child_reserve,
                         child_energy,
@@ -1395,16 +1604,29 @@ mod tests {
             staged_birth(),
             |events| {
                 let (i, _, record) = born_record(events);
-                let Reproduction::Born { key, child, child_structure, child_reserve, child_energy, birth_heat } = record
+                let Reproduction::Born {
+                    key,
+                    child,
+                    child_structure,
+                    child_reserve,
+                    child_energy,
+                    birth_heat,
+                } = record
                 else {
                     unreachable!()
                 };
-                let stale = OrganismId { slot: key.parent.slot, generation: key.parent.generation + 1 };
+                let stale = OrganismId {
+                    slot: key.parent.slot,
+                    generation: key.parent.generation + 1,
+                };
                 events[i] = HunterEvent::Reproduction {
                     tick: events[i].tick(),
                     hunter: stale,
                     record: Reproduction::Born {
-                        key: EscrowKey { parent: stale, started_tick: key.started_tick },
+                        key: EscrowKey {
+                            parent: stale,
+                            started_tick: key.started_tick,
+                        },
                         child,
                         child_structure,
                         child_reserve,
@@ -1424,7 +1646,14 @@ mod tests {
             staged_birth(),
             |events| {
                 let (i, hunter, record) = born_record(events);
-                let Reproduction::Born { key, child, child_structure, child_reserve, child_energy, birth_heat } = record
+                let Reproduction::Born {
+                    key,
+                    child,
+                    child_structure,
+                    child_reserve,
+                    child_energy,
+                    birth_heat,
+                } = record
                 else {
                     unreachable!()
                 };
@@ -1448,7 +1677,14 @@ mod tests {
             staged_birth(),
             |events| {
                 let (i, hunter, record) = born_record(events);
-                let Reproduction::Born { key, child, child_structure, child_reserve, child_energy, birth_heat } = record
+                let Reproduction::Born {
+                    key,
+                    child,
+                    child_structure,
+                    child_reserve,
+                    child_energy,
+                    birth_heat,
+                } = record
                 else {
                     unreachable!()
                 };
@@ -1472,7 +1708,15 @@ mod tests {
             staged_birth(),
             |events| {
                 let (i, hunter, record) = born_record(events);
-                let Reproduction::Born { key, child, child_reserve, child_energy, birth_heat, .. } = record else {
+                let Reproduction::Born {
+                    key,
+                    child,
+                    child_reserve,
+                    child_energy,
+                    birth_heat,
+                    ..
+                } = record
+                else {
                     unreachable!()
                 };
                 events[i] = HunterEvent::Reproduction {
@@ -1500,7 +1744,10 @@ mod tests {
                 let (i, hunter, record) = born_record(events);
                 events[i] = HunterEvent::Reproduction {
                     tick: events[i].tick(),
-                    hunter: OrganismId { slot: hunter.slot + 7, generation: hunter.generation },
+                    hunter: OrganismId {
+                        slot: hunter.slot + 7,
+                        generation: hunter.generation,
+                    },
                     record,
                 };
             },
@@ -1514,7 +1761,11 @@ mod tests {
             staged_birth(),
             |events| {
                 let (i, hunter, record) = born_record(events);
-                events[i] = HunterEvent::Reproduction { tick: events[i].tick() - 1, hunter, record };
+                events[i] = HunterEvent::Reproduction {
+                    tick: events[i].tick() - 1,
+                    hunter,
+                    record,
+                };
             },
             "a record stamped with another tick",
         );
@@ -1533,9 +1784,15 @@ mod tests {
         world.step();
         let hunter = world.drain_hunter_events();
         let life = world.drain_events();
-        let err = audit.observe(&hunter, &life, &world.state).expect_err("a skipped tick must be refused");
+        let err = audit
+            .observe(&hunter, &life, &world.state)
+            .expect_err("a skipped tick must be refused");
         assert!(err.to_string().contains("consecutive"), "{err}");
-        assert_eq!(audit.last_complete_tick(), world.tick() - 2, "and nothing was recorded");
+        assert_eq!(
+            audit.last_complete_tick(),
+            world.tick() - 2,
+            "and nothing was recorded"
+        );
     }
 
     #[test]
@@ -1546,10 +1803,19 @@ mod tests {
         feed_to_full(&mut world, parent);
         let mut audit = ReproductionAudit::new(&world.state).expect("a fresh opening");
         run(&mut world, &mut audit, 60, |seen| saw(seen, "funded"));
-        assert!(world.state.organisms.get(parent).expect("alive").escrow.is_some());
+        assert!(
+            world
+                .state
+                .organisms
+                .get(parent)
+                .expect("alive")
+                .escrow
+                .is_some()
+        );
 
         // Attaching a second audit here would have to invent the debits that funded it.
-        let err = ReproductionAudit::new(&world.state).expect_err("a mid-gestation opening must be refused");
+        let err = ReproductionAudit::new(&world.state)
+            .expect_err("a mid-gestation opening must be refused");
         assert!(err.to_string().contains("mid-gestation"), "{err}");
     }
 
@@ -1572,16 +1838,22 @@ mod tests {
             world.step();
             let hunter = world.drain_hunter_events();
             let life = world.drain_events();
-            audit.observe(&hunter, &life, &world.state).expect("a genuine tick must audit");
+            audit
+                .observe(&hunter, &life, &world.state)
+                .expect("a genuine tick must audit");
             // Every parent keeps refilling, so the lineage keeps reproducing.
             if tick % 40 == 0 {
-                let members: Vec<OrganismId> = world.state.hunters.members.iter().map(|m| m.id).collect();
+                let members: Vec<OrganismId> =
+                    world.state.hunters.members.iter().map(|m| m.id).collect();
                 for id in members {
                     feed_to_full(&mut world, id);
                 }
             }
             let members = world.state.hunters.members.len();
-            assert!(audit.open.len() <= members, "one open gestation per member at most");
+            assert!(
+                audit.open.len() <= members,
+                "one open gestation per member at most"
+            );
             assert!(
                 audit.sizes.len() <= members + audit.open.len(),
                 "the size cache is not pruned: {} against {members} members",
@@ -1610,7 +1882,9 @@ mod tests {
             profile.capture_max = 1.0;
             let parent = found(&mut world, profile.clone());
             // A frozen prey inside the claws, so the run settles a real capture too.
-            let grasp = world.hunter_view()[0].capture_center.expect("a centre on the open top face");
+            let grasp = world.hunter_view()[0]
+                .capture_center
+                .expect("a centre on the open top face");
             let cfg = world.config().clone();
             let mut genome = Genome::founder(0.5, &cfg.drives);
             genome.size = 0.5;
@@ -1641,14 +1915,17 @@ mod tests {
             world.state.external_material_in += 0.8;
             feed_to_full(&mut world, parent);
 
-            let mut watcher = audit.then(|| ReproductionAudit::new(&world.state).expect("a fresh opening"));
+            let mut watcher =
+                audit.then(|| ReproductionAudit::new(&world.state).expect("a fresh opening"));
             for _ in 0..400 {
                 world.step();
                 // Both runs drain, so the comparison isolates the audit's own calls.
                 let hunter = world.drain_hunter_events();
                 let life = world.drain_events();
                 if let Some(watcher) = watcher.as_mut() {
-                    watcher.observe(&hunter, &life, &world.state).expect("a genuine tick must audit");
+                    watcher
+                        .observe(&hunter, &life, &world.state)
+                        .expect("a genuine tick must audit");
                     // Reading the report every tick must be just as inert.
                     let _ = watcher.summary();
                 }
@@ -1660,7 +1937,10 @@ mod tests {
         let (unwatched, same_captures) = scenario(false);
         assert_eq!(watched, unwatched, "observation moved the world");
         assert_eq!(captures, same_captures);
-        assert!(captures >= 1, "this fixture should settle a capture: {captures}");
+        assert!(
+            captures >= 1,
+            "this fixture should settle a capture: {captures}"
+        );
     }
 
     // Additional independent branch-order probes (Astra, 2026-09-13).
@@ -1671,9 +1951,17 @@ mod tests {
         let before = staged.audit.summary();
         let mut malformed = staged.hunter.clone();
         malformed.push(blocked(staged.world.tick(), parent));
-        assert!(staged.audit.observe(&malformed, &staged.life, &staged.world.state).is_err());
+        assert!(
+            staged
+                .audit
+                .observe(&malformed, &staged.life, &staged.world.state)
+                .is_err()
+        );
         assert_eq!(staged.audit.summary(), before);
-        staged.audit.observe(&staged.hunter, &staged.life, &staged.world.state).unwrap();
+        staged
+            .audit
+            .observe(&staged.hunter, &staged.life, &staged.world.state)
+            .unwrap();
     }
 
     #[test]
@@ -1687,7 +1975,11 @@ mod tests {
         let life = world.drain_events();
         assert!(!saw(&hunter, "funded"));
         let before = audit.summary();
-        assert!(audit.observe(&fund_refund(&world, parent), &life, &world.state).is_err());
+        assert!(
+            audit
+                .observe(&fund_refund(&world, parent), &life, &world.state)
+                .is_err()
+        );
         assert_eq!(audit.summary(), before);
         audit.observe(&hunter, &life, &world.state).unwrap();
     }
@@ -1700,7 +1992,8 @@ mod tests {
         let before = audit.summary();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             audit.observe(&[], &[], &world.state)
-        })).expect("checked next tick must not panic");
+        }))
+        .expect("checked next tick must not panic");
         assert!(result.is_err());
         assert_eq!(audit.summary(), before);
         assert_eq!(audit.last_complete_tick(), u64::MAX);
@@ -1718,7 +2011,10 @@ mod tests {
         HunterEvent::Reproduction {
             tick,
             hunter: parent,
-            record: Reproduction::NotFunded { parent, reason: FundingBlocked::Stocks },
+            record: Reproduction::NotFunded {
+                parent,
+                reason: FundingBlocked::Stocks,
+            },
         }
     }
 
@@ -1730,7 +2026,10 @@ mod tests {
         let reserve = cfg.child_reserve_fraction * p.reserve_max;
         let energy = cfg.child_energy_fraction * p.energy_max;
         let build = cfg.build_cost * structure;
-        let key = EscrowKey { parent, started_tick: world.tick() - 1 };
+        let key = EscrowKey {
+            parent,
+            started_tick: world.tick() - 1,
+        };
         vec![
             HunterEvent::Reproduction {
                 tick: world.tick(),
@@ -1773,16 +2072,28 @@ mod tests {
         let profile = breeder(&world);
         let parent = found(&mut world, profile);
         feed_to_full(&mut world, parent);
-        world.state.hunters.member_mut(parent).expect("a member").next_reproduction_tick = 40;
+        world
+            .state
+            .hunters
+            .member_mut(parent)
+            .expect("a member")
+            .next_reproduction_tick = 40;
         let mut audit = ReproductionAudit::new(&world.state).expect("a fresh opening");
         for _ in 0..80 {
             world.step();
             let hunter = world.drain_hunter_events();
             let life = world.drain_events();
             if saw(&hunter, "miscarried") {
-                return Staged { world, audit, hunter, life };
+                return Staged {
+                    world,
+                    audit,
+                    hunter,
+                    life,
+                };
             }
-            audit.observe(&hunter, &life, &world.state).expect("a genuine tick must audit");
+            audit
+                .observe(&hunter, &life, &world.state)
+                .expect("a genuine tick must audit");
         }
         panic!("no same-tick loss in 80 ticks")
     }
@@ -1797,7 +2108,10 @@ mod tests {
         let mut audit = ReproductionAudit::new(&world.state).expect("a fresh opening");
         world.step();
         let before = audit.summary();
-        let ghost = OrganismId { slot: 12345, generation: 999 };
+        let ghost = OrganismId {
+            slot: 12345,
+            generation: 999,
+        };
         let err = audit
             .observe(&[blocked(world.tick(), ghost)], &[], &world.state)
             .expect_err("an unknown hunter has no transactions");
@@ -1806,7 +2120,10 @@ mod tests {
         assert_eq!(count(&audit.summary(), "not_funded_stocks"), 0);
 
         // The sharper case: the right slot, the wrong generation.
-        let stale = OrganismId { slot: member.slot, generation: member.generation + 1 };
+        let stale = OrganismId {
+            slot: member.slot,
+            generation: member.generation + 1,
+        };
         let err = audit
             .observe(&[blocked(world.tick(), stale)], &[], &world.state)
             .expect_err("a stale generation is not the member that holds that slot");
@@ -1845,7 +2162,10 @@ mod tests {
         let parent = bystander(&mut world, SPOT);
         let mut audit = ReproductionAudit::new(&world.state).expect("a fresh opening");
         world.step();
-        assert!(!world.hunters().contains(parent), "this fixture needs a non-member");
+        assert!(
+            !world.hunters().contains(parent),
+            "this fixture needs a non-member"
+        );
         let before = audit.summary();
         let err = audit
             .observe(&fund_refund(&world, parent), &[], &world.state)
@@ -1866,17 +2186,26 @@ mod tests {
             .filter(|e| matches!(e, HunterEvent::Reproduction { .. }))
             .cloned()
             .collect();
-        assert_eq!(copied.len(), 2, "the fixture carries exactly one funding and one loss");
+        assert_eq!(
+            copied.len(),
+            2,
+            "the fixture carries exactly one funding and one loss"
+        );
         let mut doubled = s.hunter.clone();
         doubled.extend(copied);
         let err = s
             .audit
             .observe(&doubled, &s.life, &s.world.state)
             .expect_err("a closed gestation cannot be reopened or reclosed");
-        assert!(err.to_string().contains("funded twice") || err.to_string().contains("closed"), "{err}");
+        assert!(
+            err.to_string().contains("funded twice") || err.to_string().contains("closed"),
+            "{err}"
+        );
         assert_eq!(s.audit.summary(), before, "the refusal was not atomic");
         // The genuine batch still audits, and counts once.
-        s.audit.observe(&s.hunter, &s.life, &s.world.state).expect("the genuine batch audits");
+        s.audit
+            .observe(&s.hunter, &s.life, &s.world.state)
+            .expect("the genuine batch audits");
         assert_eq!(count(&s.audit.summary(), "funded"), 1);
         assert_eq!(count(&s.audit.summary(), "miscarried"), 1);
     }
@@ -1888,14 +2217,20 @@ mod tests {
         let before = s.audit.summary();
         let mut dropped = s.hunter.clone();
         dropped.retain(|e| !matches!(e, HunterEvent::Death { .. }));
-        assert_eq!(dropped.len() + 1, s.hunter.len(), "the fixture carries one hunter death");
+        assert_eq!(
+            dropped.len() + 1,
+            s.hunter.len(),
+            "the fixture carries one hunter death"
+        );
         let err = s
             .audit
             .observe(&dropped, &s.life, &s.world.state)
             .expect_err("a member death must be reported in both channels");
         assert!(err.to_string().contains("no hunter death record"), "{err}");
         assert_eq!(s.audit.summary(), before);
-        s.audit.observe(&s.hunter, &s.life, &s.world.state).expect("the genuine batch audits");
+        s.audit
+            .observe(&s.hunter, &s.life, &s.world.state)
+            .expect("the genuine batch audits");
     }
 
     /// The rest of finding 5: a duplicated hunter death, and one whose cause disagrees with the
@@ -1921,7 +2256,15 @@ mod tests {
         assert_eq!(s.audit.summary(), before);
 
         // Disagreeing: the lineage says one cause, the ordinary event another.
-        let HunterEvent::Death { tick, id, gut_material, gut_energy, gut_energy_stored, cause } = death else {
+        let HunterEvent::Death {
+            tick,
+            id,
+            gut_material,
+            gut_energy,
+            gut_energy_stored,
+            cause,
+        } = death
+        else {
             panic!("a death record")
         };
         assert_eq!(cause, DeathCause::Age, "the fixture kills by age");
@@ -1942,9 +2285,14 @@ mod tests {
             .audit
             .observe(&relabelled, &s.life, &s.world.state)
             .expect_err("the two channels must agree on the cause");
-        assert!(err.to_string().contains("no matching ordinary death"), "{err}");
+        assert!(
+            err.to_string().contains("no matching ordinary death"),
+            "{err}"
+        );
         assert_eq!(s.audit.summary(), before);
-        s.audit.observe(&s.hunter, &s.life, &s.world.state).expect("the genuine batch audits");
+        s.audit
+            .observe(&s.hunter, &s.life, &s.world.state)
+            .expect("the genuine batch audits");
         assert_eq!(count(&s.audit.summary(), "miscarried"), 1);
     }
 
@@ -1958,7 +2306,11 @@ mod tests {
         world.step();
         let before = audit.summary();
         let mut events = fund_refund(&world, parent);
-        if let HunterEvent::Reproduction { record: Reproduction::Funded { key, .. }, .. } = &mut events[0] {
+        if let HunterEvent::Reproduction {
+            record: Reproduction::Funded { key, .. },
+            ..
+        } = &mut events[0]
+        {
             key.started_tick = u64::MAX;
         }
         let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1974,7 +2326,8 @@ mod tests {
     #[test]
     fn a_membership_addition_without_a_birth_is_refused() {
         let mut world = quiet(WorldConfig::default());
-        let mut audit = ReproductionAudit::new(&world.state).expect("a fresh opening on an empty lineage");
+        let mut audit =
+            ReproductionAudit::new(&world.state).expect("a fresh opening on an empty lineage");
         let profile = breeder(&world);
         let parent = found(&mut world, profile);
         world.step();
@@ -1982,9 +2335,15 @@ mod tests {
         let err = audit
             .observe(&[], &[], &world.state)
             .expect_err("the lineage grew without a birth");
-        assert!(err.to_string().contains("without a birth or a death"), "{err}");
+        assert!(
+            err.to_string().contains("without a birth or a death"),
+            "{err}"
+        );
         assert_eq!(audit.summary(), before);
-        assert!(!audit.sizes.contains_key(&parent), "the audit absorbed an unexplained member");
+        assert!(
+            !audit.sizes.contains_key(&parent),
+            "the audit absorbed an unexplained member"
+        );
         assert!(!audit.members.contains(&parent));
     }
 
@@ -1998,13 +2357,23 @@ mod tests {
             .iter()
             .find_map(|event| match event {
                 HunterEvent::Reproduction {
-                    record: Reproduction::Funded { key, escrow_structure, escrow_reserve, escrow_energy, .. },
+                    record:
+                        Reproduction::Funded {
+                            key,
+                            escrow_structure,
+                            escrow_reserve,
+                            escrow_energy,
+                            ..
+                        },
                     ..
                 } => Some((*key, *escrow_structure, *escrow_reserve, *escrow_energy)),
                 _ => None,
             })
             .expect("the funding");
-        assert!(s.world.state.organisms.get(key.parent).is_none(), "this fixture needs a dead parent");
+        assert!(
+            s.world.state.organisms.get(key.parent).is_none(),
+            "this fixture needs a dead parent"
+        );
         let mut relabelled = s.hunter.clone();
         for event in &mut relabelled {
             if let HunterEvent::Reproduction { record, .. } = event
@@ -2028,7 +2397,9 @@ mod tests {
             .expect_err("a dead parent cannot be refunded an escrow");
         assert!(err.to_string().contains("in the tick it died"), "{err}");
         assert_eq!(s.audit.summary(), before);
-        s.audit.observe(&s.hunter, &s.life, &s.world.state).expect("the genuine batch audits");
+        s.audit
+            .observe(&s.hunter, &s.life, &s.world.state)
+            .expect("the genuine batch audits");
         assert_eq!(count(&s.audit.summary(), "miscarried"), 1);
         assert_eq!(count(&s.audit.summary(), "refunded"), 0);
     }
@@ -2047,7 +2418,14 @@ mod tests {
             .iter()
             .find_map(|event| match event {
                 HunterEvent::Reproduction {
-                    record: Reproduction::Funded { key, escrow_structure, escrow_reserve, escrow_energy, .. },
+                    record:
+                        Reproduction::Funded {
+                            key,
+                            escrow_structure,
+                            escrow_reserve,
+                            escrow_energy,
+                            ..
+                        },
                     ..
                 } => Some((*key, *escrow_structure, *escrow_reserve, *escrow_energy)),
                 _ => None,
@@ -2060,7 +2438,10 @@ mod tests {
             {
                 *record = Reproduction::Born {
                     key,
-                    child: OrganismId { slot: 99, generation: 1 },
+                    child: OrganismId {
+                        slot: 99,
+                        generation: 1,
+                    },
                     child_structure: structure,
                     child_reserve: reserve,
                     child_energy: energy,
@@ -2068,8 +2449,15 @@ mod tests {
                 };
             }
         }
-        let err = s.audit.observe(&relabelled, &s.life, &s.world.state).expect_err("a dead parent cannot bear");
-        assert!(err.to_string().contains("cannot bear a child") || err.to_string().contains("not a live organism"), "{err}");
+        let err = s
+            .audit
+            .observe(&relabelled, &s.life, &s.world.state)
+            .expect_err("a dead parent cannot bear");
+        assert!(
+            err.to_string().contains("cannot bear a child")
+                || err.to_string().contains("not a live organism"),
+            "{err}"
+        );
         assert_eq!(s.audit.summary(), before);
 
         // A parent that closes a gestation and funds another in the same tick: core's due-birth
@@ -2080,13 +2468,21 @@ mod tests {
             .hunter
             .iter()
             .find_map(|e| match e {
-                HunterEvent::Reproduction { record, .. } if is(record, "born") => Some(record.parent()),
+                HunterEvent::Reproduction { record, .. } if is(record, "born") => {
+                    Some(record.parent())
+                }
                 _ => None,
             })
             .expect("a birth");
         let mut with_funding = staged.hunter.clone();
         let cfg = &staged.world.config().organism;
-        let p = &staged.world.state.organisms.get(parent).expect("alive").phenotype;
+        let p = &staged
+            .world
+            .state
+            .organisms
+            .get(parent)
+            .expect("alive")
+            .phenotype;
         let structure = cfg.child_structure_fraction * p.structure_adult;
         let reserve = cfg.child_reserve_fraction * p.reserve_max;
         let energy = cfg.child_energy_fraction * p.energy_max;
@@ -2095,7 +2491,10 @@ mod tests {
             tick: staged.world.tick(),
             hunter: parent,
             record: Reproduction::Funded {
-                key: EscrowKey { parent, started_tick: staged.world.tick() - 1 },
+                key: EscrowKey {
+                    parent,
+                    started_tick: staged.world.tick() - 1,
+                },
                 parent_reserve_before: structure + reserve,
                 parent_reserve_after: 0.0,
                 parent_energy_before: energy + build,
@@ -2110,8 +2509,15 @@ mod tests {
             .audit
             .observe(&with_funding, &staged.life, &staged.world.state)
             .expect_err("closing and funding in one tick is not a thing core does");
-        assert!(err.to_string().contains("closed a gestation") || err.to_string().contains("not holding"), "{err}");
+        assert!(
+            err.to_string().contains("closed a gestation")
+                || err.to_string().contains("not holding"),
+            "{err}"
+        );
         assert_eq!(staged.audit.summary(), before);
-        staged.audit.observe(&staged.hunter, &staged.life, &staged.world.state).expect("the genuine batch audits");
+        staged
+            .audit
+            .observe(&staged.hunter, &staged.life, &staged.world.state)
+            .expect("the genuine batch audits");
     }
 }

@@ -50,11 +50,16 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
 #[test]
 fn the_embedding_is_the_isotropic_cylinder_of_the_plan() {
     for (topo, s) in [(ring(), 1.0), (Topology::Ring { w: 640, h: 360 }, 2.0)] {
-        let Topology::Ring { w, h } = topo else { unreachable!() };
+        let Topology::Ring { w, h } = topo else {
+            unreachable!()
+        };
         let scale = Scale::new(s);
-        for (u, v) in
-            [(0.0, 0.0), (0.5, 0.5), (80.0, 45.0), (f64::from(w) - 0.5, f64::from(h) - 0.5)]
-        {
+        for (u, v) in [
+            (0.0, 0.0),
+            (0.5, 0.5),
+            (80.0, 45.0),
+            (f64::from(w) - 0.5, f64::from(h) - 0.5),
+        ] {
             let got = topo.embed(scale, &front(u, v));
             let want = reference_embed(f64::from(w), f64::from(h), s, u, v);
             for k in 0..3 {
@@ -69,7 +74,10 @@ fn the_embedding_is_the_isotropic_cylinder_of_the_plan() {
         // The radius is what makes arc length per pixel `1/(32·S)`: both rungs of §6's
         // ladder give the same cylinder, 1.59155 units across.
         let r = f64::from(w) / (std::f64::consts::TAU * 32.0 * s);
-        assert!((r - 1.591_549_430_918_953_5).abs() <= 1e-12, "{topo:?}: r = {r}");
+        assert!(
+            (r - 1.591_549_430_918_953_5).abs() <= 1e-12,
+            "{topo:?}: r = {r}"
+        );
     }
 }
 
@@ -180,13 +188,26 @@ fn normalize_maps_height_monotonically_to_latitude() {
 #[test]
 fn the_latitude_span_is_sixty_point_five_degrees() {
     let topo = ring();
-    let top = normalize(topo.embed(Scale::ONE, &front(0.0, 0.0)))[1].asin().to_degrees();
-    let bottom =
-        normalize(topo.embed(Scale::ONE, &front(0.0, f64::from(H))))[1].asin().to_degrees();
+    let top = normalize(topo.embed(Scale::ONE, &front(0.0, 0.0)))[1]
+        .asin()
+        .to_degrees();
+    let bottom = normalize(topo.embed(Scale::ONE, &front(0.0, f64::from(H))))[1]
+        .asin()
+        .to_degrees();
     assert!((top - 60.50).abs() <= 0.01, "top rim latitude {top}");
-    assert!((bottom + 60.50).abs() <= 0.01, "bottom rim latitude {bottom}");
-    assert_eq!(topo.embed(Scale::ONE, &front(0.0, 0.0))[1], 2.8125, "y_e at the top rim");
-    assert_eq!(topo.embed(Scale::ONE, &front(0.0, f64::from(H)))[1], -2.8125);
+    assert!(
+        (bottom + 60.50).abs() <= 0.01,
+        "bottom rim latitude {bottom}"
+    );
+    assert_eq!(
+        topo.embed(Scale::ONE, &front(0.0, 0.0))[1],
+        2.8125,
+        "y_e at the top rim"
+    );
+    assert_eq!(
+        topo.embed(Scale::ONE, &front(0.0, f64::from(H)))[1],
+        -2.8125
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -198,7 +219,10 @@ fn the_latitude_span_is_sixty_point_five_degrees() {
 #[test]
 fn blobs_per_channel_is_three_and_the_cap_is_fifty_five_degrees() {
     let cfg = WeatherConfig::default();
-    assert_eq!(cfg.blobs_per_channel, 3, "§5a's conclusion: the cube's defaults transfer");
+    assert_eq!(
+        cfg.blobs_per_channel, 3,
+        "§5a's conclusion: the cube's defaults transfer"
+    );
     assert_eq!(cfg.blob_radius_deg, 55.0);
     assert_eq!(cfg.amplitude, 0.3);
 
@@ -206,9 +230,18 @@ fn blobs_per_channel_is_three_and_the_cap_is_fifty_five_degrees() {
     assert_eq!(weather.light.len(), 3);
     assert_eq!(weather.moisture.len(), 3);
     for b in weather.light.iter().chain(weather.moisture.iter()) {
-        assert!((dot(b.center, b.center) - 1.0).abs() <= 1e-12, "the centre is a unit direction");
-        assert!((dot(b.axis, b.axis) - 1.0).abs() <= 1e-12, "the axis is a unit direction");
-        assert!(dot(b.center, b.axis).abs() <= 1e-9, "the axis is perpendicular to the centre");
+        assert!(
+            (dot(b.center, b.center) - 1.0).abs() <= 1e-12,
+            "the centre is a unit direction"
+        );
+        assert!(
+            (dot(b.axis, b.axis) - 1.0).abs() <= 1e-12,
+            "the axis is a unit direction"
+        );
+        assert!(
+            dot(b.center, b.axis).abs() <= 1e-9,
+            "the axis is perpendicular to the centre"
+        );
         assert!(b.rate > 0.0);
     }
 }
@@ -217,14 +250,23 @@ fn blobs_per_channel_is_three_and_the_cap_is_fifty_five_degrees() {
 /// have bit-identical weather — §5a's "RNG stream parity is trivially exact".
 #[test]
 fn the_weather_stream_is_identical_on_a_ring_and_on_a_cube() {
-    let mut cube_cfg = WorldConfig { seed: SEED, ..WorldConfig::default() };
+    let mut cube_cfg = WorldConfig {
+        seed: SEED,
+        ..WorldConfig::default()
+    };
     cube_cfg.topology = Topology::Cube;
-    let mut ring_cfg = WorldConfig { seed: SEED, ..WorldConfig::default() };
+    let mut ring_cfg = WorldConfig {
+        seed: SEED,
+        ..WorldConfig::default()
+    };
     ring_cfg.topology = ring();
 
     let mut cube = World::new(cube_cfg).expect("legal cube world");
     let mut ring_world = World::new(ring_cfg).expect("legal ring world");
-    assert_eq!(cube.state.weather, ring_world.state.weather, "weather at tick 0");
+    assert_eq!(
+        cube.state.weather, ring_world.state.weather,
+        "weather at tick 0"
+    );
 
     // Far enough for the orbit and for the per-minute random walk (20 Hz × 60 = 1,200).
     for _ in 0..1_300 {
@@ -235,7 +277,10 @@ fn the_weather_stream_is_identical_on_a_ring_and_on_a_cube() {
         cube.state.weather, ring_world.state.weather,
         "weather after 1,300 ticks, including the per-minute walk"
     );
-    assert_eq!(cube.state.weather.last_walk_minute, 1, "the walk really happened");
+    assert_eq!(
+        cube.state.weather.last_walk_minute, 1,
+        "the walk really happened"
+    );
     assert_ne!(
         Weather::new(&WeatherConfig::default(), SEED),
         cube.state.weather,
@@ -258,8 +303,11 @@ fn the_cap_aspect_at_the_rims_is_measured_and_recorded() {
     };
 
     let mut recorded = Vec::new();
-    for (label, centre_row) in [("top rim", 0u16), ("equator", ROWS / 2), ("bottom rim", ROWS - 1)]
-    {
+    for (label, centre_row) in [
+        ("top rim", 0u16),
+        ("equator", ROWS / 2),
+        ("bottom rim", ROWS - 1),
+    ] {
         let centre = dir_of(COLS / 2, centre_row);
         let mut in_cap = vec![false; usize::from(COLS) * usize::from(ROWS)];
         for cy in 0..ROWS {
@@ -271,8 +319,9 @@ fn the_cap_aspect_at_the_rims_is_measured_and_recorded() {
         }
         // Half-width along the centre's own row, and the extent up and down its own column.
         let row = |cy: u16, cx: u16| in_cap[usize::from(cy) * usize::from(COLS) + usize::from(cx)];
-        let half_width =
-            (0..COLS / 2).take_while(|d| row(centre_row, (COLS / 2 + d) % COLS)).count();
+        let half_width = (0..COLS / 2)
+            .take_while(|d| row(centre_row, (COLS / 2 + d) % COLS))
+            .count();
         let mut down = 0usize;
         while centre_row + (down as u16) < ROWS && row(centre_row + down as u16, COLS / 2) {
             down += 1;
@@ -297,8 +346,15 @@ fn the_cap_aspect_at_the_rims_is_measured_and_recorded() {
     let equator = recorded.iter().find(|r| r.0 == "equator").unwrap();
     let top = recorded.iter().find(|r| r.0 == "top rim").unwrap();
     let bottom = recorded.iter().find(|r| r.0 == "bottom rim").unwrap();
-    assert!(equator.4 > 0 && top.4 > 0 && bottom.4 > 0, "every cap covers some of the world");
-    assert_eq!(top.4, bottom.4, "the two rims are mirror images: {} vs {}", top.4, bottom.4);
+    assert!(
+        equator.4 > 0 && top.4 > 0 && bottom.4 > 0,
+        "every cap covers some of the world"
+    );
+    assert_eq!(
+        top.4, bottom.4,
+        "the two rims are mirror images: {} vs {}",
+        top.4, bottom.4
+    );
     assert!(
         (top.5 - bottom.5).abs() <= 1e-12,
         "and their aspects match: {} vs {}",
@@ -314,5 +370,9 @@ fn the_cap_aspect_at_the_rims_is_measured_and_recorded() {
     // The equator cap is unclipped, so its half-width is the 55° azimuth arc: 55/360 of 80
     // cells = 12.2, and the ±55° meridian reaches r·tan(55°)·32 px = 18.2 cells.
     assert_eq!(equator.1, 13, "equator half-width in cells");
-    assert!(equator.2 >= 18 && equator.2 <= 19, "equator reach up: {}", equator.2);
+    assert!(
+        equator.2 >= 18 && equator.2 <= 19,
+        "equator reach up: {}",
+        equator.2
+    );
 }

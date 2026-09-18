@@ -63,9 +63,17 @@ impl Clip {
             (seconds / self.seconds).clamp(0.0, 1.0) * (n - 1) as f64
         };
         let i = (u.floor() as usize).min(n - 1);
-        let j = if self.looping { (i + 1) % n } else { (i + 1).min(n - 1) };
+        let j = if self.looping {
+            (i + 1) % n
+        } else {
+            (i + 1).min(n - 1)
+        };
         let mix = (u - i as f64) as f32;
-        Pose { first: &self.frames[i], second: &self.frames[j], mix }
+        Pose {
+            first: &self.frames[i],
+            second: &self.frames[j],
+            mix,
+        }
     }
 }
 
@@ -118,7 +126,10 @@ impl Plant {
     /// carries one. A pair without a clip (and every v1–v4 pack) returns `None`, which is
     /// the presenter's cue to keep its reveal mask.
     pub fn transition(&self, from: u8, to: u8) -> Option<&Clip> {
-        self.transitions.iter().find(|t| t.from == from && t.to == to).map(|t| &t.clip)
+        self.transitions
+            .iter()
+            .find(|t| t.from == from && t.to == to)
+            .map(|t| &t.clip)
     }
 }
 
@@ -214,18 +225,36 @@ fn derive_vine_strips(original: &Clip) -> Result<VineStrips> {
         }
     }
     let piece = |endpoint: bool| -> Result<Clip> {
-        let frames = original.frames.iter().map(|frame| {
-            let pixels = (0..16).flat_map(|y| {
-                (0..16).map(move |x| {
-                    let keep = if endpoint { (4..8).contains(&y) } else { (1..15).contains(&y) };
-                    if keep { frame.texel(x, y) } else { [0.0; 4] }
-                })
-            }).collect();
-            Sprite::from_premultiplied(16, 16, frame.pivot(), pixels).map_err(anyhow::Error::msg)
-        }).collect::<Result<Vec<_>>>()?;
-        Ok(Clip { frames, seconds: original.seconds, looping: original.looping })
+        let frames = original
+            .frames
+            .iter()
+            .map(|frame| {
+                let pixels = (0..16)
+                    .flat_map(|y| {
+                        (0..16).map(move |x| {
+                            let keep = if endpoint {
+                                (4..8).contains(&y)
+                            } else {
+                                (1..15).contains(&y)
+                            };
+                            if keep { frame.texel(x, y) } else { [0.0; 4] }
+                        })
+                    })
+                    .collect();
+                Sprite::from_premultiplied(16, 16, frame.pivot(), pixels)
+                    .map_err(anyhow::Error::msg)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Clip {
+            frames,
+            seconds: original.seconds,
+            looping: original.looping,
+        })
     };
-    Ok(VineStrips { trunk: piece(false)?, endpoint: piece(true)? })
+    Ok(VineStrips {
+        trunk: piece(false)?,
+        endpoint: piece(true)?,
+    })
 }
 
 /// The lowest tail row the loader accepts: the top trunk segment reaches four rows into
@@ -293,7 +322,10 @@ impl ArtPack {
         // Pack v4 makes the sample counts data; earlier packs always carried eight
         // creature samples and four plant samples, and still say so.
         let frames = frame_count(&meta["frames"], "frames")?;
-        ensure!(version >= 4 || frames == 8, "packs before v4 carry eight creature frames");
+        ensure!(
+            version >= 4 || frames == 8,
+            "packs before v4 carry eight creature frames"
+        );
         ensure!(
             meta["creatures"] == "creatures.png" && meta["habitat"] == "habitat.png",
             "unsupported atlas filenames"
@@ -307,7 +339,11 @@ impl ArtPack {
                 .as_array()
                 .context("creature_names must be a list")?
                 .iter()
-                .map(|v| v.as_str().map(str::to_owned).context("creature name must be a string"))
+                .map(|v| {
+                    v.as_str()
+                        .map(str::to_owned)
+                        .context("creature name must be a string")
+                })
                 .collect::<Result<_>>()?,
             None => ["lantern", "sail", "mossback"].map(str::to_owned).into(),
         };
@@ -377,7 +413,10 @@ impl ArtPack {
             .collect::<Result<Vec<_>>>()?;
         let plant_frames = if version >= 2 {
             let n = frame_count(&meta["plant_frames"], "plant_frames")?;
-            ensure!(version >= 4 || n == 4, "packs before v4 carry four plant frames");
+            ensure!(
+                version >= 4 || n == 4,
+                "packs before v4 carry four plant frames"
+            );
             n
         } else {
             4
@@ -388,11 +427,21 @@ impl ArtPack {
             Vec::new()
         };
         let (tall, ground) = if version >= 3 {
-            (load_tall(directory, &meta, plant_frames)?, load_ground(directory, &meta)?)
+            (
+                load_tall(directory, &meta, plant_frames)?,
+                load_ground(directory, &meta)?,
+            )
         } else {
             (Vec::new(), Vec::new())
         };
-        Ok(Self { creature_names, clips, habitat, plants, tall, ground })
+        Ok(Self {
+            creature_names,
+            clips,
+            habitat,
+            plants,
+            tall,
+            ground,
+        })
     }
 
     /// Samples per creature clip (every creature clip in a pack has the same count).
@@ -440,7 +489,9 @@ impl ArtPack {
 
 /// A sample count from the pack, within [`MIN_FRAMES`]`..=`[`MAX_FRAMES`].
 fn frame_count(value: &serde_json::Value, what: &str) -> Result<usize> {
-    let n = value.as_u64().with_context(|| format!("pack needs {what}"))? as usize;
+    let n = value
+        .as_u64()
+        .with_context(|| format!("pack needs {what}"))? as usize;
     ensure!(
         (MIN_FRAMES..=MAX_FRAMES).contains(&n),
         "{what} must be {MIN_FRAMES}..={MAX_FRAMES}, got {n}"
@@ -462,8 +513,13 @@ fn load_plants(
     plant_frames: usize,
     version: u64,
 ) -> Result<Vec<Plant>> {
-    ensure!(meta["plant_atlas"] == "plants.png", "unsupported plant atlas layout");
-    let rows = meta["plants"].as_array().context("pack v2 needs a plants array")?;
+    ensure!(
+        meta["plant_atlas"] == "plants.png",
+        "unsupported plant atlas layout"
+    );
+    let rows = meta["plants"]
+        .as_array()
+        .context("pack v2 needs a plants array")?;
     ensure!(!rows.is_empty(), "pack v2 has no plant rows");
     let (width, height, rgba) = read_rgba(&directory.join("plants.png"))?;
     ensure!(
@@ -476,32 +532,59 @@ fn load_plants(
     // Every frame goes through `tile`, so a transition frame passes the same 9-pixel
     // extent budget as a stage frame (`Sprite::from_rgba` rejects a wider one).
     let clip_at = |row: usize, seconds: f64, looping: bool| -> Result<Clip> {
-        ensure!(seconds.is_finite() && seconds > 0.0, "invalid plant clip duration");
+        ensure!(
+            seconds.is_finite() && seconds > 0.0,
+            "invalid plant clip duration"
+        );
         let frames = (0..plant_frames)
             .map(|column| tile(&rgba, width, column * 16, row * 16))
             .collect::<Result<Vec<_>>>()?;
-        Ok(Clip { frames, seconds, looping })
+        Ok(Clip {
+            frames,
+            seconds,
+            looping,
+        })
     };
     let mut plants: Vec<Plant> = Vec::new();
     // Rows arrive plant-major; a plant closes when the next name appears.
     let mut pending: PendingPlant = None;
     let close = |pending: &mut PendingPlant, plants: &mut Vec<Plant>| -> Result<()> {
         if let Some((name, band, stages, fruit, transitions)) = pending.take() {
-            ensure!(stages.len() == 3, "plant {name} must have exactly three stages");
+            ensure!(
+                stages.len() == 3,
+                "plant {name} must have exactly three stages"
+            );
             let mut it = stages.into_iter();
             let stages = [it.next().unwrap(), it.next().unwrap(), it.next().unwrap()];
-            ensure!(plants.iter().all(|p| p.name != name), "duplicate plant {name}");
-            plants.push(Plant { name, band, stages, fruit, transitions });
+            ensure!(
+                plants.iter().all(|p| p.name != name),
+                "duplicate plant {name}"
+            );
+            plants.push(Plant {
+                name,
+                band,
+                stages,
+                fruit,
+                transitions,
+            });
         }
         Ok(())
     };
     for (row, entry) in rows.iter().enumerate() {
-        ensure!(entry["row"].as_u64() == Some(row as u64), "plant rows must be sequential");
+        ensure!(
+            entry["row"].as_u64() == Some(row as u64),
+            "plant rows must be sequential"
+        );
         let name = entry["name"].as_str().context("plant row needs a name")?;
         let band = Band::parse(entry["band"].as_str().context("plant row needs a band")?)
             .with_context(|| format!("unknown band on plant {name}"))?;
-        let seconds = entry["seconds"].as_f64().context("plant row needs seconds")?;
-        ensure!(entry["frames"] == plant_frames as u64, "plant rows carry {plant_frames} frames");
+        let seconds = entry["seconds"]
+            .as_f64()
+            .context("plant row needs seconds")?;
+        ensure!(
+            entry["frames"] == plant_frames as u64,
+            "plant rows carry {plant_frames} frames"
+        );
         if pending.as_ref().is_none_or(|(n, ..)| n != name) {
             close(&mut pending, &mut plants)?;
             pending = Some((name.to_string(), band, Vec::new(), None, Vec::new()));
@@ -520,7 +603,10 @@ fn load_plants(
             }
             // Pack v5: a growth transition, after this plant's stage and fruit rows.
             v if v == "grow" && slot.2.len() == 3 => {
-                ensure!(version >= 5, "growth transitions need pack v5, not v{version}");
+                ensure!(
+                    version >= 5,
+                    "growth transitions need pack v5, not v{version}"
+                );
                 let step = |key: &str| -> Result<u8> {
                     let value = entry[key]
                         .as_u64()
@@ -534,14 +620,20 @@ fn load_plants(
                     "plant {name}: growth row {row} goes {from} → {to}; a transition is one stage step up"
                 );
                 ensure!(
-                    slot.4.iter().all(|t: &Transition| (t.from, t.to) != (from, to)),
+                    slot.4
+                        .iter()
+                        .all(|t: &Transition| (t.from, t.to) != (from, to)),
                     "plant {name}: two growth clips for {from} → {to}"
                 );
                 ensure!(
                     entry["loop"].as_bool() == Some(false),
                     "plant {name}: growth row {row} must be marked loop: false"
                 );
-                slot.4.push(Transition { from, to, clip: clip_at(row, seconds, false)? });
+                slot.4.push(Transition {
+                    from,
+                    to,
+                    clip: clip_at(row, seconds, false)?,
+                });
             }
             other => anyhow::bail!("plant {name}: unexpected stage {other} at row {row}"),
         }
@@ -556,9 +648,18 @@ fn load_plants(
 /// explicit corner-cap-owner opt-in.
 type PendingTall = Option<(String, Option<Clip>, Option<Clip>, Option<Clip>, bool, bool)>;
 
-fn load_tall(directory: &Path, meta: &serde_json::Value, plant_frames: usize) -> Result<Vec<TallPlant>> {
-    ensure!(meta["tall_atlas"] == "tall.png", "unsupported tall atlas layout");
-    let rows = meta["tall"].as_array().context("pack v3 needs a tall array")?;
+fn load_tall(
+    directory: &Path,
+    meta: &serde_json::Value,
+    plant_frames: usize,
+) -> Result<Vec<TallPlant>> {
+    ensure!(
+        meta["tall_atlas"] == "tall.png",
+        "unsupported tall atlas layout"
+    );
+    let rows = meta["tall"]
+        .as_array()
+        .context("pack v3 needs a tall array")?;
     ensure!(!rows.is_empty(), "pack v3 has no tall plant rows");
     let (width, height, rgba) = read_rgba(&directory.join("tall.png"))?;
     ensure!(
@@ -569,23 +670,37 @@ fn load_tall(directory: &Path, meta: &serde_json::Value, plant_frames: usize) ->
         rows.len()
     );
     let clip_at = |row: usize, seconds: f64| -> Result<Clip> {
-        ensure!(seconds.is_finite() && seconds > 0.0, "invalid tall clip duration");
+        ensure!(
+            seconds.is_finite() && seconds > 0.0,
+            "invalid tall clip duration"
+        );
         let frames = (0..plant_frames)
             .map(|column| tile(&rgba, width, column * 16, row * 16))
             .collect::<Result<Vec<_>>>()?;
-        Ok(Clip { frames, seconds, looping: true })
+        Ok(Clip {
+            frames,
+            seconds,
+            looping: true,
+        })
     };
     let mut out: Vec<TallPlant> = Vec::new();
     let mut pending: PendingTall = None;
-    let close = |pending: &mut PendingTall, out: &mut Vec<TallPlant>|
-     -> Result<()> {
+    let close = |pending: &mut PendingTall, out: &mut Vec<TallPlant>| -> Result<()> {
         if let Some((name, base, trunk, crown, vine_opt_in, corner_cap_owner)) = pending.take() {
             let trunk = trunk.with_context(|| format!("tall plant {name} has no trunk"))?;
-            ensure!(out.iter().all(|p| p.name != name), "duplicate tall plant {name}");
+            ensure!(
+                out.iter().all(|p| p.name != name),
+                "duplicate tall plant {name}"
+            );
             let vine_strips = if vine_opt_in {
-                ensure!(base.is_none() && crown.is_none(), "vine_strips requires a trunk-only vinecoil (no base or crown)");
+                ensure!(
+                    base.is_none() && crown.is_none(),
+                    "vine_strips requires a trunk-only vinecoil (no base or crown)"
+                );
                 Some(derive_vine_strips(&trunk).with_context(|| format!("tall plant {name}"))?)
-            } else { None };
+            } else {
+                None
+            };
             // The corner-cap owner is accepted only on the shipped host caps: the listing is
             // the record of which art passed the dense corner handoff sweep. Checked once
             // the plant is whole, after the vine's own shape rule.
@@ -593,7 +708,10 @@ fn load_tall(directory: &Path, meta: &serde_json::Value, plant_frames: usize) ->
                 !corner_cap_owner || CORNER_CAP_OWNER_HOSTS.contains(&name.as_str()),
                 "corner_cap_owner is accepted only on the shipped host caps {CORNER_CAP_OWNER_HOSTS:?}, not {name}"
             );
-            ensure!(!corner_cap_owner || crown.is_some(), "corner_cap_owner requires a crown for tall plant {name}");
+            ensure!(
+                !corner_cap_owner || crown.is_some(),
+                "corner_cap_owner requires a crown for tall plant {name}"
+            );
             let mut tail_row = 16;
             let cap = match &crown {
                 Some(crown) => {
@@ -625,27 +743,66 @@ fn load_tall(directory: &Path, meta: &serde_json::Value, plant_frames: usize) ->
                 }
                 None => None,
             };
-            out.push(TallPlant { name, base, trunk, crown, cap, tail_row, vine_strips, corner_cap_owner });
+            out.push(TallPlant {
+                name,
+                base,
+                trunk,
+                crown,
+                cap,
+                tail_row,
+                vine_strips,
+                corner_cap_owner,
+            });
         }
         Ok(())
     };
     for (row, entry) in rows.iter().enumerate() {
-        ensure!(entry["row"].as_u64() == Some(row as u64), "tall rows must be sequential");
+        ensure!(
+            entry["row"].as_u64() == Some(row as u64),
+            "tall rows must be sequential"
+        );
         let name = entry["name"].as_str().context("tall row needs a name")?;
         let vine_opt_in = if let Some(selector) = entry.get("vine_strips") {
-            ensure!(selector.as_str() == Some(VINE_STRIPS_V1), "unsupported vine_strips selector at tall row {row}");
-            ensure!(name == "vinecoil" && entry["part"] == "trunk", "vine_strips is supported only on the vinecoil trunk row");
-            ensure!(entry.get("loop").is_none_or(|v| v.as_bool() == Some(true)), "vine_strips must loop");
+            ensure!(
+                selector.as_str() == Some(VINE_STRIPS_V1),
+                "unsupported vine_strips selector at tall row {row}"
+            );
+            ensure!(
+                name == "vinecoil" && entry["part"] == "trunk",
+                "vine_strips is supported only on the vinecoil trunk row"
+            );
+            ensure!(
+                entry.get("loop").is_none_or(|v| v.as_bool() == Some(true)),
+                "vine_strips must loop"
+            );
             true
-        } else { false };
+        } else {
+            false
+        };
         let corner_cap_owner = if let Some(selector) = entry.get("corner_cap_owner") {
-            ensure!(selector.as_str() == Some(CORNER_CAP_OWNER_V1), "unsupported corner_cap_owner selector at tall row {row}");
-            ensure!(entry["part"] == "crown", "corner_cap_owner is supported only on a crown row (tall row {row})");
-            ensure!(entry.get("loop").is_none_or(|v| v.as_bool() == Some(true)), "corner_cap_owner must loop");
+            ensure!(
+                selector.as_str() == Some(CORNER_CAP_OWNER_V1),
+                "unsupported corner_cap_owner selector at tall row {row}"
+            );
+            ensure!(
+                entry["part"] == "crown",
+                "corner_cap_owner is supported only on a crown row (tall row {row})"
+            );
+            ensure!(
+                entry.get("loop").is_none_or(|v| v.as_bool() == Some(true)),
+                "corner_cap_owner must loop"
+            );
             true
-        } else { false };
-        let seconds = entry["seconds"].as_f64().context("tall row needs seconds")?;
-        ensure!(entry["frames"] == plant_frames as u64, "tall rows carry {plant_frames} frames");
+        } else {
+            false
+        };
+        let seconds = entry["seconds"]
+            .as_f64()
+            .context("tall row needs seconds")?;
+        ensure!(
+            entry["frames"] == plant_frames as u64,
+            "tall rows carry {plant_frames} frames"
+        );
         if pending.as_ref().is_none_or(|(n, ..)| n != name) {
             close(&mut pending, &mut out)?;
             pending = Some((name.to_string(), None, None, None, false, false));
@@ -656,7 +813,9 @@ fn load_tall(directory: &Path, meta: &serde_json::Value, plant_frames: usize) ->
         let clip = clip_at(row, seconds)?;
         // Parts arrive in base, trunk, crown order; each at most once.
         match entry["part"].as_str() {
-            Some("base") if slot.1.is_none() && slot.2.is_none() && slot.3.is_none() => slot.1 = Some(clip),
+            Some("base") if slot.1.is_none() && slot.2.is_none() && slot.3.is_none() => {
+                slot.1 = Some(clip)
+            }
             Some("trunk") if slot.2.is_none() && slot.3.is_none() => slot.2 = Some(clip),
             Some("crown") if slot.2.is_some() && slot.3.is_none() => slot.3 = Some(clip),
             other => anyhow::bail!("tall plant {name}: unexpected part {other:?} at row {row}"),
@@ -677,7 +836,9 @@ fn load_ground(directory: &Path, meta: &serde_json::Value) -> Result<Vec<GroundT
             && meta["ground_frames"] == GROUND_FRAMES as u64,
         "unsupported ground atlas layout"
     );
-    let rows = meta["ground"].as_array().context("pack v3 needs a ground array")?;
+    let rows = meta["ground"]
+        .as_array()
+        .context("pack v3 needs a ground array")?;
     ensure!(!rows.is_empty(), "pack v3 has no ground rows");
     let (width, height, rgba) = read_rgba(&directory.join("ground.png"))?;
     ensure!(
@@ -689,27 +850,55 @@ fn load_ground(directory: &Path, meta: &serde_json::Value) -> Result<Vec<GroundT
     );
     let mut out: Vec<GroundTile> = Vec::new();
     for (row, entry) in rows.iter().enumerate() {
-        ensure!(entry["row"].as_u64() == Some(row as u64), "ground rows must be sequential");
-        let name = entry["name"].as_str().context("ground row needs a name")?.to_string();
+        ensure!(
+            entry["row"].as_u64() == Some(row as u64),
+            "ground rows must be sequential"
+        );
+        let name = entry["name"]
+            .as_str()
+            .context("ground row needs a name")?
+            .to_string();
         let band = Band::parse(entry["band"].as_str().context("ground row needs a band")?)
             .with_context(|| format!("unknown band on ground tile {name}"))?;
-        let seconds = entry["seconds"].as_f64().context("ground row needs seconds")?;
-        ensure!(seconds.is_finite() && seconds > 0.0, "invalid ground clip duration");
-        ensure!(entry["frames"] == GROUND_FRAMES as u64, "ground rows carry {GROUND_FRAMES} frames");
-        ensure!(out.iter().all(|g| g.name != name), "duplicate ground tile {name}");
-        ensure!(out.iter().all(|g| g.band != band), "two ground tiles for {}", band.name());
+        let seconds = entry["seconds"]
+            .as_f64()
+            .context("ground row needs seconds")?;
+        ensure!(
+            seconds.is_finite() && seconds > 0.0,
+            "invalid ground clip duration"
+        );
+        ensure!(
+            entry["frames"] == GROUND_FRAMES as u64,
+            "ground rows carry {GROUND_FRAMES} frames"
+        );
+        ensure!(
+            out.iter().all(|g| g.name != name),
+            "duplicate ground tile {name}"
+        );
+        ensure!(
+            out.iter().all(|g| g.band != band),
+            "two ground tiles for {}",
+            band.name()
+        );
         let frames = (0..GROUND_FRAMES)
             .map(|column| {
                 let (x, y) = (column * GROUND_TILE, row * GROUND_TILE);
                 let mut px = Vec::with_capacity(GROUND_TILE * GROUND_TILE * 4);
                 for r in y..y + GROUND_TILE {
-                    px.extend_from_slice(&rgba[(r * width + x) * 4..(r * width + x + GROUND_TILE) * 4]);
+                    px.extend_from_slice(
+                        &rgba[(r * width + x) * 4..(r * width + x + GROUND_TILE) * 4],
+                    );
                 }
                 Sprite::from_rgba(GROUND_TILE, GROUND_TILE, Vec2::new(4.0, 4.0), &px)
                     .map_err(anyhow::Error::msg)
             })
             .collect::<Result<Vec<_>>>()?;
-        out.push(GroundTile { name, band, frames, seconds });
+        out.push(GroundTile {
+            name,
+            band,
+            frames,
+            seconds,
+        });
     }
     Ok(out)
 }
@@ -769,7 +958,10 @@ mod tests {
             }
         }
         let bud = &art.clips[3];
-        assert!(std::ptr::eq(bud.at(bud.seconds * 4.0), bud.frames.last().unwrap()));
+        assert!(std::ptr::eq(
+            bud.at(bud.seconds * 4.0),
+            bud.frames.last().unwrap()
+        ));
         let movement = &art.clips[1];
         assert!(std::ptr::eq(
             movement.at(movement.seconds),
@@ -813,7 +1005,10 @@ mod tests {
         }
         // The last rig's frames are reachable through the same accessor as the first's.
         let last = art.creature_count() - 1;
-        assert!(std::ptr::eq(art.creature(last, 0, 0.0), &art.clips[last * 4].frames[0]));
+        assert!(std::ptr::eq(
+            art.creature(last, 0, 0.0),
+            &art.clips[last * 4].frames[0]
+        ));
     }
 
     fn distinct_frames(clip: &Clip) -> usize {
@@ -845,24 +1040,36 @@ mod tests {
             assert_eq!(plant.band, band, "{name}");
             assert_eq!(plant.fruit.is_some(), fruit, "{name} fruit");
             assert_eq!(
-                plant.transitions.iter().map(|t| (t.from, t.to)).collect::<Vec<_>>(),
+                plant
+                    .transitions
+                    .iter()
+                    .map(|t| (t.from, t.to))
+                    .collect::<Vec<_>>(),
                 transitions,
                 "{name} growth transitions"
             );
             for step in transitions {
-                let clip = plant.transition(step.0, step.1).expect("declared transition");
+                let clip = plant
+                    .transition(step.0, step.1)
+                    .expect("declared transition");
                 assert!(!clip.looping, "{name} {step:?} must not loop");
                 assert_eq!(clip.frames.len(), art.plant_frames(), "{name} {step:?}");
                 assert!(clip.seconds > 0.0, "{name} {step:?}");
                 for frame in &clip.frames {
-                    assert!(frame.extent() > 0.0 && frame.extent() <= 9.0, "{name} {step:?}");
+                    assert!(
+                        frame.extent() > 0.0 && frame.extent() <= 9.0,
+                        "{name} {step:?}"
+                    );
                 }
             }
             assert!(std::ptr::eq(art.plant(name).unwrap(), plant));
             let clips = plant.stages.iter().chain(plant.fruit.iter());
             for (i, clip) in clips.enumerate() {
                 assert_eq!(clip.frames.len(), art.plant_frames(), "{name} clip {i}");
-                assert!(clip.looping && clip.seconds > 0.0, "{name} clip {i} must loop");
+                assert!(
+                    clip.looping && clip.seconds > 0.0,
+                    "{name} clip {i} must loop"
+                );
                 let need = if i == 0 { 2 } else { 4 };
                 assert!(
                     distinct_frames(clip) >= need,
@@ -870,7 +1077,10 @@ mod tests {
                     distinct_frames(clip)
                 );
                 for frame in &clip.frames {
-                    assert!(frame.extent() > 0.0 && frame.extent() <= 9.0, "{name} clip {i}");
+                    assert!(
+                        frame.extent() > 0.0 && frame.extent() <= 9.0,
+                        "{name} clip {i}"
+                    );
                 }
             }
         }
@@ -907,10 +1117,15 @@ mod tests {
     #[test]
     fn the_baked_tall_plants_have_periodic_trunks_that_their_caps_join() {
         let art = ArtPack::load(&atelier()).unwrap();
-        let expected = [("spiretree", true, true), ("glasscane", true, true), ("vinecoil", false, false)];
+        let expected = [
+            ("spiretree", true, true),
+            ("glasscane", true, true),
+            ("vinecoil", false, false),
+        ];
         assert_eq!(art.tall.len(), expected.len());
         let meta: serde_json::Value =
-            serde_json::from_reader(std::fs::File::open(atelier().join("pack.json")).unwrap()).unwrap();
+            serde_json::from_reader(std::fs::File::open(atelier().join("pack.json")).unwrap())
+                .unwrap();
         let rows = meta["tall"].as_array().unwrap();
         let (width, _, rgba) = read_rgba(&atelier().join("tall.png")).unwrap();
         for (plant, (name, base, crown)) in art.tall.iter().zip(expected) {
@@ -919,15 +1134,31 @@ mod tests {
             assert_eq!(plant.crown.is_some(), crown, "{name} crown");
             assert!(std::ptr::eq(art.tall_plant(name).unwrap(), plant));
             let row_of = |part: &str| {
-                rows.iter().position(|r| r["name"] == name && r["part"] == part).unwrap()
+                rows.iter()
+                    .position(|r| r["name"] == name && r["part"] == part)
+                    .unwrap()
             };
             let trunk_row = row_of("trunk");
-            for clip in [Some(&plant.trunk), plant.base.as_ref(), plant.crown.as_ref()].into_iter().flatten() {
+            for clip in [
+                Some(&plant.trunk),
+                plant.base.as_ref(),
+                plant.crown.as_ref(),
+            ]
+            .into_iter()
+            .flatten()
+            {
                 assert_eq!(clip.frames.len(), art.plant_frames());
                 assert!(clip.looping && clip.seconds > 0.0);
-                assert!(distinct_frames(clip) >= 4, "{name}: a column part needs four distinct frames");
+                assert!(
+                    distinct_frames(clip) >= 4,
+                    "{name}: a column part needs four distinct frames"
+                );
                 for frame in &clip.frames {
-                    assert!(frame.extent() > 0.0 && frame.extent() <= 9.0, "{name} extent {}", frame.extent());
+                    assert!(
+                        frame.extent() > 0.0 && frame.extent() <= 9.0,
+                        "{name} extent {}",
+                        frame.extent()
+                    );
                 }
             }
             for frame in 0..art.plant_frames() {
@@ -942,7 +1173,8 @@ mod tests {
                         let end = pixel(&rgba, width, x0 + x, trunk_row * 16 + y);
                         let inner = if y == 0 { y + 4 } else { y - 4 };
                         assert!(
-                            end[3] == 0 || end == pixel(&rgba, width, x0 + x, trunk_row * 16 + inner),
+                            end[3] == 0
+                                || end == pixel(&rgba, width, x0 + x, trunk_row * 16 + inner),
                             "{name} trunk frame {frame} row {y} is neither empty nor the pattern at ({x},{y})"
                         );
                     }
@@ -992,17 +1224,29 @@ mod tests {
     fn the_lanternstalk_grows_from_its_sprout_into_the_neutral_stage_one_image() {
         let art = ArtPack::load(&atelier()).unwrap();
         let plant = art.plant("lanternstalk").unwrap();
-        let clip = plant.transition(0, 1).expect("pack v5 carries the growth pilot");
+        let clip = plant
+            .transition(0, 1)
+            .expect("pack v5 carries the growth pilot");
         // 1 → 2 is authored too (the growth expansion); only this pilot carries the
         // stricter "endpoint is a loop sample" property asserted below.
-        assert!(plant.transition(1, 2).is_some(), "the 1 → 2 step is authored as well");
-        assert!(plant.transition(1, 0).is_none(), "a transition only runs upward");
+        assert!(
+            plant.transition(1, 2).is_some(),
+            "the 1 → 2 step is authored as well"
+        );
+        assert!(
+            plant.transition(1, 0).is_none(),
+            "a transition only runs upward"
+        );
         assert!(!clip.looping);
         assert_eq!(clip.frames.len(), art.plant_frames());
         assert!(distinct_frames(clip) >= 4, "the growth clip must move");
         // Sampled inclusively, so the endpoints are the poses the presenter blends into.
         let (first, last) = (clip.frames.first().unwrap(), clip.frames.last().unwrap());
-        assert_ne!(format!("{first:?}"), format!("{last:?}"), "the plant must have grown");
+        assert_ne!(
+            format!("{first:?}"),
+            format!("{last:?}"),
+            "the plant must have grown"
+        );
         assert!(std::ptr::eq(clip.sample(0.0).first, first));
         assert!(std::ptr::eq(clip.sample(clip.seconds).first, last));
         // The neutral pose of a stage is rotation 0 with modulate 1, which for these clips
@@ -1049,7 +1293,11 @@ mod tests {
     #[test]
     fn the_baked_ground_tiles_cover_the_three_bands_and_wrap_without_a_seam() {
         let art = ArtPack::load(&atelier()).unwrap();
-        let expected = [("grit", Band::Soil), ("mossweave", Band::Foliage), ("frondmat", Band::Canopy)];
+        let expected = [
+            ("grit", Band::Soil),
+            ("mossweave", Band::Foliage),
+            ("frondmat", Band::Canopy),
+        ];
         assert_eq!(art.ground.len(), expected.len());
         let (width, _, rgba) = read_rgba(&atelier().join("ground.png")).unwrap();
         for (row, (tile, (name, band))) in art.ground.iter().zip(expected).enumerate() {
@@ -1066,7 +1314,10 @@ mod tests {
                 .len();
             assert!(distinct >= 2, "{name} does not breathe");
             for (frame, sprite) in tile.frames.iter().enumerate() {
-                assert!(sprite.extent() > 0.0 && sprite.extent() <= 9.0, "{name} frame {frame}");
+                assert!(
+                    sprite.extent() > 0.0 && sprite.extent() <= 9.0,
+                    "{name} frame {frame}"
+                );
                 let (x0, y0) = (frame * GROUND_TILE, row * GROUND_TILE);
                 let a = |x: usize, y: usize| alpha(&rgba, width, x0 + x, y0 + y);
                 // Seam test: the alpha step across the wrap (column 7 → column 0 of the
@@ -1096,7 +1347,10 @@ mod tests {
                     wrap_mean <= interior_mean * 1.25 + 2.0,
                     "{name} frame {frame}: wrap step {wrap_mean:.1} vs interior {interior_mean:.1}"
                 );
-                let coverage: i32 = (0..GROUND_TILE).flat_map(|y| (0..GROUND_TILE).map(move |x| (x, y))).map(|(x, y)| a(x, y)).sum();
+                let coverage: i32 = (0..GROUND_TILE)
+                    .flat_map(|y| (0..GROUND_TILE).map(move |x| (x, y)))
+                    .map(|(x, y)| a(x, y))
+                    .sum();
                 assert!(coverage > 0, "{name} frame {frame} is empty");
             }
         }

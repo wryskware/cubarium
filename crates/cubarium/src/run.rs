@@ -11,12 +11,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use cube_proto::Frame;
 use cubarium_render::Canvas;
 use cubarium_surface::PixelImage;
+use cube_proto::Frame;
 
-use crate::clock::{Clock, Step};
 use crate::cli::{Command, Demo, SinkArg};
+use crate::clock::{Clock, Step};
 use crate::scene::{SceneKind, Scenes, render};
 use crate::sink::{FrameSink, Output, PngSink, ShimSink, WebSink, WorldShape};
 
@@ -69,9 +69,7 @@ fn run_demo(demo: &Demo, stop: &AtomicBool) -> Result<()> {
 
     let shape = WorldShape::new(topology, scale);
     let mut sink: Box<dyn FrameSink> = match demo.sink {
-        SinkArg::Preview => {
-            Box::new(crate::sink::PreviewSink::new(demo.scale, &demo.out, shape)?)
-        }
+        SinkArg::Preview => Box::new(crate::sink::PreviewSink::new(demo.scale, &demo.out, shape)?),
         SinkArg::Shim => Box::new(ShimSink::new(demo.addr.clone())),
         SinkArg::Png => Box::new(PngSink::new(&demo.out, demo.every)?),
         SinkArg::Web => Box::new(WebSink::with_world(
@@ -83,8 +81,7 @@ fn run_demo(demo: &Demo, stop: &AtomicBool) -> Result<()> {
         )?),
     };
 
-    let limit =
-        (demo.seconds > 0.0).then(|| Duration::from_secs_f64(demo.seconds));
+    let limit = (demo.seconds > 0.0).then(|| Duration::from_secs_f64(demo.seconds));
     let stats = drive(&mut scenes, sink.as_mut(), limit, demo.fps, stop, shape)?;
     sink.finish()?;
 
@@ -170,12 +167,18 @@ pub fn drive(
             Step::Lagged { behind, log } => {
                 stats.dropped_frames += 1;
                 if log {
-                    eprintln!("cubarium: behind by {:.0} ms; dropping render work", behind.as_secs_f64() * 1e3);
+                    eprintln!(
+                        "cubarium: behind by {:.0} ms; dropping render work",
+                        behind.as_secs_f64() * 1e3
+                    );
                 }
             }
             Step::Paused { gap } => {
                 stats.pauses += 1;
-                eprintln!("cubarium: clock re-based after a {:.1} s pause", gap.as_secs_f64());
+                eprintln!(
+                    "cubarium: clock re-based after a {:.1} s pause",
+                    gap.as_secs_f64()
+                );
             }
         }
     }
@@ -207,9 +210,15 @@ mod tests {
         let mut scenes = Scenes::new(SceneKind::All, 1);
         let mut rec = Recorder::default();
         let stop = AtomicBool::new(false);
-        let stats =
-            drive(&mut scenes, &mut rec, Some(Duration::from_millis(600)), 60, &stop, WorldShape::CUBE)
-                .unwrap();
+        let stats = drive(
+            &mut scenes,
+            &mut rec,
+            Some(Duration::from_millis(600)),
+            60,
+            &stop,
+            WorldShape::CUBE,
+        )
+        .unwrap();
         assert!(stats.ticks >= 8, "ticks {}", stats.ticks);
         assert!(stats.frames >= 12, "frames {}", stats.frames);
         assert_eq!(rec.frames.len() as u64, stats.frames);
@@ -221,7 +230,10 @@ mod tests {
                 faces.insert(face);
             }
         }
-        assert!(faces.len() > 1, "a frame must light more than one face: {faces:?}");
+        assert!(
+            faces.len() > 1,
+            "a frame must light more than one face: {faces:?}"
+        );
     }
 
     #[test]
@@ -238,8 +250,15 @@ mod tests {
         }
         let mut scenes = Scenes::new(SceneKind::Body, 1);
         let mut sink = Once(0);
-        let stats = drive(&mut scenes, &mut sink, None, 60, &AtomicBool::new(false), WorldShape::CUBE)
-            .unwrap();
+        let stats = drive(
+            &mut scenes,
+            &mut sink,
+            None,
+            60,
+            &AtomicBool::new(false),
+            WorldShape::CUBE,
+        )
+        .unwrap();
         assert_eq!(stats.frames, 3);
     }
 
@@ -263,7 +282,10 @@ mod tests {
         // No time limit: only the flag can end this loop.
         let stats = drive(&mut scenes, &mut sink, None, 60, &stop, WorldShape::CUBE).unwrap();
         setter.join().unwrap();
-        assert!(stats.frames > 0, "the loop must have rendered before it stopped");
+        assert!(
+            stats.frames > 0,
+            "the loop must have rendered before it stopped"
+        );
         assert!(
             stats.elapsed < Duration::from_secs(5),
             "the loop must stop promptly: {:?}",

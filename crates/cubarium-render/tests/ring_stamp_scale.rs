@@ -44,12 +44,20 @@ fn the_budget_fits_inside_the_local_radius_on_every_rung() {
     let rungs: [(Topology, Scale, f64, f64); 3] = [
         (Topology::Cube, Scale::ONE, 9.0, 32.0),
         (Topology::Ring { w: 320, h: 180 }, Scale::ONE, 9.0, 90.0),
-        (Topology::Ring { w: 640, h: 360 }, Scale::new(2.0), 18.0, 180.0),
+        (
+            Topology::Ring { w: 640, h: 360 },
+            Scale::new(2.0),
+            18.0,
+            180.0,
+        ),
     ];
     for (topo, scale, budget, radius) in rungs {
         assert_eq!(scale.footprint_radius(), budget, "{topo:?}: budget");
         assert_eq!(topo.max_local_radius(), radius, "{topo:?}: local radius");
-        assert!(budget <= radius, "{topo:?}: the stamp budget must fit inside the unfolding");
+        assert!(
+            budget <= radius,
+            "{topo:?}: the stamp budget must fit inside the unfolding"
+        );
     }
 }
 
@@ -58,11 +66,22 @@ fn the_budget_fits_inside_the_local_radius_on_every_rung() {
 #[test]
 fn a_sprite_wider_than_the_budget_is_refused() {
     let too_big = solid(13).expect_err("a 13×13 solid square reaches 9.69 px from its pivot");
-    assert!(too_big.contains("budget"), "the refusal should name the budget, got {too_big:?}");
-    assert!(expected_extent(13) > 9.0, "sanity: {} > 9", expected_extent(13));
+    assert!(
+        too_big.contains("budget"),
+        "the refusal should name the budget, got {too_big:?}"
+    );
+    assert!(
+        expected_extent(13) > 9.0,
+        "sanity: {} > 9",
+        expected_extent(13)
+    );
 
     let ok = solid(11).expect("an 11×11 solid square reaches 8.28 px and fits");
-    assert!((ok.extent() - expected_extent(11)).abs() <= 1e-9, "extent {}", ok.extent());
+    assert!(
+        (ok.extent() - expected_extent(11)).abs() <= 1e-9,
+        "extent {}",
+        ok.extent()
+    );
     assert!(ok.extent() <= Scale::ONE.footprint_radius());
 }
 
@@ -94,7 +113,10 @@ fn at_scale_one_an_oversized_stamp_is_over_budget() {
     let sprite = solid(8).expect("an 8×8 solid square fits at scale 1");
     let extent = sprite.extent();
     assert!(extent <= 9.0, "extent {extent}");
-    assert!(extent * 2.0 > Scale::ONE.footprint_radius(), "doubled it is over budget");
+    assert!(
+        extent * 2.0 > Scale::ONE.footprint_radius(),
+        "doubled it is over budget"
+    );
     assert!(
         extent * 2.0 <= Scale::new(2.0).footprint_radius(),
         "but inside the budget of a world at S = 2, which is what FW-3 must adopt"
@@ -128,12 +150,26 @@ fn a_stamp_straddling_the_wrap_paints_both_sides_inside_the_budget() {
     let sprite = solid(8).expect("an 8×8 solid square fits the budget");
     let anchor = SurfacePoint::new(Face::Front, 0.5, 90.5);
     let mut scratch = Vec::new();
-    stamp_sprite(&mut canvas, anchor, Vec2::new(1.0, 0.0), &sprite, 1.0, 1.0, &mut scratch);
+    stamp_sprite(
+        &mut canvas,
+        anchor,
+        Vec2::new(1.0, 0.0),
+        &sprite,
+        1.0,
+        1.0,
+        &mut scratch,
+    );
 
     let (pixels, worst) = painted(&canvas, anchor);
     assert!(!pixels.is_empty(), "the stamp drew nothing");
-    assert!(pixels.iter().any(|(x, _)| *x < 8), "nothing painted east of the wrap");
-    assert!(pixels.iter().any(|(x, _)| *x > 311), "nothing painted west of the wrap");
+    assert!(
+        pixels.iter().any(|(x, _)| *x < 8),
+        "nothing painted east of the wrap"
+    );
+    assert!(
+        pixels.iter().any(|(x, _)| *x > 311),
+        "nothing painted west of the wrap"
+    );
     assert!(
         worst <= Scale::ONE.footprint_radius() + 1e-9,
         "a painted pixel is {worst} from the anchor, past the {} budget",
@@ -142,8 +178,20 @@ fn a_stamp_straddling_the_wrap_paints_both_sides_inside_the_budget() {
     // The same stamp in the middle of the chart paints the same number of pixels.
     let mut mid_canvas = Canvas::new(topo, Scale::ONE);
     let mid = SurfacePoint::new(Face::Front, 160.5, 90.5);
-    stamp_sprite(&mut mid_canvas, mid, Vec2::new(1.0, 0.0), &sprite, 1.0, 1.0, &mut scratch);
-    assert_eq!(painted(&mid_canvas, mid).0.len(), pixels.len(), "the wrap costs no pixels");
+    stamp_sprite(
+        &mut mid_canvas,
+        mid,
+        Vec2::new(1.0, 0.0),
+        &sprite,
+        1.0,
+        1.0,
+        &mut scratch,
+    );
+    assert_eq!(
+        painted(&mid_canvas, mid).0.len(),
+        pixels.len(),
+        "the wrap costs no pixels"
+    );
 }
 
 /// A sprite that is over budget draws nothing at all — the refusal is silent but total.
@@ -154,9 +202,23 @@ fn an_over_budget_stamp_draws_nothing() {
     let sprite = solid(8).expect("fits at scale 1");
     let anchor = SurfacePoint::new(Face::Front, 160.5, 90.5);
     let mut scratch = Vec::new();
-    assert!(sprite.extent() * 2.0 > Scale::ONE.footprint_radius(), "over budget at scale 2");
-    stamp_sprite(&mut canvas, anchor, Vec2::new(1.0, 0.0), &sprite, 2.0, 1.0, &mut scratch);
-    assert!(canvas.pixels().iter().all(|p| *p == [0.0; 3]), "an over-budget stamp must not draw");
+    assert!(
+        sprite.extent() * 2.0 > Scale::ONE.footprint_radius(),
+        "over budget at scale 2"
+    );
+    stamp_sprite(
+        &mut canvas,
+        anchor,
+        Vec2::new(1.0, 0.0),
+        &sprite,
+        2.0,
+        1.0,
+        &mut scratch,
+    );
+    assert!(
+        canvas.pixels().iter().all(|p| *p == [0.0; 3]),
+        "an over-budget stamp must not draw"
+    );
 }
 
 /// §9's FW-3 row: "adopt `Scale::footprint_radius()` at both check sites … a `scale = 2`
@@ -170,10 +232,27 @@ fn a_scale_two_stamp_draws_on_a_world_at_s2() {
     let sprite = solid(8).expect("fits at scale 1");
     let anchor = SurfacePoint::new(Face::Front, 320.5, 180.5);
     let mut scratch = Vec::new();
-    assert!(sprite.extent() * 2.0 <= scale.footprint_radius(), "inside the S = 2 budget");
-    stamp_sprite(&mut canvas, anchor, Vec2::new(1.0, 0.0), &sprite, 2.0, 1.0, &mut scratch);
+    assert!(
+        sprite.extent() * 2.0 <= scale.footprint_radius(),
+        "inside the S = 2 budget"
+    );
+    stamp_sprite(
+        &mut canvas,
+        anchor,
+        Vec2::new(1.0, 0.0),
+        &sprite,
+        2.0,
+        1.0,
+        &mut scratch,
+    );
 
     let (pixels, worst) = painted(&canvas, anchor);
-    assert!(!pixels.is_empty(), "a scale = 2 stamp must draw on a world at S = 2");
-    assert!(worst <= scale.footprint_radius() + 1e-9, "painted {worst} px from the anchor");
+    assert!(
+        !pixels.is_empty(),
+        "a scale = 2 stamp must draw on a world at S = 2"
+    );
+    assert!(
+        worst <= scale.footprint_radius() + 1e-9,
+        "painted {worst} px from the anchor"
+    );
 }

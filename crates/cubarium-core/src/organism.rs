@@ -69,7 +69,12 @@ pub struct Organism {
 
 impl Organism {
     pub fn material(&self) -> f64 {
-        self.structure + self.reserve + self.escrow.as_ref().map_or(0.0, |e| e.structure + e.reserve)
+        self.structure
+            + self.reserve
+            + self
+                .escrow
+                .as_ref()
+                .map_or(0.0, |e| e.structure + e.reserve)
     }
 
     pub fn age_ticks(&self, now: u64) -> u64 {
@@ -91,8 +96,16 @@ impl Organism {
     /// not how much a starving one can raise, and gating on it would kill bodies that the
     /// physiology would have refuelled on the next tick.
     pub fn raisable_energy(&self, cfg: &OrganismConfig, dt: f64) -> f64 {
-        let energy = if self.energy.is_finite() { self.energy.max(0.0) } else { 0.0 };
-        let reserve = if self.reserve.is_finite() { self.reserve.max(0.0) } else { 0.0 };
+        let energy = if self.energy.is_finite() {
+            self.energy.max(0.0)
+        } else {
+            0.0
+        };
+        let reserve = if self.reserve.is_finite() {
+            self.reserve.max(0.0)
+        } else {
+            0.0
+        };
         let burned = (cfg.oxidation_rate * dt).max(0.0).min(reserve);
         let released = cfg.reserve_energy_density * burned;
         let room = (self.phenotype.energy_max - energy).max(0.0);

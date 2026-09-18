@@ -181,7 +181,8 @@ impl QuietPause {
 
     /// Held decisions already completed before boundary `now`.
     pub fn completed(&self, now: u64) -> u64 {
-        now.saturating_sub(self.start_tick).min(POST_BIRTH_PAUSE_TICKS)
+        now.saturating_sub(self.start_tick)
+            .min(POST_BIRTH_PAUSE_TICKS)
     }
 
     /// Whether the decision at boundary `now` is held by this entry.
@@ -203,7 +204,11 @@ pub struct QuietState {
 
 impl Default for QuietState {
     fn default() -> Self {
-        QuietState { version: QUIET_VERSION, policy: QuietPolicy::Off, pauses: Vec::new() }
+        QuietState {
+            version: QUIET_VERSION,
+            policy: QuietPolicy::Off,
+            pauses: Vec::new(),
+        }
     }
 }
 
@@ -245,7 +250,10 @@ impl QuietState {
         alive: impl Fn(OrganismId) -> bool,
     ) -> Result<(), String> {
         if self.version != QUIET_VERSION {
-            return Err(format!("quiet extension version {} is not {QUIET_VERSION}", self.version));
+            return Err(format!(
+                "quiet extension version {} is not {QUIET_VERSION}",
+                self.version
+            ));
         }
         if !self.policy.enabled() {
             // Off is inert, and an Off world carrying entries is a contradiction rather than a
@@ -288,7 +296,10 @@ impl QuietState {
                 return Err(format!("quiet pause {:?} is its own child", p.parent));
             }
             if !alive(p.parent) {
-                return Err(format!("quiet pause names {:?}, which is not alive", p.parent));
+                return Err(format!(
+                    "quiet pause names {:?}, which is not alive",
+                    p.parent
+                ));
             }
             if p.end_tick != p.start_tick.saturating_add(POST_BIRTH_PAUSE_TICKS) {
                 return Err(format!(
@@ -388,7 +399,13 @@ impl Budget {
         let oxidation = cfg.oxidation_rate * h;
         let energy = per_second * h + cfg.build_cost * growth;
         let material = oxidation + growth;
-        let budget = Budget { per_second, growth, oxidation, energy, material };
+        let budget = Budget {
+            per_second,
+            growth,
+            oxidation,
+            energy,
+            material,
+        };
         // A bound that is not a finite nonnegative number bounds nothing.
         if ![per_second, growth, oxidation, energy, material]
             .iter()
@@ -437,7 +454,7 @@ mod tests {
     use crate::config::WorldConfig;
     use crate::genome::{Genome, decode};
     use crate::ids::Slots;
-    use crate::organism::{Origin, Organism};
+    use crate::organism::{Organism, Origin};
     use crate::rng::Counter;
     use cubarium_surface::{Face, SurfacePoint, Vec2};
 
@@ -482,10 +499,15 @@ mod tests {
         assert!(!QuietPolicy::Off.enabled());
         assert!(QuietPolicy::PostBirthPauseV1.enabled());
         assert_eq!(QuietPolicy::Off.as_str(), "off");
-        assert_eq!(QuietPolicy::PostBirthPauseV1.as_str(), "post_birth_pause_v1");
-        q.validate(0, 512, false, |_| true).expect("the default validates");
+        assert_eq!(
+            QuietPolicy::PostBirthPauseV1.as_str(),
+            "post_birth_pause_v1"
+        );
+        q.validate(0, 512, false, |_| true)
+            .expect("the default validates");
         // And it validates in a hunter world too: Off never conflicts with anything.
-        q.validate(0, 512, true, |_| true).expect("off is compatible with hunters");
+        q.validate(0, 512, true, |_| true)
+            .expect("off is compatible with hunters");
     }
 
     #[test]
@@ -503,7 +525,12 @@ mod tests {
         assert!(p.holds(b), "the first held decision is at B");
         assert!(p.holds(b + 39), "the last held decision is at B+39");
         assert!(!p.holds(b + 40), "B+40 is ordinary again");
-        assert_eq!((b..b + POST_BIRTH_PAUSE_TICKS).filter(|t| p.holds(*t)).count(), 40);
+        assert_eq!(
+            (b..b + POST_BIRTH_PAUSE_TICKS)
+                .filter(|t| p.holds(*t))
+                .count(),
+            40
+        );
         assert_eq!(p.remaining(b), 40);
         assert_eq!(p.remaining(b + 1), 39);
         assert_eq!(p.remaining(b + 39), 1);
@@ -511,7 +538,11 @@ mod tests {
         assert_eq!(p.completed(b), 0);
         assert_eq!(p.completed(b + 1), 1);
         assert_eq!(p.completed(b + 40), 40);
-        assert_eq!(p.completed(b + 99), 40, "completion is capped at the window");
+        assert_eq!(
+            p.completed(b + 99),
+            40,
+            "completion is capped at the window"
+        );
     }
 
     #[test]
@@ -541,9 +572,15 @@ mod tests {
             + cfg.organism.move_cost * s_bound * (f64::from(d.rest_effort) * o.phenotype.speed_max)
             + cfg.organism.sense_cost * o.phenotype.sense_radius;
         assert_eq!(b.per_second, want_per_second);
-        assert_eq!(b.growth, (cfg.organism.growth_rate * h).min((sa - o.structure).max(0.0)));
+        assert_eq!(
+            b.growth,
+            (cfg.organism.growth_rate * h).min((sa - o.structure).max(0.0))
+        );
         assert_eq!(b.oxidation, cfg.organism.oxidation_rate * h);
-        assert_eq!(b.energy, b.per_second * h + cfg.organism.build_cost * b.growth);
+        assert_eq!(
+            b.energy,
+            b.per_second * h + cfg.organism.build_cost * b.growth
+        );
         assert_eq!(b.material, b.oxidation + b.growth);
 
         // An adult's growth term is zero, and a bigger body bounds by its own structure.
@@ -565,7 +602,10 @@ mod tests {
 
         // Exactly on the bound is not covering it, on either currency.
         let exact = organism(0.5, b.material, b.energy);
-        assert!(!b.affordable(&exact), "landing on the bound is not affordability");
+        assert!(
+            !b.affordable(&exact),
+            "landing on the bound is not affordability"
+        );
         let over = organism(0.5, b.material * 1.0001 + 1e-12, b.energy * 1.0001 + 1e-12);
         assert!(b.affordable(&over));
         let thin_energy = organism(0.5, b.material * 2.0, b.energy);
@@ -590,14 +630,25 @@ mod tests {
             assert_eq!(Budget::of(&o, &cfg.organism, h), None, "structure {poison}");
             let mut o = organism(0.5, 1.0, 1.0);
             o.phenotype.maintenance = poison;
-            assert_eq!(Budget::of(&o, &cfg.organism, h), None, "maintenance {poison}");
+            assert_eq!(
+                Budget::of(&o, &cfg.organism, h),
+                None,
+                "maintenance {poison}"
+            );
             let mut o = organism(0.5, 1.0, 1.0);
             o.phenotype.speed_max = poison;
             assert_eq!(Budget::of(&o, &cfg.organism, h), None, "speed {poison}");
             let mut bad = cfg.organism.clone();
             bad.build_cost = poison;
-            assert_eq!(Budget::of(&organism(0.5, 1.0, 1.0), &bad, h), None, "build_cost {poison}");
-            assert_eq!(Budget::of(&organism(0.5, 1.0, 1.0), &cfg.organism, poison), None);
+            assert_eq!(
+                Budget::of(&organism(0.5, 1.0, 1.0), &bad, h),
+                None,
+                "build_cost {poison}"
+            );
+            assert_eq!(
+                Budget::of(&organism(0.5, 1.0, 1.0), &cfg.organism, poison),
+                None
+            );
         }
         // A finite budget over a nonfinite stock is still not affordable.
         let b = Budget::of(&organism(0.5, 1.0, 1.0), &cfg.organism, h).unwrap();
@@ -624,7 +675,9 @@ mod tests {
             pauses,
         };
         // The control really does validate.
-        state(vec![sound(100)]).validate(120, 512, false, |_| true).expect("the control is valid");
+        state(vec![sound(100)])
+            .validate(120, 512, false, |_| true)
+            .expect("the control is valid");
 
         // A version this build does not know.
         let mut bad = state(vec![sound(100)]);
@@ -637,27 +690,53 @@ mod tests {
         assert!(off.validate(120, 512, false, |_| true).is_err());
 
         // An enabled policy beside a hunter extension is refused in this slice.
-        assert!(state(vec![sound(100)]).validate(120, 512, true, |_| true).is_err());
+        assert!(
+            state(vec![sound(100)])
+                .validate(120, 512, true, |_| true)
+                .is_err()
+        );
 
         // More entries than the world can hold organisms.
         let many: Vec<QuietPause> = (0..5)
-            .map(|i| QuietPause { parent: id(i, 1), child: id(100 + i, 1), ..sound(100) })
+            .map(|i| QuietPause {
+                parent: id(i, 1),
+                child: id(100 + i, 1),
+                ..sound(100)
+            })
             .collect();
-        assert!(state(many.clone()).validate(120, 4, false, |_| true).is_err());
-        state(many.clone()).validate(120, 5, false, |_| true).expect("exactly at the bound is fine");
+        assert!(
+            state(many.clone())
+                .validate(120, 4, false, |_| true)
+                .is_err()
+        );
+        state(many.clone())
+            .validate(120, 5, false, |_| true)
+            .expect("exactly at the bound is fine");
 
         // Out of order, and therefore also duplicated.
         let mut swapped = many.clone();
         swapped.swap(0, 1);
         assert!(state(swapped).validate(120, 512, false, |_| true).is_err());
         let duplicate = vec![sound(100), sound(100)];
-        assert!(state(duplicate).validate(120, 512, false, |_| true).is_err());
+        assert!(
+            state(duplicate)
+                .validate(120, 512, false, |_| true)
+                .is_err()
+        );
 
         // A parent that is not alive, and a parent that is its own child.
-        assert!(state(vec![sound(100)]).validate(120, 512, false, |_| false).is_err());
+        assert!(
+            state(vec![sound(100)])
+                .validate(120, 512, false, |_| false)
+                .is_err()
+        );
         let mut selfish = sound(100);
         selfish.child = selfish.parent;
-        assert!(state(vec![selfish]).validate(120, 512, false, |_| true).is_err());
+        assert!(
+            state(vec![selfish])
+                .validate(120, 512, false, |_| true)
+                .is_err()
+        );
 
         // A duration that is not the candidate's.
         for wrong in [0u64, 1, 39, 41, 4000] {
@@ -671,26 +750,42 @@ mod tests {
 
         // Impossible ranges against the world's own clock.
         let future = sound(200);
-        assert!(state(vec![future]).validate(120, 512, false, |_| true).is_err());
+        assert!(
+            state(vec![future])
+                .validate(120, 512, false, |_| true)
+                .is_err()
+        );
         let expired = sound(50);
         assert!(
-            state(vec![expired]).validate(120, 512, false, |_| true).is_err(),
+            state(vec![expired])
+                .validate(120, 512, false, |_| true)
+                .is_err(),
             "a pause the world stepped past should have been released"
         );
         // The exact boundaries. `start == tick` is the first held decision. `end == tick` is the
         // release boundary: the window is complete but the decision that consumes the entry has
         // not been made yet, so a world snapshotted there is valid and resumes exactly.
-        state(vec![sound(120)]).validate(120, 512, false, |_| true).expect("start at now is held");
+        state(vec![sound(120)])
+            .validate(120, 512, false, |_| true)
+            .expect("start at now is held");
         state(vec![sound(120 - POST_BIRTH_PAUSE_TICKS)])
             .validate(120, 512, false, |_| true)
             .expect("end at now is awaiting its release");
-        assert!(state(vec![sound(79)]).validate(120, 512, false, |_| true).is_err());
+        assert!(
+            state(vec![sound(79)])
+                .validate(120, 512, false, |_| true)
+                .is_err()
+        );
 
         // Tick arithmetic that would overflow.
         let mut huge = sound(0);
         huge.start_tick = u64::MAX - 5;
         huge.end_tick = u64::MAX;
-        assert!(state(vec![huge]).validate(u64::MAX - 1, 512, false, |_| true).is_err());
+        assert!(
+            state(vec![huge])
+                .validate(u64::MAX - 1, 512, false, |_| true)
+                .is_err()
+        );
     }
 
     #[test]

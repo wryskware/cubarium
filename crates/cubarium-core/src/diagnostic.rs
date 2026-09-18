@@ -96,5 +96,9 @@ impl ScriptedIntent {
 }
 
 fn clamp_unit(x: f64, fallback: f64) -> f64 {
-    if x.is_finite() { x.clamp(0.0, 1.0) } else { fallback }
+    if x.is_finite() {
+        x.clamp(0.0, 1.0)
+    } else {
+        fallback
+    }
 }

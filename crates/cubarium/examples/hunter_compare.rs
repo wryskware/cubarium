@@ -58,7 +58,10 @@ enum ProfileVariant {
 impl ProfileVariant {
     /// The reserve-target background this recipe runs on, if any.
     fn raises_reserve_targets(self) -> bool {
-        matches!(self, ProfileVariant::ReserveTargetsV1 | ProfileVariant::ReserveTargetsCharge80V1)
+        matches!(
+            self,
+            ProfileVariant::ReserveTargetsV1 | ProfileVariant::ReserveTargetsCharge80V1
+        )
     }
 }
 
@@ -848,8 +851,12 @@ impl PairedLocal {
 fn recipe_scope(variant: ProfileVariant) -> &'static str {
     match variant {
         ProfileVariant::Baseline => "baseline preserves the original fixed profile exactly",
-        ProfileVariant::ReserveTargetsV1 => "reserve-targets-v1 changes only seek/perch reserve fractions to .80/.90; all costs, reproductive gates, geometry, imports and placements unchanged",
-        ProfileVariant::ReserveTargetsCharge80V1 => "reserve-targets-charge80-v1 is reserve-targets-v1 (seek/perch .80/.90) with semantic profile version 3 raised to 4 and nothing else; version 4's one meaning is a fixed 0.80 E_max oxidation activation threshold for authoritative members at every age and phase. The conversion block, costs, reproductive gates, geometry, imports and placements are unchanged, and ordinary organisms keep the world's configured threshold",
+        ProfileVariant::ReserveTargetsV1 => {
+            "reserve-targets-v1 changes only seek/perch reserve fractions to .80/.90; all costs, reproductive gates, geometry, imports and placements unchanged"
+        }
+        ProfileVariant::ReserveTargetsCharge80V1 => {
+            "reserve-targets-charge80-v1 is reserve-targets-v1 (seek/perch .80/.90) with semantic profile version 3 raised to 4 and nothing else; version 4's one meaning is a fixed 0.80 E_max oxidation activation threshold for authoritative members at every age and phase. The conversion block, costs, reproductive gates, geometry, imports and placements are unchanged, and ordinary organisms keep the world's configured threshold"
+        }
     }
 }
 
@@ -871,13 +878,18 @@ fn main() -> Result<()> {
         .organism
         .oxidation_threshold;
     ensure!(
-        openings.iter().all(|o| o.state.config.organism.oxidation_threshold == world_threshold),
+        openings
+            .iter()
+            .all(|o| o.state.config.organism.oxidation_threshold == world_threshold),
         "the cohort's openings disagree about the configured oxidation threshold"
     );
     let resolved = {
         let config = &openings[0].state.config;
         let p = profile_for(config, 3, args.profile);
-        (p.oxidation_policy().as_str(), p.oxidation_threshold(&config.organism))
+        (
+            p.oxidation_policy().as_str(),
+            p.oxidation_threshold(&config.organism),
+        )
     };
     fs::create_dir(&args.out).context("output must be a NEW directory")?;
     let executable_path = std::env::current_exe()?;
@@ -1012,8 +1024,8 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use cubarium_surface::{Scale, Topology};
     use super::*;
+    use cubarium_surface::{Scale, Topology};
     #[test]
     fn measurement_flag_requires_the_full_horizon_and_uninterrupted_observers() {
         assert!(!measurement_complete(6000, 6000, true, true));
@@ -1057,7 +1069,10 @@ mod tests {
             assert_eq!(candidate.version, 4);
             let mut expected = background.clone();
             expected.version = 4;
-            assert_eq!(candidate, expected, "arm {index} changed a field other than `version`");
+            assert_eq!(
+                candidate, expected,
+                "arm {index} changed a field other than `version`"
+            );
             // The reserve-target background really is the fixed .80/.90 one.
             assert_eq!(candidate.seek_reserve_fraction, 0.80);
             assert_eq!(candidate.perch_reserve_fraction, 0.90);
@@ -1069,11 +1084,17 @@ mod tests {
                 config.organism.oxidation_threshold
             );
             assert_eq!(candidate.oxidation_threshold(&config.organism), 0.80);
-            assert_eq!(candidate.oxidation_policy().as_str(), "fixed-member-threshold");
+            assert_eq!(
+                candidate.oxidation_policy().as_str(),
+                "fixed-member-threshold"
+            );
             // Attack-off controls take the candidate policy too; that is the whole point of
             // running them under the same recipe.
             assert_eq!(candidate.attacks_enabled, index != 2 && index != 4);
-            assert_eq!(candidate.scavenge_fraction, if index >= 4 { 0.25 } else { 0.0 });
+            assert_eq!(
+                candidate.scavenge_fraction,
+                if index >= 4 { 0.25 } else { 0.0 }
+            );
         }
     }
 
@@ -1094,7 +1115,10 @@ mod tests {
             }
         }
         assert!(recipe_scope(ProfileVariant::ReserveTargetsCharge80V1).contains("0.80 E_max"));
-        assert!(recipe_scope(ProfileVariant::ReserveTargetsCharge80V1).contains("version 3 raised to 4"));
+        assert!(
+            recipe_scope(ProfileVariant::ReserveTargetsCharge80V1)
+                .contains("version 3 raised to 4")
+        );
     }
 
     #[test]
@@ -1120,7 +1144,9 @@ mod tests {
         .unwrap();
         assert_eq!(charge.profile, ProfileVariant::ReserveTargetsCharge80V1);
         assert!(Args::try_parse_from(["compare", "cohort", "out", "--profile", "rescue"]).is_err());
-        assert!(Args::try_parse_from(["compare", "cohort", "out", "--profile", "charge80"]).is_err());
+        assert!(
+            Args::try_parse_from(["compare", "cohort", "out", "--profile", "charge80"]).is_err()
+        );
     }
 
     #[test]
@@ -1216,8 +1242,12 @@ mod tests {
             .map(|(i, name)| Arm::new(&opening, i, &dir.join(name)).unwrap())
             .collect();
         let mut local = PairedLocal::new(&arms, &dir).unwrap();
-        let cell =
-            cubarium_surface::cell_of(Topology::Cube, Scale::ONE, &opening.organisms.iter().next().unwrap().1.pos).index();
+        let cell = cubarium_surface::cell_of(
+            Topology::Cube,
+            Scale::ONE,
+            &opening.organisms.iter().next().unwrap().1.pos,
+        )
+        .index();
         // Deliberate synthetic exposure to test orchestration/file ordering at
         // exactly a census boundary; spatial's separate fixture uses a REAL kill.
         let capture = recovery::Capture {

@@ -69,8 +69,16 @@ impl Adam {
     /// One ascent step. Returns the RMS of the applied displacement, purely as a reported
     /// diagnostic.
     pub fn ascend(&mut self, theta: &mut [f64], gradient: &[f64]) -> f64 {
-        assert_eq!(theta.len(), self.m.len(), "parameter/state dimension mismatch");
-        assert_eq!(gradient.len(), self.m.len(), "gradient/state dimension mismatch");
+        assert_eq!(
+            theta.len(),
+            self.m.len(),
+            "parameter/state dimension mismatch"
+        );
+        assert_eq!(
+            gradient.len(),
+            self.m.len(),
+            "gradient/state dimension mismatch"
+        );
         self.step += 1;
         let t = self.step as i32;
         let bc1 = 1.0 - self.beta1.powi(t);
@@ -101,7 +109,10 @@ impl Adam {
 /// with both stores empty genuinely produce the same `f64`, and that is the case the average
 /// rank exists for.
 pub fn average_ranks(scores: &[f64]) -> Vec<f64> {
-    assert!(scores.iter().all(|s| s.is_finite()), "a non-finite score is an experiment error");
+    assert!(
+        scores.iter().all(|s| s.is_finite()),
+        "a non-finite score is an experiment error"
+    );
     let mut order: Vec<usize> = (0..scores.len()).collect();
     order.sort_by(|a, b| {
         scores[*a]
@@ -193,7 +204,10 @@ mod tests {
         assert_eq!(average_ranks(&[3.0, 1.0, 3.0]), vec![1.5, 0.0, 1.5]);
         assert_eq!(average_ranks(&[5.0; 4]), vec![1.5; 4]);
         // A three-way tie in the middle.
-        assert_eq!(average_ranks(&[0.0, 2.0, 2.0, 2.0, 9.0]), vec![0.0, 2.0, 2.0, 2.0, 4.0]);
+        assert_eq!(
+            average_ranks(&[0.0, 2.0, 2.0, 2.0, 9.0]),
+            vec![0.0, 2.0, 2.0, 2.0, 4.0]
+        );
     }
 
     #[test]
@@ -217,7 +231,10 @@ mod tests {
         let g = gradient(&plus, &minus, dim, SIGMA, |i, out| {
             perturbation(99, 0, i as u64, out);
         });
-        assert!(g.iter().all(|x| *x == 0.0), "a tie must give exactly zero, saw {g:?}");
+        assert!(
+            g.iter().all(|x| *x == 0.0),
+            "a tie must give exactly zero, saw {g:?}"
+        );
 
         let mut theta = vec![0.25; dim];
         let before = theta.clone();
@@ -245,12 +262,21 @@ mod tests {
             .map(|j| (w0 * eps[0][j] + w1 * eps[1][j]) / denominator)
             .collect();
 
-        let got = gradient(&plus, &minus, dim, sigma, |i, out| out.copy_from_slice(&eps[i]));
+        let got = gradient(&plus, &minus, dim, sigma, |i, out| {
+            out.copy_from_slice(&eps[i])
+        });
         for j in 0..dim {
-            assert!((got[j] - want[j]).abs() < 1e-15, "element {j}: {} vs {}", got[j], want[j]);
+            assert!(
+                (got[j] - want[j]).abs() < 1e-15,
+                "element {j}: {} vs {}",
+                got[j],
+                want[j]
+            );
         }
         // And the documented `1 / sigma` scaling: halving sigma doubles the estimate.
-        let half = gradient(&plus, &minus, dim, sigma / 2.0, |i, out| out.copy_from_slice(&eps[i]));
+        let half = gradient(&plus, &minus, dim, sigma / 2.0, |i, out| {
+            out.copy_from_slice(&eps[i])
+        });
         for j in 0..dim {
             assert!((half[j] - 2.0 * want[j]).abs() < 1e-14);
         }
@@ -269,7 +295,10 @@ mod tests {
         let n = 256;
         let sigma = SIGMA;
         let f = |x: &[f64]| -> f64 {
-            -x.iter().zip(&target).map(|(a, b)| (a - b) * (a - b)).sum::<f64>()
+            -x.iter()
+                .zip(&target)
+                .map(|(a, b)| (a - b) * (a - b))
+                .sum::<f64>()
         };
         let mut eps = vec![0.0; dim];
         let mut plus = Vec::with_capacity(n);
@@ -314,10 +343,16 @@ mod tests {
                 }
                 m.push(f(&cand));
             }
-            let g = gradient(&p, &m, dim, sigma, |i, out| perturbation(4242, g_i, i as u64, out));
+            let g = gradient(&p, &m, dim, sigma, |i, out| {
+                perturbation(4242, g_i, i as u64, out)
+            });
             adam.ascend(&mut x, &g);
         }
-        assert!(f(&x) > before, "ascent did not improve: {before} -> {}", f(&x));
+        assert!(
+            f(&x) > before,
+            "ascent did not improve: {before} -> {}",
+            f(&x)
+        );
     }
 
     /// The Adam state is the whole state: stopping after two steps and resuming must produce
@@ -347,7 +382,10 @@ mod tests {
         assert_eq!(resumed.step, 2);
         resumed.ascend(&mut theta_b, &gradients[2]);
 
-        assert_eq!(theta_a, theta_b, "a resumed run must match an uninterrupted one exactly");
+        assert_eq!(
+            theta_a, theta_b,
+            "a resumed run must match an uninterrupted one exactly"
+        );
         assert_eq!(adam_a, resumed);
     }
 
@@ -357,7 +395,9 @@ mod tests {
         let mut theta = vec![0.0; dim];
         let mut adam = Adam::new(dim);
         for g_i in 0..25u64 {
-            let g: Vec<f64> = (0..dim).map(|j| ((g_i * 7 + j as u64) as f64).cos()).collect();
+            let g: Vec<f64> = (0..dim)
+                .map(|j| ((g_i * 7 + j as u64) as f64).cos())
+                .collect();
             adam.ascend(&mut theta, &g);
         }
         assert!(theta.iter().all(|x| x.is_finite()));

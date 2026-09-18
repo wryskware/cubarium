@@ -22,12 +22,12 @@ use crate::hunter::HunterEvent;
 use crate::pairs::NeighborLists;
 use crate::quiet::QuietEvent;
 
+pub use crate::fields::{CellClass, EcologyV1State};
 pub use budget::{
     BodyBudget, BudgetRecorder, CARRION, CHANNEL_NAMES, CHANNELS, FOLIAGE, FRUIT, IntakeLimit,
-    IntakeTick, LITTER, MAX_CLOSED_RECORDS, MAX_TRACE_ROWS, MOUTH_GRAZE, MOUTH_FRUIT,
-    MOUTH_NAMES, MOUTH_SCAVENGE, MOUTHS,
+    IntakeTick, LITTER, MAX_CLOSED_RECORDS, MAX_TRACE_ROWS, MOUTH_FRUIT, MOUTH_GRAZE, MOUTH_NAMES,
+    MOUTH_SCAVENGE, MOUTHS,
 };
-pub use crate::fields::{CellClass, EcologyV1State};
 pub use lifecycle::{TRAINING_FOUNDER_HUE, TRAINING_START_ENERGY, TRAINING_START_RESERVE};
 pub(crate) use state::check_genome;
 pub use state::{ChargingDiagnostics, IntakeDiagnostics, NeuralTiming, TickCounters, WorldState};

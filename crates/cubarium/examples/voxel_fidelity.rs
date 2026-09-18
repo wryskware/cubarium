@@ -29,8 +29,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use cubarium::sink::gpu::voxel::{VoxelGpuSink, VoxelGpuSinkOptions};
 use cubarium::sink::GpuTargetKind;
+use cubarium::sink::gpu::voxel::{VoxelGpuSink, VoxelGpuSinkOptions};
 use cubarium::voxel::present::VoxelPresenter;
 use cubarium::voxel::project::Projection;
 use cubarium::voxel::{VoxelConfig, scene as authored_scene};
@@ -99,7 +99,12 @@ fn main() -> Result<()> {
         world: world_cfg.clone(),
         ..VoxelConfig::default()
     };
-    let proj = Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, &world_cfg)?;
+    let proj = Projection::new(
+        cfg.tilt_degrees,
+        cfg.px_per_voxel,
+        cfg.raster_height,
+        &world_cfg,
+    )?;
     println!(
         "projection: {}x{} raster, {} px per voxel, depth step {} px, world {}x{}x{}",
         proj.raster_w, proj.raster_h, proj.s, proj.rise, proj.width, proj.height, proj.depth
@@ -137,10 +142,20 @@ fn main() -> Result<()> {
         worst = worst.max(compare(&args, name, &cfg, proj, &world, &flora, &mut gpu)?);
     }
     let (world, flora) = fixtures(&world_cfg);
-    worst = worst.max(compare(&args, "fixtures", &cfg, proj, &world, &flora, &mut gpu)?);
+    worst = worst.max(compare(
+        &args, "fixtures", &cfg, proj, &world, &flora, &mut gpu,
+    )?);
     let sprout_ticks = (SPROUT_SECONDS * f64::from(TICK_HZ)).round() as u64;
     let (world, flora) = build(&world_cfg, true, Some(sprout_ticks));
-    worst = worst.max(compare(&args, "authored-sprout", &cfg, proj, &world, &flora, &mut gpu)?);
+    worst = worst.max(compare(
+        &args,
+        "authored-sprout",
+        &cfg,
+        proj,
+        &world,
+        &flora,
+        &mut gpu,
+    )?);
     println!("\nworst single-channel difference over every scene: {worst}/255");
     Ok(())
 }
@@ -152,8 +167,11 @@ fn main() -> Result<()> {
 /// rain is the run's own `r` with no argument — one default pulse a second — because
 /// `Config::rain_m_per_s` defaults to zero and a world nobody rains on never pools.
 fn build(cfg: &Config, authored: bool, ticks: Option<u64>) -> (World, Flora) {
-    let mut world =
-        if authored { authored_scene::authored(cfg.clone()) } else { World::new(cfg.clone()) };
+    let mut world = if authored {
+        authored_scene::authored(cfg.clone())
+    } else {
+        World::new(cfg.clone())
+    };
     let mut flora = Flora::new(FloraConfig::default());
     // Six stands spread across the strip and the habitat's depth: both species, both
     // near the seam and away from it, at full wood so the crown disc is at its widest.
@@ -161,14 +179,28 @@ fn build(cfg: &Config, authored: bool, ticks: Option<u64>) -> (World, Flora) {
         .into_iter()
         .enumerate()
     {
-        let species = if i % 2 == 0 { Species::Bloomcrown } else { Species::Umbrellafrond };
+        let species = if i % 2 == 0 {
+            Species::Bloomcrown
+        } else {
+            Species::Umbrellafrond
+        };
         let wood = flora.config().species(species).wood_max;
-        flora.apply(&world, FloraCommand::Seed { x, z, species, wood });
+        flora.apply(
+            &world,
+            FloraCommand::Seed {
+                x,
+                z,
+                species,
+                wood,
+            },
+        );
     }
     if let Some(ticks) = ticks {
         for t in 0..ticks {
             if t % u64::from(TICK_HZ) == 0 {
-                world.apply(VoxelCommand::RainPulse { volume_m3: DEFAULT_RAIN_M3 });
+                world.apply(VoxelCommand::RainPulse {
+                    volume_m3: DEFAULT_RAIN_M3,
+                });
             }
             world.step();
             flora.step(&mut world);
@@ -192,7 +224,10 @@ fn bench(
 ) -> Result<()> {
     let (world, flora) = build(world_cfg, true, None);
     let n = args.bench;
-    let topology = Topology::Ring { w: proj.raster_w, h: proj.raster_h };
+    let topology = Topology::Ring {
+        w: proj.raster_w,
+        h: proj.raster_h,
+    };
     let mut canvas = Canvas::new(topology, Scale::ONE);
     let mut raster = cube_proto::Raster::black(proj.raster_w, proj.raster_h);
     let mut presenter = VoxelPresenter::new(cfg.clone(), proj);
@@ -225,8 +260,14 @@ fn bench(
         "bench over {n} frames at {}x{} ({} px/voxel, depth step {}):",
         p.raster_w, p.raster_h, p.s, p.rise
     );
-    println!("  CPU presenter draw + encode {cpu_ms:.3} ms/frame ({:.0} fps)", 1e3 / cpu_ms);
-    println!("  GPU record + submit + fence {gpu_ms:.3} ms/frame ({:.0} fps)", 1e3 / gpu_ms);
+    println!(
+        "  CPU presenter draw + encode {cpu_ms:.3} ms/frame ({:.0} fps)",
+        1e3 / cpu_ms
+    );
+    println!(
+        "  GPU record + submit + fence {gpu_ms:.3} ms/frame ({:.0} fps)",
+        1e3 / gpu_ms
+    );
     println!(
         "  CPU pack of one tick        {pack_ms:.3} ms, {:.0} KiB uploaded",
         p.upload_bytes() as f64 / 1024.0
@@ -251,28 +292,63 @@ fn fixtures(cfg: &Config) -> (World, Flora) {
     // A floor to stand the water on, and a basin with rock walls.
     for z in 0..cfg.depth {
         for x in 0..i64::from(cfg.width) {
-            world.apply(VoxelCommand::SetMaterial { x, y: 0, z, material: Material::Bedrock });
-            world.apply(VoxelCommand::SetMaterial { x, y: 1, z, material: Material::Soil });
+            world.apply(VoxelCommand::SetMaterial {
+                x,
+                y: 0,
+                z,
+                material: Material::Bedrock,
+            });
+            world.apply(VoxelCommand::SetMaterial {
+                x,
+                y: 1,
+                z,
+                material: Material::Soil,
+            });
         }
     }
     // Twelve copies of the presenter's own partial-roof fixture, spread across the strip.
     for k in 0..12i64 {
         let x = 4 + k * 10;
-        world.apply(VoxelCommand::AddWater { x, y: 6, z: 1, volume_m3: v * 0.25 });
-        world.apply(VoxelCommand::SetMaterial { x, y: 7, z: 0, material: Material::Rock });
+        world.apply(VoxelCommand::AddWater {
+            x,
+            y: 6,
+            z: 1,
+            volume_m3: v * 0.25,
+        });
+        world.apply(VoxelCommand::SetMaterial {
+            x,
+            y: 7,
+            z: 0,
+            material: Material::Rock,
+        });
     }
     // A pool eight slabs deep with a rock lid over its near half, so a water top meets a
     // roof and a water body meets both.
     for z in 0..8u32 {
         for x in 60..76i64 {
             for y in 2..5u32 {
-                world.apply(VoxelCommand::AddWater { x, y, z, volume_m3: v });
+                world.apply(VoxelCommand::AddWater {
+                    x,
+                    y,
+                    z,
+                    volume_m3: v,
+                });
             }
         }
     }
     for x in 60..70i64 {
-        world.apply(VoxelCommand::SetMaterial { x, y: 6, z: 0, material: Material::Rock });
-        world.apply(VoxelCommand::SetMaterial { x, y: 6, z: 1, material: Material::Rock });
+        world.apply(VoxelCommand::SetMaterial {
+            x,
+            y: 6,
+            z: 0,
+            material: Material::Rock,
+        });
+        world.apply(VoxelCommand::SetMaterial {
+            x,
+            y: 6,
+            z: 1,
+            material: Material::Rock,
+        });
     }
     (world, Flora::new(FloraConfig::default()))
 }
@@ -290,7 +366,10 @@ fn compare(
     gpu: &mut VoxelGpuSink,
 ) -> Result<u8> {
     let (w, h) = (u32::from(proj.raster_w), u32::from(proj.raster_h));
-    let topology = Topology::Ring { w: proj.raster_w, h: proj.raster_h };
+    let topology = Topology::Ring {
+        w: proj.raster_w,
+        h: proj.raster_h,
+    };
     let mut canvas = Canvas::new(topology, Scale::ONE);
     let mut raster = cube_proto::Raster::black(proj.raster_w, proj.raster_h);
     VoxelPresenter::new(cfg.clone(), proj).draw(&world.view(), flora.view(), &mut canvas);
@@ -379,7 +458,10 @@ fn compare(
 
     let dir = &args.out;
     write_rgb(&dir.join(format!("{name}-cpu.png")), w, h, cpu)?;
-    let gpu_rgb: Vec<u8> = gpu_rgba.chunks_exact(4).flat_map(|p| p[..3].to_vec()).collect();
+    let gpu_rgb: Vec<u8> = gpu_rgba
+        .chunks_exact(4)
+        .flat_map(|p| p[..3].to_vec())
+        .collect();
     write_rgb(&dir.join(format!("{name}-gpu.png")), w, h, &gpu_rgb)?;
     write_rgb(&dir.join(format!("{name}-diff.png")), w, h, &diff_png)?;
     Ok(max[0].max(max[1]).max(max[2]))
@@ -563,24 +645,43 @@ fn rules(
     ];
     let mut out: Vec<Rule> = names
         .iter()
-        .map(|name| Rule { name, voxels: 0, pixels: 0, worst: 0, verdict: None, ties: 0 })
+        .map(|name| Rule {
+            name,
+            voxels: 0,
+            pixels: 0,
+            worst: 0,
+            verdict: None,
+            ties: 0,
+        })
         .collect();
 
     let solid = |x: i64, y: i64, z: u32| -> bool {
         y >= 0 && y < i64::from(c.height) && view.material_at(x, y as u32, z).is_solid()
     };
     let free = |x: i64, y: i64, z: u32| -> f64 {
-        if y < 0 || y >= i64::from(c.height) { 0.0 } else { view.free_at(x, y as u32, z) }
+        if y < 0 || y >= i64::from(c.height) {
+            0.0
+        } else {
+            view.free_at(x, y as u32, z)
+        }
     };
     let fill = |x: i64, y: i64, z: u32| -> i32 {
         let f = free(x, y, z);
-        if f <= 1e-4 { 0 } else { ((f as f32).clamp(0.0, 1.0) * s as f32).round().clamp(1.0, s as f32) as i32 }
+        if f <= 1e-4 {
+            0
+        } else {
+            ((f as f32).clamp(0.0, 1.0) * s as f32)
+                .round()
+                .clamp(1.0, s as f32) as i32
+        }
     };
     let water_open_up = |x: i64, y: i64, z: u32| -> bool {
         fill(x, y, z) < s || (!solid(x, y + 1, z) && free(x, y + 1, z) <= 1e-4)
     };
     let roof_gap = |x: i64, y: u32, z: u32| -> u32 {
-        (y + 1..c.height).find(|&yy| solid(x, i64::from(yy), z)).map_or(0, |yy| yy - y)
+        (y + 1..c.height)
+            .find(|&yy| solid(x, i64::from(yy), z))
+            .map_or(0, |yy| yy - y)
     };
 
     for z in 0..c.depth {
@@ -594,10 +695,7 @@ fn rules(
                     let open_up = !solid(x, yi + 1, z);
                     let open_left = !solid(x - 1, yi, z);
                     let open_right = !solid(x + 1, yi, z);
-                    let riser = open_up
-                        && z > 0
-                        && !solid(x, yi, z - 1)
-                        && solid(x, yi - 1, z - 1);
+                    let riser = open_up && z > 0 && !solid(x, yi, z - 1) && solid(x, yi - 1, z - 1);
                     let back_continues =
                         z + 1 < c.depth && solid(x, yi, z + 1) && !solid(x, yi + 1, z + 1);
 
@@ -635,7 +733,11 @@ fn rules(
                         p.brighter((fc + 1, fr), (fc + 1, fr + s - 1), &mut out[3]);
                     }
                     if open_up {
-                        let r = if back_continues { &mut out[5] } else { &mut out[4] };
+                        let r = if back_continues {
+                            &mut out[5]
+                        } else {
+                            &mut out[4]
+                        };
                         r.voxels += 1;
                         p.worst_over((fc, tr, proj.s, proj.rise), r);
                         if rise > 2 {
@@ -682,9 +784,7 @@ fn rules(
                     }
                     // A pixel over four or more slabs of water is the deep-pool case the
                     // one-surface-per-pixel rule is about.
-                    if z >= 3
-                        && (1..=3).all(|k| fill(x, yi, z - k) > 0)
-                        && water_open_up(x, yi, z)
+                    if z >= 3 && (1..=3).all(|k| fill(x, yi, z - k) > 0) && water_open_up(x, yi, z)
                     {
                         out[10].voxels += 1;
                         p.worst_over((fc, skin, proj.s, f as u32), &mut out[10]);
@@ -706,8 +806,11 @@ fn rules(
                                         return false;
                                     }
                                     let sk = fn_ + s - nf;
-                                    let top =
-                                        if water_open_up(x, yn, z - 1) { sk - rise } else { sk };
+                                    let top = if water_open_up(x, yn, z - 1) {
+                                        sk - rise
+                                    } else {
+                                        sk
+                                    };
                                     (top..fn_ + s).contains(&row)
                                 }
                             })

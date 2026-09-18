@@ -7,7 +7,6 @@
 //! capture and `= 0` for a certain miss. Nothing else about the profile is changed, and no
 //! test here is evidence about ecological balance.
 
-use cubarium_surface::{Scale, Topology};
 use cubarium_core::genome::{Genome, decode};
 use cubarium_core::hunter::{
     AttemptOutcome, FixedHunterProfile, HunterEvent, HunterMember, HunterPhase, HunterTarget,
@@ -16,6 +15,7 @@ use cubarium_core::ids::OrganismId;
 use cubarium_core::organism::{DeathCause, Mode, Organism, Origin};
 use cubarium_core::rng::Counter;
 use cubarium_core::snapshot::{SnapshotError, state_hash};
+use cubarium_surface::{Scale, Topology};
 
 /// The schema 12 replay hash of a world: FNV-1a over its frozen schema 12 projection. Recorded
 /// constants from before schema 13 are properties of those bytes, so they are checked against
@@ -199,7 +199,8 @@ fn effector_point(
     profile: &FixedHunterProfile,
     scale: f64,
 ) -> SurfacePoint {
-    travel(Topology::Cube, 
+    travel(
+        Topology::Cube,
         root,
         body_offset(heading, profile.capture_offset_body, scale),
     )
@@ -1355,7 +1356,11 @@ fn a_grasp_past_the_open_rim_never_captures_and_is_never_published() {
     // open rim of a side face, aimed at it.
     let spot = SurfacePoint::new(Face::Front, 32.0, 63.0);
     let heading = Vec2::new(0.0, 1.0);
-    let sweep = travel(Topology::Cube, spot, body_offset(heading, profile.capture_offset_body, 1.0));
+    let sweep = travel(
+        Topology::Cube,
+        spot,
+        body_offset(heading, profile.capture_offset_body, 1.0),
+    );
     assert!(
         sweep.reflections > 0,
         "this fixture needs the reach to meet the rim"
@@ -1672,8 +1677,12 @@ fn a_hunter_that_cannot_pay_the_handling_cost_digests_nothing_that_tick() {
 #[test]
 fn a_facultative_hunter_scavenges_at_its_allocated_fraction_and_a_specialist_does_not() {
     let litter = |world: &mut World, id: OrganismId| {
-        let cell =
-            cubarium_surface::cell_of(Topology::Cube, Scale::ONE, &world.state.organisms.get(id).expect("alive").pos).index();
+        let cell = cubarium_surface::cell_of(
+            Topology::Cube,
+            Scale::ONE,
+            &world.state.organisms.get(id).expect("alive").pos,
+        )
+        .index();
         world.state.fields.d[cell] = 2.0;
         world.state.fields.de[cell] = 4.0;
         world.state.external_material_in += 2.0;
@@ -2307,4 +2316,3 @@ fn observations_do_not_move_a_profile_three_hunter_world() {
         "a funded-birth world moved"
     );
 }
-

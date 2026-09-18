@@ -4,18 +4,18 @@
 //! never sees them — it is handed a cloned [`SceneView`] snapshot of the last completed
 //! tick. Every spatial step goes through `cubarium-surface`.
 
-use cubarium_surface::{Scale, Topology};
-use cube_proto::Face;
 use cubarium_render::{BodyShape, Canvas, Lobe, Trail, draw_trail, stamp_body};
 use cubarium_surface::{
     FieldGraph, PathSegment, PixelImage, ScalarField, SurfacePoint, Vec2, deposit, diffuse,
     travel_into,
 };
+use cubarium_surface::{Scale, Topology};
+use cube_proto::Face;
 
 use crate::clock::DT;
-use crate::present::{PALETTE, TRAIL_BRIGHTNESS, draw_floor, draw_ramp_field, interpolate_on};
 #[cfg(test)]
 use crate::present::interpolate;
+use crate::present::{PALETTE, TRAIL_BRIGHTNESS, draw_floor, draw_ramp_field, interpolate_on};
 use crate::rng::SplitMix64;
 
 /// Which fixture(s) to run.
@@ -43,7 +43,11 @@ pub fn body_color() -> [f32; 3] {
 /// The history trail is the body color at the M2 trail brightness.
 pub fn trail_color() -> [f32; 3] {
     let c = body_color();
-    [c[0] * TRAIL_BRIGHTNESS, c[1] * TRAIL_BRIGHTNESS, c[2] * TRAIL_BRIGHTNESS]
+    [
+        c[0] * TRAIL_BRIGHTNESS,
+        c[1] * TRAIL_BRIGHTNESS,
+        c[2] * TRAIL_BRIGHTNESS,
+    ]
 }
 
 /// At most 160 trail segments.
@@ -57,9 +61,18 @@ pub const FIELD_SCALE: f64 = 6.0;
 pub fn fixture_body() -> BodyShape {
     BodyShape {
         lobes: vec![
-            Lobe { offset: Vec2::new(0.0, 0.0), radius: 1.6 },
-            Lobe { offset: Vec2::new(2.4, 0.0), radius: 1.0 },
-            Lobe { offset: Vec2::new(-1.4, 1.3), radius: 0.9 },
+            Lobe {
+                offset: Vec2::new(0.0, 0.0),
+                radius: 1.6,
+            },
+            Lobe {
+                offset: Vec2::new(2.4, 0.0),
+                radius: 1.0,
+            },
+            Lobe {
+                offset: Vec2::new(-1.4, 1.3),
+                radius: 0.9,
+            },
         ],
     }
 }
@@ -179,7 +192,12 @@ impl BodyScene {
 
         // Steer, then sweep, then transport the heading through the travel's tangent map.
         self.heading = rotate_screen_ccw(self.heading, self.turn_rate * DT);
-        travel_into(self.topology, self.pos, self.heading * (BODY_SPEED * DT), &mut self.travel_buf);
+        travel_into(
+            self.topology,
+            self.pos,
+            self.heading * (BODY_SPEED * DT),
+            &mut self.travel_buf,
+        );
         self.trail.push_travel(&self.travel_buf, tick);
         self.pos = self.travel_buf.end;
         self.heading = self.travel_buf.map.apply(self.heading);
@@ -222,8 +240,7 @@ pub struct VertexScene {
 }
 
 /// The four Top-face anchors, 2.5 px diagonally inside each vertex.
-pub const VERTEX_ANCHORS: [(f64, f64); 4] =
-    [(2.5, 2.5), (61.5, 2.5), (61.5, 61.5), (2.5, 61.5)];
+pub const VERTEX_ANCHORS: [(f64, f64); 4] = [(2.5, 2.5), (61.5, 2.5), (61.5, 61.5), (2.5, 61.5)];
 /// The Front/Right seam straddler.
 pub const SEAM_ANCHOR: (f64, f64) = (63.2, 40.0);
 
@@ -238,7 +255,11 @@ impl VertexScene {
     /// must be carried by two images, and one tucked against each rim, which must be
     /// clipped and not wrapped.
     pub fn on(topology: Topology, _seed: u64) -> VertexScene {
-        VertexScene { topology, angle: 0.0, shape: fixture_body() }
+        VertexScene {
+            topology,
+            angle: 0.0,
+            shape: fixture_body(),
+        }
     }
 
     pub fn tick(&mut self, _tick: u64) {
@@ -373,7 +394,12 @@ impl PatchScene {
                 PATCH_AMOUNT,
             );
         }
-        diffuse(&mut self.field, &mut self.scratch, &self.graph, PATCH_DIFFUSION);
+        diffuse(
+            &mut self.field,
+            &mut self.scratch,
+            &self.graph,
+            PATCH_DIFFUSION,
+        );
         for c in cubarium_surface::CellId::all(self.topology, self.scale) {
             let x = self.field.get(c);
             self.field.set(c, x * PATCH_DECAY);
@@ -529,16 +555,26 @@ mod tests {
         let right: f64 = (0..4)
             .map(|cx| field.values[usize::from(cells_x) * 22 + usize::from(cells_x) - 1 - cx])
             .sum();
-        assert!(left > 0.0 && right > 0.0, "the wrap deposit is on both sides: {left} {right}");
+        assert!(
+            left > 0.0 && right > 0.0,
+            "the wrap deposit is on both sides: {left} {right}"
+        );
 
         for b in &view.bodies {
-            assert!(b.anchor.is_canonical(ring()), "{:?} is on the ring", b.anchor);
+            assert!(
+                b.anchor.is_canonical(ring()),
+                "{:?} is on the ring",
+                b.anchor
+            );
         }
         // And it draws onto a ring canvas without reaching for a chart the ring has not.
         let mut canvas = Canvas::new(ring(), Scale::ONE);
         let mut scratch = Vec::new();
         render(&view, 0.0, &mut canvas, &mut scratch);
-        assert!(canvas.pixels().iter().any(|p| *p != PALETTE.floor), "it drew");
+        assert!(
+            canvas.pixels().iter().any(|p| *p != PALETTE.floor),
+            "it drew"
+        );
     }
 
     /// Six simulated minutes of the wandering body on a ring: it stays canonical, it goes
@@ -563,7 +599,10 @@ mod tests {
                 .any(|seg| seg.from.x < 1.0 || seg.to.x > 319.0);
         }
         assert!(wrapped, "the body reached the wrap at least once");
-        assert!(max_u - min_u > 200.0, "it covered the world: {min_u}..{max_u}");
+        assert!(
+            max_u - min_u > 200.0,
+            "it covered the world: {min_u}..{max_u}"
+        );
     }
 
     #[test]
@@ -571,7 +610,10 @@ mod tests {
         let v = Vec2::new(1.0, 0.0);
         let q = rotate_screen_ccw(v, std::f64::consts::FRAC_PI_2);
         let want = v.rotate_quarter_turns(1);
-        assert!((q.x - want.x).abs() < 1e-12 && (q.y - want.y).abs() < 1e-12, "{q:?} vs {want:?}");
+        assert!(
+            (q.x - want.x).abs() < 1e-12 && (q.y - want.y).abs() < 1e-12,
+            "{q:?} vs {want:?}"
+        );
         // Length is preserved.
         let r = rotate_screen_ccw(Vec2::new(0.3, -0.7), 1.234);
         assert!((r.length() - Vec2::new(0.3, -0.7).length()).abs() < 1e-12);
@@ -584,7 +626,10 @@ mod tests {
         let c = run(SceneKind::All, 43, 200).view();
         assert_eq!(a.bodies[0].anchor, b.bodies[0].anchor);
         assert_eq!(a.field, b.field);
-        assert_ne!(a.bodies[0].anchor, c.bodies[0].anchor, "a different seed must differ");
+        assert_ne!(
+            a.bodies[0].anchor, c.bodies[0].anchor,
+            "a different seed must differ"
+        );
     }
 
     #[test]
@@ -597,20 +642,33 @@ mod tests {
             let v = s.view();
             let a = v.bodies[0].anchor;
             assert!(a.is_canonical(Topology::Cube), "non-canonical anchor {a:?}");
-            assert!((v.bodies[0].heading.length() - 1.0).abs() < 1e-9, "heading drifted");
+            assert!(
+                (v.bodies[0].heading.length() - 1.0).abs() < 1e-9,
+                "heading drifted"
+            );
             faces.insert(a.face);
         }
-        assert!(faces.len() >= 3, "the body should reach several faces, got {faces:?}");
+        assert!(
+            faces.len() >= 3,
+            "the body should reach several faces, got {faces:?}"
+        );
     }
 
     #[test]
     fn the_trail_is_bounded_in_length_and_age() {
         let s = run(SceneKind::Body, 3, 2_000);
         let trail = s.view().trail.expect("the body scene has a trail");
-        assert!(trail.len() <= TRAIL_MAX_SEGMENTS, "trail {} segments", trail.len());
+        assert!(
+            trail.len() <= TRAIL_MAX_SEGMENTS,
+            "trail {} segments",
+            trail.len()
+        );
         let now = s.view().tick;
         for seg in trail.segments() {
-            assert!(now - seg.tick <= TRAIL_MAX_AGE_TICKS, "segment older than the window");
+            assert!(
+                now - seg.tick <= TRAIL_MAX_AGE_TICKS,
+                "segment older than the window"
+            );
         }
     }
 
@@ -621,14 +679,23 @@ mod tests {
         assert!(f.is_finite() && f.is_nonnegative());
         // Deposits add 40 every 12 s and 0.5 %/tick decay bounds the steady state.
         assert!(f.total() > 1.0, "the field should hold mass: {}", f.total());
-        assert!(f.total() < 40.0 * 12.0, "decay should bound the total: {}", f.total());
+        assert!(
+            f.total() < 40.0 * 12.0,
+            "decay should bound the total: {}",
+            f.total()
+        );
     }
 
     #[test]
     fn every_scene_lights_more_than_one_face() {
         let mut canvas = Canvas::cube();
         let mut scratch = Vec::new();
-        for kind in [SceneKind::Body, SceneKind::Vertex, SceneKind::Patch, SceneKind::All] {
+        for kind in [
+            SceneKind::Body,
+            SceneKind::Vertex,
+            SceneKind::Patch,
+            SceneKind::All,
+        ] {
             // 20 s of simulation, the capture length the contract asks for.
             let s = run(kind, 1, 400);
             render(&s.view(), 0.0, &mut canvas, &mut scratch);
@@ -642,7 +709,13 @@ mod tests {
         let s = run(SceneKind::Vertex, 1, 100);
         let v = s.view();
         assert_eq!(v.bodies.len(), 5);
-        assert_eq!(v.bodies.iter().filter(|b| b.anchor.face == Face::Top).count(), 4);
+        assert_eq!(
+            v.bodies
+                .iter()
+                .filter(|b| b.anchor.face == Face::Top)
+                .count(),
+            4
+        );
         let seam = v.bodies.last().unwrap();
         assert_eq!(seam.anchor.face, Face::Front);
         assert!((seam.anchor.u - 63.2).abs() < 1e-12);
@@ -652,7 +725,10 @@ mod tests {
         render(&v, 0.0, &mut canvas, &mut scratch);
         let faces = lit_faces(&canvas);
         // The Top vertices reach the four side faces and the seam body reaches Right.
-        assert!(faces.contains(&Face::Top) && faces.contains(&Face::Right), "{faces:?}");
+        assert!(
+            faces.contains(&Face::Top) && faces.contains(&Face::Right),
+            "{faces:?}"
+        );
     }
 
     /// The fixture body carries its last tick's path, so the demo interpolates between
@@ -663,7 +739,10 @@ mod tests {
         let s = run(SceneKind::Body, 11, 100);
         let v = s.view();
         let body = &v.bodies[0];
-        assert!(!body.moved.is_empty(), "the wandering body travels every tick");
+        assert!(
+            !body.moved.is_empty(),
+            "the wandering body travels every tick"
+        );
 
         let (start, _) = interpolate(&body.moved, body.anchor, body.heading, 0.0);
         let first = body.moved.first().unwrap();
@@ -690,7 +769,10 @@ mod tests {
             .flat_map(|f| (0..64u16).flat_map(move |y| (0..64u16).map(move |x| (f, x, y))))
             .map(|(f, x, y)| canvas.get(f, x, y)[0])
             .collect();
-        assert_ne!(at_zero, at_one, "the interpolated body must move within the tick");
+        assert_ne!(
+            at_zero, at_one,
+            "the interpolated body must move within the tick"
+        );
     }
 
     #[test]
@@ -705,7 +787,10 @@ mod tests {
         for _ in 0..50 {
             s.tick();
         }
-        assert_eq!(snap.bodies[0].anchor, pos, "the snapshot moved with the scene");
+        assert_eq!(
+            snap.bodies[0].anchor, pos,
+            "the snapshot moved with the scene"
+        );
         assert_eq!(snap.field, field);
         assert_ne!(s.view().bodies[0].anchor, pos, "the scene did not advance");
     }
@@ -715,7 +800,11 @@ mod tests {
         let s = run(SceneKind::All, 1, 10);
         let v = s.view();
         assert!(v.field.is_some() && v.trail.is_some());
-        assert_eq!(v.bodies.len(), 6, "one wanderer plus five vertex-fixture bodies");
+        assert_eq!(
+            v.bodies.len(),
+            6,
+            "one wanderer plus five vertex-fixture bodies"
+        );
         for kind in [SceneKind::Body, SceneKind::Vertex, SceneKind::Patch] {
             let v = run(kind, 1, 10).view();
             match kind {

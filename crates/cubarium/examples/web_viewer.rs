@@ -14,15 +14,15 @@
 
 use std::time::{Duration, Instant};
 
-use cube_proto::{FACE_SIZE, Face, Frame};
 use cubarium::sink::{FrameSink, Output, WebSink};
+use cube_proto::{FACE_SIZE, Face, Frame};
 
 const BASE: [[u8; 3]; 5] = [
-    [58, 10, 14],  // Front  red
-    [10, 58, 18],  // Right  green
-    [14, 18, 66],  // Back   blue
-    [58, 48, 10],  // Left   amber
-    [50, 12, 58],  // Top    violet
+    [58, 10, 14], // Front  red
+    [10, 58, 18], // Right  green
+    [14, 18, 66], // Back   blue
+    [58, 48, 10], // Left   amber
+    [50, 12, 58], // Top    violet
 ];
 
 /// A 3x3 block anchored at the named chart corner, matching the page's own marker.
@@ -49,8 +49,12 @@ fn pattern(tick: u64) -> Frame {
                     x,
                     y,
                     [
-                        base[0].saturating_add(x as u8).saturating_add(if lit { 90 } else { 0 }),
-                        base[1].saturating_add(y as u8).saturating_add(if lit { 90 } else { 0 }),
+                        base[0]
+                            .saturating_add(x as u8)
+                            .saturating_add(if lit { 90 } else { 0 }),
+                        base[1]
+                            .saturating_add(y as u8)
+                            .saturating_add(if lit { 90 } else { 0 }),
                         base[2].saturating_add(if lit { 90 } else { 0 }),
                     ],
                 );
@@ -64,7 +68,10 @@ fn pattern(tick: u64) -> Frame {
 }
 
 fn main() -> anyhow::Result<()> {
-    let port: u16 = std::env::args().nth(1).and_then(|a| a.parse().ok()).unwrap_or(8787);
+    let port: u16 = std::env::args()
+        .nth(1)
+        .and_then(|a| a.parse().ok())
+        .unwrap_or(8787);
     let mut sink = WebSink::new(port)?;
     println!("cubarium web viewer: {}  (ctrl-c to stop)", sink.url());
 

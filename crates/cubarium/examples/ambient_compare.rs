@@ -53,9 +53,21 @@ const BUILD: &str = concat!(env!("CARGO_PKG_VERSION"), "+", env!("CUBARIUM_GIT_H
 /// The care study's own three targets: an ordinary interior cell, a side seam, and the open
 /// bottom rim. Reused verbatim so a dose here means what it meant there.
 const TARGETS: [CareTarget; 3] = [
-    CareTarget { face: 0, u: 32.0, v: 48.0 },
-    CareTarget { face: 0, u: 63.5, v: 48.0 },
-    CareTarget { face: 1, u: 32.0, v: 63.5 },
+    CareTarget {
+        face: 0,
+        u: 32.0,
+        v: 48.0,
+    },
+    CareTarget {
+        face: 0,
+        u: 63.5,
+        v: 48.0,
+    },
+    CareTarget {
+        face: 1,
+        u: 32.0,
+        v: 63.5,
+    },
 ];
 
 /// The candidate's multiplier on the opening's own rain rate. One value, no sweep.
@@ -118,8 +130,15 @@ struct Args {
 fn sha256(bytes: &[u8]) -> Result<String> {
     // The host's standard checksum utility, with no shell interpolation and no added
     // dependency. Input is bytes on stdin, never a command or a path argument.
-    let mut child = Command::new("sha256sum").stdin(Stdio::piped()).stdout(Stdio::piped()).spawn()?;
-    child.stdin.take().context("checksum stdin")?.write_all(bytes)?;
+    let mut child = Command::new("sha256sum")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()?;
+    child
+        .stdin
+        .take()
+        .context("checksum stdin")?
+        .write_all(bytes)?;
     let out = child.wait_with_output()?;
     ensure!(out.status.success(), "sha256sum failed");
     let text = String::from_utf8(out.stdout)?;
@@ -211,7 +230,10 @@ fn load_cohort(dir: &Path) -> Result<(Value, Vec<Opening>)> {
             state.config.water.rain_rate.is_finite() && state.config.water.rain_rate > 0.0,
             "seed{seed} has no natural rainfall to vary"
         );
-        openings.push(Opening { state, source: row.clone() });
+        openings.push(Opening {
+            state,
+            source: row.clone(),
+        });
     }
     openings.sort_by_key(|o| o.state.config.seed);
     Ok((manifest, openings))
@@ -232,10 +254,11 @@ struct Baseline {
 
 impl Baseline {
     fn read(s: &WorldState) -> Result<Self> {
-        let (material, energy, water) =
-            (material(s), energy(s), s.fields.w.iter().sum::<f64>());
+        let (material, energy, water) = (material(s), energy(s), s.fields.w.iter().sum::<f64>());
         ensure!(
-            [material, energy, water].iter().all(|x| x.is_finite() && *x >= 0.0),
+            [material, energy, water]
+                .iter()
+                .all(|x| x.is_finite() && *x >= 0.0),
             "invalid pre-intervention baseline"
         );
         Ok(Self {
@@ -293,13 +316,23 @@ struct Arm {
 }
 
 impl Arm {
-    fn new(opening: &WorldState, base: Baseline, name: &str, candidate: bool, dose: Option<u16>, dir: &Path) -> Result<Self> {
+    fn new(
+        opening: &WorldState,
+        base: Baseline,
+        name: &str,
+        candidate: bool,
+        dose: Option<u16>,
+        dir: &Path,
+    ) -> Result<Self> {
         fs::create_dir(dir)?;
         let state = arm_state(opening, candidate);
         let before_hash = cubarium_core::snapshot::state_hash(opening);
         let after_hash = cubarium_core::snapshot::state_hash(&state);
         if candidate {
-            ensure!(before_hash != after_hash, "the candidate change left the state identical");
+            ensure!(
+                before_hash != after_hash,
+                "the candidate change left the state identical"
+            );
         } else {
             ensure!(
                 before_hash == after_hash
@@ -308,7 +341,10 @@ impl Arm {
                 "the 100% arm must leave the opening untouched, bit for bit"
             );
         }
-        let dose = dose.map(CareDose::new).transpose().map_err(|e| anyhow!(e))?;
+        let dose = dose
+            .map(CareDose::new)
+            .transpose()
+            .map_err(|e| anyhow!(e))?;
         let world = World::from_state(state.clone()).map_err(|e| anyhow!(e))?;
         let regions = region::Regions::new(&state, &TARGETS)?;
         json_new(
@@ -393,7 +429,10 @@ impl Arm {
                 target: TARGETS[index],
                 dose,
             });
-            let booked = receipt.outcome.applied().map_or(0.0, |q| q.energy_in - q.energy_out);
+            let booked = receipt
+                .outcome
+                .applied()
+                .map_or(0.0, |q| q.energy_in - q.energy_out);
             if let Some(q) = receipt.outcome.applied() {
                 self.receipt_energy_in.add(q.energy_in);
                 self.receipt_energy_out.add(q.energy_out);
@@ -445,14 +484,16 @@ impl Arm {
             - s.energy_ledgers().net_since(self.opening_ledgers)
             - (s.care.feed_energy_in - initial.care.feed_energy_in)
             + (s.care.clean_energy_out - initial.care.clean_energy_out);
-        ensure!(corrected_residual.is_finite(), "nonfinite corrected energy audit");
+        ensure!(
+            corrected_residual.is_finite(),
+            "nonfinite corrected energy audit"
+        );
         self.worst_corrected_energy = self.worst_corrected_energy.max(corrected_residual.abs());
-        let windowed_residual = energy(s)
-            - self.base.energy
-            - (self.windowed.light.value() + transient_light)
-            + (self.windowed.heat.value() + transient_heat)
-            - self.receipt_energy_in.value()
-            + self.receipt_energy_out.value();
+        let windowed_residual =
+            energy(s) - self.base.energy - (self.windowed.light.value() + transient_light)
+                + (self.windowed.heat.value() + transient_heat)
+                - self.receipt_energy_in.value()
+                + self.receipt_energy_out.value();
         ensure!(windowed_residual.is_finite(), "nonfinite windowed audit");
         self.worst_windowed_energy = self.worst_windowed_energy.max(windowed_residual.abs());
         let residuals = [
@@ -465,7 +506,8 @@ impl Arm {
                 + (s.heat_out_total - initial.heat_out_total)
                 - (s.care.feed_energy_in - initial.care.feed_energy_in)
                 + (s.care.clean_energy_out - initial.care.clean_energy_out),
-            s.fields.w.iter().sum::<f64>() - self.base.water
+            s.fields.w.iter().sum::<f64>()
+                - self.base.water
                 - (s.rain_in_total - initial.rain_in_total)
                 + (s.evap_out_total - initial.evap_out_total),
         ];
@@ -507,7 +549,13 @@ impl Arm {
         Ok(())
     }
 
-    fn finish(&mut self, dir: &Path, planned: u64, horizon: Horizon, reason: Option<String>) -> Result<Value> {
+    fn finish(
+        &mut self,
+        dir: &Path,
+        planned: u64,
+        horizon: Horizon,
+        reason: Option<String>,
+    ) -> Result<Value> {
         self.receipts.flush()?;
         self.sample_stream.flush()?;
         self.receipts.get_ref().sync_all()?;
@@ -580,7 +628,13 @@ impl Arm {
 /// Finalization can fail after simulation has advanced (for example a refused output write).
 /// Keep the actual progress and original step error without presenting stale observers as a
 /// valid completed measurement. The caller can still run every other prescribed arm.
-fn finish_retained(arm: &mut Arm, dir: &Path, planned: u64, horizon: Horizon, reason: Option<String>) -> Value {
+fn finish_retained(
+    arm: &mut Arm,
+    dir: &Path,
+    planned: u64,
+    horizon: Horizon,
+    reason: Option<String>,
+) -> Value {
     match arm.finish(dir, planned, horizon, reason.clone()) {
         Ok(summary) => summary,
         Err(error) => json!({
@@ -598,17 +652,25 @@ fn finish_retained(arm: &mut Arm, dir: &Path, planned: u64, horizon: Horizon, re
 }
 
 fn numerical_success(seeds: &[Value]) -> bool {
-    seeds.len() == 12 && seeds.iter().all(|s| {
-        s["technical_complete"] == true
-            && s["arms"].as_array().is_some_and(|arms| {
-                arms.len() == ARMS.len() && arms.iter().all(|a| {
-                    a["technical_complete"] == true && a["audit_passed"] == true
+    seeds.len() == 12
+        && seeds.iter().all(|s| {
+            s["technical_complete"] == true
+                && s["arms"].as_array().is_some_and(|arms| {
+                    arms.len() == ARMS.len()
+                        && arms
+                            .iter()
+                            .all(|a| a["technical_complete"] == true && a["audit_passed"] == true)
                 })
-            })
-    })
+        })
 }
 
-fn run_seed(opening: &Opening, dir: &Path, planned: u64, horizon: Horizon, sample_every: u64) -> Result<Value> {
+fn run_seed(
+    opening: &Opening,
+    dir: &Path,
+    planned: u64,
+    horizon: Horizon,
+    sample_every: u64,
+) -> Result<Value> {
     fs::create_dir(dir)?;
     let base = Baseline::read(&opening.state)?;
     let mut summaries = Vec::new();
@@ -619,8 +681,11 @@ fn run_seed(opening: &Opening, dir: &Path, planned: u64, horizon: Horizon, sampl
             Ok(arm) => arm,
             Err(error) => {
                 let text = format!("{name}: initialization_failure: {error:#}");
-                json_new(&arm_dir.join("initialization-failure.json"), &json!({"error": text}))
-                    .ok();
+                json_new(
+                    &arm_dir.join("initialization-failure.json"),
+                    &json!({"error": text}),
+                )
+                .ok();
                 failure.get_or_insert(text.clone());
                 summaries.push(json!({"arm": name, "technical_complete": false, "error": text}));
                 continue;
@@ -700,7 +765,13 @@ fn main() -> Result<()> {
     let mut failed = false;
     for opening in &openings {
         let seed = opening.state.config.seed;
-        let result = match run_seed(opening, &args.out.join(format!("seed-{seed}")), planned, args.horizon, args.sample_every) {
+        let result = match run_seed(
+            opening,
+            &args.out.join(format!("seed-{seed}")),
+            planned,
+            args.horizon,
+            args.sample_every,
+        ) {
             Ok(result) => result,
             Err(error) => json!({
                 "seed": seed, "technical_complete": false,
@@ -714,7 +785,11 @@ fn main() -> Result<()> {
         }
         eprintln!(
             "seed {seed}/12 {}",
-            if result["technical_complete"] == true { "complete" } else { "RETAINED WITH FAILURE" }
+            if result["technical_complete"] == true {
+                "complete"
+            } else {
+                "RETAINED WITH FAILURE"
+            }
         );
         all.push(result);
     }
@@ -732,7 +807,10 @@ fn main() -> Result<()> {
     });
     json_new(&args.out.join("summary.json"), &summary)?;
     println!("{}", args.out.display());
-    ensure!(numerical_passed, "retained ambient cohort contains technical or numerical failures; see summary.json");
+    ensure!(
+        numerical_passed,
+        "retained ambient cohort contains technical or numerical failures; see summary.json"
+    );
     Ok(())
 }
 
@@ -767,7 +845,10 @@ mod tests {
         for field in ["audit_passed", "technical_complete"] {
             let mut bad = good.clone();
             bad[11]["arms"][5][field] = json!(false);
-            assert!(!numerical_success(&bad), "{field} must cause a failing process result");
+            assert!(
+                !numerical_success(&bad),
+                "{field} must cause a failing process result"
+            );
         }
         assert!(!numerical_success(&good[..11]));
         let mut missing = good.clone();
@@ -783,11 +864,25 @@ mod tests {
         let o = opening();
         let dir = temp("retained-finalization");
         let arm_dir = dir.join("arm");
-        let mut arm = Arm::new(&o, Baseline::read(&o).unwrap(), "rain100_none", false, None, &arm_dir).unwrap();
+        let mut arm = Arm::new(
+            &o,
+            Baseline::read(&o).unwrap(),
+            "rain100_none",
+            false,
+            None,
+            &arm_dir,
+        )
+        .unwrap();
         arm.step(0, 200).unwrap();
         // An exclusive-write refusal is deterministic; this is not an ENOSPC simulation.
         write_new(&arm_dir.join("closing.cubw"), b"do not overwrite").unwrap();
-        let summary = finish_retained(&mut arm, &arm_dir, 2400, Horizon::Smoke, Some("original step fault".into()));
+        let summary = finish_retained(
+            &mut arm,
+            &arm_dir,
+            2400,
+            Horizon::Smoke,
+            Some("original step fault".into()),
+        );
         assert_eq!(summary["termination"], "finalization_failure");
         assert_eq!(summary["technical_complete"], false);
         assert_eq!(summary["audit_passed"], false);
@@ -795,7 +890,10 @@ mod tests {
         assert_eq!(summary["closing_tick"], arm.world.tick());
         assert_eq!(summary["closing_population"], arm.world.population());
         assert_eq!(summary["step_failure"], "original step fault");
-        assert_eq!(fs::read(arm_dir.join("closing.cubw")).unwrap(), b"do not overwrite");
+        assert_eq!(
+            fs::read(arm_dir.join("closing.cubw")).unwrap(),
+            b"do not overwrite"
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -818,8 +916,14 @@ mod tests {
         // relying on one being harmless: a percentage round trip is lossy for ordinary rates.
         // The default 0.6 happens to survive it, which is exactly the sort of accident a
         // harness must not depend on.
-        assert_eq!(o.config.water.rain_rate, 0.6, "the cohort's rate, for the record");
-        assert_eq!(o.config.water.rain_rate * 100.0 / 100.0, o.config.water.rain_rate);
+        assert_eq!(
+            o.config.water.rain_rate, 0.6,
+            "the cohort's rate, for the record"
+        );
+        assert_eq!(
+            o.config.water.rain_rate * 100.0 / 100.0,
+            o.config.water.rain_rate
+        );
         let lossy: f64 = 0.947_657_271_874_606_6;
         assert_ne!(
             (lossy * 90.0 / 90.0).to_bits(),
@@ -843,10 +947,16 @@ mod tests {
 
         let mut rewound = candidate.clone();
         rewound.config.water.rain_rate = o.config.water.rain_rate;
-        assert_eq!(rewound, o, "the candidate changed something other than the rain rate");
+        assert_eq!(
+            rewound, o,
+            "the candidate changed something other than the rain rate"
+        );
 
         // Named explicitly, so a future field added to WaterConfig cannot slip in unnoticed.
-        assert_eq!(candidate.config.water.rain_threshold, o.config.water.rain_threshold);
+        assert_eq!(
+            candidate.config.water.rain_threshold,
+            o.config.water.rain_threshold
+        );
         assert_eq!(candidate.config.water.flow, o.config.water.flow);
         assert_eq!(candidate.config.water.evap, o.config.water.evap);
         assert_eq!(candidate.config.water.flood, o.config.water.flood);
@@ -928,7 +1038,8 @@ mod tests {
         for (a, b) in [(0, 1), (0, 2), (3, 4), (3, 5)] {
             assert_eq!(
                 arms[a].1.world.state.weather, arms[b].1.world.state.weather,
-                "dose moved the weather between {} and {}", arms[a].0, arms[b].0
+                "dose moved the weather between {} and {}",
+                arms[a].0, arms[b].0
             );
             assert_eq!(
                 arms[a].1.world.state.config.water.rain_rate,
@@ -953,12 +1064,16 @@ mod tests {
             assert!(
                 gap <= noise,
                 "dose moved the attributed natural rain between {} and {}: {gap:e}",
-                arms[a].0, arms[b].0
+                arms[a].0,
+                arms[b].0
             );
         }
         // Support really did move it, and by about the tenth the proposal describes.
         assert!(natural[0] > 0.0 && natural[3] > 0.0);
-        assert!(natural[3] < natural[0], "the candidate must receive less natural rain");
+        assert!(
+            natural[3] < natural[0],
+            "the candidate must receive less natural rain"
+        );
         let ratio = natural[3] / natural[0];
         assert!((ratio - CANDIDATE_FRACTION).abs() < 1e-9, "ratio {ratio}");
         // And the gap the support level opens is enormous beside that accumulation noise, so
@@ -973,9 +1088,16 @@ mod tests {
         assert_eq!(manual[3], 0.0);
         assert_eq!(manual[1], manual[4], "support rescaled the standard dose");
         assert_eq!(manual[2], manual[5], "support rescaled the generous dose");
-        assert!(manual[2] > manual[1] && manual[1] > 0.0, "generous is the larger dose");
+        assert!(
+            manual[2] > manual[1] && manual[1] > 0.0,
+            "generous is the larger dose"
+        );
         // The dose really is the 1.5× the panel names, on the delivered water itself.
-        assert!((manual[2] / manual[1] - 1.5).abs() < 1e-9, "{}", manual[2] / manual[1]);
+        assert!(
+            (manual[2] / manual[1] - 1.5).abs() < 1e-9,
+            "{}",
+            manual[2] / manual[1]
+        );
         // Identical attempts and outcomes on both support levels.
         for (a, b) in [(1, 4), (2, 5)] {
             assert_eq!(arms[a].1.receipts_written, arms[b].1.receipts_written);
@@ -991,7 +1113,15 @@ mod tests {
         let o = opening();
         let base = Baseline::read(&o).unwrap();
         let dir = temp("resume");
-        let mut arm = Arm::new(&o, base, "rain90_generous", true, Some(1500), &dir.join("arm")).unwrap();
+        let mut arm = Arm::new(
+            &o,
+            base,
+            "rain90_generous",
+            true,
+            Some(1500),
+            &dir.join("arm"),
+        )
+        .unwrap();
         // Past the first scheduled shower, and into it.
         for elapsed in 0..(CARE_START + 40) {
             arm.step(elapsed, 200).unwrap();
@@ -1004,7 +1134,10 @@ mod tests {
         let bytes = cubarium_core::encode_snapshot(&arm.world.state, "ambient-resume");
         let (_, state) = decode_snapshot(&bytes).unwrap();
         assert_eq!(state, arm.world.state);
-        assert_eq!(state.config.water.rain_rate, o.config.water.rain_rate * CANDIDATE_FRACTION);
+        assert_eq!(
+            state.config.water.rain_rate,
+            o.config.water.rain_rate * CANDIDATE_FRACTION
+        );
         let mut resumed = World::from_state(state).unwrap();
         for elapsed in (CARE_START + 40)..(CARE_START + 400) {
             arm.step(elapsed, 200).unwrap();
@@ -1016,7 +1149,10 @@ mod tests {
                 "diverged at elapsed {elapsed}"
             );
         }
-        assert!(arm.world.state.care.showers.is_empty(), "the shower finished");
+        assert!(
+            arm.world.state.care.showers.is_empty(),
+            "the shower finished"
+        );
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -1047,11 +1183,18 @@ mod tests {
             arm.step(elapsed, 200).unwrap();
         }
         assert_eq!(arm.receipts_written, 1, "the scheduled attempt was made");
-        assert_eq!(arm.receipts_by_outcome, [0, 0, 1], "and refused, not applied");
+        assert_eq!(
+            arm.receipts_by_outcome,
+            [0, 0, 1],
+            "and refused, not applied"
+        );
         arm.receipts.flush().unwrap();
         let text = fs::read_to_string(arm_dir.join("receipts.jsonl")).unwrap();
         assert!(text.contains(r#""outcome":"rejected""#), "{text}");
-        assert!(text.contains("shower active"), "the reason is kept verbatim: {text}");
+        assert!(
+            text.contains("shower active"),
+            "the reason is kept verbatim: {text}"
+        );
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -1059,15 +1202,12 @@ mod tests {
     /// observation, at the unchanged limit — no tolerance is widened to let a run finish.
     #[test]
     fn an_unbooked_change_fails_the_audit_at_the_unchanged_limit() {
-        for (name, damage) in [
-            ("material", 0usize),
-            ("energy", 1),
-            ("water", 2),
-        ] {
+        for (name, damage) in [("material", 0usize), ("energy", 1), ("water", 2)] {
             let o = opening();
             let base = Baseline::read(&o).unwrap();
             let dir = temp(&format!("adversarial-{name}"));
-            let mut arm = Arm::new(&o, base, "rain100_none", false, None, &dir.join("arm")).unwrap();
+            let mut arm =
+                Arm::new(&o, base, "rain100_none", false, None, &dir.join("arm")).unwrap();
             arm.step(0, 200).unwrap();
             // Exactly at the limit, which the audit treats as a failure rather than a pass:
             // a fixture that merely exceeded it by a lot would not test the boundary.
@@ -1108,9 +1248,16 @@ mod tests {
         assert_eq!(Horizon::TwentyFourHour.ticks(), 1_728_000);
         assert_eq!(Horizon::SeventyTwoHour.ticks(), 5_184_000);
         assert!(!Horizon::Smoke.prescribed());
-        for h in [Horizon::TwoHour, Horizon::TwentyFourHour, Horizon::SeventyTwoHour] {
+        for h in [
+            Horizon::TwoHour,
+            Horizon::TwentyFourHour,
+            Horizon::SeventyTwoHour,
+        ] {
             assert!(h.prescribed());
-            assert!(h.ticks().is_multiple_of(200), "the 200-tick cadence must divide {h:?}");
+            assert!(
+                h.ticks().is_multiple_of(200),
+                "the 200-tick cadence must divide {h:?}"
+            );
         }
         // The family really is the preregistered six, crossing two support levels with three doses.
         assert_eq!(ARMS.len(), 6);
@@ -1127,7 +1274,8 @@ mod tests {
     /// refusal before a single world is constructed, never a partial screen.
     #[test]
     fn an_incomplete_or_tampered_cohort_is_refused() {
-        let real = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../captures/hunter-openings-2026-09-13");
+        let real =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../captures/hunter-openings-2026-09-13");
         if !real.join("manifest.json").exists() {
             eprintln!("skipping: the prescribed cohort is not present in this checkout");
             return;
@@ -1136,7 +1284,12 @@ mod tests {
         let (manifest, openings) = load_cohort(&real).expect("the prescribed cohort must load");
         assert_eq!(openings.len(), 12);
         assert_eq!(manifest["opening_tick"], 144_000);
-        assert!(openings.iter().enumerate().all(|(i, o)| o.state.config.seed == i as u64 + 1));
+        assert!(
+            openings
+                .iter()
+                .enumerate()
+                .all(|(i, o)| o.state.config.seed == i as u64 + 1)
+        );
 
         let dir = temp("cohort");
         let manifest_text = fs::read_to_string(real.join("manifest.json")).unwrap();
@@ -1147,8 +1300,13 @@ mod tests {
 
         // An incomplete manifest, an unexpected kind, and eleven seeds.
         for (name, damage) in [
-            ("incomplete", (|m: &mut Value| m["complete"] = json!(false)) as fn(&mut Value)),
-            ("wrong-kind", |m: &mut Value| m["kind"] = json!("something-else")),
+            (
+                "incomplete",
+                (|m: &mut Value| m["complete"] = json!(false)) as fn(&mut Value),
+            ),
+            ("wrong-kind", |m: &mut Value| {
+                m["kind"] = json!("something-else")
+            }),
             ("eleven", |m: &mut Value| {
                 m["openings"].as_array_mut().unwrap().pop();
             }),
@@ -1181,13 +1339,20 @@ mod tests {
                     fs::copy(from, to.join("world-144000.cubw")).unwrap();
                 }
             }
-            assert!(load_cohort(&case).is_err(), "{name}: a damaged cohort must be refused");
+            assert!(
+                load_cohort(&case).is_err(),
+                "{name}: a damaged cohort must be refused"
+            );
         }
 
         // And a snapshot whose bytes no longer match its recorded checksum.
         let case = dir.join("flipped-byte");
         fs::create_dir_all(case.join("seed-1")).unwrap();
-        fs::write(case.join("manifest.json"), serde_json::to_vec(&rows).unwrap()).unwrap();
+        fs::write(
+            case.join("manifest.json"),
+            serde_json::to_vec(&rows).unwrap(),
+        )
+        .unwrap();
         for seed in 1..=12u64 {
             fs::create_dir_all(case.join(format!("seed-{seed}"))).unwrap();
             fs::copy(
@@ -1196,7 +1361,10 @@ mod tests {
             )
             .unwrap();
         }
-        assert!(load_cohort(&case).is_ok(), "the copy must be a faithful one first");
+        assert!(
+            load_cohort(&case).is_ok(),
+            "the copy must be a faithful one first"
+        );
         let path = case.join("seed-1/world-144000.cubw");
         let mut bytes = fs::read(&path).unwrap();
         let last = bytes.len() - 1;
@@ -1214,7 +1382,10 @@ mod tests {
         let dir = temp("exclusive");
         let out = dir.join("run");
         fs::create_dir(&out).unwrap();
-        assert!(fs::create_dir(&out).is_err(), "an existing output directory must be refused");
+        assert!(
+            fs::create_dir(&out).is_err(),
+            "an existing output directory must be refused"
+        );
         write_new(&out.join("manifest.json"), b"{}").unwrap();
         assert!(
             write_new(&out.join("manifest.json"), b"{}").is_err(),

@@ -133,7 +133,11 @@ fn a_neural_animal_runs_its_own_controller_and_moves() {
         world.drain_events();
     }
     let o = world.state.organisms.get(id).expect("alive");
-    assert_eq!(o.mode, Mode::Seeking, "an active neural body is not resting");
+    assert_eq!(
+        o.mode,
+        Mode::Seeking,
+        "an active neural body is not resting"
+    );
     assert!(
         o.pos != before,
         "a neural body asking for full thrust did not move"
@@ -160,7 +164,10 @@ fn a_zero_policy_holds_the_body_exactly_still() {
     let o = world.state.organisms.get(id).expect("alive");
     // σ(0) = 0.5 for thrust — above the deadband — but tanh(0) = 0 for turn, so the heading
     // must be untouched and the travel must be along it.
-    assert_eq!(o.heading, heading, "a zero turn channel never turns the body");
+    assert_eq!(
+        o.heading, heading,
+        "a zero turn channel never turns the body"
+    );
     assert!(o.pos != before, "σ(0) thrust is a real half-speed request");
     world.check_invariants().unwrap();
 }
@@ -182,11 +189,21 @@ fn the_controller_runs_on_every_second_tick_for_each_animal() {
         assert_eq!(a.phase, 0);
     }
     let mut updates = 0;
-    let mut previous = world.neural().get(list[0]).expect("attached").hidden.clone();
+    let mut previous = world
+        .neural()
+        .get(list[0])
+        .expect("attached")
+        .hidden
+        .clone();
     for _ in 0..8 {
         world.step();
         world.drain_events();
-        let now = world.neural().get(list[0]).expect("attached").hidden.clone();
+        let now = world
+            .neural()
+            .get(list[0])
+            .expect("attached")
+            .hidden
+            .clone();
         if now != previous {
             updates += 1;
         }
@@ -288,7 +305,11 @@ fn a_hand_framed_schema_fourteen_payload_is_refused_by_name() {
     // And the projection side of the rule is unchanged: an empty extension still has an old
     // image, and the payload it drops is exactly the extension.
     let full = postcard::to_allocvec(&reference.state).expect("encodes");
-    assert_eq!(&full[..payload.len()], &payload[..], "schema 14 is a prefix of schema 16");
+    assert_eq!(
+        &full[..payload.len()],
+        &payload[..],
+        "schema 14 is a prefix of schema 16"
+    );
     assert!(full.len() > payload.len(), "and schema 16 appends to it");
 }
 
@@ -327,7 +348,13 @@ fn a_reused_slot_starts_from_zero_hidden_state() {
         world.drain_events();
     }
     assert!(
-        world.neural().get(doomed).expect("attached").hidden.iter().any(|h| *h != 0.0),
+        world
+            .neural()
+            .get(doomed)
+            .expect("attached")
+            .hidden
+            .iter()
+            .any(|h| *h != 0.0),
         "the fixture needs a nonzero hidden state to prove it does not survive"
     );
 
@@ -346,7 +373,10 @@ fn a_reused_slot_starts_from_zero_hidden_state() {
             _ => None,
         })
         .collect();
-    assert!(deaths.contains(&doomed), "the fixture body died: {deaths:?}");
+    assert!(
+        deaths.contains(&doomed),
+        "the fixture body died: {deaths:?}"
+    );
     assert!(
         !world.neural().contains(doomed),
         "the private state went at the same boundary the body did"
@@ -362,7 +392,12 @@ fn a_reused_slot_starts_from_zero_hidden_state() {
     let p = state.intern(Policy::new(Gru32::zeros()));
     state.insert(reused, AnimalState::fresh(world.tick(), p));
     assert!(
-        state.get(reused).expect("inserted").hidden.iter().all(|h| *h == 0.0),
+        state
+            .get(reused)
+            .expect("inserted")
+            .hidden
+            .iter()
+            .all(|h| *h == 0.0),
         "a reused slot starts from zero"
     );
     world.check_invariants().unwrap();
@@ -545,7 +580,10 @@ fn a_neural_body_below_the_minimum_age_cannot_start_gestation() {
 fn a_neural_body_at_the_minimum_age_starts_gestation() {
     let (_, gate) = tries_to_bud(0.0, true);
     let (opened, _) = tries_to_bud(gate + DT, true);
-    assert!(opened, "a funded adult past the {gate} s gate did not start gestation");
+    assert!(
+        opened,
+        "a funded adult past the {gate} s gate did not start gestation"
+    );
 }
 
 /// **Insufficient funding.** Old enough, and still refused — by the world's own escrow
@@ -554,5 +592,8 @@ fn a_neural_body_at_the_minimum_age_starts_gestation() {
 fn a_mature_but_unfunded_neural_body_cannot_start_gestation() {
     let (_, gate) = tries_to_bud(0.0, true);
     let (opened, _) = tries_to_bud(gate + DT, false);
-    assert!(!opened, "an unfunded body opened an escrow it could not pay for");
+    assert!(
+        !opened,
+        "an unfunded body opened an escrow it could not pay for"
+    );
 }

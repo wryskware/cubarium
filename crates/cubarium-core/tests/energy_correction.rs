@@ -30,7 +30,9 @@ use cubarium_surface::{CellId, Face};
 /// The postcard payload of a snapshot file: everything after the variable-length header.
 #[allow(dead_code)]
 fn payload(bytes: &[u8]) -> &[u8] {
-    let id_len = usize::from(u16::from_le_bytes(bytes[8..10].try_into().expect("2 bytes")));
+    let id_len = usize::from(u16::from_le_bytes(
+        bytes[8..10].try_into().expect("2 bytes"),
+    ));
     &bytes[cubarium_core::snapshot::HEADER_FIXED_BYTES + id_len..]
 }
 
@@ -47,7 +49,11 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 
 fn target_of(cell: CellId) -> CareTarget {
     let c = cell.center(Topology::Cube, Scale::ONE);
-    CareTarget { face: c.face.index() as u8, u: c.u, v: c.v }
+    CareTarget {
+        face: c.face.index() as u8,
+        u: c.u,
+        v: c.v,
+    }
 }
 
 fn command(seq: u64, tick: u64, kind: CareKind, cell: CellId) -> CareCommand {
@@ -104,12 +110,37 @@ fn the_corrected_accessors_and_delta_helper_are_the_documented_arithmetic() {
     let s: &WorldState = &world.state;
     let closing = s.energy_ledgers();
 
-    assert_eq!(closing.light_in, Ledger { raw: s.light_in_total, correction: s.energy_correction.light_in });
-    assert_eq!(closing.heat_out, Ledger { raw: s.heat_out_total, correction: s.energy_correction.heat_out });
-    assert_eq!(s.light_in_corrected(), s.light_in_total + s.energy_correction.light_in);
-    assert_eq!(s.heat_out_corrected(), s.heat_out_total + s.energy_correction.heat_out);
-    assert_eq!(s.net_energy_in_corrected(), s.light_in_corrected() - s.heat_out_corrected());
-    assert_eq!(world.energy_ledgers(), closing, "the world delegates to its state");
+    assert_eq!(
+        closing.light_in,
+        Ledger {
+            raw: s.light_in_total,
+            correction: s.energy_correction.light_in
+        }
+    );
+    assert_eq!(
+        closing.heat_out,
+        Ledger {
+            raw: s.heat_out_total,
+            correction: s.energy_correction.heat_out
+        }
+    );
+    assert_eq!(
+        s.light_in_corrected(),
+        s.light_in_total + s.energy_correction.light_in
+    );
+    assert_eq!(
+        s.heat_out_corrected(),
+        s.heat_out_total + s.energy_correction.heat_out
+    );
+    assert_eq!(
+        s.net_energy_in_corrected(),
+        s.light_in_corrected() - s.heat_out_corrected()
+    );
+    assert_eq!(
+        world.energy_ledgers(),
+        closing,
+        "the world delegates to its state"
+    );
 
     assert_eq!(
         closing.heat_out.since(opening.heat_out),
@@ -136,14 +167,18 @@ fn a_partial_correction_and_an_in_flight_shower_survive_a_restart() {
     let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 6, 9);
     let tick = original.tick();
     assert!(matches!(
-        original.apply_care(&command(1, tick, CareKind::Feed, cell)).outcome,
+        original
+            .apply_care(&command(1, tick, CareKind::Feed, cell))
+            .outcome,
         cubarium_core::CareOutcome::Applied(_)
     ));
     for _ in 0..40 {
         original.step();
     }
     assert!(matches!(
-        original.apply_care(&command(2, original.tick(), CareKind::Rain, cell)).outcome,
+        original
+            .apply_care(&command(2, original.tick(), CareKind::Rain, cell))
+            .outcome,
         cubarium_core::CareOutcome::Applied(_)
     ));
     for _ in 0..45 {
@@ -151,16 +186,29 @@ fn a_partial_correction_and_an_in_flight_shower_survive_a_restart() {
     }
 
     // The state being checkpointed is genuinely mid-flight on both counts.
-    assert_eq!(original.care().showers[0].delivered, 45, "45 of 120 samples are gone");
+    assert_eq!(
+        original.care().showers[0].delivered,
+        45,
+        "45 of 120 samples are gone"
+    );
     let held = original.state.energy_correction;
-    assert!(held.heat_out != 0.0, "the correction under test must be partially accumulated");
+    assert!(
+        held.heat_out != 0.0,
+        "the correction under test must be partially accumulated"
+    );
     assert!(held.light_in != 0.0);
 
     let bytes = encode_snapshot(&original.state, "correction-resume-test");
-    assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), SCHEMA_VERSION);
+    assert_eq!(
+        u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
+        SCHEMA_VERSION
+    );
     let (meta, state) = decode_snapshot(&bytes).expect("round trip");
     assert_eq!(meta.schema, SCHEMA_VERSION);
-    assert_eq!(state.energy_correction, held, "the correction is persisted, not recomputed");
+    assert_eq!(
+        state.energy_correction, held,
+        "the correction is persisted, not recomputed"
+    );
     let mut reloaded = World::from_state(state).expect("the mid-flight state is valid");
     assert_eq!(state_hash(&reloaded.state), state_hash(&original.state));
 
@@ -201,10 +249,16 @@ fn an_unusable_correction_is_refused_by_the_decoder() {
     // The control: a signed correction on a sound state really does load, both ways.
     for correction in [-1e-9, 1e-9] {
         let mut ok = base();
-        ok.energy_correction = EnergyCorrection { light_in: correction, heat_out: -correction };
+        ok.energy_correction = EnergyCorrection {
+            light_in: correction,
+            heat_out: -correction,
+        };
         ok.validate().expect("a signed correction is valid");
         let (_, back) = decode_snapshot(&encode_snapshot(&ok, "hardening")).expect("it loads");
-        assert_eq!(back.energy_correction, ok.energy_correction, "the correction round-trips");
+        assert_eq!(
+            back.energy_correction, ok.energy_correction,
+            "the correction round-trips"
+        );
     }
 
     let refused = |state: WorldState, wanted: &str| {

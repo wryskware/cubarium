@@ -21,7 +21,10 @@ fn ring() -> Topology {
 }
 
 fn world_of(topo: Topology, ticks: u32) -> World {
-    let mut cfg = WorldConfig { seed: SEED, ..WorldConfig::default() };
+    let mut cfg = WorldConfig {
+        seed: SEED,
+        ..WorldConfig::default()
+    };
     cfg.topology = topo;
     let mut world = World::new(cfg).expect("legal world");
     for _ in 0..ticks {
@@ -62,9 +65,20 @@ fn the_cube_presenter_draws_the_same_image_twice() {
     fresh.observe(&view);
     fresh.draw(&view, 0.0, &mut twice);
 
-    assert_eq!(once.pixels(), twice.pixels(), "the same view draws the same image");
-    assert!(once.pixels().iter().any(|p| *p != [0.0; 3]), "the presenter drew something");
-    println!("cube presenter digest at tick {}: {:016x}", view.tick, fnv1a(once.pixels()));
+    assert_eq!(
+        once.pixels(),
+        twice.pixels(),
+        "the same view draws the same image"
+    );
+    assert!(
+        once.pixels().iter().any(|p| *p != [0.0; 3]),
+        "the presenter drew something"
+    );
+    println!(
+        "cube presenter digest at tick {}: {:016x}",
+        view.tick,
+        fnv1a(once.pixels())
+    );
 }
 
 /// Interpolating between ticks changes the image but not its shape, and a second frame from
@@ -101,7 +115,11 @@ fn a_ring_render_view_carries_the_topology_and_the_world_s_cell_count() {
     assert_eq!(view.water.len(), world.cell_count());
     assert_eq!(view.rain.len(), world.cell_count());
     for o in &view.organisms {
-        assert!(o.pos.is_canonical(view.topology), "{:?} is on the ring", o.pos);
+        assert!(
+            o.pos.is_canonical(view.topology),
+            "{:?} is on the ring",
+            o.pos
+        );
     }
 
     // And a ring canvas is the surface it has to be drawn onto.
@@ -122,7 +140,10 @@ fn the_presenter_draws_a_ring_world() {
     let mut presenter = Presenter::new();
     presenter.observe(&view);
     presenter.draw(&view, 0.0, &mut canvas);
-    assert!(canvas.pixels().iter().any(|p| *p != [0.0; 3]), "the ring presenter drew something");
+    assert!(
+        canvas.pixels().iter().any(|p| *p != [0.0; 3]),
+        "the ring presenter drew something"
+    );
 }
 
 // --- pending FW-5 -----------------------------------------------------------------

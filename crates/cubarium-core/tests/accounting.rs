@@ -125,8 +125,12 @@ fn death_moves_organism_material_into_remains() {
         // Ecology v1 §8: an ordinary death lands in **animal remains** `C`, not in plant
         // litter `D`. Both are detrital stocks and neither is the other.
         let before_detritus: f64 = world.state.ecology.carrion.iter().sum();
-        let before_organism: f64 =
-            world.state.organisms.iter().map(|(_, o)| o.material()).sum::<f64>();
+        let before_organism: f64 = world
+            .state
+            .organisms
+            .iter()
+            .map(|(_, o)| o.material())
+            .sum::<f64>();
 
         world.step();
 
@@ -136,8 +140,12 @@ fn death_moves_organism_material_into_remains() {
 
         let after_material = total_material(&world);
         let after_detritus: f64 = world.state.ecology.carrion.iter().sum();
-        let after_organism: f64 =
-            world.state.organisms.iter().map(|(_, o)| o.material()).sum::<f64>();
+        let after_organism: f64 = world
+            .state
+            .organisms
+            .iter()
+            .map(|(_, o)| o.material())
+            .sum::<f64>();
 
         assert!(
             (after_material - before_material).abs() < 1e-9,
@@ -160,7 +168,9 @@ fn death_moves_organism_material_into_remains() {
         );
 
         // Every remaining stock is still a well-formed stock right after a death.
-        world.check_invariants().unwrap_or_else(|e| panic!("tick {tick} after a death: {e}"));
+        world
+            .check_invariants()
+            .unwrap_or_else(|e| panic!("tick {tick} after a death: {e}"));
 
         checked += 1;
         if checked == 3 {

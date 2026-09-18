@@ -21,20 +21,19 @@ use cubarium_surface::{Scale, Topology};
 use std::path::{Path, PathBuf};
 use std::ptr;
 
-use cube_proto::{FACE_SIZE, Face};
 use cubarium::art::{ArtPack, Band, Plant};
 use cubarium::art_present::{
     ArtPresenter, GROW_BLEND, Growth, GrowthStep, PLANT_BEND_LENGTH, PLANT_BEND_ROOT,
     PLANT_REVEAL_PX, STAGE_GROW_SECONDS, band_of, band_opacity, growth_between, growth_step,
     growth_weights, plant_bend_budget, plant_cap, plant_phase_of, present_seconds, slot_of,
-    slot_wind, species_of, stage_opacity, stage_thresholds, wind_strength,
-    wood_from_producer,
+    slot_wind, species_of, stage_opacity, stage_thresholds, wind_strength, wood_from_producer,
 };
 use cubarium::clock::DT;
 use cubarium::present::PRODUCER_SATURATION;
 use cubarium_core::view::RenderView;
 use cubarium_render::{Bend, Canvas, Mask, Pose, stamp_layers_bent, stamp_pose};
 use cubarium_surface::{CUBE_CELL_COUNT, CellId, SurfacePoint, Vec2};
+use cube_proto::{FACE_SIZE, Face};
 
 // ---------------------------------------------------------------------------
 // fixtures (the patterns of `art_motion.rs`, copied so this file stands alone)
@@ -137,7 +136,9 @@ fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
 fn near(cell: CellId) -> Vec<(Face, u16, u16)> {
     let centre = cell.center(Topology::Cube, Scale::ONE);
     (0..FACE_SIZE as u16)
-        .flat_map(|y| (0..FACE_SIZE as u16).map(move |x| (cell.face(Topology::Cube, Scale::ONE), x, y)))
+        .flat_map(|y| {
+            (0..FACE_SIZE as u16).map(move |x| (cell.face(Topology::Cube, Scale::ONE), x, y))
+        })
         .filter(|&(_, x, y)| {
             (f64::from(x) + 0.5 - centre.u).hypot(f64::from(y) + 0.5 - centre.v) <= 12.0
         })
@@ -164,7 +165,9 @@ fn max_diff(a: &Canvas, b: &Canvas) -> f32 {
 }
 
 fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u16, u16)> {
-    every_pixel().filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y)).collect()
+    every_pixel()
+        .filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y))
+        .collect()
 }
 
 fn assert_same_canvas(a: &Canvas, b: &Canvas, what: &str) {
@@ -218,13 +221,7 @@ fn idle_pose<'a>(plant: &'a Plant, stage: u8, cell: CellId, seconds: f64) -> Pos
 /// simulated time per observe, so the growth advances by exactly `1 / STAGE_GROW_SECONDS` of a
 /// step each time (an exact binary fraction) while presentation time runs `gap · DT` — which
 /// is how a mid-step frame can be placed at a *calm* instant as well as a windy one.
-fn drive(
-    p: &mut ArtPresenter,
-    cell: CellId,
-    density: f64,
-    gap: u64,
-    observes: u64,
-) -> RenderView {
+fn drive(p: &mut ArtPresenter, cell: CellId, density: f64, gap: u64, observes: u64) -> RenderView {
     p.observe(&bare_view(0));
     let mut last = bare_view(0);
     for k in 1..=observes {
@@ -268,7 +265,9 @@ fn expected_step(
     let opacity_of = |stage: u8| stage_opacity(stage, density, &thresholds, ceiling);
     let mut canvas = background.clone();
     let scratch = &mut Vec::new();
-    let clip = step.lower.and_then(|low| plant.transition(low, step.upper).map(|c| (low, c)));
+    let clip = step
+        .lower
+        .and_then(|low| plant.transition(low, step.upper).map(|c| (low, c)));
     match clip {
         Some((low, clip)) => {
             let under = opacity_of(low);
@@ -314,7 +313,9 @@ fn expected_step(
                 &layers,
                 1.0,
                 opacity_of(step.upper),
-                Mask::Axial { reveal: step.t * PLANT_REVEAL_PX },
+                Mask::Axial {
+                    reveal: step.t * PLANT_REVEAL_PX,
+                },
                 bend,
                 scratch,
             );
@@ -366,36 +367,65 @@ fn expected_idle(
 #[test]
 fn the_shipped_pack_carries_the_lanternstalks_growth_transitions_and_the_pilot_is_0_to_1() {
     let art = pack();
-    let plant = art.plant(PILOT).expect("the pack must carry the pilot plant");
+    let plant = art
+        .plant(PILOT)
+        .expect("the pack must carry the pilot plant");
     assert_eq!(
-        plant.transitions.iter().map(|t| (t.from, t.to)).collect::<Vec<_>>(),
+        plant
+            .transitions
+            .iter()
+            .map(|t| (t.from, t.to))
+            .collect::<Vec<_>>(),
         vec![(0u8, 1u8), (1, 2)],
         "the pilot's 0 → 1 clip and the 1 → 2 clip authored on 2026-09-13"
     );
-    let clip = plant.transition(0, 1).expect("pack v5 carries the growth pilot");
+    let clip = plant
+        .transition(0, 1)
+        .expect("pack v5 carries the growth pilot");
     assert!(!clip.looping, "a growth transition never loops");
-    assert!(!plant.transitions[0].clip.looping, "`Transition::clip` is always non-looping");
+    assert!(
+        !plant.transitions[0].clip.looping,
+        "`Transition::clip` is always non-looping"
+    );
     assert!(plant.transition(1, 2).is_some(), "1 → 2 is authored too");
-    assert!(plant.transition(0, 2).is_none(), "a transition is one stage step");
-    assert!(plant.transition(1, 0).is_none(), "a transition only runs upward");
+    assert!(
+        plant.transition(0, 2).is_none(),
+        "a transition is one stage step"
+    );
+    assert!(
+        plant.transition(1, 0).is_none(),
+        "a transition only runs upward"
+    );
 
     // Inclusive endpoints: the first and last baked samples, held, with no blend.
     let first = clip.sample(0.0);
-    assert!(ptr::eq(first.first, &clip.frames[0]), "sample(0) is not the first frame");
+    assert!(
+        ptr::eq(first.first, &clip.frames[0]),
+        "sample(0) is not the first frame"
+    );
     assert_eq!(first.mix, 0.0, "sample(0) must not blend");
     let last = clip.sample(clip.seconds);
     assert!(
         ptr::eq(last.first, clip.frames.last().unwrap()),
         "sample(seconds) is not the last frame"
     );
-    assert!(ptr::eq(last.second, clip.frames.last().unwrap()), "the end wrapped into the start");
+    assert!(
+        ptr::eq(last.second, clip.frames.last().unwrap()),
+        "the end wrapped into the start"
+    );
     assert_eq!(last.mix, 0.0, "sample(seconds) must hold the last frame");
     // Past the end it stays there, and before the start it stays at the first.
     for seconds in [clip.seconds, clip.seconds * 1.5, clip.seconds + 1.0] {
-        assert!(ptr::eq(clip.sample(seconds).first, clip.frames.last().unwrap()), "{seconds} s");
+        assert!(
+            ptr::eq(clip.sample(seconds).first, clip.frames.last().unwrap()),
+            "{seconds} s"
+        );
     }
     for seconds in [-1.0, 0.0, f64::NAN] {
-        assert!(ptr::eq(clip.sample(seconds).first, &clip.frames[0]), "{seconds} s");
+        assert!(
+            ptr::eq(clip.sample(seconds).first, &clip.frames[0]),
+            "{seconds} s"
+        );
     }
     assert!(clip.frames.len() >= 2, "a clip needs two samples to blend");
     assert!(clip.seconds > 0.0);
@@ -404,8 +434,17 @@ fn the_shipped_pack_carries_the_lanternstalks_growth_transitions_and_the_pilot_i
     // canopy species — a top-down opening from the centre — later the same day), so no
     // plant of the shipped pack keeps the reveal mask for a stage step any more.
     for plant in &art.plants {
-        let pairs = plant.transitions.iter().map(|t| (t.from, t.to)).collect::<Vec<_>>();
-        assert_eq!(pairs, vec![(0u8, 1u8), (1, 2)], "{} growth clips", plant.name);
+        let pairs = plant
+            .transitions
+            .iter()
+            .map(|t| (t.from, t.to))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            pairs,
+            vec![(0u8, 1u8), (1, 2)],
+            "{} growth clips",
+            plant.name
+        );
         assert_eq!(
             plant.band == Band::Canopy,
             matches!(plant.name.as_str(), "umbrellafrond" | "bloomcrown"),
@@ -433,9 +472,10 @@ fn a_cell_fed_from_bare_ground_reveals_its_sprout_and_then_plays_the_authored_cl
     let art = plants_only();
     let budget = plant_bend_budget(art.plant(PILOT).unwrap());
 
-    for (what, gap, observes, windy) in
-        [("a windy instant", 20u64, 6u64, true), ("a calm instant", 100, 5, false)]
-    {
+    for (what, gap, observes, windy) in [
+        ("a windy instant", 20u64, 6u64, true),
+        ("a calm instant", 100, 5, false),
+    ] {
         let mut p = ArtPresenter::new(plants_only());
         assert_eq!(
             p.bend_budget(PILOT),
@@ -446,7 +486,11 @@ fn a_cell_fed_from_bare_ground_reveals_its_sprout_and_then_plays_the_authored_cl
         let f = 1.0;
         let seconds = present_seconds(v.tick, f);
         let step = drawn_step(&p, cell, f).expect("the fixture must be in flight");
-        assert_eq!((step.lower, step.upper), (Some(0), 1), "{what}: not the 0 → 1 step");
+        assert_eq!(
+            (step.lower, step.upper),
+            (Some(0), 1),
+            "{what}: not the 0 → 1 step"
+        );
         assert!(
             step.t > GROW_BLEND && step.t < 1.0 - GROW_BLEND,
             "{what}: t = {} is inside an edge blend, not the clip alone",
@@ -461,9 +505,16 @@ fn a_cell_fed_from_bare_ground_reveals_its_sprout_and_then_plays_the_authored_cl
             wind_strength(seconds)
         );
         if windy {
-            assert!(bend.amplitude.abs() > 1e-6, "{what}: the breeze must displace something");
+            assert!(
+                bend.amplitude.abs() > 1e-6,
+                "{what}: the breeze must displace something"
+            );
         } else {
-            assert_eq!(wind_strength(seconds), 0.0, "{what}: the packet must be quiet");
+            assert_eq!(
+                wind_strength(seconds),
+                0.0,
+                "{what}: the packet must be quiet"
+            );
         }
 
         let actual = draw(&mut p, &v, f);
@@ -476,7 +527,11 @@ fn a_cell_fed_from_bare_ground_reveals_its_sprout_and_then_plays_the_authored_cl
             wind_of(cell, budget, seconds),
             step,
         );
-        assert_same_canvas(&actual, &expected, &format!("the 0 → 1 clip step at {what}"));
+        assert_same_canvas(
+            &actual,
+            &expected,
+            &format!("the 0 → 1 clip step at {what}"),
+        );
         // The fixture is not comparing two empty images.
         assert!(
             max_diff_at(&actual, &background(&v, f), &near(cell)) > 0.05,
@@ -490,7 +545,11 @@ fn a_cell_fed_from_bare_ground_reveals_its_sprout_and_then_plays_the_authored_cl
     let v = drive(&mut p, cell, DENSITY, 20, 2);
     let f = 0.5;
     let step = drawn_step(&p, cell, f).expect("in flight out of bare ground");
-    assert_eq!((step.lower, step.upper), (None, 0), "the first step must come out of bare ground");
+    assert_eq!(
+        (step.lower, step.upper),
+        (None, 0),
+        "the first step must come out of bare ground"
+    );
     let seconds = present_seconds(v.tick, f);
     let actual = draw(&mut p, &v, f);
     let expected = expected_step(
@@ -519,7 +578,10 @@ fn a_cell_fed_from_bare_ground_reveals_its_sprout_and_then_plays_the_authored_cl
 /// of every step.
 #[test]
 fn the_step_is_a_partition_of_three_weights_and_enters_and_leaves_on_the_idle_stage_images() {
-    assert!(GROW_BLEND > 0.0 && GROW_BLEND < 0.5, "the two edge blends would overlap");
+    assert!(
+        GROW_BLEND > 0.0 && GROW_BLEND < 0.5,
+        "the two edge blends would overlap"
+    );
 
     // The weights, as a pure function: a partition, the reach of each blend, zero slope at
     // both edges, and nonsense held on the lower stage.
@@ -530,21 +592,59 @@ fn the_step_is_a_partition_of_three_weights_and_enters_and_leaves_on_the_idle_st
         for (name, w) in [("w_from", from), ("w_grow", grow), ("w_to", to)] {
             assert!((0.0..=1.0).contains(&w), "t = {t}: {name} is {w}");
         }
-        assert!((from + grow + to - 1.0).abs() < 1e-6, "t = {t}: the weights sum to {}", from + grow + to);
-        assert!(!(from > 0.0 && to > 0.0), "t = {t}: both edge blends are live");
-        assert_eq!(from > 0.0, t < GROW_BLEND, "t = {t}: the entry blend's reach");
-        assert_eq!(to > 0.0, t > 1.0 - GROW_BLEND, "t = {t}: the exit blend's reach");
+        assert!(
+            (from + grow + to - 1.0).abs() < 1e-6,
+            "t = {t}: the weights sum to {}",
+            from + grow + to
+        );
+        assert!(
+            !(from > 0.0 && to > 0.0),
+            "t = {t}: both edge blends are live"
+        );
+        assert_eq!(
+            from > 0.0,
+            t < GROW_BLEND,
+            "t = {t}: the entry blend's reach"
+        );
+        assert_eq!(
+            to > 0.0,
+            t > 1.0 - GROW_BLEND,
+            "t = {t}: the exit blend's reach"
+        );
         sampled.push((t, grow));
     }
-    assert_eq!(growth_weights(0.0), [1.0, 0.0, 0.0], "t = 0 is the lower stage alone");
-    assert_eq!(growth_weights(1.0), [0.0, 0.0, 1.0], "t = 1 is the upper stage alone");
-    assert_eq!(growth_weights(0.5), [0.0, 1.0, 0.0], "the middle is the clip alone");
-    assert_eq!(growth_weights(f64::NAN), [1.0, 0.0, 0.0], "nonsense holds the lower stage");
+    assert_eq!(
+        growth_weights(0.0),
+        [1.0, 0.0, 0.0],
+        "t = 0 is the lower stage alone"
+    );
+    assert_eq!(
+        growth_weights(1.0),
+        [0.0, 0.0, 1.0],
+        "t = 1 is the upper stage alone"
+    );
+    assert_eq!(
+        growth_weights(0.5),
+        [0.0, 1.0, 0.0],
+        "the middle is the clip alone"
+    );
+    assert_eq!(
+        growth_weights(f64::NAN),
+        [1.0, 0.0, 0.0],
+        "nonsense holds the lower stage"
+    );
     // The growth layer rises monotonically out of 0 over the entry blend, with zero slope at 0.
-    let entry: Vec<(f64, f32)> =
-        sampled.iter().copied().filter(|&(t, _)| t <= GROW_BLEND).collect();
+    let entry: Vec<(f64, f32)> = sampled
+        .iter()
+        .copied()
+        .filter(|&(t, _)| t <= GROW_BLEND)
+        .collect();
     for pair in entry.windows(2) {
-        assert!(pair[1].1 >= pair[0].1 - 1e-9, "the growth layer dipped at t = {}", pair[1].0);
+        assert!(
+            pair[1].1 >= pair[0].1 - 1e-9,
+            "the growth layer dipped at t = {}",
+            pair[1].0
+        );
     }
     let slope = |t: f64| f64::from((growth_weights(t + 0.0005)[1] - growth_weights(t)[1]).abs());
     assert!(
@@ -577,14 +677,23 @@ fn the_step_is_a_partition_of_three_weights_and_enters_and_leaves_on_the_idle_st
         p.observe(&v);
         for frame in 0..FRAMES_PER_TICK {
             let f = frame as f64 / FRAMES_PER_TICK as f64;
-            let Some(step) = drawn_step(&p, cell, f) else { continue };
+            let Some(step) = drawn_step(&p, cell, f) else {
+                continue;
+            };
             if step.lower != Some(0) || step.t <= 0.0 || step.t >= GROW_BLEND / 4.0 {
                 continue;
             }
             let seconds = present_seconds(v.tick, f);
             let bg = background(&v, f);
-            let idle =
-                expected_idle(&art, &bg, cell, DENSITY, seconds, wind_of(cell, budget, seconds), 0);
+            let idle = expected_idle(
+                &art,
+                &bg,
+                cell,
+                DENSITY,
+                seconds,
+                wind_of(cell, budget, seconds),
+                0,
+            );
             let actual = draw(&mut p, &v, f);
             entry_diffs.push((step.t, max_diff(&actual, &idle)));
             seen += 1;
@@ -605,7 +714,10 @@ fn the_step_is_a_partition_of_three_weights_and_enters_and_leaves_on_the_idle_st
              weight {w_grow}"
         );
     }
-    let smallest = entry_diffs.iter().copied().fold((1.0, f32::MAX), |a, b| if b.0 < a.0 { b } else { a });
+    let smallest = entry_diffs
+        .iter()
+        .copied()
+        .fold((1.0, f32::MAX), |a, b| if b.0 < a.0 { b } else { a });
     assert!(
         smallest.1 < 0.01,
         "at t = {} the frame is still {} from the idle stage-0 image: the step enters with a cut",
@@ -623,19 +735,32 @@ fn the_step_is_a_partition_of_three_weights_and_enters_and_leaves_on_the_idle_st
         p.observe(&v);
         for frame in 0..FRAMES_PER_TICK {
             let f = frame as f64 / FRAMES_PER_TICK as f64;
-            let Some(step) = drawn_step(&p, cell, f) else { continue };
+            let Some(step) = drawn_step(&p, cell, f) else {
+                continue;
+            };
             if step.lower != Some(0) || step.t <= 1.0 - GROW_BLEND / 8.0 || step.t >= 1.0 {
                 continue;
             }
             let seconds = present_seconds(v.tick, f);
             let bg = background(&v, f);
-            let idle =
-                expected_idle(&art, &bg, cell, DENSITY, seconds, wind_of(cell, budget, seconds), 1);
+            let idle = expected_idle(
+                &art,
+                &bg,
+                cell,
+                DENSITY,
+                seconds,
+                wind_of(cell, budget, seconds),
+                1,
+            );
             let actual = draw(&mut p, &v, f);
             exit_diffs.push((step.t, max_diff(&actual, &idle)));
         }
     }
-    assert!(exit_diffs.len() >= 3, "the sweep found only {} frames in the exit blend", exit_diffs.len());
+    assert!(
+        exit_diffs.len() >= 3,
+        "the sweep found only {} frames in the exit blend",
+        exit_diffs.len()
+    );
     println!("exit: {exit_diffs:?}");
     for &(t, d) in &exit_diffs {
         let w_grow = f64::from(growth_weights(t)[1]);
@@ -645,7 +770,10 @@ fn the_step_is_a_partition_of_three_weights_and_enters_and_leaves_on_the_idle_st
              weight {w_grow}"
         );
     }
-    let last = exit_diffs.iter().copied().fold((0.0, f32::MAX), |a, b| if b.0 > a.0 { b } else { a });
+    let last = exit_diffs
+        .iter()
+        .copied()
+        .fold((0.0, f32::MAX), |a, b| if b.0 > a.0 { b } else { a });
     assert!(
         last.1 < 0.01,
         "at t = {} the frame is still {} from the idle stage-1 image: the step leaves with a cut",
@@ -674,16 +802,37 @@ fn wilting_through_a_step_draws_the_growing_pictures_backwards_at_the_same_progr
     // First the rule itself, as a pure function of the two orientations.
     for i in 0..=100 {
         let p = f64::from(i) / 100.0;
-        let up = Growth { from: Some(0), to: Some(1), g: p, target: Some(1), fruit: 0.0 };
-        let down = Growth { from: Some(1), to: Some(0), g: 1.0 - p, target: None, fruit: 0.0 };
+        let up = Growth {
+            from: Some(0),
+            to: Some(1),
+            g: p,
+            target: Some(1),
+            fruit: 0.0,
+        };
+        let down = Growth {
+            from: Some(1),
+            to: Some(0),
+            g: 1.0 - p,
+            target: None,
+            fruit: 0.0,
+        };
         assert_eq!(
             growth_step(up).map(|s| (s.lower, s.upper)),
             Some((Some(0), 1)),
             "p = {p}: the rising pair"
         );
         let (a, b) = (growth_step(up).unwrap(), growth_step(down).unwrap());
-        assert_eq!((a.lower, a.upper), (b.lower, b.upper), "p = {p}: the pair must be ordered");
-        assert!((a.t - b.t).abs() < 1e-15, "p = {p}: {} wilting vs {} growing", b.t, a.t);
+        assert_eq!(
+            (a.lower, a.upper),
+            (b.lower, b.upper),
+            "p = {p}: the pair must be ordered"
+        );
+        assert!(
+            (a.t - b.t).abs() < 1e-15,
+            "p = {p}: {} wilting vs {} growing",
+            b.t,
+            a.t
+        );
     }
 
     let cell = pilot_cell();
@@ -702,8 +851,16 @@ fn wilting_through_a_step_draws_the_growing_pictures_backwards_at_the_same_progr
         let mut growing = ArtPresenter::new(plants_only());
         drive(&mut growing, cell, DENSITY, 20, grown);
         let up = drawn_step(&growing, cell, f).expect("the growing fixture is in flight");
-        assert!((up.t - progress).abs() < 1e-15, "growing t is {} not {progress}", up.t);
-        assert_eq!(growing.growth_of(cell).to, Some(1), "the growing plant must be climbing");
+        assert!(
+            (up.t - progress).abs() < 1e-15,
+            "growing t is {} not {progress}",
+            up.t
+        );
+        assert_eq!(
+            growing.growth_of(cell).to,
+            Some(1),
+            "the growing plant must be climbing"
+        );
 
         let mut wilting = ArtPresenter::new(plants_only());
         drive(&mut wilting, cell, DENSITY, 20, extra);
@@ -756,21 +913,41 @@ fn a_growth_step_is_pure_and_independent_of_the_render_rate() {
     let step = drawn_step(&p, cell, 0.25).expect("in flight");
     assert_eq!((step.lower, step.upper), (Some(0), 1));
 
-    let before: Vec<Growth> = CellId::all(Topology::Cube, Scale::ONE).map(|c| p.growth_of(c)).collect();
-    let before_prev: Vec<Growth> = CellId::all(Topology::Cube, Scale::ONE).map(|c| p.growth_prev_of(c)).collect();
+    let before: Vec<Growth> = CellId::all(Topology::Cube, Scale::ONE)
+        .map(|c| p.growth_of(c))
+        .collect();
+    let before_prev: Vec<Growth> = CellId::all(Topology::Cube, Scale::ONE)
+        .map(|c| p.growth_prev_of(c))
+        .collect();
     let first = draw(&mut p, &v, 0.25);
     for _ in 0..4 {
-        assert_same_canvas(&first, &draw(&mut p, &v, 0.25), "a repeated draw of one frame");
+        assert_same_canvas(
+            &first,
+            &draw(&mut p, &v, 0.25),
+            "a repeated draw of one frame",
+        );
     }
-    assert_eq!(CellId::all(Topology::Cube, Scale::ONE).map(|c| p.growth_of(c)).collect::<Vec<_>>(), before, "a draw moved the growth");
     assert_eq!(
-        CellId::all(Topology::Cube, Scale::ONE).map(|c| p.growth_prev_of(c)).collect::<Vec<_>>(),
+        CellId::all(Topology::Cube, Scale::ONE)
+            .map(|c| p.growth_of(c))
+            .collect::<Vec<_>>(),
+        before,
+        "a draw moved the growth"
+    );
+    assert_eq!(
+        CellId::all(Topology::Cube, Scale::ONE)
+            .map(|c| p.growth_prev_of(c))
+            .collect::<Vec<_>>(),
         before_prev,
         "a draw moved the previous-tick copy the frames interpolate from"
     );
     // A wind packet arriving between two draws of the same frame is not a thing either: the
     // same (state, view, f) is the same instant, so the bend is the same too.
-    assert_same_canvas(&first, &draw(&mut p, &v, 0.25), "one more draw, after 25 others");
+    assert_same_canvas(
+        &first,
+        &draw(&mut p, &v, 0.25),
+        "one more draw, after 25 others",
+    );
 
     // Three render rates, one simulated history. Against a 20 Hz clock a 30 fps host draws
     // three frames every two ticks, a 60 fps host three a tick and a 120 fps host six, so by
@@ -784,8 +961,10 @@ fn a_growth_step_is_pure_and_independent_of_the_render_rate() {
         let frames: usize = plan.iter().map(Vec::len).sum();
         assert!(frames > 0, "{rate} fps drew nothing");
     }
-    let mut hosts: Vec<ArtPresenter> =
-        rates.iter().map(|_| ArtPresenter::new(plants_only())).collect();
+    let mut hosts: Vec<ArtPresenter> = rates
+        .iter()
+        .map(|_| ArtPresenter::new(plants_only()))
+        .collect();
     for host in &mut hosts {
         host.observe(&bare_view(0));
     }
@@ -817,7 +996,11 @@ fn a_growth_step_is_pure_and_independent_of_the_render_rate() {
             .zip(&images)
             .filter_map(|(&rate, image)| image.as_ref().map(|c| (rate, c)))
             .collect();
-        assert!(drawn.len() >= 2, "tick {tick}: only {} rate(s) hit the boundary", drawn.len());
+        assert!(
+            drawn.len() >= 2,
+            "tick {tick}: only {} rate(s) hit the boundary",
+            drawn.len()
+        );
         for &(rate, image) in &drawn[1..] {
             assert_same_canvas(
                 drawn[0].1,
@@ -825,11 +1008,15 @@ fn a_growth_step_is_pure_and_independent_of_the_render_rate() {
                 &format!("tick {tick} at f = 0: {} fps vs {rate} fps", drawn[0].0),
             );
         }
-        if drawn.len() == 3 && drawn_step(&hosts[0], cell, 0.0).is_some_and(|s| s.lower == Some(0)) {
+        if drawn.len() == 3 && drawn_step(&hosts[0], cell, 0.0).is_some_and(|s| s.lower == Some(0))
+        {
             compared += 1;
         }
     }
-    assert!(compared > 30, "all three rates met inside the clip step only {compared} times");
+    assert!(
+        compared > 30,
+        "all three rates met inside the clip step only {compared} times"
+    );
 }
 
 /// The `f` values a host running at `rate` frames a second draws inside each tick of a 20 Hz
@@ -840,7 +1027,11 @@ fn a_growth_step_is_pure_and_independent_of_the_render_rate() {
 /// falling a rounding error short of it.
 fn schedule(rate: u64, ticks: u64) -> Vec<Vec<f64>> {
     let hz = (1.0 / DT).round() as u64;
-    assert_eq!(1.0 / DT, hz as f64, "the clock must be a whole number of ticks a second");
+    assert_eq!(
+        1.0 / DT,
+        hz as f64,
+        "the clock must be a whole number of ticks a second"
+    );
     let mut out = vec![Vec::new(); ticks as usize + 1];
     for i in 0.. {
         let (whole, part) = ((i * hz) / rate, (i * hz) % rate);
@@ -886,7 +1077,11 @@ fn the_authored_step_moves_less_than_a_fraction_of_a_baked_sample_per_frame_at_6
     let plant = art.plant(PILOT).unwrap();
     let clip = plant.transition(0, 1).expect("the pilot clip");
     let n = clip.frames.len();
-    assert_eq!((n, clip.seconds), (24, STAGE_GROW_SECONDS), "the derivation assumes 24 samples over 4 s");
+    assert_eq!(
+        (n, clip.seconds),
+        (24, STAGE_GROW_SECONDS),
+        "the derivation assumes 24 samples over 4 s"
+    );
     let du = (1.0 / 60.0) / (clip.seconds / (n - 1) as f64);
 
     // `jump`: the largest adjacent-sample difference of the clip, stamped alone over black at
@@ -911,7 +1106,10 @@ fn the_authored_step_moves_less_than_a_fraction_of_a_baked_sample_per_frame_at_6
     for pair in clip.frames.windows(2) {
         jump = jump.max(max_diff(&stamp_alone(&pair[0]), &stamp_alone(&pair[1])));
     }
-    assert!(jump > 0.0, "the pilot clip does not move at all between samples");
+    assert!(
+        jump > 0.0,
+        "the pilot clip does not move at all between samples"
+    );
 
     // The frames the sweep walks: the ticks of the 0 → 1 step, at 60 fps.
     let ticks: Vec<u64> = (1..=200).collect();
@@ -933,7 +1131,10 @@ fn the_authored_step_moves_less_than_a_fraction_of_a_baked_sample_per_frame_at_6
                 last = Some(image);
             }
         }
-        assert!(sway > 0.0, "the control plant at density {stage_density} does not move at all");
+        assert!(
+            sway > 0.0,
+            "the control plant at density {stage_density} does not move at all"
+        );
     }
     let bound = 2.0 * sway + 2.0 * du as f32 * jump;
     println!("sway {sway}, sample jump {jump}, du {du}, bound {bound}");
@@ -970,11 +1171,22 @@ fn the_authored_step_moves_less_than_a_fraction_of_a_baked_sample_per_frame_at_6
             last = Some(image);
         }
     }
-    println!("the worst frame of the step moved {worst}; t ran {lowest} .. {highest} over {frames} frames");
+    println!(
+        "the worst frame of the step moved {worst}; t ran {lowest} .. {highest} over {frames} frames"
+    );
     assert!(worst > 0.0, "the step never moved at all");
-    assert!(lowest < 0.02, "the sweep missed the start of the step (lowest t {lowest})");
-    assert!(highest > 0.98, "the sweep missed the end of the step (highest t {highest})");
-    assert!(frames > 200, "a 4 s step at 60 fps is 240 frames, not {frames}");
+    assert!(
+        lowest < 0.02,
+        "the sweep missed the start of the step (lowest t {lowest})"
+    );
+    assert!(
+        highest > 0.98,
+        "the sweep missed the end of the step (highest t {highest})"
+    );
+    assert!(
+        frames > 200,
+        "a 4 s step at 60 fps is 240 frames, not {frames}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1005,23 +1217,35 @@ fn the_fruit_accent_takes_no_part_in_a_growth_step() {
         let v = one_cell_view(tick, cell, DENSITY);
         fruiting.observe_with_fruit(&v, Some(&ripe));
         plain.observe_with_fruit(&v, None);
-        assert_eq!(fruiting.growth_of(cell).fruit, 0.0, "tick {tick}: a plant in flight grew fruit");
+        assert_eq!(
+            fruiting.growth_of(cell).fruit,
+            0.0,
+            "tick {tick}: a plant in flight grew fruit"
+        );
         for frame in 0..FRAMES_PER_TICK {
             let f = frame as f64 / FRAMES_PER_TICK as f64;
-            let Some(step) = drawn_step(&fruiting, cell, f) else { continue };
+            let Some(step) = drawn_step(&fruiting, cell, f) else {
+                continue;
+            };
             let a = draw_fruit(&mut fruiting, &v, f, Some(&ripe));
             let b = draw_fruit(&mut plain, &v, f, None);
             assert_same_canvas(
                 &a,
                 &b,
-                &format!("tick {tick} frame {frame} at t = {}: the fruit field changed a step", step.t),
+                &format!(
+                    "tick {tick} frame {frame} at t = {}: the fruit field changed a step",
+                    step.t
+                ),
             );
             if step.lower == Some(0) {
                 in_flight += 1;
             }
         }
     }
-    assert!(in_flight > 200, "the sweep only saw {in_flight} frames of the clip step");
+    assert!(
+        in_flight > 200,
+        "the sweep only saw {in_flight} frames of the clip step"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1095,8 +1319,16 @@ fn the_root_row_is_fixed_through_the_step_and_nothing_below_it_is_painted() {
         .into_iter()
         .filter(|&(_, x, y)| tile_at(slot.at, heading, x, y).y >= 15.5)
         .collect();
-    assert!(root_row.len() >= 8, "the fixture found only {} root-row pixels", root_row.len());
-    assert!(below.len() >= 8, "the fixture found only {} pixels below the plant", below.len());
+    assert!(
+        root_row.len() >= 8,
+        "the fixture found only {} root-row pixels",
+        root_row.len()
+    );
+    assert!(
+        below.len() >= 8,
+        "the fixture found only {} pixels below the plant",
+        below.len()
+    );
 
     let bg = background(&shown, f);
     let mut p = ArtPresenter::new(plants_only());
@@ -1105,7 +1337,9 @@ fn the_root_row_is_fixed_through_the_step_and_nothing_below_it_is_painted() {
     let mut seen = 0;
     for tick in 1..=200u64 {
         p.observe(&one_cell_view(tick, cell, DENSITY));
-        let Some(step) = drawn_step(&p, cell, f) else { continue };
+        let Some(step) = drawn_step(&p, cell, f) else {
+            continue;
+        };
         if step.lower != Some(0) {
             continue;
         }
@@ -1113,11 +1347,22 @@ fn the_root_row_is_fixed_through_the_step_and_nothing_below_it_is_painted() {
 
         // Nothing at or below row 15, ever.
         let leak = max_diff_at(&image, &bg, &below);
-        assert!(leak == 0.0, "t = {}: the step painted {leak} below the plant's lowest row", step.t);
+        assert!(
+            leak == 0.0,
+            "t = {}: the step painted {leak} below the plant's lowest row",
+            step.t
+        );
 
         // The root row is the windless image, bit for bit, while the rest of the plant leans.
-        let calm =
-            expected_step(&art, &bg, cell, DENSITY, seconds, (Bend::NONE, heading), step);
+        let calm = expected_step(
+            &art,
+            &bg,
+            cell,
+            DENSITY,
+            seconds,
+            (Bend::NONE, heading),
+            step,
+        );
         let skated = max_diff_at(&image, &calm, &root_row);
         assert!(
             skated == 0.0,
@@ -1137,7 +1382,11 @@ fn the_root_row_is_fixed_through_the_step_and_nothing_below_it_is_painted() {
             .copied()
             .filter(|&(fc, x, y)| image.get(fc, x, y) != bg.get(fc, x, y))
             .collect();
-        assert!(!painted.is_empty(), "t = {}: the root row is not painted at all", step.t);
+        assert!(
+            !painted.is_empty(),
+            "t = {}: the root row is not painted at all",
+            step.t
+        );
         match &footprint {
             None => footprint = Some((step.t, painted)),
             Some((first_t, first)) => assert_eq!(

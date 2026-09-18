@@ -161,7 +161,7 @@
 
 use std::cell::RefCell;
 
-use crate::{Command, Config, Material, World, DT};
+use crate::{Command, Config, DT, Material, World};
 
 /// The fraction of a head difference that crosses one face in one substep.
 ///
@@ -194,11 +194,19 @@ fn voxel(w: &World) -> f64 {
 }
 
 fn free_m3(w: &World, i: usize) -> f64 {
-    if w.material[i].is_solid() { 0.0 } else { w.free[i] * voxel(w) }
+    if w.material[i].is_solid() {
+        0.0
+    } else {
+        w.free[i] * voxel(w)
+    }
 }
 
 fn free_room_m3(w: &World, i: usize) -> f64 {
-    if w.material[i].is_solid() { 0.0 } else { (1.0 - w.free[i]).max(0.0) * voxel(w) }
+    if w.material[i].is_solid() {
+        0.0
+    } else {
+        (1.0 - w.free[i]).max(0.0) * voxel(w)
+    }
 }
 
 fn pore_m3(w: &World, i: usize) -> f64 {
@@ -207,7 +215,11 @@ fn pore_m3(w: &World, i: usize) -> f64 {
 
 fn pore_room_m3(w: &World, i: usize) -> f64 {
     let cap = w.material[i].pore_capacity();
-    if cap <= 0.0 { 0.0 } else { (1.0 - w.pore[i]).max(0.0) * voxel(w) * cap }
+    if cap <= 0.0 {
+        0.0
+    } else {
+        (1.0 - w.pore[i]).max(0.0) * voxel(w) * cap
+    }
 }
 
 fn add_free(w: &mut World, i: usize, vol: f64) -> f64 {
@@ -324,7 +336,11 @@ fn sky_cell(w: &World, x: i64, z: u32) -> Option<usize> {
     for y in (0..c.height).rev() {
         let i = c.index(x, y, z);
         if w.material[i].is_solid() || w.free[i] >= 1.0 {
-            return if y + 1 < c.height { Some(c.index(x, y + 1, z)) } else { None };
+            return if y + 1 < c.height {
+                Some(c.index(x, y + 1, z))
+            } else {
+                None
+            };
         }
         if w.free[i] > 0.0 {
             return Some(i);
@@ -531,7 +547,11 @@ pub fn water_table(w: &mut World) {
         // (`design/7_Research/voxel-tick-profile-2026-09-18.md`). Same rows, same rule.
         let band = {
             let rows = (table / c.voxel_m - 0.5).floor() + 1.0;
-            if rows <= 0.0 { 0 } else { (rows as u32).min(c.height) }
+            if rows <= 0.0 {
+                0
+            } else {
+                (rows as u32).min(c.height)
+            }
         };
         #[cfg(feature = "profile")]
         crate::profile::add(
@@ -796,7 +816,10 @@ fn exchange_inner(w: &mut World, threads: usize) {
         #[cfg(feature = "profile")]
         {
             crate::profile::add(crate::profile::Count::ExchangeWet, sc.active.len() as u64);
-            crate::profile::add(crate::profile::Count::ExchangeColumns, sc.columns.len() as u64);
+            crate::profile::add(
+                crate::profile::Count::ExchangeColumns,
+                sc.columns.len() as u64,
+            );
         }
 
         // ---- one pass per active column: heads, and where a push displaces to. **This is
@@ -899,7 +922,11 @@ fn exchange_inner(w: &mut World, threads: usize) {
                 // Same row, so the neighbour's column is all that changes and its
                 // column-major index needs no division.
                 let tj = tat(col_of(j, plane), y as usize, height);
-                let there = if w.free[j] > 0.0 { sc.head[tj] } else { f64::from(y) };
+                let there = if w.free[j] > 0.0 {
+                    sc.head[tj]
+                } else {
+                    f64::from(y)
+                };
                 let drop = here - there;
                 if drop <= 0.0 {
                     continue;
@@ -972,7 +999,11 @@ fn exchange_inner(w: &mut World, threads: usize) {
             let cell = sc.touched[ti];
             let proposed = sc.proposed_in[cell];
             let room = (1.0 - w.free[cell]).max(0.0);
-            sc.accept[cell] = if proposed > room && proposed > 0.0 { room / proposed } else { 1.0 };
+            sc.accept[cell] = if proposed > room && proposed > 0.0 {
+                room / proposed
+            } else {
+                1.0
+            };
         }
 
         // ---- apply: one subtraction and one addition per edge, accumulated per cell so
@@ -1034,7 +1065,11 @@ fn offer_up_the_run(w: &World, plane: usize, tj: usize, q: f64, sc: &mut Scratch
 /// substep, in cell units. Zero leaves the flux uncapped, which is the default.
 #[inline]
 fn cap_flux(c: &Config, q: f64) -> f64 {
-    if c.free_transfer_cap > 0.0 { q.min(c.free_transfer_cap) } else { q }
+    if c.free_transfer_cap > 0.0 {
+        q.min(c.free_transfer_cap)
+    } else {
+        q
+    }
 }
 
 /// The column scan, over every active column: **the one leg of the water tick that runs on
@@ -1050,7 +1085,13 @@ fn cap_flux(c: &Config, q: f64) -> f64 {
 fn scan_columns(w: &World, height: usize, plane: usize, threads: usize, sc: &mut Scratch) {
     // Field-by-field, so the read-only column list and the three written buffers are
     // disjoint borrows of one `Scratch`.
-    let Scratch { head, room_target, run_top, columns, .. } = sc;
+    let Scratch {
+        head,
+        room_target,
+        run_top,
+        columns,
+        ..
+    } = sc;
     let (material, free) = (&w.material[..], &w.free[..]);
 
     #[cfg(feature = "parallel")]
@@ -1061,7 +1102,9 @@ fn scan_columns(w: &World, height: usize, plane: usize, threads: usize, sc: &mut
         let rooms = cut_spans(room_target, height, &chunks);
         let tops = cut_spans(run_top, height, &chunks);
         let pool = bevy_tasks::ComputeTaskPool::get_or_init(|| {
-            bevy_tasks::TaskPoolBuilder::new().num_threads(threads).build()
+            bevy_tasks::TaskPoolBuilder::new()
+                .num_threads(threads)
+                .build()
         });
         pool.scope(|scope| {
             for (((cols, (start, h)), (_, r)), (_, t)) in
@@ -1281,7 +1324,9 @@ pub fn drain(w: &mut World) {
 
 pub fn spring(w: &mut World) {
     crate::voxel_phase!(Spring, {
-        let Some((x, y, z)) = w.spring_cell else { return };
+        let Some((x, y, z)) = w.spring_cell else {
+            return;
+        };
         if w.aquifer_m3 <= 0.0 || w.config.spring_k_m2_per_s <= 0.0 {
             return;
         }
@@ -1319,7 +1364,9 @@ pub fn outlet(w: &mut World) {
         if !w.outlet_open {
             return;
         }
-        let Some((x, y, z)) = w.outlet_cell else { return };
+        let Some((x, y, z)) = w.outlet_cell else {
+            return;
+        };
         if y >= w.config.height || z >= w.config.depth {
             return;
         }
@@ -1471,7 +1518,11 @@ fn set_material(w: &mut World, i: usize, material: Material) -> f64 {
         return 0.0;
     }
 
-    let kept = if material.is_solid() { add_pore(w, i, water) } else { add_free(w, i, water) };
+    let kept = if material.is_solid() {
+        add_pore(w, i, water)
+    } else {
+        add_free(w, i, water)
+    };
     let mut left = water - kept;
     if left > 1e-15 {
         left -= spill_to_nearest_void(w, i, left);

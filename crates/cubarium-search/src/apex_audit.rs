@@ -48,8 +48,8 @@ use cubarium_core::hunter::{
     self, AttemptOutcome, FixedHunterProfile, HunterEvent, HunterPhase, PursuitStop, StrikeClass,
     StrikeRecord,
 };
-use cubarium_core::organism::DeathCause;
 use cubarium_core::motor::ApexTurnRadius;
+use cubarium_core::organism::DeathCause;
 use cubarium_core::{BodyBudget, MotorModel, OrganismId, World, WorldConfig};
 use serde::{Deserialize, Serialize};
 
@@ -456,29 +456,39 @@ impl StrikeStats {
         if r.held_at_strike().unwrap_or(false) {
             self.held_at_strike += 1;
         }
-        self.intent_body_forward.push_opt(r.intent.and_then(|f| f.body_forward));
+        self.intent_body_forward
+            .push_opt(r.intent.and_then(|f| f.body_forward));
         // The strike frame's own reach is the radius the turn is priced at, and the burst is
         // exactly `strike_seconds` long by construction of the three frames.
         let sweep = r.hunter_turn_strike.map(|t| {
-            r.strike.map_or(r.resolution.advertised_reach, |f| f.advertised_reach) * t.abs()
+            r.strike
+                .map_or(r.resolution.advertised_reach, |f| f.advertised_reach)
+                * t.abs()
                 / STRIKE_SECONDS
         });
         self.hunter_sweep_strike.push_opt(sweep);
         self.hunter_motor_strike.push_opt(motor_strike(r));
         self.advertised_reach.push(r.resolution.advertised_reach);
         self.tolerance.push_opt(r.resolution.tolerance);
-        self.intent_separation.push_opt(r.intent.and_then(|f| f.effector_distance));
-        self.intent_overshoot.push_opt(r.intent.and_then(|f| f.overshoot()));
-        self.strike_separation.push_opt(r.strike.and_then(|f| f.effector_distance));
-        self.resolution_separation.push_opt(r.resolution.effector_distance);
+        self.intent_separation
+            .push_opt(r.intent.and_then(|f| f.effector_distance));
+        self.intent_overshoot
+            .push_opt(r.intent.and_then(|f| f.overshoot()));
+        self.strike_separation
+            .push_opt(r.strike.and_then(|f| f.effector_distance));
+        self.resolution_separation
+            .push_opt(r.resolution.effector_distance);
         self.resolution_overshoot.push_opt(r.resolution.overshoot());
-        self.separation_change_over_strike.push_opt(r.separation_change_over_strike());
-        self.separation_change_total.push_opt(r.separation_change_total());
+        self.separation_change_over_strike
+            .push_opt(r.separation_change_over_strike());
+        self.separation_change_total
+            .push_opt(r.separation_change_total());
         self.prey_speed_windup.push_opt(r.target_speed_windup);
         self.prey_speed_strike.push_opt(r.target_speed_strike);
         self.hunter_speed_windup.push_opt(r.hunter_speed_windup);
         self.hunter_speed_strike.push_opt(r.hunter_speed_strike);
-        self.prey_turn_strike_deg.push_opt(r.target_turn_strike.map(f64::to_degrees));
+        self.prey_turn_strike_deg
+            .push_opt(r.target_turn_strike.map(f64::to_degrees));
     }
 
     pub fn add(&mut self, other: &StrikeStats) {
@@ -500,8 +510,10 @@ impl StrikeStats {
         self.strike_separation.add(&other.strike_separation);
         self.resolution_separation.add(&other.resolution_separation);
         self.resolution_overshoot.add(&other.resolution_overshoot);
-        self.separation_change_over_strike.add(&other.separation_change_over_strike);
-        self.separation_change_total.add(&other.separation_change_total);
+        self.separation_change_over_strike
+            .add(&other.separation_change_over_strike);
+        self.separation_change_total
+            .add(&other.separation_change_total);
         self.prey_speed_windup.add(&other.prey_speed_windup);
         self.prey_speed_strike.add(&other.prey_speed_strike);
         self.hunter_speed_windup.add(&other.hunter_speed_windup);
@@ -599,8 +611,10 @@ impl GapBinStats {
         if r.outcome == AttemptOutcome::Captured {
             self.captures += 1;
         }
-        self.closure_over_strike.push_opt(r.separation_change_over_strike().map(|d| -d));
-        self.intent_separation.push_opt(r.intent.and_then(|f| f.effector_distance));
+        self.closure_over_strike
+            .push_opt(r.separation_change_over_strike().map(|d| -d));
+        self.intent_separation
+            .push_opt(r.intent.and_then(|f| f.effector_distance));
         self.hunter_motor_strike.push_opt(motor_strike(r));
     }
 
@@ -621,7 +635,9 @@ impl GapBinStats {
 /// one place it is derived, so the class table and the gap bins cannot disagree.
 fn motor_strike(r: &StrikeRecord) -> Option<f64> {
     let sweep = r.hunter_turn_strike.map(|t| {
-        r.strike.map_or(r.resolution.advertised_reach, |f| f.advertised_reach) * t.abs()
+        r.strike
+            .map_or(r.resolution.advertised_reach, |f| f.advertised_reach)
+            * t.abs()
             / STRIKE_SECONDS
     })?;
     Some(r.hunter_speed_strike? + sweep)
@@ -629,7 +645,10 @@ fn motor_strike(r: &StrikeRecord) -> Option<f64> {
 
 fn empty_gap_bins() -> Vec<GapBinStats> {
     (0..GAP_BINS)
-        .map(|b| GapBinStats { bin: b as u8, ..GapBinStats::default() })
+        .map(|b| GapBinStats {
+            bin: b as u8,
+            ..GapBinStats::default()
+        })
         .collect()
 }
 
@@ -779,7 +798,10 @@ impl StrikeAudit {
     }
 
     pub fn stats_for_outcome(&self, outcome: AttemptOutcome) -> Option<StrikeStats> {
-        self.by_outcome.iter().find(|(o, _)| *o == outcome).map(|(_, s)| *s)
+        self.by_outcome
+            .iter()
+            .find(|(o, _)| *o == outcome)
+            .map(|(_, s)| *s)
     }
 }
 
@@ -1005,13 +1027,18 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
     config.capacity.event_log = false;
     let hash = calibrate::config_hash(&config);
     // Provenance: is this the declared screen candidate of the same name, at this seed?
-    let matches = calibrate::candidate(&eco.label)
-        .map(|c| c.config(seed).map(|c| calibrate::config_hash(&c) == hash).unwrap_or(false));
+    let matches = calibrate::candidate(&eco.label).map(|c| {
+        c.config(seed)
+            .map(|c| calibrate::config_hash(&c) == hash)
+            .unwrap_or(false)
+    });
 
     // The profile is derived from the **base** configuration, exactly as the screen derives it,
     // so the apex genome does not shift under a candidate's parameters.
     let profile = FixedHunterProfile::lanternjaw_trial(&evaluate::base_config(seed));
-    profile.validate().map_err(|e| format!("hunter profile rejected: {e}"))?;
+    profile
+        .validate()
+        .map_err(|e| format!("hunter profile rejected: {e}"))?;
     if ledger && (profile.strike_seconds - STRIKE_SECONDS).abs() > 1e-12 {
         return Err(format!(
             "the sweep this audit derives divides by STRIKE_SECONDS = {STRIKE_SECONDS}, but the \
@@ -1019,7 +1046,9 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
             profile.strike_seconds
         ));
     }
-    config.validate().map_err(|e| format!("config rejected: {e}"))?;
+    config
+        .validate()
+        .map_err(|e| format!("config rejected: {e}"))?;
     let mut world = World::new(config).map_err(|e| format!("world creation refused: {e}"))?;
     world.record_body_budgets(ledger);
     // The per-attempt strike record follows the ledger flag rather than a new one: this whole
@@ -1071,12 +1100,19 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
         world.drain_events();
         for event in world.drain_hunter_events() {
             match event {
-                HunterEvent::Attempt { hunter, outcome, .. } => {
+                HunterEvent::Attempt {
+                    hunter, outcome, ..
+                } => {
                     if let Some(life) = lives.iter_mut().find(|l| l.id == hunter) {
                         life.attempts.sample(outcome);
                     }
                 }
-                HunterEvent::Capture { hunter, material, energy, .. } => {
+                HunterEvent::Capture {
+                    hunter,
+                    material,
+                    energy,
+                    ..
+                } => {
                     if let Some(life) = lives.iter_mut().find(|l| l.id == hunter) {
                         life.captures += 1;
                         life.capture_material += material;
@@ -1113,8 +1149,10 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
         if !introduced && apex > 0 && world.tick() == introduce_tick {
             // Before a founder exists, so an apex override cannot have reached this world yet:
             // two arms that share `motor` must produce the same hash here, row for row.
-            pre_introduction_state_hash =
-                Some(format!("{:016x}", cubarium_core::snapshot::state_hash(&world.state)));
+            pre_introduction_state_hash = Some(format!(
+                "{:016x}",
+                cubarium_core::snapshot::state_hash(&world.state)
+            ));
             let targets = evaluate::apex_targets(seed, apex);
             let receipts = world
                 .introduce_hunters_with_age(profile.clone(), &targets, founder_age_seconds)
@@ -1172,7 +1210,8 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
             life.end_reserve_fraction = reserve_fraction;
             life.end_energy_fraction = energy_fraction;
             if let Some(member) = world.hunters().member(life.id) {
-                life.phases.sample(member.phase, world.state.apex_dormancy.contains(life.id));
+                life.phases
+                    .sample(member.phase, world.state.apex_dormancy.contains(life.id));
                 life.readiness.sample(&profile, o, member, now, dt);
             }
             if let Some(budget) = world.body_budget(life.id) {
@@ -1245,7 +1284,10 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
 
 /// The one sentence the audit produces, from the rows it produced.
 fn verdict(rows: &[AuditRow]) -> String {
-    let with_two_adults = rows.iter().filter(|r| r.opportunity.ticks_two_adults > 0).count();
+    let with_two_adults = rows
+        .iter()
+        .filter(|r| r.opportunity.ticks_two_adults > 0)
+        .count();
     let with_overlap = rows.iter().filter(|r| r.readiness_overlap()).count();
     let with_meeting = rows.iter().filter(|r| r.ready_pair_ever_met()).count();
     let candidates: u64 = rows.iter().map(|r| r.opportunity.pair_candidates).sum();
@@ -1260,7 +1302,11 @@ fn verdict(rows: &[AuditRow]) -> String {
             .flat_map(|r| r.lives.iter().map(|l| l.age_at_end_ticks))
             .max()
             .unwrap_or(0);
-        let min_age = rows.iter().map(|r| r.reproduce_min_age_ticks).max().unwrap_or(0);
+        let min_age = rows
+            .iter()
+            .map(|r| r.reproduce_min_age_ticks)
+            .max()
+            .unwrap_or(0);
         let age = if min_age > 0 && oldest < min_age {
             format!(
                 " No member ever became eligible at all: the oldest apex in any run reached \
@@ -1361,13 +1407,19 @@ pub fn run(
     let seeds: Vec<u64> = HELDOUT_SEEDS[..seeds].to_vec();
 
     println!("# apex opportunity audit");
-    println!("# build {BUILD_ID}, {apex} adults introduced at tick {introduce_tick}, never restocked");
+    println!(
+        "# build {BUILD_ID}, {apex} adults introduced at tick {introduce_tick}, never restocked"
+    );
     println!(
         "# founders placed at age {founder_age_seconds} s, per-body ledger {}",
         if ledger { "on" } else { "off" }
     );
     println!("# pursuit stopping rule {}", stop.as_str());
-    println!("# motor contract {}, apex turn radius {}", motor.name(), apex_turn_radius.name());
+    println!(
+        "# motor contract {}, apex turn radius {}",
+        motor.name(),
+        apex_turn_radius.name()
+    );
     println!(
         "# apex members' motor contract {}",
         match apex_motor {
@@ -1395,12 +1447,14 @@ pub fn run(
             scope.spawn(|| {
                 loop {
                     let i = cursor.fetch_add(1, Ordering::SeqCst);
-                    let Some(&(e, seed)) = jobs.get(i) else { return };
+                    let Some(&(e, seed)) = jobs.get(i) else {
+                        return;
+                    };
                     if started.elapsed().as_secs() >= wall_seconds {
-                        failures
-                            .lock()
-                            .expect("failures")
-                            .push(format!("{}/{seed}: not started inside the wall cap", ecologies[e].label));
+                        failures.lock().expect("failures").push(format!(
+                            "{}/{seed}: not started inside the wall cap",
+                            ecologies[e].label
+                        ));
                         continue;
                     }
                     match run_one(&ecologies[e], seed, arm) {
@@ -1428,7 +1482,16 @@ pub fn run(
     println!();
     println!(
         "{:<12} {:>7} {:>9} {:>9} {:>9} {:>9} {:>10} {:>7} {:>7} {:>7}",
-        "config", "seed", "life a", "life b", "2 adults", "2 ready", "min px", "cands", "radius", "ready",
+        "config",
+        "seed",
+        "life a",
+        "life b",
+        "2 adults",
+        "2 ready",
+        "min px",
+        "cands",
+        "radius",
+        "ready",
     );
     for r in &rows {
         let life = |i: usize| r.lives.get(i).map_or(0, |l| l.lived_ticks);
@@ -1470,7 +1533,9 @@ pub fn run(
             for (i, l) in r.lives.iter().enumerate() {
                 let (credit, paid) = l.budget.as_ref().map_or((0.0, 0.0), |b| {
                     (
-                        b.battery_credit_total() + b.gut_battery_credit + b.oxidation_battery_credit,
+                        b.battery_credit_total()
+                            + b.gut_battery_credit
+                            + b.oxidation_battery_credit,
                         b.bill_paid + b.other_energy_paid,
                     )
                 });
@@ -1481,7 +1546,8 @@ pub fn run(
                     i,
                     l.lived_ticks,
                     l.age_at_end_ticks,
-                    l.death_cause.map_or_else(|| "alive".to_string(), |c| format!("{c:?}")),
+                    l.death_cause
+                        .map_or_else(|| "alive".to_string(), |c| format!("{c:?}")),
                     l.captures,
                     credit,
                     paid,
@@ -1506,8 +1572,18 @@ pub fn run(
         );
         println!(
             "{:<28} {:>6} {:>7} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
-            "class", "n", "e paid", "sep@int", "sep@str", "sep@res", "over@res", "fwd@int",
-            "held", "prey v", "hunt v", "hunt |m|",
+            "class",
+            "n",
+            "e paid",
+            "sep@int",
+            "sep@str",
+            "sep@res",
+            "over@res",
+            "fwd@int",
+            "held",
+            "prey v",
+            "hunt v",
+            "hunt |m|",
         );
         let cell = |s: Option<f64>| s.map_or_else(|| "—".to_string(), |v| format!("{v:.2}"));
         for (class, st) in strikes.classes_in_order() {
@@ -1530,8 +1606,17 @@ pub fn run(
         println!();
         println!(
             "{:<28} {:>6} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
-            "outcome", "n", "sep@int", "sep@str", "sep@res", "tol", "reach", "fwd@int", "held",
-            "prey v", "hunt |m|",
+            "outcome",
+            "n",
+            "sep@int",
+            "sep@str",
+            "sep@res",
+            "tol",
+            "reach",
+            "fwd@int",
+            "held",
+            "prey v",
+            "hunt |m|",
         );
         for (outcome, st) in &strikes.by_outcome {
             println!(

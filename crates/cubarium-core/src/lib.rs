@@ -82,9 +82,9 @@ pub use telemetry::Telemetry;
 pub use view::RenderView;
 pub use world::{
     BodyBudget, BudgetRecorder, CARRION, CHANNEL_NAMES, CHANNELS, ChargingDiagnostics, FOLIAGE,
-    FRUIT, IntakeDiagnostics, IntakeLimit, IntakeTick, LITTER, MOUTH_GRAZE, MOUTH_FRUIT,
-    MOUTH_NAMES, MOUTH_SCAVENGE, MOUTHS, NeuralTiming, TRAINING_FOUNDER_HUE,
-    TRAINING_START_ENERGY, TRAINING_START_RESERVE, World, WorldState,
+    FRUIT, IntakeDiagnostics, IntakeLimit, IntakeTick, LITTER, MOUTH_FRUIT, MOUTH_GRAZE,
+    MOUTH_NAMES, MOUTH_SCAVENGE, MOUTHS, NeuralTiming, TRAINING_FOUNDER_HUE, TRAINING_START_ENERGY,
+    TRAINING_START_RESERVE, World, WorldState,
 };
 
 /// Simulation ticks per second.

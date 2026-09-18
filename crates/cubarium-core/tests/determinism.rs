@@ -6,8 +6,13 @@ use cubarium_core::rng::{Stream, draw, unit};
 use cubarium_core::snapshot::state_hash;
 use cubarium_core::{World, WorldConfig, decode_snapshot, encode_snapshot};
 
-const STREAMS: [Stream; 5] =
-    [Stream::Weather, Stream::OrganismTurn, Stream::Birth, Stream::Founders, Stream::Habitat];
+const STREAMS: [Stream; 5] = [
+    Stream::Weather,
+    Stream::OrganismTurn,
+    Stream::Birth,
+    Stream::Founders,
+    Stream::Habitat,
+];
 
 fn hashes_at(config: WorldConfig, checkpoints: &[u64]) -> Vec<u64> {
     let mut world = World::new(config).expect("valid config");
@@ -32,15 +37,27 @@ fn the_same_config_replays_to_the_same_state_hash() {
     assert_eq!(a, b, "two runs of the default config diverged");
 
     // A hash that never changes would make the test vacuous.
-    assert_ne!(a[0], a[1], "the state hash did not change between ticks 1 and 100");
-    assert_ne!(a[1], a[2], "the state hash did not change between ticks 100 and 1000");
+    assert_ne!(
+        a[0], a[1],
+        "the state hash did not change between ticks 1 and 100"
+    );
+    assert_ne!(
+        a[1], a[2],
+        "the state hash did not change between ticks 100 and 1000"
+    );
 }
 
 /// Spec: every draw mixes the world seed, so different seeds are different worlds.
 #[test]
 fn different_seeds_diverge_by_tick_one_hundred() {
-    let first = WorldConfig { seed: 1, ..WorldConfig::default() };
-    let second = WorldConfig { seed: 2, ..WorldConfig::default() };
+    let first = WorldConfig {
+        seed: 1,
+        ..WorldConfig::default()
+    };
+    let second = WorldConfig {
+        seed: 2,
+        ..WorldConfig::default()
+    };
 
     let a = hashes_at(first, &[100]);
     let b = hashes_at(second, &[100]);
@@ -60,7 +77,10 @@ fn a_snapshot_resume_replays_exactly() {
     let bytes = encode_snapshot(&original.state, "test-build");
     let (meta, state) = decode_snapshot(&bytes).expect("a freshly encoded snapshot must decode");
     assert_eq!(meta.build_id, "test-build");
-    assert_eq!(state, original.state, "the snapshot round trip changed the state");
+    assert_eq!(
+        state, original.state,
+        "the snapshot round trip changed the state"
+    );
 
     let mut resumed = World::from_state(state).expect("a valid state must rebuild");
     assert_eq!(resumed.tick(), 500);
@@ -75,7 +95,10 @@ fn a_snapshot_resume_replays_exactly() {
         state_hash(&original.state),
         "resumed run diverged from the uninterrupted run by tick 1000"
     );
-    assert_eq!(resumed.state, original.state, "resumed state differs field-by-field");
+    assert_eq!(
+        resumed.state, original.state,
+        "resumed state differs field-by-field"
+    );
 
     let from_original = original.telemetry();
     let from_resumed = resumed.telemetry();
@@ -83,7 +106,10 @@ fn a_snapshot_resume_replays_exactly() {
     assert_eq!(from_original.state_hash, from_resumed.state_hash);
     assert_eq!(original.state.births_total, resumed.state.births_total);
     assert_eq!(original.state.deaths_total, resumed.state.deaths_total);
-    assert_eq!(original.state.cap_rejections_total, resumed.state.cap_rejections_total);
+    assert_eq!(
+        original.state.cap_rejections_total,
+        resumed.state.cap_rejections_total
+    );
 }
 
 /// Spec, "Randomness": "Rendering and logging never draw." The render view and telemetry
@@ -128,13 +154,21 @@ fn draws_are_keyed_by_stream_key_and_counter() {
         // Reproducible for each stream in its own right.
         assert_eq!(draw(seed, stream, 5, 9), draw(seed, stream, 5, 9));
     }
-    assert_ne!(base, draw(seed, Stream::OrganismTurn, 6, 9), "key change did not change the draw");
+    assert_ne!(
+        base,
+        draw(seed, Stream::OrganismTurn, 6, 9),
+        "key change did not change the draw"
+    );
     assert_ne!(
         base,
         draw(seed, Stream::OrganismTurn, 5, 10),
         "counter change did not change the draw"
     );
-    assert_ne!(base, draw(seed + 1, Stream::OrganismTurn, 5, 9), "seed change did not change it");
+    assert_ne!(
+        base,
+        draw(seed + 1, Stream::OrganismTurn, 5, 9),
+        "seed change did not change it"
+    );
 
     // Dense block: no collisions across the three coordinates at once.
     let mut seen = std::collections::HashSet::new();

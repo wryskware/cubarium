@@ -228,7 +228,10 @@ impl NeuralState {
                 return Err(format!("neural animal {id:?} carries a non-finite value"));
             }
             if a.phase > 1 {
-                return Err(format!("neural animal {id:?} has phase {}, not 0 or 1", a.phase));
+                return Err(format!(
+                    "neural animal {id:?} has phase {}, not 0 or 1",
+                    a.phase
+                ));
             }
             if self.policies.get(a.policy as usize).is_none() {
                 return Err(format!(
@@ -302,7 +305,10 @@ mod tests {
         let f = Feedback::default();
         let c = f.channels(1.0, 5.0, 2.5, 0.05);
         assert_eq!(c[..5], [0.0; 5]);
-        assert_eq!(c[5], 1.0, "nothing was requested, so all of it was delivered");
+        assert_eq!(
+            c[5], 1.0,
+            "nothing was requested, so all of it was delivered"
+        );
     }
 
     #[test]

@@ -470,7 +470,10 @@ pub fn labelled(values: &[f64]) -> serde_json::Map<String, serde_json::Value> {
 /// [`PARAMS`] order. This is what a replay reads: it is the only encoding that is guaranteed
 /// to hand the simulation back the number it was given.
 pub fn bit_labels(values: &[f64]) -> Vec<String> {
-    values.iter().map(|v| format!("{:016x}", v.to_bits())).collect()
+    values
+        .iter()
+        .map(|v| format!("{:016x}", v.to_bits()))
+        .collect()
 }
 
 /// Inverse of [`bit_labels`], with the length and the digits checked.
@@ -554,7 +557,13 @@ mod tests {
         let profile = FixedHunterProfile::lanternjaw_trial(&shipped);
         let read_back = read(&shipped, &profile);
         for (k, p) in PARAMS.iter().enumerate() {
-            assert!(p.lo < p.hi, "{}: lo {} is not below hi {}", p.name, p.lo, p.hi);
+            assert!(
+                p.lo < p.hi,
+                "{}: lo {} is not below hi {}",
+                p.name,
+                p.lo,
+                p.hi
+            );
             assert!(
                 p.lo <= p.default && p.default <= p.hi,
                 "{}: default {} is outside [{}, {}]",
@@ -605,7 +614,9 @@ mod tests {
         }
         // And the key that replaced it is named, so the list still covers the constraint.
         assert!(
-            EXCLUDED.iter().any(|(names, _)| names.contains("plant.energy_density")),
+            EXCLUDED
+                .iter()
+                .any(|(names, _)| names.contains("plant.energy_density")),
             "the one `e_v` must still be listed as excluded and why"
         );
     }

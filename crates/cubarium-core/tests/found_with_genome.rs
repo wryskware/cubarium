@@ -25,12 +25,18 @@ use cubarium_surface::{Face, SurfacePoint, Vec2};
 const SKIMMER_FORM: u8 = 3;
 
 fn world(seed: u64) -> World {
-    World::new(WorldConfig { seed, ..WorldConfig::default() })
-        .expect("the shipped defaults build a world")
+    World::new(WorldConfig {
+        seed,
+        ..WorldConfig::default()
+    })
+    .expect("the shipped defaults build a world")
 }
 
 fn here() -> (SurfacePoint, Vec2) {
-    (SurfacePoint::new(Face::Front, 20.0, 20.0), Vec2::new(1.0, 0.0))
+    (
+        SurfacePoint::new(Face::Front, 20.0, 20.0),
+        Vec2::new(1.0, 0.0),
+    )
 }
 
 /// The genome and phenotype of the first founder of `form`, as `World::new` built it.
@@ -62,7 +68,10 @@ fn the_roster_gives_every_founder_of_a_kind_one_genome() {
             .collect();
         assert!(!genomes.is_empty(), "form {form} is on the roster");
         for g in &genomes {
-            assert_eq!(g, &genomes[0], "form {form}: the kind fixes every locus, hue included");
+            assert_eq!(
+                g, &genomes[0],
+                "form {form}: the kind fixes every locus, hue included"
+            );
         }
     }
 }
@@ -79,7 +88,10 @@ fn the_door_matches_the_roster_path_for_every_phenotype_field() {
         .expect("a roster genome founds");
     let o = w.state.organisms.get(id).expect("the founded body is live");
 
-    assert_eq!(o.genome, genome, "the genome is stored exactly as handed in");
+    assert_eq!(
+        o.genome, genome,
+        "the genome is stored exactly as handed in"
+    );
     let p = &o.phenotype;
     assert_eq!(p.structure_adult, roster.structure_adult, "structure_adult");
     assert_eq!(p.reserve_max, roster.reserve_max, "reserve_max");
@@ -127,11 +139,20 @@ fn the_door_founds_an_adult_of_the_current_tick_from_outside() {
     let tick = w.tick();
     let (genome, _) = roster_body(&w, SKIMMER_FORM);
     let (pos, heading) = here();
-    let id = w.found_animal_with_genome(pos, heading, genome).expect("founds");
+    let id = w
+        .found_animal_with_genome(pos, heading, genome)
+        .expect("founds");
     let o = w.state.organisms.get(id).expect("live");
     assert_eq!(o.born_tick, tick, "born at the tick it was founded on");
-    assert_eq!(o.origin, Origin::Founder, "it arrived from outside, like every founder");
-    assert_eq!(o.structure, o.phenotype.structure_adult, "adult at founding");
+    assert_eq!(
+        o.origin,
+        Origin::Founder,
+        "it arrived from outside, like every founder"
+    );
+    assert_eq!(
+        o.structure, o.phenotype.structure_adult,
+        "adult at founding"
+    );
     assert_eq!(o.births, 0);
     assert!(o.escrow.is_none());
 }
@@ -147,7 +168,9 @@ fn the_material_box_closes_when_the_door_founds() {
     let phenotype = decode(&genome, &w.state.config.organism);
     let before = w.state.external_material_in;
     let (pos, heading) = here();
-    let id = w.found_animal_with_genome(pos, heading, genome).expect("founds");
+    let id = w
+        .found_animal_with_genome(pos, heading, genome)
+        .expect("founds");
     let o = w.state.organisms.get(id).expect("live");
     let expected = o.structure + o.reserve;
 
@@ -157,9 +180,16 @@ fn the_material_box_closes_when_the_door_founds() {
         "exactly the body's own structure and reserve is imported"
     );
     assert_eq!(o.structure, phenotype.structure_adult);
-    assert!(o.reserve > 0.0 && o.reserve <= phenotype.reserve_max, "reserve inside its cap");
-    assert!(o.energy > 0.0 && o.energy <= phenotype.energy_max, "battery inside its cap");
-    w.check_invariants().expect("the audits pass immediately after founding");
+    assert!(
+        o.reserve > 0.0 && o.reserve <= phenotype.reserve_max,
+        "reserve inside its cap"
+    );
+    assert!(
+        o.energy > 0.0 && o.energy <= phenotype.energy_max,
+        "battery inside its cap"
+    );
+    w.check_invariants()
+        .expect("the audits pass immediately after founding");
     for _ in 0..100 {
         w.step();
     }
@@ -176,7 +206,10 @@ fn a_refused_founding_imports_nothing() {
     let err = w
         .found_animal_with_genome(here().0, Vec2::ZERO, genome)
         .expect_err("a zero heading is refused");
-    assert!(err.contains("heading"), "the refusal names the heading: {err}");
+    assert!(
+        err.contains("heading"),
+        "the refusal names the heading: {err}"
+    );
     assert_eq!((w.state.external_material_in, w.population()), before);
 }
 
@@ -194,7 +227,9 @@ fn capacity_is_refused_by_name() {
     assert_eq!(w.population() as u32, founders);
     let (genome, _) = roster_body(&w, SKIMMER_FORM);
     let (pos, heading) = here();
-    let err = w.found_animal_with_genome(pos, heading, genome).expect_err("the cap refuses");
+    let err = w
+        .found_animal_with_genome(pos, heading, genome)
+        .expect_err("the cap refuses");
     assert!(
         err.contains("cannot found another animal") && err.contains(&founders.to_string()),
         "the refusal names the capacity: {err}"
@@ -238,10 +273,16 @@ fn the_door_never_rewrites_the_genome_it_was_given() {
     for diet in [0.10f32, 0.60, 0.85, 0.90] {
         let mut g = base.clone();
         g.diet = diet;
-        let id = w.found_animal_with_genome(here().0, here().1, g.clone()).expect("founds");
+        let id = w
+            .found_animal_with_genome(here().0, here().1, g.clone())
+            .expect("founds");
         let o = w.state.organisms.get(id).expect("live");
         assert_eq!(o.genome, g, "diet {diet}: stored exactly");
-        assert_eq!(o.phenotype, decode(&g, &w.state.config.organism), "diet {diet}: decoded once");
+        assert_eq!(
+            o.phenotype,
+            decode(&g, &w.state.config.organism),
+            "diet {diet}: decoded once"
+        );
     }
 }
 
@@ -255,15 +296,29 @@ fn the_caps_the_door_produces_are_the_contracts() {
     let theta = w.state.config.organism.capability_gate;
     let gamma = w.state.config.organism.capability_exponent;
     assert_eq!((theta, gamma), (0.2, 1.0), "the shipped gate and exponent");
-    let phi = |x: f64| if x >= theta && x > 0.0 { x.powf(gamma) } else { 0.0 };
+    let phi = |x: f64| {
+        if x >= theta && x > 0.0 {
+            x.powf(gamma)
+        } else {
+            0.0
+        }
+    };
     for diet in [0.10f32, 0.60, 0.85, 0.90] {
         let mut g = base.clone();
         g.diet = diet;
-        let id = w.found_animal_with_genome(here().0, here().1, g).expect("founds");
+        let id = w
+            .found_animal_with_genome(here().0, here().1, g)
+            .expect("founds");
         let p = &w.state.organisms.get(id).expect("live").phenotype;
         let d = f64::from(diet);
-        assert!((p.cap_foliage - phi(d)).abs() < 1e-12, "diet {diet}: cap_foliage");
-        assert!((p.cap_detrital - phi(1.0 - d)).abs() < 1e-12, "diet {diet}: cap_detrital");
+        assert!(
+            (p.cap_foliage - phi(d)).abs() < 1e-12,
+            "diet {diet}: cap_foliage"
+        );
+        assert!(
+            (p.cap_detrital - phi(1.0 - d)).abs() < 1e-12,
+            "diet {diet}: cap_detrital"
+        );
     }
 }
 
@@ -274,7 +329,13 @@ fn the_training_door_still_founds_the_unit_adult() {
     let mut w = world(19);
     let id = w.found_training_animal(here().0, here().1).expect("founds");
     let o = w.state.organisms.get(id).expect("live");
-    let expect = Genome::founder(cubarium_core::world::TRAINING_FOUNDER_HUE, &w.state.config.drives);
-    assert_eq!(o.genome, expect, "the training body is still the unit adult");
+    let expect = Genome::founder(
+        cubarium_core::world::TRAINING_FOUNDER_HUE,
+        &w.state.config.drives,
+    );
+    assert_eq!(
+        o.genome, expect,
+        "the training body is still the unit adult"
+    );
     assert_eq!(o.origin, Origin::Founder);
 }

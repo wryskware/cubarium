@@ -217,7 +217,10 @@ fn main() {
         }
     }
 
-    let config = FloraConfig { provision: Provision::AtCreation, ..FloraConfig::default() };
+    let config = FloraConfig {
+        provision: Provision::AtCreation,
+        ..FloraConfig::default()
+    };
     let caps = (
         observation_cap(resident, config.species(resident)),
         observation_cap(newcomer, config.species(newcomer)),
@@ -297,7 +300,8 @@ fn main() {
          from expiry (R5.4/R10.1).",
         match cap_override {
             Some(_) => "given with `--cap`",
-            None => "the default, DEFAULT_BUDGET_FACTOR x the **pair** bound — a named \
+            None =>
+                "the default, DEFAULT_BUDGET_FACTOR x the **pair** bound — a named \
                      placeholder, nothing measured it",
         },
         100.0 * window / bound,
@@ -329,9 +333,15 @@ fn main() {
     }
 
     // ----------------------------------------------------------- the conditioned state
-    let Some(conditioned) =
-        condition(&config, resident, newcomer, conditioning_s, phase_a_s, seed, noise_seed)
-    else {
+    let Some(conditioned) = condition(
+        &config,
+        resident,
+        newcomer,
+        conditioning_s,
+        phase_a_s,
+        seed,
+        noise_seed,
+    ) else {
         return;
     };
     // R10.2: an unresolved conditioning is not a conditioned state. A control refuses on it; a
@@ -533,9 +543,9 @@ fn parse(argv: &[String]) -> Result<Invocation, String> {
                 i += 2; // the option **and** its value
             }
             "--phase-a" => {
-                let value = argv.get(i + 1).ok_or_else(|| {
-                    "`--phase-a` wants a number of seconds after it".to_string()
-                })?;
+                let value = argv
+                    .get(i + 1)
+                    .ok_or_else(|| "`--phase-a` wants a number of seconds after it".to_string())?;
                 let seconds: f64 = value
                     .parse()
                     .map_err(|_| format!("`--phase-a {value}` is not a number of seconds"))?;
@@ -572,9 +582,13 @@ fn parse(argv: &[String]) -> Result<Invocation, String> {
     let species = |i: usize, role: &str| -> Result<Species, String> {
         let names: Vec<&str> = Species::ALL.iter().map(|s| s.name()).collect();
         match positional.get(i) {
-            None => Err(format!("no {role} species was named; the six are {}", names.join(", "))),
-            Some(name) => Species::parse(name)
-                .ok_or_else(|| format!("unknown species {name:?}; the six are {}", names.join(", "))),
+            None => Err(format!(
+                "no {role} species was named; the six are {}",
+                names.join(", ")
+            )),
+            Some(name) => Species::parse(name).ok_or_else(|| {
+                format!("unknown species {name:?}; the six are {}", names.join(", "))
+            }),
         }
     };
     let resident = species(0, "resident")?;
@@ -599,9 +613,10 @@ fn parse(argv: &[String]) -> Result<Invocation, String> {
     let integer = |i: usize, what: &str| -> Result<Option<u64>, String> {
         match positional.get(i) {
             None => Ok(None),
-            Some(text) => {
-                text.parse::<u64>().map(Some).map_err(|_| format!("{what} {text:?} is not a seed"))
-            }
+            Some(text) => text
+                .parse::<u64>()
+                .map(Some)
+                .map_err(|_| format!("{what} {text:?} is not a seed")),
         }
     };
     let seed = integer(3, "the world seed")?.unwrap_or(1);
@@ -784,8 +799,12 @@ fn condition(
         &tol,
         "B, the coupled setting with the resident",
     );
-    let verdict_b =
-        phase_verdict("B, the coupled setting with the resident", &records_b, settle_b, &tol);
+    let verdict_b = phase_verdict(
+        "B, the coupled setting with the resident",
+        &records_b,
+        settle_b,
+        &tol,
+    );
     unresolved = unresolved.or(verdict_b);
     println!(
         "  conditioning spent {:.0} s of its {budget_s:.0} s budget over the two phases",
@@ -860,8 +879,10 @@ fn settle_phase(
         return (Vec::new(), Settle::Expired, 0.0);
     }
     let mut records: Vec<IntervalRecord> = Vec::new();
-    let mut previous: Vec<Vec<Site>> =
-        species.iter().map(|&s| eligible_sites(world, flora, skyline, s)).collect();
+    let mut previous: Vec<Vec<Site>> = species
+        .iter()
+        .map(|&s| eligible_sites(world, flora, skyline, s))
+        .collect();
     let mut mark = water_mark(world, 0.0);
     let start = mark;
     let mut spent_ticks = 0u64;
@@ -872,8 +893,10 @@ fn settle_phase(
         let spent = spent_ticks as f64 * cubarium_voxel::DT;
         let now = water_mark(world, spent);
         let dt = (now.seconds - mark.seconds).max(1e-12);
-        let sets: Vec<Vec<Site>> =
-            species.iter().map(|&s| eligible_sites(world, flora, skyline, s)).collect();
+        let sets: Vec<Vec<Site>> = species
+            .iter()
+            .map(|&s| eligible_sites(world, flora, skyline, s))
+            .collect();
         let record = IntervalRecord {
             seconds: spent,
             ticks: interval_ticks,
@@ -887,7 +910,11 @@ fn settle_phase(
                 .iter()
                 .zip(previous.iter())
                 .map(|(now, before)| {
-                    if records.is_empty() { None } else { Some(turnover_of(before, now)) }
+                    if records.is_empty() {
+                        None
+                    } else {
+                        Some(turnover_of(before, now))
+                    }
                 })
                 .collect(),
         };
@@ -934,7 +961,10 @@ fn settle_phase(
             tail as f64 * cubarium_voxel::DT
         );
     }
-    println!("  phase {label}, whole phase: {}", water_budget_line(&start, &mark));
+    println!(
+        "  phase {label}, whole phase: {}",
+        water_budget_line(&start, &mark)
+    );
     (records, verdict, spent_ticks as f64 * cubarium_voxel::DT)
 }
 
@@ -973,7 +1003,7 @@ fn phase_verdict(
             "  phase {label}, head: the last three intervals' steps decay by a factor {ratio:.4} \
              each, which extrapolates to **{limit:.3} m** — a geometric extrapolation of three \
              numbers and not a measurement",
-            ),
+        ),
         None => println!(
             "  phase {label}, head: no geometric extrapolation (fewer than three complete \
              intervals, or the steps are not decaying)"
@@ -1086,7 +1116,12 @@ fn plant_cohort(
     for site in free.iter().step_by(stride).take(FOUNDERS_PER_SPECIES) {
         let ok = flora.apply(
             world,
-            Command::Seed { x: site.x as i64, z: site.z, species, wood },
+            Command::Seed {
+                x: site.x as i64,
+                z: site.z,
+                species,
+                wood,
+            },
         );
         if ok {
             let id = flora.view().stand_at(*site).expect("just planted").id;
@@ -1116,7 +1151,10 @@ fn plant_cohort(
 }
 
 fn eligible_count(world: &World, flora: &Flora, skyline: &[Site], species: Species) -> usize {
-    skyline.iter().filter(|s| passes(world, flora, species, **s)).count()
+    skyline
+        .iter()
+        .filter(|s| passes(world, flora, species, **s))
+        .count()
 }
 
 fn residual_line(flora: &Flora) -> String {
@@ -1126,7 +1164,12 @@ fn residual_line(flora: &Flora) -> String {
         v.mineral() - v.ledger.expected_mineral(),
         v.energy() - v.ledger.expected_energy(),
     );
-    format!("organic {o:+.2e}, mineral {n:+.2e}, energy {e:+.2e} (stocks {:.4}, {:.4}, {:.4})", v.organic(), v.mineral(), v.energy())
+    format!(
+        "organic {o:+.2e}, mineral {n:+.2e}, energy {e:+.2e} (stocks {:.4}, {:.4}, {:.4})",
+        v.organic(),
+        v.mineral(),
+        v.energy()
+    )
 }
 
 // ============================================================ the declared sites
@@ -1163,8 +1206,10 @@ impl DeclaredSite {
 fn predeclare_sites(c: &Conditioned, newcomer: Species) -> Vec<DeclaredSite> {
     println!("\n=== predeclared introduction sites ===");
     let pool = habitat(&c.world, &c.flora, &c.skyline, newcomer);
-    let free: Vec<Site> =
-        pool.into_iter().filter(|s| c.flora.view().stand_at(*s).is_none()).collect();
+    let free: Vec<Site> = pool
+        .into_iter()
+        .filter(|s| c.flora.view().stand_at(*s).is_none())
+        .collect();
     println!(
         "{} passes its own establishment predicate on {} of {} skyline columns in the \
          conditioned state; {} of them are unoccupied and pass its habitat rule {:?}",
@@ -1242,7 +1287,10 @@ fn recipients_of(world: &World, flora: &Flora, species: Species, site: Site) -> 
             seen.push(face);
         }
     }
-    let ok = seen.iter().filter(|s| passes(world, flora, species, **s)).count();
+    let ok = seen
+        .iter()
+        .filter(|s| passes(world, flora, species, **s))
+        .count();
     (seen.len(), ok)
 }
 
@@ -1294,7 +1342,9 @@ fn run_arm(
             "   REFUSED: the resident could not be excluded from this arm, so it is not the \
              exclusion arm it claims to be and is not reported as one."
         );
-        return ArmOutcome { resident_end: count(&flora, resident) };
+        return ArmOutcome {
+            resident_end: count(&flora, resident),
+        };
     }
 
     let founder = match (treatment, site) {
@@ -1320,7 +1370,9 @@ fn run_arm(
                     s.site.x,
                     s.site.z
                 );
-                return ArmOutcome { resident_end: count(&flora, resident) };
+                return ArmOutcome {
+                    resident_end: count(&flora, resident),
+                };
             }
             let stand = *flora.view().stand_at(s.site).expect("just planted");
             println!(
@@ -1397,8 +1449,17 @@ fn run_arm(
         started.elapsed().as_secs_f64()
     );
 
-    watch.report(&flora, resident, newcomer, budget, treatment, c.resident_alive);
-    ArmOutcome { resident_end: count(&flora, resident) }
+    watch.report(
+        &flora,
+        resident,
+        newcomer,
+        budget,
+        treatment,
+        c.resident_alive,
+    );
+    ArmOutcome {
+        resident_end: count(&flora, resident),
+    }
 }
 
 /// Remove the resident from a branched state: every stand of it with `Command::Clear`, and
@@ -1419,8 +1480,13 @@ fn exclude_resident(flora: &mut Flora, world: &World, resident: Species) -> bool
         .collect();
     let mut cleared = 0usize;
     for (id, site) in &stands {
-        if flora.apply(world, Command::Clear { x: site.x as i64, z: site.z })
-            && !flora.view().stands.iter().any(|s| s.id == *id)
+        if flora.apply(
+            world,
+            Command::Clear {
+                x: site.x as i64,
+                z: site.z,
+            },
+        ) && !flora.view().stands.iter().any(|s| s.id == *id)
         {
             cleared += 1;
         }
@@ -1434,8 +1500,14 @@ fn exclude_resident(flora: &mut Flora, world: &World, resident: Species) -> bool
         .collect();
     let mut banks_cleared = 0usize;
     for site in &banked {
-        if flora.apply(world, Command::ClearBank { x: site.x as i64, z: site.z, species: resident })
-        {
+        if flora.apply(
+            world,
+            Command::ClearBank {
+                x: site.x as i64,
+                z: site.z,
+                species: resident,
+            },
+        ) {
             banks_cleared += 1;
         }
     }
@@ -1453,13 +1525,26 @@ fn exclude_resident(flora: &mut Flora, world: &World, resident: Species) -> bool
         "   retained and matched: stored water {:.4} -> {:.4} m3, head {:.3} -> {:.3} m, litter \
          {:.5} -> {:.5}, dead wood {:.5} -> {:.5}, soil mineral {:.4} -> {:.4}, mineral \
          imported {:.1} -> {:.1}",
-        before.stored, after.stored, before.head, after.head, before.litter, after.litter,
-        before.dead_wood, after.dead_wood, before.soil_mineral, after.soil_mineral,
-        before.imported_mineral, after.imported_mineral
+        before.stored,
+        after.stored,
+        before.head,
+        after.head,
+        before.litter,
+        after.litter,
+        before.dead_wood,
+        after.dead_wood,
+        before.soil_mineral,
+        after.soil_mineral,
+        before.imported_mineral,
+        after.imported_mineral
     );
     let alive = count(flora, resident);
-    let banks_left =
-        flora.view().ground.iter().filter(|g| g.seed_organic(resident) > 0.0).count();
+    let banks_left = flora
+        .view()
+        .ground
+        .iter()
+        .filter(|g| g.seed_organic(resident) > 0.0)
+        .count();
     if alive > 0 || banks_left > 0 {
         println!(
             "   the exclusion is incomplete: {alive} stands and {banks_left} banks of {} are \
@@ -1477,7 +1562,10 @@ fn exclude_resident(flora: &mut Flora, world: &World, resident: Species) -> bool
         ("litter", after.litter - before.litter),
         ("dead wood", after.dead_wood - before.dead_wood),
         ("soil mineral", after.soil_mineral - before.soil_mineral),
-        ("imported mineral", after.imported_mineral - before.imported_mineral),
+        (
+            "imported mineral",
+            after.imported_mineral - before.imported_mineral,
+        ),
     ];
     for (what, delta) in moved {
         if delta.abs() > 1e-9 {
@@ -1556,7 +1644,11 @@ struct Record {
 
 impl Record {
     fn mean(&self, sum: f64) -> f64 {
-        if self.samples == 0 { f64::NAN } else { sum / self.samples as f64 }
+        if self.samples == 0 {
+            f64::NAN
+        } else {
+            sum / self.samples as f64
+        }
     }
 }
 
@@ -1627,8 +1719,13 @@ impl Watch {
         let mut now: Vec<u64> = Vec::new();
         // Copied out before the walk: an event is printed through `&mut self`, and the view
         // borrows the layer for as long as it is held.
-        let stands: Vec<Stand> =
-            flora.view().stands.iter().filter(|s| s.species == species).copied().collect();
+        let stands: Vec<Stand> = flora
+            .view()
+            .stands
+            .iter()
+            .filter(|s| s.species == species)
+            .copied()
+            .collect();
         for stand in &stands {
             now.push(stand.id);
             let i = match self.records.binary_search_by_key(&stand.id, |r| r.id) {
@@ -1656,23 +1753,29 @@ impl Watch {
                             monod_sum: 0.0,
                         },
                     );
-                    self.event(format!(
-                        "birth: {} #{} at ({},{}) y{}, wood {:.5}",
-                        self.species.name(),
-                        stand.id,
-                        stand.site.x,
-                        stand.site.z,
-                        stand.site.y,
-                        stand.wood
-                    ), tick);
+                    self.event(
+                        format!(
+                            "birth: {} #{} at ({},{}) y{}, wood {:.5}",
+                            self.species.name(),
+                            stand.id,
+                            stand.site.x,
+                            stand.site.z,
+                            stand.site.y,
+                            stand.wood
+                        ),
+                        tick,
+                    );
                     i
                 }
             };
             // **Funding** is the parcel's own change, corrected by what this stand actually
             // sent this tick — which the receipts say exactly, so a delivering tick's funding
             // is no longer reconstructed from an assumed package size.
-            let sent: f64 =
-                receipts.iter().filter(|r| r.donor == stand.id).map(|r| r.organic).sum();
+            let sent: f64 = receipts
+                .iter()
+                .filter(|r| r.donor == stand.id)
+                .map(|r| r.organic)
+                .sum();
             let funded = stand.parcel - self.records[i].parcel + sent;
             self.records[i].parcel = stand.parcel;
             if funded > 0.0 {
@@ -1680,7 +1783,10 @@ impl Watch {
                 self.records[i].funded_ticks += 1;
             }
             // The life history, sampled on the tick the stand is already being read on.
-            let pool = flora.view().ground_at(stand.site).map_or(0.0, |g| g.mineral);
+            let pool = flora
+                .view()
+                .ground_at(stand.site)
+                .map_or(0.0, |g| g.mineral);
             let half = flora.config().species(species).nutrient_half;
             self.records[i].site = stand.site;
             self.records[i].wood = stand.wood;
@@ -1688,8 +1794,11 @@ impl Watch {
             self.records[i].light_sum += stand.light;
             self.records[i].moisture_sum += stand.moisture;
             self.records[i].unstressed_sum += 1.0 - stand.aeration_stress;
-            self.records[i].monod_sum +=
-                if pool + half > 0.0 { pool / (pool + half) } else { 0.0 };
+            self.records[i].monod_sum += if pool + half > 0.0 {
+                pool / (pool + half)
+            } else {
+                0.0
+            };
             if self.records[i].donor_tick.is_none() && stand.wood >= donor_min {
                 self.records[i].donor_tick = Some(tick);
                 self.event(
@@ -1733,7 +1842,9 @@ impl Watch {
                 );
                 continue;
             };
-            self.records[i].deliveries.push((tick, r.recipient, r.organic));
+            self.records[i]
+                .deliveries
+                .push((tick, r.recipient, r.organic));
             let descendant = self.records[i].descendant;
             self.event(
                 format!(
@@ -1769,7 +1880,11 @@ impl Watch {
                             format!(
                                 "loss: {} #{id} is gone{}",
                                 self.species.name(),
-                                if descendant { "" } else { " — the introduced founder" }
+                                if descendant {
+                                    ""
+                                } else {
+                                    " — the introduced founder"
+                                }
                             ),
                             tick,
                         );
@@ -1796,7 +1911,10 @@ impl Watch {
     }
 
     fn losses(&self) -> usize {
-        self.records.iter().filter(|r| r.descendant && r.lost_tick.is_some()).count()
+        self.records
+            .iter()
+            .filter(|r| r.descendant && r.lost_tick.is_some())
+            .count()
     }
 
     fn survivors(&self, flora: &Flora) -> usize {
@@ -1826,7 +1944,12 @@ impl Watch {
 
     fn founder_parcel(&self, flora: &Flora) -> f64 {
         let Some(id) = self.founder else { return 0.0 };
-        flora.view().stands.iter().find(|s| s.id == id).map_or(0.0, |s| s.parcel)
+        flora
+            .view()
+            .stands
+            .iter()
+            .find(|s| s.id == id)
+            .map_or(0.0, |s| s.parcel)
     }
 
     /// The arm's verdict, in R5.4's own words, and never a coexistence claim.
@@ -1870,7 +1993,11 @@ impl Watch {
         println!(
             "   by identity: {births} descendant birth(s), {losses} of them lost before the end, \
              {survivors} surviving; the introduced founder {}",
-            if founder_alive { "survived the whole window" } else { "died during the window" }
+            if founder_alive {
+                "survived the whole window"
+            } else {
+                "died during the window"
+            }
         );
         // The founder's own donations, separately from any descendant's.
         for r in &self.records {
@@ -1880,7 +2007,11 @@ impl Watch {
             println!(
                 "     #{} ({}): funded {:.5} over {} ticks, {} deliveries{}",
                 r.id,
-                if r.descendant { "descendant" } else { "introduced founder" },
+                if r.descendant {
+                    "descendant"
+                } else {
+                    "introduced founder"
+                },
                 r.funded,
                 r.funded_ticks,
                 r.deliveries.len(),
@@ -1913,7 +2044,15 @@ impl Watch {
             );
             println!(
                 "     {:>5} {:>14} {:>9} {:>7} {:>8} {:>7} {:>9} {:>8} {:>7}",
-                "id", "column", "wood", "of W_est", "born (s)", "light", "moisture", "unstress", "monod"
+                "id",
+                "column",
+                "wood",
+                "of W_est",
+                "born (s)",
+                "light",
+                "moisture",
+                "unstress",
+                "monod"
             );
             for r in &living {
                 println!(
@@ -1938,7 +2077,12 @@ impl Watch {
                 observation_cap(newcomer, flora.config().species(newcomer)).growth_ticks
             );
         }
-        let first_birth = self.records.iter().filter(|r| r.descendant).map(|r| r.born_tick).min();
+        let first_birth = self
+            .records
+            .iter()
+            .filter(|r| r.descendant)
+            .map(|r| r.born_tick)
+            .min();
         let replacement = self
             .records
             .iter()
@@ -2006,8 +2150,14 @@ impl Watch {
 /// Adding a positive zero normalises it and changes no other value.
 fn banked(flora: &Flora, species: Species) -> (usize, f64) {
     let ground = flora.view().ground;
-    let sites = ground.iter().filter(|g| g.seed_organic(species) > 0.0).count();
-    (sites, ground.iter().map(|g| g.seed_organic(species)).sum::<f64>() + 0.0)
+    let sites = ground
+        .iter()
+        .filter(|g| g.seed_organic(species) > 0.0)
+        .count();
+    (
+        sites,
+        ground.iter().map(|g| g.seed_organic(species)).sum::<f64>() + 0.0,
+    )
 }
 
 #[cfg(test)]
@@ -2038,15 +2188,28 @@ mod tests {
         for x in 0..width as i64 {
             for y in 1..=2u32 {
                 let want = pore * Material::Soil.pore_capacity() * w.config().voxel_volume();
-                w.apply(WorldCommand::AddWater { x, y, z: 0, volume_m3: want });
-                w.apply(WorldCommand::SetMaterial { x, y, z: 0, material: Material::Soil });
+                w.apply(WorldCommand::AddWater {
+                    x,
+                    y,
+                    z: 0,
+                    volume_m3: want,
+                });
+                w.apply(WorldCommand::SetMaterial {
+                    x,
+                    y,
+                    z: 0,
+                    material: Material::Soil,
+                });
             }
         }
         w
     }
 
     fn eager() -> FloraConfig {
-        FloraConfig { provision: Provision::AtCreation, ..FloraConfig::default() }
+        FloraConfig {
+            provision: Provision::AtCreation,
+            ..FloraConfig::default()
+        }
     }
 
     /// **The R7.2 empty-layer check.** A velvetpad resident asks `UnderACrown` for its sites,
@@ -2062,7 +2225,10 @@ mod tests {
 
         // The gates themselves are open here: it is the habitat rule that has nothing.
         assert_eq!(
-            skyline.iter().filter(|s| passes(&world, &flora, Species::Velvetpad, **s)).count(),
+            skyline
+                .iter()
+                .filter(|s| passes(&world, &flora, Species::Velvetpad, **s))
+                .count(),
             skyline.len(),
             "the fixture's premise: every column passes velvetpad's own predicate"
         );
@@ -2074,11 +2240,20 @@ mod tests {
         // The declared background canopy, which is what the study plants first.
         let background =
             background_canopy(Species::Velvetpad, Species::Umbrellafrond).expect("a background");
-        assert_eq!(background, Species::Bloomcrown, "the first eligible species in ALL order");
+        assert_eq!(
+            background,
+            Species::Bloomcrown,
+            "the first eligible species in ALL order"
+        );
         let wood = founder_wood(flora.config().species(background));
         assert!(flora.apply(
             &world,
-            Command::Seed { x: 4, z: 0, species: background, wood }
+            Command::Seed {
+                x: 4,
+                z: 0,
+                species: background,
+                wood
+            }
         ));
         let under = habitat(&world, &flora, &skyline, Species::Velvetpad);
         assert!(
@@ -2114,12 +2289,23 @@ mod tests {
         let mut world = strip(8, 0.5);
         let skyline = skyline_of(&world);
         let mut flora = Flora::in_world(&world, eager());
-        let planted = plant_cohort(&mut flora, &world, &skyline, Species::Bloomcrown, "resident");
+        let planted = plant_cohort(
+            &mut flora,
+            &world,
+            &skyline,
+            Species::Bloomcrown,
+            "resident",
+        );
         assert!(planted > 0, "the premise: the cohort is planted");
 
         // A metre of free water over every support face: well past bloomcrown's 0.05 m.
         for x in 0..8i64 {
-            world.apply(WorldCommand::AddWater { x, y: 3, z: 0, volume_m3: 0.9 });
+            world.apply(WorldCommand::AddWater {
+                x,
+                y: 3,
+                z: 0,
+                volume_m3: 0.9,
+            });
         }
         flora.step(&mut world);
         assert_eq!(
@@ -2142,7 +2328,10 @@ mod tests {
         let area = f64::from(c.width) * f64::from(c.depth) * c.voxel_m * c.voxel_m;
         assert!((area - 192.0).abs() < 1e-12, "footprint {area} m2");
         assert!((outlet - HARNESS_RAIN_M_PER_S * area).abs() < 1e-12);
-        assert!(outlet < c.outlet_m3_per_s, "the core default 0.05 is left alone and is larger");
+        assert!(
+            outlet < c.outlet_m3_per_s,
+            "the core default 0.05 is left alone and is larger"
+        );
 
         // And the world the study conditions on carries it, with the rain untouched. Only one
         // world is built here: `prepared_world` generates and warms up 1,000 ticks, which is
@@ -2151,7 +2340,8 @@ mod tests {
         let study = prepared_world_with_outlet(1, 101, outlet);
         assert!((study.config().outlet_m3_per_s - 0.0384).abs() < 1e-12);
         assert_eq!(
-            study.config().rain_m_per_s, HARNESS_RAIN_M_PER_S,
+            study.config().rain_m_per_s,
+            HARNESS_RAIN_M_PER_S,
             "the rain, and so the soil-wetting treatment, is unchanged"
         );
     }
@@ -2181,11 +2371,17 @@ mod tests {
         let explicit = parse(&argv("bloomcrown umbrellafrond 500 7 11 --cap 60")).expect("parses");
         assert_eq!((explicit.seed, explicit.noise_seed), (7, 11));
         let leading = parse(&argv("--cap 60 bloomcrown umbrellafrond 500 7 11")).expect("parses");
-        assert_eq!(leading, explicit, "an option before the positionals is the same run");
+        assert_eq!(
+            leading, explicit,
+            "an option before the positionals is the same run"
+        );
 
         // Omitted entirely: both seeds default and nothing is shifted.
         let bare = parse(&argv("bloomcrown umbrellafrond")).expect("parses");
-        assert_eq!((bare.seed, bare.noise_seed, bare.cap_override), (1, 101, None));
+        assert_eq!(
+            (bare.seed, bare.noise_seed, bare.cap_override),
+            (1, 101, None)
+        );
         assert_eq!(bare.conditioning_s, 1_000.0);
 
         let pilot = parse(&argv("pilot bloomcrown umbrellafrond 400 2 3")).expect("parses");
@@ -2220,8 +2416,10 @@ mod tests {
 
         // A zero conditioning budget is **allowed**: it asks what an unconditioned state looks
         // like, and it reports "conditioning unresolved" like any other expiry.
-        let argv: Vec<String> =
-            "bloomcrown umbrellafrond 0".split(' ').map(String::from).collect();
+        let argv: Vec<String> = "bloomcrown umbrellafrond 0"
+            .split(' ')
+            .map(String::from)
+            .collect();
         assert_eq!(parse(&argv).expect("parses").conditioning_s, 0.0);
     }
 
@@ -2233,15 +2431,24 @@ mod tests {
         let never = refusal(Species::Velvetpad, 0, 0, 3072).expect("never planted is a refusal");
         assert!(never.starts_with("REFUSED:"), "{never}");
         assert!(never.contains("was never planted"), "{never}");
-        assert!(never.contains("UnderACrown"), "the habitat rule that had no site: {never}");
-        assert!(!never.contains("invasion of anything"), "that is the other case: {never}");
+        assert!(
+            never.contains("UnderACrown"),
+            "the habitat rule that had no site: {never}"
+        );
+        assert!(
+            !never.contains("invasion of anything"),
+            "that is the other case: {never}"
+        );
 
         let gone = refusal(Species::Bloomcrown, 8, 0, 3072).expect("disappeared is a refusal");
         assert!(gone.contains("has disappeared"), "{gone}");
         assert!(gone.contains("8 founders were planted"), "{gone}");
         assert!(gone.contains("not an invasion of anything"), "{gone}");
 
-        assert!(refusal(Species::Bloomcrown, 8, 1, 3072).is_none(), "one living stand is enough");
+        assert!(
+            refusal(Species::Bloomcrown, 8, 1, 3072).is_none(),
+            "one living stand is enough"
+        );
         assert!(refusal(Species::Bloomcrown, 8, 19, 3072).is_none());
     }
 
@@ -2255,7 +2462,13 @@ mod tests {
         let skyline = skyline_of(&world);
         let mut flora = Flora::in_world(&world, eager());
         // A bloomcrown resident cohort, then umbrellafrond's sites among what is left.
-        let planted = plant_cohort(&mut flora, &world, &skyline, Species::Bloomcrown, "resident");
+        let planted = plant_cohort(
+            &mut flora,
+            &world,
+            &skyline,
+            Species::Bloomcrown,
+            "resident",
+        );
         assert!(planted > 0);
         let c = Conditioned {
             world: world.clone(),
@@ -2268,12 +2481,19 @@ mod tests {
             background: None,
             unresolved: None,
         };
-        let declared: Vec<Site> =
-            predeclare_sites(&c, Species::Umbrellafrond).into_iter().map(|s| s.site).collect();
-        let again: Vec<Site> =
-            predeclare_sites(&c, Species::Umbrellafrond).into_iter().map(|s| s.site).collect();
+        let declared: Vec<Site> = predeclare_sites(&c, Species::Umbrellafrond)
+            .into_iter()
+            .map(|s| s.site)
+            .collect();
+        let again: Vec<Site> = predeclare_sites(&c, Species::Umbrellafrond)
+            .into_iter()
+            .map(|s| s.site)
+            .collect();
         assert_eq!(declared, again, "one conditioned state declares one list");
-        assert!(!declared.is_empty(), "the fixture must offer the newcomer somewhere");
+        assert!(
+            !declared.is_empty(),
+            "the fixture must offer the newcomer somewhere"
+        );
 
         // The exclusion arm's own state: the resident removed, which frees its columns and
         // takes its crowns away. Re-deriving there is a different list, and that is the defect

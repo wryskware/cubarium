@@ -52,7 +52,10 @@ impl Headless {
             )
         }?[0];
         let fence = unsafe { d.create_fence(&vk::FenceCreateInfo::default(), None) }?;
-        Ok(Headless { command_buffer, fence })
+        Ok(Headless {
+            command_buffer,
+            fence,
+        })
     }
 
     /// Draw one frame and wait for it. Returns the GPU milliseconds the timestamps saw.
@@ -63,12 +66,18 @@ impl Headless {
         frame: S::Frame<'_>,
     ) -> Result<f64> {
         let d = &gpu.device;
-        unsafe { d.reset_command_buffer(self.command_buffer, vk::CommandBufferResetFlags::empty()) }?;
+        unsafe {
+            d.reset_command_buffer(self.command_buffer, vk::CommandBufferResetFlags::empty())
+        }?;
         src.record_frame(gpu, self.command_buffer, frame, None)?;
         let one = [self.command_buffer];
         unsafe {
             d.reset_fences(&[self.fence])?;
-            d.queue_submit(gpu.queue, &[vk::SubmitInfo::default().command_buffers(&one)], self.fence)?;
+            d.queue_submit(
+                gpu.queue,
+                &[vk::SubmitInfo::default().command_buffers(&one)],
+                self.fence,
+            )?;
             d.wait_for_fences(&[self.fence], true, u64::MAX)?;
         }
         Ok(src.gpu_ms(gpu))

@@ -7,10 +7,10 @@
 //! a row popping in whole, a reveal that is not monotone, a zero-weight layer that still
 //! costs footprint.
 
-use cubarium_surface::Topology;
-use cube_proto::Face;
 use cubarium_render::{Canvas, Mask, Pose, Sprite, stamp_layers, stamp_pose, stamp_sprite};
+use cubarium_surface::Topology;
 use cubarium_surface::{SurfacePoint, Vec2};
+use cube_proto::Face;
 
 // ---------------------------------------------------------------------------
 // fixtures
@@ -116,7 +116,13 @@ fn draw_layers(
 }
 
 fn draw_tile(sprite: &Sprite, mask: Mask, background: &Canvas) -> Canvas {
-    draw_layers(background, tile_anchor(), &[(Pose::still(sprite), 1.0)], 1.0, mask)
+    draw_layers(
+        background,
+        tile_anchor(),
+        &[(Pose::still(sprite), 1.0)],
+        1.0,
+        mask,
+    )
 }
 
 /// The pixels a tile at [`tile_anchor`] can reach: its footprint is under the nine-pixel
@@ -167,13 +173,29 @@ fn a_still_pose_without_a_mask_stamps_bit_identically_to_stamp_sprite() {
     let sprite = row_tile(|ty| [(16 * ty + 8) as u8, 255 - (13 * ty) as u8, 90, 255]);
     let anchors = [
         ("mid-face", SurfacePoint::new(Face::Front, 32.25, 32.25), 1),
-        ("across a side seam", SurfacePoint::new(Face::Front, 63.5, 32.5), 2),
-        ("at a top-face vertex", SurfacePoint::new(Face::Top, 0.25, 0.25), 3),
+        (
+            "across a side seam",
+            SurfacePoint::new(Face::Front, 63.5, 32.5),
+            2,
+        ),
+        (
+            "at a top-face vertex",
+            SurfacePoint::new(Face::Top, 0.25, 0.25),
+            3,
+        ),
     ];
     for (what, anchor, faces) in anchors {
         for heading in [Vec2::new(1.0, 0.0), Vec2::new(0.6, -0.8)] {
             let mut expected = Canvas::cube();
-            stamp_sprite(&mut expected, anchor, heading, &sprite, 1.0, 0.85, &mut Vec::new());
+            stamp_sprite(
+                &mut expected,
+                anchor,
+                heading,
+                &sprite,
+                1.0,
+                0.85,
+                &mut Vec::new(),
+            );
             let mut actual = Canvas::cube();
             stamp_pose(
                 &mut actual,
@@ -185,7 +207,10 @@ fn a_still_pose_without_a_mask_stamps_bit_identically_to_stamp_sprite() {
                 Mask::None,
                 &mut Vec::new(),
             );
-            assert!(peak(&expected) > 0.05, "{what}: the fixture must paint something");
+            assert!(
+                peak(&expected) > 0.05,
+                "{what}: the fixture must paint something"
+            );
             let touched = Face::ALL
                 .into_iter()
                 .filter(|&f| {
@@ -232,7 +257,15 @@ fn two_opaque_layers_at_half_weight_replace_the_background_exactly() {
     let background = filled([0.0, 1.0, 0.0]);
     let mut leaky = background.clone();
     for sprite in [&red, &blue] {
-        stamp_sprite(&mut leaky, anchor, Vec2::new(1.0, 0.0), sprite, 1.0, 0.5, &mut Vec::new());
+        stamp_sprite(
+            &mut leaky,
+            anchor,
+            Vec2::new(1.0, 0.0),
+            sprite,
+            1.0,
+            0.5,
+            &mut Vec::new(),
+        );
     }
     let leaked = leaky.get(Face::Front, 32, 32);
     assert!(
@@ -249,19 +282,34 @@ fn a_weight_of_one_is_the_first_layer_alone_and_a_zero_weight_layer_costs_no_foo
     let small = dot([255, 220, 40, 255]);
     let large = Sprite::from_rgba(5, 1, Vec2::new(2.5, 0.5), &[255; 20]).unwrap();
     let scale = 3.0;
-    assert!(large.extent() * scale > 9.0, "the fixture's wide sprite must break the budget");
+    assert!(
+        large.extent() * scale > 9.0,
+        "the fixture's wide sprite must break the budget"
+    );
     assert!(small.extent() * scale < 9.0);
     let anchor = SurfacePoint::new(Face::Front, 32.25, 32.25);
     let background = filled([0.1, 0.0, 0.3]);
 
-    let alone = draw_layers(&background, anchor, &[(Pose::still(&small), 1.0)], scale, Mask::None);
-    assert!(max_diff(&alone, &background) > 0.1, "the fixture drew nothing");
+    let alone = draw_layers(
+        &background,
+        anchor,
+        &[(Pose::still(&small), 1.0)],
+        scale,
+        Mask::None,
+    );
+    assert!(
+        max_diff(&alone, &background) > 0.1,
+        "the fixture drew nothing"
+    );
 
     for weights in [(1.0f32, 0.0f32), (1.0, -1.0), (1.0, f32::NAN)] {
         let mixed = draw_layers(
             &background,
             anchor,
-            &[(Pose::still(&small), weights.0), (Pose::still(&large), weights.1)],
+            &[
+                (Pose::still(&small), weights.0),
+                (Pose::still(&large), weights.1),
+            ],
             scale,
             Mask::None,
         );
@@ -308,7 +356,11 @@ fn a_layer_contributes_its_temporal_blend_and_not_a_held_frame() {
     let blue = dot([0, 0, 255, 255]);
     let green = dot([0, 255, 0, 255]);
     let anchor = SurfacePoint::pixel_center(Topology::Cube, Face::Left, 10, 10);
-    let swaying = Pose { first: &red, second: &blue, mix: 0.5 };
+    let swaying = Pose {
+        first: &red,
+        second: &blue,
+        mix: 0.5,
+    };
 
     // One layer at weight 1: the pose's own lerp, (0.5, 0, 0.5).
     let solo = draw_layers(&Canvas::cube(), anchor, &[(swaying, 1.0)], 1.0, Mask::None);
@@ -334,7 +386,10 @@ fn a_layer_contributes_its_temporal_blend_and_not_a_held_frame() {
         );
     }
     // And it is not the held first frame of the swaying layer, which would be (0.5, 0.5, 0).
-    assert!(pixel[2] > 0.2, "the layer lost its temporal blend: {pixel:?}");
+    assert!(
+        pixel[2] > 0.2,
+        "the layer lost its temporal blend: {pixel:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -357,7 +412,11 @@ fn a_strip_paints_exactly_the_whole_rows_between_its_floor_and_reveal() {
             let mut painted = 0;
             for tx in 0..16usize {
                 let (f, x, y) = texel_pixel(tx, ty);
-                let want = if inside { whole.get(f, x, y) } else { background.get(f, x, y) };
+                let want = if inside {
+                    whole.get(f, x, y)
+                } else {
+                    background.get(f, x, y)
+                };
                 assert_eq!(
                     strip.get(f, x, y),
                     want,
@@ -374,13 +433,26 @@ fn a_strip_paints_exactly_the_whole_rows_between_its_floor_and_reveal() {
     // An empty strip draws nothing at all.
     for (floor, reveal) in [(12.0, 12.0), (12.0, 11.0), (0.0, 0.0)] {
         let empty = draw_tile(&tile, Mask::Strip { floor, reveal }, &background);
-        assert_identical(&empty, &background, &format!("Strip {{ {floor}, {reveal} }}"));
+        assert_identical(
+            &empty,
+            &background,
+            &format!("Strip {{ {floor}, {reveal} }}"),
+        );
     }
 
     // Two strips that partition the tile's rows composite to one unmasked stamp: every row
     // is owned by exactly one of them, so no row is painted twice and none is missed.
     let mut split = background.clone();
-    for mask in [Mask::Strip { floor: 0.0, reveal: 12.0 }, Mask::Strip { floor: 12.0, reveal: 16.0 }] {
+    for mask in [
+        Mask::Strip {
+            floor: 0.0,
+            reveal: 12.0,
+        },
+        Mask::Strip {
+            floor: 12.0,
+            reveal: 16.0,
+        },
+    ] {
         stamp_layers(
             &mut split,
             tile_anchor(),
@@ -392,7 +464,11 @@ fn a_strip_paints_exactly_the_whole_rows_between_its_floor_and_reveal() {
             &mut Vec::new(),
         );
     }
-    assert!(max_diff(&split, &whole) < 1e-6, "{}", max_diff(&split, &whole));
+    assert!(
+        max_diff(&split, &whole) < 1e-6,
+        "{}",
+        max_diff(&split, &whole)
+    );
 }
 
 /// The reveal is a continuous function of the strip's height: a twentieth-of-a-pixel step
@@ -405,7 +481,14 @@ fn a_growing_strip_fades_its_first_row_in_and_never_jumps_a_whole_row() {
     let empty = Canvas::cube();
 
     // Over black with an opaque white tile the pixel value *is* the mask coverage.
-    let mut previous = draw_tile(&tile, Mask::Strip { floor, reveal: floor }, &empty);
+    let mut previous = draw_tile(
+        &tile,
+        Mask::Strip {
+            floor,
+            reveal: floor,
+        },
+        &empty,
+    );
     assert_eq!(peak(&previous), 0.0, "a strip at its floor must be empty");
     let mut reveal = floor + REVEAL_STEP;
     while reveal <= 17.0 {
@@ -416,7 +499,14 @@ fn a_growing_strip_fades_its_first_row_in_and_never_jumps_a_whole_row() {
     }
     assert!(peak(&previous) > 0.9, "the fixture never filled a row");
 
-    let born = draw_tile(&tile, Mask::Strip { floor, reveal: floor + 1e-6 }, &empty);
+    let born = draw_tile(
+        &tile,
+        Mask::Strip {
+            floor,
+            reveal: floor + 1e-6,
+        },
+        &empty,
+    );
     assert!(
         peak(&born) < 1e-4,
         "a strip one millionth of a pixel tall already shows {}",
@@ -440,10 +530,18 @@ fn axial_and_radial_reveals_are_monotone_from_nothing_to_the_whole_tile() {
 
     for name in ["axial", "radial"] {
         let mask_at = |reveal: f64| {
-            if name == "axial" { Mask::Axial { reveal } } else { Mask::Radial { reveal } }
+            if name == "axial" {
+                Mask::Axial { reveal }
+            } else {
+                Mask::Radial { reveal }
+            }
         };
         let born = draw_tile(&tile, mask_at(1e-6), &empty);
-        assert!(peak(&born) < 1e-4, "{name} popped at reveal 1e-6: {}", peak(&born));
+        assert!(
+            peak(&born) < 1e-4,
+            "{name} popped at reveal 1e-6: {}",
+            peak(&born)
+        );
 
         let mut previous = draw_tile(&tile, mask_at(0.0), &empty);
         assert_eq!(peak(&previous), 0.0, "{name} at reveal 0 must be empty");
@@ -462,9 +560,17 @@ fn axial_and_radial_reveals_are_monotone_from_nothing_to_the_whole_tile() {
             if f == Face::Front && (16..48).contains(&x) && (16..48).contains(&y) {
                 continue;
             }
-            assert_eq!(previous.get(f, x, y), [0.0; 3], "the tile reached ({f:?}, {x}, {y})");
+            assert_eq!(
+                previous.get(f, x, y),
+                [0.0; 3],
+                "the tile reached ({f:?}, {x}, {y})"
+            );
         }
-        assert_identical(&previous, &whole, &format!("{name} at a reveal past the tile"));
+        assert_identical(
+            &previous,
+            &whole,
+            &format!("{name} at a reveal past the tile"),
+        );
     }
 }
 
@@ -524,7 +630,11 @@ fn subtract_clears_only_the_texels_other_paints_identically_inside_the_rows() {
     ]);
 
     let cut = base.subtract(&other, 1..3);
-    assert_identical(&stamped(&cut), &stamped(&expected), "subtract over rows 1..3");
+    assert_identical(
+        &stamped(&cut),
+        &stamped(&expected),
+        "subtract over rows 1..3",
+    );
     assert!(
         !stamped(&cut)
             .get(Face::Front, 30, 31)
@@ -547,7 +657,10 @@ fn subtract_clears_only_the_texels_other_paints_identically_inside_the_rows() {
         NONE, NONE, NONE, NONE, //
     ]);
     let trimmed = corner.subtract(&corner, 0..4);
-    assert!(trimmed.extent() < corner.extent(), "clearing the outer texels must shrink the extent");
+    assert!(
+        trimmed.extent() < corner.extent(),
+        "clearing the outer texels must shrink the extent"
+    );
     assert_eq!(peak(&stamped(&trimmed)), peak(&filled([0.0, 0.15, 0.0])));
     assert!(inner.extent() < corner.extent());
 
@@ -557,11 +670,19 @@ fn subtract_clears_only_the_texels_other_paints_identically_inside_the_rows() {
     assert_eq!(untouched.width(), base.width());
     assert_eq!(untouched.height(), base.height());
     assert_eq!(untouched.extent(), base.extent());
-    assert_identical(&stamped(&untouched), &stamped(&base), "subtract with wrong dimensions");
+    assert_identical(
+        &stamped(&untouched),
+        &stamped(&base),
+        "subtract with wrong dimensions",
+    );
 
     // Rows beyond the sprite are clamped rather than panicking, and clear what they reach.
     let all = base.subtract(&base, 0..99);
-    assert_eq!(all.extent(), 0.0, "subtracting a sprite from itself leaves nothing");
+    assert_eq!(
+        all.extent(),
+        0.0,
+        "subtracting a sprite from itself leaves nothing"
+    );
 }
 
 #[test]
@@ -584,9 +705,15 @@ fn paints_like_is_true_only_where_every_painted_texel_of_other_matches() {
     ]);
 
     assert!(base.paints_like(&base, 0..4));
-    assert!(base.paints_like(&tail, 1..3), "every painted texel of the tail agrees there");
+    assert!(
+        base.paints_like(&tail, 1..3),
+        "every painted texel of the tail agrees there"
+    );
     assert!(!base.paints_like(&tail, 0..4), "row 3 disagrees");
-    assert!(base.paints_like(&tail, 0..1), "an all-transparent row compares vacuously true");
+    assert!(
+        base.paints_like(&tail, 0..1),
+        "an all-transparent row compares vacuously true"
+    );
     // A transparent texel of `other` is never compared, so a sprite painting nothing in the
     // rows always agrees.
     let blank = quad([[NONE; 1][0]; 16]);
@@ -597,5 +724,8 @@ fn paints_like_is_true_only_where_every_painted_texel_of_other_matches() {
 
     // And the two functions agree: what `subtract` cleared no longer paints like `other`.
     let cut = base.subtract(&tail, 1..3);
-    assert!(!cut.paints_like(&tail, 1..3), "the cleared texels must no longer match");
+    assert!(
+        !cut.paints_like(&tail, 1..3),
+        "the cleared texels must no longer match"
+    );
 }

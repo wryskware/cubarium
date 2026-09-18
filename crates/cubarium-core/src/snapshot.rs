@@ -19,6 +19,7 @@ pub mod projection;
 
 pub mod care_v1;
 
+pub use projection::{ConfigProjection, CubeProjection, first_difference, projection_hash};
 pub use v7::{SCHEMA_V7, WorldStateV7};
 pub use v8::{SCHEMA_V8, WorldStateV8};
 pub use v9::{SCHEMA_V9, WorldStateV9};
@@ -29,7 +30,6 @@ pub use v13::{SCHEMA_V13, WorldStateV13};
 pub use v14::{SCHEMA_V14, WorldStateV14};
 pub use v16::{CONFIG_VERSION_V16, SCHEMA_V16, WorldStateV16, decode_v16};
 pub use v17::{CONFIG_VERSION_V17, SCHEMA_V17, WorldStateV17, decode_v17};
-pub use projection::{ConfigProjection, CubeProjection, first_difference, projection_hash};
 
 /// Bumped whenever `WorldState` or any nested type changes shape.
 ///

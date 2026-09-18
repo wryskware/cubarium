@@ -80,7 +80,11 @@ fn unfold_pixels_owns_every_pixel_exactly_once_across_the_wrap_and_at_the_rims()
             assert_eq!(img.face, Face::Front, "{label}: a ring has one chart");
             let slot = usize::from(img.y) * usize::from(W) + usize::from(img.x);
             seen[slot] += 1;
-            assert_eq!(seen[slot], 1, "{label}: pixel ({}, {}) owned twice", img.x, img.y);
+            assert_eq!(
+                seen[slot], 1,
+                "{label}: pixel ({}, {}) owned twice",
+                img.x, img.y
+            );
         }
 
         let expected = brute_force(anchor, RADIUS);
@@ -121,7 +125,11 @@ fn ownership_agrees_with_the_wrapped_euclidean_and_local_is_the_unfolded_centre(
                 }
             }
         }
-        assert_eq!(got.len(), expected, "{label}: owned vs wrapped-Euclidean count");
+        assert_eq!(
+            got.len(),
+            expected,
+            "{label}: owned vs wrapped-Euclidean count"
+        );
 
         for img in &got {
             let p = SurfacePoint::pixel_center(ring(), Face::Front, img.x, img.y);
@@ -153,12 +161,18 @@ fn the_wrap_costs_a_footprint_no_pixels_but_a_rim_clips_it() {
     let middle = owned(front(160.5, 90.5), budget).len();
     let on_wrap = owned(front(0.5, 90.5), budget).len();
     let over_wrap = owned(front(319.5, 90.5), budget).len();
-    assert_eq!(on_wrap, middle, "a footprint at u = 0.5 reaches around the wrap");
+    assert_eq!(
+        on_wrap, middle,
+        "a footprint at u = 0.5 reaches around the wrap"
+    );
     assert_eq!(over_wrap, middle, "and so does one at u = 319.5");
 
     let on_rim = owned(front(160.5, 0.5), budget).len();
     assert!(on_rim < middle, "the top rim clips: {on_rim} vs {middle}");
-    assert!(on_rim > middle / 3, "but only by about half: {on_rim} vs {middle}");
+    assert!(
+        on_rim > middle / 3,
+        "but only by about half: {on_rim} vs {middle}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -174,11 +188,19 @@ fn a_ring_enumerates_three_chart_images() {
     assert_eq!(images.len(), 3, "direct, +w and −w");
     let mut shifts: Vec<f64> = images.iter().map(|i| i.origin.x).collect();
     shifts.sort_by(f64::total_cmp);
-    assert_eq!(shifts, vec![-f64::from(W), 0.0, f64::from(W)], "the origins are the two shifts");
+    assert_eq!(
+        shifts,
+        vec![-f64::from(W), 0.0, f64::from(W)],
+        "the origins are the two shifts"
+    );
     for img in &images {
         assert_eq!(img.target_face, Face::Front);
         assert_eq!(img.origin.y, 0.0, "the wrap is horizontal only");
-        assert_eq!(img.map, cubarium_surface::TangentMap::IDENTITY, "zero quarter turns");
+        assert_eq!(
+            img.map,
+            cubarium_surface::TangentMap::IDENTITY,
+            "zero quarter turns"
+        );
     }
 }
 
@@ -228,7 +250,10 @@ fn ring_chord_sq_is_the_wrapped_euclidean() {
     assert_eq!(topo.chord_sq(&b, &a), 4.0, "and it is symmetric");
     assert_eq!(topo.chord_sq(&a, &a), 0.0);
     // Exactly half way round is the same either way.
-    assert_eq!(topo.chord_sq(&front(0.0, 0.0), &front(160.0, 0.0)), 160.0 * 160.0);
+    assert_eq!(
+        topo.chord_sq(&front(0.0, 0.0), &front(160.0, 0.0)),
+        160.0 * 160.0
+    );
 
     // A deterministic sweep of pairs against the formula the plan writes.
     let mut state = 0x2545_F491_4F6C_DD1Du64;
@@ -243,7 +268,10 @@ fn ring_chord_sq_is_the_wrapped_euclidean() {
         let b = front(next() * f64::from(W), next() * f64::from(H));
         let expected = wrapped_sq(&a, &b);
         let got = topo.chord_sq(&a, &b);
-        assert!((got - expected).abs() <= 1e-9, "chord_sq({a:?}, {b:?}) = {got} vs {expected}");
+        assert!(
+            (got - expected).abs() <= 1e-9,
+            "chord_sq({a:?}, {b:?}) = {got} vs {expected}"
+        );
     }
 }
 
@@ -262,7 +290,10 @@ fn ring_chord_sq_is_the_true_surface_distance() {
         let d = surface_distance(topo, a, b, topo.max_local_radius())
             .unwrap_or_else(|| panic!("{a:?} to {b:?} should be within the local radius"));
         let chord = topo.chord_sq(&a, &b).sqrt();
-        assert!((d - chord).abs() <= 1e-9, "{a:?} to {b:?}: surface {d} vs chord {chord}");
+        assert!(
+            (d - chord).abs() <= 1e-9,
+            "{a:?} to {b:?}: surface {d} vs chord {chord}"
+        );
     }
 }
 

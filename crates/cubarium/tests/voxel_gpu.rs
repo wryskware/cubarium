@@ -26,7 +26,12 @@ use cubarium_voxel_fauna::{Command as FaunaCommand, Fauna, FaunaConfig, Species 
 use cubarium_voxel_flora::{Command as FloraCommand, Flora, FloraConfig, Species};
 
 fn config() -> Config {
-    Config { width: 32, height: 12, depth: 4, ..Config::default() }
+    Config {
+        width: 32,
+        height: 12,
+        depth: 4,
+        ..Config::default()
+    }
 }
 
 /// The shader's first three lines, against the projection they invert.
@@ -42,7 +47,12 @@ fn the_shaders_slab_lookup_names_the_voxel_the_projection_gave_the_pixel() {
         let c = config();
         let proj = Projection::new(tilt, s, 0, &c).unwrap();
         let params = cubarium::sink::gpu::voxel::params_of(
-            &VoxelConfig { tilt_degrees: tilt, px_per_voxel: s, world: c.clone(), ..VoxelConfig::default() },
+            &VoxelConfig {
+                tilt_degrees: tilt,
+                px_per_voxel: s,
+                world: c.clone(),
+                ..VoxelConfig::default()
+            },
             proj,
             true,
         );
@@ -86,7 +96,10 @@ fn the_shaders_slab_lookup_names_the_voxel_the_projection_gave_the_pixel() {
 #[test]
 fn the_gpu_draws_the_same_small_world_as_the_cpu_presenter() {
     let c = config();
-    let cfg = VoxelConfig { world: c.clone(), ..VoxelConfig::default() };
+    let cfg = VoxelConfig {
+        world: c.clone(),
+        ..VoxelConfig::default()
+    };
     let proj = Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, &c).unwrap();
 
     let mut gpu = match VoxelGpuSink::new(
@@ -111,10 +124,24 @@ fn the_gpu_draws_the_same_small_world_as_the_cpu_presenter() {
     let mut fauna = Fauna::new(FaunaConfig::default());
     let body = fauna.config().species(Beast::Frondgrazer).body_max;
     assert!(
-        fauna.apply(&world, FaunaCommand::Introduce { x: 3, z: 1, species: Beast::Frondgrazer, body }),
+        fauna.apply(
+            &world,
+            FaunaCommand::Introduce {
+                x: 3,
+                z: 1,
+                species: Beast::Frondgrazer,
+                body
+            }
+        ),
         "the fixture has a support face at (3, 1) for the grazer"
     );
-    let mut canvas = Canvas::new(Topology::Ring { w: proj.raster_w, h: proj.raster_h }, Scale::ONE);
+    let mut canvas = Canvas::new(
+        Topology::Ring {
+            w: proj.raster_w,
+            h: proj.raster_h,
+        },
+        Scale::ONE,
+    );
     let mut raster = cube_proto::Raster::black(proj.raster_w, proj.raster_h);
     VoxelPresenter::new(cfg, proj).draw_with_fauna(
         &world.view(),
@@ -157,7 +184,12 @@ fn fixture(c: &Config) -> (World, Flora) {
     let mut world = World::empty(c.clone());
     let v = c.voxel_volume();
     let set = |w: &mut World, x: i64, y: u32, z: u32, m: Material| {
-        w.apply(Command::SetMaterial { x, y, z, material: m });
+        w.apply(Command::SetMaterial {
+            x,
+            y,
+            z,
+            material: m,
+        });
     };
     for z in 0..c.depth {
         for x in 0..i64::from(c.width) {
@@ -182,22 +214,46 @@ fn fixture(c: &Config) -> (World, Flora) {
     for z in 0..c.depth {
         for x in -2..6i64 {
             for y in 3..5u32 {
-                world.apply(Command::AddWater { x, y, z, volume_m3: v });
+                world.apply(Command::AddWater {
+                    x,
+                    y,
+                    z,
+                    volume_m3: v,
+                });
             }
         }
     }
-    world.apply(Command::AddWater { x: 24, y: 6, z: 1, volume_m3: v * 0.25 });
+    world.apply(Command::AddWater {
+        x: 24,
+        y: 6,
+        z: 1,
+        volume_m3: v * 0.25,
+    });
     // And some pore water, so the wet-soil darkening is on screen.
     for x in 8..20i64 {
-        world.apply(Command::AddWater { x, y: 2, z: 2, volume_m3: v * 0.2 });
+        world.apply(Command::AddWater {
+            x,
+            y: 2,
+            z: 2,
+            volume_m3: v * 0.2,
+        });
     }
 
     let mut flora = Flora::new(FloraConfig::default());
-    for (x, z, species) in
-        [(14i64, 2u32, Species::Bloomcrown), (2, 1, Species::Umbrellafrond)]
-    {
+    for (x, z, species) in [
+        (14i64, 2u32, Species::Bloomcrown),
+        (2, 1, Species::Umbrellafrond),
+    ] {
         let wood = flora.config().species(species).wood_max;
-        flora.apply(&world, FloraCommand::Seed { x, z, species, wood });
+        flora.apply(
+            &world,
+            FloraCommand::Seed {
+                x,
+                z,
+                species,
+                wood,
+            },
+        );
     }
     (world, flora)
 }

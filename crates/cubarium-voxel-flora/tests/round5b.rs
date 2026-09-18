@@ -18,7 +18,7 @@
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
 use cubarium_voxel_flora::{
-    Command, Deposit, DepositKind, Flora, FloraConfig, Site, Species, SpeciesConfig, Trophic, DT,
+    Command, DT, Deposit, DepositKind, Flora, FloraConfig, Site, Species, SpeciesConfig, Trophic,
 };
 
 // ------------------------------------------------------------------- fixtures
@@ -28,7 +28,12 @@ use cubarium_voxel_flora::{
 fn fill(w: &mut World, x: i64, y: u32, z: u32, material: Material, pore: f64) {
     let want = pore * material.pore_capacity() * w.config().voxel_volume();
     if want > 0.0 {
-        let got = w.apply(WorldCommand::AddWater { x, y, z, volume_m3: want });
+        let got = w.apply(WorldCommand::AddWater {
+            x,
+            y,
+            z,
+            volume_m3: want,
+        });
         assert!((got - want).abs() < 1e-12, "the void took {got} of {want}");
     }
     w.apply(WorldCommand::SetMaterial { x, y, z, material });
@@ -56,7 +61,12 @@ fn pillars(width: u32, keep: &[i64], pore: f64) -> World {
                 fill(&mut w, x, y, 0, Material::Soil, pore);
             }
         } else {
-            w.apply(WorldCommand::SetMaterial { x, y: 0, z: 0, material: Material::Air });
+            w.apply(WorldCommand::SetMaterial {
+                x,
+                y: 0,
+                z: 0,
+                material: Material::Air,
+            });
             assert!(
                 cubarium_voxel_flora::highest_support(&w.view(), x, 0).is_none(),
                 "({x},0) must be void"
@@ -78,7 +88,12 @@ fn roofed(width: u32, depth: u32) -> World {
             for y in 1..=2 {
                 fill(&mut w, x, y, z, Material::Soil, 0.5);
             }
-            w.apply(WorldCommand::SetMaterial { x, y: 4, z, material: Material::Rock });
+            w.apply(WorldCommand::SetMaterial {
+                x,
+                y: 4,
+                z,
+                material: Material::Rock,
+            });
         }
     }
     w
@@ -105,9 +120,18 @@ fn assert_residuals(flora: &Flora, when: &str) {
         v.mineral() - v.ledger.expected_mineral(),
         v.energy() - v.ledger.expected_energy(),
     );
-    assert!(o.abs() <= 1e-9 * v.organic().abs().max(1.0), "{when}: organic residual {o}");
-    assert!(n.abs() <= 1e-9 * v.mineral().abs().max(1.0), "{when}: mineral residual {n}");
-    assert!(e.abs() <= 1e-9 * v.energy().abs().max(1.0), "{when}: energy residual {e}");
+    assert!(
+        o.abs() <= 1e-9 * v.organic().abs().max(1.0),
+        "{when}: organic residual {o}"
+    );
+    assert!(
+        n.abs() <= 1e-9 * v.mineral().abs().max(1.0),
+        "{when}: mineral residual {n}"
+    );
+    assert!(
+        e.abs() <= 1e-9 * v.energy().abs().max(1.0),
+        "{when}: energy residual {e}"
+    );
 }
 
 /// A config whose glowcap preset is the shipped one unless a test says otherwise, with the
@@ -123,7 +147,15 @@ fn log_on(flora: &mut Flora, site: Site, organic: f64) -> (f64, f64, f64) {
     let sc = flora.config().species(Species::Glowcap).clone();
     let (mineral, energy) = (sc.n_tissue * organic, sc.energy_density * organic);
     assert!(
-        flora.deposit(site, Deposit { kind: DepositKind::DeadWood, organic, mineral, energy }),
+        flora.deposit(
+            site,
+            Deposit {
+                kind: DepositKind::DeadWood,
+                organic,
+                mineral,
+                energy
+            }
+        ),
         "the log was refused at {site:?}"
     );
     (organic, mineral, energy)
@@ -133,9 +165,20 @@ fn log_on(flora: &mut Flora, site: Site, organic: f64) -> (f64, f64, f64) {
 /// size, and exactly `donor_min` for all six presets.
 fn plant_glowcap(flora: &mut Flora, world: &World, x: i64) -> Site {
     let wood = 0.5 * flora.config().species(Species::Glowcap).wood_max;
-    assert!(flora.apply(world, Command::Seed { x, z: 0, species: Species::Glowcap, wood }));
+    assert!(flora.apply(
+        world,
+        Command::Seed {
+            x,
+            z: 0,
+            species: Species::Glowcap,
+            wood
+        }
+    ));
     let site = cubarium_voxel_flora::highest_support(&world.view(), x, 0).expect("a support face");
-    assert_eq!(flora.view().stand_at(site).expect("a founder").species, Species::Glowcap);
+    assert_eq!(
+        flora.view().stand_at(site).expect("a founder").species,
+        Species::Glowcap
+    );
     site
 }
 
@@ -159,8 +202,15 @@ fn a_glowcap_on_a_log_earns_and_one_on_a_bare_face_earns_nothing() {
     let mut world = pillars(6, &[1, 4], 0.5);
     let mut flora = Flora::new(config());
     let sc = flora.config().species(Species::Glowcap).clone();
-    assert_eq!(sc.trophic, Trophic::Saprotroph, "the preset is the thing being tested");
-    assert_eq!(sc.assimilation, 0.0, "a saprotroph fixes nothing from light");
+    assert_eq!(
+        sc.trophic,
+        Trophic::Saprotroph,
+        "the preset is the thing being tested"
+    );
+    assert_eq!(
+        sc.assimilation, 0.0,
+        "a saprotroph fixes nothing from light"
+    );
 
     let fed = plant_glowcap(&mut flora, &world, 1);
     let starved = plant_glowcap(&mut flora, &world, 4);
@@ -181,20 +231,52 @@ fn a_glowcap_on_a_log_earns_and_one_on_a_bare_face_earns_nothing() {
     assert!(uptake(&flora) > 0.0, "nothing left the log for the fungus");
     // The log also decomposes on its own, so what left it is the uptake **and** the
     // `wood_decomposition` of the same 50 ticks: the fungus's share is the smaller.
-    assert!(gone > uptake(&flora), "{gone} left the log against {} eaten", uptake(&flora));
-    assert!(f.wood > w0, "the fed fungus did not grow: {} against {w0}", f.wood);
-    assert!(f.light > 0.0 && f.moisture > 0.0, "the fixture is lit and damp: {f:?}");
+    assert!(
+        gone > uptake(&flora),
+        "{gone} left the log against {} eaten",
+        uptake(&flora)
+    );
+    assert!(
+        f.wood > w0,
+        "the fed fungus did not grow: {} against {w0}",
+        f.wood
+    );
+    assert!(
+        f.light > 0.0 && f.moisture > 0.0,
+        "the fixture is lit and damp: {f:?}"
+    );
 
     // The starved one earns nothing at all under the same sky, and pays maintenance out of
     // its reserve.
-    assert_eq!(dead_wood_at(&flora, starved), 0.0, "the bare face has no log");
-    assert!(s.wood <= w0, "the starved fungus grew on nothing: {} against {w0}", s.wood);
-    assert!(s.reserve < q0, "the starved fungus paid nothing: {} against {q0}", s.reserve);
-    assert!(s.light > 0.0, "the starved stand is in open sky and still earns nothing: {s:?}");
+    assert_eq!(
+        dead_wood_at(&flora, starved),
+        0.0,
+        "the bare face has no log"
+    );
+    assert!(
+        s.wood <= w0,
+        "the starved fungus grew on nothing: {} against {w0}",
+        s.wood
+    );
+    assert!(
+        s.reserve < q0,
+        "the starved fungus paid nothing: {} against {q0}",
+        s.reserve
+    );
+    assert!(
+        s.light > 0.0,
+        "the starved stand is in open sky and still earns nothing: {s:?}"
+    );
 
     // And the light boundary never moved for either of them.
-    assert_eq!(v.ledger.fixed_in, fixed0, "a saprotroph fixed organic matter from light");
-    assert_eq!(v.ledger.light_in, 0.0, "a saprotroph took energy off the light boundary");
+    assert_eq!(
+        v.ledger.fixed_in, fixed0,
+        "a saprotroph fixed organic matter from light"
+    );
+    assert_eq!(
+        v.ledger.light_in, 0.0,
+        "a saprotroph took energy off the light boundary"
+    );
     assert_residuals(&flora, "after 1 s of one fed and one starved fungus");
 }
 
@@ -214,14 +296,31 @@ fn the_uptake_never_exceeds_the_pool_and_stops_when_it_is_empty() {
     let want = sc.substrate_uptake_per_s * 0.5 * sc.wood_max * DT;
     assert!((want - 5e-5).abs() < 1e-18, "the fixture's premise: {want}");
     let (organic, mineral, energy) = log_on(&mut flora, site, 0.5 * want);
-    assert!(organic < want, "the log has to be smaller than one tick's demand");
+    assert!(
+        organic < want,
+        "the log has to be smaller than one tick's demand"
+    );
 
     flora.step(&mut world);
-    assert!((uptake(&flora) - organic).abs() <= 1e-18, "took {} of {organic}", uptake(&flora));
+    assert!(
+        (uptake(&flora) - organic).abs() <= 1e-18,
+        "took {} of {organic}",
+        uptake(&flora)
+    );
     let g = flora.view().ground_at(site).expect("ground").clone();
-    assert_eq!(g.dead_wood, 0.0, "the pool went negative or kept dust: {}", g.dead_wood);
-    assert_eq!(g.dead_wood_mineral, 0.0, "mineral left behind on an empty pool");
-    assert_eq!(g.dead_wood_energy, 0.0, "energy left behind on an empty pool");
+    assert_eq!(
+        g.dead_wood, 0.0,
+        "the pool went negative or kept dust: {}",
+        g.dead_wood
+    );
+    assert_eq!(
+        g.dead_wood_mineral, 0.0,
+        "mineral left behind on an empty pool"
+    );
+    assert_eq!(
+        g.dead_wood_energy, 0.0,
+        "energy left behind on an empty pool"
+    );
     // The mineral that came with the wood is in the fungus and in the site's pool, and
     // nowhere else: `arrived` over what the tissue needed is released to the soil.
     let v = flora.view();
@@ -231,10 +330,17 @@ fn the_uptake_never_exceeds_the_pool_and_stops_when_it_is_empty() {
 
     let after_one = uptake(&flora);
     run(&mut flora, &mut world, 20);
-    assert_eq!(uptake(&flora), after_one, "an empty log went on feeding the fungus");
+    assert_eq!(
+        uptake(&flora),
+        after_one,
+        "an empty log went on feeding the fungus"
+    );
     assert_eq!(dead_wood_at(&flora, site), 0.0);
     assert_residuals(&flora, "after a log was eaten whole");
-    assert!(mineral > 0.0 && energy > 0.0, "the fixture laid a log with substance in it");
+    assert!(
+        mineral > 0.0 && energy > 0.0,
+        "the fixture laid a log with substance in it"
+    );
 }
 
 /// **Mineral is closed while a fungus digests.** It only ever moves between stocks — out of
@@ -260,7 +366,11 @@ fn mineral_runs_from_wood_through_the_fungus_to_litter_and_the_site_pool_and_is_
     let g = v.ground_at(site).expect("ground").clone();
     let stand = *v.stand_at(site).expect("the fungus died");
     // Every link of the chain carries some of it.
-    assert!(g.dead_wood_mineral < log_mineral, "none left the log: {}", g.dead_wood_mineral);
+    assert!(
+        g.dead_wood_mineral < log_mineral,
+        "none left the log: {}",
+        g.dead_wood_mineral
+    );
     assert!(stand.mineral > 0.0, "the mycelium holds none");
     assert!(g.litter_mineral > 0.0, "the caps shed none to litter");
     assert!(g.mineral > 0.0, "nothing reached the soil");
@@ -270,7 +380,11 @@ fn mineral_runs_from_wood_through_the_fungus_to_litter_and_the_site_pool_and_is_
         "total mineral moved from {total0} to {}",
         v.mineral()
     );
-    assert_eq!(v.ledger.expected_mineral(), expected0, "a mineral boundary flow was booked");
+    assert_eq!(
+        v.ledger.expected_mineral(),
+        expected0,
+        "a mineral boundary flow was booked"
+    );
     assert_residuals(&flora, "after 4 s of digestion");
 }
 
@@ -298,9 +412,15 @@ fn a_small_finite_log_empties_and_then_the_reserve_falls() {
         assert!(w[1].0 <= w[0].0, "the pool rose: {:?}", windows);
         assert!(w[1].1 <= w[0].1, "the uptake rose: {:?}", windows);
     }
-    assert_eq!(windows[3].0, 0.0, "the log is not empty at 4 s: {windows:?}");
+    assert_eq!(
+        windows[3].0, 0.0,
+        "the log is not empty at 4 s: {windows:?}"
+    );
     assert_eq!(windows[3].1, 0.0, "the empty log still fed it: {windows:?}");
-    assert!(windows[3].2 < windows[2].2, "the reserve did not fall: {windows:?}");
+    assert!(
+        windows[3].2 < windows[2].2,
+        "the reserve did not fall: {windows:?}"
+    );
     assert_residuals(&flora, "after a small log ran out");
 }
 
@@ -321,22 +441,45 @@ fn germination_needs_a_log_and_never_needs_light() {
     log_on(&mut flora, at(1), 1.0);
 
     let view = world.view();
-    let with_log = flora.view().establishment_gates(&view, at(1), Species::Glowcap);
-    let without = flora.view().establishment_gates(&view, at(4), Species::Glowcap);
+    let with_log = flora
+        .view()
+        .establishment_gates(&view, at(1), Species::Glowcap);
+    let without = flora
+        .view()
+        .establishment_gates(&view, at(4), Species::Glowcap);
     assert!(with_log.passes() && flora.view().can_establish(&view, at(1), Species::Glowcap));
-    assert!(!without.passes(), "a face with no log admitted a spore: {without:?}");
+    assert!(
+        !without.passes(),
+        "a face with no log admitted a spore: {without:?}"
+    );
     assert_eq!(
-        (with_log.pore_ok, with_log.aeration_ok, with_log.depth_ok, with_log.light_ok),
-        (without.pore_ok, without.aeration_ok, without.depth_ok, without.light_ok),
+        (
+            with_log.pore_ok,
+            with_log.aeration_ok,
+            with_log.depth_ok,
+            with_log.light_ok
+        ),
+        (
+            without.pore_ok,
+            without.aeration_ok,
+            without.depth_ok,
+            without.light_ok
+        ),
         "the two faces differ in something other than the substrate"
     );
-    assert!(with_log.substrate_ok && !without.substrate_ok, "{with_log:?} {without:?}");
+    assert!(
+        with_log.substrate_ok && !without.substrate_ok,
+        "{with_log:?} {without:?}"
+    );
     assert!((with_log.dead_wood - 1.0).abs() < 1e-15 && without.dead_wood == 0.0);
     // The light gate is open for a saprotroph whatever the sky says, and the free function
     // that cannot see a log refuses both faces — which is what it is documented to do.
     assert!(with_log.light_ok && without.light_ok);
     let sc = flora.config().species(Species::Glowcap);
-    assert!(!cubarium_voxel_flora::can_establish(&view, at(1), sc), "no substrate, no pass");
+    assert!(
+        !cubarium_voxel_flora::can_establish(&view, at(1), sc),
+        "no substrate, no pass"
+    );
 
     // And in the dark: a roofed site where every plant's light gate shuts — springturf's
     // and even umbrellafrond's, the shade-tolerant one — and the glowcap's does not
@@ -349,12 +492,26 @@ fn germination_needs_a_log_and_never_needs_light() {
     let view = dark.view();
     let turf = cubarium_voxel_flora::establishment_gates(&view, cellar, &config().springturf);
     let frond = cubarium_voxel_flora::establishment_gates(&view, cellar, &config().umbrellafrond);
-    let glow = under.view().establishment_gates(&view, cellar, Species::Glowcap);
-    assert_eq!(glow.sky_visibility, turf.sky_visibility, "one site, one sky");
+    let glow = under
+        .view()
+        .establishment_gates(&view, cellar, Species::Glowcap);
+    assert_eq!(
+        glow.sky_visibility, turf.sky_visibility,
+        "one site, one sky"
+    );
     assert_eq!(turf.sky_visibility, 0.0, "the roof leaks: {turf:?}");
-    assert!(!turf.light_ok && !turf.passes(), "springturf started in the dark: {turf:?}");
-    assert!(!frond.light_ok, "the shade-tolerant plant still wants some sky: {frond:?}");
-    assert!(glow.light_ok && glow.passes(), "the dark shut the fungus out: {glow:?}");
+    assert!(
+        !turf.light_ok && !turf.passes(),
+        "springturf started in the dark: {turf:?}"
+    );
+    assert!(
+        !frond.light_ok,
+        "the shade-tolerant plant still wants some sky: {frond:?}"
+    );
+    assert!(
+        glow.light_ok && glow.passes(),
+        "the dark shut the fungus out: {glow:?}"
+    );
 }
 
 /// **One spore package, one birth, at exactly `alive_min`.** A funded glowcap donor on a
@@ -387,7 +544,15 @@ fn one_spore_package_births_a_glowcap_at_exactly_alive_min_and_only_over_the_sub
         // A **full-grown** donor, so that one tick's whole reserve `reserve_cap · wood_max`
         // is over one package and the parcel fills at once.
         let wood = flora.config().species(Species::Glowcap).wood_max;
-        assert!(flora.apply(&world, Command::Seed { x: 1, z: 0, species: Species::Glowcap, wood }));
+        assert!(flora.apply(
+            &world,
+            Command::Seed {
+                x: 1,
+                z: 0,
+                species: Species::Glowcap,
+                wood
+            }
+        ));
         log_on(&mut flora, at(1), 1.0);
         // Stop on the **birth tick**: the newborn's wood is `alive_min` exactly at the end
         // of the tick it is born in, because growth (phase 6) runs before the seed bank
@@ -405,16 +570,30 @@ fn one_spore_package_births_a_glowcap_at_exactly_alive_min_and_only_over_the_sub
     // The shipped threshold: the recipient's box holds the donor's whole log.
     let (flora, _world, package) = birth(config().glowcap.establish_substrate_min);
     let v = flora.view();
-    assert_eq!(v.ledger.establishments, 1, "no birth in 1 s: {:?}", v.ledger);
-    let born = *v.stand_at(at(2)).expect("nothing stands on the only landing site");
+    assert_eq!(
+        v.ledger.establishments, 1,
+        "no birth in 1 s: {:?}",
+        v.ledger
+    );
+    let born = *v
+        .stand_at(at(2))
+        .expect("nothing stands on the only landing site");
     assert_eq!(born.species, Species::Glowcap);
-    assert_eq!(born.wood, config().glowcap.alive_min, "born with {} of wood", born.wood);
+    assert_eq!(
+        born.wood,
+        config().glowcap.alive_min,
+        "born with {} of wood",
+        born.wood
+    );
     assert!(
         (born.organic() - package).abs() <= 1e-16,
         "born holding {} of a {package} package",
         born.organic()
     );
-    assert!(born.foliage > 0.0 && born.reserve > 0.0 && born.mineral > 0.0, "{born:?}");
+    assert!(
+        born.foliage > 0.0 && born.reserve > 0.0 && born.mineral > 0.0,
+        "{born:?}"
+    );
     assert!(v.ledger.propagule_landed[Species::Glowcap.index()] > 0.0);
     assert_residuals(&flora, "after a paid glowcap birth");
     // The only face inside `hop` 1 is the one it landed on, so the landing is geometry and
@@ -424,10 +603,17 @@ fn one_spore_package_births_a_glowcap_at_exactly_alive_min_and_only_over_the_sub
     // germinates. Nothing else differs.
     let (refused, _world, _) = birth(10.0);
     let v = refused.view();
-    assert_eq!(v.ledger.establishments, 0, "a spore germinated over too little wood");
-    assert!(v.stand_at(at(2)).is_none(), "something stands on the refused face");
+    assert_eq!(
+        v.ledger.establishments, 0,
+        "a spore germinated over too little wood"
+    );
     assert!(
-        v.ground_at(at(2)).is_some_and(|g| g.seed_organic(Species::Glowcap) > 0.0),
+        v.stand_at(at(2)).is_none(),
+        "something stands on the refused face"
+    );
+    assert!(
+        v.ground_at(at(2))
+            .is_some_and(|g| g.seed_organic(Species::Glowcap) > 0.0),
         "the package never landed, so the refusal says nothing"
     );
     assert_residuals(&refused, "after a refused glowcap germination");
@@ -450,9 +636,19 @@ fn a_dead_wood_deposit_joins_the_pool_and_decomposes_at_the_wood_rate() {
     let (organic, mineral, energy) = log_on(&mut flora, site, 0.4);
 
     let v = flora.view();
-    let g = v.ground_at(site).expect("the deposit provisioned no ground").clone();
-    assert_eq!((g.dead_wood, g.dead_wood_mineral, g.dead_wood_energy), (organic, mineral, energy));
-    assert_eq!((g.litter, g.carrion), (0.0, 0.0), "a log is neither litter nor a corpse");
+    let g = v
+        .ground_at(site)
+        .expect("the deposit provisioned no ground")
+        .clone();
+    assert_eq!(
+        (g.dead_wood, g.dead_wood_mineral, g.dead_wood_energy),
+        (organic, mineral, energy)
+    );
+    assert_eq!(
+        (g.litter, g.carrion),
+        (0.0, 0.0),
+        "a log is neither litter nor a corpse"
+    );
     assert_eq!(v.ledger.deposited_organic_in, organic);
     assert_eq!(v.ledger.deposited_mineral_in, mineral);
     assert_eq!(v.ledger.deposited_energy_in, energy);
@@ -464,8 +660,14 @@ fn a_dead_wood_deposit_joins_the_pool_and_decomposes_at_the_wood_rate() {
     let v = flora.view();
     let g = v.ground_at(site).expect("ground").clone();
     let gone = organic - g.dead_wood;
-    assert!((gone - 1.0 * DT * organic).abs() < 1e-15, "{gone} of {organic} in one tick");
-    assert!((v.ledger.respired_out - gone).abs() < 1e-15, "the wood was not respired");
+    assert!(
+        (gone - 1.0 * DT * organic).abs() < 1e-15,
+        "{gone} of {organic} in one tick"
+    );
+    assert!(
+        (v.ledger.respired_out - gone).abs() < 1e-15,
+        "the wood was not respired"
+    );
     // Mineral to the soil at the stock's own fraction, energy to heat at its own density.
     assert!((g.mineral - flora.config().initial_mineral - mineral * DT).abs() < 1e-15);
     assert!((v.ledger.heat_out - energy * DT).abs() < 1e-15);
@@ -488,12 +690,20 @@ fn a_dead_wood_deposit_joins_the_pool_and_decomposes_at_the_wood_rate() {
 fn validate_covers_the_three_new_fields() {
     let config = config();
     config.validate().expect("the shipped config");
-    config.glowcap.validate("glowcap").expect("the shipped glowcap");
+    config
+        .glowcap
+        .validate("glowcap")
+        .expect("the shipped glowcap");
     assert_eq!(config.glowcap.trophic, Trophic::Saprotroph);
     for species in Species::ALL {
         let sc = config.species(species);
         let is_fungus = sc.trophic == Trophic::Saprotroph;
-        assert_eq!(is_fungus, species == Species::Glowcap, "{} is the wrong mode", species.name());
+        assert_eq!(
+            is_fungus,
+            species == Species::Glowcap,
+            "{} is the wrong mode",
+            species.name()
+        );
         // The five plants carry the three numbers inert and at zero, so switching one to a
         // saprotroph cannot silently inherit a rate.
         if !is_fungus {
@@ -504,29 +714,46 @@ fn validate_covers_the_three_new_fields() {
     }
 
     for (what, mutate) in [
-        ("substrate_yield", (|sc: &mut SpeciesConfig| sc.substrate_yield = 1.5) as fn(&mut _)),
-        ("substrate_yield", |sc: &mut SpeciesConfig| sc.substrate_yield = -0.1),
-        ("substrate_yield", |sc: &mut SpeciesConfig| sc.substrate_yield = f64::NAN),
-        ("substrate_uptake_per_s", |sc: &mut SpeciesConfig| sc.substrate_uptake_per_s = f64::NAN),
-        ("substrate_uptake_per_s", |sc: &mut SpeciesConfig| sc.substrate_uptake_per_s = -1.0),
-        ("establish_substrate_min", |sc: &mut SpeciesConfig| sc.establish_substrate_min = -1.0),
         (
-            "establish_substrate_min",
-            |sc: &mut SpeciesConfig| sc.establish_substrate_min = f64::INFINITY,
+            "substrate_yield",
+            (|sc: &mut SpeciesConfig| sc.substrate_yield = 1.5) as fn(&mut _),
         ),
+        ("substrate_yield", |sc: &mut SpeciesConfig| {
+            sc.substrate_yield = -0.1
+        }),
+        ("substrate_yield", |sc: &mut SpeciesConfig| {
+            sc.substrate_yield = f64::NAN
+        }),
+        ("substrate_uptake_per_s", |sc: &mut SpeciesConfig| {
+            sc.substrate_uptake_per_s = f64::NAN
+        }),
+        ("substrate_uptake_per_s", |sc: &mut SpeciesConfig| {
+            sc.substrate_uptake_per_s = -1.0
+        }),
+        ("establish_substrate_min", |sc: &mut SpeciesConfig| {
+            sc.establish_substrate_min = -1.0
+        }),
+        ("establish_substrate_min", |sc: &mut SpeciesConfig| {
+            sc.establish_substrate_min = f64::INFINITY
+        }),
     ] {
         let mut broken = config.clone();
         mutate(broken.species_mut(Species::Glowcap));
         let e = broken.validate().expect_err("a broken {what} was accepted");
         assert!(e.contains("glowcap") && e.contains(what), "{e}");
-        assert!(Flora::try_new(broken).is_err(), "a broken config reached a tick");
+        assert!(
+            Flora::try_new(broken).is_err(),
+            "a broken config reached a tick"
+        );
     }
 
     // A zero-income saprotroph is a legal frozen fixture, not a refusal.
     let mut frozen = config.clone();
     frozen.glowcap.substrate_uptake_per_s = 0.0;
     frozen.glowcap.substrate_yield = 0.0;
-    frozen.validate().expect("a frozen fungus is a valid preset");
+    frozen
+        .validate()
+        .expect("a frozen fungus is a valid preset");
 }
 
 /// The glowcap's own shape, in the model rather than in the picture: **one crown cell at
@@ -566,7 +793,15 @@ fn pruning_an_unsupported_site_books_out_its_carrion() {
     let mut flora = Flora::new(config());
     let site = at(1);
     let (organic, mineral, energy) = (0.4, 0.012, 0.9);
-    assert!(flora.deposit(site, Deposit { kind: DepositKind::Carrion, organic, mineral, energy }));
+    assert!(flora.deposit(
+        site,
+        Deposit {
+            kind: DepositKind::Carrion,
+            organic,
+            mineral,
+            energy
+        }
+    ));
     let pool = flora.view().ground_at(site).expect("provisioned").mineral;
     assert_residuals(&flora, "after a carrion deposit");
 
@@ -574,17 +809,40 @@ fn pruning_an_unsupported_site_books_out_its_carrion() {
     // gone with it. (The column's bedrock is still there, so the *column* has a support
     // face lower down; what the site lost is its own.)
     for y in 1..=2 {
-        world.apply(WorldCommand::SetMaterial { x: 1, y, z: 0, material: Material::Air });
+        world.apply(WorldCommand::SetMaterial {
+            x: 1,
+            y,
+            z: 0,
+            material: Material::Air,
+        });
     }
-    assert!(!world.view().is_support(1, 2, 0), "the face is still a support");
+    assert!(
+        !world.view().is_support(1, 2, 0),
+        "the face is still a support"
+    );
     flora.step(&mut world);
 
     let v = flora.view();
-    assert!(v.ground_at(site).is_none(), "the site survived losing its support");
-    assert_eq!(v.ledger.removed_organic_out, organic, "the carrion was not booked out");
-    assert_eq!(v.ledger.removed_mineral_out, mineral + pool, "with the soluble pool");
+    assert!(
+        v.ground_at(site).is_none(),
+        "the site survived losing its support"
+    );
+    assert_eq!(
+        v.ledger.removed_organic_out, organic,
+        "the carrion was not booked out"
+    );
+    assert_eq!(
+        v.ledger.removed_mineral_out,
+        mineral + pool,
+        "with the soluble pool"
+    );
     assert_eq!(v.ledger.removed_energy_out, energy);
-    assert_eq!(v.organic(), 0.0, "something is still standing: {:?}", v.stands);
+    assert_eq!(
+        v.organic(),
+        0.0,
+        "something is still standing: {:?}",
+        v.stands
+    );
     assert_residuals(&flora, "after the support was taken away");
 }
 
@@ -593,19 +851,37 @@ fn pruning_an_unsupported_site_books_out_its_carrion() {
 /// which is what its own doc promises. All three kinds, and all three residuals.
 #[test]
 fn a_deposit_on_a_site_with_no_support_is_booked_out_by_the_next_tick() {
-    for kind in [DepositKind::Carrion, DepositKind::Litter, DepositKind::DeadWood] {
+    for kind in [
+        DepositKind::Carrion,
+        DepositKind::Litter,
+        DepositKind::DeadWood,
+    ] {
         let mut world = pillars(4, &[1], 0.5);
         let mut flora = Flora::new(config());
         // A site in the void: `pillars` left column 2 with nothing solid at all.
         let nowhere = Site { x: 2, y: 2, z: 0 };
         assert!(cubarium_voxel_flora::highest_support(&world.view(), 2, 0).is_none());
         let (organic, mineral, energy) = (0.4, 0.012, 0.9);
-        assert!(flora.deposit(nowhere, Deposit { kind, organic, mineral, energy }), "{kind:?}");
+        assert!(
+            flora.deposit(
+                nowhere,
+                Deposit {
+                    kind,
+                    organic,
+                    mineral,
+                    energy
+                }
+            ),
+            "{kind:?}"
+        );
         assert_residuals(&flora, "after a deposit into the void");
 
         flora.step(&mut world);
         let v = flora.view();
-        assert!(v.ground_at(nowhere).is_none(), "{kind:?}: the void site survived");
+        assert!(
+            v.ground_at(nowhere).is_none(),
+            "{kind:?}: the void site survived"
+        );
         assert_eq!(v.ledger.removed_organic_out, organic, "{kind:?}");
         assert_eq!(
             v.ledger.removed_mineral_out,
@@ -635,24 +911,44 @@ fn a_deposit_on_a_site_with_no_support_is_booked_out_by_the_next_tick() {
 /// them. Both for all three kinds, with the pools left empty.
 #[test]
 fn a_zero_organic_deposit_credits_the_pool_and_the_heat_at_once() {
-    for kind in [DepositKind::Carrion, DepositKind::Litter, DepositKind::DeadWood] {
+    for kind in [
+        DepositKind::Carrion,
+        DepositKind::Litter,
+        DepositKind::DeadWood,
+    ] {
         let mut world = pillars(4, &[1], 0.5);
         let mut flora = Flora::new(config());
         let site = at(1);
         let (mineral, energy) = (0.02, 0.4);
         assert!(
-            flora.deposit(site, Deposit { kind, organic: 0.0, mineral, energy }),
+            flora.deposit(
+                site,
+                Deposit {
+                    kind,
+                    organic: 0.0,
+                    mineral,
+                    energy
+                }
+            ),
             "{kind:?}: a consumer with only mineral left was refused"
         );
         let v = flora.view();
         let g = v.ground_at(site).expect("provisioned").clone();
-        assert_eq!((g.litter, g.dead_wood, g.carrion), (0.0, 0.0, 0.0), "{kind:?}: a pool");
+        assert_eq!(
+            (g.litter, g.dead_wood, g.carrion),
+            (0.0, 0.0, 0.0),
+            "{kind:?}: a pool"
+        );
         assert_eq!(
             (g.litter_mineral, g.dead_wood_mineral, g.carrion_mineral),
             (0.0, 0.0, 0.0),
             "{kind:?}: mineral stranded in a pool that can never release it"
         );
-        assert_eq!(g.mineral, flora.config().initial_mineral + mineral, "{kind:?}");
+        assert_eq!(
+            g.mineral,
+            flora.config().initial_mineral + mineral,
+            "{kind:?}"
+        );
         assert_eq!(v.ledger.heat_out, energy, "{kind:?}");
         assert_eq!(v.ledger.deposited_mineral_in, mineral, "{kind:?}");
         assert_eq!(v.ledger.deposited_energy_in, energy, "{kind:?}");
@@ -662,7 +958,10 @@ fn a_zero_organic_deposit_credits_the_pool_and_the_heat_at_once() {
         // And it stays settled: nothing about it moves again.
         run(&mut flora, &mut world, 5);
         let v = flora.view();
-        assert_eq!(v.ground_at(site).expect("ground").mineral, flora.config().initial_mineral + mineral);
+        assert_eq!(
+            v.ground_at(site).expect("ground").mineral,
+            flora.config().initial_mineral + mineral
+        );
         assert_eq!(v.ledger.heat_out, energy, "{kind:?}");
         assert_residuals(&flora, "five ticks after a zero-organic deposit");
     }
@@ -703,13 +1002,23 @@ fn decomposition_delays_organic_matter_and_not_the_mineral_of_a_mixed_pool() {
     // inter-tick so that it is in the next tick's snapshot.
     assert!(flora.deposit(
         site,
-        Deposit { kind: DepositKind::Litter, organic: 1.0, mineral: 0.0, energy: 0.0 }
+        Deposit {
+            kind: DepositKind::Litter,
+            organic: 1.0,
+            mineral: 0.0,
+            energy: 0.0
+        }
     ));
     // The fresh unit: a founder at wood 0.5 sheds `alpha · W` = 1.0 of foliage this tick,
     // and the fraction rule sends `n_tissue · 1.0` = 1.0 of mineral with it.
     assert!(flora.apply(
         &world,
-        Command::Seed { x: 1, z: 0, species: Species::Bloomcrown, wood: 0.5 }
+        Command::Seed {
+            x: 1,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.5
+        }
     ));
     let pool0 = flora.view().ground_at(site).expect("ground").mineral;
     assert_eq!(pool0, initial_mineral, "the fixture's premise");
@@ -728,7 +1037,11 @@ fn decomposition_delays_organic_matter_and_not_the_mineral_of_a_mixed_pool() {
         g.mineral,
         pool0 + 0.25
     );
-    assert!((g.litter_mineral - 0.75).abs() < 1e-12, "litter mineral {}", g.litter_mineral);
+    assert!(
+        (g.litter_mineral - 0.75).abs() < 1e-12,
+        "litter mineral {}",
+        g.litter_mineral
+    );
     assert_residuals(&flora, "after one mixed-density decomposition step");
 }
 
@@ -741,7 +1054,15 @@ fn decomposition_delays_organic_matter_and_not_the_mineral_of_a_mixed_pool() {
 fn log_with(flora: &mut Flora, site: Site, organic: f64, mineral: f64) -> (f64, f64, f64) {
     let energy = flora.config().species(Species::Glowcap).energy_density * organic;
     assert!(
-        flora.deposit(site, Deposit { kind: DepositKind::DeadWood, organic, mineral, energy }),
+        flora.deposit(
+            site,
+            Deposit {
+                kind: DepositKind::DeadWood,
+                organic,
+                mineral,
+                energy
+            }
+        ),
         "the log was refused at {site:?}"
     );
     (organic, mineral, energy)
@@ -778,9 +1099,19 @@ fn a_mineral_free_log_pays_the_upkeep_and_builds_nothing() {
     let (organic, _, energy) = log_with(&mut flora, site, 1.0, 0.0);
     let sc = flora.config().species(Species::Glowcap).clone();
     let before = flora.view().stand_at(site).expect("the founder").clone();
-    assert_eq!((before.wood, before.foliage, before.reserve), (0.05, 0.1, 0.025));
-    assert!(before.mineral > 0.0, "a founder arrives with its own tissue mineral");
-    assert_eq!(flora.view().ground_at(site).expect("ground").mineral, 0.0, "a bare pool");
+    assert_eq!(
+        (before.wood, before.foliage, before.reserve),
+        (0.05, 0.1, 0.025)
+    );
+    assert!(
+        before.mineral > 0.0,
+        "a founder arrives with its own tissue mineral"
+    );
+    assert_eq!(
+        flora.view().ground_at(site).expect("ground").mineral,
+        0.0,
+        "a bare pool"
+    );
 
     flora.step(&mut world);
 
@@ -789,11 +1120,18 @@ fn a_mineral_free_log_pays_the_upkeep_and_builds_nothing() {
     let g = v.ground_at(site).expect("ground").clone();
     // What it ate: the rate on a full-moisture box, and the log still holds the rest.
     let want = sc.substrate_uptake_per_s * before.wood * 1.0 * DT;
-    assert!((uptake(&flora) - want).abs() <= 1e-15 * want, "it took {} of {want}", uptake(&flora));
+    assert!(
+        (uptake(&flora) - want).abs() <= 1e-15 * want,
+        "it took {} of {want}",
+        uptake(&flora)
+    );
     assert!((g.dead_wood - (organic - want)).abs() < 1e-15);
     // And what it built: nothing at all, in any of the three tissues.
     assert_eq!(after.wood, before.wood, "no wood was built");
-    assert_eq!(after.reserve, before.reserve, "the income paid the upkeep, the reserve did not");
+    assert_eq!(
+        after.reserve, before.reserve,
+        "the income paid the upkeep, the reserve did not"
+    );
     assert!(after.foliage < before.foliage, "the caps only senesced");
     let shed = sc.senescence * before.foliage * DT;
     assert!((after.foliage - (before.foliage - shed)).abs() <= 1e-15 * before.foliage);
@@ -840,20 +1178,33 @@ fn a_partly_mineralised_log_builds_exactly_what_its_mineral_funds() {
         assert_residuals(&flora, "one tick on a partly mineralised log");
         let v = flora.view();
         let g = v.ground_at(site).expect("ground").clone();
-        (v.stand_at(site).expect("the founder").wood - w0, g.mineral, mineral - g.dead_wood_mineral)
+        (
+            v.stand_at(site).expect("the founder").wood - w0,
+            g.mineral,
+            mineral - g.dead_wood_mineral,
+        )
     }
 
     let sc = FloraConfig::default().species(Species::Glowcap).clone();
     let d_w = (sc.wood_rate * 0.05 * DT).min(sc.wood_max - 0.05);
-    assert!((d_w - 5e-6).abs() <= 1e-15 * 5e-6, "the tick's wood demand is {d_w}");
+    assert!(
+        (d_w - 5e-6).abs() <= 1e-15 * 5e-6,
+        "the tick's wood demand is {d_w}"
+    );
 
     // Over-funded: a dead trunk's own density. The wood is the rate's own demand, and the
     // mineral the tissue did not need went to the site's pool.
     let (dw_full, pool_full, arrived_full) = one_tick(sc.n_tissue * 1.0);
     // The tolerances are relative because both numbers are differences of stocks a
     // thousand times their own size: `0.050005 - 0.05` carries an ulp of 0.05 with it.
-    assert!((dw_full - d_w).abs() <= 1e-9 * d_w, "the full log built {dw_full} of {d_w}");
-    assert!((arrived_full - 1e-6).abs() <= 1e-9 * 1e-6, "arrived {arrived_full}");
+    assert!(
+        (dw_full - d_w).abs() <= 1e-9 * d_w,
+        "the full log built {dw_full} of {d_w}"
+    );
+    assert!(
+        (arrived_full - 1e-6).abs() <= 1e-9 * 1e-6,
+        "arrived {arrived_full}"
+    );
     let need_full = sc.n_tissue * dw_full;
     assert!(
         (pool_full - (arrived_full - need_full)).abs() <= 1e-9 * (arrived_full - need_full),
@@ -865,13 +1216,19 @@ fn a_partly_mineralised_log_builds_exactly_what_its_mineral_funds() {
     // Half-funded: a log at 0.001 of mineral per unit, a twentieth of a trunk's density,
     // so the tick's arrival is 5e-8 and pays for 2.5e-6 of wood exactly.
     let (dw_half, pool_half, arrived_half) = one_tick(0.001);
-    assert!((arrived_half - 5e-8).abs() <= 1e-9 * 5e-8, "arrived {arrived_half}");
+    assert!(
+        (arrived_half - 5e-8).abs() <= 1e-9 * 5e-8,
+        "arrived {arrived_half}"
+    );
     assert!(
         (dw_half - arrived_half / sc.n_tissue).abs() <= 1e-9 * dw_half,
         "it built {dw_half}, and its mineral funds {}",
         arrived_half / sc.n_tissue
     );
-    assert!((dw_half - 0.5 * dw_full).abs() <= 1e-9 * dw_full, "half the mineral, half the wood");
+    assert!(
+        (dw_half - 0.5 * dw_full).abs() <= 1e-9 * dw_full,
+        "half the mineral, half the wood"
+    );
     // Nothing is left over and nothing is drawn: the arrival was spent exactly.
     assert_eq!(pool_half, 0.0, "the pool neither gained nor could give");
 }
@@ -896,7 +1253,12 @@ fn terraces(width: u32, tops: &[(i64, u32)], pore: f64) -> World {
                 );
             }
             None => {
-                w.apply(WorldCommand::SetMaterial { x, y: 0, z: 0, material: Material::Air });
+                w.apply(WorldCommand::SetMaterial {
+                    x,
+                    y: 0,
+                    z: 0,
+                    material: Material::Air,
+                });
                 assert!(
                     cubarium_voxel_flora::highest_support(&w.view(), x, 0).is_none(),
                     "({x},0) must be void"
@@ -928,8 +1290,14 @@ fn substrate_access_reaches_one_row_up_and_one_row_down() {
     let (organic, _, _) = log_on(&mut flora, face(3, 2), 1.0);
     log_on(&mut flora, face(7, 2), 1.0);
     let sc = flora.config().species(Species::Glowcap).clone();
-    assert_eq!(sc.substrate_reach_up_down, 1, "the placeholder this case is about");
-    assert!(organic > sc.establish_substrate_min, "a log is more than the gate asks for");
+    assert_eq!(
+        sc.substrate_reach_up_down, 1,
+        "the placeholder this case is about"
+    );
+    assert!(
+        organic > sc.establish_substrate_min,
+        "a log is more than the gate asks for"
+    );
 
     let v = flora.view();
     let view = world.view();
@@ -951,7 +1319,10 @@ fn substrate_access_reaches_one_row_up_and_one_row_down() {
         (face(5, 2), "level with a log two columns away"),
     ] {
         let g = v.establishment_gates(&view, site, Species::Glowcap);
-        assert_eq!(g.dead_wood, 0.0, "{what} {site:?} is genuinely substrate-free");
+        assert_eq!(
+            g.dead_wood, 0.0,
+            "{what} {site:?} is genuinely substrate-free"
+        );
         assert!(!g.substrate_ok, "{what}: the substrate gate is what shuts");
         assert!(
             g.pore_ok && g.aeration_ok && g.depth_ok && g.light_ok,
@@ -961,5 +1332,8 @@ fn substrate_access_reaches_one_row_up_and_one_row_down() {
     }
     // And the box is the substrate's own geometry, not the water's: `rooting_depth` is
     // untouched, so the soil-water reading of the one-row-up face is still its own row.
-    assert_eq!(sc.rooting_depth, 1, "the soil-water box was not widened to do this");
+    assert_eq!(
+        sc.rooting_depth, 1,
+        "the soil-water box was not widened to do this"
+    );
 }

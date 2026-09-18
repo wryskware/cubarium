@@ -39,7 +39,6 @@
 //! cargo run --release -p cubarium-core --example food_stock_flow
 //! ```
 
-use cubarium_surface::{Scale, Topology};
 use cubarium_core::config::WorldConfig;
 use cubarium_core::genome::{Genome, decode};
 use cubarium_core::ids::OrganismId;
@@ -47,6 +46,7 @@ use cubarium_core::organism::{Mode, Organism, Origin};
 use cubarium_core::rng::Counter;
 use cubarium_core::{DT, IntakeDiagnostics, World};
 use cubarium_surface::{CellId, Face, SurfacePoint, Vec2, cell_of};
+use cubarium_surface::{Scale, Topology};
 
 /// Ticks per arm. 12,000 at 20 Hz is ten minutes of world time — the handoff's ceiling.
 const TICKS: u64 = 12_000;
@@ -86,7 +86,16 @@ fn main() {
     println!("## Summary at tick {TICKS}  (material units; 12,000 ticks = 600 s of world time)");
     println!(
         "{:<12} {:>6} {:>8} {:>9} {:>9} {:>9} {:>9} {:>8} {:>7} {:>7} {:>16}",
-        "arm", "n", "P_end", "grown", "eaten_P", "eaten_D", "per-head", "served%", "below%", "sat%",
+        "arm",
+        "n",
+        "P_end",
+        "grown",
+        "eaten_P",
+        "eaten_D",
+        "per-head",
+        "served%",
+        "below%",
+        "sat%",
         "starved at tick"
     );
     for r in &finals {
@@ -107,7 +116,11 @@ fn main() {
             r.served_percent(),
             r.below_percent(),
             r.saturated_percent(),
-            if starved.is_empty() { "-".to_string() } else { starved.join(",") },
+            if starved.is_empty() {
+                "-".to_string()
+            } else {
+                starved.join(",")
+            },
         );
     }
 
@@ -123,7 +136,10 @@ fn main() {
         "- Undisturbed patch: P {:.4} -> {:.4} m standing, gross production {:.4} m over {horizon:.0} s \
          ({:.3e} m/s mean). Nothing was eaten, so the difference between production and standing \
          stock is mortality into detritus.",
-        undisturbed.p_start, undisturbed.p_end, undisturbed.grown, undisturbed.grown / horizon,
+        undisturbed.p_start,
+        undisturbed.p_end,
+        undisturbed.grown,
+        undisturbed.grown / horizon,
     );
     if let Some(t) = one.feeding_ticks() {
         let fed = t as f64 * DT;
@@ -189,8 +205,7 @@ fn main() {
          only {:.4} m was edible (D_eff = D · min(1, rho/e_r)). Detritus was never above \
          feed_min as *edible* material, so the scavenging gate never opened and eaten_D is zero \
          — a quality refusal, not an absence of matter.",
-        one.d_end,
-        one.d_eff_end,
+        one.d_end, one.d_eff_end,
     );
     println!(
         "- Unreachable food: none by construction. Every other cell was emptied, so nothing in \
@@ -200,11 +215,19 @@ fn main() {
 
     println!();
     println!("## Not measured here (censored, not extrapolated)");
-    println!("- Anything after a consumer starved: each arm's intake horizon is its own, listed above.");
-    println!("- Fruit as a channel: F stayed at 0 in every consumed arm, so no frugivory rate was observed.");
-    println!("- Scavenging rate: the gate never opened, so no detritus intake rate exists to report.");
+    println!(
+        "- Anything after a consumer starved: each arm's intake horizon is its own, listed above."
+    );
+    println!(
+        "- Fruit as a channel: F stayed at 0 in every consumed arm, so no frugivory rate was observed."
+    );
+    println!(
+        "- Scavenging rate: the gate never opened, so no detritus intake rate exists to report."
+    );
     println!("- Whether a *moving* animal would do better: the fixture pins every body in place.");
-    println!("- Multi-cell patches, nutrient limitation at other light levels, and any other config.");
+    println!(
+        "- Multi-cell patches, nutrient limitation at other light levels, and any other config."
+    );
     println!();
     println!("# wall time {:.1} s", started.elapsed().as_secs_f64());
 }
@@ -285,14 +308,19 @@ fn run(name: &'static str, consumers: usize, cease: bool) -> Report {
     strip_to_patch(&mut world);
     let placed: Vec<OrganismId> = (0..consumers).map(|i| place(&mut world, i)).collect();
     let mut world = World::from_state(world.state).expect("the staged state is a valid world");
-    world.check_invariants().expect("the staged world is consistent");
+    world
+        .check_invariants()
+        .expect("the staged world is consistent");
 
     println!();
-    println!("## arm `{name}`  consumers {consumers}{}", if cease {
-        format!("  (removed at tick {CEASE_TICK})")
-    } else {
-        String::new()
-    });
+    println!(
+        "## arm `{name}`  consumers {consumers}{}",
+        if cease {
+            format!("  (removed at tick {CEASE_TICK})")
+        } else {
+            String::new()
+        }
+    );
     println!(
         "{:>7} {:>9} {:>9} {:>9} {:>9} {:>9} {:>10} {:>10} {:>10} {:>9}",
         "tick", "P", "F", "D_eff", "N", "De/D", "grown", "eaten_P", "eaten_D", "reserve"
@@ -466,7 +494,11 @@ fn place(world: &mut World, nth: usize) -> OrganismId {
     // what feeding reads.
     let offset = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)][nth % 4];
     let pos = SurfacePoint::new(Face::Top, centre.u + offset.0, centre.v + offset.1);
-    assert_eq!(cell_of(Topology::Cube, Scale::ONE, &pos), patch(), "consumer {nth} landed outside the patch");
+    assert_eq!(
+        cell_of(Topology::Cube, Scale::ONE, &pos),
+        patch(),
+        "consumer {nth} landed outside the patch"
+    );
     let structure = phenotype.structure_adult;
     let reserve = 0.5 * phenotype.reserve_max;
     let organism = Organism {

@@ -35,12 +35,34 @@ fn column_world(height: u32, porosity: f64, head_m: f64) -> World {
 fn wet_soil(w: &mut World, x: i64, y: u32, z: u32, pore: f64) {
     let cap = Material::Soil.pore_capacity() * w.config().voxel_volume();
     if pore > 0.0 {
-        let got = w.apply(Command::AddWater { x, y, z, volume_m3: pore * cap });
-        assert!((got - pore * cap).abs() < 1e-12, "the void took {got} of {}", pore * cap);
+        let got = w.apply(Command::AddWater {
+            x,
+            y,
+            z,
+            volume_m3: pore * cap,
+        });
+        assert!(
+            (got - pore * cap).abs() < 1e-12,
+            "the void took {got} of {}",
+            pore * cap
+        );
     }
-    w.apply(Command::SetMaterial { x, y, z, material: Material::Soil });
-    assert!((w.view().pore_at(x, y, z) - pore).abs() < 1e-12, "{}", w.view().pore_at(x, y, z));
-    assert_eq!(w.view().free_at(x, y, z), 0.0, "nothing may be left standing");
+    w.apply(Command::SetMaterial {
+        x,
+        y,
+        z,
+        material: Material::Soil,
+    });
+    assert!(
+        (w.view().pore_at(x, y, z) - pore).abs() < 1e-12,
+        "{}",
+        w.view().pore_at(x, y, z)
+    );
+    assert_eq!(
+        w.view().free_at(x, y, z),
+        0.0,
+        "nothing may be left standing"
+    );
 }
 
 fn residual(w: &World) -> f64 {
@@ -79,18 +101,30 @@ fn table_column(pore1: f64, pore2: f64, head_m: f64) -> World {
 fn a_permeable_voxel_just_above_the_head_is_not_saturated() {
     // Head 1.9 m: `y = 1`'s centre (1.5) is under it, `y = 2`'s (2.5) is not.
     let mut w = table_column(0.0, Material::Soil.field_capacity(), 1.9);
-    assert!((w.aquifer_head_m() - 1.9).abs() < 1e-12, "head {}", w.aquifer_head_m());
+    assert!(
+        (w.aquifer_head_m() - 1.9).abs() < 1e-12,
+        "head {}",
+        w.aquifer_head_m()
+    );
     run(&mut w, 200);
 
     let v = w.view();
-    assert!(v.pore_at(0, 1, 0) > 0.999, "the voxel under the head is at {}", v.pore_at(0, 1, 0));
+    assert!(
+        v.pore_at(0, 1, 0) > 0.999,
+        "the voxel under the head is at {}",
+        v.pore_at(0, 1, 0)
+    );
     assert_eq!(
         v.pore_at(0, 2, 0),
         Material::Soil.field_capacity(),
         "the voxel above the head took water from the table"
     );
     // And the head is still where it was put, to a millimetre: the fixture's premise.
-    assert!((w.aquifer_head_m() - 1.9).abs() < 1e-3, "head {}", w.aquifer_head_m());
+    assert!(
+        (w.aquifer_head_m() - 1.9).abs() < 1e-3,
+        "head {}",
+        w.aquifer_head_m()
+    );
     assert!(residual(&w).abs() < 1e-9, "{}", residual(&w));
 }
 
@@ -115,7 +149,12 @@ fn seepage_stops_exactly_at_the_head() {
     // its own height.
     let mut w = table_column(0.0, 0.0, 2.3);
     // `y = 2` is soil in `table_column`; this fixture wants it void, so dig it back out.
-    w.apply(Command::SetMaterial { x: 0, y: 2, z: 0, material: Material::Air });
+    w.apply(Command::SetMaterial {
+        x: 0,
+        y: 2,
+        z: 0,
+        material: Material::Air,
+    });
     for tick in 0..400 {
         let level = w.aquifer_head_m() - 2.0;
         let before = w.view().free_at(0, 2, 0);
@@ -136,23 +175,44 @@ fn seepage_stops_exactly_at_the_head() {
         / (w.config().width as f64 * w.config().depth as f64 * w.config().cell_area() * 1000.0);
     let level = w.aquifer_head_m() - 2.0;
     let free = w.view().free_at(0, 2, 0);
-    assert!(w.view().pore_at(0, 1, 0) > 0.999, "the ground under the pond is not saturated");
+    assert!(
+        w.view().pore_at(0, 1, 0) > 0.999,
+        "the ground under the pond is not saturated"
+    );
     assert!(
         free - level <= one_transfer_m && free >= level,
         "the settled pond is at {free} against a table at {level}: not within the {one_transfer_m} \
          of head that one transfer costs"
     );
-    assert_eq!(w.view().free_at(0, 3, 0), 0.0, "and nothing above the table's own cell");
+    assert_eq!(
+        w.view().free_at(0, 3, 0),
+        0.0,
+        "and nothing above the table's own cell"
+    );
     assert!(residual(&w).abs() < 1e-9, "{}", residual(&w));
 
     // A cell already holding more than the table's level takes nothing: not a drop, and
     // not a drop back either, since the saturated ground below has no room for it.
     let mut w = table_column(1.0, 0.0, 2.3);
-    w.apply(Command::SetMaterial { x: 0, y: 2, z: 0, material: Material::Air });
-    w.apply(Command::AddWater { x: 0, y: 2, z: 0, volume_m3: 0.6 });
+    w.apply(Command::SetMaterial {
+        x: 0,
+        y: 2,
+        z: 0,
+        material: Material::Air,
+    });
+    w.apply(Command::AddWater {
+        x: 0,
+        y: 2,
+        z: 0,
+        volume_m3: 0.6,
+    });
     assert_eq!(w.view().free_at(0, 2, 0), 0.6);
     run(&mut w, 400);
-    assert_eq!(w.view().free_at(0, 2, 0), 0.6, "a cell above the table was touched");
+    assert_eq!(
+        w.view().free_at(0, 2, 0),
+        0.6,
+        "a cell above the table was touched"
+    );
     assert!(residual(&w).abs() < 1e-9, "{}", residual(&w));
 }
 
@@ -163,20 +223,39 @@ fn drain_resumes_for_a_voxel_the_head_has_fallen_below() {
     // Head 2.9 m: both soil voxels (centres 1.5 and 2.5) are under it.
     let mut w = table_column(0.0, 0.0, 2.9);
     run(&mut w, 200);
-    assert!(w.view().pore_at(0, 1, 0) > 0.999, "y=1 {}", w.view().pore_at(0, 1, 0));
-    assert!(w.view().pore_at(0, 2, 0) > 0.999, "y=2 {}", w.view().pore_at(0, 2, 0));
+    assert!(
+        w.view().pore_at(0, 1, 0) > 0.999,
+        "y=1 {}",
+        w.view().pore_at(0, 1, 0)
+    );
+    assert!(
+        w.view().pore_at(0, 2, 0) > 0.999,
+        "y=2 {}",
+        w.view().pore_at(0, 2, 0)
+    );
     // Two hundred more ticks and the saturated zone has not drained a drop: the table
     // holds it up.
     let held = (w.view().pore_at(0, 1, 0), w.view().pore_at(0, 2, 0));
     run(&mut w, 200);
-    assert_eq!((w.view().pore_at(0, 1, 0), w.view().pore_at(0, 2, 0)), held, "it drained anyway");
+    assert_eq!(
+        (w.view().pore_at(0, 1, 0), w.view().pore_at(0, 2, 0)),
+        held,
+        "it drained anyway"
+    );
 
     // Pump the table down to 1.0 m, below both voxels' centres, and they drain to field
     // capacity like any unsupported ground.
     let want = w.config().aquifer_volume_for_head(1.0) - w.view().aquifer_m3;
     let moved = w.apply(Command::ChargeAquifer { volume_m3: want });
-    assert!((moved - want).abs() < 1e-9, "the withdrawal moved {moved} of {want}");
-    assert!((w.aquifer_head_m() - 1.0).abs() < 1e-9, "head {}", w.aquifer_head_m());
+    assert!(
+        (moved - want).abs() < 1e-9,
+        "the withdrawal moved {moved} of {want}"
+    );
+    assert!(
+        (w.aquifer_head_m() - 1.0).abs() < 1e-9,
+        "head {}",
+        w.aquifer_head_m()
+    );
     run(&mut w, 600);
 
     let fc = Material::Soil.field_capacity();
@@ -198,14 +277,26 @@ fn drain_resumes_for_a_voxel_the_head_has_fallen_below() {
 // is pinned from the flora crate, where a canopy exists to be seeded.
 
 fn plain_slab(width: u32, height: u32, depth: u32) -> World {
-    World::empty(Config { width, height, depth, voxel_m: 1.0, seed: 19, ..Config::default() })
+    World::empty(Config {
+        width,
+        height,
+        depth,
+        voxel_m: 1.0,
+        seed: 19,
+        ..Config::default()
+    })
 }
 
 /// Rock over every slab of the columns in `xs`, at `y`.
 fn roof_over(w: &mut World, xs: std::ops::Range<i64>, y: u32) {
     for x in xs {
         for z in 0..w.config().depth {
-            w.apply(Command::SetMaterial { x, y, z, material: Material::Rock });
+            w.apply(Command::SetMaterial {
+                x,
+                y,
+                z,
+                material: Material::Rock,
+            });
         }
     }
 }
@@ -234,10 +325,21 @@ fn sky_visibility_under_a_partial_roof_is_between_open_and_roofed() {
     );
     // Strictly darker the further under the roof one stands, and dark at its middle.
     let deeper = half.view().sky_visibility(6, 0, 3);
-    assert!(deeper < partial, "two columns further in is {deeper}, not darker than {partial}");
-    assert_eq!(half.view().sky_visibility(8, 0, 3), 0.0, "the middle of the roof is roofed");
+    assert!(
+        deeper < partial,
+        "two columns further in is {deeper}, not darker than {partial}"
+    );
+    assert_eq!(
+        half.view().sky_visibility(8, 0, 3),
+        0.0,
+        "the middle of the roof is roofed"
+    );
     // The site out from under it is untouched: a roof shades what it covers.
-    assert_eq!(half.view().sky_visibility(0, 0, 3), 1.0, "open ground beside a roof");
+    assert_eq!(
+        half.view().sky_visibility(0, 0, 3),
+        1.0,
+        "open ground beside a roof"
+    );
 }
 
 // ============================================================ the noise seed
@@ -251,10 +353,19 @@ fn sky_visibility_under_a_partial_roof_is_between_open_and_roofed() {
 // that are true are below: unmoved columns are identical, and the foundation rows are.
 
 fn wobble_pair(seed: u64, noise_a: u64, noise_b: u64) -> (World, World) {
-    let base = Config { seed, ..Config::default() };
+    let base = Config {
+        seed,
+        ..Config::default()
+    };
     (
-        World::new(Config { noise_seed: noise_a, ..base.clone() }),
-        World::new(Config { noise_seed: noise_b, ..base }),
+        World::new(Config {
+            noise_seed: noise_a,
+            ..base.clone()
+        }),
+        World::new(Config {
+            noise_seed: noise_b,
+            ..base
+        }),
     )
 }
 
@@ -296,7 +407,10 @@ fn noise_seed_leaves_every_unmoved_column_identical_in_every_pair() {
                 }
             }
             let columns = (c.width * c.depth) as u64;
-            assert!(moved > 0, "seed {seed}, noise {na} vs {nb}: the wobble did not move at all");
+            assert!(
+                moved > 0,
+                "seed {seed}, noise {na} vs {nb}: the wobble did not move at all"
+            );
             assert!(
                 moved * 2 < columns,
                 "seed {seed}, noise {na} vs {nb}: {moved} of {columns} surface cells moved, \
@@ -328,7 +442,11 @@ fn noise_seed_leaves_the_foundation_rows_identical() {
                         vb.material_at(x, y, z),
                         "seed {seed}: ({x}, {y}, {z}) moved below y = 2"
                     );
-                    assert_eq!(va.material_at(x, y, z), Material::Bedrock, "({x}, {y}, {z})");
+                    assert_eq!(
+                        va.material_at(x, y, z),
+                        Material::Bedrock,
+                        "({x}, {y}, {z})"
+                    );
                 }
             }
         }

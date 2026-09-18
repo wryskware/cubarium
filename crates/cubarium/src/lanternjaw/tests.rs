@@ -1,7 +1,7 @@
-use cubarium_surface::Topology;
 use super::raster::HEAD;
 use super::*;
 use cubarium_render::{Canvas, RigPart, rig_radius};
+use cubarium_surface::Topology;
 use cubarium_surface::{SurfacePoint, Vec2};
 
 fn rig_parts(parts: &[Part]) -> Vec<RigPart<'_>> {

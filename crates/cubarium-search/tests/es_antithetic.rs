@@ -57,10 +57,17 @@ fn the_reduction_replays_a_real_generation_onto_the_trainers_own_centre() {
     assert_eq!(row.center_score, report.center_score);
     assert_eq!(
         antithetic::layout_order(&report).expect("order"),
-        layouts[..2].iter().map(|l| l.name.clone()).collect::<Vec<_>>()
+        layouts[..2]
+            .iter()
+            .map(|l| l.name.clone())
+            .collect::<Vec<_>>()
     );
     // The centre's own jobs are in the report too, and must not be mistaken for a candidate.
-    assert_eq!(row.binding_counts.iter().sum::<usize>(), 4, "two members of two pairs");
+    assert_eq!(
+        row.binding_counts.iter().sum::<usize>(),
+        4,
+        "two members of two pairs"
+    );
 
     let (geo, replayed, replayed_adam) =
         antithetic::replay(&theta0, &[report.clone()], &protocol, Aggregate::Min).expect("replay");
@@ -70,7 +77,10 @@ fn the_reduction_replays_a_real_generation_onto_the_trainers_own_centre() {
         "the extracted weights must rebuild the trainer's own gradient"
     );
     assert_eq!(geo[0].gradient_norm_recorded, report.gradient_norm);
-    assert_eq!(replayed, theta, "the replay must land on the trainer's centre, bit for bit");
+    assert_eq!(
+        replayed, theta,
+        "the replay must land on the trainer's centre, bit for bit"
+    );
     assert_eq!(replayed_adam, adam);
     assert!((geo[0].step_rms - report.update_rms).abs() < 1e-12 * report.update_rms.max(1.0));
 }
@@ -93,7 +103,10 @@ fn a_report_whose_episodes_disagree_with_its_scores_is_refused() {
     let mut tampered = report.clone();
     tampered.candidate_scores[0] += 1.0;
     let err = antithetic::reduce_generation(&tampered, Aggregate::Min).expect_err("refused");
-    assert!(err.contains("pair0+"), "the error must name the candidate: {err}");
+    assert!(
+        err.contains("pair0+"),
+        "the error must name the candidate: {err}"
+    );
 
     // And the aggregate is part of the question: the same episodes under `Mean` do not produce
     // the `Min` scores the report recorded, so asking for the wrong one is refused too.

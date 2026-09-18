@@ -41,11 +41,15 @@ impl World {
     /// §5). Keeping the draw is what leaves the cube's stream byte-identical.
     pub fn new(config: WorldConfig) -> Result<World, String> {
         config.validate()?;
-        let habitat = Habitat::new(&config.habitat, config.seed, config.topology, config.world_scale);
+        let habitat = Habitat::new(
+            &config.habitat,
+            config.seed,
+            config.topology,
+            config.world_scale,
+        );
         let weather = Weather::new(&config.weather, config.seed);
         let fields = Fields::new(&config, &habitat.light_base, &habitat.moisture_base);
-        let ecology =
-            EcologyV1State::new(&config, &habitat.light_base, &habitat.moisture_base);
+        let ecology = EcologyV1State::new(&config, &habitat.light_base, &habitat.moisture_base);
 
         let cap = config.capacity.max_organisms;
         let mut organisms = Slots::with_capacity(cap as usize);
@@ -141,10 +145,10 @@ impl World {
             + state.ecology.total_material()
             + organism_material
             + state.hunters.gut_material_total()
-                - state.external_material_in
-                - state.care.feed_material_in
-                + state.care.clean_material_out
-                - state.hunters.imported_material();
+            - state.external_material_in
+            - state.care.feed_material_in
+            + state.care.clean_material_out
+            - state.hunters.imported_material();
         Ok(World::assemble(state, habitat, initial_material))
     }
 
@@ -201,7 +205,8 @@ impl World {
             self.state.external_material_in += founder.structure + founder.reserve;
             ids.push(self.state.organisms.insert(founder));
         }
-        self.moved.resize_with(self.state.organisms.slot_count(), Vec::new);
+        self.moved
+            .resize_with(self.state.organisms.slot_count(), Vec::new);
         Ok(ids)
     }
 
@@ -351,7 +356,10 @@ impl World {
             rain: vec![0.0; cells].into_boxed_slice(),
             manual_rain: vec![0.0; cells].into_boxed_slice(),
             rain_envelope: care::rain_envelope(),
-            scratch: (ScalarField::zeros(topo, scale), ScalarField::zeros(topo, scale)),
+            scratch: (
+                ScalarField::zeros(topo, scale),
+                ScalarField::zeros(topo, scale),
+            ),
             eco_scratch: EcoScratch::new(cells),
             water_scratch: ScalarField::zeros(topo, scale),
             sense_rings: Vec::new(),
@@ -408,7 +416,9 @@ impl World {
 /// `key = index`.
 fn roster_keys(config: &WorldConfig) -> Vec<(u64, Option<&FounderKind>)> {
     if config.founders.kinds.is_empty() {
-        (0..u64::from(config.founders.count)).map(|i| (i, None)).collect()
+        (0..u64::from(config.founders.count))
+            .map(|i| (i, None))
+            .collect()
     } else {
         config
             .founders
@@ -627,7 +637,8 @@ impl World {
             fed_this_tick: false,
         });
         self.state.external_material_in += structure + reserve;
-        self.moved.resize_with(self.state.organisms.slot_count(), Vec::new);
+        self.moved
+            .resize_with(self.state.organisms.slot_count(), Vec::new);
         Ok(id)
     }
 
@@ -650,8 +661,7 @@ impl World {
         policy.validate_in(self.action_adapter)?;
         if self.state.quiet.policy.enabled() {
             return Err(
-                "the ordinary quiet extension and neural animals cannot be enabled together"
-                    .into(),
+                "the ordinary quiet extension and neural animals cannot be enabled together".into(),
             );
         }
         let id = self.found_training_animal(pos, heading)?;

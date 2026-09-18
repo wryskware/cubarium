@@ -200,7 +200,10 @@ fn main() -> Result<()> {
     );
     let wet = view.water.iter().filter(|&&w| w > 0.0).count();
     let raining = view.rain.iter().filter(|&&r| r > 0.0).count();
-    println!("cells with water {wet}/{}, with rain {raining}", view.water.len());
+    println!(
+        "cells with water {wet}/{}, with rain {raining}",
+        view.water.len()
+    );
 
     // --- (A) ablations ----------------------------------------------------------------
     println!("\n(A) ablations: the same presenter, the same frame, one input taken away");
@@ -268,7 +271,11 @@ fn main() -> Result<()> {
         xs.push(t0.elapsed());
     }
     std::hint::black_box(&dst);
-    row("Canvas::clone_from (5 x 64 x 64 x RGB f32)", median_ms(xs), 0.0);
+    row(
+        "Canvas::clone_from (5 x 64 x 64 x RGB f32)",
+        median_ms(xs),
+        0.0,
+    );
     let mut xs = Vec::with_capacity(args.frames);
     for _ in 0..args.frames {
         let t0 = Instant::now();
@@ -286,10 +293,21 @@ fn main() -> Result<()> {
         for face in Face::ALL {
             for y in 0..FACE_SIZE as u16 {
                 for x in 0..FACE_SIZE as u16 {
-                    acc += cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y)).index();
+                    acc += cell_of(
+                        Topology::Cube,
+                        Scale::ONE,
+                        &SurfacePoint::pixel_center(Topology::Cube, face, x, y),
+                    )
+                    .index();
                     for edge in cubarium_surface::Edge::ALL {
-                        if let Some((nf, nx, ny)) = pixel_neighbor(Topology::Cube, face, x, y, edge) {
-                            acc += cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, nf, nx, ny)).index();
+                        if let Some((nf, nx, ny)) = pixel_neighbor(Topology::Cube, face, x, y, edge)
+                        {
+                            acc += cell_of(
+                                Topology::Cube,
+                                Scale::ONE,
+                                &SurfacePoint::pixel_center(Topology::Cube, nf, nx, ny),
+                            )
+                            .index();
                         }
                     }
                 }
@@ -298,7 +316,11 @@ fn main() -> Result<()> {
         std::hint::black_box(acc);
         xs.push(t0.elapsed());
     }
-    row("recomputed, as every field pass does today", median_ms(xs), 0.0);
+    row(
+        "recomputed, as every field pass does today",
+        median_ms(xs),
+        0.0,
+    );
 
     // The same answers from a table built once. Five u16 per pixel: own cell and four
     // neighbours, `u16::MAX` where the neighbour does not exist.
@@ -307,11 +329,20 @@ fn main() -> Result<()> {
         for y in 0..FACE_SIZE as u16 {
             for x in 0..FACE_SIZE as u16 {
                 let p = (face.index() * FACE_SIZE + usize::from(y)) * FACE_SIZE + usize::from(x);
-                table[p * 5] = cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y)).index() as u16;
+                table[p * 5] = cell_of(
+                    Topology::Cube,
+                    Scale::ONE,
+                    &SurfacePoint::pixel_center(Topology::Cube, face, x, y),
+                )
+                .index() as u16;
                 for (i, edge) in cubarium_surface::Edge::ALL.into_iter().enumerate() {
                     if let Some((nf, nx, ny)) = pixel_neighbor(Topology::Cube, face, x, y, edge) {
-                        table[p * 5 + 1 + i] =
-                            cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, nf, nx, ny)).index() as u16;
+                        table[p * 5 + 1 + i] = cell_of(
+                            Topology::Cube,
+                            Scale::ONE,
+                            &SurfacePoint::pixel_center(Topology::Cube, nf, nx, ny),
+                        )
+                        .index() as u16;
                     }
                 }
             }
@@ -333,7 +364,9 @@ fn main() -> Result<()> {
 
     // --- (D) the stamp footprints ------------------------------------------------------
     println!("\n(D) unfold_pixels for the 1,280 plant slots (radius 9 px, one per stamp)");
-    let anchors: Vec<SurfacePoint> = CellId::all(Topology::Cube, Scale::ONE).map(|c| slot_of(c).at).collect();
+    let anchors: Vec<SurfacePoint> = CellId::all(Topology::Cube, Scale::ONE)
+        .map(|c| slot_of(c).at)
+        .collect();
     let mut scratch: Vec<PixelImage> = Vec::new();
     let mut seam = 0usize;
     let mut pixels = 0usize;
@@ -480,7 +513,10 @@ fn main() -> Result<()> {
     // on its own core and spliced back. The composite is checked against the serial image
     // before anything is timed, because a split that is faster and different is worthless.
     if cores.len() > 1 {
-        println!("\n(F) one image over {} row bands, one core each", cores.len());
+        println!(
+            "\n(F) one image over {} row bands, one core each",
+            cores.len()
+        );
         let frames = args.frames.min(200);
         let n = cores.len();
         let mut serial_canvas = Canvas::cube();
@@ -520,8 +556,10 @@ fn main() -> Result<()> {
             let t0 = Instant::now();
             canvas.split_into(&mut bands);
             std::thread::scope(|s| {
-                for ((band, bp), &cpu) in
-                    bands.iter_mut().zip(band_presenters.iter_mut()).zip(cpus.iter())
+                for ((band, bp), &cpu) in bands
+                    .iter_mut()
+                    .zip(band_presenters.iter_mut())
+                    .zip(cpus.iter())
                 {
                     s.spawn(move || {
                         pin(&[cpu]);
@@ -536,7 +574,11 @@ fn main() -> Result<()> {
         }
         let split = median_ms(xs);
         row("split over the bands, wall clock", split, one);
-        println!("    speedup: {:.2}x on {n} bands ({:.0} % efficiency)", one / split, 100.0 * one / (split * n as f64));
+        println!(
+            "    speedup: {:.2}x on {n} bands ({:.0} % efficiency)",
+            one / split,
+            100.0 * one / (split * n as f64)
+        );
         if !serial.is_empty() {
             pin(&serial);
         }

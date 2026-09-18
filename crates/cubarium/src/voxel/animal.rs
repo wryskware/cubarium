@@ -86,7 +86,11 @@ pub fn interim_style(species: Species) -> Style {
     let c = srgb_linear(match species {
         Species::Frondgrazer => INTERIM_ANIMAL_SRGB,
     });
-    Style { wood: c, crown: c, heart: c }
+    Style {
+        wood: c,
+        crown: c,
+        heart: c,
+    }
 }
 
 /// The cells one animal occupies, with the part each holds.
@@ -214,12 +218,23 @@ mod tests {
     use super::*;
 
     fn world() -> World {
-        let c = VoxelConfig { width: 8, height: 6, depth: 3, voxel_m: 1.0, ..VoxelConfig::default() };
+        let c = VoxelConfig {
+            width: 8,
+            height: 6,
+            depth: 3,
+            voxel_m: 1.0,
+            ..VoxelConfig::default()
+        };
         let mut w = World::empty(c.clone());
         for z in 0..c.depth {
             for x in 0..i64::from(c.width) {
                 for y in 1..=2 {
-                    w.apply(WorldCommand::SetMaterial { x, y, z, material: Material::Soil });
+                    w.apply(WorldCommand::SetMaterial {
+                        x,
+                        y,
+                        z,
+                        material: Material::Soil,
+                    });
                 }
             }
         }
@@ -234,7 +249,12 @@ mod tests {
         let mut fauna = Fauna::new(FaunaConfig::default());
         assert!(fauna.apply(
             &w,
-            Command::Introduce { x: 3, z: 1, species: Species::Frondgrazer, body: 0.02 }
+            Command::Introduce {
+                x: 3,
+                z: 1,
+                species: Species::Frondgrazer,
+                body: 0.02
+            }
         ));
         let mut grid = Animals::empty(0, 0, 0);
         grid.rebuild(&w.view(), Some(fauna.view()));
@@ -263,7 +283,10 @@ mod tests {
 
         let style = grid.style(grid.at(3, 3, 1)).expect("the interim style");
         assert_eq!(style, interim_style(Species::Frondgrazer));
-        assert_eq!(style.wood, style.crown, "the interim glyph is one flat colour");
+        assert_eq!(
+            style.wood, style.crown,
+            "the interim glyph is one flat colour"
+        );
         // And it is none of the five plant palettes.
         for plant in cubarium_voxel_flora::Species::ALL {
             assert_ne!(style.wood, super::super::stand::seed_style(plant).crown);
@@ -279,13 +302,21 @@ mod tests {
         // The last column, so the block's second half is column 0.
         assert!(fauna.apply(
             &w,
-            Command::Introduce { x: 7, z: 2, species: Species::Frondgrazer, body: 0.02 }
+            Command::Introduce {
+                x: 7,
+                z: 2,
+                species: Species::Frondgrazer,
+                body: 0.02
+            }
         ));
         let mut grid = Animals::empty(0, 0, 0);
         grid.rebuild(&w.view(), Some(fauna.view()));
         assert!(grid.at(7, 3, 2).is_block());
         assert!(grid.at(0, 3, 2).is_block(), "the body crosses the seam");
-        assert!(grid.at(8, 3, 2).is_block(), "which is the same cell, unwrapped");
+        assert!(
+            grid.at(8, 3, 2).is_block(),
+            "which is the same cell, unwrapped"
+        );
         // `z = 3` is outside a 3-deep world, and nothing of it landed at `z = 0`.
         assert_eq!(grid.at(7, 3, 0), AnimalPart::None);
     }

@@ -27,9 +27,19 @@ const GRAZERS: usize = 2;
 /// A small world with water in it, six species of founder and two grazers: the same
 /// condition three times over, so the only difference between arms is how the tick ran.
 fn conditioned() -> (World, Flora, Fauna) {
-    let dry = VoxelConfig { seed: 1, rain_m_per_s: RAIN_M_PER_S, ..VoxelConfig::default() };
-    let floor = World::new(dry.clone()).outlet_cell().map_or(0.0, |(_, y, _)| y as f64) * dry.voxel_m;
-    let config = VoxelConfig { initial_aquifer_head_m: floor + 1.0, ..dry };
+    let dry = VoxelConfig {
+        seed: 1,
+        rain_m_per_s: RAIN_M_PER_S,
+        ..VoxelConfig::default()
+    };
+    let floor = World::new(dry.clone())
+        .outlet_cell()
+        .map_or(0.0, |(_, y, _)| y as f64)
+        * dry.voxel_m;
+    let config = VoxelConfig {
+        initial_aquifer_head_m: floor + 1.0,
+        ..dry
+    };
     let mut world = World::new(config);
     world.apply(WorldCommand::SetOutlet { open: true });
     for _ in 0..WARMUP_TICKS {
@@ -51,7 +61,12 @@ fn conditioned() -> (World, Flora, Fauna) {
         for site in strided(&pool, FOUNDERS_PER_SPECIES) {
             if flora.apply(
                 &world,
-                FloraCommand::Seed { x: i64::from(site.x), z: site.z, species, wood },
+                FloraCommand::Seed {
+                    x: i64::from(site.x),
+                    z: site.z,
+                    species,
+                    wood,
+                },
             ) {
                 taken.push(site);
             }
@@ -63,7 +78,9 @@ fn conditioned() -> (World, Flora, Fauna) {
         .into_iter()
         .filter(|s| {
             world.view().material_at(i64::from(s.x), s.y, s.z) == Material::Soil
-                && flora.view().can_establish(&world.view(), *s, Species::Springturf)
+                && flora
+                    .view()
+                    .can_establish(&world.view(), *s, Species::Springturf)
         })
         .collect();
     let body = fauna.config().species(Beast::Frondgrazer).body_max;
@@ -207,9 +224,15 @@ fn rel(a: f64, b: f64) -> f64 {
 fn agree(name: &str, a: &Reading, b: &Reading, tol: f64) {
     assert_eq!(a.stands, b.stands, "{name}: stand count");
     assert_eq!(a.animals, b.animals, "{name}: animal count");
-    assert_eq!(a.animal_faces, b.animal_faces, "{name}: the faces the animals ended up on");
+    assert_eq!(
+        a.animal_faces, b.animal_faces,
+        "{name}: the faces the animals ended up on"
+    );
     for (i, (x, y)) in a.animal_body.iter().zip(b.animal_body.iter()).enumerate() {
-        assert!(rel(*x, *y) <= tol, "{name}: animal {i} body {x} against {y}");
+        assert!(
+            rel(*x, *y) <= tol,
+            "{name}: animal {i} body {x} against {y}"
+        );
     }
     assert!(
         rel(a.stored_m3, b.stored_m3) <= tol,
@@ -245,8 +268,16 @@ fn conserves(name: &str, r: &Reading) {
         r.water_residual,
         r.stored_m3
     );
-    assert!(r.organic_residual.abs() < 1e-9, "{name}: flora organic residual {:.3e}", r.organic_residual);
-    assert!(r.mineral_residual.abs() < 1e-9, "{name}: flora mineral residual {:.3e}", r.mineral_residual);
+    assert!(
+        r.organic_residual.abs() < 1e-9,
+        "{name}: flora organic residual {:.3e}",
+        r.organic_residual
+    );
+    assert!(
+        r.mineral_residual.abs() < 1e-9,
+        "{name}: flora mineral residual {:.3e}",
+        r.mineral_residual
+    );
 }
 
 /// The schedule is the three-call sequence. Not asserted bit for bit — the claim is that
@@ -311,7 +342,9 @@ fn a_caller_can_hold_all_three_layers_at_once() {
         // `Command::Seed` is the declared founder and does not ask the establishment
         // gates, so any support face will do: what is under test is the access, not the
         // ecology.
-        let Some(site) = skyline_of(world).into_iter().next() else { return false };
+        let Some(site) = skyline_of(world).into_iter().next() else {
+            return false;
+        };
         let wood = 0.5 * flora.config().species(Species::Springturf).wood_max;
         flora.apply(
             world,

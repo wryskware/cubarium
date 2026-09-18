@@ -138,12 +138,7 @@ impl Sim {
     /// first `Sim` in a process fixes its size; a second one with a different
     /// `SimConfig::threads` gets the pool that already exists. That is why the bench runs
     /// one process per thread count.
-    pub fn new(
-        world: cubarium_voxel::World,
-        flora: Flora,
-        fauna: Fauna,
-        config: SimConfig,
-    ) -> Sim {
+    pub fn new(world: cubarium_voxel::World, flora: Flora, fauna: Fauna, config: SimConfig) -> Sim {
         let threads = config.threads.max(1);
         if threads > 1 {
             ComputeTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(threads).build());
@@ -328,7 +323,12 @@ fn sys_evaporate(mut w: ResMut<VoxelWorld>) {
 /// count and `sub_dt` come off the world's own config, exactly as
 /// [`cubarium_voxel::water::step`] reads them.
 fn sys_substeps(ecs: &mut World) {
-    let substeps = ecs.resource::<VoxelWorld>().0.config().water_substeps.max(1);
+    let substeps = ecs
+        .resource::<VoxelWorld>()
+        .0
+        .config()
+        .water_substeps
+        .max(1);
     for _ in 0..substeps {
         ecs.run_schedule(Substep);
     }

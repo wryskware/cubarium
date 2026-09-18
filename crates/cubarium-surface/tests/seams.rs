@@ -12,8 +12,8 @@
 
 use cubarium_surface::Topology;
 use cubarium_surface::{
-    Edge, Face, FACE_EXTENT, GEOM_EPS, SurfacePoint, TangentMap, Vec2, cross_seam,
-    pixel_neighbor, travel,
+    Edge, FACE_EXTENT, Face, GEOM_EPS, SurfacePoint, TangentMap, Vec2, cross_seam, pixel_neighbor,
+    travel,
 };
 
 const SIDE_FACES: [Face; 4] = [Face::Front, Face::Right, Face::Back, Face::Left];
@@ -64,7 +64,11 @@ fn every_connected_half_edge_lands_where_cross_seam_says() {
                 let (start, step) = start_and_step(face, edge, t);
                 let tr = travel(Topology::Cube, start, step);
                 assert_eq!(tr.end.face, nf, "{face:?}/{edge:?} t={t}: face");
-                assert_eq!(tr.end.pixel(Topology::Cube), (u16::from(nx), u16::from(ny)), "{face:?}/{edge:?} t={t}: pixel");
+                assert_eq!(
+                    tr.end.pixel(Topology::Cube),
+                    (u16::from(nx), u16::from(ny)),
+                    "{face:?}/{edge:?} t={t}: pixel"
+                );
                 assert_eq!(
                     tr.map,
                     TangentMap::quarter_turns(turns),
@@ -74,7 +78,11 @@ fn every_connected_half_edge_lands_where_cross_seam_says() {
                 assert_eq!(tr.reflections, 0, "{face:?}/{edge:?} t={t}: reflections");
                 assert_eq!(tr.ties, 0, "{face:?}/{edge:?} t={t}: ties");
                 assert!(!tr.fallback, "{face:?}/{edge:?} t={t}: fallback");
-                assert!(tr.end.is_canonical(Topology::Cube), "{face:?}/{edge:?} t={t}: {:?}", tr.end);
+                assert!(
+                    tr.end.is_canonical(Topology::Cube),
+                    "{face:?}/{edge:?} t={t}: {:?}",
+                    tr.end
+                );
                 // One segment in each chart, together exactly the displacement length.
                 assert_eq!(tr.segments.len(), 2, "{face:?}/{edge:?} t={t}: segments");
                 let total: f64 = tr.segments.iter().map(|s| s.length()).sum();
@@ -123,11 +131,17 @@ fn crossing_a_seam_is_invertible() {
 #[test]
 fn the_four_open_bottom_edges_reflect() {
     for face in SIDE_FACES {
-        assert!(face.neighbor(Edge::Bottom).is_none(), "{face:?} bottom is open");
+        assert!(
+            face.neighbor(Edge::Bottom).is_none(),
+            "{face:?} bottom is open"
+        );
         for t in 0..64u16 {
             let (start, step) = start_and_step(face, Edge::Bottom, t);
             let tr = travel(Topology::Cube, start, step);
-            assert_eq!(tr.end.face, face, "{face:?} t={t}: reflection changed chart");
+            assert_eq!(
+                tr.end.face, face,
+                "{face:?} t={t}: reflection changed chart"
+            );
             assert_eq!(tr.reflections, 1, "{face:?} t={t}: reflections");
             assert_eq!(tr.crossings, 0, "{face:?} t={t}: crossings");
             assert_eq!(tr.map, TangentMap::REFLECT_Y, "{face:?} t={t}: map");
@@ -144,7 +158,10 @@ fn the_four_open_bottom_edges_reflect() {
     }
     // Top has no open edge at all.
     for edge in Edge::ALL {
-        assert!(Face::Top.neighbor(edge).is_some(), "Top/{edge:?} must be connected");
+        assert!(
+            Face::Top.neighbor(edge).is_some(),
+            "Top/{edge:?} must be connected"
+        );
     }
 }
 
@@ -164,7 +181,9 @@ fn the_along_edge_parameter_reverses_on_exactly_the_two_twisted_top_seams() {
     let mut straight_seen = 0;
     for face in Face::ALL {
         for edge in Edge::ALL {
-            let Some(seam) = face.neighbor(edge) else { continue };
+            let Some(seam) = face.neighbor(edge) else {
+                continue;
+            };
             for t in 0..64u16 {
                 let (start, step) = start_and_step(face, edge, t);
                 let s = f64::from(t) + 0.5;
@@ -216,11 +235,7 @@ fn pixel_neighbor_matches_the_discrete_contract() {
                     let got = pixel_neighbor(Topology::Cube, face, x, y, edge);
                     if !on_edge {
                         let (dx, dy) = edge.outward();
-                        let want = (
-                            face,
-                            (i32::from(x) + dx) as u16,
-                            (i32::from(y) + dy) as u16,
-                        );
+                        let want = (face, (i32::from(x) + dx) as u16, (i32::from(y) + dy) as u16);
                         assert_eq!(got, Some(want), "{face:?} ({x},{y}) {edge:?}");
                     } else {
                         let t = edge.coord_of(x as u8, y as u8);

@@ -20,8 +20,8 @@ use cubarium_core::hunter::{
     FixedHunterProfile, HunterTarget, PROFILE_VERSION, PROFILE_VERSION_CHARGE80,
 };
 use cubarium_core::{World, WorldConfig};
-use cube_proto::Frame;
 use cubarium_render::Canvas;
+use cube_proto::Frame;
 
 fn atelier() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/atelier")
@@ -44,7 +44,14 @@ fn founded(version: u32) -> World {
         profile = profile.charge80();
     }
     world
-        .start_hunter_trial(profile, HunterTarget { face: 4, u: 32.0, v: 32.0 })
+        .start_hunter_trial(
+            profile,
+            HunterTarget {
+                face: 4,
+                u: 32.0,
+                v: 32.0,
+            },
+        )
         .expect("the trial starts");
     world
 }
@@ -97,13 +104,17 @@ fn both_versions_draw_the_same_supplied_state_to_the_byte() {
     let mut frames = Vec::new();
     for version in [PROFILE_VERSION, PROFILE_VERSION_CHARGE80] {
         let world = founded(version);
-        assert_eq!(world.hunters().profile().expect("a profile").version, version);
+        assert_eq!(
+            world.hunters().profile().expect("a profile").version,
+            version
+        );
         let mut art = presenter();
         art.validate_hunter_profile(world.hunters().profile().expect("a profile"))
             .expect("drawable");
         let view = world.render_view();
         art.observe(&view);
-        art.observe_hunters(&view, &world.hunter_view(), &[]).expect("the adapter accepts it");
+        art.observe_hunters(&view, &world.hunter_view(), &[])
+            .expect("the adapter accepts it");
         let mut canvas = Canvas::cube();
         art.draw(&view, 0.0, &mut canvas);
         let mut frame = Frame::black();

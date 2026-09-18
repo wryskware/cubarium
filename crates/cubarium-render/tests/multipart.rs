@@ -27,12 +27,12 @@
 use cubarium_surface::Topology;
 use std::collections::HashSet;
 
-use cube_proto::Face;
 use cubarium_render::{
-    Bend, Canvas, Mask, Pose, RIG_MARGIN, RigPart, Sprite, rig_radius, stamp_layers_bent_with_radius,
-    stamp_rig, stamp_rig_with_radius, stamp_sprite,
+    Bend, Canvas, Mask, Pose, RIG_MARGIN, RigPart, Sprite, rig_radius,
+    stamp_layers_bent_with_radius, stamp_rig, stamp_rig_with_radius, stamp_sprite,
 };
 use cubarium_surface::{MAX_LOCAL_RADIUS, PixelImage, SurfacePoint, Vec2, unfold_pixels};
+use cube_proto::Face;
 
 // ---------------------------------------------------------------------------
 // canvas helpers
@@ -47,7 +47,11 @@ fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
 /// Bit-for-bit equality, which is what "bit for bit" and "identical" in the docs mean.
 fn assert_identical(a: &Canvas, b: &Canvas, what: &str) {
     if let Some((f, x, y)) = every_pixel().find(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y)) {
-        panic!("{what}: ({f:?}, {x}, {y}) is {:?} vs {:?}", a.get(f, x, y), b.get(f, x, y));
+        panic!(
+            "{what}: ({f:?}, {x}, {y}) is {:?} vs {:?}",
+            a.get(f, x, y),
+            b.get(f, x, y)
+        );
     }
 }
 
@@ -76,13 +80,18 @@ fn worst_diff(a: &Canvas, b: &Canvas) -> (f32, Face, u16, u16) {
 }
 
 fn peak(image: &Canvas) -> f32 {
-    every_pixel().flat_map(|(f, x, y)| image.get(f, x, y)).fold(0.0, f32::max)
+    every_pixel()
+        .flat_map(|(f, x, y)| image.get(f, x, y))
+        .fold(0.0, f32::max)
 }
 
 /// Total premultiplied light on the whole cube, in linear channel units: the sum of the RGB
 /// channels over every face pixel, exactly as the `sprite.rs` tests' `total`.
 fn total_light(image: &Canvas) -> f64 {
-    every_pixel().flat_map(|(f, x, y)| image.get(f, x, y)).map(f64::from).sum()
+    every_pixel()
+        .flat_map(|(f, x, y)| image.get(f, x, y))
+        .map(f64::from)
+        .sum()
 }
 
 fn lit_faces(image: &Canvas) -> usize {
@@ -98,7 +107,12 @@ fn ground() -> Canvas {
     let mut canvas = Canvas::cube();
     for (f, x, y) in every_pixel() {
         let k = f64::from(x) * 0.011 + f64::from(y) * 0.007 + (f as usize as f64) * 0.03;
-        canvas.set(f, x, y, [0.08 + 0.04 * k as f32, 0.05, 0.19 - 0.02 * k as f32]);
+        canvas.set(
+            f,
+            x,
+            y,
+            [0.08 + 0.04 * k as f32, 0.05, 0.19 - 0.02 * k as f32],
+        );
     }
     canvas
 }
@@ -114,7 +128,11 @@ fn ground() -> Canvas {
 /// `0 ≤ r, g, b ≤ a ≤ 1`, as `Sprite::from_premultiplied` requires, and every texel is
 /// painted so a joint between two pieces is visible if the renderer opens one.
 fn material(x: usize, y: usize, opaque: bool) -> [f32; 4] {
-    let a = if opaque { 1.0 } else { 0.20 + 0.06 * ((x + 3 * y) % 11) as f32 };
+    let a = if opaque {
+        1.0
+    } else {
+        0.20 + 0.06 * ((x + 3 * y) % 11) as f32
+    };
     [
         a * (0.13 + 0.05 * (x % 7) as f32),
         a * (0.07 + 0.06 * (y % 5) as f32),
@@ -173,8 +191,16 @@ fn cut(n: usize, opaque: bool) -> Vec<(Sprite, Vec2)> {
             x0 as f64 - WHOLE_PIVOT.x + pivot.x,
             y0 as f64 - WHOLE_PIVOT.y + pivot.y,
         );
-        assert_eq!(offset.x.fract(), 0.0, "a cut piece must sit on the body lattice");
-        assert_eq!(offset.y.fract(), 0.0, "a cut piece must sit on the body lattice");
+        assert_eq!(
+            offset.x.fract(),
+            0.0,
+            "a cut piece must sit on the body lattice"
+        );
+        assert_eq!(
+            offset.y.fract(),
+            0.0,
+            "a cut piece must sit on the body lattice"
+        );
         out.push((patch(x0, y0, w, h, pivot, opaque), offset));
     }
     out
@@ -201,7 +227,14 @@ fn chain(opaque: bool) -> Vec<(Sprite, Vec2)> {
 }
 
 fn rig_parts(pieces: &[(Sprite, Vec2)], layer: u8) -> Vec<RigPart<'_>> {
-    pieces.iter().map(|(sprite, offset)| RigPart { sprite, offset: *offset, layer }).collect()
+    pieces
+        .iter()
+        .map(|(sprite, offset)| RigPart {
+            sprite,
+            offset: *offset,
+            layer,
+        })
+        .collect()
 }
 
 fn draw(
@@ -211,7 +244,14 @@ fn draw(
     parts: &[RigPart<'_>],
     opacity: f32,
 ) {
-    stamp_rig(canvas, root, heading, &[(parts, 1.0)], opacity, &mut Vec::new());
+    stamp_rig(
+        canvas,
+        root,
+        heading,
+        &[(parts, 1.0)],
+        opacity,
+        &mut Vec::new(),
+    );
 }
 
 fn drawn(root: SurfacePoint, heading: Vec2, parts: &[RigPart<'_>], opacity: f32) -> Canvas {
@@ -225,16 +265,43 @@ fn drawn(root: SurfacePoint, heading: Vec2, parts: &[RigPart<'_>], opacity: f32)
 // ---------------------------------------------------------------------------
 
 const ANCHORS: [(&str, SurfacePoint); 10] = [
-    ("mid-face, integer", SurfacePoint::new(Face::Front, 32.0, 32.0)),
-    ("mid-face, pixel centre", SurfacePoint::new(Face::Front, 32.5, 32.5)),
-    ("mid-face, subpixel", SurfacePoint::new(Face::Front, 32.3, 31.7)),
-    ("a side/side seam", SurfacePoint::new(Face::Front, 63.5, 32.5)),
-    ("a side/side seam, subpixel", SurfacePoint::new(Face::Front, 63.2, 20.7)),
-    ("a side/side seam, from Right", SurfacePoint::new(Face::Right, 0.5, 41.5)),
+    (
+        "mid-face, integer",
+        SurfacePoint::new(Face::Front, 32.0, 32.0),
+    ),
+    (
+        "mid-face, pixel centre",
+        SurfacePoint::new(Face::Front, 32.5, 32.5),
+    ),
+    (
+        "mid-face, subpixel",
+        SurfacePoint::new(Face::Front, 32.3, 31.7),
+    ),
+    (
+        "a side/side seam",
+        SurfacePoint::new(Face::Front, 63.5, 32.5),
+    ),
+    (
+        "a side/side seam, subpixel",
+        SurfacePoint::new(Face::Front, 63.2, 20.7),
+    ),
+    (
+        "a side/side seam, from Right",
+        SurfacePoint::new(Face::Right, 0.5, 41.5),
+    ),
     ("a side/top seam", SurfacePoint::new(Face::Front, 27.5, 0.5)),
-    ("a side/top seam, from Top", SurfacePoint::new(Face::Top, 38.3, 63.5)),
-    ("a top vertex, from Top", SurfacePoint::new(Face::Top, 0.5, 0.5)),
-    ("a top vertex, from a side", SurfacePoint::new(Face::Front, 0.5, 0.5)),
+    (
+        "a side/top seam, from Top",
+        SurfacePoint::new(Face::Top, 38.3, 63.5),
+    ),
+    (
+        "a top vertex, from Top",
+        SurfacePoint::new(Face::Top, 0.5, 0.5),
+    ),
+    (
+        "a top vertex, from a side",
+        SurfacePoint::new(Face::Front, 0.5, 0.5),
+    ),
 ];
 
 /// One axis-aligned heading, one shallow diagonal and one 45° diagonal: the body frame is
@@ -284,7 +351,11 @@ fn one_part_at_the_root_is_an_ordinary_sprite_stamp_plus_the_tail_its_radius_cli
 
     for opaque in [true, false] {
         let sprite = whole(opaque);
-        let parts = [RigPart { sprite: &sprite, offset: Vec2::ZERO, layer: 0 }];
+        let parts = [RigPart {
+            sprite: &sprite,
+            offset: Vec2::ZERO,
+            layer: 0,
+        }];
         let radius = rig_radius(&[(&parts[..], 1.0)]);
         assert!(
             radius > sprite.extent() && radius < MAX_LOCAL_RADIUS,
@@ -406,7 +477,11 @@ fn one_part_at_the_root_is_an_ordinary_sprite_stamp_plus_the_tail_its_radius_cli
 fn a_material_cut_into_lattice_aligned_pieces_draws_the_uncut_material() {
     for opaque in [true, false] {
         let uncut = whole(opaque);
-        let single = [RigPart { sprite: &uncut, offset: Vec2::ZERO, layer: 0 }];
+        let single = [RigPart {
+            sprite: &uncut,
+            offset: Vec2::ZERO,
+            layer: 0,
+        }];
         for n in [2usize, 4] {
             let pieces = cut(n, opaque);
             let parts = rig_parts(&pieces, 0);
@@ -498,19 +573,26 @@ fn equal_layers_sum_and_distinct_layers_source_over_in_ascending_order() {
     let heading = Vec2::new(1.0, 0.0);
     let pivot = Vec2::new(0.5, 0.5);
     let under = Sprite::from_premultiplied(1, 1, pivot, vec![[0.0, 0.5, 0.0, 1.0]]).unwrap();
-    let opaque_over =
-        Sprite::from_premultiplied(1, 1, pivot, vec![[0.6, 0.0, 0.0, 1.0]]).unwrap();
+    let opaque_over = Sprite::from_premultiplied(1, 1, pivot, vec![[0.6, 0.0, 0.0, 1.0]]).unwrap();
     let glass_over = Sprite::from_premultiplied(1, 1, pivot, vec![[0.0, 0.0, 0.3, 0.5]]).unwrap();
 
     let at = |canvas: &Canvas| canvas.get(Face::Front, 32, 32);
     fn one(sprite: &Sprite, layer: u8) -> RigPart<'_> {
-        RigPart { sprite, offset: Vec2::ZERO, layer }
+        RigPart {
+            sprite,
+            offset: Vec2::ZERO,
+            layer,
+        }
     }
 
     // An opaque upper layer hides the lower one entirely.
     let parts = [one(&under, 0), one(&opaque_over, 1)];
     let image = drawn(root, heading, &parts, 1.0);
-    assert_eq!(at(&image), [0.6, 0.0, 0.0], "an opaque layer 1 must hide layer 0");
+    assert_eq!(
+        at(&image),
+        [0.6, 0.0, 0.0],
+        "an opaque layer 1 must hide layer 0"
+    );
 
     // Declared depth, not slice order: the same two parts listed the other way round draw the
     // same picture.
@@ -594,8 +676,16 @@ fn equal_layers_sum_and_distinct_layers_source_over_in_ascending_order() {
 fn a_state_mixture_is_the_premultiplied_mix_of_the_single_state_images() {
     let a = whole(true);
     let b = white(3, 3, Vec2::new(1.5, 1.5));
-    let state_a = [RigPart { sprite: &a, offset: Vec2::new(-2.0, 1.0), layer: 0 }];
-    let state_b = [RigPart { sprite: &b, offset: Vec2::new(3.0, -1.0), layer: 0 }];
+    let state_a = [RigPart {
+        sprite: &a,
+        offset: Vec2::new(-2.0, 1.0),
+        layer: 0,
+    }];
+    let state_b = [RigPart {
+        sprite: &b,
+        offset: Vec2::new(3.0, -1.0),
+        layer: 0,
+    }];
 
     for (where_, root) in ANCHORS {
         for (which, heading) in HEADINGS {
@@ -612,7 +702,8 @@ fn a_state_mixture_is_the_premultiplied_mix_of_the_single_state_images() {
                     &mut Vec::new(),
                 );
                 for (f, x, y) in every_pixel() {
-                    let (pa, pb, pm) = (only_a.get(f, x, y), only_b.get(f, x, y), mixed.get(f, x, y));
+                    let (pa, pb, pm) =
+                        (only_a.get(f, x, y), only_b.get(f, x, y), mixed.get(f, x, y));
                     for c in 0..3 {
                         let want = w * pa[c] + (1.0 - w) * pb[c];
                         assert!(
@@ -627,8 +718,22 @@ fn a_state_mixture_is_the_premultiplied_mix_of_the_single_state_images() {
             // Two separate partially opaque redraws would let the ground back in. Measure how
             // much, so the identity above is not a tautology on this fixture.
             let mut naive = ground();
-            stamp_rig(&mut naive, root, heading, &[(&state_a[..], 1.0)], 0.5, &mut Vec::new());
-            stamp_rig(&mut naive, root, heading, &[(&state_b[..], 1.0)], 0.5, &mut Vec::new());
+            stamp_rig(
+                &mut naive,
+                root,
+                heading,
+                &[(&state_a[..], 1.0)],
+                0.5,
+                &mut Vec::new(),
+            );
+            stamp_rig(
+                &mut naive,
+                root,
+                heading,
+                &[(&state_b[..], 1.0)],
+                0.5,
+                &mut Vec::new(),
+            );
             let mut mixed = ground();
             stamp_rig(
                 &mut mixed,
@@ -654,9 +759,17 @@ fn a_state_mixture_is_the_premultiplied_mix_of_the_single_state_images() {
 fn zero_and_nonsense_state_weights_drop_their_state_without_enlarging_the_query() {
     let a = whole(true);
     let far = white(1, 1, Vec2::new(0.5, 0.5));
-    let state_a = [RigPart { sprite: &a, offset: Vec2::ZERO, layer: 0 }];
+    let state_a = [RigPart {
+        sprite: &a,
+        offset: Vec2::ZERO,
+        layer: 0,
+    }];
     // A part far enough out that including it would grow the query radius a long way.
-    let state_far = [RigPart { sprite: &far, offset: Vec2::new(0.0, 25.0), layer: 0 }];
+    let state_far = [RigPart {
+        sprite: &far,
+        offset: Vec2::new(0.0, 25.0),
+        layer: 0,
+    }];
     let root = SurfacePoint::new(Face::Front, 32.0, 32.0);
     let heading = Vec2::new(1.0, 0.0);
 
@@ -671,7 +784,11 @@ fn zero_and_nonsense_state_weights_drop_their_state_without_enlarging_the_query(
             1.0,
             &mut Vec::new(),
         );
-        assert_identical(&canvas, &alone, &format!("a state at weight {dead} must not be drawn"));
+        assert_identical(
+            &canvas,
+            &alone,
+            &format!("a state at weight {dead} must not be drawn"),
+        );
         // And it must not have enlarged the query either.
         let radius = rig_radius(&[(&state_a[..], 1.0), (&state_far[..], dead)]);
         assert!(
@@ -715,13 +832,29 @@ fn a_part_hanging_over_the_open_rim_is_cut_and_never_reflected() {
     // Tall and narrow, pivot near its bottom, so the part straddles the rim while staying
     // inside the nine-pixel material budget.
     let sprite = patch(0, 0, 4, 9, Vec2::new(2.0, 8.0), true);
-    let parts = [RigPart { sprite: &sprite, offset: Vec2::new(0.0, 6.0), layer: 0 }];
+    let parts = [RigPart {
+        sprite: &sprite,
+        offset: Vec2::new(0.0, 6.0),
+        layer: 0,
+    }];
     let heading = Vec2::new(1.0, 0.0);
 
     let mut rim = Canvas::cube();
-    draw(&mut rim, SurfacePoint::new(Face::Front, 32.0, 60.0), heading, &parts, 1.0);
+    draw(
+        &mut rim,
+        SurfacePoint::new(Face::Front, 32.0, 60.0),
+        heading,
+        &parts,
+        1.0,
+    );
     let mut flat = Canvas::cube();
-    draw(&mut flat, SurfacePoint::new(Face::Front, 32.0, 30.0), heading, &parts, 1.0);
+    draw(
+        &mut flat,
+        SurfacePoint::new(Face::Front, 32.0, 30.0),
+        heading,
+        &parts,
+        1.0,
+    );
 
     // The flat body really does reach past where the rim is, so the cut is not vacuous.
     assert!(
@@ -786,18 +919,39 @@ fn a_rig_straddling_a_seam_is_one_continuous_body_of_the_same_light() {
             draw(&mut c, mid, heading, &parts, 1.0);
             c
         });
-        assert!(middle > 1.0, "the fixture must carry real light, got {middle}");
+        assert!(
+            middle > 1.0,
+            "the fixture must carry real light, got {middle}"
+        );
 
         for (where_, root) in [
             // A side/side seam: a pure translation of the lattice, no turn.
-            ("a side/side seam", SurfacePoint::new(Face::Front, 63.5, 32.5)),
-            ("a side/side seam, off centre", SurfacePoint::new(Face::Right, 0.5, 41.5)),
+            (
+                "a side/side seam",
+                SurfacePoint::new(Face::Front, 63.5, 32.5),
+            ),
+            (
+                "a side/side seam, off centre",
+                SurfacePoint::new(Face::Right, 0.5, 41.5),
+            ),
             // Front/Top is an untwisted seam; Right/Top is a quarter turn (see
             // `travel`'s `design_example_right_to_top_is_a_quarter_turn`), and Back/Top a half.
-            ("a side/top seam, untwisted", SurfacePoint::new(Face::Front, 27.5, 0.5)),
-            ("a side/top seam, from Top", SurfacePoint::new(Face::Top, 38.5, 63.5)),
-            ("a side/top seam, a quarter turn", SurfacePoint::new(Face::Right, 32.5, 0.5)),
-            ("a side/top seam, a half turn", SurfacePoint::new(Face::Back, 32.5, 0.5)),
+            (
+                "a side/top seam, untwisted",
+                SurfacePoint::new(Face::Front, 27.5, 0.5),
+            ),
+            (
+                "a side/top seam, from Top",
+                SurfacePoint::new(Face::Top, 38.5, 63.5),
+            ),
+            (
+                "a side/top seam, a quarter turn",
+                SurfacePoint::new(Face::Right, 32.5, 0.5),
+            ),
+            (
+                "a side/top seam, a half turn",
+                SurfacePoint::new(Face::Back, 32.5, 0.5),
+            ),
         ] {
             let mut canvas = Canvas::cube();
             draw(&mut canvas, root, heading, &parts, 1.0);
@@ -830,28 +984,49 @@ fn at_every_top_vertex_every_pixel_has_one_owner() {
     // already-opaque pixel shows up as a value above 1 rather than hiding inside a dim colour.
     let bright = white(3, 3, Vec2::new(1.5, 1.5));
     let mut parts = rig_parts(&pieces, 0);
-    parts.push(RigPart { sprite: &bright, offset: Vec2::new(1.0, 0.0), layer: 1 });
+    parts.push(RigPart {
+        sprite: &bright,
+        offset: Vec2::new(1.0, 0.0),
+        layer: 1,
+    });
 
     // The twelve (vertex, incident face) pairs: the two upper corners of each side chart and
     // the four corners of Top.
     let mut anchors: Vec<(String, SurfacePoint)> = Vec::new();
     for face in [Face::Front, Face::Right, Face::Back, Face::Left] {
         for u in [0.5f64, 63.5] {
-            anchors.push((format!("{face:?} top corner u={u}"), SurfacePoint::new(face, u, 0.5)));
+            anchors.push((
+                format!("{face:?} top corner u={u}"),
+                SurfacePoint::new(face, u, 0.5),
+            ));
         }
     }
     for u in [0.5f64, 63.5] {
         for v in [0.5f64, 63.5] {
-            anchors.push((format!("Top corner ({u}, {v})"), SurfacePoint::new(Face::Top, u, v)));
+            anchors.push((
+                format!("Top corner ({u}, {v})"),
+                SurfacePoint::new(Face::Top, u, v),
+            ));
         }
     }
-    assert_eq!(anchors.len(), 12, "four top vertices from each of three incident faces");
+    assert_eq!(
+        anchors.len(),
+        12,
+        "four top vertices from each of three incident faces"
+    );
 
     for (where_, root) in &anchors {
         for (which, heading) in HEADINGS {
             let mut scratch: Vec<PixelImage> = Vec::new();
             let mut canvas = Canvas::cube();
-            stamp_rig(&mut canvas, *root, heading, &[(&parts[..], 1.0)], 1.0, &mut scratch);
+            stamp_rig(
+                &mut canvas,
+                *root,
+                heading,
+                &[(&parts[..], 1.0)],
+                1.0,
+                &mut scratch,
+            );
             assert!(
                 peak(&canvas) <= 1.0 + 1e-6,
                 "{where_} heading {which}: a pixel reached {} — brighter than full coverage, so \
@@ -919,12 +1094,28 @@ fn a_material_partition_is_never_duplicated_at_a_top_vertex() {
     let next = marked(0, 0);
     let gapped = marked(1, 0);
     let adjacent = [
-        RigPart { sprite: &near, offset: Vec2::ZERO, layer: 0 },
-        RigPart { sprite: &next, offset: Vec2::new(3.0, 0.0), layer: 0 },
+        RigPart {
+            sprite: &near,
+            offset: Vec2::ZERO,
+            layer: 0,
+        },
+        RigPart {
+            sprite: &next,
+            offset: Vec2::new(3.0, 0.0),
+            layer: 0,
+        },
     ];
     let gap = [
-        RigPart { sprite: &near, offset: Vec2::ZERO, layer: 0 },
-        RigPart { sprite: &gapped, offset: Vec2::new(3.0, 0.0), layer: 0 },
+        RigPart {
+            sprite: &near,
+            offset: Vec2::ZERO,
+            layer: 0,
+        },
+        RigPart {
+            sprite: &gapped,
+            offset: Vec2::new(3.0, 0.0),
+            layer: 0,
+        },
     ];
     let heading = Vec2::new(1.0, 0.0);
 
@@ -1006,7 +1197,10 @@ fn a_material_partition_is_never_duplicated_at_a_top_vertex() {
         let painted: Vec<(Face, u16, u16)> = every_pixel()
             .filter(|&(f, x, y)| canvas.get(f, x, y) != [0.0; 3])
             .collect();
-        assert!(!painted.is_empty(), "{where_}: the vertex fixture painted nothing");
+        assert!(
+            !painted.is_empty(),
+            "{where_}: the vertex fixture painted nothing"
+        );
         assert!(
             painted.iter().any(|&(f, _, _)| f != root.face),
             "{where_}: the marked texels stayed on the root's own chart ({painted:?}), so the \
@@ -1018,7 +1212,13 @@ fn a_material_partition_is_never_duplicated_at_a_top_vertex() {
     // owned through the root's Front→Top image, so it reads body (0.5, −1.5) — the first
     // part's painted texel centre at full weight, and the second part's texel not at all.
     let mut canvas = Canvas::cube();
-    draw(&mut canvas, SurfacePoint::new(Face::Front, 63.0, 1.0), heading, &adjacent[..], 1.0);
+    draw(
+        &mut canvas,
+        SurfacePoint::new(Face::Front, 63.0, 1.0),
+        heading,
+        &adjacent[..],
+        1.0,
+    );
     let px = canvas.get(Face::Top, 63, 63);
     for c in 0..3 {
         assert!(
@@ -1062,13 +1262,29 @@ fn visible_material_over_the_rim_is_drawn_and_off_surface_support_does_not_veto_
         "Astra's fixture measures an extent of about 7.726, not {}",
         sprite.extent()
     );
-    let parts = [RigPart { sprite: &sprite, offset: Vec2::new(6.0, 0.0), layer: 0 }];
+    let parts = [RigPart {
+        sprite: &sprite,
+        offset: Vec2::new(6.0, 0.0),
+        layer: 0,
+    }];
     let heading = Vec2::new(0.0, 1.0);
 
     let mut rim = Canvas::cube();
-    draw(&mut rim, SurfacePoint::new(Face::Front, 32.0, 60.0), heading, &parts, 1.0);
+    draw(
+        &mut rim,
+        SurfacePoint::new(Face::Front, 32.0, 60.0),
+        heading,
+        &parts,
+        1.0,
+    );
     let mut flat = Canvas::cube();
-    draw(&mut flat, SurfacePoint::new(Face::Front, 32.0, 30.0), heading, &parts, 1.0);
+    draw(
+        &mut flat,
+        SurfacePoint::new(Face::Front, 32.0, 30.0),
+        heading,
+        &parts,
+        1.0,
+    );
 
     // The rear texel, on the surface, at the flat placement's own pixel.
     assert_eq!(
@@ -1100,8 +1316,11 @@ fn visible_material_over_the_rim_is_drawn_and_off_surface_support_does_not_veto_
     // And the whole image is the flat one shifted thirty rows, with the rows that do not exist
     // simply missing — no reflected copy, nothing on another face.
     for (f, x, y) in every_pixel() {
-        let want =
-            if f == Face::Front && y >= 30 { flat.get(Face::Front, x, y - 30) } else { [0.0; 3] };
+        let want = if f == Face::Front && y >= 30 {
+            flat.get(Face::Front, x, y - 30)
+        } else {
+            [0.0; 3]
+        };
         assert_eq!(
             rim.get(f, x, y),
             want,
@@ -1119,7 +1338,13 @@ fn visible_material_over_the_rim_is_drawn_and_off_surface_support_does_not_veto_
     let mut v = 49.0f64;
     while v <= 63.5 {
         let mut canvas = Canvas::cube();
-        draw(&mut canvas, SurfacePoint::new(Face::Front, 32.0, v), heading, &parts, 1.0);
+        draw(
+            &mut canvas,
+            SurfacePoint::new(Face::Front, 32.0, v),
+            heading,
+            &parts,
+            1.0,
+        );
         let light = total_light(&canvas);
         assert!(
             light >= 2.9,
@@ -1143,7 +1368,13 @@ fn visible_material_over_the_rim_is_drawn_and_off_surface_support_does_not_veto_
     }
     // The sweep really did lose the front texel: it starts with both and ends with one.
     let mut both = Canvas::cube();
-    draw(&mut both, SurfacePoint::new(Face::Front, 32.0, 49.0), heading, &parts, 1.0);
+    draw(
+        &mut both,
+        SurfacePoint::new(Face::Front, 32.0, 49.0),
+        heading,
+        &parts,
+        1.0,
+    );
     assert!(
         (total_light(&both) - 6.0).abs() < 1e-6,
         "the sweep must start with both texels on the surface, not {}",
@@ -1162,7 +1393,11 @@ fn rig_radius_is_the_documented_maximum_over_the_participating_parts() {
     let pieces = chain(true);
     let parts = rig_parts(&pieces, 0);
     let big = whole(true);
-    let other = [RigPart { sprite: &big, offset: Vec2::new(-3.0, 7.5), layer: 1 }];
+    let other = [RigPart {
+        sprite: &big,
+        offset: Vec2::new(-3.0, 7.5),
+        layer: 1,
+    }];
 
     let by_hand = |sets: &[&[RigPart<'_>]]| {
         sets.iter()
@@ -1173,14 +1408,21 @@ fn rig_radius_is_the_documented_maximum_over_the_participating_parts() {
     };
 
     let one = rig_radius(&[(&parts[..], 1.0)]);
-    assert!((one - by_hand(&[&parts])).abs() < 1e-12, "{one} vs {}", by_hand(&[&parts]));
+    assert!(
+        (one - by_hand(&[&parts])).abs() < 1e-12,
+        "{one} vs {}",
+        by_hand(&[&parts])
+    );
     let both = rig_radius(&[(&parts[..], 0.4), (&other[..], 0.6)]);
     assert!(
         (both - by_hand(&[&parts, &other])).abs() < 1e-12,
         "{both} vs {}",
         by_hand(&[&parts, &other])
     );
-    assert!(both > one, "the second state's part is further out, so it must widen the query");
+    assert!(
+        both > one,
+        "the second state's part is further out, so it must widen the query"
+    );
 
     // No parts is zero, both for an empty state list and for an empty state.
     let empty: [RigPart<'_>; 0] = [];
@@ -1211,7 +1453,11 @@ fn the_rigs_own_radius_paints_what_a_larger_legal_radius_paints() {
     let pieces = chain(false);
     let bright = white(3, 3, Vec2::new(1.5, 1.5));
     let mut parts = rig_parts(&pieces, 0);
-    parts.push(RigPart { sprite: &bright, offset: Vec2::new(5.0, -2.0), layer: 1 });
+    parts.push(RigPart {
+        sprite: &bright,
+        offset: Vec2::new(5.0, -2.0),
+        layer: 1,
+    });
     let generous = 24.0;
     assert!(generous <= MAX_LOCAL_RADIUS);
     assert!(
@@ -1240,7 +1486,10 @@ fn the_rigs_own_radius_paints_what_a_larger_legal_radius_paints() {
                      rig's own query missed"
                 ),
             );
-            assert!(max_diff(&tight, &ground()) > 0.01, "{where_}/{which}: the fixture is blank");
+            assert!(
+                max_diff(&tight, &ground()) > 0.01,
+                "{where_}/{which}: the fixture is blank"
+            );
         }
     }
 }
@@ -1255,7 +1504,11 @@ fn the_rigs_own_radius_paints_what_a_larger_legal_radius_paints() {
 #[test]
 fn degenerate_input_draws_nothing_and_does_not_panic() {
     let sprite = whole(true);
-    let parts = [RigPart { sprite: &sprite, offset: Vec2::ZERO, layer: 0 }];
+    let parts = [RigPart {
+        sprite: &sprite,
+        offset: Vec2::ZERO,
+        layer: 0,
+    }];
     let root = SurfacePoint::new(Face::Front, 32.0, 32.0);
 
     for (what, heading, opacity) in [
@@ -1267,14 +1520,32 @@ fn degenerate_input_draws_nothing_and_does_not_panic() {
         ("a NaN opacity", Vec2::new(1.0, 0.0), f32::NAN),
     ] {
         let mut canvas = ground();
-        stamp_rig(&mut canvas, root, heading, &[(&parts[..], 1.0)], opacity, &mut Vec::new());
+        stamp_rig(
+            &mut canvas,
+            root,
+            heading,
+            &[(&parts[..], 1.0)],
+            opacity,
+            &mut Vec::new(),
+        );
         assert_identical(&canvas, &ground(), &format!("{what} must draw nothing"));
     }
 
     // An opacity above 1 is clamped to 1, not refused.
     let mut clamped = ground();
-    stamp_rig(&mut clamped, root, Vec2::new(1.0, 0.0), &[(&parts[..], 1.0)], 4.0, &mut Vec::new());
-    assert_identical(&clamped, &drawn(root, Vec2::new(1.0, 0.0), &parts, 1.0), "opacity clamp");
+    stamp_rig(
+        &mut clamped,
+        root,
+        Vec2::new(1.0, 0.0),
+        &[(&parts[..], 1.0)],
+        4.0,
+        &mut Vec::new(),
+    );
+    assert_identical(
+        &clamped,
+        &drawn(root, Vec2::new(1.0, 0.0), &parts, 1.0),
+        "opacity clamp",
+    );
 
     // A heading of any length is a direction: only its normalization is used.
     for scale in [0.25f64, 1.0, 17.0] {
@@ -1293,7 +1564,11 @@ fn degenerate_input_draws_nothing_and_does_not_panic() {
 #[should_panic(expected = "MAX_LOCAL_RADIUS")]
 fn the_generous_reference_query_refuses_an_illegal_radius() {
     let sprite = whole(true);
-    let parts = [RigPart { sprite: &sprite, offset: Vec2::ZERO, layer: 0 }];
+    let parts = [RigPart {
+        sprite: &sprite,
+        offset: Vec2::ZERO,
+        layer: 0,
+    }];
     stamp_rig_with_radius(
         &mut Canvas::cube(),
         SurfacePoint::new(Face::Front, 32.0, 32.0),

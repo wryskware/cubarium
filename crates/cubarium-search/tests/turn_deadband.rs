@@ -47,9 +47,15 @@ fn a_policy_file_records_the_adapter_and_a_missing_one_is_the_shipped_adapter() 
         two.policy_digest,
         cubarium_core::neural::schema_digest_in(ActionAdapter::CubAct2)
     );
-    two.check_adapter(ActionAdapter::CubAct2).expect("its own adapter");
-    let err = two.check_adapter(ActionAdapter::CubAct1).expect_err("the other one is refused");
-    assert!(err.contains("cub-act-2"), "the refusal names the file's adapter: {err}");
+    two.check_adapter(ActionAdapter::CubAct2)
+        .expect("its own adapter");
+    let err = two
+        .check_adapter(ActionAdapter::CubAct1)
+        .expect_err("the other one is refused");
+    assert!(
+        err.contains("cub-act-2"),
+        "the refusal names the file's adapter: {err}"
+    );
     assert!(err.contains("cub-act-1"), "and the evaluation's: {err}");
     assert!(err.contains("not the same task"), "{err}");
 
@@ -77,10 +83,16 @@ fn a_policy_file_records_the_adapter_and_a_missing_one_is_the_shipped_adapter() 
     value.as_object_mut().expect("object").remove("adapter");
     let old: PolicyFile = serde_json::from_value(value).expect("an older file still parses");
     assert_eq!(old.adapter, None);
-    assert_eq!(old.adapter().expect("read as the shipped adapter"), ActionAdapter::CubAct1);
+    assert_eq!(
+        old.adapter().expect("read as the shipped adapter"),
+        ActionAdapter::CubAct1
+    );
     old.check_adapter(ActionAdapter::CubAct1).expect("accepted");
     assert!(old.check_adapter(ActionAdapter::CubAct2).is_err());
-    assert!(old.policy().is_ok(), "the weights themselves are still loadable");
+    assert!(
+        old.policy().is_ok(),
+        "the weights themselves are still loadable"
+    );
 
     // And a `cub-act-2` file rebuilds into a policy stamped for `cub-act-2`.
     let policy = two.policy().expect("loadable");
@@ -95,7 +107,10 @@ fn restamping_a_theta_for_the_other_adapter_moves_no_weight() {
     let one = tensor::policy(&theta).expect("a policy");
     let two = tensor::policy_in(&theta, ActionAdapter::CubAct2).expect("a policy");
     assert_ne!(one.schema_digest, two.schema_digest);
-    for (a, b) in tensor::flatten(&one.weights).iter().zip(tensor::flatten(&two.weights)) {
+    for (a, b) in tensor::flatten(&one.weights)
+        .iter()
+        .zip(tensor::flatten(&two.weights))
+    {
         assert_eq!(a.to_bits(), b.to_bits());
     }
     assert_eq!(one.weights, two.weights);
@@ -111,7 +126,11 @@ fn restamping_a_theta_for_the_other_adapter_moves_no_weight() {
 #[test]
 fn the_host_refuses_a_cub_act_2_policy_by_name() {
     let mut world = World::new(WorldConfig::default()).expect("valid");
-    assert_eq!(world.action_adapter(), ActionAdapter::CubAct1, "the host names no adapter");
+    assert_eq!(
+        world.action_adapter(),
+        ActionAdapter::CubAct1,
+        "the host names no adapter"
+    );
     for _ in 0..200 {
         world.step();
         world.drain_events();
@@ -119,16 +138,39 @@ fn the_host_refuses_a_cub_act_2_policy_by_name() {
     let before = world.population();
 
     let foreign = Policy::new_in(Gru32::zeros(), ActionAdapter::CubAct2);
-    let id = world.state.organisms.iter().map(|(i, _)| i).next().expect("a body");
-    let err = world.attach_neural_policy(id, foreign.clone()).expect_err("refused");
-    assert!(err.contains("cub-act-2"), "the refusal names the policy's adapter: {err}");
+    let id = world
+        .state
+        .organisms
+        .iter()
+        .map(|(i, _)| i)
+        .next()
+        .expect("a body");
+    let err = world
+        .attach_neural_policy(id, foreign.clone())
+        .expect_err("refused");
+    assert!(
+        err.contains("cub-act-2"),
+        "the refusal names the policy's adapter: {err}"
+    );
     assert!(err.contains("cub-act-1"), "and the world's: {err}");
     assert!(world.neural().get(id).is_none());
 
     // `found_neural_animal` is the other door, and it refuses before the body exists.
-    let pos = cubarium_surface::CellId::new(cubarium_surface::Topology::Cube, cubarium_surface::Scale::ONE, cubarium_surface::Face::Top, 8, 8).center(cubarium_surface::Topology::Cube, cubarium_surface::Scale::ONE);
+    let pos = cubarium_surface::CellId::new(
+        cubarium_surface::Topology::Cube,
+        cubarium_surface::Scale::ONE,
+        cubarium_surface::Face::Top,
+        8,
+        8,
+    )
+    .center(
+        cubarium_surface::Topology::Cube,
+        cubarium_surface::Scale::ONE,
+    );
     let heading = cubarium_surface::Vec2::new(1.0, 0.0);
-    let err = world.found_neural_animal(pos, heading, foreign).expect_err("refused");
+    let err = world
+        .found_neural_animal(pos, heading, foreign)
+        .expect_err("refused");
     assert!(err.contains("cub-act-2"), "{err}");
     assert_eq!(world.population(), before, "a refused seed founds nothing");
 
@@ -151,18 +193,25 @@ fn a_layout_puts_its_world_on_its_own_adapter() {
     let (world, id) = released.build().expect("builds");
     assert_eq!(world.action_adapter(), ActionAdapter::CubAct2);
     // And the layout hash does not move with it.
-    assert_eq!(plain.hash(&plain.config()), released.hash(&released.config()));
+    assert_eq!(
+        plain.hash(&plain.config()),
+        released.hash(&released.config())
+    );
 
     // A `cub-act-2` policy runs in it, for ordinary core inference.
     let mut world = world;
     let policy =
         tensor::policy_in(&tensor::initial_center(11), ActionAdapter::CubAct2).expect("a policy");
-    world.attach_neural_policy(id, policy).expect("its own adapter attaches");
+    world
+        .attach_neural_policy(id, policy)
+        .expect("its own adapter attaches");
     for _ in 0..200 {
         world.step();
         world.drain_events();
     }
-    world.check_invariants().expect("the world stays consistent");
+    world
+        .check_invariants()
+        .expect("the world stays consistent");
 }
 
 // -------------------------------------------------------------------------------------------

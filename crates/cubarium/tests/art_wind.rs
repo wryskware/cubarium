@@ -17,21 +17,18 @@
 use cubarium_surface::{Scale, Topology};
 use std::path::{Path, PathBuf};
 
-use cube_proto::{FACE_SIZE, Face};
 use cubarium::art::{ArtPack, Band, Clip, TallPlant};
 use cubarium::art_present::{
     ArtPresenter, Growth, MOTIF_OPACITY, PLANT_BEND_LENGTH, PLANT_BEND_ROOT, SOIL_SCALE,
     TALL_BEND_LENGTH, TALL_BEND_ROOT, TALL_FIRST_JOIN, TALL_JOIN, TALL_MAX_SEGMENTS, TALL_OPACITY,
     TALL_PLANTS, TALL_STRIP_FLOOR, TALL_STRIP_TOP, TALL_VINE_FLOOR, TALL_VINE_TOP, TILE_ROWS,
-    TallColumn, VINE_PLANT,
-    WIND_CHART_MAX, WIND_FALL, WIND_FLUTTER, WIND_FLUTTER_SECONDS, WIND_HOLD, WIND_PEAK_SECONDS,
-    WIND_PEAK_VARY, WIND_PERIOD, WIND_QUIET_SECONDS, WIND_RISE, WIND_SLOT_VARIATION,
-    WIND_TRAVEL_SECONDS, band_of, canopy_heading, effective_tip, placement_of, plant_bend,
-    plant_bend_budget, plant_cap, plant_phase_of, present_seconds, slot_of, slot_wind,
+    TallColumn, VINE_PLANT, WIND_CHART_MAX, WIND_FALL, WIND_FLUTTER, WIND_FLUTTER_SECONDS,
+    WIND_HOLD, WIND_PEAK_SECONDS, WIND_PEAK_VARY, WIND_PERIOD, WIND_QUIET_SECONDS, WIND_RISE,
+    WIND_SLOT_VARIATION, WIND_TRAVEL_SECONDS, band_of, canopy_heading, effective_tip, placement_of,
+    plant_bend, plant_bend_budget, plant_cap, plant_phase_of, present_seconds, slot_of, slot_wind,
     species_of, tall_amplitude, tall_anchor_at, tall_bend_base, tall_bend_budget, tall_columns,
     tall_grown_px, tall_heading, tall_wind_of, trunk_strip, wind_at, wind_chart, wind_phase,
-    wind_response, wind_strength,
-    wood_from_producer,
+    wind_response, wind_strength, wood_from_producer,
 };
 use cubarium::clock::DT;
 use cubarium::present::PRODUCER_SATURATION;
@@ -39,10 +36,10 @@ use cubarium_core::OrganismId;
 use cubarium_core::organism::Mode;
 use cubarium_core::view::{OrganismView, RenderView};
 use cubarium_render::{
-    Bend, Canvas, Mask, Pose, Sprite, srgb_decode, stamp_layers_bent,
-    stamp_layers_bent_with_radius,
+    Bend, Canvas, Mask, Pose, Sprite, srgb_decode, stamp_layers_bent, stamp_layers_bent_with_radius,
 };
 use cubarium_surface::{CUBE_CELL_COUNT, CellId, SurfacePoint, Vec2, travel};
+use cube_proto::{FACE_SIZE, Face};
 
 // ---------------------------------------------------------------------------
 // fixtures
@@ -142,7 +139,9 @@ fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
 fn near(cell: CellId) -> Vec<(Face, u16, u16)> {
     let centre = cell.center(Topology::Cube, Scale::ONE);
     (0..FACE_SIZE as u16)
-        .flat_map(|y| (0..FACE_SIZE as u16).map(move |x| (cell.face(Topology::Cube, Scale::ONE), x, y)))
+        .flat_map(|y| {
+            (0..FACE_SIZE as u16).map(move |x| (cell.face(Topology::Cube, Scale::ONE), x, y))
+        })
         .filter(|&(_, x, y)| {
             (f64::from(x) + 0.5 - centre.u).hypot(f64::from(y) + 0.5 - centre.v) <= 12.0
         })
@@ -164,7 +163,9 @@ fn max_diff(a: &Canvas, b: &Canvas) -> f32 {
 }
 
 fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u16, u16)> {
-    every_pixel().filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y)).collect()
+    every_pixel()
+        .filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y))
+        .collect()
 }
 
 fn assert_same_canvas(a: &Canvas, b: &Canvas, what: &str) {
@@ -309,14 +310,21 @@ fn the_shared_gust_stays_in_range_rests_exactly_and_never_jumps_at_a_boundary() 
         );
         let u = seconds % WIND_PERIOD;
         if u >= active_seconds() {
-            assert_eq!(s, 0.0, "the quiet interval is not exactly quiet at {seconds} (u = {u})");
+            assert_eq!(
+                s, 0.0,
+                "the quiet interval is not exactly quiet at {seconds} (u = {u})"
+            );
         }
         if s > best.1 {
             best = (u, s);
         }
         previous = s;
     }
-    assert!(best.1 > 0.99, "the gust never reached full strength: {}", best.1);
+    assert!(
+        best.1 > 0.99,
+        "the gust never reached full strength: {}",
+        best.1
+    );
     assert!(
         best.0 >= WIND_RISE && best.0 <= WIND_RISE + WIND_HOLD,
         "the gust peaked at u = {}, outside the hold",
@@ -381,7 +389,11 @@ fn the_chart_breeze_agrees_in_three_dimensions_on_both_sides_of_every_seam() {
                 assert_eq!(crossed.reflections, 0);
                 let there = crossed.end;
                 let mine = Topology::Cube.embed_tangent(Scale::ONE, &here, wind_chart(face, u, v));
-                let theirs = Topology::Cube.embed_tangent(Scale::ONE, &there, wind_chart(there.face, there.u, there.v));
+                let theirs = Topology::Cube.embed_tangent(
+                    Scale::ONE,
+                    &there,
+                    wind_chart(there.face, there.u, there.v),
+                );
                 for axis in 0..3 {
                     assert!(
                         (mine[axis] - theirs[axis]).abs() < 1e-5,
@@ -431,7 +443,11 @@ fn the_chart_breeze_is_exactly_calm_at_the_side_seams_the_top_vertices_and_the_t
             );
         }
     }
-    assert_eq!(wind_chart(Face::Top, 32.0, 32.0), Vec2::ZERO, "Top's centre is not calm");
+    assert_eq!(
+        wind_chart(Face::Top, 32.0, 32.0),
+        Vec2::ZERO,
+        "Top's centre is not calm"
+    );
 
     // |W| ≤ WIND_CHART_MAX everywhere, and it is reached (so the constant is not slack).
     let mut most = 0.0f64;
@@ -440,12 +456,18 @@ fn the_chart_breeze_is_exactly_calm_at_the_side_seams_the_top_vertices_and_the_t
             for j in 0..=128 {
                 let (u, v) = (f64::from(i) * 0.5, f64::from(j) * 0.5);
                 let w = wind_chart(face, u, v).length();
-                assert!(w <= WIND_CHART_MAX + 1e-12, "{face:?} at ({u}, {v}) blows {w}");
+                assert!(
+                    w <= WIND_CHART_MAX + 1e-12,
+                    "{face:?} at ({u}, {v}) blows {w}"
+                );
                 most = most.max(w);
             }
         }
     }
-    assert!((most - WIND_CHART_MAX).abs() < 1e-12, "the largest chart wind is {most}");
+    assert!(
+        (most - WIND_CHART_MAX).abs() < 1e-12,
+        "the largest chart wind is {most}"
+    );
 
     for bad in [f64::NAN, f64::INFINITY] {
         assert_eq!(wind_chart(Face::Front, bad, 32.0), Vec2::ZERO);
@@ -470,7 +492,10 @@ fn the_delayed_per_root_breeze_is_exactly_zero_through_the_shared_quiet_interval
         .map(|(_, r)| r.lag_seconds)
         .collect();
     let worst_lag = lags.iter().cloned().fold(0.0f64, f64::max);
-    assert!(worst_lag > 0.0 && worst_lag <= 0.5, "the table's lags are {lags:?}");
+    assert!(
+        worst_lag > 0.0 && worst_lag <= 0.5,
+        "the table's lags are {lags:?}"
+    );
     let margin = WIND_TRAVEL_SECONDS + worst_lag;
     assert!(
         WIND_QUIET_SECONDS > 2.0 * margin,
@@ -480,15 +505,20 @@ fn the_delayed_per_root_breeze_is_exactly_zero_through_the_shared_quiet_interval
     let points: Vec<SurfacePoint> = Face::ALL
         .into_iter()
         .flat_map(|face| {
-            [1.5f64, 16.0, 32.0, 47.5, 62.5].into_iter().flat_map(move |u| {
-                [1.5f64, 16.0, 32.0, 47.5, 62.5].into_iter().map(move |v| {
-                    SurfacePoint::new(face, u, v)
+            [1.5f64, 16.0, 32.0, 47.5, 62.5]
+                .into_iter()
+                .flat_map(move |u| {
+                    [1.5f64, 16.0, 32.0, 47.5, 62.5]
+                        .into_iter()
+                        .map(move |v| SurfacePoint::new(face, u, v))
                 })
-            })
         })
         .collect();
     for point in &points {
-        assert!(wind_phase(*point).abs() <= 1.0 + 1e-12, "the spatial phase left [−1, 1]");
+        assert!(
+            wind_phase(*point).abs() <= 1.0 + 1e-12,
+            "the spatial phase left [−1, 1]"
+        );
     }
 
     for packet in 0..4 {
@@ -510,7 +540,10 @@ fn the_delayed_per_root_breeze_is_exactly_zero_through_the_shared_quiet_interval
             samples += 1;
             seconds += 0.25;
         }
-        assert!(samples > 20, "only {samples} quiet samples in packet {packet}");
+        assert!(
+            samples > 20,
+            "only {samples} quiet samples in packet {packet}"
+        );
     }
 
     // Outside a quiet interval the breeze is the chart field scaled by a factor in [0, 1]: the
@@ -556,8 +589,14 @@ fn a_familys_admitted_tip_leaves_room_for_the_largest_slot_variation() {
     for budget in [0.0, 0.01, 0.05, 0.2, 0.55, 0.62, 3.8, 7.7] {
         for tip in [0.0, 0.12, 0.45, 0.5, 0.7, 0.9, 12.0] {
             let admitted = effective_tip(tip, budget);
-            assert!(admitted >= 0.0, "an admitted tip is never negative: {admitted}");
-            assert!(admitted <= tip + 1e-12, "{admitted} is more than the desired {tip}");
+            assert!(
+                admitted >= 0.0,
+                "an admitted tip is never negative: {admitted}"
+            );
+            assert!(
+                admitted <= tip + 1e-12,
+                "{admitted} is more than the desired {tip}"
+            );
             assert!(
                 admitted * most <= budget + 1e-12,
                 "tip {tip} on budget {budget} admits {admitted}, which a +{}% slot turns into {}",
@@ -573,7 +612,11 @@ fn a_familys_admitted_tip_leaves_room_for_the_largest_slot_variation() {
         assert_eq!(effective_tip(f64::INFINITY, budget), 0.0);
     }
     for tip in [0.0, 0.45, 0.9] {
-        assert_eq!(effective_tip(tip, f64::INFINITY), tip, "nothing measured bounds this asset");
+        assert_eq!(
+            effective_tip(tip, f64::INFINITY),
+            tip,
+            "nothing measured bounds this asset"
+        );
         assert_eq!(effective_tip(tip, f64::NAN), 0.0);
         assert_eq!(effective_tip(tip, -1.0), 0.0);
     }
@@ -613,7 +656,12 @@ fn every_measured_budget_matches_an_independent_sweep_of_bend_headroom() {
             "{}'s budget is not the smallest headroom of its whole family",
             plant.name
         );
-        assert_eq!(presenter.bend_budget(&plant.name), want, "{} is not in the table", plant.name);
+        assert_eq!(
+            presenter.bend_budget(&plant.name),
+            want,
+            "{} is not in the table",
+            plant.name
+        );
         assert!(want > 0.0, "{} cannot move at all", plant.name);
     }
 
@@ -625,14 +673,20 @@ fn every_measured_budget_matches_an_independent_sweep_of_bend_headroom() {
     };
     let trunk_base = tall_bend_base(f64::from(TALL_MAX_SEGMENTS));
     let cap_base = tall_bend_base(f64::from(TALL_MAX_SEGMENTS) + 1.0);
-    assert_eq!(tall_bend_base(0.0), -8.0, "a base tile's bottom edge is 8 px below the horizon");
+    assert_eq!(
+        tall_bend_base(0.0),
+        -8.0,
+        "a base tile's bottom edge is 8 px below the horizon"
+    );
     assert_eq!(trunk_base, 4.0 * f64::from(TALL_MAX_SEGMENTS) - 8.0);
     for plant in &art.tall {
         // Opted-in vines render a derived pair, not the original authored trunk.
         // Retain the independent raw-clip check too by explicitly testing legacy mode.
         let mut want = if let Some(vine) = &plant.vine_strips {
             column_over(&vine.trunk, trunk_base).min(column_over(&vine.endpoint, cap_base))
-        } else { column_over(&plant.trunk, trunk_base) };
+        } else {
+            column_over(&plant.trunk, trunk_base)
+        };
         if let Some(base) = &plant.base {
             want = want.min(column_over(base, tall_bend_base(0.0)));
         }
@@ -645,24 +699,46 @@ fn every_measured_budget_matches_an_independent_sweep_of_bend_headroom() {
             "{}'s column budget is not the smallest headroom of its rendered parts",
             plant.name
         );
-        assert_eq!(presenter.bend_budget(&plant.name), want, "{} is not in the table", plant.name);
+        assert_eq!(
+            presenter.bend_budget(&plant.name),
+            want,
+            "{} is not in the table",
+            plant.name
+        );
         assert!(want > 0.0, "{} cannot move at all", plant.name);
     }
     let mut legacy = pack();
-    let vine = legacy.tall.iter_mut().find(|p| p.name == VINE_PLANT).unwrap();
+    let vine = legacy
+        .tall
+        .iter_mut()
+        .find(|p| p.name == VINE_PLANT)
+        .unwrap();
     assert!(vine.vine_strips.take().is_some());
     assert_eq!(tall_bend_budget(vine), column_over(&vine.trunk, trunk_base));
 
     // The table covers the whole pack and nothing else, and an unmeasured name stands still.
-    assert_eq!(presenter.bend_budgets().len(), art.plants.len() + art.tall.len());
+    assert_eq!(
+        presenter.bend_budgets().len(),
+        art.plants.len() + art.tall.len()
+    );
     assert_eq!(presenter.bend_budget("no such plant"), 0.0);
 
     // A column shares one budget with its vine, because both bend by the same amplitude.
     let vine = presenter.bend_budget(VINE_PLANT);
     for (pick, name) in TALL_PLANTS.iter().enumerate() {
         let own = presenter.bend_budget(name);
-        let bare = TallColumn { face: Face::Front, cx: 3, pick, vine: false };
-        let vined = TallColumn { face: Face::Front, cx: 3, pick, vine: true };
+        let bare = TallColumn {
+            face: Face::Front,
+            cx: 3,
+            pick,
+            vine: false,
+        };
+        let vined = TallColumn {
+            face: Face::Front,
+            cx: 3,
+            pick,
+            vine: true,
+        };
         assert_eq!(presenter.column_budget(&bare), own);
         assert_eq!(presenter.column_budget(&vined), own.min(vine));
     }
@@ -682,7 +758,10 @@ fn every_measured_budget_matches_an_independent_sweep_of_bend_headroom() {
 fn every_shipped_plant_and_column_frame_draws_completely_at_its_own_budget() {
     let art = pack();
     let anchors = [
-        ("a chart interior", SurfacePoint::new(Face::Front, 32.25, 40.25)),
+        (
+            "a chart interior",
+            SurfacePoint::new(Face::Front, 32.25, 40.25),
+        ),
         ("a side seam", SurfacePoint::new(Face::Front, 63.5, 32.5)),
         ("a top vertex", SurfacePoint::new(Face::Top, 0.25, 0.25)),
     ];
@@ -698,14 +777,27 @@ fn every_shipped_plant_and_column_frame_draws_completely_at_its_own_budget() {
         };
         for frame in clip.frames.iter().step_by(STRIDE) {
             for sign in [-1.0, 1.0] {
-                let bend = Bend { amplitude: sign * admitted, base, root, length };
+                let bend = Bend {
+                    amplitude: sign * admitted,
+                    base,
+                    root,
+                    length,
+                };
                 assert!(
                     frame.bend_headroom(root, length, base) >= admitted - 1e-12,
                     "{name}: the family budget {admitted} is over this frame's own headroom"
                 );
                 for (what, anchor) in anchors {
                     let mut tight = Canvas::cube();
-                    stamp(&mut tight, frame, anchor, Vec2::new(0.8, -0.6), 1.0, Mask::None, bend);
+                    stamp(
+                        &mut tight,
+                        frame,
+                        anchor,
+                        Vec2::new(0.8, -0.6),
+                        1.0,
+                        Mask::None,
+                        bend,
+                    );
                     let mut wide = Canvas::cube();
                     stamp_layers_bent_with_radius(
                         &mut wide,
@@ -725,7 +817,11 @@ fn every_shipped_plant_and_column_frame_draws_completely_at_its_own_budget() {
                         &format!("{name} at {what}, amplitude {}", bend.amplitude),
                     );
                     let painted = every_pixel().any(|(f, x, y)| tight.get(f, x, y) != [0.0; 3]);
-                    assert!(painted, "{name} vanished at {what} under {}", bend.amplitude);
+                    assert!(
+                        painted,
+                        "{name} vanished at {what} under {}",
+                        bend.amplitude
+                    );
                     checked += 1;
                 }
             }
@@ -735,33 +831,91 @@ fn every_shipped_plant_and_column_frame_draws_completely_at_its_own_budget() {
     for plant in &art.plants {
         let budget = plant_bend_budget(plant);
         for stage in &plant.stages {
-            sweep(&plant.name, stage, budget, PLANT_BEND_ROOT, PLANT_BEND_LENGTH, 0.0);
+            sweep(
+                &plant.name,
+                stage,
+                budget,
+                PLANT_BEND_ROOT,
+                PLANT_BEND_LENGTH,
+                0.0,
+            );
         }
         if let Some(fruit) = &plant.fruit {
-            sweep(&plant.name, fruit, budget, PLANT_BEND_ROOT, PLANT_BEND_LENGTH, 0.0);
+            sweep(
+                &plant.name,
+                fruit,
+                budget,
+                PLANT_BEND_ROOT,
+                PLANT_BEND_LENGTH,
+                0.0,
+            );
         }
         for transition in &plant.transitions {
-            sweep(&plant.name, &transition.clip, budget, PLANT_BEND_ROOT, PLANT_BEND_LENGTH, 0.0);
+            sweep(
+                &plant.name,
+                &transition.clip,
+                budget,
+                PLANT_BEND_ROOT,
+                PLANT_BEND_LENGTH,
+                0.0,
+            );
         }
     }
     for plant in &art.tall {
         let budget = tall_bend_budget(plant);
         let trunk_base = tall_bend_base(f64::from(TALL_MAX_SEGMENTS));
         if let Some(base) = &plant.base {
-            sweep(&plant.name, base, budget, TALL_BEND_ROOT, TALL_BEND_LENGTH, tall_bend_base(0.0));
+            sweep(
+                &plant.name,
+                base,
+                budget,
+                TALL_BEND_ROOT,
+                TALL_BEND_LENGTH,
+                tall_bend_base(0.0),
+            );
         }
         if let Some(vine) = &plant.vine_strips {
-            sweep(&plant.name, &vine.trunk, budget, TALL_BEND_ROOT, TALL_BEND_LENGTH, trunk_base);
-            sweep(&plant.name, &vine.endpoint, budget, TALL_BEND_ROOT, TALL_BEND_LENGTH,
-                tall_bend_base(f64::from(TALL_MAX_SEGMENTS) + 1.0));
+            sweep(
+                &plant.name,
+                &vine.trunk,
+                budget,
+                TALL_BEND_ROOT,
+                TALL_BEND_LENGTH,
+                trunk_base,
+            );
+            sweep(
+                &plant.name,
+                &vine.endpoint,
+                budget,
+                TALL_BEND_ROOT,
+                TALL_BEND_LENGTH,
+                tall_bend_base(f64::from(TALL_MAX_SEGMENTS) + 1.0),
+            );
             // Also preserve the legacy raw-image footprint check at its own admission;
             // the opt-in intentionally no longer tries to bend this unrendered image.
-            let raw_budget = plant.trunk.frames.iter()
+            let raw_budget = plant
+                .trunk
+                .frames
+                .iter()
                 .map(|f| f.bend_headroom(TALL_BEND_ROOT, TALL_BEND_LENGTH, trunk_base))
                 .fold(f64::INFINITY, f64::min);
-            sweep(&plant.name, &plant.trunk, raw_budget, TALL_BEND_ROOT, TALL_BEND_LENGTH, trunk_base);
+            sweep(
+                &plant.name,
+                &plant.trunk,
+                raw_budget,
+                TALL_BEND_ROOT,
+                TALL_BEND_LENGTH,
+                trunk_base,
+            );
         } else {
-            sweep(&plant.name, &plant.trunk, budget, TALL_BEND_ROOT, TALL_BEND_LENGTH, trunk_base);
+            sweep(
+                &plant.name,
+                &plant.trunk,
+                budget,
+                TALL_BEND_ROOT,
+                TALL_BEND_LENGTH,
+                trunk_base,
+            );
         }
         if let Some(cap) = &plant.cap {
             sweep(
@@ -795,23 +949,45 @@ fn every_shipped_plant_and_column_frame_draws_completely_at_its_own_budget() {
 /// horizon) would open a join.
 #[test]
 fn a_synthetic_striped_column_composites_every_row_exactly_once_under_one_bend() {
-    let column = TallColumn { face: Face::Front, cx: 7, pick: 0, vine: false };
+    let column = TallColumn {
+        face: Face::Front,
+        cx: 7,
+        pick: 0,
+        vine: false,
+    };
     let base_anchor = tall_anchor_at(column.face, column.cx, 0.0);
     let heading = tall_heading(column.face, column.cx);
-    assert_eq!(heading, Vec2::new(1.0, 0.0), "the fixture needs a column whose tile axes are the face's");
-    assert_eq!(base_anchor.v.fract(), 0.0, "the fixture needs an integer anchor row");
+    assert_eq!(
+        heading,
+        Vec2::new(1.0, 0.0),
+        "the fixture needs a column whose tile axes are the face's"
+    );
+    assert_eq!(
+        base_anchor.v.fract(),
+        0.0,
+        "the fixture needs an integer anchor row"
+    );
     let v0 = base_anchor.v;
 
     let plant = striped_tall();
     let budget = tall_bend_budget(&plant);
-    assert!(budget.is_finite() && budget > 0.05, "the synthetic column's budget is {budget}");
+    assert!(
+        budget.is_finite() && budget > 0.05,
+        "the synthetic column's budget is {budget}"
+    );
 
     // How tall the column may be drawn before its cap leaves this face: a row at global height
     // `H` is face row `v0 − 0.5 − H`, and the cap's top painted row is at `4·height + 11.5`.
-    let tallest = ((v0 - 13.0) / 4.0).floor().min(f64::from(TALL_MAX_SEGMENTS));
-    assert!(tallest >= 3.0, "the fixture's column can only reach {tallest} segments");
+    let tallest = ((v0 - 13.0) / 4.0)
+        .floor()
+        .min(f64::from(TALL_MAX_SEGMENTS));
+    assert!(
+        tallest >= 3.0,
+        "the fixture's column can only reach {tallest} segments"
+    );
 
-    let green = f64::from(srgb_decode(STRIPE_GREEN)) * f64::from(TALL_OPACITY) * STRIPE_WIDTH as f64;
+    let green =
+        f64::from(srgb_decode(STRIPE_GREEN)) * f64::from(TALL_OPACITY) * STRIPE_WIDTH as f64;
     for height in [3.0, 3.25, 3.5, 3.75, tallest] {
         for amplitude in [0.0, budget, -budget] {
             let image = draw_striped_column(&plant, &column, height, amplitude, false);
@@ -864,7 +1040,10 @@ fn a_synthetic_striped_column_composites_every_row_exactly_once_under_one_bend()
                     );
                 }
             }
-            assert!(exact > 12, "only {exact} rows were checked exactly at height {height}");
+            assert!(
+                exact > 12,
+                "only {exact} rows were checked exactly at height {height}"
+            );
         }
     }
 }
@@ -876,15 +1055,25 @@ fn a_synthetic_striped_column_composites_every_row_exactly_once_under_one_bend()
 /// driven by its own (still) response, or by a bend rooted in its own tile, drifts here.
 #[test]
 fn a_vine_takes_its_host_columns_amplitude_and_only_adds_light() {
-    let column = TallColumn { face: Face::Front, cx: 7, pick: 0, vine: true };
+    let column = TallColumn {
+        face: Face::Front,
+        cx: 7,
+        pick: 0,
+        vine: true,
+    };
     let anchor = tall_anchor_at(column.face, column.cx, 0.0);
     let plant = striped_tall();
     let budget = tall_bend_budget(&plant);
     // The vine carries no response of its own: it would stand perfectly still.
     assert_eq!(wind_response(VINE_PLANT).tip_px, 0.0);
 
-    for (height, amplitude) in [(3.0, 0.0), (3.0, budget), (3.0, -budget), (3.5, budget), (3.5, -budget)]
-    {
+    for (height, amplitude) in [
+        (3.0, 0.0),
+        (3.0, budget),
+        (3.0, -budget),
+        (3.5, budget),
+        (3.5, -budget),
+    ] {
         let bare = draw_striped_column(&plant, &column, height, amplitude, false);
         let vined = draw_striped_column(&plant, &column, height, amplitude, true);
         // The trunk's own pixels are untouched: the vine paints its own columns only. A tile
@@ -917,7 +1106,10 @@ fn a_vine_takes_its_host_columns_amplitude_and_only_adds_light() {
                 vine_rows += 1;
             }
         }
-        assert!(vine_rows >= 8, "the fixture's vine painted only {vine_rows} rows");
+        assert!(
+            vine_rows >= 8,
+            "the fixture's vine painted only {vine_rows} rows"
+        );
     }
 }
 
@@ -955,7 +1147,11 @@ fn striped_tile(rows: std::ops::Range<usize>, column: u8, width: usize) -> Sprit
 }
 
 fn one_frame(sprite: Sprite) -> Clip {
-    Clip { frames: vec![sprite], seconds: 3.0, looping: true }
+    Clip {
+        frames: vec![sprite],
+        seconds: 3.0,
+        looping: true,
+    }
 }
 
 /// The synthetic family: a base whose art stops where the first trunk's strip begins
@@ -1015,22 +1211,45 @@ fn draw_striped_column(
     let (strip_floor, strip_top) = trunk_strip(plant);
     for i in 1..=(height.ceil() as u8) {
         let floor = if i == 1 { TALL_FIRST_JOIN } else { strip_floor };
-        let top = if i == TALL_MAX_SEGMENTS { TILE_ROWS } else { strip_top };
+        let top = if i == TALL_MAX_SEGMENTS {
+            TILE_ROWS
+        } else {
+            strip_top
+        };
         let reveal = top.min(grown - tall_bend_base(f64::from(i)));
         if reveal <= floor {
             continue;
         }
-        part(&plant.trunk.frames[0], f64::from(i), Mask::Strip { floor, reveal });
+        part(
+            &plant.trunk.frames[0],
+            f64::from(i),
+            Mask::Strip { floor, reveal },
+        );
     }
-    part(&plant.cap.as_ref().unwrap().frames[0], height + 1.0, Mask::None);
+    part(
+        &plant.cap.as_ref().unwrap().frames[0],
+        height + 1.0,
+        Mask::None,
+    );
     if vine {
         let sprite = striped_vine();
         let mut i = 1u8;
         while f64::from(i) <= height.ceil() {
-            let top = if i + 2 > TALL_MAX_SEGMENTS { TILE_ROWS } else { TALL_VINE_TOP };
+            let top = if i + 2 > TALL_MAX_SEGMENTS {
+                TILE_ROWS
+            } else {
+                TALL_VINE_TOP
+            };
             let reveal = top.min(grown - tall_bend_base(f64::from(i)));
             if reveal > TALL_VINE_FLOOR {
-                part(&sprite, f64::from(i), Mask::Strip { floor: TALL_VINE_FLOOR, reveal });
+                part(
+                    &sprite,
+                    f64::from(i),
+                    Mask::Strip {
+                        floor: TALL_VINE_FLOOR,
+                        reveal,
+                    },
+                );
             }
             i += 2;
         }
@@ -1069,10 +1288,15 @@ fn a_quiet_tick_bends_nothing_anywhere_on_the_cube() {
         let slot = slot_of(cell);
         for band in [Band::Soil, Band::Foliage, Band::Canopy, Band::Water] {
             let name = species_of(band, cell);
-            let (bend, heading) =
-                slot_wind(&slot, name, presenter.bend_budget(name), quiet);
-            assert!(bend.is_identity(), "{name} in {cell:?} is bent in a quiet interval");
-            assert_eq!(heading, slot.heading, "{name} in {cell:?} turned in a quiet interval");
+            let (bend, heading) = slot_wind(&slot, name, presenter.bend_budget(name), quiet);
+            assert!(
+                bend.is_identity(),
+                "{name} in {cell:?} is bent in a quiet interval"
+            );
+            assert_eq!(
+                heading, slot.heading,
+                "{name} in {cell:?} turned in a quiet interval"
+            );
             checked += 1;
         }
     }
@@ -1108,16 +1332,41 @@ fn a_quiet_tick_bends_nothing_anywhere_on_the_cube() {
 fn the_rising_breeze_moves_plant_pixels_and_leaves_the_ground_bodies_and_rain_alone() {
     let calm = 24.0;
     let windy = calm + 48.0;
-    assert_eq!(wind_strength(calm), 0.0, "the calm instant must be inside a quiet interval");
-    assert!(wind_strength(windy) > 0.5, "the windy instant must be inside a packet");
+    assert_eq!(
+        wind_strength(calm),
+        0.0,
+        "the calm instant must be inside a quiet interval"
+    );
+    assert!(
+        wind_strength(windy) > 0.5,
+        "the windy instant must be inside a packet"
+    );
 
     let view_at = |seconds: f64| {
         let mut v = rich_view(tick_at(seconds));
         v.rain.fill(0.6);
         v.organisms = vec![
-            organism(OrganismId { slot: 1, generation: 1 }, SurfacePoint::new(Face::Front, 20.0, 40.0)),
-            organism(OrganismId { slot: 2, generation: 1 }, SurfacePoint::new(Face::Left, 33.0, 22.0)),
-            organism(OrganismId { slot: 3, generation: 1 }, SurfacePoint::new(Face::Top, 30.0, 30.0)),
+            organism(
+                OrganismId {
+                    slot: 1,
+                    generation: 1,
+                },
+                SurfacePoint::new(Face::Front, 20.0, 40.0),
+            ),
+            organism(
+                OrganismId {
+                    slot: 2,
+                    generation: 1,
+                },
+                SurfacePoint::new(Face::Left, 33.0, 22.0),
+            ),
+            organism(
+                OrganismId {
+                    slot: 3,
+                    generation: 1,
+                },
+                SurfacePoint::new(Face::Top, 30.0, 30.0),
+            ),
         ];
         v
     };
@@ -1140,7 +1389,11 @@ fn the_rising_breeze_moves_plant_pixels_and_leaves_the_ground_bodies_and_rain_al
     let mut plant_pixels: Vec<(Face, u16, u16)> = differing(&full_calm, &bare_calm);
     plant_pixels.extend(differing(&full_windy, &bare_windy));
     let moved = differing(&full_calm, &full_windy);
-    assert!(moved.len() > 40, "the breeze moved only {} pixels", moved.len());
+    assert!(
+        moved.len() > 40,
+        "the breeze moved only {} pixels",
+        moved.len()
+    );
     for pixel in &moved {
         assert!(
             plant_pixels.contains(pixel),
@@ -1179,8 +1432,8 @@ fn the_painted_root_row_of_every_side_species_is_identical_windy_and_calm() {
             continue;
         }
         species += 1;
-        let tip = effective_tip(response.tip_px, plant_bend_budget(plant))
-            * (1.0 + WIND_SLOT_VARIATION);
+        let tip =
+            effective_tip(response.tip_px, plant_bend_budget(plant)) * (1.0 + WIND_SLOT_VARIATION);
         assert!(tip > 0.0, "{} is admitted no movement at all", plant.name);
         let clips: Vec<&Clip> = plant
             .stages
@@ -1191,14 +1444,33 @@ fn the_painted_root_row_of_every_side_species_is_identical_windy_and_calm() {
         for (which, clip) in clips.iter().enumerate() {
             for frame in clip.frames.iter().step_by(6) {
                 let mut calm = Canvas::cube();
-                stamp(&mut calm, frame, anchor, Vec2::new(1.0, 0.0), MOTIF_OPACITY, Mask::None, Bend::NONE);
-                let painted = (24..40u16)
-                    .any(|x| calm.get(Face::Front, x, root_rows[0]) != [0.0; 3]);
+                stamp(
+                    &mut calm,
+                    frame,
+                    anchor,
+                    Vec2::new(1.0, 0.0),
+                    MOTIF_OPACITY,
+                    Mask::None,
+                    Bend::NONE,
+                );
+                let painted =
+                    (24..40u16).any(|x| calm.get(Face::Front, x, root_rows[0]) != [0.0; 3]);
                 for sign in [-1.0, 1.0] {
                     let bend = plant_bend(tip, Vec2::new(sign, 0.0), Vec2::new(1.0, 0.0));
-                    assert!((bend.amplitude.abs() - tip).abs() < 1e-12, "the fixture's bend must be at full tip");
+                    assert!(
+                        (bend.amplitude.abs() - tip).abs() < 1e-12,
+                        "the fixture's bend must be at full tip"
+                    );
                     let mut windy = Canvas::cube();
-                    stamp(&mut windy, frame, anchor, Vec2::new(1.0, 0.0), MOTIF_OPACITY, Mask::None, bend);
+                    stamp(
+                        &mut windy,
+                        frame,
+                        anchor,
+                        Vec2::new(1.0, 0.0),
+                        MOTIF_OPACITY,
+                        Mask::None,
+                        bend,
+                    );
                     for &y in &root_rows {
                         for x in 20..44u16 {
                             assert_eq!(
@@ -1233,9 +1505,9 @@ fn the_painted_root_row_of_every_side_species_is_identical_windy_and_calm() {
 /// packet per tick, would blow straight through it.
 #[test]
 fn a_plants_pixels_never_jump_between_two_frames_at_sixty_fps() {
-    let cell = full_plant_cell("reedspire").or_else(|| full_plant_cell("lanternstalk")).expect(
-        "the cube has a rank-2 slot of a bending species in the middle of a side face",
-    );
+    let cell = full_plant_cell("reedspire")
+        .or_else(|| full_plant_cell("lanternstalk"))
+        .expect("the cube has a rank-2 slot of a bending species in the middle of a side face");
     let window = near(cell);
     let art = pack_without(true, false, true);
     let name = species_of(band_of(cell), cell);
@@ -1278,7 +1550,10 @@ fn a_plants_pixels_never_jump_between_two_frames_at_sixty_fps() {
     // pixel by 0.065 and the windiest frame of a rise or a fall by 0.076, so the breeze is
     // costing 0.012 — this bound is under three times the derivation and well under a jump.
     const WIND_STEP: f32 = 0.03;
-    for (what, from) in [("the rise", WIND_PERIOD), ("the fall", WIND_PERIOD + WIND_RISE + WIND_HOLD)] {
+    for (what, from) in [
+        ("the rise", WIND_PERIOD),
+        ("the fall", WIND_PERIOD + WIND_RISE + WIND_HOLD),
+    ] {
         let windy = sweep(from, from + WIND_RISE.min(WIND_FALL));
         assert!(
             windy <= sway + WIND_STEP,
@@ -1318,7 +1593,10 @@ fn full_plant_cell(name: &str) -> Option<CellId> {
 fn a_paused_frame_and_a_second_presenter_draw_the_identical_windy_image() {
     let tick = tick_at(WIND_PERIOD + WIND_RISE + WIND_HOLD * 0.5);
     let v = rich_view(tick);
-    assert!(wind_strength(present_seconds(tick, 0.5)) > 0.5, "the fixture tick must be windy");
+    assert!(
+        wind_strength(present_seconds(tick, 0.5)) > 0.5,
+        "the fixture tick must be windy"
+    );
 
     let mut p = snapped(pack(), &v);
     let held = draw(&mut p, &v, 0.5);
@@ -1326,9 +1604,16 @@ fn a_paused_frame_and_a_second_presenter_draw_the_identical_windy_image() {
         assert_same_canvas(&draw(&mut p, &v, 0.5), &held, "a paused frame moved");
     }
     let mut other = snapped(pack(), &v);
-    assert_same_canvas(&draw(&mut other, &v, 0.5), &held, "a second presenter drew differently");
+    assert_same_canvas(
+        &draw(&mut other, &v, 0.5),
+        &held,
+        "a second presenter drew differently",
+    );
     // And the next frame is a different image, so the pause is a pause and not a still cube.
-    assert!(max_diff(&draw(&mut p, &v, 1.0), &held) > 0.0, "the cube never moves at all");
+    assert!(
+        max_diff(&draw(&mut p, &v, 1.0), &held) > 0.0,
+        "the cube never moves at all"
+    );
 }
 
 /// A canopy (top-face) plant "rotates instead of bending … about the stationary center", by
@@ -1354,11 +1639,17 @@ fn a_canopy_plant_turns_about_its_pivot_and_is_never_carried_sideways() {
     let slot = slot_of(cell);
     let seconds = WIND_RISE + WIND_HOLD * 0.5;
     let w = wind_at(slot.at, seconds, response.lag_seconds);
-    assert!(w.length() > 0.05, "the fixture's canopy cell must feel the breeze");
+    assert!(
+        w.length() > 0.05,
+        "the fixture's canopy cell must feel the breeze"
+    );
 
     let (bend, heading) = slot_wind(&slot, name, plant_bend_budget(plant), seconds);
     assert_eq!(bend, Bend::NONE, "a canopy plant must never be bent");
-    assert!((heading.length() - 1.0).abs() < 1e-12, "the heading stopped being a unit vector");
+    assert!(
+        (heading.length() - 1.0).abs() < 1e-12,
+        "the heading stopped being a unit vector"
+    );
     let turned = heading.screen_angle() - slot.heading.screen_angle();
     let want = (response.spin_deg * slot.wind * w.length() / WIND_CHART_MAX).to_radians();
     assert!(
@@ -1366,9 +1657,15 @@ fn a_canopy_plant_turns_about_its_pivot_and_is_never_carried_sideways() {
             < 1e-9,
         "the canopy turned {turned} rad, not the documented {want}"
     );
-    assert_eq!(heading, canopy_heading(slot.heading, response.spin_deg * slot.wind, w));
+    assert_eq!(
+        heading,
+        canopy_heading(slot.heading, response.spin_deg * slot.wind, w)
+    );
     // Exactly calm, exactly the authored heading, bit for bit.
-    assert_eq!(canopy_heading(slot.heading, response.spin_deg, Vec2::ZERO), slot.heading);
+    assert_eq!(
+        canopy_heading(slot.heading, response.spin_deg, Vec2::ZERO),
+        slot.heading
+    );
 
     // The drawn cube: the background a pack with no plants draws, plus this one stamp.
     let tick = tick_at((seconds / DT).round() * DT);
@@ -1409,7 +1706,11 @@ fn a_canopy_plant_turns_about_its_pivot_and_is_never_carried_sideways() {
     );
     let mut p = ArtPresenter::new(pack_without(true, false, false));
     let actual = observe_draw(&mut p, &v, 0.0);
-    assert_eq!(p.growth_of(cell), Growth::snapped(Some(2), false), "the canopy plant must be full");
+    assert_eq!(
+        p.growth_of(cell),
+        Growth::snapped(Some(2), false),
+        "the canopy plant must be full"
+    );
     assert_same_canvas(&actual, &expected, "a canopy plant at full wind");
     assert!(
         max_diff_at(&expected, &unturned, &near(cell)) > 1e-4,
@@ -1425,8 +1726,12 @@ fn a_canopy_plant_turns_about_its_pivot_and_is_never_carried_sideways() {
 #[test]
 fn a_v4_pack_still_draws_and_the_growth_clip_is_a_non_looping_pair_of_endpoints() {
     let art = pack();
-    let plant = art.plant("lanternstalk").expect("lanternstalk is in the pack");
-    let clip = plant.transition(0, 1).expect("the pilot's grow01 clip is baked");
+    let plant = art
+        .plant("lanternstalk")
+        .expect("lanternstalk is in the pack");
+    let clip = plant
+        .transition(0, 1)
+        .expect("the pilot's grow01 clip is baked");
     assert!(!clip.looping, "a growth transition must not loop");
     assert!(clip.seconds > 0.0 && clip.frames.len() >= 2);
     let transition = plant
@@ -1434,10 +1739,17 @@ fn a_v4_pack_still_draws_and_the_growth_clip_is_a_non_looping_pair_of_endpoints(
         .iter()
         .find(|t| t.from == 0)
         .expect("the transition carries its own stages");
-    assert_eq!(transition.to, transition.from + 1, "a transition is one stage step");
+    assert_eq!(
+        transition.to,
+        transition.from + 1,
+        "a transition is one stage step"
+    );
     assert!(!transition.clip.looping);
     assert!(
-        plant.transitions.iter().all(|t| plant.transition(t.from, t.to).is_some()),
+        plant
+            .transitions
+            .iter()
+            .all(|t| plant.transition(t.from, t.to).is_some()),
         "every authored transition is reachable by its pair"
     );
     assert!(plant.transition(1, 0).is_none(), "growth clips run one way");
@@ -1464,13 +1776,22 @@ fn a_v4_pack_still_draws_and_the_growth_clip_is_a_non_looping_pair_of_endpoints(
         plant.transitions.clear();
     }
     let plain = v4.plant("lanternstalk").unwrap();
-    assert!(plain.transition(0, 1).is_none(), "a v4 pack carries no transitions");
-    assert!(plant_bend_budget(plain) >= plant_bend_budget(plant), "dropping a clip cannot tighten a budget");
+    assert!(
+        plain.transition(0, 1).is_none(),
+        "a v4 pack carries no transitions"
+    );
+    assert!(
+        plant_bend_budget(plain) >= plant_bend_budget(plant),
+        "dropping a clip cannot tighten a budget"
+    );
     let tick = tick_at(WIND_PERIOD + WIND_RISE + WIND_HOLD * 0.5);
     let v = rich_view(tick);
     let mut p = snapped(v4, &v);
     let image = draw(&mut p, &v, 0.0);
-    assert!(max_diff(&image, &Canvas::cube()) > 0.05, "a v4 pack drew nothing");
+    assert!(
+        max_diff(&image, &Canvas::cube()) > 0.05,
+        "a v4 pack drew nothing"
+    );
 }
 
 /// One sprite stamped alone, for comparing two frames of a clip.
@@ -1507,24 +1828,58 @@ fn frame_image(sprite: &Sprite) -> Canvas {
 #[test]
 fn the_shifted_strips_are_opted_into_by_the_art_and_still_composite_each_row_once() {
     let art = pack();
-    assert_eq!(trunk_strip(art.tall_plant("glasscane").unwrap()), (TALL_JOIN, TILE_ROWS));
-    assert_eq!(trunk_strip(art.tall_plant(VINE_PLANT).unwrap()), (TALL_JOIN, TILE_ROWS));
-    assert_eq!(trunk_strip(art.tall_plant("spiretree").unwrap()), (TALL_STRIP_FLOOR, TALL_STRIP_TOP));
-    assert_eq!((TALL_STRIP_FLOOR, TALL_STRIP_TOP), (TALL_JOIN - 1.0, TILE_ROWS - 1.0));
-    assert_eq!(trunk_strip(&striped_tall()), (TALL_JOIN, TILE_ROWS), "the stripes paint row 0");
+    assert_eq!(
+        trunk_strip(art.tall_plant("glasscane").unwrap()),
+        (TALL_JOIN, TILE_ROWS)
+    );
+    assert_eq!(
+        trunk_strip(art.tall_plant(VINE_PLANT).unwrap()),
+        (TALL_JOIN, TILE_ROWS)
+    );
+    assert_eq!(
+        trunk_strip(art.tall_plant("spiretree").unwrap()),
+        (TALL_STRIP_FLOOR, TALL_STRIP_TOP)
+    );
+    assert_eq!(
+        (TALL_STRIP_FLOOR, TALL_STRIP_TOP),
+        (TALL_JOIN - 1.0, TILE_ROWS - 1.0)
+    );
+    assert_eq!(
+        trunk_strip(&striped_tall()),
+        (TALL_JOIN, TILE_ROWS),
+        "the stripes paint row 0"
+    );
 
-    let column = TallColumn { face: Face::Front, cx: 7, pick: 0, vine: false };
+    let column = TallColumn {
+        face: Face::Front,
+        cx: 7,
+        pick: 0,
+        vine: false,
+    };
     let v0 = tall_anchor_at(column.face, column.cx, 0.0).v;
     let mut plant = striped_tall();
     plant.trunk = one_frame(striped_tile(1..15, TRUNK_COLUMN, STRIPE_WIDTH));
-    assert_eq!(trunk_strip(&plant), (TALL_STRIP_FLOOR, TALL_STRIP_TOP), "row 0 clear opts in");
+    assert_eq!(
+        trunk_strip(&plant),
+        (TALL_STRIP_FLOOR, TALL_STRIP_TOP),
+        "row 0 clear opts in"
+    );
     let budget = tall_bend_budget(&plant);
     // The trunk itself earns room (the stripes' 4-row cap stays the column's bound).
     let top = tall_bend_base(f64::from(TALL_MAX_SEGMENTS));
-    let room = |p: &TallPlant| p.trunk.frames[0].bend_headroom(TALL_BEND_ROOT, TALL_BEND_LENGTH, top);
-    assert!(room(&plant) > room(&striped_tall()) + 1.0, "clearing the end rows must earn trunk room: {} vs {}", room(&plant), room(&striped_tall()));
-    let tallest = ((v0 - 13.0) / 4.0).floor().min(f64::from(TALL_MAX_SEGMENTS));
-    let green = f64::from(srgb_decode(STRIPE_GREEN)) * f64::from(TALL_OPACITY) * STRIPE_WIDTH as f64;
+    let room =
+        |p: &TallPlant| p.trunk.frames[0].bend_headroom(TALL_BEND_ROOT, TALL_BEND_LENGTH, top);
+    assert!(
+        room(&plant) > room(&striped_tall()) + 1.0,
+        "clearing the end rows must earn trunk room: {} vs {}",
+        room(&plant),
+        room(&striped_tall())
+    );
+    let tallest = ((v0 - 13.0) / 4.0)
+        .floor()
+        .min(f64::from(TALL_MAX_SEGMENTS));
+    let green =
+        f64::from(srgb_decode(STRIPE_GREEN)) * f64::from(TALL_OPACITY) * STRIPE_WIDTH as f64;
     let mut exact_rows = 0;
     for height in [1.0, 2.5, 3.0, 3.25, 3.5, 3.75, 4.0, tallest] {
         for amplitude in [0.0, budget, -budget] {
@@ -1544,23 +1899,40 @@ fn the_shifted_strips_are_opted_into_by_the_art_and_still_composite_each_row_onc
                     lit += f64::from(p[1]);
                     blue += f64::from(p[2]);
                 }
-                assert!(lit <= green + 1e-5, "H = {h}: {lit} green, a row composited twice (height {height}, amplitude {amplitude})");
+                assert!(
+                    lit <= green + 1e-5,
+                    "H = {h}: {lit} green, a row composited twice (height {height}, amplitude {amplitude})"
+                );
                 let interior = h <= grown - 1.5 || (whole && h >= grown + 0.5);
                 if !interior {
                     continue;
                 }
                 exact_rows += 1;
-                assert!((lit - green).abs() < 1e-5, "H = {h}: {lit} green, not one stamp (height {height}, amplitude {amplitude}): a gap");
+                assert!(
+                    (lit - green).abs() < 1e-5,
+                    "H = {h}: {lit} green, not one stamp (height {height}, amplitude {amplitude}): a gap"
+                );
                 let k = stripe_of(v0, y);
                 for (channel, want) in [(red, STRIPE_RED[k]), (blue, STRIPE_BLUE[k])] {
-                    let expect = f64::from(srgb_decode(want)) * f64::from(TALL_OPACITY) * STRIPE_WIDTH as f64;
-                    assert!((channel - expect).abs() < 1e-5, "H = {h}: stripe {k} expected (height {height}, amplitude {amplitude}): the column slipped a row");
+                    let expect = f64::from(srgb_decode(want))
+                        * f64::from(TALL_OPACITY)
+                        * STRIPE_WIDTH as f64;
+                    assert!(
+                        (channel - expect).abs() < 1e-5,
+                        "H = {h}: stripe {k} expected (height {height}, amplitude {amplitude}): the column slipped a row"
+                    );
                 }
             }
         }
     }
-    assert!(exact_rows > 200, "only {exact_rows} rows were checked exactly");
-    println!("  shifted strips: {exact_rows} interior rows composited exactly once, budget {budget:.3} vs {:.3}", tall_bend_budget(&striped_tall()));
+    assert!(
+        exact_rows > 200,
+        "only {exact_rows} rows were checked exactly"
+    );
+    println!(
+        "  shifted strips: {exact_rows} interior rows composited exactly once, budget {budget:.3} vs {:.3}",
+        tall_bend_budget(&striped_tall())
+    );
 }
 
 /// The spiretree earns its authored tip. Its dome is centred on the pivot and its trunk
@@ -1576,7 +1948,10 @@ fn the_spiretree_column_is_admitted_its_whole_desired_tip() {
     let desired = wind_response("spiretree").tip_px;
     assert_eq!(desired, 0.9, "the authored response this test is about");
     let budget = tall_bend_budget(spire);
-    println!("  spiretree budget {budget:.3} px, vine {:.3} px", tall_bend_budget(vine));
+    println!(
+        "  spiretree budget {budget:.3} px, vine {:.3} px",
+        tall_bend_budget(vine)
+    );
     assert!(
         budget >= desired * (1.0 + WIND_SLOT_VARIATION),
         "the spiretree's budget {budget} still clips its desired {desired} px"
@@ -1595,7 +1970,10 @@ fn the_spiretree_column_is_admitted_its_whole_desired_tip() {
             .map(|f| f.bend_headroom(TALL_BEND_ROOT, TALL_BEND_LENGTH, base))
             .fold(f64::INFINITY, f64::min);
         println!("  spiretree {what} headroom {room:.3} px");
-        assert!(room >= desired * (1.0 + WIND_SLOT_VARIATION), "{what} headroom {room}");
+        assert!(
+            room >= desired * (1.0 + WIND_SLOT_VARIATION),
+            "{what} headroom {room}"
+        );
     }
     // The trunk's end rows are unpainted and the rest is the 4-periodic pattern.
     for frame in &spire.trunk.frames {
@@ -1603,13 +1981,24 @@ fn the_spiretree_column_is_admitted_its_whole_desired_tip() {
             assert_eq!(frame.texel(x, 0)[3], 0.0, "trunk row 0 painted");
             assert_eq!(frame.texel(x, 15)[3], 0.0, "trunk row 15 painted");
             for y in 1..11 {
-                assert_eq!(frame.texel(x, y), frame.texel(x, y + 4), "not periodic at ({x}, {y})");
+                assert_eq!(
+                    frame.texel(x, y),
+                    frame.texel(x, y + 4),
+                    "not periodic at ({x}, {y})"
+                );
             }
         }
     }
     let presenter = ArtPresenter::new(pack());
-    for column in tall_columns().into_iter().filter(|c| TALL_PLANTS[c.pick] == "spiretree") {
-        let want = if column.vine { budget.min(tall_bend_budget(vine)) } else { budget };
+    for column in tall_columns()
+        .into_iter()
+        .filter(|c| TALL_PLANTS[c.pick] == "spiretree")
+    {
+        let want = if column.vine {
+            budget.min(tall_bend_budget(vine))
+        } else {
+            budget
+        };
         assert_eq!(presenter.column_budget(&column), want, "{column:?}");
     }
 }

@@ -1,8 +1,8 @@
 //! Shared wind field and bend budgets.
 
+use super::*;
 use cubarium_render::Sprite;
 use cubarium_surface::Topology;
-use super::*;
 
 // --- Wind ----------------------------------------------------------------------------
 //
@@ -249,7 +249,8 @@ impl ArtGeometry {
     /// [`tall_amplitude`] in this world.
     pub fn tall_amplitude(self, column: &TallColumn, budget: f64, seconds: f64) -> f64 {
         let response = wind_response(TALL_PLANTS[column.pick]);
-        let tip = effective_tip(response.tip_px, budget) * self.tall_wind_of(column.face, column.cx);
+        let tip =
+            effective_tip(response.tip_px, budget) * self.tall_wind_of(column.face, column.cx);
         if tip <= 0.0 {
             return 0.0;
         }
@@ -619,7 +620,13 @@ pub fn tall_bend_budget_at(plant: &TallPlant, bound: f64) -> f64 {
         clip.frames
             .iter()
             .map(|f| {
-                headroom_at(f, TALL_BEND_ROOT, TALL_BEND_LENGTH, tall_bend_base(i), bound)
+                headroom_at(
+                    f,
+                    TALL_BEND_ROOT,
+                    TALL_BEND_LENGTH,
+                    tall_bend_base(i),
+                    bound,
+                )
             })
             .fold(f64::INFINITY, f64::min)
     };

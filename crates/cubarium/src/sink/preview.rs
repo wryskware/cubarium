@@ -81,7 +81,10 @@ impl PreviewSink {
             "cubarium",
             width,
             height,
-            WindowOptions { resize: false, ..WindowOptions::default() },
+            WindowOptions {
+                resize: false,
+                ..WindowOptions::default()
+            },
         )
         .context("creating the preview window")?;
         Ok(PreviewSink {
@@ -152,7 +155,9 @@ impl PreviewSink {
             format!("creating capture directory {}", self.capture_dir.display())
         })?;
         crate::net::net_rgb8(frame, &mut self.net_buf);
-        let path = self.capture_dir.join(format!("preview_{:06}.png", self.captures));
+        let path = self
+            .capture_dir
+            .join(format!("preview_{:06}.png", self.captures));
         super::png::write_net_png(&path, &self.net_buf)?;
         self.captures += 1;
         eprintln!("cubarium: wrote {}", path.display());
@@ -177,7 +182,9 @@ impl PreviewSink {
         let s = self.scale;
         for row in 0..NET_ROWS {
             for col in 0..NET_COLS {
-                let Some(face) = face_at(col, row) else { continue };
+                let Some(face) = face_at(col, row) else {
+                    continue;
+                };
                 let (ox, oy) = net_origin(face, s, SEPARATOR);
                 for y in 0..FACE_SIZE {
                     for x in 0..FACE_SIZE {

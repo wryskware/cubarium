@@ -36,7 +36,10 @@ impl SurfacePoint {
     #[inline]
     pub fn is_canonical(&self, topo: Topology) -> bool {
         let (w, h) = topo.extent(self.face);
-        self.u.is_finite() && self.v.is_finite() && (0.0..w).contains(&self.u) && (0.0..h).contains(&self.v)
+        self.u.is_finite()
+            && self.v.is_finite()
+            && (0.0..w).contains(&self.u)
+            && (0.0..h).contains(&self.v)
     }
 
     /// Map a coordinate equal to the chart extent onto the largest double below it so the
@@ -144,7 +147,13 @@ pub const fn face_frame(face: Face) -> FaceFrame {
 /// same chart. If it is on `edge`, the cube asks `cross_seam(face, edge, t)` with `t` the
 /// pixel's along-edge index, and the ring wraps `x` to the other end of the same row.
 /// Used by seam-aware pixel filters; never a distance metric.
-pub fn pixel_neighbor(topo: Topology, face: Face, x: u16, y: u16, edge: Edge) -> Option<(Face, u16, u16)> {
+pub fn pixel_neighbor(
+    topo: Topology,
+    face: Face,
+    x: u16,
+    y: u16,
+    edge: Edge,
+) -> Option<(Face, u16, u16)> {
     let (w, h) = topo.extent(face);
     assert!(
         f64::from(x) < w && f64::from(y) < h,
@@ -193,13 +202,31 @@ mod tests {
 
     #[test]
     fn interior_neighbors_stay_in_chart() {
-        assert_eq!(pixel_neighbor(CUBE, Face::Front, 10, 10, Edge::Top), Some((Face::Front, 10, 9)));
-        assert_eq!(pixel_neighbor(CUBE, Face::Front, 10, 10, Edge::Right), Some((Face::Front, 11, 10)));
-        assert_eq!(pixel_neighbor(CUBE, Face::Front, 10, 10, Edge::Bottom), Some((Face::Front, 10, 11)));
-        assert_eq!(pixel_neighbor(CUBE, Face::Front, 10, 10, Edge::Left), Some((Face::Front, 9, 10)));
+        assert_eq!(
+            pixel_neighbor(CUBE, Face::Front, 10, 10, Edge::Top),
+            Some((Face::Front, 10, 9))
+        );
+        assert_eq!(
+            pixel_neighbor(CUBE, Face::Front, 10, 10, Edge::Right),
+            Some((Face::Front, 11, 10))
+        );
+        assert_eq!(
+            pixel_neighbor(CUBE, Face::Front, 10, 10, Edge::Bottom),
+            Some((Face::Front, 10, 11))
+        );
+        assert_eq!(
+            pixel_neighbor(CUBE, Face::Front, 10, 10, Edge::Left),
+            Some((Face::Front, 9, 10))
+        );
         // On an edge, but asked for a direction that does not leave the chart.
-        assert_eq!(pixel_neighbor(CUBE, Face::Front, 0, 0, Edge::Bottom), Some((Face::Front, 0, 1)));
-        assert_eq!(pixel_neighbor(CUBE, Face::Front, 0, 0, Edge::Right), Some((Face::Front, 1, 0)));
+        assert_eq!(
+            pixel_neighbor(CUBE, Face::Front, 0, 0, Edge::Bottom),
+            Some((Face::Front, 0, 1))
+        );
+        assert_eq!(
+            pixel_neighbor(CUBE, Face::Front, 0, 0, Edge::Right),
+            Some((Face::Front, 1, 0))
+        );
     }
 
     #[test]
@@ -228,7 +255,9 @@ mod tests {
         for edge in Edge::ALL {
             for t in 0..64u8 {
                 let (x, y) = edge.pixel(t);
-                assert!(pixel_neighbor(CUBE, Face::Top, u16::from(x), u16::from(y), edge).is_some());
+                assert!(
+                    pixel_neighbor(CUBE, Face::Top, u16::from(x), u16::from(y), edge).is_some()
+                );
             }
         }
     }
@@ -242,7 +271,10 @@ mod tests {
                     let want = cube_proto::geometry::pixel_direction(face, x as u8, y as u8);
                     let got = CUBE.embed(Scale::ONE, &p);
                     for k in 0..3 {
-                        assert!((got[k] - want[k]).abs() < 1e-12, "{face:?} ({x},{y}) axis {k}");
+                        assert!(
+                            (got[k] - want[k]).abs() < 1e-12,
+                            "{face:?} ({x},{y}) axis {k}"
+                        );
                     }
                 }
             }
@@ -252,19 +284,37 @@ mod tests {
     #[test]
     fn the_ring_wraps_sideways_and_stops_at_the_rims() {
         for y in [0u16, 1, 90, 179] {
-            assert_eq!(pixel_neighbor(RING, Face::Front, 319, y, Edge::Right), Some((Face::Front, 0, y)));
-            assert_eq!(pixel_neighbor(RING, Face::Front, 0, y, Edge::Left), Some((Face::Front, 319, y)));
-            assert_eq!(pixel_neighbor(RING, Face::Front, 5, y, Edge::Right), Some((Face::Front, 6, y)));
+            assert_eq!(
+                pixel_neighbor(RING, Face::Front, 319, y, Edge::Right),
+                Some((Face::Front, 0, y))
+            );
+            assert_eq!(
+                pixel_neighbor(RING, Face::Front, 0, y, Edge::Left),
+                Some((Face::Front, 319, y))
+            );
+            assert_eq!(
+                pixel_neighbor(RING, Face::Front, 5, y, Edge::Right),
+                Some((Face::Front, 6, y))
+            );
         }
         for x in [0u16, 1, 160, 319] {
             assert_eq!(pixel_neighbor(RING, Face::Front, x, 0, Edge::Top), None);
-            assert_eq!(pixel_neighbor(RING, Face::Front, x, 179, Edge::Bottom), None);
-            assert_eq!(pixel_neighbor(RING, Face::Front, x, 1, Edge::Top), Some((Face::Front, x, 0)));
+            assert_eq!(
+                pixel_neighbor(RING, Face::Front, x, 179, Edge::Bottom),
+                None
+            );
+            assert_eq!(
+                pixel_neighbor(RING, Face::Front, x, 1, Edge::Top),
+                Some((Face::Front, x, 0))
+            );
         }
         // The wrap is reciprocal at every row.
         for y in 0..180u16 {
             let right = pixel_neighbor(RING, Face::Front, 319, y, Edge::Right).expect("wrap");
-            assert_eq!(pixel_neighbor(RING, right.0, right.1, right.2, Edge::Left), Some((Face::Front, 319, y)));
+            assert_eq!(
+                pixel_neighbor(RING, right.0, right.1, right.2, Edge::Left),
+                Some((Face::Front, 319, y))
+            );
         }
     }
 
@@ -277,6 +327,9 @@ mod tests {
         assert!(SurfacePoint::new(Face::Front, 300.0, 10.0).is_canonical(RING));
         // 300 is off the cube but on the ring: the extent is the topology's, not a constant.
         assert!(!SurfacePoint::new(Face::Front, 300.0, 10.0).is_canonical(CUBE));
-        assert_eq!(SurfacePoint::pixel_center(RING, Face::Front, 319, 179), SurfacePoint::new(Face::Front, 319.5, 179.5));
+        assert_eq!(
+            SurfacePoint::pixel_center(RING, Face::Front, 319, 179),
+            SurfacePoint::new(Face::Front, 319.5, 179.5)
+        );
     }
 }

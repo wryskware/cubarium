@@ -217,7 +217,9 @@ pub fn order_for(
             // A support face that is not soil. The pore gate has already passed on every
             // site in the pool, and the root box only ever holds soil voxels, so a
             // non-soil face in this pool *is* a face with a soil pocket in reach.
-            pool.retain(|s| view.material_at(s.x as i64, s.y, s.z) != cubarium_voxel::Material::Soil);
+            pool.retain(|s| {
+                view.material_at(s.x as i64, s.y, s.z) != cubarium_voxel::Material::Soil
+            });
             pool.reverse();
             pool
         }
@@ -286,7 +288,11 @@ pub fn canopy_over(world: &World, flora: &Flora, planned: &[Founder]) -> Vec<Can
         });
     }
     for f in planned {
-        if view.stands.iter().any(|s| s.site.x == f.x && s.site.z == f.z) {
+        if view
+            .stands
+            .iter()
+            .any(|s| s.site.x == f.x && s.site.z == f.z)
+        {
             continue; // already standing, and counted above with its real wood
         }
         let Some(site) = cubarium_voxel_flora::highest_support(&world.view(), f.x as i64, f.z)
@@ -353,12 +359,15 @@ pub fn site_key(species: Species, site: Site) -> u64 {
 /// threshold it is compared with.
 pub fn gate_line(world: &World, flora: &Flora, species: Species, site: Site) -> String {
     let sc = flora.config().species(species);
-    let g = flora.view().establishment_gates(&world.view(), site, species);
+    let g = flora
+        .view()
+        .establishment_gates(&world.view(), site, species);
     format!(
         "mean pore {} (>= {:.2}), saturated fraction {:.3} (<= {:.2}), water {:.3} m \
          (<= {:.2}), sky {:.3} (>= {:.2}), {} soil voxels, dead wood in the box {:.3} \
          (>= {:.3})",
-        g.mean_pore.map_or_else(|| "none".to_string(), |m| format!("{m:.3}")),
+        g.mean_pore
+            .map_or_else(|| "none".to_string(), |m| format!("{m:.3}")),
         sc.establish_pore_min,
         g.saturated_fraction,
         sc.establish_saturated_max,
@@ -458,9 +467,14 @@ pub fn prepared_world_with_outlet(seed: u64, noise_seed: u64, outlet_m3_per_s: f
         outlet_m3_per_s,
         ..VoxelConfig::default()
     };
-    let basin_floor_m =
-        World::new(dry.clone()).outlet_cell().map_or(0.0, |(_, y, _)| y as f64) * dry.voxel_m;
-    let config = VoxelConfig { initial_aquifer_head_m: basin_floor_m + 1.0, ..dry };
+    let basin_floor_m = World::new(dry.clone())
+        .outlet_cell()
+        .map_or(0.0, |(_, y, _)| y as f64)
+        * dry.voxel_m;
+    let config = VoxelConfig {
+        initial_aquifer_head_m: basin_floor_m + 1.0,
+        ..dry
+    };
     let mut world = World::new(config);
     world.apply(WorldCommand::SetOutlet { open: true });
     for _ in 0..WARMUP_TICKS {
@@ -495,8 +509,11 @@ pub fn skyline_of(world: &World) -> Vec<Site> {
 /// threw their wood away and read an old or a newborn resident as a half-grown founder
 /// (Astra R7.1).
 pub fn habitat(world: &World, flora: &Flora, skyline: &[Site], species: Species) -> Vec<Site> {
-    let ok: Vec<Site> =
-        skyline.iter().copied().filter(|s| passes(world, flora, species, *s)).collect();
+    let ok: Vec<Site> = skyline
+        .iter()
+        .copied()
+        .filter(|s| passes(world, flora, species, *s))
+        .collect();
     order_for(world, flora, species, habitat_of(species), ok, &[])
 }
 
@@ -518,7 +535,12 @@ pub fn step_coupled(flora: &mut Flora, world: &mut World, seconds: f64) {
 }
 
 pub fn count(flora: &Flora, species: Species) -> usize {
-    flora.view().stands.iter().filter(|s| s.species == species).count()
+    flora
+        .view()
+        .stands
+        .iter()
+        .filter(|s| s.species == species)
+        .count()
 }
 
 // ============================================================ the observation cap
@@ -589,7 +611,11 @@ pub fn observation_cap(species: Species, sc: &SpeciesConfig) -> ObservationCap {
     };
     // One whole package, net of construction respiration: of a gross `propagule_rate · dt`
     // taken out of the reserve, `1 / (1 + c_g)` of it reaches the parcel.
-    let package = if sc.propagule_split[0] > 0.0 { sc.alive_min / sc.propagule_split[0] } else { 0.0 };
+    let package = if sc.propagule_split[0] > 0.0 {
+        sc.alive_min / sc.propagule_split[0]
+    } else {
+        0.0
+    };
     let net_per_tick = sc.propagule_rate * dt / (1.0 + sc.build);
     let package_ticks = if package <= 0.0 {
         f64::INFINITY
@@ -613,7 +639,11 @@ pub fn observation_cap(species: Species, sc: &SpeciesConfig) -> ObservationCap {
 }
 
 fn finite_ticks(t: f64) -> u64 {
-    if t.is_finite() && t >= 0.0 { t as u64 } else { u64::MAX }
+    if t.is_finite() && t >= 0.0 {
+        t as u64
+    } else {
+        u64::MAX
+    }
 }
 
 impl ObservationCap {
@@ -726,7 +756,11 @@ pub fn replacement_timeline(species: Species, sc: &SpeciesConfig) -> Replacement
         u64::MAX => u64::MAX,
         sum => sum - 1,
     };
-    let total_s = if total_ticks == u64::MAX { f64::INFINITY } else { total_ticks as f64 * dt };
+    let total_s = if total_ticks == u64::MAX {
+        f64::INFINITY
+    } else {
+        total_ticks as f64 * dt
+    };
     ReplacementTimeline {
         species,
         fund_ticks,
@@ -825,23 +859,61 @@ mod cap_tests {
 
         let bloom = observation_cap(Species::Bloomcrown, config.species(Species::Bloomcrown));
         assert_eq!(bloom.growth_ticks, 54_163);
-        assert!((bloom.growth_s - 2_708.15).abs() < 1e-9, "growth {}", bloom.growth_s);
-        assert!((bloom.package - 0.05).abs() < 1e-12, "package {}", bloom.package);
-        assert!((bloom.package_s - 300.0).abs() < 1e-9, "package {}", bloom.package_s);
-        assert!((bloom.total_s - 3_008.15).abs() < 1e-9, "total {}", bloom.total_s);
+        assert!(
+            (bloom.growth_s - 2_708.15).abs() < 1e-9,
+            "growth {}",
+            bloom.growth_s
+        );
+        assert!(
+            (bloom.package - 0.05).abs() < 1e-12,
+            "package {}",
+            bloom.package
+        );
+        assert!(
+            (bloom.package_s - 300.0).abs() < 1e-9,
+            "package {}",
+            bloom.package_s
+        );
+        assert!(
+            (bloom.total_s - 3_008.15).abs() < 1e-9,
+            "total {}",
+            bloom.total_s
+        );
 
         let stone = observation_cap(Species::Stonecushion, config.species(Species::Stonecushion));
         assert_eq!(stone.growth_ticks, 160_945);
-        assert!((stone.growth_s - 8_047.25).abs() < 1e-9, "growth {}", stone.growth_s);
-        assert!((stone.package - 0.025).abs() < 1e-12, "package {}", stone.package);
-        assert!((stone.package_s - 600.0).abs() < 1e-9, "package {}", stone.package_s);
-        assert!((stone.total_s - 8_647.25).abs() < 1e-9, "total {}", stone.total_s);
+        assert!(
+            (stone.growth_s - 8_047.25).abs() < 1e-9,
+            "growth {}",
+            stone.growth_s
+        );
+        assert!(
+            (stone.package - 0.025).abs() < 1e-12,
+            "package {}",
+            stone.package
+        );
+        assert!(
+            (stone.package_s - 600.0).abs() < 1e-9,
+            "package {}",
+            stone.package_s
+        );
+        assert!(
+            (stone.total_s - 8_647.25).abs() < 1e-9,
+            "total {}",
+            stone.total_s
+        );
 
         // The pair takes the larger, and 6,000 s resolves neither pair it is put against:
         // it is under bloomcrown's own 3,008.15 s twice over only for the original pair.
-        let frond = observation_cap(Species::Umbrellafrond, config.species(Species::Umbrellafrond));
+        let frond = observation_cap(
+            Species::Umbrellafrond,
+            config.species(Species::Umbrellafrond),
+        );
         assert!((pair_cap(&bloom, &frond) - 3_008.15).abs() < 1e-9);
-        assert!(pair_cap(&bloom, &stone) > 6_000.0, "6,000 s cannot resolve stonecushion");
+        assert!(
+            pair_cap(&bloom, &stone) > 6_000.0,
+            "6,000 s cannot resolve stonecushion"
+        );
     }
 
     /// **The earliest-possible replacement timeline, stage by stage** (Astra R10.1). The
@@ -855,7 +927,10 @@ mod cap_tests {
         // Stage 1 by repeated addition is **6,001** and not 6,000: 6,000 additions of
         // 8.3333e-6 give 0.049999999999996936 against the package's 0.049999999999999996.
         assert_eq!(bloom.closed_form_fund_ticks, 6_000);
-        assert_eq!(bloom.fund_ticks, 6_001, "the model's own addition decides the tick");
+        assert_eq!(
+            bloom.fund_ticks, 6_001,
+            "the model's own addition decides the tick"
+        );
         assert_eq!(bloom.germinate_ticks, 1);
         assert_eq!(bloom.grow_ticks, 54_163);
         // Astra's own milestones (R11.1): delivered at 6,001, born at 6,002, donor size at
@@ -866,21 +941,41 @@ mod cap_tests {
         assert_eq!(bloom.birth_tick, 6_002);
         assert_eq!(bloom.donor_tick, 60_165);
         assert_eq!(bloom.total_ticks, 66_165);
-        assert_eq!(bloom.total_ticks, 6_001 + 1 + 54_163 + 6_001 - 1, "the shared tick");
-        assert!((bloom.total_s - 3_308.25).abs() < 1e-9, "total {}", bloom.total_s);
+        assert_eq!(
+            bloom.total_ticks,
+            6_001 + 1 + 54_163 + 6_001 - 1,
+            "the shared tick"
+        );
+        assert!(
+            (bloom.total_s - 3_308.25).abs() < 1e-9,
+            "total {}",
+            bloom.total_s
+        );
 
         let stone =
             replacement_timeline(Species::Stonecushion, config.species(Species::Stonecushion));
         assert_eq!(stone.fund_ticks, 12_001);
         assert_eq!(stone.grow_ticks, 160_945);
-        assert_eq!((stone.deliver_tick, stone.birth_tick, stone.donor_tick), (12_001, 12_002, 172_947));
+        assert_eq!(
+            (stone.deliver_tick, stone.birth_tick, stone.donor_tick),
+            (12_001, 12_002, 172_947)
+        );
         assert_eq!(stone.total_ticks, 184_947);
-        assert!((stone.total_s - 9_247.35).abs() < 1e-9, "total {}", stone.total_s);
+        assert!(
+            (stone.total_s - 9_247.35).abs() < 1e-9,
+            "total {}",
+            stone.total_s
+        );
 
         // The bound is strictly above the published cap, which is the whole of R10.1: a
         // budget at the published cap cannot observe the replacement it names.
         let cap = observation_cap(Species::Bloomcrown, config.species(Species::Bloomcrown));
-        assert!(bloom.total_s > cap.total_s, "{} vs {}", bloom.total_s, cap.total_s);
+        assert!(
+            bloom.total_s > cap.total_s,
+            "{} vs {}",
+            bloom.total_s,
+            cap.total_s
+        );
         assert!((bloom.total_s - cap.total_s - 300.10).abs() < 1e-9);
     }
 
@@ -903,14 +998,27 @@ mod cap_tests {
         for x in 0..4i64 {
             for y in 1..=2u32 {
                 let want = 0.6 * Material::Soil.pore_capacity() * world.config().voxel_volume();
-                world.apply(WorldCommand::AddWater { x, y, z: 0, volume_m3: want });
-                world.apply(WorldCommand::SetMaterial { x, y, z: 0, material: Material::Soil });
+                world.apply(WorldCommand::AddWater {
+                    x,
+                    y,
+                    z: 0,
+                    volume_m3: want,
+                });
+                world.apply(WorldCommand::SetMaterial {
+                    x,
+                    y,
+                    z: 0,
+                    material: Material::Soil,
+                });
             }
         }
         // Accelerated, and stated as such: a hundredfold assimilation, a rich pool, a fast
         // parcel and fast wood. Nothing here is a preset proposal — the point is to walk all
         // four stages inside a short test.
-        let mut config = FloraConfig { initial_mineral: 500.0, ..FloraConfig::default() };
+        let mut config = FloraConfig {
+            initial_mineral: 500.0,
+            ..FloraConfig::default()
+        };
         {
             let sc = config.species_mut(Species::Bloomcrown);
             sc.assimilation = 40.0;
@@ -920,13 +1028,19 @@ mod cap_tests {
             sc.wood_rate = 1.2;
             sc.hop = 1;
         }
-        let timeline = replacement_timeline(Species::Bloomcrown, config.species(Species::Bloomcrown));
+        let timeline =
+            replacement_timeline(Species::Bloomcrown, config.species(Species::Bloomcrown));
         let donor_min = config.species(Species::Bloomcrown).donor_min;
         let founder = founder_wood(config.species(Species::Bloomcrown));
         let mut flora = Flora::in_world(&world, config);
         assert!(flora.apply(
             &world,
-            Command::Seed { x: 0, z: 0, species: Species::Bloomcrown, wood: founder }
+            Command::Seed {
+                x: 0,
+                z: 0,
+                species: Species::Bloomcrown,
+                wood: founder
+            }
         ));
         let founder_id = 0u64;
 
@@ -935,7 +1049,11 @@ mod cap_tests {
         for tick in 1..=300u64 {
             flora.step(&mut world);
             let v = flora.view();
-            if delivered.is_none() && v.ground.iter().any(|g| g.seed_organic(Species::Bloomcrown) > 0.0) {
+            if delivered.is_none()
+                && v.ground
+                    .iter()
+                    .any(|g| g.seed_organic(Species::Bloomcrown) > 0.0)
+            {
                 delivered = Some(tick);
             }
             if born.is_none() && v.ledger.establishments > 0 {
@@ -964,8 +1082,16 @@ mod cap_tests {
             grown.expect("stage 3: no descendant reached donor size"),
             redelivered.expect("stage 4: no descendant funded a package of its own"),
         );
-        assert!(d >= timeline.fund_ticks, "stage 1 beat its bound: {d} < {}", timeline.fund_ticks);
-        assert_eq!(b, d + timeline.germinate_ticks, "germination is the next tick, exactly");
+        assert!(
+            d >= timeline.fund_ticks,
+            "stage 1 beat its bound: {d} < {}",
+            timeline.fund_ticks
+        );
+        assert_eq!(
+            b,
+            d + timeline.germinate_ticks,
+            "germination is the next tick, exactly"
+        );
         assert!(
             g - b >= timeline.grow_ticks,
             "stage 3 beat the growth cap: {} ticks against {}",
@@ -999,7 +1125,11 @@ mod cap_tests {
         config.species_mut(Species::Bloomcrown).wood_rate = 0.0;
         let never = replacement_timeline(Species::Bloomcrown, config.species(Species::Bloomcrown));
         assert_eq!(never.grow_ticks, u64::MAX);
-        assert_eq!(never.total_ticks, u64::MAX, "no off-by-one may make it finite");
+        assert_eq!(
+            never.total_ticks,
+            u64::MAX,
+            "no off-by-one may make it finite"
+        );
         assert!(never.total_s.is_infinite());
 
         let mut config = FloraConfig::default();
@@ -1028,11 +1158,24 @@ mod cap_tests {
         for x in 0..3i64 {
             for y in 1..=2u32 {
                 let want = 0.6 * Material::Soil.pore_capacity() * world.config().voxel_volume();
-                world.apply(WorldCommand::AddWater { x, y, z: 0, volume_m3: want });
-                world.apply(WorldCommand::SetMaterial { x, y, z: 0, material: Material::Soil });
+                world.apply(WorldCommand::AddWater {
+                    x,
+                    y,
+                    z: 0,
+                    volume_m3: want,
+                });
+                world.apply(WorldCommand::SetMaterial {
+                    x,
+                    y,
+                    z: 0,
+                    material: Material::Soil,
+                });
             }
         }
-        let mut config = FloraConfig { initial_mineral: 50.0, ..FloraConfig::default() };
+        let mut config = FloraConfig {
+            initial_mineral: 50.0,
+            ..FloraConfig::default()
+        };
         {
             let sc = config.species_mut(Species::Bloomcrown);
             sc.assimilation = 40.0;
@@ -1043,7 +1186,12 @@ mod cap_tests {
         // Just below the threshold, so the crossing is this fixture's own event.
         assert!(flora.apply(
             &world,
-            Command::Seed { x: 1, z: 0, species: Species::Bloomcrown, wood: donor_min * 0.99 }
+            Command::Seed {
+                x: 1,
+                z: 0,
+                species: Species::Bloomcrown,
+                wood: donor_min * 0.99
+            }
         ));
         let before = *flora.view().stands.first().expect("the stand");
         assert!(before.wood < donor_min, "the premise: below donor_min");
@@ -1051,7 +1199,11 @@ mod cap_tests {
 
         flora.step(&mut world);
         let after = *flora.view().stands.first().expect("still alive");
-        assert!(after.wood >= donor_min, "the crossing tick: wood {}", after.wood);
+        assert!(
+            after.wood >= donor_min,
+            "the crossing tick: wood {}",
+            after.wood
+        );
         assert!(
             after.parcel > 0.0,
             "the crossing tick must also fund: parcel {} after wood {}",
@@ -1096,12 +1248,25 @@ mod cap_tests {
         for x in 0..3i64 {
             for y in 1..=2u32 {
                 let want = 0.6 * Material::Soil.pore_capacity() * world.config().voxel_volume();
-                world.apply(WorldCommand::AddWater { x, y, z: 0, volume_m3: want });
-                world.apply(WorldCommand::SetMaterial { x, y, z: 0, material: Material::Soil });
+                world.apply(WorldCommand::AddWater {
+                    x,
+                    y,
+                    z: 0,
+                    volume_m3: want,
+                });
+                world.apply(WorldCommand::SetMaterial {
+                    x,
+                    y,
+                    z: 0,
+                    material: Material::Soil,
+                });
             }
         }
 
-        let mut config = FloraConfig { initial_mineral: 50.0, ..FloraConfig::default() };
+        let mut config = FloraConfig {
+            initial_mineral: 50.0,
+            ..FloraConfig::default()
+        };
         {
             let sc = config.species_mut(Species::Bloomcrown);
             sc.wood_rate = 0.3;
@@ -1115,12 +1280,21 @@ mod cap_tests {
         let mut flora = Flora::in_world(&world, config);
         assert!(flora.apply(
             &world,
-            Command::Seed { x: 1, z: 0, species: Species::Bloomcrown, wood: newborn }
+            Command::Seed {
+                x: 1,
+                z: 0,
+                species: Species::Bloomcrown,
+                wood: newborn
+            }
         ));
         for _ in 0..cap.growth_ticks - 1 {
             flora.step(&mut world);
         }
-        let stand = *flora.view().stands.first().expect("the newborn is still alive");
+        let stand = *flora
+            .view()
+            .stands
+            .first()
+            .expect("the newborn is still alive");
         assert!(
             stand.wood < donor_min,
             "the growth cap was beaten: wood {} at tick {} against donor_min {donor_min}",
@@ -1131,9 +1305,18 @@ mod cap_tests {
         // wrong reason. It multiplied its wood five and a half times in those 181 ticks and
         // still could not beat the cap, because income and not the cap is what bounds it
         // here: 0.1102 against the cap's own ceiling of 0.2960.
-        assert!(stand.wood > 2.0 * newborn, "a starved fixture proves nothing: wood {}", stand.wood);
-        let ceiling = newborn * (1.0 + 0.3 * cubarium_voxel_flora::DT).powi(cap.growth_ticks as i32 - 1);
-        assert!(stand.wood <= ceiling + 1e-12, "wood {} over the cap's ceiling {ceiling}", stand.wood);
+        assert!(
+            stand.wood > 2.0 * newborn,
+            "a starved fixture proves nothing: wood {}",
+            stand.wood
+        );
+        let ceiling =
+            newborn * (1.0 + 0.3 * cubarium_voxel_flora::DT).powi(cap.growth_ticks as i32 - 1);
+        assert!(
+            stand.wood <= ceiling + 1e-12,
+            "wood {} over the cap's ceiling {ceiling}",
+            stand.wood
+        );
     }
 }
 
@@ -1189,7 +1372,10 @@ pub struct IntervalRecord {
 impl IntervalRecord {
     /// The largest turnover any species showed, or `None` if this is the first interval.
     pub fn worst_turnover(&self) -> Option<f64> {
-        self.turnover.iter().copied().try_fold(0.0f64, |a, t| Some(a.max(t?)))
+        self.turnover
+            .iter()
+            .copied()
+            .try_fold(0.0f64, |a, t| Some(a.max(t?)))
     }
 }
 
@@ -1242,7 +1428,9 @@ impl Tolerances {
         let storage_ok = r.storage_rate.abs()
             <= self.storage_fraction_of_rain * r.rain_rate.abs().max(f64::MIN_POSITIVE);
         let head_ok = r.head_delta.abs() <= self.head_m_per_interval;
-        let turnover_ok = r.worst_turnover().is_some_and(|t| t <= self.eligible_turnover);
+        let turnover_ok = r
+            .worst_turnover()
+            .is_some_and(|t| t <= self.eligible_turnover);
         storage_ok && head_ok && turnover_ok
     }
 
@@ -1279,7 +1467,11 @@ impl Tolerances {
             )),
             Some(_) => {}
         }
-        if out.is_empty() { "settled".to_string() } else { out.join("; ") }
+        if out.is_empty() {
+            "settled".to_string()
+        } else {
+            out.join("; ")
+        }
     }
 }
 
@@ -1309,13 +1501,19 @@ pub fn conditioning_verdict(
 ) -> Settle {
     let n = tol.intervals.max(1);
     if records.len() >= n && records[records.len() - n..].iter().all(|r| tol.holds(r)) {
-        return Settle::Settled { at_s: records.last().map_or(0.0, |r| r.seconds) };
+        return Settle::Settled {
+            at_s: records.last().map_or(0.0, |r| r.seconds),
+        };
     }
     // **Expired when another whole interval no longer fits** (R11.2), not when the budget is
     // merely exhausted: a fractional tail cannot qualify, so a budget with only a tail left
     // has nothing further to offer this phase and the remainder is not worth running.
     let elapsed = records.last().map_or(0.0, |r| r.seconds);
-    if elapsed + interval_s > budget_s + 1e-9 { Settle::Expired } else { Settle::Running }
+    if elapsed + interval_s > budget_s + 1e-9 {
+        Settle::Expired
+    } else {
+        Settle::Running
+    }
 }
 
 /// `|symmetric difference| / |union|` of two sorted site sets: 0.0 for two identical sets,
@@ -1339,14 +1537,26 @@ pub fn turnover_of(before: &[Site], after: &[Site]) -> f64 {
             (None, None) => unreachable!(),
         }
     }
-    if union == 0 { 0.0 } else { (union - both) as f64 / union as f64 }
+    if union == 0 {
+        0.0
+    } else {
+        (union - both) as f64 / union as f64
+    }
 }
 
 /// Every skyline column one species could establish on now, sorted: the set whose turnover
 /// the conditioning decision reads, through the model's own predicate.
-pub fn eligible_sites(world: &World, flora: &Flora, skyline: &[Site], species: Species) -> Vec<Site> {
-    let mut out: Vec<Site> =
-        skyline.iter().copied().filter(|s| passes(world, flora, species, *s)).collect();
+pub fn eligible_sites(
+    world: &World,
+    flora: &Flora,
+    skyline: &[Site],
+    species: Species,
+) -> Vec<Site> {
+    let mut out: Vec<Site> = skyline
+        .iter()
+        .copied()
+        .filter(|s| passes(world, flora, species, *s))
+        .collect();
     out.sort_unstable();
     out
 }
@@ -1384,8 +1594,14 @@ mod settle_tests {
     #[test]
     fn two_consecutive_quiet_intervals_settle_and_one_does_not() {
         let tol = Tolerances::default();
-        assert_eq!(tol.intervals, 2, "the placeholder this test is written against");
-        assert_eq!(conditioning_verdict(&[quiet(100.0)], &tol, 1_000.0, 100.0), Settle::Running);
+        assert_eq!(
+            tol.intervals, 2,
+            "the placeholder this test is written against"
+        );
+        assert_eq!(
+            conditioning_verdict(&[quiet(100.0)], &tol, 1_000.0, 100.0),
+            Settle::Running
+        );
         assert_eq!(
             conditioning_verdict(&[quiet(100.0), quiet(200.0)], &tol, 1_000.0, 100.0),
             Settle::Settled { at_s: 200.0 }
@@ -1397,7 +1613,11 @@ mod settle_tests {
         let tol = Tolerances::default();
         let first = rec(100.0, 0.0, 0.0, None);
         assert!(!tol.holds(&first), "no previous set to compare with");
-        assert!(tol.why(&first).contains("no previous interval"), "{}", tol.why(&first));
+        assert!(
+            tol.why(&first).contains("no previous interval"),
+            "{}",
+            tol.why(&first)
+        );
         assert_eq!(
             conditioning_verdict(&[first, quiet(200.0)], &tol, 1_000.0, 100.0),
             Settle::Running,
@@ -1410,7 +1630,10 @@ mod settle_tests {
         let tol = Tolerances::default();
         let drift = rec(300.0, 0.0207, 0.0001, Some(0.005)); // the smoke's own 54 % of rain
         let records = vec![quiet(100.0), quiet(200.0), drift];
-        assert_eq!(conditioning_verdict(&records, &tol, 1_000.0, 100.0), Settle::Running);
+        assert_eq!(
+            conditioning_verdict(&records, &tol, 1_000.0, 100.0),
+            Settle::Running
+        );
     }
 
     #[test]
@@ -1419,7 +1642,11 @@ mod settle_tests {
         // The smoke's final interval, which the old harness accepted as conditioned.
         let storage = rec(1_000.0, 0.0207, 0.0001, Some(0.005));
         assert!(!tol.holds(&storage));
-        assert!(tol.why(&storage).contains("54 % of rain"), "{}", tol.why(&storage));
+        assert!(
+            tol.why(&storage).contains("54 % of rain"),
+            "{}",
+            tol.why(&storage)
+        );
 
         let head = rec(1_000.0, 0.0000384, -0.0032, Some(0.005));
         assert!(!tol.holds(&head));
@@ -1427,7 +1654,11 @@ mod settle_tests {
 
         let churn = rec(1_000.0, 0.0000384, 0.0001, Some(0.31));
         assert!(!tol.holds(&churn));
-        assert!(tol.why(&churn).contains("turnover 31.0 %"), "{}", tol.why(&churn));
+        assert!(
+            tol.why(&churn).contains("turnover 31.0 %"),
+            "{}",
+            tol.why(&churn)
+        );
 
         // And all three together pass, with the reason line saying so.
         let ok = quiet(1_000.0);
@@ -1438,9 +1669,18 @@ mod settle_tests {
     #[test]
     fn a_budget_that_runs_out_before_the_tolerances_hold_is_unresolved() {
         let tol = Tolerances::default();
-        let records = vec![rec(100.0, 0.0207, -0.06, None), rec(200.0, 0.0195, -0.05, Some(0.3))];
-        assert_eq!(conditioning_verdict(&records, &tol, 500.0, 100.0), Settle::Running);
-        assert_eq!(conditioning_verdict(&records, &tol, 200.0, 100.0), Settle::Expired);
+        let records = vec![
+            rec(100.0, 0.0207, -0.06, None),
+            rec(200.0, 0.0195, -0.05, Some(0.3)),
+        ];
+        assert_eq!(
+            conditioning_verdict(&records, &tol, 500.0, 100.0),
+            Settle::Running
+        );
+        assert_eq!(
+            conditioning_verdict(&records, &tol, 200.0, 100.0),
+            Settle::Expired
+        );
         // Expiry is about the budget and never about the tolerances being wrong.
         assert_eq!(conditioning_verdict(&[], &tol, 0.0, 100.0), Settle::Expired);
     }
@@ -1459,7 +1699,11 @@ mod settle_tests {
             rec(300.0, 0.0000384, -0.02, Some(0.01)),
         ];
         assert_eq!(tol.first_met(Which::Storage, &records), Some((1, 100.0)));
-        assert_eq!(tol.first_met(Which::Head, &records), None, "0.02 m is still 20x the limit");
+        assert_eq!(
+            tol.first_met(Which::Head, &records),
+            None,
+            "0.02 m is still 20x the limit"
+        );
         assert_eq!(tol.first_met(Which::Turnover, &records), Some((3, 300.0)));
         assert_eq!(tol.trend(Which::Head, &records), Some((0.08, 0.02)));
 
@@ -1470,15 +1714,31 @@ mod settle_tests {
         assert!((limit - 2.48).abs() < 1e-12, "limit {limit}");
 
         // Not decaying: no extrapolation rather than a wrong one.
-        let steady = vec![rec(100.0, 0.0, -0.05, None), rec(200.0, 0.0, -0.05, Some(0.0)), rec(300.0, 0.0, -0.06, Some(0.0))];
-        assert_eq!(head_asymptote(&steady), None, "a growing step extrapolates to nothing");
-        assert_eq!(head_asymptote(&records[..2]), None, "fewer than three records");
+        let steady = vec![
+            rec(100.0, 0.0, -0.05, None),
+            rec(200.0, 0.0, -0.05, Some(0.0)),
+            rec(300.0, 0.0, -0.06, Some(0.0)),
+        ];
+        assert_eq!(
+            head_asymptote(&steady),
+            None,
+            "a growing step extrapolates to nothing"
+        );
+        assert_eq!(
+            head_asymptote(&records[..2]),
+            None,
+            "fewer than three records"
+        );
         // An incomplete interval satisfies no single tolerance either.
         let mut partial = rec(400.0, 0.0, 0.0, Some(0.0));
         partial.complete = false;
         partial.ticks = 0;
         for which in Which::ALL {
-            assert!(!tol.holds_one(which, &partial), "{} on a partial interval", which.name());
+            assert!(
+                !tol.holds_one(which, &partial),
+                "{} on a partial interval",
+                which.name()
+            );
         }
     }
 
@@ -1538,8 +1798,16 @@ mod settle_tests {
     fn turnover_is_the_symmetric_difference_over_the_union() {
         let s = |xs: &[u32]| -> Vec<Site> { xs.iter().map(|&x| Site { x, y: 2, z: 0 }).collect() };
         assert_eq!(turnover_of(&s(&[1, 2, 3]), &s(&[1, 2, 3])), 0.0);
-        assert_eq!(turnover_of(&[], &[]), 0.0, "two empty sets moved by nothing");
-        assert_eq!(turnover_of(&s(&[1, 2]), &s(&[3, 4])), 1.0, "disjoint is total turnover");
+        assert_eq!(
+            turnover_of(&[], &[]),
+            0.0,
+            "two empty sets moved by nothing"
+        );
+        assert_eq!(
+            turnover_of(&s(&[1, 2]), &s(&[3, 4])),
+            1.0,
+            "disjoint is total turnover"
+        );
         // One column gained: union 4, both 3.
         assert!((turnover_of(&s(&[1, 2, 3]), &s(&[1, 2, 3, 4])) - 0.25).abs() < 1e-12);
         // One gained and one lost is **not** stationary, which a count comparison would miss.
@@ -1584,17 +1852,15 @@ impl Tolerances {
                     <= self.storage_fraction_of_rain * r.rain_rate.abs().max(f64::MIN_POSITIVE)
             }
             Which::Head => r.head_delta.abs() <= self.head_m_per_interval,
-            Which::Turnover => r.worst_turnover().is_some_and(|t| t <= self.eligible_turnover),
+            Which::Turnover => r
+                .worst_turnover()
+                .is_some_and(|t| t <= self.eligible_turnover),
         }
     }
 
     /// The **first** record on which one tolerance held, and its 1-based interval number:
     /// what a probe reports per tolerance, and `None` for "never, in this phase".
-    pub fn first_met(
-        &self,
-        which: Which,
-        records: &[IntervalRecord],
-    ) -> Option<(usize, f64)> {
+    pub fn first_met(&self, which: Which, records: &[IntervalRecord]) -> Option<(usize, f64)> {
         records
             .iter()
             .enumerate()

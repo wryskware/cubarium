@@ -52,7 +52,10 @@ pub fn unit_at(seed: u64, stream: u64, key: u64, counter: u64) -> f64 {
 /// and readable in a log line. Both signs of a pair use this same key: the antithetic pair is
 /// `theta ± sigma·epsilon` with *one* `epsilon`.
 pub fn pair_key(generation: u64, pair: u64) -> u64 {
-    assert!(pair < (1 << 20), "pair index {pair} does not fit the key packing");
+    assert!(
+        pair < (1 << 20),
+        "pair index {pair} does not fit the key packing"
+    );
     (generation << 20) | pair
 }
 
@@ -70,9 +73,18 @@ mod tests {
 
     #[test]
     fn a_draw_is_a_pure_function_of_its_position() {
-        assert_eq!(gaussian(5, stream::ES_INIT, 2, 900), gaussian(5, stream::ES_INIT, 2, 900));
-        assert_ne!(gaussian(5, stream::ES_INIT, 2, 900), gaussian(5, stream::ES_INIT, 2, 901));
-        assert_ne!(gaussian(5, stream::ES_INIT, 2, 900), gaussian(6, stream::ES_INIT, 2, 900));
+        assert_eq!(
+            gaussian(5, stream::ES_INIT, 2, 900),
+            gaussian(5, stream::ES_INIT, 2, 900)
+        );
+        assert_ne!(
+            gaussian(5, stream::ES_INIT, 2, 900),
+            gaussian(5, stream::ES_INIT, 2, 901)
+        );
+        assert_ne!(
+            gaussian(5, stream::ES_INIT, 2, 900),
+            gaussian(6, stream::ES_INIT, 2, 900)
+        );
         assert_ne!(
             gaussian(5, stream::ES_INIT, 2, 900),
             gaussian(5, stream::ES_PERTURBATION, 2, 900)
@@ -89,7 +101,10 @@ mod tests {
         assert!(mean.abs() < 0.05, "mean {mean}");
         assert!((var - 1.0).abs() < 0.08, "variance {var}");
         // Lag-1 correlation: the defect `crate::rng::normal` would have shown here.
-        let lag: f64 = v.windows(2).map(|w| (w[0] - mean) * (w[1] - mean)).sum::<f64>()
+        let lag: f64 = v
+            .windows(2)
+            .map(|w| (w[0] - mean) * (w[1] - mean))
+            .sum::<f64>()
             / ((n - 1) as f64 * var);
         assert!(lag.abs() < 0.05, "lag-1 correlation {lag}");
         assert!(v.iter().all(|x| x.is_finite()));
@@ -101,7 +116,10 @@ mod tests {
         perturbation(11, 3, 2, &mut whole);
         let key = pair_key(3, 2);
         for i in (0..64).rev() {
-            assert_eq!(whole[i], gaussian(11, stream::ES_PERTURBATION, key, i as u64));
+            assert_eq!(
+                whole[i],
+                gaussian(11, stream::ES_PERTURBATION, key, i as u64)
+            );
         }
     }
 

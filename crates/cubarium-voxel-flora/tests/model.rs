@@ -46,12 +46,34 @@ fn plain(width: u32, height: u32, pore: f64) -> World {
 fn wet_soil(w: &mut World, x: i64, y: u32, pore: f64) {
     let cap = Material::Soil.pore_capacity() * w.config().voxel_volume();
     if pore > 0.0 {
-        let got = w.apply(WorldCommand::AddWater { x, y, z: 0, volume_m3: pore * cap });
-        assert!((got - pore * cap).abs() < 1e-12, "the void took {got} of {}", pore * cap);
+        let got = w.apply(WorldCommand::AddWater {
+            x,
+            y,
+            z: 0,
+            volume_m3: pore * cap,
+        });
+        assert!(
+            (got - pore * cap).abs() < 1e-12,
+            "the void took {got} of {}",
+            pore * cap
+        );
     }
-    w.apply(WorldCommand::SetMaterial { x, y, z: 0, material: Material::Soil });
-    assert!((w.view().pore_at(x, y, 0) - pore).abs() < 1e-12, "{}", w.view().pore_at(x, y, 0));
-    assert_eq!(w.view().free_at(x, y, 0), 0.0, "nothing may be left standing");
+    w.apply(WorldCommand::SetMaterial {
+        x,
+        y,
+        z: 0,
+        material: Material::Soil,
+    });
+    assert!(
+        (w.view().pore_at(x, y, 0) - pore).abs() < 1e-12,
+        "{}",
+        w.view().pore_at(x, y, 0)
+    );
+    assert_eq!(
+        w.view().free_at(x, y, 0),
+        0.0,
+        "nothing may be left standing"
+    );
 }
 
 /// The support face of a column of `plain`.
@@ -64,9 +86,18 @@ fn assert_residuals(flora: &Flora, when: &str) {
     let o = v.organic() - v.ledger.expected_organic();
     let n = v.mineral() - v.ledger.expected_mineral();
     let e = v.energy() - v.ledger.expected_energy();
-    assert!(o.abs() <= 1e-9 * v.organic().abs().max(1.0), "{when}: organic residual {o}");
-    assert!(n.abs() <= 1e-9 * v.mineral().abs().max(1.0), "{when}: mineral residual {n}");
-    assert!(e.abs() <= 1e-9 * v.energy().abs().max(1.0), "{when}: energy residual {e}");
+    assert!(
+        o.abs() <= 1e-9 * v.organic().abs().max(1.0),
+        "{when}: organic residual {o}"
+    );
+    assert!(
+        n.abs() <= 1e-9 * v.mineral().abs().max(1.0),
+        "{when}: mineral residual {n}"
+    );
+    assert!(
+        e.abs() <= 1e-9 * v.energy().abs().max(1.0),
+        "{when}: energy residual {e}"
+    );
 }
 
 fn run(flora: &mut Flora, world: &mut World, ticks: u32) {
@@ -100,14 +131,42 @@ fn shade_covers_exactly_the_crown_radius_the_presenter_draws() {
 
     let mut world = plain(16, 12, 0.6);
     let mut flora = Flora::new(config);
-    assert!(flora.apply(&world, Command::Seed { x: 8, z: 0, species: Species::Umbrellafrond, wood: 0.6 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 8,
+            z: 0,
+            species: Species::Umbrellafrond,
+            wood: 0.6
+        }
+    ));
     // At the radius, and one voxel beyond it.
-    assert!(flora.apply(&world, Command::Seed { x: 10, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
-    assert!(flora.apply(&world, Command::Seed { x: 11, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 10,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.1
+        }
+    ));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 11,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.1
+        }
+    ));
 
     let uc = flora.config().species(Species::Umbrellafrond).clone();
     let bc = flora.config().species(Species::Bloomcrown).clone();
-    assert_eq!(uc.crown_radius(0.6), 2.0, "the fixture's premise: a whole-voxel radius");
+    assert_eq!(
+        uc.crown_radius(0.6),
+        2.0,
+        "the fixture's premise: a whole-voxel radius"
+    );
     assert!(
         uc.crown_height(0.6) > bc.crown_height(0.1),
         "the shading crown has to be the taller one: {} against {}",
@@ -122,18 +181,30 @@ fn shade_covers_exactly_the_crown_radius_the_presenter_draws() {
     let area = (std::f64::consts::PI * uc.crown_radius(0.6).powi(2)).max(1.0);
     let l = (-30.0 * (uc.alpha * 0.6) / area).exp();
     let expect = l * (1.0 + bc.light_half) / (l + bc.light_half);
-    let covered = flora.view().stand_at(site(10)).expect("at the radius").light;
+    let covered = flora
+        .view()
+        .stand_at(site(10))
+        .expect("at the radius")
+        .light;
     assert!(
         (covered - expect).abs() < 1e-12,
         "a stand exactly at the crown radius got {covered}, not the crown's own {expect}"
     );
     assert_eq!(
-        flora.view().stand_at(site(11)).expect("beyond the radius").light,
+        flora
+            .view()
+            .stand_at(site(11))
+            .expect("beyond the radius")
+            .light,
         1.0,
         "one voxel past the crown is open sky, exactly"
     );
     assert_eq!(
-        flora.view().stand_at(site(8)).expect("the shading stand").light,
+        flora
+            .view()
+            .stand_at(site(8))
+            .expect("the shading stand")
+            .light,
         1.0,
         "and nothing shades the tall stand itself"
     );
@@ -153,23 +224,65 @@ fn a_crown_level_with_another_does_not_shade_it_but_a_higher_one_does() {
     let mut flora = Flora::new(config);
     // A level pair, one voxel apart, each inside the other's crown.
     for x in [4i64, 5] {
-        assert!(flora.apply(&world, Command::Seed { x, z: 0, species: Species::Umbrellafrond, wood: 0.6 }));
+        assert!(flora.apply(
+            &world,
+            Command::Seed {
+                x,
+                z: 0,
+                species: Species::Umbrellafrond,
+                wood: 0.6
+            }
+        ));
     }
     // And an unequal pair, the same species and the same crown radius, one voxel apart.
-    assert!(flora.apply(&world, Command::Seed { x: 10, z: 0, species: Species::Umbrellafrond, wood: 0.6 }));
-    assert!(flora.apply(&world, Command::Seed { x: 11, z: 0, species: Species::Umbrellafrond, wood: 0.3 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 10,
+            z: 0,
+            species: Species::Umbrellafrond,
+            wood: 0.6
+        }
+    ));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 11,
+            z: 0,
+            species: Species::Umbrellafrond,
+            wood: 0.3
+        }
+    ));
 
     let uc = flora.config().species(Species::Umbrellafrond).clone();
     // The level pair covers itself — one voxel apart against a two-voxel radius — so
     // "not shaded" can only be the strictness of the inequality on the tops.
-    assert!(1.0 <= uc.crown_radius(0.6), "the level pair must cover each other");
-    assert!(uc.crown_height(0.3) < uc.crown_height(0.6), "and the unequal pair is not level");
+    assert!(
+        1.0 <= uc.crown_radius(0.6),
+        "the level pair must cover each other"
+    );
+    assert!(
+        uc.crown_height(0.3) < uc.crown_height(0.6),
+        "and the unequal pair is not level"
+    );
 
     flora.step(&mut world);
     let v = flora.view();
-    assert_eq!(v.stand_at(site(4)).unwrap().light, 1.0, "a level crown does not shade");
-    assert_eq!(v.stand_at(site(5)).unwrap().light, 1.0, "in either direction");
-    assert_eq!(v.stand_at(site(10)).unwrap().light, 1.0, "nor does a lower crown shade a higher");
+    assert_eq!(
+        v.stand_at(site(4)).unwrap().light,
+        1.0,
+        "a level crown does not shade"
+    );
+    assert_eq!(
+        v.stand_at(site(5)).unwrap().light,
+        1.0,
+        "in either direction"
+    );
+    assert_eq!(
+        v.stand_at(site(10)).unwrap().light,
+        1.0,
+        "nor does a lower crown shade a higher"
+    );
     // The lower crown is shaded, by exactly the taller crown's own attenuation.
     let area = (std::f64::consts::PI * uc.crown_radius(0.6).powi(2)).max(1.0);
     let l = (-30.0 * (uc.alpha * 0.6) / area).exp();
@@ -202,7 +315,12 @@ fn one_shared_voxel(pore: f64) -> World {
     });
     for x in 0..5i64 {
         if x == 2 {
-            w.apply(WorldCommand::SetMaterial { x, y: 1, z: 0, material: Material::Bedrock });
+            w.apply(WorldCommand::SetMaterial {
+                x,
+                y: 1,
+                z: 0,
+                material: Material::Bedrock,
+            });
             wet_soil(&mut w, x, 2, pore);
         } else {
             for y in 1..=2 {
@@ -230,13 +348,32 @@ fn one_voxel_shared_by_two_species_splits_exactly_by_demand() {
     let pore = 0.6;
     let mut world = one_shared_voxel(pore);
     let mut flora = Flora::new(config);
-    assert!(flora.apply(&world, Command::Seed { x: 1, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
-    assert!(flora.apply(&world, Command::Seed { x: 3, z: 0, species: Species::Umbrellafrond, wood: 0.1 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 1,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.1
+        }
+    ));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 3,
+            z: 0,
+            species: Species::Umbrellafrond,
+            wood: 0.1
+        }
+    ));
 
     // One voxel's stock, and the whole strip's: four two-voxel columns and one of one.
     let per_voxel = pore * Material::Soil.pore_capacity() * world.config().voxel_volume();
     let stock0 = pore_stock(&world);
-    assert!((stock0 - 9.0 * per_voxel).abs() < 1e-12, "{stock0} is not nine voxels of soil");
+    assert!(
+        (stock0 - 9.0 * per_voxel).abs() < 1e-12,
+        "{stock0} is not nine voxels of soil"
+    );
 
     flora.step(&mut world);
 
@@ -246,12 +383,23 @@ fn one_voxel_shared_by_two_species_splits_exactly_by_demand() {
     // demands differ and the split observable.
     let bs = flora.config().species(Species::Bloomcrown).clone();
     let us = flora.config().species(Species::Umbrellafrond).clone();
-    assert_eq!(b.moisture, 1.0, "pore 0.6 is past bloomcrown's sat_pore of {}", bs.sat_pore);
-    assert!((u.moisture - 0.6).abs() < 1e-12, "umbrellafrond's ramp: {}", u.moisture);
+    assert_eq!(
+        b.moisture, 1.0,
+        "pore 0.6 is past bloomcrown's sat_pore of {}",
+        bs.sat_pore
+    );
+    assert!(
+        (u.moisture - 0.6).abs() < 1e-12,
+        "umbrellafrond's ramp: {}",
+        u.moisture
+    );
 
     let demand_b = bs.transpiration_m3_per_s * (bs.alpha * 0.1) * b.moisture * cubarium_voxel::DT;
     let demand_u = us.transpiration_m3_per_s * (us.alpha * 0.1) * u.moisture * cubarium_voxel::DT;
-    assert!(demand_b / 5.0 > per_voxel, "the fixture has to be starved to test a split");
+    assert!(
+        demand_b / 5.0 > per_voxel,
+        "the fixture has to be starved to test a split"
+    );
 
     // Four voxels are the bloomcrown's alone and four the umbrellafrond's; the fifth is
     // shared, and there the two demands share the stock in their own proportion.
@@ -259,8 +407,16 @@ fn one_voxel_shared_by_two_species_splits_exactly_by_demand() {
     let shared_u = per_voxel * demand_u / (demand_b + demand_u);
     let want_b = 4.0 * per_voxel + shared_b;
     let want_u = 4.0 * per_voxel + shared_u;
-    assert!((b.water_m3 - want_b).abs() < 1e-12 * want_b, "{} against {want_b}", b.water_m3);
-    assert!((u.water_m3 - want_u).abs() < 1e-12 * want_u, "{} against {want_u}", u.water_m3);
+    assert!(
+        (b.water_m3 - want_b).abs() < 1e-12 * want_b,
+        "{} against {want_b}",
+        b.water_m3
+    );
+    assert!(
+        (u.water_m3 - want_u).abs() < 1e-12 * want_u,
+        "{} against {want_u}",
+        u.water_m3
+    );
     // The shared voxel alone, as a ratio: exactly the ratio of the demands.
     let (got_b, got_u) = (b.water_m3 - 4.0 * per_voxel, u.water_m3 - 4.0 * per_voxel);
     assert!(
@@ -281,7 +437,11 @@ fn one_voxel_shared_by_two_species_splits_exactly_by_demand() {
         flora.view().ledger.transpired_m3
     );
     assert!(pore_stock(&world) >= 0.0, "the soil went negative");
-    assert!(pore_stock(&world) < 1e-15, "every root voxel should be dry: {}", pore_stock(&world));
+    assert!(
+        pore_stock(&world) < 1e-15,
+        "every root voxel should be dry: {}",
+        pore_stock(&world)
+    );
     assert!(
         (stock0 - total).abs() < 1e-12 * stock0,
         "the soil lost {} for {total} taken",
@@ -354,8 +514,24 @@ fn two_species_banks_share_one_site_and_each_donor_pays_only_its_own() {
 
     let mut world = plain(4, 8, 0.6);
     let mut flora = Flora::new(config);
-    assert!(flora.apply(&world, Command::Seed { x: 0, z: 0, species: Species::Umbrellafrond, wood: 0.4 }));
-    assert!(flora.apply(&world, Command::Seed { x: 2, z: 0, species: Species::Bloomcrown, wood: 0.4 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 0,
+            z: 0,
+            species: Species::Umbrellafrond,
+            wood: 0.4
+        }
+    ));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 2,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.4
+        }
+    ));
 
     let bs = flora.config().species(Species::Bloomcrown).clone();
     let us = flora.config().species(Species::Umbrellafrond).clone();
@@ -389,7 +565,12 @@ fn two_species_banks_share_one_site_and_each_donor_pays_only_its_own() {
     // Each donor asked for, was funded, and is holding exactly its own arithmetic.
     for (species, net, landed, seeded) in [
         (Species::Bloomcrown, net_b, 6.0 * package, seeded_reserve_b),
-        (Species::Umbrellafrond, net_u, 3.0 * package, seeded_reserve_u),
+        (
+            Species::Umbrellafrond,
+            net_u,
+            3.0 * package,
+            seeded_reserve_u,
+        ),
     ] {
         let i = species.index();
         let accrued = ticks as f64 * net;
@@ -438,17 +619,30 @@ fn two_species_banks_share_one_site_and_each_donor_pays_only_its_own() {
         let mut sorted = species.clone();
         sorted.sort();
         sorted.dedup();
-        assert_eq!(species, sorted, "not one cohort per species, sorted: {:?}", g.seeds);
+        assert_eq!(
+            species, sorted,
+            "not one cohort per species, sorted: {:?}",
+            g.seeds
+        );
         if species.len() == 2 {
             shared += 1;
         }
     }
-    assert!(shared >= 1, "the two species never shared a site in {ticks} ticks");
+    assert!(
+        shared >= 1,
+        "the two species never shared a site in {ticks} ticks"
+    );
     // And what is banked is what landed, less the attrition each bin has paid since.
-    for (species, landed) in
-        [(Species::Bloomcrown, 6.0 * package), (Species::Umbrellafrond, 3.0 * package)]
-    {
-        let banked: f64 = flora.view().ground.iter().map(|g| g.seed_organic(species)).sum();
+    for (species, landed) in [
+        (Species::Bloomcrown, 6.0 * package),
+        (Species::Umbrellafrond, 3.0 * package),
+    ] {
+        let banked: f64 = flora
+            .view()
+            .ground
+            .iter()
+            .map(|g| g.seed_organic(species))
+            .sum();
         assert!(
             banked > 0.99 * landed && banked <= landed,
             "{} banked {banked} of {landed} landed",
@@ -473,7 +667,15 @@ fn two_species_banks_share_one_site_and_each_donor_pays_only_its_own() {
 fn nothing_outside_hop_ever_receives_and_the_patch_does_not_creep() {
     let mut world = plain(16, 8, 0.6);
     let mut flora = Flora::new(FloraConfig::default());
-    assert!(flora.apply(&world, Command::Seed { x: 7, z: 0, species: Species::Bloomcrown, wood: 0.4 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 7,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.4
+        }
+    ));
     let sc = flora.config().species(Species::Bloomcrown).clone();
     assert_eq!(sc.hop, 2, "the placeholder hop this test reads");
     let package = sc.alive_min / sc.propagule_split[0];
@@ -497,7 +699,10 @@ fn nothing_outside_hop_ever_receives_and_the_patch_does_not_creep() {
         "something landed on a parcel that is not a package: {:?}",
         flora.view().ground
     );
-    assert_eq!(flora.view().ledger.propagule_landed[Species::Bloomcrown.index()], 0.0);
+    assert_eq!(
+        flora.view().ledger.propagule_landed[Species::Bloomcrown.index()],
+        0.0
+    );
     assert_eq!(flora.view().ledger.establishments, 0);
     assert_residuals(&flora, "after forty ticks of one placeholder donor");
 
@@ -507,12 +712,25 @@ fn nothing_outside_hop_ever_receives_and_the_patch_does_not_creep() {
     config.bloomcrown.reserve_cap = 4.0;
     let mut world = plain(16, 8, 0.6);
     let mut flora = Flora::new(config);
-    assert!(flora.apply(&world, Command::Seed { x: 7, z: 0, species: Species::Bloomcrown, wood: 0.4 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 7,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.4
+        }
+    ));
 
     run(&mut flora, &mut world, 40);
 
-    let banked: Vec<u32> =
-        flora.view().ground.iter().filter(|g| !g.seeds.is_empty()).map(|g| g.site.x).collect();
+    let banked: Vec<u32> = flora
+        .view()
+        .ground
+        .iter()
+        .filter(|g| !g.seeds.is_empty())
+        .map(|g| g.site.x)
+        .collect();
     assert!(!banked.is_empty(), "a funded donor landed nothing");
     assert!(
         banked.iter().all(|x| [5u32, 6, 8, 9].contains(x)),
@@ -560,7 +778,15 @@ fn a_donor_is_debited_exactly_what_arrives_plus_its_construction() {
     frozen(&mut config.bloomcrown);
     let mut world = plain(8, 8, 0.6);
     let mut flora = Flora::new(config);
-    assert!(flora.apply(&world, Command::Seed { x: 3, z: 0, species: Species::Bloomcrown, wood: 0.4 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 3,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.4
+        }
+    ));
 
     let sc = flora.config().species(Species::Bloomcrown).clone();
     let reserve0 = sc.reserve_cap * 0.4;
@@ -603,8 +829,14 @@ fn a_donor_is_debited_exactly_what_arrives_plus_its_construction() {
         // mineral — to 1e-11, which is the cohort's own attrition decomposing in the three
         // ticks since it landed, and not the 0.01 of construction that was respired.
         let pool = g.mineral - flora.config().initial_mineral;
-        assert!(pool >= 0.0 && pool < 1e-10, "construction fertilized the site by {pool}");
-        assert!(flora.view().stand_at(g.site).is_none(), "a package is a cohort, not a stand");
+        assert!(
+            pool >= 0.0 && pool < 1e-10,
+            "construction fertilized the site by {pool}"
+        );
+        assert!(
+            flora.view().stand_at(g.site).is_none(),
+            "a package is a cohort, not a stand"
+        );
     }
     assert_eq!(landed_on, 1, "one package, one recipient");
     // What is there is the package less the attrition of the three ticks since it landed:
@@ -646,9 +878,21 @@ fn a_donor_is_debited_exactly_what_arrives_plus_its_construction() {
     // has not landed is exactly what it is holding.
     let l = flora.view().ledger;
     let i = Species::Bloomcrown.index();
-    assert!((l.propagule_requested[i] - accrued).abs() <= 1e-15, "{:?}", l.propagule_requested);
-    assert!((l.propagule_funded[i] - accrued).abs() <= 1e-15, "{:?}", l.propagule_funded);
-    assert!((l.propagule_landed[i] - package).abs() <= 1e-15, "{:?}", l.propagule_landed);
+    assert!(
+        (l.propagule_requested[i] - accrued).abs() <= 1e-15,
+        "{:?}",
+        l.propagule_requested
+    );
+    assert!(
+        (l.propagule_funded[i] - accrued).abs() <= 1e-15,
+        "{:?}",
+        l.propagule_funded
+    );
+    assert!(
+        (l.propagule_landed[i] - package).abs() <= 1e-15,
+        "{:?}",
+        l.propagule_landed
+    );
     assert!(
         (l.propagule_funded[i] - l.propagule_landed[i] - donor.parcel).abs() <= 1e-15,
         "funded minus landed is the parcel: {:?} against {}",
@@ -669,28 +913,65 @@ fn a_donor_is_debited_exactly_what_arrives_plus_its_construction() {
 #[test]
 fn a_canopy_changes_no_sky_visibility_and_all_of_the_plant_s_light() {
     let mut world = plain(16, 12, 0.6);
-    let before: Vec<f64> =
-        (0..16i64).map(|x| world.view().sky_visibility(x, 2, 0)).collect();
+    let before: Vec<f64> = (0..16i64)
+        .map(|x| world.view().sky_visibility(x, 2, 0))
+        .collect();
     let version = world.terrain_version();
-    assert!(before.iter().all(|&v| v == 1.0), "the fixture is an open plain: {before:?}");
+    assert!(
+        before.iter().all(|&v| v == 1.0),
+        "the fixture is an open plain: {before:?}"
+    );
 
     let mut flora = Flora::new(FloraConfig::default());
-    assert!(flora.apply(&world, Command::Seed { x: 8, z: 0, species: Species::Umbrellafrond, wood: 0.6 }));
-    assert!(flora.apply(&world, Command::Seed { x: 9, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 8,
+            z: 0,
+            species: Species::Umbrellafrond,
+            wood: 0.6
+        }
+    ));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 9,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.1
+        }
+    ));
     run(&mut flora, &mut world, 5);
 
-    let after: Vec<f64> = (0..16i64).map(|x| world.view().sky_visibility(x, 2, 0)).collect();
-    assert_eq!(before, after, "a canopy is not terrain and may not change its geometry");
-    assert_eq!(world.terrain_version(), version, "a plant committed a material change");
+    let after: Vec<f64> = (0..16i64)
+        .map(|x| world.view().sky_visibility(x, 2, 0))
+        .collect();
+    assert_eq!(
+        before, after,
+        "a canopy is not terrain and may not change its geometry"
+    );
+    assert_eq!(
+        world.terrain_version(),
+        version,
+        "a plant committed a material change"
+    );
 
     // And the canopy is doing something — in the plant layer's number, at the default
     // `shade_k`, with no rate touched.
-    let shaded = flora.view().stand_at(site(9)).expect("under the crown").light;
+    let shaded = flora
+        .view()
+        .stand_at(site(9))
+        .expect("under the crown")
+        .light;
     assert!(
         shaded < after[9],
         "the covered stand's light {shaded} is not below its site's sky visibility {}",
         after[9]
     );
-    assert_eq!(flora.view().stand_at(site(8)).unwrap().light, 1.0, "the taller stand is unshaded");
+    assert_eq!(
+        flora.view().stand_at(site(8)).unwrap().light,
+        1.0,
+        "the taller stand is unshaded"
+    );
     assert_residuals(&flora, "after five ticks under a canopy");
 }

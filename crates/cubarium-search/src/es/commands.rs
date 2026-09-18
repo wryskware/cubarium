@@ -21,13 +21,18 @@ use super::export::PolicyFile;
 use super::fixture::{self, Ecology, HORIZON_TICKS};
 use super::optimizer::Adam;
 use super::tensor::{self, PARAMS};
-use super::trainer::{Aggregate, self, CenterRecord, Checkpoint, GenerationError, GenerationReport, Plan, Protocol,
-    run_generation, score,};
+use super::trainer::{
+    self, Aggregate, CenterRecord, Checkpoint, GenerationError, GenerationReport, Plan, Protocol,
+    run_generation, score,
+};
 use crate::evaluate::BUILD_ID;
 
 /// The three controls, in the order the table reports them.
-pub const CONTROLS: [Control; 3] =
-    [Control::NoIntake, Control::StationaryGrazing, Control::MobileScript];
+pub const CONTROLS: [Control; 3] = [
+    Control::NoIntake,
+    Control::StationaryGrazing,
+    Control::MobileScript,
+];
 
 type Boxed = Box<dyn std::error::Error>;
 
@@ -47,24 +52,50 @@ pub fn protocol(config: Option<PathBuf>) -> Result<(), Boxed> {
     println!("parameters           {PARAMS}");
     println!();
     println!("## optimizer: antithetic Gaussian ES, centred-rank utilities, Adam ascent");
-    println!("sigma                {} (fixed; no adaptive sigma, no mutation rescaling)", p.sigma);
+    println!(
+        "sigma                {} (fixed; no adaptive sigma, no mutation rescaling)",
+        p.sigma
+    );
     println!("learning rate        {}", p.learning_rate);
-    println!("beta1 / beta2 / eps  {} / {} / {} (bias-corrected, no weight decay)", p.beta1, p.beta2, p.adam_eps);
+    println!(
+        "beta1 / beta2 / eps  {} / {} / {} (bias-corrected, no weight decay)",
+        p.beta1, p.beta2, p.adam_eps
+    );
     println!("utilities            average ranks over 2n scores, u = rank/(2n-1) - 0.5");
     println!("gradient             g = sum_i (u+_i - u-_i) eps_i / (2 n sigma)");
     println!("flatten order        w_i, w_h, b_i, b_h, w_o, b_o; each row-major, gates (r,z,n)");
     println!("initialisation       {}", p.init);
     println!();
     println!("## score (frozen before the smoke)");
-    println!("score = t_min + {} * mean(clip(usable terminal stores / body capacity, 0, 1))", p.store_weight);
-    println!("aggregate = {} (`es-train --aggregate mean` scores mean survival ticks instead; a different hash)", p.aggregate.as_str());
+    println!(
+        "score = t_min + {} * mean(clip(usable terminal stores / body capacity, 0, 1))",
+        p.store_weight
+    );
+    println!(
+        "aggregate = {} (`es-train --aggregate mean` scores mean survival ticks instead; a different hash)",
+        p.aggregate.as_str()
+    );
     println!("t_min is the minimum survival ticks over the candidate's layouts; a dead animal");
-    println!("contributes zero stores. The whole secondary term is at most {} of one tick.", p.store_weight);
+    println!(
+        "contributes zero stores. The whole secondary term is at most {} of one tick.",
+        p.store_weight
+    );
     println!();
     println!("## episode");
-    println!("horizon              {} ticks ({:.0} s at 20 Hz)", p.horizon_ticks, fixture::seconds(p.horizon_ticks));
-    println!("body                 one mature founder (hue {}), structure = structure_adult,", fixture::FOUNDER_HUE);
-    println!("                     reserve {} of R_max, energy {} of E_max, births disabled", fixture::START_RESERVE, fixture::START_ENERGY);
+    println!(
+        "horizon              {} ticks ({:.0} s at 20 Hz)",
+        p.horizon_ticks,
+        fixture::seconds(p.horizon_ticks)
+    );
+    println!(
+        "body                 one mature founder (hue {}), structure = structure_adult,",
+        fixture::FOUNDER_HUE
+    );
+    println!(
+        "                     reserve {} of R_max, energy {} of E_max, births disabled",
+        fixture::START_RESERVE,
+        fixture::START_ENERGY
+    );
     println!("                     equally through the diagnostic seam's `bud: Some(false)`");
     println!();
     println!("## training layouts (optimisation sees only these)");
@@ -91,8 +122,9 @@ pub fn controls(
     let deadline = started + Duration::from_secs(wall_seconds);
     let eco = Ecology::from_option(config.as_deref())?;
     let layouts = fixture::training_layouts_on(&eco);
-    let jobs: Vec<(usize, Control)> =
-        (0..layouts.len()).flat_map(|l| CONTROLS.map(|c| (l, c))).collect();
+    let jobs: Vec<(usize, Control)> = (0..layouts.len())
+        .flat_map(|l| CONTROLS.map(|c| (l, c)))
+        .collect();
 
     println!("# R2a fixture controls");
     println!(
@@ -147,12 +179,28 @@ pub fn controls(
     println!();
     println!(
         "{:<13} {:<19} {:>7} {:>8} {:>6} {:>10} {:>10} {:>10} {:>10} {:>8} {:>6} {:>9} {:>9}",
-        "layout", "control", "ticks", "seconds", "alive", "stores_end", "intake_P", "upkeep",
-        "motion", "px", "cells", "route_P0", "route_P1"
+        "layout",
+        "control",
+        "ticks",
+        "seconds",
+        "alive",
+        "stores_end",
+        "intake_P",
+        "upkeep",
+        "motion",
+        "px",
+        "cells",
+        "route_P0",
+        "route_P1"
     );
     for (i, (l, c)) in jobs.iter().enumerate() {
         match &slots[i] {
-            None => println!("{:<13} {:<19} {:>7}", layouts[*l].name, c.name(), "CANCELLED"),
+            None => println!(
+                "{:<13} {:<19} {:>7}",
+                layouts[*l].name,
+                c.name(),
+                "CANCELLED"
+            ),
             Some(e) => println!(
                 "{:<13} {:<19} {:>7} {:>8.1} {:>6} {:>10.4} {:>10.4} {:>10.4} {:>10.4} {:>8.1} \
                  {:>6} {:>9.3} {:>9.3}",
@@ -186,7 +234,10 @@ pub fn controls(
     println!("R2 stationary grazing cannot pass the relocation task (it dies too)");
     println!("R3 a paid mobile strategy can exploit the food (funded at the horizon)");
     println!();
-    println!("{:<13} {:>4} {:>4} {:>4}  verdict", "layout", "R1", "R2", "R3");
+    println!(
+        "{:<13} {:>4} {:>4} {:>4}  verdict",
+        "layout", "R1", "R2", "R3"
+    );
     let mut all_pass = true;
     for (l, layout) in layouts.iter().enumerate() {
         let get = |c: Control| {
@@ -210,7 +261,11 @@ pub fn controls(
             mark(r1),
             mark(r2),
             mark(r3),
-            if pass { "learning-ready" } else { "NOT learning-ready" }
+            if pass {
+                "learning-ready"
+            } else {
+                "NOT learning-ready"
+            }
         );
     }
     println!();
@@ -239,13 +294,16 @@ pub fn controls(
                 })
             })
             .collect();
-        write_json(&path, &serde_json::json!({
-            "build": BUILD_ID,
-            "horizon_ticks": HORIZON_TICKS,
-            "workers": workers,
-            "wall_seconds": wall,
-            "rows": rows,
-        }))?;
+        write_json(
+            &path,
+            &serde_json::json!({
+                "build": BUILD_ID,
+                "horizon_ticks": HORIZON_TICKS,
+                "workers": workers,
+                "wall_seconds": wall,
+                "rows": rows,
+            }),
+        )?;
         println!("wrote {}", path.display());
     }
     Ok(())
@@ -277,7 +335,10 @@ pub fn smoke(config: Option<PathBuf>, out: Option<PathBuf>) -> Result<(), Boxed>
         "# {SMOKE_PAIRS} pairs x 2 signs x 1 layout ({}) x {SMOKE_TICKS} ticks = 4 episodes, twice",
         one[0].name
     );
-    println!("# build {BUILD_ID}   protocol hash {:#018x}", protocol.hash());
+    println!(
+        "# build {BUILD_ID}   protocol hash {:#018x}",
+        protocol.hash()
+    );
     println!("# config {} (hash {})", protocol.config, eco.hex());
 
     // The plumbing being smoked now includes the ecology, so the layouts are checked against
@@ -389,7 +450,10 @@ pub fn smoke(config: Option<PathBuf>, out: Option<PathBuf>) -> Result<(), Boxed>
     println!("candidate scores  {:?}", report_a.candidate_scores);
     println!("gradient L2 norm  {:.12e}", report_a.gradient_norm);
     println!("update RMS        {:.12e}", report_a.update_rms);
-    println!("centre L2 change  {:.12e}", l2_delta(&tensor::initial_center(protocol.train_seed), &theta_a));
+    println!(
+        "centre L2 change  {:.12e}",
+        l2_delta(&tensor::initial_center(protocol.train_seed), &theta_a)
+    );
 
     println!();
     println!("## the repeat at four workers");
@@ -404,7 +468,11 @@ pub fn smoke(config: Option<PathBuf>, out: Option<PathBuf>) -> Result<(), Boxed>
     let ok = scores_equal && jobs_equal && theta_equal && adam_equal;
     println!(
         "verdict                   {}",
-        if ok { "deterministic" } else { "NOT DETERMINISTIC" }
+        if ok {
+            "deterministic"
+        } else {
+            "NOT DETERMINISTIC"
+        }
     );
 
     let wall = started.elapsed().as_secs_f64();
@@ -416,18 +484,21 @@ pub fn smoke(config: Option<PathBuf>, out: Option<PathBuf>) -> Result<(), Boxed>
     );
 
     if let Some(path) = out {
-        write_json(&path, &serde_json::json!({
-            "build": BUILD_ID,
-            "protocol": protocol,
-            "protocol_hash": format!("{:#018x}", protocol.hash()),
-            "workers_a": 2, "workers_b": 4,
-            "report_a": report_a,
-            "report_b": report_b,
-            "theta_a_hex_fnv1a": format!("{:#018x}", fixture::fnv1a(super::bits::encode(&theta_a).as_bytes())),
-            "theta_b_hex_fnv1a": format!("{:#018x}", fixture::fnv1a(super::bits::encode(&theta_b).as_bytes())),
-            "deterministic": ok,
-            "wall_seconds": wall,
-        }))?;
+        write_json(
+            &path,
+            &serde_json::json!({
+                "build": BUILD_ID,
+                "protocol": protocol,
+                "protocol_hash": format!("{:#018x}", protocol.hash()),
+                "workers_a": 2, "workers_b": 4,
+                "report_a": report_a,
+                "report_b": report_b,
+                "theta_a_hex_fnv1a": format!("{:#018x}", fixture::fnv1a(super::bits::encode(&theta_a).as_bytes())),
+                "theta_b_hex_fnv1a": format!("{:#018x}", fixture::fnv1a(super::bits::encode(&theta_b).as_bytes())),
+                "deterministic": ok,
+                "wall_seconds": wall,
+            }),
+        )?;
         println!("wrote {}", path.display());
     }
     if !ok {
@@ -447,11 +518,20 @@ pub fn bench(ticks: u64, workers: usize, config: Option<PathBuf>) -> Result<(), 
     println!("# build {BUILD_ID}, {ticks} ticks per episode");
     println!();
     let limits = Limits::new(&cancel);
-    println!("{:<13} {:>9} {:>12} {:>12} {:>9}", "layout", "seconds", "ticks/s", "validations", "alive");
+    println!(
+        "{:<13} {:>9} {:>12} {:>12} {:>9}",
+        "layout", "seconds", "ticks/s", "validations", "alive"
+    );
     for l in &layouts {
         let t = Instant::now();
-        let e = episode::run(l, &Driver::Policy(Box::new(policy.clone())), ticks, limits, "bench")
-            .expect("not cancelled");
+        let e = episode::run(
+            l,
+            &Driver::Policy(Box::new(policy.clone())),
+            ticks,
+            limits,
+            "bench",
+        )
+        .expect("not cancelled");
         let s = t.elapsed().as_secs_f64();
         println!(
             "{:<13} {:>9.3} {:>12.0} {:>12} {:>9}",
@@ -500,8 +580,14 @@ pub fn bench(ticks: u64, workers: usize, config: Option<PathBuf>) -> Result<(), 
         s / jobs.len() as f64 * workers as f64,
     );
     println!();
-    println!("A full-horizon ({HORIZON_TICKS}-tick) episode therefore costs about {:.2} s of one", HORIZON_TICKS as f64 / (total / s) * workers as f64);
-    println!("worker's time, and {:.2} s of wall time at {workers} workers.", HORIZON_TICKS as f64 / (total / s));
+    println!(
+        "A full-horizon ({HORIZON_TICKS}-tick) episode therefore costs about {:.2} s of one",
+        HORIZON_TICKS as f64 / (total / s) * workers as f64
+    );
+    println!(
+        "worker's time, and {:.2} s of wall time at {workers} workers.",
+        HORIZON_TICKS as f64 / (total / s)
+    );
     Ok(())
 }
 
@@ -558,7 +644,11 @@ pub fn train(
                 )
                 .into());
             }
-            println!("# resumed from {} at generation {}", path.display(), cp.generation_completed);
+            println!(
+                "# resumed from {} at generation {}",
+                path.display(),
+                cp.generation_completed
+            );
             cp
         }
         None => {
@@ -588,11 +678,18 @@ pub fn train(
     // truncate them. A fresh run either has no log (it was refused otherwise) or had its old
     // one removed above by an explicit `--overwrite`.
     let _ = resuming;
-    let mut log =
-        std::io::BufWriter::new(fs::OpenOptions::new().create(true).append(true).open(&log_path)?);
+    let mut log = std::io::BufWriter::new(
+        fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)?,
+    );
 
     println!("# R2a learning run");
-    println!("# build {BUILD_ID}   protocol hash {:#018x}", protocol.hash());
+    println!(
+        "# build {BUILD_ID}   protocol hash {:#018x}",
+        protocol.hash()
+    );
     println!("# config {} (hash {})", protocol.config, eco.hex());
     println!(
         "# {pairs} pairs ({} candidates) x {} layouts x {horizon} ticks, up to {generations} \
@@ -701,14 +798,22 @@ pub fn train(
     }
     if center_eval
         && checkpoint.generation_completed > first
-        && checkpoint.recorded_center_score(checkpoint.generation_completed).is_none()
+        && checkpoint
+            .recorded_center_score(checkpoint.generation_completed)
+            .is_none()
         && Instant::now() < deadline
     {
         let plan = Plan::new(&layouts, horizon, workers, false, Some(deadline));
         match finalize_center(&mut checkpoint, &plan, &checkpoint_path, &cancel)? {
             Some(s) => println!(
                 "{:>4} {:>8} {:>12} {:>12} {:>12.3} {:>12} {:>9}",
-                "fin", layouts.len(), "-", "-", s, "-", "-"
+                "fin",
+                layouts.len(),
+                "-",
+                "-",
+                s,
+                "-",
+                "-"
             ),
             None => stop = "wall-time cap before the final centre evaluation".into(),
         }
@@ -757,7 +862,13 @@ pub fn finalize_center(
     cancel: &AtomicBool,
 ) -> Result<Option<f64>, Boxed> {
     let generation = checkpoint.generation_completed;
-    match trainer::evaluate(&checkpoint.theta, &checkpoint.protocol, plan, generation, cancel) {
+    match trainer::evaluate(
+        &checkpoint.theta,
+        &checkpoint.protocol,
+        plan,
+        generation,
+        cancel,
+    ) {
         Ok((score, episodes)) => {
             score_center(checkpoint, generation, score);
             checkpoint.episodes_run += episodes.len() as u64;
@@ -835,7 +946,10 @@ pub struct EvalProbe {
 
 impl EvalProbe {
     pub fn plain() -> EvalProbe {
-        EvalProbe { reset_hidden_every: None, copies: 1 }
+        EvalProbe {
+            reset_hidden_every: None,
+            copies: 1,
+        }
     }
 }
 
@@ -888,16 +1002,37 @@ pub fn evaluate(
     let cancel = AtomicBool::new(false);
     let started = Instant::now();
     let limits = Limits::until(&cancel, started + Duration::from_secs(wall_seconds));
-    println!("# evaluation of {} (generation {}, digest {:#x}) on the {set} set", policy_file.display(), file.generation, file.policy_digest);
-    println!("# build {BUILD_ID}, {horizon} ticks per episode, {wall_seconds} s cap, {} layouts", layouts.len());
-    println!("# config {} (hash {}), protocol hash {:#018x}", eco.label, eco.hex(), file.protocol_hash);
+    println!(
+        "# evaluation of {} (generation {}, digest {:#x}) on the {set} set",
+        policy_file.display(),
+        file.generation,
+        file.policy_digest
+    );
+    println!(
+        "# build {BUILD_ID}, {horizon} ticks per episode, {wall_seconds} s cap, {} layouts",
+        layouts.len()
+    );
+    println!(
+        "# config {} (hash {}), protocol hash {:#018x}",
+        eco.label,
+        eco.hex(),
+        file.protocol_hash
+    );
     if let Some(k) = probe.reset_hidden_every {
-        println!("# probe: every animal's hidden state is zeroed every {k} ticks (held action and feedback kept)");
+        println!(
+            "# probe: every animal's hidden state is zeroed every {k} ticks (held action and feedback kept)"
+        );
     }
     if probe.copies > 1 {
-        println!("# probe: {} copies of the animal share the arena, the extras in the opening's other cells", probe.copies);
+        println!(
+            "# probe: {} copies of the animal share the arena, the extras in the opening's other cells",
+            probe.copies
+        );
     }
-    println!("{:<14} {:>6} {:>5} {:>7} {:>7} {:>7} {:>7} {:>7} {:>6} {:>6} {:>6}", "layout", "ticks", "alive", "stores", "P", "F", "D", "upkeep", "BL", "cells", "copies");
+    println!(
+        "{:<14} {:>6} {:>5} {:>7} {:>7} {:>7} {:>7} {:>7} {:>6} {:>6} {:>6}",
+        "layout", "ticks", "alive", "stores", "P", "F", "D", "upkeep", "BL", "cells", "copies"
+    );
     let mut episodes = Vec::new();
     let mut copies_alive_final = Vec::new();
     let mut copies_deaths: Vec<Vec<(u64, usize)>> = Vec::new();
@@ -912,7 +1047,12 @@ pub fn evaluate(
             .take(probe.copies - 1)
             .collect();
         if extra_cells.len() + 1 < probe.copies {
-            return Err(format!("layout {} opening has room for only {} copies", l.name, extra_cells.len() + 1).into());
+            return Err(format!(
+                "layout {} opening has room for only {} copies",
+                l.name,
+                extra_cells.len() + 1
+            )
+            .into());
         }
         let fault = |w: &mut cubarium_core::World, tick: u64| {
             if tick == 0 && probe.copies > 1 {
@@ -920,7 +1060,12 @@ pub fn evaluate(
                 // copies (same body, same reserve, same policy, fresh hidden state), placed in
                 // the opening's other cells, and scripted `bud = false` like the focal.
                 let focal = w.state.neural.animals[0].0;
-                let template = w.state.organisms.get(focal).expect("the focal animal").clone();
+                let template = w
+                    .state
+                    .organisms
+                    .get(focal)
+                    .expect("the focal animal")
+                    .clone();
                 let mut ids = vec![focal];
                 for cell in &extra_cells {
                     let mut o = template.clone();
@@ -928,12 +1073,21 @@ pub fn evaluate(
                     let booked = o.structure + o.reserve;
                     let id = w.state.organisms.insert(o);
                     w.state.external_material_in += booked;
-                    w.attach_neural_policy(id, policy.clone()).expect("a copy attaches");
+                    w.attach_neural_policy(id, policy.clone())
+                        .expect("a copy attaches");
                     ids.push(id);
                 }
                 w.set_scripted_intents(
                     ids.iter()
-                        .map(|id| (*id, cubarium_core::diagnostic::ScriptedIntent { bud: Some(false), ..Default::default() }))
+                        .map(|id| {
+                            (
+                                *id,
+                                cubarium_core::diagnostic::ScriptedIntent {
+                                    bud: Some(false),
+                                    ..Default::default()
+                                },
+                            )
+                        })
                         .collect(),
                 );
             }
@@ -950,17 +1104,38 @@ pub fn evaluate(
                 deaths.lock().expect("deaths").push((tick + 1, alive));
             }
         };
-        let e = match episode::run_with_fault(l, &Driver::Policy(Box::new(policy.clone())), horizon, limits, &name, Some(&fault)) {
+        let e = match episode::run_with_fault(
+            l,
+            &Driver::Policy(Box::new(policy.clone())),
+            horizon,
+            limits,
+            &name,
+            Some(&fault),
+        ) {
             Ok(e) => e,
             Err(err) => {
-                println!("stopped: {err:?} after {:.1} s", started.elapsed().as_secs_f64());
+                println!(
+                    "stopped: {err:?} after {:.1} s",
+                    started.elapsed().as_secs_f64()
+                );
                 break;
             }
         };
         let alive_final = last_alive.load(Ordering::Relaxed);
         println!(
             "{:<14} {:>6} {:>5} {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>6.0} {:>6} {:>3}/{:<2}",
-            l.name, e.ticks, e.alive, e.terminal_stores, e.intake_producer, e.intake_fruit, e.intake_detritus, e.upkeep_billed, e.body_lengths, e.distinct_cells, alive_final, probe.copies
+            l.name,
+            e.ticks,
+            e.alive,
+            e.terminal_stores,
+            e.intake_producer,
+            e.intake_fruit,
+            e.intake_detritus,
+            e.upkeep_billed,
+            e.body_lengths,
+            e.distinct_cells,
+            alive_final,
+            probe.copies
         );
         episodes.push(e);
         copies_alive_final.push(alive_final);
@@ -969,8 +1144,15 @@ pub fn evaluate(
     let wall = started.elapsed().as_secs_f64();
     let survived = episodes.iter().filter(|e| e.alive).count();
     let min_ticks = episodes.iter().map(|e| e.ticks).min().unwrap_or(0);
-    let mean_ticks = if episodes.is_empty() { 0.0 } else { episodes.iter().map(|e| e.ticks as f64).sum::<f64>() / episodes.len() as f64 };
-    println!("survived {survived} of {} layouts; min {min_ticks} ticks, mean {mean_ticks:.0}; wall {wall:.1} s of {wall_seconds}", layouts.len());
+    let mean_ticks = if episodes.is_empty() {
+        0.0
+    } else {
+        episodes.iter().map(|e| e.ticks as f64).sum::<f64>() / episodes.len() as f64
+    };
+    println!(
+        "survived {survived} of {} layouts; min {min_ticks} ticks, mean {mean_ticks:.0}; wall {wall:.1} s of {wall_seconds}",
+        layouts.len()
+    );
     let summary = serde_json::json!({
         "build": BUILD_ID,
         "policy_file": policy_file.display().to_string(),
@@ -993,7 +1175,9 @@ pub fn evaluate(
         "mean_ticks": mean_ticks,
         "wall_seconds": wall,
     });
-    if let Some(parent) = out.parent() { fs::create_dir_all(parent)?; }
+    if let Some(parent) = out.parent() {
+        fs::create_dir_all(parent)?;
+    }
     fs::write(&out, serde_json::to_string_pretty(&summary)?)?;
     println!("wrote {}", out.display());
     Ok(())
@@ -1033,16 +1217,22 @@ pub fn export(
     // wrote at the time and are checked against the record's hash, so the exported policy is
     // the one that earned the score and not a reconstruction.
     let (theta, generation, selected_score) = match generation {
-        None => (cp.theta.clone(), cp.generation_completed, cp.recorded_center_score(cp.generation_completed)),
+        None => (
+            cp.theta.clone(),
+            cp.generation_completed,
+            cp.recorded_center_score(cp.generation_completed),
+        ),
         Some(g) => {
             let record = cp
                 .centers
                 .iter()
                 .find(|c| c.generation == g)
-                .ok_or_else(|| format!(
-                    "this run recorded no centre for generation {g}; it holds {:?}",
-                    cp.center_generations()
-                ))?;
+                .ok_or_else(|| {
+                    format!(
+                        "this run recorded no centre for generation {g}; it holds {:?}",
+                        cp.center_generations()
+                    )
+                })?;
             let dir = checkpoint.parent().unwrap_or_else(|| Path::new("."));
             let path = dir.join(&record.file);
             let stored: PolicyFile = serde_json::from_str(&fs::read_to_string(&path)?)?;
@@ -1087,13 +1277,30 @@ pub fn export(
         "recorded centre score {}",
         selected_score.map_or_else(|| "-".to_string(), |s| format!("{s:.3}"))
     );
-    println!("weights fnv1a       {:#018x}", fixture::fnv1a(super::bits::encode(&theta).as_bytes()));
+    println!(
+        "weights fnv1a       {:#018x}",
+        fixture::fnv1a(super::bits::encode(&theta).as_bytes())
+    );
     println!("protocol hash       {:#018x}", cp.protocol_hash);
-    println!("config              {} (hash {})", cp.protocol.config, eco.hex());
+    println!(
+        "config              {} (hash {})",
+        cp.protocol.config,
+        eco.hex()
+    );
     println!("policy digest       {:#018x}", loaded.schema_digest);
-    println!("parameters          {}", tensor::flatten(&loaded.weights).len());
+    println!(
+        "parameters          {}",
+        tensor::flatten(&loaded.weights).len()
+    );
     println!("wrote               {}", out.display());
-    println!("weight round trip   {}", if exact { "exact, bit for bit" } else { "NOT EXACT" });
+    println!(
+        "weight round trip   {}",
+        if exact {
+            "exact, bit for bit"
+        } else {
+            "NOT EXACT"
+        }
+    );
     if !exact {
         return Err("the exported policy does not round-trip exactly".into());
     }
@@ -1120,7 +1327,11 @@ pub fn export(
 }
 
 fn l2_delta(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum::<f64>().sqrt()
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (x - y) * (x - y))
+        .sum::<f64>()
+        .sqrt()
 }
 
 /// Write, then rename. A crash or a full disk during the write leaves the previous completed

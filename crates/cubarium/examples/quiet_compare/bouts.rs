@@ -264,7 +264,7 @@ impl Observer {
             releases: 0,
             completed_held_ticks: Sum::default(),
             live_admissions: BTreeMap::new(),
-    unmatched_closes: 0,
+            unmatched_closes: 0,
             deaths_on_final_held_interval: 0,
             held_intervals_ended_by_death: 0,
             violations: Vec::new(),
@@ -283,7 +283,8 @@ impl Observer {
     fn violation(&mut self, what: &str, detail: Value) {
         self.violation_count += 1;
         if self.violations.len() < RETAINED_VIOLATIONS {
-            self.violations.push(json!({"what": what, "detail": detail}));
+            self.violations
+                .push(json!({"what": what, "detail": detail}));
         }
     }
 
@@ -383,7 +384,13 @@ impl Observer {
         let mut closed: BTreeSet<OrganismId> = BTreeSet::new();
         for event in quiet {
             match *event {
-                QuietEvent::Begin { tick, parent, child, end_tick, .. } => {
+                QuietEvent::Begin {
+                    tick,
+                    parent,
+                    child,
+                    end_tick,
+                    ..
+                } => {
                     self.admissions += 1;
                     begun.insert((parent, tick));
                     // An admission must correspond to a real paid insertion committed at this
@@ -393,15 +400,28 @@ impl Observer {
                             if *t == tick && *id == child && *p == parent)
                     });
                     if !matched {
-                        self.violation("admission without a matching paid birth", json!({"tick": tick, "parent": parent, "child": child}));
+                        self.violation(
+                            "admission without a matching paid birth",
+                            json!({"tick": tick, "parent": parent, "child": child}),
+                        );
                     }
                     if end_tick != tick + POST_BIRTH_PAUSE_TICKS {
-                        self.violation("admission window is not the candidate's", json!({"tick": tick, "end_tick": end_tick}));
+                        self.violation(
+                            "admission window is not the candidate's",
+                            json!({"tick": tick, "end_tick": end_tick}),
+                        );
                     }
                     if state.organisms.get(parent).is_none() {
-                        self.violation("admission for a parent that is not alive", json!({"parent": parent}));
+                        self.violation(
+                            "admission for a parent that is not alive",
+                            json!({"parent": parent}),
+                        );
                     }
-                    if state.organisms.get(parent).is_some_and(|o| o.born_tick == tick) {
+                    if state
+                        .organisms
+                        .get(parent)
+                        .is_some_and(|o| o.born_tick == tick)
+                    {
                         self.violation("admission for a newborn", json!({"parent": parent}));
                     }
                     if parent == child {
@@ -419,7 +439,12 @@ impl Observer {
                         );
                     }
                 }
-                QuietEvent::Refuse { tick, parent, child, reason } => {
+                QuietEvent::Refuse {
+                    tick,
+                    parent,
+                    child,
+                    reason,
+                } => {
                     *self.refusals.entry(reason.as_str()).or_default() += 1;
                     // A refusal is an offer that a real paid insertion made and the rule
                     // declined. One with no birth behind it would inflate the opportunity
@@ -436,7 +461,13 @@ impl Observer {
                         );
                     }
                 }
-                QuietEvent::End { tick, parent, child, completed_ticks, .. } => {
+                QuietEvent::End {
+                    tick,
+                    parent,
+                    child,
+                    completed_ticks,
+                    ..
+                } => {
                     self.releases += 1;
                     closed.insert(parent);
                     self.completed_held_ticks.add(completed_ticks as f64);
@@ -445,7 +476,14 @@ impl Observer {
                     }
                     self.close_admission("release", parent, child, tick, completed_ticks);
                 }
-                QuietEvent::Abort { tick, parent, child, completed_ticks, reason, .. } => {
+                QuietEvent::Abort {
+                    tick,
+                    parent,
+                    child,
+                    completed_ticks,
+                    reason,
+                    ..
+                } => {
                     *self.aborts.entry(reason.as_str()).or_default() += 1;
                     closed.insert(parent);
                     self.completed_held_ticks.add(completed_ticks as f64);
@@ -454,10 +492,11 @@ impl Observer {
                     // held and the pause then had no parent to release. That is a different event
                     // from an abort taken before a decision, and conflating them would either
                     // lose a real held tick or let a genuine over-run pass.
-                    let death_on_the_last_interval =
-                        completed_ticks == POST_BIRTH_PAUSE_TICKS && reason == QuietReason::ParentGone;
+                    let death_on_the_last_interval = completed_ticks == POST_BIRTH_PAUSE_TICKS
+                        && reason == QuietReason::ParentGone;
                     if completed_ticks > POST_BIRTH_PAUSE_TICKS
-                        || (completed_ticks == POST_BIRTH_PAUSE_TICKS && !death_on_the_last_interval)
+                        || (completed_ticks == POST_BIRTH_PAUSE_TICKS
+                            && !death_on_the_last_interval)
                     {
                         self.violation(
                             "an abort completed the whole window without dying on it",
@@ -480,7 +519,10 @@ impl Observer {
         // abort, is a lost record even when every published count balances. The pause set is the
         // world's; the records are the harness's claim about it.
         for p in &state.quiet.pauses {
-            let carried = pre.pauses.get(&p.parent).is_some_and(|q| q.start_tick == p.start_tick);
+            let carried = pre
+                .pauses
+                .get(&p.parent)
+                .is_some_and(|q| q.start_tick == p.start_tick);
             if !carried && !begun.contains(&(p.parent, p.start_tick)) {
                 self.violation(
                     "a pause appeared with no admission record",
@@ -527,24 +569,39 @@ impl Observer {
 
             let class = if o.born_tick == now {
                 if held {
-                    self.violation("a newborn was held by a pause", json!({"id": id, "tick": now}));
+                    self.violation(
+                        "a newborn was held by a pause",
+                        json!({"id": id, "tick": now}),
+                    );
                 }
                 Some(RestClass::NewbornInitial)
             } else if held {
                 if o.mode != Mode::Resting {
-                    self.violation("a held interval is not Resting", json!({"id": id, "tick": now, "mode": format!("{:?}", o.mode)}));
+                    self.violation(
+                        "a held interval is not Resting",
+                        json!({"id": id, "tick": now, "mode": format!("{:?}", o.mode)}),
+                    );
                 }
                 if o.fed_this_tick {
                     self.held_intake_ticks += 1;
-                    self.violation("a held interval took intake", json!({"id": id, "tick": now}));
+                    self.violation(
+                        "a held interval took intake",
+                        json!({"id": id, "tick": now}),
+                    );
                 }
                 if let Some((escrow_before, counter_before)) = pre.held_before.get(&id) {
                     if !escrow_before && o.escrow.is_some() {
-                        self.violation("a held interval opened a new gestation", json!({"id": id, "tick": now}));
+                        self.violation(
+                            "a held interval opened a new gestation",
+                            json!({"id": id, "tick": now}),
+                        );
                     }
                     let drew = o.turn_counter.0.wrapping_sub(counter_before.0);
                     if drew != 4 {
-                        self.violation("a held interval drew a different number of turn counters", json!({"id": id, "tick": now, "drew": drew}));
+                        self.violation(
+                            "a held interval drew a different number of turn counters",
+                            json!({"id": id, "tick": now, "drew": drew}),
+                        );
                     }
                 }
                 Some(RestClass::PostBirthRecovery)
@@ -633,8 +690,10 @@ impl Observer {
                 p.holds(pre.tick)
                     && !aborted_at_pre.contains_key(id)
                     && state.organisms.get(**id).is_none()
-                    && life.iter().any(|e| matches!(e, LifeEvent::Death { id: d, tick: t, .. }
-                        if d == *id && *t == now))
+                    && life.iter().any(|e| {
+                        matches!(e, LifeEvent::Death { id: d, tick: t, .. }
+                        if d == *id && *t == now)
+                    })
             })
             .map(|(id, p)| (*id, *p))
             .collect();
@@ -653,10 +712,20 @@ impl Observer {
                         BoutEnd::Reclassified(RestClass::PostBirthRecovery),
                         Some(RestClass::PostBirthRecovery),
                     );
-                    self.begin(id, RestClass::PostBirthRecovery, now, Some((pause.child, pause.start_tick)));
+                    self.begin(
+                        id,
+                        RestClass::PostBirthRecovery,
+                        now,
+                        Some((pause.child, pause.start_tick)),
+                    );
                 }
                 None => {
-                    self.begin(id, RestClass::PostBirthRecovery, now, Some((pause.child, pause.start_tick)));
+                    self.begin(
+                        id,
+                        RestClass::PostBirthRecovery,
+                        now,
+                        Some((pause.child, pause.start_tick)),
+                    );
                 }
             }
         }
@@ -672,7 +741,9 @@ impl Observer {
             .map(|(id, open)| (*id, open.class))
             .collect();
         for (id, open_class) in gone {
-            let end = self.recovery_terminal(open_class, id, quiet).unwrap_or(BoutEnd::Died);
+            let end = self
+                .recovery_terminal(open_class, id, quiet)
+                .unwrap_or(BoutEnd::Died);
             self.close_with(id, end, None);
         }
         let _ = (pre.alive, seen);
@@ -699,8 +770,22 @@ impl Observer {
         })
     }
 
-    fn begin(&mut self, id: OrganismId, class: RestClass, now: u64, origin: Option<(OrganismId, u64)>) {
-        self.open.insert(id, Open { class, start_tick: now, last_tick: now, origin });
+    fn begin(
+        &mut self,
+        id: OrganismId,
+        class: RestClass,
+        now: u64,
+        origin: Option<(OrganismId, u64)>,
+    ) {
+        self.open.insert(
+            id,
+            Open {
+                class,
+                start_tick: now,
+                last_tick: now,
+                origin,
+            },
+        );
     }
 
     fn close(&mut self, id: OrganismId, end: BoutEnd) {
@@ -708,7 +793,9 @@ impl Observer {
     }
 
     fn close_with(&mut self, id: OrganismId, end: BoutEnd, next_class: Option<RestClass>) {
-        let Some(open) = self.open.remove(&id) else { return };
+        let Some(open) = self.open.remove(&id) else {
+            return;
+        };
         let slot = Self::slot(open.class);
         self.totals[slot].bouts += 1;
         if open.class == RestClass::PostBirthRecovery && !end.is_recovery_terminal() {
@@ -799,7 +886,8 @@ mod tests {
     fn mature() -> WorldState {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../cubarium-core/tests/fixtures/quiet-v12-plain-3000.cubw");
-        let (_, state) = decode_snapshot(&std::fs::read(path).expect("the fixture")).expect("loads");
+        let (_, state) =
+            decode_snapshot(&std::fs::read(path).expect("the fixture")).expect("loads");
         state
     }
 
@@ -812,7 +900,9 @@ mod tests {
             world.step();
             let life = world.drain_events();
             let quiet = world.drain_quiet_events();
-            observer.after(&world, pre, &life, &quiet).expect("observed");
+            observer
+                .after(&world, pre, &life, &quiet)
+                .expect("observed");
             bouts.extend(observer.drain_bouts());
         }
         observer.close_censored();
@@ -837,7 +927,9 @@ mod tests {
             world.step();
             let life = world.drain_events();
             let quiet = world.drain_quiet_events();
-            observer.after(&world, pre, &life, &quiet).expect("observed");
+            observer
+                .after(&world, pre, &life, &quiet)
+                .expect("observed");
             let _ = observer.drain_bouts();
             if let Some(tick) = quiet.iter().find_map(|e| match *e {
                 QuietEvent::Begin { tick, .. } => Some(tick),
@@ -845,7 +937,10 @@ mod tests {
             }) {
                 break tick;
             }
-            assert!(world.tick() - opening < 3000, "the fixture must admit a pause");
+            assert!(
+                world.tick() - opening < 3000,
+                "the fixture must admit a pause"
+            );
         };
         assert_eq!(world.tick(), boundary, "the admission is this boundary");
         assert_eq!(observer.held_intervals_ended_by_death, 0);
@@ -859,19 +954,27 @@ mod tests {
         world.step();
         let life = world.drain_events();
         let quiet = world.drain_quiet_events();
-        observer.after(&world, pre, &life, &quiet).expect("observed");
+        observer
+            .after(&world, pre, &life, &quiet)
+            .expect("observed");
         assert!(observer.reconciled(), "{}", observer.summary());
 
         let aborts: Vec<(OrganismId, u64)> = quiet
             .iter()
             .filter_map(|e| match *e {
-                QuietEvent::Abort { parent, completed_ticks, reason: QuietReason::ParentGone, .. } => {
-                    Some((parent, completed_ticks))
-                }
+                QuietEvent::Abort {
+                    parent,
+                    completed_ticks,
+                    reason: QuietReason::ParentGone,
+                    ..
+                } => Some((parent, completed_ticks)),
                 _ => None,
             })
             .collect();
-        assert!(!aborts.is_empty(), "the held parent really died with the pause open");
+        assert!(
+            !aborts.is_empty(),
+            "the held parent really died with the pause open"
+        );
         let bouts = observer.drain_bouts();
         for (parent, completed) in aborts {
             assert_eq!(completed, 1, "the parent died in its first held interval");
@@ -879,7 +982,10 @@ mod tests {
                 .iter()
                 .find(|b| b.id == parent && b.class == RestClass::PostBirthRecovery)
                 .expect("the one held interval it lived through must still be a bout");
-            assert_eq!(bout.ticks, completed, "the bout and its abort must be the same length");
+            assert_eq!(
+                bout.ticks, completed,
+                "the bout and its abort must be the same length"
+            );
             assert_eq!(bout.start_tick, boundary + 1);
             assert_eq!(bout.end_tick, boundary + 1);
             assert_eq!(bout.end, BoutEnd::Aborted(QuietReason::ParentGone));
@@ -905,7 +1011,9 @@ mod tests {
             world.step();
             let life = world.drain_events();
             let quiet = world.drain_quiet_events();
-            observer.after(&world, pre, &life, &quiet).expect("observed");
+            observer
+                .after(&world, pre, &life, &quiet)
+                .expect("observed");
             let _ = observer.drain_bouts();
             for o in &world.render_view().organisms {
                 let mut faces = None;
@@ -922,13 +1030,20 @@ mod tests {
             }
         }
         let measured = observer.transported_px.value();
-        assert!(measured > 0.0, "a live world transports its organisms somewhere");
+        assert!(
+            measured > 0.0,
+            "a live world transports its organisms somewhere"
+        );
         assert!(
             (measured - reference).abs() <= 1e-9 * reference.max(1.0),
             "the accumulated path {measured} is not the published path {reference}"
         );
         assert_eq!(observer.seam_ticks, reference_seam_ticks);
-        let classified: f64 = observer.totals.iter().map(|t| t.transported_px.value()).sum();
+        let classified: f64 = observer
+            .totals
+            .iter()
+            .map(|t| t.transported_px.value())
+            .sum();
         assert!(
             classified <= measured + 1e-9,
             "classified rest moved more than the whole world did"
@@ -942,16 +1057,32 @@ mod tests {
         let (world, observer, bouts) = run(mature(), 1200);
         assert!(observer.reconciled(), "{:?}", observer.summary());
         assert_eq!(observer.admissions, 0);
-        assert_eq!(observer.totals[Observer::slot(RestClass::PostBirthRecovery)].organism_ticks, 0);
-        assert!(bouts.iter().all(|b| b.class != RestClass::PostBirthRecovery));
+        assert_eq!(
+            observer.totals[Observer::slot(RestClass::PostBirthRecovery)].organism_ticks,
+            0
+        );
+        assert!(
+            bouts
+                .iter()
+                .all(|b| b.class != RestClass::PostBirthRecovery)
+        );
         // Newborn rest really is observed, and it comes from real births.
-        let newborns = bouts.iter().filter(|b| b.class == RestClass::NewbornInitial).count();
-        assert!(newborns > 0, "the fixture must produce births in 1200 ticks");
+        let newborns = bouts
+            .iter()
+            .filter(|b| b.class == RestClass::NewbornInitial)
+            .count();
+        assert!(
+            newborns > 0,
+            "the fixture must produce births in 1200 ticks"
+        );
         assert!(world.state.births_total > 0);
         // Every organism-tick is accounted for exactly once.
         let classified: u64 = observer.totals.iter().map(|t| t.organism_ticks).sum();
         assert_eq!(classified + observer.active_ticks, observer.organism_ticks);
-        assert_eq!(observer.mode_ticks[0], classified, "resting ticks are the classified ones");
+        assert_eq!(
+            observer.mode_ticks[0], classified,
+            "resting ticks are the classified ones"
+        );
     }
 
     /// The candidate's recovery bouts are real, exactly forty ticks when released, and every one
@@ -962,15 +1093,27 @@ mod tests {
         state.quiet = QuietState::post_birth_pause_v1();
         let (_, observer, bouts) = run(state, 3000);
         assert!(observer.reconciled(), "{:?}", observer.summary());
-        assert!(observer.admissions > 0, "the fixture must admit a pause in 3000 ticks");
+        assert!(
+            observer.admissions > 0,
+            "the fixture must admit a pause in 3000 ticks"
+        );
 
-        let recovery: Vec<&Bout> =
-            bouts.iter().filter(|b| b.class == RestClass::PostBirthRecovery).collect();
+        let recovery: Vec<&Bout> = bouts
+            .iter()
+            .filter(|b| b.class == RestClass::PostBirthRecovery)
+            .collect();
         assert!(!recovery.is_empty());
         for b in &recovery {
-            assert!(b.origin.is_some(), "a recovery bout must name its originating birth");
+            assert!(
+                b.origin.is_some(),
+                "a recovery bout must name its originating birth"
+            );
             let (_, boundary) = b.origin.unwrap();
-            assert_eq!(b.start_tick, boundary + 1, "the first completed interval is B+1");
+            assert_eq!(
+                b.start_tick,
+                boundary + 1,
+                "the first completed interval is B+1"
+            );
             assert!(b.ticks <= POST_BIRTH_PAUSE_TICKS);
             match b.end {
                 BoutEnd::Released => {
@@ -983,9 +1126,15 @@ mod tests {
             }
         }
         // Released bouts equal the world's own release records.
-        let released = recovery.iter().filter(|b| b.end == BoutEnd::Released).count() as u64;
+        let released = recovery
+            .iter()
+            .filter(|b| b.end == BoutEnd::Released)
+            .count() as u64;
         assert_eq!(released, observer.releases);
-        assert_eq!(observer.held_intake_ticks, 0, "no held interval may take intake");
+        assert_eq!(
+            observer.held_intake_ticks, 0,
+            "no held interval may take intake"
+        );
     }
 
     /// The release boundary is not a forty-first held interval, and an abort's own tick is not a
@@ -1003,7 +1152,9 @@ mod tests {
             world.step();
             let life = world.drain_events();
             let quiet = world.drain_quiet_events();
-            observer.after(&world, pre, &life, &quiet).expect("observed");
+            observer
+                .after(&world, pre, &life, &quiet)
+                .expect("observed");
             observer.drain_bouts();
             if let Some((parent, tick)) = quiet.iter().find_map(|e| match *e {
                 QuietEvent::Begin { parent, tick, .. } => Some((parent, tick)),
@@ -1022,7 +1173,9 @@ mod tests {
             world.step();
             let life = world.drain_events();
             let quiet = world.drain_quiet_events();
-            observer.after(&world, pre, &life, &quiet).expect("observed");
+            observer
+                .after(&world, pre, &life, &quiet)
+                .expect("observed");
         }
         let after_forty =
             observer.totals[Observer::slot(RestClass::PostBirthRecovery)].organism_ticks;
@@ -1032,15 +1185,26 @@ mod tests {
         // The release decision. The entry still exists going in, and `holds` is false, so the
         // interval it produces is not recovery even if the parent happens to rest on.
         let pre = observer.before(&world);
-        assert!(pre.pauses.contains_key(&parent), "the entry is still there at the boundary");
-        assert!(!pre.pauses[&parent].holds(pre.tick), "but it holds no decision");
+        assert!(
+            pre.pauses.contains_key(&parent),
+            "the entry is still there at the boundary"
+        );
+        assert!(
+            !pre.pauses[&parent].holds(pre.tick),
+            "but it holds no decision"
+        );
         world.step();
         let life = world.drain_events();
         let quiet = world.drain_quiet_events();
-        observer.after(&world, pre, &life, &quiet).expect("observed");
+        observer
+            .after(&world, pre, &life, &quiet)
+            .expect("observed");
         let after_release =
             observer.totals[Observer::slot(RestClass::PostBirthRecovery)].organism_ticks;
-        assert_eq!(after_release, after_forty, "the release produced a forty-first recovery tick");
+        assert_eq!(
+            after_release, after_forty,
+            "the release produced a forty-first recovery tick"
+        );
         assert_eq!(observer.releases, 1);
         assert!(observer.reconciled());
     }
@@ -1060,7 +1224,9 @@ mod tests {
             world.step();
             let life = world.drain_events();
             let quiet = world.drain_quiet_events();
-            observer.after(&world, pre, &life, &quiet).expect("observed");
+            observer
+                .after(&world, pre, &life, &quiet)
+                .expect("observed");
             bouts.extend(observer.drain_bouts());
             if let Some(parent) = quiet.iter().find_map(|e| match *e {
                 QuietEvent::Begin { parent, .. } => Some(parent),
@@ -1076,7 +1242,9 @@ mod tests {
             world.step();
             let life = world.drain_events();
             let quiet = world.drain_quiet_events();
-            observer.after(&world, pre, &life, &quiet).expect("observed");
+            observer
+                .after(&world, pre, &life, &quiet)
+                .expect("observed");
             bouts.extend(observer.drain_bouts());
         }
         world.state.organisms.get_mut(parent).expect("alive").energy = 1e-9;
@@ -1086,7 +1254,9 @@ mod tests {
         world.step();
         let life = world.drain_events();
         let quiet = world.drain_quiet_events();
-        observer.after(&world, pre, &life, &quiet).expect("observed");
+        observer
+            .after(&world, pre, &life, &quiet)
+            .expect("observed");
         bouts.extend(observer.drain_bouts());
 
         assert_eq!(
@@ -1099,7 +1269,10 @@ mod tests {
             .iter()
             .find(|b| b.id == parent && b.class == RestClass::PostBirthRecovery)
             .expect("the aborted bout is closed");
-        assert!(matches!(aborted.end, BoutEnd::Aborted(QuietReason::UnaffordableRemaining)));
+        assert!(matches!(
+            aborted.end,
+            BoutEnd::Aborted(QuietReason::UnaffordableRemaining)
+        ));
         assert_eq!(aborted.ticks, 5, "five completed intervals, not six");
         assert!(observer.reconciled());
     }
@@ -1117,7 +1290,9 @@ mod tests {
             world.step();
             let life = world.drain_events();
             let quiet = world.drain_quiet_events();
-            observer.after(&world, pre, &life, &quiet).expect("observed");
+            observer
+                .after(&world, pre, &life, &quiet)
+                .expect("observed");
             bouts.extend(observer.drain_bouts());
             if quiet.iter().any(|e| matches!(e, QuietEvent::Begin { .. })) {
                 break;
@@ -1129,12 +1304,19 @@ mod tests {
         world.step();
         let life = world.drain_events();
         let quiet = world.drain_quiet_events();
-        observer.after(&world, pre, &life, &quiet).expect("observed");
+        observer
+            .after(&world, pre, &life, &quiet)
+            .expect("observed");
         observer.close_censored();
         bouts.extend(observer.drain_bouts());
-        let censored: Vec<&Bout> = bouts.iter().filter(|b| b.end == BoutEnd::Censored).collect();
+        let censored: Vec<&Bout> = bouts
+            .iter()
+            .filter(|b| b.end == BoutEnd::Censored)
+            .collect();
         assert!(
-            censored.iter().any(|b| b.class == RestClass::PostBirthRecovery && b.ticks == 1),
+            censored
+                .iter()
+                .any(|b| b.class == RestClass::PostBirthRecovery && b.ticks == 1),
             "the open recovery bout must be censored at one tick"
         );
     }

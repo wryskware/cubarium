@@ -27,7 +27,10 @@ use cubarium_search::precondition;
 use cubarium_search::search::{self, Budget, TRAINING_SEEDS, Variation};
 
 #[derive(Parser, Debug)]
-#[command(name = "cubarium-search", about = "Headless whole-ecosystem parameter search")]
+#[command(
+    name = "cubarium-search",
+    about = "Headless whole-ecosystem parameter search"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -329,7 +332,10 @@ enum Command {
     /// with the world's own per-organism store ledger.
     EsBudget {
         /// The trained policy to compare. Its recorded config hash must be `--config`'s.
-        #[arg(long, default_value = "runs/es-eco-v1-fastleaf/selected/center-00009-policy.json")]
+        #[arg(
+            long,
+            default_value = "runs/es-eco-v1-fastleaf/selected/center-00009-policy.json"
+        )]
         policy: PathBuf,
         /// The ecology every fixture world is built on. Required: this experiment is about one
         /// named ecology, and a silent default would make the comparison meaningless.
@@ -619,9 +625,23 @@ enum Command {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     match Cli::parse().command {
         Command::Params => print_params(),
-        Command::Baseline { ticks, sample_every, apex, workers, worlds, seed, out } => {
-            baseline(ticks, sample_every, apex, workers, worlds.unwrap_or(workers), seed, out)
-        }
+        Command::Baseline {
+            ticks,
+            sample_every,
+            apex,
+            workers,
+            worlds,
+            seed,
+            out,
+        } => baseline(
+            ticks,
+            sample_every,
+            apex,
+            workers,
+            worlds.unwrap_or(workers),
+            seed,
+            out,
+        ),
         Command::Search {
             label,
             evaluations,
@@ -684,9 +704,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let motor = cubarium_core::MotorModel::parse(&motor)?;
             let pursuit_stop = cubarium_search::apex_audit::parse_pursuit_stop(&pursuit_stop)?;
             let names: Vec<String> = if candidates == "all" {
-                calibrate::CANDIDATES.iter().map(|c| c.name.to_string()).collect()
+                calibrate::CANDIDATES
+                    .iter()
+                    .map(|c| c.name.to_string())
+                    .collect()
             } else {
-                candidates.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+                candidates
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
             };
             let arms: Vec<u32> = arms
                 .split(',')
@@ -745,9 +772,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             out,
         } => {
             let names: Vec<String> = if candidates == "all" {
-                calibrate::CANDIDATES.iter().map(|c| c.name.to_string()).collect()
+                calibrate::CANDIDATES
+                    .iter()
+                    .map(|c| c.name.to_string())
+                    .collect()
             } else {
-                candidates.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+                candidates
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
             };
             let ages: Vec<u64> = ages
                 .split(',')
@@ -762,7 +796,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let pursuit_stop = cubarium_search::apex_audit::parse_pursuit_stop(&pursuit_stop)?;
             let dir = out.join(&stage);
             let report = match stage.as_str() {
-                "field" => precondition::run_field(&names, set, seeds, &ages, workers, wall_seconds, &dir)?,
+                "field" => {
+                    precondition::run_field(&names, set, seeds, &ages, workers, wall_seconds, &dir)?
+                }
                 "compare" => precondition::run_compare(
                     &names,
                     set,
@@ -794,17 +830,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &dir,
                 )?,
                 other => {
-                    return Err(
-                        format!("unknown --stage {other}; use `field`, `compare` or `grazed`")
-                            .into(),
-                    );
+                    return Err(format!(
+                        "unknown --stage {other}; use `field`, `compare` or `grazed`"
+                    )
+                    .into());
                 }
             };
             precondition::print_report(&report);
             println!("rows and states under {}", dir.display());
             Ok(())
         }
-        Command::CalibrateExport { candidate, seed, selected, why, out } => {
+        Command::CalibrateExport {
+            candidate,
+            seed,
+            selected,
+            why,
+            out,
+        } => {
             let path = calibrate::export(&candidate, seed, &out, selected, &why)?;
             let config = calibrate::candidate(&candidate)
                 .ok_or_else(|| format!("{candidate} is not a declared candidate"))?
@@ -847,11 +889,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Census(args) => Ok(census::run_command(args)?),
         Command::Replay { record, index } => replay(&record, index),
         Command::EsProtocol { config } => es::commands::protocol(config),
-        Command::EsControls { workers, wall_seconds, config, out } => {
-            es::commands::controls(workers, wall_seconds, config, out)
-        }
+        Command::EsControls {
+            workers,
+            wall_seconds,
+            config,
+            out,
+        } => es::commands::controls(workers, wall_seconds, config, out),
         Command::EsSmoke { config, out } => es::commands::smoke(config, out),
-        Command::EsBench { ticks, workers, config } => es::commands::bench(ticks, workers, config),
+        Command::EsBench {
+            ticks,
+            workers,
+            config,
+        } => es::commands::bench(ticks, workers, config),
         Command::EsTrain {
             pairs,
             generations,
@@ -895,16 +944,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             adapter,
             out,
         } => {
-            let probe = es::commands::EvalProbe { reset_hidden_every, copies };
+            let probe = es::commands::EvalProbe {
+                reset_hidden_every,
+                copies,
+            };
             let motor = cubarium_core::MotorModel::parse(&motor)?;
             let adapter = cubarium_core::neural::ActionAdapter::parse(&adapter)?;
             es::commands::evaluate(
-                policy, &set, horizon, wall_seconds, probe, config, motor, adapter, out,
+                policy,
+                &set,
+                horizon,
+                wall_seconds,
+                probe,
+                config,
+                motor,
+                adapter,
+                out,
             )
         }
-        Command::EsBudget { policy, config, horizon, initial_seed, workers, wall_seconds, out } => {
-            es::budget::run(policy, config, horizon, initial_seed, workers, wall_seconds, out)
-        }
+        Command::EsBudget {
+            policy,
+            config,
+            horizon,
+            initial_seed,
+            workers,
+            wall_seconds,
+            out,
+        } => es::budget::run(
+            policy,
+            config,
+            horizon,
+            initial_seed,
+            workers,
+            wall_seconds,
+            out,
+        ),
         Command::ApexAudit {
             config,
             seeds,
@@ -938,8 +1012,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .transpose()?,
             };
             cubarium_search::apex_audit::run(
-                config.split(',').map(|s| PathBuf::from(s.trim())).filter(|p| !p.as_os_str().is_empty()).collect(),
-                seeds, arm, workers, wall_seconds, out,
+                config
+                    .split(',')
+                    .map(|s| PathBuf::from(s.trim()))
+                    .filter(|p| !p.as_os_str().is_empty())
+                    .collect(),
+                seeds,
+                arm,
+                workers,
+                wall_seconds,
+                out,
             )
         }
         Command::EsTurnBand {
@@ -953,11 +1035,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             bootstrap,
             out,
         } => es::turnband::run(
-            run, config, generation, horizon, workers, wall_seconds, pairs, bootstrap, out,
+            run,
+            config,
+            generation,
+            horizon,
+            workers,
+            wall_seconds,
+            pairs,
+            bootstrap,
+            out,
         ),
-        Command::EsExport { checkpoint, config, generation, out, verify_ticks } => {
-            es::commands::export(checkpoint, config, generation, out, verify_ticks)
-        }
+        Command::EsExport {
+            checkpoint,
+            config,
+            generation,
+            out,
+            verify_ticks,
+        } => es::commands::export(checkpoint, config, generation, out, verify_ticks),
         Command::EsPopulation {
             policy,
             config,
@@ -989,11 +1083,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             let ecology = es::Ecology::load(&config)?;
             let pursuit_stop = cubarium_search::apex_audit::parse_pursuit_stop(&pursuit_stop)?;
-            let arms: Vec<u32> =
-                arms.split(',').map(|s| s.trim().parse::<u32>()).collect::<Result<_, _>>()?;
+            let arms: Vec<u32> = arms
+                .split(',')
+                .map(|s| s.trim().parse::<u32>())
+                .collect::<Result<_, _>>()?;
             let seeds: Vec<u64> = TRAINING_SEEDS
                 .get(..seeds)
-                .ok_or_else(|| format!("seed count {seeds} is outside 1..={}", TRAINING_SEEDS.len()))?
+                .ok_or_else(|| {
+                    format!("seed count {seeds} is outside 1..={}", TRAINING_SEEDS.len())
+                })?
                 .to_vec();
             let report = population::run_stage(
                 &ecology,
@@ -1020,9 +1118,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn print_params() -> Result<(), Box<dyn std::error::Error>> {
     println!("build {BUILD_ID}");
     println!("\n{} searched parameters\n", params::PARAMS.len());
-    println!("{:<34} {:>10} {:>10} {:>10}  unit / why", "field", "default", "lo", "hi");
+    println!(
+        "{:<34} {:>10} {:>10} {:>10}  unit / why",
+        "field", "default", "lo", "hi"
+    );
     for p in params::PARAMS {
-        println!("{:<34} {:>10} {:>10} {:>10}  {}", p.name, p.default, p.lo, p.hi, p.unit);
+        println!(
+            "{:<34} {:>10} {:>10} {:>10}  {}",
+            p.name, p.default, p.lo, p.hi, p.unit
+        );
         println!("{:<34} {:>10} {:>10} {:>10}    {}", "", "", "", "", p.why);
     }
     println!("\nidentified but not searched in this milestone\n");
@@ -1039,9 +1143,11 @@ fn peak_rss_mib() -> f64 {
     std::fs::read_to_string("/proc/self/status")
         .ok()
         .and_then(|s| {
-            s.lines()
-                .find(|l| l.starts_with("VmHWM:"))
-                .and_then(|l| l.split_whitespace().nth(1).and_then(|k| k.parse::<f64>().ok()))
+            s.lines().find(|l| l.starts_with("VmHWM:")).and_then(|l| {
+                l.split_whitespace()
+                    .nth(1)
+                    .and_then(|k| k.parse::<f64>().ok())
+            })
         })
         .map(|kib| kib / 1024.0)
         .unwrap_or(f64::NAN)
@@ -1148,7 +1254,11 @@ fn run_search(
     std::fs::create_dir_all(&dir)?;
     let rows_path = dir.join("evals.jsonl");
     let mut rows = BufWriter::new(
-        OpenOptions::new().create(true).write(true).truncate(true).open(&rows_path)?,
+        OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&rows_path)?,
     );
     let mut write_error = None;
 
@@ -1160,9 +1270,8 @@ fn run_search(
         search_seed,
         |row| {
             if write_error.is_none()
-                && let Err(e) = serde_json::to_writer(&mut rows, row).and_then(|()| {
-                    rows.write_all(b"\n").map_err(serde_json::Error::io)
-                })
+                && let Err(e) = serde_json::to_writer(&mut rows, row)
+                    .and_then(|()| rows.write_all(b"\n").map_err(serde_json::Error::io))
             {
                 write_error = Some(e);
             }
@@ -1188,7 +1297,9 @@ fn run_search(
         "{} ticks simulated, {:.0} ticks/s aggregate over {} worker(s)",
         report.ticks_simulated, report.ticks_per_second, report.budget.workers
     );
-    println!("\ncandidate  gen origin      status                fitness  pers plnt turn matr lin  vary apex");
+    println!(
+        "\ncandidate  gen origin      status                fitness  pers plnt turn matr lin  vary apex"
+    );
     for c in &report.candidates {
         let status = if c.completed + c.invalid + c.failed == 0 {
             "unevaluated".to_string()
@@ -1204,8 +1315,18 @@ fn run_search(
                 let a = o.as_array();
                 println!(
                     "{:>9}  {:>3} {:<11} {:<18} {:>8.4}  {:.2} {:.2} {:.2} {:.2} {:.2} {:.2} {:.2}",
-                    c.candidate, c.generation, c.origin, status, f,
-                    a[0], a[1], a[2], a[3], a[4], a[5], a[6]
+                    c.candidate,
+                    c.generation,
+                    c.origin,
+                    status,
+                    f,
+                    a[0],
+                    a[1],
+                    a[2],
+                    a[3],
+                    a[4],
+                    a[5],
+                    a[6]
                 );
             }
             _ => println!(
@@ -1221,10 +1342,17 @@ fn run_search(
     }
     println!(
         "\nnondominated candidates: {:?}",
-        report.nondominated.iter().map(|i| report.candidates[*i].candidate).collect::<Vec<_>>()
+        report
+            .nondominated
+            .iter()
+            .map(|i| report.candidates[*i].candidate)
+            .collect::<Vec<_>>()
     );
     if let Some(best) = report.best_by_scalar {
-        println!("best by scalar: candidate {}", report.candidates[best].candidate);
+        println!(
+            "best by scalar: candidate {}",
+            report.candidates[best].candidate
+        );
     }
     println!("\nrows    {}", rows_path.display());
     println!("summary {}", summary_path.display());
@@ -1249,10 +1377,16 @@ fn replay(record: &PathBuf, index: usize) -> Result<(), Box<dyn std::error::Erro
         .as_array()
         .ok_or("row has no param_bits: it was written by a build before exact replay")?
         .iter()
-        .map(|v| v.as_str().map(str::to_string).ok_or("param_bits holds a non-string"))
+        .map(|v| {
+            v.as_str()
+                .map(str::to_string)
+                .ok_or("param_bits holds a non-string")
+        })
         .collect::<Result<_, _>>()?;
     let values = params::from_bit_labels(&bits)?;
-    let recorded_fingerprint = row["param_fingerprint"].as_u64().ok_or("row has no fingerprint")?;
+    let recorded_fingerprint = row["param_fingerprint"]
+        .as_u64()
+        .ok_or("row has no fingerprint")?;
     if params::fingerprint(&values) != recorded_fingerprint {
         return Err(format!(
             "row {index} fingerprint {recorded_fingerprint} does not match the vector it records"
@@ -1271,7 +1405,10 @@ fn replay(record: &PathBuf, index: usize) -> Result<(), Box<dyn std::error::Erro
     let recorded_hash = row["metrics"]["final_ecology_hash"].as_u64();
     let replayed_hash = again.metrics.as_ref().map(|m| m.final_ecology_hash);
 
-    println!("status   recorded {recorded_status:?}  replayed {:?}", again.status);
+    println!(
+        "status   recorded {recorded_status:?}  replayed {:?}",
+        again.status
+    );
     println!("ecology  recorded {recorded_hash:?}  replayed {replayed_hash:?}");
     let matched = recorded_status == again.status && recorded_hash == replayed_hash;
     println!("{}", if matched { "REPRODUCED" } else { "DIVERGED" });

@@ -18,8 +18,14 @@ use cubarium_voxel_flora::{Command, Flora, FloraConfig, Site, Species, Stage};
 /// A strip one slab deep: bedrock floor, two rows of soil at a chosen pore fraction,
 /// air above. Every column's top soil voxel is a support face in open sky.
 fn plain(width: u32, height: u32, pore: f64) -> World {
-    let config =
-        VoxelConfig { width, height, depth: 1, voxel_m: 1.0, seed: 7, ..VoxelConfig::default() };
+    let config = VoxelConfig {
+        width,
+        height,
+        depth: 1,
+        voxel_m: 1.0,
+        seed: 7,
+        ..VoxelConfig::default()
+    };
     let mut w = World::empty(config);
     for x in 0..width as i64 {
         for y in 1..=2 {
@@ -33,12 +39,34 @@ fn plain(width: u32, height: u32, pore: f64) -> World {
 fn wet_soil(w: &mut World, x: i64, y: u32, pore: f64) {
     let cap = Material::Soil.pore_capacity() * w.config().voxel_volume();
     if pore > 0.0 {
-        let got = w.apply(WorldCommand::AddWater { x, y, z: 0, volume_m3: pore * cap });
-        assert!((got - pore * cap).abs() < 1e-12, "the void took {got} of {}", pore * cap);
+        let got = w.apply(WorldCommand::AddWater {
+            x,
+            y,
+            z: 0,
+            volume_m3: pore * cap,
+        });
+        assert!(
+            (got - pore * cap).abs() < 1e-12,
+            "the void took {got} of {}",
+            pore * cap
+        );
     }
-    w.apply(WorldCommand::SetMaterial { x, y, z: 0, material: Material::Soil });
-    assert!((w.view().pore_at(x, y, 0) - pore).abs() < 1e-12, "{}", w.view().pore_at(x, y, 0));
-    assert_eq!(w.view().free_at(x, y, 0), 0.0, "nothing may be left standing");
+    w.apply(WorldCommand::SetMaterial {
+        x,
+        y,
+        z: 0,
+        material: Material::Soil,
+    });
+    assert!(
+        (w.view().pore_at(x, y, 0) - pore).abs() < 1e-12,
+        "{}",
+        w.view().pore_at(x, y, 0)
+    );
+    assert_eq!(
+        w.view().free_at(x, y, 0),
+        0.0,
+        "nothing may be left standing"
+    );
 }
 
 fn site(x: u32) -> Site {
@@ -67,9 +95,18 @@ fn assert_residuals(flora: &Flora, when: &str) {
     let o = organic_residual(flora);
     let n = mineral_residual(flora);
     let e = energy_residual(flora);
-    assert!(o.abs() <= 1e-9 * v.organic().abs().max(1.0), "{when}: organic residual {o}");
-    assert!(n.abs() <= 1e-9 * v.mineral().abs().max(1.0), "{when}: mineral residual {n}");
-    assert!(e.abs() <= 1e-9 * v.energy().abs().max(1.0), "{when}: energy residual {e}");
+    assert!(
+        o.abs() <= 1e-9 * v.organic().abs().max(1.0),
+        "{when}: organic residual {o}"
+    );
+    assert!(
+        n.abs() <= 1e-9 * v.mineral().abs().max(1.0),
+        "{when}: mineral residual {n}"
+    );
+    assert!(
+        e.abs() <= 1e-9 * v.energy().abs().max(1.0),
+        "{when}: energy residual {e}"
+    );
 }
 
 fn run(flora: &mut Flora, world: &mut World, ticks: u32) {
@@ -86,7 +123,15 @@ fn run(flora: &mut Flora, world: &mut World, ticks: u32) {
 fn a_seeded_stand_in_open_sky_earns_income_and_grows() {
     let mut world = plain(8, 8, 0.6);
     let mut flora = Flora::new(FloraConfig::default());
-    assert!(flora.apply(&world, Command::Seed { x: 3, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 3,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.1
+        }
+    ));
 
     let before = *flora.view().stand_at(site(3)).expect("seeded");
     let mineral0 = flora.view().ground_at(site(3)).expect("ground").mineral;
@@ -95,8 +140,17 @@ fn a_seeded_stand_in_open_sky_earns_income_and_grows() {
     let after = *flora.view().stand_at(site(3)).expect("still there");
     assert_eq!(after.light, 1.0, "open sky and a saturating light response");
     assert_eq!(after.moisture, 1.0, "pore 0.6 is past sat_pore");
-    assert!(after.wood > before.wood, "wood {} -> {}", before.wood, after.wood);
-    assert!(after.foliage > 0.9 * before.foliage, "foliage held up: {}", after.foliage);
+    assert!(
+        after.wood > before.wood,
+        "wood {} -> {}",
+        before.wood,
+        after.wood
+    );
+    assert!(
+        after.foliage > 0.9 * before.foliage,
+        "foliage held up: {}",
+        after.foliage
+    );
     assert!(flora.view().ledger.light_in > 0.0, "it fixed no light");
     assert!(flora.view().ledger.transpired_m3 > 0.0, "it drank nothing");
     assert_eq!(
@@ -109,8 +163,14 @@ fn a_seeded_stand_in_open_sky_earns_income_and_grows() {
     // tissue built — and the mineral it drew is standing in the plant, not respired.
     let g = flora.view().ground_at(site(3)).expect("ground");
     assert!(g.mineral < mineral0, "mineral {mineral0} -> {}", g.mineral);
-    assert!(after.mineral > before.mineral, "the plant holds the mineral it drew");
-    assert!(flora.view().ground_at(site(3)).unwrap().litter > 0.0, "senescence sheds litter");
+    assert!(
+        after.mineral > before.mineral,
+        "the plant holds the mineral it drew"
+    );
+    assert!(
+        flora.view().ground_at(site(3)).unwrap().litter > 0.0,
+        "senescence sheds litter"
+    );
     assert_residuals(&flora, "after 100 ticks of growth");
 }
 
@@ -126,21 +186,42 @@ fn a_stand_at_wilting_point_earns_nothing_and_dies_of_unpaid_maintenance() {
     let mut config = FloraConfig::default();
     config.bloomcrown.maintenance = 0.4;
     let mut flora = Flora::new(config);
-    assert!(flora.apply(&world, Command::Seed { x: 2, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 2,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.1
+        }
+    ));
 
     flora.step(&mut world);
-    let stand = *flora.view().stand_at(site(2)).expect("still alive after one tick");
+    let stand = *flora
+        .view()
+        .stand_at(site(2))
+        .expect("still alive after one tick");
     assert_eq!(stand.moisture, 0.0, "dry soil is wilting point");
     assert_eq!(flora.view().ledger.light_in, 0.0, "no water, no income");
-    assert_eq!(flora.view().ledger.transpired_m3, 0.0, "and nothing to drink");
+    assert_eq!(
+        flora.view().ledger.transpired_m3,
+        0.0,
+        "and nothing to drink"
+    );
 
     run(&mut flora, &mut world, 200);
-    assert!(flora.view().stand_at(site(2)).is_none(), "it should be dead");
+    assert!(
+        flora.view().stand_at(site(2)).is_none(),
+        "it should be dead"
+    );
     assert_eq!(flora.view().ledger.deaths, 1);
     let g = flora.view().ground_at(site(2)).expect("its remains");
     assert!(g.dead_wood > 0.0, "wood becomes dead wood");
     assert!(g.litter > 0.0, "foliage and reserve become litter");
-    assert!(g.litter_mineral > 0.0 && g.dead_wood_mineral > 0.0, "carrying their mineral");
+    assert!(
+        g.litter_mineral > 0.0 && g.dead_wood_mineral > 0.0,
+        "carrying their mineral"
+    );
     // The pool gained mineral only from decomposing the remains: nothing was ever
     // assimilated here, so no mineral was drawn out of it either.
     assert!(
@@ -168,16 +249,55 @@ fn a_taller_crown_lowers_the_light_and_the_income_under_it() {
     let mut world = plain(16, 12, 0.6);
     let mut flora = Flora::new(config);
     // The shaded pair at x = 4/5, and a lone control at x = 12.
-    assert!(flora.apply(&world, Command::Seed { x: 4, z: 0, species: Species::Umbrellafrond, wood: 0.6 }));
-    assert!(flora.apply(&world, Command::Seed { x: 5, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
-    assert!(flora.apply(&world, Command::Seed { x: 12, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 4,
+            z: 0,
+            species: Species::Umbrellafrond,
+            wood: 0.6
+        }
+    ));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 5,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.1
+        }
+    ));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 12,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.1
+        }
+    ));
     run(&mut flora, &mut world, 100);
 
     let shaded = *flora.view().stand_at(site(5)).expect("shaded stand");
     let open = *flora.view().stand_at(site(12)).expect("control stand");
-    assert!(shaded.light < 0.5 * open.light, "shaded {} vs open {}", shaded.light, open.light);
-    assert!(shaded.wood < open.wood, "shaded wood {} vs open {}", shaded.wood, open.wood);
-    assert!(shaded.foliage < open.foliage, "shaded foliage {} vs open {}", shaded.foliage, open.foliage);
+    assert!(
+        shaded.light < 0.5 * open.light,
+        "shaded {} vs open {}",
+        shaded.light,
+        open.light
+    );
+    assert!(
+        shaded.wood < open.wood,
+        "shaded wood {} vs open {}",
+        shaded.wood,
+        open.wood
+    );
+    assert!(
+        shaded.foliage < open.foliage,
+        "shaded foliage {} vs open {}",
+        shaded.foliage,
+        open.foliage
+    );
     // The tall stand is not shaded by the short one: only a strictly higher crown top
     // shades, and the umbrellafrond's is 5 voxels up against the bloomcrown's 1.
     assert_eq!(flora.view().stand_at(site(4)).unwrap().light, 1.0);
@@ -215,10 +335,34 @@ fn a_stand_that_cannot_pay_under_a_closed_canopy_diebacks_and_dies() {
     let mut world = plain(16, 12, 0.6);
     let mut flora = Flora::new(config);
     for x in [3i64, 4, 6, 7] {
-        assert!(flora.apply(&world, Command::Seed { x, z: 0, species: Species::Umbrellafrond, wood: 0.6 }));
+        assert!(flora.apply(
+            &world,
+            Command::Seed {
+                x,
+                z: 0,
+                species: Species::Umbrellafrond,
+                wood: 0.6
+            }
+        ));
     }
-    assert!(flora.apply(&world, Command::Seed { x: 5, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
-    assert!(flora.apply(&world, Command::Seed { x: 12, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 5,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.1
+        }
+    ));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 12,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.1
+        }
+    ));
     run(&mut flora, &mut world, 40);
 
     // The bloomcrown is dead — and the gap under the canopy does not stay empty: the four
@@ -238,13 +382,24 @@ fn a_stand_that_cannot_pay_under_a_closed_canopy_diebacks_and_dies() {
         "the gap holds neither an umbrellafrond bank nor an umbrellafrond born of one: \
          stand {took_the_gap:?}, bank {banked:?}"
     );
-    let open = flora.view().stand_at(site(12)).expect("the open stand lives");
-    assert!(open.wood >= 0.1, "the open stand paid its way: wood {}", open.wood);
+    let open = flora
+        .view()
+        .stand_at(site(12))
+        .expect("the open stand lives");
+    assert!(
+        open.wood >= 0.1,
+        "the open stand paid its way: wood {}",
+        open.wood
+    );
     assert_eq!(flora.view().ledger.deaths, 1);
     assert!(flora.view().ground_at(site(5)).unwrap().dead_wood > 0.0);
     // The four crowns are level with each other, so none of them shades another.
     for x in [3, 4, 6, 7] {
-        assert_eq!(flora.view().stand_at(site(x)).unwrap().light, 1.0, "crown at {x}");
+        assert_eq!(
+            flora.view().stand_at(site(x)).unwrap().light,
+            1.0,
+            "crown at {x}"
+        );
     }
     assert_residuals(&flora, "after a death under a canopy");
 }
@@ -261,8 +416,24 @@ fn shared_root_world(pore: f64) -> World {
 fn two_stands_sharing_a_root_box_take_their_demand_and_the_core_books_the_sum() {
     let mut world = shared_root_world(0.2);
     let mut flora = Flora::new(FloraConfig::default());
-    assert!(flora.apply(&world, Command::Seed { x: 0, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
-    assert!(flora.apply(&world, Command::Seed { x: 1, z: 0, species: Species::Bloomcrown, wood: 0.2 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 0,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.1
+        }
+    ));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 1,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.2
+        }
+    ));
 
     let stock0: f64 = pore_stock(&world);
     flora.step(&mut world);
@@ -279,17 +450,30 @@ fn two_stands_sharing_a_root_box_take_their_demand_and_the_core_books_the_sum() 
     // voxel's capacity, and a withdrawal this small (1e-7 of the cell's stock) is
     // quantized by the ulp of that fraction. The ledger still books exactly what the
     // store lost, which is what the volume checks below are for.
-    assert!((a.water_m3 - want_a).abs() < 1e-8 * want_a, "{} vs {want_a}", a.water_m3);
-    assert!((b.water_m3 / a.water_m3 - 2.0).abs() < 1e-6, "twice the foliage, twice the water");
+    assert!(
+        (a.water_m3 - want_a).abs() < 1e-8 * want_a,
+        "{} vs {want_a}",
+        a.water_m3
+    );
+    assert!(
+        (b.water_m3 / a.water_m3 - 2.0).abs() < 1e-6,
+        "twice the foliage, twice the water"
+    );
 
     let total = a.water_m3 + b.water_m3;
-    assert!((flora.view().ledger.transpired_m3 - total).abs() < 1e-12 * total, "the shares sum");
+    assert!(
+        (flora.view().ledger.transpired_m3 - total).abs() < 1e-12 * total,
+        "the shares sum"
+    );
     assert_eq!(
         world.view().ledger.transpiration_out,
         flora.view().ledger.transpired_m3,
         "the core books exactly the sum of the shares"
     );
-    assert!((stock0 - pore_stock(&world) - total).abs() < 1e-15, "the soil lost exactly that");
+    assert!(
+        (stock0 - pore_stock(&world) - total).abs() < 1e-15,
+        "the soil lost exactly that"
+    );
     assert_residuals(&flora, "after one shared drink");
 }
 
@@ -302,8 +486,24 @@ fn a_starved_shared_root_box_is_emptied_once_and_split_by_demand() {
     let mut config = FloraConfig::default();
     config.bloomcrown.transpiration_m3_per_s = 500.0;
     let mut flora = Flora::new(config);
-    assert!(flora.apply(&world, Command::Seed { x: 0, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
-    assert!(flora.apply(&world, Command::Seed { x: 1, z: 0, species: Species::Bloomcrown, wood: 0.2 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 0,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.1
+        }
+    ));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 1,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.2
+        }
+    ));
 
     // Only the two root rows hold water; the stands' boxes are the whole of them.
     let stock0 = pore_stock(&world);
@@ -311,11 +511,20 @@ fn a_starved_shared_root_box_is_emptied_once_and_split_by_demand() {
 
     let a = flora.view().stand_at(site(0)).unwrap().water_m3;
     let b = flora.view().stand_at(site(1)).unwrap().water_m3;
-    assert!((a + b - stock0).abs() < 1e-15, "{a} + {b} is not the {stock0} that was there");
+    assert!(
+        (a + b - stock0).abs() < 1e-15,
+        "{a} + {b} is not the {stock0} that was there"
+    );
     assert!(pore_stock(&world) < 1e-15, "the box is empty, not negative");
     assert!(pore_stock(&world) >= 0.0);
-    assert!((b / a - 2.0).abs() < 1e-9, "the split follows demand: {a} and {b}");
-    assert_eq!(world.view().ledger.transpiration_out, flora.view().ledger.transpired_m3);
+    assert!(
+        (b / a - 2.0).abs() < 1e-9,
+        "the split follows demand: {a} and {b}"
+    );
+    assert_eq!(
+        world.view().ledger.transpiration_out,
+        flora.view().ledger.transpired_m3
+    );
 }
 
 fn pore_stock(world: &World) -> f64 {
@@ -337,34 +546,80 @@ fn pore_stock(world: &World) -> f64 {
 fn a_pool_drowns_bloomcrown_and_a_film_does_not_while_umbrellafrond_stands_in_both() {
     let mut world = plain(8, 8, 0.5);
     let mut flora = Flora::new(FloraConfig::default());
-    assert!(flora.apply(&world, Command::Seed { x: 2, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
-    assert!(flora.apply(&world, Command::Seed { x: 5, z: 0, species: Species::Umbrellafrond, wood: 0.1 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 2,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.1
+        }
+    ));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 5,
+            z: 0,
+            species: Species::Umbrellafrond,
+            wood: 0.1
+        }
+    ));
 
     // A 2 cm film first: that is rain on its way somewhere, and it kills nothing. Both
     // species' thresholds mean a pool.
     for x in [2, 5] {
-        world.apply(WorldCommand::AddWater { x, y: 3, z: 0, volume_m3: 0.02 });
+        world.apply(WorldCommand::AddWater {
+            x,
+            y: 3,
+            z: 0,
+            volume_m3: 0.02,
+        });
     }
     flora.step(&mut world);
-    assert!(flora.view().stand_at(site(2)).is_some(), "bloomcrown does not drown in a shower");
+    assert!(
+        flora.view().stand_at(site(2)).is_some(),
+        "bloomcrown does not drown in a shower"
+    );
     assert_eq!(flora.view().ledger.deaths, 0);
 
     // Now 0.2 m: past bloomcrown's 0.05 m, inside umbrellafrond's 0.5 m.
     for x in [2, 5] {
-        world.apply(WorldCommand::AddWater { x, y: 3, z: 0, volume_m3: 0.18 });
+        world.apply(WorldCommand::AddWater {
+            x,
+            y: 3,
+            z: 0,
+            volume_m3: 0.18,
+        });
     }
     flora.step(&mut world);
-    assert!(flora.view().stand_at(site(2)).is_none(), "bloomcrown drowns in a puddle");
-    assert!(flora.view().stand_at(site(5)).is_some(), "umbrellafrond stands in it");
+    assert!(
+        flora.view().stand_at(site(2)).is_none(),
+        "bloomcrown drowns in a puddle"
+    );
+    assert!(
+        flora.view().stand_at(site(5)).is_some(),
+        "umbrellafrond stands in it"
+    );
     assert_eq!(flora.view().ledger.deaths, 1);
     let g = flora.view().ground_at(site(2)).unwrap();
-    assert!(g.dead_wood > 0.0 && g.litter > 0.0, "a drowning is a §4.7 death");
+    assert!(
+        g.dead_wood > 0.0 && g.litter > 0.0,
+        "a drowning is a §4.7 death"
+    );
 
     // Half a metre more and it is past the limit too.
-    world.apply(WorldCommand::AddWater { x: 5, y: 3, z: 0, volume_m3: 0.5 });
+    world.apply(WorldCommand::AddWater {
+        x: 5,
+        y: 3,
+        z: 0,
+        volume_m3: 0.5,
+    });
     assert!(world.view().water_depth_m(5, 2, 0) > 0.5);
     flora.step(&mut world);
-    assert!(flora.view().stand_at(site(5)).is_none(), "and now it drowns");
+    assert!(
+        flora.view().stand_at(site(5)).is_none(),
+        "and now it drowns"
+    );
     assert_eq!(flora.view().ledger.deaths, 2);
     assert_residuals(&flora, "after two drownings");
 }
@@ -376,14 +631,35 @@ fn a_pool_drowns_bloomcrown_and_a_film_does_not_while_umbrellafrond_stands_in_bo
 fn dead_wood_keeps_its_energy_until_it_decomposes() {
     let mut world = plain(8, 8, 0.5);
     let mut flora = Flora::new(FloraConfig::default());
-    assert!(flora.apply(&world, Command::Seed { x: 2, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 2,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.1
+        }
+    ));
     let e_v = flora.config().species(Species::Bloomcrown).energy_density;
 
     // Drown it: a §4.7 death, wood to dead wood.
-    world.apply(WorldCommand::AddWater { x: 2, y: 3, z: 0, volume_m3: 0.2 });
+    world.apply(WorldCommand::AddWater {
+        x: 2,
+        y: 3,
+        z: 0,
+        volume_m3: 0.2,
+    });
     flora.step(&mut world);
-    let g = flora.view().ground_at(site(2)).expect("its remains").clone();
-    assert!((g.dead_wood - 0.1).abs() < 1e-12, "the wood it had: {}", g.dead_wood);
+    let g = flora
+        .view()
+        .ground_at(site(2))
+        .expect("its remains")
+        .clone();
+    assert!(
+        (g.dead_wood - 0.1).abs() < 1e-12,
+        "the wood it had: {}",
+        g.dead_wood
+    );
     assert!(
         (g.dead_wood_energy - e_v * g.dead_wood).abs() < 1e-12,
         "dead wood holds e_v per unit, not zero: {} for {}",
@@ -392,13 +668,31 @@ fn dead_wood_keeps_its_energy_until_it_decomposes() {
     );
 
     // Clear the water so nothing else dies, and let it rot for a hundred ticks.
-    world.apply(WorldCommand::SetMaterial { x: 2, y: 3, z: 0, material: Material::Rock });
-    world.apply(WorldCommand::SetMaterial { x: 2, y: 3, z: 0, material: Material::Air });
+    world.apply(WorldCommand::SetMaterial {
+        x: 2,
+        y: 3,
+        z: 0,
+        material: Material::Rock,
+    });
+    world.apply(WorldCommand::SetMaterial {
+        x: 2,
+        y: 3,
+        z: 0,
+        material: Material::Air,
+    });
     let heat0 = flora.view().ledger.heat_out;
     run(&mut flora, &mut world, 100);
 
-    let after = flora.view().ground_at(site(2)).expect("still rotting").clone();
-    assert!(after.dead_wood < g.dead_wood, "it did not decompose: {}", after.dead_wood);
+    let after = flora
+        .view()
+        .ground_at(site(2))
+        .expect("still rotting")
+        .clone();
+    assert!(
+        after.dead_wood < g.dead_wood,
+        "it did not decompose: {}",
+        after.dead_wood
+    );
     assert!(after.dead_wood_energy < g.dead_wood_energy);
     assert!(
         (after.dead_wood_energy - e_v * after.dead_wood).abs() < 1e-12,
@@ -408,17 +702,27 @@ fn dead_wood_keeps_its_energy_until_it_decomposes() {
     );
     let released = g.dead_wood_energy - after.dead_wood_energy;
     let heat = flora.view().ledger.heat_out - heat0;
-    assert!(heat >= released - 1e-12, "the released energy did not reach heat: {heat} vs {released}");
+    assert!(
+        heat >= released - 1e-12,
+        "the released energy did not reach heat: {heat} vs {released}"
+    );
     // The organic matter it lost is respired out of the system, not turned into
     // fertilizer — but the mineral that was in it lands in the site's pool, at the same
     // fraction as the organic matter that left.
-    assert!(after.mineral > flora.config().initial_mineral, "{}", after.mineral);
-    assert!(flora.view().ledger.respired_out > 0.0, "decomposition respires nothing");
+    assert!(
+        after.mineral > flora.config().initial_mineral,
+        "{}",
+        after.mineral
+    );
+    assert!(
+        flora.view().ledger.respired_out > 0.0,
+        "decomposition respires nothing"
+    );
     // Exactly what the two decomposing stocks gave up, and not a unit more: the site's
     // mineral is conserved across the transfer.
     let released = after.mineral - flora.config().initial_mineral;
-    let gave_up = (g.litter_mineral + g.dead_wood_mineral)
-        - (after.litter_mineral + after.dead_wood_mineral);
+    let gave_up =
+        (g.litter_mineral + g.dead_wood_mineral) - (after.litter_mineral + after.dead_wood_mineral);
     assert!(
         (released - gave_up).abs() < 1e-9 * gave_up,
         "{released} reached the pool for {gave_up} released"
@@ -432,22 +736,40 @@ fn dead_wood_keeps_its_energy_until_it_decomposes() {
 fn a_terrain_edit_that_buries_a_support_books_the_stand_out() {
     let mut world = plain(8, 8, 0.5);
     let mut flora = Flora::new(FloraConfig::default());
-    assert!(flora.apply(&world, Command::Seed { x: 2, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 2,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.1
+        }
+    ));
     run(&mut flora, &mut world, 5);
 
     let stand = *flora.view().stand_at(site(2)).unwrap();
     let ground = flora.view().ground_at(site(2)).unwrap().clone();
     let organic = stand.organic() + ground.litter + ground.dead_wood;
-    let mineral =
-        stand.mineral + ground.mineral + ground.litter_mineral + ground.dead_wood_mineral;
+    let mineral = stand.mineral + ground.mineral + ground.litter_mineral + ground.dead_wood_mineral;
 
     // Rock in the void above the face: it is no longer a support.
-    world.apply(WorldCommand::SetMaterial { x: 2, y: 3, z: 0, material: Material::Rock });
+    world.apply(WorldCommand::SetMaterial {
+        x: 2,
+        y: 3,
+        z: 0,
+        material: Material::Rock,
+    });
     assert!(!world.view().is_support(2, 2, 0));
     flora.step(&mut world);
 
-    assert!(flora.view().stand_at(site(2)).is_none(), "the stand is gone");
-    assert!(flora.view().ground_at(site(2)).is_none(), "and so is its ground");
+    assert!(
+        flora.view().stand_at(site(2)).is_none(),
+        "the stand is gone"
+    );
+    assert!(
+        flora.view().ground_at(site(2)).is_none(),
+        "and so is its ground"
+    );
     let l = flora.view().ledger;
     assert!(
         (l.removed_organic_out - organic).abs() < 1e-15,
@@ -492,13 +814,24 @@ fn a_donor_saves_a_parcel_and_lands_one_whole_package_on_one_site() {
     let mut world = plain(8, 8, 0.6);
     let mut flora = Flora::new(config);
     // Wood 0.4 is over bloomcrown's donor_min of 0.3, and `Seed` fills the reserve.
-    assert!(flora.apply(&world, Command::Seed { x: 3, z: 0, species: Species::Bloomcrown, wood: 0.4 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 3,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.4
+        }
+    ));
     let sc = flora.config().species(Species::Bloomcrown).clone();
     let build = 1.0 + sc.build;
     let gross = sc.propagule_rate * cubarium_voxel::DT;
     let net = gross / build;
     let package = sc.alive_min / sc.propagule_split[0];
-    assert!((net - 0.0075).abs() < 1e-15 && (package - 0.05).abs() < 1e-15, "{net} {package}");
+    assert!(
+        (net - 0.0075).abs() < 1e-15 && (package - 0.05).abs() < 1e-15,
+        "{net} {package}"
+    );
     let mineral0 = flora.view().mineral();
     let donor0 = *flora.view().stand_at(site(3)).expect("seeded");
 
@@ -522,14 +855,23 @@ fn a_donor_saves_a_parcel_and_lands_one_whole_package_on_one_site() {
             "tick {tick}: a partial parcel landed: {:?}",
             flora.view().ground
         );
-        assert_eq!(flora.view().stands.len(), 1, "tick {tick}: a cohort became a stand");
+        assert_eq!(
+            flora.view().stands.len(),
+            1,
+            "tick {tick}: a cohort became a stand"
+        );
     }
 
     // The seventh: one package leaves, on exactly one of the four candidate sites, and the
     // remainder keeps saving.
     flora.step(&mut world);
-    let banked: Vec<Site> =
-        flora.view().ground.iter().filter(|g| !g.seeds.is_empty()).map(|g| g.site).collect();
+    let banked: Vec<Site> = flora
+        .view()
+        .ground
+        .iter()
+        .filter(|g| !g.seeds.is_empty())
+        .map(|g| g.site)
+        .collect();
     assert_eq!(banked.len(), 1, "one package, one recipient: {banked:?}");
     let at = banked[0];
     assert!(
@@ -537,15 +879,28 @@ fn a_donor_saves_a_parcel_and_lands_one_whole_package_on_one_site() {
         "{at:?} is not one of the donor's hop-2 neighbours, or is its own site"
     );
     assert_eq!(flora.view().stands.len(), 1, "a cohort is not a stand");
-    assert_eq!(flora.view().ledger.establishments, 0, "nothing germinated on its landing tick");
+    assert_eq!(
+        flora.view().ledger.establishments,
+        0,
+        "nothing germinated on its landing tick"
+    );
 
     let g = flora.view().ground_at(at).expect("the recipient");
     assert_eq!(g.seeds.len(), 1, "one cohort, not {:?}", g.seeds);
     let c = g.seeds[0];
     assert_eq!(c.species, Species::Bloomcrown);
-    assert_eq!(c.bin_start_tick, 0, "the bin tick 0 opened: the placeholders' bin is 3,000 ticks");
-    assert!((c.organic - package).abs() <= 1e-15 * package, "{c:?} for a {package} package");
-    assert!(c.mineral > 0.0, "a cohort carries the donor's mineral: {c:?}");
+    assert_eq!(
+        c.bin_start_tick, 0,
+        "the bin tick 0 opened: the placeholders' bin is 3,000 ticks"
+    );
+    assert!(
+        (c.organic - package).abs() <= 1e-15 * package,
+        "{c:?} for a {package} package"
+    );
+    assert!(
+        c.mineral > 0.0,
+        "a cohort carries the donor's mineral: {c:?}"
+    );
     assert_eq!(
         g.mineral,
         flora.config().initial_mineral,
@@ -557,7 +912,11 @@ fn a_donor_saves_a_parcel_and_lands_one_whole_package_on_one_site() {
     // half is the construction on everything it saved, sent or not.
     let donor = *flora.view().stand_at(site(3)).expect("the donor");
     let spent = donor0.reserve - donor.reserve;
-    assert!((spent - 7.0 * gross).abs() <= 1e-15, "the donor spent {spent} of {}", 7.0 * gross);
+    assert!(
+        (spent - 7.0 * gross).abs() <= 1e-15,
+        "the donor spent {spent} of {}",
+        7.0 * gross
+    );
     assert!(
         (donor.parcel - (7.0 * net - package)).abs() <= 1e-15,
         "the parcel holds {} after sending one {package} package",
@@ -589,10 +948,26 @@ fn a_donor_saves_a_parcel_and_lands_one_whole_package_on_one_site() {
     // could pay for everything it asked for, and one package of it has landed.
     let l = flora.view().ledger;
     let i = Species::Bloomcrown.index();
-    assert!((l.propagule_requested[i] - 7.0 * net).abs() <= 1e-15, "{:?}", l.propagule_requested);
-    assert!((l.propagule_funded[i] - 7.0 * net).abs() <= 1e-15, "{:?}", l.propagule_funded);
-    assert!((l.propagule_landed[i] - package).abs() <= 1e-15, "{:?}", l.propagule_landed);
-    assert_eq!(l.propagule_requested[Species::Umbrellafrond.index()], 0.0, "no frond asked");
+    assert!(
+        (l.propagule_requested[i] - 7.0 * net).abs() <= 1e-15,
+        "{:?}",
+        l.propagule_requested
+    );
+    assert!(
+        (l.propagule_funded[i] - 7.0 * net).abs() <= 1e-15,
+        "{:?}",
+        l.propagule_funded
+    );
+    assert!(
+        (l.propagule_landed[i] - package).abs() <= 1e-15,
+        "{:?}",
+        l.propagule_landed
+    );
+    assert_eq!(
+        l.propagule_requested[Species::Umbrellafrond.index()],
+        0.0,
+        "no frond asked"
+    );
 
     // One new site brought its own `initial_mineral`, which is booked in.
     assert!(
@@ -626,10 +1001,21 @@ fn a_cohort_on_a_site_that_fails_the_predicate_decays_to_litter_and_never_stands
     config.wood_decomposition = 0.0;
     let mut world = plain(8, 8, 0.6);
     let mut flora = Flora::new(config);
-    assert!(flora.apply(&world, Command::Seed { x: 3, z: 0, species: Species::Bloomcrown, wood: 0.4 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 3,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.4
+        }
+    ));
 
     run(&mut flora, &mut world, 7);
-    assert!(flora.apply(&world, Command::Clear { x: 3, z: 0 }), "the donor is taken away");
+    assert!(
+        flora.apply(&world, Command::Clear { x: 3, z: 0 }),
+        "the donor is taken away"
+    );
     let banked = flora
         .view()
         .ground
@@ -647,13 +1033,19 @@ fn a_cohort_on_a_site_that_fails_the_predicate_decays_to_litter_and_never_stands
     let c = g.seeds[0];
     // Seventeen ticks since the bin opened: the package landed on tick 7, in the bin whose
     // five-tick window opened at tick 5, and the run is at tick 17.
-    assert_eq!(c.bin_start_tick, 5, "not the bin the landing tick belonged to: {c:?}");
+    assert_eq!(
+        c.bin_start_tick, 5,
+        "not the bin the landing tick belonged to: {c:?}"
+    );
     assert_eq!(c.age_ticks(flora.tick()), 12, "the bin did not age");
     // Attrition from its **first banked tick**, not from the tick it landed on: the
     // package arrives in step 9, after that tick's decay has been charged, so ten ticks in
     // the bank is ten factors of `1 − seed_attrition_per_s · dt` and no more. K7 moved
     // germination in front of the decay; it did not move the decay itself.
-    let attrition = flora.config().species(Species::Bloomcrown).seed_attrition_per_s;
+    let attrition = flora
+        .config()
+        .species(Species::Bloomcrown)
+        .seed_attrition_per_s;
     let want = landed.organic * (1.0 - attrition * cubarium_voxel::DT).powi(10);
     assert!(
         (c.organic - want).abs() <= 1e-15,
@@ -673,12 +1065,19 @@ fn a_cohort_on_a_site_that_fails_the_predicate_decays_to_litter_and_never_stands
         "the litter's mineral is {} for {lost_mineral} lost",
         g.litter_mineral
     );
-    assert!(flora.view().stands.is_empty(), "something germinated on a failing site");
+    assert!(
+        flora.view().stands.is_empty(),
+        "something germinated on a failing site"
+    );
 
     // Past `seed_max_age_s` — 1 s is 30 ticks — the rest of it falls whole.
     run(&mut flora, &mut world, 25);
     let g = flora.view().ground_at(banked).unwrap().clone();
-    assert!(g.seeds.is_empty(), "the over-age cohort is still there: {:?}", g.seeds);
+    assert!(
+        g.seeds.is_empty(),
+        "the over-age cohort is still there: {:?}",
+        g.seeds
+    );
     assert!(
         (g.litter - landed.organic).abs() < 1e-15,
         "{} of the cohort's {} reached the litter",
@@ -691,7 +1090,10 @@ fn a_cohort_on_a_site_that_fails_the_predicate_decays_to_litter_and_never_stands
         g.litter_mineral,
         landed.mineral
     );
-    assert!(flora.view().stands.is_empty(), "something germinated on a failing site");
+    assert!(
+        flora.view().stands.is_empty(),
+        "something germinated on a failing site"
+    );
     assert_eq!(flora.view().ledger.establishments, 0);
     assert_residuals(&flora, "after a cohort decayed away");
 }
@@ -723,20 +1125,47 @@ fn a_bank_over_the_threshold_germinates_into_a_stand_of_its_own_pooled_cohorts()
     config.bloomcrown.senescence = 0.0;
     let mut world = plain(6, 8, 0.6);
     let mut flora = Flora::new(config);
-    assert!(flora.apply(&world, Command::Seed { x: 2, z: 0, species: Species::Bloomcrown, wood: 0.6 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 2,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.6
+        }
+    ));
     let sc = flora.config().species(Species::Bloomcrown).clone();
     let package = sc.alive_min / sc.propagule_split[0];
     let build = 1.0 + sc.build;
 
     // Tick one: one package lands, on one of the two neighbours, and nothing is born.
     flora.step(&mut world);
-    let banked: Vec<Site> =
-        flora.view().ground.iter().filter(|g| !g.seeds.is_empty()).map(|g| g.site).collect();
+    let banked: Vec<Site> = flora
+        .view()
+        .ground
+        .iter()
+        .filter(|g| !g.seeds.is_empty())
+        .map(|g| g.site)
+        .collect();
     assert_eq!(banked.len(), 1, "one package a tick: {banked:?}");
-    assert!([site(1), site(3)].contains(&banked[0]), "{banked:?} is not a hop-1 neighbour");
-    let first = flora.view().ground_at(banked[0]).unwrap().seed_organic(Species::Bloomcrown);
-    assert!((first - package).abs() <= 1e-15 * package, "a {first} package, not {package}");
-    assert_eq!(flora.view().ledger.establishments, 0, "born on its landing tick");
+    assert!(
+        [site(1), site(3)].contains(&banked[0]),
+        "{banked:?} is not a hop-1 neighbour"
+    );
+    let first = flora
+        .view()
+        .ground_at(banked[0])
+        .unwrap()
+        .seed_organic(Species::Bloomcrown);
+    assert!(
+        (first - package).abs() <= 1e-15 * package,
+        "a {first} package, not {package}"
+    );
+    assert_eq!(
+        flora.view().ledger.establishments,
+        0,
+        "born on its landing tick"
+    );
 
     // Tick two: that one package is a recruit. It germinates out of the whole package,
     // before any attrition is charged against it, on the site it landed on.
@@ -751,11 +1180,20 @@ fn a_bank_over_the_threshold_germinates_into_a_stand_of_its_own_pooled_cohorts()
     // The bin it came out of was emptied whole, so the bank on that site is whatever the
     // donor has landed since and nothing older.
     assert!(
-        flora.view().ground_at(at).unwrap().seed_organic(Species::Bloomcrown) <= package,
+        flora
+            .view()
+            .ground_at(at)
+            .unwrap()
+            .seed_organic(Species::Bloomcrown)
+            <= package,
         "the bin was not spent whole: {:?}",
         flora.view().ground_at(at).unwrap().seeds
     );
-    assert_eq!(s.stage, Stage::Alive, "a germinated stand is alive, not establishing");
+    assert_eq!(
+        s.stage,
+        Stage::Alive,
+        "a germinated stand is alive, not establishing"
+    );
     assert_eq!(s.species, Species::Bloomcrown);
     assert!(s.wood >= sc.alive_min, "born below alive_min: {}", s.wood);
     // Exactly one package, whatever the bank had grown to by then, and exactly `alive_min`
@@ -765,7 +1203,11 @@ fn a_bank_over_the_threshold_germinates_into_a_stand_of_its_own_pooled_cohorts()
         "born with {} for a {package} package",
         s.organic()
     );
-    assert!((s.wood - sc.alive_min).abs() <= 1e-15, "born with {} of wood", s.wood);
+    assert!(
+        (s.wood - sc.alive_min).abs() <= 1e-15,
+        "born with {} of wood",
+        s.wood
+    );
     assert_eq!(s.parcel, 0.0, "a newborn saves nothing yet");
     // Its mineral came with its cohorts, at the **donor's** own density and not `n_tissue`
     // exactly: the mineral is pulled when the package leaves, by the fraction rule over the
@@ -808,16 +1250,39 @@ fn a_bank_waits_under_a_living_stand_and_germinates_when_it_dies() {
     config.umbrellafrond.maintenance = 0.4;
     let mut world = plain(5, 8, 0.6);
     let mut flora = Flora::new(config);
-    assert!(flora.apply(&world, Command::Seed { x: 0, z: 0, species: Species::Bloomcrown, wood: 0.6 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 0,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.6
+        }
+    ));
     let victim = site(1);
-    assert!(flora.apply(&world, Command::Seed { x: 1, z: 0, species: Species::Umbrellafrond, wood: 0.02 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 1,
+            z: 0,
+            species: Species::Umbrellafrond,
+            wood: 0.02
+        }
+    ));
 
     // Twenty ticks: the bank on the occupied site is over the threshold and waiting.
     run(&mut flora, &mut world, 20);
-    let bank = flora.view().ground_at(victim).unwrap().seed_organic(Species::Bloomcrown);
+    let bank = flora
+        .view()
+        .ground_at(victim)
+        .unwrap()
+        .seed_organic(Species::Bloomcrown);
     let w_frac = flora.config().species(Species::Bloomcrown).propagule_split[0];
     let alive_min = flora.config().species(Species::Bloomcrown).alive_min;
-    assert!(w_frac * bank >= alive_min, "the bank is not over the threshold: {bank}");
+    assert!(
+        w_frac * bank >= alive_min,
+        "the bank is not over the threshold: {bank}"
+    );
     assert_eq!(
         flora.view().stand_at(victim).map(|s| s.species),
         Some(Species::Umbrellafrond),
@@ -830,12 +1295,23 @@ fn a_bank_waits_under_a_living_stand_and_germinates_when_it_dies() {
     run(&mut flora, &mut world, 40);
     assert_eq!(flora.view().ledger.deaths, 1, "the victim did not die");
     let born = *flora.view().stand_at(victim).expect("the gap stayed empty");
-    assert_eq!(born.species, Species::Bloomcrown, "the wrong species took the gap");
-    assert!(born.wood >= alive_min, "born below alive_min: {}", born.wood);
+    assert_eq!(
+        born.species,
+        Species::Bloomcrown,
+        "the wrong species took the gap"
+    );
+    assert!(
+        born.wood >= alive_min,
+        "born below alive_min: {}",
+        born.wood
+    );
     assert!(flora.view().ledger.establishments >= 1);
     // The dead umbrellafrond's remains are on the same site, under its successor.
     let g = flora.view().ground_at(victim).unwrap();
-    assert!(g.dead_wood > 0.0 && g.litter > 0.0, "the victim left no remains");
+    assert!(
+        g.dead_wood > 0.0 && g.litter > 0.0,
+        "the victim left no remains"
+    );
     assert_residuals(&flora, "after a gap was filled by its bank");
 }
 
@@ -857,13 +1333,25 @@ fn respiration_loses_organic_matter_and_releases_no_mineral() {
     config.bloomcrown.maintenance = 0.4;
     config.bloomcrown.senescence = 0.0;
     let mut flora = Flora::new(config);
-    assert!(flora.apply(&world, Command::Seed { x: 2, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 2,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.1
+        }
+    ));
 
     let n_tissue = flora.config().species(Species::Bloomcrown).n_tissue;
     let stand0 = *flora.view().stand_at(site(2)).expect("seeded");
     let pool0 = flora.view().ground_at(site(2)).expect("ground").mineral;
     let organic0 = flora.view().organic();
-    assert_eq!(stand0.mineral, n_tissue * stand0.organic(), "a founder arrives at n_tissue");
+    assert_eq!(
+        stand0.mineral,
+        n_tissue * stand0.organic(),
+        "a founder arrives at n_tissue"
+    );
 
     run(&mut flora, &mut world, 20);
 
@@ -871,7 +1359,10 @@ fn respiration_loses_organic_matter_and_releases_no_mineral() {
     let l = flora.view().ledger;
     assert_eq!(l.fixed_in, 0.0, "dry soil is no income");
     assert!(l.respired_out > 0.0, "it respired nothing");
-    assert!(stand.organic() < stand0.organic(), "it lost no organic matter");
+    assert!(
+        stand.organic() < stand0.organic(),
+        "it lost no organic matter"
+    );
     let lost = organic0 - flora.view().organic();
     assert!(
         (lost - l.respired_out).abs() < 1e-12 * l.respired_out,
@@ -884,7 +1375,10 @@ fn respiration_loses_organic_matter_and_releases_no_mineral() {
         pool0,
         "respiration fertilized the site"
     );
-    assert_eq!(stand.mineral, stand0.mineral, "respiration took mineral out of the plant");
+    assert_eq!(
+        stand.mineral, stand0.mineral,
+        "respiration took mineral out of the plant"
+    );
     assert!(
         stand.mineral > n_tissue * stand.organic(),
         "what is left should be mineral-rich: {} for {} of tissue",
@@ -909,22 +1403,60 @@ fn a_decomposing_litter_cohort_releases_exactly_its_mineral() {
 
     let mut world = plain(8, 8, 0.5);
     let mut flora = Flora::new(config);
-    assert!(flora.apply(&world, Command::Seed { x: 2, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 2,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.1
+        }
+    ));
     // Drown it: a §4.7 death puts foliage and reserve into litter, with their mineral.
-    world.apply(WorldCommand::AddWater { x: 2, y: 3, z: 0, volume_m3: 0.2 });
+    world.apply(WorldCommand::AddWater {
+        x: 2,
+        y: 3,
+        z: 0,
+        volume_m3: 0.2,
+    });
     flora.step(&mut world);
     // Take the water away so the litter can rot without anything else happening.
-    world.apply(WorldCommand::SetMaterial { x: 2, y: 3, z: 0, material: Material::Rock });
-    world.apply(WorldCommand::SetMaterial { x: 2, y: 3, z: 0, material: Material::Air });
+    world.apply(WorldCommand::SetMaterial {
+        x: 2,
+        y: 3,
+        z: 0,
+        material: Material::Rock,
+    });
+    world.apply(WorldCommand::SetMaterial {
+        x: 2,
+        y: 3,
+        z: 0,
+        material: Material::Air,
+    });
 
-    let before = flora.view().ground_at(site(2)).expect("its remains").clone();
-    assert!(before.litter > 0.0 && before.litter_mineral > 0.0, "{before:?}");
+    let before = flora
+        .view()
+        .ground_at(site(2))
+        .expect("its remains")
+        .clone();
+    assert!(
+        before.litter > 0.0 && before.litter_mineral > 0.0,
+        "{before:?}"
+    );
     let respired0 = flora.view().ledger.respired_out;
 
     flora.step(&mut world);
 
-    let after = flora.view().ground_at(site(2)).expect("still there").clone();
-    assert_eq!(after.litter, 0.0, "the whole cohort was eligible: {}", after.litter);
+    let after = flora
+        .view()
+        .ground_at(site(2))
+        .expect("still there")
+        .clone();
+    assert_eq!(
+        after.litter, 0.0,
+        "the whole cohort was eligible: {}",
+        after.litter
+    );
     assert_eq!(after.litter_mineral, 0.0, "and it kept none of its mineral");
     let released = after.mineral - before.mineral;
     assert!(
@@ -939,7 +1471,10 @@ fn a_decomposing_litter_cohort_releases_exactly_its_mineral() {
         "the cohort's {} of organic matter left as {respired} of respiration",
         before.litter
     );
-    assert_eq!(after.dead_wood, before.dead_wood, "the dead wood was not in play");
+    assert_eq!(
+        after.dead_wood, before.dead_wood,
+        "the dead wood was not in play"
+    );
     assert_residuals(&flora, "after one litter cohort decomposed");
 }
 
@@ -963,7 +1498,15 @@ fn growth_stops_when_the_site_s_mineral_is_spent_though_light_and_water_are_ampl
         config.bloomcrown.nutrient_draw_max = 1e9;
         let mut world = plain(6, 8, 0.6);
         let mut flora = Flora::new(config);
-        assert!(flora.apply(&world, Command::Seed { x: 2, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
+        assert!(flora.apply(
+            &world,
+            Command::Seed {
+                x: 2,
+                z: 0,
+                species: Species::Bloomcrown,
+                wood: 0.1
+            }
+        ));
         run(&mut flora, &mut world, 50);
         (flora, world)
     };
@@ -976,14 +1519,24 @@ fn growth_stops_when_the_site_s_mineral_is_spent_though_light_and_water_are_ampl
     run(&mut ample, &mut ample_world, 150);
 
     let stand = *starved.view().stand_at(site(2)).expect("still alive");
-    assert_eq!(stand.light, 1.0, "open sky, so light is not what stopped it");
-    assert_eq!(stand.moisture, 1.0, "pore 0.6 is past sat_pore: nor is water");
+    assert_eq!(
+        stand.light, 1.0,
+        "open sky, so light is not what stopped it"
+    );
+    assert_eq!(
+        stand.moisture, 1.0,
+        "pore 0.6 is past sat_pore: nor is water"
+    );
     // The pool does not reach zero and should not: senescence keeps shedding foliage
     // into litter and decomposition keeps handing that litter's mineral back, so the
     // site settles at the small stock that recycling supports — a fiftieth of what it
     // started with here. That trickle is all the growth there is.
     let g = starved.view().ground_at(site(2)).unwrap();
-    assert!(g.mineral < 0.02 * 1e-4, "the pool is not spent: {}", g.mineral);
+    assert!(
+        g.mineral < 0.02 * 1e-4,
+        "the pool is not spent: {}",
+        g.mineral
+    );
     // Everything the plant drew came out of that one pool, and nowhere else.
     assert!(
         stand.mineral - seeded_mineral <= 1e-4 + 1e-18,
@@ -993,7 +1546,10 @@ fn growth_stops_when_the_site_s_mineral_is_spent_though_light_and_water_are_ampl
     // And growth has stopped, not merely slowed: over the next 150 ticks the wood does
     // not move by one bit, while the ample arm — same light, same water, same rates —
     // keeps growing.
-    assert_eq!(stand.wood, mid.wood, "the starved stand grew after its pool was spent");
+    assert_eq!(
+        stand.wood, mid.wood,
+        "the starved stand grew after its pool was spent"
+    );
     assert!(
         ample.view().stand_at(site(2)).unwrap().wood > stand.wood,
         "the ample arm did not outgrow the starved one"
@@ -1055,22 +1611,53 @@ fn coupled(flora: &mut Flora, world: &mut World, ticks: u32) {
 fn a_saturated_root_box_stresses_bloomcrown_to_nothing_and_leaves_umbrellafrond_earning() {
     let mut bloom_world = saturated_basin();
     let mut bloom = Flora::new(FloraConfig::default());
-    assert!(bloom.apply(&bloom_world, Command::Seed { x: 2, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
+    assert!(bloom.apply(
+        &bloom_world,
+        Command::Seed {
+            x: 2,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.1
+        }
+    ));
     let mut frond_world = saturated_basin();
     let mut frond = Flora::new(FloraConfig::default());
-    assert!(frond.apply(&frond_world, Command::Seed { x: 2, z: 0, species: Species::Umbrellafrond, wood: 0.1 }));
+    assert!(frond.apply(
+        &frond_world,
+        Command::Seed {
+            x: 2,
+            z: 0,
+            species: Species::Umbrellafrond,
+            wood: 0.1
+        }
+    ));
 
     coupled(&mut bloom, &mut bloom_world, 2000);
     coupled(&mut frond, &mut frond_world, 2000);
 
     let b = *bloom.view().stand_at(site(2)).expect("alive, not drowned");
     let u = *frond.view().stand_at(site(2)).expect("alive, not drowned");
-    assert_eq!(bloom_world.view().water_depth_m(2, 2, 0), 0.0, "this is wet soil, not a pool");
-    assert_eq!(bloom.view().ledger.deaths, 0, "drowning is not what is being tested");
+    assert_eq!(
+        bloom_world.view().water_depth_m(2, 2, 0),
+        0.0,
+        "this is wet soil, not a pool"
+    );
+    assert_eq!(
+        bloom.view().ledger.deaths,
+        0,
+        "drowning is not what is being tested"
+    );
     assert_eq!(b.light, 1.0, "open sky: light is not what stopped it");
     assert_eq!(b.moisture, 1.0, "pore 1.0 is past sat_pore: nor is water");
-    assert!(1.0 - b.aeration_stress < 1e-6, "bloomcrown should be fully stressed: {b:?}");
-    assert_eq!(u.aeration_stress, 0.0, "umbrellafrond stressed to {}", u.aeration_stress);
+    assert!(
+        1.0 - b.aeration_stress < 1e-6,
+        "bloomcrown should be fully stressed: {b:?}"
+    );
+    assert_eq!(
+        u.aeration_stress, 0.0,
+        "umbrellafrond stressed to {}",
+        u.aeration_stress
+    );
 
     // Earning nothing measurable: over the next thirty ticks the bloomcrown fixes about
     // 1.5e-12 of a unit — `1 − stress` is 2e-9 there and its maintenance alone is 1e-6 a
@@ -1082,11 +1669,17 @@ fn a_saturated_root_box_stresses_bloomcrown_to_nothing_and_leaves_umbrellafrond_
     let earned = bloom.view().ledger.fixed_in - fixed;
     assert!(earned < 1e-10, "a fully stressed stand fixed {earned}");
     assert_eq!(after.wood, b.wood, "and it grew");
-    assert!(after.foliage < b.foliage && after.reserve < b.reserve, "{after:?}");
+    assert!(
+        after.foliage < b.foliage && after.reserve < b.reserve,
+        "{after:?}"
+    );
     // The umbrellafrond on the same box is still earning over the same span.
     let frond_fixed = frond.view().ledger.fixed_in;
     coupled(&mut frond, &mut frond_world, 30);
-    assert!(frond.view().ledger.fixed_in > frond_fixed, "umbrellafrond stopped earning");
+    assert!(
+        frond.view().ledger.fixed_in > frond_fixed,
+        "umbrellafrond stopped earning"
+    );
 
     // Drop the table out from under it: `drain` takes the root box down to the soil's
     // field capacity, well under `saturated_pore`, and the stress relaxes and the income
@@ -1098,11 +1691,24 @@ fn a_saturated_root_box_stresses_bloomcrown_to_nothing_and_leaves_umbrellafrond_
     coupled(&mut bloom, &mut bloom_world, 600);
 
     let dry = *bloom.view().stand_at(site(2)).expect("still alive");
-    assert!(bloom_world.view().pore_at(2, 1, 0) < 0.95, "the box is still saturated");
-    assert!(dry.aeration_stress < 1.0, "the stress did not relax: {}", dry.aeration_stress);
-    assert!(bloom.view().ledger.fixed_in > fixed, "the income did not come back");
+    assert!(
+        bloom_world.view().pore_at(2, 1, 0) < 0.95,
+        "the box is still saturated"
+    );
+    assert!(
+        dry.aeration_stress < 1.0,
+        "the stress did not relax: {}",
+        dry.aeration_stress
+    );
+    assert!(
+        bloom.view().ledger.fixed_in > fixed,
+        "the income did not come back"
+    );
     assert_residuals(&bloom, "after a bloomcrown stressed and relaxed");
-    assert_residuals(&frond, "after an umbrellafrond shrugged off a saturated box");
+    assert_residuals(
+        &frond,
+        "after an umbrellafrond shrugged off a saturated box",
+    );
 }
 
 /// The establishment half: on a wholly saturated site bloomcrown's bank never germinates
@@ -1133,8 +1739,24 @@ fn bloomcrown_cannot_germinate_on_a_saturated_site_and_umbrellafrond_can() {
     // saturated fraction of every root box is 1 and nothing has to move to keep it there.
     let mut world = saturated_basin();
     let mut flora = Flora::new(config);
-    assert!(flora.apply(&world, Command::Seed { x: 0, z: 0, species: Species::Bloomcrown, wood: 0.6 }));
-    assert!(flora.apply(&world, Command::Seed { x: 3, z: 0, species: Species::Umbrellafrond, wood: 0.6 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 0,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood: 0.6
+        }
+    ));
+    assert!(flora.apply(
+        &world,
+        Command::Seed {
+            x: 3,
+            z: 0,
+            species: Species::Umbrellafrond,
+            wood: 0.6
+        }
+    ));
 
     // Round 3b: a package lands on one drawn neighbour a tick, and a site needs two of
     // them before a birth is possible at all (one package is exactly `alive_min / w_frac`
@@ -1148,7 +1770,10 @@ fn bloomcrown_cannot_germinate_on_a_saturated_site_and_umbrellafrond_can() {
     for x in [1u32, 5] {
         let g = flora.view().ground_at(site(x)).unwrap();
         let bank = g.seed_organic(Species::Bloomcrown);
-        assert!(w_frac * bank >= alive_min, "site {x} is not over the threshold: {bank}");
+        assert!(
+            w_frac * bank >= alive_min,
+            "site {x} is not over the threshold: {bank}"
+        );
         assert!(
             flora.view().stand_at(site(x)).is_none(),
             "bloomcrown germinated on a saturated site: {:?}",
@@ -1164,7 +1789,11 @@ fn bloomcrown_cannot_germinate_on_a_saturated_site_and_umbrellafrond_can() {
         assert_eq!(s.species, Species::Umbrellafrond);
         assert!(s.wood >= flora.config().species(Species::Umbrellafrond).alive_min);
     }
-    assert_eq!(flora.view().ledger.establishments, 2, "one per umbrellafrond bank");
+    assert_eq!(
+        flora.view().ledger.establishments,
+        2,
+        "one per umbrellafrond bank"
+    );
     assert_residuals(&flora, "after a saturated site turned one species away");
 }
 
@@ -1188,8 +1817,18 @@ fn the_three_residuals_stay_at_noise_over_two_hundred_ticks_with_rain() {
         for x in 0..config.width as i64 {
             for y in 1..=2 {
                 let cap = Material::Soil.pore_capacity() * world.config().voxel_volume();
-                world.apply(WorldCommand::AddWater { x, y, z, volume_m3: 0.5 * cap });
-                world.apply(WorldCommand::SetMaterial { x, y, z, material: Material::Soil });
+                world.apply(WorldCommand::AddWater {
+                    x,
+                    y,
+                    z,
+                    volume_m3: 0.5 * cap,
+                });
+                world.apply(WorldCommand::SetMaterial {
+                    x,
+                    y,
+                    z,
+                    material: Material::Soil,
+                });
             }
         }
     }
@@ -1201,7 +1840,15 @@ fn the_three_residuals_stay_at_noise_over_two_hundred_ticks_with_rain() {
         (9, Species::Umbrellafrond, 0.1),
     ] {
         for z in 0..config.depth {
-            assert!(flora.apply(&world, Command::Seed { x, z, species, wood }));
+            assert!(flora.apply(
+                &world,
+                Command::Seed {
+                    x,
+                    z,
+                    species,
+                    wood
+                }
+            ));
         }
     }
 
@@ -1218,6 +1865,9 @@ fn the_three_residuals_stay_at_noise_over_two_hundred_ticks_with_rain() {
     let water = world.view().stored_m3() - world.view().ledger.expected_stored();
     assert!(water.abs() < 1e-9, "water residual {water}");
     assert!(flora.view().ledger.transpired_m3 > 0.0, "nothing drank");
-    assert_eq!(flora.view().ledger.transpired_m3, world.view().ledger.transpiration_out);
+    assert_eq!(
+        flora.view().ledger.transpired_m3,
+        world.view().ledger.transpiration_out
+    );
     assert!(flora.view().ledger.light_in > 0.0, "nothing grew");
 }

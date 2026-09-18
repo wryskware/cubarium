@@ -24,7 +24,11 @@ pub struct Slots<T> {
 
 impl<T> Slots<T> {
     pub fn with_capacity(cap: usize) -> Slots<T> {
-        Slots { entries: Vec::with_capacity(cap), free: Vec::new(), live: 0 }
+        Slots {
+            entries: Vec::with_capacity(cap),
+            free: Vec::new(),
+            live: 0,
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -46,7 +50,10 @@ impl<T> Slots<T> {
         }
         let slot = self.entries.len() as u32;
         self.entries.push(Some((1, value)));
-        OrganismId { slot, generation: 1 }
+        OrganismId {
+            slot,
+            generation: 1,
+        }
     }
 
     /// Remove by ID; `None` if the ID is stale or empty.
@@ -87,13 +94,29 @@ impl<T> Slots<T> {
     /// Live entries in slot order.
     pub fn iter(&self) -> impl Iterator<Item = (OrganismId, &T)> {
         self.entries.iter().enumerate().filter_map(|(i, e)| {
-            e.as_ref().map(|(g, v)| (OrganismId { slot: i as u32, generation: *g }, v))
+            e.as_ref().map(|(g, v)| {
+                (
+                    OrganismId {
+                        slot: i as u32,
+                        generation: *g,
+                    },
+                    v,
+                )
+            })
         })
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (OrganismId, &mut T)> {
         self.entries.iter_mut().enumerate().filter_map(|(i, e)| {
-            e.as_mut().map(|(g, v)| (OrganismId { slot: i as u32, generation: *g }, v))
+            e.as_mut().map(|(g, v)| {
+                (
+                    OrganismId {
+                        slot: i as u32,
+                        generation: *g,
+                    },
+                    v,
+                )
+            })
         })
     }
 
@@ -113,8 +136,20 @@ mod tests {
         assert!(s.is_empty());
         let a = s.insert("a");
         let b = s.insert("b");
-        assert_eq!(a, OrganismId { slot: 0, generation: 1 });
-        assert_eq!(b, OrganismId { slot: 1, generation: 1 });
+        assert_eq!(
+            a,
+            OrganismId {
+                slot: 0,
+                generation: 1
+            }
+        );
+        assert_eq!(
+            b,
+            OrganismId {
+                slot: 1,
+                generation: 1
+            }
+        );
         assert_eq!(s.len(), 2);
         assert_eq!(s.slot_count(), 2);
         assert_eq!(s.get(a), Some(&"a"));
@@ -133,9 +168,21 @@ mod tests {
 
         // Lowest free slot first, with a generation one above the previous occupant.
         let d = s.insert(10);
-        assert_eq!(d, OrganismId { slot: 0, generation: 2 });
+        assert_eq!(
+            d,
+            OrganismId {
+                slot: 0,
+                generation: 2
+            }
+        );
         let e = s.insert(11);
-        assert_eq!(e, OrganismId { slot: 2, generation: 2 });
+        assert_eq!(
+            e,
+            OrganismId {
+                slot: 2,
+                generation: 2
+            }
+        );
         assert_eq!(s.slot_count(), 3);
         assert_eq!(s.len(), 3);
         assert_eq!(s.get(b), Some(&1));
@@ -159,8 +206,20 @@ mod tests {
         assert_eq!(s.get(b), Some(&8));
 
         // Out-of-range slots.
-        assert_eq!(s.get(OrganismId { slot: 99, generation: 1 }), None);
-        assert_eq!(s.remove(OrganismId { slot: 99, generation: 1 }), None);
+        assert_eq!(
+            s.get(OrganismId {
+                slot: 99,
+                generation: 1
+            }),
+            None
+        );
+        assert_eq!(
+            s.remove(OrganismId {
+                slot: 99,
+                generation: 1
+            }),
+            None
+        );
     }
 
     #[test]
@@ -191,7 +250,13 @@ mod tests {
         for g in 2..10 {
             s.remove(id).unwrap();
             id = s.insert(g);
-            assert_eq!(id, OrganismId { slot: 0, generation: g });
+            assert_eq!(
+                id,
+                OrganismId {
+                    slot: 0,
+                    generation: g
+                }
+            );
             assert_eq!(s.slot_count(), 1);
         }
     }

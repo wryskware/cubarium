@@ -79,11 +79,20 @@ fn main() {
 
     let (plain, founders_a) = arm(seconds, 0, seed, noise_seed);
     let (grazed, founders_b) = arm(seconds, grazers, seed, noise_seed);
-    assert_eq!(founders_a, founders_b, "the two arms must be the same conditioned world");
-    println!("\nfounders (identical in both arms): {}", show_founders(&founders_a));
+    assert_eq!(
+        founders_a, founders_b,
+        "the two arms must be the same conditioned world"
+    );
+    println!(
+        "\nfounders (identical in both arms): {}",
+        show_founders(&founders_a)
+    );
 
     report(&plain, &grazed, seconds);
-    println!("\nwall time: {:.1} s for two arms of {seconds} coupled seconds", started.elapsed().as_secs_f64());
+    println!(
+        "\nwall time: {:.1} s for two arms of {seconds} coupled seconds",
+        started.elapsed().as_secs_f64()
+    );
 }
 
 fn arg<T: std::str::FromStr>(args: &[String], i: usize) -> Option<T> {
@@ -216,7 +225,10 @@ impl CropAttempts {
             }
         }
         for key in seen {
-            match self.by_dy.binary_search_by_key(&key, |&(sp, dy, _)| (sp, dy)) {
+            match self
+                .by_dy
+                .binary_search_by_key(&key, |&(sp, dy, _)| (sp, dy))
+            {
                 Ok(i) => self.by_dy[i].2 += 1,
                 Err(i) => self.by_dy.insert(i, (key.0, key.1, 1)),
             }
@@ -276,7 +288,9 @@ fn attribute(
             receipts.contested += organic;
             continue;
         }
-        let mut reached_by = croppers.iter().filter(|c| c.reach.iter().any(|&(s, _)| s == site));
+        let mut reached_by = croppers
+            .iter()
+            .filter(|c| c.reach.iter().any(|&(s, _)| s == site));
         let Some(one) = reached_by.next() else {
             // Nobody who cropped could reach it: not this harness's to attribute either.
             receipts.contested += organic;
@@ -288,7 +302,10 @@ fn attribute(
         }
         let face = one.face;
         receipts.attributed += organic;
-        match receipts.by_face_y.binary_search_by_key(&face.y, |&(y, _, _)| y) {
+        match receipts
+            .by_face_y
+            .binary_search_by_key(&face.y, |&(y, _, _)| y)
+        {
             Ok(i) => {
                 receipts.by_face_y[i].1 += organic;
                 receipts.by_face_y[i].2 += 1;
@@ -296,7 +313,10 @@ fn attribute(
             Err(i) => receipts.by_face_y.insert(i, (face.y, organic, 1)),
         }
         let key = (species, i64::from(site.y) - i64::from(face.y));
-        match receipts.by_dy.binary_search_by_key(&key, |&(sp, dy, _)| (sp, dy)) {
+        match receipts
+            .by_dy
+            .binary_search_by_key(&key, |&(sp, dy, _)| (sp, dy))
+        {
             Ok(i) => receipts.by_dy[i].2 += organic,
             Err(i) => receipts.by_dy.insert(i, (key.0, key.1, organic)),
         }
@@ -322,9 +342,14 @@ fn prepared_world(seed: u64, noise_seed: u64) -> World {
         rain_m_per_s: HARNESS_RAIN_M_PER_S,
         ..VoxelConfig::default()
     };
-    let basin_floor_m =
-        World::new(dry.clone()).outlet_cell().map_or(0.0, |(_, y, _)| y as f64) * dry.voxel_m;
-    let config = VoxelConfig { initial_aquifer_head_m: basin_floor_m + 1.0, ..dry };
+    let basin_floor_m = World::new(dry.clone())
+        .outlet_cell()
+        .map_or(0.0, |(_, y, _)| y as f64)
+        * dry.voxel_m;
+    let config = VoxelConfig {
+        initial_aquifer_head_m: basin_floor_m + 1.0,
+        ..dry
+    };
     let mut world = World::new(config);
     world.apply(WorldCommand::SetOutlet { open: true });
     for _ in 0..WARMUP_TICKS {
@@ -416,12 +441,15 @@ fn sample(t: f64, flora: &Flora, fauna: &Fauna, founders: u64) -> Sample {
     let n = av.animals.len();
     let d = n.max(1) as f64;
     let cohort = |of: fn(u64, u64) -> bool| {
-        av.animals.iter().filter(|a| of(a.id, founders)).fold(Cohort::default(), |mut c, a| {
-            c.animals += 1;
-            c.body += a.body;
-            c.reserve += a.reserve;
-            c
-        })
+        av.animals
+            .iter()
+            .filter(|a| of(a.id, founders))
+            .fold(Cohort::default(), |mut c, a| {
+                c.animals += 1;
+                c.body += a.body;
+                c.reserve += a.reserve;
+                c
+            })
     };
     Sample {
         t,
@@ -449,7 +477,12 @@ fn arm(seconds: f64, grazers: usize, seed: u64, noise_seed: u64) -> (Arm, Vec<(S
         let wood = FOUNDER_FRACTION * flora.config().species(species).wood_max;
         flora.apply(
             &world,
-            FloraCommand::Seed { x: i64::from(site.x), z: site.z, species, wood },
+            FloraCommand::Seed {
+                x: i64::from(site.x),
+                z: site.z,
+                species,
+                wood,
+            },
         );
     }
     let mut fauna = Fauna::new(FaunaConfig::default());
@@ -479,9 +512,7 @@ fn arm(seconds: f64, grazers: usize, seed: u64, noise_seed: u64) -> (Arm, Vec<(S
                     .view()
                     .reachable_foliage(&world.view(), a.site, reach)
                     .into_iter()
-                    .filter_map(|(site, _)| {
-                        flora.view().stand_at(site).map(|s| (site, s.species))
-                    })
+                    .filter_map(|(site, _)| flora.view().stand_at(site).map(|s| (site, s.species)))
                     .collect(),
             })
             .collect();
@@ -508,12 +539,18 @@ fn arm(seconds: f64, grazers: usize, seed: u64, noise_seed: u64) -> (Arm, Vec<(S
         }
         // Anything that ate and then left: `step` acts before it removes its dead, so a
         // grazer can take a mouthful and drown in the same tick (R11.4).
-        let gone: Vec<&Reading> =
-            before.iter().filter(|r| fauna.view().animal(r.id).is_none()).collect();
+        let gone: Vec<&Reading> = before
+            .iter()
+            .filter(|r| fauna.view().animal(r.id).is_none())
+            .collect();
         let taken: Vec<(Site, Species, f64)> = held
             .iter()
             .map(|&(site, species, foliage)| {
-                (site, species, foliage - flora.view().stand_at(site).map_or(0.0, |s| s.foliage))
+                (
+                    site,
+                    species,
+                    foliage - flora.view().stand_at(site).map_or(0.0, |s| s.foliage),
+                )
             })
             .collect();
         attribute(&mut receipts, &taken, &croppers, &gone);
@@ -535,7 +572,12 @@ fn arm(seconds: f64, grazers: usize, seed: u64, noise_seed: u64) -> (Arm, Vec<(S
             }
         }
         if (tick + 1) % every == 0 {
-            samples.push(sample((tick + 1) as f64 * DT, &flora, &fauna, grazers as u64));
+            samples.push(sample(
+                (tick + 1) as f64 * DT,
+                &flora,
+                &fauna,
+                grazers as u64,
+            ));
         }
     }
     if samples.last().map(|s| s.t) != Some(ticks as f64 * DT) {
@@ -620,15 +662,28 @@ fn report(plain: &Arm, grazed: &Arm, seconds: f64) {
     );
 
     println!("\n## the producers, both arms (stands / foliage / reserve / wood)\n");
-    println!("| t (s) | arm | {} |", PATCH.iter().map(|s| s.name()).collect::<Vec<_>>().join(" | "));
-    println!("| --- | --- | {} |", PATCH.iter().map(|_| "---").collect::<Vec<_>>().join(" | "));
+    println!(
+        "| t (s) | arm | {} |",
+        PATCH
+            .iter()
+            .map(|s| s.name())
+            .collect::<Vec<_>>()
+            .join(" | ")
+    );
+    println!(
+        "| --- | --- | {} |",
+        PATCH.iter().map(|_| "---").collect::<Vec<_>>().join(" | ")
+    );
     for arm in [plain, grazed] {
         for s in &arm.samples {
             let cells: Vec<String> = PATCH
                 .iter()
                 .map(|sp| {
                     let e = s.stocks[sp.index()];
-                    format!("{} / {:.4} / {:.4} / {:.4}", e.stands, e.foliage, e.reserve, e.wood)
+                    format!(
+                        "{} / {:.4} / {:.4} / {:.4}",
+                        e.stands, e.foliage, e.reserve, e.wood
+                    )
                 })
                 .collect();
             println!("| {:.0} | {} | {} |", s.t, arm.label, cells.join(" | "));
@@ -641,7 +696,13 @@ fn report(plain: &Arm, grazed: &Arm, seconds: f64) {
     for s in &grazed.samples {
         // No animals is no mean, and a mean of nothing printed as 0.00000 reads as a
         // measurement of a body that is not there.
-        let mean = |v: f64| if s.animals == 0 { "—".to_string() } else { format!("{:.5}", nz(v)) };
+        let mean = |v: f64| {
+            if s.animals == 0 {
+                "—".to_string()
+            } else {
+                format!("{:.5}", nz(v))
+            }
+        };
         println!(
             "| {:.0} | {} | {} | {} | {} | {} | {} | {} |",
             s.t,
@@ -663,7 +724,11 @@ fn report(plain: &Arm, grazed: &Arm, seconds: f64) {
     println!("| --- | --- | --- | --- | --- | --- | --- |");
     for s in &grazed.samples {
         let cell = |c: &Cohort, v: f64| {
-            if c.animals == 0 { "—".to_string() } else { format!("{:.5}", nz(v)) }
+            if c.animals == 0 {
+                "—".to_string()
+            } else {
+                format!("{:.5}", nz(v))
+            }
         };
         println!(
             "| {:.0} | {} | {} | {} | {} | {} | {} |",
@@ -694,7 +759,10 @@ fn report(plain: &Arm, grazed: &Arm, seconds: f64) {
     println!("| species | bites | organic |");
     println!("| --- | --- | --- |");
     for sp in Species::ALL {
-        let (b, o) = (grazed.bites_by_plant[sp.index()], grazed.eaten_by_plant[sp.index()]);
+        let (b, o) = (
+            grazed.bites_by_plant[sp.index()],
+            grazed.eaten_by_plant[sp.index()],
+        );
         if b > 0 {
             println!("| {} | {b} | {o:.6} |", sp.name());
         }
@@ -763,7 +831,12 @@ fn report(plain: &Arm, grazed: &Arm, seconds: f64) {
     for arm in [plain, grazed] {
         println!(
             "{}: eaten {:.6} / {:.7} / {:.6}, deposited {:.6} / {:.7} / {:.6}",
-            arm.label, arm.eaten.0, arm.eaten.1, arm.eaten.2, arm.deposited.0, arm.deposited.1,
+            arm.label,
+            arm.eaten.0,
+            arm.eaten.1,
+            arm.eaten.2,
+            arm.deposited.0,
+            arm.deposited.1,
             arm.deposited.2
         );
         println!(
@@ -778,13 +851,21 @@ fn report(plain: &Arm, grazed: &Arm, seconds: f64) {
         );
         println!(
             "  flora residual {:.3e} of {:.4} / {:.3e} of {:.4} / {:.3e} of {:.4}",
-            nz(arm.flora_residuals.0), arm.flora_stocks.0, nz(arm.flora_residuals.1),
-            arm.flora_stocks.1, nz(arm.flora_residuals.2), arm.flora_stocks.2
+            nz(arm.flora_residuals.0),
+            arm.flora_stocks.0,
+            nz(arm.flora_residuals.1),
+            arm.flora_stocks.1,
+            nz(arm.flora_residuals.2),
+            arm.flora_stocks.2
         );
         println!(
             "  fauna residual {:.3e} of {:.6} / {:.3e} of {:.7} / {:.3e} of {:.6}",
-            nz(arm.fauna_residuals.0), nz(arm.fauna_stocks.0), nz(arm.fauna_residuals.1),
-            nz(arm.fauna_stocks.1), nz(arm.fauna_residuals.2), nz(arm.fauna_stocks.2)
+            nz(arm.fauna_residuals.0),
+            nz(arm.fauna_stocks.0),
+            nz(arm.fauna_residuals.1),
+            nz(arm.fauna_stocks.1),
+            nz(arm.fauna_residuals.2),
+            nz(arm.fauna_stocks.2)
         );
         println!(
             "  plants: {} establishments, {} deaths",
@@ -807,7 +888,11 @@ mod tests {
     }
 
     fn reading(id: u64, face: Site, reach: &[(Site, Species)]) -> Reading {
-        Reading { id, face, reach: reach.to_vec() }
+        Reading {
+            id,
+            face,
+            reach: reach.to_vec(),
+        }
     }
 
     /// **R10.5, the attempts table.** Two stands of the same species at the same height in
@@ -827,7 +912,11 @@ mod tests {
                 (site(3, 2), Species::Bloomcrown),
             ],
         );
-        assert_eq!(attempts.by_face_y, vec![(2, 1)], "one animal-tick, one face");
+        assert_eq!(
+            attempts.by_face_y,
+            vec![(2, 1)],
+            "one animal-tick, one face"
+        );
         assert_eq!(
             attempts.by_dy,
             vec![
@@ -845,8 +934,22 @@ mod tests {
     /// face, so the report can say what share the attribution covers.
     #[test]
     fn a_receipt_is_attributed_only_where_one_eater_could_have_taken_it() {
-        let low = reading(0, site(4, 2), &[(site(3, 2), Species::Springturf), (site(9, 2), Species::Springturf)]);
-        let high = reading(1, site(7, 3), &[(site(6, 2), Species::Bloomcrown), (site(9, 2), Species::Springturf)]);
+        let low = reading(
+            0,
+            site(4, 2),
+            &[
+                (site(3, 2), Species::Springturf),
+                (site(9, 2), Species::Springturf),
+            ],
+        );
+        let high = reading(
+            1,
+            site(7, 3),
+            &[
+                (site(6, 2), Species::Bloomcrown),
+                (site(9, 2), Species::Springturf),
+            ],
+        );
         let croppers = [&low, &high];
 
         let mut receipts = Receipts::default();
@@ -868,15 +971,27 @@ mod tests {
         assert_eq!(receipts.by_face_y, vec![(2, 1e-4, 1), (3, 2e-4, 1)]);
         assert_eq!(
             receipts.by_dy,
-            vec![(Species::Bloomcrown, -1, 2e-4), (Species::Springturf, 0, 1e-4)],
+            vec![
+                (Species::Bloomcrown, -1, 2e-4),
+                (Species::Springturf, 0, 1e-4)
+            ],
             "the bloomcrown was taken from a face one voxel above it"
         );
-        assert!((receipts.attributed - 3e-4).abs() < 1e-18, "{}", receipts.attributed);
+        assert!(
+            (receipts.attributed - 3e-4).abs() < 1e-18,
+            "{}",
+            receipts.attributed
+        );
         assert_eq!(receipts.contested, 5e-5);
 
         // A stand nobody who cropped could reach is not attributed either.
         let mut orphan = Receipts::default();
-        attribute(&mut orphan, &[(site(20, 2), Species::Springturf, 7e-5)], &croppers, &[]);
+        attribute(
+            &mut orphan,
+            &[(site(20, 2), Species::Springturf, 7e-5)],
+            &croppers,
+            &[],
+        );
         assert_eq!((orphan.attributed, orphan.contested), (0.0, 7e-5));
         assert!(orphan.by_face_y.is_empty());
     }
@@ -920,7 +1035,12 @@ mod tests {
         let far = site(20, 2);
         let mut mixed = Receipts::default();
         let reacher = reading(2, site(20, 2), &[(far, Species::Springturf)]);
-        attribute(&mut mixed, &[(far, Species::Springturf, 3e-5)], &[&reacher], &[&lower]);
+        attribute(
+            &mut mixed,
+            &[(far, Species::Springturf, 3e-5)],
+            &[&reacher],
+            &[&lower],
+        );
         assert_eq!((mixed.attributed, mixed.contested), (3e-5, 0.0));
     }
 }

@@ -83,12 +83,18 @@ mod vec2;
 pub use cube_proto::geometry::{cross_seam, rotate_heading};
 pub use cube_proto::{Edge, Face, Seam};
 
-pub use field::{CELLS_PER_FACE_EDGE, CUBE_CELL_COUNT, CellId, FieldGraph, ScalarField, cell_of, deposit, diffuse};
+pub use field::{
+    CELLS_PER_FACE_EDGE, CUBE_CELL_COUNT, CellId, FieldGraph, ScalarField, cell_of, deposit,
+    diffuse,
+};
 pub use geometry::{CELL_PIXELS, EMBED_PIXELS, FOOTPRINT_PIXELS, Scale, Topology, TopologyError};
 pub use point::{FaceFrame, SurfacePoint, face_frame, pixel_neighbor};
 pub use raster::{PixelImage, unfold_pixels};
 pub use travel::{MAX_CROSSINGS, PathSegment, Travel, travel, travel_into};
-pub use unfold::{ChartImage, ChartPath, MAX_LOCAL_RADIUS, MAX_SEAMS, Unfolded, chart_images, segment_is_valid, surface_distance, unfold, unfold_with};
+pub use unfold::{
+    ChartImage, ChartPath, MAX_LOCAL_RADIUS, MAX_SEAMS, Unfolded, chart_images, segment_is_valid,
+    surface_distance, unfold, unfold_with,
+};
 pub use vec2::{TangentMap, Vec2};
 
 /// Side length of one **cube** face chart in pixel units. A ring's chart extent is its

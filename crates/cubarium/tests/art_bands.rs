@@ -9,14 +9,11 @@
 //! ramp, a filter or a weight has to survive a second, independently written copy of the
 //! rule rather than agreeing with itself.
 
-use cubarium_surface::{Scale, Topology};
-use cube_proto::{FACE_SIZE, Face};
 use cubarium::art::ArtPack;
 use cubarium::art_present::{
-    ArtPresenter, Band, CANOPY_STAGES, HORIZON, SOIL_HIGH_SRGB, SOIL_LOW_SRGB,
-    SOIL_MAX_BRIGHTNESS, SOIL_MIN_BRIGHTNESS, SOIL_SCALE, SOIL_TOP, band_of, band_of_height,
-    cell_band, height_of, next_stage, plant_density, rank_cap_of, soil_weight,
-    stage_thresholds, w_soil,
+    ArtPresenter, Band, CANOPY_STAGES, HORIZON, SOIL_HIGH_SRGB, SOIL_LOW_SRGB, SOIL_MAX_BRIGHTNESS,
+    SOIL_MIN_BRIGHTNESS, SOIL_SCALE, SOIL_TOP, band_of, band_of_height, cell_band, height_of,
+    next_stage, plant_density, rank_cap_of, soil_weight, stage_thresholds, w_soil,
 };
 use cubarium::present::{
     self, DETRITUS_SCALE, DETRITUS_THRESHOLD, PALETTE, PRODUCER_SATURATION, srgb_linear,
@@ -24,9 +21,11 @@ use cubarium::present::{
 use cubarium_core::view::RenderView;
 use cubarium_render::{Canvas, draw_field};
 use cubarium_surface::{
-    CUBE_CELL_COUNT, CELLS_PER_FACE_EDGE, CellId, Edge, ScalarField, SurfacePoint, cell_of,
+    CELLS_PER_FACE_EDGE, CUBE_CELL_COUNT, CellId, Edge, ScalarField, SurfacePoint, cell_of,
     pixel_neighbor,
 };
+use cubarium_surface::{Scale, Topology};
+use cube_proto::{FACE_SIZE, Face};
 
 use std::path::Path;
 
@@ -84,7 +83,9 @@ fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
 }
 
 fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u16, u16)> {
-    every_pixel().filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y)).collect()
+    every_pixel()
+        .filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y))
+        .collect()
 }
 
 fn assert_same_canvas(a: &Canvas, b: &Canvas, what: &str) {
@@ -112,11 +113,19 @@ fn side_faces() -> impl Iterator<Item = Face> {
 /// each existing pixel-neighbor's cell with weight 1, normalized over the neighbors that
 /// exist. Written out again here rather than borrowed from the renderer.
 fn filtered(field: &ScalarField, face: Face, x: u16, y: u16) -> f64 {
-    let mut sum = field.get(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y))) * 4.0;
+    let mut sum = field.get(cell_of(
+        Topology::Cube,
+        Scale::ONE,
+        &SurfacePoint::pixel_center(Topology::Cube, face, x, y),
+    )) * 4.0;
     let mut divisor = 4.0;
     for edge in Edge::ALL {
         if let Some((nf, nx, ny)) = pixel_neighbor(Topology::Cube, face, x, y, edge) {
-            sum += field.get(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, nf, nx, ny)));
+            sum += field.get(cell_of(
+                Topology::Cube,
+                Scale::ONE,
+                &SurfacePoint::pixel_center(Topology::Cube, nf, nx, ny),
+            ));
             divisor += 1.0;
         }
     }
@@ -206,9 +215,16 @@ fn soil_is_the_bottom_five_cell_rows_of_every_side_face_and_no_top_cell() {
                 let h = height_of(cell);
                 // Every cell in a row of a side face sits at the same height.
                 let expected = 1.0 - (f64::from(cy) + 0.5) / 8.0;
-                assert!((h - expected).abs() < 1e-12, "{cell:?}: h = {h}, expected {expected}");
+                assert!(
+                    (h - expected).abs() < 1e-12,
+                    "{cell:?}: h = {h}, expected {expected}"
+                );
                 let b = band_of(cell);
-                assert_eq!(*band.get_or_insert(b), b, "{face:?} row {cy} is not one band");
+                assert_eq!(
+                    *band.get_or_insert(b),
+                    b,
+                    "{face:?} row {cy} is not one band"
+                );
                 assert_ne!(b, Band::Canopy, "{cell:?} is not on the top face");
             }
             if band == Some(Band::Soil) {
@@ -224,25 +240,42 @@ fn soil_is_the_bottom_five_cell_rows_of_every_side_face_and_no_top_cell() {
     }
 
     // And the top face is the canopy, all of it, at exactly h = 1.
-    for cell in CellId::all(Topology::Cube, Scale::ONE).filter(|c| c.face(Topology::Cube, Scale::ONE) == Face::Top) {
+    for cell in CellId::all(Topology::Cube, Scale::ONE)
+        .filter(|c| c.face(Topology::Cube, Scale::ONE) == Face::Top)
+    {
         assert_eq!(height_of(cell), 1.0, "{cell:?}");
         assert_eq!(band_of(cell), Band::Canopy, "{cell:?}");
     }
 
     // The band rule itself, at its two edges.
     assert_eq!(band_of_height(SOIL_TOP - 1e-9), Band::Soil);
-    assert_eq!(band_of_height(SOIL_TOP), Band::Foliage, "the soil rule is strict");
+    assert_eq!(
+        band_of_height(SOIL_TOP),
+        Band::Foliage,
+        "the soil rule is strict"
+    );
     assert_eq!(band_of_height(0.9999), Band::Foliage);
     assert_eq!(band_of_height(1.0), Band::Canopy);
 }
 
 #[test]
 fn w_soil_is_one_below_the_horizon_zero_above_it_and_monotone_between() {
-    assert_eq!(w_soil(SOIL_TOP - HORIZON), 1.0, "the bottom of the blend is wholly soil");
-    assert_eq!(w_soil(SOIL_TOP + HORIZON), 0.0, "the top of the blend is wholly foliage");
+    assert_eq!(
+        w_soil(SOIL_TOP - HORIZON),
+        1.0,
+        "the bottom of the blend is wholly soil"
+    );
+    assert_eq!(
+        w_soil(SOIL_TOP + HORIZON),
+        0.0,
+        "the top of the blend is wholly foliage"
+    );
     assert_eq!(w_soil(-1.0), 1.0, "the rim is wholly soil");
     assert_eq!(w_soil(1.0), 0.0, "the canopy has no soil in it");
-    assert!((w_soil(SOIL_TOP) - 0.5).abs() < 1e-12, "the blend is centered on SOIL_TOP");
+    assert!(
+        (w_soil(SOIL_TOP) - 0.5).abs() < 1e-12,
+        "the blend is centered on SOIL_TOP"
+    );
     assert_eq!(w_soil(f64::NAN), 0.0, "a NaN height is not soil");
 
     // Monotone (non-increasing) in h over the whole cube, and strictly decreasing
@@ -253,13 +286,19 @@ fn w_soil_is_one_below_the_horizon_zero_above_it_and_monotone_between() {
         let h = -1.0 + 2.0 * f64::from(k) / 4000.0;
         let w = w_soil(h);
         assert!((0.0..=1.0).contains(&w), "w_soil({h}) = {w}");
-        assert!(w <= previous + 1e-15, "w_soil rose from {previous} to {w} at h = {h}");
+        assert!(
+            w <= previous + 1e-15,
+            "w_soil rose from {previous} to {w} at h = {h}"
+        );
         if w < previous {
             moved = true;
         }
         previous = w;
     }
-    assert!(moved, "w_soil never changed: the horizon is not a blend at all");
+    assert!(
+        moved,
+        "w_soil never changed: the horizon is not a blend at all"
+    );
 }
 
 #[test]
@@ -276,7 +315,10 @@ fn the_horizon_is_the_same_row_on_all_four_side_faces_and_absent_from_the_top() 
                 );
             }
             // And it is the pixel's own height, not its cell's.
-            let h = Topology::Cube.embed(Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, 0, y))[1];
+            let h = Topology::Cube.embed(
+                Scale::ONE,
+                &SurfacePoint::pixel_center(Topology::Cube, face, 0, y),
+            )[1];
             assert_eq!(front, w_soil(h) as f32, "row {y} of {face:?}");
         }
         for x in 0..FACE_SIZE as u16 {
@@ -338,7 +380,10 @@ fn a_saturated_world_with_no_detritus_still_has_a_bare_soil_band() {
         }
         soil_px += 1;
     }
-    assert!(soil_px > 1_000, "only {soil_px} pixels are wholly soil and motif-free");
+    assert!(
+        soil_px > 1_000,
+        "only {soil_px} pixels are wholly soil and motif-free"
+    );
 
     // And above the horizon the ground is the decided image: floor, ramp, flecks. With
     // producers saturated everywhere every foliage slot grows a plant, so the comparison
@@ -352,7 +397,10 @@ fn a_saturated_world_with_no_detritus_still_has_a_bare_soil_band() {
     let mut foliage_px = 0;
     for (face, x, y) in deep_foliage() {
         assert_eq!(soil_weight(face, x, y), 0.0);
-        assert!(plant_free(&quiet, face, x, y), "{face:?} ({x}, {y}) is within a plant's reach");
+        assert!(
+            plant_free(&quiet, face, x, y),
+            "{face:?} ({x}, {y}) is within a plant's reach"
+        );
         assert_eq!(
             quiet_canvas.get(face, x, y),
             ground.get(face, x, y),
@@ -360,7 +408,10 @@ fn a_saturated_world_with_no_detritus_still_has_a_bare_soil_band() {
         );
         foliage_px += 1;
     }
-    assert!(foliage_px > 1_000, "only {foliage_px} foliage pixels were compared");
+    assert!(
+        foliage_px > 1_000,
+        "only {foliage_px} foliage pixels were compared"
+    );
 
     // The soil is genuinely darker than the lit foliage above it: that is the picture.
     let mut ramp_only = Canvas::cube();
@@ -388,7 +439,14 @@ fn detritus_brightens_the_soil_and_keeps_it_violet() {
     // A pixel deep in the soil, far from the horizon and from any seam.
     let (face, x, y) = (Face::Front, 32, 60);
     assert_eq!(soil_weight(face, x, y), 1.0);
-    assert_eq!(band_of(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y))), Band::Soil);
+    assert_eq!(
+        band_of(cell_of(
+            Topology::Cube,
+            Scale::ONE,
+            &SurfacePoint::pixel_center(Topology::Cube, face, x, y)
+        )),
+        Band::Soil
+    );
 
     let poor = bare.get(face, x, y);
     let full = rich.get(face, x, y);
@@ -397,13 +455,26 @@ fn detritus_brightens_the_soil_and_keeps_it_violet() {
         light(full) > light(poor),
         "detritus must brighten the soil: {full:?} against {poor:?}"
     );
-    assert!(full[2] > full[1], "rich soil must be violet, not green: {full:?}");
-    assert!(full[0] < full[2], "rich soil must be violet, not red: {full:?}");
-    assert!(poor[2] > poor[1] && poor[0] < poor[2], "bare soil must be plum: {poor:?}");
+    assert!(
+        full[2] > full[1],
+        "rich soil must be violet, not green: {full:?}"
+    );
+    assert!(
+        full[0] < full[2],
+        "rich soil must be violet, not red: {full:?}"
+    );
+    assert!(
+        poor[2] > poor[1] && poor[0] < poor[2],
+        "bare soil must be plum: {poor:?}"
+    );
 
     // And an empty world is the ground rule as written, in both bands at once; a
     // detritus-rich soil also grows plants, which `tests/art_plants.rs` covers.
-    assert_same_canvas(&bare, &expected_ground(&view(flat(0.0), flat(0.0))), "an empty world");
+    assert_same_canvas(
+        &bare,
+        &expected_ground(&view(flat(0.0), flat(0.0))),
+        "an empty world",
+    );
 }
 
 #[test]
@@ -411,9 +482,12 @@ fn the_foliage_ground_is_the_decided_image_and_the_soil_never_flecks() {
     // A mixed world: producers everywhere but under every plant threshold, and detritus
     // everywhere above the fleck threshold (so the soil grows plants where it is rich;
     // those pixels are excluded, the soil plants are tested in `tests/art_plants.rs`).
-    let producer: Vec<f64> =
-        (0..CUBE_CELL_COUNT).map(|i| saturation() * CANOPY_STAGES[0] * (i % 5) as f64 / 8.0).collect();
-    let detritus: Vec<f64> = (0..CUBE_CELL_COUNT).map(|i| 0.06 + (i % 7) as f64 * 0.2).collect();
+    let producer: Vec<f64> = (0..CUBE_CELL_COUNT)
+        .map(|i| saturation() * CANOPY_STAGES[0] * (i % 5) as f64 / 8.0)
+        .collect();
+    let detritus: Vec<f64> = (0..CUBE_CELL_COUNT)
+        .map(|i| 0.06 + (i % 7) as f64 * 0.2)
+        .collect();
     let v = view(producer, detritus.clone());
     let canvas = draw(&v);
 
@@ -435,7 +509,13 @@ fn the_foliage_ground_is_the_decided_image_and_the_soil_never_flecks() {
             *value = 0.0;
         }
     }
-    draw_field(&mut foliage, &flecks, DETRITUS_SCALE, PALETTE.detritus, false);
+    draw_field(
+        &mut foliage,
+        &flecks,
+        DETRITUS_SCALE,
+        PALETTE.detritus,
+        false,
+    );
 
     let mut compared = 0;
     for (face, x, y) in every_pixel() {
@@ -450,7 +530,10 @@ fn the_foliage_ground_is_the_decided_image_and_the_soil_never_flecks() {
         );
         compared += 1;
     }
-    assert!(compared > 1_000, "only {compared} foliage pixels were actually compared");
+    assert!(
+        compared > 1_000,
+        "only {compared} foliage pixels were actually compared"
+    );
 }
 
 /// True when no plant can reach this pixel, so its value is the ground alone.
@@ -469,16 +552,26 @@ fn plant_free(v: &RenderView, face: Face, x: u16, y: u16) -> bool {
     if face == Face::Top && y >= FACE_SIZE as u16 - MARGIN {
         return false;
     }
-    let here = cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y));
+    let here = cell_of(
+        Topology::Cube,
+        Scale::ONE,
+        &SurfacePoint::pixel_center(Topology::Cube, face, x, y),
+    );
     for dy in -3i32..=3 {
         for dx in -3i32..=3 {
-            let (cx, cy) = (i32::from(here.cx(Topology::Cube, Scale::ONE)) + dx, i32::from(here.cy(Topology::Cube, Scale::ONE)) + dy);
+            let (cx, cy) = (
+                i32::from(here.cx(Topology::Cube, Scale::ONE)) + dx,
+                i32::from(here.cy(Topology::Cube, Scale::ONE)) + dy,
+            );
             if !(0..CELLS_PER_FACE_EDGE as i32).contains(&cx)
                 || !(0..CELLS_PER_FACE_EDGE as i32).contains(&cy)
             {
                 continue;
             }
-            if would_grow(v, CellId::new(Topology::Cube, Scale::ONE, face, cx as u16, cy as u16)) {
+            if would_grow(
+                v,
+                CellId::new(Topology::Cube, Scale::ONE, face, cx as u16, cy as u16),
+            ) {
                 return false;
             }
         }
@@ -497,7 +590,8 @@ fn would_grow(v: &RenderView, cell: CellId) -> bool {
 /// Side-face pixels well above the horizon and well inside the face, where the only
 /// plants that could reach are the foliage's own.
 fn deep_foliage() -> impl Iterator<Item = (Face, u16, u16)> {
-    side_faces().flat_map(|face| (12..=33u16).flat_map(move |y| (12..52u16).map(move |x| (face, x, y))))
+    side_faces()
+        .flat_map(|face| (12..=33u16).flat_map(move |y| (12..52u16).map(move |x| (face, x, y))))
 }
 
 // ---------------------------------------------------------------------------

@@ -182,7 +182,8 @@ impl SyntheticWorld {
         let (cx, cy) = (layout.cells_x(), layout.cells_y());
         let mut slots = Vec::with_capacity((cx * cy) as usize);
         for index in 0..cx * cy {
-            let mut hash = SplitMix64::new(seed ^ u64::from(index).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+            let mut hash =
+                SplitMix64::new(seed ^ u64::from(index).wrapping_mul(0x9E37_79B9_7F4A_7C15));
             let pick = (hash.next_u64() % 2) as usize;
             let jitter = [hash.range(-1.0, 1.0) as f32, hash.range(-1.0, 1.0) as f32];
             let rank = hash.next_f64();
@@ -193,7 +194,13 @@ impl SyntheticWorld {
                 // `stalk_heading(up) = (−up.y, up.x)` with up = (0, −1): `(1, 0)`.
                 heading: [angle.cos() as f32, angle.sin() as f32],
                 pick,
-                rank_cap: if rank < 0.22 { 2 } else if rank < 0.50 { 1 } else { 0 },
+                rank_cap: if rank < 0.22 {
+                    2
+                } else if rank < 0.50 {
+                    1
+                } else {
+                    0
+                },
                 wind: hash.range(0.85, 1.15),
                 phase: hash.range(0.0, 3.0),
             });
@@ -292,7 +299,11 @@ impl SyntheticWorld {
                 // Detritus: litter gathers below the horizon and under rich foliage. It
                 // is the soil band's own density, so its patches decide where mushrooms
                 // stand; the same shoulder keeps bare ground bare.
-                let litter = smoothstep(0.30, 0.90, wrapped_noise(u + 0.11, v + 0.5, seconds * 0.015, 5));
+                let litter = smoothstep(
+                    0.30,
+                    0.90,
+                    wrapped_noise(u + 0.11, v + 0.5, seconds * 0.015, 5),
+                );
                 f.detritus[i] = ((0.10 + 1.10 * litter) * (0.25 + 1.05 * below) * 1.5) as f32;
 
                 // Rain over a band of columns around the shower's centre, wrapping.
@@ -362,8 +373,14 @@ impl SyntheticWorld {
                 // the texture cross-fades through the horizon with the ground under it.
                 let soil = soil_weight(f64::from(py) + 0.5, f64::from(self.layout.h));
                 let weight = if band == Band::Soil { soil } else { 1.0 - soil };
-                let tile_band = if band == Band::Water { Band::Soil } else { band };
-                let Some(clip) = atlas.ground(tile_band.name()) else { continue };
+                let tile_band = if band == Band::Water {
+                    Band::Soil
+                } else {
+                    band
+                };
+                let Some(clip) = atlas.ground(tile_band.name()) else {
+                    continue;
+                };
                 let t = self.density_at(cell, tile_band);
                 let t0 = tile_band.thresholds()[0];
                 let opacity = (((t - t0) / (1.0 - t0)).clamp(0.0, 1.0) as f32)
@@ -375,7 +392,14 @@ impl SyntheticWorld {
                 let phase = hash01(u64::from(i) << 20 ^ u64::from(j) ^ 0x6772_6F75) * clip.seconds;
                 self.scene.push(
                     Layer::GroundCover,
-                    instance(atlas, clip, seconds + phase, [px as f32 + 0.5, py as f32 + 0.5], [1.0, 0.0], opacity),
+                    instance(
+                        atlas,
+                        clip,
+                        seconds + phase,
+                        [px as f32 + 0.5, py as f32 + 0.5],
+                        [1.0, 0.0],
+                        opacity,
+                    ),
                 );
             }
         }
@@ -419,13 +443,19 @@ impl SyntheticWorld {
                 let (clip, phase) = if step > 1e-3 && lower < 2 {
                     match atlas.plant(name, PlantClip::Grow(lower, upper)) {
                         Some(grow) => (grow, step * grow.seconds - seconds),
-                        None => (atlas.plant(name, PlantClip::Stage(lower)).unwrap(), slot.phase),
+                        None => (
+                            atlas.plant(name, PlantClip::Stage(lower)).unwrap(),
+                            slot.phase,
+                        ),
                     }
                 } else {
-                    let Some(idle) = atlas.plant(name, PlantClip::Stage(lower)) else { continue };
+                    let Some(idle) = atlas.plant(name, PlantClip::Stage(lower)) else {
+                        continue;
+                    };
                     (idle, slot.phase)
                 };
-                let mut sprite = instance(atlas, clip, seconds + phase, anchor, slot.heading, opacity);
+                let mut sprite =
+                    instance(atlas, clip, seconds + phase, anchor, slot.heading, opacity);
                 sprite.bend = [bend as f32, 0.0, 0.0, PLANT_BEND_LENGTH];
                 self.scene.push(Layer::Plants, sprite);
             }
@@ -451,36 +481,64 @@ impl SyntheticWorld {
             // One wind sample at the column's base, one amplitude for every part of it,
             // so the whole column is one continuous curve of one height coordinate.
             let amplitude = TALL_TIP_PX
-                * wind_at(f64::from(anchor_x), f64::from(anchor_y), seconds, f64::from(self.layout.w));
-            let at = |i: f32| [anchor_x, anchor_y - 4.0 * i * s];
-            let stamp = |world: &mut Scene, clip: Clip, i: f32, floor: f32, reveal: f32, opacity: f32| {
-                let mut sprite = instance(
-                    atlas,
-                    clip,
-                    seconds + column.phase,
-                    at(i),
-                    [1.0, 0.0],
-                    opacity,
+                * wind_at(
+                    f64::from(anchor_x),
+                    f64::from(anchor_y),
+                    seconds,
+                    f64::from(self.layout.w),
                 );
-                // `tall_bend_base(i) = 4i − 8`: the tile's bottom edge above the root.
-                sprite.bend = [amplitude as f32, 4.0 * i - 8.0, 0.0, TALL_BEND_LENGTH];
-                sprite.mask_floor = floor;
-                sprite.mask_reveal = reveal;
-                world.push(Layer::Tall, sprite);
-            };
+            let at = |i: f32| [anchor_x, anchor_y - 4.0 * i * s];
+            let stamp =
+                |world: &mut Scene, clip: Clip, i: f32, floor: f32, reveal: f32, opacity: f32| {
+                    let mut sprite = instance(
+                        atlas,
+                        clip,
+                        seconds + column.phase,
+                        at(i),
+                        [1.0, 0.0],
+                        opacity,
+                    );
+                    // `tall_bend_base(i) = 4i − 8`: the tile's bottom edge above the root.
+                    sprite.bend = [amplitude as f32, 4.0 * i - 8.0, 0.0, TALL_BEND_LENGTH];
+                    sprite.mask_floor = floor;
+                    sprite.mask_reveal = reveal;
+                    world.push(Layer::Tall, sprite);
+                };
             if let Some(base) = atlas.tall(name, "base") {
-                stamp(&mut self.scene, base, 0.0, NO_MASK_FLOOR, NO_MASK_REVEAL, TALL_OPACITY * fade);
+                stamp(
+                    &mut self.scene,
+                    base,
+                    0.0,
+                    NO_MASK_FLOOR,
+                    NO_MASK_REVEAL,
+                    TALL_OPACITY * fade,
+                );
             }
             if let Some(trunk) = atlas.tall(name, "trunk") {
                 for i in 1..=TALL_MAX_SEGMENTS {
-                    let floor = if i == 1 { TALL_FIRST_JOIN } else { TALL_STRIP_FLOOR };
-                    let top = if i == TALL_MAX_SEGMENTS { TILE_ROWS } else { TALL_STRIP_TOP };
+                    let floor = if i == 1 {
+                        TALL_FIRST_JOIN
+                    } else {
+                        TALL_STRIP_FLOOR
+                    };
+                    let top = if i == TALL_MAX_SEGMENTS {
+                        TILE_ROWS
+                    } else {
+                        TALL_STRIP_TOP
+                    };
                     let local = grown - (4.0 * i as f32 - 8.0);
                     let reveal = local.min(top);
                     if reveal <= floor {
                         break;
                     }
-                    stamp(&mut self.scene, trunk, i as f32, floor, reveal, TALL_OPACITY);
+                    stamp(
+                        &mut self.scene,
+                        trunk,
+                        i as f32,
+                        floor,
+                        reveal,
+                        TALL_OPACITY,
+                    );
                 }
             }
             if let Some(crown) = atlas.tall(name, "crown") {
@@ -531,7 +589,8 @@ impl SyntheticWorld {
                             continue;
                         }
                         let x = (col * cell_px) as i32 + dx * self.layout.scale as i32;
-                        self.scene.push(Layer::Rain, rain_mark(solid, [x as f32, y as f32], alpha));
+                        self.scene
+                            .push(Layer::Rain, rain_mark(solid, [x as f32, y as f32], alpha));
                     }
                 }
             }
@@ -542,8 +601,12 @@ impl SyntheticWorld {
     fn bodies(&mut self, atlas: &Atlas, seconds: f64) {
         let names: Vec<String> = atlas.creature_names().to_vec();
         for body in &self.bodies.clone() {
-            let Some(name) = names.get(body.rig % names.len()) else { continue };
-            let Some(clip) = atlas.creature(name, body.state) else { continue };
+            let Some(name) = names.get(body.rig % names.len()) else {
+                continue;
+            };
+            let Some(clip) = atlas.creature(name, body.state) else {
+                continue;
+            };
             let x = (body.start[0] + body.speed * seconds).rem_euclid(f64::from(self.layout.w));
             let y = body.start[1] + body.bob[0] * (TAU * seconds * body.bob[1]).sin();
             // The tile is authored facing +x (`pack.json`'s `facing`), so the heading is
@@ -631,7 +694,12 @@ impl SyntheticWorld {
     fn plant_bend(&self, slot: &Slot, anchor: [f32; 2], seconds: f64) -> f64 {
         PLANT_TIP_PX
             * slot.wind
-            * wind_at(f64::from(anchor[0]), f64::from(anchor[1]), seconds, f64::from(self.layout.w))
+            * wind_at(
+                f64::from(anchor[0]),
+                f64::from(anchor[1]),
+                seconds,
+                f64::from(self.layout.w),
+            )
     }
 }
 
@@ -728,8 +796,16 @@ fn instance(
     opacity: f32,
 ) -> SpriteInstance {
     let (a, b, mix) = clip.pose(seconds);
-    let mut sprite = SpriteInstance { anchor, heading, opacity, ..SpriteInstance::empty() };
-    assert!(sprite.push_pose(a, b, mix, 1.0, atlas), "one pose always fits four slots");
+    let mut sprite = SpriteInstance {
+        anchor,
+        heading,
+        opacity,
+        ..SpriteInstance::empty()
+    };
+    assert!(
+        sprite.push_pose(a, b, mix, 1.0, atlas),
+        "one pose always fits four slots"
+    );
     sprite
 }
 
@@ -792,7 +868,14 @@ mod tests {
         world.tick(1, 1.0);
         let f = &world.scene().fields;
         let n = RingLayout::RING_320.cell_count();
-        for field in [&f.producer, &f.water, &f.detritus, &f.rain, &f.growth, &f.tall] {
+        for field in [
+            &f.producer,
+            &f.water,
+            &f.detritus,
+            &f.rain,
+            &f.growth,
+            &f.tall,
+        ] {
             assert_eq!(field.len(), n);
         }
         assert!(f.producer.iter().any(|v| *v > 0.3), "no producer anywhere");
@@ -804,7 +887,10 @@ mod tests {
         for row in 0..RingLayout::RING_320.cells_y() as usize {
             let seam = (f.producer[row * cx] - f.producer[row * cx + cx - 1]).abs();
             let inner = (f.producer[row * cx + 1] - f.producer[row * cx]).abs();
-            assert!(seam <= inner.max(0.02) * 3.0 + 0.02, "row {row}: seam {seam} vs {inner}");
+            assert!(
+                seam <= inner.max(0.02) * 3.0 + 0.02,
+                "row {row}: seam {seam} vs {inner}"
+            );
         }
     }
 
@@ -816,9 +902,16 @@ mod tests {
         world.tick(20, 1.0);
         let scene = world.frame(&atlas, 1.0, 0.0);
         for layer in crate::scene::LAYERS {
-            assert!(!scene.layers[layer as usize].is_empty(), "{layer:?} drew nothing");
+            assert!(
+                !scene.layers[layer as usize].is_empty(),
+                "{layer:?} drew nothing"
+            );
         }
-        assert!(scene.instance_count() < 8192, "{} instances", scene.instance_count());
+        assert!(
+            scene.instance_count() < 8192,
+            "{} instances",
+            scene.instance_count()
+        );
         assert!(
             scene.layers[Layer::Plants as usize].len() > 200,
             "only {} plants",

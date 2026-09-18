@@ -1,8 +1,8 @@
 //! Substrate rendering from a scalar field.
 
 use crate::{Canvas, PixelCells};
-use cube_proto::Face;
 use cubarium_surface::{Edge, ScalarField, SurfacePoint, cell_of, pixel_neighbor};
+use cube_proto::Face;
 
 /// Add `color · min(value / scale, 1)` for each pixel from its cell (nearest-cell sample).
 /// With `filter`, apply a seam-aware one-pixel box filter first: each pixel's value is the
@@ -14,14 +14,24 @@ use cubarium_surface::{Edge, ScalarField, SurfacePoint, cell_of, pixel_neighbor}
 /// The pixel→cell map is recomputed per pixel here. A presenter that draws a field every
 /// frame should hold a [`PixelCells`] and call [`draw_field_with`], which is the same
 /// image bit for bit.
-pub fn draw_field(canvas: &mut Canvas, field: &ScalarField, scale: f64, color: [f32; 3], filter: bool) {
+pub fn draw_field(
+    canvas: &mut Canvas,
+    field: &ScalarField,
+    scale: f64,
+    color: [f32; 3],
+    filter: bool,
+) {
     if scale.is_nan() || scale <= 0.0 {
         return;
     }
     let topo = canvas.topology();
     let world = canvas.scale();
     let at = |face, x, y| {
-        field.get(cell_of(topo, world, &SurfacePoint::pixel_center(topo, face, x, y)))
+        field.get(cell_of(
+            topo,
+            world,
+            &SurfacePoint::pixel_center(topo, face, x, y),
+        ))
     };
     draw(canvas, scale, color, |face, x, y| {
         let own = at(face, x, y);
@@ -94,8 +104,8 @@ fn draw(canvas: &mut Canvas, scale: f64, color: [f32; 3], value: impl Fn(Face, u
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cube_proto::Face;
     use cubarium_surface::{CellId, FieldGraph, Scale, Topology, diffuse};
+    use cube_proto::Face;
 
     fn sample(canvas: &Canvas) -> Vec<f32> {
         let mut v = Vec::with_capacity(5 * 64 * 64);
@@ -119,15 +129,24 @@ mod tests {
         let (a, b) = (sample(&filtered), sample(&plain));
         assert_eq!(a.len(), 20_480);
         for (i, (&f, &p)) in a.iter().zip(b.iter()).enumerate() {
-            assert!((f - 0.5).abs() < 1e-6, "pixel {i} filtered to {f}, expected 0.5");
-            assert!((f - p).abs() < 1e-6, "pixel {i}: filter changed a constant field");
+            assert!(
+                (f - 0.5).abs() < 1e-6,
+                "pixel {i} filtered to {f}, expected 0.5"
+            );
+            assert!(
+                (f - p).abs() < 1e-6,
+                "pixel {i}: filter changed a constant field"
+            );
         }
     }
 
     #[test]
     fn values_clamp_at_the_scale_and_zero_stays_black() {
         let mut field = ScalarField::zeros(Topology::Cube, Scale::ONE);
-        field.set(CellId::new(Topology::Cube, Scale::ONE, Face::Front, 4, 4), 100.0);
+        field.set(
+            CellId::new(Topology::Cube, Scale::ONE, Face::Front, 4, 4),
+            100.0,
+        );
         let mut canvas = Canvas::cube();
         draw_field(&mut canvas, &field, 6.0, [0.12, 0.5, 0.2], false);
         // The 4x4 pixels of that cell are saturated; everything else is black.
@@ -151,7 +170,10 @@ mod tests {
     #[test]
     fn the_filter_softens_a_cell_edge_without_touching_the_field() {
         let mut field = ScalarField::zeros(Topology::Cube, Scale::ONE);
-        field.set(CellId::new(Topology::Cube, Scale::ONE, Face::Front, 4, 4), 6.0);
+        field.set(
+            CellId::new(Topology::Cube, Scale::ONE, Face::Front, 4, 4),
+            6.0,
+        );
         let before = field.clone();
         let mut canvas = Canvas::cube();
         draw_field(&mut canvas, &field, 6.0, [1.0, 1.0, 1.0], true);
@@ -185,7 +207,10 @@ mod tests {
                 let mut tabled = Canvas::new(topo, world);
                 draw_field_with(&mut tabled, &cells, &f, 6.0, [0.12, 0.5, 0.2], filter);
                 assert_eq!(plain.pixels(), tabled.pixels(), "{topo:?} filter={filter}");
-                assert!(plain.pixels().iter().any(|p| *p != [0.0; 3]), "the pass drew");
+                assert!(
+                    plain.pixels().iter().any(|p| *p != [0.0; 3]),
+                    "the pass drew"
+                );
             }
         }
     }
@@ -203,7 +228,9 @@ mod tests {
         let graph = FieldGraph::new(Topology::Cube, Scale::ONE);
         let mut field = ScalarField::zeros(Topology::Cube, Scale::ONE);
         let mut scratch = ScalarField::zeros(Topology::Cube, Scale::ONE);
-        cubarium_surface::deposit(Topology::Cube, Scale::ONE, 
+        cubarium_surface::deposit(
+            Topology::Cube,
+            Scale::ONE,
             &mut field,
             SurfacePoint::new(Face::Front, 62.0, 32.0),
             10.0,
@@ -224,6 +251,9 @@ mod tests {
                 }
             }
         }
-        assert!(faces.contains(&Face::Front) && faces.contains(&Face::Right), "{faces:?}");
+        assert!(
+            faces.contains(&Face::Front) && faces.contains(&Face::Right),
+            "{faces:?}"
+        );
     }
 }

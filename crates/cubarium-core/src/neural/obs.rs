@@ -208,7 +208,11 @@ pub fn observe(
             let presence = sector_weight(k, theta) * near;
             if presence > v[BODY + 2 * k] {
                 v[BODY + 2 * k] = presence;
-                let mine = if s.extent.is_finite() && s.extent > 0.0 { s.extent } else { 0.0 };
+                let mine = if s.extent.is_finite() && s.extent > 0.0 {
+                    s.extent
+                } else {
+                    0.0
+                };
                 let theirs = if body.extent.is_finite() && body.extent > 0.0 {
                     body.extent
                 } else {
@@ -298,11 +302,19 @@ fn ratio(x: f64, scale: f64) -> f64 {
 }
 
 fn clamp01(x: f64) -> f64 {
-    if x.is_finite() { x.clamp(0.0, 1.0) } else { 0.0 }
+    if x.is_finite() {
+        x.clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
 }
 
 fn clamp_unit(x: f64) -> f64 {
-    if x.is_finite() { x.clamp(-1.0, 1.0) } else { 0.0 }
+    if x.is_finite() {
+        x.clamp(-1.0, 1.0)
+    } else {
+        0.0
+    }
 }
 
 fn wrap_pi(a: f64) -> f64 {
@@ -425,7 +437,10 @@ mod tests {
         let a = observe(Vec2::new(1.0, 0.0), &one, &[], &bare());
         let b = observe(Vec2::new(1.0, 0.0), &three, &[], &bare());
         assert!((a.0[FOOD_NEAR] - b.0[FOOD_NEAR]).abs() < 1e-12);
-        assert!((a.0[FOOD_NEAR] - 0.5).abs() < 1e-12, "0.75 m of a 1.5 m ceiling");
+        assert!(
+            (a.0[FOOD_NEAR] - 0.5).abs() < 1e-12,
+            "0.75 m of a 1.5 m ceiling"
+        );
     }
 
     #[test]

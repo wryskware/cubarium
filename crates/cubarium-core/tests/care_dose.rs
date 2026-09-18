@@ -7,7 +7,6 @@
 //! litter. A standard dose is the pre-dose arithmetic bit for bit; the byte-for-byte proof of
 //! that against genuine pre-dose fixtures lives in `care_dose_migration.rs`.
 
-use cubarium_surface::{Scale, Topology};
 use cubarium_core::care::{
     ActiveShower, CLEAN_FRACTION, CLEAN_MATERIAL, CareCommand, CareDose, CareKind, CareOutcome,
     CareTarget, FEED_ALLOWANCE, FEED_MATERIAL, RAIN_DEPTH_TOTAL, RAIN_TICKS, footprint,
@@ -15,12 +14,17 @@ use cubarium_core::care::{
 use cubarium_core::snapshot::{SnapshotError, state_hash};
 use cubarium_core::{World, WorldConfig, decode_snapshot, encode_snapshot};
 use cubarium_surface::{CUBE_CELL_COUNT, CellId, Face, FieldGraph};
+use cubarium_surface::{Scale, Topology};
 
 // ---------------------------------------------------------------- helpers
 
 fn target_of(cell: CellId) -> CareTarget {
     let c = cell.center(Topology::Cube, Scale::ONE);
-    CareTarget { face: c.face.index() as u8, u: c.u, v: c.v }
+    CareTarget {
+        face: c.face.index() as u8,
+        u: c.u,
+        v: c.v,
+    }
 }
 
 fn dosed(seq: u64, tick: u64, kind: CareKind, cell: CellId, permille: u16) -> CareCommand {
@@ -53,11 +57,17 @@ fn still_water_config() -> WorldConfig {
 
 /// The documented interior / seam / open-rim trio, so every scaling claim is checked where the
 /// footprint is full, where it crosses a face boundary, and where it is short a neighbour.
-const PLACES: [(&str, Face, u16, u16); 3] =
-    [("interior", Face::Front, 8, 8), ("seam", Face::Front, 15, 8), ("rim", Face::Front, 8, 15)];
+const PLACES: [(&str, Face, u16, u16); 3] = [
+    ("interior", Face::Front, 8, 8),
+    ("seam", Face::Front, 15, 8),
+    ("rim", Face::Front, 8, 15),
+];
 
 fn places() -> Vec<(&'static str, CellId)> {
-    PLACES.iter().map(|(n, f, u, v)| (*n, CellId::new(Topology::Cube, Scale::ONE, *f, *u, *v))).collect()
+    PLACES
+        .iter()
+        .map(|(n, f, u, v)| (*n, CellId::new(Topology::Cube, Scale::ONE, *f, *u, *v)))
+        .collect()
 }
 
 /// Every dose the contract names, plus both bounds and the standard one.
@@ -83,7 +93,10 @@ fn the_dose_refuses_out_of_range_values_instead_of_clamping() {
     for bad in [0u16, 1, 249, 2001, 4000, 10_000, u16::MAX] {
         let err = CareDose::new(bad).expect_err("out of range");
         assert!(err.contains(&bad.to_string()), "{err}");
-        assert!(err.contains("250") && err.contains("2000"), "the error names the bounds: {err}");
+        assert!(
+            err.contains("250") && err.contains("2000"),
+            "the error names the bounds: {err}"
+        );
         // The refusal is not a clamp in disguise.
         assert!(!err.contains("clamp"));
     }
@@ -110,7 +123,11 @@ fn a_standard_dose_is_bit_for_bit_the_nominal_amount() {
         std::f64::consts::PI,
     ];
     for x in awkward {
-        assert_eq!(CareDose::STANDARD.scale(x), x, "the standard dose moved {x}");
+        assert_eq!(
+            CareDose::STANDARD.scale(x),
+            x,
+            "the standard dose moved {x}"
+        );
         assert_eq!(CareDose::STANDARD.scale(x).to_bits(), x.to_bits());
     }
     // f64::MAX is the case that shows the branch is load-bearing rather than decorative: the
@@ -132,7 +149,11 @@ fn an_explicit_standard_dose_is_the_same_command_as_no_dose_at_all() {
     let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 8);
     let mut implicit = World::new(still_water_config()).expect("valid");
     let mut explicit = World::new(still_water_config()).expect("valid");
-    for (seq, kind) in [(1, CareKind::Feed), (2, CareKind::Clean), (3, CareKind::Rain)] {
+    for (seq, kind) in [
+        (1, CareKind::Feed),
+        (2, CareKind::Clean),
+        (3, CareKind::Rain),
+    ] {
         let a = implicit.apply_care(&CareCommand::standard(seq, 0, kind, target_of(cell)));
         let b = explicit.apply_care(&dosed(seq, 0, kind, cell, 1000));
         assert_eq!(a.outcome, b.outcome, "{kind:?}");
@@ -170,10 +191,24 @@ fn a_feed_dose_scales_the_total_and_leaves_the_footprint_alone() {
             let CareOutcome::Applied(q) = receipt.outcome.clone() else {
                 panic!("{name} at {permille}: {:?}", receipt.outcome)
             };
-            assert_eq!(q.cells as usize, fp.len(), "{name} at {permille}: the footprint moved");
-            assert!((q.material_in - m).abs() < 1e-12, "{name} at {permille}: {}", q.material_in);
-            assert!((q.energy_in - rho * m).abs() < 1e-12, "{name} at {permille}");
-            assert_eq!((q.material_out, q.energy_out, q.water_depth), (0.0, 0.0, 0.0));
+            assert_eq!(
+                q.cells as usize,
+                fp.len(),
+                "{name} at {permille}: the footprint moved"
+            );
+            assert!(
+                (q.material_in - m).abs() < 1e-12,
+                "{name} at {permille}: {}",
+                q.material_in
+            );
+            assert!(
+                (q.energy_in - rho * m).abs() < 1e-12,
+                "{name} at {permille}"
+            );
+            assert_eq!(
+                (q.material_out, q.energy_out, q.water_depth),
+                (0.0, 0.0, 0.0)
+            );
 
             // Per cell it is exactly `m · w_c`, with the same weights as any other dose, and
             // the energy is `rho · (m · w_c)` — the contract's grouping, not `(rho·m)·w`.
@@ -181,17 +216,26 @@ fn a_feed_dose_scales_the_total_and_leaves_the_footprint_alone() {
             for (c, w) in &fp {
                 let i = c.index();
                 inside[i] = true;
-                assert_eq!(world.state.fields.d[i], before[i] + m * w, "{name} at {permille}");
+                assert_eq!(
+                    world.state.fields.d[i],
+                    before[i] + m * w,
+                    "{name} at {permille}"
+                );
                 assert_eq!(world.state.fields.de[i], de_before[i] + rho * (m * w));
             }
             for i in 0..CUBE_CELL_COUNT {
-                assert!(inside[i] || world.state.fields.d[i] == before[i], "{name}: cell {i} moved");
+                assert!(
+                    inside[i] || world.state.fields.d[i] == before[i],
+                    "{name}: cell {i} moved"
+                );
             }
             // The ledgers book the actual sums, and the allowance books the same number.
             assert_eq!(world.care().feed_material_in, q.material_in);
             assert_eq!(world.care().feed_energy_in, q.energy_in);
             assert_eq!(world.care().allowance_used, q.material_in);
-            world.check_invariants().expect("a dosed feed leaves a consistent world");
+            world
+                .check_invariants()
+                .expect("a dosed feed leaves a consistent world");
         }
     }
 }
@@ -209,7 +253,10 @@ fn the_allowance_is_thirty_units_at_every_dose_and_refuses_rather_than_shrinking
         let mut accepted = 0;
         let reason = loop {
             seq += 1;
-            match world.apply_care(&dosed(seq, 0, CareKind::Feed, cell, permille)).outcome {
+            match world
+                .apply_care(&dosed(seq, 0, CareKind::Feed, cell, permille))
+                .outcome
+            {
                 CareOutcome::Applied(_) => accepted += 1,
                 CareOutcome::Rejected(r) => break r,
                 other => panic!("a feed came back {other:?}"),
@@ -218,7 +265,11 @@ fn the_allowance_is_thirty_units_at_every_dose_and_refuses_rather_than_shrinking
         };
         assert_eq!(accepted, expected, "at {permille} permille");
         assert_eq!(reason, "allowance exhausted");
-        assert_eq!(world.care().admitted_seq, seq, "a refusal still spends its seq");
+        assert_eq!(
+            world.care().admitted_seq,
+            seq,
+            "a refusal still spends its seq"
+        );
         let spent = f64::from(accepted) * f64::from(permille) / 1000.0 * FEED_MATERIAL;
         assert!((world.care().feed_material_in - spent).abs() < 1e-9);
         assert!(world.care().allowance_used <= FEED_ALLOWANCE + 1e-9);
@@ -235,7 +286,9 @@ fn a_dose_larger_than_the_remaining_allowance_is_refused_without_a_trace() {
     let mut world = World::new(WorldConfig::default()).expect("valid");
     for seq in 1..=9 {
         assert!(matches!(
-            world.apply_care(&dosed(seq, 0, CareKind::Feed, cell, 1000)).outcome,
+            world
+                .apply_care(&dosed(seq, 0, CareKind::Feed, cell, 1000))
+                .outcome,
             CareOutcome::Applied(_)
         ));
     }
@@ -245,21 +298,33 @@ fn a_dose_larger_than_the_remaining_allowance_is_refused_without_a_trace() {
     let de_before: Vec<f64> = world.state.fields.de.clone();
     let ledgers_before = world.care().clone();
 
-    let refused = world.apply_care(&dosed(10, 0, CareKind::Feed, cell, 2000)).outcome;
+    let refused = world
+        .apply_care(&dosed(10, 0, CareKind::Feed, cell, 2000))
+        .outcome;
     assert_eq!(refused, CareOutcome::Rejected("allowance exhausted".into()));
-    assert_eq!(world.state.fields.d, d_before, "a refused feed moved the litter");
+    assert_eq!(
+        world.state.fields.d, d_before,
+        "a refused feed moved the litter"
+    );
     assert_eq!(world.state.fields.de, de_before);
-    assert_eq!(world.care().feed_material_in, ledgers_before.feed_material_in);
+    assert_eq!(
+        world.care().feed_material_in,
+        ledgers_before.feed_material_in
+    );
     assert_eq!(world.care().allowance_used, ledgers_before.allowance_used);
     assert_eq!(world.care().admitted_seq, 10, "but it still spent its seq");
 
     // The 3 units that do fit still land, and then nothing else does.
     assert!(matches!(
-        world.apply_care(&dosed(11, 0, CareKind::Feed, cell, 1000)).outcome,
+        world
+            .apply_care(&dosed(11, 0, CareKind::Feed, cell, 1000))
+            .outcome,
         CareOutcome::Applied(_)
     ));
     assert!(matches!(
-        world.apply_care(&dosed(12, 0, CareKind::Feed, cell, 250)).outcome,
+        world
+            .apply_care(&dosed(12, 0, CareKind::Feed, cell, 250))
+            .outcome,
         CareOutcome::Rejected(_)
     ));
 }
@@ -286,8 +351,15 @@ fn a_clean_dose_scales_the_cap_but_never_the_per_cell_half() {
                 panic!("{name} at {permille}: {:?}", receipt.outcome)
             };
             let want: f64 = fp.iter().map(|(_, w)| cap * w).sum();
-            assert!((q.material_out - want).abs() < 1e-12, "{name} at {permille}: {}", q.material_out);
-            assert!((q.material_out - cap).abs() < 1e-9, "the dose is the total over the footprint");
+            assert!(
+                (q.material_out - want).abs() < 1e-12,
+                "{name} at {permille}: {}",
+                q.material_out
+            );
+            assert!(
+                (q.material_out - cap).abs() < 1e-9,
+                "the dose is the total over the footprint"
+            );
             assert!((q.energy_out - rho * q.material_out).abs() < 1e-9);
             assert_eq!(q.cells as usize, fp.len(), "{name}: the footprint moved");
             for (c, w) in &fp {
@@ -296,7 +368,9 @@ fn a_clean_dose_scales_the_cap_but_never_the_per_cell_half() {
                     "{name} at {permille}"
                 );
             }
-            world.check_invariants().expect("a dosed clean preserves the energy density");
+            world
+                .check_invariants()
+                .expect("a dosed clean preserves the energy density");
 
             // Scarce litter: the half-of-what-is-there limit bites at every dose alike, so the
             // largest dose removes exactly what the smallest does and the cell is not emptied.
@@ -309,10 +383,16 @@ fn a_clean_dose_scales_the_cap_but_never_the_per_cell_half() {
             let CareOutcome::Partial(q) = receipt.outcome.clone() else {
                 panic!("{name} scarce at {permille}: {:?}", receipt.outcome)
             };
-            assert!((q.material_out - CLEAN_FRACTION * 0.01).abs() < 1e-15, "{name} at {permille}");
+            assert!(
+                (q.material_out - CLEAN_FRACTION * 0.01).abs() < 1e-15,
+                "{name} at {permille}"
+            );
             assert!((world.state.fields.d[cell.index()] - 0.005).abs() < 1e-15);
             assert!((world.state.fields.de[cell.index()] - 0.01).abs() < 1e-15);
-            assert!(world.state.fields.d[cell.index()] > 0.0, "cleanup is not sterilization");
+            assert!(
+                world.state.fields.d[cell.index()] > 0.0,
+                "cleanup is not sterilization"
+            );
         }
     }
 }
@@ -327,8 +407,15 @@ fn an_empty_or_sparse_footprint_is_refused_or_partial_at_every_dose() {
         world.state.fields.d.fill(0.0);
         world.state.fields.de.fill(0.0);
         let receipt = world.apply_care(&dosed(1, 0, CareKind::Clean, cell, permille));
-        assert_eq!(receipt.outcome, CareOutcome::Rejected("nothing to remove".into()));
-        assert_eq!(world.care().admitted_seq, 1, "a refusal still consumes its seq");
+        assert_eq!(
+            receipt.outcome,
+            CareOutcome::Rejected("nothing to remove".into())
+        );
+        assert_eq!(
+            world.care().admitted_seq,
+            1,
+            "a refusal still consumes its seq"
+        );
         assert_eq!(world.care().clean_material_out, 0.0);
 
         // Exactly enough litter for the *standard* cap in the centre cell alone. A dose above
@@ -336,9 +423,16 @@ fn an_empty_or_sparse_footprint_is_refused_or_partial_at_every_dose() {
         world.state.fields.d[cell.index()] = 2.0 * CLEAN_MATERIAL;
         world.state.fields.de[cell.index()] = 0.0;
         let receipt = world.apply_care(&dosed(2, 0, CareKind::Clean, cell, permille));
-        let got = receipt.outcome.applied().expect("something was removed").material_out;
+        let got = receipt
+            .outcome
+            .applied()
+            .expect("something was removed")
+            .material_out;
         let cap = f64::from(permille) / 1000.0 * CLEAN_MATERIAL;
-        assert!(got + 1e-12 < cap, "{permille}: {got} should fall short of {cap}");
+        assert!(
+            got + 1e-12 < cap,
+            "{permille}: {got} should fall short of {cap}"
+        );
         assert!(
             matches!(receipt.outcome, CareOutcome::Partial(_)),
             "{permille}: a short clean must say partial, not applied: {:?}",
@@ -368,7 +462,10 @@ fn only_material_actually_removed_restores_the_allowance() {
         .expect("there is litter here")
         .material_out;
     let after: f64 = world.state.fields.d.iter().sum();
-    assert!((before - after - q).abs() < 1e-12, "the ledger is what left the fields");
+    assert!(
+        (before - after - q).abs() < 1e-12,
+        "the ledger is what left the fields"
+    );
     assert!((world.care().allowance_used - (used - q)).abs() < 1e-12);
 
     // And a clean that removes nothing restores nothing.
@@ -377,7 +474,9 @@ fn only_material_actually_removed_restores_the_allowance() {
     world.state.fields.de.fill(0.0);
     let held = world.care().allowance_used;
     assert!(matches!(
-        world.apply_care(&dosed(12, 0, CareKind::Clean, far, 2000)).outcome,
+        world
+            .apply_care(&dosed(12, 0, CareKind::Clean, far, 2000))
+            .outcome,
         CareOutcome::Rejected(_)
     ));
     assert_eq!(world.care().allowance_used, held);
@@ -402,18 +501,38 @@ fn a_rain_dose_scales_the_depth_over_the_same_footprint_and_envelope() {
             let CareOutcome::Applied(q) = receipt.outcome.clone() else {
                 panic!("{name} at {permille}: {:?}", receipt.outcome)
             };
-            assert_eq!(q.cells as usize, fp.len(), "{name} at {permille}: the footprint moved");
-            assert_eq!(q.water_depth, want, "the receipt quotes the scheduled total honestly");
-            assert_eq!(q.ends_tick, Some(u64::from(RAIN_TICKS)), "the envelope is the same length");
+            assert_eq!(
+                q.cells as usize,
+                fp.len(),
+                "{name} at {permille}: the footprint moved"
+            );
+            assert_eq!(
+                q.water_depth, want,
+                "the receipt quotes the scheduled total honestly"
+            );
+            assert_eq!(
+                q.ends_tick,
+                Some(u64::from(RAIN_TICKS)),
+                "the envelope is the same length"
+            );
             assert_eq!(world.care().showers[0].dose_permille, permille);
 
             for _ in 0..RAIN_TICKS {
                 world.step();
             }
-            assert!(world.care().showers.is_empty(), "{name} at {permille}: the shower did not retire");
+            assert!(
+                world.care().showers.is_empty(),
+                "{name} at {permille}: the shower did not retire"
+            );
             let delivered: f64 = world.state.fields.w.iter().sum();
-            assert!((delivered - want).abs() < 1e-9, "{name} at {permille} delivered {delivered}");
-            assert!((world.care().rain_depth_in - want).abs() < 1e-9, "{name} at {permille}");
+            assert!(
+                (delivered - want).abs() < 1e-9,
+                "{name} at {permille} delivered {delivered}"
+            );
+            assert!(
+                (world.care().rain_depth_in - want).abs() < 1e-9,
+                "{name} at {permille}"
+            );
             assert_eq!(
                 world.state.rain_in_total - rain_before,
                 world.care().rain_depth_in,
@@ -421,9 +540,15 @@ fn a_rain_dose_scales_the_depth_over_the_same_footprint_and_envelope() {
             );
             for (c, w) in &fp {
                 let got = world.state.fields.w[c.index()];
-                assert!((got - want * w).abs() < 1e-9, "{name} at {permille}, cell {}: {got}", c.index());
+                assert!(
+                    (got - want * w).abs() < 1e-9,
+                    "{name} at {permille}, cell {}: {got}",
+                    c.index()
+                );
             }
-            world.check_invariants().expect("a dosed shower leaves a consistent world");
+            world
+                .check_invariants()
+                .expect("a dosed shower leaves a consistent world");
         }
     }
 }
@@ -437,7 +562,9 @@ fn a_nonstandard_shower_persists_its_own_dose_across_a_restart() {
     let mut original = World::new(still_water_config()).expect("valid");
     original.state.fields.w.fill(0.0);
     assert!(matches!(
-        original.apply_care(&dosed(1, 0, CareKind::Rain, cell, 1500)).outcome,
+        original
+            .apply_care(&dosed(1, 0, CareKind::Rain, cell, 1500))
+            .outcome,
         CareOutcome::Applied(_)
     ));
     for _ in 0..50 {
@@ -447,8 +574,15 @@ fn a_nonstandard_shower_persists_its_own_dose_across_a_restart() {
 
     // A second command, at a different dose, is refused — and changes nothing about the first.
     let second = original.apply_care(&dosed(2, 50, CareKind::Rain, cell, 250));
-    assert_eq!(second.outcome, CareOutcome::Rejected("shower active".into()));
-    assert_eq!(original.care().showers[0].dose_permille, 1500, "a selection cannot retune a shower");
+    assert_eq!(
+        second.outcome,
+        CareOutcome::Rejected("shower active".into())
+    );
+    assert_eq!(
+        original.care().showers[0].dose_permille,
+        1500,
+        "a selection cannot retune a shower"
+    );
     assert_eq!(original.care().admitted_seq, 2);
 
     // The dose is in the snapshot, so the reloaded world is the same world.
@@ -471,7 +605,10 @@ fn a_nonstandard_shower_persists_its_own_dose_across_a_restart() {
     assert!(original.care().showers.is_empty());
     let want = 1.5 * RAIN_DEPTH_TOTAL;
     let delivered: f64 = original.state.fields.w.iter().sum();
-    assert!((delivered - want).abs() < 1e-9, "the resumed shower delivered {delivered}, not {want}");
+    assert!(
+        (delivered - want).abs() < 1e-9,
+        "the resumed shower delivered {delivered}, not {want}"
+    );
     assert!((original.care().rain_depth_in - want).abs() < 1e-9);
 }
 
@@ -497,12 +634,22 @@ fn a_restart_delivers_exactly_the_remaining_samples_of_a_quarter_dose() {
     for _ in 0..30 {
         resumed.step();
     }
-    assert!(resumed.care().showers.is_empty(), "the last 30 samples finished it");
+    assert!(
+        resumed.care().showers.is_empty(),
+        "the last 30 samples finished it"
+    );
     let want = 0.25 * RAIN_DEPTH_TOTAL;
-    assert!((resumed.care().rain_depth_in - want).abs() < 1e-9, "{}", resumed.care().rain_depth_in);
+    assert!(
+        (resumed.care().rain_depth_in - want).abs() < 1e-9,
+        "{}",
+        resumed.care().rain_depth_in
+    );
     let delivered: f64 = resumed.state.fields.w.iter().sum();
     assert!((delivered - want).abs() < 1e-9, "{delivered}");
-    assert!(booked_before < want, "and the pre-snapshot part was only part of it");
+    assert!(
+        booked_before < want,
+        "and the pre-snapshot part was only part of it"
+    );
 }
 
 // ---------------------------------------------------------------- hostile input
@@ -513,7 +660,13 @@ fn a_restart_delivers_exactly_the_remaining_samples_of_a_quarter_dose() {
 #[test]
 fn a_wire_dose_outside_the_bounds_is_rejected_and_still_spends_its_seq() {
     let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 8);
-    for (seq, permille) in [(1u64, 0u16), (2, 249), (3, 2001), (4, 50_000), (5, u16::MAX)] {
+    for (seq, permille) in [
+        (1u64, 0u16),
+        (2, 249),
+        (3, 2001),
+        (4, 50_000),
+        (5, u16::MAX),
+    ] {
         let mut world = World::new(WorldConfig::default()).expect("valid");
         world.state.care.admitted_seq = seq - 1;
         let d_before: Vec<f64> = world.state.fields.d.clone();
@@ -525,10 +678,20 @@ fn a_wire_dose_outside_the_bounds_is_rejected_and_still_spends_its_seq() {
             dose: wire_dose(permille),
         };
         let receipt = world.apply_care(&cmd);
-        let reason = receipt.outcome.reason().unwrap_or_else(|| panic!("{permille} was accepted"));
+        let reason = receipt
+            .outcome
+            .reason()
+            .unwrap_or_else(|| panic!("{permille} was accepted"));
         assert!(reason.contains("care dose"), "{reason}");
-        assert!(reason.contains(&permille.to_string()), "the reason names the value: {reason}");
-        assert_eq!(world.care().admitted_seq, seq, "a rejected dose still spends its seq");
+        assert!(
+            reason.contains(&permille.to_string()),
+            "the reason names the value: {reason}"
+        );
+        assert_eq!(
+            world.care().admitted_seq,
+            seq,
+            "a rejected dose still spends its seq"
+        );
         assert_eq!(world.state.fields.d, d_before, "and moves nothing");
         assert_eq!(world.care().feed_material_in, 0.0);
     }
@@ -555,19 +718,29 @@ fn a_crafted_shower_dose_is_refused_by_the_decoder() {
     };
 
     // The controls: both documented bounds and the standard dose really do load.
-    for ok in [CareDose::MIN_PERMILLE, CareDose::STANDARD_PERMILLE, CareDose::MAX_PERMILLE] {
+    for ok in [
+        CareDose::MIN_PERMILLE,
+        CareDose::STANDARD_PERMILLE,
+        CareDose::MAX_PERMILLE,
+    ] {
         let state = with(ok);
-        state.validate().unwrap_or_else(|e| panic!("{ok} should be valid: {e}"));
+        state
+            .validate()
+            .unwrap_or_else(|e| panic!("{ok} should be valid: {e}"));
         decode_snapshot(&encode_snapshot(&state, "dose")).unwrap_or_else(|e| panic!("{ok}: {e:?}"));
     }
 
     for bad in [0u16, 1, 249, 2001, 9999, u16::MAX] {
         let state = with(bad);
-        let err = state.validate().expect_err(&format!("{bad} should be refused"));
+        let err = state
+            .validate()
+            .expect_err(&format!("{bad} should be refused"));
         assert!(err.contains("care shower 1"), "{err}");
         assert!(err.contains(&bad.to_string()), "{err}");
         match decode_snapshot(&encode_snapshot(&state, "dose")) {
-            Err(SnapshotError::Invalid(reason)) => assert!(reason.contains(&bad.to_string()), "{reason}"),
+            Err(SnapshotError::Invalid(reason)) => {
+                assert!(reason.contains(&bad.to_string()), "{reason}")
+            }
             other => panic!("a shower at {bad} permille decoded as {other:?}"),
         }
     }

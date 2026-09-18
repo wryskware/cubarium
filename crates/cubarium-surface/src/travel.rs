@@ -66,7 +66,11 @@ pub(crate) fn earliest_exit(p: Vec2, d: Vec2, sweep_len: f64, extent: (f64, f64)
         }
     }
     let edge = Edge::ALL[tied.trailing_zeros() as usize];
-    Some(Exit { edge, t: tmin, tied })
+    Some(Exit {
+        edge,
+        t: tmin,
+        tied,
+    })
 }
 
 /// The length of `edge` in its chart: the width for the horizontal edges, the height for
@@ -219,13 +223,24 @@ pub fn travel_into(topo: Topology, start: SurfacePoint, displacement: Vec2, out:
     out.ties = 0;
     out.fallback = false;
 
-    debug_assert!(start.is_canonical(topo), "travel from non-canonical {start:?}");
+    debug_assert!(
+        start.is_canonical(topo),
+        "travel from non-canonical {start:?}"
+    );
     let mut face = start.face;
     let mut extent = topo.extent(face);
     // Keep the sweep total even if a caller hands in a slightly out-of-range point.
     let mut p = Vec2::new(
-        if start.u.is_finite() { start.u.clamp(0.0, extent.0) } else { 0.0 },
-        if start.v.is_finite() { start.v.clamp(0.0, extent.1) } else { 0.0 },
+        if start.u.is_finite() {
+            start.u.clamp(0.0, extent.0)
+        } else {
+            0.0
+        },
+        if start.v.is_finite() {
+            start.v.clamp(0.0, extent.1)
+        } else {
+            0.0
+        },
     );
 
     let mut d = displacement;
@@ -241,7 +256,11 @@ pub fn travel_into(topo: Topology, start: SurfacePoint, displacement: Vec2, out:
             // The sweep ends inside this chart.
             let end = p + d;
             if end != p {
-                out.segments.push(PathSegment { face, from: p, to: end });
+                out.segments.push(PathSegment {
+                    face,
+                    from: p,
+                    to: end,
+                });
             }
             p = end;
             break;
@@ -253,7 +272,11 @@ pub fn travel_into(topo: Topology, start: SurfacePoint, displacement: Vec2, out:
         let t = exit.t.clamp(0.0, 1.0);
         let hp = snap_to_edge(p + d * t, exit.edge, extent);
         if hp != p {
-            out.segments.push(PathSegment { face, from: p, to: hp });
+            out.segments.push(PathSegment {
+                face,
+                from: p,
+                to: hp,
+            });
         }
         let remaining = d * (1.0 - t);
 
@@ -267,7 +290,11 @@ pub fn travel_into(topo: Topology, start: SurfacePoint, displacement: Vec2, out:
             }
             Some(seam) => {
                 let s = edge_param(exit.edge, hp);
-                let s2 = if seam.reversed { edge_len(exit.edge, extent) - s } else { s };
+                let s2 = if seam.reversed {
+                    edge_len(exit.edge, extent) - s
+                } else {
+                    s
+                };
                 let turns = topo.seam_turns(face, exit.edge).expect("seam exists");
                 let rot = TangentMap::quarter_turns(turns);
                 face = seam.face;
@@ -314,20 +341,35 @@ mod tests {
 
     fn assert_point(t: &Travel, face: Face, u: f64, v: f64) {
         assert_eq!(t.end.face, face, "face: {:?}", t.end);
-        assert!(approx(t.end.u, u) && approx(t.end.v, v), "{:?} != ({face:?}, {u}, {v})", t.end);
+        assert!(
+            approx(t.end.u, u) && approx(t.end.v, v),
+            "{:?} != ({face:?}, {u}, {v})",
+            t.end
+        );
     }
 
     #[test]
     fn design_example_front_to_right() {
-        let t = travel(Topology::Cube, SurfacePoint::new(Face::Front, 63.75, 20.0), Vec2::new(0.5, 0.0));
+        let t = travel(
+            Topology::Cube,
+            SurfacePoint::new(Face::Front, 63.75, 20.0),
+            Vec2::new(0.5, 0.0),
+        );
         assert_point(&t, Face::Right, 0.25, 20.0);
-        assert_eq!((t.crossings, t.reflections, t.ties, t.fallback), (1, 0, 0, false));
+        assert_eq!(
+            (t.crossings, t.reflections, t.ties, t.fallback),
+            (1, 0, 0, false)
+        );
         assert_eq!(t.map, TangentMap::IDENTITY);
     }
 
     #[test]
     fn design_example_right_to_top_is_a_quarter_turn() {
-        let t = travel(Topology::Cube, SurfacePoint::new(Face::Right, 10.0, 0.25), Vec2::new(0.0, -0.5));
+        let t = travel(
+            Topology::Cube,
+            SurfacePoint::new(Face::Right, 10.0, 0.25),
+            Vec2::new(0.0, -0.5),
+        );
         assert_point(&t, Face::Top, 63.75, 54.0);
         assert_eq!(t.crossings, 1);
         // "its upward direction becomes Top-leftward"
@@ -337,7 +379,11 @@ mod tests {
 
     #[test]
     fn design_example_back_to_top_is_a_half_turn() {
-        let t = travel(Topology::Cube, SurfacePoint::new(Face::Back, 10.0, 0.25), Vec2::new(0.0, -0.5));
+        let t = travel(
+            Topology::Cube,
+            SurfacePoint::new(Face::Back, 10.0, 0.25),
+            Vec2::new(0.0, -0.5),
+        );
         assert_point(&t, Face::Top, 54.0, 0.25);
         assert_eq!(t.crossings, 1);
         // "its upward direction becomes Top-downward"
@@ -366,11 +412,20 @@ mod tests {
                         Edge::Bottom => (Vec2::new(s, 63.5), Vec2::new(0.0, 1.0)),
                         Edge::Left => (Vec2::new(0.5, s), Vec2::new(-1.0, 0.0)),
                     };
-                    let t = travel(Topology::Cube, SurfacePoint::new(face, start.x, start.y), disp);
+                    let t = travel(
+                        Topology::Cube,
+                        SurfacePoint::new(face, start.x, start.y),
+                        disp,
+                    );
                     let (wf, wx, wy, wt) = crate::cross_seam(face, edge, k as u8).expect("seam");
                     assert_eq!(wt, turns);
                     assert_eq!(t.end.face, wf, "{face:?} {edge:?} k={k}");
-                    assert_eq!(t.end.pixel(Topology::Cube), (u16::from(wx), u16::from(wy)), "{face:?} {edge:?} k={k}: {:?}", t.end);
+                    assert_eq!(
+                        t.end.pixel(Topology::Cube),
+                        (u16::from(wx), u16::from(wy)),
+                        "{face:?} {edge:?} k={k}: {:?}",
+                        t.end
+                    );
                     assert_eq!(t.crossings, 1);
                     assert_eq!(t.map, TangentMap::quarter_turns(turns));
                     checked += 1;
@@ -409,7 +464,8 @@ mod tests {
         // the same parameter; the rule takes the lowest edge index, Top.
         let p = Vec2::new(63.0, 1.0);
         let d = Vec2::new(1.0, -1.0);
-        let exit = earliest_exit(p, d, d.length(), (FACE_EXTENT, FACE_EXTENT)).expect("the corner is a boundary hit");
+        let exit = earliest_exit(p, d, d.length(), (FACE_EXTENT, FACE_EXTENT))
+            .expect("the corner is a boundary hit");
         assert!(exit.is_tie());
         assert!(exit.includes(Edge::Top) && exit.includes(Edge::Right));
         assert_eq!(exit.edge, Edge::Top);
@@ -418,7 +474,11 @@ mod tests {
         // End to end: the tie is counted, the hit lands exactly on the vertex, nothing
         // is silently dropped, and the swept length survives the singularity.
         let disp = Vec2::new(2.0, -2.0);
-        let t = travel(Topology::Cube, SurfacePoint::new(Face::Front, 63.0, 1.0), disp);
+        let t = travel(
+            Topology::Cube,
+            SurfacePoint::new(Face::Front, 63.0, 1.0),
+            disp,
+        );
         assert!(t.ties >= 1, "{t:?}");
         assert!(!t.fallback);
         assert_eq!(t.segments[0].face, Face::Front);
@@ -431,7 +491,12 @@ mod tests {
     fn exact_corner_start_prefers_top() {
         // A point placed exactly on the corner with an outward-and-up displacement.
         let mut out = Travel::default();
-        travel_into(Topology::Cube, SurfacePoint::new(Face::Front, 63.9999999999, 1e-10), Vec2::new(1.0, -1.0), &mut out);
+        travel_into(
+            Topology::Cube,
+            SurfacePoint::new(Face::Front, 63.9999999999, 1e-10),
+            Vec2::new(1.0, -1.0),
+            &mut out,
+        );
         assert!(out.crossings >= 1);
         assert!(!out.fallback);
     }
@@ -447,7 +512,8 @@ mod tests {
         };
         for _ in 0..2000 {
             let face = Face::ALL[(rnd() * 5.0) as usize % 5];
-            let start = SurfacePoint::new(face, rnd() * 64.0, rnd() * 64.0).canonicalize(Topology::Cube);
+            let start =
+                SurfacePoint::new(face, rnd() * 64.0, rnd() * 64.0).canonicalize(Topology::Cube);
             let disp = Vec2::new((rnd() - 0.5) * 40.0, (rnd() - 0.5) * 40.0);
             let fwd = travel(Topology::Cube, start, disp);
             if fwd.fallback || fwd.ties > 0 {
@@ -465,13 +531,21 @@ mod tests {
                 back.end
             );
             // The net map composes back to the identity.
-            assert_eq!(fwd.map.then(back.map), TangentMap::IDENTITY, "start={start:?} disp={disp:?}");
+            assert_eq!(
+                fwd.map.then(back.map),
+                TangentMap::IDENTITY,
+                "start={start:?} disp={disp:?}"
+            );
         }
     }
 
     #[test]
     fn rim_reflects_and_never_tunnels() {
-        let t = travel(Topology::Cube, SurfacePoint::new(Face::Front, 10.0, 63.0), Vec2::new(0.0, 2.0));
+        let t = travel(
+            Topology::Cube,
+            SurfacePoint::new(Face::Front, 10.0, 63.0),
+            Vec2::new(0.0, 2.0),
+        );
         assert_eq!(t.end.face, Face::Front);
         assert_eq!(t.reflections, 1);
         assert_eq!(t.crossings, 0);
@@ -487,12 +561,20 @@ mod tests {
         // Top(0) < Right(1) < Bottom(2) < Left(3), so the vertical seam wins the tie and
         // the rim reflection happens on the far side of it.
         let disp = Vec2::new(2.0, 2.0);
-        let t = travel(Topology::Cube, SurfacePoint::new(Face::Front, 63.0, 63.0), disp);
+        let t = travel(
+            Topology::Cube,
+            SurfacePoint::new(Face::Front, 63.0, 63.0),
+            disp,
+        );
         assert_eq!(t.ties, 1);
         assert_eq!(t.crossings, 1);
         assert_eq!(t.reflections, 1);
         assert_eq!(t.end.face, Face::Right);
-        assert!((t.end.u - 1.0).abs() < 1e-9 && (t.end.v - 63.0).abs() < 1e-9, "{:?}", t.end);
+        assert!(
+            (t.end.u - 1.0).abs() < 1e-9 && (t.end.v - 63.0).abs() < 1e-9,
+            "{:?}",
+            t.end
+        );
         assert!(!t.fallback);
         let total: f64 = t.segments.iter().map(PathSegment::length).sum();
         assert!((total - disp.length()).abs() < 1e-9, "{total}");
@@ -501,7 +583,11 @@ mod tests {
     #[test]
     fn multi_chart_overshoot_keeps_total_length() {
         let disp = Vec2::new(200.0, 0.0);
-        let t = travel(Topology::Cube, SurfacePoint::new(Face::Front, 32.0, 32.0), disp);
+        let t = travel(
+            Topology::Cube,
+            SurfacePoint::new(Face::Front, 32.0, 32.0),
+            disp,
+        );
         assert_eq!(t.crossings, 3);
         assert_eq!(t.segments.len(), 4);
         let total: f64 = t.segments.iter().map(PathSegment::length).sum();
@@ -511,7 +597,11 @@ mod tests {
 
     #[test]
     fn non_finite_displacement_is_a_fallback() {
-        let t = travel(Topology::Cube, SurfacePoint::new(Face::Front, 5.0, 5.0), Vec2::new(f64::NAN, 0.0));
+        let t = travel(
+            Topology::Cube,
+            SurfacePoint::new(Face::Front, 5.0, 5.0),
+            Vec2::new(f64::NAN, 0.0),
+        );
         assert!(t.fallback);
         assert_eq!(t.end, SurfacePoint::new(Face::Front, 5.0, 5.0));
         assert!(t.segments.is_empty());
@@ -519,7 +609,11 @@ mod tests {
 
     #[test]
     fn zero_displacement_emits_nothing() {
-        let t = travel(Topology::Cube, SurfacePoint::new(Face::Front, 5.0, 5.0), Vec2::ZERO);
+        let t = travel(
+            Topology::Cube,
+            SurfacePoint::new(Face::Front, 5.0, 5.0),
+            Vec2::ZERO,
+        );
         assert!(t.segments.is_empty());
         assert!(!t.fallback);
         assert_eq!(t.end, SurfacePoint::new(Face::Front, 5.0, 5.0));
@@ -537,7 +631,8 @@ mod tests {
         let mut out = Travel::default();
         for _ in 0..20_000 {
             let face = Face::ALL[(rnd() * 5.0) as usize % 5];
-            let start = SurfacePoint::new(face, rnd() * 64.0, rnd() * 64.0).canonicalize(Topology::Cube);
+            let start =
+                SurfacePoint::new(face, rnd() * 64.0, rnd() * 64.0).canonicalize(Topology::Cube);
             // Deliberately include vertex-directed and huge steps.
             let disp = match (rnd() * 3.0) as u32 {
                 0 => Vec2::new(64.0 - start.u, -start.v),
@@ -545,7 +640,11 @@ mod tests {
                 _ => Vec2::new((rnd() - 0.5) * 8.0, (rnd() - 0.5) * 8.0),
             };
             travel_into(Topology::Cube, start, disp, &mut out);
-            assert!(out.end.is_canonical(Topology::Cube), "{start:?} {disp:?} -> {:?}", out.end);
+            assert!(
+                out.end.is_canonical(Topology::Cube),
+                "{start:?} {disp:?} -> {:?}",
+                out.end
+            );
             for s in &out.segments {
                 assert!(s.length() > 0.0, "zero-length segment emitted");
             }
@@ -587,10 +686,17 @@ mod ring_tests {
         // Out through the right edge, in through the left: a pure translation by -w, no
         // rotation, no reflection, and the same chart on both sides.
         both_scales(319.5, 20.0, Vec2::new(1.0, 0.0), |t, s| {
-            assert_eq!((t.crossings, t.reflections, t.ties, t.fallback), (1, 0, 0, false));
+            assert_eq!(
+                (t.crossings, t.reflections, t.ties, t.fallback),
+                (1, 0, 0, false)
+            );
             assert_eq!(t.map, TangentMap::IDENTITY);
             assert_eq!(t.end.face, Face::Front);
-            assert!(approx(t.end.u, 0.5 * s) && approx(t.end.v, 20.0 * s), "{:?}", t.end);
+            assert!(
+                approx(t.end.u, 0.5 * s) && approx(t.end.v, 20.0 * s),
+                "{:?}",
+                t.end
+            );
             let total: f64 = t.segments.iter().map(PathSegment::length).sum();
             assert!(approx(total, 1.0 * s));
         });
@@ -658,19 +764,59 @@ mod ring_tests {
             tied: [Edge; 2],
             winner: Edge,
         }
-        let corner = |name, start, disp, tied, winner| Corner { name, start, disp, tied, winner };
+        let corner = |name, start, disp, tied, winner| Corner {
+            name,
+            start,
+            disp,
+            tied,
+            winner,
+        };
         let corners = [
-            corner("top-left", (1.0, 1.0), (-2.0, -2.0), [Edge::Top, Edge::Left], Edge::Top),
-            corner("top-right", (319.0, 1.0), (2.0, -2.0), [Edge::Top, Edge::Right], Edge::Top),
-            corner("bottom-left", (1.0, 179.0), (-2.0, 2.0), [Edge::Bottom, Edge::Left], Edge::Bottom),
-            corner("bottom-right", (319.0, 179.0), (2.0, 2.0), [Edge::Right, Edge::Bottom], Edge::Right),
+            corner(
+                "top-left",
+                (1.0, 1.0),
+                (-2.0, -2.0),
+                [Edge::Top, Edge::Left],
+                Edge::Top,
+            ),
+            corner(
+                "top-right",
+                (319.0, 1.0),
+                (2.0, -2.0),
+                [Edge::Top, Edge::Right],
+                Edge::Top,
+            ),
+            corner(
+                "bottom-left",
+                (1.0, 179.0),
+                (-2.0, 2.0),
+                [Edge::Bottom, Edge::Left],
+                Edge::Bottom,
+            ),
+            corner(
+                "bottom-right",
+                (319.0, 179.0),
+                (2.0, 2.0),
+                [Edge::Right, Edge::Bottom],
+                Edge::Right,
+            ),
         ];
-        for Corner { name, start: (u, v), disp: (dx, dy), tied, winner } in corners {
+        for Corner {
+            name,
+            start: (u, v),
+            disp: (dx, dy),
+            tied,
+            winner,
+        } in corners
+        {
             let d = Vec2::new(dx, dy);
             let exit = earliest_exit(Vec2::new(u, v), d, d.length(), RING.extent(Face::Front))
                 .expect("the corner is a boundary hit");
             assert!(exit.is_tie(), "{name}: not a tie");
-            assert!(exit.includes(tied[0]) && exit.includes(tied[1]), "{name}: {exit:?}");
+            assert!(
+                exit.includes(tied[0]) && exit.includes(tied[1]),
+                "{name}: {exit:?}"
+            );
             assert_eq!(exit.edge, winner, "{name}");
 
             let t = travel(RING, at(u, v), d);
@@ -685,23 +831,40 @@ mod ring_tests {
 
             // The same fixture at S = 2 gives the same corner, doubled.
             let t2 = travel(RING2, at(u * 2.0, v * 2.0), d * 2.0);
-            assert_eq!((t2.ties, t2.crossings, t2.reflections), (1, 1, 1), "{name} at S = 2");
-            assert!(approx(t2.end.u, t.end.u * 2.0) && approx(t2.end.v, t.end.v * 2.0),
-                "{name} at S = 2: {:?} is not twice {:?}", t2.end, t.end);
+            assert_eq!(
+                (t2.ties, t2.crossings, t2.reflections),
+                (1, 1, 1),
+                "{name} at S = 2"
+            );
+            assert!(
+                approx(t2.end.u, t.end.u * 2.0) && approx(t2.end.v, t.end.v * 2.0),
+                "{name} at S = 2: {:?} is not twice {:?}",
+                t2.end,
+                t.end
+            );
 
             // Near-ties: skew the aim 2% either way and each edge wins alone.
             for (sx, sy) in [(1.0, 1.02), (1.02, 1.0)] {
                 let skewed = Vec2::new(dx * sx, dy * sy);
-                let e = earliest_exit(Vec2::new(u, v), skewed, skewed.length(), RING.extent(Face::Front))
-                    .expect("still a boundary hit");
+                let e = earliest_exit(
+                    Vec2::new(u, v),
+                    skewed,
+                    skewed.length(),
+                    RING.extent(Face::Front),
+                )
+                .expect("still a boundary hit");
                 assert!(!e.is_tie(), "{name}: a 2% skew still ties");
                 let st = travel(RING, at(u, v), skewed);
                 assert_eq!(st.ties, 0, "{name}: skewed sweep tied");
                 // Whichever edge went first, the corner still costs one of each.
                 assert_eq!((st.crossings, st.reflections), (1, 1), "{name} skewed");
                 // And the exact tie's answer is the limit of the two skewed ones.
-                assert!((st.end.u - t.end.u).abs() < 0.1 && (st.end.v - t.end.v).abs() < 0.1,
-                    "{name}: skewed end {:?} is far from the exact-tie end {:?}", st.end, t.end);
+                assert!(
+                    (st.end.u - t.end.u).abs() < 0.1 && (st.end.v - t.end.v).abs() < 0.1,
+                    "{name}: skewed end {:?} is far from the exact-tie end {:?}",
+                    st.end,
+                    t.end
+                );
             }
         }
     }
@@ -711,7 +874,9 @@ mod ring_tests {
     #[test]
     fn only_the_bottom_right_corner_crosses_before_it_reflects() {
         let first_edge = |u: f64, v: f64, d: Vec2| {
-            earliest_exit(Vec2::new(u, v), d, d.length(), RING.extent(Face::Front)).expect("hit").edge
+            earliest_exit(Vec2::new(u, v), d, d.length(), RING.extent(Face::Front))
+                .expect("hit")
+                .edge
         };
         assert_eq!(first_edge(1.0, 1.0, Vec2::new(-2.0, -2.0)), Edge::Top);
         assert_eq!(first_edge(319.0, 1.0, Vec2::new(2.0, -2.0)), Edge::Top);
@@ -730,9 +895,16 @@ mod ring_tests {
         // Aimed into the bottom-right region but not at the corner: the seam comes first
         // at t = 0.5, the rim afterwards, and neither is a tie.
         both_scales(318.0, 178.0, Vec2::new(4.0, 3.0), |t, s| {
-            assert_eq!((t.crossings, t.reflections, t.ties, t.fallback), (1, 1, 0, false));
+            assert_eq!(
+                (t.crossings, t.reflections, t.ties, t.fallback),
+                (1, 1, 0, false)
+            );
             assert_eq!(t.map, TangentMap::REFLECT_Y);
-            assert!(approx(t.end.u, 2.0 * s) && approx(t.end.v, 179.0 * s), "{:?}", t.end);
+            assert!(
+                approx(t.end.u, 2.0 * s) && approx(t.end.v, 179.0 * s),
+                "{:?}",
+                t.end
+            );
             let total: f64 = t.segments.iter().map(PathSegment::length).sum();
             assert!(approx(total, 5.0 * s));
         });
@@ -746,7 +918,11 @@ mod ring_tests {
             assert_eq!(t.reflections, 0);
             assert_eq!(t.segments.len(), 4);
             assert_eq!(t.map, TangentMap::IDENTITY);
-            assert!(approx(t.end.u, 100.0 * s) && approx(t.end.v, 90.0 * s), "{:?}", t.end);
+            assert!(
+                approx(t.end.u, 100.0 * s) && approx(t.end.v, 90.0 * s),
+                "{:?}",
+                t.end
+            );
             let total: f64 = t.segments.iter().map(PathSegment::length).sum();
             assert!(approx(total, 900.0 * s), "{total}");
         });
@@ -758,7 +934,10 @@ mod ring_tests {
         assert!(!t.fallback);
         assert!(t.crossings >= 4 && t.reflections >= 3, "{t:?}");
         let total: f64 = t.segments.iter().map(PathSegment::length).sum();
-        assert!((total - Vec2::new(-1300.0, 700.0).length()).abs() < 1e-9, "{total}");
+        assert!(
+            (total - Vec2::new(-1300.0, 700.0).length()).abs() < 1e-9,
+            "{total}"
+        );
     }
 
     #[test]
@@ -788,7 +967,11 @@ mod ring_tests {
                 fwd.end,
                 back.end
             );
-            assert_eq!(fwd.map.then(back.map), TangentMap::IDENTITY, "start={start:?} disp={disp:?}");
+            assert_eq!(
+                fwd.map.then(back.map),
+                TangentMap::IDENTITY,
+                "start={start:?} disp={disp:?}"
+            );
             checked += 1;
         }
         assert!(checked > 2000, "only {checked} round trips");
@@ -815,7 +998,11 @@ mod ring_tests {
                     _ => Vec2::new((rnd() - 0.5) * 20.0, (rnd() - 0.5) * 20.0),
                 };
                 travel_into(topo, start, disp, &mut out);
-                assert!(out.end.is_canonical(topo), "{start:?} {disp:?} -> {:?}", out.end);
+                assert!(
+                    out.end.is_canonical(topo),
+                    "{start:?} {disp:?} -> {:?}",
+                    out.end
+                );
                 for s in &out.segments {
                     assert!(s.length() > 0.0, "zero-length segment emitted");
                 }

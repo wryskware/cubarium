@@ -246,7 +246,11 @@ fn nearest_clear_cell(
 ) -> Option<cubarium_surface::CellId> {
     use cubarium_surface::{CELLS_PER_FACE_EDGE, CellId};
     let edge = CELLS_PER_FACE_EDGE as i32;
-    let (face, cx, cy) = (want.face(Topology::Cube, Scale::ONE), i32::from(want.cx(Topology::Cube, Scale::ONE)), i32::from(want.cy(Topology::Cube, Scale::ONE)));
+    let (face, cx, cy) = (
+        want.face(Topology::Cube, Scale::ONE),
+        i32::from(want.cx(Topology::Cube, Scale::ONE)),
+        i32::from(want.cy(Topology::Cube, Scale::ONE)),
+    );
     for r in 0..edge {
         let mut best: Option<CellId> = None;
         for y in (cy - r).max(0)..=(cy + r).min(edge - 1) {
@@ -320,7 +324,8 @@ fn seed_neural_animals(run: &Run, world: &mut World) -> Result<usize> {
     let east = cubarium_surface::Vec2::new(1.0, 0.0);
     for k in 0..run.neural_count {
         let face = cubarium_surface::Face::from_index((k % 5) as u8).expect("five faces");
-        let want = cubarium_surface::CellId::new(Topology::Cube, Scale::ONE, face, SEED_CELL, SEED_CELL);
+        let want =
+            cubarium_surface::CellId::new(Topology::Cube, Scale::ONE, face, SEED_CELL, SEED_CELL);
         let cell = nearest_clear_cell(world, want).ok_or_else(|| {
             anyhow::anyhow!(
                 "--neural: no clear ground anywhere on {face:?} to start a neural animal on"
@@ -336,7 +341,11 @@ fn seed_neural_animals(run: &Run, world: &mut World) -> Result<usize> {
             );
         }
         world
-            .found_neural_animal(cell.center(Topology::Cube, Scale::ONE), east, policy.clone())
+            .found_neural_animal(
+                cell.center(Topology::Cube, Scale::ONE),
+                east,
+                policy.clone(),
+            )
             .map_err(|e| anyhow::anyhow!("--neural: seeding copy {k} on {face:?}: {e}"))?;
     }
     eprintln!(
@@ -404,7 +413,9 @@ fn open_sink(
                 shape,
                 art,
                 crate::sink::GpuSinkOptions {
-                    target: run.gpu_target.unwrap_or_else(crate::sink::GpuTargetKind::detect),
+                    target: run
+                        .gpu_target
+                        .unwrap_or_else(crate::sink::GpuTargetKind::detect),
                     bend_substep: run.bend_substep(),
                     filter_bilinear: run.gpu_filter == crate::cli::GpuFilterArg::Bilinear,
                     art_scale: run.gpu_art_scale,
@@ -437,8 +448,13 @@ fn open_sink(
     if !run.mirror_web {
         return Ok(Some(primary));
     }
-    let web =
-        WebSink::with_world(run.web_port, speed_note(run.speed), source.clone(), care, shape)?;
+    let web = WebSink::with_world(
+        run.web_port,
+        speed_note(run.speed),
+        source.clone(),
+        care,
+        shape,
+    )?;
     // `--web-port 0` binds an ephemeral port, so the URL has to be reported to be usable.
     eprintln!(
         "cubarium: mirroring the same frames to the viewer at {}",

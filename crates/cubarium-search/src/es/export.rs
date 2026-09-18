@@ -189,7 +189,10 @@ impl PolicyFile {
     /// it was written, and that is a fact about the workspace, not an assumption about the
     /// file.
     pub fn check_adapter(&self, adapter: ActionAdapter) -> Result<(), String> {
-        let trained = self.adapter.as_deref().unwrap_or(ActionAdapter::CubAct1.name());
+        let trained = self
+            .adapter
+            .as_deref()
+            .unwrap_or(ActionAdapter::CubAct1.name());
         if trained == adapter.name() {
             return Ok(());
         }
@@ -248,38 +251,61 @@ mod tests {
     #[test]
     fn an_exported_policy_round_trips_weight_for_weight_and_the_core_runs_it() {
         let theta = tensor::initial_center(20_260_915);
-        let file = PolicyFile::new(&theta, "test", 0xdead_beef, 3, "default", 0xc0ffee, MotorModel::Sweep).expect("exportable");
+        let file = PolicyFile::new(
+            &theta,
+            "test",
+            0xdead_beef,
+            3,
+            "default",
+            0xc0ffee,
+            MotorModel::Sweep,
+        )
+        .expect("exportable");
         let json = serde_json::to_string(&file).expect("write");
         let back: PolicyFile = serde_json::from_str(&json).expect("read");
         assert_eq!(back, file);
 
         let original = tensor::policy(&theta).expect("policy");
         let loaded = back.policy().expect("policy");
-        assert_eq!(loaded, original, "an exported policy must be the trained one, exactly");
+        assert_eq!(
+            loaded, original,
+            "an exported policy must be the trained one, exactly"
+        );
         for (a, b) in tensor::flatten(&loaded.weights).iter().zip(&theta) {
             assert_eq!(a.to_bits(), b.to_bits());
         }
 
         // Ordinary core inference: attach it to a real body and step the real world.
         let (mut world, id) = training_layouts()[0].build().expect("built");
-        world.attach_neural_policy(id, loaded).expect("the core accepts it");
+        world
+            .attach_neural_policy(id, loaded)
+            .expect("the core accepts it");
         for _ in 0..120 {
             world.step();
             world.drain_events();
         }
-        world.check_invariants().expect("the world stays consistent");
-        assert!(world.state.organisms.get(id).is_some(), "the body survived 6 s");
+        world
+            .check_invariants()
+            .expect("the world stays consistent");
+        assert!(
+            world.state.organisms.get(id).is_some(),
+            "the body survived 6 s"
+        );
         assert!(world.neural().get(id).is_some(), "and it is still neural");
     }
 
     #[test]
     fn a_foreign_schema_or_a_mismatched_count_is_refused() {
         let theta = tensor::initial_center(1);
-        let mut file = PolicyFile::new(&theta, "test", 0, 0, "default", 0xc0ffee, MotorModel::Sweep).expect("exportable");
+        let mut file =
+            PolicyFile::new(&theta, "test", 0, 0, "default", 0xc0ffee, MotorModel::Sweep)
+                .expect("exportable");
         file.schema = "something-else".into();
         assert!(file.policy().is_err());
 
-        let mut file = PolicyFile::new(&theta, "test", 0, 0, "default", 0xc0ffee, MotorModel::Sweep).expect("exportable");
+        let mut file =
+            PolicyFile::new(&theta, "test", 0, 0, "default", 0xc0ffee, MotorModel::Sweep)
+                .expect("exportable");
         file.parameters = 7;
         assert!(file.policy().is_err());
     }
@@ -290,7 +316,9 @@ mod tests {
     #[test]
     fn a_foreign_compatibility_digest_is_refused_by_name() {
         let theta = tensor::initial_center(1);
-        let mut file = PolicyFile::new(&theta, "test", 0, 0, "default", 0xc0ffee, MotorModel::Sweep).expect("exportable");
+        let mut file =
+            PolicyFile::new(&theta, "test", 0, 0, "default", 0xc0ffee, MotorModel::Sweep)
+                .expect("exportable");
         assert!(file.policy().is_ok(), "this build's own digest is accepted");
 
         file.policy_digest ^= 1;
@@ -321,14 +349,31 @@ mod tests {
         let elsewhere = Ecology::defaults();
 
         let theta = tensor::initial_center(1);
-        let file = PolicyFile::new(&theta, "test", 0, 0, &here.label, here.hash, MotorModel::Sweep)
-            .expect("exportable");
-        file.check_ecology(&here).expect("its own ecology is accepted");
+        let file = PolicyFile::new(
+            &theta,
+            "test",
+            0,
+            0,
+            &here.label,
+            here.hash,
+            MotorModel::Sweep,
+        )
+        .expect("exportable");
+        file.check_ecology(&here)
+            .expect("its own ecology is accepted");
 
-        let err = file.check_ecology(&elsewhere).expect_err("another ecology is refused");
-        assert!(err.contains("fast-leaf-ish"), "the refusal names the file's ecology: {err}");
+        let err = file
+            .check_ecology(&elsewhere)
+            .expect_err("another ecology is refused");
+        assert!(
+            err.contains("fast-leaf-ish"),
+            "the refusal names the file's ecology: {err}"
+        );
         assert!(err.contains(&here.hex()), "and its hash: {err}");
-        assert!(err.contains(&elsewhere.hex()), "and the evaluation's hash: {err}");
+        assert!(
+            err.contains(&elsewhere.hex()),
+            "and the evaluation's hash: {err}"
+        );
         assert!(err.contains("not the same task"), "{err}");
 
         // A file written before the ecology was part of the protocol: the fields are absent
@@ -342,7 +387,9 @@ mod tests {
             serde_json::from_value(value).expect("an older policy file still parses");
         assert_eq!(old.config, None);
         assert_eq!(old.config_hash, None);
-        let err = old.check_ecology(&here).expect_err("an unknown ecology is refused");
+        let err = old
+            .check_ecology(&here)
+            .expect_err("an unknown ecology is refused");
         assert!(err.contains("records no config hash"), "{err}");
         assert!(err.contains(&here.hex()), "{err}");
         // The weights themselves are still perfectly loadable: this refusal is about the

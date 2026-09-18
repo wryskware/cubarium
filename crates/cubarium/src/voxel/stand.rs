@@ -253,7 +253,9 @@ impl Stands {
         // Then the seed banks, also in site order: one sprout mark per site that holds a
         // cohort, in the colours of whichever species' cohorts hold the most there.
         for g in flora.ground {
-            let Some(species) = g.seed_species() else { continue };
+            let Some(species) = g.seed_species() else {
+                continue;
+            };
             let style = self.styles.len().min(u16::MAX as usize) as u16;
             if usize::from(style) != self.styles.len() {
                 break;
@@ -261,7 +263,11 @@ impl Stands {
             self.styles.push(seed_style(species));
             self.place(
                 view,
-                Cell { x: i64::from(g.site.x), y: g.site.y + 1, z: g.site.z },
+                Cell {
+                    x: i64::from(g.site.x),
+                    y: g.site.y + 1,
+                    z: g.site.z,
+                },
                 Part::Sprout(style),
             );
         }
@@ -350,7 +356,14 @@ pub fn parts_of(flora: FloraView<'_>, stand: &Stand, style: u16) -> Vec<(Cell, P
     // — which is what a one-voxel-tall plant is.
     let h = crown_height_voxels(sc.crown_height(stand.wood));
     for k in 1..h {
-        out.push((Cell { x: sx, y: site.y + k, z: site.z }, Part::Trunk(style)));
+        out.push((
+            Cell {
+                x: sx,
+                y: site.y + k,
+                z: site.z,
+            },
+            Part::Trunk(style),
+        ));
     }
 
     // The crown: the horizontal disc the shade model covers, at the trunk's top. `z` has
@@ -369,8 +382,15 @@ pub fn parts_of(flora: FloraView<'_>, stand: &Stand, style: u16) -> Vec<(Cell, P
                 continue;
             }
             out.push((
-                Cell { x: sx + dx, y: top, z: z as u32 },
-                Part::Crown { style, heart: dx == 0 && dz == 0 },
+                Cell {
+                    x: sx + dx,
+                    y: top,
+                    z: z as u32,
+                },
+                Part::Crown {
+                    style,
+                    heart: dx == 0 && dz == 0,
+                },
             ));
         }
     }
@@ -394,9 +414,11 @@ fn palette(species: Species) -> (u32, u32, u32) {
         Species::Stonecushion => (CUSHION_WOOD_SRGB, CUSHION_CROWN_SRGB, CUSHION_HEART_SRGB),
         Species::Velvetpad => (PAD_WOOD_SRGB, PAD_CROWN_SRGB, PAD_HEART_SRGB),
         // Interim, and named so: see the block above the constants.
-        Species::Glowcap => {
-            (GLOWCAP_INTERIM_WOOD_SRGB, GLOWCAP_INTERIM_CAP_SRGB, GLOWCAP_INTERIM_HEART_SRGB)
-        }
+        Species::Glowcap => (
+            GLOWCAP_INTERIM_WOOD_SRGB,
+            GLOWCAP_INTERIM_CAP_SRGB,
+            GLOWCAP_INTERIM_HEART_SRGB,
+        ),
     }
 }
 
@@ -405,7 +427,11 @@ fn palette(species: Species) -> (u32, u32, u32) {
 /// `crown`, so what it says is only which species is waiting there.
 pub fn seed_style(species: Species) -> Style {
     let (wood, crown, heart) = palette(species);
-    Style { wood: srgb_linear(wood), crown: srgb_linear(crown), heart: srgb_linear(heart) }
+    Style {
+        wood: srgb_linear(wood),
+        crown: srgb_linear(crown),
+        heart: srgb_linear(heart),
+    }
 }
 
 /// One stand's colours: species palette, then crown fill, then wilt.
@@ -417,7 +443,11 @@ pub fn style_of(flora: FloraView<'_>, stand: &Stand) -> Style {
     // Crown fill: `P / P_cap`. A stand that has shed its foliage keeps its structure,
     // so an empty crown leans to the wood colour rather than to black.
     let cap = sc.alpha * stand.wood;
-    let fill = if cap > 0.0 { (stand.foliage / cap).clamp(0.0, 1.0) as f32 } else { 0.0 };
+    let fill = if cap > 0.0 {
+        (stand.foliage / cap).clamp(0.0, 1.0) as f32
+    } else {
+        0.0
+    };
     let crown = mix(mix(crown, wood, CROWN_BARE), crown, fill);
     let heart = mix(crown, heart, HEART_TINT * fill);
 
@@ -449,11 +479,21 @@ mod tests {
     use cubarium_voxel_flora::{Command, Flora, FloraConfig, Site, Stage};
 
     fn world() -> World {
-        let mut world = World::empty(Config { width: 32, height: 16, depth: 4, ..Config::default() });
+        let mut world = World::empty(Config {
+            width: 32,
+            height: 16,
+            depth: 4,
+            ..Config::default()
+        });
         for z in 0..4 {
             for x in 0..32 {
                 for y in 0..=3 {
-                    world.apply(VoxelCommand::SetMaterial { x, y, z, material: Material::Soil });
+                    world.apply(VoxelCommand::SetMaterial {
+                        x,
+                        y,
+                        z,
+                        material: Material::Soil,
+                    });
                 }
             }
         }
@@ -469,7 +509,15 @@ mod tests {
         let mut flora = Flora::new(FloraConfig::default());
         let sp = Species::Umbrellafrond;
         let wood = flora.config().species(sp).wood_max;
-        assert!(flora.apply(&world, Command::Seed { x: 10, z: 2, species: sp, wood }));
+        assert!(flora.apply(
+            &world,
+            Command::Seed {
+                x: 10,
+                z: 2,
+                species: sp,
+                wood
+            }
+        ));
 
         let view = world.view();
         let mut stands = Stands::empty(32, 16, 4);
@@ -488,18 +536,35 @@ mod tests {
         // The crown's centre replaces the trunk's top cell, and the disc is one cell
         // thick: nothing above it, nothing below it but trunk.
         assert!(
-            matches!(stands.at(10, i64::from(3 + h), 2), Part::Crown { heart: true, .. }),
+            matches!(
+                stands.at(10, i64::from(3 + h), 2),
+                Part::Crown { heart: true, .. }
+            ),
             "the crown centres on the trunk top"
         );
-        assert_eq!(stands.at(10, i64::from(4 + h), 2), Part::None, "the crown is one cell thick");
+        assert_eq!(
+            stands.at(10, i64::from(4 + h), 2),
+            Part::None,
+            "the crown is one cell thick"
+        );
 
         // The disc spreads in `x` and `z`, which is what the shade model calls cover.
         let r = sc.crown_radius(wood);
         assert!(r > 2.0, "the fixture wants a disc wider than one cell: {r}");
-        assert!(matches!(stands.at(12, i64::from(3 + h), 2), Part::Crown { heart: false, .. }));
-        assert!(matches!(stands.at(10, i64::from(3 + h), 0), Part::Crown { heart: false, .. }));
+        assert!(matches!(
+            stands.at(12, i64::from(3 + h), 2),
+            Part::Crown { heart: false, .. }
+        ));
+        assert!(matches!(
+            stands.at(10, i64::from(3 + h), 0),
+            Part::Crown { heart: false, .. }
+        ));
         // And it stops: `dx² + dz² > r²` is outside.
-        assert_eq!(stands.at(13, i64::from(3 + h), 2), Part::None, "the disc has an edge");
+        assert_eq!(
+            stands.at(13, i64::from(3 + h), 2),
+            Part::None,
+            "the disc has an edge"
+        );
 
         // `x` wraps with the ring, and the cells above the world's ceiling are dropped
         // rather than folded back in.
@@ -525,7 +590,15 @@ mod tests {
         let mut flora = Flora::new(config);
         let sp = Species::Bloomcrown;
         let wood = flora.config().species(sp).wood_max;
-        assert!(flora.apply(&world, Command::Seed { x: 6, z: 1, species: sp, wood }));
+        assert!(flora.apply(
+            &world,
+            Command::Seed {
+                x: 6,
+                z: 1,
+                species: sp,
+                wood
+            }
+        ));
         flora.step(&mut world);
 
         let banks: Vec<Site> = flora
@@ -535,20 +608,36 @@ mod tests {
             .filter(|g| g.seed_species().is_some())
             .map(|g| g.site)
             .collect();
-        assert!(!banks.is_empty(), "one tick of a full-grown donor should have seeded a bank");
-        assert!(!banks.contains(&Site { x: 6, y: 3, z: 1 }), "a donor does not seed itself");
+        assert!(
+            !banks.is_empty(),
+            "one tick of a full-grown donor should have seeded a bank"
+        );
+        assert!(
+            !banks.contains(&Site { x: 6, y: 3, z: 1 }),
+            "a donor does not seed itself"
+        );
 
         let view = world.view();
         let mut stands = Stands::empty(32, 16, 4);
         stands.rebuild(&view, flora.view());
         for site in banks {
             let part = stands.at(i64::from(site.x), i64::from(site.y) + 1, site.z);
-            assert!(matches!(part, Part::Sprout(_)), "no sprout at {site:?}: {part:?}");
+            assert!(
+                matches!(part, Part::Sprout(_)),
+                "no sprout at {site:?}: {part:?}"
+            );
             assert!(!part.is_block(), "a sprout is a mark, not a block");
             // Two cells up is empty: a bank is one cell and never a stem.
-            assert_eq!(stands.at(i64::from(site.x), i64::from(site.y) + 2, site.z), Part::None);
+            assert_eq!(
+                stands.at(i64::from(site.x), i64::from(site.y) + 2, site.z),
+                Part::None
+            );
             let style = stands.style(part).expect("a sprout paints");
-            assert_eq!(style, seed_style(Species::Bloomcrown), "the bank's own species");
+            assert_eq!(
+                style,
+                seed_style(Species::Bloomcrown),
+                "the bank's own species"
+            );
         }
     }
 
@@ -571,9 +660,17 @@ mod tests {
             mineral: 0.0006,
             bin_start_tick: 0,
         });
-        assert_eq!(g.seed_species(), Some(Species::Umbrellafrond), "the larger bank");
+        assert_eq!(
+            g.seed_species(),
+            Some(Species::Umbrellafrond),
+            "the larger bank"
+        );
         g.seeds[0].organic = 0.05;
-        assert_eq!(g.seed_species(), Some(Species::Bloomcrown), "and now the other one");
+        assert_eq!(
+            g.seed_species(),
+            Some(Species::Bloomcrown),
+            "and now the other one"
+        );
     }
 
     /// A cell that terrain has taken is not painted: a stand whose support was buried
@@ -584,13 +681,30 @@ mod tests {
         let mut flora = Flora::new(FloraConfig::default());
         let sp = Species::Bloomcrown;
         let wood = flora.config().species(sp).wood_max;
-        assert!(flora.apply(&world, Command::Seed { x: 6, z: 1, species: sp, wood }));
-        world.apply(VoxelCommand::SetMaterial { x: 6, y: 4, z: 1, material: Material::Rock });
+        assert!(flora.apply(
+            &world,
+            Command::Seed {
+                x: 6,
+                z: 1,
+                species: sp,
+                wood
+            }
+        ));
+        world.apply(VoxelCommand::SetMaterial {
+            x: 6,
+            y: 4,
+            z: 1,
+            material: Material::Rock,
+        });
 
         let view = world.view();
         let mut stands = Stands::empty(32, 16, 4);
         stands.rebuild(&view, flora.view());
-        assert_eq!(stands.at(6, 4, 1), Part::None, "the buried trunk cell is not drawn");
+        assert_eq!(
+            stands.at(6, 4, 1),
+            Part::None,
+            "the buried trunk cell is not drawn"
+        );
     }
 
     /// The two species are warm and cool, a bare crown falls back toward its own wood,
@@ -626,9 +740,20 @@ mod tests {
 
         let bloom = full(Species::Bloomcrown);
         let frond = full(Species::Umbrellafrond);
-        assert!(bloom.crown[0] > bloom.crown[2], "bloomcrown is warm: {:?}", bloom.crown);
-        assert!(frond.crown[2] > frond.crown[0], "umbrellafrond is cool: {:?}", frond.crown);
-        assert!(bloom.heart[0] > bloom.crown[0], "the bloom heart is the warmer pixel");
+        assert!(
+            bloom.crown[0] > bloom.crown[2],
+            "bloomcrown is warm: {:?}",
+            bloom.crown
+        );
+        assert!(
+            frond.crown[2] > frond.crown[0],
+            "umbrellafrond is cool: {:?}",
+            frond.crown
+        );
+        assert!(
+            bloom.heart[0] > bloom.crown[0],
+            "the bloom heart is the warmer pixel"
+        );
 
         // An empty crown leans to the wood: structure, not a dark canopy.
         let bare = make(Species::Bloomcrown, 0.0, 1.0);
@@ -641,12 +766,22 @@ mod tests {
         // Wilt dulls and darkens, and stops short of grey: the species must survive it.
         let dry = make(Species::Umbrellafrond, frond_cap(&flora), 0.0);
         let sat = |c: [f32; 3]| {
-            let (lo, hi) = c.iter().fold((f32::MAX, 0.0f32), |(l, h), &v| (l.min(v), h.max(v)));
+            let (lo, hi) = c
+                .iter()
+                .fold((f32::MAX, 0.0f32), |(l, h), &v| (l.min(v), h.max(v)));
             hi - lo
         };
         assert!(sat(dry.crown) < sat(frond.crown), "a dry stand is duller");
-        assert!(sat(dry.crown) > sat(frond.crown) * 0.3, "but not grey: {:?}", dry.crown);
-        assert!(dry.crown[2] > dry.crown[0], "and still cool: {:?}", dry.crown);
+        assert!(
+            sat(dry.crown) > sat(frond.crown) * 0.3,
+            "but not grey: {:?}",
+            dry.crown
+        );
+        assert!(
+            dry.crown[2] > dry.crown[0],
+            "and still cool: {:?}",
+            dry.crown
+        );
     }
 
     fn frond_cap(flora: &Flora) -> f64 {
@@ -670,7 +805,11 @@ mod tests {
 
         // Geometry, at `alive_min` and at `wood_max`: one cell or more, always a heart, and
         // never a trunk cell for the three ground-level species.
-        for species in [Species::Springturf, Species::Stonecushion, Species::Velvetpad] {
+        for species in [
+            Species::Springturf,
+            Species::Stonecushion,
+            Species::Velvetpad,
+        ] {
             let sc = flora.config().species(species);
             for wood in [sc.alive_min, sc.wood_max] {
                 let stand = Stand {
@@ -695,13 +834,21 @@ mod tests {
                     "{} at wood {wood} is not one cell tall",
                     species.name()
                 );
-                let trunks = parts.iter().filter(|(_, p)| matches!(p, Part::Trunk(_))).count();
+                let trunks = parts
+                    .iter()
+                    .filter(|(_, p)| matches!(p, Part::Trunk(_)))
+                    .count();
                 let crowns: Vec<&Cell> = parts
                     .iter()
                     .filter(|(_, p)| matches!(p, Part::Crown { .. }))
                     .map(|(c, _)| c)
                     .collect();
-                assert_eq!(trunks, 0, "{}: a stemless plant grew a stem", species.name());
+                assert_eq!(
+                    trunks,
+                    0,
+                    "{}: a stemless plant grew a stem",
+                    species.name()
+                );
                 assert!(
                     !crowns.is_empty(),
                     "{} at wood {wood} stamped no cell at all",
@@ -713,7 +860,10 @@ mod tests {
                     species.name()
                 );
                 assert_eq!(
-                    parts.iter().filter(|(_, p)| matches!(p, Part::Crown { heart: true, .. })).count(),
+                    parts
+                        .iter()
+                        .filter(|(_, p)| matches!(p, Part::Crown { heart: true, .. }))
+                        .count(),
                     1,
                     "{}: one heart and no more",
                     species.name()
@@ -744,33 +894,72 @@ mod tests {
             };
             parts_of(flora.view(), &stand, 0).len()
         };
-        let (turf, cushion, pad) =
-            (cells(Species::Springturf), cells(Species::Stonecushion), cells(Species::Velvetpad));
-        assert!(turf >= 1 && cushion >= 1 && pad >= 1, "turf {turf}, cushion {cushion}, pad {pad}");
-        assert_eq!(turf, cushion, "the two share a radius range: {turf}, {cushion}");
-        assert!(pad > turf, "the pad must be the broad one: {pad} against {turf}");
+        let (turf, cushion, pad) = (
+            cells(Species::Springturf),
+            cells(Species::Stonecushion),
+            cells(Species::Velvetpad),
+        );
+        assert!(
+            turf >= 1 && cushion >= 1 && pad >= 1,
+            "turf {turf}, cushion {cushion}, pad {pad}"
+        );
+        assert_eq!(
+            turf, cushion,
+            "the two share a radius range: {turf}, {cushion}"
+        );
+        assert!(
+            pad > turf,
+            "the pad must be the broad one: {pad} against {turf}"
+        );
 
         // A stand of each of the five actually reaches the grid, on its own support face.
         let mut flora = Flora::new(FloraConfig::default());
         for (x, species) in Species::ALL.into_iter().enumerate() {
             let sc = flora.config().species(species);
             let wood = sc.wood_max;
-            assert!(flora.apply(&world, Command::Seed { x: x as i64 * 4, z: 1, species, wood }));
+            assert!(flora.apply(
+                &world,
+                Command::Seed {
+                    x: x as i64 * 4,
+                    z: 1,
+                    species,
+                    wood
+                }
+            ));
         }
         let view = world.view();
         let mut stands = Stands::empty(32, 16, 4);
         stands.rebuild(&view, flora.view());
         for (x, species) in Species::ALL.into_iter().enumerate() {
             let part = stands.at(x as i64 * 4, 4, 1);
-            assert!(part.is_block(), "{} stamped nothing at all: {part:?}", species.name());
+            assert!(
+                part.is_block(),
+                "{} stamped nothing at all: {part:?}",
+                species.name()
+            );
             let style = stands.style(part).expect("it paints");
-            assert_eq!(style, style_of(flora.view(), flora.view().stand_at(Site { x: x as u32 * 4, y: 3, z: 1 }).expect("seeded")));
+            assert_eq!(
+                style,
+                style_of(
+                    flora.view(),
+                    flora
+                        .view()
+                        .stand_at(Site {
+                            x: x as u32 * 4,
+                            y: 3,
+                            z: 1
+                        })
+                        .expect("seeded")
+                )
+            );
         }
 
         // The palettes: every pair of the five crowns apart in linear light, and the same
         // for the sprout marks, which are the unmoved palette.
-        let crowns: Vec<(Species, [f32; 3])> =
-            Species::ALL.into_iter().map(|s| (s, seed_style(s).crown)).collect();
+        let crowns: Vec<(Species, [f32; 3])> = Species::ALL
+            .into_iter()
+            .map(|s| (s, seed_style(s).crown))
+            .collect();
         let dist = |a: [f32; 3], b: [f32; 3]| {
             ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
         };
@@ -778,28 +967,52 @@ mod tests {
         for (i, (sa, a)) in crowns.iter().enumerate() {
             for (sb, b) in crowns.iter().skip(i + 1) {
                 let d = dist(*a, *b);
-                assert!(d > 0.25, "{} and {} are {d} apart in linear light", sa.name(), sb.name());
+                assert!(
+                    d > 0.25,
+                    "{} and {} are {d} apart in linear light",
+                    sa.name(),
+                    sb.name()
+                );
                 closest = closest.min(d);
             }
         }
         // Measured: the closest pair of the five is stonecushion's stone-lilac against
         // velvetpad's violet, at 0.44. Pinned as a floor, not as a value, so a repaint has
         // room to move but not to collapse two species into one colour.
-        assert!(closest > 0.4, "the closest pair of the five is {closest} apart");
+        assert!(
+            closest > 0.4,
+            "the closest pair of the five is {closest} apart"
+        );
 
         // And the three new ones land where the module doc says: springturf blue-dominant,
         // velvetpad blue-dominant but far darker in green, stonecushion the low-chroma one.
         let chroma = |c: [f32; 3]| {
-            let (lo, hi) = c.iter().fold((f32::MAX, 0.0f32), |(l, h), &v| (l.min(v), h.max(v)));
+            let (lo, hi) = c
+                .iter()
+                .fold((f32::MAX, 0.0f32), |(l, h), &v| (l.min(v), h.max(v)));
             hi - lo
         };
         let turf = seed_style(Species::Springturf).crown;
         let cushion = seed_style(Species::Stonecushion).crown;
         let pad = seed_style(Species::Velvetpad).crown;
-        assert!(turf[2] > turf[0] && turf[2] > turf[1], "springturf is blue: {turf:?}");
-        assert!(pad[2] > pad[0] && pad[2] > pad[1], "velvetpad is violet-blue: {pad:?}");
-        assert!(turf[1] > pad[1] * 2.0, "the cyan and the violet must part in green");
-        for other in [turf, pad, seed_style(Species::Bloomcrown).crown, seed_style(Species::Umbrellafrond).crown] {
+        assert!(
+            turf[2] > turf[0] && turf[2] > turf[1],
+            "springturf is blue: {turf:?}"
+        );
+        assert!(
+            pad[2] > pad[0] && pad[2] > pad[1],
+            "velvetpad is violet-blue: {pad:?}"
+        );
+        assert!(
+            turf[1] > pad[1] * 2.0,
+            "the cyan and the violet must part in green"
+        );
+        for other in [
+            turf,
+            pad,
+            seed_style(Species::Bloomcrown).crown,
+            seed_style(Species::Umbrellafrond).crown,
+        ] {
             assert!(
                 chroma(cushion) < chroma(other),
                 "stonecushion must be the low-chroma one: {} against {}",
@@ -845,30 +1058,64 @@ mod tests {
                 parcel: 0.0,
             };
             let parts = parts_of(flora.view(), &stand, 0);
-            assert_eq!(parts.len(), 1, "a glowcap at wood {wood} is not one cell: {parts:?}");
-            assert_eq!(parts[0].0, Cell { x: 10, y: 4, z: 2 }, "not on its support's own face");
-            assert_eq!(parts[0].1, Part::Crown { style: 0, heart: true }, "{parts:?}");
+            assert_eq!(
+                parts.len(),
+                1,
+                "a glowcap at wood {wood} is not one cell: {parts:?}"
+            );
+            assert_eq!(
+                parts[0].0,
+                Cell { x: 10, y: 4, z: 2 },
+                "not on its support's own face"
+            );
+            assert_eq!(
+                parts[0].1,
+                Part::Crown {
+                    style: 0,
+                    heart: true
+                },
+                "{parts:?}"
+            );
             assert_eq!(crown_height_voxels(sc.crown_height(wood)), 1);
         }
 
         // And on the grid, through the whole presenter path.
         assert!(flora.apply(
             &world,
-            Command::Seed { x: 7, z: 1, species: Species::Glowcap, wood: sc.wood_max }
+            Command::Seed {
+                x: 7,
+                z: 1,
+                species: Species::Glowcap,
+                wood: sc.wood_max
+            }
         ));
         let view = world.view();
         let mut stands = Stands::empty(32, 16, 4);
         stands.rebuild(&view, flora.view());
         let part = stands.at(7, 4, 1);
         assert!(part.is_block(), "the cap stamped nothing: {part:?}");
-        assert_eq!(stands.at(7, 5, 1), Part::None, "a cap is one cell and never a stem");
+        assert_eq!(
+            stands.at(7, 5, 1),
+            Part::None,
+            "a cap is one cell and never a stem"
+        );
         let style = stands.style(part).expect("it paints");
-        let standing = flora.view().stand_at(Site { x: 7, y: 3, z: 1 }).expect("seeded");
-        assert_eq!(style, style_of(flora.view(), standing), "the cell paints its own stand");
+        let standing = flora
+            .view()
+            .stand_at(Site { x: 7, y: 3, z: 1 })
+            .expect("seeded");
+        assert_eq!(
+            style,
+            style_of(flora.view(), standing),
+            "the cell paints its own stand"
+        );
         // A founder is planted with `moisture` 0 until its first tick, so the *drawn*
         // colour is the interim cap wilted; the palette entry itself is the constant, which
         // is what `seed_style` reads and what the distance below is measured on.
-        assert_eq!(seed_style(Species::Glowcap).crown, srgb_linear(GLOWCAP_INTERIM_CAP_SRGB));
+        assert_eq!(
+            seed_style(Species::Glowcap).crown,
+            srgb_linear(GLOWCAP_INTERIM_CAP_SRGB)
+        );
 
         // Distinct from all five producers' crowns in linear light, with room to spare.
         let dist = |a: [f32; 3], b: [f32; 3]| {
@@ -884,6 +1131,9 @@ mod tests {
             assert!(d > 0.4, "the interim cap is {d} from {}", species.name());
             nearest = nearest.min(d);
         }
-        assert!(nearest > 0.6, "the nearest producer crown is {nearest} away");
+        assert!(
+            nearest > 0.6,
+            "the nearest producer crown is {nearest} away"
+        );
     }
 }

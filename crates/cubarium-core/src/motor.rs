@@ -244,7 +244,10 @@ pub struct MotorRequest {
 impl MotorRequest {
     /// The request that holds a body exactly where and as it is.
     pub fn still(heading: Vec2) -> MotorRequest {
-        MotorRequest { heading, speed: 0.0 }
+        MotorRequest {
+            heading,
+            speed: 0.0,
+        }
     }
 }
 
@@ -350,7 +353,12 @@ impl ResolvedMotion {
 
     /// A body that neither moved nor turned.
     pub fn still(heading: Vec2) -> ResolvedMotion {
-        ResolvedMotion { heading, speed: 0.0, turn: 0.0, sweep: 0.0 }
+        ResolvedMotion {
+            heading,
+            speed: 0.0,
+            turn: 0.0,
+            sweep: 0.0,
+        }
     }
 }
 
@@ -424,7 +432,11 @@ pub fn resolve_in(
             let demand = speed_req + rotation_req;
             let available = limits.available();
             if demand > available {
-                if demand > 0.0 { available / demand } else { 0.0 }
+                if demand > 0.0 {
+                    available / demand
+                } else {
+                    0.0
+                }
             } else {
                 1.0
             }
@@ -464,7 +476,12 @@ pub fn resolve_in(
             .unwrap_or(current)
     };
     let sweep = radius * (turn / dt).abs();
-    ResolvedMotion { heading, speed, turn, sweep }
+    ResolvedMotion {
+        heading,
+        speed,
+        turn,
+        sweep,
+    }
 }
 
 /// How far the resolved turn may sit from the requested one and still count as *unbound*.
@@ -787,10 +804,7 @@ mod tests {
     const FREE: f64 = f64::INFINITY;
 
     /// An adult apex body from the trial profile's own genome, decoded by the world's rule.
-    fn apex_body(
-        profile: &crate::hunter::FixedHunterProfile,
-        cfg: &WorldConfig,
-    ) -> Organism {
+    fn apex_body(profile: &crate::hunter::FixedHunterProfile, cfg: &WorldConfig) -> Organism {
         use cubarium_surface::{Face, SurfacePoint};
 
         use crate::organism::Mode;
@@ -819,7 +833,13 @@ mod tests {
     }
 
     fn limits(radius_px: f64, turn_rate_max: f64, speed_cap: f64) -> MotorLimits {
-        MotorLimits { radius_px, turn_rate_max, speed_cap, motor_budget: FREE, dt: DT }
+        MotorLimits {
+            radius_px,
+            turn_rate_max,
+            speed_cap,
+            motor_budget: FREE,
+            dt: DT,
+        }
     }
 
     /// The one calibration constant is the world's own unit adult, not a free parameter.
@@ -845,7 +865,14 @@ mod tests {
         let h = Vec2::new(1.0, 0.0);
         for &(r, cap) in &[(2.5, 0.3), (9.0, 0.3), (0.5, 4.0)] {
             let l = limits(r, 90.0f64.to_radians(), cap);
-            let m = resolve(h, &MotorRequest { heading: h, speed: cap }, &l);
+            let m = resolve(
+                h,
+                &MotorRequest {
+                    heading: h,
+                    speed: cap,
+                },
+                &l,
+            );
             assert_eq!(m.speed, cap, "radius {r}");
             assert_eq!(m.turn, 0.0);
             assert_eq!(m.sweep, 0.0);
@@ -870,7 +897,14 @@ mod tests {
 
         // A unit adult: the whole translation budget, spent on turning.
         let l = limits(REFERENCE_RADIUS_PX, omega_max, cap);
-        let m = resolve(h, &MotorRequest { heading: back, speed: 0.0 }, &l);
+        let m = resolve(
+            h,
+            &MotorRequest {
+                heading: back,
+                speed: 0.0,
+            },
+            &l,
+        );
         assert_eq!(m.speed, 0.0, "a pivot needs no forward motion");
         assert!(m.turn.abs() > 0.0, "a pure pivot is still legal");
         assert!(
@@ -878,24 +912,53 @@ mod tests {
             "{} rad/s is not u/r",
             m.turn.abs() / DT
         );
-        assert!((m.motor_magnitude() - cap).abs() < 1e-15, "the whole budget went to the turn");
-        assert!(m.turn.abs() < omega_max * DT, "6.9°/s, not the genome's 90°/s");
+        assert!(
+            (m.motor_magnitude() - cap).abs() < 1e-15,
+            "the whole budget went to the turn"
+        );
+        assert!(
+            m.turn.abs() < omega_max * DT,
+            "6.9°/s, not the genome's 90°/s"
+        );
 
         // Twice the radius, exactly half the sweep rate the same budget buys.
         let wide = limits(2.0 * REFERENCE_RADIUS_PX, omega_max, cap);
-        let m2 = resolve(h, &MotorRequest { heading: back, speed: 0.0 }, &wide);
+        let m2 = resolve(
+            h,
+            &MotorRequest {
+                heading: back,
+                speed: 0.0,
+            },
+            &wide,
+        );
         assert!(
             (m2.turn.abs() / DT - cap / (2.0 * REFERENCE_RADIUS_PX)).abs() < 1e-15,
             "{}",
             m2.turn.abs() / DT
         );
-        assert!((m2.turn.abs() * 2.0 - m.turn.abs()).abs() < 1e-15, "half, exactly");
-        assert!((m2.motor_magnitude() - cap).abs() < 1e-15, "the same budget, either way");
+        assert!(
+            (m2.turn.abs() * 2.0 - m.turn.abs()).abs() < 1e-15,
+            "half, exactly"
+        );
+        assert!(
+            (m2.motor_magnitude() - cap).abs() < 1e-15,
+            "the same budget, either way"
+        );
 
         // A body with no translation budget has no turning budget either: that is the whole
         // point of a shared one.
         let broke = limits(REFERENCE_RADIUS_PX, omega_max, 0.0);
-        assert_eq!(resolve(h, &MotorRequest { heading: back, speed: 0.0 }, &broke), ResolvedMotion::still(h));
+        assert_eq!(
+            resolve(
+                h,
+                &MotorRequest {
+                    heading: back,
+                    speed: 0.0
+                },
+                &broke
+            ),
+            ResolvedMotion::still(h)
+        );
     }
 
     /// **R0b regression.** The angular ceiling is a ceiling and never an addend: raising it,
@@ -906,16 +969,34 @@ mod tests {
         let cap = 0.3;
         for &omega_max in &[0.0, 90.0f64.to_radians(), 240.0f64.to_radians(), 1e6] {
             let l = limits(REFERENCE_RADIUS_PX, omega_max, cap);
-            assert_eq!(l.capability(), cap, "ceiling {omega_max} moved the capability");
+            assert_eq!(
+                l.capability(),
+                cap,
+                "ceiling {omega_max} moved the capability"
+            );
             assert_eq!(l.available(), cap, "ceiling {omega_max} moved the budget");
         }
         // It still clips: a genome that cannot turn fast does not turn fast.
         let h = Vec2::new(1.0, 0.0);
         let back = Vec2::new(-1.0, 0.0);
         let slow = limits(REFERENCE_RADIUS_PX, 0.01, cap);
-        let m = resolve(h, &MotorRequest { heading: back, speed: 0.0 }, &slow);
-        assert!((m.turn.abs() / DT - 0.01).abs() < 1e-15, "{}", m.turn.abs() / DT);
-        assert!(m.motor_magnitude() < cap, "the ceiling bound before the budget did");
+        let m = resolve(
+            h,
+            &MotorRequest {
+                heading: back,
+                speed: 0.0,
+            },
+            &slow,
+        );
+        assert!(
+            (m.turn.abs() / DT - 0.01).abs() < 1e-15,
+            "{}",
+            m.turn.abs() / DT
+        );
+        assert!(
+            m.motor_magnitude() < cap,
+            "the ceiling bound before the budget did"
+        );
     }
 
     /// Wading and a burst reach the envelope through one number — `speed_cap` — so they now
@@ -931,12 +1012,37 @@ mod tests {
         // A threatened prey's `escape_speed_multiple` of 2.
         let burst = limits(REFERENCE_RADIUS_PX, omega_max, 0.3 * 2.0);
 
-        let pivot = |l: &MotorLimits| resolve(h, &MotorRequest { heading: back, speed: 0.0 }, l).turn.abs() / DT;
-        assert!((pivot(&waded) * 2.0 - pivot(&dry)).abs() < 1e-15, "wading did not slow the turn");
-        assert!((pivot(&burst) - pivot(&dry) * 2.0).abs() < 1e-15, "the burst did not lift the turn");
+        let pivot = |l: &MotorLimits| {
+            resolve(
+                h,
+                &MotorRequest {
+                    heading: back,
+                    speed: 0.0,
+                },
+                l,
+            )
+            .turn
+            .abs()
+                / DT
+        };
+        assert!(
+            (pivot(&waded) * 2.0 - pivot(&dry)).abs() < 1e-15,
+            "wading did not slow the turn"
+        );
+        assert!(
+            (pivot(&burst) - pivot(&dry) * 2.0).abs() < 1e-15,
+            "the burst did not lift the turn"
+        );
         // Still the same one bound in every case.
         for l in [&dry, &waded, &burst] {
-            let m = resolve(h, &MotorRequest { heading: back, speed: 0.15 }, l);
+            let m = resolve(
+                h,
+                &MotorRequest {
+                    heading: back,
+                    speed: 0.15,
+                },
+                l,
+            );
             assert!(m.motor_magnitude() <= l.available() * (1.0 + 1e-12));
         }
     }
@@ -950,8 +1056,19 @@ mod tests {
         assert!(rest_effort > 0.0, "resting effort is not literally zero");
         let cap = rest_effort * OrganismConfig::default().speed_max;
         let l = limits(REFERENCE_RADIUS_PX, 90.0f64.to_radians(), cap);
-        let m = resolve(h, &MotorRequest { heading: Vec2::new(-1.0, 0.0), speed: cap }, &l);
-        assert!(m.sweep <= cap, "{} px/s of sweep on a {cap} px/s budget", m.sweep);
+        let m = resolve(
+            h,
+            &MotorRequest {
+                heading: Vec2::new(-1.0, 0.0),
+                speed: cap,
+            },
+            &l,
+        );
+        assert!(
+            m.sweep <= cap,
+            "{} px/s of sweep on a {cap} px/s budget",
+            m.sweep
+        );
         // R0d pace calibration: the same 5% resting share of a 16.667x larger cruise.
         // Measured 0.2350 px/s = 0.047 BL/s of the unit adult — a half turn in 33 s.
         assert!(m.sweep < 0.24, "a resting body swept {} px/s", m.sweep);
@@ -965,13 +1082,24 @@ mod tests {
         let omega_max = 90.0f64.to_radians();
         let r = 6.0;
         let l = limits(r, omega_max, 0.3);
-        let m = resolve(h, &MotorRequest { heading: Vec2::new(-1.0, 0.0), speed: 0.3 }, &l);
+        let m = resolve(
+            h,
+            &MotorRequest {
+                heading: Vec2::new(-1.0, 0.0),
+                speed: 0.3,
+            },
+            &l,
+        );
         let demand = 0.3 + r * omega_max;
         let u = l.capability();
         assert!(demand > u, "this fixture must actually bind");
         let s = u / demand;
         assert!((m.speed - 0.3 * s).abs() < 1e-12, "{}", m.speed);
-        assert!((m.turn.abs() - omega_max * DT * s).abs() < 1e-15, "{}", m.turn);
+        assert!(
+            (m.turn.abs() - omega_max * DT * s).abs() < 1e-15,
+            "{}",
+            m.turn
+        );
         assert!(
             (m.motor_magnitude() - u).abs() < 1e-12,
             "the envelope is met exactly: {}",
@@ -993,13 +1121,29 @@ mod tests {
         let l = limits(REFERENCE_RADIUS_PX, 90.0f64.to_radians(), 0.3);
         let reachable = l.available() * DT / REFERENCE_RADIUS_PX;
         assert!(reachable > 0.0 && reachable < 90.0f64.to_radians() * DT);
-        let target = Vec2::from_screen_angle(-reachable * 0.5).normalized().expect("unit");
-        let m = resolve(h, &MotorRequest { heading: target, speed: 0.0 }, &l);
+        let target = Vec2::from_screen_angle(-reachable * 0.5)
+            .normalized()
+            .expect("unit");
+        let m = resolve(
+            h,
+            &MotorRequest {
+                heading: target,
+                speed: 0.0,
+            },
+            &l,
+        );
         assert_eq!(m.heading, target, "no round trip through an angle");
 
         // Just past 180°: the short way is negative, never a full sweep the other way.
         let behind = Vec2::from_screen_angle(std::f64::consts::PI + 0.1);
-        let m = resolve(h, &MotorRequest { heading: behind, speed: 0.0 }, &l);
+        let m = resolve(
+            h,
+            &MotorRequest {
+                heading: behind,
+                speed: 0.0,
+            },
+            &l,
+        );
         assert!(m.turn < 0.0, "{}", m.turn);
     }
 
@@ -1021,13 +1165,31 @@ mod tests {
         let h = Vec2::new(1.0, 0.0);
         let mut l = limits(REFERENCE_RADIUS_PX, 90.0f64.to_radians(), 0.3);
         l.motor_budget = bill.affordable_motor(upkeep, DT);
-        let m = resolve(h, &MotorRequest { heading: Vec2::new(0.0, 1.0), speed: 0.3 }, &l);
-        assert_eq!(m, ResolvedMotion::still(h), "no free movement once energy is gone");
+        let m = resolve(
+            h,
+            &MotorRequest {
+                heading: Vec2::new(0.0, 1.0),
+                speed: 0.3,
+            },
+            &l,
+        );
+        assert_eq!(
+            m,
+            ResolvedMotion::still(h),
+            "no free movement once energy is gone"
+        );
 
         // A sliver of movement energy buys a proportional sliver of motion.
         l.motor_budget = bill.affordable_motor(upkeep + bill.motor_cost(0.1, 0.0, DT), DT);
         assert!((l.motor_budget - 0.1).abs() < 1e-12, "{}", l.motor_budget);
-        let m = resolve(h, &MotorRequest { heading: Vec2::new(0.0, 1.0), speed: 0.3 }, &l);
+        let m = resolve(
+            h,
+            &MotorRequest {
+                heading: Vec2::new(0.0, 1.0),
+                speed: 0.3,
+            },
+            &l,
+        );
         assert!(
             (m.motor_magnitude() - 0.1).abs() < 1e-12,
             "{}",
@@ -1053,7 +1215,10 @@ mod tests {
         assert_eq!(bill.total_cost(speed, 0.0, DT), legacy);
         // The budget split reconciles with the charge to within association.
         let split = bill.upkeep(DT) + bill.motor_cost(speed, 0.0, DT);
-        assert!((split - legacy).abs() <= 4.0 * f64::EPSILON * legacy, "{split} vs {legacy}");
+        assert!(
+            (split - legacy).abs() <= 4.0 * f64::EPSILON * legacy,
+            "{split} vs {legacy}"
+        );
     }
 
     /// The price of turning is a separate, named number from the radius that bounds it, and
@@ -1077,7 +1242,10 @@ mod tests {
         let l = limits(6.0, 90.0f64.to_radians(), 0.3);
         let m = resolve(
             Vec2::new(1.0, 0.0),
-            &MotorRequest { heading: Vec2::new(-1.0, 0.0), speed: 0.3 },
+            &MotorRequest {
+                heading: Vec2::new(-1.0, 0.0),
+                speed: 0.3,
+            },
             &l,
         );
         assert!((m.motor_magnitude() - l.capability()).abs() < 1e-12);
@@ -1109,7 +1277,10 @@ mod tests {
         let grasp = adult.capture_offset_body.length() + adult.capture_reach_px;
         assert!((r - grasp).abs() < 1e-12, "{r} vs {grasp}");
         assert!(r > o.phenotype.extent, "the claws reach past the lobes");
-        assert!(r < adult.visual_query_extent_px, "the art's query support is not the body");
+        assert!(
+            r < adult.visual_query_extent_px,
+            "the art's query support is not the body"
+        );
 
         // A juvenile is the same rig, smaller — and its radius shrinks with it.
         o.structure = o.phenotype.structure_adult * 0.25;
@@ -1126,15 +1297,35 @@ mod tests {
     #[test]
     fn degenerate_inputs_hold_still() {
         let h = Vec2::new(1.0, 0.0);
-        let nan = MotorRequest { heading: Vec2::new(f64::NAN, 0.0), speed: f64::NAN };
+        let nan = MotorRequest {
+            heading: Vec2::new(f64::NAN, 0.0),
+            speed: f64::NAN,
+        };
         let m = resolve(h, &nan, &limits(2.5, 1.5, 0.3));
         assert_eq!(m, ResolvedMotion::still(h));
 
-        let zero_dt = MotorLimits { dt: 0.0, ..limits(2.5, 1.5, 0.3) };
-        let m = resolve(h, &MotorRequest { heading: Vec2::new(0.0, 1.0), speed: 1.0 }, &zero_dt);
+        let zero_dt = MotorLimits {
+            dt: 0.0,
+            ..limits(2.5, 1.5, 0.3)
+        };
+        let m = resolve(
+            h,
+            &MotorRequest {
+                heading: Vec2::new(0.0, 1.0),
+                speed: 1.0,
+            },
+            &zero_dt,
+        );
         assert_eq!(m, ResolvedMotion::still(h));
 
-        let m = resolve(Vec2::ZERO, &MotorRequest { heading: h, speed: 1.0 }, &limits(2.5, 1.5, 0.3));
+        let m = resolve(
+            Vec2::ZERO,
+            &MotorRequest {
+                heading: h,
+                speed: 1.0,
+            },
+            &limits(2.5, 1.5, 0.3),
+        );
         assert_eq!(m, ResolvedMotion::still(h));
     }
 }

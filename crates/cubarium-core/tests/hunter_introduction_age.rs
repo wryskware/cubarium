@@ -27,7 +27,9 @@ use cubarium_core::{DT, OrganismId, World, WorldConfig};
 fn quick_maturity(world: &World, seconds: f64) -> FixedHunterProfile {
     let mut profile = FixedHunterProfile::lanternjaw_trial(world.config());
     profile.reproduce_min_age_seconds = seconds;
-    profile.validate().expect("the trial profile with a short maturity is valid");
+    profile
+        .validate()
+        .expect("the trial profile with a short maturity is valid");
     profile
 }
 
@@ -51,20 +53,32 @@ fn stepped(ticks: u64) -> World {
 /// age term is the only one left that can decide it. This mutates a test world's organism
 /// directly; it books nothing, because these tests read a predicate, not a budget.
 fn fill_stores(world: &mut World, id: OrganismId, profile: &FixedHunterProfile) {
-    let o = world.state.organisms.get_mut(id).expect("the founder is placed");
+    let o = world
+        .state
+        .organisms
+        .get_mut(id)
+        .expect("the founder is placed");
     o.reserve = profile.reproduce_reserve_fraction * o.phenotype.reserve_max;
     o.energy = profile.reproduce_energy_fraction * o.phenotype.energy_max;
 }
 
 fn ready(world: &World, id: OrganismId, profile: &FixedHunterProfile) -> bool {
-    let o = world.state.organisms.get(id).expect("the founder is placed");
+    let o = world
+        .state
+        .organisms
+        .get(id)
+        .expect("the founder is placed");
     let member = world.hunters().member(id).expect("the founder is a member");
     hunter::may_reproduce(profile, o, member, world.state.tick, DT)
 }
 
 /// Every term of `may_reproduce` except the age one, so a test can say which term decided.
 fn non_age_terms_hold(world: &World, id: OrganismId, profile: &FixedHunterProfile) -> bool {
-    let o = world.state.organisms.get(id).expect("the founder is placed");
+    let o = world
+        .state
+        .organisms
+        .get(id)
+        .expect("the founder is placed");
     let member = world.hunters().member(id).expect("the founder is a member");
     o.escrow.is_none()
         && !member.carrying()
@@ -77,7 +91,12 @@ fn non_age_terms_hold(world: &World, id: OrganismId, profile: &FixedHunterProfil
 }
 
 fn body(world: &World, id: OrganismId) -> Organism {
-    world.state.organisms.get(id).expect("the founder is placed").clone()
+    world
+        .state
+        .organisms
+        .get(id)
+        .expect("the founder is placed")
+        .clone()
 }
 
 /// Age zero is the door that exists today: the same state hash at introduction, and the same
@@ -89,7 +108,9 @@ fn introduction_at_age_zero_is_byte_identical_to_the_current_door() {
     assert_eq!(state_hash(&old.state), state_hash(&new.state));
 
     let profile = quick_maturity(&old, 10.0);
-    let old_receipts = old.introduce_hunters(profile.clone(), &pair()).expect("old door");
+    let old_receipts = old
+        .introduce_hunters(profile.clone(), &pair())
+        .expect("old door");
     let new_receipts = new
         .introduce_hunters_with_age(profile.clone(), &pair(), 0.0)
         .expect("new door at age zero");
@@ -124,7 +145,10 @@ fn an_aged_founder_passes_the_age_term_and_fails_nothing_else_a_young_one_passes
     let mut aged = stepped(maturity_ticks + 20);
     let profile = quick_maturity(&young, maturity_seconds);
 
-    let y = young.introduce_hunters(profile.clone(), &[target(1, 23.0, 31.0)]).expect("young")[0].id;
+    let y = young
+        .introduce_hunters(profile.clone(), &[target(1, 23.0, 31.0)])
+        .expect("young")[0]
+        .id;
     let a = aged
         .introduce_hunters_with_age(profile.clone(), &[target(1, 23.0, 31.0)], maturity_seconds)
         .expect("aged")[0]
@@ -146,7 +170,10 @@ fn an_aged_founder_passes_the_age_term_and_fails_nothing_else_a_young_one_passes
     assert!(non_age_terms_hold(&aged, a, &profile));
 
     // So the predicate is decided by the age alone.
-    assert!(!ready(&young, y, &profile), "the age-zero founder must not be ready");
+    assert!(
+        !ready(&young, y, &profile),
+        "the age-zero founder must not be ready"
+    );
     assert!(ready(&aged, a, &profile), "the aged founder must be ready");
 }
 
@@ -159,7 +186,9 @@ fn the_age_moves_the_birth_tick_and_no_other_value() {
     let age_seconds = 20.0;
     let age_ticks = (age_seconds / DT).round() as u64;
 
-    let y = young.introduce_hunters(profile.clone(), &pair()).expect("young");
+    let y = young
+        .introduce_hunters(profile.clone(), &pair())
+        .expect("young");
     let a = aged
         .introduce_hunters_with_age(profile.clone(), &pair(), age_seconds)
         .expect("aged");
@@ -177,10 +206,17 @@ fn the_age_moves_the_birth_tick_and_no_other_value() {
             aged.hunters().member(ra.id).expect("member"),
         );
     }
-    assert_eq!(young.hunters().founder_material_in, aged.hunters().founder_material_in);
-    assert_eq!(young.hunters().founder_energy_in, aged.hunters().founder_energy_in);
+    assert_eq!(
+        young.hunters().founder_material_in,
+        aged.hunters().founder_material_in
+    );
+    assert_eq!(
+        young.hunters().founder_energy_in,
+        aged.hunters().founder_energy_in
+    );
     assert!(aged.mass_residual().abs() < 1e-9);
-    aged.check_invariants().expect("an aged founder keeps the world's own invariants");
+    aged.check_invariants()
+        .expect("an aged founder keeps the world's own invariants");
 }
 
 /// An age the profile, the world's lifespan or the world's own clock cannot carry is refused

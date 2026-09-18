@@ -61,8 +61,8 @@ use cubarium_voxel_flora::{
 use cubarium_voxel_sim::{Sim, SimConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::clock::{Clock, Step};
 use crate::cli::{Voxel, VoxelSceneArg, VoxelSinkArg};
+use crate::clock::{Clock, Step};
 use crate::sink::gpu::voxel::{VoxelGpuSink, VoxelGpuSinkOptions};
 use crate::sink::{FrameSink, GpuTargetKind, Output, PngSink, WebSink, WorldShape};
 
@@ -153,8 +153,7 @@ impl Default for VoxelConfig {
 pub fn load_config(path: &Path) -> Result<VoxelConfig> {
     let text = std::fs::read_to_string(path)
         .with_context(|| format!("reading the voxel config {}", path.display()))?;
-    toml::from_str(&text)
-        .with_context(|| format!("parsing the voxel config {}", path.display()))
+    toml::from_str(&text).with_context(|| format!("parsing the voxel config {}", path.display()))
 }
 
 // --- The run -------------------------------------------------------------------------
@@ -172,12 +171,10 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     // `World::new` and `World::empty` panic on a config no world can be built from —
     // building one from nonsense is a programming error. A config *file* is input, so the
     // boundary is here: a bad file is reported, not a backtrace.
-    cfg.world
-        .validate()
-        .with_context(|| match &args.config {
-            Some(path) => format!("the `[world]` in {}", path.display()),
-            None => "the built-in world defaults".to_string(),
-        })?;
+    cfg.world.validate().with_context(|| match &args.config {
+        Some(path) => format!("the `[world]` in {}", path.display()),
+        None => "the built-in world defaults".to_string(),
+    })?;
 
     let world = match &args.load {
         Some(path) => {
@@ -201,8 +198,16 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     let flora = Flora::new(FloraConfig::default());
     let fauna = Fauna::new(FaunaConfig::default());
 
-    let proj = Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, world.config())?;
-    let topology = Topology::Ring { w: proj.raster_w, h: proj.raster_h };
+    let proj = Projection::new(
+        cfg.tilt_degrees,
+        cfg.px_per_voxel,
+        cfg.raster_height,
+        world.config(),
+    )?;
+    let topology = Topology::Ring {
+        w: proj.raster_w,
+        h: proj.raster_h,
+    };
     let shape = WorldShape::new(topology, Scale::ONE);
 
     let speed = args.speed.clamp(MIN_SPEED, MAX_SPEED);
@@ -210,15 +215,20 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         WebSink::with_world(
             port,
             "voxel strip",
-            crate::sink::web::Source { speed, ..Default::default() },
+            crate::sink::web::Source {
+                speed,
+                ..Default::default()
+            },
             None,
             shape,
         )
     };
     let mut out: Out = match args.sink {
-        VoxelSinkArg::Png => {
-            Out::cpu(Box::new(PngSink::new(&args.out, args.every)?), cfg.clone(), proj)
-        }
+        VoxelSinkArg::Png => Out::cpu(
+            Box::new(PngSink::new(&args.out, args.every)?),
+            cfg.clone(),
+            proj,
+        ),
         VoxelSinkArg::Web => Out::cpu(Box::new(web(args.web_port)?), cfg.clone(), proj),
         VoxelSinkArg::Gpu => {
             crate::sink::gpu::voxel::check(proj)?;
@@ -243,10 +253,17 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     // (`design/handoffs/voxel-schedule-brief-2026-09-18.md`). The thread count only ever
     // splits work *inside* a phase.
     let sim_config = SimConfig {
-        threads: if cfg.threads == 0 { SimConfig::default().threads } else { cfg.threads },
+        threads: if cfg.threads == 0 {
+            SimConfig::default().threads
+        } else {
+            cfg.threads
+        },
     };
     let mut sim = Sim::new(world, flora, fauna, sim_config);
-    eprintln!("cubarium voxel: tick schedule on {} thread(s)", sim_config.threads);
+    eprintln!(
+        "cubarium voxel: tick schedule on {} thread(s)",
+        sim_config.threads
+    );
 
     let c = sim.world().config().clone();
     eprintln!(
@@ -340,7 +357,10 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                 }
             }
             Step::Paused { gap } => {
-                eprintln!("cubarium voxel: clock re-based after a {:.1} s pause", gap.as_secs_f64());
+                eprintln!(
+                    "cubarium voxel: clock re-based after a {:.1} s pause",
+                    gap.as_secs_f64()
+                );
             }
         }
     }
@@ -398,7 +418,10 @@ enum Out {
 
 impl Out {
     fn cpu(sink: Box<dyn FrameSink>, cfg: VoxelConfig, proj: Projection) -> Out {
-        let topology = Topology::Ring { w: proj.raster_w, h: proj.raster_h };
+        let topology = Topology::Ring {
+            w: proj.raster_w,
+            h: proj.raster_h,
+        };
         Out::Cpu {
             sink,
             presenter: VoxelPresenter::new(cfg, proj),
@@ -410,15 +433,14 @@ impl Out {
     /// Draw one frame. `moved` says the world has changed since the last one, which is
     /// what the GPU path packs a new voxel texture on; the CPU path reads the world
     /// afresh every frame and ignores it.
-    fn render(
-        &mut self,
-        world: &World,
-        flora: &Flora,
-        fauna: &Fauna,
-        moved: bool,
-    ) -> Result<()> {
+    fn render(&mut self, world: &World, flora: &Flora, fauna: &Fauna, moved: bool) -> Result<()> {
         match self {
-            Out::Cpu { sink, presenter, canvas, raster } => {
+            Out::Cpu {
+                sink,
+                presenter,
+                canvas,
+                raster,
+            } => {
                 presenter.draw_with_fauna(&world.view(), flora.view(), Some(fauna.view()), canvas);
                 canvas.encode_raster(raster);
                 sink.submit(Output::Ring(raster))
@@ -468,7 +490,14 @@ struct Control {
 
 impl Control {
     fn new(speed: f64, proj: Projection) -> Control {
-        Control { speed, paused: false, pending_steps: 0, outlet: false, quit: false, proj }
+        Control {
+            speed,
+            paused: false,
+            pending_steps: 0,
+            outlet: false,
+            quit: false,
+            proj,
+        }
     }
 
     /// Apply one stdin line. Anything unrecognised prints the usage and changes nothing;
@@ -477,13 +506,7 @@ impl Control {
     /// The plant and animal layers come in as further borrows rather than living in
     /// `Control`, for the same reason the world does: the loop reads `paused` and `speed`
     /// while it still holds all three.
-    fn handle(
-        &mut self,
-        world: &mut World,
-        flora: &mut Flora,
-        fauna: &mut Fauna,
-        line: &str,
-    ) {
+    fn handle(&mut self, world: &mut World, flora: &mut Flora, fauna: &mut Fauna, line: &str) {
         let line = line.trim();
         if line.is_empty() {
             return;
@@ -496,7 +519,10 @@ impl Control {
             "q" | "quit" => self.quit = true,
             "p" | "pause" => {
                 self.paused = !self.paused;
-                eprintln!("cubarium voxel: {}", if self.paused { "paused" } else { "running" });
+                eprintln!(
+                    "cubarium voxel: {}",
+                    if self.paused { "paused" } else { "running" }
+                );
             }
             "s" | "step" => {
                 self.paused = true;
@@ -528,7 +554,9 @@ impl Control {
                 let volume = match rest.first().map(|t| t.parse::<f64>()) {
                     Some(Ok(v)) if v.is_finite() && v != 0.0 => v,
                     _ => {
-                        eprintln!("cubarium voxel: `a M3` wants a nonzero volume (negative withdraws)");
+                        eprintln!(
+                            "cubarium voxel: `a M3` wants a nonzero volume (negative withdraws)"
+                        );
                         return;
                     }
                 };
@@ -585,8 +613,12 @@ impl Control {
                                 eprintln!(
                                     "cubarium voxel: {path} is {}x{}x{}, this run draws \
                                      {}x{}x{}; restart with a matching config",
-                                    c.width, c.height, c.depth,
-                                    self.proj.width, self.proj.height, self.proj.depth
+                                    c.width,
+                                    c.height,
+                                    c.depth,
+                                    self.proj.width,
+                                    self.proj.height,
+                                    self.proj.depth
                                 );
                             } else {
                                 *world = loaded;
@@ -604,7 +636,9 @@ impl Control {
                 None => eprintln!("cubarium voxel: `l PATH` needs a path (terrain only)"),
             },
             "i" | "inspect" => {
-                let Some((x, y, z)) = coords(world, "i X Y Z", &rest) else { return };
+                let Some((x, y, z)) = coords(world, "i X Y Z", &rest) else {
+                    return;
+                };
                 eprintln!("cubarium voxel: {}", cell_state(world, x, y, z));
                 // The site is the cell itself, not the column's skyline: `i` on a
                 // support face reports what grows there and what the ground holds.
@@ -614,8 +648,15 @@ impl Control {
                     Some(s) => eprintln!(
                         "cubarium voxel:   {} {:?} W {:.4} P {:.4} Q {:.4} mineral {:.5} \
                          light {:.3} moisture {:.3} aeration stress {:.3}",
-                        s.species.name(), s.stage, s.wood, s.foliage, s.reserve, s.mineral,
-                        s.light, s.moisture, s.aeration_stress,
+                        s.species.name(),
+                        s.stage,
+                        s.wood,
+                        s.foliage,
+                        s.reserve,
+                        s.mineral,
+                        s.light,
+                        s.moisture,
+                        s.aeration_stress,
                     ),
                     None => eprintln!("cubarium voxel:   no stand"),
                 }
@@ -625,15 +666,25 @@ impl Control {
                     eprintln!(
                         "cubarium voxel:   {} #{} body {:.4} reserve {:.4} mineral {:.5} \
                          energy {:.4} age {} ticks {:?}",
-                        a.species.name(), a.id, a.body, a.reserve, a.mineral, a.energy,
-                        a.age_ticks, a.state,
+                        a.species.name(),
+                        a.id,
+                        a.body,
+                        a.reserve,
+                        a.mineral,
+                        a.energy,
+                        a.age_ticks,
+                        a.state,
                     );
                 }
                 if let Some(g) = fv.ground_at(site) {
                     eprintln!(
                         "cubarium voxel:   ground N {:.4} litter {:.4} ({:.4} energy, \
                          {:.5} mineral) dead wood {:.4} ({:.5} mineral)",
-                        g.mineral, g.litter, g.litter_energy, g.litter_mineral, g.dead_wood,
+                        g.mineral,
+                        g.litter,
+                        g.litter_energy,
+                        g.litter_mineral,
+                        g.dead_wood,
                         g.dead_wood_mineral,
                     );
                     // The seed bank, in the order the ground holds it: species, then
@@ -643,7 +694,10 @@ impl Control {
                         eprintln!(
                             "cubarium voxel:   seed {} organic {:.6} mineral {:.7} age {} ticks \
                              (bin from tick {})",
-                            c.species.name(), c.organic, c.mineral, c.age_ticks(fv.tick),
+                            c.species.name(),
+                            c.organic,
+                            c.mineral,
+                            c.age_ticks(fv.tick),
                             c.bin_start_tick,
                         );
                     }
@@ -654,7 +708,9 @@ impl Control {
             }
             "f" | "flora" => {
                 let usage = "f X Z bloomcrown|umbrellafrond [wood]";
-                let Some((x, z)) = column(world, usage, &rest) else { return };
+                let Some((x, z)) = column(world, usage, &rest) else {
+                    return;
+                };
                 let Some(species) = rest.get(2).and_then(|n| Species::parse(n)) else {
                     eprintln!(
                         "cubarium voxel: `{usage}` — `{}` is not a species",
@@ -674,7 +730,15 @@ impl Control {
                         }
                     },
                 };
-                if flora.apply(world, FloraCommand::Seed { x, z, species, wood }) {
+                if flora.apply(
+                    world,
+                    FloraCommand::Seed {
+                        x,
+                        z,
+                        species,
+                        wood,
+                    },
+                ) {
                     let site = highest_site(world, x, z);
                     eprintln!(
                         "cubarium voxel: seeded {} at {:?} with W {wood}",
@@ -692,7 +756,9 @@ impl Control {
                 }
             }
             "c" | "clear" => {
-                let Some((x, z)) = column(world, "c X Z", &rest) else { return };
+                let Some((x, z)) = column(world, "c X Z", &rest) else {
+                    return;
+                };
                 if flora.apply(world, FloraCommand::Clear { x, z }) {
                     eprintln!("cubarium voxel: cleared the stand at ({x}, {z})");
                 } else {
@@ -701,7 +767,9 @@ impl Control {
             }
             "g" | "grazer" => {
                 let usage = "g X Z frondgrazer [body]";
-                let Some((x, z)) = column(world, usage, &rest) else { return };
+                let Some((x, z)) = column(world, usage, &rest) else {
+                    return;
+                };
                 let Some(species) = rest.get(2).and_then(|n| Beast::parse(n)) else {
                     eprintln!(
                         "cubarium voxel: `{usage}` — `{}` is not an animal",
@@ -721,7 +789,15 @@ impl Control {
                         }
                     },
                 };
-                if fauna.apply(world, FaunaCommand::Introduce { x, z, species, body }) {
+                if fauna.apply(
+                    world,
+                    FaunaCommand::Introduce {
+                        x,
+                        z,
+                        species,
+                        body,
+                    },
+                ) {
                     eprintln!(
                         "cubarium voxel: introduced {} at {:?} with body {body}",
                         species.name(),
@@ -738,7 +814,9 @@ impl Control {
             }
             "m" | "material" => {
                 let usage = "m X Y Z air|rock|soil|bedrock";
-                let Some((x, y, z)) = coords(world, usage, &rest) else { return };
+                let Some((x, y, z)) = coords(world, usage, &rest) else {
+                    return;
+                };
                 let material = match rest.get(3).map(|w| w.to_ascii_lowercase()).as_deref() {
                     Some("air") => Material::Air,
                     Some("rock") => Material::Rock,
@@ -837,7 +915,10 @@ fn column(world: &World, usage: &str, rest: &[&str]) -> Option<(i64, u32)> {
     };
     let c = world.config();
     if z >= c.depth {
-        eprintln!("cubarium voxel: z = {z} is outside a {}-deep world", c.depth);
+        eprintln!(
+            "cubarium voxel: z = {z} is outside a {}-deep world",
+            c.depth
+        );
         return None;
     }
     Some((x, z))
@@ -845,7 +926,11 @@ fn column(world: &World, usage: &str, rest: &[&str]) -> Option<(i64, u32)> {
 
 /// The flora site a cell names: the cell itself, with `x` wrapped as a site stores it.
 fn site_of(world: &World, x: i64, y: u32, z: u32) -> Site {
-    Site { x: x.rem_euclid(i64::from(world.config().width)) as u32, y, z }
+    Site {
+        x: x.rem_euclid(i64::from(world.config().width)) as u32,
+        y,
+        z,
+    }
 }
 
 /// The site `f` and `c` act on: the highest support face of a column, which is what
@@ -910,12 +995,13 @@ mod tests {
         assert_eq!(d.water_alpha, 0.5);
         assert_eq!(d.world, cubarium_voxel::Config::default());
 
-        let cfg: VoxelConfig = toml::from_str(
-            "tilt_degrees = 35.0\n[world]\nwidth = 64\ndepth = 8\n",
-        )
-        .unwrap();
+        let cfg: VoxelConfig =
+            toml::from_str("tilt_degrees = 35.0\n[world]\nwidth = 64\ndepth = 8\n").unwrap();
         assert_eq!(cfg.tilt_degrees, 35.0);
-        assert_eq!(cfg.px_per_voxel, 4, "an unmentioned field keeps its default");
+        assert_eq!(
+            cfg.px_per_voxel, 4,
+            "an unmentioned field keeps its default"
+        );
         assert_eq!(cfg.world.width, 64);
         assert_eq!(cfg.world.depth, 8);
         assert_eq!(cfg.world.height, cubarium_voxel::Config::default().height);
@@ -950,7 +1036,10 @@ mod tests {
     fn a_world_no_world_can_be_built_from_is_refused_not_panicked_on() {
         let cfg: VoxelConfig =
             toml::from_str("[world]\ndepth = 0\n").expect("it parses; it is just impossible");
-        let err = cfg.world.validate().expect_err("a zero dimension must be refused");
+        let err = cfg
+            .world
+            .validate()
+            .expect_err("a zero dimension must be refused");
         assert!(format!("{err}").contains("nonzero dimensions"), "{err}");
 
         let bad: VoxelConfig = toml::from_str("[world]\nvoxel_m = 0.0\n").unwrap();
@@ -962,7 +1051,12 @@ mod tests {
     /// single step is owed, and a nonsense line changes nothing.
     #[test]
     fn stdin_commands_change_exactly_what_they_name() {
-        let c = cubarium_voxel::Config { width: 16, height: 8, depth: 2, ..Default::default() };
+        let c = cubarium_voxel::Config {
+            width: 16,
+            height: 8,
+            depth: 2,
+            ..Default::default()
+        };
         let mut world = World::empty(c.clone());
         let mut flora = Flora::new(FloraConfig::default());
         let mut fauna = Fauna::new(FaunaConfig::default());
@@ -1011,17 +1105,26 @@ mod tests {
     /// bytes load into a run that holds no ecology, which is what `--load` does at startup.
     #[test]
     fn a_terrain_load_is_refused_while_the_ecology_is_standing() {
-        let c = cubarium_voxel::Config { width: 16, height: 8, depth: 2, ..Default::default() };
+        let c = cubarium_voxel::Config {
+            width: 16,
+            height: 8,
+            depth: 2,
+            ..Default::default()
+        };
         let proj = Projection::new(30.0, 4, 0, &c).unwrap();
-        let path = std::env::temp_dir()
-            .join(format!("cubarium-voxel-terrain-{}.bin", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("cubarium-voxel-terrain-{}.bin", std::process::id()));
         let at = path.to_str().expect("a utf-8 temp path").to_string();
 
         let mut world = World::empty(c.clone());
         let mut flora = Flora::new(FloraConfig::default());
         let mut fauna = Fauna::new(FaunaConfig::default());
         let mut ctl = Control::new(1.0, proj);
-        assert_eq!(ecology_state(&flora, &fauna), None, "a fresh run holds no ecology");
+        assert_eq!(
+            ecology_state(&flora, &fauna),
+            None,
+            "a fresh run holds no ecology"
+        );
 
         ctl.handle(&mut world, &mut flora, &mut fauna, &format!("w {at}"));
         assert!(path.exists(), "the terrain was saved");
@@ -1050,12 +1153,21 @@ mod tests {
         let why = ecology_state(&flora, &fauna).expect("the ground and the ledger remain");
         assert!(why.contains("ground") || why.contains("ledger"), "{why}");
         ctl.handle(&mut world, &mut flora, &mut fauna, &format!("l {at}"));
-        assert_eq!(world.view().material_at(3, 2, 1), Material::Soil, "still refused");
+        assert_eq!(
+            world.view().material_at(3, 2, 1),
+            Material::Soil,
+            "still refused"
+        );
 
         // The same bytes into a run with no ecology in it: accepted, and the edit is gone.
         let mut fresh_flora = Flora::new(FloraConfig::default());
         let mut fresh_fauna = Fauna::new(FaunaConfig::default());
-        ctl.handle(&mut world, &mut fresh_flora, &mut fresh_fauna, &format!("l {at}"));
+        ctl.handle(
+            &mut world,
+            &mut fresh_flora,
+            &mut fresh_fauna,
+            &format!("l {at}"),
+        );
         assert_eq!(
             world.view().material_at(3, 2, 1),
             Material::Air,
@@ -1063,18 +1175,30 @@ mod tests {
         );
 
         // And an animal alone is enough to refuse.
-        ctl.handle(&mut world, &mut fresh_flora, &mut fresh_fauna, "m 3 2 1 soil");
+        ctl.handle(
+            &mut world,
+            &mut fresh_flora,
+            &mut fresh_fauna,
+            "m 3 2 1 soil",
+        );
         let mut fauna = Fauna::new(FaunaConfig::default());
-        assert!(fauna.apply(&world, FaunaCommand::Introduce {
-            x: 3,
-            z: 1,
-            species: Beast::Frondgrazer,
-            body: 0.02,
-        }));
+        assert!(fauna.apply(
+            &world,
+            FaunaCommand::Introduce {
+                x: 3,
+                z: 1,
+                species: Beast::Frondgrazer,
+                body: 0.02,
+            }
+        ));
         let mut flora = Flora::new(FloraConfig::default());
         assert!(ecology_state(&flora, &fauna).unwrap().contains("animal"));
         ctl.handle(&mut world, &mut flora, &mut fauna, &format!("l {at}"));
-        assert_eq!(world.view().material_at(3, 2, 1), Material::Soil, "refused for the animal");
+        assert_eq!(
+            world.view().material_at(3, 2, 1),
+            Material::Soil,
+            "refused for the animal"
+        );
 
         let _ = std::fs::remove_file(&path);
         // Both help texts say what the two commands carry.
@@ -1086,7 +1210,12 @@ mod tests {
     /// tool was missing — you can now dig a channel and watch the pool find it.
     #[test]
     fn a_paused_terrain_edit_changes_the_cell_the_next_inspect_reports() {
-        let c = cubarium_voxel::Config { width: 16, height: 8, depth: 2, ..Default::default() };
+        let c = cubarium_voxel::Config {
+            width: 16,
+            height: 8,
+            depth: 2,
+            ..Default::default()
+        };
         let mut world = World::empty(c.clone());
         let mut flora = Flora::new(FloraConfig::default());
         let mut fauna = Fauna::new(FaunaConfig::default());
@@ -1109,9 +1238,20 @@ mod tests {
 
         // A `y` or `z` outside the world, an unknown material and a short line are all
         // refused, and leave the cell alone.
-        for bad in ["m 3 99 1 air", "m 3 2 9 air", "m 3 2 1 lava", "m 3 2 1", "m", "material"] {
+        for bad in [
+            "m 3 99 1 air",
+            "m 3 2 9 air",
+            "m 3 2 1 lava",
+            "m 3 2 1",
+            "m",
+            "material",
+        ] {
             ctl.handle(&mut world, &mut flora, &mut fauna, bad);
-            assert_eq!(world.view().material_at(3, 2, 1), Material::Rock, "`{bad}` edited a cell");
+            assert_eq!(
+                world.view().material_at(3, 2, 1),
+                Material::Rock,
+                "`{bad}` edited a cell"
+            );
         }
 
         ctl.handle(&mut world, &mut flora, &mut fauna, "m 3 2 1 air");
@@ -1125,12 +1265,22 @@ mod tests {
     /// refused without touching the stands, and `c` takes the stand back off again.
     #[test]
     fn the_flora_commands_seed_clear_and_inspect_exactly_what_they_name() {
-        let c = cubarium_voxel::Config { width: 16, height: 8, depth: 2, ..Default::default() };
+        let c = cubarium_voxel::Config {
+            width: 16,
+            height: 8,
+            depth: 2,
+            ..Default::default()
+        };
         let mut world = World::empty(c.clone());
         for z in 0..c.depth {
             for x in 0..i64::from(c.width) {
                 for y in 0..=2 {
-                    world.apply(VoxelCommand::SetMaterial { x, y, z, material: Material::Soil });
+                    world.apply(VoxelCommand::SetMaterial {
+                        x,
+                        y,
+                        z,
+                        material: Material::Soil,
+                    });
                 }
             }
         }
@@ -1142,14 +1292,25 @@ mod tests {
         // A founder with no wood named is full-grown: the stand this command exists to
         // put in the picture is one you can see.
         ctl.handle(&mut world, &mut flora, &mut fauna, "f 3 1 bloomcrown");
-        let stand = *flora.view().stand_at(site).expect("a stand on the column's skyline");
+        let stand = *flora
+            .view()
+            .stand_at(site)
+            .expect("a stand on the column's skyline");
         assert_eq!(stand.species, Species::Bloomcrown);
         assert_eq!(stand.wood, flora.config().bloomcrown.wood_max);
         assert_eq!(flora.view().stands.len(), 1);
 
         // An explicit wood is taken, and `x` wraps as everything in the ring does.
-        ctl.handle(&mut world, &mut flora, &mut fauna, "f -12 0 umbrellafrond 0.25");
-        let other = *flora.view().stand_at(Site { x: 4, y: 2, z: 0 }).expect("the wrapped column");
+        ctl.handle(
+            &mut world,
+            &mut flora,
+            &mut fauna,
+            "f -12 0 umbrellafrond 0.25",
+        );
+        let other = *flora
+            .view()
+            .stand_at(Site { x: 4, y: 2, z: 0 })
+            .expect("the wrapped column");
         assert_eq!(other.species, Species::Umbrellafrond);
         assert_eq!(other.wood, 0.25);
 
@@ -1172,7 +1333,10 @@ mod tests {
         // `i` on the site reports the stand and its ground; on a bare cell it says so.
         // Neither prints anything the run can act on, so the assertion is that the
         // lookups are the ones the printout claims.
-        assert!(flora.view().ground_at(site).is_some(), "seeding creates the ground");
+        assert!(
+            flora.view().ground_at(site).is_some(),
+            "seeding creates the ground"
+        );
         assert!(flora.view().stand_at(Site { x: 9, y: 2, z: 1 }).is_none());
         ctl.handle(&mut world, &mut flora, &mut fauna, "i 3 2 1");
         ctl.handle(&mut world, &mut flora, &mut fauna, "i 9 2 1");
@@ -1202,7 +1366,12 @@ mod tests {
     /// world of a different shape is refused rather than drawn into the wrong raster.
     #[test]
     fn save_and_load_round_trip_and_a_mismatched_world_is_refused() {
-        let c = cubarium_voxel::Config { width: 16, height: 8, depth: 2, ..Default::default() };
+        let c = cubarium_voxel::Config {
+            width: 16,
+            height: 8,
+            depth: 2,
+            ..Default::default()
+        };
         let mut world = scene::authored(c.clone());
         let proj = Projection::new(30.0, 4, 0, &c).unwrap();
         let dir = std::env::temp_dir().join(format!("cubarium-voxel-{}", std::process::id()));
@@ -1213,19 +1382,40 @@ mod tests {
         let mut flora = Flora::new(FloraConfig::default());
         let mut fauna = Fauna::new(FaunaConfig::default());
         let mut ctl = Control::new(1.0, proj);
-        ctl.handle(&mut world, &mut flora, &mut fauna, &format!("w {}", path.display()));
+        ctl.handle(
+            &mut world,
+            &mut flora,
+            &mut fauna,
+            &format!("w {}", path.display()),
+        );
         assert!(path.exists());
 
         let mut fresh = World::empty(c.clone());
-        ctl.handle(&mut fresh, &mut flora, &mut fauna, &format!("l {}", path.display()));
-        assert!((fresh.view().stored_m3() - before).abs() < 1e-9, "the pool came back");
+        ctl.handle(
+            &mut fresh,
+            &mut flora,
+            &mut fauna,
+            &format!("l {}", path.display()),
+        );
+        assert!(
+            (fresh.view().stored_m3() - before).abs() < 1e-9,
+            "the pool came back"
+        );
 
         // A world of another shape is named and refused.
         let other = dir.join("other.bin");
-        let wide = cubarium_voxel::Config { width: 32, ..c.clone() };
+        let wide = cubarium_voxel::Config {
+            width: 32,
+            ..c.clone()
+        };
         std::fs::write(&other, World::empty(wide).save()).unwrap();
         let mut keep = World::empty(c.clone());
-        ctl.handle(&mut keep, &mut flora, &mut fauna, &format!("l {}", other.display()));
+        ctl.handle(
+            &mut keep,
+            &mut flora,
+            &mut fauna,
+            &format!("l {}", other.display()),
+        );
         assert_eq!(keep.config().width, 16, "the run kept its own world");
 
         std::fs::remove_dir_all(&dir).unwrap();

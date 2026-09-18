@@ -63,7 +63,10 @@ impl Habitat {
                 let lambda = lo + (hi - lo) * unit(seed, Stream::Habitat, i, 2);
                 let phase = std::f64::consts::TAU * unit(seed, Stream::Habitat, i, 3);
                 let k = std::f64::consts::TAU / lambda;
-                Wave { scaled_dir: [dir[0] * k, dir[1] * k, dir[2] * k], phase }
+                Wave {
+                    scaled_dir: [dir[0] * k, dir[1] * k, dir[2] * k],
+                    phase,
+                }
             })
             .collect();
 
@@ -74,7 +77,9 @@ impl Habitat {
             let sum: f64 = waves
                 .iter()
                 .map(|w| {
-                    (p[0] * w.scaled_dir[0] + p[1] * w.scaled_dir[1] + p[2] * w.scaled_dir[2]
+                    (p[0] * w.scaled_dir[0]
+                        + p[1] * w.scaled_dir[1]
+                        + p[2] * w.scaled_dir[2]
                         + w.phase)
                         .cos()
                 })
@@ -112,9 +117,18 @@ impl Habitat {
             moisture_base[i] = w.clamp(cfg.moisture_min, 1.0);
             positions[i] = p;
             // `basin_gain = 0` must give exactly `y`: skip the noise term rather than add 0·n.
-            terrain[i] = if cfg.basin_gain != 0.0 { y + cfg.basin_gain * noise(basin) } else { y };
+            terrain[i] = if cfg.basin_gain != 0.0 {
+                y + cfg.basin_gain * noise(basin)
+            } else {
+                y
+            };
         }
-        Habitat { light_base, moisture_base, positions, terrain }
+        Habitat {
+            light_base,
+            moisture_base,
+            positions,
+            terrain,
+        }
     }
 }
 
@@ -156,7 +170,11 @@ impl Weather {
                 cfg.periods_min[within_channel % cfg.periods_min.len()]
             };
             let ticks = period_min * 60.0 * f64::from(crate::TICK_HZ);
-            let rate = if ticks > 0.0 { std::f64::consts::TAU / ticks } else { 0.0 };
+            let rate = if ticks > 0.0 {
+                std::f64::consts::TAU / ticks
+            } else {
+                0.0
+            };
             Blob { center, axis, rate }
         };
         Weather {
@@ -180,7 +198,12 @@ impl Weather {
         let minute = tick / TICKS_PER_MINUTE;
         if minute > self.last_walk_minute {
             let step = cfg.walk_deg_per_min.to_radians();
-            for (i, blob) in self.light.iter_mut().chain(self.moisture.iter_mut()).enumerate() {
+            for (i, blob) in self
+                .light
+                .iter_mut()
+                .chain(self.moisture.iter_mut())
+                .enumerate()
+            {
                 // Keys match `Weather::new`: light blobs 0..n, moisture blobs n..2n.
                 let key = i as u64;
                 let azimuth = std::f64::consts::TAU * unit(seed, Stream::Weather, key, minute);
@@ -237,7 +260,10 @@ impl Weather {
         for i in 0..count {
             let dir = normalize_or(habitat.positions[i], [0.0, 1.0, 0.0]);
             let sum = |blobs: &[Blob]| -> f64 {
-                blobs.iter().map(|b| cfg.amplitude * cap(dot(b.center, dir), radius, cos_radius)).sum()
+                blobs
+                    .iter()
+                    .map(|b| cfg.amplitude * cap(dot(b.center, dir), radius, cos_radius))
+                    .sum()
             };
             let wet = sum(&self.moisture);
             light[i] = (habitat.light_base[i] + sum(&self.light)).clamp(0.0, 1.0);
@@ -292,13 +318,21 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
 }
 
 fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 
 /// Normalize, falling back to `fallback` when the vector is degenerate.
 fn normalize_or(v: [f64; 3], fallback: [f64; 3]) -> [f64; 3] {
     let len = dot(v, v).sqrt();
-    if len > 1e-12 && len.is_finite() { [v[0] / len, v[1] / len, v[2] / len] } else { fallback }
+    if len > 1e-12 && len.is_finite() {
+        [v[0] / len, v[1] / len, v[2] / len]
+    } else {
+        fallback
+    }
 }
 
 /// Gram–Schmidt: the unit component of `v` perpendicular to the unit vector `axis`, or an
@@ -316,7 +350,11 @@ fn orthonormalize(v: [f64; 3], axis: [f64; 3]) -> [f64; 3] {
 
 /// Some unit vector perpendicular to the unit vector `a`.
 fn any_perpendicular(a: [f64; 3]) -> [f64; 3] {
-    let seed = if a[0].abs() < 0.9 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
+    let seed = if a[0].abs() < 0.9 {
+        [1.0, 0.0, 0.0]
+    } else {
+        [0.0, 1.0, 0.0]
+    };
     let p = cross(a, seed);
     normalize_or(p, [1.0, 0.0, 0.0])
 }
@@ -326,7 +364,11 @@ fn rodrigues(v: [f64; 3], axis: [f64; 3], angle: f64) -> [f64; 3] {
     let (s, c) = angle.sin_cos();
     let k = cross(axis, v);
     let d = dot(axis, v) * (1.0 - c);
-    [v[0] * c + k[0] * s + axis[0] * d, v[1] * c + k[1] * s + axis[1] * d, v[2] * c + k[2] * s + axis[2] * d]
+    [
+        v[0] * c + k[0] * s + axis[0] * d,
+        v[1] * c + k[1] * s + axis[1] * d,
+        v[2] * c + k[2] * s + axis[2] * d,
+    ]
 }
 
 #[cfg(test)]
@@ -346,7 +388,11 @@ mod tests {
         for seed in [1u64, 2, 7, 12345] {
             let h = Habitat::new(&cfg, seed, Topology::Cube, Scale::ONE);
             for i in 0..CUBE_CELL_COUNT {
-                assert!((0.0..=1.0).contains(&h.light_base[i]), "light {}", h.light_base[i]);
+                assert!(
+                    (0.0..=1.0).contains(&h.light_base[i]),
+                    "light {}",
+                    h.light_base[i]
+                );
                 assert!(
                     h.moisture_base[i] >= cfg.moisture_min && h.moisture_base[i] <= 1.0,
                     "moisture {}",
@@ -354,7 +400,10 @@ mod tests {
                 );
                 // Cell centers lie on the cube surface: one coordinate is ±1.
                 let p = h.positions[i];
-                assert!(p.iter().any(|c| (c.abs() - 1.0).abs() < 1e-12), "position {p:?}");
+                assert!(
+                    p.iter().any(|c| (c.abs() - 1.0).abs() < 1e-12),
+                    "position {p:?}"
+                );
             }
         }
     }
@@ -362,8 +411,14 @@ mod tests {
     #[test]
     fn habitat_is_deterministic_and_seed_dependent() {
         let cfg = WorldConfig::default().habitat;
-        assert_eq!(Habitat::new(&cfg, 4, Topology::Cube, Scale::ONE), Habitat::new(&cfg, 4, Topology::Cube, Scale::ONE));
-        assert_ne!(Habitat::new(&cfg, 4, Topology::Cube, Scale::ONE).light_base, Habitat::new(&cfg, 5, Topology::Cube, Scale::ONE).light_base);
+        assert_eq!(
+            Habitat::new(&cfg, 4, Topology::Cube, Scale::ONE),
+            Habitat::new(&cfg, 4, Topology::Cube, Scale::ONE)
+        );
+        assert_ne!(
+            Habitat::new(&cfg, 4, Topology::Cube, Scale::ONE).light_base,
+            Habitat::new(&cfg, 5, Topology::Cube, Scale::ONE).light_base
+        );
     }
 
     /// Across each of the eight seams a neighboring pair of cells must not be more
@@ -385,13 +440,20 @@ mod tests {
                 if a.face(Topology::Cube, Scale::ONE) == b.face(Topology::Cube, Scale::ONE) {
                     worst_inner = worst_inner.max(d);
                 } else {
-                    let mut pair = [a.face(Topology::Cube, Scale::ONE) as u8, b.face(Topology::Cube, Scale::ONE) as u8];
+                    let mut pair = [
+                        a.face(Topology::Cube, Scale::ONE) as u8,
+                        b.face(Topology::Cube, Scale::ONE) as u8,
+                    ];
                     pair.sort_unstable();
                     seams_seen.insert(pair);
                     worst_seam = worst_seam.max(d);
                 }
             }
-            assert_eq!(seams_seen.len(), 8, "expected all eight seams, got {seams_seen:?}");
+            assert_eq!(
+                seams_seen.len(),
+                8,
+                "expected all eight seams, got {seams_seen:?}"
+            );
             println!(
                 "seed {seed}: max seam-neighbor jump {worst_seam:.6}, max in-face jump {worst_inner:.6}"
             );
@@ -409,9 +471,20 @@ mod tests {
         assert_eq!(w.light.len(), cfg.blobs_per_channel as usize);
         assert_eq!(w.moisture.len(), cfg.blobs_per_channel as usize);
         for (i, b) in w.light.iter().chain(w.moisture.iter()).enumerate() {
-            assert!((norm(b.center) - 1.0).abs() < 1e-12, "blob {i} center {:?}", b.center);
-            assert!((norm(b.axis) - 1.0).abs() < 1e-12, "blob {i} axis {:?}", b.axis);
-            assert!(dot(b.center, b.axis).abs() < 1e-12, "blob {i} not orthogonal");
+            assert!(
+                (norm(b.center) - 1.0).abs() < 1e-12,
+                "blob {i} center {:?}",
+                b.center
+            );
+            assert!(
+                (norm(b.axis) - 1.0).abs() < 1e-12,
+                "blob {i} axis {:?}",
+                b.axis
+            );
+            assert!(
+                dot(b.center, b.axis).abs() < 1e-12,
+                "blob {i} not orthogonal"
+            );
         }
         // Light and moisture blobs use different keys, so they differ.
         assert_ne!(w.light[0].center, w.moisture[0].center);
@@ -453,7 +526,10 @@ mod tests {
                     .fold(0.0, f64::max);
             }
         }
-        assert!(moved > 0.1, "the center should have travelled by a quarter period: {moved}");
+        assert!(
+            moved > 0.1,
+            "the center should have travelled by a quarter period: {moved}"
+        );
         for k in 0..3 {
             assert!(
                 (w.light[0].center[k] - start.light[0].center[k]).abs() < 1e-6,
@@ -467,7 +543,10 @@ mod tests {
     #[test]
     fn the_random_walk_moves_centers_once_per_minute() {
         let cfg = WorldConfig::default().weather;
-        let mut still = WeatherConfig { walk_deg_per_min: 0.0, ..cfg.clone() };
+        let mut still = WeatherConfig {
+            walk_deg_per_min: 0.0,
+            ..cfg.clone()
+        };
         still.walk_deg_per_min = 0.0;
         let mut walked = Weather::new(&cfg, 31);
         let mut straight = Weather::new(&still, 31);
@@ -477,12 +556,20 @@ mod tests {
         }
         assert_eq!(walked.last_walk_minute, 3);
         assert_eq!(straight.last_walk_minute, 3);
-        let angle = dot(walked.light[0].center, straight.light[0].center).clamp(-1.0, 1.0).acos();
+        let angle = dot(walked.light[0].center, straight.light[0].center)
+            .clamp(-1.0, 1.0)
+            .acos();
         // Three minutes of 2° tilts, each in its own direction: within 0 and 6 degrees.
-        assert!(angle > 1e-3 && angle <= 6.0f64.to_radians() + 1e-9, "walk angle {angle}");
+        assert!(
+            angle > 1e-3 && angle <= 6.0f64.to_radians() + 1e-9,
+            "walk angle {angle}"
+        );
         for b in walked.light.iter().chain(walked.moisture.iter()) {
             assert!((norm(b.center) - 1.0).abs() < 1e-12);
-            assert!(dot(b.center, b.axis).abs() < 1e-9, "axis lost orthogonality");
+            assert!(
+                dot(b.center, b.axis).abs() < 1e-9,
+                "axis lost orthogonality"
+            );
         }
     }
 
@@ -495,11 +582,24 @@ mod tests {
         let mut moisture = vec![0.0f64; CUBE_CELL_COUNT];
         let mut source = vec![0.0f64; CUBE_CELL_COUNT];
 
-        let flat = WeatherConfig { amplitude: 0.0, ..world.weather.clone() };
-        weather.sample(&flat, &habitat, &mut light, &mut moisture, &mut source, world.habitat.moisture_min);
+        let flat = WeatherConfig {
+            amplitude: 0.0,
+            ..world.weather.clone()
+        };
+        weather.sample(
+            &flat,
+            &habitat,
+            &mut light,
+            &mut moisture,
+            &mut source,
+            world.habitat.moisture_min,
+        );
         assert_eq!(&light[..], &habitat.light_base[..]);
         assert_eq!(&moisture[..], &habitat.moisture_base[..]);
-        assert!(source.iter().all(|&b| b == 0.0), "no amplitude, no rain source");
+        assert!(
+            source.iter().all(|&b| b == 0.0),
+            "no amplitude, no rain source"
+        );
 
         weather.sample(
             &world.weather,
@@ -513,7 +613,11 @@ mod tests {
         // amplitudes, and equal to the lift of moisture wherever the clamp did not bite.
         let ceiling = world.weather.amplitude * f64::from(world.weather.blobs_per_channel);
         for i in 0..CUBE_CELL_COUNT {
-            assert!(source[i] >= 0.0 && source[i] <= ceiling + 1e-12, "source {}", source[i]);
+            assert!(
+                source[i] >= 0.0 && source[i] <= ceiling + 1e-12,
+                "source {}",
+                source[i]
+            );
             let lifted = habitat.moisture_base[i] + source[i];
             if lifted <= 1.0 && lifted >= world.habitat.moisture_min {
                 assert!((moisture[i] - lifted).abs() < 1e-12);
@@ -619,7 +723,10 @@ mod tests {
             let i = cell.index();
             let y = h.positions[i][1];
             let z = h.terrain[i];
-            assert!((z - y).abs() <= cfg.basin_gain + 1e-12, "terrain {z} vs y {y}");
+            assert!(
+                (z - y).abs() <= cfg.basin_gain + 1e-12,
+                "terrain {z} vs y {y}"
+            );
             if cell.face(Topology::Cube, Scale::ONE) == Face::Top {
                 assert!((z - 1.0).abs() <= cfg.basin_gain + 1e-12);
                 if z < 1.0 {
@@ -632,14 +739,30 @@ mod tests {
         // basin noise is at most 0.06 either way.
         for face in [Face::Front, Face::Right, Face::Back, Face::Left] {
             let row_mean = |cy: u16| -> f64 {
-                (0..16u16).map(|cx| h.terrain[CellId::new(Topology::Cube, Scale::ONE, face, cx, cy).index()]).sum::<f64>() / 16.0
+                (0..16u16)
+                    .map(|cx| {
+                        h.terrain[CellId::new(Topology::Cube, Scale::ONE, face, cx, cy).index()]
+                    })
+                    .sum::<f64>()
+                    / 16.0
             };
             for cy in 0..15u16 {
-                assert!(row_mean(cy) > row_mean(cy + 1), "{face:?} row {cy} does not fall");
+                assert!(
+                    row_mean(cy) > row_mean(cy + 1),
+                    "{face:?} row {cy} does not fall"
+                );
             }
         }
         // No basins: the terrain is the embedded height exactly.
-        let flat = Habitat::new(&HabitatConfig { basin_gain: 0.0, ..cfg }, 9, Topology::Cube, Scale::ONE);
+        let flat = Habitat::new(
+            &HabitatConfig {
+                basin_gain: 0.0,
+                ..cfg
+            },
+            9,
+            Topology::Cube,
+            Scale::ONE,
+        );
         for i in 0..CUBE_CELL_COUNT {
             assert_eq!(flat.terrain[i], flat.positions[i][1]);
         }

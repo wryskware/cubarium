@@ -35,7 +35,11 @@ pub(crate) struct CellSet {
 
 impl Default for CellSet {
     fn default() -> CellSet {
-        CellSet { cells: Vec::new(), slot: Vec::new(), dirty: true }
+        CellSet {
+            cells: Vec::new(),
+            slot: Vec::new(),
+            dirty: true,
+        }
     }
 }
 
@@ -50,7 +54,11 @@ impl PartialEq for CellSet {
         }
         self.cells.len() == other.cells.len()
             && self.slot.len() == other.slot.len()
-            && self.slot.iter().zip(other.slot.iter()).all(|(a, b)| (*a == 0) == (*b == 0))
+            && self
+                .slot
+                .iter()
+                .zip(other.slot.iter())
+                .all(|(a, b)| (*a == 0) == (*b == 0))
     }
 }
 

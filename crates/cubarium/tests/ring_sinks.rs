@@ -21,7 +21,15 @@ fn painted(w: u16, h: u16) -> Raster {
     for y in 0..h {
         for x in 0..w {
             let i = u32::from(y) * u32::from(w) + u32::from(x);
-            raster.set(x, y, [(i & 0xFF) as u8, ((i >> 8) & 0xFF) as u8, (x as u8) ^ (y as u8)]);
+            raster.set(
+                x,
+                y,
+                [
+                    (i & 0xFF) as u8,
+                    ((i >> 8) & 0xFF) as u8,
+                    (x as u8) ^ (y as u8),
+                ],
+            );
         }
     }
     raster
@@ -36,7 +44,10 @@ fn reassemble(datagrams: &[Vec<u8>], seq: u32) -> Raster {
         let (header, payload) = decode(dg).expect("a strip decodes");
         assert_eq!(header.format, Format::RasterStrip, "format 2");
         assert_eq!(header.face, None, "a raster names no face");
-        assert_eq!(header.seq, seq, "every strip of one image carries the same seq");
+        assert_eq!(
+            header.seq, seq,
+            "every strip of one image carries the same seq"
+        );
 
         let (strip, pixels) = decode_strip(payload).expect("the strip header parses");
         strip.validate().expect("the geometry is legal");
@@ -56,11 +67,17 @@ fn reassemble(datagrams: &[Vec<u8>], seq: u32) -> Raster {
             rows_seen.push(y);
             let row_bytes = out.row_bytes();
             let from = usize::from(r) * row_bytes;
-            out.rows_mut(y, 1).expect("in range").copy_from_slice(&pixels[from..][..row_bytes]);
+            out.rows_mut(y, 1)
+                .expect("in range")
+                .copy_from_slice(&pixels[from..][..row_bytes]);
         }
     }
     let out = image.expect("at least one strip");
-    assert_eq!(rows_seen.len(), usize::from(out.height()), "every row arrived exactly once");
+    assert_eq!(
+        rows_seen.len(),
+        usize::from(out.height()),
+        "every row arrived exactly once"
+    );
     out
 }
 
@@ -72,12 +89,25 @@ fn a_320_by_180_raster_round_trips_through_format_2() {
     // 320 × 180 × 3 = 172,800 bytes, well over the 65,507-byte datagram, so the image goes
     // out as three strips of 68, 68 and 44 rows. (§3's "a 320×180 image goes out in one" is
     // wrong: one *row* is 960 bytes and only 68 of them fit.)
-    assert_eq!(datagrams.len(), 3, "172,800 bytes cannot fit in one 65,507-byte datagram");
+    assert_eq!(
+        datagrams.len(),
+        3,
+        "172,800 bytes cannot fit in one 65,507-byte datagram"
+    );
     let rows: Vec<u16> = datagrams
         .iter()
-        .map(|dg| decode_strip(decode(dg).expect("decodes").1).expect("strip").0.rows)
+        .map(|dg| {
+            decode_strip(decode(dg).expect("decodes").1)
+                .expect("strip")
+                .0
+                .rows
+        })
         .collect();
-    assert_eq!(rows, vec![68, 68, 44], "68 rows per strip, then the remainder");
+    assert_eq!(
+        rows,
+        vec![68, 68, 44],
+        "68 rows per strip, then the remainder"
+    );
 
     let back = reassemble(&datagrams, 7);
     assert_eq!(back.size(), (W, H));
@@ -106,9 +136,16 @@ fn every_strip_but_the_last_carries_the_same_number_of_rows() {
     encode_raster(&raster, 1, MAX_DATAGRAM, &mut datagrams).expect("encodes");
     let strips: Vec<Strip> = datagrams
         .iter()
-        .map(|dg| decode_strip(decode(dg).expect("decodes").1).expect("strip").0)
+        .map(|dg| {
+            decode_strip(decode(dg).expect("decodes").1)
+                .expect("strip")
+                .0
+        })
         .collect();
-    assert!(strips.len() > 1, "a 1920×1080 image needs several datagrams");
+    assert!(
+        strips.len() > 1,
+        "a 1920×1080 image needs several datagrams"
+    );
     let full = strips[0].rows;
     for (i, s) in strips.iter().enumerate() {
         assert_eq!(
@@ -120,12 +157,18 @@ fn every_strip_but_the_last_carries_the_same_number_of_rows() {
         if i + 1 < strips.len() {
             assert_eq!(s.rows, full, "strip {i} is a full strip");
         } else {
-            assert!(s.rows <= full && s.rows > 0, "the last strip is the remainder");
+            assert!(
+                s.rows <= full && s.rows > 0,
+                "the last strip is the remainder"
+            );
         }
     }
     // The largest whole number of rows that fits: the budget is the datagram less both headers.
     let row_bytes = raster.row_bytes();
-    assert_eq!(full, ((MAX_DATAGRAM - HEADER_BYTES - STRIP_HEADER_BYTES) / row_bytes) as u16);
+    assert_eq!(
+        full,
+        ((MAX_DATAGRAM - HEADER_BYTES - STRIP_HEADER_BYTES) / row_bytes) as u16
+    );
 }
 
 /// A caller-chosen limit too small for a single row is the one failure the encoder has.
@@ -135,15 +178,25 @@ fn a_datagram_limit_below_one_row_is_refused() {
     let mut datagrams = Vec::new();
     let row = raster.row_bytes();
     assert_eq!(
-        encode_raster(&raster, 0, HEADER_BYTES + STRIP_HEADER_BYTES + row - 1, &mut datagrams),
+        encode_raster(
+            &raster,
+            0,
+            HEADER_BYTES + STRIP_HEADER_BYTES + row - 1,
+            &mut datagrams
+        ),
         Err(ProtoError::DatagramTooLarge {
             len: HEADER_BYTES + STRIP_HEADER_BYTES + row,
             max: HEADER_BYTES + STRIP_HEADER_BYTES + row - 1
         })
     );
     // Exactly one row's worth is enough, and then there is one strip per row.
-    encode_raster(&raster, 0, HEADER_BYTES + STRIP_HEADER_BYTES + row, &mut datagrams)
-        .expect("fits");
+    encode_raster(
+        &raster,
+        0,
+        HEADER_BYTES + STRIP_HEADER_BYTES + row,
+        &mut datagrams,
+    )
+    .expect("fits");
     assert_eq!(datagrams.len(), usize::from(H), "one strip per row");
     assert_eq!(reassemble(&datagrams, 0).as_bytes(), raster.as_bytes());
 }
@@ -153,17 +206,57 @@ fn a_datagram_limit_below_one_row_is_refused() {
 #[test]
 fn a_strip_with_impossible_geometry_is_refused() {
     let bad = [
-        Strip { width: 0, height: 180, y0: 0, rows: 1 },
-        Strip { width: 320, height: 0, y0: 0, rows: 1 },
-        Strip { width: 320, height: 180, y0: 0, rows: 0 },
-        Strip { width: 320, height: 180, y0: 179, rows: 2 },
-        Strip { width: 320, height: 180, y0: 180, rows: 1 },
-        Strip { width: 5000, height: 180, y0: 0, rows: 1 },
+        Strip {
+            width: 0,
+            height: 180,
+            y0: 0,
+            rows: 1,
+        },
+        Strip {
+            width: 320,
+            height: 0,
+            y0: 0,
+            rows: 1,
+        },
+        Strip {
+            width: 320,
+            height: 180,
+            y0: 0,
+            rows: 0,
+        },
+        Strip {
+            width: 320,
+            height: 180,
+            y0: 179,
+            rows: 2,
+        },
+        Strip {
+            width: 320,
+            height: 180,
+            y0: 180,
+            rows: 1,
+        },
+        Strip {
+            width: 5000,
+            height: 180,
+            y0: 0,
+            rows: 1,
+        },
     ];
     for strip in bad {
         assert!(strip.validate().is_err(), "{strip:?} must be refused");
     }
-    assert!(Strip { width: 320, height: 180, y0: 179, rows: 1 }.validate().is_ok(), "the last row");
+    assert!(
+        Strip {
+            width: 320,
+            height: 180,
+            y0: 179,
+            rows: 1
+        }
+        .validate()
+        .is_ok(),
+        "the last row"
+    );
 
     // And a payload whose length disagrees with its header is refused too.
     let raster = painted(8, 4);
@@ -172,7 +265,10 @@ fn a_strip_with_impossible_geometry_is_refused() {
     let (_, payload) = decode(&datagrams[0]).expect("decodes");
     let mut truncated = payload.to_vec();
     truncated.pop();
-    assert!(decode_strip(&truncated).is_err(), "a short payload is refused");
+    assert!(
+        decode_strip(&truncated).is_err(),
+        "a short payload is refused"
+    );
 }
 
 /// Format 2 is a third format beside the two cube ones, not a replacement: a cube frame
@@ -182,8 +278,16 @@ fn the_raster_format_is_the_third_one() {
     assert_eq!(Format::RasterStrip.code(), 2);
     assert_eq!(Format::FullFrame.code(), 0);
     assert_eq!(Format::SingleFace.code(), 1);
-    assert_eq!(Format::RasterStrip.fixed_payload_len(), None, "a strip is variable length");
-    assert_eq!(Format::RasterStrip.payload_len(), STRIP_HEADER_BYTES, "and that is its minimum");
+    assert_eq!(
+        Format::RasterStrip.fixed_payload_len(),
+        None,
+        "a strip is variable length"
+    );
+    assert_eq!(
+        Format::RasterStrip.payload_len(),
+        STRIP_HEADER_BYTES,
+        "and that is its minimum"
+    );
 }
 
 // --- pending FW-4 -----------------------------------------------------------------

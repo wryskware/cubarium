@@ -18,8 +18,8 @@ use std::time::Instant;
 use cubarium_core::config::FounderKind;
 use cubarium_core::ids::OrganismId;
 use cubarium_core::motor::MotorBill;
-use cubarium_core::neural::gru::{Gru32, OUTPUT};
 use cubarium_core::neural::Policy;
+use cubarium_core::neural::gru::{Gru32, OUTPUT};
 use cubarium_core::{DT, NeuralTiming, World, WorldConfig};
 use cubarium_surface::{Face, SurfacePoint};
 
@@ -67,13 +67,8 @@ fn probe_world() -> (World, OrganismId) {
         // law would refuse every bite for a reason that has nothing to do with the policy.
         o.reserve = 0.2 * o.phenotype.reserve_max;
         o.energy = o.phenotype.energy_max;
-        world.state.external_material_in += world
-            .state
-            .organisms
-            .get(id)
-            .expect("the founder")
-            .reserve
-            - before;
+        world.state.external_material_in +=
+            world.state.organisms.get(id).expect("the founder").reserve - before;
     }
     // A well-fed patch so grazing has something to bite.
     for cell in cubarium_surface::CellId::all(Topology::Cube, Scale::ONE) {
@@ -229,8 +224,14 @@ fn action_tape() {
     );
 
     // The two checks the review asked for, stated as checks rather than left to the reader.
-    let rest = rows.iter().find(|r| r.0.starts_with("rest")).expect("the rest row");
-    assert_eq!(rest.3, 0.0, "a closed mouth must record exactly zero intake");
+    let rest = rows
+        .iter()
+        .find(|r| r.0.starts_with("rest"))
+        .expect("the rest row");
+    assert_eq!(
+        rest.3, 0.0,
+        "a closed mouth must record exactly zero intake"
+    );
     let both = rows
         .iter()
         .find(|r| r.0.starts_with("travel and graze"))
@@ -334,9 +335,8 @@ fn throughput() {
                 nanos as f64 / calls as f64 / 1000.0
             }
         };
-        let summed = (t.sampler_nanos + t.inference_nanos + t.adapter_nanos) as f64
-            / body_ticks
-            / 1000.0;
+        let summed =
+            (t.sampler_nanos + t.inference_nanos + t.adapter_nanos) as f64 / body_ticks / 1000.0;
         println!(
             "| {bodies} | {:.3} | {:.3} | {:.3} | {summed:.3} | {}/{}/{} |",
             per(t.sampler_nanos, t.sampler_calls),

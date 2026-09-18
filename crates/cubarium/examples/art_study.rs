@@ -1,7 +1,6 @@
 //! Godot-authored sprite/animation study on the real five-face output path.
 //! Explicit development choreography; this is not an evolving population.
 
-use cubarium_surface::Topology;
 use anyhow::{Result, ensure};
 use clap::{Parser, ValueEnum};
 use cubarium::{
@@ -12,6 +11,7 @@ use cubarium::{
     sink::{FrameSink, Output, PngSink, PreviewSink, ShimSink, WebSink, WorldShape},
 };
 use cubarium_render::{Canvas, stamp_sprite};
+use cubarium_surface::Topology;
 use cubarium_surface::{PathSegment, SurfacePoint, Vec2, travel};
 use cube_proto::{Face, Frame};
 use std::{
@@ -145,7 +145,11 @@ fn main() -> Result<()> {
             let heading = Vec2::from_screen_angle(rng.range(-0.5, 0.5));
             plants.push((p, kind, heading, rng.range(0.65, 1.0)));
         }
-        let count = if args.scene == Scene::Gallery { 4 * rigs } else { 5 };
+        let count = if args.scene == Scene::Gallery {
+            4 * rigs
+        } else {
+            5
+        };
         for index in 0..count {
             let (u, v) = if args.scene == Scene::Gallery {
                 // Columns are rigs, rows are rest/move/feed/bud.
@@ -221,7 +225,11 @@ fn main() -> Result<()> {
                         let bend = 0.025 * (t * 0.17 + specimen.offset).sin() * DT;
                         let a = specimen.heading.screen_angle() + bend;
                         specimen.heading = Vec2::from_screen_angle(a);
-                        let step = travel(Topology::Cube, specimen.anchor, specimen.heading * (speed * DT));
+                        let step = travel(
+                            Topology::Cube,
+                            specimen.anchor,
+                            specimen.heading * (speed * DT),
+                        );
                         specimen.anchor = step.end;
                         specimen.heading = step.map.apply(specimen.heading);
                         specimen.moved = step.segments;

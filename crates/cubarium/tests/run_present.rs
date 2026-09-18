@@ -3,9 +3,9 @@
 
 mod support;
 
-use cube_proto::{FACE_SIZE, Face};
 use cubarium::net::{PNG_HEIGHT, PNG_WIDTH, net_origin};
 use cubarium_render::srgb_encode;
+use cube_proto::{FACE_SIZE, Face};
 use support::{Scratch, run};
 
 /// Decode one of the sink's captures into a tightly packed RGB8 net image.
@@ -15,7 +15,10 @@ fn read_net(path: &std::path::Path) -> Vec<u8> {
     let mut reader = decoder.read_info().unwrap();
     let mut buf = vec![0; reader.output_buffer_size().unwrap()];
     let info = reader.next_frame(&mut buf).unwrap();
-    assert_eq!((info.width as usize, info.height as usize), (PNG_WIDTH, PNG_HEIGHT));
+    assert_eq!(
+        (info.width as usize, info.height as usize),
+        (PNG_WIDTH, PNG_HEIGHT)
+    );
     assert_eq!(info.color_type, png::ColorType::Rgb);
     buf.truncate(info.buffer_size());
     buf
@@ -68,16 +71,25 @@ fn the_png_sink_captures_substrate_and_bodies_on_several_faces() {
     // Ten simulated seconds at twenty times real time: half a second of wall clock,
     // enough for several rendered frames.
     let outcome = run(&[
-        "--sink", "png",
-        "--speed", "20",
-        "--seconds", "10",
+        "--sink",
+        "png",
+        "--speed",
+        "20",
+        "--seconds",
+        "10",
         "--fresh",
-        "--state", state.to_str().unwrap(),
-        "--out", out.to_str().unwrap(),
-        "--every", "3",
+        "--state",
+        state.to_str().unwrap(),
+        "--out",
+        out.to_str().unwrap(),
+        "--every",
+        "3",
     ]);
     assert_eq!(outcome.final_tick, 200);
-    assert!(outcome.frames > 0, "the png sink must have been given frames");
+    assert!(
+        outcome.frames > 0,
+        "the png sink must have been given frames"
+    );
 
     let mut captures: Vec<std::path::PathBuf> = std::fs::read_dir(&out)
         .unwrap()
@@ -86,23 +98,37 @@ fn the_png_sink_captures_substrate_and_bodies_on_several_faces() {
         .filter(|p| p.extension().is_some_and(|e| e == "png"))
         .collect();
     captures.sort();
-    assert!(captures.len() >= 2, "expected several captures, got {captures:?}");
     assert!(
-        captures.iter().any(|p| p.file_name().unwrap() == "final.png"),
+        captures.len() >= 2,
+        "expected several captures, got {captures:?}"
+    );
+    assert!(
+        captures
+            .iter()
+            .any(|p| p.file_name().unwrap() == "final.png"),
         "the sink must write final.png on a clean stop"
     );
 
     let net = read_net(&out.join("final.png"));
     let stats = face_stats(&net);
     let substrate_faces = stats.iter().filter(|(_, lit, _)| *lit > 0).count();
-    assert_eq!(substrate_faces, 5, "the producer substrate covers every face: {stats:?}");
+    assert_eq!(
+        substrate_faces, 5,
+        "the producer substrate covers every face: {stats:?}"
+    );
     let body_faces = stats.iter().filter(|(_, _, bright)| *bright > 0).count();
-    assert!(body_faces > 1, "bodies must appear on more than one face: {stats:?}");
+    assert!(
+        body_faces > 1,
+        "bodies must appear on more than one face: {stats:?}"
+    );
 
     // A body is a compact stamp, not a wash: far fewer bright pixels than lit ones.
     let total_lit: usize = stats.iter().map(|(_, l, _)| l).sum();
     let total_bright: usize = stats.iter().map(|(_, _, b)| b).sum();
-    assert!(total_bright > 0 && total_bright * 4 < total_lit, "{total_bright} of {total_lit}");
+    assert!(
+        total_bright > 0 && total_bright * 4 < total_lit,
+        "{total_bright} of {total_lit}"
+    );
 
     // The floor is under every pixel of every face, including the faces the world has
     // not reached: nothing inside a face image is black.
@@ -155,7 +181,10 @@ fn the_presenter_paints_only_what_the_spec_lists() {
                 let under = substrate.get(face, x, y);
                 // Bodies and trails only ever add light.
                 for i in 0..3 {
-                    assert!(px[i] >= under[i] - 1e-6, "{face:?} {x},{y}: {px:?} vs {under:?}");
+                    assert!(
+                        px[i] >= under[i] - 1e-6,
+                        "{face:?} {x},{y}: {px:?} vs {under:?}"
+                    );
                 }
                 if (0..3).any(|i| px[i] - under[i] > 1e-4) {
                     body_faces.insert(face);
@@ -163,7 +192,10 @@ fn the_presenter_paints_only_what_the_spec_lists() {
             }
         }
     }
-    assert!(body_faces.len() > 1, "bodies must be visible on several faces: {body_faces:?}");
+    assert!(
+        body_faces.len() > 1,
+        "bodies must be visible on several faces: {body_faces:?}"
+    );
 
     // With no organisms and no fields there is the night floor and nothing else.
     let mut empty = fields_only;

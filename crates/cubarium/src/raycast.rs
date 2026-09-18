@@ -7,8 +7,8 @@
 //! The `-Y` plane is simply absent: the cube's bottom is open, and a ray that would only
 //! hit it shows background.
 
-use cube_proto::{FACE_SIZE, Face};
 use cubarium_surface::{FACE_EXTENT, face_frame};
+use cube_proto::{FACE_SIZE, Face};
 
 type V3 = [f64; 3];
 
@@ -19,7 +19,11 @@ fn dot(a: V3, b: V3) -> f64 {
 
 #[inline]
 fn cross(a: V3, b: V3) -> V3 {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 
 #[inline]
@@ -77,7 +81,10 @@ pub fn invert_face(face: Face, p: V3) -> Option<(f64, f64)> {
     }
     // `SurfacePoint::embed` uses `a = u / 32 - 1`, `b = v / 32 - 1`.
     let half = FACE_EXTENT / 2.0;
-    Some((((a + 1.0) * half).clamp(0.0, FACE_EXTENT), ((b + 1.0) * half).clamp(0.0, FACE_EXTENT)))
+    Some((
+        ((a + 1.0) * half).clamp(0.0, FACE_EXTENT),
+        ((b + 1.0) * half).clamp(0.0, FACE_EXTENT),
+    ))
 }
 
 /// The nearest of the five face planes hit by the ray `origin + t·dir`, `t > 0`.
@@ -193,9 +200,9 @@ impl Camera {
 
 #[cfg(test)]
 mod tests {
-    use cubarium_surface::{Scale, Topology};
     use super::*;
     use cubarium_surface::SurfacePoint;
+    use cubarium_surface::{Scale, Topology};
 
     /// The contract's required test: the ray-caster's face and `(u, v)` inversion must
     /// round-trip the `face_frame` embedding at the center of every one of the 20,480
@@ -212,15 +219,26 @@ mod tests {
 
                     // Straight inversion of the embedding.
                     let (u, v) = invert_face(face, target).expect("pixel center is on its face");
-                    assert!((u - (f64::from(x) + 0.5)).abs() < 1e-9, "{face:?} ({x},{y}) u={u}");
-                    assert!((v - (f64::from(y) + 0.5)).abs() < 1e-9, "{face:?} ({x},{y}) v={v}");
+                    assert!(
+                        (u - (f64::from(x) + 0.5)).abs() < 1e-9,
+                        "{face:?} ({x},{y}) u={u}"
+                    );
+                    assert!(
+                        (v - (f64::from(y) + 0.5)).abs() < 1e-9,
+                        "{face:?} ({x},{y}) v={v}"
+                    );
 
                     // The full cast from outside along the face normal must pick this
                     // face (not a farther plane) and land on this pixel.
                     let origin = add(target, scale(n, 3.0));
                     let hit = cast(origin, scale(n, -1.0)).expect("a ray down the normal hits");
                     assert_eq!(hit.face, face, "{face:?} ({x},{y}) hit {:?}", hit.face);
-                    assert_eq!(hit.pixel(), (x as u8, y as u8), "{face:?} ({x},{y}) -> {:?}", hit.pixel());
+                    assert_eq!(
+                        hit.pixel(),
+                        (x as u8, y as u8),
+                        "{face:?} ({x},{y}) -> {:?}",
+                        hit.pixel()
+                    );
                     assert!((hit.u - (f64::from(x) + 0.5)).abs() < 1e-9);
                     assert!((hit.v - (f64::from(y) + 0.5)).abs() < 1e-9);
                     checked += 1;
@@ -234,8 +252,14 @@ mod tests {
     fn the_bottom_is_open() {
         // There is no -Y plane, so a ray aimed up the axis passes straight through the
         // open bottom and lands on the *inside* of the Top face instead of a sixth face.
-        assert_eq!(cast([0.0, -5.0, 0.0], [0.0, 1.0, 0.0]).map(|h| h.face), Some(Face::Top));
-        assert_eq!(cast([0.3, -5.0, -0.4], [0.0, 1.0, 0.0]).map(|h| h.face), Some(Face::Top));
+        assert_eq!(
+            cast([0.0, -5.0, 0.0], [0.0, 1.0, 0.0]).map(|h| h.face),
+            Some(Face::Top)
+        );
+        assert_eq!(
+            cast([0.3, -5.0, -0.4], [0.0, 1.0, 0.0]).map(|h| h.face),
+            Some(Face::Top)
+        );
         // Outside the footprint, the ray misses the cube entirely.
         assert!(cast([3.0, -5.0, 0.0], [0.0, 1.0, 0.0]).is_none());
         // Grazing just below the cube: every plane hit falls outside its face square,
@@ -279,7 +303,10 @@ mod tests {
         // From every yaw the viewport center still shows some face (from below, the
         // open bottom may show through, so only check the upper hemisphere).
         for k in 0..16 {
-            let c = Camera { yaw: f64::from(k) * std::f64::consts::TAU / 16.0, ..Camera::default() };
+            let c = Camera {
+                yaw: f64::from(k) * std::f64::consts::TAU / 16.0,
+                ..Camera::default()
+            };
             let (o, d) = c.ray(0.0, 0.0);
             assert!(cast(o, d).is_some(), "yaw index {k}");
         }
@@ -291,7 +318,10 @@ mod tests {
         let mut hits = Vec::new();
         c.trace_viewport(64, &mut hits);
         assert_eq!(hits.len(), 64 * 64);
-        assert!(hits.iter().any(|h| h.is_none()), "the corners must be background");
+        assert!(
+            hits.iter().any(|h| h.is_none()),
+            "the corners must be background"
+        );
         let faces: std::collections::HashSet<Face> =
             hits.iter().flatten().map(|&(f, _, _)| f).collect();
         assert!(faces.contains(&Face::Front) && faces.contains(&Face::Right));

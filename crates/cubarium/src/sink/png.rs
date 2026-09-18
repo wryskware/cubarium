@@ -36,7 +36,14 @@ impl PngSink {
         let dir = dir.into();
         std::fs::create_dir_all(&dir)
             .with_context(|| format!("creating capture directory {}", dir.display()))?;
-        Ok(PngSink { dir, every: every.max(1), seen: 0, saved: 0, last: None, buf: Vec::new() })
+        Ok(PngSink {
+            dir,
+            every: every.max(1),
+            seen: 0,
+            saved: 0,
+            last: None,
+            buf: Vec::new(),
+        })
     }
 
     pub fn saved(&self) -> u64 {
@@ -167,9 +174,7 @@ mod tests {
             sink.finish().unwrap();
             assert_eq!(sink.saved(), 2, "frames 0 and 2");
 
-            let file = std::io::BufReader::new(
-                std::fs::File::open(dir.join("final.png")).unwrap(),
-            );
+            let file = std::io::BufReader::new(std::fs::File::open(dir.join("final.png")).unwrap());
             let decoder = ::png::Decoder::new(file);
             let mut reader = decoder.read_info().unwrap();
             let info = reader.info();
@@ -177,7 +182,11 @@ mod tests {
             assert_eq!(info.color_type, ::png::ColorType::Rgb);
             let mut back = vec![0u8; reader.output_buffer_size().expect("a bounded image")];
             let out = reader.next_frame(&mut back).unwrap();
-            assert_eq!(&back[..out.buffer_size()], raster.as_bytes(), "byte for byte");
+            assert_eq!(
+                &back[..out.buffer_size()],
+                raster.as_bytes(),
+                "byte for byte"
+            );
             std::fs::remove_dir_all(&dir).unwrap();
         }
     }

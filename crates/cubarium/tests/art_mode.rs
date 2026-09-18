@@ -9,11 +9,10 @@ use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use cube_proto::{FACE_SIZE, Face};
 use cubarium::art::{ArtPack, Clip, STATES};
-use cubarium::art_present::{rank_cap_of,
+use cubarium::art_present::{
     ArtPresenter, CANOPY_STAGES, FOLIAGE_STAGES, SOIL_SCALE, SOIL_STAGES, clip_time, form_of,
-    phase_of, present_seconds, soil_weight, state_of,
+    phase_of, present_seconds, rank_cap_of, soil_weight, state_of,
 };
 use cubarium::clock::DT;
 use cubarium::present::{JUVENILE_SCALE, PRODUCER_SATURATION, Presenter, interpolate};
@@ -23,6 +22,7 @@ use cubarium_core::organism::Mode;
 use cubarium_core::view::{OrganismView, RenderView};
 use cubarium_render::{Canvas, Sprite, stamp_sprite};
 use cubarium_surface::{CUBE_CELL_COUNT, CellId, PixelImage, SurfacePoint, Vec2};
+use cube_proto::{FACE_SIZE, Face};
 
 // ---------------------------------------------------------------------------
 // fixtures
@@ -50,7 +50,12 @@ fn producer_for_density(d: f64) -> f64 {
     d * PRODUCER_MAX * PRODUCER_SATURATION
 }
 
-fn view(tick: u64, producer: Vec<f64>, detritus: Vec<f64>, organisms: Vec<OrganismView>) -> RenderView {
+fn view(
+    tick: u64,
+    producer: Vec<f64>,
+    detritus: Vec<f64>,
+    organisms: Vec<OrganismView>,
+) -> RenderView {
     assert_eq!(producer.len(), CUBE_CELL_COUNT);
     assert_eq!(detritus.len(), CUBE_CELL_COUNT);
     RenderView {
@@ -77,21 +82,28 @@ fn view(tick: u64, producer: Vec<f64>, detritus: Vec<f64>, organisms: Vec<Organi
 /// may grow anywhere while the ramp still has real structure in it.
 fn quiet_producer() -> Vec<f64> {
     let ceiling = producer_for_density(CANOPY_STAGES[0]);
-    (0..CUBE_CELL_COUNT).map(|i| ceiling * (i % 20) as f64 / 20.0).collect()
+    (0..CUBE_CELL_COUNT)
+        .map(|i| ceiling * (i % 20) as f64 / 20.0)
+        .collect()
 }
 
 /// A detritus field with cells above and below the fleck threshold, and every cell below
 /// the soil's own first stage threshold so the soil band grows no plant either.
 fn mixed_detritus() -> Vec<f64> {
     let ceiling = SOIL_SCALE * SOIL_STAGES[0];
-    (0..CUBE_CELL_COUNT).map(|i| ceiling * (i % 13) as f64 / 13.0).collect()
+    (0..CUBE_CELL_COUNT)
+        .map(|i| ceiling * (i % 13) as f64 / 13.0)
+        .collect()
 }
 
 /// Pixels of `after` that differ from `before` and are wholly above the horizon. The
 /// decided M2 image says nothing about the soil band, so comparisons against it are only
 /// meaningful where there is no soil.
 fn differing_above_horizon(a: &Canvas, b: &Canvas) -> Vec<(Face, u16, u16)> {
-    differing(a, b).into_iter().filter(|&(f, x, y)| soil_weight(f, x, y) == 0.0).collect()
+    differing(a, b)
+        .into_iter()
+        .filter(|&(f, x, y)| soil_weight(f, x, y) == 0.0)
+        .collect()
 }
 
 fn flat(value: f64) -> Vec<f64> {
@@ -136,7 +148,9 @@ fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
 
 /// Pixels where the two canvases are not bit-for-bit the same value.
 fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u16, u16)> {
-    every_pixel().filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y)).collect()
+    every_pixel()
+        .filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y))
+        .collect()
 }
 
 fn assert_same_canvas(a: &Canvas, b: &Canvas, what: &str) {
@@ -196,14 +210,22 @@ fn form_of_follows_min_two_floor_hue_times_three() {
         let below = f32::from_bits(boundary.to_bits() - 1);
         let above = f32::from_bits(boundary.to_bits() + 1);
         for hue in [below, boundary, above] {
-            assert_eq!(form_of(hue), expected_form(hue), "hue {hue:?} near a tercile");
+            assert_eq!(
+                form_of(hue),
+                expected_form(hue),
+                "hue {hue:?} near a tercile"
+            );
         }
     }
     // Named cases from the brief.
     assert_eq!(form_of(0.0), 0);
     assert_eq!(form_of(0.34), 1);
     assert_eq!(form_of(0.99), 2);
-    assert_eq!(form_of(1.0), 2, "hue 1 is the top tercile, not a fourth rig");
+    assert_eq!(
+        form_of(1.0),
+        2,
+        "hue 1 is the top tercile, not a fourth rig"
+    );
     assert_eq!(form_of(f32::NAN), 0, "a NaN hue is form 0");
 }
 
@@ -227,7 +249,10 @@ fn form_of_never_leaves_the_three_rigs() {
     ];
     for hue in hostile {
         let form = form_of(hue);
-        assert!(form <= 2, "hue {hue:?} selected rig {form}, but the pack has 3 rigs");
+        assert!(
+            form <= 2,
+            "hue {hue:?} selected rig {form}, but the pack has 3 rigs"
+        );
     }
     // And the pack must actually be able to answer for every rig the function can name.
     let pack = pack();
@@ -250,7 +275,11 @@ fn state_of_maps_each_mode_to_its_documented_clip() {
     ] {
         let o = organism(id(1, 1), 0.5, mode, at);
         assert_eq!(state_of(&o), want, "{mode:?}");
-        assert_eq!(STATES[state_of(&o)], name, "{mode:?} must select the {name} clip");
+        assert_eq!(
+            STATES[state_of(&o)],
+            name,
+            "{mode:?} must select the {name} clip"
+        );
     }
 }
 
@@ -328,13 +357,24 @@ fn phase_of_spreads_a_population_over_the_whole_clip() {
         buckets[((p / seconds) * 8.0) as usize % 8] += 1;
     }
     for (i, &n) in buckets.iter().enumerate() {
-        assert!(n > 0, "no organism phased into eighth {i} of the clip: {buckets:?}");
+        assert!(
+            n > 0,
+            "no organism phased into eighth {i} of the clip: {buckets:?}"
+        );
     }
 }
 
 #[test]
 fn phase_of_yields_zero_for_a_degenerate_clip_length() {
-    for seconds in [0.0f64, -0.0, -1.0, -4.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+    for seconds in [
+        0.0f64,
+        -0.0,
+        -1.0,
+        -4.0,
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+    ] {
         for slot in [0u32, 1, 7, 12345] {
             assert_eq!(
                 phase_of(id(slot, 2), seconds),
@@ -393,7 +433,10 @@ fn clip_time_ignores_wall_clock_delay() {
     let second = clip_time(clip, seconds, phase, None);
     std::thread::sleep(Duration::from_millis(8));
     let third = clip_time(clip, seconds, phase, None);
-    assert_eq!(first, second, "the same tick must sample the same instant of the clip");
+    assert_eq!(
+        first, second,
+        "the same tick must sample the same instant of the clip"
+    );
     assert_eq!(second, third);
 }
 
@@ -431,7 +474,10 @@ fn clip_time_keeps_looping_clips_on_simulated_time_even_while_gestating() {
     let pack = pack();
     let clip = clip_of(&pack, 2, 1);
     let phase = phase_of(id(3, 3), clip.seconds);
-    assert_eq!(clip_time(clip, 40.0 * DT, phase, Some(0.5)), 40.0 * DT + phase);
+    assert_eq!(
+        clip_time(clip, 40.0 * DT, phase, Some(0.5)),
+        40.0 * DT + phase
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -446,20 +492,43 @@ fn draw_is_a_pure_function_of_the_view() {
         quiet_producer(),
         mixed_detritus(),
         vec![
-            organism(id(2, 1), 0.1, Mode::Resting, SurfacePoint::new(Face::Front, 20.0, 20.0)),
-            organism(id(5, 2), 0.5, Mode::Seeking, SurfacePoint::new(Face::Top, 32.0, 32.0)),
-            organism(id(8, 3), 0.9, Mode::Feeding, SurfacePoint::new(Face::Left, 40.0, 12.0)),
+            organism(
+                id(2, 1),
+                0.1,
+                Mode::Resting,
+                SurfacePoint::new(Face::Front, 20.0, 20.0),
+            ),
+            organism(
+                id(5, 2),
+                0.5,
+                Mode::Seeking,
+                SurfacePoint::new(Face::Top, 32.0, 32.0),
+            ),
+            organism(
+                id(8, 3),
+                0.9,
+                Mode::Feeding,
+                SurfacePoint::new(Face::Left, 40.0, 12.0),
+            ),
         ],
     );
     let first = draw_art(&mut p, &v, 0.25);
     std::thread::sleep(Duration::from_millis(12));
     let second = draw_art(&mut p, &v, 0.25);
-    assert_same_canvas(&first, &second, "two draws of the same view separated by wall time");
+    assert_same_canvas(
+        &first,
+        &second,
+        "two draws of the same view separated by wall time",
+    );
 }
 
 /// Draw one body of `hue` in `mode` at `tick`, on a bare floor.
 fn pose_at(p: &mut ArtPresenter, body: &OrganismView, tick: u64) -> Canvas {
-    draw_art(p, &view(tick, flat(0.0), flat(0.0), vec![body.clone()]), 0.0)
+    draw_art(
+        p,
+        &view(tick, flat(0.0), flat(0.0), vec![body.clone()]),
+        0.0,
+    )
 }
 
 /// A slot whose clip phase sits comfortably inside a frame, so a period test measures the
@@ -497,7 +566,12 @@ fn a_whole_clip_period_later_a_resting_body_holds_the_same_pose() {
     let rest = clip_of(&pack_ref, form, 0);
     let period_ticks = whole_ticks(rest);
     let slot = slot_phased_mid_frame(rest, 1);
-    let body = organism(id(slot, 1), hue, Mode::Resting, SurfacePoint::new(Face::Front, 30.0, 30.0));
+    let body = organism(
+        id(slot, 1),
+        hue,
+        Mode::Resting,
+        SurfacePoint::new(Face::Front, 30.0, 30.0),
+    );
 
     let mut p = presenter();
     let now = pose_at(&mut p, &body, 100);
@@ -507,7 +581,10 @@ fn a_whole_clip_period_later_a_resting_body_holds_the_same_pose() {
     // Non-vacuity: somewhere strictly inside the period the pose must actually change.
     let moved = (1..period_ticks)
         .any(|offset| !differing(&now, &pose_at(&mut p, &body, 100 + offset)).is_empty());
-    assert!(moved, "the rest clip never changed pose anywhere inside its period");
+    assert!(
+        moved,
+        "the rest clip never changed pose anywhere inside its period"
+    );
 }
 
 #[test]
@@ -522,7 +599,12 @@ fn a_feeding_body_repeats_on_its_own_period_and_not_before() {
     let feed = clip_of(&pack_ref, form, 2);
     let period_ticks = whole_ticks(feed);
     let slot = slot_phased_mid_frame(feed, 6);
-    let body = organism(id(slot, 6), hue, Mode::Feeding, SurfacePoint::new(Face::Left, 30.0, 30.0));
+    let body = organism(
+        id(slot, 6),
+        hue,
+        Mode::Feeding,
+        SurfacePoint::new(Face::Left, 30.0, 30.0),
+    );
 
     // From tick 1, not tick 0: the presentation clock of a frame is the interval `tick − 1
     // → tick`, so ticks 0 and 1 both show simulated instant 0 and only ticks from 1 on are
@@ -574,7 +656,10 @@ fn an_empty_quiet_world_draws_exactly_the_m2_image_above_the_horizon() {
         diff.len(),
         diff[0],
     );
-    assert!(total_light(&art_canvas) > 0.0, "the fixture must actually draw something");
+    assert!(
+        total_light(&art_canvas) > 0.0,
+        "the fixture must actually draw something"
+    );
     // Non-vacuity: the soil band is a different image, which is the point of the bands.
     assert!(
         !differing(&art_canvas, &old_canvas).is_empty(),
@@ -586,7 +671,14 @@ fn an_empty_quiet_world_draws_exactly_the_m2_image_above_the_horizon() {
 fn a_rich_cell_adds_a_plant_and_nothing_else() {
     // A foliage cell that can grow at all: sprout-only slots (rank cap 0) stay bare by rule.
     let cell = CellId::all(Topology::Cube, Scale::ONE)
-        .find(|&c| c.face(Topology::Cube, Scale::ONE) == Face::Front && c.cy(Topology::Cube, Scale::ONE) >= 5 && c.cy(Topology::Cube, Scale::ONE) <= 8 && c.cx(Topology::Cube, Scale::ONE) >= 6 && c.cx(Topology::Cube, Scale::ONE) <= 10 && rank_cap_of(c) >= 1)
+        .find(|&c| {
+            c.face(Topology::Cube, Scale::ONE) == Face::Front
+                && c.cy(Topology::Cube, Scale::ONE) >= 5
+                && c.cy(Topology::Cube, Scale::ONE) <= 8
+                && c.cx(Topology::Cube, Scale::ONE) >= 6
+                && c.cx(Topology::Cube, Scale::ONE) <= 10
+                && rank_cap_of(c) >= 1
+        })
         .expect("a growable foliage cell near the middle of Front");
     let center = cell.center(Topology::Cube, Scale::ONE);
     let mut producer = quiet_producer();
@@ -604,7 +696,10 @@ fn a_rich_cell_adds_a_plant_and_nothing_else() {
     // Above the horizon the only thing the art image adds to the M2 image is the motif:
     // the soil band is a different ground and is excluded here, not from the drawing.
     let diff = differing_above_horizon(&art_canvas, &old_canvas);
-    assert!(!diff.is_empty(), "a cell above the last stage threshold must grow a visible plant");
+    assert!(
+        !diff.is_empty(),
+        "a cell above the last stage threshold must grow a visible plant"
+    );
 
     // The plant is one sprite stamped at the cell centre with at most +-1 px of jitter
     // per axis, and a plant tile's extent is under the 9 px budget, so everything it
@@ -612,7 +707,11 @@ fn a_rich_cell_adds_a_plant_and_nothing_else() {
     // under a pixel).
     let mut worst = 0.0f64;
     for &(face, x, y) in &diff {
-        assert_eq!(face, Face::Front, "the plant escaped its face at ({x}, {y})");
+        assert_eq!(
+            face,
+            Face::Front,
+            "the plant escaped its face at ({x}, {y})"
+        );
         let dx = f64::from(x) + 0.5 - center.u;
         let dy = f64::from(y) + 0.5 - center.v;
         worst = worst.max(dx.hypot(dy));
@@ -655,12 +754,23 @@ fn a_full_gestation_draws_the_bud_clips_last_frame() {
         phase,
         body.gestation,
     );
-    assert_eq!(t, bud_seconds, "progress 1 must land exactly on the end of the bud clip");
+    assert_eq!(
+        t, bud_seconds,
+        "progress 1 must land exactly on the end of the bud clip"
+    );
 
     let (anchor, facing) = interpolate(&body.moved, body.pos, body.heading, 0.0);
     let sprite: &Sprite = p.pack().creature(form, 3, t);
     let mut scratch: Vec<PixelImage> = Vec::new();
-    stamp_sprite(&mut expected, anchor, facing, sprite, 1.0, 1.0, &mut scratch);
+    stamp_sprite(
+        &mut expected,
+        anchor,
+        facing,
+        sprite,
+        1.0,
+        1.0,
+        &mut scratch,
+    );
 
     assert_same_canvas(
         &actual,
@@ -680,15 +790,19 @@ fn a_juvenile_draws_a_smaller_footprint_than_an_adult() {
     let adult = organism(id(21, 1), hue, Mode::Seeking, at);
     let mut juvenile = adult.clone();
     juvenile.juvenile = true;
-    const { assert!(JUVENILE_SCALE < 1.0, "the juvenile scale must actually shrink the body") };
+    const {
+        assert!(
+            JUVENILE_SCALE < 1.0,
+            "the juvenile scale must actually shrink the body"
+        )
+    };
 
     let empty = view(55, flat(0.0), flat(0.0), Vec::new());
     let mut p = presenter();
     let background = draw_art(&mut p, &empty, 0.0);
 
     let adult_canvas = draw_art(&mut p, &view(55, flat(0.0), flat(0.0), vec![adult]), 0.0);
-    let juvenile_canvas =
-        draw_art(&mut p, &view(55, flat(0.0), flat(0.0), vec![juvenile]), 0.0);
+    let juvenile_canvas = draw_art(&mut p, &view(55, flat(0.0), flat(0.0), vec![juvenile]), 0.0);
 
     let adult_px = differing(&adult_canvas, &background).len();
     let juvenile_px = differing(&juvenile_canvas, &background).len();
@@ -723,15 +837,31 @@ fn a_body_on_a_seam_spans_both_faces_and_conserves_light() {
     let background = draw_art(&mut p, &empty, 0.0);
     let base_light = total_light(&background);
 
-    let on_seam = draw_art(&mut p, &view(200, flat(0.0), flat(0.0), vec![seam_body]), 0.0);
-    let at_center =
-        draw_art(&mut p, &view(200, flat(0.0), flat(0.0), vec![center_body]), 0.0);
+    let on_seam = draw_art(
+        &mut p,
+        &view(200, flat(0.0), flat(0.0), vec![seam_body]),
+        0.0,
+    );
+    let at_center = draw_art(
+        &mut p,
+        &view(200, flat(0.0), flat(0.0), vec![center_body]),
+        0.0,
+    );
 
     let touched = differing(&on_seam, &background);
-    let on_front = touched.iter().filter(|&&(f, _, _)| f == Face::Front).count();
-    let on_right = touched.iter().filter(|&&(f, _, _)| f == Face::Right).count();
+    let on_front = touched
+        .iter()
+        .filter(|&&(f, _, _)| f == Face::Front)
+        .count();
+    let on_right = touched
+        .iter()
+        .filter(|&&(f, _, _)| f == Face::Right)
+        .count();
     assert!(on_front > 0, "the seam body lit nothing on Front");
-    assert!(on_right > 0, "the seam body lit nothing on Right: it did not cross the seam");
+    assert!(
+        on_right > 0,
+        "the seam body lit nothing on Right: it did not cross the seam"
+    );
     assert_eq!(
         on_front + on_right,
         touched.len(),
@@ -740,7 +870,10 @@ fn a_body_on_a_seam_spans_both_faces_and_conserves_light() {
 
     let added_seam = total_light(&on_seam) - base_light;
     let added_center = total_light(&at_center) - base_light;
-    assert!(added_center > 0.0, "the reference body at the face centre lit nothing");
+    assert!(
+        added_center > 0.0,
+        "the reference body at the face centre lit nothing"
+    );
     assert!(
         (added_seam - added_center).abs() <= 1e-4,
         "light is not conserved across the seam: {added_seam} on the seam vs \
@@ -757,10 +890,17 @@ fn a_body_on_a_seam_spans_both_faces_and_conserves_light() {
 /// lowercased head and the body. The sink closes the connection itself.
 fn http_get(addr: SocketAddr, path: &str) -> (String, String, Vec<u8>) {
     let mut stream = TcpStream::connect(addr).expect("connect to the sink");
-    stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-    stream.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
-    write!(stream, "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-        .expect("write the request");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    stream
+        .set_write_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+    )
+    .expect("write the request");
     let mut raw = Vec::new();
     stream.read_to_end(&mut raw).expect("read the response");
     let split = raw
@@ -798,5 +938,9 @@ fn web_sink_without_a_note_serves_an_empty_body() {
 
     let (status, _head, body) = http_get(sink.addr(), "/note");
     assert!(status.starts_with("HTTP/1.1 200"), "status was {status:?}");
-    assert!(body.is_empty(), "expected no note, got {:?}", String::from_utf8_lossy(&body));
+    assert!(
+        body.is_empty(),
+        "expected no note, got {:?}",
+        String::from_utf8_lossy(&body)
+    );
 }

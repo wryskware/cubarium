@@ -112,8 +112,7 @@ pub const TREATMENTS: [(f32, f32); 4] = [
 ];
 
 /// Short names for the four, in index order.
-pub const TREATMENT_NAMES: [&str; 4] =
-    ["T0 wet/0.60", "T1 wet/0.85", "T2 mid/0.60", "T3 mid/0.85"];
+pub const TREATMENT_NAMES: [&str; 4] = ["T0 wet/0.60", "T1 wet/0.85", "T2 mid/0.60", "T3 mid/0.85"];
 
 /// Which treatment row `row` puts in `slot`: `(slot mod 4) XOR row`.
 ///
@@ -186,9 +185,14 @@ pub fn landscape_census(land: &Landscape) -> Vec<(f64, usize, usize)> {
         .iter()
         .enumerate()
         .map(|(b, &hi)| {
-            let lo = if b == 0 { f64::NEG_INFINITY } else { DEPTH_BANDS[b - 1] };
-            let in_band: Vec<usize> =
-                (0..CUBE_CELL_COUNT).filter(|&i| land.depth[i] > lo && land.depth[i] <= hi).collect();
+            let lo = if b == 0 {
+                f64::NEG_INFINITY
+            } else {
+                DEPTH_BANDS[b - 1]
+            };
+            let in_band: Vec<usize> = (0..CUBE_CELL_COUNT)
+                .filter(|&i| land.depth[i] > lo && land.depth[i] <= hi)
+                .collect();
             let fed = in_band.iter().filter(|&&i| land.foliage[i] > 0.0).count();
             (hi, in_band.len(), fed)
         })
@@ -268,9 +272,7 @@ impl Arm {
             Arm::A => "diet within body: the roster skimmer at 0.60 against the same body at 0.85",
             Arm::B => "body within diet: every roster body held at 0.85, a pure foliage feeder",
             Arm::C => "the founder pairing: every roster body at its own roster diet",
-            Arm::ASwap => {
-                "arm A with the diets swapped between the slot pairs: the counterbalance"
-            }
+            Arm::ASwap => "arm A with the diets swapped between the slot pairs: the counterbalance",
             Arm::D1 | Arm::D2 | Arm::D3 | Arm::D4 => {
                 "depth x diet on the skimmer body: one row of the 4 x 8 Latin square"
             }
@@ -422,7 +424,9 @@ impl Roster {
     }
 
     pub fn genome(&self, form: u8) -> &Genome {
-        self.by_form.get(&form).unwrap_or_else(|| panic!("form {form} is on the roster"))
+        self.by_form
+            .get(&form)
+            .unwrap_or_else(|| panic!("form {form} is on the roster"))
     }
 }
 
@@ -477,7 +481,11 @@ pub fn warm_up(
             *s /= n;
         }
     }
-    Ok(Landscape { depth, foliage, litter })
+    Ok(Landscape {
+        depth,
+        foliage,
+        litter,
+    })
 }
 
 /// Two cells are too close when they share a face and lie within [`MIN_SEPARATION`] cells of
@@ -486,10 +494,14 @@ pub fn warm_up(
 /// one pool.
 fn too_close(a: CellId, b: CellId) -> bool {
     a.face(Topology::Cube, Scale::ONE) == b.face(Topology::Cube, Scale::ONE)
-        && (i32::from(a.cx(Topology::Cube, Scale::ONE)) - i32::from(b.cx(Topology::Cube, Scale::ONE)))
-            .abs()
-            .max((i32::from(a.cy(Topology::Cube, Scale::ONE)) - i32::from(b.cy(Topology::Cube, Scale::ONE))).abs())
-            < MIN_SEPARATION
+        && (i32::from(a.cx(Topology::Cube, Scale::ONE))
+            - i32::from(b.cx(Topology::Cube, Scale::ONE)))
+        .abs()
+        .max(
+            (i32::from(a.cy(Topology::Cube, Scale::ONE))
+                - i32::from(b.cy(Topology::Cube, Scale::ONE)))
+            .abs(),
+        ) < MIN_SEPARATION
 }
 
 /// The eight anchors the clones are placed at, spread over all five faces and well separated
@@ -548,7 +560,13 @@ pub fn choose_cells(land: &Landscape, wet_min: f64) -> Result<[Placement; CLONES
     let mut taken: Vec<CellId> = Vec::with_capacity(CLONES);
     let mut chosen: Vec<Placement> = Vec::with_capacity(CLONES);
     for &(face, ax, ay) in ANCHORS.iter() {
-        let anchor = CellId::new(Topology::Cube, Scale::ONE, face, u16::from(ax), u16::from(ay));
+        let anchor = CellId::new(
+            Topology::Cube,
+            Scale::ONE,
+            face,
+            u16::from(ax),
+            u16::from(ay),
+        );
         // Outward in Chebyshev rings from the anchor, within its own face: the first living
         // cell far enough from everything already taken. Ring members are visited in
         // `(cx, cy)` order, so the choice is a function of the landscape and nothing else.
@@ -586,7 +604,9 @@ pub fn choose_cells(land: &Landscape, wet_min: f64) -> Result<[Placement; CLONES
             mean_litter: land.litter[cell.index()],
         });
     }
-    chosen.try_into().map_err(|_| "the anchors did not resolve to eight cells".to_string())
+    chosen
+        .try_into()
+        .map_err(|_| "the anchors did not resolve to eight cells".to_string())
 }
 
 /// The eight clones of one arm, in slot order.
@@ -814,7 +834,15 @@ fn run_inner(arm: Arm, seed: u64, design: Design, ledger: bool) -> Result<ArmRun
     // mutated either: mutation only reaches offspring, and these have none.
     world.set_scripted_intents(
         ids.iter()
-            .map(|id| (*id, ScriptedIntent { bud: Some(false), ..ScriptedIntent::default() }))
+            .map(|id| {
+                (
+                    *id,
+                    ScriptedIntent {
+                        bud: Some(false),
+                        ..ScriptedIntent::default()
+                    },
+                )
+            })
             .collect(),
     );
 
@@ -829,7 +857,9 @@ fn run_inner(arm: Arm, seed: u64, design: Design, ledger: bool) -> Result<ArmRun
 
         if tick % design.probe_every == 0 {
             for (slot, id) in ids.iter().enumerate() {
-                let Some(o) = world.state.organisms.get(*id) else { continue };
+                let Some(o) = world.state.organisms.get(*id) else {
+                    continue;
+                };
                 let cell = cell_of(Topology::Cube, Scale::ONE, &o.pos);
                 let t = &mut tracks[slot];
                 if !t.seen[cell.index()] {
@@ -862,7 +892,10 @@ fn run_inner(arm: Arm, seed: u64, design: Design, ledger: bool) -> Result<ArmRun
         // Every clone is gone: the arm has nothing left to measure, and running the world on
         // would change no number in it. The condition reads the *organisms*, not the ledger,
         // so a run with recording off stops at exactly the same tick.
-        if ids.iter().all(|id| world.state.organisms.get(*id).is_none()) {
+        if ids
+            .iter()
+            .all(|id| world.state.organisms.get(*id).is_none())
+        {
             stopped_early = true;
             break;
         }
@@ -931,7 +964,11 @@ fn run_inner(arm: Arm, seed: u64, design: Design, ledger: bool) -> Result<ArmRun
             growth_energy: b.growth_energy,
             reproduction_energy: b.reproduction_energy,
             net_margin,
-            net_margin_per_second: if seconds > 0.0 { net_margin / seconds } else { 0.0 },
+            net_margin_per_second: if seconds > 0.0 {
+                net_margin / seconds
+            } else {
+                0.0
+            },
             usable_start: b.usable_start(e_r),
             usable_end: b.usable_end(e_r),
             material_residual: b.material_residual(),
@@ -1046,8 +1083,10 @@ pub fn run(
         return Err("the factorial needs at least one arm and one seed".into());
     }
     let workers = workers.max(1);
-    let jobs: Vec<(Arm, u64)> =
-        arms.iter().flat_map(|a| seeds.iter().map(move |s| (*a, *s))).collect();
+    let jobs: Vec<(Arm, u64)> = arms
+        .iter()
+        .flat_map(|a| seeds.iter().map(move |s| (*a, *s)))
+        .collect();
 
     std::fs::create_dir_all(out).map_err(|e| format!("creating {}: {e}", out.display()))?;
     let rows_path = out.join("runs.jsonl");
@@ -1090,11 +1129,19 @@ pub fn run(
         }
     });
 
-    let failures = failures.into_inner().map_err(|_| "a worker panicked".to_string())?;
+    let failures = failures
+        .into_inner()
+        .map_err(|_| "a worker panicked".to_string())?;
     if !failures.is_empty() {
-        return Err(format!("{} run(s) failed: {}", failures.len(), failures.join("; ")));
+        return Err(format!(
+            "{} run(s) failed: {}",
+            failures.len(),
+            failures.join("; ")
+        ));
     }
-    let mut rows = results.into_inner().map_err(|_| "a worker panicked".to_string())?;
+    let mut rows = results
+        .into_inner()
+        .map_err(|_| "a worker panicked".to_string())?;
     rows.sort_by_key(|(i, _)| *i);
     let rows: Vec<ArmRun> = rows.into_iter().map(|(_, r)| r).collect();
 
@@ -1153,7 +1200,10 @@ pub fn command(
     let seeds = crate::calibrate::SeedSet::parse(seed_set)?.seeds(seeds)?;
     println!("build {BUILD_ID}");
     println!("ecology {ECOLOGY}");
-    println!("seeds {seeds:?}  arms {:?}", arms.iter().map(|a| a.label()).collect::<Vec<_>>());
+    println!(
+        "seeds {seeds:?}  arms {:?}",
+        arms.iter().map(|a| a.label()).collect::<Vec<_>>()
+    );
     println!(
         "design ticks {} warm-up {} probe/{} drain/{} wet_min {} pursuit-stop {}",
         design.ticks,
@@ -1178,7 +1228,9 @@ pub fn command(
             // that matter rather than by a band average that can hide them.
             let mut deepest: Vec<usize> = (0..CUBE_CELL_COUNT).collect();
             deepest.sort_by(|&a, &b| {
-                land.depth[b].partial_cmp(&land.depth[a]).unwrap_or(std::cmp::Ordering::Equal)
+                land.depth[b]
+                    .partial_cmp(&land.depth[a])
+                    .unwrap_or(std::cmp::Ordering::Equal)
             });
             println!(
                 "ten deepest cells: {}",
@@ -1224,7 +1276,10 @@ pub fn command(
     rows.sort_by_key(|r| (r.arm, r.seed));
     print_report(&rows);
     print_depth_analysis(&rows);
-    println!("\nruns {} in {:.1} s on {workers} workers", report.runs, report.wall_seconds);
+    println!(
+        "\nruns {} in {:.1} s on {workers} workers",
+        report.runs, report.wall_seconds
+    );
     println!("simulated ticks {}", report.simulated_ticks);
     println!(
         "worst |material residual| {:.3e}   worst |energy residual| {:.3e}",
@@ -1251,9 +1306,7 @@ pub fn print_report(rows: &[ArmRun]) {
             "\n| kind | depth | diet | start | n | survived | mean life (s) | served f/F/l/c | \
              credited (m) | billed (e) | net margin (e/s) | cells | wet probes |"
         );
-        println!(
-            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
-        );
+        println!("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
         // One line per (kind, depth, diet, start class), pooled over seeds. `depth` is in the
         // key because workstream O moves it; for every other arm each kind has exactly one
         // value of it, so those tables are unchanged apart from the extra column.
@@ -1303,7 +1356,11 @@ pub fn median_of(mut v: Vec<f64>) -> f64 {
     }
     v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let n = v.len();
-    if n % 2 == 1 { v[n / 2] } else { 0.5 * (v[n / 2 - 1] + v[n / 2]) }
+    if n % 2 == 1 {
+        v[n / 2]
+    } else {
+        0.5 * (v[n / 2 - 1] + v[n / 2])
+    }
 }
 
 fn established(c: &CloneRow) -> bool {
@@ -1318,7 +1375,10 @@ fn established(c: &CloneRow) -> bool {
 /// of them — and the per-seed tables are what "4 of 4 agree" is read off. No clone-level test
 /// is computed: 32 lives sharing four worlds are not 32 independent observations.
 pub fn print_depth_analysis(rows: &[ArmRun]) {
-    let runs: Vec<&ArmRun> = rows.iter().filter(|r| r.arm.depth_row().is_some()).collect();
+    let runs: Vec<&ArmRun> = rows
+        .iter()
+        .filter(|r| r.arm.depth_row().is_some())
+        .collect();
     if runs.is_empty() {
         return;
     }
@@ -1407,8 +1467,11 @@ pub fn print_depth_analysis(rows: &[ArmRun]) {
         for &seed in &seeds {
             let mut line = format!("| {seed} {kind} |");
             for t in 0..4 {
-                let cs: Vec<&CloneRow> =
-                    cells.iter().filter(|(k, _)| k.0 == seed).map(|(_, q)| q[t]).collect();
+                let cs: Vec<&CloneRow> = cells
+                    .iter()
+                    .filter(|(k, _)| k.0 == seed)
+                    .map(|(_, q)| q[t])
+                    .collect();
                 let text = match kind {
                     "median life" => format!(
                         " {:.0} s |",
@@ -1444,10 +1507,14 @@ pub fn print_depth_analysis(rows: &[ArmRun]) {
         ("the roster skimmer vs both loci moved", 0, 3),
     ];
     for (label, a, b) in contrasts {
-        let won = cells.iter().filter(|(_, q)| q[a].lifetime_seconds > q[b].lifetime_seconds);
+        let won = cells
+            .iter()
+            .filter(|(_, q)| q[a].lifetime_seconds > q[b].lifetime_seconds);
         let won = won.count();
-        let ties =
-            cells.iter().filter(|(_, q)| q[a].lifetime_seconds == q[b].lifetime_seconds).count();
+        let ties = cells
+            .iter()
+            .filter(|(_, q)| q[a].lifetime_seconds == q[b].lifetime_seconds)
+            .count();
         let est = |t: usize| cells.iter().filter(|(_, q)| established(q[t])).count();
         let med = |t: usize| median_of(cells.iter().map(|(_, q)| q[t].lifetime_seconds).collect());
         let per_seed = |t: usize, u: usize, on_est: bool| {
@@ -1455,7 +1522,11 @@ pub fn print_depth_analysis(rows: &[ArmRun]) {
                 .iter()
                 .filter(|&&s| {
                     let pick = |t: usize| -> Vec<&CloneRow> {
-                        cells.iter().filter(|(k, _)| k.0 == s).map(|(_, q)| q[t]).collect()
+                        cells
+                            .iter()
+                            .filter(|(k, _)| k.0 == s)
+                            .map(|(_, q)| q[t])
+                            .collect()
                     };
                     let (x, y) = (pick(t), pick(u));
                     if on_est {
@@ -1487,10 +1558,14 @@ pub fn print_depth_analysis(rows: &[ArmRun]) {
     // 0.10 is `life(T1) − life(T0)` and at depth 0.55 it is `life(T3) − life(T2)`; the
     // interaction is the difference of those two, cell by cell, so it is free of both the
     // cell and the world.
-    let d_low: Vec<f64> =
-        cells.iter().map(|(_, q)| q[1].lifetime_seconds - q[0].lifetime_seconds).collect();
-    let d_high: Vec<f64> =
-        cells.iter().map(|(_, q)| q[3].lifetime_seconds - q[2].lifetime_seconds).collect();
+    let d_low: Vec<f64> = cells
+        .iter()
+        .map(|(_, q)| q[1].lifetime_seconds - q[0].lifetime_seconds)
+        .collect();
+    let d_high: Vec<f64> = cells
+        .iter()
+        .map(|(_, q)| q[3].lifetime_seconds - q[2].lifetime_seconds)
+        .collect();
     let inter: Vec<f64> = d_low.iter().zip(&d_high).map(|(a, b)| a - b).collect();
     let same_sign = d_low
         .iter()
@@ -1520,7 +1595,10 @@ pub fn print_depth_analysis(rows: &[ArmRun]) {
         same_sign,
         cells.len()
     );
-    println!("\n| establishment, of {} cells | diet 0.60 | diet 0.85 |", cells.len());
+    println!(
+        "\n| establishment, of {} cells | diet 0.60 | diet 0.85 |",
+        cells.len()
+    );
     println!("| --- | --- | --- |");
     for (name, lo, hi) in [("depth 0.10", 0usize, 1usize), ("depth 0.55", 2, 3)] {
         println!(
@@ -1535,7 +1613,8 @@ pub fn print_depth_analysis(rows: &[ArmRun]) {
     // standing there feels no depth term at all. Slot 4's anchor is on Top in every seed, so
     // it is a control the design did not have to add: if the depth effect is the steering
     // term, it must be weaker there than in the seven slots that have an `up`.
-    let top: Vec<&((u64, usize), [&CloneRow; 4])> = cells.iter().filter(|(k, _)| k.1 == 4).collect();
+    let top: Vec<&((u64, usize), [&CloneRow; 4])> =
+        cells.iter().filter(|(k, _)| k.1 == 4).collect();
     let rest: Vec<&((u64, usize), [&CloneRow; 4])> =
         cells.iter().filter(|(k, _)| k.1 != 4).collect();
     println!(

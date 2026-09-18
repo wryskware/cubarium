@@ -111,8 +111,9 @@ pub struct Mutation {
 
 /// The loci sparse mutation may touch (`design/fauna-v2.md` "Mutation"), in the order a
 /// uniform draw indexes them. `form` is never here: the look is the lineage's badge.
-pub const MUTABLE_LOCI: [&str; 10] =
-    ["size", "speed", "sense", "reserve", "mouth", "hue", "diet", "depth", "swim", "w_depth"];
+pub const MUTABLE_LOCI: [&str; 10] = [
+    "size", "speed", "sense", "reserve", "mouth", "hue", "diet", "depth", "swim", "w_depth",
+];
 
 /// Closed range of a mutable locus, in `MUTABLE_LOCI` order.
 const LOCUS_RANGES: [(f32, f32); 10] = [
@@ -173,7 +174,12 @@ impl Genome {
     /// that clamps back onto the parent's own value (a locus already at a range boundary,
     /// pushed further out) is not a change and records nothing, so at the boundaries a child
     /// differs less often than `probability`.
-    pub fn mutate(&mut self, probability: f64, step: f64, mut unit: impl FnMut() -> f64) -> Vec<Mutation> {
+    pub fn mutate(
+        &mut self,
+        probability: f64,
+        step: f64,
+        mut unit: impl FnMut() -> f64,
+    ) -> Vec<Mutation> {
         let mut out = Vec::new();
         if probability <= 0.0 || probability.is_nan() || unit() >= probability {
             return out;
@@ -198,7 +204,11 @@ impl Genome {
             let to = (from + delta).clamp(lo, hi);
             if to != from {
                 *slot = to;
-                out.push(Mutation { locus: MUTABLE_LOCI[locus], from, to });
+                out.push(Mutation {
+                    locus: MUTABLE_LOCI[locus],
+                    from,
+                    to,
+                });
             }
         }
         out
@@ -267,7 +277,13 @@ impl Genome {
         fix(&mut self.depth, 0.0, 1.0);
         fix(&mut self.swim, 0.0, 1.0);
         let d = &mut self.drives;
-        for w in [&mut d.w_food, &mut d.w_detritus, &mut d.w_persist, &mut d.w_crowd, &mut d.w_depth] {
+        for w in [
+            &mut d.w_food,
+            &mut d.w_detritus,
+            &mut d.w_persist,
+            &mut d.w_crowd,
+            &mut d.w_depth,
+        ] {
             fix(w, 0.0, 2.0);
         }
         for t in [
@@ -380,12 +396,17 @@ pub struct Phenotype {
 /// `body_extent_max` (record nothing; the clamp is a decode rule).
 pub fn decode(genome: &Genome, cfg: &OrganismConfig) -> Phenotype {
     let size = f64::from(genome.size);
-    let mut lobes = vec![(0.0, 0.0, 0.9 + 0.5 * size), (1.6 * size, 0.0, 0.6 + 0.3 * size)];
+    let mut lobes = vec![
+        (0.0, 0.0, 0.9 + 0.5 * size),
+        (1.6 * size, 0.0, 0.6 + 0.3 * size),
+    ];
     if genome.speed > 0.6 {
         lobes.push((-1.4 * size, 0.0, 0.5 + 0.2 * size));
     }
     let extent_of = |lobes: &[(f64, f64, f64)]| {
-        lobes.iter().fold(0.0f64, |m, &(x, y, r)| m.max(x.hypot(y) + r))
+        lobes
+            .iter()
+            .fold(0.0f64, |m, &(x, y, r)| m.max(x.hypot(y) + r))
     };
     let mut extent = extent_of(&lobes);
     if extent > cfg.body_extent_max && extent > 0.0 {
@@ -433,7 +454,11 @@ pub fn decode(genome: &Genome, cfg: &OrganismConfig) -> Phenotype {
         diet,
         h_pref: -1.0 + 2.0 * f64::from(genome.depth.clamp(0.0, 1.0)),
         swim: f64::from(genome.swim.clamp(0.0, 1.0)),
-        form: if genome.form == FORM_UNSET { form_of_hue(genome.hue) } else { genome.form },
+        form: if genome.form == FORM_UNSET {
+            form_of_hue(genome.hue)
+        } else {
+            genome.form
+        },
         drives,
     }
 }
@@ -448,7 +473,12 @@ mod tests {
     #[allow(clippy::type_complexity)]
     fn fields() -> Vec<(&'static str, f32, f32, fn(&mut Genome) -> &mut f32)> {
         vec![
-            ("size", 0.5, 2.0, (|g| &mut g.size) as fn(&mut Genome) -> &mut f32),
+            (
+                "size",
+                0.5,
+                2.0,
+                (|g| &mut g.size) as fn(&mut Genome) -> &mut f32,
+            ),
             ("metabolism", 0.5, 2.0, |g| &mut g.metabolism),
             ("sense", 2.0, 12.0, |g| &mut g.sense),
             ("reserve", 0.5, 2.0, |g| &mut g.reserve),
@@ -470,9 +500,15 @@ mod tests {
             ("feed_effort", 0.0, 1.0, |g| &mut g.drives.feed_effort),
             ("bud_reserve", 0.0, 1.0, |g| &mut g.drives.bud_reserve),
             ("bud_energy", 0.0, 1.0, |g| &mut g.drives.bud_energy),
-            ("bud_min_age_seconds", 0.0, 3600.0, |g| &mut g.drives.bud_min_age_seconds),
-            ("tau_hunger_seconds", 1.0, 60.0, |g| &mut g.drives.tau_hunger_seconds),
-            ("turn_rate_max_deg", 0.0, 360.0, |g| &mut g.drives.turn_rate_max_deg),
+            ("bud_min_age_seconds", 0.0, 3600.0, |g| {
+                &mut g.drives.bud_min_age_seconds
+            }),
+            ("tau_hunger_seconds", 1.0, 60.0, |g| {
+                &mut g.drives.tau_hunger_seconds
+            }),
+            ("turn_rate_max_deg", 0.0, 360.0, |g| {
+                &mut g.drives.turn_rate_max_deg
+            }),
             ("turn_noise", 0.0, 2.0, |g| &mut g.drives.turn_noise),
         ]
     }
@@ -485,10 +521,17 @@ mod tests {
     fn founder_is_in_range_and_unchanged_by_clamp() {
         let mut g = founder();
         assert_eq!(g.version, Genome::VERSION);
-        assert_eq!((g.size, g.metabolism, g.reserve, g.mouth, g.speed), (1.0, 1.0, 1.0, 1.0, 1.0));
+        assert_eq!(
+            (g.size, g.metabolism, g.reserve, g.mouth, g.speed),
+            (1.0, 1.0, 1.0, 1.0, 1.0)
+        );
         assert_eq!(g.sense, 6.0);
         assert_eq!(g.hue, 0.5);
-        assert_eq!((g.diet, g.depth, g.swim, g.form), (0.7, 0.5, 0.0, 1), "v2 founder defaults; hue 0.5 is tercile 1");
+        assert_eq!(
+            (g.diet, g.depth, g.swim, g.form),
+            (0.7, 0.5, 0.0, 1),
+            "v2 founder defaults; hue 0.5 is tercile 1"
+        );
         assert_eq!(g.drives.w_depth, 1.0);
         assert!(!g.clamp(), "founder genome should already be in range");
         assert_eq!(g, founder());
@@ -545,7 +588,12 @@ mod tests {
         let want = [(0.0, 0.0, 1.4), (1.6, 0.0, 0.9), (-1.4, 0.0, 0.7)];
         assert_eq!(p.lobes.len(), want.len());
         for (got, w) in p.lobes.iter().zip(want.iter()) {
-            assert!((got.0 - w.0).abs() < 1e-12 && (got.1 - w.1).abs() < 1e-12 && (got.2 - w.2).abs() < 1e-12, "{got:?} vs {w:?}");
+            assert!(
+                (got.0 - w.0).abs() < 1e-12
+                    && (got.1 - w.1).abs() < 1e-12
+                    && (got.2 - w.2).abs() < 1e-12,
+                "{got:?} vs {w:?}"
+            );
         }
         assert!((p.extent - 2.5).abs() < 1e-12, "extent {}", p.extent);
         assert_eq!(p.hue, g.hue);
@@ -597,8 +645,17 @@ mod tests {
         // The recorded extent is the recomputed one, which — because radii are not scaled —
         // may still sit above `body_extent_max` for a body that is mostly radius. The rule
         // is one scaling pass, not a fixed point.
-        assert!(p.extent < unclamped.extent, "{} vs {}", p.extent, unclamped.extent);
-        assert!((p.extent - (3.2 * s + 1.2)).abs() < 1e-12, "extent {}", p.extent);
+        assert!(
+            p.extent < unclamped.extent,
+            "{} vs {}",
+            p.extent,
+            unclamped.extent
+        );
+        assert!(
+            (p.extent - (3.2 * s + 1.2)).abs() < 1e-12,
+            "extent {}",
+            p.extent
+        );
         // Genomes inside the documented ranges always fit the default bound.
         let default_cfg = WorldConfig::default().organism;
         assert!(decode(&g, &default_cfg).extent <= default_cfg.body_extent_max);
@@ -625,13 +682,26 @@ mod tests {
         let text = toml::to_string(&v1).expect("a genome serializes");
         let stripped: String = text
             .lines()
-            .filter(|l| !(l.starts_with("diet") || l.starts_with("depth") || l.starts_with("swim") || l.starts_with("form") || l.starts_with("w_depth")))
+            .filter(|l| {
+                !(l.starts_with("diet")
+                    || l.starts_with("depth")
+                    || l.starts_with("swim")
+                    || l.starts_with("form")
+                    || l.starts_with("w_depth"))
+            })
             .map(|l| format!("{l}\n"))
             .collect();
-        assert!(!stripped.contains("diet"), "the v2 keys were stripped: {stripped}");
+        assert!(
+            !stripped.contains("diet"),
+            "the v2 keys were stripped: {stripped}"
+        );
         let mut g: Genome = toml::from_str(&stripped).expect("a v1 genome still decodes");
         assert_eq!(g.version, 1);
-        assert_eq!((g.diet, g.depth, g.swim), (0.7, 0.5, 0.0), "the design's v1 defaults");
+        assert_eq!(
+            (g.diet, g.depth, g.swim),
+            (0.7, 0.5, 0.0),
+            "the design's v1 defaults"
+        );
         assert_eq!(g.form, FORM_UNSET);
         assert_eq!(g.drives.w_depth, 1.0);
         assert!(g.upgrade(), "an upgrade changes a v1 genome");
@@ -647,7 +717,16 @@ mod tests {
 
     #[test]
     fn the_form_tercile_and_clamp_cover_the_new_loci() {
-        assert_eq!((form_of_hue(0.0), form_of_hue(0.33), form_of_hue(0.34), form_of_hue(0.99), form_of_hue(1.0)), (0, 0, 1, 2, 2));
+        assert_eq!(
+            (
+                form_of_hue(0.0),
+                form_of_hue(0.33),
+                form_of_hue(0.34),
+                form_of_hue(0.99),
+                form_of_hue(1.0)
+            ),
+            (0, 0, 1, 2, 2)
+        );
         assert_eq!(form_of_hue(f32::NAN), 0);
         let mut g = founder();
         g.form = MAX_FORMS + 3;
@@ -656,7 +735,10 @@ mod tests {
         let mut unset = founder();
         unset.form = FORM_UNSET;
         unset.clamp();
-        assert_eq!(unset.form, FORM_UNSET, "clamp leaves the upgrade marker for `upgrade`");
+        assert_eq!(
+            unset.form, FORM_UNSET,
+            "clamp leaves the upgrade marker for `upgrade`"
+        );
     }
 
     #[test]
@@ -679,7 +761,10 @@ mod tests {
         // (lopsided) generalist and `γ = 1` makes the two yields sum to one.
         assert!((p.cap_foliage - f64::from(0.25f32)).abs() < 1e-15);
         assert!((p.cap_detrital - (1.0 - f64::from(0.25f32))).abs() < 1e-15);
-        assert!((p.cap_foliage + p.cap_detrital - 1.0).abs() < 1e-15, "at γ = 1 breadth is free");
+        assert!(
+            (p.cap_foliage + p.cap_detrital - 1.0).abs() < 1e-15,
+            "at γ = 1 breadth is free"
+        );
         assert_eq!(p.h_pref, 1.0);
         assert_eq!(p.swim, 0.5);
         assert_eq!(p.form, 3);
@@ -720,7 +805,10 @@ mod tests {
             let changes = g.mutate(0.3, 0.08, unit_stream(seed));
             assert_eq!(g.form, 5, "form never mutates");
             assert_eq!(g.version, before.version);
-            assert!(!g.clone().clamp(), "a mutated genome is always in range: {g:?}");
+            assert!(
+                !g.clone().clamp(),
+                "a mutated genome is always in range: {g:?}"
+            );
             match changes.len() {
                 0 => assert_eq!(g, before, "no record, no change"),
                 1 => one += 1,
@@ -738,17 +826,38 @@ mod tests {
             // The record is exact: applying it to the parent gives the child.
             let mut replay = before.clone();
             for m in &changes {
-                let i = MUTABLE_LOCI.iter().position(|l| *l == m.locus).expect("a mutable locus");
-                assert_eq!(*replay.locus_mut(i), m.from, "{}: `from` is the parent's value", m.locus);
+                let i = MUTABLE_LOCI
+                    .iter()
+                    .position(|l| *l == m.locus)
+                    .expect("a mutable locus");
+                assert_eq!(
+                    *replay.locus_mut(i),
+                    m.from,
+                    "{}: `from` is the parent's value",
+                    m.locus
+                );
                 *replay.locus_mut(i) = m.to;
             }
             assert_eq!(replay, g);
         }
         let rate = f64::from(mutated) / N as f64;
-        assert!((rate - 0.3).abs() < 0.03, "mutation rate {rate} vs p_mut 0.3");
-        assert!(one > 0 && two > 0, "both one- and two-locus births occur ({one}, {two})");
-        assert!((f64::from(one) / f64::from(one + two) - 0.5).abs() < 0.06, "one vs two loci are equally likely");
-        assert_eq!(touched.len(), MUTABLE_LOCI.len(), "every mutable locus was touched: {touched:?}");
+        assert!(
+            (rate - 0.3).abs() < 0.03,
+            "mutation rate {rate} vs p_mut 0.3"
+        );
+        assert!(
+            one > 0 && two > 0,
+            "both one- and two-locus births occur ({one}, {two})"
+        );
+        assert!(
+            (f64::from(one) / f64::from(one + two) - 0.5).abs() < 0.06,
+            "one vs two loci are equally likely"
+        );
+        assert_eq!(
+            touched.len(),
+            MUTABLE_LOCI.len(),
+            "every mutable locus was touched: {touched:?}"
+        );
         assert!(!touched.contains_key("form"));
 
         // Probability zero and a zero step are exact copies; a step is bounded by the range.
@@ -756,7 +865,10 @@ mod tests {
         assert!(g.mutate(0.0, 0.08, unit_stream(1)).is_empty());
         assert_eq!(g, founder());
         let mut g = founder();
-        assert!(g.mutate(1.0, 0.0, unit_stream(1)).is_empty(), "a zero step changes nothing");
+        assert!(
+            g.mutate(1.0, 0.0, unit_stream(1)).is_empty(),
+            "a zero step changes nothing"
+        );
         assert_eq!(g, founder());
         let mut g = founder();
         g.mutate(1.0, 100.0, unit_stream(3));

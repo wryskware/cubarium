@@ -1,7 +1,6 @@
 //! Read-only bridge from genuine settlement events to paired spatial observations.
 //! The counter map retains only living full IDs; it is never fed back into World.
 
-use cubarium_surface::{Scale, Topology};
 use super::recovery;
 use anyhow::{Context, Result, ensure};
 use cubarium_core::{
@@ -11,6 +10,7 @@ use cubarium_core::{
 use cubarium_surface::{
     CUBE_CELL_COUNT, CellId, ChartImage, Face, FieldGraph, MAX_SEAMS, cell_of, chart_images,
 };
+use cubarium_surface::{Scale, Topology};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const ON_ARMS: [usize; 2] = [3, 5];
@@ -60,7 +60,9 @@ pub fn local_forms(
         let mut counts = [0; 8];
         for (id, organism) in state.organisms.iter() {
             if !state.hunters.contains(id)
-                && cells.binary_search(&cell_of(Topology::Cube, Scale::ONE, &organism.pos).index()).is_ok()
+                && cells
+                    .binary_search(&cell_of(Topology::Cube, Scale::ONE, &organism.pos).index())
+                    .is_ok()
             {
                 counts[usize::from(organism.phenotype.form).min(7)] += 1;
             }
@@ -178,8 +180,14 @@ mod tests {
             })
             .unwrap();
         assert_eq!(captures.len(), 1);
-        assert_eq!(captures[0].cell, cell_of(Topology::Cube, Scale::ONE, &evidence.prey_pos).index());
-        assert_ne!(captures[0].cell, cell_of(Topology::Cube, Scale::ONE, &evidence.hunter_pos).index());
+        assert_eq!(
+            captures[0].cell,
+            cell_of(Topology::Cube, Scale::ONE, &evidence.prey_pos).index()
+        );
+        assert_ne!(
+            captures[0].cell,
+            cell_of(Topology::Cube, Scale::ONE, &evidence.hunter_pos).index()
+        );
         assert_eq!(captures[0].id.attempt, 1);
         assert_eq!(before, cubarium_core::snapshot::state_hash(&state));
         assert!(
@@ -314,7 +322,8 @@ impl CaptureAudit {
                 .collect(),
             images: std::array::from_fn(|face| {
                 let mut images = Vec::new();
-                chart_images(Topology::Cube, 
+                chart_images(
+                    Topology::Cube,
                     Face::from_index(face as u8).unwrap(),
                     MAX_SEAMS,
                     &mut images,
@@ -414,7 +423,8 @@ impl CaptureAudit {
                     "invalid capture inventory"
                 );
                 ensure!(
-                    evidence.prey_pos.is_canonical(Topology::Cube) && evidence.hunter_pos.is_canonical(Topology::Cube),
+                    evidence.prey_pos.is_canonical(Topology::Cube)
+                        && evidence.hunter_pos.is_canonical(Topology::Cube),
                     "capture position is not finite/canonical"
                 );
                 ensure!(

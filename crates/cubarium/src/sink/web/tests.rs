@@ -220,7 +220,10 @@ fn the_status_route_reports_the_population_and_how_many_of_it_is_neural() {
     let mut sink = WebSink::new(0).expect("binding an ephemeral port");
     let (_, _, body) = get(sink.addr(), "/status");
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(v["population"], 0, "before the first tick, zero — not absent");
+    assert_eq!(
+        v["population"], 0,
+        "before the first tick, zero — not absent"
+    );
     assert_eq!(v["neural_animals"], 0, "an ordinary world is never neural");
 
     sink.observe_tick(200);
@@ -1199,8 +1202,7 @@ fn the_status_route_names_the_world_s_topology_and_size() {
     assert_eq!(v["h"], 64);
     assert_eq!(v["scale"], 1.0);
 
-    let ring =
-        WebSink::with_world(0, "", Source::default(), None, ring_shape()).expect("binding");
+    let ring = WebSink::with_world(0, "", Source::default(), None, ring_shape()).expect("binding");
     let (_, _, body) = get(ring.addr(), "/status");
     let v: serde_json::Value = serde_json::from_str(&body_text(&body)).unwrap();
     assert_eq!(v["topology"], "ring");
@@ -1236,7 +1238,11 @@ fn the_frame_route_serves_the_raster_behind_the_same_eight_byte_sequence() {
 
     let (status, _, body) = get(sink.addr(), "/frame");
     assert_eq!(status, "HTTP/1.1 200 OK");
-    assert_eq!(body.len(), expect, "a black raster before the host submits one");
+    assert_eq!(
+        body.len(),
+        expect,
+        "a black raster before the host submits one"
+    );
     assert!(body[8..].iter().all(|&b| b == 0));
 
     for seed in 0..3u8 {
@@ -1252,7 +1258,10 @@ fn the_frame_route_serves_the_raster_behind_the_same_eight_byte_sequence() {
     let (seq, held) = sink.newest_raster().expect("a raster in the mailbox");
     assert_eq!(seq, 2);
     assert_eq!(held.as_bytes(), newest.as_bytes());
-    assert!(sink.newest().is_none(), "a ring world has no cube frame to hand out");
+    assert!(
+        sink.newest().is_none(),
+        "a ring world has no cube frame to hand out"
+    );
     assert_eq!(sink.shape(), ring_shape());
 }
 
@@ -1260,8 +1269,14 @@ fn the_frame_route_serves_the_raster_behind_the_same_eight_byte_sequence() {
 /// three names are part of the contract between the host and the embedded page.
 #[test]
 fn the_embedded_page_reads_the_topology_from_status() {
-    assert!(INDEX_HTML.contains(r#"s.topology === "ring""#), "the page must branch on topology");
-    assert!(INDEX_HTML.contains("enterRingMode(s.w, s.h, s.scale)"), "and size itself from w/h");
+    assert!(
+        INDEX_HTML.contains(r#"s.topology === "ring""#),
+        "the page must branch on topology"
+    );
+    assert!(
+        INDEX_HTML.contains("enterRingMode(s.w, s.h, s.scale)"),
+        "and size itself from w/h"
+    );
     assert!(
         INDEX_HTML.contains("frameBodyBytes"),
         "and expect the world's own /frame length rather than the cube's constant"

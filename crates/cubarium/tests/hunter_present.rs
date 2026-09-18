@@ -11,10 +11,10 @@
 //!
 //! Nothing here is evidence about ecological balance; the world is a staged fixture.
 
-use cubarium_surface::Topology;
 use cubarium::art::ArtPack;
 use cubarium::art_present::{ArtPresenter, present_seconds};
 use cubarium::clock::DT;
+use cubarium_surface::Topology;
 mod support;
 
 use cubarium::hunter_present::{
@@ -146,7 +146,8 @@ fn effector_point(
     profile: &FixedHunterProfile,
     scale: f64,
 ) -> SurfacePoint {
-    travel(Topology::Cube, 
+    travel(
+        Topology::Cube,
         root,
         body_offset(heading, profile.capture_offset_body, scale),
     )
@@ -1219,7 +1220,8 @@ fn a_captured_prey_is_carried_to_the_events_settlement_position_and_meets_the_cl
         .find(|h| h.id == hunter)
         .unwrap();
     let (root, dir) = cubarium::present::interpolate(&o.moved, o.pos, o.heading, 1.0);
-    let claw = travel(Topology::Cube, 
+    let claw = travel(
+        Topology::Cube,
         root,
         body_offset(dir, effectors(h.body_scale).near_claw, 1.0),
     )
@@ -1398,7 +1400,12 @@ fn a_juveniles_scale_is_the_cores_and_its_named_claw_is_where_the_core_tests_con
     assert!((h.geometry.ingestion_offset_body.x - e.mouth.x).abs() < 1e-9);
     // And the published capture centre is that claw carried from the root.
     if let Some(center) = h.capture_center {
-        let want = travel(Topology::Cube, h.pos, body_offset(h.heading, e.near_claw, 1.0)).end;
+        let want = travel(
+            Topology::Cube,
+            h.pos,
+            body_offset(h.heading, e.near_claw, 1.0),
+        )
+        .end;
         assert_eq!(center.face, want.face);
         assert!(
             (center.u - want.u).abs() < 1e-6 && (center.v - want.v).abs() < 1e-6,
@@ -1935,9 +1942,14 @@ fn a_capture_across_a_seam_carries_the_prey_over_the_seam_on_screen() {
         let offsets: Vec<Vec2> = lit
             .iter()
             .map(|&q| {
-                cubarium_surface::unfold(Topology::Cube, *pose, q, cubarium_surface::MAX_LOCAL_RADIUS)
-                    .expect("nearby")
-                    .local
+                cubarium_surface::unfold(
+                    Topology::Cube,
+                    *pose,
+                    q,
+                    cubarium_surface::MAX_LOCAL_RADIUS,
+                )
+                .expect("nearby")
+                .local
                     - pose.chart()
             })
             .collect();

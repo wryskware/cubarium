@@ -25,7 +25,11 @@ fn ring_config() -> WorldConfig {
 #[test]
 fn the_config_carries_the_topology_and_the_scale_and_validates_them() {
     let d = WorldConfig::default();
-    assert_eq!(d.topology, Topology::Cube, "a default world is still a cube");
+    assert_eq!(
+        d.topology,
+        Topology::Cube,
+        "a default world is still a cube"
+    );
     assert_eq!(d.world_scale, Scale::ONE);
     assert_eq!(d.version, CONFIG_VERSION);
     assert_eq!(CONFIG_VERSION, 9);
@@ -134,14 +138,18 @@ fn validate_refuses_a_state_whose_shape_disagrees_with_its_topology() {
     let mut stray = world.state.clone();
     let (id, _) = stray.organisms.iter().next().expect("a founder");
     stray.organisms.get_mut(id).expect("live").pos = SurfacePoint::new(Face::Top, 1.0, 1.0);
-    let err = stray.validate().expect_err("an organism on Face::Top of a ring");
+    let err = stray
+        .validate()
+        .expect_err("an organism on Face::Top of a ring");
     assert!(err.contains("chart"), "{err}");
 
     // And a cube state carrying a ring's config is refused for the same reason.
     let cube = World::new(WorldConfig::default()).expect("a cube world");
     let mut mixed = cube.state.clone();
     mixed.config.topology = RING;
-    let err = mixed.validate().expect_err("1,280 cells declared as a ring");
+    let err = mixed
+        .validate()
+        .expect_err("1,280 cells declared as a ring");
     assert!(err.contains("expected 3600"), "{err}");
 }
 
@@ -149,23 +157,30 @@ fn validate_refuses_a_state_whose_shape_disagrees_with_its_topology() {
 fn a_persisted_shower_is_range_checked_against_the_runtime_cell_count() {
     let mut world = World::new(ring_config()).expect("a ring world");
     world.state.care.admitted_seq = 1;
-    world.state.care.showers.push(cubarium_core::care::ActiveShower {
-        seq: 1,
-        apply_after_tick: 0,
-        // 2,000 is past the cube's 1,280 and inside the ring's 3,600: the check is the
-        // world's own count, not a constant.
-        cells: vec![2000],
-        weights: vec![1.0],
-        delivered: 0,
-        dose_permille: cubarium_core::care::CareDose::STANDARD_PERMILLE,
-    });
+    world
+        .state
+        .care
+        .showers
+        .push(cubarium_core::care::ActiveShower {
+            seq: 1,
+            apply_after_tick: 0,
+            // 2,000 is past the cube's 1,280 and inside the ring's 3,600: the check is the
+            // world's own count, not a constant.
+            cells: vec![2000],
+            weights: vec![1.0],
+            delivered: 0,
+            dose_permille: cubarium_core::care::CareDose::STANDARD_PERMILLE,
+        });
     world
         .state
         .validate()
         .expect("cell 2,000 is on a 3,600-cell ring");
 
     world.state.care.showers[0].cells = vec![3600];
-    let err = world.state.validate().expect_err("cell 3,600 is off the ring");
+    let err = world
+        .state
+        .validate()
+        .expect_err("cell 3,600 is off the ring");
     assert!(err.contains("out of range"), "{err}");
 }
 
@@ -184,7 +199,9 @@ fn care_and_hunter_targets_resolve_past_pixel_sixty_three_on_a_ring() {
         u: 200.0,
         v: 170.0,
     };
-    let cell = t.resolve(RING, Scale::ONE).expect("200,170 is on a 320x180 ring");
+    let cell = t
+        .resolve(RING, Scale::ONE)
+        .expect("200,170 is on a 320x180 ring");
     assert_eq!(cell.cx(RING, Scale::ONE), 50);
     assert_eq!(cell.cy(RING, Scale::ONE), 42);
     assert_eq!(cell, CellId::new(RING, Scale::ONE, Face::Front, 50, 42));
@@ -200,35 +217,81 @@ fn care_and_hunter_targets_resolve_past_pixel_sixty_three_on_a_ring() {
 
     // Off the world, in both directions and on a chart the ring does not have.
     for bad in [
-        CareTarget { face: front, u: 320.0, v: 10.0 },
-        CareTarget { face: front, u: 10.0, v: 180.0 },
-        CareTarget { face: front, u: -0.5, v: 10.0 },
-        CareTarget { face: front, u: f64::NAN, v: 10.0 },
-        CareTarget { face: top, u: 10.0, v: 10.0 },
-        CareTarget { face: 9, u: 10.0, v: 10.0 },
+        CareTarget {
+            face: front,
+            u: 320.0,
+            v: 10.0,
+        },
+        CareTarget {
+            face: front,
+            u: 10.0,
+            v: 180.0,
+        },
+        CareTarget {
+            face: front,
+            u: -0.5,
+            v: 10.0,
+        },
+        CareTarget {
+            face: front,
+            u: f64::NAN,
+            v: 10.0,
+        },
+        CareTarget {
+            face: top,
+            u: 10.0,
+            v: 10.0,
+        },
+        CareTarget {
+            face: 9,
+            u: 10.0,
+            v: 10.0,
+        },
     ] {
         assert_eq!(bad.resolve(RING, Scale::ONE), None, "{bad:?} resolved");
     }
 
     // `HunterTarget` is the apex half of the same rule, and returns a point rather than a cell.
-    let h = HunterTarget { face: front, u: 200.0, v: 170.0 };
+    let h = HunterTarget {
+        face: front,
+        u: 200.0,
+        v: 170.0,
+    };
     let p = h.resolve(RING).expect("an apex target past pixel 63");
     assert_eq!(p, SurfacePoint::new(Face::Front, 200.0, 170.0));
     assert_eq!(h.resolve(Topology::Cube), None);
     for bad in [
-        HunterTarget { face: front, u: 320.0, v: 10.0 },
-        HunterTarget { face: top, u: 10.0, v: 10.0 },
+        HunterTarget {
+            face: front,
+            u: 320.0,
+            v: 10.0,
+        },
+        HunterTarget {
+            face: top,
+            u: 10.0,
+            v: 10.0,
+        },
     ] {
         assert_eq!(bad.resolve(RING), None, "{bad:?} resolved");
     }
 
     // The cube's own answers are untouched.
     assert_eq!(
-        CareTarget { face: front, u: 63.9, v: 63.9 }.resolve(Topology::Cube, Scale::ONE),
+        CareTarget {
+            face: front,
+            u: 63.9,
+            v: 63.9
+        }
+        .resolve(Topology::Cube, Scale::ONE),
         Some(CellId::new(Topology::Cube, Scale::ONE, Face::Front, 15, 15))
     );
     assert_eq!(
-        CareTarget { face: front, u: 64.0, v: 1.0 }.resolve(Topology::Cube, Scale::ONE),
+        CareTarget {
+            face: front,
+            u: 64.0,
+            v: 1.0
+        }
+        .resolve(Topology::Cube, Scale::ONE),
         None
     );
 }
@@ -244,7 +307,10 @@ fn care_and_hunter_targets_resolve_past_pixel_sixty_three_on_a_ring() {
 fn height_falls_with_v_and_is_not_the_embedding() {
     assert_eq!(RING.height(&SurfacePoint::new(Face::Front, 0.0, 0.0)), 1.0);
     assert_eq!(RING.height(&SurfacePoint::new(Face::Front, 0.0, 90.0)), 0.0);
-    assert_eq!(RING.height(&SurfacePoint::new(Face::Front, 0.0, 180.0)), -1.0);
+    assert_eq!(
+        RING.height(&SurfacePoint::new(Face::Front, 0.0, 180.0)),
+        -1.0
+    );
     // Independent of `u`: the wrap is level.
     for u in [0.0, 80.0, 319.0] {
         assert_eq!(

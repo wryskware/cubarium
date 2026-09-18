@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use cubarium_core::world::WorldState;
-use cubarium_core::{decode_snapshot, SnapshotError};
+use cubarium_core::{SnapshotError, decode_snapshot};
 
 /// Snapshot files kept in the state directory. The newest is never removed.
 pub const SNAPSHOT_KEEP: usize = 8;
@@ -33,7 +33,11 @@ pub const LOCK_NAME: &str = ".lock";
 /// The build identity written into every snapshot header: the crate version plus the
 /// git short hash captured by `build.rs` (`unknown` when git was unavailable).
 pub fn build_id() -> String {
-    format!("{}+{}", env!("CARGO_PKG_VERSION"), env!("CUBARIUM_GIT_HASH"))
+    format!(
+        "{}+{}",
+        env!("CARGO_PKG_VERSION"),
+        env!("CUBARIUM_GIT_HASH")
+    )
 }
 
 /// `world-<tick>.cubw` inside `dir`.
@@ -44,7 +48,10 @@ pub fn snapshot_path(dir: &Path, tick: u64) -> PathBuf {
 /// The tick encoded in a snapshot file name, or `None` when the name is not one.
 /// Names that do not parse are ignored entirely rather than guessed at.
 pub fn parse_tick(name: &str) -> Option<u64> {
-    name.strip_prefix(PREFIX)?.strip_suffix(SUFFIX)?.parse().ok()
+    name.strip_prefix(PREFIX)?
+        .strip_suffix(SUFFIX)?
+        .parse()
+        .ok()
 }
 
 /// Every `world-<tick>.cubw` in `dir`, newest tick first. Unreadable directories and
@@ -151,7 +158,11 @@ impl StateLock {
 fn flock_exclusive_nonblocking(file: &File) -> io::Result<()> {
     use std::os::unix::io::AsRawFd;
     let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-    if rc == 0 { Ok(()) } else { Err(io::Error::last_os_error()) }
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
 }
 
 // --- What a state directory already holds -------------------------------------------
@@ -187,7 +198,10 @@ impl Occupancy {
             ));
         }
         if !self.temporaries.is_empty() {
-            parts.push(format!("{} interrupted snapshot write(s)", self.temporaries.len()));
+            parts.push(format!(
+                "{} interrupted snapshot write(s)",
+                self.temporaries.len()
+            ));
         }
         if self.journal.is_some() {
             parts.push(format!("a non-empty {JOURNAL_NAME}"));
@@ -208,9 +222,12 @@ pub fn occupancy(dir: &Path) -> io::Result<Occupancy> {
         Err(e) => return Err(io::Error::new(e.kind(), format!("{}: {e}", dir.display()))),
     };
     for entry in entries {
-        let entry = entry.map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", dir.display())))?;
+        let entry =
+            entry.map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", dir.display())))?;
         let path = entry.path();
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
         let file_type = entry
             .file_type()
             .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", path.display())))?;
@@ -231,7 +248,9 @@ pub fn occupancy(dir: &Path) -> io::Result<Occupancy> {
             }
         }
     }
-    found.snapshots.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+    found
+        .snapshots
+        .sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
     found.temporaries.sort();
     Ok(found)
 }
@@ -263,10 +282,7 @@ impl std::fmt::Display for LoadFailure {
 /// Try every snapshot newest-first and return the first that decodes and validates.
 /// Every failure is reported to `report` with its path so the operator learns why an
 /// older world was resumed.
-pub fn load_newest(
-    dir: &Path,
-    report: &mut dyn FnMut(&Path, &LoadFailure),
-) -> Option<Loaded> {
+pub fn load_newest(dir: &Path, report: &mut dyn FnMut(&Path, &LoadFailure)) -> Option<Loaded> {
     for (tick, path) in list_snapshots(dir) {
         match fs::read(&path) {
             Err(e) => report(&path, &LoadFailure::Io(e.to_string())),
@@ -300,7 +316,11 @@ pub fn write_snapshot(dir: &Path, tick: u64, bytes: &[u8]) -> std::io::Result<Pa
     let tmp = dir.join(format!("tmp-{tick}{SUFFIX}"));
     let final_path = snapshot_path(dir, tick);
     {
-        let mut file = OpenOptions::new().write(true).create(true).truncate(true).open(&tmp)?;
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&tmp)?;
         file.write_all(bytes)?;
         file.sync_all()?;
     }
@@ -361,7 +381,13 @@ impl Checkpointer {
                 checkpoint_loop(&worker_dir, &worker_shared);
             })
             .expect("spawning the checkpoint worker");
-        Checkpointer { dir, shared, handle: Some(handle), queued: 0, warned_drop: false }
+        Checkpointer {
+            dir,
+            shared,
+            handle: Some(handle),
+            queued: 0,
+            warned_drop: false,
+        }
     }
 
     pub fn dir(&self) -> &Path {
@@ -490,7 +516,8 @@ mod tests {
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("cubarium-state-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("cubarium-state-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -506,7 +533,10 @@ mod tests {
         assert_eq!(parse_tick("world-12.cubw.bak"), None);
         assert_eq!(parse_tick("telemetry.jsonl"), None);
         let dir = Path::new("/state");
-        assert_eq!(snapshot_path(dir, 77), PathBuf::from("/state/world-77.cubw"));
+        assert_eq!(
+            snapshot_path(dir, 77),
+            PathBuf::from("/state/world-77.cubw")
+        );
     }
 
     #[test]
@@ -568,9 +598,7 @@ mod tests {
         for i in 0..12u64 {
             cp.queue(i * 10, vec![i as u8; 32]);
             let deadline = std::time::Instant::now() + Duration::from_secs(5);
-            while std::time::Instant::now() < deadline
-                && !snapshot_path(&dir, i * 10).exists()
-            {
+            while std::time::Instant::now() < deadline && !snapshot_path(&dir, i * 10).exists() {
                 std::thread::sleep(Duration::from_millis(2));
             }
         }
@@ -592,7 +620,10 @@ mod tests {
     #[test]
     fn occupancy_sees_snapshots_temp_files_and_a_nonempty_journal_only() {
         let dir = temp_dir("occupancy");
-        assert!(!occupancy(&dir).unwrap().is_occupied(), "an empty directory is not occupied");
+        assert!(
+            !occupancy(&dir).unwrap().is_occupied(),
+            "an empty directory is not occupied"
+        );
 
         // Files an operator may keep beside a world are not occupancy.
         fs::write(dir.join("telemetry.jsonl"), b"{}\n").unwrap();
@@ -602,13 +633,21 @@ mod tests {
         // An *empty* journal is not occupancy either: care that never accepted anything
         // left no history to mix.
         fs::write(dir.join(JOURNAL_NAME), b"").unwrap();
-        assert!(!occupancy(&dir).unwrap().is_occupied(), "{:?}", occupancy(&dir).unwrap());
+        assert!(
+            !occupancy(&dir).unwrap().is_occupied(),
+            "{:?}",
+            occupancy(&dir).unwrap()
+        );
 
         fs::write(dir.join(JOURNAL_NAME), b"{\"rec\":\"epoch\"}\n").unwrap();
         let seen = occupancy(&dir).unwrap();
         assert!(seen.is_occupied());
         assert!(seen.journal.is_some());
-        assert!(seen.describe().contains(JOURNAL_NAME), "{}", seen.describe());
+        assert!(
+            seen.describe().contains(JOURNAL_NAME),
+            "{}",
+            seen.describe()
+        );
 
         fs::write(snapshot_path(&dir, 5), b"x").unwrap();
         fs::write(snapshot_path(&dir, 446_277), b"x").unwrap();
@@ -624,7 +663,11 @@ mod tests {
     #[test]
     fn occupancy_propagates_a_read_error_and_reports_a_missing_directory_as_empty() {
         // `list_snapshots` treats both as empty; the protective check must not.
-        assert!(!occupancy(Path::new("/definitely/not/here")).unwrap().is_occupied());
+        assert!(
+            !occupancy(Path::new("/definitely/not/here"))
+                .unwrap()
+                .is_occupied()
+        );
         // A path that is a file, not a directory, is an error rather than "nothing here".
         let dir = temp_dir("occupancy-error");
         let file = dir.join("not-a-directory");
@@ -642,14 +685,23 @@ mod tests {
 
         let err = StateLock::acquire(&dir).expect_err("a second launcher must be refused");
         let text = format!("{err:#}");
-        assert!(text.contains(&dir.display().to_string()), "the refusal names the directory: {text}");
+        assert!(
+            text.contains(&dir.display().to_string()),
+            "the refusal names the directory: {text}"
+        );
 
         // The diagnostic content is content, not the mechanism.
         let note = fs::read_to_string(held.path()).unwrap();
-        assert!(note.contains(&format!("pid {}", std::process::id())), "{note}");
+        assert!(
+            note.contains(&format!("pid {}", std::process::id())),
+            "{note}"
+        );
 
         drop(held);
-        assert!(dir.join(LOCK_NAME).exists(), "the lock file is never unlinked");
+        assert!(
+            dir.join(LOCK_NAME).exists(),
+            "the lock file is never unlinked"
+        );
         let again = StateLock::acquire(&dir).expect("the lock is free once the owner drops it");
         drop(again);
         fs::remove_dir_all(&dir).unwrap();
@@ -679,7 +731,10 @@ mod tests {
         assert!(dir.join(LOCK_NAME).exists());
         let again = StateLock::acquire(&dir).expect("free once every writer has exited");
         drop(again);
-        assert!(snapshot_path(&dir, 1).exists(), "the detached writer's work still landed");
+        assert!(
+            snapshot_path(&dir, 1).exists(),
+            "the detached writer's work still landed"
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -694,7 +749,10 @@ mod tests {
         std::thread::sleep(Duration::from_millis(50));
         fs::create_dir_all(&missing).unwrap();
         cp.shutdown(Some((2, b"y".to_vec())));
-        assert!(snapshot_path(&missing, 2).exists(), "the worker must survive a write failure");
+        assert!(
+            snapshot_path(&missing, 2).exists(),
+            "the worker must survive a write failure"
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -45,13 +45,21 @@ fn set_get_round_trip_at_every_face_corner() {
     // Give every (face, corner) a distinct colour so an aliasing bug cannot hide.
     for (fi, face) in Face::ALL.into_iter().enumerate() {
         for (ci, (x, y)) in corners.into_iter().enumerate() {
-            let rgb = [(fi * 20 + 1) as u8, (ci * 30 + 2) as u8, (fi * 4 + ci) as u8];
+            let rgb = [
+                (fi * 20 + 1) as u8,
+                (ci * 30 + 2) as u8,
+                (fi * 4 + ci) as u8,
+            ];
             frame.set(face, x, y, rgb);
         }
     }
     for (fi, face) in Face::ALL.into_iter().enumerate() {
         for (ci, (x, y)) in corners.into_iter().enumerate() {
-            let rgb = [(fi * 20 + 1) as u8, (ci * 30 + 2) as u8, (fi * 4 + ci) as u8];
+            let rgb = [
+                (fi * 20 + 1) as u8,
+                (ci * 30 + 2) as u8,
+                (fi * 4 + ci) as u8,
+            ];
             assert_eq!(frame.get(face, x, y), rgb, "{face:?} corner ({x},{y})");
             let o = doc_offset(fi, x, y);
             assert_eq!(

@@ -9,7 +9,6 @@
 //! The staging below is Astra's review fixture (`design/7_Research/assets/`), kept because it
 //! produces a certain capture rather than waiting for a favourable roll.
 
-use cubarium_surface::Topology;
 use cubarium_core::genome::{Genome, decode};
 use cubarium_core::hunter::{FixedHunterProfile, HunterTarget};
 use cubarium_core::ids::OrganismId;
@@ -18,6 +17,7 @@ use cubarium_core::neural::gru::Gru32;
 use cubarium_core::organism::{Mode, Organism, Origin};
 use cubarium_core::rng::Counter;
 use cubarium_core::{AnimalState, World, WorldConfig, decode_snapshot, encode_snapshot};
+use cubarium_surface::Topology;
 use cubarium_surface::{Face, SurfacePoint, Vec2, travel};
 
 /// A motionless, non-feeding policy: the prey is a body with private state, nothing more.
@@ -26,7 +26,6 @@ fn still_policy() -> Policy {
     w.b_o = vec![-8.0, 0.0, -8.0, -8.0, -8.0, -8.0, -8.0];
     Policy::new(w)
 }
-
 
 fn empty_world() -> World {
     let mut cfg = WorldConfig::default();
@@ -122,7 +121,8 @@ fn effector_point(
     profile: &FixedHunterProfile,
     scale: f64,
 ) -> SurfacePoint {
-    travel(Topology::Cube, 
+    travel(
+        Topology::Cube,
         root,
         body_offset(heading, profile.capture_offset_body, scale),
     )
@@ -167,8 +167,6 @@ fn run_until(world: &mut World, ticks: u64, mut done: impl FnMut(&World) -> bool
             .collect::<Vec<_>>()
     );
 }
-
-
 
 #[test]
 fn a_captured_neural_prey_leaves_no_private_state_behind() {

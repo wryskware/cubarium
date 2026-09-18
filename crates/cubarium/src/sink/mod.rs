@@ -9,10 +9,10 @@ pub mod shim;
 pub mod web;
 
 use anyhow::Result;
-use cube_proto::{FACE_SIZE, Frame, Raster};
 use cubarium_core::hunter::{HunterEvent, HunterView};
 use cubarium_core::view::RenderView;
 use cubarium_surface::{Scale, Topology};
+use cube_proto::{FACE_SIZE, Frame, Raster};
 
 pub use fanout::FanOutSink;
 pub use gpu::{GpuSink, GpuSinkOptions, GpuTargetKind};
@@ -100,7 +100,10 @@ pub struct WorldShape {
 impl WorldShape {
     /// The cube at `S = 1`: what every sink showed before the ring existed, and the
     /// default for the entry points that do not name a shape.
-    pub const CUBE: WorldShape = WorldShape { topology: Topology::Cube, scale: Scale::ONE };
+    pub const CUBE: WorldShape = WorldShape {
+        topology: Topology::Cube,
+        scale: Scale::ONE,
+    };
 
     pub fn new(topology: Topology, scale: Scale) -> WorldShape {
         WorldShape { topology, scale }

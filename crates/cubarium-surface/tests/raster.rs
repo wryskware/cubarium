@@ -40,7 +40,10 @@ fn brute_force(anchor: SurfacePoint, radius: f64) -> Vec<PixelImage> {
             }
         }
     }
-    assert_eq!(examined, 20_480, "the brute force must cover every surface pixel");
+    assert_eq!(
+        examined, 20_480,
+        "the brute force must cover every surface pixel"
+    );
     out
 }
 
@@ -53,25 +56,61 @@ fn corner(face: Face, u: f64, v: f64) -> SurfacePoint {
 /// incident charts, and in each lower rim corner.
 fn anchors() -> Vec<(String, SurfacePoint)> {
     let mut out: Vec<(String, SurfacePoint)> = Vec::new();
-    out.push(("interior".into(), SurfacePoint::pixel_center(Topology::Cube, Face::Front, 32, 32)));
-    out.push(("interior off-lattice".into(), SurfacePoint::new(Face::Front, 20.25, 41.75)));
+    out.push((
+        "interior".into(),
+        SurfacePoint::pixel_center(Topology::Cube, Face::Front, 32, 32),
+    ));
+    out.push((
+        "interior off-lattice".into(),
+        SurfacePoint::new(Face::Front, 20.25, 41.75),
+    ));
     for face in [Face::Front, Face::Right, Face::Back, Face::Left] {
-        out.push((format!("{face:?} vertical seam"), SurfacePoint::new(face, 63.5, 32.5)));
-        out.push((format!("{face:?} top seam"), SurfacePoint::new(face, 32.5, 0.5)));
+        out.push((
+            format!("{face:?} vertical seam"),
+            SurfacePoint::new(face, 63.5, 32.5),
+        ));
+        out.push((
+            format!("{face:?} top seam"),
+            SurfacePoint::new(face, 32.5, 0.5),
+        ));
     }
     let vertices: [[(Face, f64, f64); 3]; 4] = [
-        [(Face::Front, 64.0, 0.0), (Face::Right, 0.0, 0.0), (Face::Top, 64.0, 64.0)],
-        [(Face::Right, 64.0, 0.0), (Face::Back, 0.0, 0.0), (Face::Top, 64.0, 0.0)],
-        [(Face::Back, 64.0, 0.0), (Face::Left, 0.0, 0.0), (Face::Top, 0.0, 0.0)],
-        [(Face::Left, 64.0, 0.0), (Face::Front, 0.0, 0.0), (Face::Top, 0.0, 64.0)],
+        [
+            (Face::Front, 64.0, 0.0),
+            (Face::Right, 0.0, 0.0),
+            (Face::Top, 64.0, 64.0),
+        ],
+        [
+            (Face::Right, 64.0, 0.0),
+            (Face::Back, 0.0, 0.0),
+            (Face::Top, 64.0, 0.0),
+        ],
+        [
+            (Face::Back, 64.0, 0.0),
+            (Face::Left, 0.0, 0.0),
+            (Face::Top, 0.0, 0.0),
+        ],
+        [
+            (Face::Left, 64.0, 0.0),
+            (Face::Front, 0.0, 0.0),
+            (Face::Top, 0.0, 64.0),
+        ],
     ];
     for (i, vertex) in vertices.into_iter().enumerate() {
         for (face, u, v) in vertex {
             out.push((format!("vertex {i} from {face:?}"), corner(face, u, v)));
         }
     }
-    for (face, u) in [(Face::Front, 63.5), (Face::Right, 0.5), (Face::Back, 63.5), (Face::Left, 0.5)] {
-        out.push((format!("{face:?} lower corner"), SurfacePoint::new(face, u, 63.5)));
+    for (face, u) in [
+        (Face::Front, 63.5),
+        (Face::Right, 0.5),
+        (Face::Back, 63.5),
+        (Face::Left, 0.5),
+    ] {
+        out.push((
+            format!("{face:?} lower corner"),
+            SurfacePoint::new(face, u, 63.5),
+        ));
     }
     out
 }
@@ -88,7 +127,11 @@ fn assert_matches_brute_force(what: &str, anchor: SurfacePoint, radius: f64) -> 
         want.len()
     );
     for (g, w) in got.iter().zip(&want) {
-        assert_eq!((g.face, g.x, g.y), (w.face, w.x, w.y), "{what} r={radius}: pixel order");
+        assert_eq!(
+            (g.face, g.x, g.y),
+            (w.face, w.x, w.y),
+            "{what} r={radius}: pixel order"
+        );
         assert!(
             (g.local - w.local).length() <= 1e-9,
             "{what} r={radius}: {:?} local {:?} vs {:?}",
@@ -108,7 +151,10 @@ fn assert_matches_brute_force(what: &str, anchor: SurfacePoint, radius: f64) -> 
     // Each pixel once, in (face, y, x) order.
     for w in got.windows(2) {
         let key = |p: &PixelImage| (p.face.index(), p.y, p.x);
-        assert!(key(&w[0]) < key(&w[1]), "{what} r={radius}: duplicate or unsorted pixel");
+        assert!(
+            key(&w[0]) < key(&w[1]),
+            "{what} r={radius}: duplicate or unsorted pixel"
+        );
     }
     got
 }
@@ -170,17 +216,34 @@ fn an_interior_disc_is_the_pixel_lattice_disc() {
 fn a_stamp_carried_across_a_flat_seam_keeps_its_distances() {
     let radius = 9.5;
     let mut here = Vec::new();
-    unfold_pixels(Topology::Cube, SurfacePoint::new(Face::Front, 34.5, 34.5), radius, &mut here);
+    unfold_pixels(
+        Topology::Cube,
+        SurfacePoint::new(Face::Front, 34.5, 34.5),
+        radius,
+        &mut here,
+    );
     let mut there = Vec::new();
     // 34.5 + 32 = 66.5, i.e. Right (2.5, 34.5): eight whole pixels past the flat seam.
-    unfold_pixels(Topology::Cube, SurfacePoint::new(Face::Right, 2.5, 34.5), radius, &mut there);
-    assert_eq!(here.len(), there.len(), "the stamp changed size across the seam");
+    unfold_pixels(
+        Topology::Cube,
+        SurfacePoint::new(Face::Right, 2.5, 34.5),
+        radius,
+        &mut there,
+    );
+    assert_eq!(
+        here.len(),
+        there.len(),
+        "the stamp changed size across the seam"
+    );
     let mut a: Vec<f64> = here.iter().map(|p| p.distance).collect();
     let mut b: Vec<f64> = there.iter().map(|p| p.distance).collect();
     a.sort_by(f64::total_cmp);
     b.sort_by(f64::total_cmp);
     for (x, y) in a.iter().zip(&b) {
-        assert!((x - y).abs() <= 1e-9, "distance {x} became {y} across the seam");
+        assert!(
+            (x - y).abs() <= 1e-9,
+            "distance {x} became {y} across the seam"
+        );
     }
 }
 
@@ -195,7 +258,11 @@ fn a_footprint_around_a_top_vertex_owns_each_pixel_once() {
     let mut seen = std::collections::HashSet::new();
     let mut faces = std::collections::HashSet::new();
     for p in &got {
-        assert!(seen.insert((p.face, p.x, p.y)), "{:?} appears twice", (p.face, p.x, p.y));
+        assert!(
+            seen.insert((p.face, p.x, p.y)),
+            "{:?} appears twice",
+            (p.face, p.x, p.y)
+        );
         faces.insert(p.face);
         assert!(p.distance <= 9.5 + 1e-9);
         assert!(p.local.is_finite());
@@ -212,14 +279,19 @@ fn a_footprint_around_a_top_vertex_owns_each_pixel_once() {
         "{} pixels is more than a full disc ({full})",
         got.len()
     );
-    assert!((got.len() as f64) > 0.6 * full, "{} pixels is too few", got.len());
+    assert!(
+        (got.len() as f64) > 0.6 * full,
+        "{} pixels is too few",
+        got.len()
+    );
 }
 
 #[test]
 #[should_panic]
 fn a_radius_beyond_max_local_radius_panics() {
     let mut out = Vec::new();
-    unfold_pixels(Topology::Cube, 
+    unfold_pixels(
+        Topology::Cube,
         SurfacePoint::new(Face::Front, 32.0, 32.0),
         MAX_LOCAL_RADIUS + 0.5,
         &mut out,
@@ -230,17 +302,32 @@ fn a_radius_beyond_max_local_radius_panics() {
 #[should_panic]
 fn a_non_canonical_anchor_panics() {
     let mut out = Vec::new();
-    unfold_pixels(Topology::Cube, SurfacePoint::new(Face::Front, 64.0, 32.0), 4.0, &mut out);
+    unfold_pixels(
+        Topology::Cube,
+        SurfacePoint::new(Face::Front, 64.0, 32.0),
+        4.0,
+        &mut out,
+    );
 }
 
 /// `out` is cleared and its capacity reused, so repeated stamping allocates nothing.
 #[test]
 fn the_output_buffer_is_reused() {
     let mut out = Vec::new();
-    unfold_pixels(Topology::Cube, SurfacePoint::new(Face::Front, 32.5, 32.5), 9.5, &mut out);
+    unfold_pixels(
+        Topology::Cube,
+        SurfacePoint::new(Face::Front, 32.5, 32.5),
+        9.5,
+        &mut out,
+    );
     let big = out.len();
     let cap = out.capacity();
-    unfold_pixels(Topology::Cube, SurfacePoint::new(Face::Front, 32.5, 32.5), 1.5, &mut out);
+    unfold_pixels(
+        Topology::Cube,
+        SurfacePoint::new(Face::Front, 32.5, 32.5),
+        1.5,
+        &mut out,
+    );
     assert!(out.len() < big, "the buffer was not cleared");
     assert!(out.capacity() >= cap, "the buffer lost its capacity");
 }

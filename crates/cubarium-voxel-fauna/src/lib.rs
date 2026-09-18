@@ -90,7 +90,9 @@ impl Species {
 
     /// The name a command line or a stdin line gives, or `None`.
     pub fn parse(s: &str) -> Option<Species> {
-        Species::ALL.into_iter().find(|sp| sp.name().eq_ignore_ascii_case(s))
+        Species::ALL
+            .into_iter()
+            .find(|sp| sp.name().eq_ignore_ascii_case(s))
     }
 }
 
@@ -246,7 +248,10 @@ impl SpeciesConfig {
             birth_body: 0.03,
             birth_cost: 0.01,
             reserve_cap: 0.5,
-            reach: Reach { horizontal: 1, up: 1 },
+            reach: Reach {
+                horizontal: 1,
+                up: 1,
+            },
             climb: 1,
             wade_depth_m: 0.05,
             drown_depth_m: 0.2,
@@ -259,7 +264,11 @@ impl SpeciesConfig {
     /// Whole ticks between steps, never zero.
     pub fn step_period_ticks(&self) -> u64 {
         let t = (self.step_period_s * f64::from(TICK_HZ)).round();
-        if !t.is_finite() || t < 1.0 { 1 } else { t as u64 }
+        if !t.is_finite() || t < 1.0 {
+            1
+        } else {
+            t as u64
+        }
     }
 
     /// The reserve intake into a body of this size stops at: `reserve_cap · body`. A
@@ -292,17 +301,28 @@ impl SpeciesConfig {
         ];
         for (field, v) in fields {
             if !v.is_finite() || v < 0.0 {
-                return Err(format!("{name}.{field} must be finite and nonnegative, not {v}"));
+                return Err(format!(
+                    "{name}.{field} must be finite and nonnegative, not {v}"
+                ));
             }
         }
         if !(self.yield_fraction <= 1.0) {
-            return Err(format!("{name}.yield_fraction must be at most 1, not {}", self.yield_fraction));
+            return Err(format!(
+                "{name}.yield_fraction must be at most 1, not {}",
+                self.yield_fraction
+            ));
         }
         if !(self.step_period_s.is_finite() && self.step_period_s > 0.0) {
-            return Err(format!("{name}.step_period_s must be positive, not {}", self.step_period_s));
+            return Err(format!(
+                "{name}.step_period_s must be positive, not {}",
+                self.step_period_s
+            ));
         }
         if !(self.body_min > 0.0) {
-            return Err(format!("{name}.body_min must be positive, not {}", self.body_min));
+            return Err(format!(
+                "{name}.body_min must be positive, not {}",
+                self.body_min
+            ));
         }
         if self.body_min > self.birth_body || self.birth_body > self.body_max {
             return Err(format!(
@@ -330,7 +350,9 @@ pub struct FaunaConfig {
 
 impl Default for FaunaConfig {
     fn default() -> FaunaConfig {
-        FaunaConfig { frondgrazer: SpeciesConfig::frondgrazer() }
+        FaunaConfig {
+            frondgrazer: SpeciesConfig::frondgrazer(),
+        }
     }
 }
 
@@ -462,7 +484,10 @@ pub struct FaunaView<'a> {
 impl<'a> FaunaView<'a> {
     /// The animal with this identity, if it is still alive.
     pub fn animal(&self, id: u64) -> Option<&'a Animal> {
-        self.animals.binary_search_by_key(&id, |a| a.id).ok().map(|i| &self.animals[i])
+        self.animals
+            .binary_search_by_key(&id, |a| a.id)
+            .ok()
+            .map(|i| &self.animals[i])
     }
 
     /// Every animal standing on this face, in id order. More than one is allowed: a
@@ -497,7 +522,12 @@ pub enum Command {
     ///
     /// More than one animal may stand on a face, so this is never refused for being
     /// occupied.
-    Introduce { x: i64, z: u32, species: Species, body: f64 },
+    Introduce {
+        x: i64,
+        z: u32,
+        species: Species,
+        body: f64,
+    },
     /// Take every animal off the highest support face of column `(x, z)`, booking their
     /// material as `removed_*_out`. No corpse: this is a frontend's undo, not a death.
     /// Refused if there is none.
@@ -531,7 +561,12 @@ impl Fauna {
     /// [`Fauna::new`] without the panic.
     pub fn try_new(config: FaunaConfig) -> Result<Fauna, String> {
         config.validate()?;
-        Ok(Fauna { config, tick: 0, animals: Vec::new(), ledger: FaunaLedger::default() })
+        Ok(Fauna {
+            config,
+            tick: 0,
+            animals: Vec::new(),
+            ledger: FaunaLedger::default(),
+        })
     }
 
     pub fn config(&self) -> &FaunaConfig {
@@ -576,7 +611,12 @@ impl Fauna {
     /// whether it was accepted.
     pub fn apply(&mut self, world: &World, command: Command) -> bool {
         match command {
-            Command::Introduce { x, z, species, body } => {
+            Command::Introduce {
+                x,
+                z,
+                species,
+                body,
+            } => {
                 let view = world.view();
                 let Some(site) = cubarium_voxel_flora::highest_support(&view, x, z) else {
                     return false;
@@ -726,7 +766,11 @@ pub fn steppable(
         if view.water_depth_m(x, y, z) > sc.wade_depth_m {
             continue;
         }
-        out.push(Site { x: x.rem_euclid(i64::from(c.width)) as u32, y, z });
+        out.push(Site {
+            x: x.rem_euclid(i64::from(c.width)) as u32,
+            y,
+            z,
+        });
     }
     out
 }

@@ -143,7 +143,13 @@ pub fn proposed_score(t_min: u64, mean_auxiliary: f64) -> f64 {
 /// The action channels this check reads: the two movement channels and the three mouths.
 pub const CH: usize = 5;
 pub const CHANNEL_NAMES: [&str; CH] = ["thrust", "turn", "graze", "fruit", "scavenge"];
-const CHANNEL_INDEX: [usize; CH] = [THRUST, TURN, GRAZE, cubarium_core::neural::action::FRUIT, SCAVENGE];
+const CHANNEL_INDEX: [usize; CH] = [
+    THRUST,
+    TURN,
+    GRAZE,
+    cubarium_core::neural::action::FRUIT,
+    SCAVENGE,
+];
 
 /// The levels `v[0]` is driven to. `v[0] = P_here / P_max`, so these are "bare", "a quarter
 /// stand" … "a full stand under the body", and nothing else in the vector moves with them.
@@ -366,8 +372,12 @@ pub fn record(
     let acc: Mutex<(u64, u64, f64, u64, Pending)> = Mutex::new((0, 0, 0.0, 0, None));
 
     let watch = |w: &mut World, tick: u64| {
-        let Some((id, _)) = w.state.organisms.iter().next() else { return };
-        let Some(animal) = w.state.neural.get(id) else { return };
+        let Some((id, _)) = w.state.organisms.iter().next() else {
+            return;
+        };
+        let Some(animal) = w.state.neural.get(id) else {
+            return;
+        };
         if animal.updates_on(tick) {
             let held = animal.held;
             let mut v = [0.0; CH];
@@ -391,7 +401,9 @@ pub fn record(
         }
         let mut hidden = [0.0f64; HIDDEN];
         hidden.copy_from_slice(&animal.hidden);
-        let Some(obs) = w.neural_observation(id) else { return };
+        let Some(obs) = w.neural_observation(id) else {
+            return;
+        };
         let obs = obs.0;
         let on_food = obs[0] >= held_floor || obs[1] >= held_floor || obs[2] >= held_floor;
         let mut a = acc.lock().expect("acc");
@@ -409,8 +421,7 @@ pub fn record(
     };
 
     let driver = episode::Driver::Policy(Box::new(policy.clone()));
-    let episode =
-        episode::run_with_fault(layout, &driver, horizon, limits, job, Some(&watch))?;
+    let episode = episode::run_with_fault(layout, &driver, horizon, limits, job, Some(&watch))?;
 
     let all = all.into_inner().expect("all");
     let (on_food_ticks, update_ticks, residual, checks, _) = acc.into_inner().expect("acc");
@@ -499,9 +510,15 @@ pub fn sweep(
     let natural_sd = natural.sd();
     let zero = [0.0f64; HIDDEN];
 
-    for (stratum, want) in [("on-food", Some(true)), ("off-food", Some(false)), ("all", None)] {
-        let pool: Vec<&Sample> =
-            samples.iter().filter(|s| want.is_none_or(|w| s.on_food == w)).collect();
+    for (stratum, want) in [
+        ("on-food", Some(true)),
+        ("off-food", Some(false)),
+        ("all", None),
+    ] {
+        let pool: Vec<&Sample> = samples
+            .iter()
+            .filter(|s| want.is_none_or(|w| s.on_food == w))
+            .collect();
         if pool.is_empty() {
             continue;
         }
@@ -513,15 +530,23 @@ pub fn sweep(
             let mut ring_span = [0.0f64; CH];
 
             for s in &pool {
-                let x0: [f64; OBS_LEN] =
-                    s.obs.clone().try_into().expect("a recorded observation is 70 wide");
+                let x0: [f64; OBS_LEN] = s
+                    .obs
+                    .clone()
+                    .try_into()
+                    .expect("a recorded observation is 70 wide");
                 let mut h = zero;
                 if start == Start::Carried {
                     h.copy_from_slice(&s.hidden);
                 }
                 let mut per_level = Vec::with_capacity(V0_LEVELS.len());
                 for (li, level) in V0_LEVELS.iter().enumerate() {
-                    let out = respond(weights, cap, &variant(&x0, Some(*level), Ring::AsRecorded), &h);
+                    let out = respond(
+                        weights,
+                        cap,
+                        &variant(&x0, Some(*level), Ring::AsRecorded),
+                        &h,
+                    );
                     for c in 0..CH {
                         v0_mean[li][c] += out[c];
                     }
@@ -537,13 +562,22 @@ pub fn sweep(
                 }
                 for c in 0..CH {
                     v0_delta[c] += per_level[V0_LEVELS.len() - 1][c] - per_level[0][c];
-                    let hi = per_level.iter().map(|p| p[c]).fold(f64::NEG_INFINITY, f64::max);
+                    let hi = per_level
+                        .iter()
+                        .map(|p| p[c])
+                        .fold(f64::NEG_INFINITY, f64::max);
                     let lo = per_level.iter().map(|p| p[c]).fold(f64::INFINITY, f64::min);
                     v0_span[c] += hi - lo;
                     // The ring span excludes the as-recorded control arm: it compares the three
                     // *constructed* ring states with one another.
-                    let hi = per_arm[1..].iter().map(|p| p[c]).fold(f64::NEG_INFINITY, f64::max);
-                    let lo = per_arm[1..].iter().map(|p| p[c]).fold(f64::INFINITY, f64::min);
+                    let hi = per_arm[1..]
+                        .iter()
+                        .map(|p| p[c])
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    let lo = per_arm[1..]
+                        .iter()
+                        .map(|p| p[c])
+                        .fold(f64::INFINITY, f64::min);
                     ring_span[c] += hi - lo;
                 }
             }
@@ -568,7 +602,11 @@ pub fn sweep(
                 ring_span[c] /= n;
                 let sd = natural_sd[c];
                 let ratio = |x: f64| if sd > 0.0 { x / sd } else { f64::INFINITY };
-                d_sd[c] = if sd > 0.0 { v0_delta[c].abs() / sd } else { f64::INFINITY };
+                d_sd[c] = if sd > 0.0 {
+                    v0_delta[c].abs() / sd
+                } else {
+                    f64::INFINITY
+                };
                 s_sd[c] = ratio(v0_span[c]);
                 r_sd[c] = ratio(ring_span[c]);
             }
@@ -600,7 +638,11 @@ pub fn sweep(
 pub fn capability_of(layout: &fixture::Layout) -> Result<Capability, Boxed> {
     let (world, id) = layout.build()?;
     let cfg = world.config().clone();
-    let o = world.state.organisms.get(id).ok_or_else(|| Boxed::from("no body"))?;
+    let o = world
+        .state
+        .organisms
+        .get(id)
+        .ok_or_else(|| Boxed::from("no body"))?;
     Ok(Capability::ordinary(
         o.phenotype.cap_foliage,
         o.phenotype.cap_detrital,
@@ -660,7 +702,10 @@ pub fn measure_rung(
         Mutex::new((0.0, 0.0, 0.0, 0, 0, None));
     let watch = |w: &mut World, _tick: u64| {
         let (rows, dropped) = w.drain_intake_trace();
-        assert_eq!(dropped, 0, "a per-tick drain can never overflow the trace cap");
+        assert_eq!(
+            dropped, 0,
+            "a per-tick drain can never overflow the trace cap"
+        );
         let closed = w.drain_body_budgets().0;
         let record = match closed.into_iter().next_back() {
             Some(b) => Some(b),
@@ -794,8 +839,15 @@ pub fn stays(
     let cancel = AtomicBool::new(false);
     let track: Mutex<Vec<(u16, f64)>> = Mutex::new(Vec::new());
     let watch = |w: &mut World, _tick: u64| {
-        let Some((id, o)) = w.state.organisms.iter().next() else { return };
-        let here = cubarium_surface::cell_of(cubarium_surface::Topology::Cube, cubarium_surface::Scale::ONE, &o.pos).0;
+        let Some((id, o)) = w.state.organisms.iter().next() else {
+            return;
+        };
+        let here = cubarium_surface::cell_of(
+            cubarium_surface::Topology::Cube,
+            cubarium_surface::Scale::ONE,
+            &o.pos,
+        )
+        .0;
         let travelled: f64 = w
             .moved_segments(id)
             .iter()
@@ -803,7 +855,14 @@ pub fn stays(
             .sum();
         track.lock().expect("track").push((here, travelled));
     };
-    episode::run_with_fault(layout, driver, horizon, Limits::new(&cancel), "stays", Some(&watch))?;
+    episode::run_with_fault(
+        layout,
+        driver,
+        horizon,
+        Limits::new(&cancel),
+        "stays",
+        Some(&watch),
+    )?;
     let track = track.into_inner().expect("track");
 
     let mut out = Vec::new();
@@ -900,12 +959,23 @@ pub fn run_sweep(
     let mut layouts = fixture::training_layouts_on(&eco);
     layouts.extend(fixture::holdout_layouts_on(&eco));
 
-    println!("# check (a): the frozen controller's response to food, on {} ({})", eco.label, eco.hex());
-    println!("# build {BUILD_ID}, {horizon} ticks, {} drivers x {} layouts", named.len(), layouts.len());
-    println!("# v[0] levels {V0_LEVELS:?}, ring arms as-recorded/none/ahead/behind, hidden reset and carried");
+    println!(
+        "# check (a): the frozen controller's response to food, on {} ({})",
+        eco.label,
+        eco.hex()
+    );
+    println!(
+        "# build {BUILD_ID}, {horizon} ticks, {} drivers x {} layouts",
+        named.len(),
+        layouts.len()
+    );
+    println!(
+        "# v[0] levels {V0_LEVELS:?}, ring arms as-recorded/none/ahead/behind, hidden reset and carried"
+    );
 
-    let jobs: Vec<(usize, usize)> =
-        (0..named.len()).flat_map(|d| (0..layouts.len()).map(move |l| (d, l))).collect();
+    let jobs: Vec<(usize, usize)> = (0..named.len())
+        .flat_map(|d| (0..layouts.len()).map(move |l| (d, l)))
+        .collect();
     let cursor = AtomicUsize::new(0);
     let done: Mutex<Vec<(usize, Recording)>> = Mutex::new(Vec::new());
     let failures: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -918,7 +988,9 @@ pub fn run_sweep(
             scope.spawn(|| {
                 loop {
                     let next = cursor.fetch_add(1, Ordering::Relaxed);
-                    let Some(&(d, l)) = jobs.get(next) else { return };
+                    let Some(&(d, l)) = jobs.get(next) else {
+                        return;
+                    };
                     let (name, policy) = &named[d];
                     let layout = &layouts[l];
                     let cap = match capability_of(layout) {
@@ -940,7 +1012,11 @@ pub fn run_sweep(
 
     let failures = failures.into_inner().expect("f");
     if !failures.is_empty() {
-        return Err(Boxed::from(format!("{} episode(s) failed: {}", failures.len(), failures.join("; "))));
+        return Err(Boxed::from(format!(
+            "{} episode(s) failed: {}",
+            failures.len(),
+            failures.join("; ")
+        )));
     }
     let mut done = done.into_inner().expect("done");
     done.sort_by(|a, b| (a.0, &a.1.layout).cmp(&(b.0, &b.1.layout)));
@@ -949,7 +1025,11 @@ pub fn run_sweep(
     let mut rows = Vec::new();
     let mut trajectories = Vec::new();
     for (d, (name, policy)) in named.iter().enumerate() {
-        let mine: Vec<&Recording> = done.iter().filter(|(i, _)| *i == d).map(|(_, r)| r).collect();
+        let mine: Vec<&Recording> = done
+            .iter()
+            .filter(|(i, _)| *i == d)
+            .map(|(_, r)| r)
+            .collect();
         let mut pooled_samples: Vec<Sample> = Vec::new();
         let mut pooled_natural = Moments::default();
         for rec in &mine {
@@ -967,11 +1047,25 @@ pub fn run_sweep(
                 natural_mean: rec.natural.mean(),
                 natural_sd: rec.natural.sd(),
             });
-            rows.extend(sweep(name, &rec.layout, &rec.samples, &rec.natural, &policy.weights, &cap));
+            rows.extend(sweep(
+                name,
+                &rec.layout,
+                &rec.samples,
+                &rec.natural,
+                &policy.weights,
+                &cap,
+            ));
             pooled_samples.extend(rec.samples.iter().cloned());
             pooled_natural.merge(&rec.natural);
         }
-        rows.extend(sweep(name, "pooled", &pooled_samples, &pooled_natural, &policy.weights, &cap));
+        rows.extend(sweep(
+            name,
+            "pooled",
+            &pooled_samples,
+            &pooled_natural,
+            &policy.weights,
+            &cap,
+        ));
     }
 
     let report = SweepReport {
@@ -1050,7 +1144,10 @@ pub fn run_ladder(
         episode::Control::StationaryGrazing,
         episode::Control::NoIntake,
     ] {
-        rungs.push(NamedDriver { name: c.name(), driver: episode::Driver::Control(c) });
+        rungs.push(NamedDriver {
+            name: c.name(),
+            driver: episode::Driver::Control(c),
+        });
     }
     if let Some(path) = &policy_file {
         let file: PolicyFile = serde_json::from_str(&fs::read_to_string(path)?)?;
@@ -1061,12 +1158,23 @@ pub fn run_ladder(
         });
     }
 
-    println!("# check (b): the dwell ladder under t_min + 0.25*stores, on {} ({})", eco.label, eco.hex());
-    println!("# build {BUILD_ID}, {horizon} ticks, {} rungs x {} layouts", rungs.len(), layouts.len());
-    println!("# the auxiliary is reported alongside: T={AUX_HORIZON}, lambda={AUX_LAMBDA}, clip={AUX_CLIP}, dead tick {AUX_DEAD_TICK}");
+    println!(
+        "# check (b): the dwell ladder under t_min + 0.25*stores, on {} ({})",
+        eco.label,
+        eco.hex()
+    );
+    println!(
+        "# build {BUILD_ID}, {horizon} ticks, {} rungs x {} layouts",
+        rungs.len(),
+        layouts.len()
+    );
+    println!(
+        "# the auxiliary is reported alongside: T={AUX_HORIZON}, lambda={AUX_LAMBDA}, clip={AUX_CLIP}, dead tick {AUX_DEAD_TICK}"
+    );
 
-    let jobs: Vec<(usize, usize)> =
-        (0..rungs.len()).flat_map(|r| (0..layouts.len()).map(move |l| (r, l))).collect();
+    let jobs: Vec<(usize, usize)> = (0..rungs.len())
+        .flat_map(|r| (0..layouts.len()).map(move |l| (r, l)))
+        .collect();
     let cursor = AtomicUsize::new(0);
     let out_rows: Mutex<Vec<LadderEpisode>> = Mutex::new(Vec::new());
     let failures: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -1079,7 +1187,9 @@ pub fn run_ladder(
             scope.spawn(|| {
                 loop {
                     let next = cursor.fetch_add(1, Ordering::Relaxed);
-                    let Some(&(r, l)) = jobs.get(next) else { return };
+                    let Some(&(r, l)) = jobs.get(next) else {
+                        return;
+                    };
                     match measure_rung(&layouts[l], &rungs[r], horizon, limits, e_r, eta_ox) {
                         Ok(row) => out_rows.lock().expect("rows").push(row),
                         Err(e) => failures.lock().expect("f").push(e.to_string()),
@@ -1091,7 +1201,11 @@ pub fn run_ladder(
 
     let failures = failures.into_inner().expect("f");
     if !failures.is_empty() {
-        return Err(Boxed::from(format!("{} episode(s) failed: {}", failures.len(), failures.join("; "))));
+        return Err(Boxed::from(format!(
+            "{} episode(s) failed: {}",
+            failures.len(),
+            failures.join("; ")
+        )));
     }
     let mut episodes = out_rows.into_inner().expect("rows");
     episodes.sort_by(|a, b| (&a.rung, &a.layout).cmp(&(&b.rung, &b.layout)));
@@ -1103,8 +1217,11 @@ pub fn run_ladder(
         if mine.is_empty() {
             continue;
         }
-        let train: Vec<&LadderEpisode> =
-            mine.iter().filter(|e| training_names.contains(&e.layout)).copied().collect();
+        let train: Vec<&LadderEpisode> = mine
+            .iter()
+            .filter(|e| training_names.contains(&e.layout))
+            .copied()
+            .collect();
         scores.push((rung.name.clone(), reduce(&train), reduce(&mine)));
     }
 
@@ -1144,7 +1261,9 @@ fn write_json<T: Serialize>(out: &Path, value: &T) -> Result<(), Boxed> {
 
 fn print_sweep(r: &SweepReport) {
     println!();
-    println!("driver                layout  stratum   start     n   channel   v0=0    v0=1    span   span/sd   natural sd");
+    println!(
+        "driver                layout  stratum   start     n   channel   v0=0    v0=1    span   span/sd   natural sd"
+    );
     for row in r.rows.iter().filter(|row| row.layout == "pooled") {
         for c in 0..CH {
             println!(
@@ -1165,9 +1284,16 @@ fn print_sweep(r: &SweepReport) {
     }
     println!();
     println!("ring arms (pooled, all strata):");
-    for row in r.rows.iter().filter(|row| row.layout == "pooled" && row.stratum == "all") {
+    for row in r
+        .rows
+        .iter()
+        .filter(|row| row.layout == "pooled" && row.stratum == "all")
+    {
         for c in 0..CH {
-            print!("{:<20} {:<7} {:<8}", row.driver, row.start, CHANNEL_NAMES[c]);
+            print!(
+                "{:<20} {:<7} {:<8}",
+                row.driver, row.start, CHANNEL_NAMES[c]
+            );
             for (a, arm) in RING_ARMS.iter().enumerate() {
                 print!("  {}={:.4}", arm.name(), row.ring_mean[a][c]);
             }
@@ -1178,8 +1304,14 @@ fn print_sweep(r: &SweepReport) {
     for t in &r.trajectories {
         println!(
             "# {:<20} {:<12} ticks {:>6} alive {:<5} updates {:>6} on-food {:>6} samples {:>3} residual {:.3e}",
-            t.driver, t.layout, t.ticks, t.alive, t.update_ticks, t.on_food_update_ticks,
-            t.samples, t.max_reconstruction_residual
+            t.driver,
+            t.layout,
+            t.ticks,
+            t.alive,
+            t.update_ticks,
+            t.on_food_update_ticks,
+            t.samples,
+            t.max_reconstruction_residual
         );
     }
     println!("# wall {:.1} s", r.wall_seconds);
@@ -1188,13 +1320,23 @@ fn print_sweep(r: &SweepReport) {
 fn print_ladder(r: &LadderReport) {
     println!();
     println!("b_ref = {:.6e} e/tick", r.b_ref);
-    println!("rung                 set        t_min  t_mean   stores  CURRENT   on-food  served      A    PROPOSED");
+    println!(
+        "rung                 set        t_min  t_mean   stores  CURRENT   on-food  served      A    PROPOSED"
+    );
     for (name, train, all) in &r.scores {
         for (label, s) in [("train-4", train), ("all-12", all)] {
             println!(
                 "{:<20} {:<9} {:>6} {:>7.0} {:>8.4} {:>9.3} {:>8.4} {:>7.3} {:>7.4} {:>10.2}",
-                name, label, s.t_min, s.t_mean, s.mean_stores, s.current_score,
-                s.mean_on_food_fraction, s.mean_served, s.mean_auxiliary, s.proposed_score
+                name,
+                label,
+                s.t_min,
+                s.t_mean,
+                s.mean_stores,
+                s.current_score,
+                s.mean_on_food_fraction,
+                s.mean_served,
+                s.mean_auxiliary,
+                s.proposed_score
             );
         }
     }
@@ -1233,7 +1375,10 @@ mod tests {
             let out = respond(&w, &cap, &variant(&base, Some(level), Ring::AsRecorded), &h);
             let head = (2.0f64 * level).tanh();
             let want = 1.0 / (1.0 + (-head).exp());
-            assert!(want > cubarium_core::neural::action::DEADBAND, "the band must not bite");
+            assert!(
+                want > cubarium_core::neural::action::DEADBAND,
+                "the band must not bite"
+            );
             assert!(
                 (out[0] - want).abs() < 1e-12,
                 "v0 {level}: thrust {} is not the computed {want}",
@@ -1244,12 +1389,29 @@ mod tests {
         let lo = respond(&w, &cap, &variant(&base, Some(0.0), Ring::AsRecorded), &h);
         let hi = respond(&w, &cap, &variant(&base, Some(1.0), Ring::AsRecorded), &h);
         let want = 1.0 / (1.0 + (-(2.0f64).tanh()).exp()) - 0.5;
-        assert!((hi[0] - lo[0] - want).abs() < 1e-12, "{} vs {want}", hi[0] - lo[0]);
-        assert!((want - 0.223_927_5).abs() < 1e-6, "the documented value moved: {want}");
+        assert!(
+            (hi[0] - lo[0] - want).abs() < 1e-12,
+            "{} vs {want}",
+            hi[0] - lo[0]
+        );
+        assert!(
+            (want - 0.223_927_5).abs() < 1e-6,
+            "the documented value moved: {want}"
+        );
         // And a weight set that reads nothing from v[0] must not move at all.
         let inert = Gru32::zeros();
-        let a = respond(&inert, &cap, &variant(&base, Some(0.0), Ring::AsRecorded), &h);
-        let b = respond(&inert, &cap, &variant(&base, Some(1.0), Ring::AsRecorded), &h);
+        let a = respond(
+            &inert,
+            &cap,
+            &variant(&base, Some(0.0), Ring::AsRecorded),
+            &h,
+        );
+        let b = respond(
+            &inert,
+            &cap,
+            &variant(&base, Some(1.0), Ring::AsRecorded),
+            &h,
+        );
         assert_eq!(a, b, "a policy that ignores v[0] must give the same action");
     }
 
@@ -1298,7 +1460,10 @@ mod tests {
             let driver = episode::Driver::Control(episode::Control::Dwell(d));
             let stays = stays(&layout, &driver, 600).expect("ok");
             let done: Vec<&Stay> = stays.iter().filter(|s| s.completed).collect();
-            assert!(done.len() >= 3, "d {d}: the ladder must complete several stays: {stays:?}");
+            assert!(
+                done.len() >= 3,
+                "d {d}: the ladder must complete several stays: {stays:?}"
+            );
             for s in &done {
                 assert_eq!(
                     s.ticks_on_cell,
@@ -1312,7 +1477,11 @@ mod tests {
             // And every stay is on a cell of the route, not on bare ground.
             let route: Vec<u16> = layout.route().iter().map(|c| c.0).collect();
             for s in &done {
-                assert!(route.contains(&s.cell), "d {d}: stayed on {} which is not food", s.cell);
+                assert!(
+                    route.contains(&s.cell),
+                    "d {d}: stayed on {} which is not food",
+                    s.cell
+                );
             }
         }
         // The mobile script's own stays are its own rule's, and much longer than any rung here:
@@ -1324,7 +1493,10 @@ mod tests {
         )
         .expect("ok");
         assert!(
-            script.iter().filter(|s| s.completed).all(|s| s.ticks_on_cell > 400),
+            script
+                .iter()
+                .filter(|s| s.completed)
+                .all(|s| s.ticks_on_cell > 400),
             "the script leaves on depletion, not on a counter: {script:?}"
         );
     }
@@ -1399,5 +1571,4 @@ mod tests {
         assert!(proposed_score(1_000, -1.0) < proposed_score(1_200, 1.0));
         assert!(proposed_score(1_000, 1.0) >= proposed_score(1_199, -1.0));
     }
-
 }

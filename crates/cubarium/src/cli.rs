@@ -39,7 +39,10 @@ impl std::str::FromStr for TopologyArg {
                 .parse::<u16>()
                 .map_err(|_| format!("`{text}`: the ring's {which} must be 1..=65535"))
         };
-        Ok(TopologyArg(Topology::Ring { w: parse(w, "width")?, h: parse(h, "height")? }))
+        Ok(TopologyArg(Topology::Ring {
+            w: parse(w, "width")?,
+            h: parse(h, "height")?,
+        }))
     }
 }
 
@@ -62,7 +65,10 @@ pub fn topology_name(topo: Topology) -> &'static str {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "cubarium", about = "Cubarium host: clock, fixture scenes, output sinks")]
+#[command(
+    name = "cubarium",
+    about = "Cubarium host: clock, fixture scenes, output sinks"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -144,9 +150,7 @@ impl Voxel {
     /// Reject flag combinations clap cannot express.
     pub fn validate(&self) -> anyhow::Result<()> {
         anyhow::ensure!(
-            self.gpu_web_rate.is_finite()
-                && self.gpu_web_rate >= 0.0
-                && self.gpu_web_rate <= 60.0,
+            self.gpu_web_rate.is_finite() && self.gpu_web_rate >= 0.0 && self.gpu_web_rate <= 60.0,
             "--gpu-web-rate is frames per second for the viewer, 0 (none) to 60"
         );
         if self.sink != VoxelSinkArg::Gpu {
@@ -520,25 +524,37 @@ impl Run {
 
     /// The telemetry path after the documented default is applied.
     pub fn telemetry_path(&self) -> PathBuf {
-        self.telemetry.clone().unwrap_or_else(|| self.state.join("telemetry.jsonl"))
+        self.telemetry
+            .clone()
+            .unwrap_or_else(|| self.state.join("telemetry.jsonl"))
     }
 
     /// The field dump path after the documented default is applied. Only consulted when
     /// the world's `capacity.field_dump_seconds` is nonzero.
     pub fn fields_path(&self) -> PathBuf {
-        self.fields.clone().unwrap_or_else(|| self.state.join("fields.jsonl"))
+        self.fields
+            .clone()
+            .unwrap_or_else(|| self.state.join("fields.jsonl"))
     }
 
     /// The life event log path after the documented default is applied. Only consulted
     /// when the world's `capacity.event_log` is true.
     pub fn events_path(&self) -> PathBuf {
-        self.events.clone().unwrap_or_else(|| self.state.join("events.jsonl"))
+        self.events
+            .clone()
+            .unwrap_or_else(|| self.state.join("events.jsonl"))
     }
 
     /// Reject combinations the contract forbids.
     pub fn validate(&self) -> anyhow::Result<()> {
-        anyhow::ensure!(self.seconds >= 0.0 && self.seconds.is_finite(), "--seconds must be >= 0");
-        anyhow::ensure!(self.speed >= 0.0 && self.speed.is_finite(), "--speed must be >= 0");
+        anyhow::ensure!(
+            self.seconds >= 0.0 && self.seconds.is_finite(),
+            "--seconds must be >= 0"
+        );
+        anyhow::ensure!(
+            self.speed >= 0.0 && self.speed.is_finite(),
+            "--speed must be >= 0"
+        );
         anyhow::ensure!(
             self.speed > 0.0 || !self.sink.is_visual(),
             "--speed 0 is headless only; use --sink none"
@@ -622,7 +638,10 @@ impl Run {
 impl Demo {
     /// Reject combinations the contract forbids.
     pub fn validate(&self) -> anyhow::Result<()> {
-        anyhow::ensure!(self.seconds >= 0.0 && self.seconds.is_finite(), "--seconds must be >= 0");
+        anyhow::ensure!(
+            self.seconds >= 0.0 && self.seconds.is_finite(),
+            "--seconds must be >= 0"
+        );
         if self.sink == SinkArg::Png {
             anyhow::ensure!(self.seconds > 0.0, "--seconds is required with --sink png");
         }
@@ -681,8 +700,13 @@ mod tests {
         assert_eq!(r.neural_count, 4, "the documented default cohort");
 
         let r = parse_run([
-            "cubarium", "run", "--fresh", "--neural", "/tmp/center-00059.json",
-            "--neural-count", "7",
+            "cubarium",
+            "run",
+            "--fresh",
+            "--neural",
+            "/tmp/center-00059.json",
+            "--neural-count",
+            "7",
         ]);
         assert_eq!(r.neural, Some(PathBuf::from("/tmp/center-00059.json")));
         assert_eq!(r.neural_count, 7);
@@ -693,14 +717,24 @@ mod tests {
         let r = parse_run(["cubarium", "run", "--neural", "/tmp/center-00059.json"]);
         assert_eq!(r.neural, Some(PathBuf::from("/tmp/center-00059.json")));
         assert!(!r.fresh);
-        r.validate().expect("the parser does not decide fresh-versus-resume");
+        r.validate()
+            .expect("the parser does not decide fresh-versus-resume");
 
         let err = parse_run([
-            "cubarium", "run", "--fresh", "--neural", "/tmp/p.json", "--neural-count", "0",
+            "cubarium",
+            "run",
+            "--fresh",
+            "--neural",
+            "/tmp/p.json",
+            "--neural-count",
+            "0",
         ])
         .validate()
         .expect_err("a cohort of zero seeds nothing");
-        assert!(format!("{err}").contains("--neural-count must be at least 1"), "{err}");
+        assert!(
+            format!("{err}").contains("--neural-count must be at least 1"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -721,9 +755,26 @@ mod tests {
     #[test]
     fn every_documented_option_parses() {
         let d = demo([
-            "cubarium", "demo", "--scene", "vertex", "--sink", "shim", "--seconds", "20",
-            "--seed", "9", "--addr", "10.0.0.4:1234", "--out", "/tmp/c", "--every", "5",
-            "--scale", "2", "--fps", "24",
+            "cubarium",
+            "demo",
+            "--scene",
+            "vertex",
+            "--sink",
+            "shim",
+            "--seconds",
+            "20",
+            "--seed",
+            "9",
+            "--addr",
+            "10.0.0.4:1234",
+            "--out",
+            "/tmp/c",
+            "--every",
+            "5",
+            "--scale",
+            "2",
+            "--fps",
+            "24",
         ]);
         assert_eq!(d.scene, SceneArg::Vertex);
         assert_eq!(d.sink, SinkArg::Shim);
@@ -770,23 +821,40 @@ mod tests {
         assert!(!r.mirror_web, "the mirrored viewer is opt-in");
         assert_eq!(r.art, None, "the art image is opt-in");
         assert!(!r.care, "care is opt-in");
-        assert!(!r.require_resume, "a run may still create a new world by default");
+        assert!(
+            !r.require_resume,
+            "a run may still create a new world by default"
+        );
         r.validate().unwrap();
     }
 
     #[test]
     fn care_needs_the_viewer_and_is_accepted_with_either_spelling_of_it() {
-        parse_run(["cubarium", "run", "--sink", "web", "--care"]).validate().unwrap();
-        parse_run(["cubarium", "run", "--sink", "shim", "--mirror-web", "--care"])
+        parse_run(["cubarium", "run", "--sink", "web", "--care"])
             .validate()
             .unwrap();
+        parse_run([
+            "cubarium",
+            "run",
+            "--sink",
+            "shim",
+            "--mirror-web",
+            "--care",
+        ])
+        .validate()
+        .unwrap();
         for sink in ["shim", "preview"] {
             let r = parse_run(["cubarium", "run", "--sink", sink, "--care"]);
             let err = r.validate().unwrap_err().to_string();
             assert!(err.contains("--care needs the viewer"), "{sink}: {err}");
         }
-        let r = parse_run(["cubarium", "run", "--sink", "none", "--speed", "0", "--care"]);
-        assert!(r.validate().is_err(), "a headless run has no viewer to offer care on");
+        let r = parse_run([
+            "cubarium", "run", "--sink", "none", "--speed", "0", "--care",
+        ]);
+        assert!(
+            r.validate().is_err(),
+            "a headless run has no viewer to offer care on"
+        );
     }
 
     #[test]
@@ -794,26 +862,46 @@ mod tests {
         let r = parse_run(["cubarium", "run", "--fresh", "--require-resume"]);
         let err = r.validate().unwrap_err().to_string();
         assert!(err.contains("opposite things"), "{err}");
-        parse_run(["cubarium", "run", "--require-resume"]).validate().unwrap();
-        parse_run(["cubarium", "run", "--fresh"]).validate().unwrap();
+        parse_run(["cubarium", "run", "--require-resume"])
+            .validate()
+            .unwrap();
+        parse_run(["cubarium", "run", "--fresh"])
+            .validate()
+            .unwrap();
     }
 
     #[test]
     fn mirroring_the_viewer_is_allowed_beside_every_rendering_sink() {
         for sink in ["shim", "preview", "png"] {
             let r = parse_run([
-                "cubarium", "run", "--sink", sink, "--mirror-web", "--web-port", "7393",
-                "--seconds", "5",
+                "cubarium",
+                "run",
+                "--sink",
+                sink,
+                "--mirror-web",
+                "--web-port",
+                "7393",
+                "--seconds",
+                "5",
             ]);
             assert!(r.mirror_web, "{sink}");
             assert_eq!(r.web_port, 7393);
-            r.validate().unwrap_or_else(|e| panic!("--mirror-web with --sink {sink}: {e}"));
+            r.validate()
+                .unwrap_or_else(|e| panic!("--mirror-web with --sink {sink}: {e}"));
         }
     }
 
     #[test]
     fn mirroring_a_headless_run_is_refused() {
-        let r = parse_run(["cubarium", "run", "--sink", "none", "--speed", "0", "--mirror-web"]);
+        let r = parse_run([
+            "cubarium",
+            "run",
+            "--sink",
+            "none",
+            "--speed",
+            "0",
+            "--mirror-web",
+        ]);
         let err = r.validate().unwrap_err().to_string();
         assert!(err.contains("nothing to mirror"), "{err}");
     }
@@ -824,7 +912,9 @@ mod tests {
         let err = r.validate().unwrap_err().to_string();
         assert!(err.contains("already the viewer"), "{err}");
         // …and `--sink web` on its own is untouched.
-        parse_run(["cubarium", "run", "--sink", "web"]).validate().unwrap();
+        parse_run(["cubarium", "run", "--sink", "web"])
+            .validate()
+            .unwrap();
     }
 
     #[test]
@@ -839,11 +929,39 @@ mod tests {
     #[test]
     fn every_documented_run_option_parses() {
         let r = parse_run([
-            "cubarium", "run", "--config", "w.toml", "--state", "/tmp/s", "--sink", "none",
-            "--speed", "0", "--seconds", "600", "--seed", "7", "--fresh", "--telemetry",
-            "/tmp/t.jsonl", "--fields", "/tmp/f.jsonl", "--events", "/tmp/e.jsonl",
-            "--addr", "10.0.0.4:1", "--out", "/tmp/c", "--every", "5", "--scale", "2",
-            "--fps", "120", "--art", "assets/atelier",
+            "cubarium",
+            "run",
+            "--config",
+            "w.toml",
+            "--state",
+            "/tmp/s",
+            "--sink",
+            "none",
+            "--speed",
+            "0",
+            "--seconds",
+            "600",
+            "--seed",
+            "7",
+            "--fresh",
+            "--telemetry",
+            "/tmp/t.jsonl",
+            "--fields",
+            "/tmp/f.jsonl",
+            "--events",
+            "/tmp/e.jsonl",
+            "--addr",
+            "10.0.0.4:1",
+            "--out",
+            "/tmp/c",
+            "--every",
+            "5",
+            "--scale",
+            "2",
+            "--fps",
+            "120",
+            "--art",
+            "assets/atelier",
         ]);
         assert_eq!(r.config, Some(PathBuf::from("w.toml")));
         assert_eq!(r.state, PathBuf::from("/tmp/s"));
@@ -869,7 +987,9 @@ mod tests {
         let r = parse_run(["cubarium", "run", "--sink", "png"]);
         let err = r.validate().unwrap_err().to_string();
         assert!(err.contains("--seconds is required"), "{err}");
-        parse_run(["cubarium", "run", "--sink", "png", "--seconds", "1"]).validate().unwrap();
+        parse_run(["cubarium", "run", "--sink", "png", "--seconds", "1"])
+            .validate()
+            .unwrap();
     }
 
     #[test]
@@ -879,30 +999,58 @@ mod tests {
             let err = r.validate().unwrap_err().to_string();
             assert!(err.contains("headless"), "{sink}: {err}");
         }
-        parse_run(["cubarium", "run", "--sink", "none", "--speed", "0"]).validate().unwrap();
+        parse_run(["cubarium", "run", "--sink", "none", "--speed", "0"])
+            .validate()
+            .unwrap();
     }
 
     #[test]
     fn negative_durations_and_speeds_are_refused() {
         // `--seconds -1` would be read as a flag, so the contract's negative values are
         // spelled with `=`.
-        assert!(parse_run(["cubarium", "run", "--seconds=-1"]).validate().is_err());
-        assert!(parse_run(["cubarium", "run", "--speed=-1"]).validate().is_err());
-        assert!(parse_run(["cubarium", "run", "--speed=nan"]).validate().is_err());
-        assert!(parse_run(["cubarium", "run", "--every", "0"]).validate().is_err());
-        assert!(parse_run(["cubarium", "run", "--scale", "0"]).validate().is_err());
+        assert!(
+            parse_run(["cubarium", "run", "--seconds=-1"])
+                .validate()
+                .is_err()
+        );
+        assert!(
+            parse_run(["cubarium", "run", "--speed=-1"])
+                .validate()
+                .is_err()
+        );
+        assert!(
+            parse_run(["cubarium", "run", "--speed=nan"])
+                .validate()
+                .is_err()
+        );
+        assert!(
+            parse_run(["cubarium", "run", "--every", "0"])
+                .validate()
+                .is_err()
+        );
+        assert!(
+            parse_run(["cubarium", "run", "--scale", "0"])
+                .validate()
+                .is_err()
+        );
     }
 
     #[test]
     fn the_frame_rate_must_be_inside_the_documented_range() {
         for fps in ["0", "241", "10000"] {
-            let err = parse_run(["cubarium", "run", "--fps", fps]).validate().unwrap_err();
+            let err = parse_run(["cubarium", "run", "--fps", fps])
+                .validate()
+                .unwrap_err();
             assert!(err.to_string().contains("--fps must be"), "{fps}: {err}");
-            let err = demo(["cubarium", "demo", "--fps", fps]).validate().unwrap_err();
+            let err = demo(["cubarium", "demo", "--fps", fps])
+                .validate()
+                .unwrap_err();
             assert!(err.to_string().contains("--fps must be"), "{fps}: {err}");
         }
         for fps in ["1", "30", "60", "144", "240"] {
-            parse_run(["cubarium", "run", "--fps", fps]).validate().unwrap();
+            parse_run(["cubarium", "run", "--fps", fps])
+                .validate()
+                .unwrap();
             demo(["cubarium", "demo", "--fps", fps]).validate().unwrap();
         }
     }
@@ -951,9 +1099,21 @@ mod topology_tests {
             TopologyArg::from_str(" ring:1920X1080 ").unwrap().0,
             Topology::Ring { w: 1920, h: 1080 }
         );
-        for bad in ["", "ring", "ring:320", "ring:320x", "ring:0x180 extra", "sphere:1x1",
-                    "ring:65536x180", "ring:-1x180", "ring:320x180x2"] {
-            assert!(TopologyArg::from_str(bad).is_err(), "`{bad}` must not parse");
+        for bad in [
+            "",
+            "ring",
+            "ring:320",
+            "ring:320x",
+            "ring:0x180 extra",
+            "sphere:1x1",
+            "ring:65536x180",
+            "ring:-1x180",
+            "ring:320x180x2",
+        ] {
+            assert!(
+                TopologyArg::from_str(bad).is_err(),
+                "`{bad}` must not parse"
+            );
         }
         for text in ["cube", "ring:320x180", "ring:640x360"] {
             assert_eq!(TopologyArg::from_str(text).unwrap().to_string(), text);
@@ -965,12 +1125,25 @@ mod topology_tests {
     #[test]
     fn a_fresh_run_takes_the_topology_and_the_scale_from_the_command_line() {
         let r = parse_run(["cubarium", "run"]);
-        assert_eq!(r.topology(), None, "no --topology means the config file decides");
+        assert_eq!(
+            r.topology(),
+            None,
+            "no --topology means the config file decides"
+        );
         assert_eq!(r.scale(), None);
 
         let r = parse_run([
-            "cubarium", "run", "--fresh", "--sink", "none", "--speed", "0",
-            "--topology", "ring:640x360", "--world-scale", "2",
+            "cubarium",
+            "run",
+            "--fresh",
+            "--sink",
+            "none",
+            "--speed",
+            "0",
+            "--topology",
+            "ring:640x360",
+            "--world-scale",
+            "2",
         ]);
         assert_eq!(r.topology(), Some(Topology::Ring { w: 640, h: 360 }));
         assert_eq!(r.scale(), Some(Scale::new(2.0)));
@@ -983,23 +1156,37 @@ mod topology_tests {
     #[test]
     fn the_preview_window_is_refused_for_a_ring_on_both_commands() {
         let err = parse_run([
-            "cubarium", "run", "--fresh", "--sink", "preview", "--topology", "ring:320x180",
+            "cubarium",
+            "run",
+            "--fresh",
+            "--sink",
+            "preview",
+            "--topology",
+            "ring:320x180",
         ])
         .validate()
         .unwrap_err()
         .to_string();
         assert!(err.contains("cannot show a ring world (320x180)"), "{err}");
-        assert!(err.contains("--sink web"), "the refusal must name what to use instead: {err}");
+        assert!(
+            err.contains("--sink web"),
+            "the refusal must name what to use instead: {err}"
+        );
         assert!(err.contains("--sink png"), "{err}");
 
         let err = parse_demo(["cubarium", "demo", "--topology", "ring:320x180"])
             .validate()
             .unwrap_err()
             .to_string();
-        assert!(err.contains("cannot show a ring world"), "preview is the demo default: {err}");
+        assert!(
+            err.contains("cannot show a ring world"),
+            "preview is the demo default: {err}"
+        );
 
         // And a cube preview is untouched on both.
-        parse_run(["cubarium", "run", "--sink", "preview"]).validate().unwrap();
+        parse_run(["cubarium", "run", "--sink", "preview"])
+            .validate()
+            .unwrap();
         parse_demo(["cubarium", "demo"]).validate().unwrap();
     }
 
@@ -1015,7 +1202,13 @@ mod topology_tests {
         assert!(err.contains("pinned to scale 1"), "{err}");
 
         let err = parse_run([
-            "cubarium", "run", "--fresh", "--topology", "cube", "--world-scale", "1.5",
+            "cubarium",
+            "run",
+            "--fresh",
+            "--topology",
+            "cube",
+            "--world-scale",
+            "1.5",
         ])
         .validate()
         .unwrap_err()
@@ -1024,19 +1217,40 @@ mod topology_tests {
 
         // Spelled with `=`, as the contract's other negative values are: bare `-1` reads
         // as a flag.
-        for bad in ["--world-scale=0", "--world-scale=-1", "--world-scale=nan",
-                    "--world-scale=inf"] {
+        for bad in [
+            "--world-scale=0",
+            "--world-scale=-1",
+            "--world-scale=nan",
+            "--world-scale=inf",
+        ] {
             let r = parse_run([
-                "cubarium", "run", "--fresh", "--sink", "none", "--speed", "0",
-                "--topology", "ring:320x180", bad,
+                "cubarium",
+                "run",
+                "--fresh",
+                "--sink",
+                "none",
+                "--speed",
+                "0",
+                "--topology",
+                "ring:320x180",
+                bad,
             ]);
             assert!(r.validate().is_err(), "{bad}");
         }
         // The documented pair does parse and validate. `--sink none --speed 0` because
         // `run`'s default sink is the preview window, which a ring is refused from.
         parse_run([
-            "cubarium", "run", "--fresh", "--sink", "none", "--speed", "0",
-            "--topology", "ring:320x180", "--world-scale", "1",
+            "cubarium",
+            "run",
+            "--fresh",
+            "--sink",
+            "none",
+            "--speed",
+            "0",
+            "--topology",
+            "ring:320x180",
+            "--world-scale",
+            "1",
         ])
         .validate()
         .unwrap();
@@ -1048,8 +1262,15 @@ mod topology_tests {
     #[test]
     fn a_shape_cannot_be_asked_for_alongside_a_required_resume() {
         let err = parse_run([
-            "cubarium", "run", "--require-resume", "--sink", "none", "--speed", "0",
-            "--topology", "ring:320x180",
+            "cubarium",
+            "run",
+            "--require-resume",
+            "--sink",
+            "none",
+            "--speed",
+            "0",
+            "--topology",
+            "ring:320x180",
         ])
         .validate()
         .unwrap_err()
@@ -1071,8 +1292,18 @@ mod topology_tests {
         for scene in ["body", "vertex", "patch", "all"] {
             for (ring, s) in [("ring:320x180", "1"), ("ring:640x360", "2")] {
                 parse_demo([
-                    "cubarium", "demo", "--sink", "png", "--seconds", "1", "--scene", scene,
-                    "--topology", ring, "--world-scale", s,
+                    "cubarium",
+                    "demo",
+                    "--sink",
+                    "png",
+                    "--seconds",
+                    "1",
+                    "--scene",
+                    scene,
+                    "--topology",
+                    ring,
+                    "--world-scale",
+                    s,
                 ])
                 .validate()
                 .unwrap_or_else(|e| panic!("{scene} on {ring} S={s}: {e}"));
@@ -1080,9 +1311,18 @@ mod topology_tests {
         }
         // And every scene is still fine on a cube.
         for scene in ["body", "vertex", "patch", "all"] {
-            parse_demo(["cubarium", "demo", "--sink", "png", "--seconds", "1", "--scene", scene])
-                .validate()
-                .unwrap();
+            parse_demo([
+                "cubarium",
+                "demo",
+                "--sink",
+                "png",
+                "--seconds",
+                "1",
+                "--scene",
+                scene,
+            ])
+            .validate()
+            .unwrap();
         }
     }
 
@@ -1092,8 +1332,18 @@ mod topology_tests {
     #[test]
     fn the_gpu_fed_viewer_is_refused_beside_the_cpu_rasterised_one() {
         let err = parse_run([
-            "cubarium", "run", "--fresh", "--sink", "gpu", "--topology", "ring:320x180",
-            "--art", "assets/atelier", "--gpu-web-rate", "2", "--mirror-web",
+            "cubarium",
+            "run",
+            "--fresh",
+            "--sink",
+            "gpu",
+            "--topology",
+            "ring:320x180",
+            "--art",
+            "assets/atelier",
+            "--gpu-web-rate",
+            "2",
+            "--mirror-web",
         ])
         .validate()
         .unwrap_err()
@@ -1101,33 +1351,74 @@ mod topology_tests {
         assert!(err.contains("two viewers on one port"), "{err}");
 
         let err = parse_run([
-            "cubarium", "run", "--fresh", "--sink", "png", "--out", "/tmp/x",
-            "--seconds", "1", "--gpu-web-rate", "2",
+            "cubarium",
+            "run",
+            "--fresh",
+            "--sink",
+            "png",
+            "--out",
+            "/tmp/x",
+            "--seconds",
+            "1",
+            "--gpu-web-rate",
+            "2",
         ])
         .validate()
         .unwrap_err()
         .to_string();
         assert!(err.contains("this run's sink is png"), "{err}");
 
-        for bad in ["--gpu-web-rate=-1", "--gpu-web-rate=61", "--gpu-web-rate=nan"] {
+        for bad in [
+            "--gpu-web-rate=-1",
+            "--gpu-web-rate=61",
+            "--gpu-web-rate=nan",
+        ] {
             let r = parse_run([
-                "cubarium", "run", "--fresh", "--sink", "gpu", "--topology", "ring:320x180",
-                "--art", "assets/atelier", bad,
+                "cubarium",
+                "run",
+                "--fresh",
+                "--sink",
+                "gpu",
+                "--topology",
+                "ring:320x180",
+                "--art",
+                "assets/atelier",
+                bad,
             ]);
             assert!(r.validate().is_err(), "{bad}");
         }
 
         // The documented pair parses, and 0 (the default) is not a viewer at all.
         parse_run([
-            "cubarium", "run", "--fresh", "--sink", "gpu", "--topology", "ring:640x360",
-            "--world-scale", "2", "--art", "assets/atelier", "--gpu-web-rate", "2",
+            "cubarium",
+            "run",
+            "--fresh",
+            "--sink",
+            "gpu",
+            "--topology",
+            "ring:640x360",
+            "--world-scale",
+            "2",
+            "--art",
+            "assets/atelier",
+            "--gpu-web-rate",
+            "2",
         ])
         .validate()
         .unwrap();
-        parse_run(["cubarium", "run", "--fresh", "--sink", "png", "--out", "/tmp/x",
-                   "--seconds", "1"])
-            .validate()
-            .unwrap();
+        parse_run([
+            "cubarium",
+            "run",
+            "--fresh",
+            "--sink",
+            "png",
+            "--out",
+            "/tmp/x",
+            "--seconds",
+            "1",
+        ])
+        .validate()
+        .unwrap();
     }
 
     /// A ring the surface contract cannot accept is refused with the contract's own
@@ -1135,11 +1426,21 @@ mod topology_tests {
     #[test]
     fn a_ring_the_geometry_refuses_is_refused_on_the_command_line() {
         // Not a whole number of 4-pixel cells.
-        let err = parse_demo(["cubarium", "demo", "--topology", "ring:321x180", "--sink", "png",
-                              "--seconds", "1", "--scene", "body"])
-            .validate()
-            .unwrap_err()
-            .to_string();
+        let err = parse_demo([
+            "cubarium",
+            "demo",
+            "--topology",
+            "ring:321x180",
+            "--sink",
+            "png",
+            "--seconds",
+            "1",
+            "--scene",
+            "body",
+        ])
+        .validate()
+        .unwrap_err()
+        .to_string();
         assert!(err.contains("--topology ring:321x180"), "{err}");
     }
 }

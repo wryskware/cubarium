@@ -95,32 +95,23 @@ pub struct ShimScanout {
 
 impl ShimScanout {
     /// Connect, export `SLOTS` scanout images and attach them all.
-    pub fn open<S: FrameSource>(
-        gpu: &Gpu,
-        src: &mut S,
-        quarter_turns: u32,
-    ) -> Result<ShimScanout> {
+    pub fn open<S: FrameSource>(gpu: &Gpu, src: &mut S, quarter_turns: u32) -> Result<ShimScanout> {
         if !gpu.has_dma_buf {
             bail!("this device has no VK_EXT_external_memory_dma_buf; the shim cannot be fed");
         }
         dmabuf::linear_export_supported(gpu)?;
         let shader_encode = !dmabuf::srgb_view_supported(gpu);
         let raster = src.raster_size();
-        let transform = PresentTransform::fit(
-            raster,
-            PANEL,
-            quarter_turns,
-            shader_encode,
-        )
-        .ok_or_else(|| {
-            anyhow!(
-                "a {}x{} raster does not fit {}x{} at {quarter_turns} quarter turn(s)",
-                raster.0,
-                raster.1,
-                PANEL.0,
-                PANEL.1
-            )
-        })?;
+        let transform = PresentTransform::fit(raster, PANEL, quarter_turns, shader_encode)
+            .ok_or_else(|| {
+                anyhow!(
+                    "a {}x{} raster does not fit {}x{} at {quarter_turns} quarter turn(s)",
+                    raster.0,
+                    raster.1,
+                    PANEL.0,
+                    PANEL.1
+                )
+            })?;
 
         let view_format = if shader_encode {
             dmabuf::FORMAT
@@ -143,7 +134,10 @@ impl ShimScanout {
         // fill in a struct field -- *is* the attached client and makes the real
         // connection refuse itself. That cost half an hour of blaming a neighbour.
         let mut first = dmabuf::export_linear(gpu, PANEL.0, PANEL.1, shader_encode)?;
-        let first_fd = first.fd.take().expect("a freshly exported image has its fd");
+        let first_fd = first
+            .fd
+            .take()
+            .expect("a freshly exported image has its fd");
         let (socket, attached) = connect_when_free(&first, first_fd.as_fd())?;
         drop(first_fd);
         let mut client = ShimScanout {
@@ -158,7 +152,10 @@ impl ShimScanout {
         let mut pending = vec![(attached.slot, first)];
         for _ in 1..SLOTS {
             let mut image = dmabuf::export_linear(gpu, PANEL.0, PANEL.1, shader_encode)?;
-            let fd = image.fd.take().expect("a freshly exported image has its fd");
+            let fd = image
+                .fd
+                .take()
+                .expect("a freshly exported image has its fd");
             let id = client.attach(&image, fd.as_fd())?;
             // The daemon has imported the fd, so ours is dropped here rather than
             // kept: the framebuffer it made is what lives on.
@@ -185,7 +182,11 @@ impl ShimScanout {
             PANEL.0,
             PANEL.1,
             client.slots[0].image.pitch,
-            if shader_encode { "the present shader" } else { "the _SRGB attachment" }
+            if shader_encode {
+                "the present shader"
+            } else {
+                "the _SRGB attachment"
+            }
         );
         Ok(client)
     }
@@ -211,7 +212,9 @@ impl ShimScanout {
         let start = Instant::now();
         {
             let slot = &self.slots[index];
-            unsafe { d.reset_command_buffer(slot.command_buffer, vk::CommandBufferResetFlags::empty()) }?;
+            unsafe {
+                d.reset_command_buffer(slot.command_buffer, vk::CommandBufferResetFlags::empty())
+            }?;
             src.record_frame(
                 gpu,
                 slot.command_buffer,
@@ -227,7 +230,11 @@ impl ShimScanout {
             let one = [slot.command_buffer];
             unsafe {
                 d.reset_fences(&[slot.fence])?;
-                d.queue_submit(gpu.queue, &[vk::SubmitInfo::default().command_buffers(&one)], slot.fence)?;
+                d.queue_submit(
+                    gpu.queue,
+                    &[vk::SubmitInfo::default().command_buffers(&one)],
+                    slot.fence,
+                )?;
                 d.wait_for_fences(&[slot.fence], true, u64::MAX)?;
             }
         }
@@ -297,8 +304,12 @@ impl ShimScanout {
     /// wait happens only when the renderer has genuinely got a frame ahead of the panel.
     fn present(&mut self, slot: u8) -> Result<()> {
         self.seq = self.seq.wrapping_add(1);
-        send(&self.socket, &request(TAG_PRESENT, slot, self.seq, 0, 0, 0, 0, 0), None)
-            .context("sendmsg(Present)")
+        send(
+            &self.socket,
+            &request(TAG_PRESENT, slot, self.seq, 0, 0, 0, 0, 0),
+            None,
+        )
+        .context("sendmsg(Present)")
     }
 
     /// Read one reply and fold its `released` mask into the free set.
@@ -311,7 +322,9 @@ impl ShimScanout {
 
     pub fn destroy(&mut self, gpu: &Gpu) {
         let d = &gpu.device;
-        unsafe { let _ = d.device_wait_idle(); }
+        unsafe {
+            let _ = d.device_wait_idle();
+        }
         for i in 0..self.slots.len() {
             let request = request(TAG_DETACH, self.slots[i].id, 0, 0, 0, 0, 0, 0);
             if send(&self.socket, &request, None).is_ok() {
@@ -344,7 +357,11 @@ impl Reply {
     /// `Ok` when this is the reply that was asked for; the daemon's own text otherwise.
     fn expect(&self, tag: u8) -> Result<()> {
         if self.tag == REPLY_ERROR {
-            bail!("the daemon refused the request with code {}: {}", self.code, self.message);
+            bail!(
+                "the daemon refused the request with code {}: {}",
+                self.code,
+                self.message
+            );
         }
         if self.tag != tag {
             bail!("expected reply tag {tag}, got {}", self.tag);
@@ -400,7 +417,16 @@ fn connect_when_free(image: &LinearImage, fd: BorrowedFd<'_>) -> Result<(OwnedFd
 
 /// Send `Attach` with the one descriptor it must carry, and read the answer.
 fn attach_on(socket: &OwnedFd, image: &LinearImage, fd: BorrowedFd<'_>) -> Result<Reply> {
-    let request = request(TAG_ATTACH, 0, 0, PANEL.0, PANEL.1, FOURCC_XR24, image.pitch, image.offset);
+    let request = request(
+        TAG_ATTACH,
+        0,
+        0,
+        PANEL.0,
+        PANEL.1,
+        FOURCC_XR24,
+        image.pitch,
+        image.offset,
+    );
     send(socket, &request, Some(fd)).context("sendmsg(Attach)")?;
     recv(socket)
 }
@@ -436,7 +462,10 @@ fn recv(socket: &OwnedFd) -> Result<Reply> {
     )
     .context("recvmsg")?;
     if received.bytes < 12 {
-        bail!("the daemon sent a {}-byte reply; the header is 12", received.bytes);
+        bail!(
+            "the daemon sent a {}-byte reply; the header is 12",
+            received.bytes
+        );
     }
     let len = u32::from_le_bytes(buffer[8..12].try_into().unwrap()) as usize;
     let end = (12 + len).min(received.bytes);

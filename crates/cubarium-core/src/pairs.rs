@@ -55,9 +55,18 @@ pub fn build(
     out: &mut NeighborLists,
 ) {
     let max_reach = topo.max_local_radius();
-    let NeighborLists { lists, pairs_considered, pairs_unfolded, lists_truncated } = out;
+    let NeighborLists {
+        lists,
+        pairs_considered,
+        pairs_unfolded,
+        lists_truncated,
+    } = out;
 
-    let slots = bodies.iter().map(|b| b.id.slot as usize + 1).max().unwrap_or(0);
+    let slots = bodies
+        .iter()
+        .map(|b| b.id.slot as usize + 1)
+        .max()
+        .unwrap_or(0);
     if lists.len() < slots {
         lists.resize_with(slots, Vec::new);
     }
@@ -74,18 +83,33 @@ pub fn build(
                 continue;
             }
             *pairs_unfolded += 1;
-            let Some(u) = unfold_with(topo, &images[topo.chart_index(a.pos.face)], a.pos, b.pos, reach)
-            else {
+            let Some(u) = unfold_with(
+                topo,
+                &images[topo.chart_index(a.pos.face)],
+                a.pos,
+                b.pos,
+                reach,
+            ) else {
                 continue;
             };
             let pad = a.extent + b.extent;
             if u.distance <= a.sense_radius + pad {
-                lists[a.id.slot as usize].push(Neighbor { id: b.id, local: u.local, distance: u.distance, extent: b.extent });
+                lists[a.id.slot as usize].push(Neighbor {
+                    id: b.id,
+                    local: u.local,
+                    distance: u.distance,
+                    extent: b.extent,
+                });
             }
             if u.distance <= b.sense_radius + pad {
                 // Unfolding is symmetric: carry a's offset from b back into b's chart.
                 let local = b.pos.chart() + u.map.inverse().apply(a.pos.chart() - u.local);
-                lists[b.id.slot as usize].push(Neighbor { id: a.id, local, distance: u.distance, extent: a.extent });
+                lists[b.id.slot as usize].push(Neighbor {
+                    id: a.id,
+                    local,
+                    distance: u.distance,
+                    extent: a.extent,
+                });
             }
         }
     }
@@ -108,22 +132,37 @@ mod tests {
     fn images() -> [Vec<ChartImage>; 5] {
         std::array::from_fn(|i| {
             let mut v = Vec::new();
-            chart_images(Topology::Cube, Face::from_index(i as u8).expect("five faces"), MAX_SEAMS, &mut v);
+            chart_images(
+                Topology::Cube,
+                Face::from_index(i as u8).expect("five faces"),
+                MAX_SEAMS,
+                &mut v,
+            );
             v
         })
     }
 
     fn id(slot: u32) -> OrganismId {
-        OrganismId { slot, generation: 1 }
+        OrganismId {
+            slot,
+            generation: 1,
+        }
     }
 
     fn body(slot: u32, face: Face, u: f64, v: f64, sense: f64) -> Body {
-        Body { id: id(slot), pos: SurfacePoint::new(face, u, v), sense_radius: sense, extent: 1.4 }
+        Body {
+            id: id(slot),
+            pos: SurfacePoint::new(face, u, v),
+            sense_radius: sense,
+            extent: 1.4,
+        }
     }
 
     /// A deterministic stand-in for `rng::draw`, which another module owns.
     fn next(state: &mut u64) -> f64 {
-        *state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        *state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
         ((*state >> 11) as f64) * (1.0 / (1u64 << 53) as f64)
     }
 
@@ -131,7 +170,8 @@ mod tests {
         let mut s = seed;
         (0..n)
             .map(|k| {
-                let face = Face::from_index((next(&mut s) * 5.0).floor() as u8).expect("five faces");
+                let face =
+                    Face::from_index((next(&mut s) * 5.0).floor() as u8).expect("five faces");
                 let u = next(&mut s) * FACE_EXTENT;
                 let v = next(&mut s) * FACE_EXTENT;
                 let sense = 2.0 + next(&mut s) * 10.0;
@@ -155,7 +195,13 @@ mod tests {
     #[test]
     fn equal_radii_give_symmetric_lists() {
         let bodies = random_bodies(200, 0xC0FFEE);
-        let bodies: Vec<Body> = bodies.into_iter().map(|b| Body { sense_radius: 8.0, ..b }).collect();
+        let bodies: Vec<Body> = bodies
+            .into_iter()
+            .map(|b| Body {
+                sense_radius: 8.0,
+                ..b
+            })
+            .collect();
         let mut out = NeighborLists::default();
         build(Topology::Cube, &bodies, &images(), 64, &mut out);
 
@@ -167,7 +213,10 @@ mod tests {
                     "slot {slot} sees {:?} but not the reverse",
                     n.id
                 );
-                let mirror = back.iter().find(|m| m.id.slot == slot as u32).expect("reverse entry");
+                let mirror = back
+                    .iter()
+                    .find(|m| m.id.slot == slot as u32)
+                    .expect("reverse entry");
                 assert!((mirror.distance - n.distance).abs() < 1e-9);
             }
         }
@@ -183,8 +232,11 @@ mod tests {
         for (k, a) in bodies.iter().enumerate() {
             for b in &bodies[k + 1..] {
                 let pad = a.extent + b.extent;
-                let reach = (a.sense_radius.max(b.sense_radius) + pad).min(cubarium_surface::MAX_LOCAL_RADIUS);
-                let Some(u) = unfold(Topology::Cube, a.pos, b.pos, reach) else { continue };
+                let reach = (a.sense_radius.max(b.sense_radius) + pad)
+                    .min(cubarium_surface::MAX_LOCAL_RADIUS);
+                let Some(u) = unfold(Topology::Cube, a.pos, b.pos, reach) else {
+                    continue;
+                };
                 if u.distance <= a.sense_radius + pad {
                     expected.push((a.id.slot, b.id));
                 }
@@ -196,9 +248,15 @@ mod tests {
         expected.sort_unstable();
 
         assert_eq!(edges(&out), expected);
-        assert!(!expected.is_empty(), "the fixture should produce some neighbors");
+        assert!(
+            !expected.is_empty(),
+            "the fixture should produce some neighbors"
+        );
         assert_eq!(out.pairs_considered, (200 * 199) / 2);
-        assert!(out.pairs_unfolded < out.pairs_considered, "the chord filter must reject something");
+        assert!(
+            out.pairs_unfolded < out.pairs_considered,
+            "the chord filter must reject something"
+        );
     }
 
     #[test]
@@ -229,16 +287,31 @@ mod tests {
     #[test]
     fn neighbors_are_found_across_a_seam() {
         // Two bodies 2 px apart across the Front/Right seam at u = 64.
-        let bodies = vec![body(0, Face::Front, 63.0, 20.0, 8.0), body(1, Face::Right, 1.0, 20.0, 8.0)];
+        let bodies = vec![
+            body(0, Face::Front, 63.0, 20.0, 8.0),
+            body(1, Face::Right, 1.0, 20.0, 8.0),
+        ];
         let mut out = NeighborLists::default();
         build(Topology::Cube, &bodies, &images(), 16, &mut out);
         assert_eq!(out.lists[0].len(), 1);
         assert_eq!(out.lists[1].len(), 1);
-        assert!((out.lists[0][0].distance - 2.0).abs() < 1e-9, "{}", out.lists[0][0].distance);
+        assert!(
+            (out.lists[0][0].distance - 2.0).abs() < 1e-9,
+            "{}",
+            out.lists[0][0].distance
+        );
         // The image of the Right-face body lies just past the Front chart's right edge.
-        assert!((out.lists[0][0].local.x - 65.0).abs() < 1e-9, "{:?}", out.lists[0][0].local);
+        assert!(
+            (out.lists[0][0].local.x - 65.0).abs() < 1e-9,
+            "{:?}",
+            out.lists[0][0].local
+        );
         // And the reverse image lies just past the Right chart's left edge.
-        assert!((out.lists[1][0].local.x + 1.0).abs() < 1e-9, "{:?}", out.lists[1][0].local);
+        assert!(
+            (out.lists[1][0].local.x + 1.0).abs() < 1e-9,
+            "{:?}",
+            out.lists[1][0].local
+        );
     }
 
     #[test]

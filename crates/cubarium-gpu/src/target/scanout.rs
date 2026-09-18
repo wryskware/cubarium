@@ -65,7 +65,11 @@ impl Scanout {
                     raster.1
                 )
             })?;
-        let view_format = if shader_encode { dmabuf::FORMAT } else { vk::Format::B8G8R8A8_SRGB };
+        let view_format = if shader_encode {
+            dmabuf::FORMAT
+        } else {
+            vk::Format::B8G8R8A8_SRGB
+        };
         let pass = src.present_pass(gpu, view_format, vk::ImageLayout::GENERAL)?;
 
         let d = &gpu.device;
@@ -79,8 +83,12 @@ impl Scanout {
         let mut frames = Vec::with_capacity(RING);
         for i in 0..RING {
             let mut image = dmabuf::export_linear(gpu, w, h, shader_encode)?;
-            let fd = image.fd.take().expect("a freshly exported image has its fd");
-            let fb = output.import_dmabuf(fd, w, h, DrmFourcc::Xrgb8888, image.pitch, image.offset)?;
+            let fd = image
+                .fd
+                .take()
+                .expect("a freshly exported image has its fd");
+            let fb =
+                output.import_dmabuf(fd, w, h, DrmFourcc::Xrgb8888, image.pitch, image.offset)?;
             frames.push(Frame {
                 target: TargetImage {
                     image: image.image,
@@ -97,9 +105,19 @@ impl Scanout {
         println!(
             "direct scanout: {RING} linear dma-bufs, AddFB2 accepted at pitch {}, sRGB encode by {}",
             frames[0].image.pitch,
-            if shader_encode { "the present shader" } else { "the _SRGB attachment" }
+            if shader_encode {
+                "the present shader"
+            } else {
+                "the _SRGB attachment"
+            }
         );
-        Ok(Scanout { output, frames, transform, view_format, index: 0 })
+        Ok(Scanout {
+            output,
+            frames,
+            transform,
+            view_format,
+            index: 0,
+        })
     }
 
     pub fn width(&self) -> u32 {
@@ -132,7 +150,9 @@ impl Scanout {
         self.index = (self.index + 1) % RING;
         let slot = &self.frames[i];
         let start = Instant::now();
-        unsafe { d.reset_command_buffer(slot.command_buffer, vk::CommandBufferResetFlags::empty()) }?;
+        unsafe {
+            d.reset_command_buffer(slot.command_buffer, vk::CommandBufferResetFlags::empty())
+        }?;
         src.record_frame(
             gpu,
             slot.command_buffer,
@@ -148,7 +168,11 @@ impl Scanout {
         let one = [slot.command_buffer];
         unsafe {
             d.reset_fences(&[slot.fence])?;
-            d.queue_submit(gpu.queue, &[vk::SubmitInfo::default().command_buffers(&one)], slot.fence)?;
+            d.queue_submit(
+                gpu.queue,
+                &[vk::SubmitInfo::default().command_buffers(&one)],
+                slot.fence,
+            )?;
             d.wait_for_fences(&[slot.fence], true, u64::MAX)?;
         }
         let submitted = Instant::now();
@@ -162,11 +186,7 @@ impl Scanout {
     }
 
     /// The last scanned-out image, read back through the GPU as RGBA8.
-    pub fn read_scanout<S: FrameSource>(
-        &self,
-        gpu: &Gpu,
-        src: &S,
-    ) -> Result<(u32, u32, Vec<u8>)> {
+    pub fn read_scanout<S: FrameSource>(&self, gpu: &Gpu, src: &S) -> Result<(u32, u32, Vec<u8>)> {
         let i = (self.index + RING - 1) % RING;
         let rgba = dmabuf::read_back(
             gpu,

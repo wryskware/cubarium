@@ -1,4 +1,3 @@
-use cubarium_surface::Topology;
 use cubarium_core::dormancy::{
     ApexDormancyEvent, ApexDormancyState, MAINTENANCE_PER_STRUCTURE_SECOND, PREY_REQUIRED,
     RECHECK_TICKS, SUSTAIN_TICKS,
@@ -9,6 +8,7 @@ use cubarium_core::organism::{DeathCause, Mode, Organism, Origin};
 use cubarium_core::rng::Counter;
 use cubarium_core::snapshot::{HEADER_FIXED_BYTES, MAGIC, SCHEMA_V13, v13};
 use cubarium_core::{DT, LifeEvent, World, WorldConfig, decode_snapshot, encode_snapshot};
+use cubarium_surface::Topology;
 use cubarium_surface::{Face, SurfacePoint, Vec2};
 
 const SPOT: SurfacePoint = SurfacePoint {
@@ -90,7 +90,8 @@ fn place_juvenile_prey(world: &mut World, n: u32, pos: SurfacePoint) {
         phenotype.maintenance = 0.0;
         let structure = 0.2;
         let reserve = 0.02;
-        let p = SurfacePoint::new(pos.face, pos.u + f64::from(i) * 0.1, pos.v).canonicalize(Topology::Cube);
+        let p = SurfacePoint::new(pos.face, pos.u + f64::from(i) * 0.1, pos.v)
+            .canonicalize(Topology::Cube);
         world.state.organisms.insert(Organism {
             pos: p,
             heading: Vec2::new(1.0, 0.0),

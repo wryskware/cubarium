@@ -41,7 +41,10 @@ pub fn unfold_pixels(topo: Topology, anchor: SurfacePoint, radius: f64, out: &mu
         "radius {radius} exceeds the local radius {local_radius} of {topo:?} \
          (MAX_LOCAL_RADIUS on the cube)"
     );
-    assert!(anchor.is_canonical(topo), "unfold_pixels from non-canonical {anchor:?}");
+    assert!(
+        anchor.is_canonical(topo),
+        "unfold_pixels from non-canonical {anchor:?}"
+    );
     out.clear();
     // A negative radius selects nothing; NaN already failed the assert above.
     if radius < 0.0 {
@@ -81,7 +84,12 @@ fn index_range(c: f64, radius: f64, extent: f64) -> std::ops::RangeInclusive<u16
 
 /// The fast path: the anchor is at least `radius` from every chart edge, so the whole
 /// disk lies in the anchor's own chart and every owning path is `ChartPath::direct()`.
-fn unfold_pixels_direct(topo: Topology, anchor: SurfacePoint, radius: f64, out: &mut Vec<PixelImage>) {
+fn unfold_pixels_direct(
+    topo: Topology,
+    anchor: SurfacePoint,
+    radius: f64,
+    out: &mut Vec<PixelImage>,
+) {
     let a = anchor.chart();
     let (w, h) = topo.extent(anchor.face);
     let limit = radius + GEOM_EPS;
@@ -146,9 +154,7 @@ fn unfold_pixels_general(
     }
     // Sort into output order, with ChartPath order inside each pixel's group so that the
     // winner is picked exactly as `unfold_with` picks it.
-    out.sort_by(|p, q| {
-        (p.face.index(), p.y, p.x, p.path).cmp(&(q.face.index(), q.y, q.x, q.path))
-    });
+    out.sort_by(|p, q| (p.face.index(), p.y, p.x, p.path).cmp(&(q.face.index(), q.y, q.x, q.path)));
     // Keep one image per pixel: the shortest, ties by ChartPath order.
     let mut write = 0usize;
     let mut i = 0usize;
@@ -191,7 +197,13 @@ mod tests {
     }
 
     fn same(a: &[PixelImage], b: &[PixelImage], what: &str) {
-        assert_eq!(a.len(), b.len(), "{what}: {} vs {} pixels", a.len(), b.len());
+        assert_eq!(
+            a.len(),
+            b.len(),
+            "{what}: {} vs {} pixels",
+            a.len(),
+            b.len()
+        );
         for (p, q) in a.iter().zip(b) {
             assert_eq!((p.face, p.x, p.y), (q.face, q.x, q.y), "{what}");
             assert_eq!(p.path, q.path, "{what} at {:?} ({}, {})", p.face, p.x, p.y);
@@ -294,13 +306,23 @@ mod tests {
             let sorted = keys.clone();
             keys.sort_unstable();
             keys.dedup();
-            assert_eq!(keys.len(), out.len(), "duplicate pixel for {anchor:?} r={radius}");
+            assert_eq!(
+                keys.len(),
+                out.len(),
+                "duplicate pixel for {anchor:?} r={radius}"
+            );
             assert_eq!(keys, sorted, "output not sorted for {anchor:?} r={radius}");
             for p in &out {
                 assert!(p.distance <= radius + GEOM_EPS);
                 // `local` is the pixel center as seen in the anchor's chart.
                 assert!(((p.local - anchor.chart()).length() - p.distance).abs() < 1e-9);
-                assert!(segment_is_valid(Topology::Cube, anchor.face, anchor.chart(), p.local, &p.path));
+                assert!(segment_is_valid(
+                    Topology::Cube,
+                    anchor.face,
+                    anchor.chart(),
+                    p.local,
+                    &p.path
+                ));
             }
         }
     }
@@ -312,12 +334,20 @@ mod tests {
         let mut counts = Vec::new();
         let mut out = Vec::new();
         for u in [10.0, 32.0, 63.5] {
-            unfold_pixels(Topology::Cube, SurfacePoint::new(Face::Front, u, 32.0), 6.0, &mut out);
+            unfold_pixels(
+                Topology::Cube,
+                SurfacePoint::new(Face::Front, u, 32.0),
+                6.0,
+                &mut out,
+            );
             counts.push(out.len());
         }
         // Away from the open rim and the top vertices the count is stable.
         assert_eq!(counts[0], counts[1], "{counts:?}");
-        assert!(counts[2] >= counts[1] - 4 && counts[2] <= counts[1] + 4, "{counts:?}");
+        assert!(
+            counts[2] >= counts[1] - 4 && counts[2] <= counts[1] + 4,
+            "{counts:?}"
+        );
     }
 
     #[test]
@@ -328,7 +358,8 @@ mod tests {
                 let anchor = SurfacePoint::pixel_center(Topology::Cube, face, x, y);
                 unfold_pixels(Topology::Cube, anchor, 3.0, &mut out);
                 let me = out.iter().find(|p| (p.face, p.x, p.y) == (face, x, y));
-                let me = me.unwrap_or_else(|| panic!("anchor pixel missing for {face:?} ({x},{y})"));
+                let me =
+                    me.unwrap_or_else(|| panic!("anchor pixel missing for {face:?} ({x},{y})"));
                 assert_eq!(me.distance, 0.0);
                 assert_eq!(me.path, ChartPath::direct());
             }
@@ -344,7 +375,10 @@ mod tests {
         for face in [Face::Front, Face::Right, Face::Top] {
             assert!(out.iter().any(|p| p.face == face), "no {face:?} pixels");
         }
-        assert!(!out.iter().any(|p| p.face == Face::Back || p.face == Face::Left));
+        assert!(
+            !out.iter()
+                .any(|p| p.face == Face::Back || p.face == Face::Left)
+        );
         // Standing exactly on the vertex, all three wedges are one seam away; the 90
         // degree angular deficit shows up as a disk smaller than the flat one.
         assert!(out.iter().all(|p| p.path.len <= 1));
@@ -373,7 +407,12 @@ mod tests {
     #[test]
     fn zero_radius_keeps_only_the_containing_pixel_when_centred() {
         let mut out = Vec::new();
-        unfold_pixels(Topology::Cube, SurfacePoint::pixel_center(Topology::Cube, Face::Front, 10, 10), 0.0, &mut out);
+        unfold_pixels(
+            Topology::Cube,
+            SurfacePoint::pixel_center(Topology::Cube, Face::Front, 10, 10),
+            0.0,
+            &mut out,
+        );
         assert_eq!(out.len(), 1);
         assert_eq!((out[0].face, out[0].x, out[0].y), (Face::Front, 10, 10));
     }
@@ -382,7 +421,12 @@ mod tests {
     #[should_panic(expected = "MAX_LOCAL_RADIUS")]
     fn radius_above_the_local_bound_panics() {
         let mut out = Vec::new();
-        unfold_pixels(Topology::Cube, SurfacePoint::new(Face::Front, 1.0, 1.0), MAX_LOCAL_RADIUS + 1.0, &mut out);
+        unfold_pixels(
+            Topology::Cube,
+            SurfacePoint::new(Face::Front, 1.0, 1.0),
+            MAX_LOCAL_RADIUS + 1.0,
+            &mut out,
+        );
     }
 }
 
@@ -410,7 +454,13 @@ mod ring_tests {
     }
 
     fn same(a: &[PixelImage], b: &[PixelImage], what: &str) {
-        assert_eq!(a.len(), b.len(), "{what}: {} vs {} pixels", a.len(), b.len());
+        assert_eq!(
+            a.len(),
+            b.len(),
+            "{what}: {} vs {} pixels",
+            a.len(),
+            b.len()
+        );
         for (p, q) in a.iter().zip(b) {
             assert_eq!((p.face, p.x, p.y), (q.face, q.x, q.y), "{what}");
             assert_eq!(p.path, q.path, "{what} at ({}, {})", p.x, p.y);
@@ -423,12 +473,12 @@ mod ring_tests {
     #[test]
     fn matches_the_brute_force_definition_across_the_wrap() {
         let anchors = [
-            at(160.5, 90.5),  // the middle: the fast path
-            at(0.25, 90.5),   // hard against the wrap
-            at(319.75, 90.5), // and the other side of it
-            at(0.25, 0.25),   // the top-left corner
+            at(160.5, 90.5),    // the middle: the fast path
+            at(0.25, 90.5),     // hard against the wrap
+            at(319.75, 90.5),   // and the other side of it
+            at(0.25, 0.25),     // the top-left corner
             at(319.75, 179.75), // the bottom-right corner
-            at(2.5, 177.5),   // near the bottom-left corner
+            at(2.5, 177.5),     // near the bottom-left corner
         ];
         for anchor in anchors {
             let anchor = anchor.canonicalize(RING);
@@ -502,12 +552,22 @@ mod ring_tests {
                 let mut sorted = keys.clone();
                 sorted.sort_unstable();
                 sorted.dedup();
-                assert_eq!(sorted.len(), out.len(), "duplicate pixel for {anchor:?} r={radius}");
+                assert_eq!(
+                    sorted.len(),
+                    out.len(),
+                    "duplicate pixel for {anchor:?} r={radius}"
+                );
                 assert_eq!(sorted, keys, "output not sorted for {anchor:?} r={radius}");
                 for p in &out {
                     assert!(p.distance <= radius + GEOM_EPS);
                     assert!(((p.local - anchor.chart()).length() - p.distance).abs() < 1e-9);
-                    assert!(segment_is_valid(topo, anchor.face, anchor.chart(), p.local, &p.path));
+                    assert!(segment_is_valid(
+                        topo,
+                        anchor.face,
+                        anchor.chart(),
+                        p.local,
+                        &p.path
+                    ));
                     // Unfoldings never cross a rim.
                     for &(_, e) in p.path.steps() {
                         assert!(e == Edge::Right || e == Edge::Left, "a rim in an unfolding");
@@ -529,12 +589,21 @@ mod ring_tests {
             counts.push(out.len());
         }
         assert_eq!(counts[0], counts[1], "{counts:?}");
-        assert_eq!(counts[0], counts[2], "the wrap is not a boundary: {counts:?}");
-        assert_eq!(counts[0], counts[3], "the wrap is not a boundary: {counts:?}");
+        assert_eq!(
+            counts[0], counts[2],
+            "the wrap is not a boundary: {counts:?}"
+        );
+        assert_eq!(
+            counts[0], counts[3],
+            "the wrap is not a boundary: {counts:?}"
+        );
 
         // Straddling the seam, both sides are present, each pixel once.
         unfold_pixels(RING, at(0.5, 90.5), 5.0, &mut out);
-        assert!(out.iter().any(|p| p.x >= 316), "no pixels on the far side of the wrap");
+        assert!(
+            out.iter().any(|p| p.x >= 316),
+            "no pixels on the far side of the wrap"
+        );
         assert!(out.iter().any(|p| p.x <= 4), "no pixels on the near side");
         assert!(out.iter().any(|p| p.path.len == 1), "no wrapped ownership");
         // A rim clips instead: fewer pixels, and none outside the chart.
@@ -558,10 +627,25 @@ mod ring_tests {
         }
         // The same stamp at S = 2 covers four times the pixels, as a doubled radius must.
         let mut wide = Vec::new();
-        unfold_pixels(RING, at(160.5, 90.5), Scale::ONE.footprint_radius(), &mut out);
-        unfold_pixels(RING2, at(320.5, 180.5), Scale::new(2.0).footprint_radius(), &mut wide);
+        unfold_pixels(
+            RING,
+            at(160.5, 90.5),
+            Scale::ONE.footprint_radius(),
+            &mut out,
+        );
+        unfold_pixels(
+            RING2,
+            at(320.5, 180.5),
+            Scale::new(2.0).footprint_radius(),
+            &mut wide,
+        );
         let ratio = wide.len() as f64 / out.len() as f64;
-        assert!((ratio - 4.0).abs() < 0.2, "{} vs {} pixels", wide.len(), out.len());
+        assert!(
+            (ratio - 4.0).abs() < 0.2,
+            "{} vs {} pixels",
+            wide.len(),
+            out.len()
+        );
     }
 
     #[test]

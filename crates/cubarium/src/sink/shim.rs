@@ -75,7 +75,11 @@ impl ShimSink {
                 .spawn(move || worker_loop(&shared, &addr))
                 .expect("spawning the shim worker thread")
         };
-        ShimSink { shared, worker: Some(worker), addr }
+        ShimSink {
+            shared,
+            worker: Some(worker),
+            addr,
+        }
     }
 
     pub fn addr(&self) -> &str {
@@ -121,7 +125,12 @@ impl ShimSink {
 
 impl FrameSink for ShimSink {
     fn submit(&mut self, out: Output<'_>) -> Result<()> {
-        let mut slot = self.shared.mailbox.slot.lock().expect("shim mailbox poisoned");
+        let mut slot = self
+            .shared
+            .mailbox
+            .slot
+            .lock()
+            .expect("shim mailbox poisoned");
         if slot.is_some() {
             // The worker is still busy; the newest frame wins.
             self.shared.dropped.fetch_add(1, Ordering::Relaxed);
@@ -271,7 +280,10 @@ mod tests {
         for _ in 0..50 {
             sink.submit(Output::Cube(&frame)).unwrap();
         }
-        assert!(t0.elapsed() < Duration::from_millis(500), "submit blocked on I/O");
+        assert!(
+            t0.elapsed() < Duration::from_millis(500),
+            "submit blocked on I/O"
+        );
     }
 
     #[test]
@@ -282,7 +294,10 @@ mod tests {
             sink.submit(Output::Cube(&frame)).unwrap();
         }
         std::thread::sleep(Duration::from_millis(150));
-        assert!(sink.errors() > 0, "the worker should have reported a connect failure");
+        assert!(
+            sink.errors() > 0,
+            "the worker should have reported a connect failure"
+        );
         sink.finish().unwrap();
     }
 
@@ -296,6 +311,9 @@ mod tests {
         for _ in 0..50 {
             sink.submit(Output::Ring(&raster)).unwrap();
         }
-        assert!(t0.elapsed() < Duration::from_millis(500), "submit blocked on I/O");
+        assert!(
+            t0.elapsed() < Duration::from_millis(500),
+            "submit blocked on I/O"
+        );
     }
 }

@@ -29,7 +29,9 @@ use cubarium_surface::{Face, SurfacePoint, cell_of};
 
 /// The postcard payload of a snapshot file: everything after the variable-length header.
 fn payload(bytes: &[u8]) -> &[u8] {
-    let id_len = usize::from(u16::from_le_bytes(bytes[8..10].try_into().expect("2 bytes")));
+    let id_len = usize::from(u16::from_le_bytes(
+        bytes[8..10].try_into().expect("2 bytes"),
+    ));
     &bytes[HEADER_FIXED_BYTES + id_len..]
 }
 
@@ -73,10 +75,18 @@ fn still_config() -> WorldConfig {
     cfg
 }
 
-const SPOT: SurfacePoint = SurfacePoint { face: Face::Top, u: 22.0, v: 34.0 };
+const SPOT: SurfacePoint = SurfacePoint {
+    face: Face::Top,
+    u: 22.0,
+    v: 34.0,
+};
 
 fn target_of(pos: SurfacePoint) -> HunterTarget {
-    HunterTarget { face: pos.face.index() as u8, u: pos.u, v: pos.v }
+    HunterTarget {
+        face: pos.face.index() as u8,
+        u: pos.u,
+        v: pos.v,
+    }
 }
 
 /// A quiet world with one founded member, at the given semantic profile version.
@@ -112,7 +122,13 @@ fn reserve_of(world: &World, id: OrganismId) -> f64 {
 }
 
 fn reserve_max(world: &World, id: OrganismId) -> f64 {
-    world.state.organisms.get(id).expect("alive").phenotype.reserve_max
+    world
+        .state
+        .organisms
+        .get(id)
+        .expect("alive")
+        .phenotype
+        .reserve_max
 }
 
 fn energy_fraction(world: &World, id: OrganismId) -> f64 {
@@ -152,13 +168,19 @@ fn version_three_remains_the_default_and_defers_to_the_world() {
     let profile = FixedHunterProfile::lanternjaw_trial(&cfg);
     assert_eq!(profile.version, PROFILE_VERSION);
     assert_eq!(profile.oxidation_policy(), OxidationPolicy::Configured);
-    assert_eq!(profile.oxidation_policy().as_str(), "configured-world-threshold");
+    assert_eq!(
+        profile.oxidation_policy().as_str(),
+        "configured-world-threshold"
+    );
 
     // Bit-identical to the world's own number, at the default and at anything else: a version 3
     // member is not "the same to within rounding", it is the same expression.
     for threshold in [0.5, 0.0, 0.125, 0.31415926535, 0.8, 1.0] {
         cfg.organism.oxidation_threshold = threshold;
-        assert_eq!(profile.oxidation_threshold(&cfg.organism).to_bits(), threshold.to_bits());
+        assert_eq!(
+            profile.oxidation_threshold(&cfg.organism).to_bits(),
+            threshold.to_bits()
+        );
     }
 }
 
@@ -173,7 +195,10 @@ fn version_four_differs_from_version_three_only_in_its_version_number() {
 
     let mut rewound = four.clone();
     rewound.version = three.version;
-    assert_eq!(rewound, three, "version 4 changed a field other than `version`");
+    assert_eq!(
+        rewound, three,
+        "version 4 changed a field other than `version`"
+    );
     assert_eq!(
         postcard::to_allocvec(&four).expect("encodable").len(),
         postcard::to_allocvec(&three).expect("encodable").len(),
@@ -217,19 +242,31 @@ fn only_versions_three_and_four_are_supported() {
     for ok in SUPPORTED_PROFILE_VERSIONS {
         let mut p = base.clone();
         p.version = ok;
-        p.validate().unwrap_or_else(|e| panic!("version {ok} must validate: {e}"));
+        p.validate()
+            .unwrap_or_else(|e| panic!("version {ok} must validate: {e}"));
     }
     for bad in [0u32, 1, 2, 5, 6, 40, u32::MAX] {
         let mut p = base.clone();
         p.version = bad;
-        let err = p.validate().expect_err("an unsupported version must be refused");
+        let err = p
+            .validate()
+            .expect_err("an unsupported version must be refused");
         assert!(err.contains(&format!("version {bad}")), "{err}");
-        assert!(err.contains("[3, 4]"), "the refusal names what is supported: {err}");
+        assert!(
+            err.contains("[3, 4]"),
+            "the refusal names what is supported: {err}"
+        );
     }
 
     // A world carrying an unsupported version does not decode, whatever its shape.
     let (mut world, _) = founded(PROFILE_VERSION_CHARGE80, quiet_config());
-    world.state.hunters.profile.as_mut().expect("a profile").version = 5;
+    world
+        .state
+        .hunters
+        .profile
+        .as_mut()
+        .expect("a profile")
+        .version = 5;
     match decode_snapshot(&encode_snapshot(&world.state, "bad-version")) {
         Err(SnapshotError::Invalid(reason)) => assert!(reason.contains("version 5"), "{reason}"),
         other => panic!("an unsupported profile version decoded as {other:?}"),
@@ -251,11 +288,19 @@ fn version_four_has_version_threes_shape_and_round_trips() {
         payload(&b).len(),
         "version 4 must not change the payload's length; a new schema would be needed"
     );
-    assert_ne!(payload(&a), payload(&b), "but it is a different world, and hashes as one");
+    assert_ne!(
+        payload(&a),
+        payload(&b),
+        "but it is a different world, and hashes as one"
+    );
     assert_ne!(state_hash(&v3.state), state_hash(&v4.state));
 
     let (meta, back) = decode_snapshot(&b).expect("a version 4 world decodes");
-    assert_eq!(meta.schema, cubarium_core::SCHEMA_VERSION, "no new schema is needed");
+    assert_eq!(
+        meta.schema,
+        cubarium_core::SCHEMA_VERSION,
+        "no new schema is needed"
+    );
     assert_eq!(back.hunters.profile.as_ref().expect("a profile").version, 4);
     assert_eq!(back, v4.state);
     World::from_state(back).expect("and rebuilds into a valid world");
@@ -273,17 +318,26 @@ fn the_policy_opens_exactly_the_band_between_the_reference_and_the_fixed_thresho
     let reference = cfg.organism.oxidation_threshold;
     assert_eq!(reference, 0.5, "the fixture's reference threshold");
 
-    for (version, opens_below) in [(PROFILE_VERSION, reference), (PROFILE_VERSION_CHARGE80, 0.80)] {
+    for (version, opens_below) in [
+        (PROFILE_VERSION, reference),
+        (PROFILE_VERSION_CHARGE80, 0.80),
+    ] {
         // The two exact boundaries are in this list on purpose: the test is `<`, so a battery
         // sitting *on* a threshold does not activate it.
-        for fraction in [0.0, 0.25, 0.4999, 0.5, 0.5001, 0.6, 0.7, 0.7999, 0.8, 0.8001, 0.95, 1.0] {
+        for fraction in [
+            0.0, 0.25, 0.4999, 0.5, 0.5001, 0.6, 0.7, 0.7999, 0.8, 0.8001, 0.95, 1.0,
+        ] {
             let (mut world, id) = founded(version, cfg.clone());
             let full = reserve_max(&world, id);
             set_reserve(&mut world, id, full);
             set_energy_fraction(&mut world, id, fraction);
             let before = reserve_of(&world, id);
             let energy_before = world.state.organisms.get(id).unwrap().energy;
-            let cell = cell_of(Topology::Cube, Scale::ONE, &world.state.organisms.get(id).unwrap().pos);
+            let cell = cell_of(
+                Topology::Cube,
+                Scale::ONE,
+                &world.state.organisms.get(id).unwrap().pos,
+            );
             let n_before = world.state.fields.n[cell.index()];
             world.step();
             // The premise of the exact boundary: nothing spent the battery before physiology.
@@ -307,7 +361,10 @@ fn the_policy_opens_exactly_the_band_between_the_reference_and_the_fixed_thresho
                     "v{version} at {fraction}: the burned material must be back in the cell"
                 );
             } else {
-                assert_eq!(burned, 0.0, "v{version} at {fraction} of E_max must not have burned");
+                assert_eq!(
+                    burned, 0.0,
+                    "v{version} at {fraction} of E_max must not have burned"
+                );
                 assert_eq!(world.state.fields.n[cell.index()], n_before);
             }
 
@@ -357,14 +414,25 @@ fn an_ordinary_organism_is_never_subject_to_the_member_policy() {
         "an ordinary organism at 0.6 of E_max must not oxidize under a member's policy"
     );
     let burned = m_before - reserve_of(&world, member);
-    assert!(close(burned, burn_ceiling(&world)), "and the member beside it must: {burned}");
-    assert_eq!(world.charging_diagnostics().extra_transactions, 1, "one member, one transaction");
+    assert!(
+        close(burned, burn_ceiling(&world)),
+        "and the member beside it must: {burned}"
+    );
+    assert_eq!(
+        world.charging_diagnostics().extra_transactions,
+        1,
+        "one member, one transaction"
+    );
 
     assert_eq!(world.member_oxidation_threshold(), 0.80);
     let (v3, _) = founded(PROFILE_VERSION, quiet_config());
     assert_eq!(v3.member_oxidation_threshold(), 0.5);
     let plain = World::new(quiet_config()).expect("valid");
-    assert_eq!(plain.member_oxidation_threshold(), 0.5, "no profile, no policy");
+    assert_eq!(
+        plain.member_oxidation_threshold(),
+        0.5,
+        "no profile, no policy"
+    );
 }
 
 // ---------------------------------------------------------------- the conversion block
@@ -385,7 +453,11 @@ fn the_conversion_arithmetic_is_the_same_block_at_either_threshold() {
     world.step();
 
     let d = world.charging_diagnostics();
-    assert_eq!(d.extra_reserve_burned, org.oxidation_rate * DT, "the burn ceiling is rate · dt");
+    assert_eq!(
+        d.extra_reserve_burned,
+        org.oxidation_rate * DT,
+        "the burn ceiling is rate · dt"
+    );
     assert!(
         close(before - reserve_of(&world, id), d.extra_reserve_burned),
         "and it is the reserve that actually left"
@@ -395,7 +467,10 @@ fn the_conversion_arithmetic_is_the_same_block_at_either_threshold() {
     // gain is the whole efficient share and the heat is the rest — the identity, exactly.
     assert_eq!(d.extra_energy_gained, e_r * burned * eff);
     assert_eq!(d.extra_heat, e_r * burned - d.extra_energy_gained);
-    assert!(d.extra_heat > 0.0, "an 80%-efficient conversion releases heat");
+    assert!(
+        d.extra_heat > 0.0,
+        "an 80%-efficient conversion releases heat"
+    );
 }
 
 /// The headroom cap still binds, and the excess still becomes heat rather than being stored or
@@ -405,7 +480,10 @@ fn the_conversion_arithmetic_is_the_same_block_at_either_threshold() {
 fn the_battery_headroom_still_caps_the_gain_and_the_rest_is_heat() {
     let mut cfg = quiet_config();
     cfg.organism.oxidation_rate = 100.0;
-    let (e_r, eff) = (cfg.organism.reserve_energy_density, cfg.organism.oxidation_efficiency);
+    let (e_r, eff) = (
+        cfg.organism.reserve_energy_density,
+        cfg.organism.oxidation_efficiency,
+    );
     let (mut world, id) = founded(PROFILE_VERSION_CHARGE80, cfg);
     let max = reserve_max(&world, id);
     set_reserve(&mut world, id, max);
@@ -414,7 +492,10 @@ fn the_battery_headroom_still_caps_the_gain_and_the_rest_is_heat() {
     world.step();
 
     let d = world.charging_diagnostics();
-    assert_eq!(d.extra_reserve_burned, max, "the ceiling was above the reserve, so the reserve is");
+    assert_eq!(
+        d.extra_reserve_burned, max,
+        "the ceiling was above the reserve, so the reserve is"
+    );
     assert!(close(before - reserve_of(&world, id), max));
     let burned = d.extra_reserve_burned;
     let released = e_r * burned;
@@ -425,8 +506,15 @@ fn the_battery_headroom_still_caps_the_gain_and_the_rest_is_heat() {
         released * eff
     );
     let o = world.state.organisms.get(id).expect("alive");
-    assert_eq!(o.energy, o.phenotype.energy_max, "the battery is exactly full, never over");
-    assert_eq!(d.extra_heat, released - d.extra_energy_gained, "the excess is heat");
+    assert_eq!(
+        o.energy, o.phenotype.energy_max,
+        "the battery is exactly full, never over"
+    );
+    assert_eq!(
+        d.extra_heat,
+        released - d.extra_energy_gained,
+        "the excess is heat"
+    );
     assert!(d.extra_heat > 0.0);
 }
 
@@ -438,18 +526,30 @@ fn a_zero_reserve_never_charges_and_no_energy_is_invented() {
         let (mut world, id) = founded(version, quiet_config());
         set_reserve(&mut world, id, 0.0);
         set_energy_fraction(&mut world, id, 0.6);
-        let cell = cell_of(Topology::Cube, Scale::ONE, &world.state.organisms.get(id).unwrap().pos);
+        let cell = cell_of(
+            Topology::Cube,
+            Scale::ONE,
+            &world.state.organisms.get(id).unwrap().pos,
+        );
         let n_before = world.state.fields.n[cell.index()];
         let energy_before = world.state.organisms.get(id).unwrap().energy;
         world.step();
 
-        assert_eq!(reserve_of(&world, id), 0.0, "v{version}: nothing to burn, nothing burned");
+        assert_eq!(
+            reserve_of(&world, id),
+            0.0,
+            "v{version}: nothing to burn, nothing burned"
+        );
         assert_eq!(world.state.fields.n[cell.index()], n_before, "v{version}");
         assert!(
             world.state.organisms.get(id).unwrap().energy < energy_before,
             "v{version}: upkeep is still paid; a policy is not a gift"
         );
-        assert_eq!(world.charging_diagnostics(), ChargingDiagnostics::default(), "v{version}");
+        assert_eq!(
+            world.charging_diagnostics(),
+            ChargingDiagnostics::default(),
+            "v{version}"
+        );
     }
 }
 
@@ -468,11 +568,19 @@ fn a_zero_oxidation_rate_transacts_nothing_and_records_nothing() {
         set_reserve(&mut world, id, full);
         // Below both thresholds, so the activation test passes and only the amount is zero.
         set_energy_fraction(&mut world, id, 0.1);
-        let cell = cell_of(Topology::Cube, Scale::ONE, &world.state.organisms.get(id).unwrap().pos);
+        let cell = cell_of(
+            Topology::Cube,
+            Scale::ONE,
+            &world.state.organisms.get(id).unwrap().pos,
+        );
         let n_before = world.state.fields.n[cell.index()];
         world.step();
 
-        assert_eq!(reserve_of(&world, id), full, "v{version}: a zero rate burns nothing");
+        assert_eq!(
+            reserve_of(&world, id),
+            full,
+            "v{version}: a zero rate burns nothing"
+        );
         assert_eq!(world.state.fields.n[cell.index()], n_before, "v{version}");
         assert_eq!(
             world.charging_diagnostics(),
@@ -491,7 +599,11 @@ fn the_burn_is_capped_by_the_reserve_that_is_actually_there() {
     set_reserve(&mut world, id, scrap);
     set_energy_fraction(&mut world, id, 0.6);
     world.step();
-    assert_eq!(reserve_of(&world, id), 0.0, "the whole scrap went, and no more");
+    assert_eq!(
+        reserve_of(&world, id),
+        0.0,
+        "the whole scrap went, and no more"
+    );
     assert_eq!(world.charging_diagnostics().extra_reserve_burned, scrap);
     assert!(scrap < ceiling);
 }
@@ -540,8 +652,15 @@ fn a_member_inside_the_band_separates_the_two_policies() {
     assert_eq!(v3_burn, 0.0, "version 3 does not charge inside the band");
     assert_eq!(v3_diag, ChargingDiagnostics::default());
     assert!(v4_burn > 0.0, "version 4 does");
-    assert_eq!(v4_diag.extra_transactions, 100, "every tick of the window, and only those");
-    assert!(close(v4_diag.extra_reserve_burned, v4_burn), "{} vs {v4_burn}", v4_diag.extra_reserve_burned);
+    assert_eq!(
+        v4_diag.extra_transactions, 100,
+        "every tick of the window, and only those"
+    );
+    assert!(
+        close(v4_diag.extra_reserve_burned, v4_burn),
+        "{} vs {v4_burn}",
+        v4_diag.extra_reserve_burned
+    );
 }
 
 // ---------------------------------------------------------------- reproduction
@@ -564,7 +683,10 @@ fn charging_can_fund_a_fully_paid_escrow_when_the_stocks_allow() {
         }
         let gate_reserve = profile.reproduce_reserve_fraction;
         let gate_energy = profile.reproduce_energy_fraction;
-        let id = world.start_hunter_trial(profile, target_of(SPOT)).expect("starts").id;
+        let id = world
+            .start_hunter_trial(profile, target_of(SPOT))
+            .expect("starts")
+            .id;
         let o = world.state.organisms.get(id).expect("alive");
         let (r_max, e_max) = (o.phenotype.reserve_max, o.phenotype.energy_max);
         // Full reserve, and a battery a little *below* the unchanged 0.75 gate but inside the
@@ -572,8 +694,14 @@ fn charging_can_fund_a_fully_paid_escrow_when_the_stocks_allow() {
         set_reserve(&mut world, id, r_max);
         set_energy_fraction(&mut world, id, 0.72);
         assert!(0.72 > world.config().organism.oxidation_threshold && 0.72 < 0.80);
-        assert!(0.72 < gate_energy, "the battery gate is genuinely shut at the start");
-        assert!(1.0 >= gate_reserve, "and the reserve gate is genuinely open");
+        assert!(
+            0.72 < gate_energy,
+            "the battery gate is genuinely shut at the start"
+        );
+        assert!(
+            1.0 >= gate_reserve,
+            "and the reserve gate is genuinely open"
+        );
         (world, id, gate_reserve, gate_energy, r_max, e_max)
     };
 
@@ -582,12 +710,18 @@ fn charging_can_fund_a_fully_paid_escrow_when_the_stocks_allow() {
     for _ in 0..1200 {
         world.step();
     }
-    assert!(energy_fraction(&world, id) < gate_energy, "version 3 cannot reach the gate here");
+    assert!(
+        energy_fraction(&world, id) < gate_energy,
+        "version 3 cannot reach the gate here"
+    );
     assert_eq!(world.charging_diagnostics(), ChargingDiagnostics::default());
     assert!(
         world.drain_hunter_events().iter().all(|e| !matches!(
             e,
-            HunterEvent::Reproduction { record: cubarium_core::Reproduction::Funded { .. }, .. }
+            HunterEvent::Reproduction {
+                record: cubarium_core::Reproduction::Funded { .. },
+                ..
+            }
         )),
         "and funds nothing"
     );
@@ -599,12 +733,29 @@ fn charging_can_fund_a_fully_paid_escrow_when_the_stocks_allow() {
         world.step();
         for event in world.drain_hunter_events() {
             if let HunterEvent::Reproduction {
-                record: cubarium_core::Reproduction::Funded { escrow_structure, escrow_reserve, escrow_energy, build_heat, parent_reserve_before, parent_energy_before, .. },
+                record:
+                    cubarium_core::Reproduction::Funded {
+                        escrow_structure,
+                        escrow_reserve,
+                        escrow_energy,
+                        build_heat,
+                        parent_reserve_before,
+                        parent_energy_before,
+                        ..
+                    },
                 tick,
                 ..
             } = event
             {
-                funded = Some((tick, escrow_structure, escrow_reserve, escrow_energy, build_heat, parent_reserve_before, parent_energy_before));
+                funded = Some((
+                    tick,
+                    escrow_structure,
+                    escrow_reserve,
+                    escrow_energy,
+                    build_heat,
+                    parent_reserve_before,
+                    parent_energy_before,
+                ));
                 break;
             }
         }
@@ -619,20 +770,37 @@ fn charging_can_fund_a_fully_paid_escrow_when_the_stocks_allow() {
     // Fully paid, at the recipe's own unchanged prices, out of the parent's own stocks.
     let cfg = world.config().organism.clone();
     let o = world.state.organisms.get(id).expect("the parent is alive");
-    assert_eq!(structure, cfg.child_structure_fraction * o.phenotype.structure_adult);
-    assert_eq!(reserve, cfg.child_reserve_fraction * o.phenotype.reserve_max);
+    assert_eq!(
+        structure,
+        cfg.child_structure_fraction * o.phenotype.structure_adult
+    );
+    assert_eq!(
+        reserve,
+        cfg.child_reserve_fraction * o.phenotype.reserve_max
+    );
     assert_eq!(energy, cfg.child_energy_fraction * o.phenotype.energy_max);
     assert_eq!(build, cfg.build_cost * structure);
-    assert!(r_before >= gate_reserve * r_max, "the reserve gate was open when it paid");
-    assert!(e_before >= gate_energy * o.phenotype.energy_max, "and so was the battery gate");
+    assert!(
+        r_before >= gate_reserve * r_max,
+        "the reserve gate was open when it paid"
+    );
+    assert!(
+        e_before >= gate_energy * o.phenotype.energy_max,
+        "and so was the battery gate"
+    );
     // The charging that got it there is booked, and it is real reserve that was spent.
     let d = world.charging_diagnostics();
     assert!(d.extra_transactions > 0 && d.extra_reserve_burned > 0.0);
     assert!(
-        close(d.extra_heat, cfg.reserve_energy_density * d.extra_reserve_burned - d.extra_energy_gained),
+        close(
+            d.extra_heat,
+            cfg.reserve_energy_density * d.extra_reserve_burned - d.extra_energy_gained
+        ),
         "the accumulated conversion heat is the accumulated release less the accumulated gain"
     );
-    world.check_invariants().expect("a funded world is consistent");
+    world
+        .check_invariants()
+        .expect("a funded world is consistent");
 }
 
 /// The conservative half of the same claim: a member whose **reserve** is short does not become
@@ -644,7 +812,10 @@ fn a_stock_limited_member_does_not_become_ready_by_charging() {
     let mut profile = FixedHunterProfile::lanternjaw_trial(world.config()).charge80();
     profile.reproduce_min_age_seconds = 0.0;
     let gate_reserve = profile.reproduce_reserve_fraction;
-    let id = world.start_hunter_trial(profile, target_of(SPOT)).expect("starts").id;
+    let id = world
+        .start_hunter_trial(profile, target_of(SPOT))
+        .expect("starts")
+        .id;
     let r_max = reserve_max(&world, id);
     // Half the reserve the gate wants, and a battery inside the charging band.
     set_reserve(&mut world, id, 0.5 * gate_reserve * r_max);
@@ -676,7 +847,10 @@ fn a_stock_limited_member_does_not_become_ready_by_charging() {
             o.reserve,
             gate_reserve * r_max
         );
-        assert!(o.reserve <= opening_reserve, "charging spends reserve, it does not create it");
+        assert!(
+            o.reserve <= opening_reserve,
+            "charging spends reserve, it does not create it"
+        );
     }
     let d = world.charging_diagnostics();
     assert!(d.extra_transactions > 0, "and it really did charge");
@@ -695,7 +869,10 @@ fn a_saved_world_resumes_identically_mid_charge_and_mid_gestation() {
         let mut profile = FixedHunterProfile::lanternjaw_trial(world.config()).charge80();
         profile.reproduce_min_age_seconds = 0.0;
         profile.gestation_seconds = 40.0;
-        let id = world.start_hunter_trial(profile, target_of(SPOT)).expect("starts").id;
+        let id = world
+            .start_hunter_trial(profile, target_of(SPOT))
+            .expect("starts")
+            .id;
         let r_max = reserve_max(&world, id);
         set_reserve(&mut world, id, r_max);
         set_energy_fraction(&mut world, id, if gestate { 0.79 } else { 0.7 });
@@ -708,7 +885,11 @@ fn a_saved_world_resumes_identically_mid_charge_and_mid_gestation() {
             world.drain_events();
             split += 1;
             let charging = world.charging_diagnostics().extra_transactions > 0;
-            let open = world.state.organisms.get(id).is_some_and(|o| o.escrow.is_some());
+            let open = world
+                .state
+                .organisms
+                .get(id)
+                .is_some_and(|o| o.escrow.is_some());
             if charging && (!gestate || open) {
                 break;
             }
@@ -719,7 +900,10 @@ fn a_saved_world_resumes_identically_mid_charge_and_mid_gestation() {
         );
         if gestate {
             let o = world.state.organisms.get(id).expect("alive");
-            assert!(o.escrow.is_some(), "{name}: the fixture must be gestating at the split");
+            assert!(
+                o.escrow.is_some(),
+                "{name}: the fixture must be gestating at the split"
+            );
         }
 
         let at_split = world.charging_diagnostics();
@@ -727,7 +911,11 @@ fn a_saved_world_resumes_identically_mid_charge_and_mid_gestation() {
         let (_, state) = decode_snapshot(&bytes).expect("{name}: the split state round trips");
         assert_eq!(state, world.state);
         let mut resumed = World::from_state(state).expect("valid");
-        assert_eq!(state_hash(&resumed.state), state_hash(&world.state), "{name}");
+        assert_eq!(
+            state_hash(&resumed.state),
+            state_hash(&world.state),
+            "{name}"
+        );
         assert_eq!(
             resumed.charging_diagnostics(),
             ChargingDiagnostics::default(),
@@ -743,12 +931,24 @@ fn a_saved_world_resumes_identically_mid_charge_and_mid_gestation() {
                 "{name}: diverged {i} ticks after the split (tick {})",
                 world.tick()
             );
-            let (a, b): (Vec<HunterEvent>, Vec<HunterEvent>) =
-                (world.drain_hunter_events().to_vec(), resumed.drain_hunter_events().to_vec());
-            assert_eq!(format!("{a:?}"), format!("{b:?}"), "{name}: hunter events diverged");
-            let (a, b): (Vec<LifeEvent>, Vec<LifeEvent>) =
-                (world.drain_events().to_vec(), resumed.drain_events().to_vec());
-            assert_eq!(format!("{a:?}"), format!("{b:?}"), "{name}: life events diverged");
+            let (a, b): (Vec<HunterEvent>, Vec<HunterEvent>) = (
+                world.drain_hunter_events().to_vec(),
+                resumed.drain_hunter_events().to_vec(),
+            );
+            assert_eq!(
+                format!("{a:?}"),
+                format!("{b:?}"),
+                "{name}: hunter events diverged"
+            );
+            let (a, b): (Vec<LifeEvent>, Vec<LifeEvent>) = (
+                world.drain_events().to_vec(),
+                resumed.drain_events().to_vec(),
+            );
+            assert_eq!(
+                format!("{a:?}"),
+                format!("{b:?}"),
+                "{name}: life events diverged"
+            );
         }
         // The same physics ran on both sides, so the same extra transactions were counted.
         // The uninterrupted world's totals also cover everything before the split, so it is the
@@ -768,7 +968,10 @@ fn a_saved_world_resumes_identically_mid_charge_and_mid_gestation() {
             ),
             "{name}: and different burns"
         );
-        assert!(split > 0, "{name}: the split must be after at least one tick");
+        assert!(
+            split > 0,
+            "{name}: the split must be after at least one tick"
+        );
     }
 }
 
@@ -789,7 +992,11 @@ fn recording_the_diagnostics_cannot_move_the_simulation() {
             b.step();
         }
         assert_eq!(state_hash(&a.state), state_hash(&b.state), "v{version}");
-        assert_eq!(a.charging_diagnostics(), b.charging_diagnostics(), "v{version}");
+        assert_eq!(
+            a.charging_diagnostics(),
+            b.charging_diagnostics(),
+            "v{version}"
+        );
         // The counters are outside the persisted state, so they cannot reach the hash.
         assert_eq!(
             encode_snapshot(&a.state, "twice"),

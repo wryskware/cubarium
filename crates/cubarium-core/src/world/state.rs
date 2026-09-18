@@ -11,8 +11,8 @@ use crate::genome::{Genome, MAX_FORMS};
 use crate::habitat::Weather;
 use crate::hunter::{FixedHunterProfile, HunterState};
 use crate::ids::Slots;
-use crate::organism::Organism;
 use crate::neural::NeuralState;
+use crate::organism::Organism;
 use crate::quiet::QuietState;
 
 use super::*;
@@ -169,7 +169,8 @@ impl WorldState {
             }
         }
         self.fields.check(self.config.detritus.energy_cap)?;
-        self.ecology.check(self.config.detritus.carrion_energy_cap)?;
+        self.ecology
+            .check(self.config.detritus.carrion_energy_cap)?;
         self.care.validate(self.tick, cells)?;
         self.hunters
             .validate(self.tick, &self.organisms, &self.config)?;

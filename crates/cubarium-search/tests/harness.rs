@@ -36,8 +36,7 @@ fn the_default_vector_round_trips_and_sits_inside_its_own_box() {
     }
 
     let mut config = base_config(TRAINING_SEEDS[0]);
-    let mut profile =
-        cubarium_core::hunter::FixedHunterProfile::lanternjaw_trial(&config);
+    let mut profile = cubarium_core::hunter::FixedHunterProfile::lanternjaw_trial(&config);
     params::apply(&defaults, &mut config, &mut profile).unwrap();
     assert_eq!(params::read(&config, &profile), defaults);
     // The defaults must be exactly the shipped world, so a search always reports what it moved
@@ -62,7 +61,10 @@ fn the_default_vector_round_trips_and_sits_inside_its_own_box() {
     let mut moved = defaults.clone();
     moved[3] += 1e-12;
     assert_ne!(params::fingerprint(&defaults), params::fingerprint(&moved));
-    assert_eq!(params::fingerprint(&defaults), params::fingerprint(&params::defaults()));
+    assert_eq!(
+        params::fingerprint(&defaults),
+        params::fingerprint(&params::defaults())
+    );
 }
 
 #[test]
@@ -71,7 +73,10 @@ fn the_same_candidate_and_seed_reproduce_bit_for_bit_and_different_seeds_do_not(
     let a = evaluate(&values, TRAINING_SEEDS[0], SHORT);
     let b = evaluate(&values, TRAINING_SEEDS[0], SHORT);
     assert_eq!(a.status, Status::Completed, "{:?}", a.reason);
-    assert_eq!(a.metrics, b.metrics, "a replay of the same (candidate, seed) must be identical");
+    assert_eq!(
+        a.metrics, b.metrics,
+        "a replay of the same (candidate, seed) must be identical"
+    );
 
     let other = evaluate(&values, TRAINING_SEEDS[1], SHORT);
     assert_eq!(other.status, Status::Completed);
@@ -94,15 +99,27 @@ fn a_configuration_the_core_refuses_is_recorded_as_rejected_not_repaired() {
     // `drives.bud_reserve` below 0.60 cannot fund a child: the core refuses it, and the
     // declared search box deliberately contains that region.
     let mut values = params::defaults();
-    let index = params::PARAMS.iter().position(|p| p.name == "drives.bud_reserve").unwrap();
-    assert!(params::PARAMS[index].lo < 0.60, "the box must straddle the constraint");
+    let index = params::PARAMS
+        .iter()
+        .position(|p| p.name == "drives.bud_reserve")
+        .unwrap();
+    assert!(
+        params::PARAMS[index].lo < 0.60,
+        "the box must straddle the constraint"
+    );
     values[index] = params::PARAMS[index].lo;
 
     let refused = evaluate(&values, TRAINING_SEEDS[0], SHORT);
     assert_eq!(refused.status, Status::Invalid);
     let reason = refused.reason.expect("a refusal must carry its reason");
-    assert!(reason.contains("child material"), "unexpected refusal: {reason}");
-    assert!(refused.metrics.is_none(), "a refused candidate must not carry metrics");
+    assert!(
+        reason.contains("child material"),
+        "unexpected refusal: {reason}"
+    );
+    assert!(
+        refused.metrics.is_none(),
+        "a refused candidate must not carry metrics"
+    );
     // The refusal is the world's decision, not a repair: the value went through untouched.
     let mut config = base_config(TRAINING_SEEDS[0]);
     let mut profile = cubarium_core::hunter::FixedHunterProfile::lanternjaw_trial(&config);
@@ -115,11 +132,41 @@ fn the_protocol_and_the_budget_refuse_every_limit_they_cannot_enforce() {
     SHORT.validate().unwrap();
     Protocol::default().validate().unwrap();
     let cases: Vec<(&str, Protocol)> = vec![
-        ("horizon_ticks", Protocol { horizon_ticks: 0, ..SHORT }),
-        ("sample_every", Protocol { sample_every: 0, ..SHORT }),
-        ("sample_every", Protocol { sample_every: 10_000, ..SHORT }),
-        ("apex_founders", Protocol { apex_founders: 3, ..SHORT }),
-        ("apex_introduce_tick", Protocol { apex_introduce_tick: 400, ..SHORT }),
+        (
+            "horizon_ticks",
+            Protocol {
+                horizon_ticks: 0,
+                ..SHORT
+            },
+        ),
+        (
+            "sample_every",
+            Protocol {
+                sample_every: 0,
+                ..SHORT
+            },
+        ),
+        (
+            "sample_every",
+            Protocol {
+                sample_every: 10_000,
+                ..SHORT
+            },
+        ),
+        (
+            "apex_founders",
+            Protocol {
+                apex_founders: 3,
+                ..SHORT
+            },
+        ),
+        (
+            "apex_introduce_tick",
+            Protocol {
+                apex_introduce_tick: 400,
+                ..SHORT
+            },
+        ),
     ];
     for (expect, protocol) in cases {
         let err = protocol.validate().unwrap_err();
@@ -129,16 +176,47 @@ fn the_protocol_and_the_budget_refuse_every_limit_they_cannot_enforce() {
     let ok = Budget::default();
     ok.validate().unwrap();
     let cases: Vec<(&str, Budget)> = vec![
-        ("max_evaluations", Budget { max_evaluations: 0, ..ok }),
+        (
+            "max_evaluations",
+            Budget {
+                max_evaluations: 0,
+                ..ok
+            },
+        ),
         ("workers", Budget { workers: 0, ..ok }),
         ("workers", Budget { workers: 64, ..ok }),
-        ("population", Budget { population: 1, ..ok }),
+        (
+            "population",
+            Budget {
+                population: 1,
+                ..ok
+            },
+        ),
         ("elite", Budget { elite: 0, ..ok }),
-        ("elite", Budget { elite: 4, population: 4, ..ok }),
-        ("generations", Budget { generations: 0, ..ok }),
+        (
+            "elite",
+            Budget {
+                elite: 4,
+                population: 4,
+                ..ok
+            },
+        ),
+        (
+            "generations",
+            Budget {
+                generations: 0,
+                ..ok
+            },
+        ),
         ("seeds", Budget { seeds: 0, ..ok }),
         ("seeds", Budget { seeds: 99, ..ok }),
-        ("wall_seconds", Budget { wall_seconds: 0, ..ok }),
+        (
+            "wall_seconds",
+            Budget {
+                wall_seconds: 0,
+                ..ok
+            },
+        ),
         ("max_rows", Budget { max_rows: 0, ..ok }),
     ];
     for (expect, budget) in cases {
@@ -149,10 +227,22 @@ fn the_protocol_and_the_budget_refuse_every_limit_they_cannot_enforce() {
 
     Variation::default().validate().unwrap();
     for bad in [
-        Variation { mutation_rate: 1.5, ..Variation::default() },
-        Variation { crossover_rate: -0.1, ..Variation::default() },
-        Variation { mutation_sigma: 0.9, ..Variation::default() },
-        Variation { mutation_sigma: f64::NAN, ..Variation::default() },
+        Variation {
+            mutation_rate: 1.5,
+            ..Variation::default()
+        },
+        Variation {
+            crossover_rate: -0.1,
+            ..Variation::default()
+        },
+        Variation {
+            mutation_sigma: 0.9,
+            ..Variation::default()
+        },
+        Variation {
+            mutation_sigma: f64::NAN,
+            ..Variation::default()
+        },
     ] {
         assert!(bad.validate().is_err(), "{bad:?} should have been refused");
     }
@@ -183,7 +273,10 @@ fn the_evaluation_cap_is_the_number_of_simulations_actually_run() {
     };
     let rows = Mutex::new(0u64);
     let report = search::run(
-        Protocol { horizon_ticks: 200, ..SHORT },
+        Protocol {
+            horizon_ticks: 200,
+            ..SHORT
+        },
         budget,
         Variation::default(),
         Scoring::default(),
@@ -192,10 +285,17 @@ fn the_evaluation_cap_is_the_number_of_simulations_actually_run() {
     )
     .unwrap();
 
-    assert_eq!(report.evaluations_run, 3, "the cap is a hard limit, not a target");
+    assert_eq!(
+        report.evaluations_run, 3,
+        "the cap is a hard limit, not a target"
+    );
     assert_eq!(report.stop_reason, StopReason::Evaluations);
     assert_eq!(report.generations_run, 1);
-    assert_eq!(*rows.lock().unwrap(), 3, "one row per simulation actually run");
+    assert_eq!(
+        *rows.lock().unwrap(),
+        3,
+        "one row per simulation actually run"
+    );
     // The candidate the budget never reached is reported, unscored, rather than dropped.
     assert_eq!(report.candidates.len(), 4);
     // Exactly one candidate was never reached; it is reported as unevaluated rather than
@@ -225,9 +325,15 @@ fn a_search_is_reproducible_from_its_seed_and_its_rows_are_ordered() {
     };
     let once = collect(budget, 77);
     let twice = collect(budget, 77);
-    assert_eq!(once, twice, "the same search seed must produce the same search");
+    assert_eq!(
+        once, twice,
+        "the same search seed must produce the same search"
+    );
     let different = collect(budget, 78);
-    assert_ne!(once, different, "a different search seed must explore differently");
+    assert_ne!(
+        once, different,
+        "a different search seed must explore differently"
+    );
 
     // Rows come out in (generation, candidate, seed) order whatever the workers did.
     let mut keys: Vec<(u32, u64)> = once.iter().map(|(g, c, _)| (*g, *c)).collect();
@@ -244,7 +350,10 @@ fn a_search_is_reproducible_from_its_seed_and_its_rows_are_ordered() {
 fn collect(budget: Budget, seed: u64) -> Vec<(u32, u64, Option<u64>)> {
     let rows = Mutex::new(Vec::new());
     search::run(
-        Protocol { horizon_ticks: 200, ..SHORT },
+        Protocol {
+            horizon_ticks: 200,
+            ..SHORT
+        },
         budget,
         Variation::default(),
         Scoring::default(),
@@ -253,7 +362,10 @@ fn collect(budget: Budget, seed: u64) -> Vec<(u32, u64, Option<u64>)> {
             rows.lock().unwrap().push((
                 row.generation,
                 row.candidate,
-                row.evaluation.metrics.as_ref().map(|m| m.final_ecology_hash),
+                row.evaluation
+                    .metrics
+                    .as_ref()
+                    .map(|m| m.final_ecology_hash),
             ));
         },
     )
@@ -263,15 +375,30 @@ fn collect(budget: Budget, seed: u64) -> Vec<(u32, u64, Option<u64>)> {
 
 #[test]
 fn a_completed_run_keeps_the_worlds_material_energy_and_water_identities() {
-    let protocol = Protocol { horizon_ticks: 600, sample_every: 60, ..SHORT };
+    let protocol = Protocol {
+        horizon_ticks: 600,
+        sample_every: 60,
+        ..SHORT
+    };
     let evaluation = evaluate(&params::defaults(), TRAINING_SEEDS[2], protocol);
-    assert_eq!(evaluation.status, Status::Completed, "{:?}", evaluation.reason);
+    assert_eq!(
+        evaluation.status,
+        Status::Completed,
+        "{:?}",
+        evaluation.reason
+    );
     let m = evaluation.metrics.unwrap();
 
     // The apex cohort is an accounted input, not free material.
     assert_eq!(m.apex_introduced, 2);
-    assert!(evaluation.apex_material_in > 0.0, "apex founders must book their material");
-    assert!(evaluation.apex_energy_in > 0.0, "apex founders must book their energy");
+    assert!(
+        evaluation.apex_material_in > 0.0,
+        "apex founders must book their material"
+    );
+    assert!(
+        evaluation.apex_energy_in > 0.0,
+        "apex founders must book their energy"
+    );
 
     // Scaled to the world's own stocks, these are rounding, not drift.
     let scale = m.producer_capacity.max(1.0);
@@ -295,22 +422,42 @@ fn a_completed_run_keeps_the_worlds_material_energy_and_water_identities() {
     assert_eq!(m.ticks_run, protocol.horizon_ticks);
     assert!(!m.collapsed);
     assert_eq!(m.survived_ticks, protocol.horizon_ticks);
-    assert!(m.final_population >= 20, "the default world places 24 prey founders plus the apex");
-    assert_eq!(m.min_forms_present, 5, "four founder kinds plus the apex rig");
-    assert!(m.feeding_fraction > 0.0, "ordinary founders feed; frozen ones would not");
+    assert!(
+        m.final_population >= 20,
+        "the default world places 24 prey founders plus the apex"
+    );
+    assert_eq!(
+        m.min_forms_present, 5,
+        "four founder kinds plus the apex rig"
+    );
+    assert!(
+        m.feeding_fraction > 0.0,
+        "ordinary founders feed; frozen ones would not"
+    );
     assert!(m.mean_producer > 0.0 && m.gross_production_per_hour > 0.0);
 }
 
 #[test]
 fn a_prey_only_protocol_runs_with_no_apex_and_scores_no_apex() {
-    let protocol = Protocol { apex_founders: 0, ..SHORT };
+    let protocol = Protocol {
+        apex_founders: 0,
+        ..SHORT
+    };
     let evaluation = evaluate(&params::defaults(), TRAINING_SEEDS[0], protocol);
-    assert_eq!(evaluation.status, Status::Completed, "{:?}", evaluation.reason);
+    assert_eq!(
+        evaluation.status,
+        Status::Completed,
+        "{:?}",
+        evaluation.reason
+    );
     let m = evaluation.metrics.unwrap();
     assert_eq!(m.apex_introduced, 0);
     assert_eq!(evaluation.apex_material_in, 0.0);
     assert_eq!(m.apex_alive_final, 0);
-    assert_eq!(m.min_forms_present, 4, "the four founder kinds, and no apex rig");
+    assert_eq!(
+        m.min_forms_present, 4,
+        "the four founder kinds, and no apex rig"
+    );
     let scoring = Scoring::default();
     let objectives = m.objectives(&scoring);
     assert!(
@@ -324,7 +471,11 @@ fn a_prey_only_protocol_runs_with_no_apex_and_scores_no_apex() {
 #[test]
 fn the_scalar_rank_cannot_hide_a_dead_or_idle_world() {
     let scoring = Scoring::default();
-    let protocol = Protocol { horizon_ticks: 600, sample_every: 60, ..SHORT };
+    let protocol = Protocol {
+        horizon_ticks: 600,
+        sample_every: 60,
+        ..SHORT
+    };
     let live = evaluate(&params::defaults(), TRAINING_SEEDS[0], protocol)
         .metrics
         .expect("the default world completes");
@@ -366,10 +517,17 @@ fn dominance_is_a_partial_order_over_all_seven_objectives() {
     };
     let better = Objectives { apex: 0.6, ..base };
     // A trade: strictly better on apex, strictly worse on variety.
-    let traded = Objectives { apex: 0.7, variety: 0.4, ..base };
+    let traded = Objectives {
+        apex: 0.7,
+        variety: 0.4,
+        ..base
+    };
     assert!(better.dominates(&base));
     assert!(!base.dominates(&better));
-    assert!(!base.dominates(&base), "an identical vector does not dominate itself");
+    assert!(
+        !base.dominates(&base),
+        "an identical vector does not dominate itself"
+    );
     assert!(!traded.dominates(&better) && !better.dominates(&traded));
 }
 
@@ -391,7 +549,11 @@ fn a_recorded_row_replays_from_its_exact_bits() {
         seeds: 1,
         max_rows: 16,
     };
-    let protocol = Protocol { horizon_ticks: 300, sample_every: 50, ..SHORT };
+    let protocol = Protocol {
+        horizon_ticks: 300,
+        sample_every: 50,
+        ..SHORT
+    };
     let rows = Mutex::new(Vec::new());
     search::run(
         protocol,
@@ -421,7 +583,10 @@ fn a_recorded_row_replays_from_its_exact_bits() {
         assert_eq!(again.status, row.evaluation.status);
         assert_eq!(
             again.metrics.as_ref().map(|m| m.final_ecology_hash),
-            row.evaluation.metrics.as_ref().map(|m| m.final_ecology_hash),
+            row.evaluation
+                .metrics
+                .as_ref()
+                .map(|m| m.final_ecology_hash),
             "row for candidate {} did not reproduce from its recorded bits",
             row.candidate
         );

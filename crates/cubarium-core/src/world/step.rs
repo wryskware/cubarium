@@ -471,10 +471,17 @@ impl World {
                         light,
                         images,
                         &sense_rings[cell_of(topo, world_scale, &o.pos).index()],
-                        neighbors.lists.get(id.slot as usize).map_or(&[][..], |l| &l[..]),
+                        neighbors
+                            .lists
+                            .get(id.slot as usize)
+                            .map_or(&[][..], |l| &l[..]),
                         &mut sensed_cells,
                         &mut sensed_bodies,
-                        if budgets.traced() == Some(id) { Some(&mut traced_head) } else { None },
+                        if budgets.traced() == Some(id) {
+                            Some(&mut traced_head)
+                        } else {
+                            None
+                        },
                         motor_model,
                         action_adapter,
                     );
@@ -500,7 +507,8 @@ impl World {
                 for ring in &sense_rings[here][..depth] {
                     for neighbor in ring {
                         let center = neighbor.center(topo, world_scale);
-                        let Some(view) = unfold_with(topo, 
+                        let Some(view) = unfold_with(
+                            topo,
                             &images[topo.chart_index(o.pos.face)],
                             o.pos,
                             center,
@@ -671,11 +679,12 @@ impl World {
                     let mut perched = 0u32;
                     let mut ready_ids: Vec<OrganismId> = Vec::new();
                     for (index, m) in hunters.members.iter().enumerate() {
-                        let Some(o) = organisms.get(m.id) else { continue };
+                        let Some(o) = organisms.get(m.id) else {
+                            continue;
+                        };
                         alive += 1;
                         let dormant = apex_dormancy_on && apex_dormancy.contains(m.id);
-                        let adult =
-                            o.structure >= o.phenotype.structure_adult - hunter::TOLERANCE;
+                        let adult = o.structure >= o.phenotype.structure_adult - hunter::TOLERANCE;
                         if dormant || !adult {
                             continue;
                         }
@@ -701,7 +710,8 @@ impl World {
                             else {
                                 continue;
                             };
-                            if let Some(d) = cubarium_surface::surface_distance(topo, 
+                            if let Some(d) = cubarium_surface::surface_distance(
+                                topo,
                                 oa.pos,
                                 ob.pos,
                                 cubarium_surface::MAX_LOCAL_RADIUS,
@@ -1397,7 +1407,9 @@ impl World {
                 // Wading (`design/water.md`, `design/fauna-v2.md`): speed is divided by
                 // `1 + w · (1 − swim)` of the cell the organism stands in before it moves; a
                 // swimmer ignores the pool.
-                let wading = 1.0 + fields.w[cell_of(topo, world_scale, &o.pos).index()] * (1.0 - o.phenotype.swim);
+                let wading = 1.0
+                    + fields.w[cell_of(topo, world_scale, &o.pos).index()]
+                        * (1.0 - o.phenotype.swim);
                 let mut speed_cap = d.effort * o.phenotype.speed_max / wading;
                 // A hunter's burst and a threatened prey's dash are the only boosts, and both
                 // raise `speed_cap`. Since R0b that *is* the whole motor budget, so a
@@ -1458,7 +1470,12 @@ impl World {
                     a.feedback.res_mag += motion.motor_magnitude();
                     a.feedback.ticks = a.feedback.ticks.saturating_add(1);
                 }
-                travel_into(topo, o.pos, motion.heading * (motion.speed * dt), travel_buf);
+                travel_into(
+                    topo,
+                    o.pos,
+                    motion.heading * (motion.speed * dt),
+                    travel_buf,
+                );
                 o.pos = travel_buf.end;
                 // Transport is a change of chart, applied to the *resolved* heading: it costs
                 // nothing and consumes no turn budget.
@@ -1513,7 +1530,9 @@ impl World {
                 o.energy -= collected;
                 let shortfall = (cost - collected).max(0.0);
                 if shortfall > 0.0 {
-                    let allowance = (org_cfg.oxidation_rate * dt).min(o.reserve.max(0.0)).max(0.0);
+                    let allowance = (org_cfg.oxidation_rate * dt)
+                        .min(o.reserve.max(0.0))
+                        .max(0.0);
                     let per_unit = e_r * org_cfg.oxidation_efficiency;
                     if allowance > 0.0 && per_unit > 0.0 {
                         // Burn only what the shortfall needs, never the whole allowance.
@@ -1830,12 +1849,21 @@ impl World {
                 };
                 // §6.2: a channel whose machinery does not exist is refused here, in the
                 // world, whatever asked for it.
-                let want_fruit =
-                    if o.phenotype.cap_foliage > 0.0 { d.fruit_effort.max(0.0) } else { 0.0 };
-                let want_graze =
-                    if o.phenotype.cap_foliage > 0.0 { d.graze_effort.max(0.0) } else { 0.0 };
-                let want_scavenge =
-                    if o.phenotype.cap_detrital > 0.0 { d.scavenge_effort.max(0.0) } else { 0.0 };
+                let want_fruit = if o.phenotype.cap_foliage > 0.0 {
+                    d.fruit_effort.max(0.0)
+                } else {
+                    0.0
+                };
+                let want_graze = if o.phenotype.cap_foliage > 0.0 {
+                    d.graze_effort.max(0.0)
+                } else {
+                    0.0
+                };
+                let want_scavenge = if o.phenotype.cap_detrital > 0.0 {
+                    d.scavenge_effort.max(0.0)
+                } else {
+                    0.0
+                };
                 let asked = want_fruit + want_graze + want_scavenge;
                 if asked <= 0.0 {
                     continue;
@@ -1891,12 +1919,15 @@ impl World {
                 fruit[cell] = share(fruit[cell], fields.f[cell]);
                 graze[cell] = share(graze[cell], fields.p[cell]);
                 let (litter, litter_e) = (fields.d[cell], fields.de[cell]);
-                let (remains, remains_e) =
-                    (ecology.carrion[cell], ecology.carrion_energy[cell]);
+                let (remains, remains_e) = (ecology.carrion[cell], ecology.carrion_energy[cell]);
                 litter_eff[cell] = edible_detritus(litter, litter_e, e_r);
                 carrion_eff[cell] = edible_detritus(remains, remains_e, e_r);
                 litter_density[cell] = if litter > 0.0 { litter_e / litter } else { 0.0 };
-                carrion_density[cell] = if remains > 0.0 { remains_e / remains } else { 0.0 };
+                carrion_density[cell] = if remains > 0.0 {
+                    remains_e / remains
+                } else {
+                    0.0
+                };
                 scavenge[cell] = share(scavenge[cell], litter_eff[cell] + carrion_eff[cell]);
             }
 
@@ -2028,8 +2059,11 @@ impl World {
                             if let Some(rec) = eco_scratch.plant_budget_mut() {
                                 rec.cells[cell].withdrawal_litter += q;
                             }
-                            let eta =
-                                if e_r > 0.0 { eta_m * (rho / e_r).min(1.0) } else { eta_m };
+                            let eta = if e_r > 0.0 {
+                                eta_m * (rho / e_r).min(1.0)
+                            } else {
+                                eta_m
+                            };
                             let q_d = cap_d * q;
                             let to_reserve = eta * q_d;
                             o.reserve += to_reserve;
@@ -2064,16 +2098,19 @@ impl World {
                         }
                         if q_remains > 0.0 {
                             let q = q_remains;
-                            let carried = (carrion_density[cell] * q)
-                                .min(ecology.carrion_energy[cell]);
+                            let carried =
+                                (carrion_density[cell] * q).min(ecology.carrion_energy[cell]);
                             let rho = carried / q;
                             ecology.carrion[cell] -= q;
                             ecology.carrion_energy[cell] -= carried;
                             if let Some(rec) = eco_scratch.plant_budget_mut() {
                                 rec.cells[cell].withdrawal_carrion += q;
                             }
-                            let eta =
-                                if e_r > 0.0 { eta_m * (rho / e_r).min(1.0) } else { eta_m };
+                            let eta = if e_r > 0.0 {
+                                eta_m * (rho / e_r).min(1.0)
+                            } else {
+                                eta_m
+                            };
                             let q_d = cap_d * q;
                             let to_reserve = eta * q_d;
                             o.reserve += to_reserve;
@@ -2250,7 +2287,7 @@ impl World {
                                             e_r,
                                         )
                                         && hunter::surface_reach(
-                            topo,
+                                            topo,
                                             images,
                                             buried.pos,
                                             prey.pos,
@@ -2367,7 +2404,9 @@ impl World {
                         .get(id.slot as usize)
                         .copied()
                         .unwrap_or(0.0);
-                    let burned = (org_cfg.oxidation_rate * dt - already).max(0.0).min(o.reserve);
+                    let burned = (org_cfg.oxidation_rate * dt - already)
+                        .max(0.0)
+                        .min(o.reserve);
                     o.reserve -= burned;
                     fields.n[cell_of(topo, world_scale, &o.pos).index()] += burned;
                     // The reserve material carried `e_r` per unit; `η_ox` of it becomes usable.
@@ -2855,7 +2894,12 @@ impl World {
                     key,
                     mut counter,
                 ) = placement;
-                travel_into(topo, from, direction * cfg.drives.birth_offset_px, travel_buf);
+                travel_into(
+                    topo,
+                    from,
+                    direction * cfg.drives.birth_offset_px,
+                    travel_buf,
+                );
                 counters.travel_ties += travel_buf.ties;
                 counters.travel_fallbacks += u32::from(travel_buf.fallback);
                 let heading = travel_buf
@@ -2916,10 +2960,7 @@ impl World {
                 // phase. Weight mutation, two-parent neural mating and any change to body
                 // inheritance belong to a later slice; nothing here mutates weights.
                 if let Some(parent_policy) = neural.get(*parent_id).map(|a| a.policy) {
-                    neural.insert(
-                        child_id,
-                        neural::AnimalState::fresh(now + 1, parent_policy),
-                    );
+                    neural.insert(child_id, neural::AnimalState::fresh(now + 1, parent_policy));
                 }
                 if let Some(index) = hunter_parent {
                     // The funded descendant joins the lineage with no target, an empty gut and
@@ -3146,15 +3187,13 @@ fn neural_decision(
         // ---- sample ----
         let sampler_start = std::time::Instant::now();
         let animal = &neural.animals[index].1;
-        let feedback = animal.feedback.channels(
-            o.phenotype.mouth_rate,
-            o.phenotype.speed_max,
-            radius_px,
-            dt,
-        );
+        let feedback =
+            animal
+                .feedback
+                .channels(o.phenotype.mouth_rate, o.phenotype.speed_max, radius_px, dt);
         let observation = sample_observation(
-            o, now, dt, cfg, e_r, fields, eco, light, images, rings, neighbours, u_full,
-            feedback, cells, bodies,
+            o, now, dt, cfg, e_r, fields, eco, light, images, rings, neighbours, u_full, feedback,
+            cells, bodies,
         );
         timing.sampler_nanos = timing
             .sampler_nanos
@@ -3207,7 +3246,12 @@ fn neural_decision(
     }
 
     let adapter_start = std::time::Instant::now();
-    let decision = decision_from(neural.animals[index].1.held_action(), o, &envelope, omega_max);
+    let decision = decision_from(
+        neural.animals[index].1.held_action(),
+        o,
+        &envelope,
+        omega_max,
+    );
     timing.adapter_nanos = timing
         .adapter_nanos
         .saturating_add(adapter_start.elapsed().as_nanos() as u64);
@@ -3282,9 +3326,13 @@ pub(super) fn sample_observation(
     for (hop, ring) in rings[..depth].iter().enumerate() {
         for neighbor in ring {
             let center = neighbor.center(topo, world_scale);
-            let Some(view) =
-                unfold_with(topo, &images[topo.chart_index(o.pos.face)], o.pos, center, CELL_UNFOLD_RADIUS)
-            else {
+            let Some(view) = unfold_with(
+                topo,
+                &images[topo.chart_index(o.pos.face)],
+                o.pos,
+                center,
+                CELL_UNFOLD_RADIUS,
+            ) else {
                 continue;
             };
             if view.distance <= GRADIENT_EPS || view.distance.is_nan() {

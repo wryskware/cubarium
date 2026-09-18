@@ -305,7 +305,13 @@ pub fn measure_contact(
 ) -> Option<ContactMeasure> {
     let (forward, side) = body_basis(heading)?;
     let window = geometry.window(topo, prey_extent);
-    let u = unfold_with(topo, &images[topo.chart_index(root.face)], root, prey, window)?;
+    let u = unfold_with(
+        topo,
+        &images[topo.chart_index(root.face)],
+        root,
+        prey,
+        window,
+    )?;
     let delta = u.local - root.chart();
     let body = Vec2::new(forward.dot(delta), side.dot(delta));
     Some(ContactMeasure {
@@ -348,7 +354,13 @@ pub fn body_point(
     }
     // The round trip: the root's own shortest image of that point must be the body coordinate
     // it was built from, or the renderer and the world disagree about where the claw is.
-    let u = unfold_with(topo, &images[topo.chart_index(root.face)], root, swept.end, reach + 1.0)?;
+    let u = unfold_with(
+        topo,
+        &images[topo.chart_index(root.face)],
+        root,
+        swept.end,
+        reach + 1.0,
+    )?;
     let delta = u.local - root.chart();
     let back = Vec2::new(forward.dot(delta), side.dot(delta));
     if (back - offset_body).length() > GRASP_EPS {

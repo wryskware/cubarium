@@ -270,8 +270,12 @@ impl Candidate {
     pub fn vector(&self) -> Result<Vec<f64>, String> {
         let mut values = params::defaults();
         for (name, value) in self.overrides {
-            let k = params::index_of(name)
-                .ok_or_else(|| format!("candidate {}: {name} is not a searched parameter", self.name))?;
+            let k = params::index_of(name).ok_or_else(|| {
+                format!(
+                    "candidate {}: {name} is not a searched parameter",
+                    self.name
+                )
+            })?;
             values[k] = *value;
         }
         Ok(values)
@@ -488,7 +492,9 @@ fn gates_for(rows: &[&CalibrationRow]) -> (Gates, Vec<f64>, usize, f64, f64) {
     if rows.is_empty() {
         return (gates, retention, 0, 0.0, 0.0);
     }
-    gates.sound = rows.iter().all(|r| r.evaluation.status == Status::Completed);
+    gates.sound = rows
+        .iter()
+        .all(|r| r.evaluation.status == Status::Completed);
     let mut persists = true;
     let mut vegetated = true;
     let mut turning_over = true;
@@ -544,12 +550,8 @@ fn gates_for(rows: &[&CalibrationRow]) -> (Gates, Vec<f64>, usize, f64, f64) {
     gates.turning_over = turning_over;
     gates.guilds_intact = guilds_intact;
     gates.stands_intact = stands_intact;
-    gates.plausible = gates.sound
-        && persists
-        && vegetated
-        && turning_over
-        && guilds_intact
-        && stands_intact;
+    gates.plausible =
+        gates.sound && persists && vegetated && turning_over && guilds_intact && stands_intact;
     (gates, retention, extinctions, worst_mass, worst_energy)
 }
 
@@ -603,9 +605,11 @@ fn peak_rss_mib() -> f64 {
     std::fs::read_to_string("/proc/self/status")
         .ok()
         .and_then(|s| {
-            s.lines()
-                .find(|l| l.starts_with("VmHWM:"))
-                .and_then(|l| l.split_whitespace().nth(1).and_then(|k| k.parse::<f64>().ok()))
+            s.lines().find(|l| l.starts_with("VmHWM:")).and_then(|l| {
+                l.split_whitespace()
+                    .nth(1)
+                    .and_then(|k| k.parse::<f64>().ok())
+            })
         })
         .map(|kib| kib / 1024.0)
         .unwrap_or(f64::NAN)
@@ -641,7 +645,11 @@ pub fn run_stage(
             candidate(n).ok_or_else(|| {
                 format!(
                     "{n} is not a declared candidate; known: {}",
-                    CANDIDATES.iter().map(|c| c.name).collect::<Vec<_>>().join(", ")
+                    CANDIDATES
+                        .iter()
+                        .map(|c| c.name)
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 )
             })
         })
@@ -656,10 +664,15 @@ pub fn run_stage(
     }
     let price_index = params::index_of("organism.move_cost")
         .ok_or("organism.move_cost is not in the parameter box")?;
-    let (lo, hi) = (params::PARAMS[price_index].lo, params::PARAMS[price_index].hi);
+    let (lo, hi) = (
+        params::PARAMS[price_index].lo,
+        params::PARAMS[price_index].hi,
+    );
     for price in prices {
         if !price.is_finite() || *price <= 0.0 {
-            return Err(format!("movement price {price} is not a positive finite number"));
+            return Err(format!(
+                "movement price {price} is not a positive finite number"
+            ));
         }
         if *price < lo || *price > hi {
             return Err(format!(
@@ -750,8 +763,7 @@ pub fn run_stage(
                         apex_founders: job.arm,
                         apex_introduce_tick,
                     };
-                    let evaluation =
-                        evaluate_with(&job.values, job.seed, protocol, options);
+                    let evaluation = evaluate_with(&job.values, job.seed, protocol, options);
                     let row = CalibrationRow {
                         candidate: job.candidate.name.to_string(),
                         axes: job.candidate.axes.to_string(),
@@ -769,7 +781,10 @@ pub fn run_stage(
                     {
                         let _ = writeln!(w, "{text}");
                     }
-                    results.lock().expect("calibration results mutex").push((i, row));
+                    results
+                        .lock()
+                        .expect("calibration results mutex")
+                        .push((i, row));
                 }
             });
         }
@@ -779,7 +794,9 @@ pub fn run_stage(
     if let Ok(mut w) = writer.lock() {
         let _ = w.flush();
     }
-    let mut results = results.into_inner().map_err(|e| format!("results mutex: {e}"))?;
+    let mut results = results
+        .into_inner()
+        .map_err(|e| format!("results mutex: {e}"))?;
     results.sort_by_key(|(i, _)| *i);
     let rows: Vec<CalibrationRow> = results.into_iter().map(|(_, r)| r).collect();
     let ticks: u64 = rows
@@ -791,47 +808,53 @@ pub fn run_stage(
     let mut cells = Vec::new();
     for price in prices {
         for c in &chosen {
-        for arm in arms {
-            let mine: Vec<&CalibrationRow> = rows
-                .iter()
-                .filter(|r| {
-                    r.candidate == c.name
-                        && r.arm == *arm
-                        && r.move_cost.to_bits() == price.to_bits()
-                })
-                .collect();
-            if mine.is_empty() {
-                continue;
-            }
-            let (gates, foliage_retention, extinctions, worst_mass, worst_energy) =
-                gates_for(&mine);
-            let completed_metrics: Vec<Value> = mine
-                .iter()
-                .filter(|r| r.evaluation.status == Status::Completed)
-                .filter_map(|r| r.evaluation.metrics.as_ref())
-                .map(|m| serde_json::to_value(m).unwrap_or(Value::Null))
-                .collect();
-            cells.push(CellSummary {
-                candidate: c.name.to_string(),
-                axes: c.axes.to_string(),
-                arm: *arm,
-                move_cost: *price,
-                seeds: mine.len(),
-                completed: mine
+            for arm in arms {
+                let mine: Vec<&CalibrationRow> = rows
+                    .iter()
+                    .filter(|r| {
+                        r.candidate == c.name
+                            && r.arm == *arm
+                            && r.move_cost.to_bits() == price.to_bits()
+                    })
+                    .collect();
+                if mine.is_empty() {
+                    continue;
+                }
+                let (gates, foliage_retention, extinctions, worst_mass, worst_energy) =
+                    gates_for(&mine);
+                let completed_metrics: Vec<Value> = mine
                     .iter()
                     .filter(|r| r.evaluation.status == Status::Completed)
-                    .count(),
-                invalid: mine.iter().filter(|r| r.evaluation.status == Status::Invalid).count(),
-                failed: mine.iter().filter(|r| r.evaluation.status == Status::Failed).count(),
-                reason: mine.iter().find_map(|r| r.evaluation.reason.clone()),
-                extinctions,
-                worst_mass_residual: worst_mass,
-                worst_energy_residual: worst_energy,
-                mean: mean_value(&completed_metrics),
-                foliage_retention,
-                gates,
-            });
-        }
+                    .filter_map(|r| r.evaluation.metrics.as_ref())
+                    .map(|m| serde_json::to_value(m).unwrap_or(Value::Null))
+                    .collect();
+                cells.push(CellSummary {
+                    candidate: c.name.to_string(),
+                    axes: c.axes.to_string(),
+                    arm: *arm,
+                    move_cost: *price,
+                    seeds: mine.len(),
+                    completed: mine
+                        .iter()
+                        .filter(|r| r.evaluation.status == Status::Completed)
+                        .count(),
+                    invalid: mine
+                        .iter()
+                        .filter(|r| r.evaluation.status == Status::Invalid)
+                        .count(),
+                    failed: mine
+                        .iter()
+                        .filter(|r| r.evaluation.status == Status::Failed)
+                        .count(),
+                    reason: mine.iter().find_map(|r| r.evaluation.reason.clone()),
+                    extinctions,
+                    worst_mass_residual: worst_mass,
+                    worst_energy_residual: worst_energy,
+                    mean: mean_value(&completed_metrics),
+                    foliage_retention,
+                    gates,
+                });
+            }
         }
     }
 
@@ -867,7 +890,9 @@ fn sweep_name() -> String {
 /// half-space, which was the only rule the workspace had. Named rather than taken from
 /// `PursuitStop::default()` so that adopting a new shipped rule cannot relabel a retained plan.
 fn half_space_name() -> String {
-    cubarium_core::hunter::PursuitStop::ForwardHalfSpace.as_str().to_string()
+    cubarium_core::hunter::PursuitStop::ForwardHalfSpace
+        .as_str()
+        .to_string()
 }
 
 pub fn config_hash(config: &WorldConfig) -> u64 {
@@ -882,7 +907,13 @@ pub fn config_hash(config: &WorldConfig) -> u64 {
 
 /// Export one candidate as a complete `WorldConfig` TOML that `cubarium run --config` accepts,
 /// beside a JSON note recording what it is and how to reproduce it.
-pub fn export(name: &str, seed: u64, out: &Path, selected: bool, why: &str) -> Result<PathBuf, String> {
+pub fn export(
+    name: &str,
+    seed: u64,
+    out: &Path,
+    selected: bool,
+    why: &str,
+) -> Result<PathBuf, String> {
     let c = candidate(name).ok_or_else(|| format!("{name} is not a declared candidate"))?;
     let config = c.config(seed)?;
     config
@@ -899,7 +930,8 @@ pub fn export(name: &str, seed: u64, out: &Path, selected: bool, why: &str) -> R
     if config_hash(&round_trip) != config_hash(&config) {
         return Err("the exported TOML does not round-trip to the same configuration".into());
     }
-    std::fs::write(&toml_path, &text).map_err(|e| format!("writing {}: {e}", toml_path.display()))?;
+    std::fs::write(&toml_path, &text)
+        .map_err(|e| format!("writing {}: {e}", toml_path.display()))?;
 
     let values = c.vector()?;
     let note = serde_json::json!({
@@ -920,8 +952,11 @@ pub fn export(name: &str, seed: u64, out: &Path, selected: bool, why: &str) -> R
         "load_with": format!("cubarium run --config {}", toml_path.display()),
     });
     let note_path = out.join(format!("{name}.json"));
-    std::fs::write(&note_path, serde_json::to_string_pretty(&note).map_err(|e| e.to_string())?)
-        .map_err(|e| format!("writing {}: {e}", note_path.display()))?;
+    std::fs::write(
+        &note_path,
+        serde_json::to_string_pretty(&note).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| format!("writing {}: {e}", note_path.display()))?;
     Ok(toml_path)
 }
 
@@ -947,13 +982,39 @@ pub fn print_report(report: &StageReport) {
         report.plan.seed_set,
     );
     println!("movement prices {:?}", report.plan.prices);
-    println!("per-body ledger  {}", if report.plan.ledger { "on" } else { "off" });
-    println!("plant record     {}", if report.plan.plant_record { "on" } else { "off" });
-    println!("founders         {}", if report.plan.no_animals { "none (plant-only)" } else { "ordinary" });
+    println!(
+        "per-body ledger  {}",
+        if report.plan.ledger { "on" } else { "off" }
+    );
+    println!(
+        "plant record     {}",
+        if report.plan.plant_record {
+            "on"
+        } else {
+            "off"
+        }
+    );
+    println!(
+        "founders         {}",
+        if report.plan.no_animals {
+            "none (plant-only)"
+        } else {
+            "ordinary"
+        }
+    );
     println!(
         "\n{:<24} {:>9} {:>3} {:>4} {:>6} {:>9} {:>9} {:>8} {:>8} {:>7} {:>7}  gates",
-        "candidate", "move_cost", "arm", "ok", "extinc", "foliage/0", "wood", "pop", "births",
-        "deaths", "apexA",
+        "candidate",
+        "move_cost",
+        "arm",
+        "ok",
+        "extinc",
+        "foliage/0",
+        "wood",
+        "pop",
+        "births",
+        "deaths",
+        "apexA",
     );
     for cell in &report.cells {
         let get = |path: &[&str]| -> f64 {
@@ -987,7 +1048,11 @@ pub fn print_report(report: &StageReport) {
             flag(cell.gates.turning_over, 'T'),
             flag(cell.gates.guilds_intact, 'G'),
             flag(cell.gates.stands_intact, 'C'),
-            if cell.gates.plausible { "PLAUSIBLE" } else { "" },
+            if cell.gates.plausible {
+                "PLAUSIBLE"
+            } else {
+                ""
+            },
         );
     }
     println!(
@@ -1000,15 +1065,25 @@ pub fn print_report(report: &StageReport) {
 
 /// Every declared candidate and what it moves.
 pub fn print_candidates() {
-    println!("build {BUILD_ID}\n{} declared candidates\n", CANDIDATES.len());
+    println!(
+        "build {BUILD_ID}\n{} declared candidates\n",
+        CANDIDATES.len()
+    );
     for c in CANDIDATES {
         println!("{:<24} [{}]  {}", c.name, c.axes, c.hypothesis);
         if c.overrides.is_empty() {
             println!("{:<24}   (shipped defaults)", "");
         }
         for (name, value) in c.overrides {
-            let k = params::index_of(name).expect("a declared candidate names a searched parameter");
-            println!("{:<24}   {:<34} {} (default {})", "", name, value, params::PARAMS[k].default);
+            let k =
+                params::index_of(name).expect("a declared candidate names a searched parameter");
+            println!(
+                "{:<24}   {:<34} {} (default {})",
+                "",
+                name,
+                value,
+                params::PARAMS[k].default
+            );
         }
     }
     let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
@@ -1019,7 +1094,11 @@ pub fn print_candidates() {
     }
     println!("\nhow often each searched name is moved by the screen");
     for p in params::PARAMS {
-        println!("  {:<34} {}", p.name, counts.get(p.name).copied().unwrap_or(0));
+        println!(
+            "  {:<34} {}",
+            p.name,
+            counts.get(p.name).copied().unwrap_or(0)
+        );
     }
 }
 
@@ -1053,7 +1132,9 @@ mod tests {
                     c.name
                 );
             }
-            let config = c.config(TRAINING_SEEDS[0]).unwrap_or_else(|e| panic!("{}: {e}", c.name));
+            let config = c
+                .config(TRAINING_SEEDS[0])
+                .unwrap_or_else(|e| panic!("{}: {e}", c.name));
             config
                 .validate()
                 .unwrap_or_else(|e| panic!("{} builds a config the core refuses: {e}", c.name));
@@ -1073,7 +1154,10 @@ mod tests {
             assert_eq!(v.to_bits(), p.default.to_bits(), "{} moved", p.name);
         }
         let config = baseline.config(7).expect("the baseline config builds");
-        assert_eq!(config_hash(&config), config_hash(&crate::evaluate::base_config(7)));
+        assert_eq!(
+            config_hash(&config),
+            config_hash(&crate::evaluate::base_config(7))
+        );
     }
 
     /// Candidate names are unique, and every candidate but the baseline moves at least two
@@ -1097,7 +1181,8 @@ mod tests {
     /// Exporting a candidate produces a TOML the core reads back to the same configuration.
     #[test]
     fn an_exported_candidate_round_trips_through_toml() {
-        let dir = std::env::temp_dir().join(format!("cubarium-calibrate-export-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("cubarium-calibrate-export-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = export("joint-strong", 1_001, &dir, false, "test").expect("export");
         let text = std::fs::read_to_string(&path).expect("the export is readable");
@@ -1160,7 +1245,11 @@ mod tests {
             DEFAULT_MOVE_COST.to_bits(),
             "the ladder's control rung is not the shipped price"
         );
-        assert_eq!(LADDER_PRICES[4].to_bits(), 0.0018f64.to_bits(), "F's lowest raised level");
+        assert_eq!(
+            LADDER_PRICES[4].to_bits(),
+            0.0018f64.to_bits(),
+            "F's lowest raised level"
+        );
         assert_eq!(
             LADDER_PRICES,
             [0.00036, 0.0006, 0.0009, 0.0012, 0.0018],

@@ -1,7 +1,7 @@
 //! Tall-plant placement, growth geometry, and drawing.
 
-use cubarium_surface::Topology;
 use super::*;
+use cubarium_surface::Topology;
 
 // --- Tall plants ---------------------------------------------------------------------
 //
@@ -156,7 +156,12 @@ impl ArtGeometry {
         let select = hash.next_f64();
         let pick = (hash.next_u64() % 2) as usize;
         let vine = hash.next_f64() < TALL_VINE_P;
-        (select < TALL_COLUMN_P).then_some(TallColumn { face, cx, pick, vine })
+        (select < TALL_COLUMN_P).then_some(TallColumn {
+            face,
+            cx,
+            pick,
+            vine,
+        })
     }
 
     /// A column's own share of the shared breeze.
@@ -501,16 +506,14 @@ pub(super) fn draw_column_in(
     // Only the cube has corners: the handoff exists because a full column's crown crosses
     // onto the Top face there. A ring's crown lands inside the foliage band and its wrap is
     // not a corner, so the retained-owner path is off.
-    let near_corner =
-        geom.topology() == Topology::Cube && (column.cx < 2 || column.cx > 13);
+    let near_corner = geom.topology() == Topology::Cube && (column.cx < 2 || column.cx > 13);
     // A toned column is dead wood: base and trunk only, so `hold_owner` is never set on
     // this path and the retained-chart stamp — which has no tone — is never reached.
     let mut stamp = |clip: &Clip, i: f64, mask: Mask, opacity: f32, hold_owner: bool| {
         if opacity <= 0.0 {
             return;
         }
-        let pose =
-            clip.sample(seconds + geom.tall_phase_of(column.face, column.cx, clip.seconds));
+        let pose = clip.sample(seconds + geom.tall_phase_of(column.face, column.cx, clip.seconds));
         let at = geom.tall_anchor_at(column.face, column.cx, i);
         let bend = Bend {
             amplitude,
@@ -622,8 +625,8 @@ pub(super) fn draw_column_in(
             // Endpoint pixels own global heights40..44. Skip the empty patch below its
             // first bilinear support without adding a new Strip start envelope at40.
             if reveal > 7.0 {
-                let pose = clip
-                    .sample(seconds + geom.tall_phase_of(column.face, column.cx, clip.seconds));
+                let pose =
+                    clip.sample(seconds + geom.tall_phase_of(column.face, column.cx, clip.seconds));
                 cubarium_render::stamp_pose_in_chart(
                     canvas,
                     geom.tall_anchor(column.face, column.cx, max_segments),
@@ -716,8 +719,16 @@ pub(super) fn silhouette_layers<'a>(
         let opacity = opacity_of(stage);
         return (opacity > 0.0).then_some(([(pose, 1.0), (pose, 0.0)], opacity));
     }
-    let GrowthStep { lower, upper, t: tu } = growth_step(growth)?;
-    let tu = if tu.is_finite() { tu.clamp(0.0, 1.0) } else { 0.0 };
+    let GrowthStep {
+        lower,
+        upper,
+        t: tu,
+    } = growth_step(growth)?;
+    let tu = if tu.is_finite() {
+        tu.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
     let top = stage_pose(plant, upper, cell, s);
     let (layers, opacity) = match lower {
         Some(low) => {

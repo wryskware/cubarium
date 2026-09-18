@@ -6,11 +6,11 @@
 //! from the 3D cube embedding with Rodrigues rotations about the actual shared edges and
 //! knows nothing about `Face::neighbor`, `cross_seam` or any 2D transition table.
 
-use cubarium_surface::{Scale, Topology};
 use cubarium_surface::{
     Edge, FACE_EXTENT, Face, GEOM_EPS, MAX_CROSSINGS, SurfacePoint, TangentMap, Travel, Vec2,
     travel, travel_into,
 };
+use cubarium_surface::{Scale, Topology};
 use cubarium_surface_oracle as oracle;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
@@ -64,10 +64,26 @@ fn faces_adjacent(a: Face, b: Face) -> bool {
 /// face. Read off `SurfacePoint::embed`: e.g. the (1, 1, 1) vertex is Front (64, 0),
 /// Right (0, 0) and Top (64, 64).
 const TOP_VERTICES: [[(Face, f64, f64); 3]; 4] = [
-    [(Face::Front, 64.0, 0.0), (Face::Right, 0.0, 0.0), (Face::Top, 64.0, 64.0)],
-    [(Face::Right, 64.0, 0.0), (Face::Back, 0.0, 0.0), (Face::Top, 64.0, 0.0)],
-    [(Face::Back, 64.0, 0.0), (Face::Left, 0.0, 0.0), (Face::Top, 0.0, 0.0)],
-    [(Face::Left, 64.0, 0.0), (Face::Front, 0.0, 0.0), (Face::Top, 0.0, 64.0)],
+    [
+        (Face::Front, 64.0, 0.0),
+        (Face::Right, 0.0, 0.0),
+        (Face::Top, 64.0, 64.0),
+    ],
+    [
+        (Face::Right, 64.0, 0.0),
+        (Face::Back, 0.0, 0.0),
+        (Face::Top, 64.0, 0.0),
+    ],
+    [
+        (Face::Back, 64.0, 0.0),
+        (Face::Left, 0.0, 0.0),
+        (Face::Top, 0.0, 0.0),
+    ],
+    [
+        (Face::Left, 64.0, 0.0),
+        (Face::Front, 0.0, 0.0),
+        (Face::Top, 0.0, 64.0),
+    ],
 ];
 
 /// The eight compass directions, as unit displacements in chart coordinates.
@@ -90,9 +106,17 @@ fn compass() -> [Vec2; 8] {
 #[test]
 fn front_to_right_example() {
     // "Front (63.75, 20) moving (0.5, 0) finishes at Right (0.25, 20)."
-    let tr = travel(Topology::Cube, SurfacePoint::new(Face::Front, 63.75, 20.0), Vec2::new(0.5, 0.0));
+    let tr = travel(
+        Topology::Cube,
+        SurfacePoint::new(Face::Front, 63.75, 20.0),
+        Vec2::new(0.5, 0.0),
+    );
     assert_point(tr.end, Face::Right, 0.25, 20.0, 1e-12, "front -> right");
-    assert_eq!(tr.map, TangentMap::IDENTITY, "the vertical seams do not twist");
+    assert_eq!(
+        tr.map,
+        TangentMap::IDENTITY,
+        "the vertical seams do not twist"
+    );
     assert_eq!((tr.crossings, tr.reflections, tr.ties), (1, 0, 0));
     assert!(!tr.fallback);
     let total: f64 = tr.segments.iter().map(|s| s.length()).sum();
@@ -104,10 +128,18 @@ fn right_to_top_example_turns_up_into_top_leftward() {
     // "Right (10, 0.25) moving (0, -0.5) finishes at Top (63.75, 54); its upward
     // direction becomes Top-leftward." The along-edge parameter is reversed
     // continuously: 64 - 10 = 54, not 63 - 10.
-    let tr = travel(Topology::Cube, SurfacePoint::new(Face::Right, 10.0, 0.25), Vec2::new(0.0, -0.5));
+    let tr = travel(
+        Topology::Cube,
+        SurfacePoint::new(Face::Right, 10.0, 0.25),
+        Vec2::new(0.0, -0.5),
+    );
     assert_point(tr.end, Face::Top, 63.75, 54.0, 1e-12, "right -> top");
     assert_eq!(tr.map, TangentMap::quarter_turns(1));
-    assert_eq!(tr.map.apply(Vec2::new(0.0, -1.0)), Vec2::new(-1.0, 0.0), "up -> Top-left");
+    assert_eq!(
+        tr.map.apply(Vec2::new(0.0, -1.0)),
+        Vec2::new(-1.0, 0.0),
+        "up -> Top-left"
+    );
     assert_eq!((tr.crossings, tr.reflections, tr.ties), (1, 0, 0));
     assert!(!tr.fallback);
 }
@@ -116,10 +148,18 @@ fn right_to_top_example_turns_up_into_top_leftward() {
 fn back_to_top_example_turns_up_into_top_downward() {
     // "Back (10, 0.25) moving (0, -0.5) finishes at Top (54, 0.25); its upward direction
     // becomes Top-downward."
-    let tr = travel(Topology::Cube, SurfacePoint::new(Face::Back, 10.0, 0.25), Vec2::new(0.0, -0.5));
+    let tr = travel(
+        Topology::Cube,
+        SurfacePoint::new(Face::Back, 10.0, 0.25),
+        Vec2::new(0.0, -0.5),
+    );
     assert_point(tr.end, Face::Top, 54.0, 0.25, 1e-12, "back -> top");
     assert_eq!(tr.map, TangentMap::quarter_turns(2));
-    assert_eq!(tr.map.apply(Vec2::new(0.0, -1.0)), Vec2::new(0.0, 1.0), "up -> Top-down");
+    assert_eq!(
+        tr.map.apply(Vec2::new(0.0, -1.0)),
+        Vec2::new(0.0, 1.0),
+        "up -> Top-down"
+    );
     assert_eq!((tr.crossings, tr.reflections, tr.ties), (1, 0, 0));
     assert!(!tr.fallback);
 }
@@ -145,7 +185,11 @@ fn swept_transport_matches_3d_geometry() {
     runner(384, 0x5e)
         .run(&(any_point(), any_displacement(200.0)), |(start, d)| {
             let tr = travel(Topology::Cube, start, d);
-            prop_assert!(tr.end.is_canonical(Topology::Cube), "end not canonical: {:?}", tr.end);
+            prop_assert!(
+                tr.end.is_canonical(Topology::Cube),
+                "end not canonical: {:?}",
+                tr.end
+            );
             prop_assert!(tr.end.u.is_finite() && tr.end.v.is_finite());
             prop_assert!(tr.crossings + tr.reflections <= MAX_CROSSINGS + 1);
             if tr.fallback {
@@ -214,7 +258,11 @@ fn swept_transport_matches_3d_geometry() {
                     tr.crossings + tr.reflections + 1,
                     "one segment per chart entered plus one per reflection kink"
                 );
-                prop_assert_eq!(s.faces.len() as u32, tr.crossings + 1, "chart sequence length");
+                prop_assert_eq!(
+                    s.faces.len() as u32,
+                    tr.crossings + 1,
+                    "chart sequence length"
+                );
                 prop_assert_eq!(s.reflections, tr.reflections, "reflection count");
                 let want = oracle::FaceSquare::of(s.face).embed(s.u, s.v);
                 prop_assert!(
@@ -298,8 +346,16 @@ fn swept_transport_matches_3d_geometry() {
         ties.get(),
         oracle_ties.get()
     );
-    assert!(multi_chart.get() > 20, "only {} sweeps crossed two or more seams", multi_chart.get());
-    assert!(reflected.get() > 5, "only {} sweeps reflected off the rim", reflected.get());
+    assert!(
+        multi_chart.get() > 20,
+        "only {} sweeps crossed two or more seams",
+        multi_chart.get()
+    );
+    assert!(
+        reflected.get() > 5,
+        "only {} sweeps reflected off the rim",
+        reflected.get()
+    );
 }
 
 /// `travel_into` reuses its buffer and produces exactly what `travel` produces.
@@ -390,7 +446,11 @@ fn exact_vertex_starts_and_aims_are_bounded_and_deterministic() {
                 let tr = travel(Topology::Cube, start, d);
                 assert!(!tr.fallback, "{what} skew {skew}: fell back");
                 assert_eq!(tr.ties, 0, "{what} skew {skew}: reported a tie");
-                assert!(tr.end.is_canonical(Topology::Cube), "{what} skew {skew}: {:?}", tr.end);
+                assert!(
+                    tr.end.is_canonical(Topology::Cube),
+                    "{what} skew {skew}: {:?}",
+                    tr.end
+                );
                 let total: f64 = tr.segments.iter().map(|s| s.length()).sum();
                 assert!((total - d.length()).abs() <= 1e-9, "{what} skew {skew}");
                 if tr.fallback {
@@ -414,18 +474,33 @@ fn lower_side_corner_crosses_and_reflects() {
     // Edge::Right (1) before Edge::Bottom (2), the point enters Right at (0, 64) with
     // half a pixel left in each axis, immediately reflects off the rim, and finishes at
     // Right (0.5, 63.5).
-    let tr = travel(Topology::Cube, SurfacePoint::new(Face::Front, 63.5, 63.5), Vec2::new(1.0, 1.0));
+    let tr = travel(
+        Topology::Cube,
+        SurfacePoint::new(Face::Front, 63.5, 63.5),
+        Vec2::new(1.0, 1.0),
+    );
     assert_point(tr.end, Face::Right, 0.5, 63.5, 1e-12, "lower corner step");
     assert_eq!(tr.crossings, 1, "one seam crossing");
     assert_eq!(tr.reflections, 1, "one rim reflection");
     assert!(tr.ties >= 1, "the simultaneous hit is a tie");
     assert!(!tr.fallback);
-    assert_eq!(tr.map, TangentMap::REFLECT_Y, "a straight seam then a rim reflection");
+    assert_eq!(
+        tr.map,
+        TangentMap::REFLECT_Y,
+        "a straight seam then a rim reflection"
+    );
     let total: f64 = tr.segments.iter().map(|s| s.length()).sum();
-    assert!((total - Vec2::new(1.0, 1.0).length()).abs() <= 1e-12, "swept {total}");
+    assert!(
+        (total - Vec2::new(1.0, 1.0).length()).abs() <= 1e-12,
+        "swept {total}"
+    );
 
     // The same geometry at a different scale: Front (63.9, 63.9) + (0.2, 0.2).
-    let tr = travel(Topology::Cube, SurfacePoint::new(Face::Front, 63.9, 63.9), Vec2::new(0.2, 0.2));
+    let tr = travel(
+        Topology::Cube,
+        SurfacePoint::new(Face::Front, 63.9, 63.9),
+        Vec2::new(0.2, 0.2),
+    );
     assert_point(tr.end, Face::Right, 0.1, 63.9, 1e-9, "exact tie variant");
     assert_eq!((tr.crossings, tr.reflections), (1, 1));
     assert!(tr.ties >= 1);
@@ -452,7 +527,11 @@ fn straight_paths_never_tunnel_through_the_open_bottom() {
         let d = Vec2::from_screen_angle(next() * std::f64::consts::TAU) * (next() * 90.0);
         travel_into(Topology::Cube, start, d, &mut buf);
         reflections += buf.reflections;
-        assert!(buf.end.is_canonical(Topology::Cube), "{start:?} + {d:?} -> {:?}", buf.end);
+        assert!(
+            buf.end.is_canonical(Topology::Cube),
+            "{start:?} + {d:?} -> {:?}",
+            buf.end
+        );
         for s in &buf.segments {
             for p in [s.from, s.to] {
                 assert!(
@@ -463,5 +542,8 @@ fn straight_paths_never_tunnel_through_the_open_bottom() {
             }
         }
     }
-    assert!(reflections > 100, "the fixture must actually exercise the rim");
+    assert!(
+        reflections > 100,
+        "the fixture must actually exercise the rim"
+    );
 }

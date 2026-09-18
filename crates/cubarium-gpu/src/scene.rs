@@ -53,9 +53,17 @@ pub struct RingLayout {
 impl RingLayout {
     /// The 320×180, `S = 1` rung: the configuration FW-0 measured and §6 recommends
     /// as the fallback.
-    pub const RING_320: RingLayout = RingLayout { w: 320, h: 180, scale: 1 };
+    pub const RING_320: RingLayout = RingLayout {
+        w: 320,
+        h: 180,
+        scale: 1,
+    };
     /// The 640×360, `S = 2` rung: §6's recommended candidate.
-    pub const RING_640: RingLayout = RingLayout { w: 640, h: 360, scale: 2 };
+    pub const RING_640: RingLayout = RingLayout {
+        w: 640,
+        h: 360,
+        scale: 2,
+    };
 
     /// Whether the raster divides into whole cells at this scale.
     pub fn is_valid(&self) -> bool {
@@ -258,11 +266,22 @@ impl SpriteInstance {
     /// which is the caller's cue to drop its lightest layer and renormalise rather than
     /// to silently lose one.
     #[must_use]
-    pub fn push_pose(&mut self, a: u32, b: u32, mix: f32, weight: f32, atlas: &crate::Atlas) -> bool {
+    pub fn push_pose(
+        &mut self,
+        a: u32,
+        b: u32,
+        mix: f32,
+        weight: f32,
+        atlas: &crate::Atlas,
+    ) -> bool {
         if !(weight.is_finite() && weight > 0.0) {
             return true;
         }
-        let mix = if mix.is_finite() { mix.clamp(0.0, 1.0) } else { 0.0 };
+        let mix = if mix.is_finite() {
+            mix.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         // A pose at the exact start or end of its blend is one frame, not two: taking
         // the fast path here is what keeps an idle plant inside two slots.
         let pairs: &[(u32, f32)] = &if mix <= 0.0 {
@@ -349,7 +368,10 @@ impl SpriteInstance {
 
     /// An instance with no frames at all: what a builder starts from.
     pub fn empty() -> SpriteInstance {
-        SpriteInstance { weights: [0.0; 4], ..Default::default() }
+        SpriteInstance {
+            weights: [0.0; 4],
+            ..Default::default()
+        }
     }
 }
 
@@ -474,25 +496,64 @@ mod tests {
         for layout in [
             RingLayout::RING_320,
             RingLayout::RING_640,
-            RingLayout { w: 960, h: 540, scale: 3 },
-            RingLayout { w: 1920, h: 1080, scale: 6 },
+            RingLayout {
+                w: 960,
+                h: 540,
+                scale: 3,
+            },
+            RingLayout {
+                w: 1920,
+                h: 1080,
+                scale: 6,
+            },
         ] {
             assert!(layout.is_valid(), "{layout:?}");
             assert_eq!((layout.cells_x(), layout.cells_y()), (80, 45), "{layout:?}");
         }
-        assert!(!RingLayout { w: 321, h: 180, scale: 1 }.is_valid());
+        assert!(
+            !RingLayout {
+                w: 321,
+                h: 180,
+                scale: 1
+            }
+            .is_valid()
+        );
     }
 
     #[test]
     fn a_stamp_reaching_past_a_rim_is_pushed_twice_and_one_in_the_middle_once() {
         let mut scene = Scene::new(RingLayout::RING_320);
-        let tile = SpriteInstance { size: [16, 16], ..Default::default() };
-        scene.push(Layer::Plants, SpriteInstance { anchor: [160.0, 90.0], ..tile });
+        let tile = SpriteInstance {
+            size: [16, 16],
+            ..Default::default()
+        };
+        scene.push(
+            Layer::Plants,
+            SpriteInstance {
+                anchor: [160.0, 90.0],
+                ..tile
+            },
+        );
         assert_eq!(scene.layers[Layer::Plants as usize].len(), 1);
-        scene.push(Layer::Plants, SpriteInstance { anchor: [2.0, 90.0], ..tile });
+        scene.push(
+            Layer::Plants,
+            SpriteInstance {
+                anchor: [2.0, 90.0],
+                ..tile
+            },
+        );
         assert_eq!(scene.layers[Layer::Plants as usize].len(), 3);
-        assert_eq!(scene.layers[Layer::Plants as usize][2].anchor, [322.0, 90.0]);
-        scene.push(Layer::Plants, SpriteInstance { anchor: [318.0, 90.0], ..tile });
+        assert_eq!(
+            scene.layers[Layer::Plants as usize][2].anchor,
+            [322.0, 90.0]
+        );
+        scene.push(
+            Layer::Plants,
+            SpriteInstance {
+                anchor: [318.0, 90.0],
+                ..tile
+            },
+        );
         assert_eq!(scene.layers[Layer::Plants as usize][4].anchor, [-2.0, 90.0]);
     }
 
@@ -514,8 +575,15 @@ mod tests {
     /// the shader drew before the box existed.
     #[test]
     fn the_opaque_box_is_the_union_of_the_live_frames_and_falls_back_to_the_tile() {
-        let mut i = SpriteInstance { size: [16, 16], ..SpriteInstance::empty() };
-        assert_eq!(i.quad_texels(), (16.0, 16.0), "no box and no bend: the whole tile");
+        let mut i = SpriteInstance {
+            size: [16, 16],
+            ..SpriteInstance::empty()
+        };
+        assert_eq!(
+            i.quad_texels(),
+            (16.0, 16.0),
+            "no box and no bend: the whole tile"
+        );
         i.cover([0, 0, 0, 0]);
         assert_eq!(i.quad_texels(), (16.0, 16.0), "an empty box is not a box");
         i.cover([5, 3, 11, 14]);
@@ -524,8 +592,16 @@ mod tests {
         i.cover([6, 2, 9, 12]);
         assert_eq!(i.bbox, [5.0, 2.0, 11.0, 14.0], "the union grows both ways");
         i.bend = [2.5, 0.0, 0.0, 13.0];
-        assert_eq!(i.quad_texels(), (12.0, 12.0), "the bend's reach pads x only");
+        assert_eq!(
+            i.quad_texels(),
+            (12.0, 12.0),
+            "the bend's reach pads x only"
+        );
         i.bend = [2.5, 0.0, 0.0, 0.0];
-        assert_eq!(i.quad_texels(), (6.0, 12.0), "a bend with no length displaces nothing");
+        assert_eq!(
+            i.quad_texels(),
+            (6.0, 12.0),
+            "a bend with no length displaces nothing"
+        );
     }
 }

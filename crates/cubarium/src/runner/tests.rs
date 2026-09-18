@@ -94,7 +94,8 @@ fn care_flourishes_follow_durable_application_and_boundary_replay_only() {
             "test",
             cubarium_surface::Topology::Cube,
             hooks,
-        ).unwrap();
+        )
+        .unwrap();
         let service = care::CareService::new("visual-test".to_string(), journal.status());
         let mut rt = CareRuntime {
             service,
@@ -346,21 +347,46 @@ fn ring_scratch(name: &str) -> PathBuf {
 /// that `Canvas::new(topo, scale)`, `encode_raster` and `Output::Ring` are wired together.
 #[test]
 fn a_fresh_ring_world_renders_and_captures_at_its_own_size() {
-    for (spec, scale, w, h) in [("ring:320x180", "1", 320u32, 180u32), ("ring:640x360", "2", 640, 360)] {
+    for (spec, scale, w, h) in [
+        ("ring:320x180", "1", 320u32, 180u32),
+        ("ring:640x360", "2", 640, 360),
+    ] {
         let state = ring_scratch("ring-run-state");
         let out = ring_scratch("ring-run-out");
         let run = Run::parse_from([
-            "cubarium", "--fresh", "--seed", "1", "--sink", "png", "--speed", "20",
-            "--seconds", "3", "--every", "10000", "--fps", "30",
-            "--topology", spec, "--world-scale", scale,
-            "--state", state.to_str().unwrap(), "--out", out.to_str().unwrap(),
+            "cubarium",
+            "--fresh",
+            "--seed",
+            "1",
+            "--sink",
+            "png",
+            "--speed",
+            "20",
+            "--seconds",
+            "3",
+            "--every",
+            "10000",
+            "--fps",
+            "30",
+            "--topology",
+            spec,
+            "--world-scale",
+            scale,
+            "--state",
+            state.to_str().unwrap(),
+            "--out",
+            out.to_str().unwrap(),
         ]);
-        run.validate().expect("a fresh ring capture run is well formed");
+        run.validate()
+            .expect("a fresh ring capture run is well formed");
         let outcome = run_world(&run).expect("the ring world runs");
-        assert_eq!(outcome.config.topology, cubarium_surface::Topology::Ring {
-            w: w as u16,
-            h: h as u16
-        });
+        assert_eq!(
+            outcome.config.topology,
+            cubarium_surface::Topology::Ring {
+                w: w as u16,
+                h: h as u16
+            }
+        );
         assert!(outcome.frames > 0, "{spec}: the loop must have rendered");
         assert_eq!(outcome.population, 24, "{spec}: the founders are alive");
 
@@ -368,8 +394,16 @@ fn a_fresh_ring_world_renders_and_captures_at_its_own_size() {
         let png = std::fs::read(out.join("final.png")).expect("a final capture");
         assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
         assert_eq!(&png[12..16], b"IHDR");
-        assert_eq!(u32::from_be_bytes(png[16..20].try_into().unwrap()), w, "{spec} width");
-        assert_eq!(u32::from_be_bytes(png[20..24].try_into().unwrap()), h, "{spec} height");
+        assert_eq!(
+            u32::from_be_bytes(png[16..20].try_into().unwrap()),
+            w,
+            "{spec} width"
+        );
+        assert_eq!(
+            u32::from_be_bytes(png[20..24].try_into().unwrap()),
+            h,
+            "{spec} height"
+        );
         assert_eq!(png[24], 8, "8 bits per channel");
         assert_eq!(png[25], 2, "truecolour RGB, as the cube capture is");
 
@@ -386,12 +420,25 @@ fn a_fresh_ring_world_renders_and_captures_at_its_own_size() {
 fn a_resume_refuses_a_topology_the_snapshot_does_not_have() {
     let state = ring_scratch("resume-topology");
     let out = ring_scratch("resume-topology-out");
-    let base = ["cubarium", "--seed", "1", "--sink", "none", "--speed", "0", "--seconds", "2"];
+    let base = [
+        "cubarium",
+        "--seed",
+        "1",
+        "--sink",
+        "none",
+        "--speed",
+        "0",
+        "--seconds",
+        "2",
+    ];
     let mut fresh = Run::parse_from(base);
     fresh.fresh = true;
     fresh.state = state.clone();
     fresh.out = out.clone();
-    fresh.topology = Some(TopologyArg(cubarium_surface::Topology::Ring { w: 320, h: 180 }));
+    fresh.topology = Some(TopologyArg(cubarium_surface::Topology::Ring {
+        w: 320,
+        h: 180,
+    }));
     let first = run_world(&fresh).expect("a fresh ring world");
     assert!(first.final_tick > 0);
 
@@ -400,25 +447,40 @@ fn a_resume_refuses_a_topology_the_snapshot_does_not_have() {
     resume.state = state.clone();
     resume.out = out.clone();
     resume.topology = Some(TopologyArg(cubarium_surface::Topology::Cube));
-    let err = format!("{:#}", run_world(&resume).expect_err("a cube resume of a ring world"));
+    let err = format!(
+        "{:#}",
+        run_world(&resume).expect_err("a cube resume of a ring world")
+    );
     assert!(err.contains("this world is a ring world"), "{err}");
     assert!(err.contains("asked for a cube world"), "{err}");
-    assert!(err.contains("--fresh"), "the refusal must say what to do instead: {err}");
+    assert!(
+        err.contains("--fresh"),
+        "the refusal must say what to do instead: {err}"
+    );
 
     // Resumed as what it is, it carries on from where it stopped.
     let mut again = Run::parse_from(base);
     again.state = state.clone();
     again.out = out.clone();
-    again.topology = Some(TopologyArg(cubarium_surface::Topology::Ring { w: 320, h: 180 }));
+    again.topology = Some(TopologyArg(cubarium_surface::Topology::Ring {
+        w: 320,
+        h: 180,
+    }));
     let second = run_world(&again).expect("a ring resume of a ring world");
-    assert_eq!(second.start_tick, first.final_tick, "it resumed where it left off");
+    assert_eq!(
+        second.start_tick, first.final_tick,
+        "it resumed where it left off"
+    );
 
     // And a resume that names no topology at all is unchanged: it takes the snapshot's.
     let mut silent = Run::parse_from(base);
     silent.state = state.clone();
     silent.out = out.clone();
     let third = run_world(&silent).expect("a resume that names no shape");
-    assert_eq!(third.config.topology, cubarium_surface::Topology::Ring { w: 320, h: 180 });
+    assert_eq!(
+        third.config.topology,
+        cubarium_surface::Topology::Ring { w: 320, h: 180 }
+    );
 
     let _ = std::fs::remove_dir_all(&state);
     let _ = std::fs::remove_dir_all(&out);

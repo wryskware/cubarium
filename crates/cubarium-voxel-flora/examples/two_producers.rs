@@ -117,12 +117,21 @@ fn lay_declared_logs(world: &World, flora: &mut Flora, skyline: &[Site]) -> Vec<
     pool.sort_by_key(|s| (site_key(Species::Glowcap, *s), s.x, s.z));
     let candidates = pool.len();
     let stride = (pool.len() / DECLARED_LOGS).max(1);
-    let chosen: Vec<Site> = pool.iter().copied().step_by(stride).take(DECLARED_LOGS).collect();
+    let chosen: Vec<Site> = pool
+        .iter()
+        .copied()
+        .step_by(stride)
+        .take(DECLARED_LOGS)
+        .collect();
     let (mineral, energy) = (sc.n_tissue * LOG_ORGANIC, sc.energy_density * LOG_ORGANIC);
     let mut laid: Vec<Site> = Vec::new();
     for site in chosen {
-        let deposit =
-            Deposit { kind: DepositKind::DeadWood, organic: LOG_ORGANIC, mineral, energy };
+        let deposit = Deposit {
+            kind: DepositKind::DeadWood,
+            organic: LOG_ORGANIC,
+            mineral,
+            energy,
+        };
         if flora.deposit(site, deposit) {
             laid.push(site);
         }
@@ -135,7 +144,10 @@ fn lay_declared_logs(world: &World, flora: &mut Flora, skyline: &[Site]) -> Vec<
          **imported** into the world as `deposited_organic_in`",
         laid.len()
     );
-    let cells: Vec<String> = laid.iter().map(|s| format!("({},{}) y{}", s.x, s.z, s.y)).collect();
+    let cells: Vec<String> = laid
+        .iter()
+        .map(|s| format!("({},{}) y{}", s.x, s.z, s.y))
+        .collect();
     println!("declared logs at: {}", cells.join(", "));
     laid
 }
@@ -215,7 +227,10 @@ fn species_arg(args: &[String], i: usize, fallback: Species) -> Species {
         None => fallback,
         Some(name) => Species::parse(name).unwrap_or_else(|| {
             let names: Vec<&str> = Species::ALL.iter().map(|s| s.name()).collect();
-            panic!("unknown species {name:?}; the five are {}", names.join(", "))
+            panic!(
+                "unknown species {name:?}; the five are {}",
+                names.join(", ")
+            )
         }),
     }
 }
@@ -238,11 +253,20 @@ fn run(
     // is deterministic in the seed, so the second world is the first one with water in
     // it. The outlet cell is the lowest void cell of the receiving basin, so its `y` is
     // the basin floor.
-    let dry =
-        VoxelConfig { seed, noise_seed, rain_m_per_s: HARNESS_RAIN_M_PER_S, ..VoxelConfig::default() };
-    let basin_floor_m =
-        World::new(dry.clone()).outlet_cell().map_or(0.0, |(_, y, _)| y as f64) * dry.voxel_m;
-    let config = VoxelConfig { initial_aquifer_head_m: basin_floor_m + 1.0, ..dry };
+    let dry = VoxelConfig {
+        seed,
+        noise_seed,
+        rain_m_per_s: HARNESS_RAIN_M_PER_S,
+        ..VoxelConfig::default()
+    };
+    let basin_floor_m = World::new(dry.clone())
+        .outlet_cell()
+        .map_or(0.0, |(_, y, _)| y as f64)
+        * dry.voxel_m;
+    let config = VoxelConfig {
+        initial_aquifer_head_m: basin_floor_m + 1.0,
+        ..dry
+    };
     let (width, depth) = (config.width, config.depth);
     let mut world = World::new(config.clone());
     world.apply(WorldCommand::SetOutlet { open: true });
@@ -264,8 +288,13 @@ fn run(
 
     let mut flora = Flora::new(FloraConfig::default());
     let eligible = eligible_sets(&world, &flora, &skyline);
-    let own_founders =
-        pick_founders(&world, &flora, &skyline, species, verbose && founders.is_none());
+    let own_founders = pick_founders(
+        &world,
+        &flora,
+        &skyline,
+        species,
+        verbose && founders.is_none(),
+    );
     let (planted, off_predicate) = match founders {
         None => (own_founders.clone(), 0),
         Some(given) => (given.to_vec(), off_count(&world, &flora, given)),
@@ -332,7 +361,11 @@ fn run(
                 let stress = all.iter().map(|s| s.aeration_stress).sum::<f64>() / n;
                 let depth = all
                     .iter()
-                    .map(|s| world.view().water_depth_m(s.site.x as i64, s.site.y, s.site.z))
+                    .map(|s| {
+                        world
+                            .view()
+                            .water_depth_m(s.site.x as i64, s.site.y, s.site.z)
+                    })
                     .sum::<f64>()
                     / n;
                 let sc = flora.config().species(species);
@@ -407,8 +440,10 @@ fn run(
     let cut = skyline.len() / 4;
     let mut low_quartile: Vec<(u32, u32)> = skyline[..cut].iter().map(|s| (s.x, s.z)).collect();
     low_quartile.sort_unstable();
-    let mut high_quartile: Vec<(u32, u32)> =
-        skyline[skyline.len() - cut..].iter().map(|s| (s.x, s.z)).collect();
+    let mut high_quartile: Vec<(u32, u32)> = skyline[skyline.len() - cut..]
+        .iter()
+        .map(|s| (s.x, s.z))
+        .collect();
     high_quartile.sort_unstable();
 
     let outcome = Outcome {
@@ -430,7 +465,16 @@ fn run(
     };
     if verbose {
         let end_mark = water_mark(&world, ticks as f64 * cubarium_voxel::DT);
-        report(&world, &flora, &config, &skyline, seeded, ticks, seconds, basin_floor_m);
+        report(
+            &world,
+            &flora,
+            &config,
+            &skyline,
+            seeded,
+            ticks,
+            seconds,
+            basin_floor_m,
+        );
         println!("whole run: {}", water_budget_line(&start_mark, &end_mark));
         print_columns(&outcome);
     }
@@ -439,7 +483,11 @@ fn run(
 
 /// Every skyline column that passes each species' establishment predicate right now, as
 /// sorted column keys. An instantaneous reading: the caller says when it took it.
-fn eligible_sets(world: &World, flora: &Flora, skyline: &[Site]) -> [Vec<(u32, u32)>; Species::COUNT] {
+fn eligible_sets(
+    world: &World,
+    flora: &Flora,
+    skyline: &[Site],
+) -> [Vec<(u32, u32)>; Species::COUNT] {
     let mut out: [Vec<(u32, u32)>; Species::COUNT] = std::array::from_fn(|_| Vec::new());
     for species in Species::ALL {
         let mut set: Vec<(u32, u32)> = skyline
@@ -463,7 +511,10 @@ fn eligible_sets(world: &World, flora: &Flora, skyline: &[Site]) -> [Vec<(u32, u
 /// construction; the point is which of them is doing the work.
 fn gate_diagnosis(world: &World, flora: &Flora, skyline: &[Site], when: &str) {
     let view = world.view();
-    println!("establishment gates {when} ({} skyline columns):", skyline.len());
+    println!(
+        "establishment gates {when} ({} skyline columns):",
+        skyline.len()
+    );
     for species in Species::ALL {
         let sc = flora.config().species(species);
         let mut eligible = 0usize;
@@ -514,7 +565,11 @@ fn gate_diagnosis(world: &World, flora: &Flora, skyline: &[Site], when: &str) {
                 }
             }
         }
-        let mean_pore = if mean_pore_n > 0 { mean_pore_sum / mean_pore_n as f64 } else { f64::NAN };
+        let mean_pore = if mean_pore_n > 0 {
+            mean_pore_sum / mean_pore_n as f64
+        } else {
+            f64::NAN
+        };
         println!(
             "  {:>14}: {eligible} eligible; shut gates (a column can fail several): no soil in the root box {no_soil}, mean pore < {:.2} {pore}, saturated fraction > {:.2} {aeration}, water over {:.2} m {depth}, sky < {:.2} {light}{}",
             species.name(),
@@ -565,14 +620,21 @@ fn gate_diagnosis(world: &World, flora: &Flora, skyline: &[Site], when: &str) {
                 }
             }
             candidates += seen.len();
-            ok += seen.iter().filter(|s| passes(world, flora, species, **s)).count();
+            ok += seen
+                .iter()
+                .filter(|s| passes(world, flora, species, **s))
+                .count();
         }
         println!(
             "  {:>14}: {} donors, {candidates} candidate faces within hop {}, {ok} of them eligible ({:.1} per donor)",
             "",
             donors.len(),
             sc.hop,
-            if donors.is_empty() { 0.0 } else { ok as f64 / donors.len() as f64 }
+            if donors.is_empty() {
+                0.0
+            } else {
+                ok as f64 / donors.len() as f64
+            }
         );
     }
 }
@@ -602,8 +664,11 @@ fn pick_founders(
     for round in rounds {
         for species in round {
             let habitat = habitat_of(species);
-            let eligible: Vec<Site> =
-                skyline.iter().copied().filter(|s| passes(world, flora, species, *s)).collect();
+            let eligible: Vec<Site> = skyline
+                .iter()
+                .copied()
+                .filter(|s| passes(world, flora, species, *s))
+                .collect();
             let n = eligible.len();
             // No fallback (Astra R7.4). A species with nowhere to establish used to be
             // seeded anyway, on whatever its own ordering preferred among *every* skyline
@@ -657,7 +722,11 @@ fn pick_founders(
             let mut hi = 0;
             let mut chosen: Vec<Site> = Vec::new();
             for site in ok.iter().step_by(stride).take(FOUNDERS_PER_SPECIES) {
-                out.push(Founder { species, x: site.x, z: site.z });
+                out.push(Founder {
+                    species,
+                    x: site.x,
+                    z: site.z,
+                });
                 chosen.push(*site);
                 lo = lo.min(site.y);
                 hi = hi.max(site.y);
@@ -717,7 +786,9 @@ fn founder_identity_report(world: &World, flora: &Flora, founders: &[(u64, Speci
     );
     let v = flora.view();
     for &(id, species, site) in founders {
-        let g = flora.view().establishment_gates(&world.view(), site, species);
+        let g = flora
+            .view()
+            .establishment_gates(&world.view(), site, species);
         let at = format!("({},{}) y{}", site.x, site.z, site.y);
         match v.stands.iter().find(|s| s.id == id) {
             Some(s) => println!(
@@ -759,8 +830,12 @@ fn germination_diagnosis(world: &World, flora: &Flora) {
             view.ledger.propagule_funded[i],
             view.ledger.propagule_landed[i],
         );
-        let parcels: f64 =
-            view.stands.iter().filter(|s| s.species == species).map(|s| s.parcel).sum();
+        let parcels: f64 = view
+            .stands
+            .iter()
+            .filter(|s| s.species == species)
+            .map(|s| s.parcel)
+            .sum();
         let sc = flora.config().species(species);
         let package = sc.alive_min / sc.propagule_split[0];
         println!(
@@ -788,16 +863,27 @@ fn germination_diagnosis(world: &World, flora: &Flora) {
         } else {
             banks.iter().map(|&(_, o)| o).sum::<f64>() / banks.len() as f64
         };
-        let over: Vec<Site> =
-            banks.iter().filter(|&&(_, o)| o >= threshold).map(|&(s, _)| s).collect();
-        let over_and_ok = over.iter().filter(|&&s| passes(world, flora, species, s)).count();
-        let predicate_ok =
-            banks.iter().filter(|&&(s, _)| passes(world, flora, species, s)).count();
+        let over: Vec<Site> = banks
+            .iter()
+            .filter(|&&(_, o)| o >= threshold)
+            .map(|&(s, _)| s)
+            .collect();
+        let over_and_ok = over
+            .iter()
+            .filter(|&&s| passes(world, flora, species, s))
+            .count();
+        let predicate_ok = banks
+            .iter()
+            .filter(|&&(s, _)| passes(world, flora, species, s))
+            .count();
         // Vacancy is the third constraint and it used not to be printed at all, so a
         // fractional bank at observation could be read as a refused predicate when an
         // occupied site is just as consistent with it (Astra R7.5). The germinable count is
         // the conjunction: a whole package, a vacant site, and the predicate open.
-        let vacant = banks.iter().filter(|&&(s, _)| view.stand_at(s).is_none()).count();
+        let vacant = banks
+            .iter()
+            .filter(|&&(s, _)| view.stand_at(s).is_none())
+            .count();
         // And **which** gate is shutting a waiting bank, per site, through the same
         // `Gates`: "0 of 3 banked sites pass the predicate" says that one of them did
         // without saying which, and for a saprotroph the answer is usually its substrate —
@@ -841,12 +927,12 @@ fn germination_diagnosis(world: &World, flora: &Flora) {
 fn off_count(world: &World, flora: &Flora, founders: &[Founder]) -> usize {
     founders
         .iter()
-        .filter(|f| {
-            match cubarium_voxel_flora::highest_support(&world.view(), f.x as i64, f.z) {
+        .filter(
+            |f| match cubarium_voxel_flora::highest_support(&world.view(), f.x as i64, f.z) {
                 None => true,
                 Some(site) => !passes(world, flora, f.species, site),
-            }
-        })
+            },
+        )
         .count()
 }
 
@@ -864,7 +950,11 @@ fn report(
     let view = flora.view();
     println!(
         "two_producers: {}x{}x{} seed {} noise_seed {}, rain {} m/s, outlet open",
-        config.width, config.height, config.depth, config.seed, config.noise_seed,
+        config.width,
+        config.height,
+        config.depth,
+        config.seed,
+        config.noise_seed,
         config.rain_m_per_s
     );
     println!(
@@ -875,8 +965,7 @@ fn report(
     );
     // The experiment condition, as an arithmetic statement rather than a claim: nominal
     // rain against the only exit the world has at these settings.
-    let footprint_m2 =
-        config.width as f64 * config.voxel_m * config.depth as f64 * config.voxel_m;
+    let footprint_m2 = config.width as f64 * config.voxel_m * config.depth as f64 * config.voxel_m;
     println!(
         "forcing: rain {:.5} m/s over {footprint_m2:.0} m2 is a nominal {:.4} m3/s in, against \
          an outlet of {:.4} m3/s and evaporation {:.5} m/s — {:.0} % of the outlet-only \
@@ -894,13 +983,21 @@ fn report(
     );
 
     for species in Species::ALL {
-        let all: Vec<_> = view.stands.iter().filter(|s| s.species == species).collect();
+        let all: Vec<_> = view
+            .stands
+            .iter()
+            .filter(|s| s.species == species)
+            .collect();
         let n = all.len();
         let wood: f64 = all.iter().map(|s| s.wood).sum();
         let light: f64 = all.iter().map(|s| s.light).sum::<f64>() / n.max(1) as f64;
         let moisture: f64 = all.iter().map(|s| s.moisture).sum::<f64>() / n.max(1) as f64;
         // The seed bank: how many sites are waiting, and how much organic matter waits.
-        let banks = view.ground.iter().filter(|g| g.seed_organic(species) > 0.0).count();
+        let banks = view
+            .ground
+            .iter()
+            .filter(|g| g.seed_organic(species) > 0.0)
+            .count();
         let banked: f64 = view.ground.iter().map(|g| g.seed_organic(species)).sum();
         println!(
             "{:>14}: {n} stands, wood {wood:.4}, mean light {light:.3}, moisture {moisture:.3}; \
@@ -931,14 +1028,25 @@ fn report(
                 format!("{} {n}", species.name())
             })
             .collect();
-        println!("  q{} y {lo}..{}: {} columns, {}", q + 1, hi.min(999), columns, counts.join(", "));
+        println!(
+            "  q{} y {lo}..{}: {} columns, {}",
+            q + 1,
+            hi.min(999),
+            columns,
+            counts.join(", ")
+        );
     }
 
     let l = view.ledger;
     println!(
         "ledger: fixed_in {:.6} respired_out {:.6} light_in {:.6} heat_out {:.6} \
          transpired {:.6} m3 deaths {} establishments {}",
-        l.fixed_in, l.respired_out, l.light_in, l.heat_out, l.transpired_m3, l.deaths,
+        l.fixed_in,
+        l.respired_out,
+        l.light_in,
+        l.heat_out,
+        l.transpired_m3,
+        l.deaths,
         l.establishments
     );
     println!(
@@ -969,7 +1077,10 @@ fn print_columns(outcome: &Outcome) {
     for species in Species::ALL {
         let all = &outcome.occupied[species.index()];
         let alive = &outcome.alive[species.index()];
-        let (d, f) = (outcome.descendants[species.index()], outcome.founder_stands[species.index()]);
+        let (d, f) = (
+            outcome.descendants[species.index()],
+            outcome.founder_stands[species.index()],
+        );
         println!(
             "{:>14}: {} occupied columns ({} with a living stand), lowest skyline quartile {:.2}; \
              {d} of {} living stands are descendants ({}), {f} still the founder",
@@ -978,7 +1089,11 @@ fn print_columns(outcome: &Outcome) {
             alive.len(),
             quartile_fraction(all, &outcome.low_quartile),
             d + f,
-            if d + f == 0 { "n/a".to_string() } else { format!("{:.2}", d as f64 / (d + f) as f64) }
+            if d + f == 0 {
+                "n/a".to_string()
+            } else {
+                format!("{:.2}", d as f64 / (d + f) as f64)
+            }
         );
         println!("    {}", columns(all));
     }
@@ -1008,7 +1123,11 @@ fn columns(set: &[(u32, u32)]) -> String {
                 i += 1;
                 last = zs[i].1;
             }
-            parts.push(if last == start { format!("{start}") } else { format!("{start}-{last}") });
+            parts.push(if last == start {
+                format!("{start}")
+            } else {
+                format!("{start}-{last}")
+            });
             i += 1;
         }
         out.push(format!("x{x}:z{}", parts.join(",")));
@@ -1021,7 +1140,11 @@ fn columns(set: &[(u32, u32)]) -> String {
 fn jaccard(a: &[(u32, u32)], b: &[(u32, u32)]) -> Option<f64> {
     let inter = a.iter().filter(|k| b.binary_search(k).is_ok()).count();
     let union = a.len() + b.len() - inter;
-    if union == 0 { None } else { Some(inter as f64 / union as f64) }
+    if union == 0 {
+        None
+    } else {
+        Some(inter as f64 / union as f64)
+    }
 }
 
 fn show(v: Option<f64>) -> String {
@@ -1045,8 +1168,11 @@ fn quartile_fraction(set: &[(u32, u32)], low: &[(u32, u32)]) -> f64 {
 
 /// One species' founder columns, sorted for `jaccard`.
 fn founder_columns(founders: &[Founder], species: Species) -> Vec<(u32, u32)> {
-    let mut out: Vec<(u32, u32)> =
-        founders.iter().filter(|f| f.species == species).map(|f| (f.x, f.z)).collect();
+    let mut out: Vec<(u32, u32)> = founders
+        .iter()
+        .filter(|f| f.species == species)
+        .map(|f| (f.x, f.z))
+        .collect();
     out.sort_unstable();
     out
 }
@@ -1055,7 +1181,10 @@ fn founder_columns(founders: &[Founder], species: Species) -> Vec<(u32, u32)> {
 /// itself produced, since the founder columns are identical in all three runs by
 /// construction and would otherwise inflate every overlap.
 fn spread(set: &[(u32, u32)], founders: &[Founder]) -> Vec<(u32, u32)> {
-    set.iter().copied().filter(|&(x, z)| !founders.iter().any(|f| f.x == x && f.z == z)).collect()
+    set.iter()
+        .copied()
+        .filter(|&(x, z)| !founders.iter().any(|f| f.x == x && f.z == z))
+        .collect()
 }
 
 /// The decisive experiment: the same landform under two noise seeds, against a different
@@ -1068,8 +1197,10 @@ fn compare(args: &[String]) {
     let control_seed: u64 = arg(args, 4).unwrap_or(7);
     // Any pair, by name. The default is the round-3 pair, so an invocation written before
     // round 4 still runs the experiment it ran then.
-    let pair =
-        [species_arg(args, 5, Species::Bloomcrown), species_arg(args, 6, Species::Umbrellafrond)];
+    let pair = [
+        species_arg(args, 5, Species::Bloomcrown),
+        species_arg(args, 6, Species::Umbrellafrond),
+    ];
 
     println!(
         "=== base: seed {seed}, noise_seed {noise_a}, pair {} and {} ===",
@@ -1080,15 +1211,27 @@ fn compare(args: &[String]) {
     println!("\n=== re-drawn noise: seed {seed}, noise_seed {noise_b} (same landform) ===");
     let alt = run(seconds, seed, noise_b, &pair, Some(&base.founders), true);
     println!("\n=== control: seed {control_seed}, noise_seed {noise_a} (another landform) ===");
-    let ctl = run(seconds, control_seed, noise_a, &pair, Some(&base.founders), true);
+    let ctl = run(
+        seconds,
+        control_seed,
+        noise_a,
+        &pair,
+        Some(&base.founders),
+        true,
+    );
 
     println!("\n=== the comparison ===");
     println!(
         "seconds {seconds:.0}; base seed {} noise {}; re-drawn noise {}; control seed {} \
          (founder columns identical in all three: {} of them, off-predicate {} in the \
          re-draw and {} in the control)",
-        base.seed, base.noise_seed, alt.noise_seed, ctl.seed,
-        base.founders.len(), alt.off_predicate, ctl.off_predicate
+        base.seed,
+        base.noise_seed,
+        alt.noise_seed,
+        ctl.seed,
+        base.founders.len(),
+        alt.off_predicate,
+        ctl.off_predicate
     );
     // The landform itself, before any plant or any drop of water: if the ridges and the
     // hollows do not stay put under a re-drawn noise, nothing that follows them can.
@@ -1103,7 +1246,11 @@ fn compare(args: &[String]) {
     println!(
         "life cycle per arm: base establishments {} deaths {}; re-drawn noise {} / {}; \
          control {} / {}",
-        base.establishments, base.deaths, alt.establishments, alt.deaths, ctl.establishments,
+        base.establishments,
+        base.deaths,
+        alt.establishments,
+        alt.deaths,
+        ctl.establishments,
         ctl.deaths
     );
     for species in pair {
@@ -1127,8 +1274,11 @@ fn compare(args: &[String]) {
             show(jaccard(b, a)),
             show(jaccard(b, c))
         );
-        let (bs, as_, cs) =
-            (spread(b, &base.founders), spread(a, &base.founders), spread(c, &base.founders));
+        let (bs, as_, cs) = (
+            spread(b, &base.founders),
+            spread(a, &base.founders),
+            spread(c, &base.founders),
+        );
         println!(
             "  founders excluded ({} / {} / {} columns): noise {}   control {}",
             bs.len(),
@@ -1166,8 +1316,11 @@ fn compare(args: &[String]) {
             show(jaccard(be, ae)),
             show(jaccard(be, ce))
         );
-        let (bo, ao, co) =
-            (&base.eligible_at_end[i], &alt.eligible_at_end[i], &ctl.eligible_at_end[i]);
+        let (bo, ao, co) = (
+            &base.eligible_at_end[i],
+            &alt.eligible_at_end[i],
+            &ctl.eligible_at_end[i],
+        );
         println!(
             "  eligible at observation (the last tick of the run, with the plants in it) \
              ({} / {} / {}): noise {}   control {}",
@@ -1260,7 +1413,11 @@ fn invasion(
     resident: Species,
     newcomer: Species,
 ) {
-    println!("\n=== resident {} , newcomer {} ===", resident.name(), newcomer.name());
+    println!(
+        "\n=== resident {} , newcomer {} ===",
+        resident.name(),
+        newcomer.name()
+    );
     let mut world = prepared_world(seed, noise_seed);
     let skyline = skyline_of(&world);
     let mut flora = Flora::new(FloraConfig::default());
@@ -1291,9 +1448,16 @@ fn invasion(
     );
     step_coupled(&mut flora, &mut world, fill);
     let resident_filled = count(&flora, resident);
-    let banks_filled =
-        flora.view().ground.iter().filter(|g| g.seed_organic(resident) > 0.0).count();
-    let (est0, deaths0) = (flora.view().ledger.establishments, flora.view().ledger.deaths);
+    let banks_filled = flora
+        .view()
+        .ground
+        .iter()
+        .filter(|g| g.seed_organic(resident) > 0.0)
+        .count();
+    let (est0, deaths0) = (
+        flora.view().ledger.establishments,
+        flora.view().ledger.deaths,
+    );
     println!(
         "  after {fill:.0} s alone: {resident_filled} resident stands, seed bank on \
          {banks_filled} sites, establishments {est0}, deaths {deaths0}"
@@ -1302,7 +1466,10 @@ fn invasion(
     // One founder of the newcomer, in the best site its own habitat still offers that the
     // resident is not standing on.
     let ok = habitat(&world, &flora, &skyline, newcomer);
-    let target = ok.iter().copied().find(|s| flora.view().stand_at(*s).is_none());
+    let target = ok
+        .iter()
+        .copied()
+        .find(|s| flora.view().stand_at(*s).is_none());
     let Some(target) = target else {
         println!("  the newcomer has no free habitat site at all: no invasion to test");
         return;
@@ -1326,7 +1493,9 @@ fn invasion(
         target.x,
         target.z,
         target.y,
-        ok.iter().filter(|s| flora.view().stand_at(**s).is_none()).count()
+        ok.iter()
+            .filter(|s| flora.view().stand_at(**s).is_none())
+            .count()
     );
 
     // Every newcomer identity seen alive at the end of any tick, so a descendant that is
@@ -1351,12 +1520,19 @@ fn invasion(
     // By identity, not by site: anything of the newcomer's that is not the founder itself
     // germinated during the probe, including a stand that took the founder's own site in
     // the tick the founder died.
-    let descendants =
-        view.stands.iter().filter(|s| s.species == newcomer && s.id != founder_id).count();
+    let descendants = view
+        .stands
+        .iter()
+        .filter(|s| s.species == newcomer && s.id != founder_id)
+        .count();
     let births = seen.len();
     let lost = births - descendants;
     let founder_gone = !view.stands.iter().any(|s| s.id == founder_id);
-    let banks = view.ground.iter().filter(|g| g.seed_organic(newcomer) > 0.0).count();
+    let banks = view
+        .ground
+        .iter()
+        .filter(|g| g.seed_organic(newcomer) > 0.0)
+        .count();
     let banked: f64 = view.ground.iter().map(|g| g.seed_organic(newcomer)).sum();
     println!(
         "  after {probe:.0} s of invasion: newcomer {newcomer_stands} stands ({descendants} of \
@@ -1370,7 +1546,11 @@ fn invasion(
         view.ledger.establishments,
         deaths0,
         view.ledger.deaths,
-        if founder_gone { "died during the probe" } else { "survived the whole probe" }
+        if founder_gone {
+            "died during the probe"
+        } else {
+            "survived the whole probe"
+        }
     );
     // Not a verdict on coexistence (Astra R4.7). One birth, or a founder surviving, is not
     // an invasion: the criterion needs the rare species to increase through complete
@@ -1381,7 +1561,11 @@ fn invasion(
     println!(
         "  recruitment {} within {probe:.0} s: {births} newcomer birth(s) by identity, \
          {lost} of them dead before the end, {descendants} surviving descendant(s)",
-        if births > 0 { "OBSERVED" } else { "NOT OBSERVED" }
+        if births > 0 {
+            "OBSERVED"
+        } else {
+            "NOT OBSERVED"
+        }
     );
 }
 
@@ -1433,7 +1617,11 @@ fn community(args: &[String]) {
     println!(
         "community: {}x{}x{} seed {} noise_seed {}, rain {} m/s, outlet open; {WARMUP_TICKS} \
          warm-up ticks (50 s) then {seconds:.0} coupled seconds, so the world ends at {} s",
-        config.width, config.height, config.depth, config.seed, config.noise_seed,
+        config.width,
+        config.height,
+        config.depth,
+        config.seed,
+        config.noise_seed,
         config.rain_m_per_s,
         50.0 + seconds
     );
@@ -1465,15 +1653,27 @@ fn community(args: &[String]) {
     let mut seen = Seen::new();
     for f in &founders {
         let wood = founder_wood(flora.config().species(f.species));
-        if flora.apply(&world, Command::Seed { x: f.x as i64, z: f.z, species: f.species, wood }) {
+        if flora.apply(
+            &world,
+            Command::Seed {
+                x: f.x as i64,
+                z: f.z,
+                species: f.species,
+                wood,
+            },
+        ) {
             planted[f.species.index()] += 1;
         }
     }
     let founder_ids: Vec<u64> = flora.view().stands.iter().map(|s| s.id).collect();
     // Identity, species and site of every founder, for the per-stand record at observation
     // (Astra R7.4).
-    let founder_rows: Vec<(u64, Species, Site)> =
-        flora.view().stands.iter().map(|s| (s.id, s.species, s.site)).collect();
+    let founder_rows: Vec<(u64, Species, Site)> = flora
+        .view()
+        .stands
+        .iter()
+        .map(|s| (s.id, s.species, s.site))
+        .collect();
     assert_eq!(
         founder_ids.len() as u64,
         flora.view().ledger.births,
@@ -1506,8 +1706,11 @@ fn community(args: &[String]) {
                 let n = v.stands.iter().filter(|s| s.species == species).count();
                 let sc = flora.config().species(species);
                 let threshold = sc.alive_min / sc.propagule_split[0];
-                let bank =
-                    v.ground.iter().map(|g| g.seed_organic(species)).fold(0.0f64, f64::max);
+                let bank = v
+                    .ground
+                    .iter()
+                    .map(|g| g.seed_organic(species))
+                    .fold(0.0f64, f64::max);
                 line.push_str(&format!(
                     "; {} {n} ({:.0}% bank)",
                     species.name(),
@@ -1529,8 +1732,18 @@ fn community(args: &[String]) {
     let v = flora.view();
     println!(
         "{:>14}  {:>8} {:>7} {:>7} {:>7} {:>7} {:>7} {:>8} {:>7} {:>7} {:>7} {:>6}",
-        "species", "founders", "alive", "found.", "desc.", "births", "deaths", "wood", "light",
-        "moist", "stress", "banks"
+        "species",
+        "founders",
+        "alive",
+        "found.",
+        "desc.",
+        "births",
+        "deaths",
+        "wood",
+        "light",
+        "moist",
+        "stress",
+        "banks"
     );
     for species in Species::ALL {
         let all: Vec<_> = v.stands.iter().filter(|s| s.species == species).collect();
@@ -1539,7 +1752,11 @@ fn community(args: &[String]) {
         let desc = all.len() - still;
         let born = seen.len(species) - planted[species.index()];
         let gone = seen.len(species) - all.len();
-        let banks = v.ground.iter().filter(|g| g.seed_organic(species) > 0.0).count();
+        let banks = v
+            .ground
+            .iter()
+            .filter(|g| g.seed_organic(species) > 0.0)
+            .count();
         println!(
             "{:>14}  {:>8} {:>7} {:>7} {:>7} {:>7} {:>7} {:>8.4} {:>7.3} {:>7.3} {:>7.3} {:>6}",
             species.name(),
@@ -1594,8 +1811,14 @@ fn community(args: &[String]) {
     println!(
         "ledger: fixed_in {:.6} respired_out {:.6} light_in {:.6} heat_out {:.6} transpired \
          {:.6} m3 births {} establishments {} deaths {}",
-        l.fixed_in, l.respired_out, l.light_in, l.heat_out, l.transpired_m3, l.births,
-        l.establishments, l.deaths
+        l.fixed_in,
+        l.respired_out,
+        l.light_in,
+        l.heat_out,
+        l.transpired_m3,
+        l.births,
+        l.establishments,
+        l.deaths
     );
     println!(
         "residuals: organic {:.3e} mineral {:.3e} energy {:.3e} (stocks: organic {:.4} mineral \
@@ -1620,7 +1843,10 @@ fn community(args: &[String]) {
         world.view().ledger.transpiration_out,
         l.transpired_m3
     );
-    println!("wall time: {:.1} s for {ticks} coupled ticks", started.elapsed().as_secs_f64());
+    println!(
+        "wall time: {:.1} s for {ticks} coupled ticks",
+        started.elapsed().as_secs_f64()
+    );
 }
 
 // ------------------------------------------------------------------ 5a: harvest
@@ -1640,7 +1866,10 @@ fn community(args: &[String]) {
 /// The declared faces of this probe are the patch species' own founder faces, so what a
 /// harvester eats here is whatever else is within two voxels of it, and the per-species
 /// lines below say exactly what that was.
-const HARVEST_REACH: Reach = Reach { horizontal: 2, up: 1 };
+const HARVEST_REACH: Reach = Reach {
+    horizontal: 2,
+    up: 1,
+};
 
 /// How many support faces the scripted harvester works from. Predeclared before the run,
 /// printed with what each of them can reach at the start.
@@ -1774,7 +2003,15 @@ fn harvest_arm(
     let founders = pick_founders(&world, &flora, &skyline, &Species::ALL, verbose);
     for f in &founders {
         let wood = founder_wood(flora.config().species(f.species));
-        flora.apply(&world, Command::Seed { x: f.x as i64, z: f.z, species: f.species, wood });
+        flora.apply(
+            &world,
+            Command::Seed {
+                x: f.x as i64,
+                z: f.z,
+                species: f.species,
+                wood,
+            },
+        );
     }
 
     // The harvester's faces, predeclared: the first `HARVEST_SITES` founder faces of the
@@ -1792,7 +2029,9 @@ fn harvest_arm(
     let mut sites: Vec<(Site, usize, f64)> = Vec::new();
     let mut cohort: Vec<u64> = Vec::new();
     for &face in &faces {
-        let reach = flora.view().reachable_foliage(&world.view(), face, HARVEST_REACH);
+        let reach = flora
+            .view()
+            .reachable_foliage(&world.view(), face, HARVEST_REACH);
         // `+ 0.0` only so that an empty reach prints as a positive zero.
         let foliage: f64 = 0.0 + reach.iter().map(|&(_, f)| f).sum::<f64>();
         sites.push((face, reach.len(), foliage));
@@ -1810,7 +2049,11 @@ fn harvest_arm(
     let half = ticks / 2;
     let every = 100 * cubarium_voxel::TICK_HZ as u64;
     let mut arm = Arm {
-        label: if harvesting { "harvested" } else { "plant-only" },
+        label: if harvesting {
+            "harvested"
+        } else {
+            "plant-only"
+        },
         samples: vec![(0.0, stocks_of(&flora))],
         sites,
         cohort: cohort.clone(),
@@ -1837,7 +2080,9 @@ fn harvest_arm(
             let budget = rate * cubarium_voxel::DT;
             for &face in &faces {
                 let mut left = budget;
-                let reachable = flora.view().reachable_foliage(&world.view(), face, HARVEST_REACH);
+                let reachable = flora
+                    .view()
+                    .reachable_foliage(&world.view(), face, HARVEST_REACH);
                 for (site, _) in reachable {
                     if left <= 0.0 {
                         break;
@@ -1876,7 +2121,8 @@ fn harvest_arm(
             arm.fill_at[1] = cohort_fill(&flora, &cohort);
         }
         if (tick + 1) % every == 0 {
-            arm.samples.push(((tick + 1) as f64 * cubarium_voxel::DT, stocks_of(&flora)));
+            arm.samples
+                .push(((tick + 1) as f64 * cubarium_voxel::DT, stocks_of(&flora)));
         }
     }
 
@@ -1897,7 +2143,8 @@ fn harvest_arm(
     );
     arm.stocks = (v.organic(), v.mineral(), v.energy());
     if arm.samples.last().map(|&(s, _)| s) != Some(ticks as f64 * cubarium_voxel::DT) {
-        arm.samples.push((ticks as f64 * cubarium_voxel::DT, stocks_of(&flora)));
+        arm.samples
+            .push((ticks as f64 * cubarium_voxel::DT, stocks_of(&flora)));
     }
     arm.bitten.sort_unstable();
     arm.recovered.sort_unstable();
@@ -1927,13 +2174,19 @@ fn harvest(args: &[String]) {
 
     let mut first = true;
     for patch in [Species::Springturf, Species::Bloomcrown] {
-        let (control, founders) =
-            harvest_arm(seconds, rate, seed, noise_seed, patch, false, first);
+        let (control, founders) = harvest_arm(seconds, rate, seed, noise_seed, patch, false, first);
         first = false;
         let (grazed, again) = harvest_arm(seconds, rate, seed, noise_seed, patch, true, false);
         assert_eq!(again, founders, "the two arms must plant the same founders");
-        assert_eq!(control.consumed, (0.0, 0.0, 0.0), "the plant-only arm ate something");
-        assert_eq!(control.cohort, grazed.cohort, "the two arms must mean the same cohort");
+        assert_eq!(
+            control.consumed,
+            (0.0, 0.0, 0.0),
+            "the plant-only arm ate something"
+        );
+        assert_eq!(
+            control.cohort, grazed.cohort,
+            "the two arms must mean the same cohort"
+        );
         report_harvest(patch, &control, &grazed, rate);
     }
     println!(
@@ -2026,15 +2279,18 @@ fn report_harvest(patch: Species, control: &Arm, grazed: &Arm, rate: f64) {
          stands reached {:.0} % of their own α·W before the end — a recovery fraction of {:.2}; \
          the other {} are still under it or no longer standing",
         100.0 * FULL_FOLIAGE,
-        if bitten == 0 { 0.0 } else { recovered as f64 / bitten as f64 },
+        if bitten == 0 {
+            0.0
+        } else {
+            recovered as f64 / bitten as f64
+        },
         bitten - recovered
     );
     println!(
         "  that bar is strict, and the plant-only arm is what says how strict: its own cohort's \
          mean canopy fill P/(α·W) ends at {:.3}, so a count against a {:.2} bar is not by itself \
          evidence that nothing regrew. The fill comparison below is the measure.",
-        control.fill_at[2].0,
-        FULL_FOLIAGE
+        control.fill_at[2].0, FULL_FOLIAGE
     );
     println!(
         "  the declared cohort ({} stands reachable at the start), foliage / reserve / alive at \
@@ -2093,13 +2349,22 @@ mod tests {
         });
         for (x, top) in [(0i64, 2u32), (1, 4), (7, 2)] {
             for y in 1..=top {
-                w.apply(WorldCommand::SetMaterial { x, y, z: 0, material: Material::Soil });
+                w.apply(WorldCommand::SetMaterial {
+                    x,
+                    y,
+                    z: 0,
+                    material: Material::Soil,
+                });
             }
         }
         for (x, top) in [(0i64, 2u32), (1, 4), (7, 2)] {
             assert_eq!(
                 cubarium_voxel_flora::highest_support(&w.view(), x, 0),
-                Some(Site { x: x as u32, y: top, z: 0 }),
+                Some(Site {
+                    x: x as u32,
+                    y: top,
+                    z: 0
+                }),
                 "column {x} must have its face at {top}"
             );
         }
@@ -2118,12 +2383,27 @@ mod tests {
     fn a_crown_lower_than_the_site_it_covers_does_not_shade_it() {
         let world = two_ledges();
         let flora = Flora::new(FloraConfig::default());
-        let planned = [Founder { species: Species::Bloomcrown, x: 0, z: 0 }];
+        let planned = [Founder {
+            species: Species::Bloomcrown,
+            x: 0,
+            z: 0,
+        }];
         let canopy = canopy_over(&world, &flora, &planned);
         assert_eq!(canopy.len(), 1, "one planned crown: {canopy:?}");
-        assert!((canopy[0].top - 4.0).abs() < 1e-12, "absolute top {}", canopy[0].top);
-        assert!((canopy[0].radius - 1.0).abs() < 1e-12, "radius {}", canopy[0].radius);
-        assert!(canopy[0].foliage > 0.0, "a planned founder arrives with alpha * wood");
+        assert!(
+            (canopy[0].top - 4.0).abs() < 1e-12,
+            "absolute top {}",
+            canopy[0].top
+        );
+        assert!(
+            (canopy[0].radius - 1.0).abs() < 1e-12,
+            "radius {}",
+            canopy[0].radius
+        );
+        assert!(
+            canopy[0].foliage > 0.0,
+            "a planned founder arrives with alpha * wood"
+        );
 
         let bloom = flora.config().species(Species::Bloomcrown);
         let velvet = flora.config().species(Species::Velvetpad);
@@ -2136,8 +2416,14 @@ mod tests {
             "the level-face comparison the old helper made"
         );
         // Both columns are inside the crown's footprint, so it is the height that decides.
-        assert!(covered_by(&canopy, 8, high, 0.0), "the high ledge is under the footprint");
-        assert!(covered_by(&canopy, 8, level, 0.0), "the level ledge is under the footprint");
+        assert!(
+            covered_by(&canopy, 8, high, 0.0),
+            "the high ledge is under the footprint"
+        );
+        assert!(
+            covered_by(&canopy, 8, level, 0.0),
+            "the level ledge is under the footprint"
+        );
 
         assert!(
             !under_a_crown(&canopy, 8, &flora, Species::Velvetpad, high),
@@ -2161,7 +2447,12 @@ mod tests {
         let mut flora = Flora::new(FloraConfig::default());
         assert!(flora.apply(
             &world,
-            Command::Seed { x: 0, z: 0, species: Species::Bloomcrown, wood: sc.alive_min }
+            Command::Seed {
+                x: 0,
+                z: 0,
+                species: Species::Bloomcrown,
+                wood: sc.alive_min
+            }
         ));
 
         let canopy = canopy_over(&world, &flora, &[]);

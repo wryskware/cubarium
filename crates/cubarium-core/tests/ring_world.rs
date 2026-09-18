@@ -19,14 +19,20 @@ fn ring() -> Topology {
 }
 
 fn ring_config() -> WorldConfig {
-    let mut cfg = WorldConfig { seed: SEED, ..WorldConfig::default() };
+    let mut cfg = WorldConfig {
+        seed: SEED,
+        ..WorldConfig::default()
+    };
     cfg.topology = ring();
     cfg.world_scale = Scale::ONE;
     cfg
 }
 
 fn cube_config() -> WorldConfig {
-    WorldConfig { seed: SEED, ..WorldConfig::default() }
+    WorldConfig {
+        seed: SEED,
+        ..WorldConfig::default()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -45,12 +51,22 @@ fn a_ring_world_is_built_from_its_topology_and_steps() {
         world.step();
     }
     assert_eq!(world.tick(), 20);
-    world.check_invariants().expect("invariants hold on a ring world");
+    world
+        .check_invariants()
+        .expect("invariants hold on a ring world");
 
     let view = world.render_view();
-    assert_eq!(view.topology, ring(), "the view carries the topology to the presenter");
+    assert_eq!(
+        view.topology,
+        ring(),
+        "the view carries the topology to the presenter"
+    );
     assert_eq!(view.scale, Scale::ONE);
-    assert_eq!(view.producer.len(), 3600, "every per-cell vector is the world's cell count");
+    assert_eq!(
+        view.producer.len(),
+        3600,
+        "every per-cell vector is the world's cell count"
+    );
     assert_eq!(view.water.len(), 3600);
     assert_eq!(view.rain.len(), 3600);
 }
@@ -68,7 +84,10 @@ fn a_cube_world_still_pins_the_scale_to_one() {
         Err(e) => e,
         Ok(_) => panic!("a cube at S = 2 must be refused"),
     };
-    assert!(err.to_lowercase().contains("scale"), "the refusal should name the scale: {err}");
+    assert!(
+        err.to_lowercase().contains("scale"),
+        "the refusal should name the scale: {err}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -82,8 +101,16 @@ fn founders_land_on_the_one_chart_inside_its_extent() {
     assert!(!view.organisms.is_empty());
     for o in &view.organisms {
         assert_eq!(o.pos.face, Face::Front, "a ring has one chart");
-        assert!((0.0..f64::from(W)).contains(&o.pos.u), "u = {} outside [0, {W})", o.pos.u);
-        assert!((0.0..f64::from(H)).contains(&o.pos.v), "v = {} outside [0, {H})", o.pos.v);
+        assert!(
+            (0.0..f64::from(W)).contains(&o.pos.u),
+            "u = {} outside [0, {W})",
+            o.pos.u
+        );
+        assert!(
+            (0.0..f64::from(H)).contains(&o.pos.v),
+            "v = {} outside [0, {H})",
+            o.pos.v
+        );
         assert!(o.pos.is_canonical(ring()));
     }
 }
@@ -94,9 +121,15 @@ fn founders_land_on_the_one_chart_inside_its_extent() {
 /// chart's extent. If a draw were added, removed or reordered for the ring, this fails.
 #[test]
 fn the_founder_draws_are_the_documented_stream_on_both_topologies() {
-    for (topo, ext_u, ext_v) in [(Topology::Cube, 64.0, 64.0), (ring(), f64::from(W), f64::from(H))]
-    {
-        let mut cfg = if matches!(topo, Topology::Cube) { cube_config() } else { ring_config() };
+    for (topo, ext_u, ext_v) in [
+        (Topology::Cube, 64.0, 64.0),
+        (ring(), f64::from(W), f64::from(H)),
+    ] {
+        let mut cfg = if matches!(topo, Topology::Cube) {
+            cube_config()
+        } else {
+            ring_config()
+        };
         cfg.topology = topo;
         // The v1 founder path, where the draw key is the founder index. (With `kinds`
         // configured the key folds the kind index into its high bits instead.)
@@ -137,7 +170,11 @@ fn the_same_seed_places_the_same_founders_on_a_ring_and_on_a_cube() {
     let ring_world = World::new(ring_config()).expect("legal ring world");
     let cube_world = World::new(cube_config()).expect("legal cube world");
     let (rv, cv) = (ring_world.render_view(), cube_world.render_view());
-    assert_eq!(rv.organisms.len(), cv.organisms.len(), "the same founders were placed");
+    assert_eq!(
+        rv.organisms.len(),
+        cv.organisms.len(),
+        "the same founders were placed"
+    );
 
     for (r, c) in rv.organisms.iter().zip(cv.organisms.iter()) {
         assert_eq!(r.id.slot, c.id.slot, "the same slots in the same order");
@@ -178,8 +215,15 @@ fn ring_height_is_one_minus_two_v_over_h_and_the_cube_keeps_the_embedding() {
             "embed()[1] should not be the height at v = {v}"
         );
     }
-    assert_eq!(topo.height(&SurfacePoint::new(Face::Front, 0.0, 0.0)), 1.0, "canopy row");
-    assert!(topo.height(&SurfacePoint::new(Face::Front, 0.0, 179.0)) < -0.98, "soil row");
+    assert_eq!(
+        topo.height(&SurfacePoint::new(Face::Front, 0.0, 0.0)),
+        1.0,
+        "canopy row"
+    );
+    assert!(
+        topo.height(&SurfacePoint::new(Face::Front, 0.0, 179.0)) < -0.98,
+        "soil row"
+    );
 
     // On the cube the two are the same function.
     for face in Face::ALL {
@@ -204,7 +248,9 @@ fn the_controller_reads_the_ring_height() {
     let view = world.render_view();
     let mut checked = 0;
     for o in &view.organisms {
-        let Some(obs) = world.neural_observation(o.id) else { continue };
+        let Some(obs) = world.neural_observation(o.id) else {
+            continue;
+        };
         let want = 1.0 - 2.0 * o.pos.v / f64::from(H);
         assert!(
             (f64::from(obs.0[55]) - want).abs() <= 1e-6,
@@ -236,12 +282,22 @@ fn care_and_apex_targets_beyond_pixel_63_resolve_on_a_ring() {
         assert!(cell.index() < 3600);
 
         let apex = HunterTarget { face: 0, u, v };
-        let p = apex.resolve(topo).unwrap_or_else(|| panic!("apex at ({u}, {v})"));
+        let p = apex
+            .resolve(topo)
+            .unwrap_or_else(|| panic!("apex at ({u}, {v})"));
         assert!(p.is_canonical(topo), "the apex spawn point is canonical");
         assert_eq!(p.face, Face::Front);
     }
     // The cube is unchanged: 64 is off the chart there.
-    assert_eq!(CareTarget { face: 0, u: 64.0, v: 10.0 }.resolve(Topology::Cube, Scale::ONE), None);
+    assert_eq!(
+        CareTarget {
+            face: 0,
+            u: 64.0,
+            v: 10.0
+        }
+        .resolve(Topology::Cube, Scale::ONE),
+        None
+    );
 }
 
 #[test]

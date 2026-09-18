@@ -72,7 +72,11 @@ pub fn step(
     let cells = graph.cell_count();
     debug_assert_eq!(w.len(), cells);
     debug_assert_eq!(rain.len(), cells);
-    let Drivers { terrain, light, rain_source } = drivers;
+    let Drivers {
+        terrain,
+        light,
+        rain_source,
+    } = drivers;
     let mut ledger = WaterLedger::default();
 
     // Rain.
@@ -80,7 +84,11 @@ pub fn step(
         None => {
             for i in 0..cells {
                 let excess = rain_source[i] - cfg.rain_threshold;
-                let rate = if excess > 0.0 { cfg.rain_rate * excess } else { 0.0 };
+                let rate = if excess > 0.0 {
+                    cfg.rain_rate * excess
+                } else {
+                    0.0
+                };
                 rain[i] = rate as f32;
                 let added = rate * DT;
                 w[i] += added;
@@ -90,7 +98,11 @@ pub fn step(
         Some(manual) => {
             for i in 0..cells {
                 let excess = rain_source[i] - cfg.rain_threshold;
-                let natural = if excess > 0.0 { cfg.rain_rate * excess } else { 0.0 };
+                let natural = if excess > 0.0 {
+                    cfg.rain_rate * excess
+                } else {
+                    0.0
+                };
                 let rate = natural + manual[i];
                 rain[i] = rate as f32;
                 let added = rate * DT;
@@ -144,7 +156,9 @@ pub fn step(
     // Evaporation.
     if cfg.evap > 0.0 {
         for i in 0..cells {
-            let lost = (cfg.evap * light[i].max(cfg.evap_floor) * w[i] * DT).min(w[i]).max(0.0);
+            let lost = (cfg.evap * light[i].max(cfg.evap_floor) * w[i] * DT)
+                .min(w[i])
+                .max(0.0);
             w[i] -= lost;
             ledger.evap_out += lost;
         }
@@ -171,13 +185,13 @@ pub fn check(w: &[f64], cells: usize) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use cubarium_surface::{Scale, Topology};
     use super::*;
-    use cubarium_surface::CUBE_CELL_COUNT;
     use crate::config::WorldConfig;
     use crate::habitat::Habitat;
-    use cube_proto::Face;
+    use cubarium_surface::CUBE_CELL_COUNT;
     use cubarium_surface::CellId;
+    use cubarium_surface::{Scale, Topology};
+    use cube_proto::Face;
 
     struct Harness {
         cfg: WaterConfig,
@@ -213,7 +227,11 @@ mod tests {
             step(
                 w,
                 &self.cfg,
-                Drivers { terrain: &self.terrain, light: &self.light, rain_source: &self.source },
+                Drivers {
+                    terrain: &self.terrain,
+                    light: &self.light,
+                    rain_source: &self.source,
+                },
                 manual,
                 &mut self.rain,
                 &self.graph,
@@ -276,8 +294,16 @@ mod tests {
         let mut w = vec![0.0; CUBE_CELL_COUNT];
         let ledger = h.step_with(&mut w, Some(&manual[..]));
         // The published rate is the sum, so the visible shower and the deposited water agree.
-        assert!((f64::from(h.rain[wet]) - (natural + 0.25)).abs() < 1e-6, "{}", h.rain[wet]);
-        assert!((f64::from(h.rain[dry]) - 0.125).abs() < 1e-9, "{}", h.rain[dry]);
+        assert!(
+            (f64::from(h.rain[wet]) - (natural + 0.25)).abs() < 1e-6,
+            "{}",
+            h.rain[wet]
+        );
+        assert!(
+            (f64::from(h.rain[dry]) - 0.125).abs() < 1e-9,
+            "{}",
+            h.rain[dry]
+        );
         assert!((w[wet] - (natural + 0.25) * DT).abs() < 1e-15);
         assert!((w[dry] - 0.125 * DT).abs() < 1e-15);
         // Manual water is inside `rain_in` once, and attributed exactly where nothing
@@ -320,7 +346,11 @@ mod tests {
             assert!(w.iter().all(|&x| x >= 0.0), "negative depth");
             assert!(w.iter().all(|&x| x.is_finite()));
         }
-        assert!((total(&w) - before).abs() < 1e-12 * before.max(1.0), "{} vs {before}", total(&w));
+        assert!(
+            (total(&w) - before).abs() < 1e-12 * before.max(1.0),
+            "{} vs {before}",
+            total(&w)
+        );
     }
 
     #[test]
@@ -340,7 +370,10 @@ mod tests {
             assert!(ticks < 20_000, "water never reached the bottom row");
         }
         // Report the count in the test name's assertion so a regression is visible.
-        assert!(ticks <= 2400, "reached the bottom row after {ticks} ticks (> 2 simulated minutes)");
+        assert!(
+            ticks <= 2400,
+            "reached the bottom row after {ticks} ticks (> 2 simulated minutes)"
+        );
         eprintln!("water reached the bottom row of the face after {ticks} ticks");
         assert!((total(&w) - 1.0).abs() < 1e-12);
     }
@@ -374,8 +407,16 @@ mod tests {
             .collect();
         let mean = top.iter().sum::<f64>() / top.len() as f64;
         assert!((mean - before / 256.0).abs() < 1e-9);
-        assert!(top.iter().all(|&x| (x - mean).abs() < 1e-6), "not level: {:?}", top.iter().cloned().fold((f64::MAX, f64::MIN), |(lo, hi), x| (lo.min(x), hi.max(x))));
-        assert!(w.iter().enumerate().all(|(i, &x)| CellId(i as u16).face(Topology::Cube, Scale::ONE) == Face::Top || x == 0.0));
+        assert!(
+            top.iter().all(|&x| (x - mean).abs() < 1e-6),
+            "not level: {:?}",
+            top.iter()
+                .cloned()
+                .fold((f64::MAX, f64::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)))
+        );
+        assert!(w.iter().enumerate().all(
+            |(i, &x)| CellId(i as u16).face(Topology::Cube, Scale::ONE) == Face::Top || x == 0.0
+        ));
         // A level field is a fixed point, bit for bit.
         let snapshot = w.clone();
         h.step(&mut w);

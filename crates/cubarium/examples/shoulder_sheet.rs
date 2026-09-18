@@ -95,7 +95,11 @@ impl Image {
         for y in 0..src.h {
             for x in 0..src.w {
                 let o = (y * src.w + x) * 3;
-                self.set(at.0 + x, at.1 + y, [src.rgb[o], src.rgb[o + 1], src.rgb[o + 2]]);
+                self.set(
+                    at.0 + x,
+                    at.1 + y,
+                    [src.rgb[o], src.rgb[o + 1], src.rgb[o + 2]],
+                );
             }
         }
     }
@@ -228,9 +232,9 @@ const WHOLE: f64 = 1e-9;
 /// Whether two frames are identical **as the cube shows them**: 8-bit encoded, not the f32
 /// canvas, so a tone travel too small to change a displayed pixel counts as invisible.
 fn same_frame(a: &Frame, b: &Frame) -> bool {
-    Face::ALL.into_iter().all(|f| {
-        (0..FACE_SIZE).all(|y| (0..FACE_SIZE).all(|x| a.get(f, x, y) == b.get(f, x, y)))
-    })
+    Face::ALL
+        .into_iter()
+        .all(|f| (0..FACE_SIZE).all(|y| (0..FACE_SIZE).all(|x| a.get(f, x, y) == b.get(f, x, y))))
 }
 
 fn encode(canvas: &Canvas) -> Frame {
@@ -445,7 +449,9 @@ fn recovery(cell: CellId, horizon: u64) -> [Vec<Frame>; SHOULDERS.len()] {
             world.drain_events();
         }
     }
-    world.check_invariants().expect("the recovery run ends consistent");
+    world
+        .check_invariants()
+        .expect("the recovery run ends consistent");
     println!();
     println!(
         "- the grazer was removed at tick {} ({:.0} s)",
@@ -534,7 +540,11 @@ fn main() {
             },
             120,
         );
-        let steady = worst_frame_step(full, &|tick| stand(tick + 1, cell, AVERAGE_W, AVERAGE_P), 120);
+        let steady = worst_frame_step(
+            full,
+            &|tick| stand(tick + 1, cell, AVERAGE_W, AVERAGE_P),
+            120,
+        );
         // And whether that mix is actually on screen: the same ungrazed average stand drawn
         // at this shoulder and at `WHOLE`, encoded, compared pixel for pixel.
         let average = stand(PANEL_TICK, cell, AVERAGE_W, AVERAGE_P);
@@ -546,7 +556,11 @@ fn main() {
             first.map_or("never".to_string(), |(f, _)| f.to_string()),
             first.map_or("never".to_string(), |(_, s)| format!("{:.1} %", 100.0 * s)),
             100.0 * leaves,
-            if tinted { ", on screen" } else { ", not on screen" },
+            if tinted {
+                ", on screen"
+            } else {
+                ", not on screen"
+            },
             wobble - steady,
         );
     }
@@ -556,7 +570,10 @@ fn main() {
          cover, the producer wash and the detritus flecks read `P` directly and none of them \
          has a shoulder.",
         anywhere.map_or("never".to_string(), |(f, _)| f.to_string()),
-        anywhere.map_or("never".to_string(), |(_, s)| format!("{:.2} % lost", 100.0 * s)),
+        anywhere.map_or("never".to_string(), |(_, s)| format!(
+            "{:.2} % lost",
+            100.0 * s
+        )),
     );
     println!();
 

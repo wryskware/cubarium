@@ -127,24 +127,36 @@ pub struct TangentMap {
 }
 
 impl TangentMap {
-    pub const IDENTITY: TangentMap = TangentMap { m: [[1, 0], [0, 1]] };
+    pub const IDENTITY: TangentMap = TangentMap {
+        m: [[1, 0], [0, 1]],
+    };
 
     /// Counter-clockwise-on-screen rotation by `turns` quarter turns (`rotate_heading`).
     pub const fn quarter_turns(turns: u8) -> TangentMap {
         match turns % 4 {
             0 => TangentMap::IDENTITY,
-            1 => TangentMap { m: [[0, 1], [-1, 0]] },
-            2 => TangentMap { m: [[-1, 0], [0, -1]] },
-            _ => TangentMap { m: [[0, -1], [1, 0]] },
+            1 => TangentMap {
+                m: [[0, 1], [-1, 0]],
+            },
+            2 => TangentMap {
+                m: [[-1, 0], [0, -1]],
+            },
+            _ => TangentMap {
+                m: [[0, -1], [1, 0]],
+            },
         }
     }
 
     /// Reflection across a horizontal line: `(x, y) -> (x, -y)`. This is the rim
     /// reflection at a side face's bottom edge.
-    pub const REFLECT_Y: TangentMap = TangentMap { m: [[1, 0], [0, -1]] };
+    pub const REFLECT_Y: TangentMap = TangentMap {
+        m: [[1, 0], [0, -1]],
+    };
 
     /// Reflection across a vertical line: `(x, y) -> (-x, y)`.
-    pub const REFLECT_X: TangentMap = TangentMap { m: [[-1, 0], [0, 1]] };
+    pub const REFLECT_X: TangentMap = TangentMap {
+        m: [[-1, 0], [0, 1]],
+    };
 
     #[inline]
     pub fn apply(self, v: Vec2) -> Vec2 {
@@ -161,8 +173,14 @@ impl TangentMap {
         let b = next.m;
         TangentMap {
             m: [
-                [b[0][0] * a[0][0] + b[0][1] * a[1][0], b[0][0] * a[0][1] + b[0][1] * a[1][1]],
-                [b[1][0] * a[0][0] + b[1][1] * a[1][0], b[1][0] * a[0][1] + b[1][1] * a[1][1]],
+                [
+                    b[0][0] * a[0][0] + b[0][1] * a[1][0],
+                    b[0][0] * a[0][1] + b[0][1] * a[1][1],
+                ],
+                [
+                    b[1][0] * a[0][0] + b[1][1] * a[1][0],
+                    b[1][0] * a[0][1] + b[1][1] * a[1][1],
+                ],
             ],
         }
     }
@@ -170,7 +188,9 @@ impl TangentMap {
     /// The inverse map; for an orthogonal integer matrix this is the transpose.
     pub const fn inverse(self) -> TangentMap {
         let m = self.m;
-        TangentMap { m: [[m[0][0], m[1][0]], [m[0][1], m[1][1]]] }
+        TangentMap {
+            m: [[m[0][0], m[1][0]], [m[0][1], m[1][1]]],
+        }
     }
 
     /// Determinant: `+1` for a pure rotation, `-1` when an odd number of reflections

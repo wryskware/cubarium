@@ -25,7 +25,12 @@ use cubarium_voxel_flora::{
 fn fill(w: &mut World, x: i64, y: u32, z: u32, material: Material, pore: f64) {
     let want = pore * material.pore_capacity() * w.config().voxel_volume();
     if want > 0.0 {
-        let got = w.apply(WorldCommand::AddWater { x, y, z, volume_m3: want });
+        let got = w.apply(WorldCommand::AddWater {
+            x,
+            y,
+            z,
+            volume_m3: want,
+        });
         assert!((got - want).abs() < 1e-12, "the void took {got} of {want}");
     }
     w.apply(WorldCommand::SetMaterial { x, y, z, material });
@@ -54,7 +59,12 @@ fn pillars(width: u32, keep: &[i64], pore: f64) -> World {
                 fill(&mut w, x, y, 0, Material::Soil, pore);
             }
         } else {
-            w.apply(WorldCommand::SetMaterial { x, y: 0, z: 0, material: Material::Air });
+            w.apply(WorldCommand::SetMaterial {
+                x,
+                y: 0,
+                z: 0,
+                material: Material::Air,
+            });
             assert!(
                 cubarium_voxel_flora::highest_support(&w.view(), x, 0).is_none(),
                 "({x},0) must be void"
@@ -74,7 +84,12 @@ fn roofed(width: u32, depth: u32) -> World {
             for y in 1..=2 {
                 fill(&mut w, x, y, z, Material::Soil, 0.5);
             }
-            w.apply(WorldCommand::SetMaterial { x, y: 4, z, material: Material::Rock });
+            w.apply(WorldCommand::SetMaterial {
+                x,
+                y: 4,
+                z,
+                material: Material::Rock,
+            });
         }
     }
     w
@@ -109,9 +124,18 @@ fn assert_residuals(flora: &Flora, when: &str) {
         v.mineral() - v.ledger.expected_mineral(),
         v.energy() - v.ledger.expected_energy(),
     );
-    assert!(o.abs() <= 1e-9 * v.organic().abs().max(1.0), "{when}: organic residual {o}");
-    assert!(n.abs() <= 1e-9 * v.mineral().abs().max(1.0), "{when}: mineral residual {n}");
-    assert!(e.abs() <= 1e-9 * v.energy().abs().max(1.0), "{when}: energy residual {e}");
+    assert!(
+        o.abs() <= 1e-9 * v.organic().abs().max(1.0),
+        "{when}: organic residual {o}"
+    );
+    assert!(
+        n.abs() <= 1e-9 * v.mineral().abs().max(1.0),
+        "{when}: mineral residual {n}"
+    );
+    assert!(
+        e.abs() <= 1e-9 * v.energy().abs().max(1.0),
+        "{when}: energy residual {e}"
+    );
 }
 
 /// A config in which one species funds a whole package in a single tick and hops exactly one
@@ -127,7 +151,15 @@ fn fast_donor(config: &mut FloraConfig, species: Species) {
 fn plant(flora: &mut Flora, world: &World, x: i64, species: Species) {
     let wood = flora.config().species(species).wood_max;
     assert!(
-        flora.apply(world, Command::Seed { x, z: 0, species, wood }),
+        flora.apply(
+            world,
+            Command::Seed {
+                x,
+                z: 0,
+                species,
+                wood
+            }
+        ),
         "{} would not plant on column {x}",
         species.name()
     );
@@ -144,22 +176,35 @@ fn at_creation_provisions_every_support_face_once_and_books_the_whole_inventory(
     let faces = support_faces(&world);
     assert_eq!(faces.len(), 24, "4 x 3 columns with two faces each");
 
-    let config = FloraConfig { provision: Provision::AtCreation, ..FloraConfig::default() };
+    let config = FloraConfig {
+        provision: Provision::AtCreation,
+        ..FloraConfig::default()
+    };
     let mineral = config.initial_mineral;
     let flora = Flora::in_world(&world, config);
     let v = flora.view();
 
     let sites: Vec<Site> = v.ground.iter().map(|g| g.site).collect();
     assert_eq!(sites, faces, "one Ground per support face, in site order");
-    assert!(v.ground.iter().all(|g| g.mineral == mineral), "each face holds initial_mineral");
+    assert!(
+        v.ground.iter().all(|g| g.mineral == mineral),
+        "each face holds initial_mineral"
+    );
     assert_eq!(v.ledger.seeded_mineral_in, faces.len() as f64 * mineral);
     assert_eq!(v.ledger.expected_mineral(), faces.len() as f64 * mineral);
-    assert_eq!(v.mineral(), faces.len() as f64 * mineral, "the stock is the booking");
+    assert_eq!(
+        v.mineral(),
+        faces.len() as f64 * mineral,
+        "the stock is the booking"
+    );
     assert_residuals(&flora, "at creation");
 
     // The default is untouched: the same world under `Lazy` starts with nothing at all.
     let lazy = Flora::in_world(&world, FloraConfig::default());
-    assert!(lazy.view().ground.is_empty(), "Lazy provisions nothing at creation");
+    assert!(
+        lazy.view().ground.is_empty(),
+        "Lazy provisions nothing at creation"
+    );
     assert_eq!(lazy.view().ledger.seeded_mineral_in, 0.0);
 }
 
@@ -189,7 +234,10 @@ fn at_creation_keeps_the_imported_mineral_equal_across_arms_where_lazy_does_not(
     }
     let arms = |provision: Provision| {
         let world = pillars(4, &[0, 1, 2], 0.5);
-        let mut config = FloraConfig { provision, ..FloraConfig::default() };
+        let mut config = FloraConfig {
+            provision,
+            ..FloraConfig::default()
+        };
         fast_donor(&mut config, Species::Bloomcrown);
         // Two columns in reach, so an arm that keeps its donor can reach a site the other
         // one never does: that difference is the whole subject of this test.
@@ -200,21 +248,35 @@ fn at_creation_keeps_the_imported_mineral_equal_across_arms_where_lazy_does_not(
         // two support faces within the donor's hop, since column 3 is void.
         let mut conditioned_world = world.clone();
         flora.step(&mut conditioned_world);
-        let imported = |f: &Flora| {
-            f.view().ledger.seeded_mineral_in + f.view().ledger.deposited_mineral_in
-        };
+        let imported =
+            |f: &Flora| f.view().ledger.seeded_mineral_in + f.view().ledger.deposited_mineral_in;
         let imported_0 = imported(&flora);
 
         // Arm A keeps the donor and goes on colonising; arm B loses it and its bank,
         // exactly as the study's exclusion arm loses its resident.
         let (mut a, mut wa) = (flora.clone(), conditioned_world.clone());
         let (mut b, mut wb) = (flora.clone(), conditioned_world.clone());
-        assert!(b.apply(&wb, Command::Clear { x: 0, z: 0 }), "arm B clears its donor");
+        assert!(
+            b.apply(&wb, Command::Clear { x: 0, z: 0 }),
+            "arm B clears its donor"
+        );
         let banks: usize = [1, 2]
             .into_iter()
-            .filter(|&x| b.apply(&wb, Command::ClearBank { x, z: 0, species: Species::Bloomcrown }))
+            .filter(|&x| {
+                b.apply(
+                    &wb,
+                    Command::ClearBank {
+                        x,
+                        z: 0,
+                        species: Species::Bloomcrown,
+                    },
+                )
+            })
             .count();
-        assert_eq!(banks, 1, "conditioning landed exactly one package, on column 1 or 2");
+        assert_eq!(
+            banks, 1,
+            "conditioning landed exactly one package, on column 1 or 2"
+        );
         for _ in 0..20 {
             a.step(&mut wa);
             b.step(&mut wb);
@@ -224,8 +286,14 @@ fn at_creation_keeps_the_imported_mineral_equal_across_arms_where_lazy_does_not(
         Arms {
             imported_0,
             imported: (imported(&a), imported(&b)),
-            net: (a.view().ledger.expected_mineral(), b.view().ledger.expected_mineral()),
-            removed: (a.view().ledger.removed_mineral_out, b.view().ledger.removed_mineral_out),
+            net: (
+                a.view().ledger.expected_mineral(),
+                b.view().ledger.expected_mineral(),
+            ),
+            removed: (
+                a.view().ledger.removed_mineral_out,
+                b.view().ledger.removed_mineral_out,
+            ),
             sites: (a.view().ground.len(), b.view().ground.len()),
         }
     };
@@ -239,7 +307,11 @@ fn at_creation_keeps_the_imported_mineral_equal_across_arms_where_lazy_does_not(
         eager.imported.0, eager.imported_0,
         "AtCreation: and neither imported any after the branch"
     );
-    assert_eq!(eager.sites, (3, 3), "every support face was provisioned before the branch");
+    assert_eq!(
+        eager.sites,
+        (3, 3),
+        "every support face was provisioned before the branch"
+    );
     assert_eq!(eager.removed.0, 0.0, "arm A books nothing out");
     assert!(eager.removed.1 > 0.0, "arm B books its resident out");
     let gap = (eager.net.0 - eager.net.1) - eager.removed.1;
@@ -270,7 +342,10 @@ fn at_creation_keeps_the_imported_mineral_equal_across_arms_where_lazy_does_not(
         (lazy.sites.0 - lazy.sites.1) as f64 * FloraConfig::default().initial_mineral,
         "and the gap is exactly initial_mineral per extra site the arm reached"
     );
-    assert!(lazy.imported.0 > lazy.imported_0, "Lazy imports while the plants are spreading");
+    assert!(
+        lazy.imported.0 > lazy.imported_0,
+        "Lazy imports while the plants are spreading"
+    );
 }
 
 // ------------------------------------------------------------ Command::ClearBank
@@ -289,16 +364,38 @@ fn two_banks_on_one_site() -> (World, Flora) {
     let mut stepped = world.clone();
     flora.step(&mut stepped);
     assert!(
-        flora.deposit(at(1), Deposit { kind: DepositKind::Litter, organic: 0.2, mineral: 0.004, energy: 0.3 }),
+        flora.deposit(
+            at(1),
+            Deposit {
+                kind: DepositKind::Litter,
+                organic: 0.2,
+                mineral: 0.004,
+                energy: 0.3
+            }
+        ),
         "the litter was refused"
     );
     assert!(
-        flora.deposit(at(1), Deposit { kind: DepositKind::DeadWood, organic: 0.5, mineral: 0.01, energy: 1.0 }),
+        flora.deposit(
+            at(1),
+            Deposit {
+                kind: DepositKind::DeadWood,
+                organic: 0.5,
+                mineral: 0.01,
+                energy: 1.0
+            }
+        ),
         "the log was refused"
     );
     let g = flora.view().ground_at(at(1)).expect("a bank site");
-    assert!(g.seed_organic(Species::Bloomcrown) > 0.0, "no bloomcrown package reached (1,0)");
-    assert!(g.seed_organic(Species::Umbrellafrond) > 0.0, "no umbrellafrond package reached (1,0)");
+    assert!(
+        g.seed_organic(Species::Bloomcrown) > 0.0,
+        "no bloomcrown package reached (1,0)"
+    );
+    assert!(
+        g.seed_organic(Species::Umbrellafrond) > 0.0,
+        "no umbrellafrond package reached (1,0)"
+    );
     (world, flora)
 }
 
@@ -311,55 +408,118 @@ fn clear_bank_books_one_species_out_and_leaves_the_rest_of_the_site_untouched() 
     let before = flora.view().ground_at(at(1)).expect("a bank site").clone();
     let ledger = flora.view().ledger.clone();
     let e_v = flora.config().species(Species::Bloomcrown).energy_density;
-    let (organic, mineral) =
-        (before.seed_organic(Species::Bloomcrown), before.seed_mineral(Species::Bloomcrown));
+    let (organic, mineral) = (
+        before.seed_organic(Species::Bloomcrown),
+        before.seed_mineral(Species::Bloomcrown),
+    );
 
     assert!(
-        flora.apply(&world, Command::ClearBank { x: 1, z: 0, species: Species::Bloomcrown }),
+        flora.apply(
+            &world,
+            Command::ClearBank {
+                x: 1,
+                z: 0,
+                species: Species::Bloomcrown
+            }
+        ),
         "the bloomcrown bank would not clear"
     );
 
-    let after = flora.view().ground_at(at(1)).expect("the site is still there").clone();
-    assert_eq!(after.seed_organic(Species::Bloomcrown), 0.0, "the resident's bank is gone");
+    let after = flora
+        .view()
+        .ground_at(at(1))
+        .expect("the site is still there")
+        .clone();
+    assert_eq!(
+        after.seed_organic(Species::Bloomcrown),
+        0.0,
+        "the resident's bank is gone"
+    );
     assert!(
         after.seeds.iter().all(|c| c.species != Species::Bloomcrown),
         "no bloomcrown cohort may survive: {:?}",
         after.seeds
     );
     // Retained, to the bit.
-    assert_eq!(after.seed_organic(Species::Umbrellafrond), before.seed_organic(Species::Umbrellafrond));
-    assert_eq!(after.seed_mineral(Species::Umbrellafrond), before.seed_mineral(Species::Umbrellafrond));
-    assert_eq!(after.mineral, before.mineral, "the soil mineral pool is retained");
+    assert_eq!(
+        after.seed_organic(Species::Umbrellafrond),
+        before.seed_organic(Species::Umbrellafrond)
+    );
+    assert_eq!(
+        after.seed_mineral(Species::Umbrellafrond),
+        before.seed_mineral(Species::Umbrellafrond)
+    );
+    assert_eq!(
+        after.mineral, before.mineral,
+        "the soil mineral pool is retained"
+    );
     assert_eq!(after.litter, before.litter, "the litter is retained");
     assert_eq!(after.litter_mineral, before.litter_mineral);
     assert_eq!(after.litter_energy, before.litter_energy);
-    assert_eq!(after.dead_wood, before.dead_wood, "the dead wood is retained");
+    assert_eq!(
+        after.dead_wood, before.dead_wood,
+        "the dead wood is retained"
+    );
     assert_eq!(after.dead_wood_mineral, before.dead_wood_mineral);
     assert_eq!(after.dead_wood_energy, before.dead_wood_energy);
 
     // Booked out, not dropped: a `Clear`'s three lines on a bank's three currencies.
     let now = flora.view().ledger.clone();
-    assert_eq!(now.removed_organic_out - ledger.removed_organic_out, organic);
-    assert_eq!(now.removed_mineral_out - ledger.removed_mineral_out, mineral);
-    assert_eq!(now.removed_energy_out - ledger.removed_energy_out, e_v * organic);
+    assert_eq!(
+        now.removed_organic_out - ledger.removed_organic_out,
+        organic
+    );
+    assert_eq!(
+        now.removed_mineral_out - ledger.removed_mineral_out,
+        mineral
+    );
+    assert_eq!(
+        now.removed_energy_out - ledger.removed_energy_out,
+        e_v * organic
+    );
     assert_eq!(now.births, ledger.births, "a removal is not a birth");
     assert_residuals(&flora, "after the bank removal");
 
     // And the refusals, which book nothing at all.
     let quiet = flora.view().ledger.clone();
     assert!(
-        !flora.apply(&world, Command::ClearBank { x: 1, z: 0, species: Species::Bloomcrown }),
+        !flora.apply(
+            &world,
+            Command::ClearBank {
+                x: 1,
+                z: 0,
+                species: Species::Bloomcrown
+            }
+        ),
         "a bank that is already gone cannot be removed again"
     );
     assert!(
-        !flora.apply(&world, Command::ClearBank { x: 1, z: 0, species: Species::Springturf }),
+        !flora.apply(
+            &world,
+            Command::ClearBank {
+                x: 1,
+                z: 0,
+                species: Species::Springturf
+            }
+        ),
         "a species with no cohort here has no bank to remove"
     );
     assert!(
-        !flora.apply(&world, Command::ClearBank { x: 3, z: 0, species: Species::Bloomcrown }),
+        !flora.apply(
+            &world,
+            Command::ClearBank {
+                x: 3,
+                z: 0,
+                species: Species::Bloomcrown
+            }
+        ),
         "column 3 has no support face at all"
     );
-    assert_eq!(*flora.view().ledger, quiet, "a refused removal books nothing");
+    assert_eq!(
+        *flora.view().ledger,
+        quiet,
+        "a refused removal books nothing"
+    );
 }
 
 /// The exclusion arm as the study performs it, on the fixture: **`Clear` then `ClearBank`**
@@ -378,16 +538,36 @@ fn clearing_a_resident_without_its_bank_leaves_it_able_to_come_back() {
     let mut w1 = world.clone();
     assert!(kept.apply(&w1, Command::Clear { x: 0, z: 0 }));
     let mut removed = kept.clone();
-    assert!(removed.apply(&world, Command::ClearBank { x: 1, z: 0, species: Species::Bloomcrown }));
+    assert!(removed.apply(
+        &world,
+        Command::ClearBank {
+            x: 1,
+            z: 0,
+            species: Species::Bloomcrown
+        }
+    ));
     let mut w2 = world.clone();
 
-    assert_eq!(stocks(&kept), stocks(&removed), "the site's own stocks are matched");
+    assert_eq!(
+        stocks(&kept),
+        stocks(&removed),
+        "the site's own stocks are matched"
+    );
     for _ in 0..40 {
         kept.step(&mut w1);
         removed.step(&mut w2);
     }
-    let alive = |f: &Flora| f.view().stands.iter().filter(|s| s.species == Species::Bloomcrown).count();
-    assert!(alive(&kept) > 0, "the retained bank germinated: that is what a Clear leaves behind");
+    let alive = |f: &Flora| {
+        f.view()
+            .stands
+            .iter()
+            .filter(|s| s.species == Species::Bloomcrown)
+            .count()
+    };
+    assert!(
+        alive(&kept) > 0,
+        "the retained bank germinated: that is what a Clear leaves behind"
+    );
     assert_eq!(alive(&removed), 0, "the removed bank cannot recruit");
     assert_residuals(&kept, "bank kept");
     assert_residuals(&removed, "bank removed");
@@ -402,14 +582,20 @@ fn clearing_a_resident_without_its_bank_leaves_it_able_to_come_back() {
 #[test]
 fn a_cloned_conditioned_state_steps_identically_for_ten_ticks() {
     let mut world = pillars(4, &[0, 1, 2], 0.5);
-    let mut config = FloraConfig { provision: Provision::AtCreation, ..FloraConfig::default() };
+    let mut config = FloraConfig {
+        provision: Provision::AtCreation,
+        ..FloraConfig::default()
+    };
     fast_donor(&mut config, Species::Bloomcrown);
     let mut flora = Flora::in_world(&world, config);
     plant(&mut flora, &world, 0, Species::Bloomcrown);
     for _ in 0..5 {
         flora.step(&mut world);
     }
-    assert!(!flora.view().ground.is_empty(), "the conditioned state must hold something");
+    assert!(
+        !flora.view().ground.is_empty(),
+        "the conditioned state must hold something"
+    );
 
     let (mut w2, mut f2) = (world.clone(), flora.clone());
     for _ in 0..10 {
@@ -460,13 +646,21 @@ fn two_donors_delivering_in_one_tick_name_two_different_recipients() {
     assert_eq!(receipts.len(), 2, "two donors, two packages: {receipts:?}");
     let mut recipients: Vec<Site> = receipts.iter().map(|r| r.recipient).collect();
     recipients.sort_unstable();
-    assert_eq!(recipients, vec![at(1), at(3)], "the two only reachable faces");
+    assert_eq!(
+        recipients,
+        vec![at(1), at(3)],
+        "the two only reachable faces"
+    );
     let mut donors: Vec<u64> = receipts.iter().map(|r| r.donor).collect();
     donors.sort_unstable();
     assert_eq!(donors, vec![0, 1], "the two founders, by identity");
     for r in &receipts {
         assert_eq!(r.species, Species::Bloomcrown);
-        assert!((r.organic - package).abs() < 1e-15, "one whole package: {}", r.organic);
+        assert!(
+            (r.organic - package).abs() < 1e-15,
+            "one whole package: {}",
+            r.organic
+        );
         assert!(r.mineral > 0.0, "the mineral travelled with it");
         assert_eq!(r.tick, flora.tick());
         // The donor never sends to its own site, which is the rule the receipt reflects.
@@ -474,8 +668,18 @@ fn two_donors_delivering_in_one_tick_name_two_different_recipients() {
     }
     // And the evidence that a bank difference could not have told them apart: the two banks
     // grew by exactly the same amount, so "the largest increase" is a coin toss.
-    let grew = |site: Site| flora.view().ground_at(site).map_or(0.0, |g| g.seed_organic(Species::Bloomcrown));
-    assert!((grew(at(1)) - grew(at(3))).abs() < 1e-15, "{} vs {}", grew(at(1)), grew(at(3)));
+    let grew = |site: Site| {
+        flora
+            .view()
+            .ground_at(site)
+            .map_or(0.0, |g| g.seed_organic(Species::Bloomcrown))
+    };
+    assert!(
+        (grew(at(1)) - grew(at(3))).abs() < 1e-15,
+        "{} vs {}",
+        grew(at(1)),
+        grew(at(3))
+    );
 
     // Transient: the next tick starts with an empty list whether or not anyone read it.
     let before = flora.deliveries().len();
@@ -502,17 +706,41 @@ fn a_bank_emptied_and_refilled_in_one_tick_still_names_its_recipient() {
     let first: Vec<DeliveryReceipt> = flora.deliveries().to_vec();
     assert_eq!(first.len(), 1, "one donor, one package");
     assert_eq!(first[0].recipient, at(1));
-    let banked_after_first = flora.view().ground_at(at(1)).expect("a bank").seed_organic(Species::Bloomcrown);
+    let banked_after_first = flora
+        .view()
+        .ground_at(at(1))
+        .expect("a bank")
+        .seed_organic(Species::Bloomcrown);
     assert!(banked_after_first > 0.0);
-    assert_eq!(flora.view().ledger.establishments, 0, "nothing is born on the landing tick");
+    assert_eq!(
+        flora.view().ledger.establishments,
+        0,
+        "nothing is born on the landing tick"
+    );
 
     flora.step(&mut stepped);
     let second: Vec<DeliveryReceipt> = flora.deliveries().to_vec();
-    assert_eq!(flora.view().ledger.establishments, 1, "the package germinated on this tick");
-    assert_eq!(second.len(), 1, "and the donor delivered again in the same tick");
-    assert_eq!(second[0].recipient, at(1), "the same site, named and not inferred");
+    assert_eq!(
+        flora.view().ledger.establishments,
+        1,
+        "the package germinated on this tick"
+    );
+    assert_eq!(
+        second.len(),
+        1,
+        "and the donor delivered again in the same tick"
+    );
+    assert_eq!(
+        second[0].recipient,
+        at(1),
+        "the same site, named and not inferred"
+    );
     assert_eq!(second[0].donor, first[0].donor);
-    let banked_after_second = flora.view().ground_at(at(1)).expect("a bank").seed_organic(Species::Bloomcrown);
+    let banked_after_second = flora
+        .view()
+        .ground_at(at(1))
+        .expect("a bank")
+        .seed_organic(Species::Bloomcrown);
     assert!(
         (banked_after_second - banked_after_first).abs() < 1e-15,
         "the fixture's whole point: the bank is unchanged across a real delivery ({} -> {})",
@@ -533,6 +761,9 @@ fn a_tick_with_no_delivery_leaves_no_receipt() {
     let mut stepped = world.clone();
     for _ in 0..5 {
         flora.step(&mut stepped);
-        assert!(flora.deliveries().is_empty(), "no package can be funded this soon");
+        assert!(
+            flora.deliveries().is_empty(),
+            "no package can be funded this soon"
+        );
     }
 }

@@ -10,7 +10,9 @@ fn main() {
     for path in git_watch_paths() {
         println!("cargo:rerun-if-changed={}", path.display());
     }
-    let id = std::env::var("CUBARIUM_SEARCH_BUILD").ok().unwrap_or_else(git_id);
+    let id = std::env::var("CUBARIUM_SEARCH_BUILD")
+        .ok()
+        .unwrap_or_else(git_id);
     println!("cargo:rustc-env=CUBARIUM_SEARCH_BUILD={id}");
 }
 
@@ -46,7 +48,11 @@ fn git_watch_paths() -> Vec<std::path::PathBuf> {
     else {
         return Vec::new();
     };
-    let mut paths = vec![git_dir.join("HEAD"), git_dir.join("index"), git_dir.join("packed-refs")];
+    let mut paths = vec![
+        git_dir.join("HEAD"),
+        git_dir.join("index"),
+        git_dir.join("packed-refs"),
+    ];
     if let Ok(head) = std::fs::read_to_string(git_dir.join("HEAD"))
         && let Some(r) = head.trim().strip_prefix("ref: ")
     {

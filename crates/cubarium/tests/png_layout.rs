@@ -2,8 +2,8 @@
 //! net offsets — Top above Front, and Left, Front, Right, Back in a row — with the
 //! unused cells black.
 
-use cube_proto::{FACE_SIZE, Face, Frame};
 use cubarium::net::{PNG_HEIGHT, PNG_WIDTH, net_origin, net_rgb8};
+use cube_proto::{FACE_SIZE, Face, Frame};
 
 /// The offsets the README documents, written out independently of `net_origin`.
 const DOCUMENTED: [(Face, usize, usize); 5] = [

@@ -20,8 +20,11 @@ struct Envelope {
 }
 
 pub fn encode(world: &World) -> Vec<u8> {
-    postcard::to_stdvec(&Envelope { schema: SCHEMA, world: world.clone() })
-        .expect("a World always serializes")
+    postcard::to_stdvec(&Envelope {
+        schema: SCHEMA,
+        world: world.clone(),
+    })
+    .expect("a World always serializes")
 }
 
 pub fn decode(bytes: &[u8]) -> anyhow::Result<World> {
@@ -30,7 +33,9 @@ pub fn decode(bytes: &[u8]) -> anyhow::Result<World> {
         bail!("voxel snapshot schema {tag} is not {SCHEMA}; start a fresh world");
     }
     let mut env: Envelope = postcard::from_bytes(bytes).context("corrupt voxel world snapshot")?;
-    env.world.validate_loaded().context("invalid voxel world snapshot")?;
+    env.world
+        .validate_loaded()
+        .context("invalid voxel world snapshot")?;
     // The water active sets are not serialized — they are a cache of the arrays — so a
     // decoded world builds them before anything can iterate them.
     env.world.rebuild_active_sets();
@@ -42,7 +47,12 @@ mod tests {
     use crate::{Config, World};
 
     fn fixture() -> World {
-        World::empty(Config { width: 4, height: 4, depth: 1, ..Config::default() })
+        World::empty(Config {
+            width: 4,
+            height: 4,
+            depth: 1,
+            ..Config::default()
+        })
     }
 
     #[test]
@@ -70,14 +80,20 @@ mod tests {
         let i = world.config.index(1, 0, 0);
         world.free[i] = 1.0;
         let err = World::load(&world.save()).expect_err("bedrock holds no free water");
-        assert!(format!("{err:#}").contains("holds no free water"), "{err:#}");
+        assert!(
+            format!("{err:#}").contains("holds no free water"),
+            "{err:#}"
+        );
     }
 
     #[test]
     fn pore_water_without_pore_space_is_refused() {
         let mut world = fixture();
         let i = world.config.index(1, 2, 0);
-        assert!(!world.material[i].is_solid(), "the fixture's (1, 2, 0) must be air");
+        assert!(
+            !world.material[i].is_solid(),
+            "the fixture's (1, 2, 0) must be air"
+        );
         world.pore[i] = 1.0;
         let err = World::load(&world.save()).expect_err("air has no pore space");
         assert!(format!("{err:#}").contains("has no pore space"), "{err:#}");

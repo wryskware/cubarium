@@ -6,9 +6,9 @@
 use cubarium_surface::{Scale, Topology};
 use std::collections::HashSet;
 
-use cube_proto::{Face, Frame};
 use cubarium::raycast::{Camera, cast, invert_face};
 use cubarium_surface::{SurfacePoint, face_frame};
+use cube_proto::{Face, Frame};
 
 #[test]
 fn the_inversion_round_trips_every_pixel_center_on_every_face() {
@@ -17,16 +17,29 @@ fn the_inversion_round_trips_every_pixel_center_on_every_face() {
         let n = face_frame(face).normal;
         for y in 0..64u16 {
             for x in 0..64u16 {
-                let target = Topology::Cube.embed(Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y));
+                let target = Topology::Cube.embed(
+                    Scale::ONE,
+                    &SurfacePoint::pixel_center(Topology::Cube, face, x, y),
+                );
 
                 // The embedding inverts exactly.
                 let (u, v) = invert_face(face, target).expect("a pixel center is on its face");
-                assert!((u - (f64::from(x) + 0.5)).abs() < 1e-9, "{face:?} ({x},{y}) u = {u}");
-                assert!((v - (f64::from(y) + 0.5)).abs() < 1e-9, "{face:?} ({x},{y}) v = {v}");
+                assert!(
+                    (u - (f64::from(x) + 0.5)).abs() < 1e-9,
+                    "{face:?} ({x},{y}) u = {u}"
+                );
+                assert!(
+                    (v - (f64::from(y) + 0.5)).abs() < 1e-9,
+                    "{face:?} ({x},{y}) v = {v}"
+                );
 
                 // And the whole cast — nearest of the five planes, inside the square —
                 // picks this face and this pixel.
-                let origin = [target[0] + n[0] * 4.0, target[1] + n[1] * 4.0, target[2] + n[2] * 4.0];
+                let origin = [
+                    target[0] + n[0] * 4.0,
+                    target[1] + n[1] * 4.0,
+                    target[2] + n[2] * 4.0,
+                ];
                 let hit = cast(origin, [-n[0], -n[1], -n[2]]).expect("the ray hits the cube");
                 assert_eq!(hit.face, face, "{face:?} ({x},{y})");
                 assert_eq!(hit.pixel(), (x as u8, y as u8), "{face:?} ({x},{y})");
@@ -64,7 +77,10 @@ fn the_cube_samples_the_same_bytes_the_shim_receives() {
         }
     }
     assert!(background > 0, "the viewport corners must be background");
-    assert!(seen.len() >= 3, "the default corner view shows three faces: {seen:?}");
+    assert!(
+        seen.len() >= 3,
+        "the default corner view shows three faces: {seen:?}"
+    );
 }
 
 #[test]
@@ -91,8 +107,14 @@ fn no_ray_ever_reports_a_pixel_outside_a_chart() {
 fn there_is_no_sixth_face_where_the_bottom_would_be() {
     // Only five planes exist, so a ray up the y axis passes through the open bottom and
     // lands on the inside of Top rather than on a bottom face.
-    assert_eq!(cast([0.0, -6.0, 0.0], [0.0, 1.0, 0.0]).map(|h| h.face), Some(Face::Top));
-    assert_eq!(cast([0.4, -6.0, -0.3], [0.0, 1.0, 0.0]).map(|h| h.face), Some(Face::Top));
+    assert_eq!(
+        cast([0.0, -6.0, 0.0], [0.0, 1.0, 0.0]).map(|h| h.face),
+        Some(Face::Top)
+    );
+    assert_eq!(
+        cast([0.4, -6.0, -0.3], [0.0, 1.0, 0.0]).map(|h| h.face),
+        Some(Face::Top)
+    );
     // A ray grazing just below the cube hits no face square at all: background.
     assert!(cast([0.0, -1.5, 5.0], [0.0, 0.0, -1.0]).is_none());
     // No cast ever names a face outside the five-face set.

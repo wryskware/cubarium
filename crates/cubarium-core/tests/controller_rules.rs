@@ -5,12 +5,12 @@
 //! read only the public construction path. They pass `TurnGate::UNGATED`: these are the v1
 //! rules, which fauna v2's turn gate leaves intact at `k = 1` (`design/fauna-v2.md`).
 
+use cubarium_core::DT;
 use cubarium_core::config::{DriveConfig, OrganismConfig};
 use cubarium_core::controller::{Observation, TurnGate, decide};
 use cubarium_core::genome::{Genome, decode};
 use cubarium_core::organism::{Escrow, Mode, Organism, Origin};
 use cubarium_core::rng::Counter;
-use cubarium_core::DT;
 use cubarium_surface::{Face, SurfacePoint, Vec2};
 
 fn drives() -> DriveConfig {
@@ -46,7 +46,10 @@ fn organism(mode: Mode, reserve: f64, energy: f64, hunger_memory: f64) -> Organi
 /// The memory under test is therefore `1 − reserve` (with `R_max = 1`), chosen exactly.
 fn organism_with_pinned_hunger(mode: Mode, reserve: f64) -> Organism {
     let mut org = organism(mode, reserve, 2.0, 0.0);
-    assert_eq!(org.phenotype.reserve_max, 1.0, "the fixture assumes R_max = 1");
+    assert_eq!(
+        org.phenotype.reserve_max, 1.0,
+        "the fixture assumes R_max = 1"
+    );
     org.hunger_memory = org.hunger();
     org
 }
@@ -72,30 +75,90 @@ fn hysteresis_uses_strict_comparisons_at_both_thresholds() {
     // Exactly at `seek_on`: not greater than, so Resting stands.
     let org = organism_with_pinned_hunger(Mode::Resting, 1.0 - on);
     assert_eq!(org.hunger_memory, on, "the fixture did not land on seek_on");
-    let d = decide(&org, &Observation::default(), 0, DT, true, true, TurnGate::UNGATED);
+    let d = decide(
+        &org,
+        &Observation::default(),
+        0,
+        DT,
+        true,
+        true,
+        TurnGate::UNGATED,
+    );
     assert_eq!(d.hunger_memory, on, "the pinned memory drifted");
-    assert_eq!(d.mode, Mode::Resting, "m_h == seek_on must not start Seeking");
+    assert_eq!(
+        d.mode,
+        Mode::Resting,
+        "m_h == seek_on must not start Seeking"
+    );
 
     // One representable step above: Seeking.
     let org = organism_with_pinned_hunger(Mode::Resting, (1.0 - on).next_down());
     assert!(org.hunger_memory > on, "the fixture did not clear seek_on");
-    let d = decide(&org, &Observation::default(), 0, DT, true, true, TurnGate::UNGATED);
-    assert!(d.hunger_memory > on, "the pinned memory drifted below the threshold");
-    assert_eq!(d.mode, Mode::Seeking, "m_h just above seek_on must start Seeking");
+    let d = decide(
+        &org,
+        &Observation::default(),
+        0,
+        DT,
+        true,
+        true,
+        TurnGate::UNGATED,
+    );
+    assert!(
+        d.hunger_memory > on,
+        "the pinned memory drifted below the threshold"
+    );
+    assert_eq!(
+        d.mode,
+        Mode::Seeking,
+        "m_h just above seek_on must start Seeking"
+    );
 
     // Exactly at `seek_off`: not less than, so Seeking stands.
     let org = organism_with_pinned_hunger(Mode::Seeking, 1.0 - off);
-    assert_eq!(org.hunger_memory, off, "the fixture did not land on seek_off");
-    let d = decide(&org, &Observation::default(), 0, DT, true, true, TurnGate::UNGATED);
+    assert_eq!(
+        org.hunger_memory, off,
+        "the fixture did not land on seek_off"
+    );
+    let d = decide(
+        &org,
+        &Observation::default(),
+        0,
+        DT,
+        true,
+        true,
+        TurnGate::UNGATED,
+    );
     assert_eq!(d.hunger_memory, off, "the pinned memory drifted");
-    assert_eq!(d.mode, Mode::Seeking, "m_h == seek_off must not stop Seeking");
+    assert_eq!(
+        d.mode,
+        Mode::Seeking,
+        "m_h == seek_off must not stop Seeking"
+    );
 
     // One representable step below: Resting.
     let org = organism_with_pinned_hunger(Mode::Seeking, (1.0 - off).next_up());
-    assert!(org.hunger_memory < off, "the fixture did not drop below seek_off");
-    let d = decide(&org, &Observation::default(), 0, DT, true, true, TurnGate::UNGATED);
-    assert!(d.hunger_memory < off, "the pinned memory drifted above the threshold");
-    assert_eq!(d.mode, Mode::Resting, "m_h just below seek_off must stop Seeking");
+    assert!(
+        org.hunger_memory < off,
+        "the fixture did not drop below seek_off"
+    );
+    let d = decide(
+        &org,
+        &Observation::default(),
+        0,
+        DT,
+        true,
+        true,
+        TurnGate::UNGATED,
+    );
+    assert!(
+        d.hunger_memory < off,
+        "the pinned memory drifted above the threshold"
+    );
+    assert_eq!(
+        d.mode,
+        Mode::Resting,
+        "m_h just below seek_off must stop Seeking"
+    );
 
     // Inside the band nothing changes, in either direction.
     for mode in [Mode::Resting, Mode::Seeking] {
@@ -105,7 +168,15 @@ fn hysteresis_uses_strict_comparisons_at_both_thresholds() {
             "the fixture left the hysteresis band: {}",
             org.hunger_memory
         );
-        let d = decide(&org, &Observation::default(), 0, DT, true, true, TurnGate::UNGATED);
+        let d = decide(
+            &org,
+            &Observation::default(),
+            0,
+            DT,
+            true,
+            true,
+            TurnGate::UNGATED,
+        );
         assert_eq!(d.mode, mode, "the hysteresis band must hold {mode:?}");
     }
 }
@@ -116,15 +187,26 @@ fn the_turn_is_capped_at_the_maximum_turn_rate() {
     let limit = drives().turn_rate_max_deg.to_radians() * DT;
 
     // Steering exactly 90° away from the heading, in both senses, and 180° away.
-    for steer in [Vec2::new(0.0, -1.0), Vec2::new(0.0, 1.0), Vec2::new(-1.0, 0.0)] {
+    for steer in [
+        Vec2::new(0.0, -1.0),
+        Vec2::new(0.0, 1.0),
+        Vec2::new(-1.0, 0.0),
+    ] {
         // Empty reserve gives `h = 1`, so the food gradient reaches the steering vector at
         // full weight; the other three terms are zero.
         let org = organism(Mode::Seeking, 0.0, 2.0, 1.0);
-        let obs = Observation { grad_p: steer, ..Observation::default() };
+        let obs = Observation {
+            grad_p: steer,
+            ..Observation::default()
+        };
         let d = decide(&org, &obs, 0, DT, true, true, TurnGate::UNGATED);
 
         let turned = (d.heading.length() - 1.0).abs();
-        assert!(turned <= 1e-12, "the new heading is not a unit vector: {:?}", d.heading);
+        assert!(
+            turned <= 1e-12,
+            "the new heading is not a unit vector: {:?}",
+            d.heading
+        );
 
         let cos = org.heading.dot(d.heading).clamp(-1.0, 1.0);
         let angle = cos.acos();
@@ -142,10 +224,16 @@ fn the_turn_is_capped_at_the_maximum_turn_rate() {
 
     // Steering the heading already points at leaves it alone (no wobble at the cap).
     let org = organism(Mode::Seeking, 0.0, 2.0, 1.0);
-    let obs = Observation { grad_p: org.heading, ..Observation::default() };
+    let obs = Observation {
+        grad_p: org.heading,
+        ..Observation::default()
+    };
     let d = decide(&org, &obs, 0, DT, true, true, TurnGate::UNGATED);
     let angle = org.heading.dot(d.heading).clamp(-1.0, 1.0).acos();
-    assert!(angle <= 1e-9, "aligned steering turned the heading by {angle} rad");
+    assert!(
+        angle <= 1e-9,
+        "aligned steering turned the heading by {angle} rad"
+    );
 }
 
 /// Spec: "`Feeding` when Seeking and the own cell holds `P ≥ feed_min` (or `D ≥ feed_min`
@@ -156,33 +244,77 @@ fn feeding_needs_the_mechanism_and_the_threshold() {
     let hungry = || organism(Mode::Seeking, 0.0, 2.0, 1.0);
 
     // Grazing: exactly at the threshold feeds, one ulp below does not.
-    let at = Observation { p_here: feed_min, ..Observation::default() };
+    let at = Observation {
+        p_here: feed_min,
+        ..Observation::default()
+    };
     let d = decide(&hungry(), &at, 0, DT, true, true, TurnGate::UNGATED);
     assert_eq!(d.mode, Mode::Feeding, "p_here == feed_min must feed");
     assert_eq!((d.graze_effort, d.scavenge_effort), (1.0, 0.0));
 
-    let below = Observation { p_here: feed_min.next_down(), ..Observation::default() };
+    let below = Observation {
+        p_here: feed_min.next_down(),
+        ..Observation::default()
+    };
     let d = decide(&hungry(), &below, 0, DT, true, true, TurnGate::UNGATED);
-    assert_eq!(d.mode, Mode::Seeking, "p_here just below feed_min must not feed");
+    assert_eq!(
+        d.mode,
+        Mode::Seeking,
+        "p_here just below feed_min must not feed"
+    );
     assert_eq!((d.graze_effort, d.scavenge_effort), (0.0, 0.0));
 
     // With grazing off, only detritus decides.
-    let plenty_of_producer = Observation { p_here: 10.0, ..Observation::default() };
-    let d = decide(&hungry(), &plenty_of_producer, 0, DT, false, true, TurnGate::UNGATED);
-    assert_eq!(d.mode, Mode::Seeking, "grazing is off; producer must not feed anyone");
+    let plenty_of_producer = Observation {
+        p_here: 10.0,
+        ..Observation::default()
+    };
+    let d = decide(
+        &hungry(),
+        &plenty_of_producer,
+        0,
+        DT,
+        false,
+        true,
+        TurnGate::UNGATED,
+    );
+    assert_eq!(
+        d.mode,
+        Mode::Seeking,
+        "grazing is off; producer must not feed anyone"
+    );
     assert_eq!((d.graze_effort, d.scavenge_effort), (0.0, 0.0));
 
-    let detritus = Observation { p_here: 10.0, d_here: feed_min, ..Observation::default() };
+    let detritus = Observation {
+        p_here: 10.0,
+        d_here: feed_min,
+        ..Observation::default()
+    };
     let d = decide(&hungry(), &detritus, 0, DT, false, true, TurnGate::UNGATED);
-    assert_eq!(d.mode, Mode::Feeding, "d_here == feed_min must feed when scavenging is on");
+    assert_eq!(
+        d.mode,
+        Mode::Feeding,
+        "d_here == feed_min must feed when scavenging is on"
+    );
     assert_eq!((d.graze_effort, d.scavenge_effort), (0.0, 1.0));
 
-    let thin = Observation { d_here: feed_min.next_down(), ..Observation::default() };
+    let thin = Observation {
+        d_here: feed_min.next_down(),
+        ..Observation::default()
+    };
     let d = decide(&hungry(), &thin, 0, DT, false, true, TurnGate::UNGATED);
-    assert_eq!(d.mode, Mode::Seeking, "d_here just below feed_min must not feed");
+    assert_eq!(
+        d.mode,
+        Mode::Seeking,
+        "d_here just below feed_min must not feed"
+    );
 
     // With both channels on and both cells stocked, both requests go out.
-    let both = Observation { p_here: 1.0, d_here: 1.0, ..Observation::default() };
+    let both = Observation {
+        p_here: 1.0,
+        d_here: 1.0,
+        ..Observation::default()
+    };
     let d = decide(&hungry(), &both, 0, DT, true, true, TurnGate::UNGATED);
     assert_eq!((d.graze_effort, d.scavenge_effort), (1.0, 1.0));
 
@@ -193,7 +325,15 @@ fn feeding_needs_the_mechanism_and_the_threshold() {
 
     // Feeding falls back to Seeking when the cell drops below the threshold.
     let feeding = organism(Mode::Feeding, 0.0, 2.0, 1.0);
-    let d = decide(&feeding, &Observation::default(), 0, DT, true, true, TurnGate::UNGATED);
+    let d = decide(
+        &feeding,
+        &Observation::default(),
+        0,
+        DT,
+        true,
+        true,
+        TurnGate::UNGATED,
+    );
     assert_eq!(d.mode, Mode::Seeking);
 }
 
@@ -206,12 +346,23 @@ fn effort_is_the_phenotypes_drive_for_the_mode() {
 
     // Seeking: hungry, nothing underfoot.
     let seeking = organism(Mode::Seeking, 0.0, 2.0, 1.0);
-    let d = decide(&seeking, &Observation::default(), 0, DT, true, true, TurnGate::UNGATED);
+    let d = decide(
+        &seeking,
+        &Observation::default(),
+        0,
+        DT,
+        true,
+        true,
+        TurnGate::UNGATED,
+    );
     assert_eq!(d.mode, Mode::Seeking);
     assert_eq!(d.effort, 1.0, "Seeking effort is 1.0 by the spec");
 
     // Feeding: hungry, standing on producer.
-    let obs = Observation { p_here: 1.0, ..Observation::default() };
+    let obs = Observation {
+        p_here: 1.0,
+        ..Observation::default()
+    };
     let d = decide(&seeking, &obs, 0, DT, true, true, TurnGate::UNGATED);
     assert_eq!(d.mode, Mode::Feeding);
     assert_eq!(d.effort, f64::from(genome_drives.feed_effort));
@@ -262,15 +413,36 @@ fn budding_requires_every_condition_including_an_empty_escrow() {
     let ready = |now: u64, reserve: f64, energy: f64| {
         let mut org = organism(Mode::Resting, reserve, energy, 0.0);
         org.born_tick = 0;
-        decide(&org, &Observation::default(), now, DT, true, true, TurnGate::UNGATED).bud
+        decide(
+            &org,
+            &Observation::default(),
+            now,
+            DT,
+            true,
+            true,
+            TurnGate::UNGATED,
+        )
+        .bud
     };
 
-    assert!(ready(old_enough, reserve, energy), "every condition met but bud was refused");
+    assert!(
+        ready(old_enough, reserve, energy),
+        "every condition met but bud was refused"
+    );
 
     // Each condition alone blocks conception.
-    assert!(!ready(old_enough - 1, reserve, energy), "a too-young organism budded");
-    assert!(!ready(old_enough, reserve.next_down(), energy), "a thin reserve budded");
-    assert!(!ready(old_enough, reserve, energy.next_down()), "a low energy budded");
+    assert!(
+        !ready(old_enough - 1, reserve, energy),
+        "a too-young organism budded"
+    );
+    assert!(
+        !ready(old_enough, reserve.next_down(), energy),
+        "a thin reserve budded"
+    );
+    assert!(
+        !ready(old_enough, reserve, energy.next_down()),
+        "a low energy budded"
+    );
 
     // An existing escrow blocks it even when everything else is satisfied.
     let mut gestating = organism(Mode::Resting, reserve, energy, 0.0);
@@ -281,8 +453,19 @@ fn budding_requires_every_condition_including_an_empty_escrow() {
         started_tick: 0,
         genome: genome.clone(),
     });
-    let d = decide(&gestating, &Observation::default(), old_enough, DT, true, true, TurnGate::UNGATED);
-    assert!(!d.bud, "an organism already gestating requested a second bud");
+    let d = decide(
+        &gestating,
+        &Observation::default(),
+        old_enough,
+        DT,
+        true,
+        true,
+        TurnGate::UNGATED,
+    );
+    assert!(
+        !d.bud,
+        "an organism already gestating requested a second bud"
+    );
 }
 
 /// Spec: "`ou` is the organism's Ornstein–Uhlenbeck turn noise"; the doc gives
@@ -295,7 +478,15 @@ fn the_turn_noise_relaxes_and_is_driven_by_the_supplied_normal() {
     // With no noise the vector decays geometrically toward zero.
     let mut org = organism(Mode::Resting, 1.0, 2.0, 0.0);
     org.ou = Vec2::new(1.0, -0.5);
-    let d = decide(&org, &Observation::default(), 0, DT, true, true, TurnGate::UNGATED);
+    let d = decide(
+        &org,
+        &Observation::default(),
+        0,
+        DT,
+        true,
+        true,
+        TurnGate::UNGATED,
+    );
     let expected = org.ou * (1.0 - DT / TAU_OU);
     assert!(
         (d.ou.x - expected.x).abs() < 1e-15 && (d.ou.y - expected.y).abs() < 1e-15,
@@ -306,7 +497,10 @@ fn the_turn_noise_relaxes_and_is_driven_by_the_supplied_normal() {
     // The supplied standard normal enters scaled by `turn_noise · sqrt(dt)`.
     let mut org = organism(Mode::Resting, 1.0, 2.0, 0.0);
     org.ou = Vec2::ZERO;
-    let obs = Observation { noise: Vec2::new(1.0, 2.0), ..Observation::default() };
+    let obs = Observation {
+        noise: Vec2::new(1.0, 2.0),
+        ..Observation::default()
+    };
     let d = decide(&org, &obs, 0, DT, true, true, TurnGate::UNGATED);
     let scale = turn_noise * DT.sqrt();
     assert!(
@@ -317,5 +511,9 @@ fn the_turn_noise_relaxes_and_is_driven_by_the_supplied_normal() {
     );
 
     // `decide` is pure: it reports the new vector rather than mutating the organism.
-    assert_eq!(org.ou, Vec2::ZERO, "decide mutated the organism's OU vector");
+    assert_eq!(
+        org.ou,
+        Vec2::ZERO,
+        "decide mutated the organism's OU vector"
+    );
 }

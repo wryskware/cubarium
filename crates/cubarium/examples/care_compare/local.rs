@@ -1,8 +1,8 @@
 //! Fixed, paired observation regions. Never selects a more responsive site after care.
-use cubarium_surface::{Scale, Topology};
 use anyhow::{Context, Result, ensure};
 use cubarium_core::{CareTarget, OrganismId, WorldState, organism::Mode};
 use cubarium_surface::{CellId, FieldGraph, cell_of};
+use cubarium_surface::{Scale, Topology};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
@@ -102,7 +102,12 @@ impl LocalObserver {
         let graph = FieldGraph::new(Topology::Cube, Scale::ONE);
         let mut regions = Vec::new();
         for &target in targets {
-            let mut cells = BTreeSet::from([target.resolve(cubarium_surface::Topology::Cube, cubarium_surface::Scale::ONE).context("invalid local target")?]);
+            let mut cells = BTreeSet::from([target
+                .resolve(
+                    cubarium_surface::Topology::Cube,
+                    cubarium_surface::Scale::ONE,
+                )
+                .context("invalid local target")?]);
             for _ in 0..HOPS {
                 let neighbors: Vec<_> = cells
                     .iter()
@@ -157,7 +162,11 @@ impl LocalObserver {
             let members: Vec<_> = state
                 .organisms
                 .iter()
-                .filter(|(_, o)| region.cells.contains(&cell_of(Topology::Cube, Scale::ONE, &o.pos)))
+                .filter(|(_, o)| {
+                    region
+                        .cells
+                        .contains(&cell_of(Topology::Cube, Scale::ONE, &o.pos))
+                })
                 .collect();
             region.cohort = Some(members.iter().map(|(id, _)| *id).collect());
             region.cohort_opening = json!({"tick":state.tick,"target":region.target,
@@ -274,7 +283,8 @@ mod tests {
         assert_eq!(totals["resting"], 3);
         // Moving away does not erase a fixed cohort member or add the replacement.
         state.organisms.get_mut(ids[0]).unwrap().pos = SurfacePoint::new(Face::Back, 32.0, 32.0);
-        state.organisms.get_mut(ids[2]).unwrap().pos = target.resolve().unwrap().center(Topology::Cube, Scale::ONE);
+        state.organisms.get_mut(ids[2]).unwrap().pos =
+            target.resolve().unwrap().center(Topology::Cube, Scale::ONE);
         state.tick += 1;
         observer.observe(&state).unwrap();
         let cohort = observer.sample(&state).unwrap()["regions"][0]["first_pulse_cohort"].clone();

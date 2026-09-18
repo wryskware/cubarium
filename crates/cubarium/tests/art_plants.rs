@@ -8,22 +8,19 @@
 use cubarium_surface::{Scale, Topology};
 use std::path::Path;
 
-use cube_proto::{FACE_SIZE, Face};
 use cubarium::art::{ArtPack, Band};
 use cubarium::art_present::{
     ArtPresenter, CANOPY_PLANTS, FOLIAGE_PLANTS, FOLIAGE_STAGES, FRUIT_SHOW, HEADING_JITTER_DEG,
-    MOTIF_OPACITY, RANK_FULL, RANK_MID, REED_DEPTH, REED_STAGES, SOIL_PLANT_OPACITY,
-    SOIL_PLANTS, SOIL_SCALE, SOIL_STAGES, STAGE_HYST, WATER_PLANT, band_of, band_opacity,
-    cell_band, fruit_stage, next_stage, placement_of, plant_density, plant_phase_of,
-    plant_cap, rank_cap_of, slot_of, soil_weight, species_of, stage_opacity, stage_thresholds,
-    stalk_heading, up_of, column_density, ground_pose, ground_opacity, ground_phase_of,
-    ground_points, ground_weight, tall_anchor, tall_columns, tall_heading,
-    tall_phase_of, tall_target, algae_water_color, water_brightness, water_coverage, water_phase,
-    TALL_PLANTS, VINE_PLANT, present_seconds, tall_grown_px, trunk_strip, TALL_FIRST_JOIN,
-    TALL_MAX_SEGMENTS, TALL_OPACITY, TALL_VINE_FLOOR, TALL_VINE_TOP, TILE_ROWS,
-    plant_bend_budget, slot_wind, tall_amplitude, tall_bend_base, tall_bend_budget, wind_strength,
-    WIND_QUIET_TICK,
-    TALL_BEND_LENGTH, TALL_BEND_ROOT,
+    MOTIF_OPACITY, RANK_FULL, RANK_MID, REED_DEPTH, REED_STAGES, SOIL_PLANT_OPACITY, SOIL_PLANTS,
+    SOIL_SCALE, SOIL_STAGES, STAGE_HYST, TALL_BEND_LENGTH, TALL_BEND_ROOT, TALL_FIRST_JOIN,
+    TALL_MAX_SEGMENTS, TALL_OPACITY, TALL_PLANTS, TALL_VINE_FLOOR, TALL_VINE_TOP, TILE_ROWS,
+    VINE_PLANT, WATER_PLANT, WIND_QUIET_TICK, algae_water_color, band_of, band_opacity, cell_band,
+    column_density, fruit_stage, ground_opacity, ground_phase_of, ground_points, ground_pose,
+    ground_weight, next_stage, placement_of, plant_bend_budget, plant_cap, plant_density,
+    plant_phase_of, present_seconds, rank_cap_of, slot_of, slot_wind, soil_weight, species_of,
+    stage_opacity, stage_thresholds, stalk_heading, tall_amplitude, tall_anchor, tall_bend_base,
+    tall_bend_budget, tall_columns, tall_grown_px, tall_heading, tall_phase_of, tall_target,
+    trunk_strip, up_of, water_brightness, water_coverage, water_phase, wind_strength,
     wood_from_producer,
 };
 use cubarium::clock::DT;
@@ -36,6 +33,7 @@ use cubarium_surface::{
     CUBE_CELL_COUNT, CellId, Edge, PixelImage, ScalarField, SurfacePoint, Vec2, cell_of,
     pixel_neighbor,
 };
+use cube_proto::{FACE_SIZE, Face};
 
 // ---------------------------------------------------------------------------
 // fixtures
@@ -89,13 +87,15 @@ fn draw(p: &mut ArtPresenter, v: &RenderView, fruit: Option<&[f64]>) -> Canvas {
 }
 
 fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
-    Face::ALL
-        .into_iter()
-        .flat_map(|f| (0..FACE_SIZE as u16).flat_map(move |y| (0..FACE_SIZE as u16).map(move |x| (f, x, y))))
+    Face::ALL.into_iter().flat_map(|f| {
+        (0..FACE_SIZE as u16).flat_map(move |y| (0..FACE_SIZE as u16).map(move |x| (f, x, y)))
+    })
 }
 
 fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u16, u16)> {
-    every_pixel().filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y)).collect()
+    every_pixel()
+        .filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y))
+        .collect()
 }
 
 fn assert_same_canvas(a: &Canvas, b: &Canvas, what: &str) {
@@ -115,11 +115,19 @@ fn assert_same_canvas(a: &Canvas, b: &Canvas, what: &str) {
 // ---------------------------------------------------------------------------
 
 fn filtered(field: &ScalarField, face: Face, x: u16, y: u16) -> f64 {
-    let mut sum = field.get(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y))) * 4.0;
+    let mut sum = field.get(cell_of(
+        Topology::Cube,
+        Scale::ONE,
+        &SurfacePoint::pixel_center(Topology::Cube, face, x, y),
+    )) * 4.0;
     let mut divisor = 4.0;
     for edge in Edge::ALL {
         if let Some((nf, nx, ny)) = pixel_neighbor(Topology::Cube, face, x, y, edge) {
-            sum += field.get(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, nf, nx, ny)));
+            sum += field.get(cell_of(
+                Topology::Cube,
+                Scale::ONE,
+                &SurfacePoint::pixel_center(Topology::Cube, nf, nx, ny),
+            ));
             divisor += 1.0;
         }
     }
@@ -194,7 +202,9 @@ fn expected_ground(v: &RenderView) -> Canvas {
             let point = SurfacePoint::pixel_center(Topology::Cube, face, x, y);
             let cell = cell_of(Topology::Cube, Scale::ONE, &point);
             let band = band_of(cell);
-            let Some(tile) = pack.ground_for(band) else { continue };
+            let Some(tile) = pack.ground_for(band) else {
+                continue;
+            };
             // Ground cover is low cover, not structure: it still reads the producer field.
             let t = cubarium::art_present::ground_density(v, cell.index(), band);
             let opacity = ground_opacity(t, band) * ground_weight(face, x, y, band);
@@ -202,8 +212,20 @@ fn expected_ground(v: &RenderView) -> Canvas {
                 continue;
             }
             // Presentation time of a frame at fraction 0: the tick's own instant.
-            let pose = ground_pose(tile, present_seconds(v.tick, 0.0) + ground_phase_of(face, x, y, tile.seconds));
-            stamp_pose(&mut canvas, point, Vec2::new(1.0, 0.0), pose, 1.0, opacity, Mask::None, &mut scratch);
+            let pose = ground_pose(
+                tile,
+                present_seconds(v.tick, 0.0) + ground_phase_of(face, x, y, tile.seconds),
+            );
+            stamp_pose(
+                &mut canvas,
+                point,
+                Vec2::new(1.0, 0.0),
+                pose,
+                1.0,
+                opacity,
+                Mask::None,
+                &mut scratch,
+            );
         }
     }
     // Water: filtered depth, coverage 1 − exp(−w/film), source-over, shimmering.
@@ -216,16 +238,29 @@ fn expected_ground(v: &RenderView) -> Canvas {
         }
         // Algae: the pool leans mint by its own cell's producer density over saturation.
         let saturation = v.producer_max * PRODUCER_SATURATION;
-        let cell = cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y));
-        let p_t = if saturation > 0.0 { v.producer[cell.index()] / saturation } else { 0.0 };
+        let cell = cell_of(
+            Topology::Cube,
+            Scale::ONE,
+            &SurfacePoint::pixel_center(Topology::Cube, face, x, y),
+        );
+        let p_t = if saturation > 0.0 {
+            v.producer[cell.index()] / saturation
+        } else {
+            0.0
+        };
         let c = algae_water_color(w, p_t);
         let b = water_brightness(present_seconds(v.tick, 0.0), water_phase(face, x, y));
         let under = canvas.get(face, x, y);
-        canvas.set(face, x, y, [
-            c[0] * b * a + under[0] * (1.0 - a),
-            c[1] * b * a + under[1] * (1.0 - a),
-            c[2] * b * a + under[2] * (1.0 - a),
-        ]);
+        canvas.set(
+            face,
+            x,
+            y,
+            [
+                c[0] * b * a + under[0] * (1.0 - a),
+                c[1] * b * a + under[1] * (1.0 - a),
+                c[2] * b * a + under[2] * (1.0 - a),
+            ],
+        );
     }
     canvas
 }
@@ -242,7 +277,9 @@ fn stamp_tall(canvas: &mut Canvas, v: &RenderView, pack: &ArtPack) {
             continue;
         }
         let grown = tall_grown_px(f64::from(n));
-        let plant = pack.tall_plant(TALL_PLANTS[column.pick]).expect("tall species");
+        let plant = pack
+            .tall_plant(TALL_PLANTS[column.pick])
+            .expect("tall species");
         let heading = tall_heading(column.face, column.cx);
         // The column's single wind amplitude, bounded by its own family's measured budget
         // and, where it carries one, the vine's: every part takes this same amplitude with
@@ -257,7 +294,9 @@ fn stamp_tall(canvas: &mut Canvas, v: &RenderView, pack: &ArtPack) {
         };
         let amplitude = tall_amplitude(&column, budget, present_seconds(v.tick, 0.0));
         let mut stamp = |clip: &cubarium::art::Clip, i: u8, mask: Mask| {
-            let pose = clip.sample(present_seconds(v.tick, 0.0) + tall_phase_of(column.face, column.cx, clip.seconds));
+            let pose = clip.sample(
+                present_seconds(v.tick, 0.0) + tall_phase_of(column.face, column.cx, clip.seconds),
+            );
             let bend = Bend {
                 amplitude,
                 base: tall_bend_base(f64::from(i)),
@@ -284,8 +323,19 @@ fn stamp_tall(canvas: &mut Canvas, v: &RenderView, pack: &ArtPack) {
         let (strip_floor, strip_top) = trunk_strip(plant);
         for i in 1..=n {
             let floor = if i == 1 { TALL_FIRST_JOIN } else { strip_floor };
-            let top = if i == TALL_MAX_SEGMENTS { TILE_ROWS } else { strip_top };
-            stamp(&plant.trunk, i, Mask::Strip { floor, reveal: local(i).min(top) });
+            let top = if i == TALL_MAX_SEGMENTS {
+                TILE_ROWS
+            } else {
+                strip_top
+            };
+            stamp(
+                &plant.trunk,
+                i,
+                Mask::Strip {
+                    floor,
+                    reveal: local(i).min(top),
+                },
+            );
         }
         if let Some(cap) = &plant.cap {
             stamp(cap, n + 1, Mask::None);
@@ -293,12 +343,23 @@ fn stamp_tall(canvas: &mut Canvas, v: &RenderView, pack: &ArtPack) {
         if column.vine {
             let vine = pack.tall_plant(VINE_PLANT).expect("vine");
             for i in (1..=TALL_MAX_SEGMENTS).step_by(2) {
-                let top = if i + 2 > TALL_MAX_SEGMENTS { TILE_ROWS } else { TALL_VINE_TOP };
+                let top = if i + 2 > TALL_MAX_SEGMENTS {
+                    TILE_ROWS
+                } else {
+                    TALL_VINE_TOP
+                };
                 let reveal = local(i).min(top);
                 if reveal <= TALL_VINE_FLOOR {
                     break;
                 }
-                stamp(&vine.trunk, i, Mask::Strip { floor: TALL_VINE_FLOOR, reveal });
+                stamp(
+                    &vine.trunk,
+                    i,
+                    Mask::Strip {
+                        floor: TALL_VINE_FLOOR,
+                        reveal,
+                    },
+                );
             }
         }
     }
@@ -309,7 +370,8 @@ fn stamp_tall(canvas: &mut Canvas, v: &RenderView, pack: &ArtPack) {
 fn stage_from_bare(v: &RenderView, cell: CellId) -> (Band, Option<u8>) {
     let band = cell_band(cell, v.water.get(cell.index()).copied());
     let t = plant_density(v, cell.index(), band);
-    let stage = plant_cap(band, cell).and_then(|cap| next_stage(None, t, &stage_thresholds(band), cap));
+    let stage =
+        plant_cap(band, cell).and_then(|cap| next_stage(None, t, &stage_thresholds(band), cap));
     (band, stage)
 }
 
@@ -320,8 +382,12 @@ fn expected_image(v: &RenderView, pack: &ArtPack, fruit: Option<&[f64]>) -> Canv
     let mut canvas = expected_ground(v);
     let mut scratch: Vec<PixelImage> = Vec::new();
     for cell in CellId::all(Topology::Cube, Scale::ONE) {
-        let (band, Some(stage)) = stage_from_bare(v, cell) else { continue };
-        let Some(plant) = pack.plant(species_of(band, cell)) else { continue };
+        let (band, Some(stage)) = stage_from_bare(v, cell) else {
+            continue;
+        };
+        let Some(plant) = pack.plant(species_of(band, cell)) else {
+            continue;
+        };
         let t = plant_density(v, cell.index(), band);
         let opacity = stage_opacity(stage, t, &stage_thresholds(band), band_opacity(band));
         if opacity <= 0.0 {
@@ -373,21 +439,44 @@ fn species_follow_the_band_and_a_wet_cell_grows_reeds() {
             Band::Canopy => &CANOPY_PLANTS,
             Band::Water => unreachable!("a dry cell is never water"),
         };
-        assert!(allowed.contains(&name), "{cell:?} in {band:?} picked {name}");
+        assert!(
+            allowed.contains(&name),
+            "{cell:?} in {band:?} picked {name}"
+        );
         *seen.entry(name).or_default() += 1;
         // Wet, the same cell grows reeds whatever its band.
         assert_eq!(cell_band(cell, Some(REED_DEPTH + 0.01)), Band::Water);
-        assert_eq!(cell_band(cell, Some(REED_DEPTH)), band, "the depth rule is strict");
+        assert_eq!(
+            cell_band(cell, Some(REED_DEPTH)),
+            band,
+            "the depth rule is strict"
+        );
         assert_eq!(cell_band(cell, None), band);
         assert_eq!(species_of(Band::Water, cell), WATER_PLANT);
     }
-    for name in SOIL_PLANTS.iter().chain(&FOLIAGE_PLANTS).chain(&CANOPY_PLANTS) {
-        assert!(seen[name] > 60, "{name} is picked by only {} cells", seen[name]);
+    for name in SOIL_PLANTS
+        .iter()
+        .chain(&FOLIAGE_PLANTS)
+        .chain(&CANOPY_PLANTS)
+    {
+        assert!(
+            seen[name] > 60,
+            "{name} is picked by only {} cells",
+            seen[name]
+        );
     }
     // Every named species exists in the pack.
     let art = pack();
-    for name in SOIL_PLANTS.iter().chain(&FOLIAGE_PLANTS).chain(&CANOPY_PLANTS).chain([&WATER_PLANT]) {
-        assert!(art.plant(name).is_some(), "the pack has no plant named {name}");
+    for name in SOIL_PLANTS
+        .iter()
+        .chain(&FOLIAGE_PLANTS)
+        .chain(&CANOPY_PLANTS)
+        .chain([&WATER_PLANT])
+    {
+        assert!(
+            art.plant(name).is_some(),
+            "the pack has no plant named {name}"
+        );
     }
 }
 
@@ -395,7 +484,11 @@ fn species_follow_the_band_and_a_wet_cell_grows_reeds() {
 fn slots_stay_in_their_cell_stand_up_on_the_sides_and_face_freely_on_top() {
     for cell in CellId::all(Topology::Cube, Scale::ONE) {
         let slot = slot_of(cell);
-        assert_eq!(cell_of(Topology::Cube, Scale::ONE, &slot.at), cell, "{cell:?} anchored its plant elsewhere");
+        assert_eq!(
+            cell_of(Topology::Cube, Scale::ONE, &slot.at),
+            cell,
+            "{cell:?} anchored its plant elsewhere"
+        );
         assert!((slot.heading.length() - 1.0).abs() < 1e-9);
         assert!(slot.pick < 2);
         assert!(slot.rank_cap <= 2);
@@ -407,7 +500,11 @@ fn slots_stay_in_their_cell_stand_up_on_the_sides_and_face_freely_on_top() {
                 // Up really is up: a step along it raises the embedded height.
                 let here = cell.center(Topology::Cube, Scale::ONE);
                 let there = SurfacePoint::new(here.face, here.u + up.x, here.v + up.y);
-                assert!(Topology::Cube.embed(Scale::ONE, &there)[1] > Topology::Cube.embed(Scale::ONE, &here)[1], "{cell:?}: {up:?} is not up");
+                assert!(
+                    Topology::Cube.embed(Scale::ONE, &there)[1]
+                        > Topology::Cube.embed(Scale::ONE, &here)[1],
+                    "{cell:?}: {up:?} is not up"
+                );
                 // Tiles stand along their −y, which the renderer lays along the heading
                 // turned a quarter turn; so the heading is up turned the other way.
                 let stand = stalk_heading(up);
@@ -420,7 +517,11 @@ fn slots_stay_in_their_cell_stand_up_on_the_sides_and_face_freely_on_top() {
                 let tile_up = Vec2::new(-side.x, -side.y);
                 assert!((tile_up.x - up.x).abs() < 1e-12 && (tile_up.y - up.y).abs() < 1e-12);
             }
-            None => assert_eq!(cell.face(Topology::Cube, Scale::ONE), Face::Top, "{cell:?} has no up"),
+            None => assert_eq!(
+                cell.face(Topology::Cube, Scale::ONE),
+                Face::Top,
+                "{cell:?} has no up"
+            ),
         }
     }
 }
@@ -432,9 +533,18 @@ fn the_rank_split_is_about_a_third_each() {
         counts[usize::from(rank_cap_of(cell))] += 1;
     }
     let share = |n: usize| n as f64 / CUBE_CELL_COUNT as f64;
-    assert!((share(counts[2]) - RANK_FULL).abs() < 0.05, "stage-2 share {counts:?}");
-    assert!((share(counts[1]) - (RANK_MID - RANK_FULL)).abs() < 0.05, "stage-1 share {counts:?}");
-    assert!((share(counts[0]) - (1.0 - RANK_MID)).abs() < 0.05, "sprout share {counts:?}");
+    assert!(
+        (share(counts[2]) - RANK_FULL).abs() < 0.05,
+        "stage-2 share {counts:?}"
+    );
+    assert!(
+        (share(counts[1]) - (RANK_MID - RANK_FULL)).abs() < 0.05,
+        "stage-1 share {counts:?}"
+    );
+    assert!(
+        (share(counts[0]) - (1.0 - RANK_MID)).abs() < 0.05,
+        "sprout share {counts:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -445,13 +555,27 @@ fn the_rank_split_is_about_a_third_each() {
 fn stages_rise_at_the_threshold_and_fall_only_below_the_hysteresis() {
     for band in [Band::Soil, Band::Foliage, Band::Canopy, Band::Water] {
         let th = stage_thresholds(band);
-        assert!(th[0] < th[1] && th[1] < th[2], "{band:?} thresholds are not ordered");
+        assert!(
+            th[0] < th[1] && th[1] < th[2],
+            "{band:?} thresholds are not ordered"
+        );
         for (i, &t) in th.iter().enumerate() {
             let stage = i as u8;
-            assert_eq!(next_stage(None, t, &th, 2), stage.checked_sub(1), "{band:?} at th[{i}] exactly");
-            assert_eq!(next_stage(None, t + 1e-9, &th, 2), Some(stage), "{band:?} just over th[{i}]");
+            assert_eq!(
+                next_stage(None, t, &th, 2),
+                stage.checked_sub(1),
+                "{band:?} at th[{i}] exactly"
+            );
+            assert_eq!(
+                next_stage(None, t + 1e-9, &th, 2),
+                Some(stage),
+                "{band:?} just over th[{i}]"
+            );
             // Held just under the threshold, released below threshold − hysteresis.
-            assert_eq!(next_stage(Some(stage), t - STAGE_HYST / 2.0, &th, 2), Some(stage));
+            assert_eq!(
+                next_stage(Some(stage), t - STAGE_HYST / 2.0, &th, 2),
+                Some(stage)
+            );
             assert_eq!(
                 next_stage(Some(stage), t - STAGE_HYST - 1e-9, &th, 2),
                 stage.checked_sub(1),
@@ -463,7 +587,12 @@ fn stages_rise_at_the_threshold_and_fall_only_below_the_hysteresis() {
         assert_eq!(next_stage(None, 10.0, &th, 1), Some(1));
         assert_eq!(next_stage(None, 10.0, &th, 2), Some(2));
     }
-    const { assert!(REED_STAGES[0] > REED_DEPTH, "reeds stand only in pools deeper than the water line") };
+    const {
+        assert!(
+            REED_STAGES[0] > REED_DEPTH,
+            "reeds stand only in pools deeper than the water line"
+        )
+    };
 }
 
 #[test]
@@ -479,7 +608,11 @@ fn a_flickering_field_does_not_flicker_the_plant() {
     p.observe(&view(0, producer.clone(), flat(0.0), flat(0.0)));
     assert_eq!(p.stage_of(cell), Some(0));
     for tick in 1..40u64 {
-        let wobble = if tick % 2 == 0 { th[0] + 0.01 } else { th[0] - STAGE_HYST / 2.0 };
+        let wobble = if tick % 2 == 0 {
+            th[0] + 0.01
+        } else {
+            th[0] - STAGE_HYST / 2.0
+        };
         producer[cell.index()] = saturation() * wobble;
         p.observe(&view(tick, producer.clone(), flat(0.0), flat(0.0)));
         assert_eq!(p.stage_of(cell), Some(0), "tick {tick} flickered");
@@ -536,9 +669,17 @@ fn two_presenters_agree_on_every_slot_and_phase() {
         assert_eq!(plant_phase_of(cell, f64::NAN), 0.0);
     }
     // Phases are spread, not shared: at least half the cells differ from their neighbour.
-    let phases: Vec<f64> = CellId::all(Topology::Cube, Scale::ONE).map(|c| plant_phase_of(c, 1.0)).collect();
-    let distinct = phases.windows(2).filter(|w| (w[0] - w[1]).abs() > 1e-6).count();
-    assert!(distinct > CUBE_CELL_COUNT / 2, "{distinct} neighbouring cells differ in phase");
+    let phases: Vec<f64> = CellId::all(Topology::Cube, Scale::ONE)
+        .map(|c| plant_phase_of(c, 1.0))
+        .collect();
+    let distinct = phases
+        .windows(2)
+        .filter(|w| (w[0] - w[1]).abs() > 1e-6)
+        .count();
+    assert!(
+        distinct > CUBE_CELL_COUNT / 2,
+        "{distinct} neighbouring cells differ in phase"
+    );
 }
 
 #[test]
@@ -548,10 +689,15 @@ fn sway_runs_on_simulated_time_and_repeats_after_a_clip_period() {
     let seconds = plant.stages[2].seconds;
     let ticks = |secs: f64| {
         let t = (secs / DT).round() as u64;
-        assert!((t as f64 * DT - secs).abs() < 1e-9, "{secs} s is not a whole number of ticks");
+        assert!(
+            (t as f64 * DT - secs).abs() < 1e-9,
+            "{secs} s is not a whole number of ticks"
+        );
         t
     };
-    fn gcd(a: u64, b: u64) -> u64 { if b == 0 { a } else { gcd(b, a % b) } }
+    fn gcd(a: u64, b: u64) -> u64 {
+        if b == 0 { a } else { gcd(b, a % b) }
+    }
     let lcm = |a: u64, b: u64| a / gcd(a, b) * b;
     // Every simulated-time layer in a dry saturated world: the plants' sway, the ground
     // tiles' breath and the tall plants' pulse. The image repeats after their common period.
@@ -570,16 +716,28 @@ fn sway_runs_on_simulated_time_and_repeats_after_a_clip_period() {
     // clip period: it is deliberately not a loop.)
     let base = WIND_QUIET_TICK;
     for tick in [base, base + period, base + plant_period / 2] {
-        assert_eq!(wind_strength(present_seconds(tick, 0.0)), 0.0, "tick {tick} is windy");
+        assert_eq!(
+            wind_strength(present_seconds(tick, 0.0)),
+            0.0,
+            "tick {tick} is windy"
+        );
     }
     let v0 = view(base, flat(saturation()), flat(0.0), flat(0.0));
     let v1 = view(base + period, flat(saturation()), flat(0.0), flat(0.0));
-    let v_half = view(base + plant_period / 2, flat(saturation()), flat(0.0), flat(0.0));
+    let v_half = view(
+        base + plant_period / 2,
+        flat(saturation()),
+        flat(0.0),
+        flat(0.0),
+    );
     let a = draw(&mut p, &v0, None);
     let b = draw(&mut p, &v1, None);
     let h = draw(&mut p, &v_half, None);
     assert_same_canvas(&a, &b, "one sway period later");
-    assert!(!differing(&a, &h).is_empty(), "half a period later the plants have not moved");
+    assert!(
+        !differing(&a, &h).is_empty(),
+        "half a period later the plants have not moved"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -591,7 +749,13 @@ fn a_saturated_foliage_cell_draws_its_species_stage_at_its_cap() {
     let art = pack();
     // A cell whose rank lets it grow to stage 2, so the full sprite is what shows.
     let cell = CellId::all(Topology::Cube, Scale::ONE)
-        .find(|&c| c.face(Topology::Cube, Scale::ONE) == Face::Front && band_of(c) == Band::Foliage && rank_cap_of(c) == 2 && c.cy(Topology::Cube, Scale::ONE) >= 3 && c.cy(Topology::Cube, Scale::ONE) <= 7)
+        .find(|&c| {
+            c.face(Topology::Cube, Scale::ONE) == Face::Front
+                && band_of(c) == Band::Foliage
+                && rank_cap_of(c) == 2
+                && c.cy(Topology::Cube, Scale::ONE) >= 3
+                && c.cy(Topology::Cube, Scale::ONE) <= 7
+        })
         .expect("some front foliage cell has rank 2");
     let mut producer = flat(0.0);
     producer[cell.index()] = saturation();
@@ -625,15 +789,31 @@ fn a_saturated_foliage_cell_draws_its_species_stage_at_its_cap() {
         &mut scratch,
     );
     assert_same_canvas(&actual, &expected, "one full foliage plant");
-    assert!(!differing(&actual, &expected_ground(&v)).is_empty(), "it drew nothing");
+    assert!(
+        !differing(&actual, &expected_ground(&v)).is_empty(),
+        "it drew nothing"
+    );
 
     // The other foliage species at the same slot would be a different image.
     let other = FOLIAGE_PLANTS.iter().find(|&&n| n != name).unwrap();
     let wrong = &art.plant(other).unwrap().stages[2];
     let mut other_img = expected_ground(&v);
-    let wrong_pose = wrong.sample(present_seconds(v.tick, 0.0) + plant_phase_of(cell, wrong.seconds));
-    stamp_pose(&mut other_img, at, heading, wrong_pose, 1.0, MOTIF_OPACITY, Mask::None, &mut scratch);
-    assert!(!differing(&actual, &other_img).is_empty(), "the two foliage species draw alike");
+    let wrong_pose =
+        wrong.sample(present_seconds(v.tick, 0.0) + plant_phase_of(cell, wrong.seconds));
+    stamp_pose(
+        &mut other_img,
+        at,
+        heading,
+        wrong_pose,
+        1.0,
+        MOTIF_OPACITY,
+        Mask::None,
+        &mut scratch,
+    );
+    assert!(
+        !differing(&actual, &other_img).is_empty(),
+        "the two foliage species draw alike"
+    );
 }
 
 #[test]
@@ -642,48 +822,90 @@ fn every_band_at_once_is_the_rule_as_written() {
     // Producers saturated, detritus rich, a pond on the top face and a puddle in the soil.
     let mut water = flat(0.0);
     for cell in CellId::all(Topology::Cube, Scale::ONE) {
-        if cell.face(Topology::Cube, Scale::ONE) == Face::Top && cell.cx(Topology::Cube, Scale::ONE) >= 4 && cell.cx(Topology::Cube, Scale::ONE) <= 7 && cell.cy(Topology::Cube, Scale::ONE) >= 9 && cell.cy(Topology::Cube, Scale::ONE) <= 11 {
+        if cell.face(Topology::Cube, Scale::ONE) == Face::Top
+            && cell.cx(Topology::Cube, Scale::ONE) >= 4
+            && cell.cx(Topology::Cube, Scale::ONE) <= 7
+            && cell.cy(Topology::Cube, Scale::ONE) >= 9
+            && cell.cy(Topology::Cube, Scale::ONE) <= 11
+        {
             water[cell.index()] = 1.2;
         }
-        if cell.face(Topology::Cube, Scale::ONE) == Face::Right && cell.cy(Topology::Cube, Scale::ONE) == 15 && cell.cx(Topology::Cube, Scale::ONE) % 3 == 0 {
+        if cell.face(Topology::Cube, Scale::ONE) == Face::Right
+            && cell.cy(Topology::Cube, Scale::ONE) == 15
+            && cell.cx(Topology::Cube, Scale::ONE) % 3 == 0
+        {
             water[cell.index()] = 0.5;
         }
     }
     let v = view(250, flat(saturation()), flat(SOIL_SCALE * 0.8), water);
     let mut p = ArtPresenter::new(pack());
     let actual = draw(&mut p, &v, None);
-    assert_same_canvas(&actual, &expected_image(&v, &art, None), "a rich world in every band");
+    assert_same_canvas(
+        &actual,
+        &expected_image(&v, &art, None),
+        "a rich world in every band",
+    );
 
     // Non-vacuity: reeds stand in the pond, the soil has plants, the canopy is covered.
     // Reeds stand in the pond's slots that may grow at all; the sprout-only slots stay open
     // water, so the pond is not a fence.
     let pond_cells: Vec<CellId> = CellId::all(Topology::Cube, Scale::ONE)
-        .filter(|c| c.face(Topology::Cube, Scale::ONE) == Face::Top && (4..=7).contains(&c.cx(Topology::Cube, Scale::ONE)) && (9..=11).contains(&c.cy(Topology::Cube, Scale::ONE)))
+        .filter(|c| {
+            c.face(Topology::Cube, Scale::ONE) == Face::Top
+                && (4..=7).contains(&c.cx(Topology::Cube, Scale::ONE))
+                && (9..=11).contains(&c.cy(Topology::Cube, Scale::ONE))
+        })
         .collect();
     for &pond in &pond_cells {
         assert_eq!(p.band_at(pond), Band::Water);
-        assert_eq!(p.stage_of(pond).is_some(), plant_cap(Band::Water, pond).is_some(), "{pond:?}");
+        assert_eq!(
+            p.stage_of(pond).is_some(),
+            plant_cap(Band::Water, pond).is_some(),
+            "{pond:?}"
+        );
         assert_eq!(p.plant_for(Band::Water, pond).unwrap().name, WATER_PLANT);
     }
-    assert!(pond_cells.iter().any(|&c| p.stage_of(c).is_some()), "no reed in the pond");
-    assert!(pond_cells.iter().any(|&c| p.stage_of(c).is_none()), "the pond is a reed fence");
+    assert!(
+        pond_cells.iter().any(|&c| p.stage_of(c).is_some()),
+        "no reed in the pond"
+    );
+    assert!(
+        pond_cells.iter().any(|&c| p.stage_of(c).is_none()),
+        "the pond is a reed fence"
+    );
     let soil = CellId::all(Topology::Cube, Scale::ONE)
-        .find(|&c| c.face(Topology::Cube, Scale::ONE) == Face::Left && c.cy(Topology::Cube, Scale::ONE) == 14 && rank_cap_of(c) >= 1)
+        .find(|&c| {
+            c.face(Topology::Cube, Scale::ONE) == Face::Left
+                && c.cy(Topology::Cube, Scale::ONE) == 14
+                && rank_cap_of(c) >= 1
+        })
         .expect("a growable soil cell on Left");
     assert_eq!(p.band_at(soil), Band::Soil);
     assert!(p.stage_of(soil).is_some(), "rich soil grows");
     // Sprout-only slots stay bare by rule, so a saturated world grows in roughly the
     // `RANK_MID` share of cells and leaves the rest as breathing room.
-    let grown = CellId::all(Topology::Cube, Scale::ONE).filter(|&c| p.stage_of(c).is_some()).count();
+    let grown = CellId::all(Topology::Cube, Scale::ONE)
+        .filter(|&c| p.stage_of(c).is_some())
+        .count();
     let share = grown as f64 / CUBE_CELL_COUNT as f64;
-    assert!((share - RANK_MID).abs() < 0.06, "{grown} cells grew in a saturated world (share {share:.2})");
+    assert!(
+        (share - RANK_MID).abs() < 0.06,
+        "{grown} cells grew in a saturated world (share {share:.2})"
+    );
 }
 
 #[test]
 fn fruit_shows_on_a_full_plant_only_when_the_cell_holds_enough() {
     let art = pack();
     let cell = CellId::all(Topology::Cube, Scale::ONE)
-        .find(|&c| c.face(Topology::Cube, Scale::ONE) == Face::Back && band_of(c) == Band::Foliage && rank_cap_of(c) == 2 && species_of(Band::Foliage, c) == "lanternstalk" && c.cy(Topology::Cube, Scale::ONE) >= 3 && c.cy(Topology::Cube, Scale::ONE) <= 7)
+        .find(|&c| {
+            c.face(Topology::Cube, Scale::ONE) == Face::Back
+                && band_of(c) == Band::Foliage
+                && rank_cap_of(c) == 2
+                && species_of(Band::Foliage, c) == "lanternstalk"
+                && c.cy(Topology::Cube, Scale::ONE) >= 3
+                && c.cy(Topology::Cube, Scale::ONE) <= 7
+        })
         .expect("a back-face lanternstalk slot of rank 2");
     let mut producer = flat(0.0);
     producer[cell.index()] = saturation();
@@ -699,8 +921,15 @@ fn fruit_shows_on_a_full_plant_only_when_the_cell_holds_enough() {
     assert!(fruit_stage(Some(0.1)) && !fruit_stage(Some(0.02)) && !fruit_stage(None));
     assert!(!fruit_stage(Some(FRUIT_SHOW)), "the fruit rule is strict");
 
-    assert_same_canvas(&not_yet, &none, "fruit under the threshold draws the plain stage");
-    assert!(!differing(&fruiting, &none).is_empty(), "fruit changed nothing");
+    assert_same_canvas(
+        &not_yet,
+        &none,
+        "fruit under the threshold draws the plain stage",
+    );
+    assert!(
+        !differing(&fruiting, &none).is_empty(),
+        "fruit changed nothing"
+    );
 
     let plant = art.plant("lanternstalk").unwrap();
     let clip = plant.fruit.as_ref().expect("lanternstalk has a fruit clip");
@@ -727,7 +956,11 @@ fn fruit_shows_on_a_full_plant_only_when_the_cell_holds_enough() {
     );
     assert_same_canvas(&fruiting, &expected, "the fruit clip at the slot");
     fruit[cell.index()] = 0.1;
-    assert_same_canvas(&fruiting, &expected_image(&v, &art, Some(&fruit)), "the full rule with fruit");
+    assert_same_canvas(
+        &fruiting,
+        &expected_image(&v, &art, Some(&fruit)),
+        "the full rule with fruit",
+    );
 }
 
 #[test]
@@ -735,30 +968,47 @@ fn nothing_grows_below_the_first_threshold_and_the_soil_ramp_is_untouched() {
     let producer: Vec<f64> = (0..CUBE_CELL_COUNT)
         .map(|i| saturation() * stage_thresholds(Band::Canopy)[0] * (i % 9) as f64 / 9.0)
         .collect();
-    let detritus: Vec<f64> = (0..CUBE_CELL_COUNT).map(|i| SOIL_SCALE * SOIL_STAGES[0] * (i % 4) as f64 / 4.0).collect();
+    let detritus: Vec<f64> = (0..CUBE_CELL_COUNT)
+        .map(|i| SOIL_SCALE * SOIL_STAGES[0] * (i % 4) as f64 / 4.0)
+        .collect();
     let v = view(5, producer.clone(), detritus.clone(), flat(0.0));
     let mut p = ArtPresenter::new(pack());
     let actual = draw(&mut p, &v, None);
     for cell in CellId::all(Topology::Cube, Scale::ONE) {
-        assert_eq!(p.stage_of(cell), None, "{cell:?} grew below its first threshold");
+        assert_eq!(
+            p.stage_of(cell),
+            None,
+            "{cell:?} grew below its first threshold"
+        );
     }
     for i in 0..p.columns().len() {
         assert_eq!(p.segments_of(i), 0, "a quiet column grew a tall plant");
     }
-    assert_same_canvas(&actual, &expected_ground(&v), "a quiet world is only ground");
+    assert_same_canvas(
+        &actual,
+        &expected_ground(&v),
+        "a quiet world is only ground",
+    );
     // Water exactly at the water line is drawn as water but grows no reed.
     let wet = view(5, producer, detritus, flat(REED_DEPTH));
     let mut p = ArtPresenter::new(pack());
     let _ = draw(&mut p, &wet, None);
     for cell in CellId::all(Topology::Cube, Scale::ONE) {
-        assert_eq!(p.stage_of(cell), None, "{cell:?} grew a reed at the water line");
+        assert_eq!(
+            p.stage_of(cell),
+            None,
+            "{cell:?} grew a reed at the water line"
+        );
     }
 }
 
 #[test]
 fn sprouts_fade_in_and_soil_plants_are_dimmer() {
     let th = FOLIAGE_STAGES;
-    assert_eq!(stage_opacity(0, th[0] - STAGE_HYST, &th, MOTIF_OPACITY), 0.0);
+    assert_eq!(
+        stage_opacity(0, th[0] - STAGE_HYST, &th, MOTIF_OPACITY),
+        0.0
+    );
     let mid = stage_opacity(0, (th[0] - STAGE_HYST + th[1]) / 2.0, &th, MOTIF_OPACITY);
     assert!((mid - MOTIF_OPACITY / 2.0).abs() < 1e-6, "{mid}");
     assert_eq!(stage_opacity(0, th[1], &th, MOTIF_OPACITY), MOTIF_OPACITY);
@@ -766,7 +1016,12 @@ fn sprouts_fade_in_and_soil_plants_are_dimmer() {
     assert_eq!(stage_opacity(2, 0.0, &th, MOTIF_OPACITY), MOTIF_OPACITY);
     assert_eq!(stage_opacity(0, f64::NAN, &th, MOTIF_OPACITY), 0.0);
     assert_eq!(band_opacity(Band::Soil), SOIL_PLANT_OPACITY);
-    const { assert!(SOIL_PLANT_OPACITY < MOTIF_OPACITY, "soil plants must be dimmer") };
+    const {
+        assert!(
+            SOIL_PLANT_OPACITY < MOTIF_OPACITY,
+            "soil plants must be dimmer"
+        )
+    };
     for band in [Band::Foliage, Band::Canopy, Band::Water] {
         assert_eq!(band_opacity(band), MOTIF_OPACITY);
     }

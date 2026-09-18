@@ -60,11 +60,11 @@ pub const HORIZON_TICKS: u64 = 36_000;
 /// seeding control and this fixture cannot drift apart; this is the same constant.
 pub use cubarium_core::TRAINING_FOUNDER_HUE as FOUNDER_HUE;
 
+/// Starting energy as a fraction of `energy_max`.
+pub use cubarium_core::TRAINING_START_ENERGY as START_ENERGY;
 /// Starting reserve as a fraction of `reserve_max` (headroom to store, so intake is never
 /// refused for a reason that has nothing to do with behaviour).
 pub use cubarium_core::TRAINING_START_RESERVE as START_RESERVE;
-/// Starting energy as a fraction of `energy_max`.
-pub use cubarium_core::TRAINING_START_ENERGY as START_ENERGY;
 
 /// The **ecology** a fixture set is built on: the base [`WorldConfig`] every layout starts
 /// from, with a label and a hash.
@@ -105,7 +105,11 @@ impl Ecology {
     /// A named base configuration.
     pub fn of(label: &str, base: WorldConfig) -> Ecology {
         let hash = crate::calibrate::config_hash(&base);
-        Ecology { label: label.to_string(), hash, base: Arc::new(base) }
+        Ecology {
+            label: label.to_string(),
+            hash,
+            base: Arc::new(base),
+        }
     }
 
     /// Read a `cubarium run --config` TOML — for instance the calibration's selected
@@ -160,7 +164,13 @@ impl Patch {
         let hi_y = (self.cy + self.half).min(15);
         for y in lo_y..=hi_y {
             for x in lo_x..=hi_x {
-                out.push(CellId::new(Topology::Cube, Scale::ONE, face, u16::from(x), u16::from(y)));
+                out.push(CellId::new(
+                    Topology::Cube,
+                    Scale::ONE,
+                    face,
+                    u16::from(x),
+                    u16::from(y),
+                ));
             }
         }
         out
@@ -236,7 +246,13 @@ impl Layout {
     }
 
     pub fn start_cell(&self) -> CellId {
-        CellId::new(Topology::Cube, Scale::ONE, self.face(), u16::from(self.start.0), u16::from(self.start.1))
+        CellId::new(
+            Topology::Cube,
+            Scale::ONE,
+            self.face(),
+            u16::from(self.start.0),
+            u16::from(self.start.1),
+        )
     }
 
     pub fn heading_vec(&self) -> Vec2 {
@@ -431,7 +447,11 @@ impl Layout {
     /// display's `--neural` seeding uses. There is one definition of this animal, not two.
     fn place(&self, world: &mut World) -> OrganismId {
         let pos = self.start_cell().center(Topology::Cube, Scale::ONE);
-        assert_eq!(cell_of(Topology::Cube, Scale::ONE, &pos), self.start_cell(), "the grazer landed outside its start cell");
+        assert_eq!(
+            cell_of(Topology::Cube, Scale::ONE, &pos),
+            self.start_cell(),
+            "the grazer landed outside its start cell"
+        );
         world
             .found_training_animal(pos, self.heading_vec())
             .expect("a fresh layout world has room for its one grazer")
@@ -465,13 +485,28 @@ pub fn training_layouts_on(ecology: &Ecology) -> Vec<Layout> {
             start: (3, 8),
             heading: (1.0, 0.0),
             patches: vec![
-                Patch { cx: 3, cy: 8, half: 1, fill: 0.55 },
-                Patch { cx: 8, cy: 8, half: 1, fill: 1.0 },
-                Patch { cx: 13, cy: 8, half: 1, fill: 1.0 },
+                Patch {
+                    cx: 3,
+                    cy: 8,
+                    half: 1,
+                    fill: 0.55,
+                },
+                Patch {
+                    cx: 8,
+                    cy: 8,
+                    half: 1,
+                    fill: 1.0,
+                },
+                Patch {
+                    cx: 13,
+                    cy: 8,
+                    half: 1,
+                    fill: 1.0,
+                },
             ],
             ecology: e(),
             motor: MotorModel::default(),
-        adapter: ActionAdapter::default(),
+            adapter: ActionAdapter::default(),
         },
         Layout {
             name: "t2-weak-open".into(),
@@ -479,13 +514,28 @@ pub fn training_layouts_on(ecology: &Ecology) -> Vec<Layout> {
             start: (8, 12),
             heading: (0.0, -1.0),
             patches: vec![
-                Patch { cx: 8, cy: 12, half: 1, fill: 0.30 },
-                Patch { cx: 8, cy: 7, half: 1, fill: 1.0 },
-                Patch { cx: 4, cy: 3, half: 1, fill: 1.0 },
+                Patch {
+                    cx: 8,
+                    cy: 12,
+                    half: 1,
+                    fill: 0.30,
+                },
+                Patch {
+                    cx: 8,
+                    cy: 7,
+                    half: 1,
+                    fill: 1.0,
+                },
+                Patch {
+                    cx: 4,
+                    cy: 3,
+                    half: 1,
+                    fill: 1.0,
+                },
             ],
             ecology: e(),
             motor: MotorModel::default(),
-        adapter: ActionAdapter::default(),
+            adapter: ActionAdapter::default(),
         },
         Layout {
             name: "t3-scatter".into(),
@@ -493,13 +543,28 @@ pub fn training_layouts_on(ecology: &Ecology) -> Vec<Layout> {
             start: (12, 4),
             heading: (-1.0, 0.0),
             patches: vec![
-                Patch { cx: 12, cy: 4, half: 1, fill: 0.70 },
-                Patch { cx: 9, cy: 6, half: 0, fill: 1.0 },
-                Patch { cx: 5, cy: 9, half: 2, fill: 1.0 },
+                Patch {
+                    cx: 12,
+                    cy: 4,
+                    half: 1,
+                    fill: 0.70,
+                },
+                Patch {
+                    cx: 9,
+                    cy: 6,
+                    half: 0,
+                    fill: 1.0,
+                },
+                Patch {
+                    cx: 5,
+                    cy: 9,
+                    half: 2,
+                    fill: 1.0,
+                },
             ],
             ecology: e(),
             motor: MotorModel::default(),
-        adapter: ActionAdapter::default(),
+            adapter: ActionAdapter::default(),
         },
         Layout {
             name: "t4-ring".into(),
@@ -507,15 +572,40 @@ pub fn training_layouts_on(ecology: &Ecology) -> Vec<Layout> {
             start: (8, 8),
             heading: (FRAC_1_SQRT_2, FRAC_1_SQRT_2),
             patches: vec![
-                Patch { cx: 8, cy: 8, half: 1, fill: 0.45 },
-                Patch { cx: 12, cy: 12, half: 1, fill: 1.0 },
-                Patch { cx: 12, cy: 4, half: 0, fill: 1.0 },
-                Patch { cx: 4, cy: 4, half: 1, fill: 1.0 },
-                Patch { cx: 4, cy: 12, half: 0, fill: 1.0 },
+                Patch {
+                    cx: 8,
+                    cy: 8,
+                    half: 1,
+                    fill: 0.45,
+                },
+                Patch {
+                    cx: 12,
+                    cy: 12,
+                    half: 1,
+                    fill: 1.0,
+                },
+                Patch {
+                    cx: 12,
+                    cy: 4,
+                    half: 0,
+                    fill: 1.0,
+                },
+                Patch {
+                    cx: 4,
+                    cy: 4,
+                    half: 1,
+                    fill: 1.0,
+                },
+                Patch {
+                    cx: 4,
+                    cy: 12,
+                    half: 0,
+                    fill: 1.0,
+                },
             ],
             ecology: e(),
             motor: MotorModel::default(),
-        adapter: ActionAdapter::default(),
+            adapter: ActionAdapter::default(),
         },
     ]
 }
@@ -544,8 +634,9 @@ fn holdout_layout(index: u64, ecology: &Ecology) -> Layout {
     let draw = |c: u64| super::rng::unit_at(seed, stream::ES_HOLDOUT, index, c);
     // Positions come from a 4-cell lattice inset from the rim, so a patch never clips the face
     // edge and two patches are always at least four cells apart.
-    let lattice: Vec<(u8, u8)> =
-        (0..4u8).flat_map(|y| (0..4u8).map(move |x| (2 + 4 * x, 2 + 4 * y))).collect();
+    let lattice: Vec<(u8, u8)> = (0..4u8)
+        .flat_map(|y| (0..4u8).map(move |x| (2 + 4 * x, 2 + 4 * y)))
+        .collect();
     let mut taken: Vec<usize> = Vec::new();
     let pick = |c: u64, taken: &mut Vec<usize>| -> (u8, u8) {
         let free: Vec<usize> = (0..lattice.len()).filter(|i| !taken.contains(i)).collect();
@@ -574,9 +665,24 @@ fn holdout_layout(index: u64, ecology: &Ecology) -> Layout {
         start: open,
         heading,
         patches: vec![
-            Patch { cx: open.0, cy: open.1, half: 1, fill: (fill * 1e6).round() / 1e6 },
-            Patch { cx: later_a.0, cy: later_a.1, half: 1, fill: 1.0 },
-            Patch { cx: later_b.0, cy: later_b.1, half: 1, fill: 1.0 },
+            Patch {
+                cx: open.0,
+                cy: open.1,
+                half: 1,
+                fill: (fill * 1e6).round() / 1e6,
+            },
+            Patch {
+                cx: later_a.0,
+                cy: later_a.1,
+                half: 1,
+                fill: 1.0,
+            },
+            Patch {
+                cx: later_b.0,
+                cy: later_b.1,
+                half: 1,
+                fill: 1.0,
+            },
         ],
         ecology: ecology.clone(),
         motor: MotorModel::default(),
@@ -639,8 +745,11 @@ mod tests {
         let before = seeds.len();
         seeds.dedup();
         assert_eq!(seeds.len(), before, "every layout has its own world seed");
-        let mut hashes: Vec<u64> =
-            train.iter().chain(&hold).map(|l| l.hash(&l.config())).collect();
+        let mut hashes: Vec<u64> = train
+            .iter()
+            .chain(&hold)
+            .map(|l| l.hash(&l.config()))
+            .collect();
         hashes.sort_unstable();
         let before = hashes.len();
         hashes.dedup();
@@ -652,7 +761,11 @@ mod tests {
         let l = &training_layouts()[0];
         let cfg = l.config();
         let base = l.hash(&cfg);
-        assert_eq!(base, l.hash(&cfg), "the hash is a pure function of the layout and config");
+        assert_eq!(
+            base,
+            l.hash(&cfg),
+            "the hash is a pure function of the layout and config"
+        );
 
         let mut moved = l.clone();
         moved.patches[0].fill += 1e-6;
@@ -660,7 +773,11 @@ mod tests {
 
         let mut other_cfg = cfg.clone();
         other_cfg.producer.max += 1e-9;
-        assert_ne!(l.hash(&other_cfg), base, "the world config is inside the hash");
+        assert_ne!(
+            l.hash(&other_cfg),
+            base,
+            "the world config is inside the hash"
+        );
     }
 
     #[test]
@@ -669,8 +786,17 @@ mod tests {
             let (world, id) = l.build().unwrap_or_else(|e| panic!("{}: {e}", l.name));
             assert_eq!(world.population(), 1, "{}", l.name);
             let o = world.state.organisms.get(id).expect("the grazer");
-            assert_eq!(cell_of(Topology::Cube, Scale::ONE, &o.pos), l.start_cell(), "{}", l.name);
-            assert!((o.structure - o.phenotype.structure_adult).abs() < 1e-12, "{}", l.name);
+            assert_eq!(
+                cell_of(Topology::Cube, Scale::ONE, &o.pos),
+                l.start_cell(),
+                "{}",
+                l.name
+            );
+            assert!(
+                (o.structure - o.phenotype.structure_adult).abs() < 1e-12,
+                "{}",
+                l.name
+            );
             assert!((o.heading.length() - 1.0).abs() < 1e-12, "{}", l.name);
             // The layout's food is exactly what it declares, and it is all it declares.
             // Ecology v1 (§14 "search"): a painted patch is a live stand, so the imported
@@ -705,7 +831,9 @@ mod tests {
             assert!(world.state.fields.d.iter().all(|x| *x == 0.0), "{}", l.name);
             assert!(eco.dead_wood.iter().all(|x| *x == 0.0), "{}", l.name);
             assert!(eco.carrion.iter().all(|x| *x == 0.0), "{}", l.name);
-            world.check_invariants().unwrap_or_else(|e| panic!("{}: {e}", l.name));
+            world
+                .check_invariants()
+                .unwrap_or_else(|e| panic!("{}: {e}", l.name));
         }
     }
 
@@ -729,13 +857,22 @@ mod tests {
                 "{}: the opening is finite, not full and not foodless",
                 l.name
             );
-            assert_eq!((opening.cx, opening.cy), l.start, "{}: the grazer opens in a patch", l.name);
+            assert_eq!(
+                (opening.cx, opening.cy),
+                l.start,
+                "{}: the grazer opens in a patch",
+                l.name
+            );
             assert!(l.patches.len() >= 2, "{}: there is later food", l.name);
             // Later food is outside the opening patch and inside the face.
             let open_cells = opening.cells(l.face());
             for p in &l.patches[1..] {
                 for c in p.cells(l.face()) {
-                    assert!(!open_cells.contains(&c), "{}: later food overlaps the opening", l.name);
+                    assert!(
+                        !open_cells.contains(&c),
+                        "{}: later food overlaps the opening",
+                        l.name
+                    );
                 }
             }
         }
@@ -745,18 +882,31 @@ mod tests {
     fn held_out_layouts_follow_the_declared_rules() {
         for l in holdout_layouts() {
             assert_eq!(l.patches.len(), 3);
-            assert!((0.30..=0.75).contains(&l.patches[0].fill), "{}: {}", l.name, l.patches[0].fill);
+            assert!(
+                (0.30..=0.75).contains(&l.patches[0].fill),
+                "{}: {}",
+                l.name,
+                l.patches[0].fill
+            );
             assert!(l.patches[1..].iter().all(|p| p.fill == 1.0));
             assert_eq!((l.patches[0].cx, l.patches[0].cy), l.start);
             for p in &l.patches {
-                assert!(p.cx >= 1 && p.cx <= 14 && p.cy >= 1 && p.cy <= 14, "{}", l.name);
+                assert!(
+                    p.cx >= 1 && p.cx <= 14 && p.cy >= 1 && p.cy <= 14,
+                    "{}",
+                    l.name
+                );
             }
             let centres: Vec<(u8, u8)> = l.patches.iter().map(|p| (p.cx, p.cy)).collect();
             for i in 0..centres.len() {
                 for j in (i + 1)..centres.len() {
                     let dx = centres[i].0.abs_diff(centres[j].0);
                     let dy = centres[i].1.abs_diff(centres[j].1);
-                    assert!(dx >= 4 || dy >= 4, "{}: patches {i} and {j} are adjacent", l.name);
+                    assert!(
+                        dx >= 4 || dy >= 4,
+                        "{}: patches {i} and {j} are adjacent",
+                        l.name
+                    );
                 }
             }
         }
@@ -777,7 +927,8 @@ mod tests {
         c.mechanisms.mutation = true;
         c.founders.count = 9;
         c.seed = 4_242;
-        c.validate().expect("the moved ecology is one the core accepts");
+        c.validate()
+            .expect("the moved ecology is one the core accepts");
         Ecology::of("moved", c)
     }
 
@@ -789,8 +940,14 @@ mod tests {
         assert_eq!(eco.hash, crate::calibrate::config_hash(&eco.base));
         assert_eq!(eco.hex(), format!("{:016x}", eco.hash));
         let defaults = Ecology::defaults();
-        assert_eq!(defaults.hash, crate::calibrate::config_hash(&WorldConfig::default()));
-        assert_ne!(defaults.hash, eco.hash, "a moved ecology is a different ecology");
+        assert_eq!(
+            defaults.hash,
+            crate::calibrate::config_hash(&WorldConfig::default())
+        );
+        assert_ne!(
+            defaults.hash, eco.hash,
+            "a moved ecology is a different ecology"
+        );
         assert_eq!(defaults.label, "default");
     }
 
@@ -799,7 +956,10 @@ mod tests {
     #[test]
     fn a_layout_starts_from_its_ecology_and_still_applies_its_own_overrides() {
         let eco = moved_ecology();
-        for l in training_layouts_on(&eco).iter().chain(&holdout_layouts_on(&eco)) {
+        for l in training_layouts_on(&eco)
+            .iter()
+            .chain(&holdout_layouts_on(&eco))
+        {
             let c = l.config();
             // From the ecology.
             assert_eq!(c.plant.foliage_rate, 0.006, "{}", l.name);
@@ -837,7 +997,10 @@ mod tests {
     #[test]
     fn every_layout_on_a_moved_ecology_paints_live_stands_under_that_ecologys_constants() {
         let eco = moved_ecology();
-        for l in training_layouts_on(&eco).iter().chain(&holdout_layouts_on(&eco)) {
+        for l in training_layouts_on(&eco)
+            .iter()
+            .chain(&holdout_layouts_on(&eco))
+        {
             let (world, id) = l.build().unwrap_or_else(|e| panic!("{}: {e}", l.name));
             assert_eq!(world.population(), 1, "{}", l.name);
             assert!(world.state.organisms.get(id).is_some(), "{}", l.name);
@@ -862,16 +1025,30 @@ mod tests {
                     live += 1;
                 }
             }
-            assert_eq!(live, l.route().len(), "{}: every painted cell is live", l.name);
+            assert_eq!(
+                live,
+                l.route().len(),
+                "{}: every painted cell is live",
+                l.name
+            );
             // The opening patch is at its declared fraction of *this* ecology's P_max.
             let opening = l.patches[0];
-            let centre = CellId::new(Topology::Cube, Scale::ONE, l.face(), u16::from(opening.cx), u16::from(opening.cy)).index();
+            let centre = CellId::new(
+                Topology::Cube,
+                Scale::ONE,
+                l.face(),
+                u16::from(opening.cx),
+                u16::from(opening.cy),
+            )
+            .index();
             assert!(
                 (world.state.fields.p[centre] - opening.fill * cfg.producer.max).abs() < 1e-12,
                 "{}",
                 l.name
             );
-            world.check_invariants().unwrap_or_else(|e| panic!("{}: {e}", l.name));
+            world
+                .check_invariants()
+                .unwrap_or_else(|e| panic!("{}: {e}", l.name));
         }
     }
 }

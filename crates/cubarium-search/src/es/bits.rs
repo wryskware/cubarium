@@ -19,8 +19,8 @@
 //! 10,215 values encode to 163,440 hex characters (about 160 KiB), so a whole checkpoint —
 //! centre plus both Adam moments — stays under half a megabyte.
 
-use serde::de::{Error, Unexpected};
 use serde::Deserializer;
+use serde::de::{Error, Unexpected};
 
 /// `#[serde(with = "crate::es::bits::hex_f64s")]` on a `Vec<f64>`.
 pub mod hex_f64s {

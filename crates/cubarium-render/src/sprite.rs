@@ -80,7 +80,14 @@ impl Sprite {
                 scale.world()
             ));
         }
-        Ok(Self { width, height, pivot, pixels, extent, budget })
+        Ok(Self {
+            width,
+            height,
+            pivot,
+            pixels,
+            extent,
+            budget,
+        })
     }
 
     /// A sprite from **premultiplied linear** RGBA already in the canvas's own light, for
@@ -127,7 +134,9 @@ impl Sprite {
                 || !(0.0..=1.0).contains(&a)
                 || p[..3].iter().any(|&c| c < 0.0 || c > a)
             {
-                return Err(format!("pixel {i} is not premultiplied linear RGBA in range: {p:?}"));
+                return Err(format!(
+                    "pixel {i} is not premultiplied linear RGBA in range: {p:?}"
+                ));
             }
             if a > 0.0 {
                 let x = (i % width) as f64 + 0.5 - pivot.x;
@@ -142,7 +151,14 @@ impl Sprite {
                 scale.world()
             ));
         }
-        Ok(Self { width, height, pivot, pixels, extent, budget })
+        Ok(Self {
+            width,
+            height,
+            pivot,
+            pixels,
+            extent,
+            budget,
+        })
     }
 
     /// The pivot, in sprite pixels from the image's upper-left corner.
@@ -273,7 +289,12 @@ impl Sprite {
     /// sprite's extent plus the amplitude: a tall sprite whose widest texels sit at its
     /// still root keeps a usable budget.
     pub fn bend_headroom(&self, root: f64, length: f64, base: f64) -> f64 {
-        let probe = Bend { amplitude: 1.0, base, root, length };
+        let probe = Bend {
+            amplitude: 1.0,
+            base,
+            root,
+            length,
+        };
         let mut bound = f64::INFINITY;
         for (i, p) in self.pixels.iter().enumerate() {
             if p[3] <= 0.0 {
@@ -355,7 +376,16 @@ pub fn stamp_sprite(
     opacity: f32,
     scratch: &mut Vec<PixelImage>,
 ) {
-    stamp_pose(canvas, anchor, heading, Pose::still(sprite), scale, opacity, Mask::None, scratch);
+    stamp_pose(
+        canvas,
+        anchor,
+        heading,
+        Pose::still(sprite),
+        scale,
+        opacity,
+        Mask::None,
+        scratch,
+    );
 }
 
 /// A pose between two samples of one clip: `first` blended toward `second` by `mix`.
@@ -377,12 +407,20 @@ pub struct Pose<'a> {
 impl<'a> Pose<'a> {
     /// One sprite, no blend.
     pub fn still(sprite: &'a Sprite) -> Pose<'a> {
-        Pose { first: sprite, second: sprite, mix: 0.0 }
+        Pose {
+            first: sprite,
+            second: sprite,
+            mix: 0.0,
+        }
     }
 
     /// The blend weight, sanitized into `[0, 1]`.
     pub fn weight(&self) -> f32 {
-        if self.mix.is_finite() { self.mix.clamp(0.0, 1.0) } else { 0.0 }
+        if self.mix.is_finite() {
+            self.mix.clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
     }
 
     /// The extent the stamp unfolds for this pose: `first`'s at weight 0, `second`'s at
@@ -447,7 +485,12 @@ pub struct Bend {
 impl Bend {
     /// No bend at all: the identity, which [`stamp_layers_bent`] takes on exactly the code
     /// path [`stamp_layers`] has always taken, bit for bit and at the same cost.
-    pub const NONE: Bend = Bend { amplitude: 0.0, base: 0.0, root: 0.0, length: 0.0 };
+    pub const NONE: Bend = Bend {
+        amplitude: 0.0,
+        base: 0.0,
+        root: 0.0,
+        length: 0.0,
+    };
 
     /// Whether this bend displaces nothing, so the stamp is the unbent one.
     ///
@@ -578,7 +621,16 @@ pub fn stamp_pose(
     mask: Mask,
     scratch: &mut Vec<PixelImage>,
 ) {
-    stamp_layers(canvas, anchor, heading, &[(pose, 1.0)], scale, opacity, mask, scratch);
+    stamp_layers(
+        canvas,
+        anchor,
+        heading,
+        &[(pose, 1.0)],
+        scale,
+        opacity,
+        mask,
+        scratch,
+    );
 }
 
 /// Stamp a weighted mix of poses through one unfold and one source-over per pixel.
@@ -607,7 +659,17 @@ pub fn stamp_layers(
     mask: Mask,
     scratch: &mut Vec<PixelImage>,
 ) {
-    stamp_layers_bent(canvas, anchor, heading, layers, scale, opacity, mask, Bend::NONE, scratch);
+    stamp_layers_bent(
+        canvas,
+        anchor,
+        heading,
+        layers,
+        scale,
+        opacity,
+        mask,
+        Bend::NONE,
+        scratch,
+    );
 }
 
 /// [`stamp_layers`] with a rooted horizontal [`Bend`] applied in the shared tile
@@ -716,7 +778,11 @@ impl Tone {
         }
         let colour = std::array::from_fn(|c| {
             let v: f32 = self.colour[c];
-            if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 }
+            if v.is_finite() {
+                v.clamp(0.0, 1.0)
+            } else {
+                0.0
+            }
         });
         let (floor, reference) = self.shade.sanitized();
         Some((colour, floor, reference, mix))
@@ -974,7 +1040,10 @@ fn stamp_unfolded<const BENT: bool, const TINTED: bool>(
         let local = Vec2::new(h.dot(d) / scale, side.dot(d) / scale);
         // The material row is never displaced, so the sample only moves along tile +x.
         let at = if BENT {
-            Vec2::new(local.x - bend.displacement(tile_height, local.y + reference.pivot.y), local.y)
+            Vec2::new(
+                local.x - bend.displacement(tile_height, local.y + reference.pivot.y),
+                local.y,
+            )
         } else {
             local
         };
@@ -1071,7 +1140,9 @@ pub fn stamp_pose_in_chart(
     {
         return;
     }
-    let Some(h) = heading.normalized() else { return };
+    let Some(h) = heading.normalized() else {
+        return;
+    };
     let bend = if bend.is_identity() { Bend::NONE } else { bend };
     let radius = (extent + bend.amplitude.abs()).min(budget);
     let query = radius + (owner.chart() - center.chart()).length();
@@ -1117,8 +1188,8 @@ pub fn stamp_pose_in_chart(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cube_proto::Face;
     use cubarium_surface::{FOOTPRINT_PIXELS, Topology};
+    use cube_proto::Face;
 
     fn total(canvas: &Canvas) -> f64 {
         Face::ALL
@@ -1195,7 +1266,12 @@ mod tests {
     }
 
     fn bend_of(amplitude: f64) -> Bend {
-        Bend { amplitude, base: 0.0, root: 1.0, length: 13.0 }
+        Bend {
+            amplitude,
+            base: 0.0,
+            root: 1.0,
+            length: 13.0,
+        }
     }
 
     #[test]
@@ -1240,10 +1316,30 @@ mod tests {
             bend_of(0.0),
             bend_of(f64::NAN),
             bend_of(f64::INFINITY),
-            Bend { amplitude: 3.0, base: 0.0, root: 1.0, length: 0.0 },
-            Bend { amplitude: 3.0, base: 0.0, root: 1.0, length: -13.0 },
-            Bend { amplitude: 3.0, base: f64::NAN, root: 1.0, length: 13.0 },
-            Bend { amplitude: 3.0, base: 0.0, root: f64::NAN, length: 13.0 },
+            Bend {
+                amplitude: 3.0,
+                base: 0.0,
+                root: 1.0,
+                length: 0.0,
+            },
+            Bend {
+                amplitude: 3.0,
+                base: 0.0,
+                root: 1.0,
+                length: -13.0,
+            },
+            Bend {
+                amplitude: 3.0,
+                base: f64::NAN,
+                root: 1.0,
+                length: 13.0,
+            },
+            Bend {
+                amplitude: 3.0,
+                base: 0.0,
+                root: f64::NAN,
+                length: 13.0,
+            },
         ];
         for anchor in anchors {
             let mut plain = Canvas::cube();
@@ -1325,7 +1421,11 @@ mod tests {
                     "amplitude {amplitude}: the root row changed at x={x}"
                 );
             }
-            assert_ne!(still_vs(&still, &bent), 0, "amplitude {amplitude} changed nothing at all");
+            assert_ne!(
+                still_vs(&still, &bent),
+                0,
+                "amplitude {amplitude} changed nothing at all"
+            );
         }
         // Monotone: the displaced tip's light moves further with a larger amplitude.
         let centroid = |canvas: &Canvas| {
@@ -1347,7 +1447,10 @@ mod tests {
         let mut last = centroid(&still);
         for amplitude in [0.25, 0.5, 1.0, 2.0] {
             let c = centroid(&draw(amplitude));
-            assert!(c > last + 1e-6, "amplitude {amplitude}: tip centroid {c} <= {last}");
+            assert!(
+                c > last + 1e-6,
+                "amplitude {amplitude}: tip centroid {c} <= {last}"
+            );
             last = c;
         }
         // And the other way for a negative amplitude.
@@ -1389,15 +1492,28 @@ mod tests {
         }
         // Away from the vertex the seam only relabels pixels: the same light, and it is
         // spread over more than one face.
-        assert!((total(&middle) - total(&seam)).abs() < 1e-6, "seam lost light");
         assert!(
-            Face::ALL.into_iter().filter(|&f| (0..64u16).any(|y| (0..64u16).any(|x| seam.get(f, x, y) != [0.0; 3]))).count() >= 2,
+            (total(&middle) - total(&seam)).abs() < 1e-6,
+            "seam lost light"
+        );
+        assert!(
+            Face::ALL
+                .into_iter()
+                .filter(|&f| (0..64u16).any(|y| (0..64u16).any(|x| seam.get(f, x, y) != [0.0; 3])))
+                .count()
+                >= 2,
             "the seam stamp did not reach the neighbouring face"
         );
         // At a vertex the 90° angular deficit can only *lose* light (each pixel is
         // composited once), never duplicate it.
-        assert!(total(&vertex) <= total(&middle) + 1e-6, "a vertex duplicated light");
-        assert!(total(&vertex) > total(&middle) * 0.5, "a vertex swallowed the stamp");
+        assert!(
+            total(&vertex) <= total(&middle) + 1e-6,
+            "a vertex duplicated light"
+        );
+        assert!(
+            total(&vertex) > total(&middle) * 0.5,
+            "a vertex swallowed the stamp"
+        );
     }
 
     #[test]
@@ -1409,7 +1525,12 @@ mod tests {
         // support of every painted texel, displaced by the largest `D` that can read it,
         // inside the nine-pixel footprint.
         let worst = |amplitude: f64| {
-            let probe = Bend { amplitude, base: 0.0, root: 1.0, length: 13.0 };
+            let probe = Bend {
+                amplitude,
+                base: 0.0,
+                root: 1.0,
+                length: 13.0,
+            };
             let mut worst = 0.0f64;
             for row in 0..16usize {
                 for col in 0..5usize {
@@ -1425,8 +1546,15 @@ mod tests {
             }
             worst
         };
-        assert!(worst(room) <= FOOTPRINT_PIXELS + 1e-9, "at the budget: {}", worst(room));
-        assert!(worst(room * 1.2) > FOOTPRINT_PIXELS + 1e-9, "the budget is not tight");
+        assert!(
+            worst(room) <= FOOTPRINT_PIXELS + 1e-9,
+            "at the budget: {}",
+            worst(room)
+        );
+        assert!(
+            worst(room * 1.2) > FOOTPRINT_PIXELS + 1e-9,
+            "the budget is not tight"
+        );
         // A bend nothing can follow (no length) bounds nothing.
         assert_eq!(s.bend_headroom(1.0, 0.0, 0.0), f64::INFINITY);
         // A root above the whole tile freezes every texel, so again no bound.
@@ -1440,7 +1568,10 @@ mod tests {
             *b = if i % 4 == 3 { 255 } else { 128 };
         }
         let wide = Sprite::from_rgba(16, 16, Vec2::new(8.0, 8.0), &wide);
-        assert!(wide.is_err(), "a full 16x16 tile is past the nine-pixel budget already");
+        assert!(
+            wide.is_err(),
+            "a full 16x16 tile is past the nine-pixel budget already"
+        );
     }
 
     #[test]
@@ -1516,7 +1647,10 @@ mod tests {
         // With the tile's +x along the chart's +u, the tile's rows are the face's rows. A
         // strip owning heights 4..8 above the tile's bottom edge paints the same face rows
         // whether bent or not: coverage is evaluated at the material row.
-        let mask = Mask::Strip { floor: 4.0, reveal: 8.0 };
+        let mask = Mask::Strip {
+            floor: 4.0,
+            reveal: 8.0,
+        };
         let plain = draw(Bend::NONE, mask);
         let bent = draw(bend_of(2.0), mask);
         let rows = |canvas: &Canvas| {
@@ -1527,7 +1661,10 @@ mod tests {
         assert_eq!(rows(&plain), rows(&bent), "the bend moved the strip's rows");
         assert!(!rows(&plain).is_empty());
         // An empty mask still draws nothing, bent or not.
-        let empty = Mask::Strip { floor: 8.0, reveal: 8.0 };
+        let empty = Mask::Strip {
+            floor: 8.0,
+            reveal: 8.0,
+        };
         assert_eq!(total(&draw(bend_of(2.0), empty)), 0.0);
     }
 
@@ -1615,7 +1752,10 @@ mod tests {
             painted(&one),
             "the tone changed which pixels were covered"
         );
-        assert!(painted(&one).len() > 8, "the fixture painted almost nothing");
+        assert!(
+            painted(&one).len() > 8,
+            "the fixture painted almost nothing"
+        );
         for i in 1..8 {
             let mix = i as f32 / 8.0;
             let got = draw(mix);
@@ -1698,7 +1838,10 @@ mod tests {
             1.0,
             &mut Vec::new(),
         );
-        assert!(cube.pixels().iter().all(|p| *p == [0.0; 3]), "over budget at S = 1");
+        assert!(
+            cube.pixels().iter().all(|p| *p == [0.0; 3]),
+            "over budget at S = 1"
+        );
 
         let topo = Topology::Ring { w: 640, h: 360 };
         let mut ring = Canvas::new(topo, Scale::new(2.0));
@@ -1712,14 +1855,22 @@ mod tests {
             &mut Vec::new(),
         );
         let lit = ring.pixels().iter().filter(|p| **p != [0.0; 3]).count();
-        assert!(lit > 200, "a scale = 2 stamp must draw on a world at S = 2, lit {lit}");
+        assert!(
+            lit > 200,
+            "a scale = 2 stamp must draw on a world at S = 2, lit {lit}"
+        );
 
         // And its bend headroom scales with the art it was authored for.
-        let room1 = Sprite::from_rgba(8, 8, pivot(8), &solid(8)).unwrap().bend_headroom(1.0, 6.0, 0.0);
+        let room1 = Sprite::from_rgba(8, 8, pivot(8), &solid(8))
+            .unwrap()
+            .bend_headroom(1.0, 6.0, 0.0);
         let room2 = Sprite::from_rgba_at(Scale::new(2.0), 8, 8, pivot(8), &solid(8))
             .unwrap()
             .bend_headroom(1.0, 6.0, 0.0);
-        assert!(room2 > room1, "a bigger budget is a bigger bend headroom: {room1} -> {room2}");
+        assert!(
+            room2 > room1,
+            "a bigger budget is a bigger bend headroom: {room1} -> {room2}"
+        );
     }
 
     #[test]
@@ -1736,15 +1887,44 @@ mod tests {
             for (u, v) in [(32.5, 32.5), (0.5, 0.5), (63.5, 0.5), (63.5, 63.5)] {
                 let anchor = SurfacePoint::new(face, u, v);
                 for amplitude in [0.0, -0.4, 0.4, f64::NAN, f64::INFINITY] {
-                    for mask in [Mask::None, Mask::Axial { reveal: 8.25 }, Mask::Strip { floor: 4.0, reveal: 12.0 }] {
+                    for mask in [
+                        Mask::None,
+                        Mask::Axial { reveal: 8.25 },
+                        Mask::Strip {
+                            floor: 4.0,
+                            reveal: 12.0,
+                        },
+                    ] {
                         let mut original = Canvas::cube();
                         let mut retained = Canvas::cube();
                         let bend = bend_of(amplitude);
-                        stamp_layers_bent(&mut original, anchor, Vec2::new(0.0, -1.0),
-                            &[(Pose::still(&sprite), 1.0)], 1.0, 0.7, mask, bend, &mut Vec::new());
-                        stamp_pose_in_chart(&mut retained, anchor, anchor, Vec2::new(0.0, -1.0),
-                            Pose::still(&sprite), 0.7, mask, bend, &mut Vec::new());
-                        assert_eq!(still_vs(&original, &retained), 0, "{anchor:?} {amplitude} {mask:?}");
+                        stamp_layers_bent(
+                            &mut original,
+                            anchor,
+                            Vec2::new(0.0, -1.0),
+                            &[(Pose::still(&sprite), 1.0)],
+                            1.0,
+                            0.7,
+                            mask,
+                            bend,
+                            &mut Vec::new(),
+                        );
+                        stamp_pose_in_chart(
+                            &mut retained,
+                            anchor,
+                            anchor,
+                            Vec2::new(0.0, -1.0),
+                            Pose::still(&sprite),
+                            0.7,
+                            mask,
+                            bend,
+                            &mut Vec::new(),
+                        );
+                        assert_eq!(
+                            still_vs(&original, &retained),
+                            0,
+                            "{anchor:?} {amplitude} {mask:?}"
+                        );
                     }
                 }
             }
@@ -1757,29 +1937,79 @@ mod tests {
         let good = SurfacePoint::new(Face::Front, 32.5, 32.5);
         let draw = |owner, center, heading, opacity, bend| {
             let mut canvas = Canvas::cube();
-            stamp_pose_in_chart(&mut canvas, owner, center, heading, Pose::still(&sprite),
-                opacity, Mask::None, bend, &mut Vec::new());
+            stamp_pose_in_chart(
+                &mut canvas,
+                owner,
+                center,
+                heading,
+                Pose::still(&sprite),
+                opacity,
+                Mask::None,
+                bend,
+                &mut Vec::new(),
+            );
             canvas
         };
         let heading = Vec2::new(1.0, 0.0);
-        for point in [SurfacePoint::new(Face::Front, f64::NAN, 0.0),
-            SurfacePoint::new(Face::Front, 64.0, 2.0), SurfacePoint::new(Face::Front, -0.1, 2.0)] {
+        for point in [
+            SurfacePoint::new(Face::Front, f64::NAN, 0.0),
+            SurfacePoint::new(Face::Front, 64.0, 2.0),
+            SurfacePoint::new(Face::Front, -0.1, 2.0),
+        ] {
             assert_eq!(total(&draw(point, good, heading, 1.0, Bend::NONE)), 0.0);
             assert_eq!(total(&draw(good, point, heading, 1.0, Bend::NONE)), 0.0);
         }
-        for h in [Vec2::ZERO, Vec2::new(f64::NAN, 1.0), Vec2::new(f64::INFINITY, 0.0)] {
+        for h in [
+            Vec2::ZERO,
+            Vec2::new(f64::NAN, 1.0),
+            Vec2::new(f64::INFINITY, 0.0),
+        ] {
             assert_eq!(total(&draw(good, good, h, 1.0, Bend::NONE)), 0.0);
         }
         for opacity in [0.0, -1.0, f32::NAN, f32::INFINITY] {
             assert_eq!(total(&draw(good, good, heading, opacity, Bend::NONE)), 0.0);
         }
-        assert_eq!(total(&draw(good, SurfacePoint::new(Face::Top, 32.5, 32.5), heading, 1.0, Bend::NONE)), 0.0);
-        assert_eq!(total(&draw(SurfacePoint::new(Face::Front, 0.5, 0.5),
-            SurfacePoint::new(Face::Front, 63.5, 63.5), heading, 1.0, Bend::NONE)), 0.0);
+        assert_eq!(
+            total(&draw(
+                good,
+                SurfacePoint::new(Face::Top, 32.5, 32.5),
+                heading,
+                1.0,
+                Bend::NONE
+            )),
+            0.0
+        );
+        assert_eq!(
+            total(&draw(
+                SurfacePoint::new(Face::Front, 0.5, 0.5),
+                SurfacePoint::new(Face::Front, 63.5, 63.5),
+                heading,
+                1.0,
+                Bend::NONE
+            )),
+            0.0
+        );
         let opaque = draw(good, good, heading, 1.0, Bend::NONE);
-        assert_eq!(still_vs(&opaque, &draw(good, good, heading, 4.0, Bend::NONE)), 0);
-        assert_eq!(still_vs(&opaque, &draw(good, good, heading, 1.0,
-            Bend { base: f64::NAN, ..bend_of(0.4) })), 0);
+        assert_eq!(
+            still_vs(&opaque, &draw(good, good, heading, 4.0, Bend::NONE)),
+            0
+        );
+        assert_eq!(
+            still_vs(
+                &opaque,
+                &draw(
+                    good,
+                    good,
+                    heading,
+                    1.0,
+                    Bend {
+                        base: f64::NAN,
+                        ..bend_of(0.4)
+                    }
+                )
+            ),
+            0
+        );
     }
 
     #[test]
@@ -1805,15 +2035,32 @@ mod tests {
                 unfold_pixels(Topology::Cube, center, FOOTPRINT_PIXELS, &mut neighborhood);
                 let mut allowed = vec![false; 5 * 64 * 64];
                 for p in neighborhood {
-                    allowed[p.face.index() * 4096 + usize::from(p.y) * 64 + usize::from(p.x)] = true;
+                    allowed[p.face.index() * 4096 + usize::from(p.y) * 64 + usize::from(p.x)] =
+                        true;
                 }
                 for amplitude in [-0.9, 0.0, 0.9] {
                     let draw = |mix| {
                         let mut canvas = Canvas::cube();
-                        stamp_pose_in_chart(&mut canvas, owner, center, Vec2::new(1.0, 0.0),
-                            Pose { first: &first, second: &second, mix }, 0.7,
+                        stamp_pose_in_chart(
+                            &mut canvas,
+                            owner,
+                            center,
+                            Vec2::new(1.0, 0.0),
+                            Pose {
+                                first: &first,
+                                second: &second,
+                                mix,
+                            },
+                            0.7,
                             Mask::Axial { reveal: 11.75 },
-                            Bend { amplitude, base: 32.0, root: 1.0, length: 40.0 }, &mut Vec::new());
+                            Bend {
+                                amplitude,
+                                base: 32.0,
+                                root: 1.0,
+                                length: 40.0,
+                            },
+                            &mut Vec::new(),
+                        );
                         canvas
                     };
                     let a = draw(0.0);
@@ -1823,14 +2070,23 @@ mod tests {
                     for f in Face::ALL {
                         for y in 0..64 {
                             for x in 0..64 {
-                                let (a, b, actual) = (a.get(f, x, y), b.get(f, x, y), mixed.get(f, x, y));
+                                let (a, b, actual) =
+                                    (a.get(f, x, y), b.get(f, x, y), mixed.get(f, x, y));
                                 if actual.iter().any(|v| *v > 0.0) {
-                                    assert!(allowed[f.index() * 4096 + usize::from(y) * 64 + usize::from(x)], "outside physical support: {owner:?} -> {f:?} {x},{y}");
+                                    assert!(
+                                        allowed[f.index() * 4096
+                                            + usize::from(y) * 64
+                                            + usize::from(x)],
+                                        "outside physical support: {owner:?} -> {f:?} {x},{y}"
+                                    );
                                     painted += 1;
                                 }
                                 for c in 0..3 {
                                     let expected = a[c] + (b[c] - a[c]) * 0.37;
-                                    assert!(actual[c].is_finite() && (actual[c] - expected).abs() < 1e-7);
+                                    assert!(
+                                        actual[c].is_finite()
+                                            && (actual[c] - expected).abs() < 1e-7
+                                    );
                                 }
                             }
                         }
@@ -1838,6 +2094,9 @@ mod tests {
                 }
             }
         }
-        assert!(painted > 1000, "support/blending sweep must exercise visible patches");
+        assert!(
+            painted > 1000,
+            "support/blending sweep must exercise visible patches"
+        );
     }
 }

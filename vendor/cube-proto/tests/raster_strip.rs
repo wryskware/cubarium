@@ -48,7 +48,11 @@ fn reassemble(datagrams: &[Vec<u8>], seq: u32) -> Raster {
         assert_eq!(dg.len(), strip.datagram_len());
 
         let r = out.get_or_insert_with(|| Raster::black(strip.width, strip.height));
-        assert_eq!(r.size(), (strip.width, strip.height), "size changed mid-image");
+        assert_eq!(
+            r.size(),
+            (strip.width, strip.height),
+            "size changed mid-image"
+        );
         r.rows_mut(strip.y0, strip.rows)
             .expect("the strip fits")
             .copy_from_slice(pixels);
@@ -140,7 +144,7 @@ fn a_smaller_datagram_limit_cuts_smaller_strips() {
     let src = patterned(100, 20);
     let row = 100 * 3;
     for limit in [
-        HEADER_BYTES + STRIP_HEADER_BYTES + row,     // exactly one row
+        HEADER_BYTES + STRIP_HEADER_BYTES + row, // exactly one row
         HEADER_BYTES + STRIP_HEADER_BYTES + row + 1, // still one row
         HEADER_BYTES + STRIP_HEADER_BYTES + 3 * row, // three rows
         MAX_DATAGRAM,
@@ -159,8 +163,13 @@ fn a_limit_too_small_for_one_row_is_an_error_not_a_bad_datagram() {
     let src = patterned(100, 20);
     let row = 100 * 3;
     let mut out = Vec::new();
-    let err = encode_raster(&src, 1, HEADER_BYTES + STRIP_HEADER_BYTES + row - 1, &mut out)
-        .expect_err("one row must not fit");
+    let err = encode_raster(
+        &src,
+        1,
+        HEADER_BYTES + STRIP_HEADER_BYTES + row - 1,
+        &mut out,
+    )
+    .expect_err("one row must not fit");
     assert!(
         matches!(err, ProtoError::DatagramTooLarge { .. }),
         "got {err:?}"
@@ -275,7 +284,10 @@ fn a_strip_that_runs_past_the_bottom_is_refused() {
     }
     // The exactly-fitting cases are legal.
     for (y0, rows) in [(0u16, 3u16), (1, 2), (2, 1)] {
-        assert!(decode(&strip_datagram(4, 3, y0, rows)).is_ok(), "y0 {y0} rows {rows}");
+        assert!(
+            decode(&strip_datagram(4, 3, y0, rows)).is_ok(),
+            "y0 {y0} rows {rows}"
+        );
     }
 }
 

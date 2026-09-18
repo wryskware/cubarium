@@ -93,11 +93,17 @@ pub struct TurnGate {
 
 impl TurnGate {
     /// Full turning in every mode: the pre-gating controller.
-    pub const UNGATED: TurnGate = TurnGate { feed: 1.0, rest: 1.0 };
+    pub const UNGATED: TurnGate = TurnGate {
+        feed: 1.0,
+        rest: 1.0,
+    };
 
     /// The gate a world config asks for.
     pub fn from_config(cfg: &OrganismConfig) -> Self {
-        TurnGate { feed: cfg.feed_turn_fraction, rest: cfg.rest_turn_fraction }
+        TurnGate {
+            feed: cfg.feed_turn_fraction,
+            rest: cfg.rest_turn_fraction,
+        }
     }
 
     /// `k` for the mode decided this tick.
@@ -233,8 +239,11 @@ pub fn decide_quiet(
         + obs.repulsion * f64::from(d.w_crowd)
         + obs.up * (f64::from(d.w_depth) * (org.phenotype.h_pref - obs.height))
         + ou * f64::from(d.w_persist);
-    let heading =
-        turn_toward(org.heading, steer, f64::from(d.turn_rate_max_deg).to_radians() * dt * k);
+    let heading = turn_toward(
+        org.heading,
+        steer,
+        f64::from(d.turn_rate_max_deg).to_radians() * dt * k,
+    );
 
     let effort = match mode {
         Mode::Seeking => 1.0,
@@ -244,9 +253,21 @@ pub fn decide_quiet(
     let feeding = mode == Mode::Feeding;
     // A held tick cannot be Feeding, so these are already zero; the explicit guard states the
     // contract rather than relying on that, and covers a future mode the override might impose.
-    let fruit_effort = if feeding && can_fruit && !held { 1.0 } else { 0.0 };
-    let graze_effort = if feeding && can_graze && !held { 1.0 } else { 0.0 };
-    let scavenge_effort = if feeding && can_scavenge && !held { 1.0 } else { 0.0 };
+    let fruit_effort = if feeding && can_fruit && !held {
+        1.0
+    } else {
+        0.0
+    };
+    let graze_effort = if feeding && can_graze && !held {
+        1.0
+    } else {
+        0.0
+    };
+    let scavenge_effort = if feeding && can_scavenge && !held {
+        1.0
+    } else {
+        0.0
+    };
 
     let age_seconds = org.age_ticks(now) as f64 * dt;
     // New budding requests are suppressed until release. The completed child's stores and birth
@@ -423,26 +444,42 @@ mod tests {
         let org = organism(Mode::Resting, 0.0, 2.0, 0.0);
         let d = decide(&org, &Observation::default(), 0, DT, true, true, gate());
         let expected = (1.0 - (-DT / 10.0f64).exp()) * 1.0;
-        assert!((d.hunger_memory - expected).abs() < 1e-15, "{} vs {expected}", d.hunger_memory);
+        assert!(
+            (d.hunger_memory - expected).abs() < 1e-15,
+            "{} vs {expected}",
+            d.hunger_memory
+        );
     }
 
     #[test]
     fn mode_hysteresis_uses_seek_on_and_seek_off() {
         // Starving (h = 1) just below the on-threshold: still resting.
         let org = organism(Mode::Resting, 0.0, 2.0, 0.29);
-        assert_eq!(decide(&org, &Observation::default(), 0, DT, true, true, gate()).mode, Mode::Resting);
+        assert_eq!(
+            decide(&org, &Observation::default(), 0, DT, true, true, gate()).mode,
+            Mode::Resting
+        );
 
         // At the threshold the lag pushes the memory above it: resting -> seeking.
         let org = organism(Mode::Resting, 0.0, 2.0, 0.30);
-        assert_eq!(decide(&org, &Observation::default(), 0, DT, true, true, gate()).mode, Mode::Seeking);
+        assert_eq!(
+            decide(&org, &Observation::default(), 0, DT, true, true, gate()).mode,
+            Mode::Seeking
+        );
 
         // Full (h = 0) above the off-threshold: still seeking.
         let org = organism(Mode::Seeking, 1.0, 2.0, 0.11);
-        assert_eq!(decide(&org, &Observation::default(), 0, DT, true, true, gate()).mode, Mode::Seeking);
+        assert_eq!(
+            decide(&org, &Observation::default(), 0, DT, true, true, gate()).mode,
+            Mode::Seeking
+        );
 
         // At the off-threshold the lag pushes the memory below it: seeking -> resting.
         let org = organism(Mode::Seeking, 1.0, 2.0, 0.10);
-        assert_eq!(decide(&org, &Observation::default(), 0, DT, true, true, gate()).mode, Mode::Resting);
+        assert_eq!(
+            decide(&org, &Observation::default(), 0, DT, true, true, gate()).mode,
+            Mode::Resting
+        );
     }
 
     #[test]
@@ -452,7 +489,10 @@ mod tests {
         org.phenotype.diet = 0.5;
         org.phenotype.cap_foliage = 0.5;
         org.phenotype.cap_detrital = 0.5;
-        let hungry = Observation { p_here: 1.0, ..Observation::default() };
+        let hungry = Observation {
+            p_here: 1.0,
+            ..Observation::default()
+        };
         let d = decide(&org, &hungry, 0, DT, true, true, gate());
         assert_eq!(d.mode, Mode::Feeding);
         assert_eq!((d.graze_effort, d.scavenge_effort), (1.0, 0.0));
@@ -463,7 +503,11 @@ mod tests {
         assert_eq!((d.graze_effort, d.scavenge_effort), (0.0, 0.0));
 
         // Both channels can request at once (`d_here` is edible detritus, not raw D).
-        let both = Observation { p_here: 1.0, d_here: 1.0, ..Observation::default() };
+        let both = Observation {
+            p_here: 1.0,
+            d_here: 1.0,
+            ..Observation::default()
+        };
         let d = decide(&org, &both, 0, DT, true, true, gate());
         assert_eq!((d.graze_effort, d.scavenge_effort), (1.0, 1.0));
 
@@ -480,28 +524,50 @@ mod tests {
     fn effort_follows_mode() {
         // The drives are f32, so the efforts come back as the widened f32 values.
         let resting = organism(Mode::Resting, 1.0, 2.0, 0.0);
-        assert_eq!(decide(&resting, &Observation::default(), 0, DT, true, true, gate()).effort, f64::from(0.05f32));
+        assert_eq!(
+            decide(&resting, &Observation::default(), 0, DT, true, true, gate()).effort,
+            f64::from(0.05f32)
+        );
 
         let seeking = organism(Mode::Seeking, 0.0, 2.0, 1.0);
-        assert_eq!(decide(&seeking, &Observation::default(), 0, DT, true, true, gate()).effort, 1.0);
+        assert_eq!(
+            decide(&seeking, &Observation::default(), 0, DT, true, true, gate()).effort,
+            1.0
+        );
 
-        let obs = Observation { p_here: 1.0, ..Observation::default() };
-        assert_eq!(decide(&seeking, &obs, 0, DT, true, true, gate()).effort, f64::from(0.2f32));
+        let obs = Observation {
+            p_here: 1.0,
+            ..Observation::default()
+        };
+        assert_eq!(
+            decide(&seeking, &obs, 0, DT, true, true, gate()).effort,
+            f64::from(0.2f32)
+        );
     }
 
     #[test]
     fn turn_is_rate_limited_toward_strong_steering() {
         // Repulsion straight "up" on screen (-v) against a heading along +u.
         let org = organism(Mode::Resting, 1.0, 2.0, 0.0);
-        let obs = Observation { repulsion: Vec2::new(0.0, -1000.0), ..Observation::default() };
+        let obs = Observation {
+            repulsion: Vec2::new(0.0, -1000.0),
+            ..Observation::default()
+        };
         let d = decide(&org, &obs, 0, DT, true, true, TurnGate::UNGATED);
         let limit = 90.0f64.to_radians() * DT;
         assert!((d.heading.length() - 1.0).abs() < 1e-12);
-        assert!((d.heading.screen_angle() - limit).abs() < 1e-12, "{}", d.heading.screen_angle());
+        assert!(
+            (d.heading.screen_angle() - limit).abs() < 1e-12,
+            "{}",
+            d.heading.screen_angle()
+        );
 
         // Reaching the target within one tick's budget snaps exactly onto it.
         let tiny = Vec2::new(1.0, -0.01);
-        let obs = Observation { repulsion: tiny, ..Observation::default() };
+        let obs = Observation {
+            repulsion: tiny,
+            ..Observation::default()
+        };
         let d = decide(&org, &obs, 0, DT, true, true, TurnGate::UNGATED);
         let expected = tiny.normalized().unwrap();
         assert!((d.heading - expected).length() < 1e-12);
@@ -520,16 +586,60 @@ mod tests {
         let energy_needed = f64::from(p.drives.bud_energy) * p.energy_max;
         let age_needed = (f64::from(p.drives.bud_min_age_seconds) / DT).round() as u64;
         let ready = organism(Mode::Resting, reserve_needed, energy_needed, 0.0);
-        assert!(decide(&ready, &Observation::default(), age_needed, DT, true, true, gate()).bud);
+        assert!(
+            decide(
+                &ready,
+                &Observation::default(),
+                age_needed,
+                DT,
+                true,
+                true,
+                gate()
+            )
+            .bud
+        );
 
         // One tick too young.
-        assert!(!decide(&ready, &Observation::default(), age_needed - 1, DT, true, true, gate()).bud);
+        assert!(
+            !decide(
+                &ready,
+                &Observation::default(),
+                age_needed - 1,
+                DT,
+                true,
+                true,
+                gate()
+            )
+            .bud
+        );
         // Reserve just below bud_reserve · R_max.
         let lean = organism(Mode::Resting, reserve_needed * 0.999, energy_needed, 0.0);
-        assert!(!decide(&lean, &Observation::default(), age_needed, DT, true, true, gate()).bud);
+        assert!(
+            !decide(
+                &lean,
+                &Observation::default(),
+                age_needed,
+                DT,
+                true,
+                true,
+                gate()
+            )
+            .bud
+        );
         // Energy just below bud_energy · E_max.
         let tired = organism(Mode::Resting, reserve_needed, energy_needed * 0.999, 0.0);
-        assert!(!decide(&tired, &Observation::default(), age_needed, DT, true, true, gate()).bud);
+        assert!(
+            !decide(
+                &tired,
+                &Observation::default(),
+                age_needed,
+                DT,
+                true,
+                true,
+                gate()
+            )
+            .bud
+        );
         // Already gestating.
         let mut gestating = organism(Mode::Resting, reserve_needed, energy_needed, 0.0);
         gestating.escrow = Some(Escrow {
@@ -539,6 +649,17 @@ mod tests {
             started_tick: 0,
             genome: genome(),
         });
-        assert!(!decide(&gestating, &Observation::default(), age_needed, DT, true, true, gate()).bud);
+        assert!(
+            !decide(
+                &gestating,
+                &Observation::default(),
+                age_needed,
+                DT,
+                true,
+                true,
+                gate()
+            )
+            .bud
+        );
     }
 }

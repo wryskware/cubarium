@@ -6,7 +6,6 @@
 //! observation through `World::neural_observation`, which runs the same sampler the controller
 //! does, from the same neighbour lists and rings, without stepping.
 
-use cubarium_surface::{Scale, Topology};
 use cubarium_core::genome::{Genome, decode};
 use cubarium_core::ids::OrganismId;
 use cubarium_core::neural::Policy;
@@ -16,6 +15,7 @@ use cubarium_core::organism::{Mode, Organism, Origin};
 use cubarium_core::rng::Counter;
 use cubarium_core::{DT, World, WorldConfig};
 use cubarium_surface::{Face, SurfacePoint, Vec2, cell_of, travel};
+use cubarium_surface::{Scale, Topology};
 
 /// An empty, weather-free world: nothing moves or grows that the fixture did not put there.
 fn bare() -> World {
@@ -157,7 +157,10 @@ fn a_body_at_a_seam_senses_the_same_food_and_bodies_as_an_equivalent_flat_layout
         world.step();
         world.drain_events();
         let o = world.state.organisms.get(id).expect("alive");
-        assert_eq!(o.pos.face, anchor.face, "the observer must not have wandered off");
+        assert_eq!(
+            o.pos.face, anchor.face,
+            "the observer must not have wandered off"
+        );
         sensed.push(world.neural_observation(id).expect("an observation"));
     }
 
@@ -234,7 +237,12 @@ fn the_seventeenth_neighbour_in_range_is_not_sensed_and_the_fixture_says_so() {
     // Every one of them is inside `r_sense`, so all seventeen are *in range*.
     for k in 0..16 {
         let a = std::f64::consts::PI * (0.6 + 0.8 * f64::from(k) / 15.0);
-        let spot = travel(Topology::Cube, anchor, body_offset(heading, 2.0 * a.cos(), 2.0 * a.sin())).end;
+        let spot = travel(
+            Topology::Cube,
+            anchor,
+            body_offset(heading, 2.0 * a.cos(), 2.0 * a.sin()),
+        )
+        .end;
         place(&mut world, spot, heading, 0.6);
     }
     let far = travel(Topology::Cube, anchor, body_offset(heading, 6.5, 0.0)).end;
@@ -256,8 +264,13 @@ fn the_seventeenth_neighbour_in_range_is_not_sensed_and_the_fixture_says_so() {
     );
     // And it really is in range: it is well inside the observer's sensing radius.
     let o = world.state.organisms.get(id).expect("alive");
-    let reach = cubarium_surface::unfold(Topology::Cube, o.pos, world.state.organisms.get(seventeenth).expect("alive").pos, 32.0)
-        .expect("the two are on one chart");
+    let reach = cubarium_surface::unfold(
+        Topology::Cube,
+        o.pos,
+        world.state.organisms.get(seventeenth).expect("alive").pos,
+        32.0,
+    )
+    .expect("the two are on one chart");
     assert!(
         reach.distance < o.phenotype.sense_radius,
         "the 17th body is {} px away against a sensing radius of {}",
@@ -340,7 +353,10 @@ fn a_held_turn_turns_by_the_same_signed_amount_on_both_sides_of_a_seam() {
         after_seam.len()
     );
     let want = before_seam[before_seam.len() - 1];
-    assert!(want > 0.0, "a positive `a₁` is a clockwise turn, measured {want}");
+    assert!(
+        want > 0.0,
+        "a positive `a₁` is a clockwise turn, measured {want}"
+    );
     for (i, turn) in after_seam.iter().enumerate() {
         assert!(
             (turn - want).abs() < 1e-9,

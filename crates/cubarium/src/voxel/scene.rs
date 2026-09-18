@@ -94,7 +94,12 @@ pub fn authored(config: Config) -> World {
                 } else {
                     Material::Soil
                 };
-                world.apply(Command::SetMaterial { x, y, z, material: m });
+                world.apply(Command::SetMaterial {
+                    x,
+                    y,
+                    z,
+                    material: m,
+                });
             }
         }
     }
@@ -123,7 +128,12 @@ pub fn authored(config: Config) -> World {
             let roof = surface(c, x, z).saturating_sub(3);
             let floor = roof.saturating_sub(3).max(BEDROCK_TOP + 1);
             for y in floor..roof {
-                world.apply(Command::SetMaterial { x, y, z, material: Material::Air });
+                world.apply(Command::SetMaterial {
+                    x,
+                    y,
+                    z,
+                    material: Material::Air,
+                });
             }
         }
     }
@@ -165,7 +175,12 @@ pub fn authored(config: Config) -> World {
             let top = surface(c, x, z);
             let floor = top.saturating_sub(cut).max(BEDROCK_TOP);
             for y in (floor + 1)..=top {
-                world.apply(Command::SetMaterial { x, y, z, material: Material::Air });
+                world.apply(Command::SetMaterial {
+                    x,
+                    y,
+                    z,
+                    material: Material::Air,
+                });
             }
         }
     }
@@ -182,7 +197,12 @@ pub fn authored(config: Config) -> World {
         for z in 0..c.depth {
             let top = world.view().surface_y(x, z).unwrap_or(0);
             for y in (top + 1)..=level {
-                world.apply(Command::AddWater { x, y, z, volume_m3: volume });
+                world.apply(Command::AddWater {
+                    x,
+                    y,
+                    z,
+                    volume_m3: volume,
+                });
             }
         }
     }
@@ -197,7 +217,12 @@ mod tests {
     /// The landform is periodic in `x` by construction, at every depth.
     #[test]
     fn the_landform_is_periodic_across_the_seam() {
-        let c = Config { width: 48, height: 20, depth: 6, ..Config::default() };
+        let c = Config {
+            width: 48,
+            height: 20,
+            depth: 6,
+            ..Config::default()
+        };
         for z in 0..c.depth {
             for x in -8i64..8 {
                 assert_eq!(
@@ -213,13 +238,22 @@ mod tests {
     /// bedrock floor survives.
     #[test]
     fn the_authored_world_stays_inside_its_config() {
-        let c = Config { width: 40, height: 16, depth: 4, ..Config::default() };
+        let c = Config {
+            width: 40,
+            height: 16,
+            depth: 4,
+            ..Config::default()
+        };
         let world = authored(c.clone());
         let view = world.view();
         assert_eq!(view.material.len(), c.cells());
         for z in 0..c.depth {
             for x in 0..i64::from(c.width) {
-                assert_eq!(view.material_at(x, 0, z), Material::Bedrock, "the floor at {x},{z}");
+                assert_eq!(
+                    view.material_at(x, 0, z),
+                    Material::Bedrock,
+                    "the floor at {x},{z}"
+                );
                 assert_eq!(
                     view.material_at(x, c.height - 1, z),
                     Material::Air,

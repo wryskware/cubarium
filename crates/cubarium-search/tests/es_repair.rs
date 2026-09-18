@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
-use cubarium_search::es::{self, tensor, trainer};
 use cubarium_search::es::trainer::{Checkpoint, GenerationError};
+use cubarium_search::es::{self, tensor, trainer};
 
 fn scratch(name: &str) -> PathBuf {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
@@ -52,7 +52,10 @@ fn a_deadline_that_passes_during_the_last_batch_cancels_without_an_update() {
         matches!(err, GenerationError::Cancelled(_)),
         "expected cancellation, got {err:?}"
     );
-    assert_eq!(theta, original, "a cancelled generation must not move the centre");
+    assert_eq!(
+        theta, original,
+        "a cancelled generation must not move the centre"
+    );
     assert_eq!(adam.step, 0, "and must not advance the optimizer");
     assert!(
         started.elapsed() < Duration::from_millis(600),
@@ -63,7 +66,10 @@ fn a_deadline_that_passes_during_the_last_batch_cancels_without_an_update() {
     // The work it did is counted, separately from optimizer progress.
     let discarded = err.discarded();
     assert!(discarded.episodes_attempted > 0, "it attempted work");
-    assert!(discarded.ticks_run > 0, "and simulated ticks, which the budget must see");
+    assert!(
+        discarded.ticks_run > 0,
+        "and simulated ticks, which the budget must see"
+    );
     assert!(
         discarded.episodes_completed < discarded.episodes_attempted
             || discarded.ticks_run < 2 * 4_000,
@@ -118,12 +124,22 @@ fn a_resumed_run_continues_the_same_run_rather_than_repeating_it() {
     assert_eq!(a.theta, b.theta, "resume must reach the same centre");
     assert_eq!(a.adam, b.adam);
     assert_eq!(a.generation_completed, b.generation_completed);
-    assert_eq!(a.episodes_run, 28, "the uninterrupted cost the review measured");
+    assert_eq!(
+        a.episodes_run, 28,
+        "the uninterrupted cost the review measured"
+    );
     assert_eq!(a.ticks_run, 1_120);
-    assert_eq!(b.episodes_run, a.episodes_run, "resume must not pay for a repeated centre");
+    assert_eq!(
+        b.episodes_run, a.episodes_run,
+        "resume must not pay for a repeated centre"
+    );
     assert_eq!(b.ticks_run, a.ticks_run);
     assert_eq!(a.center_generations(), vec![0, 1, 2]);
-    assert_eq!(b.center_generations(), vec![0, 1, 2], "no duplicated centre");
+    assert_eq!(
+        b.center_generations(),
+        vec![0, 1, 2],
+        "no duplicated centre"
+    );
     assert!(a.centers.iter().all(|c| c.score.is_some()));
     assert!(b.centers.iter().all(|c| c.score.is_some()));
 
@@ -140,7 +156,11 @@ fn a_resumed_run_continues_the_same_run_rather_than_repeating_it() {
             .collect()
     };
     assert_eq!(generations(&whole), vec![0, 1]);
-    assert_eq!(generations(&part), vec![0, 1], "resuming must not truncate the log");
+    assert_eq!(
+        generations(&part),
+        vec![0, 1],
+        "resuming must not truncate the log"
+    );
 
     // Every centre this run passed through is recoverable, weight for weight, not only the
     // last — which is what lets the evaluation assignment select any of them.
@@ -192,7 +212,10 @@ fn a_fresh_run_refuses_to_overwrite_an_existing_one_unless_told_to() {
     go(false).expect("the first run is fine");
     let err = go(false).expect_err("a second fresh run must be refused");
     let message = err.to_string();
-    assert!(message.contains("--resume"), "the refusal names the way forward: {message}");
+    assert!(
+        message.contains("--resume"),
+        "the refusal names the way forward: {message}"
+    );
     assert!(message.contains("--overwrite"), "{message}");
 
     // The refusal is not a lockout: an explicit overwrite starts over.
@@ -202,7 +225,11 @@ fn a_fresh_run_refuses_to_overwrite_an_existing_one_unless_told_to() {
             .expect("parse");
     assert_eq!(cp.generation_completed, 1);
     let rows = fs::read_to_string(out.join("generations.jsonl")).expect("log");
-    assert_eq!(rows.lines().count(), 1, "an overwrite starts the history over, once");
+    assert_eq!(
+        rows.lines().count(),
+        1,
+        "an overwrite starts the history over, once"
+    );
 }
 
 /// **Repair-1 review finding A**: an invariant failure in the *final centre* evaluation must be
@@ -226,8 +253,11 @@ fn an_invalid_final_centre_evaluation_fails_the_run_and_keeps_the_completed_chec
     cp.episodes_run = 24;
     cp.ticks_run = 9_600;
     cp.theta[0] += 0.125;
-    fs::write(&checkpoint_path, serde_json::to_string_pretty(&cp).expect("write"))
-        .expect("seed checkpoint");
+    fs::write(
+        &checkpoint_path,
+        serde_json::to_string_pretty(&cp).expect("write"),
+    )
+    .expect("seed checkpoint");
     let completed = cp.clone();
 
     // Corrupt the animal's private state one tick before the rollout's validation cadence.
@@ -252,7 +282,10 @@ fn an_invalid_final_centre_evaluation_fails_the_run_and_keeps_the_completed_chec
     // The job identity and the detail survive.
     let message = err.to_string();
     assert!(message.contains("invalid world"), "{message}");
-    assert!(message.contains("gen3/center/"), "the failing job is named: {message}");
+    assert!(
+        message.contains("gen3/center/"),
+        "the failing job is named: {message}"
+    );
     assert!(
         message.contains("t1-corridor")
             || message.contains("t2-weak-open")
@@ -260,22 +293,34 @@ fn an_invalid_final_centre_evaluation_fails_the_run_and_keeps_the_completed_chec
             || message.contains("t4-ring"),
         "the layout is named: {message}"
     );
-    assert!(!message.contains("wall-time cap"), "this is not a budget stop: {message}");
+    assert!(
+        !message.contains("wall-time cap"),
+        "this is not a budget stop: {message}"
+    );
 
     // Discarded work is counted, and it is not optimizer progress.
     assert!(cp.discarded.episodes_attempted > 0);
     assert!(cp.discarded.ticks_run > 0);
-    assert_eq!(cp.episodes_run, completed.episodes_run, "no episodes credited to progress");
+    assert_eq!(
+        cp.episodes_run, completed.episodes_run,
+        "no episodes credited to progress"
+    );
     assert_eq!(cp.ticks_run, completed.ticks_run);
 
     // The completed optimizer state is saved and unchanged on disk.
     let saved: Checkpoint =
         serde_json::from_str(&fs::read_to_string(&checkpoint_path).expect("read")).expect("parse");
-    assert_eq!(saved.theta, completed.theta, "the last completed centre survives");
+    assert_eq!(
+        saved.theta, completed.theta,
+        "the last completed centre survives"
+    );
     assert_eq!(saved.adam, completed.adam);
     assert_eq!(saved.generation_completed, 3);
     assert_eq!(saved.episodes_run, completed.episodes_run);
-    assert_eq!(saved.discarded, cp.discarded, "with the discarded work recorded beside it");
+    assert_eq!(
+        saved.discarded, cp.discarded,
+        "with the discarded work recorded beside it"
+    );
 
     // And a cancellation in the same place is still an ordinary budget stop, not an error.
     let mut cp = completed.clone();

@@ -117,9 +117,17 @@ pub struct MeanByController {
 impl MeanByController {
     fn of(sums: (f64, u64), other: (f64, u64)) -> MeanByController {
         MeanByController {
-            neural: if sums.1 > 0 { sums.0 / sums.1 as f64 } else { 0.0 },
+            neural: if sums.1 > 0 {
+                sums.0 / sums.1 as f64
+            } else {
+                0.0
+            },
             neural_n: sums.1,
-            legacy: if other.1 > 0 { other.0 / other.1 as f64 } else { 0.0 },
+            legacy: if other.1 > 0 {
+                other.0 / other.1 as f64
+            } else {
+                0.0
+            },
             legacy_n: other.1,
         }
     }
@@ -130,7 +138,9 @@ impl MeanByController {
 /// `PursuitStop::default()` so that adopting a new shipped rule cannot relabel a retained
 /// report (`design/7_Research/ecology-v1-predicate-adoption-2026-09-16.md`).
 fn half_space_name() -> String {
-    cubarium_core::hunter::PursuitStop::ForwardHalfSpace.as_str().to_string()
+    cubarium_core::hunter::PursuitStop::ForwardHalfSpace
+        .as_str()
+        .to_string()
 }
 
 /// Everything one population comparison ran under.
@@ -312,7 +322,13 @@ fn copy_placements(seed: u64, count: usize) -> Vec<(CellId, Vec2)> {
             let y = 2 + (unit(seed, stream::APEX_PLACEMENT, key, 2) * 12.0) as u16;
             let angle = std::f64::consts::TAU * unit(seed, stream::APEX_PLACEMENT, key, 3);
             (
-                CellId::new(Topology::Cube, Scale::ONE, Face::from_index(face).unwrap_or(Face::Front), x.min(13), y.min(13)),
+                CellId::new(
+                    Topology::Cube,
+                    Scale::ONE,
+                    Face::from_index(face).unwrap_or(Face::Front),
+                    x.min(13),
+                    y.min(13),
+                ),
                 Vec2::new(angle.cos(), angle.sin()),
             )
         })
@@ -551,7 +567,10 @@ impl Recorder {
             if self.apex_ids.contains(&id) {
                 continue;
             }
-            self.visited.entry(id).or_default().insert(cell_of(Topology::Cube, Scale::ONE, &o.pos).index() as u16);
+            self.visited
+                .entry(id)
+                .or_default()
+                .insert(cell_of(Topology::Cube, Scale::ONE, &o.pos).index() as u16);
         }
     }
 
@@ -559,7 +578,11 @@ impl Recorder {
         let visited = std::mem::take(&mut self.visited);
         for (id, cells) in visited {
             let neural = self.neural_of.get(&id).copied().unwrap_or(false);
-            let slot = if neural { &mut self.cells_neural } else { &mut self.cells_legacy };
+            let slot = if neural {
+                &mut self.cells_neural
+            } else {
+                &mut self.cells_legacy
+            };
             slot.0 += cells.len() as f64;
             slot.1 += 1;
             if self.imported.contains(&id) {
@@ -585,7 +608,8 @@ impl Recorder {
             self.neural_extinct_at = Some(world.tick());
         }
         if world.tick() >= self.late_from_tick {
-            self.late_foliage.push(world.state.fields.p.iter().sum::<f64>());
+            self.late_foliage
+                .push(world.state.fields.p.iter().sum::<f64>());
         }
         self.max_mass = self.max_mass.max(world.mass_residual().abs());
         let energy = (crate::evaluate::stored_energy(world) - self.opening_energy)
@@ -612,8 +636,17 @@ fn trial(
     let start = Instant::now();
     let done = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         run_trial(
-            ecology, policy, seed, arm, mix, copies, horizon, sample_every, introduce_tick,
-            pursuit_stop, start,
+            ecology,
+            policy,
+            seed,
+            arm,
+            mix,
+            copies,
+            horizon,
+            sample_every,
+            introduce_tick,
+            pursuit_stop,
+            start,
         )
     }));
     match done {
@@ -624,7 +657,14 @@ fn trial(
                 .map(|s| (*s).to_string())
                 .or_else(|| payload.downcast_ref::<String>().cloned())
                 .unwrap_or_else(|| "non-string panic payload".to_string());
-            refused(seed, arm, mix, "failed", format!("simulation panicked: {what}"), start)
+            refused(
+                seed,
+                arm,
+                mix,
+                "failed",
+                format!("simulation panicked: {what}"),
+                start,
+            )
         }
     }
 }
@@ -714,19 +754,40 @@ fn run_trial(
     config.seed = seed;
     config.capacity.event_log = false;
     if let Err(e) = config.validate() {
-        return refused(seed, arm, mix, "invalid", format!("config rejected: {e}"), start);
+        return refused(
+            seed,
+            arm,
+            mix,
+            "invalid",
+            format!("config rejected: {e}"),
+            start,
+        );
     }
     // The apex profile is derived from the **base** config exactly as `evaluate::run` derives
     // it, so the predator in these arms is bit-for-bit the one the calibration screen used.
     let profile = FixedHunterProfile::lanternjaw_trial(&base_config(seed));
     if let Err(e) = profile.validate() {
-        return refused(seed, arm, mix, "invalid", format!("hunter profile rejected: {e}"), start);
+        return refused(
+            seed,
+            arm,
+            mix,
+            "invalid",
+            format!("hunter profile rejected: {e}"),
+            start,
+        );
     }
 
     let mut world = match World::new(config) {
         Ok(w) => w,
         Err(e) => {
-            return refused(seed, arm, mix, "invalid", format!("world creation refused: {e}"), start);
+            return refused(
+                seed,
+                arm,
+                mix,
+                "invalid",
+                format!("world creation refused: {e}"),
+                start,
+            );
         }
     };
     // The pursuit stopping rule, before the first tick. A transient on the world, so the
@@ -829,8 +890,12 @@ fn run_trial(
         .map(|m| m.id)
         .filter(|id| world.state.organisms.get(*id).is_some())
         .collect();
-    let final_population =
-        world.state.organisms.iter().filter(|(id, _)| !live_apex.contains(id)).count() as u32;
+    let final_population = world
+        .state
+        .organisms
+        .iter()
+        .filter(|(id, _)| !live_apex.contains(id))
+        .count() as u32;
 
     let mut travel = ((0.0f64, 0u64), (0.0f64, 0u64));
     let mut lengths = ((0.0f64, 0u64), (0.0f64, 0u64));
@@ -841,7 +906,11 @@ fn run_trial(
         slot.1 += 1;
         let extent = rec.extent_of.get(id).copied().unwrap_or(0.0);
         if extent > 0.0 {
-            let slot = if neural { &mut lengths.0 } else { &mut lengths.1 };
+            let slot = if neural {
+                &mut lengths.0
+            } else {
+                &mut lengths.1
+            };
             slot.0 += px / extent;
             slot.1 += 1;
         }
@@ -910,8 +979,16 @@ fn run_trial(
         copy_alive_final,
         copy_deaths_by_cause: rec.copy_deaths_by_cause.clone(),
         copy_births: rec.copy_births,
-        copy_travel_px_mean: if copy_travel.1 > 0 { copy_travel.0 / copy_travel.1 as f64 } else { 0.0 },
-        copy_body_lengths_mean: if copy_lengths.1 > 0 { copy_lengths.0 / copy_lengths.1 as f64 } else { 0.0 },
+        copy_travel_px_mean: if copy_travel.1 > 0 {
+            copy_travel.0 / copy_travel.1 as f64
+        } else {
+            0.0
+        },
+        copy_body_lengths_mean: if copy_lengths.1 > 0 {
+            copy_lengths.0 / copy_lengths.1 as f64
+        } else {
+            0.0
+        },
         copy_distinct_cells_per_window: if rec.copy_cells.1 > 0 {
             rec.copy_cells.0 / rec.copy_cells.1 as f64
         } else {
@@ -1047,14 +1124,19 @@ pub fn run_stage(
                         introduce_tick,
                         pursuit_stop,
                     );
-                    results.lock().expect("population results mutex").push((i, row));
+                    results
+                        .lock()
+                        .expect("population results mutex")
+                        .push((i, row));
                 }
             });
         }
     });
 
     let wall = start.elapsed().as_secs_f64();
-    let mut results = results.into_inner().map_err(|e| format!("results mutex: {e}"))?;
+    let mut results = results
+        .into_inner()
+        .map_err(|e| format!("results mutex: {e}"))?;
     results.sort_by_key(|(i, _)| *i);
     let rows: Vec<PopulationRow> = results.into_iter().map(|(_, r)| r).collect();
     let ticks: u64 = rows.iter().map(|r| r.ticks_run).sum();
@@ -1065,7 +1147,8 @@ pub fn run_stage(
         text.push_str(&serde_json::to_string(r).map_err(|e| e.to_string())?);
         text.push('\n');
     }
-    std::fs::write(&rows_path, text).map_err(|e| format!("writing {}: {e}", rows_path.display()))?;
+    std::fs::write(&rows_path, text)
+        .map_err(|e| format!("writing {}: {e}", rows_path.display()))?;
 
     let mut arm_summaries = Vec::new();
     let mut inheritance: Option<bool> = None;
@@ -1088,7 +1171,11 @@ pub fn run_stage(
             }
         }
         let m = |v: &[&PopulationRow], f: &dyn Fn(&PopulationRow) -> f64| -> f64 {
-            if v.is_empty() { 0.0 } else { v.iter().map(|r| f(r)).sum::<f64>() / v.len() as f64 }
+            if v.is_empty() {
+                0.0
+            } else {
+                v.iter().map(|r| f(r)).sum::<f64>() / v.len() as f64
+            }
         };
         let pair = |f: &dyn Fn(&PopulationRow) -> f64| (m(&neural, f), m(&legacy, f));
         let mut nb = ByController::default();
@@ -1129,15 +1216,27 @@ pub fn run_stage(
             copy_body_lengths: pair(&|r| r.copy_body_lengths_mean),
             neural_arm_distinct_cells: MeanByController {
                 neural: m(&neural, &|r| r.distinct_cells_per_body_window.neural),
-                neural_n: neural.iter().map(|r| r.distinct_cells_per_body_window.neural_n).sum(),
+                neural_n: neural
+                    .iter()
+                    .map(|r| r.distinct_cells_per_body_window.neural_n)
+                    .sum(),
                 legacy: m(&neural, &|r| r.distinct_cells_per_body_window.legacy),
-                legacy_n: neural.iter().map(|r| r.distinct_cells_per_body_window.legacy_n).sum(),
+                legacy_n: neural
+                    .iter()
+                    .map(|r| r.distinct_cells_per_body_window.legacy_n)
+                    .sum(),
             },
             neural_arm_body_lengths: MeanByController {
                 neural: m(&neural, &|r| r.body_lengths_per_body.neural),
-                neural_n: neural.iter().map(|r| r.body_lengths_per_body.neural_n).sum(),
+                neural_n: neural
+                    .iter()
+                    .map(|r| r.body_lengths_per_body.neural_n)
+                    .sum(),
                 legacy: m(&neural, &|r| r.body_lengths_per_body.legacy),
-                legacy_n: neural.iter().map(|r| r.body_lengths_per_body.legacy_n).sum(),
+                legacy_n: neural
+                    .iter()
+                    .map(|r| r.body_lengths_per_body.legacy_n)
+                    .sum(),
             },
             neural_arm_births: nb,
             neural_arm_deaths: nd,
@@ -1192,7 +1291,14 @@ pub fn print_report(report: &PopulationReport) {
     println!();
     println!(
         "{:>3} {:>8} {:>17} {:>15} {:>15} {:>13} {:>13} {:>11}",
-        "arm", "mix", "final pop / neural", "births", "deaths", "intake P", "retention", "depletion"
+        "arm",
+        "mix",
+        "final pop / neural",
+        "births",
+        "deaths",
+        "intake P",
+        "retention",
+        "depletion"
     );
     for a in &report.arms {
         println!(
@@ -1228,8 +1334,26 @@ pub fn print_report(report: &PopulationReport) {
     );
     for a in &report.arms {
         for (label, v) in [
-            ("neural", (a.copy_lifetime_ticks.0, a.copy_alive_final.0, a.copy_births.0, a.copy_distinct_cells.0, a.copy_body_lengths.0)),
-            ("legacy", (a.copy_lifetime_ticks.1, a.copy_alive_final.1, a.copy_births.1, a.copy_distinct_cells.1, a.copy_body_lengths.1)),
+            (
+                "neural",
+                (
+                    a.copy_lifetime_ticks.0,
+                    a.copy_alive_final.0,
+                    a.copy_births.0,
+                    a.copy_distinct_cells.0,
+                    a.copy_body_lengths.0,
+                ),
+            ),
+            (
+                "legacy",
+                (
+                    a.copy_lifetime_ticks.1,
+                    a.copy_alive_final.1,
+                    a.copy_births.1,
+                    a.copy_distinct_cells.1,
+                    a.copy_body_lengths.1,
+                ),
+            ),
         ] {
             println!(
                 "{:>3} {:>8} {:>14.0} {:>12.1} {:>10.1} {:>14.1} {:>14.0}",
@@ -1241,14 +1365,26 @@ pub fn print_report(report: &PopulationReport) {
     println!("## inside the neural arm, by the controller the world reports");
     println!(
         "{:>3} {:>12} {:>12} {:>14} {:>14} {:>16} {:>16}",
-        "arm", "births n/l", "deaths n/l", "cells/body n", "cells/body l", "body lengths n", "body lengths l"
+        "arm",
+        "births n/l",
+        "deaths n/l",
+        "cells/body n",
+        "cells/body l",
+        "body lengths n",
+        "body lengths l"
     );
     for a in &report.arms {
         println!(
             "{:>3} {:>12} {:>12} {:>14.2} {:>14.2} {:>16.0} {:>16.0}",
             a.arm,
-            format!("{}/{}", a.neural_arm_births.neural, a.neural_arm_births.legacy),
-            format!("{}/{}", a.neural_arm_deaths.neural, a.neural_arm_deaths.legacy),
+            format!(
+                "{}/{}",
+                a.neural_arm_births.neural, a.neural_arm_births.legacy
+            ),
+            format!(
+                "{}/{}",
+                a.neural_arm_deaths.neural, a.neural_arm_deaths.legacy
+            ),
             a.neural_arm_distinct_cells.neural,
             a.neural_arm_distinct_cells.legacy,
             a.neural_arm_body_lengths.neural,
@@ -1283,8 +1419,32 @@ mod tests {
     fn the_two_arms_are_matched_in_everything_but_the_controller() {
         let eco = Ecology::defaults();
         let policy = tensor::policy(&tensor::initial_center(7)).expect("a policy");
-        let neural = run_trial(&eco, &policy, 1001, 0, Mix::Neural, 4, 400, 200, 0, Default::default(), Instant::now());
-        let legacy = run_trial(&eco, &policy, 1001, 0, Mix::Legacy, 4, 400, 200, 0, Default::default(), Instant::now());
+        let neural = run_trial(
+            &eco,
+            &policy,
+            1001,
+            0,
+            Mix::Neural,
+            4,
+            400,
+            200,
+            0,
+            Default::default(),
+            Instant::now(),
+        );
+        let legacy = run_trial(
+            &eco,
+            &policy,
+            1001,
+            0,
+            Mix::Legacy,
+            4,
+            400,
+            200,
+            0,
+            Default::default(),
+            Instant::now(),
+        );
 
         assert_eq!(neural.status, "completed", "{:?}", neural.reason);
         assert_eq!(legacy.status, "completed", "{:?}", legacy.reason);
@@ -1297,8 +1457,16 @@ mod tests {
             neural.imported_material,
             legacy.imported_material
         );
-        assert!(neural.max_abs_mass_residual < 1e-6, "{}", neural.max_abs_mass_residual);
-        assert!(legacy.max_abs_mass_residual < 1e-6, "{}", legacy.max_abs_mass_residual);
+        assert!(
+            neural.max_abs_mass_residual < 1e-6,
+            "{}",
+            neural.max_abs_mass_residual
+        );
+        assert!(
+            legacy.max_abs_mass_residual < 1e-6,
+            "{}",
+            legacy.max_abs_mass_residual
+        );
     }
 
     /// Provenance comes from the world. The neural arm's copies are neural and nothing else is;
@@ -1307,12 +1475,45 @@ mod tests {
     fn a_bodys_controller_is_read_from_the_world_not_from_how_it_was_founded() {
         let eco = Ecology::defaults();
         let policy = tensor::policy(&tensor::initial_center(7)).expect("a policy");
-        let neural = run_trial(&eco, &policy, 1001, 0, Mix::Neural, 4, 200, 100, 0, Default::default(), Instant::now());
-        let legacy = run_trial(&eco, &policy, 1001, 0, Mix::Legacy, 4, 200, 100, 0, Default::default(), Instant::now());
+        let neural = run_trial(
+            &eco,
+            &policy,
+            1001,
+            0,
+            Mix::Neural,
+            4,
+            200,
+            100,
+            0,
+            Default::default(),
+            Instant::now(),
+        );
+        let legacy = run_trial(
+            &eco,
+            &policy,
+            1001,
+            0,
+            Mix::Legacy,
+            4,
+            200,
+            100,
+            0,
+            Default::default(),
+            Instant::now(),
+        );
 
-        assert_eq!(neural.copies_neural_at_tick0, 4, "the four copies are the neural bodies");
-        assert_eq!(neural.founders_neural_at_tick0, 0, "and the founders are not");
-        assert_eq!(legacy.copies_neural_at_tick0, 0, "the legacy arm holds no neural body");
+        assert_eq!(
+            neural.copies_neural_at_tick0, 4,
+            "the four copies are the neural bodies"
+        );
+        assert_eq!(
+            neural.founders_neural_at_tick0, 0,
+            "and the founders are not"
+        );
+        assert_eq!(
+            legacy.copies_neural_at_tick0, 0,
+            "the legacy arm holds no neural body"
+        );
         assert_eq!(legacy.births.neural, 0);
         assert_eq!(legacy.deaths.neural, 0);
         assert_eq!(legacy.births_of_neural_parents, 0);
@@ -1323,8 +1524,32 @@ mod tests {
     fn a_trial_reproduces_from_its_seed() {
         let eco = Ecology::defaults();
         let policy = tensor::policy(&tensor::initial_center(7)).expect("a policy");
-        let a = run_trial(&eco, &policy, 1002, 1, Mix::Neural, 2, 400, 200, 100, Default::default(), Instant::now());
-        let b = run_trial(&eco, &policy, 1002, 1, Mix::Neural, 2, 400, 200, 100, Default::default(), Instant::now());
+        let a = run_trial(
+            &eco,
+            &policy,
+            1002,
+            1,
+            Mix::Neural,
+            2,
+            400,
+            200,
+            100,
+            Default::default(),
+            Instant::now(),
+        );
+        let b = run_trial(
+            &eco,
+            &policy,
+            1002,
+            1,
+            Mix::Neural,
+            2,
+            400,
+            200,
+            100,
+            Default::default(),
+            Instant::now(),
+        );
         assert_eq!(a.population_series, b.population_series);
         assert_eq!(a.neural_series, b.neural_series);
         assert_eq!(a.births, b.births);
@@ -1344,11 +1569,18 @@ mod tests {
             assert_eq!(a.len(), 4);
             for ((cell, heading), (cell_b, _)) in a.iter().zip(&b) {
                 assert_eq!(cell, cell_b);
-                let (x, y) = (cell.cx(Topology::Cube, Scale::ONE), cell.cy(Topology::Cube, Scale::ONE));
+                let (x, y) = (
+                    cell.cx(Topology::Cube, Scale::ONE),
+                    cell.cy(Topology::Cube, Scale::ONE),
+                );
                 assert!((2..=13).contains(&x) && (2..=13).contains(&y), "{x},{y}");
                 assert!((heading.length() - 1.0).abs() < 1e-12);
             }
-            assert_ne!(a, copy_placements(seed + 1, 4), "another seed places differently");
+            assert_ne!(
+                a,
+                copy_placements(seed + 1, 4),
+                "another seed places differently"
+            );
         }
     }
 }

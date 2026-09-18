@@ -49,7 +49,9 @@ impl World {
         // The care ledgers and any shower's progress are runtime invariants too: catching a
         // defect here stops a checkpoint that would not load back. So are the compensated
         // energy ledgers.
-        self.state.care.validate(self.state.tick, self.cell_count())?;
+        self.state
+            .care
+            .validate(self.state.tick, self.cell_count())?;
         self.state.energy_ledgers().validate()?;
         self.state
             .hunters

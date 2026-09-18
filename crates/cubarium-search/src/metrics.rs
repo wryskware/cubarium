@@ -406,7 +406,10 @@ impl EcoMeasures {
 
             foliage_mean: mean(|s| s.producer),
             foliage_final: last.producer,
-            foliage_min: window.iter().map(|s| s.producer).fold(f64::INFINITY, f64::min),
+            foliage_min: window
+                .iter()
+                .map(|s| s.producer)
+                .fold(f64::INFINITY, f64::min),
             wood_mean: mean(|s| s.wood),
             wood_final: last.wood,
             dead_wood_mean: mean(|s| s.dead_wood),
@@ -473,13 +476,25 @@ impl EcoMeasures {
             apex_alive_final: last.apex_active + last.apex_dormant,
 
             feeding_fraction: mean(|s| {
-                if s.population > 0 { f64::from(s.feeding) / f64::from(s.population) } else { 0.0 }
+                if s.population > 0 {
+                    f64::from(s.feeding) / f64::from(s.population)
+                } else {
+                    0.0
+                }
             }),
             seeking_fraction: mean(|s| {
-                if s.population > 0 { f64::from(s.seeking) / f64::from(s.population) } else { 0.0 }
+                if s.population > 0 {
+                    f64::from(s.seeking) / f64::from(s.population)
+                } else {
+                    0.0
+                }
             }),
             resting_fraction: mean(|s| {
-                if s.population > 0 { f64::from(s.resting) / f64::from(s.population) } else { 0.0 }
+                if s.population > 0 {
+                    f64::from(s.resting) / f64::from(s.population)
+                } else {
+                    0.0
+                }
             }),
             mean_hunger: mean(|s| s.mean_hunger),
             form_evenness_mean: mean(|s| s.form_evenness),
@@ -568,7 +583,11 @@ impl Default for Scoring {
 }
 
 fn clamp01(x: f64) -> f64 {
-    if x.is_finite() { x.clamp(0.0, 1.0) } else { 0.0 }
+    if x.is_finite() {
+        x.clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
 }
 
 /// Geometric mean with every term floored, so a single zero dominates without erasing the
@@ -710,7 +729,15 @@ impl Components {
             floor,
         );
 
-        Objectives { persistence, plants, prey_turnover, maturation, lineage, variety, apex }
+        Objectives {
+            persistence,
+            plants,
+            prey_turnover,
+            maturation,
+            lineage,
+            variety,
+            apex,
+        }
     }
 
     /// The scalar rank: the geometric mean of the seven objectives, gated by activity.

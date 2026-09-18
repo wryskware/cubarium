@@ -88,10 +88,17 @@ fn the_synthetic_ring_at_a_fixed_instant_is_the_stored_image() {
     let reference = root().join("tests/golden/synthetic-320x180-s1.png");
     if !reference.exists() {
         write_png(&reference, layout.w, layout.h, &rgba).expect("write the first reference");
-        panic!("wrote a new reference at {}; review it and re-run", reference.display());
+        panic!(
+            "wrote a new reference at {}; review it and re-run",
+            reference.display()
+        );
     }
     let (w, h, want) = read_png(&reference).expect("read the reference");
-    assert_eq!((w, h), (layout.w, layout.h), "the reference is a different size");
+    assert_eq!(
+        (w, h),
+        (layout.w, layout.h),
+        "the reference is a different size"
+    );
 
     let (mean, over, worst) = compare(&rgba, &want);
     if mean > 0.5 || over > 0.001 {
@@ -104,7 +111,10 @@ fn the_synthetic_ring_at_a_fixed_instant_is_the_stored_image() {
             got.display()
         );
     }
-    println!("mean |Δ| {mean:.3}, {:.3}% over 8, worst {worst}", over * 100.0);
+    println!(
+        "mean |Δ| {mean:.3}, {:.3}% over 8, worst {worst}",
+        over * 100.0
+    );
 }
 
 #[test]
@@ -119,12 +129,19 @@ fn the_same_scene_at_scale_two_is_the_stored_image() {
     let reference = root().join("tests/golden/synthetic-640x360-s2.png");
     if !reference.exists() {
         write_png(&reference, layout.w, layout.h, &rgba).expect("write the first reference");
-        panic!("wrote a new reference at {}; review it and re-run", reference.display());
+        panic!(
+            "wrote a new reference at {}; review it and re-run",
+            reference.display()
+        );
     }
     let (w, h, want) = read_png(&reference).expect("read the reference");
     assert_eq!((w, h), (layout.w, layout.h));
     let (mean, over, worst) = compare(&rgba, &want);
-    assert!(mean <= 0.5 && over <= 0.001, "mean {mean:.3}, {:.3}% over 8, worst {worst}", over * 100.0);
+    assert!(
+        mean <= 0.5 && over <= 0.001,
+        "mean {mean:.3}, {:.3}% over 8, worst {worst}",
+        over * 100.0
+    );
 }
 
 #[test]
@@ -147,10 +164,16 @@ fn every_sprite_texel_covers_a_whole_scale_by_scale_block() {
             return;
         }
     };
-    let clip = atlas.plant("lanternstalk", cubarium_gpu::atlas::PlantClip::Stage(2)).unwrap();
+    let clip = atlas
+        .plant("lanternstalk", cubarium_gpu::atlas::PlantClip::Stage(2))
+        .unwrap();
     let rect = atlas.rect(clip.first);
     let histogram = |scale: u32| {
-        let layout = RingLayout { w: 64 * scale, h: 64 * scale, scale };
+        let layout = RingLayout {
+            w: 64 * scale,
+            h: 64 * scale,
+            scale,
+        };
         let mut renderer = Renderer::new(&gpu, &atlas, layout).expect("renderer");
         renderer.art_scale = scale as f32;
         let mut headless = Headless::new(&gpu, &renderer).expect("headless");
@@ -185,14 +208,20 @@ fn every_sprite_texel_covers_a_whole_scale_by_scale_block() {
         for y in (12 * scale + 1)..=(28 * scale) {
             for x in (24 * scale + 1)..=(40 * scale) {
                 let i = ((y * layout.w + x) * 4) as usize;
-                *counts.entry([rgba[i], rgba[i + 1], rgba[i + 2]]).or_insert(0usize) += 1;
+                *counts
+                    .entry([rgba[i], rgba[i + 1], rgba[i + 2]])
+                    .or_insert(0usize) += 1;
             }
         }
         counts
     };
     let one = histogram(1);
     let two = histogram(2);
-    assert!(one.len() >= 5, "the fixture painted almost nothing: {} colours", one.len());
+    assert!(
+        one.len() >= 5,
+        "the fixture painted almost nothing: {} colours",
+        one.len()
+    );
     let colours: Vec<_> = one.keys().copied().collect();
     assert_eq!(
         colours,
@@ -214,7 +243,10 @@ fn every_sprite_texel_covers_a_whole_scale_by_scale_block() {
             one[colour]
         );
     }
-    println!("{} sprite colours, each exactly 4x as large at S = 2", colours.len() - 1);
+    println!(
+        "{} sprite colours, each exactly 4x as large at S = 2",
+        colours.len() - 1
+    );
 }
 
 #[test]
@@ -226,7 +258,9 @@ fn the_ring_wraps_across_the_seam_rather_than_cutting_at_it() {
     let Some(rgba) = render(layout) else { return };
     let luma = |x: u32, y: u32| {
         let i = ((y * layout.w + x) * 4) as usize;
-        f64::from(rgba[i]) * 0.2126 + f64::from(rgba[i + 1]) * 0.7152 + f64::from(rgba[i + 2]) * 0.0722
+        f64::from(rgba[i]) * 0.2126
+            + f64::from(rgba[i + 1]) * 0.7152
+            + f64::from(rgba[i + 2]) * 0.0722
     };
     let column = |x: u32| (0..layout.h).map(|y| luma(x, y)).sum::<f64>() / f64::from(layout.h);
     let seam = (column(0) - column(layout.w - 1)).abs();

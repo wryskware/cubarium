@@ -20,9 +20,15 @@ pub const FIXTURE_BUILD_ID: &str = "cube-projection-fixture";
 
 fn main() {
     let mut args = std::env::args().skip(1);
-    let out = args.next().expect("usage: export_cube_fixture <out-path> [ticks] [seed]");
-    let ticks: u64 = args.next().map_or(FIXTURE_TICKS, |s| s.parse().expect("ticks"));
-    let seed: u64 = args.next().map_or(FIXTURE_SEED, |s| s.parse().expect("seed"));
+    let out = args
+        .next()
+        .expect("usage: export_cube_fixture <out-path> [ticks] [seed]");
+    let ticks: u64 = args
+        .next()
+        .map_or(FIXTURE_TICKS, |s| s.parse().expect("ticks"));
+    let seed: u64 = args
+        .next()
+        .map_or(FIXTURE_SEED, |s| s.parse().expect("seed"));
 
     let config = WorldConfig {
         seed,

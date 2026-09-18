@@ -114,7 +114,9 @@ impl Output {
             .and_then(|e| e.crtc());
         if crtc.is_none() {
             for &e in info.encoders() {
-                let Ok(encoder) = card.get_encoder(e) else { continue };
+                let Ok(encoder) = card.get_encoder(e) else {
+                    continue;
+                };
                 if let Some(&c) = resources.filter_crtcs(encoder.possible_crtcs()).first() {
                     crtc = Some(c);
                     break;
@@ -155,8 +157,19 @@ impl Output {
         pitch: u32,
         offset: u32,
     ) -> Result<framebuffer::Handle> {
-        let handle = self.card.prime_fd_to_buffer(fd.as_fd()).context("drmPrimeFDToHandle")?;
-        let buffer = ImportedBuffer { handle, width, height, fourcc, pitch, offset, _fd: fd };
+        let handle = self
+            .card
+            .prime_fd_to_buffer(fd.as_fd())
+            .context("drmPrimeFDToHandle")?;
+        let buffer = ImportedBuffer {
+            handle,
+            width,
+            height,
+            fourcc,
+            pitch,
+            offset,
+            _fd: fd,
+        };
         let fb = self
             .card
             .add_planar_framebuffer(&buffer, FbCmd2Flags::empty())
@@ -167,7 +180,13 @@ impl Output {
 
     pub fn set_crtc(&self, fb: framebuffer::Handle) -> Result<()> {
         self.card
-            .set_crtc(self.crtc, Some(fb), (0, 0), &[self.connector], Some(self.mode))
+            .set_crtc(
+                self.crtc,
+                Some(fb),
+                (0, 0),
+                &[self.connector],
+                Some(self.mode),
+            )
             .context("drmModeSetCrtc")
     }
 

@@ -85,7 +85,10 @@ impl Unfolds {
 
     /// A scratch buffer that remembers each anchor's footprint.
     pub fn cached() -> Unfolds {
-        Unfolds { enabled: true, ..Unfolds::new() }
+        Unfolds {
+            enabled: true,
+            ..Unfolds::new()
+        }
     }
 
     /// Turn the cache on or off without dropping what it holds — a presenter leaves it on
@@ -116,17 +119,16 @@ impl Unfolds {
     /// The pixels within `radius` of `anchor`, from the cache when it has an answer at
     /// least that wide. The slice may be a **superset**: a caller must drop the pixels
     /// whose `distance` exceeds its own limit, which is what every stamp already does.
-    pub fn pixels(
-        &mut self,
-        topo: Topology,
-        anchor: SurfacePoint,
-        radius: f64,
-    ) -> &[PixelImage] {
+    pub fn pixels(&mut self, topo: Topology, anchor: SurfacePoint, radius: f64) -> &[PixelImage] {
         if !self.enabled {
             unfold_pixels(topo, anchor, radius, &mut self.scratch);
             return &self.scratch;
         }
-        let key = Key(anchor.face.index() as u8, anchor.u.to_bits(), anchor.v.to_bits());
+        let key = Key(
+            anchor.face.index() as u8,
+            anchor.u.to_bits(),
+            anchor.v.to_bits(),
+        );
         if let Some(e) = self.map.get(&key)
             && e.radius >= radius
         {
@@ -145,7 +147,11 @@ impl Unfolds {
         self.pool.extend_from_slice(&self.scratch);
         if let Some(old) = self.map.insert(
             key,
-            Entry { start: start as u32, len: self.scratch.len() as u32, radius },
+            Entry {
+                start: start as u32,
+                len: self.scratch.len() as u32,
+                radius,
+            },
         ) {
             // The anchor asked for a wider radius than last time; its old run stays in the
             // pool as dead space until `clear`, which is bounded by how far the wind can
@@ -274,7 +280,10 @@ mod tests {
         let anchor = SurfacePoint::new(Face::Top, 0.5, 63.5);
         let pixels = cache.pixels(topo, anchor, 9.0);
         let row = |p: &PixelImage| (topo.chart_index(p.face), p.y, p.x);
-        assert!(pixels.windows(2).all(|w| row(&w[0]) < row(&w[1])), "not in row order");
+        assert!(
+            pixels.windows(2).all(|w| row(&w[0]) < row(&w[1])),
+            "not in row order"
+        );
     }
 
     /// A cache turned off is a scratch buffer, and a full one stops admitting anchors
@@ -285,13 +294,21 @@ mod tests {
         let mut off = Unfolds::new();
         let anchor = SurfacePoint::new(Face::Front, 32.5, 32.5);
         let n = off.pixels(topo, anchor, 9.0).len();
-        assert_eq!(off.stats(), (0, 0, 0, 0), "nothing cached when caching is off");
+        assert_eq!(
+            off.stats(),
+            (0, 0, 0, 0),
+            "nothing cached when caching is off"
+        );
 
         let mut small = Unfolds::cached();
         small.capacity = n; // room for exactly one anchor
         assert_eq!(small.pixels(topo, anchor, 9.0).len(), n);
         let other = SurfacePoint::new(Face::Front, 20.5, 20.5);
-        assert_eq!(small.pixels(topo, other, 9.0).len(), n, "still answered, just not stored");
+        assert_eq!(
+            small.pixels(topo, other, 9.0).len(),
+            n,
+            "still answered, just not stored"
+        );
         assert_eq!(small.stats().2, 1, "the second anchor was not admitted");
         small.clear();
         assert_eq!(small.stats(), (0, 0, 0, 0));

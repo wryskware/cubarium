@@ -17,10 +17,10 @@
 //! where producer growth stops entirely (`crate::fields`). Counting cells in those two states is
 //! an exposure measure, not a claim about what grew.
 
-use cubarium_surface::{Scale, Topology};
 use anyhow::{Context, Result};
 use cubarium_core::{CareTarget, WorldState};
 use cubarium_surface::{CUBE_CELL_COUNT, CellId, FieldGraph};
+use cubarium_surface::{Scale, Topology};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
@@ -93,7 +93,12 @@ impl Regions {
         let graph = FieldGraph::new(Topology::Cube, Scale::ONE);
         let mut regions = Vec::new();
         for &target in targets {
-            let mut cells = BTreeSet::from([target.resolve(cubarium_surface::Topology::Cube, cubarium_surface::Scale::ONE).context("invalid ambient target")?]);
+            let mut cells = BTreeSet::from([target
+                .resolve(
+                    cubarium_surface::Topology::Cube,
+                    cubarium_surface::Scale::ONE,
+                )
+                .context("invalid ambient target")?]);
             for _ in 0..HOPS {
                 let neighbors: Vec<CellId> = cells
                     .iter()
@@ -234,9 +239,17 @@ mod tests {
 
     fn targets() -> [CareTarget; 2] {
         [
-            CareTarget { face: 0, u: 32.0, v: 48.0 },
+            CareTarget {
+                face: 0,
+                u: 32.0,
+                v: 48.0,
+            },
             // On the side seam, so the region has to cross a face boundary.
-            CareTarget { face: 0, u: 63.5, v: 48.0 },
+            CareTarget {
+                face: 0,
+                u: 63.5,
+                v: 48.0,
+            },
         ]
     }
 
@@ -250,7 +263,11 @@ mod tests {
         // the same count across two faces. Both are fixed, and neither counts a cell twice.
         assert!(shape.iter().all(|n| *n == 25), "{shape:?}");
         let cells: BTreeSet<usize> = regions.regions[1].cells.iter().copied().collect();
-        assert_eq!(cells.len(), regions.regions[1].cells.len(), "a cell was counted twice");
+        assert_eq!(
+            cells.len(),
+            regions.regions[1].cells.len(),
+            "a cell was counted twice"
+        );
     }
 
     #[test]
@@ -304,11 +321,17 @@ mod tests {
         world.step();
         regions.observe(&world.state).unwrap();
         let s = regions.sample(&world.state).unwrap();
-        assert_eq!(s["global_flooded_cells_now"], 2, "on the threshold counts, under it does not");
+        assert_eq!(
+            s["global_flooded_cells_now"], 2,
+            "on the threshold counts, under it does not"
+        );
         assert_eq!(s["global_drowned_cells_now"], 1);
         assert_eq!(s["targets"][0]["flooded_cell_ticks"], 2);
         assert_eq!(s["targets"][0]["drowned_cell_ticks"], 1);
-        assert_eq!(s["targets"][1]["flooded_cell_ticks"], 0, "the other region is untouched");
+        assert_eq!(
+            s["targets"][1]["flooded_cell_ticks"], 0,
+            "the other region is untouched"
+        );
     }
 
     #[test]
@@ -317,10 +340,16 @@ mod tests {
         let mut regions = Regions::new(&world.state, &targets()).unwrap();
         world.step();
         regions.observe(&world.state).unwrap();
-        assert!(regions.observe(&world.state).is_err(), "a repeated tick must be refused");
+        assert!(
+            regions.observe(&world.state).is_err(),
+            "a repeated tick must be refused"
+        );
         world.step();
         world.step();
-        assert!(regions.observe(&world.state).is_err(), "a skipped tick must be refused");
+        assert!(
+            regions.observe(&world.state).is_err(),
+            "a skipped tick must be refused"
+        );
         // And a sample may not describe a world the integral has not reached.
         assert!(regions.sample(&world.state).is_err());
     }

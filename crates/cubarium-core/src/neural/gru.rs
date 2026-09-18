@@ -84,7 +84,10 @@ impl Gru32 {
             ("b_o", &self.b_o, OUTPUT),
         ] {
             if v.len() != want {
-                return Err(format!("policy tensor {name} has {} values, expected {want}", v.len()));
+                return Err(format!(
+                    "policy tensor {name} has {} values, expected {want}",
+                    v.len()
+                ));
             }
             if let Some(i) = v.iter().position(|x| !x.is_finite()) {
                 return Err(format!("policy tensor {name}[{i}] is not finite"));
@@ -94,7 +97,11 @@ impl Gru32 {
     }
 
     pub fn parameters(&self) -> usize {
-        self.w_i.len() + self.w_h.len() + self.b_i.len() + self.b_h.len() + self.w_o.len()
+        self.w_i.len()
+            + self.w_h.len()
+            + self.b_i.len()
+            + self.b_h.len()
+            + self.w_o.len()
             + self.b_o.len()
     }
 
@@ -333,8 +340,15 @@ mod tests {
         let r = 0.5f64;
         let after = (r * (1.0 * 0.5 + 1.0)).tanh(); // reset multiplies (W_hn h + b_hn)
         let before = (1.0 * (r * 0.5) + 1.0).tanh(); // reset multiplies h only
-        assert!((h[0] - after).abs() < 1e-9, "{} is not reset-after {after}", h[0]);
-        assert!((after - before).abs() > 1e-3, "the fixture must separate the conventions");
+        assert!(
+            (h[0] - after).abs() < 1e-9,
+            "{} is not reset-after {after}",
+            h[0]
+        );
+        assert!(
+            (after - before).abs() > 1e-3,
+            "the fixture must separate the conventions"
+        );
     }
 
     #[test]

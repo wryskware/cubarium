@@ -113,28 +113,47 @@ fn additional_spawns_preserve_gestation_and_buried_offspring() {
     assert_eq!(world.state.apex_encounters.gestations.len(), 1);
     let gestating = world.state.apex_encounters.clone();
     let profile = world.hunters().profile().unwrap().clone();
-    world.introduce_hunters(profile.clone(), &[HunterTarget {
-        face: 0, u: 4.0, v: 5.0,
-    }]).unwrap();
+    world
+        .introduce_hunters(
+            profile.clone(),
+            &[HunterTarget {
+                face: 0,
+                u: 4.0,
+                v: 5.0,
+            }],
+        )
+        .unwrap();
     assert_eq!(world.state.apex_encounters, gestating);
 
     let mut child = None;
     for _ in 0..4 {
         world.step();
-        child = world.drain_apex_encounter_events().into_iter().find_map(|e| match e {
-            ApexEncounterEvent::Born { child, .. } => Some(child),
-            _ => None,
-        });
-        if child.is_some() { break; }
+        child = world
+            .drain_apex_encounter_events()
+            .into_iter()
+            .find_map(|e| match e {
+                ApexEncounterEvent::Born { child, .. } => Some(child),
+                _ => None,
+            });
+        if child.is_some() {
+            break;
+        }
     }
     let child = child.expect("the preserved gestation must still produce its child");
     assert!(world.state.apex_dormancy.contains(child));
     assert!(world.state.apex_encounters.parents_of(child).is_some());
     let sleeping = world.state.apex_dormancy.clone();
     let ancestry = world.state.apex_encounters.clone();
-    world.introduce_hunters(profile, &[HunterTarget {
-        face: 3, u: 42.0, v: 42.0,
-    }]).unwrap();
+    world
+        .introduce_hunters(
+            profile,
+            &[HunterTarget {
+                face: 3,
+                u: 42.0,
+                v: 42.0,
+            }],
+        )
+        .unwrap();
     assert_eq!(world.state.apex_dormancy, sleeping);
     assert_eq!(world.state.apex_encounters, ancestry);
     let energy = world.state.organisms.get(child).unwrap().energy;

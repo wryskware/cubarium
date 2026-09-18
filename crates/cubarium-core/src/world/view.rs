@@ -110,7 +110,9 @@ impl World {
     }
 
     /// The scripted intents in force (`World::set_scripted_intents`), read-only.
-    pub fn scripted_intents(&self) -> &[(crate::ids::OrganismId, crate::diagnostic::ScriptedIntent)] {
+    pub fn scripted_intents(
+        &self,
+    ) -> &[(crate::ids::OrganismId, crate::diagnostic::ScriptedIntent)] {
         &self.scripted
     }
 
@@ -336,14 +338,18 @@ impl World {
         let here = cubarium_surface::cell_of(cfg.topology, cfg.world_scale, &o.pos).index();
         let wading = 1.0 + self.state.fields.w[here] * (1.0 - o.phenotype.swim);
         let bill = crate::motor::MotorBill::of(o, cfg);
-        let u_full =
-            (o.phenotype.speed_max / wading).min(bill.affordable_motor(o.energy, dt));
+        let u_full = (o.phenotype.speed_max / wading).min(bill.affordable_motor(o.energy, dt));
         // The observation must state the radius **the model in force** uses, or a body would
         // be told about a turning capability its own envelope does not have.
         let radius_px = crate::motor::turn_radius_px_in(o, None, self.motor_model);
-        let feedback = self.state.neural.get(id).map_or([0.0, 0.0, 0.0, 0.0, 0.0, 1.0], |a| {
-            a.feedback.channels(o.phenotype.mouth_rate, o.phenotype.speed_max, radius_px, dt)
-        });
+        let feedback = self
+            .state
+            .neural
+            .get(id)
+            .map_or([0.0, 0.0, 0.0, 0.0, 0.0, 1.0], |a| {
+                a.feedback
+                    .channels(o.phenotype.mouth_rate, o.phenotype.speed_max, radius_px, dt)
+            });
         let mut cells = Vec::new();
         let mut bodies = Vec::new();
         Some(super::step::sample_observation(
@@ -357,10 +363,13 @@ impl World {
             &self.light,
             &self.images,
             &self.sense_rings[here],
-            self.neighbors.lists.get(id.slot as usize).map_or(&[][..], |l| &l[..]),
+            self.neighbors
+                .lists
+                .get(id.slot as usize)
+                .map_or(&[][..], |l| &l[..]),
             u_full,
             feedback,
-        &mut cells,
+            &mut cells,
             &mut bodies,
         ))
     }
@@ -431,7 +440,10 @@ impl World {
         // decodes the same seven numbers differently (`crate::neural::ActionAdapter`).
         policy.validate_in(self.action_adapter)?;
         if self.state.organisms.get(id).is_none() {
-            return Err(format!("organism {}:{} is not alive", id.slot, id.generation));
+            return Err(format!(
+                "organism {}:{} is not alive",
+                id.slot, id.generation
+            ));
         }
         if self.state.hunters.contains(id) {
             return Err(format!(
@@ -442,8 +454,7 @@ impl World {
         }
         if self.state.quiet.policy.enabled() {
             return Err(
-                "the ordinary quiet extension and neural animals cannot be enabled together"
-                    .into(),
+                "the ordinary quiet extension and neural animals cannot be enabled together".into(),
             );
         }
         let index = self.state.neural.intern(policy);

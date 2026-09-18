@@ -1,8 +1,8 @@
 //! Independent image-level regression fixtures from the in-progress Astra review.
 //! These assert observable continuity and compositing properties, not mask formulas.
 
-use cubarium_surface::Topology;
 use cubarium_render::{Canvas, Mask, Pose, Sprite, stamp_pose};
+use cubarium_surface::Topology;
 use cubarium_surface::{SurfacePoint, Vec2};
 use cube_proto::Face;
 

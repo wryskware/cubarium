@@ -14,12 +14,12 @@
 //! `cubarium::art::ArtPack` and the presenter's documented column geometry, and this crate is
 //! below that one in the dependency graph.
 
-use cube_proto::Face;
 use cubarium_render::{
     Bend, Canvas, Mask, Pose, Sprite, stamp_layers, stamp_layers_bent,
     stamp_layers_bent_with_radius,
 };
 use cubarium_surface::{SurfacePoint, Vec2};
+use cube_proto::Face;
 
 // ---------------------------------------------------------------------------
 // fixtures
@@ -40,7 +40,11 @@ fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
 fn assert_identical(a: &Canvas, b: &Canvas, what: &str) {
     let wrong = every_pixel().find(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y));
     if let Some((f, x, y)) = wrong {
-        panic!("{what}: ({f:?}, {x}, {y}) is {:?} vs {:?}", a.get(f, x, y), b.get(f, x, y));
+        panic!(
+            "{what}: ({f:?}, {x}, {y}) is {:?} vs {:?}",
+            a.get(f, x, y),
+            b.get(f, x, y)
+        );
     }
 }
 
@@ -54,7 +58,9 @@ fn max_diff(a: &Canvas, b: &Canvas) -> f32 {
 }
 
 fn peak(image: &Canvas) -> f32 {
-    every_pixel().flat_map(|(f, x, y)| image.get(f, x, y)).fold(0.0, f32::max)
+    every_pixel()
+        .flat_map(|(f, x, y)| image.get(f, x, y))
+        .fold(0.0, f32::max)
 }
 
 /// Total light on the whole cube, in linear channel units.
@@ -84,13 +90,7 @@ fn tile_x(x: u16) -> f64 {
     f64::from(x) + 0.5 - 32.0 + PIVOT.x
 }
 
-fn draw_at(
-    sprite: &Sprite,
-    anchor: SurfacePoint,
-    heading: Vec2,
-    mask: Mask,
-    bend: Bend,
-) -> Canvas {
+fn draw_at(sprite: &Sprite, anchor: SurfacePoint, heading: Vec2, mask: Mask, bend: Bend) -> Canvas {
     let mut image = Canvas::cube();
     stamp_layers_bent(
         &mut image,
@@ -182,7 +182,12 @@ fn coverage(mask: Mask, p: Vec2) -> f64 {
 
 /// A bend with the small-plant shape of the doc comments: the tile stands on the root line.
 fn plant_bend(amplitude: f64) -> Bend {
-    Bend { amplitude, base: 0.0, root: 1.5, length: 13.0 }
+    Bend {
+        amplitude,
+        base: 0.0,
+        root: 1.5,
+        length: 13.0,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -196,9 +201,18 @@ fn plant_bend(amplitude: f64) -> Bend {
 /// image or nothing at all — and the whole zero-wind guarantee of the slice rests on this.
 #[test]
 fn every_identity_bend_draws_the_unbent_image_bit_for_bit() {
-    let first = disc(7.7, |tx, ty| [(16 * ty + 8) as u8, 255 - (13 * tx) as u8, 90, 255]);
+    let first = disc(7.7, |tx, ty| {
+        [(16 * ty + 8) as u8, 255 - (13 * tx) as u8, 90, 255]
+    });
     let second = disc(6.4, |tx, ty| [40, (11 * tx) as u8, (16 * ty) as u8, 200]);
-    let layers = [(Pose { first: &first, second: &second, mix: 0.37 }, 1.0)];
+    let layers = [(
+        Pose {
+            first: &first,
+            second: &second,
+            mix: 0.37,
+        },
+        1.0,
+    )];
 
     let identities = [
         ("Bend::NONE", Bend::NONE),
@@ -206,27 +220,86 @@ fn every_identity_bend_draws_the_unbent_image_bit_for_bit() {
         ("a negative zero amplitude", plant_bend(-0.0)),
         ("a NaN amplitude", plant_bend(f64::NAN)),
         ("an infinite amplitude", plant_bend(f64::INFINITY)),
-        ("a negatively infinite amplitude", plant_bend(f64::NEG_INFINITY)),
-        ("a zero length", Bend { amplitude: 0.6, base: 0.0, root: 1.5, length: 0.0 }),
-        ("a negative length", Bend { amplitude: 0.6, base: 0.0, root: 1.5, length: -13.0 }),
-        ("a NaN length", Bend { amplitude: 0.6, base: 0.0, root: 1.5, length: f64::NAN }),
-        ("a NaN base", Bend { amplitude: 0.6, base: f64::NAN, root: 1.5, length: 13.0 }),
-        ("a NaN root", Bend { amplitude: 0.6, base: 0.0, root: f64::NAN, length: 13.0 }),
+        (
+            "a negatively infinite amplitude",
+            plant_bend(f64::NEG_INFINITY),
+        ),
+        (
+            "a zero length",
+            Bend {
+                amplitude: 0.6,
+                base: 0.0,
+                root: 1.5,
+                length: 0.0,
+            },
+        ),
+        (
+            "a negative length",
+            Bend {
+                amplitude: 0.6,
+                base: 0.0,
+                root: 1.5,
+                length: -13.0,
+            },
+        ),
+        (
+            "a NaN length",
+            Bend {
+                amplitude: 0.6,
+                base: 0.0,
+                root: 1.5,
+                length: f64::NAN,
+            },
+        ),
+        (
+            "a NaN base",
+            Bend {
+                amplitude: 0.6,
+                base: f64::NAN,
+                root: 1.5,
+                length: 13.0,
+            },
+        ),
+        (
+            "a NaN root",
+            Bend {
+                amplitude: 0.6,
+                base: 0.0,
+                root: f64::NAN,
+                length: 13.0,
+            },
+        ),
         (
             "an infinite base",
-            Bend { amplitude: 0.6, base: f64::INFINITY, root: 1.5, length: 13.0 },
+            Bend {
+                amplitude: 0.6,
+                base: f64::INFINITY,
+                root: 1.5,
+                length: 13.0,
+            },
         ),
     ];
     let anchors = [
         ("mid-face", SurfacePoint::new(Face::Front, 32.25, 32.25), 1),
-        ("across a side seam", SurfacePoint::new(Face::Front, 63.5, 32.5), 2),
-        ("at a top-face vertex", SurfacePoint::new(Face::Top, 0.25, 0.25), 3),
+        (
+            "across a side seam",
+            SurfacePoint::new(Face::Front, 63.5, 32.5),
+            2,
+        ),
+        (
+            "at a top-face vertex",
+            SurfacePoint::new(Face::Top, 0.25, 0.25),
+            3,
+        ),
     ];
     let masks = [
         Mask::None,
         Mask::Axial { reveal: 6.4 },
         Mask::Radial { reveal: 3.2 },
-        Mask::Strip { floor: 4.0, reveal: 9.0 },
+        Mask::Strip {
+            floor: 4.0,
+            reveal: 9.0,
+        },
     ];
 
     for (what, anchor, faces) in anchors {
@@ -243,12 +316,16 @@ fn every_identity_bend_draws_the_unbent_image_bit_for_bit() {
                     mask,
                     &mut Vec::new(),
                 );
-                assert!(peak(&expected) > 0.05, "{what}/{mask:?}: the fixture must paint");
+                assert!(
+                    peak(&expected) > 0.05,
+                    "{what}/{mask:?}: the fixture must paint"
+                );
                 if mask == Mask::None {
                     let touched = Face::ALL
                         .into_iter()
                         .filter(|&f| {
-                            (0..64u16).any(|y| (0..64u16).any(|x| expected.get(f, x, y) != [0.0; 3]))
+                            (0..64u16)
+                                .any(|y| (0..64u16).any(|x| expected.get(f, x, y) != [0.0; 3]))
                         })
                         .count();
                     assert!(
@@ -294,18 +371,29 @@ fn no_row_at_or_below_the_root_moves_under_any_amplitude() {
         ("a small plant", 0.0f64, 1.5f64, 13.0f64),
         ("a column's base tile", -8.0, 0.0, 48.0),
     ];
-    let sprite = disc(7.7, |tx, ty| [(15 * tx + 5) as u8, (15 * ty + 5) as u8, 200, 255]);
+    let sprite = disc(7.7, |tx, ty| {
+        [(15 * tx + 5) as u8, (15 * ty + 5) as u8, 200, 255]
+    });
 
     for (what, base, root, length) in shapes {
         let still = draw(&sprite, Mask::None, Bend::NONE);
         // The destination rows whose height is at or below the root: `H = (16 − p_y) + base`
         // and a destination pixel in face row `24 + ty` has `p_y = ty + 0.5`.
-        let fixed: Vec<usize> =
-            (0..TILE).filter(|&ty| (TILE as f64 - (ty as f64 + 0.5)) + base <= root).collect();
-        assert!(!fixed.is_empty(), "{what}: the fixture must have a fixed row");
+        let fixed: Vec<usize> = (0..TILE)
+            .filter(|&ty| (TILE as f64 - (ty as f64 + 0.5)) + base <= root)
+            .collect();
+        assert!(
+            !fixed.is_empty(),
+            "{what}: the fixture must have a fixed row"
+        );
         let mut moved = false;
         for amplitude in [-50.0, -3.0, -1.0, -0.5, -0.05, 0.05, 0.5, 1.0, 3.0, 50.0] {
-            let bend = Bend { amplitude, base, root, length };
+            let bend = Bend {
+                amplitude,
+                base,
+                root,
+                length,
+            };
             let bent = draw(&sprite, Mask::None, bend);
             for &ty in &fixed {
                 for tx in 0..TILE {
@@ -322,7 +410,10 @@ fn no_row_at_or_below_the_root_moves_under_any_amplitude() {
                 moved = true;
             }
         }
-        assert!(moved, "{what}: the fixture never moved anything, so it proves nothing");
+        assert!(
+            moved,
+            "{what}: the fixture never moved anything, so it proves nothing"
+        );
     }
 }
 
@@ -347,7 +438,12 @@ fn each_rows_displacement_is_the_hermite_profile_of_its_height() {
                 continue;
             }
             tested += 1;
-            let bend = Bend { amplitude, base, root, length };
+            let bend = Bend {
+                amplitude,
+                base,
+                root,
+                length,
+            };
             let image = draw(&sprite, Mask::None, bend);
             let mut previous: Option<(f64, f64)> = None;
             for ty in rows.clone().rev() {
@@ -407,7 +503,10 @@ fn each_rows_displacement_is_the_hermite_profile_of_its_height() {
                 );
             }
         }
-        assert!(tested >= 4, "the sweep tried only {tested} amplitudes on this bend shape");
+        assert!(
+            tested >= 4,
+            "the sweep tried only {tested} amplitudes on this bend shape"
+        );
     }
 }
 
@@ -419,11 +518,21 @@ fn each_rows_displacement_is_the_hermite_profile_of_its_height() {
 fn an_integer_amplitude_past_the_bend_length_shifts_the_material_by_whole_texels() {
     // A short length puts every row past `root + length`, so `D` is the amplitude everywhere.
     let shape = (0.0f64, 0.0f64, 0.4f64);
-    for (rows, amplitude) in [(4..12usize, 2.0f64), (4..12, -2.0), (0..15, 1.0), (0..15, -1.0)] {
+    for (rows, amplitude) in [
+        (4..12usize, 2.0f64),
+        (4..12, -2.0),
+        (0..15, 1.0),
+        (0..15, -1.0),
+    ] {
         let color = |ty: usize| [(17 * ty + 3) as u8, 255 - (9 * ty) as u8, 120, 255];
         let sprite = stem(rows.clone(), 8, color);
         let shifted = stem(rows.clone(), (8.0 + amplitude) as usize, color);
-        let bend = Bend { amplitude, base: shape.0, root: shape.1, length: shape.2 };
+        let bend = Bend {
+            amplitude,
+            base: shape.0,
+            root: shape.1,
+            length: shape.2,
+        };
         assert!(
             sprite.bend_headroom(bend.root, bend.length, bend.base) >= amplitude.abs(),
             "the fixture's amplitude {amplitude} must be inside the sprite's headroom"
@@ -449,7 +558,9 @@ fn an_integer_amplitude_past_the_bend_length_shifts_the_material_by_whole_texels
 /// cuts the bent material against a stationary circle.
 #[test]
 fn a_bend_reads_every_mask_on_the_material_it_moved() {
-    let sprite = disc(6.0, |tx, ty| [(15 * tx + 9) as u8, 250 - (14 * ty) as u8, 70, 255]);
+    let sprite = disc(6.0, |tx, ty| {
+        [(15 * tx + 9) as u8, 250 - (14 * ty) as u8, 70, 255]
+    });
     let bend = plant_bend(0.55);
     assert!(
         sprite.bend_headroom(bend.root, bend.length, bend.base) >= bend.amplitude,
@@ -463,8 +574,14 @@ fn a_bend_reads_every_mask_on_the_material_it_moved() {
         Mask::Axial { reveal: 9.4 },
         Mask::Radial { reveal: 3.0 },
         Mask::Radial { reveal: 5.5 },
-        Mask::Strip { floor: 4.0, reveal: 9.0 },
-        Mask::Strip { floor: 6.0, reveal: 13.5 },
+        Mask::Strip {
+            floor: 4.0,
+            reveal: 9.0,
+        },
+        Mask::Strip {
+            floor: 6.0,
+            reveal: 13.5,
+        },
     ] {
         let masked = draw(&sprite, mask, bend);
         let mut wrong_coordinates_would_differ = 0.0f64;
@@ -522,7 +639,9 @@ fn a_bend_reads_every_mask_on_the_material_it_moved() {
 /// the unbent stamp at the same anchor.
 #[test]
 fn a_bent_stamp_keeps_its_light_across_a_seam_and_pays_no_more_at_a_vertex() {
-    let sprite = disc(6.0, |tx, ty| [(15 * tx + 9) as u8, 250 - (14 * ty) as u8, 70, 255]);
+    let sprite = disc(6.0, |tx, ty| {
+        [(15 * tx + 9) as u8, 250 - (14 * ty) as u8, 70, 255]
+    });
     let bend = plant_bend(0.55);
     assert!(sprite.bend_headroom(bend.root, bend.length, bend.base) >= bend.amplitude);
 
@@ -540,13 +659,26 @@ fn a_bent_stamp_keeps_its_light_across_a_seam_and_pays_no_more_at_a_vertex() {
         // angle ripples by a fraction of a percent wherever it is drawn (this fixture's
         // rotated mid-face stamp already carries 0.6 % more light than its axis-aligned one).
         // The seam must add nothing to that: the tolerance is the ripple, not a seam budget.
-        let tolerance = if heading == Vec2::new(1.0, 0.0) { 1e-6 } else { 3e-3 };
+        let tolerance = if heading == Vec2::new(1.0, 0.0) {
+            1e-6
+        } else {
+            3e-3
+        };
 
         for (what, anchor) in [
-            ("a side/side seam", SurfacePoint::new(Face::Front, 63.5, 32.5)),
-            ("a side/side seam, off centre", SurfacePoint::new(Face::Right, 0.5, 41.5)),
+            (
+                "a side/side seam",
+                SurfacePoint::new(Face::Front, 63.5, 32.5),
+            ),
+            (
+                "a side/side seam, off centre",
+                SurfacePoint::new(Face::Right, 0.5, 41.5),
+            ),
             ("a side/top seam", SurfacePoint::new(Face::Front, 27.5, 0.5)),
-            ("a side/top seam, from Top", SurfacePoint::new(Face::Top, 38.5, 63.5)),
+            (
+                "a side/top seam, from Top",
+                SurfacePoint::new(Face::Top, 38.5, 63.5),
+            ),
         ] {
             let light = total_light(&draw_at(&sprite, anchor, heading, Mask::None, bend));
             assert!(
@@ -570,7 +702,10 @@ fn a_bent_stamp_keeps_its_light_across_a_seam_and_pays_no_more_at_a_vertex() {
         const VERTEX_DEFECT: f64 = 0.10;
         for (what, anchor) in [
             ("a Top vertex", SurfacePoint::new(Face::Top, 0.5, 0.5)),
-            ("a Top vertex, from a side", SurfacePoint::new(Face::Front, 0.5, 0.5)),
+            (
+                "a Top vertex, from a side",
+                SurfacePoint::new(Face::Front, 0.5, 0.5),
+            ),
         ] {
             let still = total_light(&draw_at(&sprite, anchor, heading, Mask::None, Bend::NONE));
             let bent = total_light(&draw_at(&sprite, anchor, heading, Mask::None, bend));
@@ -600,8 +735,16 @@ fn a_bent_stamp_keeps_its_light_across_a_seam_and_pays_no_more_at_a_vertex() {
 fn at_its_admitted_headroom_a_larger_unfold_radius_draws_the_same_image() {
     let fixtures: [(&str, Sprite); 4] = [
         ("a stem", white_stem(0..15)),
-        ("a disc", disc(7.7, |tx, ty| [(15 * tx + 9) as u8, 250 - (14 * ty) as u8, 70, 255])),
-        ("a tall off-centre stem", stem(0..16, 9, |ty| [200, (13 * ty) as u8, 255, 255])),
+        (
+            "a disc",
+            disc(7.7, |tx, ty| {
+                [(15 * tx + 9) as u8, 250 - (14 * ty) as u8, 70, 255]
+            }),
+        ),
+        (
+            "a tall off-centre stem",
+            stem(0..16, 9, |ty| [200, (13 * ty) as u8, 255, 255]),
+        ),
         (
             "one far texel",
             Sprite::from_rgba(1, 1, Vec2::new(0.5, 8.2), &[255, 255, 255, 255]).unwrap(),
@@ -609,7 +752,10 @@ fn at_its_admitted_headroom_a_larger_unfold_radius_draws_the_same_image() {
     ];
     let anchors = [
         ("mid-face", SurfacePoint::new(Face::Front, 32.25, 32.25)),
-        ("across a side seam", SurfacePoint::new(Face::Front, 63.5, 32.5)),
+        (
+            "across a side seam",
+            SurfacePoint::new(Face::Front, 63.5, 32.5),
+        ),
         ("at a top vertex", SurfacePoint::new(Face::Top, 0.25, 0.25)),
     ];
     for (name, sprite) in &fixtures {
@@ -619,7 +765,12 @@ fn at_its_admitted_headroom_a_larger_unfold_radius_draws_the_same_image() {
                 continue;
             }
             for sign in [-1.0, 1.0] {
-                let bend = Bend { amplitude: sign * headroom, base, root, length };
+                let bend = Bend {
+                    amplitude: sign * headroom,
+                    base,
+                    root,
+                    length,
+                };
                 for (what, anchor) in anchors {
                     // A stamp the *unbent* renderer already draws as nothing is a fixture the
                     // cube's vertex cone has swallowed, not a wind failure: only the radius

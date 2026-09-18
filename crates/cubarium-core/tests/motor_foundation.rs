@@ -74,9 +74,18 @@ fn no_body_in_an_ordinary_world_ever_leaves_its_motor_envelope() {
     // exactly `REFERENCE_RADIUS_PX` is the one the envelope is calibrated on, and the wide ones
     // are the ones that have to trade.
     config.founders.kinds = vec![
-        FounderKind { count: 12, ..kind(0.6) },
-        FounderKind { count: 12, ..kind(1.0) },
-        FounderKind { count: 12, ..kind(2.0) },
+        FounderKind {
+            count: 12,
+            ..kind(0.6)
+        },
+        FounderKind {
+            count: 12,
+            ..kind(1.0)
+        },
+        FounderKind {
+            count: 12,
+            ..kind(2.0)
+        },
     ];
     let mut world = World::new(config).expect("valid");
 
@@ -142,7 +151,10 @@ fn no_body_in_an_ordinary_world_ever_leaves_its_motor_envelope() {
         widest_pivot_rate < widest_ceiling,
         "a body wider than the reference radius reached its genome's full {widest_ceiling} rad/s          ({widest_pivot_rate}); the envelope never bound it"
     );
-    assert!(traded, "no body ever turned while travelling, so nothing was traded");
+    assert!(
+        traded,
+        "no body ever turned while travelling, so nothing was traded"
+    );
 }
 
 /// A founder kind of one body size, everything else the world's own defaults.
@@ -170,7 +182,14 @@ fn an_apex_late_override_cannot_spin_a_body_for_free() {
     let profile = FixedHunterProfile::lanternjaw_trial(world.config());
     let spot = SurfacePoint::new(Face::Top, 32.0, 32.0);
     let hunter = world
-        .start_hunter_trial(profile.clone(), HunterTarget { face: 4, u: 32.0, v: 32.0 })
+        .start_hunter_trial(
+            profile.clone(),
+            HunterTarget {
+                face: 4,
+                u: 32.0,
+                v: 32.0,
+            },
+        )
         .expect("started")
         .id;
 
@@ -182,7 +201,10 @@ fn an_apex_late_override_cannot_spin_a_body_for_free() {
         let before = o.reserve;
         o.reserve = 0.1 * o.phenotype.reserve_max;
         world.state.external_material_in += o.reserve - before;
-        assert_eq!(o.pos, spot, "the trial placed the member where this fixture expects");
+        assert_eq!(
+            o.pos, spot,
+            "the trial placed the member where this fixture expects"
+        );
     }
 
     let (radius, ceiling, capability) = {
@@ -213,7 +235,10 @@ fn an_apex_late_override_cannot_spin_a_body_for_free() {
     let mut largest_turn_rate = 0.0f64;
     let mut largest_budget = capability;
     let in_strike = |w: &World| {
-        w.hunters().members.iter().any(|m| m.id == hunter && m.phase == HunterPhase::Strike)
+        w.hunters()
+            .members
+            .iter()
+            .any(|m| m.id == hunter && m.phase == HunterPhase::Strike)
     };
     for _ in 0..400 {
         let heading = world.state.organisms.get(hunter).expect("alive").heading;
@@ -235,7 +260,11 @@ fn an_apex_late_override_cannot_spin_a_body_for_free() {
         if crossed_a_seam(&world, hunter) {
             continue;
         }
-        let allowed = if striking { strike_pivot } else { pivot_ceiling };
+        let allowed = if striking {
+            strike_pivot
+        } else {
+            pivot_ceiling
+        };
         if striking {
             largest_budget = largest_budget.max(profile.strike_speed_px_s);
         }
@@ -285,7 +314,10 @@ fn an_apex_late_override_cannot_spin_a_body_for_free() {
 #[test]
 fn a_turning_body_pays_for_the_distance_it_sweeps() {
     let mut config = calm();
-    config.founders.kinds = vec![FounderKind { count: 8, ..kind(2.0) }];
+    config.founders.kinds = vec![FounderKind {
+        count: 8,
+        ..kind(2.0)
+    }];
     config.mechanisms.grazing = false;
     config.mechanisms.scavenging = false;
     // Oxidation would top the battery up in the same tick and hide the charge.
@@ -301,7 +333,14 @@ fn a_turning_body_pays_for_the_distance_it_sweeps() {
             .organisms
             .iter()
             .map(|(id, o)| {
-                (id, o.heading, o.energy, o.structure, o.phenotype.extent, o.phenotype.maintenance)
+                (
+                    id,
+                    o.heading,
+                    o.energy,
+                    o.structure,
+                    o.phenotype.extent,
+                    o.phenotype.maintenance,
+                )
             })
             .collect();
         world.step();
@@ -339,7 +378,10 @@ fn a_turning_body_pays_for_the_distance_it_sweeps() {
             }
         }
     }
-    assert!(billed > 1_000, "too few clean ticks to mean anything: {billed}");
+    assert!(
+        billed > 1_000,
+        "too few clean ticks to mean anything: {billed}"
+    );
     assert!(turning > 0, "no body turned at all");
 }
 
@@ -357,10 +399,11 @@ fn a_seam_crossing_is_transport_and_never_a_paid_turn() {
 
     // One body walking straight at a seam, resting so that it requests no turn at all: every
     // radian that appears in its heading across the boundary is the chart's doing.
-    let id = world
-        .state
-        .organisms
-        .insert(founder_at(&world, SurfacePoint::new(Face::Front, 63.99, 32.0), Vec2::new(1.0, 0.0)));
+    let id = world.state.organisms.insert(founder_at(
+        &world,
+        SurfacePoint::new(Face::Front, 63.99, 32.0),
+        Vec2::new(1.0, 0.0),
+    ));
     {
         let o = world.state.organisms.get(id).expect("alive");
         world.state.external_material_in += o.structure + o.reserve;
@@ -371,7 +414,13 @@ fn a_seam_crossing_is_transport_and_never_a_paid_turn() {
     for _ in 0..400 {
         let (heading, energy, structure, sense_radius, maintenance) = {
             let o = world.state.organisms.get(id).expect("alive");
-            (o.heading, o.energy, o.structure, o.phenotype.sense_radius, o.phenotype.maintenance)
+            (
+                o.heading,
+                o.energy,
+                o.structure,
+                o.phenotype.sense_radius,
+                o.phenotype.maintenance,
+            )
         };
         world.step();
         world.drain_events();
@@ -402,7 +451,11 @@ fn a_seam_crossing_is_transport_and_never_a_paid_turn() {
     assert!(crossings > 0, "the fixture never crossed a seam");
 }
 
-fn founder_at(world: &World, pos: SurfacePoint, heading: Vec2) -> cubarium_core::organism::Organism {
+fn founder_at(
+    world: &World,
+    pos: SurfacePoint,
+    heading: Vec2,
+) -> cubarium_core::organism::Organism {
     use cubarium_core::genome::{Genome, decode};
     use cubarium_core::organism::{Organism, Origin};
     use cubarium_core::rng::Counter;
@@ -448,10 +501,11 @@ fn a_body_with_no_movement_energy_holds_still() {
     config.mechanisms.scavenging = false;
     config.organism.oxidation_rate = 0.0;
     let mut world = World::new(config).expect("valid");
-    let id = world
-        .state
-        .organisms
-        .insert(founder_at(&world, SurfacePoint::new(Face::Top, 20.0, 20.0), Vec2::new(1.0, 0.0)));
+    let id = world.state.organisms.insert(founder_at(
+        &world,
+        SurfacePoint::new(Face::Top, 20.0, 20.0),
+        Vec2::new(1.0, 0.0),
+    ));
     {
         let o = world.state.organisms.get_mut(id).expect("alive");
         // Hungry enough to want to go somewhere, with nothing to go on. The sliver of reserve
@@ -482,10 +536,20 @@ fn a_body_with_no_movement_energy_holds_still() {
     let mut world = World::from_state(world.state).expect("valid");
 
     world.step();
-    let o = world.state.organisms.get(id).expect("it starves later, not this tick");
+    let o = world
+        .state
+        .organisms
+        .get(id)
+        .expect("it starves later, not this tick");
     assert_eq!(o.pos, pos, "an organism with no movement energy travelled");
-    assert_eq!(o.heading, heading, "an organism with no movement energy turned");
-    assert!(world.moved_segments(id).is_empty(), "it published a path anyway");
+    assert_eq!(
+        o.heading, heading,
+        "an organism with no movement energy turned"
+    );
+    assert!(
+        world.moved_segments(id).is_empty(),
+        "it published a path anyway"
+    );
     assert_eq!(o.energy, 0.0, "upkeep is still unavoidable");
 }
 
@@ -509,7 +573,14 @@ fn an_escaping_prey_turns_within_its_body_and_pays_for_it() {
     let profile = FixedHunterProfile::lanternjaw_trial(world.config());
     let escape_ceiling = profile.escape_turn_rate_deg.to_radians();
     let hunter = world
-        .start_hunter_trial(profile, HunterTarget { face: 4, u: 32.0, v: 32.0 })
+        .start_hunter_trial(
+            profile,
+            HunterTarget {
+                face: 4,
+                u: 32.0,
+                v: 32.0,
+            },
+        )
         .expect("started")
         .id;
     {
@@ -526,7 +597,15 @@ fn an_escaping_prey_turns_within_its_body_and_pays_for_it() {
             .organisms
             .iter()
             .filter(|(id, _)| *id != hunter)
-            .map(|(id, o)| (id, o.heading, o.phenotype.extent, o.phenotype.speed_max, o.pos.face))
+            .map(|(id, o)| {
+                (
+                    id,
+                    o.heading,
+                    o.phenotype.extent,
+                    o.phenotype.speed_max,
+                    o.pos.face,
+                )
+            })
             .collect();
         world.step();
         world.drain_hunter_events();
@@ -597,7 +676,10 @@ fn profile_escape_speed(speed_max: f64) -> f64 {
 #[test]
 fn a_saved_world_resumes_identically_through_paid_pivots() {
     let mut config = calm();
-    config.founders.kinds = vec![FounderKind { count: 24, ..kind(2.0) }];
+    config.founders.kinds = vec![FounderKind {
+        count: 24,
+        ..kind(2.0)
+    }];
     let mut world = World::new(config).expect("valid");
     for _ in 0..200 {
         world.step();

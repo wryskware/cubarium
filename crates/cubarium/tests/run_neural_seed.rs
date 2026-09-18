@@ -15,7 +15,13 @@ use support::{Scratch, parse, run};
 fn write_policy(scratch: &Scratch, name: &str, seed: u64) -> std::path::PathBuf {
     // The ecology the policy claims: the shipped defaults, which is the world `--fresh`
     // creates here. Its hash is the one `es-export` records (`calibrate::config_hash`).
-    write_policy_in(scratch, name, seed, "default", &cubarium_core::WorldConfig::default())
+    write_policy_in(
+        scratch,
+        name,
+        seed,
+        "default",
+        &cubarium_core::WorldConfig::default(),
+    )
 }
 
 /// The same, claiming a named ecology: the label and hash `es-train --config` would record.
@@ -28,9 +34,20 @@ fn write_policy_in(
 ) -> std::path::PathBuf {
     let theta = cubarium_search::es::tensor::initial_center(seed);
     let hash = cubarium_search::calibrate::config_hash(config);
-    let file = cubarium_search::es::export::PolicyFile::new(&theta, "test", 0, 59, label, hash, cubarium_core::MotorModel::Sweep)
-        .expect("an exportable centre");
-    scratch.write(name, &serde_json::to_string(&file).expect("writing the policy file"))
+    let file = cubarium_search::es::export::PolicyFile::new(
+        &theta,
+        "test",
+        0,
+        59,
+        label,
+        hash,
+        cubarium_core::MotorModel::Sweep,
+    )
+    .expect("an exportable centre");
+    scratch.write(
+        name,
+        &serde_json::to_string(&file).expect("writing the policy file"),
+    )
 }
 
 /// A world config that is a different ecology from the defaults: one plant constant moved,
@@ -56,10 +73,19 @@ fn a_fresh_seeded_world_holds_exactly_the_cohort_and_a_resume_refuses_to_seed_ag
     let policy = write_policy(&scratch, "center.json", 20_260_915);
 
     let seeded = run(&[
-        "--sink", "none", "--speed", "0", "--seconds", "2", "--fresh",
-        "--state", state.to_str().unwrap(),
-        "--neural", policy.to_str().unwrap(),
-        "--neural-count", "3",
+        "--sink",
+        "none",
+        "--speed",
+        "0",
+        "--seconds",
+        "2",
+        "--fresh",
+        "--state",
+        state.to_str().unwrap(),
+        "--neural",
+        policy.to_str().unwrap(),
+        "--neural-count",
+        "3",
     ]);
     assert_eq!(seeded.final_tick, 40);
     assert_eq!(
@@ -81,23 +107,46 @@ fn a_fresh_seeded_world_holds_exactly_the_cohort_and_a_resume_refuses_to_seed_ag
     let err = format!(
         "{:#}",
         cubarium::run_world(&parse(&[
-            "--sink", "none", "--speed", "0", "--seconds", "1",
-            "--state", state.to_str().unwrap(),
-            "--neural", policy.to_str().unwrap(),
+            "--sink",
+            "none",
+            "--speed",
+            "0",
+            "--seconds",
+            "1",
+            "--state",
+            state.to_str().unwrap(),
+            "--neural",
+            policy.to_str().unwrap(),
         ]))
         .expect_err("a resumed world must not be seeded a second time")
     );
     assert!(err.contains("--neural seeds a new world"), "{err}");
-    assert!(err.contains("--fresh"), "the refusal names the control that would work: {err}");
+    assert!(
+        err.contains("--fresh"),
+        "the refusal names the control that would work: {err}"
+    );
 
     // And the resume without the control carries the cohort it already has: the policy
     // rides the snapshot (schema 15), so a restart does not lose the animals.
     let resumed = run(&[
-        "--sink", "none", "--speed", "0", "--seconds", "1",
-        "--state", state.to_str().unwrap(),
+        "--sink",
+        "none",
+        "--speed",
+        "0",
+        "--seconds",
+        "1",
+        "--state",
+        state.to_str().unwrap(),
     ]);
-    assert_eq!(resumed.loaded_tick, Some(40), "the resume started from the seeded snapshot");
-    assert_eq!(resumed.neural_animals, 3, "the cohort survived the snapshot round trip");
+    assert_eq!(
+        resumed.loaded_tick,
+        Some(40),
+        "the resume started from the seeded snapshot"
+    );
+    assert_eq!(
+        resumed.neural_animals, 3,
+        "the cohort survived the snapshot round trip"
+    );
 }
 
 /// The default cohort is four, one per side face, and they are alive and moving after 20 s
@@ -109,9 +158,17 @@ fn the_default_cohort_is_four_and_they_are_still_there_after_twenty_seconds() {
     let policy = write_policy(&scratch, "center.json", 7);
 
     let outcome = run(&[
-        "--sink", "none", "--speed", "0", "--seconds", "20", "--fresh",
-        "--state", state.to_str().unwrap(),
-        "--neural", policy.to_str().unwrap(),
+        "--sink",
+        "none",
+        "--speed",
+        "0",
+        "--seconds",
+        "20",
+        "--fresh",
+        "--state",
+        state.to_str().unwrap(),
+        "--neural",
+        policy.to_str().unwrap(),
     ]);
     assert_eq!(outcome.final_tick, 400);
     assert_eq!(outcome.neural_animals, 4, "the documented default cohort");
@@ -128,13 +185,24 @@ fn an_unreadable_policy_file_refuses_the_run() {
     let err = format!(
         "{:#}",
         cubarium::run_world(&parse(&[
-            "--sink", "none", "--speed", "0", "--seconds", "1", "--fresh",
-            "--state", state.to_str().unwrap(),
-            "--neural", bad.to_str().unwrap(),
+            "--sink",
+            "none",
+            "--speed",
+            "0",
+            "--seconds",
+            "1",
+            "--fresh",
+            "--state",
+            state.to_str().unwrap(),
+            "--neural",
+            bad.to_str().unwrap(),
         ]))
         .expect_err("a policy file that will not parse must refuse the run")
     );
-    assert!(err.contains("not-a-policy.json"), "the refusal names the file: {err}");
+    assert!(
+        err.contains("not-a-policy.json"),
+        "the refusal names the file: {err}"
+    );
 }
 
 /// Present *and moving*: the seeded bodies are ordinary organisms driven by the policy, so
@@ -155,14 +223,20 @@ fn every_seeded_animal_leaves_its_starting_cell() {
         let face = Face::from_index(k).expect("four side faces");
         let cell = CellId::new(Topology::Cube, Scale::ONE, face, 8, 8);
         let id = world
-            .found_neural_animal(cell.center(Topology::Cube, Scale::ONE), Vec2::new(1.0, 0.0), policy.clone())
+            .found_neural_animal(
+                cell.center(Topology::Cube, Scale::ONE),
+                Vec2::new(1.0, 0.0),
+                policy.clone(),
+            )
             .expect("a fresh world has room for four more");
         seeded.push((id, cell));
     }
     assert_eq!(world.neural_population(), 4);
 
-    let mut visited: Vec<std::collections::BTreeSet<_>> =
-        seeded.iter().map(|(_, c)| [*c].into_iter().collect()).collect();
+    let mut visited: Vec<std::collections::BTreeSet<_>> = seeded
+        .iter()
+        .map(|(_, c)| [*c].into_iter().collect())
+        .collect();
     for _ in 0..400 {
         world.step();
         world.drain_events();
@@ -172,7 +246,9 @@ fn every_seeded_animal_leaves_its_starting_cell() {
             }
         }
     }
-    world.check_invariants().expect("the world stays consistent");
+    world
+        .check_invariants()
+        .expect("the world stays consistent");
 
     for (i, (id, start)) in seeded.iter().enumerate() {
         let o = world.state.organisms.get(*id).expect("alive after 20 s");
@@ -193,31 +269,66 @@ fn every_seeded_animal_leaves_its_starting_cell() {
 fn a_policy_trained_in_another_ecology_is_refused_against_this_world() {
     let scratch = Scratch::new("neural-foreign-ecology");
     let state = scratch.join("state");
-    let policy = write_policy_in(&scratch, "fast-leaf-center.json", 3, "fast-leaf", &fast_leaf_like());
+    let policy = write_policy_in(
+        &scratch,
+        "fast-leaf-center.json",
+        3,
+        "fast-leaf",
+        &fast_leaf_like(),
+    );
 
     // No `--config`: the world is the shipped defaults, the policy is not.
     let err = refusal(&[
-        "--sink", "none", "--speed", "0", "--seconds", "1", "--fresh",
-        "--state", state.to_str().unwrap(),
-        "--neural", policy.to_str().unwrap(),
+        "--sink",
+        "none",
+        "--speed",
+        "0",
+        "--seconds",
+        "1",
+        "--fresh",
+        "--state",
+        state.to_str().unwrap(),
+        "--neural",
+        policy.to_str().unwrap(),
     ]);
-    assert!(err.contains("fast-leaf-center.json"), "the refusal names the file: {err}");
-    assert!(err.contains("trained in ecology fast-leaf"), "and the ecology it claims: {err}");
+    assert!(
+        err.contains("fast-leaf-center.json"),
+        "the refusal names the file: {err}"
+    );
+    assert!(
+        err.contains("trained in ecology fast-leaf"),
+        "and the ecology it claims: {err}"
+    );
     assert!(err.contains("config hash"), "and says what differs: {err}");
-    assert!(support::snapshot_ticks(&state).is_empty(), "a refused run writes no world");
+    assert!(
+        support::snapshot_ticks(&state).is_empty(),
+        "a refused run writes no world"
+    );
 
     // The other way round: a defaults policy against a `--config` that is a different ecology.
     let toml = toml::to_string(&fast_leaf_like()).expect("a config serialises");
     let config = scratch.write("fast-leaf.toml", &toml);
     let defaults_policy = write_policy(&scratch, "default-center.json", 3);
     let err = refusal(&[
-        "--sink", "none", "--speed", "0", "--seconds", "1", "--fresh",
-        "--state", state.to_str().unwrap(),
-        "--config", config.to_str().unwrap(),
-        "--neural", defaults_policy.to_str().unwrap(),
+        "--sink",
+        "none",
+        "--speed",
+        "0",
+        "--seconds",
+        "1",
+        "--fresh",
+        "--state",
+        state.to_str().unwrap(),
+        "--config",
+        config.to_str().unwrap(),
+        "--neural",
+        defaults_policy.to_str().unwrap(),
     ]);
     assert!(err.contains("trained in ecology default"), "{err}");
-    assert!(err.contains("this evaluation is fast-leaf"), "the world's ecology is named by the file's stem: {err}");
+    assert!(
+        err.contains("this evaluation is fast-leaf"),
+        "the world's ecology is named by the file's stem: {err}"
+    );
 }
 
 /// A policy that records no ecology at all — every file written before the ecology was
@@ -227,19 +338,38 @@ fn a_policy_without_a_recorded_ecology_is_refused() {
     let scratch = Scratch::new("neural-unknown-ecology");
     let state = scratch.join("state");
     let theta = cubarium_search::es::tensor::initial_center(5);
-    let mut file = cubarium_search::es::export::PolicyFile::new(&theta, "test", 0, 59, "default", 0, cubarium_core::MotorModel::Sweep)
-        .expect("an exportable centre");
+    let mut file = cubarium_search::es::export::PolicyFile::new(
+        &theta,
+        "test",
+        0,
+        59,
+        "default",
+        0,
+        cubarium_core::MotorModel::Sweep,
+    )
+    .expect("an exportable centre");
     file.config = None;
     file.config_hash = None;
     let policy = scratch.write("old-center.json", &serde_json::to_string(&file).unwrap());
 
     let err = refusal(&[
-        "--sink", "none", "--speed", "0", "--seconds", "1", "--fresh",
-        "--state", state.to_str().unwrap(),
-        "--neural", policy.to_str().unwrap(),
+        "--sink",
+        "none",
+        "--speed",
+        "0",
+        "--seconds",
+        "1",
+        "--fresh",
+        "--state",
+        state.to_str().unwrap(),
+        "--neural",
+        policy.to_str().unwrap(),
     ]);
     assert!(err.contains("old-center.json"), "{err}");
-    assert!(err.contains("records no config hash"), "refused as unknown, not accepted as default: {err}");
+    assert!(
+        err.contains("records no config hash"),
+        "refused as unknown, not accepted as default: {err}"
+    );
 }
 
 /// The matching case with a named ecology: a policy trained under `--config <toml>` seeds a
@@ -256,16 +386,33 @@ fn a_policy_trained_in_the_configured_ecology_seeds_that_world() {
     let policy = write_policy_in(&scratch, "fast-leaf-center.json", 3, "fast-leaf", &loaded);
 
     let seeded = run(&[
-        "--sink", "none", "--speed", "0", "--seconds", "1", "--fresh",
-        "--state", state.to_str().unwrap(),
-        "--config", config.to_str().unwrap(),
-        "--seed", "7",
-        "--neural", policy.to_str().unwrap(),
-        "--neural-count", "2",
+        "--sink",
+        "none",
+        "--speed",
+        "0",
+        "--seconds",
+        "1",
+        "--fresh",
+        "--state",
+        state.to_str().unwrap(),
+        "--config",
+        config.to_str().unwrap(),
+        "--seed",
+        "7",
+        "--neural",
+        policy.to_str().unwrap(),
+        "--neural-count",
+        "2",
     ]);
-    assert_eq!(seeded.neural_animals, 2, "the matching policy seeds its cohort");
+    assert_eq!(
+        seeded.neural_animals, 2,
+        "the matching policy seeds its cohort"
+    );
     assert_eq!(seeded.config.seed, 7, "the seed override still applies");
-    assert_eq!(seeded.config.plant.foliage_rate, 0.006, "in the configured ecology");
+    assert_eq!(
+        seeded.config.plant.foliage_rate, 0.006,
+        "in the configured ecology"
+    );
 }
 
 /// The **motor contract**, checked at the same door as the ecology and for the same reason: a
@@ -293,20 +440,40 @@ fn a_policy_trained_under_the_other_motor_contract_is_refused_by_name() {
         cubarium_core::MotorModel::Inertial,
     )
     .expect("an exportable centre");
-    let policy = scratch.write("inertial-center.json", &serde_json::to_string(&file).unwrap());
+    let policy = scratch.write(
+        "inertial-center.json",
+        &serde_json::to_string(&file).unwrap(),
+    );
 
     let err = refusal(&[
-        "--sink", "none", "--speed", "0", "--seconds", "1", "--fresh",
-        "--state", state.to_str().unwrap(),
-        "--neural", policy.to_str().unwrap(),
+        "--sink",
+        "none",
+        "--speed",
+        "0",
+        "--seconds",
+        "1",
+        "--fresh",
+        "--state",
+        state.to_str().unwrap(),
+        "--neural",
+        policy.to_str().unwrap(),
     ]);
-    assert!(err.contains("inertial-center.json"), "the refusal names the file: {err}");
+    assert!(
+        err.contains("inertial-center.json"),
+        "the refusal names the file: {err}"
+    );
     assert!(
         err.contains("trained under the inertial motor contract"),
         "and the contract it claims: {err}"
     );
-    assert!(err.contains("sweep"), "and the contract this world runs: {err}");
-    assert!(support::snapshot_ticks(&state).is_empty(), "a refused run writes no world");
+    assert!(
+        err.contains("sweep"),
+        "and the contract this world runs: {err}"
+    );
+    assert!(
+        support::snapshot_ticks(&state).is_empty(),
+        "a refused run writes no world"
+    );
 }
 
 /// A policy file that records **no** motor at all is `sweep`, not "unknown" — unlike the
@@ -333,16 +500,36 @@ fn a_policy_from_before_the_motor_field_existed_still_seeds() {
     // A file from before the field existed does not carry the key at all, so it is removed
     // rather than written as `null`: `None` must mean `sweep` for both spellings.
     let mut json = serde_json::to_value(&file).expect("a policy file serialises");
-    assert!(json.as_object_mut().expect("an object").remove("motor").is_some());
+    assert!(
+        json.as_object_mut()
+            .expect("an object")
+            .remove("motor")
+            .is_some()
+    );
     let text = serde_json::to_string(&json).expect("writing the policy file");
-    assert!(!text.contains("\"motor\""), "the fixture is a file with no motor field");
+    assert!(
+        !text.contains("\"motor\""),
+        "the fixture is a file with no motor field"
+    );
     let policy = scratch.write("old-center.json", &text);
 
     let seeded = run(&[
-        "--sink", "none", "--speed", "0", "--seconds", "1", "--fresh",
-        "--state", state.to_str().unwrap(),
-        "--neural", policy.to_str().unwrap(),
-        "--neural-count", "2",
+        "--sink",
+        "none",
+        "--speed",
+        "0",
+        "--seconds",
+        "1",
+        "--fresh",
+        "--state",
+        state.to_str().unwrap(),
+        "--neural",
+        policy.to_str().unwrap(),
+        "--neural-count",
+        "2",
     ]);
-    assert_eq!(seeded.neural_animals, 2, "missing means sweep, and sweep is what this world runs");
+    assert_eq!(
+        seeded.neural_animals, 2,
+        "missing means sweep, and sweep is what this world runs"
+    );
 }

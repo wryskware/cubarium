@@ -50,7 +50,11 @@ use serde::{Deserialize, Serialize};
 pub fn accumulate(raw: &mut f64, correction: &mut f64, amount: f64) {
     let s = *raw;
     let next = s + amount;
-    *correction += if s.abs() >= amount.abs() { (s - next) + amount } else { (amount - next) + s };
+    *correction += if s.abs() >= amount.abs() {
+        (s - next) + amount
+    } else {
+        (amount - next) + s
+    };
     *raw = next;
 }
 
@@ -157,11 +161,24 @@ mod tests {
         for _ in 0..(1u32 << 20) {
             accumulate(&mut raw, &mut correction, amount);
         }
-        assert_eq!(raw, 1.0, "the raw counter is bit-identical to the naive sum");
+        assert_eq!(
+            raw, 1.0,
+            "the raw counter is bit-identical to the naive sum"
+        );
         let ledger = Ledger { raw, correction };
-        assert_eq!(ledger.total(), 1.0 + 2f64.powi(-40), "corrected total is the exact sum");
+        assert_eq!(
+            ledger.total(),
+            1.0 + 2f64.powi(-40),
+            "corrected total is the exact sum"
+        );
         assert_eq!(correction, 2f64.powi(-40));
-        assert_eq!(ledger.since(Ledger { raw: 1.0, correction: 0.0 }), 2f64.powi(-40));
+        assert_eq!(
+            ledger.since(Ledger {
+                raw: 1.0,
+                correction: 0.0
+            }),
+            2f64.powi(-40)
+        );
     }
 
     /// A signed sequence of 20,000 amounts against an exact `i128` reference.
@@ -174,13 +191,18 @@ mod tests {
     #[test]
     fn signed_additions_below_the_raw_ulp_match_an_exact_integer_reference() {
         let scale = 2f64.powi(-70);
-        let opening = Ledger { raw: 1.0, correction: 0.0 };
+        let opening = Ledger {
+            raw: 1.0,
+            correction: 0.0,
+        };
         let (mut raw, mut correction) = (opening.raw, opening.correction);
         let mut units: i128 = 0;
         let (mut positives, mut negatives) = (0u32, 0u32);
         let mut lcg = 0x2545_f491_4f6c_dd1du64;
         for _ in 0..20_000 {
-            lcg = lcg.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            lcg = lcg
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
             // A signed amount in (−2^-53, 2^-53), expressed in whole units of 2^-70.
             let step = i128::from(((lcg >> 40) % (1 << 17)) as i64) - (1 << 16);
             if step > 0 {
@@ -191,11 +213,24 @@ mod tests {
             units += step;
             accumulate(&mut raw, &mut correction, step as f64 * scale);
         }
-        assert!(positives > 1_000 && negatives > 1_000, "the sequence must go both ways");
-        assert_eq!(raw, 1.0, "the raw counter is bit-identical to the naive sum, which kept nothing");
+        assert!(
+            positives > 1_000 && negatives > 1_000,
+            "the sequence must go both ways"
+        );
+        assert_eq!(
+            raw, 1.0,
+            "the raw counter is bit-identical to the naive sum, which kept nothing"
+        );
         let exact = units as f64 * scale;
-        assert_ne!(exact, 0.0, "the reference sum must be nonzero for this to prove anything");
-        assert_eq!(Ledger { raw, correction }.since(opening), exact, "delta missed the exact sum");
+        assert_ne!(
+            exact, 0.0,
+            "the reference sum must be nonzero for this to prove anything"
+        );
+        assert_eq!(
+            Ledger { raw, correction }.since(opening),
+            exact,
+            "delta missed the exact sum"
+        );
         assert_eq!(correction, exact);
     }
 
@@ -219,50 +254,91 @@ mod tests {
             let (mut raw, mut correction) = (10.0f64, 0.0f64);
             accumulate(&mut raw, &mut correction, bad);
             let ledger = Ledger { raw, correction };
-            assert!(ledger.validate("light_in_total").is_err(), "{bad} passed validation");
+            assert!(
+                ledger.validate("light_in_total").is_err(),
+                "{bad} passed validation"
+            );
         }
     }
 
     #[test]
     fn validation_names_the_failure_and_accepts_a_signed_correction() {
         // A negative correction on a positive total is ordinary.
-        Ledger { raw: 100.0, correction: -1e-9 }
-            .validate("heat_out_total")
-            .expect("a signed correction is valid");
-        Ledger::default().validate("light_in_total").expect("a fresh world is valid");
-
-        let err = Ledger { raw: 1.0, correction: f64::NAN }
+        Ledger {
+            raw: 100.0,
+            correction: -1e-9,
+        }
+        .validate("heat_out_total")
+        .expect("a signed correction is valid");
+        Ledger::default()
             .validate("light_in_total")
-            .expect_err("a NaN correction must fail");
-        assert!(err.contains("light_in_total") && err.contains("correction"), "{err}");
+            .expect("a fresh world is valid");
 
-        let err = Ledger { raw: 1.0, correction: -2.0 }
-            .validate("heat_out_total")
-            .expect_err("a negative corrected total must fail");
-        assert!(err.contains("heat_out_total") && err.contains("negative"), "{err}");
+        let err = Ledger {
+            raw: 1.0,
+            correction: f64::NAN,
+        }
+        .validate("light_in_total")
+        .expect_err("a NaN correction must fail");
+        assert!(
+            err.contains("light_in_total") && err.contains("correction"),
+            "{err}"
+        );
+
+        let err = Ledger {
+            raw: 1.0,
+            correction: -2.0,
+        }
+        .validate("heat_out_total")
+        .expect_err("a negative corrected total must fail");
+        assert!(
+            err.contains("heat_out_total") && err.contains("negative"),
+            "{err}"
+        );
     }
 
     #[test]
     fn the_delta_helper_beats_differencing_two_corrected_totals() {
         // A large raw total with a tiny interval flow: subtracting `total()`s rounds the
         // flow away, differencing each component keeps it.
-        let opening = Ledger { raw: 1e16, correction: 0.25 };
+        let opening = Ledger {
+            raw: 1e16,
+            correction: 0.25,
+        };
         let mut closing = opening;
         accumulate(&mut closing.raw, &mut closing.correction, 0.5);
         assert_eq!(closing.raw, 1e16, "0.5 is below the ulp of 1e16");
         assert_eq!(closing.since(opening), 0.5);
-        assert_eq!(closing.total() - opening.total(), 0.0, "the naive difference loses it");
+        assert_eq!(
+            closing.total() - opening.total(),
+            0.0,
+            "the naive difference loses it"
+        );
     }
 
     #[test]
     fn the_energy_ledgers_net_the_two_flows_precisely() {
         let opening = EnergyLedgers {
-            light_in: Ledger { raw: 1e15, correction: 0.0 },
-            heat_out: Ledger { raw: 1e15, correction: 0.0 },
+            light_in: Ledger {
+                raw: 1e15,
+                correction: 0.0,
+            },
+            heat_out: Ledger {
+                raw: 1e15,
+                correction: 0.0,
+            },
         };
         let mut closing = opening;
-        accumulate(&mut closing.light_in.raw, &mut closing.light_in.correction, 0.75);
-        accumulate(&mut closing.heat_out.raw, &mut closing.heat_out.correction, 0.25);
+        accumulate(
+            &mut closing.light_in.raw,
+            &mut closing.light_in.correction,
+            0.75,
+        );
+        accumulate(
+            &mut closing.heat_out.raw,
+            &mut closing.heat_out.correction,
+            0.25,
+        );
         assert_eq!(closing.net_since(opening), 0.5);
         closing.validate().expect("both ledgers are sound");
     }
