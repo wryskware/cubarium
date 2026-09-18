@@ -18,7 +18,7 @@ that would need a judgment call: leave a note in the return instead of deciding.
   anything under `art/`, or any deployed process (the cube, the Tachyon, a toy on port 7402).
 - Commit **explicit paths only**: `git add <file> …`, never `git add -A` or `commit -a`.
   Commit message: one line saying what changed, then a blank line, then a short body.
-- Never run `cargo fmt` on the repo. Never edit numbers in configs or presets. Never
+- Never edit numbers in configs or presets. Never
   add a test that pins a byte hash of a world. Never write a design decision; if a doc
   needs one, note it and move on.
 - Build with `cargo build -j 24 --release -p <crate>`; test only the crate you touched.
@@ -26,6 +26,24 @@ that would need a judgment call: leave a note in the return instead of deciding.
 - `gh` is authenticated; use it for issues.
 - Return format at the end: per task, ≤10 lines: what you changed (commit hash), the
   check you ran and its output, anything you skipped and why.
+
+## Task 0 — format the repo, once, in its own commit
+
+The repo has never been run through rustfmt (about 4,700 hunks pending). Do it as one
+commit that changes nothing else, before any other task:
+
+```
+git status --short          # must show no modified tracked files except design/handoffs/README.md
+cargo fmt --all
+git add $(git diff --name-only -- '*.rs')
+git commit -m "cargo fmt --all, once, no other change"
+cargo build -j 24 --release --workspace
+cargo fmt --all --check     # must print nothing
+```
+
+If `git status` shows other modified tracked files before you start, stop and report;
+do not format on top of someone's work. Every later commit must keep
+`cargo fmt --all --check` clean for the files it touches.
 
 ## Task 1 — close issue #13
 
