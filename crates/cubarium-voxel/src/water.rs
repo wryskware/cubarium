@@ -161,6 +161,7 @@
 
 use std::cell::RefCell;
 
+use crate::world::VoidRun;
 use crate::{Command, Config, DT, Material, World};
 
 /// The fraction of a head difference that crosses one face in one substep.
@@ -777,6 +778,9 @@ fn exchange_inner(w: &mut World, threads: usize) {
     if w.wet.len() == 0 {
         return;
     }
+    // The void-run geometry the scan needs is terrain-only, so it is built once per
+    // terrain version and not per substep; it must exist before the workers read it.
+    w.ensure_void_runs();
     SCRATCH.with(|slot| {
         let sc = &mut *slot.borrow_mut();
         sc.ensure(n, plane);
@@ -1072,12 +1076,12 @@ fn cap_flux(c: &Config, q: f64) -> f64 {
 /// more than one thread.**
 ///
 /// Each column's scan writes only that column's own `height` entries of the three
-/// column-major scratch buffers and reads only the world's arrays, so the columns are
-/// independent by construction. With `threads` above one and at least one column per
-/// worker, the ascending column list is cut into `threads` equal-count chunks and each
-/// chunk's columns span one contiguous, disjoint run of each buffer — an ordinary
-/// `split_at_mut`, no unsafe, no synchronisation, and no reduction to reassociate. Below
-/// that it is the same loop on this thread.
+/// column-major scratch buffers and reads only the world's arrays and the cached void-run
+/// geometry, so the columns are independent by construction. With `threads` above one and
+/// at least one column per worker, the ascending column list is cut into `threads`
+/// equal-count chunks and each chunk's columns span one contiguous, disjoint run of each
+/// buffer — an ordinary `split_at_mut`, no unsafe, no synchronisation, and no reduction to
+/// reassociate. Below that it is the same loop on this thread.
 fn scan_columns(w: &World, height: usize, plane: usize, threads: usize, sc: &mut Scratch) {
     // Field-by-field, so the read-only column list and the three written buffers are
     // disjoint borrows of one `Scratch`.
@@ -1088,7 +1092,12 @@ fn scan_columns(w: &World, height: usize, plane: usize, threads: usize, sc: &mut
         columns,
         ..
     } = sc;
-    let (material, free) = (&w.material[..], &w.free[..]);
+    let free = &w.free[..];
+    // The cached geometry: `plane + 1` offsets into one flat run list. Read-only here, so
+    // every worker shares it without synchronisation.
+    let offset = &w.void_runs.offset[..];
+    let runs = &w.void_runs.runs[..];
+    let runs_of = |col: usize| &runs[offset[col] as usize..offset[col + 1] as usize];
 
     #[cfg(feature = "parallel")]
     if threads > 1 && columns.len() >= threads {
@@ -1110,11 +1119,10 @@ fn scan_columns(w: &World, height: usize, plane: usize, threads: usize, sc: &mut
                     for &col in cols {
                         let at = col * height - start;
                         scan_column(
-                            material,
                             free,
-                            height,
                             plane,
                             col,
+                            &runs[offset[col] as usize..offset[col + 1] as usize],
                             &mut h[at..at + height],
                             &mut r[at..at + height],
                             &mut t[at..at + height],
@@ -1130,11 +1138,10 @@ fn scan_columns(w: &World, height: usize, plane: usize, threads: usize, sc: &mut
     for &col in columns.iter() {
         let at = col * height;
         scan_column(
-            material,
             free,
-            height,
             plane,
             col,
+            runs_of(col),
             &mut head[at..at + height],
             &mut room_target[at..at + height],
             &mut run_top[at..at + height],
@@ -1178,31 +1185,28 @@ fn cut_spans<'a, T>(
 /// ceiling is where a push stops. A **water run** is a maximal stack of wet cells inside a
 /// void run, and every cell of it carries the run's own surface level.
 ///
+/// The runs themselves are **static geometry**, handed in from [`World::void_runs`], so
+/// this pass never rediscovers them from `material`; only the water-dependent values —
+/// `room_target`, `run_top` and `head` — are written here, every substep.
+///
 /// **This is the parallel pass**, and it is why the scratch is column-major: it reads the
-/// world's arrays (shared) and writes only `head[y]`, `room_target[y]` and `run_top[y]` of
-/// the **one column** whose three `height`-long spans the caller handed it. Two columns
-/// never overlap, so a worker per chunk of columns needs no synchronisation and no unsafe.
-/// The values written are world cell indices, exactly as before.
+/// world's `free` array (shared) and writes only `head[y]`, `room_target[y]` and
+/// `run_top[y]` of the **one column** whose three `height`-long spans the caller handed
+/// it. Two columns never overlap, so a worker per chunk of columns needs no
+/// synchronisation and no unsafe. The values written are world cell indices, exactly as
+/// before.
 fn scan_column(
-    material: &[Material],
     free: &[f64],
-    height: usize,
     plane: usize,
     col: usize,
+    runs: &[VoidRun],
     head: &mut [f64],
     room_target: &mut [usize],
     run_top: &mut [usize],
 ) {
-    let mut y = 0usize;
-    while y < height {
-        if material[y * plane + col].is_solid() {
-            y += 1;
-            continue;
-        }
-        let mut top = y;
-        while top + 1 < height && !material[(top + 1) * plane + col].is_solid() {
-            top += 1;
-        }
+    for run in runs {
+        let y = run.y0 as usize;
+        let top = run.top as usize;
         // Displacement targets, from the ceiling down: the lowest cell with room seen so
         // far is the lowest cell with room at or above the cell being written.
         let mut best = usize::MAX;
@@ -1233,7 +1237,6 @@ fn scan_column(
                 k += 1;
             }
         }
-        y = top + 1;
     }
 }
 
@@ -1758,5 +1761,314 @@ mod fall_tests {
         for x in 0..8 {
             assert!(free_at(&w, x, 1) > 0.0, "column {x} floor is dry");
         }
+    }
+}
+
+/// The void-run geometry cache (`design/handoffs/voxel-exchange-geometry-2026-09-18.md`):
+/// the cached scan must compute exactly what the old material walk did, the cache must
+/// rebuild on a terrain edit and not on a water change, and it must belong to the world
+/// rather than to the thread.
+#[cfg(test)]
+mod exchange_geometry_tests {
+    use super::{ROOM_EPS, exchange, scan_column};
+    use crate::{Command, Config, Material, World};
+
+    fn cfg(width: u32, height: u32) -> Config {
+        Config {
+            width,
+            height,
+            depth: 1,
+            voxel_m: 1.0,
+            seed: 7,
+            ..Config::default()
+        }
+    }
+
+    /// Three columns of different shape: an open run, a column split by a roof, and a
+    /// column with a floor and a roof; water in an open run, a lower cavity and an upper
+    /// run.
+    fn varied_fixture() -> World {
+        let mut w = World::empty(cfg(3, 6));
+        w.apply(Command::SetMaterial {
+            x: 1,
+            y: 3,
+            z: 0,
+            material: Material::Rock,
+        });
+        w.apply(Command::SetMaterial {
+            x: 2,
+            y: 1,
+            z: 0,
+            material: Material::Rock,
+        });
+        w.apply(Command::SetMaterial {
+            x: 2,
+            y: 4,
+            z: 0,
+            material: Material::Rock,
+        });
+        for (x, y, volume_m3) in [(0, 1, 1.0), (1, 1, 0.5), (2, 5, 0.3)] {
+            w.apply(Command::AddWater {
+                x,
+                y,
+                z: 0,
+                volume_m3,
+            });
+        }
+        w
+    }
+
+    fn free_at(w: &World, x: i64, y: u32) -> f64 {
+        w.view().free_at(x, y, 0)
+    }
+
+    fn residual(w: &World) -> f64 {
+        w.view().stored_m3() - w.view().ledger.expected_stored()
+    }
+
+    /// The scan as it was before the cache: rediscover the runs from `material` every
+    /// call, then write the same three arrays.
+    fn uncached_scan(
+        material: &[Material],
+        free: &[f64],
+        height: usize,
+        plane: usize,
+        col: usize,
+    ) -> (Vec<f64>, Vec<usize>, Vec<usize>) {
+        let mut head = vec![0.0; height];
+        let mut room_target = vec![usize::MAX; height];
+        let mut run_top = vec![usize::MAX; height];
+        let mut y = 0usize;
+        while y < height {
+            if material[y * plane + col].is_solid() {
+                y += 1;
+                continue;
+            }
+            let mut top = y;
+            while top + 1 < height && !material[(top + 1) * plane + col].is_solid() {
+                top += 1;
+            }
+            let mut best = usize::MAX;
+            let top_cell = top * plane + col;
+            for k in (y..=top).rev() {
+                let i = k * plane + col;
+                if free[i] < 1.0 - ROOM_EPS {
+                    best = i;
+                }
+                room_target[k] = best;
+                run_top[k] = top_cell;
+            }
+            let mut k = y;
+            while k <= top {
+                let i = k * plane + col;
+                if free[i] > 0.0 {
+                    let mut t = k;
+                    while t + 1 <= top && free[(t + 1) * plane + col] > 0.0 {
+                        t += 1;
+                    }
+                    let surface = t as f64 + free[t * plane + col];
+                    for m in k..=t {
+                        head[m] = surface;
+                    }
+                    k = t + 1;
+                } else {
+                    k += 1;
+                }
+            }
+            y = top + 1;
+        }
+        (head, room_target, run_top)
+    }
+
+    fn cached_scan(w: &World, col: usize) -> (Vec<f64>, Vec<usize>, Vec<usize>) {
+        let plane = w.config.width as usize * w.config.depth as usize;
+        let height = w.config.height as usize;
+        let offset = &w.void_runs.offset;
+        let runs = &w.void_runs.runs;
+        let mut head = vec![0.0; height];
+        let mut room_target = vec![usize::MAX; height];
+        let mut run_top = vec![usize::MAX; height];
+        scan_column(
+            &w.free,
+            plane,
+            col,
+            &runs[offset[col] as usize..offset[col + 1] as usize],
+            &mut head,
+            &mut room_target,
+            &mut run_top,
+        );
+        (head, room_target, run_top)
+    }
+
+    /// The cached scan is the uncached walk to the bit on a fixture with stacked cavities.
+    #[test]
+    fn cached_scan_matches_the_uncached_walk() {
+        let mut w = varied_fixture();
+        w.ensure_void_runs();
+        let plane = w.config.width as usize * w.config.depth as usize;
+        let height = w.config.height as usize;
+        for col in 0..plane {
+            let (head, room_target, run_top) = cached_scan(&w, col);
+            let (rh, rr, rt) = uncached_scan(&w.material, &w.free, height, plane, col);
+            assert_eq!(head, rh, "head, column {col}");
+            assert_eq!(room_target, rr, "room_target, column {col}");
+            assert_eq!(run_top, rt, "run_top, column {col}");
+        }
+    }
+
+    /// A water change with no terrain edit must move the recomputed heads: only the void
+    /// runs are cached, not the wet runs.
+    #[test]
+    fn water_changes_recompute_heads_without_a_terrain_edit() {
+        let mut w = varied_fixture();
+        w.ensure_void_runs();
+        let version = w.terrain_version();
+        let before = cached_scan(&w, 1).0[1];
+        // Fill the lower cavity's last half-cell: its one-cell water run goes full.
+        w.apply(Command::AddWater {
+            x: 1,
+            y: 1,
+            z: 0,
+            volume_m3: 0.5,
+        });
+        assert_eq!(
+            w.terrain_version(),
+            version,
+            "adding water moved the terrain version"
+        );
+        let after = cached_scan(&w, 1).0[1];
+        assert!(after > before, "head stayed {before} after the water rose");
+    }
+
+    /// Opening a roofed passage rebuilds the geometry, and the exchange then moves water
+    /// through it; before the edit the roof holds the water up.
+    #[test]
+    fn a_terrain_edit_rebuilds_the_geometry_and_opens_the_passage() {
+        let mut w = World::empty(cfg(1, 4));
+        w.apply(Command::SetMaterial {
+            x: 0,
+            y: 2,
+            z: 0,
+            material: Material::Rock,
+        });
+        w.apply(Command::AddWater {
+            x: 0,
+            y: 3,
+            z: 0,
+            volume_m3: 1.0,
+        });
+        exchange(&mut w, 1);
+        assert_eq!(free_at(&w, 0, 3), 1.0, "the roof did not hold the water");
+        assert_eq!(free_at(&w, 0, 2), 0.0, "water crossed the solid roof");
+
+        let before = w.terrain_version();
+        w.apply(Command::SetMaterial {
+            x: 0,
+            y: 2,
+            z: 0,
+            material: Material::Air,
+        });
+        assert!(
+            w.terrain_version() > before,
+            "the edit did not bump the version"
+        );
+        exchange(&mut w, 1);
+        assert!(
+            free_at(&w, 0, 2) > 0.0,
+            "the rebuilt geometry missed the new void"
+        );
+        assert_eq!(
+            w.void_runs.runs.len(),
+            1,
+            "the roof still splits the column"
+        );
+        assert!(residual(&w).abs() < 1e-12);
+
+        // Closing it again rebuilds too: the one run becomes two.
+        w.apply(Command::SetMaterial {
+            x: 0,
+            y: 2,
+            z: 0,
+            material: Material::Rock,
+        });
+        w.ensure_void_runs();
+        assert_eq!(
+            w.void_runs.runs.len(),
+            2,
+            "closing the passage did not rebuild the geometry"
+        );
+    }
+
+    /// Two worlds of the same size and terrain version have different floors. The cache
+    /// belongs to the world, so neither borrows the other's runs (`SCRATCH`'s dimensions
+    /// and version are not a valid key).
+    #[test]
+    fn two_worlds_with_one_terrain_version_do_not_share_geometry() {
+        let mut a = World::empty(cfg(2, 5));
+        let mut b = World::empty(cfg(2, 5));
+        a.apply(Command::SetMaterial {
+            x: 0,
+            y: 2,
+            z: 0,
+            material: Material::Rock,
+        });
+        b.apply(Command::SetMaterial {
+            x: 1,
+            y: 2,
+            z: 0,
+            material: Material::Rock,
+        });
+        assert_eq!(a.terrain_version(), b.terrain_version());
+        a.ensure_void_runs();
+        b.ensure_void_runs();
+        assert_ne!(
+            a.void_runs.runs, b.void_runs.runs,
+            "the two floors share a cache"
+        );
+        for w in [&mut a, &mut b] {
+            w.apply(Command::AddWater {
+                x: 0,
+                y: 3,
+                z: 0,
+                volume_m3: 1.0,
+            });
+        }
+        exchange(&mut a, 1);
+        exchange(&mut b, 1);
+        assert_ne!(
+            a.free, b.free,
+            "one world's water answered to the other's floor"
+        );
+    }
+
+    /// A clone keeps the built geometry and behaves identically; a snapshot round trip
+    /// comes back without it and rebuilds it to the same runs.
+    #[test]
+    fn clone_reuses_geometry_and_load_rebuilds_it() {
+        let mut w = varied_fixture();
+        w.ensure_void_runs();
+        let snapshot = w.save();
+
+        let mut cloned = w.clone();
+        assert_eq!(
+            cloned.void_runs.runs, w.void_runs.runs,
+            "the clone dropped it"
+        );
+
+        let mut loaded = World::load(&snapshot).expect("the world round-trips");
+        loaded.ensure_void_runs();
+        assert_eq!(
+            loaded.void_runs.runs, w.void_runs.runs,
+            "the decoded world rebuilt different geometry"
+        );
+
+        for _ in 0..3 {
+            exchange(&mut w, 1);
+            exchange(&mut cloned, 1);
+            exchange(&mut loaded, 1);
+        }
+        assert_eq!(w.free, cloned.free, "the clone diverged");
+        assert_eq!(w.free, loaded.free, "the loaded world diverged");
+        assert!(residual(&w).abs() < 1e-12);
     }
 }

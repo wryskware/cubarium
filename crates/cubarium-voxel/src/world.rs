@@ -337,6 +337,64 @@ pub struct World {
     pub(crate) wet: crate::sparse::CellSet,
     #[serde(skip)]
     pub(crate) damp: crate::sparse::CellSet,
+    /// **A cache, not state:** every column's void runs, derived from `material` alone.
+    /// Rebuilt lazily when [`World::terrain_version`] moves and never otherwise. Not
+    /// serialized, so a decoded world starts dirty. World-owned rather than thread-local:
+    /// two worlds can share dimensions and a terrain version without sharing a floor plan
+    /// (`design/handoffs/voxel-exchange-geometry-2026-09-18.md`).
+    #[serde(skip)]
+    pub(crate) void_runs: VoidRuns,
+}
+
+/// Every column's **void runs**: the maximal stacks of non-solid cells, one entry per run.
+/// Geometry only — a function of `material` and nothing else — so it is rebuilt exactly
+/// when [`World::terrain_version`] moves: a `SetMaterial` that commits a change, or a
+/// generation carve. Water, and which of the run's cells is wet, is **not** in here; the
+/// exchange recomputes heads, `room_target`, drives, offers and acceptance every substep.
+///
+/// **A cache, not state**: not serialized, so a decoded world comes back dirty and the
+/// next exchange builds it; a clone copies it, which is valid because a clone shares the
+/// terrain. Since two worlds can share dimensions and a terrain version, it lives on the
+/// `World` and not in the thread-local `SCRATCH`.
+#[derive(Clone, Debug)]
+pub(crate) struct VoidRuns {
+    /// Per column `c`: the first index into [`Self::runs`] that belongs to column `c`.
+    /// `plane + 1` entries, so column `c`'s runs are `runs[offset[c]..offset[c + 1]]`.
+    /// Empty when dirty.
+    pub(crate) offset: Vec<u32>,
+    /// Every run, grouped by column in ascending `(col, y0)` order.
+    pub(crate) runs: Vec<VoidRun>,
+    /// The `terrain_version` this cache was built from.
+    version: u64,
+    /// Set when the cache has never been built in this world, or after a decode.
+    dirty: bool,
+}
+
+impl Default for VoidRuns {
+    fn default() -> VoidRuns {
+        VoidRuns {
+            offset: Vec::new(),
+            runs: Vec::new(),
+            version: 0,
+            dirty: true,
+        }
+    }
+}
+
+/// One maximal stack of non-solid cells in one column: rows `y0..=top` inclusive.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct VoidRun {
+    pub(crate) y0: u32,
+    pub(crate) top: u32,
+}
+
+/// Set equality, not layout equality: a **stale** cache carries no information, so it
+/// equals anything — the same rule as [`crate::sparse::CellSet`], so a snapshot round trip
+/// compares two worlds holding the same terrain whether or not either has built its cache.
+impl PartialEq for VoidRuns {
+    fn eq(&self, other: &VoidRuns) -> bool {
+        self.dirty || other.dirty || self.runs == other.runs
+    }
 }
 
 impl World {
@@ -358,6 +416,7 @@ impl World {
             spring_cell: None,
             wet: crate::sparse::CellSet::default(),
             damp: crate::sparse::CellSet::default(),
+            void_runs: VoidRuns::default(),
             config,
         };
         crate::generate::landform(&mut world);
@@ -397,6 +456,7 @@ impl World {
             spring_cell: None,
             wet: crate::sparse::CellSet::default(),
             damp: crate::sparse::CellSet::default(),
+            void_runs: VoidRuns::default(),
             material,
             config,
         };
@@ -517,6 +577,48 @@ impl World {
                 self.damp.insert(i);
             }
         }
+    }
+
+    /// Build the void-run geometry cache if the terrain has moved since it was built, or if
+    /// this world has never built it — a fresh world, or one decoded from a snapshot. A
+    /// clone keeps a valid cache (a clone shares the terrain, so it shares the geometry).
+    ///
+    /// One full scan of `material`, and the only writer of the cache. Called by the
+    /// exchange before any worker reads geometry; the scan is inside the exchange timing,
+    /// not hidden outside the tick.
+    pub(crate) fn ensure_void_runs(&mut self) {
+        if !self.void_runs.dirty && self.void_runs.version == self.terrain_version {
+            return;
+        }
+        let plane = self.config.width as usize * self.config.depth as usize;
+        let height = self.config.height as usize;
+        let VoidRuns { offset, runs, .. } = &mut self.void_runs;
+        runs.clear();
+        offset.clear();
+        offset.reserve(plane + 1);
+        for col in 0..plane {
+            offset.push(runs.len() as u32);
+            let mut y = 0usize;
+            while y < height {
+                if self.material[y * plane + col].is_solid() {
+                    y += 1;
+                    continue;
+                }
+                let mut top = y;
+                while top + 1 < height && !self.material[(top + 1) * plane + col].is_solid() {
+                    top += 1;
+                }
+                runs.push(VoidRun {
+                    y0: y as u32,
+                    top: top as u32,
+                });
+                y = top + 1;
+            }
+        }
+        offset.push(runs.len() as u32);
+        let version = self.terrain_version;
+        self.void_runs.version = version;
+        self.void_runs.dirty = false;
     }
 
     /// Serialize the whole world. Refuses nothing; `load` refuses other schemas.
