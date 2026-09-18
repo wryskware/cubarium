@@ -1445,6 +1445,43 @@ mod settle_tests {
         assert_eq!(conditioning_verdict(&[], &tol, 0.0, 100.0), Settle::Expired);
     }
 
+    /// **The per-tolerance summary and the extrapolation**, on synthetic records: which
+    /// tolerance was first met on which interval, which was never met and what it did instead,
+    /// and where a decaying head is heading.
+    #[test]
+    fn a_phase_reports_each_tolerance_and_where_the_head_was_going() {
+        let tol = Tolerances::default();
+        // Storage quiet from the start, head decaying by half each interval, turnover settling
+        // on the third: three different answers from one phase.
+        let records = vec![
+            rec(100.0, 0.0000384, -0.08, None),
+            rec(200.0, 0.0000384, -0.04, Some(0.10)),
+            rec(300.0, 0.0000384, -0.02, Some(0.01)),
+        ];
+        assert_eq!(tol.first_met(Which::Storage, &records), Some((1, 100.0)));
+        assert_eq!(tol.first_met(Which::Head, &records), None, "0.02 m is still 20x the limit");
+        assert_eq!(tol.first_met(Which::Turnover, &records), Some((3, 300.0)));
+        assert_eq!(tol.trend(Which::Head, &records), Some((0.08, 0.02)));
+
+        // The head's own steps halve, so the remaining travel is one more step's worth: from
+        // 2.5 m with a -0.02 m step and a ratio of 0.5, the limit is 2.5 - 0.02 = 2.48 m.
+        let (ratio, limit) = head_asymptote(&records).expect("three decaying steps");
+        assert!((ratio - 0.5).abs() < 1e-12, "ratio {ratio}");
+        assert!((limit - 2.48).abs() < 1e-12, "limit {limit}");
+
+        // Not decaying: no extrapolation rather than a wrong one.
+        let steady = vec![rec(100.0, 0.0, -0.05, None), rec(200.0, 0.0, -0.05, Some(0.0)), rec(300.0, 0.0, -0.06, Some(0.0))];
+        assert_eq!(head_asymptote(&steady), None, "a growing step extrapolates to nothing");
+        assert_eq!(head_asymptote(&records[..2]), None, "fewer than three records");
+        // An incomplete interval satisfies no single tolerance either.
+        let mut partial = rec(400.0, 0.0, 0.0, Some(0.0));
+        partial.complete = false;
+        partial.ticks = 0;
+        for which in Which::ALL {
+            assert!(!tol.holds_one(which, &partial), "{} on a partial interval", which.name());
+        }
+    }
+
     /// **The 200.01 s case** (Astra R11.2). A phase whose budget is a hair over two intervals
     /// used to be able to manufacture a settled verdict: a first record with no turnover, one
     /// genuinely quiet 100 s record, and then a **0.01 s tail** that runs zero ticks, reports
@@ -1508,4 +1545,108 @@ mod settle_tests {
         // One gained and one lost is **not** stationary, which a count comparison would miss.
         assert!((turnover_of(&s(&[1, 2, 3]), &s(&[1, 2, 4])) - 0.5).abs() < 1e-12);
     }
+}
+
+// ------------------------------------------- reading a phase's records after the fact
+
+/// Which single tolerance a record satisfied, for the per-tolerance summary a conditioning
+/// probe prints. Each is read **alone**: a phase settles only when all three hold together on
+/// consecutive intervals, and these say which of them is the one still failing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Which {
+    Storage,
+    Head,
+    Turnover,
+}
+
+impl Which {
+    pub const ALL: [Which; 3] = [Which::Storage, Which::Head, Which::Turnover];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Which::Storage => "storage",
+            Which::Head => "head",
+            Which::Turnover => "turnover",
+        }
+    }
+}
+
+impl Tolerances {
+    /// Whether one record satisfies **one** of the three tolerances, ignoring the others.
+    /// An incomplete interval satisfies none of them (R11.2).
+    pub fn holds_one(&self, which: Which, r: &IntervalRecord) -> bool {
+        if !r.complete {
+            return false;
+        }
+        match which {
+            Which::Storage => {
+                r.storage_rate.abs()
+                    <= self.storage_fraction_of_rain * r.rain_rate.abs().max(f64::MIN_POSITIVE)
+            }
+            Which::Head => r.head_delta.abs() <= self.head_m_per_interval,
+            Which::Turnover => r.worst_turnover().is_some_and(|t| t <= self.eligible_turnover),
+        }
+    }
+
+    /// The **first** record on which one tolerance held, and its 1-based interval number:
+    /// what a probe reports per tolerance, and `None` for "never, in this phase".
+    pub fn first_met(
+        &self,
+        which: Which,
+        records: &[IntervalRecord],
+    ) -> Option<(usize, f64)> {
+        records
+            .iter()
+            .enumerate()
+            .find(|(_, r)| self.holds_one(which, r))
+            .map(|(i, r)| (i + 1, r.seconds))
+    }
+
+    /// One tolerance's own value on the first and last complete record, for the trend line a
+    /// probe prints when the tolerance was never met.
+    pub fn trend(&self, which: Which, records: &[IntervalRecord]) -> Option<(f64, f64)> {
+        let mut complete = records.iter().filter(|r| r.complete);
+        let first = complete.next()?;
+        let last = records.iter().filter(|r| r.complete).next_back()?;
+        let value = |r: &IntervalRecord| match which {
+            Which::Storage => r.storage_rate.abs(),
+            Which::Head => r.head_delta.abs(),
+            Which::Turnover => r.worst_turnover().unwrap_or(f64::NAN),
+        };
+        Some((value(first), value(last)))
+    }
+}
+
+/// A **geometric extrapolation** of where the head is going, from the last three complete
+/// intervals: the ratio of consecutive head steps, and the limit that ratio implies.
+///
+/// `(ratio, limit)`, or `None` when there are not three complete records, when the steps are
+/// not decaying (`ratio >= 1`, which is not converging at all) or when the last step is zero
+/// (already still). **It is an extrapolation and not a measurement**: it assumes the next step
+/// is `ratio` times the last one for ever, which the model never promised, and it exists so
+/// that a probe that does not settle can still say what it was heading for instead of only
+/// that it had not arrived.
+pub fn head_asymptote(records: &[IntervalRecord]) -> Option<(f64, f64)> {
+    let complete: Vec<&IntervalRecord> = records.iter().filter(|r| r.complete).collect();
+    if complete.len() < 3 {
+        return None;
+    }
+    let (a, b, c) = (
+        complete[complete.len() - 3],
+        complete[complete.len() - 2],
+        complete[complete.len() - 1],
+    );
+    let (d1, d2) = (b.head_delta, c.head_delta);
+    if d1 == 0.0 || d2 == 0.0 {
+        return None;
+    }
+    // Two estimates of the same ratio; the later pair is the one used, the earlier one only
+    // tells a reader whether the decay is itself steady.
+    let _earlier = d1 / a.head_delta;
+    let ratio = d2 / d1;
+    if !(ratio.is_finite() && ratio.abs() < 1.0) {
+        return None;
+    }
+    // h_inf = h_last + d2 * r / (1 - r): the sum of the remaining geometric steps.
+    Some((ratio, c.head_m + d2 * ratio / (1.0 - ratio)))
 }

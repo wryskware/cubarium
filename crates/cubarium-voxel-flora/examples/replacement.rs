@@ -117,6 +117,11 @@ fn study_outlet_m3_per_s() -> f64 {
 enum Mode {
     Full,
     Pilot,
+    /// **Conditioning only**: both phases, their records, the per-tolerance summary and the
+    /// verdicts, and then stop — no sites, no arms, no observation. The authorised probe of
+    /// 2026-09-18 is this mode: it asks whether and when this world settles, which is a
+    /// question about the conditioning and not about any species pair's G.
+    Condition,
 }
 
 impl Mode {
@@ -124,6 +129,7 @@ impl Mode {
         match self {
             Mode::Full => "control study (seven arms)",
             Mode::Pilot => "positive-control **pilot** (one arm, to measure G)",
+            Mode::Condition => "**conditioning probe** (both phases, no arm)",
         }
     }
 }
@@ -169,8 +175,16 @@ fn main() {
             return;
         }
     };
-    let Invocation { mode, resident, newcomer, conditioning_s, seed, noise_seed, cap_override } =
-        invocation;
+    let Invocation {
+        mode,
+        resident,
+        newcomer,
+        conditioning_s,
+        seed,
+        noise_seed,
+        cap_override,
+        phase_a_s,
+    } = invocation;
 
     if resident == newcomer {
         println!(
@@ -289,8 +303,9 @@ fn main() {
         100.0 * window / bound,
         100.0 * window / pair
     );
-    if window <= bound {
+    if window <= bound && mode != Mode::Condition {
         match mode {
+            Mode::Condition => unreachable!("guarded above: a probe runs no arm"),
             Mode::Full => {
                 println!(
                     "\nREFUSED: the stopping budget {window:.0} s is **at or below {}'s own \
@@ -314,7 +329,8 @@ fn main() {
     }
 
     // ----------------------------------------------------------- the conditioned state
-    let Some(conditioned) = condition(&config, resident, newcomer, conditioning_s, seed, noise_seed)
+    let Some(conditioned) =
+        condition(&config, resident, newcomer, conditioning_s, phase_a_s, seed, noise_seed)
     else {
         return;
     };
@@ -322,6 +338,9 @@ fn main() {
     // pilot may run on it, loudly, because a pilot is measuring G and is not a comparison.
     if let Some(why) = &conditioned.unresolved {
         match mode {
+            // A probe's whole subject is the conditioning: an unresolved verdict is its
+            // result, not a reason to stop early, and it has already been printed in full.
+            Mode::Condition => {}
             Mode::Full => {
                 println!(
                     "\nREFUSED: {why}\nThe arms of a control study are matched *and* settled or \
@@ -336,6 +355,17 @@ fn main() {
                  it is not a control measurement (R10.2)."
             ),
         }
+    }
+
+    if mode == Mode::Condition {
+        println!(
+            "\n=== conditioning probe: done ===\nNo introduction site was chosen and no arm was \
+             run. What this probe reports is above: the two phases' interval records, which \
+             tolerance was first met on which interval, and what the head was heading for. It \
+             says nothing about either species' G, and a settled verdict here would license a \
+             pilot rather than replace one."
+        );
+        return;
     }
 
     // ------------------------------------------------------------- the declared sites
@@ -360,6 +390,7 @@ fn main() {
          else."
     );
     let control = match mode {
+        Mode::Condition => unreachable!("a conditioning probe returned before the arms"),
         Mode::Pilot => {
             let site = &declared_sites[0];
             println!(
@@ -441,8 +472,9 @@ fn main() {
 
 // ============================================================ arguments
 
-const USAGE: &str = "usage: replacement [full|pilot] <resident> <newcomer> \
-                     [conditioning_budget_s] [seed] [noise_seed] [--cap <seconds>]";
+const USAGE: &str = "usage: replacement [full|pilot|condition] <resident> <newcomer> \
+                     [conditioning_budget_s] [seed] [noise_seed] [--cap <seconds>] \
+                     [--phase-a <seconds>]";
 
 /// Everything one invocation says, parsed once.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -454,6 +486,11 @@ struct Invocation {
     seed: u64,
     noise_seed: u64,
     cap_override: Option<f64>,
+    /// `--phase-a <seconds>`: how much of the conditioning budget phase A may spend, given
+    /// **in seconds** instead of through [`HYDROLOGY_SHARE`]. The placeholder stays what it
+    /// is; this says "this probe gives the hydrology 4,000 s of its 6,000", which is a
+    /// declared condition of that probe and is printed with it.
+    phase_a_s: Option<f64>,
 }
 
 /// The command line, as one fallible function of the argument vector — which is what makes
@@ -473,6 +510,7 @@ struct Invocation {
 fn parse(argv: &[String]) -> Result<Invocation, String> {
     let mut positional: Vec<&str> = Vec::new();
     let mut cap_override: Option<f64> = None;
+    let mut phase_a_s: Option<f64> = None;
     let mut i = 0usize;
     while i < argv.len() {
         let token = argv[i].as_str();
@@ -494,8 +532,27 @@ fn parse(argv: &[String]) -> Result<Invocation, String> {
                 cap_override = Some(seconds);
                 i += 2; // the option **and** its value
             }
+            "--phase-a" => {
+                let value = argv.get(i + 1).ok_or_else(|| {
+                    "`--phase-a` wants a number of seconds after it".to_string()
+                })?;
+                let seconds: f64 = value
+                    .parse()
+                    .map_err(|_| format!("`--phase-a {value}` is not a number of seconds"))?;
+                if !seconds.is_finite() || seconds < 0.0 {
+                    return Err(format!(
+                        "`--phase-a {seconds}` is not a duration: it has to be a finite, \
+                         nonnegative number of seconds"
+                    ));
+                }
+                phase_a_s = Some(seconds);
+                i += 2;
+            }
             other if other.starts_with("--") => {
-                return Err(format!("unknown option {other:?}; the only one is `--cap <seconds>`"));
+                return Err(format!(
+                    "unknown option {other:?}; the two are `--cap <seconds>` and \
+                     `--phase-a <seconds>`"
+                ));
             }
             other => {
                 positional.push(other);
@@ -507,6 +564,7 @@ fn parse(argv: &[String]) -> Result<Invocation, String> {
     // `pilot` (or an explicit `full`) as the first word, before the two species.
     let (mode, positional) = match positional.first().copied() {
         Some("pilot") => (Mode::Pilot, &positional[1..]),
+        Some("condition") => (Mode::Condition, &positional[1..]),
         Some("full") => (Mode::Full, &positional[1..]),
         _ => (Mode::Full, &positional[..]),
     };
@@ -552,7 +610,24 @@ fn parse(argv: &[String]) -> Result<Invocation, String> {
         return Err(format!("{extra:?} is one argument too many"));
     }
 
-    Ok(Invocation { mode, resident, newcomer, conditioning_s, seed, noise_seed, cap_override })
+    if let Some(phase_a) = phase_a_s {
+        if phase_a > conditioning_s + 1e-9 {
+            return Err(format!(
+                "`--phase-a {phase_a}` is more than the whole conditioning budget \
+                 {conditioning_s}"
+            ));
+        }
+    }
+    Ok(Invocation {
+        mode,
+        resident,
+        newcomer,
+        conditioning_s,
+        seed,
+        noise_seed,
+        cap_override,
+        phase_a_s,
+    })
 }
 
 // ============================================================ the conditioned state
@@ -585,6 +660,7 @@ fn condition(
     resident: Species,
     newcomer: Species,
     budget_s: f64,
+    phase_a_s: Option<f64>,
     seed: u64,
     noise_seed: u64,
 ) -> Option<Conditioned> {
@@ -596,9 +672,13 @@ fn condition(
          and then the coupled setting with the resident in it. Elapsed time is not a \
          conditioned habitat (R10.2), so each phase ends when its tolerances hold — or the \
          budget expires and the run says **conditioning unresolved**. Phase A may spend at \
-         most {:.0} s of it (HYDROLOGY_SHARE, a placeholder), so that an unsettling hydrology \
-         cannot leave the resident unconditioned.",
-        budget_s * HYDROLOGY_SHARE
+         most {:.0} s of it ({}), so that an unsettling hydrology cannot leave the resident \
+         unconditioned.",
+        phase_a_s.unwrap_or(budget_s * HYDROLOGY_SHARE),
+        match phase_a_s {
+            Some(_) => "given with `--phase-a`, a declared condition of this run",
+            None => "HYDROLOGY_SHARE, a placeholder",
+        }
     );
     let outlet = study_outlet_m3_per_s();
     let mut world = prepared_world_with_outlet(seed, noise_seed, outlet);
@@ -635,12 +715,13 @@ fn condition(
     // later state offers bloomcrown more sites is **not** the reason — a convenient planting
     // moment is not a conditioned one, and early planting remains its own succession
     // experiment.
+    let phase_a_budget = phase_a_s.unwrap_or(budget_s * HYDROLOGY_SHARE);
     let (records_a, settle_a, spent_a) = settle_phase(
         &mut flora,
         &mut world,
         &skyline,
         &[resident, newcomer],
-        budget_s * HYDROLOGY_SHARE,
+        phase_a_budget,
         0.0,
         &tol,
         "A, the hydrology alone",
@@ -865,6 +946,39 @@ fn phase_verdict(
     settle: Settle,
     tol: &Tolerances,
 ) -> Option<String> {
+    // The per-tolerance summary, printed for every phase whatever its verdict: a phase settles
+    // only when all three hold **together** on consecutive intervals, and this says which of
+    // them got there and which is the one still failing.
+    for which in Which::ALL {
+        let line = match tol.first_met(which, records) {
+            Some((n, at)) => format!("first met on interval {n} (t {at:.0} s)"),
+            None => match tol.trend(which, records) {
+                Some((first, last)) if first.is_nan() || last.is_nan() => {
+                    "**never met** in this phase: no interval had a previous one to compare \
+                     its eligible sets with"
+                        .to_string()
+                }
+                Some((first, last)) => format!(
+                    "**never met** in this phase: {first:.6} on the first complete interval, \
+                     {last:.6} on the last"
+                ),
+                None => "never met, and no complete interval ran".to_string(),
+            },
+        };
+        println!("  phase {label}, {} tolerance: {line}", which.name());
+    }
+    // Where the head was heading, when it was still moving. An extrapolation, labelled.
+    match head_asymptote(records) {
+        Some((ratio, limit)) => println!(
+            "  phase {label}, head: the last three intervals' steps decay by a factor {ratio:.4} \
+             each, which extrapolates to **{limit:.3} m** — a geometric extrapolation of three \
+             numbers and not a measurement",
+            ),
+        None => println!(
+            "  phase {label}, head: no geometric extrapolation (fewer than three complete \
+             intervals, or the steps are not decaying)"
+        ),
+    }
     match settle {
         Settle::Settled { at_s } => {
             println!(
