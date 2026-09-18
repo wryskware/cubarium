@@ -293,6 +293,25 @@ fn main() {
     else {
         return;
     };
+    // R10.2: an unresolved conditioning is not a conditioned state. A control refuses on it; a
+    // pilot may run on it, loudly, because a pilot is measuring G and is not a comparison.
+    if let Some(why) = &conditioned.unresolved {
+        match mode {
+            Mode::Full => {
+                println!(
+                    "\nREFUSED: {why}\nThe arms of a control study are matched *and* settled or \
+                     they are not a control, so none were run. Raise the conditioning budget, or \
+                     run `replacement pilot …` and read its arm for what it is."
+                );
+                return;
+            }
+            Mode::Pilot => println!(
+                "\nthe pilot runs on an **unresolved conditioning**, stamped here and in its own \
+                 verdict: whatever G it measures belongs to a setting that was still moving, and \
+                 it is not a control measurement (R10.2)."
+            ),
+        }
+    }
 
     // ------------------------------------------------------------- the declared sites
     let declared_sites = predeclare_sites(&conditioned, newcomer);
@@ -433,31 +452,65 @@ struct Conditioned {
     resident_alive: usize,
     /// The background canopy this study declared, if the resident's habitat needed one.
     background: Option<(Species, usize)>,
+    /// `Some` when a conditioning phase's budget expired before its tolerances held: the
+    /// printed **conditioning unresolved** text. A control must refuse on it; a pilot may
+    /// run on it and says so (R10.2).
+    unresolved: Option<String>,
 }
 
-/// Condition the hydrology and the resident, and refuse rather than hand back a state no arm
-/// can be read from: `None` is a printed refusal.
+/// Condition the **hydrology first**, then the resident, and check the coupled setting again
+/// before handing anything back — Astra's R10.2. `None` is a printed refusal; a state that
+/// comes back with `unresolved` set is one the caller must refuse for a control.
 fn condition(
     config: &FloraConfig,
     resident: Species,
     newcomer: Species,
-    seconds: f64,
+    budget_s: f64,
     seed: u64,
     noise_seed: u64,
 ) -> Option<Conditioned> {
+    let tol = Tolerances::default();
     println!("\n=== conditioning ===");
+    println!("  {}", tol.line());
+    println!(
+        "  conditioning **budget** {budget_s:.0} s, spent in two phases: the hydrology alone, \
+         and then the coupled setting with the resident in it. Elapsed time is not a \
+         conditioned habitat (R10.2), so each phase ends when its tolerances hold — or the \
+         budget expires and the run says **conditioning unresolved**."
+    );
     let mut world = prepared_world(seed, noise_seed);
     let skyline = skyline_of(&world);
     let mut flora = Flora::in_world(&world, config.clone());
     println!(
-        "{} skyline columns; {} support faces provisioned with {} of mineral each at creation, \
-         booked once as seeded_mineral_in {:.1} — a **fixed per-site inventory**, so no arm can \
-         import mineral by colonising further (R5.4)",
+        "  {} skyline columns; {} support faces provisioned with {} of mineral each at \
+         creation, booked once as seeded_mineral_in {:.1} — a **fixed per-site inventory**, so \
+         no arm can import mineral by colonising further (R5.4)",
         skyline.len(),
         flora.view().ground.len(),
         config.initial_mineral,
         flora.view().ledger.seeded_mineral_in
     );
+
+    // ---- phase A: the hydrology alone, **before any founder is selected**.
+    //
+    // The plant layer is stepped throughout and simply has nothing in it yet, so the phase
+    // order and the tick clock are the same ones a planted run walks. Founder selection reads
+    // the gates, the gates read the water, and the water is still moving: selecting first was
+    // the R10.2 defect, and the fix is to settle first and select from what settled. That the
+    // later state offers bloomcrown more sites is **not** the reason — a convenient planting
+    // moment is not a conditioned one, and early planting remains its own succession
+    // experiment.
+    let (records_a, settle_a, spent_a) = settle_phase(
+        &mut flora,
+        &mut world,
+        &skyline,
+        &[resident, newcomer],
+        budget_s,
+        0.0,
+        &tol,
+        "A, the hydrology alone",
+    );
+    let mut unresolved = phase_verdict("A, the hydrology alone", &records_a, settle_a, &tol);
 
     // ---- the declared background canopy, if the resident's own habitat needs one.
     //
@@ -497,38 +550,31 @@ fn condition(
         None
     };
 
-    // ---- the resident cohort, on its own contract habitat.
+    // ---- the resident cohort, selected from the state phase A left.
     let resident_planted = plant_cohort(&mut flora, &world, &skyline, resident, "resident");
     if let Some(why) = refusal(resident, resident_planted, resident_planted, skyline.len()) {
         println!("\n{why}");
         return None;
     }
 
-    // ---- the conditioning run, with the water budget and the eligible sets per interval.
-    let mut mark = water_mark(&world, 0.0);
-    let start = mark;
-    let mut elapsed = 0.0;
-    println!("\nconditioning run ({seconds:.0} s), reported every {INTERVAL_S:.0} s:");
-    while elapsed < seconds - 1e-9 {
-        let chunk = INTERVAL_S.min(seconds - elapsed);
-        step_coupled(&mut flora, &mut world, chunk);
-        elapsed += chunk;
-        let now = water_mark(&world, elapsed);
-        println!("  t {elapsed:>7.0} s: {}", water_budget_line(&mark, &now));
-        println!(
-            "  t {elapsed:>7.0} s: {} stands {}, eligible columns {} / {}; {} eligible columns \
-             {} — interval storage, habitat and head, not only head (R5.4)",
-            resident.name(),
-            count(&flora, resident),
-            eligible_count(&world, &flora, &skyline, resident),
-            skyline.len(),
-            newcomer.name(),
-            eligible_count(&world, &flora, &skyline, newcomer)
-        );
-        mark = now;
-    }
-    let end = water_mark(&world, elapsed);
-    println!("  whole run: {}", water_budget_line(&start, &end));
+    // ---- phase B: the coupled setting, with the resident in it and perturbing it.
+    let (records_b, settle_b, spent_b) = settle_phase(
+        &mut flora,
+        &mut world,
+        &skyline,
+        &[resident, newcomer],
+        budget_s,
+        spent_a,
+        &tol,
+        "B, the coupled setting with the resident",
+    );
+    let verdict_b =
+        phase_verdict("B, the coupled setting with the resident", &records_b, settle_b, &tol);
+    unresolved = unresolved.or(verdict_b);
+    println!(
+        "  conditioning spent {:.0} s of its {budget_s:.0} s budget over the two phases",
+        spent_a + spent_b
+    );
 
     let resident_alive = count(&flora, resident);
     let (banks, banked) = banked(&flora, resident);
@@ -558,7 +604,137 @@ fn condition(
         resident_planted,
         resident_alive,
         background,
+        unresolved,
     })
+}
+
+/// One conditioning phase: step in [`INTERVAL_S`] intervals, record what each one read, print
+/// it, and stop when the tolerances hold on `tol.intervals` consecutive intervals or the
+/// budget runs out. Returns the records, the verdict and the seconds this phase spent.
+///
+/// `already_spent` is what the earlier phase took out of the same budget, so the two phases
+/// share one finite budget rather than each getting its own.
+#[allow(clippy::too_many_arguments)]
+fn settle_phase(
+    flora: &mut Flora,
+    world: &mut World,
+    skyline: &[Site],
+    species: &[Species],
+    budget_s: f64,
+    already_spent: f64,
+    tol: &Tolerances,
+    label: &str,
+) -> (Vec<IntervalRecord>, Settle, f64) {
+    println!("\nphase {label}, reported every {INTERVAL_S:.0} s:");
+    let remaining = (budget_s - already_spent).max(0.0);
+    if remaining <= 0.0 {
+        println!("  the conditioning budget was already spent before this phase began");
+        return (Vec::new(), Settle::Expired, 0.0);
+    }
+    let mut records: Vec<IntervalRecord> = Vec::new();
+    let mut previous: Vec<Vec<Site>> =
+        species.iter().map(|&s| eligible_sites(world, flora, skyline, s)).collect();
+    let mut mark = water_mark(world, 0.0);
+    let start = mark;
+    let mut spent = 0.0;
+    let mut verdict = Settle::Running;
+    while spent < remaining - 1e-9 {
+        let chunk = INTERVAL_S.min(remaining - spent);
+        step_coupled(flora, world, chunk);
+        spent += chunk;
+        let now = water_mark(world, spent);
+        let dt = (now.seconds - mark.seconds).max(1e-12);
+        let sets: Vec<Vec<Site>> =
+            species.iter().map(|&s| eligible_sites(world, flora, skyline, s)).collect();
+        let record = IntervalRecord {
+            seconds: spent,
+            rain_rate: (now.rain_in - mark.rain_in) / dt,
+            storage_rate: (now.stored - mark.stored) / dt,
+            head_m: now.head_m,
+            head_delta: now.head_m - mark.head_m,
+            eligible: sets.iter().map(|s| s.len()).collect(),
+            turnover: sets
+                .iter()
+                .zip(previous.iter())
+                .map(|(now, before)| {
+                    if records.is_empty() { None } else { Some(turnover_of(before, now)) }
+                })
+                .collect(),
+        };
+        // The next interval's turnover is measured against **this** interval's sets, not
+        // against the phase's first ones: a set that drifts a little every interval is not a
+        // stationary one, and comparing everything with the start would call it stationary
+        // once it stopped moving relative to a state it had long left.
+        previous = sets;
+        println!("  t {spent:>7.0} s: {}", water_budget_line(&mark, &now));
+        let habitat: Vec<String> = species
+            .iter()
+            .zip(record.eligible.iter())
+            .zip(record.turnover.iter())
+            .map(|((s, n), t)| {
+                format!(
+                    "{} {n}/{}{}",
+                    s.name(),
+                    skyline.len(),
+                    match t {
+                        Some(t) => format!(" (turnover {:.1} %)", 100.0 * t),
+                        None => String::new(),
+                    }
+                )
+            })
+            .collect();
+        println!(
+            "  t {spent:>7.0} s: stands {}; eligible columns {} — {}",
+            flora.view().stands.len(),
+            habitat.join(", "),
+            tol.why(&record)
+        );
+        records.push(record);
+        mark = now;
+        verdict = conditioning_verdict(&records, tol, remaining);
+        if verdict != Settle::Running {
+            break;
+        }
+    }
+    println!("  phase {label}, whole phase: {}", water_budget_line(&start, &mark));
+    (records, verdict, spent)
+}
+
+/// One phase's verdict, printed. `Some(text)` is the **conditioning unresolved** line the
+/// caller has to refuse a control on; `None` means the phase settled.
+fn phase_verdict(
+    label: &str,
+    records: &[IntervalRecord],
+    settle: Settle,
+    tol: &Tolerances,
+) -> Option<String> {
+    match settle {
+        Settle::Settled { at_s } => {
+            println!(
+                "  phase {label}: **settled** at t {at_s:.0} s — the tolerances held on {} \
+                 consecutive intervals",
+                tol.intervals
+            );
+            None
+        }
+        Settle::Running | Settle::Expired => {
+            let last = records
+                .last()
+                .map(|r| tol.why(r))
+                .unwrap_or_else(|| "no interval ran at all".to_string());
+            let text = format!(
+                "**CONDITIONING UNRESOLVED** in phase {label}: the budget ran out after {} \
+                 interval(s) and the tolerances never held on {} consecutive ones. The last \
+                 interval: {last}. This is not a conditioned habitat, and a longer fixed \
+                 duration is not the answer to it (R10.2) — a species with no settled niche \
+                 refusing is evidence, not a reason to loosen a gate.",
+                records.len(),
+                tol.intervals
+            );
+            println!("  {text}");
+            Some(text)
+        }
+    }
 }
 
 /// **The refusal a conditioned state earns, if it earns one** — the R7.2 rule, as one
@@ -1619,6 +1795,7 @@ mod tests {
             resident_planted: planted,
             resident_alive: count(&flora, Species::Bloomcrown),
             background: None,
+            unresolved: None,
         };
         let declared: Vec<Site> =
             predeclare_sites(&c, Species::Umbrellafrond).into_iter().map(|s| s.site).collect();
@@ -1641,6 +1818,7 @@ mod tests {
             resident_planted: planted,
             resident_alive: 0,
             background: None,
+            unresolved: None,
         };
         let rederived: Vec<Site> = predeclare_sites(&arm_state, Species::Umbrellafrond)
             .into_iter()
