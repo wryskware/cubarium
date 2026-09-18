@@ -1747,3 +1747,29 @@ placeholders is a reasonable value — nothing here measured any of them, and no
 depends on one. The other direction of this pair (umbrellafrond resident, bloomcrown newcomer)
 was **not run**: it is the same command with the two species exchanged, and coexistence
 evidence needs both directions.
+
+### After Astra round 10 (R10.1–R10.4) — 2026-09-17
+
+The harness changed under the four round-10 items and was re-smoked **short**, as a pilot:
+`replacement pilot bloomcrown umbrellafrond 600 1 101 --cap 60` in `--release`, **135.6 s** of
+wall time (12,000 conditioning ticks in two phases, then 1,200 ticks of one arm in 11.4 s). No
+long run was made and the tables above are unchanged; this is what the repaired harness now
+prints.
+
+| what | before round 10 | now |
+| --- | --- | --- |
+| the observable window | published cap **3,008.15 s** (a newborn's clock) | earliest-possible **bound 3,308.30 s** = fund 6,001 t + germinate 1 t + grow 54,163 t + refund 6,001 t; stonecushion **9,247.40 s** |
+| the budget | the cap, doubling as a sufficient window | a separate **stopping budget**; a `full` study at or below the bound is **refused** and pointed at `pilot` |
+| conditioning | a fixed 1,000 s, then accept | two phases against one budget (half to the hydrology), tolerances **5 % of rain / 0.001 m / 2 % turnover on 2 intervals** |
+| phase A (hydrology alone, 300 s) | — | **unresolved**: storage −0.0116 m³/s = **30 % of rain** every interval, head −0.059 m per interval, umbrellafrond turnover 9.1 % |
+| phase B (with the resident, 300 s) | — | **unresolved**: storage 30 % of rain, head −0.054 m, turnover bloomcrown 13.3 %, umbrellafrond **26.4 %** |
+| the arm (60 s) | — | founder funded 0.01000 in 1,200 ticks, **0 deliveries, 0 births** → *unresolved at the stopping budget (1.8 % of the bound)* |
+| delivery destinations | the largest bank increase, shared by every donor that tick | the model's own `DeliveryReceipt { donor, recipient, organic, mineral }` |
+| `--cap 300` after three positionals | also set the **world seed** to 300 | consumed with its value; seed stays 1 |
+
+The substantive finding is the conditioning one: on the published conditions this world **does
+not settle**. The outlet exports 0.050 m³/s against 0.0384 m³/s of accepted rain, so storage
+falls at a constant −0.0116 m³/s and the head drops ~0.06 m per 100 s throughout — and the
+eligible sets move with it, umbrellafrond's by a quarter of its union in one interval while
+bloomcrown's shrinks. A fixed 1,000 s of "conditioning" was measuring the middle of that
+drainage. No tolerance was loosened and no gate was touched to make it pass (R10.2).

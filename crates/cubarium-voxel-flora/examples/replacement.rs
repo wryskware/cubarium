@@ -4,8 +4,13 @@
 //!
 //! ```text
 //! cargo run --release -p cubarium-voxel-flora --example replacement -- \
-//!     <resident> <newcomer> [conditioning_s] [seed] [noise_seed] [--cap seconds]
+//!     [full|pilot] <resident> <newcomer> [conditioning_budget_s] [seed] [noise_seed] \
+//!     [--cap <seconds>]
 //! ```
+//!
+//! `--cap` **consumes its own value**, so shortening a run cannot change its seeds (R10.4),
+//! and a duration that is negative, non-finite or unparseable is a printed refusal rather than
+//! a silent default.
 //!
 //! Astra designed this study in R5.4 and corrected it in R7.2
 //! (`design/7_Research/astra-voxel-first-wave-review-2026-09-16.md`); the brief that
@@ -82,6 +87,13 @@ const MAX_EVENTS: usize = 60;
 /// can only be chosen after a pilot has measured one.
 const DEFAULT_BUDGET_FACTOR: f64 = 1.5;
 
+/// The share of the conditioning budget phase A — the hydrology alone — may spend before
+/// phase B gets the rest. **A named placeholder.** One budget covers both phases, and without
+/// a split a hydrology that never settles would spend all of it and leave the resident
+/// unconditioned: half each keeps both phases' verdicts readable, and the total stays finite
+/// (R10.2).
+const HYDROLOGY_SHARE: f64 = 0.5;
+
 /// What a run is for. `full` is the seven-arm study; `pilot` is R10.1's **positive-control
 /// pilot**, one arm whose job is to measure `G`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -132,33 +144,16 @@ impl Budget {
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let flags: Vec<&String> = args.iter().filter(|a| a.starts_with("--")).collect();
-    let positional: Vec<String> =
-        args.iter().filter(|a| !a.starts_with("--")).cloned().collect();
-
-    // `pilot` as the first word, before the two species: R10.1's positive-control pilot,
-    // which measures G instead of spending seven arms at a budget that cannot resolve one.
-    let (mode, positional) = match positional.first().map(String::as_str) {
-        Some("pilot") => (Mode::Pilot, positional[1..].to_vec()),
-        Some("full") => (Mode::Full, positional[1..].to_vec()),
-        _ => (Mode::Full, positional),
-    };
-    let resident = species_arg(&positional, 0);
-    let newcomer = species_arg(&positional, 1);
-    let conditioning_s: f64 = arg(&positional, 2).unwrap_or(1_000.0);
-    let seed: u64 = arg(&positional, 3).unwrap_or(1);
-    let noise_seed: u64 = arg(&positional, 4).unwrap_or(101);
-    let mut cap_override: Option<f64> = None;
-    for (i, flag) in args.iter().enumerate() {
-        if flag == "--cap" {
-            cap_override = args.get(i + 1).and_then(|s| s.parse().ok());
-            assert!(cap_override.is_some(), "`--cap` wants a number of seconds after it");
-        } else if flag.starts_with("--") && flag != "--cap" {
-            panic!("unknown flag {flag:?}; the only one is `--cap <seconds>`");
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let invocation = match parse(&argv) {
+        Ok(invocation) => invocation,
+        Err(why) => {
+            println!("REFUSED: {why}\n{USAGE}");
+            return;
         }
-    }
-    let _ = flags;
+    };
+    let Invocation { mode, resident, newcomer, conditioning_s, seed, noise_seed, cap_override } =
+        invocation;
 
     if resident == newcomer {
         println!(
@@ -416,24 +411,118 @@ fn main() {
 
 // ============================================================ arguments
 
-fn arg<T: std::str::FromStr>(args: &[String], i: usize) -> Option<T> {
-    args.get(i).and_then(|s| s.parse().ok())
+const USAGE: &str = "usage: replacement [full|pilot] <resident> <newcomer> \
+                     [conditioning_budget_s] [seed] [noise_seed] [--cap <seconds>]";
+
+/// Everything one invocation says, parsed once.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Invocation {
+    mode: Mode,
+    resident: Species,
+    newcomer: Species,
+    conditioning_s: f64,
+    seed: u64,
+    noise_seed: u64,
+    cap_override: Option<f64>,
 }
 
-/// A species named on the command line, through the model's own `Species::parse`. There is
-/// no default: a replacement control is about two named species and a silent fallback would
-/// make a run mean something other than what it was asked for.
-fn species_arg(args: &[String], i: usize) -> Species {
-    let names: Vec<&str> = Species::ALL.iter().map(|s| s.name()).collect();
-    match args.get(i) {
-        None => panic!(
-            "replacement <resident> <newcomer> [conditioning_s] [seed] [noise_seed] [--cap s]; \
-             the species are {}",
-            names.join(", ")
-        ),
-        Some(name) => Species::parse(name)
-            .unwrap_or_else(|| panic!("unknown species {name:?}; the six are {}", names.join(", "))),
+/// The command line, as one fallible function of the argument vector — which is what makes
+/// R10.4's cases testable.
+///
+/// **An option consumes its own value.** The old parser filtered `--`-prefixed tokens out of
+/// the positional list and left the *value* in it, so `replacement bloomcrown umbrellafrond
+/// 1000 --cap 300` read 300 as the **world seed** and quietly ran a different world from the
+/// one the reader thinks was shortened (Astra R10.4). Shortening a run must not change its
+/// experimental keys.
+///
+/// Two more silent fallbacks are refused here rather than defaulted: a positional that is not
+/// a number at all, and a duration that is negative or not finite. A `--cap 0` is refused too
+/// — an arm that runs no ticks is not an arm — while a **zero conditioning budget is
+/// allowed**, because it is a legitimate way to ask what an unconditioned state looks like and
+/// it reports "conditioning unresolved" like any other expiry.
+fn parse(argv: &[String]) -> Result<Invocation, String> {
+    let mut positional: Vec<&str> = Vec::new();
+    let mut cap_override: Option<f64> = None;
+    let mut i = 0usize;
+    while i < argv.len() {
+        let token = argv[i].as_str();
+        match token {
+            "--cap" => {
+                let value = argv
+                    .get(i + 1)
+                    .ok_or_else(|| "`--cap` wants a number of seconds after it".to_string())?;
+                let seconds: f64 = value
+                    .parse()
+                    .map_err(|_| format!("`--cap {value}` is not a number of seconds"))?;
+                if !seconds.is_finite() || seconds <= 0.0 {
+                    return Err(format!(
+                        "`--cap {seconds}` is not a duration: a stopping budget has to be a \
+                         finite, positive number of seconds, and an arm that runs no ticks is \
+                         not an arm"
+                    ));
+                }
+                cap_override = Some(seconds);
+                i += 2; // the option **and** its value
+            }
+            other if other.starts_with("--") => {
+                return Err(format!("unknown option {other:?}; the only one is `--cap <seconds>`"));
+            }
+            other => {
+                positional.push(other);
+                i += 1;
+            }
+        }
     }
+
+    // `pilot` (or an explicit `full`) as the first word, before the two species.
+    let (mode, positional) = match positional.first().copied() {
+        Some("pilot") => (Mode::Pilot, &positional[1..]),
+        Some("full") => (Mode::Full, &positional[1..]),
+        _ => (Mode::Full, &positional[..]),
+    };
+
+    let species = |i: usize, role: &str| -> Result<Species, String> {
+        let names: Vec<&str> = Species::ALL.iter().map(|s| s.name()).collect();
+        match positional.get(i) {
+            None => Err(format!("no {role} species was named; the six are {}", names.join(", "))),
+            Some(name) => Species::parse(name)
+                .ok_or_else(|| format!("unknown species {name:?}; the six are {}", names.join(", "))),
+        }
+    };
+    let resident = species(0, "resident")?;
+    let newcomer = species(1, "newcomer")?;
+
+    let number = |i: usize, what: &str| -> Result<Option<f64>, String> {
+        match positional.get(i) {
+            None => Ok(None),
+            Some(text) => text
+                .parse::<f64>()
+                .map(Some)
+                .map_err(|_| format!("{what} {text:?} is not a number")),
+        }
+    };
+    let conditioning_s = number(2, "the conditioning budget")?.unwrap_or(1_000.0);
+    if !conditioning_s.is_finite() || conditioning_s < 0.0 {
+        return Err(format!(
+            "a conditioning budget of {conditioning_s} is not a duration: it has to be a finite, \
+             nonnegative number of seconds"
+        ));
+    }
+    let integer = |i: usize, what: &str| -> Result<Option<u64>, String> {
+        match positional.get(i) {
+            None => Ok(None),
+            Some(text) => {
+                text.parse::<u64>().map(Some).map_err(|_| format!("{what} {text:?} is not a seed"))
+            }
+        }
+    };
+    let seed = integer(3, "the world seed")?.unwrap_or(1);
+    let noise_seed = integer(4, "the noise seed")?.unwrap_or(101);
+    if let Some(extra) = positional.get(5) {
+        return Err(format!("{extra:?} is one argument too many"));
+    }
+
+    Ok(Invocation { mode, resident, newcomer, conditioning_s, seed, noise_seed, cap_override })
 }
 
 // ============================================================ the conditioned state
@@ -476,7 +565,10 @@ fn condition(
         "  conditioning **budget** {budget_s:.0} s, spent in two phases: the hydrology alone, \
          and then the coupled setting with the resident in it. Elapsed time is not a \
          conditioned habitat (R10.2), so each phase ends when its tolerances hold — or the \
-         budget expires and the run says **conditioning unresolved**."
+         budget expires and the run says **conditioning unresolved**. Phase A may spend at \
+         most {:.0} s of it (HYDROLOGY_SHARE, a placeholder), so that an unsettling hydrology \
+         cannot leave the resident unconditioned.",
+        budget_s * HYDROLOGY_SHARE
     );
     let mut world = prepared_world(seed, noise_seed);
     let skyline = skyline_of(&world);
@@ -505,7 +597,7 @@ fn condition(
         &mut world,
         &skyline,
         &[resident, newcomer],
-        budget_s,
+        budget_s * HYDROLOGY_SHARE,
         0.0,
         &tol,
         "A, the hydrology alone",
@@ -1747,6 +1839,75 @@ mod tests {
         );
         // This is the condition `condition` refuses on: planted > 0 and alive == 0.
         assert!(planted > 0 && count(&flora, Species::Bloomcrown) == 0);
+    }
+
+    /// **An option consumes its own value** (Astra R10.4). This is the case that made the
+    /// item: `--cap 300` at the end of a three-positional command used to leave `300` in the
+    /// positional list, where it became the **world seed** — so the shortened run was a
+    /// different world from the one it claimed to shorten.
+    #[test]
+    fn a_cap_value_never_becomes_the_world_seed() {
+        let argv = |s: &str| -> Vec<String> { s.split(' ').map(String::from).collect() };
+
+        let shortened = parse(&argv("bloomcrown umbrellafrond 1000 --cap 300")).expect("parses");
+        assert_eq!(shortened.cap_override, Some(300.0));
+        assert_eq!(shortened.seed, 1, "the default seed, not the cap's value");
+        assert_eq!(shortened.noise_seed, 101);
+        assert_eq!(shortened.conditioning_s, 1_000.0);
+        assert_eq!(shortened.mode, Mode::Full);
+
+        // The published command supplies both seeds, and is unaffected either way.
+        let published =
+            parse(&argv("bloomcrown umbrellafrond 1000 1 101 --cap 300")).expect("parses");
+        assert_eq!((published.seed, published.noise_seed), (1, 101));
+        assert_eq!(published.cap_override, Some(300.0));
+
+        // Explicit seeds are kept, wherever the option sits.
+        let explicit = parse(&argv("bloomcrown umbrellafrond 500 7 11 --cap 60")).expect("parses");
+        assert_eq!((explicit.seed, explicit.noise_seed), (7, 11));
+        let leading = parse(&argv("--cap 60 bloomcrown umbrellafrond 500 7 11")).expect("parses");
+        assert_eq!(leading, explicit, "an option before the positionals is the same run");
+
+        // Omitted entirely: both seeds default and nothing is shifted.
+        let bare = parse(&argv("bloomcrown umbrellafrond")).expect("parses");
+        assert_eq!((bare.seed, bare.noise_seed, bare.cap_override), (1, 101, None));
+        assert_eq!(bare.conditioning_s, 1_000.0);
+
+        let pilot = parse(&argv("pilot bloomcrown umbrellafrond 400 2 3")).expect("parses");
+        assert_eq!(pilot.mode, Mode::Pilot);
+        assert_eq!((pilot.seed, pilot.noise_seed), (2, 3));
+        assert_eq!(pilot.resident, Species::Bloomcrown);
+        assert_eq!(pilot.newcomer, Species::Umbrellafrond);
+    }
+
+    /// **Durations that are not durations, and every other silent fallback, are refused.**
+    #[test]
+    fn a_bad_argument_is_a_refusal_and_never_a_default() {
+        let bad = |s: &str| -> String {
+            let argv: Vec<String> = s.split(' ').map(String::from).collect();
+            parse(&argv).expect_err(&format!("{s:?} must be refused"))
+        };
+
+        assert!(bad("bloomcrown umbrellafrond -5").contains("not a duration"));
+        assert!(bad("bloomcrown umbrellafrond nan").contains("not a duration"));
+        assert!(bad("bloomcrown umbrellafrond inf").contains("not a duration"));
+        assert!(bad("bloomcrown umbrellafrond soon").contains("not a number"));
+        assert!(bad("bloomcrown umbrellafrond 100 --cap -5").contains("not a duration"));
+        assert!(bad("bloomcrown umbrellafrond 100 --cap 0").contains("not an arm"));
+        assert!(bad("bloomcrown umbrellafrond 100 --cap nan").contains("not a duration"));
+        assert!(bad("bloomcrown umbrellafrond 100 --cap soon").contains("not a number"));
+        assert!(bad("bloomcrown umbrellafrond 100 --cap").contains("wants a number"));
+        assert!(bad("bloomcrown umbrellafrond --seed 4").contains("unknown option"));
+        assert!(bad("bloomcrown gloomcrown").contains("unknown species"));
+        assert!(bad("bloomcrown").contains("no newcomer species"));
+        assert!(bad("pilot").contains("no resident species"));
+        assert!(bad("bloomcrown umbrellafrond 100 1 101 extra").contains("one argument too many"));
+
+        // A zero conditioning budget is **allowed**: it asks what an unconditioned state looks
+        // like, and it reports "conditioning unresolved" like any other expiry.
+        let argv: Vec<String> =
+            "bloomcrown umbrellafrond 0".split(' ').map(String::from).collect();
+        assert_eq!(parse(&argv).expect("parses").conditioning_s, 0.0);
     }
 
     /// **The two refusals, in the words they are printed in.** A resident that was never
