@@ -145,7 +145,7 @@ impl Phase {
 /// took.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Count {
-    /// Cells `fall` walked: the wet columns' cells, once per substep.
+    /// Wet cells `fall` visited after the bottom row, once per substep.
     FallCells,
     /// Wet cells `infiltrate` offered to the ground, once per substep.
     InfiltrateCells,
@@ -206,7 +206,7 @@ impl Count {
 
     pub fn name(self) -> &'static str {
         match self {
-            Count::FallCells => "fall: cells visited (wet columns)",
+            Count::FallCells => "fall: wet cells visited (snapshot)",
             Count::InfiltrateCells => "infiltrate: wet cells visited",
             Count::ExchangeWet => "exchange: wet cells offering water",
             Count::ExchangeColumns => "exchange: columns walked",

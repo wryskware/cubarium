@@ -449,25 +449,36 @@ pub fn evaporate(w: &mut World) {
 /// Every void cell hands what it can to the void cell below. Purely vertical, so no
 /// horizontal direction is picked; a column compacts by one cell per substep.
 ///
-/// Iterated over the **wet columns** and not the grid: a column is walked bottom-up the
-/// moment one of its wet cells is met, so the rule — and its bottom-up order, which is
-/// what makes a whole column shift down by one rather than only its floor cell — is
-/// exactly what it was, over 2e3 columns instead of 147e3 cells
-/// (`design/7_Research/voxel-tick-profile-2026-09-18.md`).
+/// Iterated over a **snapshot of the wet cells taken at the start of this call**, ordered
+/// bottom-up, instead of walking every wet column through its full height. Ascending world
+/// index is bottom-up: `y` is the outer index, so every row is visited before the row above
+/// it, and within one column the lower cell is always met first. The snapshot is what keeps
+/// the rule: a cell wetted by a transfer from the cell above it is **not** in the snapshot,
+/// so it does not carry that arrival farther down in the same call, while a wet cell above
+/// still gets its own turn later and makes room. Copying and sorting the snapshot is measured
+/// as part of the phase, and is the cost the column walk did not have
+/// (`design/handoffs/voxel-sparse-fall-2026-09-18.md`).
 pub fn fall(w: &mut World) {
     crate::voxel_phase!(Fall, {
-        let c = w.config.clone();
-        let plane = c.width as usize * c.depth as usize;
-        let columns = wet_columns(w, plane);
-        #[cfg(feature = "profile")]
-        crate::profile::add(
-            crate::profile::Count::FallCells,
-            columns.len() as u64 * u64::from(c.height.saturating_sub(1)),
-        );
-        for col in columns {
-            for y in 1..c.height {
-                let i = y as usize * plane + col;
-                if w.free[i] <= 0.0 || w.material[i].is_solid() {
+        let plane = w.config.width as usize * w.config.depth as usize;
+        SCRATCH.with(|slot| {
+            let sc = &mut *slot.borrow_mut();
+            sc.fall.clear();
+            sc.fall.extend_from_slice(w.wet.cells());
+            sc.fall.sort_unstable();
+            #[cfg(feature = "profile")]
+            let mut visited = 0u64;
+            for &i in &sc.fall {
+                // The bottom row has nowhere to fall to; it is in the snapshot only because
+                // the snapshot is the whole wet set.
+                if i < plane || w.material[i].is_solid() {
+                    continue;
+                }
+                #[cfg(feature = "profile")]
+                {
+                    visited += 1;
+                }
+                if w.free[i] <= 0.0 {
                     continue;
                 }
                 let below = i - plane;
@@ -476,29 +487,10 @@ pub fn fall(w: &mut World) {
                     transfer(w, (i, Store::Free), (below, Store::Free), want);
                 }
             }
-        }
+            #[cfg(feature = "profile")]
+            crate::profile::add(crate::profile::Count::FallCells, visited);
+        });
     });
-}
-
-/// The columns holding free water, deduplicated, in the order the wet set holds them.
-/// Collected into a fresh `Vec` because the caller then writes the water arrays; the
-/// dedup array itself is the reused scratch.
-fn wet_columns(w: &World, plane: usize) -> Vec<usize> {
-    SCRATCH.with(|slot| {
-        let sc = &mut *slot.borrow_mut();
-        sc.ensure(w.config.cells(), plane);
-        sc.next_stamp();
-        let stamp = sc.stamp;
-        let mut out = Vec::with_capacity(sc.columns.len().max(64));
-        for &i in w.wet.cells() {
-            let col = i % plane;
-            if sc.col_stamp[col] != stamp {
-                sc.col_stamp[col] = stamp;
-                out.push(col);
-            }
-        }
-        out
-    })
 }
 
 /// Whether the centre of row `y` lies at or below the water table `table`, in metres
@@ -660,6 +652,10 @@ struct Scratch {
     /// The wet cells at the start of the substep, copied so the sets may be edited while
     /// the flux is applied.
     active: Vec<usize>,
+    /// The wet cells at the start of a [`fall`] call, sorted bottom-up by world index and
+    /// reused across substeps and ticks so the phase allocates nothing. `fall` and
+    /// `exchange` never overlap, so they share this one scratch.
+    fall: Vec<usize>,
     /// The **full** cells of the active set: the submerged ones, which are the only cells
     /// that carry another column's head and the only ones that can push straight up.
     full: Vec<usize>,
@@ -1582,4 +1578,185 @@ fn spill_to_nearest_void(w: &mut World, from: usize, volume_m3: f64) -> f64 {
         shell = next;
     }
     placed
+}
+
+/// Tiny function fixtures for [`fall`] alone: the sparse snapshot must move water exactly
+/// as the wet-column walk did, one cell per call, and keep the wet set honest. In-module so
+/// the private `wet` set can be checked directly
+/// (`design/handoffs/voxel-sparse-fall-2026-09-18.md`).
+#[cfg(test)]
+mod fall_tests {
+    use super::fall;
+    use crate::{Command, Config, Material, World};
+
+    /// A one-column world of air over the default bedrock floor, so the floor itself is
+    /// the solid boundary unless a fixture clears it.
+    fn fixture(height: u32) -> World {
+        World::empty(Config {
+            width: 1,
+            height,
+            depth: 1,
+            voxel_m: 1.0,
+            seed: 7,
+            ..Config::default()
+        })
+    }
+
+    fn add(w: &mut World, x: i64, y: u32, volume_m3: f64) -> f64 {
+        w.apply(Command::AddWater {
+            x,
+            y,
+            z: 0,
+            volume_m3,
+        })
+    }
+
+    fn free_at(w: &World, x: i64, y: u32) -> f64 {
+        w.view().free_at(x, y, 0)
+    }
+
+    fn residual(w: &World) -> f64 {
+        w.view().stored_m3() - w.view().ledger.expected_stored()
+    }
+
+    /// The wet set is exactly the cells the arrays say hold free water: no stale member
+    /// left by a transfer that emptied a cell, none missing after one filled it.
+    fn assert_wet_set_is_true(w: &World) {
+        let n = w.config.cells();
+        let mut member = vec![false; n];
+        for &i in w.wet.cells() {
+            member[i] = true;
+        }
+        for (i, (&member, &free)) in member.iter().zip(w.free.iter()).enumerate() {
+            assert_eq!(
+                member,
+                free > 0.0,
+                "wet-set membership disagrees with free water at cell {i} (free {free})"
+            );
+        }
+    }
+
+    /// A falling droplet: one call moves it exactly one cell, not to the floor.
+    #[test]
+    fn fall_moves_a_droplet_one_cell() {
+        let mut w = fixture(5);
+        add(&mut w, 0, 3, 1.0);
+        fall(&mut w);
+        assert_eq!(free_at(&w, 0, 2), 1.0);
+        assert_eq!(free_at(&w, 0, 1), 0.0, "the arrival fell a second cell");
+        assert!(residual(&w).abs() < 1e-12);
+        assert_wet_set_is_true(&w);
+    }
+
+    /// A stacked wet column shifts down by one cell, which needs the bottom-up visit:
+    /// each cell meets the space the cell below just vacated.
+    #[test]
+    fn fall_shifts_a_stacked_column_one_cell() {
+        let mut w = fixture(6);
+        // Clear the bedrock floor so the column has somewhere to go.
+        w.apply(Command::SetMaterial {
+            x: 0,
+            y: 0,
+            z: 0,
+            material: Material::Air,
+        });
+        for y in 1..=3 {
+            add(&mut w, 0, y, 1.0);
+        }
+        fall(&mut w);
+        for y in 0..=2 {
+            assert_eq!(free_at(&w, 0, y), 1.0, "floor of the shift at {y}");
+        }
+        for y in 3..6 {
+            assert_eq!(free_at(&w, 0, y), 0.0, "left behind at {y}");
+        }
+        assert!(residual(&w).abs() < 1e-12);
+        assert_wet_set_is_true(&w);
+    }
+
+    /// A partly full receiver on the solid floor takes only its room; the donor keeps the
+    /// rest and does not overfill it.
+    #[test]
+    fn fall_fills_a_partly_full_receiver_only_to_its_room() {
+        let mut w = fixture(5);
+        add(&mut w, 0, 1, 0.5); // receiver on the bedrock floor, half full
+        add(&mut w, 0, 2, 1.0); // donor directly above
+        fall(&mut w);
+        assert!((free_at(&w, 0, 1) - 1.0).abs() < 1e-12, "receiver");
+        assert!((free_at(&w, 0, 2) - 0.5).abs() < 1e-12, "donor");
+        assert!(free_at(&w, 0, 0) == 0.0, "water entered the bedrock");
+        assert!(residual(&w).abs() < 1e-12);
+        assert_wet_set_is_true(&w);
+    }
+
+    /// A solid floor refuses the transfer and the water stays put.
+    #[test]
+    fn fall_stops_on_a_solid_floor() {
+        let mut w = fixture(4);
+        add(&mut w, 0, 1, 1.0);
+        fall(&mut w);
+        assert_eq!(free_at(&w, 0, 1), 1.0);
+        assert_eq!(free_at(&w, 0, 0), 0.0);
+        assert!(residual(&w).abs() < 1e-12);
+        assert_wet_set_is_true(&w);
+    }
+
+    /// The bottom row is skipped rather than indexed below the world: a wet cell at
+    /// `y = 0` is untouched and no subtraction underflows.
+    #[test]
+    fn fall_skips_the_bottom_row() {
+        let mut w = fixture(4);
+        w.apply(Command::SetMaterial {
+            x: 0,
+            y: 0,
+            z: 0,
+            material: Material::Air,
+        });
+        add(&mut w, 0, 0, 1.0);
+        fall(&mut w);
+        assert_eq!(free_at(&w, 0, 0), 1.0);
+        assert!(residual(&w).abs() < 1e-12);
+        assert_wet_set_is_true(&w);
+    }
+
+    /// An empty world falls through with nothing to do.
+    #[test]
+    fn fall_over_an_empty_world_does_nothing() {
+        let mut w = fixture(4);
+        fall(&mut w);
+        assert!(w.wet.cells().is_empty());
+        assert!(residual(&w).abs() < 1e-12);
+    }
+
+    /// A densely wet world: several columns, partial cells at every level, repeated
+    /// calls. Conservation and wet-set membership hold every call.
+    #[test]
+    fn fall_keeps_conservation_and_the_wet_set_in_a_dense_world() {
+        let mut w = World::empty(Config {
+            width: 8,
+            height: 8,
+            depth: 1,
+            voxel_m: 1.0,
+            seed: 7,
+            ..Config::default()
+        });
+        for x in 0..8 {
+            for y in 1..7 {
+                // A varying partial fill so cells have room and the order matters.
+                add(&mut w, x, y, 0.4 + 0.05 * ((x + y as i64) % 4) as f64);
+            }
+        }
+        assert_wet_set_is_true(&w);
+        let before = w.view().stored_m3();
+        for _ in 0..6 {
+            fall(&mut w);
+            assert_wet_set_is_true(&w);
+            assert!((w.view().stored_m3() - before).abs() < 1e-9);
+            assert!(residual(&w).abs() < 1e-9);
+        }
+        // Water reached the floor everywhere it could fall to.
+        for x in 0..8 {
+            assert!(free_at(&w, x, 1) > 0.0, "column {x} floor is dry");
+        }
+    }
 }

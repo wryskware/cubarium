@@ -97,7 +97,7 @@ fn main() {
          seed {seed}, {threads} thread(s)"
     );
 
-    let world = prepared_world(seed, warmup_ticks);
+    let world = prepared_world(seed, warmup_ticks, threads);
     let c = world.config().clone();
     println!(
         "world {}x{}x{} voxels of {} m ({} cells, {} columns), water_substeps {}, rain \
@@ -152,7 +152,7 @@ fn arg<T: std::str::FromStr>(args: &[String], i: usize) -> Option<T> {
 /// `grazed.rs`'s `prepared_world`, with the conditioning ticks in it: generate once to find
 /// the basin floor, generate the world the run uses with the table a metre above it, open
 /// the outlet, and step it world-only for the warm-up.
-fn prepared_world(seed: u64, warmup_ticks: u64) -> World {
+fn prepared_world(seed: u64, warmup_ticks: u64, threads: usize) -> World {
     let dry = VoxelConfig {
         seed,
         rain_m_per_s: HARNESS_RAIN_M_PER_S,
@@ -169,7 +169,9 @@ fn prepared_world(seed: u64, warmup_ticks: u64) -> World {
     let mut world = World::new(config);
     world.apply(WorldCommand::SetOutlet { open: true });
     for _ in 0..warmup_ticks {
-        world.step();
+        // Warm-up can initialise the process-global pool before Sim::new does.
+        // Use the requested count here too, rather than fixing it to every CPU.
+        world.step_with(threads);
     }
     world
 }
