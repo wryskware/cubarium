@@ -114,6 +114,12 @@ struct Reading {
     mineral_residual: f64,
     stands: usize,
     animals: usize,
+    /// Every animal's id and the face it stands on, in the layer's own id order: what
+    /// `sense` decided, read directly. The one check that a split `sense` put the animals
+    /// where an unsplit one would.
+    animal_faces: Vec<(u64, u32, u32, u32)>,
+    /// Their bodies, same order.
+    animal_body: Vec<f64>,
     /// Mean pore fraction over each species' stands' root boxes, in `Species::ALL` order;
     /// `0.0` for a species with no stands left.
     root_pore: Vec<f64>,
@@ -160,6 +166,13 @@ fn read(world: &World, flora: &Flora, fauna: &Fauna) -> Reading {
         mineral_residual: fv.mineral() - fv.ledger.expected_mineral(),
         stands: fv.stands.len(),
         animals: fauna.view().animals.len(),
+        animal_faces: fauna
+            .view()
+            .animals
+            .iter()
+            .map(|a| (a.id, a.site.x, a.site.y, a.site.z))
+            .collect(),
+        animal_body: fauna.view().animals.iter().map(|a| a.body).collect(),
         root_pore,
     }
 }
@@ -194,6 +207,10 @@ fn rel(a: f64, b: f64) -> f64 {
 fn agree(name: &str, a: &Reading, b: &Reading, tol: f64) {
     assert_eq!(a.stands, b.stands, "{name}: stand count");
     assert_eq!(a.animals, b.animals, "{name}: animal count");
+    assert_eq!(a.animal_faces, b.animal_faces, "{name}: the faces the animals ended up on");
+    for (i, (x, y)) in a.animal_body.iter().zip(b.animal_body.iter()).enumerate() {
+        assert!(rel(*x, *y) <= tol, "{name}: animal {i} body {x} against {y}");
+    }
     assert!(
         rel(a.stored_m3, b.stored_m3) <= tol,
         "{name}: stored water {} against {} ({:.3e} relative, tolerance {tol:.0e})",
