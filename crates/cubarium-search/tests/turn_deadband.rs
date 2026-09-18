@@ -15,8 +15,11 @@ use cubarium_search::es::export::PolicyFile;
 use cubarium_search::es::turnband::{ALPHA, sign_test, two_sided_binomial};
 use cubarium_search::es::{fixture, tensor};
 
-/// An arbitrary ecology config hash: the policy file carries it verbatim, so any value does.
-const FAST_LEAF_CONFIG_HASH: u64 = 0x09e2_4439_2ec9_1768;
+/// A config hash for the policy file to carry. The file records whatever it is given
+/// verbatim, so the test computes an arbitrary one instead of pinning a real run's number.
+fn config_hash() -> u64 {
+    fixture::fnv1a(b"turn-deadband config")
+}
 
 // -------------------------------------------------------------------------------------------
 // The policy file's provenance.
@@ -33,7 +36,7 @@ fn a_policy_file_records_the_adapter_and_a_missing_one_is_the_shipped_adapter() 
         0xdead_beef,
         9,
         "fast-leaf",
-        FAST_LEAF_CONFIG_HASH,
+        config_hash(),
         MotorModel::Sweep,
         ActionAdapter::CubAct2,
     )
@@ -57,7 +60,7 @@ fn a_policy_file_records_the_adapter_and_a_missing_one_is_the_shipped_adapter() 
         0xdead_beef,
         9,
         "fast-leaf",
-        FAST_LEAF_CONFIG_HASH,
+        config_hash(),
         MotorModel::Sweep,
     )
     .expect("exportable");
