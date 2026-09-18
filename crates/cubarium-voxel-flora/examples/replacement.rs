@@ -352,16 +352,8 @@ fn condition(
 
     // ---- the resident cohort, on its own contract habitat.
     let resident_planted = plant_cohort(&mut flora, &world, &skyline, resident, "resident");
-    if resident_planted == 0 {
-        println!(
-            "\nREFUSED: **{} was never planted.** Not one of the {} skyline columns passes its \
-             own establishment predicate and its habitat rule {:?} with nothing standing on it, \
-             so this state has no resident population. An arm run from it would be a newcomer \
-             introduced into an empty treatment, and R7.2 refuses to label that an invasion.",
-            resident.name(),
-            skyline.len(),
-            habitat_of(resident)
-        );
+    if let Some(why) = refusal(resident, resident_planted, resident_planted, skyline.len()) {
+        println!("\n{why}");
         return None;
     }
 
@@ -405,15 +397,8 @@ fn condition(
     );
     println!("  residuals: {}", residual_line(&flora));
 
-    if resident_alive == 0 {
-        println!(
-            "\nREFUSED: **{} has disappeared.** {resident_planted} founders were planted and \
-             none of them is alive at the end of conditioning, so at the moment the newcomer \
-             would be introduced there is no resident population. This is printed as a refusal \
-             and **not** run as an arm: a newcomer introduced into an empty treatment is not an \
-             invasion of anything (Astra R7.2).",
-            resident.name()
-        );
+    if let Some(why) = refusal(resident, resident_planted, resident_alive, skyline.len()) {
+        println!("\n{why}");
         return None;
     }
 
@@ -427,6 +412,40 @@ fn condition(
         resident_alive,
         background,
     })
+}
+
+/// **The refusal a conditioned state earns, if it earns one** — the R7.2 rule, as one
+/// function, so that the decision is testable and cannot differ between the two places the
+/// study asks it.
+///
+/// `None` means there is a resident population to run arms against. Otherwise the returned
+/// text is printed and no arm is run: an arm whose resident was never planted, or whose
+/// resident has disappeared by the moment of introduction, is a **newcomer in an empty
+/// treatment**, and calling that an invasion is exactly the defect Astra found in the old
+/// `chesson` probe.
+fn refusal(resident: Species, planted: usize, alive: usize, skyline: usize) -> Option<String> {
+    if planted == 0 {
+        return Some(format!(
+            "REFUSED: **{} was never planted.** Not one of the {skyline} skyline columns passes \
+             its own establishment predicate and its habitat rule {:?} with nothing standing on \
+             it, so this state has no resident population. An arm run from it would be a \
+             newcomer introduced into an empty treatment, and R7.2 refuses to label that an \
+             invasion.",
+            resident.name(),
+            habitat_of(resident)
+        ));
+    }
+    if alive == 0 {
+        return Some(format!(
+            "REFUSED: **{} has disappeared.** {planted} founders were planted and none of them \
+             is alive at the end of conditioning, so at the moment the newcomer would be \
+             introduced there is no resident population. This is printed as a refusal and \
+             **not** run as an arm: a newcomer introduced into an empty treatment is not an \
+             invasion of anything (Astra R7.2).",
+            resident.name()
+        ));
+    }
+    None
 }
 
 /// The declared background canopy species for a resident whose habitat is `UnderACrown`: the
@@ -1404,6 +1423,26 @@ mod tests {
         );
         // This is the condition `condition` refuses on: planted > 0 and alive == 0.
         assert!(planted > 0 && count(&flora, Species::Bloomcrown) == 0);
+    }
+
+    /// **The two refusals, in the words they are printed in.** A resident that was never
+    /// planted and a resident that has disappeared are different sentences and different
+    /// causes, and neither of them is an arm.
+    #[test]
+    fn the_refusal_rule_names_the_two_cases_and_passes_a_living_resident() {
+        let never = refusal(Species::Velvetpad, 0, 0, 3072).expect("never planted is a refusal");
+        assert!(never.starts_with("REFUSED:"), "{never}");
+        assert!(never.contains("was never planted"), "{never}");
+        assert!(never.contains("UnderACrown"), "the habitat rule that had no site: {never}");
+        assert!(!never.contains("invasion of anything"), "that is the other case: {never}");
+
+        let gone = refusal(Species::Bloomcrown, 8, 0, 3072).expect("disappeared is a refusal");
+        assert!(gone.contains("has disappeared"), "{gone}");
+        assert!(gone.contains("8 founders were planted"), "{gone}");
+        assert!(gone.contains("not an invasion of anything"), "{gone}");
+
+        assert!(refusal(Species::Bloomcrown, 8, 1, 3072).is_none(), "one living stand is enough");
+        assert!(refusal(Species::Bloomcrown, 8, 19, 3072).is_none());
     }
 
     /// **One site list, for every arm.** The list is declared from the conditioned state and
