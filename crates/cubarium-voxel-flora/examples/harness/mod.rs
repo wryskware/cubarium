@@ -597,6 +597,144 @@ impl ObservationCap {
     }
 }
 
+/// The **earliest-possible replacement timeline** of one species, measured from the moment
+/// this study actually introduces it: **one founder with a zero parcel, and no newborn of
+/// its own anywhere in the world**.
+///
+/// Astra's R10.1. [`ObservationCap`] costs *newborn → donor → package*, which is the right
+/// arithmetic for a newborn — and the study has none. Its founder has to fund and deliver a
+/// first package, that package has to germinate, and only then does the newborn clock the
+/// cap describes begin; then that descendant has to fund a package of its own before
+/// anything has been *replaced*. Four stages, in the model's own phase order:
+///
+/// 1. **Fund and deliver the first package.** `propagate` funds `propagule_rate · dt`
+///    gross into the parcel and, **in the same tick, after that funding**, sends one whole
+///    package if the parcel now holds one. There is no separate delivery phase, so this
+///    stage is exactly the number of funded ticks the parcel needs — counted here by the
+///    model's own **repeated addition**, not by `ceil(package / net)`: 6,000 additions of
+///    bloomcrown's increment give `0.049999999999996936`, which is below the package
+///    `0.049999999999999996`, so the sixth-thousandth tick does *not* deliver and the
+///    honest count is 6,001. [`ObservationCap::package_ticks`] keeps the closed form,
+///    because that is the number R5.4 and R7.2 published; the difference is carried here
+///    as [`ReplacementTimeline::closed_form_fund_ticks`] and printed.
+/// 2. **Germinate.** A package that lands on tick `t` is born at tick `t + 1`: step 8 of
+///    the next tick is the first lottery that can see it (`step`'s seed-bank doc). **One
+///    tick**, and only if the site passes the predicate and wins its own local lottery.
+/// 3. **Grow from `alive_min` to `donor_min`** under the growth cap: [`ObservationCap`]'s
+///    own first term, unchanged.
+/// 4. **Fund the descendant's own package**, which is stage 1 again for the new stand.
+///
+/// **It is a lower bound on a lower bound.** Every stage assumes perfect funding, an
+/// immediate germination on a passing site, and income that keeps the growth cap saturated
+/// the whole way — none of which the model promises. So a budget above this bound does not
+/// make a replacement likely; a budget **below** it makes one impossible, which is the
+/// thing R10.1 asks the harness to stop hiding.
+#[derive(Clone, Copy, Debug)]
+pub struct ReplacementTimeline {
+    pub species: Species,
+    /// Stage 1: funded ticks until the parcel holds one whole package, by repeated
+    /// addition. The delivery happens on this tick.
+    pub fund_ticks: u64,
+    /// `ceil(package / net)`: what the published cap arithmetic uses. One tick less than
+    /// `fund_ticks` when the repeated addition falls short of the package, which is the
+    /// ordinary case.
+    pub closed_form_fund_ticks: u64,
+    /// Stage 2: one tick, the phase order's own gap between landing and the lottery.
+    pub germinate_ticks: u64,
+    /// Stage 3: the growth cap, `alive_min` → `donor_min`.
+    pub grow_ticks: u64,
+    /// Stage 4: the descendant funding its own package — stage 1 again.
+    pub refund_ticks: u64,
+    pub total_ticks: u64,
+    pub total_s: f64,
+}
+
+/// One species' earliest-possible replacement timeline, from its own preset.
+pub fn replacement_timeline(species: Species, sc: &SpeciesConfig) -> ReplacementTimeline {
+    let dt = cubarium_voxel_flora::DT;
+    let cap = observation_cap(species, sc);
+    let package = cap.package;
+    // The model's own two lines: `ask = propagule_rate · dt` gross out of the reserve, of
+    // which `1 / (1 + build)` reaches the parcel.
+    let net = sc.propagule_rate * dt / (1.0 + sc.build);
+    let fund_ticks = ticks_to_fund(package, net);
+    let germinate_ticks = 1;
+    let grow_ticks = cap.growth_ticks;
+    let total_ticks = fund_ticks
+        .saturating_add(germinate_ticks)
+        .saturating_add(grow_ticks)
+        .saturating_add(fund_ticks);
+    let total_s = if total_ticks == u64::MAX { f64::INFINITY } else { total_ticks as f64 * dt };
+    ReplacementTimeline {
+        species,
+        fund_ticks,
+        closed_form_fund_ticks: cap.package_ticks,
+        germinate_ticks,
+        grow_ticks,
+        refund_ticks: fund_ticks,
+        total_ticks,
+        total_s,
+    }
+}
+
+/// How many funded ticks a parcel needs to hold one whole `package`, **as the model adds
+/// it**: `parcel += net` every tick, and the delivery test is `parcel < package`. Float
+/// addition is not multiplication and this is the number that decides a tick.
+///
+/// `u64::MAX` for a species that can never fund one, and for a `net` so small that the
+/// addition stops making progress at all — which is a real float condition and not a
+/// hypothetical: `parcel + net == parcel` once `net` falls below the parcel's own epsilon.
+fn ticks_to_fund(package: f64, net: f64) -> u64 {
+    if !(package > 0.0) || !(net > 0.0) || !package.is_finite() || !net.is_finite() {
+        return u64::MAX;
+    }
+    let mut parcel = 0.0f64;
+    let mut ticks = 0u64;
+    while parcel < package {
+        let next = parcel + net;
+        if next <= parcel {
+            return u64::MAX; // the increment has vanished into the float
+        }
+        parcel = next;
+        ticks += 1;
+    }
+    ticks
+}
+
+impl ReplacementTimeline {
+    /// The four stages with their own numbers, so that a reader can add them up.
+    pub fn line(&self) -> String {
+        format!(
+            "{:>14}: fund+deliver the first package {} ticks ({:.2} s){} + germinate {} tick ({:.2} s) + grow newborn -> donor {} ticks ({:.2} s) + the descendant's own package {} ticks ({:.2} s) = **{} ticks, {:.2} s** at the earliest",
+            self.species.name(),
+            self.fund_ticks,
+            self.fund_ticks as f64 * cubarium_voxel_flora::DT,
+            if self.fund_ticks == self.closed_form_fund_ticks {
+                String::new()
+            } else {
+                format!(
+                    " [the closed form says {}; repeated addition falls short of the package on that tick]",
+                    self.closed_form_fund_ticks
+                )
+            },
+            self.germinate_ticks,
+            self.germinate_ticks as f64 * cubarium_voxel_flora::DT,
+            self.grow_ticks,
+            self.grow_ticks as f64 * cubarium_voxel_flora::DT,
+            self.refund_ticks,
+            self.refund_ticks as f64 * cubarium_voxel_flora::DT,
+            self.total_ticks,
+            self.total_s
+        )
+    }
+}
+
+/// The **bound of a pair**: the larger of the two timelines, because one window has to be
+/// able to resolve either direction.
+pub fn pair_bound(a: &ReplacementTimeline, b: &ReplacementTimeline) -> f64 {
+    a.total_s.max(b.total_s)
+}
+
 /// The cap of a **pair**, which is what an arm runs under: the larger of the two, so that
 /// one window can resolve a replacement in either direction. Astra's R7.2 asked for a
 /// species-appropriate cap rather than one number for every pair — 6,000 s was
@@ -642,6 +780,137 @@ mod cap_tests {
         let frond = observation_cap(Species::Umbrellafrond, config.species(Species::Umbrellafrond));
         assert!((pair_cap(&bloom, &frond) - 3_008.15).abs() < 1e-9);
         assert!(pair_cap(&bloom, &stone) > 6_000.0, "6,000 s cannot resolve stonecushion");
+    }
+
+    /// **The earliest-possible replacement timeline, stage by stage** (Astra R10.1). The
+    /// published caps are *newborn* clocks and the study introduces a **founder with a zero
+    /// parcel**, so the bound is one package earlier and one germination tick longer at each
+    /// end.
+    #[test]
+    fn the_timeline_adds_the_two_stages_the_published_cap_leaves_out() {
+        let config = FloraConfig::default();
+        let bloom = replacement_timeline(Species::Bloomcrown, config.species(Species::Bloomcrown));
+        // Stage 1 by repeated addition is **6,001** and not 6,000: 6,000 additions of
+        // 8.3333e-6 give 0.049999999999996936 against the package's 0.049999999999999996.
+        assert_eq!(bloom.closed_form_fund_ticks, 6_000);
+        assert_eq!(bloom.fund_ticks, 6_001, "the model's own addition decides the tick");
+        assert_eq!(bloom.germinate_ticks, 1);
+        assert_eq!(bloom.grow_ticks, 54_163);
+        assert_eq!(bloom.total_ticks, 6_001 + 1 + 54_163 + 6_001);
+        assert!((bloom.total_s - 3_308.30).abs() < 1e-9, "total {}", bloom.total_s);
+
+        let stone =
+            replacement_timeline(Species::Stonecushion, config.species(Species::Stonecushion));
+        assert_eq!(stone.fund_ticks, 12_001);
+        assert_eq!(stone.grow_ticks, 160_945);
+        assert!((stone.total_s - 9_247.40).abs() < 1e-9, "total {}", stone.total_s);
+
+        // The bound is strictly above the published cap, which is the whole of R10.1: a
+        // budget at the published cap cannot observe the replacement it names.
+        let cap = observation_cap(Species::Bloomcrown, config.species(Species::Bloomcrown));
+        assert!(bloom.total_s > cap.total_s, "{} vs {}", bloom.total_s, cap.total_s);
+        assert!((bloom.total_s - cap.total_s - 300.15).abs() < 1e-9);
+    }
+
+    /// **The whole timeline against the model, with the rates accelerated.** Four stages in
+    /// one 300-tick fixture: the first package delivered, the germination one tick later, the
+    /// newborn reaching `donor_min`, and that descendant funding a package of its own. Each
+    /// measured stage is compared with its bound in the only direction a bound can be
+    /// checked — the model is **never earlier** — and all four are required to happen, so a
+    /// fixture that simply failed to reproduce could not pass.
+    #[test]
+    fn the_model_walks_the_whole_timeline_and_never_beats_it() {
+        let mut world = World::empty(VoxelConfig {
+            width: 4,
+            height: 8,
+            depth: 1,
+            voxel_m: 1.0,
+            seed: 11,
+            ..VoxelConfig::default()
+        });
+        for x in 0..4i64 {
+            for y in 1..=2u32 {
+                let want = 0.6 * Material::Soil.pore_capacity() * world.config().voxel_volume();
+                world.apply(WorldCommand::AddWater { x, y, z: 0, volume_m3: want });
+                world.apply(WorldCommand::SetMaterial { x, y, z: 0, material: Material::Soil });
+            }
+        }
+        // Accelerated, and stated as such: a hundredfold assimilation, a rich pool, a fast
+        // parcel and fast wood. Nothing here is a preset proposal — the point is to walk all
+        // four stages inside a short test.
+        let mut config = FloraConfig { initial_mineral: 500.0, ..FloraConfig::default() };
+        {
+            let sc = config.species_mut(Species::Bloomcrown);
+            sc.assimilation = 40.0;
+            sc.foliage_rate = 0.5;
+            sc.propagule_rate = 0.12;
+            sc.reserve_cap = 40.0;
+            sc.wood_rate = 1.2;
+            sc.hop = 1;
+        }
+        let timeline = replacement_timeline(Species::Bloomcrown, config.species(Species::Bloomcrown));
+        let donor_min = config.species(Species::Bloomcrown).donor_min;
+        let founder = founder_wood(config.species(Species::Bloomcrown));
+        let mut flora = Flora::in_world(&world, config);
+        assert!(flora.apply(
+            &world,
+            Command::Seed { x: 0, z: 0, species: Species::Bloomcrown, wood: founder }
+        ));
+        let founder_id = 0u64;
+
+        let (mut delivered, mut born, mut grown, mut redelivered) = (None, None, None, None);
+        let mut parcels: Vec<(u64, f64)> = vec![(founder_id, 0.0)];
+        for tick in 1..=300u64 {
+            flora.step(&mut world);
+            let v = flora.view();
+            if delivered.is_none() && v.ground.iter().any(|g| g.seed_organic(Species::Bloomcrown) > 0.0) {
+                delivered = Some(tick);
+            }
+            if born.is_none() && v.ledger.establishments > 0 {
+                born = Some(tick);
+            }
+            for stand in v.stands.iter().filter(|s| s.id != founder_id) {
+                if grown.is_none() && stand.wood >= donor_min {
+                    grown = Some(tick);
+                }
+                let slot = parcels.iter().position(|(id, _)| *id == stand.id);
+                match slot {
+                    None => parcels.push((stand.id, stand.parcel)),
+                    Some(i) => {
+                        if redelivered.is_none() && stand.parcel < parcels[i].1 {
+                            redelivered = Some(tick);
+                        }
+                        parcels[i].1 = stand.parcel;
+                    }
+                }
+            }
+        }
+
+        let (d, b, g, r) = (
+            delivered.expect("stage 1: no package was ever delivered"),
+            born.expect("stage 2: nothing germinated"),
+            grown.expect("stage 3: no descendant reached donor size"),
+            redelivered.expect("stage 4: no descendant funded a package of its own"),
+        );
+        assert!(d >= timeline.fund_ticks, "stage 1 beat its bound: {d} < {}", timeline.fund_ticks);
+        assert_eq!(b, d + timeline.germinate_ticks, "germination is the next tick, exactly");
+        assert!(
+            g - b >= timeline.grow_ticks,
+            "stage 3 beat the growth cap: {} ticks against {}",
+            g - b,
+            timeline.grow_ticks
+        );
+        assert!(
+            r - b >= timeline.refund_ticks,
+            "stage 4 beat its bound: {} ticks from birth against {}",
+            r - b,
+            timeline.refund_ticks
+        );
+        assert!(
+            r >= timeline.total_ticks,
+            "the whole walk beat the timeline: {r} against {}",
+            timeline.total_ticks
+        );
     }
 
     /// **A species that cannot replace itself has no finite cap**, and the harness must

@@ -1700,12 +1700,18 @@ unresolved at cap"**, which is the correct reading and not a disappointment: see
    arithmetic predicted exactly that.** The introduced founder starts at wood 0.3, which is
    `donor_min` for this preset, so it reaches donor size on its first tick — the harness prints
    that as the founder's own event and says it is *not* a descendant — and then funds
-   `propagule_rate · dt / (1 + c_g)` = 8.3333e−6 per tick. Over 6,000 ticks that is **0.05000
-   exactly**, one whole package, and the model delivers a package only when the parcel already
-   holds one: so the arm ends with the first package saved and not yet sent. A birth needs the
-   delivery, a germination lottery and then 2,708.15 s of capped growth before a *descendant*
-   could donate. 300 s could not have produced a replacement, and no arm inferred exclusion
-   from the fact that it did not.
+   `propagule_rate · dt / (1 + c_g)` = 8.3333e−6 per tick. **Corrected (Astra R10.1): that is
+   not 0.05 exactly and the tick matters.** 6,000 repeated additions of that increment give
+   `0.049999999999996936`, which is *below* the package `0.049999999999999996` — "0.05000" in
+   the table above is rounded display, not exact funding — so the 6,000th tick does **not**
+   deliver, and the honest count is **6,001 ticks (300.05 s)**. The delivery then happens in
+   that same tick, **after** its own funding: `src/step.rs` funds and sends in one phase and
+   there is no separate delivery step. No model epsilon and no rate tuning is called for by
+   this; the arithmetic that has to change is the harness's, and R10.1's earliest-possible
+   timeline now carries it. The arm still ends with the first package saved and not sent, and a
+   birth still needs that delivery, a germination tick and then 2,708.15 s of capped growth
+   before a *descendant* could donate: 300 s could not have produced a replacement, and no arm
+   inferred exclusion from the fact that it did not.
 2. **The exclusion arm excludes, and retains everything else.** 19 of 19 stands cleared and 9
    of 9 seed banks removed, booked out as `removed_*` (organic +8.4229, mineral +0.1737), with
    stored water 210.8303 m³, head 2.501 m, litter 3.18641, dead wood 0.00000, soil mineral

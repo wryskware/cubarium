@@ -15,11 +15,17 @@
 //!
 //! What it does, in the order it does it:
 //!
-//! 1. **Prints the predeclared cap**, from the presets' own arithmetic
-//!    ([`harness::observation_cap`]) — the time from a newborn to a donor at the growth cap
-//!    plus one fully funded package, for both species of the pair, with the larger of the
-//!    two as the pair's cap. A window shorter than that can only report **unresolved at
-//!    cap**, and this harness says so instead of inferring exclusion.
+//! 1. **Prints the predeclared cap and, separately, the earliest-possible replacement
+//!    timeline.** The cap ([`harness::observation_cap`]) is a *newborn's* clock — newborn to
+//!    donor at the growth cap plus one funded package. This study introduces a **founder
+//!    with a zero parcel and no newborn**, so the thing it could actually observe is
+//!    [`harness::replacement_timeline`]'s four stages: the founder's first package, the
+//!    germination tick, the newborn's capped growth, and that descendant's own package —
+//!    3,308.30 s for the original pair against the published cap's 3,008.15 s (Astra R10.1).
+//!    The **authorised stopping budget** is printed as a third, separate number: a stopping
+//!    rule, not a sufficient window. A `full` study whose budget is at or below the bound is
+//!    **refused**, because no arm of it could resolve a replacement; `replacement pilot …`
+//!    runs one positive-control arm instead, whose job is to measure `G`.
 //! 2. **Conditions one state**: the generated world under the harness's rain, warmed up, with
 //!    `Provision::AtCreation` so that every support face holds the same mineral inventory in
 //!    every arm however far an arm's own plants spread, then the resident's founder cohort on
@@ -69,12 +75,75 @@ const INTERVAL_S: f64 = 100.0;
 /// built to read, and the counts are still exact.
 const MAX_EVENTS: usize = 60;
 
+/// The default stopping budget, as a multiple of the pair's earliest-possible replacement
+/// bound. **A named placeholder and nothing measured it**: it exists so that a run with no
+/// `--cap` stops somewhere above the bound rather than at the published cap, which R10.1
+/// showed cannot observe a replacement at all. R5.4's real window — 3 x the measured `G` —
+/// can only be chosen after a pilot has measured one.
+const DEFAULT_BUDGET_FACTOR: f64 = 1.5;
+
+/// What a run is for. `full` is the seven-arm study; `pilot` is R10.1's **positive-control
+/// pilot**, one arm whose job is to measure `G`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mode {
+    Full,
+    Pilot,
+}
+
+impl Mode {
+    fn label(self) -> &'static str {
+        match self {
+            Mode::Full => "control study (seven arms)",
+            Mode::Pilot => "positive-control **pilot** (one arm, to measure G)",
+        }
+    }
+}
+
+/// The two durations an arm is read against, kept together so that no report can quote one
+/// without the other: the **stopping budget** this run was given, and the
+/// **earliest-possible bound** the pair's own presets impose (Astra R10.1).
+#[derive(Clone, Copy, Debug)]
+struct Budget {
+    window: f64,
+    bound: f64,
+}
+
+impl Budget {
+    /// The sentence an expiry earns. Never "exclusion", and never silent about the bound.
+    fn unresolved(&self) -> String {
+        if self.window <= self.bound {
+            format!(
+                "**unresolved at the stopping budget** ({:.0} s, which is {:.1} % of the \
+                 earliest-possible bound {:.2} s — a replacement could not have completed \
+                 here however the arm behaved)",
+                self.window,
+                100.0 * self.window / self.bound,
+                self.bound
+            )
+        } else {
+            format!(
+                "**unresolved at the stopping budget** ({:.0} s against an earliest-possible \
+                 bound of {:.2} s — long enough in principle, so this is a measurement and not \
+                 an arithmetic impossibility, and it is still not evidence of exclusion)",
+                self.window, self.bound
+            )
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let flags: Vec<&String> = args.iter().filter(|a| a.starts_with("--")).collect();
     let positional: Vec<String> =
         args.iter().filter(|a| !a.starts_with("--")).cloned().collect();
 
+    // `pilot` as the first word, before the two species: R10.1's positive-control pilot,
+    // which measures G instead of spending seven arms at a budget that cannot resolve one.
+    let (mode, positional) = match positional.first().map(String::as_str) {
+        Some("pilot") => (Mode::Pilot, positional[1..].to_vec()),
+        Some("full") => (Mode::Full, positional[1..].to_vec()),
+        _ => (Mode::Full, positional),
+    };
     let resident = species_arg(&positional, 0);
     let newcomer = species_arg(&positional, 1);
     let conditioning_s: f64 = arg(&positional, 2).unwrap_or(1_000.0);
@@ -128,11 +197,21 @@ fn main() {
         observation_cap(newcomer, config.species(newcomer)),
     );
     let declared = pair_cap(&caps.0, &caps.1);
-    let window = cap_override.unwrap_or(declared);
+    let timelines = (
+        replacement_timeline(resident, config.species(resident)),
+        replacement_timeline(newcomer, config.species(newcomer)),
+    );
+    let bound = pair_bound(&timelines.0, &timelines.1);
+    // The **authorised stopping budget**, which is not the bound and not a sufficient
+    // window: it is when this run stops and prints what it saw.
+    let window = cap_override.unwrap_or(DEFAULT_BUDGET_FACTOR * bound);
+    let budget = Budget { window, bound };
 
     println!(
-        "replacement control: resident {}, newcomer {}; seed {seed}, noise_seed {noise_seed}; \
-         {conditioning_s:.0} s of conditioning then {window:.0} s of observation per arm",
+        "replacement {}: resident {}, newcomer {}; seed {seed}, noise_seed {noise_seed}; a \
+         conditioning **budget** of {conditioning_s:.0} s and a stopping budget of \
+         {window:.0} s per arm",
+        mode.label(),
         resident.name(),
         newcomer.name()
     );
@@ -162,16 +241,51 @@ fn main() {
         "  pair cap: **{declared:.2} s** (the larger of the two, so one window can resolve \
          either direction)"
     );
-    if window + 1e-9 < declared {
-        println!(
-            "  the window is **shortened to {window:.0} s** by `--cap`, which is {:.1} % of the \
-             predeclared cap. A window this short **cannot resolve a replacement**: whatever it \
-             ends with, an arm that has not completed one is reported as **unresolved at cap** \
-             and exclusion is not inferred from it (R5.4).",
-            100.0 * window / declared
-        );
-    } else {
-        println!("  the window is the predeclared cap and was not shortened.");
+    println!(
+        "\nearliest-possible **replacement timeline** (Astra R10.1) — from what this study \
+         actually introduces, one founder with a **zero parcel** and no newborn of its own \
+         anywhere, which the published cap above does not cost:"
+    );
+    println!("  {}", timelines.0.line());
+    println!("  {}", timelines.1.line());
+    println!(
+        "  pair bound: **{bound:.2} s**, against the published pair cap's {declared:.2} s. It is \
+         a lower bound on a lower bound — perfect funding, an immediate germination on a \
+         passing site and a saturated growth cap the whole way — so a budget above it makes \
+         nothing likely, and a budget below it makes a replacement **impossible**."
+    );
+    println!(
+        "\nauthorised stopping budget: **{window:.0} s** per arm ({}), which is {:.1} % of the \
+         bound. A stopping rule and not a sufficient window: on expiry every arm reports \
+         **unresolved**, and exclusion is never inferred from expiry (R5.4/R10.1).",
+        match cap_override {
+            Some(_) => "given with `--cap`",
+            None => "the default, DEFAULT_BUDGET_FACTOR x the bound — a named placeholder, \
+                     nothing measured it",
+        },
+        100.0 * window / bound
+    );
+    if window <= bound {
+        match mode {
+            Mode::Full => {
+                println!(
+                    "\nREFUSED: the stopping budget {window:.0} s is **at or below the \
+                     earliest-possible bound {bound:.2} s**, so no arm of this study could \
+                     observe the replacement it is named after, and seven arms of it would buy \
+                     nothing but expiry (Astra R10.1). Either raise the budget above the bound, \
+                     or run `replacement pilot {} {} ...` — one positive-control arm, whose job \
+                     is to **measure G** so that a real budget can be chosen.",
+                    resident.name(),
+                    newcomer.name()
+                );
+                return;
+            }
+            Mode::Pilot => println!(
+                "  the pilot runs anyway, on purpose: its job is to measure G if it can, and a \
+                 pilot that expires below the bound is the expected outcome and is reported as \
+                 **unresolved** rather than as exclusion."
+            ),
+        }
     }
 
     // ----------------------------------------------------------- the conditioned state
@@ -201,12 +315,35 @@ fn main() {
          and the same phase — so a difference between two arms is the treatment and nothing \
          else."
     );
-    let control = run_arm(&conditioned, Treatment::ResidentOnly, None, window);
-    for (n, site) in declared_sites.iter().enumerate() {
-        println!("\n---------- site {} of {}: {}", n + 1, declared_sites.len(), site.label());
-        run_arm(&conditioned, Treatment::Both, Some(site), window);
-        run_arm(&conditioned, Treatment::NewcomerAlone, Some(site), window);
-    }
+    let control = match mode {
+        Mode::Pilot => {
+            let site = &declared_sites[0];
+            println!(
+                "pilot: **one positive-control arm** — {} alone at the first declared site {}, \
+                 with the resident excluded so that nothing else can be the cause of what it \
+                 does. Its only question is **G**, the replacement time R5.4 asks for before a \
+                 probe window of 3 x G can mean anything. No control, no comparison and no \
+                 second site.",
+                newcomer.name(),
+                site.label()
+            );
+            run_arm(&conditioned, Treatment::NewcomerAlone, Some(site), budget)
+        }
+        Mode::Full => {
+            let control = run_arm(&conditioned, Treatment::ResidentOnly, None, budget);
+            for (n, site) in declared_sites.iter().enumerate() {
+                println!(
+                    "\n---------- site {} of {}: {}",
+                    n + 1,
+                    declared_sites.len(),
+                    site.label()
+                );
+                run_arm(&conditioned, Treatment::Both, Some(site), budget);
+                run_arm(&conditioned, Treatment::NewcomerAlone, Some(site), budget);
+            }
+            control
+        }
+    };
 
     println!("\n=== what this can and cannot say ===");
     println!(
@@ -224,6 +361,16 @@ fn main() {
         },
         conditioned.resident_alive
     );
+    if mode == Mode::Pilot {
+        println!(
+            "This was a **pilot**: one positive-control arm, no control to compare it with and \
+             one site. If it measured a G above, that number is what a real budget and R5.4's \
+             3 x G probe window can be chosen from — for this site, this seed and these \
+             conditions. If it did not, the pair's earliest-possible bound is {bound:.2} s and \
+             the budget it was given was {window:.0} s.",
+        );
+        return;
+    }
     println!(
         "The resident-only control ended with {} resident stands against the {} it was \
          conditioned with{}.",
@@ -685,8 +832,9 @@ fn run_arm(
     c: &Conditioned,
     treatment: Treatment,
     site: Option<&DeclaredSite>,
-    window: f64,
+    budget: Budget,
 ) -> ArmOutcome {
+    let window = budget.window;
     let (resident, newcomer) = (c.resident, c.newcomer);
     println!("\n-- arm: {}", treatment.label());
     // The branch: a clone of the one conditioned state, which `tests/replacement.rs` pins as
@@ -799,7 +947,7 @@ fn run_arm(
         started.elapsed().as_secs_f64()
     );
 
-    watch.report(&flora, resident, newcomer, window, treatment, c.resident_alive);
+    watch.report(&flora, resident, newcomer, budget, treatment, c.resident_alive);
     ArmOutcome { resident_end: count(&flora, resident) }
 }
 
@@ -1168,10 +1316,11 @@ impl Watch {
         flora: &Flora,
         resident: Species,
         newcomer: Species,
-        window: f64,
+        budget: Budget,
         treatment: Treatment,
         resident_start: usize,
     ) {
+        let window = budget.window;
         if self.truncated > 0 {
             println!(
                 "   ({} further events were not printed; the counts below are still exact)",
@@ -1242,31 +1391,35 @@ impl Watch {
         match (first_birth, descendant_donor, replacement) {
             (None, _, _) => println!(
                 "   recruitment NOT OBSERVED within {window:.0} s: no {} identity but the \
-                 introduced founder was ever alive. **Unresolved at cap** — the window is what \
-                 it is and this is not evidence of exclusion (R5.4).",
-                newcomer.name()
+                 introduced founder was ever alive. {}.",
+                newcomer.name(),
+                budget.unresolved()
             ),
             (Some(b), None, _) => println!(
                 "   first birth at t {:.2} s, and **no descendant reached donor size**: the \
-                 replacement is NOT completed and this arm is **unresolved at cap** \
-                 ({window:.0} s). A birth is not a generation.",
-                b as f64 * cubarium_voxel::DT
+                 replacement is NOT completed and this arm is {}. A birth is not a generation.",
+                b as f64 * cubarium_voxel::DT,
+                budget.unresolved()
             ),
             (Some(b), Some(d), None) => println!(
                 "   first birth at t {:.2} s and a descendant at donor size from t {:.2} s, but \
                  **no descendant has funded a package** of its own: the replacement is NOT \
-                 completed and this arm is **unresolved at cap** ({window:.0} s).",
+                 completed and this arm is {}.",
                 b as f64 * cubarium_voxel::DT,
-                d as f64 * cubarium_voxel::DT
+                d as f64 * cubarium_voxel::DT,
+                budget.unresolved()
             ),
             (Some(b), Some(_), Some(g)) => println!(
                 "   **replacement completed**: first birth at t {:.2} s and a descendant funded \
-                 and delivered its own package at t {:.2} s, so the replacement time G for this \
-                 site and direction is {:.2} s. Beyond the founder's reserve subsidy: the \
-                 package was the descendant's own.",
+                 and delivered its own package at t {:.2} s, so the measured replacement time \
+                 **G = {:.2} s** for this site and direction, against an earliest-possible \
+                 bound of {:.2} s. Beyond the founder's reserve subsidy: the package was the \
+                 descendant's own. R5.4's probe window is at least 3 x G = {:.2} s.",
                 b as f64 * cubarium_voxel::DT,
                 g as f64 * cubarium_voxel::DT,
-                g as f64 * cubarium_voxel::DT
+                g as f64 * cubarium_voxel::DT,
+                budget.bound,
+                3.0 * g as f64 * cubarium_voxel::DT
             ),
         }
         if treatment == Treatment::Both && resident_now == 0 {
