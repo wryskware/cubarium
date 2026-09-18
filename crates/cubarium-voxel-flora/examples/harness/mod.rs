@@ -645,6 +645,17 @@ pub struct ReplacementTimeline {
     pub grow_ticks: u64,
     /// Stage 4: the descendant funding its own package — stage 1 again.
     pub refund_ticks: u64,
+    /// The tick the founder's first package leaves, counting the introduction as tick 0.
+    pub deliver_tick: u64,
+    /// The tick the newborn appears: the delivery tick plus the germination tick.
+    pub birth_tick: u64,
+    /// The tick that newborn reaches `donor_min`.
+    pub donor_tick: u64,
+    /// The tick the descendant's own package can leave — `total_ticks`. **One less than the
+    /// four stages added up** (Astra R11.1): `step` grows in step 4 and propagates in step 9
+    /// of the same tick, and `propagate` tests the wood that step 4 just produced, so the very
+    /// tick that reaches `donor_min` can fund the first instalment of the descendant's own
+    /// package. Stages 3 and 4 share that tick and adding them whole double-counts it.
     pub total_ticks: u64,
     pub total_s: f64,
 }
@@ -660,10 +671,16 @@ pub fn replacement_timeline(species: Species, sc: &SpeciesConfig) -> Replacement
     let fund_ticks = ticks_to_fund(package, net);
     let germinate_ticks = 1;
     let grow_ticks = cap.growth_ticks;
-    let total_ticks = fund_ticks
-        .saturating_add(germinate_ticks)
-        .saturating_add(grow_ticks)
-        .saturating_add(fund_ticks);
+    // The milestones, as ticks after the introduction. The last one **subtracts the tick
+    // stages 3 and 4 share** (R11.1); an infinite stage keeps the whole timeline infinite,
+    // because `saturating_add` stops at `u64::MAX` and the subtraction below is skipped.
+    let deliver_tick = fund_ticks;
+    let birth_tick = deliver_tick.saturating_add(germinate_ticks);
+    let donor_tick = birth_tick.saturating_add(grow_ticks);
+    let total_ticks = match donor_tick.saturating_add(fund_ticks) {
+        u64::MAX => u64::MAX,
+        sum => sum - 1,
+    };
     let total_s = if total_ticks == u64::MAX { f64::INFINITY } else { total_ticks as f64 * dt };
     ReplacementTimeline {
         species,
@@ -672,6 +689,9 @@ pub fn replacement_timeline(species: Species, sc: &SpeciesConfig) -> Replacement
         germinate_ticks,
         grow_ticks,
         refund_ticks: fund_ticks,
+        deliver_tick,
+        birth_tick,
+        donor_tick,
         total_ticks,
         total_s,
     }
@@ -705,10 +725,10 @@ impl ReplacementTimeline {
     /// The four stages with their own numbers, so that a reader can add them up.
     pub fn line(&self) -> String {
         format!(
-            "{:>14}: fund+deliver the first package {} ticks ({:.2} s){} + germinate {} tick ({:.2} s) + grow newborn -> donor {} ticks ({:.2} s) + the descendant's own package {} ticks ({:.2} s) = **{} ticks, {:.2} s** at the earliest",
+            "{:>14}: the first package leaves at tick {} ({:.2} s){}, the newborn appears at {}, it reaches donor size at {} (+{} growth ticks), and its own package can leave at **{} ticks, {:.2} s** — one tick less than the four stages added up, because the tick that reaches donor_min also funds the first instalment (R11.1)",
             self.species.name(),
-            self.fund_ticks,
-            self.fund_ticks as f64 * cubarium_voxel_flora::DT,
+            self.deliver_tick,
+            self.deliver_tick as f64 * cubarium_voxel_flora::DT,
             if self.fund_ticks == self.closed_form_fund_ticks {
                 String::new()
             } else {
@@ -717,12 +737,9 @@ impl ReplacementTimeline {
                     self.closed_form_fund_ticks
                 )
             },
-            self.germinate_ticks,
-            self.germinate_ticks as f64 * cubarium_voxel_flora::DT,
+            self.birth_tick,
+            self.donor_tick,
             self.grow_ticks,
-            self.grow_ticks as f64 * cubarium_voxel_flora::DT,
-            self.refund_ticks,
-            self.refund_ticks as f64 * cubarium_voxel_flora::DT,
             self.total_ticks,
             self.total_s
         )
@@ -796,20 +813,30 @@ mod cap_tests {
         assert_eq!(bloom.fund_ticks, 6_001, "the model's own addition decides the tick");
         assert_eq!(bloom.germinate_ticks, 1);
         assert_eq!(bloom.grow_ticks, 54_163);
-        assert_eq!(bloom.total_ticks, 6_001 + 1 + 54_163 + 6_001);
-        assert!((bloom.total_s - 3_308.30).abs() < 1e-9, "total {}", bloom.total_s);
+        // Astra's own milestones (R11.1): delivered at 6,001, born at 6,002, donor size at
+        // 60,165, and its own package can leave at 66,165 — **one less** than the four stages
+        // added up, because the growth tick that reaches `donor_min` also funds the first
+        // instalment (`step` grows in step 4 and propagates in step 9 of the same tick).
+        assert_eq!(bloom.deliver_tick, 6_001);
+        assert_eq!(bloom.birth_tick, 6_002);
+        assert_eq!(bloom.donor_tick, 60_165);
+        assert_eq!(bloom.total_ticks, 66_165);
+        assert_eq!(bloom.total_ticks, 6_001 + 1 + 54_163 + 6_001 - 1, "the shared tick");
+        assert!((bloom.total_s - 3_308.25).abs() < 1e-9, "total {}", bloom.total_s);
 
         let stone =
             replacement_timeline(Species::Stonecushion, config.species(Species::Stonecushion));
         assert_eq!(stone.fund_ticks, 12_001);
         assert_eq!(stone.grow_ticks, 160_945);
-        assert!((stone.total_s - 9_247.40).abs() < 1e-9, "total {}", stone.total_s);
+        assert_eq!((stone.deliver_tick, stone.birth_tick, stone.donor_tick), (12_001, 12_002, 172_947));
+        assert_eq!(stone.total_ticks, 184_947);
+        assert!((stone.total_s - 9_247.35).abs() < 1e-9, "total {}", stone.total_s);
 
         // The bound is strictly above the published cap, which is the whole of R10.1: a
         // budget at the published cap cannot observe the replacement it names.
         let cap = observation_cap(Species::Bloomcrown, config.species(Species::Bloomcrown));
         assert!(bloom.total_s > cap.total_s, "{} vs {}", bloom.total_s, cap.total_s);
-        assert!((bloom.total_s - cap.total_s - 300.15).abs() < 1e-9);
+        assert!((bloom.total_s - cap.total_s - 300.10).abs() < 1e-9);
     }
 
     /// **The whole timeline against the model, with the rates accelerated.** Four stages in
@@ -900,10 +927,13 @@ mod cap_tests {
             g - b,
             timeline.grow_ticks
         );
+        // Stage 4 against **donor attainment**, not birth (R11.1): measuring it from the
+        // birth tick folds the growth stage into it and cannot isolate the funding. The `+ 1`
+        // is the shared tick — the donor tick itself can fund the first instalment.
         assert!(
-            r - b >= timeline.refund_ticks,
-            "stage 4 beat its bound: {} ticks from birth against {}",
-            r - b,
+            r - g + 1 >= timeline.refund_ticks,
+            "stage 4 beat its bound: {} funded ticks from donor size against {}",
+            r - g + 1,
             timeline.refund_ticks
         );
         assert!(
@@ -916,6 +946,75 @@ mod cap_tests {
     /// **A species that cannot replace itself has no finite cap**, and the harness must
     /// print that rather than a number: a zero `wood_rate` never reaches `donor_min`, and a
     /// zero `propagule_rate` never funds a package.
+    /// **An infinite stage keeps the whole timeline infinite**, and the shared-tick
+    /// subtraction must not turn `u64::MAX` into a finite number one tick below it (R11.1).
+    #[test]
+    fn a_timeline_with_an_unreachable_stage_stays_infinite() {
+        let mut config = FloraConfig::default();
+        config.species_mut(Species::Bloomcrown).wood_rate = 0.0;
+        let never = replacement_timeline(Species::Bloomcrown, config.species(Species::Bloomcrown));
+        assert_eq!(never.grow_ticks, u64::MAX);
+        assert_eq!(never.total_ticks, u64::MAX, "no off-by-one may make it finite");
+        assert!(never.total_s.is_infinite());
+
+        let mut config = FloraConfig::default();
+        config.species_mut(Species::Bloomcrown).propagule_rate = 0.0;
+        let unfunded =
+            replacement_timeline(Species::Bloomcrown, config.species(Species::Bloomcrown));
+        assert_eq!(unfunded.fund_ticks, u64::MAX);
+        assert_eq!(unfunded.total_ticks, u64::MAX);
+        assert!(unfunded.total_s.is_infinite());
+    }
+
+    /// **Funding happens on the threshold-crossing tick itself** (R11.1): the tick whose
+    /// growth reaches `donor_min` is the tick `propagate` reads that wood in, so the parcel
+    /// starts filling immediately. This is the model claim the shared-tick subtraction rests
+    /// on, and it is checked against the model and not asserted in a comment.
+    #[test]
+    fn a_stand_funds_on_the_very_tick_it_reaches_donor_size() {
+        let mut world = World::empty(VoxelConfig {
+            width: 3,
+            height: 8,
+            depth: 1,
+            voxel_m: 1.0,
+            seed: 13,
+            ..VoxelConfig::default()
+        });
+        for x in 0..3i64 {
+            for y in 1..=2u32 {
+                let want = 0.6 * Material::Soil.pore_capacity() * world.config().voxel_volume();
+                world.apply(WorldCommand::AddWater { x, y, z: 0, volume_m3: want });
+                world.apply(WorldCommand::SetMaterial { x, y, z: 0, material: Material::Soil });
+            }
+        }
+        let mut config = FloraConfig { initial_mineral: 50.0, ..FloraConfig::default() };
+        {
+            let sc = config.species_mut(Species::Bloomcrown);
+            sc.assimilation = 40.0;
+            sc.wood_rate = 0.3; // 1.5 % of wood per tick: one tick crosses a 1 % gap
+        }
+        let donor_min = config.species(Species::Bloomcrown).donor_min;
+        let mut flora = Flora::in_world(&world, config);
+        // Just below the threshold, so the crossing is this fixture's own event.
+        assert!(flora.apply(
+            &world,
+            Command::Seed { x: 1, z: 0, species: Species::Bloomcrown, wood: donor_min * 0.99 }
+        ));
+        let before = *flora.view().stands.first().expect("the stand");
+        assert!(before.wood < donor_min, "the premise: below donor_min");
+        assert_eq!(before.parcel, 0.0, "and holding nothing");
+
+        flora.step(&mut world);
+        let after = *flora.view().stands.first().expect("still alive");
+        assert!(after.wood >= donor_min, "the crossing tick: wood {}", after.wood);
+        assert!(
+            after.parcel > 0.0,
+            "the crossing tick must also fund: parcel {} after wood {}",
+            after.parcel,
+            after.wood
+        );
+    }
+
     #[test]
     fn a_preset_that_cannot_replace_itself_has_an_infinite_cap() {
         let mut config = FloraConfig::default();

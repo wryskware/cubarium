@@ -125,9 +125,9 @@ impl Budget {
     fn unresolved(&self) -> String {
         if self.window <= self.bound {
             format!(
-                "**unresolved at the stopping budget** ({:.0} s, which is {:.1} % of the \
-                 earliest-possible bound {:.2} s — a replacement could not have completed \
-                 here however the arm behaved)",
+                "**unresolved at the stopping budget** ({:.0} s, which is {:.1} % of this \
+                 species' own earliest-possible bound {:.2} s — a replacement could not have \
+                 completed here however the arm behaved)",
                 self.window,
                 100.0 * self.window / self.bound,
                 self.bound
@@ -196,10 +196,17 @@ fn main() {
         replacement_timeline(resident, config.species(resident)),
         replacement_timeline(newcomer, config.species(newcomer)),
     );
-    let bound = pair_bound(&timelines.0, &timelines.1);
+    // Two different numbers, and R11.1 is about not confusing them. The **pair bound** is a
+    // common-window policy: one window that could resolve either direction, which is what the
+    // default budget is scaled from. The **arm's own bound** is the *newcomer's* timeline,
+    // because this invocation introduces the newcomer and nothing else — a pair's maximum is
+    // not proof that its faster direction cannot finish below that maximum, so an
+    // impossibility claim about *this* arm has to use the species the arm actually tests.
+    let pair = pair_bound(&timelines.0, &timelines.1);
+    let bound = timelines.1.total_s;
     // The **authorised stopping budget**, which is not the bound and not a sufficient
     // window: it is when this run stops and prints what it saw.
-    let window = cap_override.unwrap_or(DEFAULT_BUDGET_FACTOR * bound);
+    let window = cap_override.unwrap_or(DEFAULT_BUDGET_FACTOR * pair);
     let budget = Budget { window, bound };
 
     println!(
@@ -244,32 +251,38 @@ fn main() {
     println!("  {}", timelines.0.line());
     println!("  {}", timelines.1.line());
     println!(
-        "  pair bound: **{bound:.2} s**, against the published pair cap's {declared:.2} s. It is \
-         a lower bound on a lower bound — perfect funding, an immediate germination on a \
-         passing site and a saturated growth cap the whole way — so a budget above it makes \
-         nothing likely, and a budget below it makes a replacement **impossible**."
+        "  pair bound **{pair:.2} s** (a common-window policy: one window for either \
+         direction), and **this arm's own bound {bound:.2} s** — the newcomer's, because the \
+         newcomer is what it introduces (R11.1). Against the published pair cap's \
+         {declared:.2} s. Both are a lower bound on a lower bound — perfect funding, an \
+         immediate germination on a passing site and a saturated growth cap the whole way — so \
+         a budget above one makes nothing likely, while a budget below the **arm's own** makes \
+         a replacement in it impossible."
     );
     println!(
-        "\nauthorised stopping budget: **{window:.0} s** per arm ({}), which is {:.1} % of the \
-         bound. A stopping rule and not a sufficient window: on expiry every arm reports \
-         **unresolved**, and exclusion is never inferred from expiry (R5.4/R10.1).",
+        "\nauthorised stopping budget: **{window:.0} s** per arm ({}), which is {:.1} % of this \
+         arm's own bound and {:.1} % of the pair's. A stopping rule and not a sufficient \
+         window: on expiry every arm reports **unresolved**, and exclusion is never inferred \
+         from expiry (R5.4/R10.1).",
         match cap_override {
             Some(_) => "given with `--cap`",
-            None => "the default, DEFAULT_BUDGET_FACTOR x the bound — a named placeholder, \
-                     nothing measured it",
+            None => "the default, DEFAULT_BUDGET_FACTOR x the **pair** bound — a named \
+                     placeholder, nothing measured it",
         },
-        100.0 * window / bound
+        100.0 * window / bound,
+        100.0 * window / pair
     );
     if window <= bound {
         match mode {
             Mode::Full => {
                 println!(
-                    "\nREFUSED: the stopping budget {window:.0} s is **at or below the \
+                    "\nREFUSED: the stopping budget {window:.0} s is **at or below {}'s own \
                      earliest-possible bound {bound:.2} s**, so no arm of this study could \
                      observe the replacement it is named after, and seven arms of it would buy \
-                     nothing but expiry (Astra R10.1). Either raise the budget above the bound, \
-                     or run `replacement pilot {} {} ...` — one positive-control arm, whose job \
-                     is to **measure G** so that a real budget can be chosen.",
+                     nothing but expiry (Astra R10.1/R11.1). Either raise the budget above that \
+                     bound, or run `replacement pilot {} {} ...` — one positive-control arm, \
+                     whose job is to **measure G** so that a real budget can be chosen.",
+                    newcomer.name(),
                     resident.name(),
                     newcomer.name()
                 );
