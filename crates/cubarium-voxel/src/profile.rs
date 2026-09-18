@@ -35,7 +35,7 @@ pub enum Phase {
     Substeps,
     Infiltrate,
     Fall,
-    Equalize,
+    Exchange,
     Drain,
     WaterTable,
     Spring,
@@ -68,7 +68,7 @@ impl Phase {
         Phase::Substeps,
         Phase::Infiltrate,
         Phase::Fall,
-        Phase::Equalize,
+        Phase::Exchange,
         Phase::Drain,
         Phase::WaterTable,
         Phase::Spring,
@@ -114,7 +114,7 @@ impl Phase {
             Phase::Substeps => "  substep loop (total)",
             Phase::Infiltrate => "    infiltrate",
             Phase::Fall => "    fall",
-            Phase::Equalize => "    equalize",
+            Phase::Exchange => "    exchange",
             Phase::Drain => "  drain",
             Phase::WaterTable => "  water_table",
             Phase::Spring => "  spring",
@@ -145,21 +145,17 @@ impl Phase {
 /// took.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Count {
-    /// Cells looked at by `fall`, once per cell per substep.
+    /// Cells `fall` walked: the wet columns' cells, once per substep.
     FallCells,
-    /// Cells looked at by `infiltrate`, once per cell per substep.
+    /// Wet cells `infiltrate` offered to the ground, once per substep.
     InfiltrateCells,
-    /// Cells scanned by `equalize`'s seed sweep, once per cell per substep.
-    EqualizeScanned,
-    /// Cells holding free water at `equalize`'s seed sweep: its seeds.
-    EqualizeSeeds,
-    /// Connected void regions `equalize` actually filled, per substep.
-    EqualizeRegions,
-    /// Cells visited inside those regions' walks.
-    EqualizeRegionCells,
-    /// Cells scanned by `water_table`.
+    /// Wet cells the local exchange offered water from, per substep.
+    ExchangeWet,
+    /// Columns it walked for heads and displacement targets, per substep.
+    ExchangeColumns,
+    /// Cells of the saturated band `water_table` scanned.
     WaterTableCells,
-    /// Cells scanned by `drain`.
+    /// Damp cells `drain` looked at.
     DrainCells,
     /// Columns scanned by `rain` and `evaporate` (sky/open-water search included).
     ColumnScans,
@@ -184,13 +180,11 @@ pub enum Count {
 }
 
 impl Count {
-    pub const ALL: [Count; 18] = [
+    pub const ALL: [Count; 16] = [
         Count::FallCells,
         Count::InfiltrateCells,
-        Count::EqualizeScanned,
-        Count::EqualizeSeeds,
-        Count::EqualizeRegions,
-        Count::EqualizeRegionCells,
+        Count::ExchangeWet,
+        Count::ExchangeColumns,
         Count::WaterTableCells,
         Count::DrainCells,
         Count::ColumnScans,
@@ -212,14 +206,12 @@ impl Count {
 
     pub fn name(self) -> &'static str {
         match self {
-            Count::FallCells => "fall: cells visited",
-            Count::InfiltrateCells => "infiltrate: cells visited",
-            Count::EqualizeScanned => "equalize: cells scanned for seeds",
-            Count::EqualizeSeeds => "equalize: cells holding free water",
-            Count::EqualizeRegions => "equalize: regions filled",
-            Count::EqualizeRegionCells => "equalize: cells inside those regions",
-            Count::WaterTableCells => "water_table: cells scanned",
-            Count::DrainCells => "drain: cells scanned",
+            Count::FallCells => "fall: cells visited (wet columns)",
+            Count::InfiltrateCells => "infiltrate: wet cells visited",
+            Count::ExchangeWet => "exchange: wet cells offering water",
+            Count::ExchangeColumns => "exchange: columns walked",
+            Count::WaterTableCells => "water_table: band cells scanned",
+            Count::DrainCells => "drain: damp cells scanned",
             Count::ColumnScans => "column scans (rain, evaporate, ...)",
             Count::ColumnSearchCells => "cells walked by those column searches",
             Count::Stands => "stands stepped",

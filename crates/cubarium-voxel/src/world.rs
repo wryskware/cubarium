@@ -281,6 +281,15 @@ pub struct World {
     /// Where the aquifer discharges when its head rises above the cell. Generation
     /// picks a low void cell part way up the basin flank.
     pub(crate) spring_cell: Option<(u32, u32, u32)>,
+    /// **A cache, not state:** the void cells that hold free water, and the porous cells
+    /// that hold pore water — the active sets the water phases iterate instead of the
+    /// grid (`design/7_Research/voxel-tick-profile-2026-09-18.md`). Maintained by the
+    /// store primitives that write the arrays; **not serialized**, so a decoded world
+    /// rebuilds them on its first step, and equality is set equality.
+    #[serde(skip)]
+    pub(crate) wet: crate::sparse::CellSet,
+    #[serde(skip)]
+    pub(crate) damp: crate::sparse::CellSet,
 }
 
 impl World {
@@ -300,11 +309,16 @@ impl World {
             ledger: Ledger::default(),
             outlet_cell: None,
             spring_cell: None,
+            wet: crate::sparse::CellSet::default(),
+            damp: crate::sparse::CellSet::default(),
             config,
         };
         crate::generate::landform(&mut world);
         world.aquifer_m3 = world.config.aquifer_volume_for_head(world.config.initial_aquifer_head_m);
         world.ledger.initial_stored = world.view().stored_m3();
+        // The active sets are built here rather than lazily so that a world is never in a
+        // state where its cache disagrees with its arrays.
+        world.rebuild_active_sets();
         world
     }
 
@@ -330,11 +344,14 @@ impl World {
             ledger: Ledger::default(),
             outlet_cell: None,
             spring_cell: None,
+            wet: crate::sparse::CellSet::default(),
+            damp: crate::sparse::CellSet::default(),
             material,
             config,
         };
         world.aquifer_m3 = world.config.aquifer_volume_for_head(world.config.initial_aquifer_head_m);
         world.ledger.initial_stored = world.view().stored_m3();
+        world.rebuild_active_sets();
         world
     }
 
@@ -411,6 +428,23 @@ impl World {
     /// [`crate::water::apply`] for the whole receipt contract.
     pub fn apply(&mut self, command: Command) -> f64 {
         crate::water::apply(self, command)
+    }
+
+    /// Rebuild the water active sets from the arrays, which is the only thing that can
+    /// re-establish them after a snapshot, generation, or any other direct write. One
+    /// full scan; the step calls it when a set says it is stale.
+    pub(crate) fn rebuild_active_sets(&mut self) {
+        let n = self.config.cells();
+        self.wet.reset(n);
+        self.damp.reset(n);
+        for i in 0..n {
+            if !self.material[i].is_solid() && self.free[i] > 0.0 {
+                self.wet.insert(i);
+            }
+            if self.material[i].pore_capacity() > 0.0 && self.pore[i] > 0.0 {
+                self.damp.insert(i);
+            }
+        }
     }
 
     /// Serialize the whole world. Refuses nothing; `load` refuses other schemas.

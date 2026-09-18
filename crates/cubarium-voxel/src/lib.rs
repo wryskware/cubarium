@@ -33,6 +33,7 @@ pub mod material;
 #[cfg(feature = "profile")]
 pub mod profile;
 pub mod snapshot;
+mod sparse;
 pub mod water;
 pub mod world;
 
