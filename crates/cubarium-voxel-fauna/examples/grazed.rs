@@ -184,7 +184,7 @@ struct Arm {
 /// are deduplicated per animal-tick — two stands of the same species at the same height in
 /// one reach set are one observation, not two, which is what R10.5 found double-counted.
 /// Intake is [`Receipts`], keyed on withdrawals that actually returned something.
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct CropAttempts {
     /// Crop-attempt animal-ticks by the height of the face the animal stood on.
     by_face_y: Vec<(u32, u64)>,
@@ -235,24 +235,45 @@ impl CropAttempts {
 /// reach is `contested` and booked to no face, because splitting it would mean
 /// reproducing `crop`'s own spending order in the harness. The report prints both, so the
 /// share the attribution covers is visible rather than assumed.
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct Receipts {
     /// Organic matter and receipts by the height of the face it was taken from.
     by_face_y: Vec<(u32, f64, u64)>,
     /// Organic matter by plant species and by `stand.y - face.y`.
     by_dy: Vec<(Species, i64, f64)>,
-    /// Attributed to one face, and left unattributed because more than one eater could
-    /// have taken it.
+    /// Attributed to one face, and left unattributed — because more than one eater could
+    /// have taken it, or because an eater that could have is no longer there to ask
+    /// (Astra R11.4).
     attributed: f64,
     contested: f64,
 }
 
 /// Book one tick's withdrawals. `taken` is every stand that lost foliage, with the species
 /// it is and the organic matter it lost; `croppers` are the animals whose state after the
-/// tick was `Cropping`, with the reach sets read before any of them ate.
-fn attribute(receipts: &mut Receipts, taken: &[(Site, Species, f64)], croppers: &[&Reading]) {
+/// tick was `Cropping`, with the reach sets read before any of them ate; `gone` are the
+/// pre-tick animals that are **no longer in the world** at the end of it.
+///
+/// **A disappeared eater takes its receipts with it (Astra R11.4).** The animal layer acts
+/// before it removes its dead, so a grazer can eat a whole mouthful and then starve or
+/// drown in the same tick — and it leaves no state for the harness to read, not even a
+/// final `State`. Any stand such an animal could reach is therefore **unattributed**:
+/// giving that loss to a survivor standing at a different height would put another
+/// animal's intake on the wrong face, which is exactly the reading this table exists for.
+/// It is deliberately conservative — an animal the terrain removed in step 1 never ate at
+/// all, and the harness cannot tell the two exits apart from outside — and it costs only
+/// attribution coverage, which the report prints.
+fn attribute(
+    receipts: &mut Receipts,
+    taken: &[(Site, Species, f64)],
+    croppers: &[&Reading],
+    gone: &[&Reading],
+) {
     for &(site, species, organic) in taken {
         if !(organic > 0.0) {
+            continue;
+        }
+        if gone.iter().any(|g| g.reach.iter().any(|&(s, _)| s == site)) {
+            receipts.contested += organic;
             continue;
         }
         let mut reached_by = croppers.iter().filter(|c| c.reach.iter().any(|&(s, _)| s == site));
@@ -485,13 +506,17 @@ fn arm(seconds: f64, grazers: usize, seed: u64, noise_seed: u64) -> (Arm, Vec<(S
         for r in &croppers {
             attempts.record(r.face, &r.reach);
         }
+        // Anything that ate and then left: `step` acts before it removes its dead, so a
+        // grazer can take a mouthful and drown in the same tick (R11.4).
+        let gone: Vec<&Reading> =
+            before.iter().filter(|r| fauna.view().animal(r.id).is_none()).collect();
         let taken: Vec<(Site, Species, f64)> = held
             .iter()
             .map(|&(site, species, foliage)| {
                 (site, species, foliage - flora.view().stand_at(site).map_or(0.0, |s| s.foliage))
             })
             .collect();
-        attribute(&mut receipts, &taken, &croppers);
+        attribute(&mut receipts, &taken, &croppers, &gone);
         if tick + 1 == half {
             // The introduction is **between** ticks, like every other command in this
             // world: the tick that follows is the first one the animals act in.
@@ -715,7 +740,8 @@ fn report(plain: &Arm, grazed: &Arm, seconds: f64) {
     let booked = grazed.receipts.attributed + grazed.receipts.contested;
     println!(
         "\nattributed {:.6} of {:.6} withdrawn ({:.1} %); contested {:.6} on stands more \
-         than one cropping animal could reach; the animal ledger's own eaten organic is \
+         than one cropping animal could reach, or that an animal which left the world this \
+         tick could have reached; the animal ledger's own eaten organic is \
          {:.6}, so the receipts account for every unit that left a stand",
         grazed.receipts.attributed,
         booked,
@@ -727,8 +753,10 @@ fn report(plain: &Arm, grazed: &Arm, seconds: f64) {
         "(a receipt is foliage that actually left a stand, so an empty withdrawal is not in \
          here at all. Nothing but an animal takes foliage between the plant step and the \
          animal step, which is why the loss is the receipt; a stand exactly one cropping \
-         animal could reach is booked to that animal's face, and one that several could is \
-         left unattributed rather than split by a rule the model owns.)"
+         animal could reach is booked to that animal's face, and one that several could — \
+         or that an animal which died or drowned this tick could, having eaten before the \
+         layer removed it — is left unattributed rather than split or handed to a survivor \
+         at another height.)"
     );
 
     println!("\n## the two ledgers, and the residuals\n");
@@ -834,6 +862,7 @@ mod tests {
                 (site(5, 2), Species::Springturf, 0.0),
             ],
             &croppers,
+            &[],
         );
 
         assert_eq!(receipts.by_face_y, vec![(2, 1e-4, 1), (3, 2e-4, 1)]);
@@ -847,8 +876,51 @@ mod tests {
 
         // A stand nobody who cropped could reach is not attributed either.
         let mut orphan = Receipts::default();
-        attribute(&mut orphan, &[(site(20, 2), Species::Springturf, 7e-5)], &croppers);
+        attribute(&mut orphan, &[(site(20, 2), Species::Springturf, 7e-5)], &croppers, &[]);
         assert_eq!((orphan.attributed, orphan.contested), (0.0, 7e-5));
         assert!(orphan.by_face_y.is_empty());
+    }
+
+    /// **R11.4: an animal that ate and then drowned does not hand its intake to a
+    /// survivor.** Two grazers on faces of different heights can reach one stand: the
+    /// lower one crops it and drowns in the same tick — `step` acts before it removes its
+    /// dead — and the harness sees only the survivor, whose face is a voxel higher. That
+    /// loss is now **unattributed** rather than booked to the survivor's height, which
+    /// would have put one animal's mouthful on another animal's face in the very table
+    /// that exists to read heights.
+    ///
+    /// The control is the same geometry with nobody gone: a survivor that merely rested
+    /// does not block the attribution, so the rule keys on *disappearing* and not on
+    /// having failed to crop.
+    #[test]
+    fn a_receipt_an_animal_that_left_the_world_could_have_taken_is_unattributed() {
+        let stand = site(5, 2);
+        let lower = reading(0, stand, &[(stand, Species::Springturf)]);
+        let higher = reading(1, site(6, 3), &[(stand, Species::Springturf)]);
+        let taken = [(stand, Species::Springturf, 1e-4)];
+
+        // The lower one ate and drowned; the higher one survived and cropped.
+        let mut drowned = Receipts::default();
+        attribute(&mut drowned, &taken, &[&higher], &[&lower]);
+        assert_eq!((drowned.attributed, drowned.contested), (0.0, 1e-4));
+        assert!(
+            drowned.by_face_y.is_empty() && drowned.by_dy.is_empty(),
+            "nothing may land on the survivor's face: {drowned:?}",
+        );
+
+        // The control: the lower one is still there, resting, and the survivor's receipt
+        // is its own.
+        let mut alive = Receipts::default();
+        attribute(&mut alive, &taken, &[&higher], &[]);
+        assert_eq!((alive.attributed, alive.contested), (1e-4, 0.0));
+        assert_eq!(alive.by_face_y, vec![(3, 1e-4, 1)]);
+        assert_eq!(alive.by_dy, vec![(Species::Springturf, -1, 1e-4)]);
+
+        // And a stand the departed animal could not reach is unaffected by its exit.
+        let far = site(20, 2);
+        let mut mixed = Receipts::default();
+        let reacher = reading(2, site(20, 2), &[(far, Species::Springturf)]);
+        attribute(&mut mixed, &[(far, Species::Springturf, 3e-5)], &[&reacher], &[&lower]);
+        assert_eq!((mixed.attributed, mixed.contested), (3e-5, 0.0));
     }
 }
