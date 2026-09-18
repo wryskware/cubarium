@@ -7,6 +7,16 @@
 //! running (pause, single-step, speed, rain, set a cell's material, save, load, inspect,
 //! outlet, quit).
 //!
+//! **`w` and `l` are terrain only** (Astra R9.6). `World::save`/`World::load` carry the
+//! voxels, the water and the world's own tick, and **nothing** of the plant or animal
+//! layers: there is no atomic world/flora/fauna envelope yet, and the plant layer does not
+//! serialize at all. So `l` is refused in place whenever this run holds ecology state — any
+//! stand, any animal, any provisioned ground, any seed bank, any nonzero ecological ledger
+//! — because restoring another world's terrain under living stands would leave them
+//! standing on water and rock they never grew in, with their ledgers still describing the
+//! terrain that is gone. A terrain snapshot is resumed with `--load PATH` at startup, which
+//! begins the ecology fresh on it, and that is what the refusal says.
+//!
 //! `--speed` scales world ticks per clock tick through an accumulator, so a fractional
 //! speed slows the world down without touching the clock: the picture is still drawn at
 //! `--fps` and the simulation still advances in whole 20 Hz ticks.
@@ -43,10 +53,10 @@ use cubarium_render::Canvas;
 use cubarium_surface::{Scale, Topology};
 use cubarium_voxel::{Command as VoxelCommand, Material, World};
 use cubarium_voxel_fauna::{
-    Command as FaunaCommand, Fauna, FaunaConfig, Species as Beast,
+    Command as FaunaCommand, Fauna, FaunaConfig, FaunaLedger, Species as Beast,
 };
 use cubarium_voxel_flora::{
-    Command as FloraCommand, Flora, FloraConfig, Site, Species,
+    Command as FloraCommand, Flora, FloraConfig, FloraLedger, Site, Species,
 };
 use serde::{Deserialize, Serialize};
 
@@ -65,8 +75,9 @@ const COMMANDS: &str = "p pause/resume, s step, +/- speed, r [m3] rain, a M3 cha
                         f X Z bloomcrown|umbrellafrond [wood] seed a stand, \
                         c X Z clear a stand, \
                         g X Z frondgrazer [body] introduce an animal, \
-                        w PATH save, \
-                        l PATH load, i X Y Z inspect, o outlet, q quit";
+                        w PATH save the terrain only, \
+                        l PATH load a terrain only (refused once anything is alive), \
+                        i X Y Z inspect, o outlet, q quit";
 
 /// Default rain volume for the `r` command, in cubic metres.
 const DEFAULT_RAIN_M3: f64 = 1.0;
@@ -521,36 +532,61 @@ impl Control {
                 );
             }
             "w" | "save" => match rest.first() {
+                // Terrain only, and the message says so: `World::save` holds the voxels,
+                // the water and the world's tick, and neither layer of the ecology.
                 Some(path) => match std::fs::write(path, world.save()) {
-                    Ok(()) => eprintln!("cubarium voxel: saved {path}"),
+                    Ok(()) => eprintln!(
+                        "cubarium voxel: saved {path} — terrain and water only, no plants \
+                         and no animals"
+                    ),
                     Err(e) => eprintln!("cubarium voxel: saving {path}: {e}"),
                 },
-                None => eprintln!("cubarium voxel: `w PATH` needs a path"),
+                None => eprintln!("cubarium voxel: `w PATH` needs a path (terrain only)"),
             },
             "l" | "load" => match rest.first() {
-                Some(path) => match std::fs::read(path).map_err(anyhow::Error::from).and_then(|b| World::load(&b)) {
-                    Ok(loaded) => {
-                        // The projection is fixed for the life of the run, so a world of
-                        // a different shape would draw into the wrong raster.
-                        let c = loaded.config();
-                        if (c.width, c.height, c.depth)
-                            != (self.proj.width, self.proj.height, self.proj.depth)
-                        {
-                            eprintln!(
-                                "cubarium voxel: {path} is {}x{}x{}, this run draws {}x{}x{}; \
-                                 restart with a matching config",
-                                c.width, c.height, c.depth,
-                                self.proj.width, self.proj.height, self.proj.depth
-                            );
-                        } else {
-                            *world = loaded;
-                            self.outlet = world.outlet_open();
-                            eprintln!("cubarium voxel: loaded {path} at tick {}", world.tick());
-                        }
+                Some(path) => {
+                    // A terrain load is not an ecosystem restore (Astra R9.6): refuse it
+                    // in place while anything of the ecology is standing, and say what.
+                    if let Some(why) = ecology_state(flora, fauna) {
+                        eprintln!(
+                            "cubarium voxel: `l` loads the **terrain only** and this run has \
+                             {why}; an in-place load would leave them on another world's \
+                             terrain with ledgers describing this one. Restart with \
+                             `--load {path}`, which starts the ecology fresh on that terrain."
+                        );
+                        return;
                     }
-                    Err(e) => eprintln!("cubarium voxel: loading {path}: {e:#}"),
-                },
-                None => eprintln!("cubarium voxel: `l PATH` needs a path"),
+                    let read = std::fs::read(path)
+                        .map_err(anyhow::Error::from)
+                        .and_then(|b| World::load(&b));
+                    match read {
+                        Ok(loaded) => {
+                            // The projection is fixed for the life of the run, so a world
+                            // of a different shape would draw into the wrong raster.
+                            let c = loaded.config();
+                            if (c.width, c.height, c.depth)
+                                != (self.proj.width, self.proj.height, self.proj.depth)
+                            {
+                                eprintln!(
+                                    "cubarium voxel: {path} is {}x{}x{}, this run draws \
+                                     {}x{}x{}; restart with a matching config",
+                                    c.width, c.height, c.depth,
+                                    self.proj.width, self.proj.height, self.proj.depth
+                                );
+                            } else {
+                                *world = loaded;
+                                self.outlet = world.outlet_open();
+                                eprintln!(
+                                    "cubarium voxel: loaded the terrain of {path} at tick \
+                                     {} — the plants and the animals are this run's own",
+                                    world.tick()
+                                );
+                            }
+                        }
+                        Err(e) => eprintln!("cubarium voxel: loading {path}: {e:#}"),
+                    }
+                }
+                None => eprintln!("cubarium voxel: `l PATH` needs a path (terrain only)"),
             },
             "i" | "inspect" => {
                 let Some((x, y, z)) = coords(world, "i X Y Z", &rest) else { return };
@@ -719,6 +755,39 @@ impl Control {
 /// `x` wraps — the strip is a ring and has no end to fall off — so any integer is a
 /// column. `y` and `z` have real ends, so one outside the world is refused and named
 /// rather than folded into a cell the caller did not mean.
+/// What a terrain-only load would leave standing, in words, or `None` when this run holds
+/// no ecology at all and `World::load` can safely replace the terrain under it.
+///
+/// Astra R9.6: `World::save`/`World::load` carry the voxels, the water and the world's
+/// tick, and neither layer of the ecology — so an in-place load against living stands is
+/// not a restore of anything. The checks are the review's list: any stand, any animal, any
+/// seed bank, any provisioned ground, and a nonzero ledger on either layer (compared
+/// against `Default`, so a term added later is covered without touching this).
+fn ecology_state(flora: &Flora, fauna: &Fauna) -> Option<String> {
+    let fv = flora.view();
+    let av = fauna.view();
+    if !fv.stands.is_empty() {
+        return Some(format!("{} stand(s) growing", fv.stands.len()));
+    }
+    if !av.animals.is_empty() {
+        return Some(format!("{} animal(s) alive", av.animals.len()));
+    }
+    let banks = fv.ground.iter().filter(|g| !g.seeds.is_empty()).count();
+    if banks > 0 {
+        return Some(format!("{banks} site(s) holding a seed bank"));
+    }
+    if !fv.ground.is_empty() {
+        return Some(format!("{} provisioned ground site(s)", fv.ground.len()));
+    }
+    if *fv.ledger != FloraLedger::default() {
+        return Some("a nonzero plant ledger".to_string());
+    }
+    if *av.ledger != FaunaLedger::default() {
+        return Some("a nonzero animal ledger".to_string());
+    }
+    None
+}
+
 fn coords(world: &World, usage: &str, rest: &[&str]) -> Option<(i64, u32, u32)> {
     let triple = (
         rest.first().and_then(|t| t.parse::<i64>().ok()),
@@ -918,6 +987,83 @@ mod tests {
         ctl.handle(&mut world, &mut flora, &mut fauna, "i 0 0 0");
         ctl.handle(&mut world, &mut flora, &mut fauna, "q");
         assert!(ctl.quit);
+    }
+
+    /// **R9.6: `w` and `l` are terrain only, and an in-place load is refused while
+    /// anything of the ecology is standing.** A saved terrain, one edited cell, and then a
+    /// stand: `l` refuses and the edit survives, because loading would have put the stand
+    /// on another world's terrain with its ledger still describing this one. The same
+    /// bytes load into a run that holds no ecology, which is what `--load` does at startup.
+    #[test]
+    fn a_terrain_load_is_refused_while_the_ecology_is_standing() {
+        let c = cubarium_voxel::Config { width: 16, height: 8, depth: 2, ..Default::default() };
+        let proj = Projection::new(30.0, 4, 0, &c).unwrap();
+        let path = std::env::temp_dir()
+            .join(format!("cubarium-voxel-terrain-{}.bin", std::process::id()));
+        let at = path.to_str().expect("a utf-8 temp path").to_string();
+
+        let mut world = World::empty(c.clone());
+        let mut flora = Flora::new(FloraConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut ctl = Control::new(1.0, proj);
+        assert_eq!(ecology_state(&flora, &fauna), None, "a fresh run holds no ecology");
+
+        ctl.handle(&mut world, &mut flora, &mut fauna, &format!("w {at}"));
+        assert!(path.exists(), "the terrain was saved");
+
+        // A cell edited after the save, so a load that happened would be visible.
+        ctl.handle(&mut world, &mut flora, &mut fauna, "m 3 2 1 soil");
+        assert_eq!(world.view().material_at(3, 2, 1), Material::Soil);
+
+        // Something alive. `f` seeds a stand on the column's highest support face.
+        ctl.handle(&mut world, &mut flora, &mut fauna, "f 3 1 bloomcrown");
+        assert_eq!(flora.view().stands.len(), 1, "a stand is standing");
+        assert!(ecology_state(&flora, &fauna).unwrap().contains("stand"));
+
+        ctl.handle(&mut world, &mut flora, &mut fauna, &format!("l {at}"));
+        assert_eq!(
+            world.view().material_at(3, 2, 1),
+            Material::Soil,
+            "the load was refused and the world was left alone"
+        );
+        assert_eq!(flora.view().stands.len(), 1, "and so was the stand");
+
+        // Ground and a nonzero ledger are enough on their own: clearing the stand leaves
+        // both, and the refusal stands.
+        ctl.handle(&mut world, &mut flora, &mut fauna, "c 3 1");
+        assert!(flora.view().stands.is_empty());
+        let why = ecology_state(&flora, &fauna).expect("the ground and the ledger remain");
+        assert!(why.contains("ground") || why.contains("ledger"), "{why}");
+        ctl.handle(&mut world, &mut flora, &mut fauna, &format!("l {at}"));
+        assert_eq!(world.view().material_at(3, 2, 1), Material::Soil, "still refused");
+
+        // The same bytes into a run with no ecology in it: accepted, and the edit is gone.
+        let mut fresh_flora = Flora::new(FloraConfig::default());
+        let mut fresh_fauna = Fauna::new(FaunaConfig::default());
+        ctl.handle(&mut world, &mut fresh_flora, &mut fresh_fauna, &format!("l {at}"));
+        assert_eq!(
+            world.view().material_at(3, 2, 1),
+            Material::Air,
+            "the terrain came back as it was saved"
+        );
+
+        // And an animal alone is enough to refuse.
+        ctl.handle(&mut world, &mut fresh_flora, &mut fresh_fauna, "m 3 2 1 soil");
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        assert!(fauna.apply(&world, FaunaCommand::Introduce {
+            x: 3,
+            z: 1,
+            species: Beast::Frondgrazer,
+            body: 0.02,
+        }));
+        let mut flora = Flora::new(FloraConfig::default());
+        assert!(ecology_state(&flora, &fauna).unwrap().contains("animal"));
+        ctl.handle(&mut world, &mut flora, &mut fauna, &format!("l {at}"));
+        assert_eq!(world.view().material_at(3, 2, 1), Material::Soil, "refused for the animal");
+
+        let _ = std::fs::remove_file(&path);
+        // Both help texts say what the two commands carry.
+        assert!(COMMANDS.contains("terrain"), "{COMMANDS}");
     }
 
     /// Terrain editing from stdin: paused, `m` changes one cell, and the `i` that follows

@@ -439,6 +439,26 @@ pub struct SpeciesConfig {
     /// before a spore cohort may germinate there. **Placeholder**; inert on a `Photo`
     /// species, whose substrate gate is open by construction.
     pub establish_substrate_min: f64,
+    /// **Saprotroph only.** How many support-face rows **up and down** the mycelium box
+    /// reaches from the stand's own face: the vertical reach of *substrate access*, and
+    /// nothing to do with water. **Placeholder 1** (`design/backlog.md` §1); inert on a
+    /// [`Trophic::Photo`] species, which never walks the box.
+    ///
+    /// Astra R9.3, and a rule decision rather than a repair. The box used to borrow
+    /// `rooting_depth`'s geometry, which reaches only **down**, so at `rooting_depth` 1 the
+    /// box was the stand's own row alone: a spore landing one voxel above or below a full
+    /// log had no wood in its box, and the round-5b `community` run refused all three of
+    /// its landings on exactly that (`design/7_Research/voxel-round3-experiment-2026-09-16.md`,
+    /// "Round 5b"). Mycelium in a log is not a root in soil and has no reason to share the
+    /// root box's downward asymmetry, so substrate access now has its own **symmetric**
+    /// reach, and the soil-water box is left exactly as it was — raising `rooting_depth`
+    /// would have moved the water too and still only repaired one direction.
+    ///
+    /// Sideways the box is still `rooting_radius`, and blind paid landing plus
+    /// germination-time selection are unchanged: a spore lands on the highest support face
+    /// of a column inside its `hop` and the gates are read *there*, so a grove still ends
+    /// where the wood does.
+    pub substrate_reach_up_down: u32,
     /// `α`: foliage the structure can carry, `P_cap = α · W`.
     pub alpha: f64,
     /// `W_max`: the most living wood one stand can hold.
@@ -534,6 +554,11 @@ pub struct SpeciesConfig {
     /// magnitude tighter**, so the stock cap cannot be the binding one for any positive
     /// `N`: `n_tissue` sets the stoichiometry of the draw and the density of the tissue,
     /// and not the ceiling on income.
+    ///
+    /// For a [`Trophic::Saprotroph`] it **is** a ceiling on growth (Astra R9.1): a fungus's
+    /// income carries its own mineral out of the log, and what it may build in a tick is
+    /// `(arriving mineral + the site's pool) / n_tissue`. Unfunded income is respired where
+    /// every other unspent unit is. `step`'s §4.4a is the rule.
     pub n_tissue: f64,
     /// `q_share`: share of every tick's surplus that goes to the reserve first.
     pub reserve_share: f64,
@@ -673,6 +698,9 @@ impl SpeciesConfig {
             substrate_uptake_per_s: 0.0,
             substrate_yield: 0.0,
             establish_substrate_min: 0.0,
+            // One row up and one down, for a species that ever walks the box. Inert here:
+            // a `Photo` species never does.
+            substrate_reach_up_down: 1,
             alpha: 2.0,
             wood_max: 0.6,
             reserve_cap: 0.5,
@@ -1053,12 +1081,17 @@ impl SpeciesConfig {
     ///   the other way for this species. Its `stress_rate_per_s` 0.1 and `relax_rate_per_s`
     ///   0.05 are therefore **inert on the income** and kept only because the stress is
     ///   still tracked and drawn.
-    /// - **The box.** `rooting_depth` 1 and `rooting_radius` 1: the mycelium box is the nine
-    ///   support faces of its own level, its own included, and it reaches no deeper — so the
-    ///   root box's downward-only asymmetry cannot arise for this species. Water is read off
-    ///   the *soil voxels* of the same box, as every stand's is, which is why a glowcap on
-    ///   bare rock has `μ = 0` and starves however much wood is on the rock: one water read
-    ///   for every stand is the model's rule and a fungus is not exempted from it here.
+    /// - **The box.** `substrate_reach_up_down` 1 and `rooting_radius` 1: the mycelium box
+    ///   is the twenty-seven support faces within one row of its own — its own level, the
+    ///   row above and the row below — so a log one voxel up or down a step is in reach of
+    ///   the mycelium and a log two rows away is not (Astra R9.3; before it the box was the
+    ///   nine faces of its own row alone, and a grove could not cross a one-voxel step in
+    ///   either direction). Water is read off
+    ///   the *soil voxels* of the `rooting_depth` root box, as every stand's is, which is why
+    ///   a glowcap on bare rock has `μ = 0` and starves however much wood is on the rock:
+    ///   one water read for every stand is the model's rule and a fungus is not exempted
+    ///   from it here. **Bare rock means no soil voxel anywhere in that box** — a rock face
+    ///   with a soil pocket inside the box reads that pocket's water and is not bare.
     ///   `transpiration_m3_per_s` **0.0** — it reads the moisture and withdraws nothing, so
     ///   a fungus takes no water away from the plants it lives among.
     /// - **Small and cheap.** `wood_max` 0.1, `alive_min` 0.01, `donor_min` 0.05 —
@@ -1632,9 +1665,10 @@ impl<'a> FloraView<'a> {
     /// a saprotroph's income is drawn from. **Zero for a [`Trophic::Photo`] species**,
     /// which never asks.
     ///
-    /// The box is the root box's geometry — `rooting_depth` down and `rooting_radius`
-    /// sideways, `x` wrapped and `z` clipped — read as **support sites** rather than as
-    /// soil voxels, because a ground stock lives one per support face.
+    /// The box is `substrate_reach_up_down` rows up **and** down and `rooting_radius`
+    /// sideways, `x` wrapped and `z` clipped, read as **support sites** rather than as soil
+    /// voxels, because a ground stock lives one per support face. Its vertical reach is its
+    /// own species field and not the soil-water root box's (Astra R9.3).
     pub fn dead_wood_in_box(
         &self,
         world: &VoxelView<'_>,

@@ -181,6 +181,113 @@ fn foliage_two_voxels_up_is_not_eaten() {
     assert_eq!(fauna.view().ledger.steps, 0);
 }
 
+// ------------------------------------------------ R9.1: the mineral budget of a bite
+
+/// A flora config whose springturf tissue holds `n_tissue` of mineral per unit, so a test
+/// can say what a bite carries. Nothing else moves, and the **animal's** knobs are the
+/// placeholders throughout.
+fn flora_with_plant_mineral(n_tissue: f64) -> Flora {
+    let mut config = FloraConfig::default();
+    config.species_mut(Plant::Springturf).n_tissue = n_tissue;
+    Flora::new(config)
+}
+
+/// **R9.1, the zero-mineral bite.** A turf whose tissue holds no mineral at all is food
+/// with no nutrient in it: the grazer takes its whole mouthful, respires every unit of it
+/// with the energy that came in it, pays its upkeep out of its reserve, and **builds
+/// nothing** — although it is itself carrying `n_tissue · organic` of mineral from the day
+/// it was introduced. That inventory is not a reserve growth may draw on.
+#[test]
+fn a_mineral_free_bite_builds_nothing_and_is_respired_whole() {
+    let world = plain(8, 2, 0.3, 5);
+    let mut flora = flora_with_plant_mineral(0.0);
+    turf(&mut flora, &world, 3);
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let id = grazer(&mut fauna, &world, 2, 0.02);
+    let sc = *fauna.config().species(Species::Frondgrazer);
+    let before = *fauna.view().animal(id).unwrap();
+    assert!(before.mineral > 0.0, "it arrived with mineral in its tissue");
+
+    fauna.step(&world, &mut flora);
+
+    let v = fauna.view();
+    let a = *v.animal(id).unwrap();
+    let bite = sc.bite_per_s * DT;
+    assert!((v.ledger.eaten_organic_in - bite).abs() < 1e-18, "it ate one whole bite");
+    assert_eq!(v.ledger.eaten_mineral_in, 0.0, "and the bite carried no mineral");
+    assert_eq!(a.body, before.body, "nothing was built");
+    let upkeep = sc.maintenance_per_s * before.body * DT;
+    assert!(
+        (a.reserve - (before.reserve - upkeep)).abs() <= 1e-12 * before.reserve,
+        "the reserve paid the upkeep and gained nothing: {a:?}"
+    );
+    assert_eq!(a.mineral, before.mineral, "its own mineral is an inventory, not a reserve");
+    assert!(
+        (v.ledger.respired_out - (bite + upkeep)).abs() <= 1e-12 * bite,
+        "the whole bite and the upkeep were respired: {}",
+        v.ledger.respired_out
+    );
+    // Its own energy fell only by the upkeep's own heat, at its own density: none of the
+    // bite's energy stayed, because none of the bite's organic matter did.
+    let e_density = before.energy / before.organic();
+    assert!(
+        (a.energy - (before.energy - e_density * upkeep)).abs() <= 1e-12 * before.energy,
+        "{a:?}"
+    );
+    let heat = v.ledger.eaten_energy_in + e_density * upkeep;
+    assert!((v.ledger.heat_out - heat).abs() <= 1e-12 * heat, "heat {}", v.ledger.heat_out);
+    assert_eq!(v.ledger.deposited_mineral_out, 0.0, "there was nothing to excrete");
+    assert_residual_pair(&flora, &fauna, "after a mineral-free bite");
+}
+
+/// **R9.1, the partially funded bite.** The placeholders themselves: a plant's foliage
+/// holds `n_tissue` 0.02 and this animal's tissue wants 0.05, so a `1e-4` bite brings
+/// `2e-6` of mineral and funds `4e-5` of tissue where `yield_fraction` 0.5 would have
+/// built `5e-5`. The growth is exactly `mineral / n_tissue`, the difference is respired
+/// with its energy, and every unit of the bite's mineral ends up in the new tissue with
+/// nothing left over to excrete. **No grazer knob is touched.**
+#[test]
+fn a_partly_mineralised_bite_builds_exactly_what_its_mineral_funds() {
+    let world = plain(8, 2, 0.3, 5);
+    let mut flora = Flora::new(FloraConfig::default());
+    turf(&mut flora, &world, 3);
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let id = grazer(&mut fauna, &world, 2, 0.02);
+    let sc = *fauna.config().species(Species::Frondgrazer);
+    let before = *fauna.view().animal(id).unwrap();
+    assert!(before.body < sc.body_max, "there is room to grow into");
+
+    fauna.step(&world, &mut flora);
+
+    let v = fauna.view();
+    let a = *v.animal(id).unwrap();
+    let bite = v.ledger.eaten_organic_in;
+    let mineral = v.ledger.eaten_mineral_in;
+    assert!((bite - 1e-4).abs() < 1e-18 && (mineral - 2e-6).abs() < 1e-18, "{bite} / {mineral}");
+    let funded = mineral / sc.n_tissue;
+    assert!(
+        (funded - 4e-5).abs() <= 1e-12 * funded && funded < sc.yield_fraction * bite,
+        "the mineral funds {funded} of the {} the yield would build",
+        sc.yield_fraction * bite
+    );
+    // All of it went into the body, which had room for it.
+    let built = a.body - before.body;
+    assert!((built - funded).abs() <= 1e-9 * funded, "it built {built} and not {funded}");
+    assert_eq!(a.reserve, before.reserve - sc.maintenance_per_s * before.body * DT);
+    // The mineral: all of it kept, none excreted, none created.
+    assert!((a.mineral - (before.mineral + mineral)).abs() <= 1e-12 * a.mineral);
+    assert_eq!(v.ledger.deposited_mineral_out, 0.0, "nothing was left over to excrete");
+    // And what was not built was respired with the energy that came in with it.
+    let upkeep = sc.maintenance_per_s * before.body * DT;
+    assert!(
+        (v.ledger.respired_out - (bite - built + upkeep)).abs() <= 1e-12 * bite,
+        "respired {} of {}",
+        v.ledger.respired_out,
+        bite - built + upkeep
+    );
+    assert_residual_pair(&flora, &fauna, "after a partly funded bite");
+}
+
 // ------------------------------------------------------- maintenance and death
 
 /// The upkeep is paid out of the reserve while there is one, and out of the body after
@@ -309,6 +416,117 @@ fn a_step_crosses_neither_a_wall_nor_a_pool() {
     assert!(fauna.view().ledger.bites > 0, "and ate when it got there");
 }
 
+// ------------------------------------------------- R9.5: sensing in face coordinates
+
+/// A bloomcrown founder at half its own `wood_max`: wood 0.3, foliage `α · W` = 0.6, and a
+/// crown whose lowest cell is **two** voxels above its support face, so a browser with
+/// `reach.up` 1 can only eat it from a face at least one voxel higher than the stand's.
+fn bloom(flora: &mut Flora, world: &World, x: i64) {
+    let wood = 0.5 * flora.config().bloomcrown.wood_max;
+    assert!(
+        flora.apply(world, FloraCommand::Seed { x, z: 0, species: Plant::Bloomcrown, wood }),
+        "a bloomcrown founder at x {x}"
+    );
+    assert_eq!(flora.config().bloomcrown.crown_voxels(wood), 2, "the fixture's premise");
+}
+
+/// **R9.5, Astra's case: a feeding face outside the sensing radius is not selectable.**
+/// Width 40, depth 1, a grazer on `(10,2)`, a bloomcrown founder on `(18,2)` — eight
+/// columns away, inside `sense_radius` 8 — and the **only** face its crown can be eaten
+/// from is the raised `(19,3)`, nine columns away and outside it. The old stand-centre
+/// prefilter admitted that face because the *stand* was inside the radius; the face-domain
+/// rule refuses it, and the animal has nothing to walk to.
+///
+/// Three arms: the refusal, the same fixture translated across the `x` seam, and the same
+/// fixture at `sense_radius` 9 — this test's own number — where the face *is* a candidate
+/// and the walk happens, so the refusal is about the radius and not about the geometry.
+#[test]
+fn a_feeding_face_outside_the_sensing_radius_is_not_selectable() {
+    /// One arm: a grazer at `gx`, a bloomcrown at `bx`, the sole raised face at `bx + 1`.
+    /// Returns where the animal ended up, its state, and the bites and steps it took.
+    fn arm(gx: i64, bx: i64, radius: u32) -> (Site, State, u64, u64) {
+        let mut world = plain(40, 2, 0.3, 5);
+        let raised = (bx + 1).rem_euclid(40);
+        raise(&mut world, raised, 2, 3, 0.3);
+        let mut flora = Flora::new(FloraConfig::default());
+        bloom(&mut flora, &world, bx);
+        let mut fauna = Fauna::new(config_with(|s| s.sense_radius = radius));
+        let sc = *fauna.config().species(Species::Frondgrazer);
+        let id = grazer(&mut fauna, &world, gx, 0.02);
+
+        // The premise, from the model's own reach query: the crown is food from the raised
+        // face and from nowhere else in the world.
+        let fv = flora.view();
+        let from_raised =
+            fv.reachable_foliage(&world.view(), at(raised as u32, 3), sc.reach).len();
+        assert_eq!(from_raised, 1, "the crown is reachable from the raised face");
+        for x in 0..40u32 {
+            if x == raised as u32 {
+                continue;
+            }
+            assert!(
+                fv.reachable_foliage(&world.view(), at(x, 2), sc.reach).is_empty(),
+                "({x},2) must not reach the crown"
+            );
+        }
+
+        for _ in 0..400 {
+            fauna.step(&world, &mut flora);
+        }
+        let a = *fauna.view().animal(id).expect("it neither starved nor drowned");
+        (a.site, a.state, fauna.view().ledger.bites, fauna.view().ledger.steps)
+    }
+
+    // The refusal: nine columns is outside a radius of eight, so it rests where it stands.
+    let (site, state, bites, steps) = arm(10, 18, 8);
+    assert_eq!(site, at(10, 2), "it did not move: {site:?}");
+    assert_eq!(state, State::Resting);
+    assert_eq!((bites, steps), (0, 0), "nothing sensed, nothing eaten");
+
+    // The same case translated across the seam: `x` wraps, so 32 → 1 is nine columns the
+    // short way round and the answer cannot depend on where the seam is.
+    let (site, state, bites, steps) = arm(32, 0, 8);
+    assert_eq!(site, at(32, 2), "across the seam too: {site:?}");
+    assert_eq!(state, State::Resting);
+    assert_eq!((bites, steps), (0, 0));
+
+    // Not vacuous: at a radius of nine the raised face is a candidate, and the animal
+    // walks to it and eats.
+    let (site, _, bites, steps) = arm(10, 18, 9);
+    assert!(steps > 0 && bites > 0, "at radius 9 it walked and ate: {site:?} {steps} {bites}");
+    assert_eq!(site.y, 3, "and it is standing on the raised face: {site:?}");
+}
+
+/// **R9.5, the other direction: a stand outside the radius whose feeding face is inside it
+/// is found.** A springturf founder on `(19,2)` is nine columns from a grazer on `(10,2)`
+/// and the stand-centre prefilter dropped it, although `(18,2)` — eight columns away, well
+/// inside `sense_radius` 8 — reaches it. Scoring candidate faces finds it, and the animal
+/// walks over and eats.
+#[test]
+fn a_stand_outside_the_radius_is_found_through_a_face_inside_it() {
+    let world = plain(40, 2, 0.3, 5);
+    let mut flora = Flora::new(FloraConfig::default());
+    turf(&mut flora, &world, 19);
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let sc = *fauna.config().species(Species::Frondgrazer);
+    let id = grazer(&mut fauna, &world, 10, 0.02);
+    // The premise: nothing is in reach where it stands, the stand is nine columns away,
+    // and the nearest face that reaches it is eight.
+    let fv = flora.view();
+    assert!(fv.reachable_foliage(&world.view(), at(10, 2), sc.reach).is_empty());
+    assert_eq!(fv.reachable_foliage(&world.view(), at(18, 2), sc.reach).len(), 1);
+    assert_eq!(sc.sense_radius, 8, "the placeholder this case is about");
+
+    for _ in 0..400 {
+        fauna.step(&world, &mut flora);
+    }
+
+    let a = *fauna.view().animal(id).expect("it is still alive");
+    assert!(fauna.view().ledger.steps > 0, "it walked: {a:?}");
+    assert!(fauna.view().ledger.bites > 0, "and it ate when it got there");
+    assert_residual_pair(&flora, &fauna, "after walking to a stand outside the radius");
+}
+
 // ----------------------------------------------------------------- the newborn
 
 /// A birth is paid out of the parent's reserve, exactly `birth_cost` of it, and the
@@ -338,6 +556,19 @@ fn a_birth_pays_birth_cost_and_the_newborn_is_at_body_min() {
     let newborn = fauna.view().animals.iter().find(|a| a.id != parent).copied().unwrap();
     assert_eq!(newborn.body, sc.body_min);
     assert!((newborn.reserve - (sc.birth_cost - sc.body_min)).abs() < 1e-15);
+    // **The named exception to `reserve_cap` (Astra R9.4).** `birth_cost - body_min` is
+    // 0.005 and `reserve_cap · body_min` is 0.0025, so a newborn starts with twice the
+    // reserve its own body would take in as intake. That is deliberate: the parcel is what
+    // the parent actually paid out of its reserve, and clamping it would destroy organic
+    // matter. `reserve_cap` is the ceiling on **new intake** and not a storage bound, and
+    // `a_newborn_s_endowment_sits_above_the_intake_ceiling_and_is_spent_normally` pins
+    // both halves of that contract.
+    assert!(
+        newborn.reserve > sc.reserve_of(newborn.body),
+        "the endowment is above the intake ceiling by design: {} against {}",
+        newborn.reserve,
+        sc.reserve_of(newborn.body)
+    );
     assert_eq!(newborn.site, before.site);
     assert_eq!(newborn.age_ticks, 0);
     // The mineral and the energy left the parent by the same fraction rule the organic
@@ -355,6 +586,127 @@ fn a_birth_pays_birth_cost_and_the_newborn_is_at_body_min() {
     assert!((fauna.view().organic() - (stock - upkeep)).abs() < 1e-15, "a birth is internal");
     assert_eq!(fauna.view().ledger.introduced_organic_in, stock, "and nothing was introduced");
     assert_fauna_residuals(&fauna, "after a birth");
+}
+
+/// **R9.4: `reserve_cap` is the ceiling on new intake, and a newborn's endowment sits
+/// above it.** Two halves of one contract.
+///
+/// The ceiling: an adult at `body_max` with a full reserve eats and stays at exactly
+/// `reserve_cap · body` — its body cannot take the matter and its reserve will not, so the
+/// surplus is respired. Nothing ever raises a reserve past the ceiling.
+///
+/// The exception: a newborn's paid endowment starts at twice it, no intake raises that
+/// excess, and maintenance spends it like any other reserve — no clamp anywhere, which
+/// would have destroyed organic matter the parent paid for.
+#[test]
+fn a_newborn_s_endowment_sits_above_the_intake_ceiling_and_is_spent_normally() {
+    let sc = *FaunaConfig::default().species(Species::Frondgrazer);
+
+    // ---- the ceiling, on an adult that is already full.
+    let world = plain(8, 2, 0.3, 5);
+    let mut flora = Flora::new(FloraConfig::default());
+    turf(&mut flora, &world, 3);
+    // A birth cost this adult can never afford, so the only things moving its reserve are
+    // the upkeep and the intake. (`validate` refuses a zero cost: a newborn needs a body.)
+    let mut fauna = Fauna::new(config_with(|s| s.birth_cost = 1.0));
+    let id = grazer(&mut fauna, &world, 2, sc.body_max);
+    assert_eq!(fauna.view().animal(id).unwrap().reserve, sc.reserve_of(sc.body_max));
+    for tick in 1..=5 {
+        fauna.step(&world, &mut flora);
+        let a = *fauna.view().animal(id).unwrap();
+        assert_eq!(a.body, sc.body_max, "tick {tick}: it had nowhere to put a body");
+        assert!(
+            a.reserve <= sc.reserve_of(a.body) + 1e-18
+                && (a.reserve - sc.reserve_of(a.body)).abs() <= 1e-12 * a.reserve,
+            "tick {tick}: intake refilled the reserve to the ceiling and no further: {a:?}"
+        );
+    }
+    assert!(fauna.view().ledger.bites > 0, "it was eating the whole time");
+    assert!(fauna.view().ledger.respired_out > 0.0, "and respiring what it could not hold");
+    assert_residual_pair(&flora, &fauna, "an adult held at the ceiling");
+
+    // ---- the exception, on a newborn in a world with nothing to eat.
+    let world = plain(4, 2, 0.3, 5);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let parent = grazer(&mut fauna, &world, 1, sc.body_max);
+    fauna.step(&world, &mut flora);
+    let newborn = fauna.view().animals.iter().find(|a| a.id != parent).copied().expect("a birth");
+    let cap = sc.reserve_of(newborn.body);
+    assert!(
+        (newborn.reserve - 0.005).abs() < 1e-18 && (cap - 0.0025).abs() < 1e-18,
+        "the placeholders' own numbers: {} above {cap}",
+        newborn.reserve
+    );
+
+    // Maintenance spends the excess at the ordinary rate, with no clamp at the ceiling.
+    let mut reserve = newborn.reserve;
+    for tick in 1..=3 {
+        fauna.step(&world, &mut flora);
+        let a = *fauna.view().animal(newborn.id).unwrap();
+        let upkeep = sc.maintenance_per_s * a.body * DT;
+        assert!(
+            (a.reserve - (reserve - upkeep)).abs() <= 1e-12 * reserve,
+            "tick {tick}: the reserve fell by the upkeep and nothing else: {a:?}"
+        );
+        assert!(a.reserve > cap, "tick {tick}: still above the ceiling, not clamped to it");
+        assert_eq!(a.body, newborn.body, "and the body is untouched while the reserve pays");
+        reserve = a.reserve;
+    }
+    assert_fauna_residuals(&fauna, "a newborn above the ceiling");
+
+    // And no intake raises the excess: with food in reach the newborn's reserve still only
+    // falls, because `room` is zero while it is above the ceiling and the assimilated
+    // matter goes into the body instead.
+    let world = plain(8, 2, 0.3, 5);
+    let mut flora = Flora::new(FloraConfig::default());
+    turf(&mut flora, &world, 3);
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let parent = grazer(&mut fauna, &world, 2, sc.body_max);
+    fauna.step(&world, &mut flora);
+    let newborn = fauna.view().animals.iter().find(|a| a.id != parent).copied().expect("a birth");
+    let mut last = newborn;
+    for tick in 1..=5 {
+        fauna.step(&world, &mut flora);
+        let a = *fauna.view().animal(newborn.id).unwrap();
+        assert!(a.reserve < last.reserve, "tick {tick}: the excess never rose: {a:?}");
+        assert!(a.body > last.body, "tick {tick}: the intake went into the body");
+        assert!(a.reserve > sc.reserve_of(a.body), "tick {tick}: and it is still above it");
+        last = a;
+    }
+    assert_residual_pair(&flora, &fauna, "a fed newborn above the ceiling");
+}
+
+/// **R9.4's cheap case: one full default adult buys two young with nothing to eat.** Two
+/// ticks, two paid births out of one full reserve, and a third tick that cannot pay for
+/// another — `0.025` of reserve against `birth_cost` 0.01 twice, with the upkeep on top.
+/// Neither newborn reproduces: `body_min` is under `birth_body`.
+#[test]
+fn a_full_adult_buys_two_young_with_nothing_to_eat() {
+    let world = plain(4, 2, 0.3, 5);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let sc = *fauna.config().species(Species::Frondgrazer);
+    let parent = grazer(&mut fauna, &world, 1, sc.body_max);
+    let stock = fauna.view().organic();
+
+    fauna.step(&world, &mut flora);
+    assert_eq!(fauna.view().ledger.born, 1, "the first young");
+    fauna.step(&world, &mut flora);
+    assert_eq!(fauna.view().ledger.born, 2, "and the second, out of the same reserve");
+    assert_eq!(fauna.view().animals.len(), 3);
+    let after = *fauna.view().animal(parent).unwrap();
+    assert!(
+        after.reserve < sc.birth_cost && after.reserve > 0.0,
+        "what is left cannot buy a third: {after:?}"
+    );
+
+    fauna.step(&world, &mut flora);
+    assert_eq!(fauna.view().ledger.born, 2, "and the third tick buys nothing");
+    assert_eq!(fauna.view().ledger.bites, 0, "with nothing eaten anywhere");
+    // Two births are internal: the layer's organic matter moved only by respiration.
+    assert!(fauna.view().organic() < stock && fauna.view().organic() > 0.9 * stock);
+    assert_fauna_residuals(&fauna, "two young out of one reserve");
 }
 
 // -------------------------------------------------------------- the two ledgers
@@ -409,10 +761,15 @@ fn the_two_ledgers_close_together_over_a_hundred_coupled_ticks() {
 }
 
 /// Dung: the mineral a bite carries in excess of the tissue it built is excreted as a
-/// litter deposit on the animal's own face. At the placeholders there is never any excess
-/// — `n_tissue` 0.05 against a plant's 0.02, on half a bite assimilated, asks for more
-/// mineral than food carries — so this test sets the animal's own `n_tissue` to zero to
-/// exercise the path, and says that the placeholders make it inert.
+/// litter deposit on the animal's own face.
+///
+/// **What the placeholders do and do not make inert (Astra R9.2).** The excess depends on
+/// the tissue **actually placed**, not on `yield_fraction`, so "there is never any excess
+/// at the defaults" was wrong: it is true only of a *fresh founder's first bite*, where
+/// the whole mouthful has somewhere to go. This test keeps that narrow arm, and adds the
+/// two cases that do excrete — an animal with nowhere left to put the matter, at the
+/// placeholders with **no knob touched**, and mineral-rich food with the grazer's own
+/// numbers unchanged. The forced `n_tissue` 0 arm stays as the path's extreme.
 #[test]
 fn excess_mineral_is_excreted_as_litter() {
     let world = plain(8, 2, 0.3, 5);
@@ -438,13 +795,74 @@ fn excess_mineral_is_excreted_as_litter() {
     assert_eq!(g.litter, 0.0, "dung is mineral only this round: the rest was respired");
     assert_residual_pair(&flora, &fauna, "after excretion");
 
-    // And at the placeholders, nothing is excreted at all.
+    // The narrow true claim: a **fresh founder's first bite** carries no excess. Half a
+    // bite assimilated is funded to 0.4 of it by a plant's own 0.02 of mineral, and a
+    // young animal's body has room for all of that, so every unit of the mineral is
+    // needed. This is not a property of the placeholders in general.
     let mut flora = Flora::new(FloraConfig::default());
     turf(&mut flora, &world, 3);
     let mut fauna = Fauna::new(FaunaConfig::default());
     grazer(&mut fauna, &world, 2, 0.02);
     fauna.step(&world, &mut flora);
-    assert_eq!(fauna.view().ledger.deposited_mineral_out, 0.0);
+    assert_eq!(
+        fauna.view().ledger.deposited_mineral_out, 0.0,
+        "a fresh founder's first bite has somewhere to put every unit it can fund"
+    );
+
+    // An animal with nowhere to put it **does** excrete, at the placeholders and with no
+    // knob touched anywhere: at `body_max` with a full reserve, the only room the bite
+    // finds is what this tick's upkeep just made, so the tissue placed is `2.5e-6` and the
+    // mineral it needs is a sixteenth of what the bite brought.
+    let mut flora = Flora::new(FloraConfig::default());
+    turf(&mut flora, &world, 3);
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let sc = *fauna.config().species(Species::Frondgrazer);
+    let id = grazer(&mut fauna, &world, 2, sc.body_max);
+    let before = *fauna.view().animal(id).unwrap();
+    fauna.step(&world, &mut flora);
+    let v = fauna.view();
+    // Read the tissue placed off the ledger rather than off the animal: a full adult also
+    // pays for a newborn on this tick, and a birth is an internal transfer, so
+    // `respired_out = upkeep + bite - placed` is the only reading that is about the bite.
+    let upkeep = sc.maintenance_per_s * before.body * DT;
+    let placed = v.ledger.eaten_organic_in + upkeep - v.ledger.respired_out;
+    assert!(
+        (placed - upkeep).abs() <= 1e-9 * upkeep,
+        "it placed only what the upkeep freed: {placed} against {upkeep}"
+    );
+    let excess = v.ledger.eaten_mineral_in - sc.n_tissue * placed;
+    assert!(
+        (v.ledger.deposited_mineral_out - excess).abs() <= 1e-12 * excess && excess > 0.0,
+        "a full animal excretes {} of {excess}",
+        v.ledger.deposited_mineral_out
+    );
+    assert_eq!(v.ledger.born, 1, "and it paid for a newborn out of the same reserve");
+    assert_residual_pair(&flora, &fauna, "after a full animal's bite");
+
+    // And mineral-rich food excretes with the **grazer's** numbers untouched: a turf whose
+    // own `n_tissue` is 0.2 brings `2e-5` of mineral in a `1e-4` bite, ten times what the
+    // tissue it funds can hold, and the remainder is dung.
+    let mut flora = flora_with_plant_mineral(0.2);
+    turf(&mut flora, &world, 3);
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let id = grazer(&mut fauna, &world, 2, 0.02);
+    let before = *fauna.view().animal(id).unwrap();
+    fauna.step(&world, &mut flora);
+    let v = fauna.view();
+    let a = *v.animal(id).unwrap();
+    assert!((v.ledger.eaten_mineral_in - 2e-5).abs() < 1e-18, "{}", v.ledger.eaten_mineral_in);
+    // The yield is what binds here, not the mineral: half the bite is built.
+    let built = a.body - before.body;
+    assert!((built - 0.5e-4).abs() <= 1e-9 * built, "it built {built}");
+    let excess = v.ledger.eaten_mineral_in - sc.n_tissue * built;
+    assert!(
+        (v.ledger.deposited_mineral_out - excess).abs() <= 1e-9 * excess,
+        "excreted {} of {excess}",
+        v.ledger.deposited_mineral_out
+    );
+    let g = flora.view().ground_at(at(2, 2)).expect("the dung provisioned the site");
+    assert!(g.mineral > flora.config().initial_mineral, "and it is in the site's pool");
+    assert_residual_pair(&flora, &fauna, "after a mineral-rich bite");
 }
 
 // ------------------------------------------------------------- the keyed stream

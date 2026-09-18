@@ -28,7 +28,7 @@ use std::time::Instant;
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
 use cubarium_voxel_fauna::{
-    Command as FaunaCommand, DT, Fauna, FaunaConfig, Species as Beast, TICK_HZ,
+    Command as FaunaCommand, DT, Fauna, FaunaConfig, Species as Beast, State, TICK_HZ,
 };
 use cubarium_voxel_flora::{
     Command as FloraCommand, Flora, FloraConfig, Site, Species, can_establish,
@@ -116,6 +116,32 @@ struct Sample {
     steps: u64,
     born: u64,
     deaths: u64,
+    /// The **introduced founders** and their descendants, kept apart by identity (Astra
+    /// R9.2): an animal's `id` never changes, and the founders hold the first `n` of them
+    /// because an introduction is the first thing this harness creates. A falling
+    /// population *mean* is composition and not shrinking individuals — 75 newborns at
+    /// `body_min` move it on their own — so a starvation reading needs these rows and not
+    /// that mean.
+    founders: Cohort,
+    descendants: Cohort,
+}
+
+/// One cohort of animals at one moment: how many, and the stocks they hold.
+#[derive(Clone, Copy, Debug, Default)]
+struct Cohort {
+    animals: usize,
+    body: f64,
+    reserve: f64,
+}
+
+impl Cohort {
+    fn mean_body(&self) -> f64 {
+        self.body / self.animals.max(1) as f64
+    }
+
+    fn mean_reserve(&self) -> f64 {
+        self.reserve / self.animals.max(1) as f64
+    }
 }
 
 /// Everything one arm leaves behind.
@@ -140,6 +166,52 @@ struct Arm {
     fauna_residuals: (f64, f64, f64),
     flora_stocks: (f64, f64, f64),
     fauna_stocks: (f64, f64, f64),
+    /// Where the cropping happened, and how high the food was above it.
+    bites: BiteSites,
+}
+
+/// **Where the bites were taken, and from how high (Astra R9.5).** Round 5c measured that
+/// 87 % of the intake came off bloomcrown, which a ground browser can only eat from a face
+/// above the stand's own — and recorded nothing about *which* faces did it, so the
+/// attribution was an inference. This is the record that makes it a measurement.
+///
+/// The unit is a **cropping animal-tick**, not a bite: one mouthful is spread over every
+/// stand in reach in site order and the ledger counts bites by plant species, so splitting
+/// a mouthful between two stands of different species would mean reproducing the model's
+/// own spending order here. What is recorded instead is the face each animal cropped from
+/// and the stands that were in reach **from that face, before it ate** — which is exactly
+/// the set the mouthful was spent over. Per-bite attribution would need a field in
+/// `FaunaLedger`, and that is a snapshot schema change.
+#[derive(Default)]
+struct BiteSites {
+    /// Cropping animal-ticks by the height of the face the animal stood on.
+    by_face_y: Vec<(u32, u64)>,
+    /// Every distinct face cropped from, sorted.
+    faces: Vec<Site>,
+    /// Cropping animal-ticks by plant species and by `stand.y - face.y`: negative is food
+    /// below the eater, zero is level with it, positive is above.
+    by_dy: Vec<(Species, i64, u64)>,
+}
+
+impl BiteSites {
+    /// One cropping animal-tick on `face`, with the stands that were in reach of it.
+    fn record(&mut self, face: Site, reach: &[(Site, f64)], flora: &Flora) {
+        match self.by_face_y.binary_search_by_key(&face.y, |&(y, _)| y) {
+            Ok(i) => self.by_face_y[i].1 += 1,
+            Err(i) => self.by_face_y.insert(i, (face.y, 1)),
+        }
+        if let Err(i) = self.faces.binary_search(&face) {
+            self.faces.insert(i, face);
+        }
+        for &(site, _) in reach {
+            let Some(stand) = flora.view().stand_at(site) else { continue };
+            let key = (stand.species, i64::from(site.y) - i64::from(face.y));
+            match self.by_dy.binary_search_by_key(&key, |&(sp, dy, _)| (sp, dy)) {
+                Ok(i) => self.by_dy[i].2 += 1,
+                Err(i) => self.by_dy.insert(i, (key.0, key.1, 1)),
+            }
+        }
+    }
 }
 
 /// `two_producers.rs`'s `prepared_world`: generate once to find the basin floor, then
@@ -240,10 +312,20 @@ fn stocks_of(flora: &Flora) -> [Stocks; Species::COUNT] {
     out
 }
 
-fn sample(t: f64, flora: &Flora, fauna: &Fauna) -> Sample {
+/// One sample. `founders` is how many animals were introduced, which is also the number of
+/// ids the founders hold: `0..founders`.
+fn sample(t: f64, flora: &Flora, fauna: &Fauna, founders: u64) -> Sample {
     let av = fauna.view();
     let n = av.animals.len();
     let d = n.max(1) as f64;
+    let cohort = |of: fn(u64, u64) -> bool| {
+        av.animals.iter().filter(|a| of(a.id, founders)).fold(Cohort::default(), |mut c, a| {
+            c.animals += 1;
+            c.body += a.body;
+            c.reserve += a.reserve;
+            c
+        })
+    };
     Sample {
         t,
         stocks: stocks_of(flora),
@@ -254,6 +336,8 @@ fn sample(t: f64, flora: &Flora, fauna: &Fauna) -> Sample {
         steps: av.ledger.steps,
         born: av.ledger.born,
         deaths: av.ledger.deaths,
+        founders: cohort(|id, n| id < n),
+        descendants: cohort(|id, n| id >= n),
     }
 }
 
@@ -277,12 +361,29 @@ fn arm(seconds: f64, grazers: usize, seed: u64, noise_seed: u64) -> (Arm, Vec<(S
     let ticks = (seconds * f64::from(TICK_HZ)).round() as u64;
     let half = ticks / 2;
     let every = 100 * u64::from(TICK_HZ);
-    let mut samples = vec![sample(0.0, &flora, &fauna)];
+    let mut samples = vec![sample(0.0, &flora, &fauna, grazers as u64)];
+    let mut bites = BiteSites::default();
+    let reach = fauna.config().species(Beast::Frondgrazer).reach;
 
     for tick in 0..ticks {
         world.step();
         flora.step(&mut world);
+        // What each animal could reach from where it stands, read **before** it eats: the
+        // set a mouthful is spent over, and the only moment it can be read.
+        let before: Vec<(u64, Site, Vec<(Site, f64)>)> = fauna
+            .view()
+            .animals
+            .iter()
+            .map(|a| (a.id, a.site, flora.view().reachable_foliage(&world.view(), a.site, reach)))
+            .collect();
         fauna.step(&world, &mut flora);
+        for (id, site, reached) in &before {
+            // An animal that cropped did not move, so the face it stands on now is the one
+            // the pre-bite reach was read from.
+            if fauna.view().animal(*id).map(|a| a.state) == Some(State::Cropping) {
+                bites.record(*site, reached, &flora);
+            }
+        }
         if tick + 1 == half {
             // The introduction is **between** ticks, like every other command in this
             // world: the tick that follows is the first one the animals act in.
@@ -301,11 +402,11 @@ fn arm(seconds: f64, grazers: usize, seed: u64, noise_seed: u64) -> (Arm, Vec<(S
             }
         }
         if (tick + 1) % every == 0 {
-            samples.push(sample((tick + 1) as f64 * DT, &flora, &fauna));
+            samples.push(sample((tick + 1) as f64 * DT, &flora, &fauna, grazers as u64));
         }
     }
     if samples.last().map(|s| s.t) != Some(ticks as f64 * DT) {
-        samples.push(sample(ticks as f64 * DT, &flora, &fauna));
+        samples.push(sample(ticks as f64 * DT, &flora, &fauna, grazers as u64));
     }
 
     let fv = flora.view();
@@ -352,6 +453,7 @@ fn arm(seconds: f64, grazers: usize, seed: u64, noise_seed: u64) -> (Arm, Vec<(S
         ),
         flora_stocks: (fv.organic(), fv.mineral(), fv.energy()),
         fauna_stocks: (av.organic(), av.mineral(), av.energy()),
+        bites,
     };
     (arm, founders)
 }
@@ -419,6 +521,41 @@ fn report(plain: &Arm, grazed: &Arm, seconds: f64) {
         );
     }
 
+    println!("\n## the animals by identity: the introduced founders and their descendants\n");
+    println!(
+        "| t (s) | founders | founder mean body | founder mean reserve | descendants | \
+         descendant mean body | descendant mean reserve |"
+    );
+    println!("| --- | --- | --- | --- | --- | --- | --- |");
+    for s in &grazed.samples {
+        let cell = |c: &Cohort, v: f64| {
+            if c.animals == 0 { "—".to_string() } else { format!("{:.5}", nz(v)) }
+        };
+        println!(
+            "| {:.0} | {} | {} | {} | {} | {} | {} |",
+            s.t,
+            s.founders.animals,
+            cell(&s.founders, s.founders.mean_body()),
+            cell(&s.founders, s.founders.mean_reserve()),
+            s.descendants.animals,
+            cell(&s.descendants, s.descendants.mean_body()),
+            cell(&s.descendants, s.descendants.mean_reserve()),
+        );
+    }
+    let config = FaunaConfig::default();
+    let sc = config.species(Beast::Frondgrazer);
+    println!(
+        "\n(an id never changes, so these are the same animals at every row. A full default \
+         adult's reserve is {:.4} against an upkeep of {:.1e} /s, which is {:.0} s of \
+         standing still — and about {:.0} s once it has paid for two newborns at \
+         {:.3} each. A falling population mean is composition before it is starvation.)",
+        sc.reserve_of(sc.body_max),
+        sc.maintenance_per_s * sc.body_max,
+        sc.reserve_of(sc.body_max) / (sc.maintenance_per_s * sc.body_max),
+        (sc.reserve_of(sc.body_max) - 2.0 * sc.birth_cost) / (sc.maintenance_per_s * sc.body_max),
+        sc.birth_cost,
+    );
+
     println!("\n## what was eaten, by the species it came off\n");
     println!("| species | bites | organic |");
     println!("| --- | --- | --- |");
@@ -432,6 +569,26 @@ fn report(plain: &Arm, grazed: &Arm, seconds: f64) {
         "\n(a reach box does not choose a species: which stands a browser can eat depends on \
          the face it stands on, so this table is a measurement and not a property of any \
          preset.)"
+    );
+
+    println!("\n## where it was cropped from (cropping animal-ticks)\n");
+    println!("| eater's face y | animal-ticks | distinct faces at this height |");
+    println!("| --- | --- | --- |");
+    for &(y, n) in &grazed.bites.by_face_y {
+        let faces = grazed.bites.faces.iter().filter(|f| f.y == y).count();
+        println!("| {y} | {n} | {faces} |");
+    }
+    println!("\n| species in reach | stand y - face y | animal-ticks |");
+    println!("| --- | --- | --- |");
+    for &(sp, dy, n) in &grazed.bites.by_dy {
+        println!("| {} | {dy:+} | {n} |", sp.name());
+    }
+    println!(
+        "\n(a cropping animal-tick, not a bite: one mouthful is spent over every stand in \
+         reach in site order, so the faces and the reach sets are recorded and the split \
+         between two stands is not. `stand y - face y` is what a higher face buys: a \
+         positive row is food above the eater, which is the only way a grown bloomcrown is \
+         food at all.)"
     );
 
     println!("\n## the two ledgers, and the residuals\n");

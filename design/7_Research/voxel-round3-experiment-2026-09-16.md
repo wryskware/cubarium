@@ -1313,12 +1313,16 @@ closes to about 0.77 — so the surplus the uptake rule *can* produce (it is bou
 rate and the pools and **not** by what the stand can spend) was a small term here, at a mean
 moisture of 0.688. That is a measurement of this arm and not a property of the rule.
 
-**A drying log starves it, and a drowned one does not.** Mean moisture 0.688 across the eight
-fungi, and the two on the driest logs sat at 0.500 — `μ` multiplies the uptake, so those two
-earned half. Mean `aeration_stress` 0.292, and it **cost them nothing**: a saprotroph's
-uptake reads `μ` and not `1 − aeration_stress`, so three fungi whose root boxes are now over
-half saturated pay for it on the way in (the gate refuses a spore there) and nothing as
-adults. That is the preset's stated limitation, now measured rather than asserted, and it is
+**A drying log starves it, and saturated roots do not reduce adult uptake.** Mean moisture
+0.688 across the eight fungi, and the two on the driest logs sat at 0.500 — `μ` multiplies
+the uptake, so those two earned half. Mean `aeration_stress` 0.292, and it **cost them
+nothing**: a saprotroph's uptake reads `μ` and not `1 − aeration_stress`, so three fungi whose
+root boxes are now over half saturated pay for it on the way in (the gate refuses a spore
+there) and nothing as adults. Free water still **kills** it — `drown_depth_m` 0.05, and a
+cap under a pool dies in step 3 — so "a drowned one does not" would have been wrong twice
+over (Astra R9.3): what saturation does not do is reduce an established mycelium's income.
+And `μ` is read off the **soil voxels** of the root box, so "bare rock" means no soil anywhere
+in that box: a rock face with a soil pocket inside the box is not bare and does not starve. That is the preset's stated limitation, now measured rather than asserted, and it is
 the first thing to revisit if waterlogging is meant to cost a mycelium anything.
 
 ### The grove did not spread, and the gate diagnosis says why
@@ -1350,14 +1354,26 @@ donors' own dispersal neighbourhood is 12 eligible faces of 52 candidates (**1.5
 donor**). So a grove's spread at these placeholders is bounded by the log and by the box's
 geometry, not by the hop and not by reproduction.
 
-Three ways out, none of them taken here and all of them rule decisions rather than numbers: a
-mycelium box that reaches **up** as well as down (the root box reaches only down, which is
-inherited and stated in `mycelium_sites`); a dispersal rule for a saprotroph that lands on
-the substrate rather than on the skyline; or a deeper `rooting_depth`, which is the one that
-is only a number and the least honest of the three. The other half of the same finding is
-that the run's own supply of dead wood — 0.0176 from dieback — is three orders of magnitude
-under a declared log, so a self-sustaining decomposer grove needs plants that actually die,
-which is the round-4/5a observation (zero deaths in 400 s) reappearing from the other side.
+Three ways out were on the table, all of them rule decisions rather than numbers: a mycelium
+box with a vertical reach of its own; a dispersal rule for a saprotroph that lands on the
+substrate rather than on the skyline; or a deeper `rooting_depth`, which is only a number
+and the least honest of the three, because it moves the water too and repairs one direction
+only. **Decided (Astra R9.3, package Q):** substrate access has its own species field,
+`substrate_reach_up_down`, placeholder **1**, symmetric — one row up and one row down — and
+the soil-water root box is untouched. Blind paid landing and germination-time selection
+stay: a spore still lands on the highest support face of a column inside its `hop` and the
+gates are still read there, so a grove still ends where the wood does. The four geometry
+cases are pinned in `crates/cubarium-voxel-flora/tests/round5b.rs`
+(`substrate_access_reaches_one_row_up_and_one_row_down`): same level, one up, one down, and
+two genuinely substrate-free faces refused on substrate alone. This run predates the change,
+so its zero establishments are a reading of the old box.
+
+The other half of the same finding is that the run's own supply of dead wood — 0.0176 from
+dieback — is about **57 times** smaller than one declared log of 1.0, not three orders of
+magnitude; and that 0.0176 is a **standing stock** at one moment and not a cumulative
+supply, so it says what was lying there and not what the plants produced over the run.
+Either way a self-sustaining decomposer grove needs plants that actually die, which is the
+round-4/5a observation (zero deaths in 400 s) reappearing from the other side.
 
 ### The three residuals, with a fungus digesting
 
@@ -1401,11 +1417,13 @@ comparison. Nothing about whether 0.02 /s of uptake, a 0.4 yield, a 0.02 substra
 or a 1.0 log is a reasonable number — **nothing measured any of them**, and the preset's own
 doc says which sentence each of them was chosen to encode. Nothing about competition between
 the fungus and the plants (they share a mineral pool and a water box, and no arm varied it),
-nothing about two fungi on one log (the collect-then-withdraw rule for a shared pool is
-implemented and unit-tested, and this arm's boxes did not overlap enough to exercise it),
+nothing about two fungi on one log *in a run* — the collect-then-withdraw rule now has its
+own unit test on `feed` itself, two mycelia of unequal demand sharing one log one-to-three in
+all three currencies (`src/step.rs`,
+`two_fungi_share_one_log_in_proportion_to_their_demand`), which is what Astra's R9.3 found
+missing: the earlier claim rested on a test of the scalar proportional arithmetic. This
+arm's boxes did not overlap enough to exercise it —
 and nothing about what a waterlogged log should cost a mycelium.
-first); and any arm-to-arm difference smaller than the water-and-shade coupling that already
-moves untouched species in the fourth decimal by 400 s.
 
 ## Round 5c — 2026-09-17
 
@@ -1498,20 +1516,32 @@ has to record it.)
 | plant-only | 0 / 0 / 0 | 0 / 0 / 0 | −9.08e-13 of 12.2161 | 0 of 0 |
 | grazed | 0 / 0 / 0 | 0 / 0 / 0 | 3.17e-12 of 6.5157 | −1.03e-11 of 2.3638 |
 
-The union is **exactly zero in all three currencies**, not float noise, and that is by
-construction rather than by luck: `Flora::take_foliage` returns the `Taken` it books and the
-animal books the same value, so `consumed_organic_out == eaten_organic_in` to the bit, and a
-deposit is the same triplet seen from its two sides. Each layer's own residual is the same
-1e-12 relative float noise rounds 3, 4 and 5a reported, now with 4.729769 of organic matter,
-0.0959539 of mineral and 9.459538 of energy crossing between two layers that each account for
-it independently.
+**Two different checks, and only one of them is exactly zero (Astra R9.2).** The
+**transfer mismatch** — what one layer says it handed over against what the other says it
+received — is exactly zero in all three currencies, by construction rather than by luck:
+`Flora::take_foliage` returns the `Taken` it books and the animal books the same value, so
+`consumed_organic_out == eaten_organic_in` to the bit, and a deposit is the same triplet
+seen from its two sides. The **stock residuals** are a separate check and are float noise,
+not zero: the two published organic residuals sum to about −7.13e-12 (3.17e-12 in the flora
+and −1.03e-11 in the fauna), the same 1e-12 relative noise rounds 3, 4 and 5a reported, now
+with 4.729769 of organic matter, 0.0959539 of mineral and 9.459538 of energy crossing
+between two layers that each account for it independently. Neither number is a nutrient
+sufficiency claim.
+
+One caveat for any harness that compares the two sides: the plant layer's `deposited_*_in`
+counts **every** deposit it received, so a run whose harness also lays material — the
+`community` run's eight declared logs, for instance — has to subtract those external
+deposits before the animal layer's `deposited_*_out` can be cancelled against it. In the
+grazed arms the animals are the only depositors, which is why the equality holds as printed.
 
 ### What the run says, in plain words
 
 1. **Every flow is paid, and the ledgers close together.** Four introduced bodies, 51,833
    bites, 75 births, 648 steps and 4.73 of organic matter moved between the layers, with both
    residuals at 1e-12 relative and the union at zero.
-2. **Four grazers stripped the meadow in 200 s and nothing died.** Springturf foliage went
+2. **Four founders and their descendants stripped the meadow in 200 s and nothing died.**
+   Four animals were introduced and 79 were eating by the end, so "four grazers" names the
+   treatment and not the mouths. Springturf foliage went
    from 0.5886 to 0.0004 — held at zero, not recovering — and bloomcrown's from 4.7413 to
    1.2304 against a control that ended at 4.8993. No plant died in either arm: a withdrawal
    takes `P` and death is `W < alive_min`, so a browser cannot kill a stand directly, only
@@ -1519,12 +1549,20 @@ it independently.
    grazing did reach was the **wood**: springturf's fell 0.2945 → 0.2167 while the control's
    rose to 0.3020, and bloomcrown's reserve fell 1.1949 → 0.5767 against 1.3096.
 3. **No animal died either, and the population quadrupled twice.** 4 → 58 → 79 with **zero
-   deaths**, because `maintenance_per_s` 0.001 on a body of 0.05 is 2.5e-6 per tick and a
-   full reserve is 0.025: an animal that stops eating has ~200 s of reserve before its body
-   starts paying and thousands of seconds before `body_min`. The 400 s window is therefore
-   **shorter than this placeholder's starvation time**, and the falling mean body (0.0500 →
-   0.0268) and mean reserve (0.0250 → 0.0031) are what the crash looks like *before* it
-   arrives. Nothing here measures whether it arrives, and nothing here is a viability claim.
+   deaths**. The arithmetic, corrected (Astra R9.2): `maintenance_per_s` 0.001 on a body of
+   0.05 is 5e-5 per second, so a full reserve of `reserve_cap · body` = 0.025 is **500 s**
+   of standing still — about **100 s** once the animal has paid 0.01 each for two newborns
+   — and then thousands of seconds of body before `body_min` (`0.05 · e^{−0.001 t}` reaches
+   0.005 at ≈ 2,300 s). The earlier "~200 s" was wrong. The 400 s window is therefore
+   shorter than this placeholder's starvation time from a *full* reserve, and **the falling
+   mean body (0.0500 → 0.0268) and mean reserve (0.0250 → 0.0031) are composition and not
+   shrinking individuals**: 75 newborns arrive at `body_min` 0.005 and pull any mean down on
+   their own. Reading them as "what the crash looks like before it arrives" was an
+   inference this run cannot support. What would support it is founder-versus-descendant
+   stocks **by identity**, which the harness did not record then and does now — a 60 s
+   two-grazer smoke on the repaired code shows founders still at body 0.05 while their
+   descendants average 0.018, which is the composition effect measured. Nothing here
+   measures whether a crash arrives, and nothing here is a viability claim.
 4. **Births are bounded by income and by nothing else.** There is no mating system, no
    gestation and no refractory period this round (stated in the crate doc): an adult pays
    `birth_cost` 0.01 out of its reserve whenever `body >= birth_body` 0.03 and the reserve
@@ -1532,13 +1570,22 @@ it independently.
    growth, which is exactly what 4 → 79 while the foliage went to zero is.
 5. **The producers' recruitment differed and this run cannot attribute it.** Five
    establishments in the plant-only arm against three in the grazed one, and the grazed arm
-   ended with 8 springturf against the control's 10. A grazed world has less income and
-   should, if anything, recruit less; two lottery draws in one arm are not a mechanism.
-6. **Excretion never happened.** `n_tissue` 0.05 on `yield_fraction` 0.5 asks 0.025 of mineral
-   per unit eaten against a plant's own 0.02, so no bite ever carried excess mineral and the
-   only deposit in 400 s was 7.6e-6 of mineral. The litter-deposit path is tested with a
-   forced config (`tests/round5c.rs`) and is dead at the placeholders — a consequence of two
-   untuned numbers, reported and not tuned away.
+   ended with 8 springturf against the control's 10. Two lottery draws in one arm are not a
+   mechanism, and this note states **no expected direction** for them: recruitment here
+   runs through a funded bank, a keyed lottery and each arm's own water and shade, and
+   Astra's R8.3 is that a one-arm difference of two draws does not identify any of those.
+6. **Excretion happened, and the 7.6e-6 of mineral deposited in 400 s is it** (Astra
+   R9.2; this note previously said the opposite in the same sentence as the number). Dung is
+   the mineral a bite carries in excess of the tissue **actually placed**, and that is not
+   `yield_fraction`'s business: an animal at `body_max` with a full reserve places only what
+   its own upkeep just freed, so most of the bite's mineral has nowhere to go and is
+   excreted. Plant `n_tissue` is also not current foliage mineral density — respiration
+   retains mineral, so a stand's tissue drifts richer than 0.02 — which moves the threshold
+   the other way too. What *is* true at the placeholders is narrower: a **fresh founder's
+   first bite** carries no excess, because 0.05 of tissue mineral against a plant's 0.02
+   leaves a young animal needing every unit it can fund. Both cases are pinned in
+   `crates/cubarium-voxel-fauna/tests/round5c.rs`, together with a mineral-rich food case at
+   unchanged grazer knobs.
 
 ### Not established
 
@@ -1548,6 +1595,12 @@ evidence either way. Whether four is a reasonable number of founders, whether th
 introduction is a reasonable time, or whether any of the sixteen placeholders is a reasonable
 value: nothing measured any of them, and no result above depends on one. Which faces the
 bloomcrown bites were taken from. And anything about the *look* of a consumer: the presenter
-draws an interim 2×1×2 block in a placeholder colour, the art direction is Wrysk's own thread,
-and the `--sink gpu` path does not draw animals at all yet because the staging that would feed
-it lives in `crates/cubarium/src/sink/**`, which package O was told not to touch.
+draws an interim 2×1×2 block in a placeholder colour, and the art direction is Wrysk's own
+thread. (The `--sink gpu` omission recorded here is stale: round 5c's own staging work gives
+an animal precedence over the plant in its cell on the GPU path too.)
+
+**This run predates the R9.1–R9.6 repairs and would not reproduce.** The mineral budget now
+bounds what a bite builds (R9.1), sensing is bounded in candidate-face coordinates (R9.5)
+and a mycelium box reaches one row up as well as down (R9.3), so every growth, population
+and spread number above belongs to the code at 680a9af. What survives the repairs is the
+accounting: paid flows, matching transfers, and residuals at float noise.

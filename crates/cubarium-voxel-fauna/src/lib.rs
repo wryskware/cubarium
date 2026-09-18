@@ -162,8 +162,17 @@ pub struct SpeciesConfig {
     /// The fraction of a bite that becomes tissue. The rest is respired, with the energy
     /// that was in it leaving as heat and the mineral staying behind.
     pub yield_fraction: f64,
-    /// Mineral per unit of tissue built. Mineral a bite carries in excess of this is
-    /// excreted as a litter deposit.
+    /// Mineral per unit of tissue built — the density of what it builds, and therefore the
+    /// **budget** its growth fits inside: a bite can build at most `mineral / n_tissue` of
+    /// tissue, whatever `yield_fraction` would otherwise have assimilated, and the
+    /// unfunded organic matter is respired with its energy (Astra R9.1). Mineral a bite
+    /// carries in excess of what was built is excreted as a litter deposit.
+    ///
+    /// There is **no mineral reserve**: [`Animal::mineral`] is an inventory of the tissue's
+    /// own content and growth never draws on it, so a mineral-free bite builds nothing
+    /// however much mineral the animal is carrying. At the placeholders the budget binds
+    /// on every bite — a plant's foliage holds 0.02 against this 0.05 — so a frondgrazer
+    /// turns 40 % of what it eats into tissue and not the 50 % `yield_fraction` names.
     pub n_tissue: f64,
     /// Structure it grows to and no further.
     pub body_max: f64,
@@ -175,7 +184,20 @@ pub struct SpeciesConfig {
     /// `body_min`, because that is the newborn's body; the remainder is the newborn's
     /// reserve.
     pub birth_cost: f64,
-    /// Reserve it can hold, per unit of body.
+    /// The ceiling on **new intake** into the reserve, per unit of body: assimilated
+    /// matter stops going to the reserve at `reserve_cap · body` and is respired instead
+    /// ([`step`]'s assimilation). It is deliberately **not** a universal storage bound
+    /// (Astra R9.4).
+    ///
+    /// **The one exception, named.** A paid birth endowment may sit above it. A newborn is
+    /// `body_min` of body and `birth_cost − body_min` of reserve, which at the
+    /// placeholders is `0.005` against a cap of `reserve_cap · body_min` = `0.0025`: the
+    /// parcel is what the parent actually paid for out of its own reserve, so clamping it
+    /// would either destroy organic matter or need a conserving birth allocation, which is
+    /// a life-history decision and not a repair. While a reserve is above the ceiling no
+    /// intake raises it — `room` is zero and the surplus is respired — and maintenance
+    /// spends it exactly as it spends any other reserve, so the excess is transient and
+    /// never grows.
     pub reserve_cap: f64,
     /// How far it can get at food from the face it stands on.
     pub reach: Reach,
@@ -188,7 +210,12 @@ pub struct SpeciesConfig {
     pub drown_depth_m: f64,
     /// Seconds between steps. Quantised to whole ticks, never below one.
     pub step_period_s: f64,
-    /// How far, in voxels of wrapped `x` and of `z`, it can smell food it cannot reach.
+    /// How far, in voxels of wrapped `x` and of `z` each measured on its own, a **face it
+    /// could stand on** may be and still be a candidate for the walk. The domain is the
+    /// candidate face's and not the food's (Astra R9.5): a crown is found by scoring the
+    /// faces in this box with [`cubarium_voxel_flora::FloraView::reachable_foliage`], so a
+    /// stand outside the box whose feeding face is inside it *is* found, and a stand inside
+    /// it whose only feeding face is outside is not.
     pub sense_radius: u32,
     /// Energy per unit of organic matter an **introduced** animal arrives with. Used for
     /// nothing else: every other unit of energy in this layer came in with a bite at the
@@ -235,7 +262,10 @@ impl SpeciesConfig {
         if !t.is_finite() || t < 1.0 { 1 } else { t as u64 }
     }
 
-    /// The reserve a body of this size can hold.
+    /// The reserve intake into a body of this size stops at: `reserve_cap · body`. A
+    /// ceiling on new intake and not a storage bound — a newborn's paid endowment starts
+    /// above it (see [`SpeciesConfig::reserve_cap`]) — so a caller must not read this as
+    /// "what it is holding" or clamp to it.
     pub fn reserve_of(&self, body: f64) -> f64 {
         self.reserve_cap * body
     }

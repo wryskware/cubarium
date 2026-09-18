@@ -731,3 +731,235 @@ fn decomposition_delays_organic_matter_and_not_the_mineral_of_a_mixed_pool() {
     assert!((g.litter_mineral - 0.75).abs() < 1e-12, "litter mineral {}", g.litter_mineral);
     assert_residuals(&flora, "after one mixed-density decomposition step");
 }
+
+// -------------------------------------------- R9.1: the mineral budget before the tissue
+
+/// A log with a **declared** mineral content: `log_on`'s deposit with the density chosen
+/// by the caller rather than a dead trunk's own `n_tissue`. A log carrying less mineral
+/// than the tissue it would become is exactly what R9.1 is about, and there is no way to
+/// say it with `log_on`.
+fn log_with(flora: &mut Flora, site: Site, organic: f64, mineral: f64) -> (f64, f64, f64) {
+    let energy = flora.config().species(Species::Glowcap).energy_density * organic;
+    assert!(
+        flora.deposit(site, Deposit { kind: DepositKind::DeadWood, organic, mineral, energy }),
+        "the log was refused at {site:?}"
+    );
+    (organic, mineral, energy)
+}
+
+/// A config for the R9.1 fixtures: a **bare** mineral pool, so the only mineral in the
+/// world is the log's own; **no decomposition at all**, so the only thing that moves the
+/// log is the fungus; and **no spores**, so the reserve funds nothing and every unit the
+/// ledger respires is this tick's metabolism. All three are fixture conditions and none of
+/// them is a preset change.
+fn budget_config() -> FloraConfig {
+    let mut config = config();
+    config.initial_mineral = 0.0;
+    config.decomposition = 0.0;
+    config.wood_decomposition = 0.0;
+    config.glowcap.propagule_rate = 0.0;
+    config
+}
+
+/// **R9.1, the zero-mineral case.** Astra's own: `initial_mineral` 0, a moist half-grown
+/// glowcap (`W` 0.05) and an energy-bearing, **mineral-free** log. One default tick takes
+/// `5e-5` of organic matter, earns `2e-5` of it and pays `5e-7` of maintenance out of that
+/// — and builds **nothing**, because the `1e-7` of mineral that `5e-6` of new wood needs
+/// does not exist anywhere it can draw on. Before the repair it grew the wood anyway and
+/// the tissue held less than `n_tissue`.
+///
+/// The stand's own `mineral` inventory is 0.001 and is **not** a reserve it can build out
+/// of: that is the standing R4.3 limitation, and this fixture is where it bites.
+#[test]
+fn a_mineral_free_log_pays_the_upkeep_and_builds_nothing() {
+    let mut world = pillars(4, &[1], 0.5);
+    let mut flora = Flora::new(budget_config());
+    let site = plant_glowcap(&mut flora, &world, 1);
+    let (organic, _, energy) = log_with(&mut flora, site, 1.0, 0.0);
+    let sc = flora.config().species(Species::Glowcap).clone();
+    let before = flora.view().stand_at(site).expect("the founder").clone();
+    assert_eq!((before.wood, before.foliage, before.reserve), (0.05, 0.1, 0.025));
+    assert!(before.mineral > 0.0, "a founder arrives with its own tissue mineral");
+    assert_eq!(flora.view().ground_at(site).expect("ground").mineral, 0.0, "a bare pool");
+
+    flora.step(&mut world);
+
+    let v = flora.view();
+    let after = v.stand_at(site).expect("the founder").clone();
+    let g = v.ground_at(site).expect("ground").clone();
+    // What it ate: the rate on a full-moisture box, and the log still holds the rest.
+    let want = sc.substrate_uptake_per_s * before.wood * 1.0 * DT;
+    assert!((uptake(&flora) - want).abs() <= 1e-15 * want, "it took {} of {want}", uptake(&flora));
+    assert!((g.dead_wood - (organic - want)).abs() < 1e-15);
+    // And what it built: nothing at all, in any of the three tissues.
+    assert_eq!(after.wood, before.wood, "no wood was built");
+    assert_eq!(after.reserve, before.reserve, "the income paid the upkeep, the reserve did not");
+    assert!(after.foliage < before.foliage, "the caps only senesced");
+    let shed = sc.senescence * before.foliage * DT;
+    assert!((after.foliage - (before.foliage - shed)).abs() <= 1e-15 * before.foliage);
+    // Nothing was drawn from the pool and nothing was released to it: there was no
+    // mineral on either side of the settlement.
+    assert_eq!(g.mineral, 0.0, "the pool is still bare");
+    // Every unit it ate was respired, and the log's energy left as heat with it: with no
+    // decomposition in this fixture the fungus is the only thing respiring.
+    assert!(
+        (v.ledger.respired_out - want).abs() <= 1e-12 * want,
+        "respired {} of {want}",
+        v.ledger.respired_out
+    );
+    let e_v = energy / organic;
+    assert!(
+        (v.ledger.heat_out - e_v * want).abs() <= 1e-12 * e_v * want,
+        "heat {} of {}",
+        v.ledger.heat_out,
+        e_v * want
+    );
+    assert_residuals(&flora, "one tick on a mineral-free log");
+}
+
+/// **R9.1, the partially funded case.** The same tick on three logs that differ in one
+/// number: a log at a dead trunk's own density over-funds the tick and the excess mineral
+/// is released to the site's pool, a log at a **twentieth** of that density funds exactly
+/// half of the wood the income could otherwise build, and the growth is exactly what the
+/// mineral pays for — `Δw = arrived / n_tissue`, to the bit.
+///
+/// A fresh founder is the clean case on purpose: `Command::Seed` gives it `α · W` of
+/// foliage and `reserve_cap · W` of reserve, so `d_p` and `d_q` are both zero on its first
+/// tick and the only new tissue in it is wood.
+#[test]
+fn a_partly_mineralised_log_builds_exactly_what_its_mineral_funds() {
+    /// One tick on a log of `organic` holding `mineral`: the wood built, and the site's
+    /// mineral pool and the log's own mineral afterwards.
+    fn one_tick(mineral: f64) -> (f64, f64, f64) {
+        let mut world = pillars(4, &[1], 0.5);
+        let mut flora = Flora::new(budget_config());
+        let site = plant_glowcap(&mut flora, &world, 1);
+        log_with(&mut flora, site, 1.0, mineral);
+        let w0 = flora.view().stand_at(site).expect("the founder").wood;
+        flora.step(&mut world);
+        assert_residuals(&flora, "one tick on a partly mineralised log");
+        let v = flora.view();
+        let g = v.ground_at(site).expect("ground").clone();
+        (v.stand_at(site).expect("the founder").wood - w0, g.mineral, mineral - g.dead_wood_mineral)
+    }
+
+    let sc = FloraConfig::default().species(Species::Glowcap).clone();
+    let d_w = (sc.wood_rate * 0.05 * DT).min(sc.wood_max - 0.05);
+    assert!((d_w - 5e-6).abs() <= 1e-15 * 5e-6, "the tick's wood demand is {d_w}");
+
+    // Over-funded: a dead trunk's own density. The wood is the rate's own demand, and the
+    // mineral the tissue did not need went to the site's pool.
+    let (dw_full, pool_full, arrived_full) = one_tick(sc.n_tissue * 1.0);
+    // The tolerances are relative because both numbers are differences of stocks a
+    // thousand times their own size: `0.050005 - 0.05` carries an ulp of 0.05 with it.
+    assert!((dw_full - d_w).abs() <= 1e-9 * d_w, "the full log built {dw_full} of {d_w}");
+    assert!((arrived_full - 1e-6).abs() <= 1e-9 * 1e-6, "arrived {arrived_full}");
+    let need_full = sc.n_tissue * dw_full;
+    assert!(
+        (pool_full - (arrived_full - need_full)).abs() <= 1e-9 * (arrived_full - need_full),
+        "the excess {} went to the pool, not {}",
+        arrived_full - need_full,
+        pool_full
+    );
+
+    // Half-funded: a log at 0.001 of mineral per unit, a twentieth of a trunk's density,
+    // so the tick's arrival is 5e-8 and pays for 2.5e-6 of wood exactly.
+    let (dw_half, pool_half, arrived_half) = one_tick(0.001);
+    assert!((arrived_half - 5e-8).abs() <= 1e-9 * 5e-8, "arrived {arrived_half}");
+    assert!(
+        (dw_half - arrived_half / sc.n_tissue).abs() <= 1e-9 * dw_half,
+        "it built {dw_half}, and its mineral funds {}",
+        arrived_half / sc.n_tissue
+    );
+    assert!((dw_half - 0.5 * dw_full).abs() <= 1e-9 * dw_full, "half the mineral, half the wood");
+    // Nothing is left over and nothing is drawn: the arrival was spent exactly.
+    assert_eq!(pool_half, 0.0, "the pool neither gained nor could give");
+}
+
+// ------------------------------------------ R9.3: what a mycelium neighbourhood reaches
+
+/// A strip with **steps** in it: `(x, top)` makes column `x` bedrock at `y = 0` and soil
+/// from 1 to `top`, so its support face is `top`; every other column is void. What
+/// [`pillars`] is for one flat row, for a row a grove would have to climb.
+fn terraces(width: u32, tops: &[(i64, u32)], pore: f64) -> World {
+    let mut w = empty_world(width, 1);
+    for x in 0..width as i64 {
+        match tops.iter().find(|&&(cx, _)| cx == x) {
+            Some(&(_, top)) => {
+                for y in 1..=top {
+                    fill(&mut w, x, y, 0, Material::Soil, pore);
+                }
+                assert_eq!(
+                    cubarium_voxel_flora::highest_support(&w.view(), x, 0).map(|s| s.y),
+                    Some(top),
+                    "column {x} must stand at {top}"
+                );
+            }
+            None => {
+                w.apply(WorldCommand::SetMaterial { x, y: 0, z: 0, material: Material::Air });
+                assert!(
+                    cubarium_voxel_flora::highest_support(&w.view(), x, 0).is_none(),
+                    "({x},0) must be void"
+                );
+            }
+        }
+    }
+    w
+}
+
+fn face(x: u32, y: u32) -> Site {
+    Site { x, y, z: 0 }
+}
+
+/// **R9.3: substrate access reaches one row up and one row down, and no further.** The
+/// rule decision R9.3 asked for, pinned as geometry: one log on `(3,2)`, and the
+/// germination predicate the model itself runs — read off the flora's own ground — on four
+/// faces that differ from it only in height.
+///
+/// Same level `(3,2)` and `(2,3)` one **up** and `(4,1)` one **down** all have the log in
+/// their mycelium box and pass; `(8,4)` is two rows above a log one column away and
+/// `(5,2)` is level with one two columns away, and both are refused on substrate alone
+/// with every other gate open. Before the repair the two vertical cases failed too, which
+/// is what refused all three of the round-5b `community` run's landings.
+#[test]
+fn substrate_access_reaches_one_row_up_and_one_row_down() {
+    let world = terraces(10, &[(2, 3), (3, 2), (4, 1), (5, 2), (7, 2), (8, 4)], 0.5);
+    let mut flora = Flora::new(config());
+    let (organic, _, _) = log_on(&mut flora, face(3, 2), 1.0);
+    log_on(&mut flora, face(7, 2), 1.0);
+    let sc = flora.config().species(Species::Glowcap).clone();
+    assert_eq!(sc.substrate_reach_up_down, 1, "the placeholder this case is about");
+    assert!(organic > sc.establish_substrate_min, "a log is more than the gate asks for");
+
+    let v = flora.view();
+    let view = world.view();
+    for (site, what) in [
+        (face(3, 2), "the log's own face"),
+        (face(2, 3), "one row up"),
+        (face(4, 1), "one row down"),
+    ] {
+        let g = v.establishment_gates(&view, site, Species::Glowcap);
+        assert!(
+            (g.dead_wood - organic).abs() < 1e-15,
+            "{what} {site:?}: its box holds {} of dead wood",
+            g.dead_wood
+        );
+        assert!(g.passes(), "{what} {site:?} must pass: {g:?}");
+    }
+    for (site, what) in [
+        (face(8, 4), "two rows above a log one column away"),
+        (face(5, 2), "level with a log two columns away"),
+    ] {
+        let g = v.establishment_gates(&view, site, Species::Glowcap);
+        assert_eq!(g.dead_wood, 0.0, "{what} {site:?} is genuinely substrate-free");
+        assert!(!g.substrate_ok, "{what}: the substrate gate is what shuts");
+        assert!(
+            g.pore_ok && g.aeration_ok && g.depth_ok && g.light_ok,
+            "{what}: and nothing else is: {g:?}"
+        );
+        assert!(!g.passes());
+    }
+    // And the box is the substrate's own geometry, not the water's: `rooting_depth` is
+    // untouched, so the soil-water reading of the one-row-up face is still its own row.
+    assert_eq!(sc.rooting_depth, 1, "the soil-water box was not widened to do this");
+}

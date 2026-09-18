@@ -547,28 +547,31 @@ fn ramp(value: f64, lo: f64, hi: f64) -> f64 {
 
 // --------------------------------------------------------------- 5b. substrate
 
-/// The **mycelium box** of a saprotroph on `site`: [`root_box`]'s geometry read as support
-/// **sites** rather than as soil voxels — `|dx| <= rooting_radius`, `|dz| <=
-/// rooting_radius`, `site.y - rooting_depth < y <= site.y`, `x` wrapped and `z` clipped at
-/// the walls — in a fixed geometric order, deduplicated.
+/// The **mycelium box** of a saprotroph on `site`: `|dx| <= rooting_radius`, `|dz| <=
+/// rooting_radius`, `|dy| <= `[`SpeciesConfig::substrate_reach_up_down`], `x` wrapped and
+/// `z` and `y` clipped at the walls, read as support **sites** rather than as soil voxels,
+/// in a fixed geometric order, deduplicated.
 ///
 /// Sites, not voxels, because what a fungus eats is a *stock on the ground* and the ground
 /// stocks live one per support face. A site in the box that has never held anything has no
 /// [`Ground`] and therefore no dead wood, which is the same thing as holding none.
 ///
-/// Two consequences of reusing the root box, both stated rather than repaired. The box
-/// reaches **down** and never up, so a log on the face above a fungus is not in its box
-/// while one on the face below is — at `rooting_depth` 1, which is glowcap's placeholder,
-/// the box is one row and the asymmetry does not arise. And the box is a box and not a
-/// path: a log across a one-voxel wall is in reach of a mycelium that could not actually
-/// grow through it, exactly as [`crate::Reach`] is a box with no line of sight in it.
+/// **The vertical reach is its own field and symmetric (Astra R9.3).** It used to be
+/// [`root_box`]'s geometry, which reaches `rooting_depth` **down** and never up, so at
+/// glowcap's `rooting_depth` 1 the box was the stand's own row alone and a spore one voxel
+/// above or below a full log found nothing to eat — which is what refused all three
+/// landings of the round-5b `community` run. Mycelium in a log is not a root in soil, so
+/// substrate access is now decided by `substrate_reach_up_down` and the soil-water box is
+/// untouched.
+///
+/// Still a box and not a path: a log across a one-voxel wall is in reach of a mycelium that
+/// could not actually grow through it, exactly as [`crate::Reach`] is a box with no line of
+/// sight in it.
 fn mycelium_sites(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> Vec<Site> {
     let c = view.config;
-    let span = sc.rooting_depth.min(site.y + 1);
-    if span == 0 {
-        return Vec::new();
-    }
-    let y_lo = site.y + 1 - span;
+    let up_down = i64::from(sc.substrate_reach_up_down);
+    let y_lo = (i64::from(site.y) - up_down).max(0) as u32;
+    let y_hi = (i64::from(site.y) + up_down).min(i64::from(c.height.max(1) - 1)) as u32;
     let r = sc.rooting_radius as i64;
     let width = c.width.max(1) as i64;
     let mut out: Vec<Site> = Vec::new();
@@ -577,7 +580,7 @@ fn mycelium_sites(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> Vec<S
         if z < 0 || z >= c.depth as i64 {
             continue;
         }
-        for y in y_lo..=site.y {
+        for y in y_lo..=y_hi {
             for dx in -r..=r {
                 let x = (site.x as i64 + dx).rem_euclid(width) as u32;
                 let s = Site { x, y, z: z as u32 };
@@ -840,18 +843,53 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink], substrate: &[Taken]) 
         ledger.respired_out += paid_a + paid_q;
         ledger.heat_out += e_v * (paid_a + paid_q);
 
+        // ---- 4.4a the mineral budget, **before** a unit of tissue is allocated
+        //
+        // Astra R9.1. The mineral used to be netted against the tissue *after* it was
+        // built, which capped the **debit** and not the growth: a moist half-grown glowcap
+        // on an energy-bearing, mineral-free log with a bare site pool still grew
+        // `5e-6` of wood whose `1e-7` of mineral did not exist, so the tissue it built
+        // held less than `n_tissue` and the promise that `n_tissue` is the density of what
+        // is built was only true for the five plants. The budget now comes first and
+        // bounds what may be built at all.
+        //
+        // What is spendable this tick is what **arrived** with the income plus what the
+        // site's pool can give up: `arrived_mineral` — the mineral that came out of the
+        // log with the wood, zero for a `Photo` stand — plus the pool `n0` itself. The
+        // pool is the bound a plant's own draw obeys: §4.2's stock cap `N / n_tissue` is
+        // exactly `N` of mineral read in tissue units, and `nutrient_draw_max` bounds
+        // **assimilation**, which a saprotroph does not do. A *rate* cap on a fungal pool
+        // draw is a rule decision and a `design/backlog.md` row, not one this round
+        // invents.
+        //
+        // For a `Photo` stand this cap is provably non-binding and is written once for
+        // both modes rather than branched: §4.2 caps `A` by `mineral_cap = N / n_tissue`
+        // and every unit built costs at least one unit of `rem <= A`, so
+        // `n_tissue · built <= N` already. For a saprotroph it is the whole of R9.1.
+        let mineral_budget = arrived_mineral + n0.max(0.0);
+        let mut tissue_left = if sc.n_tissue > 0.0 {
+            (mineral_budget / sc.n_tissue).max(0.0)
+        } else {
+            f64::INFINITY
+        };
+
         // ---- 4.4 growth: reserve share, foliage, wood, then the rest to reserve
         //
-        // Every increment is floored at zero as well as capped by its demand. The caps
-        // above already keep `rem` non-negative in exact arithmetic; in f64 a
-        // `rem - build * (rem / build)` can land a few ulps below it, and a negative
-        // "growth" would take a stock down instead of up.
-        let dq_s = (sc.reserve_share * rem).min(d_q).max(0.0);
+        // Every increment is floored at zero as well as capped by its demand **and by the
+        // mineral budget left**. Unfunded income is not held anywhere: it falls through to
+        // the leftover `rem` below and is respired there, with its energy as heat, which
+        // is where a capped income has always gone. The caps above already keep `rem`
+        // non-negative in exact arithmetic; in f64 a `rem - build * (rem / build)` can
+        // land a few ulps below it, and a negative "growth" would take a stock down
+        // instead of up.
+        let dq_s = (sc.reserve_share * rem).min(d_q).min(tissue_left).max(0.0);
         rem -= dq_s;
+        tissue_left -= dq_s;
         stands[si].reserve += dq_s;
 
-        let dp_a = (rem / build).min(d_p).max(0.0);
+        let dp_a = (rem / build).min(d_p).min(tissue_left).max(0.0);
         rem -= build * dp_a;
+        tissue_left -= dp_a;
         let dp_q = if p0 < sc.reflush_below * p_cap {
             (stands[si].reserve / build)
                 .min(d_p - dp_a)
@@ -863,11 +901,12 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink], substrate: &[Taken]) 
         stands[si].reserve -= build * dp_q;
         stands[si].foliage += dp_a + dp_q;
 
-        let dw = (rem / build).min(d_w).max(0.0);
+        let dw = (rem / build).min(d_w).min(tissue_left).max(0.0);
         rem -= build * dw;
+        tissue_left -= dw;
         stands[si].wood += dw;
 
-        let dq_r = rem.min((d_q - dq_s).max(0.0)).max(0.0);
+        let dq_r = rem.min((d_q - dq_s).max(0.0)).min(tissue_left).max(0.0);
         stands[si].reserve += dq_r;
         rem -= dq_r;
         // The leftover itself: never respire a negative residue. With the §4.2 cap on
@@ -882,16 +921,17 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink], substrate: &[Taken]) 
 
         // New tissue built out of this tick's income draws `n_tissue` per unit from the
         // site's pool. The reflush `dp_q` is not new tissue — it is reserve turned into
-        // foliage — so its mineral is already in the stand and is not drawn again. The
-        // `min` is float insurance: `A_pot`'s `mineral / n_tissue` cap already bounds
-        // this by the pool, and only this stand draws on this site.
+        // foliage — so its mineral is already in the stand and is not drawn again. This is
+        // now a **settlement** of §4.4a's budget and not a cap of its own: `need` is at
+        // most `mineral_budget` by construction, so the draw below is always fully funded
+        // and the `min`s are float insurance. Only this stand draws on this site.
         let built = dq_s + dp_a + dw + dq_r;
         let need = (sc.n_tissue * built).max(0.0);
         // A saprotroph's mineral arrives **with the wood**, at the log's own density, and
         // is netted against what the tissue it built actually needs: the excess is released
-        // to the site's pool and a shortfall is drawn from it under the same cap the plants
-        // draw under. Mineral only ever moves between stocks, so both directions conserve
-        // it exactly. A `Photo` stand has no arrival and this is the draw it always was.
+        // to the site's pool and a shortfall is drawn from the pool the budget counted.
+        // Mineral only ever moves between stocks, so both directions conserve it exactly.
+        // A `Photo` stand has no arrival and this is the draw it always was.
         stands[si].mineral += arrived_mineral;
         if arrived_mineral > need {
             let release = (arrived_mineral - need).min(stands[si].mineral.max(0.0));
@@ -2145,5 +2185,70 @@ mod tests {
         assert!((ramp(0.4, 0.2, 0.6) - 0.5).abs() < 1e-15);
         assert_eq!(ramp(0.3, 0.5, 0.5), 0.0);
         assert_eq!(ramp(0.5, 0.5, 0.5), 1.0);
+    }
+
+    /// **Two fungi on one log, with unequal demands (Astra R9.3).** `feed` itself, not the
+    /// scalar arithmetic under it: the collect-then-withdraw rule is what makes two
+    /// mycelia *share* a log instead of the earlier one in the sweep eating its fill, and
+    /// until now only [`split_proportional`] was tested, which is not `feed` and not its
+    /// three-currency remainder.
+    ///
+    /// Two glowcaps on adjacent faces, `W` 0.02 and 0.06, so their demands are `2e-5` and
+    /// `6e-5` — one to three — and one shared log on the first one's face holding `4e-5` of
+    /// organic matter, **half** of what the two ask for, with a declared `3e-6` of mineral
+    /// and `5e-4` of energy so that the three receipts are distinguishable numbers.
+    ///
+    /// All three currencies split one to three, the pool is left at exactly zero in all
+    /// three with no float dust claiming to be a stock, and the last demander takes each
+    /// remainder so that what the pool lost and what the stands received are the same
+    /// number and not the same number to a few ulps.
+    #[test]
+    fn two_fungi_share_one_log_in_proportion_to_their_demand() {
+        let world = slab(4, 0.6);
+        let mut flora = Flora::new(FloraConfig::default());
+        for (x, wood) in [(1i64, 0.02), (2, 0.06)] {
+            assert!(flora.apply(
+                &world,
+                crate::Command::Seed { x, z: 0, species: Species::Glowcap, wood }
+            ));
+        }
+        let log = Site { x: 1, y: 2, z: 0 };
+        assert!(flora.deposit(
+            log,
+            crate::Deposit {
+                kind: crate::DepositKind::DeadWood,
+                organic: 4e-5,
+                mineral: 3e-6,
+                energy: 5e-4,
+            }
+        ));
+        // Both boxes hold the one log, and it is the only dead wood in the world.
+        let sc = flora.config().species(Species::Glowcap).clone();
+        for site in [Site { x: 1, y: 2, z: 0 }, Site { x: 2, y: 2, z: 0 }] {
+            let held = flora.view().dead_wood_in_box(&world.view(), site, &sc);
+            assert!((held - 4e-5).abs() < 1e-18, "{site:?} sees {held}");
+        }
+
+        // One tick's worth of the moisture `drink` would have read: full, so the demands
+        // are the rate's own. `feed` is the step under test and nothing else runs.
+        let moisture = vec![Drink { moisture: 1.0, taken_m3: 0.0, saturated: 0.0 }; 2];
+        let out = feed(&mut flora, &world, &moisture);
+
+        assert_eq!(out.len(), 2);
+        // A quarter and three quarters, in every currency.
+        for (i, f) in [(0usize, 0.25), (1, 0.75)] {
+            assert!((out[i].organic - f * 4e-5).abs() < 1e-20, "{i}: organic {:?}", out[i]);
+            assert!((out[i].mineral - f * 3e-6).abs() < 1e-20, "{i}: mineral {:?}", out[i]);
+            assert!((out[i].energy - f * 5e-4).abs() < 1e-18, "{i}: energy {:?}", out[i]);
+        }
+        // Three times the demand, three times the share, and nothing was created: the two
+        // receipts sum to exactly what the log held.
+        assert_eq!(out[0].organic + out[1].organic, 4e-5);
+        assert_eq!(out[0].mineral + out[1].mineral, 3e-6);
+        assert_eq!(out[0].energy + out[1].energy, 5e-4);
+        let g = flora.view().ground_at(log).expect("the log's site").clone();
+        assert_eq!((g.dead_wood, g.dead_wood_mineral, g.dead_wood_energy), (0.0, 0.0, 0.0));
+        let uptake = flora.view().ledger.substrate_uptake[Species::Glowcap.index()];
+        assert_eq!(uptake, 4e-5, "the diagnostic flux is the whole withdrawal");
     }
 }
