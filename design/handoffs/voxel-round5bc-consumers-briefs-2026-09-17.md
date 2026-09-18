@@ -1,8 +1,9 @@
 ---
-status: leaning
+status: resolved
 date: 2026-09-17
 owner: Fable
 ---
+> **RESOLVED 2026-09-17.** Landed on main; see git log for the commits.
 
 # Voxel rounds 5b and 5c: both first consumers, in parallel
 

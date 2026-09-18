@@ -1,8 +1,9 @@
 ---
-status: leaning
+status: resolved
 date: 2026-09-18
 owner: Fable
 ---
+> **RESOLVED 2026-09-18.** Landed on main; see git log for the commits.
 
 # Voxel schedule: bevy_ecs as the tick's backbone, parallel inside phases
 

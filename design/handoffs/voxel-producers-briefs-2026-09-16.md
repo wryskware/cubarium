@@ -1,8 +1,9 @@
 ---
-status: leaning
+status: resolved
 date: 2026-09-16
 owner: Fable
 ---
+> **RESOLVED 2026-09-16.** Landed on main; see git log for the commits.
 
 # Voxel round 2: two producers on the terrain
 
