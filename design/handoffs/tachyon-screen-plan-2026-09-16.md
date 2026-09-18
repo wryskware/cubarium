@@ -6,6 +6,10 @@ decision_refs: []
 
 # Tachyon screen: the cube world on a flat HD display
 
+> **Note 2026-09-18.** This plan of record is kept as the live panel contract.
+> The GS-0/GS-1 spike research and flat-world briefs it cites were deleted with
+> the dated flat-era material; those references are Git history.
+
 Plan of record for phase 1. Written by Fable on 2026-09-16 after probing the
 device and reading the LED cube shim. Workers get their own briefs (linked at
 the end); this file is the shared contract they are held to.
