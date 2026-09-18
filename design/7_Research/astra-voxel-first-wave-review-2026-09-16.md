@@ -1478,3 +1478,120 @@ cleared to continue, with R9.7 before generalizing its founder treatment.
 Apply reporting corrections now; settle R9.3/R9.5 before drawing the
 corresponding fungal-spread or feeding-access conclusions. No parameter
 tuning, population target, long rerun or art revision is required by this review.
+
+## Round 10
+
+Reviewed **8a59491**, Q and P, by source and isolated arithmetic. **49 focused
+tests passed**: replacement integration/example, round-5b/5c, shared-log uptake,
+fauna snapshot validation and terrain-load refusal. No long run or capture.
+
+1. **P1 — R10.1: the proposed full cap cannot observe the replacement it
+   measures. Before authorising the seven long arms.**
+   `crates/cubarium-voxel-flora/examples/harness/mod.rs:523-566` computes
+   **newborn → donor → package**, but `examples/replacement.rs:705-747`
+   introduces a donor with **zero parcel and no newborn**. Its first package
+   must be funded and germinate before that clock can start. Even perfect
+   funding, immediate germination and capped growth therefore require about
+   **3,308.15 s**, not 3,008.15 s; stonecushion needs about **9,247.25 s**,
+   not 8,647.25 s, with tick/rounding details still to include. These are
+   earliest possibilities, not durations that guarantee success. My earlier
+   newborn bound and the brief must be corrected where they became a sufficient
+   observation window. **Change:** print that lower bound separately from the
+   authorised stopping budget, include first recruitment and phase order, and
+   require a budget above it for replacement controls. Keep “unresolved” on
+   expiry; first authorise a positive-control pilot to measure G rather than
+   spending seven arms at an impossible cap. Test the complete timeline with
+   accelerated rates. The one-sided growth test remains valid.
+
+   Also correct `design/7_Research/voxel-round3-experiment-2026-09-16.md:1703-1705`:
+   6,000 repeated additions give `0.049999999999996936`, below the package
+   `0.049999999999999996`. “0.05000” is rounded display, not exact funding;
+   `src/step.rs:1533-1542` delivers **after this tick's funding**, without an
+   extra delivery phase. No model epsilon or rate tuning is needed.
+
+2. **P2 — R10.2: elapsed conditioning is not a conditioned habitat. Before
+   full controls; this answers (b).**
+   `crates/cubarium-voxel-flora/examples/replacement.rs:302-354` selects the
+   resident immediately after the fixed warm-up; `:400-414` accepts any
+   surviving resident regardless of the printed water/habitat trajectory.
+   The smoke's final storage rate is **+0.0207 m³/s**, about **54% of rain**,
+   despite its nearly stationary head (experiment note `:1657-1659`). That
+   does not establish the steady setting the replacement comparison assumes.
+   **Recommendation:** condition hydrology **before selecting founders**, then
+   condition the resident and check the coupled setting again before branching.
+   Predeclare tolerances for interval storage, head and eligible-site turnover
+   over consecutive intervals, plus a finite conditioning budget; print
+   “conditioning unresolved” if it expires. Test that decision on synthetic
+   interval records, not another long smoke. Do not pick a convenient later
+   planting moment just because it gives more bloomcrown sites. Early planting
+   remains a valid separate succession experiment. Refusal when a species has
+   no settled niche is evidence, not a reason to loosen its gates.
+
+3. **P2 — R10.3: delivery destinations are invented by the observer. Before
+   full controls.**
+   `crates/cubarium-voxel-flora/examples/replacement.rs:1067-1102` assigns the
+   single largest bank increase to **every** donor delivering that tick.
+   Its baseline updates only on deliveries, so intervening germination,
+   attrition and expiry also confound the difference. A bank read as 0.05,
+   subsequently emptied, then receiving 0.05 again has zero measured growth;
+   the fallback nevertheless prints a delivery to `(0,0,0)`.
+   **Change:** expose transient `(donor_id, recipient, amount)` delivery
+   receipts, or omit destination attribution and explicitly retain only the
+   parcel-derived donor counts. Never fabricate a site. Pin two simultaneous
+   destinations and a refilled bank in a tiny observer fixture. Identity-based
+   births/losses and descendant parcel drops are otherwise useful; this is an
+   observation defect, not lost material in the model.
+
+4. **P2 — R10.4: a cap-only override can change the world seed. Before any
+   further harness invocation.**
+   `crates/cubarium-voxel-flora/examples/replacement.rs:74-86` removes the
+   `--cap` token from positional arguments but retains its value. Thus
+   `replacement bloomcrown umbrellafrond 1000 --cap 300` also selects seed
+   **300**, instead of default 1. **Change:** consume each option and its
+   value together; pin omitted/explicit seed cases and reject non-finite or
+   negative durations. The published command supplies both seeds and is
+   unaffected, but shortening a run must not change its experimental keys.
+
+5. **P3 — R10.5: the new feeding-height report measures attempts and reach,
+   not successful intake. Before interpreting that report; not an ambient-run
+   blocker.** `crates/cubarium-voxel-fauna/examples/grazed.rs:380-384` keys on
+   `State::Cropping`, which can survive an empty withdrawal after an earlier
+   animal depleted the same stand. `:206-212` counts once per reachable stand,
+   so two stands with the same species/height add two to one animal-tick.
+   **Change:** call these crop-attempt/reachable-stand observations, or deduplicate
+   species/height per animal-tick; use successful withdrawal receipts if actual
+   bite attribution is wanted. Q repairs the sensing geometry itself.
+
+### What this does and does not establish
+
+**Q clears R9.1–R9.6's model/state blockers.** At flora
+`src/step.rs:869-929`, each new increment spends the remaining mineral budget
+in the stated order; the last increment needs no subsequent subtraction.
+Reflush converts already funded reserve and correctly draws no new mineral,
+including when this tick funded that reserve. Unused income is respired;
+Photo's existing cap makes the additional budget non-binding. Fauna
+`src/step.rs:363-394` now bounds new tissue by incoming mineral. Intake-only
+reserve capacity, symmetric substrate access, 1:3 shared-log receipts,
+candidate-face sensing and terrain-only refusal/state validation match the
+requested repairs. The full-founder excretion refinement is right: upkeep
+frees only `2.5e-6` tissue room. Zero excess in a young animal is conditional
+on **mineral-limited food and room for it**, not a universal age rule; the
+enriched-food test correctly covers the exception. R10.5 limits the new report.
+
+**P's bookkeeping and main refusals are sound.** Eager provisioning books each
+existing support once; resident stands and banks are removed with their
+currencies, retaining water and ground pools. Worker (a) is correct: matched
+initial imports and net inventories differing by the removal are the right
+assertions, not equal post-exclusion `expected_mineral`. Introduced newcomers
+also add their declared founder mineral relative to resident-only. One cloned
+resident-only control can serve all three sites; seven arms are sufficient
+for one direction. Half-own-maximum founders resolve R9.7, and immediate
+donation is properly distinguished from descendant replacement. The missing-
+resident and glowcap refusals are appropriate. Worker (c)'s positive-zero
+normalisation changes presentation only. None of this establishes replacement,
+stationarity or coexistence; those remain measurements, not passing tests.
+
+**Verdict: Q's two consumers clear for a first fresh, uninterrupted long
+ambient run; full ecosystem persistence and ecological stability are not
+claimed. P is not ready for the proposed 1.8-hour full-cap controls: address
+R10.1–R10.4, then authorise a revised conditioning/observation budget.**
