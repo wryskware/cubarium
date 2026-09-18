@@ -157,6 +157,18 @@ fn maintenance(fauna: &mut Fauna) {
 }
 
 /// Step 3: one snapshot of what every animal can reach and smell.
+///
+/// **The sensing domain is a set of standing faces (Astra R9.5).** A candidate is any
+/// support face within `sense_radius` of the animal's own face — wrapped `x` and plain `z`,
+/// each measured on its own — that this species could stand on, and its score is
+/// `reachable_foliage` from that face, the model's own reach query. So what an animal can
+/// find is bounded by where it could stand, and what it can eat there is decided by the
+/// same rule a bite uses. Nothing here classifies a stand as edible.
+///
+/// Two approximations stay, and stay stated: there is **no line of sight** — the reach box
+/// and this radius are both geometry, so neither knows about a wall between the animal and
+/// the food — and the walk is **greedy** (`toward`), one strictly-closer orthogonal step
+/// per period. Neither establishes a body-sized passage, an obstacle refuge or a path.
 fn sense(
     fauna: &Fauna,
     view: &VoxelView<'_>,
@@ -173,31 +185,45 @@ fn sense(
         let total: f64 = reach.iter().map(|&(_, f)| f).sum();
         let bite = sc.bite_per_s * DT;
 
-        // Candidate faces: every support face of a foliage-bearing stand's own column and
-        // of its four orthogonal neighbours, within `sense_radius` of where the animal
-        // stands, that it could stand on (`steppable` reads `climb` against the animal's
-        // *current* face, so the candidate list is deliberately built without it — a
-        // target several voxels up is still worth walking toward, one climbable step at a
-        // time).
+        // Candidate faces, in **candidate-face coordinates** (Astra R9.5). Every support
+        // face this animal could stand on whose distance from the face it *is* standing on
+        // is within `sense_radius` — wrapped `x`, plain `z`, each measured on its own, the
+        // same box `sense_radius` always meant — is a candidate, and it is scored below
+        // with `reachable_foliage` **from that face**. The sensing domain belongs to the
+        // candidate and not to the food: the old stand-centre prefilter bounded the food's
+        // column and then added neighbouring faces without bounding them, so it admitted a
+        // face nine columns away whose stand was eight, and missed a face eight columns
+        // away whose stand was nine. `climb` is deliberately not applied here —
+        // `steppable` reads it against the animal's *current* face, and a target several
+        // voxels up is still worth walking toward one climbable step at a time.
+        //
+        // Walked from the stands rather than over the whole radius, which is the **same
+        // set**: a face with nothing in reach scores zero and is dropped by the `t < bite`
+        // test below, so the only faces that can survive are those within
+        // `reach.horizontal` of some crown cell of a foliage-bearing stand. The crown
+        // radius is in the span because reach is measured to a crown *cell* and a crown is
+        // wider than its own column.
+        let sense = i64::from(sc.sense_radius);
         let mut candidates: Vec<Site> = Vec::new();
-        for (site, foliage) in fv.stands.iter().map(|s| (s.site, s.foliage)) {
-            if !(foliage > 0.0) {
-                continue;
-            }
-            if wrapped_dx(width, i64::from(site.x), i64::from(a.site.x)) > i64::from(sc.sense_radius)
-                || (i64::from(site.z) - i64::from(a.site.z)).abs() > i64::from(sc.sense_radius)
-            {
-                continue;
-            }
-            for (dx, dz) in [(0i64, 0i64), (-1, 0), (1, 0), (0, -1), (0, 1)] {
-                let z = i64::from(site.z) + dz;
+        for stand in fv.stands.iter().filter(|s| s.foliage > 0.0) {
+            let crown = fv.config.species(stand.species).crown_radius(stand.wood).max(0.0);
+            let span = i64::from(sc.reach.horizontal) + crown.floor() as i64;
+            for dz in -span..=span {
+                let z = i64::from(stand.site.z) + dz;
                 if z < 0 || z >= i64::from(view.config.depth) {
                     continue;
                 }
-                let x = i64::from(site.x) + dx;
-                for face in faces_in_column(view, x, z as u32, &sc) {
-                    if let Err(at) = candidates.binary_search(&face) {
-                        candidates.insert(at, face);
+                for dx in -span..=span {
+                    let x = i64::from(stand.site.x) + dx;
+                    for face in faces_in_column(view, x, z as u32, &sc) {
+                        if wrapped_dx(width, i64::from(face.x), i64::from(a.site.x)) > sense
+                            || (i64::from(face.z) - i64::from(a.site.z)).abs() > sense
+                        {
+                            continue;
+                        }
+                        if let Err(at) = candidates.binary_search(&face) {
+                            candidates.insert(at, face);
+                        }
                     }
                 }
             }

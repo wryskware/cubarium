@@ -416,6 +416,117 @@ fn a_step_crosses_neither_a_wall_nor_a_pool() {
     assert!(fauna.view().ledger.bites > 0, "and ate when it got there");
 }
 
+// ------------------------------------------------- R9.5: sensing in face coordinates
+
+/// A bloomcrown founder at half its own `wood_max`: wood 0.3, foliage `α · W` = 0.6, and a
+/// crown whose lowest cell is **two** voxels above its support face, so a browser with
+/// `reach.up` 1 can only eat it from a face at least one voxel higher than the stand's.
+fn bloom(flora: &mut Flora, world: &World, x: i64) {
+    let wood = 0.5 * flora.config().bloomcrown.wood_max;
+    assert!(
+        flora.apply(world, FloraCommand::Seed { x, z: 0, species: Plant::Bloomcrown, wood }),
+        "a bloomcrown founder at x {x}"
+    );
+    assert_eq!(flora.config().bloomcrown.crown_voxels(wood), 2, "the fixture's premise");
+}
+
+/// **R9.5, Astra's case: a feeding face outside the sensing radius is not selectable.**
+/// Width 40, depth 1, a grazer on `(10,2)`, a bloomcrown founder on `(18,2)` — eight
+/// columns away, inside `sense_radius` 8 — and the **only** face its crown can be eaten
+/// from is the raised `(19,3)`, nine columns away and outside it. The old stand-centre
+/// prefilter admitted that face because the *stand* was inside the radius; the face-domain
+/// rule refuses it, and the animal has nothing to walk to.
+///
+/// Three arms: the refusal, the same fixture translated across the `x` seam, and the same
+/// fixture at `sense_radius` 9 — this test's own number — where the face *is* a candidate
+/// and the walk happens, so the refusal is about the radius and not about the geometry.
+#[test]
+fn a_feeding_face_outside_the_sensing_radius_is_not_selectable() {
+    /// One arm: a grazer at `gx`, a bloomcrown at `bx`, the sole raised face at `bx + 1`.
+    /// Returns where the animal ended up, its state, and the bites and steps it took.
+    fn arm(gx: i64, bx: i64, radius: u32) -> (Site, State, u64, u64) {
+        let mut world = plain(40, 2, 0.3, 5);
+        let raised = (bx + 1).rem_euclid(40);
+        raise(&mut world, raised, 2, 3, 0.3);
+        let mut flora = Flora::new(FloraConfig::default());
+        bloom(&mut flora, &world, bx);
+        let mut fauna = Fauna::new(config_with(|s| s.sense_radius = radius));
+        let sc = *fauna.config().species(Species::Frondgrazer);
+        let id = grazer(&mut fauna, &world, gx, 0.02);
+
+        // The premise, from the model's own reach query: the crown is food from the raised
+        // face and from nowhere else in the world.
+        let fv = flora.view();
+        let from_raised =
+            fv.reachable_foliage(&world.view(), at(raised as u32, 3), sc.reach).len();
+        assert_eq!(from_raised, 1, "the crown is reachable from the raised face");
+        for x in 0..40u32 {
+            if x == raised as u32 {
+                continue;
+            }
+            assert!(
+                fv.reachable_foliage(&world.view(), at(x, 2), sc.reach).is_empty(),
+                "({x},2) must not reach the crown"
+            );
+        }
+
+        for _ in 0..400 {
+            fauna.step(&world, &mut flora);
+        }
+        let a = *fauna.view().animal(id).expect("it neither starved nor drowned");
+        (a.site, a.state, fauna.view().ledger.bites, fauna.view().ledger.steps)
+    }
+
+    // The refusal: nine columns is outside a radius of eight, so it rests where it stands.
+    let (site, state, bites, steps) = arm(10, 18, 8);
+    assert_eq!(site, at(10, 2), "it did not move: {site:?}");
+    assert_eq!(state, State::Resting);
+    assert_eq!((bites, steps), (0, 0), "nothing sensed, nothing eaten");
+
+    // The same case translated across the seam: `x` wraps, so 32 → 1 is nine columns the
+    // short way round and the answer cannot depend on where the seam is.
+    let (site, state, bites, steps) = arm(32, 0, 8);
+    assert_eq!(site, at(32, 2), "across the seam too: {site:?}");
+    assert_eq!(state, State::Resting);
+    assert_eq!((bites, steps), (0, 0));
+
+    // Not vacuous: at a radius of nine the raised face is a candidate, and the animal
+    // walks to it and eats.
+    let (site, _, bites, steps) = arm(10, 18, 9);
+    assert!(steps > 0 && bites > 0, "at radius 9 it walked and ate: {site:?} {steps} {bites}");
+    assert_eq!(site.y, 3, "and it is standing on the raised face: {site:?}");
+}
+
+/// **R9.5, the other direction: a stand outside the radius whose feeding face is inside it
+/// is found.** A springturf founder on `(19,2)` is nine columns from a grazer on `(10,2)`
+/// and the stand-centre prefilter dropped it, although `(18,2)` — eight columns away, well
+/// inside `sense_radius` 8 — reaches it. Scoring candidate faces finds it, and the animal
+/// walks over and eats.
+#[test]
+fn a_stand_outside_the_radius_is_found_through_a_face_inside_it() {
+    let world = plain(40, 2, 0.3, 5);
+    let mut flora = Flora::new(FloraConfig::default());
+    turf(&mut flora, &world, 19);
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let sc = *fauna.config().species(Species::Frondgrazer);
+    let id = grazer(&mut fauna, &world, 10, 0.02);
+    // The premise: nothing is in reach where it stands, the stand is nine columns away,
+    // and the nearest face that reaches it is eight.
+    let fv = flora.view();
+    assert!(fv.reachable_foliage(&world.view(), at(10, 2), sc.reach).is_empty());
+    assert_eq!(fv.reachable_foliage(&world.view(), at(18, 2), sc.reach).len(), 1);
+    assert_eq!(sc.sense_radius, 8, "the placeholder this case is about");
+
+    for _ in 0..400 {
+        fauna.step(&world, &mut flora);
+    }
+
+    let a = *fauna.view().animal(id).expect("it is still alive");
+    assert!(fauna.view().ledger.steps > 0, "it walked: {a:?}");
+    assert!(fauna.view().ledger.bites > 0, "and it ate when it got there");
+    assert_residual_pair(&flora, &fauna, "after walking to a stand outside the radius");
+}
+
 // ----------------------------------------------------------------- the newborn
 
 /// A birth is paid out of the parent's reserve, exactly `birth_cost` of it, and the

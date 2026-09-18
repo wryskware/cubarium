@@ -210,7 +210,12 @@ pub struct SpeciesConfig {
     pub drown_depth_m: f64,
     /// Seconds between steps. Quantised to whole ticks, never below one.
     pub step_period_s: f64,
-    /// How far, in voxels of wrapped `x` and of `z`, it can smell food it cannot reach.
+    /// How far, in voxels of wrapped `x` and of `z` each measured on its own, a **face it
+    /// could stand on** may be and still be a candidate for the walk. The domain is the
+    /// candidate face's and not the food's (Astra R9.5): a crown is found by scoring the
+    /// faces in this box with [`cubarium_voxel_flora::FloraView::reachable_foliage`], so a
+    /// stand outside the box whose feeding face is inside it *is* found, and a stand inside
+    /// it whose only feeding face is outside is not.
     pub sense_radius: u32,
     /// Energy per unit of organic matter an **introduced** animal arrives with. Used for
     /// nothing else: every other unit of energy in this layer came in with a bite at the
