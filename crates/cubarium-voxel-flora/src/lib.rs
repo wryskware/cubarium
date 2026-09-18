@@ -55,13 +55,13 @@ pub use cubarium_voxel::{DT, TICK_HZ};
 /// harness picking founder columns, a diagnosis of which gate is shut. There is one
 /// predicate, and this is it.
 pub use step::can_establish;
-/// The same predicate, gate by gate, for a caller that needs to know **which** gate shut:
-/// `Gates::passes()` is exactly `can_establish`.
-pub use step::{Gates, establishment_gates, establishment_gates_on_substrate};
 /// The same predicate with the geometric sky reading supplied by a caller that already has
 /// it — the batch observation path, [`FloraView::establishment_gates_over`], where one ray
 /// per site is shared across species.
 pub use step::establishment_gates_with_sky;
+/// The same predicate, gate by gate, for a caller that needs to know **which** gate shut:
+/// `Gates::passes()` is exactly `can_establish`.
+pub use step::{Gates, establishment_gates, establishment_gates_on_substrate};
 
 /// The **stands** of the voxel ecology, each one a role: see the preset that carries its
 /// numbers ([`SpeciesConfig::bloomcrown`] and the five after it) for the sentence of
@@ -1617,15 +1617,29 @@ pub struct Taken {
 /// **Owned by the study, never by the process and never by the model.** A study holds one
 /// for as long as it holds the world it reads and drops it with that world, so its lifetime
 /// and its memory are bounded to that study — no process-global accumulating cache. It
-/// carries the world's [`VoxelView::terrain_version`] **and** a fingerprint of the terrain
-/// itself, so a decoded, reset, cloned or matched-arm world that happens to share dimensions
-/// and a version number still cannot hand a reading for one floor plan to another.
+/// carries the world's [`VoxelView::terrain_version`], its grid dimensions **and** a
+/// fingerprint of the material array, so neither a decoded, reset, cloned or matched-arm
+/// world that shares a version number nor a differently-shaped world with the same bytes can
+/// hand a reading for one floor plan to another.
 #[derive(Clone, Debug, Default)]
 pub struct SkyCache {
     /// Sorted by site: one hemisphere reading per site, terrain geometry only.
     entries: Vec<(Site, f64)>,
-    /// The `(terrain_version, terrain fingerprint)` the entries were read against.
-    key: Option<(u64, u64)>,
+    /// The terrain the entries were read against.
+    key: Option<TerrainKey>,
+}
+
+/// What a cached reading is valid for: the world's terrain revision, its shape, and a
+/// fingerprint of its material. The shape is in the key because the flat index layout and
+/// the ray march both read `Config`, so identical bytes under different dimensions are
+/// different geometry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TerrainKey {
+    version: u64,
+    width: u32,
+    height: u32,
+    depth: u32,
+    material: u64,
 }
 
 impl SkyCache {
@@ -1651,10 +1665,17 @@ impl SkyCache {
     }
 
     /// Point the cache at `view`'s terrain, dropping every reading if this is not the
-    /// terrain the cache last held. The fingerprint is over the material array, so two
-    /// worlds that share dimensions and a `terrain_version` are still told apart.
+    /// terrain the cache last held. The fingerprint is over the material array and the key
+    /// also names the shape, so two worlds that share a `terrain_version` are told apart
+    /// whether their difference is a floor plan or a grid.
     fn sync(&mut self, view: &VoxelView<'_>) {
-        let key = (view.terrain_version, terrain_fingerprint(view.material));
+        let key = TerrainKey {
+            version: view.terrain_version,
+            width: view.config.width,
+            height: view.config.height,
+            depth: view.config.depth,
+            material: terrain_fingerprint(view.material),
+        };
         if self.key != Some(key) {
             self.entries.clear();
             self.key = Some(key);

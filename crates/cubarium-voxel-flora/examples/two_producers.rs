@@ -523,13 +523,7 @@ fn eligible_sets(
 /// no second approximate predicate, which is what package J deleted and what Astra's R5.2
 /// asks to keep deleted. A column can fail several gates at once, so the counts overlap by
 /// construction; the point is which of them is doing the work.
-fn gate_diagnosis(
-    world: &World,
-    flora: &Flora,
-    skyline: &[Site],
-    when: &str,
-    sky: &mut SkyCache,
-) {
+fn gate_diagnosis(world: &World, flora: &Flora, skyline: &[Site], when: &str, sky: &mut SkyCache) {
     let view = world.view();
     println!(
         "establishment gates {when} ({} skyline columns):",

@@ -110,7 +110,13 @@ fn cached_fields_are_the_uncached_fields_on_open_and_roofed_ground() {
 
     // The roof is a real change to the shared geometry, not a no-op fixture.
     let sites = sites_of(&roofed);
-    let open_sky = cached(&open, &flora, &sites, Species::Bloomcrown, &mut SkyCache::new());
+    let open_sky = cached(
+        &open,
+        &flora,
+        &sites,
+        Species::Bloomcrown,
+        &mut SkyCache::new(),
+    );
     let roofed_sky = cached(
         &roofed,
         &flora,
@@ -184,7 +190,109 @@ fn a_cache_does_not_cross_a_world_that_shares_a_version_number() {
     // A clone shares the terrain, so its cached reading is right too.
     let clone = a.clone();
     let from_clone = cached(&clone, &flora, &sites, Species::Bloomcrown, &mut sky);
-    assert_eq!(from_clone, uncached(&a, &flora, &sites, Species::Bloomcrown));
+    assert_eq!(
+        from_clone,
+        uncached(&a, &flora, &sites, Species::Bloomcrown)
+    );
+}
+
+// ============================================== another world, another shape
+//
+// Identical material bytes and an identical `terrain_version` under different grid
+// dimensions are different geometry: the flat index layout and the ray march both read
+// `Config`, so the cache key must name the shape. Here a 2 x 3 x 1 world and a 1 x 1 x 6
+// world are driven to the same six material cells and the same version, and one cache is
+// asked about the same site in both.
+
+#[test]
+fn a_cache_does_not_cross_a_differently_shaped_world() {
+    let config = |width, height, depth| VoxelConfig {
+        width,
+        height,
+        depth,
+        voxel_m: 1.0,
+        seed: 23,
+        ..VoxelConfig::default()
+    };
+    // P: 2 x 3 x 1, index = 2y + x. Target [Bedrock, Bedrock, Air, Air, Soil, Air] with the
+    // soil as a roof at (0, 2, 0) over the support at (0, 0, 0).
+    let mut p = World::empty(config(2, 3, 1));
+    p.apply(WorldCommand::SetMaterial {
+        x: 0,
+        y: 2,
+        z: 0,
+        material: Material::Soil,
+    });
+    assert_eq!(p.terrain_version(), 1);
+    // Pad P to Q's version with a three-step change-and-revert of its own floor cell: the
+    // bytes come back and the version advances, so the two worlds agree on both.
+    for m in [Material::Rock, Material::Soil, Material::Bedrock] {
+        p.apply(WorldCommand::SetMaterial {
+            x: 0,
+            y: 0,
+            z: 0,
+            material: m,
+        });
+    }
+
+    // Q: 1 x 1 x 6, index = z. The same bytes land on a grid one cell tall.
+    let mut q = World::empty(config(1, 1, 6));
+    q.apply(WorldCommand::SetMaterial {
+        x: 0,
+        y: 0,
+        z: 2,
+        material: Material::Air,
+    });
+    q.apply(WorldCommand::SetMaterial {
+        x: 0,
+        y: 0,
+        z: 3,
+        material: Material::Air,
+    });
+    q.apply(WorldCommand::SetMaterial {
+        x: 0,
+        y: 0,
+        z: 4,
+        material: Material::Soil,
+    });
+    q.apply(WorldCommand::SetMaterial {
+        x: 0,
+        y: 0,
+        z: 5,
+        material: Material::Air,
+    });
+
+    assert_eq!(
+        p.view().material,
+        q.view().material,
+        "the fixture is the same bytes under different dimensions"
+    );
+    assert_eq!(
+        p.terrain_version(),
+        q.terrain_version(),
+        "the fixture shares a version number as well"
+    );
+
+    let sites = vec![Site { x: 0, y: 0, z: 0 }];
+    let flora = Flora::new(FloraConfig::default());
+    let mut sky = SkyCache::new();
+    let from_p = cached(&p, &flora, &sites, Species::Bloomcrown, &mut sky);
+    let from_q = cached(&q, &flora, &sites, Species::Bloomcrown, &mut sky);
+
+    assert_eq!(from_p, uncached(&p, &flora, &sites, Species::Bloomcrown));
+    assert_eq!(from_q, uncached(&q, &flora, &sites, Species::Bloomcrown));
+    assert!(
+        from_p[0].sky_visibility < 1.0,
+        "the roof over P's site must shut part of its sky"
+    );
+    assert_eq!(
+        from_q[0].sky_visibility, 1.0,
+        "Q is one cell tall, so every site is top-of-world open sky"
+    );
+    assert_ne!(
+        from_p[0].sky_visibility, from_q[0].sky_visibility,
+        "the same bytes under another shape read differently"
+    );
 }
 
 // ============================================ water and dead wood are read afresh
@@ -201,10 +309,7 @@ fn cached_observations_re_read_water_and_dead_wood() {
     let mut sky = SkyCache::new();
 
     let before = cached(&world, &flora, &sites, Species::Glowcap, &mut sky);
-    assert!(
-        !before[1].substrate_ok,
-        "a fresh world holds no dead wood"
-    );
+    assert!(!before[1].substrate_ok, "a fresh world holds no dead wood");
 
     // Fixed terrain (this only writes free water), a log and a puddle: the cache key is
     // unchanged, so both readings must come off the new world and the new ground.
@@ -276,7 +381,12 @@ fn cached_and_uncached_eligible_sets_agree() {
         let want: Vec<Site> = sites
             .iter()
             .copied()
-            .filter(|s| flora.view().establishment_gates(&world.view(), *s, species).passes())
+            .filter(|s| {
+                flora
+                    .view()
+                    .establishment_gates(&world.view(), *s, species)
+                    .passes()
+            })
             .collect();
         assert_eq!(got, want, "{} eligible set", species.name());
     }
