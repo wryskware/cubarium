@@ -107,6 +107,10 @@ pub struct Voxel {
     /// Which world to start from; ignored when `--load` names a snapshot.
     #[arg(long, value_enum, default_value_t = VoxelSceneArg::Authored)]
     pub scene: VoxelSceneArg,
+    /// Start with the empty ecology instead of the seeded example habitat: no stands, no
+    /// logs, no animals. `f` and `g` still populate it by hand; the harness-shaped run.
+    #[arg(long, default_value_t = false)]
+    pub empty: bool,
     /// Stop after this much wall time; 0 runs until `q` or Ctrl-C. Required for `png`.
     #[arg(long, default_value_t = 0.0)]
     pub seconds: f64,

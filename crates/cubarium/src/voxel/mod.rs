@@ -38,6 +38,7 @@
 //! everything else, as the **interim** glyph of [`animal`].
 
 pub mod animal;
+pub mod habitat;
 pub mod present;
 pub mod project;
 pub mod scene;
@@ -176,7 +177,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         None => "the built-in world defaults".to_string(),
     })?;
 
-    let world = match &args.load {
+    let mut world = match &args.load {
         Some(path) => {
             let bytes = std::fs::read(path)
                 .with_context(|| format!("reading the world {}", path.display()))?;
@@ -191,12 +192,20 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         }
     };
 
-    // No `[flora]` table this round: the plant layer runs on its own defaults, and the
-    // config file stays the presentation's plus the world's. The animal layer likewise —
-    // and it starts empty, because an animal is introduced by a `g` command and never
-    // generated.
-    let flora = Flora::new(FloraConfig::default());
-    let fauna = Fauna::new(FaunaConfig::default());
+    // No `[flora]` table this round: both layers run on their own defaults, and the config
+    // file stays the presentation's plus the world's. Unless `--empty` asks otherwise, the
+    // layers start on the seeded example habitat ([`habitat`]) so a bare `--sink gpu` launch
+    // puts a living world on the screen without an `f` or a `g` typed at it.
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    if !args.empty {
+        let seeded = habitat::seed(&mut world, &mut flora, &mut fauna);
+        eprintln!(
+            "cubarium voxel: seeded the example habitat — {} stands, {} logs, {} frondgrazers \
+             (--empty for a bare world)",
+            seeded.stands, seeded.logs, seeded.animals
+        );
+    }
 
     let proj = Projection::new(
         cfg.tilt_degrees,
