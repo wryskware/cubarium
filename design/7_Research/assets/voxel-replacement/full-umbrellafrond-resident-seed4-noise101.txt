@@ -1,0 +1,1303 @@
+replacement control study (seven arms): resident umbrellafrond, newcomer bloomcrown; seed 4, noise_seed 101; a conditioning **budget** of 4000 s and a stopping budget of 12000 s per arm
+experiment conditions, none of them a model rule: rain 0.0002 m/s on exposed top faces, 1000 ticks (50 s) of world warm-up before anything is planted, 8 resident founders, mineral provisioning AtCreation (every support face at creation, one booking)
+founder treatment (Astra R9.7): **0.5 · wood_max** with ordinary `Seed` foliage `alpha · W`, full reserve, zero parcel and no bank of its own species — 0.3 for umbrellafrond and 0.3 for bloomcrown. A flat 0.3 is that rule for the original pair and five times springturf's whole mature wood, so the rule and not the number is what is fixed across the arms.
+
+predeclared observation cap, from the presets' own arithmetic:
+   umbrellafrond: newborn wood 0.02 -> donor 0.3 at wood_rate 0.001 under the growth cap = 54163 ticks = 2708.15 s; one package 0.0500 (0.02/0.4) at propagule_rate 0.0002 net of build 0.2 = 6000 ticks = 300.00 s; **cap 3008.15 s**
+      bloomcrown: newborn wood 0.02 -> donor 0.3 at wood_rate 0.001 under the growth cap = 54163 ticks = 2708.15 s; one package 0.0500 (0.02/0.4) at propagule_rate 0.0002 net of build 0.2 = 6000 ticks = 300.00 s; **cap 3008.15 s**
+  pair cap: **3008.15 s** (the larger of the two, so one window can resolve either direction)
+
+earliest-possible **replacement timeline** (Astra R10.1) — from what this study actually introduces, one founder with a **zero parcel** and no newborn of its own anywhere, which the published cap above does not cost:
+   umbrellafrond: the first package leaves at tick 6001 (300.05 s) [the closed form says 6000; repeated addition falls short of the package on that tick], the newborn appears at 6002, it reaches donor size at 60165 (+54163 growth ticks), and its own package can leave at **66165 ticks, 3308.25 s** — one tick less than the four stages added up, because the tick that reaches donor_min also funds the first instalment (R11.1)
+      bloomcrown: the first package leaves at tick 6001 (300.05 s) [the closed form says 6000; repeated addition falls short of the package on that tick], the newborn appears at 6002, it reaches donor size at 60165 (+54163 growth ticks), and its own package can leave at **66165 ticks, 3308.25 s** — one tick less than the four stages added up, because the tick that reaches donor_min also funds the first instalment (R11.1)
+  pair bound **3308.25 s** (a common-window policy: one window for either direction), and **this arm's own bound 3308.25 s** — the newcomer's, because the newcomer is what it introduces (R11.1). Against the published pair cap's 3008.15 s. Both are a lower bound on a lower bound — perfect funding, an immediate germination on a passing site and a saturated growth cap the whole way — so a budget above one makes nothing likely, while a budget below the **arm's own** makes a replacement in it impossible.
+
+authorised stopping budget: **12000 s** per arm (given with `--cap`), which is 362.7 % of this arm's own bound and 362.7 % of the pair's. A stopping rule and not a sufficient window: on expiry every arm reports **unresolved**, and exclusion is never inferred from expiry (R5.4/R10.1).
+
+=== conditioning ===
+  settling tolerances (**placeholders, nothing measured them**): |storage change| <= 5 % of the interval's own accepted rain, |head change| <= 0.001 m per interval, eligible-set turnover <= 2 % of the union, all three on 2 consecutive intervals
+  conditioning **budget** 4000 s, spent in two phases: the hydrology alone, and then the coupled setting with the resident in it. Elapsed time is not a conditioned habitat (R10.2), so each phase ends when its tolerances hold — or the budget expires and the run says **conditioning unresolved**. Phase A may spend at most 3500 s of it (given with `--phase-a`, a declared condition of this run), so that an unsettling hydrology cannot leave the resident unconditioned.
+  declared water treatment: rain 0.0002 m/s and the study's own **outlet capacity 0.038400000000000004 m3/s** — the nominal accepted rain over this world's own 192 m2 footprint, set once here and therefore identical in every arm, with the core's 0.05 m3/s default left alone (Astra R11.3). A capacity is not an imposed export, and this equality is not a promise of equilibrium: evaporation and transpiration leave by their own paths and both phases still have to pass.
+  3072 skyline columns; 3072 support faces provisioned with 1 of mineral each at creation, booked once as seeded_mineral_in 3072.0 — a **fixed per-site inventory**, so no arm can import mineral by colonising further (R5.4)
+
+phase A, the hydrology alone, reported every 100 s:
+  t     100 s: water m3/s over 100 s: rain in 0.038200, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000200 (residual -7.26e-12); head 2.989 m (-0.1668 m), stored 235.3851 m3
+  t     100 s: stands 0; eligible columns umbrellafrond 293/3072, bloomcrown 2668/3072 — head moved -0.1668 m (limit 0.001 m); no previous interval to compare the eligible sets with
+  t     200 s: water m3/s over 100 s: rain in 0.038325, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000075 (residual -2.69e-11); head 2.927 m (-0.0623 m), stored 235.3776 m3
+  t     200 s: stands 0; eligible columns umbrellafrond 330/3072 (turnover 11.2 %), bloomcrown 2673/3072 (turnover 0.2 %) — head moved -0.0623 m (limit 0.001 m); eligible-set turnover 11.2 % (limit 2 %)
+  t     300 s: water m3/s over 100 s: rain in 0.038347, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000053 (residual -6.79e-11); head 2.880 m (-0.0473 m), stored 235.3723 m3
+  t     300 s: stands 0; eligible columns umbrellafrond 424/3072 (turnover 22.2 %), bloomcrown 2673/3072 (turnover 0.0 %) — head moved -0.0473 m (limit 0.001 m); eligible-set turnover 22.2 % (limit 2 %)
+  t     400 s: water m3/s over 100 s: rain in 0.038342, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000058 (residual -1.12e-10); head 2.850 m (-0.0299 m), stored 235.3665 m3
+  t     400 s: stands 0; eligible columns umbrellafrond 484/3072 (turnover 28.4 %), bloomcrown 2560/3072 (turnover 4.2 %) — head moved -0.0299 m (limit 0.001 m); eligible-set turnover 28.4 % (limit 2 %)
+  t     500 s: water m3/s over 100 s: rain in 0.038333, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000067 (residual -2.00e-10); head 2.812 m (-0.0376 m), stored 235.3598 m3
+  t     500 s: stands 0; eligible columns umbrellafrond 642/3072 (turnover 24.6 %), bloomcrown 2506/3072 (turnover 2.1 %) — head moved -0.0376 m (limit 0.001 m); eligible-set turnover 24.6 % (limit 2 %)
+  t     600 s: water m3/s over 100 s: rain in 0.038330, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000070 (residual -2.00e-10); head 2.774 m (-0.0380 m), stored 235.3528 m3
+  t     600 s: stands 0; eligible columns umbrellafrond 971/3072 (turnover 33.9 %), bloomcrown 2204/3072 (turnover 12.1 %) — head moved -0.0380 m (limit 0.001 m); eligible-set turnover 33.9 % (limit 2 %)
+  t     700 s: water m3/s over 100 s: rain in 0.038319, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000081 (residual -2.02e-10); head 2.741 m (-0.0334 m), stored 235.3446 m3
+  t     700 s: stands 0; eligible columns umbrellafrond 1388/3072 (turnover 30.0 %), bloomcrown 2182/3072 (turnover 1.0 %) — head moved -0.0334 m (limit 0.001 m); eligible-set turnover 30.0 % (limit 2 %)
+  t     800 s: water m3/s over 100 s: rain in 0.038189, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000211 (residual -2.07e-10); head 2.721 m (-0.0197 m), stored 235.3235 m3
+  t     800 s: stands 0; eligible columns umbrellafrond 1816/3072 (turnover 23.6 %), bloomcrown 2170/3072 (turnover 0.5 %) — head moved -0.0197 m (limit 0.001 m); eligible-set turnover 23.6 % (limit 2 %)
+  t     900 s: water m3/s over 100 s: rain in 0.038037, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000363 (residual -1.80e-10); head 2.704 m (-0.0172 m), stored 235.2872 m3
+  t     900 s: stands 0; eligible columns umbrellafrond 2190/3072 (turnover 17.1 %), bloomcrown 1683/3072 (turnover 22.4 %) — head moved -0.0172 m (limit 0.001 m); eligible-set turnover 22.4 % (limit 2 %)
+  t    1000 s: water m3/s over 100 s: rain in 0.038053, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000347 (residual -1.43e-10); head 2.690 m (-0.0135 m), stored 235.2525 m3
+  t    1000 s: stands 0; eligible columns umbrellafrond 2385/3072 (turnover 8.2 %), bloomcrown 1507/3072 (turnover 10.5 %) — head moved -0.0135 m (limit 0.001 m); eligible-set turnover 10.5 % (limit 2 %)
+  t    1100 s: water m3/s over 100 s: rain in 0.038301, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000099 (residual -1.45e-10); head 2.700 m (+0.0094 m), stored 235.2427 m3
+  t    1100 s: stands 0; eligible columns umbrellafrond 2516/3072 (turnover 5.4 %), bloomcrown 1293/3072 (turnover 14.3 %) — head moved +0.0094 m (limit 0.001 m); eligible-set turnover 14.3 % (limit 2 %)
+  t    1200 s: water m3/s over 100 s: rain in 0.038206, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000194 (residual -1.51e-10); head 2.689 m (-0.0112 m), stored 235.2233 m3
+  t    1200 s: stands 0; eligible columns umbrellafrond 2560/3072 (turnover 1.7 %), bloomcrown 1152/3072 (turnover 10.9 %) — head moved -0.0112 m (limit 0.001 m); eligible-set turnover 10.9 % (limit 2 %)
+  t    1300 s: water m3/s over 100 s: rain in 0.038176, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000224 (residual -1.71e-10); head 2.673 m (-0.0154 m), stored 235.2009 m3
+  t    1300 s: stands 0; eligible columns umbrellafrond 2612/3072 (turnover 2.0 %), bloomcrown 909/3072 (turnover 21.1 %) — head moved -0.0154 m (limit 0.001 m); eligible-set turnover 21.1 % (limit 2 %)
+  t    1400 s: water m3/s over 100 s: rain in 0.038290, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000110 (residual -1.63e-10); head 2.674 m (+0.0007 m), stored 235.1899 m3
+  t    1400 s: stands 0; eligible columns umbrellafrond 2671/3072 (turnover 2.4 %), bloomcrown 458/3072 (turnover 49.6 %) — eligible-set turnover 49.6 % (limit 2 %)
+  t    1500 s: water m3/s over 100 s: rain in 0.038323, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000077 (residual -1.80e-10); head 2.678 m (+0.0042 m), stored 235.1822 m3
+  t    1500 s: stands 0; eligible columns umbrellafrond 2723/3072 (turnover 1.9 %), bloomcrown 401/3072 (turnover 12.4 %) — head moved +0.0042 m (limit 0.001 m); eligible-set turnover 12.4 % (limit 2 %)
+  t    1600 s: water m3/s over 100 s: rain in 0.038313, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000087 (residual -1.73e-10); head 2.668 m (-0.0099 m), stored 235.1735 m3
+  t    1600 s: stands 0; eligible columns umbrellafrond 2736/3072 (turnover 0.5 %), bloomcrown 337/3072 (turnover 16.0 %) — head moved -0.0099 m (limit 0.001 m); eligible-set turnover 16.0 % (limit 2 %)
+  t    1700 s: water m3/s over 100 s: rain in 0.038372, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000028 (residual -1.69e-10); head 2.673 m (+0.0048 m), stored 235.1707 m3
+  t    1700 s: stands 0; eligible columns umbrellafrond 2759/3072 (turnover 0.8 %), bloomcrown 308/3072 (turnover 8.6 %) — head moved +0.0048 m (limit 0.001 m); eligible-set turnover 8.6 % (limit 2 %)
+  t    1800 s: water m3/s over 100 s: rain in 0.038400, outlet 0.036804, evaporation 0.000000, transpiration 0.00000000, storage change +0.001596 (residual -1.75e-10); head 2.700 m (+0.0267 m), stored 235.3303 m3
+  t    1800 s: stands 0; eligible columns umbrellafrond 2783/3072 (turnover 0.9 %), bloomcrown 289/3072 (turnover 6.2 %) — head moved +0.0267 m (limit 0.001 m); eligible-set turnover 6.2 % (limit 2 %)
+  t    1900 s: water m3/s over 100 s: rain in 0.038400, outlet 0.034189, evaporation 0.000000, transpiration 0.00000000, storage change +0.004211 (residual -1.77e-10); head 2.703 m (+0.0039 m), stored 235.7514 m3
+  t    1900 s: stands 0; eligible columns umbrellafrond 2784/3072 (turnover 0.0 %), bloomcrown 286/3072 (turnover 1.0 %) — storage +0.004211 m3/s is 11 % of rain (limit 5 %); head moved +0.0039 m (limit 0.001 m)
+  t    2000 s: water m3/s over 100 s: rain in 0.038400, outlet 0.033747, evaporation 0.000000, transpiration 0.00000000, storage change +0.004653 (residual -1.97e-10); head 2.710 m (+0.0061 m), stored 236.2167 m3
+  t    2000 s: stands 0; eligible columns umbrellafrond 2785/3072 (turnover 0.0 %), bloomcrown 281/3072 (turnover 1.7 %) — storage +0.004653 m3/s is 12 % of rain (limit 5 %); head moved +0.0061 m (limit 0.001 m)
+  t    2100 s: water m3/s over 100 s: rain in 0.038400, outlet 0.034515, evaporation 0.000000, transpiration 0.00000000, storage change +0.003885 (residual -1.97e-10); head 2.715 m (+0.0055 m), stored 236.6052 m3
+  t    2100 s: stands 0; eligible columns umbrellafrond 2786/3072 (turnover 0.0 %), bloomcrown 274/3072 (turnover 2.5 %) — storage +0.003885 m3/s is 10 % of rain (limit 5 %); head moved +0.0055 m (limit 0.001 m); eligible-set turnover 2.5 % (limit 2 %)
+  t    2200 s: water m3/s over 100 s: rain in 0.038400, outlet 0.034504, evaporation 0.000000, transpiration 0.00000000, storage change +0.003896 (residual -1.98e-10); head 2.720 m (+0.0053 m), stored 236.9949 m3
+  t    2200 s: stands 0; eligible columns umbrellafrond 2787/3072 (turnover 0.0 %), bloomcrown 272/3072 (turnover 0.7 %) — storage +0.003896 m3/s is 10 % of rain (limit 5 %); head moved +0.0053 m (limit 0.001 m)
+  t    2300 s: water m3/s over 100 s: rain in 0.038400, outlet 0.034704, evaporation 0.000000, transpiration 0.00000000, storage change +0.003696 (residual -2.02e-10); head 2.726 m (+0.0052 m), stored 237.3645 m3
+  t    2300 s: stands 0; eligible columns umbrellafrond 2787/3072 (turnover 0.0 %), bloomcrown 272/3072 (turnover 0.0 %) — storage +0.003696 m3/s is 10 % of rain (limit 5 %); head moved +0.0052 m (limit 0.001 m)
+  t    2400 s: water m3/s over 100 s: rain in 0.038400, outlet 0.035155, evaporation 0.000000, transpiration 0.00000000, storage change +0.003245 (residual -2.06e-10); head 2.730 m (+0.0046 m), stored 237.6889 m3
+  t    2400 s: stands 0; eligible columns umbrellafrond 2787/3072 (turnover 0.0 %), bloomcrown 272/3072 (turnover 0.0 %) — storage +0.003245 m3/s is 8 % of rain (limit 5 %); head moved +0.0046 m (limit 0.001 m)
+  t    2500 s: water m3/s over 100 s: rain in 0.038400, outlet 0.035122, evaporation 0.000000, transpiration 0.00000000, storage change +0.003278 (residual -2.17e-10); head 2.735 m (+0.0046 m), stored 238.0168 m3
+  t    2500 s: stands 0; eligible columns umbrellafrond 2787/3072 (turnover 0.0 %), bloomcrown 272/3072 (turnover 0.0 %) — storage +0.003278 m3/s is 9 % of rain (limit 5 %); head moved +0.0046 m (limit 0.001 m)
+  t    2600 s: water m3/s over 100 s: rain in 0.038400, outlet 0.035405, evaporation 0.000000, transpiration 0.00000000, storage change +0.002995 (residual -2.17e-10); head 2.739 m (+0.0043 m), stored 238.3163 m3
+  t    2600 s: stands 0; eligible columns umbrellafrond 2787/3072 (turnover 0.0 %), bloomcrown 272/3072 (turnover 0.0 %) — storage +0.002995 m3/s is 8 % of rain (limit 5 %); head moved +0.0043 m (limit 0.001 m)
+  t    2700 s: water m3/s over 100 s: rain in 0.038400, outlet 0.035409, evaporation 0.000000, transpiration 0.00000000, storage change +0.002991 (residual -2.18e-10); head 2.743 m (+0.0042 m), stored 238.6154 m3
+  t    2700 s: stands 0; eligible columns umbrellafrond 2787/3072 (turnover 0.0 %), bloomcrown 272/3072 (turnover 0.0 %) — storage +0.002991 m3/s is 8 % of rain (limit 5 %); head moved +0.0042 m (limit 0.001 m)
+  t    2800 s: water m3/s over 100 s: rain in 0.038400, outlet 0.035949, evaporation 0.000000, transpiration 0.00000000, storage change +0.002451 (residual -2.21e-10); head 2.747 m (+0.0035 m), stored 238.8604 m3
+  t    2800 s: stands 0; eligible columns umbrellafrond 2787/3072 (turnover 0.0 %), bloomcrown 272/3072 (turnover 0.0 %) — storage +0.002451 m3/s is 6 % of rain (limit 5 %); head moved +0.0035 m (limit 0.001 m)
+  t    2900 s: water m3/s over 100 s: rain in 0.038400, outlet 0.036618, evaporation 0.000000, transpiration 0.00000000, storage change +0.001782 (residual -2.23e-10); head 2.746 m (-0.0004 m), stored 239.0387 m3
+  t    2900 s: stands 0; eligible columns umbrellafrond 2787/3072 (turnover 0.0 %), bloomcrown 272/3072 (turnover 0.0 %) — settled
+  t    3000 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038153, evaporation 0.000000, transpiration 0.00000000, storage change +0.000247 (residual -2.29e-10); head 2.746 m (-0.0003 m), stored 239.0633 m3
+  t    3000 s: stands 0; eligible columns umbrellafrond 2787/3072 (turnover 0.0 %), bloomcrown 272/3072 (turnover 0.0 %) — settled
+  phase A, the hydrology alone, whole phase: water m3/s over 3000 s: rain in 0.038322, outlet 0.037102, evaporation 0.000000, transpiration 0.00000000, storage change +0.001219 (residual -1.72e-10); head 2.746 m (-0.4101 m), stored 239.0633 m3
+  phase A, the hydrology alone, storage tolerance: first met on interval 1 (t 100 s)
+  phase A, the hydrology alone, head tolerance: first met on interval 14 (t 1400 s)
+  phase A, the hydrology alone, turnover tolerance: first met on interval 19 (t 1900 s)
+  phase A, the hydrology alone, head: the last three intervals' steps decay by a factor 0.8989 each, which extrapolates to **2.743 m** — a geometric extrapolation of three numbers and not a measurement
+  phase A, the hydrology alone: **settled** at t 3000 s — the tolerances held on 2 consecutive intervals
+resident umbrellafrond: 8 founders at wood 0.3 on 2787 candidates of 3072 skyline columns (habitat rule Hollow)
+  umbrellafrond #0 ( 81,  0) y9  — mean pore 1.000 (>= 0.45), saturated fraction 1.000 (<= 1.00), water 0.156 m (<= 0.50), sky 0.802 (>= 0.10), 21 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  umbrellafrond #1 (102,  6) y13 — mean pore 1.000 (>= 0.45), saturated fraction 1.000 (<= 1.00), water 0.000 m (<= 0.50), sky 0.958 (>= 0.10), 32 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  umbrellafrond #2 ( 80, 14) y17 — mean pore 0.921 (>= 0.45), saturated fraction 0.895 (<= 1.00), water 0.000 m (<= 0.50), sky 0.874 (>= 0.10), 19 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  umbrellafrond #3 (  3,  7) y20 — mean pore 0.875 (>= 0.45), saturated fraction 0.833 (<= 1.00), water 0.000 m (<= 0.50), sky 0.729 (>= 0.10), 18 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  umbrellafrond #4 ( 20,  5) y22 — mean pore 1.000 (>= 0.45), saturated fraction 1.000 (<= 1.00), water 0.000 m (<= 0.50), sky 0.687 (>= 0.10), 28 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  umbrellafrond #5 ( 30,  8) y24 — mean pore 1.000 (>= 0.45), saturated fraction 1.000 (<= 1.00), water 0.000 m (<= 0.50), sky 0.802 (>= 0.10), 33 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  umbrellafrond #6 ( 45, 10) y26 — mean pore 0.850 (>= 0.45), saturated fraction 0.800 (<= 1.00), water 0.000 m (<= 0.50), sky 0.844 (>= 0.10), 25 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  umbrellafrond #7 ( 59, 17) y29 — mean pore 0.490 (>= 0.45), saturated fraction 0.320 (<= 1.00), water 0.000 m (<= 0.50), sky 0.844 (>= 0.10), 25 soil voxels, dead wood in the box 0.000 (>= 0.000)
+
+phase B, the coupled setting with the resident, reported every 100 s:
+  t     100 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038298, evaporation 0.000000, transpiration 0.00008860, storage change +0.000014 (residual -2.29e-10); head 2.746 m (-0.0000 m), stored 239.0647 m3
+  t     100 s: stands 8; eligible columns umbrellafrond 2787/3072, bloomcrown 272/3072 — no previous interval to compare the eligible sets with
+  t     200 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038277, evaporation 0.000000, transpiration 0.00008925, storage change +0.000034 (residual -2.29e-10); head 2.746 m (-0.0001 m), stored 239.0681 m3
+  t     200 s: stands 8; eligible columns umbrellafrond 2787/3072 (turnover 0.0 %), bloomcrown 272/3072 (turnover 0.0 %) — settled
+  t     300 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038346, evaporation 0.000000, transpiration 0.00009063, storage change -0.000037 (residual -2.29e-10); head 2.746 m (-0.0000 m), stored 239.0644 m3
+  t     300 s: stands 8; eligible columns umbrellafrond 2787/3072 (turnover 0.0 %), bloomcrown 272/3072 (turnover 0.0 %) — settled
+  phase B, the coupled setting with the resident, whole phase: water m3/s over 300 s: rain in 0.038400, outlet 0.038307, evaporation 0.000000, transpiration 0.00008950, storage change +0.000004 (residual -2.29e-10); head 2.746 m (-0.0002 m), stored 239.0644 m3
+  phase B, the coupled setting with the resident, storage tolerance: first met on interval 1 (t 100 s)
+  phase B, the coupled setting with the resident, head tolerance: first met on interval 1 (t 100 s)
+  phase B, the coupled setting with the resident, turnover tolerance: first met on interval 2 (t 200 s)
+  phase B, the coupled setting with the resident, head: the last three intervals' steps decay by a factor 0.1705 each, which extrapolates to **2.746 m** — a geometric extrapolation of three numbers and not a measurement
+  phase B, the coupled setting with the resident: **settled** at t 300 s — the tolerances held on 2 consecutive intervals
+  conditioning spent 3300 s of its 4000 s budget over the two phases
+conditioned: **8 umbrellafrond stands** alive — 8 founders planted and 0 establishments since, so the count includes the resident's own descendants — seed bank on 0 sites holding 0.00000; deaths 0, births 8
+  residuals: organic -1.33e-13, mineral -1.36e-12, energy -2.66e-13 (stocks 10.9826, 3072.1680, 21.9652)
+
+=== predeclared introduction sites ===
+bloomcrown passes its own establishment predicate on 272 of 3072 skyline columns in the conditioned state; 272 of them are unoccupied and pass its habitat rule Ridge
+  site 1 ( 62, 19) y30: 1 eligible recipients of 24 candidate faces within hop 2
+           gates: mean pore 0.411 (>= 0.10), saturated fraction 0.214 (<= 0.25), water 0.000 m (<= 0.05), sky 0.958 (>= 0.60), 14 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  site 2 (104, 22) y21: 9 eligible recipients of 19 candidate faces within hop 2
+           gates: mean pore 0.250 (>= 0.10), saturated fraction 0.000 (<= 0.25), water 0.000 m (<= 0.05), sky 0.802 (>= 0.60), 18 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  site 3 ( 12,  2) y20: 13 eligible recipients of 24 candidate faces within hop 2
+           gates: mean pore 0.350 (>= 0.10), saturated fraction 0.133 (<= 0.25), water 0.000 m (<= 0.05), sky 0.916 (>= 0.60), 15 soil voxels, dead wood in the box 0.000 (>= 0.000)
+
+=== arms ===
+Every arm below is a **clone** of the one conditioned state above — the same world, the same water, the same litter, the same mineral inventory, the same resident cohort and the same phase — so a difference between two arms is the treatment and nothing else.
+
+-- arm: resident only (the control, introduced nothing)
+     t (s)  resident  newcomer  births  losses survivors   deliv. max desc.W fnd.parcel   banks    banked head (m)
+       100        16         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+       200        16         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+       300        16         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+       400        23         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+       500        23         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+       600        23         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+       700        30         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+       800        30         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+       900        30         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      1000        34         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      1100        35         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      1200        35         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      1300        40         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      1400        40         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      1500        40         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      1600        43         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      1700        43         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      1800        43         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      1900        46         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      2000        46         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      2100        46         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      2200        50         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      2300        50         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      2400        50         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      2500        53         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      2600        53         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      2700        53         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      2800        56         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      2900        56         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      3000        56         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      3100        57         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      3200        57         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      3300        57         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      3400        58         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      3500        58         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      3600        58         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      3700        58         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      3800        58         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      3900        58         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      4000        59         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      4100        59         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      4200        59         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      4300        59         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      4400        59         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      4500        59         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      4600        59         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      4700        59         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      4800        59         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      4900        59         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      5000        59         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      5100        59         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      5200        60         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      5300        59         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      5400        59         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      5500        59         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      5600        59         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      5700        59         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      5800        59         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      5900        59         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      6000        62         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      6100        63         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      6200        63         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      6300        68         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      6400        70         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      6500        70         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      6600        72         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      6700        74         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      6800        75         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      6900        80         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      7000        83         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      7100        84         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      7200        89         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      7300        92         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      7400        93         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      7500        95         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      7600        99         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      7700       101         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      7800       107         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      7900       110         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      8000       111         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      8100       115         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      8200       118         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      8300       118         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      8400       122         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      8500       125         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      8600       125         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      8700       130         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      8800       133         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      8900       134         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      9000       137         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      9100       139         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.747
+      9200       140         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      9300       142         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      9400       143         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      9500       144         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.747
+      9600       147         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      9700       147         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.747
+      9800       148         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+      9900       149         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+     10000       149         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+     10100       151         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+     10200       151         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+     10300       156         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+     10400       157         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+     10500       158         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.747
+     10600       159         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+     10700       159         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.747
+     10800       162         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+     10900       162         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.747
+     11000       161         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+     11100       162         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+     11200       162         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.747
+     11300       161         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+     11400       162         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.747
+     11500       162         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+     11600       162         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+     11700       162         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.747
+     11800       162         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.746
+     11900       161         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.747
+     12000       162         0       0       0         0        0    0.00000    0.00000       0   0.00000    2.747
+   water: water m3/s over 12000 s: rain in 0.038400, outlet 0.037836, evaporation 0.000000, transpiration 0.00057713, storage change -0.000013 (residual -2.27e-10); head 2.747 m (+0.0010 m), stored 238.9114 m3
+   residuals: organic -1.32e-8, mineral -1.57e-10, energy -2.64e-8 (stocks 216.3414, 3072.1680, 432.6827)
+   1231.2 s of wall time for 240000 coupled ticks
+   control: umbrellafrond went 8 -> 162 stands over 12000 s with nothing introduced; establishments 160, deaths 6. A resident that is itself declining cannot be invaded 'against' (R5.4), which is what this arm is for.
+
+---------- site 1 of 3: (62,19) y30 — 1 eligible recipients of 24 candidate faces in hop
+
+-- arm: resident plus newcomer
+   one bloomcrown founder #8 at (62,19) y30: wood 0.3, foliage 0.6000, reserve 0.1500, parcel 0.0000; bank of its own species on 0 sites (0.00000)
+   gates at the declared site: mean pore 0.411 (>= 0.10), saturated fraction 0.214 (<= 0.25), water 0.000 m (<= 0.05), sky 0.958 (>= 0.60), 14 soil voxels, dead wood in the box 0.000 (>= 0.000)
+     t (s)  resident  newcomer  births  losses survivors   deliv. max desc.W fnd.parcel   banks    banked head (m)
+   t     0.05 s  donor size: bloomcrown #8 reached wood 0.30001 >= donor_min 0.3 — it can now set material aside (this is the introduced founder, not a descendant)
+       100        16         1       0       0         0        0    0.00000    0.01667       0   0.00000    2.746
+       200        16         1       0       0         0        0    0.00000    0.03333       0   0.00000    2.746
+       300        16         1       0       0         0        0    0.00000    0.05000       0   0.00000    2.746
+   t   300.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001008 of mineral with it) to (64,20) y30 — the introduced founder donating again, which is not descendant reproduction
+       400        23         1       0       0         0        1    0.00000    0.01667       1   0.04524    2.746
+       500        23         1       0       0         0        1    0.00000    0.03333       1   0.04094    2.746
+       600        23         1       0       0         0        1    0.00000    0.05000       1   0.03704    2.746
+   t   600.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001014 of mineral with it) to (64,18) y29 — the introduced founder donating again, which is not descendant reproduction
+       700        30         1       0       0         0        2    0.00000    0.01667       2   0.07876    2.746
+       800        30         1       0       0         0        2    0.00000    0.03333       2   0.07127    2.746
+       900        30         1       0       0         0        2    0.00000    0.05000       2   0.06448    2.746
+   t   900.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001018 of mineral with it) to (61,19) y30 — the introduced founder donating again, which is not descendant reproduction
+      1000        34         1       0       0         0        3    0.00000    0.01667       2   0.07876    2.746
+      1100        35         1       0       0         0        3    0.00000    0.03333       2   0.07127    2.746
+      1200        35         1       0       0         0        3    0.00000    0.05000       2   0.06448    2.746
+   t  1200.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001020 of mineral with it) to (61,19) y30 — the introduced founder donating again, which is not descendant reproduction
+      1300        40         1       0       0         0        4    0.00000    0.01667       1   0.07876    2.746
+      1400        40         1       0       0         0        4    0.00000    0.03333       1   0.07127    2.746
+      1500        40         1       0       0         0        4    0.00000    0.05000       1   0.06448    2.746
+   t  1500.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001022 of mineral with it) to (60,19) y30 — the introduced founder donating again, which is not descendant reproduction
+      1600        43         1       0       0         0        5    0.00000    0.01667       2   0.07876    2.746
+      1700        43         1       0       0         0        5    0.00000    0.03333       2   0.07127    2.746
+      1800        43         1       0       0         0        5    0.00000    0.05000       2   0.06448    2.746
+   t  1800.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001023 of mineral with it) to (62,18) y29 — the introduced founder donating again, which is not descendant reproduction
+      1900        46         1       0       0         0        6    0.00000    0.01667       2   0.07876    2.746
+      2000        46         1       0       0         0        6    0.00000    0.03333       2   0.07127    2.746
+      2100        46         1       0       0         0        6    0.00000    0.05000       2   0.06448    2.746
+   t  2100.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (64,20) y30 — the introduced founder donating again, which is not descendant reproduction
+      2200        50         1       0       0         0        7    0.00000    0.01667       2   0.07876    2.746
+      2300        50         1       0       0         0        7    0.00000    0.03333       2   0.07127    2.746
+      2400        50         1       0       0         0        7    0.00000    0.05000       2   0.06448    2.746
+   t  2400.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (63,21) y30 — the introduced founder donating again, which is not descendant reproduction
+      2500        53         1       0       0         0        8    0.00000    0.01667       2   0.07876    2.746
+      2600        53         1       0       0         0        8    0.00000    0.03333       2   0.07127    2.746
+      2700        53         1       0       0         0        8    0.00000    0.05000       2   0.06448    2.746
+   t  2700.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001023 of mineral with it) to (64,18) y29 — the introduced founder donating again, which is not descendant reproduction
+      2800        56         1       0       0         0        9    0.00000    0.01667       2   0.07876    2.746
+      2900        56         1       0       0         0        9    0.00000    0.03333       2   0.07127    2.746
+      3000        56         1       0       0         0        9    0.00000    0.05000       2   0.06448    2.746
+   t  3000.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001023 of mineral with it) to (62,21) y31 — the introduced founder donating again, which is not descendant reproduction
+      3100        57         1       0       0         0       10    0.00000    0.01667       2   0.07876    2.746
+      3200        57         1       0       0         0       10    0.00000    0.03333       2   0.07127    2.746
+      3300        57         1       0       0         0       10    0.00000    0.05000       2   0.06448    2.746
+   t  3300.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (64,18) y29 — the introduced founder donating again, which is not descendant reproduction
+      3400        58         1       0       0         0       11    0.00000    0.01667       2   0.07876    2.746
+      3500        58         1       0       0         0       11    0.00000    0.03333       2   0.07127    2.746
+      3600        58         1       0       0         0       11    0.00000    0.05000       2   0.06448    2.746
+   t  3600.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (63,18) y29 — the introduced founder donating again, which is not descendant reproduction
+      3700        58         1       0       0         0       12    0.00000    0.01667       2   0.07876    2.746
+      3800        58         1       0       0         0       12    0.00000    0.03333       2   0.07127    2.746
+      3900        58         1       0       0         0       12    0.00000    0.05000       2   0.06448    2.746
+   t  3900.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (64,21) y30 — the introduced founder donating again, which is not descendant reproduction
+      4000        59         1       0       0         0       13    0.00000    0.01667       2   0.07876    2.746
+      4100        59         1       0       0         0       13    0.00000    0.03333       2   0.07127    2.746
+      4200        59         1       0       0         0       13    0.00000    0.05000       2   0.06448    2.746
+   t  4200.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (60,20) y30 — the introduced founder donating again, which is not descendant reproduction
+      4300        59         1       0       0         0       14    0.00000    0.01667       2   0.07876    2.746
+      4400        59         1       0       0         0       14    0.00000    0.03333       2   0.07127    2.746
+      4500        59         1       0       0         0       14    0.00000    0.05000       2   0.06448    2.746
+   t  4500.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (60,18) y29 — the introduced founder donating again, which is not descendant reproduction
+   t  4500.10 s  birth: bloomcrown #60 at (60,18) y29, wood 0.02000
+      4600        59         2       1       0         1       15    0.02000    0.01667       1   0.03352    2.746
+      4700        59         2       1       0         1       15    0.02000    0.03333       1   0.03033    2.746
+      4800        59         2       1       0         1       15    0.02000    0.05000       1   0.02744    2.746
+   t  4800.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (60,18) y29 — the introduced founder donating again, which is not descendant reproduction
+      4900        59         2       1       0         1       16    0.02000    0.01667       1   0.04524    2.746
+      5000        59         2       1       0         1       16    0.02000    0.03333       1   0.04094    2.746
+      5100        59         2       1       0         1       16    0.02000    0.05000       1   0.03704    2.746
+   t  5100.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (61,19) y30 — the introduced founder donating again, which is not descendant reproduction
+      5200        60         2       1       0         1       17    0.02000    0.01667       2   0.07876    2.746
+      5300        59         2       1       0         1       17    0.02000    0.03333       2   0.07127    2.746
+      5400        59         2       1       0         1       17    0.02000    0.05000       2   0.06448    2.746
+   t  5400.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (63,19) y29 — the introduced founder donating again, which is not descendant reproduction
+      5500        59         2       1       0         1       18    0.02000    0.01667       2   0.07876    2.746
+      5600        59         2       1       0         1       18    0.02000    0.03333       2   0.07127    2.746
+      5700        59         2       1       0         1       18    0.02000    0.05000       2   0.06448    2.746
+   t  5700.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (63,19) y29 — the introduced founder donating again, which is not descendant reproduction
+      5800        59         2       1       0         1       19    0.02000    0.01667       1   0.07876    2.746
+      5900        59         2       1       0         1       19    0.02000    0.03333       1   0.07127    2.746
+      6000        62         2       1       0         1       19    0.02000    0.05000       1   0.06448    2.746
+   t  6000.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (63,20) y30 — the introduced founder donating again, which is not descendant reproduction
+      6100        63         2       1       0         1       20    0.02000    0.01667       2   0.07876    2.746
+      6200        63         2       1       0         1       20    0.02001    0.03333       2   0.07127    2.746
+      6300        68         2       1       0         1       20    0.02007    0.05000       2   0.06448    2.746
+   t  6300.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (64,18) y29 — the introduced founder donating again, which is not descendant reproduction
+      6400        70         2       1       0         1       21    0.02021    0.01667       2   0.07876    2.746
+      6500        70         2       1       0         1       21    0.02039    0.03333       2   0.07127    2.746
+      6600        72         2       1       0         1       21    0.02061    0.05000       2   0.06448    2.746
+   t  6600.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (61,17) y29 — the introduced founder donating again, which is not descendant reproduction
+      6700        74         2       1       0         1       22    0.02087    0.01667       2   0.07876    2.746
+      6800        75         2       1       0         1       22    0.02115    0.03333       2   0.07127    2.746
+      6900        80         2       1       0         1       22    0.02145    0.05000       2   0.06448    2.746
+   t  6900.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (63,21) y30 — the introduced founder donating again, which is not descendant reproduction
+      7000        83         2       1       0         1       23    0.02177    0.01667       2   0.07876    2.746
+      7100        84         2       1       0         1       23    0.02211    0.03333       2   0.07127    2.746
+      7200        89         2       1       0         1       23    0.02246    0.05000       2   0.06448    2.746
+   t  7200.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (60,18) y29 — the introduced founder donating again, which is not descendant reproduction
+      7300        92         2       1       0         1       24    0.02282    0.01667       2   0.07876    2.746
+      7400        93         2       1       0         1       24    0.02319    0.03333       2   0.07127    2.746
+      7500        95         2       1       0         1       24    0.02357    0.05000       2   0.06448    2.746
+   t  7500.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (62,18) y29 — the introduced founder donating again, which is not descendant reproduction
+      7600        99         2       1       0         1       25    0.02395    0.01667       2   0.07876    2.746
+      7700       101         2       1       0         1       25    0.02435    0.03333       2   0.07127    2.746
+      7800       107         2       1       0         1       25    0.02476    0.05000       2   0.06448    2.746
+   t  7800.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (61,19) y30 — the introduced founder donating again, which is not descendant reproduction
+      7900       110         2       1       0         1       26    0.02517    0.01667       2   0.07876    2.746
+      8000       111         2       1       0         1       26    0.02559    0.03333       2   0.07127    2.746
+      8100       115         2       1       0         1       26    0.02602    0.05000       2   0.06448    2.746
+   t  8100.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (60,17) y29 — the introduced founder donating again, which is not descendant reproduction
+      8200       118         2       1       0         1       27    0.02646    0.01667       2   0.07876    2.746
+      8300       118         2       1       0         1       27    0.02690    0.03333       2   0.07127    2.746
+      8400       122         2       1       0         1       27    0.02735    0.05000       2   0.06448    2.746
+   t  8400.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (62,21) y31 — the introduced founder donating again, which is not descendant reproduction
+      8500       125         2       1       0         1       28    0.02781    0.01667       2   0.07876    2.746
+      8600       125         2       1       0         1       28    0.02828    0.03333       2   0.07127    2.746
+      8700       130         2       1       0         1       28    0.02876    0.05000       2   0.06448    2.746
+   t  8700.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (61,18) y29 — the introduced founder donating again, which is not descendant reproduction
+      8800       133         2       1       0         1       29    0.02924    0.01667       2   0.07876    2.746
+      8900       134         2       1       0         1       29    0.02974    0.03333       2   0.07127    2.746
+      9000       137         2       1       0         1       29    0.03024    0.05000       2   0.06448    2.746
+   t  9000.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (61,21) y31 — the introduced founder donating again, which is not descendant reproduction
+      9100       139         2       1       0         1       30    0.03075    0.01667       2   0.07876    2.746
+      9200       140         2       1       0         1       30    0.03126    0.03333       2   0.07127    2.746
+      9300       142         2       1       0         1       30    0.03179    0.05000       2   0.06448    2.746
+   t  9300.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (63,17) y28 — the introduced founder donating again, which is not descendant reproduction
+      9400       143         2       1       0         1       31    0.03233    0.01667       2   0.07876    2.746
+      9500       144         2       1       0         1       31    0.03287    0.03333       2   0.07127    2.746
+      9600       147         2       1       0         1       31    0.03343    0.05000       2   0.06448    2.746
+   t  9600.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (64,19) y29 — the introduced founder donating again, which is not descendant reproduction
+      9700       147         2       1       0         1       32    0.03399    0.01667       2   0.07876    2.747
+      9800       148         2       1       0         1       32    0.03456    0.03333       2   0.07127    2.746
+      9900       149         2       1       0         1       32    0.03514    0.05000       2   0.06448    2.746
+   t  9900.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (60,17) y29 — the introduced founder donating again, which is not descendant reproduction
+     10000       149         2       1       0         1       33    0.03573    0.01667       2   0.07876    2.747
+     10100       151         2       1       0         1       33    0.03634    0.03333       2   0.07127    2.746
+     10200       151         2       1       0         1       33    0.03695    0.05000       2   0.06448    2.746
+   t 10200.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (63,21) y30 — the introduced founder donating again, which is not descendant reproduction
+     10300       156         2       1       0         1       34    0.03757    0.01667       2   0.07876    2.746
+     10400       157         2       1       0         1       34    0.03820    0.03333       2   0.07127    2.747
+     10500       158         2       1       0         1       34    0.03869    0.05000       2   0.06448    2.746
+   t 10500.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (60,20) y30 — the introduced founder donating again, which is not descendant reproduction
+     10600       159         2       1       0         1       35    0.03912    0.01667       2   0.07876    2.747
+     10700       159         2       1       0         1       35    0.03958    0.03333       2   0.07127    2.746
+     10800       162         2       1       0         1       35    0.04007    0.05000       2   0.06448    2.746
+   t 10800.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (61,18) y29 — the introduced founder donating again, which is not descendant reproduction
+     10900       162         2       1       0         1       36    0.04058    0.01667       2   0.07876    2.746
+     11000       161         2       1       0         1       36    0.04111    0.03333       2   0.07127    2.746
+     11100       162         2       1       0         1       36    0.04166    0.05000       2   0.06448    2.747
+   t 11100.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (63,17) y28 — the introduced founder donating again, which is not descendant reproduction
+     11200       162         2       1       0         1       37    0.04223    0.01667       2   0.07876    2.747
+     11300       161         2       1       0         1       37    0.04281    0.03333       2   0.07127    2.746
+     11400       162         2       1       0         1       37    0.04340    0.05000       2   0.06448    2.746
+   t 11400.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (62,21) y31 — the introduced founder donating again, which is not descendant reproduction
+     11500       162         2       1       0         1       38    0.04401    0.01667       2   0.07876    2.747
+     11600       162         2       1       0         1       38    0.04462    0.03333       2   0.07127    2.747
+     11700       162         2       1       0         1       38    0.04525    0.05000       2   0.06448    2.747
+   t 11700.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (61,19) y30 — the introduced founder donating again, which is not descendant reproduction
+     11800       162         2       1       0         1       39    0.04589    0.01667       2   0.07876    2.747
+     11900       161         2       1       0         1       39    0.04654    0.03333       2   0.07127    2.747
+     12000       162         2       1       0         1       39    0.04719    0.05000       2   0.06448    2.746
+   water: water m3/s over 12000 s: rain in 0.038400, outlet 0.037818, evaporation 0.000000, transpiration 0.00059453, storage change -0.000013 (residual -2.27e-10); head 2.746 m (+0.0005 m), stored 238.9140 m3
+   residuals: organic -1.36e-8, mineral -1.66e-10, energy -2.72e-8 (stocks 220.1342, 3072.1890, 440.2684)
+   1217.1 s of wall time for 240000 coupled ticks
+   by identity: 1 descendant birth(s), 0 of them lost before the end, 1 surviving; the introduced founder survived the whole window
+     #8 (introduced founder): funded 2.00000 over 240000 ticks, 39 deliveries, reached donor size at t 0.05 s
+   surviving descendants against donor_min 0.3 — mean light, moisture and (1 - aeration stress) are the stand's own published state over its life; the Monod factor is this harness dividing its site's published mineral pool by `pool + nutrient_half`, not a model output:
+        id         column      wood of W_est born (s)   light  moisture unstress   monod
+        60    (60,18) y29   0.04719   15.7 %   4500.1   0.869     0.720    1.000   0.667
+   the largest descendant holds 0.04719 of the 0.3 it needs (15.7 %); a newborn at the **growth cap** covers that gap in 54163 ticks, so this arm's own descendants are slower than the cap by whatever their multipliers above say
+   first birth at t 4500.10 s, and **no descendant reached donor size**: the replacement is NOT completed and this arm is **unresolved at the stopping budget** (12000 s against an earliest-possible bound of 3308.25 s — long enough in principle, so this is a measurement and not an arithmetic impossibility, and it is still not evidence of exclusion). A birth is not a generation.
+
+-- arm: newcomer with the resident excluded
+   excluded umbrellafrond: 8 of 8 stands cleared, 0 of 0 seed banks removed, all of it booked out as removed_* (organic +9.7313, mineral +0.1961)
+   retained and matched: stored water 239.0644 -> 239.0644 m3, head 2.746 -> 2.746 m, litter 1.25132 -> 1.25132, dead wood 0.00000 -> 0.00000, soil mineral 3071.9468 -> 3071.9468, mineral imported 3072.2 -> 3072.2
+   one bloomcrown founder #8 at (62,19) y30: wood 0.3, foliage 0.6000, reserve 0.1500, parcel 0.0000; bank of its own species on 0 sites (0.00000)
+   gates at the declared site: mean pore 0.411 (>= 0.10), saturated fraction 0.214 (<= 0.25), water 0.000 m (<= 0.05), sky 0.958 (>= 0.60), 14 soil voxels, dead wood in the box 0.000 (>= 0.000)
+     t (s)  resident  newcomer  births  losses survivors   deliv. max desc.W fnd.parcel   banks    banked head (m)
+   t     0.05 s  donor size: bloomcrown #8 reached wood 0.30001 >= donor_min 0.3 — it can now set material aside (this is the introduced founder, not a descendant)
+       100         0         1       0       0         0        0    0.00000    0.01667       0   0.00000    2.746
+       200         0         1       0       0         0        0    0.00000    0.03333       0   0.00000    2.746
+       300         0         1       0       0         0        0    0.00000    0.05000       0   0.00000    2.746
+   t   300.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001008 of mineral with it) to (64,20) y30 — the introduced founder donating again, which is not descendant reproduction
+       400         0         1       0       0         0        1    0.00000    0.01667       1   0.04524    2.746
+       500         0         1       0       0         0        1    0.00000    0.03333       1   0.04094    2.746
+       600         0         1       0       0         0        1    0.00000    0.05000       1   0.03704    2.746
+   t   600.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001014 of mineral with it) to (64,18) y29 — the introduced founder donating again, which is not descendant reproduction
+       700         0         1       0       0         0        2    0.00000    0.01667       2   0.07876    2.746
+       800         0         1       0       0         0        2    0.00000    0.03333       2   0.07127    2.745
+       900         0         1       0       0         0        2    0.00000    0.05000       2   0.06448    2.745
+   t   900.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001018 of mineral with it) to (61,19) y30 — the introduced founder donating again, which is not descendant reproduction
+      1000         0         1       0       0         0        3    0.00000    0.01667       2   0.07876    2.745
+      1100         0         1       0       0         0        3    0.00000    0.03333       2   0.07127    2.745
+      1200         0         1       0       0         0        3    0.00000    0.05000       2   0.06448    2.745
+   t  1200.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001020 of mineral with it) to (61,19) y30 — the introduced founder donating again, which is not descendant reproduction
+      1300         0         1       0       0         0        4    0.00000    0.01667       1   0.07876    2.745
+      1400         0         1       0       0         0        4    0.00000    0.03333       1   0.07127    2.745
+      1500         0         1       0       0         0        4    0.00000    0.05000       1   0.06448    2.745
+   t  1500.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001022 of mineral with it) to (60,19) y30 — the introduced founder donating again, which is not descendant reproduction
+      1600         0         1       0       0         0        5    0.00000    0.01667       2   0.07876    2.745
+      1700         0         1       0       0         0        5    0.00000    0.03333       2   0.07127    2.745
+      1800         0         1       0       0         0        5    0.00000    0.05000       2   0.06448    2.745
+   t  1800.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001023 of mineral with it) to (62,18) y29 — the introduced founder donating again, which is not descendant reproduction
+      1900         0         1       0       0         0        6    0.00000    0.01667       2   0.07876    2.745
+      2000         0         1       0       0         0        6    0.00000    0.03333       2   0.07127    2.745
+      2100         0         1       0       0         0        6    0.00000    0.05000       2   0.06448    2.745
+   t  2100.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (64,20) y30 — the introduced founder donating again, which is not descendant reproduction
+      2200         0         1       0       0         0        7    0.00000    0.01667       2   0.07876    2.745
+      2300         0         1       0       0         0        7    0.00000    0.03333       2   0.07127    2.745
+      2400         0         1       0       0         0        7    0.00000    0.05000       2   0.06448    2.745
+   t  2400.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (63,21) y30 — the introduced founder donating again, which is not descendant reproduction
+      2500         0         1       0       0         0        8    0.00000    0.01667       2   0.07876    2.745
+      2600         0         1       0       0         0        8    0.00000    0.03333       2   0.07127    2.745
+      2700         0         1       0       0         0        8    0.00000    0.05000       2   0.06448    2.745
+   t  2700.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001023 of mineral with it) to (64,18) y29 — the introduced founder donating again, which is not descendant reproduction
+      2800         0         1       0       0         0        9    0.00000    0.01667       2   0.07876    2.745
+      2900         0         1       0       0         0        9    0.00000    0.03333       2   0.07127    2.745
+      3000         0         1       0       0         0        9    0.00000    0.05000       2   0.06448    2.745
+   t  3000.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001023 of mineral with it) to (62,21) y31 — the introduced founder donating again, which is not descendant reproduction
+      3100         0         1       0       0         0       10    0.00000    0.01667       2   0.07876    2.745
+      3200         0         1       0       0         0       10    0.00000    0.03333       2   0.07127    2.745
+      3300         0         1       0       0         0       10    0.00000    0.05000       2   0.06448    2.745
+   t  3300.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (64,18) y29 — the introduced founder donating again, which is not descendant reproduction
+      3400         0         1       0       0         0       11    0.00000    0.01667       2   0.07876    2.745
+      3500         0         1       0       0         0       11    0.00000    0.03333       2   0.07127    2.745
+      3600         0         1       0       0         0       11    0.00000    0.05000       2   0.06448    2.745
+   t  3600.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (63,18) y29 — the introduced founder donating again, which is not descendant reproduction
+      3700         0         1       0       0         0       12    0.00000    0.01667       2   0.07876    2.745
+      3800         0         1       0       0         0       12    0.00000    0.03333       2   0.07127    2.745
+      3900         0         1       0       0         0       12    0.00000    0.05000       2   0.06448    2.745
+   t  3900.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (64,21) y30 — the introduced founder donating again, which is not descendant reproduction
+      4000         0         1       0       0         0       13    0.00000    0.01667       2   0.07876    2.746
+      4100         0         1       0       0         0       13    0.00000    0.03333       2   0.07127    2.745
+      4200         0         1       0       0         0       13    0.00000    0.05000       2   0.06448    2.745
+   t  4200.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (60,20) y30 — the introduced founder donating again, which is not descendant reproduction
+      4300         0         1       0       0         0       14    0.00000    0.01667       2   0.07876    2.745
+      4400         0         1       0       0         0       14    0.00000    0.03333       2   0.07127    2.745
+      4500         0         1       0       0         0       14    0.00000    0.05000       2   0.06448    2.745
+   t  4500.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (60,18) y29 — the introduced founder donating again, which is not descendant reproduction
+   t  4500.10 s  birth: bloomcrown #9 at (60,18) y29, wood 0.02000
+      4600         0         2       1       0         1       15    0.02000    0.01667       1   0.03352    2.745
+      4700         0         2       1       0         1       15    0.02000    0.03333       1   0.03033    2.745
+      4800         0         2       1       0         1       15    0.02000    0.05000       1   0.02744    2.745
+   t  4800.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (60,18) y29 — the introduced founder donating again, which is not descendant reproduction
+      4900         0         2       1       0         1       16    0.02000    0.01667       1   0.04524    2.745
+      5000         0         2       1       0         1       16    0.02000    0.03333       1   0.04094    2.746
+      5100         0         2       1       0         1       16    0.02000    0.05000       1   0.03704    2.745
+   t  5100.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (61,19) y30 — the introduced founder donating again, which is not descendant reproduction
+      5200         0         2       1       0         1       17    0.02000    0.01667       2   0.07876    2.746
+      5300         0         2       1       0         1       17    0.02000    0.03333       2   0.07127    2.745
+      5400         0         2       1       0         1       17    0.02000    0.05000       2   0.06448    2.745
+   t  5400.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (63,19) y29 — the introduced founder donating again, which is not descendant reproduction
+      5500         0         2       1       0         1       18    0.02000    0.01667       2   0.07876    2.745
+      5600         0         2       1       0         1       18    0.02000    0.03333       2   0.07127    2.746
+      5700         0         2       1       0         1       18    0.02000    0.05000       2   0.06448    2.746
+   t  5700.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (63,19) y29 — the introduced founder donating again, which is not descendant reproduction
+      5800         0         2       1       0         1       19    0.02000    0.01667       1   0.07876    2.745
+      5900         0         2       1       0         1       19    0.02000    0.03333       1   0.07127    2.745
+      6000         0         2       1       0         1       19    0.02000    0.05000       1   0.06448    2.746
+   t  6000.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (63,20) y30 — the introduced founder donating again, which is not descendant reproduction
+      6100         0         2       1       0         1       20    0.02000    0.01667       2   0.07876    2.745
+      6200         0         2       1       0         1       20    0.02002    0.03333       2   0.07127    2.745
+      6300         0         2       1       0         1       20    0.02011    0.05000       2   0.06448    2.746
+   t  6300.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (64,18) y29 — the introduced founder donating again, which is not descendant reproduction
+      6400         0         2       1       0         1       21    0.02026    0.01667       2   0.07876    2.746
+      6500         0         2       1       0         1       21    0.02046    0.03333       2   0.07127    2.745
+      6600         0         2       1       0         1       21    0.02069    0.05000       2   0.06448    2.745
+   t  6600.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (61,17) y29 — the introduced founder donating again, which is not descendant reproduction
+      6700         0         2       1       0         1       22    0.02096    0.01667       2   0.07876    2.745
+      6800         0         2       1       0         1       22    0.02124    0.03333       2   0.07127    2.746
+      6900         0         2       1       0         1       22    0.02155    0.05000       2   0.06448    2.745
+   t  6900.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (63,21) y30 — the introduced founder donating again, which is not descendant reproduction
+      7000         0         2       1       0         1       23    0.02188    0.01667       2   0.07876    2.746
+      7100         0         2       1       0         1       23    0.02222    0.03333       2   0.07127    2.746
+      7200         0         2       1       0         1       23    0.02257    0.05000       2   0.06448    2.746
+   t  7200.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (60,18) y29 — the introduced founder donating again, which is not descendant reproduction
+      7300         0         2       1       0         1       24    0.02294    0.01667       2   0.07876    2.745
+      7400         0         2       1       0         1       24    0.02331    0.03333       2   0.07127    2.745
+      7500         0         2       1       0         1       24    0.02369    0.05000       2   0.06448    2.745
+   t  7500.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (62,18) y29 — the introduced founder donating again, which is not descendant reproduction
+      7600         0         2       1       0         1       25    0.02408    0.01667       2   0.07876    2.745
+      7700         0         2       1       0         1       25    0.02448    0.03333       2   0.07127    2.745
+      7800         0         2       1       0         1       25    0.02489    0.05000       2   0.06448    2.745
+   t  7800.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (61,19) y30 — the introduced founder donating again, which is not descendant reproduction
+      7900         0         2       1       0         1       26    0.02531    0.01667       2   0.07876    2.745
+      8000         0         2       1       0         1       26    0.02573    0.03333       2   0.07127    2.745
+      8100         0         2       1       0         1       26    0.02616    0.05000       2   0.06448    2.745
+   t  8100.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (60,17) y29 — the introduced founder donating again, which is not descendant reproduction
+      8200         0         2       1       0         1       27    0.02660    0.01667       2   0.07876    2.746
+      8300         0         2       1       0         1       27    0.02705    0.03333       2   0.07127    2.745
+      8400         0         2       1       0         1       27    0.02751    0.05000       2   0.06448    2.745
+   t  8400.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (62,21) y31 — the introduced founder donating again, which is not descendant reproduction
+      8500         0         2       1       0         1       28    0.02797    0.01667       2   0.07876    2.746
+      8600         0         2       1       0         1       28    0.02844    0.03333       2   0.07127    2.746
+      8700         0         2       1       0         1       28    0.02892    0.05000       2   0.06448    2.746
+   t  8700.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (61,18) y29 — the introduced founder donating again, which is not descendant reproduction
+      8800         0         2       1       0         1       29    0.02940    0.01667       2   0.07876    2.746
+      8900         0         2       1       0         1       29    0.02990    0.03333       2   0.07127    2.745
+      9000         0         2       1       0         1       29    0.03040    0.05000       2   0.06448    2.745
+   t  9000.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (61,21) y31 — the introduced founder donating again, which is not descendant reproduction
+      9100         0         2       1       0         1       30    0.03092    0.01667       2   0.07876    2.745
+      9200         0         2       1       0         1       30    0.03144    0.03333       2   0.07127    2.745
+      9300         0         2       1       0         1       30    0.03197    0.05000       2   0.06448    2.745
+   t  9300.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (63,17) y28 — the introduced founder donating again, which is not descendant reproduction
+      9400         0         2       1       0         1       31    0.03250    0.01667       2   0.07876    2.745
+      9500         0         2       1       0         1       31    0.03305    0.03333       2   0.07127    2.746
+      9600         0         2       1       0         1       31    0.03361    0.05000       2   0.06448    2.745
+   t  9600.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (64,19) y29 — the introduced founder donating again, which is not descendant reproduction
+      9700         0         2       1       0         1       32    0.03417    0.01667       2   0.07876    2.746
+      9800         0         2       1       0         1       32    0.03475    0.03333       2   0.07127    2.745
+      9900         0         2       1       0         1       32    0.03534    0.05000       2   0.06448    2.745
+   t  9900.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (60,17) y29 — the introduced founder donating again, which is not descendant reproduction
+     10000         0         2       1       0         1       33    0.03593    0.01667       2   0.07876    2.746
+     10100         0         2       1       0         1       33    0.03654    0.03333       2   0.07127    2.745
+     10200         0         2       1       0         1       33    0.03715    0.05000       2   0.06448    2.745
+   t 10200.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (63,21) y30 — the introduced founder donating again, which is not descendant reproduction
+     10300         0         2       1       0         1       34    0.03778    0.01667       2   0.07876    2.745
+     10400         0         2       1       0         1       34    0.03841    0.03333       2   0.07127    2.746
+     10500         0         2       1       0         1       34    0.03906    0.05000       2   0.06448    2.746
+   t 10500.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (60,20) y30 — the introduced founder donating again, which is not descendant reproduction
+     10600         0         2       1       0         1       35    0.03972    0.01667       2   0.07876    2.745
+     10700         0         2       1       0         1       35    0.04038    0.03333       2   0.07127    2.745
+     10800         0         2       1       0         1       35    0.04106    0.05000       2   0.06448    2.746
+   t 10800.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (61,18) y29 — the introduced founder donating again, which is not descendant reproduction
+     10900         0         2       1       0         1       36    0.04175    0.01667       2   0.07876    2.746
+     11000         0         2       1       0         1       36    0.04246    0.03333       2   0.07127    2.745
+     11100         0         2       1       0         1       36    0.04317    0.05000       2   0.06448    2.745
+   t 11100.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (63,17) y28 — the introduced founder donating again, which is not descendant reproduction
+     11200         0         2       1       0         1       37    0.04390    0.01667       2   0.07876    2.745
+     11300         0         2       1       0         1       37    0.04464    0.03333       2   0.07127    2.745
+     11400         0         2       1       0         1       37    0.04539    0.05000       2   0.06448    2.745
+   t 11400.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (62,21) y31 — the introduced founder donating again, which is not descendant reproduction
+     11500         0         2       1       0         1       38    0.04615    0.01667       2   0.07876    2.745
+     11600         0         2       1       0         1       38    0.04693    0.03333       2   0.07127    2.745
+     11700         0         2       1       0         1       38    0.04771    0.05000       2   0.06448    2.745
+   t 11700.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (61,19) y30 — the introduced founder donating again, which is not descendant reproduction
+     11800         0         2       1       0         1       39    0.04852    0.01667       2   0.07876    2.746
+     11900         0         2       1       0         1       39    0.04933    0.03333       2   0.07127    2.745
+     12000         0         2       1       0         1       39    0.05016    0.05000       2   0.06448    2.745
+   water: water m3/s over 12000 s: rain in 0.038400, outlet 0.038382, evaporation 0.000000, transpiration 0.00001740, storage change +0.000000 (residual -2.28e-10); head 2.745 m (-0.0003 m), stored 239.0681 m3
+   residuals: organic -1.28e-10, mineral -9.09e-12, energy -2.56e-10 (stocks 3.8021, 3071.9929, 7.6041)
+   1118.3 s of wall time for 240000 coupled ticks
+   by identity: 1 descendant birth(s), 0 of them lost before the end, 1 surviving; the introduced founder survived the whole window
+     #8 (introduced founder): funded 2.00000 over 240000 ticks, 39 deliveries, reached donor size at t 0.05 s
+   surviving descendants against donor_min 0.3 — mean light, moisture and (1 - aeration stress) are the stand's own published state over its life; the Monod factor is this harness dividing its site's published mineral pool by `pool + nutrient_half`, not a model output:
+        id         column      wood of W_est born (s)   light  moisture unstress   monod
+         9    (60,18) y29   0.05016   16.7 %   4500.1   0.877     0.720    1.000   0.667
+   the largest descendant holds 0.05016 of the 0.3 it needs (16.7 %); a newborn at the **growth cap** covers that gap in 54163 ticks, so this arm's own descendants are slower than the cap by whatever their multipliers above say
+   first birth at t 4500.10 s, and **no descendant reached donor size**: the replacement is NOT completed and this arm is **unresolved at the stopping budget** (12000 s against an earliest-possible bound of 3308.25 s — long enough in principle, so this is a measurement and not an arithmetic impossibility, and it is still not evidence of exclusion). A birth is not a generation.
+
+---------- site 2 of 3: (104,22) y21 — 9 eligible recipients of 19 candidate faces in hop
+
+-- arm: resident plus newcomer
+   one bloomcrown founder #8 at (104,22) y21: wood 0.3, foliage 0.6000, reserve 0.1500, parcel 0.0000; bank of its own species on 0 sites (0.00000)
+   gates at the declared site: mean pore 0.250 (>= 0.10), saturated fraction 0.000 (<= 0.25), water 0.000 m (<= 0.05), sky 0.802 (>= 0.60), 18 soil voxels, dead wood in the box 0.000 (>= 0.000)
+     t (s)  resident  newcomer  births  losses survivors   deliv. max desc.W fnd.parcel   banks    banked head (m)
+   t     0.05 s  donor size: bloomcrown #8 reached wood 0.30001 >= donor_min 0.3 — it can now set material aside (this is the introduced founder, not a descendant)
+       100        16         1       0       0         0        0    0.00000    0.01667       0   0.00000    2.746
+       200        16         1       0       0         0        0    0.00000    0.03333       0   0.00000    2.746
+       300        16         1       0       0         0        0    0.00000    0.05000       0   0.00000    2.746
+   t   300.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001009 of mineral with it) to (102,21) y21 — the introduced founder donating again, which is not descendant reproduction
+       400        23         1       0       0         0        1    0.00000    0.01667       1   0.04524    2.746
+       500        23         1       0       0         0        1    0.00000    0.03333       1   0.04094    2.746
+       600        23         1       0       0         0        1    0.00000    0.05000       1   0.03704    2.746
+   t   600.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001019 of mineral with it) to (103,22) y21 — the introduced founder donating again, which is not descendant reproduction
+   t   600.10 s  birth: bloomcrown #31 at (103,22) y21, wood 0.02000
+       700        30         2       1       0         1        2    0.02000    0.01432       1   0.03352    2.746
+       800        30         2       1       0         1        2    0.02000    0.02035       1   0.03033    2.746
+       900        30         2       1       0         1        2    0.02000    0.02607       1   0.02744    2.746
+      1000        34         2       1       0         1        2    0.02000    0.03150       0   0.00000    2.746
+      1100        35         2       1       0         1        2    0.02000    0.03664       0   0.00000    2.746
+      1200        35         2       1       0         1        2    0.02000    0.04151       0   0.00000    2.746
+      1300        40         2       1       0         1        2    0.02000    0.04611       0   0.00000    2.746
+   t  1389.35 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001025 of mineral with it) to (104,23) y22 — the introduced founder donating again, which is not descendant reproduction
+   t  1389.40 s  birth: bloomcrown #42 at (104,23) y22, wood 0.02000
+      1400        40         3       2       0         2        3    0.02000    0.00045       0   0.00000    2.746
+      1500        40         3       2       0         2        3    0.02000    0.00454       0   0.00000    2.746
+      1600        43         3       2       0         2        3    0.02000    0.00840       0   0.00000    2.746
+      1700        43         3       2       0         2        3    0.02000    0.01202       0   0.00000    2.746
+      1800        43         3       2       0         2        3    0.02003    0.01542       0   0.00000    2.746
+      1900        46         3       2       0         2        3    0.02016    0.01861       0   0.00000    2.746
+      2000        46         3       2       0         2        3    0.02038    0.02158       0   0.00000    2.746
+      2100        46         3       2       0         2        3    0.02067    0.02436       0   0.00000    2.746
+      2200        50         3       2       0         2        3    0.02101    0.02694       0   0.00000    2.746
+      2300        50         3       2       0         2        3    0.02140    0.02933       0   0.00000    2.746
+      2400        50         3       2       0         2        3    0.02183    0.03155       0   0.00000    2.746
+      2500        53         3       2       0         2        3    0.02230    0.03359       0   0.00000    2.746
+      2600        53         3       2       0         2        3    0.02280    0.03546       0   0.00000    2.746
+      2700        53         3       2       0         2        3    0.02332    0.03717       0   0.00000    2.746
+      2800        56         3       2       0         2        3    0.02387    0.03872       0   0.00000    2.746
+      2900        56         3       2       0         2        3    0.02444    0.03913       0   0.00000    2.746
+      3000        56         3       2       0         2        3    0.02502    0.03913       0   0.00000    2.746
+      3100        57         3       2       0         2        3    0.02562    0.03913       0   0.00000    2.746
+      3200        57         3       2       0         2        3    0.02623    0.03913       0   0.00000    2.746
+      3300        57         3       2       0         2        3    0.02686    0.03913       0   0.00000    2.746
+      3400        58         3       2       0         2        3    0.02750    0.03913       0   0.00000    2.746
+      3500        58         3       2       0         2        3    0.02816    0.03913       0   0.00000    2.746
+      3600        58         3       2       0         2        3    0.02884    0.03913       0   0.00000    2.746
+      3700        58         3       2       0         2        3    0.02953    0.03913       0   0.00000    2.746
+      3800        58         3       2       0         2        3    0.03025    0.03913       0   0.00000    2.746
+      3900        58         3       2       0         2        3    0.03099    0.03913       0   0.00000    2.746
+      4000        59         3       2       0         2        3    0.03176    0.03913       0   0.00000    2.746
+      4100        59         3       2       0         2        3    0.03255    0.03913       0   0.00000    2.746
+      4200        59         3       2       0         2        3    0.03337    0.03913       0   0.00000    2.746
+      4300        59         3       2       0         2        3    0.03421    0.03913       0   0.00000    2.746
+      4400        59         3       2       0         2        3    0.03508    0.03913       0   0.00000    2.746
+      4500        59         3       2       0         2        3    0.03598    0.03913       0   0.00000    2.746
+      4600        59         3       2       0         2        3    0.03690    0.03913       0   0.00000    2.746
+      4700        59         3       2       0         2        3    0.03785    0.03913       0   0.00000    2.746
+      4800        59         3       2       0         2        3    0.03883    0.03913       0   0.00000    2.746
+      4900        59         3       2       0         2        3    0.03984    0.03913       0   0.00000    2.746
+      5000        59         3       2       0         2        3    0.04096    0.03913       0   0.00000    2.746
+      5100        59         3       2       0         2        3    0.04211    0.03913       0   0.00000    2.746
+      5200        60         3       2       0         2        3    0.04328    0.03913       0   0.00000    2.746
+      5300        59         3       2       0         2        3    0.04446    0.03913       0   0.00000    2.746
+      5400        59         3       2       0         2        3    0.04567    0.03913       0   0.00000    2.746
+      5500        59         3       2       0         2        3    0.04691    0.03913       0   0.00000    2.746
+      5600        59         3       2       0         2        3    0.04817    0.03913       0   0.00000    2.746
+      5700        59         3       2       0         2        3    0.04946    0.03913       0   0.00000    2.746
+      5800        59         3       2       0         2        3    0.05079    0.03913       0   0.00000    2.746
+      5900        59         3       2       0         2        3    0.05214    0.03913       0   0.00000    2.746
+      6000        62         3       2       0         2        3    0.05354    0.03913       0   0.00000    2.746
+      6100        63         3       2       0         2        3    0.05496    0.03913       0   0.00000    2.746
+      6200        63         3       2       0         2        3    0.05643    0.03913       0   0.00000    2.746
+      6300        68         3       2       0         2        3    0.05793    0.03913       0   0.00000    2.746
+      6400        70         3       2       0         2        3    0.05947    0.03913       0   0.00000    2.746
+      6500        70         3       2       0         2        3    0.06105    0.03913       0   0.00000    2.746
+      6600        72         3       2       0         2        3    0.06268    0.03913       0   0.00000    2.746
+      6700        74         3       2       0         2        3    0.06434    0.03913       0   0.00000    2.746
+      6800        75         3       2       0         2        3    0.06605    0.03913       0   0.00000    2.746
+      6900        80         3       2       0         2        3    0.06781    0.03913       0   0.00000    2.746
+   t  6951.10 s  loss: bloomcrown #42 is gone
+      7000        83         2       2       1         1        3    0.06961    0.03913       0   0.00000    2.746
+      7100        84         2       2       1         1        3    0.07146    0.03913       0   0.00000    2.746
+      7200        89         2       2       1         1        3    0.07336    0.03913       0   0.00000    2.746
+      7300        92         2       2       1         1        3    0.07530    0.03913       0   0.00000    2.746
+      7400        93         2       2       1         1        3    0.07730    0.03913       0   0.00000    2.746
+      7500        95         2       2       1         1        3    0.07936    0.03913       0   0.00000    2.746
+      7600        99         2       2       1         1        3    0.08146    0.03913       0   0.00000    2.746
+      7700       101         2       2       1         1        3    0.08362    0.03913       0   0.00000    2.746
+      7800       107         2       2       1         1        3    0.08584    0.03913       0   0.00000    2.746
+      7900       110         2       2       1         1        3    0.08812    0.03913       0   0.00000    2.746
+      8000       111         2       2       1         1        3    0.09045    0.03913       0   0.00000    2.746
+      8100       115         2       2       1         1        3    0.09285    0.03913       0   0.00000    2.746
+      8200       118         2       2       1         1        3    0.09531    0.03913       0   0.00000    2.746
+      8300       118         2       2       1         1        3    0.09784    0.03913       0   0.00000    2.746
+      8400       122         2       2       1         1        3    0.10043    0.03913       0   0.00000    2.746
+      8500       125         2       2       1         1        3    0.10309    0.03913       0   0.00000    2.746
+      8600       125         2       2       1         1        3    0.10582    0.03913       0   0.00000    2.746
+      8700       130         2       2       1         1        3    0.10862    0.03913       0   0.00000    2.747
+      8800       133         2       2       1         1        3    0.11149    0.03913       0   0.00000    2.746
+      8900       134         2       2       1         1        3    0.11444    0.03913       0   0.00000    2.746
+      9000       137         2       2       1         1        3    0.11747    0.03913       0   0.00000    2.746
+      9100       139         2       2       1         1        3    0.12057    0.03913       0   0.00000    2.746
+      9200       140         2       2       1         1        3    0.12376    0.03913       0   0.00000    2.746
+      9300       142         2       2       1         1        3    0.12703    0.03913       0   0.00000    2.746
+      9400       143         2       2       1         1        3    0.13038    0.03913       0   0.00000    2.746
+      9500       144         2       2       1         1        3    0.13383    0.03913       0   0.00000    2.746
+      9600       147         2       2       1         1        3    0.13736    0.03913       0   0.00000    2.746
+      9700       147         2       2       1         1        3    0.14098    0.03913       0   0.00000    2.746
+      9800       148         2       2       1         1        3    0.14470    0.03913       0   0.00000    2.746
+      9900       149         2       2       1         1        3    0.14852    0.03913       0   0.00000    2.746
+     10000       149         2       2       1         1        3    0.15243    0.03913       0   0.00000    2.746
+     10100       151         2       2       1         1        3    0.15645    0.03913       0   0.00000    2.746
+     10200       151         2       2       1         1        3    0.16057    0.03913       0   0.00000    2.746
+     10300       156         2       2       1         1        3    0.16480    0.03913       0   0.00000    2.746
+     10400       157         2       2       1         1        3    0.16914    0.03913       0   0.00000    2.746
+     10500       158         2       2       1         1        3    0.17358    0.03913       0   0.00000    2.747
+     10600       159         2       2       1         1        3    0.17815    0.03913       0   0.00000    2.746
+     10700       159         2       2       1         1        3    0.18283    0.03913       0   0.00000    2.747
+     10800       162         2       2       1         1        3    0.18764    0.03913       0   0.00000    2.747
+     10900       162         2       2       1         1        3    0.19256    0.03913       0   0.00000    2.747
+     11000       161         2       2       1         1        3    0.19762    0.03913       0   0.00000    2.747
+     11100       162         2       2       1         1        3    0.20280    0.03913       0   0.00000    2.746
+     11200       162         2       2       1         1        3    0.20812    0.03913       0   0.00000    2.747
+     11300       161         2       2       1         1        3    0.21357    0.03913       0   0.00000    2.747
+     11400       162         2       2       1         1        3    0.21917    0.03913       0   0.00000    2.747
+     11500       162         2       2       1         1        3    0.22490    0.03913       0   0.00000    2.747
+     11600       162         2       2       1         1        3    0.23079    0.03913       0   0.00000    2.747
+     11700       162         2       2       1         1        3    0.23682    0.03913       0   0.00000    2.746
+     11800       162         2       2       1         1        3    0.24301    0.03913       0   0.00000    2.747
+     11900       161         2       2       1         1        3    0.24936    0.03913       0   0.00000    2.747
+     12000       162         2       2       1         1        3    0.25587    0.03913       0   0.00000    2.747
+   water: water m3/s over 12000 s: rain in 0.038400, outlet 0.037832, evaporation 0.000000, transpiration 0.00058001, storage change -0.000012 (residual -2.25e-10); head 2.747 m (+0.0011 m), stored 238.9196 m3
+   residuals: organic -1.30e-8, mineral -1.58e-10, energy -2.59e-8 (stocks 217.7434, 3072.1890, 435.4868)
+   1182.6 s of wall time for 240000 coupled ticks
+   by identity: 2 descendant birth(s), 1 of them lost before the end, 1 surviving; the introduced founder survived the whole window
+     #8 (introduced founder): funded 0.18913 over 56561 ticks, 3 deliveries, reached donor size at t 0.05 s
+   surviving descendants against donor_min 0.3 — mean light, moisture and (1 - aeration stress) are the stand's own published state over its life; the Monod factor is this harness dividing its site's published mineral pool by `pool + nutrient_half`, not a model output:
+        id         column      wood of W_est born (s)   light  moisture unstress   monod
+        31   (103,22) y21   0.25587   85.3 %    600.1   0.884     0.802    1.000   0.665
+   the largest descendant holds 0.25587 of the 0.3 it needs (85.3 %); a newborn at the **growth cap** covers that gap in 54163 ticks, so this arm's own descendants are slower than the cap by whatever their multipliers above say
+   first birth at t 600.10 s, and **no descendant reached donor size**: the replacement is NOT completed and this arm is **unresolved at the stopping budget** (12000 s against an earliest-possible bound of 3308.25 s — long enough in principle, so this is a measurement and not an arithmetic impossibility, and it is still not evidence of exclusion). A birth is not a generation.
+
+-- arm: newcomer with the resident excluded
+   excluded umbrellafrond: 8 of 8 stands cleared, 0 of 0 seed banks removed, all of it booked out as removed_* (organic +9.7313, mineral +0.1961)
+   retained and matched: stored water 239.0644 -> 239.0644 m3, head 2.746 -> 2.746 m, litter 1.25132 -> 1.25132, dead wood 0.00000 -> 0.00000, soil mineral 3071.9468 -> 3071.9468, mineral imported 3072.2 -> 3072.2
+   one bloomcrown founder #8 at (104,22) y21: wood 0.3, foliage 0.6000, reserve 0.1500, parcel 0.0000; bank of its own species on 0 sites (0.00000)
+   gates at the declared site: mean pore 0.250 (>= 0.10), saturated fraction 0.000 (<= 0.25), water 0.000 m (<= 0.05), sky 0.802 (>= 0.60), 18 soil voxels, dead wood in the box 0.000 (>= 0.000)
+     t (s)  resident  newcomer  births  losses survivors   deliv. max desc.W fnd.parcel   banks    banked head (m)
+   t     0.05 s  donor size: bloomcrown #8 reached wood 0.30001 >= donor_min 0.3 — it can now set material aside (this is the introduced founder, not a descendant)
+       100         0         1       0       0         0        0    0.00000    0.01667       0   0.00000    2.746
+       200         0         1       0       0         0        0    0.00000    0.03333       0   0.00000    2.746
+       300         0         1       0       0         0        0    0.00000    0.05000       0   0.00000    2.746
+   t   300.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001009 of mineral with it) to (102,21) y21 — the introduced founder donating again, which is not descendant reproduction
+       400         0         1       0       0         0        1    0.00000    0.01667       1   0.04524    2.746
+       500         0         1       0       0         0        1    0.00000    0.03333       1   0.04094    2.745
+       600         0         1       0       0         0        1    0.00000    0.05000       1   0.03704    2.745
+   t   600.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001019 of mineral with it) to (103,22) y21 — the introduced founder donating again, which is not descendant reproduction
+   t   600.10 s  birth: bloomcrown #9 at (103,22) y21, wood 0.02000
+       700         0         2       1       0         1        2    0.02000    0.01432       1   0.03352    2.745
+       800         0         2       1       0         1        2    0.02000    0.02035       1   0.03033    2.745
+       900         0         2       1       0         1        2    0.02000    0.02607       1   0.02744    2.745
+      1000         0         2       1       0         1        2    0.02000    0.03150       0   0.00000    2.745
+      1100         0         2       1       0         1        2    0.02000    0.03664       0   0.00000    2.745
+      1200         0         2       1       0         1        2    0.02000    0.04151       0   0.00000    2.745
+      1300         0         2       1       0         1        2    0.02000    0.04611       0   0.00000    2.745
+   t  1389.35 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001025 of mineral with it) to (104,23) y22 — the introduced founder donating again, which is not descendant reproduction
+   t  1389.40 s  birth: bloomcrown #10 at (104,23) y22, wood 0.02000
+      1400         0         3       2       0         2        3    0.02000    0.00045       0   0.00000    2.745
+      1500         0         3       2       0         2        3    0.02000    0.00454       0   0.00000    2.746
+      1600         0         3       2       0         2        3    0.02000    0.00840       0   0.00000    2.745
+      1700         0         3       2       0         2        3    0.02000    0.01202       0   0.00000    2.745
+      1800         0         3       2       0         2        3    0.02003    0.01542       0   0.00000    2.745
+      1900         0         3       2       0         2        3    0.02016    0.01861       0   0.00000    2.745
+      2000         0         3       2       0         2        3    0.02038    0.02158       0   0.00000    2.745
+      2100         0         3       2       0         2        3    0.02067    0.02436       0   0.00000    2.745
+      2200         0         3       2       0         2        3    0.02101    0.02694       0   0.00000    2.746
+      2300         0         3       2       0         2        3    0.02140    0.02933       0   0.00000    2.745
+      2400         0         3       2       0         2        3    0.02183    0.03155       0   0.00000    2.745
+      2500         0         3       2       0         2        3    0.02230    0.03359       0   0.00000    2.745
+      2600         0         3       2       0         2        3    0.02280    0.03546       0   0.00000    2.745
+      2700         0         3       2       0         2        3    0.02332    0.03717       0   0.00000    2.745
+      2800         0         3       2       0         2        3    0.02387    0.03872       0   0.00000    2.745
+      2900         0         3       2       0         2        3    0.02444    0.03913       0   0.00000    2.745
+      3000         0         3       2       0         2        3    0.02502    0.03913       0   0.00000    2.745
+      3100         0         3       2       0         2        3    0.02562    0.03913       0   0.00000    2.745
+      3200         0         3       2       0         2        3    0.02623    0.03913       0   0.00000    2.745
+      3300         0         3       2       0         2        3    0.02686    0.03913       0   0.00000    2.745
+      3400         0         3       2       0         2        3    0.02750    0.03913       0   0.00000    2.745
+      3500         0         3       2       0         2        3    0.02816    0.03913       0   0.00000    2.745
+      3600         0         3       2       0         2        3    0.02884    0.03913       0   0.00000    2.745
+      3700         0         3       2       0         2        3    0.02953    0.03913       0   0.00000    2.745
+      3800         0         3       2       0         2        3    0.03025    0.03913       0   0.00000    2.745
+      3900         0         3       2       0         2        3    0.03099    0.03913       0   0.00000    2.745
+      4000         0         3       2       0         2        3    0.03176    0.03913       0   0.00000    2.745
+      4100         0         3       2       0         2        3    0.03255    0.03913       0   0.00000    2.745
+      4200         0         3       2       0         2        3    0.03337    0.03913       0   0.00000    2.745
+      4300         0         3       2       0         2        3    0.03421    0.03913       0   0.00000    2.745
+      4400         0         3       2       0         2        3    0.03508    0.03913       0   0.00000    2.745
+      4500         0         3       2       0         2        3    0.03598    0.03913       0   0.00000    2.745
+      4600         0         3       2       0         2        3    0.03690    0.03913       0   0.00000    2.745
+      4700         0         3       2       0         2        3    0.03785    0.03913       0   0.00000    2.745
+      4800         0         3       2       0         2        3    0.03883    0.03913       0   0.00000    2.745
+      4900         0         3       2       0         2        3    0.03984    0.03913       0   0.00000    2.745
+      5000         0         3       2       0         2        3    0.04096    0.03913       0   0.00000    2.745
+      5100         0         3       2       0         2        3    0.04211    0.03913       0   0.00000    2.745
+      5200         0         3       2       0         2        3    0.04328    0.03913       0   0.00000    2.745
+      5300         0         3       2       0         2        3    0.04446    0.03913       0   0.00000    2.745
+      5400         0         3       2       0         2        3    0.04567    0.03913       0   0.00000    2.745
+      5500         0         3       2       0         2        3    0.04691    0.03913       0   0.00000    2.745
+      5600         0         3       2       0         2        3    0.04817    0.03913       0   0.00000    2.745
+      5700         0         3       2       0         2        3    0.04946    0.03913       0   0.00000    2.745
+      5800         0         3       2       0         2        3    0.05079    0.03913       0   0.00000    2.745
+      5900         0         3       2       0         2        3    0.05214    0.03913       0   0.00000    2.745
+      6000         0         3       2       0         2        3    0.05354    0.03913       0   0.00000    2.745
+      6100         0         3       2       0         2        3    0.05496    0.03913       0   0.00000    2.745
+      6200         0         3       2       0         2        3    0.05643    0.03913       0   0.00000    2.745
+      6300         0         3       2       0         2        3    0.05793    0.03913       0   0.00000    2.745
+      6400         0         3       2       0         2        3    0.05947    0.03913       0   0.00000    2.745
+      6500         0         3       2       0         2        3    0.06105    0.03913       0   0.00000    2.745
+      6600         0         3       2       0         2        3    0.06268    0.03913       0   0.00000    2.745
+      6700         0         3       2       0         2        3    0.06434    0.03913       0   0.00000    2.745
+      6800         0         3       2       0         2        3    0.06605    0.03913       0   0.00000    2.745
+      6900         0         3       2       0         2        3    0.06781    0.03913       0   0.00000    2.745
+   t  6951.10 s  loss: bloomcrown #10 is gone
+      7000         0         2       2       1         1        3    0.06961    0.03913       0   0.00000    2.745
+      7100         0         2       2       1         1        3    0.07146    0.03913       0   0.00000    2.745
+      7200         0         2       2       1         1        3    0.07336    0.03913       0   0.00000    2.745
+      7300         0         2       2       1         1        3    0.07530    0.03913       0   0.00000    2.745
+      7400         0         2       2       1         1        3    0.07730    0.03913       0   0.00000    2.745
+      7500         0         2       2       1         1        3    0.07936    0.03913       0   0.00000    2.745
+      7600         0         2       2       1         1        3    0.08146    0.03913       0   0.00000    2.745
+      7700         0         2       2       1         1        3    0.08362    0.03913       0   0.00000    2.745
+      7800         0         2       2       1         1        3    0.08584    0.03913       0   0.00000    2.745
+      7900         0         2       2       1         1        3    0.08812    0.03913       0   0.00000    2.745
+      8000         0         2       2       1         1        3    0.09045    0.03913       0   0.00000    2.745
+      8100         0         2       2       1         1        3    0.09285    0.03913       0   0.00000    2.745
+      8200         0         2       2       1         1        3    0.09531    0.03913       0   0.00000    2.745
+      8300         0         2       2       1         1        3    0.09784    0.03913       0   0.00000    2.745
+      8400         0         2       2       1         1        3    0.10043    0.03913       0   0.00000    2.745
+      8500         0         2       2       1         1        3    0.10309    0.03913       0   0.00000    2.745
+      8600         0         2       2       1         1        3    0.10582    0.03913       0   0.00000    2.745
+      8700         0         2       2       1         1        3    0.10862    0.03913       0   0.00000    2.745
+      8800         0         2       2       1         1        3    0.11149    0.03913       0   0.00000    2.745
+      8900         0         2       2       1         1        3    0.11444    0.03913       0   0.00000    2.745
+      9000         0         2       2       1         1        3    0.11747    0.03913       0   0.00000    2.745
+      9100         0         2       2       1         1        3    0.12057    0.03913       0   0.00000    2.745
+      9200         0         2       2       1         1        3    0.12376    0.03913       0   0.00000    2.745
+      9300         0         2       2       1         1        3    0.12703    0.03913       0   0.00000    2.745
+      9400         0         2       2       1         1        3    0.13038    0.03913       0   0.00000    2.745
+      9500         0         2       2       1         1        3    0.13383    0.03913       0   0.00000    2.745
+      9600         0         2       2       1         1        3    0.13736    0.03913       0   0.00000    2.745
+      9700         0         2       2       1         1        3    0.14098    0.03913       0   0.00000    2.745
+      9800         0         2       2       1         1        3    0.14470    0.03913       0   0.00000    2.745
+      9900         0         2       2       1         1        3    0.14852    0.03913       0   0.00000    2.745
+     10000         0         2       2       1         1        3    0.15243    0.03913       0   0.00000    2.745
+     10100         0         2       2       1         1        3    0.15645    0.03913       0   0.00000    2.745
+     10200         0         2       2       1         1        3    0.16057    0.03913       0   0.00000    2.745
+     10300         0         2       2       1         1        3    0.16480    0.03913       0   0.00000    2.745
+     10400         0         2       2       1         1        3    0.16914    0.03913       0   0.00000    2.745
+     10500         0         2       2       1         1        3    0.17358    0.03913       0   0.00000    2.745
+     10600         0         2       2       1         1        3    0.17815    0.03913       0   0.00000    2.745
+     10700         0         2       2       1         1        3    0.18283    0.03913       0   0.00000    2.745
+     10800         0         2       2       1         1        3    0.18764    0.03913       0   0.00000    2.745
+     10900         0         2       2       1         1        3    0.19256    0.03913       0   0.00000    2.745
+     11000         0         2       2       1         1        3    0.19762    0.03913       0   0.00000    2.745
+     11100         0         2       2       1         1        3    0.20280    0.03913       0   0.00000    2.746
+     11200         0         2       2       1         1        3    0.20812    0.03913       0   0.00000    2.745
+     11300         0         2       2       1         1        3    0.21357    0.03913       0   0.00000    2.745
+     11400         0         2       2       1         1        3    0.21917    0.03913       0   0.00000    2.745
+     11500         0         2       2       1         1        3    0.22490    0.03913       0   0.00000    2.745
+     11600         0         2       2       1         1        3    0.23079    0.03913       0   0.00000    2.745
+     11700         0         2       2       1         1        3    0.23682    0.03913       0   0.00000    2.745
+     11800         0         2       2       1         1        3    0.24301    0.03913       0   0.00000    2.745
+     11900         0         2       2       1         1        3    0.24936    0.03913       0   0.00000    2.745
+     12000         0         2       2       1         1        3    0.25587    0.03913       0   0.00000    2.745
+   water: water m3/s over 12000 s: rain in 0.038400, outlet 0.038396, evaporation 0.000000, transpiration 0.00000288, storage change +0.000001 (residual -2.26e-10); head 2.745 m (-0.0003 m), stored 239.0809 m3
+   residuals: organic -3.78e-12, mineral -1.82e-12, energy -7.56e-12 (stocks 1.4020, 3071.9929, 2.8041)
+   1146.4 s of wall time for 240000 coupled ticks
+   by identity: 2 descendant birth(s), 1 of them lost before the end, 1 surviving; the introduced founder survived the whole window
+     #8 (introduced founder): funded 0.18913 over 56561 ticks, 3 deliveries, reached donor size at t 0.05 s
+   surviving descendants against donor_min 0.3 — mean light, moisture and (1 - aeration stress) are the stand's own published state over its life; the Monod factor is this harness dividing its site's published mineral pool by `pool + nutrient_half`, not a model output:
+        id         column      wood of W_est born (s)   light  moisture unstress   monod
+         9   (103,22) y21   0.25587   85.3 %    600.1   0.884     0.802    1.000   0.665
+   the largest descendant holds 0.25587 of the 0.3 it needs (85.3 %); a newborn at the **growth cap** covers that gap in 54163 ticks, so this arm's own descendants are slower than the cap by whatever their multipliers above say
+   first birth at t 600.10 s, and **no descendant reached donor size**: the replacement is NOT completed and this arm is **unresolved at the stopping budget** (12000 s against an earliest-possible bound of 3308.25 s — long enough in principle, so this is a measurement and not an arithmetic impossibility, and it is still not evidence of exclusion). A birth is not a generation.
+
+---------- site 3 of 3: (12,2) y20 — 13 eligible recipients of 24 candidate faces in hop
+
+-- arm: resident plus newcomer
+   one bloomcrown founder #8 at (12,2) y20: wood 0.3, foliage 0.6000, reserve 0.1500, parcel 0.0000; bank of its own species on 0 sites (0.00000)
+   gates at the declared site: mean pore 0.350 (>= 0.10), saturated fraction 0.133 (<= 0.25), water 0.000 m (<= 0.05), sky 0.916 (>= 0.60), 15 soil voxels, dead wood in the box 0.000 (>= 0.000)
+     t (s)  resident  newcomer  births  losses survivors   deliv. max desc.W fnd.parcel   banks    banked head (m)
+   t     0.05 s  donor size: bloomcrown #8 reached wood 0.30001 >= donor_min 0.3 — it can now set material aside (this is the introduced founder, not a descendant)
+       100        16         1       0       0         0        0    0.00000    0.01667       0   0.00000    2.746
+       200        16         1       0       0         0        0    0.00000    0.03333       0   0.00000    2.746
+       300        16         1       0       0         0        0    0.00000    0.05000       0   0.00000    2.746
+   t   300.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001008 of mineral with it) to (11,2) y20 — the introduced founder donating again, which is not descendant reproduction
+   t   300.10 s  birth: bloomcrown #17 at (11,2) y20, wood 0.02000
+       400        23         2       1       0         1        1    0.02000    0.01667       0   0.00000    2.746
+       500        23         2       1       0         1        1    0.02000    0.03333       0   0.00000    2.746
+       600        23         2       1       0         1        1    0.02000    0.05000       0   0.00000    2.746
+   t   600.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001015 of mineral with it) to (10,2) y20 — the introduced founder donating again, which is not descendant reproduction
+   t   600.10 s  birth: bloomcrown #26 at (10,2) y20, wood 0.02000
+       700        30         3       2       0         2        2    0.02000    0.01667       0   0.00000    2.746
+       800        30         3       2       0         2        2    0.02000    0.03333       0   0.00000    2.746
+       900        30         3       2       0         2        2    0.02000    0.05000       0   0.00000    2.746
+   t   900.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001021 of mineral with it) to (14,0) y19 — the introduced founder donating again, which is not descendant reproduction
+   t   900.10 s  birth: bloomcrown #34 at (14,0) y19, wood 0.02000
+      1000        34         4       3       0         3        3    0.02000    0.01667       0   0.00000    2.746
+      1100        35         4       3       0         3        3    0.02000    0.03333       0   0.00000    2.746
+      1200        35         4       3       0         3        3    0.02000    0.05000       0   0.00000    2.746
+   t  1200.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001025 of mineral with it) to (13,0) y19 — the introduced founder donating again, which is not descendant reproduction
+   t  1200.10 s  birth: bloomcrown #39 at (13,0) y19, wood 0.02000
+      1300        40         5       4       0         4        4    0.02000    0.01667       0   0.00000    2.746
+      1400        40         5       4       0         4        4    0.02000    0.03333       0   0.00000    2.746
+      1500        40         5       4       0         4        4    0.02000    0.05000       0   0.00000    2.746
+   t  1500.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001028 of mineral with it) to (14,0) y19 — the introduced founder donating again, which is not descendant reproduction
+      1600        43         5       4       0         4        5    0.02000    0.01667       1   0.04524    2.746
+      1700        43         5       4       0         4        5    0.02000    0.03333       1   0.04094    2.746
+      1800        43         5       4       0         4        5    0.02000    0.05000       1   0.03704    2.746
+   t  1800.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001031 of mineral with it) to (10,2) y20 — the introduced founder donating again, which is not descendant reproduction
+      1900        46         5       4       0         4        6    0.02000    0.01667       2   0.07876    2.746
+      2000        46         5       4       0         4        6    0.02001    0.03333       2   0.07127    2.746
+      2100        46         5       4       0         4        6    0.02008    0.05000       2   0.06448    2.746
+   t  2100.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001033 of mineral with it) to (10,0) y18 — the introduced founder donating again, which is not descendant reproduction
+   t  2100.10 s  birth: bloomcrown #52 at (10,0) y18, wood 0.02000
+      2200        50         6       5       0         5        7    0.02023    0.01667       1   0.03352    2.746
+      2300        50         6       5       0         5        7    0.02044    0.03333       1   0.03033    2.746
+      2400        50         6       5       0         5        7    0.02069    0.05000       1   0.02744    2.746
+   t  2400.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001035 of mineral with it) to (10,3) y20 — the introduced founder donating again, which is not descendant reproduction
+      2500        53         6       5       0         5        8    0.02097    0.01667       1   0.04524    2.746
+      2600        53         6       5       0         5        8    0.02129    0.03333       1   0.04094    2.746
+      2700        53         6       5       0         5        8    0.02162    0.05000       1   0.03704    2.746
+   t  2700.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001036 of mineral with it) to (12,3) y20 — the introduced founder donating again, which is not descendant reproduction
+      2800        56         6       5       0         5        9    0.02198    0.01667       2   0.07876    2.746
+      2900        56         6       5       0         5        9    0.02236    0.03333       2   0.07127    2.746
+      3000        56         6       5       0         5        9    0.02275    0.05000       2   0.06448    2.746
+   t  3000.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001037 of mineral with it) to (13,3) y20 — the introduced founder donating again, which is not descendant reproduction
+      3100        57         6       5       0         5       10    0.02315    0.01667       2   0.07876    2.746
+      3200        57         6       5       0         5       10    0.02357    0.03333       2   0.07127    2.746
+      3300        57         6       5       0         5       10    0.02400    0.05000       2   0.06448    2.746
+   t  3300.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001038 of mineral with it) to (11,0) y19 — the introduced founder donating again, which is not descendant reproduction
+   t  3300.10 s  birth: bloomcrown #63 at (11,0) y19, wood 0.02000
+      3400        58         7       6       0         6       11    0.02444    0.01667       1   0.03352    2.746
+      3500        58         7       6       0         6       11    0.02488    0.03333       1   0.03033    2.746
+      3600        58         7       6       0         6       11    0.02534    0.05000       1   0.02744    2.746
+   t  3600.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (11,1) y19 — the introduced founder donating again, which is not descendant reproduction
+   t  3600.10 s  birth: bloomcrown #65 at (11,1) y19, wood 0.02000
+      3700        58         8       7       0         7       12    0.02581    0.01667       0   0.00000    2.746
+      3800        58         8       7       0         7       12    0.02629    0.03333       0   0.00000    2.746
+      3900        58         8       7       0         7       12    0.02678    0.05000       0   0.00000    2.746
+   t  3900.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (12,3) y20 — the introduced founder donating again, which is not descendant reproduction
+      4000        59         8       7       0         7       13    0.02727    0.01667       1   0.04524    2.746
+      4100        59         8       7       0         7       13    0.02778    0.03333       1   0.04094    2.746
+      4200        59         8       7       0         7       13    0.02830    0.05000       1   0.03704    2.746
+   t  4200.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (14,0) y19 — the introduced founder donating again, which is not descendant reproduction
+      4300        59         8       7       0         7       14    0.02882    0.01667       2   0.07876    2.746
+      4400        59         8       7       0         7       14    0.02936    0.03333       2   0.07127    2.746
+      4500        59         8       7       0         7       14    0.02990    0.05000       2   0.06448    2.746
+   t  4500.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (12,0) y19 — the introduced founder donating again, which is not descendant reproduction
+   t  4500.10 s  birth: bloomcrown #67 at (12,0) y19, wood 0.02000
+      4600        59         9       8       0         8       15    0.03046    0.01667       1   0.03352    2.746
+      4700        59         9       8       0         8       15    0.03103    0.03333       1   0.03033    2.746
+      4800        59         9       8       0         8       15    0.03160    0.05000       1   0.02744    2.746
+   t  4800.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (13,2) y20 — the introduced founder donating again, which is not descendant reproduction
+   t  4800.10 s  birth: bloomcrown #68 at (13,2) y20, wood 0.02000
+      4900        59        10       9       0         9       16    0.03219    0.01667       0   0.00000    2.746
+      5000        59        10       9       0         9       16    0.03279    0.03333       0   0.00000    2.746
+      5100        59        10       9       0         9       16    0.03340    0.05000       0   0.00000    2.746
+   t  5100.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (14,0) y19 — the introduced founder donating again, which is not descendant reproduction
+      5200        60        10       9       0         9       17    0.03402    0.01667       1   0.04524    2.746
+      5300        59        10       9       0         9       17    0.03465    0.03333       1   0.04094    2.746
+      5400        59        10       9       0         9       17    0.03530    0.05000       1   0.03704    2.746
+   t  5400.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (10,2) y20 — the introduced founder donating again, which is not descendant reproduction
+      5500        59        10       9       0         9       18    0.03596    0.01667       2   0.07876    2.746
+      5600        59        10       9       0         9       18    0.03662    0.03333       2   0.07127    2.746
+      5700        59        10       9       0         9       18    0.03731    0.05000       2   0.06448    2.746
+   t  5700.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (10,2) y20 — the introduced founder donating again, which is not descendant reproduction
+      5800        59        10       9       0         9       19    0.03800    0.01667       1   0.07876    2.746
+      5900        59        10       9       0         9       19    0.03871    0.03333       1   0.07127    2.746
+      6000        62        10       9       0         9       19    0.03943    0.05000       1   0.06448    2.746
+   t  6000.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (10,2) y20 — the introduced founder donating again, which is not descendant reproduction
+      6100        63        10       9       0         9       20    0.04016    0.01667       1   0.07876    2.746
+      6200        63        10       9       0         9       20    0.04091    0.03333       1   0.07127    2.746
+   t  6291.75 s  loss: bloomcrown #39 is gone
+      6300        68         9       9       1         8       20    0.04167    0.05000       1   0.06448    2.746
+   t  6300.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (10,4) y21 — the introduced founder donating again, which is not descendant reproduction
+      6400        70         9       9       1         8       21    0.04244    0.01667       2   0.07876    2.746
+      6500        70         9       9       1         8       21    0.04323    0.03333       2   0.07127    2.746
+      6600        72         9       9       1         8       21    0.04404    0.05000       2   0.06448    2.746
+   t  6600.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (11,4) y21 — the introduced founder donating again, which is not descendant reproduction
+      6700        74         9       9       1         8       22    0.04486    0.01667       2   0.07876    2.746
+      6800        75         9       9       1         8       22    0.04569    0.03333       2   0.07127    2.746
+      6900        80         9       9       1         8       22    0.04654    0.05000       2   0.06448    2.746
+   t  6900.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (10,3) y20 — the introduced founder donating again, which is not descendant reproduction
+      7000        83         9       9       1         8       23    0.04741    0.01667       2   0.07876    2.746
+      7100        84         9       9       1         8       23    0.04830    0.03333       2   0.07127    2.746
+      7200        89         9       9       1         8       23    0.04920    0.05000       2   0.06448    2.746
+   t  7200.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (13,1) y19 — the introduced founder donating again, which is not descendant reproduction
+   t  7200.10 s  birth: bloomcrown #101 at (13,1) y19, wood 0.02000
+      7300        92        10      10       1         9       24    0.05011    0.01667       1   0.03352    2.746
+      7400        93        10      10       1         9       24    0.05105    0.03333       1   0.03033    2.746
+      7500        95        10      10       1         9       24    0.05200    0.05000       1   0.02744    2.746
+   t  7500.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (10,0) y18 — the introduced founder donating again, which is not descendant reproduction
+      7600        99        10      10       1         9       25    0.05296    0.01667       1   0.04524    2.746
+      7700       101        10      10       1         9       25    0.05395    0.03333       1   0.04094    2.746
+      7800       107        10      10       1         9       25    0.05496    0.05000       1   0.03704    2.746
+   t  7800.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (10,0) y18 — the introduced founder donating again, which is not descendant reproduction
+      7900       110        10      10       1         9       26    0.05598    0.01667       1   0.07876    2.746
+      8000       111        10      10       1         9       26    0.05702    0.03333       1   0.07127    2.746
+      8100       115        10      10       1         9       26    0.05808    0.05000       1   0.06448    2.746
+   t  8100.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (12,4) y21 — the introduced founder donating again, which is not descendant reproduction
+      8200       118        10      10       1         9       27    0.05917    0.01667       2   0.07876    2.746
+      8300       118        10      10       1         9       27    0.06027    0.03333       2   0.07127    2.746
+      8400       122        10      10       1         9       27    0.06139    0.05000       2   0.06448    2.746
+   t  8400.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (10,1) y19 — the introduced founder donating again, which is not descendant reproduction
+   t  8400.10 s  birth: bloomcrown #135 at (10,1) y19, wood 0.02000
+      8500       125        11      11       1        10       28    0.06253    0.01667       1   0.03352    2.746
+      8600       125        11      11       1        10       28    0.06369    0.03333       1   0.03033    2.746
+   t  8623.15 s  loss: bloomcrown #63 is gone
+      8700       130        10      11       2         9       28    0.06488    0.05000       1   0.02744    2.746
+   t  8700.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (10,0) y18 — the introduced founder donating again, which is not descendant reproduction
+      8800       133        10      11       2         9       29    0.06609    0.01667       1   0.04524    2.746
+      8900       134        10      11       2         9       29    0.06732    0.03333       1   0.04094    2.746
+      9000       137        10      11       2         9       29    0.06857    0.05000       1   0.03704    2.746
+   t  9000.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (14,0) y19 — the introduced founder donating again, which is not descendant reproduction
+      9100       139        10      11       2         9       30    0.06984    0.01667       2   0.07876    2.746
+      9200       140        10      11       2         9       30    0.07114    0.03333       2   0.07127    2.747
+      9300       142        10      11       2         9       30    0.07246    0.05000       2   0.06448    2.746
+   t  9300.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (13,2) y20 — the introduced founder donating again, which is not descendant reproduction
+      9400       143        10      11       2         9       31    0.07381    0.01667       2   0.07876    2.746
+      9500       144        10      11       2         9       31    0.07518    0.03333       2   0.07127    2.747
+      9600       147        10      11       2         9       31    0.07658    0.05000       2   0.06448    2.746
+   t  9600.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (14,2) y20 — the introduced founder donating again, which is not descendant reproduction
+      9700       147        10      11       2         9       32    0.07800    0.01667       2   0.07876    2.747
+      9800       148        10      11       2         9       32    0.07945    0.03333       2   0.07127    2.746
+   t  9823.15 s  loss: bloomcrown #67 is gone
+      9900       149         9      11       3         8       32    0.08092    0.05000       2   0.06448    2.746
+   t  9900.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (13,4) y21 — the introduced founder donating again, which is not descendant reproduction
+     10000       149         9      11       3         8       33    0.08243    0.01667       2   0.07876    2.746
+     10100       151         9      11       3         8       33    0.08396    0.03333       2   0.07127    2.746
+     10200       151         9      11       3         8       33    0.08551    0.05000       2   0.06448    2.746
+   t 10200.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (10,3) y20 — the introduced founder donating again, which is not descendant reproduction
+     10300       156         9      11       3         8       34    0.08710    0.01667       2   0.07876    2.746
+     10400       157         9      11       3         8       34    0.08872    0.03333       2   0.07127    2.746
+     10500       158         9      11       3         8       34    0.09036    0.05000       2   0.06448    2.746
+   t 10500.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (14,2) y20 — the introduced founder donating again, which is not descendant reproduction
+     10600       159         9      11       3         8       35    0.09204    0.01667       2   0.07876    2.746
+     10700       159         9      11       3         8       35    0.09374    0.03333       2   0.07127    2.746
+     10800       162         9      11       3         8       35    0.09548    0.05000       2   0.06448    2.747
+   t 10800.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (11,2) y20 — the introduced founder donating again, which is not descendant reproduction
+     10900       162         9      11       3         8       36    0.09725    0.01667       2   0.07876    2.747
+     11000       161         9      11       3         8       36    0.09905    0.03333       2   0.07127    2.747
+     11100       162         9      11       3         8       36    0.10089    0.05000       2   0.06448    2.746
+   t 11100.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (14,3) y21 — the introduced founder donating again, which is not descendant reproduction
+     11200       162         9      11       3         8       37    0.10275    0.01667       2   0.07876    2.747
+     11300       161         9      11       3         8       37    0.10466    0.03333       2   0.07127    2.747
+     11400       162         9      11       3         8       37    0.10659    0.05000       2   0.06448    2.747
+   t 11400.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (11,1) y19 — the introduced founder donating again, which is not descendant reproduction
+   t 11481.25 s  loss: bloomcrown #101 is gone
+     11500       162         8      11       4         7       38    0.10856    0.01667       2   0.07876    2.747
+     11600       162         8      11       4         7       38    0.11057    0.03333       2   0.07127    2.747
+     11700       162         8      11       4         7       38    0.11262    0.05000       2   0.06448    2.747
+   t 11700.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (11,0) y19 — the introduced founder donating again, which is not descendant reproduction
+   t 11700.10 s  birth: bloomcrown #179 at (11,0) y19, wood 0.02000
+     11800       162         9      12       4         8       39    0.11470    0.01667       1   0.03352    2.747
+     11900       161         9      12       4         8       39    0.11682    0.03333       1   0.03033    2.747
+     12000       162         9      12       4         8       39    0.11898    0.05000       1   0.02744    2.747
+   water: water m3/s over 12000 s: rain in 0.038400, outlet 0.037825, evaporation 0.000000, transpiration 0.00058864, storage change -0.000013 (residual -2.26e-10); head 2.747 m (+0.0010 m), stored 238.9054 m3
+   residuals: organic -1.71e-8, mineral -1.58e-10, energy -3.42e-8 (stocks 219.9648, 3072.1890, 439.9295)
+   1315.7 s of wall time for 240000 coupled ticks
+   by identity: 12 descendant birth(s), 4 of them lost before the end, 8 surviving; the introduced founder survived the whole window
+     #8 (introduced founder): funded 2.00000 over 240000 ticks, 39 deliveries, reached donor size at t 0.05 s
+   surviving descendants against donor_min 0.3 — mean light, moisture and (1 - aeration stress) are the stand's own published state over its life; the Monod factor is this harness dividing its site's published mineral pool by `pool + nutrient_half`, not a model output:
+        id         column      wood of W_est born (s)   light  moisture unstress   monod
+        17     (11,2) y20   0.02849    9.5 %    300.1   0.854     0.643    1.000   0.666
+        26     (10,2) y20   0.11898   39.7 %    600.1   0.981     0.660    1.000   0.666
+        34     (14,0) y19   0.02527    8.4 %    900.1   0.961     0.567    1.000   0.667
+        52     (10,0) y18   0.04176   13.9 %   2100.1   0.832     0.702    1.000   0.667
+        65     (11,1) y19   0.02000    6.7 %   3600.1   0.901     0.516    1.000   0.667
+        68     (13,2) y20   0.05946   19.8 %   4800.1   0.834     0.787    1.000   0.666
+       135     (10,1) y19   0.02155    7.2 %   8400.1   0.924     0.643    1.000   0.667
+       179     (11,0) y19   0.02000    6.7 %  11700.1   0.981     0.405    1.000   0.667
+   the largest descendant holds 0.11898 of the 0.3 it needs (39.7 %); a newborn at the **growth cap** covers that gap in 54163 ticks, so this arm's own descendants are slower than the cap by whatever their multipliers above say
+   first birth at t 300.10 s, and **no descendant reached donor size**: the replacement is NOT completed and this arm is **unresolved at the stopping budget** (12000 s against an earliest-possible bound of 3308.25 s — long enough in principle, so this is a measurement and not an arithmetic impossibility, and it is still not evidence of exclusion). A birth is not a generation.
+
+-- arm: newcomer with the resident excluded
+   excluded umbrellafrond: 8 of 8 stands cleared, 0 of 0 seed banks removed, all of it booked out as removed_* (organic +9.7313, mineral +0.1961)
+   retained and matched: stored water 239.0644 -> 239.0644 m3, head 2.746 -> 2.746 m, litter 1.25132 -> 1.25132, dead wood 0.00000 -> 0.00000, soil mineral 3071.9468 -> 3071.9468, mineral imported 3072.2 -> 3072.2
+   one bloomcrown founder #8 at (12,2) y20: wood 0.3, foliage 0.6000, reserve 0.1500, parcel 0.0000; bank of its own species on 0 sites (0.00000)
+   gates at the declared site: mean pore 0.350 (>= 0.10), saturated fraction 0.133 (<= 0.25), water 0.000 m (<= 0.05), sky 0.916 (>= 0.60), 15 soil voxels, dead wood in the box 0.000 (>= 0.000)
+     t (s)  resident  newcomer  births  losses survivors   deliv. max desc.W fnd.parcel   banks    banked head (m)
+   t     0.05 s  donor size: bloomcrown #8 reached wood 0.30001 >= donor_min 0.3 — it can now set material aside (this is the introduced founder, not a descendant)
+       100         0         1       0       0         0        0    0.00000    0.01667       0   0.00000    2.746
+       200         0         1       0       0         0        0    0.00000    0.03333       0   0.00000    2.746
+       300         0         1       0       0         0        0    0.00000    0.05000       0   0.00000    2.746
+   t   300.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001008 of mineral with it) to (11,2) y20 — the introduced founder donating again, which is not descendant reproduction
+   t   300.10 s  birth: bloomcrown #9 at (11,2) y20, wood 0.02000
+       400         0         2       1       0         1        1    0.02000    0.01667       0   0.00000    2.746
+       500         0         2       1       0         1        1    0.02000    0.03333       0   0.00000    2.746
+       600         0         2       1       0         1        1    0.02000    0.05000       0   0.00000    2.746
+   t   600.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001015 of mineral with it) to (10,2) y20 — the introduced founder donating again, which is not descendant reproduction
+   t   600.10 s  birth: bloomcrown #10 at (10,2) y20, wood 0.02000
+       700         0         3       2       0         2        2    0.02000    0.01667       0   0.00000    2.746
+       800         0         3       2       0         2        2    0.02000    0.03333       0   0.00000    2.745
+       900         0         3       2       0         2        2    0.02000    0.05000       0   0.00000    2.746
+   t   900.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001021 of mineral with it) to (14,0) y19 — the introduced founder donating again, which is not descendant reproduction
+   t   900.10 s  birth: bloomcrown #11 at (14,0) y19, wood 0.02000
+      1000         0         4       3       0         3        3    0.02000    0.01667       0   0.00000    2.746
+      1100         0         4       3       0         3        3    0.02000    0.03333       0   0.00000    2.745
+      1200         0         4       3       0         3        3    0.02000    0.05000       0   0.00000    2.745
+   t  1200.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001025 of mineral with it) to (13,0) y19 — the introduced founder donating again, which is not descendant reproduction
+   t  1200.10 s  birth: bloomcrown #12 at (13,0) y19, wood 0.02000
+      1300         0         5       4       0         4        4    0.02000    0.01667       0   0.00000    2.746
+      1400         0         5       4       0         4        4    0.02000    0.03333       0   0.00000    2.745
+      1500         0         5       4       0         4        4    0.02000    0.05000       0   0.00000    2.745
+   t  1500.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001028 of mineral with it) to (14,0) y19 — the introduced founder donating again, which is not descendant reproduction
+      1600         0         5       4       0         4        5    0.02000    0.01667       1   0.04524    2.745
+      1700         0         5       4       0         4        5    0.02000    0.03333       1   0.04094    2.745
+      1800         0         5       4       0         4        5    0.02000    0.05000       1   0.03704    2.745
+   t  1800.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001031 of mineral with it) to (10,2) y20 — the introduced founder donating again, which is not descendant reproduction
+      1900         0         5       4       0         4        6    0.02000    0.01667       2   0.07876    2.745
+      2000         0         5       4       0         4        6    0.02001    0.03333       2   0.07127    2.745
+      2100         0         5       4       0         4        6    0.02008    0.05000       2   0.06448    2.745
+   t  2100.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001033 of mineral with it) to (10,0) y18 — the introduced founder donating again, which is not descendant reproduction
+   t  2100.10 s  birth: bloomcrown #13 at (10,0) y18, wood 0.02000
+      2200         0         6       5       0         5        7    0.02023    0.01667       1   0.03352    2.745
+      2300         0         6       5       0         5        7    0.02044    0.03333       1   0.03033    2.745
+      2400         0         6       5       0         5        7    0.02069    0.05000       1   0.02744    2.746
+   t  2400.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001035 of mineral with it) to (10,3) y20 — the introduced founder donating again, which is not descendant reproduction
+      2500         0         6       5       0         5        8    0.02097    0.01667       1   0.04524    2.745
+      2600         0         6       5       0         5        8    0.02129    0.03333       1   0.04094    2.745
+      2700         0         6       5       0         5        8    0.02162    0.05000       1   0.03704    2.745
+   t  2700.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001036 of mineral with it) to (12,3) y20 — the introduced founder donating again, which is not descendant reproduction
+      2800         0         6       5       0         5        9    0.02198    0.01667       2   0.07876    2.745
+      2900         0         6       5       0         5        9    0.02236    0.03333       2   0.07127    2.746
+      3000         0         6       5       0         5        9    0.02275    0.05000       2   0.06448    2.745
+   t  3000.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001037 of mineral with it) to (13,3) y20 — the introduced founder donating again, which is not descendant reproduction
+      3100         0         6       5       0         5       10    0.02315    0.01667       2   0.07876    2.745
+      3200         0         6       5       0         5       10    0.02357    0.03333       2   0.07127    2.745
+      3300         0         6       5       0         5       10    0.02400    0.05000       2   0.06448    2.745
+   t  3300.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001038 of mineral with it) to (11,0) y19 — the introduced founder donating again, which is not descendant reproduction
+   t  3300.10 s  birth: bloomcrown #14 at (11,0) y19, wood 0.02000
+      3400         0         7       6       0         6       11    0.02444    0.01667       1   0.03352    2.745
+      3500         0         7       6       0         6       11    0.02488    0.03333       1   0.03033    2.746
+      3600         0         7       6       0         6       11    0.02534    0.05000       1   0.02744    2.745
+   t  3600.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (11,1) y19 — the introduced founder donating again, which is not descendant reproduction
+   t  3600.10 s  birth: bloomcrown #15 at (11,1) y19, wood 0.02000
+      3700         0         8       7       0         7       12    0.02581    0.01667       0   0.00000    2.745
+      3800         0         8       7       0         7       12    0.02629    0.03333       0   0.00000    2.745
+      3900         0         8       7       0         7       12    0.02678    0.05000       0   0.00000    2.745
+   t  3900.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (12,3) y20 — the introduced founder donating again, which is not descendant reproduction
+      4000         0         8       7       0         7       13    0.02727    0.01667       1   0.04524    2.745
+      4100         0         8       7       0         7       13    0.02778    0.03333       1   0.04094    2.746
+      4200         0         8       7       0         7       13    0.02830    0.05000       1   0.03704    2.745
+   t  4200.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (14,0) y19 — the introduced founder donating again, which is not descendant reproduction
+      4300         0         8       7       0         7       14    0.02882    0.01667       2   0.07876    2.745
+      4400         0         8       7       0         7       14    0.02936    0.03333       2   0.07127    2.745
+      4500         0         8       7       0         7       14    0.02990    0.05000       2   0.06448    2.745
+   t  4500.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (12,0) y19 — the introduced founder donating again, which is not descendant reproduction
+   t  4500.10 s  birth: bloomcrown #16 at (12,0) y19, wood 0.02000
+      4600         0         9       8       0         8       15    0.03046    0.01667       1   0.03352    2.745
+      4700         0         9       8       0         8       15    0.03103    0.03333       1   0.03033    2.745
+      4800         0         9       8       0         8       15    0.03160    0.05000       1   0.02744    2.745
+   t  4800.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (13,2) y20 — the introduced founder donating again, which is not descendant reproduction
+   t  4800.10 s  birth: bloomcrown #17 at (13,2) y20, wood 0.02000
+      4900         0        10       9       0         9       16    0.03219    0.01667       0   0.00000    2.746
+      5000         0        10       9       0         9       16    0.03279    0.03333       0   0.00000    2.745
+      5100         0        10       9       0         9       16    0.03340    0.05000       0   0.00000    2.745
+   t  5100.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (14,0) y19 — the introduced founder donating again, which is not descendant reproduction
+      5200         0        10       9       0         9       17    0.03402    0.01667       1   0.04524    2.745
+      5300         0        10       9       0         9       17    0.03465    0.03333       1   0.04094    2.745
+      5400         0        10       9       0         9       17    0.03530    0.05000       1   0.03704    2.745
+   t  5400.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (10,2) y20 — the introduced founder donating again, which is not descendant reproduction
+      5500         0        10       9       0         9       18    0.03596    0.01667       2   0.07876    2.745
+      5600         0        10       9       0         9       18    0.03662    0.03333       2   0.07127    2.745
+      5700         0        10       9       0         9       18    0.03731    0.05000       2   0.06448    2.745
+   t  5700.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (10,2) y20 — the introduced founder donating again, which is not descendant reproduction
+      5800         0        10       9       0         9       19    0.03800    0.01667       1   0.07876    2.745
+      5900         0        10       9       0         9       19    0.03871    0.03333       1   0.07127    2.745
+      6000         0        10       9       0         9       19    0.03943    0.05000       1   0.06448    2.745
+   t  6000.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (10,2) y20 — the introduced founder donating again, which is not descendant reproduction
+      6100         0        10       9       0         9       20    0.04016    0.01667       1   0.07876    2.745
+      6200         0        10       9       0         9       20    0.04091    0.03333       1   0.07127    2.745
+   t  6291.75 s  loss: bloomcrown #12 is gone
+      6300         0         9       9       1         8       20    0.04167    0.05000       1   0.06448    2.745
+   t  6300.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (10,4) y21 — the introduced founder donating again, which is not descendant reproduction
+      6400         0         9       9       1         8       21    0.04244    0.01667       2   0.07876    2.745
+      6500         0         9       9       1         8       21    0.04323    0.03333       2   0.07127    2.746
+      6600         0         9       9       1         8       21    0.04404    0.05000       2   0.06448    2.745
+   t  6600.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (11,4) y21 — the introduced founder donating again, which is not descendant reproduction
+      6700         0         9       9       1         8       22    0.04486    0.01667       2   0.07876    2.745
+      6800         0         9       9       1         8       22    0.04569    0.03333       2   0.07127    2.746
+      6900         0         9       9       1         8       22    0.04654    0.05000       2   0.06448    2.745
+   t  6900.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (10,3) y20 — the introduced founder donating again, which is not descendant reproduction
+      7000         0         9       9       1         8       23    0.04741    0.01667       2   0.07876    2.745
+      7100         0         9       9       1         8       23    0.04830    0.03333       2   0.07127    2.745
+      7200         0         9       9       1         8       23    0.04920    0.05000       2   0.06448    2.746
+   t  7200.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (13,1) y19 — the introduced founder donating again, which is not descendant reproduction
+   t  7200.10 s  birth: bloomcrown #18 at (13,1) y19, wood 0.02000
+      7300         0        10      10       1         9       24    0.05011    0.01667       1   0.03352    2.745
+      7400         0        10      10       1         9       24    0.05105    0.03333       1   0.03033    2.745
+      7500         0        10      10       1         9       24    0.05200    0.05000       1   0.02744    2.745
+   t  7500.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (10,0) y18 — the introduced founder donating again, which is not descendant reproduction
+      7600         0        10      10       1         9       25    0.05296    0.01667       1   0.04524    2.745
+      7700         0        10      10       1         9       25    0.05395    0.03333       1   0.04094    2.745
+      7800         0        10      10       1         9       25    0.05496    0.05000       1   0.03704    2.745
+   t  7800.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (10,0) y18 — the introduced founder donating again, which is not descendant reproduction
+      7900         0        10      10       1         9       26    0.05598    0.01667       1   0.07876    2.745
+      8000         0        10      10       1         9       26    0.05702    0.03333       1   0.07127    2.746
+      8100         0        10      10       1         9       26    0.05808    0.05000       1   0.06448    2.745
+   t  8100.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (12,4) y21 — the introduced founder donating again, which is not descendant reproduction
+      8200         0        10      10       1         9       27    0.05917    0.01667       2   0.07876    2.745
+      8300         0        10      10       1         9       27    0.06027    0.03333       2   0.07127    2.745
+      8400         0        10      10       1         9       27    0.06139    0.05000       2   0.06448    2.745
+   t  8400.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (10,1) y19 — the introduced founder donating again, which is not descendant reproduction
+   t  8400.10 s  birth: bloomcrown #19 at (10,1) y19, wood 0.02000
+      8500         0        11      11       1        10       28    0.06253    0.01667       1   0.03352    2.745
+      8600         0        11      11       1        10       28    0.06369    0.03333       1   0.03033    2.745
+   t  8623.15 s  loss: bloomcrown #14 is gone
+      8700         0        10      11       2         9       28    0.06488    0.05000       1   0.02744    2.745
+   t  8700.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001040 of mineral with it) to (10,0) y18 — the introduced founder donating again, which is not descendant reproduction
+      8800         0        10      11       2         9       29    0.06609    0.01667       1   0.04524    2.745
+      8900         0        10      11       2         9       29    0.06732    0.03333       1   0.04094    2.745
+      9000         0        10      11       2         9       29    0.06857    0.05000       1   0.03704    2.745
+   t  9000.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (14,0) y19 — the introduced founder donating again, which is not descendant reproduction
+      9100         0        10      11       2         9       30    0.06984    0.01667       2   0.07876    2.745
+      9200         0        10      11       2         9       30    0.07114    0.03333       2   0.07127    2.745
+      9300         0        10      11       2         9       30    0.07246    0.05000       2   0.06448    2.745
+   t  9300.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (13,2) y20 — the introduced founder donating again, which is not descendant reproduction
+      9400         0        10      11       2         9       31    0.07381    0.01667       2   0.07876    2.745
+      9500         0        10      11       2         9       31    0.07518    0.03333       2   0.07127    2.745
+      9600         0        10      11       2         9       31    0.07658    0.05000       2   0.06448    2.745
+   t  9600.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (14,2) y20 — the introduced founder donating again, which is not descendant reproduction
+      9700         0        10      11       2         9       32    0.07800    0.01667       2   0.07876    2.745
+      9800         0        10      11       2         9       32    0.07945    0.03333       2   0.07127    2.745
+   t  9823.15 s  loss: bloomcrown #16 is gone
+      9900         0         9      11       3         8       32    0.08092    0.05000       2   0.06448    2.745
+   t  9900.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (13,4) y21 — the introduced founder donating again, which is not descendant reproduction
+     10000         0         9      11       3         8       33    0.08243    0.01667       2   0.07876    2.746
+     10100         0         9      11       3         8       33    0.08396    0.03333       2   0.07127    2.745
+     10200         0         9      11       3         8       33    0.08551    0.05000       2   0.06448    2.745
+   t 10200.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (10,3) y20 — the introduced founder donating again, which is not descendant reproduction
+     10300         0         9      11       3         8       34    0.08710    0.01667       2   0.07876    2.745
+     10400         0         9      11       3         8       34    0.08872    0.03333       2   0.07127    2.745
+     10500         0         9      11       3         8       34    0.09036    0.05000       2   0.06448    2.745
+   t 10500.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (14,2) y20 — the introduced founder donating again, which is not descendant reproduction
+     10600         0         9      11       3         8       35    0.09204    0.01667       2   0.07876    2.745
+     10700         0         9      11       3         8       35    0.09374    0.03333       2   0.07127    2.745
+     10800         0         9      11       3         8       35    0.09548    0.05000       2   0.06448    2.746
+   t 10800.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (11,2) y20 — the introduced founder donating again, which is not descendant reproduction
+     10900         0         9      11       3         8       36    0.09725    0.01667       2   0.07876    2.746
+     11000         0         9      11       3         8       36    0.09905    0.03333       2   0.07127    2.745
+     11100         0         9      11       3         8       36    0.10089    0.05000       2   0.06448    2.746
+   t 11100.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (14,3) y21 — the introduced founder donating again, which is not descendant reproduction
+     11200         0         9      11       3         8       37    0.10275    0.01667       2   0.07876    2.745
+     11300         0         9      11       3         8       37    0.10466    0.03333       2   0.07127    2.746
+     11400         0         9      11       3         8       37    0.10659    0.05000       2   0.06448    2.745
+   t 11400.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (11,1) y19 — the introduced founder donating again, which is not descendant reproduction
+   t 11481.25 s  loss: bloomcrown #18 is gone
+     11500         0         8      11       4         7       38    0.10856    0.01667       2   0.07876    2.745
+     11600         0         8      11       4         7       38    0.11057    0.03333       2   0.07127    2.745
+     11700         0         8      11       4         7       38    0.11262    0.05000       2   0.06448    2.745
+   t 11700.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001039 of mineral with it) to (11,0) y19 — the introduced founder donating again, which is not descendant reproduction
+   t 11700.10 s  birth: bloomcrown #20 at (11,0) y19, wood 0.02000
+     11800         0         9      12       4         8       39    0.11470    0.01667       1   0.03352    2.746
+     11900         0         9      12       4         8       39    0.11682    0.03333       1   0.03033    2.746
+     12000         0         9      12       4         8       39    0.11898    0.05000       1   0.02744    2.745
+   water: water m3/s over 12000 s: rain in 0.038400, outlet 0.038388, evaporation 0.000000, transpiration 0.00001151, storage change +0.000000 (residual -2.27e-10); head 2.745 m (-0.0002 m), stored 239.0674 m3
+   residuals: organic -3.80e-11, mineral -1.82e-12, energy -7.61e-11 (stocks 3.6234, 3071.9929, 7.2468)
+   1164.0 s of wall time for 240000 coupled ticks
+   by identity: 12 descendant birth(s), 4 of them lost before the end, 8 surviving; the introduced founder survived the whole window
+     #8 (introduced founder): funded 2.00000 over 240000 ticks, 39 deliveries, reached donor size at t 0.05 s
+   surviving descendants against donor_min 0.3 — mean light, moisture and (1 - aeration stress) are the stand's own published state over its life; the Monod factor is this harness dividing its site's published mineral pool by `pool + nutrient_half`, not a model output:
+        id         column      wood of W_est born (s)   light  moisture unstress   monod
+         9     (11,2) y20   0.02849    9.5 %    300.1   0.854     0.643    1.000   0.666
+        10     (10,2) y20   0.11898   39.7 %    600.1   0.981     0.660    1.000   0.666
+        11     (14,0) y19   0.02527    8.4 %    900.1   0.961     0.567    1.000   0.667
+        13     (10,0) y18   0.04176   13.9 %   2100.1   0.832     0.702    1.000   0.667
+        15     (11,1) y19   0.02000    6.7 %   3600.1   0.901     0.516    1.000   0.667
+        17     (13,2) y20   0.05946   19.8 %   4800.1   0.834     0.787    1.000   0.666
+        19     (10,1) y19   0.02155    7.2 %   8400.1   0.924     0.643    1.000   0.667
+        20     (11,0) y19   0.02000    6.7 %  11700.1   0.981     0.405    1.000   0.667
+   the largest descendant holds 0.11898 of the 0.3 it needs (39.7 %); a newborn at the **growth cap** covers that gap in 54163 ticks, so this arm's own descendants are slower than the cap by whatever their multipliers above say
+   first birth at t 300.10 s, and **no descendant reached donor size**: the replacement is NOT completed and this arm is **unresolved at the stopping budget** (12000 s against an earliest-possible bound of 3308.25 s — long enough in principle, so this is a measurement and not an arithmetic impossibility, and it is still not evidence of exclusion). A birth is not a generation.
+
+=== what this can and cannot say ===
+The conditioned state this all branched from planted 8 umbrellafrond founders and stood at 8 stands of that species at the introduction, its own descendants included.
+The resident-only control ended with 162 resident stands against the 8 it was conditioned with.
+Coexistence evidence for these conditions would be a positive increase while rare **through replacement** — a descendant of the founder reaching donor size and funding its own package, beyond the founder's reserve subsidy — in **both** directions while the resident persists. One birth is not it, the founder surviving is not it, and a declining resident is not it. One successful site is a possible refuge. This invocation runs one direction; the other is the same command with the two species exchanged, and the probe window R5.4 asks for is at least 3 x the larger measured replacement time G, which only the controls can establish.

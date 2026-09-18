@@ -2041,3 +2041,131 @@ measurement of how fast a descendant actually grows.
 
 Scope, unchanged: one site, one seed, one noise seed, one treatment and one direction each; no
 control arm ran beside them; and an expiry is not evidence of exclusion.
+
+## Replacement study — 2026-09-18
+
+**Authorised study run** (`design/handoffs/voxel-replacement-study-run-2026-09-18.md`) on main at
+`e577a34`, after the voxel-perf merge: bloomcrown ⇄ umbrellafrond, `full` mode (three
+predeclared sites × the control plus two treated arms), **5 seeds × 2 noise seeds per
+direction**, observation budget **12,000 s** per arm via `--cap`. No harness change was needed
+— `--cap` already sets the stopping budget and consumes its own value — and no printing bug
+surfaced. Raw output for all 20 processes is committed under
+`design/7_Research/assets/voxel-replacement/`.
+
+```text
+replacement full <resident> <newcomer> 4000 <seed> <noise> --phase-a 3500 --cap 12000
+  20 processes (2 directions × 5 seeds {1..5} × 2 noise seeds {101, 0}), all --release,
+  each single-threaded, launched together on 32 cores.
+  per-process wall 8,064 s – 9,583 s; whole study 9,583 s (2.66 h) wall; all rc=0.
+```
+
+Timing before launch: one arm at the 12,000 s budget took **801.4 s** for its 240,000 coupled
+ticks (15.0 × real time), and 20 concurrent conditioning processes ran at a **median 192 s
+against 188 s solo** — so contention is ~1.02 × and 20 processes cost the same wall as 10
+would. The brief's 5-replicate fallback was therefore not taken: halving the replicates would
+not have shortened the wall, because the limit is each process's own seven serial arms
+(median arm 1,201 s, range 886–1,814 s), not the core count.
+
+### The re-probe: the settle moved from 2,000 s to 3,000 s, the eligible sets did not
+
+`replacement condition bloomcrown umbrellafrond 6000 1 101 --phase-a 4000`, 188 s wall, raw
+output `reprobe-seed1-noise101-budget6000.txt`. Against the 2026-09-18 conditioning probe on
+the same keys:
+
+| | probe 1 (before the merge) | re-probe (at `e577a34`) |
+| --- | --- | --- |
+| phase A storage tolerance first met | interval 1 (t 100 s) | interval 1 (t 100 s) |
+| phase A head tolerance first met | interval 16 (t 1,600 s) | interval **29** (t 2,900 s) |
+| phase A turnover tolerance first met | interval 19 (t 1,900 s) | interval 20 (t 2,000 s) |
+| **phase A settled** | **t 2,000 s** | **t 3,000 s** |
+| **phase B settled** | t 300 s | t 300 s |
+| head at settling | 2.502 m | **2.555 m** |
+| bloomcrown eligible at settling | 314 / 3,072 | **311 / 3,072** |
+| umbrellafrond eligible at settling | 2,720 / 3,072 | **2,717 / 3,072** |
+
+So the local water model moved **when** the table settles and **where** the head settles — a
+50 mm higher water table and a thousand seconds more relaxation — but not **which** columns are
+eligible: 311 against 314 and 2,717 against 2,720 is a three-column difference in each set, and
+the inversion the earlier probe described (bloomcrown collapsing from ~2,771 to ~311 while
+umbrellafrond rises from ~427 to ~2,717) is unchanged. The resident is still planted on 311
+candidates and the same 8 founders are drawn.
+
+**The settle used for every run** was therefore a conditioning budget of **4,000 s with
+`--phase-a 3500`** — above the 3,000 s measured, with 500 s left for phase B's 300 s. Every one
+of the 20 runs settled inside it: phase A at t 2,000–3,000 s (median 2,200 s; 2,000 ×2,
+2,100 ×4, 2,200 ×6, 2,700 ×2, 2,900 ×2, 3,000 ×4) and phase B at **t 300 s in all 20**. No run
+reported *conditioning unresolved*, so no arm was refused on its conditioning.
+
+### Per direction, over 10 replicates × 3 sites
+
+Each site contributes two treated arms — *resident plus newcomer* and *newcomer with the
+resident excluded* — so 30 of each per direction, beside one resident-only control per
+replicate (10). The two treatments returned the **same outcome, the same first birth and the
+same G in every one of the 60 pairs**: within 12,000 s the resident's presence elsewhere in the
+world did not change what the newcomer did at its declared site.
+
+| | bloomcrown resident → umbrellafrond newcomer | umbrellafrond resident → bloomcrown newcomer |
+| --- | --- | --- |
+| arms (each treatment) | 30 | 30 |
+| **replacement completed** | **30 / 30** | **7 / 30** |
+| first birth observed | 30 / 30 | 28 / 30 |
+| *recruitment NOT OBSERVED within 12,000 s* | 0 | 2 |
+| first birth, no descendant at donor size | 0 | 20 |
+| descendant at donor size, no package of its own | 0 | 1 |
+| REFUSED as an invasion (resident gone) | 0 | 0 |
+| first birth min / median / max (s) | 300.1 / 300.1 / 300.1 | 300.1 / 600.1 / 4,800.1 |
+| **G** min / median / max (s) | **6,216.7 / 6,515.6 / 8,101.4** | **11,178.1 / 11,641.2 / 11,972.9** |
+| largest descendant wood at 12,000 s | 0.60000 / 0.60000 / 0.60000 | 0.00000 / 0.17037 / 0.32864 |
+| as % of `donor_min` 0.3 | 200.0 / 200.0 / 200.0 % | 15.7 / 68.8 / 109.5 % |
+| resident stands, 8 → end, treated arm | 23 / 37.5 / 47 | 141 / 148.5 / 166 |
+| **resident-only control**, 8 → end | 23 / 37.5 / 47 | 141 / 148.5 / 166 |
+| control establishments / deaths | 36 / 8 (median) | 148.5 / 6 (median) |
+| control declining | 0 of 10 | 0 of 10 |
+
+**The limiter the harness prints**, for the largest surviving descendant of each arm
+(min / median / max over the 30):
+
+| multiplier | umbrellafrond descendants | bloomcrown descendants |
+| --- | --- | --- |
+| light | 0.914 / 0.964 / 0.988 | 0.822 / 0.954 / 1.000 |
+| moisture | 0.964 / 1.000 / 1.000 | **0.643 / 0.762 / 0.851** |
+| 1 − aeration stress | 1.000 / 1.000 / 1.000 | 1.000 / 1.000 / 1.000 |
+| mineral Monod (harness-computed) | 0.659 / 0.660 / 0.661 | 0.665 / 0.665 / 0.667 |
+
+Both directions carry the same ~0.66 mineral Monod factor — it is the same provisioned
+inventory in both — and the direction that stalls is the one whose descendants sit at a
+**moisture multiplier of 0.762**, on the settled, wet table the re-probe measured. Light and
+aeration hold nothing back in either direction.
+
+Per site, direction by direction (the *resident plus newcomer* arms; the excluded arms agree):
+
+| site | bloomcrown → umbrellafrond | umbrellafrond → bloomcrown |
+| --- | --- | --- |
+| 1 | 10 / 10 completed | 3 completed, 1 at donor size without a package, 4 no donor, 2 no recruitment |
+| 2 | 10 / 10 completed | 2 completed, 8 no donor |
+| 3 | 10 / 10 completed | 2 completed, 8 no donor |
+
+The two *recruitment NOT OBSERVED* arms are both seed 2 / noise 0 and seed 3 / noise 0 at
+site 1; every other arm in that direction had a birth.
+
+### What the harness says, in its own words
+
+The umbrellafrond newcomer's arms all print **replacement completed**, with a measured
+**G = 6,216.7–8,101.4 s** against the pair's earliest-possible bound of 3,308.25 s. The
+bloomcrown newcomer's arms print **replacement completed** in 7 of 30, with
+**G = 11,178.1–11,972.9 s**; the other 23 print *the replacement is NOT completed and this arm
+is unresolved at the stopping budget*, and the bound those give is that their descendants
+reached a **median 68.8 % of `donor_min`** (max 109.5 %) in 12,000 s. Expiry is not exclusion.
+
+In every arm of both directions the resident **persisted and grew** — 8 stands to a median 37.5
+(bloomcrown) and 148.5 (umbrellafrond) — and every resident-only control matched its treated
+arms exactly, so no arm in this study is one of R5.4's declining residents. The harness's own
+statement of what would count still governs what this is: *"a positive increase while rare
+through replacement — a descendant of the founder reaching donor size and funding its own
+package, beyond the founder's reserve subsidy — in both directions while the resident
+persists"*, and *"one successful site is a possible refuge"*. Both directions produced
+completed replacements at all three sites under that definition; the asymmetry is in how many
+replicates reach it inside 12,000 s (30/30 against 7/30), not in which sites can.
+
+R5.4's probe window of 3 × the larger measured G is, from these numbers, **at least
+3 × 11,972.9 s ≈ 35,919 s**.

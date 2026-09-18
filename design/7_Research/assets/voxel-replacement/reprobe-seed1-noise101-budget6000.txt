@@ -1,0 +1,118 @@
+replacement **conditioning probe** (both phases, no arm): resident bloomcrown, newcomer umbrellafrond; seed 1, noise_seed 101; a conditioning **budget** of 6000 s and a stopping budget of 4962 s per arm
+experiment conditions, none of them a model rule: rain 0.0002 m/s on exposed top faces, 1000 ticks (50 s) of world warm-up before anything is planted, 8 resident founders, mineral provisioning AtCreation (every support face at creation, one booking)
+founder treatment (Astra R9.7): **0.5 · wood_max** with ordinary `Seed` foliage `alpha · W`, full reserve, zero parcel and no bank of its own species — 0.3 for bloomcrown and 0.3 for umbrellafrond. A flat 0.3 is that rule for the original pair and five times springturf's whole mature wood, so the rule and not the number is what is fixed across the arms.
+
+predeclared observation cap, from the presets' own arithmetic:
+      bloomcrown: newborn wood 0.02 -> donor 0.3 at wood_rate 0.001 under the growth cap = 54163 ticks = 2708.15 s; one package 0.0500 (0.02/0.4) at propagule_rate 0.0002 net of build 0.2 = 6000 ticks = 300.00 s; **cap 3008.15 s**
+   umbrellafrond: newborn wood 0.02 -> donor 0.3 at wood_rate 0.001 under the growth cap = 54163 ticks = 2708.15 s; one package 0.0500 (0.02/0.4) at propagule_rate 0.0002 net of build 0.2 = 6000 ticks = 300.00 s; **cap 3008.15 s**
+  pair cap: **3008.15 s** (the larger of the two, so one window can resolve either direction)
+
+earliest-possible **replacement timeline** (Astra R10.1) — from what this study actually introduces, one founder with a **zero parcel** and no newborn of its own anywhere, which the published cap above does not cost:
+      bloomcrown: the first package leaves at tick 6001 (300.05 s) [the closed form says 6000; repeated addition falls short of the package on that tick], the newborn appears at 6002, it reaches donor size at 60165 (+54163 growth ticks), and its own package can leave at **66165 ticks, 3308.25 s** — one tick less than the four stages added up, because the tick that reaches donor_min also funds the first instalment (R11.1)
+   umbrellafrond: the first package leaves at tick 6001 (300.05 s) [the closed form says 6000; repeated addition falls short of the package on that tick], the newborn appears at 6002, it reaches donor size at 60165 (+54163 growth ticks), and its own package can leave at **66165 ticks, 3308.25 s** — one tick less than the four stages added up, because the tick that reaches donor_min also funds the first instalment (R11.1)
+  pair bound **3308.25 s** (a common-window policy: one window for either direction), and **this arm's own bound 3308.25 s** — the newcomer's, because the newcomer is what it introduces (R11.1). Against the published pair cap's 3008.15 s. Both are a lower bound on a lower bound — perfect funding, an immediate germination on a passing site and a saturated growth cap the whole way — so a budget above one makes nothing likely, while a budget below the **arm's own** makes a replacement in it impossible.
+
+authorised stopping budget: **4962 s** per arm (the default, DEFAULT_BUDGET_FACTOR x the **pair** bound — a named placeholder, nothing measured it), which is 150.0 % of this arm's own bound and 150.0 % of the pair's. A stopping rule and not a sufficient window: on expiry every arm reports **unresolved**, and exclusion is never inferred from expiry (R5.4/R10.1).
+
+=== conditioning ===
+  settling tolerances (**placeholders, nothing measured them**): |storage change| <= 5 % of the interval's own accepted rain, |head change| <= 0.001 m per interval, eligible-set turnover <= 2 % of the union, all three on 2 consecutive intervals
+  conditioning **budget** 6000 s, spent in two phases: the hydrology alone, and then the coupled setting with the resident in it. Elapsed time is not a conditioned habitat (R10.2), so each phase ends when its tolerances hold — or the budget expires and the run says **conditioning unresolved**. Phase A may spend at most 4000 s of it (given with `--phase-a`, a declared condition of this run), so that an unsettling hydrology cannot leave the resident unconditioned.
+  declared water treatment: rain 0.0002 m/s and the study's own **outlet capacity 0.038400000000000004 m3/s** — the nominal accepted rain over this world's own 192 m2 footprint, set once here and therefore identical in every arm, with the core's 0.05 m3/s default left alone (Astra R11.3). A capacity is not an imposed export, and this equality is not a promise of equilibrium: evaporation and transpiration leave by their own paths and both phases still have to pass.
+  3072 skyline columns; 3072 support faces provisioned with 1 of mineral each at creation, booked once as seeded_mineral_in 3072.0 — a **fixed per-site inventory**, so no arm can import mineral by colonising further (R5.4)
+
+phase A, the hydrology alone, reported every 100 s:
+  t     100 s: water m3/s over 100 s: rain in 0.038376, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000024 (residual -1.60e-12); head 2.894 m (-0.0654 m), stored 218.5944 m3
+  t     100 s: stands 0; eligible columns bloomcrown 2771/3072, umbrellafrond 375/3072 — head moved -0.0654 m (limit 0.001 m); no previous interval to compare the eligible sets with
+  t     200 s: water m3/s over 100 s: rain in 0.038394, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000006 (residual -2.14e-11); head 2.843 m (-0.0513 m), stored 218.5938 m3
+  t     200 s: stands 0; eligible columns bloomcrown 2771/3072 (turnover 0.5 %), umbrellafrond 408/3072 (turnover 10.4 %) — head moved -0.0513 m (limit 0.001 m); eligible-set turnover 10.4 % (limit 2 %)
+  t     300 s: water m3/s over 100 s: rain in 0.038394, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000006 (residual -6.40e-11); head 2.794 m (-0.0493 m), stored 218.5932 m3
+  t     300 s: stands 0; eligible columns bloomcrown 2678/3072 (turnover 3.4 %), umbrellafrond 495/3072 (turnover 17.6 %) — head moved -0.0493 m (limit 0.001 m); eligible-set turnover 17.6 % (limit 2 %)
+  t     400 s: water m3/s over 100 s: rain in 0.038394, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000006 (residual -9.64e-11); head 2.748 m (-0.0458 m), stored 218.5926 m3
+  t     400 s: stands 0; eligible columns bloomcrown 2627/3072 (turnover 1.9 %), umbrellafrond 633/3072 (turnover 21.8 %) — head moved -0.0458 m (limit 0.001 m); eligible-set turnover 21.8 % (limit 2 %)
+  t     500 s: water m3/s over 100 s: rain in 0.038360, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000040 (residual -2.03e-10); head 2.718 m (-0.0297 m), stored 218.5886 m3
+  t     500 s: stands 0; eligible columns bloomcrown 2594/3072 (turnover 1.3 %), umbrellafrond 795/3072 (turnover 20.4 %) — head moved -0.0297 m (limit 0.001 m); eligible-set turnover 20.4 % (limit 2 %)
+  t     600 s: water m3/s over 100 s: rain in 0.038306, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000094 (residual -2.03e-10); head 2.688 m (-0.0304 m), stored 218.5792 m3
+  t     600 s: stands 0; eligible columns bloomcrown 2260/3072 (turnover 12.9 %), umbrellafrond 1108/3072 (turnover 28.2 %) — head moved -0.0304 m (limit 0.001 m); eligible-set turnover 28.2 % (limit 2 %)
+  t     700 s: water m3/s over 100 s: rain in 0.038325, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000075 (residual -2.02e-10); head 2.658 m (-0.0302 m), stored 218.5717 m3
+  t     700 s: stands 0; eligible columns bloomcrown 2225/3072 (turnover 1.5 %), umbrellafrond 1476/3072 (turnover 24.9 %) — head moved -0.0302 m (limit 0.001 m); eligible-set turnover 24.9 % (limit 2 %)
+  t     800 s: water m3/s over 100 s: rain in 0.038386, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000014 (residual -2.12e-10); head 2.656 m (-0.0021 m), stored 218.5703 m3
+  t     800 s: stands 0; eligible columns bloomcrown 2128/3072 (turnover 4.4 %), umbrellafrond 1825/3072 (turnover 19.1 %) — head moved -0.0021 m (limit 0.001 m); eligible-set turnover 19.1 % (limit 2 %)
+  t     900 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change -0.000000 (residual -1.79e-10); head 2.638 m (-0.0172 m), stored 218.5703 m3
+  t     900 s: stands 0; eligible columns bloomcrown 1615/3072 (turnover 24.1 %), umbrellafrond 2154/3072 (turnover 15.3 %) — head moved -0.0172 m (limit 0.001 m); eligible-set turnover 24.1 % (limit 2 %)
+  t    1000 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change +0.000000 (residual -1.46e-10); head 2.613 m (-0.0259 m), stored 218.5703 m3
+  t    1000 s: stands 0; eligible columns bloomcrown 1539/3072 (turnover 5.7 %), umbrellafrond 2373/3072 (turnover 9.9 %) — head moved -0.0259 m (limit 0.001 m); eligible-set turnover 9.9 % (limit 2 %)
+  t    1100 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change +0.000000 (residual -1.59e-10); head 2.585 m (-0.0278 m), stored 218.5703 m3
+  t    1100 s: stands 0; eligible columns bloomcrown 1350/3072 (turnover 12.3 %), umbrellafrond 2478/3072 (turnover 4.2 %) — head moved -0.0278 m (limit 0.001 m); eligible-set turnover 12.3 % (limit 2 %)
+  t    1200 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change +0.000000 (residual -1.63e-10); head 2.560 m (-0.0249 m), stored 218.5703 m3
+  t    1200 s: stands 0; eligible columns bloomcrown 1219/3072 (turnover 9.7 %), umbrellafrond 2553/3072 (turnover 2.9 %) — head moved -0.0249 m (limit 0.001 m); eligible-set turnover 9.7 % (limit 2 %)
+  t    1300 s: water m3/s over 100 s: rain in 0.038400, outlet 0.036020, evaporation 0.000000, transpiration 0.00000000, storage change +0.002380 (residual -1.78e-10); head 2.539 m (-0.0205 m), stored 218.8083 m3
+  t    1300 s: stands 0; eligible columns bloomcrown 982/3072 (turnover 19.4 %), umbrellafrond 2604/3072 (turnover 2.0 %) — storage +0.002380 m3/s is 6 % of rain (limit 5 %); head moved -0.0205 m (limit 0.001 m); eligible-set turnover 19.4 % (limit 2 %)
+  t    1400 s: water m3/s over 100 s: rain in 0.038400, outlet 0.032926, evaporation 0.000000, transpiration 0.00000000, storage change +0.005474 (residual -1.77e-10); head 2.525 m (-0.0147 m), stored 219.3557 m3
+  t    1400 s: stands 0; eligible columns bloomcrown 653/3072 (turnover 33.5 %), umbrellafrond 2654/3072 (turnover 1.9 %) — storage +0.005474 m3/s is 14 % of rain (limit 5 %); head moved -0.0147 m (limit 0.001 m); eligible-set turnover 33.5 % (limit 2 %)
+  t    1500 s: water m3/s over 100 s: rain in 0.038400, outlet 0.031127, evaporation 0.000000, transpiration 0.00000000, storage change +0.007273 (residual -1.83e-10); head 2.514 m (-0.0103 m), stored 220.0830 m3
+  t    1500 s: stands 0; eligible columns bloomcrown 551/3072 (turnover 15.6 %), umbrellafrond 2674/3072 (turnover 0.7 %) — storage +0.007273 m3/s is 19 % of rain (limit 5 %); head moved -0.0103 m (limit 0.001 m); eligible-set turnover 15.6 % (limit 2 %)
+  t    1600 s: water m3/s over 100 s: rain in 0.038400, outlet 0.029677, evaporation 0.000000, transpiration 0.00000000, storage change +0.008723 (residual -1.70e-10); head 2.511 m (-0.0034 m), stored 220.9553 m3
+  t    1600 s: stands 0; eligible columns bloomcrown 445/3072 (turnover 19.2 %), umbrellafrond 2685/3072 (turnover 0.4 %) — storage +0.008723 m3/s is 23 % of rain (limit 5 %); head moved -0.0034 m (limit 0.001 m); eligible-set turnover 19.2 % (limit 2 %)
+  t    1700 s: water m3/s over 100 s: rain in 0.038400, outlet 0.029671, evaporation 0.000000, transpiration 0.00000000, storage change +0.008729 (residual -1.65e-10); head 2.513 m (+0.0020 m), stored 221.8282 m3
+  t    1700 s: stands 0; eligible columns bloomcrown 394/3072 (turnover 11.5 %), umbrellafrond 2698/3072 (turnover 0.5 %) — storage +0.008729 m3/s is 23 % of rain (limit 5 %); head moved +0.0020 m (limit 0.001 m); eligible-set turnover 11.5 % (limit 2 %)
+  t    1800 s: water m3/s over 100 s: rain in 0.038400, outlet 0.031108, evaporation 0.000000, transpiration 0.00000000, storage change +0.007292 (residual -1.67e-10); head 2.517 m (+0.0045 m), stored 222.5574 m3
+  t    1800 s: stands 0; eligible columns bloomcrown 374/3072 (turnover 5.1 %), umbrellafrond 2711/3072 (turnover 0.5 %) — storage +0.007292 m3/s is 19 % of rain (limit 5 %); head moved +0.0045 m (limit 0.001 m); eligible-set turnover 5.1 % (limit 2 %)
+  t    1900 s: water m3/s over 100 s: rain in 0.038400, outlet 0.032348, evaporation 0.000000, transpiration 0.00000000, storage change +0.006052 (residual -1.66e-10); head 2.522 m (+0.0050 m), stored 223.1626 m3
+  t    1900 s: stands 0; eligible columns bloomcrown 334/3072 (turnover 10.7 %), umbrellafrond 2712/3072 (turnover 0.0 %) — storage +0.006052 m3/s is 16 % of rain (limit 5 %); head moved +0.0050 m (limit 0.001 m); eligible-set turnover 10.7 % (limit 2 %)
+  t    2000 s: water m3/s over 100 s: rain in 0.038400, outlet 0.033436, evaporation 0.000000, transpiration 0.00000000, storage change +0.004964 (residual -1.75e-10); head 2.528 m (+0.0055 m), stored 223.6590 m3
+  t    2000 s: stands 0; eligible columns bloomcrown 332/3072 (turnover 0.6 %), umbrellafrond 2712/3072 (turnover 0.0 %) — storage +0.004964 m3/s is 13 % of rain (limit 5 %); head moved +0.0055 m (limit 0.001 m)
+  t    2100 s: water m3/s over 100 s: rain in 0.038400, outlet 0.034142, evaporation 0.000000, transpiration 0.00000000, storage change +0.004258 (residual -1.75e-10); head 2.533 m (+0.0053 m), stored 224.0848 m3
+  t    2100 s: stands 0; eligible columns bloomcrown 327/3072 (turnover 1.5 %), umbrellafrond 2715/3072 (turnover 0.1 %) — storage +0.004258 m3/s is 11 % of rain (limit 5 %); head moved +0.0053 m (limit 0.001 m)
+  t    2200 s: water m3/s over 100 s: rain in 0.038400, outlet 0.034724, evaporation 0.000000, transpiration 0.00000000, storage change +0.003676 (residual -1.76e-10); head 2.538 m (+0.0047 m), stored 224.4525 m3
+  t    2200 s: stands 0; eligible columns bloomcrown 314/3072 (turnover 4.0 %), umbrellafrond 2717/3072 (turnover 0.1 %) — storage +0.003676 m3/s is 10 % of rain (limit 5 %); head moved +0.0047 m (limit 0.001 m); eligible-set turnover 4.0 % (limit 2 %)
+  t    2300 s: water m3/s over 100 s: rain in 0.038400, outlet 0.035464, evaporation 0.000000, transpiration 0.00000000, storage change +0.002936 (residual -1.83e-10); head 2.542 m (+0.0041 m), stored 224.7460 m3
+  t    2300 s: stands 0; eligible columns bloomcrown 311/3072 (turnover 1.0 %), umbrellafrond 2717/3072 (turnover 0.0 %) — storage +0.002936 m3/s is 8 % of rain (limit 5 %); head moved +0.0041 m (limit 0.001 m)
+  t    2400 s: water m3/s over 100 s: rain in 0.038400, outlet 0.036032, evaporation 0.000000, transpiration 0.00000000, storage change +0.002368 (residual -1.83e-10); head 2.546 m (+0.0034 m), stored 224.9828 m3
+  t    2400 s: stands 0; eligible columns bloomcrown 311/3072 (turnover 0.0 %), umbrellafrond 2717/3072 (turnover 0.0 %) — storage +0.002368 m3/s is 6 % of rain (limit 5 %); head moved +0.0034 m (limit 0.001 m)
+  t    2500 s: water m3/s over 100 s: rain in 0.038400, outlet 0.036590, evaporation 0.000000, transpiration 0.00000000, storage change +0.001810 (residual -1.91e-10); head 2.548 m (+0.0026 m), stored 225.1639 m3
+  t    2500 s: stands 0; eligible columns bloomcrown 311/3072 (turnover 0.0 %), umbrellafrond 2717/3072 (turnover 0.0 %) — head moved +0.0026 m (limit 0.001 m)
+  t    2600 s: water m3/s over 100 s: rain in 0.038400, outlet 0.037024, evaporation 0.000000, transpiration 0.00000000, storage change +0.001376 (residual -1.91e-10); head 2.550 m (+0.0019 m), stored 225.3014 m3
+  t    2600 s: stands 0; eligible columns bloomcrown 311/3072 (turnover 0.0 %), umbrellafrond 2717/3072 (turnover 0.0 %) — head moved +0.0019 m (limit 0.001 m)
+  t    2700 s: water m3/s over 100 s: rain in 0.038400, outlet 0.037342, evaporation 0.000000, transpiration 0.00000000, storage change +0.001058 (residual -1.92e-10); head 2.551 m (+0.0014 m), stored 225.4072 m3
+  t    2700 s: stands 0; eligible columns bloomcrown 311/3072 (turnover 0.0 %), umbrellafrond 2717/3072 (turnover 0.0 %) — head moved +0.0014 m (limit 0.001 m)
+  t    2800 s: water m3/s over 100 s: rain in 0.038400, outlet 0.037572, evaporation 0.000000, transpiration 0.00000000, storage change +0.000828 (residual -1.96e-10); head 2.553 m (+0.0012 m), stored 225.4900 m3
+  t    2800 s: stands 0; eligible columns bloomcrown 311/3072 (turnover 0.0 %), umbrellafrond 2717/3072 (turnover 0.0 %) — head moved +0.0012 m (limit 0.001 m)
+  t    2900 s: water m3/s over 100 s: rain in 0.038400, outlet 0.037721, evaporation 0.000000, transpiration 0.00000000, storage change +0.000679 (residual -1.95e-10); head 2.553 m (+0.0009 m), stored 225.5580 m3
+  t    2900 s: stands 0; eligible columns bloomcrown 311/3072 (turnover 0.0 %), umbrellafrond 2717/3072 (turnover 0.0 %) — settled
+  t    3000 s: water m3/s over 100 s: rain in 0.038400, outlet 0.037956, evaporation 0.000000, transpiration 0.00000000, storage change +0.000444 (residual -2.00e-10); head 2.554 m (+0.0006 m), stored 225.6024 m3
+  t    3000 s: stands 0; eligible columns bloomcrown 311/3072 (turnover 0.0 %), umbrellafrond 2717/3072 (turnover 0.0 %) — settled
+  phase A, the hydrology alone, whole phase: water m3/s over 3000 s: rain in 0.038391, outlet 0.036056, evaporation 0.000000, transpiration 0.00000000, storage change +0.002335 (residual -1.64e-10); head 2.554 m (-0.4057 m), stored 225.6024 m3
+  phase A, the hydrology alone, storage tolerance: first met on interval 1 (t 100 s)
+  phase A, the hydrology alone, head tolerance: first met on interval 29 (t 2900 s)
+  phase A, the hydrology alone, turnover tolerance: first met on interval 20 (t 2000 s)
+  phase A, the hydrology alone, head: the last three intervals' steps decay by a factor 0.7059 each, which extrapolates to **2.556 m** — a geometric extrapolation of three numbers and not a measurement
+  phase A, the hydrology alone: **settled** at t 3000 s — the tolerances held on 2 consecutive intervals
+resident bloomcrown: 8 founders at wood 0.3 on 311 candidates of 3072 skyline columns (habitat rule Ridge)
+  bloomcrown #0 ( 75, 15) y31 — mean pore 0.411 (>= 0.10), saturated fraction 0.214 (<= 0.25), water 0.000 m (<= 0.05), sky 0.958 (>= 0.60), 14 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  bloomcrown #1 ( 61, 17) y29 — mean pore 0.344 (>= 0.10), saturated fraction 0.125 (<= 0.25), water 0.000 m (<= 0.05), sky 0.874 (>= 0.60), 8 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  bloomcrown #2 (123, 20) y26 — mean pore 0.411 (>= 0.10), saturated fraction 0.214 (<= 0.25), water 0.000 m (<= 0.05), sky 0.874 (>= 0.60), 14 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  bloomcrown #3 (101,  4) y21 — mean pore 0.250 (>= 0.10), saturated fraction 0.000 (<= 0.25), water 0.000 m (<= 0.05), sky 0.916 (>= 0.60), 15 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  bloomcrown #4 ( 26, 21) y21 — mean pore 0.411 (>= 0.10), saturated fraction 0.214 (<= 0.25), water 0.000 m (<= 0.05), sky 0.958 (>= 0.60), 14 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  bloomcrown #5 ( 31, 21) y20 — mean pore 0.250 (>= 0.10), saturated fraction 0.000 (<= 0.25), water 0.000 m (<= 0.05), sky 0.802 (>= 0.60), 18 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  bloomcrown #6 (119,  6) y19 — mean pore 0.350 (>= 0.10), saturated fraction 0.133 (<= 0.25), water 0.000 m (<= 0.05), sky 0.844 (>= 0.60), 15 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  bloomcrown #7 (  6, 16) y19 — mean pore 0.411 (>= 0.10), saturated fraction 0.214 (<= 0.25), water 0.000 m (<= 0.05), sky 0.760 (>= 0.60), 14 soil voxels, dead wood in the box 0.000 (>= 0.000)
+
+phase B, the coupled setting with the resident, reported every 100 s:
+  t     100 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038077, evaporation 0.000000, transpiration 0.00006259, storage change +0.000261 (residual -1.99e-10); head 2.554 m (+0.0004 m), stored 225.6285 m3
+  t     100 s: stands 8; eligible columns bloomcrown 311/3072, umbrellafrond 2717/3072 — no previous interval to compare the eligible sets with
+  t     200 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038134, evaporation 0.000000, transpiration 0.00006235, storage change +0.000204 (residual -1.99e-10); head 2.555 m (+0.0003 m), stored 225.6488 m3
+  t     200 s: stands 8; eligible columns bloomcrown 311/3072 (turnover 0.0 %), umbrellafrond 2717/3072 (turnover 0.0 %) — settled
+  t     300 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038242, evaporation 0.000000, transpiration 0.00006225, storage change +0.000096 (residual -1.99e-10); head 2.555 m (+0.0001 m), stored 225.6584 m3
+  t     300 s: stands 8; eligible columns bloomcrown 311/3072 (turnover 0.0 %), umbrellafrond 2717/3072 (turnover 0.0 %) — settled
+  phase B, the coupled setting with the resident, whole phase: water m3/s over 300 s: rain in 0.038400, outlet 0.038151, evaporation 0.000000, transpiration 0.00006240, storage change +0.000187 (residual -1.99e-10); head 2.555 m (+0.0008 m), stored 225.6584 m3
+  phase B, the coupled setting with the resident, storage tolerance: first met on interval 1 (t 100 s)
+  phase B, the coupled setting with the resident, head tolerance: first met on interval 1 (t 100 s)
+  phase B, the coupled setting with the resident, turnover tolerance: first met on interval 2 (t 200 s)
+  phase B, the coupled setting with the resident, head: the last three intervals' steps decay by a factor 0.5057 each, which extrapolates to **2.555 m** — a geometric extrapolation of three numbers and not a measurement
+  phase B, the coupled setting with the resident: **settled** at t 300 s — the tolerances held on 2 consecutive intervals
+  conditioning spent 3300 s of its 6000 s budget over the two phases
+conditioned: **8 bloomcrown stands** alive — 8 founders planted and 0 establishments since, so the count includes the resident's own descendants — seed bank on 0 sites holding 0.00000; deaths 0, births 8
+  residuals: organic -2.93e-13, mineral -1.82e-12, energy -5.86e-13 (stocks 10.0275, 3072.1680, 20.0550)
+
+=== conditioning probe: done ===
+No introduction site was chosen and no arm was run. What this probe reports is above: the two phases' interval records, which tolerance was first met on which interval, and what the head was heading for. It says nothing about either species' G, and a settled verdict here would license a pilot rather than replace one.
