@@ -1804,3 +1804,159 @@ with it, so conditioning remains **unresolved within this budget** and no G was 
 longer conditioning budget is the next thing to authorise, not a looser tolerance: subtracting
 the measured drift would turn a moving-eligibility run into a succession experiment, whose G
 does not calibrate a stationary replacement control (R11.3).
+
+## Conditioning probe — 2026-09-18
+
+**Authorised conditioning-only run** (Wrysk, 2026-09-18): four probes, no observation arm, to
+learn whether and when the study world settles under the outlet capacity R11.3 declared. The
+new `condition` sub-mode runs both conditioning phases and stops; `--phase-a` gives the
+hydrology phase its allowance in seconds without moving `HYDROLOGY_SHARE`. Four concurrent
+`--release` processes on 32 cores.
+
+```text
+replacement condition bloomcrown umbrellafrond <budget> <seed> <noise> --phase-a <a>
+  probe 1:  6,000 s budget, 4,000 s phase A, seed 1 / noise 101 (the published keys)  613.7 s wall
+  probe 2:  6,000 s budget, 4,000 s phase A, seed 1 / noise 0                         591.8 s wall
+  probe 3:  6,000 s budget, 4,000 s phase A, seed 2 / noise 101                       706.3 s wall
+  probe 4: 12,000 s budget, 8,000 s phase A, seed 1 / noise 101 (the far tail)        613.0 s wall
+```
+
+Raw per-interval output for each probe is committed under
+`design/7_Research/assets/voxel-conditioning/`. Rain is 0.038400 m³/s of accepted input and
+evaporation 0.000000 in every interval of every probe; the tolerances are the declared
+placeholders (storage ≤ 5 % of that rain, head ≤ 0.001 m per interval, eligible-set turnover
+≤ 2 %, on two consecutive complete 100 s intervals).
+
+### The headline: it settles, at about 2,000 s, and the same way under every key
+
+**Every probe settled.** Phase A settled at **t = 2,000 s** and phase B at **t = 300 s** in all
+four, spending **2,300 s** of budget — so the round-10 and round-11 smokes were not looking at
+an unsettling world, they were looking at the first 300–600 s of a ~2,000 s relaxation. Per
+tolerance, identically in all four probes:
+
+| tolerance | phase A: first met | phase B: first met |
+| --- | --- | --- |
+| storage (≤ 5 % of rain) | interval **1** (t 100 s) | interval **1** (t 100 s) |
+| head (≤ 0.001 m) | interval **16** (t 1,600 s) | interval **1** (t 100 s) |
+| eligible turnover (≤ 2 %) | interval **19** (t 1,900 s) | interval **2** (t 200 s) |
+| **verdict** | **settled at t 2,000 s** | **settled at t 300 s** |
+
+The head is not asymptoting to something it never reaches: it **arrives**, at **2.502 m**
+(probes 1, 2 and 4) and 2.501 m (probe 3) — the basin floor plus the metre `prepared_world`
+charges the aquifer to — and then holds to the printed precision at Δhead +0.0000 m per
+interval. The extrapolation the sub-mode prints agrees where it applies (phase B ratios
+0.26–0.39, limit 2.501–2.502 m) and declines to extrapolate in phase A, where the steps have
+already reached zero. What remains at settling is a **+0.0004 to +0.0006 m³/s** storage drift —
+1.0–1.4 % of rain, inside the 5 % tolerance — against an outlet exporting 0.0378–0.0383 of the
+0.0384 coming in, plus 6e-5 of transpiration once the resident stands in it.
+
+### What the habitat does while the water settles
+
+The eligible sets do not merely stop moving, they **invert**. Over phase A bloomcrown falls
+from 2,771 of 3,072 columns to **314** while umbrellafrond rises from 427 to **2,720**: the
+world wets up as the aquifer redistributes into pore space, so the sun species' saturated-
+fraction gate closes on it while the wet species' opens. Founder selection at t = 0, which is
+what the harness did before R10.2, drew the resident from a pool almost complementary to the
+settled one. That is the concrete cost of "elapsed conditioning is not a conditioned habitat",
+and it is why the resident cohort in probe 1 is planted on 314 candidates rather than 2,691.
+
+### Probe 1 — seed 1 / noise 101, the published keys
+
+**phase A, the hydrology alone** (20 intervals)
+| t (s) | outlet | transp | Δstore | head (m) | Δhead (m) | bloomcrown elig (turnover) | umbrellafrond elig (turnover) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 200 | 0.038400 | 0.00000 | +0.000000 | 2.897 | -0.0481 | 2771 (0.5 %) | 480 (11.0 %) |
+| 400 | 0.038400 | 0.00000 | +0.000000 | 2.814 | -0.0413 | 2688 (0.1 %) | 667 (29.1 %) |
+| 600 | 0.038400 | 0.00000 | +0.000000 | 2.742 | -0.0362 | 2281 (13.2 %) | 1163 (26.6 %) |
+| 800 | 0.038400 | 0.00000 | +0.000000 | 2.669 | -0.0363 | 2156 (3.7 %) | 1850 (18.3 %) |
+| 1000 | 0.038400 | 0.00000 | +0.000000 | 2.609 | -0.0263 | 1545 (6.6 %) | 2430 (9.4 %) |
+| 1500 | 0.030528 | 0.00000 | +0.007872 | 2.502 | -0.0091 | 458 (12.8 %) | 2700 (0.8 %) |
+| 2000 | 0.037856 | 0.00000 | +0.000544 | 2.502 | +0.0000 | 314 (0.0 %) | 2720 (0.0 %) |
+
+**phase B, the coupled setting with the resident** (3 intervals)
+| t (s) | outlet | transp | Δstore | head (m) | Δhead (m) | bloomcrown elig (turnover) | umbrellafrond elig (turnover) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 100 | 0.037816 | 0.00006 | +0.000524 | 2.502 | -0.0000 | 314 | 2720 |
+| 200 | 0.037876 | 0.00006 | +0.000464 | 2.502 | +0.0000 | 311 (1.0 %) | 2720 (0.0 %) |
+| 300 | 0.037970 | 0.00006 | +0.000371 | 2.502 | +0.0000 | 311 (0.0 %) | 2720 (0.0 %) |
+
+### Probe 2 — seed 1 / noise 0
+
+**phase A, the hydrology alone** (20 intervals)
+| t (s) | outlet | transp | Δstore | head (m) | Δhead (m) | bloomcrown elig (turnover) | umbrellafrond elig (turnover) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 200 | 0.038400 | 0.00000 | +0.000000 | 2.894 | -0.0483 | 2780 (0.5 %) | 467 (11.8 %) |
+| 400 | 0.038400 | 0.00000 | +0.000000 | 2.811 | -0.0414 | 2692 (0.1 %) | 690 (32.9 %) |
+| 600 | 0.038400 | 0.00000 | +0.000000 | 2.738 | -0.0364 | 2234 (14.9 %) | 1191 (26.4 %) |
+| 800 | 0.038400 | 0.00000 | +0.000000 | 2.665 | -0.0362 | 2108 (4.1 %) | 1849 (17.0 %) |
+| 1000 | 0.038400 | 0.00000 | +0.000000 | 2.605 | -0.0260 | 1530 (6.5 %) | 2403 (8.7 %) |
+| 1500 | 0.029774 | 0.00000 | +0.008626 | 2.500 | -0.0069 | 452 (16.3 %) | 2702 (1.1 %) |
+| 2000 | 0.038294 | 0.00000 | +0.000106 | 2.501 | +0.0000 | 331 (0.0 %) | 2723 (0.0 %) |
+
+**phase B, the coupled setting with the resident** (3 intervals)
+| t (s) | outlet | transp | Δstore | head (m) | Δhead (m) | bloomcrown elig (turnover) | umbrellafrond elig (turnover) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 100 | 0.038238 | 0.00006 | +0.000099 | 2.501 | -0.0000 | 331 | 2723 |
+| 200 | 0.038255 | 0.00006 | +0.000083 | 2.501 | +0.0000 | 331 (0.0 %) | 2723 (0.0 %) |
+| 300 | 0.038273 | 0.00006 | +0.000065 | 2.501 | +0.0000 | 331 (0.0 %) | 2723 (0.0 %) |
+
+### Probe 3 — seed 2 / noise 101
+
+**phase A, the hydrology alone** (20 intervals)
+| t (s) | outlet | transp | Δstore | head (m) | Δhead (m) | bloomcrown elig (turnover) | umbrellafrond elig (turnover) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 200 | 0.038400 | 0.00000 | +0.000000 | 2.875 | -0.0413 | 2735 (0.5 %) | 488 (7.6 %) |
+| 400 | 0.038400 | 0.00000 | +0.000000 | 2.795 | -0.0382 | 2618 (3.9 %) | 861 (40.8 %) |
+| 600 | 0.038400 | 0.00000 | +0.000000 | 2.723 | -0.0368 | 1971 (7.8 %) | 1399 (19.4 %) |
+| 800 | 0.038400 | 0.00000 | +0.000000 | 2.650 | -0.0352 | 1872 (4.1 %) | 2096 (15.3 %) |
+| 1000 | 0.038400 | 0.00000 | +0.000000 | 2.595 | -0.0280 | 1211 (5.6 %) | 2619 (6.6 %) |
+| 1500 | 0.035743 | 0.00000 | +0.002657 | 2.500 | -0.0088 | 299 (17.9 %) | 2821 (0.3 %) |
+| 2000 | 0.038028 | 0.00000 | +0.000372 | 2.501 | +0.0000 | 238 (0.0 %) | 2825 (0.0 %) |
+
+**phase B, the coupled setting with the resident** (3 intervals)
+| t (s) | outlet | transp | Δstore | head (m) | Δhead (m) | bloomcrown elig (turnover) | umbrellafrond elig (turnover) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 100 | 0.038241 | 0.00006 | +0.000100 | 2.501 | +0.0000 | 238 | 2825 |
+| 200 | 0.038258 | 0.00006 | +0.000084 | 2.501 | +0.0000 | 238 (0.0 %) | 2825 (0.0 %) |
+| 300 | 0.038277 | 0.00006 | +0.000065 | 2.501 | +0.0000 | 238 (0.0 %) | 2825 (0.0 %) |
+
+### Probe 4 — seed 1 / noise 101, 12,000 s budget (the far tail, and a determinism check)
+
+**phase A, the hydrology alone** (20 intervals)
+| t (s) | outlet | transp | Δstore | head (m) | Δhead (m) | bloomcrown elig (turnover) | umbrellafrond elig (turnover) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 200 | 0.038400 | 0.00000 | +0.000000 | 2.897 | -0.0481 | 2771 (0.5 %) | 480 (11.0 %) |
+| 400 | 0.038400 | 0.00000 | +0.000000 | 2.814 | -0.0413 | 2688 (0.1 %) | 667 (29.1 %) |
+| 600 | 0.038400 | 0.00000 | +0.000000 | 2.742 | -0.0362 | 2281 (13.2 %) | 1163 (26.6 %) |
+| 800 | 0.038400 | 0.00000 | +0.000000 | 2.669 | -0.0363 | 2156 (3.7 %) | 1850 (18.3 %) |
+| 1000 | 0.038400 | 0.00000 | +0.000000 | 2.609 | -0.0263 | 1545 (6.6 %) | 2430 (9.4 %) |
+| 1500 | 0.030528 | 0.00000 | +0.007872 | 2.502 | -0.0091 | 458 (12.8 %) | 2700 (0.8 %) |
+| 2000 | 0.037856 | 0.00000 | +0.000544 | 2.502 | +0.0000 | 314 (0.0 %) | 2720 (0.0 %) |
+
+**phase B, the coupled setting with the resident** (3 intervals)
+| t (s) | outlet | transp | Δstore | head (m) | Δhead (m) | bloomcrown elig (turnover) | umbrellafrond elig (turnover) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 100 | 0.037816 | 0.00006 | +0.000524 | 2.502 | -0.0000 | 314 | 2720 |
+| 200 | 0.037876 | 0.00006 | +0.000464 | 2.502 | +0.0000 | 311 (1.0 %) | 2720 (0.0 %) |
+| 300 | 0.037970 | 0.00006 | +0.000371 | 2.502 | +0.0000 | 311 (0.0 %) | 2720 (0.0 %) |
+
+Probe 4 is probe 1's keys with twice the budget: it settled on the same intervals, at the same
+head, with the same eligible counts, and left 9,700 s of its 12,000 s unspent — so there is no
+far tail to see, and the run reproduces to the interval. Probes 2 and 3 change the noise seed
+and the landform seed: the **counts** differ (bloomcrown 314 / 331 / 238, umbrellafrond
+2,720 / 2,723 / 2,825 at settling) while the **milestones do not**, which says the settling
+time is a property of the water treatment and not of a particular terrain.
+
+### What this establishes, and what it does not
+
+Conditioning under the declared outlet is **resolvable**, and ~2,300 s of budget (2,000 s of
+hydrology, 300 s of the coupled setting) is what it took on all four keys — phase B being the
+smaller number only because it inherits a settled table. Nothing was tuned to achieve it: the
+tolerances, the gates, the rain and the species are exactly as they were, and the only
+condition that changed is the one R11.3 declared.
+
+It establishes nothing about replacement. No arm ran, no newcomer founder was introduced, no G
+was measured, and a settled eligible set says where a species *could* establish at one instant,
+not that it persists there. What it licenses is the next question: a pilot now has a
+conditioning budget it can be expected to clear, and R11.1's bound says it needs an observation
+budget above **3,308.25 s** for this pair before a single replacement could complete.
