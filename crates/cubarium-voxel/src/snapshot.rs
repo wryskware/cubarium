@@ -29,8 +29,11 @@ pub fn decode(bytes: &[u8]) -> anyhow::Result<World> {
     if tag != SCHEMA {
         bail!("voxel snapshot schema {tag} is not {SCHEMA}; start a fresh world");
     }
-    let env: Envelope = postcard::from_bytes(bytes).context("corrupt voxel world snapshot")?;
+    let mut env: Envelope = postcard::from_bytes(bytes).context("corrupt voxel world snapshot")?;
     env.world.validate_loaded().context("invalid voxel world snapshot")?;
+    // The water active sets are not serialized — they are a cache of the arrays — so a
+    // decoded world builds them before anything can iterate them.
+    env.world.rebuild_active_sets();
     Ok(env.world)
 }
 

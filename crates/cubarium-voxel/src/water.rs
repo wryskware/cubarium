@@ -1,5 +1,5 @@
 //! Water: prescribed rain and evaporation, a conservative free-water solver over the
-//! void voxels (fall, then equalize every connected water region to one surface level),
+//! void voxels (fall, then a **local head-driven exchange** between neighbouring cells),
 //! infiltration into soil pores, drainage to the aquifer, spring discharge where head
 //! exceeds the spring cell, and one named outlet that exports.
 //!
@@ -22,8 +22,9 @@
 //!    water into the porous cell directly below it, the **receiving** cell's material
 //!    setting the rate at `permeability_per_s * sub_dt` of its own `pore_capacity`, per
 //!    voxel volume), then *fall* (every void cell hands its water to the void cell below
-//!    while that has room, one cell per substep), then *equalize* (every connected water
-//!    region settles to one surface level).
+//!    while that has room, one cell per substep), then *[`exchange`]* (every wet cell
+//!    offers water to its four horizontal neighbours and the cell below, driven by the
+//!    difference in column head).
 //! 4. **Drainage**: pore water above the cell's own `field_capacity` moves down — into
 //!    the pore space below, into the aquifer where a porous cell sits on bedrock or on
 //!    the foundation, or as a drip into free water where a porous cell roofs a void. A
@@ -92,71 +93,95 @@
 //! the aquifer. So this is a room-limited source, not a groundwater equilibrium, and the
 //! only path back into the aquifer is drainage (step 5).
 //!
-//! # Connectivity: what a region is
+//! # The local exchange: what moves water sideways
 //!
-//! A region is grown from a seed void cell that holds water. Its candidates are the void
-//! cells 6-connected to it, and they are admitted **a whole row of one `y` at a time**:
-//! a row joins only if the level the region would settle to after taking that whole row
-//! in still lies strictly above the highest cell in the region, the row included. So the
-//! region is always a body of water whose own surface submerges every cell it reaches
-//! through — under roofs as readily as in the open, since nothing in the rule looks at
-//! the sky.
+//! There is no region search and no connected-component solve. Each substep, every **wet**
+//! cell offers water across its four horizontal faces and to the cell below, and the drive
+//! is the difference in **column head**: the surface level `y + free` at the top of the
+//! contiguous water column the cell belongs to. A dry cell's head is its own floor, so
+//! water runs into an empty neighbour and off a ledge; a deep column's bottom cell carries
+//! its whole column's head, so it pushes hard sideways; and a **full** cell carries the
+//! highest head that reaches it across its horizontal faces ([`HEAD_PASSES`] local passes
+//! per substep), which is how the weight of one column arrives at the foot of another
+//! through a flooded passage.
 //!
-//! ## Row order, and why a row is all or nothing
+//! A push against a full neighbour is **displaced**, not refused: the water enters the
+//! lowest cells with room at or above that neighbour inside its own void run, bottom first
+//! ([`offer_up_the_run`]). That is incompressibility, locally, and it is what lifts the far
+//! shaft of a U-tube — nothing ever flows upward against its own head, and there is no
+//! separate up-push, which would only shuffle a column against `fall`.
 //!
-//! Seeds are taken lowest-water-surface first, then in index order. Rows are taken in
-//! this order: the region's own surface row first, then upwards, and only then the rows
-//! *below* it, lowest first. So the body spreads out at its own level before it looks for
-//! a way down, and by the time it does, every way down at a given `y` is in hand and they
-//! are judged together. A row refused while the level was still low is offered again in
-//! the next round, since taking other water in can lift the level within reach of it.
+//! Three caps make it stable and conservative: a cell's offers are **divided by the number
+//! of faces** it offers across (ordinary Jacobi damping — `FLOW_PER_SUBSTEP` is safe for
+//! one pair, and a cell with two low neighbours would otherwise hand each of them half its
+//! head and empty itself), then **scaled to what it holds**, and then every proposal into
+//! one destination is **scaled by that destination's room**. Both ends of every proposal
+//! are read from the water as it stood at the start of the substep and the whole of it is
+//! applied at the end, so no cell's result depends on the order the active set was walked
+//! in, and the phase is parallelisable by construction.
 //!
-//! Judging a row whole is what keeps the answer off the order the cells were reached in.
-//! Two identical hollows either side of a perched shelf are one row: admitting both would
-//! drop the level below the shelf, so *neither* is admitted, and the shelf drains into
-//! both by falling, a cell per substep, at the same rate. Admitting one of them — which is
-//! what judging candidates one at a time did — made the shelf pick the side the walk
-//! happened to reach first and left the other hollow short for good.
+//! Only the wet cells and the columns around them are ever looked at: the active sets in
+//! [`crate::World`] are maintained by the store primitives, so dry rock and dry air cost
+//! nothing at all (`design/7_Research/voxel-tick-profile-2026-09-18.md`).
 //!
-//! Index order inside a row is a tie-break for determinism only, and the fill picks no
-//! direction either: a region fills bottom-up and every cell at the surface level gets
-//! the *same* share. What is actually checked is three fixtures in `tests/core.rs` — the
-//! seam shift, the mirrored shelf and the symmetric spill — each settling to the
-//! translated or mirrored answer: exactly where they reach a common level, and to within
-//! a few times 1e-8 in a spill, whose stopping substep turns on a float comparison. That
-//! is three fixtures, not a proof that every geometry is order independent.
+//! ## What this model is, and what the old one was
 //!
-//! The level rule is what the U-tube and roofed-passage tests pin down. A shaft on the far
-//! side of a bottom connection, or of a roofed passage, joins the region only when the
-//! common level would stand above the connection, which is exactly when real water
-//! would push through it — so both sides rise together and end level, and neither the
-//! roof nor the passage floor stops them. The converse holds too: a barrier whose top
-//! is above the level is never crossed, and a spill over a low sill moves only the
-//! water that stands above the sill, a substep at a time, which leaves the two sides
-//! unequal afterwards the way real water does.
+//! The old solver grew every connected water region and set it to one surface level in a
+//! single substep. It was exact and it was 45 % of the tick. This one relaxes toward the
+//! same answer at half a head difference per substep per face: a U-tube levels in about a
+//! second, a ten-column roofed passage in a few, and the answers the fixtures in
+//! `tests/core.rs` pin — the spill thresholds, the mirrored shelf, the symmetric spill,
+//! the U-tube's own levels — come out the same. A **closed, surcharged** passage is the one
+//! case that does not settle flat: a local rule with no pressure solve leaves the surface
+//! above a flooded roof uneven by a few tenths of a cell, which
+//! `a_roofed_passage_pushes_the_far_shaft_above_the_roof` states rather than asserts away.
+//!
+//! Both numbers in it — `FLOW_PER_SUBSTEP` and `HEAD_PASSES` — are **placeholders**
+//! (`design/backlog.md`), and so is `water_substeps` 4, which is unchanged.
 //!
 //! # Limits, plainly
 //!
 //! - **No inertia.** Water has no momentum; nothing sloshes, overshoots or oscillates.
-//! - **No current.** There is no velocity field and no flow direction: water that is
-//!   in one region is simply re-levelled. A waterfall is a column of cells that each
-//!   hand their water down one cell per substep, not a jet.
-//! - **Settling is instantaneous within a region, per substep.** A lake 100 cells wide
-//!   levels in one substep, however far the water has to travel. Set
-//!   `Config::free_transfer_cap` above zero to cap how much one cell's fill may change
-//!   per substep and watch a fill spread instead; the default of zero leaves it
-//!   instantaneous.
-//! - **Water above the level is not part of the region.** A film running down a slope
-//!   descends a cell per substep rather than arriving at once.
+//! - **No current.** There is no velocity field: a flux is a head difference across one
+//!   face and nothing remembers it. A waterfall is a column of cells that each hand their
+//!   water down one cell per substep, not a jet.
+//! - **Settling travels.** A lake 100 cells wide no longer levels in one substep: head
+//!   crosses `HEAD_PASSES` cells per substep and a face moves `FLOW_PER_SUBSTEP` of its own
+//!   difference, so a wide body relaxes over ticks. `Config::free_transfer_cap` above zero
+//!   caps what one face may pass and slows it further without changing where the water ends
+//!   up.
+//! - **A surcharged closed passage does not settle flat.** See above: the one case where
+//!   the local rule visibly differs from the old region solver.
+//! - **Water above the level is not carried down at once.** A film running down a slope
+//!   descends a cell per substep.
 //! - **`f64` stores.** `free` and `pore` are `f64` fractions, so an internal transfer
 //!   debits its source exactly what it credited its destination. There is no
 //!   quantization term: the ledger residual `stored - initial_stored - net_in` is the
 //!   raw conservation error and nothing corrects it.
 
-use std::cmp::Reverse;
-use std::collections::BinaryHeap;
+use std::cell::RefCell;
 
 use crate::{Command, Config, Material, World, DT};
+
+/// The fraction of a head difference that crosses one face in one substep.
+///
+/// **Placeholder** (`design/backlog.md`): 0.5 is the largest coefficient that cannot make
+/// a pair overshoot — moving half of a difference leaves both ends level — and nothing
+/// measured it. It is the only number in the local exchange.
+const FLOW_PER_SUBSTEP: f64 = 0.5;
+
+/// A cell with less than this much room left counts as full, so a float hair of room
+/// cannot make the displacement target a cell that cannot actually take anything.
+const ROOM_EPS: f64 = 1e-12;
+
+/// How many local passes carry head through **submerged** water in one substep: how far
+/// pressure travels sideways before anything moves.
+///
+/// **Placeholder** (`design/backlog.md`). Four passes per substep and four substeps means
+/// pressure reaches sixteen cells a tick, so a wide lake levels over a few ticks instead of
+/// instantly, and a U-tube whose connection is two cells long feels the far column's weight
+/// on the first substep. It is the one number that replaces the old region search.
+const HEAD_PASSES: u32 = 4;
 
 // ---------------------------------------------------------------- store primitives
 //
@@ -192,6 +217,10 @@ fn add_free(w: &mut World, i: usize, vol: f64) -> f64 {
     let v = voxel(w);
     let before = w.free[i];
     w.free[i] = (before + vol / v).min(1.0);
+    // The active set is maintained here because this is one of the two places free water
+    // is written: a phase that iterates the wet set can only be right if the primitives
+    // keep it right.
+    w.wet.set(i, w.free[i] > 0.0);
     (w.free[i] - before).max(0.0) * v
 }
 
@@ -202,6 +231,7 @@ fn take_free(w: &mut World, i: usize, vol: f64) -> f64 {
     let v = voxel(w);
     let before = w.free[i];
     w.free[i] = (before - vol / v).max(0.0);
+    w.wet.set(i, w.free[i] > 0.0);
     (before - w.free[i]).max(0.0) * v
 }
 
@@ -213,6 +243,7 @@ fn add_pore(w: &mut World, i: usize, vol: f64) -> f64 {
     let unit = voxel(w) * cap;
     let before = w.pore[i];
     w.pore[i] = (before + vol / unit).min(1.0);
+    w.damp.set(i, w.pore[i] > 0.0);
     (w.pore[i] - before).max(0.0) * unit
 }
 
@@ -224,6 +255,7 @@ fn take_pore(w: &mut World, i: usize, vol: f64) -> f64 {
     let unit = voxel(w) * cap;
     let before = w.pore[i];
     w.pore[i] = (before - vol / unit).max(0.0);
+    w.damp.set(i, w.pore[i] > 0.0);
     (before - w.pore[i]).max(0.0) * unit
 }
 
@@ -319,97 +351,137 @@ fn open_water_cell(w: &World, x: i64, z: u32) -> Option<usize> {
 
 // ---------------------------------------------------------------- the tick
 
+/// Make a world's active sets trustworthy before any phase iterates them.
+///
+/// The sets are a cache of what the water arrays say, so a fresh, decoded or resized world
+/// has to rebuild them first. Every entry point that runs phases — [`step`] here and the
+/// schedule in `cubarium-voxel-sim` — calls this once before the first phase of a tick.
+pub fn begin(world: &mut World) {
+    if world.wet.needs_rebuild(world.config.cells())
+        || world.damp.needs_rebuild(world.config.cells())
+    {
+        world.rebuild_active_sets();
+    }
+}
+
+/// One tick of water, as one call. **The phase order is the rule** and it is written out
+/// once, here; `cubarium-voxel-sim`'s schedule chains the same public phases in the same
+/// order and this stays as the three-call sequence's water leg for tests and warm-ups.
 pub fn step(world: &mut World) {
-    rain(world);
-    evaporate(world);
-    let substeps = world.config.water_substeps.max(1);
-    let sub_dt = DT / substeps as f64;
-    for _ in 0..substeps {
-        // Infiltration first, and inside the substep: water standing on a permeable
-        // cell is offered to it before anything moves the water somewhere else. See
-        // the module doc on why runoff is what infiltration refuses.
-        infiltrate(world, sub_dt);
-        fall(world);
-        equalize(world);
-    }
-    drain(world);
-    water_table(world);
-    spring(world);
-    outlet(world);
+    begin(world);
+    crate::voxel_phase!(WorldStep, {
+        rain(world);
+        evaporate(world);
+        let substeps = world.config.water_substeps.max(1);
+        let sub_dt = DT / substeps as f64;
+        crate::voxel_phase!(Substeps, {
+            for _ in 0..substeps {
+                // Infiltration first, and inside the substep: water standing on a permeable
+                // cell is offered to it before anything moves the water somewhere else. See
+                // the module doc on why runoff is what infiltration refuses.
+                infiltrate(world, sub_dt);
+                fall(world);
+                exchange(world, 1);
+            }
+        });
+        drain(world);
+        water_table(world);
+        spring(world);
+        outlet(world);
+    });
 }
 
-fn rain(w: &mut World) {
-    let per_column = w.config.rain_m_per_s * DT * w.config.cell_area();
-    if per_column <= 0.0 {
-        return;
-    }
-    let (width, depth) = (w.config.width as i64, w.config.depth);
-    let mut credited = 0.0;
-    for z in 0..depth {
-        for x in 0..width {
-            if let Some(i) = sky_cell(w, x, z) {
-                credited += add_free(w, i, per_column);
+pub fn rain(w: &mut World) {
+    crate::voxel_phase!(Rain, {
+        let per_column = w.config.rain_m_per_s * DT * w.config.cell_area();
+        if per_column <= 0.0 {
+            return;
+        }
+        let (width, depth) = (w.config.width as i64, w.config.depth);
+        let mut credited = 0.0;
+        for z in 0..depth {
+            for x in 0..width {
+                if let Some(i) = sky_cell(w, x, z) {
+                    credited += add_free(w, i, per_column);
+                }
             }
         }
-    }
-    w.ledger.rain_in += credited;
+        w.ledger.rain_in += credited;
+    });
 }
 
-fn evaporate(w: &mut World) {
-    let per_column = w.config.evaporation_m_per_s * DT * w.config.cell_area();
-    if per_column <= 0.0 {
-        return;
-    }
-    let (width, depth) = (w.config.width as i64, w.config.depth);
-    let mut debited = 0.0;
-    for z in 0..depth {
-        for x in 0..width {
-            if let Some(i) = open_water_cell(w, x, z) {
-                debited += take_free(w, i, per_column);
+pub fn evaporate(w: &mut World) {
+    crate::voxel_phase!(Evaporate, {
+        let per_column = w.config.evaporation_m_per_s * DT * w.config.cell_area();
+        if per_column <= 0.0 {
+            return;
+        }
+        let (width, depth) = (w.config.width as i64, w.config.depth);
+        let mut debited = 0.0;
+        for z in 0..depth {
+            for x in 0..width {
+                if let Some(i) = open_water_cell(w, x, z) {
+                    debited += take_free(w, i, per_column);
+                }
             }
         }
-    }
-    w.ledger.evaporation_out += debited;
+        w.ledger.evaporation_out += debited;
+    });
 }
 
 /// Every void cell hands what it can to the void cell below. Purely vertical, so no
 /// horizontal direction is picked; a column compacts by one cell per substep.
-fn fall(w: &mut World) {
-    let c = w.config.clone();
-    for z in 0..c.depth {
-        for x in 0..c.width as i64 {
+///
+/// Iterated over the **wet columns** and not the grid: a column is walked bottom-up the
+/// moment one of its wet cells is met, so the rule — and its bottom-up order, which is
+/// what makes a whole column shift down by one rather than only its floor cell — is
+/// exactly what it was, over 2e3 columns instead of 147e3 cells
+/// (`design/7_Research/voxel-tick-profile-2026-09-18.md`).
+pub fn fall(w: &mut World) {
+    crate::voxel_phase!(Fall, {
+        let c = w.config.clone();
+        let plane = c.width as usize * c.depth as usize;
+        let columns = wet_columns(w, plane);
+        #[cfg(feature = "profile")]
+        crate::profile::add(
+            crate::profile::Count::FallCells,
+            columns.len() as u64 * u64::from(c.height.saturating_sub(1)),
+        );
+        for col in columns {
             for y in 1..c.height {
-                let i = c.index(x, y, z);
+                let i = y as usize * plane + col;
                 if w.free[i] <= 0.0 || w.material[i].is_solid() {
                     continue;
                 }
-                let below = c.index(x, y - 1, z);
+                let below = i - plane;
                 let want = free_m3(w, i).min(free_room_m3(w, below));
                 if want > 0.0 {
                     transfer(w, (i, Store::Free), (below, Store::Free), want);
                 }
             }
         }
-    }
+    });
 }
 
-/// Surface level of a region, in cell units, given how many of its cells sit at each
-/// `y` and how much water it holds (also in cell units: one full cell is `1.0`).
-fn level(counts: &[u32], mut rem: f64) -> f64 {
-    let mut top = 0.0;
-    for (y, &k) in counts.iter().enumerate() {
-        if k == 0 {
-            continue;
+/// The columns holding free water, deduplicated, in the order the wet set holds them.
+/// Collected into a fresh `Vec` because the caller then writes the water arrays; the
+/// dedup array itself is the reused scratch.
+fn wet_columns(w: &World, plane: usize) -> Vec<usize> {
+    SCRATCH.with(|slot| {
+        let sc = &mut *slot.borrow_mut();
+        sc.ensure(w.config.cells(), plane);
+        sc.next_stamp();
+        let stamp = sc.stamp;
+        let mut out = Vec::with_capacity(sc.columns.len().max(64));
+        for &i in w.wet.cells() {
+            let col = i % plane;
+            if sc.col_stamp[col] != stamp {
+                sc.col_stamp[col] = stamp;
+                out.push(col);
+            }
         }
-        let cap = k as f64;
-        if rem >= cap {
-            rem -= cap;
-            top = (y + 1) as f64;
-        } else {
-            return y as f64 + (rem / cap).max(0.0);
-        }
-    }
-    top
+        out
+    })
 }
 
 /// Whether the centre of row `y` lies at or below the water table `table`, in metres
@@ -446,366 +518,815 @@ fn submerged(c: &Config, y: u32, table: f64) -> bool {
 ///
 /// The named spring is untouched and still one cell with its own conductance: it is the
 /// world's one *feature*, while this is the ambient boundary the whole world sits on.
-fn water_table(w: &mut World) {
-    let c = w.config.clone();
-    let table = c.aquifer_head_m(w.aquifer_m3);
-    if !(table > 0.0) {
-        return;
-    }
-    // What the aquifer gives up this step, accumulated and debited once. Subtracting a
-    // microlitre from a store of tens of cubic metres forty thousand times a tick is
-    // forty thousand roundings against the store's own ulp; one subtraction is one.
-    let mut taken = 0.0;
-    let charged = w.aquifer_m3;
-
-    for y in 0..c.height {
-        if !submerged(&c, y, table) {
-            continue;
+pub fn water_table(w: &mut World) {
+    crate::voxel_phase!(WaterTable, {
+        let c = w.config.clone();
+        let table = c.aquifer_head_m(w.aquifer_m3);
+        if !(table > 0.0) {
+            return;
         }
-        for z in 0..c.depth {
-            for x in 0..c.width as i64 {
-                let i = c.index(x, y, z);
-                let m = w.material[i];
-                if m.pore_capacity() <= 0.0 || m.permeability_per_s() <= 0.0 {
-                    continue;
-                }
-                let rate = m.permeability_per_s() * DT * m.pore_capacity() * c.voxel_volume();
-                let want = rate.min(pore_room_m3(w, i)).min((charged - taken).max(0.0));
-                if want <= 0.0 {
-                    continue;
-                }
-                taken += add_pore(w, i, want);
+        // The saturated **band** and not the grid: `submerged` is monotone in `y`, so every
+        // row above the table's own row can be skipped without looking at it at all
+        // (`design/7_Research/voxel-tick-profile-2026-09-18.md`). Same rows, same rule.
+        let band = {
+            let rows = (table / c.voxel_m - 0.5).floor() + 1.0;
+            if rows <= 0.0 { 0 } else { (rows as u32).min(c.height) }
+        };
+        #[cfg(feature = "profile")]
+        crate::profile::add(
+            crate::profile::Count::WaterTableCells,
+            u64::from(c.depth) * u64::from(c.width) * u64::from(band),
+        );
+        // What the aquifer gives up this step, accumulated and debited once. Subtracting a
+        // microlitre from a store of tens of cubic metres forty thousand times a tick is
+        // forty thousand roundings against the store's own ulp; one subtraction is one.
+        let mut taken = 0.0;
+        let charged = w.aquifer_m3;
+
+        for y in 0..band {
+            if !submerged(&c, y, table) {
+                continue;
             }
-        }
-    }
-
-    for y in 1..c.height {
-        // Above the table there is nothing to seep into.
-        if (y as f64) * c.voxel_m >= table {
-            break;
-        }
-        let level = ((table - y as f64 * c.voxel_m) / c.voxel_m).clamp(0.0, 1.0);
-        for z in 0..c.depth {
-            for x in 0..c.width as i64 {
-                let i = c.index(x, y, z);
-                if w.material[i].is_solid() || w.free[i] >= level {
-                    continue;
-                }
-                let below = c.index(x, y - 1, z);
-                let m = w.material[below];
-                if m.pore_capacity() <= 0.0 || m.permeability_per_s() <= 0.0 {
-                    continue;
-                }
-                // Only saturated ground seeps: unsaturated soil takes the water itself.
-                if w.pore[below] < 1.0 - 1e-9 {
-                    continue;
-                }
-                let rate = m.permeability_per_s() * DT * m.pore_capacity() * c.voxel_volume();
-                let room = (level - w.free[i]) * c.voxel_volume();
-                let want = rate.min(room).min((charged - taken).max(0.0));
-                if want <= 0.0 {
-                    continue;
-                }
-                taken += add_free(w, i, want);
-            }
-        }
-    }
-
-    w.aquifer_m3 = (charged - taken).max(0.0);
-}
-
-/// Settle every connected water region to one surface level. See the module doc for
-/// what "connected" means here.
-fn equalize(w: &mut World) {
-    let c = w.config.clone();
-    let n = c.cells();
-    let plane = c.width as usize * c.depth as usize;
-    let height = c.height as usize;
-
-    let mut seeds: Vec<(f64, usize)> = Vec::new();
-    for i in 0..n {
-        if !w.material[i].is_solid() && w.free[i] > 0.0 {
-            seeds.push(((i / plane) as f64 + w.free[i], i));
-        }
-    }
-    if seeds.is_empty() {
-        return;
-    }
-    seeds.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-
-    let mut done = vec![false; n];
-    let mut stamp = vec![0u32; n];
-    let mut queued = vec![0u32; n];
-    let mut counts = vec![0u32; height];
-    let mut fracs = vec![0f64; height];
-    // Candidates waiting to be judged, filed under their own `y`, and the round in which
-    // that row was last refused. `rows` is non-empty only at the `y`s listed in `touched`.
-    let mut rows: Vec<Vec<usize>> = vec![Vec::new(); height];
-    let mut refused = vec![0u32; height];
-    let mut touched: Vec<usize> = Vec::new();
-    let mut region: Vec<usize> = Vec::new();
-    let mut heap: BinaryHeap<Reverse<(usize, u8, usize)>> = BinaryHeap::new();
-    let mut epoch = 0u32;
-    let mut round = 0u32;
-
-    for (_, seed) in seeds {
-        if done[seed] {
-            continue;
-        }
-        epoch += 1;
-        region.clear();
-        heap.clear();
-        stamp[seed] = epoch;
-        queued[seed] = epoch;
-        region.push(seed);
-        let mut fill = w.free[seed];
-        let mut y_max = seed / plane;
-        counts[y_max] = 1;
-        push_neighbours(&c, w, seed, epoch, &stamp, &done, &mut queued, &mut heap);
-
-        // Growth takes a whole row of candidates or none of it, and it takes the region's
-        // own surface row and the rows above it before any row below: the body spreads out
-        // at its own level first and only then looks for a way down, so when there are
-        // several ways down at one `y` they are judged together instead of one at a time.
-        // That is what keeps two equal exits from being decided by which one the walk
-        // reached first. A row refused while the level was low is offered again in the
-        // next round, since taking other water in can lift the level within reach of it.
-        for _ in 0..4 {
-            round += 1;
-            let mut committed = false;
-            loop {
-                // File everything reachable so far under its own `y`. `queued` keeps a
-                // cell out of more than one row, so a row never counts one twice.
-                while let Some(Reverse((y, _, i))) = heap.pop() {
-                    if stamp[i] == epoch || done[i] {
+            for z in 0..c.depth {
+                for x in 0..c.width as i64 {
+                    let i = c.index(x, y, z);
+                    let m = w.material[i];
+                    if m.pore_capacity() <= 0.0 || m.permeability_per_s() <= 0.0 {
                         continue;
                     }
-                    if rows[y].is_empty() {
-                        touched.push(y);
+                    let rate = m.permeability_per_s() * DT * m.pore_capacity() * c.voxel_volume();
+                    let want = rate.min(pore_room_m3(w, i)).min((charged - taken).max(0.0));
+                    if want <= 0.0 {
+                        continue;
                     }
-                    rows[y].push(i);
-                }
-                let Some(y) = (y_max..height)
-                    .chain(0..y_max)
-                    .find(|&y| refused[y] != round && !rows[y].is_empty())
-                else {
-                    break;
-                };
-
-                let batch = std::mem::take(&mut rows[y]);
-                let taking = batch.len() as u32;
-                let candidates: f64 = batch.iter().map(|&i| w.free[i]).sum();
-                counts[y] += taking;
-                let l = level(&counts, fill + candidates);
-                let top = y_max.max(y) as f64;
-                if l > top + 1e-12 {
-                    fill += candidates;
-                    y_max = y_max.max(y);
-                    for &i in &batch {
-                        stamp[i] = epoch;
-                        region.push(i);
-                    }
-                    for &i in &batch {
-                        push_neighbours(&c, w, i, epoch, &stamp, &done, &mut queued, &mut heap);
-                    }
-                    committed = true;
-                } else {
-                    counts[y] -= taking;
-                    refused[y] = round;
-                    // Not reachable at this level. Keep the row for the next round.
-                    rows[y] = batch;
+                    taken += add_pore(w, i, want);
                 }
             }
-            if !committed {
+        }
+
+        for y in 1..c.height {
+            // Above the table there is nothing to seep into.
+            if (y as f64) * c.voxel_m >= table {
+                break;
+            }
+            let level = ((table - y as f64 * c.voxel_m) / c.voxel_m).clamp(0.0, 1.0);
+            for z in 0..c.depth {
+                for x in 0..c.width as i64 {
+                    let i = c.index(x, y, z);
+                    if w.material[i].is_solid() || w.free[i] >= level {
+                        continue;
+                    }
+                    let below = c.index(x, y - 1, z);
+                    let m = w.material[below];
+                    if m.pore_capacity() <= 0.0 || m.permeability_per_s() <= 0.0 {
+                        continue;
+                    }
+                    // Only saturated ground seeps: unsaturated soil takes the water itself.
+                    if w.pore[below] < 1.0 - 1e-9 {
+                        continue;
+                    }
+                    let rate = m.permeability_per_s() * DT * m.pore_capacity() * c.voxel_volume();
+                    let room = (level - w.free[i]) * c.voxel_volume();
+                    let want = rate.min(room).min((charged - taken).max(0.0));
+                    if want <= 0.0 {
+                        continue;
+                    }
+                    taken += add_free(w, i, want);
+                }
+            }
+        }
+
+        w.aquifer_m3 = (charged - taken).max(0.0);
+    });
+}
+
+/// Scratch buffers for [`exchange`], reused for the life of the thread so the phase
+/// allocates nothing: four substeps a tick used to allocate and zero eight grid-sized
+/// vectors each (`design/7_Research/voxel-tick-profile-2026-09-18.md`). Every entry is
+/// written before it is read inside one call, so nothing here is state.
+#[derive(Default)]
+struct Scratch {
+    /// Surface level of the contiguous water column a wet cell belongs to, in cell units
+    /// (`y + free` of the run's top cell). Valid for the cells of this substep's active
+    /// columns.
+    ///
+    /// **Column-major** (`col * height + y`, see [`col_of`] and [`tcell`]) and not in the
+    /// world's own index order, so that one column's entries are contiguous: that is what
+    /// lets the scan hand each worker a disjoint `&mut` span and keeps this crate's
+    /// `#![forbid(unsafe_code)]`. Values are unchanged by the layout — `room_target` and
+    /// `run_top` still hold **world** cell indices — so the arithmetic is the arithmetic
+    /// the serial scan always did.
+    head: Vec<f64>,
+    /// For every non-solid cell of an active column: the lowest cell **at or above** it,
+    /// inside its own void run, that still has room — where a push against this cell
+    /// actually displaces water to. `usize::MAX` when the run is full to its ceiling.
+    /// Column-major, like `head`; the value is a world cell index.
+    room_target: Vec<usize>,
+    /// The top cell of each non-solid cell's own void run: where a displacement stops.
+    /// Column-major, like `head`; the value is a world cell index.
+    run_top: Vec<usize>,
+    /// One cell's offers this pass, `(destination, volume)`, before the giver's own stock
+    /// scales them.
+    offers: Vec<(usize, f64)>,
+    /// The **driving** head: a cell's own surface head, raised to the highest head that
+    /// reaches it through submerged water. A giver pushes with its `drive`; a receiver
+    /// resists with its own `head`, because what a neighbour presents to the water arriving
+    /// is its surface level and not the pressure passing through it.
+    drive: Vec<f64>,
+    /// The next `drive` while the current one is read: the propagation is Jacobi, two
+    /// buffers, so it does not depend on the order the set is walked in.
+    drive_next: Vec<f64>,
+    /// The wet cells at the start of the substep, copied so the sets may be edited while
+    /// the flux is applied.
+    active: Vec<usize>,
+    /// The **full** cells of the active set: the submerged ones, which are the only cells
+    /// that carry another column's head and the only ones that can push straight up.
+    full: Vec<usize>,
+    /// Columns holding or neighbouring water, deduplicated by `col_stamp`.
+    columns: Vec<usize>,
+    col_stamp: Vec<u32>,
+    /// Cells named by an edge, deduplicated by `touch_stamp`.
+    touched: Vec<usize>,
+    touch_stamp: Vec<u32>,
+    stamp: u32,
+    /// The proposals: from, to, and the volume in cell units.
+    edges: Vec<(u32, u32, f64)>,
+    /// Per-cell accumulators: what was proposed into a cell, the fraction of it the cell
+    /// accepts, and the net change applied at the end.
+    proposed_in: Vec<f64>,
+    accept: Vec<f64>,
+    delta: Vec<f64>,
+}
+
+impl Scratch {
+    fn ensure(&mut self, n: usize, plane: usize) {
+        if self.head.len() != n {
+            self.head = vec![0.0; n];
+            self.drive = vec![0.0; n];
+            self.drive_next = vec![0.0; n];
+            self.room_target = vec![usize::MAX; n];
+            self.run_top = vec![usize::MAX; n];
+            self.touch_stamp = vec![0; n];
+            self.proposed_in = vec![0.0; n];
+            self.accept = vec![0.0; n];
+            self.delta = vec![0.0; n];
+            self.stamp = 0;
+        }
+        if self.col_stamp.len() != plane {
+            self.col_stamp = vec![0; plane];
+            self.stamp = 0;
+        }
+    }
+
+    /// A fresh stamp for this substep's dedup arrays, clearing them on the wrap.
+    fn next_stamp(&mut self) {
+        self.stamp = self.stamp.wrapping_add(1);
+        if self.stamp == 0 {
+            self.col_stamp.fill(0);
+            self.touch_stamp.fill(0);
+            self.stamp = 1;
+        }
+    }
+}
+
+thread_local! {
+    static SCRATCH: RefCell<Scratch> = RefCell::new(Scratch::default());
+}
+
+/// The column a world cell index belongs to: `plane` is one horizontal layer, so this is
+/// the cell's `(x, z)` and nothing else.
+#[inline]
+fn col_of(i: usize, plane: usize) -> usize {
+    i % plane
+}
+
+/// The row a world cell index sits in.
+#[inline]
+fn row_of(i: usize, plane: usize) -> usize {
+    i / plane
+}
+
+/// A world cell index in the column-major scratch layout: one column's `height` entries
+/// are contiguous, which is what makes the scan splittable.
+#[inline]
+fn tcell(i: usize, plane: usize, height: usize) -> usize {
+    col_of(i, plane) * height + row_of(i, plane)
+}
+
+/// The same, from a column and a row already in hand — no division.
+#[inline]
+fn tat(col: usize, y: usize, height: usize) -> usize {
+    col * height + y
+}
+
+/// **The local exchange: what replaced the region solver.**
+///
+/// Each substep every wet cell offers water to its four horizontal neighbours and to the
+/// cell below, driven by the difference in **column head** — the surface level of the
+/// contiguous water column the cell belongs to, `y + free` at the run's top. That one
+/// definition is what carries pressure without any connectivity search: the bottom cell of
+/// a deep column has its whole column's head, so it pushes hard sideways; a full cell in a
+/// submerged gap has the head of the body it is part of and passes the push along; and a
+/// dry cell's head is its own floor, so water runs into an empty neighbour and off a ledge.
+///
+/// A push against a **full** neighbour is not refused, it is **displaced**: the water
+/// enters the lowest cell with room at or above that neighbour, inside the neighbour's own
+/// void run (`Scratch::room_target`). That is incompressibility, locally — pushing at the
+/// bottom of a submerged column lifts its surface — and it is what makes a U-tube level and
+/// a roofed passage push the far shaft up without anything ever flowing upward against its
+/// own head.
+///
+/// The flux across one face is `FLOW_PER_SUBSTEP * (head_here - head_there)`, capped three
+/// ways: by the room at the destination, by what the giver holds (its proposals are scaled
+/// down together if they ask for more), and by the destination's total acceptance (every
+/// proposal into one cell is scaled by the same factor when they overfill it together).
+/// Both ends of every proposal are read from the **old** water and the whole of it is
+/// applied at the end, so no cell's result depends on the order the set was walked in and
+/// the phase is parallelisable by construction.
+///
+/// **What this is not.** There is no momentum, no velocity field and no free surface: a
+/// lake no longer levels in one substep, it relaxes at half of its head difference per
+/// substep, which is a travelling wave rather than an instant re-level. `FLOW_PER_SUBSTEP`
+/// is a placeholder and the only number in the rule.
+pub fn exchange(w: &mut World, threads: usize) {
+    crate::voxel_phase!(Exchange, { exchange_inner(w, threads) })
+}
+
+fn exchange_inner(w: &mut World, threads: usize) {
+    let c = w.config.clone();
+    let plane = c.width as usize * c.depth as usize;
+    let height = c.height as usize;
+    let n = c.cells();
+    if w.wet.len() == 0 {
+        return;
+    }
+    SCRATCH.with(|slot| {
+        let sc = &mut *slot.borrow_mut();
+        sc.ensure(n, plane);
+        sc.next_stamp();
+        let stamp = sc.stamp;
+        // ---- the active set: the wet cells, and the columns they and their horizontal
+        // neighbours live in. Dry rock and dry air are never looked at.
+        sc.active.clear();
+        sc.active.extend_from_slice(w.wet.cells());
+        for &i in &sc.active {
+            let (x, _, z) = c.coords(i);
+            let x = x as i64;
+            for (dx, dz) in [(0i64, 0i64), (-1, 0), (1, 0), (0, -1), (0, 1)] {
+                let nz = z as i64 + dz;
+                if nz < 0 || nz >= c.depth as i64 {
+                    continue;
+                }
+                sc.col_stamp[c.index(x + dx, 0, nz as u32)] = stamp;
+            }
+        }
+        // Collected **ascending** by one pass over the stamp array rather than pushed in
+        // the order the wet set happened to be walked in. Two reasons, neither a rule: the
+        // column scan writes disjoint cells so its order cannot reach a result, and an
+        // ascending list is what lets the parallel split cut the column-major scratch into
+        // disjoint ascending spans without sorting anything. One pass over `plane` columns
+        // is cheaper than sorting the list it replaces.
+        sc.columns.clear();
+        for col in 0..plane {
+            if sc.col_stamp[col] == stamp {
+                sc.columns.push(col);
+            }
+        }
+        #[cfg(feature = "profile")]
+        {
+            crate::profile::add(crate::profile::Count::ExchangeWet, sc.active.len() as u64);
+            crate::profile::add(crate::profile::Count::ExchangeColumns, sc.columns.len() as u64);
+        }
+
+        // ---- one pass per active column: heads, and where a push displaces to. **This is
+        // the phase's parallel leg** — the columns are disjoint, the world's arrays are
+        // read-only here, and the scratch is column-major so each worker gets its own
+        // `&mut` spans (`design/7_Research/voxel-tick-profile-2026-09-18.md` measured it at
+        // 40 % of the process).
+        scan_columns(w, height, plane, threads, sc);
+
+        // ---- head through submerged water. A full cell has no free surface of its own,
+        // so it carries the highest head that reaches it across its horizontal faces: that
+        // is how the weight of one column arrives at the foot of another through a flooded
+        // passage, which is the whole of the U-tube and the roofed gap. The **driving**
+        // head is what a giver pushes with; a receiver still resists with its own surface
+        // head, or a push would cancel itself against the pressure it just transmitted.
+        //
+        // `max` only raises, so the passes converge; two buffers keep the answer off the
+        // walk order, and the loop stops as soon as a pass raises nothing.
+        for ai in 0..sc.active.len() {
+            let i = sc.active[ai];
+            sc.drive[i] = sc.head[tcell(i, plane, height)];
+        }
+        sc.full.clear();
+        for ai in 0..sc.active.len() {
+            let i = sc.active[ai];
+            if w.free[i] >= 1.0 - ROOM_EPS {
+                sc.full.push(i);
+            }
+        }
+        for _ in 0..HEAD_PASSES {
+            let mut raised = false;
+            for fi in 0..sc.full.len() {
+                let i = sc.full[fi];
+                let (x, y, z) = c.coords(i);
+                let x = x as i64;
+                let mut h = sc.drive[i];
+                for (dx, dz) in [(-1i64, 0i64), (1, 0), (0, -1), (0, 1)] {
+                    let nz = z as i64 + dz;
+                    if nz < 0 || nz >= c.depth as i64 {
+                        continue;
+                    }
+                    let j = c.index(x + dx, y, nz as u32);
+                    if w.material[j].is_solid() || w.free[j] <= 0.0 {
+                        continue;
+                    }
+                    if sc.drive[j] > h {
+                        h = sc.drive[j];
+                    }
+                }
+                sc.drive_next[i] = h;
+            }
+            for fi in 0..sc.full.len() {
+                let i = sc.full[fi];
+                if sc.drive_next[i] > sc.drive[i] {
+                    sc.drive[i] = sc.drive_next[i];
+                    raised = true;
+                }
+            }
+            if !raised {
                 break;
             }
         }
-        for &y in &touched {
-            rows[y].clear();
-        }
-        touched.clear();
 
-        // Fill the region bottom up, splitting what is left across the cells that sit
-        // at the surface level.
-        let mut rem = fill;
-        for y in 0..height {
-            if counts[y] == 0 {
+        // ---- the proposals, all read from the old water.
+        sc.edges.clear();
+        sc.touched.clear();
+        for ai in 0..sc.active.len() {
+            let i = sc.active[ai];
+            let have = w.free[i];
+            if have <= 0.0 {
                 continue;
             }
-            let cap = counts[y] as f64;
-            if rem >= cap - 1e-12 {
-                fracs[y] = 1.0;
-                rem = (rem - cap).max(0.0);
-            } else if rem > 0.0 {
-                fracs[y] = rem / cap;
-                rem = 0.0;
-            } else {
-                fracs[y] = 0.0;
-            }
-        }
-        debug_assert!(rem < 1e-9, "a region cannot hold more water than its own cells");
+            let (x, y, z) = c.coords(i);
+            let x = x as i64;
+            let here = sc.drive[i];
+            sc.offers.clear();
+            let mut total = 0.0;
+            // How many faces this cell is offering across. Its offers are divided by that
+            // count below: `FLOW_PER_SUBSTEP` is safe for **one** pair — half a difference
+            // levels a pair exactly — and a cell with two low neighbours would otherwise
+            // hand each of them half its head and empty itself, which flip-flops instead
+            // of relaxing. This is the ordinary Jacobi damping and it is what makes the
+            // exchange settle rather than ring.
+            let mut faces = 0usize;
 
-        // Optional per-substep cap: relax every cell of the region toward its target by
-        // the same factor, which keeps the total exactly.
-        let mut relax = 1.0;
-        if c.free_transfer_cap > 0.0 {
-            let mut worst = 0.0f64;
-            for &i in &region {
-                let d = (fracs[i / plane] - w.free[i]).abs();
-                worst = worst.max(d);
+            // The four horizontal faces. A push against a **full** neighbour is not
+            // refused, it is displaced: the water goes into the lowest cells with room at
+            // or above that neighbour, inside the neighbour's own void run, bottom first.
+            // That is what lifts a submerged column's surface instead of throttling the
+            // flow to the hair of room its floor cell has left.
+            for (dx, dz) in [(-1i64, 0i64), (1, 0), (0, -1), (0, 1)] {
+                let nz = z as i64 + dz;
+                if nz < 0 || nz >= c.depth as i64 {
+                    continue;
+                }
+                let j = c.index(x + dx, y, nz as u32);
+                if w.material[j].is_solid() {
+                    continue;
+                }
+                // Same row, so the neighbour's column is all that changes and its
+                // column-major index needs no division.
+                let tj = tat(col_of(j, plane), y as usize, height);
+                let there = if w.free[j] > 0.0 { sc.head[tj] } else { f64::from(y) };
+                let drop = here - there;
+                if drop <= 0.0 {
+                    continue;
+                }
+                let placed =
+                    offer_up_the_run(w, plane, tj, cap_flux(&c, FLOW_PER_SUBSTEP * drop), sc);
+                if placed > 0.0 {
+                    faces += 1;
+                    total += placed;
+                }
             }
-            if worst > c.free_transfer_cap {
-                relax = c.free_transfer_cap / worst;
+
+            // And straight down, into the cell's own room below: the same rule, and the
+            // reason a film keeps moving when `fall` has already taken what it can.
+            if y > 0 {
+                let below = c.index(x, y - 1, z);
+                if !w.material[below].is_solid() {
+                    let room = (1.0 - w.free[below]).max(0.0);
+                    let there = if w.free[below] > 0.0 {
+                        sc.head[tat(col_of(below, plane), y as usize - 1, height)]
+                    } else {
+                        f64::from(y - 1)
+                    };
+                    let drop = here - there;
+                    if drop > 0.0 && room > 0.0 {
+                        let q = cap_flux(&c, FLOW_PER_SUBSTEP * drop).min(room);
+                        if q > 0.0 {
+                            sc.offers.push((below, q));
+                            faces += 1;
+                            total += q;
+                        }
+                    }
+                }
+            }
+
+            // **There is no separate upward push**, and that is a rule and not an
+            // omission: a column rises because water *arriving* at it is displaced up its
+            // own run (`offer_up_the_run`), which is what lifts the far shaft of a U-tube.
+            // Lifting a cell's own water into the cell above it instead only shuffles a
+            // column against `fall` — the two fight, and a roofed passage never fills.
+
+            if sc.offers.is_empty() || total <= 0.0 {
+                continue;
+            }
+            // A cell cannot give more than it holds, and no one face may drain it: its
+            // offers are divided by the faces it offers across and then scaled together if
+            // they still ask for more than it has, so no face is ever preferred.
+            let share = 1.0 / faces.max(1) as f64;
+            let total = total * share;
+            let scale = share * if total > have { have / total } else { 1.0 };
+            for oi in 0..sc.offers.len() {
+                let (target, q) = sc.offers[oi];
+                let q = q * scale;
+                if q <= 0.0 {
+                    continue;
+                }
+                sc.edges.push((i as u32, target as u32, q));
+                sc.proposed_in[target] += q;
+                for cell in [i, target] {
+                    if sc.touch_stamp[cell] != stamp {
+                        sc.touch_stamp[cell] = stamp;
+                        sc.touched.push(cell);
+                    }
+                }
             }
         }
 
-        for &i in &region {
-            let before = w.free[i];
-            let target = before + relax * (fracs[i / plane] - before);
-            w.free[i] = target.clamp(0.0, 1.0);
-            done[i] = true;
+        // ---- what each destination can actually take, whoever offered it.
+        for ti in 0..sc.touched.len() {
+            let cell = sc.touched[ti];
+            let proposed = sc.proposed_in[cell];
+            let room = (1.0 - w.free[cell]).max(0.0);
+            sc.accept[cell] = if proposed > room && proposed > 0.0 { room / proposed } else { 1.0 };
         }
-        for &i in &region {
-            counts[i / plane] = 0;
+
+        // ---- apply: one subtraction and one addition per edge, accumulated per cell so
+        // that a cell touched by several edges is written once.
+        for ei in 0..sc.edges.len() {
+            let (from, to, q) = sc.edges[ei];
+            let moved = q * sc.accept[to as usize];
+            if moved <= 0.0 {
+                continue;
+            }
+            sc.delta[from as usize] -= moved;
+            sc.delta[to as usize] += moved;
         }
+        for ti in 0..sc.touched.len() {
+            let cell = sc.touched[ti];
+            let d = sc.delta[cell];
+            sc.delta[cell] = 0.0;
+            sc.proposed_in[cell] = 0.0;
+            sc.accept[cell] = 0.0;
+            if d != 0.0 {
+                w.free[cell] = (w.free[cell] + d).clamp(0.0, 1.0);
+                w.wet.set(cell, w.free[cell] > 0.0);
+            }
+        }
+    });
+}
+
+/// Place `q` into the cells with room at or above the cell whose **column-major** scratch
+/// index is `tj`, inside that cell's own void run, bottom first, recording each part as an
+/// offer. Returns how much of `q` actually found room. The walk itself is in world indices
+/// (`at += plane`), because that is what the offers and the water arrays are keyed by.
+///
+/// This is the displacement rule: pushing against a submerged cell fills the stack above
+/// it rather than stopping at whatever room that one cell has left. Without it a nearly
+/// full column throttles the flow into it to its own remaining hair of room, and a U-tube
+/// crawls toward its level geometrically instead of reaching it.
+fn offer_up_the_run(w: &World, plane: usize, tj: usize, q: f64, sc: &mut Scratch) -> f64 {
+    let mut left = q;
+    let mut at = sc.room_target[tj];
+    let top = sc.run_top[tj];
+    if at == usize::MAX || top == usize::MAX {
+        return 0.0;
+    }
+    let mut placed = 0.0;
+    while left > 0.0 && at <= top {
+        let room = (1.0 - w.free[at]).max(0.0);
+        if room > 0.0 {
+            let take = left.min(room);
+            sc.offers.push((at, take));
+            placed += take;
+            left -= take;
+        }
+        at += plane;
+    }
+    placed
+}
+
+/// `free_transfer_cap`, when the config sets one: the most one face may move in one
+/// substep, in cell units. Zero leaves the flux uncapped, which is the default.
+#[inline]
+fn cap_flux(c: &Config, q: f64) -> f64 {
+    if c.free_transfer_cap > 0.0 { q.min(c.free_transfer_cap) } else { q }
+}
+
+/// The column scan, over every active column: **the one leg of the water tick that runs on
+/// more than one thread.**
+///
+/// Each column's scan writes only that column's own `height` entries of the three
+/// column-major scratch buffers and reads only the world's arrays, so the columns are
+/// independent by construction. With `threads` above one and at least one column per
+/// worker, the ascending column list is cut into `threads` equal-count chunks and each
+/// chunk's columns span one contiguous, disjoint run of each buffer — an ordinary
+/// `split_at_mut`, no unsafe, no synchronisation, and no reduction to reassociate. Below
+/// that it is the same loop on this thread.
+fn scan_columns(w: &World, height: usize, plane: usize, threads: usize, sc: &mut Scratch) {
+    // Field-by-field, so the read-only column list and the three written buffers are
+    // disjoint borrows of one `Scratch`.
+    let Scratch { head, room_target, run_top, columns, .. } = sc;
+    let (material, free) = (&w.material[..], &w.free[..]);
+
+    #[cfg(feature = "parallel")]
+    if threads > 1 && columns.len() >= threads {
+        let per = columns.len().div_ceil(threads);
+        let chunks: Vec<&[usize]> = columns.chunks(per).collect();
+        let heads = cut_spans(head, height, &chunks);
+        let rooms = cut_spans(room_target, height, &chunks);
+        let tops = cut_spans(run_top, height, &chunks);
+        let pool = bevy_tasks::ComputeTaskPool::get_or_init(|| {
+            bevy_tasks::TaskPoolBuilder::new().num_threads(threads).build()
+        });
+        pool.scope(|scope| {
+            for (((cols, (start, h)), (_, r)), (_, t)) in
+                chunks.into_iter().zip(heads).zip(rooms).zip(tops)
+            {
+                scope.spawn(async move {
+                    for &col in cols {
+                        let at = col * height - start;
+                        scan_column(
+                            material,
+                            free,
+                            height,
+                            plane,
+                            col,
+                            &mut h[at..at + height],
+                            &mut r[at..at + height],
+                            &mut t[at..at + height],
+                        );
+                    }
+                });
+            }
+        });
+        return;
+    }
+    let _ = threads;
+
+    for &col in columns.iter() {
+        let at = col * height;
+        scan_column(
+            material,
+            free,
+            height,
+            plane,
+            col,
+            &mut head[at..at + height],
+            &mut room_target[at..at + height],
+            &mut run_top[at..at + height],
+        );
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn push_neighbours(
-    c: &Config,
-    w: &World,
-    i: usize,
-    epoch: u32,
-    stamp: &[u32],
-    done: &[bool],
-    queued: &mut [u32],
-    heap: &mut BinaryHeap<Reverse<(usize, u8, usize)>>,
+/// Cut one column-major scratch buffer into the single contiguous span each chunk of
+/// **ascending, distinct** columns covers, with each span's start offset.
+///
+/// The chunks come from `slice::chunks` of an ascending list, so their column ranges are
+/// disjoint and ascending and the cuts are plain `split_at_mut`s. Columns inside a chunk's
+/// span that are not themselves active are simply never written; no other chunk can reach
+/// them either.
+#[cfg(feature = "parallel")]
+fn cut_spans<'a, T>(
+    buf: &'a mut [T],
+    height: usize,
+    chunks: &[&[usize]],
+) -> Vec<(usize, &'a mut [T])> {
+    let mut out = Vec::with_capacity(chunks.len());
+    let mut rest: &mut [T] = buf;
+    let mut at = 0usize;
+    for cols in chunks {
+        let start = cols[0] * height;
+        let end = (cols[cols.len() - 1] + 1) * height;
+        let (_, tail) = std::mem::replace(&mut rest, &mut []).split_at_mut(start - at);
+        let (mine, tail) = tail.split_at_mut(end - start);
+        out.push((start, mine));
+        rest = tail;
+        at = end;
+    }
+    out
+}
+
+/// One pass over a column: the head of every wet cell, and the displacement target of
+/// every non-solid cell.
+///
+/// A **void run** is a maximal stack of non-solid cells; the displacement target of a cell
+/// is the lowest cell with room at or above it *within its own run*, because a solid
+/// ceiling is where a push stops. A **water run** is a maximal stack of wet cells inside a
+/// void run, and every cell of it carries the run's own surface level.
+///
+/// **This is the parallel pass**, and it is why the scratch is column-major: it reads the
+/// world's arrays (shared) and writes only `head[y]`, `room_target[y]` and `run_top[y]` of
+/// the **one column** whose three `height`-long spans the caller handed it. Two columns
+/// never overlap, so a worker per chunk of columns needs no synchronisation and no unsafe.
+/// The values written are world cell indices, exactly as before.
+fn scan_column(
+    material: &[Material],
+    free: &[f64],
+    height: usize,
+    plane: usize,
+    col: usize,
+    head: &mut [f64],
+    room_target: &mut [usize],
+    run_top: &mut [usize],
 ) {
-    let plane = c.width as usize * c.depth as usize;
-    for nb in neighbours(c, i).into_iter().flatten() {
-        if w.material[nb].is_solid() || stamp[nb] == epoch || done[nb] || queued[nb] == epoch {
+    let mut y = 0usize;
+    while y < height {
+        if material[y * plane + col].is_solid() {
+            y += 1;
             continue;
         }
-        queued[nb] = epoch;
-        let wet = if w.free[nb] > 0.0 { 0u8 } else { 1u8 };
-        heap.push(Reverse((nb / plane, wet, nb)));
-    }
-}
-
-fn infiltrate(w: &mut World, dt: f64) {
-    let c = w.config.clone();
-    for z in 0..c.depth {
-        for x in 0..c.width as i64 {
-            for y in 1..c.height {
-                let i = c.index(x, y, z);
-                if w.material[i].is_solid() || w.free[i] <= 0.0 {
-                    continue;
+        let mut top = y;
+        while top + 1 < height && !material[(top + 1) * plane + col].is_solid() {
+            top += 1;
+        }
+        // Displacement targets, from the ceiling down: the lowest cell with room seen so
+        // far is the lowest cell with room at or above the cell being written.
+        let mut best = usize::MAX;
+        let top_cell = top * plane + col;
+        for k in (y..=top).rev() {
+            let i = k * plane + col;
+            if free[i] < 1.0 - ROOM_EPS {
+                best = i;
+            }
+            room_target[k] = best;
+            run_top[k] = top_cell;
+        }
+        // Heads, one water run at a time.
+        let mut k = y;
+        while k <= top {
+            let i = k * plane + col;
+            if free[i] > 0.0 {
+                let mut t = k;
+                while t + 1 <= top && free[(t + 1) * plane + col] > 0.0 {
+                    t += 1;
                 }
-                let below = c.index(x, y - 1, z);
-                let m = w.material[below];
-                if m.pore_capacity() <= 0.0 || m.permeability_per_s() <= 0.0 {
-                    continue;
+                let surface = t as f64 + free[t * plane + col];
+                for m in k..=t {
+                    head[m] = surface;
                 }
-                let rate = m.permeability_per_s() * dt * m.pore_capacity() * c.voxel_volume();
-                transfer(w, (i, Store::Free), (below, Store::Pore), rate);
+                k = t + 1;
+            } else {
+                k += 1;
             }
         }
+        y = top + 1;
     }
 }
 
-fn drain(w: &mut World) {
-    let c = w.config.clone();
-    // The table as it stands at the start of the step: a voxel inside the saturated
-    // zone has nowhere lower to drain to, because the aquifer is what is holding it up.
-    let table = c.aquifer_head_m(w.aquifer_m3);
-    for z in 0..c.depth {
-        for x in 0..c.width as i64 {
-            for y in 0..c.height {
-                if submerged(&c, y, table) {
-                    continue;
-                }
-                let i = c.index(x, y, z);
-                let m = w.material[i];
-                let cap = m.pore_capacity();
-                if cap <= 0.0 || w.pore[i] <= 0.0 || m.permeability_per_s() <= 0.0 {
-                    continue;
-                }
-                let unit = cap * c.voxel_volume();
-                let excess = pore_m3(w, i) - m.field_capacity() * unit;
-                if excess <= 0.0 {
-                    continue;
-                }
-                let want = excess.min(m.permeability_per_s() * DT * unit);
-                if y == 0 {
-                    // Sitting on the foundation: what drains joins the aquifer.
+pub fn infiltrate(w: &mut World, dt: f64) {
+    crate::voxel_phase!(Infiltrate, {
+        let c = w.config.clone();
+        let plane = c.width as usize * c.depth as usize;
+        // Over the wet set: a cell with no free water in it has nothing to offer the ground,
+        // and source and destination are disjoint (a void cell and the porous cell under it),
+        // so the order the set is walked in cannot change the answer.
+        let active: Vec<usize> = w.wet.cells().to_vec();
+        #[cfg(feature = "profile")]
+        crate::profile::add(crate::profile::Count::InfiltrateCells, active.len() as u64);
+        for i in active {
+            if i < plane || w.material[i].is_solid() || w.free[i] <= 0.0 {
+                continue;
+            }
+            let below = i - plane;
+            let m = w.material[below];
+            if m.pore_capacity() <= 0.0 || m.permeability_per_s() <= 0.0 {
+                continue;
+            }
+            let rate = m.permeability_per_s() * dt * m.pore_capacity() * c.voxel_volume();
+            transfer(w, (i, Store::Free), (below, Store::Pore), rate);
+        }
+    });
+}
+
+pub fn drain(w: &mut World) {
+    crate::voxel_phase!(Drain, {
+        let c = w.config.clone();
+        let plane = c.width as usize * c.depth as usize;
+        // The table as it stands at the start of the step: a voxel inside the saturated
+        // zone has nowhere lower to drain to, because the aquifer is what is holding it up.
+        let table = c.aquifer_head_m(w.aquifer_m3);
+        // Over the damp set — the cells that hold any pore water — instead of the grid. Two
+        // stated consequences (`design/7_Research/voxel-tick-profile-2026-09-18.md`): a cell
+        // with no pore water can never drain, so nothing is lost; and the walk is no longer
+        // bottom-up, so a stack of wet soil can pass water down more than one cell in a tick
+        // where the grid walk passed it exactly one. It is a trickle either way — one tick's
+        // drainage is `permeability_per_s * DT` of a cell's capacity — and the soil profile is
+        // a statistical claim, not a per-cell one.
+        let active: Vec<usize> = w.damp.cells().to_vec();
+        #[cfg(feature = "profile")]
+        crate::profile::add(crate::profile::Count::DrainCells, active.len() as u64);
+        for i in active {
+            let y = (i / plane) as u32;
+            if submerged(&c, y, table) {
+                continue;
+            }
+            let m = w.material[i];
+            let cap = m.pore_capacity();
+            if cap <= 0.0 || w.pore[i] <= 0.0 || m.permeability_per_s() <= 0.0 {
+                continue;
+            }
+            let unit = cap * c.voxel_volume();
+            let excess = pore_m3(w, i) - m.field_capacity() * unit;
+            if excess <= 0.0 {
+                continue;
+            }
+            let want = excess.min(m.permeability_per_s() * DT * unit);
+            if y == 0 {
+                // Sitting on the foundation: what drains joins the aquifer.
+                let lost = take_pore(w, i, want);
+                w.aquifer_m3 += lost;
+                continue;
+            }
+            let below = i - plane;
+            match w.material[below] {
+                Material::Bedrock => {
                     let lost = take_pore(w, i, want);
                     w.aquifer_m3 += lost;
-                    continue;
                 }
-                let below = c.index(x, y - 1, z);
-                match w.material[below] {
-                    Material::Bedrock => {
-                        let lost = take_pore(w, i, want);
-                        w.aquifer_m3 += lost;
-                    }
-                    Material::Air => {
-                        transfer(w, (i, Store::Pore), (below, Store::Free), want);
-                    }
-                    _ => {
-                        transfer(w, (i, Store::Pore), (below, Store::Pore), want);
-                    }
+                Material::Air => {
+                    transfer(w, (i, Store::Pore), (below, Store::Free), want);
+                }
+                _ => {
+                    transfer(w, (i, Store::Pore), (below, Store::Pore), want);
                 }
             }
         }
-    }
+    });
 }
 
-fn spring(w: &mut World) {
-    let Some((x, y, z)) = w.spring_cell else { return };
-    if w.aquifer_m3 <= 0.0 || w.config.spring_k_m2_per_s <= 0.0 {
-        return;
-    }
-    if y >= w.config.height || z >= w.config.depth {
-        return;
-    }
-    let head = w.config.aquifer_head_m(w.aquifer_m3);
-    let h_spring = y as f64 * w.config.voxel_m;
-    let drive = (head - h_spring).max(0.0);
-    if drive <= 0.0 {
-        return;
-    }
-    let want = (w.config.spring_k_m2_per_s * drive * DT).min(w.aquifer_m3);
-    // The seep emerges at the named cell and, if that is already brim full, in the
-    // cells above it: a spring under standing water still reaches the surface. A solid
-    // roof over the seep blocks it, and the aquifer keeps what it could not push out.
-    let mut left = want;
-    for at in y..w.config.height {
-        let i = w.config.index(x as i64, at, z);
-        if w.material[i].is_solid() {
-            break;
+pub fn spring(w: &mut World) {
+    crate::voxel_phase!(Spring, {
+        let Some((x, y, z)) = w.spring_cell else { return };
+        if w.aquifer_m3 <= 0.0 || w.config.spring_k_m2_per_s <= 0.0 {
+            return;
         }
-        let got = add_free(w, i, left);
-        w.aquifer_m3 -= got;
-        left -= got;
-        if left <= 1e-15 {
-            break;
+        if y >= w.config.height || z >= w.config.depth {
+            return;
         }
-    }
+        let head = w.config.aquifer_head_m(w.aquifer_m3);
+        let h_spring = y as f64 * w.config.voxel_m;
+        let drive = (head - h_spring).max(0.0);
+        if drive <= 0.0 {
+            return;
+        }
+        let want = (w.config.spring_k_m2_per_s * drive * DT).min(w.aquifer_m3);
+        // The seep emerges at the named cell and, if that is already brim full, in the
+        // cells above it: a spring under standing water still reaches the surface. A solid
+        // roof over the seep blocks it, and the aquifer keeps what it could not push out.
+        let mut left = want;
+        for at in y..w.config.height {
+            let i = w.config.index(x as i64, at, z);
+            if w.material[i].is_solid() {
+                break;
+            }
+            let got = add_free(w, i, left);
+            w.aquifer_m3 -= got;
+            left -= got;
+            if left <= 1e-15 {
+                break;
+            }
+        }
+    });
 }
 
-fn outlet(w: &mut World) {
-    if !w.outlet_open {
-        return;
-    }
-    let Some((x, y, z)) = w.outlet_cell else { return };
-    if y >= w.config.height || z >= w.config.depth {
-        return;
-    }
-    let i = w.config.index(x as i64, y, z);
-    let want = w.config.outlet_m3_per_s * DT;
-    let lost = take_free(w, i, want);
-    w.ledger.outlet_out += lost;
+pub fn outlet(w: &mut World) {
+    crate::voxel_phase!(Outlet, {
+        if !w.outlet_open {
+            return;
+        }
+        let Some((x, y, z)) = w.outlet_cell else { return };
+        if y >= w.config.height || z >= w.config.depth {
+            return;
+        }
+        let i = w.config.index(x as i64, y, z);
+        let want = w.config.outlet_m3_per_s * DT;
+        let lost = take_free(w, i, want);
+        w.ledger.outlet_out += lost;
+    });
 }
 
 // ---------------------------------------------------------------- commands
@@ -940,6 +1461,11 @@ fn set_material(w: &mut World, i: usize, material: Material) -> f64 {
     w.material[i] = material;
     w.free[i] = 0.0;
     w.pore[i] = 0.0;
+    // The one place outside the store primitives that writes the arrays, so the one place
+    // that has to keep the active sets honest itself: an edited cell holds nothing until
+    // the material below decides what it can keep.
+    w.wet.remove(i);
+    w.damp.remove(i);
     if water <= 0.0 {
         return 0.0;
     }

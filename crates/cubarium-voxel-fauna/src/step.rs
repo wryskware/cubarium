@@ -93,7 +93,7 @@ struct Plan {
     target: Option<Site>,
 }
 
-pub(crate) fn step(fauna: &mut Fauna, world: &World, flora: &mut Flora) {
+pub(crate) fn step(fauna: &mut Fauna, world: &World, flora: &mut Flora, threads: usize) {
     // The tick counter moves first, so `fauna.tick` is the tick this step produces — the
     // flora layer's own rule, and the tick the keyed streams are keyed by.
     fauna.tick += 1;
@@ -101,12 +101,23 @@ pub(crate) fn step(fauna: &mut Fauna, world: &World, flora: &mut Flora) {
     let view = world.view();
     let seed = view.config.seed;
 
-    terrain(fauna, &view);
-    maintenance(fauna);
-    let plans = sense(fauna, &view, flora, seed, tick);
-    act(fauna, &view, flora, &plans, seed, tick);
-    births(fauna);
-    deaths(fauna, &view, flora);
+    cubarium_voxel::voxel_phase!(FaunaStep, {
+        cubarium_voxel::voxel_phase!(FaunaTerrain, { terrain(fauna, &view) });
+        cubarium_voxel::voxel_phase!(FaunaMaintenance, { maintenance(fauna) });
+        let plans = cubarium_voxel::voxel_phase!(FaunaSense, {
+            sense(fauna, &view, flora, seed, tick, threads)
+        });
+        cubarium_voxel::voxel_phase!(FaunaAct, {
+            act(fauna, &view, flora, &plans, seed, tick)
+        });
+        cubarium_voxel::voxel_phase!(FaunaBirths, { births(fauna) });
+        cubarium_voxel::voxel_phase!(FaunaDeaths, { deaths(fauna, &view, flora) });
+        #[cfg(feature = "profile")]
+        cubarium_voxel::profile::add(
+            cubarium_voxel::profile::Count::Animals,
+            fauna.animals.len() as u64,
+        );
+    });
 }
 
 /// Step 1: an animal standing on what is no longer a support face leaves the world.
@@ -175,12 +186,64 @@ fn sense(
     flora: &Flora,
     seed: u64,
     tick: u64,
+    threads: usize,
 ) -> Vec<Plan> {
     let fv = flora.view();
     let width = i64::from(view.config.width);
+    let animals = &fauna.config;
+
+    #[cfg(feature = "parallel")]
+    if threads > 1 && fauna.animals.len() >= 2 {
+        // One chunk per worker, at least one animal each. Each chunk returns its plans in
+        // its own animal order together with **which chunk it was**, and the chunks are
+        // folded back in that order, so the finishing order of the workers cannot reach
+        // the result: `out` is the same `Vec<Plan>` in the same animal order the serial
+        // pass builds. `act` still applies them in id order.
+        let per = fauna.animals.len().div_ceil(threads);
+        let pool = bevy_tasks::ComputeTaskPool::get_or_init(|| {
+            bevy_tasks::TaskPoolBuilder::new().num_threads(threads).build()
+        });
+        let mut parts: Vec<(usize, Vec<Plan>)> = pool.scope(|scope| {
+            for (k, chunk) in fauna.animals.chunks(per).enumerate() {
+                scope.spawn(async move {
+                    let plans = chunk
+                        .iter()
+                        .map(|a| plan_for(a, animals, view, &fv, width, seed, tick))
+                        .collect::<Vec<Plan>>();
+                    (k, plans)
+                });
+            }
+        });
+        parts.sort_by_key(|&(k, _)| k);
+        let mut out = Vec::with_capacity(fauna.animals.len());
+        for (_, plans) in parts {
+            out.extend(plans);
+        }
+        return out;
+    }
+    let _ = threads;
+
     let mut out = Vec::with_capacity(fauna.animals.len());
     for a in &fauna.animals {
-        let sc = *fauna.config.species(a.species);
+        out.push(plan_for(a, animals, view, &fv, width, seed, tick));
+    }
+    out
+}
+
+/// What one animal senses: a **pure function** of the world, the plant layer as it stood
+/// before anything ate, and this animal. Nothing it returns depends on any other animal,
+/// which is what makes [`sense`] splittable.
+fn plan_for(
+    a: &Animal,
+    config: &crate::FaunaConfig,
+    view: &VoxelView<'_>,
+    fv: &cubarium_voxel_flora::FloraView<'_>,
+    width: i64,
+    seed: u64,
+    tick: u64,
+) -> Plan {
+    {
+        let sc = *config.species(a.species);
         let reach = fv.reachable_foliage(view, a.site, sc.reach);
         let total: f64 = reach.iter().map(|&(_, f)| f).sum();
         let bite = sc.bite_per_s * DT;
@@ -250,6 +313,12 @@ fn sense(
                 best.push(face);
             }
         }
+        #[cfg(feature = "profile")]
+        {
+            use cubarium_voxel::profile::{add, Count};
+            add(Count::ReachQueries, 1 + candidates.len() as u64);
+            add(Count::CandidateFaces, candidates.len() as u64);
+        }
         let target = match best.len() {
             0 => None,
             1 => Some(best[0]),
@@ -258,9 +327,8 @@ fn sense(
                 Some(best[rng.below(n)])
             }
         };
-        out.push(Plan { reach, total, target });
+        Plan { reach, total, target }
     }
-    out
 }
 
 /// Every support face of a column an animal of this species could stand on: shallow

@@ -58,6 +58,7 @@ use cubarium_voxel_fauna::{
 use cubarium_voxel_flora::{
     Command as FloraCommand, Flora, FloraConfig, FloraLedger, Site, Species,
 };
+use cubarium_voxel_sim::{Sim, SimConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::clock::{Clock, Step};
@@ -120,6 +121,11 @@ pub struct VoxelConfig {
     pub haze: f32,
     /// Opacity of one voxel of free water, `0..=1`.
     pub water_alpha: f32,
+    /// Worker threads for the in-phase splits of the tick
+    /// (`cubarium_voxel_sim::SimConfig::threads`); `0` means
+    /// [`std::thread::available_parallelism`]. Execution only — it reaches no rule, no
+    /// number and no picture. **Placeholder** (`design/backlog.md` §1).
+    pub threads: usize,
     /// The world to build. Every field optional, every default the core's own — the
     /// habitat's extent, `depth` included, is the core's decision and not the presenter's.
     pub world: cubarium_voxel::Config,
@@ -134,6 +140,7 @@ impl Default for VoxelConfig {
             raster_height: 0,
             haze: 0.55,
             water_alpha: 0.5,
+            threads: 0,
             // Including the depth: `cubarium_voxel` owns how deep the habitat is.
             world: cubarium_voxel::Config::default(),
         }
@@ -172,7 +179,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
             None => "the built-in world defaults".to_string(),
         })?;
 
-    let mut world = match &args.load {
+    let world = match &args.load {
         Some(path) => {
             let bytes = std::fs::read(path)
                 .with_context(|| format!("reading the world {}", path.display()))?;
@@ -191,8 +198,8 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     // config file stays the presentation's plus the world's. The animal layer likewise —
     // and it starts empty, because an animal is introduced by a `g` command and never
     // generated.
-    let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let flora = Flora::new(FloraConfig::default());
+    let fauna = Fauna::new(FaunaConfig::default());
 
     let proj = Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, world.config())?;
     let topology = Topology::Ring { w: proj.raster_w, h: proj.raster_h };
@@ -231,7 +238,17 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         }
     };
 
-    let c = world.config();
+    // The tick's backbone: the three layers become `cubarium-voxel-sim` resources and one
+    // chained schedule steps them, in the same order the three calls ran them in
+    // (`design/handoffs/voxel-schedule-brief-2026-09-18.md`). The thread count only ever
+    // splits work *inside* a phase.
+    let sim_config = SimConfig {
+        threads: if cfg.threads == 0 { SimConfig::default().threads } else { cfg.threads },
+    };
+    let mut sim = Sim::new(world, flora, fauna, sim_config);
+    eprintln!("cubarium voxel: tick schedule on {} thread(s)", sim_config.threads);
+
+    let c = sim.world().config().clone();
     eprintln!(
         "cubarium voxel: {} world {}x{}x{} at {} m/voxel -> ring:{}x{} \
          ({} px/voxel, tilt {:.0} deg, depth step {} px)",
@@ -277,7 +294,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         }
 
         while let Ok(line) = commands.try_recv() {
-            ctl.handle(&mut world, &mut flora, &mut fauna, &line);
+            sim.with_layers_mut(|world, flora, fauna| ctl.handle(world, flora, fauna, &line));
             // A command may have moved a cell, seeded a stand or loaded a world; which
             // ones did is the command's business, and one extra pack is cheaper than a
             // rule here that has to be kept in step with `Control::handle`.
@@ -293,9 +310,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                     // A single `s` still advances exactly one world tick.
                     if ctl.pending_steps > 0 {
                         ctl.pending_steps -= 1;
-                        world.step();
-                        flora.step(&mut world);
-                        fauna.step(&world, &mut flora);
+                        sim.step();
                         ticks += 1;
                         moved = true;
                     }
@@ -303,17 +318,16 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                     debt += ctl.speed;
                     while debt >= 1.0 {
                         debt -= 1.0;
-                        world.step();
-                        flora.step(&mut world);
-                        fauna.step(&world, &mut flora);
+                        sim.step();
                         ticks += 1;
                         moved = true;
                     }
                 }
-                out.observe_tick(world.tick());
+                out.observe_tick(sim.world().tick());
             }
             Step::Render { .. } => {
-                out.render(&world, &flora, &fauna, std::mem::take(&mut moved))?;
+                let (world, flora, fauna) = sim.layers();
+                out.render(world, flora, fauna, std::mem::take(&mut moved))?;
                 frames += 1;
             }
             Step::Sleep(d) => std::thread::sleep(d),
@@ -333,6 +347,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
 
     out.finish()?;
     let elapsed = clock.elapsed(Instant::now()).as_secs_f64();
+    let (world, flora, fauna) = sim.layers();
     let view = world.view();
     let fv = flora.view();
     eprintln!(

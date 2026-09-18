@@ -255,7 +255,10 @@ fn roofed(left: f64, right: f64) -> World {
     }
     pour(&mut w, 1, left);
     pour(&mut w, 2, right);
-    run(&mut w, 20);
+    // 200 ticks, not 20: the local exchange relaxes a body toward its level at half a head
+    // difference per substep instead of re-levelling it in one, so a ten-column passage
+    // takes a few seconds rather than a tick (`design/7_Research/voxel-tick-profile-2026-09-18.md`).
+    run(&mut w, 200);
     w
 }
 
@@ -271,17 +274,184 @@ fn a_roofed_passage_fills_and_the_far_side_rises() {
     assert!(residual(&w).abs() < 1e-9);
 }
 
+/// **Pressure crosses a flooded passage.** Fourteen units in a box whose only connection
+/// is a roofed passage: the passage floods, and water then stands **above the roof** on
+/// both sides and over the roof itself, which it can only do if the far shaft was pushed
+/// up through the submerged gap.
+///
+/// The claim is qualitative on purpose. A local exchange carries head one cell per pass and
+/// has no pressure solve in it, so a *closed, surcharged* passage does not settle to one
+/// flat surface the way the old region solver made it: the surface above the roof stays
+/// uneven by a few tenths of a cell and keeps relaxing. That is a stated limitation of the
+/// first-pass local model, not a conservation fault — the residual below is the check that
+/// matters — and it is recorded in
+/// `design/7_Research/voxel-tick-profile-2026-09-18.md`.
 #[test]
 fn a_roofed_passage_pushes_the_far_shaft_above_the_roof() {
     let w = roofed(7.0, 7.0);
     let v = w.view();
-    // Fourteen units: the passage full (8), both shafts full at y = 2 (4), and the
-    // remaining 2 shared by the eight cells of the row above the roof: level 3.25. The
-    // far shaft stands above the roof, so the passage carried pressure through it.
-    assert!((v.free_at(8, 3, 0) - 0.25).abs() < 1e-3, "far {}", v.free_at(8, 3, 0));
-    assert!((v.free_at(1, 3, 0) - 0.25).abs() < 1e-3, "near {}", v.free_at(1, 3, 0));
-    assert!((v.free_at(4, 3, 0) - 0.25).abs() < 1e-3, "over the roof {}", v.free_at(4, 3, 0));
-    assert!((v.free_at(8, 2, 0) - 1.0).abs() < 1e-3, "far shaft {}", v.free_at(8, 2, 0));
+    // The passage is flooded and the far shaft is full to the roof line.
+    for x in 3..=6 {
+        assert!((v.free_at(x, 1, 0) - 1.0).abs() < 1e-2, "passage {x}: {}", v.free_at(x, 1, 0));
+    }
+    assert!(v.free_at(8, 2, 0) > 0.9, "far shaft short of the roof: {}", v.free_at(8, 2, 0));
+    // And water stands over the roof on both sides and in the middle: the surcharge got
+    // there through the passage, since there is no other way across.
+    for x in [1, 4, 8] {
+        assert!(v.free_at(x, 3, 0) > 0.1, "nothing over the roof at {x}: {}", v.free_at(x, 3, 0));
+    }
+    assert!((w.view().stored_m3() - 14.0).abs() < 1e-6, "mass: {}", w.view().stored_m3());
+    assert!(residual(&w).abs() < 1e-9);
+}
+
+// ---------------------------------------------- the local exchange: what it has to do
+
+/// **Mass is conserved to noise with everything running.** Two hundred ticks of rain on
+/// the generated world with the outlet open, so every phase fires — rain, infiltration,
+/// fall, the exchange, drainage, the water table, the spring and the export — and the
+/// ledger residual stays at float noise. This is the check that matters for a solver
+/// rewrite: the shape of the water is a rule, the conservation is a contract.
+#[test]
+fn two_hundred_ticks_of_rain_and_export_conserve_mass_to_noise() {
+    let config = Config {
+        width: 48,
+        height: 24,
+        depth: 4,
+        rain_m_per_s: 0.002,
+        outlet_m3_per_s: 0.05,
+        ..Config::default()
+    };
+    let mut w = World::new(config);
+    w.apply(Command::SetOutlet { open: true });
+    run(&mut w, 200);
+    let v = w.view();
+    let stored = v.stored_m3();
+    let residual = stored - v.ledger.expected_stored();
+    assert!(v.ledger.rain_in > 0.0, "it did not rain");
+    assert!(v.ledger.outlet_out > 0.0, "nothing was exported");
+    assert!(
+        residual.abs() <= 1e-9 * stored.max(1.0),
+        "residual {residual} against {stored} stored"
+    );
+}
+
+/// **A U-tube reaches equal levels, and in how long.** The fixture above settles by 16
+/// ticks; this says so as a time and checks the levels rather than the substep count, which
+/// is what a relaxation can be held to. `FLOW_PER_SUBSTEP` is a placeholder, so the time is
+/// a measurement of this placeholder and not a requirement on the model.
+#[test]
+fn a_u_tube_levels_within_a_second() {
+    let mut w = World::empty(cfg(5, 8));
+    wall(&mut w, 1, 2..=7);
+    wall(&mut w, 3, 1..=7);
+    wall(&mut w, 4, 1..=7);
+    pour(&mut w, 0, 4.0);
+    // 20 ticks is one second at 20 Hz.
+    run(&mut w, 20);
+    let v = w.view();
+    // Both shafts stand at 2.5 cells: floor full, half a cell above it on each side.
+    assert!((v.free_at(0, 2, 0) - 0.5).abs() < 1e-2, "near {}", v.free_at(0, 2, 0));
+    assert!((v.free_at(2, 2, 0) - 0.5).abs() < 1e-2, "far {}", v.free_at(2, 2, 0));
+    for x in 0..3 {
+        assert!((v.free_at(x, 1, 0) - 1.0).abs() < 1e-2, "floor {x}: {}", v.free_at(x, 1, 0));
+    }
+    assert!(residual(&w).abs() < 1e-9);
+}
+
+/// **A basin spills at its lowest exit.** A closed hollow with two sills — one two cells
+/// up, one three — poured full past the lower one: the water leaves over the low sill and
+/// the high side stays dry. A local exchange has no map of the basin, so this is the
+/// fixture that says it still finds the way out.
+#[test]
+fn a_basin_fills_and_spills_at_its_lowest_exit() {
+    let mut w = World::empty(cfg(9, 8));
+    // The hollow: columns 3..=5, closed by a sill of one cell at x = 6 and of two at x = 2.
+    wall(&mut w, 2, 1..=2);
+    wall(&mut w, 6, 1..=1);
+    // And far walls, so what spills has somewhere to stand and cannot come round the ring.
+    wall(&mut w, 0, 1..=7);
+    // Poured across the hollow's own three columns rather than stacked in one, so the
+    // starting state is a basin holding water and not a tower standing over both sills.
+    for x in 3..=5 {
+        pour(&mut w, x, 1.2);
+    }
+    run(&mut w, 200);
+
+    let v = w.view();
+    // The 0.6 that stood above the low sill's top drained over it and spread over the two
+    // columns beyond, whose floor is a cell lower: 0.3 each.
+    let beyond_low: f64 = (7..9).map(|x| (0..8).map(|y| v.free_at(x, y, 0)).sum::<f64>()).sum();
+    let beyond_high = (0..8).map(|y| v.free_at(1, y, 0)).sum::<f64>();
+    assert!(beyond_low > 0.55, "only {beyond_low} crossed the low sill");
+    assert!((v.free_at(7, 1, 0) - 0.3).abs() < 1e-2, "beyond the sill: {}", v.free_at(7, 1, 0));
+    assert!(beyond_high < 1e-6, "water crossed the high sill: {beyond_high}");
+    assert!((v.stored_m3() - 3.6).abs() < 1e-6, "mass: {}", v.stored_m3());
+    assert!(residual(&w).abs() < 1e-9);
+}
+
+/// **A dam holds.** A wall six cells tall with four cells of water against it: after
+/// twenty seconds the dry side is still dry, and every drop is still on the wet side.
+#[test]
+fn a_dam_holds() {
+    let mut w = World::empty(cfg(10, 8));
+    wall(&mut w, 5, 1..=6);
+    wall(&mut w, 0, 1..=7);
+    pour(&mut w, 2, 4.0);
+    run(&mut w, 400);
+
+    let v = w.view();
+    let dry_side: f64 =
+        (6..9).map(|x| (0..8).map(|y| v.free_at(x, y, 0)).sum::<f64>()).sum();
+    let wet_side: f64 =
+        (1..5).map(|x| (0..8).map(|y| v.free_at(x, y, 0)).sum::<f64>()).sum();
+    assert!(dry_side < 1e-9, "the dam leaked: {dry_side}");
+    assert!((wet_side - 4.0).abs() < 1e-6, "the wet side holds {wet_side}");
+    // And it stands against the dam rather than piling up in one column.
+    for x in 1..5 {
+        assert!((v.free_at(x, 1, 0) - 1.0).abs() < 1e-2, "floor {x}: {}", v.free_at(x, 1, 0));
+    }
+    assert!(residual(&w).abs() < 1e-9);
+}
+
+/// **A waterfall.** Water poured onto a plateau runs to the edge, leaves it, falls down
+/// the open column as thin cells — one cell per substep, which is `fall`'s own rule — and
+/// pools on the floor below. Nothing about this is a new rule: it is the exchange pushing
+/// into dry air at the lip and `fall` taking it down.
+#[test]
+fn water_runs_off_a_ledge_falls_and_pools_below() {
+    let mut w = World::empty(cfg(12, 10));
+    // A plateau four columns wide and five cells high, with open floor beyond it.
+    for x in 0..4 {
+        wall(&mut w, x, 1..=5);
+    }
+    // A wall at the far end so the pool cannot wrap round the ring into the plateau's back.
+    wall(&mut w, 11, 1..=7);
+    pour(&mut w, 1, 2.0);
+
+    // Early on, the fall is in the air: some cell of the open columns beside the lip holds
+    // a thin sheet, neither empty nor full.
+    let mut falling = false;
+    for _ in 0..40 {
+        w.step();
+        let v = w.view();
+        for x in 4..8 {
+            for y in 2..6 {
+                let f = v.free_at(x, y, 0);
+                if f > 1e-6 && f < 0.5 {
+                    falling = true;
+                }
+            }
+        }
+    }
+    assert!(falling, "nothing was ever in mid-air beside the lip");
+
+    run(&mut w, 400);
+    let v = w.view();
+    let pool: f64 = (4..11).map(|x| (0..3).map(|y| v.free_at(x, y, 0)).sum::<f64>()).sum();
+    let left_on_top: f64 = (0..4).map(|x| (6..10).map(|y| v.free_at(x, y, 0)).sum::<f64>()).sum();
+    assert!(pool > 1.9, "the pool below holds {pool} of the 2.0 poured");
+    assert!(left_on_top < 0.05, "water is still standing on the plateau: {left_on_top}");
+    assert!((v.stored_m3() - 2.0).abs() < 1e-6, "mass: {}", v.stored_m3());
     assert!(residual(&w).abs() < 1e-9);
 }
 
@@ -520,23 +690,43 @@ fn a_full_recipient_is_skipped_and_the_next_shell_takes_the_water() {
     assert!(residual(&w).abs() < 1e-9);
 }
 
+/// `free_transfer_cap` caps what one **face** may pass in one substep, so a fill travels
+/// more slowly still. The local exchange already makes a fill travel — that is what
+/// replaced the instantaneous re-level — so what this pins is that the cap slows it
+/// further and never loses any of it.
 #[test]
-fn the_transfer_cap_makes_a_fill_travel_instead_of_arriving() {
-    let mut instant = World::empty(cfg(8, 4));
-    pour(&mut instant, 0, 2.0);
-    instant.step();
+fn the_transfer_cap_makes_a_fill_travel_more_slowly() {
+    fn ring(cap: f64, ticks: u32) -> World {
+        let mut config = cfg(8, 4);
+        config.free_transfer_cap = cap;
+        let mut w = World::empty(config);
+        pour(&mut w, 0, 2.0);
+        run(&mut w, ticks);
+        w
+    }
 
-    let mut capped_config = cfg(8, 4);
-    capped_config.free_transfer_cap = 0.02;
-    let mut capped = World::empty(capped_config);
-    pour(&mut capped, 0, 2.0);
-    capped.step();
+    // One tick spreads a fill a few cells and nowhere near its level: the far side of an
+    // eight-column ring is a long way short of 2 / 8 either way, and the cap is behind.
+    let (quick, slow) = (ring(0.0, 1), ring(0.02, 1));
+    assert!(column(&quick, 4) < 0.1, "uncapped levelled in one tick: {}", column(&quick, 4));
+    assert!(column(&slow, 4) < column(&quick, 4), "the cap did not slow it in one tick");
 
-    // Uncapped, one tick levels the whole ring floor at 2 / 8 of a cell.
-    assert!((column(&instant, 4) - 0.25).abs() < 1e-3, "{}", column(&instant, 4));
-    assert!(column(&capped, 4) < 0.1, "capped arrived anyway: {}", column(&capped, 4));
-    assert!(column(&capped, 4) > 0.0, "capped never moved");
-    assert!(residual(&capped).abs() < 1e-9);
+    // Twenty ticks in, the uncapped ring is at its level and the capped one is still
+    // behind: the cap is a transit limit, not a different answer.
+    let (quick, slow) = (ring(0.0, 20), ring(0.02, 20));
+    assert!((column(&quick, 4) - 0.25).abs() < 1e-3, "uncapped: {}", column(&quick, 4));
+    assert!(column(&slow, 4) < column(&quick, 4) - 1e-6, "the cap did not slow it: {}", column(&slow, 4));
+    assert!(column(&slow, 4) > 0.0, "the cap stopped it altogether");
+
+    // And given long enough the cap changes nothing about where the water ends up.
+    let (quick, slow) = (ring(0.0, 400), ring(0.02, 400));
+    for w in [&quick, &slow] {
+        assert!((column(w, 4) - 0.25).abs() < 1e-3, "not level: {}", column(w, 4));
+    }
+    for w in [&quick, &slow] {
+        assert!((w.view().stored_m3() - 2.0).abs() < 1e-9, "mass: {}", w.view().stored_m3());
+        assert!(residual(w).abs() < 1e-9);
+    }
 }
 
 #[test]

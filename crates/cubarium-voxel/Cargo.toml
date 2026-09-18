@@ -5,8 +5,21 @@ edition.workspace = true
 rust-version.workspace = true
 description = "Voxel ringworld core: materials, terrain generation, water, ledger, save/load. No drawing."
 
+[features]
+# Per-phase timers and work counts for the tick profile
+# (`design/7_Research/voxel-tick-profile-2026-09-18.md`). Measurement only: it adds no
+# rule, changes no number, and with the feature off every call site is compiled away.
+profile = []
+# In-phase multithreading for `water::exchange`'s read-only scratch pass: a `bevy_tasks`
+# compute pool, off by default so the core's dependency tail is unchanged for an embedded
+# build. Never a rule — with the feature off, `exchange` ignores its thread count and runs
+# the same arithmetic serially
+# (`design/handoffs/voxel-schedule-brief-2026-09-18.md`).
+parallel = ["dep:bevy_tasks"]
+
 [dependencies]
 anyhow = { workspace = true }
+bevy_tasks = { workspace = true, optional = true }
 serde = { version = "1", features = ["derive"] }
 postcard = { version = "1", features = ["use-std"] }
 png = { workspace = true }
