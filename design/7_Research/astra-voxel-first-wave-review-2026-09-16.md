@@ -1595,3 +1595,90 @@ stationarity or coexistence; those remain measurements, not passing tests.
 ambient run; full ecosystem persistence and ecological stability are not
 claimed. P is not ready for the proposed 1.8-hour full-cap controls: address
 R10.1–R10.4, then authorise a revised conditioning/observation budget.**
+
+## Round 11
+
+Reviewed **3ed1182**, including **01f6959**, by source and isolated arithmetic.
+**28 focused tests passed**: flora replacement integration/example and fauna
+grazed example. No long run; the pilot measurements below are the worker's.
+
+1. **P2 — R11.1: growth and descendant funding overlap by one tick. Before
+   the pilot's timeline is published.**
+   `crates/cubarium-voxel-flora/examples/harness/mod.rs:663` adds four disjoint
+   durations, but `src/step.rs:198` grows before `:201` propagates, and `:1518`
+   tests the resulting wood. The tick that reaches donor size can fund the
+   first instalment. Keeping the stated ideal growth and repeated-addition
+   bounds, bloomcrown delivers at tick 6,001, is born at 6,002, reaches donor
+   size at 60,165 and can deliver at **66,165: 3,308.25 s**; stonecushion's
+   corresponding bound is **9,247.35 s**. **Change:** subtract the shared tick
+   for finite timelines, retaining the infinity case. Pin funding on the
+   threshold-crossing tick; the accelerated fixture's `harness/mod.rs:904`
+   checks stage four against **birth**, not donor attainment, so it does not
+   isolate that stage. Check `redelivery - donor_tick + 1` against funding.
+   Separate budgets and unresolved expiry are right. Also use the newcomer's
+   bound for an arm's impossibility claim (`examples/replacement.rs:123`): a
+   pair's maximum is a common-window policy, not proof that its faster
+   direction cannot finish below that maximum.
+
+2. **P2 — R11.2: a fractional budget tail can supply a fictitious settled
+   interval. Before using conditioning as an admission decision.**
+   `crates/cubarium-voxel-flora/examples/replacement.rs:734` accepts a shortened
+   final chunk; `examples/harness/mod.rs:467` rounds it to ticks, while the
+   observer advances by the requested seconds. For a **200.01 s phase**, a
+   first record without turnover, one quiet 100 s record, then a 0.01 s tail
+   can pass: the tail runs **zero ticks**, reports zero changes and becomes
+   the second quiet interval at `harness/mod.rs:1142`. Longer partial tails
+   also get the full head/turnover allowance over less time. **Change:** only
+   complete 100 s intervals may qualify; derive elapsed time from executed
+   ticks and leave an insufficient tail unresolved. Pin this synthetic case.
+   The two-phase budget, set symmetric difference, consecutive-record rule
+   and full-mode refusal otherwise implement R10.2 correctly.
+
+3. **P2 — R11.3: declare a stationary-study water treatment before measuring
+   its G. Before the pilot; no species tuning.**
+   `crates/cubarium-voxel-flora/examples/harness/mod.rs:422` inherits the core's
+   0.05 m³/s outlet. The observed deficit is **0.0116 m³/s, 30.2% of rain**;
+   refusing that trajectory is correct. However, experiment note
+   `design/7_Research/voxel-round3-experiment-2026-09-16.md:1770` should say
+   **did not settle within the observed budget**: `crates/cubarium-voxel/src/water.rs:807`
+   takes only available free water, so 0.05 is a capacity, not an indefinitely
+   imposed export. This is not evidence of a hydrological conservation error.
+   **Recommendation:** retain rain **2e-4 m/s** and explicitly set the study's
+   outlet capacity to **0.0384 m³/s**, its nominal accepted input over 192 m².
+   Declare that new condition once, identically across arms, leaving the core
+   default alone. Raising rain to **2.60417e-4 m/s** would instead change the
+   soil-wetting treatment. Neither equality guarantees equilibrium: include
+   evaporation/transpiration and still require both conditioning phases to
+   pass. Do not subtract the measured drift from the tolerances; moving
+   eligibility would then become a succession experiment, whose G does not
+   calibrate stationary replacement controls.
+
+4. **P3 — R11.4: a grazer that eats and then dies disappears from attribution.
+   Before interpreting intake heights on runs with deaths.**
+   `crates/cubarium-voxel-fauna/examples/grazed.rs:481` retains only surviving
+   croppers, but `src/step.rs:107` acts before `:109` removes deaths. Two
+   animals on different-height faces can reach one stand; the lower one eats
+   then drowns, and all its intake is attributed to the surviving animal's
+   face. **Change:** conservatively mark withdrawals reachable by a disappeared
+   pre-tick animal as unattributed, or emit model bite receipts before death;
+   pin this two-eater case. Deduplicated attempts and the contested category
+   resolve R10.5 for surviving animals; stand loss still measures total intake.
+
+### What this does and does not establish
+
+**R10.3 and R10.4 clear.** Delivery receipts are written beside the actual
+cohort transfer (`crates/cubarium-voxel-flora/src/step.rs:1561`), cleared each
+tick and excluded from conservation totals. Simultaneous destinations and
+emptied/refilled banks are pinned. Parsing consumes option values and rejects
+invalid durations without changing the seeds. No new model booking defect
+was found; these checks establish neither stationarity nor replacement.
+
+**Verdict: changes requested, R11.1–R11.3 before the stationary pilot; R11.4
+before interpreting feeding heights with deaths. After those study repairs,
+I recommend authorising one site-1 positive-control arm with a 4,000 s
+observation budget, plus a separately capped 1,000 s conditioning budget.
+Proceed to observation only if both phases settle; otherwise stop unresolved.
+Measure G at a descendant's own delivery, not the founder's donation or first
+birth. A 4,000 s expiry is still unresolved, and a measured G applies only to
+that direction/site/seed/treatment; seven-arm and reverse-direction controls
+remain a subsequent authorisation.**
