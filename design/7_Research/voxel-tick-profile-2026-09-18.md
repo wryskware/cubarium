@@ -257,3 +257,88 @@ value, any embedded target, cache behaviour (no counters beyond cycles), and whe
 incremental region scheme reproduces the water bit for bit — that is the first thing any
 implementation of step 1 has to prove, against the existing conservation residual and the
 round-3/4/5 fixtures. No rule, number, preset or observation changed in this commit.
+
+---
+
+# Addendum, same day: the local water model, measured
+
+Wrysk approved a first-pass **local** water model and dropped the bit-identical
+requirement: the contract is conservation and the same qualitative behaviour, measured
+statistically. `equalize` is gone; the rule that replaced it is in `water.rs`'s module doc
+and its commit. This is what it cost and what it bought, same machine, same conditions as
+above.
+
+## Before and after, mean ± spread over five seeds (1,000 ticks each)
+
+| arm | before | after | faster |
+| --- | --- | --- | --- |
+| 0 grazers | 8.81 ± 2.31 ms/tick, 121 ± 35 ticks/s (6.0× real time) | **2.68 ± 0.07 ms/tick, 373 ± 10 ticks/s (18.6×)** | 3.3× |
+| 4 grazers | 11.60 ± 2.39 ms/tick, 89 ± 20 ticks/s (4.5×) | **5.06 ± 0.11 ms/tick, 198 ± 4 ticks/s (9.9×)** | 2.3× |
+
+The spread collapsed with the mean: the old solver's cost depended on how much of the
+world happened to be wet and how the regions fell out, and the local exchange's does not.
+`community 60` went from 17.7 s to **5.9 s** for 1,200 coupled ticks.
+
+## Per-phase, after (4 grazers, 2,000 ticks)
+
+| phase | µs/tick | before | share now |
+| --- | --- | --- | --- |
+| **World::step** | **2401** | 7709 | 38.7 % |
+| rain | 133 | 65 | 2.2 % |
+| substep loop | 2111 | 7388 | 34.1 % |
+| — infiltrate | 64 | 519 | 1.0 % |
+| — fall | 396 | 1654 | 6.4 % |
+| — **exchange** (was equalize) | **1650** | 5215 | 26.6 % |
+| drain | 33 | 137 | 0.5 % |
+| water_table | 123 | 120 | 2.0 % |
+| **Flora::step** | 40 | 45 | 0.6 % |
+| **Fauna::step** (sense) | 3757 | 3964 | 60.6 % |
+
+**The tick is now the animal layer's sensing**, which this package was told not to touch:
+step 2 of the plan (stands indexed by column, per-face score memo) is the next 3.8 ms.
+Water is 2.4 ms of which the exchange is 1.65, and the counts say why: 1,412 wet cells and
+1,416 columns per substep instead of 147,456 cells scanned four times.
+
+## The active sets, after
+
+| set | after | before |
+| --- | --- | --- |
+| cells holding free water | **1,995** | 19,524 |
+| of those, movable by `fall` | 210 | 16,748 |
+| cells holding pore water | 11,862 | 11,842 |
+| over field capacity (`drain`) | 2,681 | 2,672 |
+
+## What changed in the behaviour, statistically
+
+| quantity, `community 60` | before | after |
+| --- | --- | --- |
+| stored water (m³) | 217.3650 | 217.3791 |
+| aquifer head (m) | 2.945 (−0.0390 over 60 s) | 2.901 (−0.0566) |
+| water residual | 1.3e-10 | 6.7e-11 |
+| flora residuals | 1.4e-14 | 1.4e-14 |
+| mean root-box pore, the six species | 0.143 / 0.155 / 0.159 / 0.191 / 0.204 / 0.257 | 0.143 / 0.155 / 0.159 / 0.192 / 0.205 / 0.257 |
+
+**The soil the ecology reads is the same to three decimals**, and the world holds the same
+water. Three differences worth stating:
+
+1. **Ten times fewer cells hold free water** at the same stored volume (1,995 against
+   19,524). The old solver spread a region's water as a film across every cell it reached;
+   the local exchange leaves fewer, deeper puddles. The old module doc called that film a
+   known artifact — a reader that treats any free water as standing water saw it
+   everywhere — so this is a change in the right direction, but it does move
+   `water_depth_m` on support faces and therefore the drowning gate's input.
+2. **The world drains slightly faster** (head −0.057 m against −0.039 m over 60 s): water
+   reaches the outlet as a body rather than being re-levelled into it instantly.
+3. **A closed, surcharged passage does not settle flat.** A local rule with no pressure
+   solve leaves the surface above a flooded roof uneven by a few tenths of a cell and
+   relaxing; the fixture states it instead of asserting it away. Everything else the old
+   fixtures pinned — spill thresholds, the symmetric spill, the mirrored shelf, the seam
+   shift, the U-tube's levels — comes out the same.
+
+## Next, unchanged from the plan above
+
+Step 2 (sensing: stands indexed by column plus a per-face score memo, 3.8 → ~0.15 ms) is
+now the whole tick, and it is Wrysk's own thread. After it, the tick is ~1.3 ms — about
+15× real time for the water alone at 2.4 ms — and the remaining water cost is `exchange`
+1.65 ms over 1,412 wet cells per substep, which is 290 ns per wet cell: data layout (step
+4) is the next lever there, then threads.
