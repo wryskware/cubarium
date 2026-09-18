@@ -494,3 +494,14 @@ phases across `cubarium_voxel::default_threads()` (every core the OS reports), s
 harnesses and the crates' own tests run parallel too, and `step_with(1)` is the serial run.
 An embedded build that wants no `bevy_tasks` in its tail sets `default-features = false` on
 those two crates.
+
+### Bench rerun — 2026-09-18 at 528a3ac
+
+`cargo run --release -p cubarium-voxel-sim --features profile --example bench -- 1000 4 50 <seed> 100 <threads>`, seeds 1..5, one process per run.
+
+| threads | ms/tick (mean ± half-spread) |
+| ---: | ---: |
+| 1 | 4.105 ± 0.057 |
+| 4 | 2.057 ± 0.062 |
+| 8 | 1.787 ± 0.097 |
+| 16 | 1.750 ± 0.089 |
