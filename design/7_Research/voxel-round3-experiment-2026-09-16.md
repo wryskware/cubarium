@@ -1960,3 +1960,84 @@ was measured, and a settled eligible set says where a species *could* establish 
 not that it persists there. What it licenses is the next question: a pilot now has a
 conditioning budget it can be expected to clear, and R11.1's bound says it needs an observation
 budget above **3,308.25 s** for this pair before a single replacement could complete.
+
+## Pilot — 2026-09-18
+
+**Authorised positive-control pilot**, both directions, with the budgets the conditioning probe
+implies: a 3,000 s conditioning budget (2,500 s of it for phase A, against the 2,000 s the
+probe measured) and a **4,000 s observation budget**, above R11.1's 3,308.25 s bound for this
+pair. Two concurrent `--release` processes, seed 1 / noise 101, each at **its own** direction's
+site 1. Raw output: `design/7_Research/assets/voxel-conditioning/pilot1-*.txt`, `pilot2-*.txt`.
+
+```text
+replacement pilot bloomcrown umbrellafrond 3000 1 101 --phase-a 2500 --cap 4000   1810.8 s wall
+replacement pilot umbrellafrond bloomcrown 3000 1 101 --phase-a 2500 --cap 4000   1808.3 s wall
+```
+
+**Both conditionings settled**, exactly as the probe said they would: phase A at **t 2,000 s**
+(storage on interval 1, head on interval 16, turnover on interval 19) and phase B at **t 300 s**
+in both directions, spending 2,300 s of the 3,000 s budget. So both arms were entitled to
+proceed to observation, and neither ran on an unresolved conditioning.
+
+**Both arms are unresolved at the 4,000 s budget.** In each, the *only* stand that ever reached
+`donor_min` was the introduced founder, on its own first tick, and G is measured at a
+**descendant's own delivery** — so neither direction has a G.
+
+### Arm 1 — bloomcrown resident excluded, umbrellafrond newcomer at (41,0) y8 (5 eligible recipients of 5 faces in hop)
+
+| t (s) | newcomer stands | births | losses | survivors | founder deliveries | founder parcel | bank sites |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 500 | 2 | 1 | 0 | 1 | 1 | 0.03333 | 0 |
+| 1000 | 4 | 3 | 0 | 3 | 3 | 0.01667 | 0 |
+| 1500 | 4 | 3 | 0 | 3 | 4 | 0.05000 | 1 |
+| 2000 | 5 | 4 | 0 | 4 | 6 | 0.03333 | 1 |
+| 2500 | 5 | 4 | 0 | 4 | 8 | 0.01667 | 2 |
+| 3000 | 5 | 4 | 0 | 4 | 9 | 0.05000 | 1 |
+| 3500 | 5 | 4 | 0 | 4 | 11 | 0.03333 | 2 |
+| 4000 | 6 | 5 | 0 | 5 | 13 | 0.01667 | 1 |
+
+By identity: **13 founder deliveries** (the founder funded 0.66667 over 80,000 ticks and
+reached donor size at t 0.05 s, being planted at exactly `donor_min`), **5 descendant births**
+— #9 at t 300.10 s, #10 at 600.10, #11 at 900.10, #12 at 1500.10, #13 at 3900.10 — **0 losses,
+5 survivors**, and **no descendant at donor size**. Verdict: *first birth at t 300.10 s, and no
+descendant reached donor size: the replacement is NOT completed and this arm is unresolved at
+the stopping budget.*
+
+### Arm 2 — umbrellafrond resident excluded, bloomcrown newcomer at (75,15) y31
+
+| t (s) | newcomer stands | births | losses | survivors | founder deliveries | founder parcel | bank sites |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 500 | 1 | 0 | 0 | 0 | 1 | 0.03333 | 1 |
+| 1000 | 1 | 0 | 0 | 0 | 3 | 0.01667 | 2 |
+| 1500 | 1 | 0 | 0 | 0 | 4 | 0.05000 | 1 |
+| 2000 | 1 | 0 | 0 | 0 | 6 | 0.03333 | 2 |
+| 2500 | 2 | 1 | 0 | 1 | 8 | 0.01667 | 1 |
+| 3000 | 2 | 1 | 0 | 1 | 9 | 0.05000 | 1 |
+| 3500 | 2 | 1 | 0 | 1 | 11 | 0.03333 | 2 |
+| 4000 | 2 | 1 | 0 | 1 | 13 | 0.01667 | 2 |
+
+By identity: the same **13 founder deliveries** and the same 0.66667 funded — the funding rate
+is the preset's and does not know which world it is in — but **one** descendant birth, #9 at
+**t 2,400.10 s**, 0 losses, 1 survivor, no descendant at donor size. Verdict: *first birth at
+t 2,400.10 s, and no descendant reached donor size … unresolved at the stopping budget.*
+
+### What the two arms say against each other
+
+The founder treatment was identical and the delivery counts are identical, so the difference is
+**where the packages landed and whether that ground would germinate them**: 13 deliveries bought
+umbrellafrond five recruits and bloomcrown one, and bloomcrown's came 2,100 s later. That is
+the settled world's own asymmetry — the conditioning probe measured it directly, umbrellafrond
+eligible on 2,720 of 3,072 columns against bloomcrown's 314 — and it is a statement about the
+*landing* ground, not about either species' growth.
+
+Neither arm measured G, so **no 3 × G probe window can be quoted**: R5.4's window is a multiple
+of a measured replacement time and there is not one. What the arms do bound is the direction of
+the answer. A descendant is born at `alive_min` 0.02 and needs 2,708.15 s of **capped** growth
+to reach `donor_min` 0.3, then a package; arm 1's first descendant had 3,700 s of window after
+its birth and did not arrive, so these descendants are growing **materially slower than the
+cap** — G for this pair is not near its 3,308.25 s bound, and a seven-arm study budgeted from
+that bound would expire seven times over. Getting G will need either a longer budget or a
+measurement of how fast a descendant actually grows.
+
+Scope, unchanged: one site, one seed, one noise seed, one treatment and one direction each; no
+control arm ran beside them; and an expiry is not evidence of exclusion.

@@ -1,0 +1,181 @@
+replacement positive-control **pilot** (one arm, to measure G): resident umbrellafrond, newcomer bloomcrown; seed 1, noise_seed 101; a conditioning **budget** of 3000 s and a stopping budget of 4000 s per arm
+experiment conditions, none of them a model rule: rain 0.0002 m/s on exposed top faces, 1000 ticks (50 s) of world warm-up before anything is planted, 8 resident founders, mineral provisioning AtCreation (every support face at creation, one booking)
+founder treatment (Astra R9.7): **0.5 · wood_max** with ordinary `Seed` foliage `alpha · W`, full reserve, zero parcel and no bank of its own species — 0.3 for umbrellafrond and 0.3 for bloomcrown. A flat 0.3 is that rule for the original pair and five times springturf's whole mature wood, so the rule and not the number is what is fixed across the arms.
+
+predeclared observation cap, from the presets' own arithmetic:
+   umbrellafrond: newborn wood 0.02 -> donor 0.3 at wood_rate 0.001 under the growth cap = 54163 ticks = 2708.15 s; one package 0.0500 (0.02/0.4) at propagule_rate 0.0002 net of build 0.2 = 6000 ticks = 300.00 s; **cap 3008.15 s**
+      bloomcrown: newborn wood 0.02 -> donor 0.3 at wood_rate 0.001 under the growth cap = 54163 ticks = 2708.15 s; one package 0.0500 (0.02/0.4) at propagule_rate 0.0002 net of build 0.2 = 6000 ticks = 300.00 s; **cap 3008.15 s**
+  pair cap: **3008.15 s** (the larger of the two, so one window can resolve either direction)
+
+earliest-possible **replacement timeline** (Astra R10.1) — from what this study actually introduces, one founder with a **zero parcel** and no newborn of its own anywhere, which the published cap above does not cost:
+   umbrellafrond: the first package leaves at tick 6001 (300.05 s) [the closed form says 6000; repeated addition falls short of the package on that tick], the newborn appears at 6002, it reaches donor size at 60165 (+54163 growth ticks), and its own package can leave at **66165 ticks, 3308.25 s** — one tick less than the four stages added up, because the tick that reaches donor_min also funds the first instalment (R11.1)
+      bloomcrown: the first package leaves at tick 6001 (300.05 s) [the closed form says 6000; repeated addition falls short of the package on that tick], the newborn appears at 6002, it reaches donor size at 60165 (+54163 growth ticks), and its own package can leave at **66165 ticks, 3308.25 s** — one tick less than the four stages added up, because the tick that reaches donor_min also funds the first instalment (R11.1)
+  pair bound **3308.25 s** (a common-window policy: one window for either direction), and **this arm's own bound 3308.25 s** — the newcomer's, because the newcomer is what it introduces (R11.1). Against the published pair cap's 3008.15 s. Both are a lower bound on a lower bound — perfect funding, an immediate germination on a passing site and a saturated growth cap the whole way — so a budget above one makes nothing likely, while a budget below the **arm's own** makes a replacement in it impossible.
+
+authorised stopping budget: **4000 s** per arm (given with `--cap`), which is 120.9 % of this arm's own bound and 120.9 % of the pair's. A stopping rule and not a sufficient window: on expiry every arm reports **unresolved**, and exclusion is never inferred from expiry (R5.4/R10.1).
+
+=== conditioning ===
+  settling tolerances (**placeholders, nothing measured them**): |storage change| <= 5 % of the interval's own accepted rain, |head change| <= 0.001 m per interval, eligible-set turnover <= 2 % of the union, all three on 2 consecutive intervals
+  conditioning **budget** 3000 s, spent in two phases: the hydrology alone, and then the coupled setting with the resident in it. Elapsed time is not a conditioned habitat (R10.2), so each phase ends when its tolerances hold — or the budget expires and the run says **conditioning unresolved**. Phase A may spend at most 2500 s of it (given with `--phase-a`, a declared condition of this run), so that an unsettling hydrology cannot leave the resident unconditioned.
+  declared water treatment: rain 0.0002 m/s and the study's own **outlet capacity 0.038400000000000004 m3/s** — the nominal accepted rain over this world's own 192 m2 footprint, set once here and therefore identical in every arm, with the core's 0.05 m3/s default left alone (Astra R11.3). A capacity is not an imposed export, and this equality is not a promise of equilibrium: evaporation and transpiration leave by their own paths and both phases still have to pass.
+  3072 skyline columns; 3072 support faces provisioned with 1 of mineral each at creation, booked once as seeded_mineral_in 3072.0 — a **fixed per-site inventory**, so no arm can import mineral by colonising further (R5.4)
+
+phase A, the hydrology alone, reported every 100 s:
+  t     100 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change +0.000000 (residual -1.45e-12); head 2.945 m (-0.0492 m), stored 218.5924 m3
+  t     100 s: stands 0; eligible columns umbrellafrond 427/3072, bloomcrown 2771/3072 — head moved -0.0492 m (limit 0.001 m); no previous interval to compare the eligible sets with
+  t     200 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change +0.000000 (residual -7.20e-12); head 2.897 m (-0.0481 m), stored 218.5924 m3
+  t     200 s: stands 0; eligible columns umbrellafrond 480/3072 (turnover 11.0 %), bloomcrown 2771/3072 (turnover 0.5 %) — head moved -0.0481 m (limit 0.001 m); eligible-set turnover 11.0 % (limit 2 %)
+  t     300 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change +0.000000 (residual -3.98e-11); head 2.855 m (-0.0417 m), stored 218.5924 m3
+  t     300 s: stands 0; eligible columns umbrellafrond 473/3072 (turnover 4.3 %), bloomcrown 2691/3072 (turnover 2.9 %) — head moved -0.0417 m (limit 0.001 m); eligible-set turnover 4.3 % (limit 2 %)
+  t     400 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change +0.000000 (residual -5.94e-11); head 2.814 m (-0.0413 m), stored 218.5924 m3
+  t     400 s: stands 0; eligible columns umbrellafrond 667/3072 (turnover 29.1 %), bloomcrown 2688/3072 (turnover 0.1 %) — head moved -0.0413 m (limit 0.001 m); eligible-set turnover 29.1 % (limit 2 %)
+  t     500 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change +0.000000 (residual -8.19e-11); head 2.778 m (-0.0357 m), stored 218.5924 m3
+  t     500 s: stands 0; eligible columns umbrellafrond 854/3072 (turnover 21.9 %), bloomcrown 2627/3072 (turnover 2.3 %) — head moved -0.0357 m (limit 0.001 m); eligible-set turnover 21.9 % (limit 2 %)
+  t     600 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change +0.000000 (residual -8.34e-11); head 2.742 m (-0.0362 m), stored 218.5924 m3
+  t     600 s: stands 0; eligible columns umbrellafrond 1163/3072 (turnover 26.6 %), bloomcrown 2281/3072 (turnover 13.2 %) — head moved -0.0362 m (limit 0.001 m); eligible-set turnover 26.6 % (limit 2 %)
+  t     700 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change +0.000000 (residual -4.31e-11); head 2.705 m (-0.0369 m), stored 218.5924 m3
+  t     700 s: stands 0; eligible columns umbrellafrond 1511/3072 (turnover 23.0 %), bloomcrown 2238/3072 (turnover 1.9 %) — head moved -0.0369 m (limit 0.001 m); eligible-set turnover 23.0 % (limit 2 %)
+  t     800 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change +0.000000 (residual -3.04e-11); head 2.669 m (-0.0363 m), stored 218.5924 m3
+  t     800 s: stands 0; eligible columns umbrellafrond 1850/3072 (turnover 18.3 %), bloomcrown 2156/3072 (turnover 3.7 %) — head moved -0.0363 m (limit 0.001 m); eligible-set turnover 18.3 % (limit 2 %)
+  t     900 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change +0.000000 (residual -3.83e-11); head 2.635 m (-0.0338 m), stored 218.5924 m3
+  t     900 s: stands 0; eligible columns umbrellafrond 2218/3072 (turnover 16.6 %), bloomcrown 1638/3072 (turnover 24.0 %) — head moved -0.0338 m (limit 0.001 m); eligible-set turnover 24.0 % (limit 2 %)
+  t    1000 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change +0.000000 (residual -7.52e-11); head 2.609 m (-0.0263 m), stored 218.5924 m3
+  t    1000 s: stands 0; eligible columns umbrellafrond 2430/3072 (turnover 9.4 %), bloomcrown 1545/3072 (turnover 6.6 %) — head moved -0.0263 m (limit 0.001 m); eligible-set turnover 9.4 % (limit 2 %)
+  t    1100 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change +0.000000 (residual -8.34e-11); head 2.582 m (-0.0265 m), stored 218.5924 m3
+  t    1100 s: stands 0; eligible columns umbrellafrond 2532/3072 (turnover 4.0 %), bloomcrown 1310/3072 (turnover 15.2 %) — head moved -0.0265 m (limit 0.001 m); eligible-set turnover 15.2 % (limit 2 %)
+  t    1200 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change +0.000000 (residual -8.70e-11); head 2.556 m (-0.0257 m), stored 218.5924 m3
+  t    1200 s: stands 0; eligible columns umbrellafrond 2590/3072 (turnover 2.2 %), bloomcrown 1207/3072 (turnover 7.9 %) — head moved -0.0257 m (limit 0.001 m); eligible-set turnover 7.9 % (limit 2 %)
+  t    1300 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change +0.000000 (residual -1.02e-10); head 2.532 m (-0.0240 m), stored 218.5924 m3
+  t    1300 s: stands 0; eligible columns umbrellafrond 2644/3072 (turnover 2.0 %), bloomcrown 946/3072 (turnover 21.6 %) — head moved -0.0240 m (limit 0.001 m); eligible-set turnover 21.6 % (limit 2 %)
+  t    1400 s: water m3/s over 100 s: rain in 0.038400, outlet 0.038400, evaporation 0.000000, transpiration 0.00000000, storage change +0.000000 (residual -1.11e-10); head 2.511 m (-0.0219 m), stored 218.5924 m3
+  t    1400 s: stands 0; eligible columns umbrellafrond 2678/3072 (turnover 1.3 %), bloomcrown 525/3072 (turnover 44.5 %) — head moved -0.0219 m (limit 0.001 m); eligible-set turnover 44.5 % (limit 2 %)
+  t    1500 s: water m3/s over 100 s: rain in 0.038400, outlet 0.030528, evaporation 0.000000, transpiration 0.00000000, storage change +0.007872 (residual -1.15e-10); head 2.502 m (-0.0091 m), stored 219.3796 m3
+  t    1500 s: stands 0; eligible columns umbrellafrond 2700/3072 (turnover 0.8 %), bloomcrown 458/3072 (turnover 12.8 %) — storage +0.007872 m3/s is 21 % of rain (limit 5 %); head moved -0.0091 m (limit 0.001 m); eligible-set turnover 12.8 % (limit 2 %)
+  t    1600 s: water m3/s over 100 s: rain in 0.038400, outlet 0.026703, evaporation 0.000000, transpiration 0.00000000, storage change +0.011697 (residual -1.19e-10); head 2.502 m (+0.0002 m), stored 220.5494 m3
+  t    1600 s: stands 0; eligible columns umbrellafrond 2702/3072 (turnover 0.1 %), bloomcrown 413/3072 (turnover 9.8 %) — storage +0.011697 m3/s is 30 % of rain (limit 5 %); eligible-set turnover 9.8 % (limit 2 %)
+  t    1700 s: water m3/s over 100 s: rain in 0.038400, outlet 0.030085, evaporation 0.000000, transpiration 0.00000000, storage change +0.008315 (residual -1.24e-10); head 2.502 m (+0.0004 m), stored 221.3808 m3
+  t    1700 s: stands 0; eligible columns umbrellafrond 2720/3072 (turnover 0.7 %), bloomcrown 352/3072 (turnover 14.8 %) — storage +0.008315 m3/s is 22 % of rain (limit 5 %); eligible-set turnover 14.8 % (limit 2 %)
+  t    1800 s: water m3/s over 100 s: rain in 0.038400, outlet 0.036681, evaporation 0.000000, transpiration 0.00000000, storage change +0.001719 (residual -1.02e-10); head 2.502 m (+0.0003 m), stored 221.5527 m3
+  t    1800 s: stands 0; eligible columns umbrellafrond 2720/3072 (turnover 0.0 %), bloomcrown 314/3072 (turnover 10.8 %) — eligible-set turnover 10.8 % (limit 2 %)
+  t    1900 s: water m3/s over 100 s: rain in 0.038400, outlet 0.037825, evaporation 0.000000, transpiration 0.00000000, storage change +0.000575 (residual -5.67e-11); head 2.502 m (+0.0000 m), stored 221.6102 m3
+  t    1900 s: stands 0; eligible columns umbrellafrond 2720/3072 (turnover 0.0 %), bloomcrown 314/3072 (turnover 0.0 %) — settled
+  t    2000 s: water m3/s over 100 s: rain in 0.038400, outlet 0.037856, evaporation 0.000000, transpiration 0.00000000, storage change +0.000544 (residual -6.75e-11); head 2.502 m (+0.0000 m), stored 221.6646 m3
+  t    2000 s: stands 0; eligible columns umbrellafrond 2720/3072 (turnover 0.0 %), bloomcrown 314/3072 (turnover 0.0 %) — settled
+  phase A, the hydrology alone, whole phase: water m3/s over 2000 s: rain in 0.038400, outlet 0.036864, evaporation 0.000000, transpiration 0.00000000, storage change +0.001536 (residual -7.14e-11); head 2.502 m (-0.4915 m), stored 221.6646 m3
+  phase A, the hydrology alone, storage tolerance: first met on interval 1 (t 100 s)
+  phase A, the hydrology alone, head tolerance: first met on interval 16 (t 1600 s)
+  phase A, the hydrology alone, turnover tolerance: first met on interval 19 (t 1900 s)
+  phase A, the hydrology alone, head: no geometric extrapolation (fewer than three complete intervals, or the steps are not decaying)
+  phase A, the hydrology alone: **settled** at t 2000 s — the tolerances held on 2 consecutive intervals
+resident umbrellafrond: 8 founders at wood 0.3 on 2720 candidates of 3072 skyline columns (habitat rule Hollow)
+  umbrellafrond #0 ( 41,  0) y8  — mean pore 1.000 (>= 0.45), saturated fraction 1.000 (<= 1.00), water 0.000 m (<= 0.50), sky 0.718 (>= 0.10), 23 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  umbrellafrond #1 ( 26,  7) y13 — mean pore 0.906 (>= 0.45), saturated fraction 0.875 (<= 1.00), water 0.000 m (<= 0.50), sky 0.916 (>= 0.10), 32 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  umbrellafrond #2 ( 49,  8) y16 — mean pore 1.000 (>= 0.45), saturated fraction 1.000 (<= 1.00), water 0.000 m (<= 0.50), sky 0.656 (>= 0.10), 25 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  umbrellafrond #3 ( 34, 19) y19 — mean pore 0.922 (>= 0.45), saturated fraction 0.897 (<= 1.00), water 0.000 m (<= 0.50), sky 0.916 (>= 0.10), 29 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  umbrellafrond #4 (  5, 20) y22 — mean pore 1.000 (>= 0.45), saturated fraction 1.000 (<= 1.00), water 0.000 m (<= 0.50), sky 0.802 (>= 0.10), 21 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  umbrellafrond #5 ( 68,  5) y24 — mean pore 1.000 (>= 0.45), saturated fraction 1.000 (<= 1.00), water 0.000 m (<= 0.50), sky 0.802 (>= 0.10), 27 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  umbrellafrond #6 ( 95, 11) y26 — mean pore 1.000 (>= 0.45), saturated fraction 1.000 (<= 1.00), water 0.000 m (<= 0.50), sky 0.958 (>= 0.10), 29 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  umbrellafrond #7 ( 95, 16) y29 — mean pore 0.535 (>= 0.45), saturated fraction 0.379 (<= 1.00), water 0.000 m (<= 0.50), sky 0.958 (>= 0.10), 29 soil voxels, dead wood in the box 0.000 (>= 0.000)
+
+phase B, the coupled setting with the resident, reported every 100 s:
+  t     100 s: water m3/s over 100 s: rain in 0.038400, outlet 0.037781, evaporation 0.000000, transpiration 0.00008970, storage change +0.000529 (residual -1.51e-10); head 2.502 m (-0.0000 m), stored 221.7176 m3
+  t     100 s: stands 8; eligible columns umbrellafrond 2720/3072, bloomcrown 314/3072 — no previous interval to compare the eligible sets with
+  t     200 s: water m3/s over 100 s: rain in 0.038400, outlet 0.037837, evaporation 0.000000, transpiration 0.00009039, storage change +0.000472 (residual -1.59e-10); head 2.502 m (+0.0000 m), stored 221.7648 m3
+  t     200 s: stands 8; eligible columns umbrellafrond 2720/3072 (turnover 0.0 %), bloomcrown 311/3072 (turnover 1.0 %) — settled
+  t     300 s: water m3/s over 100 s: rain in 0.038400, outlet 0.037929, evaporation 0.000000, transpiration 0.00009182, storage change +0.000379 (residual -1.67e-10); head 2.502 m (+0.0000 m), stored 221.8027 m3
+  t     300 s: stands 8; eligible columns umbrellafrond 2720/3072 (turnover 0.0 %), bloomcrown 311/3072 (turnover 0.0 %) — settled
+  phase B, the coupled setting with the resident, whole phase: water m3/s over 300 s: rain in 0.038400, outlet 0.037849, evaporation 0.000000, transpiration 0.00009064, storage change +0.000460 (residual -1.59e-10); head 2.502 m (+0.0000 m), stored 221.8027 m3
+  phase B, the coupled setting with the resident, storage tolerance: first met on interval 1 (t 100 s)
+  phase B, the coupled setting with the resident, head tolerance: first met on interval 1 (t 100 s)
+  phase B, the coupled setting with the resident, turnover tolerance: first met on interval 2 (t 200 s)
+  phase B, the coupled setting with the resident, head: the last three intervals' steps decay by a factor 0.3141 each, which extrapolates to **2.502 m** — a geometric extrapolation of three numbers and not a measurement
+  phase B, the coupled setting with the resident: **settled** at t 300 s — the tolerances held on 2 consecutive intervals
+  conditioning spent 2300 s of its 3000 s budget over the two phases
+conditioned: **8 umbrellafrond stands** alive — 8 founders planted and 0 establishments since, so the count includes the resident's own descendants — seed bank on 0 sites holding 0.00000; deaths 0, births 8
+  residuals: organic -1.30e-13, mineral -1.82e-12, energy -2.59e-13 (stocks 11.0262, 3072.1680, 22.0523)
+
+=== predeclared introduction sites ===
+bloomcrown passes its own establishment predicate on 311 of 3072 skyline columns in the conditioned state; 311 of them are unoccupied and pass its habitat rule Ridge
+  site 1 ( 75, 15) y31: 3 eligible recipients of 24 candidate faces within hop 2
+           gates: mean pore 0.411 (>= 0.10), saturated fraction 0.214 (<= 0.25), water 0.000 m (<= 0.05), sky 0.958 (>= 0.60), 14 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  site 2 ( 72,  1) y22: 5 eligible recipients of 19 candidate faces within hop 2
+           gates: mean pore 0.382 (>= 0.10), saturated fraction 0.176 (<= 0.25), water 0.000 m (<= 0.05), sky 0.687 (>= 0.60), 17 soil voxels, dead wood in the box 0.000 (>= 0.000)
+  site 3 ( 21, 19) y20: 14 eligible recipients of 24 candidate faces within hop 2
+           gates: mean pore 0.250 (>= 0.10), saturated fraction 0.000 (<= 0.25), water 0.000 m (<= 0.05), sky 0.958 (>= 0.60), 16 soil voxels, dead wood in the box 0.000 (>= 0.000)
+
+=== arms ===
+Every arm below is a **clone** of the one conditioned state above — the same world, the same water, the same litter, the same mineral inventory, the same resident cohort and the same phase — so a difference between two arms is the treatment and nothing else.
+pilot: **one positive-control arm** — bloomcrown alone at the first declared site (75,15) y31 — 3 eligible recipients of 24 candidate faces in hop, with the resident excluded so that nothing else can be the cause of what it does. Its only question is **G**, the replacement time R5.4 asks for before a probe window of 3 x G can mean anything. No control, no comparison and no second site.
+
+-- arm: newcomer with the resident excluded
+   excluded umbrellafrond: 8 of 8 stands cleared, 0 of 0 seed banks removed, all of it booked out as removed_* (organic +9.7709, mineral +0.1969)
+   retained and matched: stored water 221.8027 -> 221.8027 m3, head 2.502 -> 2.502 m, litter 1.25523 -> 1.25523, dead wood 0.00000 -> 0.00000, soil mineral 3071.9459 -> 3071.9459, mineral imported 3072.2 -> 3072.2
+   one bloomcrown founder #8 at (75,15) y31: wood 0.3, foliage 0.6000, reserve 0.1500, parcel 0.0000; bank of its own species on 0 sites (0.00000)
+   gates at the declared site: mean pore 0.411 (>= 0.10), saturated fraction 0.214 (<= 0.25), water 0.000 m (<= 0.05), sky 0.958 (>= 0.60), 14 soil voxels, dead wood in the box 0.000 (>= 0.000)
+     t (s)  resident  newcomer  births  losses survivors   deliv. fnd.parcel   banks    banked head (m)
+   t     0.05 s  donor size: bloomcrown #8 reached wood 0.30001 >= donor_min 0.3 — it can now set material aside (this is the introduced founder, not a descendant)
+       100         0         1       0       0         0        0    0.01667       0   0.00000    2.502
+       200         0         1       0       0         0        0    0.03333       0   0.00000    2.502
+       300         0         1       0       0         0        0    0.05000       0   0.00000    2.502
+   t   300.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001008 of mineral with it) to (75,14) y30 — the introduced founder donating again, which is not descendant reproduction
+       400         0         1       0       0         0        1    0.01667       1   0.04524    2.502
+       500         0         1       0       0         0        1    0.03333       1   0.04094    2.502
+       600         0         1       0       0         0        1    0.05000       1   0.03704    2.502
+   t   600.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001014 of mineral with it) to (73,16) y31 — the introduced founder donating again, which is not descendant reproduction
+       700         0         1       0       0         0        2    0.01667       2   0.07876    2.502
+       800         0         1       0       0         0        2    0.03333       2   0.07127    2.502
+       900         0         1       0       0         0        2    0.05000       1   0.03704    2.502
+   t   900.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001018 of mineral with it) to (76,17) y32 — the introduced founder donating again, which is not descendant reproduction
+      1000         0         1       0       0         0        3    0.01667       2   0.07876    2.502
+      1100         0         1       0       0         0        3    0.03333       2   0.07127    2.502
+      1200         0         1       0       0         0        3    0.05000       1   0.03704    2.502
+   t  1200.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001020 of mineral with it) to (74,17) y32 — the introduced founder donating again, which is not descendant reproduction
+      1300         0         1       0       0         0        4    0.01667       2   0.07876    2.502
+      1400         0         1       0       0         0        4    0.03333       2   0.07127    2.502
+      1500         0         1       0       0         0        4    0.05000       1   0.03704    2.502
+   t  1500.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001022 of mineral with it) to (74,14) y30 — the introduced founder donating again, which is not descendant reproduction
+      1600         0         1       0       0         0        5    0.01667       2   0.07876    2.502
+      1700         0         1       0       0         0        5    0.03333       2   0.07127    2.502
+      1800         0         1       0       0         0        5    0.05000       1   0.03704    2.502
+   t  1800.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001023 of mineral with it) to (76,14) y30 — the introduced founder donating again, which is not descendant reproduction
+      1900         0         1       0       0         0        6    0.01667       2   0.07876    2.502
+      2000         0         1       0       0         0        6    0.03333       2   0.07127    2.502
+      2100         0         1       0       0         0        6    0.05000       1   0.03704    2.502
+   t  2100.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (77,14) y30 — the introduced founder donating again, which is not descendant reproduction
+      2200         0         1       0       0         0        7    0.01667       2   0.07876    2.502
+      2300         0         1       0       0         0        7    0.03333       2   0.07127    2.502
+      2400         0         1       0       0         0        7    0.05000       1   0.03704    2.502
+   t  2400.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (77,15) y30 — the introduced founder donating again, which is not descendant reproduction
+   t  2400.10 s  birth: bloomcrown #9 at (77,15) y30, wood 0.02000
+      2500         0         2       1       0         1        8    0.01667       1   0.03352    2.502
+      2600         0         2       1       0         1        8    0.03333       1   0.03033    2.502
+      2700         0         2       1       0         1        8    0.05000       0   0.00000    2.502
+   t  2700.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001023 of mineral with it) to (76,17) y32 — the introduced founder donating again, which is not descendant reproduction
+      2800         0         2       1       0         1        9    0.01667       1   0.04524    2.502
+      2900         0         2       1       0         1        9    0.03333       1   0.04094    2.502
+      3000         0         2       1       0         1        9    0.05000       1   0.03704    2.502
+   t  3000.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001023 of mineral with it) to (77,17) y31 — the introduced founder donating again, which is not descendant reproduction
+      3100         0         2       1       0         1       10    0.01667       2   0.07876    2.502
+      3200         0         2       1       0         1       10    0.03333       2   0.07127    2.502
+      3300         0         2       1       0         1       10    0.05000       1   0.03704    2.502
+   t  3300.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (74,16) y31 — the introduced founder donating again, which is not descendant reproduction
+      3400         0         2       1       0         1       11    0.01667       2   0.07876    2.502
+      3500         0         2       1       0         1       11    0.03333       2   0.07127    2.502
+      3600         0         2       1       0         1       11    0.05000       1   0.03704    2.502
+   t  3600.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (77,16) y31 — the introduced founder donating again, which is not descendant reproduction
+      3700         0         2       1       0         1       12    0.01667       2   0.07876    2.502
+      3800         0         2       1       0         1       12    0.03333       2   0.07127    2.502
+      3900         0         2       1       0         1       12    0.05000       1   0.03704    2.502
+   t  3900.05 s  delivery: bloomcrown #8 sent one 0.0500 package (0.001024 of mineral with it) to (75,16) y31 — the introduced founder donating again, which is not descendant reproduction
+      4000         0         2       1       0         1       13    0.01667       2   0.07876    2.502
+   water: water m3/s over 4000 s: rain in 0.038400, outlet 0.038362, evaporation 0.000000, transpiration 0.00001354, storage change +0.000025 (residual -1.74e-10); head 2.502 m (+0.0000 m), stored 221.9016 m3
+   residuals: organic -5.73e-12, mineral -2.73e-12, energy -1.15e-11 (stocks 3.3885, 3071.9921, 6.7770)
+   1212.1 s of wall time for 80000 coupled ticks
+   by identity: 1 descendant birth(s), 0 of them lost before the end, 1 surviving; the introduced founder survived the whole window
+     #8 (introduced founder): funded 0.66667 over 80000 ticks, 13 deliveries, reached donor size at t 0.05 s
+   first birth at t 2400.10 s, and **no descendant reached donor size**: the replacement is NOT completed and this arm is **unresolved at the stopping budget** (4000 s against an earliest-possible bound of 3308.25 s — long enough in principle, so this is a measurement and not an arithmetic impossibility, and it is still not evidence of exclusion). A birth is not a generation.
+
+=== what this can and cannot say ===
+The conditioned state this all branched from planted 8 umbrellafrond founders and stood at 8 stands of that species at the introduction, its own descendants included.
+This was a **pilot**: one positive-control arm, no control to compare it with and one site. If it measured a G above, that number is what a real budget and R5.4's 3 x G probe window can be chosen from — for this site, this seed and these conditions. If it did not, the pair's earliest-possible bound is 3308.25 s and the budget it was given was 4000 s.
+EXIT 0 WALL 1808.276582719
