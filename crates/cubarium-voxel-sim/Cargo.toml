@@ -1,0 +1,30 @@
+[package]
+name = "cubarium-voxel-sim"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+cubarium-voxel = { workspace = true, features = ["parallel"] }
+cubarium-voxel-flora.workspace = true
+cubarium-voxel-fauna = { workspace = true, features = ["parallel"] }
+bevy_ecs.workspace = true
+bevy_tasks.workspace = true
+
+[features]
+# Forwarded to the three layers so a profiling build of the schedule times the same
+# phases the three-call sequence does. Measurement only.
+profile = [
+    "cubarium-voxel/profile",
+    "cubarium-voxel-flora/profile",
+    "cubarium-voxel-fauna/profile",
+]
+
+[dev-dependencies]
+# The sampler-hook test writes a system of its own.
+bevy_ecs.workspace = true
+
+# The tick-profile bench needs the phase timers, so it only builds with them.
+[[example]]
+name = "bench"
+required-features = ["profile"]

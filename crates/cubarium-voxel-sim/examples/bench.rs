@@ -2,8 +2,14 @@
 //! rule, no number and no observation of the ecology is in here.
 //!
 //! ```text
-//! cargo run --release -p cubarium-voxel-fauna --features profile --example bench -- [ticks] [grazers] [warmup_s] [seed] [sample_every]
+//! cargo run --release -p cubarium-voxel-sim --features profile --example bench \
+//!   -- [ticks] [grazers] [warmup_s] [seed] [sample_every] [threads]
 //! ```
+//!
+//! Since the schedule landed the tick is `cubarium_voxel_sim::Sim::step`, and `threads` is
+//! `SimConfig::threads`: `1` runs every phase serially and is the baseline this bench is
+//! read against. The compute pool is process-global, so **one process per thread count** —
+//! a run that wants the whole table runs the binary four times.
 //!
 //! The condition, declared: the **generated default world** (128 × 48 × 24 voxels of
 //! 0.25 m, `water_substeps` 4, `seed` 1, `noise_seed` 0) with the harness rain of 2e-4 m/s
@@ -39,6 +45,7 @@ use std::time::Instant;
 
 use cubarium_voxel::profile::{self, Count, Phase};
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
+use cubarium_voxel_sim::{Sim, SimConfig};
 use cubarium_voxel_fauna::{
     Command as FaunaCommand, DT, Fauna, FaunaConfig, Species as Beast, TICK_HZ,
 };
@@ -58,6 +65,18 @@ const LOG_ORGANIC: f64 = 1.0;
 /// sampled and not run every tick — and `0` turns them off entirely, which is what a
 /// `perf record` of the tick alone wants.
 const SAMPLE_EVERY: u64 = 100;
+/// The water leaves, in tick order: what `World::step` used to report as `WorldStep`.
+const WATER_PHASES: [Phase; 9] = [
+    Phase::Rain,
+    Phase::Evaporate,
+    Phase::Infiltrate,
+    Phase::Fall,
+    Phase::Exchange,
+    Phase::Drain,
+    Phase::WaterTable,
+    Phase::Spring,
+    Phase::Outlet,
+];
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -70,14 +89,15 @@ fn main() {
     let warmup_s: f64 = arg(&rest, 2).unwrap_or(50.0);
     let seed: u64 = arg(&rest, 3).unwrap_or(1);
     let sample_every: u64 = arg(&rest, 4).unwrap_or(SAMPLE_EVERY);
+    let threads: usize = arg(&rest, 5).unwrap_or(1);
 
     let warmup_ticks = (warmup_s * f64::from(TICK_HZ)).round() as u64;
     println!(
         "# voxel tick profile: {ticks} coupled ticks, {grazers} grazers, {warmup_s} s warm-up, \
-         seed {seed}"
+         seed {seed}, {threads} thread(s)"
     );
 
-    let mut world = prepared_world(seed, warmup_ticks);
+    let world = prepared_world(seed, warmup_ticks);
     let c = world.config().clone();
     println!(
         "world {}x{}x{} voxels of {} m ({} cells, {} columns), water_substeps {}, rain \
@@ -101,25 +121,28 @@ fn main() {
         Species::COUNT
     );
 
+    let mut sim = Sim::new(world, flora, fauna, SimConfig { threads });
+
     // Nothing before this line is in the numbers.
     profile::reset();
     let mut sets: Vec<Sets> = Vec::new();
     let mut observers = Observers::default();
     // The samplers are timed out of the tick: a full-grid set count and an eligible-set
-    // scan each cost about as much as a tick, and they are not the tick.
+    // scan each cost about as much as a tick, and they are not the tick. They stay out of
+    // `TickPhase::Sample` for exactly that reason — a system in the schedule would be
+    // inside `Sim::step` and therefore inside the wall time being reported.
     let mut wall = 0.0f64;
     for tick in 0..ticks {
         let at = Instant::now();
-        world.step();
-        flora.step(&mut world);
-        fauna.step(&world, &mut flora);
+        sim.step();
         wall += at.elapsed().as_secs_f64();
         if sample_every > 0 && tick % sample_every == 0 {
-            sets.push(measure_sets(&world, &flora, &fauna));
-            observers.measure(&world, &flora, &fauna);
+            let (world, flora, fauna) = sim.layers();
+            sets.push(measure_sets(world, flora, fauna));
+            observers.measure(world, flora, fauna);
         }
     }
-    report(ticks, wall, &sets, &observers, &c, sample_every);
+    report(ticks, wall, &sets, &observers, &c, sample_every, threads);
 }
 
 fn arg<T: std::str::FromStr>(args: &[String], i: usize) -> Option<T> {
@@ -361,11 +384,14 @@ fn report(
     observers: &Observers,
     c: &VoxelConfig,
     sample_every: u64,
+    threads: usize,
 ) {
     let n = ticks as f64;
-    let total = profile::nanos(Phase::WorldStep)
-        + profile::nanos(Phase::FloraStep)
-        + profile::nanos(Phase::FaunaStep);
+    // The schedule runs the water phases one at a time, so `World::step`'s own
+    // `WorldStep`/`Substeps` frames never open and the water total is the **sum of its
+    // leaves**. Those two rows are therefore absent from the table below rather than zero.
+    let water: u64 = WATER_PHASES.iter().copied().map(profile::nanos).sum();
+    let total = water + profile::nanos(Phase::FloraStep) + profile::nanos(Phase::FaunaStep);
     println!(
         "\nsim wall {:.2} s for {ticks} ticks = {:.3} ms/tick = {:.1} ticks/s = {:.1}x real \
          time (the samplers are outside this)",
@@ -381,7 +407,18 @@ fn report(
         100.0 * (total as f64 * 1e-9) / wall
     );
 
-    println!("\n## per-phase wall time per tick\n");
+    println!(
+        "\nwater {:.2} us/tick ({:.1} %), flora {:.2} us/tick ({:.1} %), fauna {:.2} us/tick \
+         ({:.1} %) of the timed total",
+        1e-3 * water as f64 / n,
+        100.0 * water as f64 / total.max(1) as f64,
+        1e-3 * profile::nanos(Phase::FloraStep) as f64 / n,
+        100.0 * profile::nanos(Phase::FloraStep) as f64 / total.max(1) as f64,
+        1e-3 * profile::nanos(Phase::FaunaStep) as f64 / n,
+        100.0 * profile::nanos(Phase::FaunaStep) as f64 / total.max(1) as f64,
+    );
+
+    println!("\n## per-phase wall time per tick, {threads} thread(s)\n");
     println!("| phase | µs/tick | % of timed | calls/tick |");
     println!("| --- | --- | --- | --- |");
     for p in Phase::ALL {

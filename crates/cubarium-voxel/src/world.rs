@@ -419,6 +419,15 @@ impl World {
     /// infiltration, drainage, spring discharge, outlet export.
     pub fn step(&mut self) {
         crate::water::step(self);
+        self.advance_tick();
+    }
+
+    /// Move the tick counter on, after every phase that reads it has run.
+    ///
+    /// Split out of [`World::step`] for `cubarium-voxel-sim`, whose schedule runs the
+    /// water phases one at a time and needs somewhere to put this. Never a rule: it is
+    /// the clock, and it moves exactly once per tick either way.
+    pub fn advance_tick(&mut self) {
         self.tick += 1;
     }
 

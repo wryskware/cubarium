@@ -556,7 +556,19 @@ impl Fauna {
     /// just moved and grows, and then the animals eat what is there. The order within the
     /// tick is [`step`]'s module doc, and it is written down in exactly one place.
     pub fn step(&mut self, world: &World, flora: &mut Flora) {
-        step::step(self, world, flora);
+        step::step(self, world, flora, 1);
+    }
+
+    /// [`Fauna::step`] with a thread count for the one phase that splits: `sense`, which
+    /// only reads. `1` is [`Fauna::step`] exactly.
+    ///
+    /// **Execution, never a rule.** Every animal's plan is a pure function of the world,
+    /// the plant layer and that animal, the plans are gathered in animal order whatever
+    /// order the chunks finish in, and `act` still applies them serially in id order. So
+    /// the thread count cannot reach a result, and with the `parallel` feature off it is
+    /// ignored altogether (`design/handoffs/voxel-schedule-brief-2026-09-18.md`).
+    pub fn step_with(&mut self, world: &World, flora: &mut Flora, threads: usize) {
+        step::step(self, world, flora, threads);
     }
 
     /// Apply a command now, between ticks, the way the plant layer's are applied. Returns

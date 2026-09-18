@@ -351,17 +351,27 @@ fn open_water_cell(w: &World, x: i64, z: u32) -> Option<usize> {
 
 // ---------------------------------------------------------------- the tick
 
-pub fn step(world: &mut World) {
-    // The active sets are a cache of the arrays; a fresh, decoded or resized world has to
-    // rebuild them before any phase may iterate them.
+/// Make a world's active sets trustworthy before any phase iterates them.
+///
+/// The sets are a cache of what the water arrays say, so a fresh, decoded or resized world
+/// has to rebuild them first. Every entry point that runs phases — [`step`] here and the
+/// schedule in `cubarium-voxel-sim` — calls this once before the first phase of a tick.
+pub fn begin(world: &mut World) {
     if world.wet.needs_rebuild(world.config.cells())
         || world.damp.needs_rebuild(world.config.cells())
     {
         world.rebuild_active_sets();
     }
+}
+
+/// One tick of water, as one call. **The phase order is the rule** and it is written out
+/// once, here; `cubarium-voxel-sim`'s schedule chains the same public phases in the same
+/// order and this stays as the three-call sequence's water leg for tests and warm-ups.
+pub fn step(world: &mut World) {
+    begin(world);
     crate::voxel_phase!(WorldStep, {
-        crate::voxel_phase!(Rain, { rain(world) });
-        crate::voxel_phase!(Evaporate, { evaporate(world) });
+        rain(world);
+        evaporate(world);
         let substeps = world.config.water_substeps.max(1);
         let sub_dt = DT / substeps as f64;
         crate::voxel_phase!(Substeps, {
@@ -369,50 +379,54 @@ pub fn step(world: &mut World) {
                 // Infiltration first, and inside the substep: water standing on a permeable
                 // cell is offered to it before anything moves the water somewhere else. See
                 // the module doc on why runoff is what infiltration refuses.
-                crate::voxel_phase!(Infiltrate, { infiltrate(world, sub_dt) });
-                crate::voxel_phase!(Fall, { fall(world) });
-                crate::voxel_phase!(Exchange, { exchange(world) });
+                infiltrate(world, sub_dt);
+                fall(world);
+                exchange(world, 1);
             }
         });
-        crate::voxel_phase!(Drain, { drain(world) });
-        crate::voxel_phase!(WaterTable, { water_table(world) });
-        crate::voxel_phase!(Spring, { spring(world) });
-        crate::voxel_phase!(Outlet, { outlet(world) });
+        drain(world);
+        water_table(world);
+        spring(world);
+        outlet(world);
     });
 }
 
-fn rain(w: &mut World) {
-    let per_column = w.config.rain_m_per_s * DT * w.config.cell_area();
-    if per_column <= 0.0 {
-        return;
-    }
-    let (width, depth) = (w.config.width as i64, w.config.depth);
-    let mut credited = 0.0;
-    for z in 0..depth {
-        for x in 0..width {
-            if let Some(i) = sky_cell(w, x, z) {
-                credited += add_free(w, i, per_column);
+pub fn rain(w: &mut World) {
+    crate::voxel_phase!(Rain, {
+        let per_column = w.config.rain_m_per_s * DT * w.config.cell_area();
+        if per_column <= 0.0 {
+            return;
+        }
+        let (width, depth) = (w.config.width as i64, w.config.depth);
+        let mut credited = 0.0;
+        for z in 0..depth {
+            for x in 0..width {
+                if let Some(i) = sky_cell(w, x, z) {
+                    credited += add_free(w, i, per_column);
+                }
             }
         }
-    }
-    w.ledger.rain_in += credited;
+        w.ledger.rain_in += credited;
+    });
 }
 
-fn evaporate(w: &mut World) {
-    let per_column = w.config.evaporation_m_per_s * DT * w.config.cell_area();
-    if per_column <= 0.0 {
-        return;
-    }
-    let (width, depth) = (w.config.width as i64, w.config.depth);
-    let mut debited = 0.0;
-    for z in 0..depth {
-        for x in 0..width {
-            if let Some(i) = open_water_cell(w, x, z) {
-                debited += take_free(w, i, per_column);
+pub fn evaporate(w: &mut World) {
+    crate::voxel_phase!(Evaporate, {
+        let per_column = w.config.evaporation_m_per_s * DT * w.config.cell_area();
+        if per_column <= 0.0 {
+            return;
+        }
+        let (width, depth) = (w.config.width as i64, w.config.depth);
+        let mut debited = 0.0;
+        for z in 0..depth {
+            for x in 0..width {
+                if let Some(i) = open_water_cell(w, x, z) {
+                    debited += take_free(w, i, per_column);
+                }
             }
         }
-    }
-    w.ledger.evaporation_out += debited;
+        w.ledger.evaporation_out += debited;
+    });
 }
 
 /// Every void cell hands what it can to the void cell below. Purely vertical, so no
@@ -423,28 +437,30 @@ fn evaporate(w: &mut World) {
 /// what makes a whole column shift down by one rather than only its floor cell — is
 /// exactly what it was, over 2e3 columns instead of 147e3 cells
 /// (`design/7_Research/voxel-tick-profile-2026-09-18.md`).
-fn fall(w: &mut World) {
-    let c = w.config.clone();
-    let plane = c.width as usize * c.depth as usize;
-    let columns = wet_columns(w, plane);
-    #[cfg(feature = "profile")]
-    crate::profile::add(
-        crate::profile::Count::FallCells,
-        columns.len() as u64 * u64::from(c.height.saturating_sub(1)),
-    );
-    for col in columns {
-        for y in 1..c.height {
-            let i = y as usize * plane + col;
-            if w.free[i] <= 0.0 || w.material[i].is_solid() {
-                continue;
-            }
-            let below = i - plane;
-            let want = free_m3(w, i).min(free_room_m3(w, below));
-            if want > 0.0 {
-                transfer(w, (i, Store::Free), (below, Store::Free), want);
+pub fn fall(w: &mut World) {
+    crate::voxel_phase!(Fall, {
+        let c = w.config.clone();
+        let plane = c.width as usize * c.depth as usize;
+        let columns = wet_columns(w, plane);
+        #[cfg(feature = "profile")]
+        crate::profile::add(
+            crate::profile::Count::FallCells,
+            columns.len() as u64 * u64::from(c.height.saturating_sub(1)),
+        );
+        for col in columns {
+            for y in 1..c.height {
+                let i = y as usize * plane + col;
+                if w.free[i] <= 0.0 || w.material[i].is_solid() {
+                    continue;
+                }
+                let below = i - plane;
+                let want = free_m3(w, i).min(free_room_m3(w, below));
+                if want > 0.0 {
+                    transfer(w, (i, Store::Free), (below, Store::Free), want);
+                }
             }
         }
-    }
+    });
 }
 
 /// The columns holding free water, deduplicated, in the order the wet set holds them.
@@ -502,84 +518,86 @@ fn submerged(c: &Config, y: u32, table: f64) -> bool {
 ///
 /// The named spring is untouched and still one cell with its own conductance: it is the
 /// world's one *feature*, while this is the ambient boundary the whole world sits on.
-fn water_table(w: &mut World) {
-    let c = w.config.clone();
-    let table = c.aquifer_head_m(w.aquifer_m3);
-    if !(table > 0.0) {
-        return;
-    }
-    // The saturated **band** and not the grid: `submerged` is monotone in `y`, so every
-    // row above the table's own row can be skipped without looking at it at all
-    // (`design/7_Research/voxel-tick-profile-2026-09-18.md`). Same rows, same rule.
-    let band = {
-        let rows = (table / c.voxel_m - 0.5).floor() + 1.0;
-        if rows <= 0.0 { 0 } else { (rows as u32).min(c.height) }
-    };
-    #[cfg(feature = "profile")]
-    crate::profile::add(
-        crate::profile::Count::WaterTableCells,
-        u64::from(c.depth) * u64::from(c.width) * u64::from(band),
-    );
-    // What the aquifer gives up this step, accumulated and debited once. Subtracting a
-    // microlitre from a store of tens of cubic metres forty thousand times a tick is
-    // forty thousand roundings against the store's own ulp; one subtraction is one.
-    let mut taken = 0.0;
-    let charged = w.aquifer_m3;
-
-    for y in 0..band {
-        if !submerged(&c, y, table) {
-            continue;
+pub fn water_table(w: &mut World) {
+    crate::voxel_phase!(WaterTable, {
+        let c = w.config.clone();
+        let table = c.aquifer_head_m(w.aquifer_m3);
+        if !(table > 0.0) {
+            return;
         }
-        for z in 0..c.depth {
-            for x in 0..c.width as i64 {
-                let i = c.index(x, y, z);
-                let m = w.material[i];
-                if m.pore_capacity() <= 0.0 || m.permeability_per_s() <= 0.0 {
-                    continue;
+        // The saturated **band** and not the grid: `submerged` is monotone in `y`, so every
+        // row above the table's own row can be skipped without looking at it at all
+        // (`design/7_Research/voxel-tick-profile-2026-09-18.md`). Same rows, same rule.
+        let band = {
+            let rows = (table / c.voxel_m - 0.5).floor() + 1.0;
+            if rows <= 0.0 { 0 } else { (rows as u32).min(c.height) }
+        };
+        #[cfg(feature = "profile")]
+        crate::profile::add(
+            crate::profile::Count::WaterTableCells,
+            u64::from(c.depth) * u64::from(c.width) * u64::from(band),
+        );
+        // What the aquifer gives up this step, accumulated and debited once. Subtracting a
+        // microlitre from a store of tens of cubic metres forty thousand times a tick is
+        // forty thousand roundings against the store's own ulp; one subtraction is one.
+        let mut taken = 0.0;
+        let charged = w.aquifer_m3;
+
+        for y in 0..band {
+            if !submerged(&c, y, table) {
+                continue;
+            }
+            for z in 0..c.depth {
+                for x in 0..c.width as i64 {
+                    let i = c.index(x, y, z);
+                    let m = w.material[i];
+                    if m.pore_capacity() <= 0.0 || m.permeability_per_s() <= 0.0 {
+                        continue;
+                    }
+                    let rate = m.permeability_per_s() * DT * m.pore_capacity() * c.voxel_volume();
+                    let want = rate.min(pore_room_m3(w, i)).min((charged - taken).max(0.0));
+                    if want <= 0.0 {
+                        continue;
+                    }
+                    taken += add_pore(w, i, want);
                 }
-                let rate = m.permeability_per_s() * DT * m.pore_capacity() * c.voxel_volume();
-                let want = rate.min(pore_room_m3(w, i)).min((charged - taken).max(0.0));
-                if want <= 0.0 {
-                    continue;
-                }
-                taken += add_pore(w, i, want);
             }
         }
-    }
 
-    for y in 1..c.height {
-        // Above the table there is nothing to seep into.
-        if (y as f64) * c.voxel_m >= table {
-            break;
-        }
-        let level = ((table - y as f64 * c.voxel_m) / c.voxel_m).clamp(0.0, 1.0);
-        for z in 0..c.depth {
-            for x in 0..c.width as i64 {
-                let i = c.index(x, y, z);
-                if w.material[i].is_solid() || w.free[i] >= level {
-                    continue;
+        for y in 1..c.height {
+            // Above the table there is nothing to seep into.
+            if (y as f64) * c.voxel_m >= table {
+                break;
+            }
+            let level = ((table - y as f64 * c.voxel_m) / c.voxel_m).clamp(0.0, 1.0);
+            for z in 0..c.depth {
+                for x in 0..c.width as i64 {
+                    let i = c.index(x, y, z);
+                    if w.material[i].is_solid() || w.free[i] >= level {
+                        continue;
+                    }
+                    let below = c.index(x, y - 1, z);
+                    let m = w.material[below];
+                    if m.pore_capacity() <= 0.0 || m.permeability_per_s() <= 0.0 {
+                        continue;
+                    }
+                    // Only saturated ground seeps: unsaturated soil takes the water itself.
+                    if w.pore[below] < 1.0 - 1e-9 {
+                        continue;
+                    }
+                    let rate = m.permeability_per_s() * DT * m.pore_capacity() * c.voxel_volume();
+                    let room = (level - w.free[i]) * c.voxel_volume();
+                    let want = rate.min(room).min((charged - taken).max(0.0));
+                    if want <= 0.0 {
+                        continue;
+                    }
+                    taken += add_free(w, i, want);
                 }
-                let below = c.index(x, y - 1, z);
-                let m = w.material[below];
-                if m.pore_capacity() <= 0.0 || m.permeability_per_s() <= 0.0 {
-                    continue;
-                }
-                // Only saturated ground seeps: unsaturated soil takes the water itself.
-                if w.pore[below] < 1.0 - 1e-9 {
-                    continue;
-                }
-                let rate = m.permeability_per_s() * DT * m.pore_capacity() * c.voxel_volume();
-                let room = (level - w.free[i]) * c.voxel_volume();
-                let want = rate.min(room).min((charged - taken).max(0.0));
-                if want <= 0.0 {
-                    continue;
-                }
-                taken += add_free(w, i, want);
             }
         }
-    }
 
-    w.aquifer_m3 = (charged - taken).max(0.0);
+        w.aquifer_m3 = (charged - taken).max(0.0);
+    });
 }
 
 /// Scratch buffers for [`exchange`], reused for the life of the thread so the phase
@@ -695,7 +713,12 @@ thread_local! {
 /// lake no longer levels in one substep, it relaxes at half of its head difference per
 /// substep, which is a travelling wave rather than an instant re-level. `FLOW_PER_SUBSTEP`
 /// is a placeholder and the only number in the rule.
-fn exchange(w: &mut World) {
+pub fn exchange(w: &mut World, threads: usize) {
+    crate::voxel_phase!(Exchange, { exchange_inner(w, threads) })
+}
+
+fn exchange_inner(w: &mut World, threads: usize) {
+    let _ = threads;
     let c = w.config.clone();
     let plane = c.width as usize * c.depth as usize;
     let n = c.cells();
@@ -707,12 +730,6 @@ fn exchange(w: &mut World) {
         sc.ensure(n, plane);
         sc.next_stamp();
         let stamp = sc.stamp;
-        if std::env::var("WATER_DEBUG").is_ok() {
-            let mut v: Vec<(u32,u32,u32)> = w.wet.cells().iter().map(|&i| c.coords(i)).collect();
-            v.sort();
-            eprintln!("wet: {v:?}");
-        }
-
         // ---- the active set: the wet cells, and the columns they and their horizontal
         // neighbours live in. Dry rock and dry air are never looked at.
         sc.active.clear();
@@ -1024,128 +1041,136 @@ fn scan_column(w: &World, c: &Config, plane: usize, col: usize, sc: &mut Scratch
     }
 }
 
-fn infiltrate(w: &mut World, dt: f64) {
-    let c = w.config.clone();
-    let plane = c.width as usize * c.depth as usize;
-    // Over the wet set: a cell with no free water in it has nothing to offer the ground,
-    // and source and destination are disjoint (a void cell and the porous cell under it),
-    // so the order the set is walked in cannot change the answer.
-    let active: Vec<usize> = w.wet.cells().to_vec();
-    #[cfg(feature = "profile")]
-    crate::profile::add(crate::profile::Count::InfiltrateCells, active.len() as u64);
-    for i in active {
-        if i < plane || w.material[i].is_solid() || w.free[i] <= 0.0 {
-            continue;
+pub fn infiltrate(w: &mut World, dt: f64) {
+    crate::voxel_phase!(Infiltrate, {
+        let c = w.config.clone();
+        let plane = c.width as usize * c.depth as usize;
+        // Over the wet set: a cell with no free water in it has nothing to offer the ground,
+        // and source and destination are disjoint (a void cell and the porous cell under it),
+        // so the order the set is walked in cannot change the answer.
+        let active: Vec<usize> = w.wet.cells().to_vec();
+        #[cfg(feature = "profile")]
+        crate::profile::add(crate::profile::Count::InfiltrateCells, active.len() as u64);
+        for i in active {
+            if i < plane || w.material[i].is_solid() || w.free[i] <= 0.0 {
+                continue;
+            }
+            let below = i - plane;
+            let m = w.material[below];
+            if m.pore_capacity() <= 0.0 || m.permeability_per_s() <= 0.0 {
+                continue;
+            }
+            let rate = m.permeability_per_s() * dt * m.pore_capacity() * c.voxel_volume();
+            transfer(w, (i, Store::Free), (below, Store::Pore), rate);
         }
-        let below = i - plane;
-        let m = w.material[below];
-        if m.pore_capacity() <= 0.0 || m.permeability_per_s() <= 0.0 {
-            continue;
-        }
-        let rate = m.permeability_per_s() * dt * m.pore_capacity() * c.voxel_volume();
-        transfer(w, (i, Store::Free), (below, Store::Pore), rate);
-    }
+    });
 }
 
-fn drain(w: &mut World) {
-    let c = w.config.clone();
-    let plane = c.width as usize * c.depth as usize;
-    // The table as it stands at the start of the step: a voxel inside the saturated
-    // zone has nowhere lower to drain to, because the aquifer is what is holding it up.
-    let table = c.aquifer_head_m(w.aquifer_m3);
-    // Over the damp set — the cells that hold any pore water — instead of the grid. Two
-    // stated consequences (`design/7_Research/voxel-tick-profile-2026-09-18.md`): a cell
-    // with no pore water can never drain, so nothing is lost; and the walk is no longer
-    // bottom-up, so a stack of wet soil can pass water down more than one cell in a tick
-    // where the grid walk passed it exactly one. It is a trickle either way — one tick's
-    // drainage is `permeability_per_s * DT` of a cell's capacity — and the soil profile is
-    // a statistical claim, not a per-cell one.
-    let active: Vec<usize> = w.damp.cells().to_vec();
-    #[cfg(feature = "profile")]
-    crate::profile::add(crate::profile::Count::DrainCells, active.len() as u64);
-    for i in active {
-        let y = (i / plane) as u32;
-        if submerged(&c, y, table) {
-            continue;
-        }
-        let m = w.material[i];
-        let cap = m.pore_capacity();
-        if cap <= 0.0 || w.pore[i] <= 0.0 || m.permeability_per_s() <= 0.0 {
-            continue;
-        }
-        let unit = cap * c.voxel_volume();
-        let excess = pore_m3(w, i) - m.field_capacity() * unit;
-        if excess <= 0.0 {
-            continue;
-        }
-        let want = excess.min(m.permeability_per_s() * DT * unit);
-        if y == 0 {
-            // Sitting on the foundation: what drains joins the aquifer.
-            let lost = take_pore(w, i, want);
-            w.aquifer_m3 += lost;
-            continue;
-        }
-        let below = i - plane;
-        match w.material[below] {
-            Material::Bedrock => {
+pub fn drain(w: &mut World) {
+    crate::voxel_phase!(Drain, {
+        let c = w.config.clone();
+        let plane = c.width as usize * c.depth as usize;
+        // The table as it stands at the start of the step: a voxel inside the saturated
+        // zone has nowhere lower to drain to, because the aquifer is what is holding it up.
+        let table = c.aquifer_head_m(w.aquifer_m3);
+        // Over the damp set — the cells that hold any pore water — instead of the grid. Two
+        // stated consequences (`design/7_Research/voxel-tick-profile-2026-09-18.md`): a cell
+        // with no pore water can never drain, so nothing is lost; and the walk is no longer
+        // bottom-up, so a stack of wet soil can pass water down more than one cell in a tick
+        // where the grid walk passed it exactly one. It is a trickle either way — one tick's
+        // drainage is `permeability_per_s * DT` of a cell's capacity — and the soil profile is
+        // a statistical claim, not a per-cell one.
+        let active: Vec<usize> = w.damp.cells().to_vec();
+        #[cfg(feature = "profile")]
+        crate::profile::add(crate::profile::Count::DrainCells, active.len() as u64);
+        for i in active {
+            let y = (i / plane) as u32;
+            if submerged(&c, y, table) {
+                continue;
+            }
+            let m = w.material[i];
+            let cap = m.pore_capacity();
+            if cap <= 0.0 || w.pore[i] <= 0.0 || m.permeability_per_s() <= 0.0 {
+                continue;
+            }
+            let unit = cap * c.voxel_volume();
+            let excess = pore_m3(w, i) - m.field_capacity() * unit;
+            if excess <= 0.0 {
+                continue;
+            }
+            let want = excess.min(m.permeability_per_s() * DT * unit);
+            if y == 0 {
+                // Sitting on the foundation: what drains joins the aquifer.
                 let lost = take_pore(w, i, want);
                 w.aquifer_m3 += lost;
+                continue;
             }
-            Material::Air => {
-                transfer(w, (i, Store::Pore), (below, Store::Free), want);
-            }
-            _ => {
-                transfer(w, (i, Store::Pore), (below, Store::Pore), want);
+            let below = i - plane;
+            match w.material[below] {
+                Material::Bedrock => {
+                    let lost = take_pore(w, i, want);
+                    w.aquifer_m3 += lost;
+                }
+                Material::Air => {
+                    transfer(w, (i, Store::Pore), (below, Store::Free), want);
+                }
+                _ => {
+                    transfer(w, (i, Store::Pore), (below, Store::Pore), want);
+                }
             }
         }
-    }
+    });
 }
 
-fn spring(w: &mut World) {
-    let Some((x, y, z)) = w.spring_cell else { return };
-    if w.aquifer_m3 <= 0.0 || w.config.spring_k_m2_per_s <= 0.0 {
-        return;
-    }
-    if y >= w.config.height || z >= w.config.depth {
-        return;
-    }
-    let head = w.config.aquifer_head_m(w.aquifer_m3);
-    let h_spring = y as f64 * w.config.voxel_m;
-    let drive = (head - h_spring).max(0.0);
-    if drive <= 0.0 {
-        return;
-    }
-    let want = (w.config.spring_k_m2_per_s * drive * DT).min(w.aquifer_m3);
-    // The seep emerges at the named cell and, if that is already brim full, in the
-    // cells above it: a spring under standing water still reaches the surface. A solid
-    // roof over the seep blocks it, and the aquifer keeps what it could not push out.
-    let mut left = want;
-    for at in y..w.config.height {
-        let i = w.config.index(x as i64, at, z);
-        if w.material[i].is_solid() {
-            break;
+pub fn spring(w: &mut World) {
+    crate::voxel_phase!(Spring, {
+        let Some((x, y, z)) = w.spring_cell else { return };
+        if w.aquifer_m3 <= 0.0 || w.config.spring_k_m2_per_s <= 0.0 {
+            return;
         }
-        let got = add_free(w, i, left);
-        w.aquifer_m3 -= got;
-        left -= got;
-        if left <= 1e-15 {
-            break;
+        if y >= w.config.height || z >= w.config.depth {
+            return;
         }
-    }
+        let head = w.config.aquifer_head_m(w.aquifer_m3);
+        let h_spring = y as f64 * w.config.voxel_m;
+        let drive = (head - h_spring).max(0.0);
+        if drive <= 0.0 {
+            return;
+        }
+        let want = (w.config.spring_k_m2_per_s * drive * DT).min(w.aquifer_m3);
+        // The seep emerges at the named cell and, if that is already brim full, in the
+        // cells above it: a spring under standing water still reaches the surface. A solid
+        // roof over the seep blocks it, and the aquifer keeps what it could not push out.
+        let mut left = want;
+        for at in y..w.config.height {
+            let i = w.config.index(x as i64, at, z);
+            if w.material[i].is_solid() {
+                break;
+            }
+            let got = add_free(w, i, left);
+            w.aquifer_m3 -= got;
+            left -= got;
+            if left <= 1e-15 {
+                break;
+            }
+        }
+    });
 }
 
-fn outlet(w: &mut World) {
-    if !w.outlet_open {
-        return;
-    }
-    let Some((x, y, z)) = w.outlet_cell else { return };
-    if y >= w.config.height || z >= w.config.depth {
-        return;
-    }
-    let i = w.config.index(x as i64, y, z);
-    let want = w.config.outlet_m3_per_s * DT;
-    let lost = take_free(w, i, want);
-    w.ledger.outlet_out += lost;
+pub fn outlet(w: &mut World) {
+    crate::voxel_phase!(Outlet, {
+        if !w.outlet_open {
+            return;
+        }
+        let Some((x, y, z)) = w.outlet_cell else { return };
+        if y >= w.config.height || z >= w.config.depth {
+            return;
+        }
+        let i = w.config.index(x as i64, y, z);
+        let want = w.config.outlet_m3_per_s * DT;
+        let lost = take_free(w, i, want);
+        w.ledger.outlet_out += lost;
+    });
 }
 
 // ---------------------------------------------------------------- commands

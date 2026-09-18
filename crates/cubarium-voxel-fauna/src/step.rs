@@ -93,7 +93,7 @@ struct Plan {
     target: Option<Site>,
 }
 
-pub(crate) fn step(fauna: &mut Fauna, world: &World, flora: &mut Flora) {
+pub(crate) fn step(fauna: &mut Fauna, world: &World, flora: &mut Flora, threads: usize) {
     // The tick counter moves first, so `fauna.tick` is the tick this step produces — the
     // flora layer's own rule, and the tick the keyed streams are keyed by.
     fauna.tick += 1;
@@ -104,8 +104,9 @@ pub(crate) fn step(fauna: &mut Fauna, world: &World, flora: &mut Flora) {
     cubarium_voxel::voxel_phase!(FaunaStep, {
         cubarium_voxel::voxel_phase!(FaunaTerrain, { terrain(fauna, &view) });
         cubarium_voxel::voxel_phase!(FaunaMaintenance, { maintenance(fauna) });
-        let plans =
-            cubarium_voxel::voxel_phase!(FaunaSense, { sense(fauna, &view, flora, seed, tick) });
+        let plans = cubarium_voxel::voxel_phase!(FaunaSense, {
+            sense(fauna, &view, flora, seed, tick, threads)
+        });
         cubarium_voxel::voxel_phase!(FaunaAct, {
             act(fauna, &view, flora, &plans, seed, tick)
         });
@@ -185,9 +186,11 @@ fn sense(
     flora: &Flora,
     seed: u64,
     tick: u64,
+    threads: usize,
 ) -> Vec<Plan> {
     let fv = flora.view();
     let width = i64::from(view.config.width);
+    let _ = threads;
     let mut out = Vec::with_capacity(fauna.animals.len());
     for a in &fauna.animals {
         let sc = *fauna.config.species(a.species);
