@@ -1350,7 +1350,7 @@ fn run_arm(
     let per_interval = (INTERVAL_S * cubarium_voxel::TICK_HZ as f64).round() as u64;
 
     println!(
-        "   {:>7} {:>9} {:>9} {:>7} {:>7} {:>9} {:>8} {:>10} {:>7} {:>9} {:>8}",
+        "   {:>7} {:>9} {:>9} {:>7} {:>7} {:>9} {:>8} {:>10} {:>10} {:>7} {:>9} {:>8}",
         "t (s)",
         "resident",
         "newcomer",
@@ -1358,6 +1358,7 @@ fn run_arm(
         "losses",
         "survivors",
         "deliv.",
+        "max desc.W",
         "fnd.parcel",
         "banks",
         "banked",
@@ -1371,13 +1372,14 @@ fn run_arm(
         if tick % per_interval == 0 || tick == ticks {
             let t = tick as f64 * cubarium_voxel::DT;
             println!(
-                "   {t:>7.0} {:>9} {:>9} {:>7} {:>7} {:>9} {:>8} {:>10.5} {:>7} {:>9.5} {:>8.3}",
+                "   {t:>7.0} {:>9} {:>9} {:>7} {:>7} {:>9} {:>8} {:>10.5} {:>10.5} {:>7} {:>9.5} {:>8.3}",
                 count(&flora, resident),
                 count(&flora, newcomer),
                 watch.births(),
                 watch.losses(),
                 watch.survivors(&flora),
                 watch.deliveries(),
+                watch.max_descendant_wood(&flora),
                 watch.founder_parcel(&flora),
                 banked(&flora, newcomer).0,
                 banked(&flora, newcomer).1,
@@ -1530,6 +1532,32 @@ struct Record {
     deliveries: Vec<(u64, Site, f64)>,
     lost_tick: Option<u64>,
     parcel: f64,
+    /// Where it stands, and what it has grown to: the two numbers an **unresolved** run needs
+    /// before a real `G` can be extrapolated from it. Without them an arm can only say that no
+    /// descendant reached `donor_min`, not how far it got or how fast it was going.
+    site: Site,
+    wood: f64,
+    /// Ticks this record has been observed alive, and the running sums of the three published
+    /// multipliers of a stand's income: `Stand::light`, `Stand::moisture` and
+    /// `1 − aeration_stress`, plus the Michaelis–Menten factor `N / (N + K_N)` of **its own
+    /// site's** mineral pool, read through `FloraView::ground_at` and the species' published
+    /// `nutrient_half`.
+    ///
+    /// The first three are the model's own per-stand state. The fourth is the harness reading
+    /// two published numbers and doing the division the income line does; it is named as such
+    /// and it is not a model output. Together they say **which multiplier** is small when a
+    /// descendant grows slower than the growth cap.
+    samples: u64,
+    light_sum: f64,
+    moisture_sum: f64,
+    unstressed_sum: f64,
+    monod_sum: f64,
+}
+
+impl Record {
+    fn mean(&self, sum: f64) -> f64 {
+        if self.samples == 0 { f64::NAN } else { sum / self.samples as f64 }
+    }
 }
 
 /// Every newcomer identity this arm has seen, and the funding and delivery events of each.
@@ -1572,6 +1600,13 @@ impl Watch {
                 deliveries: Vec::new(),
                 lost_tick: None,
                 parcel: stand.parcel,
+                site: stand.site,
+                wood: stand.wood,
+                samples: 0,
+                light_sum: 0.0,
+                moisture_sum: 0.0,
+                unstressed_sum: 0.0,
+                monod_sum: 0.0,
             });
             watch.alive.push(stand.id);
         }
@@ -1612,6 +1647,13 @@ impl Watch {
                             deliveries: Vec::new(),
                             lost_tick: None,
                             parcel: stand.parcel,
+                            site: stand.site,
+                            wood: stand.wood,
+                            samples: 0,
+                            light_sum: 0.0,
+                            moisture_sum: 0.0,
+                            unstressed_sum: 0.0,
+                            monod_sum: 0.0,
                         },
                     );
                     self.event(format!(
@@ -1637,6 +1679,17 @@ impl Watch {
                 self.records[i].funded += funded;
                 self.records[i].funded_ticks += 1;
             }
+            // The life history, sampled on the tick the stand is already being read on.
+            let pool = flora.view().ground_at(stand.site).map_or(0.0, |g| g.mineral);
+            let half = flora.config().species(species).nutrient_half;
+            self.records[i].site = stand.site;
+            self.records[i].wood = stand.wood;
+            self.records[i].samples += 1;
+            self.records[i].light_sum += stand.light;
+            self.records[i].moisture_sum += stand.moisture;
+            self.records[i].unstressed_sum += 1.0 - stand.aeration_stress;
+            self.records[i].monod_sum +=
+                if pool + half > 0.0 { pool / (pool + half) } else { 0.0 };
             if self.records[i].donor_tick.is_none() && stand.wood >= donor_min {
                 self.records[i].donor_tick = Some(tick);
                 self.event(
@@ -1758,6 +1811,19 @@ impl Watch {
         self.records.iter().map(|r| r.deliveries.len()).sum()
     }
 
+    /// The largest wood any **living descendant** holds, for the per-interval column: the one
+    /// number that says whether an unresolved arm was approaching `donor_min` or nowhere near
+    /// it. `0.0` when there is no living descendant.
+    fn max_descendant_wood(&self, flora: &Flora) -> f64 {
+        let v = flora.view();
+        self.records
+            .iter()
+            .filter(|r| r.descendant)
+            .filter_map(|r| v.stands.iter().find(|s| s.id == r.id))
+            .map(|s| s.wood)
+            .fold(0.0, f64::max)
+    }
+
     fn founder_parcel(&self, flora: &Flora) -> f64 {
         let Some(id) = self.founder else { return 0.0 };
         flora.view().stands.iter().find(|s| s.id == id).map_or(0.0, |s| s.parcel)
@@ -1825,6 +1891,51 @@ impl Watch {
                     ),
                     None => String::new(),
                 }
+            );
+        }
+        // **Each descendant against `donor_min`**, and what its own income multipliers
+        // averaged over its life. An arm that ends unresolved says here how far its
+        // descendants got and which multiplier was holding them back, which is what a real `G`
+        // has to be extrapolated from (the growth cap is an upper bound and these are the
+        // reasons the model was under it).
+        let donor_min = flora.config().species(newcomer).donor_min;
+        let living: Vec<&Record> = self
+            .records
+            .iter()
+            .filter(|r| r.descendant && flora.view().stands.iter().any(|s| s.id == r.id))
+            .collect();
+        if !living.is_empty() {
+            println!(
+                "   surviving descendants against donor_min {donor_min} — mean light, moisture \
+                 and (1 - aeration stress) are the stand's own published state over its life; \
+                 the Monod factor is this harness dividing its site's published mineral pool by \
+                 `pool + nutrient_half`, not a model output:"
+            );
+            println!(
+                "     {:>5} {:>14} {:>9} {:>7} {:>8} {:>7} {:>9} {:>8} {:>7}",
+                "id", "column", "wood", "of W_est", "born (s)", "light", "moisture", "unstress", "monod"
+            );
+            for r in &living {
+                println!(
+                    "     {:>5} {:>14} {:>9.5} {:>6.1} % {:>8.1} {:>7.3} {:>9.3} {:>8.3} {:>7.3}",
+                    r.id,
+                    format!("({},{}) y{}", r.site.x, r.site.z, r.site.y),
+                    r.wood,
+                    100.0 * r.wood / donor_min,
+                    r.born_tick as f64 * cubarium_voxel::DT,
+                    r.mean(r.light_sum),
+                    r.mean(r.moisture_sum),
+                    r.mean(r.unstressed_sum),
+                    r.mean(r.monod_sum)
+                );
+            }
+            let best = living.iter().map(|r| r.wood).fold(0.0, f64::max);
+            println!(
+                "   the largest descendant holds {best:.5} of the {donor_min} it needs ({:.1} %); \
+                 a newborn at the **growth cap** covers that gap in {} ticks, so this arm's own \
+                 descendants are slower than the cap by whatever their multipliers above say",
+                100.0 * best / donor_min,
+                observation_cap(newcomer, flora.config().species(newcomer)).growth_ticks
             );
         }
         let first_birth = self.records.iter().filter(|r| r.descendant).map(|r| r.born_tick).min();
