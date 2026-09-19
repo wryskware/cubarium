@@ -26,7 +26,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::manifest::{Manifest, Transfer};
+use crate::manifest::{Founder, Manifest, Transfer};
 
 /// The three bounded local actions, in manifest order: forward effort, signed turn
 /// effort, feed effort. Zero movement is rest; turning while stopped is permitted and
@@ -83,9 +83,18 @@ pub fn resolve_actions(response: Response, manifest: &Manifest) -> Actions {
     let deadband = manifest.deadband;
     match response {
         Response::Bounded(a) => Actions {
-            forward: deadband_low(clean(a.forward, manifest.actions[0].low, manifest.actions[0].high), deadband),
-            turn: deadband_sym(clean(a.turn, manifest.actions[1].low, manifest.actions[1].high), deadband),
-            feed: deadband_low(clean(a.feed, manifest.actions[2].low, manifest.actions[2].high), deadband),
+            forward: deadband_low(
+                clean(a.forward, manifest.actions[0].low, manifest.actions[0].high),
+                deadband,
+            ),
+            turn: deadband_sym(
+                clean(a.turn, manifest.actions[1].low, manifest.actions[1].high),
+                deadband,
+            ),
+            feed: deadband_low(
+                clean(a.feed, manifest.actions[2].low, manifest.actions[2].high),
+                deadband,
+            ),
         },
         Response::Logits(l) => Actions {
             forward: deadband_low(transfer(l[0], manifest.actions[0].transfer), deadband),
@@ -116,20 +125,12 @@ fn transfer(logit: f64, t: Transfer) -> f64 {
 
 /// Forward and feed deadband: anything below it is no action.
 fn deadband_low(v: f64, deadband: f64) -> f64 {
-    if v < deadband {
-        0.0
-    } else {
-        v
-    }
+    if v < deadband { 0.0 } else { v }
 }
 
 /// Turn deadband, on the absolute value, keeping the sign.
 fn deadband_sym(v: f64, deadband: f64) -> f64 {
-    if v.abs() < deadband {
-        0.0
-    } else {
-        v
-    }
+    if v.abs() < deadband { 0.0 } else { v }
 }
 
 /// The controller table: one controller per founder body that has one, keyed by animal
@@ -221,6 +222,201 @@ impl Controller for Scripted {
     }
 }
 
+/// The named module a controller reads from its observation by manifest slot.
+fn module_slot(manifest: &Manifest, name: &str) -> crate::manifest::Module {
+    *manifest
+        .modules
+        .iter()
+        .find(|m| m.name == name)
+        .unwrap_or_else(|| panic!("manifest has no {name} module"))
+}
+
+/// Observation-only **blind foraging** heuristic: go up the litter cue's response and
+/// trend while they support it, feed when the mouth tastes litter, turn away from contact
+/// and cover ground with a remembered, alternating turn preference when there is no
+/// signal. It reads only the observation vector — never a coordinate, a site, a route or
+/// a stock total (`design/voxel-senses-phase1-tests.md` §2's observation-only control).
+#[derive(Clone, Debug)]
+pub struct BlindForager {
+    /// The remembered turn preference while wandering without a signal: the controller's
+    /// own memory, never a world direction.
+    turn_bias: f64,
+    /// Controller samples spent moving without a signal before the preference flips.
+    wander_ticks: u32,
+    contact: crate::manifest::Module,
+    taste: crate::manifest::Module,
+    chem: crate::manifest::Module,
+}
+
+impl BlindForager {
+    /// The blind founder's heuristic, pre-indexed against its manifest.
+    pub fn new() -> BlindForager {
+        let manifest = Founder::Blind.manifest();
+        BlindForager {
+            turn_bias: 1.0,
+            wander_ticks: 0,
+            contact: module_slot(&manifest, "Contact(4)"),
+            taste: module_slot(&manifest, "Taste(1)"),
+            chem: module_slot(&manifest, "Chem(litter)"),
+        }
+    }
+}
+
+impl Default for BlindForager {
+    fn default() -> Self {
+        BlindForager::new()
+    }
+}
+
+impl Controller for BlindForager {
+    fn drive(&mut self, o: &[f64]) -> Response {
+        let c = &self.contact;
+        let (front, left, right) = (o[c.offset], o[c.offset + 1], o[c.offset + 2]);
+        let (taste_resp, taste_valid) = (o[self.taste.offset], o[self.taste.offset + 2]);
+        let (chem_resp, chem_trend, chem_valid) = (
+            o[self.chem.offset],
+            o[self.chem.offset + 1],
+            o[self.chem.offset + 2],
+        );
+
+        let front_blocked = front > 0.5;
+        let forward = if front_blocked { 0.1 } else { 1.0 };
+        // The feed gate is calibrated to the field's own scale: a settled full tile
+        // reads ≈0.29 at the receptor (bilinear over the node's neighbourhood), so a
+        // gate near 0.2 is "the cue here is near-source". Failed attempts off the stock
+        // are free — the gate costs nothing but keeps feeding honest.
+        let feed = if taste_valid > 0.5 && taste_resp > 0.2 {
+            1.0
+        } else {
+            0.0
+        };
+        let turn = if front_blocked {
+            // A wall is a physical feature, not a target: turn away from the contacted
+            // side, or fall back on the remembered preference.
+            self.wander_ticks = 0;
+            if left > right {
+                -1.0
+            } else if right > left {
+                1.0
+            } else {
+                self.turn_bias * 0.8
+            }
+        } else if chem_valid > 0.5 && chem_resp >= 0.02 {
+            self.wander_ticks = 0;
+            if chem_trend > 0.05 {
+                // A rising signal: hold the heading the body already faces.
+                self.turn_bias * 0.2
+            } else if chem_trend < -0.05 {
+                // A falling signal: change course to a remembered new preference.
+                -self.turn_bias * 0.8
+            } else {
+                // A flat signal: gently follow the remembered preference.
+                self.turn_bias * 0.4
+            }
+        } else {
+            // No signal: cover ground with an alternating turn preference.
+            self.wander_ticks += 1;
+            if self.wander_ticks >= 3 {
+                self.wander_ticks = 0;
+                self.turn_bias = -self.turn_bias;
+            }
+            self.turn_bias * 0.6
+        };
+        Response::Bounded(Actions {
+            forward,
+            turn,
+            feed,
+        })
+    }
+
+    fn reset(&mut self) {
+        self.turn_bias = 1.0;
+        self.wander_ticks = 0;
+    }
+}
+
+/// Observation-only **sighted browser** heuristic: gaze at the cone sector with the most
+/// foliage, hold a centre-sector heading, creep around front contact, and feed only when
+/// the mouth's taste reports foliage. No coordinate, site, route or stock total is read.
+#[derive(Clone, Debug)]
+pub struct BrowserForager {
+    wander_bias: f64,
+    wander_ticks: u32,
+    contact: crate::manifest::Module,
+    taste: crate::manifest::Module,
+    cone: crate::manifest::Module,
+}
+
+impl BrowserForager {
+    /// The browser founder's heuristic, pre-indexed against its manifest.
+    pub fn new() -> BrowserForager {
+        let manifest = Founder::Browser.manifest();
+        BrowserForager {
+            wander_bias: 1.0,
+            wander_ticks: 0,
+            contact: module_slot(&manifest, "Contact(4)"),
+            taste: module_slot(&manifest, "Taste(1)"),
+            cone: module_slot(&manifest, "Cone(3, foliage/body)"),
+        }
+    }
+}
+
+impl Default for BrowserForager {
+    fn default() -> Self {
+        BrowserForager::new()
+    }
+}
+
+impl Controller for BrowserForager {
+    fn drive(&mut self, o: &[f64]) -> Response {
+        let front = o[self.contact.offset];
+        let taste_resp = o[self.taste.offset];
+        let taste_valid = o[self.taste.offset + 2];
+        let base = self.cone.offset;
+        // Per sector, the foliage fraction sits at base + k*6 + 2.
+        let frac = [o[base + 2], o[base + 8], o[base + 14]];
+        let feed = if taste_valid > 0.5 && taste_resp > 0.25 {
+            1.0
+        } else {
+            0.0
+        };
+
+        let turn;
+        // Gaze: turn toward the richest sector — sector 0 is −60° (left of forward), so
+        // facing it needs a negative turn effort; sector 2 (+60°) needs positive.
+        if frac[0] > 0.02 || frac[1] > 0.02 || frac[2] > 0.02 {
+            self.wander_ticks = 0;
+            if frac[0] >= frac[1] && frac[0] >= frac[2] {
+                turn = -0.8;
+                self.wander_bias = -1.0;
+            } else if frac[2] > frac[1] {
+                turn = 0.8;
+                self.wander_bias = 1.0;
+            } else {
+                turn = 0.0;
+            }
+        } else {
+            self.wander_ticks += 1;
+            if self.wander_ticks >= 3 {
+                self.wander_ticks = 0;
+                self.wander_bias = -self.wander_bias;
+            }
+            turn = self.wander_bias * 0.6;
+        }
+        let forward = if front > 0.5 { 0.1 } else { 1.0 };
+        Response::Bounded(Actions {
+            forward,
+            turn,
+            feed,
+        })
+    }
+
+    fn reset(&mut self) {
+        self.wander_bias = 1.0;
+        self.wander_ticks = 0;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -278,8 +474,85 @@ mod tests {
             (0.0, 1.0, 0.0),
             "NAN forward is zero, turn 7 clamps to 1, feed -3 clamps to 0"
         );
-        let a = resolve_actions(Response::Logits([f64::NAN, f64::INFINITY, f64::NEG_INFINITY]), &manifest);
+        let a = resolve_actions(
+            Response::Logits([f64::NAN, f64::INFINITY, f64::NEG_INFINITY]),
+            &manifest,
+        );
         assert_eq!(a, Actions::REST, "non-finite logits are zeroed");
+    }
+
+    /// The observation-only heuristics answer bounded actions and react to the senses:
+    /// the blind one creeps around front contact and turns to a rising/falling cue, and
+    /// the browser one gazes at the richest foliage sector of its cone. Only the vector.
+    #[test]
+    fn the_heuristics_read_only_the_observation_and_reply_bounded() {
+        let blind_manifest = Founder::Blind.manifest();
+        let (c, t, ch) = (
+            module_slot(&blind_manifest, "Contact(4)"),
+            module_slot(&blind_manifest, "Taste(1)"),
+            module_slot(&blind_manifest, "Chem(litter)"),
+        );
+        let mut blind = BlindForager::new();
+        let mut o = vec![0.0; blind_manifest.inputs()];
+
+        // Front contact: creep, turn away from the contacted side (here, a remembered
+        // preference since neither side reads harder).
+        o[c.offset] = 1.0;
+        let Response::Bounded(a) = blind.drive(&o) else {
+            panic!("bounded");
+        };
+        assert!(a.forward < 1.0, "a walled body creeps");
+        assert!(a.turn.abs() > 0.5, "it turns away from the contact");
+
+        // A flat, strong, valid cue: hold the heading and keep moving.
+        let mut o = vec![0.0; blind_manifest.inputs()];
+        o[ch.offset] = 0.6;
+        o[ch.offset + 2] = 1.0;
+        let Response::Bounded(a) = blind.drive(&o) else {
+            panic!("bounded");
+        };
+        assert_eq!(a.forward, 1.0);
+        assert!(a.turn.abs() < 0.5, "a held-heading response turns little");
+
+        // Litter in the mouth: feed.
+        let mut o = vec![0.0; blind_manifest.inputs()];
+        o[t.offset] = 0.6;
+        o[t.offset + 2] = 1.0;
+        let Response::Bounded(a) = blind.drive(&o) else {
+            panic!("bounded");
+        };
+        assert_eq!(a.feed, 1.0);
+
+        // Browser: foliage richer on the left sector turns left, richer on the right
+        // turns right, and the mouth's taste gates feeding.
+        let browser_manifest = Founder::Browser.manifest();
+        let (tb, cb) = (
+            module_slot(&browser_manifest, "Taste(1)"),
+            module_slot(&browser_manifest, "Cone(3, foliage/body)"),
+        );
+        let mut browser = BrowserForager::new();
+        let mut o = vec![0.0; browser_manifest.inputs()];
+        o[cb.offset + 2] = 0.6; // left sector's foliage fraction
+        let Response::Bounded(a) = browser.drive(&o) else {
+            panic!("bounded");
+        };
+        assert!(a.turn < -0.5, "left foliage turns left, got {}", a.turn);
+        assert_eq!(a.feed, 0.0, "no mouth contact yet");
+
+        let mut o = vec![0.0; browser_manifest.inputs()];
+        o[cb.offset + 14] = 0.6; // right sector's foliage fraction
+        let Response::Bounded(a) = browser.drive(&o) else {
+            panic!("bounded");
+        };
+        assert!(a.turn > 0.5, "right foliage turns right, got {}", a.turn);
+
+        let mut o = vec![0.0; browser_manifest.inputs()];
+        o[tb.offset] = 0.6;
+        o[tb.offset + 2] = 1.0;
+        let Response::Bounded(a) = browser.drive(&o) else {
+            panic!("bounded");
+        };
+        assert_eq!(a.feed, 1.0, "foliage at the mouth feeds");
     }
 
     /// The scripted diagnostic emits its bounded script in order, cycles, and `reset`

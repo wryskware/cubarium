@@ -57,13 +57,19 @@ use bevy_ecs::system::ScheduleSystem;
 use bevy_tasks::{ComputeTaskPool, TaskPoolBuilder};
 
 use cubarium_voxel::water;
-use cubarium_voxel_fauna::Fauna;
+use cubarium_voxel_fauna::{Fauna, Senses};
 use cubarium_voxel_flora::Flora;
 
 mod arena;
-pub use arena::{
-    ARENA_DEPTH, ARENA_HEIGHT, ARENA_VOXEL_M, ARENA_WIDTH, Arena, GROUND_Y,
-};
+pub use arena::{ARENA_DEPTH, ARENA_HEIGHT, ARENA_VOXEL_M, ARENA_WIDTH, Arena, GROUND_Y};
+
+/// The static arena's per-arena sensory state as a bevy resource: the settled litter
+/// field and the trend stores, inserted by [`Sim::new_static`] (settled there, before
+/// the first tick can sample it) or [`Sim::new_static_prepared`]. The live schedule never
+/// holds this resource, so its fauna path is exactly what it was; a static schedule
+/// without one runs senses-free, like the live path. Read through [`Sim::senses`].
+#[derive(Resource)]
+pub struct SenseField(pub Senses);
 
 /// The voxel grid, free water, pore water and the aquifer: a **dense resource**, never one
 /// entity per voxel.
@@ -216,18 +222,26 @@ impl Sim {
         // it never moved.
         let mut stat = Schedule::new(StaticTick);
         stat.set_executor(SingleThreadedExecutor::new());
-        stat.configure_sets(
-            (TickPhase::Fauna, TickPhase::Advance, TickPhase::Sample).chain(),
-        );
-        stat.add_systems(sys_fauna.in_set(TickPhase::Fauna));
+        stat.configure_sets((TickPhase::Fauna, TickPhase::Advance, TickPhase::Sample).chain());
+        stat.add_systems(sys_fauna_static.in_set(TickPhase::Fauna));
         stat.add_systems(sys_advance.in_set(TickPhase::Advance));
         ecs.add_schedule(stat);
 
-        Sim { ecs, mode: ScheduleMode::Live }
+        Sim {
+            ecs,
+            mode: ScheduleMode::Live,
+        }
     }
 
     /// Build the layers and wire them into a [`Sim`] in [`ScheduleMode::Static`]: the static
     /// arena's entry point. Everything else is [`Sim::new`].
+    ///
+    /// The static arena's own [`Senses`] is built and **settled here**, before any tick can
+    /// sample it: at most 120 field updates, stopping early on convergence, in the same
+    /// update order the tick itself uses. The cost is part of this construction — the setup
+    /// the benchmark charges — and the field then evolves inside the tick at its own
+    /// cadence. A caller that has already settled a field for this exact source layout
+    /// passes it to [`Sim::new_static_prepared`] instead of paying again.
     pub fn new_static(
         world: cubarium_voxel::World,
         flora: Flora,
@@ -236,6 +250,30 @@ impl Sim {
     ) -> Sim {
         let mut sim = Sim::new(world, flora, fauna, config);
         sim.mode = ScheduleMode::Static;
+        // Settle against the layers as they stand, then hold the field as a resource.
+        let (w, f) = (sim.world(), sim.flora());
+        let mut senses = Senses::new();
+        senses.settle(&w.view(), &f.view());
+        sim.ecs.insert_resource(SenseField(senses));
+        sim
+    }
+
+    /// [`Sim::new_static`] with a caller-prepared [`Senses`]: a field settled earlier for
+    /// this exact source layout — the same frozen terrain and the same resource stocks, or
+    /// the prepared state is wrong — reused instead of re-settled. The per-body trend
+    /// stores are cleared here whatever the caller passed: they are episode-private, and a
+    /// stale trend history would read a false gradient on a new episode's first sample.
+    pub fn new_static_prepared(
+        world: cubarium_voxel::World,
+        flora: Flora,
+        fauna: Fauna,
+        config: SimConfig,
+        mut senses: Senses,
+    ) -> Sim {
+        let mut sim = Sim::new(world, flora, fauna, config);
+        sim.mode = ScheduleMode::Static;
+        senses.reset_trends();
+        sim.ecs.insert_resource(SenseField(senses));
         sim
     }
 
@@ -289,8 +327,10 @@ impl Sim {
     }
 
     /// Force one **static arena** tick whatever the mode: no `Begin`, `Water` or `Flora`
-    /// leg, just [`Fauna::step`] and the clock. This is the same system (`sys_fauna`) the
-    /// live schedule runs, so a static episode uses the production fauna path.
+    /// leg, just the fauna leg and the clock. This is the static schedule's own system
+    /// ([`sys_fauna_static`], the live [`sys_fauna`] with the arena's [`SenseField`]
+    /// threaded through), so a static episode uses the production fauna path with the
+    /// field its construction settled.
     pub fn step_static(&mut self) {
         self.ecs.run_schedule(StaticTick);
     }
@@ -377,6 +417,15 @@ impl Sim {
     pub fn ecs(&mut self) -> &mut World {
         &mut self.ecs
     }
+
+    /// The static arena's settled litter field, if this sim holds one: read-only, for a
+    /// benchmark that wants the settle cost separated or a driver that wants to cache a
+    /// prepared copy for an unchanged source layout (clone it and [`Senses::reset_trends`]
+    /// the copy, or hand it to [`Sim::new_static_prepared`]). `None` on the live schedule,
+    /// which has no field.
+    pub fn senses(&self) -> Option<&Senses> {
+        self.ecs.get_resource::<SenseField>().map(|s| &s.0)
+    }
 }
 
 // ------------------------------------------------------------------ the systems
@@ -454,6 +503,27 @@ fn sys_fauna(
     config: Res<SimConfig>,
 ) {
     fauna.0.step_with(&w.0, &mut flora.0, config.threads);
+}
+
+/// The **static arena's** fauna leg: [`Fauna::step_with_senses`] with the arena's own
+/// [`SenseField`], so the controller stage samples the settled litter field its builder
+/// prepared. The live schedule's [`sys_fauna`] is unchanged and senses-free — the field
+/// is per-arena state, and this one system is the documented mechanism that passes it
+/// into the tick (`design/voxel-senses-phase1-plan.md`, "Frozen arena contract"). A
+/// static schedule without a field runs senses-free, exactly like the live path.
+fn sys_fauna_static(
+    w: Res<VoxelWorld>,
+    mut flora: ResMut<FloraLayer>,
+    mut fauna: ResMut<FaunaLayer>,
+    config: Res<SimConfig>,
+    mut senses: Option<ResMut<SenseField>>,
+) {
+    match senses.as_deref_mut() {
+        Some(s) => fauna
+            .0
+            .step_with_senses(&w.0, &mut flora.0, config.threads, &mut s.0),
+        None => fauna.0.step_with(&w.0, &mut flora.0, config.threads),
+    }
 }
 
 fn sys_advance(mut w: ResMut<VoxelWorld>) {

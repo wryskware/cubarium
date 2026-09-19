@@ -65,6 +65,7 @@ mod body;
 mod controller;
 mod manifest;
 mod pose;
+mod senses;
 mod snapshot;
 mod step;
 
@@ -72,18 +73,20 @@ use cubarium_voxel::{VoxelView, World};
 use cubarium_voxel_flora::{Deposit, DepositKind, Flora, Site, Taken};
 use serde::{Deserialize, Serialize};
 
-pub use cubarium_voxel::{DT, TICK_HZ};
-pub use cubarium_voxel_flora::Reach;
 pub use body::{FounderPhysiology, effective_config};
 pub use controller::{
-    Actions, Controller, FounderControllers, Response, Scripted, resolve_actions,
+    Actions, BlindForager, BrowserForager, Controller, FounderControllers, Response, Scripted,
+    resolve_actions,
 };
+pub use cubarium_voxel::{DT, TICK_HZ};
+pub use cubarium_voxel_flora::Reach;
 pub use manifest::{
-    ACTION_DEADBAND, BROWSER_RAY_PITCH_OFFSETS_DEG, BROWSER_RAY_YAW_OFFSETS_DEG,
-    BROWSER_SECTOR_CENTRES_DEG, BROWSER_VISIBLE_CLASSES, Action, Founder, HIDDEN, Manifest, Module,
+    ACTION_DEADBAND, Action, BROWSER_RAY_PITCH_OFFSETS_DEG, BROWSER_RAY_YAW_OFFSETS_DEG,
+    BROWSER_SECTOR_CENTRES_DEG, BROWSER_VISIBLE_CLASSES, Founder, HIDDEN, Manifest, Module,
     SCHEMA_VERSION, Transfer, Tunings, gru32_parameter_count,
 };
 pub use pose::Pose;
+pub use senses::{Senses, UPDATE_TICKS};
 pub use snapshot::SCHEMA;
 
 /// The consumers of the voxel ecology. One, so far: see
@@ -224,6 +227,10 @@ pub struct IntervalFeedback {
     pub delivered_forward: f64,
     /// Radians actually turned over the interval, signed.
     pub delivered_turn: f64,
+    /// Organic matter the interval's paid motion respired, reserve and body together —
+    /// the per-interval motor-respiration counter, alongside the ledger's cumulative
+    /// `respired_motor_out`. Zero for a resting interval.
+    pub motor_respiration: f64,
 }
 
 /// One species' numbers. **Every one of them is an untuned placeholder**; see
@@ -509,10 +516,23 @@ pub struct FaunaLedger {
     pub eaten_organic_in: f64,
     pub eaten_mineral_in: f64,
     pub eaten_energy_in: f64,
-    /// Organic matter respired: maintenance, the undigested fraction of a bite, and
-    /// anything assimilated that a full body and a full reserve could not hold. Mineral
-    /// never crosses this boundary.
+    /// Organic matter respired: maintenance, the undigested fraction of a bite, the
+    /// founder's paid motor respiration, and anything assimilated that a full body and a
+    /// full reserve could not hold. Mineral never crosses this boundary.
+    ///
+    /// The three split counters below sum to this **to the bit** — every booking adds the
+    /// same addend to the total and to one split at the same point — so a driver reads
+    /// an interval's or an episode's upkeep, motor and digestion charges apart without a
+    /// second ledger. The ES pilot's score needs the motor term apart from upkeep
+    /// (`design/voxel-senses-phase1-tests.md` §2).
     pub respired_out: f64,
+    /// The `respired_out` share that was basal upkeep.
+    pub respired_maintenance_out: f64,
+    /// The `respired_out` share that was the founder's paid motion.
+    pub respired_motor_out: f64,
+    /// The `respired_out` share that was digestion: the undigested fraction of a bite and
+    /// assimilated matter neither the body nor the reserve could hold.
+    pub respired_digestion_out: f64,
     /// The energy that left with it, at the density of the stock it left.
     pub heat_out: f64,
     /// Organic matter, mineral and energy handed back to the plant layer by
@@ -773,6 +793,22 @@ impl Fauna {
     /// ignored altogether (`design/handoffs/voxel-schedule-brief-2026-09-18.md`).
     pub fn step_with(&mut self, world: &World, flora: &mut Flora, threads: usize) {
         step::step(self, world, flora, threads);
+    }
+
+    /// The **static arena's** stepping: [`Fauna::step_with`] with the arena's per-arena
+    /// [`Senses`] handle threaded into the tick, so the controller stage reads the settled
+    /// litter field its caller prepared (`design/voxel-senses-phase1-plan.md`, "Initial cue
+    /// field settings"). The field updates itself inside the tick at its own cadence
+    /// ([`UPDATE_TICKS`]); a caller never calls this for the live world. [`Fauna::step`] and
+    /// [`Fauna::step_with`] keep the live signature and stay senses-free.
+    pub fn step_with_senses(
+        &mut self,
+        world: &World,
+        flora: &mut Flora,
+        threads: usize,
+        senses: &mut Senses,
+    ) {
+        step::step_with_senses(self, world, flora, threads, senses);
     }
 
     /// Apply a command now, between ticks, the way the plant layer's are applied. Returns

@@ -7,12 +7,12 @@
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
 use cubarium_voxel_flora::{
-    Command as FloraCommand, Deposit, DepositKind, Flora, FloraConfig, Species as Plant, Site,
+    Command as FloraCommand, Deposit, DepositKind, Flora, FloraConfig, Site, Species as Plant,
 };
 
 use cubarium_voxel_fauna::{
-    Action as _, Actions, Animal, Command as FaunaCommand, Controller, Fauna, FaunaConfig, Founder,
-    Response, Scripted,
+    Actions, Command as FaunaCommand, Controller, Fauna, FaunaConfig, Founder, Response, Scripted,
+    Senses,
 };
 
 /// A flat world: 8 × 6 × 6 voxels at 0.25 m, soil 1..=2, ground support face at y = 2.
@@ -53,12 +53,7 @@ struct Record {
 }
 
 impl Record {
-    fn new(
-        answer: Actions,
-    ) -> (
-        Record,
-        std::sync::Arc<std::sync::Mutex<Vec<Vec<f64>>>>,
-    ) {
+    fn new(answer: Actions) -> (Record, std::sync::Arc<std::sync::Mutex<Vec<Vec<f64>>>>) {
         let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         (
             Record {
@@ -141,6 +136,55 @@ fn a_full_founder_pays_and_moves_on_the_held_actions() {
     assert_eq!(a.state, cubarium_voxel_fauna::State::Walking);
 }
 
+/// The static schedule's due tick pays maintenance, updates the field, then samples the
+/// controller. A litter source is absent from the age-five observation because no field update
+/// has run yet, but it must be visible at age ten: swapping the field and controller stages
+/// would leave that second observation at zero.
+#[test]
+fn a_due_field_update_reaches_the_controller_before_it_drives() {
+    let world = flat_world();
+    let mut flora = Flora::new(FloraConfig::default());
+    flora.deposit(
+        site(2, 2),
+        Deposit {
+            kind: DepositKind::Litter,
+            organic: 0.2,
+            mineral: 0.2 * 0.02,
+            energy: 0.2 * 2.0,
+        },
+    );
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    assert!(fauna.apply(
+        &world,
+        FaunaCommand::IntroduceFounder {
+            x: 2,
+            z: 2,
+            founder: Founder::Blind,
+            body: 0.0125,
+            heading_rad: 0.0,
+        },
+    ));
+    let id = fauna.view().ledger.births - 1;
+    let (recorder, log) = Record::new(Actions::REST);
+    assert!(fauna.set_controller(id, Box::new(recorder)));
+    let mut senses = Senses::new();
+
+    for _ in 0..10 {
+        fauna.step_with_senses(&world, &mut flora, 1, &mut senses);
+    }
+
+    let log = log.lock().unwrap();
+    assert_eq!(log.len(), 2, "samplings at ages five and ten");
+    assert_eq!(log[0][18], 0.0, "the pre-update sample has no cue");
+    assert_eq!(log[0][20], 0.0, "the pre-update field is not yet valid");
+    assert!(
+        log[1][18] > 0.0,
+        "the due update must be available to the controller: {:?}",
+        log[1]
+    );
+    assert_eq!(log[1][20], 1.0, "the due update built a valid field");
+}
+
 /// A bite debits the real litter stock once, books the same transfer on the fauna
 /// ledger, and builds tissue the assimilation rule can fund. A feed with nothing in
 /// the mouth transfers nothing at all.
@@ -179,12 +223,7 @@ fn a_litter_bite_debits_the_real_stock_exactly_once_per_interval() {
             feed: 1.0,
         }])),
     ));
-    let litter_of = |flora: &Flora| {
-        flora
-            .view()
-            .ground_at(site(2, 2))
-            .map_or(0.0, |g| g.litter)
-    };
+    let litter_of = |flora: &Flora| flora.view().ground_at(site(2, 2)).map_or(0.0, |g| g.litter);
 
     let before_stock = litter_of(&flora);
     let before_body = fauna.view().animal(id).unwrap().body;
@@ -211,7 +250,10 @@ fn a_litter_bite_debits_the_real_stock_exactly_once_per_interval() {
         "the real Taken composition: mineral pro rata at the litter's fraction"
     );
     let a = fauna.view().animal(id).expect("alive");
-    assert!(a.body > before_body, "the funded share of the bite became tissue");
+    assert!(
+        a.body > before_body,
+        "the funded share of the bite became tissue"
+    );
     assert!(
         (a.founder_state.feedback.intake - 0.5 * want).abs() < 1e-12,
         "the placed share is the yield fraction, {}",
@@ -381,7 +423,10 @@ fn the_self_feedback_is_the_prior_interval_and_reset_once() {
         "delivered forward {}",
         log[1][5]
     );
-    assert!((log[1][7] - 1.0).abs() < 1e-9, "free movement delivers what it requests");
+    assert!(
+        (log[1][7] - 1.0).abs() < 1e-9,
+        "free movement delivers what it requests"
+    );
     assert_eq!(log[1][4], 0.0, "no intake without a feed action");
 
     // Third sampling: reset once — the prior interval again, not the running total.
@@ -415,7 +460,14 @@ fn full_cruise_motor_respiration_equals_the_basal_rate() {
     let cruiser = 0;
     let rester = 1;
     let ids: Vec<u64> = fauna.view().animals.iter().map(|a| a.id).collect();
-    assert!(fauna.set_controller(ids[cruiser], Box::new(Scripted::new(vec![Actions { forward: 1.0, turn: 0.0, feed: 0.0 }]))));
+    assert!(fauna.set_controller(
+        ids[cruiser],
+        Box::new(Scripted::new(vec![Actions {
+            forward: 1.0,
+            turn: 0.0,
+            feed: 0.0
+        }]))
+    ));
     assert!(fauna.set_controller(ids[rester], Box::new(Scripted::new(vec![]))));
 
     let before = fauna.view().ledger.respired_out;
@@ -516,7 +568,10 @@ fn a_blocked_attempt_still_pays_the_motor_budget() {
     );
     let blocked = fauna.view().animal(ids[0]).unwrap();
     let free = fauna.view().animal(ids[1]).unwrap();
-    assert!(blocked.pose.x < free.pose.x, "the wall stopped the blocked body");
+    assert!(
+        blocked.pose.x < free.pose.x,
+        "the wall stopped the blocked body"
+    );
     assert!(
         blocked.founder_state.feedback.delivered_equivalent
             < blocked.founder_state.feedback.attempted_equivalent,
@@ -538,8 +593,9 @@ fn a_blocked_attempt_still_pays_the_motor_budget() {
     );
 }
 
-/// The observation the controller receives is 23 wide and finite, and its P1-C spans
-/// stay zero with validity 0 even while the body moves and eats.
+/// The observation the controller receives is 23 wide and finite. `Chem` stays zero with
+/// validity 0 on the senses-free live path, while `Light` — pure geometry — reads the
+/// real sky exposure even there.
 #[test]
 fn the_controller_receives_only_the_vector_and_it_stays_finite() {
     let world = flat_world();
@@ -577,7 +633,15 @@ fn the_controller_receives_only_the_vector_and_it_stays_finite() {
     for obs in log.lock().unwrap().iter() {
         assert_eq!(obs.len(), 23, "the blind manifest's width");
         assert!(obs.iter().all(|v| v.is_finite()), "no non-finite channel");
-        assert!(obs[18..23].iter().all(|v| *v == 0.0), "Chem and Light stay zero with validity 0");
+        assert!(
+            obs[18..21].iter().all(|v| *v == 0.0),
+            "Chem stays zero with validity 0 on the senses-free path"
+        );
+        assert_eq!(
+            obs[21..23],
+            [1.0, 1.0],
+            "Light reads open sky, valid, even live"
+        );
     }
 }
 
@@ -621,5 +685,207 @@ fn the_snapshot_round_trips_a_founders_state_and_refuses_out_of_bounds_held_acti
             - before.founder_state.feedback.delivered_forward)
             .abs()
             < 1e-15
+    );
+}
+
+/// The `Self` motion channels really flow from resolved motion: one full-cruise interval
+/// reads as exactly the manifest's forward reference with full delivery, a turn interval
+/// reads as the turn reference's signed ratio, and a wall-blocked interval reads a
+/// delivery ratio below one with the attempted-but-undelivered rest. These are the
+/// channels the search driver's interim sampler holds at zero — the fauna's own
+/// observation has carried them since P1-B.
+#[test]
+fn the_self_motion_channels_flow_from_resolved_motion() {
+    let world = flat_world();
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    assert!(fauna.apply(
+        &world,
+        FaunaCommand::IntroduceFounder {
+            x: 2,
+            z: 2,
+            founder: Founder::Blind,
+            body: 0.01,
+            heading_rad: std::f64::consts::FRAC_PI_2,
+        },
+    ));
+    let id = fauna.view().ledger.births - 1;
+    let (controller, log) = Record::new(Actions {
+        forward: 1.0,
+        turn: 0.0,
+        feed: 0.0,
+    });
+    assert!(fauna.set_controller(id, Box::new(controller)));
+    // Ten ticks: the first sampling (zero feedback), then one full interval of cruise.
+    for _ in 0..10 {
+        fauna.step(&world, &mut flora);
+    }
+    let obs = log.lock().unwrap();
+    assert_eq!(
+        obs.len(),
+        2,
+        "two samplings: the initial one and the interval's"
+    );
+    assert_eq!(obs[0][5..8], [0.0, 0.0, 1.0], "initial feedback is zero");
+    // One interval of full cruise = exactly the forward reference, unblocked (the
+    // reference is the same distance the five sub-steps sum to, to float dust).
+    assert!(
+        (obs[1][5] - 1.0).abs() < 1e-9,
+        "resolved forward, got {}",
+        obs[1][5]
+    );
+    assert_eq!(obs[1][6], 0.0, "no turn was held");
+    assert!(
+        (obs[1][7] - 1.0).abs() < 1e-9,
+        "the cruise was delivered in full"
+    );
+
+    // A turn interval reads the signed turn reference, with no forward motion. A turn
+    // in the open is delivered in full — being paid is the motor budget's job, not the
+    // delivery ratio's.
+    let mut walled = flat_world();
+    walled.apply(WorldCommand::SetMaterial {
+        x: 3,
+        y: 3,
+        z: 2,
+        material: Material::Soil,
+    });
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    assert!(fauna.apply(
+        &walled,
+        FaunaCommand::IntroduceFounder {
+            x: 2,
+            z: 2,
+            founder: Founder::Blind,
+            body: 0.01,
+            heading_rad: std::f64::consts::FRAC_PI_2,
+        },
+    ));
+    let id = fauna.view().ledger.births - 1;
+    let (turner, log) = Record::new(Actions {
+        forward: 0.0,
+        turn: 1.0,
+        feed: 0.0,
+    });
+    assert!(fauna.set_controller(id, Box::new(turner)));
+    for _ in 0..10 {
+        fauna.step(&walled, &mut flora);
+    }
+    let obs = log.lock().unwrap();
+    assert_eq!(obs.len(), 2);
+    assert_eq!(obs[1][5], 0.0, "a stopped turn covers no forward distance");
+    assert!(
+        (obs[1][6] - 1.0).abs() < 1e-9,
+        "one interval at the yaw cap is the turn reference, got {}",
+        obs[1][6]
+    );
+    assert!(
+        (obs[1][7] - 1.0).abs() < 1e-9,
+        "a turn in the open is delivered in full"
+    );
+
+    // A wall-blocked interval delivers less than it attempted: the delivery ratio is
+    // what reports the wall to a blind body. The cruise needs four intervals to reach
+    // the wall two columns east, so the last sampling is the blocked one.
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    assert!(fauna.apply(
+        &walled,
+        FaunaCommand::IntroduceFounder {
+            x: 2,
+            z: 2,
+            founder: Founder::Blind,
+            body: 0.01,
+            heading_rad: std::f64::consts::FRAC_PI_2,
+        },
+    ));
+    let id = fauna.view().ledger.births - 1;
+    let (cruiser, log) = Record::new(Actions {
+        forward: 1.0,
+        turn: 0.0,
+        feed: 0.0,
+    });
+    assert!(fauna.set_controller(id, Box::new(cruiser)));
+    for _ in 0..26 {
+        fauna.step(&walled, &mut flora);
+    }
+    let obs = log.lock().unwrap();
+    assert_eq!(obs.len(), 5, "samplings at ages 5, 10, 15, 20 and 25");
+    // The first three intervals cruise freely; the fourth runs into the wall.
+    assert!(
+        (obs[1][7] - 1.0).abs() < 1e-9,
+        "the first interval was delivered in full"
+    );
+    let last = obs.last().unwrap();
+    assert!(
+        last[7] < 1.0,
+        "a blocked interval's delivery ratio is below one, got {}",
+        last[7]
+    );
+    assert!(
+        last[5] < 1.0,
+        "the blocked cruise covered less than its reference"
+    );
+}
+
+/// The motor budget is visible twice, per animal and on the ledger: one blocked interval
+/// leaves a positive `motor_respiration` on the interval feedback and a positive
+/// `respired_motor_out` on the ledger, upkeep lands in `respired_maintenance_out`, and
+/// the three split counters sum to `respired_out` to the bit — the split the search
+/// driver's score reads to keep its motor term honest.
+#[test]
+fn the_motor_respiration_counter_and_the_ledger_split_track_one_interval() {
+    let mut world = flat_world();
+    world.apply(WorldCommand::SetMaterial {
+        x: 3,
+        y: 3,
+        z: 2,
+        material: Material::Soil,
+    });
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    assert_eq!(
+        fauna.view().ledger.respired_out,
+        0.0,
+        "a fresh layer has respired nothing"
+    );
+    assert!(fauna.apply(
+        &world,
+        FaunaCommand::IntroduceFounder {
+            x: 2,
+            z: 2,
+            founder: Founder::Blind,
+            body: 0.01,
+            heading_rad: std::f64::consts::FRAC_PI_2,
+        },
+    ));
+    let id = fauna.view().ledger.births - 1;
+    assert!(fauna.set_controller(
+        id,
+        Box::new(Scripted::new(vec![Actions {
+            forward: 1.0,
+            turn: 0.0,
+            feed: 0.0,
+        }])),
+    ));
+    // Ten ticks: one full interval of cruise into the wall, motor budget paid on the
+    // requested equivalent displacement the whole way.
+    for _ in 0..10 {
+        fauna.step(&world, &mut flora);
+    }
+    let v = fauna.view();
+    let a = v.animal(id).expect("alive");
+    assert!(
+        a.founder_state.feedback.motor_respiration > 0.0,
+        "the interval's motor respiration counter: {}",
+        a.founder_state.feedback.motor_respiration
+    );
+    let ledger = v.ledger;
+    assert!(ledger.respired_motor_out > 0.0, "the ledger's motor split");
+    assert!(ledger.respired_maintenance_out > 0.0, "ten ticks of upkeep");
+    assert_eq!(ledger.respired_digestion_out, 0.0, "nothing was eaten");
+    assert_eq!(
+        ledger.respired_maintenance_out + ledger.respired_motor_out + ledger.respired_digestion_out,
+        ledger.respired_out,
+        "the split sums to the total to the bit"
     );
 }

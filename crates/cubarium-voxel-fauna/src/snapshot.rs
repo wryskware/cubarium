@@ -27,10 +27,11 @@ use crate::Fauna;
 /// and the optional [`crate::Founder`] lineage marker — and the [`crate::Fauna`] birth
 /// switch. Schema 4 added the P1-B founder state to [`crate::Animal`] — the held
 /// controller actions and the prior-interval feedback — and the founders' own
-/// physiology table to [`crate::FaunaConfig`]. Postcard is not self-describing, so
-/// schema 3 worlds are **refused**, not migrated (`always-fresh-never-migrate`): start a
-/// fresh world.
-pub const SCHEMA: u32 = 4;
+/// physiology table to [`crate::FaunaConfig`]. Schema 5 added the respiration split to
+/// the ledger and the per-interval motor-respiration counter to the feedback (P1-C).
+/// Postcard is not self-describing, so older worlds are **refused**, not migrated
+/// (`always-fresh-never-migrate`): start a fresh world.
+pub const SCHEMA: u32 = 5;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -121,6 +122,7 @@ fn validate(fauna: &Fauna) -> Result<(), String> {
                 ("attempted equivalent displacement", fb.attempted_equivalent),
                 ("delivered equivalent displacement", fb.delivered_equivalent),
                 ("delivered forward", fb.delivered_forward),
+                ("motor respiration", fb.motor_respiration),
             ] {
                 if !value.is_finite() || value < 0.0 {
                     return Err(format!(
@@ -130,7 +132,10 @@ fn validate(fauna: &Fauna) -> Result<(), String> {
                 }
             }
             if !fb.delivered_turn.is_finite() {
-                return Err(format!("animal #{}'s delivered turn feedback is not finite", a.id));
+                return Err(format!(
+                    "animal #{}'s delivered turn feedback is not finite",
+                    a.id
+                ));
             }
         }
         if let Some(prev) = last {
@@ -196,13 +201,19 @@ mod tests {
         let mut held = animal(0, 0.02);
         held.founder = Some(crate::Founder::Blind);
         held.founder_state.held.turn = 7.0;
-        let err = format!("{:#}", decode(&encode(&layer(vec![held], 1))).expect_err("held turn 7"));
+        let err = format!(
+            "{:#}",
+            decode(&encode(&layer(vec![held], 1))).expect_err("held turn 7")
+        );
         assert!(err.contains("held turn"), "{err}");
 
         let mut feed = animal(0, 0.02);
         feed.founder = Some(crate::Founder::Blind);
         feed.founder_state.held.feed = -0.5;
-        let err = format!("{:#}", decode(&encode(&layer(vec![feed], 1))).expect_err("held feed -0.5"));
+        let err = format!(
+            "{:#}",
+            decode(&encode(&layer(vec![feed], 1))).expect_err("held feed -0.5")
+        );
         assert!(err.contains("held feed"), "{err}");
 
         let mut nan = animal(0, 0.02);

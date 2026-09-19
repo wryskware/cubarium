@@ -23,11 +23,17 @@
 //! The placed founder is idle. It has a continuous pose and a support face, but no
 //! forward/turn/feed resolution, no sensory sample and no field; those are P1-B and P1-C.
 //! P1-A's acceptance is that the world holds still and the body does not.
+//!
+//! # What P1-C adds
+//!
+//! [`Sim::new_static`] — which [`Arena::into_sim`]
+//! reaches — settles the arena's litter cue field before the first tick samples it, and
+//! the static schedule's fauna leg steps the production tick with that field, so a driven
+//! founder's `Chem(litter)` reads the prepared cue while taste remains tied to current
+//! mouth contact.
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
-use cubarium_voxel_fauna::{
-    Command as FaunaCommand, Actions, Fauna, FaunaConfig, Founder, Pose, Scripted,
-};
+use cubarium_voxel_fauna::{Command as FaunaCommand, Fauna, FaunaConfig, Founder, Pose, Senses};
 use cubarium_voxel_flora::{
     Command as FloraCommand, Deposit, DepositKind, Flora, FloraConfig, Site, Species as Plant,
     Taken,
@@ -139,8 +145,8 @@ impl Arena {
                 if z >= ARENA_DEPTH {
                     continue;
                 }
-                let idx = (x.rem_euclid(ARENA_WIDTH as i64) as usize) * ARENA_DEPTH as usize
-                    + z as usize;
+                let idx =
+                    (x.rem_euclid(ARENA_WIDTH as i64) as usize) * ARENA_DEPTH as usize + z as usize;
                 pond[idx] = true;
                 let _ = world.apply(WorldCommand::AddWater {
                     x,
@@ -231,32 +237,45 @@ impl Arena {
             }
         }
 
-        // An idle founder, off the food: pick the candidate site farthest from every
-        // resource column, so "off-food" is geometry and not a claim.
-        let start = candidates
+        // Stage A begins off food but already inside a useful signal. Pick a dry support
+        // two to four columns from a resource. Two columns keeps the mouth out of feeding
+        // contact; four keeps low foliage large enough for the deliberately sparse ray
+        // fan and remains inside the settled litter gradient. The pool and pick remain
+        // seed-deterministic.
+        let mut starts: Vec<(Site, Site, i64)> = candidates
             .iter()
             .copied()
             .filter(|s| !resources.contains(s))
-            .max_by_key(|s| {
+            .filter_map(|s| {
                 resources
                     .iter()
-                    .map(|r| {
-                        let dx = (i64::from(s.x) - i64::from(r.x)).abs();
-                        let wrapped = dx.min(ARENA_WIDTH as i64 - dx.min(ARENA_WIDTH as i64));
-                        wrapped + (i64::from(s.z) - i64::from(r.z)).abs()
-                    })
-                    .min()
-                    .unwrap_or(0)
-            });
+                    .copied()
+                    .map(|r| (r, arena_distance_squared(s, r)))
+                    .min_by_key(|(_, distance)| *distance)
+                    .filter(|(_, distance)| (4..=16).contains(distance))
+                    .map(|(target, distance)| (s, target, distance))
+            })
+            .collect();
+        starts.sort_by_key(|(site, target, distance)| (*distance, *site, *target));
+        let start = (!starts.is_empty()).then(|| starts[rng.below(starts.len())]);
 
         let mut fauna = Fauna::new(FaunaConfig::default());
         // Isolated arenas disable paid births (plan, "Frozen arena contract").
         fauna.set_births_enabled(false);
         let manifest = founder.manifest();
         let mut animal_id = None;
-        if let Some(site) = start {
+        if let Some((site, target, _)) = start {
             let body = manifest.body_reference;
-            let heading_rad = (rng.next_u64() % 4) as f64 * std::f64::consts::FRAC_PI_2;
+            // Aim generally at the in-signal resource while retaining deterministic
+            // heading variation. The browser's central ray fan spans +/-30 degrees, so
+            // this +/-5 degree offset keeps the low foliage visible at the first sample.
+            // The blind founder receives the same variation without privileged runtime
+            // information; only arena construction uses the target.
+            let dx = wrapped_dx(site.x, target.x) as f64;
+            let dz = f64::from(target.z) - f64::from(site.z);
+            let toward = dx.atan2(dz);
+            let jitter_steps = (rng.next_u64() % 3) as i64 - 1;
+            let heading_rad = toward + (jitter_steps as f64 * 5.0_f64.to_radians());
             if fauna.apply(
                 &world,
                 FaunaCommand::IntroduceFounder {
@@ -312,10 +331,40 @@ impl Arena {
         }
     }
 
+    /// Settle a reusable cue field for this exact frozen source layout. Episode-private
+    /// trend history is still reset when the field enters a simulation.
+    pub fn prepare_senses(&self) -> Senses {
+        let mut senses = Senses::new();
+        senses.settle(&self.world.view(), &self.flora.view());
+        senses
+    }
+
     /// Move the built layers into a [`Sim`] in [`crate::ScheduleMode::Static`].
     pub fn into_sim(self, config: crate::SimConfig) -> Sim {
         Sim::new_static(self.world, self.flora, self.fauna, config)
     }
+
+    /// Move the built layers into a static [`Sim`] with a field already settled for this
+    /// arena's unchanged source layout.
+    pub fn into_sim_prepared(self, config: crate::SimConfig, senses: Senses) -> Sim {
+        Sim::new_static_prepared(self.world, self.flora, self.fauna, config, senses)
+    }
+}
+
+/// Shortest signed x-column displacement on the wrapped arena strip.
+fn wrapped_dx(from: u32, to: u32) -> i64 {
+    let width = i64::from(ARENA_WIDTH);
+    let raw = i64::from(to) - i64::from(from);
+    [raw, raw - width, raw + width]
+        .into_iter()
+        .min_by_key(|delta| delta.abs())
+        .expect("three wrapped displacements")
+}
+
+fn arena_distance_squared(a: Site, b: Site) -> i64 {
+    let dx = wrapped_dx(a.x, b.x);
+    let dz = i64::from(b.z) - i64::from(a.z);
+    dx * dx + dz * dz
 }
 
 #[cfg(test)]
@@ -323,7 +372,10 @@ mod tests {
     use super::*;
     use crate::{ScheduleMode, SimConfig};
 
+    use cubarium_voxel_fauna::{Actions, Controller, Response, Scripted};
+
     const SEEDS: [u64; 4] = [1, 2, 3, 95];
+    const STAGE_A_SEEDS: [u64; 12] = [1, 2, 4, 5, 6, 8, 9, 10, 13, 14, 17, 18];
 
     /// [`Arena::build`]'s resource sites are always unique, including the seam layout
     /// (seeds `% 4 == 3`), where the seam tile used to collide with an interior pick
@@ -358,25 +410,56 @@ mod tests {
             for founder in Founder::ALL {
                 let arena = Arena::build(founder, seed);
                 let c = arena.world.config();
-                assert_eq!(
-                    (c.width, c.height, c.depth, c.voxel_m),
-                    (32, 16, 12, 0.25)
-                );
+                assert_eq!((c.width, c.height, c.depth, c.voxel_m), (32, 16, 12, 0.25));
                 assert!(!arena.resources.is_empty(), "{founder:?} seed {seed}");
                 assert!(
                     arena.resource_stock() > 0.0,
                     "{founder:?} seed {seed}: the layout is not empty"
                 );
-                assert!(
-                    !arena.fauna.births_enabled(),
-                    "arenas disable paid births"
-                );
+                assert!(!arena.fauna.births_enabled(), "arenas disable paid births");
                 let animal = arena
                     .animal_id
                     .and_then(|id| arena.fauna.view().animal(id))
                     .expect("an idle founder is placed");
                 assert_eq!(animal.founder, Some(founder));
                 assert!(arena.resources.iter().all(|r| *r != animal.site));
+            }
+        }
+    }
+
+    #[test]
+    fn stage_a_starts_off_food_inside_signal_and_facing_it() {
+        for seed in STAGE_A_SEEDS {
+            for founder in Founder::ALL {
+                let arena = Arena::build(founder, seed);
+                let animal = arena
+                    .animal_id
+                    .and_then(|id| arena.fauna.view().animal(id))
+                    .expect("the Stage A founder is placed");
+                let (target, distance) = arena
+                    .resources
+                    .iter()
+                    .copied()
+                    .map(|r| (r, arena_distance_squared(animal.site, r)))
+                    .min_by_key(|(_, distance)| *distance)
+                    .expect("the arena has resources");
+                assert!(
+                    (4..=16).contains(&distance),
+                    "{founder:?} seed {seed}: start {:?}, nearest {:?}, distance^2 {distance}",
+                    animal.site,
+                    target,
+                );
+
+                let toward = (wrapped_dx(animal.site.x, target.x) as f64)
+                    .atan2(f64::from(target.z) - f64::from(animal.site.z));
+                let heading_error = (animal.pose.heading_rad - toward)
+                    .sin()
+                    .atan2((animal.pose.heading_rad - toward).cos());
+                assert!(
+                    heading_error.abs() <= 5.0_f64.to_radians() + 1e-12,
+                    "{founder:?} seed {seed}: heading error {} degrees",
+                    heading_error.to_degrees(),
+                );
             }
         }
     }
@@ -398,11 +481,7 @@ mod tests {
             .map(|s| (s.site, s.species, s.wood, s.foliage))
             .collect();
         let before_stock = arena.resource_stock();
-        let before_animal = *arena
-            .fauna
-            .view()
-            .animal(arena.animal_id.unwrap())
-            .unwrap();
+        let before_animal = *arena.fauna.view().animal(arena.animal_id.unwrap()).unwrap();
 
         let mut sim = arena.into_sim(SimConfig { threads: 1 });
         assert_eq!(sim.mode(), ScheduleMode::Static);
@@ -412,7 +491,11 @@ mod tests {
 
         assert_eq!(sim.world().tick(), 10);
         assert_eq!(sim.fauna().tick(), 10);
-        assert_eq!(sim.world().view().material, before_material, "terrain moved");
+        assert_eq!(
+            sim.world().view().material,
+            before_material,
+            "terrain moved"
+        );
         assert_eq!(sim.world().view().free, before_free, "water moved");
         let after_stands: Vec<_> = sim
             .flora()
@@ -492,7 +575,7 @@ mod tests {
     /// a stand through the same real withdrawals. No special arena path exists.
     #[test]
     fn a_controller_driven_founder_moves_and_feeds_through_the_static_schedule() {
-        let mut arena = Arena::build(Founder::Browser, 11);
+        let arena = Arena::build(Founder::Browser, 11);
         let stand_site = arena.resources[0];
         let stock_before = arena.resource_stock();
         let idle_id = arena.animal_id.expect("the arena placed an idle body");
@@ -569,11 +652,14 @@ mod tests {
         let c = sim.fauna().view().animal(cruiser).unwrap();
         assert_ne!(
             c.pose,
-            cubarium_voxel_fauna::Pose::at_site(Site {
-                x: stand_site.x,
-                y: stand_site.y,
-                z: stand_site.z + 3
-            }, ARENA_VOXEL_M),
+            cubarium_voxel_fauna::Pose::at_site(
+                Site {
+                    x: stand_site.x,
+                    y: stand_site.y,
+                    z: stand_site.z + 3
+                },
+                ARENA_VOXEL_M
+            ),
             "the cruiser's held forward action moved it"
         );
         // The browser layout's finite stock: every springturf stand's foliage, read
@@ -594,5 +680,243 @@ mod tests {
         // The idle founder body without a controller did not move.
         let idle = sim.fauna().view().animal(idle_id).unwrap();
         assert_eq!(idle.state, cubarium_voxel_fauna::State::Resting);
+    }
+
+    /// A controller that records every observation and rests: the probe for what the
+    /// static tick's controller stage actually sampled.
+    struct Recorder {
+        log: std::sync::Arc<std::sync::Mutex<Vec<Vec<f64>>>>,
+    }
+
+    impl Recorder {
+        fn new() -> (Recorder, std::sync::Arc<std::sync::Mutex<Vec<Vec<f64>>>>) {
+            let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            (Recorder { log: log.clone() }, log)
+        }
+    }
+
+    impl Controller for Recorder {
+        fn drive(&mut self, observation: &[f64]) -> Response {
+            self.log.lock().unwrap().push(observation.to_vec());
+            Response::Bounded(cubarium_voxel_fauna::Actions::REST)
+        }
+
+        fn reset(&mut self) {
+            self.log.lock().unwrap().clear();
+        }
+    }
+
+    fn first_sample_of_built_founder(mut sim: Sim, id: u64) -> Vec<f64> {
+        let (recorder, log) = Recorder::new();
+        assert!(sim.fauna_mut().set_controller(id, Box::new(recorder)));
+        for _ in 0..6 {
+            sim.step();
+        }
+        let log = log.lock().unwrap();
+        assert_eq!(log.len(), 1, "one sampling in six ticks");
+        log[0].clone()
+    }
+
+    #[test]
+    fn stage_a_starts_present_the_promised_initial_signal() {
+        for seed in STAGE_A_SEEDS {
+            for founder in Founder::ALL {
+                let arena = Arena::build(founder, seed);
+                let id = arena.animal_id.expect("the Stage A founder is placed");
+                let start = arena.animal_pose();
+                let resources = arena.resources.clone();
+                let obs =
+                    first_sample_of_built_founder(arena.into_sim(SimConfig { threads: 1 }), id);
+                match founder {
+                    Founder::Blind => {
+                        assert_eq!(obs[20], 1.0, "seed {seed}: chemical receptor valid");
+                        assert!(obs[18] > 0.0, "seed {seed}: start is outside the cue");
+                    }
+                    Founder::Browser => {
+                        assert_eq!(obs[36], 1.0, "seed {seed}: material cone valid");
+                        let foliage = obs[20] + obs[26] + obs[32];
+                        assert!(
+                            foliage > 0.0,
+                            "seed {seed}: no starting foliage ray hit; start {start:?}, resources {resources:?}, observation {obs:?}",
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Put a resting, recording founder on a litter tile of a static sim and return its
+    /// first sampled observation.
+    fn first_sample_of_a_founder_on_the_tile(mut sim: Sim, site: Site) -> Vec<f64> {
+        let id = sim.with_layers_mut(|world, _, fauna| {
+            assert!(fauna.apply(
+                world,
+                FaunaCommand::IntroduceFounder {
+                    x: i64::from(site.x),
+                    z: site.z,
+                    founder: Founder::Blind,
+                    body: 0.0125,
+                    heading_rad: 0.0,
+                },
+            ));
+            fauna.view().ledger.births - 1
+        });
+        let (recorder, log) = Recorder::new();
+        assert!(sim.fauna_mut().set_controller(id, Box::new(recorder)));
+        // Six ticks: the first sampling is at age 5, before the tick's own first field
+        // update at tick 10 — whatever the controller read was settled in.
+        for _ in 0..6 {
+            sim.step();
+        }
+        let log = log.lock().unwrap();
+        assert_eq!(log.len(), 1, "one sampling in six ticks");
+        log[0].clone()
+    }
+
+    /// The static tick samples the **settled field**: a founder standing on a litter tile
+    /// reads a valid, nonzero `Chem(litter)` at its very first sampling. Taste separately
+    /// reports the material at its current mouth contact. The live schedule, by contrast,
+    /// has no field at all.
+    #[test]
+    fn the_static_tick_samples_the_settled_field() {
+        let arena = Arena::build(Founder::Blind, 1);
+        let site = arena.resources[0];
+        let sim = arena.into_sim(SimConfig { threads: 1 });
+        assert!(
+            sim.senses().is_some(),
+            "a static arena holds its settled field"
+        );
+        let obs = first_sample_of_a_founder_on_the_tile(sim, site);
+        assert_eq!(obs.len(), 23);
+        assert_eq!(obs[20], 1.0, "chem validity from the settled field");
+        assert!(
+            obs[18] > 0.0,
+            "a cue stands on the source tile: {}",
+            obs[18]
+        );
+        assert_eq!(obs[17], 1.0, "taste validity");
+        assert!(obs[15] > 0.0, "litter is present at the mouth contact");
+        assert_eq!(obs[21..23], [1.0, 1.0], "open-sky light, valid");
+
+        // The live schedule is senses-free: no field resource, and its fauna path is
+        // exactly what it was.
+        let live = Sim::from_configs(
+            VoxelConfig::default(),
+            cubarium_voxel_flora::FloraConfig::default(),
+            cubarium_voxel_fauna::FaunaConfig::default(),
+            SimConfig { threads: 1 },
+        );
+        assert!(live.senses().is_none());
+        assert_eq!(live.mode(), ScheduleMode::Live);
+    }
+
+    /// A prepared field is reused: a sim built from a caller-settled [`Senses`] reads the
+    /// settled cue on the first sampling — a fresh field would still read zero there,
+    /// because the tick's own first update is not due until tick 10. The episode-private
+    /// trend stores are cleared on the way in, so the first sample's trend is zero.
+    #[test]
+    fn a_prepared_field_is_reused_on_the_first_sampling() {
+        let arena = Arena::build(Founder::Blind, 1);
+        let site = arena.resources[0];
+        // Settle once through the same API the search fixture caches.
+        let prepared = arena.prepare_senses();
+        let sim = arena.into_sim_prepared(SimConfig { threads: 1 }, prepared);
+        let obs = first_sample_of_a_founder_on_the_tile(sim, site);
+        assert_eq!(obs[20], 1.0, "chem validity");
+        assert!(
+            obs[18] > 0.0,
+            "the prepared field was readable before any live update: {}",
+            obs[18]
+        );
+        assert_eq!(obs[19], 0.0, "the first sample's trend is zero, not stale");
+    }
+
+    /// The setup and sensing numbers on the arena's own scale: build, settle (inside
+    /// `new_static`), and the controller stage's sampling — one observation build with
+    /// the cone — per step. Ignored because it is a named study, not CI work
+    /// (`design/voxel-senses-phase1-tests.md` §3: measure setup separately from ticks);
+    /// run it by name when the benchmark needs the current figures.
+    #[test]
+    #[ignore = "study: run by name for the setup and per-observation numbers"]
+    fn the_setup_and_sampling_costs_are_measured() {
+        use std::time::Instant;
+
+        for founder in Founder::ALL {
+            let t0 = Instant::now();
+            let arena = Arena::build(founder, 1);
+            let build = t0.elapsed();
+
+            // An explicit settle, so the update count and the per-update cost are on
+            // record alongside into_sim's own settle.
+            let mut probe = cubarium_voxel_fauna::Senses::new();
+            let t1 = Instant::now();
+            let (updates, converged) = probe.settle(&arena.world.view(), &arena.flora.view());
+            let settle = t1.elapsed();
+
+            let t2 = Instant::now();
+            let mut sim = arena.into_sim(SimConfig { threads: 1 });
+            let into_sim = t2.elapsed();
+
+            // One driven founder on an interior column: every controller period samples
+            // one observation (blind: field + receptors; browser: 27-ray cone + receptors).
+            // The idle body the builder placed samples too — two observers.
+            let id = sim.with_layers_mut(|world, _, fauna| {
+                assert!(world.view().surface_y(8, 4).is_some(), "an interior column");
+                assert!(fauna.apply(
+                    world,
+                    FaunaCommand::IntroduceFounder {
+                        x: 8,
+                        z: 4,
+                        founder,
+                        body: founder.manifest().body_reference,
+                        heading_rad: 0.0,
+                    },
+                ));
+                fauna.view().ledger.births - 1
+            });
+            let (recorder, log) = Recorder::new();
+            assert!(sim.fauna_mut().set_controller(id, Box::new(recorder)));
+
+            let t3 = Instant::now();
+            let steps = 100;
+            for _ in 0..steps {
+                sim.step();
+            }
+            let sampled = log.lock().unwrap().len() as f64;
+            let tick_with_sampling = t3.elapsed() / steps;
+
+            // The animal-free baseline, so the per-observation share is visible: remove
+            // every body and time the same tick count.
+            let sites: Vec<_> = sim
+                .fauna()
+                .view()
+                .animals
+                .iter()
+                .map(|a| (i64::from(a.site.x), a.site.z))
+                .collect();
+            sim.with_layers_mut(|world, _, fauna| {
+                for (x, z) in sites {
+                    while fauna.apply(world, FaunaCommand::Remove { x, z }) {}
+                }
+            });
+            let t4 = Instant::now();
+            for _ in 0..steps {
+                sim.step();
+            }
+            let tick_empty = t4.elapsed() / steps;
+            println!(
+                "{}: build {build:?}, settle {updates} updates in {settle:?} (converged \
+                 {converged}), into_sim {into_sim:?}, tick+2 observers {tick_with_sampling:?}, \
+                 tick empty {tick_empty:?}, per-observation ≈ {:?} ({} samplings of the driven \
+                 body, the idle body samples too)",
+                founder.name(),
+                (tick_with_sampling
+                    .checked_sub(tick_empty)
+                    .unwrap_or_default()
+                    * steps)
+                    / (2 * sampled as u32),
+                sampled,
+            );
+        }
     }
 }

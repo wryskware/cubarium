@@ -29,14 +29,15 @@
 //! body layer; the bodies are smaller than a voxel, so a touching solid always covers
 //! one of the samples. The underside receptor reads the support face under the centre.
 //! `Wet` is the standing water at the foot, a valid zero when dry. `Taste` reads only
-//! what the mouth region physically overlaps: the ground stocks under the footprint and
-//! forward reach for the blind founder, a stand's crown cells at the body layer for the
-//! browser — never a remote query, never a neighbour outside the reach.
+//! what the mouth region physically contacts: the browser tastes the foliage of a stand
+//! whose crown cells reach the mouth region; the blind founder tastes actual litter stock
+//! under its ground-level mouth, or valid-zero bare ground. Never a remote field query,
+//! never a neighbour outside the reach.
 //!
 //! The modules P1-C owns (`Chem`, `Light`, `Cone`) are left **zero with validity 0** in
 //! the observation: this module fabricates nothing it does not measure.
 
-use cubarium_voxel::{VoxelView, DT};
+use cubarium_voxel::{DT, VoxelView};
 use cubarium_voxel_flora::{FloraView, Reach, Site};
 use serde::{Deserialize, Serialize};
 
@@ -45,9 +46,9 @@ use crate::manifest::{Founder, Manifest};
 use crate::{Animal, Fauna, SpeciesConfig};
 
 /// The cue-unit reference the plan fixes for the litter cue (`M_emit`, "Initial cue
-/// field settings"): `M_EMIT` organic-material units of a contacted material read at
-/// full cue strength. The taste probe uses the same reference the P1-C litter field
-/// will emit with, so a taste and a `Chem` response at the same spot agree.
+/// field settings"): the field emits `min(litter / M_EMIT, 1)` cue units per second. The
+/// contact Taste response uses the same material reference while reading actual stock;
+/// the remote Chem channel reads the independently diffused concentration.
 pub(crate) const M_EMIT: f64 = 0.05;
 
 /// Below this much requested equivalent displacement an interval counts as "none
@@ -241,17 +242,9 @@ pub(crate) fn resolve_motion(
                     }
                 }
                 if lo > 1e-12 {
-                    let (nx, nz, actual) = advance_candidate(
-                        view,
-                        px,
-                        pz,
-                        h,
-                        standing_y,
-                        lo,
-                        r,
-                        wade_depth_m,
-                    )
-                    .expect("the bisection's best advance is valid");
+                    let (nx, nz, actual) =
+                        advance_candidate(view, px, pz, h, standing_y, lo, r, wade_depth_m)
+                            .expect("the bisection's best advance is valid");
                     pose.x = nx;
                     pose.z = nz;
                     moved += actual;
@@ -432,8 +425,20 @@ pub(crate) fn contact_readings(
     let wx = cx.rem_euclid(i64::from(c.width));
     ContactReading {
         front: boundary_arc(view, pose, r, layer, pose.heading_rad),
-        left: boundary_arc(view, pose, r, layer, pose.heading_rad - std::f64::consts::FRAC_PI_2),
-        right: boundary_arc(view, pose, r, layer, pose.heading_rad + std::f64::consts::FRAC_PI_2),
+        left: boundary_arc(
+            view,
+            pose,
+            r,
+            layer,
+            pose.heading_rad - std::f64::consts::FRAC_PI_2,
+        ),
+        right: boundary_arc(
+            view,
+            pose,
+            r,
+            layer,
+            pose.heading_rad + std::f64::consts::FRAC_PI_2,
+        ),
         underside: f64::from(view.is_support(wx, standing_y, cz)),
         wet: f64::from(view.water_depth_m(wx, standing_y, cz) > 0.0),
         resolved: true,
@@ -447,7 +452,11 @@ pub(crate) fn contact_readings(
 fn boundary_arc(view: &VoxelView<'_>, pose: &crate::Pose, r: f64, layer: u32, centre: f64) -> f64 {
     let c = view.config;
     let probe = r * (1.0 + 1e-6);
-    for da in [0.0, -std::f64::consts::FRAC_PI_4, std::f64::consts::FRAC_PI_4] {
+    for da in [
+        0.0,
+        -std::f64::consts::FRAC_PI_4,
+        std::f64::consts::FRAC_PI_4,
+    ] {
         let a = centre + da;
         let px = pose.x + probe * a.sin();
         let pz = pose.z + probe * a.cos();
@@ -467,7 +476,11 @@ fn boundary_arc(view: &VoxelView<'_>, pose: &crate::Pose, r: f64, layer: u32, ce
 /// sampled at the capsule's extreme points (centre, reach tip, and the tip's forward
 /// and lateral extremes). At most the four columns around the body can be involved at
 /// these body sizes, and the five probes reach all of them.
-pub(crate) fn mouth_columns(view: &VoxelView<'_>, pose: &crate::Pose, manifest: &Manifest) -> Vec<(i64, u32)> {
+pub(crate) fn mouth_columns(
+    view: &VoxelView<'_>,
+    pose: &crate::Pose,
+    manifest: &Manifest,
+) -> Vec<(i64, u32)> {
     let c = view.config;
     let v = c.voxel_m;
     let r = footprint_radius(manifest);
@@ -514,7 +527,9 @@ pub(crate) fn mouth_litter_site(
             z,
         };
         let litter = fv.ground_at(site).map_or(0.0, |g| g.litter);
-        if litter > best_amount || (litter > 0.0 && litter == best_amount && best.is_some_and(|b| site < b)) {
+        if litter > best_amount
+            || (litter > 0.0 && litter == best_amount && best.is_some_and(|b| site < b))
+        {
             best = Some(site);
             best_amount = litter;
         }
@@ -586,11 +601,20 @@ pub(crate) struct TasteReading {
     pub valid: bool,
 }
 
-/// Read the mouth. The blind founder's mouth roots at the ground: it always contacts
-/// the ground it stands on, so a bare patch is a **valid zero** cue at the ground's
-/// resistance, and litter reads through the plan's response curve at the contact's own
-/// amount. The browser's mouth is at body height: it contacts a stand's crown cells
-/// when they reach the mouth region, and is **invalid** in air.
+impl TasteReading {
+    /// Zero data, validity zero: no contact, or no channel to read.
+    const INVALID: TasteReading = TasteReading {
+        cue: 0.0,
+        resistance: 0.0,
+        valid: false,
+    };
+}
+
+/// Read chemistry and resistance at the mouth's actual contact. The blind founder's
+/// mouth roots at the ground: litter under its mouth produces a litter response, while
+/// bare ground is a valid ground contact with zero litter response. The diffused
+/// `Chem(litter)` field is deliberately not consulted. The browser's mouth is at body
+/// height and is invalid in air.
 pub(crate) fn taste_reading(
     fv: &FloraView<'_>,
     view: &VoxelView<'_>,
@@ -600,6 +624,9 @@ pub(crate) fn taste_reading(
     founder: Founder,
 ) -> TasteReading {
     let sat = manifest.tunings.chem_saturation;
+    // The contact-material response: `amount / M_EMIT` cue units through the same curve
+    // the field's concentration reads through. The browser's foliage cue is still this —
+    // there is no foliage field to sample.
     let response = |amount: f64| {
         let c = (amount / M_EMIT).min(1.0);
         c / (c + sat)
@@ -608,15 +635,13 @@ pub(crate) fn taste_reading(
     match founder {
         Founder::Blind => match mouth_litter_site(fv, &cols, standing_y) {
             Some(site) => {
-                let amount = fv.ground_at(site).map_or(0.0, |g| g.litter);
+                let litter = fv.ground_at(site).map_or(0.0, |g| g.litter);
                 TasteReading {
-                    cue: response(amount),
+                    cue: response(litter),
                     resistance: resistance_of(manifest, "litter"),
                     valid: true,
                 }
             }
-            // No litter in reach: the mouth still contacts the ground itself — a valid
-            // zero cue at the ground's resistance.
             None => TasteReading {
                 cue: 0.0,
                 resistance: resistance_of(manifest, "ground"),
@@ -630,11 +655,7 @@ pub(crate) fn taste_reading(
                 valid: true,
             },
             // The mouth is in air: no contact, no taste.
-            None => TasteReading {
-                cue: 0.0,
-                resistance: 0.0,
-                valid: false,
-            },
+            None => TasteReading::INVALID,
         },
     }
 }
@@ -653,14 +674,19 @@ fn resistance_of(manifest: &Manifest, class: &str) -> f64 {
 /// The observation vector for one founder body, built from the **pre-action state of
 /// this tick**: the body's own stocks and prior-interval feedback, and the receptors'
 /// geometry as it stands before anything moves or eats. Everything is clamped; a
-/// non-finite input is rejected to zero rather than trained through. The modules P1-C
-/// owns stay zero with validity 0.
+/// non-finite input is rejected to zero rather than trained through. `senses` carries the
+/// per-arena litter field and trend stores; without it (the live schedule) `Chem` reads
+/// zero with validity 0. Taste remains contact-local, while `Light` and the `Cone` are
+/// pure geometry. `cone_occupancy` is prepared once for all observations in a controller
+/// stage so each browser does not rescan the world.
 pub(crate) fn observation(
     fauna: &Fauna,
     i: usize,
     view: &VoxelView<'_>,
     fv: &FloraView<'_>,
     manifest: &Manifest,
+    mut senses: Option<&mut crate::Senses>,
+    cone_occupancy: Option<&crate::senses::ConeOccupancy>,
 ) -> Vec<f64> {
     let a = &fauna.animals[i];
     let founder = a
@@ -706,9 +732,58 @@ pub(crate) fn observation(
     obs[tm.offset + 1] = taste.resistance;
     obs[tm.offset + 2] = f64::from(taste.valid);
 
-    // Everything after Taste belongs to P1-C: left at zero, validity included. The
-    // taste probe shares M_EMIT with that field so the two will agree at one spot.
+    // Chem(litter): the arena's litter field at the receptor, response then trend then
+    // validity. Blind founder only. Without a senses handle the module reads zero with
+    // validity 0.
+    if let Some(cm) = module_opt(manifest, "Chem(litter)") {
+        if let Some(senses) = senses.as_deref_mut() {
+            if let Some(cue) = senses.sample_cue(view, &a.pose, a.site.y) {
+                let sat = manifest.tunings.chem_saturation;
+                let q = cue / (cue + sat);
+                obs[cm.offset] = clamp01(q);
+                obs[cm.offset + 1] = senses.advance_chem_trend(a.id, q, manifest);
+                obs[cm.offset + 2] = 1.0;
+            }
+        }
+    }
+
+    // Light: uniform sky illumination × terrain exposure. Canopy shading and emission are
+    // deferred, so a glowcap is invisible. Valid when the pose resolves to a support.
+    if let Some(lm) = module_opt(manifest, "Light") {
+        if let Some((cx, cz)) = a.pose.column(view.config.voxel_m, view.config.depth) {
+            let wx = cx.rem_euclid(i64::from(view.config.width));
+            if view.is_support(wx, a.site.y, cz) {
+                obs[lm.offset] = clamp01(view.sky_visibility(wx, a.site.y, cz));
+                obs[lm.offset + 1] = 1.0;
+            }
+        }
+    }
+
+    // Cone(3, foliage/body): the fixed ray fan, a fresh reading each observation. No
+    // memory, no expansion, no body identity. Geometry alone, so it reads with or without
+    // a senses handle.
+    if let Some(cn) = module_opt(manifest, "Cone(3, foliage/body)") {
+        let occupancy = cone_occupancy.expect("browser observations prepare cone occupancy");
+        let cone = crate::senses::cone_readings(view, occupancy, a.id, &a.pose, a.site.y, manifest);
+        let base = cn.offset;
+        for (k, sec) in cone.sectors.iter().enumerate() {
+            let o = base + k * 6;
+            obs[o] = sec.clear;
+            obs[o + 1] = sec.all_proximity;
+            obs[o + 2] = sec.foliage_fraction;
+            obs[o + 3] = sec.foliage_proximity;
+            obs[o + 4] = sec.body_fraction;
+            obs[o + 5] = sec.body_proximity;
+        }
+        obs[base + 18] = f64::from(cone.valid);
+    }
+
     obs
+}
+
+/// [`module`] without the panic: `None` when this manifest has no such module.
+fn module_opt(manifest: &Manifest, name: &str) -> Option<crate::manifest::Module> {
+    manifest.modules.iter().find(|m| m.name == name).copied()
 }
 
 fn module(manifest: &Manifest, name: &str) -> crate::manifest::Module {
@@ -778,11 +853,7 @@ mod tests {
     }
 
     fn site(x: u32, z: u32) -> Site {
-        Site {
-            x,
-            y: 2,
-            z,
-        }
+        Site { x, y: 2, z }
     }
 
     fn pose_at(x_m: f64, z_m: f64, heading: f64) -> crate::Pose {
@@ -885,7 +956,11 @@ mod tests {
             "the heading turned to {}",
             pose.heading_rad
         );
-        assert_eq!((pose.x, pose.z), (0.5, 0.5), "a stopped turn does not translate");
+        assert_eq!(
+            (pose.x, pose.z),
+            (0.5, 0.5),
+            "a stopped turn does not translate"
+        );
         assert!(
             paid > 0.0,
             "the turn was paid in equivalent displacement: r·|yaw| over the period"
@@ -957,7 +1032,10 @@ mod tests {
         turned.heading_rad =
             (turned.heading_rad - std::f64::consts::FRAC_PI_2).rem_euclid(std::f64::consts::TAU);
         let contacts = contact_readings(&view, &turned, 2, &manifest);
-        assert_eq!(contacts.right, 1.0, "the wall the body faces is its right after a −90° turn");
+        assert_eq!(
+            contacts.right, 1.0,
+            "the wall the body faces is its right after a −90° turn"
+        );
         assert_eq!(contacts.front, 0.0);
     }
 
@@ -999,7 +1077,10 @@ mod tests {
         }
         assert!(blocked, "the higher face is not steppable");
         let contacts = contact_readings(&view, &pose, 2, &manifest);
-        assert_eq!(contacts.front, 1.0, "the step-up's wall is at the body layer: contact");
+        assert_eq!(
+            contacts.front, 1.0,
+            "the step-up's wall is at the body layer: contact"
+        );
         assert_eq!(contacts.underside, 1.0);
 
         // A drop: dig column x = 3 at row 4 down to air, so its support face is at
@@ -1032,7 +1113,10 @@ mod tests {
         }
         assert!(blocked, "the pit is not steppable either");
         let contacts = contact_readings(&view, &pose, 2, &manifest);
-        assert_eq!(contacts.front, 0.0, "a drop is open air at body level: the delivery ratio is what reports it");
+        assert_eq!(
+            contacts.front, 0.0,
+            "a drop is open air at body level: the delivery ratio is what reports it"
+        );
         assert_eq!(contacts.underside, 1.0);
     }
 
@@ -1049,7 +1133,11 @@ mod tests {
             volume_m3: volume,
         });
         let view = world.view();
-        assert!(view.water_depth_m(2, 2, 2) > 0.05, "the pond is {} deep", view.water_depth_m(2, 2, 2));
+        assert!(
+            view.water_depth_m(2, 2, 2) > 0.05,
+            "the pond is {} deep",
+            view.water_depth_m(2, 2, 2)
+        );
         let manifest = Founder::Blind.manifest();
         let mut pose = pose_at(2.0 * 0.25 - 0.01, 2.0 * 0.25 + 0.125, H);
         let mut blocked = false;
@@ -1069,56 +1157,73 @@ mod tests {
             blocked |= motion.blocked;
         }
         assert!(blocked);
-        assert!(pose.x < 2.0 * 0.25, "the body never entered the pond column");
+        assert!(
+            pose.x < 2.0 * 0.25,
+            "the body never entered the pond column"
+        );
     }
 
-    /// The blind founder's taste reads the litter its mouth region actually covers:
-    /// underfoot litter gives a valid cue at the litter resistance, a bare patch a
-    /// valid zero at the ground resistance, and a column beyond the reach is never
-    /// input. A founder's mouth reach is well under a voxel, so only a body standing
-    /// against the far edge of its column reaches into the next one.
+    /// A remote stock may create a local `Chem` field, but it cannot become Taste until
+    /// the mouth physically reaches litter.
     #[test]
-    fn blind_taste_reads_only_the_mouth_region() {
+    fn blind_taste_reads_contact_stock_not_the_diffused_field() {
         let world = flat_world();
         let view = world.view();
         let mut flora = Flora::new(FloraConfig::default());
-        // Litter on the body's own site, and on a neighbour two columns east, beyond
-        // the mouth reach of anything standing on the home site.
-        for (x, z) in [(2u32, 2u32), (4, 2)] {
-            flora.deposit(
-                site(x, z),
-                Deposit {
-                    kind: DepositKind::Litter,
-                    organic: 0.2,
-                    mineral: 0.2 * 0.02,
-                    energy: 0.2 * 2.0,
-                },
-            );
-        }
-        let fv = flora.view();
+        flora.deposit(
+            site(4, 2),
+            Deposit {
+                kind: DepositKind::Litter,
+                organic: 0.2,
+                mineral: 0.2 * 0.02,
+                energy: 0.2 * 2.0,
+            },
+        );
+        let mut senses = crate::Senses::new();
+        let (updates, converged) = senses.settle(&view, &flora.view());
+        assert!(converged, "the field settled in {updates} updates");
         let manifest = Founder::Blind.manifest();
+        let pose = pose_at(2.0 * 0.25 + 0.125, 2.0 * 0.25 + 0.125, -H);
+        let field = senses.sample_cue(&view, &pose, 2).expect("supported");
+        assert!(
+            field > 0.0,
+            "the remote litter produces a local diffused cue"
+        );
+        let t = taste_reading(&flora.view(), &view, &pose, 2, &manifest, Founder::Blind);
+        assert_eq!(t.cue, 0.0, "remote litter is not mouth chemistry");
+        assert!(t.valid, "bare ground is still an actual mouth contact");
+        assert!((t.resistance - 0.5).abs() < 1e-12);
 
-        // Standing on the litter site: valid cue at the litter resistance, whatever
-        // the heading — the mouth covers the footprint, and the footprint is on it.
-        let pose = pose_at(2.0 * 0.25 + 0.125, 2.0 * 0.25 + 0.125, 0.0);
-        let t = taste_reading(&fv, &view, &pose, 2, &manifest, Founder::Blind);
-        assert!(t.valid);
-        assert!(t.cue > 0.49, "a full tile reads at full cue strength, got {}", t.cue);
+        flora.deposit(
+            site(2, 2),
+            Deposit {
+                kind: DepositKind::Litter,
+                organic: 0.2,
+                mineral: 0.2 * 0.02,
+                energy: 0.2 * 2.0,
+            },
+        );
+        let t = taste_reading(&flora.view(), &view, &pose, 2, &manifest, Founder::Blind);
+        assert!(
+            t.cue > 0.2,
+            "contact with litter reads its stock: {}",
+            t.cue
+        );
         assert!((t.resistance - 0.2).abs() < 1e-12, "the litter resistance");
+    }
 
-        // Standing against the east edge of the bare column 3, facing east: the
-        // mouth's reach just crosses into column 4, whose litter is real mouth input.
-        let edge = pose_at(1.0 - 0.03, 2.0 * 0.25 + 0.125, H);
-        let t = taste_reading(&fv, &view, &edge, 2, &manifest, Founder::Blind);
-        assert!(t.valid && t.cue > 0.49, "the neighbour's litter is within the reach now");
-        // The same body facing west: the reach covers bare column 3 only — the litter
-        // two columns west is behind the mouth and never becomes input.
-        let mut west = edge;
-        west.heading_rad = -H;
-        let t = taste_reading(&fv, &view, &west, 2, &manifest, Founder::Blind);
-        assert!(t.valid, "contact with the ground itself is a valid reading");
+    /// Taste is a contact sensor and remains available without the remote cue field.
+    #[test]
+    fn blind_taste_on_bare_ground_is_valid_zero() {
+        let world = flat_world();
+        let view = world.view();
+        let flora = Flora::new(FloraConfig::default());
+        let manifest = Founder::Blind.manifest();
+        let pose = pose_at(2.0 * 0.25 + 0.125, 2.0 * 0.25 + 0.125, 0.0);
+        let t = taste_reading(&flora.view(), &view, &pose, 2, &manifest, Founder::Blind);
         assert_eq!(t.cue, 0.0);
-        assert!((t.resistance - 0.5).abs() < 1e-12, "the ground resistance, got {}", t.resistance);
+        assert_eq!(t.resistance, 0.5);
+        assert!(t.valid);
     }
 
     /// The browser's mouth is at body height: a stand's crown cell in the mouth region
@@ -1131,7 +1236,11 @@ mod tests {
         let mut flora = Flora::new(FloraConfig::default());
         // A springturf on column (2, 2): its crown cell is one voxel above the face —
         // exactly the standing body's layer.
-        let wood = 0.5 * flora.config().species(cubarium_voxel_flora::Species::Springturf).wood_max;
+        let wood = 0.5
+            * flora
+                .config()
+                .species(cubarium_voxel_flora::Species::Springturf)
+                .wood_max;
         assert!(flora.apply(
             &world,
             cubarium_voxel_flora::Command::Seed {
@@ -1147,7 +1256,10 @@ mod tests {
         // Standing in the turf itself: contact.
         let pose = pose_at(2.0 * 0.25 + 0.125, 2.0 * 0.25 + 0.125, 0.0);
         let t = taste_reading(&fv, &view, &pose, 2, &manifest, Founder::Browser);
-        assert!(t.valid, "the crown cell is at the body's own column and layer");
+        assert!(
+            t.valid,
+            "the crown cell is at the body's own column and layer"
+        );
         assert!(t.cue > 0.0 && (t.resistance - 0.3).abs() < 1e-12);
 
         // Standing one column west facing east: the crown is within the mouth reach.
@@ -1159,7 +1271,10 @@ mod tests {
         let mut away = near;
         away.heading_rad = (H + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU);
         let t = taste_reading(&fv, &view, &away, 2, &manifest, Founder::Browser);
-        assert!(!t.valid, "a stock behind the mouth is unreachable and stays unmouthed");
+        assert!(
+            !t.valid,
+            "a stock behind the mouth is unreachable and stays unmouthed"
+        );
         assert_eq!(t.cue, 0.0);
     }
 
@@ -1185,11 +1300,22 @@ mod tests {
                 heading_rad: H,
             },
         ));
-        let flora = Flora::new(FloraConfig::default());
+        let mut flora = Flora::new(FloraConfig::default());
+        // Litter one column east of the body, so the settled field has a gradient the
+        // cue channels can read.
+        flora.deposit(
+            site(3, 2),
+            Deposit {
+                kind: DepositKind::Litter,
+                organic: 0.2,
+                mineral: 0.2 * 0.02,
+                energy: 0.2 * 2.0,
+            },
+        );
         let view = world.view();
         let fv = flora.view();
         let manifest = Founder::Blind.manifest();
-        let obs = observation(&fauna, 0, &view, &fv, &manifest);
+        let obs = observation(&fauna, 0, &view, &fv, &manifest, None, None);
         assert_eq!(obs.len(), 23);
         // Introduced at the adult reference: energy and reserve read 1, birth
         // readiness is the real threshold state (adult body, full adult reserve).
@@ -1208,13 +1334,33 @@ mod tests {
         assert_eq!(obs[12], 1.0, "contact validity");
         assert_eq!(obs[13], 0.0, "dry");
         assert_eq!(obs[14], 1.0, "wet validity");
-        assert_eq!(obs[15], 0.0, "no litter in the mouth");
-        assert!((obs[16] - 0.5).abs() < 1e-12, "ground resistance");
-        assert_eq!(obs[17], 1.0, "taste validity: the mouth contacts the ground");
-        // Chem(litter) 18..21 and Light 21..23: P1-C's, zero with validity 0.
-        assert!(obs[18..23].iter().all(|v| *v == 0.0));
+        // The litter one column ahead is outside the short mouth reach: bare-ground
+        // Taste is valid zero. Chem remains unavailable; Light reads the real sky.
+        assert_eq!(obs[15], 0.0, "unreached litter is not taste");
+        assert_eq!(obs[16], 0.5, "ground resistance");
+        assert_eq!(obs[17], 1.0, "ground contact is valid");
+        assert_eq!(&obs[18..21], &[0.0, 0.0, 0.0], "chem stays invalid");
+        assert_eq!(obs[22], 1.0, "light validity");
+        assert!(
+            (0.0..=1.0).contains(&obs[21]),
+            "light response is a sky fraction, got {}",
+            obs[21]
+        );
 
-        // The browser's observation is 37 wide and its Cone span is zero too.
+        // With the arena's field the blind observation also reads remote Chem. Taste
+        // remains the independent contact-stock response.
+        let mut senses = crate::Senses::new();
+        let (updates, converged) = senses.settle(&view, &fv);
+        assert!(converged, "settled in {updates}");
+        let obs = observation(&fauna, 0, &view, &fv, &manifest, Some(&mut senses), None);
+        assert_eq!(obs[20], 1.0, "chem validity");
+        assert_eq!(obs[17], 1.0, "ground taste contact remains valid");
+        assert_eq!(obs[15], 0.0, "the field does not leak into Taste");
+        assert!(obs[18] > 0.0, "a cue in the field here, got {}", obs[18]);
+        assert!((-1.0..=1.0).contains(&obs[19]), "trend in range");
+
+        // The browser's observation is 37 wide and its Cone reads the real world: valid,
+        // and the wall two columns east shades the front sector at the eye's layer.
         let mut browser = Fauna::new(crate::FaunaConfig::default());
         assert!(browser.apply(
             &world,
@@ -1226,9 +1372,24 @@ mod tests {
                 heading_rad: H,
             },
         ));
-        let obs = observation(&browser, 0, &view, &fv, &Founder::Browser.manifest());
+        let cone_occupancy = crate::senses::cone_occupancy(&view, &fv, &browser.view());
+        let obs = observation(
+            &browser,
+            0,
+            &view,
+            &fv,
+            &Founder::Browser.manifest(),
+            None,
+            Some(&cone_occupancy),
+        );
         assert_eq!(obs.len(), 37);
-        assert!(obs[18..37].iter().all(|v| *v == 0.0), "Cone stays zero with validity 0");
+        assert_eq!(obs[36], 1.0, "the cone reads the real world");
+        assert!(
+            obs[24] < 1.0,
+            "the front sector is occluded by the wall, clear = {}",
+            obs[24]
+        );
+        assert!(obs[18..36].iter().all(|v| (-1.0..=1.0).contains(v)));
     }
 
     /// The organ-allocation rule: total structure for a core budget is core/(1−f), the
@@ -1241,7 +1402,8 @@ mod tests {
         assert_eq!(blind.organ_structure_fraction, 0.05);
         assert_eq!(browser.organ_structure_fraction, 0.10);
         let core = 0.011875;
-        let total = FounderPhysiology::total_structure_for_core(core, blind.organ_structure_fraction);
+        let total =
+            FounderPhysiology::total_structure_for_core(core, blind.organ_structure_fraction);
         assert!((total - 0.0125).abs() < 1e-12);
         assert!((blind.sensor_structure(total) - 0.05 * total).abs() < 1e-15);
         // The rule does not create matter: sensor + core is the total, not more.

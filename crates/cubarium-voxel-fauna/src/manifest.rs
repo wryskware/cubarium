@@ -470,7 +470,8 @@ impl Manifest {
 
     /// Total rays per controller observation: sectors × yaw offsets × pitch offsets.
     pub fn ray_count(&self) -> usize {
-        self.sector_centres_deg.len() * self.ray_yaw_offsets_deg.len()
+        self.sector_centres_deg.len()
+            * self.ray_yaw_offsets_deg.len()
             * self.ray_pitch_offsets_deg.len()
     }
 
@@ -537,7 +538,11 @@ impl Manifest {
         let _ = write!(
             s,
             "|tune:contact_binary={},chem_sat={},chem_tau={},trend_scale={},light_ref={},proximity={}",
-            t.contact_binary, t.chem_saturation, t.chem_tau_s, t.trend_scale_s, t.light_reference,
+            t.contact_binary,
+            t.chem_saturation,
+            t.chem_tau_s,
+            t.trend_scale_s,
+            t.light_reference,
             t.proximity_range_m
         );
         if !self.sector_centres_deg.is_empty() {
@@ -614,7 +619,10 @@ mod tests {
         assert_eq!((MODULE_CONTACT4.offset, MODULE_CONTACT4.end()), (8, 12));
         assert_eq!((MODULE_WET.offset, MODULE_WET.end()), (13, 14));
         assert_eq!((MODULE_TASTE1.offset, MODULE_TASTE1.end()), (15, 17));
-        assert_eq!((MODULE_CHEM_LITTER.offset, MODULE_CHEM_LITTER.end()), (18, 20));
+        assert_eq!(
+            (MODULE_CHEM_LITTER.offset, MODULE_CHEM_LITTER.end()),
+            (18, 20)
+        );
         assert_eq!((MODULE_LIGHT.offset, MODULE_LIGHT.end()), (21, 22));
 
         let browser = Manifest::browser();
@@ -644,8 +652,14 @@ mod tests {
             assert_eq!(m.deadband, 0.05);
             assert_eq!(m.actions[0].name, "forward_effort");
             assert_eq!(m.actions[0].transfer, Transfer::Sigmoid);
-            assert_eq!((m.actions[1].name, m.actions[1].transfer), ("turn_effort", Transfer::Tanh));
-            assert_eq!((m.actions[2].name, m.actions[2].transfer), ("feed_effort", Transfer::Sigmoid));
+            assert_eq!(
+                (m.actions[1].name, m.actions[1].transfer),
+                ("turn_effort", Transfer::Tanh)
+            );
+            assert_eq!(
+                (m.actions[2].name, m.actions[2].transfer),
+                ("feed_effort", Transfer::Sigmoid)
+            );
             assert_eq!(m.cadence_ticks(), 5, "0.25 s at 20 Hz");
         }
     }
@@ -673,7 +687,11 @@ mod tests {
         assert_ne!(blind.digest(), browser.digest());
         assert!(blind.canonical_text().contains("Chem(litter)"));
         assert!(browser.canonical_text().contains("Cone(3, foliage/body)"));
-        assert!(blind.canonical_text().contains("|taste:litter:litter=0.2:ground=0.5"));
+        assert!(
+            blind
+                .canonical_text()
+                .contains("|taste:litter:litter=0.2:ground=0.5")
+        );
         assert!(browser.canonical_text().contains("|taste:foliage"));
         assert!(blind.canonical_text().contains("|self_ref:energy="));
         assert!(blind.canonical_text().contains("|move_ref:forward="));
@@ -688,7 +706,11 @@ mod tests {
 
         let mut tau = baseline;
         tau.tunings.chem_tau_s = 2.0;
-        assert_ne!(tau.digest(), before, "a chem tuning move did not move the digest");
+        assert_ne!(
+            tau.digest(),
+            before,
+            "a chem tuning move did not move the digest"
+        );
 
         let mut energy = baseline;
         energy.adult_energy_reference = 0.1;

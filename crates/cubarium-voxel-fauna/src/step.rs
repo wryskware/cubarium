@@ -11,27 +11,29 @@
 //!    leaves as heat at the animal's own current density; the **mineral stays**, as it
 //!    does in a plant: respiration takes organic matter and leaves mineral behind. Ages
 //!    advance here, so `age_ticks` is the number of maintenance payments it has made.
-//! 3. **Controllers** — the sampling point, explicit and shared. Every founder whose
+//! 3. **Cue field.** On due ticks, update emission, decay and diffusion after maintenance
+//!    and before any controller samples.
+//! 4. **Controllers** — the sampling point, explicit and shared. Every founder whose
 //!    controller period is due is sampled from the tick's pre-action state: its
 //!    prior-interval feedback is consumed into the observation, its controller (heuristic
 //!    diagnostic or GRU — interchangeable behind [`crate::Controller`]) is driven, and the
 //!    resolved, deadbanded actions are **held** until the next sampling. A post-tick
 //!    sampler is not this stage; the heuristic bodies have no controller and skip it.
-//! 4. **Sense**, from one snapshot of the plant layer taken before any animal has eaten:
+//! 5. **Sense**, from one snapshot of the plant layer taken before any animal has eaten:
 //!    what is in reach of the face each animal stands on, and the best face it can smell.
 //!    Nothing an animal eats this tick moves another animal's plan this tick — the plant
 //!    layer's own light phase works the same way — but a bite is still bounded by the
 //!    stand it reads, so two animals on one stand cannot eat it twice.
-//! 5. **Act**, in id order: for a heuristic body, crop if a whole bite is in reach, else
+//! 6. **Act**, in id order: for a heuristic body, crop if a whole bite is in reach, else
 //!    step one support face toward the sensed face when a step is due, else rest. For a
 //!    founder, resolve the held actions — the motor budget is paid on the requested
 //!    equivalent displacement, the pose sweeps in bounded sub-steps, and on the due tick
 //!    one local bite is attempted through the plant layer's real transfers — then record
 //!    the interval's motion and intake feedback.
-//! 6. **Births.** An adult with the reserve for one pays it and a newborn appears on its
+//! 7. **Births.** An adult with the reserve for one pays it and a newborn appears on its
 //!    face. Only animals that were alive at the start of the tick can give birth, so a
 //!    newborn cannot itself breed on the tick it is born.
-//! 7. **Death.** Starvation (`body < body_min`) or drowning (standing water deeper than
+//! 8. **Death.** Starvation (`body < body_min`) or drowning (standing water deeper than
 //!    `drown_depth_m` on its own face) hands the whole animal back as **carrion** and
 //!    books a death.
 //!
@@ -61,6 +63,22 @@ use crate::{Animal, Fauna, IntervalFeedback, SpeciesConfig, State, steppable};
 /// Stream keys, so two draws in one tick cannot be the same draw. One per rule that draws.
 const DOMAIN_TARGET: u64 = 1;
 const DOMAIN_STEP: u64 = 2;
+
+/// What a respiration is for, as [`FaunaLedger`](crate::FaunaLedger) books it. The three
+/// split counters sum to `respired_out` to the bit — every booking adds the same addend
+/// to the total and to one split at the same point — so a driver can read the episode's
+/// upkeep, motor and digestion charges apart without a second ledger.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Respiration {
+    /// Basal upkeep, every animal.
+    Maintenance,
+    /// The founder's paid motion, `motor_respiration_per_s` scaled by the requested
+    /// equivalent displacement.
+    Motor,
+    /// Digestion: the undigested fraction of a bite, and anything assimilated that a full
+    /// body and a full reserve could not hold.
+    Digestion,
+}
 
 /// A deterministic scalar stream (splitmix64), keyed by the values that **identify** a
 /// draw rather than seeded from stored state. The flora layer's `Rng`, field for field, so
@@ -107,6 +125,29 @@ struct Plan {
 }
 
 pub(crate) fn step(fauna: &mut Fauna, world: &World, flora: &mut Flora, threads: usize) {
+    tick_inner(fauna, world, flora, threads, None);
+}
+
+/// The static arena's tick: [`step`] with the per-arena [`Senses`] handle. The camera-free
+/// side effect is the field update, which the tick fires at [`UPDATE_TICKS`] cadence
+/// before any controller samples, per the frozen arena's tick order.
+pub(crate) fn step_with_senses(
+    fauna: &mut Fauna,
+    world: &World,
+    flora: &mut Flora,
+    threads: usize,
+    senses: &mut crate::Senses,
+) {
+    tick_inner(fauna, world, flora, threads, Some(senses));
+}
+
+fn tick_inner(
+    fauna: &mut Fauna,
+    world: &World,
+    flora: &mut Flora,
+    threads: usize,
+    mut senses: Option<&mut crate::Senses>,
+) {
     // The tick counter moves first, so `fauna.tick` is the tick this step produces — the
     // flora layer's own rule, and the tick the keyed streams are keyed by.
     fauna.tick += 1;
@@ -117,11 +158,19 @@ pub(crate) fn step(fauna: &mut Fauna, world: &World, flora: &mut Flora, threads:
     cubarium_voxel::voxel_phase!(FaunaStep, {
         cubarium_voxel::voxel_phase!(FaunaTerrain, { terrain(fauna, &view) });
         cubarium_voxel::voxel_phase!(FaunaMaintenance, { maintenance(fauna) });
+        // Maintenance and age settle first. A due field update then reads the litter as
+        // it stands after the previous tick's feeding, before this tick's controllers.
+        if let Some(s) = senses.as_deref_mut() {
+            if tick % crate::UPDATE_TICKS == 0 {
+                let fv = flora.view();
+                s.update(&view, &fv);
+            }
+        }
         let plans = cubarium_voxel::voxel_phase!(FaunaSense, {
             // The controller stage: sample due founders and hold their actions, before
             // anything moves or eats this tick, from the same pre-action state every
             // controller of the tick reads.
-            controllers(fauna, &view, flora);
+            controllers(fauna, &view, flora, senses);
             sense(fauna, &view, flora, seed, tick, threads)
         });
         cubarium_voxel::voxel_phase!(FaunaAct, { act(fauna, &view, flora, &plans, seed, tick) });
@@ -166,7 +215,7 @@ fn terrain(fauna: &mut Fauna, view: &VoxelView<'_>) {
 /// of it came out of the body — the body's share is the structural loss a founder's
 /// `Self` channel reports, and it is internal tissue loss, not a fictitious injury
 /// model.
-fn respire(fauna: &mut Fauna, i: usize, want: f64) -> (f64, f64) {
+fn respire(fauna: &mut Fauna, i: usize, want: f64, kind: Respiration) -> (f64, f64) {
     if !(want > 0.0) {
         return (0.0, 0.0);
     }
@@ -190,9 +239,20 @@ fn respire(fauna: &mut Fauna, i: usize, want: f64) -> (f64, f64) {
         (a.energy * (paid / before)).min(a.energy)
     };
     a.energy -= e;
-    fauna.ledger.respired_out += paid;
+    book_respired(fauna, paid, kind);
     fauna.ledger.heat_out += e;
     (paid, from_body)
+}
+
+/// One respiration on the boundary: the total and its one split, the same addend at the
+/// same point, so the three splits sum to the total to the bit.
+fn book_respired(fauna: &mut Fauna, paid: f64, kind: Respiration) {
+    fauna.ledger.respired_out += paid;
+    match kind {
+        Respiration::Maintenance => fauna.ledger.respired_maintenance_out += paid,
+        Respiration::Motor => fauna.ledger.respired_motor_out += paid,
+        Respiration::Digestion => fauna.ledger.respired_digestion_out += paid,
+    }
 }
 
 fn maintenance(fauna: &mut Fauna) {
@@ -203,7 +263,7 @@ fn maintenance(fauna: &mut Fauna) {
         let a = &mut fauna.animals[i];
         a.age_ticks = a.age_ticks.saturating_add(1);
         let want = sc.maintenance_per_s * a.body * DT;
-        let (_, from_body) = respire(fauna, i, want);
+        let (_, from_body) = respire(fauna, i, want, Respiration::Maintenance);
         if is_founder && from_body > 0.0 {
             fauna.animals[i].founder_state.feedback.structural_loss += from_body;
         }
@@ -219,7 +279,12 @@ fn maintenance(fauna: &mut Fauna) {
 /// the live schedule, the static arena, an ES episode harness — reaches it through
 /// [`Fauna::step`]. A post-tick sampler is not this stage. Every controller of the tick
 /// reads the same pre-action state.
-fn controllers(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &Flora) {
+fn controllers(
+    fauna: &mut Fauna,
+    view: &VoxelView<'_>,
+    flora: &Flora,
+    mut senses: Option<&mut crate::Senses>,
+) {
     let due: Vec<usize> = fauna
         .animals
         .iter()
@@ -236,16 +301,30 @@ fn controllers(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &Flora) {
         return;
     }
     let fv = flora.view();
+    let cone_occupancy = due
+        .iter()
+        .any(|&i| fauna.animals[i].founder == Some(Founder::Browser))
+        .then(|| crate::senses::cone_occupancy(view, &fv, &fauna.view()));
     for i in due {
         let id = fauna.animals[i].id;
         let founder = fauna.animals[i].founder.expect("a due founder");
         let manifest = founder.manifest();
-        let obs = body::observation(fauna, i, view, &fv, &manifest);
+        let obs = body::observation(
+            fauna,
+            i,
+            view,
+            &fv,
+            &manifest,
+            senses.as_deref_mut(),
+            cone_occupancy.as_ref(),
+        );
         // Reject rather than train through: an observation with a non-finite channel
         // holds rest instead of reaching the controller at all.
         let held = if obs.iter().all(|v| v.is_finite()) {
             let response = fauna.controllers.drive(id, &obs);
-            response.map_or(Actions::REST, |r| crate::controller::resolve_actions(r, &manifest))
+            response.map_or(Actions::REST, |r| {
+                crate::controller::resolve_actions(r, &manifest)
+            })
         } else {
             Actions::REST
         };
@@ -540,12 +619,19 @@ fn founder_act(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &mut Fl
         * fauna.animals[i].body
         * (eq_rate / manifest.cruise_m_per_s)
         * DT;
-    let (_, motor_body) = respire(fauna, i, cost);
+    let (motor_paid, motor_body) = respire(fauna, i, cost, Respiration::Motor);
 
     // Paid heading motion on the continuous pose: turn, then a bounded sub-step sweep.
     let motion = {
         let a = &mut fauna.animals[i];
-        body::resolve_motion(view, &mut a.pose, a.site.y, &manifest, sc.wade_depth_m, held)
+        body::resolve_motion(
+            view,
+            &mut a.pose,
+            a.site.y,
+            &manifest,
+            sc.wade_depth_m,
+            held,
+        )
     };
     // The pose is authoritative for a founder: the support site follows the centre
     // column at the standing layer. Movement is constrained so this always stays a
@@ -560,7 +646,9 @@ fn founder_act(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &mut Fl
             };
         }
     }
-    // The interval's motion feedback, attempted and delivered separately.
+    // The interval's motion feedback, attempted and delivered separately, plus the
+    // motor respiration the interval paid — the per-interval counter the search driver's
+    // score reads alongside the ledger's own split.
     {
         let fb = &mut fauna.animals[i].founder_state.feedback;
         fb.attempted_equivalent += motion.attempted_equivalent;
@@ -568,6 +656,7 @@ fn founder_act(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &mut Fl
         fb.delivered_forward += motion.delivered_forward;
         fb.delivered_turn += motion.delivered_turn;
         fb.structural_loss += motor_body;
+        fb.motor_respiration += motor_paid;
     }
 
     // Feeding: one attempt per controller interval, on the due tick, from the
@@ -710,13 +799,7 @@ fn crop(
 /// Returns the organic matter actually **placed** — into body and reserve — which is
 /// what a founder's prior-interval intake feedback records, and not the bite's whole
 /// organic matter.
-fn assimilate(
-    fauna: &mut Fauna,
-    flora: &mut Flora,
-    i: usize,
-    sc: &SpeciesConfig,
-    t: Taken,
-) -> f64 {
+fn assimilate(fauna: &mut Fauna, flora: &mut Flora, i: usize, sc: &SpeciesConfig, t: Taken) -> f64 {
     let a = &mut fauna.animals[i];
     // What the yield would build, and what this bite's mineral can actually pay for.
     let funded = if sc.n_tissue > 0.0 {
@@ -757,7 +840,7 @@ fn assimilate(
     let excess = t.mineral - keep_mineral;
     let site = a.site;
 
-    fauna.ledger.respired_out += respired;
+    book_respired(fauna, respired, Respiration::Digestion);
     fauna.ledger.heat_out += heat;
     if excess > 0.0 {
         fauna.book_deposit(
