@@ -60,6 +60,15 @@ impl Founder {
     pub const ALL: [Founder; 2] = [Founder::Blind, Founder::Browser];
     pub const COUNT: usize = Founder::ALL.len();
 
+    /// Index into a per-founder array, in [`Founder::ALL`] order: stable, like the
+    /// flora's and the fauna's own species index.
+    pub fn index(self) -> usize {
+        match self {
+            Founder::Blind => 0,
+            Founder::Browser => 1,
+        }
+    }
+
     /// The lineage name: what a command line or report calls this founder.
     pub fn name(self) -> &'static str {
         match self {

@@ -25,7 +25,9 @@
 //! P1-A's acceptance is that the world holds still and the body does not.
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
-use cubarium_voxel_fauna::{Command as FaunaCommand, Fauna, FaunaConfig, Founder, Pose};
+use cubarium_voxel_fauna::{
+    Command as FaunaCommand, Actions, Fauna, FaunaConfig, Founder, Pose, Scripted,
+};
 use cubarium_voxel_flora::{
     Command as FloraCommand, Deposit, DepositKind, Flora, FloraConfig, Site, Species as Plant,
     Taken,
@@ -483,5 +485,114 @@ mod tests {
             SimConfig { threads: 1 },
         );
         assert_eq!(sim.mode(), ScheduleMode::Live);
+    }
+
+    /// A founder driven through the production static schedule: the controller stage
+    /// runs inside `sys_fauna`, the held actions move the body, and a held feed crops
+    /// a stand through the same real withdrawals. No special arena path exists.
+    #[test]
+    fn a_controller_driven_founder_moves_and_feeds_through_the_static_schedule() {
+        let mut arena = Arena::build(Founder::Browser, 11);
+        let stand_site = arena.resources[0];
+        let stock_before = arena.resource_stock();
+        let idle_id = arena.animal_id.expect("the arena placed an idle body");
+
+        // A founder body standing in the stand it will crop, off the arena's own idle
+        // body (which has no controller and stays exactly where P1-A left it).
+        let mut sim = arena.into_sim(SimConfig { threads: 1 });
+        let (feeder, cruiser) = sim.with_layers_mut(|world, _, fauna| {
+            let mut introduce = |z: u32| {
+                assert!(fauna.apply(
+                    world,
+                    FaunaCommand::IntroduceFounder {
+                        x: i64::from(stand_site.x),
+                        z,
+                        founder: Founder::Browser,
+                        body: 0.04,
+                        heading_rad: 0.0,
+                    },
+                ));
+                fauna.view().ledger.births - 1
+            };
+            // The feeder stands in the stand it will crop; the cruiser starts beside
+            // it and just drives.
+            let feeder = introduce(stand_site.z);
+            let cruiser = introduce(stand_site.z + 3);
+            (feeder, cruiser)
+        });
+        assert!(sim.fauna_mut().set_controller(
+            feeder,
+            Box::new(Scripted::new(vec![Actions {
+                forward: 0.0,
+                turn: 0.0,
+                feed: 1.0,
+            }])),
+        ));
+        assert!(sim.fauna_mut().set_controller(
+            cruiser,
+            Box::new(Scripted::new(vec![Actions {
+                forward: 1.0,
+                turn: 0.0,
+                feed: 0.0,
+            }])),
+        ));
+
+        // Five controller periods: five feed attempts for the stand's resident, and a
+        // moved body for the cruiser.
+        for _ in 0..25 {
+            sim.step();
+        }
+
+        let a = sim
+            .fauna()
+            .view()
+            .animal(feeder)
+            .expect("the driven founder survived");
+        assert_eq!(
+            a.pose,
+            cubarium_voxel_fauna::Pose::at_site(stand_site, ARENA_VOXEL_M),
+            "a feeding founder stands still"
+        );
+        assert!(
+            a.founder_state.feedback.attempted_equivalent == 0.0,
+            "no motion was requested, so none was attempted"
+        );
+        assert!(
+            sim.fauna().view().ledger.bites >= 4,
+            "the held feed attempted once per interval: {} bites",
+            sim.fauna().view().ledger.bites
+        );
+        assert!(
+            sim.fauna().view().ledger.eaten_organic_in > 0.0,
+            "the bites transferred real foliage"
+        );
+        let c = sim.fauna().view().animal(cruiser).unwrap();
+        assert_ne!(
+            c.pose,
+            cubarium_voxel_fauna::Pose::at_site(Site {
+                x: stand_site.x,
+                y: stand_site.y,
+                z: stand_site.z + 3
+            }, ARENA_VOXEL_M),
+            "the cruiser's held forward action moved it"
+        );
+        // The browser layout's finite stock: every springturf stand's foliage, read
+        // through the sim's flora — the same read `Arena::resource_stock` does.
+        let stock_after: f64 = sim
+            .flora()
+            .view()
+            .stands
+            .iter()
+            .filter(|s| s.species == cubarium_voxel_flora::Species::Springturf)
+            .map(|s| s.foliage)
+            .sum();
+        assert!(
+            stock_after < stock_before,
+            "the finite stock went down through the production withdrawals"
+        );
+
+        // The idle founder body without a controller did not move.
+        let idle = sim.fauna().view().animal(idle_id).unwrap();
+        assert_eq!(idle.state, cubarium_voxel_fauna::State::Resting);
     }
 }

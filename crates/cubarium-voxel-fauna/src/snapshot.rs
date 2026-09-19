@@ -25,9 +25,12 @@ use crate::Fauna;
 /// Schema 3: schema 2 added the per-plant ledger arrays (round 5b/5c merge). Schema 3
 /// added the phase-one body contract to [`crate::Animal`] — a continuous [`crate::Pose`]
 /// and the optional [`crate::Founder`] lineage marker — and the [`crate::Fauna`] birth
-/// switch. Postcard is not self-describing, so schema 2 worlds are **refused**, not
-/// migrated (`always-fresh-never-migrate`): start a fresh world.
-pub const SCHEMA: u32 = 3;
+/// switch. Schema 4 added the P1-B founder state to [`crate::Animal`] — the held
+/// controller actions and the prior-interval feedback — and the founders' own
+/// physiology table to [`crate::FaunaConfig`]. Postcard is not self-describing, so
+/// schema 3 worlds are **refused**, not migrated (`always-fresh-never-migrate`): start a
+/// fresh world.
+pub const SCHEMA: u32 = 4;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -69,7 +72,9 @@ pub fn decode(bytes: &[u8]) -> anyhow::Result<Fauna> {
 /// **above every id present**, because an id is never reused and `Fauna::insert` treats a
 /// collision as unreachable. A phase-one body also has to carry a finite [`crate::Pose`],
 /// because the founder's movement and sensing read it and a `NaN` position is a `NaN` in
-/// the world within a tick.
+/// the world within a tick. And a founder's held actions are bounded actions with finite
+/// feedback — the loader refuses anything that would drive a body outside the manifest's
+/// caps or feed the observation a non-finite channel.
 ///
 /// Postcard bytes are not the only way in: a hand-built or hand-edited snapshot is exactly
 /// what this is for, and a round trip of a live layer cannot fail it.
@@ -92,6 +97,41 @@ fn validate(fauna: &Fauna) -> Result<(), String> {
         }
         if !a.pose.is_finite() {
             return Err(format!("animal #{}'s pose is not finite", a.id));
+        }
+        if a.founder.is_some() {
+            let held = a.founder_state.held;
+            for (field, value) in [("forward", held.forward), ("feed", held.feed)] {
+                if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                    return Err(format!(
+                        "animal #{}'s held {field} is {value}, not a bounded action",
+                        a.id
+                    ));
+                }
+            }
+            if !held.turn.is_finite() || !(-1.0..=1.0).contains(&held.turn) {
+                return Err(format!(
+                    "animal #{}'s held turn is {}, not a bounded action",
+                    a.id, held.turn
+                ));
+            }
+            let fb = a.founder_state.feedback;
+            for (field, value) in [
+                ("intake", fb.intake),
+                ("structural_loss", fb.structural_loss),
+                ("attempted equivalent displacement", fb.attempted_equivalent),
+                ("delivered equivalent displacement", fb.delivered_equivalent),
+                ("delivered forward", fb.delivered_forward),
+            ] {
+                if !value.is_finite() || value < 0.0 {
+                    return Err(format!(
+                        "animal #{}'s {field} feedback is {value}, not finite nonnegative",
+                        a.id
+                    ));
+                }
+            }
+            if !fb.delivered_turn.is_finite() {
+                return Err(format!("animal #{}'s delivered turn feedback is not finite", a.id));
+            }
         }
         if let Some(prev) = last {
             if a.id <= prev {
@@ -138,6 +178,7 @@ mod tests {
             site: Site { x: 1, y: 2, z: 0 },
             pose: crate::Pose::at_site(Site { x: 1, y: 2, z: 0 }, 1.0),
             founder: None,
+            founder_state: crate::FounderState::default(),
             body,
             reserve: 0.5 * body,
             mineral: 0.05 * body,
@@ -145,6 +186,36 @@ mod tests {
             age_ticks: 0,
             state: State::Resting,
         }
+    }
+
+    /// A founder's held actions are bounded actions and its feedback is finite: the
+    /// loader refuses a hand-built layer that would move a body outside the manifest's
+    /// caps or feed the observation a non-finite channel.
+    #[test]
+    fn the_loader_refuses_a_founder_state_it_could_not_have_produced() {
+        let mut held = animal(0, 0.02);
+        held.founder = Some(crate::Founder::Blind);
+        held.founder_state.held.turn = 7.0;
+        let err = format!("{:#}", decode(&encode(&layer(vec![held], 1))).expect_err("held turn 7"));
+        assert!(err.contains("held turn"), "{err}");
+
+        let mut feed = animal(0, 0.02);
+        feed.founder = Some(crate::Founder::Blind);
+        feed.founder_state.held.feed = -0.5;
+        let err = format!("{:#}", decode(&encode(&layer(vec![feed], 1))).expect_err("held feed -0.5"));
+        assert!(err.contains("held feed"), "{err}");
+
+        let mut nan = animal(0, 0.02);
+        nan.founder = Some(crate::Founder::Blind);
+        nan.founder_state.feedback.structural_loss = f64::NAN;
+        let err = format!(
+            "{:#}",
+            decode(&encode(&layer(vec![nan], 1))).expect_err("a NaN channel")
+        );
+        assert!(err.contains("structural_loss"), "{err}");
+
+        // And a heuristic body's default founder state never trips any of it.
+        assert!(decode(&encode(&layer(vec![animal(0, 0.02)], 1))).is_ok());
     }
 
     /// **R9.6: the loader validates the state.** Two well-formed animals round-trip; a

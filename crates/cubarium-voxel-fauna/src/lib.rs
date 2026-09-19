@@ -48,9 +48,21 @@
 //! Every number in [`SpeciesConfig::frondgrazer`] is an untuned **placeholder** listed in
 //! `design/backlog.md` §1. Nothing here is tuned and no result in this round depends on a
 //! value.
+//!
+//! # The phase-one founder path (P1-B)
+//!
+//! A body carrying a [`Founder`] marker is not run by the heuristic at all. It runs the
+//! phase-one body model instead: a [`Controller`] is sampled at the tick's controller
+//! stage ([`step`]'s order), its three bounded actions are held, and the body resolves
+//! paid heading motion, contact/taste receptors and local feeding through real
+//! transfers — [`body`]'s and [`controller`]'s docs carry the rules. The live heuristic
+//! path above is untouched by that: `founder: None` is the frondgrazer, unchanged, and
+//! a founder with no controller installed rests exactly as it did in P1-A.
 
 #![forbid(unsafe_code)]
 
+mod body;
+mod controller;
 mod manifest;
 mod pose;
 mod snapshot;
@@ -62,6 +74,10 @@ use serde::{Deserialize, Serialize};
 
 pub use cubarium_voxel::{DT, TICK_HZ};
 pub use cubarium_voxel_flora::Reach;
+pub use body::{FounderPhysiology, effective_config};
+pub use controller::{
+    Actions, Controller, FounderControllers, Response, Scripted, resolve_actions,
+};
 pub use manifest::{
     ACTION_DEADBAND, BROWSER_RAY_PITCH_OFFSETS_DEG, BROWSER_RAY_YAW_OFFSETS_DEG,
     BROWSER_SECTOR_CENTRES_DEG, BROWSER_VISIBLE_CLASSES, Action, Founder, HIDDEN, Manifest, Module,
@@ -136,15 +152,20 @@ pub struct Animal {
     pub species: Species,
     /// The support face it stands on. Its body is drawn in the void above this.
     pub site: Site,
-    /// The continuous place and heading on that support face. P1-A keeps it still; the
-    /// phase-one founders move it in P1-B and sample it in P1-C. The heuristic browser
-    /// updates it to the new face's centre whenever it steps, so `site` stays authoritative.
+    /// The continuous place and heading on that support layer. The live heuristic
+    /// browser treats `site` as authoritative and re-anchors the pose to each face it
+    /// steps to; a **founder body is the other way round** — its pose is authoritative
+    /// and `site` follows the pose's column at the standing layer ([`step`]'s founder
+    /// path moves the pose and re-derives the site).
     pub pose: Pose,
     /// `Some` for a phase-one founder: the lineage whose manifest its controller will be
-    /// authored against. A founder body runs none of the live heuristic in P1-A — it ages,
-    /// pays maintenance and can die, and **nothing else** until P1-B gives it local actions.
-    /// `None` is the live frondgrazer heuristic path, unchanged.
+    /// authored against. P1-B runs the founder's local actions: held controller actions,
+    /// paid heading motion, contacts and local feeding. `None` is the live frondgrazer
+    /// heuristic path, unchanged.
     pub founder: Option<Founder>,
+    /// The founder's held actions and prior-interval feedback. All-default for a
+    /// heuristic body (`founder: None`), which never reads it.
+    pub founder_state: FounderState,
     /// Organic structure. Below `body_min` it is dead.
     pub body: f64,
     /// Organic matter maintenance is paid from before the body is.
@@ -166,6 +187,43 @@ impl Animal {
     pub fn organic(&self) -> f64 {
         self.body + self.reserve
     }
+}
+
+/// A phase-one founder's held actions and prior-interval feedback. The heuristic bodies
+/// carry it all-default and never read it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct FounderState {
+    /// The actions held from the last due controller sampling, already through the
+    /// shared adapter — bounded and deadbanded. Rest until the first sampling: an
+    /// unsampled founder holds no action.
+    pub held: Actions,
+    /// What the last completed interval actually did, consumed and zeroed once at the
+    /// next sampling. The `Self` channels are built from this; it never carries a
+    /// prediction of success.
+    pub feedback: IntervalFeedback,
+}
+
+/// What one controller interval actually did, from the body's own ledger events and
+/// resolved motion — the prior-interval feedback the observation's `Self` channels are
+/// built from, and zeroed once when it is consumed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct IntervalFeedback {
+    /// Organic matter assimilated into body and reserve over the interval.
+    pub intake: f64,
+    /// Internal tissue lost over the interval: the share of upkeep and motor
+    /// respiration that came out of the body itself once the reserve was empty.
+    pub structural_loss: f64,
+    /// Requested equivalent displacement over the interval, `|v| + r·|yaw rate|`
+    /// summed over the ticks it was held. A wall-constrained attempt is attempted in
+    /// full.
+    pub attempted_equivalent: f64,
+    /// Delivered equivalent displacement over the interval: what the sweep actually
+    /// covered plus the turn the body actually made.
+    pub delivered_equivalent: f64,
+    /// Metres actually covered along the heading over the interval.
+    pub delivered_forward: f64,
+    /// Radians actually turned over the interval, signed.
+    pub delivered_turn: f64,
 }
 
 /// One species' numbers. **Every one of them is an untuned placeholder**; see
@@ -363,12 +421,21 @@ impl SpeciesConfig {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FaunaConfig {
     pub frondgrazer: SpeciesConfig,
+    /// The two phase-one founders' own physiology and cost settings
+    /// ([`FounderPhysiology`], frozen for the first pilots). A body carrying a
+    /// [`Founder`] marker runs its founder's numbers instead of its placeholder
+    /// species'; [`effective_config`] is the one lookup every rule uses.
+    pub founders: [FounderPhysiology; Founder::COUNT],
 }
 
 impl Default for FaunaConfig {
     fn default() -> FaunaConfig {
         FaunaConfig {
             frondgrazer: SpeciesConfig::frondgrazer(),
+            founders: [
+                FounderPhysiology::frozen(Founder::Blind),
+                FounderPhysiology::frozen(Founder::Browser),
+            ],
         }
     }
 }
@@ -386,9 +453,34 @@ impl FaunaConfig {
         }
     }
 
+    /// One founder's physiology, by lineage.
+    pub fn founder(&self, founder: Founder) -> &FounderPhysiology {
+        &self.founders[founder.index()]
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         for s in Species::ALL {
             self.species(s).validate(s.name())?;
+        }
+        for founder in Founder::ALL {
+            let phys = self.founder(founder);
+            phys.core.validate(founder.name())?;
+            if !phys.motor_respiration_per_s.is_finite() || phys.motor_respiration_per_s < 0.0 {
+                return Err(format!(
+                    "{}.motor_respiration_per_s must be finite and nonnegative, not {}",
+                    founder.name(),
+                    phys.motor_respiration_per_s
+                ));
+            }
+            if !phys.organ_structure_fraction.is_finite()
+                || !(0.0..1.0).contains(&phys.organ_structure_fraction)
+            {
+                return Err(format!(
+                    "{}.organ_structure_fraction must be finite and below 1, not {}",
+                    founder.name(),
+                    phys.organ_structure_fraction
+                ));
+            }
         }
         Ok(())
     }
@@ -548,12 +640,15 @@ pub enum Command {
     /// Put a **phase-one founder** body of `body` organic matter on the highest support
     /// face of column `(x, z)`, at that face's centre and the given `heading_rad`. Booked
     /// exactly as [`Command::Introduce`]. A body that is not finite, a heading that is not
-    /// finite, a column with no support, or a body below `body_min` is refused.
+    /// finite, a column with no support, or a body below the founder's own `body_min` is
+    /// refused.
     ///
-    /// The founder marker selects which manifest's controller the body belongs to (P1-B);
-    /// P1-A runs none of it, so the body simply ages and pays maintenance where it is put.
-    /// The species is the shared phase-one placeholder (`Species::Frondgrazer`) for now:
-    /// the litter feeder's own digestive configuration is P1-B's.
+    /// The founder marker selects which manifest's controller the body belongs to and
+    /// which physiology it runs (P1-B): the litter feeder's digestive configuration is its
+    /// own, set deliberately from the real `Taken` composition of litter. The species is
+    /// still the shared phase-one placeholder (`Species::Frondgrazer`); every rule that
+    /// reads a founder's numbers goes through [`effective_config`], which substitutes the
+    /// founder table for the placeholder.
     IntroduceFounder {
         x: i64,
         z: u32,
@@ -582,6 +677,11 @@ pub struct Fauna {
     /// (`design/voxel-senses-phase1-plan.md`, "Frozen arena contract"); a fresh episode
     /// sets it back.
     births_enabled: bool,
+    /// The controllers the founder bodies are driven by, keyed by animal id. Driver-owned
+    /// session state, not world state: skipped by the snapshot and not cloned
+    /// ([`FounderControllers`]).
+    #[serde(skip)]
+    controllers: FounderControllers,
 }
 
 impl Fauna {
@@ -605,13 +705,32 @@ impl Fauna {
             animals: Vec::new(),
             ledger: FaunaLedger::default(),
             births_enabled: true,
+            controllers: FounderControllers::default(),
         })
+    }
+
+    /// Give the founder body `id` a controller: the diagnostic heuristic and the GRU
+    /// policy are interchangeable behind [`Controller`], and this table is what the
+    /// tick's controller stage drives. Accepted only for a body that exists; `true`
+    /// when installed. A fresh episode clears a controller's own memory through
+    /// [`Controller::reset`] — reinstalling is not what resets hidden state.
+    pub fn set_controller(&mut self, animal_id: u64, controller: Box<dyn Controller>) -> bool {
+        if self.view().animal(animal_id).is_none() {
+            return false;
+        }
+        self.controllers.set(animal_id, controller);
+        true
+    }
+
+    /// Take a body's controller back, if it has one: a driver that wants to replace or
+    /// drop one between episodes.
+    pub fn take_controller(&mut self, animal_id: u64) -> Option<Box<dyn Controller>> {
+        self.controllers.take(animal_id)
     }
 
     pub fn config(&self) -> &FaunaConfig {
         &self.config
     }
-
     /// Whether paid births run. Live-world default: `true`.
     pub fn births_enabled(&self) -> bool {
         self.births_enabled
@@ -721,7 +840,13 @@ impl Fauna {
         let Some(site) = cubarium_voxel_flora::highest_support(&view, x, z) else {
             return false;
         };
-        let sc = *self.config.species(species);
+        // A founder body is introduced under its **own** physiology: thresholds,
+        // densities and tissue mineral content come from the founder table, not from
+        // the placeholder species it shares a [`Species`] tag with.
+        let sc = match founder {
+            Some(f) => self.config.founder(f).core,
+            None => *self.config.species(species),
+        };
         if !(body.is_finite() && body >= sc.body_min) {
             return false;
         }
@@ -740,6 +865,7 @@ impl Fauna {
             site,
             pose,
             founder,
+            founder_state: FounderState::default(),
             body,
             reserve,
             mineral: sc.n_tissue * organic,
