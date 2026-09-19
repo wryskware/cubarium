@@ -21,7 +21,7 @@
 //! wall-time cap as applicable, and the worker count is capped at the plan's four
 //! everywhere. The score-counter state is named in every run's output.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 
@@ -368,6 +368,10 @@ pub fn train(
     if let Some(initial) = report.initial_center_score {
         println!("initial centre score {initial:.4}");
     }
+    let evaluation = report
+        .best
+        .as_ref()
+        .map(|best| evaluation_command(&out, founder, &best.file));
     if let Some(best) = &report.best {
         println!(
             "best centre: generation {} score {:.4} → {}",
@@ -385,13 +389,36 @@ pub fn train(
     print_counter_state();
     println!("checkpoint {}", report.checkpoint);
     println!("wall {:.2} s", report.wall_seconds);
-    println!(
-        "evaluate with: cargo run --release -p cubarium-search -- voxel-evaluate --policy \
-         {}/centers/gen0-center.json --founder {} --set training",
-        out.display(),
-        founder.name()
-    );
+    if let Some(evaluation) = evaluation {
+        println!("{evaluation}");
+    }
     Ok(())
+}
+
+fn evaluation_command(out: &Path, founder: Founder, best_file: &str) -> String {
+    format!(
+        "evaluate with: cargo run --release -p cubarium-search -- voxel-evaluate --policy \
+         {} --founder {} --set training",
+        out.join(best_file).display(),
+        founder.name(),
+    )
+}
+
+#[cfg(test)]
+mod train_output_tests {
+    use super::*;
+
+    #[test]
+    fn evaluation_command_names_the_selected_best_generation() {
+        let command = evaluation_command(
+            Path::new("/tmp/voxel-pilot"),
+            Founder::Browser,
+            "centers/gen7-center.json",
+        );
+        assert!(command.contains("/tmp/voxel-pilot/centers/gen7-center.json"));
+        assert!(command.contains("--founder frondgrazer"));
+        assert!(!command.contains("gen0-center.json"));
+    }
 }
 
 /// `voxel-evaluate`: one saved policy, or a disclosed control, over the training or the
