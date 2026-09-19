@@ -304,14 +304,19 @@ impl Controller for BlindForager {
         } else if chem_valid > 0.5 && chem_resp >= 0.02 {
             self.wander_ticks = 0;
             if chem_trend > 0.05 {
-                // A rising signal: hold the heading the body already faces.
-                self.turn_bias * 0.2
+                // A rising signal: hold the heading the body already faces.  The
+                // Stage-A arena deliberately starts aimed at the food; even the old
+                // small steering term bent that direct approach into a circle before
+                // the mouth could reach the patch.
+                0.0
             } else if chem_trend < -0.05 {
                 // A falling signal: change course to a remembered new preference.
                 -self.turn_bias * 0.8
             } else {
-                // A flat signal: gently follow the remembered preference.
-                self.turn_bias * 0.4
+                // The initial chemical sample has no temporal history, hence a flat
+                // trend.  It still means "continue this observable approach", not
+                // "begin a remembered search arc".
+                0.0
             }
         } else {
             // No signal: cover ground with an alternating turn preference.
@@ -504,7 +509,9 @@ mod tests {
         assert!(a.forward < 1.0, "a walled body creeps");
         assert!(a.turn.abs() > 0.5, "it turns away from the contact");
 
-        // A flat, strong, valid cue: hold the heading and keep moving.
+        // A flat, strong, valid cue: hold the heading and keep moving.  This is the
+        // first valid sample at an arena start, so a deterministic diagnostic must not
+        // turn away from the prepared food-facing heading.
         let mut o = vec![0.0; blind_manifest.inputs()];
         o[ch.offset] = 0.6;
         o[ch.offset + 2] = 1.0;
@@ -512,7 +519,7 @@ mod tests {
             panic!("bounded");
         };
         assert_eq!(a.forward, 1.0);
-        assert!(a.turn.abs() < 0.5, "a held-heading response turns little");
+        assert_eq!(a.turn, 0.0, "a held-heading response does not steer");
 
         // Litter in the mouth: feed.
         let mut o = vec![0.0; blind_manifest.inputs()];
@@ -553,6 +560,69 @@ mod tests {
             panic!("bounded");
         };
         assert_eq!(a.feed, 1.0, "foliage at the mouth feeds");
+    }
+
+    /// The blind diagnostic keeps an observable approach straight, changes course
+    /// after a falling cue, and only its own bounded wander memory affects no-signal
+    /// turns.  Resetting that memory restores the fresh-episode response.
+    #[test]
+    fn blind_forager_trend_wander_and_reset_are_bounded() {
+        let manifest = Founder::Blind.manifest();
+        let (contact, chem) = (
+            module_slot(&manifest, "Contact(4)"),
+            module_slot(&manifest, "Chem(litter)"),
+        );
+        let mut blind = BlindForager::new();
+
+        let mut cue = vec![0.0; manifest.inputs()];
+        cue[chem.offset] = 0.6;
+        cue[chem.offset + 2] = 1.0;
+
+        // Flat is the first temporal sample; a rising sample preserves the
+        // food-facing heading.  The old controller steered on both paths.
+        for trend in [0.0, 0.1] {
+            cue[chem.offset + 1] = trend;
+            let Response::Bounded(actions) = blind.drive(&cue) else {
+                panic!("blind diagnostic answers bounded actions");
+            };
+            assert_eq!(actions.forward, 1.0);
+            assert_eq!(actions.turn, 0.0, "trend {trend} should hold heading");
+        }
+
+        // A falling cue changes course, while front contact still limits forward
+        // effort and turns away from the contacted side.
+        cue[chem.offset + 1] = -0.1;
+        let Response::Bounded(actions) = blind.drive(&cue) else {
+            panic!("blind diagnostic answers bounded actions");
+        };
+        assert_eq!(actions.turn, -0.8);
+        cue.fill(0.0);
+        cue[contact.offset] = 1.0;
+        cue[contact.offset + 1] = 0.8;
+        cue[contact.offset + 2] = 0.1;
+        let Response::Bounded(actions) = blind.drive(&cue) else {
+            panic!("blind diagnostic answers bounded actions");
+        };
+        assert_eq!(actions.forward, 0.1);
+        assert_eq!(actions.turn, -1.0);
+
+        // No signal alternates from the controller's own memory and remains in
+        // the declared action bounds.  Reset returns to the initial preference.
+        cue.fill(0.0);
+        let mut no_signal = Vec::new();
+        for _ in 0..3 {
+            let Response::Bounded(actions) = blind.drive(&cue) else {
+                panic!("blind diagnostic answers bounded actions");
+            };
+            assert!((-1.0..=1.0).contains(&actions.turn));
+            no_signal.push(actions.turn);
+        }
+        assert_eq!(no_signal, [0.6, 0.6, -0.6]);
+        blind.reset();
+        let Response::Bounded(actions) = blind.drive(&cue) else {
+            panic!("blind diagnostic answers bounded actions");
+        };
+        assert_eq!(actions.turn, 0.6, "reset restores the initial wander bias");
     }
 
     /// The scripted diagnostic emits its bounded script in order, cycles, and `reset`
