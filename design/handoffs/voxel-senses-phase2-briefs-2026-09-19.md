@@ -171,3 +171,63 @@ source (with file:line), and the branch name. Do not fix the source; report.
 Live-world transfer of the founder bodies (the omniscient frondgrazer still
 runs the live schedule), genome linkage of appendages, Tilt, vibration, and
 the remaining roles wait until the Stage-B evidence says which slice is next.
+
+## Integration note (Fable, 2026-09-19, at dc14f49)
+
+P2-T landed at 2db1535 (17 new independent tests) and found the litter-cue
+stencil cornered instead of centred: a receptor at a face centre read a quarter
+each of its own node and its +x/+z/+x+z neighbours, so one source read 0.25
+behind the body against 0.11 the same distance ahead. Fixed at dc14f49 (one
+line in `senses.rs`, witness test promoted). P2-B landed 320e624..83f6dc7 and
+its blind retrains ran **before** that fix, so the blind rows below are on the
+biased field. Workspace suite at dc14f49: 1,913 passed, 1 skipped.
+
+P2-B's step-1 diagnostic half-refutes review finding 1: with senses ablated the
+phase-one centres score exactly like the cruise control, and the unablated GRU
+beats the ablated one on 6/8 (blind) and 8/8 (browser) layouts. The policies
+read something, most likely taste/contact ("stop and chew"), not navigation.
+Phase one's "7/8 and 8/8 acquired" counted 1e-15 conservation residue; counted
+from real bites it is 2/8 and 6/8 on the freed Stage-A start.
+
+P2-B's decisive finding: **the score is capped at 0.25 + maintenance/reference
+because founders start full.** A founder is introduced at body_max with a full
+reserve, so settled intake can only replace what upkeep and motion burned:
+0.31 at 1,200 ticks, 0.37 at 2,400, and the per-seed maxima hit those numbers
+exactly. Doing nothing scores 0.25, full cruise costs the same rate as upkeep,
+so the optimiser's best move is to stop. Every learning-target cell is unmet
+for that reason before sensing is even in question. Stage B: no controller
+depleted the first patch (0/8 everywhere).
+
+## Package P2-C: start founders hungry, rerun the four pilots
+
+Owner: the P2-B worker, resumed with its context. High effort. This time the
+fauna crate's `IntroduceFounder` and the founder tick's first-sample feedback
+are inside scope; nothing else in fauna is.
+
+1. **Introduce founders below their stores.** Add a starting-stores parameter to
+   `Command::IntroduceFounder` (body fraction of body_max and reserve fraction of
+   the full reserve; both validated, body ≥ body_min). Arenas introduce both
+   founders at body 0.5·body_max and reserve 0. Keep the manifest references
+   unchanged (they are the schema's fixed normalisers, not the start state). The
+   live schedule's existing introductions keep their present full start. The ES
+   protocol hash changes; earlier centres are refused.
+2. **First sample stays zero.** P2-T finding 3: ticks 1..4 of maintenance before
+   the first controller sample flow into the first feedback and read zero today
+   only because the start is full. Make the plan's rule hold from a depleted
+   start (initial intake/loss/motion feedback is zero at the first sample), with
+   a short test.
+3. **Check the cap before training.** Compute and report the new score ceiling
+   per founder and stage (headroom ≈ half the body plus the whole reserve, in
+   reference units) and the rest-until-death time from the depleted start at
+   each horizon. If a resting founder dies inside the horizon, say so; do not
+   tune it away, the survival term is now allowed to matter.
+4. **Rerun the four pilots** (Stage A and B, both founders) on the fixed stencil
+   and depleted start, same bounds as P2-B, and evaluate with the six
+   controllers. Stage B: report depletion and reacquisition counts.
+5. **Return (≤40 lines):** ceilings and death times, the four held-out tables,
+   per-cell learning-target verdict with the ablation and cruise evidence,
+   commits, commands, and one next change with its evidence.
+
+Decision authority: the starting fractions if 0.5/0 turns out lethal at rest
+inside a horizon (state what you chose and why), test fixtures. Not yours: the
+score formula, manifests, action set, patch sizes and horizons from P2-B.
