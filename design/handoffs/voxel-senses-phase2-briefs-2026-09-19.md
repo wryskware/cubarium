@@ -285,3 +285,45 @@ only. No fauna, flora or arena model-rule changes.
 Decision authority: exact seed lists, whether to spend remaining wall time on
 more updates or more pairs, the flattening criterion. Not yours: score,
 manifests, action set, start stores, patch sizes, horizons.
+
+## Integration note 3 (Fable, 2026-09-19, at 387f66c) — phase two closes
+
+P2-D landed (77d92fa, 387f66c); workspace suite 1,917 passed, 1 skipped. Fable
+re-ran the browser-A and blind-A held-out evaluations from the saved centres
+and reproduced the worker's numbers exactly. Four runs of 512 updates, 32
+pairs, 16 training layouts cost 110–411 s each at 16 workers; all curves flat.
+
+Held out (mean / median / acquired of 8; stationary and no-intake 0.25 / 0):
+
+| stage founder | gru | gru-ablated | heuristic | cruise |
+| --- | --- | --- | --- | --- |
+| A blind | .733/.903/6 | .222/.222/0 | .248/.235/4 | .253/.236/1 |
+| A browser | .992/1.002/8 | .243/.218/1 | .489/.519/8 | .276/.263/4 |
+| B blind | .441/.246/4 | .214/.214/0 | .201/.182/2 | .237/.223/1 |
+| B browser | .728/.728/8 | .241/.241/0 | .461/.474/8 | .228/.223/1 |
+
+**Learning target (tests plan §4) MET for Stage A blind, Stage A browser and
+Stage B browser; unmet for Stage B blind** (4/8, median just under
+stationary). Ablated rows are identical across layouts in every cell: without
+senses each policy is one fixed trajectory. Phase one's gap was search, not
+sensing: the same manifests, bodies and score, with an honest start and a
+fed trainer, forage at 55–79% of the ceiling.
+
+Still open, with evidence:
+- **Reacquisition 0/8 everywhere.** The browser empties its first patch 8/8
+  (ticks 1005–1885) and then parks. Depletion lands at 42–100% of the horizon,
+  not the 25% the Stage-B sizing assumed, so the second leg has too little
+  time and the reward needs a conjunction a perturbation rarely produces.
+  Recommended: halve the Stage-B initial patch (blind 0.015 → 0.0075; browser
+  through foliage, keeping the crown), then rerun Stage B.
+- **The blind founder learns a one-handed opening arc.** Blind-A misses are
+  the two smallest start offsets; blind-B hits are all on one side. A
+  stratified offset family (one layout, starts swept −180°..+180° in 15°
+  steps) would measure acquisition versus offset directly, and stratifying the
+  held-out eight into signed offset bins would stop a one-handed policy passing
+  by luck.
+- Survival is still constant at these horizons (rest-to-death 693 s / 1,609 s).
+
+Not started, by decision: live-world transfer of the founder bodies, genome
+linkage of appendages, Tilt, vibration, the remaining roles. Wrysk decides the
+next slice.
