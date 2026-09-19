@@ -20,68 +20,59 @@ use serde::{Deserialize, Serialize};
 
 use super::obs::OBS_LEN;
 
-/// Hidden width.
+/// Hidden width shared by every phase-one policy.
 pub const HIDDEN: usize = 32;
-/// Input width.
 pub const INPUT: usize = OBS_LEN;
-/// Output width.
 pub const OUTPUT: usize = super::action::ACT_LEN;
-/// `3H`: the three gates stacked in order `(r, z, n)`.
 pub const GATES: usize = 3 * HIDDEN;
-/// `3·H·(I + H + 2) + O·(H + 1)`.
-pub const GRU_PARAMETERS: usize =
-    GATES * INPUT + GATES * HIDDEN + 2 * GATES + OUTPUT * HIDDEN + OUTPUT;
-
-/// Row offset of each gate inside the stacked tensors.
+pub const GRU_PARAMETERS: usize = parameter_count(INPUT, OUTPUT);
 pub const R: usize = 0;
 pub const Z: usize = HIDDEN;
 pub const N: usize = 2 * HIDDEN;
 
-/// One fixed weight set. Nothing in this slice creates, mutates or selects weights beyond a
-/// hand-authored fixture and the copy an offspring inherits.
+pub const fn parameter_count(input: usize, output: usize) -> usize {
+    3 * HIDDEN * (input + HIDDEN + 2) + output * (HIDDEN + 1)
+}
+
+/// Shape-parameterized GRU arithmetic. Gate order is `(r,z,n)` and recurrence is reset-after.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Gru32 {
-    /// `[3H × I]`, row-major.
+pub struct Gru<const I: usize, const O: usize> {
     pub w_i: Vec<f64>,
-    /// `[3H × H]`, row-major.
     pub w_h: Vec<f64>,
-    /// `[3H]`.
     pub b_i: Vec<f64>,
-    /// `[3H]`.
     pub b_h: Vec<f64>,
-    /// `[O × H]`, row-major.
     pub w_o: Vec<f64>,
-    /// `[O]`.
     pub b_o: Vec<f64>,
 }
 
-impl Default for Gru32 {
+pub type Gru32 = Gru<INPUT, OUTPUT>;
+pub type Gru23 = Gru<23, 3>;
+pub type Gru37 = Gru<37, 3>;
+
+impl<const I: usize, const O: usize> Default for Gru<I, O> {
     fn default() -> Self {
-        Gru32::zeros()
+        Self::zeros()
     }
 }
-
-impl Gru32 {
-    pub fn zeros() -> Gru32 {
-        Gru32 {
-            w_i: vec![0.0; GATES * INPUT],
-            w_h: vec![0.0; GATES * HIDDEN],
-            b_i: vec![0.0; GATES],
-            b_h: vec![0.0; GATES],
-            w_o: vec![0.0; OUTPUT * HIDDEN],
-            b_o: vec![0.0; OUTPUT],
+impl<const I: usize, const O: usize> Gru<I, O> {
+    pub fn zeros() -> Self {
+        Self {
+            w_i: vec![0.; GATES * I],
+            w_h: vec![0.; GATES * HIDDEN],
+            b_i: vec![0.; GATES],
+            b_h: vec![0.; GATES],
+            w_o: vec![0.; O * HIDDEN],
+            b_o: vec![0.; O],
         }
     }
-
-    /// Every tensor has its documented shape and every value is finite.
     pub fn validate(&self) -> Result<(), String> {
         for (name, v, want) in [
-            ("w_i", &self.w_i, GATES * INPUT),
+            ("w_i", &self.w_i, GATES * I),
             ("w_h", &self.w_h, GATES * HIDDEN),
             ("b_i", &self.b_i, GATES),
             ("b_h", &self.b_h, GATES),
-            ("w_o", &self.w_o, OUTPUT * HIDDEN),
-            ("b_o", &self.b_o, OUTPUT),
+            ("w_o", &self.w_o, O * HIDDEN),
+            ("b_o", &self.b_o, O),
         ] {
             if v.len() != want {
                 return Err(format!(
@@ -95,7 +86,6 @@ impl Gru32 {
         }
         Ok(())
     }
-
     pub fn parameters(&self) -> usize {
         self.w_i.len()
             + self.w_h.len()
@@ -104,49 +94,63 @@ impl Gru32 {
             + self.w_o.len()
             + self.b_o.len()
     }
-
-    /// One controller update: advance `hidden` and return the raw linear head.
-    pub fn forward(&self, x: &[f64; INPUT], hidden: &mut [f64; HIDDEN]) -> [f64; OUTPUT] {
-        // `W_i x + b_i` and `W_h h + b_h`, both for all three gates at once, in row order.
-        let mut gi = [0.0f64; GATES];
-        let mut gh = [0.0f64; GATES];
+    pub fn forward(&self, x: &[f64; I], hidden: &mut [f64; HIDDEN]) -> [f64; O] {
+        let mut gi = [0.; GATES];
+        let mut gh = [0.; GATES];
         for row in 0..GATES {
-            let base = row * INPUT;
-            let mut acc = self.b_i[row];
-            for (c, xv) in x.iter().enumerate() {
-                acc += self.w_i[base + c] * xv;
+            let mut a = self.b_i[row];
+            for c in 0..I {
+                a += self.w_i[row * I + c] * x[c];
             }
-            gi[row] = acc;
-
-            let hbase = row * HIDDEN;
-            let mut hacc = self.b_h[row];
-            for (c, hv) in hidden.iter().enumerate() {
-                hacc += self.w_h[hbase + c] * hv;
+            gi[row] = a;
+            let mut a = self.b_h[row];
+            for c in 0..HIDDEN {
+                a += self.w_h[row * HIDDEN + c] * hidden[c];
             }
-            gh[row] = hacc;
+            gh[row] = a;
         }
-
-        let mut next = [0.0f64; HIDDEN];
+        let mut next = [0.; HIDDEN];
         for j in 0..HIDDEN {
             let r = sigmoid(gi[R + j] + gh[R + j]);
             let z = sigmoid(gi[Z + j] + gh[Z + j]);
-            // **Reset-after**: the reset gate multiplies the *whole* recurrent term
-            // `W_hn h + b_hn`, after it is formed — not the hidden state before it.
             let n = (gi[N + j] + r * gh[N + j]).tanh();
-            next[j] = z * hidden[j] + (1.0 - z) * n;
+            next[j] = z * hidden[j] + (1. - z) * n;
         }
         *hidden = next;
-
-        let mut y = [0.0f64; OUTPUT];
-        for (o, yo) in y.iter_mut().enumerate() {
-            let base = o * HIDDEN;
-            let mut acc = self.b_o[o];
-            for (j, hv) in hidden.iter().enumerate() {
-                acc += self.w_o[base + j] * hv;
+        let mut y = [0.; O];
+        for o in 0..O {
+            let mut a = self.b_o[o];
+            for j in 0..HIDDEN {
+                a += self.w_o[o * HIDDEN + j] * hidden[j];
             }
-            *yo = acc;
+            y[o] = a;
         }
         y
+    }
+}
+
+/// A shape-aware policy whose schema meaning is supplied by its caller.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ShapePolicy<const I: usize, const O: usize> {
+    pub weights: Gru<I, O>,
+    pub schema_digest: u64,
+}
+impl<const I: usize, const O: usize> ShapePolicy<I, O> {
+    pub fn new(weights: Gru<I, O>, schema_digest: u64) -> Self {
+        Self {
+            weights,
+            schema_digest,
+        }
+    }
+    pub fn validate(&self, expected_digest: u64) -> Result<(), String> {
+        self.weights.validate()?;
+        if self.schema_digest != expected_digest {
+            return Err(format!(
+                "policy schema_digest {:#018x} does not match expected {:#018x}",
+                self.schema_digest, expected_digest
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -374,5 +378,21 @@ mod tests {
     #[test]
     fn the_shapes_add_up_to_the_contracts_parameter_count() {
         assert_eq!(Gru32::zeros().parameters(), GRU_PARAMETERS);
+    }
+
+    #[test]
+    fn voxel_shapes_and_small_forward_are_shape_aware() {
+        assert_eq!(parameter_count(23, 3), 5_571);
+        assert_eq!(parameter_count(37, 3), 6_915);
+        let mut w = Gru::<2, 1>::zeros();
+        w.b_i[Z] = 1.0; // z = sigmoid(1)
+        w.b_i[N] = 0.5;
+        w.w_o[0] = 2.0;
+        let mut h = [0.0; HIDDEN];
+        let y = w.forward(&[1.0, 0.0], &mut h);
+        let z = 1.0 / (1.0 + (-1.0f64).exp());
+        let n = (0.5f64).tanh();
+        let expected = 2.0 * (1.0 - z) * n;
+        assert!((y[0] - expected).abs() < 1e-14);
     }
 }

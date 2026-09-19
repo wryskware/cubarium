@@ -16,6 +16,51 @@ pub const DEADBAND: f64 = 0.05;
 /// Level trigger on attack and reproduce: these are standing requests, not per-tick attempts.
 pub const LEVEL: f64 = 0.5;
 
+/// The distinct three-channel voxel contract: forward, signed turn, local feed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct VoxelAction3(pub [f64; 3]);
+
+/// Decodes a voxel GRU head. This is deliberately not [`ActionAdapter`].
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct VoxelActionAdapter;
+
+impl VoxelActionAdapter {
+    pub const DEADBAND: f64 = 0.05;
+    pub const FORWARD: usize = 0;
+    pub const TURN: usize = 1;
+    pub const FEED: usize = 2;
+
+    pub fn squash(self, logits: &[f64; 3]) -> VoxelAction3 {
+        let forward = band01(voxel_sigmoid(logits[Self::FORWARD]));
+        let turn = band_signed(logits[Self::TURN].tanh());
+        let feed = band01(voxel_sigmoid(logits[Self::FEED]));
+        VoxelAction3([forward, turn, feed])
+    }
+}
+
+fn band01(x: f64) -> f64 {
+    if x.is_finite() && x >= VoxelActionAdapter::DEADBAND {
+        x
+    } else {
+        0.0
+    }
+}
+fn band_signed(x: f64) -> f64 {
+    if x.is_finite() && x.abs() >= VoxelActionAdapter::DEADBAND {
+        x
+    } else {
+        0.0
+    }
+}
+fn voxel_sigmoid(x: f64) -> f64 {
+    if !x.is_finite() {
+        return if x.is_sign_positive() { 1.0 } else { 0.0 };
+    }
+    1.0 / (1.0 + (-x).exp())
+}
+
 /// Which action adapter decodes a raw head into the action in force.
 ///
 /// The two differ in **exactly one constant**: the deadband applied to [`TURN`]. Everything
@@ -366,11 +411,19 @@ fn tanh(x: f64) -> f64 {
 }
 
 fn band(x: f64, width: f64) -> f64 {
-    if x.abs() < width { 0.0 } else { x }
+    if x.abs() < width {
+        0.0
+    } else {
+        x
+    }
 }
 
 fn non_negative(x: f64) -> f64 {
-    if x.is_finite() && x > 0.0 { x } else { 0.0 }
+    if x.is_finite() && x > 0.0 {
+        x
+    } else {
+        0.0
+    }
 }
 
 #[cfg(test)]

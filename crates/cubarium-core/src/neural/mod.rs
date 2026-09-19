@@ -18,9 +18,13 @@ pub mod gru;
 pub mod obs;
 pub mod state;
 
-pub use action::{Action7, ActionAdapter, Capability, MOUTH_CHANNELS};
-pub use gru::{GRU_PARAMETERS, Gru32, HIDDEN, Policy};
-pub use obs::{OBS_LEN, Observation70, SECTORS, SelfState, SensedBody, SensedCell};
+pub use action::{
+    Action7, ActionAdapter, Capability, VoxelAction3, VoxelActionAdapter, MOUTH_CHANNELS,
+};
+pub use gru::{
+    parameter_count, Gru, Gru23, Gru32, Gru37, Policy, ShapePolicy, GRU_PARAMETERS, HIDDEN,
+};
+pub use obs::{Observation70, SelfState, SensedBody, SensedCell, OBS_LEN, SECTORS};
 pub use state::{AnimalState, Feedback, NeuralState};
 
 /// The canonical text the schema digest is taken over (`contract §5`).

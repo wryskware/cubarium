@@ -18,8 +18,10 @@
 //! readable next to `crate::neural::gru`. Nothing here reorders the GRU's loops:
 //! the world still evaluates gates in `(r, z, n)` order for each animal in slot order.
 
-use cubarium_core::neural::gru::{GATES, GRU_PARAMETERS, HIDDEN, INPUT, OUTPUT, Z};
-use cubarium_core::neural::{ActionAdapter, Gru32, Policy};
+use cubarium_core::neural::gru::{
+    parameter_count, Gru, GATES, GRU_PARAMETERS, HIDDEN, INPUT, OUTPUT, Z,
+};
+use cubarium_core::neural::{ActionAdapter, Gru32, Policy, ShapePolicy};
 
 use super::rng::{gaussian, stream};
 
@@ -44,6 +46,20 @@ pub const INIT_GAIN: f64 = 0.5;
 /// from the same retention structure and differ only in their matrix weights.
 pub const RETENTION_TAUS: [f64; 4] = [10.0, 30.0, 100.0, 300.0];
 
+/// P1-A replaces these frozen layout strings with its manifest serialization; this is the one
+/// integration hook, kept in search rather than core so the neural crate stays voxel-agnostic.
+pub const BLIND_VOXEL_SCHEMA_TEXT: &str = "voxel-blind|inputs:23(Self[8],Contact[5],Wet[2],Taste[3],Chem[3],Light[2])|actions:forward[0,1],turn[1],feed[2]|gru32-reset-after|cadence:0.25s";
+pub const BROWSER_VOXEL_SCHEMA_TEXT: &str = "voxel-browser|inputs:37(Self[8],Contact[5],Wet[2],Taste[3],Cone[19])|actions:forward[0,1],turn[1],feed[2]|gru32-reset-after|cadence:0.25s";
+
+pub fn voxel_schema_digest(manifest_text: &str) -> u64 {
+    let mut h = 0xcbf29ce484222325u64;
+    for b in manifest_text.as_bytes() {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
 /// Where each tensor starts inside the flat vector.
 pub const OFF_W_I: usize = 0;
 pub const OFF_W_H: usize = OFF_W_I + GATES * INPUT;
@@ -51,6 +67,34 @@ pub const OFF_B_I: usize = OFF_W_H + GATES * HIDDEN;
 pub const OFF_B_H: usize = OFF_B_I + GATES;
 pub const OFF_W_O: usize = OFF_B_H + GATES;
 pub const OFF_B_O: usize = OFF_W_O + OUTPUT * HIDDEN;
+
+/// Shape-parameterized offsets, with the legacy constants above remaining byte-for-byte flat.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ShapeOffsets {
+    pub w_i: usize,
+    pub w_h: usize,
+    pub b_i: usize,
+    pub b_h: usize,
+    pub w_o: usize,
+    pub b_o: usize,
+    pub params: usize,
+}
+pub const fn shape_offsets(input: usize, output: usize) -> ShapeOffsets {
+    let w_h = GATES * input;
+    let b_i = w_h + GATES * HIDDEN;
+    let b_h = b_i + GATES;
+    let w_o = b_h + GATES;
+    let b_o = w_o + output * HIDDEN;
+    ShapeOffsets {
+        w_i: 0,
+        w_h,
+        b_i,
+        b_h,
+        w_o,
+        b_o,
+        params: b_o + output,
+    }
+}
 
 /// `theta` → weights. Exact: no scaling, no clipping, no reordering.
 pub fn unflatten(theta: &[f64]) -> Result<Gru32, String> {
@@ -80,6 +124,67 @@ pub fn flatten(w: &Gru32) -> Vec<f64> {
     v.extend_from_slice(&w.w_o);
     v.extend_from_slice(&w.b_o);
     v
+}
+
+pub fn unflatten_shape<const I: usize, const O: usize>(theta: &[f64]) -> Result<Gru<I, O>, String> {
+    let o = shape_offsets(I, O);
+    if theta.len() != o.params {
+        return Err(format!(
+            "parameter vector has {} values, expected {}",
+            theta.len(),
+            o.params
+        ));
+    }
+    Ok(Gru {
+        w_i: theta[o.w_i..o.w_h].to_vec(),
+        w_h: theta[o.w_h..o.b_i].to_vec(),
+        b_i: theta[o.b_i..o.b_h].to_vec(),
+        b_h: theta[o.b_h..o.w_o].to_vec(),
+        w_o: theta[o.w_o..o.b_o].to_vec(),
+        b_o: theta[o.b_o..].to_vec(),
+    })
+}
+
+pub fn flatten_shape<const I: usize, const O: usize>(w: &Gru<I, O>) -> Vec<f64> {
+    let mut v = Vec::with_capacity(parameter_count(I, O));
+    v.extend_from_slice(&w.w_i);
+    v.extend_from_slice(&w.w_h);
+    v.extend_from_slice(&w.b_i);
+    v.extend_from_slice(&w.b_h);
+    v.extend_from_slice(&w.w_o);
+    v.extend_from_slice(&w.b_o);
+    v
+}
+
+pub fn initial_center_shape<const I: usize, const O: usize>(seed: u64) -> Vec<f64> {
+    let o = shape_offsets(I, O);
+    let mut theta = vec![0.; o.params];
+    let si = INIT_GAIN / (I as f64).sqrt();
+    let sh = INIT_GAIN / (HIDDEN as f64).sqrt();
+    for (i, x) in theta[o.w_i..o.w_h].iter_mut().enumerate() {
+        *x = si * gaussian(seed, stream::ES_INIT, 0, i as u64);
+    }
+    for (i, x) in theta[o.w_h..o.b_i].iter_mut().enumerate() {
+        *x = sh * gaussian(seed, stream::ES_INIT, 1, i as u64);
+    }
+    for (i, x) in theta[o.w_o..o.b_o].iter_mut().enumerate() {
+        *x = sh * gaussian(seed, stream::ES_INIT, 2, i as u64);
+    }
+    let per = HIDDEN / RETENTION_TAUS.len();
+    for unit in 0..HIDDEN {
+        theta[o.b_h + Z + unit] =
+            retention_bias(RETENTION_TAUS[(unit / per).min(RETENTION_TAUS.len() - 1)]);
+    }
+    theta
+}
+
+pub fn shape_policy<const I: usize, const O: usize>(
+    theta: &[f64],
+    digest: u64,
+) -> Result<ShapePolicy<I, O>, String> {
+    let policy = ShapePolicy::new(unflatten_shape(theta)?, digest);
+    policy.validate(digest)?;
+    Ok(policy)
 }
 
 /// A policy from a parameter vector, stamped with this build's schema digest.
@@ -236,5 +341,28 @@ mod tests {
     fn the_centre_is_a_policy_this_build_accepts() {
         let p = policy(&initial_center(3)).expect("a valid policy");
         assert_eq!(p.schema_digest, cubarium_core::neural::schema_digest());
+    }
+
+    #[test]
+    fn voxel_shapes_have_contract_counts_and_exact_round_trip() {
+        assert_eq!(shape_offsets(23, 3).params, 5_571);
+        assert_eq!(shape_offsets(37, 3).params, 6_915);
+        for theta in [
+            initial_center_shape::<23, 3>(9),
+            initial_center_shape::<37, 3>(9),
+        ] {
+            if theta.len() == 5_571 {
+                assert_eq!(
+                    theta,
+                    flatten_shape(&unflatten_shape::<23, 3>(&theta).unwrap())
+                );
+            } else {
+                assert_eq!(
+                    theta,
+                    flatten_shape(&unflatten_shape::<37, 3>(&theta).unwrap())
+                );
+            }
+        }
+        assert!(unflatten_shape::<23, 3>(&[0.; 5_570]).is_err());
     }
 }
