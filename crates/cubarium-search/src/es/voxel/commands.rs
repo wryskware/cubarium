@@ -600,15 +600,20 @@ pub fn evaluate(
         );
     }
 
+    // The start geometry beside each row: fixture-side, recomputed after the episode,
+    // so a reader can see what separates the layouts a policy fed on from the rest
+    // (P2-D step 3). Nothing here was ever in an observation.
     println!(
-        "{:<8} {:>7} {:>6} {:>10} {:>10} {:>8} {:>9}",
-        "seed", "ticks", "alive", "intake", "motor", "survive", "score"
+        "{:<8} {:>7} {:>6} {:>10} {:>10} {:>8} {:>9} {:>6} {:>8} {:>5}",
+        "seed", "ticks", "alive", "intake", "motor", "survive", "score", "dist", "turn", "ate"
     );
     let mut rows = Vec::new();
+    let mut geometry = Vec::new();
     for (li, seed) in seeds.iter().enumerate() {
         let e = slots[li].as_ref().expect("checked complete");
+        let g = prepared_layouts[li].start_geometry();
         println!(
-            "{:<8} {:>7} {:>6} {:>10.4} {:>10.4} {:>8.3} {:>9.4}",
+            "{:<8} {:>7} {:>6} {:>10.4} {:>10.4} {:>8.3} {:>9.4} {:>6} {:>8} {:>5}",
             seed,
             e.ticks,
             e.alive,
@@ -616,8 +621,15 @@ pub fn evaluate(
             e.score.motor_loss_normalized,
             e.score.survival_term,
             e.score.score,
+            g.map_or("-".into(), |g| format!("{:.2}", g.distance_m)),
+            g.map_or("-".into(), |g| format!(
+                "{:+.0}",
+                g.turn_to_target_rad.to_degrees()
+            )),
+            if e.eaten_organic > 0.0 { "yes" } else { "no" },
         );
         rows.push(e.clone());
+        geometry.push(g);
     }
     let mean_score = rows.iter().map(|e| e.score.score).sum::<f64>() / rows.len() as f64;
     let mean_intake =
@@ -688,6 +700,7 @@ pub fn evaluate(
             "workers": workers,
             "counters": ScoreCounters::Landed,
             "rows": rows,
+            "start_geometry": geometry,
             "mean_score": mean_score,
             "mean_intake": mean_intake,
             "alive": alive,

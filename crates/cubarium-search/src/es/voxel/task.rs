@@ -18,7 +18,7 @@
 //! ([`Prepared::rebuilt`]) so the bench can measure the two setup paths against each other.
 
 use cubarium_voxel_fauna::{Founder, Senses};
-use cubarium_voxel_sim::{Arena, Site};
+use cubarium_voxel_sim::{ARENA_VOXEL_M, ARENA_WIDTH, Arena, Site};
 
 /// The phase-one pilot's episode horizon: 1,200 ticks is 60 simulated seconds at 20 Hz
 /// (`design/voxel-senses-phase1-tests.md` §2). "Ample for multiple body lengths without
@@ -163,6 +163,47 @@ pub const DEFAULT_TRAIN_WALL_SECONDS: u64 = 900;
 pub const DEFAULT_EPISODE_LIMIT: u64 = CENTER_EVALUATIONS as u64
     + MAX_UPDATES as u64 * (2 * DEFAULT_PAIRS as u64 + 1) * TRAINING_LAYOUT_SEEDS.len() as u64;
 
+/// Where the founder starts relative to the patch the arena placed it in signal of.
+///
+/// **Fixture-side only.** This is the geometry `Arena::build` used to choose the start
+/// and the evaluator recomputes afterwards to read a result; it is not an observation,
+/// not a reward term, and no controller can reach it. P2-D added it to ask what
+/// separates the layouts a policy feeds on from the ones it wanders.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct StartGeometry {
+    /// The patch in question: Stage B's initial patch, or — on Stage A, where the
+    /// placement aimed at whichever resource was nearest — that nearest resource.
+    pub target: Site,
+    /// Metres from the start pose to that patch's face centre, across the wrapped strip.
+    pub distance_m: f64,
+    /// The signed turn the body would have to make to face it at the first tick:
+    /// `bearing − heading`, wrapped to `(−pi, pi]`. Positive is a positive yaw, the
+    /// sign of the turn action that would close it.
+    pub turn_to_target_rad: f64,
+}
+
+impl StartGeometry {
+    /// `+1` when the patch lies to the positive-yaw side of the start heading, `-1`
+    /// otherwise: the "patch side" of the bimodality reading.
+    pub fn side(&self) -> i8 {
+        if self.turn_to_target_rad >= 0.0 {
+            1
+        } else {
+            -1
+        }
+    }
+}
+
+/// The shortest signed x displacement across the wrapped strip, in metres.
+fn wrapped_dx_m(from_x: f64, to_x: f64) -> f64 {
+    let width = f64::from(ARENA_WIDTH) * ARENA_VOXEL_M;
+    let raw = to_x - from_x;
+    [raw, raw - width, raw + width]
+        .into_iter()
+        .min_by(|a, b| a.abs().partial_cmp(&b.abs()).expect("finite"))
+        .expect("three wrapped displacements")
+}
+
 /// One immutable prepared arena: the terrain, the pond, the finite resources and the
 /// placed founder, exactly as [`Arena::build`] left them.
 pub struct Prepared {
@@ -208,6 +249,33 @@ impl Prepared {
     /// Stage B's `(initial, successor)` patch sites, for the evaluator's accounting.
     pub fn patches(&self) -> Option<(Site, Site)> {
         self.patches
+    }
+
+    /// The start geometry of this layout ([`StartGeometry`]), or `None` when the arena
+    /// placed no body. Fixture-side; the driver never calls it.
+    pub fn start_geometry(&self) -> Option<StartGeometry> {
+        let pose = self.arena.animal_pose()?;
+        let target = match self.patches {
+            Some((initial, _)) => initial,
+            None => *self.arena.resources.iter().min_by(|a, b| {
+                let d = |s: &Site| {
+                    let dx = wrapped_dx_m(pose.x, (f64::from(s.x) + 0.5) * ARENA_VOXEL_M);
+                    let dz = (f64::from(s.z) + 0.5) * ARENA_VOXEL_M - pose.z;
+                    dx * dx + dz * dz
+                };
+                d(a).partial_cmp(&d(b)).expect("finite")
+            })?,
+        };
+        let dx = wrapped_dx_m(pose.x, (f64::from(target.x) + 0.5) * ARENA_VOXEL_M);
+        let dz = (f64::from(target.z) + 0.5) * ARENA_VOXEL_M - pose.z;
+        // The arena's own heading convention: atan2(dx, dz).
+        let bearing = dx.atan2(dz);
+        let delta = bearing - pose.heading_rad;
+        Some(StartGeometry {
+            target,
+            distance_m: dx.hypot(dz),
+            turn_to_target_rad: delta.sin().atan2(delta.cos()),
+        })
     }
 
     /// A fresh **private mutable copy** of the arena for one episode: every mutable datum
@@ -372,6 +440,42 @@ mod tests {
                 format!("{:?}", rebuilt.world),
                 "the cloned world equals the rebuilt one"
             );
+        }
+    }
+
+    /// The start geometry is the geometry the arena actually used: the target is within
+    /// the placement's 0.5-1 m band, and the turn that would close the heading is inside
+    /// the band each founder's start convention allows — a half-turn either way for the
+    /// blind founder, at most 90 degrees for the browser, whose stand has to be
+    /// somewhere its three sectors cover.
+    #[test]
+    fn the_start_geometry_is_the_placement_the_arena_made() {
+        for seed in EVALUATION_LAYOUT_SEEDS {
+            for founder in Founder::ALL {
+                for stage in [Stage::A, Stage::B] {
+                    let p = Prepared::build_stage(founder, seed, stage);
+                    let g = p.start_geometry().expect("a placed body has a geometry");
+                    assert!(
+                        (0.5..=1.02).contains(&g.distance_m),
+                        "{founder:?} seed {seed} stage {}: start {} m from the patch",
+                        stage.as_str(),
+                        g.distance_m
+                    );
+                    assert!(g.turn_to_target_rad.abs() <= std::f64::consts::PI + 1e-12);
+                    if founder == Founder::Browser {
+                        assert!(
+                            g.turn_to_target_rad.abs() <= std::f64::consts::FRAC_PI_2 + 1e-9,
+                            "seed {seed}: the browser's stand is outside its sector fan \
+                             by {} degrees",
+                            g.turn_to_target_rad.to_degrees()
+                        );
+                    }
+                    assert!(g.side() == 1 || g.side() == -1);
+                    if stage == Stage::B {
+                        assert_eq!(g.target, p.patches().expect("patches").0);
+                    }
+                }
+            }
         }
     }
 
