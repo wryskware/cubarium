@@ -46,20 +46,6 @@ pub const INIT_GAIN: f64 = 0.5;
 /// from the same retention structure and differ only in their matrix weights.
 pub const RETENTION_TAUS: [f64; 4] = [10.0, 30.0, 100.0, 300.0];
 
-/// P1-A replaces these frozen layout strings with its manifest serialization; this is the one
-/// integration hook, kept in search rather than core so the neural crate stays voxel-agnostic.
-pub const BLIND_VOXEL_SCHEMA_TEXT: &str = "voxel-blind|inputs:23(Self[8],Contact[5],Wet[2],Taste[3],Chem[3],Light[2])|actions:forward[0,1],turn[1],feed[2]|gru32-reset-after|cadence:0.25s";
-pub const BROWSER_VOXEL_SCHEMA_TEXT: &str = "voxel-browser|inputs:37(Self[8],Contact[5],Wet[2],Taste[3],Cone[19])|actions:forward[0,1],turn[1],feed[2]|gru32-reset-after|cadence:0.25s";
-
-pub fn voxel_schema_digest(manifest_text: &str) -> u64 {
-    let mut h = 0xcbf29ce484222325u64;
-    for b in manifest_text.as_bytes() {
-        h ^= u64::from(*b);
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    h
-}
-
 /// Where each tensor starts inside the flat vector.
 pub const OFF_W_I: usize = 0;
 pub const OFF_W_H: usize = OFF_W_I + GATES * INPUT;
@@ -178,6 +164,14 @@ pub fn initial_center_shape<const I: usize, const O: usize>(seed: u64) -> Vec<f6
     theta
 }
 
+/// A voxel-shaped policy from a parameter vector, validated against a **caller-provided**
+/// schema digest.
+///
+/// This is the single integration boundary for the later P1-D episode driver: the digest is
+/// not invented here. The driver passes `cubarium_voxel_fauna::manifest::Manifest::digest()`
+/// — FNV-1a 64 over that manifest's `canonical_text()` — and refuses a mismatch by name
+/// ([`ShapePolicy::validate`]). The voxel dependency lands with the episode driver, which is
+/// why the digest is a plain `u64` today; no placeholder text lives in this crate.
 pub fn shape_policy<const I: usize, const O: usize>(
     theta: &[f64],
     digest: u64,
@@ -347,22 +341,60 @@ mod tests {
     fn voxel_shapes_have_contract_counts_and_exact_round_trip() {
         assert_eq!(shape_offsets(23, 3).params, 5_571);
         assert_eq!(shape_offsets(37, 3).params, 6_915);
-        for theta in [
-            initial_center_shape::<23, 3>(9),
-            initial_center_shape::<37, 3>(9),
-        ] {
-            if theta.len() == 5_571 {
-                assert_eq!(
-                    theta,
-                    flatten_shape(&unflatten_shape::<23, 3>(&theta).unwrap())
-                );
-            } else {
-                assert_eq!(
-                    theta,
-                    flatten_shape(&unflatten_shape::<37, 3>(&theta).unwrap())
-                );
-            }
-        }
+
+        // Seeded centre → weights → theta, value for value, for each voxel shape.
+        let blind = initial_center_shape::<23, 3>(9);
+        assert_eq!(
+            blind,
+            flatten_shape(&unflatten_shape::<23, 3>(&blind).expect("shape"))
+        );
+        let browser = initial_center_shape::<37, 3>(9);
+        assert_eq!(
+            browser,
+            flatten_shape(&unflatten_shape::<37, 3>(&browser).expect("shape"))
+        );
+
+        // And back the other way, from weight sets whose every tensor is distinguishable, so
+        // a permuted or shifted segment cannot round-trip by luck.
+        both_directions(distinguishable(Gru::<23, 3>::zeros()));
+        both_directions(distinguishable(Gru::<37, 3>::zeros()));
+
         assert!(unflatten_shape::<23, 3>(&[0.; 5_570]).is_err());
+        assert!(unflatten_shape::<37, 3>(&[0.; 6_916]).is_err());
+    }
+
+    /// `flatten(unflatten(flatten(w))) == flatten(w)` and `unflatten(flatten(w)) == w`.
+    fn both_directions<const I: usize, const O: usize>(w: Gru<I, O>) {
+        let flat = flatten_shape(&w);
+        assert_eq!(flat.len(), parameter_count(I, O));
+        let back = unflatten_shape::<I, O>(&flat).expect("shape");
+        assert_eq!(
+            back, w,
+            "unflatten(flatten(w)) must be w, tensor for tensor"
+        );
+        assert_eq!(flatten_shape(&back), flat, "the second flatten is stable");
+    }
+
+    /// A weight set whose every tensor is distinguishable, so a round trip must be exact.
+    fn distinguishable<const I: usize, const O: usize>(mut w: Gru<I, O>) -> Gru<I, O> {
+        for (i, x) in w.w_i.iter_mut().enumerate() {
+            *x = 1.0 + i as f64;
+        }
+        for (i, x) in w.w_h.iter_mut().enumerate() {
+            *x = -1.0 - i as f64;
+        }
+        for (i, x) in w.b_i.iter_mut().enumerate() {
+            *x = 100.0 + i as f64;
+        }
+        for (i, x) in w.b_h.iter_mut().enumerate() {
+            *x = -100.0 - i as f64;
+        }
+        for (i, x) in w.w_o.iter_mut().enumerate() {
+            *x = 1000.0 + i as f64;
+        }
+        for (i, x) in w.b_o.iter_mut().enumerate() {
+            *x = -1000.0 - i as f64;
+        }
+        w
     }
 }

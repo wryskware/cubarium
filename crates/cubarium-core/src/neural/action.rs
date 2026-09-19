@@ -32,11 +32,16 @@ impl VoxelActionAdapter {
     pub const TURN: usize = 1;
     pub const FEED: usize = 2;
 
-    pub fn squash(self, logits: &[f64; 3]) -> VoxelAction3 {
+    /// Squash a voxel head. Non-finite logits are **refused**, not coerced: a NaN head is an
+    /// invalid controller outcome the caller records, never apparently valid effort.
+    pub fn squash(self, logits: &[f64; 3]) -> Result<VoxelAction3, String> {
+        if let Some(i) = logits.iter().position(|x| !x.is_finite()) {
+            return Err(format!("voxel head channel {i} is not finite"));
+        }
         let forward = band01(voxel_sigmoid(logits[Self::FORWARD]));
         let turn = band_signed(logits[Self::TURN].tanh());
         let feed = band01(voxel_sigmoid(logits[Self::FEED]));
-        VoxelAction3([forward, turn, feed])
+        Ok(VoxelAction3([forward, turn, feed]))
     }
 }
 
@@ -55,9 +60,7 @@ fn band_signed(x: f64) -> f64 {
     }
 }
 fn voxel_sigmoid(x: f64) -> f64 {
-    if !x.is_finite() {
-        return if x.is_sign_positive() { 1.0 } else { 0.0 };
-    }
+    debug_assert!(x.is_finite(), "callers reject non-finite logits first");
     1.0 / (1.0 + (-x).exp())
 }
 
@@ -461,6 +464,28 @@ mod tests {
 
     fn held(a: [f64; ACT_LEN]) -> Action7 {
         Action7(a)
+    }
+
+    /// A NaN head is refused, never decoded into apparent effort; a finite head still works.
+    #[test]
+    fn the_voxel_squash_refuses_non_finite_heads() {
+        for bad in [
+            [f64::NAN, 0.0, 0.0],
+            [0.0, f64::NAN, 0.0],
+            [0.0, 0.0, f64::NAN],
+            [f64::INFINITY, 0.0, 0.0],
+        ] {
+            let err = VoxelActionAdapter
+                .squash(&bad)
+                .expect_err("non-finite logits are an invalid controller");
+            assert!(err.contains("not finite"), "{err}");
+        }
+        let a = VoxelActionAdapter
+            .squash(&[0.4, 0.4, 0.4])
+            .expect("finite head");
+        assert!(a.0[VoxelActionAdapter::FORWARD] > 0.0);
+        assert_eq!(a.0[VoxelActionAdapter::TURN], 0.4f64.tanh());
+        assert!(a.0[VoxelActionAdapter::FEED] > 0.0);
     }
 
     #[test]

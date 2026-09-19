@@ -35,6 +35,14 @@ pub const fn parameter_count(input: usize, output: usize) -> usize {
 }
 
 /// Shape-parameterized GRU arithmetic. Gate order is `(r,z,n)` and recurrence is reset-after.
+///
+/// The legacy type was a concrete `struct Gru32`; today it is this generic type aliased. Its
+/// Serde **type name is deliberately not pinned to `"Gru32"`**: nothing persisted depends on
+/// it — snapshot payloads are `postcard`, which is not self-describing and never encodes a
+/// type name; the JSON policy artifacts (`es::export::PolicyFile`, `es::trainer::Checkpoint`)
+/// store the flat `theta` vector, never a `Gru32`; and no externally-tagged enum in the
+/// workspace embeds one. A blanket `#[serde(rename = "Gru32")]` would also mislabel every
+/// other instantiation (`Gru23`, `Gru37`), so the generic name stands.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Gru<const I: usize, const O: usize> {
     pub w_i: Vec<f64>,
@@ -381,18 +389,100 @@ mod tests {
     }
 
     #[test]
-    fn voxel_shapes_and_small_forward_are_shape_aware() {
+    fn voxel_shapes_have_the_contract_parameter_counts() {
         assert_eq!(parameter_count(23, 3), 5_571);
         assert_eq!(parameter_count(37, 3), 6_915);
-        let mut w = Gru::<2, 1>::zeros();
-        w.b_i[Z] = 1.0; // z = sigmoid(1)
-        w.b_i[N] = 0.5;
-        w.w_o[0] = 2.0;
-        let mut h = [0.0; HIDDEN];
-        let y = w.forward(&[1.0, 0.0], &mut h);
-        let z = 1.0 / (1.0 + (-1.0f64).exp());
-        let n = (0.5f64).tanh();
-        let expected = 2.0 * (1.0 - z) * n;
-        assert!((y[0] - expected).abs() < 1e-14);
+        assert_eq!(Gru23::zeros().parameters(), 5_571);
+        assert_eq!(Gru37::zeros().parameters(), 6_915);
+    }
+
+    /// The same hand-computed reference logic as
+    /// [`one_step_matches_a_hand_computed_reset_after_reference`], run on the **generic**
+    /// `Gru` at a small shape (I = 2, O = 2) with nonzero input weights, nonzero recurrent
+    /// weights and a cross-unit hidden read in every gate — so an indexing bug in the
+    /// shape-parameterized row strides, gate offsets or reset-after term changes the answer
+    /// instead of cancelling against a zero weight.
+    #[test]
+    fn generic_forward_matches_a_hand_computed_cross_unit_reference() {
+        let mut w = Gru::<2, 2>::zeros();
+        // W_i rows (gate, unit) -> input column; the row stride is the generic I = 2.
+        let set_i = |w: &mut Gru<2, 2>, gate: usize, unit: usize, col: usize, v: f64| {
+            w.w_i[(gate + unit) * 2 + col] = v;
+        };
+        let set_h = |w: &mut Gru<2, 2>, gate: usize, unit: usize, col: usize, v: f64| {
+            w.w_h[(gate + unit) * HIDDEN + col] = v;
+        };
+
+        set_i(&mut w, R, 0, 0, 1.0);
+        set_i(&mut w, Z, 0, 1, -2.0);
+        set_i(&mut w, N, 0, 0, 3.0);
+        set_i(&mut w, N, 0, 1, 0.5);
+        set_h(&mut w, R, 0, 0, 0.5);
+        set_h(&mut w, Z, 0, 1, 0.25); // unit 0's update gate reads unit 1's hidden state
+        set_h(&mut w, N, 0, 0, -1.5);
+        w.b_i[R] = 0.1;
+        w.b_h[Z] = -0.2;
+        w.b_i[N] = 0.05;
+        w.b_h[N] = 0.3;
+
+        // Unit 1 also reads unit 0's hidden state, not its own.
+        set_i(&mut w, Z, 1, 0, 1.0);
+        set_h(&mut w, N, 1, 0, 2.0);
+        w.b_i[R + 1] = -0.4;
+        w.b_i[N + 1] = 0.2;
+
+        // Head: y0 = 2·h0 + 1, y1 = −1·h1.
+        w.w_o[0 * HIDDEN] = 2.0;
+        w.b_o[0] = 1.0;
+        w.w_o[HIDDEN + 1] = -1.0;
+
+        let x = [0.5, -0.25];
+        let mut h = [0.0f64; HIDDEN];
+        h[0] = 0.4;
+        h[1] = -0.6;
+
+        // ---- reference, computed by hand from the equations in this module's header ----
+        let sig = |v: f64| 1.0 / (1.0 + (-v as f64).exp());
+        // unit 0
+        let gi_r0 = 1.0 * 0.5 + 0.1; // 0.6
+        let gh_r0 = 0.5 * 0.4 + 0.0; // 0.2
+        let r0 = sig(gi_r0 + gh_r0); // σ(0.8)
+        let gi_z0 = -2.0 * -0.25 + 0.0; // 0.5
+        let gh_z0 = 0.25 * -0.6 - 0.2; // −0.35, reads h[1]
+        let z0 = sig(gi_z0 + gh_z0); // σ(0.15)
+        let gi_n0 = 3.0 * 0.5 + 0.5 * -0.25 + 0.05; // 1.425
+        let gh_n0 = -1.5 * 0.4 + 0.3; // −0.3
+        let n0 = (gi_n0 + r0 * gh_n0).tanh();
+        let h0 = z0 * 0.4 + (1.0 - z0) * n0;
+        // unit 1
+        let r1 = sig(-0.4); // no recurrent term
+        let z1 = sig(1.0 * 0.5); // σ(0.5), no recurrent term
+        let gh_n1 = 2.0 * 0.4; // reads h[0] = 0.4
+        let n1 = (0.2 + r1 * gh_n1).tanh();
+        let h1 = z1 * -0.6 + (1.0 - z1) * n1;
+
+        let y = w.forward(&x, &mut h);
+
+        assert!((h[0] - h0).abs() < 1e-14, "h0 {} vs {h0}", h[0]);
+        assert!((h[1] - h1).abs() < 1e-14, "h1 {} vs {h1}", h[1]);
+        assert!((y[0] - (2.0 * h0 + 1.0)).abs() < 1e-14);
+        assert!((y[1] - (-h1)).abs() < 1e-14);
+        for j in 2..HIDDEN {
+            assert_eq!(h[j], 0.0, "unit {j} was inert and stayed inert");
+        }
+    }
+
+    /// A shape policy carries its caller's digest and is refused, by both digests' names,
+    /// when the expected one differs.
+    #[test]
+    fn a_shape_policy_refuses_a_wrong_digest() {
+        let weights = Gru23::zeros();
+        let p = ShapePolicy::new(weights, 0x0123_4567_89ab_cdef);
+        p.validate(0x0123_4567_89ab_cdef).expect("matching digest");
+        let err = p
+            .validate(0xfedc_ba98_7654_3210)
+            .expect_err("a foreign digest is refused");
+        assert!(err.contains("0123456789abcdef"), "{err}");
+        assert!(err.contains("fedcba9876543210"), "{err}");
     }
 }
