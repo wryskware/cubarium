@@ -620,6 +620,115 @@ enum Command {
         #[arg(long, default_value_t = 0)]
         index: usize,
     },
+    /// Phase-one voxel slice (P1-D): arena validity for both founders plus a GRU and
+    /// heuristic controller smoke through the real episode driver.
+    VoxelCheck {
+        /// One founder (`blind`/`browser`) or both by default.
+        #[arg(long)]
+        founder: Option<String>,
+        /// How many of the frozen training layout seeds to check, from the front.
+        #[arg(long, default_value_t = 4)]
+        seeds: usize,
+        /// Ticks per smoke episode.
+        #[arg(long, default_value_t = 240)]
+        ticks: u64,
+    },
+    /// Phase-one voxel slice (P1-D): episode throughput — setup cost, episodes/second at
+    /// one worker, and the same at up to four episode workers.
+    VoxelBench {
+        /// `blind` (littershredder) or `browser` (frondgrazer).
+        #[arg(long, default_value = "blind")]
+        founder: String,
+        #[arg(long, default_value_t = 1_200)]
+        ticks: u64,
+        /// Episodes per batch.
+        #[arg(long, default_value_t = 8)]
+        episodes: usize,
+        /// Episode workers for the parallel batch, at most four.
+        #[arg(long, default_value_t = 4)]
+        workers: usize,
+        /// The observation source: `self-only` (interim) or `zeros`.
+        #[arg(long, default_value = "self-only")]
+        source: String,
+    },
+    /// Phase-one voxel slice (P1-D): the bounded ES run over one founder's manifest, with
+    /// shape-aware antithetic pairs, the initial centre evaluation, and the plan's caps.
+    VoxelTrain {
+        /// `blind` (littershredder) or `browser` (frondgrazer).
+        #[arg(long, default_value = "blind")]
+        founder: String,
+        /// The training controller: `gru` is the only trainable body (the heuristic slot
+        /// carries no parameters and is refused here by name).
+        #[arg(long, default_value = "gru")]
+        controller: String,
+        #[arg(long, default_value_t = cubarium_search::es::voxel::task::DEFAULT_PAIRS)]
+        pairs: usize,
+        /// How many of the four frozen training layouts to run, from the front.
+        #[arg(long, default_value_t = 4)]
+        layouts: usize,
+        /// Updates, capped at the plan's 32.
+        #[arg(long, default_value_t = cubarium_search::es::voxel::task::MAX_UPDATES)]
+        updates: u32,
+        #[arg(long, default_value_t = cubarium_search::es::voxel::task::HORIZON_TICKS)]
+        horizon: u64,
+        /// Episode workers, at most four, one simulation thread per episode.
+        #[arg(long, default_value_t = cubarium_search::es::voxel::task::MAX_EPISODE_WORKERS)]
+        workers: usize,
+        /// Wall cap in seconds (the plan allots one archetype up to eight minutes).
+        #[arg(long, default_value_t = cubarium_search::es::voxel::task::DEFAULT_TRAIN_WALL_SECONDS)]
+        wall_seconds: u64,
+        /// The run's episode limit, counting every attempted episode including
+        /// discarded and cancelled work. The plan's per-archetype count is 2,180.
+        #[arg(long, default_value_t = cubarium_search::es::voxel::task::DEFAULT_EPISODE_LIMIT)]
+        episode_limit: u64,
+        #[arg(long, default_value_t = cubarium_search::es::voxel::task::TRAINING_SEED)]
+        train_seed: u64,
+        /// Evaluate the unperturbed centre each generation. A sampled perturbation's
+        /// score is not the centre's.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        center_eval: bool,
+        /// The observation source: `self-only` (interim) or `zeros`.
+        #[arg(long, default_value = "self-only")]
+        source: String,
+        /// Discard an existing run in `--out` and start fresh.
+        #[arg(long, default_value_t = false)]
+        overwrite: bool,
+        /// Directory for `checkpoint.json` and `centers/`.
+        #[arg(long, default_value = "runs/voxel-es-blind")]
+        out: PathBuf,
+    },
+    /// Phase-one voxel slice (P1-D): one saved policy or a disclosed control over the
+    /// training or held-out layout set, with the score components per layout.
+    VoxelEvaluate {
+        /// A saved policy file (`voxel-train`'s `centers/*.json`). Omit to run a control.
+        #[arg(long)]
+        policy: Option<PathBuf>,
+        /// Required when a control runs; checked against a policy's lineage otherwise.
+        #[arg(long)]
+        founder: Option<String>,
+        /// `gru` (with `--policy`), or one of the disclosed controls: `no-intake`,
+        /// `stationary-feeding`, `heuristic`.
+        #[arg(long, default_value = "gru")]
+        controller: String,
+        /// `training` or `holdout`. The held-out set is for validation only.
+        #[arg(long, default_value = "holdout")]
+        set: String,
+        #[arg(long, default_value_t = cubarium_search::es::voxel::task::HORIZON_TICKS)]
+        horizon: u64,
+        /// Episode workers, at most four.
+        #[arg(long, default_value_t = cubarium_search::es::voxel::task::MAX_EPISODE_WORKERS)]
+        workers: usize,
+        #[arg(long, default_value_t = 300)]
+        wall_seconds: u64,
+        /// Stop after this many episode dispatches.
+        #[arg(long, default_value_t = 64)]
+        episode_limit: u64,
+        /// The observation source: `self-only` (interim) or `zeros`.
+        #[arg(long, default_value = "self-only")]
+        source: String,
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -888,6 +997,76 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?),
         Command::Census(args) => Ok(census::run_command(args)?),
         Command::Replay { record, index } => replay(&record, index),
+        Command::VoxelCheck {
+            founder,
+            seeds,
+            ticks,
+        } => es::voxel::commands::check(founder, seeds, ticks),
+        Command::VoxelBench {
+            founder,
+            ticks,
+            episodes,
+            workers,
+            source,
+        } => es::voxel::commands::bench(founder, ticks, episodes, workers, source),
+        Command::VoxelTrain {
+            founder,
+            controller,
+            pairs,
+            layouts,
+            updates,
+            horizon,
+            workers,
+            wall_seconds,
+            episode_limit,
+            train_seed,
+            center_eval,
+            source,
+            overwrite,
+            out,
+        } => {
+            if overwrite {
+                let _ = std::fs::remove_dir_all(&out);
+            }
+            es::voxel::commands::train(
+                founder,
+                controller,
+                pairs,
+                layouts,
+                updates,
+                horizon,
+                workers,
+                wall_seconds,
+                episode_limit,
+                train_seed,
+                center_eval,
+                source,
+                out,
+            )
+        }
+        Command::VoxelEvaluate {
+            policy,
+            founder,
+            controller,
+            set,
+            horizon,
+            workers,
+            wall_seconds,
+            episode_limit,
+            source,
+            out,
+        } => es::voxel::commands::evaluate(
+            policy,
+            founder,
+            controller,
+            set,
+            horizon,
+            workers,
+            wall_seconds,
+            episode_limit,
+            source,
+            out,
+        ),
         Command::EsProtocol { config } => es::commands::protocol(config),
         Command::EsControls {
             workers,

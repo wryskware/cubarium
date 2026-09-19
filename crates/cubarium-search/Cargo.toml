@@ -16,6 +16,11 @@ path = "src/main.rs"
 [dependencies]
 cubarium-core = { workspace = true }
 cubarium-surface = { workspace = true }
+# The phase-one voxel episode driver (es::voxel): consumes the static arena and the
+# founder manifests read-only. The arena API, the manifests and their digests are the
+# landed P1-A/P1-B/P1-C interfaces this crate builds against.
+cubarium-voxel-sim = { workspace = true }
+cubarium-voxel-fauna = { workspace = true }
 clap = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 # `float_roundtrip`: the default parser is not correctly rounded (about one value in nine

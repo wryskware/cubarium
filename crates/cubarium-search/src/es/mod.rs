@@ -26,6 +26,10 @@
 //! - [`turnband`]: the paired replay of one weight set under both action adapters, and the
 //!   gradient-direction stability of the retained pair contributions.
 //! - [`commands`]: the development commands behind the `es-*` subcommands.
+//! - [`voxel`]: the **phase-one voxel slice** (P1-D) — the episode driver, controllers and
+//!   ES over the static voxel arena's two founder manifests, with its own `voxel-*`
+//!   command family. It reuses this module's optimizer, perturbation stream and exact
+//!   float persistence; nothing else is shared with the flat trainer below.
 //!
 //! Nothing here attaches a policy to the display world, migrates a world, or trains during a
 //! world's ordinary life. The trainer builds its own isolated worlds and throws them away.
@@ -44,6 +48,7 @@ pub mod scorecheck;
 pub mod tensor;
 pub mod trainer;
 pub mod turnband;
+pub mod voxel;
 
 pub use episode::{Control, Driver, Episode, EpisodeError, Limits};
 pub use fixture::{
