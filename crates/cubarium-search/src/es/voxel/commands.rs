@@ -116,6 +116,7 @@ pub fn check(founder: Option<String>, seeds: usize, ticks: u64) -> Result<(), Bo
         for (name, control) in [
             ("no-intake", VoxelControl::NoIntake),
             ("stationary-feeding", VoxelControl::StationaryFeeding),
+            ("cruise", VoxelControl::Cruise),
             ("heuristic", VoxelControl::Heuristic),
         ] {
             drivers.push((name.into(), EpisodeDriver::control(control, *f)));
@@ -319,9 +320,9 @@ pub fn train(
     let controller = controller.trim().to_ascii_lowercase();
     if controller != "gru" {
         return Err(format!(
-            "--controller must be `gru` for a training run: the heuristic slot carries no \
-             evolvable parameters. The heuristic is a diagnostic in voxel-check and \
-             voxel-evaluate."
+            "--controller must be `gru` for a training run: the open-loop controls and \
+             the heuristic slot carry no evolvable parameters. They are diagnostics in \
+             voxel-check and voxel-evaluate."
         )
         .into());
     }
@@ -429,6 +430,7 @@ pub fn evaluate(
     policy: Option<PathBuf>,
     founder: Option<String>,
     controller: String,
+    ablate_senses: bool,
     set: String,
     horizon: u64,
     workers: usize,
@@ -455,7 +457,13 @@ pub fn evaluate(
                     .into());
                 }
             }
-            (file.driver()?, f)
+            let driver = file.driver()?;
+            let driver = if ablate_senses {
+                driver.with_ablated_senses()
+            } else {
+                driver
+            };
+            (driver, f)
         }
         (Some(_), other) => {
             return Err(format!(
@@ -468,6 +476,7 @@ pub fn evaluate(
             let control = match other {
                 "no-intake" => VoxelControl::NoIntake,
                 "stationary-feeding" => VoxelControl::StationaryFeeding,
+                "cruise" => VoxelControl::Cruise,
                 "heuristic" => VoxelControl::Heuristic,
                 "gru" => {
                     return Err("--controller gru needs --policy <path>".into());
@@ -475,7 +484,7 @@ pub fn evaluate(
                 other => {
                     return Err(format!(
                         "unknown --controller `{other}`; use `gru` (with --policy), \
-                         `no-intake`, `stationary-feeding` or `heuristic`"
+                         `no-intake`, `stationary-feeding`, `cruise` or `heuristic`"
                     )
                     .into());
                 }

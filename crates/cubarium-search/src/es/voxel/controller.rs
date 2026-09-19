@@ -38,12 +38,26 @@ use cubarium_voxel_fauna::{BlindForager, BrowserForager, Controller, Founder, Re
 use super::super::tensor;
 use super::voxel_schema_digest;
 
+/// How many leading observation channels are the founder's own `Self` block. The two
+/// manifests agree: indices 0..8 are energy, reserve, birth readiness, structural loss,
+/// assimilated intake, resolved forward, resolved turn, motor delivery. Everything from
+/// index 8 on is a **sense** — contact, wet, taste, chem, light, cone — including its
+/// validity value.
+pub const SELF_CHANNELS: usize = 8;
+
 /// A GRU policy as a fauna controller: validated weights, one hidden state, raw logits
 /// out. The fauna's shared adapter transfers and deadbands them.
+///
+/// `ablate_senses` is the P2-B diagnostic: with it set, every channel from
+/// [`SELF_CHANNELS`] on — validity included — is zeroed **here**, at the point the
+/// observation is handed to the network, never in the fauna crate. The body still senses
+/// normally, the policy's own memory is untouched, and a policy whose score does not move
+/// under the ablation was not using its senses.
 #[derive(Clone, Debug)]
 pub struct GruPolicy<const I: usize> {
     policy: ShapePolicy<I, 3>,
     hidden: [f64; HIDDEN],
+    ablate_senses: bool,
 }
 
 impl<const I: usize> GruPolicy<I> {
@@ -56,7 +70,21 @@ impl<const I: usize> GruPolicy<I> {
         Ok(GruPolicy {
             policy: tensor::shape_policy::<I, 3>(theta, digest)?,
             hidden: [0.0; HIDDEN],
+            ablate_senses: false,
         })
+    }
+
+    /// The same policy with every sense channel zeroed before it is read
+    /// (see [`SELF_CHANNELS`]).
+    pub fn new_ablated(theta: &[f64], digest: u64) -> Result<GruPolicy<I>, String> {
+        let mut p = GruPolicy::new(theta, digest)?;
+        p.ablate_senses = true;
+        Ok(p)
+    }
+
+    /// Whether this body reads its senses.
+    pub fn senses_ablated(&self) -> bool {
+        self.ablate_senses
     }
 
     /// The validated policy this controller runs.
@@ -69,6 +97,9 @@ impl<const I: usize> Controller for GruPolicy<I> {
     fn drive(&mut self, observation: &[f64]) -> Response {
         let mut x = [0.0; I];
         x.copy_from_slice(observation);
+        if self.ablate_senses {
+            x[SELF_CHANNELS.min(I)..].fill(0.0);
+        }
         let logits = self.policy.weights.forward(&x, &mut self.hidden);
         Response::Logits(logits)
     }
@@ -114,6 +145,31 @@ impl Controller for StationaryFeeding {
     fn reset(&mut self) {}
 }
 
+/// Open-loop cruise: half forward effort, no turn, full feed, **without reading the
+/// observation at all**. The other half of the P2-B diagnostic pair: if a trained policy
+/// cannot beat this on a start that faces its food, the start handed it the answer.
+///
+/// Half cruise, not full: full cruise costs exactly basal upkeep by design, so a control
+/// pinned at 1.0 measures the motor budget rather than the task. 0.5 is the cheapest
+/// speed that still crosses the arena inside the horizon.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Cruise;
+
+/// The forward effort [`Cruise`] holds.
+pub const CRUISE_FORWARD: f64 = 0.5;
+
+impl Controller for Cruise {
+    fn drive(&mut self, _observation: &[f64]) -> Response {
+        Response::Bounded(cubarium_voxel_fauna::Actions {
+            forward: CRUISE_FORWARD,
+            turn: 0.0,
+            feed: 1.0,
+        })
+    }
+
+    fn reset(&mut self) {}
+}
+
 /// What drives the body for one episode. Built per episode through
 /// [`EpisodeDriver::fresh`] so the controller's memory — hidden state, turn preference —
 /// is never carried between episodes.
@@ -121,6 +177,9 @@ impl Controller for StationaryFeeding {
 pub struct EpisodeDriver {
     founder: Founder,
     kind: EpisodeKind,
+    /// Only meaningful for [`EpisodeKind::Gru`]: run the policy with its sense channels
+    /// zeroed (see [`SELF_CHANNELS`]).
+    ablate_senses: bool,
 }
 
 /// The controller body a driver runs.
@@ -144,6 +203,8 @@ pub enum EpisodeGru {
 pub enum VoxelControl {
     NoIntake,
     StationaryFeeding,
+    /// Open-loop half cruise with full feed, reading nothing ([`Cruise`]).
+    Cruise,
     /// The observation-only heuristic: the fauna's own `BlindForager` (blind founder) or
     /// `BrowserForager` (browser) — real chem/gaze heuristics shipped with the seam,
     /// interchangeable here behind the same [`Controller`] trait.
@@ -166,7 +227,20 @@ impl EpisodeDriver {
         Ok(EpisodeDriver {
             founder,
             kind: EpisodeKind::Gru(gru),
+            ablate_senses: false,
         })
+    }
+
+    /// The same driver with the policy's sense channels zeroed before every forward
+    /// pass. A no-op on a control, which reads no observation in the first place.
+    pub fn with_ablated_senses(mut self) -> EpisodeDriver {
+        self.ablate_senses = matches!(self.kind, EpisodeKind::Gru(_));
+        self
+    }
+
+    /// Whether this driver runs a sense-ablated policy.
+    pub fn senses_ablated(&self) -> bool {
+        self.ablate_senses
     }
 
     /// A diagnostic driver for `founder`.
@@ -174,6 +248,7 @@ impl EpisodeDriver {
         EpisodeDriver {
             founder,
             kind: EpisodeKind::Control(control),
+            ablate_senses: false,
         }
     }
 
@@ -195,13 +270,16 @@ impl EpisodeDriver {
             EpisodeKind::Gru(EpisodeGru::Blind(policy)) => Box::new(GruPolicy::<23> {
                 policy: (**policy).clone(),
                 hidden: [0.0; HIDDEN],
+                ablate_senses: self.ablate_senses,
             }),
             EpisodeKind::Gru(EpisodeGru::Browser(policy)) => Box::new(GruPolicy::<37> {
                 policy: (**policy).clone(),
                 hidden: [0.0; HIDDEN],
+                ablate_senses: self.ablate_senses,
             }),
             EpisodeKind::Control(VoxelControl::NoIntake) => Box::new(NoIntake),
             EpisodeKind::Control(VoxelControl::StationaryFeeding) => Box::new(StationaryFeeding),
+            EpisodeKind::Control(VoxelControl::Cruise) => Box::new(Cruise),
             // The heuristic slot is the fauna's own observation-only heuristics: the
             // body the driver runs decides which one fits its founder.
             EpisodeKind::Control(VoxelControl::Heuristic) => match self.founder {
@@ -216,9 +294,11 @@ impl EpisodeDriver {
     /// The driver's name, for job labels and reports.
     pub fn name(&self) -> String {
         match &self.kind {
+            EpisodeKind::Gru(_) if self.ablate_senses => "gru-ablated".into(),
             EpisodeKind::Gru(_) => "gru".into(),
             EpisodeKind::Control(VoxelControl::NoIntake) => "no-intake".into(),
             EpisodeKind::Control(VoxelControl::StationaryFeeding) => "stationary-feeding".into(),
+            EpisodeKind::Control(VoxelControl::Cruise) => "cruise".into(),
             EpisodeKind::Control(VoxelControl::Heuristic) => "heuristic".into(),
         }
     }
@@ -285,6 +365,106 @@ mod tests {
         );
         no.reset();
         feed.reset();
+    }
+
+    /// The open-loop cruise control reads nothing and resolves to half forward, no
+    /// turn, full feed — the same bounded response whatever it is shown.
+    #[test]
+    fn the_cruise_control_is_open_loop() {
+        let manifest = Founder::Browser.manifest();
+        let mut cruise = Cruise;
+        let a = cubarium_voxel_fauna::resolve_actions(cruise.drive(&[0.0; 37]), &manifest);
+        let b = cubarium_voxel_fauna::resolve_actions(cruise.drive(&[0.9; 37]), &manifest);
+        assert_eq!(a, b, "cruise cannot depend on the observation");
+        assert_eq!(
+            a,
+            Actions {
+                forward: CRUISE_FORWARD,
+                turn: 0.0,
+                feed: 1.0
+            }
+        );
+        cruise.reset();
+        assert_eq!(
+            EpisodeDriver::control(VoxelControl::Cruise, Founder::Browser).name(),
+            "cruise"
+        );
+    }
+
+    /// The ablation zeroes the sense channels and nothing else: two observations that
+    /// differ only from index 8 on are indistinguishable to an ablated policy, while the
+    /// same policy unablated tells them apart. The `Self` block still drives it.
+    #[test]
+    fn ablating_the_senses_hides_only_the_sense_channels() {
+        let theta = tensor::initial_center_shape::<23, 3>(21);
+        let digest = voxel_schema_digest(Founder::Blind);
+        let mut senses_a = [0.3; 23];
+        let mut senses_b = [0.3; 23];
+        for i in SELF_CHANNELS..23 {
+            senses_a[i] = 0.9;
+            senses_b[i] = 0.05;
+        }
+
+        let mut open = GruPolicy::<23>::new(&theta, digest).expect("policy");
+        let mut open2 = GruPolicy::<23>::new(&theta, digest).expect("policy");
+        assert_ne!(
+            open.drive(&senses_a),
+            open2.drive(&senses_b),
+            "an unablated policy sees its senses"
+        );
+
+        let mut blind_a = GruPolicy::<23>::new_ablated(&theta, digest).expect("policy");
+        let mut blind_b = GruPolicy::<23>::new_ablated(&theta, digest).expect("policy");
+        assert!(blind_a.senses_ablated());
+        assert_eq!(
+            blind_a.drive(&senses_a),
+            blind_b.drive(&senses_b),
+            "an ablated policy cannot tell two sense vectors apart"
+        );
+
+        // Not a lobotomy: the Self block still moves the output, and a zero-sense
+        // observation is unchanged by the ablation.
+        let mut self_hi = [0.0; 23];
+        self_hi[..SELF_CHANNELS].fill(0.8);
+        let mut blind_c = GruPolicy::<23>::new_ablated(&theta, digest).expect("policy");
+        let mut open3 = GruPolicy::<23>::new(&theta, digest).expect("policy");
+        assert_ne!(
+            blind_c.drive(&self_hi),
+            blind_b.drive(&senses_b),
+            "the Self block still reaches an ablated policy"
+        );
+        let mut blind_d = GruPolicy::<23>::new_ablated(&theta, digest).expect("policy");
+        assert_eq!(
+            blind_d.drive(&self_hi),
+            open3.drive(&self_hi),
+            "with no sense signal there is nothing to ablate"
+        );
+    }
+
+    /// The driver-level ablation switch: it renames the driver, it survives `fresh()`,
+    /// and it is a no-op on a control that reads no observation.
+    #[test]
+    fn the_driver_carries_the_ablation_into_every_fresh_body() {
+        let theta = tensor::initial_center_shape::<23, 3>(31);
+        let plain = EpisodeDriver::gru(&theta, Founder::Blind).expect("policy");
+        let ablated = plain.clone().with_ablated_senses();
+        assert_eq!(plain.name(), "gru");
+        assert_eq!(ablated.name(), "gru-ablated");
+        assert!(!plain.senses_ablated() && ablated.senses_ablated());
+
+        let mut obs = [0.2; 23];
+        obs[SELF_CHANNELS..].fill(0.95);
+        let mut a = plain.fresh();
+        let mut b = ablated.fresh();
+        assert_ne!(a.drive(&obs), b.drive(&obs), "fresh() carries the ablation");
+
+        let control =
+            EpisodeDriver::control(VoxelControl::Heuristic, Founder::Blind).with_ablated_senses();
+        assert!(
+            !control.senses_ablated(),
+            "a control reads no observation, so there is nothing to ablate"
+        );
+        assert_eq!(control.name(), "heuristic");
     }
 
     /// A driver hands out fresh memory per episode: two `fresh()` bodies are equal at

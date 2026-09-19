@@ -20,7 +20,8 @@
 //!   **inside** the loop.
 //! - [`controller`]: the controller bodies the seam runs — a validated `ShapePolicy`
 //!   answering raw logits (the fauna's shared adapter transfers and deadbands them),
-//!   the two disclosed diagnostic controls, and the observation-only heuristic slot,
+//!   the three disclosed open-loop controls (`no-intake`, `stationary-feeding`,
+//!   `cruise`), the P2-B sense ablation, and the observation-only heuristic slot,
 //!   which is the fauna's own `BlindForager`/`BrowserForager`.
 //! - [`score`]: the capability-training score of the tests plan §2 and its components.
 //! - [`trainer`]: shape-aware antithetic pairs, bounded workers, cancellation that counts
@@ -67,8 +68,8 @@ pub mod task;
 pub mod trainer;
 
 pub use controller::{
-    EpisodeDriver, EpisodeGru, EpisodeKind, GruBlind, GruBrowser, GruPolicy, NoIntake,
-    StationaryFeeding, VoxelControl,
+    CRUISE_FORWARD, Cruise, EpisodeDriver, EpisodeGru, EpisodeKind, GruBlind, GruBrowser,
+    GruPolicy, NoIntake, SELF_CHANNELS, StationaryFeeding, VoxelControl,
 };
 pub use driver::{Episode, EpisodeError, Limits, ScoreCounters};
 pub use score::{SURVIVAL_WEIGHT, ScoreComponents};

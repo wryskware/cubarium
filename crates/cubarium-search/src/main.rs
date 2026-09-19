@@ -703,9 +703,14 @@ enum Command {
         #[arg(long)]
         founder: Option<String>,
         /// `gru` (with `--policy`), or one of the disclosed controls: `no-intake`,
-        /// `stationary-feeding`, `heuristic`.
+        /// `stationary-feeding`, `cruise`, `heuristic`.
         #[arg(long, default_value = "gru")]
         controller: String,
+        /// Diagnostic: zero every observation channel outside `Self` (indices 8..),
+        /// validity included, before the GRU reads it. The body still senses; the
+        /// policy's own memory is untouched. No effect on a control.
+        #[arg(long, default_value_t = false)]
+        ablate_senses: bool,
         /// `training` or `holdout`. The held-out set is for validation only.
         #[arg(long, default_value = "holdout")]
         set: String,
@@ -1039,6 +1044,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             policy,
             founder,
             controller,
+            ablate_senses,
             set,
             horizon,
             workers,
@@ -1049,6 +1055,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             policy,
             founder,
             controller,
+            ablate_senses,
             set,
             horizon,
             workers,
