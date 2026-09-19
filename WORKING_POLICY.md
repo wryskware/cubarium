@@ -70,6 +70,17 @@ engineering. Iteration speed is priority one. Clean code, fast and dirty process
   may be reused or rewritten when the ecology changes. Live knobs and hot
   reload are undecided; restarting to reload is fine.
 
+## Training resources — correction, 2026-09-18
+
+Wrysk authorizes explicitly launched offline training and parameter-search runs
+to use up to 90% of the machine's logical CPUs and 64 GiB of memory. Determine
+the CPU worker ceiling from the machine at launch, leaving at least 10% and one
+logical CPU free, and apply a 64 GiB hard address-space limit to the training
+process. Check current system load before a long run and reduce concurrency if
+the machine is no longer otherwise idle. Keep the experiment's wall-time and
+episode limits; this resource allowance does not authorize unbounded searches
+or make ordinary tests larger.
+
 ## Lean orchestration — correction, 2026-09-17
 
 Wrysk: tokens are getting tighter; cut the parallel overhead of agents getting
