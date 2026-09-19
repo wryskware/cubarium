@@ -172,21 +172,29 @@ impl Arena {
                 });
             }
         }
-        // A seam layout explicitly lays one tile on the seam column, so the wrapped geometry
-        // gets reused at least once. The pick below adds it after the interior tiles.
-
+        // A seam layout lays its first tile on the wrapped seam column. The seam site is
+        // drawn from the **same** dry candidate pool and removed from it before the other
+        // picks, so a resource site can never be selected twice (the flaw that made seed
+        // 95 lay `(0,4,8)` twice). Every later pick is also a `swap_remove` off `candidates`.
         let mut resources: Vec<Site> = Vec::new();
-        let want = RESOURCE_TILES.min(candidates.len());
+        if seam_layout {
+            let seam: Vec<Site> = candidates.iter().copied().filter(|s| s.x == 0).collect();
+            if !seam.is_empty() {
+                let pick = seam[rng.below(seam.len())];
+                let at = candidates
+                    .iter()
+                    .position(|s| *s == pick)
+                    .expect("the seam candidate is in the pool");
+                candidates.swap_remove(at);
+                resources.push(pick);
+            }
+        }
+        let want = RESOURCE_TILES
+            .saturating_sub(resources.len())
+            .min(candidates.len());
         for _ in 0..want {
             let pick = rng.below(candidates.len());
             resources.push(candidates.swap_remove(pick));
-        }
-        if seam_layout {
-            resources.push(Site {
-                x: 0,
-                y: GROUND_Y,
-                z: rng.below(ARENA_DEPTH as usize) as u32,
-            });
         }
         resources.sort();
 
@@ -313,7 +321,34 @@ mod tests {
     use super::*;
     use crate::{ScheduleMode, SimConfig};
 
-    const SEEDS: [u64; 3] = [1, 2, 3];
+    const SEEDS: [u64; 4] = [1, 2, 3, 95];
+
+    /// [`Arena::build`]'s resource sites are always unique, including the seam layout
+    /// (seeds `% 4 == 3`), where the seam tile used to collide with an interior pick
+    /// (seed 95 laid `(0,4,8)` twice).
+    #[test]
+    fn resource_sites_are_unique_across_seeds() {
+        for seed in SEEDS {
+            for founder in Founder::ALL {
+                let arena = Arena::build(founder, seed);
+                let mut sorted = arena.resources.clone();
+                sorted.sort();
+                let n = sorted.len();
+                sorted.dedup();
+                assert_eq!(
+                    sorted.len(),
+                    n,
+                    "{founder:?} seed {seed}: a resource site was selected twice"
+                );
+                if seed % 4 == 3 {
+                    assert!(
+                        sorted.iter().any(|s| s.x == 0),
+                        "{founder:?} seed {seed}: the seam layout did not keep a seam tile"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn the_arena_is_the_frozen_size_with_finite_food() {
@@ -346,13 +381,20 @@ mod tests {
 
     /// The static arena steps the world's and the fauna's clocks, ages and maintains the
     /// body, and **holds the terrain, water and unrelated plants still**. No motion, no
-    /// feeding.
+    /// feeding. The plant check is the stands' actual state — species, site, wood and
+    /// foliage — not a count, so an empty-to-less-empty stand shuffle cannot satisfy it.
     #[test]
     fn a_static_arena_advances_time_and_freezes_the_world() {
         let arena = Arena::build(Founder::Browser, 7);
         let before_material = arena.world.view().material.to_vec();
         let before_free = arena.world.view().free.to_vec();
-        let before_stands = arena.flora.view().stands.len();
+        let before_stands: Vec<_> = arena
+            .flora
+            .view()
+            .stands
+            .iter()
+            .map(|s| (s.site, s.species, s.wood, s.foliage))
+            .collect();
         let before_stock = arena.resource_stock();
         let before_animal = *arena
             .fauna
@@ -370,7 +412,14 @@ mod tests {
         assert_eq!(sim.fauna().tick(), 10);
         assert_eq!(sim.world().view().material, before_material, "terrain moved");
         assert_eq!(sim.world().view().free, before_free, "water moved");
-        assert_eq!(sim.flora().view().stands.len(), before_stands, "a stand changed");
+        let after_stands: Vec<_> = sim
+            .flora()
+            .view()
+            .stands
+            .iter()
+            .map(|s| (s.site, s.species, s.wood, s.foliage))
+            .collect();
+        assert_eq!(after_stands, before_stands, "a stand grew, died or moved");
 
         let after = *sim
             .fauna()

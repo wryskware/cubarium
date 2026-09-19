@@ -67,7 +67,9 @@ pub fn decode(bytes: &[u8]) -> anyhow::Result<Fauna> {
 /// **sorted and unique**, because every pass over `animals` is a binary search over that
 /// order; and [`crate::FaunaLedger::births`] — the counter the next id comes from — is
 /// **above every id present**, because an id is never reused and `Fauna::insert` treats a
-/// collision as unreachable.
+/// collision as unreachable. A phase-one body also has to carry a finite [`crate::Pose`],
+/// because the founder's movement and sensing read it and a `NaN` position is a `NaN` in
+/// the world within a tick.
 ///
 /// Postcard bytes are not the only way in: a hand-built or hand-edited snapshot is exactly
 /// what this is for, and a round trip of a live layer cannot fail it.
@@ -87,6 +89,9 @@ fn validate(fauna: &Fauna) -> Result<(), String> {
                     a.id
                 ));
             }
+        }
+        if !a.pose.is_finite() {
+            return Err(format!("animal #{}'s pose is not finite", a.id));
         }
         if let Some(prev) = last {
             if a.id <= prev {
@@ -151,7 +156,7 @@ mod tests {
         let back = decode(&encode(&good)).expect("a well-formed layer");
         assert_eq!(back.view().animals, good.view().animals);
 
-        let cases: [(&str, Fauna); 5] = [
+        let cases: [(&str, Fauna); 6] = [
             ("body", layer(vec![animal(0, f64::NAN)], 1)),
             ("reserve", {
                 let mut a = animal(0, 0.02);
@@ -161,6 +166,14 @@ mod tests {
             ("energy", {
                 let mut a = animal(0, 0.02);
                 a.energy = f64::INFINITY;
+                layer(vec![a], 1)
+            }),
+            ("pose", {
+                let mut a = animal(0, 0.02);
+                a.pose = crate::Pose {
+                    x: f64::NAN,
+                    ..a.pose
+                };
                 layer(vec![a], 1)
             }),
             (

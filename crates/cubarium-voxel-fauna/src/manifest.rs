@@ -168,12 +168,29 @@ pub struct Manifest {
     pub body_width_m: f64,
     /// Organic-mass reference the founder's `Self` channels are normalized against.
     pub body_reference: f64,
+    /// Fixed `Self` normalization references (plan, "Exact starting manifests"): an adult's
+    /// energy and reserve, and the total structure the interval's structural loss is
+    /// divided by. A slice of the founder's initial stock, not a population statistic.
+    pub adult_energy_reference: f64,
+    pub adult_reserve_reference: f64,
+    pub structural_reference: f64,
     /// Cruise speed in metres per second (`1 BL/s`).
     pub cruise_m_per_s: f64,
     /// Yaw cap in radians per second.
     pub yaw_cap_rad_per_s: f64,
+    /// `resolved_forward` and `resolved_turn` are normalized against **reference ×
+    /// controller interval** — one controller period of cruise or yaw — not the rate.
+    pub forward_reference_m: f64,
+    pub turn_reference_rad: f64,
     /// Mouth/feed reach, in body lengths.
     pub mouth_reach_body_lengths: f64,
+    /// Which cue the mouth's one taste channel means: `litter` for the blind feeder,
+    /// `foliage` for the browser.
+    pub taste_cue: &'static str,
+    /// The fixed material-response resistance mapping the taste resistance channel encodes:
+    /// one scalar per contact material class, in `0..=1`. Schema data, so it lives in the
+    /// digest.
+    pub taste_resistances: &'static [(&'static str, f64)],
     pub tunings: Tunings,
     /// The material classes the eye exposes, for a browser; empty for a blind founder.
     pub visible_classes: &'static [&'static str],
@@ -351,6 +368,14 @@ const BROWSER_TUNINGS: Tunings = Tunings {
     proximity_range_m: 2.0,
 };
 
+/// The fixed material-response resistance mapping a probing littershredder mouth feels:
+/// soft litter, firmer ground.
+const BLIND_TASTE_RESISTANCES: [(&str, f64); 2] = [("litter", 0.2), ("ground", 0.5)];
+
+/// The browser's mouth mapping: pliable foliage, stiff wood, firm ground.
+const BROWSER_TASTE_RESISTANCES: [(&str, f64); 3] =
+    [("foliage", 0.3), ("wood", 0.8), ("ground", 0.5)];
+
 impl Manifest {
     /// The blind littershredder: 23 inputs, no eyes. Body 0.125 m, cruise 0.125 m/s.
     pub fn blind() -> Manifest {
@@ -364,9 +389,16 @@ impl Manifest {
             body_length_m: 0.125,
             body_width_m: 0.0625,
             body_reference: 0.0125,
+            adult_energy_reference: 0.0375,
+            adult_reserve_reference: 0.00625,
+            structural_reference: 0.0125,
             cruise_m_per_s: 0.125,
             yaw_cap_rad_per_s: 2.0,
+            forward_reference_m: 0.03125,
+            turn_reference_rad: 0.5,
             mouth_reach_body_lengths: 0.25,
+            taste_cue: "litter",
+            taste_resistances: &BLIND_TASTE_RESISTANCES,
             tunings: BLIND_TUNINGS,
             visible_classes: &[],
             sector_centres_deg: &[],
@@ -389,9 +421,16 @@ impl Manifest {
             body_length_m: 0.25,
             body_width_m: 0.125,
             body_reference: 0.05,
+            adult_energy_reference: 0.15,
+            adult_reserve_reference: 0.025,
+            structural_reference: 0.05,
             cruise_m_per_s: 0.25,
             yaw_cap_rad_per_s: 2.0,
+            forward_reference_m: 0.0625,
+            turn_reference_rad: 0.5,
             mouth_reach_body_lengths: 0.25,
+            taste_cue: "foliage",
+            taste_resistances: &BROWSER_TASTE_RESISTANCES,
             tunings: BROWSER_TUNINGS,
             visible_classes: &BROWSER_VISIBLE_CLASSES,
             sector_centres_deg: &BROWSER_SECTOR_CENTRES_DEG,
@@ -472,6 +511,19 @@ impl Manifest {
             self.yaw_cap_rad_per_s,
             self.mouth_reach_body_lengths
         );
+        let _ = write!(
+            s,
+            "|self_ref:energy={},reserve={},structural={}|move_ref:forward={},turn={}",
+            self.adult_energy_reference,
+            self.adult_reserve_reference,
+            self.structural_reference,
+            self.forward_reference_m,
+            self.turn_reference_rad
+        );
+        let _ = write!(s, "|taste:{}", self.taste_cue);
+        for (class, r) in self.taste_resistances {
+            let _ = write!(s, ":{}={}", class, r);
+        }
         let t = &self.tunings;
         let _ = write!(
             s,
@@ -562,6 +614,16 @@ mod tests {
         assert_eq!((MODULE_CONE3.offset, MODULE_CONE3.end()), (18, 36));
         assert_eq!(browser.ray_count(), 27, "3 sectors x 3 x 3 rays");
         assert_eq!(blind.ray_count(), 0);
+        // The plan's named taste cue per founder and its fixed resistance mapping.
+        assert_eq!(blind.taste_cue, "litter");
+        assert_eq!(browser.taste_cue, "foliage");
+        assert!(blind.taste_resistances.iter().any(|(c, _)| *c == "litter"));
+        assert!(
+            browser
+                .taste_resistances
+                .iter()
+                .any(|(c, _)| *c == "foliage")
+        );
     }
 
     /// The actions are the plan's three, in order, with its transfer pair and the fixed
@@ -589,7 +651,9 @@ mod tests {
     }
 
     /// The digest is stable across calls, is exactly FNV-1a over the canonical text, and
-    /// separates two founders that differ in a single module.
+    /// separates two founders that differ in a single module. The schema-significant
+    /// constants Astra named — Self references, the movement references, the taste cue and
+    /// its resistance mapping — are all part of the canonical text.
     #[test]
     fn the_digest_is_stable_and_separates_the_founders() {
         let blind = Manifest::blind();
@@ -600,5 +664,45 @@ mod tests {
         assert_ne!(blind.digest(), browser.digest());
         assert!(blind.canonical_text().contains("Chem(litter)"));
         assert!(browser.canonical_text().contains("Cone(3, foliage/body)"));
+        assert!(blind.canonical_text().contains("|taste:litter:litter=0.2:ground=0.5"));
+        assert!(browser.canonical_text().contains("|taste:foliage"));
+        assert!(blind.canonical_text().contains("|self_ref:energy="));
+        assert!(blind.canonical_text().contains("|move_ref:forward="));
+    }
+
+    /// A single changed manifest property moves the digest: the schema text is what
+    /// protects meaning, so P1-C cannot invent a constant the digest does not cover.
+    #[test]
+    fn a_single_changed_manifest_property_moves_the_digest() {
+        let baseline = Manifest::blind();
+        let before = baseline.digest();
+
+        let mut tau = baseline;
+        tau.tunings.chem_tau_s = 2.0;
+        assert_ne!(tau.digest(), before, "a chem tuning move did not move the digest");
+
+        let mut energy = baseline;
+        energy.adult_energy_reference = 0.1;
+        assert_ne!(
+            energy.digest(),
+            before,
+            "a Self energy reference move did not move the digest"
+        );
+
+        let mut resistance = baseline;
+        resistance.taste_resistances = &[("litter", 0.9), ("ground", 0.5)];
+        assert_ne!(
+            resistance.digest(),
+            before,
+            "a taste resistance move did not move the digest"
+        );
+
+        let mut reference = baseline;
+        reference.forward_reference_m = 0.01;
+        assert_ne!(
+            reference.digest(),
+            before,
+            "a movement reference move did not move the digest"
+        );
     }
 }
