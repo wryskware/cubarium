@@ -647,9 +647,6 @@ enum Command {
         /// Episode workers for the parallel batch, at most four.
         #[arg(long, default_value_t = 4)]
         workers: usize,
-        /// The observation source: `self-only` (interim) or `zeros`.
-        #[arg(long, default_value = "self-only")]
-        source: String,
     },
     /// Phase-one voxel slice (P1-D): the bounded ES run over one founder's manifest, with
     /// shape-aware antithetic pairs, the initial centre evaluation, and the plan's caps.
@@ -687,9 +684,6 @@ enum Command {
         /// score is not the centre's.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         center_eval: bool,
-        /// The observation source: `self-only` (interim) or `zeros`.
-        #[arg(long, default_value = "self-only")]
-        source: String,
         /// Discard an existing run in `--out` and start fresh.
         #[arg(long, default_value_t = false)]
         overwrite: bool,
@@ -723,9 +717,6 @@ enum Command {
         /// Stop after this many episode dispatches.
         #[arg(long, default_value_t = 64)]
         episode_limit: u64,
-        /// The observation source: `self-only` (interim) or `zeros`.
-        #[arg(long, default_value = "self-only")]
-        source: String,
         #[arg(long)]
         out: Option<PathBuf>,
     },
@@ -1007,8 +998,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ticks,
             episodes,
             workers,
-            source,
-        } => es::voxel::commands::bench(founder, ticks, episodes, workers, source),
+        } => es::voxel::commands::bench(founder, ticks, episodes, workers),
         Command::VoxelTrain {
             founder,
             controller,
@@ -1021,7 +1011,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             episode_limit,
             train_seed,
             center_eval,
-            source,
             overwrite,
             out,
         } => {
@@ -1040,7 +1029,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 episode_limit,
                 train_seed,
                 center_eval,
-                source,
                 out,
             )
         }
@@ -1053,7 +1041,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             workers,
             wall_seconds,
             episode_limit,
-            source,
             out,
         } => es::voxel::commands::evaluate(
             policy,
@@ -1064,7 +1051,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             workers,
             wall_seconds,
             episode_limit,
-            source,
             out,
         ),
         Command::EsProtocol { config } => es::commands::protocol(config),

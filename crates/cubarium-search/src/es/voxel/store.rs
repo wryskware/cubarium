@@ -72,8 +72,7 @@ impl VoxelPolicyFile {
 
     /// [`VoxelPolicyFile::load`]'s checks, against an explicit name for the messages.
     pub fn validate_named(&self, name: &str) -> Result<(), String> {
-        let founder = super::parse_founder(&self.founder)
-            .map_err(|e| format!("{name}: {e}"))?;
+        let founder = super::parse_founder(&self.founder).map_err(|e| format!("{name}: {e}"))?;
         let manifest = founder.manifest();
         let want = manifest.parameter_count();
         if self.theta.len() != want {
@@ -141,7 +140,8 @@ mod tests {
     fn a_policy_round_trips_exactly_and_drives() {
         for founder in Founder::ALL {
             let file = sample(founder);
-            let dir = std::env::temp_dir().join(format!("cubarium-voxel-policy-{}", std::process::id()));
+            let dir =
+                std::env::temp_dir().join(format!("cubarium-voxel-policy-{}", std::process::id()));
             std::fs::create_dir_all(&dir).expect("temp dir");
             let path = dir.join(format!("{}.json", founder.name()));
             file.write(&path).expect("written");
@@ -187,13 +187,20 @@ mod tests {
         assert_ne!(POLICY_SCHEMA, CHECKPOINT_SCHEMA);
         let mut file = sample(Founder::Blind);
         file.schema = CHECKPOINT_SCHEMA.into();
-        assert!(file.validate_named("p.json").is_ok(), "the token is not checked by validate");
-        let dir = std::env::temp_dir().join(format!("cubarium-voxel-policy2-{}", std::process::id()));
+        assert!(
+            file.validate_named("p.json").is_ok(),
+            "the token is not checked by validate"
+        );
+        let dir =
+            std::env::temp_dir().join(format!("cubarium-voxel-policy2-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir");
         let path = dir.join("wrong-token.json");
         file.write(&path).expect("written");
         let err = VoxelPolicyFile::load(&path).expect_err("refused");
-        assert!(err.contains("schema") && err.contains(CHECKPOINT_SCHEMA), "{err}");
+        assert!(
+            err.contains("schema") && err.contains(CHECKPOINT_SCHEMA),
+            "{err}"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

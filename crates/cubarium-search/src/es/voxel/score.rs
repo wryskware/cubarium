@@ -31,16 +31,10 @@
 //!   bite built minus what upkeep and motion respired, and the corpse carries what a dead
 //!   body still held). Gross bite organic is **not** the measure — the undigested fraction
 //!   never settled.
-//! - **maintenance paid** is read off the fauna's own respiration ledger
-//!   (`Δrespired_out`), exact while the only organic matter the founder layer respires is
-//!   upkeep. When P1-B's bites and motor respiration land, digestion and motor share that
-//!   ledger and the split becomes a required interface (the handback's note).
-//! - **paid motor organic loss** is the respiration the founder's motion charged. The
-//!   fauna does not yet publish a motor term (P1-B adds it with the named motor
-//!   respiration coefficient), so the reading is the pluggable
-//!   [`super::driver::motor_organic_loss`] hook, which returns exactly 0.0 today — the
-//!   honest zero while no motor respiration exists — and one function swap when P1-B's
-//!   ledger lands.
+//! - **maintenance paid** and **paid motor organic loss** are read from the fauna
+//!   ledger's separate `respired_maintenance_out` and `respired_motor_out` counters.
+//!   `respired_digestion_out` is deliberately excluded from settled intake: it is the
+//!   gross bite share that never entered the animal.
 
 /// The survival term's fixed weight: `0.25 × survived_fraction`, as the tests plan fixes.
 pub const SURVIVAL_WEIGHT: f64 = 0.25;

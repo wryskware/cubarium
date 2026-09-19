@@ -597,6 +597,8 @@ dependencies = [
  "clap",
  "cubarium-core",
  "cubarium-surface",
+ "cubarium-voxel-fauna",
+ "cubarium-voxel-sim",
  "serde",
  "serde_json",
  "toml",

@@ -3,9 +3,14 @@
 //! conventions (clap subcommands of `cubarium-search`, printed tables, JSON stores under
 //! `runs/`).
 //!
+//! Every command attaches the same way — the episode's controller through the fauna's
+//! own controller table (`Fauna::set_controller`), the fauna tick sampling, holding and
+//! resolving — so `--controller gru|no-intake|stationary-feeding|heuristic` means one
+//! attachment everywhere.
+//!
 //! - [`check`]: arena validity for both founders across the training seeds, then a
-//!   controller smoke (GRU centre and the disclosed controls) through the real episode
-//!   driver.
+//!   controller smoke through the real driver — including the seam's own behavioural
+//!   check: the GRU must move the body, rest must not.
 //! - [`bench`]: measured setup cost (rebuild vs prepared-clone), episode throughput, and
 //!   one versus four episode workers.
 //! - [`train`]: the bounded ES run ([`super::trainer::train`]).
@@ -14,7 +19,7 @@
 //!
 //! The commands require arena/founder, controller, seed, episode limit, worker count and
 //! wall-time cap as applicable, and the worker count is capped at the plan's four
-//! everywhere.
+//! everywhere. The score-counter state is named in every run's output.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -22,8 +27,8 @@ use std::time::Instant;
 
 use cubarium_voxel_fauna::Founder;
 
-use super::controller::{EpisodeDriver, ObservationSource, VoxelControl};
-use super::driver::{self, EpisodeError};
+use super::controller::{EpisodeDriver, VoxelControl};
+use super::driver::{self, EpisodeError, ScoreCounters};
 use super::task;
 use super::trainer::{self, TrainSpec};
 use super::{parse_founder, voxel_schema_digest};
@@ -31,25 +36,16 @@ use crate::evaluate::BUILD_ID;
 
 type Boxed = Box<dyn std::error::Error>;
 
-/// The observation source a command runs under. `self-only` is the interim default until
-/// P1-C lands the real samplers; `zeros` is the honest sensory floor.
-fn parse_source(name: &str) -> Result<&'static dyn ObservationSource, String> {
-    match name.trim().to_ascii_lowercase().as_str() {
-        "self-only" | "self" | "default" => Ok(&super::controller::SELF_ONLY),
-        "zeros" | "none" => Ok(&super::controller::ZEROS),
-        other => Err(format!(
-            "unknown observation source `{other}`; use `self-only` (interim default) or \
-             `zeros`"
-        )),
-    }
+/// The one line every run prints about its score-counter state.
+fn print_counter_state() {
+    println!(
+        "# score counters: {} — settled intake excludes digestive respiration",
+        ScoreCounters::Landed.as_str()
+    );
 }
 
 /// `voxel-check`: arena validity plus a heuristic/GRU smoke, through the real driver.
-pub fn check(
-    founder: Option<String>,
-    seeds: usize,
-    ticks: u64,
-) -> Result<(), Boxed> {
+pub fn check(founder: Option<String>, seeds: usize, ticks: u64) -> Result<(), Boxed> {
     let founders: Vec<Founder> = match founder.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(name) => vec![parse_founder(name)?],
         None => Founder::ALL.into(),
@@ -91,7 +87,9 @@ pub fn check(
             }
             println!(
                 "  seed {seed:>3}  stock {stock:>8.4}  body {}  pose {}  births-off {}  {}",
-                arena.animal_id.map_or("none".into(), |id| format!("id {id}")),
+                arena
+                    .animal_id
+                    .map_or("none".into(), |id| format!("id {id}")),
                 pose_ok.then(|| "finite").unwrap_or("MISSING"),
                 births_ok.then(|| "yes").unwrap_or("NO"),
                 if ok { "ok" } else { "FAIL" },
@@ -99,8 +97,11 @@ pub fn check(
         }
 
         // 2. Controller smoke: the GRU centre and the three disclosed controls each run
-        //    one short episode through the real driver on the first training layout.
+        //    one short episode through the real driver on the first training layout —
+        //    attached through the fauna's own controller table. The seam's behavioural
+        //    check is in the table: the GRU must move the body, rest must not.
         let prepared = task::Prepared::build(*f, task::TRAINING_LAYOUT_SEEDS[0]);
+        let start = prepared.fixture_arena().animal_pose().expect("placed");
         let cancel = AtomicBool::new(false);
         let theta = if *f == Founder::Blind {
             crate::es::tensor::initial_center_shape::<23, 3>(task::TRAINING_SEED)
@@ -115,46 +116,47 @@ pub fn check(
         for (name, control) in [
             ("no-intake", VoxelControl::NoIntake),
             ("stationary-feeding", VoxelControl::StationaryFeeding),
-            ("heuristic", VoxelControl::Stub),
+            ("heuristic", VoxelControl::Heuristic),
         ] {
-            drivers.push((name.into(), EpisodeDriver::Control(control)));
+            drivers.push((name.into(), EpisodeDriver::control(control, *f)));
         }
         println!(
-            "  {:<20} {:>7} {:>7} {:>8} {:>9} {:>9} {:>8}",
-            "driver", "ticks", "alive", "updates", "fwd", "|turn|", "feed"
+            "  {:<20} {:>7} {:>6} {:>7} {:>8} {:>9} {:>9} {:>8}",
+            "driver", "ticks", "alive", "moved", "updates", "fwd", "|turn|", "feed"
         );
         for (name, d) in &drivers {
-            let started = Instant::now();
             let out = driver::run_prepared(
                 &prepared,
                 d,
-                &super::controller::SELF_ONLY,
                 ticks,
                 super::driver::Limits::new(&cancel),
                 &format!("check/{}/{name}", f.name()),
             );
             match out {
                 Ok(e) => {
+                    let moved = (e.pose_x - start.x).abs() + (e.pose_z - start.z).abs();
                     println!(
-                        "  {:<20} {:>7} {:>7} {:>8} {:>9.3} {:>9.3} {:>8.3}  ({:.3}s)",
+                        "  {:<20} {:>7} {:>6} {:>7.3} {:>8} {:>9.3} {:>9.3} {:>8.3}",
                         name,
                         e.ticks,
                         e.alive,
+                        moved,
                         e.updates,
                         e.mean_forward,
                         e.mean_turn_abs,
                         e.mean_feed,
-                        started.elapsed().as_secs_f64(),
                     );
-                    let bounds_ok = e
-                        .score
-                        .score
-                        .is_finite()
-                        && e.updates > 0
-                        && e.mean_forward.is_finite();
-                    if !bounds_ok {
+                    // The seam check: the GRU holds real forward effort and must have
+                    // moved the body; the no-intake control holds rest and must not
+                    // have. A control's mean actions are its own, from the body.
+                    let seam_ok = match name.as_str() {
+                        "gru-centre" => moved > 1e-6 && e.mean_forward > 0.05,
+                        "no-intake" => moved == 0.0 && e.mean_forward == 0.0,
+                        _ => e.updates == ticks / manifest.cadence_ticks(),
+                    };
+                    if !seam_ok || !e.score.score.is_finite() {
                         failures += 1;
-                        println!("    FAIL: the smoke episode's measurements are not sane");
+                        println!("    FAIL: the seam or the measurements are not sane");
                     }
                 }
                 Err(err) => {
@@ -166,6 +168,7 @@ pub fn check(
         println!();
     }
 
+    print_counter_state();
     if failures == 0 {
         println!("check passed: both founders' arenas, GRU and controls run end to end.");
         println!();
@@ -177,13 +180,11 @@ pub fn check(
 }
 
 /// `voxel-bench`: setup cost, episode throughput, one versus four episode workers.
-pub fn bench(founder: String, ticks: u64, episodes: usize, workers: usize, source: String) -> Result<(), Boxed> {
+pub fn bench(founder: String, ticks: u64, episodes: usize, workers: usize) -> Result<(), Boxed> {
     if workers == 0 || workers > task::MAX_EPISODE_WORKERS {
         return Err(format!("--workers must be in 1..={}", task::MAX_EPISODE_WORKERS).into());
     }
     let founder = parse_founder(&founder)?;
-    let source_name = source.clone();
-    let source = parse_source(&source)?;
     let prepared = task::Prepared::build(founder, task::TRAINING_LAYOUT_SEEDS[0]);
     let theta = if founder == Founder::Blind {
         crate::es::tensor::initial_center_shape::<23, 3>(task::TRAINING_SEED)
@@ -192,8 +193,12 @@ pub fn bench(founder: String, ticks: u64, episodes: usize, workers: usize, sourc
     };
     let gru = EpisodeDriver::gru(&theta, founder)?;
 
-    println!("# voxel episode throughput — {} ({})", founder.name(), founder.role());
-    println!("# build {BUILD_ID}, {ticks} ticks per episode, observation source `{source_name}`");
+    println!(
+        "# voxel episode throughput — {} ({})",
+        founder.name(),
+        founder.role()
+    );
+    println!("# build {BUILD_ID}, {ticks} ticks per episode, controllers attached");
     println!();
 
     // Setup cost: rebuild from the seed vs clone the prepared layout, per episode.
@@ -225,15 +230,8 @@ pub fn bench(founder: String, ticks: u64, episodes: usize, workers: usize, sourc
     let t = Instant::now();
     let mut ticks_done = 0u64;
     for i in 0..episodes {
-        let e = driver::run_prepared(
-            &prepared,
-            &gru,
-            source,
-            ticks,
-            limits,
-            &format!("bench/{i}"),
-        )
-        .map_err(|err| format!("bench episode {i}: {err}"))?;
+        let e = driver::run_prepared(&prepared, &gru, ticks, limits, &format!("bench/{i}"))
+            .map_err(|err| format!("bench episode {i}: {err}"))?;
         ticks_done += e.ticks;
     }
     let single = t.elapsed().as_secs_f64();
@@ -252,25 +250,26 @@ pub fn bench(founder: String, ticks: u64, episodes: usize, workers: usize, sourc
     let t = Instant::now();
     std::thread::scope(|scope| {
         for _ in 0..workers {
-            scope.spawn(|| loop {
-                let i = cursor.fetch_add(1, Ordering::SeqCst);
-                if i >= jobs.len() {
-                    return;
-                }
-                match driver::run_prepared(
-                    &prepared,
-                    &gru,
-                    source,
-                    ticks,
-                    limits,
-                    &format!("bench-multi/{}", jobs[i]),
-                ) {
-                    Ok(e) => {
-                        done.fetch_add(e.ticks, Ordering::SeqCst);
+            scope.spawn(|| {
+                loop {
+                    let i = cursor.fetch_add(1, Ordering::SeqCst);
+                    if i >= jobs.len() {
+                        return;
                     }
-                    Err(EpisodeError::Cancelled { .. }) => return,
-                    Err(EpisodeError::Invalid { detail, .. }) => {
-                        panic!("bench episode invalid: {detail}");
+                    match driver::run_prepared(
+                        &prepared,
+                        &gru,
+                        ticks,
+                        limits,
+                        &format!("bench-multi/{}", jobs[i]),
+                    ) {
+                        Ok(e) => {
+                            done.fetch_add(e.ticks, Ordering::SeqCst);
+                        }
+                        Err(EpisodeError::Cancelled { .. }) => return,
+                        Err(EpisodeError::Invalid { detail, .. }) => {
+                            panic!("bench episode invalid: {detail}");
+                        }
                     }
                 }
             });
@@ -294,6 +293,7 @@ pub fn bench(founder: String, ticks: u64, episodes: usize, workers: usize, sourc
         ticks as f64 / (total / multi),
         HORIZON = task::HORIZON_TICKS,
     );
+    print_counter_state();
     Ok(())
 }
 
@@ -313,7 +313,6 @@ pub fn train(
     episode_limit: u64,
     train_seed: u64,
     center_eval: bool,
-    source: String,
     out: PathBuf,
 ) -> Result<(), Boxed> {
     let controller = controller.trim().to_ascii_lowercase();
@@ -326,7 +325,6 @@ pub fn train(
         .into());
     }
     let founder = parse_founder(&founder)?;
-    let source = parse_source(&source)?;
     if out.exists() && std::fs::read_dir(&out).map_or(false, |d| d.count() > 0) {
         return Err(format!(
             "{} already holds a run; pass --overwrite to discard it",
@@ -348,11 +346,10 @@ pub fn train(
         out: out.clone(),
     };
     let cancel = AtomicBool::new(false);
-    let report = trainer::train(&spec, source, &cancel)?;
+    let report = trainer::train(&spec, &cancel)?;
     println!();
     println!(
-        "# {} training — {} ({}), seed {train_seed}",
-        "voxel",
+        "# voxel training — {} ({}), seed {train_seed}",
         founder.name(),
         founder.role()
     );
@@ -381,13 +378,11 @@ pub fn train(
         println!();
         println!(
             "# no score spread: the candidates tied, so there was no ranking information \
-             and the gradient was zero. With the interim `self-only` observations and \
-             P1-B's action intake not yet landed, an idle body survives the horizon and \
-             every candidate scores its survival term. This is the expected state until \
-             the required P1-B/P1-C interfaces land, not a trained result."
+             and the gradient was zero."
         );
     }
     println!();
+    print_counter_state();
     println!("checkpoint {}", report.checkpoint);
     println!("wall {:.2} s", report.wall_seconds);
     println!(
@@ -411,7 +406,6 @@ pub fn evaluate(
     workers: usize,
     wall_seconds: u64,
     episode_limit: u64,
-    source: String,
     out: Option<PathBuf>,
 ) -> Result<(), Boxed> {
     if workers == 0 || workers > task::MAX_EPISODE_WORKERS {
@@ -445,7 +439,7 @@ pub fn evaluate(
             let control = match other {
                 "no-intake" => VoxelControl::NoIntake,
                 "stationary-feeding" => VoxelControl::StationaryFeeding,
-                "heuristic" => VoxelControl::Stub,
+                "heuristic" => VoxelControl::Heuristic,
                 "gru" => {
                     return Err("--controller gru needs --policy <path>".into());
                 }
@@ -460,22 +454,30 @@ pub fn evaluate(
             let named = founder.as_deref().ok_or_else(|| {
                 "--founder is required when a control runs (no policy names one)".to_string()
             })?;
-            (EpisodeDriver::Control(control), parse_founder(named)?)
+            (
+                EpisodeDriver::control(control, parse_founder(named)?),
+                parse_founder(named)?,
+            )
         }
     };
     let set = set.trim().to_ascii_lowercase();
     let seeds: &[u64] = match set.as_str() {
         "training" => &task::TRAINING_LAYOUT_SEEDS,
         "holdout" | "evaluation" => &task::EVALUATION_LAYOUT_SEEDS,
-        other => return Err(format!("unknown --set `{other}`; use `training` or `holdout`").into()),
+        other => {
+            return Err(format!("unknown --set `{other}`; use `training` or `holdout`").into());
+        }
     };
-    let source = parse_source(&source)?;
     let prepared_layouts = task::evaluation_layouts(founder)
         .into_iter()
         .chain(task::training_layouts(founder))
         .filter(|p| seeds.contains(&p.layout_seed))
         .collect::<Vec<_>>();
-    assert_eq!(prepared_layouts.len(), seeds.len(), "the frozen sets cover every seed");
+    assert_eq!(
+        prepared_layouts.len(),
+        seeds.len(),
+        "the frozen sets cover every seed"
+    );
 
     println!(
         "# voxel evaluate — {} ({}), driver `{}`, set `{set}`, {} layouts",
@@ -498,26 +500,27 @@ pub fn evaluate(
     let cursor = AtomicUsize::new(0);
     std::thread::scope(|scope| {
         for _ in 0..workers {
-            scope.spawn(|| loop {
-                let index = cursor.fetch_add(1, Ordering::SeqCst);
-                if index >= jobs.len() || Instant::now() >= deadline {
-                    return;
-                }
-                let (li, name) = &jobs[index];
-                match driver::run_prepared(
-                    &prepared_layouts[*li],
-                    &driver,
-                    source,
-                    horizon,
-                    super::driver::Limits::until(&cancel, deadline),
-                    name,
-                ) {
-                    Ok(e) => {
-                        slots.lock().expect("slots")[*li] = Some(e);
+            scope.spawn(|| {
+                loop {
+                    let index = cursor.fetch_add(1, Ordering::SeqCst);
+                    if index >= jobs.len() || Instant::now() >= deadline {
+                        return;
                     }
-                    Err(EpisodeError::Cancelled { .. }) => return,
-                    Err(EpisodeError::Invalid { detail, .. }) => {
-                        panic!("evaluation episode invalid: {detail}");
+                    let (li, name) = &jobs[index];
+                    match driver::run_prepared(
+                        &prepared_layouts[*li],
+                        &driver,
+                        horizon,
+                        super::driver::Limits::until(&cancel, deadline),
+                        name,
+                    ) {
+                        Ok(e) => {
+                            slots.lock().expect("slots")[*li] = Some(e);
+                        }
+                        Err(EpisodeError::Cancelled { .. }) => return,
+                        Err(EpisodeError::Invalid { detail, .. }) => {
+                            panic!("evaluation episode invalid: {detail}");
+                        }
                     }
                 }
             });
@@ -525,9 +528,11 @@ pub fn evaluate(
     });
     let slots = slots.into_inner()?;
     if slots.iter().any(Option::is_none) {
-        return Err("the evaluation was stopped by its wall cap before every layout ran; \
-                    raise --wall-seconds or lower --horizon"
-            .into());
+        return Err(
+            "the evaluation was stopped by its wall cap before every layout ran; \
+             raise --wall-seconds or lower --horizon"
+                .into(),
+        );
     }
 
     println!(
@@ -550,13 +555,15 @@ pub fn evaluate(
         rows.push(e.clone());
     }
     let mean_score = rows.iter().map(|e| e.score.score).sum::<f64>() / rows.len() as f64;
-    let mean_intake = rows.iter().map(|e| e.score.intake_normalized).sum::<f64>() / rows.len() as f64;
+    let mean_intake =
+        rows.iter().map(|e| e.score.intake_normalized).sum::<f64>() / rows.len() as f64;
     let alive = rows.iter().filter(|e| e.alive).count();
     println!();
     println!(
         "mean score {mean_score:.4}  mean intake {mean_intake:.4}  survived {alive}/{}",
         rows.len()
     );
+    print_counter_state();
     if let Some(path) = out {
         let report = serde_json::json!({
             "build_id": BUILD_ID,
@@ -565,6 +572,7 @@ pub fn evaluate(
             "set": set,
             "horizon_ticks": horizon,
             "workers": workers,
+            "counters": ScoreCounters::Landed,
             "rows": rows,
             "mean_score": mean_score,
             "mean_intake": mean_intake,
@@ -578,22 +586,4 @@ pub fn evaluate(
         println!("rows {}", path.join("evaluation.json").display());
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The source names parse, and an unknown name is refused with the two options.
-    #[test]
-    fn the_observation_source_names_parse() {
-        let self_only = parse_source("self-only").expect("ok");
-        let again = parse_source("self").expect("ok");
-        assert!(std::ptr::eq(self_only, again), "the same static, by every name");
-        let zeros = parse_source("zeros").expect("ok");
-        let again = parse_source("none").expect("ok");
-        assert!(std::ptr::eq(zeros, again));
-        assert!(!std::ptr::eq(self_only, zeros), "the two prototypes are distinct");
-        assert!(parse_source("chem").is_err());
-    }
 }

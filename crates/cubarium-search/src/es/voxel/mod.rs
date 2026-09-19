@@ -13,12 +13,15 @@
 //! - [`task`]: the frozen fixture — the two founders, the four training and eight
 //!   evaluation layout seeds, the episode/protocol bounds, and the immutable prepared
 //!   layout one episode clones its private mutable copy from.
-//! - [`driver`]: one episode — build or clone an arena, run the controller at the
-//!   manifest's cadence on a single simulation thread, to horizon or death, with the
-//!   cancellation flag and wall-clock deadline checked **inside** the loop.
-//! - [`controller`]: the one controller interface and its two bodies — the GRU
-//!   [`ShapePolicy`] wired through the voxel 3-action adapter, and the observation-only
-//!   diagnostic heuristic slot (a stub until P1-C lands the real samplers).
+//! - [`driver`]: one episode — build or clone an arena, **attach the episode's
+//!   controller through the fauna's own controller table** (`Fauna::set_controller`;
+//!   the fauna tick samples, holds and resolves), run on a single simulation thread to
+//!   horizon or death, with the cancellation flag and wall-clock deadline checked
+//!   **inside** the loop.
+//! - [`controller`]: the controller bodies the seam runs — a validated `ShapePolicy`
+//!   answering raw logits (the fauna's shared adapter transfers and deadbands them),
+//!   the two disclosed diagnostic controls, and the observation-only heuristic slot,
+//!   which is the fauna's own `BlindForager`/`BrowserForager`.
 //! - [`score`]: the capability-training score of the tests plan §2 and its components.
 //! - [`trainer`]: shape-aware antithetic pairs, bounded workers, cancellation that counts
 //!   its discarded work, and the run/checkpoint store.
@@ -33,9 +36,14 @@
 //!   they belong to arena tests and settlement, never to a controller input, an observation
 //!   or the reward. Everything the driver reads is the fauna view, the placed animal and
 //!   the ledger — read-only — plus the pose.
-//! - **A controller receives only the observation vector and its own memory.** That is a
-//!   type-level fact in [`controller::VoxelController::act`], not a convention: there is no
-//!   parameter through which a controller could reach the world.
+//! - **A controller receives only the observation vector and its own memory.** The fauna's
+//!   `Controller` trait enforces that by shape; this module adds only the digest
+//!   discipline and the bodies.
+//! - **The observation seam is the fauna's own.** The fauna tick builds each due
+//!   founder's observation (`body::observation`): real `Self`/contact/wet/taste channels
+//!   now, the P1-C channels (chem/light/cone) as valid zeros until that worker lands its
+//!   samplers there. There is deliberately no driver-side sampler for P1-C to replace —
+//!   the pluggable point moved into the fauna with the controller stage.
 //! - **One simulation thread per episode; at most four episode workers; no nested
 //!   parallelism.** Every episode runs its [`cubarium_voxel_sim::Sim`] with
 //!   `SimConfig { threads: 1 }`, so the fauna leg never enters the process-wide task pool
@@ -45,8 +53,8 @@
 //!
 //! [`voxel_schema_digest`] is the single integration boundary
 //! [`super::tensor::shape_policy`]'s doc anticipated: the driver passes the placed
-//! founder's [`cubarium_voxel_fauna::manifest::Manifest::digest`] and refuses a mismatch by
-//! name. A policy authored against one founder's schema is refused against the other's.
+//! founder's manifest digest and refuses a mismatch by name. A policy authored against
+//! one founder's schema is refused against the other's.
 
 use cubarium_voxel_fauna::Founder;
 
@@ -58,16 +66,19 @@ pub mod store;
 pub mod task;
 pub mod trainer;
 
-pub use controller::{EpisodeDriver, EpisodeGru, GruController, VoxelControl, VoxelController};
-pub use driver::{ActionIntake, Episode, EpisodeError, Limits};
-pub use score::{ScoreComponents, SURVIVAL_WEIGHT};
+pub use controller::{
+    EpisodeDriver, EpisodeGru, EpisodeKind, GruBlind, GruBrowser, GruPolicy, NoIntake,
+    StationaryFeeding, VoxelControl,
+};
+pub use driver::{Episode, EpisodeError, Limits, ScoreCounters};
+pub use score::{SURVIVAL_WEIGHT, ScoreComponents};
 pub use store::VoxelPolicyFile;
 pub use task::{
     EVALUATION_LAYOUT_SEEDS, HORIZON_TICKS, MAX_EPISODE_WORKERS, TRAINING_LAYOUT_SEEDS,
     TRAINING_SEED,
 };
 pub use trainer::{
-    Discarded, GenerationError, GenerationReport, GenerationPlan, Job, TrainReport, TrainSpec,
+    Discarded, GenerationError, GenerationPlan, GenerationReport, Job, TrainReport, TrainSpec,
     VoxelCheckpoint, VoxelProtocol,
 };
 
@@ -93,7 +104,7 @@ pub fn parse_founder(s: &str) -> Result<Founder, String> {
             return Err(format!(
                 "unknown founder `{other}`; use `blind` (littershredder) or `browser` \
                  (frondgrazer)"
-            ))
+            ));
         }
     })
 }
@@ -128,7 +139,10 @@ mod tests {
             Founder::Blind
         );
         assert_eq!(parse_founder("Browser").expect("role"), Founder::Browser);
-        assert_eq!(parse_founder("frondgrazer").expect("lineage"), Founder::Browser);
+        assert_eq!(
+            parse_founder("frondgrazer").expect("lineage"),
+            Founder::Browser
+        );
         assert!(parse_founder("frondgrazer ").is_ok(), "trims");
         assert!(parse_founder("krill").is_err());
     }

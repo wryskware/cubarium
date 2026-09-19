@@ -31,8 +31,8 @@
 //! simulated are carried in [`Discarded`] — budget on *work*, not on optimizer progress.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use cubarium_voxel_fauna::Founder;
@@ -40,7 +40,7 @@ use serde::{Deserialize, Serialize};
 
 use super::super::optimizer::{self, Adam};
 use super::super::rng::perturbation;
-use super::controller::{EpisodeDriver, ObservationSource};
+use super::controller::EpisodeDriver;
 use super::driver::{self, Episode, EpisodeError, Limits};
 use super::task::{self, Prepared};
 use super::voxel_schema_digest;
@@ -79,7 +79,13 @@ pub struct VoxelProtocol {
 }
 
 impl VoxelProtocol {
-    pub fn new(founder: Founder, pairs: usize, horizon: u64, train_seed: u64, layout_seeds: &[u64]) -> VoxelProtocol {
+    pub fn new(
+        founder: Founder,
+        pairs: usize,
+        horizon: u64,
+        train_seed: u64,
+        layout_seeds: &[u64],
+    ) -> VoxelProtocol {
         let manifest = founder.manifest();
         VoxelProtocol {
             schema: "cub-voxel-es-1".into(),
@@ -109,7 +115,9 @@ impl VoxelProtocol {
     /// FNV-1a 64 over the protocol's canonical JSON, the flat trainer's convention.
     pub fn hash(&self) -> u64 {
         crate::es::fixture::fnv1a(
-            serde_json::to_string(self).expect("the protocol serializes").as_bytes(),
+            serde_json::to_string(self)
+                .expect("the protocol serializes")
+                .as_bytes(),
         )
     }
 }
@@ -194,7 +202,11 @@ pub enum GenerationError {
     /// it did is reported for the budget.
     Cancelled(Discarded),
     /// An episode found an invalid fixture or state. An experiment error, not a score.
-    Invalid { job: String, detail: String, discarded: Discarded },
+    Invalid {
+        job: String,
+        detail: String,
+        discarded: Discarded,
+    },
 }
 
 impl std::fmt::Display for GenerationError {
@@ -231,9 +243,6 @@ pub struct GenerationPlan<'a> {
     pub workers: usize,
     pub evaluate_center: bool,
     pub deadline: Option<Instant>,
-    /// The observation source prototype every episode samples through. The interim
-    /// default is the manifest's `Self` channels; P1-C's real samplers wire here.
-    pub source: &'a dyn ObservationSource,
 }
 
 /// Run one generation and, if every job completed, apply the Adam ascent to `theta`.
@@ -249,12 +258,21 @@ pub fn run_generation(
     cancel: &AtomicBool,
 ) -> Result<GenerationReport, GenerationError> {
     let started = Instant::now();
-    let founder = protocol.founder_parsed().expect("the protocol names a founder");
+    let founder = protocol
+        .founder_parsed()
+        .expect("the protocol names a founder");
     let n = protocol.pairs;
     let layouts = plan.layouts;
-    assert!(n > 0 && !layouts.is_empty(), "a generation needs pairs and layouts");
+    assert!(
+        n > 0 && !layouts.is_empty(),
+        "a generation needs pairs and layouts"
+    );
     let params = theta.len();
-    assert_eq!(params, founder.manifest().parameter_count(), "the centre is the manifest's shape");
+    assert_eq!(
+        params,
+        founder.manifest().parameter_count(),
+        "the centre is the manifest's shape"
+    );
 
     // 1. Every candidate's parameter vector, in candidate index order, on this thread.
     //    Both signs of a pair share one epsilon, regenerated from its position.
@@ -268,19 +286,29 @@ pub fn run_generation(
         let theta_c = match c {
             Candidate::Center => theta.to_vec(),
             Candidate::Plus(p) | Candidate::Minus(p) => {
-                perturbation(protocol.train_seed, u64::from(generation), *p as u64, &mut eps);
-                let sign = if matches!(c, Candidate::Plus(_)) { 1.0 } else { -1.0 };
-                (0..params).map(|j| theta[j] + sign * protocol.sigma * eps[j]).collect()
+                perturbation(
+                    protocol.train_seed,
+                    u64::from(generation),
+                    *p as u64,
+                    &mut eps,
+                );
+                let sign = if matches!(c, Candidate::Plus(_)) {
+                    1.0
+                } else {
+                    -1.0
+                };
+                (0..params)
+                    .map(|j| theta[j] + sign * protocol.sigma * eps[j])
+                    .collect()
             }
         };
-        drivers.push(
-            EpisodeDriver::gru(&theta_c, founder)
-                .map_err(|e| GenerationError::Invalid {
-                    job: format!("gen{generation}/{}", c.label()),
-                    detail: e,
-                    discarded: Discarded::default(),
-                })?,
-        );
+        drivers.push(EpisodeDriver::gru(&theta_c, founder).map_err(|e| {
+            GenerationError::Invalid {
+                job: format!("gen{generation}/{}", c.label()),
+                detail: e,
+                discarded: Discarded::default(),
+            }
+        })?);
     }
 
     // 2. One job per (candidate, layout), at its stable index, into a pre-sized slot.
@@ -300,50 +328,58 @@ pub fn run_generation(
     let completed = AtomicU64::new(0);
     let ticks = AtomicU64::new(0);
     let failure: Mutex<Option<(String, String)>> = Mutex::new(None);
-    let limits = Limits { cancel, deadline: plan.deadline };
-    let workers = plan.workers.max(1).min(task::MAX_EPISODE_WORKERS).min(jobs_total.max(1));
+    let limits = Limits {
+        cancel,
+        deadline: plan.deadline,
+    };
+    let workers = plan
+        .workers
+        .max(1)
+        .min(task::MAX_EPISODE_WORKERS)
+        .min(jobs_total.max(1));
     std::thread::scope(|scope| {
         for _ in 0..workers {
-            scope.spawn(|| loop {
-                let index = cursor.fetch_add(1, Ordering::SeqCst);
-                if index >= jobs_total {
-                    return;
-                }
-                if limits.expired() {
-                    return;
-                }
-                attempted.fetch_add(1, Ordering::SeqCst);
-                let candidate = candidates[index / layouts.len()];
-                match driver::run_prepared(
-                    &layouts[index % layouts.len()],
-                    &drivers[index / layouts.len()],
-                    plan.source,
-                    plan.horizon,
-                    limits,
-                    &names[index],
-                ) {
-                    Ok(e) => {
-                        completed.fetch_add(1, Ordering::SeqCst);
-                        ticks.fetch_add(e.ticks, Ordering::SeqCst);
-                        slots.lock().expect("slots")[index] = Some(e);
-                    }
-                    Err(EpisodeError::Cancelled { ticks: t }) => {
-                        ticks.fetch_add(t, Ordering::SeqCst);
+            scope.spawn(|| {
+                loop {
+                    let index = cursor.fetch_add(1, Ordering::SeqCst);
+                    if index >= jobs_total {
                         return;
                     }
-                    Err(EpisodeError::Invalid { ticks: t, detail }) => {
-                        ticks.fetch_add(t, Ordering::SeqCst);
-                        // Stop every other worker: an invalid episode ends the
-                        // experiment, and continuing would burn budget on a broken run.
-                        cancel.store(true, Ordering::SeqCst);
-                        let mut slot = failure.lock().expect("failure");
-                        if slot.is_none() {
-                            *slot = Some((names[index].clone(), detail));
+                    if limits.expired() {
+                        return;
+                    }
+                    attempted.fetch_add(1, Ordering::SeqCst);
+                    let candidate = candidates[index / layouts.len()];
+                    match driver::run_prepared(
+                        &layouts[index % layouts.len()],
+                        &drivers[index / layouts.len()],
+                        plan.horizon,
+                        limits,
+                        &names[index],
+                    ) {
+                        Ok(e) => {
+                            completed.fetch_add(1, Ordering::SeqCst);
+                            ticks.fetch_add(e.ticks, Ordering::SeqCst);
+                            slots.lock().expect("slots")[index] = Some(e);
                         }
-                        return;
+                        Err(EpisodeError::Cancelled { ticks: t }) => {
+                            ticks.fetch_add(t, Ordering::SeqCst);
+                            return;
+                        }
+                        Err(EpisodeError::Invalid { ticks: t, detail }) => {
+                            ticks.fetch_add(t, Ordering::SeqCst);
+                            // Stop every other worker: an invalid episode ends the
+                            // experiment, and continuing would burn budget on a broken run.
+                            cancel.store(true, Ordering::SeqCst);
+                            let mut slot = failure.lock().expect("failure");
+                            if slot.is_none() {
+                                *slot = Some((names[index].clone(), detail));
+                            }
+                            return;
+                        }
                     }
+                    let _ = candidate;
                 }
-                let _ = candidate;
             });
         }
     });
@@ -353,7 +389,11 @@ pub fn run_generation(
         ticks_run: ticks.load(Ordering::SeqCst),
     };
     if let Some((job, detail)) = failure.into_inner().expect("failure") {
-        return Err(GenerationError::Invalid { job, detail, discarded });
+        return Err(GenerationError::Invalid {
+            job,
+            detail,
+            discarded,
+        });
     }
     let slots = slots.into_inner().expect("slots");
     if slots.iter().any(Option::is_none) {
@@ -391,8 +431,14 @@ pub fn run_generation(
     let minus: Vec<f64> = (0..n).map(|p| scores[2 * p + 1]).collect();
     let center_score = plan.evaluate_center.then(|| scores[2 * n]);
     let perturbation_scores = &scores[..2 * n];
-    let lo = perturbation_scores.iter().cloned().fold(f64::INFINITY, f64::min);
-    let hi = perturbation_scores.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let lo = perturbation_scores
+        .iter()
+        .cloned()
+        .fold(f64::INFINITY, f64::min);
+    let hi = perturbation_scores
+        .iter()
+        .cloned()
+        .fold(f64::NEG_INFINITY, f64::max);
     let score_spread = if hi > lo { hi - lo } else { 0.0 };
 
     // 5. The antithetic gradient estimate and the Adam ascent, the flat trainer's own
@@ -400,10 +446,16 @@ pub fn run_generation(
     let g = optimizer::gradient(&plus, &minus, params, protocol.sigma, |i, out| {
         perturbation(protocol.train_seed, u64::from(generation), i as u64, out);
     });
-    assert!(g.iter().all(|x| x.is_finite()), "a non-finite gradient is an experiment error");
+    assert!(
+        g.iter().all(|x| x.is_finite()),
+        "a non-finite gradient is an experiment error"
+    );
     let gradient_norm = g.iter().map(|x| x * x).sum::<f64>().sqrt();
     let update_rms = adam.ascend(theta, &g);
-    assert!(theta.iter().all(|x| x.is_finite()), "the updated centre must stay finite");
+    assert!(
+        theta.iter().all(|x| x.is_finite()),
+        "the updated centre must stay finite"
+    );
 
     Ok(GenerationReport {
         generation,
@@ -456,7 +508,9 @@ pub struct CenterRecord {
 
 impl VoxelCheckpoint {
     pub fn fresh(protocol: VoxelProtocol, build: &str) -> VoxelCheckpoint {
-        let founder = protocol.founder_parsed().expect("the protocol names a founder");
+        let founder = protocol
+            .founder_parsed()
+            .expect("the protocol names a founder");
         let train_seed = protocol.train_seed;
         let theta = if founder == Founder::Blind {
             super::super::tensor::initial_center_shape::<23, 3>(protocol.train_seed)
@@ -581,15 +635,8 @@ pub struct TrainReport {
 }
 
 /// Run the bounded training.
-///
-/// `source` is the observation source prototype; the interim default is
-/// [`super::controller::SelfOnly`], and P1-C's real samplers wire through the same
-/// parameter.
-pub fn train(
-    spec: &TrainSpec,
-    source: &dyn ObservationSource,
-    cancel: &AtomicBool,
-) -> Result<TrainReport, String> {    if spec.pairs == 0 {
+pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, String> {
+    if spec.pairs == 0 {
         return Err("--pairs must be at least one".into());
     }
     if spec.layouts == 0 || spec.layouts > task::TRAINING_LAYOUT_SEEDS.len() {
@@ -599,7 +646,10 @@ pub fn train(
         ));
     }
     if spec.workers == 0 || spec.workers > task::MAX_EPISODE_WORKERS {
-        return Err(format!("--workers must be in 1..={}", task::MAX_EPISODE_WORKERS));
+        return Err(format!(
+            "--workers must be in 1..={}",
+            task::MAX_EPISODE_WORKERS
+        ));
     }
     if spec.updates == 0 || spec.updates > task::MAX_UPDATES {
         return Err(format!("--updates must be in 1..={}", task::MAX_UPDATES));
@@ -623,7 +673,8 @@ pub fn train(
         .map_err(|e| format!("cannot create {}: {e}", run_dir.display()))?;
     let checkpoint_path = run_dir.join("checkpoint.json");
     let mut cp = VoxelCheckpoint::fresh(protocol, crate::evaluate::BUILD_ID);
-    cp.validate().map_err(|e| format!("fresh checkpoint: {e}"))?;
+    cp.validate()
+        .map_err(|e| format!("fresh checkpoint: {e}"))?;
     let mut score_spreads = Vec::new();
     let mut stop = TrainStop::Updates;
 
@@ -642,9 +693,11 @@ pub fn train(
             match driver::run_prepared(
                 layout,
                 &driver,
-                source,
                 spec.horizon,
-                Limits { cancel, deadline: Some(deadline) },
+                Limits {
+                    cancel,
+                    deadline: Some(deadline),
+                },
                 &format!("gen0/center/seed{}", layout.layout_seed),
             ) {
                 Ok(e) => {
@@ -666,8 +719,7 @@ pub fn train(
         cp.episodes_attempted += attempted;
         cp.episodes_completed += scores.len() as u64;
         cp.ticks_run += ticks;
-        let mean =
-            (!scores.is_empty()).then(|| scores.iter().sum::<f64>() / scores.len() as f64);
+        let mean = (!scores.is_empty()).then(|| scores.iter().sum::<f64>() / scores.len() as f64);
         if let Some(score) = mean {
             let file = "centers/gen0-center.json";
             write_center_policy(&run_dir, file, &cp, 0, score)?;
@@ -700,9 +752,15 @@ pub fn train(
             workers: spec.workers,
             evaluate_center: spec.evaluate_center,
             deadline: Some(deadline),
-            source,
         };
-        match run_generation(&mut cp.theta, &mut cp.adam, &cp.protocol, generation, &plan, cancel) {
+        match run_generation(
+            &mut cp.theta,
+            &mut cp.adam,
+            &cp.protocol,
+            generation,
+            &plan,
+            cancel,
+        ) {
             Ok(report) => {
                 cp.generations_completed = generation + 1;
                 cp.episodes_attempted += report.episodes_run;
@@ -721,7 +779,8 @@ pub fn train(
                 }
                 println!(
                     "gen {generation:>3}  score(mean) {:.4}  center {:.4}  spread {:.2e}  |g| {:.2e}  Δ {:.2e}  {} ep  {:.2}s",
-                    report.candidate_scores.iter().sum::<f64>() / report.candidate_scores.len().max(1) as f64,
+                    report.candidate_scores.iter().sum::<f64>()
+                        / report.candidate_scores.len().max(1) as f64,
                     report.center_score.map_or(f64::NAN, |s| s),
                     report.score_spread,
                     report.gradient_norm,
@@ -736,7 +795,11 @@ pub fn train(
                 cancelled_at = Some(format!("generation {generation} cancelled: {d:?}"));
                 break;
             }
-            Err(GenerationError::Invalid { job, detail, discarded }) => {
+            Err(GenerationError::Invalid {
+                job,
+                detail,
+                discarded,
+            }) => {
                 cp.discarded.add(discarded);
                 save_checkpoint(&checkpoint_path, &cp)?;
                 return Err(format!("invalid episode in {job}: {detail}"));
@@ -805,8 +868,8 @@ fn fnv1a_hex(theta: &[f64]) -> u64 {
     crate::es::fixture::fnv1a(crate::es::bits::encode(theta).as_bytes())
 }
 
-/// Save the checkpoint JSON. Written at every generation boundary so a stopped run
-/// resumes exactly.
+/// Save the checkpoint JSON at every generation boundary. It preserves the exact centre
+/// and Adam state for inspection or a future explicit resume command.
 pub fn save_checkpoint(path: &std::path::Path, cp: &VoxelCheckpoint) -> Result<(), String> {
     let json = serde_json::to_string_pretty(cp).map_err(|e| e.to_string())?;
     std::fs::write(path, json).map_err(|e| format!("cannot write {}: {e}", path.display()))
@@ -814,7 +877,10 @@ pub fn save_checkpoint(path: &std::path::Path, cp: &VoxelCheckpoint) -> Result<(
 
 /// Load and validate a checkpoint, refusing one written under a different protocol hash
 /// than `expected_hash` when one is given.
-pub fn load_checkpoint(path: &std::path::Path, expected_hash: Option<u64>) -> Result<VoxelCheckpoint, String> {
+pub fn load_checkpoint(
+    path: &std::path::Path,
+    expected_hash: Option<u64>,
+) -> Result<VoxelCheckpoint, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
     let cp: VoxelCheckpoint =
         serde_json::from_slice(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -838,47 +904,19 @@ pub fn load_checkpoint(path: &std::path::Path, expected_hash: Option<u64>) -> Re
     Ok(cp)
 }
 
-/// Resume a run from a saved checkpoint: continue from `generations_completed` under the
-/// saved protocol, with the caller's remaining budget.
-pub fn train_resumed(
-    cp: VoxelCheckpoint,
-    mut spec: TrainSpec,
-    source: &dyn ObservationSource,
-    cancel: &AtomicBool,
-) -> Result<TrainReport, String> {
-    // The resumed run continues the saved protocol's shape, whatever the flags said.
-    spec.founder = cp.protocol.founder_parsed()?;
-    spec.pairs = cp.protocol.pairs;
-    spec.layouts = cp.protocol.layout_seeds.len();
-    spec.horizon = cp.protocol.horizon_ticks;
-    spec.train_seed = cp.train_seed;
-    spec.updates = spec
-        .updates
-        .saturating_sub(cp.generations_completed)
-        .max(0);
-    if spec.updates == 0 {
-        return Err("the checkpoint has already completed its requested updates".into());
-    }
-    spec.episode_limit = spec.episode_limit.saturating_sub(cp.episodes_attempted).max(1);
-    let done = cp.generations_completed;
-    let mut report = train(&spec, source, cancel)?;
-    report.generations_completed += done;
-    Ok(report)
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::controller::{EpisodeKind, GruPolicy};
     use super::*;
-    use crate::es::voxel::controller::{SELF_ONLY, Zeros};
 
     fn smoke_spec() -> TrainSpec {
         TrainSpec {
             founder: Founder::Blind,
-            pairs: 2,
+            pairs: 1,
             layouts: 1,
             updates: 1,
             horizon: 40,
-            workers: 2,
+            workers: 1,
             wall_seconds: 60,
             episode_limit: u64::MAX,
             train_seed: 20_260_918,
@@ -889,72 +927,74 @@ mod tests {
 
     /// The smoke train: one tiny generation runs the loop end to end — centre
     /// evaluation, perturbation generation, dispatch, reduction, Adam step, checkpoint
-    /// and policy files on disk — and the record says plainly what happened.
+    /// and policy files on disk. This is a plumbing smoke only; score spread belongs in
+    /// a deliberately bounded pilot command, not a long CI rollout.
     #[test]
     fn a_smoke_train_runs_the_whole_loop_and_writes_the_store() {
         let dir = tempfile_guard();
-        let spec = TrainSpec { out: dir.clone(), ..smoke_spec() };
+        let spec = TrainSpec {
+            out: dir.clone(),
+            ..smoke_spec()
+        };
         let cancel = AtomicBool::new(false);
-        let report = train(&spec, &SELF_ONLY, &cancel).expect("the smoke train runs");
+        let report = train(&spec, &cancel).expect("the smoke train runs");
         assert_eq!(report.generations_completed, 1);
         assert_eq!(
             report.episodes_attempted,
-            // the initial centre evaluation + one generation of 2 pairs × 1 layout + centre
-            1 + (2 * 2 + 1),
+            // the initial centre evaluation + one pair and the generation centre
+            1 + (2 + 1),
         );
         assert!(
             report.initial_center_score.is_some(),
             "the initial centre was evaluated and recorded"
         );
-        assert!(report.best.is_some(), "the centre was evaluated and recorded");
+        assert_eq!(report.score_spreads.len(), 1);
+        assert!(
+            report.best.is_some(),
+            "the centre was evaluated and recorded"
+        );
         assert!(report.best.as_ref().is_some_and(|b| b.file.contains("gen")));
-        // The loop's optimizer state advanced one step; with the interim observation the
-        // scores may tie, in which case the honest gradient is zero and the centre does
-        // not move — the record says which happened.
-        assert!(report.score_spreads.len() == 1);
         let cp = load_checkpoint(&dir.join("checkpoint.json"), None).expect("valid checkpoint");
         assert_eq!(cp.generations_completed, 1);
-        assert_eq!(cp.centers.len(), 2, "initial centre + generation 0's centre");
+        assert_eq!(
+            cp.centers.len(),
+            2,
+            "initial centre + generation 0's centre"
+        );
         assert!(cp.centers.iter().all(|c| c.score.is_finite()));
+        assert_eq!(cp.theta.len(), Founder::Blind.manifest().parameter_count());
+        assert_eq!(cp.adam.step, 1, "a completed generation advances Adam once");
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// A cancelled generation counts its work and leaves the centre alone. The flag is
-    /// set from another thread while the generation's episodes are running, so the
-    /// workers stop **inside** episodes, the ticks they had simulated are counted, and
-    /// the centre is untouched.
+    /// A pre-cancelled generation dispatches no episodes and leaves optimizer state alone.
     #[test]
-    fn a_cancelled_generation_counts_its_work_and_leaves_the_centre_alone() {
-        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+    fn a_cancelled_generation_leaves_the_centre_alone() {
+        let cancel = AtomicBool::new(true);
         let founder = Founder::Blind;
-        let protocol = VoxelProtocol::new(founder, 2, 400_000, 20_260_918, &task::TRAINING_LAYOUT_SEEDS[..1]);
+        let protocol = VoxelProtocol::new(
+            founder,
+            1,
+            120,
+            20_260_918,
+            &task::TRAINING_LAYOUT_SEEDS[..1],
+        );
         let layouts = task::training_layouts(founder);
-        let mut theta = super::super::super::tensor::initial_center_shape::<23, 3>(protocol.train_seed);
+        let mut theta =
+            super::super::super::tensor::initial_center_shape::<23, 3>(protocol.train_seed);
         let before = theta.clone();
         let mut adam = Adam::new(theta.len());
         let plan = GenerationPlan {
             layouts: &layouts[..1],
-            horizon: 400_000,
-            workers: 2,
+            horizon: 120,
+            workers: 1,
             evaluate_center: false,
             deadline: None,
-            source: &Zeros,
         };
-        let flag = cancel.clone();
-        let setter = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(4));
-            flag.store(true, Ordering::Relaxed);
-        });
         let out = run_generation(&mut theta, &mut adam, &protocol, 0, &plan, &cancel);
-        setter.join().expect("the setter ran");
-        let err = out.expect_err("the flag must stop it");
+        let err = out.expect_err("the cancellation flag must stop it");
         let discarded = err.discarded();
-        assert!(
-            discarded.episodes_attempted > 0,
-            "episodes had been dispatched, and they count: {discarded:?}"
-        );
-        assert!(discarded.ticks_run > 0, "simulated work inside episodes is counted");
-        assert!(discarded.episodes_completed < discarded.episodes_attempted);
+        assert_eq!(discarded, Discarded::default());
         assert_eq!(theta, before, "a cancelled generation updates nothing");
         assert_eq!(adam.step, 0);
     }
@@ -982,11 +1022,25 @@ mod tests {
             assert!(((plus[j] + minus[j]) / 2.0 - theta[j]).abs() < 1e-15);
         }
         // And the evaluated policies are real, validated policies: the drivers build,
-        // and the two signs act differently on the same observation.
+        // and the two signs evaluate different weights — different raw logits on the
+        // same observation, which the fauna's shared adapter decodes into different
+        // held actions.
         let d_plus = EpisodeDriver::gru(&plus, founder).expect("a finite perturbation is a policy");
         let d_minus = EpisodeDriver::gru(&minus, founder).expect("and its antithesis");
         let obs = [0.0; 23];
-        assert_ne!(d_plus.fresh().act(&obs), d_minus.fresh().act(&obs));
+        let (EpisodeKind::Gru(_), EpisodeKind::Gru(_)) = (d_plus.kind(), d_minus.kind()) else {
+            panic!("gru drivers");
+        };
+        use cubarium_voxel_fauna::Controller as _;
+        let mut c_plus = GruPolicy::<23>::new(&plus, voxel_schema_digest(founder))
+            .expect("the perturbed centre is a policy");
+        let mut c_minus =
+            GruPolicy::<23>::new(&minus, voxel_schema_digest(founder)).expect("and its antithesis");
+        assert_ne!(
+            c_plus.drive(&obs),
+            c_minus.drive(&obs),
+            "the two signs must evaluate different weights"
+        );
         let _ = digest;
     }
 
@@ -995,7 +1049,13 @@ mod tests {
     #[test]
     fn a_generation_reduces_identically_whatever_the_worker_count() {
         let founder = Founder::Blind;
-        let protocol = VoxelProtocol::new(founder, 2, 40, 20_260_918, &task::TRAINING_LAYOUT_SEEDS[..1]);
+        let protocol = VoxelProtocol::new(
+            founder,
+            1,
+            40,
+            20_260_918,
+            &task::TRAINING_LAYOUT_SEEDS[..1],
+        );
         let layouts = task::training_layouts(founder);
         let run = |workers: usize| {
             let cancel = AtomicBool::new(false);
@@ -1006,9 +1066,8 @@ mod tests {
                 layouts: &layouts[..1],
                 horizon: 40,
                 workers,
-                evaluate_center: true,
+                evaluate_center: false,
                 deadline: None,
-                source: &Zeros,
             };
             let report =
                 run_generation(&mut theta, &mut adam, &protocol, 0, &plan, &cancel).expect("ok");

@@ -17,7 +17,7 @@
 //! function of its seed. Rebuilding from the seed stays available
 //! ([`Prepared::rebuilt`]) so the bench can measure the two setup paths against each other.
 
-use cubarium_voxel_fauna::Founder;
+use cubarium_voxel_fauna::{Founder, Senses};
 use cubarium_voxel_sim::Arena;
 
 /// The phase-one pilot's episode horizon: 1,200 ticks is 60 simulated seconds at 20 Hz
@@ -65,15 +65,20 @@ pub struct Prepared {
     pub founder: Founder,
     pub layout_seed: u64,
     arena: Arena,
+    /// The arena's settled cue field. Every episode clones it into its private simulator;
+    /// field settlement belongs to fixture preparation, never to every candidate rollout.
+    senses: Senses,
 }
 
 impl Prepared {
     /// Build the prepared layout: one [`Arena::build`], kept immutable.
     pub fn build(founder: Founder, layout_seed: u64) -> Prepared {
+        let arena = Arena::build(founder, layout_seed);
         Prepared {
             founder,
             layout_seed,
-            arena: Arena::build(founder, layout_seed),
+            senses: arena.prepare_senses(),
+            arena,
         }
     }
 
@@ -93,6 +98,11 @@ impl Prepared {
             resources: self.arena.resources.clone(),
             animal_id: self.arena.animal_id,
         }
+    }
+
+    /// A fresh copy of the settled cue field for one private episode simulator.
+    pub fn episode_senses(&self) -> Senses {
+        self.senses.clone()
     }
 
     /// A fresh arena rebuilt from the seed — the other setup path, measured beside the
@@ -127,7 +137,9 @@ impl std::fmt::Debug for Prepared {
 
 /// The training layout seeds, as [`Prepared`] layouts, in the frozen order.
 pub fn training_layouts(founder: Founder) -> Vec<Prepared> {
-    TRAINING_LAYOUT_SEEDS.map(|seed| Prepared::build(founder, seed)).into()
+    TRAINING_LAYOUT_SEEDS
+        .map(|seed| Prepared::build(founder, seed))
+        .into()
 }
 
 /// The evaluation layout seeds, as [`Prepared`] layouts, in the frozen order.
@@ -145,8 +157,15 @@ mod tests {
     /// keep food away from the wrapped seam as the plan says.
     #[test]
     fn the_frozen_seeds_avoid_the_seam_layout() {
-        for seed in TRAINING_LAYOUT_SEEDS.into_iter().chain(EVALUATION_LAYOUT_SEEDS) {
-            assert_ne!(seed % 4, 3, "seed {seed} is the arena's deliberate seam layout");
+        for seed in TRAINING_LAYOUT_SEEDS
+            .into_iter()
+            .chain(EVALUATION_LAYOUT_SEEDS)
+        {
+            assert_ne!(
+                seed % 4,
+                3,
+                "seed {seed} is the arena's deliberate seam layout"
+            );
         }
     }
 
@@ -177,7 +196,10 @@ mod tests {
     fn an_episode_leaves_the_prepared_layout_and_other_copies_untouched() {
         let p = Prepared::build(Founder::Blind, TRAINING_LAYOUT_SEEDS[0]);
         let before = p.fixture_arena().resource_stock();
-        assert!(before.is_finite() && before > 0.0, "a finite prepared stock");
+        assert!(
+            before.is_finite() && before > 0.0,
+            "a finite prepared stock"
+        );
         let site = p.fixture_arena().resources[0];
 
         // One episode copy consumes part of the stock through the fixture's settlement API.
