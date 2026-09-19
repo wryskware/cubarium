@@ -54,15 +54,16 @@ use cubarium_render::Canvas;
 use cubarium_surface::{Scale, Topology};
 use cubarium_voxel::{Command as VoxelCommand, Material, World};
 use cubarium_voxel_fauna::{
-    Command as FaunaCommand, Fauna, FaunaConfig, FaunaLedger, Species as Beast,
+    Command as FaunaCommand, Controller, Fauna, FaunaConfig, FaunaLedger, Founder, Response,
+    Species as Beast,
 };
 use cubarium_voxel_flora::{
     Command as FloraCommand, Flora, FloraConfig, FloraLedger, Site, Species,
 };
-use cubarium_voxel_sim::{Sim, SimConfig};
+use cubarium_voxel_sim::{Arena, Sim, SimConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::cli::{Voxel, VoxelSceneArg, VoxelSinkArg};
+use crate::cli::{Voxel, VoxelArenaArg, VoxelControllerArg, VoxelSceneArg, VoxelSinkArg};
 use crate::clock::{Clock, Step};
 use crate::sink::gpu::voxel::{VoxelGpuSink, VoxelGpuSinkOptions};
 use crate::sink::{FrameSink, GpuTargetKind, Output, PngSink, WebSink, WorldShape};
@@ -177,41 +178,89 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         None => "the built-in world defaults".to_string(),
     })?;
 
-    let mut world = match &args.load {
-        Some(path) => {
-            let bytes = std::fs::read(path)
-                .with_context(|| format!("reading the world {}", path.display()))?;
-            World::load(&bytes).with_context(|| format!("loading {}", path.display()))?
+    // The regular display remains its own coupled world. `--arena` is an explicit
+    // development mode which instead owns a frozen P1 sensing layout and a controller
+    // installed through fauna's ordinary controller boundary.
+    let sim_config = SimConfig {
+        threads: if cfg.threads == 0 {
+            SimConfig::default().threads
+        } else {
+            cfg.threads
+        },
+    };
+    let (mut sim, scene_label) = match args.arena {
+        Some(arena) => {
+            let (founder, driver) = sensing_driver(args, arena)?;
+            let mut arena = Arena::build(founder, args.arena_seed);
+            let senses = arena.prepare_senses();
+            let animal_id = arena
+                .animal_id
+                .ok_or_else(|| anyhow::anyhow!("sensing arena did not place its founder"))?;
+            let controller = driver.fresh();
+            let controller: Box<dyn Controller> = if args.arena_diagnostics {
+                Box::new(DiagnosticController::new(founder, controller))
+            } else {
+                controller
+            };
+            anyhow::ensure!(
+                arena.fauna.set_controller(animal_id, controller),
+                "sensing arena founder {animal_id} disappeared before its controller installed"
+            );
+            eprintln!(
+                "cubarium voxel: sensing arena {} seed {} with {}{}",
+                founder.name(),
+                args.arena_seed,
+                driver.name(),
+                if args.arena_diagnostics {
+                    " (controller diagnostics on stderr)"
+                } else {
+                    ""
+                },
+            );
+            (
+                arena.into_sim_prepared(SimConfig { threads: 1 }, senses),
+                format!("sensing {} arena seed {}", founder.name(), args.arena_seed),
+            )
         }
         None => {
-            let world_cfg = cfg.world.clone();
-            match args.scene {
-                VoxelSceneArg::Authored => scene::authored(world_cfg),
-                VoxelSceneArg::Generated => World::new(world_cfg),
+            let mut world = match &args.load {
+                Some(path) => {
+                    let bytes = std::fs::read(path)
+                        .with_context(|| format!("reading the world {}", path.display()))?;
+                    World::load(&bytes).with_context(|| format!("loading {}", path.display()))?
+                }
+                None => {
+                    let world_cfg = cfg.world.clone();
+                    match args.scene {
+                        VoxelSceneArg::Authored => scene::authored(world_cfg),
+                        VoxelSceneArg::Generated => World::new(world_cfg),
+                    }
+                }
+            };
+            let mut flora = Flora::new(FloraConfig::default());
+            let mut fauna = Fauna::new(FaunaConfig::default());
+            if !args.empty {
+                let seeded = habitat::seed(&mut world, &mut flora, &mut fauna);
+                eprintln!(
+                    "cubarium voxel: seeded the example habitat — {} stands, {} logs, {} frondgrazers \
+                     (--empty for a bare world)",
+                    seeded.stands, seeded.logs, seeded.animals
+                );
             }
+            let label = match (&args.load, args.scene) {
+                (Some(p), _) => p.display().to_string(),
+                (None, VoxelSceneArg::Authored) => "authored".to_string(),
+                (None, VoxelSceneArg::Generated) => "generated".to_string(),
+            };
+            (Sim::new(world, flora, fauna, sim_config), label)
         }
     };
-
-    // No `[flora]` table this round: both layers run on their own defaults, and the config
-    // file stays the presentation's plus the world's. Unless `--empty` asks otherwise, the
-    // layers start on the seeded example habitat ([`habitat`]) so a bare `--sink gpu` launch
-    // puts a living world on the screen without an `f` or a `g` typed at it.
-    let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
-    if !args.empty {
-        let seeded = habitat::seed(&mut world, &mut flora, &mut fauna);
-        eprintln!(
-            "cubarium voxel: seeded the example habitat — {} stands, {} logs, {} frondgrazers \
-             (--empty for a bare world)",
-            seeded.stands, seeded.logs, seeded.animals
-        );
-    }
 
     let proj = Projection::new(
         cfg.tilt_degrees,
         cfg.px_per_voxel,
         cfg.raster_height,
-        world.config(),
+        sim.world().config(),
     )?;
     let topology = Topology::Ring {
         w: proj.raster_w,
@@ -257,32 +306,16 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         }
     };
 
-    // The tick's backbone: the three layers become `cubarium-voxel-sim` resources and one
-    // chained schedule steps them, in the same order the three calls ran them in
-    // (`design/handoffs/voxel-schedule-brief-2026-09-18.md`). The thread count only ever
-    // splits work *inside* a phase.
-    let sim_config = SimConfig {
-        threads: if cfg.threads == 0 {
-            SimConfig::default().threads
-        } else {
-            cfg.threads
-        },
-    };
-    let mut sim = Sim::new(world, flora, fauna, sim_config);
     eprintln!(
         "cubarium voxel: tick schedule on {} thread(s)",
-        sim_config.threads
+        sim.config().threads
     );
 
     let c = sim.world().config().clone();
     eprintln!(
         "cubarium voxel: {} world {}x{}x{} at {} m/voxel -> ring:{}x{} \
          ({} px/voxel, tilt {:.0} deg, depth step {} px)",
-        match (&args.load, args.scene) {
-            (Some(p), _) => p.display().to_string(),
-            (None, VoxelSceneArg::Authored) => "authored".to_string(),
-            (None, VoxelSceneArg::Generated) => "generated".to_string(),
-        },
+        scene_label,
         c.width,
         c.height,
         c.depth,
@@ -405,6 +438,84 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         av.energy() - av.ledger.expected_energy(),
     );
     Ok(())
+}
+
+/// Select the exact controller body a sensing-arena run installs. Policy files validate
+/// their own founder and digest before handing out an [`EpisodeDriver`], so this host
+/// only has to reject a user spelling that asks a blind arena to run a browser policy.
+fn sensing_driver(
+    args: &Voxel,
+    arena: VoxelArenaArg,
+) -> Result<(Founder, cubarium_search::es::voxel::EpisodeDriver)> {
+    use cubarium_search::es::voxel::{EpisodeDriver, VoxelControl, VoxelPolicyFile};
+
+    let founder = match arena {
+        VoxelArenaArg::Blind => Founder::Blind,
+        VoxelArenaArg::Browser => Founder::Browser,
+    };
+    let driver = match args.controller {
+        VoxelControllerArg::Heuristic => EpisodeDriver::control(VoxelControl::Heuristic, founder),
+        VoxelControllerArg::NoIntake => EpisodeDriver::control(VoxelControl::NoIntake, founder),
+        VoxelControllerArg::StationaryFeeding => {
+            EpisodeDriver::control(VoxelControl::StationaryFeeding, founder)
+        }
+        VoxelControllerArg::Gru => {
+            let path = args
+                .policy
+                .as_ref()
+                .expect("Voxel::validate required --policy");
+            let policy = VoxelPolicyFile::load(path).map_err(anyhow::Error::msg)?;
+            let policy_founder = policy.founder().map_err(anyhow::Error::msg)?;
+            anyhow::ensure!(
+                policy_founder == founder,
+                "{} policy cannot run the {} arena",
+                policy_founder.name(),
+                founder.name(),
+            );
+            policy.driver().map_err(anyhow::Error::msg)?
+        }
+    };
+    Ok((founder, driver))
+}
+
+/// An opt-in stderr observer placed directly around the controller seam. It receives
+/// exactly the same packet as its wrapped controller, emits one line only when the
+/// founder's cadence calls `drive`, and never inspects world state or the target layout.
+struct DiagnosticController {
+    founder: Founder,
+    inner: Box<dyn Controller>,
+    samples: u64,
+}
+
+impl DiagnosticController {
+    fn new(founder: Founder, inner: Box<dyn Controller>) -> DiagnosticController {
+        DiagnosticController {
+            founder,
+            inner,
+            samples: 0,
+        }
+    }
+}
+
+impl Controller for DiagnosticController {
+    fn drive(&mut self, observation: &[f64]) -> Response {
+        let response = self.inner.drive(observation);
+        self.samples += 1;
+        let nonzero = observation.iter().filter(|v| **v != 0.0).count();
+        eprintln!(
+            "cubarium sensing: {} sample {} inputs={} nonzero={} response={response:?}",
+            self.founder.name(),
+            self.samples,
+            observation.len(),
+            nonzero,
+        );
+        response
+    }
+
+    fn reset(&mut self) {
+        self.samples = 0;
+        self.inner.reset();
+    }
 }
 
 /// Where the run's frames come from: the CPU presenter into a [`FrameSink`], or the

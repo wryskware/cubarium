@@ -107,6 +107,25 @@ pub struct Voxel {
     /// Which world to start from; ignored when `--load` names a snapshot.
     #[arg(long, value_enum, default_value_t = VoxelSceneArg::Authored)]
     pub scene: VoxelSceneArg,
+    /// Run the frozen phase-one sensing arena for this founder instead of the ambient
+    /// voxel world. This is an explicit development inspection mode.
+    #[arg(long, value_enum)]
+    pub arena: Option<VoxelArenaArg>,
+    /// Controller installed on the sensing-arena founder. `gru` requires `--policy`;
+    /// the other choices are disclosed diagnostic controls.
+    #[arg(long, value_enum, default_value_t = VoxelControllerArg::Heuristic)]
+    pub controller: VoxelControllerArg,
+    /// A validated voxel policy file, used only with `--arena … --controller gru`.
+    #[arg(long)]
+    pub policy: Option<PathBuf>,
+    /// Frozen arena layout seed. It changes the prepared layout, never the sensory
+    /// schema or controller interface.
+    #[arg(long, default_value_t = 1, requires = "arena")]
+    pub arena_seed: u64,
+    /// Print one bounded line per controller sample to stderr. This wraps the
+    /// controller boundary and does not add anything to the ambient display.
+    #[arg(long, requires = "arena")]
+    pub arena_diagnostics: bool,
     /// Start with the empty ecology instead of the seeded example habitat: no stands, no
     /// logs, no animals. `f` and `g` still populate it by hand; the harness-shaped run.
     #[arg(long, default_value_t = false)]
@@ -153,6 +172,33 @@ pub struct Voxel {
 impl Voxel {
     /// Reject flag combinations clap cannot express.
     pub fn validate(&self) -> anyhow::Result<()> {
+        if self.arena.is_none() {
+            anyhow::ensure!(
+                self.policy.is_none(),
+                "--policy belongs to `--arena … --controller gru`"
+            );
+            anyhow::ensure!(
+                self.controller == VoxelControllerArg::Heuristic,
+                "--controller belongs to `--arena …`"
+            );
+        } else {
+            anyhow::ensure!(
+                self.load.is_none() && !self.empty,
+                "--arena owns its frozen layout and cannot combine with --load or --empty"
+            );
+            match (self.controller, self.policy.is_some()) {
+                (VoxelControllerArg::Gru, true)
+                | (VoxelControllerArg::Heuristic, false)
+                | (VoxelControllerArg::NoIntake, false)
+                | (VoxelControllerArg::StationaryFeeding, false) => {}
+                (VoxelControllerArg::Gru, false) => {
+                    anyhow::bail!("--arena … --controller gru needs --policy <path>")
+                }
+                (_, true) => anyhow::bail!(
+                    "--policy requires --controller gru; controls do not load policy weights"
+                ),
+            }
+        }
         anyhow::ensure!(
             self.gpu_web_rate.is_finite() && self.gpu_web_rate >= 0.0 && self.gpu_web_rate <= 60.0,
             "--gpu-web-rate is frames per second for the viewer, 0 (none) to 60"
@@ -183,6 +229,22 @@ pub enum VoxelSceneArg {
     Authored,
     /// `cubarium_voxel::World::new`: the core's own generator.
     Generated,
+}
+
+/// Founder layout selected by the explicit phase-one sensing arena viewer.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VoxelArenaArg {
+    Blind,
+    Browser,
+}
+
+/// The controller choices exposed by the sensing-arena viewer.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VoxelControllerArg {
+    Heuristic,
+    NoIntake,
+    StationaryFeeding,
+    Gru,
 }
 
 /// Where `cubarium voxel` frames go. A ring raster, so no preview window.
@@ -685,6 +747,67 @@ mod tests {
             Command::Demo(d) => d,
             other => panic!("expected a demo command, got {other:?}"),
         }
+    }
+
+    /// Parse a `voxel` command line, panicking if it is not one.
+    fn voxel<const N: usize>(args: [&str; N]) -> Voxel {
+        match Cli::parse_from(args).command {
+            Command::Voxel(v) => v,
+            other => panic!("expected a voxel command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sensing_arena_selects_a_founder_and_a_disclosed_control() {
+        let v = voxel([
+            "cubarium",
+            "voxel",
+            "--arena",
+            "blind",
+            "--controller",
+            "stationary-feeding",
+            "--arena-seed",
+            "17",
+            "--arena-diagnostics",
+        ]);
+        assert_eq!(v.arena, Some(VoxelArenaArg::Blind));
+        assert_eq!(v.controller, VoxelControllerArg::StationaryFeeding);
+        assert_eq!(v.arena_seed, 17);
+        assert!(v.arena_diagnostics);
+        assert!(v.validate().is_ok());
+    }
+
+    #[test]
+    fn sensing_arena_refuses_a_policy_without_the_gru_selection() {
+        let v = voxel([
+            "cubarium",
+            "voxel",
+            "--arena",
+            "browser",
+            "--policy",
+            "best.json",
+        ]);
+        assert!(
+            v.validate()
+                .unwrap_err()
+                .to_string()
+                .contains("--controller gru")
+        );
+
+        let v = voxel([
+            "cubarium",
+            "voxel",
+            "--arena",
+            "browser",
+            "--controller",
+            "gru",
+        ]);
+        assert!(
+            v.validate()
+                .unwrap_err()
+                .to_string()
+                .contains("needs --policy")
+        );
     }
 
     /// Parse a `run` command line, panicking if it is not one.
