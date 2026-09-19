@@ -1466,10 +1466,9 @@ fn moving_a_resource_outside_sensing_range_changes_no_observation_value() {
 ///
 /// It is a half-voxel bias, not a lost signal, and the blind founder can still climb the
 /// gradient; but it is a direction-dependent distortion of the only remote sense the blind
-/// founder has, and the fix (centre the stencil on `pose/v - 0.5`) is one line. Ignored so
-/// it does not block the suite; run with `--ignored` to see the numbers.
+/// founder has. Fixed on main by centring the stencil on `pose/v - 0.5`; this test is the
+/// witness that it stays fixed.
 #[test]
-#[ignore = "P2-T finding: the cue stencil is cornered, not centred; run by name"]
 fn a_receptor_at_a_face_centre_reads_that_face_symmetrically() {
     let sample_at = |x: i64| {
         let world = flat(16, 3);

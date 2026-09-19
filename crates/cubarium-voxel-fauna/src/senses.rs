@@ -186,9 +186,13 @@ impl LitterField {
         if !self.graph.current(view) || !self.graph.has(c.index(wx, standing_y, cz)) {
             return None;
         }
+        // A node's value sits at its face centre, so the bilinear stencil is centred on
+        // `pose / v - 0.5`: a receptor at a face centre reads that node alone, and one
+        // between two centres blends them. Flooring the raw pose put the stencil's corner
+        // on the receptor and shifted the whole sampled field half a voxel (P2-T finding).
         let v = c.voxel_m;
-        let xf = pose.x / v;
-        let zf = pose.z / v;
+        let xf = pose.x / v - 0.5;
+        let zf = pose.z / v - 0.5;
         let x0 = xf.floor() as i64;
         let z0 = zf.floor() as i64;
         let (dx, dz) = (xf - x0 as f64, zf - z0 as f64);
