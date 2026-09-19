@@ -26,6 +26,19 @@ in the current-status paragraph and the linked research reports below.
 
 ## Current development status
 
+### Voxel sensing phase one — 2026-09-18
+
+The bounded voxel sensing pipeline is repaired and phase one is complete on the
+current branch (`35b1835`, followed by the resource-policy update `1258acc`).
+The blind and browser manifests have 23 and 37 inputs respectively and share
+three actions. The static viewer is available for inspection. On held-out
+layouts, the learned blind feeder acquired 7/8 targets and the browser acquired
+8/8; both survived 8/8 trials. Median scores were approximately 0.302 and 0.301,
+compared with 0.250 for the stationary baseline. These results close the narrow
+sensing slice and do not establish broader ecology or production readiness. The
+next bounded package is a two-patch depletion/reacquisition arena: consume the
+first patch, detect its disappearance, search again, and feed at the second.
+
 Updated 2026-09-13 after the owner-authorized cleanup and fresh-world restart.
 Use the [progress and fresh-thread task index](handoffs/README.md) for the current
 baseline, delivered features, evidence availability and six bounded work briefs.

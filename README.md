@@ -21,6 +21,17 @@ Priority as of this date: the ambient display comes first, the
 it, and game mode waits. `design_status` still marks all of this `leaning` or
 `exploration`; nothing here promotes a proposal to a decision.
 
+Voxel sensing phase one is complete on the current branch. The bounded sensing
+pipeline was repaired through commit `35b1835`, with its training resource
+ceiling recorded in `1258acc`. The blind and browser manifests have 23 and 37
+inputs respectively and share three actions; the static viewer is available for
+inspection. On held-out layouts, the learned blind feeder acquired 7/8 targets
+and the browser acquired 8/8; both survived 8/8 trials. Median scores were
+about 0.302 and 0.301, against 0.250 for the stationary baseline. This closes
+the narrow sensing slice only; it does not establish broader ecology or
+production readiness. The next bounded package is a two-patch
+depletion/reacquisition arena.
+
 Voxel terrain, water and the first plants and animals live in the
 `crates/cubarium-voxel*` crates. The round briefs under `design/handoffs/` and
 the dated notes under `design/7_Research/` record what each round established.
