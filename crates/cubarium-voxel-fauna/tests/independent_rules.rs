@@ -17,7 +17,8 @@ use std::sync::{Arc, Mutex};
 
 use cubarium_voxel::{Command as WorldCommand, Config, Material, World};
 use cubarium_voxel_fauna::{
-    Actions, Command, Controller, Fauna, FaunaConfig, Founder, Manifest, Response, Scripted, Senses,
+    Actions, Command, Controller, Fauna, FaunaConfig, Founder, Manifest, Response, Scripted,
+    Senses, StartingStores,
 };
 use cubarium_voxel_flora::{
     Command as FloraCommand, Deposit, DepositKind, Flora, FloraConfig, Site, Species as Plant,
@@ -103,6 +104,16 @@ fn founder_body(founder: Founder) -> f64 {
     0.5 * (core.body_min + core.body_max)
 }
 
+/// The same body, as the starting-stores fractions `IntroduceFounder` now takes: that
+/// body's share of `body_max`, with the full reserve these fixtures always had.
+fn founder_stores(founder: Founder) -> StartingStores {
+    let core = cubarium_voxel_fauna::FounderPhysiology::frozen(founder).core;
+    StartingStores {
+        body: founder_body(founder) / core.body_max,
+        reserve: 1.0,
+    }
+}
+
 /// A fauna layer with births disabled (the frozen arena contract) holding one founder at
 /// column `(x, z)` with heading `heading_rad`. Returns the layer and the body's id.
 fn one_founder(world: &World, founder: Founder, x: i64, z: u32, heading_rad: f64) -> (Fauna, u64) {
@@ -116,7 +127,7 @@ fn one_founder(world: &World, founder: Founder, x: i64, z: u32, heading_rad: f64
                 x,
                 z,
                 founder,
-                body: founder_body(founder),
+                stores: founder_stores(founder),
                 heading_rad,
             },
         ),
@@ -1239,7 +1250,7 @@ fn a_body_behind_the_rock_is_not_seen() {
                 x: 8,
                 z: 2,
                 founder: Founder::Browser,
-                body: founder_body(Founder::Browser),
+                stores: founder_stores(Founder::Browser),
                 heading_rad: 0.0,
             },
         ));

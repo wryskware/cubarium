@@ -41,6 +41,11 @@ pub struct VoxelPolicyFile {
     /// the food and are not this task's policies.
     #[serde(default)]
     pub start_heading: String,
+    /// How full the arenas introduced the founder when these weights were trained
+    /// ([`super::task::STARTING_STORES_PROTOCOL`]). Absent in a P2-B file, whose
+    /// founders arrived full and could only eat back their own upkeep.
+    #[serde(default)]
+    pub starting_stores: String,
     /// Which arena task the weights were trained on (`a` or `b`). Recorded, not
     /// validated: running a Stage-A centre on Stage B is a transfer measurement worth
     /// taking, not an error.
@@ -105,6 +110,20 @@ impl VoxelPolicyFile {
                 founder.name()
             ));
         }
+        if self.starting_stores != super::task::STARTING_STORES_PROTOCOL {
+            let had = if self.starting_stores.is_empty() {
+                "none (the founder arrived with a full body and a full reserve, so \
+                 eating could only repay its own upkeep)"
+            } else {
+                self.starting_stores.as_str()
+            };
+            return Err(format!(
+                "{name}: policy starting-stores protocol is {had}, this build's arena \
+                 uses `{}`: the task differs and the weights are not transferable. \
+                 Retrain.",
+                super::task::STARTING_STORES_PROTOCOL
+            ));
+        }
         if self.start_heading != super::task::START_HEADING_PROTOCOL {
             let had = if self.start_heading.is_empty() {
                 "none (a phase-one file: the founder was aimed at its food with a \
@@ -157,6 +176,7 @@ mod tests {
             generation: Some(3),
             score: Some(0.25),
             start_heading: crate::es::voxel::task::START_HEADING_PROTOCOL.into(),
+            starting_stores: crate::es::voxel::task::STARTING_STORES_PROTOCOL.into(),
             stage: crate::es::voxel::task::Stage::A.as_str().into(),
             theta,
         }
@@ -213,6 +233,14 @@ mod tests {
     /// task it never trained for.
     #[test]
     fn a_phase_one_centre_is_refused_because_its_start_was_a_different_task() {
+        // A P2-B centre: the heading was already freed, but its founder arrived full.
+        let mut file = sample(Founder::Blind);
+        file.starting_stores = String::new();
+        let err = file
+            .validate_named("gen27-center.json")
+            .expect_err("refused");
+        assert!(err.contains("full reserve"), "{err}");
+
         let mut file = sample(Founder::Blind);
         file.start_heading = String::new();
         let err = file

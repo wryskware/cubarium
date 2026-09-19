@@ -12,7 +12,7 @@ use cubarium_voxel_flora::{
 
 use cubarium_voxel_fauna::{
     Actions, Command as FaunaCommand, Controller, Fauna, FaunaConfig, Founder, Response, Scripted,
-    Senses,
+    Senses, StartingStores,
 };
 
 /// A flat world: 8 × 6 × 6 voxels at 0.25 m, soil 1..=2, ground support face at y = 2.
@@ -90,7 +90,7 @@ fn a_full_founder_pays_and_moves_on_the_held_actions() {
             x: 2,
             z: 2,
             founder: Founder::Blind,
-            body: 0.0125,
+            stores: StartingStores::FULL,
             heading_rad: std::f64::consts::FRAC_PI_2,
         },
     ));
@@ -160,7 +160,7 @@ fn a_due_field_update_reaches_the_controller_before_it_drives() {
             x: 2,
             z: 2,
             founder: Founder::Blind,
-            body: 0.0125,
+            stores: StartingStores::FULL,
             heading_rad: 0.0,
         },
     ));
@@ -210,7 +210,10 @@ fn a_litter_bite_debits_the_real_stock_exactly_once_per_interval() {
             x: 2,
             z: 2,
             founder: Founder::Blind,
-            body: 0.01,
+            stores: StartingStores {
+                body: 0.8,
+                reserve: 1.0
+            },
             heading_rad: 0.0,
         },
     ));
@@ -291,7 +294,10 @@ fn a_feed_off_food_transfers_nothing() {
             x: 2,
             z: 2,
             founder: Founder::Blind,
-            body: 0.01,
+            stores: StartingStores {
+                body: 0.8,
+                reserve: 1.0
+            },
             heading_rad: 0.0,
         },
     ));
@@ -344,7 +350,10 @@ fn a_browser_bite_crops_the_stand_it_touches() {
             x: 2,
             z: 2,
             founder: Founder::Browser,
-            body: 0.04,
+            stores: StartingStores {
+                body: 0.8,
+                reserve: 1.0
+            },
             heading_rad: 0.0,
         },
     ));
@@ -391,7 +400,7 @@ fn the_self_feedback_is_the_prior_interval_and_reset_once() {
             x: 2,
             z: 2,
             founder: Founder::Blind,
-            body: 0.0125,
+            stores: StartingStores::FULL,
             heading_rad: std::f64::consts::FRAC_PI_2,
         },
     ));
@@ -452,7 +461,7 @@ fn full_cruise_motor_respiration_equals_the_basal_rate() {
                 x: i64::from(x),
                 z: 2,
                 founder: Founder::Blind,
-                body: 0.0125,
+                stores: StartingStores::FULL,
                 heading_rad: 0.0,
             },
         ));
@@ -525,7 +534,7 @@ fn a_blocked_attempt_still_pays_the_motor_budget() {
             x: 2,
             z: 2,
             founder: Founder::Blind,
-            body: 0.0125,
+            stores: StartingStores::FULL,
             heading_rad: std::f64::consts::FRAC_PI_2,
         },
     ));
@@ -535,7 +544,7 @@ fn a_blocked_attempt_still_pays_the_motor_budget() {
             x: 2,
             z: 5,
             founder: Founder::Blind,
-            body: 0.0125,
+            stores: StartingStores::FULL,
             heading_rad: std::f64::consts::FRAC_PI_2,
         },
     ));
@@ -616,7 +625,10 @@ fn the_controller_receives_only_the_vector_and_it_stays_finite() {
             x: 2,
             z: 2,
             founder: Founder::Blind,
-            body: 0.01,
+            stores: StartingStores {
+                body: 0.8,
+                reserve: 1.0
+            },
             heading_rad: 0.0,
         },
     ));
@@ -658,7 +670,10 @@ fn the_snapshot_round_trips_a_founders_state_and_refuses_out_of_bounds_held_acti
             x: 2,
             z: 2,
             founder: Founder::Blind,
-            body: 0.01,
+            stores: StartingStores {
+                body: 0.8,
+                reserve: 1.0
+            },
             heading_rad: std::f64::consts::FRAC_PI_2,
         },
     ));
@@ -705,7 +720,10 @@ fn the_self_motion_channels_flow_from_resolved_motion() {
             x: 2,
             z: 2,
             founder: Founder::Blind,
-            body: 0.01,
+            stores: StartingStores {
+                body: 0.8,
+                reserve: 1.0
+            },
             heading_rad: std::f64::consts::FRAC_PI_2,
         },
     ));
@@ -757,7 +775,10 @@ fn the_self_motion_channels_flow_from_resolved_motion() {
             x: 2,
             z: 2,
             founder: Founder::Blind,
-            body: 0.01,
+            stores: StartingStores {
+                body: 0.8,
+                reserve: 1.0
+            },
             heading_rad: std::f64::consts::FRAC_PI_2,
         },
     ));
@@ -794,7 +815,10 @@ fn the_self_motion_channels_flow_from_resolved_motion() {
             x: 2,
             z: 2,
             founder: Founder::Blind,
-            body: 0.01,
+            stores: StartingStores {
+                body: 0.8,
+                reserve: 1.0
+            },
             heading_rad: std::f64::consts::FRAC_PI_2,
         },
     ));
@@ -854,7 +878,10 @@ fn the_motor_respiration_counter_and_the_ledger_split_track_one_interval() {
             x: 2,
             z: 2,
             founder: Founder::Blind,
-            body: 0.01,
+            stores: StartingStores {
+                body: 0.8,
+                reserve: 1.0
+            },
             heading_rad: std::f64::consts::FRAC_PI_2,
         },
     ));

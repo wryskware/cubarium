@@ -76,6 +76,17 @@ const LITTER_ENERGY_DENSITY: f64 = 2.0;
 /// How many resource tiles a default layout lays.
 const RESOURCE_TILES: usize = 6;
 
+/// How full an arena founder arrives: **half its structure and no reserve** (P2-C).
+///
+/// A founder introduced full has nowhere to put what it eats — settled intake can only
+/// replace the upkeep it already burned — which caps every episode at
+/// `0.25 + maintenance/reference` and leaves standing still within a hair of the best
+/// attainable score (P2-B's measurement: per-episode maxima of exactly 0.3100 at 1,200
+/// ticks and 0.3700 at 2,400). Half a body and an empty reserve is a whole
+/// `body_reference` of headroom. The live schedule's introductions are untouched.
+pub const FOUNDER_START: cubarium_voxel_fauna::StartingStores =
+    cubarium_voxel_fauna::StartingStores::HUNGRY;
+
 /// Deterministic scalar stream, splitmix64. No clock, no thread state.
 struct Rng(u64);
 
@@ -374,7 +385,6 @@ impl Arena {
         let manifest = founder.manifest();
         let mut animal_id = None;
         if let Some((site, target, _)) = start {
-            let body = manifest.body_reference;
             // The start heading (P2-B step 2). Phase one aimed both founders at the
             // in-signal resource with a +/-5 degree jitter, which made "go forward and
             // keep feeding" a winning open-loop policy and left sensing untested. The
@@ -401,7 +411,7 @@ impl Arena {
                     x: i64::from(site.x),
                     z: site.z,
                     founder,
-                    body,
+                    stores: FOUNDER_START,
                     heading_rad,
                 },
             ) {
@@ -558,6 +568,12 @@ mod tests {
                     .expect("an idle founder is placed");
                 assert_eq!(animal.founder, Some(founder));
                 assert!(arena.resources.iter().all(|r| *r != animal.site));
+                // P2-C: the arena's founder arrives hungry, so eating has somewhere to
+                // go. Half its structure, no reserve, one body_max of headroom.
+                let sc = cubarium_voxel_fauna::FounderPhysiology::frozen(founder).core;
+                assert_eq!(animal.body, 0.5 * sc.body_max, "{founder:?} seed {seed}");
+                assert_eq!(animal.reserve, 0.0, "{founder:?} seed {seed}");
+                assert!(animal.body > sc.body_min, "and it can still live");
             }
         }
     }
@@ -975,7 +991,10 @@ mod tests {
                         x: i64::from(stand_site.x),
                         z,
                         founder: Founder::Browser,
-                        body: 0.04,
+                        stores: cubarium_voxel_fauna::StartingStores {
+                            body: 0.8,
+                            reserve: 1.0,
+                        },
                         heading_rad: 0.0,
                     },
                 ));
@@ -1215,7 +1234,7 @@ mod tests {
                     x: i64::from(site.x),
                     z: site.z,
                     founder: Founder::Blind,
-                    body: 0.0125,
+                    stores: cubarium_voxel_fauna::StartingStores::FULL,
                     heading_rad: 0.0,
                 },
             ));
@@ -1328,7 +1347,7 @@ mod tests {
                         x: 8,
                         z: 4,
                         founder,
-                        body: founder.manifest().body_reference,
+                        stores: FOUNDER_START,
                         heading_rad: 0.0,
                     },
                 ));

@@ -1296,7 +1296,7 @@ mod tests {
                 x: 2,
                 z: 2,
                 founder: Founder::Blind,
-                body: 0.0125,
+                stores: crate::StartingStores::FULL,
                 heading_rad: H,
             },
         ));
@@ -1368,7 +1368,7 @@ mod tests {
                 x: 2,
                 z: 2,
                 founder: Founder::Browser,
-                body: 0.05,
+                stores: crate::StartingStores::FULL,
                 heading_rad: H,
             },
         ));

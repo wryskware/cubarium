@@ -673,13 +673,69 @@ pub enum Command {
         x: i64,
         z: u32,
         founder: Founder,
-        body: f64,
+        /// How full the body arrives ([`StartingStores`]). Unlike [`Command::Introduce`],
+        /// which always grows a full body outside the system, a founder may be placed
+        /// hungry — which is what makes eating worth anything to it.
+        stores: StartingStores,
         heading_rad: f64,
     },
     /// Take every animal off the highest support face of column `(x, z)`, booking their
     /// material as `removed_*_out`. No corpse: this is a frontend's undo, not a death.
     /// Refused if there is none.
     Remove { x: i64, z: u32 },
+}
+
+/// How full a founder body arrives, as fractions of what its physiology lets it hold.
+///
+/// Phase one introduced every founder at [`StartingStores::FULL`] — body at `body_max`
+/// and a full reserve — and P2-B measured what that costs: with no headroom, settled
+/// intake can only replace the upkeep the body already burned, so the whole score is
+/// capped at `0.25 + maintenance/reference` and standing still is within a hair of the
+/// best attainable episode. A body placed at [`StartingStores::HUNGRY`] has somewhere to
+/// put what it eats.
+///
+/// The manifest's `body_reference` is **not** this: it is the schema's fixed normaliser
+/// and does not move with the start state.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StartingStores {
+    /// Structure at introduction, as a fraction of the founder's `body_max`.
+    pub body: f64,
+    /// Reserve at introduction, as a fraction of the full reserve that much structure
+    /// carries (`reserve_cap · body`).
+    pub reserve: f64,
+}
+
+impl StartingStores {
+    /// Everything the body can hold: what [`Command::Introduce`] does, and what the
+    /// live schedule's founders keep.
+    pub const FULL: StartingStores = StartingStores {
+        body: 1.0,
+        reserve: 1.0,
+    };
+
+    /// The arenas' hungry founder (P2-C): half its structure and no reserve, so a whole
+    /// reference body of headroom is there to be eaten into.
+    pub const HUNGRY: StartingStores = StartingStores {
+        body: 0.5,
+        reserve: 0.0,
+    };
+
+    /// The absolute `(body, reserve)` these fractions mean for `sc`, or `None` when they
+    /// are not finite, not within `[0, 1]`, or the structure they ask for is below the
+    /// physiology's `body_min` — a body that cannot live is refused, not clamped.
+    pub fn resolve(&self, sc: &SpeciesConfig) -> Option<(f64, f64)> {
+        if !(self.body.is_finite() && (0.0..=1.0).contains(&self.body)) {
+            return None;
+        }
+        if !(self.reserve.is_finite() && (0.0..=1.0).contains(&self.reserve)) {
+            return None;
+        }
+        let body = self.body * sc.body_max;
+        if !(body >= sc.body_min) {
+            return None;
+        }
+        Some((body, self.reserve * sc.reserve_of(body)))
+    }
 }
 
 /// The animal layer. Owns its animals; borrows the world and the plant layer per call.
@@ -825,17 +881,24 @@ impl Fauna {
                 x,
                 z,
                 founder,
-                body,
+                stores,
                 heading_rad,
-            } => self.introduce(
-                world,
-                x,
-                z,
-                Species::Frondgrazer,
-                Some(founder),
-                body,
-                heading_rad,
-            ),
+            } => {
+                let core = self.config.founder(founder).core;
+                let Some((body, reserve)) = stores.resolve(&core) else {
+                    return false;
+                };
+                self.introduce_body(
+                    world,
+                    x,
+                    z,
+                    Species::Frondgrazer,
+                    Some(founder),
+                    body,
+                    Some(reserve),
+                    heading_rad,
+                )
+            }
             Command::Remove { x, z } => {
                 let view = world.view();
                 let Some(site) = cubarium_voxel_flora::highest_support(&view, x, z) else {
@@ -872,6 +935,24 @@ impl Fauna {
         body: f64,
         heading_rad: f64,
     ) -> bool {
+        self.introduce_body(world, x, z, species, founder, body, None, heading_rad)
+    }
+
+    /// The placement itself. `reserve` `None` is the full reserve `body` can carry — what
+    /// every live introduction does and did. `Some(r)` is an explicit starting reserve,
+    /// which only a founder introduction asks for.
+    #[allow(clippy::too_many_arguments)]
+    fn introduce_body(
+        &mut self,
+        world: &World,
+        x: i64,
+        z: u32,
+        species: Species,
+        founder: Option<Founder>,
+        body: f64,
+        reserve: Option<f64>,
+        heading_rad: f64,
+    ) -> bool {
         let view = world.view();
         let Some(site) = cubarium_voxel_flora::highest_support(&view, x, z) else {
             return false;
@@ -889,7 +970,10 @@ impl Fauna {
         if !heading_rad.is_finite() {
             return false;
         }
-        let reserve = sc.reserve_of(body);
+        let reserve = reserve.unwrap_or_else(|| sc.reserve_of(body));
+        if !(reserve.is_finite() && (0.0..=sc.reserve_of(body)).contains(&reserve)) {
+            return false;
+        }
         let organic = body + reserve;
         let pose = Pose {
             heading_rad,
@@ -1022,4 +1106,70 @@ pub fn steppable(
         });
     }
     out
+}
+
+#[cfg(test)]
+mod starting_stores_tests {
+    use super::*;
+
+    /// The fractions mean what they say against a founder's own physiology, and a body
+    /// that could not live is refused rather than clamped up to `body_min`.
+    #[test]
+    fn starting_stores_resolve_against_the_founders_own_physiology() {
+        for founder in Founder::ALL {
+            let sc = FounderPhysiology::frozen(founder).core;
+
+            let (body, reserve) = StartingStores::FULL.resolve(&sc).expect("full is valid");
+            assert_eq!(body, sc.body_max);
+            assert_eq!(reserve, sc.reserve_of(sc.body_max), "a full reserve");
+
+            let (body, reserve) = StartingStores::HUNGRY
+                .resolve(&sc)
+                .expect("hungry is valid");
+            assert_eq!(body, 0.5 * sc.body_max);
+            assert_eq!(reserve, 0.0, "hungry means no reserve at all");
+            // The headroom that buys: a whole body_max of organic matter to eat into.
+            let full = sc.body_max + sc.reserve_of(sc.body_max);
+            assert!(
+                ((full - body) - sc.body_max).abs() < 1e-15,
+                "{founder:?}: headroom {} is not one body_max",
+                full - body
+            );
+
+            // Below body_min, out of range, and non-finite are all refusals.
+            let too_small = StartingStores {
+                body: 0.5 * sc.body_min / sc.body_max,
+                reserve: 0.0,
+            };
+            assert!(too_small.resolve(&sc).is_none(), "a body under body_min");
+            for bad in [
+                StartingStores {
+                    body: 1.5,
+                    reserve: 0.0,
+                },
+                StartingStores {
+                    body: -0.1,
+                    reserve: 0.0,
+                },
+                StartingStores {
+                    body: 1.0,
+                    reserve: 1.5,
+                },
+                StartingStores {
+                    body: 1.0,
+                    reserve: -0.5,
+                },
+                StartingStores {
+                    body: f64::NAN,
+                    reserve: 0.0,
+                },
+                StartingStores {
+                    body: 1.0,
+                    reserve: f64::INFINITY,
+                },
+            ] {
+                assert!(bad.resolve(&sc).is_none(), "{bad:?} must be refused");
+            }
+        }
+    }
 }

@@ -62,6 +62,9 @@ pub struct VoxelProtocol {
     /// Which arena task the run trained on: `a` (acquire) or `b` (deplete and
     /// reacquire). Part of the hash — they are different tasks.
     pub stage: String,
+    /// How full the arenas introduced the founder ([`task::STARTING_STORES_PROTOCOL`]).
+    /// Part of the hash: a founder with no headroom is playing a different game.
+    pub starting_stores: String,
     /// The Stage-A start-heading convention the arenas were built under
     /// ([`task::START_HEADING_PROTOCOL`]). Part of the hash: aiming the founder at its
     /// food is a different task from placing it with a free heading.
@@ -101,6 +104,7 @@ impl VoxelProtocol {
             digest: voxel_schema_digest(founder),
             horizon_ticks: horizon,
             stage: stage.as_str().into(),
+            starting_stores: task::STARTING_STORES_PROTOCOL.into(),
             start_heading: task::START_HEADING_PROTOCOL.into(),
             pairs,
             sigma: optimizer::SIGMA,
@@ -868,6 +872,7 @@ fn write_center_policy(
         generation: Some(u64::from(generation)),
         score: Some(score),
         start_heading: cp.protocol.start_heading.clone(),
+        starting_stores: cp.protocol.starting_stores.clone(),
         stage: cp.protocol.stage.clone(),
         theta: cp.theta.clone(),
     };

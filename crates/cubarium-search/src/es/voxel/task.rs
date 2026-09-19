@@ -100,6 +100,12 @@ pub const EVALUATION_LAYOUT_SEEDS: [u64; 8] = [6, 8, 9, 10, 13, 14, 17, 18];
 /// policy file's own field.
 pub const START_HEADING_PROTOCOL: &str = "p2b-varied-1";
 
+/// How full this build's arenas introduce a founder (P2-C):
+/// `cubarium_voxel_sim::FOUNDER_START`, half the body and no reserve. A policy trained
+/// against a full start was trained where intake could only repay upkeep, which is a
+/// different task; it is refused rather than reinterpreted.
+pub const STARTING_STORES_PROTOCOL: &str = "p2c-half-body-no-reserve";
+
 /// The trainer's default train seed, in the trainer's own stream — its randomness never
 /// touches a world draw ([`super::trainer`]).
 pub const TRAINING_SEED: u64 = 20_260_918;
