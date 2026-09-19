@@ -626,10 +626,11 @@ pub fn evaluate(
     let mut scores: Vec<f64> = rows.iter().map(|e| e.score.score).collect();
     scores.sort_by(|a, b| a.partial_cmp(b).expect("finite"));
     let median = (scores[(scores.len() - 1) / 2] + scores[scores.len() / 2]) / 2.0;
-    let fed = rows
-        .iter()
-        .filter(|e| e.score.intake_normalized > 0.0)
-        .count();
+    // Acquisition is a real bite: gross organic that crossed the mouth, read off the
+    // ledger's own boundary counter. Settled intake is a conservation reading and
+    // carries float residue of order 1e-15, which must never be reported as a founder
+    // having found food.
+    let fed = rows.iter().filter(|e| e.eaten_organic > 0.0).count();
     println!();
     println!(
         "mean score {mean_score:.4}  median score {median:.4}  mean intake {mean_intake:.4}  \
