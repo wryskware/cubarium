@@ -238,7 +238,7 @@ impl GenerationError {
 pub struct GenerationPlan<'a> {
     pub layouts: &'a [Prepared],
     pub horizon: u64,
-    /// Episode workers, capped at [`super::task::MAX_EPISODE_WORKERS`] — one simulation
+    /// Episode workers, capped at [`super::task::episode_worker_limit`] — one simulation
     /// thread per episode, never nested episode/world parallelism.
     pub workers: usize,
     pub evaluate_center: bool,
@@ -335,7 +335,7 @@ pub fn run_generation(
     let workers = plan
         .workers
         .max(1)
-        .min(task::MAX_EPISODE_WORKERS)
+        .min(task::episode_worker_limit())
         .min(jobs_total.max(1));
     std::thread::scope(|scope| {
         for _ in 0..workers {
@@ -645,11 +645,9 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
             task::TRAINING_LAYOUT_SEEDS.len()
         ));
     }
-    if spec.workers == 0 || spec.workers > task::MAX_EPISODE_WORKERS {
-        return Err(format!(
-            "--workers must be in 1..={}",
-            task::MAX_EPISODE_WORKERS
-        ));
+    let worker_limit = task::episode_worker_limit();
+    if spec.workers == 0 || spec.workers > worker_limit {
+        return Err(format!("--workers must be in 1..={}", worker_limit));
     }
     if spec.updates == 0 || spec.updates > task::MAX_UPDATES {
         return Err(format!("--updates must be in 1..={}", task::MAX_UPDATES));

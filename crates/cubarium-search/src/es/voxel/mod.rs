@@ -44,10 +44,10 @@
 //!   now, the P1-C channels (chem/light/cone) as valid zeros until that worker lands its
 //!   samplers there. There is deliberately no driver-side sampler for P1-C to replace —
 //!   the pluggable point moved into the fauna with the controller stage.
-//! - **One simulation thread per episode; at most four episode workers; no nested
-//!   parallelism.** Every episode runs its [`cubarium_voxel_sim::Sim`] with
-//!   `SimConfig { threads: 1 }`, so the fauna leg never enters the process-wide task pool
-//!   while episode workers are running.
+//! - **One simulation thread per episode; the runtime worker ceiling reserves ten percent
+//!   of logical CPUs and stops at sixteen; no nested parallelism.** Every episode runs its
+//!   [`cubarium_voxel_sim::Sim`] with `SimConfig { threads: 1 }`, so the fauna leg never
+//!   enters the process-wide task pool while episode workers are running.
 //!
 //! # What the digest plug-in is
 //!
@@ -73,10 +73,7 @@ pub use controller::{
 pub use driver::{Episode, EpisodeError, Limits, ScoreCounters};
 pub use score::{SURVIVAL_WEIGHT, ScoreComponents};
 pub use store::VoxelPolicyFile;
-pub use task::{
-    EVALUATION_LAYOUT_SEEDS, HORIZON_TICKS, MAX_EPISODE_WORKERS, TRAINING_LAYOUT_SEEDS,
-    TRAINING_SEED,
-};
+pub use task::{EVALUATION_LAYOUT_SEEDS, HORIZON_TICKS, TRAINING_LAYOUT_SEEDS, TRAINING_SEED};
 pub use trainer::{
     Discarded, GenerationError, GenerationPlan, GenerationReport, Job, TrainReport, TrainSpec,
     VoxelCheckpoint, VoxelProtocol,

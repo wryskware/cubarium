@@ -79,7 +79,8 @@ logical CPU free, and apply a 64 GiB hard address-space limit to the training
 process. Check current system load before a long run and reduce concurrency if
 the machine is no longer otherwise idle. Keep the experiment's wall-time and
 episode limits; this resource allowance does not authorize unbounded searches
-or make ordinary tests larger.
+or make ordinary tests larger. The voxel episode trainer is capped at 16 workers:
+measurements on this machine showed diminishing returns above that point.
 
 ## Lean orchestration — correction, 2026-09-17
 

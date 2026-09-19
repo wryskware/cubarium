@@ -634,7 +634,7 @@ enum Command {
         ticks: u64,
     },
     /// Phase-one voxel slice (P1-D): episode throughput — setup cost, episodes/second at
-    /// one worker, and the same at up to four episode workers.
+    /// one worker, and the same at up to the current offline-training worker limit.
     VoxelBench {
         /// `blind` (littershredder) or `browser` (frondgrazer).
         #[arg(long, default_value = "blind")]
@@ -644,8 +644,9 @@ enum Command {
         /// Episodes per batch.
         #[arg(long, default_value_t = 8)]
         episodes: usize,
-        /// Episode workers for the parallel batch, at most four.
-        #[arg(long, default_value_t = 4)]
+        /// Episode workers for the parallel batch. The runtime limit reserves ten percent
+        /// of logical CPUs and stops at the measured sixteen-worker saturation point.
+        #[arg(long, default_value_t = cubarium_search::es::voxel::task::episode_worker_limit())]
         workers: usize,
     },
     /// Phase-one voxel slice (P1-D): the bounded ES run over one founder's manifest, with
@@ -668,8 +669,9 @@ enum Command {
         updates: u32,
         #[arg(long, default_value_t = cubarium_search::es::voxel::task::HORIZON_TICKS)]
         horizon: u64,
-        /// Episode workers, at most four, one simulation thread per episode.
-        #[arg(long, default_value_t = cubarium_search::es::voxel::task::MAX_EPISODE_WORKERS)]
+        /// Episode workers, one simulation thread per episode. The runtime limit reserves
+        /// ten percent of logical CPUs and stops at the measured sixteen-worker saturation point.
+        #[arg(long, default_value_t = cubarium_search::es::voxel::task::episode_worker_limit())]
         workers: usize,
         /// Wall cap in seconds (the plan allots one archetype up to eight minutes).
         #[arg(long, default_value_t = cubarium_search::es::voxel::task::DEFAULT_TRAIN_WALL_SECONDS)]
@@ -709,8 +711,9 @@ enum Command {
         set: String,
         #[arg(long, default_value_t = cubarium_search::es::voxel::task::HORIZON_TICKS)]
         horizon: u64,
-        /// Episode workers, at most four.
-        #[arg(long, default_value_t = cubarium_search::es::voxel::task::MAX_EPISODE_WORKERS)]
+        /// Episode workers. The runtime limit reserves ten percent of logical CPUs and
+        /// stops at the measured sixteen-worker saturation point.
+        #[arg(long, default_value_t = cubarium_search::es::voxel::task::episode_worker_limit())]
         workers: usize,
         #[arg(long, default_value_t = 300)]
         wall_seconds: u64,

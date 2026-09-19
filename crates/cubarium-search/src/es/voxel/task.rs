@@ -48,8 +48,22 @@ pub const CENTER_EVALUATIONS: usize = TRAINING_LAYOUT_SEEDS.len();
 /// Updates per archetype the pilot bounds itself to (plan §3).
 pub const MAX_UPDATES: u32 = 32;
 
-/// Episode workers the plan allows ("at most four, one simulation thread per episode").
-pub const MAX_EPISODE_WORKERS: usize = 4;
+/// The voxel trainer's measured saturation point. The machine-wide policy also reserves
+/// ten percent of logical CPUs, but this workload gains little beyond sixteen workers.
+pub const MAX_EPISODE_WORKERS: usize = 16;
+
+/// The available voxel episode workers: obey the machine-wide CPU reserve and the
+/// workload-specific saturation cap. Every episode itself stays single-threaded.
+pub fn episode_worker_limit() -> usize {
+    worker_limit_for(std::thread::available_parallelism().map_or(1, std::num::NonZero::get))
+        .min(MAX_EPISODE_WORKERS)
+}
+
+fn worker_limit_for(cpus: usize) -> usize {
+    let cpus = cpus.max(1);
+    let reserved = ((cpus + 9) / 10).max(1);
+    cpus.saturating_sub(reserved).max(1)
+}
 
 /// Wall seconds the plan allots one archetype's training ("up to eight minutes").
 pub const DEFAULT_TRAIN_WALL_SECONDS: u64 = 480;
@@ -167,6 +181,15 @@ mod tests {
                 "seed {seed} is the arena's deliberate seam layout"
             );
         }
+    }
+
+    #[test]
+    fn worker_limit_reserves_ten_percent_then_stops_at_measured_saturation() {
+        assert_eq!(worker_limit_for(1), 1);
+        assert_eq!(worker_limit_for(2), 1);
+        assert_eq!(worker_limit_for(10), 9);
+        assert_eq!(worker_limit_for(32).min(MAX_EPISODE_WORKERS), 16);
+        assert_eq!(worker_limit_for(128).min(MAX_EPISODE_WORKERS), 16);
     }
 
     /// The two setup paths prepare the identical arena: cloning the immutable layout and

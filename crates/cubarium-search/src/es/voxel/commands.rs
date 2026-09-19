@@ -11,15 +11,15 @@
 //! - [`check`]: arena validity for both founders across the training seeds, then a
 //!   controller smoke through the real driver — including the seam's own behavioural
 //!   check: the GRU must move the body, rest must not.
-//! - [`bench`]: measured setup cost (rebuild vs prepared-clone), episode throughput, and
-//!   one versus four episode workers.
+//! - [`bench`]: measured setup cost (rebuild vs prepared-clone) and episode throughput.
 //! - [`train`]: the bounded ES run ([`super::trainer::train`]).
 //! - [`evaluate`]: a saved policy or a disclosed control over the training or the
 //!   held-out layout set, with the score components per layout.
 //!
 //! The commands require arena/founder, controller, seed, episode limit, worker count and
-//! wall-time cap as applicable, and the worker count is capped at the plan's four
-//! everywhere. The score-counter state is named in every run's output.
+//! wall-time cap as applicable. The worker count reserves ten percent of logical CPUs and
+//! stops at the measured sixteen-worker saturation point everywhere. The score-counter
+//! state is named in every run's output.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -179,10 +179,11 @@ pub fn check(founder: Option<String>, seeds: usize, ticks: u64) -> Result<(), Bo
     }
 }
 
-/// `voxel-bench`: setup cost, episode throughput, one versus four episode workers.
+/// `voxel-bench`: setup cost and episode throughput at a bounded worker count.
 pub fn bench(founder: String, ticks: u64, episodes: usize, workers: usize) -> Result<(), Boxed> {
-    if workers == 0 || workers > task::MAX_EPISODE_WORKERS {
-        return Err(format!("--workers must be in 1..={}", task::MAX_EPISODE_WORKERS).into());
+    let worker_limit = task::episode_worker_limit();
+    if workers == 0 || workers > worker_limit {
+        return Err(format!("--workers must be in 1..={worker_limit}").into());
     }
     let founder = parse_founder(&founder)?;
     let prepared = task::Prepared::build(founder, task::TRAINING_LAYOUT_SEEDS[0]);
@@ -435,8 +436,9 @@ pub fn evaluate(
     episode_limit: u64,
     out: Option<PathBuf>,
 ) -> Result<(), Boxed> {
-    if workers == 0 || workers > task::MAX_EPISODE_WORKERS {
-        return Err(format!("--workers must be in 1..={}", task::MAX_EPISODE_WORKERS).into());
+    let worker_limit = task::episode_worker_limit();
+    if workers == 0 || workers > worker_limit {
+        return Err(format!("--workers must be in 1..={worker_limit}").into());
     }
     let controller = controller.trim().to_ascii_lowercase();
     let (driver, founder) = match (policy, controller.as_str()) {
