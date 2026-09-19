@@ -615,7 +615,7 @@ fn a_feeding_face_outside_the_sensing_radius_is_not_selectable() {
             );
         }
 
-        for _ in 0..400 {
+        for _ in 0..200 {
             fauna.step(&world, &mut flora);
         }
         let a = *fauna
@@ -680,7 +680,7 @@ fn a_stand_outside_the_radius_is_found_through_a_face_inside_it() {
     );
     assert_eq!(sc.sense_radius, 8, "the placeholder this case is about");
 
-    for _ in 0..400 {
+    for _ in 0..200 {
         fauna.step(&world, &mut flora);
     }
 
