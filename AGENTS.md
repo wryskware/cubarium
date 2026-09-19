@@ -25,6 +25,9 @@ relevant entries in design/0_Canon/DECISIONS.md.
   mapping. Consult its current contract and reuse its geometry helpers.
 - Keep the normal display free of analytical UI. Development diagnostics belong
   in explicit tools, captures, or logs.
+- Development windows opened in autonomous/agent runs must not steal focus or
+  re-tile the desktop workspace: pass `--background` (or set `CUBARIUM_FLOAT=1`)
+  to `./scripts/run-voxel.sh`.
 
 <!-- graft:start -->
 ## Graft — repo context graph
