@@ -231,3 +231,57 @@ are inside scope; nothing else in fauna is.
 Decision authority: the starting fractions if 0.5/0 turns out lethal at rest
 inside a horizon (state what you chose and why), test fixtures. Not yours: the
 score formula, manifests, action set, patch sizes and horizons from P2-B.
+
+## Integration note 2 (Fable, 2026-09-19, at 554a4c7)
+
+P2-C landed (6dd4b39, 554a4c7); workspace suite 1,915 passed, 1 skipped.
+Hungry start (0.5·body_max, reserve 0) raised the score ceiling from 0.31/0.37
+to about 1.3; rest-until-death is 693 s blind and 1,609 s browser, so nothing
+dies inside the horizons yet but death is reachable. Held out (mean / median /
+acquired of 8):
+
+| stage founder | gru | gru-ablated | heuristic | cruise |
+| --- | --- | --- | --- | --- |
+| A blind | .265/.237/3 | .236/.236/0 | .248/.235/4 | .253/.236/1 |
+| A browser | .373/.333/5 | .259/.238/4 | .489/.519/8 | .276/.263/4 |
+| B blind | .340/.217/3 | .256/.219/2 | .201/.182/2 | .237/.223/1 |
+| B browser | .403/.256/4 | .244/.220/1 | .461/.474/8 | .228/.223/1 |
+
+Sensing is now demonstrated for the browser on both stages and for blind B
+(ablated rows are constant across layouts; unablated wins by 0.11–0.16 mean).
+Blind A is the weak cell. All four cells still miss the ≥6/8 acquisition
+clause; per-layout scores are bimodal (about 0.22 when food is never reached,
+0.5–0.75 when it is). Stage B: first depletions ever (1/8 blind, 3/8 browser),
+reacquisition 0/8 everywhere. The browser heuristic acquires 8/8 with the same
+inputs, so for the browser the budget is provably attainable and the gap is
+search. Every training run used 1.6–3.7 s of a 900 s cap and selected a
+generation at or near the last, so the ES is starved by its own bounds.
+
+## Package P2-D: feed the search, then read the bimodality
+
+Owner: the same worker, high effort. Files: `crates/cubarium-search/src/es/voxel/*`,
+`crates/cubarium-search/src/main.rs`, arena layout-seed lists in `task.rs`
+only. No fauna, flora or arena model-rule changes.
+
+1. **Raise the ES bounds.** `DEFAULT_PAIRS` 8 → 32, `MAX_UPDATES` 64 → 512,
+   training layouts 4 → 16 fresh seeds (the held-out 8 stay untouched and
+   disjoint). Keep the wall cap at 900 s per run and the 16-worker cap; if a
+   run would exceed the cap at the measured episode rate, reduce updates first
+   and say so. The per-generation centre evaluation stays on.
+2. **Rerun the four pilots** and evaluate with the six controllers, same
+   tables as P2-C, plus Stage-B depletion and reacquisition counts. Report the
+   selected generation and whether the curve had flattened (last 64 updates
+   within the perturbation spread) or was still rising.
+3. **Read the bimodality.** For each cell, from the held-out rows and the
+   fixture-side geometry (start distance, heading offset from the bearing to
+   the initial patch, patch side), say what separates the found-food layouts
+   from the rest. Evaluator-side only; nothing enters an observation. If one
+   geometric factor explains most misses, name it and the arena change that
+   would test it; do not make that change.
+4. **Return (≤40 lines):** run costs, the four tables, per-cell verdict on the
+   tests-plan §4 target with the ablation and cruise evidence, the bimodality
+   reading, commits, commands, one next change with its evidence.
+
+Decision authority: exact seed lists, whether to spend remaining wall time on
+more updates or more pairs, the flattening criterion. Not yours: score,
+manifests, action set, start stores, patch sizes, horizons.
