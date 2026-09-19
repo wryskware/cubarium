@@ -61,7 +61,14 @@ use cubarium_voxel_fauna::{Fauna, Senses};
 use cubarium_voxel_flora::Flora;
 
 mod arena;
-pub use arena::{ARENA_DEPTH, ARENA_HEIGHT, ARENA_VOXEL_M, ARENA_WIDTH, Arena, GROUND_Y};
+pub use arena::{
+    ARENA_DEPTH, ARENA_HEIGHT, ARENA_VOXEL_M, ARENA_WIDTH, Arena, GROUND_Y,
+    REACQUISITION_LITTER_PER_PATCH, ReacquisitionArena,
+};
+/// A support face: the coordinate a resource patch, a stand and a deposit all live at.
+/// Re-exported so a caller holding an [`Arena`] can name its patch sites without
+/// depending on the plant layer directly.
+pub use cubarium_voxel_flora::Site;
 
 /// The static arena's per-arena sensory state as a bevy resource: the settled litter
 /// field and the trend stores, inserted by [`Sim::new_static`] (settled there, before

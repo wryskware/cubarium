@@ -41,6 +41,11 @@ pub struct VoxelPolicyFile {
     /// the food and are not this task's policies.
     #[serde(default)]
     pub start_heading: String,
+    /// Which arena task the weights were trained on (`a` or `b`). Recorded, not
+    /// validated: running a Stage-A centre on Stage B is a transfer measurement worth
+    /// taking, not an error.
+    #[serde(default)]
+    pub stage: String,
     /// The exact weights, in [`crate::es::tensor`]'s shape order for this founder.
     #[serde(with = "hex_f64s")]
     pub theta: Vec<f64>,
@@ -152,6 +157,7 @@ mod tests {
             generation: Some(3),
             score: Some(0.25),
             start_heading: crate::es::voxel::task::START_HEADING_PROTOCOL.into(),
+            stage: crate::es::voxel::task::Stage::A.as_str().into(),
             theta,
         }
     }

@@ -629,6 +629,9 @@ enum Command {
         /// How many of the frozen training layout seeds to check, from the front.
         #[arg(long, default_value_t = 4)]
         seeds: usize,
+        /// `a` (acquire) or `b` (deplete the first patch, then reacquire).
+        #[arg(long, default_value = "a")]
+        stage: String,
         /// Ticks per smoke episode.
         #[arg(long, default_value_t = 240)]
         ticks: u64,
@@ -639,6 +642,9 @@ enum Command {
         /// `blind` (littershredder) or `browser` (frondgrazer).
         #[arg(long, default_value = "blind")]
         founder: String,
+        /// `a` or `b`.
+        #[arg(long, default_value = "a")]
+        stage: String,
         #[arg(long, default_value_t = 1_200)]
         ticks: u64,
         /// Episodes per batch.
@@ -655,6 +661,10 @@ enum Command {
         /// `blind` (littershredder) or `browser` (frondgrazer).
         #[arg(long, default_value = "blind")]
         founder: String,
+        /// `a` (acquire) or `b` (deplete the first patch, then reacquire). Stage B
+        /// defaults to its own longer horizon.
+        #[arg(long, default_value = "a")]
+        stage: String,
         /// The training controller: `gru` is the only trainable body (the heuristic slot
         /// carries no parameters and is refused here by name).
         #[arg(long, default_value = "gru")]
@@ -664,11 +674,13 @@ enum Command {
         /// How many of the four frozen training layouts to run, from the front.
         #[arg(long, default_value_t = 4)]
         layouts: usize,
-        /// Updates, capped at the plan's 32.
+        /// Updates, capped at 64.
         #[arg(long, default_value_t = cubarium_search::es::voxel::task::MAX_UPDATES)]
         updates: u32,
-        #[arg(long, default_value_t = cubarium_search::es::voxel::task::HORIZON_TICKS)]
-        horizon: u64,
+        /// Episode horizon in ticks. Defaults to the stage's own (1,200 for A,
+        /// 2,400 for B).
+        #[arg(long)]
+        horizon: Option<u64>,
         /// Episode workers, one simulation thread per episode. The runtime limit reserves
         /// ten percent of logical CPUs and stops at the measured sixteen-worker saturation point.
         #[arg(long, default_value_t = cubarium_search::es::voxel::task::episode_worker_limit())]
@@ -711,11 +723,15 @@ enum Command {
         /// policy's own memory is untouched. No effect on a control.
         #[arg(long, default_value_t = false)]
         ablate_senses: bool,
+        /// `a` or `b`. Stage B also reports the reacquisition accounting.
+        #[arg(long, default_value = "a")]
+        stage: String,
         /// `training` or `holdout`. The held-out set is for validation only.
         #[arg(long, default_value = "holdout")]
         set: String,
-        #[arg(long, default_value_t = cubarium_search::es::voxel::task::HORIZON_TICKS)]
-        horizon: u64,
+        /// Episode horizon in ticks; defaults to the stage's own.
+        #[arg(long)]
+        horizon: Option<u64>,
         /// Episode workers. The runtime limit reserves ten percent of logical CPUs and
         /// stops at the measured sixteen-worker saturation point.
         #[arg(long, default_value_t = cubarium_search::es::voxel::task::episode_worker_limit())]
@@ -999,16 +1015,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::VoxelCheck {
             founder,
             seeds,
+            stage,
             ticks,
-        } => es::voxel::commands::check(founder, seeds, ticks),
+        } => es::voxel::commands::check(founder, stage, seeds, ticks),
         Command::VoxelBench {
             founder,
+            stage,
             ticks,
             episodes,
             workers,
-        } => es::voxel::commands::bench(founder, ticks, episodes, workers),
+        } => es::voxel::commands::bench(founder, stage, ticks, episodes, workers),
         Command::VoxelTrain {
             founder,
+            stage,
             controller,
             pairs,
             layouts,
@@ -1027,6 +1046,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             es::voxel::commands::train(
                 founder,
+                stage,
                 controller,
                 pairs,
                 layouts,
@@ -1045,6 +1065,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             founder,
             controller,
             ablate_senses,
+            stage,
             set,
             horizon,
             workers,
@@ -1056,6 +1077,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             founder,
             controller,
             ablate_senses,
+            stage,
             set,
             horizon,
             workers,

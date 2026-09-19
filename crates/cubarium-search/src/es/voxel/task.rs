@@ -18,12 +18,70 @@
 //! ([`Prepared::rebuilt`]) so the bench can measure the two setup paths against each other.
 
 use cubarium_voxel_fauna::{Founder, Senses};
-use cubarium_voxel_sim::Arena;
+use cubarium_voxel_sim::{Arena, Site};
 
 /// The phase-one pilot's episode horizon: 1,200 ticks is 60 simulated seconds at 20 Hz
 /// (`design/voxel-senses-phase1-tests.md` §2). "Ample for multiple body lengths without
 /// inheriting the old 36,000-tick campaign."
 pub const HORIZON_TICKS: u64 = 1_200;
+
+/// Stage B's horizon: 2,400 ticks, 120 simulated seconds.
+///
+/// Sized from the two legs the task actually has, at the plan's 1 BL/s cruise:
+///
+/// - **Deplete.** A Stage-B patch is a quarter of this — 30 s of full-effort feeding
+///   for either founder (`cubarium_voxel_sim::arena::REACQUISITION_LITTER_PER_PATCH`).
+/// - **Reacquire.** The successor stays at its landed 2 m minimum; the arena's widest
+///   separation is 4.85 m (16 wrapped columns by 11, at 0.25 m). At 1 BL/s that is
+///   16 s (blind, 0.125 m body) to 39 s in the worst layout, and 8-19 s for the
+///   browser's 0.25 m body. After the approach (about 10 s) and the 30 s of feeding,
+///   80 s remain: two to five times the straight-line cost, which is the room for
+///   searching. At the Stage-A horizon of 1,200 ticks the worst layout would leave
+///   15 s against a 39 s walk — not a task, a lottery.
+pub const STAGE_B_HORIZON_TICKS: u64 = 2_400;
+
+/// Which arena task a run uses.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Stage {
+    /// Acquire: the six-tile Stage-A layout, one off-food start inside the signal.
+    #[default]
+    A,
+    /// Persist and leave: two finite patches, the first small enough to run out
+    /// (`Arena::build_reacquisition`).
+    B,
+}
+
+impl Stage {
+    /// The stage's own default horizon.
+    pub fn horizon(self) -> u64 {
+        match self {
+            Stage::A => HORIZON_TICKS,
+            Stage::B => STAGE_B_HORIZON_TICKS,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Stage::A => "a",
+            Stage::B => "b",
+        }
+    }
+}
+
+/// A stage from a command-line name.
+pub fn parse_stage(s: &str) -> Result<Stage, String> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "a" | "acquire" | "stage-a" => Ok(Stage::A),
+        "b" | "reacquire" | "reacquisition" | "stage-b" => Ok(Stage::B),
+        other => Err(format!("unknown --stage `{other}`; use `a` or `b`")),
+    }
+}
+
+/// When the Stage-B evaluator calls the initial patch depleted: its stock has fallen
+/// below this fraction of what it started with. A tenth, not zero: the last crumbs of a
+/// patch are below one bite and a founder that keeps chewing them is no longer being fed
+/// by it.
+pub const DEPLETION_FRACTION: f64 = 0.1;
 
 /// The four training layout seeds. Chosen so **none** is a seam layout
 /// (`layout_seed % 4 == 3` is the arena's deliberate seam test, and the plan's default
@@ -54,7 +112,10 @@ pub const DEFAULT_PAIRS: usize = 8;
 pub const CENTER_EVALUATIONS: usize = TRAINING_LAYOUT_SEEDS.len();
 
 /// Updates per archetype the pilot bounds itself to (plan §3).
-pub const MAX_UPDATES: u32 = 32;
+/// Updates per archetype a run bounds itself to. The phase-one pilots were still
+/// climbing at the plan's 32 (blind best at update 26, browser at 31), so P2-B raises
+/// the ceiling to 64; the wall cap, not this, is what usually stops a run.
+pub const MAX_UPDATES: u32 = 64;
 
 /// The voxel trainer's measured saturation point. The machine-wide policy also reserves
 /// ten percent of logical CPUs, but this workload gains little beyond sixteen workers.
@@ -86,6 +147,11 @@ pub const DEFAULT_EPISODE_LIMIT: u64 = 2_180;
 pub struct Prepared {
     pub founder: Founder,
     pub layout_seed: u64,
+    pub stage: Stage,
+    /// Stage B's two patch sites, `(initial, successor)`. **Evaluator-only**: the
+    /// driver's epilogue reads their stocks to report reacquisition, and nothing on the
+    /// observation path ever sees them.
+    patches: Option<(Site, Site)>,
     arena: Arena,
     /// The arena's settled cue field. Every episode clones it into its private simulator;
     /// field settlement belongs to fixture preparation, never to every candidate rollout.
@@ -93,15 +159,34 @@ pub struct Prepared {
 }
 
 impl Prepared {
-    /// Build the prepared layout: one [`Arena::build`], kept immutable.
+    /// Build the prepared Stage-A layout: one [`Arena::build`], kept immutable.
     pub fn build(founder: Founder, layout_seed: u64) -> Prepared {
-        let arena = Arena::build(founder, layout_seed);
+        Prepared::build_stage(founder, layout_seed, Stage::A)
+    }
+
+    /// Build the prepared layout for `stage`, kept immutable.
+    pub fn build_stage(founder: Founder, layout_seed: u64, stage: Stage) -> Prepared {
+        let (arena, patches) = match stage {
+            Stage::A => (Arena::build(founder, layout_seed), None),
+            Stage::B => {
+                let (arena, initial, successor) =
+                    Arena::build_reacquisition(founder, layout_seed).into_parts();
+                (arena, Some((initial, successor)))
+            }
+        };
         Prepared {
             founder,
             layout_seed,
+            stage,
+            patches,
             senses: arena.prepare_senses(),
             arena,
         }
+    }
+
+    /// Stage B's `(initial, successor)` patch sites, for the evaluator's accounting.
+    pub fn patches(&self) -> Option<(Site, Site)> {
+        self.patches
     }
 
     /// A fresh **private mutable copy** of the arena for one episode: every mutable datum
@@ -130,7 +215,10 @@ impl Prepared {
     /// A fresh arena rebuilt from the seed — the other setup path, measured beside the
     /// clone path by the bench. Both must prepare the identical arena.
     pub fn rebuilt(&self) -> Arena {
-        Arena::build(self.founder, self.layout_seed)
+        match self.stage {
+            Stage::A => Arena::build(self.founder, self.layout_seed),
+            Stage::B => Arena::build_reacquisition(self.founder, self.layout_seed).into_arena(),
+        }
     }
 
     /// The placed founder's id, if the arena landed one.
@@ -150,6 +238,7 @@ impl std::fmt::Debug for Prepared {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Prepared")
             .field("founder", &self.arena.founder.name())
+            .field("stage", &self.stage.as_str())
             .field("layout_seed", &self.layout_seed)
             .field("animal_id", &self.arena.animal_id)
             .field("resources", &self.arena.resources.len())
@@ -157,17 +246,17 @@ impl std::fmt::Debug for Prepared {
     }
 }
 
-/// The training layout seeds, as [`Prepared`] layouts, in the frozen order.
-pub fn training_layouts(founder: Founder) -> Vec<Prepared> {
+/// The training layout seeds, as [`Prepared`] layouts of `stage`, in the frozen order.
+pub fn training_layouts(founder: Founder, stage: Stage) -> Vec<Prepared> {
     TRAINING_LAYOUT_SEEDS
-        .map(|seed| Prepared::build(founder, seed))
+        .map(|seed| Prepared::build_stage(founder, seed, stage))
         .into()
 }
 
-/// The evaluation layout seeds, as [`Prepared`] layouts, in the frozen order.
-pub fn evaluation_layouts(founder: Founder) -> Vec<Prepared> {
+/// The evaluation layout seeds, as [`Prepared`] layouts of `stage`, in the frozen order.
+pub fn evaluation_layouts(founder: Founder, stage: Stage) -> Vec<Prepared> {
     EVALUATION_LAYOUT_SEEDS
-        .map(|seed| Prepared::build(founder, seed))
+        .map(|seed| Prepared::build_stage(founder, seed, stage))
         .into()
 }
 

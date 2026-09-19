@@ -54,8 +54,21 @@ pub const GROUND_Y: u32 = 4;
 
 /// Fraction of a void cell a prepared pond cell is filled to.
 const POND_FILL: f64 = 0.8;
-/// Organic matter in one litter tile.
+/// Organic matter in one Stage-A litter tile.
 const LITTER_PER_TILE: f64 = 0.2;
+/// Organic matter in one **Stage-B** litter patch.
+///
+/// Stage B only means anything if the first patch actually runs out inside the horizon.
+/// The blind founder bites `bite_per_s = 0.0005` organic per second at full effort, so
+/// 0.015 is thirty seconds of uninterrupted feeding — a quarter of the Stage-B horizon
+/// (2,400 ticks = 120 s), leaving the rest of the episode for the successor leg. The
+/// Stage-A tile's 0.2 would take 400 s and could never deplete.
+///
+/// The cue pays for it: emission is `min(litter / 0.05, 1)` cue units per second, so a
+/// patch this size emits at 0.30 rather than the saturated 1.0 of a Stage-A tile. The
+/// gradient is weaker, not absent, and it is the honest consequence of a patch a founder
+/// can finish.
+pub const REACQUISITION_LITTER_PER_PATCH: f64 = 0.015;
 /// Litter mineral fraction (a plant tissue's order of magnitude).
 const LITTER_MINERAL_FRACTION: f64 = 0.02;
 /// Litter retained-energy density, at the litter energy cap.
@@ -293,7 +306,10 @@ impl Arena {
         for &site in &resources {
             match founder {
                 Founder::Blind => {
-                    let organic = LITTER_PER_TILE;
+                    let organic = match kind {
+                        LayoutKind::StageA => LITTER_PER_TILE,
+                        LayoutKind::Reacquisition => REACQUISITION_LITTER_PER_PATCH,
+                    };
                     let accepted = flora.deposit(
                         site,
                         Deposit {
@@ -306,6 +322,12 @@ impl Arena {
                     debug_assert!(accepted, "a litter deposit on a support face");
                 }
                 Founder::Browser => {
+                    // A half-grown springturf carries `alpha · W = 2.0 · 0.03 = 0.06`
+                    // of foliage, and the browser crops `bite_per_s = 0.002` organic per
+                    // second: thirty seconds, the same quarter of the Stage-B horizon the
+                    // blind patch is sized to. The browser therefore needs no separate
+                    // Stage-B size, and keeping the wood keeps the crown — and so the
+                    // ray fan's view of it — exactly as Stage A has it.
                     let wood = 0.5 * flora.config().species(Plant::Springturf).wood_max;
                     let accepted = flora.apply(
                         &world,
@@ -412,6 +434,18 @@ impl Arena {
                 Founder::Browser => fv.stand_at(site).map_or(0.0, |s| s.foliage),
             })
             .sum()
+    }
+
+    /// The live stock on **one** site of this arena's resource layout: litter organic
+    /// matter for a blind arena, stand foliage for a browser arena. The Stage-B
+    /// evaluator's per-patch reading; like [`Arena::resource_stock`] it is fixture
+    /// surface, never an observation or a reward.
+    pub fn patch_stock(&self, site: Site) -> f64 {
+        let fv = self.flora.view();
+        match self.founder {
+            Founder::Blind => fv.ground_at(site).map_or(0.0, |g| g.litter),
+            Founder::Browser => fv.stand_at(site).map_or(0.0, |s| s.foliage),
+        }
     }
 
     /// The placed founder's pose, if it landed.
@@ -676,6 +710,37 @@ mod tests {
         }
     }
 
+    /// Stage B's patches are sized so the first one actually runs out inside the
+    /// horizon: a founder biting at full effort from contact empties a patch in about a
+    /// quarter of the 2,400-tick Stage-B horizon. Checked as arithmetic on the real
+    /// stocks and the real bite rates, not by running two thousand ticks.
+    #[test]
+    fn a_stage_b_patch_is_a_quarter_horizon_of_feeding() {
+        for founder in Founder::ALL {
+            let stage = Arena::build_reacquisition(founder, 6);
+            let config = cubarium_voxel_fauna::FaunaConfig::default();
+            let bite_per_s = config.founder(founder).core.bite_per_s;
+            for patch in [stage.initial_patch, stage.successor_patch] {
+                let stock = stage.arena.patch_stock(patch);
+                let seconds = stock / bite_per_s;
+                assert!(
+                    (20.0..=40.0).contains(&seconds),
+                    "{founder:?}: a patch holding {stock} takes {seconds} s at \
+                     {bite_per_s}/s, which is not about a quarter of 120 s"
+                );
+            }
+            // And Stage A's tiles are deliberately not that: they cannot deplete.
+            let a = Arena::build(founder, 6);
+            let tile = a.patch_stock(a.resources[0]);
+            if founder == Founder::Blind {
+                assert!(
+                    tile / bite_per_s > 300.0,
+                    "a Stage-A litter tile should outlast any horizon: {tile}"
+                );
+            }
+        }
+    }
+
     /// The seeded Stage B placement always has enough dry support for two separated
     /// patches and an in-signal founder start. This is a construction sweep, not a long
     /// simulation study.
@@ -777,10 +842,7 @@ mod tests {
     }
 
     fn patch_stock(arena: &Arena, site: Site) -> f64 {
-        match arena.founder {
-            Founder::Blind => arena.flora.view().ground_at(site).map_or(0.0, |g| g.litter),
-            Founder::Browser => arena.flora.view().stand_at(site).map_or(0.0, |s| s.foliage),
-        }
+        arena.patch_stock(site)
     }
 
     fn module_channel(observation: &[f64], founder: Founder, module: &str, channel: &str) -> f64 {

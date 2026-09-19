@@ -30,6 +30,7 @@ use cubarium_voxel_fauna::Founder;
 use super::controller::{EpisodeDriver, VoxelControl};
 use super::driver::{self, EpisodeError, ScoreCounters};
 use super::task;
+use super::task::Stage;
 use super::trainer::{self, TrainSpec};
 use super::{parse_founder, voxel_schema_digest};
 use crate::evaluate::BUILD_ID;
@@ -45,14 +46,20 @@ fn print_counter_state() {
 }
 
 /// `voxel-check`: arena validity plus a heuristic/GRU smoke, through the real driver.
-pub fn check(founder: Option<String>, seeds: usize, ticks: u64) -> Result<(), Boxed> {
+pub fn check(
+    founder: Option<String>,
+    stage: String,
+    seeds: usize,
+    ticks: u64,
+) -> Result<(), Boxed> {
+    let stage = task::parse_stage(&stage)?;
     let founders: Vec<Founder> = match founder.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(name) => vec![parse_founder(name)?],
         None => Founder::ALL.into(),
     };
     let seeds = seeds.clamp(1, task::TRAINING_LAYOUT_SEEDS.len());
 
-    println!("# voxel phase-one arena check");
+    println!("# voxel arena check — stage {}", stage.as_str());
     println!("# build {BUILD_ID}");
     println!();
 
@@ -74,7 +81,7 @@ pub fn check(founder: Option<String>, seeds: usize, ticks: u64) -> Result<(), Bo
         //    APIs, because checking the fixture is what they exist for. The episode
         //    driver never reads them.
         for seed in &task::TRAINING_LAYOUT_SEEDS[..seeds] {
-            let prepared = task::Prepared::build(*f, *seed);
+            let prepared = task::Prepared::build_stage(*f, *seed, stage);
             let arena = prepared.fixture_arena();
             let stock = arena.resource_stock();
             let pose = arena.animal_pose();
@@ -100,7 +107,7 @@ pub fn check(founder: Option<String>, seeds: usize, ticks: u64) -> Result<(), Bo
         //    one short episode through the real driver on the first training layout —
         //    attached through the fauna's own controller table. The seam's behavioural
         //    check is in the table: the GRU must move the body, rest must not.
-        let prepared = task::Prepared::build(*f, task::TRAINING_LAYOUT_SEEDS[0]);
+        let prepared = task::Prepared::build_stage(*f, task::TRAINING_LAYOUT_SEEDS[0], stage);
         let start = prepared.fixture_arena().animal_pose().expect("placed");
         let cancel = AtomicBool::new(false);
         let theta = if *f == Founder::Blind {
@@ -173,7 +180,7 @@ pub fn check(founder: Option<String>, seeds: usize, ticks: u64) -> Result<(), Bo
     if failures == 0 {
         println!("check passed: both founders' arenas, GRU and controls run end to end.");
         println!();
-        println!("Next: voxel-bench, then voxel-train --founder blind --updates 2.");
+        println!("Next: voxel-bench, then voxel-train --founder blind --stage a --updates 2.");
         Ok(())
     } else {
         Err(format!("{failures} check failure(s) above").into())
@@ -181,13 +188,20 @@ pub fn check(founder: Option<String>, seeds: usize, ticks: u64) -> Result<(), Bo
 }
 
 /// `voxel-bench`: setup cost and episode throughput at a bounded worker count.
-pub fn bench(founder: String, ticks: u64, episodes: usize, workers: usize) -> Result<(), Boxed> {
+pub fn bench(
+    founder: String,
+    stage: String,
+    ticks: u64,
+    episodes: usize,
+    workers: usize,
+) -> Result<(), Boxed> {
+    let stage = task::parse_stage(&stage)?;
     let worker_limit = task::episode_worker_limit();
     if workers == 0 || workers > worker_limit {
         return Err(format!("--workers must be in 1..={worker_limit}").into());
     }
     let founder = parse_founder(&founder)?;
-    let prepared = task::Prepared::build(founder, task::TRAINING_LAYOUT_SEEDS[0]);
+    let prepared = task::Prepared::build_stage(founder, task::TRAINING_LAYOUT_SEEDS[0], stage);
     let theta = if founder == Founder::Blind {
         crate::es::tensor::initial_center_shape::<23, 3>(task::TRAINING_SEED)
     } else {
@@ -196,9 +210,10 @@ pub fn bench(founder: String, ticks: u64, episodes: usize, workers: usize) -> Re
     let gru = EpisodeDriver::gru(&theta, founder)?;
 
     println!(
-        "# voxel episode throughput — {} ({})",
+        "# voxel episode throughput — {} ({}), stage {}",
         founder.name(),
-        founder.role()
+        founder.role(),
+        stage.as_str(),
     );
     println!("# build {BUILD_ID}, {ticks} ticks per episode, controllers attached");
     println!();
@@ -207,7 +222,7 @@ pub fn bench(founder: String, ticks: u64, episodes: usize, workers: usize) -> Re
     let builds = 8;
     let t = Instant::now();
     for _ in 0..builds {
-        let _ = task::Prepared::build(founder, task::TRAINING_LAYOUT_SEEDS[0]);
+        let _ = task::Prepared::build_stage(founder, task::TRAINING_LAYOUT_SEEDS[0], stage);
     }
     let rebuild = t.elapsed().as_secs_f64() / builds as f64;
     let t = Instant::now();
@@ -291,9 +306,9 @@ pub fn bench(founder: String, ticks: u64, episodes: usize, workers: usize) -> Re
     println!(
         "A full-horizon ({HORIZON}) episode costs about {:.3} s of one worker's time, and \
          {:.3} s of wall time at {workers} workers.",
-        ticks as f64 / (ticks_done as f64 / single),
-        ticks as f64 / (total / multi),
-        HORIZON = task::HORIZON_TICKS,
+        stage.horizon() as f64 / (ticks_done as f64 / single),
+        stage.horizon() as f64 / (total / multi),
+        HORIZON = stage.horizon(),
     );
     print_counter_state();
     Ok(())
@@ -305,11 +320,12 @@ pub fn bench(founder: String, ticks: u64, episodes: usize, workers: usize) -> Re
 #[allow(clippy::too_many_arguments)]
 pub fn train(
     founder: String,
+    stage: String,
     controller: String,
     pairs: usize,
     layouts: usize,
     updates: u32,
-    horizon: u64,
+    horizon: Option<u64>,
     workers: usize,
     wall_seconds: u64,
     episode_limit: u64,
@@ -327,6 +343,8 @@ pub fn train(
         .into());
     }
     let founder = parse_founder(&founder)?;
+    let stage = task::parse_stage(&stage)?;
+    let horizon = horizon.unwrap_or_else(|| stage.horizon());
     if out.exists() && std::fs::read_dir(&out).map_or(false, |d| d.count() > 0) {
         return Err(format!(
             "{} already holds a run; pass --overwrite to discard it",
@@ -336,6 +354,7 @@ pub fn train(
     }
     let spec = TrainSpec {
         founder,
+        stage,
         pairs,
         layouts,
         updates,
@@ -351,9 +370,10 @@ pub fn train(
     let report = trainer::train(&spec, &cancel)?;
     println!();
     println!(
-        "# voxel training — {} ({}), seed {train_seed}",
+        "# voxel training — {} ({}), stage {}, horizon {horizon}, seed {train_seed}",
         founder.name(),
-        founder.role()
+        founder.role(),
+        stage.as_str(),
     );
     println!(
         "generations {}/{}  {}  episodes {} attempted / {} completed  ticks {}  \
@@ -373,7 +393,7 @@ pub fn train(
     let evaluation = report
         .best
         .as_ref()
-        .map(|best| evaluation_command(&out, founder, &best.file));
+        .map(|best| evaluation_command(&out, founder, stage, &best.file));
     if let Some(best) = &report.best {
         println!(
             "best centre: generation {} score {:.4} → {}",
@@ -397,12 +417,13 @@ pub fn train(
     Ok(())
 }
 
-fn evaluation_command(out: &Path, founder: Founder, best_file: &str) -> String {
+fn evaluation_command(out: &Path, founder: Founder, stage: Stage, best_file: &str) -> String {
     format!(
         "evaluate with: cargo run --release -p cubarium-search -- voxel-evaluate --policy \
-         {} --founder {} --set training",
+         {} --founder {} --stage {} --set training",
         out.join(best_file).display(),
         founder.name(),
+        stage.as_str(),
     )
 }
 
@@ -415,10 +436,12 @@ mod train_output_tests {
         let command = evaluation_command(
             Path::new("/tmp/voxel-pilot"),
             Founder::Browser,
+            Stage::B,
             "centers/gen7-center.json",
         );
         assert!(command.contains("/tmp/voxel-pilot/centers/gen7-center.json"));
         assert!(command.contains("--founder frondgrazer"));
+        assert!(command.contains("--stage b"));
         assert!(!command.contains("gen0-center.json"));
     }
 }
@@ -431,8 +454,9 @@ pub fn evaluate(
     founder: Option<String>,
     controller: String,
     ablate_senses: bool,
+    stage: String,
     set: String,
-    horizon: u64,
+    horizon: Option<u64>,
     workers: usize,
     wall_seconds: u64,
     episode_limit: u64,
@@ -442,6 +466,8 @@ pub fn evaluate(
     if workers == 0 || workers > worker_limit {
         return Err(format!("--workers must be in 1..={worker_limit}").into());
     }
+    let stage = task::parse_stage(&stage)?;
+    let horizon = horizon.unwrap_or_else(|| stage.horizon());
     let controller = controller.trim().to_ascii_lowercase();
     let (driver, founder) = match (policy, controller.as_str()) {
         (Some(path), "gru") => {
@@ -506,9 +532,9 @@ pub fn evaluate(
             return Err(format!("unknown --set `{other}`; use `training` or `holdout`").into());
         }
     };
-    let prepared_layouts = task::evaluation_layouts(founder)
+    let prepared_layouts = task::evaluation_layouts(founder, stage)
         .into_iter()
-        .chain(task::training_layouts(founder))
+        .chain(task::training_layouts(founder, stage))
         .filter(|p| seeds.contains(&p.layout_seed))
         .collect::<Vec<_>>();
     assert_eq!(
@@ -518,10 +544,11 @@ pub fn evaluate(
     );
 
     println!(
-        "# voxel evaluate — {} ({}), driver `{}`, set `{set}`, {} layouts",
+        "# voxel evaluate — {} ({}), driver `{}`, stage {}, set `{set}`, {} layouts",
         founder.name(),
         founder.role(),
         driver.name(),
+        stage.as_str(),
         seeds.len(),
     );
     println!("# build {BUILD_ID}, horizon {horizon}, workers {workers}");
@@ -596,18 +623,66 @@ pub fn evaluate(
     let mean_intake =
         rows.iter().map(|e| e.score.intake_normalized).sum::<f64>() / rows.len() as f64;
     let alive = rows.iter().filter(|e| e.alive).count();
+    let mut scores: Vec<f64> = rows.iter().map(|e| e.score.score).collect();
+    scores.sort_by(|a, b| a.partial_cmp(b).expect("finite"));
+    let median = (scores[(scores.len() - 1) / 2] + scores[scores.len() / 2]) / 2.0;
+    let fed = rows
+        .iter()
+        .filter(|e| e.score.intake_normalized > 0.0)
+        .count();
     println!();
     println!(
-        "mean score {mean_score:.4}  mean intake {mean_intake:.4}  survived {alive}/{}",
+        "mean score {mean_score:.4}  median score {median:.4}  mean intake {mean_intake:.4}  \
+         acquired {fed}/{}  survived {alive}/{}",
+        rows.len(),
         rows.len()
     );
+
+    // Stage B's accounting, reported *beside* the score and never inside it.
+    let reacquisition: Vec<_> = rows.iter().filter_map(|e| e.reacquisition).collect();
+    if !reacquisition.is_empty() {
+        println!();
+        println!(
+            "{:<8} {:>11} {:>11} {:>10} {:>12} {:>12}",
+            "seed", "patch1-take", "patch2-take", "depleted", "first-bite2", "reacquired"
+        );
+        for (seed, r) in seeds.iter().zip(&reacquisition) {
+            let tick = |t: Option<u64>| t.map_or("-".into(), |t| t.to_string());
+            println!(
+                "{:<8} {:>11.5} {:>11.5} {:>10} {:>12} {:>12}",
+                seed,
+                r.initial_taken,
+                r.successor_taken,
+                tick(r.depleted_tick),
+                tick(r.successor_first_bite_tick),
+                r.reacquired,
+            );
+        }
+        let depleted = reacquisition
+            .iter()
+            .filter(|r| r.depleted_tick.is_some())
+            .count();
+        let touched = reacquisition
+            .iter()
+            .filter(|r| r.successor_first_bite_tick.is_some())
+            .count();
+        let reacquired = reacquisition.iter().filter(|r| r.reacquired).count();
+        println!(
+            "initial patch depleted (below {:.0}% of its start) {depleted}/{n}  \
+             successor bitten {touched}/{n}  reacquired {reacquired}/{n}",
+            100.0 * task::DEPLETION_FRACTION,
+            n = reacquisition.len(),
+        );
+    }
     print_counter_state();
     if let Some(path) = out {
         let report = serde_json::json!({
             "build_id": BUILD_ID,
             "founder": founder.name(),
             "driver": driver.name(),
+            "stage": stage.as_str(),
             "set": set,
+            "median_score": median,
             "horizon_ticks": horizon,
             "workers": workers,
             "counters": ScoreCounters::Landed,

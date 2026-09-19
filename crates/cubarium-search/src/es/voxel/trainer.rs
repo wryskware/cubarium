@@ -42,7 +42,7 @@ use super::super::optimizer::{self, Adam};
 use super::super::rng::perturbation;
 use super::controller::EpisodeDriver;
 use super::driver::{self, Episode, EpisodeError, Limits};
-use super::task::{self, Prepared};
+use super::task::{self, Prepared, Stage};
 use super::voxel_schema_digest;
 
 /// The checkpoint's schema token.
@@ -59,6 +59,9 @@ pub struct VoxelProtocol {
     /// The manifest digest every candidate policy was validated against.
     pub digest: u64,
     pub horizon_ticks: u64,
+    /// Which arena task the run trained on: `a` (acquire) or `b` (deplete and
+    /// reacquire). Part of the hash — they are different tasks.
+    pub stage: String,
     /// The Stage-A start-heading convention the arenas were built under
     /// ([`task::START_HEADING_PROTOCOL`]). Part of the hash: aiming the founder at its
     /// food is a different task from placing it with a free heading.
@@ -85,6 +88,7 @@ pub struct VoxelProtocol {
 impl VoxelProtocol {
     pub fn new(
         founder: Founder,
+        stage: Stage,
         pairs: usize,
         horizon: u64,
         train_seed: u64,
@@ -96,6 +100,7 @@ impl VoxelProtocol {
             founder: founder.name().into(),
             digest: voxel_schema_digest(founder),
             horizon_ticks: horizon,
+            stage: stage.as_str().into(),
             start_heading: task::START_HEADING_PROTOCOL.into(),
             pairs,
             sigma: optimizer::SIGMA,
@@ -585,6 +590,7 @@ impl VoxelCheckpoint {
 /// counts against `spec.episode_limit`.
 pub struct TrainSpec {
     pub founder: Founder,
+    pub stage: Stage,
     pub pairs: usize,
     /// How many of the frozen training layouts to run, from the front.
     pub layouts: usize,
@@ -665,12 +671,13 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
     let deadline = started + Duration::from_secs(spec.wall_seconds.max(1));
     let protocol = VoxelProtocol::new(
         spec.founder,
+        spec.stage,
         spec.pairs,
         spec.horizon,
         spec.train_seed,
         &task::TRAINING_LAYOUT_SEEDS[..spec.layouts],
     );
-    let layouts = task::training_layouts(spec.founder);
+    let layouts = task::training_layouts(spec.founder, spec.stage);
     let run_dir = spec.out.clone();
     std::fs::create_dir_all(run_dir.join("centers"))
         .map_err(|e| format!("cannot create {}: {e}", run_dir.display()))?;
@@ -861,6 +868,7 @@ fn write_center_policy(
         generation: Some(u64::from(generation)),
         score: Some(score),
         start_heading: cp.protocol.start_heading.clone(),
+        stage: cp.protocol.stage.clone(),
         theta: cp.theta.clone(),
     };
     file.write(&run_dir.join(relative))
@@ -916,6 +924,7 @@ mod tests {
     fn smoke_spec() -> TrainSpec {
         TrainSpec {
             founder: Founder::Blind,
+            stage: Stage::A,
             pairs: 1,
             layouts: 1,
             updates: 1,
@@ -978,12 +987,13 @@ mod tests {
         let founder = Founder::Blind;
         let protocol = VoxelProtocol::new(
             founder,
+            Stage::A,
             1,
             120,
             20_260_918,
             &task::TRAINING_LAYOUT_SEEDS[..1],
         );
-        let layouts = task::training_layouts(founder);
+        let layouts = task::training_layouts(founder, Stage::A);
         let mut theta =
             super::super::super::tensor::initial_center_shape::<23, 3>(protocol.train_seed);
         let before = theta.clone();
@@ -1055,12 +1065,13 @@ mod tests {
         let founder = Founder::Blind;
         let protocol = VoxelProtocol::new(
             founder,
+            Stage::A,
             1,
             40,
             20_260_918,
             &task::TRAINING_LAYOUT_SEEDS[..1],
         );
-        let layouts = task::training_layouts(founder);
+        let layouts = task::training_layouts(founder, Stage::A);
         let run = |workers: usize| {
             let cancel = AtomicBool::new(false);
             let mut theta =
