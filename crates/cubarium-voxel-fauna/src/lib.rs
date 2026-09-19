@@ -51,6 +51,8 @@
 
 #![forbid(unsafe_code)]
 
+mod manifest;
+mod pose;
 mod snapshot;
 mod step;
 
@@ -60,6 +62,12 @@ use serde::{Deserialize, Serialize};
 
 pub use cubarium_voxel::{DT, TICK_HZ};
 pub use cubarium_voxel_flora::Reach;
+pub use manifest::{
+    ACTION_DEADBAND, BROWSER_RAY_PITCH_OFFSETS_DEG, BROWSER_RAY_YAW_OFFSETS_DEG,
+    BROWSER_SECTOR_CENTRES_DEG, BROWSER_VISIBLE_CLASSES, Action, Founder, HIDDEN, Manifest, Module,
+    SCHEMA_VERSION, Transfer, Tunings, gru32_parameter_count,
+};
+pub use pose::Pose;
 pub use snapshot::SCHEMA;
 
 /// The consumers of the voxel ecology. One, so far: see
@@ -128,6 +136,15 @@ pub struct Animal {
     pub species: Species,
     /// The support face it stands on. Its body is drawn in the void above this.
     pub site: Site,
+    /// The continuous place and heading on that support face. P1-A keeps it still; the
+    /// phase-one founders move it in P1-B and sample it in P1-C. The heuristic browser
+    /// updates it to the new face's centre whenever it steps, so `site` stays authoritative.
+    pub pose: Pose,
+    /// `Some` for a phase-one founder: the lineage whose manifest its controller will be
+    /// authored against. A founder body runs none of the live heuristic in P1-A — it ages,
+    /// pays maintenance and can die, and **nothing else** until P1-B gives it local actions.
+    /// `None` is the live frondgrazer heuristic path, unchanged.
+    pub founder: Option<Founder>,
     /// Organic structure. Below `body_min` it is dead.
     pub body: f64,
     /// Organic matter maintenance is paid from before the body is.
@@ -528,6 +545,22 @@ pub enum Command {
         species: Species,
         body: f64,
     },
+    /// Put a **phase-one founder** body of `body` organic matter on the highest support
+    /// face of column `(x, z)`, at that face's centre and the given `heading_rad`. Booked
+    /// exactly as [`Command::Introduce`]. A body that is not finite, a heading that is not
+    /// finite, a column with no support, or a body below `body_min` is refused.
+    ///
+    /// The founder marker selects which manifest's controller the body belongs to (P1-B);
+    /// P1-A runs none of it, so the body simply ages and pays maintenance where it is put.
+    /// The species is the shared phase-one placeholder (`Species::Frondgrazer`) for now:
+    /// the litter feeder's own digestive configuration is P1-B's.
+    IntroduceFounder {
+        x: i64,
+        z: u32,
+        founder: Founder,
+        body: f64,
+        heading_rad: f64,
+    },
     /// Take every animal off the highest support face of column `(x, z)`, booking their
     /// material as `removed_*_out`. No corpse: this is a frontend's undo, not a death.
     /// Refused if there is none.
@@ -544,6 +577,11 @@ pub struct Fauna {
     /// unordered.
     animals: Vec<Animal>,
     ledger: FaunaLedger,
+    /// Whether paid births run in [`step`]. Defaults to **true**, which is the live world's
+    /// rule and changes nothing. An isolated arena sets it false
+    /// (`design/voxel-senses-phase1-plan.md`, "Frozen arena contract"); a fresh episode
+    /// sets it back.
+    births_enabled: bool,
 }
 
 impl Fauna {
@@ -566,11 +604,22 @@ impl Fauna {
             tick: 0,
             animals: Vec::new(),
             ledger: FaunaLedger::default(),
+            births_enabled: true,
         })
     }
 
     pub fn config(&self) -> &FaunaConfig {
         &self.config
+    }
+
+    /// Whether paid births run. Live-world default: `true`.
+    pub fn births_enabled(&self) -> bool {
+        self.births_enabled
+    }
+
+    /// Turn births on or off. An isolated arena turns them off; the live world never does.
+    pub fn set_births_enabled(&mut self, enabled: bool) {
+        self.births_enabled = enabled;
     }
 
     pub fn tick(&self) -> u64 {
@@ -616,36 +665,22 @@ impl Fauna {
                 z,
                 species,
                 body,
-            } => {
-                let view = world.view();
-                let Some(site) = cubarium_voxel_flora::highest_support(&view, x, z) else {
-                    return false;
-                };
-                let sc = *self.config.species(species);
-                if !(body.is_finite() && body >= sc.body_min) {
-                    return false;
-                }
-                let reserve = sc.reserve_of(body);
-                let organic = body + reserve;
-                let animal = Animal {
-                    id: self.ledger.births,
-                    species,
-                    site,
-                    body,
-                    reserve,
-                    mineral: sc.n_tissue * organic,
-                    energy: sc.energy_density * organic,
-                    age_ticks: 0,
-                    state: State::Resting,
-                };
-                self.ledger.births += 1;
-                self.ledger.introduced += 1;
-                self.ledger.introduced_organic_in += organic;
-                self.ledger.introduced_mineral_in += animal.mineral;
-                self.ledger.introduced_energy_in += animal.energy;
-                self.insert(animal);
-                true
-            }
+            } => self.introduce(world, x, z, species, None, body, 0.0),
+            Command::IntroduceFounder {
+                x,
+                z,
+                founder,
+                body,
+                heading_rad,
+            } => self.introduce(
+                world,
+                x,
+                z,
+                Species::Frondgrazer,
+                Some(founder),
+                body,
+                heading_rad,
+            ),
             Command::Remove { x, z } => {
                 let view = world.view();
                 let Some(site) = cubarium_voxel_flora::highest_support(&view, x, z) else {
@@ -667,6 +702,58 @@ impl Fauna {
                 self.animals.len() != before
             }
         }
+    }
+
+    /// One body placed on a column's highest support face: shared by [`Command::Introduce`]
+    /// and [`Command::IntroduceFounder`], so the booking is one path. `founder` `None` is
+    /// the live heuristic browser.
+    fn introduce(
+        &mut self,
+        world: &World,
+        x: i64,
+        z: u32,
+        species: Species,
+        founder: Option<Founder>,
+        body: f64,
+        heading_rad: f64,
+    ) -> bool {
+        let view = world.view();
+        let Some(site) = cubarium_voxel_flora::highest_support(&view, x, z) else {
+            return false;
+        };
+        let sc = *self.config.species(species);
+        if !(body.is_finite() && body >= sc.body_min) {
+            return false;
+        }
+        if !heading_rad.is_finite() {
+            return false;
+        }
+        let reserve = sc.reserve_of(body);
+        let organic = body + reserve;
+        let pose = Pose {
+            heading_rad,
+            ..Pose::at_site(site, view.config.voxel_m)
+        };
+        let animal = Animal {
+            id: self.ledger.births,
+            species,
+            site,
+            pose,
+            founder,
+            body,
+            reserve,
+            mineral: sc.n_tissue * organic,
+            energy: sc.energy_density * organic,
+            age_ticks: 0,
+            state: State::Resting,
+        };
+        self.ledger.births += 1;
+        self.ledger.introduced += 1;
+        self.ledger.introduced_organic_in += organic;
+        self.ledger.introduced_mineral_in += animal.mineral;
+        self.ledger.introduced_energy_in += animal.energy;
+        self.insert(animal);
+        true
     }
 
     /// Save as postcard bytes behind this layer's own schema tag. A different tag is

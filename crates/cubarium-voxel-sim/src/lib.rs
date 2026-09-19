@@ -60,6 +60,11 @@ use cubarium_voxel::water;
 use cubarium_voxel_fauna::Fauna;
 use cubarium_voxel_flora::Flora;
 
+mod arena;
+pub use arena::{
+    ARENA_DEPTH, ARENA_HEIGHT, ARENA_VOXEL_M, ARENA_WIDTH, Arena, GROUND_Y,
+};
+
 /// The voxel grid, free water, pore water and the aquifer: a **dense resource**, never one
 /// entity per voxel.
 #[derive(Resource)]
@@ -125,10 +130,28 @@ pub struct Tick;
 #[derive(ScheduleLabel, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Substep;
 
+/// The label of the **static arena** schedule: the [`Tick`] schedule with the `Begin`,
+/// `Water` and `Flora` legs left out. Terrain, water and plant geometry were prepared once
+/// by the arena builder and do not evolve; the fauna leg, the clock and a caller's samplers
+/// still run (`design/voxel-senses-phase1-plan.md`, "Frozen arena contract").
+#[derive(ScheduleLabel, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct StaticTick;
+
+/// Which schedule [`Sim::step`] runs. The live schedule is the default and is unchanged.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ScheduleMode {
+    /// World, flora, fauna, advance: the full coupled tick.
+    #[default]
+    Live,
+    /// Fauna and advance only: a frozen arena.
+    Static,
+}
+
 /// One coupled voxel simulation: the three layers, the schedule that steps them, and the
 /// thread pool the parallel phases use.
 pub struct Sim {
     ecs: World,
+    mode: ScheduleMode,
 }
 
 impl Sim {
@@ -187,7 +210,33 @@ impl Sim {
         tick.add_systems(sys_advance.in_set(TickPhase::Advance));
         ecs.add_schedule(tick);
 
-        Sim { ecs }
+        // The static arena: the same `sys_fauna` and `sys_advance`, with no `Begin`, no
+        // `Water` and no `Flora`. Nothing in the skipped legs is a rule of the fauna tick,
+        // so an animal cannot tell which schedule stepped it except that the world around
+        // it never moved.
+        let mut stat = Schedule::new(StaticTick);
+        stat.set_executor(SingleThreadedExecutor::new());
+        stat.configure_sets(
+            (TickPhase::Fauna, TickPhase::Advance, TickPhase::Sample).chain(),
+        );
+        stat.add_systems(sys_fauna.in_set(TickPhase::Fauna));
+        stat.add_systems(sys_advance.in_set(TickPhase::Advance));
+        ecs.add_schedule(stat);
+
+        Sim { ecs, mode: ScheduleMode::Live }
+    }
+
+    /// Build the layers and wire them into a [`Sim`] in [`ScheduleMode::Static`]: the static
+    /// arena's entry point. Everything else is [`Sim::new`].
+    pub fn new_static(
+        world: cubarium_voxel::World,
+        flora: Flora,
+        fauna: Fauna,
+        config: SimConfig,
+    ) -> Sim {
+        let mut sim = Sim::new(world, flora, fauna, config);
+        sim.mode = ScheduleMode::Static;
+        sim
     }
 
     /// Build the three layers from their configs and wire them up: the ordinary entry
@@ -233,13 +282,43 @@ impl Sim {
     ///   the sky cache as it reads it (`sky_at` takes `&mut Vec`), so it would need the
     ///   cache filled in a pass of its own first. Left serial, and measured that way.
     pub fn step(&mut self) {
-        self.ecs.run_schedule(Tick);
+        match self.mode {
+            ScheduleMode::Live => self.ecs.run_schedule(Tick),
+            ScheduleMode::Static => self.ecs.run_schedule(StaticTick),
+        }
+    }
+
+    /// Force one **static arena** tick whatever the mode: no `Begin`, `Water` or `Flora`
+    /// leg, just [`Fauna::step`] and the clock. This is the same system (`sys_fauna`) the
+    /// live schedule runs, so a static episode uses the production fauna path.
+    pub fn step_static(&mut self) {
+        self.ecs.run_schedule(StaticTick);
+    }
+
+    /// Which schedule [`Sim::step`] runs.
+    pub fn mode(&self) -> ScheduleMode {
+        self.mode
+    }
+
+    /// Select the live or static schedule.
+    pub fn set_mode(&mut self, mode: ScheduleMode) {
+        self.mode = mode;
     }
 
     /// Add systems to [`TickPhase::Sample`]: a host's observers, run once per tick after
-    /// every layer has stepped.
+    /// every layer has stepped. The live schedule only; [`Sim::add_static_samplers`] is the
+    /// static schedule's.
     pub fn add_samplers<M>(&mut self, systems: impl IntoScheduleConfigs<ScheduleSystem, M>) {
         self.ecs.schedule_scope(Tick, |_, schedule| {
+            schedule.add_systems(systems.in_set(TickPhase::Sample));
+        });
+    }
+
+    /// Add systems to [`TickPhase::Sample`] of the **static** schedule. A caller that runs
+    /// a static arena and wants per-tick observers uses this; the same system shape as
+    /// [`Sim::add_samplers`], on the other schedule.
+    pub fn add_static_samplers<M>(&mut self, systems: impl IntoScheduleConfigs<ScheduleSystem, M>) {
+        self.ecs.schedule_scope(StaticTick, |_, schedule| {
             schedule.add_systems(systems.in_set(TickPhase::Sample));
         });
     }

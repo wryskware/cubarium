@@ -252,6 +252,18 @@ fn plan_for(
     seed: u64,
     tick: u64,
 ) -> Plan {
+    // A phase-one founder runs **none of the live heuristic** in P1-A: no sensing, no
+    // target, no crop. It rests where it was placed while maintenance, ageing and death
+    // still run. P1-B replaces this empty plan with the founder's local action resolution;
+    // P1-C fills the senses. Keeping the branch here (and not in `sense`) means the plans
+    // stay one per animal in id order.
+    if a.founder.is_some() {
+        return Plan {
+            reach: Vec::new(),
+            total: 0.0,
+            target: None,
+        };
+    }
     {
         let sc = *config.species(a.species);
         let reach = fv.reachable_foliage(view, a.site, sc.reach);
@@ -402,6 +414,9 @@ fn act(
         let a = fauna.animals[i];
         if let Some(to) = toward(view, &a, target, &sc, seed, tick) {
             fauna.animals[i].site = to;
+            // Keep the continuous pose tied to the support face the heuristic just moved
+            // to; P1-A's founders do not take this path at all.
+            fauna.animals[i].pose = crate::Pose::at_site(to, view.config.voxel_m);
             fauna.ledger.steps += 1;
         }
     }
@@ -582,6 +597,9 @@ fn wrapped_dx(width: i64, a: i64, b: i64) -> i64 {
 
 /// Step 5: one newborn per adult that can pay for it, out of the parent's reserve.
 fn births(fauna: &mut Fauna) {
+    if !fauna.births_enabled {
+        return;
+    }
     let parents = fauna.animals.len();
     let mut newborns: Vec<Animal> = Vec::new();
     for i in 0..parents {
@@ -601,6 +619,7 @@ fn births(fauna: &mut Fauna) {
         a.mineral -= mineral;
         a.energy -= energy;
         let (site, species) = (a.site, a.species);
+        let (pose, founder) = (a.pose, a.founder);
         let id = fauna.ledger.births;
         fauna.ledger.births += 1;
         fauna.ledger.born += 1;
@@ -608,6 +627,8 @@ fn births(fauna: &mut Fauna) {
             id,
             species,
             site,
+            pose,
+            founder,
             body: sc.body_min,
             reserve: sc.birth_cost - sc.body_min,
             mineral,

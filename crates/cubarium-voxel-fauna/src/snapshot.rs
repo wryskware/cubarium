@@ -22,11 +22,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::Fauna;
 
-/// Schema 2: schema 1 was the first animal layer; the per-plant arrays in the ledger are
-/// sized by the flora's species count, which the glowcap merge raised to six, so the
-/// postcard layout changed with it (round 5b/5c merge). Postcard is not
-/// self-describing, so any new field is a new format and earlier tags are refused.
-pub const SCHEMA: u32 = 2;
+/// Schema 3: schema 2 added the per-plant ledger arrays (round 5b/5c merge). Schema 3
+/// added the phase-one body contract to [`crate::Animal`] — a continuous [`crate::Pose`]
+/// and the optional [`crate::Founder`] lineage marker — and the [`crate::Fauna`] birth
+/// switch. Postcard is not self-describing, so schema 2 worlds are **refused**, not
+/// migrated (`always-fresh-never-migrate`): start a fresh world.
+pub const SCHEMA: u32 = 3;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -130,6 +131,8 @@ mod tests {
             id,
             species: Species::Frondgrazer,
             site: Site { x: 1, y: 2, z: 0 },
+            pose: crate::Pose::at_site(Site { x: 1, y: 2, z: 0 }, 1.0),
+            founder: None,
             body,
             reserve: 0.5 * body,
             mineral: 0.05 * body,
