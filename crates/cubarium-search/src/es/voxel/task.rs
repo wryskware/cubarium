@@ -83,10 +83,20 @@ pub fn parse_stage(s: &str) -> Result<Stage, String> {
 /// by it.
 pub const DEPLETION_FRACTION: f64 = 0.1;
 
-/// The four training layout seeds. Chosen so **none** is a seam layout
-/// (`layout_seed % 4 == 3` is the arena's deliberate seam test, and the plan's default
-/// layouts keep food away from the seam).
-pub const TRAINING_LAYOUT_SEEDS: [u64; 4] = [1, 2, 4, 5];
+/// The sixteen training layout seeds (P2-D).
+///
+/// Four layouts estimated the gradient against an objective whose between-layout spread
+/// is ten times the per-generation perturbation spread, so most of what the ES ranked
+/// was which layouts a candidate happened to land food on. Sixteen is the same protocol
+/// with four times the sample per candidate.
+///
+/// Chosen so **none** is a seam layout (`layout_seed % 4 == 3` is the arena's deliberate
+/// seam test, and the plan's default layouts keep food away from the seam), and all
+/// sixteen are disjoint from [`EVALUATION_LAYOUT_SEEDS`] — and from P2-C's four, so the
+/// held-out comparison is against a genuinely fresh training set.
+pub const TRAINING_LAYOUT_SEEDS: [u64; 16] = [
+    20, 21, 22, 24, 25, 26, 28, 29, 30, 32, 33, 34, 36, 37, 38, 40,
+];
 
 /// The eight untouched evaluation seeds. Held out: not used to choose parameters or the
 /// best generation (`design/voxel-senses-phase1-tests.md` §2). Also non-seam.
@@ -110,18 +120,20 @@ pub const STARTING_STORES_PROTOCOL: &str = "p2c-half-body-no-reserve";
 /// touches a world draw ([`super::trainer`]).
 pub const TRAINING_SEED: u64 = 20_260_918;
 
-/// Antithetic pairs per generation (plan §3: "Eight antithetic pairs on four training
-/// layouts: 64 perturbation episodes").
-pub const DEFAULT_PAIRS: usize = 8;
+/// Antithetic pairs per generation. The plan's eight became thirty-two in P2-D: the
+/// gradient was being estimated from eight pairs against layout noise an order of
+/// magnitude larger than the signal.
+pub const DEFAULT_PAIRS: usize = 32;
 
 /// Centre evaluations per generation: the unperturbed centre on **every** training layout.
 pub const CENTER_EVALUATIONS: usize = TRAINING_LAYOUT_SEEDS.len();
 
 /// Updates per archetype the pilot bounds itself to (plan §3).
-/// Updates per archetype a run bounds itself to. The phase-one pilots were still
-/// climbing at the plan's 32 (blind best at update 26, browser at 31), so P2-B raises
-/// the ceiling to 64; the wall cap, not this, is what usually stops a run.
-pub const MAX_UPDATES: u32 = 64;
+/// Updates per archetype a run bounds itself to. The plan's 32 became 64 in P2-B and 512
+/// in P2-D: every P2-C run selected a centre at or within five of its cap (browser A and
+/// B both at generation 63 of 63) while spending 1.6-3.7 s of a 900 s budget. The wall
+/// cap, not this, is what should stop a run.
+pub const MAX_UPDATES: u32 = 512;
 
 /// The voxel trainer's measured saturation point. The machine-wide policy also reserves
 /// ten percent of logical CPUs, but this workload gains little beyond sixteen workers.
@@ -140,13 +152,16 @@ fn worker_limit_for(cpus: usize) -> usize {
     cpus.saturating_sub(reserved).max(1)
 }
 
-/// Wall seconds the plan allots one archetype's training ("up to eight minutes").
-pub const DEFAULT_TRAIN_WALL_SECONDS: u64 = 480;
+/// Wall seconds one archetype's training is allotted. Fifteen minutes since P2-B.
+pub const DEFAULT_TRAIN_WALL_SECONDS: u64 = 900;
 
-/// The plan's episode count for one archetype's full bounded training: the initial centre
-/// evaluation (4) plus 32 updates × (2·8 perturbation + 4 centre evaluations) = 2,180
-/// (`design/voxel-senses-phase1-tests.md` §3).
-pub const DEFAULT_EPISODE_LIMIT: u64 = 2_180;
+/// The episode count one archetype's full bounded training needs: the initial centre
+/// evaluation (one per training layout) plus `MAX_UPDATES × (2·pairs + 1) × layouts`.
+/// At P2-D's 32 pairs, 512 updates and 16 layouts that is 532,496 — the limit is a
+/// backstop against a runaway run, not the thing that ends a healthy one (the 900 s
+/// wall cap is).
+pub const DEFAULT_EPISODE_LIMIT: u64 = CENTER_EVALUATIONS as u64
+    + MAX_UPDATES as u64 * (2 * DEFAULT_PAIRS as u64 + 1) * TRAINING_LAYOUT_SEEDS.len() as u64;
 
 /// One immutable prepared arena: the terrain, the pond, the finite resources and the
 /// placed founder, exactly as [`Arena::build`] left them.
@@ -283,6 +298,52 @@ mod tests {
                 3,
                 "seed {seed} is the arena's deliberate seam layout"
             );
+        }
+    }
+
+    /// The two sets are disjoint and internally unique — the held-out eight must never
+    /// have been trained on — and every seed on both lists actually builds a usable
+    /// layout for both founders and both stages: a placed founder and a stocked patch.
+    /// A seed that quietly placed no body would shrink a generation without saying so.
+    #[test]
+    fn every_frozen_seed_builds_a_usable_layout_for_both_founders_and_stages() {
+        let mut all: Vec<u64> = TRAINING_LAYOUT_SEEDS
+            .into_iter()
+            .chain(EVALUATION_LAYOUT_SEEDS)
+            .collect();
+        let n = all.len();
+        all.sort_unstable();
+        all.dedup();
+        assert_eq!(
+            all.len(),
+            n,
+            "a seed appears on both lists, or twice on one"
+        );
+
+        for seed in TRAINING_LAYOUT_SEEDS
+            .into_iter()
+            .chain(EVALUATION_LAYOUT_SEEDS)
+        {
+            for founder in Founder::ALL {
+                for stage in [Stage::A, Stage::B] {
+                    let p = Prepared::build_stage(founder, seed, stage);
+                    assert!(
+                        p.animal_id().is_some(),
+                        "{founder:?} seed {seed} stage {}: no founder was placed",
+                        stage.as_str()
+                    );
+                    let stock = p.fixture_arena().resource_stock();
+                    assert!(
+                        stock.is_finite() && stock > 0.0,
+                        "{founder:?} seed {seed} stage {}: stock {stock}",
+                        stage.as_str()
+                    );
+                    if stage == Stage::B {
+                        let (initial, successor) = p.patches().expect("Stage B names patches");
+                        assert_ne!(initial, successor, "seed {seed}");
+                    }
+                }
+            }
         }
     }
 

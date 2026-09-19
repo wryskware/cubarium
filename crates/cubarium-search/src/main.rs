@@ -671,10 +671,10 @@ enum Command {
         controller: String,
         #[arg(long, default_value_t = cubarium_search::es::voxel::task::DEFAULT_PAIRS)]
         pairs: usize,
-        /// How many of the four frozen training layouts to run, from the front.
-        #[arg(long, default_value_t = 4)]
+        /// How many of the frozen training layouts to run, from the front.
+        #[arg(long, default_value_t = cubarium_search::es::voxel::task::TRAINING_LAYOUT_SEEDS.len())]
         layouts: usize,
-        /// Updates, capped at 64.
+        /// Updates, capped at 512.
         #[arg(long, default_value_t = cubarium_search::es::voxel::task::MAX_UPDATES)]
         updates: u32,
         /// Episode horizon in ticks. Defaults to the stage's own (1,200 for A,
