@@ -19,7 +19,7 @@
 //! the world still evaluates gates in `(r, z, n)` order for each animal in slot order.
 
 use cubarium_core::neural::gru::{
-    parameter_count, Gru, GATES, GRU_PARAMETERS, HIDDEN, INPUT, OUTPUT, Z,
+    GATES, GRU_PARAMETERS, Gru, HIDDEN, INPUT, OUTPUT, Z, parameter_count,
 };
 use cubarium_core::neural::{ActionAdapter, Gru32, Policy, ShapePolicy};
 

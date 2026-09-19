@@ -414,19 +414,11 @@ fn tanh(x: f64) -> f64 {
 }
 
 fn band(x: f64, width: f64) -> f64 {
-    if x.abs() < width {
-        0.0
-    } else {
-        x
-    }
+    if x.abs() < width { 0.0 } else { x }
 }
 
 fn non_negative(x: f64) -> f64 {
-    if x.is_finite() && x > 0.0 {
-        x
-    } else {
-        0.0
-    }
+    if x.is_finite() && x > 0.0 { x } else { 0.0 }
 }
 
 #[cfg(test)]
