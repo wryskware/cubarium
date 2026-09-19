@@ -99,12 +99,67 @@ pub struct Arena {
     pub animal_id: Option<u64>,
 }
 
+/// Stage B's two real, finite patches. The metadata is fixture-facing only: it never
+/// enters an observation or controller and exists so a later evaluation can report
+/// reacquisition without rediscovering a target from the world.
+pub struct ReacquisitionArena {
+    pub arena: Arena,
+    /// The patch the founder starts within the ordinary Stage-A signal distance of.
+    pub initial_patch: Site,
+    /// A distinct finite patch left after the initial patch is depleted.
+    pub successor_patch: Site,
+}
+
+impl ReacquisitionArena {
+    /// Move the two-patch layout into the ordinary static simulator.
+    pub fn into_arena(self) -> Arena {
+        self.arena
+    }
+
+    /// Move the arena while retaining the two fixture sites for an evaluator's
+    /// post-episode accounting. The sites remain outside the controller boundary.
+    pub fn into_parts(self) -> (Arena, Site, Site) {
+        (self.arena, self.initial_patch, self.successor_patch)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LayoutKind {
+    StageA,
+    Reacquisition,
+}
+
 impl Arena {
     /// Build the frozen arena for `founder` from `layout_seed`, and place one idle founder
     /// body off the food. The world is not stepped: the pond is a direct `AddWater` and the
     /// ground is direct `SetMaterial`, so there is no settling cost and nothing to freeze
     /// afterwards.
     pub fn build(founder: Founder, layout_seed: u64) -> Arena {
+        Self::build_kind(founder, layout_seed, LayoutKind::StageA).0
+    }
+
+    /// Build Stage B's smallest real continuation task: one reachable finite patch and
+    /// one distinct successor. Both use the normal flora deposits, fauna feeding and
+    /// static sensory field; this type only records which physical sites form the two
+    /// patches for an evaluator after the controller has acted.
+    pub fn build_reacquisition(founder: Founder, layout_seed: u64) -> ReacquisitionArena {
+        let (arena, initial_patch) =
+            Self::build_kind(founder, layout_seed, LayoutKind::Reacquisition);
+        let initial_patch = initial_patch.expect("the two-patch layout records its initial patch");
+        let successor_patch = arena
+            .resources
+            .iter()
+            .copied()
+            .find(|site| *site != initial_patch)
+            .expect("the two-patch layout records its successor patch");
+        ReacquisitionArena {
+            arena,
+            initial_patch,
+            successor_patch,
+        }
+    }
+
+    fn build_kind(founder: Founder, layout_seed: u64, kind: LayoutKind) -> (Arena, Option<Site>) {
         let config = VoxelConfig {
             width: ARENA_WIDTH,
             height: ARENA_HEIGHT,
@@ -184,26 +239,50 @@ impl Arena {
         // drawn from the **same** dry candidate pool and removed from it before the other
         // picks, so a resource site can never be selected twice (the flaw that made seed
         // 95 lay `(0,4,8)` twice). Every later pick is also a `swap_remove` off `candidates`.
-        let mut resources: Vec<Site> = Vec::new();
-        if seam_layout {
-            let seam: Vec<Site> = candidates.iter().copied().filter(|s| s.x == 0).collect();
-            if !seam.is_empty() {
-                let pick = seam[rng.below(seam.len())];
+        let (mut resources, initial_patch) = match kind {
+            LayoutKind::StageA => {
+                let mut resources: Vec<Site> = Vec::new();
+                if seam_layout {
+                    let seam: Vec<Site> = candidates.iter().copied().filter(|s| s.x == 0).collect();
+                    if !seam.is_empty() {
+                        let pick = seam[rng.below(seam.len())];
+                        let at = candidates
+                            .iter()
+                            .position(|s| *s == pick)
+                            .expect("the seam candidate is in the pool");
+                        candidates.swap_remove(at);
+                        resources.push(pick);
+                    }
+                }
+                let want = RESOURCE_TILES
+                    .saturating_sub(resources.len())
+                    .min(candidates.len());
+                for _ in 0..want {
+                    let pick = rng.below(candidates.len());
+                    resources.push(candidates.swap_remove(pick));
+                }
+                (resources, None)
+            }
+            LayoutKind::Reacquisition => {
+                // The first patch uses the same dry support pool as Stage A. Its successor
+                // is at least 2 m away (64 squared arena columns), leaving a genuine
+                // reacquisition leg without manufacturing a route or a movement rule.
+                let initial_at = rng.below(candidates.len());
+                let initial = candidates.swap_remove(initial_at);
+                let successors: Vec<Site> = candidates
+                    .iter()
+                    .copied()
+                    .filter(|site| arena_distance_squared(*site, initial) >= 64)
+                    .collect();
+                let successor = successors[rng.below(successors.len())];
                 let at = candidates
                     .iter()
-                    .position(|s| *s == pick)
-                    .expect("the seam candidate is in the pool");
+                    .position(|site| *site == successor)
+                    .expect("the successor remains in the dry candidate pool");
                 candidates.swap_remove(at);
-                resources.push(pick);
+                (vec![initial, successor], Some(initial))
             }
-        }
-        let want = RESOURCE_TILES
-            .saturating_sub(resources.len())
-            .min(candidates.len());
-        for _ in 0..want {
-            let pick = rng.below(candidates.len());
-            resources.push(candidates.swap_remove(pick));
-        }
+        };
         resources.sort();
 
         for &site in &resources {
@@ -242,12 +321,15 @@ impl Arena {
         // contact; four keeps low foliage large enough for the deliberately sparse ray
         // fan and remains inside the settled litter gradient. The pool and pick remain
         // seed-deterministic.
+        let start_targets: &[Site] = initial_patch
+            .as_ref()
+            .map_or(resources.as_slice(), std::slice::from_ref);
         let mut starts: Vec<(Site, Site, i64)> = candidates
             .iter()
             .copied()
             .filter(|s| !resources.contains(s))
             .filter_map(|s| {
-                resources
+                start_targets
                     .iter()
                     .copied()
                     .map(|r| (r, arena_distance_squared(s, r)))
@@ -290,15 +372,18 @@ impl Arena {
             }
         }
 
-        Arena {
-            founder,
-            layout_seed,
-            world,
-            flora,
-            fauna,
-            resources,
-            animal_id,
-        }
+        (
+            Arena {
+                founder,
+                layout_seed,
+                world,
+                flora,
+                fauna,
+                resources,
+                animal_id,
+            },
+            initial_patch,
+        )
     }
 
     /// The live finite stock in the resource layout: litter organic matter for a blind
@@ -376,6 +461,7 @@ mod tests {
 
     const SEEDS: [u64; 4] = [1, 2, 3, 95];
     const STAGE_A_SEEDS: [u64; 12] = [1, 2, 4, 5, 6, 8, 9, 10, 13, 14, 17, 18];
+    const REACQUISITION_SEEDS: [u64; 4] = [1, 2, 17, 95];
 
     /// [`Arena::build`]'s resource sites are always unique, including the seam layout
     /// (seeds `% 4 == 3`), where the seam tile used to collide with an interior pick
@@ -464,6 +550,86 @@ mod tests {
         }
     }
 
+    /// Stage B is an explicit two-patch task, without changing Stage A's six-resource
+    /// fixture. The sites are fixture metadata only; the founder remains off food and
+    /// begins in the ordinary local signal range of its first finite patch.
+    #[test]
+    fn reacquisition_layouts_are_two_finite_deterministic_patches() {
+        for seed in REACQUISITION_SEEDS {
+            for founder in Founder::ALL {
+                let mut stage = Arena::build_reacquisition(founder, seed);
+                let again = Arena::build_reacquisition(founder, seed);
+                assert_eq!(stage.arena.resources, again.arena.resources);
+                assert_eq!(stage.initial_patch, again.initial_patch);
+                assert_eq!(stage.successor_patch, again.successor_patch);
+                assert_eq!(stage.arena.resources.len(), 2);
+                assert_ne!(stage.initial_patch, stage.successor_patch);
+                assert!(stage.arena.resources.contains(&stage.initial_patch));
+                assert!(stage.arena.resources.contains(&stage.successor_patch));
+                assert!(stage.arena.resource_stock() > 0.0);
+                assert!(
+                    patch_stock(&stage.arena, stage.initial_patch) > 0.0,
+                    "{founder:?} seed {seed}: initial patch is not finite"
+                );
+                assert!(
+                    patch_stock(&stage.arena, stage.successor_patch) > 0.0,
+                    "{founder:?} seed {seed}: successor patch is not finite"
+                );
+                assert!(
+                    arena_distance_squared(stage.initial_patch, stage.successor_patch) >= 64,
+                    "{founder:?} seed {seed}: successor is not a separate reacquisition leg"
+                );
+                let animal = stage
+                    .arena
+                    .animal_id
+                    .and_then(|id| stage.arena.fauna.view().animal(id))
+                    .expect("a Stage B founder is placed");
+                assert!(
+                    (4..=16).contains(&arena_distance_squared(animal.site, stage.initial_patch)),
+                    "{founder:?} seed {seed}: founder did not begin in its initial patch's signal"
+                );
+                let initial_stock = patch_stock(&stage.arena, stage.initial_patch);
+                let successor_stock = patch_stock(&stage.arena, stage.successor_patch);
+                let taken = stage
+                    .arena
+                    .take(stage.initial_patch, initial_stock)
+                    .expect("each finite patch depletes through its founder's real source");
+                assert!(taken.organic > 0.0, "{founder:?} seed {seed}");
+                assert_eq!(patch_stock(&stage.arena, stage.initial_patch), 0.0);
+                assert_eq!(
+                    patch_stock(&stage.arena, stage.successor_patch),
+                    successor_stock,
+                    "{founder:?} seed {seed}: depletion crossed into the successor patch"
+                );
+            }
+        }
+    }
+
+    /// The seeded Stage B placement always has enough dry support for two separated
+    /// patches and an in-signal founder start. This is a construction sweep, not a long
+    /// simulation study.
+    #[test]
+    fn reacquisition_placement_is_safe_across_a_broad_seed_sample() {
+        for seed in 0..256 {
+            for founder in Founder::ALL {
+                let stage = Arena::build_reacquisition(founder, seed);
+                assert_eq!(stage.arena.resources.len(), 2, "{founder:?} seed {seed}");
+                assert!(
+                    patch_stock(&stage.arena, stage.initial_patch) > 0.0,
+                    "{founder:?} seed {seed}: initial patch is not finite"
+                );
+                assert!(
+                    patch_stock(&stage.arena, stage.successor_patch) > 0.0,
+                    "{founder:?} seed {seed}: successor patch is not finite"
+                );
+                assert!(
+                    stage.arena.animal_id.is_some(),
+                    "{founder:?} seed {seed}: no in-signal founder start"
+                );
+            }
+        }
+    }
+
     /// The static arena steps the world's and the fauna's clocks, ages and maintains the
     /// body, and **holds the terrain, water and unrelated plants still**. No motion, no
     /// feeding. The plant check is the stands' actual state — species, site, wood and
@@ -539,6 +705,28 @@ mod tests {
             .sum()
     }
 
+    fn patch_stock(arena: &Arena, site: Site) -> f64 {
+        match arena.founder {
+            Founder::Blind => arena.flora.view().ground_at(site).map_or(0.0, |g| g.litter),
+            Founder::Browser => arena.flora.view().stand_at(site).map_or(0.0, |s| s.foliage),
+        }
+    }
+
+    fn module_channel(observation: &[f64], founder: Founder, module: &str, channel: &str) -> f64 {
+        let manifest = founder.manifest();
+        let module = manifest
+            .modules
+            .iter()
+            .find(|candidate| candidate.name == module)
+            .unwrap_or_else(|| panic!("{founder:?} manifest has no {module} module"));
+        let channel = module
+            .channels
+            .iter()
+            .position(|candidate| *candidate == channel)
+            .unwrap_or_else(|| panic!("{} has no {channel} channel", module.name));
+        observation[module.offset + channel]
+    }
+
     /// The finite stock is real and earnable through the production withdrawals.
     #[test]
     fn the_finite_food_is_actually_takeable() {
@@ -555,6 +743,69 @@ mod tests {
         let taken = browser.take(site, 0.01).expect("foliage off the stand");
         assert!(taken.organic > 0.0);
         assert!(browser.resource_stock() < before);
+    }
+
+    /// Depleting Stage B's first patch goes through the ordinary flora withdrawal. A new
+    /// settled field then removes its contact/taste signal while the real successor
+    /// remains chemically and mechanically present; no fixture-only target marker exists.
+    #[test]
+    fn reacquisition_depletion_updates_the_real_resource_and_sensory_sources() {
+        let mut stage = Arena::build_reacquisition(Founder::Blind, 17);
+        let initial = stage.initial_patch;
+        let successor = stage.successor_patch;
+        let before = stage.arena.resource_stock();
+        let taken = stage
+            .arena
+            .take(initial, 1.0)
+            .expect("the initial litter patch is finite and takeable");
+        assert!(taken.organic > 0.0);
+        assert!(stage.arena.resource_stock() < before);
+
+        let prepared = stage.arena.prepare_senses();
+        let initial_obs = first_sample_of_a_founder_on_the_tile(
+            stage
+                .arena
+                .into_sim_prepared(SimConfig { threads: 1 }, prepared),
+            initial,
+        );
+
+        let stage = Arena::build_reacquisition(Founder::Blind, 17);
+        let prepared = stage.arena.prepare_senses();
+        let successor_obs = first_sample_of_a_founder_on_the_tile(
+            stage
+                .arena
+                .into_sim_prepared(SimConfig { threads: 1 }, prepared),
+            successor,
+        );
+        assert_eq!(
+            initial_obs.len(),
+            Founder::Blind.manifest().inputs(),
+            "the controller receives only its declared manifest vector"
+        );
+        assert_eq!(successor_obs.len(), initial_obs.len());
+        assert_eq!(
+            module_channel(&initial_obs, Founder::Blind, "Taste(1)", "cue"),
+            0.0,
+            "depleted litter has no mouth cue"
+        );
+        assert!(
+            module_channel(&successor_obs, Founder::Blind, "Taste(1)", "cue") > 0.0,
+            "the successor still has mouth cue"
+        );
+        assert_eq!(
+            module_channel(&initial_obs, Founder::Blind, "Taste(1)", "valid"),
+            1.0,
+            "bare ground remains a valid taste contact"
+        );
+        let initial_chem = module_channel(&initial_obs, Founder::Blind, "Chem(litter)", "response");
+        let successor_chem =
+            module_channel(&successor_obs, Founder::Blind, "Chem(litter)", "response");
+        assert!(
+            successor_chem > initial_chem,
+            "the surviving successor remains a stronger local cue: initial {}, successor {}",
+            initial_chem,
+            successor_chem,
+        );
     }
 
     /// The live schedule is still the default; only an explicit static construction moves
