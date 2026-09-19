@@ -82,6 +82,11 @@ impl Rng {
     fn below(&mut self, n: usize) -> usize {
         (self.next_u64() % n.max(1) as u64) as usize
     }
+
+    /// A uniform draw in `[0, 1)`, from the top 53 bits.
+    fn unit(&mut self) -> f64 {
+        (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
+    }
 }
 
 /// A built arena and the founder it placed.
@@ -348,16 +353,26 @@ impl Arena {
         let mut animal_id = None;
         if let Some((site, target, _)) = start {
             let body = manifest.body_reference;
-            // Aim generally at the in-signal resource while retaining deterministic
-            // heading variation. The browser's central ray fan spans +/-30 degrees, so
-            // this +/-5 degree offset keeps the low foliage visible at the first sample.
-            // The blind founder receives the same variation without privileged runtime
-            // information; only arena construction uses the target.
+            // The start heading (P2-B step 2). Phase one aimed both founders at the
+            // in-signal resource with a +/-5 degree jitter, which made "go forward and
+            // keep feeding" a winning open-loop policy and left sensing untested. The
+            // heading is now drawn from the layout seed: uniform over the circle for the
+            // blind founder, uniform within a half-turn of the bearing for the browser.
+            // Only arena construction ever sees the target; no runtime path does.
             let dx = wrapped_dx(site.x, target.x) as f64;
             let dz = f64::from(target.z) - f64::from(site.z);
             let toward = dx.atan2(dz);
-            let jitter_steps = (rng.next_u64() % 3) as i64 - 1;
-            let heading_rad = toward + (jitter_steps as f64 * 5.0_f64.to_radians());
+            let heading_rad = match founder {
+                // The blind founder is handed nothing: its heading is uniform over the
+                // whole circle, drawn from the layout seed. Whatever it finds, it finds
+                // by smelling and walking.
+                Founder::Blind => rng.unit() * std::f64::consts::TAU,
+                // The browser's foliage must be *somewhere it could look*, not straight
+                // ahead: uniform within +/-90 degrees of the bearing to the target, so
+                // the target lies inside the -90..+90 the three sectors cover at the
+                // first sample and is usually well off centre.
+                Founder::Browser => toward + (2.0 * rng.unit() - 1.0) * std::f64::consts::FRAC_PI_2,
+            };
             if fauna.apply(
                 &world,
                 FaunaCommand::IntroduceFounder {
@@ -513,8 +528,15 @@ mod tests {
         }
     }
 
+    /// The P2-B start convention: the founder still begins off food and inside its
+    /// signal, but the heading no longer points at the food. The blind founder's heading
+    /// is uniform over the whole circle; the browser's is inside +/-90 degrees of the
+    /// bearing, so the foliage is somewhere the three sectors cover but usually not
+    /// ahead.
     #[test]
-    fn stage_a_starts_off_food_inside_signal_and_facing_it() {
+    fn stage_a_starts_off_food_inside_signal_without_being_aimed_at_it() {
+        let mut blind_errors: Vec<f64> = Vec::new();
+        let mut browser_errors: Vec<f64> = Vec::new();
         for seed in STAGE_A_SEEDS {
             for founder in Founder::ALL {
                 let arena = Arena::build(founder, seed);
@@ -538,14 +560,63 @@ mod tests {
 
                 let toward = (wrapped_dx(animal.site.x, target.x) as f64)
                     .atan2(f64::from(target.z) - f64::from(animal.site.z));
-                let heading_error = (animal.pose.heading_rad - toward)
+                let error = (animal.pose.heading_rad - toward)
                     .sin()
                     .atan2((animal.pose.heading_rad - toward).cos());
-                assert!(
-                    heading_error.abs() <= 5.0_f64.to_radians() + 1e-12,
-                    "{founder:?} seed {seed}: heading error {} degrees",
-                    heading_error.to_degrees(),
-                );
+                match founder {
+                    Founder::Blind => blind_errors.push(error),
+                    Founder::Browser => {
+                        assert!(
+                            error.abs() <= std::f64::consts::FRAC_PI_2 + 1e-12,
+                            "seed {seed}: the browser's target left the sector fan at \
+                             {} degrees",
+                            error.to_degrees()
+                        );
+                        browser_errors.push(error);
+                    }
+                }
+            }
+        }
+        // The blind founder is not aimed: over the twelve layouts the headings reach
+        // well outside the old +/-5 degrees and both signs occur.
+        let aimed = blind_errors
+            .iter()
+            .filter(|e| e.abs() <= 5.0_f64.to_radians())
+            .count();
+        assert!(
+            aimed <= 1,
+            "the blind start is still aimed at the food: {aimed} of {} within 5 degrees",
+            blind_errors.len()
+        );
+        assert!(
+            blind_errors.iter().any(|e| *e > 1.0) && blind_errors.iter().any(|e| *e < -1.0),
+            "the blind heading should reach both sides of the circle: {blind_errors:?}"
+        );
+        // The browser is neither aimed nor pinned to one side of the fan.
+        assert!(
+            browser_errors
+                .iter()
+                .filter(|e| e.abs() <= 5.0_f64.to_radians())
+                .count()
+                <= 1,
+            "the browser start is still aimed at the food: {browser_errors:?}"
+        );
+        assert!(
+            browser_errors.iter().any(|e| *e > 0.3) && browser_errors.iter().any(|e| *e < -0.3),
+            "the browser heading should vary across the fan: {browser_errors:?}"
+        );
+    }
+
+    /// The heading is a pure function of the layout seed, like everything else the
+    /// arena draws.
+    #[test]
+    fn the_start_heading_is_deterministic_per_seed() {
+        for seed in STAGE_A_SEEDS {
+            for founder in Founder::ALL {
+                let a = Arena::build(founder, seed).animal_pose().expect("placed");
+                let b = Arena::build(founder, seed).animal_pose().expect("placed");
+                assert_eq!(a.heading_rad, b.heading_rad, "{founder:?} seed {seed}");
+                assert!(a.heading_rad.is_finite());
             }
         }
     }
@@ -968,32 +1039,108 @@ mod tests {
         log[0].clone()
     }
 
+    /// Every sample a controller took, for a probe that runs a few seconds.
+    fn samples_of_built_founder(mut sim: Sim, id: u64, ticks: u64, turn: f64) -> Vec<Vec<f64>> {
+        let (recorder, log) = Recorder::new();
+        assert!(sim.fauna_mut().set_controller(
+            id,
+            Box::new(Turning {
+                turn,
+                inner: recorder
+            })
+        ));
+        for _ in 0..ticks {
+            sim.step();
+        }
+        let log = log.lock().unwrap();
+        log.clone()
+    }
+
+    /// A recorder that also holds a constant yaw: the probe for "could it have seen the
+    /// food if it had looked?".
+    struct Turning {
+        turn: f64,
+        inner: Recorder,
+    }
+
+    impl Controller for Turning {
+        fn drive(&mut self, observation: &[f64]) -> Response {
+            let _ = self.inner.drive(observation);
+            Response::Bounded(Actions {
+                forward: 0.0,
+                turn: self.turn,
+                feed: 0.0,
+            })
+        }
+
+        fn reset(&mut self) {
+            self.inner.reset();
+        }
+    }
+
+    /// What the freed start heading (P2-B) still promises, and what it deliberately no
+    /// longer does.
+    ///
+    /// The blind founder's cue is omnidirectional, so its promise is unchanged: a valid,
+    /// nonzero `Chem(litter)` at the very first sampling on every layout.
+    ///
+    /// The browser's is now a *looking* promise. Its three sectors are a sparse fan
+    /// (yaw -30/0/+30 within each of -60/0/+60, pitch -20/0/+20), and a half-grown
+    /// springturf's crown is about 0.19 m across at under a metre, so a start that is no
+    /// longer aimed at the stand can fall between rays: measured here, 11 of 12 layouts
+    /// still hit foliage on the very first sample and seed 4 does not. The fan is
+    /// therefore not the bottleneck the freed heading was meant to create — what the
+    /// heading removes is "the food is straight ahead", not "the food is visible". What
+    /// must hold either way is that the foliage is *there to be found*: a founder that
+    /// simply turns on the spot sees it within one revolution (pi seconds at the
+    /// 2 rad/s yaw cap) on every layout.
     #[test]
     fn stage_a_starts_present_the_promised_initial_signal() {
+        let mut browser_immediate = 0usize;
         for seed in STAGE_A_SEEDS {
             for founder in Founder::ALL {
                 let arena = Arena::build(founder, seed);
                 let id = arena.animal_id.expect("the Stage A founder is placed");
-                let start = arena.animal_pose();
-                let resources = arena.resources.clone();
-                let obs =
-                    first_sample_of_built_founder(arena.into_sim(SimConfig { threads: 1 }), id);
                 match founder {
                     Founder::Blind => {
+                        let obs = first_sample_of_built_founder(
+                            arena.into_sim(SimConfig { threads: 1 }),
+                            id,
+                        );
                         assert_eq!(obs[20], 1.0, "seed {seed}: chemical receptor valid");
                         assert!(obs[18] > 0.0, "seed {seed}: start is outside the cue");
                     }
                     Founder::Browser => {
-                        assert_eq!(obs[36], 1.0, "seed {seed}: material cone valid");
-                        let foliage = obs[20] + obs[26] + obs[32];
+                        // 80 ticks is 4 s: more than the pi seconds one revolution costs.
+                        let samples = samples_of_built_founder(
+                            arena.into_sim(SimConfig { threads: 1 }),
+                            id,
+                            80,
+                            1.0,
+                        );
+                        assert!(samples.len() >= 8, "seed {seed}: the cone was not sampled");
+                        let foliage = |o: &Vec<f64>| o[20] + o[26] + o[32];
                         assert!(
-                            foliage > 0.0,
-                            "seed {seed}: no starting foliage ray hit; start {start:?}, resources {resources:?}, observation {obs:?}",
+                            samples.iter().all(|o| o[36] == 1.0),
+                            "seed {seed}: material cone invalid"
+                        );
+                        if foliage(&samples[0]) > 0.0 {
+                            browser_immediate += 1;
+                        }
+                        assert!(
+                            samples.iter().any(|o| foliage(o) > 0.0),
+                            "seed {seed}: one revolution on the spot never saw the foliage"
                         );
                     }
                 }
             }
         }
+        assert!(
+            browser_immediate < STAGE_A_SEEDS.len(),
+            "the browser start is still aimed: {browser_immediate} of {} layouts hit \
+             foliage on the first sample",
+            STAGE_A_SEEDS.len()
+        );
     }
 
     /// Put a resting, recording founder on a litter tile of a static sim and return its

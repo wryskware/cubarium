@@ -34,6 +34,14 @@ pub const TRAINING_LAYOUT_SEEDS: [u64; 4] = [1, 2, 4, 5];
 /// best generation (`design/voxel-senses-phase1-tests.md` §2). Also non-seam.
 pub const EVALUATION_LAYOUT_SEEDS: [u64; 8] = [6, 8, 9, 10, 13, 14, 17, 18];
 
+/// The Stage-A start-heading convention this build's arena places founders under
+/// (P2-B step 2): blind uniform over the circle, browser uniform within +/-90 degrees of
+/// the bearing. Phase one aimed both founders at their food with a +/-5 degree jitter,
+/// which is a different task; a policy trained under it is refused rather than
+/// reinterpreted, both through [`super::trainer::VoxelProtocol::hash`] and through the
+/// policy file's own field.
+pub const START_HEADING_PROTOCOL: &str = "p2b-varied-1";
+
 /// The trainer's default train seed, in the trainer's own stream — its randomness never
 /// touches a world draw ([`super::trainer`]).
 pub const TRAINING_SEED: u64 = 20_260_918;

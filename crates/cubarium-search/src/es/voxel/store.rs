@@ -35,6 +35,12 @@ pub struct VoxelPolicyFile {
     pub generation: Option<u64>,
     /// Its training-set score, when recorded.
     pub score: Option<f64>,
+    /// The Stage-A start-heading convention the arenas this policy trained on were built
+    /// under ([`super::task::START_HEADING_PROTOCOL`]). Absent in a phase-one file, which
+    /// is exactly what makes it refusable: those centres were trained on a start aimed at
+    /// the food and are not this task's policies.
+    #[serde(default)]
+    pub start_heading: String,
     /// The exact weights, in [`crate::es::tensor`]'s shape order for this founder.
     #[serde(with = "hex_f64s")]
     pub theta: Vec<f64>,
@@ -94,6 +100,20 @@ impl VoxelPolicyFile {
                 founder.name()
             ));
         }
+        if self.start_heading != super::task::START_HEADING_PROTOCOL {
+            let had = if self.start_heading.is_empty() {
+                "none (a phase-one file: the founder was aimed at its food with a \
+                 +/-5 degree jitter)"
+            } else {
+                self.start_heading.as_str()
+            };
+            return Err(format!(
+                "{name}: policy start-heading protocol is {had}, this build's arena uses \
+                 `{}`: the start is a different task and the weights are not \
+                 transferable. Retrain.",
+                super::task::START_HEADING_PROTOCOL
+            ));
+        }
         Ok(())
     }
 
@@ -131,6 +151,7 @@ mod tests {
             train_seed: 20_260_918,
             generation: Some(3),
             score: Some(0.25),
+            start_heading: crate::es::voxel::task::START_HEADING_PROTOCOL.into(),
             theta,
         }
     }
@@ -179,6 +200,32 @@ mod tests {
         let mut file = sample(Founder::Blind);
         file.founder = "krill".into();
         assert!(file.validate_named("p.json").is_err());
+    }
+
+    /// A phase-one centre — written before the start heading was freed, so its file
+    /// carries no `start_heading` — is refused by name rather than silently rerun on a
+    /// task it never trained for.
+    #[test]
+    fn a_phase_one_centre_is_refused_because_its_start_was_a_different_task() {
+        let mut file = sample(Founder::Blind);
+        file.start_heading = String::new();
+        let err = file
+            .validate_named("gen26-center.json")
+            .expect_err("refused");
+        assert!(err.contains("phase-one"), "{err}");
+        assert!(
+            err.contains(crate::es::voxel::task::START_HEADING_PROTOCOL),
+            "{err}"
+        );
+
+        // And a file claiming some other convention is refused too, naming it.
+        let mut file = sample(Founder::Browser);
+        file.start_heading = "aimed-at-food".into();
+        let err = file.validate_named("p.json").expect_err("refused");
+        assert!(err.contains("aimed-at-food"), "{err}");
+
+        // The current convention is accepted and drives.
+        assert!(sample(Founder::Browser).driver().is_ok());
     }
 
     /// The checkpoint schema token and the policy schema token are distinct beasts.

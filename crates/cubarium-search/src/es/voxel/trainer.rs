@@ -59,6 +59,10 @@ pub struct VoxelProtocol {
     /// The manifest digest every candidate policy was validated against.
     pub digest: u64,
     pub horizon_ticks: u64,
+    /// The Stage-A start-heading convention the arenas were built under
+    /// ([`task::START_HEADING_PROTOCOL`]). Part of the hash: aiming the founder at its
+    /// food is a different task from placing it with a free heading.
+    pub start_heading: String,
     pub pairs: usize,
     pub sigma: f64,
     pub learning_rate: f64,
@@ -92,6 +96,7 @@ impl VoxelProtocol {
             founder: founder.name().into(),
             digest: voxel_schema_digest(founder),
             horizon_ticks: horizon,
+            start_heading: task::START_HEADING_PROTOCOL.into(),
             pairs,
             sigma: optimizer::SIGMA,
             learning_rate: optimizer::LEARNING_RATE,
@@ -855,6 +860,7 @@ fn write_center_policy(
         train_seed: cp.train_seed,
         generation: Some(u64::from(generation)),
         score: Some(score),
+        start_heading: cp.protocol.start_heading.clone(),
         theta: cp.theta.clone(),
     };
     file.write(&run_dir.join(relative))
