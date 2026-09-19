@@ -309,6 +309,19 @@ fn controllers(
         let id = fauna.animals[i].id;
         let founder = fauna.animals[i].founder.expect("a due founder");
         let manifest = founder.manifest();
+        // "Initial intake/loss/motion feedback is zero" (the plan's manifest rules).
+        // The ticks before a body's *first* sampling are not an interval it acted in:
+        // it held nothing, so there is nothing to report back about an action, and the
+        // upkeep it paid while standing there is not feedback. Clear the accumulator
+        // before the first observation is built.
+        //
+        // This was invisible until P2-C. A founder used to arrive with a full reserve,
+        // so those ticks' maintenance came out of the reserve, `structural_loss` was
+        // never incremented, and channel 3 read zero by accident. A hungry founder pays
+        // upkeep out of its structure from tick one (P2-T finding 3).
+        if fauna.animals[i].age_ticks == manifest.cadence_ticks() {
+            fauna.animals[i].founder_state.feedback = IntervalFeedback::default();
+        }
         let obs = body::observation(
             fauna,
             i,

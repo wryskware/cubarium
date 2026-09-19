@@ -1278,6 +1278,81 @@ mod tests {
         assert_eq!(t.cue, 0.0);
     }
 
+    /// A controller that records what it was shown and holds rest.
+    struct Recorder(std::sync::Arc<std::sync::Mutex<Vec<Vec<f64>>>>);
+
+    impl crate::Controller for Recorder {
+        fn drive(&mut self, observation: &[f64]) -> crate::Response {
+            self.0.lock().expect("log").push(observation.to_vec());
+            crate::Response::Bounded(crate::Actions::REST)
+        }
+
+        fn reset(&mut self) {
+            self.0.lock().expect("log").clear();
+        }
+    }
+
+    /// "Initial intake/loss/motion feedback is zero", from a **depleted** start.
+    ///
+    /// The ticks between an introduction and the first sampling are not an interval the
+    /// controller acted in, so channels 3..6 read zero and motor delivery reads 1 — even
+    /// though a hungry founder has been paying upkeep out of its own structure since
+    /// tick one. Before P2-C this held by accident: a full reserve absorbed that upkeep
+    /// and `structural_loss` was never incremented (P2-T finding 3).
+    #[test]
+    fn the_first_sample_reports_no_prior_interval_from_a_depleted_start() {
+        for founder in [Founder::Blind, Founder::Browser] {
+            let world = flat_world();
+            let mut fauna = Fauna::new(crate::FaunaConfig::default());
+            assert!(fauna.apply(
+                &world,
+                crate::Command::IntroduceFounder {
+                    x: 2,
+                    z: 2,
+                    founder,
+                    stores: crate::StartingStores::HUNGRY,
+                    heading_rad: H,
+                },
+            ));
+            let id = fauna.view().ledger.births - 1;
+            let start_body = fauna.view().animal(id).expect("placed").body;
+            let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            assert!(fauna.set_controller(id, Box::new(Recorder(log.clone()))));
+            let mut flora = Flora::new(FloraConfig::default());
+            let manifest = founder.manifest();
+            for _ in 0..manifest.cadence_ticks() {
+                fauna.step(&world, &mut flora);
+            }
+            let log = log.lock().expect("log");
+            assert_eq!(log.len(), 1, "{founder:?}: exactly one sampling");
+            let obs = &log[0];
+
+            // The premise: with no reserve, those ticks' upkeep really did come out of
+            // structure, so there was something for the old rule to leak.
+            let a = *fauna.view().animal(id).expect("alive");
+            assert_eq!(a.reserve, 0.0, "{founder:?}");
+            assert!(
+                a.body < start_body,
+                "{founder:?}: upkeep must have eaten structure"
+            );
+
+            for c in 3..=6 {
+                assert_eq!(
+                    obs[c], 0.0,
+                    "{founder:?}: channel {c} is not a prior interval"
+                );
+            }
+            assert_eq!(
+                obs[7], 1.0,
+                "{founder:?}: nothing was requested, so delivery is 1"
+            );
+            // And the *stocks* are not zeroed: they are current state, and a hungry
+            // founder's reserve channel says so.
+            assert_eq!(obs[1], 0.0, "{founder:?}: an empty reserve reads empty");
+            assert!(obs[0] > 0.0, "{founder:?}: it is still alive");
+        }
+    }
+
     /// The observation vector: real Self channels against the manifest's references,
     /// real contacts, and the P1-C spans left zero with validity 0.
     #[test]
