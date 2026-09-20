@@ -69,6 +69,9 @@ pub struct VoxelProtocol {
     /// ([`task::START_HEADING_PROTOCOL`]). Part of the hash: aiming the founder at its
     /// food is a different task from placing it with a free heading.
     pub start_heading: String,
+    /// The stage-specific arena fixture revision. Stage B changes when its stock or
+    /// geometry changes, so an old centre cannot silently resume on a different task.
+    pub arena_protocol: String,
     pub pairs: usize,
     pub sigma: f64,
     pub learning_rate: f64,
@@ -106,6 +109,7 @@ impl VoxelProtocol {
             stage: stage.as_str().into(),
             starting_stores: task::STARTING_STORES_PROTOCOL.into(),
             start_heading: task::START_HEADING_PROTOCOL.into(),
+            arena_protocol: task::arena_protocol(stage).into(),
             pairs,
             sigma: optimizer::SIGMA,
             learning_rate: optimizer::LEARNING_RATE,
@@ -873,6 +877,7 @@ fn write_center_policy(
         score: Some(score),
         start_heading: cp.protocol.start_heading.clone(),
         starting_stores: cp.protocol.starting_stores.clone(),
+        arena_protocol: cp.protocol.arena_protocol.clone(),
         stage: cp.protocol.stage.clone(),
         theta: cp.theta.clone(),
     };

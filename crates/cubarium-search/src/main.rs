@@ -705,8 +705,8 @@ enum Command {
         #[arg(long, default_value = "runs/voxel-es-blind")]
         out: PathBuf,
     },
-    /// Phase-one voxel slice (P1-D): one saved policy or a disclosed control over the
-    /// training or held-out layout set, with the score components per layout.
+    /// Voxel sensing evaluation: one saved policy or a disclosed control over the
+    /// training, held-out, or balanced blind-offset diagnostic set.
     VoxelEvaluate {
         /// A saved policy file (`voxel-train`'s `centers/*.json`). Omit to run a control.
         #[arg(long)]
@@ -726,7 +726,7 @@ enum Command {
         /// `a` or `b`. Stage B also reports the reacquisition accounting.
         #[arg(long, default_value = "a")]
         stage: String,
-        /// `training` or `holdout`. The held-out set is for validation only.
+        /// `training`, `holdout`, or `offset-sweep`. The sweep is blind Stage B only.
         #[arg(long, default_value = "holdout")]
         set: String,
         /// Episode horizon in ticks; defaults to the stage's own.

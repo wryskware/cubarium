@@ -46,6 +46,10 @@ pub struct VoxelPolicyFile {
     /// founders arrived full and could only eat back their own upkeep.
     #[serde(default)]
     pub starting_stores: String,
+    /// The stage-specific arena revision. Required for Stage-B centres because patch
+    /// stocks and geometry define their task; Stage-A centres remain transferable.
+    #[serde(default)]
+    pub arena_protocol: String,
     /// Which arena task the weights were trained on (`a` or `b`). Recorded, not
     /// validated: running a Stage-A centre on Stage B is a transfer measurement worth
     /// taking, not an error.
@@ -138,6 +142,18 @@ impl VoxelPolicyFile {
                 super::task::START_HEADING_PROTOCOL
             ));
         }
+        if self.stage == "b" && self.arena_protocol != super::task::STAGE_B_ARENA_PROTOCOL {
+            let had = if self.arena_protocol.is_empty() {
+                "none (an equal-patch pre-P3 Stage-B file)"
+            } else {
+                self.arena_protocol.as_str()
+            };
+            return Err(format!(
+                "{name}: policy Stage-B arena protocol is {had}, this build uses `{}`: \
+                 the depletion task differs and the weights are not transferable. Retrain.",
+                super::task::STAGE_B_ARENA_PROTOCOL
+            ));
+        }
         Ok(())
     }
 
@@ -177,6 +193,10 @@ mod tests {
             score: Some(0.25),
             start_heading: crate::es::voxel::task::START_HEADING_PROTOCOL.into(),
             starting_stores: crate::es::voxel::task::STARTING_STORES_PROTOCOL.into(),
+            arena_protocol: crate::es::voxel::task::arena_protocol(
+                crate::es::voxel::task::Stage::A,
+            )
+            .into(),
             stage: crate::es::voxel::task::Stage::A.as_str().into(),
             theta,
         }
@@ -260,6 +280,25 @@ mod tests {
 
         // The current convention is accepted and drives.
         assert!(sample(Founder::Browser).driver().is_ok());
+    }
+
+    #[test]
+    fn an_equal_patch_stage_b_policy_is_refused_but_stage_a_remains_transferable() {
+        let mut old_b = sample(Founder::Blind);
+        old_b.stage = "b".into();
+        old_b.arena_protocol.clear();
+        let err = old_b.validate_named("old-b.json").expect_err("refused");
+        assert!(err.contains("equal-patch"), "{err}");
+        assert!(err.contains(crate::es::voxel::task::STAGE_B_ARENA_PROTOCOL));
+
+        let mut old_a = sample(Founder::Blind);
+        old_a.arena_protocol.clear();
+        assert!(old_a.validate_named("old-a.json").is_ok());
+
+        let mut current_b = sample(Founder::Blind);
+        current_b.stage = "b".into();
+        current_b.arena_protocol = crate::es::voxel::task::STAGE_B_ARENA_PROTOCOL.into();
+        assert!(current_b.validate_named("current-b.json").is_ok());
     }
 
     /// The checkpoint schema token and the policy schema token are distinct beasts.

@@ -29,13 +29,13 @@ pub const HORIZON_TICKS: u64 = 1_200;
 ///
 /// Sized from the two legs the task actually has, at the plan's 1 BL/s cruise:
 ///
-/// - **Deplete.** A Stage-B patch is a quarter of this — 30 s of full-effort feeding
-///   for either founder (`cubarium_voxel_sim::arena::REACQUISITION_LITTER_PER_PATCH`).
+/// - **Deplete.** Stage B's initial patch is about 15 s of full-effort feeding; its
+///   successor remains 30 s. This leaves the learned controller time for the second leg.
 /// - **Reacquire.** The successor stays at its landed 2 m minimum; the arena's widest
 ///   separation is 4.85 m (16 wrapped columns by 11, at 0.25 m). At 1 BL/s that is
 ///   16 s (blind, 0.125 m body) to 39 s in the worst layout, and 8-19 s for the
-///   browser's 0.25 m body. After the approach (about 10 s) and the 30 s of feeding,
-///   80 s remain: two to five times the straight-line cost, which is the room for
+///   browser's 0.25 m body. After the approach (about 10 s) and 15 s of feeding,
+///   95 s remain: two to five times the straight-line cost, which is the room for
 ///   searching. At the Stage-A horizon of 1,200 ticks the worst layout would leave
 ///   15 s against a 39 s walk — not a task, a lottery.
 pub const STAGE_B_HORIZON_TICKS: u64 = 2_400;
@@ -98,9 +98,11 @@ pub const TRAINING_LAYOUT_SEEDS: [u64; 16] = [
     20, 21, 22, 24, 25, 26, 28, 29, 30, 32, 33, 34, 36, 37, 38, 40,
 ];
 
-/// The eight untouched evaluation seeds. Held out: not used to choose parameters or the
-/// best generation (`design/voxel-senses-phase1-tests.md` §2). Also non-seam.
-pub const EVALUATION_LAYOUT_SEEDS: [u64; 8] = [6, 8, 9, 10, 13, 14, 17, 18];
+/// Eight held-out Phase-3 evaluation seeds, never used to choose parameters or the best
+/// generation. For blind Stage B their signed start offsets occupy all four sign/range
+/// bins equally: negative/positive × near/far (two layouts in each). This prevents a
+/// one-handed opening arc from passing because one side happened to dominate the set.
+pub const EVALUATION_LAYOUT_SEEDS: [u64; 8] = [0, 1, 4, 5, 9, 41, 60, 61];
 
 /// The Stage-A start-heading convention this build's arena places founders under
 /// (P2-B step 2): blind uniform over the circle, browser uniform within +/-90 degrees of
@@ -115,6 +117,27 @@ pub const START_HEADING_PROTOCOL: &str = "p2b-varied-1";
 /// against a full start was trained where intake could only repay upkeep, which is a
 /// different task; it is refused rather than reinterpreted.
 pub const STARTING_STORES_PROTOCOL: &str = "p2c-half-body-no-reserve";
+
+/// Stage B's fixture revision. P3-A halves only the initial edible stock while retaining
+/// the successor stock and the browser crown. A Stage-B centre from the earlier equal-
+/// patch task is refused rather than silently called a policy for this one.
+pub const STAGE_B_ARENA_PROTOCOL: &str = "p3a-half-initial-patch-1";
+
+/// The arena protocol recorded for a trained stage.
+pub fn arena_protocol(stage: Stage) -> &'static str {
+    match stage {
+        Stage::A => "p2b-stage-a-1",
+        Stage::B => STAGE_B_ARENA_PROTOCOL,
+    }
+}
+
+/// One fixed Stage-B layout used for the diagnostic blind heading sweep.
+pub const OFFSET_SWEEP_LAYOUT_SEED: u64 = 6;
+/// Inclusive signed offsets, in degrees: -180, -165, ..., +180.
+pub const OFFSET_SWEEP_DEGREES: [i16; 25] = [
+    -180, -165, -150, -135, -120, -105, -90, -75, -60, -45, -30, -15, 0, 15, 30, 45, 60, 75, 90,
+    105, 120, 135, 150, 165, 180,
+];
 
 /// The trainer's default train seed, in the trainer's own stream — its randomness never
 /// touches a world draw ([`super::trainer`]).
@@ -246,6 +269,26 @@ impl Prepared {
         }
     }
 
+    /// Build one Stage-B diagnostic case with an exact fixture-side signed start turn.
+    /// The target and angle remain outside the controller boundary.
+    pub fn build_reacquisition_with_start_turn(
+        founder: Founder,
+        layout_seed: u64,
+        turn_to_initial_rad: f64,
+    ) -> Prepared {
+        let (arena, initial, successor) =
+            Arena::build_reacquisition_with_start_turn(founder, layout_seed, turn_to_initial_rad)
+                .into_parts();
+        Prepared {
+            founder,
+            layout_seed,
+            stage: Stage::B,
+            patches: Some((initial, successor)),
+            senses: arena.prepare_senses(),
+            arena,
+        }
+    }
+
     /// Stage B's `(initial, successor)` patch sites, for the evaluator's accounting.
     pub fn patches(&self) -> Option<(Site, Site)> {
         self.patches
@@ -349,9 +392,69 @@ pub fn evaluation_layouts(founder: Founder, stage: Stage) -> Vec<Prepared> {
         .into()
 }
 
+/// The blind Stage-B diagnostic sweep: one terrain/resource/start position, with only
+/// the start heading changed in balanced 15-degree increments.
+pub fn offset_sweep_layouts() -> Vec<(String, Prepared)> {
+    OFFSET_SWEEP_DEGREES
+        .into_iter()
+        .map(|degrees| {
+            (
+                format!("{degrees:+}deg"),
+                Prepared::build_reacquisition_with_start_turn(
+                    Founder::Blind,
+                    OFFSET_SWEEP_LAYOUT_SEED,
+                    f64::from(degrees).to_radians(),
+                ),
+            )
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_blind_stage_b_holdout_is_balanced_by_side_and_range() {
+        let mut bins = [0usize; 4];
+        for seed in EVALUATION_LAYOUT_SEEDS {
+            let turn = Prepared::build_stage(Founder::Blind, seed, Stage::B)
+                .start_geometry()
+                .expect("the held-out layout places a founder")
+                .turn_to_target_rad
+                .to_degrees();
+            let side = usize::from(turn >= 0.0);
+            let range = usize::from(turn.abs() > 90.0);
+            bins[side * 2 + range] += 1;
+        }
+        assert_eq!(bins, [2, 2, 2, 2], "negative/positive x near/far");
+    }
+
+    #[test]
+    fn the_offset_sweep_changes_only_the_blind_start_heading() {
+        let cases = offset_sweep_layouts();
+        assert_eq!(cases.len(), OFFSET_SWEEP_DEGREES.len());
+        let first = &cases[0].1;
+        let first_pose = first.fixture_arena().animal_pose().expect("founder");
+        let first_geometry = first.start_geometry().expect("geometry");
+        for ((label, prepared), expected) in cases.iter().zip(OFFSET_SWEEP_DEGREES) {
+            let pose = prepared.fixture_arena().animal_pose().expect("founder");
+            let geometry = prepared.start_geometry().expect("geometry");
+            assert_eq!(prepared.founder, Founder::Blind);
+            assert_eq!(prepared.stage, Stage::B);
+            assert_eq!(prepared.layout_seed, OFFSET_SWEEP_LAYOUT_SEED);
+            assert_eq!(pose.x, first_pose.x, "{label}");
+            assert_eq!(pose.z, first_pose.z, "{label}");
+            assert_eq!(geometry.target, first_geometry.target, "{label}");
+            assert_eq!(geometry.distance_m, first_geometry.distance_m, "{label}");
+            let error = geometry.turn_to_target_rad - f64::from(expected).to_radians();
+            assert!(
+                error.sin().atan2(error.cos()).abs() < 1e-12,
+                "{label}: got {} degrees",
+                geometry.turn_to_target_rad.to_degrees()
+            );
+        }
+    }
 
     /// No training or evaluation seed is the arena's seam layout, so the default fixtures
     /// keep food away from the wrapped seam as the plan says.

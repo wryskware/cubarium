@@ -427,6 +427,12 @@ fn evaluation_command(out: &Path, founder: Founder, stage: Stage, best_file: &st
     )
 }
 
+fn evaluation_jobs(layout_count: usize) -> Vec<(usize, String)> {
+    (0..layout_count)
+        .map(|li| (li, format!("eval/{li}")))
+        .collect()
+}
+
 #[cfg(test)]
 mod train_output_tests {
     use super::*;
@@ -443,6 +449,19 @@ mod train_output_tests {
         assert!(command.contains("--founder frondgrazer"));
         assert!(command.contains("--stage b"));
         assert!(!command.contains("gen0-center.json"));
+    }
+
+    #[test]
+    fn evaluation_dispatches_each_layout_once_not_once_per_worker() {
+        assert_eq!(
+            evaluation_jobs(4),
+            vec![
+                (0, "eval/0".into()),
+                (1, "eval/1".into()),
+                (2, "eval/2".into()),
+                (3, "eval/3".into()),
+            ]
+        );
     }
 }
 
@@ -525,23 +544,35 @@ pub fn evaluate(
         }
     };
     let set = set.trim().to_ascii_lowercase();
-    let seeds: &[u64] = match set.as_str() {
-        "training" => &task::TRAINING_LAYOUT_SEEDS,
-        "holdout" | "evaluation" => &task::EVALUATION_LAYOUT_SEEDS,
+    let prepared_layouts: Vec<(String, task::Prepared)> = match set.as_str() {
+        "training" => task::training_layouts(founder, stage)
+            .into_iter()
+            .map(|p| (p.layout_seed.to_string(), p))
+            .collect(),
+        "holdout" | "evaluation" => task::evaluation_layouts(founder, stage)
+            .into_iter()
+            .map(|p| (p.layout_seed.to_string(), p))
+            .collect(),
+        "offset-sweep" | "offsets" => {
+            if founder != Founder::Blind || stage != Stage::B {
+                return Err("--set offset-sweep is the blind Stage-B diagnostic".into());
+            }
+            task::offset_sweep_layouts()
+        }
         other => {
-            return Err(format!("unknown --set `{other}`; use `training` or `holdout`").into());
+            return Err(format!(
+                "unknown --set `{other}`; use `training`, `holdout` or `offset-sweep`"
+            )
+            .into());
         }
     };
-    let prepared_layouts = task::evaluation_layouts(founder, stage)
-        .into_iter()
-        .chain(task::training_layouts(founder, stage))
-        .filter(|p| seeds.contains(&p.layout_seed))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        prepared_layouts.len(),
-        seeds.len(),
-        "the frozen sets cover every seed"
-    );
+    if episode_limit < prepared_layouts.len() as u64 {
+        return Err(format!(
+            "--episode-limit {episode_limit} is smaller than this set's {} layouts",
+            prepared_layouts.len()
+        )
+        .into());
+    }
 
     println!(
         "# voxel evaluate — {} ({}), driver `{}`, stage {}, set `{set}`, {} layouts",
@@ -549,17 +580,17 @@ pub fn evaluate(
         founder.role(),
         driver.name(),
         stage.as_str(),
-        seeds.len(),
+        prepared_layouts.len(),
     );
     println!("# build {BUILD_ID}, horizon {horizon}, workers {workers}");
     println!();
 
     let deadline = Instant::now() + std::time::Duration::from_secs(wall_seconds.max(1));
     let cancel = AtomicBool::new(false);
-    let mut jobs: Vec<(usize, String)> = (0..prepared_layouts.len())
-        .flat_map(|li| (0..workers).map(move |w| (li, format!("eval/{li}/{w}"))))
-        .collect();
-    jobs.truncate(episode_limit.max(1) as usize);
+    // Exactly one episode per case. Before P3 this accidentally queued one duplicate per
+    // worker, so the default 64-episode cap covered only four of eight layouts at 16
+    // workers and evaluation failed unless callers manually raised the cap.
+    let jobs = evaluation_jobs(prepared_layouts.len());
     let slots: std::sync::Mutex<Vec<Option<driver::Episode>>> =
         std::sync::Mutex::new(vec![None; prepared_layouts.len()]);
     let cursor = AtomicUsize::new(0);
@@ -573,7 +604,7 @@ pub fn evaluate(
                     }
                     let (li, name) = &jobs[index];
                     match driver::run_prepared(
-                        &prepared_layouts[*li],
+                        &prepared_layouts[*li].1,
                         &driver,
                         horizon,
                         super::driver::Limits::until(&cancel, deadline),
@@ -605,16 +636,16 @@ pub fn evaluate(
     // (P2-D step 3). Nothing here was ever in an observation.
     println!(
         "{:<8} {:>7} {:>6} {:>10} {:>10} {:>8} {:>9} {:>6} {:>8} {:>5}",
-        "seed", "ticks", "alive", "intake", "motor", "survive", "score", "dist", "turn", "ate"
+        "case", "ticks", "alive", "intake", "motor", "survive", "score", "dist", "turn", "ate"
     );
     let mut rows = Vec::new();
     let mut geometry = Vec::new();
-    for (li, seed) in seeds.iter().enumerate() {
+    for (li, (label, prepared)) in prepared_layouts.iter().enumerate() {
         let e = slots[li].as_ref().expect("checked complete");
-        let g = prepared_layouts[li].start_geometry();
+        let g = prepared.start_geometry();
         println!(
             "{:<8} {:>7} {:>6} {:>10.4} {:>10.4} {:>8.3} {:>9.4} {:>6} {:>8} {:>5}",
-            seed,
+            label,
             e.ticks,
             e.alive,
             e.score.intake_normalized,
@@ -651,19 +682,46 @@ pub fn evaluate(
         rows.len()
     );
 
+    if founder == Founder::Blind && stage == Stage::B {
+        let mut bins = [(0usize, 0usize); 4];
+        for (row, start) in rows.iter().zip(&geometry) {
+            let Some(start) = start else { continue };
+            let turn = start.turn_to_target_rad.to_degrees();
+            let side = usize::from(turn >= 0.0);
+            let range = usize::from(turn.abs() > 90.0);
+            let bin = side * 2 + range;
+            bins[bin].1 += 1;
+            bins[bin].0 += usize::from(row.eaten_organic > 0.0);
+        }
+        println!();
+        println!(
+            "signed acquisition: neg-near {}/{}  neg-far {}/{}  pos-near {}/{}  pos-far {}/{}",
+            bins[0].0, bins[0].1, bins[1].0, bins[1].1, bins[2].0, bins[2].1, bins[3].0, bins[3].1,
+        );
+        if matches!(set.as_str(), "holdout" | "evaluation") {
+            let negative = bins[0].0 + bins[1].0;
+            let positive = bins[2].0 + bins[3].0;
+            let gate = fed >= 6 && negative >= 2 && positive >= 2;
+            println!(
+                "balanced acquisition gate (>=6/8 total and >=2/4 on each side): {}",
+                if gate { "MET" } else { "UNMET" }
+            );
+        }
+    }
+
     // Stage B's accounting, reported *beside* the score and never inside it.
     let reacquisition: Vec<_> = rows.iter().filter_map(|e| e.reacquisition).collect();
     if !reacquisition.is_empty() {
         println!();
         println!(
             "{:<8} {:>11} {:>11} {:>10} {:>12} {:>12}",
-            "seed", "patch1-take", "patch2-take", "depleted", "first-bite2", "reacquired"
+            "case", "patch1-take", "patch2-take", "depleted", "first-bite2", "reacquired"
         );
-        for (seed, r) in seeds.iter().zip(&reacquisition) {
+        for ((label, _), r) in prepared_layouts.iter().zip(&reacquisition) {
             let tick = |t: Option<u64>| t.map_or("-".into(), |t| t.to_string());
             println!(
                 "{:<8} {:>11.5} {:>11.5} {:>10} {:>12} {:>12}",
-                seed,
+                label,
                 r.initial_taken,
                 r.successor_taken,
                 tick(r.depleted_tick),
@@ -695,6 +753,7 @@ pub fn evaluate(
             "driver": driver.name(),
             "stage": stage.as_str(),
             "set": set,
+            "cases": prepared_layouts.iter().map(|(label, _)| label).collect::<Vec<_>>(),
             "median_score": median,
             "horizon_ticks": horizon,
             "workers": workers,

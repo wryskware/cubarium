@@ -56,19 +56,21 @@ pub const GROUND_Y: u32 = 4;
 const POND_FILL: f64 = 0.8;
 /// Organic matter in one Stage-A litter tile.
 const LITTER_PER_TILE: f64 = 0.2;
-/// Organic matter in one **Stage-B** litter patch.
+/// Organic matter in Stage B's successor litter patch.
 ///
 /// Stage B only means anything if the first patch actually runs out inside the horizon.
 /// The blind founder bites `bite_per_s = 0.0005` organic per second at full effort, so
-/// 0.015 is thirty seconds of uninterrupted feeding — a quarter of the Stage-B horizon
-/// (2,400 ticks = 120 s), leaving the rest of the episode for the successor leg. The
-/// Stage-A tile's 0.2 would take 400 s and could never deplete.
+/// 0.015 is thirty seconds of uninterrupted feeding. The initial patch is half this
+/// size so acquisition and depletion leave enough of the 120-second horizon for the
+/// successor leg; the successor remains the larger confirmation patch.
 ///
 /// The cue pays for it: emission is `min(litter / 0.05, 1)` cue units per second, so a
 /// patch this size emits at 0.30 rather than the saturated 1.0 of a Stage-A tile. The
 /// gradient is weaker, not absent, and it is the honest consequence of a patch a founder
 /// can finish.
 pub const REACQUISITION_LITTER_PER_PATCH: f64 = 0.015;
+/// Stage B's initial patch is half the successor stock (P3-A).
+pub const REACQUISITION_INITIAL_PATCH_FRACTION: f64 = 0.5;
 /// Litter mineral fraction (a plant tissue's order of magnitude).
 const LITTER_MINERAL_FRACTION: f64 = 0.02;
 /// Litter retained-energy density, at the litter energy cap.
@@ -164,7 +166,7 @@ impl Arena {
     /// ground is direct `SetMaterial`, so there is no settling cost and nothing to freeze
     /// afterwards.
     pub fn build(founder: Founder, layout_seed: u64) -> Arena {
-        Self::build_kind(founder, layout_seed, LayoutKind::StageA).0
+        Self::build_kind(founder, layout_seed, LayoutKind::StageA, None).0
     }
 
     /// Build Stage B's smallest real continuation task: one reachable finite patch and
@@ -172,8 +174,38 @@ impl Arena {
     /// static sensory field; this type only records which physical sites form the two
     /// patches for an evaluator after the controller has acted.
     pub fn build_reacquisition(founder: Founder, layout_seed: u64) -> ReacquisitionArena {
-        let (arena, initial_patch) =
-            Self::build_kind(founder, layout_seed, LayoutKind::Reacquisition);
+        Self::build_reacquisition_kind(founder, layout_seed, None)
+    }
+
+    /// Build the same Stage-B layout and start position as [`Self::build_reacquisition`],
+    /// but set the signed turn from the founder's heading to its initial patch exactly.
+    ///
+    /// This is a fixture-only diagnostic seam for the balanced blind offset sweep. The
+    /// heading changes the body's honest observations; the target and requested angle
+    /// are not exposed to its controller.
+    pub fn build_reacquisition_with_start_turn(
+        founder: Founder,
+        layout_seed: u64,
+        turn_to_initial_rad: f64,
+    ) -> ReacquisitionArena {
+        assert!(
+            turn_to_initial_rad.is_finite(),
+            "the diagnostic start turn must be finite"
+        );
+        Self::build_reacquisition_kind(founder, layout_seed, Some(turn_to_initial_rad))
+    }
+
+    fn build_reacquisition_kind(
+        founder: Founder,
+        layout_seed: u64,
+        start_turn_override: Option<f64>,
+    ) -> ReacquisitionArena {
+        let (arena, initial_patch) = Self::build_kind(
+            founder,
+            layout_seed,
+            LayoutKind::Reacquisition,
+            start_turn_override,
+        );
         let initial_patch = initial_patch.expect("the two-patch layout records its initial patch");
         let successor_patch = arena
             .resources
@@ -188,7 +220,12 @@ impl Arena {
         }
     }
 
-    fn build_kind(founder: Founder, layout_seed: u64, kind: LayoutKind) -> (Arena, Option<Site>) {
+    fn build_kind(
+        founder: Founder,
+        layout_seed: u64,
+        kind: LayoutKind,
+        start_turn_override: Option<f64>,
+    ) -> (Arena, Option<Site>) {
         let config = VoxelConfig {
             width: ARENA_WIDTH,
             height: ARENA_HEIGHT,
@@ -319,7 +356,14 @@ impl Arena {
                 Founder::Blind => {
                     let organic = match kind {
                         LayoutKind::StageA => LITTER_PER_TILE,
-                        LayoutKind::Reacquisition => REACQUISITION_LITTER_PER_PATCH,
+                        LayoutKind::Reacquisition => {
+                            let fraction = if Some(site) == initial_patch {
+                                REACQUISITION_INITIAL_PATCH_FRACTION
+                            } else {
+                                1.0
+                            };
+                            fraction * REACQUISITION_LITTER_PER_PATCH
+                        }
                     };
                     let accepted = flora.deposit(
                         site,
@@ -350,6 +394,20 @@ impl Arena {
                         },
                     );
                     debug_assert!(accepted, "a springturf founder on a support face");
+                    if Some(site) == initial_patch {
+                        let foliage = flora
+                            .view()
+                            .stand_at(site)
+                            .expect("the Stage-B springturf was seeded")
+                            .foliage;
+                        let removed = flora
+                            .take_foliage(
+                                site,
+                                (1.0 - REACQUISITION_INITIAL_PATCH_FRACTION) * foliage,
+                            )
+                            .expect("the initial Stage-B crown has foliage to trim");
+                        debug_assert!((removed.organic - 0.5 * foliage).abs() < 1e-12);
+                    }
                 }
             }
         }
@@ -382,7 +440,6 @@ impl Arena {
         let mut fauna = Fauna::new(FaunaConfig::default());
         // Isolated arenas disable paid births (plan, "Frozen arena contract").
         fauna.set_births_enabled(false);
-        let manifest = founder.manifest();
         let mut animal_id = None;
         if let Some((site, target, _)) = start {
             // The start heading (P2-B step 2). Phase one aimed both founders at the
@@ -394,16 +451,22 @@ impl Arena {
             let dx = wrapped_dx(site.x, target.x) as f64;
             let dz = f64::from(target.z) - f64::from(site.z);
             let toward = dx.atan2(dz);
-            let heading_rad = match founder {
-                // The blind founder is handed nothing: its heading is uniform over the
-                // whole circle, drawn from the layout seed. Whatever it finds, it finds
-                // by smelling and walking.
-                Founder::Blind => rng.unit() * std::f64::consts::TAU,
-                // The browser's foliage must be *somewhere it could look*, not straight
-                // ahead: uniform within +/-90 degrees of the bearing to the target, so
-                // the target lies inside the -90..+90 the three sectors cover at the
-                // first sample and is usually well off centre.
-                Founder::Browser => toward + (2.0 * rng.unit() - 1.0) * std::f64::consts::FRAC_PI_2,
+            let heading_rad = if let Some(turn) = start_turn_override {
+                toward - turn
+            } else {
+                match founder {
+                    // The blind founder is handed nothing: its heading is uniform over the
+                    // whole circle, drawn from the layout seed. Whatever it finds, it finds
+                    // by smelling and walking.
+                    Founder::Blind => rng.unit() * std::f64::consts::TAU,
+                    // The browser's foliage must be *somewhere it could look*, not straight
+                    // ahead: uniform within +/-90 degrees of the bearing to the target, so
+                    // the target lies inside the -90..+90 the three sectors cover at the
+                    // first sample and is usually well off centre.
+                    Founder::Browser => {
+                        toward + (2.0 * rng.unit() - 1.0) * std::f64::consts::FRAC_PI_2
+                    }
+                }
             };
             if fauna.apply(
                 &world,
@@ -726,24 +789,40 @@ mod tests {
         }
     }
 
-    /// Stage B's patches are sized so the first one actually runs out inside the
-    /// horizon: a founder biting at full effort from contact empties a patch in about a
-    /// quarter of the 2,400-tick Stage-B horizon. Checked as arithmetic on the real
-    /// stocks and the real bite rates, not by running two thousand ticks.
+    /// Stage B's initial patch is half the successor: roughly one eighth and one quarter
+    /// of the 2,400-tick horizon at full-effort contact. The crown stays the same size
+    /// for the browser; only its edible foliage is halved.
     #[test]
-    fn a_stage_b_patch_is_a_quarter_horizon_of_feeding() {
+    fn the_stage_b_initial_patch_is_half_the_successor() {
         for founder in Founder::ALL {
             let stage = Arena::build_reacquisition(founder, 6);
             let config = cubarium_voxel_fauna::FaunaConfig::default();
             let bite_per_s = config.founder(founder).core.bite_per_s;
-            for patch in [stage.initial_patch, stage.successor_patch] {
-                let stock = stage.arena.patch_stock(patch);
-                let seconds = stock / bite_per_s;
-                assert!(
-                    (20.0..=40.0).contains(&seconds),
-                    "{founder:?}: a patch holding {stock} takes {seconds} s at \
-                     {bite_per_s}/s, which is not about a quarter of 120 s"
-                );
+            let initial = stage.arena.patch_stock(stage.initial_patch);
+            let successor = stage.arena.patch_stock(stage.successor_patch);
+            assert!((initial / successor - 0.5).abs() < 1e-12, "{founder:?}");
+            assert!(
+                (10.0..=20.0).contains(&(initial / bite_per_s)),
+                "{founder:?}: the initial patch is not about one eighth of 120 s"
+            );
+            assert!(
+                (20.0..=40.0).contains(&(successor / bite_per_s)),
+                "{founder:?}: the successor is not about one quarter of 120 s"
+            );
+            if founder == Founder::Browser {
+                let initial_stand = stage
+                    .arena
+                    .flora
+                    .view()
+                    .stand_at(stage.initial_patch)
+                    .expect("initial springturf");
+                let successor_stand = stage
+                    .arena
+                    .flora
+                    .view()
+                    .stand_at(stage.successor_patch)
+                    .expect("successor springturf");
+                assert_eq!(initial_stand.wood, successor_stand.wood, "same crown");
             }
             // And Stage A's tiles are deliberately not that: they cannot deplete.
             let a = Arena::build(founder, 6);

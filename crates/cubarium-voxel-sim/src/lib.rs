@@ -63,7 +63,7 @@ use cubarium_voxel_flora::Flora;
 mod arena;
 pub use arena::{
     ARENA_DEPTH, ARENA_HEIGHT, ARENA_VOXEL_M, ARENA_WIDTH, Arena, GROUND_Y,
-    REACQUISITION_LITTER_PER_PATCH, ReacquisitionArena,
+    REACQUISITION_INITIAL_PATCH_FRACTION, REACQUISITION_LITTER_PER_PATCH, ReacquisitionArena,
 };
 /// A support face: the coordinate a resource patch, a stand and a deposit all live at.
 /// Re-exported so a caller holding an [`Arena`] can name its patch sites without
