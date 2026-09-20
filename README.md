@@ -4,7 +4,7 @@ A persistent artificial ecosystem for a 64×64 LED cube and, first, a local
 desktop display. One shared 3D voxel world with terrain, free water and a small
 plant and animal community whose changes have physical causes.
 
-## Current direction (voxel, 2026-09-18)
+## Current direction (voxel, 2026-09-20)
 
 The project is being rebuilt around a shallow **voxel ringworld**, developed and
 tested locally first and adapted to the cube and the Tachyon panel later. The
@@ -21,16 +21,18 @@ Priority as of this date: the ambient display comes first, the
 it, and game mode waits. `design_status` still marks all of this `leaning` or
 `exploration`; nothing here promotes a proposal to a decision.
 
-Voxel sensing phase one is complete on the current branch. The bounded sensing
-pipeline was repaired through commit `35b1835`, with its training resource
-ceiling recorded in `1258acc`. The blind and browser manifests have 23 and 37
-inputs respectively and share three actions; the static viewer is available for
-inspection. On held-out layouts, the learned blind feeder acquired 7/8 targets
-and the browser acquired 8/8; both survived 8/8 trials. Median scores were
-about 0.302 and 0.301, against 0.250 for the stationary baseline. This closes
-the narrow sensing slice only; it does not establish broader ecology or
-production readiness. The next bounded package is a two-patch
-depletion/reacquisition arena.
+Voxel sensing phases one and two are complete on the current branch. The
+bounded pipeline now has honest Stage-A starts, two-patch Stage-B arenas,
+recurrent-policy ablations, deterministic baselines and a fed evolutionary
+search. Stage A meets its target for both founders; Stage B does so for the
+browser but not the blind founder. The first phase-three diagnostic, through
+commit `ee607a2`, halves the initial Stage-B resource, balances the held-out
+signed offsets and adds a fixed blind offset sweep. The smaller patch made the
+browser deplete it in 7/8 held-out trials, but neither founder reacquired the
+successor patch in any held-out trial. This closes the timing hypothesis: the
+next bounded sensing package needs to train the post-depletion transition, not
+merely shorten the first feeding leg. This remains a narrow sensing result; it
+does not establish broader ecology or production readiness.
 
 Voxel terrain, water and the first plants and animals live in the
 `crates/cubarium-voxel*` crates. The round briefs under `design/handoffs/` and

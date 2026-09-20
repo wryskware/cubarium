@@ -1,5 +1,5 @@
 ---
-status: open
+status: closed
 date: 2026-09-19
 owner: Fable (orchestration); Wrysk decides
 ---
@@ -327,3 +327,35 @@ Still open, with evidence:
 Not started, by decision: live-world transfer of the founder bodies, genome
 linkage of appendages, Tilt, vibration, the remaining roles. Wrysk decides the
 next slice.
+
+## Phase-three diagnostic follow-up (Codex, 2026-09-20, at ee607a2)
+
+The two recommendations above were implemented as one bounded diagnostic:
+Stage B now starts with half the successor patch's edible resource (blind
+0.0075 versus 0.015; browser foliage 0.03 versus 0.06, with wood and crown
+unchanged), the held-out eight are balanced across signed near/far offset bins,
+and `--set offset-sweep` evaluates one blind layout from -180 to +180 degrees
+in 15-degree steps. The Stage-B arena protocol is versioned so equal-patch
+policies cannot be evaluated as if they used this geometry.
+
+Fresh 512-update, 32-pair, 16-worker Stage-B runs completed without discarded
+episodes. Blind selected generation 494 after 385 s; browser selected 505 after
+260 s. On the balanced held-out eight:
+
+| founder | score mean / median | acquired | initial depleted | successor bitten | reacquired |
+| --- | --- | --- | --- | --- | --- |
+| blind | .327 / .236 | 3/8 | 1/8 | 0/8 | 0/8 |
+| browser | .478 / .489 | 8/8 | 7/8 | 0/8 | 0/8 |
+
+The blind offset sweep acquired 5/25: negative near 2/6, negative far 1/6,
+positive near 0/7 and positive far 2/6. Its balanced gate is unmet, so the
+one-sided/angle-banded weakness remains visible rather than being hidden by the
+held-out sample.
+
+The smaller patch worked mechanically but did not teach the transition. Browser
+depletion moved earlier and became common, yet the learned controller still
+parks at the first patch and never bites the successor. The next bounded test
+should therefore isolate and reward post-depletion departure and successor
+contact (or stage that transition as its own curriculum) before another full
+Stage-B search. No live-world transfer or broader ecology work is implied by
+this result.
