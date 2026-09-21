@@ -16,6 +16,7 @@ RESTART=yes
 [ "${1:-}" = "--no-restart" ] && RESTART=no
 
 REPO=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+BUILD_REV=$(git -C "$REPO" rev-parse --short HEAD)
 
 echo "==> rsync $REPO -> $TACHYON:$REMOTE"
 rsync -a --delete \
@@ -34,6 +35,7 @@ rsync -a --delete \
 echo "==> build on the board (taskset -c 4-7, release)"
 ssh "$TACHYON" "set -eu
     export PATH=/root/.cargo/bin:\$PATH
+    export CUBARIUM_BUILD_REV=$BUILD_REV
     cd $REMOTE
     start=\$(date +%s)
     taskset -c 4-7 cargo build --release -p cubarium --bin cubarium

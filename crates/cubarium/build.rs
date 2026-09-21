@@ -1,8 +1,9 @@
 //! Stamps the git short hash into the binary so snapshots record which build wrote them.
-//! Failure is never fatal: without git (a source tarball, a sandbox) the hash is `unknown`.
+//! Git-free deployments can supply CUBARIUM_BUILD_REV; otherwise failure yields `unknown`.
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=CUBARIUM_BUILD_REV");
     // Follow both HEAD and its resolved ref: HEAD itself does not change on a
     // normal commit. Ask git for paths so linked worktrees work as well.
     for name in ["HEAD", "packed-refs"] {
@@ -11,14 +12,11 @@ fn main() {
     if let Some(reference) = git_output(&["symbolic-ref", "-q", "HEAD"]) {
         watch_git_path(&reference);
     }
-    let hash = std::process::Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
-        .output()
+    let hash = std::env::var("CUBARIUM_BUILD_REV")
         .ok()
-        .filter(|out| out.status.success())
-        .and_then(|out| String::from_utf8(out.stdout).ok())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
+        .or_else(|| git_output(&["rev-parse", "--short", "HEAD"]))
         .unwrap_or_else(|| "unknown".to_string());
     println!("cargo:rustc-env=CUBARIUM_GIT_HASH={hash}");
 }
