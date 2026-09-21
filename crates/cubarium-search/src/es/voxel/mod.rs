@@ -27,7 +27,8 @@
 //! - [`trainer`]: shape-aware antithetic pairs, bounded workers, cancellation that counts
 //!   its discarded work, and the run/checkpoint store.
 //! - [`imitate`]: the P3-C imitation seed — teacher streams recorded from the fauna's
-//!   own foraging heuristic on the training layouts.
+//!   own foraging heuristic on the training layouts, and the teacher-forced fit of a GRU
+//!   to them, saved as an ordinary centre a search can warm-start from.
 //! - [`store`]: the exported policy file and checkpoint formats.
 //! - [`commands`]: the `voxel-check` / `voxel-bench` / `voxel-train` / `voxel-evaluate`
 //!   command family.

@@ -990,6 +990,7 @@ fn write_center_policy(
         starting_stores: cp.protocol.starting_stores.clone(),
         arena_protocol: cp.protocol.arena_protocol.clone(),
         protocol_hash: Some(cp.protocol_hash),
+        imitation: None,
         stage: cp.protocol.stage.clone(),
         theta: cp.theta.clone(),
     };
@@ -1125,6 +1126,7 @@ mod tests {
             starting_stores: task::STARTING_STORES_PROTOCOL.into(),
             arena_protocol: task::arena_protocol(Stage::A, task::Band::Landed).into(),
             protocol_hash: Some(0xdead_beef),
+            imitation: None,
             stage: Stage::A.as_str().into(),
             theta: theta.clone(),
         };
@@ -1133,7 +1135,10 @@ mod tests {
 
         // Another lineage's centre is refused, by name, before anything runs.
         let err = InitCenter::load(&path, Founder::Browser).expect_err("refused");
-        assert!(err.contains("littershredder") && err.contains("frondgrazer"), "{err}");
+        assert!(
+            err.contains("littershredder") && err.contains("frondgrazer"),
+            "{err}"
+        );
 
         let init = InitCenter::load(&path, Founder::Blind).expect("loaded");
         assert_eq!(init.theta, theta, "the exact weights, not a reseed");

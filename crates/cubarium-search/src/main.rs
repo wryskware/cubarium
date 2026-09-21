@@ -674,10 +674,29 @@ enum Command {
         /// Episode horizon in ticks; defaults to each stage's own.
         #[arg(long)]
         horizon: Option<u64>,
-        /// Episode workers, one simulation thread per episode.
+        /// Episode workers, one simulation thread per episode; also the fit's threads.
         #[arg(long, default_value_t = cubarium_search::es::voxel::task::episode_worker_limit())]
         workers: usize,
-        /// Directory for `streams/`. Disposable run output.
+        /// Fit a clone to the recorded streams and save it as a centre. `--fit false`
+        /// records only.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        fit: bool,
+        /// Adam steps over the full stream set, teacher-forced.
+        #[arg(long, default_value_t = 4_000)]
+        updates: u32,
+        #[arg(long, default_value_t = 0.01)]
+        learning_rate: f64,
+        /// Truncated-BPTT window in controller steps. The hidden state carries across a
+        /// window boundary; the gradient does not.
+        #[arg(long, default_value_t = 120)]
+        chunk: usize,
+        /// Global gradient-norm clip.
+        #[arg(long, default_value_t = 5.0)]
+        clip: f64,
+        /// Seed for the initial centre the fit starts from.
+        #[arg(long, default_value_t = cubarium_search::es::voxel::task::TRAINING_SEED)]
+        fit_seed: u64,
+        /// Directory for `streams/` and `clone-center.json`. Disposable run output.
         #[arg(long, default_value = "runs/voxel-imitate-blind")]
         out: PathBuf,
     },
@@ -1078,8 +1097,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             layouts,
             horizon,
             workers,
+            fit,
+            updates,
+            learning_rate,
+            chunk,
+            clip,
+            fit_seed,
             out,
-        } => es::voxel::commands::imitate(founder, stages, band, layouts, horizon, workers, out),
+        } => es::voxel::commands::imitate(
+            founder,
+            stages,
+            band,
+            layouts,
+            horizon,
+            workers,
+            fit,
+            updates,
+            learning_rate,
+            chunk,
+            clip,
+            fit_seed,
+            out,
+        ),
         Command::VoxelTrain {
             founder,
             stage,

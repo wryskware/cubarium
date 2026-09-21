@@ -20,6 +20,35 @@ use crate::es::bits::hex_f64s;
 /// The policy file's schema token.
 pub const POLICY_SCHEMA: &str = "cub-voxel-policy-1";
 
+/// How a centre was fitted, when it came from **imitation** rather than from a search.
+///
+/// A clone is an ordinary centre — same schema, same digest and protocol checks, loadable
+/// by `--init-center` and by an evaluation — and this block is the record of where its
+/// weights came from: which teacher, over which exact streams, and how close the fit got.
+/// Absent on every centre a training run wrote, which is what it means for a file to be a
+/// search product rather than a clone.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ImitationProvenance {
+    /// [`super::imitate::IMITATION_PROVENANCE`].
+    pub provenance: String,
+    /// The controller slot imitated ([`super::imitate::TEACHER_CONTROLLER`]).
+    pub teacher: String,
+    /// FNV-1a 64 over the exact streams fitted, in the order fitted
+    /// ([`super::imitate::streams_digest`]).
+    pub streams_fnv1a: u64,
+    pub streams: usize,
+    /// Teacher steps in those streams.
+    pub steps: usize,
+    /// Adam steps taken over the full stream set.
+    pub updates: u32,
+    /// Final mean squared error against the teacher's **adapted** action, per action:
+    /// forward, turn, feed.
+    pub mse: [f64; 3],
+    pub mse_mean: f64,
+    /// Fraction of teacher steps whose turn sign the clone matches.
+    pub turn_sign_agreement: f64,
+}
+
 /// One trained centre, self-contained.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct VoxelPolicyFile {
@@ -55,6 +84,10 @@ pub struct VoxelPolicyFile {
     /// as provenance for a warm start; absent in files written before P3-B.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocol_hash: Option<u64>,
+    /// Where a clone's weights came from, when the centre was fitted to a teacher
+    /// rather than searched. Absent on a training run's centre.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imitation: Option<ImitationProvenance>,
     /// Which arena task the weights were trained on (`a` or `b`). Recorded, not
     /// validated: running a Stage-A centre on Stage B is a transfer measurement worth
     /// taking, not an error.
@@ -221,6 +254,7 @@ mod tests {
             )
             .into(),
             protocol_hash: None,
+            imitation: None,
             stage: crate::es::voxel::task::Stage::A.as_str().into(),
             theta,
         }

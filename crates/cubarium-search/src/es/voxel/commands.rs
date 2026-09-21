@@ -882,10 +882,14 @@ pub fn evaluate(
 }
 
 /// `voxel-imitate`: record the fauna's own foraging heuristic on the **training**
-/// layouts, at the controller period, as `(observation, adapted action)` streams.
+/// layouts, at the controller period, as `(observation, adapted action)` streams — then
+/// fit a GRU to them and save it as an ordinary centre.
 ///
-/// The held-out seeds are not recorded: a clone fitted on these streams has seen the
-/// training task only. Streams are disposable run output, one file per layout per stage.
+/// The held-out seeds are not recorded and not fitted: a clone has seen the training task
+/// only. Streams are disposable run output, one file per layout per stage; the clone is a
+/// [`super::store::VoxelPolicyFile`] carrying its imitation provenance, loadable by
+/// `voxel-train --init-center` and by `voxel-evaluate --policy`.
+#[allow(clippy::too_many_arguments)]
 pub fn imitate(
     founder: String,
     stages: String,
@@ -893,6 +897,12 @@ pub fn imitate(
     layouts: usize,
     horizon: Option<u64>,
     workers: usize,
+    fit: bool,
+    updates: u32,
+    learning_rate: f64,
+    chunk: usize,
+    clip: f64,
+    fit_seed: u64,
     out: PathBuf,
 ) -> Result<(), Boxed> {
     let worker_limit = task::episode_worker_limit();
@@ -927,6 +937,7 @@ pub fn imitate(
     println!();
 
     let mut all = Vec::new();
+    let recorded = stages.clone();
     for stage in stages {
         let horizon = horizon.unwrap_or_else(|| stage.horizon());
         let t = Instant::now();
@@ -962,11 +973,104 @@ pub fn imitate(
         all.extend(streams);
     }
     let steps: usize = all.iter().map(|s| s.steps).sum();
+    let digest = imitate::streams_digest(&all);
     println!();
     println!(
-        "{} streams, {steps} teacher steps, digest {:#018x}",
-        all.len(),
-        imitate::streams_digest(&all)
+        "{} streams, {steps} teacher steps, digest {digest:#018x}",
+        all.len()
+    );
+    if !fit {
+        return Ok(());
+    }
+
+    // The fit. Teacher-forced over the recorded streams: no episode runs here, so the
+    // cost is the arithmetic and nothing else.
+    let spec = imitate::FitSpec {
+        updates,
+        learning_rate,
+        chunk,
+        clip,
+        seed: fit_seed,
+        workers,
+    };
+    println!();
+    println!(
+        "# fitting a clone — {updates} Adam updates, lr {learning_rate}, TBPTT window \
+         {chunk} steps, clip {clip}, seed {fit_seed}"
+    );
+    let t = Instant::now();
+    let (theta, report) = imitate::fit(founder, &all, &spec);
+    println!(
+        "initial MSE  forward {:.5}  turn {:.5}  feed {:.5}",
+        report.initial_mse[0], report.initial_mse[1], report.initial_mse[2]
+    );
+    println!(
+        "final   MSE  forward {:.5}  turn {:.5}  feed {:.5}  (mean {:.5})",
+        report.mse[0], report.mse[1], report.mse[2], report.mse_mean
+    );
+    println!(
+        "turn-sign agreement {:.1}% of {} teacher steps   {:.1} s",
+        100.0 * report.turn_sign_agreement,
+        report.steps,
+        t.elapsed().as_secs_f64(),
+    );
+    let tail: Vec<String> = report
+        .loss_history
+        .iter()
+        .rev()
+        .take(5)
+        .rev()
+        .map(|l| format!("{l:.5}"))
+        .collect();
+    println!("loss, last sampled updates: {}", tail.join(" -> "));
+
+    // The clone declares the arena it is a policy *for*: Stage B under the recorded band
+    // when Stage B was recorded, Stage A otherwise. That is what a later load checks.
+    let clone_stage = if recorded.contains(&Stage::B) {
+        Stage::B
+    } else {
+        Stage::A
+    };
+    let file = super::store::VoxelPolicyFile {
+        schema: super::store::POLICY_SCHEMA.into(),
+        build: BUILD_ID.into(),
+        founder: founder.name().into(),
+        digest: voxel_schema_digest(founder),
+        train_seed: fit_seed,
+        generation: None,
+        score: None,
+        start_heading: task::START_HEADING_PROTOCOL.into(),
+        starting_stores: task::STARTING_STORES_PROTOCOL.into(),
+        arena_protocol: task::arena_protocol(clone_stage, band).into(),
+        protocol_hash: None,
+        imitation: Some(super::store::ImitationProvenance {
+            provenance: imitate::IMITATION_PROVENANCE.into(),
+            teacher: imitate::TEACHER_CONTROLLER.into(),
+            streams_fnv1a: digest,
+            streams: all.len(),
+            steps: report.steps,
+            updates: report.updates,
+            mse: report.mse,
+            mse_mean: report.mse_mean,
+            turn_sign_agreement: report.turn_sign_agreement,
+        }),
+        stage: clone_stage.as_str().into(),
+        theta,
+    };
+    let clone_path = out.join("clone-center.json");
+    file.write(&clone_path)?;
+    // A clone that its own loader would refuse is not a seed. Check it here, not later.
+    super::store::VoxelPolicyFile::load(&clone_path)?
+        .validate_for_band(&clone_path.display().to_string(), band)?;
+    println!();
+    println!("clone {}", clone_path.display());
+    println!(
+        "evaluate with: cargo run --release -p cubarium-search -- voxel-evaluate --policy {} \
+         --founder {} --stage {} --band {} --set holdout",
+        clone_path.display(),
+        founder.name(),
+        clone_stage.as_str(),
+        band.as_str(),
     );
     Ok(())
 }
