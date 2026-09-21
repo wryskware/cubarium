@@ -359,3 +359,93 @@ should therefore isolate and reward post-depletion departure and successor
 contact (or stage that transition as its own curriculum) before another full
 Stage-B search. No live-world transfer or broader ecology work is implied by
 this result.
+
+## Integration note 4 (Fable, 2026-09-20, at f9819c2) — why nobody reacquires
+
+P3-A is on main and reproduced exactly (browser gen505: acquired 8/8, initial
+depleted 7/8 at ticks 825–1420, successor bitten 0/8, motor ≤ 0.0033 for the
+whole episode; blind gen494: 3/8, 1/8, 0/8). Three measurements explain the
+zero, none of which is timing:
+
+1. **The litter cue does not reach the successor.** Settled field response
+   `q = cue/(cue+1)` on a flat support, one 0.015 patch (the successor stock),
+   by distance: 0 m 0.17, 0.25 m 6.7e-2, 0.5 m 1.5e-2, 0.75 m 3.5e-3, 1.0 m
+   8.3e-4, 1.25 m 1.9e-4, 1.5 m 4.2e-5, ≥ 1.75 m exactly 0 (below the field's
+   1e-5 discard). A 0.2 Stage-A tile reaches 1.75 m. Half-life 2 s and 0.4
+   diffusion give the field a decay length of about 0.2 m; that is the model
+   as designed (plan §"Chem", half-life 2 s) and is not changed here.
+2. **The cone stops at 2.0 m** (`cone_range_m`), and a stripped crown reads as
+   an occluder, not foliage, so the browser does know its patch is empty.
+3. **The successor is placed at ≥ 2 m** (`arena_distance_squared ≥ 64`, up to
+   4.85 m). From the depleted patch, therefore, neither founder can sense the
+   successor at all. Reacquisition as built is an undirected search rewarded
+   only on contact, and an ES perturbation of a parking policy that walks a
+   little, finds nothing and pays motor is pushed back to parking.
+
+Controls on the P3-A held-out eight, Stage B (this build): browser heuristic
+takes 0.0035–0.0135 off the first patch, wanders, and bites the successor in
+6/8 (first bites at ticks 280–1875) without depleting anything; browser cruise
+0/8; blind heuristic bites the successor 2/8, the first patch 0/8; blind
+cruise 1/8. So the second patch *is* findable by an observation-only wander
+for the browser inside the horizon; what the GRU never learns is to leave.
+
+The plan's own words for Stage B are "reach a second **nearby** cue patch" and
+"reach another **visible** patch", and it warns not to "demand that blind
+animals solve scent-free maze navigation before their first reward". The
+landed arena asks exactly that. The next package trains the transition as a
+curriculum inside the sensed radius first, then widens to the landed task,
+without touching senses, score or the held-out task.
+
+## Package P3-B: the sensed transition (curriculum, not shaping)
+
+Owner: one Opus 5 worker, high effort. Files: `crates/cubarium-voxel-sim/src/arena.rs`,
+`crates/cubarium-search/src/es/voxel/{task,driver,trainer,commands,store}.rs`,
+`crates/cubarium-search/src/main.rs`. Read integration notes 1–4 and the P3-A
+follow-up above first. Not in scope: `senses.rs`, `body.rs`, manifest ranges,
+the score, any observation channel, any reward term, the held-out seeds.
+
+Steps, in order, each committed by explicit path:
+
+1. **Fixture-side accounting.** Extend `Reacquisition` (driver.rs) with the
+   wrapped initial→successor `separation_m`, the founder's closest approach to
+   the successor after the depletion tick (`min_successor_distance_m`, none
+   when never depleted), and `sense_ticks`: ticks after depletion spent within
+   the founder's sensed radius of the successor (blind 1.5 m from measurement
+   1 above, browser 2.0 m = `cone_range_m`; declare both as named constants
+   in task.rs with that provenance). Print them per row and summarised in the
+   Stage-B table. Nothing here may enter an observation or the score.
+   Re-evaluate the two P3-A centres (blind gen494, browser gen505) with it.
+2. **Separation band.** Stage B gains a band: `near` places the successor with
+   `4 ≤ d² < 36` columns (1.0–1.5 m, inside both senses); `landed` keeps
+   `d² ≥ 64`. `Arena::build_reacquisition` stays `landed`. The band is part of
+   the Stage-B arena protocol string and the trainer's protocol hash, so a
+   `near` centre is refused by an unqualified `landed` evaluation. Held-out
+   and training seeds are unchanged; a short test proves every training and
+   held-out `near` layout satisfies the band and keeps its start off food.
+3. **Warm start.** `voxel-train --init-center <centers/genN-center.json>`:
+   same founder and shape, fresh Adam state, the new run's own protocol hash;
+   the checkpoint records the source file, its `weights_fnv1a` and its
+   protocol hash as provenance. Refuse a centre of the other founder.
+4. **Runs** (32 pairs, 512 updates, 16 layouts, 16 workers each; two runs may
+   share the machine): for each founder, chain A-centre → B-near → B-landed,
+   starting from `runs/voxel-es-p2d-browser-a/centers/gen504-center.json`
+   and `runs/voxel-es-p2d-blind-a/centers/gen508-center.json`. As the
+   curriculum's own control, also run A-centre → B-landed directly (no near
+   rung). Six runs; keep them under `runs/voxel-es-p3b-*`.
+5. **Report** every rung on the landed held-out eight (the near rung also on
+   its own near held-out): score mean/median, acquired, depleted, successor
+   bitten, reacquired, `min_successor_distance_m`, `sense_ticks`. The
+   question the table must answer: does the near rung teach departure, and
+   does departure survive the widening to ≥ 2 m?
+
+Decision authority: the exact band bounds within the stated radii, the CLI
+and protocol encodings, and whether the near rung's held-out set needs its
+own balance check. Escalate by returning early if step 1's accounting shows
+the P3-A browser centre already coming within 2 m of the successor after
+depletion (that would falsify measurement 3 for the layouts in question).
+
+Verification: `cargo nextest run -p cubarium-search -p cubarium-voxel-sim`
+green; tests ≤ 200 ticks; no bit-identical pins. Do not edit
+`design/handoffs/README.md` or this file. Return ≤ 40 lines: commits, the
+table, and the evidence for each conclusion. Fable integrates and runs the
+workspace suite.
