@@ -1,6 +1,7 @@
 use anyhow::{bail, ensure};
 use serde::{Deserialize, Serialize};
 
+use crate::recipe::Landform;
 use crate::{Config, Ledger, Material};
 
 /// The sky-visibility fan: `(dx, dy, dz, weight)` for each of 17 rays. The zenith
@@ -457,6 +458,30 @@ impl PartialEq for VoidRuns {
     }
 }
 
+/// Ticks the convergence test looks back over.
+pub const SETTLE_WINDOW: u32 = 100;
+
+/// What [`World::settle`] measured.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Settle {
+    /// Ticks actually stepped.
+    pub ticks: u32,
+    /// Whether the pooled volume and the wet-cell count both stopped moving.
+    pub converged: bool,
+    /// Free water standing at the end, cubic metres.
+    pub pooled_m3: f64,
+    /// Void cells holding it.
+    pub free_cells: usize,
+    /// Pore water at the end, cubic metres.
+    pub pore_m3: f64,
+    /// Change in total stored water over the last [`SETTLE_WINDOW`] ticks: storage drift,
+    /// which should be nothing at all in a world with no rain and no evaporation.
+    pub drift_m3_per_100: f64,
+    /// Settled **and** uninhabitable: water aloft past the shower trigger and not one
+    /// pool on the ground. A stable dry state is not a wet habitat (plan §4.4).
+    pub dry_locked: bool,
+}
+
 impl World {
     /// Generate a world from its config. Deterministic in `config.seed`. Panics on a
     /// config [`Config::validate`] refuses.
@@ -490,6 +515,11 @@ impl World {
         } else {
             0.0
         };
+        // A staged recipe's water inventory, poured into the geometry it just built. A
+        // `Ridge` world and any recipe with no inventory are left exactly as they were.
+        if let Landform::Staged(recipe) = world.config.landform.clone() {
+            crate::hydrate::hydrate(&mut world, &recipe.water);
+        }
         world.ledger.initial_stored = world.view().stored_m3();
         world.ledger.initial_atmosphere = world.atmosphere_m3;
         // The active sets are built here rather than lazily so that a world is never in a
@@ -631,6 +661,78 @@ impl World {
     pub fn step_with(&mut self, threads: usize) {
         crate::water::step(self, threads);
         self.advance_tick();
+    }
+
+    /// Step until the water has stopped moving, or until `cap_ticks`, and say which.
+    ///
+    /// **Settling is measured, not assumed** (`design/terrain-generation-plan-2026-09-21.md`
+    /// §4.4). A fresh world's pools are placed by geometry and its pore water by a
+    /// retention rule; the solver then redistributes both, and how long that takes is a
+    /// property of the landscape, not a constant anybody can write down. Convergence is
+    /// the pooled volume and the wet-cell count each changing by under one per cent
+    /// across the last [`SETTLE_WINDOW`] ticks.
+    ///
+    /// Nothing here is a claim about the water **cycle**: a world can be hydrostatically
+    /// settled and still locked dry, which is what [`Settle::dry_locked`] reports.
+    pub fn settle(&mut self, cap_ticks: u32) -> Settle {
+        let window = SETTLE_WINDOW as usize;
+        let mut history: Vec<(f64, usize)> = Vec::with_capacity(window + 1);
+        let mut stored: Vec<f64> = Vec::with_capacity(window + 1);
+        let mut ticks = 0;
+        let mut converged = false;
+        loop {
+            let pooled = self.pooled_m3();
+            let cells = self.wet_cells();
+            history.push((pooled, cells));
+            stored.push(self.view().stored_m3());
+            if history.len() > window {
+                let (p0, c0) = history[history.len() - 1 - window];
+                let near = |a: f64, b: f64| (a - b).abs() <= 0.01 * a.abs().max(b.abs()).max(1e-12);
+                if near(p0, pooled) && near(c0 as f64, cells as f64) {
+                    converged = true;
+                }
+            }
+            if converged || ticks >= cap_ticks {
+                break;
+            }
+            self.step();
+            ticks += 1;
+        }
+        let pooled_m3 = history.last().map(|h| h.0).unwrap_or(0.0);
+        let drift = if stored.len() > window {
+            stored[stored.len() - 1] - stored[stored.len() - 1 - window]
+        } else {
+            stored.last().copied().unwrap_or(0.0) - stored.first().copied().unwrap_or(0.0)
+        };
+        Settle {
+            ticks,
+            converged,
+            pooled_m3,
+            free_cells: history.last().map(|h| h.1).unwrap_or(0),
+            pore_m3: self.pore_m3(),
+            drift_m3_per_100: drift,
+            dry_locked: pooled_m3 <= 0.0
+                && self.atmosphere_m3
+                    > self.config.shower_trigger_fraction * self.view().total_water_m3(),
+        }
+    }
+
+    /// Free water standing in the world, cubic metres.
+    pub fn pooled_m3(&self) -> f64 {
+        self.free.iter().sum::<f64>() * self.config.voxel_volume()
+    }
+
+    /// Pore water held in soil and rock, cubic metres.
+    pub fn pore_m3(&self) -> f64 {
+        (0..self.config.cells())
+            .map(|i| self.pore[i] * self.material[i].pore_capacity())
+            .sum::<f64>()
+            * self.config.voxel_volume()
+    }
+
+    /// Void cells holding free water.
+    pub fn wet_cells(&self) -> usize {
+        self.free.iter().filter(|&&f| f > 0.0).count()
     }
 
     /// Move the tick counter on, after every phase that reads it has run.

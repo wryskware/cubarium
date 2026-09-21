@@ -414,6 +414,70 @@ impl Hollows {
     }
 }
 
+/// The water a fresh world starts with, as one inventory and its split.
+///
+/// **Inventory first** (`design/terrain-generation-plan-2026-09-21.md` §4.1): the world
+/// is charged a single total, `inventory_m` metres of water over its footprint, and the
+/// four stores — atmosphere, aquifer, pore and pools — are shares of that one number.
+/// Nothing is charged independently to a target of its own, so a world cannot quietly
+/// start with more water than its inventory says.
+///
+/// `inventory_m = 0`, the default, is the dry world every fixture and every `Ridge`
+/// config had before: [`crate::hydrate::hydrate`] does nothing at all.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Water {
+    /// Total water, metres over the world footprint. Zero is a dry world.
+    pub inventory_m: f64,
+    /// Share of the inventory held aloft for the cycle, `0..=1`.
+    pub atmosphere_fraction: f64,
+    /// Water table at creation, metres above `y = 0`. Charged out of the inventory, so
+    /// a head the inventory cannot pay for is truncated rather than conjured.
+    pub aquifer_head_m: f64,
+}
+
+impl Default for Water {
+    fn default() -> Water {
+        Water::DRY
+    }
+}
+
+impl Water {
+    /// No water at all: what a `Ridge` world and every fixture has.
+    pub const DRY: Water = Water {
+        inventory_m: 0.0,
+        atmosphere_fraction: 0.0,
+        aquifer_head_m: 0.0,
+    };
+
+    /// The staged presets' inventory: 60 mm over the footprint, a tenth of it aloft, and
+    /// a water table a little above the basin floor so the low ground is damp from below.
+    pub const DEFAULT: Water = Water {
+        inventory_m: 0.06,
+        atmosphere_fraction: 0.1,
+        aquifer_head_m: 1.0,
+    };
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        for (name, v) in [
+            ("water.inventory_m", self.inventory_m),
+            ("water.atmosphere_fraction", self.atmosphere_fraction),
+            ("water.aquifer_head_m", self.aquifer_head_m),
+        ] {
+            anyhow::ensure!(
+                v.is_finite() && v >= 0.0,
+                "{name} must be finite and not negative, not {v}"
+            );
+        }
+        anyhow::ensure!(
+            self.atmosphere_fraction <= 1.0,
+            "water.atmosphere_fraction is a share of the inventory, not {}",
+            self.atmosphere_fraction
+        );
+        Ok(())
+    }
+}
+
 /// A landscape in metres. [`Recipe::default`] is the `default` preset.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -497,6 +561,8 @@ pub struct Recipe {
     pub benches: Benches,
     /// Carved hollows.
     pub hollows: Hollows,
+    /// The water the world starts with.
+    pub water: Water,
 
     /// The per-pass seed streams.
     pub streams: Streams,
@@ -542,6 +608,7 @@ impl Recipe {
         erosion: Erosion::DEFAULT,
         benches: Benches::ON,
         hollows: Hollows::GROTTOS,
+        water: Water::DEFAULT,
         streams: Streams {
             relief: 0x_5354_4147_5F52_454C,
             ridge: 0x_5354_4147_5F52_4447,
@@ -671,6 +738,7 @@ impl Recipe {
         }
         self.benches.validate()?;
         self.hollows.validate()?;
+        self.water.validate()?;
         anyhow::ensure!(
             self.lacunarity.is_finite() && self.lacunarity > 1.0,
             "lacunarity steps the frequency up, so it must exceed 1, not {}",

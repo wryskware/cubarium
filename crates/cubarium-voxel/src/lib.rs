@@ -31,6 +31,8 @@ pub mod erosion;
 pub mod generate;
 /// Roofed void a body can stand inside: undercuts, galleries and shelves.
 pub mod hollows;
+/// The water a fresh world starts with: one inventory, poured into the geometry.
+pub mod hydrate;
 pub mod ledger;
 pub mod material;
 /// Periodic noise in physical units. Generation only.
@@ -51,11 +53,14 @@ pub mod world;
 pub use config::Config;
 pub use generate::{Budget, Heightfield, Volume};
 pub use hollows::Hollow;
+pub use hydrate::{Basin, Hydrated, hydrate};
 pub use ledger::Ledger;
 pub use material::Material;
-pub use recipe::{Benches, Erosion, Hollows, Landform, PRESETS, Preset, Recipe, Strata, Streams};
+pub use recipe::{
+    Benches, Erosion, Hollows, Landform, PRESETS, Preset, Recipe, Strata, Streams, Water,
+};
 pub use viability::{BandResult, PoreBand, Viability, ViabilitySpec};
-pub use world::{Command, VoxelView, World, default_threads};
+pub use world::{Command, SETTLE_WINDOW, Settle, VoxelView, World, default_threads};
 
 /// Simulation ticks per second. Matches `cubarium-core::TICK_HZ` so a frontend can
 /// drive both worlds with the same clock.
