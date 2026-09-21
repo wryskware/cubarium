@@ -70,11 +70,14 @@ pub use arena::{
 /// depending on the plant layer directly.
 pub use cubarium_voxel_flora::Site;
 
-/// The static arena's per-arena sensory state as a bevy resource: the settled litter
-/// field and the trend stores, inserted by [`Sim::new_static`] (settled there, before
-/// the first tick can sample it) or [`Sim::new_static_prepared`]. The live schedule never
-/// holds this resource, so its fauna path is exactly what it was; a static schedule
-/// without one runs senses-free, like the live path. Read through [`Sim::senses`].
+/// The sensory state as a bevy resource: the litter field and the per-body trend stores.
+///
+/// The **static arena** gets one from [`Sim::new_static`] (settled there, before the first
+/// tick can sample it) or [`Sim::new_static_prepared`]. The **live schedule** gets one when
+/// its caller hands [`Sim::new`] a settled [`Senses`] — the seeded habitat does, so its
+/// founders smell the litter the living flora actually drops, decomposes and is eaten off.
+/// Either schedule **without** one runs senses-free, which is exactly what the live path
+/// was before this resource could reach it. Read through [`Sim::senses`].
 #[derive(Resource)]
 pub struct SenseField(pub Senses);
 
@@ -174,7 +177,23 @@ impl Sim {
     /// first `Sim` in a process fixes its size; a second one with a different
     /// `SimConfig::threads` gets the pool that already exists. That is why the bench runs
     /// one process per thread count.
-    pub fn new(world: cubarium_voxel::World, flora: Flora, fauna: Fauna, config: SimConfig) -> Sim {
+    ///
+    /// `senses` is the **live schedule's** optional sensory state: a [`Senses`] already
+    /// settled by the caller against the layers it is passing in (settling is not done
+    /// here — a caller that has one settled for this exact source layout should not pay
+    /// twice, and the static entry points below settle for their own reasons). With one,
+    /// the fauna leg steps through [`Fauna::step_with_senses`], so the litter field
+    /// updates at its own [`cubarium_voxel_fauna::UPDATE_TICKS`] cadence from the *live*
+    /// flora — which grows, drops litter, decomposes it and has it eaten. With `None`,
+    /// the fauna leg is exactly what it was: senses-free, `Chem` reading zero with
+    /// validity 0 for any founder body.
+    pub fn new(
+        world: cubarium_voxel::World,
+        flora: Flora,
+        fauna: Fauna,
+        config: SimConfig,
+        senses: Option<Senses>,
+    ) -> Sim {
         let threads = config.threads.max(1);
         if threads > 1 {
             ComputeTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(threads).build());
@@ -185,6 +204,9 @@ impl Sim {
         ecs.insert_resource(FloraLayer(flora));
         ecs.insert_resource(FaunaLayer(fauna));
         ecs.insert_resource(config);
+        if let Some(senses) = senses {
+            ecs.insert_resource(SenseField(senses));
+        }
 
         let mut substep = Schedule::new(Substep);
         substep.set_executor(SingleThreadedExecutor::new());
@@ -255,7 +277,7 @@ impl Sim {
         fauna: Fauna,
         config: SimConfig,
     ) -> Sim {
-        let mut sim = Sim::new(world, flora, fauna, config);
+        let mut sim = Sim::new(world, flora, fauna, config, None);
         sim.mode = ScheduleMode::Static;
         // Settle against the layers as they stand, then hold the field as a resource.
         let (w, f) = (sim.world(), sim.flora());
@@ -277,7 +299,7 @@ impl Sim {
         config: SimConfig,
         mut senses: Senses,
     ) -> Sim {
-        let mut sim = Sim::new(world, flora, fauna, config);
+        let mut sim = Sim::new(world, flora, fauna, config, None);
         sim.mode = ScheduleMode::Static;
         senses.reset_trends();
         sim.ecs.insert_resource(SenseField(senses));
@@ -297,6 +319,7 @@ impl Sim {
             Flora::new(flora),
             Fauna::new(fauna),
             config,
+            None,
         )
     }
 
@@ -428,8 +451,9 @@ impl Sim {
     /// The static arena's settled litter field, if this sim holds one: read-only, for a
     /// benchmark that wants the settle cost separated or a driver that wants to cache a
     /// prepared copy for an unchanged source layout (clone it and [`Senses::reset_trends`]
-    /// the copy, or hand it to [`Sim::new_static_prepared`]). `None` on the live schedule,
-    /// which has no field.
+    /// the copy, or hand it to [`Sim::new_static_prepared`]). `None` when this sim holds
+    /// no field: every static arena has one, and a live schedule has one only when its
+    /// caller gave [`Sim::new`] a settled [`Senses`].
     pub fn senses(&self) -> Option<&Senses> {
         self.ecs.get_resource::<SenseField>().map(|s| &s.0)
     }
@@ -503,13 +527,24 @@ fn sys_flora(mut w: ResMut<VoxelWorld>, mut flora: ResMut<FloraLayer>) {
     flora.0.step(&mut w.0);
 }
 
+/// The **live** fauna leg. With a [`SenseField`] in the world — the seeded habitat's
+/// settled litter field, handed to [`Sim::new`] — it steps through
+/// [`Fauna::step_with_senses`], so the field updates at its own cadence from the living
+/// flora before any controller samples it. Without one it is
+/// [`Fauna::step_with`], byte for byte the senses-free path this system always was.
 fn sys_fauna(
     w: Res<VoxelWorld>,
     mut flora: ResMut<FloraLayer>,
     mut fauna: ResMut<FaunaLayer>,
     config: Res<SimConfig>,
+    mut senses: Option<ResMut<SenseField>>,
 ) {
-    fauna.0.step_with(&w.0, &mut flora.0, config.threads);
+    match senses.as_deref_mut() {
+        Some(s) => fauna
+            .0
+            .step_with_senses(&w.0, &mut flora.0, config.threads, &mut s.0),
+        None => fauna.0.step_with(&w.0, &mut flora.0, config.threads),
+    }
 }
 
 /// The **static arena's** fauna leg: [`Fauna::step_with_senses`] with the arena's own

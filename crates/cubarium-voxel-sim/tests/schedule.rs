@@ -208,7 +208,7 @@ fn three_calls(ticks: u64) -> Reading {
 /// The schedule, at a thread count.
 fn schedule(ticks: u64, threads: usize) -> Reading {
     let (world, flora, fauna) = conditioned();
-    let mut sim = Sim::new(world, flora, fauna, SimConfig { threads });
+    let mut sim = Sim::new(world, flora, fauna, SimConfig { threads }, None);
     for _ in 0..ticks {
         sim.step();
     }
@@ -388,4 +388,119 @@ fn a_sampler_runs_once_per_tick_after_the_layers() {
         sim.step();
     }
     assert_eq!(sim.ecs().resource::<Seen>().0, vec![1, 2, 3]);
+}
+
+/// **The live schedule's optional senses field.** A founder body on the live schedule
+/// reads a valid, nonzero litter cue when — and only when — its `Sim` was given a settled
+/// [`cubarium_voxel_fauna::Senses`]. Without one the live fauna leg is the senses-free
+/// path it always was and `Chem(litter)` reads zero with validity 0.
+///
+/// The two arms are the same world, the same litter and the same body; the only
+/// difference is the argument to [`Sim::new`].
+#[test]
+fn the_live_schedule_senses_the_litter_only_when_it_holds_a_field() {
+    use cubarium_voxel_fauna::{
+        Controller, Founder, Response, Senses, StartingStores,
+    };
+    use cubarium_voxel_flora::{Deposit, DepositKind};
+    use std::sync::{Arc, Mutex};
+
+    /// Records the packet it is handed and holds still: nothing fixture-side reaches it.
+    struct Recorder(Arc<Mutex<Vec<Vec<f64>>>>);
+    impl Controller for Recorder {
+        fn drive(&mut self, observation: &[f64]) -> Response {
+            self.0.lock().expect("the sink").push(observation.to_vec());
+            Response::Bounded(cubarium_voxel_fauna::Actions::REST)
+        }
+        fn reset(&mut self) {}
+    }
+
+    // A flat soil strip, one litter tile, one blind founder standing on it.
+    let config = VoxelConfig {
+        width: 16,
+        height: 8,
+        depth: 4,
+        rain_m_per_s: 0.0,
+        ..VoxelConfig::default()
+    };
+    let build = || {
+        let mut world = World::empty(config.clone());
+        world.apply(WorldCommand::SetOutlet { open: false });
+        for z in 0..config.depth {
+            for x in 0..config.width as i64 {
+                for y in 1..=2u32 {
+                    world.apply(WorldCommand::SetMaterial {
+                        x,
+                        y,
+                        z,
+                        material: Material::Soil,
+                    });
+                }
+            }
+        }
+        let mut flora = Flora::new(FloraConfig::default());
+        let site = Site { x: 4, y: 2, z: 2 };
+        assert!(flora.deposit(
+            site,
+            Deposit {
+                kind: DepositKind::Litter,
+                organic: 0.2,
+                mineral: 0.004,
+                energy: 0.4,
+            },
+        ));
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        assert!(fauna.apply(
+            &world,
+            FaunaCommand::IntroduceFounder {
+                x: i64::from(site.x),
+                z: site.z,
+                founder: Founder::Blind,
+                stores: StartingStores::HUNGRY,
+                heading_rad: 0.0,
+            },
+        ));
+        let id = fauna.view().ledger.births - 1;
+        (world, flora, fauna, id)
+    };
+
+    // `Chem(litter)` is the blind schema's fifth module: response, trend, validity.
+    let manifest = Founder::Blind.manifest();
+    let chem = manifest
+        .modules
+        .iter()
+        .find(|m| m.name == "Chem(litter)")
+        .copied()
+        .expect("the blind schema carries the litter cue");
+
+    let arm = |with_field: bool| -> (f64, f64) {
+        let (world, flora, mut fauna, id) = build();
+        let sink = Arc::new(Mutex::new(Vec::new()));
+        assert!(fauna.set_controller(id, Box::new(Recorder(Arc::clone(&sink)))));
+        let senses = with_field.then(|| {
+            let mut s = Senses::new();
+            s.settle(&world.view(), &flora.view());
+            s
+        });
+        let mut sim = Sim::new(world, flora, fauna, SimConfig { threads: 1 }, senses);
+        assert_eq!(sim.senses().is_some(), with_field);
+        for _ in 0..40 {
+            sim.step();
+        }
+        let samples = sink.lock().expect("the sink").clone();
+        assert!(!samples.is_empty(), "the founder was sampled");
+        let last = samples.last().expect("a sample");
+        (last[chem.offset], last[chem.offset + 2])
+    };
+
+    let (response, valid) = arm(true);
+    assert_eq!(valid, 1.0, "a live field makes the cue a valid reading");
+    assert!(
+        response > 0.0,
+        "the body standing on the litter smells it: {response}"
+    );
+
+    let (response, valid) = arm(false);
+    assert_eq!(valid, 0.0, "no field, no cue: the live path as it was");
+    assert_eq!(response, 0.0);
 }

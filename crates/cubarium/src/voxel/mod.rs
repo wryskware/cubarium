@@ -55,7 +55,7 @@ use cubarium_surface::{Scale, Topology};
 use cubarium_voxel::{Command as VoxelCommand, Material, World};
 use cubarium_voxel_fauna::{
     Command as FaunaCommand, Controller, Fauna, FaunaConfig, FaunaLedger, Founder, Response,
-    Species as Beast,
+    Senses, Species as Beast,
 };
 use cubarium_voxel_flora::{
     Command as FloraCommand, Flora, FloraConfig, FloraLedger, Site, Species,
@@ -252,7 +252,17 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                 (None, VoxelSceneArg::Authored) => "authored".to_string(),
                 (None, VoxelSceneArg::Generated) => "generated".to_string(),
             };
-            (Sim::new(world, flora, fauna, sim_config), label)
+            // The live schedule's own sensory state, settled against the layers as they
+            // stand before the first tick: the ambient world's founders smell the litter
+            // this flora actually drops and has eaten, at the field's own cadence. An
+            // `--empty` world has no litter, so the field is empty and its update is a
+            // walk over nothing.
+            let mut senses = Senses::new();
+            senses.settle(&world.view(), &flora.view());
+            (
+                Sim::new(world, flora, fauna, sim_config, Some(senses)),
+                label,
+            )
         }
     };
 
