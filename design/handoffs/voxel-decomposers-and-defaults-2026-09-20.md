@@ -122,6 +122,12 @@ default. Fable pointed `voxel_plant_autopsy` at the summed substrate.
 **S3** was run by Wrysk directly; its note is `design/soil-organic-matter-
 exploration-2026-09-20.md` (3f44c37).
 
-Follow-ups, not started: `voxel_census` and `voxel_founder_autopsy` should
-drive founders with the built-in trained default so the six-hour census
-measures the shipped world; the policy digest in the fauna snapshot.
+Follow-ups landed (Sonnet, 2026-09-20): 0abd911 — `voxel_census` and
+`voxel_founder_autopsy` install the built-in trained default through
+`install_default_founders` and print the driver per lineage; a trailing
+`heuristic` argument keeps the control. 40e4c18 — fauna snapshot schema 8
+records a per-lineage policy digest (`EpisodeDriver::digest`, FNV-1a over
+the weights); a loaded world whose lineage ran a different centre is refused
+by name and both digests, the same centre is accepted; tests in
+`crates/cubarium/src/voxel/mod.rs`. Workspace suite 1,971 green. Fable
+confirmed the census now announces the built-in centres.
