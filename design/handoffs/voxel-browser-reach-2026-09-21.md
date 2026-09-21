@@ -1,5 +1,5 @@
 ---
-status: open
+status: steps 1–4 done; live-world criteria unmet; step 4 commit waits in worktree browser-reach
 date: 2026-09-21
 owner: Fable (orchestration); decision recorded from Wrysk
 ---
@@ -94,3 +94,36 @@ constant changes: not the horizontal reach, not the cone, not births. Runs
 may use all cores; `runs/` is disposable. Windows only through the png sink.
 Return ≤ 40 lines: commits per step, the digest note, the arena height mix,
 the retrain table against P3-C, and the 60-minute autopsy against D3.
+
+## Integration note (Fable, 2026-09-21)
+
+Steps 1–2 and the evaluator column are on main (dfea7a1, d85ef1b, 24e06fd).
+Steps 3–4 were redone by a second worker in the worktree
+`.claude/worktrees/browser-reach`; its commit e5658af (new shipped centre
+`frondgrazer-p3d-reach-gen390.json`, old p3c centre removed, README row)
+**waits there** because another agent holds uncommitted edits to
+`crates/cubarium/src/voxel/mod.rs` on main; it is cherry-picked once that
+lands. Workspace suite 1,978 green in the worktree.
+
+**The reach did its job in the arena.** Clone fit on the three-height arena:
+turn MSE 0.0046, sign agreement 94.3 %. ES Stage B landed, selected gen390:
+.840/.840, 8/8 acquired, depleted, bitten and reacquired, closest approach
+0.00–0.09 m, 724 bites on crowns a voxel above the head across all eight
+layouts, against P3-C's .808/.839 at the same 8/8. Stage A gen434 .778/.757,
+8/8.
+
+**The living world still loses the browsers, faster.** 60-minute arm on the
+generated closed world with the new default: 60 browser deaths (D3: 33), all
+starvation, extinct at minute 34 (D3 still had bodies at 54); mouth contact
+at death 0/60 (D3: 2/33); bites stop after minute 18 (D3: 45) at 16,866
+bites but 2.254 assimilated organic against D3's 1.389, so each bite is
+worth more and the reach works. Alive peaks at 48 from 8 by minute 7; global
+foliage falls 17.6 → 8.6 by minute 26 (D3 held 13.7–14.0); the cone reads
+zero in every sector from minute 20. Halving the founders: 28 deaths,
+extinct by minute 30, last bite minute 11. The blind lineage is unharmed
+(15 alive at 60 min). The picture is a better grazer that strips the
+reachable canopy, breeds without limit, and starves when the cone goes
+blank. The limit has moved from access to supply against reproduction.
+
+Not evidenced: the autopsy example carries no water totals, so "water ledger
+unchanged" rests on the closed budget being configured and zero drownings.
