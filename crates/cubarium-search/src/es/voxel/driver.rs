@@ -57,7 +57,7 @@ use serde::{Deserialize, Serialize};
 
 use super::controller::EpisodeDriver;
 use super::score::ScoreComponents;
-use super::task::{DEPLETION_FRACTION, Prepared};
+use super::task::{self, DEPLETION_FRACTION, Prepared};
 
 /// How often the shared cancellation flag and the deadline are read inside an episode.
 ///
@@ -170,6 +170,10 @@ impl std::error::Error for EpisodeError {}
 /// enters an observation and nothing here enters the score. The score stays the plan's.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Reacquisition {
+    /// Wrapped metres between the two patches' face centres. Pure fixture geometry,
+    /// fixed when the layout was built.
+    #[serde(default)]
+    pub separation_m: f64,
     /// The stock each patch held at the first tick.
     pub initial_start: f64,
     pub successor_start: f64,
@@ -191,6 +195,20 @@ pub struct Reacquisition {
     /// early, not a reacquisition, and is reported through the two ticks rather than
     /// counted here.
     pub reacquired: bool,
+    /// The founder's closest approach to the successor's face centre, in metres, over
+    /// the ticks from the depletion tick onward. `None` when the initial patch never
+    /// ran out — there is no "after depletion" to measure in.
+    #[serde(default)]
+    pub min_successor_distance_m: Option<f64>,
+    /// Ticks from the depletion tick onward spent within the founder's sensed radius of
+    /// the successor ([`super::task::sensed_radius_m`]): blind 1.5 m, browser 2.0 m.
+    /// Zero when the founder never came that close, and when it never depleted.
+    #[serde(default)]
+    pub sense_ticks: u64,
+    /// The radius those `sense_ticks` were counted against, so a row states its own
+    /// threshold instead of the reader having to look it up.
+    #[serde(default)]
+    pub sensed_radius_m: f64,
 }
 
 impl Reacquisition {
@@ -201,6 +219,23 @@ impl Reacquisition {
         match (depleted_tick, first_bite_tick) {
             (Some(depleted), Some(bite)) => bite >= depleted,
             _ => false,
+        }
+    }
+
+    /// Fold one post-step reading of the body's distance to the successor into the
+    /// departure counters. A no-op until the initial patch has been called empty:
+    /// before that the founder has no reason to leave, so "how close did it get" would
+    /// measure the layout rather than the policy. The depletion tick itself counts.
+    pub fn observe_successor_distance(&mut self, tick: u64, distance_m: f64) {
+        if !self.depleted_tick.is_some_and(|d| tick >= d) {
+            return;
+        }
+        self.min_successor_distance_m = Some(
+            self.min_successor_distance_m
+                .map_or(distance_m, |m: f64| m.min(distance_m)),
+        );
+        if distance_m <= self.sensed_radius_m {
+            self.sense_ticks += 1;
         }
     }
 }
@@ -384,14 +419,19 @@ fn episode_from(
             Founder::Browser => fv.stand_at(site).map_or(0.0, |s| s.foliage),
         }
     };
+    // The founder's own reach, for the post-depletion sensed-radius counter. Fixture
+    // side: it sizes a diagnostic counter and nothing else.
+    let sensed_radius = task::sensed_radius_m(founder);
     let mut patches = prepared.patches().map(|(initial, successor)| {
         (
             initial,
             successor,
             Reacquisition {
+                separation_m: task::site_separation_m(initial, successor),
                 initial_start: patch_stock(&sim, initial),
                 successor_start: patch_stock(&sim, successor),
                 depletion_fraction: DEPLETION_FRACTION,
+                sensed_radius_m: sensed_radius,
                 ..Reacquisition::default()
             },
         )
@@ -465,6 +505,13 @@ fn episode_from(
                 forward_sum += held.forward;
                 turn_abs_sum += held.turn.abs();
                 feed_sum += held.feed;
+                // Post-depletion approach to the successor, measured from the tick the
+                // initial patch was called empty. Read after the step, never before an
+                // observation, and never summed into the score.
+                if let Some((_, successor, r)) = patches.as_mut() {
+                    let d = task::distance_to_site_m(a.pose.x, a.pose.z, *successor);
+                    r.observe_successor_distance(episode.ticks, d);
+                }
             }
             None => {
                 // Dead: an ordinary completed episode. The corpse carried what the body
@@ -783,7 +830,45 @@ mod tests {
                 "and it ate nothing: {}",
                 e.score.intake_normalized
             );
+            // The departure accounting (P3-B step 1). The separation is the layout's own
+            // wrapped geometry, so it equals the fixture arithmetic exactly and is at
+            // least the landed band's 8 columns (2 m). Nothing depleted, so there is no
+            // "after depletion" to measure in and the two counters say so.
+            assert_eq!(r.separation_m, task::site_separation_m(initial, successor));
+            assert!(
+                r.separation_m >= 2.0 - 1e-12,
+                "{founder:?}: landed separation {} m",
+                r.separation_m
+            );
+            assert_eq!(r.min_successor_distance_m, None);
+            assert_eq!(r.sense_ticks, 0);
+            assert_eq!(r.sensed_radius_m, task::sensed_radius_m(founder));
         }
+    }
+
+    /// The departure counters are arithmetic on the post-step distance, and they are
+    /// silent until the initial patch has been called empty: before that the founder
+    /// has no reason to leave and "closest approach" would measure the layout.
+    #[test]
+    fn the_departure_counters_start_at_the_depletion_tick() {
+        let mut r = Reacquisition {
+            sensed_radius_m: 1.5,
+            ..Reacquisition::default()
+        };
+        // Before depletion: walking right past the successor is not counted.
+        for tick in 1..=10 {
+            r.observe_successor_distance(tick, 0.1);
+        }
+        assert_eq!(r.min_successor_distance_m, None);
+        assert_eq!(r.sense_ticks, 0);
+
+        r.depleted_tick = Some(11);
+        // The depletion tick itself counts, and only readings at or inside 1.5 m do.
+        for (tick, d) in [(11, 3.0), (12, 1.5), (13, 1.5001), (14, 0.75), (15, 2.0)] {
+            r.observe_successor_distance(tick, d);
+        }
+        assert_eq!(r.min_successor_distance_m, Some(0.75));
+        assert_eq!(r.sense_ticks, 2, "1.5 m is inside, 1.5001 m is not");
     }
 
     /// The digest the driver validates against is the placed founder's manifest digest:

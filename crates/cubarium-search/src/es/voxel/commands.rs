@@ -714,19 +714,31 @@ pub fn evaluate(
     if !reacquisition.is_empty() {
         println!();
         println!(
-            "{:<8} {:>11} {:>11} {:>10} {:>12} {:>12}",
-            "case", "patch1-take", "patch2-take", "depleted", "first-bite2", "reacquired"
+            "{:<8} {:>11} {:>11} {:>10} {:>12} {:>10} {:>7} {:>9} {:>7}",
+            "case",
+            "patch1-take",
+            "patch2-take",
+            "depleted",
+            "first-bite2",
+            "reacquired",
+            "sep-m",
+            "min-succ-m",
+            "sense-t",
         );
         for ((label, _), r) in prepared_layouts.iter().zip(&reacquisition) {
             let tick = |t: Option<u64>| t.map_or("-".into(), |t| t.to_string());
             println!(
-                "{:<8} {:>11.5} {:>11.5} {:>10} {:>12} {:>12}",
+                "{:<8} {:>11.5} {:>11.5} {:>10} {:>12} {:>10} {:>7.2} {:>9} {:>7}",
                 label,
                 r.initial_taken,
                 r.successor_taken,
                 tick(r.depleted_tick),
                 tick(r.successor_first_bite_tick),
                 r.reacquired,
+                r.separation_m,
+                r.min_successor_distance_m
+                    .map_or("-".into(), |d| format!("{d:.2}")),
+                r.sense_ticks,
             );
         }
         let depleted = reacquisition
@@ -742,6 +754,42 @@ pub fn evaluate(
             "initial patch depleted (below {:.0}% of its start) {depleted}/{n}  \
              successor bitten {touched}/{n}  reacquired {reacquired}/{n}",
             100.0 * task::DEPLETION_FRACTION,
+            n = reacquisition.len(),
+        );
+        // The departure accounting (P3-B step 1). Fixture geometry read after the fact:
+        // how far apart the two patches are, how close the founder actually got to the
+        // successor once its own patch was empty, and how long it spent where it could
+        // sense the successor at all. None of it is in an observation or the score.
+        let separations: Vec<f64> = reacquisition.iter().map(|r| r.separation_m).collect();
+        let approaches: Vec<f64> = reacquisition
+            .iter()
+            .filter_map(|r| r.min_successor_distance_m)
+            .collect();
+        let sense_ticks: u64 = reacquisition.iter().map(|r| r.sense_ticks).sum();
+        let within = reacquisition.iter().filter(|r| r.sense_ticks > 0).count();
+        let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len().max(1) as f64;
+        let least = |v: &[f64]| v.iter().copied().fold(f64::INFINITY, f64::min);
+        println!(
+            "separation {:.2}-{:.2} m (mean {:.2})  \
+             post-depletion closest approach {}  \
+             sensed radius {:.2} m: {within}/{n} layouts entered it, {sense_ticks} ticks total",
+            least(&separations),
+            separations.iter().copied().fold(0.0, f64::max),
+            mean(&separations),
+            if approaches.is_empty() {
+                "- (nothing depleted)".to_string()
+            } else {
+                format!(
+                    "min {:.2} m, mean {:.2} m over {}/{} depleted",
+                    least(&approaches),
+                    mean(&approaches),
+                    approaches.len(),
+                    depleted,
+                )
+            },
+            reacquisition
+                .first()
+                .map_or(0.0, |r| r.sensed_radius_m),
             n = reacquisition.len(),
         );
     }

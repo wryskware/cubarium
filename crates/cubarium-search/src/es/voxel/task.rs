@@ -131,6 +131,29 @@ pub fn arena_protocol(stage: Stage) -> &'static str {
     }
 }
 
+/// How far a blind founder can sense a Stage-B litter patch, in metres.
+///
+/// Measured, not chosen (integration note 4, measurement 1): the settled field response
+/// `q = cue/(cue+1)` of one 0.015 successor patch on a flat support falls 0.17 at 0 m,
+/// 1.5e-2 at 0.5 m, 8.3e-4 at 1.0 m, 4.2e-5 at 1.5 m, and is **exactly zero** from
+/// 1.75 m out, where the cue drops below the field's 1e-5 discard. 1.5 m is therefore
+/// the last distance at which a blind founder reads the successor at all.
+///
+/// Fixture-side only: this constant sizes an evaluator's counter. No observation, no
+/// reward and no controller sees it.
+pub const BLIND_CUE_REACH_M: f64 = 1.5;
+
+/// The radius within which `founder` can sense a Stage-B successor patch at all.
+///
+/// Blind: [`BLIND_CUE_REACH_M`]. Browser: its manifest's own `cone_range_m` — the ray
+/// fan simply stops there — so the number is read from the manifest rather than copied.
+pub fn sensed_radius_m(founder: Founder) -> f64 {
+    match founder {
+        Founder::Blind => BLIND_CUE_REACH_M,
+        Founder::Browser => founder.manifest().cone_range_m,
+    }
+}
+
 /// One fixed Stage-B layout used for the diagnostic blind heading sweep.
 pub const OFFSET_SWEEP_LAYOUT_SEED: u64 = 6;
 /// Inclusive signed offsets, in degrees: -180, -165, ..., +180.
@@ -215,6 +238,29 @@ impl StartGeometry {
             -1
         }
     }
+}
+
+/// The face centre of a site, in metres.
+fn site_center_m(site: Site) -> (f64, f64) {
+    (
+        (f64::from(site.x) + 0.5) * ARENA_VOXEL_M,
+        (f64::from(site.z) + 0.5) * ARENA_VOXEL_M,
+    )
+}
+
+/// Metres from a point to a site's face centre, across the wrapped strip.
+///
+/// **Fixture-side only**, like [`StartGeometry`]: the Stage-B evaluator reads it after
+/// a tick has already been simulated, and no observation or reward term can reach it.
+pub fn distance_to_site_m(x: f64, z: f64, site: Site) -> f64 {
+    let (cx, cz) = site_center_m(site);
+    wrapped_dx_m(x, cx).hypot(cz - z)
+}
+
+/// Metres between two sites' face centres, across the wrapped strip. Fixture-side.
+pub fn site_separation_m(a: Site, b: Site) -> f64 {
+    let (ax, az) = site_center_m(a);
+    distance_to_site_m(ax, az, b)
 }
 
 /// The shortest signed x displacement across the wrapped strip, in metres.
@@ -516,6 +562,39 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The two sensed radii are the measurements they claim to be: the browser's is its
+    /// manifest's own ray-fan reach, not a copy of it, and the blind founder's is the
+    /// last distance at which integration note 4's field measurement is nonzero.
+    #[test]
+    fn the_sensed_radii_come_from_the_manifest_and_the_field_measurement() {
+        assert_eq!(
+            sensed_radius_m(Founder::Browser),
+            Founder::Browser.manifest().cone_range_m
+        );
+        assert_eq!(sensed_radius_m(Founder::Browser), 2.0);
+        assert_eq!(sensed_radius_m(Founder::Blind), BLIND_CUE_REACH_M);
+        assert_eq!(BLIND_CUE_REACH_M, 1.5);
+        // The blind manifest has no cone at all, so reading it would say 0 m.
+        assert_eq!(Founder::Blind.manifest().cone_range_m, 0.0);
+    }
+
+    /// The fixture's wrapped metre arithmetic: a straight run along z, a wrap across the
+    /// seam that takes the short way round, and the symmetry of a separation.
+    #[test]
+    fn wrapped_site_distances_take_the_short_way_round() {
+        let at = |x, z| Site { x, y: 4, z };
+        // Four columns of z apart, 0.25 m each.
+        assert!((site_separation_m(at(5, 2), at(5, 6)) - 1.0).abs() < 1e-12);
+        // Two columns apart across the seam of a 32-wide strip, not thirty.
+        let seam = site_separation_m(at(31, 3), at(1, 3));
+        assert!((seam - 0.5).abs() < 1e-12, "{seam}");
+        assert_eq!(seam, site_separation_m(at(1, 3), at(31, 3)));
+        // A point reading agrees with the site-to-site reading it is built from.
+        let (cx, cz) = site_center_m(at(31, 3));
+        assert_eq!(distance_to_site_m(cx, cz, at(1, 3)), seam);
+        assert_eq!(distance_to_site_m(cx, cz, at(31, 3)), 0.0);
     }
 
     #[test]
