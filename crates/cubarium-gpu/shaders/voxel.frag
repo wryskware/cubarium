@@ -22,9 +22,10 @@
 
 layout(set = 0, binding = 0, std140) uniform VoxelScene {
     ivec4 geom;         // s, rise, base, roof from the table (1) or a column walk (0)
-    ivec4 extent;       // width, height, depth, -
-    vec4 knobs;         // haze, water alpha, -, -
-    vec4 skyC;          // the sky, already at SKY_BRIGHTNESS
+    ivec4 extent;       // width, height, depth, raster_h
+    vec4 knobs;         // haze, water alpha, atmosphere, rain_tick
+    vec4 skyC;          // the sky zenith, already at SKY_BRIGHTNESS
+    vec4 skyHorizon;    // the sky horizon
     vec4 bedrockC;
     vec4 rockC;
     vec4 soilC;
@@ -43,6 +44,7 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
 layout(set = 0, binding = 1) uniform usampler3D voxels;  // rgba8ui, one texel per voxel
 layout(set = 0, binding = 2) uniform usampler3D roofTex; // r8ui, voxels to the solid above
 layout(set = 0, binding = 3) uniform sampler2D styleTex; // 3 x MAX_STYLES: wood, crown, heart
+layout(set = 0, binding = 4) uniform usampler2D glyphTex; // shared organism face texels
 
 layout(location = 0) out vec4 outColour;
 
@@ -52,8 +54,10 @@ const int CROWN = 2;
 const int CROWN_HEART = 3;
 const int SPROUT = 4;
 // The fauna range of the same field. The interim glyph is a flat block in the style's
-// `wood`; 6 and 7 are unspoken for until the art direction names them.
+// `wood`.
 const int ANIMAL_INTERIM = 5;
+const int LOG = 6;
+const int FLOOR_MARK = 7;
 
 int S, RISE, BASE, W, H, D;
 
@@ -70,7 +74,8 @@ uvec4 at(int x, int y, int z) { return texelFetch(voxels, ivec3(wrapX(x), y, z),
 
 int matOf(uvec4 v) { return int(v.r & 3u); }
 int partOf(uvec4 v) { return int((v.r >> 2) & 7u); }
-bool isBlockPart(int p) { return p == TRUNK || p == CROWN || p == CROWN_HEART || p == ANIMAL_INTERIM; }
+int glyphOf(uvec4 v) { return int(v.r >> 5); }
+bool isBlockPart(int p) { return p == TRUNK || p == CROWN || p == CROWN_HEART || p == ANIMAL_INTERIM || p == LOG; }
 bool solidV(uvec4 v) { return matOf(v) != 0; }
 
 // Out-of-range y reads as air, which is what makes the top of the world an open sky and
@@ -139,13 +144,6 @@ vec3 plantLit(vec3 c, float shade) {
     return shade < 1.0 ? mix(c, lit, shade) : lit;
 }
 
-// `present::trunk_shade`: the stem's cylinder, one multiplier per pixel column.
-float trunkShade(int dx) {
-    float uu = (float(dx) + 0.5) / float(S);
-    float t = clamp(1.0 - abs(uu - u.plantB.w) / 0.65, 0.0, 1.0);
-    return u.plantB.y + (u.plantB.z - u.plantB.y) * t;
-}
-
 vec3 blockBody(uvec4 v) {
     int m = matOf(v);
     float wet = holdsPore(m) ? clamp(float(v.b) / 255.0, 0.0, 1.0) : 0.0;
@@ -159,6 +157,13 @@ vec3 blockLit(vec3 body, float shade) {
 
 // --- the faces ------------------------------------------------------------------------
 
+// Micro-dithering grain across solid voxel faces to break up flat surfaces
+float faceGrain(int x, int y, int z, int dx, int dy) {
+    uint h = uint(x * 73856093 ^ y * 19349663 ^ z * 83492791 ^ dx * 2654435761u ^ dy * 38291);
+    h = (h ^ (h >> 13)) * 1274126177u;
+    return float(int(h & 15u) - 7) * 0.005;
+}
+
 // `VoxelPresenter::block`'s front rectangle: rim row, side bevel, chamfered corner, or
 // — where the ground steps one voxel into depth — the riser's lean with no rim at all.
 vec3 blockFront(int x, int y, int z, uvec4 v, int r, int dx) {
@@ -170,6 +175,10 @@ vec3 blockFront(int x, int y, int z, uvec4 v, int r, int dx) {
     bool onSide = (dx == 0 && openLeft) || (dx + 1 == S && openRight);
 
     vec3 body = blockBody(v);
+    int m = matOf(v);
+    if (m != 0 && u.roofK.z > 0.0) {
+        body = body * (1.0 + faceGrain(x, y, z, dx, dy) * (u.roofK.z / 0.04));
+    }
     vec3 lit = blockLit(body, roofShade(roofGap(x, y, z)));
     if (riser) {
         float t = S > 1 ? float(dy) / float(S - 1) : 0.0;
@@ -199,6 +208,10 @@ vec3 blockTop(int x, int y, int z, uvec4 v, int r, int dx) {
     bool backContinues = z + 1 < D && solidAt(x, y, z + 1) && !solidAt(x, y + 1, z + 1);
 
     vec3 body = blockBody(v);
+    int m = matOf(v);
+    if (m != 0 && u.roofK.z > 0.0) {
+        body = body * (1.0 + faceGrain(x, y, z, dx, dy + 100) * (u.roofK.z / 0.04));
+    }
     vec3 lit = blockLit(body, roofShade(roofGap(x, y, z)));
     float hz = hazeAt(float(z) + float(r) / float(RISE));
     vec3 plane = (dy == 0 && RISE > 2 && !backContinues) ? mix(lit, body, u.shadeA.z) : lit;
@@ -206,71 +219,53 @@ vec3 blockTop(int x, int y, int z, uvec4 v, int r, int dx) {
     return hazed(onDrop ? mix(plane, body, u.shadeB.y) : plane, hz);
 }
 
-// Two crown cells of one stand are one canopy, so the seam between them is not an edge.
-bool crownContinues(int style, int x, int y, int z) {
-    if (!inY(y)) { return false; }
-    uvec4 v = at(x, y, z);
-    int p = partOf(v);
-    return (p == CROWN || p == CROWN_HEART) && int(v.a) == style;
+vec3 glyphPigment(uvec4 v, uint q) {
+    return styleAt(int(v.a), int(q & 3u));
 }
 
-// `VoxelPresenter::plant`'s `column` closure: (front, cap) for one pixel column.
-void plantColumn(int x, int y, int z, uvec4 v, int dx, float shade, out vec3 front, out vec3 cap) {
-    int p = partOf(v);
-    int style = int(v.a);
-    vec3 wood = styleAt(style, 0);
-    bool crown = p == CROWN || p == CROWN_HEART;
-    if (p == ANIMAL_INTERIM) {
-        // `VoxelPresenter::animal`: one flat colour, no cylinder and no silhouette edge.
-        front = wood;
-        cap = plantLit(wood, shade);
-    } else if (crown) {
-        bool heart = p == CROWN_HEART;
-        bool mid = heart && dx * 2 >= S - 2 && dx * 2 < S + 2;
-        vec3 base = mid ? styleAt(style, 2) : styleAt(style, 1);
-        bool edge = (dx == 0 && !crownContinues(style, x - 1, y, z))
-                 || (dx + 1 == S && !crownContinues(style, x + 1, y, z));
-        float k = edge ? u.plantA.w : 1.0;
-        front = mix(base, wood, u.plantB.x) * k;
-        cap = plantLit(base, shade) * k;
-    } else {
-        float k = trunkShade(dx);
-        front = wood * k;
-        cap = mix(plantLit(wood, shade), wood * k, u.shadeB.y);
-    }
-}
-
-vec3 plantFront(int x, int y, int z, uvec4 v, int r, int dx) {
-    int dy = S - 1 - r;
-    float shade = roofShade(roofGap(x, y, z));
+// Organism anatomy and markings are already resolved in glyphTex by the shared
+// appearance layer. This is deliberately generic: the shader knows only pigment slots
+// and treatments, never bodies, heads, eyes or facing.
+bool glyphFront(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb) {
+    int localY = S - 1 - r;
+    int atlasY = (partOf(v) * 8 + glyphOf(v)) * (S + RISE) + localY;
+    uint q = texelFetch(glyphTex, ivec2(dx, atlasY), 0).r;
+    vec3 base = glyphPigment(v, q);
+    int tone = int(q >> 2);
+    if (tone == 63) { return false; }
     bool coveredUp = solidAt(x, y + 1, z)
         || (inY(y + 1) && isBlockPart(partOf(at(x, y + 1, z))));
-    vec3 front, cap;
-    plantColumn(x, y, z, v, dx, shade, front, cap);
-    vec3 c = (dy == 0 && !coveredUp) ? mix(front, cap, u.plantA.z) : front;
-    return hazed(c, hazeAt(float(z)));
-}
-
-vec3 plantCap(int x, int y, int z, uvec4 v, int r, int dx) {
-    float shade = roofShade(roofGap(x, y, z));
-    vec3 front, cap;
-    plantColumn(x, y, z, v, dx, shade, front, cap);
-    return hazed(cap, hazeAt(float(z) + float(r) / float(RISE)));
-}
-
-// A propagule: a mark on the floor of its cell rather than a block, with a lit tip.
-// False where the cell's own pixels are not part of the mark, which is most of them.
-bool sproutAt(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb) {
-    int dy = S - 1 - r;
-    int mark = max(S / 2, 1);
-    int x0 = (S - mark) / 2;
-    int rows = max(S / 2, 1);
-    if (dx < x0 || dx >= x0 + mark || dy < S - rows) { return false; }
-    int style = int(v.a);
-    vec3 crown = styleAt(style, 1);
-    vec3 c = dy == S - rows ? plantLit(crown, roofShade(roofGap(x, y, z))) : crown;
-    rgb = hazed(c, hazeAt(float(z)));
+    if (tone == 1) {
+        base *= u.shadeB.x;
+    } else if (tone == 2 && !coveredUp) {
+        base = mix(base, plantLit(base, roofShade(roofGap(x, y, z))), u.plantA.z);
+    } else if (tone == 3) {
+        base = plantLit(base, roofShade(roofGap(x, y, z)));
+    } else if (tone == 4 || tone == 5) {
+        base = mix(base, styleAt(int(v.a), 0), u.plantB.x);
+        if (tone == 5) { base *= u.plantA.w; }
+    } else if (tone >= 16 && tone <= 31) {
+        base *= 0.5 + float(tone & 15) / 16.0;
+    }
+    rgb = hazed(base, hazeAt(float(z)));
     return true;
+}
+
+vec3 glyphCap(int x, int y, int z, uvec4 v, int r, int dx) {
+    int localY = RISE - 1 - r;
+    int atlasY = (partOf(v) * 8 + glyphOf(v)) * (S + RISE) + S + localY;
+    uint q = texelFetch(glyphTex, ivec2(dx, atlasY), 0).r;
+    vec3 base = glyphPigment(v, q);
+    int tone = int(q >> 2);
+    float shade = roofShade(roofGap(x, y, z));
+    vec3 cap = plantLit(base, shade);
+    if (tone == 1) {
+        cap *= u.plantA.w;
+    } else if (tone >= 32 && tone <= 47) {
+        float gain = 0.5 + float(tone & 15) / 16.0;
+        cap = mix(cap, base * gain, u.shadeB.y);
+    }
+    return hazed(cap, hazeAt(float(z) + float(r) / float(RISE)));
 }
 
 // --- water ----------------------------------------------------------------------------
@@ -340,6 +335,38 @@ void waterAt(int x, int y, int z, uvec4 v, int row, inout vec3 acc, inout float 
 
 // --- the walk -------------------------------------------------------------------------
 
+// Vertical sky gradient from zenith down to horizon
+vec3 skyAt(int py) {
+    if (u.roofK.w > 0.5) {
+        float t = clamp(float(py) / float(max(u.extent.w, 1)), 0.0, 1.0);
+        return mix(u.skyC.rgb, u.skyHorizon.rgb, t);
+    }
+    return u.skyC.rgb;
+}
+
+// Atmospheric sky with drifting moisture cloud wisps
+vec3 skyColor(int px_x, int px_y) {
+    vec3 sky = skyAt(px_y);
+    float moisture = clamp(u.knobs.z, 0.0, 1.0);
+    int mistRows = min(u.extent.w / 3, 56);
+    if (u.roofK.w > 0.5 && moisture > 0.0 && px_y < mistRows) {
+        float verticalT = 1.0 - (float(px_y) / float(mistRows));
+        float rowFactor = verticalT * verticalT * moisture;
+        int driftX = int(u.knobs.w) / 2;
+        float wave1 = sin(float(px_x + driftX + px_y * 4) * 0.045) * 0.5 + 0.5;
+        float wave2 = cos(float(px_x * 2 - driftX + 37) * 0.025) * 0.5 + 0.5;
+        float density = wave1 * wave2 * rowFactor;
+        if (density > 0.10) {
+            float a = min((density - 0.10) * 1.8, 0.70);
+            vec3 cloudC = vec3(0.038, 0.020, 0.102);
+            vec3 cloudEdge = vec3(0.113, 0.171, 0.354);
+            vec3 col = mix(cloudC, cloudEdge, wave1 * 0.5);
+            sky = mix(sky, col, a);
+        }
+    }
+    return sky;
+}
+
 void main() {
     S = u.geom.x;
     RISE = u.geom.y;
@@ -376,15 +403,10 @@ void main() {
             // trunk in a pool is submerged, so the water is nearer than the plant.
             if (v.g != 0u) { waterAt(x, level, z, v, px.y, acc, trans); }
             int p = partOf(v);
-            if (isBlockPart(p)) {
-                acc += trans * plantFront(x, level, z, v, r, dx);
-                trans = 0.0;
-                break;
-            }
-            if (p == SPROUT) {
-                vec3 mark;
-                if (sproutAt(x, level, z, v, r, dx, mark)) {
-                    acc += trans * mark;
+            if (p != 0) {
+                vec3 art;
+                if (glyphFront(x, level, z, v, r, dx, art)) {
+                    acc += trans * art;
                     trans = 0.0;
                     break;
                 }
@@ -410,7 +432,7 @@ void main() {
             if (v.g != 0u) { waterAt(x, below, z, v, px.y, acc, trans); }
             int p = partOf(v);
             if (isBlockPart(p)) {
-                acc += trans * plantCap(x, below, z, v, r, dx);
+                acc += trans * glyphCap(x, below, z, v, r, dx);
                 trans = 0.0;
                 break;
             }
@@ -421,5 +443,31 @@ void main() {
 
     // The presenter clears to the sky and paints over it; front to back, the sky is
     // whatever light is left.
-    outColour = vec4(acc + trans * u.skyC.rgb, 1.0);
+    vec3 sky = skyColor(px.x, px.y);
+    outColour = vec4(acc + trans * sky, 1.0);
+
+    // Falling rain animation streaks when active
+    if (u.knobs.w > 0.0) {
+        int tick = int(u.knobs.w);
+        int speed = 4;
+        vec3 rainC = u.waterSurfaceC.rgb;
+        for (int len = 0; len < 4; ++len) {
+            int c = px.x - (len / 2);
+            uint hash = ((uint(c) * 1664525u + 1013904223u) >> 16);
+            if ((hash % 5u) == 0u) {
+                int streakLen = 3 + int(hash & 1u);
+                if (len < streakLen) {
+                    int yOffset = int((uint(tick * speed) + hash) % 32u);
+                    int period = 32 + int(hash % 16u);
+                    int r = (px.y - len - yOffset) % period;
+                    if (r < 0) { r += period; }
+                    if (r == 0) {
+                        float a = (len == streakLen - 1) ? 0.40 : 0.20;
+                        outColour.rgb = mix(outColour.rgb, rainC, a);
+                        break;
+                    }
+                }
+            }
+        }
+    }
 }

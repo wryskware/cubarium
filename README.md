@@ -50,6 +50,12 @@ world):
 ./scripts/run-voxel.sh
 ```
 
+The Stage 1 development view uses 0.125 m voxels, clustered planting and varied
+starting sizes. Plant geometry is converted from the 0.25 m reference scale;
+animal motion and sensing retain metre-based dimensions. Organism face details
+are defined in the shared appearance layer and consumed by both CPU and GPU.
+The explicit sensing arenas retain their original 0.25 m layouts.
+
 Loopback viewer without a GPU window:
 
 ```sh

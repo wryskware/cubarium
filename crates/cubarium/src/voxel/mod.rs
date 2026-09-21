@@ -38,13 +38,14 @@
 //! everything else, as the **interim** glyph of [`animal`].
 
 pub mod animal;
+pub mod appearance;
 pub mod habitat;
 pub mod present;
 pub mod project;
 pub mod scene;
 pub mod stand;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
@@ -125,13 +126,18 @@ pub struct VoxelConfig {
     pub haze: f32,
     /// Opacity of one voxel of free water, `0..=1`.
     pub water_alpha: f32,
+    /// Micro-dithering strength on solid terrain faces (0.0 to 1.0).
+    pub dither: f32,
+    /// Whether to render a vertical sky gradient.
+    pub sky_gradient: bool,
     /// Worker threads for the in-phase splits of the tick
     /// (`cubarium_voxel_sim::SimConfig::threads`); `0` means
     /// [`std::thread::available_parallelism`]. Execution only — it reaches no rule, no
     /// number and no picture. **Placeholder** (`design/backlog.md` §1).
     pub threads: usize,
-    /// The world to build. Every field optional, every default the core's own — the
-    /// habitat's extent, `depth` included, is the core's decision and not the presenter's.
+    /// The world to build. Extents follow the core; the ambient display uses 0.125 m
+    /// cells so organisms retain their physical size with more cells of visual detail.
+    #[serde(deserialize_with = "ambient_world_config")]
     pub world: cubarium_voxel::Config,
 }
 
@@ -144,11 +150,31 @@ impl Default for VoxelConfig {
             raster_height: 0,
             haze: 0.55,
             water_alpha: 0.5,
+            dither: 0.04,
+            sky_gradient: true,
             threads: 0,
             // Including the depth: `cubarium_voxel` owns how deep the habitat is.
-            world: cubarium_voxel::Config::default(),
+            world: cubarium_voxel::Config {
+                voxel_m: 0.125,
+                ..cubarium_voxel::Config::default()
+            },
         }
     }
+}
+
+// A partial [world] table must use the same cell size as an omitted table. Keep
+// the core's 0.25 m defaults for frozen arenas and existing simulation fixtures.
+fn ambient_world_config<'de, D>(
+    deserializer: D,
+) -> std::result::Result<cubarium_voxel::Config, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let mut table = toml::Table::deserialize(deserializer)?;
+    table.entry("voxel_m").or_insert(toml::Value::Float(0.125));
+    toml::Value::Table(table)
+        .try_into()
+        .map_err(serde::de::Error::custom)
 }
 
 /// `[world]`: [`cubarium_voxel::Config`] with every field optional.
@@ -161,6 +187,181 @@ pub fn load_config(path: &Path) -> Result<VoxelConfig> {
 }
 
 // --- The run -------------------------------------------------------------------------
+
+/// Generate a random 64-bit seed from `/dev/urandom` or fallback system time entropy.
+fn random_seed() -> u64 {
+    let mut buf = [0u8; 8];
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        use std::io::Read;
+        if f.read_exact(&mut buf).is_ok() {
+            let s = u64::from_le_bytes(buf);
+            if s != 0 {
+                return s;
+            }
+        }
+    }
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0x5EED_0001)
+}
+
+/// Read `[world].seed` from a TOML config file if explicitly declared there.
+fn cfg_seed_from_file(config_path: &Option<PathBuf>) -> Option<u64> {
+    let path = config_path.as_ref()?;
+    let text = std::fs::read_to_string(path).ok()?;
+    let val: toml::Value = toml::from_str(&text).ok()?;
+    val.get("world")?
+        .get("seed")?
+        .as_integer()
+        .map(|s| s as u64)
+}
+
+/// Parse tick from a snapshot filename like `world-1730.voxel`.
+fn parse_voxel_tick(name: &str) -> Option<u64> {
+    let name = name.strip_prefix("world-")?;
+    let name = name.strip_suffix(".voxel")?;
+    name.parse().ok()
+}
+
+/// Prune older voxel snapshots in `dir`, keeping the newest `keep` snapshots.
+fn prune_voxel_snapshots(dir: &Path, keep: usize) {
+    let keep = keep.max(1);
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut candidates: Vec<(u64, PathBuf)> = Vec::new();
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.is_file() {
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if let Some(tick) = parse_voxel_tick(name) {
+                candidates.push((tick, p));
+            }
+        }
+    }
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    for (_, old_path) in candidates.into_iter().skip(keep) {
+        let _ = std::fs::remove_file(old_path);
+    }
+}
+
+/// Atomically write a snapshot to `dir` and prune older snapshots.
+fn save_voxel_snapshot(dir: &Path, world: &World) {
+    let tick = world.tick();
+    let snap_file = dir.join(format!("world-{tick}.voxel"));
+    let tmp_file = dir.join(format!("tmp-{tick}.voxel"));
+    if let Ok(()) = std::fs::write(&tmp_file, world.save()) {
+        if std::fs::rename(&tmp_file, &snap_file).is_ok() {
+            eprintln!("cubarium voxel: saved snapshot {}", snap_file.display());
+            prune_voxel_snapshots(dir, 5);
+        }
+    }
+}
+
+/// Resume from a file/directory or create a fresh world according to CLI and config.
+fn load_or_create_world(args: &Voxel, cfg: &VoxelConfig) -> Result<(World, String, bool)> {
+    if let Some(path) = &args.load {
+        if path.is_file() {
+            let bytes = std::fs::read(path)
+                .with_context(|| format!("reading the world {}", path.display()))?;
+            let world =
+                World::load(&bytes).with_context(|| format!("loading {}", path.display()))?;
+            let label = path.display().to_string();
+            eprintln!("cubarium voxel: resumed world from {}", path.display());
+            return Ok((world, label, true));
+        } else if path.is_dir() {
+            let mut candidates: Vec<(u64, std::time::SystemTime, PathBuf)> = Vec::new();
+            for entry in std::fs::read_dir(path)
+                .with_context(|| format!("reading state directory {}", path.display()))?
+            {
+                let entry = entry?;
+                let p = entry.path();
+                if p.is_file() {
+                    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    if name.ends_with(".voxel") {
+                        let tick = parse_voxel_tick(name).unwrap_or(0);
+                        let mtime = entry
+                            .metadata()
+                            .and_then(|m| m.modified())
+                            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                        candidates.push((tick, mtime, p));
+                    }
+                }
+            }
+            candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+            if !candidates.is_empty() {
+                for (tick, _, cand_path) in &candidates {
+                    match std::fs::read(cand_path) {
+                        Ok(bytes) => match World::load(&bytes) {
+                            Ok(world) => {
+                                eprintln!(
+                                    "cubarium voxel: resuming {} at tick {tick}",
+                                    cand_path.display()
+                                );
+                                let label = format!("resumed from {}", cand_path.display());
+                                return Ok((world, label, true));
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "cubarium voxel: skipping corrupt snapshot {}: {e}",
+                                    cand_path.display()
+                                );
+                            }
+                        },
+                        Err(e) => {
+                            eprintln!(
+                                "cubarium voxel: skipping unreadable snapshot {}: {e}",
+                                cand_path.display()
+                            );
+                        }
+                    }
+                }
+                bail!(
+                    "{} snapshot file(s) are present in {} and none of them loaded",
+                    candidates.len(),
+                    path.display()
+                );
+            }
+            eprintln!(
+                "cubarium voxel: no loadable snapshot in {}; creating a new world",
+                path.display()
+            );
+        } else {
+            // Path does not exist yet
+            if path.extension().is_some() {
+                bail!("cannot load world from {}: file not found", path.display());
+            } else {
+                std::fs::create_dir_all(path)
+                    .with_context(|| format!("creating state directory {}", path.display()))?;
+                eprintln!(
+                    "cubarium voxel: created state directory {}; creating a new world",
+                    path.display()
+                );
+            }
+        }
+    }
+
+    let mut world_cfg = cfg.world.clone();
+    let (world, label) = match args.scene {
+        VoxelSceneArg::Authored => (scene::authored(world_cfg), "authored".to_string()),
+        VoxelSceneArg::Generated => {
+            let seed = args
+                .seed
+                .or_else(|| cfg_seed_from_file(&args.config))
+                .unwrap_or_else(|| {
+                    let s = random_seed();
+                    eprintln!("cubarium voxel: procedural world generated with random seed {s}");
+                    s
+                });
+            world_cfg.seed = seed;
+            let world = World::new(world_cfg);
+            let label = format!("generated (seed {seed})");
+            (world, label)
+        }
+    };
+    Ok((world, label, false))
+}
 
 /// Run `cubarium voxel`.
 pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
@@ -225,21 +426,8 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
             )
         }
         None => {
-            let mut world = match &args.load {
-                Some(path) => {
-                    let bytes = std::fs::read(path)
-                        .with_context(|| format!("reading the world {}", path.display()))?;
-                    World::load(&bytes).with_context(|| format!("loading {}", path.display()))?
-                }
-                None => {
-                    let world_cfg = cfg.world.clone();
-                    match args.scene {
-                        VoxelSceneArg::Authored => scene::authored(world_cfg),
-                        VoxelSceneArg::Generated => World::new(world_cfg),
-                    }
-                }
-            };
-            let mut flora = Flora::new(FloraConfig::default());
+            let (mut world, scene_label, _resumed) = load_or_create_world(args, &cfg)?;
+            let mut flora = Flora::new(FloraConfig::for_voxel_size(world.config().voxel_m));
             let mut fauna = Fauna::new(FaunaConfig::default());
             let recipes = founder_recipes(args)?;
             let drivers: Vec<(Founder, EpisodeDriver)> = recipes
@@ -278,11 +466,6 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                     recipe.source,
                 );
             }
-            let label = match (&args.load, args.scene) {
-                (Some(p), _) => p.display().to_string(),
-                (None, VoxelSceneArg::Authored) => "authored".to_string(),
-                (None, VoxelSceneArg::Generated) => "generated".to_string(),
-            };
             // The live schedule's own sensory state, settled against the layers as they
             // stand before the first tick: the ambient world's founders smell the litter
             // this flora actually drops and has eaten, at the field's own cadence. An
@@ -292,7 +475,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
             senses.settle(&world.view(), &flora.view());
             (
                 Sim::new(world, flora, fauna, sim_config, Some(senses)),
-                label,
+                scene_label,
             )
         }
     };
@@ -395,6 +578,14 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     // texture per *tick*, so it needs to be told.
     let mut moved = true;
 
+    let state_dir: Option<PathBuf> = args.load.as_ref().and_then(|p| {
+        if p.is_dir() || (p.extension().is_none() && !p.is_file()) {
+            Some(p.clone())
+        } else {
+            None
+        }
+    });
+
     while !ctl.quit {
         let now = Instant::now();
         if let Some(l) = limit
@@ -437,6 +628,12 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                     }
                 }
                 out.observe_tick(sim.world().tick());
+                if let Some(ref dir) = state_dir {
+                    if ticks > 0 && ticks % 1200 == 0 {
+                        let (world, _, _) = sim.layers();
+                        save_voxel_snapshot(dir, world);
+                    }
+                }
             }
             Step::Render { .. } => {
                 let (world, flora, fauna) = sim.layers();
@@ -462,6 +659,10 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     }
 
     out.finish()?;
+    if let Some(ref dir) = state_dir {
+        let (world, _, _) = sim.layers();
+        save_voxel_snapshot(dir, world);
+    }
     let elapsed = clock.elapsed(Instant::now()).as_secs_f64();
     let (world, flora, fauna) = sim.layers();
     let view = world.view();
@@ -521,8 +722,8 @@ const BUILT_IN_POLICIES: [(Founder, &str, &str); 2] = [
     ),
     (
         Founder::Browser,
-        "frondgrazer-p3c-wander-gen322.json",
-        include_str!("../../assets/policies/frondgrazer-p3c-wander-gen322.json"),
+        "frondgrazer-p3d-reach-gen390.json",
+        include_str!("../../assets/policies/frondgrazer-p3d-reach-gen390.json"),
     ),
 ];
 
@@ -1465,7 +1666,7 @@ mod tests {
         assert_eq!(d.raster_height, 0);
         assert_eq!(d.haze, 0.55);
         assert_eq!(d.water_alpha, 0.5);
-        assert_eq!(d.world, cubarium_voxel::Config::default());
+        assert_eq!(d.world.voxel_m, 0.125);
 
         let cfg: VoxelConfig =
             toml::from_str("tilt_degrees = 35.0\n[world]\nwidth = 64\ndepth = 8\n").unwrap();
@@ -1476,6 +1677,9 @@ mod tests {
         );
         assert_eq!(cfg.world.width, 64);
         assert_eq!(cfg.world.depth, 8);
+        assert_eq!(cfg.world.voxel_m, 0.125);
+        let explicit: VoxelConfig = toml::from_str("[world]\nvoxel_m = 0.25\n").unwrap();
+        assert_eq!(explicit.world.voxel_m, 0.25);
         assert_eq!(cfg.world.height, cubarium_voxel::Config::default().height);
 
         // A typo is an error, not a silently ignored key.
@@ -2139,6 +2343,117 @@ mod tests {
             &format!("l {}", other.display()),
         );
         assert_eq!(keep.config().width, 16, "the run kept its own world");
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn generated_world_randomizes_by_default_and_respects_explicit_seed() {
+        use crate::cli::{Voxel, VoxelControllerArg, VoxelSceneArg, VoxelSinkArg};
+        let cfg = VoxelConfig::default();
+        let make_args = |seed: Option<u64>| Voxel {
+            config: None,
+            sink: VoxelSinkArg::Web,
+            scene: VoxelSceneArg::Generated,
+            seed,
+            arena: None,
+            controller: VoxelControllerArg::Heuristic,
+            policy: None,
+            founder_policy: Vec::new(),
+            founder_heuristic: Vec::new(),
+            arena_seed: 1,
+            arena_diagnostics: false,
+            empty: false,
+            seconds: 0.0,
+            speed: 1.0,
+            load: None,
+            out: PathBuf::from("captures"),
+            every: 30,
+            fps: 60,
+            web_port: 7393,
+            gpu_target: None,
+            gpu_capture: None,
+            gpu_web_rate: 0.0,
+            gpu_roof_walk: false,
+        };
+
+        // Explicit seed is respected
+        let args = make_args(Some(42));
+        let (world, label, resumed) = load_or_create_world(&args, &cfg).unwrap();
+        assert!(!resumed);
+        assert_eq!(world.config().seed, 42);
+        assert_eq!(label, "generated (seed 42)");
+
+        // Default seed is randomized (two calls should produce different seeds)
+        let args_default1 = make_args(None);
+        let args_default2 = make_args(None);
+        let (world1, _, _) = load_or_create_world(&args_default1, &cfg).unwrap();
+        let (world2, _, _) = load_or_create_world(&args_default2, &cfg).unwrap();
+        // Probability of random seed collision is 1 in 2^64
+        assert_ne!(world1.config().seed, world2.config().seed);
+    }
+
+    #[test]
+    fn load_or_create_world_resumes_saved_state_and_does_not_regenerate() {
+        use crate::cli::{Voxel, VoxelControllerArg, VoxelSceneArg, VoxelSinkArg};
+        let dir = std::env::temp_dir().join(format!("cubarium_test_state_{}", random_seed()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let cfg = VoxelConfig::default();
+        let base_args = Voxel {
+            config: None,
+            sink: VoxelSinkArg::Web,
+            scene: VoxelSceneArg::Generated,
+            seed: None,
+            arena: None,
+            controller: VoxelControllerArg::Heuristic,
+            policy: None,
+            founder_policy: Vec::new(),
+            founder_heuristic: Vec::new(),
+            arena_seed: 1,
+            arena_diagnostics: false,
+            empty: false,
+            seconds: 0.0,
+            speed: 1.0,
+            load: Some(dir.clone()),
+            out: PathBuf::from("captures"),
+            every: 30,
+            fps: 60,
+            web_port: 7393,
+            gpu_target: None,
+            gpu_capture: None,
+            gpu_web_rate: 0.0,
+            gpu_roof_walk: false,
+        };
+
+        // 1. Initial run into empty state dir creates a fresh world
+        let (world1, _, resumed1) = load_or_create_world(&base_args, &cfg).unwrap();
+        assert!(!resumed1, "fresh directory has no snapshot to resume");
+
+        // Save a snapshot with a unique marker (e.g. edited cell)
+        let _tick = 100;
+        let mut saved_world = world1.clone();
+        saved_world.apply(cubarium_voxel::Command::SetMaterial {
+            x: 0,
+            y: 1,
+            z: 0,
+            material: cubarium_voxel::Material::Soil,
+        });
+        save_voxel_snapshot(&dir, &saved_world);
+
+        // Verify snapshot was created
+        let snap_file = dir.join(format!("world-{}.voxel", saved_world.tick()));
+        assert!(snap_file.exists());
+
+        // 2. Second run into same state dir resumes that snapshot without regenerating
+        let (resumed_world, label, resumed2) = load_or_create_world(&base_args, &cfg).unwrap();
+        assert!(resumed2, "must resume from existing snapshot in directory");
+        assert!(
+            label.contains("world-"),
+            "label reflects resumed snapshot: {label}"
+        );
+        assert_eq!(resumed_world.config().seed, saved_world.config().seed);
+        assert_eq!(resumed_world.tick(), saved_world.tick());
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

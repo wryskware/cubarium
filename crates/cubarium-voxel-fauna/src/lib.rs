@@ -73,7 +73,7 @@ use cubarium_voxel::{VoxelView, World};
 use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraView, Site, Taken};
 use serde::{Deserialize, Serialize};
 
-pub use body::{FounderPhysiology, effective_config};
+pub use body::{FounderPhysiology, effective_config, mouth_reach_up_voxels};
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
     FounderFactories, Response, Scripted, resolve_actions,

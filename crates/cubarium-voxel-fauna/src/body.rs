@@ -7,8 +7,9 @@
 //! the [`Pose`](crate::Pose)'s `(x, z)`, standing on the support face one layer below
 //! its centre column. The forward mouth is the footprint plus a short reach of
 //! `mouth_reach_body_lengths` body lengths beyond it, and it takes food from the body's
-//! own layer plus `mouth_reach_up_voxels` whole voxels above it — one for the browser,
-//! which lifts its head to a grown crown, none for the ground feeder.
+//! own layer plus the manifest's `mouth_reach_up_voxels`, authored on the 0.25 m
+//! reference grid and converted to whole voxels on finer grids — one reference voxel for
+//! the browser, which lifts its head 0.25 m to a grown crown, none for the ground feeder.
 //!
 //! # What movement is allowed to do
 //!
@@ -539,17 +540,36 @@ pub(crate) fn mouth_litter_site(
     best
 }
 
+/// A manifest's authored upward mouth reach expressed on `voxel_m`.
+///
+/// Manifest geometry is part of the trained-policy digest, so its whole-voxel value stays
+/// authored for the 0.25 m reference grid. Finer worlds convert that distance at runtime;
+/// reference-sized and coarser grids retain the historical count. A zero-reach mouth
+/// remains zero at every scale.
+pub fn mouth_reach_up_voxels(manifest: &Manifest, voxel_m: f64) -> u32 {
+    const REFERENCE_VOXEL_M: f64 = 0.25;
+
+    let authored = manifest.mouth_reach_up_voxels;
+    if authored == 0 || !voxel_m.is_finite() || !(voxel_m > 0.0) || voxel_m >= REFERENCE_VOXEL_M {
+        return authored;
+    }
+    (f64::from(authored) * REFERENCE_VOXEL_M / voxel_m)
+        .round()
+        .clamp(f64::from(authored), f64::from(u32::MAX)) as u32
+}
+
 /// The crown layers one mouth can take food from, standing on `standing_y`.
 ///
 /// The body occupies `standing_y + 1`; a founder that can lift its head reaches
-/// [`Manifest::mouth_reach_up_voxels`] whole voxels further up. A ground feeder's reach
-/// is zero, so the range is the single layer it always was.
+/// [`mouth_reach_up_voxels`] whole voxels further up. A ground feeder's reach is zero, so
+/// the range is the single layer it always was.
 pub(crate) fn mouth_crown_layers(
     standing_y: u32,
     manifest: &Manifest,
+    voxel_m: f64,
 ) -> std::ops::RangeInclusive<i64> {
     let body_layer = i64::from(standing_y) + 1;
-    body_layer..=body_layer + i64::from(manifest.mouth_reach_up_voxels)
+    body_layer..=body_layer + i64::from(mouth_reach_up_voxels(manifest, voxel_m))
 }
 
 /// The stand whose crown cells the mouth region physically touches: a crown cell of
@@ -565,7 +585,7 @@ pub(crate) fn mouth_foliage_stand(
     standing_y: u32,
     manifest: &Manifest,
 ) -> Option<(Site, f64)> {
-    let layers = mouth_crown_layers(standing_y, manifest);
+    let layers = mouth_crown_layers(standing_y, manifest, view.config.voxel_m);
     let width = i64::from(view.config.width);
     let depth = i64::from(view.config.depth);
     let mut best: Option<(Site, f64)> = None;
@@ -618,7 +638,7 @@ pub(crate) fn mouth_foliage_stands(
     standing_y: u32,
     manifest: &Manifest,
 ) -> Vec<(Site, f64)> {
-    let layers = mouth_crown_layers(standing_y, manifest);
+    let layers = mouth_crown_layers(standing_y, manifest, view.config.voxel_m);
     let width = i64::from(view.config.width);
     let depth = i64::from(view.config.depth);
     let mut out = Vec::new();
@@ -1545,6 +1565,19 @@ mod tests {
         assert!((blind.sensor_structure(total) - 0.05 * total).abs() < 1e-15);
         // The rule does not create matter: sensor + core is the total, not more.
         assert!((blind.sensor_structure(total) + core - total).abs() < 1e-12);
+    }
+
+    #[test]
+    fn finer_voxels_preserve_the_browsers_physical_mouth_lift() {
+        let browser = Founder::Browser.manifest();
+        let blind = Founder::Blind.manifest();
+
+        assert_eq!(mouth_reach_up_voxels(&browser, 0.25), 1);
+        assert_eq!(mouth_reach_up_voxels(&browser, 0.125), 2);
+        assert_eq!(mouth_reach_up_voxels(&browser, 1.0), 1);
+        assert_eq!(mouth_reach_up_voxels(&blind, 0.125), 0);
+        assert_eq!(mouth_crown_layers(2, &browser, 0.25), 3..=4);
+        assert_eq!(mouth_crown_layers(2, &browser, 0.125), 3..=5);
     }
 
     /// The counterfactual behind the vertical mouth reach: the **same** fixture, the same

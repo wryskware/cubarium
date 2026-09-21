@@ -34,8 +34,8 @@ use anyhow::{Context, Result, bail};
 
 use cubarium_gpu::vk::Gpu;
 use cubarium_gpu::voxel::{
-    MAX_STYLES, PART_ANIMAL_INTERIM, PART_CROWN, PART_CROWN_HEART, PART_NONE, PART_SPROUT,
-    PART_TRUNK, VoxelParams, VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel,
+    MAX_GLYPHS, MAX_STYLES, PART_ANIMAL_INTERIM, PART_NONE, VoxelParams, VoxelRenderer,
+    VoxelStaging, VoxelStyle, VoxelTexel,
 };
 use cubarium_voxel::{VoxelView, World};
 use cubarium_voxel_flora::Flora;
@@ -43,6 +43,7 @@ use cubarium_voxel_flora::Flora;
 use crate::sink::{FrameSink, Output, WebSink};
 use crate::voxel::VoxelConfig;
 use crate::voxel::animal::{AnimalPart, Animals};
+use crate::voxel::appearance;
 use crate::voxel::present as cpu;
 use crate::voxel::project::Projection;
 use crate::voxel::stand::{Part, Stands, Style};
@@ -206,17 +207,26 @@ impl VoxelGpuSink {
                         } else {
                             AnimalPart::None
                         };
-                        let (part, slot) = if m.is_solid() {
-                            (PART_NONE, 0)
+                        let (part, glyph, slot) = if m.is_solid() {
+                            (PART_NONE, 0, 0)
                         } else if let Some(style) = animals.style(beast) {
-                            (PART_ANIMAL_INTERIM, slot_for_style(style, styles, overflow))
+                            (
+                                PART_ANIMAL_INTERIM,
+                                beast.glyph().0,
+                                slot_for_style(style, styles, overflow),
+                            )
                         } else {
                             let p = stands.at(xi, i64::from(y), z);
-                            match part_class(p) {
-                                PART_NONE => (PART_NONE, 0),
+                            match appearance::plant_class(p) {
+                                PART_NONE => (PART_NONE, 0, 0),
                                 class => {
                                     let s = slot_for(stands, p, styles, slot_of, overflow);
-                                    (class, s)
+                                    let glyph = appearance::plant_glyph(
+                                        p,
+                                        !stands.crown_continues(p, xi - 1, y, z),
+                                        !stands.crown_continues(p, xi + 1, y, z),
+                                    );
+                                    (class, glyph.0, s)
                                 }
                             }
                         };
@@ -226,9 +236,10 @@ impl VoxelGpuSink {
                         } else {
                             0.0
                         };
-                        out.voxels[VoxelStaging::index(w, h, x, y, z)] = VoxelTexel::pack(
+                        out.voxels[VoxelStaging::index(w, h, x, y, z)] = VoxelTexel::pack_glyph(
                             m as u8,
                             part,
+                            glyph,
                             free,
                             free <= cpu::WATER_EPSILON,
                             pore,
@@ -240,7 +251,23 @@ impl VoxelGpuSink {
             for (slot, style) in styles.iter().enumerate() {
                 out.styles[slot] = VoxelStyle::new(style.wood, style.crown, style.heart);
             }
+            out.glyphs.fill(0);
+            let used = appearance::atlas_len(p.s, p.rise);
+            debug_assert!(used <= out.glyphs.len());
+            debug_assert!(appearance::ATLAS_GLYPHS <= MAX_GLYPHS);
+            appearance::write_atlas(p.s, p.rise, &mut out.glyphs[..used]);
         });
+        let atmosphere = if p.sky_gradient && view.atmosphere_m3 > 0.0 {
+            (view.atmosphere_m3 as f32 / 1.5).clamp(0.1, 1.0)
+        } else {
+            0.0
+        };
+        let rain_tick = if p.sky_gradient && view.is_raining() {
+            view.tick as f32
+        } else {
+            0.0
+        };
+        self.renderer.update_weather(atmosphere, rain_tick);
         self.ticks_staged += 1;
         self.pack_ms += (Instant::now() - started).as_secs_f64() * 1e3;
     }
@@ -419,17 +446,6 @@ fn slot_for(
     slot
 }
 
-/// [`Part`] as the texel's part class.
-fn part_class(part: Part) -> u8 {
-    match part {
-        Part::None => PART_NONE,
-        Part::Trunk(_) => PART_TRUNK,
-        Part::Crown { heart: false, .. } => PART_CROWN,
-        Part::Crown { heart: true, .. } => PART_CROWN_HEART,
-        Part::Sprout(_) => PART_SPROUT,
-    }
-}
-
 /// `VoxelPresenter::build_roof`, written into the roof texture's own index order:
 /// voxels from each one up to the nearest solid above it in its own column, `0` where
 /// the column is open to the sky, clamped into a byte.
@@ -472,6 +488,11 @@ pub fn params_of(cfg: &VoxelConfig, proj: Projection, roof_from_texture: bool) -
         water_alpha: cfg.water_alpha,
         roof_from_texture,
         sky: cpu::sky(),
+        sky_horizon: cpu::sky_horizon(),
+        atmosphere: 0.0,
+        rain_tick: 0.0,
+        dither: cfg.dither,
+        sky_gradient: cfg.sky_gradient,
         bedrock: srgb_linear(cpu::BEDROCK_SRGB),
         rock: srgb_linear(cpu::ROCK_SRGB),
         soil: srgb_linear(cpu::SOIL_SRGB),

@@ -136,6 +136,8 @@ pub struct VoxelView<'a> {
     pub aquifer_m3: f64,
     /// The lumped atmosphere store in cubic metres; zero under the open budget.
     pub atmosphere_m3: f64,
+    /// Allowance left in the current shower, in cubic metres. Zero when not raining.
+    pub shower_left_m3: f64,
     /// Whether the named outlet is exporting.
     pub outlet_open: bool,
     /// The outlet cell `(x, y, z)`, if the world names one.
@@ -145,6 +147,12 @@ pub struct VoxelView<'a> {
 }
 
 impl<'a> VoxelView<'a> {
+    /// True if rain is falling this tick (prescribed or active shower).
+    #[inline]
+    pub fn is_raining(&self) -> bool {
+        self.config.rain_m_per_s > 0.0 || self.shower_left_m3 > 0.0
+    }
+
     #[inline]
     pub fn material_at(&self, x: i64, y: u32, z: u32) -> Material {
         self.material[self.config.index(x, y, z)]
@@ -601,6 +609,7 @@ impl World {
             ledger: &self.ledger,
             aquifer_m3: self.aquifer_m3,
             atmosphere_m3: self.atmosphere_m3,
+            shower_left_m3: self.shower_left_m3,
             outlet_open: self.outlet_open,
             outlet: self.outlet_cell,
             spring: self.spring_cell,

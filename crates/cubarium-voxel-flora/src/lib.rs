@@ -1418,6 +1418,38 @@ impl Default for FloraConfig {
 }
 
 impl FloraConfig {
+    /// The authored default flora, with spatial geometry expressed for `voxel_m`.
+    ///
+    /// The presets were authored on 0.25 m voxels. Finer grids multiply every spatial
+    /// distance stored in voxel units so crowns, roots, mycelium access and propagule
+    /// travel retain their approximate physical size. The ecological rates and stores
+    /// are copied unchanged. Reference-sized and coarser grids deliberately retain the
+    /// historical defaults, as do invalid sizes (which the world config rejects at its
+    /// own input boundary).
+    pub fn for_voxel_size(voxel_m: f64) -> FloraConfig {
+        const REFERENCE_VOXEL_M: f64 = 0.25;
+
+        let mut config = FloraConfig::default();
+        if !voxel_m.is_finite() || !(voxel_m > 0.0) || voxel_m >= REFERENCE_VOXEL_M {
+            return config;
+        }
+        let scale = REFERENCE_VOXEL_M / voxel_m;
+        for species in Species::ALL {
+            let sc = config.species_mut(species);
+            sc.rooting_depth = scaled_voxel_distance(sc.rooting_depth, scale);
+            sc.rooting_radius = scaled_voxel_distance(sc.rooting_radius, scale);
+            sc.substrate_reach_up_down = scaled_voxel_distance(sc.substrate_reach_up_down, scale);
+            sc.hop = scaled_voxel_distance(sc.hop, scale);
+            for height in &mut sc.crown_height_voxels {
+                *height *= scale;
+            }
+            for radius in &mut sc.crown_radius_voxels {
+                *radius *= scale;
+            }
+        }
+        config
+    }
+
     pub fn species(&self, s: Species) -> &SpeciesConfig {
         match s {
             Species::Bloomcrown => &self.bloomcrown,
@@ -1463,6 +1495,66 @@ impl FloraConfig {
             }
         }
         Ok(())
+    }
+}
+
+fn scaled_voxel_distance(distance: u32, scale: f64) -> u32 {
+    if distance == 0 {
+        return 0;
+    }
+    (f64::from(distance) * scale)
+        .round()
+        .clamp(1.0, f64::from(u32::MAX)) as u32
+}
+
+#[cfg(test)]
+mod voxel_scale_tests {
+    use super::*;
+
+    #[test]
+    fn half_size_voxels_double_only_the_authored_spatial_geometry() {
+        let reference = FloraConfig::default();
+        let scaled = FloraConfig::for_voxel_size(0.125);
+
+        for species in Species::ALL {
+            let before = reference.species(species);
+            let after = scaled.species(species);
+            assert_eq!(after.rooting_depth, before.rooting_depth * 2);
+            assert_eq!(after.rooting_radius, before.rooting_radius * 2);
+            assert_eq!(
+                after.substrate_reach_up_down,
+                before.substrate_reach_up_down * 2
+            );
+            assert_eq!(after.hop, before.hop * 2);
+            assert_eq!(
+                after.crown_height_voxels,
+                before.crown_height_voxels.map(|v| v * 2.0)
+            );
+            assert_eq!(
+                after.crown_radius_voxels,
+                before.crown_radius_voxels.map(|v| v * 2.0)
+            );
+        }
+
+        let mut geometry_reset = scaled;
+        for species in Species::ALL {
+            let before = reference.species(species);
+            let after = geometry_reset.species_mut(species);
+            after.rooting_depth = before.rooting_depth;
+            after.rooting_radius = before.rooting_radius;
+            after.substrate_reach_up_down = before.substrate_reach_up_down;
+            after.hop = before.hop;
+            after.crown_height_voxels = before.crown_height_voxels;
+            after.crown_radius_voxels = before.crown_radius_voxels;
+        }
+        assert_eq!(geometry_reset, reference, "rates and stores stay authored");
+    }
+
+    #[test]
+    fn reference_and_coarser_voxels_keep_the_historical_defaults() {
+        let reference = FloraConfig::default();
+        assert_eq!(FloraConfig::for_voxel_size(0.25), reference);
+        assert_eq!(FloraConfig::for_voxel_size(1.0), reference);
     }
 }
 

@@ -147,7 +147,46 @@ pub const WILT_DARK: f32 = 0.25;
 /// How far the crown's heart pixels lean toward the heart colour at full foliage.
 pub const HEART_TINT: f32 = 0.75;
 
-/// What a voxel holds, if anything: which part of which drawn stand.
+// --- Substrate & Dead organic matter palettes ----------------------------------------
+pub const LOG_RIM_SRGB: u32 = 0x007A_4A6E;
+pub const LOG_FRONT_SRGB: u32 = 0x004E_2846;
+pub const LOG_DARK_SRGB: u32 = 0x003A_1C36;
+pub const LOG_TOP_SRGB: u32 = 0x006E_3E62;
+
+pub const LITTER_SRGB: u32 = 0x003D_1E38;
+pub const LITTER_FLECKS_SRGB: u32 = 0x00A0_5580;
+
+pub const CARRION_SRGB: u32 = 0x002A_1628;
+pub const CARRION_BONE_SRGB: u32 = 0x008A_7C9A;
+
+/// A fallen log's style: dark bark wood, flat wood top, cut-end belly.
+pub fn log_style() -> Style {
+    Style {
+        wood: srgb_linear(LOG_FRONT_SRGB),
+        crown: srgb_linear(LOG_TOP_SRGB),
+        heart: srgb_linear(LOG_DARK_SRGB),
+    }
+}
+
+/// Leaf litter detritus style.
+pub fn litter_style() -> Style {
+    Style {
+        wood: srgb_linear(LITTER_SRGB),
+        crown: srgb_linear(LITTER_FLECKS_SRGB),
+        heart: srgb_linear(LITTER_SRGB),
+    }
+}
+
+/// Carrion / skeletal remnants style.
+pub fn carrion_style() -> Style {
+    Style {
+        wood: srgb_linear(CARRION_SRGB),
+        crown: srgb_linear(CARRION_BONE_SRGB),
+        heart: srgb_linear(CARRION_BONE_SRGB),
+    }
+}
+
+/// What a voxel holds, if anything: which part of which drawn stand or substrate feature.
 ///
 /// The index is into [`Stands::styles`], not into the flora's stands: two stands of one
 /// species with the same foliage and moisture share a style only by coincidence, but the
@@ -163,21 +202,30 @@ pub enum Part {
     Crown { style: u16, heart: bool },
     /// A site holding a seed cohort: a mark, not a block.
     Sprout(u16),
+    /// A fallen log: horizontal dead wood cylinder on the support face.
+    Log(u16),
+    /// Leaf litter and organic detritus: a subtle textured mark on the floor.
+    Litter(u16),
+    /// Carrion / skeletal remnants on the floor.
+    Carrion(u16),
 }
 
 impl Part {
-    /// Does this part fill its voxel's faces? A sprout does not — it is a few pixels in
-    /// the middle of an otherwise empty cell, so the cell above it is still open sky and
-    /// the cell in front of it still shows what is behind.
+    /// Does this part fill its voxel's faces? Sprouts, litter and carrion do not — they
+    /// are marks on the floor of an otherwise empty cell.
     pub fn is_block(self) -> bool {
-        matches!(self, Part::Trunk(_) | Part::Crown { .. })
+        matches!(self, Part::Trunk(_) | Part::Crown { .. } | Part::Log(_))
     }
 
     /// The style this part paints with, if it paints at all.
     pub fn style(self) -> Option<u16> {
         match self {
             Part::None => None,
-            Part::Trunk(s) | Part::Sprout(s) => Some(s),
+            Part::Trunk(s)
+            | Part::Sprout(s)
+            | Part::Log(s)
+            | Part::Litter(s)
+            | Part::Carrion(s) => Some(s),
             Part::Crown { style, .. } => Some(style),
         }
     }
@@ -250,6 +298,63 @@ impl Stands {
                 self.place(view, cell, part);
             }
         }
+        // Dead wood (fallen logs): rendered where dead_wood is above threshold.
+        for g in flora.ground {
+            if g.dead_wood >= 0.05 {
+                let style = self.styles.len().min(u16::MAX as usize) as u16;
+                if usize::from(style) != self.styles.len() {
+                    break;
+                }
+                self.styles.push(log_style());
+                self.place(
+                    view,
+                    Cell {
+                        x: i64::from(g.site.x),
+                        y: g.site.y + 1,
+                        z: g.site.z,
+                    },
+                    Part::Log(style),
+                );
+            }
+        }
+        // Leaf litter and organic detritus on the soil.
+        for g in flora.ground {
+            if g.litter >= 0.05 {
+                let style = self.styles.len().min(u16::MAX as usize) as u16;
+                if usize::from(style) != self.styles.len() {
+                    break;
+                }
+                self.styles.push(litter_style());
+                self.place(
+                    view,
+                    Cell {
+                        x: i64::from(g.site.x),
+                        y: g.site.y + 1,
+                        z: g.site.z,
+                    },
+                    Part::Litter(style),
+                );
+            }
+        }
+        // Carrion / remains.
+        for g in flora.ground {
+            if g.carrion >= 0.05 {
+                let style = self.styles.len().min(u16::MAX as usize) as u16;
+                if usize::from(style) != self.styles.len() {
+                    break;
+                }
+                self.styles.push(carrion_style());
+                self.place(
+                    view,
+                    Cell {
+                        x: i64::from(g.site.x),
+                        y: g.site.y + 1,
+                        z: g.site.z,
+                    },
+                    Part::Carrion(style),
+                );
+            }
+        }
         // Then the seed banks, also in site order: one sprout mark per site that holds a
         // cohort, in the colours of whichever species' cohorts hold the most there.
         for g in flora.ground {
@@ -274,7 +379,7 @@ impl Stands {
     }
 
     /// Write one part, letting the stronger claim keep the cell. Wood beats canopy —
-    /// a trunk through another stand's crown is a trunk — and a crown beats a sprout.
+    /// a trunk through another stand's crown is a trunk — and a crown beats a sprout/log.
     fn place(&mut self, view: &VoxelView<'_>, cell: Cell, part: Part) {
         if cell.y >= self.height || cell.z >= self.depth {
             return;
@@ -285,9 +390,11 @@ impl Stands {
         let i = self.index(cell.x, cell.y, cell.z);
         let rank = |p: Part| match p {
             Part::None => 0u8,
-            Part::Sprout(_) => 1,
-            Part::Crown { .. } => 2,
-            Part::Trunk(_) => 3,
+            Part::Litter(_) | Part::Carrion(_) => 1,
+            Part::Sprout(_) => 2,
+            Part::Log(_) => 3,
+            Part::Crown { .. } => 4,
+            Part::Trunk(_) => 5,
         };
         if rank(part) >= rank(self.grid[i]) {
             self.grid[i] = part;
@@ -350,48 +457,288 @@ pub fn parts_of(flora: FloraView<'_>, stand: &Stand, style: u16) -> Vec<(Cell, P
     let sx = i64::from(site.x);
     let mut out = Vec::new();
 
-    // The trunk: the stand stands `H` cells above its support's top face, and the top
-    // one of those is the crown's own centre, so the wood runs to `H − 1`. A stand whose
-    // crown height rounds to one is a crown sitting straight on the ground, with no stem
-    // — which is what a one-voxel-tall plant is.
-    let h = crown_height_voxels(sc.crown_height(stand.wood));
-    for k in 1..h {
-        out.push((
-            Cell {
-                x: sx,
-                y: site.y + k,
-                z: site.z,
-            },
-            Part::Trunk(style),
-        ));
-    }
+    // A glowcap on dead wood perches on the log (+1 higher base)
+    let on_log = stand.species == Species::Glowcap
+        && flora
+            .ground
+            .iter()
+            .find(|g| g.site == site)
+            .map_or(false, |g| g.dead_wood >= 0.05);
+    let base_y = site.y + if on_log { 1 } else { 0 };
 
-    // The crown: the horizontal disc the shade model covers, at the trunk's top. `z` has
-    // real faces and clips; `x` runs on and wraps.
-    let top = site.y + h;
-    let r = sc.crown_radius(stand.wood).max(0.0);
-    let r2 = r * r;
-    let span = r.floor() as i64;
-    for dz in -span..=span {
-        for dx in -span..=span {
-            if (dx * dx + dz * dz) as f64 > r2 {
-                continue;
+    match stand.species {
+        Species::Bloomcrown => {
+            let h = crown_height_voxels(sc.crown_height(stand.wood));
+            for k in 1..h {
+                out.push((
+                    Cell {
+                        x: sx,
+                        y: base_y + k,
+                        z: site.z,
+                    },
+                    Part::Trunk(style),
+                ));
             }
-            let z = i64::from(site.z) + dz;
-            if z < 0 {
-                continue;
+            let top = base_y + h;
+            let r = sc.crown_radius(stand.wood).max(0.0);
+            let r2 = r * r;
+            let span = r.floor() as i64;
+            for dz in -span..=span {
+                for dx in -span..=span {
+                    let dist2 = (dx * dx + dz * dz) as f64;
+                    if dist2 > r2 {
+                        continue;
+                    }
+                    let z = i64::from(site.z) + dz;
+                    if z < 0 {
+                        continue;
+                    }
+                    // A broad rim around a lowered centre reads as a cup from the
+                    // side-on view.  It never rises beyond the model crown height or
+                    // spreads past its cover; small crowns remain a single cap.
+                    let inner = (r - 0.85).max(0.45);
+                    let notch = h > 1
+                        && r >= 1.0
+                        && dist2 <= inner * inner
+                        && (dx + dz + stand.id as i64).rem_euclid(5) != 0;
+                    let crown_y = top - u32::from(notch);
+                    out.push((
+                        Cell {
+                            x: sx + dx,
+                            y: crown_y,
+                            z: z as u32,
+                        },
+                        Part::Crown {
+                            style,
+                            heart: dx == 0 && dz == 0,
+                        },
+                    ));
+                }
             }
-            out.push((
-                Cell {
-                    x: sx + dx,
-                    y: top,
-                    z: z as u32,
-                },
-                Part::Crown {
-                    style,
-                    heart: dx == 0 && dz == 0,
-                },
-            ));
+        }
+        Species::Umbrellafrond => {
+            let h = crown_height_voxels(sc.crown_height(stand.wood));
+            for k in 1..h {
+                out.push((
+                    Cell {
+                        x: sx,
+                        y: base_y + k,
+                        z: site.z,
+                    },
+                    Part::Trunk(style),
+                ));
+            }
+            let top = base_y + h;
+            let r = sc.crown_radius(stand.wood).max(0.0);
+            let r2 = r * r;
+            let span = r.floor() as i64;
+            for dz in -span..=span {
+                for dx in -span..=span {
+                    let dist2 = (dx * dx + dz * dz) as f64;
+                    if dist2 > r2 {
+                        continue;
+                    }
+                    let z = i64::from(site.z) + dz;
+                    if z < 0 {
+                        continue;
+                    }
+                    // A narrow stalk opens into a broad parasol.  Only sparse rim cells
+                    // droop, so it keeps a continuous, readable canopy rather than a disc.
+                    let rim = dist2 > (r - 0.75).max(0.5).powi(2);
+                    let droops =
+                        rim && (dx - dz + stand.id as i64).rem_euclid(3) == 0 && top > base_y + 1;
+                    let crown_y = top - u32::from(droops);
+                    out.push((
+                        Cell {
+                            x: sx + dx,
+                            y: crown_y,
+                            z: z as u32,
+                        },
+                        Part::Crown {
+                            style,
+                            heart: dx == 0 && dz == 0,
+                        },
+                    ));
+                }
+            }
+        }
+        Species::Glowcap => {
+            let h = crown_height_voxels(sc.crown_height(stand.wood));
+            if on_log {
+                // The cap stays rooted in the one real dead-wood site; the appearance
+                // layer may cluster its marks, but occupancy never invents neighbouring
+                // substrate.
+                out.push((
+                    Cell {
+                        x: sx,
+                        y: base_y + 1,
+                        z: site.z,
+                    },
+                    Part::Trunk(style),
+                ));
+                out.push((
+                    Cell {
+                        x: sx,
+                        y: base_y + 2,
+                        z: site.z,
+                    },
+                    Part::Crown { style, heart: true },
+                ));
+            } else {
+                for k in 1..h {
+                    out.push((
+                        Cell {
+                            x: sx,
+                            y: base_y + k,
+                            z: site.z,
+                        },
+                        Part::Trunk(style),
+                    ));
+                }
+                out.push((
+                    Cell {
+                        x: sx,
+                        y: base_y + h,
+                        z: site.z,
+                    },
+                    Part::Crown { style, heart: true },
+                ));
+            }
+        }
+        Species::Springturf => {
+            let h = crown_height_voxels(sc.crown_height(stand.wood));
+            for k in 1..h {
+                out.push((
+                    Cell {
+                        x: sx,
+                        y: base_y + k,
+                        z: site.z,
+                    },
+                    Part::Trunk(style),
+                ));
+            }
+            let top = base_y + h;
+            let r = sc.crown_radius(stand.wood).max(0.0);
+            let r2 = r * r;
+            let span = r.floor() as i64;
+            for dz in -span..=span {
+                for dx in -span..=span {
+                    let dist2 = (dx * dx + dz * dz) as f64;
+                    if dist2 > r2 {
+                        continue;
+                    }
+                    let z = i64::from(site.z) + dz;
+                    if z < 0 {
+                        continue;
+                    }
+                    // Low tufts have a ragged skyline, deterministically varied by the
+                    // stand identity so growth does not shimmer between frames.
+                    let short =
+                        dist2 > 0.5 && (dx * 3 + dz * 5 + stand.id as i64).rem_euclid(3) == 0;
+                    out.push((
+                        Cell {
+                            x: sx + dx,
+                            y: top.saturating_sub(u32::from(short)).max(base_y + 1),
+                            z: z as u32,
+                        },
+                        Part::Crown {
+                            style,
+                            heart: dx == 0 && dz == 0,
+                        },
+                    ));
+                }
+            }
+        }
+        Species::Velvetpad => {
+            let h = crown_height_voxels(sc.crown_height(stand.wood));
+            for k in 1..h {
+                out.push((
+                    Cell {
+                        x: sx,
+                        y: base_y + k,
+                        z: site.z,
+                    },
+                    Part::Trunk(style),
+                ));
+            }
+            let top = base_y + h;
+            let r = sc.crown_radius(stand.wood).max(0.0);
+            let r2 = r * r;
+            let span = r.floor() as i64;
+            for dz in -span..=span {
+                for dx in -span..=span {
+                    let dist2 = (dx * dx + dz * dz) as f64;
+                    if dist2 > r2 {
+                        continue;
+                    }
+                    // Thin mats keep a broad scalloped outline: omit alternating rim
+                    // cells, never interior cells, and retain the model's cover bounds.
+                    let rim = dist2 > (r - 0.8).max(0.0).powi(2);
+                    if rim && (dx - dz + stand.id as i64).rem_euclid(3) == 0 {
+                        continue;
+                    }
+                    let z = i64::from(site.z) + dz;
+                    if z >= 0 {
+                        out.push((
+                            Cell {
+                                x: sx + dx,
+                                y: top,
+                                z: z as u32,
+                            },
+                            Part::Crown {
+                                style,
+                                heart: dx == 0 && dz == 0,
+                            },
+                        ));
+                    }
+                }
+            }
+        }
+        Species::Stonecushion => {
+            let h = crown_height_voxels(sc.crown_height(stand.wood));
+            for k in 1..h {
+                out.push((
+                    Cell {
+                        x: sx,
+                        y: base_y + k,
+                        z: site.z,
+                    },
+                    Part::Trunk(style),
+                ));
+            }
+            let top = base_y + h;
+            let r = sc.crown_radius(stand.wood).max(0.0);
+            let r2 = r * r;
+            let span = r.floor() as i64;
+            let lobe_shift = if stand.id & 1 == 0 { 0.5 } else { -0.5 };
+            for dz in -span..=span {
+                for dx in -span..=span {
+                    let dist2 = (dx * dx + dz * dz) as f64;
+                    if dist2 > r2 {
+                        continue;
+                    }
+                    let left = (dx as f64 + lobe_shift).powi(2) + (dz as f64).powi(2);
+                    let right = (dx as f64 - lobe_shift).powi(2) + (dz as f64).powi(2);
+                    let core = left.min(right);
+                    let z = i64::from(site.z) + dz;
+                    if z < 0 {
+                        continue;
+                    }
+                    // Two shallow lobes, stepped at their centres, make a compact dome.
+                    let raised = core < (r * 0.5).max(0.45).powi(2) && h > 1;
+                    out.push((
+                        Cell {
+                            x: sx + dx,
+                            y: top + u32::from(raised),
+                            z: z as u32,
+                        },
+                        Part::Crown {
+                            style,
+                            heart: dx == 0 && dz == 0,
+                        },
+                    ));
+                }
+            }
         }
     }
     out

@@ -33,10 +33,11 @@
 //! is submerged under the water's blend.
 
 use cubarium_voxel::VoxelView;
-use cubarium_voxel_fauna::{Animal, FaunaView, Species};
+use cubarium_voxel_fauna::{Animal, FaunaView, Founder, Species, State};
 
 use crate::present::srgb_linear;
 
+use super::appearance::{self, GlyphId};
 use super::stand::{Cell, Style};
 
 /// The interim body colour: a placeholder, and chosen to look like one.
@@ -47,35 +48,64 @@ use super::stand::{Cell, Style};
 /// not a proposal: see this module's header.
 pub const INTERIM_ANIMAL_SRGB: u32 = 0x00A8_FF3C;
 
+/// Littershredder (detritivore crawler) palette:
+pub const LITTERSHREDDER_BODY_SRGB: u32 = 0x0025_2B58;
+pub const LITTERSHREDDER_RIM_SRGB: u32 = 0x003E_4E7A;
+pub const LITTERSHREDDER_FEELER_SRGB: u32 = 0x0042_C5F8;
+
+/// Frondgrazer (browser) palette:
+pub const FRONDGRAZER_BODY_SRGB: u32 = 0x001E_2248;
+pub const FRONDGRAZER_HEAD_SRGB: u32 = 0x0042_4E88;
+pub const FRONDGRAZER_EYE_SRGB: u32 = 0x00D0_F4FF;
+
+/// Interaction accents:
+pub const ANIMAL_CROPPING_FLASH_SRGB: u32 = 0x00FF_9B50;
+pub const ANIMAL_STARVING_BODY_SRGB: u32 = 0x0028_2834;
+
 /// How far, in voxels, the interim block reaches from the animal's own column: one, in `x`
 /// and in `z`, for the 2×1×2 body the brief asks for. The cell it stands in is the void
 /// directly above its support face.
 pub const INTERIM_SPAN: i64 = 1;
 
 /// What a voxel holds of an animal, if anything.
-///
-/// One variant beside `None`, on purpose: the interim glyph has no parts, and a body with
-/// parts is the art thread's to define. The index is into [`Animals::styles`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AnimalPart {
     /// No animal here.
     None,
     /// One cell of an interim body block.
     Interim(u16),
+    /// An articulated body cell.
+    Body {
+        style: u16,
+        head: bool,
+        facing_right: bool,
+    },
+    /// An articulated head cell.
+    Head { style: u16, facing_right: bool },
 }
 
 impl AnimalPart {
-    /// Does this part fill its voxel's faces? The interim block does: it is a block.
+    /// Does this part fill its voxel's faces?
     pub fn is_block(self) -> bool {
-        matches!(self, AnimalPart::Interim(_))
+        matches!(
+            self,
+            AnimalPart::Interim(_) | AnimalPart::Body { .. } | AnimalPart::Head { .. }
+        )
     }
 
     /// The style this part paints with, if it paints at all.
     pub fn style(self) -> Option<u16> {
         match self {
             AnimalPart::None => None,
-            AnimalPart::Interim(s) => Some(s),
+            AnimalPart::Interim(s)
+            | AnimalPart::Body { style: s, .. }
+            | AnimalPart::Head { style: s, .. } => Some(s),
         }
+    }
+
+    /// The resolved, backend-neutral face glyph for this occupied voxel.
+    pub fn glyph(self) -> GlyphId {
+        appearance::animal_glyph(self)
     }
 }
 
@@ -93,26 +123,191 @@ pub fn interim_style(species: Species) -> Style {
     }
 }
 
+/// One animal's style this frame: distinct palettes for founders, cropping flash,
+/// starvation desaturation, or interim fallback.
+pub fn animal_style(animal: &Animal) -> Style {
+    let Some(founder) = animal.founder else {
+        return interim_style(animal.species);
+    };
+
+    let is_cropping = animal.state == State::Cropping;
+    let is_starving = animal.reserve <= 0.001 && animal.body <= 0.015;
+
+    match founder {
+        Founder::Blind => {
+            let body = if is_starving {
+                ANIMAL_STARVING_BODY_SRGB
+            } else {
+                LITTERSHREDDER_BODY_SRGB
+            };
+            let rim = if is_starving {
+                0x0038_3C4A
+            } else {
+                LITTERSHREDDER_RIM_SRGB
+            };
+            let accent = if is_cropping {
+                ANIMAL_CROPPING_FLASH_SRGB
+            } else if is_starving {
+                0x004E_5868
+            } else {
+                LITTERSHREDDER_FEELER_SRGB
+            };
+            Style {
+                wood: srgb_linear(body),
+                crown: srgb_linear(rim),
+                heart: srgb_linear(accent),
+            }
+        }
+        Founder::Browser => {
+            let body = if is_starving {
+                ANIMAL_STARVING_BODY_SRGB
+            } else {
+                FRONDGRAZER_BODY_SRGB
+            };
+            let head = if is_starving {
+                0x003A_3E52
+            } else {
+                FRONDGRAZER_HEAD_SRGB
+            };
+            let accent = if is_cropping {
+                ANIMAL_CROPPING_FLASH_SRGB
+            } else if is_starving {
+                0x0068_7280
+            } else {
+                FRONDGRAZER_EYE_SRGB
+            };
+            Style {
+                wood: srgb_linear(body),
+                crown: srgb_linear(head),
+                heart: srgb_linear(accent),
+            }
+        }
+    }
+}
+
 /// The cells one animal occupies, with the part each holds.
 ///
 /// Public so a test can state the geometry without a grid or a world in the way. `x` is
 /// **unwrapped** — a body near the seam reaches past the end of the strip and [`Animals`]
 /// is what wraps it — and `z` beyond the back wall is returned as it is and dropped on
 /// placement, exactly as [`super::stand::parts_of`] does.
-pub fn cells_of(animal: &Animal, style: u16) -> Vec<(Cell, AnimalPart)> {
+pub fn cells_of(animal: &Animal, style: u16, voxel_m: f64) -> Vec<(Cell, AnimalPart)> {
     let site = animal.site;
-    let mut out = Vec::with_capacity(4);
-    for dz in 0..=INTERIM_SPAN {
-        for dx in 0..=INTERIM_SPAN {
-            out.push((
-                Cell {
-                    x: i64::from(site.x) + dx,
-                    // The body stands on the face, so it fills the void above it.
-                    y: site.y + 1,
-                    z: (i64::from(site.z) + dz) as u32,
-                },
-                AnimalPart::Interim(style),
-            ));
+    let sx = i64::from(site.x);
+
+    let Some(founder) = animal.founder else {
+        let mut out = Vec::with_capacity(4);
+        for dz in 0..=INTERIM_SPAN {
+            for dx in 0..=INTERIM_SPAN {
+                out.push((
+                    Cell {
+                        x: sx + dx,
+                        y: site.y + 1,
+                        z: (i64::from(site.z) + dz) as u32,
+                    },
+                    AnimalPart::Interim(style),
+                ));
+            }
+        }
+        return out;
+    };
+
+    if !(voxel_m > 0.0) || !animal.pose.is_finite() {
+        return Vec::new();
+    }
+    let manifest = founder.manifest();
+    // A readable shell is twice the model body's sampled length and width.  It is a
+    // presentation-only envelope: sensing, collision, and the mouth retain the manifest
+    // footprint and continuous pose.  At 0.125 m this gives the requested 2×1×1 crawler
+    // and 4×2×2 browser; at 0.25 m it naturally resolves to half those dimensions.
+    let length = ((2.0 * manifest.body_length_m / voxel_m).ceil() as i64).max(1);
+    let width = ((2.0 * manifest.body_width_m / voxel_m).ceil() as i64).max(1);
+    let height = ((2.0 * manifest.body_width_m / voxel_m).ceil() as u32).max(1);
+    let (fx, fz) = animal.pose.forward();
+    let (step_x, step_z) = if fx.abs() >= fz.abs() {
+        (if fx >= 0.0 { 1 } else { -1 }, 0)
+    } else {
+        (0, if fz >= 0.0 { 1 } else { -1 })
+    };
+    let (side_x, side_z) = (-step_z, step_x);
+    let anchor_x = (animal.pose.x / voxel_m).floor() as i64;
+    let anchor_z = (animal.pose.z / voxel_m).floor() as i64;
+    let facing_right = fx >= 0.0;
+    let mut out = Vec::new();
+
+    match founder {
+        Founder::Blind => {
+            // Low, tapered, segmented crawler.  Its head is the first shell cell in the
+            // real forward mouth direction, never a decorative cell beyond the probe.
+            for along in 0..length {
+                for across in 0..width {
+                    let lateral = across - width / 2;
+                    let cell = Cell {
+                        x: anchor_x + along * step_x + lateral * side_x,
+                        y: site.y + 1,
+                        z: (anchor_z + along * step_z + lateral * side_z) as u32,
+                    };
+                    let part = if along + 1 == length {
+                        AnimalPart::Head {
+                            style,
+                            facing_right,
+                        }
+                    } else {
+                        AnimalPart::Body {
+                            style,
+                            head: false,
+                            facing_right,
+                        }
+                    };
+                    out.push((cell, part));
+                }
+            }
+        }
+        Founder::Browser => {
+            // Broad browser: a raised two-layer torso with only end legs below it leaves
+            // a real projected gap under the belly.  The head remains on the mouth's own
+            // reachable crown layer rather than climbing above its model contact.
+            for along in 0..length {
+                for across in 0..width {
+                    let lateral = across - width / 2;
+                    let x = anchor_x + (along - length / 2) * step_x + lateral * side_x;
+                    let z = (anchor_z + (along - length / 2) * step_z + lateral * side_z) as u32;
+                    let front = along + 1 == length;
+                    out.push((
+                        Cell {
+                            x,
+                            y: site.y + height,
+                            z,
+                        },
+                        if front {
+                            AnimalPart::Head {
+                                style,
+                                facing_right,
+                            }
+                        } else {
+                            AnimalPart::Body {
+                                style,
+                                head: along + 2 == length,
+                                facing_right,
+                            }
+                        },
+                    ));
+                    if height > 1 && (along == 0 || along + 2 == length) {
+                        out.push((
+                            Cell {
+                                x,
+                                y: site.y + 1,
+                                z,
+                            },
+                            AnimalPart::Body {
+                                style,
+                                head: false,
+                                facing_right,
+                            },
+                        ));
+                    }
+                }
+            }
         }
     }
     out
@@ -162,8 +357,8 @@ impl Animals {
             if usize::from(style) != self.styles.len() {
                 break; // more than 65 535 animals in one strip: refuse to alias styles.
             }
-            self.styles.push(interim_style(animal.species));
-            for (cell, part) in cells_of(animal, style) {
+            self.styles.push(animal_style(animal));
+            for (cell, part) in cells_of(animal, style, c.voxel_m) {
                 self.place(view, cell, part);
             }
         }
@@ -213,7 +408,7 @@ impl Animals {
 #[cfg(test)]
 mod tests {
     use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
-    use cubarium_voxel_fauna::{Command, Fauna, FaunaConfig, Species};
+    use cubarium_voxel_fauna::{Command, Fauna, FaunaConfig, Founder, Species, StartingStores};
 
     use super::*;
 
@@ -319,6 +514,65 @@ mod tests {
         );
         // `z = 3` is outside a 3-deep world, and nothing of it landed at `z = 0`.
         assert_eq!(grid.at(7, 3, 0), AnimalPart::None);
+    }
+
+    #[test]
+    fn founder_shells_scale_with_voxel_metres_and_keep_the_browser_head_at_its_front() {
+        let c = VoxelConfig {
+            voxel_m: 0.125,
+            ..VoxelConfig::default()
+        };
+        let mut w = World::empty(c.clone());
+        for z in 0..c.depth {
+            for x in 0..i64::from(c.width) {
+                w.apply(WorldCommand::SetMaterial {
+                    x,
+                    y: 0,
+                    z,
+                    material: Material::Soil,
+                });
+            }
+        }
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        assert!(fauna.apply(
+            &w,
+            Command::IntroduceFounder {
+                x: 6,
+                z: 4,
+                founder: Founder::Browser,
+                stores: StartingStores::FULL,
+                heading_rad: std::f64::consts::FRAC_PI_2,
+            }
+        ));
+        assert!(fauna.apply(
+            &w,
+            Command::IntroduceFounder {
+                x: 2,
+                z: 4,
+                founder: Founder::Blind,
+                stores: StartingStores::FULL,
+                heading_rad: std::f64::consts::FRAC_PI_2,
+            }
+        ));
+        let animals = fauna.view().animals;
+        let browser = cells_of(&animals[0], 0, c.voxel_m);
+        let blind = cells_of(&animals[1], 1, c.voxel_m);
+
+        assert_eq!(browser.len(), 12, "4×2 raised torso plus four end legs");
+        assert_eq!(blind.len(), 2, "two low crawler segments at 0.125 m");
+        assert!(
+            browser
+                .iter()
+                .any(|(c, p)| { c.x == 7 && c.y == 2 && matches!(p, AnimalPart::Head { .. }) }),
+            "the browser head is one front column from its pose, on the mouth layer"
+        );
+        assert!(browser.iter().any(|(c, _)| c.y == 1));
+        assert!(browser.iter().all(|(c, _)| c.y <= 2));
+        assert!(browser.iter().any(|(c, _)| c.x == 4 && c.y == 1));
+        assert!(
+            !browser.iter().any(|(c, _)| c.x == 5 && c.y == 1),
+            "the torso leaves a visible belly gap between its legs"
+        );
     }
 
     /// No animal layer is an empty grid and no lookup: the presenter's existing behaviour

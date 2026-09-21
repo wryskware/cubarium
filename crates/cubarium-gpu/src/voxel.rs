@@ -65,6 +65,8 @@ const QUERY_SLOTS: u32 = 4;
 /// together. The CPU presenter's own cap is 65 535 stands; a frame that really needs more
 /// than this many distinct styles reuses style 0 for the rest and the sink says so.
 pub const MAX_STYLES: usize = 256;
+/// Slots in the generic organism face-glyph atlas. Glyph zero is the empty/default tile.
+pub const MAX_GLYPHS: usize = 64;
 
 /// Plant part classes, as the texel's `part` field carries them.
 pub const PART_NONE: u8 = 0;
@@ -85,10 +87,14 @@ pub const PART_ANIMAL_INTERIM: u8 = 5;
 /// The first part id of the fauna range, for a reader that wants to ask "is this an
 /// animal" rather than "which animal part is this".
 pub const PART_FAUNA_FIRST: u8 = PART_ANIMAL_INTERIM;
+/// A fallen log: horizontal dead wood cylinder.
+pub const PART_LOG: u8 = 6;
+/// Floor marks: leaf litter or carrion remnants.
+pub const PART_FLOOR_MARK: u8 = 7;
 
 /// One voxel, as the shader reads it: `R8G8B8A8_UINT`.
 ///
-/// * `r` — material id in bits 0–1, plant part class in bits 2–4;
+/// * `r` — material id in bits 0–1, part class in bits 2–4, generic glyph id in bits 5–7;
 /// * `g` — free water as a fraction of the void volume, `0` for dry and `1..=255`
 ///   for any water at all (see the module header on the floor);
 /// * `b` — pore water as a fraction of the pore capacity;
@@ -104,9 +110,21 @@ impl VoxelTexel {
     /// by the caller because the epsilon is the presenter's constant and not this
     /// format's.
     pub fn pack(material: u8, part: u8, free: f32, dry: bool, pore: f32, style: u8) -> VoxelTexel {
+        Self::pack_glyph(material, part, 0, free, dry, pore, style)
+    }
+
+    pub fn pack_glyph(
+        material: u8,
+        part: u8,
+        glyph: u8,
+        free: f32,
+        dry: bool,
+        pore: f32,
+        style: u8,
+    ) -> VoxelTexel {
         let g = if dry { 0 } else { quantise(free).max(1) };
         VoxelTexel([
-            (material & 0x03) | ((part & 0x07) << 2),
+            (material & 0x03) | ((part & 0x07) << 2) | ((glyph & 0x07) << 5),
             g,
             quantise(pore),
             style,
@@ -119,6 +137,10 @@ impl VoxelTexel {
 
     pub fn part(self) -> u8 {
         (self.0[0] >> 2) & 0x07
+    }
+
+    pub fn glyph(self) -> u8 {
+        self.0[0] >> 5
     }
 
     /// The free-water fraction the shader sees, which is the quantised one.
@@ -193,6 +215,11 @@ pub struct VoxelParams {
     /// shader (`false`). The picture is identical; only the cost differs.
     pub roof_from_texture: bool,
     pub sky: [f32; 3],
+    pub sky_horizon: [f32; 3],
+    pub atmosphere: f32,
+    pub rain_tick: f32,
+    pub dither: f32,
+    pub sky_gradient: bool,
     pub bedrock: [f32; 3],
     pub rock: [f32; 3],
     pub soil: [f32; 3],
@@ -258,9 +285,13 @@ impl VoxelParams {
         self.width as usize * self.height as usize * self.depth as usize
     }
 
-    /// Bytes one tick uploads: the voxel texture, the roof table and the style table.
+    /// Bytes one tick uploads: world planes, styles and the small generic glyph atlas.
     pub fn upload_bytes(&self) -> usize {
-        self.voxel_count() * 5 + MAX_STYLES * std::mem::size_of::<VoxelStyle>()
+        self.voxel_count() * 5 + MAX_STYLES * std::mem::size_of::<VoxelStyle>() + self.glyph_bytes()
+    }
+
+    pub fn glyph_bytes(&self) -> usize {
+        self.s as usize * (self.s + self.rise) as usize * MAX_GLYPHS
     }
 
     /// The uniform block, in the layout `voxel.frag` declares.
@@ -273,9 +304,15 @@ impl VoxelParams {
                 self.base,
                 i32::from(self.roof_from_texture),
             ],
-            extent: [self.width as i32, self.height as i32, self.depth as i32, 0],
-            knobs: [self.haze, self.water_alpha, 0.0, 0.0],
+            extent: [
+                self.width as i32,
+                self.height as i32,
+                self.depth as i32,
+                self.raster_h as i32,
+            ],
+            knobs: [self.haze, self.water_alpha, self.atmosphere, self.rain_tick],
             sky: v(self.sky),
+            sky_horizon: v(self.sky_horizon),
             bedrock: v(self.bedrock),
             rock: v(self.rock),
             soil: v(self.soil),
@@ -285,7 +322,12 @@ impl VoxelParams {
             haze_colour: v(self.haze_colour),
             shade_a: [self.top_gain, self.top_tint, self.top_back, self.rim],
             shade_b: [self.edge_dark, self.top_edge, self.riser_lean, self.wet],
-            roof: [self.roof_light, self.roof_falloff, 0.0, 0.0],
+            roof: [
+                self.roof_light,
+                self.roof_falloff,
+                self.dither,
+                if self.sky_gradient { 1.0 } else { 0.0 },
+            ],
             water: [self.skin_alpha_gain, self.water_top_alpha, 0.0, 0.0],
             plant_a: [
                 self.plant_top_gain,
@@ -310,6 +352,7 @@ struct VoxelUniforms {
     extent: [i32; 4],
     knobs: [f32; 4],
     sky: [f32; 4],
+    sky_horizon: [f32; 4],
     bedrock: [f32; 4],
     rock: [f32; 4],
     soil: [f32; 4],
@@ -327,7 +370,7 @@ struct VoxelUniforms {
 
 /// Where one tick's world is written, straight into mapped memory.
 ///
-/// The three slices are the staging buffer itself, so the packer on the CPU writes the
+/// The slices are the staging buffer itself, so the packer on the CPU writes the
 /// voxels once instead of filling a `Vec` and copying it. Voxels and the roof table are
 /// indexed `(z · height + y) · width + x` — texture upload order, not the core's
 /// `Config::index`.
@@ -335,6 +378,8 @@ pub struct VoxelStaging<'a> {
     pub voxels: &'a mut [VoxelTexel],
     pub roof: &'a mut [u8],
     pub styles: &'a mut [VoxelStyle],
+    /// `s × (s + rise)` face texels per glyph: front rows followed by cap rows.
+    pub glyphs: &'a mut [u8],
 }
 
 impl VoxelStaging<'_> {
@@ -365,9 +410,12 @@ pub struct VoxelRenderer {
     style_image: vk::Image,
     style_memory: vk::DeviceMemory,
     style_view: vk::ImageView,
+    glyph_image: vk::Image,
+    glyph_memory: vk::DeviceMemory,
+    glyph_view: vk::ImageView,
     staging: HostBuffer,
     /// Byte offsets into [`VoxelRenderer::staging`] of the three planes.
-    offsets: (u64, u64, u64),
+    offsets: (u64, u64, u64, u64),
     /// Whether the staging buffer holds a world the GPU has not seen yet.
     dirty: bool,
     /// Whether anything has ever been staged: a frame before the first upload would
@@ -465,8 +513,15 @@ impl VoxelRenderer {
             vk::ImageTiling::OPTIMAL,
             vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST,
         )?;
+        let (glyph_image, glyph_memory) = gpu.image(
+            params.s,
+            (params.s + params.rise) * MAX_GLYPHS as u32,
+            vk::Format::R8_UINT,
+            vk::ImageTiling::OPTIMAL,
+            vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST,
+        )?;
         gpu.one_shot(command_pool, |cb| unsafe {
-            for image in [voxel_image, roof_image, style_image] {
+            for image in [voxel_image, roof_image, style_image, glyph_image] {
                 barrier(
                     d,
                     cb,
@@ -479,6 +534,7 @@ impl VoxelRenderer {
         let voxel_view = view_3d(gpu, voxel_image, vk::Format::R8G8B8A8_UINT)?;
         let roof_view = view_3d(gpu, roof_image, vk::Format::R8_UINT)?;
         let style_view = gpu.view(style_image, vk::Format::R32G32B32A32_SFLOAT)?;
+        let glyph_view = gpu.view(glyph_image, vk::Format::R8_UINT)?;
 
         let n = params.voxel_count();
         let voxel_bytes = (n * std::mem::size_of::<VoxelTexel>()) as u64;
@@ -490,9 +546,12 @@ impl VoxelRenderer {
             0,
             align16(voxel_bytes),
             align16(voxel_bytes) + align16(roof_bytes),
+            align16(voxel_bytes) + align16(roof_bytes) + align16(style_bytes),
         );
-        let staging =
-            gpu.host_buffer(offsets.2 + style_bytes, vk::BufferUsageFlags::TRANSFER_SRC)?;
+        let staging = gpu.host_buffer(
+            offsets.3 + params.glyph_bytes() as u64,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+        )?;
         let uniforms = gpu.host_buffer(
             std::mem::size_of::<VoxelUniforms>() as u64,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
@@ -524,6 +583,7 @@ impl VoxelRenderer {
             sampled(1),
             sampled(2),
             sampled(3),
+            sampled(4),
         ];
         let set_layout = unsafe {
             d.create_descriptor_set_layout(
@@ -537,7 +597,7 @@ impl VoxelRenderer {
                 .descriptor_count(1),
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .descriptor_count(3),
+                .descriptor_count(4),
         ];
         let pool = unsafe {
             d.create_descriptor_pool(
@@ -564,10 +624,11 @@ impl VoxelRenderer {
                 .image_view(view)
                 .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]
         };
-        let (iv, ir, is) = (
+        let (iv, ir, is, ig) = (
             image_info(voxel_view),
             image_info(roof_view),
             image_info(style_view),
+            image_info(glyph_view),
         );
         unsafe {
             d.update_descriptor_sets(
@@ -580,6 +641,7 @@ impl VoxelRenderer {
                     sampled_write(set, 1, &iv),
                     sampled_write(set, 2, &ir),
                     sampled_write(set, 3, &is),
+                    sampled_write(set, 4, &ig),
                 ],
                 &[],
             )
@@ -618,6 +680,9 @@ impl VoxelRenderer {
             style_image,
             style_memory,
             style_view,
+            glyph_image,
+            glyph_memory,
+            glyph_view,
             staging,
             offsets,
             dirty: false,
@@ -656,6 +721,13 @@ impl VoxelRenderer {
         Ok(())
     }
 
+    /// Update dynamic atmosphere moisture and rain animation tick uniforms.
+    pub fn update_weather(&mut self, atmosphere: f32, rain_tick: f32) {
+        self.params.atmosphere = atmosphere;
+        self.params.rain_tick = rain_tick;
+        self.uniforms.write(&[self.params.uniforms()]);
+    }
+
     /// Write one tick's world straight into the staging buffer.
     ///
     /// The styles slice is zeroed first, so a frame with fewer stands than the last one
@@ -664,7 +736,7 @@ impl VoxelRenderer {
     /// of memory traffic nobody reads.
     pub fn stage(&mut self, fill: impl FnOnce(VoxelStaging<'_>)) {
         let n = self.params.voxel_count();
-        let (voxels, roof, styles) = unsafe {
+        let (voxels, roof, styles, glyphs) = unsafe {
             (
                 std::slice::from_raw_parts_mut(
                     self.staging.ptr.add(self.offsets.0 as usize) as *mut VoxelTexel,
@@ -675,6 +747,10 @@ impl VoxelRenderer {
                     self.staging.ptr.add(self.offsets.2 as usize) as *mut VoxelStyle,
                     MAX_STYLES,
                 ),
+                std::slice::from_raw_parts_mut(
+                    self.staging.ptr.add(self.offsets.3 as usize),
+                    self.params.glyph_bytes(),
+                ),
             )
         };
         styles.fill(VoxelStyle::default());
@@ -682,6 +758,7 @@ impl VoxelRenderer {
             voxels,
             roof,
             styles,
+            glyphs,
         });
         self.dirty = true;
         self.staged = true;
@@ -729,6 +806,13 @@ impl VoxelRenderer {
                     (self.voxel_image, self.offsets.0, w, h, dd),
                     (self.roof_image, self.offsets.1, w, h, dd),
                     (self.style_image, self.offsets.2, 3, MAX_STYLES as u32, 1),
+                    (
+                        self.glyph_image,
+                        self.offsets.3,
+                        self.params.s,
+                        (self.params.s + self.params.rise) * MAX_GLYPHS as u32,
+                        1,
+                    ),
                 ];
                 for (image, offset, pw, ph, pd) in planes {
                     barrier(
@@ -884,6 +968,7 @@ impl VoxelRenderer {
                 (self.voxel_view, self.voxel_image, self.voxel_memory),
                 (self.roof_view, self.roof_image, self.roof_memory),
                 (self.style_view, self.style_image, self.style_memory),
+                (self.glyph_view, self.glyph_image, self.glyph_memory),
             ] {
                 d.destroy_image_view(view, None);
                 d.destroy_image(image, None);
@@ -1099,6 +1184,11 @@ mod tests {
             water_alpha: 0.5,
             roof_from_texture: true,
             sky: [0.0; 3],
+            sky_horizon: [0.0; 3],
+            atmosphere: 0.0,
+            rain_tick: 0.0,
+            dither: 0.0,
+            sky_gradient: false,
             bedrock: [0.0; 3],
             rock: [0.0; 3],
             soil: [0.0; 3],
@@ -1136,6 +1226,12 @@ mod tests {
         assert_eq!((t.material(), t.part(), t.style()), (3, PART_TRUNK, 9));
         assert!(t.dry() && t.free() == 0.0);
         assert!((t.pore() - 0.75).abs() < 1.0 / 255.0);
+
+        let animal = VoxelTexel::pack_glyph(0, PART_ANIMAL_INTERIM, 5, 0.0, true, 0.0, 7);
+        assert_eq!(
+            (animal.part(), animal.glyph(), animal.style()),
+            (PART_ANIMAL_INTERIM, 5, 7)
+        );
 
         let film = VoxelTexel::pack(0, PART_NONE, 1e-3, false, 0.0, 0);
         assert!(!film.dry(), "a film of water must not pack to dry");
@@ -1211,6 +1307,9 @@ mod tests {
         p.rise = 5;
         assert!(p.validate().is_err());
         assert_eq!(params().voxel_count(), 128 * 48 * 24);
-        assert_eq!(params().upload_bytes(), 128 * 48 * 24 * 5 + 256 * 48);
+        assert_eq!(
+            params().upload_bytes(),
+            128 * 48 * 24 * 5 + 256 * 48 + 4 * (4 + 2) * MAX_GLYPHS
+        );
     }
 }

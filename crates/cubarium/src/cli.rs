@@ -105,9 +105,13 @@ pub struct Voxel {
     /// Where frames go. The minifb preview is absent on purpose: it refuses ring rasters.
     #[arg(long, value_enum, default_value_t = VoxelSinkArg::Web)]
     pub sink: VoxelSinkArg,
-    /// Which world to start from; ignored when `--load` names a snapshot.
-    #[arg(long, value_enum, default_value_t = VoxelSceneArg::Authored)]
+    /// Which world to start from; ignored when `--load` or `--state` names a snapshot.
+    #[arg(long, value_enum, default_value_t = VoxelSceneArg::Generated)]
     pub scene: VoxelSceneArg,
+    /// Seed for procedural world generation (with `--scene generated`).
+    /// When omitted, a random seed is chosen.
+    #[arg(long)]
+    pub seed: Option<u64>,
     /// Run the frozen phase-one sensing arena for this founder instead of the ambient
     /// voxel world. This is an explicit development inspection mode.
     #[arg(long, value_enum)]
@@ -151,8 +155,8 @@ pub struct Voxel {
     /// World ticks per clock tick: 1.0 is real time, 0.25 is quarter speed.
     #[arg(long, default_value_t = 1.0)]
     pub speed: f64,
-    /// Resume from a saved world instead of building one.
-    #[arg(long)]
+    /// Resume from a saved world file or state directory instead of building one.
+    #[arg(long, alias = "state")]
     pub load: Option<PathBuf>,
     /// Directory for PNG captures.
     #[arg(long, default_value = "captures")]
@@ -1024,6 +1028,20 @@ mod tests {
         assert_eq!(v.controller, VoxelControllerArg::StationaryFeeding);
         assert_eq!(v.arena_seed, 17);
         assert!(v.arena_diagnostics);
+        assert!(v.validate().is_ok());
+    }
+
+    #[test]
+    fn voxel_default_scene_is_generated_and_accepts_seed_and_state() {
+        let v = voxel(["cubarium", "voxel"]);
+        assert_eq!(v.scene, VoxelSceneArg::Generated);
+        assert_eq!(v.seed, None);
+        assert_eq!(v.load, None);
+
+        let v = voxel(["cubarium", "voxel", "--seed", "42", "--state", "/tmp/saved"]);
+        assert_eq!(v.scene, VoxelSceneArg::Generated);
+        assert_eq!(v.seed, Some(42));
+        assert_eq!(v.load, Some(PathBuf::from("/tmp/saved")));
         assert!(v.validate().is_ok());
     }
 

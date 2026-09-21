@@ -1,0 +1,24 @@
+# Cubarium on the Tachyon: voxel presentation and world configuration (VR-2).
+#
+# Installed to /var/lib/cubarium/voxel.toml.
+# 160 voxels wide * 4 px/voxel = 640 px raster width.
+# 360 px raster height rotated 90 degrees with 3x nearest-neighbour upscale
+# fills the 1080x1920 Waveshare panel exactly without letterbox or pillarbox.
+
+tilt_degrees = 30.0
+px_per_voxel = 4
+raster_height = 360
+haze = 0.55
+water_alpha = 0.5
+dither = 0.04
+sky_gradient = true
+
+[world]
+width = 160
+height = 48
+depth = 24
+voxel_m = 0.125
+rain_m_per_s = 0.0
+evaporation_m_per_s = 0.0
+water_substeps = 4
+initial_aquifer_head_m = 0.0

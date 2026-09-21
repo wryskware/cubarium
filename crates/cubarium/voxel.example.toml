@@ -29,6 +29,10 @@ haze = 0.55
 # pool many slabs deep still blends one water face per pixel.
 water_alpha = 0.5
 
+# Restrained terrain grain and a dark indigo sky. These affect presentation only.
+dither = 0.04
+sky_gradient = true
+
 [world]
 # `cubarium_voxel::Config`. x wraps; y is up from the foundation; z runs into the habitat.
 width = 128
@@ -36,7 +40,9 @@ height = 48
 # `depth` is on purpose absent: how deep the habitat is is the core's decision, so it
 # mirrors `cubarium_voxel::Config::default().depth` — 24 slabs at the chosen camera, which
 # is 48 px of ground plane on top of the strip's own height. Write `depth = N` to override.
-voxel_m = 0.25
+# Half the reference ecology's cell size: plant geometry is rescaled at startup,
+# and metre-sized animals occupy twice as many cells. Training arenas stay 0.25 m.
+voxel_m = 0.125
 seed = 1
 rain_m_per_s = 0.0
 evaporation_m_per_s = 0.0

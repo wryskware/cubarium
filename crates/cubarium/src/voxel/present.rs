@@ -121,6 +121,7 @@ use crate::present::{mix, srgb_linear};
 
 use super::VoxelConfig;
 use super::animal::{AnimalPart, Animals};
+use super::appearance::{self, FaceTexel, Pigment};
 use super::project::Projection;
 use super::stand::{Part, Stands};
 
@@ -149,13 +150,13 @@ pub const LIGHT_SRGB: u32 = 0x0042_C6FF;
 pub const HAZE_SRGB: u32 = 0x0024_1657;
 
 /// How much brighter a top face is than the front face it caps.
-pub const TOP_GAIN: f32 = 2.4;
+pub const TOP_GAIN: f32 = 1.8;
 /// How far a top face leans toward [`LIGHT_SRGB`].
-pub const TOP_TINT: f32 = 0.20;
+pub const TOP_TINT: f32 = 0.15;
 /// How far a top face's back row shades back toward the front colour — the contour that
 /// says "the ground ends here going back". Drawn only where the surface really does end
 /// there, and only when the depth step is 3 px or more: at 2 px it is a 1-pixel hatch.
-pub const TOP_BACK: f32 = 0.30;
+pub const TOP_BACK: f32 = 0.24;
 /// How much of the top-face light reaches a face directly beneath a roof — the floor of a
 /// cave, the ground under an overhang. Without this a covered passage is lit exactly like
 /// open ground and reads as an artefact rather than as a hole.
@@ -165,7 +166,7 @@ pub const ROOF_LIGHT: f32 = 0.22;
 /// floor twenty voxels under the same overhang is lit, not blacked out to the frame edge.
 pub const ROOF_FALLOFF_VOXELS: f32 = 4.0;
 /// How far the front face's top row leans toward the top face: the rim light.
-pub const RIM: f32 = 0.38;
+pub const RIM: f32 = 0.28;
 /// An exposed side column is the front colour times this.
 pub const EDGE_DARK: f32 = 0.72;
 /// How far an exposed side of a top face shades toward the front colour.
@@ -247,9 +248,23 @@ fn strata_of(m: Material) -> [f32; 3] {
     }
 }
 
-/// The sky colour, in linear light. What the presenter clears to.
+/// The sky zenith colour, in linear light. What the presenter clears to at the top.
 pub fn sky() -> [f32; 3] {
     STRATA.sky
+}
+
+/// The dusky horizon sky colour.
+pub const SKY_HORIZON_SRGB: u32 = 0x002E_1B4D;
+
+/// The sky horizon colour, in linear light.
+pub fn sky_horizon() -> [f32; 3] {
+    mul(srgb_linear(SKY_HORIZON_SRGB), 0.35)
+}
+
+/// The sky colour at raster row `py` of height `h`.
+pub fn sky_at(py: i32, h: i32) -> [f32; 3] {
+    let t = (py as f32 / h.max(1) as f32).clamp(0.0, 1.0);
+    mix(sky(), sky_horizon(), t)
 }
 
 /// How much of the top-face light a surface `gap` voxels below its roof keeps. `0` is an
@@ -260,6 +275,18 @@ fn roof_shade(gap: u16) -> f32 {
     }
     let t = 1.0 - (-(f32::from(gap - 1) / ROOF_FALLOFF_VOXELS)).exp();
     ROOF_LIGHT + (1.0 - ROOF_LIGHT) * t
+}
+
+/// Micro-dithering grain across solid voxel faces to break up flat surfaces
+#[inline]
+fn face_grain(x: i64, y: u32, z: u32, dx: i32, dy: i32) -> f32 {
+    let mut h = (x as u32).wrapping_mul(73856093)
+        ^ y.wrapping_mul(19349663)
+        ^ z.wrapping_mul(83492791)
+        ^ (dx as u32).wrapping_mul(2654435761)
+        ^ (dy as u32).wrapping_mul(38291);
+    h = (h ^ (h >> 13)).wrapping_mul(1274126177);
+    ((h & 15) as i32 - 7) as f32 * 0.005
 }
 
 // --- The presenter -------------------------------------------------------------------
@@ -349,7 +376,44 @@ impl VoxelPresenter {
             );
         }
 
-        canvas.pixels_mut().fill(STRATA.sky);
+        if self.cfg.sky_gradient {
+            let cw = canvas.width() as i32;
+            let ch = canvas.height() as i32;
+            for r in 0..ch {
+                let row_sky = sky_at(r, ch);
+                for c in 0..cw {
+                    canvas.pixels_mut()[r as usize * cw as usize + c as usize] = row_sky;
+                }
+            }
+
+            // If atmospheric moisture exists aloft, draw soft drifting mist wisps across the upper sky
+            if view.atmosphere_m3 > 0.0 {
+                let moisture_factor = (view.atmosphere_m3 as f32 / 1.5).clamp(0.1, 1.0);
+                let drift_x = (view.tick / 2) as i32;
+                let mist_rows = (canvas.height() / 3).min(56) as i32;
+                let cloud_c = srgb_linear(0x0036_2858);
+                let cloud_edge = srgb_linear(0x005E_72A0);
+                let w = canvas.width() as i32;
+                for r in 0..mist_rows {
+                    let vertical_t = 1.0 - (r as f32 / mist_rows as f32);
+                    let row_factor = vertical_t * vertical_t * moisture_factor;
+                    for c in 0..w {
+                        let wave1 = ((c + drift_x + r * 4) as f32 * 0.045).sin() * 0.5 + 0.5;
+                        let wave2 = ((c * 2 - drift_x + 37) as f32 * 0.025).cos() * 0.5 + 0.5;
+                        let density = wave1 * wave2 * row_factor;
+                        if density > 0.10 {
+                            let alpha = ((density - 0.10) * 1.8).min(0.70);
+                            let col = mix(cloud_c, cloud_edge, wave1 * 0.5);
+                            let idx = r as usize * canvas.width() as usize + c as usize;
+                            canvas.pixels_mut()[idx] = mix(canvas.pixels()[idx], col, alpha);
+                        }
+                    }
+                }
+            }
+        } else {
+            canvas.pixels_mut().fill(STRATA.sky);
+        }
+
         let surf = Surface {
             w: i32::from(canvas.width()),
             h: i32::from(canvas.height()),
@@ -411,6 +475,37 @@ impl VoxelPresenter {
                     if free > WATER_EPSILON {
                         self.water(view, canvas, surf, x, y, z, free, water_alpha);
                     }
+                }
+            }
+        }
+
+        // If rain is active this tick, draw animated falling rain streaks across the scene
+        if self.cfg.sky_gradient && view.is_raining() {
+            let rain_c = srgb_linear(WATER_SURFACE_SRGB);
+            let w = canvas.width() as i32;
+            let h = canvas.height() as i32;
+            let tick = view.tick as i32;
+            let speed = 4;
+            for c in 0..w {
+                let hash = ((c.wrapping_mul(1664525).wrapping_add(1013904223)) as u32 >> 16) as i32;
+                if hash % 5 != 0 {
+                    continue;
+                }
+                let y_offset = (tick * speed + hash).rem_euclid(32);
+                let mut r = y_offset;
+                while r < h {
+                    let streak_len = 3 + (hash & 1);
+                    for len in 0..streak_len {
+                        let py = r + len;
+                        let px = c + (len / 2);
+                        if py < h {
+                            let wrapped_px = px.rem_euclid(w);
+                            let idx = py as usize * w as usize + wrapped_px as usize;
+                            let alpha = if len == streak_len - 1 { 0.40 } else { 0.20 };
+                            canvas.pixels_mut()[idx] = mix(canvas.pixels()[idx], rain_c, alpha);
+                        }
+                    }
+                    r += 32 + (hash % 16);
                 }
             }
         }
@@ -495,13 +590,18 @@ impl VoxelPresenter {
             0.0
         };
         let body = mix(strata_of(m), STRATA.water_deep, wet * WET);
-        let mut lit = mix(mul(body, TOP_GAIN), STRATA.light, TOP_TINT);
-        if shade < 1.0 {
-            lit = mix(body, lit, shade);
-        }
+        let lit_fn = |b: [f32; 3]| {
+            let mut l = mix(mul(b, TOP_GAIN), STRATA.light, TOP_TINT);
+            if shade < 1.0 {
+                l = mix(b, l, shade);
+            }
+            l
+        };
 
         let (c0, r0, w, h) = p.front_rect(x, y, z);
         let cols = w as i32;
+        let dither = self.cfg.dither;
+        let dither_scale = dither / 0.04;
         if !f.front_hidden {
             if f.riser {
                 // Ground stepping one voxel into depth: shade it as a slope and let its
@@ -512,21 +612,33 @@ impl VoxelPresenter {
                     } else {
                         0.0
                     };
-                    let slope = mix(lit, body, RISER_LEAN * t);
-                    let c = hazed(slope, self.haze_at(z as f32 - t));
-                    let e = hazed(mul(slope, EDGE_DARK), self.haze_at(z as f32 - t));
                     for dx in 0..cols {
+                        let b = if dither > 0.0 {
+                            mul(body, 1.0 + face_grain(x, y, z, dx, dy) * dither_scale)
+                        } else {
+                            body
+                        };
+                        let l = lit_fn(b);
+                        let slope = mix(l, b, RISER_LEAN * t);
+                        let c = hazed(slope, self.haze_at(z as f32 - t));
+                        let e = hazed(mul(slope, EDGE_DARK), self.haze_at(z as f32 - t));
                         let on_side = (dx == 0 && f.open_left) || (dx + 1 == cols && f.open_right);
                         surf.put(canvas, c0 + dx, r0 + dy, if on_side { e } else { c });
                     }
                 }
             } else {
-                let front = hazed(body, haze);
-                let rim = hazed(mix(body, lit, RIM), haze);
-                let edge = hazed(mul(body, EDGE_DARK), haze);
-                let top = hazed(lit, haze);
                 for dy in 0..h as i32 {
                     for dx in 0..cols {
+                        let b = if dither > 0.0 {
+                            mul(body, 1.0 + face_grain(x, y, z, dx, dy) * dither_scale)
+                        } else {
+                            body
+                        };
+                        let l = lit_fn(b);
+                        let front = hazed(b, haze);
+                        let rim = hazed(mix(b, l, RIM), haze);
+                        let edge = hazed(mul(b, EDGE_DARK), haze);
+                        let top = hazed(l, haze);
                         let on_cap = dy == 0 && f.open_up;
                         let on_side = (dx == 0 && f.open_left) || (dx + 1 == cols && f.open_right);
                         let rgb = match (on_cap, on_side) {
@@ -548,15 +660,20 @@ impl VoxelPresenter {
             for dy in 0..rise {
                 let zf = z as f32 + (rise - 1 - dy) as f32 / rise as f32;
                 let hz = self.haze_at(zf);
-                // The contour row only where the ground really ends going back.
-                let plane = if dy == 0 && rise > 2 && !f.back_continues {
-                    mix(lit, body, TOP_BACK)
-                } else {
-                    lit
-                };
-                let face = hazed(plane, hz);
-                let bevel = hazed(mix(plane, body, TOP_EDGE), hz);
                 for dx in 0..cols {
+                    let b = if dither > 0.0 {
+                        mul(body, 1.0 + face_grain(x, y, z, dx, dy + 100) * dither_scale)
+                    } else {
+                        body
+                    };
+                    let l = lit_fn(b);
+                    let plane = if dy == 0 && rise > 2 && !f.back_continues {
+                        mix(l, b, TOP_BACK)
+                    } else {
+                        l
+                    };
+                    let face = hazed(plane, hz);
+                    let bevel = hazed(mix(plane, b, TOP_EDGE), hz);
                     let on_drop = (dx == 0 && f.drop_left) || (dx + 1 == cols && f.drop_right);
                     surf.put(
                         canvas,
@@ -606,96 +723,35 @@ impl VoxelPresenter {
         // a rim row, and a rim on every voxel of a stem is a banded pole.
         let covered_up = solid(view, x, yi + 1, z) || self.stands.at(x, yi + 1, z).is_block();
 
-        if matches!(part, Part::Sprout(_)) {
-            // A propagule: a mark on the floor of its cell rather than a block, two
-            // pixels wide so it reads at all, with a lit tip.
-            let mark = (cols / 2).max(1);
-            let x0 = c0 + (cols - mark) / 2;
-            let rows = (s / 2).max(1);
-            for dy in 0..rows {
-                let c = if dy == 0 {
-                    plant_lit(style.crown, shade)
-                } else {
-                    style.crown
-                };
-                for dx in 0..mark {
-                    surf.put(canvas, x0 + dx, r0 + s - rows + dy, hazed(c, haze));
-                }
-            }
-            return;
-        }
-
-        // The front face's colour, per pixel column, and the light its cap is under.
-        let heart = matches!(part, Part::Crown { heart: true, .. });
-        let crown = matches!(part, Part::Crown { .. });
-        let (open_left, open_right) = if crown {
-            (
-                !self.stands.crown_continues(part, x - 1, y, z),
-                !self.stands.crown_continues(part, x + 1, y, z),
-            )
-        } else {
-            (false, false)
-        };
-        let column = |dx: i32| -> ([f32; 3], [f32; 3]) {
-            // `(front, cap)` for one pixel column: a trunk is a cylinder four pixels
-            // across, a crown is canopy with a shaded skirt and a silhouette edge.
-            let base = if crown {
-                if heart && dx * 2 >= cols - 2 && dx * 2 < cols + 2 {
-                    style.heart
-                } else {
-                    style.crown
-                }
-            } else {
-                style.wood
-            };
-            if crown {
-                let edge = (dx == 0 && open_left) || (dx + 1 == cols && open_right);
-                let k = if edge { CROWN_EDGE } else { 1.0 };
-                (
-                    mul(mix(base, style.wood, CROWN_UNDER), k),
-                    mul(plant_lit(base, shade), k),
-                )
-            } else {
-                let k = trunk_shade(dx, p.s);
-                (
-                    mul(base, k),
-                    mix(plant_lit(base, shade), mul(base, k), TOP_EDGE),
-                )
-            }
-        };
+        let open_left = !self.stands.crown_continues(part, x - 1, y, z);
+        let open_right = !self.stands.crown_continues(part, x + 1, y, z);
+        let class = appearance::plant_class(part);
+        let glyph = appearance::plant_glyph(part, open_left, open_right);
 
         for dy in 0..s {
             for dx in 0..cols {
-                let (front, cap) = column(dx);
-                // The rim: the lit upper edge of the face, only where the sky is.
-                let c = if dy == 0 && !covered_up {
-                    mix(front, cap, PLANT_RIM)
-                } else {
-                    front
-                };
-                surf.put(canvas, c0 + dx, r0 + dy, hazed(c, haze));
+                let texel = appearance::front_texel(class, glyph, dx as u32, dy as u32, p.s);
+                if let Some(c) = glyph_front_colour(style, texel, shade, covered_up) {
+                    surf.put(canvas, c0 + dx, r0 + dy, hazed(c, haze));
+                }
             }
         }
 
-        if !covered_up {
+        if part.is_block() && !covered_up {
             for dy in 0..rise {
                 let zf = z as f32 + (rise - 1 - dy) as f32 / rise as f32;
                 let hz = self.haze_at(zf);
                 for dx in 0..cols {
-                    let (_, cap) = column(dx);
+                    let texel = appearance::cap_texel(class, glyph, dx as u32, dy as u32, p.s);
+                    let cap = glyph_cap_colour(style, texel, shade);
                     surf.put(canvas, c0 + dx, r0 - rise + dy, hazed(cap, hz));
                 }
             }
         }
     }
 
-    /// One cell of an animal's **interim** glyph: a flat block in the placeholder colour,
-    /// with the lit rim and the cap a solid plant cell gets, and nothing else.
-    ///
-    /// Deliberately the plainest stamp in this file. There is no cylinder, no silhouette
-    /// edge, no facing and no fill, because the interim glyph says only *an animal is
-    /// here*: the look of a consumer is Wrysk's art-direction thread
-    /// (`super::animal`'s header), and this is the hook it will replace.
+    /// One cell of an animal's glyph: an articulated body/head for founders,
+    /// or a flat block in the placeholder colour for the interim fallback.
     #[allow(clippy::too_many_arguments)]
     fn animal(
         &self,
@@ -723,17 +779,21 @@ impl VoxelPresenter {
         let covered_up = solid(view, x, yi + 1, z)
             || self.stands.at(x, yi + 1, z).is_block()
             || self.animals.at(x, yi + 1, z).is_block();
-        let front = style.wood;
-        let cap = plant_lit(front, shade);
+
+        let glyph = part.glyph();
 
         for dy in 0..s {
-            let c = if dy == 0 && !covered_up {
-                mix(front, cap, PLANT_RIM)
-            } else {
-                front
-            };
             for dx in 0..cols {
-                surf.put(canvas, c0 + dx, r0 + dy, hazed(c, haze));
+                let texel = appearance::front_texel(
+                    appearance::ANIMAL_PART_CLASS,
+                    glyph,
+                    dx as u32,
+                    dy as u32,
+                    p.s,
+                );
+                if let Some(c) = glyph_front_colour(style, texel, shade, covered_up) {
+                    surf.put(canvas, c0 + dx, r0 + dy, hazed(c, haze));
+                }
             }
         }
         if !covered_up {
@@ -741,7 +801,19 @@ impl VoxelPresenter {
                 let zf = z as f32 + (rise - 1 - dy) as f32 / rise as f32;
                 let hz = self.haze_at(zf);
                 for dx in 0..cols {
-                    surf.put(canvas, c0 + dx, r0 - rise + dy, hazed(cap, hz));
+                    let texel = appearance::cap_texel(
+                        appearance::ANIMAL_PART_CLASS,
+                        glyph,
+                        dx as u32,
+                        dy as u32,
+                        p.s,
+                    );
+                    surf.put(
+                        canvas,
+                        c0 + dx,
+                        r0 - rise + dy,
+                        hazed(glyph_cap_colour(style, texel, shade), hz),
+                    );
                 }
             }
         }
@@ -894,14 +966,48 @@ fn plant_lit(c: [f32; 3], shade: f32) -> [f32; 3] {
     if shade < 1.0 { mix(c, lit, shade) } else { lit }
 }
 
-/// The trunk's cylinder: one multiplier per pixel column, brightest at
-/// [`TRUNK_LIGHT_AT`] across the stem and falling to [`TRUNK_SHADE`]`[0]` at the far
-/// edge. Four pixels are all a stem has; this is what makes them round.
-#[inline]
-fn trunk_shade(dx: i32, s: u32) -> f32 {
-    let u = (dx as f32 + 0.5) / s as f32;
-    let t = (1.0 - (u - TRUNK_LIGHT_AT).abs() / 0.65).clamp(0.0, 1.0);
-    TRUNK_SHADE[0] + (TRUNK_SHADE[1] - TRUNK_SHADE[0]) * t
+fn glyph_pigment(style: super::stand::Style, texel: FaceTexel) -> [f32; 3] {
+    match texel.pigment() {
+        Pigment::Primary => style.wood,
+        Pigment::Secondary => style.crown,
+        Pigment::Accent => style.heart,
+    }
+}
+
+fn glyph_gain(tone: u8) -> f32 {
+    0.5 + f32::from(tone & 15) / 16.0
+}
+
+fn glyph_front_colour(
+    style: super::stand::Style,
+    texel: FaceTexel,
+    shade: f32,
+    covered_up: bool,
+) -> Option<[f32; 3]> {
+    let base = glyph_pigment(style, texel);
+    Some(match texel.tone() {
+        appearance::TONE_TRANSPARENT => return None,
+        appearance::TONE_OUTLINE => mul(base, EDGE_DARK),
+        appearance::TONE_OPEN_RIM if !covered_up => mix(base, plant_lit(base, shade), PLANT_RIM),
+        appearance::TONE_LIT => plant_lit(base, shade),
+        appearance::TONE_UNDER => mix(base, style.wood, CROWN_UNDER),
+        appearance::TONE_UNDER_EDGE => mul(mix(base, style.wood, CROWN_UNDER), CROWN_EDGE),
+        tone @ 16..=31 => mul(base, glyph_gain(tone)),
+        _ => base,
+    })
+}
+
+fn glyph_cap_colour(style: super::stand::Style, texel: FaceTexel, shade: f32) -> [f32; 3] {
+    let base = glyph_pigment(style, texel);
+    match texel.tone() {
+        appearance::TONE_OUTLINE => mul(plant_lit(base, shade), CROWN_EDGE),
+        tone @ 32..=47 => mix(
+            plant_lit(base, shade),
+            mul(base, glyph_gain(tone)),
+            TOP_EDGE,
+        ),
+        _ => plant_lit(base, shade),
+    }
 }
 
 /// Rows of a voxel's front rectangle that a `free` fraction fills: at least one, so any
@@ -1006,10 +1112,21 @@ mod tests {
         }
     }
 
+    /// Geometry tests need a uniform clear and deterministic flat faces. Atmosphere and
+    /// grain have their own picture-level checks; inheriting the live visual defaults
+    /// turns classification assertions into tests of decoration instead.
+    fn test_voxel_config() -> VoxelConfig {
+        VoxelConfig {
+            dither: 0.0,
+            sky_gradient: false,
+            ..VoxelConfig::default()
+        }
+    }
+
     /// No plants: the terrain-and-water picture every test written before the flora
     /// existed is about.
     fn present(world: &World) -> (Canvas, Projection) {
-        present_with(VoxelConfig::default(), world)
+        present_with(test_voxel_config(), world)
     }
 
     fn present_with(cfg: VoxelConfig, world: &World) -> (Canvas, Projection) {
@@ -1693,7 +1810,7 @@ mod tests {
         let world = floor(&c, 5);
         let bare = Flora::new(FloraConfig::default());
         let flora = seeded(&world, 8, 0, Species::Bloomcrown);
-        let cfg = VoxelConfig::default();
+        let cfg = test_voxel_config();
         let (with, proj) = present_flora(cfg.clone(), &world, &flora);
         let (without, _) = present_flora(cfg, &world, &bare);
         assert_ne!(
@@ -1731,7 +1848,7 @@ mod tests {
         // Umbrellafrond, in the same place, is the cool one: the two species are told
         // apart by hue and not only by size.
         let cool = seeded(&world, 8, 0, Species::Umbrellafrond);
-        let (other, _) = present_flora(VoxelConfig::default(), &world, &cool);
+        let (other, _) = present_flora(test_voxel_config(), &world, &cool);
         let cx = pixel(&other, &proj, col, row);
         assert!(cx[2] > cx[0], "umbrellafrond's wood is cool: {cx:?}");
     }
@@ -1760,7 +1877,7 @@ mod tests {
             }
             world
         };
-        let cfg = VoxelConfig::default();
+        let cfg = test_voxel_config();
         let bare = Flora::new(FloraConfig::default());
 
         // Control: with nothing in front of it, the stand plainly reaches the raster.
@@ -1810,7 +1927,7 @@ mod tests {
             }
             world
         };
-        let cfg = VoxelConfig::default();
+        let cfg = test_voxel_config();
         let bare_flora = Flora::new(FloraConfig::default());
         let dry = build(false);
         let flora = seeded(&dry, x, 3, Species::Umbrellafrond);
@@ -1934,7 +2051,7 @@ mod tests {
             ..Config::default()
         };
         let world = super::super::scene::authored(c.clone());
-        let cfg = VoxelConfig::default();
+        let cfg = test_voxel_config();
         let (full, fp) = present_with(cfg.clone(), &world);
         let short_h = fp.raster_h / 2;
         let (short, sp) = present_with(

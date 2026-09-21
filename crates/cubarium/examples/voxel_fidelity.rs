@@ -37,6 +37,7 @@ use cubarium::voxel::{VoxelConfig, scene as authored_scene};
 use cubarium_render::Canvas;
 use cubarium_surface::{Scale, Topology};
 use cubarium_voxel::{Command as VoxelCommand, Config, Material, World};
+use cubarium_voxel_fauna::{Command as FaunaCommand, Fauna, FaunaConfig, Founder, StartingStores};
 use cubarium_voxel_flora::{Command as FloraCommand, Flora, FloraConfig, Species};
 
 /// The run's own `r` with no argument.
@@ -64,6 +65,8 @@ struct Args {
     /// comparing anything. The run loop caps at `clock::MAX_FPS`, so a run's reported
     /// fps cannot separate two renderers that both clear it; this can.
     bench: usize,
+    /// Render only the small fauna parity scene.
+    only_fauna: bool,
 }
 
 fn parse() -> Result<Args> {
@@ -74,6 +77,7 @@ fn parse() -> Result<Args> {
         roof_walk: false,
         worst: 0,
         bench: 0,
+        only_fauna: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -84,6 +88,7 @@ fn parse() -> Result<Args> {
             "--roof-walk" => a.roof_walk = true,
             "--worst" => a.worst = it.next().context("--worst N")?.parse()?,
             "--bench" => a.bench = it.next().context("--bench N")?.parse()?,
+            "--only-fauna" => a.only_fauna = true,
             other => bail!("unknown flag {other}"),
         }
     }
@@ -133,28 +138,88 @@ fn main() -> Result<()> {
     }
     let ticks = (args.seconds * f64::from(TICK_HZ)).round() as u64;
     let mut worst = 0u8;
+    let empty_fauna = no_fauna();
     for (name, rained) in [("authored", false), ("authored-rained", true)] {
+        if args.only_fauna {
+            break;
+        }
         let (world, flora) = build(&world_cfg, true, rained.then_some(ticks));
-        worst = worst.max(compare(&args, name, &cfg, proj, &world, &flora, &mut gpu)?);
+        worst = worst.max(compare(
+            &args,
+            name,
+            &cfg,
+            proj,
+            &world,
+            &flora,
+            &empty_fauna,
+            &mut gpu,
+        )?);
     }
     for (name, rained) in [("generated", false), ("generated-rained", true)] {
+        if args.only_fauna {
+            break;
+        }
         let (world, flora) = build(&world_cfg, false, rained.then_some(ticks));
-        worst = worst.max(compare(&args, name, &cfg, proj, &world, &flora, &mut gpu)?);
+        worst = worst.max(compare(
+            &args,
+            name,
+            &cfg,
+            proj,
+            &world,
+            &flora,
+            &empty_fauna,
+            &mut gpu,
+        )?);
     }
-    let (world, flora) = fixtures(&world_cfg);
+    if !args.only_fauna {
+        let (world, flora) = fixtures(&world_cfg);
+        worst = worst.max(compare(
+            &args,
+            "fixtures",
+            &cfg,
+            proj,
+            &world,
+            &flora,
+            &empty_fauna,
+            &mut gpu,
+        )?);
+        let sprout_ticks = (SPROUT_SECONDS * f64::from(TICK_HZ)).round() as u64;
+        let (world, flora) = build(&world_cfg, true, Some(sprout_ticks));
+        worst = worst.max(compare(
+            &args,
+            "authored-sprout",
+            &cfg,
+            proj,
+            &world,
+            &flora,
+            &empty_fauna,
+            &mut gpu,
+        )?);
+    }
+
+    // Unlike the older plant-only fixtures, this scene exercises both founder body
+    // plans, both facing directions and the shared head-accent glyph.
+    let (world, flora) = build(&world_cfg, true, None);
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    for (x, founder, heading_rad) in [(8, Founder::Blind, -1.0), (20, Founder::Browser, 1.0)] {
+        if !fauna.apply(
+            &world,
+            FaunaCommand::IntroduceFounder {
+                x,
+                z: 2,
+                founder,
+                stores: StartingStores::FULL,
+                heading_rad,
+            },
+        ) {
+            bail!(
+                "fauna fidelity fixture could not place {} at x={x}",
+                founder.name()
+            );
+        }
+    }
     worst = worst.max(compare(
-        &args, "fixtures", &cfg, proj, &world, &flora, &mut gpu,
-    )?);
-    let sprout_ticks = (SPROUT_SECONDS * f64::from(TICK_HZ)).round() as u64;
-    let (world, flora) = build(&world_cfg, true, Some(sprout_ticks));
-    worst = worst.max(compare(
-        &args,
-        "authored-sprout",
-        &cfg,
-        proj,
-        &world,
-        &flora,
-        &mut gpu,
+        &args, "fauna", &cfg, proj, &world, &flora, &fauna, &mut gpu,
     )?);
     println!("\nworst single-channel difference over every scene: {worst}/255");
     Ok(())
@@ -363,6 +428,7 @@ fn compare(
     proj: Projection,
     world: &World,
     flora: &Flora,
+    fauna: &Fauna,
     gpu: &mut VoxelGpuSink,
 ) -> Result<u8> {
     let (w, h) = (u32::from(proj.raster_w), u32::from(proj.raster_h));
@@ -372,11 +438,35 @@ fn compare(
     };
     let mut canvas = Canvas::new(topology, Scale::ONE);
     let mut raster = cube_proto::Raster::black(proj.raster_w, proj.raster_h);
-    VoxelPresenter::new(cfg.clone(), proj).draw(&world.view(), flora.view(), &mut canvas);
+    VoxelPresenter::new(cfg.clone(), proj).draw_with_fauna(
+        &world.view(),
+        flora.view(),
+        Some(fauna.view()),
+        &mut canvas,
+    );
     canvas.encode_raster(&mut raster);
     let cpu = raster.as_bytes();
 
-    gpu.stage_world(world, flora, &no_fauna());
+    let animals = fauna.view().animals.len();
+    let animal_pixels = if animals == 0 {
+        0
+    } else {
+        let mut bare_canvas = Canvas::new(topology, Scale::ONE);
+        let mut bare = cube_proto::Raster::black(proj.raster_w, proj.raster_h);
+        VoxelPresenter::new(cfg.clone(), proj).draw(&world.view(), flora.view(), &mut bare_canvas);
+        bare_canvas.encode_raster(&mut bare);
+        let changed = cpu
+            .chunks_exact(3)
+            .zip(bare.as_bytes().chunks_exact(3))
+            .filter(|(a, b)| a != b)
+            .count();
+        if changed == 0 {
+            bail!("fauna fixture contains {animals} animals but paints no pixels");
+        }
+        changed
+    };
+
+    gpu.stage_world(world, flora, fauna);
     gpu.render()?;
     let gpu_rgba = gpu.read_raster()?;
 
@@ -409,7 +499,7 @@ fn compare(
     }
     let mean = |c: usize| sum[c] as f64 / n as f64;
     println!(
-        "\n{name}: {} voxels of plant ({}), {} water voxels\n  \
+        "\n{name}: {} voxels of plant ({}), {} water voxels, {animals} animals ({animal_pixels} px)\n  \
          max |diff| r/g/b {}/{}/{}   mean {:.4}/{:.4}/{:.4}\n  \
          pixels differing by >1: {} ({:.3}%), >2: {}, >4: {}, >8: {}  of {n}",
         plant_census(world, flora).0,
@@ -489,7 +579,7 @@ fn plant_census(world: &World, flora: &Flora) -> (usize, String) {
                     Part::Crown { heart: true, .. } => heart += 1,
                     Part::Crown { heart: false, .. } => crown += 1,
                     Part::Sprout(_) => sprout += 1,
-                    Part::None => {}
+                    Part::Log(_) | Part::Litter(_) | Part::Carrion(_) | Part::None => {}
                 }
             }
         }
@@ -847,7 +937,7 @@ fn rules(
                         out[14].voxels += 1;
                         p.worst_over((fc, fr, proj.s, proj.s), &mut out[14]);
                     }
-                    Part::None => {}
+                    Part::Log(_) | Part::Litter(_) | Part::Carrion(_) | Part::None => {}
                 }
             }
         }
