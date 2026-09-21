@@ -517,8 +517,14 @@ impl World {
         };
         // A staged recipe's water inventory, poured into the geometry it just built. A
         // `Ridge` world and any recipe with no inventory are left exactly as they were.
+        //
+        // `hydrate` books what it adds, because it is safe to call on a world that already
+        // holds water. This world does not: it has just been generated, so the inventory
+        // **is** what it began with, and the booking is dropped in favour of recording it
+        // as the initial stores below.
         if let Landform::Staged(recipe) = world.config.landform.clone() {
             crate::hydrate::hydrate(&mut world, &recipe.water);
+            world.ledger = Ledger::default();
         }
         world.ledger.initial_stored = world.view().stored_m3();
         world.ledger.initial_atmosphere = world.atmosphere_m3;

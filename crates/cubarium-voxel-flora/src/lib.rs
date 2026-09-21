@@ -55,13 +55,13 @@ pub use cubarium_voxel::{DT, TICK_HZ};
 /// harness picking founder columns, a diagnosis of which gate is shut. There is one
 /// predicate, and this is it.
 pub use step::can_establish;
-/// The same predicate with the geometric sky reading supplied by a caller that already has
-/// it — the batch observation path, [`FloraView::establishment_gates_over`], where one ray
-/// per site is shared across species.
-pub use step::establishment_gates_with_sky;
 /// The same predicate, gate by gate, for a caller that needs to know **which** gate shut:
 /// `Gates::passes()` is exactly `can_establish`.
 pub use step::{Gates, establishment_gates, establishment_gates_on_substrate};
+/// The same predicate with the geometric sky reading supplied by a caller that already has
+/// it — the batch observation path, [`FloraView::establishment_gates_over`], where one ray
+/// per site is shared across species.
+pub use step::{adult_light_cover, establishment_gates_with_sky};
 
 /// The **stands** of the voxel ecology, each one a role: see the preset that carries its
 /// numbers ([`SpeciesConfig::bloomcrown`] and the five after it) for the sentence of

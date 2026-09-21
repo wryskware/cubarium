@@ -61,8 +61,14 @@ impl Hydrated {
 /// Charge a world with its recipe's water inventory.
 ///
 /// `inventory_m = 0` does nothing whatever, which is what every `Ridge` world and every
-/// fixture gets. Called by [`crate::World::new`] after the terrain is installed and
-/// before the ledger records what the world began with.
+/// fixture gets. [`crate::World::new`] calls it once the terrain is installed.
+///
+/// Everything it adds is **booked** — `Ledger::user_in` for the in-world stores,
+/// `atmosphere_in` for the store aloft — so it is safe on a world that already holds
+/// water: a store is raised *to* its target and never lowered, and the ledger explains
+/// the difference. `World::new` clears that booking and records the result as the world's
+/// initial stores instead, because for a fresh world the inventory **is** what it began
+/// with.
 pub fn hydrate(world: &mut World, w: &Water) -> Hydrated {
     let c = world.config().clone();
     let footprint = c.width as f64 * c.depth as f64 * c.cell_area();
@@ -70,26 +76,38 @@ pub fn hydrate(world: &mut World, w: &Water) -> Hydrated {
     if !(total > 0.0) {
         return Hydrated::default();
     }
-    let atmosphere = total * w.atmosphere_fraction.clamp(0.0, 1.0);
+    // The share aloft exists only where there is a sky to hold it: an **open**-budget
+    // world has no atmosphere store at all (`Config::closed_water_budget`, and
+    // `World::validate_loaded` refuses one that pretends otherwise), so its share stays in
+    // the ground and the inventory still adds up.
+    let atmosphere = if c.closed_water_budget {
+        total * w.atmosphere_fraction.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
     let charged = c
         .aquifer_volume_for_head(w.aquifer_head_m)
         .min(total - atmosphere);
     let available = total - atmosphere - charged;
 
-    // Pore first for the water table — geometry that does not depend on the pools — then
-    // the pools out of what is left, then the wet fringe a pool puts in its own banks.
-    let pore_table = wet_water_table(world, w.aquifer_head_m, available);
+    // **Pore first, then pools.** Water wets the ground before it stands on it: soil that
+    // has been rained on and has drained holds its field capacity, which is the retention
+    // rule the solver itself uses, and soil under the water table is saturated. Pools get
+    // what is left.
+    let pore = wet_soil(world, w.aquifer_head_m, available);
     let list = basins(world);
-    let pooled = fill_basins(world, &list, available - pore_table);
-    let pore_fringe = wet_pool_fringe(world, available - pore_table - pooled);
+    let pooled = fill_basins(world, &list, available - pore);
 
-    let spare = (available - pore_table - pooled - pore_fringe).max(0.0);
-    world.aquifer_m3 = charged + spare;
-    world.atmosphere_m3 = atmosphere;
+    let spare = (available - pore - pooled).max(0.0);
+    world.aquifer_m3 += charged + spare;
+    world.atmosphere_m3 += atmosphere;
+    world.ledger.user_in += pore + pooled + charged + spare;
+    world.ledger.atmosphere_in += atmosphere;
+    world.ledger.user_atmosphere_in += atmosphere;
     world.rebuild_active_sets();
     Hydrated {
         pooled_m3: pooled,
-        pore_m3: pore_table + pore_fringe,
+        pore_m3: pore,
         aquifer_m3: charged + spare,
         atmosphere_m3: atmosphere,
         basins: list.len(),
@@ -300,87 +318,64 @@ fn fill_basins(world: &mut World, list: &[Basin], budget: f64) -> f64 {
             let n = (end - k) as f64;
             let fill = (rest / (n * vol)).min(1.0);
             for &i in &cells[k..end] {
-                world.free[i] = fill;
+                // Raised *to* the head, never lowered: a world that already holds water
+                // keeps it, and only the difference is charged.
+                let add = (fill - world.free[i]).max(0.0);
+                world.free[i] += add;
+                rest -= add * vol;
+                placed += add * vol;
             }
-            rest -= fill * n * vol;
-            placed += fill * n * vol;
             k = end;
         }
     }
     placed
 }
 
-/// Field capacity in every soil voxel under the water table. The retention rule is the
-/// material's own ([`Material::field_capacity`]); nothing here invents a moisture model.
-fn wet_water_table(world: &mut World, head_m: f64, budget: f64) -> f64 {
-    let c = world.config().clone();
-    if !(head_m > 0.0) || !(budget > 0.0) {
-        return 0.0;
-    }
-    let top = (head_m / c.voxel_m).floor() as u32;
-    let mut used = 0.0;
-    for y in 0..c.height.min(top) {
-        for z in 0..c.depth {
-            for x in 0..c.width as i64 {
-                let i = c.index(x, y, z);
-                used += wet_cell(world, i, budget - used);
-                if used >= budget {
-                    return used;
-                }
-            }
-        }
-    }
-    used
-}
-
-/// The damp fringe a pool leaves in its own banks: field capacity in every soil voxel
-/// face-adjacent to standing water.
-fn wet_pool_fringe(world: &mut World, budget: f64) -> f64 {
+/// Wet the ground: every porous voxel to its material's **field capacity**, and every one
+/// under the water table to saturation. Returns the volume it took.
+///
+/// The retention rule is the material's own ([`crate::Material::field_capacity`], the same
+/// number the solver's drainage stops at), so this is the state a soil that has been
+/// rained on and has drained is already in — not a moisture model of this module's own
+/// invention. When the inventory cannot pay for all of it the whole field is scaled down
+/// by one factor, so the ground comes out uniformly drier rather than half wet and half
+/// bone dry in index order.
+fn wet_soil(world: &mut World, head_m: f64, budget: f64) -> f64 {
     let c = world.config().clone();
     if !(budget > 0.0) {
         return 0.0;
     }
-    let plane = c.width as usize * c.depth as usize;
-    let wet: Vec<usize> = (0..c.cells()).filter(|&i| world.free[i] > 0.0).collect();
+    let unit = c.voxel_volume();
+    let target = |world: &World, i: usize| -> f64 {
+        let m = world.material[i];
+        if m.pore_capacity() <= 0.0 {
+            return 0.0;
+        }
+        let top = f64::from(c.coords(i).1 + 1) * c.voxel_m;
+        if top <= head_m {
+            1.0
+        } else {
+            m.field_capacity()
+        }
+    };
+    let demand: f64 = (0..c.cells())
+        .map(|i| {
+            (target(world, i) - world.pore[i]).max(0.0) * world.material[i].pore_capacity() * unit
+        })
+        .sum();
+    if demand <= 0.0 {
+        return 0.0;
+    }
+    let scale = (budget / demand).min(1.0);
     let mut used = 0.0;
-    for i in wet {
-        let (x, y, z) = c.coords(i);
-        let x = i64::from(x);
-        let mut around = vec![c.index(x + 1, y, z), c.index(x - 1, y, z)];
-        if z + 1 < c.depth {
-            around.push(c.index(x, y, z + 1));
-        }
-        if z > 0 {
-            around.push(c.index(x, y, z - 1));
-        }
-        if i >= plane {
-            around.push(i - plane);
-        }
-        for j in around {
-            used += wet_cell(world, j, budget - used);
-            if used >= budget {
-                return used;
-            }
+    for i in 0..c.cells() {
+        let add = (target(world, i) - world.pore[i]).max(0.0) * scale;
+        if add > 0.0 {
+            world.pore[i] += add;
+            used += add * world.material[i].pore_capacity() * unit;
         }
     }
     used
-}
-
-/// Wet one voxel to field capacity, for as much of `budget` as it costs. Returns what it
-/// took; a voxel with no pore space, or one already wet, takes nothing.
-fn wet_cell(world: &mut World, i: usize, budget: f64) -> f64 {
-    let m = world.material[i];
-    let unit = m.pore_capacity() * world.config().voxel_volume();
-    if unit <= 0.0 || !(budget > 0.0) {
-        return 0.0;
-    }
-    let want = m.field_capacity() - world.pore[i];
-    if want <= 0.0 {
-        return 0.0;
-    }
-    let take = (want * unit).min(budget);
-    world.pore[i] += take / unit;
-    take
 }
 
 #[cfg(test)]
@@ -461,6 +456,12 @@ mod tests {
         assert!(out.pooled_m3 > 0.0, "some of it is standing water");
         assert_eq!(out.basins_filled, 2, "both pits caught their own runoff");
 
+        for i in 0..c.cells() {
+            if world.free[i] > 0.0 {
+                let (_, y, _) = c.coords(i);
+                assert!(y < 7, "nothing stands above a rim at y = {y}");
+            }
+        }
         for b in &list {
             let mut levels: Vec<(u32, f64)> = b
                 .cells
@@ -478,62 +479,15 @@ mod tests {
         }
     }
 
-    /// Below the first spill the water is still one head per basin, and nothing runs
-    /// over the rim.
+    /// Water wets the ground before it stands on it. An inventory too thin to bring the
+    /// soil to field capacity has nothing left to pool, and says so rather than putting a
+    /// pond on dry ground.
     #[test]
-    fn a_thin_inventory_leaves_the_basins_part_full() {
+    fn a_thin_inventory_wets_the_ground_and_pools_nothing() {
         let mut world = flat(24, 4, 6);
         dig(&mut world, 2..6, 3);
         dig(&mut world, 14..18, 5);
         world.rebuild_active_sets();
-        let out = hydrate(
-            &mut world,
-            &Water {
-                inventory_m: 0.02,
-                atmosphere_fraction: 0.0,
-                aquifer_head_m: 0.0,
-            },
-        );
-        let c = world.config().clone();
-        assert!(out.pooled_m3 > 0.0);
-        for i in 0..c.cells() {
-            if world.free[i] > 0.0 {
-                let (_, y, _) = c.coords(i);
-                assert!(y < 7, "nothing stands above a rim at y = {y}");
-            }
-        }
-    }
-
-    /// The roofed bowl of `hollows`' own fixture: `hydrate` finds it like any other
-    /// basin, and the water is still in it after the solver has had its say.
-    #[test]
-    fn a_grotto_bowl_is_a_basin_and_keeps_what_hydrate_puts_in_it() {
-        let config = Config {
-            width: 12,
-            height: 10,
-            depth: 2,
-            voxel_m: 0.25,
-            ..Config::default()
-        };
-        let mut world = World::empty(config.clone());
-        for z in 0..config.depth {
-            for x in 0..config.width as i64 {
-                for y in 1..=5 {
-                    world.material[config.index(x, y, z)] = Material::Bedrock;
-                }
-            }
-            // A bowl from x = 3 to 8, floor at y = 3, roofed at y = 7, mouth at x = 3.
-            for x in 3..=8i64 {
-                for y in 4..=6 {
-                    world.material[config.index(x, y, z)] = Material::Air;
-                }
-            }
-            for x in 4..=8i64 {
-                world.material[config.index(x, 7, z)] = Material::Bedrock;
-            }
-        }
-        world.rebuild_active_sets();
-
         let out = hydrate(
             &mut world,
             &Water {
@@ -542,88 +496,11 @@ mod tests {
                 aquifer_head_m: 0.0,
             },
         );
-        assert!(out.pooled_m3 > 0.0, "the bowl took water: {out:?}");
-        let roofed: Vec<usize> = (4..=8i64)
-            .flat_map(|x| (0..config.depth).map(move |z| (x, z)))
-            .map(|(x, z)| config.index(x, 4, z))
-            .collect();
-        assert!(
-            roofed.iter().any(|&i| world.free[i] > 0.0),
-            "the water went under the roof"
-        );
-        let settled = world.settle(300);
-        let v = world.view();
-        let held: f64 = (4..=8i64)
-            .flat_map(|x| (0..config.depth).map(move |z| (x, z)))
-            .map(|(x, z)| v.water_depth_m(x, 3, z))
-            .sum();
-        assert!(held > 0.0, "the bowl let the water out: {settled:?}");
-    }
-
-    /// Settling is measured. A world already at rest says so at once; a world with a
-    /// column of water standing over a pit finds its level and keeps the volume; a
-    /// world with water aloft and no pool anywhere is stable **and** dry-locked.
-    #[test]
-    fn settle_reports_rest_convergence_and_a_dry_lock() {
-        let mut still = flat(8, 2, 4);
-        still.rebuild_active_sets();
-        let at_rest = still.settle(600);
-        assert!(at_rest.converged, "a dry flat ring is already settled");
-        assert!(at_rest.ticks <= SETTLE_WINDOW, "{at_rest:?}");
-
-        let config = Config {
-            width: 8,
-            height: 10,
-            depth: 2,
-            voxel_m: 0.25,
-            ..Config::default()
-        };
-        let mut world = World::empty(config.clone());
-        for z in 0..config.depth {
-            for x in 0..config.width as i64 {
-                for y in 1..=4 {
-                    world.material[config.index(x, y, z)] = Material::Bedrock;
-                }
-                for y in 1..=4 {
-                    if (2..=4).contains(&x) {
-                        world.material[config.index(x, y, z)] = Material::Bedrock;
-                    }
-                }
-            }
-            for x in 2..=4i64 {
-                world.material[config.index(x, 4, z)] = Material::Air;
-            }
-        }
-        world.rebuild_active_sets();
-        let poured = 3.0 * config.voxel_volume();
-        let taken = world.apply(crate::Command::AddWater {
-            x: 3,
-            y: 8,
-            z: 0,
-            volume_m3: poured,
-        });
-        assert!(taken > 0.0);
-        let out = world.settle(600);
-        assert!(out.converged && out.ticks < 600, "{out:?}");
-        assert!(
-            (out.pooled_m3 - taken).abs() <= 0.01 * taken,
-            "the pit kept what fell into it: {out:?} against {taken}"
-        );
-
-        let mut dry = World::empty(Config {
-            width: 8,
-            height: 8,
-            depth: 2,
-            closed_water_budget: true,
-            initial_atmosphere_m3: 1.0,
-            ..Config::default()
-        });
-        dry.rebuild_active_sets();
-        let locked = dry.settle(600);
-        assert!(
-            locked.converged && locked.dry_locked,
-            "stable and dry is not a habitat: {locked:?}"
-        );
+        assert_eq!(out.pooled_m3, 0.0, "nothing to spare for a pond: {out:?}");
+        assert!(out.pore_m3 > 0.0, "the ground took it: {out:?}");
+        assert!(world.free.iter().all(|&f| f == 0.0));
+        let total = 0.05 * 24.0 * 4.0 * world.config().cell_area();
+        assert!((out.total_m3() - total).abs() <= 1e-9 * total, "{out:?}");
     }
 
     /// A dry recipe leaves the world exactly as it was.

@@ -453,8 +453,8 @@ impl Water {
     /// The staged presets' inventory: 60 mm over the footprint, a tenth of it aloft, and
     /// a water table a little above the basin floor so the low ground is damp from below.
     pub const DEFAULT: Water = Water {
-        inventory_m: 0.06,
-        atmosphere_fraction: 0.1,
+        inventory_m: 0.5,
+        atmosphere_fraction: 0.06,
         aquifer_head_m: 1.0,
     };
 
