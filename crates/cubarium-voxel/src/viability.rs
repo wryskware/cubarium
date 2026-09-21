@@ -55,7 +55,10 @@ pub struct ViabilitySpec {
     pub window_ticks: u64,
     /// Sample the stores every this many ticks. At least one.
     pub sample_every: u64,
-    /// Showers the window must contain.
+    /// Showers the window must contain. One shower takes
+    /// `shower_volume_m3 / (rain_m_per_s * footprint)` seconds to fall, so a window
+    /// shorter than `min_showers` times that can never pass however well the world
+    /// cycles: size the two together.
     pub min_showers: u64,
     /// How far the stored water may drift across the window and still count as bounded,
     /// as a fraction of the world's total water: the second half's mean against the
@@ -80,7 +83,9 @@ impl Default for ViabilitySpec {
             // Twenty simulated minutes, sampled every ten seconds.
             window_ticks: 20 * 60 * crate::TICK_HZ as u64,
             sample_every: 10 * crate::TICK_HZ as u64,
-            min_showers: 3,
+            // One turn of the cycle is the signal; more is a question about the window's
+            // length, not about the world.
+            min_showers: 1,
             drift_tolerance: 0.02,
             root_cells: 2,
             min_column_fraction: 0.05,

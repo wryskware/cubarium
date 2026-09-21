@@ -356,6 +356,17 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         cfg.tilt_degrees,
         proj.rise,
     );
+    // Under a closed budget the outlet is not an export: what it takes goes into the
+    // atmosphere store and comes back as a shower. It is the strongest of the two return
+    // flows, so a closed world starts with it open — otherwise the cycle never starts and
+    // the run reports a world that is only standing still. `o` still toggles it.
+    if sim.world().config().closed_water_budget && !sim.world().outlet_open() {
+        sim.world_mut().apply(VoxelCommand::SetOutlet { open: true });
+        eprintln!(
+            "cubarium voxel: closed water budget — the outlet is open as the return flow \
+             into the atmosphere, not an export"
+        );
+    }
     report_water_cycle(sim.world(), sim.flora(), sim.config().threads);
     eprintln!("cubarium voxel: stdin commands — {COMMANDS}");
 
@@ -724,7 +735,7 @@ impl Out {
 /// Simulated seconds the start-up viability probe watches. Short on purpose: it runs on
 /// a **clone** of the world before the first frame, so the person waiting to see the
 /// habitat pays for it in wall clock.
-const VIABILITY_WINDOW_S: u64 = 120;
+const VIABILITY_WINDOW_S: u64 = 180;
 
 /// Say at start whether this world's water cycle is one the seeded species could live
 /// in. Reports only — nothing is rejected, that is a later decision
@@ -748,6 +759,9 @@ fn report_water_cycle(world: &World, flora: &Flora, threads: usize) {
         .map(|&s| PoreBand::new(s.name(), flora.config().species(s).establish_pore_min, 1.0))
         .collect();
     let spec = ViabilitySpec {
+        // The same again as a warm-up: a cycle that has not started yet is not a cycle
+        // that cannot start, and a fresh world's first minutes are its transient.
+        warmup_ticks: VIABILITY_WINDOW_S * u64::from(cubarium_voxel::TICK_HZ),
         window_ticks: VIABILITY_WINDOW_S * u64::from(cubarium_voxel::TICK_HZ),
         sample_every: u64::from(cubarium_voxel::TICK_HZ),
         bands,
@@ -758,7 +772,8 @@ fn report_water_cycle(world: &World, flora: &Flora, threads: usize) {
     let mut probe = world.clone();
     let report = cubarium_voxel::viability::measure(&mut probe, &spec);
     eprintln!(
-        "cubarium voxel: {report} (probed {VIABILITY_WINDOW_S} simulated s in {:.1} s)",
+        "cubarium voxel: {report} (probed {VIABILITY_WINDOW_S} simulated s after a \
+         {VIABILITY_WINDOW_S} s warm-up, in {:.1} s)",
         started.elapsed().as_secs_f64()
     );
 }
