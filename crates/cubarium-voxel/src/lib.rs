@@ -29,6 +29,8 @@ pub mod config;
 /// Hydraulic erosion on a heightfield. Generation only; geological time is iterations.
 pub mod erosion;
 pub mod generate;
+/// Roofed void a body can stand inside: undercuts, galleries and shelves.
+pub mod hollows;
 pub mod ledger;
 pub mod material;
 /// Periodic noise in physical units. Generation only.
@@ -47,6 +49,7 @@ pub mod world;
 
 pub use config::Config;
 pub use generate::{Budget, Heightfield, Volume};
+pub use hollows::Hollow;
 pub use ledger::Ledger;
 pub use material::Material;
 pub use recipe::{Erosion, Hollows, Landform, PRESETS, Preset, Recipe, Streams};

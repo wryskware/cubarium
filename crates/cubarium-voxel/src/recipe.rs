@@ -138,14 +138,153 @@ impl Erosion {
     };
 }
 
-/// Carved hollows: undercuts, galleries and shelves.
+/// Carved hollows: undercuts and grottos, galleries with mouths and skylights, and the
+/// shelves that fall out of both (`design/caves-and-hollows-plan-2026-09-21.md`).
 ///
-/// Empty, and serde-defaulted, on purpose. Carving is slice 2b
-/// (`design/caves-and-hollows-plan-2026-09-21.md`); this is the section it will fill, in
-/// place, without moving a field of any preset that exists now.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+/// Both densities default to zero, so a recipe that says nothing about hollows gets the
+/// solid ring it had before they existed. Lengths are lengths, as everywhere here: the
+/// same section on a finer grid carves the same grotto out of more voxels.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-pub struct Hollows {}
+pub struct Hollows {
+    /// Void a hollow must have above a floor face before anyone can stand under it,
+    /// metres. Less than this is drainage, not habitat, and is not listed as a hollow.
+    pub clearance_m: f64,
+    /// How hard the rock under a cap has to be *not* to be, for the water to have taken
+    /// it: at or below this hardness a band is soft enough to notch out or to hold a
+    /// gallery.
+    pub soft_hardness: f64,
+
+    /// How steep the ground has to fall toward a neighbour for a column to count as a
+    /// bank, in metres of drop per metre along.
+    pub bank_slope: f64,
+    /// Thickness of the hard cap over an undercut, metres.
+    pub cap_thickness_m: f64,
+    /// How far below a hard bank a neighbour has to be cut for
+    /// [`crate::Heightfield::hard_cap`] to flag it. The second source of undercut sites,
+    /// beside the hardness geometry.
+    pub cap_drop_m: f64,
+    /// How far back into the bank the soft band is notched, metres.
+    pub undercut_depth_m: f64,
+    /// Share of eligible banks that are notched, `0..=1`. Zero carves none.
+    pub undercut_density: f64,
+    /// Size of the patches the undercuts come in, metres. Without it every eligible
+    /// column of a long bank is notched and the result is a slot, not a few grottos.
+    pub grotto_wavelength_m: f64,
+    /// How strongly hollows are pulled toward the front cut, `0..=1`. The camera is a
+    /// section through `z = 0`: a grotto at the back is a grotto nobody sees.
+    pub front_bias: f64,
+
+    /// Share of the soft rock at depth that opens into galleries, `0..=1`. Zero carves
+    /// none.
+    pub gallery_density: f64,
+    /// Size of the galleries, metres.
+    pub gallery_wavelength_m: f64,
+    /// How far the gallery noise is stretched vertically, `0..1`. Galleries follow the
+    /// soft strata, which are a couple of metres thick and tens of metres long; a field
+    /// that varies as fast up as along carves bubbles, not passages, and a bubble two
+    /// voxels tall is drainage.
+    pub gallery_flatten: f64,
+    /// How far under the surface a gallery has to start, metres, so it is a passage in
+    /// the rock and not a hole in the ground.
+    pub gallery_min_depth_m: f64,
+    /// How far a mouth may be cut through rock to open a gallery, metres.
+    pub mouth_reach_m: f64,
+    /// How close a gallery's ceiling has to come to the surface for a skylight instead,
+    /// metres. A gallery that gets neither is filled.
+    pub skylight_m: f64,
+
+    /// This section's own seed stream.
+    pub stream: u64,
+}
+
+impl Default for Hollows {
+    fn default() -> Hollows {
+        Hollows::NONE
+    }
+}
+
+impl Hollows {
+    /// No hollows at all: the solid ring.
+    pub const NONE: Hollows = Hollows {
+        clearance_m: 0.75,
+        soft_hardness: 0.45,
+        bank_slope: 1.2,
+        cap_thickness_m: 0.4,
+        cap_drop_m: 0.75,
+        undercut_depth_m: 0.75,
+        undercut_density: 0.0,
+        grotto_wavelength_m: 6.0,
+        front_bias: 0.75,
+        gallery_density: 0.0,
+        gallery_wavelength_m: 3.0,
+        gallery_flatten: 0.3,
+        gallery_min_depth_m: 0.6,
+        mouth_reach_m: 1.0,
+        skylight_m: 1.0,
+        stream: 0x_5354_4147_5F48_4C57,
+    };
+
+    /// A handful of grottos on the `default` and `wide` rings.
+    pub const GROTTOS: Hollows = Hollows {
+        undercut_density: 0.30,
+        gallery_density: 0.28,
+        ..Hollows::NONE
+    };
+
+    /// The `small` ring: half the vertical room, so shallower notches and shorter reach.
+    /// The clearance is not halved — a body is the size it is, whatever the voxel is.
+    pub const SMALL: Hollows = Hollows {
+        cap_thickness_m: 0.25,
+        cap_drop_m: 0.5,
+        undercut_depth_m: 0.5,
+        grotto_wavelength_m: 4.0,
+        gallery_wavelength_m: 2.0,
+        gallery_min_depth_m: 0.4,
+        mouth_reach_m: 0.7,
+        skylight_m: 0.7,
+        ..Hollows::GROTTOS
+    };
+
+    /// Whether anything is carved at all.
+    pub fn any(&self) -> bool {
+        self.undercut_density > 0.0 || self.gallery_density > 0.0
+    }
+
+    /// Refuse a section no hollow can be carved from.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        for (name, v) in [
+            ("clearance_m", self.clearance_m),
+            ("grotto_wavelength_m", self.grotto_wavelength_m),
+            ("gallery_wavelength_m", self.gallery_wavelength_m),
+        ] {
+            anyhow::ensure!(
+                v.is_finite() && v > 0.0,
+                "hollows.{name} must be positive and finite, not {v}"
+            );
+        }
+        for (name, v) in [
+            ("soft_hardness", self.soft_hardness),
+            ("bank_slope", self.bank_slope),
+            ("cap_thickness_m", self.cap_thickness_m),
+            ("cap_drop_m", self.cap_drop_m),
+            ("undercut_depth_m", self.undercut_depth_m),
+            ("undercut_density", self.undercut_density),
+            ("front_bias", self.front_bias),
+            ("gallery_density", self.gallery_density),
+            ("gallery_flatten", self.gallery_flatten),
+            ("gallery_min_depth_m", self.gallery_min_depth_m),
+            ("mouth_reach_m", self.mouth_reach_m),
+            ("skylight_m", self.skylight_m),
+        ] {
+            anyhow::ensure!(
+                v.is_finite() && v >= 0.0,
+                "hollows.{name} must be finite and not negative, not {v}"
+            );
+        }
+        Ok(())
+    }
+}
 
 /// A landscape in metres. [`Recipe::default`] is the `default` preset.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -271,7 +410,7 @@ impl Recipe {
         core_m: 2.0,
         pockets: 3,
         erosion: Erosion::DEFAULT,
-        hollows: Hollows {},
+        hollows: Hollows::GROTTOS,
         streams: Streams {
             relief: 0x_5354_4147_5F52_454C,
             ridge: 0x_5354_4147_5F52_4447,
@@ -300,11 +439,12 @@ impl Recipe {
         warp_m: 0.9,
         mantle_m: 0.16,
         soil_max_m: 0.9,
-        strata_m: 1.2,
+        strata_m: 1.6,
         strata_warp_m: 0.25,
         hardness_region_m: 11.0,
         core_m: 1.0,
         erosion: Erosion::SMALL,
+        hollows: Hollows::SMALL,
         ..Recipe::DEFAULT
     };
 
@@ -367,6 +507,7 @@ impl Recipe {
                 "{name} must be finite and not negative, not {v}"
             );
         }
+        self.hollows.validate()?;
         anyhow::ensure!(
             self.lacunarity.is_finite() && self.lacunarity > 1.0,
             "lacunarity steps the frequency up, so it must exceed 1, not {}",

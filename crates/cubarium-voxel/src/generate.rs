@@ -293,16 +293,12 @@ pub struct Heightfield {
     /// The level a closed basin fills to before it spills, metres. Equal to the surface
     /// outside a depression.
     pub spill_m: Vec<f64>,
-    /// Hard rock standing over a neighbour cut at least [`CAP_DROP_M`] below it: the
-    /// bank slice 2b undercuts.
+    /// Hard rock standing over a neighbour cut at least [`crate::Hollows::cap_drop_m`]
+    /// below it: one of the two sources of undercut sites.
     pub hard_cap: Vec<bool>,
     /// What the solver moved.
     pub budget: Budget,
 }
-
-/// A bank counts as a hard cap when a downslope neighbour is cut at least this far below
-/// it. Constant for now; slice 2b's `hollows` section will own it.
-pub const CAP_DROP_M: f64 = 0.75;
 
 /// What erosion moved, in metres of column thickness summed over the grid. Removed
 /// equals deposited plus whatever is still in transport, every iteration.
@@ -356,8 +352,11 @@ pub struct Volume {
 ///    visibility pass can repair a column whose far edge is genuinely the lower one.
 /// 2. [`crate::erosion::erode`] cuts channels and moves the mantle into the flats.
 /// 3. [`voxelise`] quantises it: sediment becomes Soil, bedrock becomes Rock or Bedrock
-///    by [`Recipe::hardness_at`]. (Slice 2b carves the volume here.)
-/// 4. [`prepare`] runs the skyline visibility pass and the isolated-void repair.
+///    by [`Recipe::hardness_at`].
+/// 4. [`crate::hollows::carve`] notches undercuts under the hard caps and opens galleries
+///    inside the soft strata, each with a mouth or a skylight or not at all.
+/// 5. [`prepare`] runs the skyline visibility pass, fills the hollows the camera cannot
+///    see, and the isolated-void repair catches whatever that left sealed.
 ///
 /// Feature size is the recipe's and nothing else: `width` decides how many landforms fit
 /// around the ring, `voxel_m` decides how finely they are resolved, and octaves finer
@@ -380,8 +379,10 @@ fn staged(world: &mut World, r: &Recipe) {
             c.seed,
         )
     });
+    crate::erosion::flag_hard_caps(&mut field, r.hollows.cap_drop_m, r.bedrock_hardness);
 
     let mut volume = voxelise(&c, r, &field);
+    crate::hollows::carve(&mut volume, &field, r, c.seed);
     prepare(&mut volume, &mut field, r);
 
     world.material = volume.material;
@@ -535,8 +536,13 @@ fn voxelise_column(
 /// the column is voxelised again, so the diorama cut keeps the soil and the strata it
 /// had rather than stripping the ground to whatever lay underneath.
 ///
-/// Returns how many columns moved. (Slice 2b carves before this runs and will have to
-/// say what a moved column does to a hollow inside it; today there are none.)
+/// Then the camera check: a hollow with no floor cell the camera can draw is filled
+/// ([`crate::hollows::fill_invisible`]). It runs after the skyline pass because lowering
+/// a nearer column is exactly what makes some hollows visible. A column the pass moves is
+/// voxelised again, which wipes whatever was carved inside it; what that leaves sealed,
+/// the isolated-void repair fills.
+///
+/// Returns how many columns moved.
 pub fn prepare(volume: &mut Volume, field: &mut Heightfield, r: &Recipe) -> usize {
     let (w, d) = (field.width, field.depth);
     let h = volume.config.height as usize;
@@ -563,6 +569,12 @@ pub fn prepare(volume: &mut Volume, field: &mut Heightfield, r: &Recipe) -> usiz
             .all(|&y| y >= 1 && (y as usize) < h - 1),
         "the surface left the world after the visibility pass"
     );
+    // A hollow nobody can see is not kept (the caves plan, "How the camera sees them").
+    // After the skyline pass, not before: lowering a nearer column is exactly what makes
+    // some of them visible.
+    if r.hollows.any() {
+        crate::hollows::fill_invisible(volume, r.hollows.clearance_m);
+    }
     moved
 }
 
@@ -762,9 +774,18 @@ mod tests {
         }
     }
 
+    /// The ridge generator, and any staged recipe that carves no hollows, has one solid
+    /// column under every surface cell.
+    ///
+    /// A recipe that *does* carve hollows is allowed roofed void by construction — that
+    /// is what a grotto is — so for those the standing claim is the one below: nothing is
+    /// left that the sky cannot reach.
     #[test]
-    fn the_default_landform_has_no_overhang() {
+    fn a_landform_without_hollows_has_no_overhang() {
         for (name, config) in rings() {
+            if crate::hollows::section(&config).any() {
+                continue;
+            }
             let world = World::new(config);
             let v = world.view();
             for z in 0..v.config.depth {
@@ -778,6 +799,18 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    /// And every ring, hollows or not, leaves no void the sky cannot reach.
+    #[test]
+    fn every_landform_leaves_every_void_reachable() {
+        for (name, config) in rings() {
+            let world = World::new(config);
+            assert!(
+                isolated_voids(&world).is_empty(),
+                "{name}: a void the sky cannot reach survived generation"
+            );
         }
     }
 
@@ -996,12 +1029,22 @@ mod tests {
     /// one coarse voxel of the coarse one, and that is exact. Erosion is a numerical
     /// solver on the sample grid, not a length: the same budget on twice as many samples
     /// cuts a different realisation of the same catchments, so the eroded rings are held
-    /// to a looser bound and the difference is the solver's, not the recipe's.
+    /// to a looser bound and the difference is the solver's, not the recipe's. Hollows
+    /// are off here for the same reason, one step further on: where a skylight punches
+    /// through the ground is the noise's business, not the recipe's.
     #[test]
     fn halving_the_voxel_resolves_the_same_landforms_finer() {
         let base = Preset::find("default").unwrap().config();
-        let Landform::Staged(recipe) = base.landform.clone() else {
+        let Landform::Staged(mut recipe) = base.landform.clone() else {
             panic!("a preset is staged");
+        };
+        // Hollows off for this one. A skylight is a hole punched through the terrain
+        // wherever a gallery happened to land, and where it lands is the noise's
+        // business, not the recipe's claim about feature size.
+        recipe.hollows = crate::Hollows::NONE;
+        let base = Config {
+            landform: Landform::Staged(recipe),
+            ..base
         };
         // The same 32 m ring at half the cell size is twice the cells in every
         // direction: the same world resolved finer, not a shallower one.

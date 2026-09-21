@@ -25,12 +25,8 @@
 
 use std::collections::BinaryHeap;
 
-use crate::generate::{CAP_DROP_M, Heightfield};
+use crate::generate::Heightfield;
 use crate::recipe::Erosion;
-
-/// How hard a bank has to be to count as a cap over an undercut. Constant for now, like
-/// [`CAP_DROP_M`]; slice 2b's `hollows` section will own both.
-pub const CAP_HARDNESS: f64 = 0.6;
 
 /// The gradient the drainage surface gives a flat, metres per sample. Small enough that
 /// no terrain notices it, large enough to order a lake's cells toward its spill.
@@ -52,7 +48,6 @@ pub fn erode(field: &mut Heightfield, e: &Erosion, hardness: impl Fn(usize, usiz
     }
     read_hardness(field, &hardness);
     if e.iterations == 0 {
-        flag_hard_caps(field);
         return;
     }
 
@@ -161,7 +156,6 @@ pub fn erode(field: &mut Heightfield, e: &Erosion, hardness: impl Fn(usize, usiz
         &mut heap,
     );
     field.spill_m.copy_from_slice(&filled);
-    flag_hard_caps(field);
 }
 
 fn read_hardness(field: &mut Heightfield, hardness: &impl Fn(usize, usize, f64) -> f64) {
@@ -330,17 +324,21 @@ fn relax(field: &mut Heightfield, repose: f64, surface: &mut [f64], delta: &mut 
     }
 }
 
-/// Flag the banks slice 2b undercuts: hard rock at the surface with a neighbour cut at
-/// least [`CAP_DROP_M`] below it.
-fn flag_hard_caps(field: &mut Heightfield) {
+/// Flag the banks a hard cap stands on: hard rock at the surface with a neighbour cut at
+/// least `drop_m` below it. One of the two sources of undercut sites
+/// ([`crate::hollows::carve`]); the other is the hardness layering itself.
+///
+/// Not something erosion does to the field — a read of it — so it is its own call and
+/// runs whatever the iteration budget was.
+pub fn flag_hard_caps(field: &mut Heightfield, drop_m: f64, min_hardness: f64) {
     let (w, d) = (field.width, field.depth);
     let surface: Vec<f64> = (0..w * d).map(|i| field.surface_m(i)).collect();
     for i in 0..w * d {
-        let capped = field.hardness[i] >= CAP_HARDNESS
+        let capped = field.hardness[i] >= min_hardness
             && neighbours(i, w, d)
                 .into_iter()
                 .flatten()
-                .any(|nb| surface[i] - surface[nb] >= CAP_DROP_M);
+                .any(|nb| surface[i] - surface[nb] >= drop_m);
         field.hard_cap[i] = capped;
     }
 }
@@ -619,19 +617,11 @@ mod tests {
     fn a_hard_bank_over_a_cut_is_flagged() {
         let (w, d) = (16usize, 4usize);
         let mut f = field(w, d, 0.25, 0.0, |x, _| if x < 8 { 5.0 } else { 3.0 });
-        erode(
-            &mut f,
-            &Erosion {
-                iterations: 1,
-                rain: 0.0,
-                repose_sweeps: 0,
-                ..budget()
-            },
-            constant_hardness(0.95),
-        );
+        f.hardness.fill(0.95);
+        flag_hard_caps(&mut f, 0.75, 0.6);
         assert!(
             f.hard_cap[7],
-            "the hard bank at the {CAP_DROP_M} m drop is not flagged"
+            "the hard bank over a 2 m drop is not flagged"
         );
         assert!(!f.hard_cap[3], "flat hard ground is not a cap");
     }
