@@ -69,9 +69,13 @@ pub struct VoxelProtocol {
     /// ([`task::START_HEADING_PROTOCOL`]). Part of the hash: aiming the founder at its
     /// food is a different task from placing it with a free heading.
     pub start_heading: String,
-    /// The stage-specific arena fixture revision. Stage B changes when its stock or
-    /// geometry changes, so an old centre cannot silently resume on a different task.
+    /// The stage-specific arena fixture revision, which for Stage B names the successor
+    /// separation band ([`task::stage_b_arena_protocol`]). Stage B changes when its
+    /// stock or geometry changes, so an old centre cannot silently resume on a different
+    /// task, and a near-rung run hashes differently from a landed one.
     pub arena_protocol: String,
+    /// Stage B's successor separation band, `near` or `landed`; `none` on Stage A.
+    pub successor_band: String,
     pub pairs: usize,
     pub sigma: f64,
     pub learning_rate: f64,
@@ -95,6 +99,7 @@ impl VoxelProtocol {
     pub fn new(
         founder: Founder,
         stage: Stage,
+        band: task::Band,
         pairs: usize,
         horizon: u64,
         train_seed: u64,
@@ -109,7 +114,11 @@ impl VoxelProtocol {
             stage: stage.as_str().into(),
             starting_stores: task::STARTING_STORES_PROTOCOL.into(),
             start_heading: task::START_HEADING_PROTOCOL.into(),
-            arena_protocol: task::arena_protocol(stage).into(),
+            arena_protocol: task::arena_protocol(stage, band).into(),
+            successor_band: match stage {
+                Stage::A => "none".into(),
+                Stage::B => band.as_str().into(),
+            },
             pairs,
             sigma: optimizer::SIGMA,
             learning_rate: optimizer::LEARNING_RATE,
@@ -599,6 +608,8 @@ impl VoxelCheckpoint {
 pub struct TrainSpec {
     pub founder: Founder,
     pub stage: Stage,
+    /// Stage B's successor separation band. Ignored on Stage A.
+    pub band: task::Band,
     pub pairs: usize,
     /// How many of the frozen training layouts to run, from the front.
     pub layouts: usize,
@@ -680,12 +691,13 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
     let protocol = VoxelProtocol::new(
         spec.founder,
         spec.stage,
+        spec.band,
         spec.pairs,
         spec.horizon,
         spec.train_seed,
         &task::TRAINING_LAYOUT_SEEDS[..spec.layouts],
     );
-    let layouts = task::training_layouts(spec.founder, spec.stage);
+    let layouts = task::training_layouts(spec.founder, spec.stage, spec.band);
     let run_dir = spec.out.clone();
     std::fs::create_dir_all(run_dir.join("centers"))
         .map_err(|e| format!("cannot create {}: {e}", run_dir.display()))?;
@@ -935,6 +947,7 @@ mod tests {
         TrainSpec {
             founder: Founder::Blind,
             stage: Stage::A,
+            band: task::Band::Landed,
             pairs: 1,
             layouts: 1,
             updates: 1,
@@ -998,12 +1011,13 @@ mod tests {
         let protocol = VoxelProtocol::new(
             founder,
             Stage::A,
+            task::Band::Landed,
             1,
             120,
             20_260_918,
             &task::TRAINING_LAYOUT_SEEDS[..1],
         );
-        let layouts = task::training_layouts(founder, Stage::A);
+        let layouts = task::training_layouts(founder, Stage::A, task::Band::Landed);
         let mut theta =
             super::super::super::tensor::initial_center_shape::<23, 3>(protocol.train_seed);
         let before = theta.clone();
@@ -1076,12 +1090,13 @@ mod tests {
         let protocol = VoxelProtocol::new(
             founder,
             Stage::A,
+            task::Band::Landed,
             1,
             40,
             20_260_918,
             &task::TRAINING_LAYOUT_SEEDS[..1],
         );
-        let layouts = task::training_layouts(founder, Stage::A);
+        let layouts = task::training_layouts(founder, Stage::A, task::Band::Landed);
         let run = |workers: usize| {
             let cancel = AtomicBool::new(false);
             let mut theta =

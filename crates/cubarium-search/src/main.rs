@@ -665,6 +665,11 @@ enum Command {
         /// defaults to its own longer horizon.
         #[arg(long, default_value = "a")]
         stage: String,
+        /// Stage B's successor separation band: `landed` (the task, 2 m and out) or
+        /// `near` (the curriculum rung, 1.0-1.5 m, inside both founders' senses). Part
+        /// of the arena protocol string and so of the run's protocol hash.
+        #[arg(long, default_value = "landed")]
+        band: String,
         /// The training controller: `gru` is the only trainable body (the heuristic slot
         /// carries no parameters and is refused here by name).
         #[arg(long, default_value = "gru")]
@@ -726,6 +731,15 @@ enum Command {
         /// `a` or `b`. Stage B also reports the reacquisition accounting.
         #[arg(long, default_value = "a")]
         stage: String,
+        /// Stage B's successor separation band the *layouts* are built in: `landed` or
+        /// `near`.
+        #[arg(long, default_value = "landed")]
+        band: String,
+        /// The band the policy was trained on, when it differs from `--band`. Naming it
+        /// declares a disclosed transfer measurement; leaving it out means the policy
+        /// must carry the evaluated band's own arena protocol or be refused.
+        #[arg(long)]
+        policy_band: Option<String>,
         /// `training`, `holdout`, or `offset-sweep`. The sweep is blind Stage B only.
         #[arg(long, default_value = "holdout")]
         set: String,
@@ -1028,6 +1042,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::VoxelTrain {
             founder,
             stage,
+            band,
             controller,
             pairs,
             layouts,
@@ -1047,6 +1062,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             es::voxel::commands::train(
                 founder,
                 stage,
+                band,
                 controller,
                 pairs,
                 layouts,
@@ -1066,6 +1082,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             controller,
             ablate_senses,
             stage,
+            band,
+            policy_band,
             set,
             horizon,
             workers,
@@ -1078,6 +1096,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             controller,
             ablate_senses,
             stage,
+            band,
+            policy_band,
             set,
             horizon,
             workers,

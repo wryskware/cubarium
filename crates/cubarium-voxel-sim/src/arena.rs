@@ -157,7 +157,47 @@ impl ReacquisitionArena {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LayoutKind {
     StageA,
-    Reacquisition,
+    Reacquisition(SuccessorBand),
+}
+
+/// How far Stage B places the successor patch from the initial one, in squared arena
+/// columns (a column is [`ARENA_VOXEL_M`] = 0.25 m).
+///
+/// The band is a curriculum rung, not a tuning knob: it decides whether the founder can
+/// sense the second patch from the first one at all. The initial patch, the founder's
+/// start band and both stocks are the same in either.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SuccessorBand {
+    /// 4 to under 6 columns, 1.0 m to under 1.5 m. Inside the blind founder's measured
+    /// 1.5 m litter-cue reach and well inside the browser's 2.0 m cone, so a founder
+    /// standing on its emptied patch can already sense where to go next.
+    Near,
+    /// 8 columns and out: 2.0 m to the strip's widest 4.85 m. The landed Stage-B task,
+    /// where neither founder can sense the successor from the patch it just emptied.
+    #[default]
+    Landed,
+}
+
+impl SuccessorBand {
+    /// The half-open squared-column band a successor site must fall in.
+    pub fn bounds(self) -> (i64, i64) {
+        match self {
+            SuccessorBand::Near => (16, 36),
+            SuccessorBand::Landed => (64, i64::MAX),
+        }
+    }
+
+    pub fn contains(self, distance_squared: i64) -> bool {
+        let (low, high) = self.bounds();
+        distance_squared >= low && distance_squared < high
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SuccessorBand::Near => "near",
+            SuccessorBand::Landed => "landed",
+        }
+    }
 }
 
 impl Arena {
@@ -169,12 +209,21 @@ impl Arena {
         Self::build_kind(founder, layout_seed, LayoutKind::StageA, None).0
     }
 
+    /// Build Stage B with the successor in `band` ([`SuccessorBand`]).
+    pub fn build_reacquisition_in(
+        founder: Founder,
+        layout_seed: u64,
+        band: SuccessorBand,
+    ) -> ReacquisitionArena {
+        Self::build_reacquisition_kind(founder, layout_seed, band, None)
+    }
+
     /// Build Stage B's smallest real continuation task: one reachable finite patch and
     /// one distinct successor. Both use the normal flora deposits, fauna feeding and
     /// static sensory field; this type only records which physical sites form the two
     /// patches for an evaluator after the controller has acted.
     pub fn build_reacquisition(founder: Founder, layout_seed: u64) -> ReacquisitionArena {
-        Self::build_reacquisition_kind(founder, layout_seed, None)
+        Self::build_reacquisition_kind(founder, layout_seed, SuccessorBand::Landed, None)
     }
 
     /// Build the same Stage-B layout and start position as [`Self::build_reacquisition`],
@@ -192,18 +241,24 @@ impl Arena {
             turn_to_initial_rad.is_finite(),
             "the diagnostic start turn must be finite"
         );
-        Self::build_reacquisition_kind(founder, layout_seed, Some(turn_to_initial_rad))
+        Self::build_reacquisition_kind(
+            founder,
+            layout_seed,
+            SuccessorBand::Landed,
+            Some(turn_to_initial_rad),
+        )
     }
 
     fn build_reacquisition_kind(
         founder: Founder,
         layout_seed: u64,
+        band: SuccessorBand,
         start_turn_override: Option<f64>,
     ) -> ReacquisitionArena {
         let (arena, initial_patch) = Self::build_kind(
             founder,
             layout_seed,
-            LayoutKind::Reacquisition,
+            LayoutKind::Reacquisition(band),
             start_turn_override,
         );
         let initial_patch = initial_patch.expect("the two-patch layout records its initial patch");
@@ -329,17 +384,24 @@ impl Arena {
                 }
                 (resources, None)
             }
-            LayoutKind::Reacquisition => {
+            LayoutKind::Reacquisition(band) => {
                 // The first patch uses the same dry support pool as Stage A. Its successor
-                // is at least 2 m away (64 squared arena columns), leaving a genuine
-                // reacquisition leg without manufacturing a route or a movement rule.
+                // sits in the requested band — landed's 2 m and out, or the curriculum's
+                // near ring — leaving a genuine reacquisition leg without manufacturing a
+                // route or a movement rule.
                 let initial_at = rng.below(candidates.len());
                 let initial = candidates.swap_remove(initial_at);
                 let successors: Vec<Site> = candidates
                     .iter()
                     .copied()
-                    .filter(|site| arena_distance_squared(*site, initial) >= 64)
+                    .filter(|site| band.contains(arena_distance_squared(*site, initial)))
                     .collect();
+                assert!(
+                    !successors.is_empty(),
+                    "{founder:?} seed {layout_seed}: the {} band has no dry support face \
+                     left of the initial patch",
+                    band.as_str()
+                );
                 let successor = successors[rng.below(successors.len())];
                 let at = candidates
                     .iter()
@@ -356,7 +418,7 @@ impl Arena {
                 Founder::Blind => {
                     let organic = match kind {
                         LayoutKind::StageA => LITTER_PER_TILE,
-                        LayoutKind::Reacquisition => {
+                        LayoutKind::Reacquisition(_) => {
                             let fraction = if Some(site) == initial_patch {
                                 REACQUISITION_INITIAL_PATCH_FRACTION
                             } else {
@@ -420,10 +482,25 @@ impl Arena {
         let start_targets: &[Site] = initial_patch
             .as_ref()
             .map_or(resources.as_slice(), std::slice::from_ref);
+        // The near band puts the successor within 6 columns of the initial patch, which
+        // is inside the 2-to-4-column ring the start is drawn from: without this the
+        // founder could be placed in feeding contact with the patch it is supposed to
+        // have to find. The landed band satisfies the same rule for free — its patches
+        // are 8 columns apart and the start is at most 4 from the initial one — so it is
+        // scoped to `Near` and the landed pool is left exactly as it was.
+        let start_clearance = match kind {
+            LayoutKind::Reacquisition(SuccessorBand::Near) => 4,
+            _ => 0,
+        };
         let mut starts: Vec<(Site, Site, i64)> = candidates
             .iter()
             .copied()
             .filter(|s| !resources.contains(s))
+            .filter(|s| {
+                resources
+                    .iter()
+                    .all(|r| arena_distance_squared(*s, *r) >= start_clearance)
+            })
             .filter_map(|s| {
                 start_targets
                     .iter()

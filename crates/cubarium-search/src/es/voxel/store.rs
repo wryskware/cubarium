@@ -46,8 +46,9 @@ pub struct VoxelPolicyFile {
     /// founders arrived full and could only eat back their own upkeep.
     #[serde(default)]
     pub starting_stores: String,
-    /// The stage-specific arena revision. Required for Stage-B centres because patch
-    /// stocks and geometry define their task; Stage-A centres remain transferable.
+    /// The stage-specific arena revision, including Stage B's successor separation band
+    /// ([`super::task::stage_b_arena_protocol`]). Required for Stage-B centres because
+    /// patch stocks and geometry define their task; Stage-A centres remain transferable.
     #[serde(default)]
     pub arena_protocol: String,
     /// Which arena task the weights were trained on (`a` or `b`). Recorded, not
@@ -86,12 +87,41 @@ impl VoxelPolicyFile {
                 file.schema
             ));
         }
-        file.validate_named(&path.display().to_string())?;
+        file.validate_common(&path.display().to_string())?;
         Ok(file)
     }
 
-    /// [`VoxelPolicyFile::load`]'s checks, against an explicit name for the messages.
+    /// [`VoxelPolicyFile::load`]'s checks plus the landed Stage-B band, against an
+    /// explicit name for the messages. An evaluation or a warm start that means some
+    /// other band says so with [`VoxelPolicyFile::validate_for_band`].
     pub fn validate_named(&self, name: &str) -> Result<(), String> {
+        self.validate_for_band(name, super::task::Band::Landed)
+    }
+
+    /// The common checks plus the Stage-B arena protocol of `band`: a Stage-B centre is
+    /// a policy for one separation band and is refused, never reinterpreted, under
+    /// another. Stage-A centres stay transferable.
+    pub fn validate_for_band(&self, name: &str, band: super::task::Band) -> Result<(), String> {
+        self.validate_common(name)?;
+        let want = super::task::stage_b_arena_protocol(band);
+        if self.stage == "b" && self.arena_protocol != want {
+            let had = if self.arena_protocol.is_empty() {
+                "none (an equal-patch pre-P3 Stage-B file)"
+            } else {
+                self.arena_protocol.as_str()
+            };
+            return Err(format!(
+                "{name}: policy Stage-B arena protocol is {had}, this run's `{}` band \
+                 uses `{want}`: the depletion task differs and the weights are not \
+                 transferable. Retrain, or say which band the centre came from.",
+                band.as_str()
+            ));
+        }
+        Ok(())
+    }
+
+    /// The founder, shape, digest and start-convention checks every load makes.
+    fn validate_common(&self, name: &str) -> Result<(), String> {
         let founder = super::parse_founder(&self.founder).map_err(|e| format!("{name}: {e}"))?;
         let manifest = founder.manifest();
         let want = manifest.parameter_count();
@@ -142,31 +172,19 @@ impl VoxelPolicyFile {
                 super::task::START_HEADING_PROTOCOL
             ));
         }
-        if self.stage == "b" && self.arena_protocol != super::task::STAGE_B_ARENA_PROTOCOL {
-            let had = if self.arena_protocol.is_empty() {
-                "none (an equal-patch pre-P3 Stage-B file)"
-            } else {
-                self.arena_protocol.as_str()
-            };
-            return Err(format!(
-                "{name}: policy Stage-B arena protocol is {had}, this build uses `{}`: \
-                 the depletion task differs and the weights are not transferable. Retrain.",
-                super::task::STAGE_B_ARENA_PROTOCOL
-            ));
-        }
         Ok(())
     }
 
     /// The validated founder this file names.
     pub fn founder(&self) -> Result<Founder, String> {
-        self.validate_named("policy")?;
+        self.validate_common("policy")?;
         super::parse_founder(&self.founder)
     }
 
     /// The controller this file drives one episode with — a validated GRU over this
     /// founder's shape and digest.
     pub fn driver(&self) -> Result<EpisodeDriver, String> {
-        self.validate_named("policy")?;
+        self.validate_common("policy")?;
         let founder = super::parse_founder(&self.founder)?;
         EpisodeDriver::gru(&self.theta, founder)
     }
@@ -195,6 +213,7 @@ mod tests {
             starting_stores: crate::es::voxel::task::STARTING_STORES_PROTOCOL.into(),
             arena_protocol: crate::es::voxel::task::arena_protocol(
                 crate::es::voxel::task::Stage::A,
+                crate::es::voxel::task::Band::Landed,
             )
             .into(),
             stage: crate::es::voxel::task::Stage::A.as_str().into(),
@@ -289,7 +308,7 @@ mod tests {
         old_b.arena_protocol.clear();
         let err = old_b.validate_named("old-b.json").expect_err("refused");
         assert!(err.contains("equal-patch"), "{err}");
-        assert!(err.contains(crate::es::voxel::task::STAGE_B_ARENA_PROTOCOL));
+        assert!(err.contains(crate::es::voxel::task::STAGE_B_LANDED_ARENA_PROTOCOL));
 
         let mut old_a = sample(Founder::Blind);
         old_a.arena_protocol.clear();
@@ -297,8 +316,33 @@ mod tests {
 
         let mut current_b = sample(Founder::Blind);
         current_b.stage = "b".into();
-        current_b.arena_protocol = crate::es::voxel::task::STAGE_B_ARENA_PROTOCOL.into();
+        current_b.arena_protocol = crate::es::voxel::task::STAGE_B_LANDED_ARENA_PROTOCOL.into();
         assert!(current_b.validate_named("current-b.json").is_ok());
+    }
+
+    /// A near-rung centre and a landed centre are policies for different tasks: each is
+    /// refused by name under the other's band, and accepted under its own.
+    #[test]
+    fn a_near_rung_centre_is_refused_by_an_unqualified_landed_evaluation() {
+        use crate::es::voxel::task::{Band, stage_b_arena_protocol};
+        let mut near = sample(Founder::Browser);
+        near.stage = "b".into();
+        near.arena_protocol = stage_b_arena_protocol(Band::Near).into();
+        let err = near.validate_named("near.json").expect_err("refused");
+        assert!(err.contains(stage_b_arena_protocol(Band::Near)), "{err}");
+        assert!(err.contains(stage_b_arena_protocol(Band::Landed)), "{err}");
+        assert!(near.validate_for_band("near.json", Band::Near).is_ok());
+
+        let mut landed = sample(Founder::Browser);
+        landed.stage = "b".into();
+        landed.arena_protocol = stage_b_arena_protocol(Band::Landed).into();
+        assert!(landed.validate_named("landed.json").is_ok());
+        assert!(
+            landed.validate_for_band("landed.json", Band::Near).is_err(),
+            "a landed centre is not a near-rung policy either"
+        );
+        // Either way the weights themselves still load — the refusal is about the task.
+        assert!(near.driver().is_ok() && landed.driver().is_ok());
     }
 
     /// The checkpoint schema token and the policy schema token are distinct beasts.

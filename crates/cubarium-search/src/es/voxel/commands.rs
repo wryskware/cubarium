@@ -321,6 +321,7 @@ pub fn bench(
 pub fn train(
     founder: String,
     stage: String,
+    band: String,
     controller: String,
     pairs: usize,
     layouts: usize,
@@ -344,6 +345,7 @@ pub fn train(
     }
     let founder = parse_founder(&founder)?;
     let stage = task::parse_stage(&stage)?;
+    let band = task::parse_band(&band)?;
     let horizon = horizon.unwrap_or_else(|| stage.horizon());
     if out.exists() && std::fs::read_dir(&out).map_or(false, |d| d.count() > 0) {
         return Err(format!(
@@ -355,6 +357,7 @@ pub fn train(
     let spec = TrainSpec {
         founder,
         stage,
+        band,
         pairs,
         layouts,
         updates,
@@ -370,10 +373,14 @@ pub fn train(
     let report = trainer::train(&spec, &cancel)?;
     println!();
     println!(
-        "# voxel training — {} ({}), stage {}, horizon {horizon}, seed {train_seed}",
+        "# voxel training — {} ({}), stage {}{}, horizon {horizon}, seed {train_seed}",
         founder.name(),
         founder.role(),
         stage.as_str(),
+        match stage {
+            Stage::A => String::new(),
+            Stage::B => format!(" band {}", band.as_str()),
+        },
     );
     println!(
         "generations {}/{}  {}  episodes {} attempted / {} completed  ticks {}  \
@@ -393,7 +400,7 @@ pub fn train(
     let evaluation = report
         .best
         .as_ref()
-        .map(|best| evaluation_command(&out, founder, stage, &best.file));
+        .map(|best| evaluation_command(&out, founder, stage, band, &best.file));
     if let Some(best) = &report.best {
         println!(
             "best centre: generation {} score {:.4} → {}",
@@ -417,13 +424,23 @@ pub fn train(
     Ok(())
 }
 
-fn evaluation_command(out: &Path, founder: Founder, stage: Stage, best_file: &str) -> String {
+fn evaluation_command(
+    out: &Path,
+    founder: Founder,
+    stage: Stage,
+    band: task::Band,
+    best_file: &str,
+) -> String {
     format!(
         "evaluate with: cargo run --release -p cubarium-search -- voxel-evaluate --policy \
-         {} --founder {} --stage {} --set training",
+         {} --founder {} --stage {}{} --set training",
         out.join(best_file).display(),
         founder.name(),
         stage.as_str(),
+        match stage {
+            Stage::A => String::new(),
+            Stage::B => format!(" --band {}", band.as_str()),
+        },
     )
 }
 
@@ -443,12 +460,23 @@ mod train_output_tests {
             Path::new("/tmp/voxel-pilot"),
             Founder::Browser,
             Stage::B,
+            task::Band::Near,
             "centers/gen7-center.json",
         );
         assert!(command.contains("/tmp/voxel-pilot/centers/gen7-center.json"));
         assert!(command.contains("--founder frondgrazer"));
         assert!(command.contains("--stage b"));
+        assert!(command.contains("--band near"), "{command}");
         assert!(!command.contains("gen0-center.json"));
+        // Stage A has no successor, so it carries no band on the command line.
+        let a = evaluation_command(
+            Path::new("/tmp/voxel-pilot"),
+            Founder::Blind,
+            Stage::A,
+            task::Band::Landed,
+            "centers/gen7-center.json",
+        );
+        assert!(!a.contains("--band"), "{a}");
     }
 
     #[test]
@@ -474,6 +502,8 @@ pub fn evaluate(
     controller: String,
     ablate_senses: bool,
     stage: String,
+    band: String,
+    policy_band: Option<String>,
     set: String,
     horizon: Option<u64>,
     workers: usize,
@@ -486,11 +516,20 @@ pub fn evaluate(
         return Err(format!("--workers must be in 1..={worker_limit}").into());
     }
     let stage = task::parse_stage(&stage)?;
+    let band = task::parse_band(&band)?;
+    // Which band the *policy* was trained on. Absent means "this one": the evaluation is
+    // unqualified and a centre from the other band is refused. Naming a different band
+    // declares a deliberate transfer measurement and says so in the header.
+    let policy_band = policy_band
+        .map(|b| task::parse_band(&b))
+        .transpose()?
+        .unwrap_or(band);
     let horizon = horizon.unwrap_or_else(|| stage.horizon());
     let controller = controller.trim().to_ascii_lowercase();
     let (driver, founder) = match (policy, controller.as_str()) {
         (Some(path), "gru") => {
             let file = super::store::VoxelPolicyFile::load(&path)?;
+            file.validate_for_band(&path.display().to_string(), policy_band)?;
             let f = file.founder()?;
             if let Some(named) = &founder {
                 let want = parse_founder(named)?;
@@ -545,11 +584,11 @@ pub fn evaluate(
     };
     let set = set.trim().to_ascii_lowercase();
     let prepared_layouts: Vec<(String, task::Prepared)> = match set.as_str() {
-        "training" => task::training_layouts(founder, stage)
+        "training" => task::training_layouts(founder, stage, band)
             .into_iter()
             .map(|p| (p.layout_seed.to_string(), p))
             .collect(),
-        "holdout" | "evaluation" => task::evaluation_layouts(founder, stage)
+        "holdout" | "evaluation" => task::evaluation_layouts(founder, stage, band)
             .into_iter()
             .map(|p| (p.layout_seed.to_string(), p))
             .collect(),
@@ -575,13 +614,25 @@ pub fn evaluate(
     }
 
     println!(
-        "# voxel evaluate — {} ({}), driver `{}`, stage {}, set `{set}`, {} layouts",
+        "# voxel evaluate — {} ({}), driver `{}`, stage {}{}, set `{set}`, {} layouts",
         founder.name(),
         founder.role(),
         driver.name(),
         stage.as_str(),
+        match stage {
+            Stage::A => String::new(),
+            Stage::B => format!(" band {}", band.as_str()),
+        },
         prepared_layouts.len(),
     );
+    if stage == Stage::B && policy_band != band {
+        println!(
+            "# DISCLOSED TRANSFER: the policy was trained on the `{}` band and is being \
+             read on the `{}` one. Its protocol string is not this arena's.",
+            policy_band.as_str(),
+            band.as_str(),
+        );
+    }
     println!("# build {BUILD_ID}, horizon {horizon}, workers {workers}");
     println!();
 
@@ -800,6 +851,8 @@ pub fn evaluate(
             "founder": founder.name(),
             "driver": driver.name(),
             "stage": stage.as_str(),
+            "band": band.as_str(),
+            "policy_band": policy_band.as_str(),
             "set": set,
             "cases": prepared_layouts.iter().map(|(label, _)| label).collect::<Vec<_>>(),
             "median_score": median,

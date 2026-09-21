@@ -18,7 +18,7 @@
 //! ([`Prepared::rebuilt`]) so the bench can measure the two setup paths against each other.
 
 use cubarium_voxel_fauna::{Founder, Senses};
-use cubarium_voxel_sim::{ARENA_VOXEL_M, ARENA_WIDTH, Arena, Site};
+use cubarium_voxel_sim::{ARENA_VOXEL_M, ARENA_WIDTH, Arena, Site, SuccessorBand};
 
 /// The phase-one pilot's episode horizon: 1,200 ticks is 60 simulated seconds at 20 Hz
 /// (`design/voxel-senses-phase1-tests.md` §2). "Ample for multiple body lengths without
@@ -118,16 +118,49 @@ pub const START_HEADING_PROTOCOL: &str = "p2b-varied-1";
 /// different task; it is refused rather than reinterpreted.
 pub const STARTING_STORES_PROTOCOL: &str = "p2c-half-body-no-reserve";
 
-/// Stage B's fixture revision. P3-A halves only the initial edible stock while retaining
-/// the successor stock and the browser crown. A Stage-B centre from the earlier equal-
-/// patch task is refused rather than silently called a policy for this one.
-pub const STAGE_B_ARENA_PROTOCOL: &str = "p3a-half-initial-patch-1";
+/// Stage B's landed fixture revision. P3-A halves only the initial edible stock while
+/// retaining the successor stock and the browser crown. A Stage-B centre from the
+/// earlier equal-patch task is refused rather than silently called a policy for this one.
+///
+/// P3-B did **not** re-anchor this string: the near band is scoped so that a landed
+/// layout is built from exactly the draws P3-A made, so a P3-A landed centre is still a
+/// policy for this task and re-anchoring would only destroy a usable artefact. The band
+/// is disclosed through [`STAGE_B_NEAR_ARENA_PROTOCOL`] instead, which is a different
+/// string and therefore a different protocol hash.
+pub const STAGE_B_LANDED_ARENA_PROTOCOL: &str = "p3a-half-initial-patch-1";
 
-/// The arena protocol recorded for a trained stage.
-pub fn arena_protocol(stage: Stage) -> &'static str {
+/// Stage B's near rung (P3-B step 2): the successor sits 4 to under 6 columns from the
+/// initial patch, inside both founders' sensed radii. That is a different task from the
+/// landed one — the founder can smell or see where to go next — so its centres carry
+/// their own protocol string and an unqualified landed evaluation refuses them.
+pub const STAGE_B_NEAR_ARENA_PROTOCOL: &str = "p3b-near-successor-1";
+
+/// The Stage-B arena protocol for one separation band.
+pub fn stage_b_arena_protocol(band: Band) -> &'static str {
+    match band {
+        Band::Landed => STAGE_B_LANDED_ARENA_PROTOCOL,
+        Band::Near => STAGE_B_NEAR_ARENA_PROTOCOL,
+    }
+}
+
+/// The arena protocol recorded for a trained stage and band. Stage A has no successor,
+/// so its band is ignored.
+pub fn arena_protocol(stage: Stage, band: Band) -> &'static str {
     match stage {
         Stage::A => "p2b-stage-a-1",
-        Stage::B => STAGE_B_ARENA_PROTOCOL,
+        Stage::B => stage_b_arena_protocol(band),
+    }
+}
+
+/// Stage B's successor separation band, the P3-B curriculum rung.
+pub type Band = SuccessorBand;
+
+/// A band from a command-line name.
+pub fn parse_band(s: &str) -> Result<Band, String> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "near" => Ok(Band::Near),
+        "landed" | "far" => Ok(Band::Landed),
+        other => Err(format!("unknown --band `{other}`; use `near` or `landed`")),
     }
 }
 
@@ -279,6 +312,8 @@ pub struct Prepared {
     pub founder: Founder,
     pub layout_seed: u64,
     pub stage: Stage,
+    /// Stage B's successor separation band. Stage A carries the default and ignores it.
+    pub band: Band,
     /// Stage B's two patch sites, `(initial, successor)`. **Evaluator-only**: the
     /// driver's epilogue reads their stocks to report reacquisition, and nothing on the
     /// observation path ever sees them.
@@ -295,13 +330,23 @@ impl Prepared {
         Prepared::build_stage(founder, layout_seed, Stage::A)
     }
 
-    /// Build the prepared layout for `stage`, kept immutable.
+    /// Build the prepared layout for `stage` in the landed band, kept immutable.
     pub fn build_stage(founder: Founder, layout_seed: u64, stage: Stage) -> Prepared {
+        Prepared::build_stage_in(founder, layout_seed, stage, Band::Landed)
+    }
+
+    /// Build the prepared layout for `stage` with the Stage-B successor in `band`.
+    pub fn build_stage_in(
+        founder: Founder,
+        layout_seed: u64,
+        stage: Stage,
+        band: Band,
+    ) -> Prepared {
         let (arena, patches) = match stage {
             Stage::A => (Arena::build(founder, layout_seed), None),
             Stage::B => {
                 let (arena, initial, successor) =
-                    Arena::build_reacquisition(founder, layout_seed).into_parts();
+                    Arena::build_reacquisition_in(founder, layout_seed, band).into_parts();
                 (arena, Some((initial, successor)))
             }
         };
@@ -309,6 +354,7 @@ impl Prepared {
             founder,
             layout_seed,
             stage,
+            band,
             patches,
             senses: arena.prepare_senses(),
             arena,
@@ -329,6 +375,7 @@ impl Prepared {
             founder,
             layout_seed,
             stage: Stage::B,
+            band: Band::Landed,
             patches: Some((initial, successor)),
             senses: arena.prepare_senses(),
             arena,
@@ -395,7 +442,8 @@ impl Prepared {
     pub fn rebuilt(&self) -> Arena {
         match self.stage {
             Stage::A => Arena::build(self.founder, self.layout_seed),
-            Stage::B => Arena::build_reacquisition(self.founder, self.layout_seed).into_arena(),
+            Stage::B => Arena::build_reacquisition_in(self.founder, self.layout_seed, self.band)
+                .into_arena(),
         }
     }
 
@@ -417,6 +465,7 @@ impl std::fmt::Debug for Prepared {
         f.debug_struct("Prepared")
             .field("founder", &self.arena.founder.name())
             .field("stage", &self.stage.as_str())
+            .field("band", &self.band.as_str())
             .field("layout_seed", &self.layout_seed)
             .field("animal_id", &self.arena.animal_id)
             .field("resources", &self.arena.resources.len())
@@ -425,16 +474,16 @@ impl std::fmt::Debug for Prepared {
 }
 
 /// The training layout seeds, as [`Prepared`] layouts of `stage`, in the frozen order.
-pub fn training_layouts(founder: Founder, stage: Stage) -> Vec<Prepared> {
+pub fn training_layouts(founder: Founder, stage: Stage, band: Band) -> Vec<Prepared> {
     TRAINING_LAYOUT_SEEDS
-        .map(|seed| Prepared::build_stage(founder, seed, stage))
+        .map(|seed| Prepared::build_stage_in(founder, seed, stage, band))
         .into()
 }
 
 /// The evaluation layout seeds, as [`Prepared`] layouts of `stage`, in the frozen order.
-pub fn evaluation_layouts(founder: Founder, stage: Stage) -> Vec<Prepared> {
+pub fn evaluation_layouts(founder: Founder, stage: Stage, band: Band) -> Vec<Prepared> {
     EVALUATION_LAYOUT_SEEDS
-        .map(|seed| Prepared::build_stage(founder, seed, stage))
+        .map(|seed| Prepared::build_stage_in(founder, seed, stage, band))
         .into()
 }
 
@@ -500,6 +549,124 @@ mod tests {
                 geometry.turn_to_target_rad.to_degrees()
             );
         }
+    }
+
+    /// Every training and held-out layout of the near rung actually satisfies its band
+    /// and still starts the founder off food.
+    ///
+    /// Proved from the arena's own wrapped column arithmetic rather than by running
+    /// anything: the successor lands 4 to 5 columns from the initial patch (1.0 m to
+    /// 1.49 m, inside the blind founder's 1.5 m cue reach and the browser's 2.0 m cone),
+    /// the start is a distinct site 2 to 4 columns from the initial patch, and it is at
+    /// least 2 columns from **both** patches, so the body is never introduced in feeding
+    /// contact with the patch it is meant to have to find.
+    #[test]
+    fn every_near_layout_sits_in_its_band_and_starts_off_food() {
+        let columns = |site: Site, other: Site| -> i64 {
+            let width = i64::from(ARENA_WIDTH);
+            let raw = i64::from(other.x) - i64::from(site.x);
+            let dx = [raw, raw - width, raw + width]
+                .into_iter()
+                .min_by_key(|d| d.abs())
+                .expect("three wrapped displacements");
+            let dz = i64::from(other.z) - i64::from(site.z);
+            dx * dx + dz * dz
+        };
+        for seed in TRAINING_LAYOUT_SEEDS
+            .into_iter()
+            .chain(EVALUATION_LAYOUT_SEEDS)
+        {
+            for founder in Founder::ALL {
+                let p = Prepared::build_stage_in(founder, seed, Stage::B, Band::Near);
+                let (initial, successor) = p.patches().expect("Stage B names its patches");
+                let separation = columns(initial, successor);
+                assert!(
+                    Band::Near.contains(separation),
+                    "{founder:?} seed {seed}: successor {separation} squared columns off"
+                );
+                let metres = site_separation_m(initial, successor);
+                assert!(
+                    (1.0..1.5).contains(&metres),
+                    "{founder:?} seed {seed}: {metres} m apart"
+                );
+                assert!(metres <= sensed_radius_m(founder));
+
+                let arena = p.fixture_arena();
+                let pose = arena.animal_pose().expect("the near layout places a founder");
+                let start = Site {
+                    x: (pose.x / ARENA_VOXEL_M).floor() as u32,
+                    y: initial.y,
+                    z: (pose.z / ARENA_VOXEL_M).floor() as u32,
+                };
+                assert!(
+                    !arena.resources.contains(&start),
+                    "{founder:?} seed {seed}: the founder was started on a patch"
+                );
+                assert!(
+                    (4..=16).contains(&columns(start, initial)),
+                    "{founder:?} seed {seed}: start {} off the initial patch",
+                    columns(start, initial)
+                );
+                for patch in [initial, successor] {
+                    assert!(
+                        columns(start, patch) >= 4,
+                        "{founder:?} seed {seed}: start is {} squared columns from {patch:?}",
+                        columns(start, patch)
+                    );
+                }
+                assert!(
+                    arena.patch_stock(initial) > 0.0 && arena.patch_stock(successor) > 0.0,
+                    "{founder:?} seed {seed}: both near patches are stocked"
+                );
+            }
+        }
+    }
+
+    /// The landed band is untouched by the near rung: every landed layout already keeps
+    /// the start two columns clear of both patches, which is why the near band's extra
+    /// start filter is scoped to `Near` and the landed candidate pool — and so every
+    /// landed draw — is exactly what P3-A built.
+    #[test]
+    fn the_landed_band_already_satisfies_the_near_rungs_start_rule() {
+        for seed in TRAINING_LAYOUT_SEEDS
+            .into_iter()
+            .chain(EVALUATION_LAYOUT_SEEDS)
+        {
+            for founder in Founder::ALL {
+                let p = Prepared::build_stage_in(founder, seed, Stage::B, Band::Landed);
+                let (initial, successor) = p.patches().expect("patches");
+                assert!(site_separation_m(initial, successor) >= 2.0);
+                let pose = p.fixture_arena().animal_pose().expect("founder");
+                for patch in [initial, successor] {
+                    let d = distance_to_site_m(pose.x, pose.z, patch);
+                    assert!(
+                        d >= 0.5,
+                        "{founder:?} seed {seed}: start {d} m from {patch:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The two bands are different tasks and say so: different protocol strings, and
+    /// disjoint squared-column ranges with no value satisfying both.
+    #[test]
+    fn the_two_bands_are_disjoint_and_separately_named() {
+        assert_ne!(
+            stage_b_arena_protocol(Band::Near),
+            stage_b_arena_protocol(Band::Landed)
+        );
+        assert_eq!(arena_protocol(Stage::A, Band::Near), "p2b-stage-a-1");
+        assert_eq!(arena_protocol(Stage::A, Band::Landed), "p2b-stage-a-1");
+        for d2 in 0..200i64 {
+            assert!(!(Band::Near.contains(d2) && Band::Landed.contains(d2)), "{d2}");
+        }
+        assert!(Band::Near.contains(16) && Band::Near.contains(35));
+        assert!(!Band::Near.contains(15) && !Band::Near.contains(36));
+        assert!(Band::Landed.contains(64) && !Band::Landed.contains(63));
+        assert_eq!(parse_band("Near").expect("parsed"), Band::Near);
+        assert_eq!(parse_band(" landed ").expect("parsed"), Band::Landed);
+        assert!(parse_band("middling").is_err());
     }
 
     /// No training or evaluation seed is the arena's seam layout, so the default fixtures
