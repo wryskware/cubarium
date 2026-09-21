@@ -172,9 +172,60 @@ where
 {
     let mut table = toml::Table::deserialize(deserializer)?;
     table.entry("voxel_m").or_insert(toml::Value::Float(0.125));
+    expand_landform_preset(&mut table).map_err(serde::de::Error::custom)?;
     toml::Value::Table(table)
         .try_into()
         .map_err(serde::de::Error::custom)
+}
+
+/// Let `[world.landform]` name one of the shipped landscapes:
+///
+/// ```toml
+/// [world.landform]
+/// preset = "wide"     # small | default | wide
+/// relief_m = 3.0      # any recipe field, overriding the preset
+/// ```
+///
+/// The preset is expanded here, into the plain `landform = { staged = { .. } }` the
+/// core's serde already reads, so `cubarium_voxel::Recipe` stays an ordinary struct that
+/// postcard can read straight back out of a world snapshot. The extents stay `[world]`'s
+/// business: a preset names a landscape, not a ring size.
+///
+/// Anything else — no `landform` key, `landform = "ridge"`, or a `[world.landform.staged]`
+/// table written out in full — passes through untouched.
+fn expand_landform_preset(world: &mut toml::Table) -> std::result::Result<(), String> {
+    let Some(toml::Value::Table(landform)) = world.get("landform") else {
+        return Ok(());
+    };
+    if !landform.contains_key("preset") {
+        return Ok(());
+    }
+    let mut landform = landform.clone();
+    let name = match landform.remove("preset") {
+        Some(toml::Value::String(name)) => name,
+        Some(other) => {
+            return Err(format!(
+                "[world.landform] preset must be a name, not {other}"
+            ));
+        }
+        None => unreachable!("the key is there"),
+    };
+    let preset = cubarium_voxel::Preset::find(&name).ok_or_else(|| {
+        let known: Vec<&str> = cubarium_voxel::PRESETS.iter().map(|p| p.name).collect();
+        format!("no landform preset is called {name:?}; the shipped ones are {known:?}")
+    })?;
+    let mut staged = match toml::Value::try_from(preset.recipe) {
+        Ok(toml::Value::Table(t)) => t,
+        _ => return Err("a recipe is a table".into()),
+    };
+    // Whatever else the table said overrides the preset, field by field.
+    for (key, value) in landform {
+        staged.insert(key, value);
+    }
+    let mut wrapped = toml::Table::new();
+    wrapped.insert("staged".into(), toml::Value::Table(staged));
+    world.insert("landform".into(), toml::Value::Table(wrapped));
+    Ok(())
 }
 
 /// `[world]`: [`cubarium_voxel::Config`] with every field optional.
@@ -1685,6 +1736,44 @@ mod tests {
         // A typo is an error, not a silently ignored key.
         assert!(toml::from_str::<VoxelConfig>("tilt_degree = 35.0\n").is_err());
         assert!(toml::from_str::<VoxelConfig>("[world]\nwidht = 64\n").is_err());
+    }
+
+    /// `[world.landform]` picks the generator: absent is the ridge generator every world
+    /// had, a preset name expands to that shipped recipe, and any field beside the name
+    /// overrides it. An unknown preset is an error with the names that do exist.
+    #[test]
+    fn the_world_table_chooses_a_landform_and_names_a_preset() {
+        use cubarium_voxel::Landform;
+
+        let plain: VoxelConfig = toml::from_str("[world]\nwidth = 64\n").unwrap();
+        assert_eq!(plain.world.landform, Landform::Ridge);
+
+        let ridge: VoxelConfig = toml::from_str("[world]\nlandform = \"ridge\"\n").unwrap();
+        assert_eq!(ridge.world.landform, Landform::Ridge);
+
+        let wide: VoxelConfig =
+            toml::from_str("[world]\n[world.landform]\npreset = \"wide\"\n").unwrap();
+        let wanted = cubarium_voxel::Preset::find("wide").unwrap().recipe;
+        assert_eq!(wide.world.landform, Landform::Staged(wanted));
+
+        let tweaked: VoxelConfig =
+            toml::from_str("[world]\n[world.landform]\npreset = \"small\"\nrelief_m = 2.0\n")
+                .unwrap();
+        let Landform::Staged(recipe) = tweaked.world.landform else {
+            panic!("a preset makes a staged landform");
+        };
+        assert_eq!(recipe.relief_m, 2.0, "the file overrides the preset");
+        assert_eq!(
+            recipe.relief_wavelength_m,
+            cubarium_voxel::Recipe::SMALL.relief_wavelength_m,
+            "and leaves the rest of it alone"
+        );
+        assert!(tweaked.world.validate().is_ok());
+
+        let err = toml::from_str::<VoxelConfig>("[world.landform]\npreset = \"huge\"\n")
+            .expect_err("there is no huge preset");
+        let msg = format!("{err}");
+        assert!(msg.contains("huge") && msg.contains("wide"), "{msg}");
     }
 
     /// The committed example config parses, is the default picture, and does not pin the
