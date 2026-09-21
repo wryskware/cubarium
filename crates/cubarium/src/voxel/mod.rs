@@ -52,7 +52,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use cubarium_render::Canvas;
 use cubarium_surface::{Scale, Topology};
-use cubarium_voxel::{Command as VoxelCommand, Material, World};
+use cubarium_voxel::{Command as VoxelCommand, Material, PoreBand, ViabilitySpec, World};
 use cubarium_voxel_fauna::{
     Command as FaunaCommand, Controller, Fauna, FaunaConfig, FaunaLedger, Founder, Response,
     Senses, Species as Beast,
@@ -356,6 +356,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         cfg.tilt_degrees,
         proj.rise,
     );
+    report_water_cycle(sim.world(), sim.flora(), sim.config().threads);
     eprintln!("cubarium voxel: stdin commands — {COMMANDS}");
 
     let commands = spawn_stdin_reader();
@@ -718,6 +719,48 @@ impl Out {
             Out::Gpu(gpu) => gpu.finish(),
         }
     }
+}
+
+/// Simulated seconds the start-up viability probe watches. Short on purpose: it runs on
+/// a **clone** of the world before the first frame, so the person waiting to see the
+/// habitat pays for it in wall clock.
+const VIABILITY_WINDOW_S: u64 = 120;
+
+/// Say at start whether this world's water cycle is one the seeded species could live
+/// in. Reports only — nothing is rejected, that is a later decision
+/// (`design/handoffs/voxel-water-cycle-2026-09-20.md`).
+///
+/// Measured on a clone, so the run itself starts on the world the scene built and not on
+/// one this probe has already stepped two minutes forward.
+fn report_water_cycle(world: &World, flora: &Flora, threads: usize) {
+    if !world.config().closed_water_budget {
+        eprintln!(
+            "cubarium voxel: open water budget — rain from nowhere, evaporation and the \
+             outlet to nowhere; no cycle to report"
+        );
+        return;
+    }
+    // The bands are the plant layer's own establishment gate. `establish_pore_min` is a
+    // floor, so the band's ceiling is saturation: too wet is drowning, which the plant
+    // layer judges from standing water and not from pore.
+    let bands: Vec<PoreBand> = Species::ALL
+        .iter()
+        .map(|&s| PoreBand::new(s.name(), flora.config().species(s).establish_pore_min, 1.0))
+        .collect();
+    let spec = ViabilitySpec {
+        window_ticks: VIABILITY_WINDOW_S * u64::from(cubarium_voxel::TICK_HZ),
+        sample_every: u64::from(cubarium_voxel::TICK_HZ),
+        bands,
+        threads,
+        ..ViabilitySpec::default()
+    };
+    let started = Instant::now();
+    let mut probe = world.clone();
+    let report = cubarium_voxel::viability::measure(&mut probe, &spec);
+    eprintln!(
+        "cubarium voxel: {report} (probed {VIABILITY_WINDOW_S} simulated s in {:.1} s)",
+        started.elapsed().as_secs_f64()
+    );
 }
 
 /// The run state a stdin command may change, and the one function that changes it.

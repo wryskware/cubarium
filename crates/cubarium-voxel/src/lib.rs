@@ -34,12 +34,15 @@ pub mod material;
 pub mod profile;
 pub mod snapshot;
 mod sparse;
+/// Is this world's water cycle one a habitat could live in? Reports, never rejects.
+pub mod viability;
 pub mod water;
 pub mod world;
 
 pub use config::Config;
 pub use ledger::Ledger;
 pub use material::Material;
+pub use viability::{BandResult, PoreBand, Viability, ViabilitySpec};
 pub use world::{Command, VoxelView, World, default_threads};
 
 /// Simulation ticks per second. Matches `cubarium-core::TICK_HZ` so a frontend can
