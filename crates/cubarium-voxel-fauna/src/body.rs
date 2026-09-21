@@ -592,6 +592,50 @@ pub(crate) fn mouth_foliage_stand(
     best
 }
 
+/// Every foliage-bearing stand whose crown touches the actual mouth probe columns.
+/// The public fauna wrapper exposes this only as a read-only autopsy diagnostic.
+pub(crate) fn mouth_foliage_stands(
+    fv: &FloraView<'_>,
+    view: &VoxelView<'_>,
+    cols: &[(i64, u32)],
+    standing_y: u32,
+) -> Vec<(Site, f64)> {
+    let body_layer = i64::from(standing_y) + 1;
+    let width = i64::from(view.config.width);
+    let depth = i64::from(view.config.depth);
+    let mut out = Vec::new();
+    for stand in fv.stands.iter().filter(|s| s.foliage > 0.0) {
+        let sc = fv.config.species(stand.species);
+        if i64::from(stand.site.y) + i64::from(sc.crown_voxels(stand.wood)) != body_layer {
+            continue;
+        }
+        let radius = sc.crown_radius(stand.wood).max(0.0);
+        let span = radius.floor() as i64;
+        let r2 = radius * radius;
+        let mut touching = false;
+        'cells: for dz in -span..=span {
+            for dx in -span..=span {
+                if (dx * dx + dz * dz) as f64 > r2 {
+                    continue;
+                }
+                let cx = (i64::from(stand.site.x) + dx).rem_euclid(width);
+                let cz = i64::from(stand.site.z) + dz;
+                if cz < 0 || cz >= depth {
+                    continue;
+                }
+                if cols.contains(&(cx, cz as u32)) {
+                    touching = true;
+                    break 'cells;
+                }
+            }
+        }
+        if touching {
+            out.push((stand.site, stand.foliage));
+        }
+    }
+    out
+}
+
 /// A taste reading: the contact's cue response, the manifest's fixed resistance for the
 /// material actually touched, and whether the mouth contacted anything at all.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

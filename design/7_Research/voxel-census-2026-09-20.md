@@ -152,3 +152,72 @@ same build on the authored open world reproduces the collapse above. Water
 was the whole plant story; glowcap (a dead-wood decomposer) and the founders
 (D2) are the remaining questions.
 
+## D3 — generated closed-world browsers starve at the mouth-access boundary, 2026-09-21
+
+Brief: `design/handoffs/voxel-browser-autopsy-2026-09-20.md`. The instrumented
+autopsy ran the trained built-in centres for 60 simulated minutes on the
+generated closed world:
+`voxel_founder_autopsy 60 generated closed`. A second arm used the same seeder,
+water budget, controllers and horizon with four founders per lineage:
+`voxel_founder_autopsy 60 generated closed half`. Raw CSVs were disposable
+under `/tmp`; the harness now records cause deltas, exact mouth candidates,
+same-height support counts, species bites, local foliage, cone sectors and
+crown regrowth.
+
+The trained arm introduced 16 bodies and born bodies brought the total to 100.
+The browser lineage had 33 deaths, all starvation; it had no drowning or
+terrain-removal deaths. Deaths by the integer part of the recorded death minute
+were: `10:2, 11:5, 12:1, 13:1, 14:1, 15:2, 16:2, 17:2, 18:3, 19:2,
+21:3, 22:1, 23:1, 25:1, 27:1, 31:1, 34:1, 41:1, 45:1, 54:1`. Every
+death row held the browser at approximately `body_min` with zero reserve. The
+first death was at 10.01 min and the last at 54.73 min.
+
+At death, all 33 bodies had a live stand with foliage within the 2 m sensed
+range; nearest-stand distance averaged 0.957 m, with a 0.176–1.813 m range.
+The nearest species were umbrellafrond 14, stonecushion 8, velvetpad 6,
+glowcap 4 and springturf 1. Only 2 of 33 nearest crowns touched the actual
+0.0625 m mouth probe. The same-height geometry did not confine the bodies:
+there were 11–31 support faces at the body's standing height within 2 m,
+mean 25, and 1–3 immediately legal exits, mean 2.30. The browser could be
+near food in cone space while lacking an edible crown at its mouth.
+
+The browser bit every living species except stonecushion: bloomcrown 1,657
+bites / 0.6435988 organic, umbrellafrond 8,387 / 0.4355061, springturf 236 /
+0.1178078, velvetpad 5,224 / 1.9708931 and glowcap 3,417 / 0.2377075. The
+trained arm's cumulative browser intake stopped after minute 45: it reached
+18,921 bites and 1.3893157 assimilated organic, with no further bites through
+minute 60. Foliage still stood near the surviving browsers at the stop:
+4.5179 organic within 2 m at minute 45, while 13.6846 stood globally. By
+minute 60 the browsers were gone, but global foliage was 14.0137.
+
+The cone did not read foliage everywhere. At minute 26, when six browsers
+remained, mean sector foliage fractions were `0.0000, 0.1111, 0.0926`; at
+minute 35 they were `0.0000, 0.0000, 0.0000` for the three remaining bodies.
+At minute 45 the two remaining bodies again read zero in all three sectors,
+and the bite count stopped in that interval. Thus the cone's failure at intake
+stop is an empty/weak directional signal, not canopy saturation. Cropped
+crowns did regrow during the horizon: by minute 60 the tracker recorded
+regrowth events for bloomcrown 615, umbrellafrond 8,347, springturf 40,
+stonecushion 6, velvetpad 3,176 and glowcap 3,368. Food was being replenished
+while browsers still died.
+
+Halving the seeded founders reduced the browser deaths from 33 to 22 and left
+one browser alive at 60 min; it also reduced browser bites from 18,921 to
+14,705 and assimilated organic from 1.3893157 to 0.9817583. Every browser
+death in that arm was still starvation, with zero drownings and zero removals.
+The boom increases local depletion and loss, but does not explain the access
+failure by itself.
+
+Diagnosis: the dominant cause is a mismatch between the browser's 2 m cone
+and its 0.0625 m, height-specific mouth geometry. The browser can sense or
+pass near foliage and the crowns can regrow, but the movement signal does not
+reliably bring a crown into the mouth. Same-height terrain confinement is
+not supported by the measured support counts, and the canopy-occlusion
+inverse is contradicted at the intake stop.
+
+Proposed, not made: make the browser's movement target use the nearest crown
+that is reachable by the actual mouth geometry, and treat a cone hit with no
+mouth-reachable crown as a search state rather than edible progress. Evidence
+of improvement in the same 60-minute arm would be continued browser bites
+after minute 45, a higher than 2/33 death-time mouth-contact fraction, lower
+starvation, and no loss of the observed plant regrowth or closed water ledger.

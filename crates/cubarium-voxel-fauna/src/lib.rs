@@ -70,7 +70,7 @@ mod snapshot;
 mod step;
 
 use cubarium_voxel::{VoxelView, World};
-use cubarium_voxel_flora::{Deposit, DepositKind, Flora, Site, Taken};
+use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraView, Site, Taken};
 use serde::{Deserialize, Serialize};
 
 pub use body::{FounderPhysiology, effective_config};
@@ -88,6 +88,67 @@ pub use manifest::{
 pub use pose::Pose;
 pub use senses::{Senses, UPDATE_TICKS};
 pub use snapshot::SCHEMA;
+
+/// The browser's three cone sectors as `(foliage_fraction, foliage_proximity)` pairs.
+/// This is a read-only diagnostic projection of the same ray result the founder
+/// controller receives; it exists for autopsies and does not participate in stepping.
+pub fn browser_cone_readings(
+    view: &VoxelView<'_>,
+    flora: &FloraView<'_>,
+    fauna: &FaunaView<'_>,
+    animal: &Animal,
+) -> Option<[(f64, f64); 3]> {
+    if animal.founder != Some(Founder::Browser) {
+        return None;
+    }
+    let occupancy = senses::cone_occupancy(view, flora, fauna);
+    let reading = senses::cone_readings(
+        view,
+        &occupancy,
+        animal.id,
+        &animal.pose,
+        animal.site.y,
+        &Founder::Browser.manifest(),
+    );
+    reading.valid.then_some(
+        reading
+            .sectors
+            .map(|sector| (sector.foliage_fraction, sector.foliage_proximity)),
+    )
+}
+
+/// The stand selected by the browser's actual mouth geometry, if any. Read-only
+/// diagnostic access for explaining a bite or a starvation event.
+pub fn browser_mouth_foliage(
+    view: &VoxelView<'_>,
+    flora: &FloraView<'_>,
+    animal: &Animal,
+) -> Option<(Site, f64)> {
+    if animal.founder != Some(Founder::Browser) {
+        return None;
+    }
+    let cols = body::mouth_columns(view, &animal.pose, &Founder::Browser.manifest());
+    body::mouth_foliage_stand(flora, view, &cols, animal.site.y)
+}
+
+/// Every stand whose crown touches the browser's actual mouth probe columns.
+/// Read-only diagnostic access for distinguishing a nearby crown from edible contact.
+pub fn browser_mouth_candidates(
+    view: &VoxelView<'_>,
+    flora: &FloraView<'_>,
+    animal: &Animal,
+) -> Option<Vec<(Site, f64)>> {
+    if animal.founder != Some(Founder::Browser) {
+        return None;
+    }
+    let cols = body::mouth_columns(view, &animal.pose, &Founder::Browser.manifest());
+    Some(body::mouth_foliage_stands(
+        flora,
+        view,
+        &cols,
+        animal.site.y,
+    ))
+}
 
 /// The consumers of the voxel ecology. One, so far: see
 /// [`SpeciesConfig::frondgrazer`] for the sentence of ecology its numbers encode.

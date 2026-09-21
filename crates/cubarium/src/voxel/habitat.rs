@@ -109,6 +109,19 @@ impl Seeded {
 /// settled; then every unit enters through the ordinary founder, deposit and introduction
 /// inflows the layers already name. Deterministic for a given world.
 pub fn seed(world: &mut World, flora: &mut Flora, fauna: &mut Fauna) -> Seeded {
+    seed_with_founder_counts(world, flora, fauna, [SHREDDERS, BROWSERS])
+}
+
+/// Seed the example habitat with a caller-selected number of bodies per sensed lineage.
+/// The normal ambient scene uses [`seed`]; this variant exists for bounded diagnosis arms
+/// that need to change only the starting population while keeping the seeder's placement,
+/// stores and controller setup identical.
+pub fn seed_with_founder_counts(
+    world: &mut World,
+    flora: &mut Flora,
+    fauna: &mut Fauna,
+    founder_counts: [usize; Founder::COUNT],
+) -> Seeded {
     for _ in 0..SETTLE_TICKS {
         world.step();
     }
@@ -234,7 +247,10 @@ pub fn seed(world: &mut World, flora: &mut Flora, fauna: &mut Fauna) -> Seeded {
                 && view.water_depth_m(i64::from(s.x), s.y, s.z) <= blind_drown
         })
         .collect();
-    for (k, site) in strided(&pool, SHREDDERS).into_iter().enumerate() {
+    for (k, site) in strided(&pool, founder_counts[Founder::Blind.index()])
+        .into_iter()
+        .enumerate()
+    {
         if !flora.deposit(
             site,
             Deposit {
@@ -252,7 +268,7 @@ pub fn seed(world: &mut World, flora: &mut Flora, fauna: &mut Fauna) -> Seeded {
             fauna,
             Founder::Blind,
             site,
-            spread_heading(k, SHREDDERS),
+            spread_heading(k, founder_counts[Founder::Blind.index()]),
         ) {
             taken.push(site);
             seeded.founders[Founder::Blind.index()] += 1;
@@ -281,13 +297,16 @@ pub fn seed(world: &mut World, flora: &mut Flora, fauna: &mut Fauna) -> Seeded {
     } else {
         meadow
     };
-    for (k, site) in strided(&pool, BROWSERS).into_iter().enumerate() {
+    for (k, site) in strided(&pool, founder_counts[Founder::Browser.index()])
+        .into_iter()
+        .enumerate()
+    {
         if introduce_founder(
             world,
             fauna,
             Founder::Browser,
             site,
-            spread_heading(k, BROWSERS),
+            spread_heading(k, founder_counts[Founder::Browser.index()]),
         ) {
             seeded.founders[Founder::Browser.index()] += 1;
         }

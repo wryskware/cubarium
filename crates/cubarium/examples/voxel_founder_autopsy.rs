@@ -1,15 +1,18 @@
 //! Founder autopsy: what kills the seeded habitat's founders in the first half hour.
 //!
 //! ```text
-//! cargo run --release -p cubarium --example voxel_founder_autopsy -- 30 > runs/voxel-founder-autopsy.csv
+//! cargo run --release -p cubarium --example voxel_founder_autopsy -- 60 generated closed \
+//!     > runs/voxel-founder-autopsy.csv
 //! ```
 //!
 //! The diagnosis package D2 of `design/handoffs/voxel-collapse-diagnosis-2026-09-20.md`.
 //! The census (`design/7_Research/voxel-census-2026-09-20.md`) could see 65 bodies leave
-//! and not one reason; this example builds the same world — the default authored scene,
+//! and not one reason; this example builds the same world — the generated scene with the
+//! closed water budget,
 //! `habitat::seed`, the settled live [`Senses`] field, exactly the setup
 //! `examples/voxel_census.rs` uses — steps it for the given number of simulated minutes
-//! (default 30) and writes every event the question needs.
+//! (default 60) and writes every event the question needs. Add `half` for the founder-count
+//! comparison or `heuristic` for the disclosed control.
 //!
 //! **It is read-only on the model.** Nothing here changes a birth, feeding, movement or
 //! physiology rule, the seeder, or a constant; the only new thing in the crates is the
@@ -18,7 +21,7 @@
 //! The founders are driven by the built-in trained centres by default, the same drivers
 //! `cubarium voxel`'s ambient run installs, so this autopsies the world that ships. A
 //! trailing `heuristic` argument keeps the old, observation-only control:
-//! `voxel_founder_autopsy -- 30 heuristic`.
+//! `voxel_founder_autopsy -- 60 generated closed heuristic`.
 //!
 //! # What it writes
 //!
@@ -59,11 +62,12 @@ use cubarium::voxel::VoxelConfig;
 use cubarium::voxel::habitat;
 use cubarium::voxel::install_default_founders;
 use cubarium::voxel::scene;
-use cubarium_voxel::VoxelView;
+use cubarium_voxel::{Command as WorldCommand, VoxelView, World};
 use cubarium_voxel_fauna::{
-    Animal, Departure, Fauna, FaunaConfig, Founder, Senses, TICK_HZ, effective_config,
+    Animal, Departure, Fauna, FaunaConfig, Founder, Senses, TICK_HZ, browser_cone_readings,
+    browser_mouth_candidates, effective_config,
 };
-use cubarium_voxel_flora::{Flora, FloraConfig, FloraView};
+use cubarium_voxel_flora::{Flora, FloraConfig, FloraView, Species as Plant};
 use cubarium_voxel_sim::{Sim, SimConfig};
 
 /// One simulated minute, in ticks.
@@ -75,6 +79,17 @@ const BLIND_REACH_M: f64 = 1.5;
 /// The browser founder's cone range, metres — its manifest's `cone_range_m`, restated for
 /// the same reason.
 const BROWSER_REACH_M: f64 = 2.0;
+
+const HARNESS_RAIN_M_PER_S: f64 = 0.0002;
+const CLOSED_EVAPORATION_M_PER_S: f64 = 0.0001;
+
+#[derive(Clone, Copy)]
+struct FoodProbe {
+    dist_m: f64,
+    species: Option<Plant>,
+    foliage: f64,
+    crown_in_mouth: bool,
+}
 
 /// The sensed reach of one lineage.
 fn reach_m(founder: Founder) -> f64 {
@@ -93,6 +108,10 @@ struct Seen {
     reserve: f64,
     age_ticks: u64,
     dist_m: f64,
+    nearest_species: Option<Plant>,
+    nearest_foliage: f64,
+    nearest_crown_in_mouth: bool,
+    same_height_2m: usize,
     deep_water: bool,
     /// Where it stood, and where it has been: the pose, and the metres of ground it has
     /// covered since it appeared. A body that pays the motor budget every tick and
@@ -122,21 +141,58 @@ struct Seen {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let minutes: f64 = args.get(1).map_or(30.0, |a| {
-        a.parse()
-            .expect("usage: voxel_founder_autopsy [MINUTES] [heuristic]")
-    });
+    let minutes: f64 = args
+        .iter()
+        .skip(1)
+        .find_map(|a| a.parse().ok())
+        .unwrap_or(60.0);
+    let generated = args.iter().any(|a| a == "generated");
+    let closed = args.iter().any(|a| a == "closed");
+    let half_founders = args.iter().any(|a| a == "half");
     // The shipped world's founders are driven by the built-in trained centres by
     // default, exactly as `cubarium voxel`'s ambient run installs them; `heuristic` as a
     // trailing argument keeps the old, observation-only control.
-    let heuristic = args.get(2).is_some_and(|a| a == "heuristic");
+    let heuristic = args.iter().any(|a| a == "heuristic");
+    assert!(
+        !closed || generated,
+        "closed diagnosis requires the generated world"
+    );
 
     let cfg = VoxelConfig::default();
-    let mut world = scene::authored(cfg.world.clone());
+    let mut world = if generated {
+        let mut world_cfg = cfg.world.clone();
+        if closed {
+            let dry = VoxelConfig::default().world;
+            let basin_floor_m = World::new(dry.clone())
+                .outlet_cell()
+                .map_or(0.0, |(_, y, _)| f64::from(y) * dry.voxel_m);
+            world_cfg = cubarium_voxel::Config {
+                rain_m_per_s: HARNESS_RAIN_M_PER_S,
+                evaporation_m_per_s: CLOSED_EVAPORATION_M_PER_S,
+                initial_aquifer_head_m: basin_floor_m + 1.0,
+                closed_water_budget: true,
+                ..world_cfg
+            };
+        }
+        let mut world = World::new(world_cfg);
+        if closed {
+            world.apply(WorldCommand::SetOutlet { open: true });
+        }
+        world
+    } else {
+        scene::authored(cfg.world.clone())
+    };
     let mut flora = Flora::new(FloraConfig::default());
     let mut fauna = Fauna::new(FaunaConfig::default());
-    let seeded = habitat::seed(&mut world, &mut flora, &mut fauna);
+    let counts = if half_founders { [4, 4] } else { [8, 8] };
+    let seeded = habitat::seed_with_founder_counts(&mut world, &mut flora, &mut fauna, counts);
     let fauna_cfg = *fauna.config();
+    eprintln!(
+        "scene: {} world, {} water budget; founder counts {:?}",
+        if generated { "generated" } else { "authored" },
+        if closed { "closed" } else { "open" },
+        counts,
+    );
     eprintln!(
         "seeded: stands={} logs={} litter_tiles={} founders={:?}",
         seeded.stands, seeded.logs, seeded.litter_tiles, seeded.founders
@@ -195,25 +251,37 @@ fn main() {
     println!("HEADER,MINX,tick,minute,lineage,bites,assimilated,removed,max_dist_m,births_total");
     println!("HEADER,FOOD,tick,minute,litter_organic,litter_sites,foliage,foliage_stands");
     println!(
-        "HEADER,BODY,tick,minute,id,lineage,age_ticks,body,reserve,dist_m,reach_m,in_reach,pose_x,pose_z,travelled_m,exits,held_forward,held_turn,held_feed,state,heading_rad,ahead"
+        "HEADER,BODY,tick,minute,id,lineage,age_ticks,body,reserve,dist_m,reach_m,in_reach,nearest_species,nearest_foliage,crown_in_mouth,same_height_supports_2m,pose_x,pose_z,travelled_m,exits,held_forward,held_turn,held_feed,state,heading_rad,ahead"
     );
     println!(
         "HEADER,BIRTH,tick,minute,id,lineage,body,reserve,dist_m,reach_m,parent_id,parent_reserve_after"
     );
     println!(
-        "HEADER,DEATH,tick,minute,id,lineage,cause,age_ticks,body,reserve,dist_m,travelled_m,exits"
+        "HEADER,DEATH,tick,minute,id,lineage,cause,age_ticks,body,reserve,nearest_dist_m,nearest_species,nearest_foliage,crown_in_mouth,same_height_supports_2m,travelled_m,exits"
+    );
+    println!("HEADER,CAUSE,tick,minute,lineage,starved,drowned,removed");
+    println!(
+        "HEADER,PLANT,tick,minute,species,near_foliage,near_stands,total_foliage,total_stands,bites,eaten"
+    );
+    println!("HEADER,REGROW,tick,minute,species,cropped_stands,regrowth_events");
+    println!(
+        "HEADER,CONE,tick,minute,sampled,front_left_fraction,front_fraction,front_right_fraction,front_left_proximity,front_proximity,front_right_proximity,all_sectors_nonzero"
     );
     println!("HEADER,SUMMARY,ticks,what,values");
     let mut prev: Vec<(u64, Seen)> = snapshot(&sim, &[]);
+    let mut previous_causes = [[0u64; Departure::COUNT]; Founder::COUNT];
+    let mut crown_history = CrownHistory::default();
+    observe_crowns(&sim, &mut crown_history);
     for (id, s) in &prev {
         report_body(0, 0, *id, s);
     }
-    report_minute(0, &sim);
+    report_minute(0, &sim, &mut previous_causes, &crown_history);
 
     let total_ticks = (minutes * 60.0 * f64::from(TICK_HZ)) as u64;
     for tick in 1..=total_ticks {
         sim.step();
         let now = snapshot(&sim, &prev);
+        observe_crowns(&sim, &mut crown_history);
 
         // Departures: an id in the previous tick and not in this one. The **counts** by
         // cause come from the ledger and are exact; this per-body label is re-derived
@@ -228,7 +296,7 @@ fn main() {
                     Departure::Starved
                 };
                 println!(
-                    "DEATH,{tick},{:.2},{id},{},{},{},{:.7},{:.7},{:.3},{:.3},{}",
+                    "DEATH,{tick},{:.2},{id},{},{},{},{:.7},{:.7},{:.3},{},{:.7},{},{},{:.3},{}",
                     tick as f64 / TICKS_PER_MIN as f64,
                     lineage(was.founder),
                     cause.name(),
@@ -236,6 +304,10 @@ fn main() {
                     was.body,
                     was.reserve,
                     was.dist_m,
+                    was.nearest_species.map_or("none", Plant::name),
+                    was.nearest_foliage,
+                    was.nearest_crown_in_mouth,
+                    was.same_height_2m,
                     was.travelled_m,
                     was.exits,
                 );
@@ -284,7 +356,7 @@ fn main() {
             for (id, s) in &now {
                 report_body(tick, minute, *id, s);
             }
-            report_minute(minute, &sim);
+            report_minute(minute, &sim, &mut previous_causes, &crown_history);
         }
         prev = now;
     }
@@ -317,6 +389,7 @@ fn snapshot(sim: &Sim, prev: &[(u64, Seen)]) -> Vec<(u64, Seen)> {
         .map(|a| {
             let sc = effective_config(fauna.config(), a);
             let depth = view.water_depth_m(i64::from(a.site.x), a.site.y, a.site.z);
+            let food = food_probe(&view, &fv, a);
             (
                 a.id,
                 Seen {
@@ -324,7 +397,11 @@ fn snapshot(sim: &Sim, prev: &[(u64, Seen)]) -> Vec<(u64, Seen)> {
                     body: a.body,
                     reserve: a.reserve,
                     age_ticks: a.age_ticks,
-                    dist_m: nearest_food_m(&view, &fv, a),
+                    dist_m: food.dist_m,
+                    nearest_species: food.species,
+                    nearest_foliage: food.foliage,
+                    nearest_crown_in_mouth: food.crown_in_mouth,
+                    same_height_2m: same_height_supports_2m(&view, a),
                     deep_water: depth > sc.drown_depth_m,
                     x: a.pose.x,
                     z: a.pose.z,
@@ -342,27 +419,73 @@ fn snapshot(sim: &Sim, prev: &[(u64, Seen)]) -> Vec<(u64, Seen)> {
         .collect()
 }
 
-/// Planar metres from a body's pose to the nearest site holding food **of its own kind**,
-/// `x` the short way round the ring. Infinite when the world holds none.
-fn nearest_food_m(view: &VoxelView<'_>, fv: &FloraView<'_>, a: &Animal) -> f64 {
+/// Planar distance and contact evidence for the nearest stand with foliage. The browser
+/// reach bit is checked against the actual mouth probe columns, not the wider cone.
+fn food_probe(view: &VoxelView<'_>, fv: &FloraView<'_>, a: &Animal) -> FoodProbe {
     let voxel_m = view.config.voxel_m;
     let mut best = f64::INFINITY;
-    // The blind feeder eats litter off the ground under its mouth; everything else in
-    // this world eats foliage off a stand.
     if matches!(a.founder, Some(Founder::Blind)) {
         for g in fv.ground {
             if g.litter > 0.0 {
                 best = best.min(planar_m(view, a, g.site.x, g.site.z, voxel_m));
             }
         }
-    } else {
-        for s in fv.stands {
-            if s.foliage > 0.0 {
-                best = best.min(planar_m(view, a, s.site.x, s.site.z, voxel_m));
-            }
+        return FoodProbe {
+            dist_m: best,
+            species: None,
+            foliage: 0.0,
+            crown_in_mouth: false,
+        };
+    }
+    let mouth = browser_mouth_candidates(view, fv, a).unwrap_or_default();
+    let mut nearest = None;
+    for stand in fv.stands.iter().filter(|s| s.foliage > 0.0) {
+        let dist = planar_m(view, a, stand.site.x, stand.site.z, voxel_m);
+        if dist < best {
+            best = dist;
+            nearest = Some(stand);
         }
     }
-    best
+    let Some(stand) = nearest else {
+        return FoodProbe {
+            dist_m: f64::INFINITY,
+            species: None,
+            foliage: 0.0,
+            crown_in_mouth: false,
+        };
+    };
+    FoodProbe {
+        dist_m: planar_m(view, a, stand.site.x, stand.site.z, voxel_m),
+        species: Some(stand.species),
+        foliage: stand.foliage,
+        crown_in_mouth: mouth.iter().any(|(site, _)| *site == stand.site),
+    }
+}
+
+fn same_height_supports_2m(view: &VoxelView<'_>, a: &Animal) -> usize {
+    if a.founder != Some(Founder::Browser) {
+        return 0;
+    }
+    let radius = (BROWSER_REACH_M / view.config.voxel_m).ceil() as i64;
+    let width = i64::from(view.config.width);
+    let depth = view.config.depth;
+    let r2 = BROWSER_REACH_M * BROWSER_REACH_M;
+    let x = i64::from(a.site.x);
+    let z = i64::from(a.site.z);
+    (-(radius)..=radius)
+        .flat_map(|dz| (-(radius)..=radius).map(move |dx| (dx, dz)))
+        .filter(|(dx, dz)| {
+            let distance_m = ((*dx as f64) * view.config.voxel_m).powi(2)
+                + ((*dz as f64) * view.config.voxel_m).powi(2);
+            distance_m <= r2 + 1e-12
+        })
+        .filter(|(dx, dz)| {
+            let nz = z + dz;
+            nz >= 0
+                && (nz as u32) < depth
+                && view.is_support((x + dx).rem_euclid(width), a.site.y, nz as u32)
+        })
+        .count()
 }
 
 fn planar_m(view: &VoxelView<'_>, a: &Animal, sx: u32, sz: u32, voxel_m: f64) -> f64 {
@@ -379,7 +502,7 @@ fn planar_m(view: &VoxelView<'_>, a: &Animal, sx: u32, sz: u32, voxel_m: f64) ->
 
 fn report_body(tick: u64, minute: u64, id: u64, s: &Seen) {
     println!(
-        "BODY,{tick},{minute},{id},{},{},{:.7},{:.7},{:.3},{:.3},{},{:.3},{:.3},{:.3},{},{:.2},{:.2},{:.2},{:?},{:.3},{}",
+        "BODY,{tick},{minute},{id},{},{},{:.7},{:.7},{:.3},{:.3},{},{},{:.7},{},{},{:.3},{:.3},{:.3},{},{:.2},{:.2},{:.2},{:?},{:.3},{}",
         lineage(s.founder),
         s.age_ticks,
         s.body,
@@ -387,6 +510,10 @@ fn report_body(tick: u64, minute: u64, id: u64, s: &Seen) {
         s.dist_m,
         s.founder.map_or(f64::NAN, reach_m),
         s.founder.is_some_and(|f| s.dist_m <= reach_m(f)),
+        s.nearest_species.map_or("none", Plant::name),
+        s.nearest_foliage,
+        s.nearest_crown_in_mouth,
+        s.same_height_2m,
         s.x,
         s.z,
         s.travelled_m,
@@ -463,7 +590,12 @@ fn exits(view: &VoxelView<'_>, a: &Animal, sc: &cubarium_voxel_fauna::SpeciesCon
 }
 
 /// One row per lineage per minute.
-fn report_minute(minute: u64, sim: &Sim) {
+fn report_minute(
+    minute: u64,
+    sim: &Sim,
+    previous_causes: &mut [[u64; Departure::COUNT]; Founder::COUNT],
+    crown_history: &CrownHistory,
+) {
     let (world, flora, fauna) = sim.layers();
     let view = world.view();
     let fv = flora.view();
@@ -475,7 +607,10 @@ fn report_minute(minute: u64, sim: &Sim) {
         let mean = |v: f64| if n == 0 { 0.0 } else { v / n as f64 };
         let body: f64 = mine.iter().map(|a| a.body).sum();
         let reserve: f64 = mine.iter().map(|a| a.reserve).sum();
-        let dists: Vec<f64> = mine.iter().map(|a| nearest_food_m(&view, &fv, a)).collect();
+        let dists: Vec<f64> = mine
+            .iter()
+            .map(|a| food_probe(&view, &fv, a).dist_m)
+            .collect();
         let in_reach = dists.iter().filter(|d| **d <= reach_m(f)).count();
         let mean_dist = if n == 0 {
             0.0
@@ -501,6 +636,19 @@ fn report_minute(minute: u64, sim: &Sim) {
             l.departed_founder(f, Departure::Removed),
             l.births,
         );
+        let current = std::array::from_fn(|i| l.deaths_by_founder_cause[f.index()][i]);
+        println!(
+            "CAUSE,{},{minute},{},{},{},{}",
+            minute * TICKS_PER_MIN,
+            f.name(),
+            current[Departure::Starved.index()]
+                .saturating_sub(previous_causes[f.index()][Departure::Starved.index()]),
+            current[Departure::Drowned.index()]
+                .saturating_sub(previous_causes[f.index()][Departure::Drowned.index()]),
+            current[Departure::Removed.index()]
+                .saturating_sub(previous_causes[f.index()][Departure::Removed.index()]),
+        );
+        previous_causes[f.index()] = current;
     }
     // The litter the blind feeders live off, and the foliage the browsers do.
     let litter: f64 = fv.ground.iter().map(|g| g.litter).sum();
@@ -511,6 +659,162 @@ fn report_minute(minute: u64, sim: &Sim) {
         "FOOD,{},{minute},{litter:.4},{sites},{foliage:.4},{stands}",
         minute * TICKS_PER_MIN
     );
+    report_plants(minute, &view, &fv, &av);
+    report_cone(minute, &view, &fv, &av);
+    report_regrowth(minute, crown_history);
+}
+
+#[derive(Clone, Copy)]
+struct CrownState {
+    id: u64,
+    species: Plant,
+    last_foliage: f64,
+    cropped: bool,
+    regrowth_events: u64,
+}
+
+#[derive(Default)]
+struct CrownHistory {
+    stands: Vec<CrownState>,
+}
+
+fn observe_crowns(sim: &Sim, history: &mut CrownHistory) {
+    for stand in sim.flora().view().stands {
+        let Some(state) = history.stands.iter_mut().find(|s| s.id == stand.id) else {
+            history.stands.push(CrownState {
+                id: stand.id,
+                species: stand.species,
+                last_foliage: stand.foliage,
+                cropped: false,
+                regrowth_events: 0,
+            });
+            continue;
+        };
+        if stand.foliage + 1e-12 < state.last_foliage {
+            state.cropped = true;
+        } else if state.cropped && stand.foliage > state.last_foliage + 1e-12 {
+            state.regrowth_events += 1;
+            state.cropped = false;
+        }
+        state.last_foliage = stand.foliage;
+    }
+}
+
+fn report_plants(
+    minute: u64,
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    av: &cubarium_voxel_fauna::FaunaView<'_>,
+) {
+    let browsers: Vec<&Animal> = av
+        .animals
+        .iter()
+        .filter(|a| a.founder == Some(Founder::Browser))
+        .collect();
+    for species in Plant::ALL {
+        let mut near_foliage = 0.0;
+        let mut near_stands = 0usize;
+        let mut total_foliage = 0.0;
+        let mut total_stands = 0usize;
+        for stand in fv
+            .stands
+            .iter()
+            .filter(|s| s.species == species && s.foliage > 0.0)
+        {
+            total_foliage += stand.foliage;
+            total_stands += 1;
+            if browsers.iter().any(|a| {
+                planar_m(view, a, stand.site.x, stand.site.z, view.config.voxel_m)
+                    <= BROWSER_REACH_M
+            }) {
+                near_foliage += stand.foliage;
+                near_stands += 1;
+            }
+        }
+        let i = species.index();
+        println!(
+            "PLANT,{},{minute},{},{:.7},{},{:.7},{},{},{:.7}",
+            minute * TICKS_PER_MIN,
+            species.name(),
+            near_foliage,
+            near_stands,
+            total_foliage,
+            total_stands,
+            av.ledger.bites_by_plant[i],
+            av.ledger.eaten_by_plant[i],
+        );
+    }
+}
+
+fn report_cone(
+    minute: u64,
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    av: &cubarium_voxel_fauna::FaunaView<'_>,
+) {
+    let mut sampled = 0u64;
+    let mut fractions = [0.0; 3];
+    let mut proximities = [0.0; 3];
+    let mut all_nonzero = 0u64;
+    for animal in av
+        .animals
+        .iter()
+        .filter(|a| a.founder == Some(Founder::Browser))
+    {
+        let Some(reading) = browser_cone_readings(view, fv, av, animal) else {
+            continue;
+        };
+        sampled += 1;
+        for (i, (fraction, proximity)) in reading.into_iter().enumerate() {
+            fractions[i] += fraction;
+            proximities[i] += proximity;
+        }
+        if reading.iter().all(|(fraction, _)| *fraction > 0.0) {
+            all_nonzero += 1;
+        }
+    }
+    let mean = |total: f64| {
+        if sampled == 0 {
+            0.0
+        } else {
+            total / sampled as f64
+        }
+    };
+    println!(
+        "CONE,{},{minute},{},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{}",
+        minute * TICKS_PER_MIN,
+        sampled,
+        mean(fractions[0]),
+        mean(fractions[1]),
+        mean(fractions[2]),
+        mean(proximities[0]),
+        mean(proximities[1]),
+        mean(proximities[2]),
+        all_nonzero,
+    );
+}
+
+fn report_regrowth(minute: u64, history: &CrownHistory) {
+    for species in Plant::ALL {
+        let cropped = history
+            .stands
+            .iter()
+            .filter(|s| s.species == species && s.cropped)
+            .count();
+        let events: u64 = history
+            .stands
+            .iter()
+            .filter(|s| s.species == species)
+            .map(|s| s.regrowth_events)
+            .sum();
+        println!(
+            "REGROW,{},{minute},{},{},{}",
+            minute * TICKS_PER_MIN,
+            species.name(),
+            cropped,
+            events,
+        );
+    }
 }
 
 fn summary(sim: &Sim, ticks: u64) {
@@ -539,6 +843,15 @@ fn summary(sim: &Sim, ticks: u64) {
             f.name(),
             l.bites_by_founder[f.index()],
             l.assimilated_by_founder[f.index()],
+        );
+    }
+    for species in Plant::ALL {
+        let i = species.index();
+        println!(
+            "SUMMARY,{ticks},plant_{},bites={} eaten={:.7}",
+            species.name(),
+            l.bites_by_plant[i],
+            l.eaten_by_plant[i],
         );
     }
     assert_eq!(
