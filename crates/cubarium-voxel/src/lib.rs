@@ -29,9 +29,13 @@ pub mod config;
 pub mod generate;
 pub mod ledger;
 pub mod material;
+/// Periodic noise in physical units. Generation only.
+pub mod noise;
 /// Per-phase timings and work counts, with the `profile` feature only. Never a rule.
 #[cfg(feature = "profile")]
 pub mod profile;
+/// What a landscape is made of, in metres, and which generator builds it.
+pub mod recipe;
 pub mod snapshot;
 mod sparse;
 /// Is this world's water cycle one a habitat could live in? Reports, never rejects.
@@ -42,6 +46,7 @@ pub mod world;
 pub use config::Config;
 pub use ledger::Ledger;
 pub use material::Material;
+pub use recipe::{Landform, PRESETS, Preset, Recipe, Streams};
 pub use viability::{BandResult, PoreBand, Viability, ViabilitySpec};
 pub use world::{Command, VoxelView, World, default_threads};
 

@@ -1,6 +1,8 @@
 use anyhow::{Context, ensure};
 use serde::{Deserialize, Serialize};
 
+use crate::recipe::Landform;
+
 /// Everything a world is generated and stepped from. Physical units: metres and
 /// seconds; volumes in cubic metres. Depth is a free choice; the full world is deep.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -79,6 +81,12 @@ pub struct Config {
     /// may apply, so a filling region can be watched travelling. Zero (the default)
     /// disables the cap and a region settles to its level in one substep.
     pub free_transfer_cap: f64,
+    /// Which generator builds the terrain, and — for
+    /// [`crate::Landform::Staged`] — the recipe it builds from, in metres.
+    ///
+    /// [`crate::Landform::Ridge`], the default, is the original generator, byte for
+    /// byte: a config that never mentions a landform gets the world it always had.
+    pub landform: Landform,
 }
 
 impl Default for Config {
@@ -102,6 +110,7 @@ impl Default for Config {
             shower_trigger_fraction: 0.02,
             shower_volume_m3: 5.0,
             free_transfer_cap: 0.0,
+            landform: Landform::Ridge,
         }
     }
 }
@@ -166,6 +175,9 @@ impl Config {
             self.water_substeps >= 1,
             "water_substeps must be at least 1, not 0"
         );
+        if let Landform::Staged(recipe) = &self.landform {
+            recipe.validate().context("the staged landform recipe")?;
+        }
         Ok(())
     }
 
