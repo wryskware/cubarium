@@ -466,6 +466,22 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         av.mineral() - av.ledger.expected_mineral(),
         av.energy() - av.ledger.expected_energy(),
     );
+    // The founder census: who of the sensed lineages is still standing, and what each
+    // lineage actually got into its tissue. `assimilated` is the placed figure — what
+    // became body and reserve — and not the bite's gross organic matter.
+    let census: Vec<String> = Founder::ALL
+        .into_iter()
+        .map(|f| {
+            let alive = av.animals.iter().filter(|a| a.founder == Some(f)).count();
+            format!(
+                "{} {alive} alive, {} bites, {:.3e} assimilated",
+                f.name(),
+                av.ledger.bites_by_founder[f.index()],
+                av.ledger.assimilated_by_founder[f.index()],
+            )
+        })
+        .collect();
+    eprintln!("cubarium voxel: founders — {}", census.join("; "));
     Ok(())
 }
 
