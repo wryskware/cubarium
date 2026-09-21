@@ -75,8 +75,8 @@ use serde::{Deserialize, Serialize};
 
 pub use body::{FounderPhysiology, effective_config};
 pub use controller::{
-    Actions, BlindForager, BrowserForager, Controller, FounderControllers, Response, Scripted,
-    resolve_actions,
+    Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
+    FounderFactories, Response, Scripted, resolve_actions,
 };
 pub use cubarium_voxel::{DT, TICK_HZ};
 pub use cubarium_voxel_flora::Reach;
@@ -758,6 +758,11 @@ pub struct Fauna {
     /// ([`FounderControllers`]).
     #[serde(skip)]
     controllers: FounderControllers,
+    /// How to build a fresh controller for a founder **born** here, one recipe per
+    /// lineage. Skipped by the snapshot for the same reason the controllers are, but
+    /// cloned with the layer: see [`FounderFactories`].
+    #[serde(skip)]
+    factories: FounderFactories,
 }
 
 impl Fauna {
@@ -782,6 +787,7 @@ impl Fauna {
             ledger: FaunaLedger::default(),
             births_enabled: true,
             controllers: FounderControllers::default(),
+            factories: FounderFactories::default(),
         })
     }
 
@@ -802,6 +808,47 @@ impl Fauna {
     /// drop one between episodes.
     pub fn take_controller(&mut self, animal_id: u64) -> Option<Box<dyn Controller>> {
         self.controllers.take(animal_id)
+    }
+
+    /// Register how to build a controller for a founder **born** in this layer.
+    ///
+    /// A newborn founder inherits its parent's lineage and pays for its own body, but it
+    /// inherits no mind: [`step`]'s birth rule asks this factory for a fresh controller
+    /// of the parent's kind, so a lineage that breeds keeps being driven instead of
+    /// filling the world with resting bodies that still pay upkeep. One factory per
+    /// lineage, never a shared controller instance — two bodies sharing one controller
+    /// would share its memory.
+    ///
+    /// Introduced bodies are **not** touched by this: a driver installs their controllers
+    /// itself with [`Fauna::set_controller`], which is also how it chooses something
+    /// other than the lineage default for a particular body.
+    pub fn set_founder_factory(
+        &mut self,
+        founder: Founder,
+        factory: std::sync::Arc<dyn ControllerFactory>,
+    ) {
+        self.factories.set(founder, factory);
+    }
+
+    /// Forget a lineage's factory. Founders of that kind born afterwards rest.
+    pub fn clear_founder_factory(&mut self, founder: Founder) {
+        self.factories.clear(founder);
+    }
+
+    /// Whether a lineage has a birth factory registered.
+    pub fn has_founder_factory(&self, founder: Founder) -> bool {
+        self.factories.has(founder)
+    }
+
+    /// A fresh controller of a lineage's registered kind, installed on an existing body.
+    /// `false` when the body does not exist or the lineage has no factory. This is how a
+    /// driver re-installs controllers over a whole layer — after a load, or after
+    /// changing what a lineage is driven by.
+    pub fn install_founder_controller(&mut self, animal_id: u64, founder: Founder) -> bool {
+        let Some(controller) = self.factories.make(founder) else {
+            return false;
+        };
+        self.set_controller(animal_id, controller)
     }
 
     pub fn config(&self) -> &FaunaConfig {
@@ -915,6 +962,9 @@ impl Fauna {
                     }
                 });
                 for a in removed {
+                    // The body is gone, so its controller is too: ids are never reused,
+                    // and a table that only grows is a leak in a world that breeds.
+                    self.controllers.take(a.id);
                     self.book_removed(&a);
                 }
                 self.animals.len() != before

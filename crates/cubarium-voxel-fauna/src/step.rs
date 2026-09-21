@@ -203,6 +203,8 @@ fn terrain(fauna: &mut Fauna, view: &VoxelView<'_>) {
         .animals
         .retain(|a| view.is_support(i64::from(a.site.x), a.site.y, a.site.z));
     for a in &gone {
+        // As with a death: the body left the world, so its controller does too.
+        fauna.controllers.take(a.id);
         fauna.book_removed(a);
     }
 }
@@ -938,6 +940,19 @@ fn wrapped_dx(width: i64, a: i64, b: i64) -> i64 {
 }
 
 /// Step 6: one newborn per adult that can pay for it, out of the parent's reserve.
+///
+/// **A founder body breeds by this same rule.** The newborn inherits the parent's
+/// lineage marker and its pose, and it is paid for exactly as any other newborn is: the
+/// parcel leaves the parent's reserve with its mineral and energy pro rata, and the
+/// newborn starts at `body_min` with what is left of the parcel as its reserve. Nothing
+/// about a founder is free here.
+///
+/// What it does **not** inherit is a mind. A newborn founder with no controller holds
+/// [`Actions::REST`] for ever while still paying upkeep, so each one is given a *fresh*
+/// controller of its own lineage from that lineage's registered
+/// [`crate::ControllerFactory`] — never the parent's instance, which would mean two
+/// bodies sharing one memory. A lineage with no factory registered breeds resting
+/// bodies, which is the pre-existing behaviour and is stated rather than papered over.
 fn births(fauna: &mut Fauna) {
     if !fauna.births_enabled {
         return;
@@ -980,8 +995,17 @@ fn births(fauna: &mut Fauna) {
             state: State::Resting,
         });
     }
+    let fresh: Vec<(u64, Founder)> = newborns
+        .iter()
+        .filter_map(|n| n.founder.map(|f| (n.id, f)))
+        .collect();
     for n in newborns {
         fauna.insert(n);
+    }
+    for (id, founder) in fresh {
+        if let Some(controller) = fauna.factories.make(founder) {
+            fauna.controllers.set(id, controller);
+        }
     }
 }
 
@@ -1002,6 +1026,11 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
     }
     let ids: Vec<u64> = dead.iter().map(|a| a.id).collect();
     fauna.animals.retain(|a| !ids.contains(&a.id));
+    for id in &ids {
+        // A dead body's controller goes with it. Ids are never reused, so a table that
+        // only ever grows is a leak once the world breeds and buries.
+        fauna.controllers.take(*id);
+    }
     for a in &dead {
         // The whole animal, whatever is left of it: a corpse with no organic matter left
         // is still a corpse with mineral in it, and keeping an inert remainder on a dead

@@ -916,3 +916,167 @@ fn the_motor_respiration_counter_and_the_ledger_split_track_one_interval() {
         "the split sums to the total to the bit"
     );
 }
+
+/// **A founder body breeds, and the newborn is driven.**
+///
+/// `step::births` already carried the parent's lineage marker onto the newborn, so a
+/// founder has always been able to reproduce under the ordinary paid single-parent rule
+/// — but the newborn arrived with no controller and would have rested for ever while
+/// paying upkeep. With a factory registered for the lineage, every founder born gets a
+/// **fresh** controller of the parent's kind: its own memory, never the parent's
+/// instance.
+///
+/// The parent here is a browser founder at full stores: `body_max` 0.05 is above the
+/// `birth_body` 0.03 and a full reserve 0.025 is above the `birth_cost` 0.01, so the
+/// first tick's birth rule fires. Nothing is free: the parcel leaves the parent's
+/// reserve with its mineral and energy pro rata, which the fauna residual below checks.
+#[test]
+fn a_born_founder_gets_a_fresh_controller_of_its_parents_kind() {
+    use std::sync::{Arc, Mutex};
+
+    /// Counts how many controllers were built and how many drives each one saw.
+    #[derive(Default)]
+    struct Tally {
+        built: usize,
+        drives: Vec<usize>,
+    }
+
+    struct Counting {
+        slot: usize,
+        tally: Arc<Mutex<Tally>>,
+    }
+    impl Controller for Counting {
+        fn drive(&mut self, _o: &[f64]) -> Response {
+            self.tally.lock().unwrap().drives[self.slot] += 1;
+            Response::Bounded(Actions::REST)
+        }
+        fn reset(&mut self) {}
+    }
+
+    let tally: Arc<Mutex<Tally>> = Arc::default();
+    let make = {
+        let tally = Arc::clone(&tally);
+        move || -> Box<dyn Controller> {
+            let mut t = tally.lock().unwrap();
+            let slot = t.built;
+            t.built += 1;
+            t.drives.push(0);
+            drop(t);
+            Box::new(Counting {
+                slot,
+                tally: Arc::clone(&tally),
+            })
+        }
+    };
+
+    let world = flat_world();
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    fauna.set_founder_factory(Founder::Browser, Arc::new(make));
+    assert!(fauna.has_founder_factory(Founder::Browser));
+    assert!(!fauna.has_founder_factory(Founder::Blind));
+
+    assert!(fauna.apply(
+        &world,
+        FaunaCommand::IntroduceFounder {
+            x: 3,
+            z: 3,
+            founder: Founder::Browser,
+            stores: StartingStores::FULL,
+            heading_rad: 0.0,
+        },
+    ));
+    let parent = fauna.view().ledger.births - 1;
+    // The parent's own controller comes from the same recipe, installed the way a driver
+    // installs one on an introduced body.
+    assert!(fauna.install_founder_controller(parent, Founder::Browser));
+    assert_eq!(tally.lock().unwrap().built, 1);
+
+    let organic_before = fauna.view().organic();
+    fauna.step(&world, &mut flora);
+
+    let born = fauna.view().ledger.born;
+    assert_eq!(born, 1, "the full-stores browser founder paid for a newborn");
+    let newborns: Vec<u64> = fauna
+        .view()
+        .animals
+        .iter()
+        .filter(|a| a.id != parent)
+        .map(|a| a.id)
+        .collect();
+    assert_eq!(newborns.len(), 1);
+    let child = newborns[0];
+    assert_eq!(
+        fauna.view().animal(child).and_then(|a| a.founder),
+        Some(Founder::Browser),
+        "the newborn carries the parent's lineage"
+    );
+    assert_eq!(
+        tally.lock().unwrap().built,
+        2,
+        "the newborn was built a controller of its own, not handed the parent's"
+    );
+
+    // Both bodies are driven from here on, each through its own controller: two distinct
+    // slots both advance. The birth rule has no cooldown — a parent that can still pay
+    // pays again on the next tick — so the count to check is one controller per body
+    // ever created, and that is what is asserted rather than a fixed number of bodies.
+    for _ in 0..20 {
+        fauna.step(&world, &mut flora);
+    }
+    let tally = tally.lock().unwrap();
+    assert_eq!(
+        tally.built,
+        1 + fauna.view().ledger.born as usize,
+        "one fresh controller per founder ever created: the introduced parent plus every \
+         body born ({} so far)",
+        fauna.view().ledger.born
+    );
+    assert!(
+        tally.drives[0] > 0 && tally.drives[1] > 0,
+        "the parent and the first newborn were each sampled through their own \
+         controller: {:?}",
+        tally.drives
+    );
+    drop(tally);
+
+    // Paid, never free: nothing was created for the newborn. The animal layer holds
+    // exactly what its own ledger says, and no organic matter appeared.
+    let v = fauna.view();
+    assert!(
+        (v.organic() - v.ledger.expected_organic()).abs() < 1e-12,
+        "fauna organic residual {:e}",
+        v.organic() - v.ledger.expected_organic()
+    );
+    assert!(
+        v.organic() <= organic_before + 1e-12,
+        "a birth created organic matter: {} from {organic_before}",
+        v.organic()
+    );
+}
+
+/// A dead or removed body's controller leaves with it: the table does not grow for ever
+/// in a world that breeds and buries. Ids are never reused, so a stale entry would be a
+/// plain leak.
+#[test]
+fn a_removed_body_takes_its_controller_with_it() {
+    let world = flat_world();
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    assert!(fauna.apply(
+        &world,
+        FaunaCommand::IntroduceFounder {
+            x: 3,
+            z: 3,
+            founder: Founder::Blind,
+            stores: StartingStores::FULL,
+            heading_rad: 0.0,
+        },
+    ));
+    let id = fauna.view().ledger.births - 1;
+    assert!(fauna.set_controller(id, Box::new(Scripted::new(vec![Actions::REST]))));
+    assert!(fauna.apply(&world, FaunaCommand::Remove { x: 3, z: 3 }));
+    assert!(
+        fauna.take_controller(id).is_none(),
+        "the removed body's controller went with it"
+    );
+}

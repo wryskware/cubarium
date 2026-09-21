@@ -21,6 +21,8 @@
 //! world it makes is the ordinary disposable development world. `--empty` asks for the
 //! bare world back.
 
+use std::sync::Arc;
+
 use cubarium_voxel::{Material, VoxelView, World};
 use cubarium_voxel_fauna::{
     BlindForager, BrowserForager, Command as FaunaCommand, Controller, Fauna, Founder,
@@ -206,6 +208,13 @@ pub fn seed(world: &mut World, flora: &mut Flora, fauna: &mut Fauna) -> Seeded {
     // full has nowhere to put what it eats, so eating would be worth nothing to it.
     // Both are driven by their own observation-only heuristic, installed through the
     // fauna layer's ordinary controller boundary.
+    //
+    // The heuristics are also registered as each lineage's **birth factory**, so a
+    // founder born here is handed a fresh controller of its parent's kind instead of
+    // resting for ever while paying upkeep. A caller that wants something else — the
+    // ambient run's `--founder-policy` — replaces both the factory and the standing
+    // bodies' controllers afterwards.
+    install_heuristics(fauna);
 
     // Littershredders on litter-bearing soil: dry open soil away from the stands, each
     // with its own starter tile of leaf litter laid under it first, so the founder
@@ -277,6 +286,21 @@ pub fn seed(world: &mut World, flora: &mut Flora, fauna: &mut Fauna) -> Seeded {
     seeded
 }
 
+/// Register each lineage's own observation-only heuristic as its birth factory: every
+/// founder **born** in this layer is driven by one of these unless a caller replaces
+/// them. Introduced bodies get theirs from [`introduce_founder`], out of the same
+/// recipes.
+pub fn install_heuristics(fauna: &mut Fauna) {
+    fauna.set_founder_factory(
+        Founder::Blind,
+        Arc::new(|| -> Box<dyn Controller> { Box::new(BlindForager::new()) }),
+    );
+    fauna.set_founder_factory(
+        Founder::Browser,
+        Arc::new(|| -> Box<dyn Controller> { Box::new(BrowserForager::new()) }),
+    );
+}
+
 /// One founder body on a column's highest support face, hungry, with its own heuristic
 /// installed. Returns whether the layer accepted it.
 fn introduce_founder(
@@ -299,11 +323,7 @@ fn introduce_founder(
         return false;
     }
     let id = fauna.view().ledger.births - 1;
-    let controller: Box<dyn Controller> = match founder {
-        Founder::Blind => Box::new(BlindForager::new()),
-        Founder::Browser => Box::new(BrowserForager::new()),
-    };
-    fauna.set_controller(id, controller)
+    fauna.install_founder_controller(id, founder)
 }
 
 /// Headings spread evenly around the circle, one per body. Deterministic, and nothing

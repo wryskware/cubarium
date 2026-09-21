@@ -190,6 +190,82 @@ impl std::fmt::Debug for FounderControllers {
     }
 }
 
+/// **How to build a fresh controller of one founder kind.** A recipe, not a mind: the
+/// factory is asked for a *new* controller with new memory every time it is used, so no
+/// two bodies can ever share one.
+///
+/// This exists because a founder body can be **born** (`step::births`) as well as
+/// introduced. A newborn inherits its parent's lineage marker and nothing else — not its
+/// memory, and not its controller — so the layer has to be able to make the newborn one
+/// of the parent's kind without knowing what kind of controller the driver chose. The
+/// driver registers one factory per founder ([`crate::Fauna::set_founder_factory`]) and
+/// every founder born after that gets a controller from it.
+///
+/// Any `Fn() -> Box<dyn Controller>` that is `Send + Sync` is a factory, so the ordinary
+/// registration is a closure: `|| Box::new(BlindForager::new())`, or a closure over a
+/// loaded policy that hands out a fresh network with a zeroed hidden state.
+pub trait ControllerFactory: Send + Sync {
+    /// A brand-new controller of this kind, with its own memory.
+    fn make(&self) -> Box<dyn Controller>;
+}
+
+impl<F> ControllerFactory for F
+where
+    F: Fn() -> Box<dyn Controller> + Send + Sync,
+{
+    fn make(&self) -> Box<dyn Controller> {
+        self()
+    }
+}
+
+/// One registered [`ControllerFactory`] per founder lineage, in [`Founder::index`] order.
+///
+/// Unlike [`FounderControllers`], this **is** cloned with the layer: a factory is the
+/// recipe for a mind and not a mind, so a copy of a layer that breeds still knows what to
+/// give its newborns. It is still skipped by the snapshot — a recipe is not world state
+/// and a `dyn Fn` does not serialize — so a loaded layer's driver registers factories
+/// again, which is the same contract the controllers themselves have.
+#[derive(Clone, Default)]
+pub struct FounderFactories {
+    per_founder: [Option<std::sync::Arc<dyn ControllerFactory>>; Founder::COUNT],
+}
+
+impl FounderFactories {
+    /// Register (or replace) the factory for one lineage.
+    pub fn set(&mut self, founder: Founder, factory: std::sync::Arc<dyn ControllerFactory>) {
+        self.per_founder[founder.index()] = Some(factory);
+    }
+
+    /// Forget one lineage's factory. Bodies of that kind born afterwards get no
+    /// controller and rest, exactly as an unregistered lineage's always did.
+    pub fn clear(&mut self, founder: Founder) {
+        self.per_founder[founder.index()] = None;
+    }
+
+    /// Whether this lineage has a factory registered.
+    pub fn has(&self, founder: Founder) -> bool {
+        self.per_founder[founder.index()].is_some()
+    }
+
+    /// A fresh controller for this lineage, or `None` when none is registered.
+    pub fn make(&self, founder: Founder) -> Option<Box<dyn Controller>> {
+        self.per_founder[founder.index()]
+            .as_ref()
+            .map(|f| f.make())
+    }
+}
+
+impl std::fmt::Debug for FounderFactories {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let registered: Vec<&'static str> = Founder::ALL
+            .into_iter()
+            .filter(|founder| self.has(*founder))
+            .map(Founder::name)
+            .collect();
+        f.debug_tuple("FounderFactories").field(&registered).finish()
+    }
+}
+
 /// A diagnostic controller that cycles a fixed script of already-bounded actions, one
 /// per drive. It is the plumbing test's controller — motion, contact and feeding
 /// behaviour are driven with it — and **not** the P1-C foraging heuristic, which reads
