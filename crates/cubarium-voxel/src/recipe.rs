@@ -434,6 +434,20 @@ pub struct Water {
     /// Water table at creation, metres above `y = 0`. Charged out of the inventory, so
     /// a head the inventory cannot pay for is truncated rather than conjured.
     pub aquifer_head_m: f64,
+
+    /// Whether the world runs the **closed** cycle: route B of
+    /// `design/handoffs/voxel-water-cycle-2026-09-20.md` — evaporation, transpiration and
+    /// the outlet's export go into the lumped atmosphere store and come back as showers,
+    /// and nothing leaves. False keeps the open flow-through budget every fixture has.
+    pub closed_cycle: bool,
+    /// Rain onto exposed top surfaces while a shower is falling, metres per second.
+    pub rain_m_per_s: f64,
+    /// Evaporation from open free-water surfaces, metres per second.
+    pub evaporation_m_per_s: f64,
+    /// Share of the world's total water the atmosphere must hold before a shower starts.
+    pub shower_trigger_fraction: f64,
+    /// How much one shower delivers, cubic metres.
+    pub shower_volume_m3: f64,
 }
 
 impl Default for Water {
@@ -444,10 +458,18 @@ impl Default for Water {
 
 impl Water {
     /// No water at all: what a `Ridge` world and every fixture has.
+    /// No water at all, and no cycle: what a `Ridge` world and every fixture has. The
+    /// five runtime values are [`Config::default`]'s own, so applying this recipe's water
+    /// to a config changes nothing.
     pub const DRY: Water = Water {
         inventory_m: 0.0,
         atmosphere_fraction: 0.0,
         aquifer_head_m: 0.0,
+        closed_cycle: false,
+        rain_m_per_s: 0.0,
+        evaporation_m_per_s: 0.0,
+        shower_trigger_fraction: 0.02,
+        shower_volume_m3: 5.0,
     };
 
     /// The staged presets' inventory: half a metre of water over the footprint, six per
@@ -459,10 +481,21 @@ impl Water {
     /// rings, so this leaves roughly 0.09 m for the pools: on `default` that is 16 m³ in
     /// the basins against the 142 m³ it would take to fill every one of them to its spill.
     /// Ponds in the low ground, not a flooded ring.
+    /// The cycle's four numbers are the ones the water-cycle handoff's 24-hour study ran
+    /// on and found BOUNDED at three seeds: shower rate 2e-4 m/s, evaporation 1e-4 m/s,
+    /// trigger 0.02, shower 5 m³. Evaporation must stay below the shower rate — `evaporate`
+    /// runs straight after `rain` and lifts fresh rain before it infiltrates — and the
+    /// handoff names the trigger a placeholder that rains nearly back to back: intermittent
+    /// weather lives in 0.10 to 0.24, and above 0.26 the world locks dry. Not changed here.
     pub const DEFAULT: Water = Water {
         inventory_m: 0.5,
         atmosphere_fraction: 0.06,
         aquifer_head_m: 1.0,
+        closed_cycle: true,
+        rain_m_per_s: 2e-4,
+        evaporation_m_per_s: 1e-4,
+        shower_trigger_fraction: 0.02,
+        shower_volume_m3: 5.0,
     };
 
     pub fn validate(&self) -> anyhow::Result<()> {
@@ -470,6 +503,13 @@ impl Water {
             ("water.inventory_m", self.inventory_m),
             ("water.atmosphere_fraction", self.atmosphere_fraction),
             ("water.aquifer_head_m", self.aquifer_head_m),
+            ("water.rain_m_per_s", self.rain_m_per_s),
+            ("water.evaporation_m_per_s", self.evaporation_m_per_s),
+            (
+                "water.shower_trigger_fraction",
+                self.shower_trigger_fraction,
+            ),
+            ("water.shower_volume_m3", self.shower_volume_m3),
         ] {
             anyhow::ensure!(
                 v.is_finite() && v >= 0.0,
@@ -481,7 +521,26 @@ impl Water {
             "water.atmosphere_fraction is a share of the inventory, not {}",
             self.atmosphere_fraction
         );
+        anyhow::ensure!(
+            self.shower_trigger_fraction <= 1.0,
+            "water.shower_trigger_fraction is a share of the world's water, not {}",
+            self.shower_trigger_fraction
+        );
         Ok(())
+    }
+
+    /// Write this recipe's runtime water settings onto the config the world will run on.
+    ///
+    /// **The recipe decides the cycle** (slice 3's decision, applied here): a landscape
+    /// states its own water inventory and the weather that keeps it moving, and the host
+    /// TOML no longer writes rain, evaporation or a water table beside it. [`Water::DRY`]
+    /// holds [`Config::default`]'s own five values, so a `Ridge` world is untouched.
+    pub fn cycle_into(&self, c: &mut Config) {
+        c.closed_water_budget = self.closed_cycle;
+        c.rain_m_per_s = self.rain_m_per_s;
+        c.evaporation_m_per_s = self.evaporation_m_per_s;
+        c.shower_trigger_fraction = self.shower_trigger_fraction;
+        c.shower_volume_m3 = self.shower_volume_m3;
     }
 }
 

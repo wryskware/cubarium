@@ -60,7 +60,7 @@ pub use recipe::{
     Benches, Erosion, Hollows, Landform, PRESETS, Preset, Recipe, Strata, Streams, Water,
 };
 pub use viability::{BandResult, PoreBand, Viability, ViabilitySpec};
-pub use world::{Command, SETTLE_WINDOW, Settle, VoxelView, World, default_threads};
+pub use world::{Command, SETTLE_REST, SETTLE_WINDOW, Settle, VoxelView, World, default_threads};
 
 /// Simulation ticks per second. Matches `cubarium-core::TICK_HZ` so a frontend can
 /// drive both worlds with the same clock.

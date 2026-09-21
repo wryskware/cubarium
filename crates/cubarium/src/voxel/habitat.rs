@@ -982,9 +982,15 @@ mod tests {
 
     #[test]
     fn the_staged_default_habitat_steps_with_closed_ledgers() {
+        // The `default` recipe on a short ring: benches, grottos, a water inventory and
+        // the closed cycle, at a sixteenth of the shipped ring's settle cost. Which ring
+        // the ambient run builds is `the_config_defaults_are_the_documented_ones`'s
+        // business; this one asks whether a habitat seeded off support faces steps with
+        // its books closed.
         let preset = cubarium_voxel::Preset::find("default").unwrap();
         steps_with_closed_ledgers(World::new(Config {
             seed: 1,
+            width: 48,
             ..preset.config()
         }));
     }

@@ -502,9 +502,22 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                 // The settle report, once, at startup: how long the water took to stop
                 // moving and whether it did. The ordinary display shows none of this.
                 let st = seeded.settle;
+                let wc = world.config().clone();
                 eprintln!(
-                    "cubarium voxel: water settled in {} ticks ({}), {:.2} m³ pooled in {} \
-                     cells, {:.2} m³ pore, drift {:.2e} m³/100 ticks{}",
+                    "cubarium voxel: {} — water settled in {} ticks ({}), {:.2} m³ pooled \
+                     in {} cells, {:.2} m³ pore, drift {:.2e} m³/100 ticks{}",
+                    if wc.closed_water_budget {
+                        format!(
+                            "closed cycle, {:.2} m³ aloft, showers at {:.0} % of total, \
+                             {:.0} mm/h rain, {:.0} mm/h evaporation",
+                            world.atmosphere_m3(),
+                            wc.shower_trigger_fraction * 100.0,
+                            wc.rain_m_per_s * 3600.0 * 1000.0,
+                            wc.evaporation_m_per_s * 3600.0 * 1000.0,
+                        )
+                    } else {
+                        "open budget, no cycle to report".to_string()
+                    },
                     st.ticks,
                     if st.converged {
                         "converged"

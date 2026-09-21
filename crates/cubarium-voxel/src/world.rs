@@ -461,6 +461,37 @@ impl PartialEq for VoidRuns {
 /// Ticks the convergence test looks back over.
 pub const SETTLE_WINDOW: u32 = 100;
 
+/// Ticks of no movement at all that count as rest. A world nothing is happening in should
+/// not have to be stepped through the whole convergence window to say so.
+pub const SETTLE_REST: u32 = 20;
+
+/// Nothing has moved, at all, for the last [`SETTLE_REST`] samples.
+fn at_rest(history: &[(f64, usize)]) -> bool {
+    let n = SETTLE_REST as usize;
+    if history.len() <= n {
+        return false;
+    }
+    let last = history[history.len() - 1];
+    history[history.len() - 1 - n..].iter().all(|&h| h == last)
+}
+
+/// Both readings have moved by less than their tolerance over the last `window` samples.
+///
+/// The pooled volume's is one per cent of itself. The wet-cell count's is one per cent of
+/// **the pooled cell count**, with a floor of eight cells: a pool whose edge gains and
+/// loses a film of a few cells as a shower falls on it is a settled pool, and on a world
+/// with no water at all the floor is what stops an empty comparison deciding anything.
+fn settled_over(history: &[(f64, usize)], window: usize) -> bool {
+    if history.len() <= window {
+        return false;
+    }
+    let (p0, c0) = history[history.len() - 1 - window];
+    let (pooled, cells) = history[history.len() - 1];
+    let volume_ok = (pooled - p0).abs() <= 0.01 * pooled.abs().max(p0.abs()).max(1e-12);
+    let room = (0.01 * cells.max(c0) as f64).max(8.0);
+    volume_ok && (cells as f64 - c0 as f64).abs() <= room
+}
+
 /// What [`World::settle`] measured.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Settle {
@@ -487,6 +518,13 @@ impl World {
     /// config [`Config::validate`] refuses.
     pub fn new(config: Config) -> World {
         config.validate().expect("World::new needs a valid Config");
+        // A staged landscape states the weather that keeps its inventory moving, and it
+        // states it before anything is built, so the config the world runs on — and the
+        // config its snapshot carries — is the one the recipe asked for.
+        let mut config = config;
+        if let Landform::Staged(recipe) = config.landform.clone() {
+            recipe.water.cycle_into(&mut config);
+        }
         let n = config.cells();
         let mut world = World {
             material: vec![Material::Air; n],
@@ -691,13 +729,7 @@ impl World {
             let cells = self.wet_cells();
             history.push((pooled, cells));
             stored.push(self.view().stored_m3());
-            if history.len() > window {
-                let (p0, c0) = history[history.len() - 1 - window];
-                let near = |a: f64, b: f64| (a - b).abs() <= 0.01 * a.abs().max(b.abs()).max(1e-12);
-                if near(p0, pooled) && near(c0 as f64, cells as f64) {
-                    converged = true;
-                }
-            }
+            converged = at_rest(&history) || settled_over(&history, window);
             if converged || ticks >= cap_ticks {
                 break;
             }

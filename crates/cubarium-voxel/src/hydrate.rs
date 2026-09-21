@@ -381,7 +381,7 @@ fn wet_soil(world: &mut World, head_m: f64, budget: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Config, Material, SETTLE_WINDOW};
+    use crate::{Config, Material, SETTLE_REST, SETTLE_WINDOW};
 
     /// A flat ring of rock `top` voxels deep, with air over it.
     fn flat(width: u32, depth: u32, top: u32) -> World {
@@ -444,6 +444,7 @@ mod tests {
             inventory_m: 0.2,
             atmosphere_fraction: 0.1,
             aquifer_head_m: 0.1,
+            ..Water::DRY
         };
         let out = hydrate(&mut world, &w);
         let c = world.config().clone();
@@ -492,8 +493,7 @@ mod tests {
             &mut world,
             &Water {
                 inventory_m: 0.05,
-                atmosphere_fraction: 0.0,
-                aquifer_head_m: 0.0,
+                ..Water::DRY
             },
         );
         assert_eq!(out.pooled_m3, 0.0, "nothing to spare for a pond: {out:?}");
@@ -501,6 +501,221 @@ mod tests {
         assert!(world.free.iter().all(|&f| f == 0.0));
         let total = 0.05 * 24.0 * 4.0 * world.config().cell_area();
         assert!((out.total_m3() - total).abs() <= 1e-9 * total, "{out:?}");
+    }
+
+    /// The roofed bowl of `hollows`' own fixture: `hydrate` finds it like any other
+    /// basin, and the water is still in it after the solver has had its say.
+    ///
+    /// (Restored: this test and the settle one below were cut by an editing slip in
+    /// `e260844` and are back with the behaviour they always asserted.)
+    #[test]
+    fn a_grotto_bowl_is_a_basin_and_keeps_what_hydrate_puts_in_it() {
+        let config = Config {
+            width: 12,
+            height: 10,
+            depth: 2,
+            voxel_m: 0.25,
+            ..Config::default()
+        };
+        let mut world = World::empty(config.clone());
+        for z in 0..config.depth {
+            for x in 0..config.width as i64 {
+                for y in 1..=5 {
+                    world.material[config.index(x, y, z)] = Material::Bedrock;
+                }
+            }
+            // A bowl from x = 3 to 8, floor at y = 3, roofed at y = 7, mouth at x = 3.
+            for x in 3..=8i64 {
+                for y in 4..=6 {
+                    world.material[config.index(x, y, z)] = Material::Air;
+                }
+            }
+            for x in 4..=8i64 {
+                world.material[config.index(x, 7, z)] = Material::Bedrock;
+            }
+        }
+        world.rebuild_active_sets();
+
+        let out = hydrate(
+            &mut world,
+            &Water {
+                inventory_m: 0.05,
+                ..Water::DRY
+            },
+        );
+        assert!(out.pooled_m3 > 0.0, "the bowl took water: {out:?}");
+        let roofed: Vec<usize> = (4..=8i64)
+            .flat_map(|x| (0..config.depth).map(move |z| (x, z)))
+            .map(|(x, z)| config.index(x, 4, z))
+            .collect();
+        assert!(
+            roofed.iter().any(|&i| world.free[i] > 0.0),
+            "the water went under the roof"
+        );
+        let settled = world.settle(300);
+        let v = world.view();
+        let held: f64 = (4..=8i64)
+            .flat_map(|x| (0..config.depth).map(move |z| (x, z)))
+            .map(|(x, z)| v.water_depth_m(x, 3, z))
+            .sum();
+        assert!(held > 0.0, "the bowl let the water out: {settled:?}");
+    }
+
+    /// Settling is measured. A world already at rest says so **before** the convergence
+    /// window is even full; a world with a column of water standing over a pit finds its
+    /// level and keeps the volume; a world with water aloft and no pool anywhere is
+    /// stable *and* dry-locked, and one with a pool is not.
+    #[test]
+    fn settle_reports_rest_convergence_and_a_dry_lock() {
+        let mut still = flat(8, 2, 4);
+        still.rebuild_active_sets();
+        let at_rest = still.settle(600);
+        assert!(at_rest.converged, "a dry flat ring is already settled");
+        assert!(
+            at_rest.ticks < SETTLE_WINDOW,
+            "rest is reported without stepping the whole window: {at_rest:?}"
+        );
+        assert!(at_rest.ticks <= SETTLE_REST + 1, "{at_rest:?}");
+
+        let config = Config {
+            width: 8,
+            height: 10,
+            depth: 2,
+            voxel_m: 0.25,
+            ..Config::default()
+        };
+        let mut world = World::empty(config.clone());
+        for z in 0..config.depth {
+            for x in 0..config.width as i64 {
+                for y in 1..=4 {
+                    world.material[config.index(x, y, z)] = Material::Bedrock;
+                }
+            }
+            for x in 2..=4i64 {
+                world.material[config.index(x, 4, z)] = Material::Air;
+            }
+        }
+        world.rebuild_active_sets();
+        let poured = 3.0 * config.voxel_volume();
+        let taken = world.apply(crate::Command::AddWater {
+            x: 3,
+            y: 8,
+            z: 0,
+            volume_m3: poured,
+        });
+        assert!(taken > 0.0);
+        let out = world.settle(600);
+        assert!(out.converged && out.ticks < 600, "{out:?}");
+        assert!(
+            (out.pooled_m3 - taken).abs() <= 0.01 * taken,
+            "the pit kept what fell into it: {out:?} against {taken}"
+        );
+        assert!(
+            !out.dry_locked,
+            "a world with a pool in it is not locked dry: {out:?}"
+        );
+
+        // Water aloft, nowhere for it to fall to that it can stay: stable and still not a
+        // habitat. Rain is off, so the shower that starts delivers nothing.
+        let mut dry = World::empty(Config {
+            width: 8,
+            height: 8,
+            depth: 2,
+            closed_water_budget: true,
+            initial_atmosphere_m3: 1.0,
+            ..Config::default()
+        });
+        dry.rebuild_active_sets();
+        let locked = dry.settle(600);
+        assert!(
+            locked.converged && locked.dry_locked,
+            "stable and dry is not a habitat: {locked:?}"
+        );
+    }
+
+    /// A staged world runs the **closed** cycle its recipe asked for: the budget is on,
+    /// the atmosphere holds exactly its share of the inventory, the snapshot survives the
+    /// validator that refuses an open world holding water aloft, and the books balance
+    /// after a minute of weather.
+    #[test]
+    fn a_staged_world_runs_the_closed_cycle_its_recipe_asked_for() {
+        let recipe = crate::Recipe::DEFAULT;
+        let mut world = World::new(Config {
+            width: 24,
+            height: 16,
+            depth: 4,
+            voxel_m: 0.25,
+            seed: 1,
+            landform: crate::Landform::Staged(recipe),
+            ..Config::default()
+        });
+        let c = world.config().clone();
+        assert!(c.closed_water_budget, "the recipe turned the cycle on");
+        assert_eq!(c.rain_m_per_s, recipe.water.rain_m_per_s);
+        assert_eq!(c.evaporation_m_per_s, recipe.water.evaporation_m_per_s);
+        assert!(
+            c.evaporation_m_per_s > 0.0 && c.evaporation_m_per_s < c.rain_m_per_s,
+            "evaporation is on, and below the shower rate"
+        );
+
+        let footprint = c.width as f64 * c.depth as f64 * c.cell_area();
+        let want = recipe.water.inventory_m * footprint * recipe.water.atmosphere_fraction;
+        assert!(
+            (world.atmosphere_m3 - want).abs() <= 1e-9 * want,
+            "the atmosphere holds its share: {} against {want}",
+            world.atmosphere_m3
+        );
+
+        let bytes = world.save();
+        World::load(&bytes).expect("a closed staged world is a valid snapshot");
+
+        for _ in 0..60 {
+            world.step();
+        }
+        let v = world.view();
+        assert!(
+            v.total_residual().abs() <= 1e-9 * v.total_water_m3().max(1.0),
+            "residual {:e} after a minute of weather",
+            v.total_residual()
+        );
+    }
+
+    /// **Study, not a test.** `default` seed 1: settle, then run until the first shower
+    /// starts or 6000 ticks pass, and say when it fired and what it delivered.
+    #[test]
+    #[ignore = "study: run by name"]
+    fn the_first_shower_on_the_default_ring() {
+        let p = crate::Preset::find("default").unwrap();
+        let mut world = World::new(Config {
+            seed: 1,
+            ..p.config()
+        });
+        let settled = world.settle(600);
+        let during = world.view().ledger.showers;
+        let falling = world.shower_left_m3();
+        let fell_by_settle = world.view().ledger.atmosphere_out;
+        let mut next: Option<u64> = None;
+        for t in 0..6000u64 {
+            world.step();
+            if world.view().ledger.showers > during {
+                next = Some(t + 1);
+                break;
+            }
+        }
+        let v = world.view();
+        println!(
+            "settle {settled:?}\n\
+             showers started by the end of settle: {during} \
+             ({:.4} m³ fallen, {falling:.4} m³ of the current one still to come)\n\
+             next shower starts {next:?} ticks past settle; \
+             total fallen {:.4} m³; atmosphere {:.2} m³ against a trigger of {:.2} m³ \
+             of {:.2} m³ total",
+            fell_by_settle,
+            v.ledger.atmosphere_out,
+            world.atmosphere_m3,
+            v.config.shower_trigger_fraction * v.total_water_m3(),
+            v.total_water_m3(),
+        );
     }
 
     /// A dry recipe leaves the world exactly as it was.

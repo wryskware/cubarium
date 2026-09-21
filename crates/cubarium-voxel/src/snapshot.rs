@@ -22,7 +22,7 @@ use crate::World;
 /// `benches` section). Postcard
 /// is not self-describing, so a new field is a new format: earlier tags are refused,
 /// never migrated.
-pub const SCHEMA: u32 = 10;
+pub const SCHEMA: u32 = 11;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
