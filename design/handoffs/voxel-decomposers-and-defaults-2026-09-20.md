@@ -1,5 +1,5 @@
 ---
-status: open
+status: S1 and S2 landed; S3 moved
 date: 2026-09-20
 owner: Fable (orchestration); decisions recorded from Wrysk
 ---
@@ -87,3 +87,41 @@ shredder line, since the two now share a pool.
 
 Moved to its own brief, **not dispatched** by Wrysk's instruction:
 `voxel-soil-pool-brief-2026-09-20.md`.
+
+## Integration note (Fable, 2026-09-20, at 864f926)
+
+**S1 landed** (c510382): the two P3-C centres are committed under
+`crates/cubarium/assets/policies/` with a provenance README, embedded with
+`include_str!`, validated against this build's manifest digest, and installed
+on the ambient run's founders by default; `--founder-policy` overrides,
+`--founder-heuristic <lineage|all>` selects the observation-only control.
+One simulated hour on the generated closed world: littershredder 24 alive /
+95,668 bites on the trained default against 0 alive / 6,798 on the
+heuristics; frondgrazer 0 alive in both arms (bites stop at about minute
+26). The browser die-out is a new question, handed to Wrysk's thread in
+`voxel-browser-autopsy-2026-09-20.md`. Known limit: the fauna snapshot holds
+one bool per lineage, so loading a policy-driven world under a *different*
+trained centre is not refused; refusing it needs a policy digest beside the
+flag (a fauna-crate change, not made).
+
+**S2 landed** (3d1841b, 864f926): a saprotroph's substrate is dead wood plus
+litter, drawn pro rata by stock through the existing per-pool draw, yield
+applied per withdrawal (litter's retained energy is capped, a log's is not).
+No constants moved, no schema change, photo species untouched. The five
+tests specified in the brief are in `tests/round5b.rs` under the names
+given there. Six-hour census on the generated closed world, glowcap at
+1 / 3 / 6 h: 12 / 10 / 9 (never below 7) against the baseline 8 / 8 / 0
+(zero at minute 307). Fable confirmed the two CSVs. Litter is 4–8 % lower
+at every checkpoint (the fungi now drain it); plant stands at 6 h are 273
+against 286, consistent with fungal tissue holding mineral that litter decay
+used to release, a side effect for Wrysk to weigh with the soil-pool brief.
+The shredder line is unchanged because `voxel_census` still runs the
+heuristics: the example does not go through the ambient run's built-in
+default. Fable pointed `voxel_plant_autopsy` at the summed substrate.
+
+**S3** was run by Wrysk directly; its note is `design/soil-organic-matter-
+exploration-2026-09-20.md` (3f44c37).
+
+Follow-ups, not started: `voxel_census` and `voxel_founder_autopsy` should
+drive founders with the built-in trained default so the six-hour census
+measures the shipped world; the policy digest in the fauna snapshot.
