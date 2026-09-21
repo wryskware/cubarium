@@ -508,3 +508,63 @@ Open, for Wrysk:
   a task that does not ask a blind animal to find what it cannot smell. The
   plan's "nearby" is, for the blind founder, a number: under 1.5 m.
 - The survival term is still constant; unchanged since note 3.
+
+## Package P3-C: born with the wander (imitation seed, then search)
+
+Decided by Wrysk 2026-09-20: real animals fall back to area-restricted search
+when intake stops and nothing is in sensor range; build that instinct in as a
+*seed*, not a reflex layer, and accept that the constructed two-patch arena
+is a harsher case than continuous litter in the live world. Fallback if this
+fails for the blind founder: keep its Stage B inside its 1.5 m reach (the
+`near` band) as the honest task (option 3). No sense, body or score changes.
+
+Owner: one Opus 5 worker, high effort. Files: `crates/cubarium-search/src/es/**`
+and `main.rs` only. Read integration notes 4 and 5 first. The heuristic
+controllers to imitate are the fauna's `BlindForager` and `BrowserForager`
+(crates/cubarium-voxel-fauna/src/controller.rs), reachable through
+`VoxelControl::Heuristic`; they already wander with alternating turn bias
+when no cue is present and turn away from walls.
+
+Steps, each committed by explicit path:
+
+1. **Record teacher streams.** A `voxel-imitate` command runs the heuristic
+   on the 16 training layouts for Stage A and Stage B `landed`, at the
+   controller period, and records `(observation, adapted action)` pairs:
+   the same observation vector the GRU would receive and the heuristic's
+   bounded `(forward, turn, feed)`. Streams are per layout, disposable
+   files under `runs/voxel-imitate-*`, not committed.
+2. **Fit the GRU to the streams.** Minimise mean squared error between the
+   GRU's *adapted* actions and the teacher's over the recorded streams, run
+   teacher-forced (the GRU reads the recorded observations, never the sim).
+   Optimiser is the worker's choice: the existing ES machinery on this loss
+   is acceptable and needs no simulation per candidate; an analytic GRU
+   gradient is acceptable if it is tested against finite differences on a
+   tiny shape. Stop on a plateau or a fixed budget; report the final MSE per
+   action and the fraction of teacher steps whose sign of turn the clone
+   matches. Save the clone as an ordinary centre file (`store.rs`) with
+   provenance `imitation-of-heuristic-1`, stream digest and MSE, loadable by
+   `--init-center`.
+3. **Check the clone behaves like its teacher.** Evaluate the clone alone
+   (controller `gru`) on the landed Stage-B held-out eight with the P3-B
+   accounting, next to the heuristic control. It should approach the
+   heuristic's numbers (browser: successor bitten 6/8; blind: 2/8) and,
+   critically, keep moving after intake stops. If the clone parks, stop and
+   report: the fit is the problem, not the search.
+4. **Search from the clone.** `voxel-train --stage b --band landed
+   --init-center <clone>` for both founders, 32 pairs, 512 updates, 16
+   layouts. Evaluate on the landed held-out eight with the full accounting.
+   Compare against P3-B's A→landed arm (browser 6/8 reacquired at .784;
+   blind 0/8 at .410, closest approach 1.04 m).
+5. **Report** the two-row comparison per founder (A-seed vs wander-seed),
+   the clone's own row, the fit numbers, and the evidence for whether the
+   blind founder now enters its 1.5 m radius after depletion and whether it
+   bites. If the blind founder still reacquires 0/8, say so plainly; the
+   fallback is a decision Fable records, not a change the worker makes.
+
+Constraints: the clone is trained on training layouts only; held-out seeds
+stay untouched; nothing fixture-side enters an observation; the protocol hash
+of the ES run is the run's own, with the clone recorded as init provenance.
+Tests short (≤ 200 ticks); no bit-identical pins; explicit-path commits; do
+not edit `design/handoffs/README.md` or this file. Verification: `cargo
+nextest run -p cubarium-search` green. Return ≤ 40 lines with commits, tables
+and evidence. Fable integrates and runs the workspace suite.
