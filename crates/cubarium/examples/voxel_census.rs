@@ -137,8 +137,8 @@ fn main() {
 }
 
 /// The CSV header: `sim_min`, then per plant species `stands_<name>`, then per animal
-/// species `animals_<name>` and `body_<name>`, then the four ledger counters, then
-/// `litter`.
+/// species `animals_<name>` and `body_<name>`, then per founder lineage its count, mean
+/// body, standing eggs and gestating bodies, then the ledger counters, then `litter`.
 fn print_header() {
     let mut header = String::from("sim_min");
     for s in Plant::ALL {
@@ -151,14 +151,20 @@ fn print_header() {
     for f in Founder::ALL {
         header.push_str(&format!(",founders_{}", f.name()));
         header.push_str(&format!(",body_{}", f.name()));
+        // The eggs of that lineage standing in the world and the bodies of it
+        // gestating: a lineage with no living body but a clutch on the ground has not
+        // gone extinct yet, and the count alone could not say so.
+        header.push_str(&format!(",eggs_{}", f.name()));
+        header.push_str(&format!(",gestating_{}", f.name()));
     }
-    header.push_str(",flora_births,flora_deaths,fauna_births,fauna_deaths,litter");
+    header.push_str(",flora_births,flora_deaths,fauna_births,fauna_deaths,fauna_hatched,litter");
     header.push_str(",stored,atmosphere,showers,residual");
     println!("{header}");
 }
 
-/// One CSV row: `sim_min`, then per plant species the stand count, then per animal species
-/// the animal count and mean body, then the four ledger counters, then the total litter.
+/// One CSV row: `sim_min`, then per plant species the stand count, then per animal
+/// species the animal count and mean body, then per lineage its count, mean body, eggs
+/// and gestations, then the ledger counters, then the total litter.
 fn print_row(minute: u64, sim: &Sim) {
     let f = sim.flora().view();
     let a = sim.fauna().view();
@@ -197,11 +203,14 @@ fn print_row(minute: u64, sim: &Sim) {
             bodies.iter().sum::<f64>() / bodies.len() as f64
         };
         row.push(format!("{mean:.4}"));
+        row.push(a.eggs_by_founder(founder).to_string());
+        row.push(a.gestating_by_founder(founder).to_string());
     }
     row.push(f.ledger.births.to_string());
     row.push(f.ledger.deaths.to_string());
     row.push(a.ledger.births.to_string());
     row.push(a.ledger.deaths.to_string());
+    row.push(a.ledger.hatched.to_string());
     let litter: f64 = f.ground.iter().map(|g| g.litter).sum();
     row.push(format!("{litter:.4}"));
     let w = sim.world().view();

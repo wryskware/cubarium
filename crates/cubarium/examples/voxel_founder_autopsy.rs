@@ -15,8 +15,7 @@
 //! comparison or `heuristic` for the disclosed control.
 //!
 //! **It is read-only on the model.** Nothing here changes a birth, feeding, movement or
-//! physiology rule, the seeder, or a constant; the only new thing in the crates is the
-//! fauna ledger's [`Departure`] counters, which are counters.
+//! physiology rule, the seeder, or a constant.
 //!
 //! The founders are driven by the built-in trained centres by default, the same drivers
 //! `cubarium voxel`'s ambient run installs, so this autopsies the world that ships. A
@@ -29,8 +28,12 @@
 //! holds the whole autopsy and `grep` picks a view out of it:
 //!
 //! - `MIN` — one row per simulated minute per lineage: alive, cumulative born and
-//!   departures by cause, mean body and reserve, cumulative bites, and how many living
-//!   bodies have food inside their sensed reach.
+//!   departures by cause, mean body and reserve, cumulative bites, how many living
+//!   bodies have food inside their sensed reach, and — since the reproduction round —
+//!   the eggs of that lineage standing in the world and the bodies of it gestating.
+//! - `REPRO` — one row per simulated minute for the whole layer: the two reproduction
+//!   rules' own counters, which is where an egg that never hatched and a gestation that
+//!   never reached term are read.
 //! - `BODY` — one row per living body per minute: its age, stores, and the distance from
 //!   its pose to the nearest thing **it** can eat, against its own sensed reach.
 //! - `BIRTH` — one row per newborn, at the tick it appears: its body, its reserve, the
@@ -246,7 +249,7 @@ fn main() {
     // One header line per record type, so a `grep MIN,` of this file is a CSV with its
     // own column names a line above it.
     println!(
-        "HEADER,MIN,tick,minute,lineage,alive,starved,drowned,mean_body,mean_reserve,in_reach,mean_dist_m"
+        "HEADER,MIN,tick,minute,lineage,alive,starved,drowned,mean_body,mean_reserve,in_reach,mean_dist_m,eggs,gestating"
     );
     println!("HEADER,MINX,tick,minute,lineage,bites,assimilated,removed,max_dist_m,births_total");
     println!("HEADER,FOOD,tick,minute,litter_organic,litter_sites,foliage,foliage_stands");
@@ -260,6 +263,9 @@ fn main() {
         "HEADER,DEATH,tick,minute,id,lineage,cause,age_ticks,body,reserve,nearest_dist_m,nearest_species,nearest_foliage,crown_in_mouth,same_height_supports_2m,travelled_m,exits"
     );
     println!("HEADER,CAUSE,tick,minute,lineage,starved,drowned,removed");
+    println!(
+        "HEADER,REPRO,tick,minute,born,hatched,clutches_laid,eggs_laid,eggs_standing,eggs_lost,gestations_opened,gestations_failed"
+    );
     println!(
         "HEADER,PLANT,tick,minute,species,near_foliage,near_stands,total_foliage,total_stands,bites,eaten"
     );
@@ -619,13 +625,15 @@ fn report_minute(
         };
         let max_dist = dists.iter().copied().fold(0.0f64, f64::max);
         println!(
-            "MIN,{},{minute},{},{n},{},{},{:.7},{:.7},{in_reach},{mean_dist:.3}",
+            "MIN,{},{minute},{},{n},{},{},{:.7},{:.7},{in_reach},{mean_dist:.3},{},{}",
             minute * TICKS_PER_MIN,
             f.name(),
             l.departed_founder(f, Departure::Starved),
             l.departed_founder(f, Departure::Drowned),
             mean(body),
             mean(reserve),
+            av.eggs_by_founder(f),
+            av.gestating_by_founder(f),
         );
         println!(
             "MINX,{},{minute},{},{},{:.7},{},{max_dist:.3},{}",
@@ -650,6 +658,21 @@ fn report_minute(
         );
         previous_causes[f.index()] = current;
     }
+    // Reproduction, once per minute for the whole layer: the two rules' own counters,
+    // which are the only place an egg that never hatched or a gestation that never
+    // reached term can be read (`design/handoffs/voxel-reproduction-2026-09-21.md`).
+    println!(
+        "REPRO,{},{minute},{},{},{},{},{},{},{},{}",
+        minute * TICKS_PER_MIN,
+        l.born,
+        l.hatched,
+        l.clutches_laid,
+        l.eggs_laid,
+        av.clutches.iter().map(|c| u64::from(c.count)).sum::<u64>(),
+        l.eggs_lost,
+        l.gestations_opened,
+        l.gestations_failed,
+    );
     // The litter the blind feeders live off, and the foliage the browsers do.
     let litter: f64 = fv.ground.iter().map(|g| g.litter).sum();
     let sites = fv.ground.iter().filter(|g| g.litter > 0.0).count();
@@ -839,12 +862,24 @@ fn summary(sim: &Sim, ticks: u64) {
     }
     for f in Founder::ALL {
         println!(
-            "SUMMARY,{ticks},{},bites={} assimilated={:.7}",
+            "SUMMARY,{ticks},{},bites={} assimilated={:.7} eggs_standing={} gestating={}",
             f.name(),
             l.bites_by_founder[f.index()],
             l.assimilated_by_founder[f.index()],
+            sim.fauna().view().eggs_by_founder(f),
+            sim.fauna().view().gestating_by_founder(f),
         );
     }
+    println!(
+        "SUMMARY,{ticks},reproduction,born={} hatched={} clutches_laid={} eggs_laid={} eggs_lost={} gestations_opened={} gestations_failed={}",
+        l.born,
+        l.hatched,
+        l.clutches_laid,
+        l.eggs_laid,
+        l.eggs_lost,
+        l.gestations_opened,
+        l.gestations_failed,
+    );
     for species in Plant::ALL {
         let i = species.index();
         println!(
