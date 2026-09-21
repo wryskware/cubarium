@@ -115,6 +115,68 @@ pub fn ring_noise(x_m: f64, z_m: f64, circumference_m: f64, cells: u32, seed: u6
 /// clamp the rare excursion past it rather than shrinking everything to fit it.
 const GAIN: f64 = 2.4;
 
+/// Unit gradient at a lattice point of the three-dimensional lattice.
+fn gradient3(ix: i64, iy: i64, iz: i64, seed: u64) -> (f64, f64, f64) {
+    let a = hash2(
+        ix,
+        iz,
+        seed ^ (iy as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15),
+    );
+    // A direction on the sphere from two independent angles.
+    let theta = (a >> 11) as f64 / (1u64 << 53) as f64 * TAU;
+    let cos_phi = ((a << 11) >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0;
+    let sin_phi = (1.0 - cos_phi * cos_phi).max(0.0).sqrt();
+    (sin_phi * theta.cos(), cos_phi, sin_phi * theta.sin())
+}
+
+/// Gradient noise in three dimensions, roughly `-1..1`, periodic in `x` with exactly
+/// `cells` lattice cells around `circumference_m`. `y` and `z` run on the same lattice
+/// and do not wrap: up is up and the habitat has two walls.
+///
+/// Same rule as [`ring_noise`]: the metre coordinate is reduced modulo the circumference
+/// before it reaches the lattice, so a gallery that runs off one end of the ring arrives
+/// at the other as the same gallery.
+pub fn ring_noise_3d(
+    x_m: f64,
+    y_m: f64,
+    z_m: f64,
+    circumference_m: f64,
+    cells: u32,
+    seed: u64,
+) -> f64 {
+    let cells = cells.max(1);
+    let cell_m = circumference_m / cells as f64;
+    if !(cell_m > 0.0 && cell_m.is_finite()) {
+        return 0.0;
+    }
+    let fx = x_m.rem_euclid(circumference_m) / cell_m;
+    let (fy, fz) = (y_m / cell_m, z_m / cell_m);
+    let (ix, iy, iz) = (fx.floor(), fy.floor(), fz.floor());
+    let (tx, ty, tz) = (fx - ix, fy - iy, fz - iz);
+    let (i0, j0, k0) = (ix as i64, iy as i64, iz as i64);
+    let (ux, uy, uz) = (quintic(tx), quintic(ty), quintic(tz));
+    let n = cells as i64;
+    let mut acc = 0.0;
+    for (dx, dy, dz) in [
+        (0i64, 0i64, 0i64),
+        (1, 0, 0),
+        (0, 1, 0),
+        (1, 1, 0),
+        (0, 0, 1),
+        (1, 0, 1),
+        (0, 1, 1),
+        (1, 1, 1),
+    ] {
+        let (gx, gy, gz) = gradient3((i0 + dx).rem_euclid(n), j0 + dy, k0 + dz, seed);
+        let (ox, oy, oz) = (tx - dx as f64, ty - dy as f64, tz - dz as f64);
+        let wx = if dx == 0 { 1.0 - ux } else { ux };
+        let wy = if dy == 0 { 1.0 - uy } else { uy };
+        let wz = if dz == 0 { 1.0 - uz } else { uz };
+        acc += (gx * ox + gy * oy + gz * oz) * wx * wy * wz;
+    }
+    acc * GAIN
+}
+
 /// Walk the resolved octaves of a ladder, handing each one its cell count and amplitude.
 /// Returns the amplitude sum, so a caller can normalise.
 fn walk(
@@ -261,6 +323,29 @@ mod tests {
             "the ladder still only asks for 6"
         );
         assert_eq!(resolved_octaves(&LADDER, 64.0), 0);
+    }
+
+    /// The three-dimensional field repeats around the ring too, so a gallery running off
+    /// one end arrives at the other as the same gallery.
+    #[test]
+    fn the_three_dimensional_field_repeats_around_the_ring() {
+        let circ = 32.0;
+        let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+        for i in 0..128 {
+            let x = i as f64 * 0.25;
+            for y in [0.0, 1.25, 4.5] {
+                let here = ring_noise_3d(x, y, 1.5, circ, 8, 4);
+                let there = ring_noise_3d(x + circ, y, 1.5, circ, 8, 4);
+                assert_eq!(here.to_bits(), there.to_bits(), "x {x} y {y}");
+                lo = lo.min(here);
+                hi = hi.max(here);
+            }
+        }
+        assert!(hi - lo > 0.8, "the field barely moves: {lo:.3}..{hi:.3}");
+        assert!(
+            lo > -1.4 && hi < 1.4,
+            "the field left its range: {lo:.3}..{hi:.3}"
+        );
     }
 
     /// Bounded and not constant: a field that always returns zero would pass every seam
