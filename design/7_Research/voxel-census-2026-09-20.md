@@ -59,3 +59,84 @@ except stonecushion dies on a fixed schedule in the authored habitat when the
 same species persist in the study arena; (2) what kills the founders in the
 first half hour, by cause, and whether newborns can reach food at all. The
 first live ambient instance waits on both.
+
+## Diagnoses (D1, D2; 2026-09-20, at edfa8f6)
+
+Brief: `design/handoffs/voxel-collapse-diagnosis-2026-09-20.md`. Examples:
+`crates/cubarium/examples/voxel_plant_autopsy.rs` (edfa8f6) and
+`voxel_founder_autopsy.rs` (23f81f7); the fauna ledger now books departures
+by cause and lineage (93907e7, snapshot schema 7). Fable re-ran both
+autopsies; the numbers below reproduced.
+
+### D1 — the authored world is dry, so every plant's income is zero
+
+`cubarium_voxel::Config::default()` has no rain and no aquifer head, and
+`scene::authored` only pours free water into the bowl's air cells; pore
+water is never created. At seeding all 62 founders read mean pore 0.0000 and
+μ = 0, and 0 of 3,072 skyline columns pass any species' pore gate, at t = 0
+and at 6 h. Deaths are pure reserve-then-dieback timing ordered by each
+species' maintenance: a plant-only run (fauna never stepped) reproduces the
+census to the minute (springturf 15, glowcap 155, velvetpad 179, bloomcrown
+and umbrellafrond 249; 56 deaths, 0 drownings). Umbrellafrond stands in
+0.4999 m of pool water with no soil in its root box (the bowl is carved to
+rock) and dies of thirst in the pond. Stonecushion is not surviving; it is
+the slowest bill (W 0.050 → 0.0215 at 6 h, extrapolated death near minute
+615).
+
+Why the study arena kept them: its generated world runs rain 2e-4 m/s with
+an open outlet and a charged aquifer; moisture 0.85–1.00, zero deaths, same
+presets and start size. Only the water differs.
+
+Why nothing germinates: no propagule ever lands (a founder can fund a parcel
+only from reserve above half its cap, and with zero income that pot is spent
+once: 40–96 % of a package), and even a full bank has no eligible column
+(the pore gate refuses all 3,072). The seeder's site proxy never consults the
+establishment predicate: 62 of 62 founders stand where their own seeds are
+refused.
+
+Proposed, not made: give the ambient world the study arena's water budget.
+On the authored fixture that floods (no outlet cell exists): with arena rain
+and a 1.5 m head, at 1 h the presets are solvent at 8–19× maintenance with 47
+establishments, but 14 of 15 deaths are drownings and 1,245 columns are
+under standing water. So the real choice is between wetting the authored
+fixture (it needs an outlet) and running the ambient habitat on the
+generated world. Two presets may have no niche here at all once wet:
+umbrellafrond (rock bowl, no root soil) and velvetpad (its establish pore
+0.30 is above soil's field capacity 0.25).
+
+### D2 — all 65 founders starve; the blind heuristic freezes and cannot feel a drop
+
+All 65 deaths are starvation (44 littershredder, 21 frondgrazer; 0 drowned),
+every body at `body_min` with reserve 0. Newborn placement is fine: 49 of 49
+born within reach of food (blind max 0.18 m of 1.5 m; browser 0.38 m of
+2.0 m). Blind births leave the parent at exactly zero reserve (`birth_cost`
+equals the full reserve) and each standing founder paid three births in its
+first 111 s, refilling twice; the births are not the killer, they are what
+stacks seven bodies on one tile.
+
+Blind lineage: 0 of 44 travelled more than 1 m in its life, 36 travelled
+0.000 m, while holding forward 1.0 every tick and paying the motor bill; not
+one non-zero turn sample in 30 minutes. `BlindForager` returns turn 0
+whenever a litter cue ≥ 0.02 is present with a flat trend, and after minute
+1 litter lies on 70 sites so the diffuse cue is always present and flat. The
+wall branch cannot rescue it: `contact_readings` only feels a solid at body
+height, and 452 of 542 littershredder body-minutes had a drop or the strip's
+end ahead, refusals the founder motion rule makes (destination must be a
+support face at exactly the body's own standing height) and the receptors
+cannot sense. Result: six stacks of seven bodies, each tile eaten out by
+minute 3, fifteen minutes of starving in place while world litter rose
+1.6 → 6.3.
+
+Browsers fail differently: 14 of 21 travelled over 1 m (to 225 m), 2,822
+bites, but the foliage under them collapses (D1) and only 2.2 % of browser
+body-minutes had a stand inside the 0.0625 m mouth reach.
+
+Newborn budget from the constants: 1,000 s at rest, 500 s at cruise (62.5 m
+blind, 125 m browser). Observed newborn lifetimes 504–884 s: they cruise.
+
+Proposed, not made: make `BlindForager` treat "cue present, trend flat" as
+the wander case unless the previous interval actually delivered forward
+motion (the delivered-forward channel already exists in Self). Second
+candidate, unmeasured: the founder motion rule's same-height requirement
+confines a founder to the flat patch it stands on; how large those patches
+are on this landform was not measured.

@@ -1,5 +1,5 @@
 ---
-status: open
+status: landed
 date: 2026-09-20
 owner: Fable (orchestration); Wrysk decides what changes afterwards
 ---
@@ -81,3 +81,10 @@ hook), `crates/cubarium/examples/` (a new example). Do not touch
 4. Propose one change (a birth cooldown, a newborn placement rule, a reserve
    floor after birth, or a seeding density) with the evidence that would
    show it worked, without making it.
+
+## Result (Fable, 2026-09-20)
+
+Both diagnoses landed; findings and proposed changes are recorded in
+`design/7_Research/voxel-census-2026-09-20.md` ("Diagnoses"). Decisions
+(water budget of the ambient world; the blind heuristic; the same-height
+motion rule) are Wrysk's.
