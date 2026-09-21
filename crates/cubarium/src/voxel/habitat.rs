@@ -12,7 +12,9 @@
 //! founder) — introduced hungry through `Command::IntroduceFounder` with their own
 //! observation-only heuristics installed. The legacy `Species::Frondgrazer` animal is
 //! still in the fauna crate and still reachable from the `g` stdin line; this seeder
-//! stopped placing it.
+//! stopped placing it. Those heuristics are the seeder's floor: the ambient run installs
+//! the trained P3-C centres over them by default (`crates/cubarium/assets/policies`),
+//! and `--founder-heuristic` is what leaves this floor standing.
 //!
 //! **It is a stage-1 dev scene, not a tuned ecology.** The species are placed by simple
 //! environment proxies — standing water, rock or soil, height band — every founder is
@@ -29,8 +31,7 @@ use cubarium_voxel_fauna::{
     StartingStores,
 };
 use cubarium_voxel_flora::{
-    Command as FloraCommand, Deposit, DepositKind, Flora, FloraView, Site, Species,
-    highest_support,
+    Command as FloraCommand, Deposit, DepositKind, Flora, FloraView, Site, Species, highest_support,
 };
 
 /// World ticks run before anything is planted. The authored fixture fills its pool to a
@@ -206,14 +207,17 @@ pub fn seed(world: &mut World, flora: &mut Flora, fauna: &mut Fauna) -> Seeded {
     // The two **sensed founder lineages**, which is what walks this habitat now. Both
     // arrive hungry (`StartingStores::HUNGRY`, the arenas' P2-C start): a body placed
     // full has nowhere to put what it eats, so eating would be worth nothing to it.
-    // Both are driven by their own observation-only heuristic, installed through the
-    // fauna layer's ordinary controller boundary.
+    // The seeder installs each lineage's own observation-only heuristic through the
+    // fauna layer's ordinary controller boundary, and registers it as that lineage's
+    // **birth factory** too, so a founder born here is handed a fresh controller of its
+    // parent's kind instead of resting for ever while paying upkeep.
     //
-    // The heuristics are also registered as each lineage's **birth factory**, so a
-    // founder born here is handed a fresh controller of its parent's kind instead of
-    // resting for ever while paying upkeep. A caller that wants something else — the
-    // ambient run's `--founder-policy` — replaces both the factory and the standing
-    // bodies' controllers afterwards.
+    // That heuristic is the seeder's floor, not the live run's default: the ambient run
+    // replaces both the factory and the standing bodies' controllers afterwards with the
+    // trained P3-C centre built into the binary (`crates/cubarium/assets/policies`),
+    // unless `--founder-heuristic` asks for this floor as the disclosed control or
+    // `--founder-policy` names another centre. A caller that seeds a habitat without
+    // going through `cubarium voxel` gets the heuristics and nothing else.
     install_heuristics(fauna);
 
     // Littershredders on litter-bearing soil: dry open soil away from the stands, each
@@ -243,7 +247,13 @@ pub fn seed(world: &mut World, flora: &mut Flora, fauna: &mut Fauna) -> Seeded {
             continue;
         }
         seeded.litter_tiles += 1;
-        if introduce_founder(world, fauna, Founder::Blind, site, spread_heading(k, SHREDDERS)) {
+        if introduce_founder(
+            world,
+            fauna,
+            Founder::Blind,
+            site,
+            spread_heading(k, SHREDDERS),
+        ) {
             taken.push(site);
             seeded.founders[Founder::Blind.index()] += 1;
         }

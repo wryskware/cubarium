@@ -241,7 +241,11 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
             };
             let mut flora = Flora::new(FloraConfig::default());
             let mut fauna = Fauna::new(FaunaConfig::default());
-            let drivers = founder_drivers(args)?;
+            let recipes = founder_recipes(args)?;
+            let drivers: Vec<(Founder, EpisodeDriver)> = recipes
+                .iter()
+                .filter_map(|r| r.driver.clone().map(|d| (r.founder, d)))
+                .collect();
             if !args.empty {
                 let seeded = habitat::seed(&mut world, &mut flora, &mut fauna);
                 eprintln!(
@@ -260,11 +264,18 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                 habitat::install_heuristics(&mut fauna);
             }
             install_founder_controllers(&mut fauna, &drivers)?;
-            for (founder, driver) in &drivers {
+            // Say what is actually driving each lineage, every run: the default is now a
+            // trained centre, and a trained animal and a reflex animal are told apart
+            // from outside only by being told apart here.
+            for recipe in &recipes {
                 eprintln!(
-                    "cubarium voxel: {} founders are driven by {}",
-                    founder.name(),
-                    driver.name(),
+                    "cubarium voxel: {} founders are driven by {} ({})",
+                    recipe.founder.name(),
+                    match &recipe.driver {
+                        Some(driver) => driver.name(),
+                        None => "the observation-only heuristic".to_string(),
+                    },
+                    recipe.source,
                 );
             }
             let label = match (&args.load, args.scene) {
@@ -499,42 +510,134 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     Ok(())
 }
 
-/// Load the `--founder-policy` files into one episode driver each, refusing a file
-/// whose own declared lineage is not the one the flag named.
+/// The trained centres the ambient run installs by default, carried inside the binary so
+/// the live world needs no files on disk. Provenance, and the rule that a centre is
+/// replaced and never edited, are in `crates/cubarium/assets/policies/README.md`.
+const BUILT_IN_POLICIES: [(Founder, &str, &str); 2] = [
+    (
+        Founder::Blind,
+        "littershredder-p3c-wander-gen441.json",
+        include_str!("../../assets/policies/littershredder-p3c-wander-gen441.json"),
+    ),
+    (
+        Founder::Browser,
+        "frondgrazer-p3c-wander-gen322.json",
+        include_str!("../../assets/policies/frondgrazer-p3c-wander-gen322.json"),
+    ),
+];
+
+/// Parse one embedded centre into a driver, with the same checks [`VoxelPolicyFile::load`]
+/// makes of a file on disk: the schema token first, then the file's own validation of
+/// lineage, weight count, finite weights and this build's founder-manifest digest.
 ///
-/// The file is the trainer's own policy file and validates itself — schema token,
+/// A centre that no longer matches this build's manifest fails here rather than being
+/// reinterpreted, which is the point of shipping the trainer's own file untouched: the
+/// binary refuses to pretend that weights trained against another schema are its default.
+fn built_in_driver(founder: Founder) -> Result<EpisodeDriver> {
+    let (_, name, json) = BUILT_IN_POLICIES
+        .iter()
+        .find(|(f, _, _)| *f == founder)
+        .ok_or_else(|| anyhow::anyhow!("no built-in centre for the {} lineage", founder.name()))?;
+    let file: VoxelPolicyFile = serde_json::from_str(json)
+        .with_context(|| format!("the built-in centre {name} is not a policy file"))?;
+    anyhow::ensure!(
+        file.schema == cubarium_search::es::voxel::store::POLICY_SCHEMA,
+        "the built-in centre {name}: schema `{}` is not {}",
+        file.schema,
+        cubarium_search::es::voxel::store::POLICY_SCHEMA,
+    );
+    let declared = file
+        .founder()
+        .map_err(|e| anyhow::anyhow!("the built-in centre {name}: {e}"))?;
+    anyhow::ensure!(
+        declared == founder,
+        "the built-in centre {name} declares the {} lineage, not {}",
+        declared.name(),
+        founder.name(),
+    );
+    file.driver()
+        .map_err(|e| anyhow::anyhow!("the built-in centre {name}: {e}"))
+}
+
+/// What one founder lineage of the ambient run is driven by, and how it was chosen. The
+/// source is carried so the run can say it out loud: a world whose animals are a trained
+/// policy and a world whose animals are a reflex look alike from outside.
+struct FounderRecipe {
+    founder: Founder,
+    /// `None` is the observation-only heuristic the seeder registered.
+    driver: Option<EpisodeDriver>,
+    source: String,
+}
+
+/// Choose each lineage's driver for the ambient run: `--founder-policy` first, then
+/// `--founder-heuristic` (the disclosed control), and otherwise the trained centre built
+/// into the binary, which is the default since Wrysk's 2026-09-20 decision — founders on
+/// these centres survived the generated closed world where the heuristics died.
+///
+/// A `--founder-policy` file is the trainer's own and validates itself — schema token,
 /// lineage, vector length, finite weights, and a digest that is that founder manifest's
 /// — so all this adds is the cross-check the user's spelling makes possible: a browser
 /// centre asked to drive the blind lineage is refused by name rather than run against a
 /// schema it was never trained on.
-fn founder_drivers(args: &Voxel) -> Result<Vec<(Founder, EpisodeDriver)>> {
+fn founder_recipes(args: &Voxel) -> Result<Vec<FounderRecipe>> {
+    let policies = args.founder_policies()?;
+    let heuristics = args.founder_heuristics()?;
     let mut out = Vec::new();
-    for (founder, path) in args.founder_policies()? {
-        let file = VoxelPolicyFile::load(&path).map_err(anyhow::Error::msg)?;
-        let declared = file.founder().map_err(anyhow::Error::msg)?;
-        anyhow::ensure!(
-            declared == founder,
-            "--founder-policy {}={}: the file declares the {} lineage",
-            founder.name(),
-            path.display(),
-            declared.name(),
-        );
-        out.push((founder, file.driver().map_err(anyhow::Error::msg)?));
+    for founder in Founder::ALL {
+        if let Some((_, path)) = policies.iter().find(|(f, _)| *f == founder) {
+            let file = VoxelPolicyFile::load(path).map_err(anyhow::Error::msg)?;
+            let declared = file.founder().map_err(anyhow::Error::msg)?;
+            anyhow::ensure!(
+                declared == founder,
+                "--founder-policy {}={}: the file declares the {} lineage",
+                founder.name(),
+                path.display(),
+                declared.name(),
+            );
+            out.push(FounderRecipe {
+                founder,
+                driver: Some(file.driver().map_err(anyhow::Error::msg)?),
+                source: format!("--founder-policy {}", path.display()),
+            });
+        } else if heuristics.contains(&founder) {
+            out.push(FounderRecipe {
+                founder,
+                driver: None,
+                source: "--founder-heuristic, the disclosed control".to_string(),
+            });
+        } else {
+            let name = BUILT_IN_POLICIES
+                .iter()
+                .find(|(f, _, _)| *f == founder)
+                .map(|(_, n, _)| *n)
+                .unwrap_or("none");
+            out.push(FounderRecipe {
+                founder,
+                driver: Some(built_in_driver(founder)?),
+                source: format!("the built-in centre {name}"),
+            });
+        }
     }
     Ok(out)
 }
 
-/// Install the ambient run's founder controllers over a whole layer: every lineage keeps
-/// the heuristic the seeder registered unless `--founder-policy` named a saved GRU for
-/// it, in which case that lineage's **birth factory and every standing body of that
-/// lineage** are switched to the policy. One factory per lineage, and `EpisodeDriver::fresh`
-/// per body, so no two bodies share a hidden state.
+/// Install the ambient run's founder controllers over a whole layer: a lineage given a
+/// driver has its **birth factory and every standing body of that lineage** switched to
+/// it, and a lineage given none keeps the heuristic the seeder registered. One factory
+/// per lineage, and `EpisodeDriver::fresh` per body, so no two bodies share a hidden
+/// state. Since the trained centres became the default, "given none" means the run asked
+/// for the control with `--founder-heuristic`.
 ///
 /// A layer that *remembers* being policy-driven — [`Fauna::policy_driven`], which a
-/// snapshot carries — and is given no flag for that lineage is **refused here**, not
+/// snapshot carries — and is given no driver for that lineage is **refused here**, not
 /// quietly demoted to a heuristic: a world whose animals were a trained policy is not
-/// the same world with the heuristic put back, and silently substituting one is exactly
+/// the same world with the reflex put back, and silently substituting one is exactly
 /// the re-anchoring `always-fresh-never-migrate` forbids.
+///
+/// The record the layer carries is per lineage and boolean, so what is refused is the
+/// demotion, not a swap of one centre for another: loading a policy-driven world under a
+/// *different* trained centre is still a re-anchoring the fauna snapshot cannot yet see,
+/// which would need a policy digest stored beside the flag.
 fn install_founder_controllers(
     fauna: &mut Fauna,
     drivers: &[(Founder, EpisodeDriver)],
@@ -542,9 +645,11 @@ fn install_founder_controllers(
     for founder in Founder::ALL {
         if fauna.policy_driven(founder) && !drivers.iter().any(|(f, _)| *f == founder) {
             bail!(
-                "this world's {} founders were driven by a saved policy; pass \
-                 `--founder-policy {}=<centre.json>` to run them again, or start a fresh \
+                "this world's {} founders were driven by a saved policy; drop \
+                 `--founder-heuristic {}` to run them on the built-in centre, or pass \
+                 `--founder-policy {}=<centre.json>` to name one, or start a fresh \
                  world. They are not silently put back on the heuristic.",
+                founder.name(),
                 founder.name(),
                 founder.name(),
             );
@@ -1496,17 +1601,89 @@ mod tests {
         // without the flag rather than falling back.
         let mut loaded = Fauna::load(&fauna.save()).expect("the layer round-trips");
         crate::voxel::habitat::install_heuristics(&mut loaded);
+        //
+        // With the trained centres as the default, an empty driver list is what
+        // `--founder-heuristic` produces, so this is exactly the demotion the flag could
+        // ask for, and the message names both ways back.
         let err = format!(
             "{:#}",
             install_founder_controllers(&mut loaded, &[]).expect_err("a demotion in silence")
         );
         assert!(err.contains("littershredder"), "{err}");
+        assert!(err.contains("--founder-heuristic"), "{err}");
         assert!(err.contains("--founder-policy"), "{err}");
 
         // With the flag back, it loads.
         let driver = EpisodeDriver::control(VoxelControl::Heuristic, Founder::Blind);
         install_founder_controllers(&mut loaded, &[(Founder::Blind, driver)])
             .expect("the policy supplied again");
+    }
+
+    /// **The ambient run's default is the trained centres, and the binary carries them.**
+    ///
+    /// The two embedded files are the trainer's own output and validate themselves
+    /// against *this* build — schema token, declared lineage, weight count, finite
+    /// weights, and the founder-manifest digest — so this test fails loudly the moment a
+    /// manifest change makes the shipped default a policy for a schema that no longer
+    /// exists. That is the whole reason the centres are committed rather than fetched.
+    #[test]
+    fn the_built_in_centres_drive_their_own_lineage_by_default() {
+        use clap::Parser;
+
+        for founder in Founder::ALL {
+            let driver = built_in_driver(founder).expect("the built-in centre validates");
+            assert!(
+                driver.name().contains("gru"),
+                "{} runs a trained centre, not a control: {}",
+                founder.name(),
+                driver.name()
+            );
+        }
+
+        let voxel = |args: &[&str]| -> crate::cli::Voxel {
+            let mut line = vec!["cubarium", "voxel"];
+            line.extend(args.iter().copied());
+            match crate::cli::Cli::parse_from(line).command {
+                crate::cli::Command::Voxel(v) => v,
+                other => panic!("expected a voxel command, got {other:?}"),
+            }
+        };
+
+        // No flags: every lineage is driven by its built-in centre.
+        let recipes = founder_recipes(&voxel(&[])).expect("the default run");
+        assert_eq!(recipes.len(), Founder::ALL.len());
+        for recipe in &recipes {
+            assert!(
+                recipe.driver.is_some(),
+                "{} has a centre",
+                recipe.founder.name()
+            );
+            assert!(recipe.source.contains("built-in"), "{}", recipe.source);
+        }
+
+        // `--founder-heuristic all` is the control: no driver for either lineage, so the
+        // seeder's heuristic stands and `install_founder_controllers` records nothing.
+        let recipes = founder_recipes(&voxel(&["--founder-heuristic", "all"])).expect("control");
+        assert!(recipes.iter().all(|r| r.driver.is_none()));
+        assert!(
+            recipes
+                .iter()
+                .all(|r| r.source.contains("--founder-heuristic"))
+        );
+
+        // One lineage on the control, the other still on its centre.
+        let recipes =
+            founder_recipes(&voxel(&["--founder-heuristic", "blind"])).expect("one lineage");
+        let blind = recipes
+            .iter()
+            .find(|r| r.founder == Founder::Blind)
+            .expect("the blind lineage");
+        let browser = recipes
+            .iter()
+            .find(|r| r.founder == Founder::Browser)
+            .expect("the browser lineage");
+        assert!(blind.driver.is_none(), "{}", blind.source);
+        assert!(browser.driver.is_some(), "{}", browser.source);
     }
 
     #[test]
