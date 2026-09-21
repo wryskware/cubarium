@@ -198,11 +198,12 @@ impl Benches {
         ramp_m: 2.0,
     };
 
-    /// `small` has half the vertical room and a 1.6 m band in it, so a full pull would
-    /// put a quarter of its height into one face. Gentler.
+    /// `small`. Full strength, like the others: a partial pull on a 1.4 m band leaves a
+    /// face too short for a grotto to fit under, and a ledge you cannot get under is
+    /// just a slope with a step in it.
     pub const SMALL: Benches = Benches {
-        strength: 0.6,
-        ramp_m: 1.2,
+        strength: 1.0,
+        ramp_m: 0.4,
     };
 
     pub fn validate(&self) -> anyhow::Result<()> {
@@ -551,28 +552,57 @@ impl Recipe {
         },
     };
 
-    /// The `small` ring the Tachyon panel runs: 160 x 48 x 24 at 0.125 m, 20 m around
-    /// and only 6 m of headroom. A compact selection of landforms at half the relief,
-    /// five resolved octaves from 10 m down to 0.625 m — not the wide landscape squeezed
-    /// into a small ring.
+    /// The `small` ring the Tachyon panel runs: 160 x 48 x 24 at 0.125 m, 20 m around,
+    /// 6 m tall and 3 m deep, drawn at 4 px per voxel on a 640 x 360 raster.
+    ///
+    /// Designed from that picture rather than scaled down from `default`. Two broad
+    /// landforms around the ring and three rocky regions across them, so there are
+    /// benched, grotto-bearing headlands with soil valleys between. Bands of 1.4 m,
+    /// which is what a grotto needs: eleven voxels of face for a two-voxel cap over
+    /// seven of soft rock with the shared 0.75 m of clearance under it. The fields
+    /// barely vary with depth, so a rocky region is a stripe across the whole strip and
+    /// its benches are terraces the camera looks along.
+    ///
+    /// Measured at seeds 1, 7 and 77: 4 to 11 undercuts, 25 to 26 bench faces, a closed
+    /// basin with its spill above its floor on every seed, a fifth to a third of the
+    /// columns bare rock, the skyline pass under 4.5 %, and every ring walkable.
     pub const SMALL: Recipe = Recipe {
-        base_m: 1.5,
+        // 0.375 m of floor and 5.375 m of ceiling is five metres of room, and the bench
+        // pull spends up to one band of it, so the smooth relief lives in the top three
+        // and a half and the benches cut down into the rest.
+        base_m: 1.6,
         back_rise_m: 1.5,
-        basin_floor_m: 0.7,
+        basin_floor_m: 0.9,
+        // Three metres of habitat against twenty around: the fields barely change with
+        // depth, so a rocky region is a stripe across the whole strip and its benches
+        // are terraces the camera looks along, not patches that step down behind what
+        // is in front of them.
+        depth_scale: 0.2,
         relief_wavelength_m: 10.0,
-        relief_m: 1.3,
+        relief_m: 1.7,
         relief_octaves: 5,
         ridge_wavelength_m: 5.0,
-        ridge_relief_m: 0.7,
-        rocky_wavelength_m: 13.0,
+        ridge_relief_m: 0.55,
+        // Three rocky regions around twenty metres, with soft ground between them.
+        rocky_wavelength_m: 7.0,
+        rocky_fraction: 0.4,
         warp_wavelength_m: 11.0,
         warp_m: 0.9,
-        mantle_m: 0.16,
+        mantle_m: 0.18,
         soil_max_m: 0.9,
-        strata_m: 1.6,
+        // A grotto needs a cap of 2 voxels over 7 of soft rock and a neighbour cut below
+        // its floor: nine voxels of face, 1.125 m. A 1.4 m band gives eleven.
+        strata_m: 1.4,
         strata_warp_m: 0.25,
-        hardness_region_m: 11.0,
-        core_m: 1.0,
+        // Four cells of regional variation around twenty metres, not two: on a ring
+        // this short a slower field is one value per seed, and a seed whose value sat
+        // low had no hard bands anywhere and so no ledges at all.
+        hardness_region_m: 5.0,
+        // A thin cap over a thick soft band. At 0.125 m a grotto wants two voxels of
+        // bedrock over seven of rock, and the default's threshold makes the hard part of
+        // a 1.4 m band four voxels thick -- a roof so deep the notch never starts.
+        bedrock_hardness: 0.78,
+        core_m: 0.8,
         erosion: Erosion::SMALL,
         benches: Benches::SMALL,
         hollows: Hollows::SMALL,

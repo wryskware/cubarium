@@ -870,10 +870,9 @@ mod tests {
                 };
                 let (_, volume, report) = staged_terrain(&config, &recipe);
                 let (w, d) = (config.width as usize, config.depth as usize);
-                // The benched ground steps, and the undercut pass finds the steps. Not
-                // asked of `small`: a 1.6 m band at a 0.6 pull is a face 7.7 voxels tall
-                // and a notch there needs 9, so its ledges are ledges without grottos.
-                if p.name != "small" {
+                // The benched ground steps, and the undercut pass finds the steps —
+                // on every preset now, `small` included.
+                {
                     let steps = (0..d)
                         .flat_map(|z| (0..w).map(move |x| (x, z)))
                         .filter(|&(x, z)| {
