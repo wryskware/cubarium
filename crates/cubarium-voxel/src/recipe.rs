@@ -450,8 +450,15 @@ impl Water {
         aquifer_head_m: 0.0,
     };
 
-    /// The staged presets' inventory: 60 mm over the footprint, a tenth of it aloft, and
-    /// a water table a little above the basin floor so the low ground is damp from below.
+    /// The staged presets' inventory: half a metre of water over the footprint, six per
+    /// cent of it aloft (nothing at all under the **open** budget, which has no
+    /// atmosphere store), and a metre of water table.
+    ///
+    /// A metre of head costs `aquifer_porosity` metres of the inventory -- 0.35 -- and
+    /// bringing every soil voxel to field capacity costs another 0.025 to 0.035 on these
+    /// rings, so this leaves roughly 0.09 m for the pools: on `default` that is 16 m³ in
+    /// the basins against the 142 m³ it would take to fill every one of them to its spill.
+    /// Ponds in the low ground, not a flooded ring.
     pub const DEFAULT: Water = Water {
         inventory_m: 0.5,
         atmosphere_fraction: 0.06,

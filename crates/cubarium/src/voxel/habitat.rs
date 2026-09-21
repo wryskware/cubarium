@@ -971,10 +971,27 @@ mod tests {
 
     /// A few coupled ticks, the fast-iteration bar: the seeded founders stand, the layers
     /// step, and the two ledgers stay closed. Not a study, and deliberately not long.
+    ///
+    /// Run on the hand-built fixture **and** on the shipped `default` landscape, which is
+    /// what `cubarium voxel` with no TOML now generates: a habitat whose founders came off
+    /// support faces and hollow floors has to step as cleanly as one off a skyline.
     #[test]
     fn the_seeded_habitat_steps_with_closed_ledgers() {
-        let (mut world, mut flora, mut fauna, seeded) =
-            seeded(crate::voxel::scene::authored(config()));
+        steps_with_closed_ledgers(crate::voxel::scene::authored(config()));
+    }
+
+    #[test]
+    fn the_staged_default_habitat_steps_with_closed_ledgers() {
+        let preset = cubarium_voxel::Preset::find("default").unwrap();
+        steps_with_closed_ledgers(World::new(Config {
+            seed: 1,
+            ..preset.config()
+        }));
+    }
+
+    fn steps_with_closed_ledgers(world: World) {
+        let (mut world, mut flora, mut fauna, seeded) = seeded(world);
+        assert!(seeded.stands > 0, "a habitat with plants in it: {seeded:?}");
         let before: Vec<(u64, Species)> = flora
             .view()
             .stands

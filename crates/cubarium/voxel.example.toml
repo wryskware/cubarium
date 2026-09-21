@@ -40,15 +40,21 @@ height = 48
 # `depth` is on purpose absent: how deep the habitat is is the core's decision, so it
 # mirrors `cubarium_voxel::Config::default().depth` — 24 slabs at the chosen camera, which
 # is 48 px of ground plane on top of the strip's own height. Write `depth = N` to override.
-# Half the reference ecology's cell size: plant geometry is rescaled at startup,
-# and metre-sized animals occupy twice as many cells. Training arenas stay 0.25 m.
-voxel_m = 0.125
+# The cell size the `default` landscape below was written for. A recipe fixes its feature
+# sizes in metres, so halving this resolves the same landforms finer rather than shrinking
+# them; the shipped `small` ring runs at 0.125 m and states it.
+voxel_m = 0.25
 seed = 1
-rain_m_per_s = 0.0
-evaporation_m_per_s = 0.0
 water_substeps = 4
-# Level of the water table at creation, metres above the foundation. 0 is a dry aquifer.
-# Set it a little above the basin floor and the basin's soil is saturated from below and
-# seeps a pond, while higher ground drains to field capacity. The `a M3` stdin command
-# charges it by hand at run time.
-initial_aquifer_head_m = 0.0
+
+# Which generator builds the terrain, and the landscape it builds. `preset` names one of
+# the shipped recipes — small | default | wide — and any recipe field written beside it
+# overrides that one field. `landform = "ridge"` asks for the original ridge generator
+# instead, which is what every fixture and training arena still uses.
+#
+# The rain, evaporation and water-table keys that used to sit in `[world]` are the
+# recipe's business now: `Recipe.water` states the world's whole water inventory in metres
+# over the footprint and how it is split between the sky, the aquifer, the soil and the
+# pools. The `a M3` and `r M3` stdin commands still add water by hand at run time.
+[world.landform]
+preset = "default"
