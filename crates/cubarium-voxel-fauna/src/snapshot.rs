@@ -38,9 +38,15 @@ use crate::Fauna;
 /// autopsy needs to tell a starvation from a drowning. Pure instrumentation, and still a
 /// schema bump: the serialized ledger grew two arrays and a world saved under schema 6
 /// has no honest value for them.
+/// Schema 8 added [`crate::Fauna::policy_digest`] beside `policy_driven`: the
+/// `weights_fnv1a` of the centre each lineage is recorded as running, or `0` for a
+/// heuristic. `policy_driven` alone could tell a trained lineage from a heuristic one,
+/// but not one trained centre from another, so `install_founder_controllers` could not
+/// refuse a policy-driven world handed a *different* centre for the same lineage — only
+/// a bare demotion. A world saved under schema 7 has no honest digest to fill it with.
 /// Postcard is not self-describing, so older worlds are **refused**, not migrated
 /// (`always-fresh-never-migrate`): start a fresh world.
-pub const SCHEMA: u32 = 7;
+pub const SCHEMA: u32 = 8;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -230,6 +236,7 @@ mod tests {
 
         let mut fauna = layer(vec![body], 1);
         fauna.set_policy_driven(crate::Founder::Browser, true);
+        fauna.set_policy_digest(crate::Founder::Browser, 0xdead_beef_cafe_1234);
         fauna.ledger.bites_by_founder[crate::Founder::Browser.index()] = 3;
         fauna.ledger.assimilated_by_founder[crate::Founder::Browser.index()] = 2.5e-4;
         // A mind installed before the save is not part of the save.
@@ -241,6 +248,11 @@ mod tests {
         assert_eq!(back.view().ledger, fauna.view().ledger);
         assert!(back.policy_driven(crate::Founder::Browser));
         assert!(!back.policy_driven(crate::Founder::Blind));
+        assert_eq!(
+            back.policy_digest(crate::Founder::Browser),
+            0xdead_beef_cafe_1234
+        );
+        assert_eq!(back.policy_digest(crate::Founder::Blind), 0);
         assert!(
             back.take_controller(0).is_none(),
             "a loaded layer's founders rest until a driver installs controllers again"

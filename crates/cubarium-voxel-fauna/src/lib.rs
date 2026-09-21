@@ -869,6 +869,15 @@ pub struct Fauna {
     /// flag is the one thing a loader cannot re-derive, so it is recorded: a driver
     /// reading it either supplies the policy again or refuses the load.
     policy_driven: [bool; Founder::COUNT],
+    /// The `weights_fnv1a` digest of the centre driving this lineage, by
+    /// [`Founder::index`], or `0` for a heuristic or an untouched lineage. Recorded
+    /// beside [`Fauna::policy_driven`] for the same reason and by the same installer:
+    /// the bool alone can tell a trained lineage from a heuristic one, but not one
+    /// trained centre from another, so a loaded world whose lineage was driven by one
+    /// centre and is handed a *different* one could not be refused — only demoted or
+    /// silently swapped, both of which `always-fresh-never-migrate` forbids. This is
+    /// the identity a loader compares against.
+    policy_digest: [u64; Founder::COUNT],
 }
 
 impl Fauna {
@@ -895,6 +904,7 @@ impl Fauna {
             controllers: FounderControllers::default(),
             factories: FounderFactories::default(),
             policy_driven: [false; Founder::COUNT],
+            policy_digest: [0; Founder::COUNT],
         })
     }
 
@@ -948,6 +958,20 @@ impl Fauna {
     /// world at all.
     pub fn set_policy_driven(&mut self, founder: Founder, driven: bool) {
         self.policy_driven[founder.index()] = driven;
+    }
+
+    /// The `weights_fnv1a` digest of the centre this lineage is recorded as running, or
+    /// `0` for a heuristic or an untouched lineage. Snapshot state: see the field's own
+    /// note for why it is recorded beside [`Fauna::policy_driven`].
+    pub fn policy_digest(&self, founder: Founder) -> u64 {
+        self.policy_digest[founder.index()]
+    }
+
+    /// Record the `weights_fnv1a` digest of the centre now driving this lineage. A
+    /// driver sets it whenever it sets [`Fauna::set_policy_driven`]; a loader reads it
+    /// to decide whether the centre it was handed is the one this world remembers.
+    pub fn set_policy_digest(&mut self, founder: Founder, digest: u64) {
+        self.policy_digest[founder.index()] = digest;
     }
 
     /// Forget a lineage's factory. Founders of that kind born afterwards rest.

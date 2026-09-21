@@ -656,10 +656,11 @@ fn founder_recipes(args: &Voxel) -> Result<Vec<FounderRecipe>> {
 /// the same world with the reflex put back, and silently substituting one is exactly
 /// the re-anchoring `always-fresh-never-migrate` forbids.
 ///
-/// The record the layer carries is per lineage and boolean, so what is refused is the
-/// demotion, not a swap of one centre for another: loading a policy-driven world under a
-/// *different* trained centre is still a re-anchoring the fauna snapshot cannot yet see,
-/// which would need a policy digest stored beside the flag.
+/// The record the layer carries is per lineage and a [`Fauna::policy_digest`]
+/// (`weights_fnv1a`, `0` for a heuristic), so what is refused is not only the demotion
+/// but a swap of one centre for another: a loaded world whose recorded digest is nonzero
+/// and does not match the digest of the driver offered for that lineage is refused by
+/// name, the same re-anchoring the bare-demotion refusal above forbids.
 fn install_founder_controllers(
     fauna: &mut Fauna,
     drivers: &[(Founder, EpisodeDriver)],
@@ -678,12 +679,28 @@ fn install_founder_controllers(
         }
     }
     for (founder, driver) in drivers {
+        let digest = driver.digest();
+        let recorded = fauna.policy_digest(*founder);
+        if recorded != 0 && recorded != digest {
+            bail!(
+                "this world's {} founders were driven by a saved policy, centre digest \
+                 {recorded:#018x}; the centre supplied here is a different one (digest \
+                 {digest:#018x}). That is not the same world under a new centre, so the \
+                 policy is refused rather than swapped in silence — supply the same \
+                 centre, or start a fresh world.",
+                founder.name(),
+            );
+        }
+    }
+    for (founder, driver) in drivers {
+        let digest = driver.digest();
         let driver = driver.clone();
         fauna.set_founder_factory(
             *founder,
             std::sync::Arc::new(move || -> Box<dyn Controller> { driver.fresh() }),
         );
         fauna.set_policy_driven(*founder, true);
+        fauna.set_policy_digest(*founder, digest);
     }
     // Re-install over every standing founder body, so a loaded layer's bodies and the
     // bodies a policy flag took over are both driven by the lineage's current recipe.
@@ -1639,6 +1656,106 @@ mod tests {
         let driver = EpisodeDriver::control(VoxelControl::Heuristic, Founder::Blind);
         install_founder_controllers(&mut loaded, &[(Founder::Blind, driver)])
             .expect("the policy supplied again");
+    }
+
+    /// **A policy-driven lineage loaded under a *different* centre is refused, not
+    /// silently run on the wrong weights.**
+    ///
+    /// The bool alone tells a trained lineage from a heuristic one; it cannot tell one
+    /// trained centre from another. [`Fauna::policy_digest`] (`weights_fnv1a`) is
+    /// recorded beside it for exactly this: two GRU centres for the same lineage, same
+    /// shape, different weights, so different digests, and the loaded layer's recorded
+    /// digest disagrees with the second one it is offered.
+    #[test]
+    fn a_policy_driven_lineage_under_a_different_centre_is_refused_on_load() {
+        use cubarium_search::es::tensor::initial_center_shape;
+        use cubarium_voxel_fauna::StartingStores;
+
+        let world = crate::voxel::scene::authored(cubarium_voxel::Config {
+            width: 32,
+            height: 16,
+            depth: 4,
+            ..cubarium_voxel::Config::default()
+        });
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        crate::voxel::habitat::install_heuristics(&mut fauna);
+        let placed = (0..32i64).any(|x| {
+            fauna.apply(
+                &world,
+                FaunaCommand::IntroduceFounder {
+                    x,
+                    z: 1,
+                    founder: Founder::Blind,
+                    stores: StartingStores::HUNGRY,
+                    heading_rad: 0.0,
+                },
+            )
+        });
+        assert!(placed, "a founder body stands somewhere on the strip");
+
+        let theta_a = initial_center_shape::<23, 3>(11);
+        let driver_a = EpisodeDriver::gru(&theta_a, Founder::Blind).expect("a valid centre");
+        install_founder_controllers(&mut fauna, &[(Founder::Blind, driver_a)])
+            .expect("the first centre installs");
+        assert!(fauna.policy_driven(Founder::Blind));
+
+        let mut loaded = Fauna::load(&fauna.save()).expect("the layer round-trips");
+        crate::voxel::habitat::install_heuristics(&mut loaded);
+
+        let theta_b = initial_center_shape::<23, 3>(29);
+        assert_ne!(theta_a, theta_b, "the two seeds give two different centres");
+        let driver_b = EpisodeDriver::gru(&theta_b, Founder::Blind).expect("a valid centre");
+        let err = format!(
+            "{:#}",
+            install_founder_controllers(&mut loaded, &[(Founder::Blind, driver_b)])
+                .expect_err("a different centre for the same lineage is refused")
+        );
+        assert!(err.contains("littershredder"), "{err}");
+        assert!(err.contains("different"), "{err}");
+    }
+
+    /// **The same centre loads without complaint.** The digest the loaded layer carries
+    /// equals the digest of the driver offered again, so the world is accepted — the
+    /// refusal above is about a *different* centre, not every reload.
+    #[test]
+    fn a_policy_driven_lineage_under_the_same_centre_is_accepted_on_load() {
+        use cubarium_search::es::tensor::initial_center_shape;
+        use cubarium_voxel_fauna::StartingStores;
+
+        let world = crate::voxel::scene::authored(cubarium_voxel::Config {
+            width: 32,
+            height: 16,
+            depth: 4,
+            ..cubarium_voxel::Config::default()
+        });
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        crate::voxel::habitat::install_heuristics(&mut fauna);
+        let placed = (0..32i64).any(|x| {
+            fauna.apply(
+                &world,
+                FaunaCommand::IntroduceFounder {
+                    x,
+                    z: 1,
+                    founder: Founder::Blind,
+                    stores: StartingStores::HUNGRY,
+                    heading_rad: 0.0,
+                },
+            )
+        });
+        assert!(placed, "a founder body stands somewhere on the strip");
+
+        let theta = initial_center_shape::<23, 3>(7);
+        let driver = EpisodeDriver::gru(&theta, Founder::Blind).expect("a valid centre");
+        install_founder_controllers(&mut fauna, &[(Founder::Blind, driver)])
+            .expect("the centre installs");
+
+        let mut loaded = Fauna::load(&fauna.save()).expect("the layer round-trips");
+        crate::voxel::habitat::install_heuristics(&mut loaded);
+
+        let same = EpisodeDriver::gru(&theta, Founder::Blind).expect("the same centre again");
+        install_founder_controllers(&mut loaded, &[(Founder::Blind, same)])
+            .expect("the same centre loads without complaint");
+        assert!(loaded.policy_driven(Founder::Blind));
     }
 
     /// **The ambient run's default is the trained centres, and the binary carries them.**

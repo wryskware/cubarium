@@ -399,6 +399,34 @@ impl EpisodeDriver {
             EpisodeKind::Control(VoxelControl::Heuristic) => "heuristic".into(),
         }
     }
+
+    /// This driver's `weights_fnv1a` — FNV-1a 64 over its exact weights, the same digest
+    /// [`crate::es::voxel::trainer`] stamps a checkpoint's provenance with
+    /// ([`crate::es::voxel::store::VoxelPolicyFile`] carries the founder-**manifest**
+    /// digest instead, which every centre trained for a lineage shares; this one tells
+    /// two different trained centres for the same lineage apart). Zero for a diagnostic
+    /// control, which has no weights to name — a fauna layer stores this beside
+    /// [`crate::Fauna::policy_driven`] so a loader can refuse a saved policy-driven world
+    /// handed a *different* centre for the same lineage, not only a bare demotion.
+    pub fn digest(&self) -> u64 {
+        match &self.kind {
+            EpisodeKind::Gru(EpisodeGru::Blind(policy)) => {
+                weights_fnv1a(&tensor::flatten_shape(&policy.weights))
+            }
+            EpisodeKind::Gru(EpisodeGru::Browser(policy)) => {
+                weights_fnv1a(&tensor::flatten_shape(&policy.weights))
+            }
+            EpisodeKind::Control(_) => 0,
+        }
+    }
+}
+
+/// FNV-1a 64 over the weights' little-endian hex — the same bytes
+/// [`crate::es::voxel::trainer`]'s own `fnv1a_hex` and [`crate::es::fixture::fnv1a`] hash,
+/// so a driver built from a [`crate::es::voxel::store::VoxelPolicyFile`]'s `theta` and a
+/// checkpoint's `weights_fnv1a` provenance name the same centre the same way.
+fn weights_fnv1a(theta: &[f64]) -> u64 {
+    crate::es::fixture::fnv1a(crate::es::bits::encode(theta).as_bytes())
 }
 
 #[cfg(test)]
