@@ -573,6 +573,17 @@ pub struct FaunaLedger {
     /// species. This is that measurement, taken where the bite happens.
     pub bites_by_plant: [u64; cubarium_voxel_flora::Species::COUNT],
     pub eaten_by_plant: [f64; cubarium_voxel_flora::Species::COUNT],
+    /// Local founder bites and the organic matter they actually **placed** into body
+    /// and reserve, by lineage, indexed by [`Founder::index`].
+    ///
+    /// The same kind of measurement as `bites_by_plant`, taken at the other end of the
+    /// transfer: what a lineage got, not what a species lost. `assimilated_by_founder`
+    /// is the placed figure and not the bite's gross organic matter, because that is
+    /// what became tissue — it is the same number the body's own `Self`
+    /// `assimilated_intake` channel reports. A heuristic body carries no lineage and
+    /// appears in neither.
+    pub bites_by_founder: [u64; Founder::COUNT],
+    pub assimilated_by_founder: [f64; Founder::COUNT],
     /// Steps taken, one voxel each.
     pub steps: u64,
 }
@@ -763,6 +774,17 @@ pub struct Fauna {
     /// cloned with the layer: see [`FounderFactories`].
     #[serde(skip)]
     factories: FounderFactories,
+    /// Which lineages were driven by a **saved policy** rather than their own
+    /// heuristic, by [`Founder::index`]. This one **is** world state and the snapshot
+    /// carries it.
+    ///
+    /// The controllers themselves are not saved — a `dyn Controller` does not serialize
+    /// and a hidden state is session state — so on its own a loaded layer cannot tell a
+    /// trained lineage from a heuristic one, and a loader would put the heuristic back
+    /// without saying anything. That is a different world wearing the same bytes. This
+    /// flag is the one thing a loader cannot re-derive, so it is recorded: a driver
+    /// reading it either supplies the policy again or refuses the load.
+    policy_driven: [bool; Founder::COUNT],
 }
 
 impl Fauna {
@@ -788,6 +810,7 @@ impl Fauna {
             births_enabled: true,
             controllers: FounderControllers::default(),
             factories: FounderFactories::default(),
+            policy_driven: [false; Founder::COUNT],
         })
     }
 
@@ -828,6 +851,19 @@ impl Fauna {
         factory: std::sync::Arc<dyn ControllerFactory>,
     ) {
         self.factories.set(founder, factory);
+    }
+
+    /// Whether this lineage's bodies are driven by a saved policy rather than their own
+    /// heuristic. Snapshot state: see the field's own note for why it is recorded.
+    pub fn policy_driven(&self, founder: Founder) -> bool {
+        self.policy_driven[founder.index()]
+    }
+
+    /// Record that this lineage is (or is no longer) driven by a saved policy. A driver
+    /// sets it when it installs one; a loader reads it to decide whether it may run this
+    /// world at all.
+    pub fn set_policy_driven(&mut self, founder: Founder, driven: bool) {
+        self.policy_driven[founder.index()] = driven;
     }
 
     /// Forget a lineage's factory. Founders of that kind born afterwards rest.

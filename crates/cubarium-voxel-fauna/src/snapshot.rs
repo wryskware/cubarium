@@ -29,9 +29,13 @@ use crate::Fauna;
 /// controller actions and the prior-interval feedback — and the founders' own
 /// physiology table to [`crate::FaunaConfig`]. Schema 5 added the respiration split to
 /// the ledger and the per-interval motor-respiration counter to the feedback (P1-C).
+/// Schema 6 brought the founders into the **live** world: the per-lineage bite and
+/// assimilated-intake counters on the ledger, and [`crate::Fauna::policy_driven`] — the
+/// record of which lineages were driven by a saved policy, which is the one thing about
+/// a founder's controller that a loader cannot re-derive and must not guess.
 /// Postcard is not self-describing, so older worlds are **refused**, not migrated
 /// (`always-fresh-never-migrate`): start a fresh world.
-pub const SCHEMA: u32 = 5;
+pub const SCHEMA: u32 = 6;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -191,6 +195,58 @@ mod tests {
             age_ticks: 0,
             state: State::Resting,
         }
+    }
+
+    /// **Schema 6 carries the founder bodies and refuses an older world.**
+    ///
+    /// The bodies: lineage marker, pose, held actions and prior-interval feedback all
+    /// come back as they went in. The lineage's `policy_driven` flag comes back too,
+    /// which is the whole reason the schema moved — a loader that could not tell a
+    /// trained lineage from a heuristic one would put the heuristic back in silence.
+    /// The controllers themselves do **not** come back: a mind is session state, and a
+    /// loaded layer's founders rest until a driver installs controllers again.
+    ///
+    /// The refusal is checked by rewriting the leading schema tag, which is one postcard
+    /// varint byte. No hash is pinned and no old bytes are kept in the tree.
+    #[test]
+    fn schema_six_round_trips_a_founder_world_and_refuses_an_older_one() {
+        let mut body = animal(0, 0.02);
+        body.founder = Some(crate::Founder::Browser);
+        body.founder_state.held = crate::Actions {
+            forward: 0.75,
+            turn: -0.5,
+            feed: 1.0,
+        };
+        body.founder_state.feedback.intake = 1e-4;
+        body.pose = crate::Pose {
+            heading_rad: 1.25,
+            ..body.pose
+        };
+
+        let mut fauna = layer(vec![body], 1);
+        fauna.set_policy_driven(crate::Founder::Browser, true);
+        fauna.ledger.bites_by_founder[crate::Founder::Browser.index()] = 3;
+        fauna.ledger.assimilated_by_founder[crate::Founder::Browser.index()] = 2.5e-4;
+        // A mind installed before the save is not part of the save.
+        assert!(fauna.set_controller(0, Box::new(crate::Scripted::new(vec![body.founder_state.held]))));
+
+        let bytes = encode(&fauna);
+        let mut back = decode(&bytes).expect("a founder world round-trips");
+        assert_eq!(back.view().animals, fauna.view().animals);
+        assert_eq!(back.view().ledger, fauna.view().ledger);
+        assert!(back.policy_driven(crate::Founder::Browser));
+        assert!(!back.policy_driven(crate::Founder::Blind));
+        assert!(
+            back.take_controller(0).is_none(),
+            "a loaded layer's founders rest until a driver installs controllers again"
+        );
+
+        let mut older = bytes.clone();
+        assert_eq!(older[0], SCHEMA as u8, "the tag is the leading varint byte");
+        older[0] = SCHEMA as u8 - 1;
+        let err = format!("{:#}", decode(&older).expect_err("an older world"));
+        assert!(err.contains("start a fresh world"), "{err}");
+        assert!(err.contains(&format!("is not {SCHEMA}")), "{err}");
     }
 
     /// A founder's held actions are bounded actions and its feedback is finite: the

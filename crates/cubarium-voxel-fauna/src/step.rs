@@ -736,6 +736,8 @@ fn founder_feed(
             };
             let taken = fauna.book_eaten(taken);
             let placed = assimilate(fauna, flora, i, sc, taken);
+            fauna.ledger.bites_by_founder[founder.index()] += 1;
+            fauna.ledger.assimilated_by_founder[founder.index()] += placed;
             fauna.animals[i].founder_state.feedback.intake += placed;
             true
         }
@@ -756,6 +758,8 @@ fn founder_feed(
                 fauna.ledger.eaten_by_plant[plant.index()] += taken.organic;
             }
             let placed = assimilate(fauna, flora, i, sc, taken);
+            fauna.ledger.bites_by_founder[founder.index()] += 1;
+            fauna.ledger.assimilated_by_founder[founder.index()] += placed;
             fauna.animals[i].founder_state.feedback.intake += placed;
             true
         }
