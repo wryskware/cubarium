@@ -435,3 +435,19 @@ preset × seed PNGs plus `default` seed 1 and `wide` seed 7 at
 `px_per_voxel = 8`.
 
 Return (≤40 lines) as before.
+
+## Slice 2d — integrated 2026-09-21
+
+Landed at e3a1b63; schema 8 → 9. **Works**: default/wide carry 25–47
+three-voxel steps, 31–62 bench faces and 6–12 undercuts per ring; all hollows
+visible, no sealed voids, walkable, skyline pass ≤ 3.8 %. Accepted:
+`benches.strength` 1.0 on default/wide, 0.6 on small; undercut gate 0.70 /
+front bias 0.5; mouth test against the neighbour's rock (a sill is still a
+mouth); the invariance tests run with benches off; `seal_unreadable_shafts`
+(a real camera bug: a shaft safe while a neighbouring gallery was open stops
+being safe when it is filled). Open: **`small` gets ledges but no grottos** —
+its 1.6 m band at 0.6 pull gives a 7.7-voxel face and a notch with 0.75 m of
+clearance under a 2-voxel cap needs 9. Wrysk's call: accept ledges only on the
+Tachyon ring, or raise `small`'s band / pull, or lower its clearance.
+Pictures at 8 px/voxel: flat-topped benches, terraced strata, dark notches
+under the ledges — the first slice that reads as the layered design.
