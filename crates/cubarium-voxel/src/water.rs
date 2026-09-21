@@ -774,6 +774,9 @@ struct Scratch {
     /// The top cell of each non-solid cell's own void run: where a displacement stops.
     /// Column-major, like `head`; the value is a world cell index.
     run_top: Vec<usize>,
+    /// Wet and effectively-full rows in each column for the <=64-row exchange fast path.
+    wet_mask: Vec<u64>,
+    full_mask: Vec<u64>,
     /// One cell's offers this pass, `(destination, volume)`, before the giver's own stock
     /// scales them.
     offers: Vec<(usize, f64)>,
@@ -827,6 +830,8 @@ impl Scratch {
         }
         if self.col_stamp.len() != plane {
             self.col_stamp = vec![0; plane];
+            self.wet_mask = vec![0; plane];
+            self.full_mask = vec![0; plane];
             self.stamp = 0;
         }
     }
@@ -906,6 +911,10 @@ pub fn exchange(w: &mut World, threads: usize) {
 }
 
 fn exchange_inner(w: &mut World, threads: usize) {
+    exchange_inner_with_masks(w, threads, w.config.height <= 64);
+}
+
+fn exchange_inner_with_masks(w: &mut World, threads: usize, use_masks: bool) {
     let c = w.config.clone();
     let plane = c.width as usize * c.depth as usize;
     let height = c.height as usize;
@@ -925,6 +934,18 @@ fn exchange_inner(w: &mut World, threads: usize) {
         // neighbours live in. Dry rock and dry air are never looked at.
         sc.active.clear();
         sc.active.extend_from_slice(w.wet.cells());
+        if use_masks {
+            sc.wet_mask.fill(0);
+            sc.full_mask.fill(0);
+            for &i in &sc.active {
+                let col = col_of(i, plane);
+                let bit = 1u64 << row_of(i, plane);
+                sc.wet_mask[col] |= bit;
+                if w.free[i] >= 1.0 - ROOM_EPS {
+                    sc.full_mask[col] |= bit;
+                }
+            }
+        }
         for &i in &sc.active {
             let (x, _, z) = c.coords(i);
             let x = x as i64;
@@ -957,12 +978,11 @@ fn exchange_inner(w: &mut World, threads: usize) {
             );
         }
 
-        // ---- one pass per active column: heads, and where a push displaces to. **This is
-        // the phase's parallel leg** — the columns are disjoint, the world's arrays are
-        // read-only here, and the scratch is column-major so each worker gets its own
-        // `&mut` spans (`design/7_Research/voxel-tick-profile-2026-09-18.md` measured it at
-        // 40 % of the process).
-        scan_columns(w, height, plane, threads, sc);
+        // ---- one pass per active column: heads, and where a push displaces to. The mask
+        // path is a short serial word walk; the taller-world fallback is parallel because
+        // its dense columns are disjoint (`design/7_Research/voxel-tick-profile-2026-09-18.md`
+        // measured the old dense scan at 40 % of the process).
+        scan_columns(w, height, plane, threads, use_masks, sc);
 
         // ---- head through submerged water. A full cell has no free surface of its own,
         // so it carries the highest head that reaches it across its horizontal faces: that
@@ -1056,7 +1076,8 @@ fn exchange_inner(w: &mut World, threads: usize) {
                 }
                 // Same row, so the neighbour's column is all that changes and its
                 // column-major index needs no division.
-                let tj = tat(col_of(j, plane), y as usize, height);
+                let neighbour_col = col_of(j, plane);
+                let tj = tat(neighbour_col, y as usize, height);
                 let there = if w.free[j] > 0.0 {
                     sc.head[tj]
                 } else {
@@ -1066,8 +1087,12 @@ fn exchange_inner(w: &mut World, threads: usize) {
                 if drop <= 0.0 {
                     continue;
                 }
-                let placed =
-                    offer_up_the_run(w, plane, tj, cap_flux(&c, FLOW_PER_SUBSTEP * drop), sc);
+                let q = cap_flux(&c, FLOW_PER_SUBSTEP * drop);
+                let placed = if use_masks {
+                    offer_up_the_run_mask(w, plane, neighbour_col, y as usize, q, sc)
+                } else {
+                    offer_up_the_run(w, plane, tj, q, sc)
+                };
                 if placed > 0.0 {
                     faces += 1;
                     total += placed;
@@ -1196,6 +1221,51 @@ fn offer_up_the_run(w: &World, plane: usize, tj: usize, q: f64, sc: &mut Scratch
     placed
 }
 
+/// Mask-backed displacement lookup for worlds no taller than one machine word. The first
+/// target still uses `ROOM_EPS`; once found, the unchanged upward walk accepts every
+/// positive sliver of room, including one smaller than `ROOM_EPS`.
+fn offer_up_the_run_mask(
+    w: &World,
+    plane: usize,
+    col: usize,
+    y: usize,
+    q: f64,
+    sc: &mut Scratch,
+) -> f64 {
+    let void = w.void_runs.mask[col];
+    let above = void >> y;
+    let run_len = above.trailing_ones() as usize;
+    if run_len == 0 {
+        return 0.0;
+    }
+    let run_bits = if run_len == 64 {
+        u64::MAX
+    } else {
+        ((1u64 << run_len) - 1) << y
+    };
+    let available = run_bits & !sc.full_mask[col];
+    if available == 0 {
+        return 0.0;
+    }
+    let first_y = available.trailing_zeros() as usize;
+    let top_y = y + run_len - 1;
+    let mut at = first_y * plane + col;
+    let top = top_y * plane + col;
+    let mut left = q;
+    let mut placed = 0.0;
+    while left > 0.0 && at <= top {
+        let room = (1.0 - w.free[at]).max(0.0);
+        if room > 0.0 {
+            let take = left.min(room);
+            sc.offers.push((at, take));
+            placed += take;
+            left -= take;
+        }
+        at += plane;
+    }
+    placed
+}
+
 /// `free_transfer_cap`, when the config sets one: the most one face may move in one
 /// substep, in cell units. Zero leaves the flux uncapped, which is the default.
 #[inline]
@@ -1207,8 +1277,8 @@ fn cap_flux(c: &Config, q: f64) -> f64 {
     }
 }
 
-/// The column scan, over every active column: **the one leg of the water tick that runs on
-/// more than one thread.**
+/// The column scan over every active column. Worlds up to 64 rows use a short serial word
+/// walk; the dense fallback for taller worlds can run on multiple threads.
 ///
 /// Each column's scan writes only that column's own `height` entries of the three
 /// column-major scratch buffers and reads only the world's arrays and the cached void-run
@@ -1217,7 +1287,18 @@ fn cap_flux(c: &Config, q: f64) -> f64 {
 /// equal-count chunks and each chunk's columns span one contiguous, disjoint run of each
 /// buffer — an ordinary `split_at_mut`, no unsafe, no synchronisation, and no reduction to
 /// reassociate. Below that it is the same loop on this thread.
-fn scan_columns(w: &World, height: usize, plane: usize, threads: usize, sc: &mut Scratch) {
+fn scan_columns(
+    w: &World,
+    height: usize,
+    plane: usize,
+    threads: usize,
+    use_masks: bool,
+    sc: &mut Scratch,
+) {
+    if use_masks {
+        scan_columns_mask(w, height, plane, threads, sc);
+        return;
+    }
     // Field-by-field, so the read-only column list and the three written buffers are
     // disjoint borrows of one `Scratch`.
     let Scratch {
@@ -1284,6 +1365,46 @@ fn scan_columns(w: &World, height: usize, plane: usize, threads: usize, sc: &mut
     }
 }
 
+/// Fill heads only for wet runs. Room and void-run bounds are queried from column masks
+/// by the offer path, so the two dense `usize` buffers are untouched on this path.
+fn scan_columns_mask(w: &World, height: usize, plane: usize, threads: usize, sc: &mut Scratch) {
+    let Scratch {
+        head,
+        columns,
+        wet_mask,
+        ..
+    } = sc;
+    let free = &w.free[..];
+    let wet_mask = &wet_mask[..];
+
+    // The mask walk is short enough that dispatching these columns to the task pool costs
+    // more than scanning them locally on the 48-row live world. Taller worlds retain the
+    // parallel dense scan above.
+    let _ = threads;
+
+    for &col in columns.iter() {
+        let at = col * height;
+        scan_column_mask(free, plane, col, wet_mask[col], &mut head[at..at + height]);
+    }
+}
+
+#[inline]
+fn scan_column_mask(free: &[f64], plane: usize, col: usize, mut wet: u64, head: &mut [f64]) {
+    while wet != 0 {
+        let y = wet.trailing_zeros() as usize;
+        let run = (wet >> y).trailing_ones() as usize;
+        let top = y + run - 1;
+        let surface = top as f64 + free[top * plane + col];
+        head[y..=top].fill(surface);
+        let clear = if run == 64 {
+            u64::MAX
+        } else {
+            ((1u64 << run) - 1) << y
+        };
+        wet &= !clear;
+    }
+}
+
 /// Cut one column-major scratch buffer into the single contiguous span each chunk of
 /// **ascending, distinct** columns covers, with each span's start offset.
 ///
@@ -1324,12 +1445,12 @@ fn cut_spans<'a, T>(
 /// this pass never rediscovers them from `material`; only the water-dependent values —
 /// `room_target`, `run_top` and `head` — are written here, every substep.
 ///
-/// **This is the parallel pass**, and it is why the scratch is column-major: it reads the
-/// world's `free` array (shared) and writes only `head[y]`, `room_target[y]` and
-/// `run_top[y]` of the **one column** whose three `height`-long spans the caller handed
-/// it. Two columns never overlap, so a worker per chunk of columns needs no
-/// synchronisation and no unsafe. The values written are world cell indices, exactly as
-/// before.
+/// **This is the taller-world parallel fallback**, and it is why the scratch is
+/// column-major: it reads the world's `free` array (shared) and writes only `head[y]`,
+/// `room_target[y]` and `run_top[y]` of the **one column** whose three `height`-long spans
+/// the caller handed it. Two columns never overlap, so a worker per chunk of columns needs
+/// no synchronisation and no unsafe. The values written are world cell indices, exactly
+/// as before.
 fn scan_column(
     free: &[f64],
     plane: usize,
@@ -1916,7 +2037,10 @@ mod fall_tests {
 /// rather than to the thread.
 #[cfg(test)]
 mod exchange_geometry_tests {
-    use super::{ROOM_EPS, exchange, scan_column};
+    use super::{
+        ROOM_EPS, Scratch, exchange, exchange_inner_with_masks, offer_up_the_run,
+        offer_up_the_run_mask, scan_column, scan_column_mask, tat,
+    };
     use crate::{Command, Config, Material, World};
 
     fn cfg(width: u32, height: u32) -> Config {
@@ -2216,6 +2340,167 @@ mod exchange_geometry_tests {
         assert_eq!(w.free, cloned.free, "the clone diverged");
         assert_eq!(w.free, loaded.free, "the loaded world diverged");
         assert!(residual(&w).abs() < 1e-12);
+    }
+
+    fn mask_fixture(height: u32) -> World {
+        let mut w = World::empty(cfg(4, height));
+        for (x, y) in [(0, 17), (1, 9), (1, 31), (2, 22), (3, height - 2)] {
+            w.apply(Command::SetMaterial {
+                x,
+                y,
+                z: 0,
+                material: Material::Rock,
+            });
+        }
+        for (x, y, amount) in [
+            (0, 1, 1.0),
+            (0, 2, 1.0),
+            (0, 3, 0.8),
+            (1, 1, 0.5),
+            // Effectively full: initial room lookup skips it, but the continuation from
+            // the real room below must still accept its positive sliver.
+            (1, 2, 1.0 - ROOM_EPS / 2.0),
+            (1, 3, 0.4),
+            (2, 23, 0.75),
+            (2, 24, 1.0),
+            (3, height - 1, 0.3),
+        ] {
+            w.apply(Command::AddWater {
+                x,
+                y,
+                z: 0,
+                volume_m3: amount,
+            });
+        }
+        w
+    }
+
+    /// The word path preserves every floating-point operation and active-set edit across
+    /// separated cavities, the bit-63 boundary, terrain-cache rebuilds and snapshot loads.
+    #[test]
+    fn mask_exchange_matches_the_reference_trajectory_at_height_64() {
+        let mut fast = mask_fixture(64);
+        let mut reference = fast.clone();
+        for step in 0..200 {
+            if step == 40 || step == 120 {
+                let material = if step == 40 {
+                    Material::Rock
+                } else {
+                    Material::Air
+                };
+                for w in [&mut fast, &mut reference] {
+                    w.apply(Command::SetMaterial {
+                        x: 2,
+                        y: 30,
+                        z: 0,
+                        material,
+                    });
+                }
+            }
+            if step == 80 {
+                fast = World::load(&fast.save()).expect("fast snapshot reloads");
+                reference = World::load(&reference.save()).expect("reference snapshot reloads");
+                assert!(!fast.wet.cells().is_empty(), "snapshot lost its wet set");
+            }
+            exchange_inner_with_masks(&mut fast, 1, true);
+            exchange_inner_with_masks(&mut reference, 1, false);
+            assert_eq!(
+                fast.free, reference.free,
+                "free water diverged at step {step}"
+            );
+            assert_eq!(fast.wet, reference.wet, "wet set diverged at step {step}");
+        }
+    }
+
+    /// Sixty-five rows cannot fit in the portable mask and therefore retain the dense
+    /// scan, including water on either side of bit 64's would-be boundary.
+    #[test]
+    fn height_65_uses_the_reference_fallback() {
+        let mut selected = mask_fixture(65);
+        let mut reference = selected.clone();
+        for step in 0..40 {
+            exchange(&mut selected, 1);
+            exchange_inner_with_masks(&mut reference, 1, false);
+            assert_eq!(
+                selected.free, reference.free,
+                "fallback diverged at step {step}"
+            );
+        }
+        selected.ensure_void_runs();
+        assert!(selected.void_runs.mask.is_empty());
+    }
+
+    #[test]
+    fn masks_cover_one_row_and_a_full_64_row_word() {
+        for height in [1, 64] {
+            let mut w = World::empty(cfg(1, height));
+            w.apply(Command::SetMaterial {
+                x: 0,
+                y: 0,
+                z: 0,
+                material: Material::Air,
+            });
+            for y in 0..height {
+                w.apply(Command::AddWater {
+                    x: 0,
+                    y,
+                    z: 0,
+                    volume_m3: if y + 1 == height { 0.25 } else { 1.0 },
+                });
+            }
+            w.ensure_void_runs();
+            let expected_mask = if height == 64 {
+                u64::MAX
+            } else {
+                (1u64 << height) - 1
+            };
+            assert_eq!(w.void_runs.mask, [expected_mask]);
+            let mut head = vec![0.0; height as usize];
+            scan_column_mask(&w.free, 1, 0, expected_mask, &mut head);
+            assert!(
+                head.iter().all(|&h| h == f64::from(height - 1) + 0.25),
+                "wrong head at height {height}: {head:?}"
+            );
+            if height == 64 {
+                w.free.fill(1.0);
+                for y in [0, 63] {
+                    assert_offer_paths_match(&w, y, 0.75);
+                }
+                w.free[0] = 0.5;
+                assert_offer_paths_match(&w, 0, 0.75);
+                w.free[0] = 1.0;
+                w.free[63] = 0.5;
+                assert_offer_paths_match(&w, 0, 0.75);
+                assert_offer_paths_match(&w, 63, 0.75);
+            }
+        }
+    }
+
+    fn assert_offer_paths_match(w: &World, y: usize, q: f64) {
+        let height = w.config.height as usize;
+        let mut reference = Scratch::default();
+        reference.ensure(height, 1);
+        scan_column(
+            &w.free,
+            1,
+            0,
+            &w.void_runs.runs,
+            &mut reference.head,
+            &mut reference.room_target,
+            &mut reference.run_top,
+        );
+        let reference_placed = offer_up_the_run(w, 1, tat(0, y, height), q, &mut reference);
+
+        let mut masked = Scratch::default();
+        masked.ensure(height, 1);
+        for row in 0..height {
+            if w.free[row] >= 1.0 - ROOM_EPS {
+                masked.full_mask[0] |= 1u64 << row;
+            }
+        }
+        let masked_placed = offer_up_the_run_mask(w, 1, 0, y, q, &mut masked);
+        assert_eq!(masked_placed, reference_placed, "placed from y={y}");
+        assert_eq!(masked.offers, reference.offers, "offers from y={y}");
     }
 }
 /// The closed water budget: nothing leaves but `displaced_out`, and the arithmetic says

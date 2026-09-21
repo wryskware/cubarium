@@ -411,6 +411,10 @@ pub(crate) struct VoidRuns {
     pub(crate) offset: Vec<u32>,
     /// Every run, grouped by column in ascending `(col, y0)` order.
     pub(crate) runs: Vec<VoidRun>,
+    /// One bit per non-solid row, when the world is at most 64 cells tall. This is the
+    /// same geometry as `runs`, in a form the water exchange can query without filling
+    /// a dense per-cell displacement table every substep. Taller worlds use `runs`.
+    pub(crate) mask: Vec<u64>,
     /// The `terrain_version` this cache was built from.
     version: u64,
     /// Set when the cache has never been built in this world, or after a decode.
@@ -422,6 +426,7 @@ impl Default for VoidRuns {
         VoidRuns {
             offset: Vec::new(),
             runs: Vec::new(),
+            mask: Vec::new(),
             version: 0,
             dirty: true,
         }
@@ -666,12 +671,19 @@ impl World {
         }
         let plane = self.config.width as usize * self.config.depth as usize;
         let height = self.config.height as usize;
-        let VoidRuns { offset, runs, .. } = &mut self.void_runs;
+        let VoidRuns {
+            offset, runs, mask, ..
+        } = &mut self.void_runs;
         runs.clear();
         offset.clear();
+        mask.clear();
         offset.reserve(plane + 1);
+        if height <= 64 {
+            mask.reserve(plane);
+        }
         for col in 0..plane {
             offset.push(runs.len() as u32);
+            let mut col_mask = 0u64;
             let mut y = 0usize;
             while y < height {
                 if self.material[y * plane + col].is_solid() {
@@ -686,7 +698,19 @@ impl World {
                     y0: y as u32,
                     top: top as u32,
                 });
+                if height <= 64 {
+                    let width = top - y + 1;
+                    let bits = if width == 64 {
+                        u64::MAX
+                    } else {
+                        ((1u64 << width) - 1) << y
+                    };
+                    col_mask |= bits;
+                }
                 y = top + 1;
+            }
+            if height <= 64 {
+                mask.push(col_mask);
             }
         }
         offset.push(runs.len() as u32);
