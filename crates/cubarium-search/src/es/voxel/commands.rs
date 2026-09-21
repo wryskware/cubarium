@@ -1041,7 +1041,7 @@ pub fn imitate(
         score: None,
         start_heading: task::START_HEADING_PROTOCOL.into(),
         starting_stores: task::STARTING_STORES_PROTOCOL.into(),
-        arena_protocol: task::arena_protocol(clone_stage, band).into(),
+        arena_protocol: task::arena_protocol(founder, clone_stage, band),
         protocol_hash: None,
         imitation: Some(super::store::ImitationProvenance {
             provenance: imitate::IMITATION_PROVENANCE.into(),

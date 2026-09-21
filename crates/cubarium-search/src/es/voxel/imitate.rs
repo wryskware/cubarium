@@ -171,7 +171,7 @@ impl TeacherStream {
         }
         let stage = task::parse_stage(&self.stage).map_err(|e| format!("{name}: {e}"))?;
         let band = task::parse_band(&self.band).map_err(|e| format!("{name}: {e}"))?;
-        let want = task::arena_protocol(stage, band);
+        let want = task::arena_protocol(founder, stage, band);
         if self.arena_protocol != want {
             return Err(format!(
                 "{name}: stream arena protocol is `{}`, this build's stage {} band {} uses \
@@ -307,7 +307,7 @@ pub fn record_streams(
                         digest: voxel_schema_digest(founder),
                         stage: stage.as_str().into(),
                         band: band.as_str().into(),
-                        arena_protocol: task::arena_protocol(stage, band).into(),
+                        arena_protocol: task::arena_protocol(founder, stage, band),
                         start_heading: task::START_HEADING_PROTOCOL.into(),
                         starting_stores: task::STARTING_STORES_PROTOCOL.into(),
                         layout_seed: prepared[index].layout_seed,
@@ -940,7 +940,7 @@ mod tests {
             digest: voxel_schema_digest(founder),
             stage: Stage::A.as_str().into(),
             band: Band::Landed.as_str().into(),
-            arena_protocol: task::arena_protocol(Stage::A, Band::Landed).into(),
+            arena_protocol: task::arena_protocol(founder, Stage::A, Band::Landed),
             start_heading: task::START_HEADING_PROTOCOL.into(),
             starting_stores: task::STARTING_STORES_PROTOCOL.into(),
             layout_seed: 0,
@@ -992,7 +992,7 @@ mod tests {
             score: None,
             start_heading: task::START_HEADING_PROTOCOL.into(),
             starting_stores: task::STARTING_STORES_PROTOCOL.into(),
-            arena_protocol: task::arena_protocol(Stage::B, Band::Landed).into(),
+            arena_protocol: task::arena_protocol(founder, Stage::B, Band::Landed),
             protocol_hash: None,
             imitation: Some(crate::es::voxel::store::ImitationProvenance {
                 provenance: IMITATION_PROVENANCE.into(),
@@ -1050,7 +1050,7 @@ mod tests {
             digest: voxel_schema_digest(founder),
             stage: Stage::B.as_str().into(),
             band: Band::Landed.as_str().into(),
-            arena_protocol: task::arena_protocol(Stage::B, Band::Landed).into(),
+            arena_protocol: task::arena_protocol(founder, Stage::B, Band::Landed),
             start_heading: task::START_HEADING_PROTOCOL.into(),
             starting_stores: task::STARTING_STORES_PROTOCOL.into(),
             layout_seed: 7,
@@ -1094,7 +1094,7 @@ mod tests {
         s.band = Band::Near.as_str().into();
         let err = s.validate("s", founder).expect_err("refused");
         assert!(
-            err.contains(task::arena_protocol(Stage::B, Band::Landed)),
+            err.contains(&task::arena_protocol(founder, Stage::B, Band::Landed)),
             "{err}"
         );
 

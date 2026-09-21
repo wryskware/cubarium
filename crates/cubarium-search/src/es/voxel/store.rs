@@ -140,7 +140,10 @@ impl VoxelPolicyFile {
     /// another. Stage-A centres stay transferable.
     pub fn validate_for_band(&self, name: &str, band: super::task::Band) -> Result<(), String> {
         self.validate_common(name)?;
-        let want = super::task::stage_b_arena_protocol(band);
+        // The founder is part of the Stage-B string: the browser's arenas carry their own
+        // crown-height revision and the blind founder's do not.
+        let founder = super::parse_founder(&self.founder).map_err(|e| format!("{name}: {e}"))?;
+        let want = super::task::arena_protocol(founder, super::task::Stage::B, band);
         if self.stage == "b" && self.arena_protocol != want {
             let had = if self.arena_protocol.is_empty() {
                 "none (an equal-patch pre-P3 Stage-B file)"
@@ -249,10 +252,10 @@ mod tests {
             start_heading: crate::es::voxel::task::START_HEADING_PROTOCOL.into(),
             starting_stores: crate::es::voxel::task::STARTING_STORES_PROTOCOL.into(),
             arena_protocol: crate::es::voxel::task::arena_protocol(
+                founder,
                 crate::es::voxel::task::Stage::A,
                 crate::es::voxel::task::Band::Landed,
-            )
-            .into(),
+            ),
             protocol_hash: None,
             imitation: None,
             stage: crate::es::voxel::task::Stage::A.as_str().into(),
@@ -363,18 +366,19 @@ mod tests {
     /// refused by name under the other's band, and accepted under its own.
     #[test]
     fn a_near_rung_centre_is_refused_by_an_unqualified_landed_evaluation() {
-        use crate::es::voxel::task::{Band, stage_b_arena_protocol};
+        use crate::es::voxel::task::{Band, Stage, arena_protocol};
+        let protocol = |band| arena_protocol(Founder::Browser, Stage::B, band);
         let mut near = sample(Founder::Browser);
         near.stage = "b".into();
-        near.arena_protocol = stage_b_arena_protocol(Band::Near).into();
+        near.arena_protocol = protocol(Band::Near);
         let err = near.validate_named("near.json").expect_err("refused");
-        assert!(err.contains(stage_b_arena_protocol(Band::Near)), "{err}");
-        assert!(err.contains(stage_b_arena_protocol(Band::Landed)), "{err}");
+        assert!(err.contains(&protocol(Band::Near)), "{err}");
+        assert!(err.contains(&protocol(Band::Landed)), "{err}");
         assert!(near.validate_for_band("near.json", Band::Near).is_ok());
 
         let mut landed = sample(Founder::Browser);
         landed.stage = "b".into();
-        landed.arena_protocol = stage_b_arena_protocol(Band::Landed).into();
+        landed.arena_protocol = protocol(Band::Landed);
         assert!(landed.validate_named("landed.json").is_ok());
         assert!(
             landed.validate_for_band("landed.json", Band::Near).is_err(),

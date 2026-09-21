@@ -114,7 +114,7 @@ impl VoxelProtocol {
             stage: stage.as_str().into(),
             starting_stores: task::STARTING_STORES_PROTOCOL.into(),
             start_heading: task::START_HEADING_PROTOCOL.into(),
-            arena_protocol: task::arena_protocol(stage, band).into(),
+            arena_protocol: task::arena_protocol(founder, stage, band),
             successor_band: match stage {
                 Stage::A => "none".into(),
                 Stage::B => band.as_str().into(),
@@ -1124,7 +1124,7 @@ mod tests {
             score: Some(0.9),
             start_heading: task::START_HEADING_PROTOCOL.into(),
             starting_stores: task::STARTING_STORES_PROTOCOL.into(),
-            arena_protocol: task::arena_protocol(Stage::A, task::Band::Landed).into(),
+            arena_protocol: task::arena_protocol(Founder::Blind, Stage::A, task::Band::Landed),
             protocol_hash: Some(0xdead_beef),
             imitation: None,
             stage: Stage::A.as_str().into(),

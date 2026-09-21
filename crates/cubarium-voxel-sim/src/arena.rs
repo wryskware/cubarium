@@ -78,6 +78,66 @@ const LITTER_ENERGY_DENSITY: f64 = 2.0;
 /// How many resource tiles a default layout lays.
 const RESOURCE_TILES: usize = 6;
 
+/// Foliage on one browser stand, whatever species and wood carry its crown.
+///
+/// Exactly what a half-grown springturf held before crown heights varied
+/// (`alpha · W = 2.0 · 0.03`), so the browser's edible stock, its depletion timing and
+/// the taste cue that reads the amount are all unchanged: the only thing the crown-height
+/// mix moves is **where the crown is**. A taller stand is seeded with the wood its height
+/// needs and then trimmed back to this.
+pub const BROWSER_FOLIAGE_PER_STAND: f64 = 0.06;
+
+/// How far above the browser's head layer a stand's crown may be laid, in whole voxels
+/// (`design/handoffs/voxel-browser-reach-2026-09-21.md`, step 2). Zero is the crown at
+/// the head, one is inside the new vertical mouth reach, and two is out of reach and has
+/// to be learned as such. A Stage-A layout lays each rise twice; Stage B's two patches
+/// are both scored, so an unreachable successor would be an impossible task and its
+/// pattern is `[0, 1]`.
+pub const BROWSER_CROWN_RISES: [u32; 3] = [0, 1, 2];
+
+/// A private stream for the crown-height draw, so the pond, the resource sites and the
+/// start placement are drawn from exactly the numbers they were before: only the crowns
+/// move.
+const CROWN_HEIGHT_SALT: u64 = 0x_C807_4E16_4854_5321;
+
+/// The species and wood that put a crown `rise` voxels above the browser's head layer.
+///
+/// Springturf's crown height tops out at one voxel, so the two taller rungs are
+/// bloomcrown, whose `crown_height_voxels` spans `[1, 3]` — the same species whose grown
+/// crowns leave the browser's head layer in the live world (`design/7_Research/
+/// voxel-census-2026-09-20.md` §D3). Half its `wood_max` rounds to a two-voxel crown and
+/// all of it to three.
+fn crown_wood(config: &FloraConfig, rise: u32) -> (Plant, f64) {
+    match rise {
+        0 => (Plant::Springturf, 0.5 * config.springturf.wood_max),
+        1 => (Plant::Bloomcrown, 0.5 * config.bloomcrown.wood_max),
+        _ => (Plant::Bloomcrown, config.bloomcrown.wood_max),
+    }
+}
+
+/// The crown rise of each browser stand in a layout, in the resource order the caller
+/// lays them.
+///
+/// Deterministic per seed and **balanced by construction**: a Stage-A layout gets each of
+/// [`BROWSER_CROWN_RISES`] twice over its six tiles, Stage B gets one crown at the head
+/// and one a voxel above it, and the shuffle only decides which tile is which. So every
+/// layout carries a reachable crown and the training set carries all three heights
+/// without depending on a draw coming out right.
+fn browser_crown_rises(layout_seed: u64, kind: LayoutKind, tiles: usize) -> Vec<u32> {
+    let palette: &[u32] = match kind {
+        LayoutKind::StageA => &BROWSER_CROWN_RISES,
+        // Both Stage-B patches are scored — the initial one has to be depleted and the
+        // successor bitten — so neither may be out of reach.
+        LayoutKind::Reacquisition(_) => &BROWSER_CROWN_RISES[..2],
+    };
+    let mut rises: Vec<u32> = (0..tiles).map(|i| palette[i % palette.len()]).collect();
+    let mut rng = Rng::new(layout_seed ^ CROWN_HEIGHT_SALT);
+    for i in (1..rises.len()).rev() {
+        rises.swap(i, rng.below(i + 1));
+    }
+    rises
+}
+
 /// How full an arena founder arrives: **half its structure and no reserve** (P2-C).
 ///
 /// A founder introduced full has nowhere to put what it eats — settled intake can only
@@ -413,7 +473,14 @@ impl Arena {
         };
         resources.sort();
 
-        for &site in &resources {
+        // Crown heights, in the sorted resource order, drawn from their own stream so the
+        // pond, the resource sites and the start placement are untouched.
+        let crown_rises = match founder {
+            Founder::Browser => browser_crown_rises(layout_seed, kind, resources.len()),
+            Founder::Blind => Vec::new(),
+        };
+
+        for (index, &site) in resources.iter().enumerate() {
             match founder {
                 Founder::Blind => {
                     let organic = match kind {
@@ -439,36 +506,54 @@ impl Arena {
                     debug_assert!(accepted, "a litter deposit on a support face");
                 }
                 Founder::Browser => {
-                    // A half-grown springturf carries `alpha · W = 2.0 · 0.03 = 0.06`
-                    // of foliage, and the browser crops `bite_per_s = 0.002` organic per
-                    // second: thirty seconds, the same quarter of the Stage-B horizon the
-                    // blind patch is sized to. The browser therefore needs no separate
-                    // Stage-B size, and keeping the wood keeps the crown — and so the
-                    // ray fan's view of it — exactly as Stage A has it.
-                    let wood = 0.5 * flora.config().species(Plant::Springturf).wood_max;
+                    // The stand's **wood carries its crown height** and nothing else: it
+                    // is seeded at the wood its rise needs and then trimmed back to
+                    // `BROWSER_FOLIAGE_PER_STAND`, which is what every browser stand held
+                    // before heights varied. The browser crops `bite_per_s = 0.002`
+                    // organic per second, so 0.06 is thirty seconds of feeding — the same
+                    // quarter of the Stage-B horizon the blind patch is sized to — and the
+                    // initial Stage-B patch is still half of it.
+                    let rise = crown_rises[index];
+                    let (species, wood) = crown_wood(flora.config(), rise);
                     let accepted = flora.apply(
                         &world,
                         FloraCommand::Seed {
                             x: i64::from(site.x),
                             z: site.z,
-                            species: Plant::Springturf,
+                            species,
                             wood,
                         },
                     );
-                    debug_assert!(accepted, "a springturf founder on a support face");
-                    if Some(site) == initial_patch {
-                        let foliage = flora
-                            .view()
-                            .stand_at(site)
-                            .expect("the Stage-B springturf was seeded")
-                            .foliage;
+                    debug_assert!(accepted, "a browser stand on a support face");
+                    let stand = flora
+                        .view()
+                        .stand_at(site)
+                        .expect("the browser stand was seeded");
+                    debug_assert_eq!(
+                        flora.config().species(species).crown_voxels(stand.wood),
+                        rise + 1,
+                        "{species:?} at wood {wood} is not a crown {rise} above the head"
+                    );
+                    let want = match kind {
+                        LayoutKind::StageA => BROWSER_FOLIAGE_PER_STAND,
+                        LayoutKind::Reacquisition(_) if Some(site) == initial_patch => {
+                            REACQUISITION_INITIAL_PATCH_FRACTION * BROWSER_FOLIAGE_PER_STAND
+                        }
+                        LayoutKind::Reacquisition(_) => BROWSER_FOLIAGE_PER_STAND,
+                    };
+                    let trim = stand.foliage - want;
+                    debug_assert!(
+                        trim >= -1e-15,
+                        "a seeded crown must carry at least the arena's stock"
+                    );
+                    // A crown at the head is the old half-grown springturf and already
+                    // holds exactly the stock; the taller ones are seeded large and cut
+                    // back to it.
+                    if trim > 0.0 {
                         let removed = flora
-                            .take_foliage(
-                                site,
-                                (1.0 - REACQUISITION_INITIAL_PATCH_FRACTION) * foliage,
-                            )
-                            .expect("the initial Stage-B crown has foliage to trim");
-                        debug_assert!((removed.organic - 0.5 * foliage).abs() < 1e-12);
+                            .take_foliage(site, trim)
+                            .expect("the seeded crown has foliage to trim");
+                        debug_assert!((removed.organic - trim).abs() < 1e-12);
                     }
                 }
             }
@@ -887,19 +972,16 @@ mod tests {
                 "{founder:?}: the successor is not about one quarter of 120 s"
             );
             if founder == Founder::Browser {
-                let initial_stand = stage
-                    .arena
-                    .flora
-                    .view()
-                    .stand_at(stage.initial_patch)
-                    .expect("initial springturf");
-                let successor_stand = stage
-                    .arena
-                    .flora
-                    .view()
-                    .stand_at(stage.successor_patch)
-                    .expect("successor springturf");
-                assert_eq!(initial_stand.wood, successor_stand.wood, "same crown");
+                // The two patches no longer share a wood — wood is what carries the
+                // crown height now — but both Stage-B crowns must be inside the
+                // browser's own vertical mouth reach, or the task is impossible.
+                let reach = i64::from(Founder::Browser.manifest().mouth_reach_up_voxels);
+                for patch in [stage.initial_patch, stage.successor_patch] {
+                    assert!(
+                        (0..=reach).contains(&crown_rise(&stage.arena.flora, patch)),
+                        "{patch:?}: a Stage-B crown out of the browser's mouth reach"
+                    );
+                }
             }
             // And Stage A's tiles are deliberately not that: they cannot deplete.
             let a = Arena::build(founder, 6);
@@ -1002,15 +1084,21 @@ mod tests {
         assert_eq!(stock, before_stock, "the idle body ate nothing");
     }
 
+    /// How far above the body's head layer one stand's crown sits: the layer a body
+    /// standing on the stand's own support face would have to lift its mouth to.
+    fn crown_rise(flora: &Flora, site: Site) -> i64 {
+        let stand = flora.view().stand_at(site).expect("a seeded stand");
+        let voxels = flora
+            .config()
+            .species(stand.species)
+            .crown_voxels(stand.wood);
+        i64::from(voxels) - 1
+    }
+
     fn arena_stock(flora: &Flora) -> f64 {
-        // The browser layout's stock: every springturf stand's foliage.
-        flora
-            .view()
-            .stands
-            .iter()
-            .filter(|s| s.species == Plant::Springturf)
-            .map(|s| s.foliage)
-            .sum()
+        // The browser layout's stock: every seeded stand's foliage, whatever species
+        // carries the crown height that stand was laid at.
+        flora.view().stands.iter().map(|s| s.foliage).sum()
     }
 
     fn patch_stock(arena: &Arena, site: Site) -> f64 {
@@ -1221,16 +1309,9 @@ mod tests {
             ),
             "the cruiser's held forward action moved it"
         );
-        // The browser layout's finite stock: every springturf stand's foliage, read
-        // through the sim's flora — the same read `Arena::resource_stock` does.
-        let stock_after: f64 = sim
-            .flora()
-            .view()
-            .stands
-            .iter()
-            .filter(|s| s.species == cubarium_voxel_flora::Species::Springturf)
-            .map(|s| s.foliage)
-            .sum();
+        // The browser layout's finite stock: every seeded stand's foliage, read through
+        // the sim's flora — the same read `Arena::resource_stock` does.
+        let stock_after: f64 = sim.flora().view().stands.iter().map(|s| s.foliage).sum();
         assert!(
             stock_after < stock_before,
             "the finite stock went down through the production withdrawals"

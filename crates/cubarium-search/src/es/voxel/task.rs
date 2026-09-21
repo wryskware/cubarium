@@ -135,7 +135,21 @@ pub const STAGE_B_LANDED_ARENA_PROTOCOL: &str = "p3a-half-initial-patch-1";
 /// their own protocol string and an unqualified landed evaluation refuses them.
 pub const STAGE_B_NEAR_ARENA_PROTOCOL: &str = "p3b-near-successor-1";
 
-/// The Stage-B arena protocol for one separation band.
+/// The browser's crown-height revision of every arena it trains on
+/// (`design/handoffs/voxel-browser-reach-2026-09-21.md`, step 2): its stands' crowns are
+/// laid at the head layer, one voxel above it and — Stage A only, where the tile is not
+/// a scored patch — two voxels above it, out of the vertical mouth reach. The stock per
+/// stand, the resource sites, the pond and the start placement are exactly what they
+/// were; only the crown heights moved. A browser centre trained on the flat all-at-head
+/// geometry is a policy for a different task and is refused.
+///
+/// The **blind** founder's litter arenas are untouched, so its protocol strings are
+/// untouched and its P3-C centre still qualifies. Versioning per founder is the honest
+/// statement: one lineage's task changed and the other's did not.
+pub const BROWSER_CROWN_HEIGHT_REVISION: &str = "p3d-crown-heights-1";
+
+/// The Stage-B arena protocol for one separation band, for the blind founder's litter
+/// patches. The browser's own revision is appended by [`arena_protocol`].
 pub fn stage_b_arena_protocol(band: Band) -> &'static str {
     match band {
         Band::Landed => STAGE_B_LANDED_ARENA_PROTOCOL,
@@ -143,14 +157,22 @@ pub fn stage_b_arena_protocol(band: Band) -> &'static str {
     }
 }
 
-/// The arena protocol recorded for a trained stage and band. Stage A has no successor,
-/// so its band is ignored.
-pub fn arena_protocol(stage: Stage, band: Band) -> &'static str {
-    match stage {
-        Stage::A => "p2b-stage-a-1",
+/// The arena protocol recorded for a trained founder, stage and band. Stage A has no
+/// successor, so its band is ignored; the browser carries
+/// [`BROWSER_CROWN_HEIGHT_REVISION`] on top of the stage's own string.
+pub fn arena_protocol(founder: Founder, stage: Stage, band: Band) -> String {
+    let base = match stage {
+        Stage::A => STAGE_A_ARENA_PROTOCOL,
         Stage::B => stage_b_arena_protocol(band),
+    };
+    match founder {
+        Founder::Blind => base.to_string(),
+        Founder::Browser => format!("{base}+{BROWSER_CROWN_HEIGHT_REVISION}"),
     }
 }
+
+/// Stage A's fixture revision, shared by both founders.
+pub const STAGE_A_ARENA_PROTOCOL: &str = "p2b-stage-a-1";
 
 /// Stage B's successor separation band, the P3-B curriculum rung.
 pub type Band = SuccessorBand;
@@ -592,7 +614,9 @@ mod tests {
                 assert!(metres <= sensed_radius_m(founder));
 
                 let arena = p.fixture_arena();
-                let pose = arena.animal_pose().expect("the near layout places a founder");
+                let pose = arena
+                    .animal_pose()
+                    .expect("the near layout places a founder");
                 let start = Site {
                     x: (pose.x / ARENA_VOXEL_M).floor() as u32,
                     y: initial.y,
@@ -619,6 +643,100 @@ mod tests {
                     "{founder:?} seed {seed}: both near patches are stocked"
                 );
             }
+        }
+    }
+
+    /// The browser's crown-height mix, over the sixteen training layouts and the
+    /// held-out eight (`design/handoffs/voxel-browser-reach-2026-09-21.md`, step 2).
+    ///
+    /// A Stage-A layout lays six stands whose crowns sit at the body's head layer, one
+    /// voxel above it and two above it — two tiles each, so all three heights are in the
+    /// training set and in every single layout, and four of the six are inside the
+    /// browser's vertical mouth reach. Stage B's two patches are both scored, so both are
+    /// reachable and the pattern there is head and head + 1. Every stand carries exactly
+    /// the stock it carried before heights varied, and the blind founder's litter arenas
+    /// have no crowns at all.
+    #[test]
+    fn the_browsers_crowns_stand_at_three_heights_and_every_layout_keeps_a_reachable_one() {
+        use cubarium_voxel_sim::BROWSER_FOLIAGE_PER_STAND;
+
+        let reach = i64::from(Founder::Browser.manifest().mouth_reach_up_voxels);
+        let rise = |arena: &cubarium_voxel_sim::Arena, site: Site| -> i64 {
+            let fv = arena.flora.view();
+            let stand = fv.stand_at(site).expect("a browser stand");
+            i64::from(fv.config.species(stand.species).crown_voxels(stand.wood)) - 1
+        };
+
+        let mut seen_a = [0usize; 3];
+        let mut seen_b = [0usize; 3];
+        for seed in TRAINING_LAYOUT_SEEDS
+            .into_iter()
+            .chain(EVALUATION_LAYOUT_SEEDS)
+        {
+            // Stage A: six tiles, two at each height, and the stock per stand unmoved.
+            let a = Prepared::build_stage(Founder::Browser, seed, Stage::A);
+            let arena = a.fixture_arena();
+            let mut per_layout = [0usize; 3];
+            for &site in &arena.resources {
+                let r = rise(arena, site);
+                assert!(
+                    (0..=2).contains(&r),
+                    "seed {seed}: a Stage-A crown {r} above the head"
+                );
+                per_layout[r as usize] += 1;
+                seen_a[r as usize] += 1;
+                assert!(
+                    (arena.patch_stock(site) - BROWSER_FOLIAGE_PER_STAND).abs() < 1e-12,
+                    "seed {seed}: stand {site:?} holds {}",
+                    arena.patch_stock(site)
+                );
+            }
+            assert_eq!(
+                per_layout,
+                [2, 2, 2],
+                "seed {seed}: Stage A's height mix is not two of each"
+            );
+            assert!(
+                per_layout[..=reach as usize].iter().sum::<usize>() > 0,
+                "seed {seed}: no reachable crown in the Stage-A layout"
+            );
+
+            // Stage B: both patches scored, so both inside the mouth's vertical reach.
+            let b = Prepared::build_stage_in(Founder::Browser, seed, Stage::B, Band::Landed);
+            let arena = b.fixture_arena();
+            let (initial, successor) = b.patches().expect("Stage B names its patches");
+            let mut rises = Vec::new();
+            for site in [initial, successor] {
+                let r = rise(arena, site);
+                assert!(
+                    (0..=reach).contains(&r),
+                    "seed {seed}: a scored Stage-B crown {r} above the head is unreachable"
+                );
+                seen_b[r as usize] += 1;
+                rises.push(r);
+            }
+            assert_ne!(rises[0], rises[1], "seed {seed}: Stage B lays one of each");
+            assert!(
+                (arena.patch_stock(successor) - BROWSER_FOLIAGE_PER_STAND).abs() < 1e-12
+                    && (arena.patch_stock(initial) - 0.5 * BROWSER_FOLIAGE_PER_STAND).abs() < 1e-12,
+                "seed {seed}: the two-patch stock moved with the crown height"
+            );
+        }
+        assert!(
+            seen_a.iter().all(|&n| n > 0),
+            "the training and held-out Stage-A set misses a height: {seen_a:?}"
+        );
+        assert!(
+            seen_b[0] > 0 && seen_b[1] > 0 && seen_b[2] == 0,
+            "Stage B must mix head and head + 1 and lay nothing out of reach: {seen_b:?}"
+        );
+        // The blind founder's arenas are litter on the ground: no stands, no heights.
+        for seed in TRAINING_LAYOUT_SEEDS {
+            let blind = Prepared::build_stage(Founder::Blind, seed, Stage::A);
+            assert!(
+                blind.fixture_arena().flora.view().stands.is_empty(),
+                "seed {seed}: the blind arena grew a crown"
+            );
         }
     }
 
@@ -656,10 +774,29 @@ mod tests {
             stage_b_arena_protocol(Band::Near),
             stage_b_arena_protocol(Band::Landed)
         );
-        assert_eq!(arena_protocol(Stage::A, Band::Near), "p2b-stage-a-1");
-        assert_eq!(arena_protocol(Stage::A, Band::Landed), "p2b-stage-a-1");
+        assert_eq!(
+            arena_protocol(Founder::Blind, Stage::A, Band::Near),
+            "p2b-stage-a-1"
+        );
+        assert_eq!(
+            arena_protocol(Founder::Blind, Stage::A, Band::Landed),
+            "p2b-stage-a-1"
+        );
+        // The browser's crown-height revision rides on every one of its own strings and
+        // on none of the blind founder's.
+        for stage in [Stage::A, Stage::B] {
+            for band in [Band::Near, Band::Landed] {
+                let blind = arena_protocol(Founder::Blind, stage, band);
+                let browser = arena_protocol(Founder::Browser, stage, band);
+                assert!(!blind.contains(BROWSER_CROWN_HEIGHT_REVISION));
+                assert_eq!(browser, format!("{blind}+{BROWSER_CROWN_HEIGHT_REVISION}"));
+            }
+        }
         for d2 in 0..200i64 {
-            assert!(!(Band::Near.contains(d2) && Band::Landed.contains(d2)), "{d2}");
+            assert!(
+                !(Band::Near.contains(d2) && Band::Landed.contains(d2)),
+                "{d2}"
+            );
         }
         assert!(Band::Near.contains(16) && Band::Near.contains(35));
         assert!(!Band::Near.contains(15) && !Band::Near.contains(36));
