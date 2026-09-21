@@ -242,9 +242,14 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
             if !args.empty {
                 let seeded = habitat::seed(&mut world, &mut flora, &mut fauna);
                 eprintln!(
-                    "cubarium voxel: seeded the example habitat — {} stands, {} logs, {} frondgrazers \
+                    "cubarium voxel: seeded the example habitat — {} stands, {} logs, \
+                     {} litter tiles, {} littershredders, {} frondgrazer founders \
                      (--empty for a bare world)",
-                    seeded.stands, seeded.logs, seeded.animals
+                    seeded.stands,
+                    seeded.logs,
+                    seeded.litter_tiles,
+                    seeded.founders[Founder::Blind.index()],
+                    seeded.founders[Founder::Browser.index()],
                 );
             }
             let label = match (&args.load, args.scene) {

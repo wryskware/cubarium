@@ -7,6 +7,13 @@
 //! gap: one deterministic founder habitat built entirely out of the flora and fauna
 //! crates' own commands, with no model rule changed and no new mechanic.
 //!
+//! Since the live-founders package the animals it places are the two **sensed founder
+//! lineages** — `Founder::Blind` (littershredder) and `Founder::Browser` (frondgrazer
+//! founder) — introduced hungry through `Command::IntroduceFounder` with their own
+//! observation-only heuristics installed. The legacy `Species::Frondgrazer` animal is
+//! still in the fauna crate and still reachable from the `g` stdin line; this seeder
+//! stopped placing it.
+//!
 //! **It is a stage-1 dev scene, not a tuned ecology.** The species are placed by simple
 //! environment proxies — standing water, rock or soil, height band — every founder is
 //! half-grown so a ground browser can reach a canopy, and the counts are chosen for a
@@ -15,9 +22,13 @@
 //! bare world back.
 
 use cubarium_voxel::{Material, VoxelView, World};
-use cubarium_voxel_fauna::{Command as FaunaCommand, Fauna, Species as Beast};
+use cubarium_voxel_fauna::{
+    BlindForager, BrowserForager, Command as FaunaCommand, Controller, Fauna, Founder,
+    StartingStores,
+};
 use cubarium_voxel_flora::{
-    Command as FloraCommand, Deposit, DepositKind, Flora, Site, Species, highest_support,
+    Command as FloraCommand, Deposit, DepositKind, Flora, FloraView, Site, Species,
+    highest_support,
 };
 
 /// World ticks run before anything is planted. The authored fixture fills its pool to a
@@ -45,16 +56,50 @@ const PRODUCERS: [(Species, usize); 5] = [
     (Species::Stonecushion, 6),
 ];
 
-/// How many glowcaps the decomposer grove holds, and how many browsers walk the meadow.
+/// How many glowcaps the decomposer grove holds.
 const GLOWCAPS: usize = 8;
-const GRAZERS: usize = 8;
+
+/// How many **sensed founder bodies** of each lineage the habitat starts with: eight
+/// littershredders ([`Founder::Blind`]) and eight frondgrazer founders
+/// ([`Founder::Browser`]), the same count the legacy `Species::Frondgrazer`
+/// introductions used, now split across the two lineages. The legacy species stays in
+/// the fauna crate and is still reachable from the `g` stdin line; this seeder simply
+/// stops placing it.
+const SHREDDERS: usize = 8;
+const BROWSERS: usize = 8;
+
+/// Leaf litter laid under each littershredder, in organic-matter units.
+///
+/// A fresh world has **no litter at all** — litterfall is senescence, and nothing has
+/// senesced before the first tick — so a blind litter feeder placed on bare soil would
+/// start with nothing to smell and nothing to eat. This is the same move the glowcap
+/// grove already makes with its log: lay the substrate the founder's own gate needs. At
+/// 0.2 the tile saturates the cue's emission term (`min(litter / 0.05, 1)`) exactly as a
+/// Stage-A arena tile does, so the founder starts on a signal it has actually been seen
+/// to follow. It is a dev-scene starter, not a claim about a standing litter layer.
+const LITTER_ORGANIC: f64 = 0.2;
+/// Mineral and retained-energy densities of that starter litter: a plant tissue's order
+/// of magnitude, and the litter energy cap. The same pair the frozen arena deposits at.
+const LITTER_MINERAL_FRACTION: f64 = 0.02;
+const LITTER_ENERGY_DENSITY: f64 = 2.0;
 
 /// What [`seed`] put into the world.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Seeded {
     pub stands: usize,
     pub logs: usize,
-    pub animals: usize,
+    /// Founder bodies placed, by [`Founder::index`]: littershredders, then frondgrazer
+    /// founders.
+    pub founders: [usize; Founder::COUNT],
+    /// Litter tiles laid for the littershredders.
+    pub litter_tiles: usize,
+}
+
+impl Seeded {
+    /// Every animal the seeder introduced.
+    pub fn animals(&self) -> usize {
+        self.founders.iter().sum()
+    }
 }
 
 /// Seed the example habitat. The world is stepped briefly first so its initial water has
@@ -156,33 +201,162 @@ pub fn seed(world: &mut World, flora: &mut Flora, fauna: &mut Fauna) -> Seeded {
         }
     }
 
-    // Ground browsers on open soil, spread so several patches are being grazed. They
-    // sense and walk to the nearest foliage within their own radius.
-    let grazer_drown = fauna.config().species(Beast::Frondgrazer).drown_depth_m;
+    // The two **sensed founder lineages**, which is what walks this habitat now. Both
+    // arrive hungry (`StartingStores::HUNGRY`, the arenas' P2-C start): a body placed
+    // full has nowhere to put what it eats, so eating would be worth nothing to it.
+    // Both are driven by their own observation-only heuristic, installed through the
+    // fauna layer's ordinary controller boundary.
+
+    // Littershredders on litter-bearing soil: dry open soil away from the stands, each
+    // with its own starter tile of leaf litter laid under it first, so the founder
+    // begins on a cue it can smell and a stock it can bite.
+    let blind_drown = fauna.config().founder(Founder::Blind).core.drown_depth_m;
     let pool: Vec<Site> = skyline
         .iter()
         .copied()
         .filter(|s| {
-            view.material_at(i64::from(s.x), s.y, s.z) == Material::Soil
-                && view.water_depth_m(i64::from(s.x), s.y, s.z) <= grazer_drown
+            !taken.contains(s)
+                && view.material_at(i64::from(s.x), s.y, s.z) == Material::Soil
+                && view.water_depth_m(i64::from(s.x), s.y, s.z) <= 0.0
+                && view.water_depth_m(i64::from(s.x), s.y, s.z) <= blind_drown
         })
         .collect();
-    let body = fauna.config().species(Beast::Frondgrazer).body_max;
-    for site in strided(&pool, GRAZERS) {
-        if fauna.apply(
-            world,
-            FaunaCommand::Introduce {
-                x: i64::from(site.x),
-                z: site.z,
-                species: Beast::Frondgrazer,
-                body,
+    for (k, site) in strided(&pool, SHREDDERS).into_iter().enumerate() {
+        if !flora.deposit(
+            site,
+            Deposit {
+                kind: DepositKind::Litter,
+                organic: LITTER_ORGANIC,
+                mineral: LITTER_ORGANIC * LITTER_MINERAL_FRACTION,
+                energy: LITTER_ORGANIC * LITTER_ENERGY_DENSITY,
             },
         ) {
-            seeded.animals += 1;
+            continue;
+        }
+        seeded.litter_tiles += 1;
+        if introduce_founder(world, fauna, Founder::Blind, site, spread_heading(k, SHREDDERS)) {
+            taken.push(site);
+            seeded.founders[Founder::Blind.index()] += 1;
+        }
+    }
+
+    // Frondgrazer founders on open soil in the meadow. "Open soil" is the legacy
+    // grazers' pool; the meadow part is the founder's own limit and not a route — it
+    // browses through a 2 m cone and a mouth that reaches a quarter of a body length,
+    // with no target search at all, so a body dropped on empty ground has nothing its
+    // senses can act on. `browser_faces` returns the dry soil faces a **half-grown crown
+    // already covers at the body's own layer**, which is the same geometry the frozen
+    // arena gives its browser. It falls back to plain open soil if this landform grew no
+    // reachable crown, rather than placing nothing.
+    let meadow = browser_faces(&view, &flora.view(), fauna);
+    let browser_drown = fauna.config().founder(Founder::Browser).core.drown_depth_m;
+    let pool: Vec<Site> = if meadow.is_empty() {
+        skyline
+            .iter()
+            .copied()
+            .filter(|s| {
+                view.material_at(i64::from(s.x), s.y, s.z) == Material::Soil
+                    && view.water_depth_m(i64::from(s.x), s.y, s.z) <= browser_drown
+            })
+            .collect()
+    } else {
+        meadow
+    };
+    for (k, site) in strided(&pool, BROWSERS).into_iter().enumerate() {
+        if introduce_founder(
+            world,
+            fauna,
+            Founder::Browser,
+            site,
+            spread_heading(k, BROWSERS),
+        ) {
+            seeded.founders[Founder::Browser.index()] += 1;
         }
     }
 
     seeded
+}
+
+/// One founder body on a column's highest support face, hungry, with its own heuristic
+/// installed. Returns whether the layer accepted it.
+fn introduce_founder(
+    world: &World,
+    fauna: &mut Fauna,
+    founder: Founder,
+    site: Site,
+    heading_rad: f64,
+) -> bool {
+    if !fauna.apply(
+        world,
+        FaunaCommand::IntroduceFounder {
+            x: i64::from(site.x),
+            z: site.z,
+            founder,
+            stores: StartingStores::HUNGRY,
+            heading_rad,
+        },
+    ) {
+        return false;
+    }
+    let id = fauna.view().ledger.births - 1;
+    let controller: Box<dyn Controller> = match founder {
+        Founder::Blind => Box::new(BlindForager::new()),
+        Founder::Browser => Box::new(BrowserForager::new()),
+    };
+    fauna.set_controller(id, controller)
+}
+
+/// Headings spread evenly around the circle, one per body. Deterministic, and nothing
+/// about the world reaches it: a founder is not aimed at its food.
+fn spread_heading(k: usize, of: usize) -> f64 {
+    std::f64::consts::TAU * (k as f64) / (of.max(1) as f64)
+}
+
+/// The dry soil faces a seeded crown already reaches at the body's own layer: a support
+/// face `s` such that some standing crown occupies the column of `s` at height
+/// `s.y + 1`, which is exactly the contact [`cubarium_voxel_fauna`]'s browser mouth
+/// tests for. Sorted low to high, like the skyline the other pools come from.
+fn browser_faces(view: &VoxelView<'_>, fv: &FloraView<'_>, fauna: &Fauna) -> Vec<Site> {
+    let drown = fauna.config().founder(Founder::Browser).core.drown_depth_m;
+    let width = i64::from(view.config.width);
+    let depth = i64::from(view.config.depth);
+    let mut out: Vec<Site> = Vec::new();
+    for stand in fv.stands.iter().filter(|s| s.foliage > 0.0) {
+        let sc = fv.config.species(stand.species);
+        let crown_y = i64::from(stand.site.y) + i64::from(sc.crown_voxels(stand.wood));
+        let radius = sc.crown_radius(stand.wood).max(0.0);
+        let span = radius.floor() as i64;
+        let r2 = radius * radius;
+        for dz in -span..=span {
+            for dx in -span..=span {
+                if (dx * dx + dz * dz) as f64 > r2 {
+                    continue;
+                }
+                let cx = (i64::from(stand.site.x) + dx).rem_euclid(width);
+                let cz = i64::from(stand.site.z) + dz;
+                if cz < 0 || cz >= depth {
+                    continue;
+                }
+                let Some(face) = highest_support(view, cx, cz as u32) else {
+                    continue;
+                };
+                if i64::from(face.y) + 1 != crown_y {
+                    continue;
+                }
+                if view.material_at(cx, face.y, face.z) != Material::Soil {
+                    continue;
+                }
+                if view.water_depth_m(cx, face.y, face.z) > drown {
+                    continue;
+                }
+                if !out.contains(&face) {
+                    out.push(face);
+                }
+            }
+        }
+    }
+    out.sort_by_key(|s| (s.y, s.x, s.z));
+    out
 }
 
 /// Every column's highest support face, sorted low to high, so a strided sample spreads
@@ -263,7 +437,97 @@ mod tests {
         assert_eq!(a, b, "the same world seeds the same habitat");
         assert!(a.stands >= 10, "a populated picture, not a specimen: {a:?}");
         assert!(a.logs > 0, "the glowcap grove has its wood: {a:?}");
-        assert!(a.animals > 0, "something moves: {a:?}");
+        assert!(a.animals() > 0, "something moves: {a:?}");
+        for founder in Founder::ALL {
+            assert!(
+                a.founders[founder.index()] > 0,
+                "the habitat introduces {}: {a:?}",
+                founder.name()
+            );
+        }
+        assert!(
+            a.litter_tiles >= a.founders[Founder::Blind.index()],
+            "every littershredder got its starter tile: {a:?}"
+        );
+    }
+
+    /// **Both founder lineages eat in the seeded habitat.** The bodies are the seeder's
+    /// own — hungry, on the faces it chose, driven by the heuristics it installed — and
+    /// they run through the live schedule with the live litter field, which is what the
+    /// ambient run does. The evidence for a bite is the founder's own `Self`
+    /// `assimilated_intake` channel: the prior interval's assimilated organic matter,
+    /// read out of the packet the controller was handed. Nothing fixture-side reaches
+    /// it, and nothing here reads a site or a stock.
+    #[test]
+    fn both_founder_kinds_take_a_bite_in_the_first_ten_seconds() {
+        use cubarium_voxel_fauna::{Response, Senses};
+        use cubarium_voxel_sim::{Sim, SimConfig};
+        use std::sync::{Arc, Mutex};
+
+        /// Passes the packet through untouched and remembers the largest intake channel
+        /// it ever carried.
+        struct Watched {
+            inner: Box<dyn Controller>,
+            intake: usize,
+            best: Arc<Mutex<f64>>,
+        }
+        impl Controller for Watched {
+            fn drive(&mut self, o: &[f64]) -> Response {
+                let mut best = self.best.lock().expect("the sink");
+                *best = best.max(o[self.intake]);
+                drop(best);
+                self.inner.drive(o)
+            }
+            fn reset(&mut self) {
+                self.inner.reset();
+            }
+        }
+
+        let (world, flora, mut fauna, seeded) = seeded(crate::voxel::scene::authored(config()));
+        // One watcher per founder kind, wrapped around the controller the seeder
+        // installed, so the heuristic under test is the one the habitat ships.
+        let best: [Arc<Mutex<f64>>; Founder::COUNT] = std::array::from_fn(|_| Arc::default());
+        let bodies: Vec<(u64, Founder)> = fauna
+            .view()
+            .animals
+            .iter()
+            .filter_map(|a| a.founder.map(|f| (a.id, f)))
+            .collect();
+        assert_eq!(bodies.len(), seeded.animals(), "every animal is a founder");
+        for (id, founder) in bodies {
+            let intake = founder
+                .manifest()
+                .modules
+                .iter()
+                .find(|m| m.name == "Self")
+                .expect("every schema opens with Self")
+                .offset
+                + 4;
+            let inner = fauna.take_controller(id).expect("the seeder installed one");
+            assert!(fauna.set_controller(
+                id,
+                Box::new(Watched {
+                    inner,
+                    intake,
+                    best: Arc::clone(&best[founder.index()]),
+                }),
+            ));
+        }
+
+        let mut senses = Senses::new();
+        senses.settle(&world.view(), &flora.view());
+        let mut sim = Sim::new(world, flora, fauna, SimConfig { threads: 1 }, Some(senses));
+        for _ in 0..200 {
+            sim.step();
+        }
+        for founder in Founder::ALL {
+            let seen = *best[founder.index()].lock().expect("the sink");
+            assert!(
+                seen > 0.0,
+                "no {} reported any assimilated intake in 200 ticks",
+                founder.name()
+            );
+        }
     }
 
     /// A few coupled ticks, the fast-iteration bar: the seeded founders stand, the layers
