@@ -655,6 +655,32 @@ enum Command {
         #[arg(long, default_value_t = cubarium_search::es::voxel::task::episode_worker_limit())]
         workers: usize,
     },
+    /// Phase-three voxel slice (P3-C): record the fauna's own foraging heuristic on the
+    /// training layouts as `(observation, adapted action)` streams — the teacher an
+    /// imitation seed is fitted to. The held-out seeds are never recorded.
+    VoxelImitate {
+        /// `blind` (littershredder) or `browser` (frondgrazer).
+        #[arg(long, default_value = "blind")]
+        founder: String,
+        /// Comma-separated stages to record, in order: `a`, `b`, or `a,b`.
+        #[arg(long, default_value = "a,b")]
+        stages: String,
+        /// Stage B's successor separation band for the recorded layouts.
+        #[arg(long, default_value = "landed")]
+        band: String,
+        /// How many of the frozen training layouts to record, from the front.
+        #[arg(long, default_value_t = cubarium_search::es::voxel::task::TRAINING_LAYOUT_SEEDS.len())]
+        layouts: usize,
+        /// Episode horizon in ticks; defaults to each stage's own.
+        #[arg(long)]
+        horizon: Option<u64>,
+        /// Episode workers, one simulation thread per episode.
+        #[arg(long, default_value_t = cubarium_search::es::voxel::task::episode_worker_limit())]
+        workers: usize,
+        /// Directory for `streams/`. Disposable run output.
+        #[arg(long, default_value = "runs/voxel-imitate-blind")]
+        out: PathBuf,
+    },
     /// Phase-one voxel slice (P1-D): the bounded ES run over one founder's manifest, with
     /// shape-aware antithetic pairs, the initial centre evaluation, and the plan's caps.
     VoxelTrain {
@@ -1045,6 +1071,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             episodes,
             workers,
         } => es::voxel::commands::bench(founder, stage, ticks, episodes, workers),
+        Command::VoxelImitate {
+            founder,
+            stages,
+            band,
+            layouts,
+            horizon,
+            workers,
+            out,
+        } => es::voxel::commands::imitate(founder, stages, band, layouts, horizon, workers, out),
         Command::VoxelTrain {
             founder,
             stage,

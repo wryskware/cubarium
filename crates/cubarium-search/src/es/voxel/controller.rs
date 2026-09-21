@@ -31,9 +31,13 @@
 //! `reset()` — fresh memory by construction and by contract — then reads outcomes from
 //! the world and ledger. It never samples, holds or resolves.
 
+use std::sync::{Arc, Mutex};
+
 use cubarium_core::neural::ShapePolicy;
 use cubarium_core::neural::gru::HIDDEN;
-use cubarium_voxel_fauna::{BlindForager, BrowserForager, Controller, Founder, Response};
+use cubarium_voxel_fauna::{
+    Actions, BlindForager, BrowserForager, Controller, Founder, Response, resolve_actions,
+};
 
 use super::super::tensor;
 use super::voxel_schema_digest;
@@ -170,6 +174,78 @@ impl Controller for Cruise {
     fn reset(&mut self) {}
 }
 
+/// One teacher step: the observation a controller was handed, and the action the fauna's
+/// own adapter resolved from its answer.
+///
+/// The observation is the vector the body sampled — exactly what a GRU in that slot would
+/// have read — and the action is the *adapted* one (`resolve_actions`), which is what the
+/// world went on to hold. Nothing fixture-side is here: there is no site, no distance, no
+/// stock. A pair is what one controller saw and what the world then did.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TeacherStep {
+    pub observation: Vec<f64>,
+    pub action: Actions,
+}
+
+/// Where a [`RecordingController`] puts its pairs. Shared because the controller itself is
+/// moved into the fauna's table and never handed back.
+pub type TeacherSink = Arc<Mutex<Vec<TeacherStep>>>;
+
+/// A fresh, empty sink.
+pub fn teacher_sink() -> TeacherSink {
+    Arc::new(Mutex::new(Vec::new()))
+}
+
+/// A transparent wrapper around any [`Controller`] that records `(observation, adapted
+/// action)` for every sample.
+///
+/// Transparent is the contract: the wrapped controller sees the same observation, and the
+/// **unmodified** response goes back to the fauna, so an episode recorded is an episode
+/// run. The adapter is the fauna's own [`resolve_actions`], never a second copy, so the
+/// recorded action is the one the body held.
+pub struct RecordingController {
+    inner: Box<dyn Controller>,
+    manifest: cubarium_voxel_fauna::Manifest,
+    sink: TeacherSink,
+}
+
+impl RecordingController {
+    pub fn new(
+        inner: Box<dyn Controller>,
+        manifest: cubarium_voxel_fauna::Manifest,
+        sink: TeacherSink,
+    ) -> RecordingController {
+        RecordingController {
+            inner,
+            manifest,
+            sink,
+        }
+    }
+}
+
+impl Controller for RecordingController {
+    fn drive(&mut self, observation: &[f64]) -> Response {
+        let response = self.inner.drive(observation);
+        let action = resolve_actions(response, &self.manifest);
+        if let Ok(mut sink) = self.sink.lock() {
+            sink.push(TeacherStep {
+                observation: observation.to_vec(),
+                action,
+            });
+        }
+        response
+    }
+
+    /// Fresh memory means a fresh recording: one episode is one stream, so the sink is
+    /// emptied with the wrapped controller's memory.
+    fn reset(&mut self) {
+        self.inner.reset();
+        if let Ok(mut sink) = self.sink.lock() {
+            sink.clear();
+        }
+    }
+}
+
 /// What drives the body for one episode. Built per episode through
 /// [`EpisodeDriver::fresh`] so the controller's memory — hidden state, turn preference —
 /// is never carried between episodes.
@@ -180,6 +256,10 @@ pub struct EpisodeDriver {
     /// Only meaningful for [`EpisodeKind::Gru`]: run the policy with its sense channels
     /// zeroed (see [`SELF_CHANNELS`]).
     ablate_senses: bool,
+    /// When set, every body this driver hands out is wrapped in a
+    /// [`RecordingController`] writing its `(observation, adapted action)` pairs here.
+    /// The episode itself is unchanged: the wrapper returns the inner response untouched.
+    record: Option<TeacherSink>,
 }
 
 /// The controller body a driver runs.
@@ -228,6 +308,7 @@ impl EpisodeDriver {
             founder,
             kind: EpisodeKind::Gru(gru),
             ablate_senses: false,
+            record: None,
         })
     }
 
@@ -249,7 +330,16 @@ impl EpisodeDriver {
             founder,
             kind: EpisodeKind::Control(control),
             ablate_senses: false,
+            record: None,
         }
+    }
+
+    /// The same driver, recording every `(observation, adapted action)` pair it produces
+    /// into `sink`. One sink per episode: [`EpisodeDriver::fresh`] clears it through the
+    /// wrapper's `reset`, so a reused sink holds the last episode only.
+    pub fn recording(mut self, sink: TeacherSink) -> EpisodeDriver {
+        self.record = Some(sink);
+        self
     }
 
     /// The founder this driver runs.
@@ -287,6 +377,13 @@ impl EpisodeDriver {
                 Founder::Browser => Box::new(BrowserForager::new()),
             },
         };
+        if let Some(sink) = &self.record {
+            controller = Box::new(RecordingController::new(
+                controller,
+                self.founder.manifest(),
+                Arc::clone(sink),
+            ));
+        }
         controller.reset();
         controller
     }

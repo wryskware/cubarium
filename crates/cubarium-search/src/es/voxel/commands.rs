@@ -12,6 +12,8 @@
 //!   controller smoke through the real driver — including the seam's own behavioural
 //!   check: the GRU must move the body, rest must not.
 //! - [`bench`]: measured setup cost (rebuild vs prepared-clone) and episode throughput.
+//! - [`imitate`]: record the heuristic's `(observation, adapted action)` streams on the
+//!   training layouts ([`super::imitate`]).
 //! - [`train`]: the bounded ES run ([`super::trainer::train`]).
 //! - [`evaluate`]: a saved policy or a disclosed control over the training or the
 //!   held-out layout set, with the score components per layout.
@@ -29,6 +31,7 @@ use cubarium_voxel_fauna::Founder;
 
 use super::controller::{EpisodeDriver, VoxelControl};
 use super::driver::{self, EpisodeError, ScoreCounters};
+use super::imitate;
 use super::task;
 use super::task::Stage;
 use super::trainer::{self, TrainSpec};
@@ -843,9 +846,7 @@ pub fn evaluate(
                     depleted,
                 )
             },
-            reacquisition
-                .first()
-                .map_or(0.0, |r| r.sensed_radius_m),
+            reacquisition.first().map_or(0.0, |r| r.sensed_radius_m),
             n = reacquisition.len(),
         );
     }
@@ -877,5 +878,95 @@ pub fn evaluate(
         )?;
         println!("rows {}", path.join("evaluation.json").display());
     }
+    Ok(())
+}
+
+/// `voxel-imitate`: record the fauna's own foraging heuristic on the **training**
+/// layouts, at the controller period, as `(observation, adapted action)` streams.
+///
+/// The held-out seeds are not recorded: a clone fitted on these streams has seen the
+/// training task only. Streams are disposable run output, one file per layout per stage.
+pub fn imitate(
+    founder: String,
+    stages: String,
+    band: String,
+    layouts: usize,
+    horizon: Option<u64>,
+    workers: usize,
+    out: PathBuf,
+) -> Result<(), Boxed> {
+    let worker_limit = task::episode_worker_limit();
+    if workers == 0 || workers > worker_limit {
+        return Err(format!("--workers must be in 1..={worker_limit}").into());
+    }
+    let founder = parse_founder(&founder)?;
+    let band = task::parse_band(&band)?;
+    let stages: Vec<Stage> = stages
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(task::parse_stage)
+        .collect::<Result<_, _>>()?;
+    if stages.is_empty() {
+        return Err("--stages needs at least one of `a`, `b`".into());
+    }
+
+    println!(
+        "# voxel imitation streams — {} ({}), teacher `{}`, band {}, {} training layouts",
+        founder.name(),
+        founder.role(),
+        imitate::TEACHER_CONTROLLER,
+        band.as_str(),
+        layouts.min(task::TRAINING_LAYOUT_SEEDS.len()),
+    );
+    println!("# build {BUILD_ID}, schema {}", imitate::TEACHER_SCHEMA);
+    println!(
+        "# held-out seeds {:?} are not recorded",
+        task::EVALUATION_LAYOUT_SEEDS
+    );
+    println!();
+
+    let mut all = Vec::new();
+    for stage in stages {
+        let horizon = horizon.unwrap_or_else(|| stage.horizon());
+        let t = Instant::now();
+        let streams = imitate::record_streams(founder, stage, band, layouts, horizon, workers)?;
+        let paths = imitate::write_streams(&out.join("streams"), &streams)?;
+        let steps: usize = streams.iter().map(|s| s.steps).sum();
+        let mut moving = 0usize;
+        let mut feeding = 0usize;
+        let mut turning = 0usize;
+        for s in &streams {
+            for t in 0..s.steps {
+                let a = s.action(t);
+                moving += usize::from(a[0] > 0.0);
+                turning += usize::from(a[1] != 0.0);
+                feeding += usize::from(a[2] > 0.0);
+            }
+        }
+        let f = |n: usize| 100.0 * n as f64 / steps.max(1) as f64;
+        println!(
+            "stage {}  horizon {horizon}  {} streams  {steps} steps  \
+             forward {:.1}%  turning {:.1}%  feeding {:.1}%  {:.2} s  -> {}",
+            stage.as_str(),
+            streams.len(),
+            f(moving),
+            f(turning),
+            f(feeding),
+            t.elapsed().as_secs_f64(),
+            paths.first().map_or_else(
+                || out.display().to_string(),
+                |p| p.parent().unwrap_or(&out).display().to_string()
+            ),
+        );
+        all.extend(streams);
+    }
+    let steps: usize = all.iter().map(|s| s.steps).sum();
+    println!();
+    println!(
+        "{} streams, {steps} teacher steps, digest {:#018x}",
+        all.len(),
+        imitate::streams_digest(&all)
+    );
     Ok(())
 }

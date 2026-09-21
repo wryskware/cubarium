@@ -26,6 +26,8 @@
 //! - [`score`]: the capability-training score of the tests plan §2 and its components.
 //! - [`trainer`]: shape-aware antithetic pairs, bounded workers, cancellation that counts
 //!   its discarded work, and the run/checkpoint store.
+//! - [`imitate`]: the P3-C imitation seed — teacher streams recorded from the fauna's
+//!   own foraging heuristic on the training layouts.
 //! - [`store`]: the exported policy file and checkpoint formats.
 //! - [`commands`]: the `voxel-check` / `voxel-bench` / `voxel-train` / `voxel-evaluate`
 //!   command family.
@@ -62,6 +64,7 @@ use cubarium_voxel_fauna::Founder;
 pub mod commands;
 pub mod controller;
 pub mod driver;
+pub mod imitate;
 pub mod score;
 pub mod store;
 pub mod task;
@@ -69,7 +72,8 @@ pub mod trainer;
 
 pub use controller::{
     CRUISE_FORWARD, Cruise, EpisodeDriver, EpisodeGru, EpisodeKind, GruBlind, GruBrowser,
-    GruPolicy, NoIntake, SELF_CHANNELS, StationaryFeeding, VoxelControl,
+    GruPolicy, NoIntake, RecordingController, SELF_CHANNELS, StationaryFeeding, TeacherSink,
+    TeacherStep, VoxelControl, teacher_sink,
 };
 pub use driver::{Episode, EpisodeError, Limits, ScoreCounters};
 pub use score::{SURVIVAL_WEIGHT, ScoreComponents};
