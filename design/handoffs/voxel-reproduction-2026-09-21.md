@@ -1,5 +1,5 @@
 ---
-status: open
+status: landed in worktree reproduction (3bfe98f..f3348f0); awaiting main
 date: 2026-09-21
 owner: Fable (orchestration); creature decisions recorded from Wrysk
 ---
@@ -114,3 +114,47 @@ no bit-identical pins; no changes to feeding, movement, reach, senses or the
 seeder; runs may use all cores; `runs/` is disposable; no windows.
 `cargo nextest run --workspace --exclude cubarium-gpu` green in the worktree
 before returning. Return ≤ 40 lines.
+
+## Integration note (Fable, 2026-09-21, at f3348f0 in worktree `reproduction`)
+
+Commits: 3bfe98f (both rules, fauna snapshot schema 9), be32f79 (the ten
+tests as specified), f30c589 (autopsy and census columns, placeholders in
+`design/backlog.md` §1), f3348f0 (ledger residuals in the autopsy).
+Workspace suite 1,988 green in the worktree. Fable re-ran the 60-minute arm
+from the worktree's build and got the worker's numbers exactly.
+
+Placeholders chosen (backlog §1): browser surplus floor 0.005, hold 120 s,
+gestation 180 s, loss fraction 0.25, interval 300 s; shredder floor
+0.000625, hold 120 s, interval 300 s, incubation 300 s, egg 0.004 organic,
+**clutch size 1** — forced, not chosen: the frozen blind body's reserve
+ceiling cannot pay two viable eggs; the rule and tests handle any count.
+
+Deviations, accepted: reproduction state on `Animal.reproduction` rather
+than the controller-interval `founder_state`; tables on
+`SpeciesConfig.reproduction` so the browser founder shares the frondgrazer
+species' numbers; egg eligibility priced at the clutch, since the shredder's
+`birth_cost` is its whole reserve ceiling; `born` counts hatchlings;
+gestation respiration is a fourth respiration split.
+
+**60-minute arm, generated closed world, built-in defaults:**
+
+| | D3 (before reach) | reach only | reach + reproduction |
+| --- | --- | --- | --- |
+| browser deaths | 33 | 60 | 13 |
+| browser peak alive | – | 48 at min 7 | 12 at min 7 |
+| browser extinct at | after 54 | 34 | 35 |
+| foliage low point | 13.7 | 8.6 | 10.4, recovering to 12.5 |
+| shredders alive at 60 min | 15 | 15 | 14 (30 eggs laid, 30 hatched, 0 lost) |
+
+The overshoot is gone and the canopy is never stripped, so the browser's
+remaining failure is not overgrazing: 13 bodies starve with 10–12 organic
+of foliage standing. The reach and search line stays open. Six-hour census:
+frondgrazer 0 from minute 35, littershredder 0 from minute 122 (litter then
+climbs to 119.6 uneaten); plants **6 of 6 alive** at 6 h (bloomcrown 33,
+umbrellafrond 139, springturf 20, stonecushion 34, velvetpad 2, glowcap 10)
+against the recorded 5 of 6.
+
+Main: the chain e5658af..f3348f0 waits in this worktree because the main
+checkout carries another agent's uncommitted edits to
+`crates/cubarium/src/voxel/mod.rs` and, as of this note, an uncommitted copy
+of e5658af's asset swap. Cherry-pick once main is clean.
