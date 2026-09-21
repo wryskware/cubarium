@@ -559,6 +559,28 @@ fn built_in_driver(founder: Founder) -> Result<EpisodeDriver> {
         .map_err(|e| anyhow::anyhow!("the built-in centre {name}: {e}"))
 }
 
+/// Install the ambient run's built-in trained centres on every founder lineage of an
+/// already-seeded layer, and say so on stderr — one line per lineage naming its driver,
+/// the same announcement `cubarium voxel`'s ambient run makes by default. An example that
+/// wants to measure the shipped world's founders, and not the seeder's bare
+/// observation-only heuristics, calls this once after `habitat::seed` (or
+/// `habitat::install_heuristics` on an empty world), before stepping the sim.
+pub fn install_default_founders(fauna: &mut Fauna) -> Result<()> {
+    let mut drivers = Vec::with_capacity(Founder::ALL.len());
+    for founder in Founder::ALL {
+        drivers.push((founder, built_in_driver(founder)?));
+    }
+    install_founder_controllers(fauna, &drivers)?;
+    for (founder, driver) in &drivers {
+        eprintln!(
+            "{} founders are driven by {} (the built-in centre)",
+            founder.name(),
+            driver.name(),
+        );
+    }
+    Ok(())
+}
+
 /// What one founder lineage of the ambient run is driven by, and how it was chosen. The
 /// source is carried so the run can say it out loud: a world whose animals are a trained
 /// policy and a world whose animals are a reflex look alike from outside.

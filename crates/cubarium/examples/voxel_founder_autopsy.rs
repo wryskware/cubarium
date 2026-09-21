@@ -15,6 +15,11 @@
 //! physiology rule, the seeder, or a constant; the only new thing in the crates is the
 //! fauna ledger's [`Departure`] counters, which are counters.
 //!
+//! The founders are driven by the built-in trained centres by default, the same drivers
+//! `cubarium voxel`'s ambient run installs, so this autopsies the world that ships. A
+//! trailing `heuristic` argument keeps the old, observation-only control:
+//! `voxel_founder_autopsy -- 30 heuristic`.
+//!
 //! # What it writes
 //!
 //! Five record types on stdout, each its own CSV shape behind a leading tag, so one file
@@ -52,6 +57,7 @@
 
 use cubarium::voxel::VoxelConfig;
 use cubarium::voxel::habitat;
+use cubarium::voxel::install_default_founders;
 use cubarium::voxel::scene;
 use cubarium_voxel::VoxelView;
 use cubarium_voxel_fauna::{
@@ -115,9 +121,15 @@ struct Seen {
 }
 
 fn main() {
-    let minutes: f64 = std::env::args().nth(1).map_or(30.0, |a| {
-        a.parse().expect("usage: voxel_founder_autopsy [MINUTES]")
+    let args: Vec<String> = std::env::args().collect();
+    let minutes: f64 = args.get(1).map_or(30.0, |a| {
+        a.parse()
+            .expect("usage: voxel_founder_autopsy [MINUTES] [heuristic]")
     });
+    // The shipped world's founders are driven by the built-in trained centres by
+    // default, exactly as `cubarium voxel`'s ambient run installs them; `heuristic` as a
+    // trailing argument keeps the old, observation-only control.
+    let heuristic = args.get(2).is_some_and(|a| a == "heuristic");
 
     let cfg = VoxelConfig::default();
     let mut world = scene::authored(cfg.world.clone());
@@ -129,6 +141,11 @@ fn main() {
         "seeded: stands={} logs={} litter_tiles={} founders={:?}",
         seeded.stands, seeded.logs, seeded.litter_tiles, seeded.founders
     );
+    if heuristic {
+        eprintln!("founders: the observation-only heuristic (control)");
+    } else {
+        install_default_founders(&mut fauna).expect("the built-in centres validate");
+    }
     for f in Founder::ALL {
         let sc = fauna_cfg.founder(f).core;
         let m = f.manifest();

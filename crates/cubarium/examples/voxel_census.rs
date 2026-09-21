@@ -17,9 +17,19 @@
 //! per-founder-lineage counts and mean body, the four ledger birth/death counters, and the
 //! total litter organic. The seed report goes to
 //! stderr so it never mixes with the CSV.
+//!
+//! The founders are driven by the built-in trained centres by default — the same drivers
+//! `cubarium voxel`'s ambient run installs — so this measures the world that ships, not
+//! the seeder's bare heuristics. A trailing `heuristic` argument keeps the old,
+//! observation-only control:
+//!
+//! ```text
+//! cargo run --release -p cubarium --example voxel_census -- 1 generated closed heuristic
+//! ```
 
 use cubarium::voxel::VoxelConfig;
 use cubarium::voxel::habitat;
+use cubarium::voxel::install_default_founders;
 use cubarium::voxel::scene;
 use cubarium_voxel::{Command as WorldCommand, World};
 use cubarium_voxel_fauna::{Fauna, FaunaConfig, Founder, Senses, Species as Beast, TICK_HZ};
@@ -42,10 +52,15 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let hours: f64 = args.get(1).map_or(6.0, |a| {
         a.parse()
-            .expect("usage: voxel_census [HOURS] [authored|generated] [open|closed]")
+            .expect("usage: voxel_census [HOURS] [authored|generated] [open|closed] [heuristic]")
     });
     let generated = args.get(2).is_some_and(|a| a == "generated");
     let closed = args.get(3).is_some_and(|a| a == "closed");
+    // The shipped world's founders are driven by the built-in trained centres by
+    // default, exactly as `cubarium voxel`'s ambient run installs them — this measures
+    // the world that ships, not the seeder's bare heuristics. `heuristic` as a trailing
+    // argument keeps the old, observation-only control.
+    let heuristic = args.get(4).is_some_and(|a| a == "heuristic");
 
     let cfg = VoxelConfig::default();
     let mut world = if generated {
@@ -96,6 +111,11 @@ fn main() {
         seeded.founders,
         seeded.animals()
     );
+    if heuristic {
+        eprintln!("founders: the observation-only heuristic (control)");
+    } else {
+        install_default_founders(&mut fauna).expect("the built-in centres validate");
+    }
 
     // The live founders sense a settled litter field; the ambient run settles it the
     // same way before the first tick.
