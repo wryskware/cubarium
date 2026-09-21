@@ -4,7 +4,13 @@
 //! cargo run --release -p cubarium --example voxel_census -- 6 > runs/voxel-census-6h.csv
 //! ```
 //!
-//! Builds the default authored world, seeds it with the standard habitat, and steps the
+//! ```text
+//! cargo run --release -p cubarium --example voxel_census -- 6 generated closed \
+//!     > runs/voxel-census-generated-closed-6h.csv
+//! ```
+//!
+//! Builds a world — the authored fixture by default, or the core's generator — seeds it
+//! with the standard habitat, and steps the
 //! coupled simulation for the given number of simulated hours (default 6). Every simulated
 //! minute — 1,200 ticks at [`cubarium_voxel_fauna::TICK_HZ`] — it prints one CSV row to
 //! stdout: the per-species stand counts, the per-species animal counts and mean body, the
@@ -15,6 +21,7 @@
 use cubarium::voxel::habitat;
 use cubarium::voxel::scene;
 use cubarium::voxel::VoxelConfig;
+use cubarium_voxel::{Command as WorldCommand, World};
 use cubarium_voxel_fauna::{Fauna, FaunaConfig, Founder, Senses, Species as Beast, TICK_HZ};
 use cubarium_voxel_flora::{Flora, FloraConfig, Species as Plant};
 use cubarium_voxel_sim::{Sim, SimConfig};
@@ -22,13 +29,57 @@ use cubarium_voxel_sim::{Sim, SimConfig};
 /// One simulated minute, in ticks: 60 s at the fixed tick rate.
 const TICKS_PER_MIN: u64 = 60 * TICK_HZ as u64;
 
+/// The flora study harness's rain rate, reused as the closed budget's shower rate
+/// (`crates/cubarium-voxel-flora/examples/harness/mod.rs`). An experiment condition.
+const HARNESS_RAIN_M_PER_S: f64 = 0.0002;
+/// Evaporation for the closed budget: half the shower rate. It has to be **under** the
+/// shower rate or a falling drop is lifted again in the same tick — `evaporate` runs
+/// right after `rain` — and no rain ever reaches the soil. An experiment condition, not
+/// a model default, and the same one `cubarium-voxel`'s `water_cycle` example uses.
+const CLOSED_EVAPORATION_M_PER_S: f64 = 0.0001;
+
 fn main() {
-    let hours: f64 = std::env::args()
-        .nth(1)
-        .map_or(6.0, |a| a.parse().expect("usage: voxel_census [HOURS]"));
+    let args: Vec<String> = std::env::args().collect();
+    let hours: f64 = args
+        .get(1)
+        .map_or(6.0, |a| a.parse().expect("usage: voxel_census [HOURS] [authored|generated] [open|closed]"));
+    let generated = args.get(2).is_some_and(|a| a == "generated");
+    let closed = args.get(3).is_some_and(|a| a == "closed");
 
     let cfg = VoxelConfig::default();
-    let mut world = scene::authored(cfg.world.clone());
+    let mut world = if generated {
+        // The closed budget's water is the flora study's own: the shower rate it ran on,
+        // the aquifer charged a metre above the basin floor, and the outlet open — which
+        // in a closed world is the return flow into the atmosphere, not an export.
+        let mut world_cfg = cfg.world.clone();
+        if closed {
+            let dry = VoxelConfig::default().world;
+            let basin_floor_m = World::new(dry.clone())
+                .outlet_cell()
+                .map_or(0.0, |(_, y, _)| f64::from(y))
+                * dry.voxel_m;
+            world_cfg = cubarium_voxel::Config {
+                rain_m_per_s: HARNESS_RAIN_M_PER_S,
+                evaporation_m_per_s: CLOSED_EVAPORATION_M_PER_S,
+                initial_aquifer_head_m: basin_floor_m + 1.0,
+                closed_water_budget: true,
+                ..world_cfg
+            };
+        }
+        let mut w = World::new(world_cfg);
+        if closed {
+            w.apply(WorldCommand::SetOutlet { open: true });
+        }
+        w
+    } else {
+        assert!(!closed, "the closed budget is measured on the generated world");
+        scene::authored(cfg.world.clone())
+    };
+    eprintln!(
+        "scene: {} world, {} water budget",
+        if generated { "generated" } else { "authored" },
+        if closed { "closed" } else { "open" }
+    );
 
     let mut flora = Flora::new(FloraConfig::default());
     let mut fauna = Fauna::new(FaunaConfig::default());
@@ -78,6 +129,7 @@ fn print_header() {
         header.push_str(&format!(",body_{}", f.name()));
     }
     header.push_str(",flora_births,flora_deaths,fauna_births,fauna_deaths,litter");
+    header.push_str(",stored,atmosphere,showers,residual");
     println!("{header}");
 }
 
@@ -128,5 +180,10 @@ fn print_row(minute: u64, sim: &Sim) {
     row.push(a.ledger.deaths.to_string());
     let litter: f64 = f.ground.iter().map(|g| g.litter).sum();
     row.push(format!("{litter:.4}"));
+    let w = sim.world().view();
+    row.push(format!("{:.4}", w.stored_m3()));
+    row.push(format!("{:.4}", w.atmosphere_m3));
+    row.push(w.ledger.showers.to_string());
+    row.push(format!("{:.3e}", w.total_residual()));
     println!("{}", row.join(","));
 }

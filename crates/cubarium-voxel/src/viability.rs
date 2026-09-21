@@ -174,7 +174,7 @@ pub fn measure(world: &mut World, spec: &ViabilitySpec) -> Viability {
     let every = spec.sample_every.max(1);
     let mut stored: Vec<f64> = Vec::new();
     let mut atmosphere: Vec<f64> = Vec::new();
-    let mut sample = |w: &World, stored: &mut Vec<f64>, atmosphere: &mut Vec<f64>| {
+    let sample = |w: &World, stored: &mut Vec<f64>, atmosphere: &mut Vec<f64>| {
         stored.push(w.view().stored_m3());
         atmosphere.push(w.atmosphere_m3());
     };
