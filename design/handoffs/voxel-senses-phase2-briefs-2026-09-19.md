@@ -568,3 +568,56 @@ Tests short (≤ 200 ticks); no bit-identical pins; explicit-path commits; do
 not edit `design/handoffs/README.md` or this file. Verification: `cargo
 nextest run -p cubarium-search` green. Return ≤ 40 lines with commits, tables
 and evidence. Fable integrates and runs the workspace suite.
+
+## Integration note 6 (Fable, 2026-09-20, at 7f7111e) — the wander seed, and a correction
+
+P3-C is on main (c107385 teacher recording, 7f7111e imitation fit and clone
+centre; steps 3–5 are measurements). I re-ran the browser wander-seed row and
+the three blind rows in question; all reproduce the worker's numbers exactly.
+
+**Fit.** 11,520 teacher steps per founder (16 training layouts, Stage A and
+Stage B landed), analytic GRU gradient checked against finite differences
+(worst relative error under 1e-7). Final MSE on adapted actions: blind
+forward 0 / turn 0.0012 / feed 0; browser 0 / 0.0002 / 0. Turn-sign
+agreement 98.8 % and 99.5 %. The clone alone behaves like its teacher on the
+landed held-out (successor bitten 5 vs 6, 1 vs 2; mean forward 0.998 for
+both) and never parks.
+
+**Landed held-out eight, selected best of each run:**
+
+| arm | score | acq | depl | bit | reacq | min-succ | sense-t |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| browser A-seed (P3-B gen508) | .784/.935 | 8 | 8 | 6 | 6 | 0.05 m | 8277 |
+| **browser wander-seed (P3-C gen322)** | .808/.839 | 8 | 8 | 8 | **8** | 0.05 m | 10478 |
+| blind A-seed (P3-B gen451) | .425/.478 | 7 | 6 | 0 | 0 | 1.83 m | 0 |
+| blind A→near→landed (P3-B gen506) | .448/.484 | 7 | 7 | 0 | 0 | 1.02 m | 351 |
+| blind wander-seed (P3-C gen441) | .436/.471 | 7 | 7 | 0 | 0 | 1.93 m | 0 |
+
+**Browser: Stage B closed at 8/8.** From the wander seed every layout is
+depleted (ticks 510–595) and every successor bitten (755–1985); closest
+approach after depletion is 0.05–0.09 m on all eight. The two layouts the
+A-seed missed are taken. The median falls (.935 → .839) because the wanderer
+spends more of the horizon travelling; it converts the worst layouts rather
+than perfecting the best.
+
+**Blind: 0/8 in every arm, as note 4's measurement 3 predicts.** Closest
+approach after depletion is 1.83–1.93 m against a cue that is zero past
+1.75 m; the wander seed cannot be aimed at what cannot be smelled. Decision
+recorded per Wrysk (2026-09-20): **the blind founder's Stage B is the `near`
+band** (successor 1.0–1.5 m, inside its reach). The landed band stays as a
+diagnostic for it, not a target. In the live world litter is continuous under
+plants, so this is the honest task, not a concession.
+
+**Correction to note 5.** The P3-B report swapped the two blind Stage-B run
+labels: by checkpoint provenance `blind-a-landed` selected gen451 and
+`blind-near-landed` selected gen506. Note 5's row ".478/.488, 8 acquired,
+balanced gate MET" was `blind-near-landed/gen451`, a non-selected generation
+of that run, and its ".410/.479, 6 acquired" row was `blind-a-landed/gen506`,
+likewise non-selected. The table above holds the selected bests. The near
+rung's advantage for the blind founder is therefore +1 depletion, +.02 score
+and a closer approach (1.02 m vs 1.83 m), not 8/8 acquisition; note 5's
+"only arm that gets the blind founder to 8/8" is withdrawn. Nothing else in
+note 5 changes; the browser rows reproduced exactly.
+
+Open: survival term still constant. Live-world transfer of both founders is
+in progress under `voxel-live-founders-2026-09-20.md`.
