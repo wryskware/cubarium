@@ -101,3 +101,99 @@ requirements conflicted with the code, and the PNG paths.
 Briefed after slice 1 is integrated. Slice 2 (erosion and soil) will be a
 separate authoring pass for its fixtures (sediment accounting, periodic flux,
 tiny slope/basin fixtures) before implementation.
+
+## Slice 1 — integrated 2026-09-21
+
+Landed at 2fa65e3, 633bf7c, b06babc. Accepted deviations: whole-ring pooled
+statistics for the width test; height and depth doubled with the width in the
+voxel test; the seam-step bound taken over the whole ring. Pictures: gentle
+rolling relief, one material at the surface, no seam. Erosion supplies the
+character.
+
+## Slice 2 — erosion and soil
+
+Owner: the same generator worker (Opus, high). Files: `cubarium-voxel/src/`
+(`recipe.rs`, `generate.rs`, new `erosion.rs`), one dev example
+`cubarium-voxel/examples/erosion_map.rs`. Nothing in the host.
+
+**First commit — seams from the [caves plan](../caves-and-hollows-plan-2026-09-21.md):**
+
+1. Strata come from a periodic hardness field `hardness(x_m, y_m, z_m) → 0..1`
+   held by the recipe (its own stream), replacing the per-column sine carried
+   over in slice 1. Ridge is untouched.
+2. The staged pipeline is explicit stages with a value between them:
+   `Heightfield { bedrock_m, sediment_m }` → `voxelise` → `Volume` (the
+   material array) → `prepare` (skyline visibility pass, isolated-void
+   repair). Erosion acts on the heightfield; carving will act on the volume.
+3. `Recipe.hollows`, a serde-defaulted empty section (a unit struct or an
+   empty struct is fine now).
+4. No-overhang stays a test over the presets, not a property the voxeliser
+   cannot violate.
+
+**Erosion.** A CPU solver on the heightfield with a fixed budget
+`recipe.erosion.iterations`; `0` is the identity. Per sample column: bedrock
+height, sediment depth, hardness read at the bedrock surface. X periodic in
+every pass; front and back are walls. Each iteration: uniform model rain →
+downhill routing over the wrapped neighbourhood → stream-power entrainment
+(∝ slope × discharge), sediment first, then bedrock divided by hardness →
+transport → deposition where capacity falls below load → relaxation of
+sediment above an angle of repose. The ring has no exterior drain: water that
+reaches a closed basin stops there and its load deposits; find spill levels
+with a Priority-Flood over a derived drainage surface, keep the real
+depressions. Model water is discarded at the end; it is not the live world's
+inventory. Geological time is `iterations`, never ticks.
+
+Accounting each iteration: material removed from bedrock and sediment equals
+material deposited plus material in transport; no layer negative; bedrock
+never rises. Keep the totals on the heightfield so tests and the dev example
+can read them.
+
+Output carried into voxelisation: sediment depth becomes Soil, bedrock
+becomes Rock/Bedrock via the hardness field; slice 1's slope-derived soil is
+removed for staged rings. Exposed rock where sediment is under half a voxel.
+The heightfield also carries a `hard_cap` flag per column: surface hardness
+high and a downslope neighbour cut at least `recipe.hollows`-independent
+`cap_drop_m` (constant for now, 0.75 m) below — the input for slice 2b's
+undercuts. The visibility pass runs after erosion and reports how many
+columns it moved; if it moves more than 5 % of a preset's columns, say so in
+the return rather than tuning it away.
+
+Tests to write **before** the solver, on tiny fields (about 16 × 4 samples),
+each under a second:
+
+1. Conservation: on a tilted plane, after 50 iterations, removed − deposited
+   − in transport is within 1e-9 relative of zero; sediment ≥ 0 everywhere;
+   bedrock at every sample ≤ its start.
+2. Periodic flux: a plane sloping across the seam deposits on the far side of
+   `x = 0`; and eroding a cyclically shifted field gives the shifted result
+   within floating-point tolerance.
+3. Closed basin: a bowl with no exterior drain gains sediment on its floor,
+   loses it on its rim, never produces NaN, and its spill level equals the
+   lowest rim sample.
+4. Hardness: two identical slopes, hardness 0.2 and 0.9, the soft one loses
+   more bedrock.
+5. Repose: a vertical sediment step relaxes until no adjacent pair exceeds the
+   angle of repose by more than one sample's worth.
+6. Identity and determinism: `iterations = 0` returns the input; same input
+   twice gives the same output.
+7. Voxelisation: a column's soil voxel count equals its sediment depth
+   rounded to voxels, and a column with sediment under half a voxel shows rock
+   at the surface.
+8. The slice 1 preset and camera tests stay green with the presets' erosion
+   budgets on.
+
+Presets get erosion budgets that finish in well under a second each at their
+own sample counts; report the timings.
+
+**Dev example** `erosion_map`: for a preset name and seed, write greyscale
+PNGs of bedrock height, sediment depth and discharge for the eroded field to a
+directory given on the command line (the crate already depends on `png`). Not
+a test; committed as a tool.
+
+Visual check for the integrator: the six PNGs as in slice 1 into the scratch
+directory named in the message under `terrain-slice2/`, plus the `erosion_map`
+output for `default` seed 1 and `wide` seed 7.
+
+Return (≤40 lines): commits, which tests were red first, where the brief and
+the code disagreed and what you chose, erosion timings per preset, how many
+columns the visibility pass moved per preset, PNG paths.
