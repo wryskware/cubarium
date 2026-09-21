@@ -451,3 +451,133 @@ clearance under a 2-voxel cap needs 9. Wrysk's call: accept ledges only on the
 Tachyon ring, or raise `small`'s band / pull, or lower its clearance.
 Pictures at 8 px/voxel: flat-topped benches, terraced strata, dark notches
 under the ledges — the first slice that reads as the layered design.
+
+## Wrysk, 2026-09-21: go for slice 3; redo `small`
+
+"Raise small's pull to 1.0. Currently don't like its preset anyway, so feel
+free to completely redo it."
+
+## Package S — the `small` preset, redone
+
+Owner: generator worker (Opus, medium). Files: `recipe.rs` (the `SMALL`
+constants) and its tests only. Runs in parallel with slice 3; do not touch
+files outside `recipe.rs` without saying so.
+
+`small` is the Tachyon ring: 160 × 48 × 24 at 0.125 m, 20 m circumference,
+6 m tall, 3 m deep, 4 px/voxel on a 640 × 360 raster. Redo its recipe from
+the picture's needs, not from `default` scaled down: `benches.strength` 1.0;
+strata spacing and pull chosen so a grotto with the shared 0.75 m clearance
+fits under a cap (a face of at least 9 voxels at 0.125 m = 1.125 m, so bands
+of about 1.25–1.5 m); two or three rocky regions with benches and grottos,
+soil valleys between, at least one closed basin that can hold a pool
+(`spill_m` above its floor); relief that uses most of the 6 m without
+touching the ceiling; erosion budget that keeps bare rock around a quarter to
+a third of columns and the skyline pass under 5 %. Keep it walkable.
+
+Verification: the preset assertions (undercuts > 0 at two seeds, all hollows
+visible, no sealed voids, walkable, skyline < 5 %) now include `small`. Report
+the same per-seed table as 2d. Visual check: `small` at seeds 1, 7, 77 at
+4 px/voxel and seed 1 at 8 px/voxel, into the scratch directory under
+`terrain-small/`.
+
+## Slice 3 — water and founders
+
+Owner: a new habitat worker (Opus, high). Files: `cubarium-voxel/src/`
+(new `hydrate.rs`, `world.rs` for a settle API), `cubarium/src/voxel/habitat.rs`
+and `mod.rs`, `cubarium-voxel-fauna/src/step.rs` (headroom),
+`cubarium-voxel-flora` only for a shared suitability predicate if one is
+missing, `config/tachyon/voxel.toml`. Do not touch `recipe.rs`'s `SMALL`
+constants (package S owns them) or `generate.rs`/`erosion.rs`/`hollows.rs`
+except to read.
+
+Plan sections 4 and 5 are the spec; the decisions below fix what they leave
+open. Read the plan's "What exists now" for `habitat.rs:119–334`.
+
+**Decisions.**
+
+- **Inventory first.** `Recipe.water` (serde-defaulted for Ridge) states the
+  total water as metres over the footprint (`inventory_m`) and its split:
+  `atmosphere_fraction` reserved for the cycle, `aquifer_head_m` for the
+  table, the rest available to pools and pore. Nothing is charged
+  independently to a full target; the four stores sum to the inventory and
+  `Ledger::initial_*` records them as today.
+- **Pools from geometry.** `hydrate` fills closed basins to `min(spill_m,
+  what the remaining inventory allows)` at one head per basin, lowest basins
+  first, using the flood's own basin labelling; a grotto floor that is a bowl
+  (`hollows::find`) is a basin like any other. Pore moisture is set to field
+  capacity in soil below the water table and within one voxel of a pool, per
+  the existing retention rules; elsewhere it is the current default. No
+  perched tables except where the geometry holds them.
+- **Settle is measured, not assumed.** `World::settle(cap_ticks) ->
+  Settle { ticks, converged, pooled_m3, free_cells, pore_m3, drift_m3_per_100,
+  dry_locked }` replaces the host's `SETTLE_TICKS = 400`. Convergence: over
+  the last 100 ticks, change in pooled volume and in wet-cell count both
+  under 1 %; cap 600 ticks. `dry_locked` is true when the atmosphere holds
+  more than the shower trigger and no pool exists. The host logs the report
+  once at startup; the ordinary display shows nothing.
+- **Founders on support faces.** Replace `skyline_of` with an enumeration of
+  support faces (any `y`, including hollow floors) and score each with the
+  flora crate's own establishment gates (`establishment_gates_with_sky`) plus
+  an adult-maintenance check: light response × the species' rate at that
+  site covers its adult upkeep. If that check needs a predicate the flora
+  crate does not expose, add it there and call it from the host; never copy
+  the rule into the host. Patch centres with a minimum spacing in metres,
+  colonies grown over connected suitable faces (use the traversability
+  neighbourhood), gaps kept. Counts by usable area × target coverage with a
+  small-world cap, recomputing light as crowns are placed. Logs and litter
+  before glowcaps and shredders, booked in the ledger.
+- **Fauna after food.** Browsers need: a support face with headroom for the
+  body, water under wade depth, reachable foliage within mouth reach, and a
+  walkable route to a second foliage patch. **No foodless fallback**: a
+  species that cannot be placed is reported as a shortfall in `Seeded` and
+  not placed. Headroom: `faces_in_column` rejects a face whose void above is
+  shorter than the body's height, derived from the species' existing
+  geometry (`mouth_reach_up_voxels` or the body scale it already carries);
+  do not add a new species parameter unless nothing there fits, and say so.
+  This is a model-rule change: its tests are listed below and stay in the
+  fauna crate.
+- **Defaults flip.** The host's generated scene (`cubarium voxel` with no
+  TOML) uses the staged `default` preset; `Landform::Ridge` remains
+  `Config::default()` for fixtures and is selectable with `landform = "ridge"`.
+  `config/tachyon/voxel.toml` selects `preset = "small"` and its `[world]`
+  drops the rain/evaporation/aquifer keys the recipe now decides.
+- **Not in this slice**: UI regenerate/keep-candidate controls (slice 4;
+  restart with `--seed` is the regenerate for now), any tuning of species
+  rates, any run past the settle cap.
+
+Tests to write **before** the code, each under a second unless marked:
+
+1. Inventory: after `hydrate`, surface + pore + aquifer + atmosphere equals
+   `inventory_m × footprint` within 1e-9 relative on a fixture with two
+   basins; the deeper basin fills first; a fixture with inventory below the
+   first spill leaves both basins partly filled at one head each.
+2. Grotto pool: a bowl-floored hollow fixture receives water in `hydrate`
+   and holds it after `settle`.
+3. Settle: on a fixture already at rest, `settle` returns in ≤ 100 ticks
+   with `converged`; on a fixture with a fresh column of free water above a
+   basin it converges before the cap and pooled volume ends within 1 % of
+   the poured amount; `dry_locked` is true on a fixture with no pools and a
+   charged atmosphere. (≤ 600 ticks on tiny worlds; keep under a second.)
+4. Support faces: on a fixture with a roofed shelf, the founder site list
+   includes the shelf's floor and the ground under it, and excludes the roof
+   top when it has no headroom.
+5. Suitability: a bloomcrown is not placed on a shaded hollow floor; an
+   umbrellafrond is; a glowcap is placed only where litter was booked first.
+6. Shortfall: on a fixture with plants but no reachable second patch,
+   browsers are not placed and `Seeded` reports the shortfall; on the
+   authored scene they are placed.
+7. Headroom (fauna crate): `faces_in_column` lists a floor with body-height
+   headroom and rejects one with one voxel less; an animal on a floor keeps
+   its face when a roof appears above its headroom and loses it when the roof
+   drops below.
+8. Host: `cubarium voxel` with no TOML generates the staged default; the
+   Tachyon TOML parses to `small`; both seeded habitats step 60 ticks with
+   closed ledgers (extend `the_seeded_habitat_steps_with_closed_ledgers`).
+
+Visual check into the scratch directory under `terrain-slice3/`: `default`
+seed 1 and `wide` seed 7 at 4 and 8 px/voxel after settle and founders, plus
+the settle report and `Seeded` printed for each.
+
+Return (≤40 lines): commits, red-first tests, disagreements and choices,
+settle ticks and pooled m³ per preset, founder counts and shortfalls per
+preset, PNG paths.
