@@ -68,8 +68,8 @@ pub use step::{Gates, establishment_gates, establishment_gates_on_substrate};
 /// ecology the numbers encode.
 ///
 /// Five of the six are producers. The sixth, [`Species::Glowcap`], is a
-/// [`Trophic::Saprotroph`]: the same stand, the same lifecycle, and dead wood where the
-/// light was. "Species" is therefore the crate's word for a kind of stand and not a claim
+/// [`Trophic::Saprotroph`]: the same stand, the same lifecycle, and dead organic matter —
+/// dead wood and litter both — where the light was. "Species" is therefore the crate's word for a kind of stand and not a claim
 /// that they are all plants.
 ///
 /// The first two are the pair of the first coupled experiment and keep slots 0 and 1, so
@@ -1068,8 +1068,9 @@ impl SpeciesConfig {
     /// **Every number is an untuned placeholder** (`design/backlog.md` §1), chosen to
     /// encode that sentence and nothing else:
     ///
-    /// - **Income.** `substrate_uptake_per_s` 0.02 per unit of mycelium per second and
-    ///   `substrate_yield` 0.4: a fungus at full moisture earns `0.4 · 0.02 · W = 0.008 · W`
+    /// - **Income.** `substrate_uptake_per_s` 0.02 per unit of mycelium per second, against
+    ///   the **dead wood and the litter** of its box together, and `substrate_yield` 0.4:
+    ///   a fungus at full moisture earns `0.4 · 0.02 · W = 0.008 · W`
     ///   of tissue per second against maintenance plus cap replacement
     ///   `0.0002 · W + 1.2 · 0.001 · 2 · W = 0.0026 · W`, a **3.08× margin** — solvent on a
     ///   log with wood in it, and starving the moment the log or the moisture runs out,
@@ -1079,9 +1080,10 @@ impl SpeciesConfig {
     ///   `assimilation` is **0.0**, so the species earns nothing from light even if some
     ///   future caller reaches the `Photo` branch with it.
     /// - **The substrate gate.** `establish_substrate_min` 0.02 is about one spore package's
-    ///   worth of wood (`alive_min / w_frac` = 0.025): a log has to hold roughly what the
-    ///   stand it would feed is made of. Below it the box is not a log any more and the gate
-    ///   shuts, which is how a decomposer grove *ends*.
+    ///   worth of wood (`alive_min / w_frac` = 0.025): a box has to hold roughly what the
+    ///   stand it would feed is made of, counting its litter as well as its wood. Below it
+    ///   there is nothing there to eat and the gate shuts, which is how a decomposer grove
+    ///   *ends* — on a floor with litter on it, later than it used to.
     /// - **Water, the three thresholds together.** `establish_pore_min` 0.1 and
     ///   `establish_saturated_max` 0.5 are the brief's "pore between the species' floor and
     ///   its saturation ceiling", read in the model's own terms — the existing pore gate is
@@ -1996,7 +1998,9 @@ pub enum Command {
 pub enum DepositKind {
     /// [`Ground::carrion`]: a corpse, on its own pool at its own rate.
     Carrion,
-    /// [`Ground::litter`], through the same `e_d_max` cap plant litter goes through.
+    /// [`Ground::litter`], through the same `e_d_max` cap plant litter goes through. It is
+    /// **saprotroph food** as well as a shredder's: a deposit here feeds any fungus whose
+    /// mycelium box reaches the site, on the same terms as a log.
     Litter,
     /// [`Ground::dead_wood`]: a **log**. Round 5a did not have this kind, because nothing
     /// in that round could put wood on the ground that a plant had not grown there
@@ -2005,7 +2009,7 @@ pub enum DepositKind {
     ///
     /// Round 5b needs it twice over. A saprotroph eats dead wood, and a **fresh world has
     /// none**: the harness has to lay declared logs before a fungus can be introduced at
-    /// all. And a consumer that kills a stand and leaves its trunk standing is putting wood
+    /// all — a fungus also eats litter now, but a fresh world has none of that either. And a consumer that kills a stand and leaves its trunk standing is putting wood
     /// back, not litter and not a corpse.
     ///
     /// No energy cap, for carrion's reason: a deposit's energy comes from the depositor's
