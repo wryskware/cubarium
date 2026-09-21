@@ -670,6 +670,12 @@ enum Command {
         /// of the arena protocol string and so of the run's protocol hash.
         #[arg(long, default_value = "landed")]
         band: String,
+        /// Warm start: a saved centre (`centers/*.json`) whose exact weights this run
+        /// begins from, with a fresh Adam state and its own protocol hash. The source
+        /// file, its weight hash and its protocol are recorded in the checkpoint. A
+        /// centre of the other founder is refused.
+        #[arg(long)]
+        init_center: Option<PathBuf>,
         /// The training controller: `gru` is the only trainable body (the heuristic slot
         /// carries no parameters and is refused here by name).
         #[arg(long, default_value = "gru")]
@@ -1043,6 +1049,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             founder,
             stage,
             band,
+            init_center,
             controller,
             pairs,
             layouts,
@@ -1063,6 +1070,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 founder,
                 stage,
                 band,
+                init_center,
                 controller,
                 pairs,
                 layouts,

@@ -322,6 +322,7 @@ pub fn train(
     founder: String,
     stage: String,
     band: String,
+    init_center: Option<PathBuf>,
     controller: String,
     pairs: usize,
     layouts: usize,
@@ -347,6 +348,9 @@ pub fn train(
     let stage = task::parse_stage(&stage)?;
     let band = task::parse_band(&band)?;
     let horizon = horizon.unwrap_or_else(|| stage.horizon());
+    let init_center = init_center
+        .map(|path| trainer::InitCenter::load(&path, founder))
+        .transpose()?;
     if out.exists() && std::fs::read_dir(&out).map_or(false, |d| d.count() > 0) {
         return Err(format!(
             "{} already holds a run; pass --overwrite to discard it",
@@ -358,6 +362,7 @@ pub fn train(
         founder,
         stage,
         band,
+        init_center,
         pairs,
         layouts,
         updates,

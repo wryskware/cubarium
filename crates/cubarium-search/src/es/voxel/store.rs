@@ -51,6 +51,10 @@ pub struct VoxelPolicyFile {
     /// patch stocks and geometry define their task; Stage-A centres remain transferable.
     #[serde(default)]
     pub arena_protocol: String,
+    /// FNV-1a 64 of the training run's full protocol, when the file came from one. Kept
+    /// as provenance for a warm start; absent in files written before P3-B.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol_hash: Option<u64>,
     /// Which arena task the weights were trained on (`a` or `b`). Recorded, not
     /// validated: running a Stage-A centre on Stage B is a transfer measurement worth
     /// taking, not an error.
@@ -216,6 +220,7 @@ mod tests {
                 crate::es::voxel::task::Band::Landed,
             )
             .into(),
+            protocol_hash: None,
             stage: crate::es::voxel::task::Stage::A.as_str().into(),
             theta,
         }

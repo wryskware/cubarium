@@ -519,6 +519,81 @@ pub struct VoxelCheckpoint {
     pub discarded: Discarded,
     /// One record per centre the run evaluated, oldest first.
     pub centers: Vec<CenterRecord>,
+    /// Where this run's starting weights came from, when it was warm-started.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub init_center: Option<InitProvenance>,
+}
+
+/// Where a warm-started run's initial weights came from. Provenance only: the run's own
+/// protocol, hash and Adam state are its own.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InitProvenance {
+    /// The source policy file, as it was named on the command line.
+    pub file: String,
+    /// FNV-1a 64 over the source weights' little-endian hex, so the file can be checked
+    /// against the record.
+    pub weights_fnv1a: u64,
+    /// The source run's protocol hash, when its file recorded one (files written before
+    /// P3-B did not).
+    pub protocol_hash: Option<u64>,
+    /// The stage and arena protocol the source was trained under, so a reader can see
+    /// which rung of the curriculum this run followed.
+    pub stage: String,
+    pub arena_protocol: String,
+    pub generation: Option<u64>,
+    pub score: Option<f64>,
+}
+
+/// A loaded warm-start centre: the weights plus what to record about them.
+#[derive(Clone, Debug)]
+pub struct InitCenter {
+    pub theta: Vec<f64>,
+    pub provenance: InitProvenance,
+}
+
+impl InitCenter {
+    /// Load `path` as a warm start for `founder`.
+    ///
+    /// The founder is a refusal, not a warning: another lineage's weights are the wrong
+    /// shape for this manifest and would be a different animal. The stage and band are
+    /// **not** refused — walking a centre up a curriculum is the point — but both are
+    /// recorded, and the new run gets its own protocol hash regardless.
+    pub fn load(path: &std::path::Path, founder: Founder) -> Result<InitCenter, String> {
+        let file = super::store::VoxelPolicyFile::load(path)?;
+        let named = super::parse_founder(&file.founder)?;
+        if named != founder {
+            return Err(format!(
+                "{}: --init-center is a {} centre but this run trains {}: the weights \
+                 are another lineage's and cannot be reinterpreted",
+                path.display(),
+                named.name(),
+                founder.name()
+            ));
+        }
+        let protocol_hash = file.protocol_hash.or_else(|| sibling_protocol_hash(path));
+        Ok(InitCenter {
+            provenance: InitProvenance {
+                file: path.display().to_string(),
+                weights_fnv1a: fnv1a_hex(&file.theta),
+                protocol_hash,
+                stage: file.stage.clone(),
+                arena_protocol: file.arena_protocol.clone(),
+                generation: file.generation,
+                score: file.score,
+            },
+            theta: file.theta,
+        })
+    }
+}
+
+/// A centre file written before P3-B carries no protocol hash of its own; its run's
+/// `checkpoint.json` sits two directories up (`<run>/centers/genN-center.json`), so read
+/// the hash from there when it is available rather than recording nothing.
+fn sibling_protocol_hash(center: &std::path::Path) -> Option<u64> {
+    let checkpoint = center.parent()?.parent()?.join("checkpoint.json");
+    let bytes = std::fs::read(checkpoint).ok()?;
+    let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    value.get("protocol_hash")?.as_u64()
 }
 
 /// One evaluated centre in the run's history.
@@ -559,6 +634,7 @@ impl VoxelCheckpoint {
             ticks_run: 0,
             discarded: Discarded::default(),
             centers: Vec::new(),
+            init_center: None,
         }
     }
 
@@ -610,6 +686,9 @@ pub struct TrainSpec {
     pub stage: Stage,
     /// Stage B's successor separation band. Ignored on Stage A.
     pub band: task::Band,
+    /// A saved centre to start this run's weights from, with a fresh Adam state
+    /// ([`InitCenter`]). `None` starts from the seeded initial centre.
+    pub init_center: Option<InitCenter>,
     pub pairs: usize,
     /// How many of the frozen training layouts to run, from the front.
     pub layouts: usize,
@@ -703,6 +782,26 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
         .map_err(|e| format!("cannot create {}: {e}", run_dir.display()))?;
     let checkpoint_path = run_dir.join("checkpoint.json");
     let mut cp = VoxelCheckpoint::fresh(protocol, crate::evaluate::BUILD_ID);
+    if let Some(init) = &spec.init_center {
+        // The warm start: the source centre's exact weights, this run's own protocol
+        // hash, and a **fresh** Adam state — the source's moments belong to the
+        // gradient of a different task and carrying them would be a silent migration.
+        cp.theta.clone_from(&init.theta);
+        cp.adam = Adam::new(cp.theta.len());
+        cp.init_center = Some(init.provenance.clone());
+        println!(
+            "# warm start from {} (stage {}, arena {}, protocol {}), weights {:#018x}; \
+             Adam state fresh, this run's protocol {:#018x}",
+            init.provenance.file,
+            init.provenance.stage,
+            init.provenance.arena_protocol,
+            init.provenance
+                .protocol_hash
+                .map_or("unrecorded".to_string(), |h| format!("{h:#018x}")),
+            init.provenance.weights_fnv1a,
+            cp.protocol_hash,
+        );
+    }
     cp.validate()
         .map_err(|e| format!("fresh checkpoint: {e}"))?;
     let mut score_spreads = Vec::new();
@@ -880,7 +979,7 @@ fn write_center_policy(
 ) -> Result<(), String> {
     let founder = cp.protocol.founder_parsed()?;
     let file = super::store::VoxelPolicyFile {
-        schema: super::store::POLICY_SCHEMA.into(),
+        schema: crate::es::voxel::store::POLICY_SCHEMA.into(),
         build: crate::evaluate::BUILD_ID.into(),
         founder: founder.name().into(),
         digest: cp.protocol.digest,
@@ -890,6 +989,7 @@ fn write_center_policy(
         start_heading: cp.protocol.start_heading.clone(),
         starting_stores: cp.protocol.starting_stores.clone(),
         arena_protocol: cp.protocol.arena_protocol.clone(),
+        protocol_hash: Some(cp.protocol_hash),
         stage: cp.protocol.stage.clone(),
         theta: cp.theta.clone(),
     };
@@ -948,6 +1048,7 @@ mod tests {
             founder: Founder::Blind,
             stage: Stage::A,
             band: task::Band::Landed,
+            init_center: None,
             pairs: 1,
             layouts: 1,
             updates: 1,
@@ -1001,6 +1102,109 @@ mod tests {
         assert_eq!(cp.theta.len(), Founder::Blind.manifest().parameter_count());
         assert_eq!(cp.adam.step, 1, "a completed generation advances Adam once");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The warm start takes the source centre's exact weights and nothing else: a fresh
+    /// Adam state, this run's own protocol hash, and the source recorded as provenance.
+    /// The other founder's centre is refused by name rather than reshaped.
+    #[test]
+    fn a_warm_start_takes_the_weights_and_leaves_the_optimizer_state_behind() {
+        let dir = std::env::temp_dir().join(format!("cubarium-voxel-init-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+
+        let theta = super::super::super::tensor::initial_center_shape::<23, 3>(77);
+        let source = crate::es::voxel::store::VoxelPolicyFile {
+            schema: crate::es::voxel::store::POLICY_SCHEMA.into(),
+            build: "test".into(),
+            founder: Founder::Blind.name().into(),
+            digest: voxel_schema_digest(Founder::Blind),
+            train_seed: 1,
+            generation: Some(504),
+            score: Some(0.9),
+            start_heading: task::START_HEADING_PROTOCOL.into(),
+            starting_stores: task::STARTING_STORES_PROTOCOL.into(),
+            arena_protocol: task::arena_protocol(Stage::A, task::Band::Landed).into(),
+            protocol_hash: Some(0xdead_beef),
+            stage: Stage::A.as_str().into(),
+            theta: theta.clone(),
+        };
+        let path = dir.join("gen504-center.json");
+        source.write(&path).expect("written");
+
+        // Another lineage's centre is refused, by name, before anything runs.
+        let err = InitCenter::load(&path, Founder::Browser).expect_err("refused");
+        assert!(err.contains("littershredder") && err.contains("frondgrazer"), "{err}");
+
+        let init = InitCenter::load(&path, Founder::Blind).expect("loaded");
+        assert_eq!(init.theta, theta, "the exact weights, not a reseed");
+        assert_eq!(init.provenance.protocol_hash, Some(0xdead_beef));
+        assert_eq!(init.provenance.weights_fnv1a, fnv1a_hex(&theta));
+        assert_eq!(init.provenance.generation, Some(504));
+        assert_eq!(init.provenance.stage, "a");
+
+        // A Stage-B near run started from that Stage-A centre: the weights carry over,
+        // the Adam moments do not, and the run's protocol is its own.
+        let protocol = VoxelProtocol::new(
+            Founder::Blind,
+            Stage::B,
+            task::Band::Near,
+            1,
+            40,
+            20_260_918,
+            &task::TRAINING_LAYOUT_SEEDS[..1],
+        );
+        let mut cp = VoxelCheckpoint::fresh(protocol, "test");
+        let cold = cp.theta.clone();
+        assert_ne!(cold, theta, "the seeded centre is not the source centre");
+        cp.theta.clone_from(&init.theta);
+        cp.adam = Adam::new(cp.theta.len());
+        cp.init_center = Some(init.provenance.clone());
+        assert_eq!(cp.theta, theta);
+        assert_eq!(cp.adam.step, 0);
+        assert!(cp.adam.m.iter().all(|x| *x == 0.0) && cp.adam.v.iter().all(|x| *x == 0.0));
+        assert_ne!(cp.protocol_hash, 0xdead_beef, "the run hashes as itself");
+        assert_eq!(
+            cp.protocol.arena_protocol,
+            task::stage_b_arena_protocol(task::Band::Near)
+        );
+        cp.validate().expect("a warm-started checkpoint is valid");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The two bands are two protocols: the same founder, stage, pairs, horizon, seed
+    /// and layouts hash differently, so a near checkpoint cannot be resumed as a landed
+    /// one.
+    #[test]
+    fn the_separation_band_is_in_the_protocol_hash() {
+        let of = |band| {
+            VoxelProtocol::new(
+                Founder::Browser,
+                Stage::B,
+                band,
+                32,
+                2_400,
+                20_260_918,
+                &task::TRAINING_LAYOUT_SEEDS,
+            )
+        };
+        let near = of(task::Band::Near);
+        let landed = of(task::Band::Landed);
+        assert_ne!(near.hash(), landed.hash());
+        assert_eq!(near.successor_band, "near");
+        assert_eq!(landed.successor_band, "landed");
+        // Stage A has no successor, so the flag cannot move its hash.
+        let a = |band| {
+            VoxelProtocol::new(
+                Founder::Browser,
+                Stage::A,
+                band,
+                32,
+                1_200,
+                20_260_918,
+                &task::TRAINING_LAYOUT_SEEDS,
+            )
+        };
+        assert_eq!(a(task::Band::Near).hash(), a(task::Band::Landed).hash());
     }
 
     /// A pre-cancelled generation dispatches no episodes and leaves optimizer state alone.
