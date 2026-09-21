@@ -18,8 +18,13 @@ Add `crates/cubarium/examples/voxel_census.rs`. It must:
 2. `let mut flora = cubarium_voxel_flora::Flora::new(cubarium_voxel_flora::FloraConfig::default());`
    `let mut fauna = cubarium_voxel_fauna::Fauna::new(cubarium_voxel_fauna::FaunaConfig::default());`
    `let seeded = cubarium::voxel::habitat::seed(&mut world, &mut flora, &mut fauna);`
-   Print `seeded` (`stands`, `logs`, `animals`) to stderr.
-3. `let mut sim = cubarium_voxel_sim::Sim::new(world, flora, fauna, cubarium_voxel_sim::SimConfig::default());`
+   Print `seeded` (`stands`, `logs`, `founders`, `litter_tiles`, and
+   `seeded.animals()`) to stderr.
+3. Settle the litter cue field the live founders sense, then build the live sim:
+   `let mut senses = cubarium_voxel_fauna::Senses::new();`
+   `senses.settle(&world.view(), &flora.view());`
+   `let mut sim = cubarium_voxel_sim::Sim::new(world, flora, fauna, cubarium_voxel_sim::SimConfig::default(), Some(senses));`
+   (five arguments; the last is the senses field, since commit 815de70).
    and call `sim.step()` in a loop. Ticks are 20 per simulated second
    (`cubarium_voxel_fauna::TICK_HZ`).
 4. Every simulated minute (1,200 ticks) print one CSV row to stdout with:
