@@ -493,6 +493,54 @@ impl FaunaConfig {
     }
 }
 
+/// Why a body left the world, as [`FaunaLedger`] books it.
+///
+/// Two of the three are **deaths** under [`step`]'s step 8 and leave a corpse; the third
+/// is not a death at all and leaves none. Keeping all three in one enum is what lets a
+/// census say "sixty-five bodies left, and here is the split" without a second bookkeeping
+/// path: the two death causes sum to [`FaunaLedger::deaths`], and `Removed` is stated
+/// beside them rather than hidden in the difference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Departure {
+    /// `body` fell below the effective `body_min`: the reserve ran out and dieback took
+    /// the structure past the floor. A corpse.
+    Starved,
+    /// Standing water deeper than the effective `drown_depth_m` on its own face. A
+    /// corpse.
+    Drowned,
+    /// No corpse: a [`Command::Remove`], or a body whose support face stopped being one
+    /// ([`step`]'s step 1). Booked `removed_*_out` and **not** counted in
+    /// [`FaunaLedger::deaths`].
+    Removed,
+}
+
+impl Departure {
+    pub const ALL: [Departure; 3] = [Departure::Starved, Departure::Drowned, Departure::Removed];
+    pub const COUNT: usize = Departure::ALL.len();
+
+    /// Index into a per-cause array, in [`Departure::ALL`] order.
+    pub fn index(self) -> usize {
+        match self {
+            Departure::Starved => 0,
+            Departure::Drowned => 1,
+            Departure::Removed => 2,
+        }
+    }
+
+    /// Whether this departure left a corpse and is counted in [`FaunaLedger::deaths`].
+    pub fn is_death(self) -> bool {
+        !matches!(self, Departure::Removed)
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Departure::Starved => "starved",
+            Departure::Drowned => "drowned",
+            Departure::Removed => "removed",
+        }
+    }
+}
+
 /// Every unit of organic matter, mineral and energy that has crossed this layer's
 /// boundary, and the counters of what happened.
 ///
@@ -561,6 +609,26 @@ pub struct FaunaLedger {
     pub introduced: u64,
     /// Animals that died: starved below `body_min`, or drowned.
     pub deaths: u64,
+    /// The **cause** each of those deaths was booked under, by [`Departure::index`]:
+    /// `Starved`, `Drowned`, then `Removed`.
+    ///
+    /// Instrumentation, not a rule: nothing here changes when a body dies, only what the
+    /// ledger can be asked afterwards. `deaths_by_cause[Starved] +
+    /// deaths_by_cause[Drowned]` is exactly [`FaunaLedger::deaths`]
+    /// ([`FaunaLedger::deaths_accounted`] asserts it), because every death books both at
+    /// the same point. `deaths_by_cause[Removed]` is **not** in `deaths` and never was: a
+    /// body an [`Command::Remove`] took, or one whose support face the terrain took away,
+    /// left the world without dying and without a corpse ([`step`]'s step 1), and the
+    /// census could not tell that apart from a death before this counter existed.
+    ///
+    /// A body that is at once below `body_min` and under drowning water is booked
+    /// `Starved`: the starvation clause is the one the death rule reads first, and a
+    /// cause counter must name the clause that fired, not adjudicate between two.
+    pub deaths_by_cause: [u64; Departure::COUNT],
+    /// The same three counters restricted to bodies that carry a lineage, indexed
+    /// `[founder][cause]` in [`Founder::index`] and [`Departure::index`] order. A
+    /// heuristic body carries no lineage and appears only in the totals above.
+    pub deaths_by_founder_cause: [[u64; Departure::COUNT]; Founder::COUNT],
     /// Withdrawals that returned something.
     pub bites: u64,
     /// Bites and organic matter **by the plant species they came off**, indexed by
@@ -589,6 +657,22 @@ pub struct FaunaLedger {
 }
 
 impl FaunaLedger {
+    /// How many bodies left this way, whatever lineage they carried.
+    pub fn departed(&self, cause: Departure) -> u64 {
+        self.deaths_by_cause[cause.index()]
+    }
+
+    /// How many bodies of one lineage left this way.
+    pub fn departed_founder(&self, founder: Founder, cause: Departure) -> u64 {
+        self.deaths_by_founder_cause[founder.index()][cause.index()]
+    }
+
+    /// The two death causes, summed: equal to [`FaunaLedger::deaths`] for any ledger this
+    /// layer produced, which is the instrumentation's own invariant.
+    pub fn deaths_accounted(&self) -> u64 {
+        self.departed(Departure::Starved) + self.departed(Departure::Drowned)
+    }
+
     pub fn expected_organic(&self) -> f64 {
         self.introduced_organic_in + self.eaten_organic_in
             - self.respired_out
@@ -1153,6 +1237,17 @@ impl Fauna {
         self.ledger.removed_organic_out += a.organic();
         self.ledger.removed_mineral_out += a.mineral;
         self.ledger.removed_energy_out += a.energy;
+        self.book_departure(a, Departure::Removed);
+    }
+
+    /// The one place a departure's cause is counted, so the totals and the per-lineage
+    /// split cannot drift: the same body books the same addend into both at the same
+    /// point, exactly as [`FaunaLedger::respired_out`]'s three splits do.
+    pub(crate) fn book_departure(&mut self, a: &Animal, cause: Departure) {
+        self.ledger.deaths_by_cause[cause.index()] += 1;
+        if let Some(founder) = a.founder {
+            self.ledger.deaths_by_founder_cause[founder.index()][cause.index()] += 1;
+        }
     }
 }
 

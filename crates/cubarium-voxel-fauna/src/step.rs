@@ -58,7 +58,7 @@ use cubarium_voxel_flora::{DepositKind, Flora, Site, Taken};
 use crate::body;
 use crate::controller::Actions;
 use crate::manifest::Founder;
-use crate::{Animal, Fauna, IntervalFeedback, SpeciesConfig, State, steppable};
+use crate::{Animal, Departure, Fauna, IntervalFeedback, SpeciesConfig, State, steppable};
 
 /// Stream keys, so two draws in one tick cannot be the same draw. One per rule that draws.
 const DOMAIN_TARGET: u64 = 1;
@@ -1015,27 +1015,35 @@ fn births(fauna: &mut Fauna) {
 
 /// Step 7: starvation and drowning, and the carrion they leave.
 fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
-    let dead: Vec<Animal> = fauna
+    // The cause is read off the same two clauses the rule is made of, in the order the
+    // rule reads them: this is a label on an existing decision, not a second decision.
+    // A body that satisfies both is `Starved`, which the `else if` fixes explicitly.
+    let dead: Vec<(Animal, Departure)> = fauna
         .animals
         .iter()
-        .filter(|a| {
+        .filter_map(|a| {
             let sc = body::effective_config(&fauna.config, a);
-            a.body < sc.body_min
-                || view.water_depth_m(i64::from(a.site.x), a.site.y, a.site.z) > sc.drown_depth_m
+            if a.body < sc.body_min {
+                Some((*a, Departure::Starved))
+            } else if view.water_depth_m(i64::from(a.site.x), a.site.y, a.site.z) > sc.drown_depth_m
+            {
+                Some((*a, Departure::Drowned))
+            } else {
+                None
+            }
         })
-        .copied()
         .collect();
     if dead.is_empty() {
         return;
     }
-    let ids: Vec<u64> = dead.iter().map(|a| a.id).collect();
+    let ids: Vec<u64> = dead.iter().map(|(a, _)| a.id).collect();
     fauna.animals.retain(|a| !ids.contains(&a.id));
     for id in &ids {
         // A dead body's controller goes with it. Ids are never reused, so a table that
         // only ever grows is a leak once the world breeds and buries.
         fauna.controllers.take(*id);
     }
-    for a in &dead {
+    for (a, cause) in &dead {
         // The whole animal, whatever is left of it: a corpse with no organic matter left
         // is still a corpse with mineral in it, and keeping an inert remainder on a dead
         // animal is how a ledger stops closing.
@@ -1050,5 +1058,6 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
             },
         );
         fauna.ledger.deaths += 1;
+        fauna.book_departure(a, *cause);
     }
 }

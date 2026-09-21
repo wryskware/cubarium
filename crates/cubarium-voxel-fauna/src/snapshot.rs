@@ -33,9 +33,14 @@ use crate::Fauna;
 /// assimilated-intake counters on the ledger, and [`crate::Fauna::policy_driven`] — the
 /// record of which lineages were driven by a saved policy, which is the one thing about
 /// a founder's controller that a loader cannot re-derive and must not guess.
+/// Schema 7 added the ledger's **departure-cause** counters — `deaths_by_cause` and
+/// `deaths_by_founder_cause` ([`crate::Departure`]) — which the 2026-09-20 founder
+/// autopsy needs to tell a starvation from a drowning. Pure instrumentation, and still a
+/// schema bump: the serialized ledger grew two arrays and a world saved under schema 6
+/// has no honest value for them.
 /// Postcard is not self-describing, so older worlds are **refused**, not migrated
 /// (`always-fresh-never-migrate`): start a fresh world.
-pub const SCHEMA: u32 = 6;
+pub const SCHEMA: u32 = 7;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -209,7 +214,7 @@ mod tests {
     /// The refusal is checked by rewriting the leading schema tag, which is one postcard
     /// varint byte. No hash is pinned and no old bytes are kept in the tree.
     #[test]
-    fn schema_six_round_trips_a_founder_world_and_refuses_an_older_one() {
+    fn the_current_schema_round_trips_a_founder_world_and_refuses_an_older_one() {
         let mut body = animal(0, 0.02);
         body.founder = Some(crate::Founder::Browser);
         body.founder_state.held = crate::Actions {
