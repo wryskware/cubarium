@@ -6,7 +6,9 @@
 //! `body_width / 2` (width is half the length, so the disc fits the length), centred on
 //! the [`Pose`](crate::Pose)'s `(x, z)`, standing on the support face one layer below
 //! its centre column. The forward mouth is the footprint plus a short reach of
-//! `mouth_reach_body_lengths` body lengths beyond it.
+//! `mouth_reach_body_lengths` body lengths beyond it, and it takes food from the body's
+//! own layer plus `mouth_reach_up_voxels` whole voxels above it — one for the browser,
+//! which lifts its head to a grown crown, none for the ground feeder.
 //!
 //! # What movement is allowed to do
 //!
@@ -537,24 +539,39 @@ pub(crate) fn mouth_litter_site(
     best
 }
 
-/// The stand whose crown cells the mouth region physically touches, at the body's own
-/// layer: a crown cell of `stand.site` in a mouth column, at the standing layer plus
-/// one. The most foliage wins, ties to the smallest root site. `None` when the mouth is
-/// in air — a neighbouring stand whose crown does not reach the mouth is not mouth
-/// input.
+/// The crown layers one mouth can take food from, standing on `standing_y`.
+///
+/// The body occupies `standing_y + 1`; a founder that can lift its head reaches
+/// [`Manifest::mouth_reach_up_voxels`] whole voxels further up. A ground feeder's reach
+/// is zero, so the range is the single layer it always was.
+pub(crate) fn mouth_crown_layers(
+    standing_y: u32,
+    manifest: &Manifest,
+) -> std::ops::RangeInclusive<i64> {
+    let body_layer = i64::from(standing_y) + 1;
+    body_layer..=body_layer + i64::from(manifest.mouth_reach_up_voxels)
+}
+
+/// The stand whose crown cells the mouth region physically touches: a crown cell of
+/// `stand.site` in a mouth column, at a layer the mouth can get at — the body's own
+/// layer, and up to [`Manifest::mouth_reach_up_voxels`] above it, which is how a browser
+/// takes a crown that has grown past its head. The most foliage wins, ties to the
+/// smallest root site. `None` when the mouth is in air — a neighbouring stand whose crown
+/// does not reach the mouth is not mouth input.
 pub(crate) fn mouth_foliage_stand(
     fv: &FloraView<'_>,
     view: &VoxelView<'_>,
     cols: &[(i64, u32)],
     standing_y: u32,
+    manifest: &Manifest,
 ) -> Option<(Site, f64)> {
-    let body_layer = i64::from(standing_y) + 1;
+    let layers = mouth_crown_layers(standing_y, manifest);
     let width = i64::from(view.config.width);
     let depth = i64::from(view.config.depth);
     let mut best: Option<(Site, f64)> = None;
     for stand in fv.stands.iter().filter(|s| s.foliage > 0.0) {
         let sc = fv.config.species(stand.species);
-        if i64::from(stand.site.y) + i64::from(sc.crown_voxels(stand.wood)) != body_layer {
+        if !layers.contains(&(i64::from(stand.site.y) + i64::from(sc.crown_voxels(stand.wood)))) {
             continue;
         }
         let radius = sc.crown_radius(stand.wood).max(0.0);
@@ -599,14 +616,15 @@ pub(crate) fn mouth_foliage_stands(
     view: &VoxelView<'_>,
     cols: &[(i64, u32)],
     standing_y: u32,
+    manifest: &Manifest,
 ) -> Vec<(Site, f64)> {
-    let body_layer = i64::from(standing_y) + 1;
+    let layers = mouth_crown_layers(standing_y, manifest);
     let width = i64::from(view.config.width);
     let depth = i64::from(view.config.depth);
     let mut out = Vec::new();
     for stand in fv.stands.iter().filter(|s| s.foliage > 0.0) {
         let sc = fv.config.species(stand.species);
-        if i64::from(stand.site.y) + i64::from(sc.crown_voxels(stand.wood)) != body_layer {
+        if !layers.contains(&(i64::from(stand.site.y) + i64::from(sc.crown_voxels(stand.wood)))) {
             continue;
         }
         let radius = sc.crown_radius(stand.wood).max(0.0);
@@ -692,7 +710,7 @@ pub(crate) fn taste_reading(
                 valid: true,
             },
         },
-        Founder::Browser => match mouth_foliage_stand(fv, view, &cols, standing_y) {
+        Founder::Browser => match mouth_foliage_stand(fv, view, &cols, standing_y, manifest) {
             Some((_, foliage)) => TasteReading {
                 cue: response(foliage),
                 resistance: resistance_of(manifest, "foliage"),
@@ -1527,5 +1545,55 @@ mod tests {
         assert!((blind.sensor_structure(total) - 0.05 * total).abs() < 1e-15);
         // The rule does not create matter: sensor + core is the total, not more.
         assert!((blind.sensor_structure(total) + core - total).abs() < 1e-12);
+    }
+
+    /// The counterfactual behind the vertical mouth reach: the **same** fixture, the same
+    /// mouth columns and the same crown one voxel above the head, read once with a reach
+    /// of zero — the rule every build before 2026-09-21 had — and once with the browser's
+    /// declared reach of one. Zero refuses it; one takes it. Nothing else about the mouth
+    /// moves: the head-layer crown is accepted by both.
+    #[test]
+    fn a_zero_up_reach_refuses_the_crown_the_browser_can_now_lift_its_head_to() {
+        use cubarium_voxel_flora::{Command as FloraCommand, Species as Plant};
+
+        let world = flat_world();
+        let view = world.view();
+        let mut flora = Flora::new(FloraConfig::default());
+        // bloomcrown wood 0.30 rounds to a two-voxel crown, so its crown layer is the
+        // body's head layer plus one; wood 0.12 rounds to one and sits at the head.
+        for (x, wood) in [(2i64, 0.30), (5, 0.12)] {
+            assert!(flora.apply(
+                &world,
+                FloraCommand::Seed {
+                    x,
+                    z: 2,
+                    species: Plant::Bloomcrown,
+                    wood,
+                },
+            ));
+        }
+        let fv = flora.view();
+        let mut manifest = Founder::Browser.manifest();
+        assert_eq!(manifest.mouth_reach_up_voxels, 1);
+
+        let cols_over = mouth_columns(&view, &pose_at(2.5 * 0.25, 2.5 * 0.25, 0.0), &manifest);
+        let cols_head = mouth_columns(&view, &pose_at(5.5 * 0.25, 2.5 * 0.25, 0.0), &manifest);
+
+        assert_eq!(
+            mouth_foliage_stand(&fv, &view, &cols_over, 2, &manifest).map(|(s, _)| s),
+            Some(site(2, 2)),
+            "reach one must take the crown one voxel up"
+        );
+        manifest.mouth_reach_up_voxels = 0;
+        assert_eq!(
+            mouth_foliage_stand(&fv, &view, &cols_over, 2, &manifest),
+            None,
+            "reach zero is the old rule and must refuse it"
+        );
+        assert_eq!(
+            mouth_foliage_stand(&fv, &view, &cols_head, 2, &manifest).map(|(s, _)| s),
+            Some(site(5, 2)),
+            "reach zero must still take a crown at the head layer"
+        );
     }
 }

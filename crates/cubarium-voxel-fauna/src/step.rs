@@ -742,7 +742,8 @@ fn founder_feed(
             true
         }
         Founder::Browser => {
-            let Some((root, _)) = body::mouth_foliage_stand(&flora.view(), view, &cols, site_y)
+            let Some((root, _)) =
+                body::mouth_foliage_stand(&flora.view(), view, &cols, site_y, manifest)
             else {
                 return false;
             };

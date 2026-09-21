@@ -193,6 +193,17 @@ pub struct Manifest {
     pub turn_reference_rad: f64,
     /// Mouth/feed reach, in body lengths.
     pub mouth_reach_body_lengths: f64,
+    /// How many whole voxels **above its own head layer** the mouth can still take food
+    /// from: a browser lifts its head one voxel (0.25 m, one body length) to reach a
+    /// grown crown, a ground feeder cannot (`design/handoffs/voxel-browser-reach-
+    /// 2026-09-21.md`). The accepted crown layers are
+    /// `standing_y + 1 ..= standing_y + 1 + mouth_reach_up_voxels`; the contact, taste
+    /// and cone rules are untouched.
+    ///
+    /// Only a **non-zero** reach is written into [`Manifest::canonical_text`], so a
+    /// lineage that cannot lift its head keeps the digest it had before this field
+    /// existed and its trained centres keep loading.
+    pub mouth_reach_up_voxels: u32,
     /// Which cue the mouth's one taste channel means: `litter` for the blind feeder,
     /// `foliage` for the browser.
     pub taste_cue: &'static str,
@@ -406,6 +417,7 @@ impl Manifest {
             forward_reference_m: 0.03125,
             turn_reference_rad: 0.5,
             mouth_reach_body_lengths: 0.25,
+            mouth_reach_up_voxels: 0,
             taste_cue: "litter",
             taste_resistances: &BLIND_TASTE_RESISTANCES,
             tunings: BLIND_TUNINGS,
@@ -438,6 +450,7 @@ impl Manifest {
             forward_reference_m: 0.0625,
             turn_reference_rad: 0.5,
             mouth_reach_body_lengths: 0.25,
+            mouth_reach_up_voxels: 1,
             taste_cue: "foliage",
             taste_resistances: &BROWSER_TASTE_RESISTANCES,
             tunings: BROWSER_TUNINGS,
@@ -521,6 +534,12 @@ impl Manifest {
             self.yaw_cap_rad_per_s,
             self.mouth_reach_body_lengths
         );
+        // Written only when the mouth actually lifts: a zero reach is the behaviour every
+        // earlier build had, so its canonical text — and its digest — stay exactly as they
+        // were. A lineage that can lift declares it, and its old centres are refused.
+        if self.mouth_reach_up_voxels > 0 {
+            let _ = write!(s, "|mouth_up:{}", self.mouth_reach_up_voxels);
+        }
         let _ = write!(
             s,
             "|self_ref:energy={},reserve={},structural={}|move_ref:forward={},turn={}",

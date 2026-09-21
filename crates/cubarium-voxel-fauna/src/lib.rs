@@ -127,8 +127,9 @@ pub fn browser_mouth_foliage(
     if animal.founder != Some(Founder::Browser) {
         return None;
     }
-    let cols = body::mouth_columns(view, &animal.pose, &Founder::Browser.manifest());
-    body::mouth_foliage_stand(flora, view, &cols, animal.site.y)
+    let manifest = Founder::Browser.manifest();
+    let cols = body::mouth_columns(view, &animal.pose, &manifest);
+    body::mouth_foliage_stand(flora, view, &cols, animal.site.y, &manifest)
 }
 
 /// Every stand whose crown touches the browser's actual mouth probe columns.
@@ -141,12 +142,14 @@ pub fn browser_mouth_candidates(
     if animal.founder != Some(Founder::Browser) {
         return None;
     }
-    let cols = body::mouth_columns(view, &animal.pose, &Founder::Browser.manifest());
+    let manifest = Founder::Browser.manifest();
+    let cols = body::mouth_columns(view, &animal.pose, &manifest);
     Some(body::mouth_foliage_stands(
         flora,
         view,
         &cols,
         animal.site.y,
+        &manifest,
     ))
 }
 
