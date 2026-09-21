@@ -8,13 +8,14 @@
 //! coupled simulation for the given number of simulated hours (default 6). Every simulated
 //! minute — 1,200 ticks at [`cubarium_voxel_fauna::TICK_HZ`] — it prints one CSV row to
 //! stdout: the per-species stand counts, the per-species animal counts and mean body, the
-//! four ledger birth/death counters, and the total litter organic. The seed report goes to
+//! per-founder-lineage counts and mean body, the four ledger birth/death counters, and the
+//! total litter organic. The seed report goes to
 //! stderr so it never mixes with the CSV.
 
 use cubarium::voxel::habitat;
 use cubarium::voxel::scene;
 use cubarium::voxel::VoxelConfig;
-use cubarium_voxel_fauna::{Fauna, FaunaConfig, Species as Beast, TICK_HZ};
+use cubarium_voxel_fauna::{Fauna, FaunaConfig, Founder, Senses, Species as Beast, TICK_HZ};
 use cubarium_voxel_flora::{Flora, FloraConfig, Species as Plant};
 use cubarium_voxel_sim::{Sim, SimConfig};
 
@@ -33,11 +34,19 @@ fn main() {
     let mut fauna = Fauna::new(FaunaConfig::default());
     let seeded = habitat::seed(&mut world, &mut flora, &mut fauna);
     eprintln!(
-        "seeded: stands={} logs={} animals={}",
-        seeded.stands, seeded.logs, seeded.animals
+        "seeded: stands={} logs={} litter_tiles={} founders={:?} animals={}",
+        seeded.stands,
+        seeded.logs,
+        seeded.litter_tiles,
+        seeded.founders,
+        seeded.animals()
     );
 
-    let mut sim = Sim::new(world, flora, fauna, SimConfig::default());
+    // The live founders sense a settled litter field; the ambient run settles it the
+    // same way before the first tick.
+    let mut senses = Senses::new();
+    senses.settle(&world.view(), &flora.view());
+    let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
 
     let total_ticks = (hours * 3600.0 * f64::from(TICK_HZ)) as u64;
     print_header();
@@ -64,6 +73,10 @@ fn print_header() {
         header.push_str(&format!(",animals_{}", s.name()));
         header.push_str(&format!(",body_{}", s.name()));
     }
+    for f in Founder::ALL {
+        header.push_str(&format!(",founders_{}", f.name()));
+        header.push_str(&format!(",body_{}", f.name()));
+    }
     header.push_str(",flora_births,flora_deaths,fauna_births,fauna_deaths,litter");
     println!("{header}");
 }
@@ -84,6 +97,21 @@ fn print_row(minute: u64, sim: &Sim) {
             .animals
             .iter()
             .filter(|an| an.species == s)
+            .map(|an| an.body)
+            .collect();
+        row.push(bodies.len().to_string());
+        let mean = if bodies.is_empty() {
+            0.0
+        } else {
+            bodies.iter().sum::<f64>() / bodies.len() as f64
+        };
+        row.push(format!("{mean:.4}"));
+    }
+    for founder in Founder::ALL {
+        let bodies: Vec<f64> = a
+            .animals
+            .iter()
+            .filter(|an| an.founder == Some(founder))
             .map(|an| an.body)
             .collect();
         row.push(bodies.len().to_string());
