@@ -186,6 +186,10 @@ fn dead_wood_at(flora: &Flora, site: Site) -> f64 {
     flora.view().ground_at(site).map_or(0.0, |g| g.dead_wood)
 }
 
+fn litter_at(flora: &Flora, site: Site) -> f64 {
+    flora.view().ground_at(site).map_or(0.0, |g| g.litter)
+}
+
 fn uptake(flora: &Flora) -> f64 {
     flora.view().ledger.substrate_uptake[Species::Glowcap.index()]
 }
@@ -284,7 +288,8 @@ fn a_glowcap_on_a_log_earns_and_one_on_a_bare_face_earns_nothing() {
 /// 2e-5 of organic matter on this fixture's first tick and the log holds half of that: the
 /// fungus takes the log, exactly, and the pool's mineral and energy go with the last of it
 /// rather than leaving float dust behind claiming to be a stock. Every tick after that
-/// takes nothing.
+/// takes nothing **out of that pool** — the fungus goes on eating the litter it sheds
+/// itself, which is the litter diet and has its own tests below.
 #[test]
 fn the_uptake_never_exceeds_the_pool_and_stops_when_it_is_empty() {
     let mut world = pillars(4, &[1], 0.5);
@@ -328,12 +333,37 @@ fn the_uptake_never_exceeds_the_pool_and_stops_when_it_is_empty() {
     let pool = v.ground_at(site).expect("ground").mineral;
     assert!(stand.mineral > 0.0 && pool > 0.0, "{stand:?} {pool}");
 
+    // **The empty pool feeds nothing more.** Since the litter diet the fungus also eats
+    // the foliage it sheds on its own site, so the *uptake* does not stop here — what
+    // stops is this pool: the dead wood stays at exactly zero for every one of the next
+    // twenty ticks, and everything the fungus takes after the log comes out of the litter
+    // it shed itself, which is the only other stock on the face.
     let after_one = uptake(&flora);
-    run(&mut flora, &mut world, 20);
-    assert_eq!(
-        uptake(&flora),
-        after_one,
-        "an empty log went on feeding the fungus"
+    let mut last = after_one;
+    for _ in 0..20 {
+        flora.step(&mut world);
+        assert_eq!(
+            dead_wood_at(&flora, site),
+            0.0,
+            "an empty log went on feeding the fungus"
+        );
+        // The two pools are the only stocks `feed` reads, and this one is empty on every
+        // one of these ticks, so whatever the fungus still takes came out of the litter
+        // it sheds — and it is still bounded by the rate.
+        let tick = uptake(&flora) - last;
+        last = uptake(&flora);
+        assert!(
+            tick <= want + 1e-18,
+            "a tick took {tick} against a demand of {want}"
+        );
+    }
+    assert!(
+        uptake(&flora) > after_one,
+        "the litter the fungus shed fed it nothing"
+    );
+    assert!(
+        litter_at(&flora, site) > 0.0,
+        "the fixture has no litter in it at all"
     );
     assert_eq!(dead_wood_at(&flora, site), 0.0);
     assert_residuals(&flora, "after a log was eaten whole");
@@ -389,8 +419,13 @@ fn mineral_runs_from_wood_through_the_fungus_to_litter_and_the_site_pool_and_is_
 }
 
 /// **A small finite log runs out, and the fungus starts losing.** Direction only, and no
-/// death claim: over 200 ticks the pool never rises, the uptake per window falls to exactly
-/// nothing, and once it does the reserve falls every window.
+/// death claim: over 200 ticks the dead-wood pool never rises, the uptake per window
+/// falls, and once the log is gone the reserve falls every window.
+///
+/// The uptake does not fall to *nothing*, as it did before the litter diet: a glowcap eats
+/// the foliage it sheds, so an emptied log leaves a trickle of self-shed litter behind it.
+/// The trickle is a fraction of what the log paid — the claim is that it does not keep the
+/// fungus solvent, which is what the falling reserve says.
 #[test]
 fn a_small_finite_log_empties_and_then_the_reserve_falls() {
     let mut world = pillars(4, &[1], 0.5);
@@ -416,7 +451,10 @@ fn a_small_finite_log_empties_and_then_the_reserve_falls() {
         windows[3].0, 0.0,
         "the log is not empty at 4 s: {windows:?}"
     );
-    assert_eq!(windows[3].1, 0.0, "the empty log still fed it: {windows:?}");
+    assert!(
+        windows[3].1 < 0.2 * windows[0].1,
+        "the emptied log left the fungus as well fed as the log did: {windows:?}"
+    );
     assert!(
         windows[3].2 < windows[2].2,
         "the reserve did not fall: {windows:?}"
@@ -1336,4 +1374,373 @@ fn substrate_access_reaches_one_row_up_and_one_row_down() {
         sc.rooting_depth, 1,
         "the soil-water box was not widened to do this"
     );
+}
+
+// ------------------------------------------------------- the litter diet (S2)
+//
+// A saprotroph's substrate is the **sum of dead wood and litter** in its mycelium box,
+// for its income and for its establishment gate alike. The five tests below are the ones
+// `design/handoffs/voxel-decomposers-and-defaults-2026-09-20.md` §S2 specifies, in its
+// order.
+
+/// A config that leaves the model alone and turns off the two *other* things that move a
+/// litter pool, so that a test can say what the fungus took and not merely what changed:
+/// the pools' own decomposition (`decomposition`, `wood_decomposition`) and the glowcap's
+/// litterfall (`senescence`). Both rules have their own tests; neither is under test here,
+/// and both would otherwise be added to, or subtracted from, the withdrawal being
+/// measured. The five plants are untouched, and so is every number the income rule reads.
+fn isolating() -> FloraConfig {
+    let mut c = FloraConfig::default();
+    c.decomposition = 0.0;
+    c.wood_decomposition = 0.0;
+    c.glowcap.senescence = 0.0;
+    c
+}
+
+/// Lay litter on `site` — `organic` units with the mineral and the energy the tissue it
+/// fell from held, as a consumer's droppings or a shed canopy would arrive. `e_v` is
+/// exactly `litter_energy_cap`, so nothing is capped away and the fixture's energy is the
+/// energy it says. Returns the three numbers deposited.
+fn litter_on(flora: &mut Flora, site: Site, organic: f64) -> (f64, f64, f64) {
+    let sc = flora.config().species(Species::Glowcap).clone();
+    let (mineral, energy) = (sc.n_tissue * organic, sc.energy_density * organic);
+    assert!(
+        energy <= flora.config().litter_energy_cap * organic,
+        "the fixture's litter would lose energy to the e_d_max cap"
+    );
+    assert!(
+        flora.deposit(
+            site,
+            Deposit {
+                kind: DepositKind::Litter,
+                organic,
+                mineral,
+                energy
+            }
+        ),
+        "the litter was refused at {site:?}"
+    );
+    (organic, mineral, energy)
+}
+
+/// (a) **Litter alone feeds a fungus.** A glowcap on a face holding litter and no dead
+/// wood at all gains tissue over 100 ticks, and the litter pool falls by exactly what the
+/// withdrawal took, in each of the three currencies: the organic matter against the
+/// ledger's own `substrate_uptake`, and the mineral and the energy against the pool's
+/// density rule, which is `take_pool`'s pro rata and the same one `take_litter` gives a
+/// consumer.
+///
+/// The booking is `substrate_uptake` and **not** `consumed_organic_out`, which stays at
+/// zero: a glowcap is a stand inside this layer, so its meal crosses no boundary, and the
+/// test pins that distinction because a shredder eating the same pool *is* a boundary
+/// flow (test (c)).
+#[test]
+fn a_glowcap_on_litter_alone_gains_tissue_and_the_pool_falls_by_what_it_took() {
+    let mut world = pillars(4, &[1], 0.5);
+    let mut flora = Flora::new(isolating());
+    let site = plant_glowcap(&mut flora, &world, 1);
+    let (organic, mineral, energy) = litter_on(&mut flora, site, 0.02);
+    let before = *flora.view().stand_at(site).expect("planted");
+    assert_eq!(dead_wood_at(&flora, site), 0.0, "the fixture has no wood");
+
+    run(&mut flora, &mut world, 100);
+
+    let v = flora.view();
+    let g = v.ground_at(site).expect("ground").clone();
+    let stand = *v.stand_at(site).expect("the fungus died on litter");
+    let took = organic - g.litter;
+    assert!(took > 0.0, "the fungus took nothing off a litter face");
+    assert_eq!(
+        dead_wood_at(&flora, site),
+        0.0,
+        "wood appeared from nowhere"
+    );
+    // Tissue: the whole point of the meal.
+    assert!(
+        stand.material() > before.material(),
+        "no tissue gained: {} against {}",
+        stand.material(),
+        before.material()
+    );
+    // Organic: the pool's fall **is** the ledger's uptake, nothing else moved it.
+    assert!(
+        (took - uptake(&flora)).abs() <= 1e-12 * took,
+        "the pool fell by {took} against an uptake of {}",
+        uptake(&flora)
+    );
+    // Mineral and energy: the pool's own density, so the same fraction of each.
+    let f = took / organic;
+    let (took_mineral, took_energy) = (mineral - g.litter_mineral, energy - g.litter_energy);
+    assert!(
+        (took_mineral - f * mineral).abs() <= 1e-12 * f * mineral,
+        "mineral fell by {took_mineral} against {} at the pool's density",
+        f * mineral
+    );
+    assert!(
+        (took_energy - f * energy).abs() <= 1e-12 * f * energy,
+        "energy fell by {took_energy} against {} at the pool's density",
+        f * energy
+    );
+    // And none of it was a boundary flow.
+    assert_eq!(
+        (
+            v.ledger.consumed_organic_out,
+            v.ledger.consumed_mineral_out,
+            v.ledger.consumed_energy_out
+        ),
+        (0.0, 0.0, 0.0),
+        "a stand inside the layer was booked as a consumer outside it"
+    );
+    assert_residuals(&flora, "after 100 ticks of a fungus on litter");
+}
+
+/// (b) **Two pools, one rate, split pro rata by stock.** The declared rule: dead wood and
+/// litter are two pools in the same pro-rata draw, with **no preference** between them, so
+/// a box holding three times as much wood as litter gives up three times as much wood, and
+/// the two shares sum to the rate bound `substrate_uptake_per_s · W · μ · dt`.
+///
+/// One tick, because the rule is a per-tick one, and on a fixture where the demand is far
+/// below both pools, so nothing but the split is being measured.
+#[test]
+fn the_draw_splits_pro_rata_between_the_two_pools_and_sums_to_the_rate_bound() {
+    let mut world = pillars(4, &[1], 0.5);
+    let mut flora = Flora::new(isolating());
+    let site = plant_glowcap(&mut flora, &world, 1);
+    let sc = flora.config().species(Species::Glowcap).clone();
+    let (wood, litter) = (0.03, 0.01);
+    log_on(&mut flora, site, wood);
+    litter_on(&mut flora, site, litter);
+
+    // Full moisture on this fixture, so the bound is the rate's own.
+    let want = sc.substrate_uptake_per_s * 0.5 * sc.wood_max * DT;
+    assert!((want - 5e-5).abs() < 1e-18, "the fixture's premise: {want}");
+    assert!(
+        want < 0.1 * litter.min(wood),
+        "the demand has to be far below both pools"
+    );
+
+    flora.step(&mut world);
+
+    let g = flora.view().ground_at(site).expect("ground").clone();
+    let (took_wood, took_litter) = (wood - g.dead_wood, litter - g.litter);
+    assert!(took_wood > 0.0 && took_litter > 0.0, "one pool was skipped");
+    assert!(
+        (took_wood + took_litter - want).abs() <= 1e-18,
+        "the two shares are {took_wood} + {took_litter}, not {want}"
+    );
+    assert!(
+        (took_wood / took_litter - wood / litter).abs() <= 1e-12,
+        "the split is {took_wood}:{took_litter} against stocks {wood}:{litter}"
+    );
+    assert!(
+        (uptake(&flora) - want).abs() <= 1e-18,
+        "the diagnostic flux is {} against {want}",
+        uptake(&flora)
+    );
+    assert_residuals(&flora, "after one tick on two pools");
+}
+
+/// (c) **A shredder and a fungus on one litter pool.** An animal biting the same litter
+/// through `Flora::take_litter` and a glowcap drawing on it through step 5b together take
+/// **exactly what the pool held and not a unit more** over 100 ticks, and the two ledgers
+/// still close: this layer's three residuals hold, and the `consumed_*_out` this layer
+/// books is to the bit the three numbers the shredder was handed and owes on its own
+/// books. That identity is the whole of "the fauna ledger closes" as this crate can state
+/// it — the fauna crate books the `Taken` it received and nothing else.
+///
+/// The demand is deliberately more than three times the stock, so the pool's bound is what
+/// is being tested and not the rate's.
+#[test]
+fn a_shredder_and_a_glowcap_on_one_pool_take_no_more_than_it_held() {
+    let mut world = pillars(4, &[1], 0.5);
+    let mut flora = Flora::new(isolating());
+    let site = plant_glowcap(&mut flora, &world, 1);
+    let (organic, mineral, energy) = litter_on(&mut flora, site, 0.004);
+    let bite = 1e-4;
+
+    let (mut ate_o, mut ate_m, mut ate_e) = (0.0, 0.0, 0.0);
+    for _ in 0..100 {
+        flora.step(&mut world);
+        let held = flora.view().ground_at(site).map_or(0.0, |g| g.litter);
+        if let Some(t) = flora.take_litter(site, bite) {
+            assert!(
+                t.organic <= held + 1e-18,
+                "a bite of {} off a pool holding {held}",
+                t.organic
+            );
+            ate_o += t.organic;
+            ate_m += t.mineral;
+            ate_e += t.energy;
+        }
+    }
+
+    let v = flora.view();
+    let g = v.ground_at(site).expect("ground").clone();
+    assert!(
+        v.stand_at(site).is_some(),
+        "the fungus died and shed a pool this test is counting"
+    );
+    assert!(ate_o > 0.0 && uptake(&flora) > 0.0, "one eater got nothing");
+    // The two of them ate the pool, and the pool is what they ate. The hard bound is the
+    // pool's own — `take_pool` hands over `min(want, stock)` and the stock below is
+    // exactly zero, never negative — so the sum is checked to float dust and not to the
+    // bit: two receipts summed in a different order than the withdrawals is a few ulps.
+    assert!(
+        ate_o + uptake(&flora) <= organic * (1.0 + 1e-12),
+        "{ate_o} + {} came out of a pool of {organic}",
+        uptake(&flora)
+    );
+    assert!(
+        (ate_o + uptake(&flora) - organic).abs() <= 1e-12 * organic,
+        "the pool was not emptied: {ate_o} + {} of {organic}",
+        uptake(&flora)
+    );
+    assert_eq!(
+        (g.litter, g.litter_mineral, g.litter_energy),
+        (0.0, 0.0, 0.0),
+        "an emptied pool kept dust"
+    );
+    // The boundary the two ledgers share: what the animal was handed is what this layer
+    // booked out, to the bit, and the fungus's own meal is in neither number.
+    assert_eq!(
+        (
+            v.ledger.consumed_organic_out,
+            v.ledger.consumed_mineral_out,
+            v.ledger.consumed_energy_out
+        ),
+        (ate_o, ate_m, ate_e),
+        "the two ledgers disagree about what the shredder took"
+    );
+    assert!(
+        ate_m < mineral && ate_e < energy,
+        "the shredder took the fungus's share too"
+    );
+    assert_residuals(&flora, "after a shredder and a fungus shared a pool");
+}
+
+/// (d) **The substrate gate opens on litter.** A face whose mycelium box holds litter at
+/// or above `establish_substrate_min` and **no dead wood at all** passes the establishment
+/// predicate for a glowcap; a face holding less than the gate asks for does not, and says
+/// so through `substrate_ok` alone. `Gates` reports the two stocks apart and gates on their
+/// sum, which is what `Gates::substrate` is.
+#[test]
+fn the_substrate_gate_passes_on_litter_with_no_dead_wood() {
+    let mut world = pillars(6, &[1, 4], 0.5);
+    let mut flora = Flora::new(config());
+    let sc = flora.config().species(Species::Glowcap).clone();
+    let enough = 1.5 * sc.establish_substrate_min;
+    let short = 0.5 * sc.establish_substrate_min;
+    litter_on(&mut flora, at(1), enough);
+    litter_on(&mut flora, at(4), short);
+
+    let view = world.view();
+    let v = flora.view();
+    let rich = v.establishment_gates(&view, at(1), Species::Glowcap);
+    let poor = v.establishment_gates(&view, at(4), Species::Glowcap);
+
+    assert_eq!(rich.dead_wood, 0.0, "the fixture laid no wood");
+    assert!((rich.litter - enough).abs() <= 1e-15, "{rich:?}");
+    assert_eq!(rich.substrate(), rich.dead_wood + rich.litter);
+    assert!(
+        rich.substrate_ok && rich.passes(),
+        "litter alone shut the gate: {rich:?}"
+    );
+    assert!(
+        v.can_establish(&view, at(1), Species::Glowcap),
+        "the predicate the tick runs disagrees with its own gates"
+    );
+    assert!(
+        !poor.substrate_ok && !poor.passes(),
+        "a face under the threshold admitted a spore: {poor:?}"
+    );
+    assert_eq!(
+        (poor.pore_ok, poor.aeration_ok, poor.depth_ok, poor.light_ok),
+        (rich.pore_ok, rich.aeration_ok, rich.depth_ok, rich.light_ok),
+        "the two faces differ in something other than the substrate"
+    );
+    // And the three box readings agree with each other.
+    assert_eq!(v.dead_wood_in_box(&view, at(1), &sc), 0.0);
+    assert!((v.litter_in_box(&view, at(1), &sc) - enough).abs() <= 1e-15);
+    assert!((v.substrate_in_box(&view, at(1), &sc) - enough).abs() <= 1e-15);
+    // Dropping the same amount of *wood* on the poor face opens it, which is the sum rule
+    // read from the other side.
+    log_on(&mut flora, at(4), sc.establish_substrate_min);
+    let mixed = flora
+        .view()
+        .establishment_gates(&view, at(4), Species::Glowcap);
+    assert!(
+        mixed.dead_wood > 0.0 && mixed.litter > 0.0 && mixed.substrate_ok,
+        "wood plus litter did not reach the gate: {mixed:?}"
+    );
+    let _ = &mut world;
+}
+
+/// (e) **The five plants are unchanged.** None of them takes anything from litter: their
+/// `substrate_uptake` is exactly zero after 100 ticks standing on a litter-bearing face,
+/// and a litter pool on a **neighbouring** face — one inside a saprotroph's mycelium box,
+/// and the one pool in the fixture nothing sheds onto — ends the run holding exactly what
+/// the same pool holds in a world with no plant in it at all.
+///
+/// The plant's own face cannot be compared that way, because its litterfall lands there;
+/// the neighbour can, and it is the face a fungus in its place would have eaten.
+#[test]
+fn the_five_photo_species_take_nothing_from_litter() {
+    for species in Species::ALL {
+        if species == Species::Glowcap {
+            continue;
+        }
+        let (mut planted, mut bare) = (pillars(6, &[1, 2], 0.5), pillars(6, &[1, 2], 0.5));
+        let (mut with_plant, mut alone) = (Flora::new(config()), Flora::new(config()));
+        let sc = with_plant.config().species(species).clone();
+        assert_eq!(sc.trophic, Trophic::Photo, "{species:?} is not a plant");
+        assert!(with_plant.apply(
+            &planted,
+            Command::Seed {
+                x: 1,
+                z: 0,
+                species,
+                wood: 0.5 * sc.wood_max
+            }
+        ));
+        litter_on(&mut with_plant, at(1), 0.02);
+        litter_on(&mut with_plant, at(2), 0.02);
+        litter_on(&mut alone, at(1), 0.02);
+        litter_on(&mut alone, at(2), 0.02);
+
+        run(&mut with_plant, &mut planted, 100);
+        run(&mut alone, &mut bare, 100);
+
+        let v = with_plant.view();
+        assert_eq!(
+            v.ledger.substrate_uptake[species.index()],
+            0.0,
+            "{species:?} ate litter"
+        );
+        assert!(
+            v.stand_at(at(2)).is_none(),
+            "{species:?} spread onto the neighbour face and the comparison is not clean"
+        );
+        let (neighbour, control) = (
+            v.ground_at(at(2)).expect("ground").clone(),
+            alone.view().ground_at(at(2)).expect("ground").clone(),
+        );
+        assert_eq!(
+            (
+                neighbour.litter,
+                neighbour.litter_mineral,
+                neighbour.litter_energy
+            ),
+            (
+                control.litter,
+                control.litter_mineral,
+                control.litter_energy
+            ),
+            "{species:?} moved a litter pool next door"
+        );
+        assert_eq!(
+            neighbour.dead_wood, 0.0,
+            "{species:?} put wood on the neighbour face"
+        );
+        assert_residuals(&with_plant, "after 100 ticks of a plant on litter");
+    }
 }

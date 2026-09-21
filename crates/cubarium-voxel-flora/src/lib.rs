@@ -418,12 +418,15 @@ pub enum Trophic {
     /// ([`FloraLedger::fixed_in`]).
     #[default]
     Photo,
-    /// **A saprotroph.** Income is dead wood: at most
-    /// [`SpeciesConfig::substrate_uptake_per_s`]` · W · μ · dt` taken pro rata from the
-    /// dead-wood pools of the sites in its **mycelium box**, of which
-    /// [`SpeciesConfig::substrate_yield`] becomes tissue and the rest is respired at once.
-    /// No light gate, no light income, and nothing is created at the boundary: the organic
-    /// matter was already in the system, in the log.
+    /// **A saprotroph.** Income is dead organic matter — **dead wood and litter both**:
+    /// at most [`SpeciesConfig::substrate_uptake_per_s`]` · W · μ · dt` taken pro rata
+    /// from the dead-wood **and litter** pools of the sites in its **mycelium box**, of
+    /// which [`SpeciesConfig::substrate_yield`] becomes tissue and the rest is respired at
+    /// once. The yield is applied to each pool's withdrawal separately, because the two
+    /// carry their own mineral and energy per unit. No light gate, no light income, and
+    /// nothing is created at the boundary: the organic matter was already in the system,
+    /// in the log or in the leaf fall. Carrion is not substrate: a corpse is a consumer's
+    /// pool and out of scope.
     Saprotroph,
 }
 
@@ -437,18 +440,19 @@ pub struct SpeciesConfig {
     /// meaning with it — the three `substrate_*` fields below are simply inert on a
     /// `Photo` species, and the light fields are inert on a `Saprotroph`.
     pub trophic: Trophic,
-    /// **Saprotroph only.** Organic matter a mycelium withdraws from the dead wood in its
-    /// box per second per unit of `W`, at full moisture. The uptake is
-    /// `substrate_uptake_per_s · W · μ · dt`, bounded again by what the pools actually
-    /// hold, so a drying log and an empty log both starve the fungus. **Placeholder**
+    /// **Saprotroph only.** Organic matter a mycelium withdraws from the dead wood **and
+    /// litter** in its box per second per unit of `W`, at full moisture. The uptake is
+    /// `substrate_uptake_per_s · W · μ · dt` against the **sum** of the two, bounded again
+    /// by what the pools actually hold, so a drying log and a bare face both starve the
+    /// fungus. **Placeholder**
     /// (`design/backlog.md` §1); inert on a [`Trophic::Photo`] species.
     pub substrate_uptake_per_s: f64,
     /// **Saprotroph only.** The fraction of the organic matter taken that becomes tissue;
     /// the rest is respired at once (`respired_out`, heat). The brief's `yield`, spelled out
     /// because `yield` is a reserved word. **Placeholder**; inert on a `Photo` species.
     pub substrate_yield: f64,
-    /// **Saprotroph only.** Dead wood the sites of the mycelium box must hold, in total,
-    /// before a spore cohort may germinate there. **Placeholder**; inert on a `Photo`
+    /// **Saprotroph only.** Substrate — dead wood **and** litter — the sites of the
+    /// mycelium box must hold, in total, before a spore cohort may germinate there. **Placeholder**; inert on a `Photo`
     /// species, whose substrate gate is open by construction.
     pub establish_substrate_min: f64,
     /// **Saprotroph only.** How many support-face rows **up and down** the mycelium box
@@ -1545,8 +1549,8 @@ pub struct FloraLedger {
     pub propagule_requested: [f64; Species::COUNT],
     pub propagule_funded: [f64; Species::COUNT],
     pub propagule_landed: [f64; Species::COUNT],
-    /// Organic matter the saprotrophs have withdrawn from dead wood, per species, indexed
-    /// by [`Species::index`]: a **diagnostic flux and not a boundary flow**, exactly like
+    /// Organic matter the saprotrophs have withdrawn from dead wood and litter, per
+    /// species, indexed by [`Species::index`]: a **diagnostic flux and not a boundary flow**, exactly like
     /// the three `propagule_*` arrays, and therefore in none of the three
     /// `expected_*` totals.
     ///
@@ -1837,23 +1841,40 @@ impl<'a> FloraView<'a> {
         out
     }
 
-    /// Dead wood the sites of a species' **mycelium box** around `from` hold, in total:
-    /// what [`SpeciesConfig::establish_substrate_min`] is compared against, and the stock
-    /// a saprotroph's income is drawn from. **Zero for a [`Trophic::Photo`] species**,
-    /// which never asks.
+    /// The **substrate** the sites of a species' **mycelium box** around `from` hold, in
+    /// total: what [`SpeciesConfig::establish_substrate_min`] is compared against, and the
+    /// stock a saprotroph's income is drawn from. **Zero for a [`Trophic::Photo`]
+    /// species**, which never asks.
+    ///
+    /// It is the **sum of dead wood and litter** — a fungus eats both, and the one rate
+    /// and the one gate apply to the sum. [`FloraView::dead_wood_in_box`] and
+    /// [`FloraView::litter_in_box`] are the two halves, for a diagnosis that wants to say
+    /// which of them a site holds. Carrion is not in it.
     ///
     /// The box is `substrate_reach_up_down` rows up **and** down and `rooting_radius`
     /// sideways, `x` wrapped and `z` clipped, read as **support sites** rather than as soil
     /// voxels, because a ground stock lives one per support face. Its vertical reach is its
     /// own species field and not the soil-water root box's (Astra R9.3).
-    pub fn dead_wood_in_box(&self, world: &VoxelView<'_>, from: Site, sc: &SpeciesConfig) -> f64 {
+    pub fn substrate_in_box(&self, world: &VoxelView<'_>, from: Site, sc: &SpeciesConfig) -> f64 {
         step::substrate_in_box(world, self.ground, from, sc)
+    }
+
+    /// The dead wood alone of [`FloraView::substrate_in_box`]'s box: half the substrate,
+    /// and the half this method has always reported.
+    pub fn dead_wood_in_box(&self, world: &VoxelView<'_>, from: Site, sc: &SpeciesConfig) -> f64 {
+        step::substrate_pools_in_box(world, self.ground, from, sc).0
+    }
+
+    /// The litter alone of [`FloraView::substrate_in_box`]'s box: the other half, which a
+    /// saprotroph has eaten since a litter diet was given to it.
+    pub fn litter_in_box(&self, world: &VoxelView<'_>, from: Site, sc: &SpeciesConfig) -> f64 {
+        step::substrate_pools_in_box(world, self.ground, from, sc).1
     }
 
     /// The one establishment predicate for **any** species, gate by gate, with the
     /// substrate read off this layer's own ground: [`can_establish`] cannot do that,
-    /// because a `VoxelView` holds no dead wood, so this is the form a harness or a
-    /// diagnosis wants once a saprotroph is in the world.
+    /// because a `VoxelView` holds no dead wood and no litter, so this is the form a
+    /// harness or a diagnosis wants once a saprotroph is in the world.
     pub fn establishment_gates(
         &self,
         world: &VoxelView<'_>,
@@ -1861,12 +1882,8 @@ impl<'a> FloraView<'a> {
         species: Species,
     ) -> Gates {
         let sc = self.config.species(species);
-        step::establishment_gates_on_substrate(
-            world,
-            site,
-            sc,
-            self.dead_wood_in_box(world, site, sc),
-        )
+        let (dead_wood, litter) = step::substrate_pools_in_box(world, self.ground, site, sc);
+        step::establishment_gates_on_substrate(world, site, sc, dead_wood, litter)
     }
 
     /// `passes()` on [`FloraView::establishment_gates`]: the predicate itself, for any
@@ -1881,7 +1898,7 @@ impl<'a> FloraView<'a> {
     ///
     /// The predicate, the thresholds and every other reading are the same function as the
     /// per-site form; only the ray's result is supplied. The cache holds terrain geometry
-    /// alone, so pore water, saturation, standing water and the dead wood of the species'
+    /// alone, so pore water, saturation, standing water and the substrate of the species'
     /// mycelium box are read afresh here on every call: the result is the instantaneous
     /// reading it has always been, and no gate outcome is carried across ticks.
     ///
@@ -1901,12 +1918,15 @@ impl<'a> FloraView<'a> {
             .copied()
             .map(|site| {
                 let sky_visibility = sky.visibility(world, site);
+                let (dead_wood, litter) =
+                    step::substrate_pools_in_box(world, self.ground, site, sc);
                 step::establishment_gates_with_sky(
                     world,
                     site,
                     sc,
                     sky_visibility,
-                    self.dead_wood_in_box(world, site, sc),
+                    dead_wood,
+                    litter,
                 )
             })
             .collect()

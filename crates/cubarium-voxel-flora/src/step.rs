@@ -79,13 +79,17 @@
 //! # A saprotroph's income
 //!
 //! A [`crate::Trophic::Saprotroph`] stand runs every rule above except one: its income is
-//! not light. It withdraws organic matter from the dead-wood pools of its mycelium box
-//! (step 5b), keeps `substrate_yield` of it as income and respires the rest at once, and
-//! the mineral that came with the wood is netted against what its new tissue actually
-//! needs. Nothing about that crosses the layer's boundary: the organic matter was already
-//! in the system, in the log, so it is **not** `fixed_in` and the withdrawal is **not**
-//! `consumed_*_out` — those name material a consumer *outside* this layer took, and a
-//! glowcap is a stand inside it. What the ledger gains is a per-species diagnostic flux,
+//! not light. It withdraws organic matter from the **dead-wood and litter** pools of its
+//! mycelium box (step 5b), keeps `substrate_yield` of it as income and respires the rest
+//! at once, and the mineral that came with the substrate is netted against what its new
+//! tissue actually needs. Both pools, one rate: the substrate a fungus eats is the sum of
+//! the two, and the same `substrate_uptake_per_s` and `establish_substrate_min` apply to
+//! it. Carrion is not in that sum. Nothing about that crosses the layer's boundary: the organic matter was already
+//! in the system, in the log or in the leaf fall, so it is **not** `fixed_in` and the
+//! withdrawal is **not** `consumed_*_out` — those name material a consumer *outside* this
+//! layer took, and a glowcap is a stand inside it. A litter-shredding animal's
+//! [`crate::Flora::take_litter`] **is** `consumed_*_out`, off the very same pool, which is
+//! how the two ledgers stay apart while the two eaters share one stock. What the ledger gains is a per-species diagnostic flux,
 //! [`FloraLedger::substrate_uptake`], which is a report and not a boundary term, exactly
 //! like the three `propagule_*` arrays.
 //!
@@ -647,36 +651,74 @@ fn mycelium_sites(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> Vec<S
     out
 }
 
-/// The dead wood a saprotroph's mycelium box holds, which is what
-/// `establish_substrate_min` is compared against. **Zero for a [`Trophic::Photo`]
-/// species**, whose substrate gate is open whatever the ground holds — the box walk is
-/// skipped entirely for the five plants.
+/// The **substrate** a saprotroph's mycelium box holds — dead wood **and litter**, as the
+/// two numbers it is the sum of — which is what `establish_substrate_min` is compared
+/// against and what step 5b draws on. **`(0.0, 0.0)` for a [`Trophic::Photo`] species**,
+/// whose substrate gate is open whatever the ground holds — the box walk is skipped
+/// entirely for the five plants.
+///
+/// Both pools, because dead organic matter is dead organic matter to a fungus: a log and
+/// the leaf litter around it are the same food, differing in how fast they decompose on
+/// their own, and a decomposer that could only eat trunks starved on a floor deep in
+/// shed foliage. Carrion is **not** in the sum: a corpse is a consumer's own pool and
+/// out of this round's scope.
+pub(crate) fn substrate_pools_in_box(
+    view: &VoxelView<'_>,
+    ground: &[Ground],
+    site: Site,
+    sc: &SpeciesConfig,
+) -> (f64, f64) {
+    if sc.trophic != Trophic::Saprotroph {
+        return (0.0, 0.0);
+    }
+    let mut dead_wood = 0.0;
+    let mut litter = 0.0;
+    for gi in mycelium_sites(view, site, sc)
+        .into_iter()
+        .filter_map(|s| ground.binary_search_by_key(&s, |g| g.site).ok())
+    {
+        dead_wood += ground[gi].dead_wood;
+        litter += ground[gi].litter;
+    }
+    (dead_wood, litter)
+}
+
+/// [`substrate_pools_in_box`] summed: the one number the gate and the income rule read.
 pub(crate) fn substrate_in_box(
     view: &VoxelView<'_>,
     ground: &[Ground],
     site: Site,
     sc: &SpeciesConfig,
 ) -> f64 {
-    if sc.trophic != Trophic::Saprotroph {
-        return 0.0;
-    }
-    mycelium_sites(view, site, sc)
-        .into_iter()
-        .filter_map(|s| ground.binary_search_by_key(&s, |g| g.site).ok())
-        .map(|gi| ground[gi].dead_wood)
-        .sum()
+    let (dead_wood, litter) = substrate_pools_in_box(view, ground, site, sc);
+    dead_wood + litter
 }
 
-/// Step 5b: what every saprotroph took out of the dead wood this tick, in `stands` order,
-/// zero for every [`Trophic::Photo`] stand.
+/// Step 5b: what every saprotroph took out of the **dead wood and the litter** this tick,
+/// in `stands` order, zero for every [`Trophic::Photo`] stand.
 ///
-/// **[`drink`]'s rule, on the dead-wood pools.** Each saprotroph asks for
+/// **[`drink`]'s rule, on both dead pools.** Each saprotroph asks for
 /// `substrate_uptake_per_s · W · μ · dt`, split across the pools of its own mycelium box
 /// pro rata by what each holds; then every pool is drawn on **once** for the total asked of
-/// it, through the same [`crate::take_pool`] a consumer's `take_dead_wood` uses, and what it
-/// gave up is shared among its demanders proportional to demand. Collect-then-withdraw is
-/// the model's rule for a shared bounded stock, and it is the reason two fungi on one log
-/// share it instead of the earlier site in the sweep eating its fill first.
+/// it, through the same [`crate::take_pool`] a consumer's `take_dead_wood` and
+/// `take_litter` use, and what it gave up is shared among its demanders proportional to
+/// demand. Collect-then-withdraw is the model's rule for a shared bounded stock, and it is
+/// the reason two fungi on one log share it instead of the earlier site in the sweep
+/// eating its fill first.
+///
+/// **A site holds two pools, and each is a pool in that split.** The dead wood and the
+/// litter of one ground entry are two separate stocks in the pro-rata draw, exactly as
+/// two sites' logs are: there is no preference between them, so a box holding twice as
+/// much litter as wood gives up twice as much litter, and neither is drawn on before the
+/// other. The withdrawal order is `(site, pool)`, with dead wood before litter at a site,
+/// which no result depends on because every pool is drawn on once for its whole share.
+///
+/// **The yield is applied per pool, not to the sum** ([`yield_of`]). The two pools carry
+/// their own mineral and their own energy per unit — litter's retained energy is capped
+/// by `e_d_max` and a log's is not — and `take_pool` hands each over at its own density,
+/// so what became tissue is computed from each withdrawal separately and summed. A
+/// high-energy log therefore cannot pay for tissue built out of low-energy litter; the
+/// [`Substrate::gross`] this returns is that sum, and [`grow`] spends it.
 ///
 /// The uptake is bounded twice — by the rate and by the pools — so an empty log feeds
 /// nothing and a pool can never go negative. It is **not** multiplied by
@@ -688,8 +730,8 @@ pub(crate) fn substrate_in_box(
 /// to a stand, both inside this layer, so the only ledger term it touches is the
 /// per-species diagnostic [`FloraLedger::substrate_uptake`]; the organic matter the fungus
 /// does **not** keep is respired in [`grow`], where every other respiration is.
-fn feed(flora: &mut Flora, world: &World, drink: &[Drink]) -> Vec<Taken> {
-    let mut out = vec![Taken::default(); flora.stands.len()];
+fn feed(flora: &mut Flora, world: &World, drink: &[Drink]) -> Vec<Substrate> {
+    let mut out = vec![Substrate::default(); flora.stands.len()];
     let Flora {
         config,
         stands,
@@ -698,9 +740,9 @@ fn feed(flora: &mut Flora, world: &World, drink: &[Drink]) -> Vec<Taken> {
         ..
     } = flora;
     let view = world.view();
-    // (ground index, stand index, wanted) — sorted, so the withdrawal order is the
-    // ground's own site order and nothing depends on how the stands were reached.
-    let mut wants: Vec<(usize, usize, f64)> = Vec::new();
+    // Sorted, so the withdrawal order is the ground's own site order, dead wood before
+    // litter at a site, and nothing depends on how the stands were reached.
+    let mut wants: Vec<Want> = Vec::new();
     for (si, stand) in stands.iter().enumerate() {
         let sc = config.species(stand.species);
         if sc.trophic != Trophic::Saprotroph {
@@ -710,86 +752,182 @@ fn feed(flora: &mut Flora, world: &World, drink: &[Drink]) -> Vec<Taken> {
         if !(want > 0.0) {
             continue;
         }
-        let mut pools: Vec<(usize, f64)> = Vec::new();
+        let mut pools: Vec<(usize, Pool, f64)> = Vec::new();
         for s in mycelium_sites(&view, stand.site, sc) {
             if let Ok(gi) = ground.binary_search_by_key(&s, |g| g.site) {
-                if ground[gi].dead_wood > 0.0 {
-                    pools.push((gi, ground[gi].dead_wood));
+                for pool in [Pool::DeadWood, Pool::Litter] {
+                    let held = pool.held(&ground[gi]);
+                    if held > 0.0 {
+                        pools.push((gi, pool, held));
+                    }
                 }
             }
         }
-        let total: f64 = pools.iter().map(|&(_, w)| w).sum();
+        let total: f64 = pools.iter().map(|&(_, _, w)| w).sum();
         if !(total > 0.0) {
             continue;
         }
-        for (gi, held) in pools {
+        for (gi, pool, held) in pools {
             let share = split_proportional(want, held, total);
             if share > 0.0 {
-                wants.push((gi, si, share));
+                wants.push(Want {
+                    gi,
+                    pool,
+                    si,
+                    want: share,
+                });
             }
         }
     }
-    wants.sort_unstable_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+    wants.sort_unstable_by_key(|w| (w.gi, w.pool, w.si));
 
+    // Reused across pools so a tick with many fungi allocates once.
+    let mut shares: Vec<Taken> = Vec::new();
     let mut at = 0;
     while at < wants.len() {
-        let gi = wants[at].0;
+        let (gi, pool) = (wants[at].gi, wants[at].pool);
         let mut end = at;
         let mut total = 0.0;
-        while end < wants.len() && wants[end].0 == gi {
-            total += wants[end].2;
+        while end < wants.len() && wants[end].gi == gi && wants[end].pool == pool {
+            total += wants[end].want;
             end += 1;
         }
-        let g = &mut ground[gi];
         // One bounded withdrawal for the whole pool, whatever asked for it.
-        if let Some(taken) = crate::take_pool(
-            &mut g.dead_wood,
-            &mut g.dead_wood_mineral,
-            &mut g.dead_wood_energy,
-            total,
-        ) {
-            share_taken(taken, &wants[at..end], &mut out);
+        if let Some(taken) = pool.take(&mut ground[gi], total) {
+            split_shares(taken, &wants[at..end], &mut shares);
+            for (w, share) in wants[at..end].iter().zip(shares.iter().copied()) {
+                let s = &mut out[w.si];
+                s.taken.organic += share.organic;
+                s.taken.mineral += share.mineral;
+                s.taken.energy += share.energy;
+                // Per pool, at that pool's own mineral and energy density.
+                s.gross += yield_of(config.species(stands[w.si].species), share);
+            }
         }
         at = end;
     }
     for (si, stand) in stands.iter().enumerate() {
-        ledger.substrate_uptake[stand.species.index()] += out[si].organic;
+        ledger.substrate_uptake[stand.species.index()] += out[si].taken.organic;
     }
     out
 }
 
+/// Which of a site's two dead pools a saprotroph's withdrawal reads. Ordered, because the
+/// withdrawals are grouped by `(site, pool)` and the grouping needs a total order;
+/// carrion is not a member, being out of a saprotroph's scope this round.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Pool {
+    DeadWood,
+    Litter,
+}
+
+impl Pool {
+    fn held(self, g: &Ground) -> f64 {
+        match self {
+            Pool::DeadWood => g.dead_wood,
+            Pool::Litter => g.litter,
+        }
+    }
+
+    fn take(self, g: &mut Ground, want: f64) -> Option<Taken> {
+        match self {
+            Pool::DeadWood => crate::take_pool(
+                &mut g.dead_wood,
+                &mut g.dead_wood_mineral,
+                &mut g.dead_wood_energy,
+                want,
+            ),
+            Pool::Litter => crate::take_pool(
+                &mut g.litter,
+                &mut g.litter_mineral,
+                &mut g.litter_energy,
+                want,
+            ),
+        }
+    }
+}
+
+/// One saprotroph's claim on one pool: the ground entry, which pool of it, the stand, and
+/// what that stand asked of it this tick.
+#[derive(Clone, Copy, Debug)]
+struct Want {
+    gi: usize,
+    pool: Pool,
+    si: usize,
+    want: f64,
+}
+
+/// What step 5b hands [`grow`] for one stand: everything the withdrawals took, and the
+/// part of it that may become tissue.
+///
+/// The two are separate because the yield is a **per-pool** rule (see [`feed`]): the
+/// organic matter, the mineral and the energy sum over the pools drawn on, while the
+/// tissue is `yield_of` each withdrawal, summed. With one pool they are the same
+/// arithmetic they always were.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct Substrate {
+    pub taken: Taken,
+    pub gross: f64,
+}
+
+/// The tissue one withdrawal may become: `substrate_yield` of its organic matter, bounded
+/// by what its own energy pays for.
+///
+/// The `energy / e_v` bound is conservation and not a rule: the tissue this income becomes
+/// holds `e_v` per unit, so building more of it than the substrate's own energy pays for
+/// would create energy inside the system. At the placeholders it never binds on a declared
+/// log — `e_v · yield` is 0.8 against a log's own 2.0 per unit — and it binds exactly when
+/// a pool was laid with less energy in it than the tissue it would become: a log with
+/// nothing in it to eat, or litter whose `e_d_max` cap threw energy away before the fungus
+/// arrived.
+fn yield_of(sc: &SpeciesConfig, taken: Taken) -> f64 {
+    let e_v = sc.energy_density;
+    (sc.substrate_yield.clamp(0.0, 1.0) * taken.organic)
+        .min(if e_v > 0.0 {
+            taken.energy / e_v
+        } else {
+            f64::INFINITY
+        })
+        .max(0.0)
+        .min(taken.organic)
+}
+
 /// Split one pool's withdrawal among its demanders, proportional to demand in all three
-/// currencies, with the **last** demander taking each remainder.
+/// currencies, with the **last** demander taking each remainder. The shares come back in
+/// `wants` order, in `shares`, which is cleared first.
 ///
 /// The remainder rule is what [`split_proportional`] alone cannot give: water's shares are
 /// not in a ledger, and these are, so what the pool lost and what the stands received have
-/// to agree to the bit rather than to a few ulps. With one demander — which is every case
-/// this round produces — it hands over the whole [`Taken`].
-fn share_taken(taken: Taken, wants: &[(usize, usize, f64)], out: &mut [Taken]) {
-    let total: f64 = wants.iter().map(|&(_, _, w)| w).sum();
+/// to agree to the bit rather than to a few ulps. With one demander — which is the common
+/// case — it hands over the whole [`Taken`].
+fn split_shares(taken: Taken, wants: &[Want], shares: &mut Vec<Taken>) {
+    shares.clear();
+    let total: f64 = wants.iter().map(|w| w.want).sum();
     let (mut o, mut m, mut e) = (taken.organic, taken.mineral, taken.energy);
-    for (k, &(_, si, want)) in wants.iter().enumerate() {
-        let (so, sm, se) = if k + 1 == wants.len() {
-            (o.max(0.0), m.max(0.0), e.max(0.0))
+    for (k, w) in wants.iter().enumerate() {
+        let share = if k + 1 == wants.len() {
+            Taken {
+                organic: o.max(0.0),
+                mineral: m.max(0.0),
+                energy: e.max(0.0),
+            }
         } else {
-            (
-                split_proportional(taken.organic, want, total).min(o.max(0.0)),
-                split_proportional(taken.mineral, want, total).min(m.max(0.0)),
-                split_proportional(taken.energy, want, total).min(e.max(0.0)),
-            )
+            Taken {
+                organic: split_proportional(taken.organic, w.want, total).min(o.max(0.0)),
+                mineral: split_proportional(taken.mineral, w.want, total).min(m.max(0.0)),
+                energy: split_proportional(taken.energy, w.want, total).min(e.max(0.0)),
+            }
         };
-        o -= so;
-        m -= sm;
-        e -= se;
-        out[si].organic += so;
-        out[si].mineral += sm;
-        out[si].energy += se;
+        o -= share.organic;
+        m -= share.mineral;
+        e -= share.energy;
+        shares.push(share);
     }
 }
 
 // ------------------------------------------- 6. income, growth, senescence, death
 
-fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink], substrate: &[Taken]) {
+fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink], substrate: &[Substrate]) {
     let Flora {
         config,
         stands,
@@ -878,29 +1016,20 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink], substrate: &[Taken]) 
                 ledger.light_in += e_v * a;
                 (a, 0.0)
             }
-            // A saprotroph's income is the dead wood step 5b already took out of the pools
-            // for it. `substrate_yield` of it is income and the rest is respired **at
-            // once**: it has left the log and it is not tissue, so it cannot be left
-            // unaccounted the way an uncaptured photon is, and there is no demand cap here
-            // for the same reason — anything the stand cannot spend falls through to the
-            // leftover `rem` below and is respired there.
+            // A saprotroph's income is the dead wood and litter step 5b already took out
+            // of the pools for it. `substrate_yield` of it is income and the rest is
+            // respired **at once**: it has left the pool and it is not tissue, so it
+            // cannot be left unaccounted the way an uncaptured photon is, and there is no
+            // demand cap here for the same reason — anything the stand cannot spend falls
+            // through to the leftover `rem` below and is respired there.
             //
-            // The `energy / e_v` bound is conservation and not a rule: the tissue this
-            // income becomes holds `e_v` per unit, so building more of it than the
-            // substrate's own energy pays for would create energy inside the system. At
-            // the placeholders it never binds — `e_v · yield` is 0.8 against a log's own
-            // 2.0 per unit — and it binds exactly when a log was laid with less energy in
-            // it than the tissue it would become, which is a log with nothing to eat.
+            // The tissue was computed pool by pool in [`feed`] ([`yield_of`]), because the
+            // two pools carry their own energy per unit; here it is only spent. It is
+            // bounded again by `taken.organic` against float dust, and the energy bound it
+            // already obeys per pool keeps `taken.energy - e_v · gross` non-negative.
             Trophic::Saprotroph => {
-                let taken = substrate[si];
-                let gross = (sc.substrate_yield.clamp(0.0, 1.0) * taken.organic)
-                    .min(if e_v > 0.0 {
-                        taken.energy / e_v
-                    } else {
-                        f64::INFINITY
-                    })
-                    .max(0.0)
-                    .min(taken.organic);
+                let Substrate { taken, gross } = substrate[si];
+                let gross = gross.max(0.0).min(taken.organic);
                 let waste = (taken.organic - gross).max(0.0);
                 ledger.respired_out += waste;
                 ledger.heat_out += (taken.energy - e_v * gross).max(0.0);
@@ -1780,14 +1909,8 @@ fn establishes(
     sc: &SpeciesConfig,
 ) -> bool {
     let visibility = sky_at(sky, view, site);
-    gates(
-        view,
-        site,
-        sc,
-        visibility,
-        substrate_in_box(view, ground, site, sc),
-    )
-    .passes()
+    let (dead_wood, litter) = substrate_pools_in_box(view, ground, site, sc);
+    gates(view, site, sc, visibility, dead_wood, litter).passes()
 }
 
 /// The same predicate for a caller outside a tick — a harness picking founders, a
@@ -1841,6 +1964,11 @@ pub struct Gates {
     /// [`Trophic::Photo`] species, which never asks, and zero for a caller that read the
     /// gates off a `VoxelView` alone, which has no ground stocks in it.
     pub dead_wood: f64,
+    /// Litter in the same box, on the same terms. It is the **other half of the substrate**
+    /// a saprotroph eats, so the gate reads [`Gates::substrate`] and not this field or
+    /// `dead_wood` alone: the two are reported apart only so a diagnosis can say which
+    /// food a site holds.
+    pub litter: f64,
     /// `mean_pore >= establish_pore_min`, and false for a box with no soil in it.
     pub pore_ok: bool,
     /// `saturated_fraction <= establish_saturated_max`.
@@ -1850,12 +1978,19 @@ pub struct Gates {
     /// `sky_visibility >= establish_light_min` — and **always true for a saprotroph**,
     /// which has no light gate at all, because it does not eat light.
     pub light_ok: bool,
-    /// `dead_wood >= establish_substrate_min` — and **always true for a `Photo` species**,
-    /// whose substrate gate is open by construction.
+    /// `substrate() >= establish_substrate_min` — and **always true for a `Photo`
+    /// species**, whose substrate gate is open by construction.
     pub substrate_ok: bool,
 }
 
 impl Gates {
+    /// The substrate the box holds: `dead_wood + litter`, which is what
+    /// [`SpeciesConfig::establish_substrate_min`] is compared against and what a
+    /// saprotroph's income is drawn from. A fungus eats both.
+    pub fn substrate(&self) -> f64 {
+        self.dead_wood + self.litter
+    }
+
     /// The predicate itself: every gate, and nothing else.
     pub fn passes(&self) -> bool {
         self.pore_ok && self.aeration_ok && self.depth_ok && self.light_ok && self.substrate_ok
@@ -1871,25 +2006,27 @@ impl Gates {
 /// is the same function with the reading supplied, and
 /// [`crate::FloraView::establishment_gates`] takes it off the flora's own ground.
 pub fn establishment_gates(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> Gates {
-    establishment_gates_on_substrate(view, site, sc, 0.0)
+    establishment_gates_on_substrate(view, site, sc, 0.0, 0.0)
 }
 
-/// [`establishment_gates`] with the dead wood of the species' mycelium box handed in: the
-/// substrate is an **input** to the one predicate, the way sky visibility is, and not a
-/// second predicate.
+/// [`establishment_gates`] with the substrate of the species' mycelium box handed in —
+/// its dead wood and its litter, the two stocks a saprotroph eats, reported apart and
+/// gated on their sum: the substrate is an **input** to the one predicate, the way sky
+/// visibility is, and not a second predicate.
 pub fn establishment_gates_on_substrate(
     view: &VoxelView<'_>,
     site: Site,
     sc: &SpeciesConfig,
     dead_wood: f64,
+    litter: f64,
 ) -> Gates {
     let visibility = view.sky_visibility(site.x as i64, site.y, site.z);
-    gates(view, site, sc, visibility, dead_wood)
+    gates(view, site, sc, visibility, dead_wood, litter)
 }
 
 /// [`establishment_gates_on_substrate`] with the geometric sky reading handed in by a
 /// caller that already has it. The **same** predicate, the same thresholds and the same
-/// readings of pore water, saturation, standing water and dead wood — only the hemisphere
+/// readings of pore water, saturation, standing water and substrate — only the hemisphere
 /// ray's result is supplied, and it is exactly [`VoxelView::sky_visibility`].
 ///
 /// A study sweeping one skyline for all six species caches one reading per site and shares
@@ -1901,8 +2038,9 @@ pub fn establishment_gates_with_sky(
     sc: &SpeciesConfig,
     sky_visibility: f64,
     dead_wood: f64,
+    litter: f64,
 ) -> Gates {
-    gates(view, site, sc, sky_visibility, dead_wood)
+    gates(view, site, sc, sky_visibility, dead_wood, litter)
 }
 
 /// The same, for a caller that already has a sky reading — `step`'s memoized cache, which
@@ -1913,6 +2051,7 @@ fn gates(
     sc: &SpeciesConfig,
     sky_visibility: f64,
     dead_wood: f64,
+    litter: f64,
 ) -> Gates {
     #[cfg(feature = "profile")]
     cubarium_voxel::profile::add(cubarium_voxel::profile::Count::GatesEvaluated, 1);
@@ -1927,6 +2066,7 @@ fn gates(
         water_depth_m,
         sky_visibility,
         dead_wood,
+        litter,
         pore_ok: mean_pore.is_some_and(|mean| mean >= sc.establish_pore_min),
         aeration_ok: saturated_fraction <= sc.establish_saturated_max,
         depth_ok: water_depth_m <= sc.drown_depth_m,
@@ -1939,7 +2079,7 @@ fn gates(
         },
         substrate_ok: match sc.trophic {
             Trophic::Photo => true,
-            Trophic::Saprotroph => dead_wood >= sc.establish_substrate_min,
+            Trophic::Saprotroph => dead_wood + litter >= sc.establish_substrate_min,
         },
     }
 }
@@ -2564,26 +2704,26 @@ mod tests {
         // A quarter and three quarters, in every currency.
         for (i, f) in [(0usize, 0.25), (1, 0.75)] {
             assert!(
-                (out[i].organic - f * 4e-5).abs() < 1e-20,
+                (out[i].taken.organic - f * 4e-5).abs() < 1e-20,
                 "{i}: organic {:?}",
                 out[i]
             );
             assert!(
-                (out[i].mineral - f * 3e-6).abs() < 1e-20,
+                (out[i].taken.mineral - f * 3e-6).abs() < 1e-20,
                 "{i}: mineral {:?}",
                 out[i]
             );
             assert!(
-                (out[i].energy - f * 5e-4).abs() < 1e-18,
+                (out[i].taken.energy - f * 5e-4).abs() < 1e-18,
                 "{i}: energy {:?}",
                 out[i]
             );
         }
         // Three times the demand, three times the share, and nothing was created: the two
         // receipts sum to exactly what the log held.
-        assert_eq!(out[0].organic + out[1].organic, 4e-5);
-        assert_eq!(out[0].mineral + out[1].mineral, 3e-6);
-        assert_eq!(out[0].energy + out[1].energy, 5e-4);
+        assert_eq!(out[0].taken.organic + out[1].taken.organic, 4e-5);
+        assert_eq!(out[0].taken.mineral + out[1].taken.mineral, 3e-6);
+        assert_eq!(out[0].taken.energy + out[1].taken.energy, 5e-4);
         let g = flora.view().ground_at(log).expect("the log's site").clone();
         assert_eq!(
             (g.dead_wood, g.dead_wood_mineral, g.dead_wood_energy),

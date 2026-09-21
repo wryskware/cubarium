@@ -110,6 +110,7 @@ fn lay_declared_logs(world: &World, flora: &mut Flora, skyline: &[Site]) -> Vec<
                 *s,
                 &sc,
                 sc.establish_substrate_min,
+                0.0,
             )
             .passes()
         })
