@@ -354,7 +354,7 @@ pub struct Volume {
 ///    Every column is then tilted, if it needs it, until the back stands at least half
 ///    [`Recipe::back_rise_m`] above the front — the relief varies with depth too, and no
 ///    visibility pass can repair a column whose far edge is genuinely the lower one.
-/// 2. Erosion cuts channels and moves the mantle into the flats. (Next commit.)
+/// 2. [`crate::erosion::erode`] cuts channels and moves the mantle into the flats.
 /// 3. [`voxelise`] quantises it: sediment becomes Soil, bedrock becomes Rock or Bedrock
 ///    by [`Recipe::hardness_at`]. (Slice 2b carves the volume here.)
 /// 4. [`prepare`] runs the skyline visibility pass and the isolated-void repair.
@@ -369,8 +369,18 @@ fn staged(world: &mut World, r: &Recipe) {
         return;
     }
     let mut field = heightfield(&c, r);
-    // Stage 2, erosion, lands here in the next commit; [`Recipe::erosion`] is the budget
-    // it will read. Until then the mantle stays where the heightfield laid it.
+    let circumference_m = field.circumference_m;
+    let cell = field.cell_m;
+    crate::erosion::erode(&mut field, &r.erosion, |x, z, bedrock_m| {
+        r.hardness_at(
+            (x as f64 + 0.5) * cell,
+            bedrock_m,
+            (z as f64 + 0.5) * cell,
+            circumference_m,
+            c.seed,
+        )
+    });
+
     let mut volume = voxelise(&c, r, &field);
     prepare(&mut volume, &mut field, r);
 

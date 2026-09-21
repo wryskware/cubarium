@@ -26,6 +26,8 @@ macro_rules! voxel_phase {
 }
 
 pub mod config;
+/// Hydraulic erosion on a heightfield. Generation only; geological time is iterations.
+pub mod erosion;
 pub mod generate;
 pub mod ledger;
 pub mod material;
