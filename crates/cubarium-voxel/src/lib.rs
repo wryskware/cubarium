@@ -44,9 +44,10 @@ pub mod water;
 pub mod world;
 
 pub use config::Config;
+pub use generate::{Budget, Heightfield, Volume};
 pub use ledger::Ledger;
 pub use material::Material;
-pub use recipe::{Landform, PRESETS, Preset, Recipe, Streams};
+pub use recipe::{Erosion, Hollows, Landform, PRESETS, Preset, Recipe, Streams};
 pub use viability::{BandResult, PoreBand, Viability, ViabilitySpec};
 pub use world::{Command, VoxelView, World, default_threads};
 

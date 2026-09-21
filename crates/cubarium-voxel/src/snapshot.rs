@@ -12,10 +12,13 @@ use crate::World;
 /// for the closed water budget (`World::atmosphere_m3`, `World::shower_left_m3`, the four
 /// new `Ledger` terms and its shower count, and the `Config` switch with its two shower
 /// knobs), and to 5 for the terrain generation recipe (`Config::landform`, which carries
-/// a whole `Recipe` inside the serialized world). Postcard
+/// a whole `Recipe` inside the serialized world), and to 6 for erosion and the hardness
+/// field (the `Recipe` gained its `erosion` and `hollows` sections and its hardness
+/// parameters, and lost the slope-derived soil the staged generator no longer uses).
+/// Postcard
 /// is not self-describing, so a new field is a new format: earlier tags are refused,
 /// never migrated.
-pub const SCHEMA: u32 = 5;
+pub const SCHEMA: u32 = 6;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

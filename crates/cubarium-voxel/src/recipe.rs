@@ -18,6 +18,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::Config;
+use std::f64::consts::TAU;
+
 use crate::noise::{Ladder, fbm, resolved_octaves, ridged, ring_cells, ring_noise, smoothstep};
 
 /// Which generator builds the terrain.
@@ -54,7 +56,9 @@ pub struct Streams {
     pub warp: u64,
     /// Which stretches of the ring are rocky.
     pub rocky: u64,
-    /// Rock thickness, strata warp and the soil pockets.
+    /// The rock hardness field: strata warp and the slow regional variation.
+    pub hardness: u64,
+    /// The soil pockets.
     pub material: u64,
 }
 
@@ -65,10 +69,83 @@ impl Default for Streams {
             ridge: 0x_5354_4147_5F52_4447,
             warp: 0x_5354_4147_5F57_5250,
             rocky: 0x_5354_4147_5F52_4B59,
+            hardness: 0x_5354_4147_5F48_5244,
             material: 0x_5354_4147_5F4D_4154,
         }
     }
 }
+
+/// The erosion budget. Geological time is [`Erosion::iterations`], never ticks: it is a
+/// work budget for a solver, not a duration anything in the world experiences.
+///
+/// The model water each iteration rains, routes and discards is a modelling tool. It is
+/// never the live world's inventory; slice 3 fills the basins from the water budget.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Erosion {
+    /// How many iterations the solver runs. `0` is the identity.
+    pub iterations: u32,
+    /// Model rain per sample column per iteration.
+    pub rain: f64,
+    /// Sediment one unit of discharge carries per unit of slope. This and `rain` set the
+    /// scale together; only their product means anything.
+    pub capacity: f64,
+    /// Fraction of the carrying deficit taken off the bed each iteration.
+    pub erode: f64,
+    /// Fraction of the excess load dropped each iteration.
+    pub deposit: f64,
+    /// How much slower hardness `1` bedrock yields than loose sediment.
+    pub bedrock_resistance: f64,
+    /// Deepest one iteration may cut at one column, metres. A stability limit, not a
+    /// rule: without it a single steep column can cut through the floor in one pass.
+    pub max_cut_m: f64,
+    /// Tangent of the angle of repose for loose sediment.
+    pub repose: f64,
+    /// Relaxation sweeps of the repose rule per iteration.
+    pub repose_sweeps: u32,
+}
+
+impl Default for Erosion {
+    fn default() -> Erosion {
+        Erosion::DEFAULT
+    }
+}
+
+impl Erosion {
+    /// The budget the `default` and `wide` presets run.
+    pub const DEFAULT: Erosion = Erosion {
+        iterations: 100,
+        rain: 1.0,
+        capacity: 0.0025,
+        erode: 0.5,
+        deposit: 0.4,
+        bedrock_resistance: 6.0,
+        max_cut_m: 0.05,
+        repose: 0.8,
+        repose_sweeps: 2,
+    };
+
+    /// The `small` preset's budget: half the cell size, so half the cut per iteration.
+    pub const SMALL: Erosion = Erosion {
+        max_cut_m: 0.03,
+        ..Erosion::DEFAULT
+    };
+
+    /// No erosion at all: the identity.
+    pub const NONE: Erosion = Erosion {
+        iterations: 0,
+        ..Erosion::DEFAULT
+    };
+}
+
+/// Carved hollows: undercuts, galleries and shelves.
+///
+/// Empty, and serde-defaulted, on purpose. Carving is slice 2b
+/// (`design/caves-and-hollows-plan-2026-09-21.md`); this is the section it will fill, in
+/// place, without moving a field of any preset that exists now.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Hollows {}
 
 /// A landscape in metres. [`Recipe::default`] is the `default` preset.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -121,28 +198,36 @@ pub struct Recipe {
     /// the Nyquist limit of the grid the terrain is quantised onto.
     pub min_feature_voxels: f64,
 
-    /// Soil on ground with no slope, metres.
-    pub soil_flat_m: f64,
-    /// Extra soil in receiving ground, metres. Slice 2 replaces this with transported
-    /// sediment; until then soil still comes from slope and deposition, never from the
-    /// elevation noise.
-    pub soil_deposit_m: f64,
-    /// Soil everywhere, even on a bare flank, metres.
-    pub soil_floor_m: f64,
-    /// Deepest soil a column may carry, metres.
+    /// Loose weathered sediment the landscape starts mantled in, metres. Erosion moves
+    /// it; it is not added to the relief, the bedrock top sits this far below the
+    /// surface. With no erosion at all this is the soil everywhere.
+    pub mantle_m: f64,
+    /// Deepest sediment a column may carry into the voxels, metres.
     pub soil_max_m: f64,
 
-    /// Rock between the soil and the bedrock core, metres.
-    pub rock_m: f64,
-    /// How far that thickness swings around the ring, metres.
-    pub rock_swing_m: f64,
-    /// Spacing of the hard strata water perches on, metres.
+    /// One soft-to-hard cycle of the strata, metres of height.
     pub strata_m: f64,
     /// How far the strata are warped around the ring, metres.
     pub strata_warp_m: f64,
+    /// Hardness of the softest and of the hardest rock, `0..=1`.
+    pub hardness_soft: f64,
+    pub hardness_hard: f64,
+    /// Wavelength of the slow regional variation in hardness, metres: the same band is
+    /// not equally hard all the way around.
+    pub hardness_region_m: f64,
+    /// At or above this hardness the rock voxelises as [`crate::Material::Bedrock`], and
+    /// a bank standing over a cut counts as a hard cap.
+    pub bedrock_hardness: f64,
+    /// Everything below this height is the impermeable core, hardness `1`.
+    pub core_m: f64,
 
     /// Soil pockets inside the rock.
     pub pockets: u32,
+
+    /// The erosion budget.
+    pub erosion: Erosion,
+    /// Carved hollows. Empty until slice 2b.
+    pub hollows: Hollows,
 
     /// The per-pass seed streams.
     pub streams: Streams,
@@ -175,20 +260,24 @@ impl Recipe {
         warp_wavelength_m: 18.0,
         warp_m: 1.6,
         min_feature_voxels: 2.0,
-        soil_flat_m: 0.8,
-        soil_deposit_m: 0.6,
-        soil_floor_m: 0.08,
+        mantle_m: 0.25,
         soil_max_m: 1.5,
-        rock_m: 1.5,
-        rock_swing_m: 0.75,
-        strata_m: 0.5,
+        strata_m: 2.0,
         strata_warp_m: 0.4,
+        hardness_soft: 0.25,
+        hardness_hard: 0.95,
+        hardness_region_m: 18.0,
+        bedrock_hardness: 0.7,
+        core_m: 2.0,
         pockets: 3,
+        erosion: Erosion::DEFAULT,
+        hollows: Hollows {},
         streams: Streams {
             relief: 0x_5354_4147_5F52_454C,
             ridge: 0x_5354_4147_5F52_4447,
             warp: 0x_5354_4147_5F57_5250,
             rocky: 0x_5354_4147_5F52_4B59,
+            hardness: 0x_5354_4147_5F48_5244,
             material: 0x_5354_4147_5F4D_4154,
         },
     };
@@ -209,14 +298,13 @@ impl Recipe {
         rocky_wavelength_m: 13.0,
         warp_wavelength_m: 11.0,
         warp_m: 0.9,
-        soil_flat_m: 0.5,
-        soil_deposit_m: 0.35,
-        soil_floor_m: 0.05,
+        mantle_m: 0.16,
         soil_max_m: 0.9,
-        rock_m: 0.9,
-        rock_swing_m: 0.4,
-        strata_m: 0.3,
+        strata_m: 1.2,
         strata_warp_m: 0.25,
+        hardness_region_m: 11.0,
+        core_m: 1.0,
+        erosion: Erosion::SMALL,
         ..Recipe::DEFAULT
     };
 
@@ -238,6 +326,8 @@ impl Recipe {
             ("rocky_wavelength_m", self.rocky_wavelength_m),
             ("warp_wavelength_m", self.warp_wavelength_m),
             ("strata_m", self.strata_m),
+            ("mantle_m", self.mantle_m),
+            ("hardness_region_m", self.hardness_region_m),
             ("depth_scale", self.depth_scale),
             ("min_feature_voxels", self.min_feature_voxels),
             ("relief_m", self.relief_m),
@@ -255,13 +345,22 @@ impl Recipe {
             ("ridge_relief_m", self.ridge_relief_m),
             ("rocky_fraction", self.rocky_fraction),
             ("warp_m", self.warp_m),
-            ("soil_flat_m", self.soil_flat_m),
-            ("soil_deposit_m", self.soil_deposit_m),
-            ("soil_floor_m", self.soil_floor_m),
             ("soil_max_m", self.soil_max_m),
-            ("rock_m", self.rock_m),
-            ("rock_swing_m", self.rock_swing_m),
             ("strata_warp_m", self.strata_warp_m),
+            ("core_m", self.core_m),
+            ("hardness_soft", self.hardness_soft),
+            ("hardness_hard", self.hardness_hard),
+            ("bedrock_hardness", self.bedrock_hardness),
+            ("erosion.rain", self.erosion.rain),
+            ("erosion.capacity", self.erosion.capacity),
+            ("erosion.erode", self.erosion.erode),
+            ("erosion.deposit", self.erosion.deposit),
+            (
+                "erosion.bedrock_resistance",
+                self.erosion.bedrock_resistance,
+            ),
+            ("erosion.max_cut_m", self.erosion.max_cut_m),
+            ("erosion.repose", self.erosion.repose),
         ] {
             anyhow::ensure!(
                 v.is_finite() && v >= 0.0,
@@ -372,6 +471,58 @@ impl Recipe {
             seed ^ s.ridge,
         );
         broad + mask * self.ridge_relief_m * crest
+    }
+}
+
+impl Recipe {
+    /// How hard the rock is at one point of the world, `0..=1`.
+    ///
+    /// A field of `(x, y, z)` in metres, not a per-column formula: the erosion solver
+    /// reads it at the bedrock surface, the voxeliser turns it into
+    /// [`crate::Material::Bedrock`] or [`crate::Material::Rock`], and slice 2b's
+    /// galleries will follow the same layers the picture shows. Periodic in `x`.
+    ///
+    /// Strata are one soft-to-hard cycle every [`Recipe::strata_m`] of height, warped
+    /// around the ring so they are not flat, modulated slowly so the same band is not
+    /// equally hard everywhere, and overridden by the impermeable core below
+    /// [`Recipe::core_m`].
+    pub fn hardness_at(
+        &self,
+        x_m: f64,
+        y_m: f64,
+        z_m: f64,
+        circumference_m: f64,
+        seed: u64,
+    ) -> f64 {
+        let x_m = if circumference_m > 0.0 {
+            x_m.rem_euclid(circumference_m)
+        } else {
+            x_m
+        };
+        let zs = z_m * self.depth_scale;
+        let s = self.streams;
+        let warp = self.strata_warp_m
+            * ring_noise(
+                x_m,
+                zs,
+                circumference_m,
+                ring_cells(circumference_m, self.warp_wavelength_m),
+                seed ^ s.hardness,
+            );
+        let band = 0.5 - 0.5 * (TAU * (y_m + warp) / self.strata_m.max(1e-9)).cos();
+        let region = 0.5
+            + 0.5
+                * ring_noise(
+                    x_m,
+                    zs,
+                    circumference_m,
+                    ring_cells(circumference_m, self.hardness_region_m),
+                    seed ^ s.hardness.rotate_left(13),
+                );
+        let mixed = 0.72 * band + 0.28 * region.clamp(0.0, 1.0);
+        let layered = self.hardness_soft + (self.hardness_hard - self.hardness_soft) * mixed;
+        let core = 1.0 - smoothstep(self.core_m, self.core_m + 0.5, y_m);
+        layered.max(core).clamp(0.0, 1.0)
     }
 }
 
