@@ -300,3 +300,62 @@ read, and the `erosion_map` output is not needed.
 Return (≤40 lines): commits, red-first tests, disagreements and your choice,
 hollow counts per preset and seed (undercuts / galleries / filled as
 invisible), any proposal on incision, PNG paths.
+
+## Slice 2b — integrated 2026-09-21
+
+Landed at e219af6, 2de2bea; schema 6 → 7. Accepted: seam test as rotation of
+the material array; mouths and skylights reverted when they break the
+landform rule; `halving_the_voxel` with hollows off; `small` strata 1.6 m.
+Finding: **undercuts carve zero on every preset** because no surface drop of
+3 voxels exists between neighbouring columns; listed hollows are 1–5 shallow
+galleries per ring, all at the front cut, and at 8 px/voxel they read as
+small dark slots only. The machinery (carve, `hollows::find`, camera check,
+galleries, skylights) is in and tested; the landscapes lack banks.
+
+## Slice 2c — layer-aware incision
+
+Owner: the same generator worker (Opus, high). Files: `erosion.rs`,
+`recipe.rs`, `generate.rs` tests; nothing outside `cubarium-voxel`.
+
+Adopt the worker's proposal from slice 2b: the stream-power bedrock cut reads
+hardness **at the cell being cut**, and the per-iteration cap is a recipe pair
+`erosion.max_cut_soft_m` / `erosion.max_cut_hard_m` applied by whether the
+cell's hardness is ≤ `hollows.soft_hardness`. Start at 0.25 m / 0.05 m (the
+5:1 the proposal gives). This changes every preset's terrain; the point is
+banks, steps and rocky shoulders where a hard band caps a soft one, so
+undercuts have something to cut into. The plan's section 2 asks for exactly
+this ("banks, rocky shoulders and depositional flats"; "exposed rock on
+erosional slopes").
+
+Hard constraint: **the ring stays walkable.** Add a traversability check in
+the voxel crate: over all support faces (any `z`), with a step bound of
+`0.5 m` in `y` between 4-neighbouring faces (wrapping `x`), a closed route
+around the ring exists. Run it as a test on every preset at two seeds. If
+incision breaks it, the fix is a ramp or a lower cap, reported, not a
+silently loosened bound.
+
+Tests before the change, each under a second:
+
+1. Differential incision: a channel fixture with a hard band over a soft band
+   ends, after the preset iteration count, with a step of at least 3 voxels
+   between the capped column and its cut neighbour; the same fixture with
+   uniform hardness ends with no step over 1 voxel.
+2. Conservation and the bedrock-never-rises rule still hold under the new cap
+   (extend test 1 of slice 2 to the new fixture).
+3. Traversability as above, on the three presets at two seeds, and on a
+   fixture with a 3-voxel wall across the whole depth (must fail) and the same
+   wall with a one-column ramp (must pass).
+4. Presets: with 2c on, `default` and `wide` list at least one undercut at
+   both seeds; `hollows::find` has no invisible hollows; `isolated_voids` is
+   empty; the skyline pass stays under 5 %; every slice 1, 2 and 2b test is
+   green.
+
+Report per preset and seed: columns with a 3-voxel drop to a 1-cell
+neighbour, undercut / gallery / dropped counts, skyline-pass percentage,
+traversability result, erosion time.
+
+Visual check into the scratch directory under `terrain-slice2c/`: the six
+preset × seed PNGs, plus `default` seed 1 and `wide` seed 7 at
+`px_per_voxel = 8`.
+
+Return (≤40 lines) as before.
