@@ -140,3 +140,15 @@ motion (the delivered-forward channel already exists in Self). Second
 candidate, unmeasured: the founder motion rule's same-height requirement
 confines a founder to the flat patch it stands on; how large those patches
 are on this landform was not measured.
+
+## Closed water budget (route B), 2026-09-20, at 72101aa
+
+With the closed budget on the **generated** world (brief and integration
+note: `design/handoffs/voxel-water-cycle-2026-09-20.md`), the six-hour
+census reads at 6 h: bloomcrown 42, umbrellafrond 149, springturf 34,
+stonecushion 34, velvetpad 27, glowcap 0 (first zero at minute 307); flora
+births 376 against 62 seeded, 90 deaths. Reproduced exactly by Fable. The
+same build on the authored open world reproduces the collapse above. Water
+was the whole plant story; glowcap (a dead-wood decomposer) and the founders
+(D2) are the remaining questions.
+

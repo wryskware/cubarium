@@ -1,5 +1,5 @@
 ---
-status: open
+status: landed
 date: 2026-09-20
 owner: Fable (orchestration); decisions recorded from Wrysk
 ---
@@ -87,3 +87,52 @@ changes. Runs may use all cores; outputs under `runs/` are disposable.
 Return ≤ 40 lines: commits, the 24 h table for the three seeds (bounded or
 locked, thresholds), the six-hour census line, the viability report, and
 the evidence behind each conclusion. Fable integrates.
+
+## Integration note (Fable, 2026-09-20, at 72101aa)
+
+Landed: 197d4b6 (atmosphere store, showers, return loop, ledger, config
+switch, world schema 4), df73de5 (`AddAtmosphere`, stdin `h M3`), 5417e2f
+(`viability::measure`, printed at start), 63ebecd (`examples/water_cycle.rs`;
+`voxel_census [HOURS] [authored|generated] [open|closed]`), 4d3e048, a7849fc,
+72101aa. Workspace suite 1,959 passed, 1 skipped; the flora study harness is
+unchanged. Worker's decision, accepted: the outlet returns to the atmosphere
+(one store, one threshold, one residual, one thing route C replaces) rather
+than to a second reserve.
+
+**24 h, three generated seeds, closed budget** (shower rate 2e-4 m/s,
+evaporation 1e-4, trigger 0.02, shower 5 m³, aquifer at floor + 1 m; total
+water 218.40 m³). Read from the CSVs by Fable: stored water stays within
+192–218 m³ all day; first-half to second-half mean drift +0.25 %, +0.36 %,
++0.67 % of total; 456, 663, 653 showers; residual 1.4–1.5e-5 m³ at the end,
+i.e. 6e-8 relative, growing linearly with throughput (f64 accumulation over
+1.73 M ticks; the ≤ 200-tick tests hold 1e-9). All three BOUNDED.
+
+**Lock threshold** (seed 1, 3 h sweep of `shower_trigger_fraction`): 0.10 →
+24 showers, 0.20 → 6, 0.24 → 2, still bounded; 0.26 and above → 0 showers,
+LOCKED DRY. Without rain the atmosphere plateaus at 25.3 % of total water,
+so any trigger above that is never reached. Intermittent weather lives in
+0.10–0.24; the default 0.02 is a placeholder that rains nearly back to back.
+
+**Six-hour census, generated world, closed budget** (worker's run, reproduced
+exactly by Fable at 72101aa): at 6 h bloomcrown 42, umbrellafrond 149, springturf 34,
+stonecushion 34, velvetpad 27, glowcap 0 (first zero at minute 307); flora
+births 376 against 62 seeded, 90 deaths. Same build on the authored open
+world: only stonecushion's 6 alive, births frozen at 62 (D1 reproduced). The
+budget, not the build, changed the outcome. Fauna still extinct by minute
+30 (D2's blind heuristic, untouched). Glowcap is the decomposer; its gate is
+dead-wood substrate, not pore water, and it was not chased here.
+
+**Viability line as the ambient run prints it** (reproduced by Fable):
+VIABLE, stored 205–211 m³ (drift −1.31 % bounded), atmosphere 7–13 m³,
+residual 6e-10; in band: bloomcrown, stonecushion, glowcap 100 % of 3,044
+soil columns; umbrellafrond 9.4 %, springturf 13.9 %, velvetpad 12.5 %.
+
+Left open, by the worker and agreed:
+- Evaporation is an experiment value, not canon. It must sit below the
+  shower rate because `evaporate` runs right after `rain` in the tick and
+  lifts fresh rain before it infiltrates; at 4e-4 the soil never recharged.
+  The engine of the cycle is the outlet return, not evaporation. Ordering
+  evaporation after infiltration is a model question for later.
+- Seed 1 loses ~0.1 m³ of store per 6 h to the aquifer; a longer watch would
+  say whether that ends in a lock. Trigger sweep on seed 1 only.
+- The seeder still never consults the establishment predicate.
