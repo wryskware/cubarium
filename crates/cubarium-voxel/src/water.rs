@@ -506,11 +506,14 @@ pub fn shower(w: &mut World) {
             if !(w.atmosphere_m3 >= trigger) || w.atmosphere_m3 <= 0.0 {
                 return;
             }
-            w.shower_left_m3 = w.config.shower_volume_m3.min(w.atmosphere_m3);
-            w.ledger.showers += 1;
-            if w.shower_left_m3 <= 0.0 {
+            // The allowance decides whether a shower starts at all: a zero shower volume
+            // is no weather, not a shower counted afresh on every tick forever.
+            let allowance = w.config.shower_volume_m3.min(w.atmosphere_m3);
+            if allowance <= 0.0 {
                 return;
             }
+            w.shower_left_m3 = allowance;
+            w.ledger.showers += 1;
         }
 
         let per_column = w.config.rain_m_per_s * DT * w.config.cell_area();
@@ -2407,6 +2410,22 @@ mod closed_budget_tests {
             "an open world's water is {before} plus the through-flow {flowed}, not {}",
             v.total_water_m3()
         );
+    }
+
+    /// A zero shower volume is no weather at all: no shower starts and the count stays
+    /// put, rather than a fresh shower being booked on every tick forever.
+    #[test]
+    fn a_zero_shower_volume_starts_no_shower() {
+        let mut w = World::empty(Config {
+            shower_volume_m3: 0.0,
+            ..config(true)
+        });
+        w.apply(Command::AddAtmosphere { volume_m3: 1.0 });
+        run(&mut w, TICKS);
+        let v = w.view();
+        assert_eq!(v.ledger.showers, 0);
+        assert_eq!(v.ledger.rain_in, 0.0);
+        assert!(v.total_residual().abs() < 1e-9);
     }
 
     /// The user's lever: water aloft, the store's residual still zero, and the world's
