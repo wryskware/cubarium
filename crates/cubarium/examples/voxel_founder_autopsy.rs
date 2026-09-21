@@ -889,6 +889,20 @@ fn summary(sim: &Sim, ticks: u64) {
             l.eaten_by_plant[i],
         );
     }
+    // The two ledgers, on the world that actually ran: an escrow and a clutch are paid
+    // packages the layer still owns, so a reproduction round that created or destroyed
+    // matter would show here and nowhere else in this file.
+    let av = sim.fauna().view();
+    let fv = sim.flora().view();
+    println!(
+        "SUMMARY,{ticks},residuals,fauna_organic={:.3e} fauna_mineral={:.3e} fauna_energy={:.3e} flora_organic={:.3e} flora_mineral={:.3e} flora_energy={:.3e}",
+        av.organic() - av.ledger.expected_organic(),
+        av.mineral() - av.ledger.expected_mineral(),
+        av.energy() - av.ledger.expected_energy(),
+        fv.organic() - fv.ledger.expected_organic(),
+        fv.mineral() - fv.ledger.expected_mineral(),
+        fv.energy() - fv.ledger.expected_energy(),
+    );
     assert_eq!(
         l.deaths,
         l.deaths_accounted(),
