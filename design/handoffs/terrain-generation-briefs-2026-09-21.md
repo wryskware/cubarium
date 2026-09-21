@@ -581,3 +581,63 @@ the settle report and `Seeded` printed for each.
 Return (≤40 lines): commits, red-first tests, disagreements and choices,
 settle ticks and pooled m³ per preset, founder counts and shortfalls per
 preset, PNG paths.
+
+## Package S and slice 3 — integrated 2026-09-21
+
+Package S landed at ab4a6db (small redone from its own picture: strata 1.4 m,
+own bedrock threshold 0.78, regional hardness 5 m, depth scale 0.2, three
+rocky regions; 4–11 undercuts per seed; seed 1's basin is a puddle).
+Slice 3 landed at 6474f9e, 4497240, e260844, 3d80bb4; schema 9 → 10;
+workspace 2042 tests green in 4.1 s. Accepted deviations: a 3D sheet-by-level
+basin flood on the material array (sees grotto bowls, works for Ridge and
+fixtures); allocation by catchment with per-basin spill caps; all porous
+voxels wetted to field capacity and charged to the inventory (the dry
+default planted nothing); atmosphere charged only under a closed budget;
+headroom = 1 + mouth reach off the manifest; route to a second patch over
+level-adjacent faces; `scene::authored` charges the default inventory.
+Pictures: pools in the low catchments, glowcaps on the wet flat under the
+ledge, bloomcrowns banded along the terrace, no shortfalls on any preset.
+
+Open from the worker: the staged worlds run an **open budget with rain and
+evaporation at zero** — hydrostatics only, no cycle — and the panel TOML has
+always been that way. Every preset reports "still moving at the cap" with a
+drift of 1e-10 m³ per 100 ticks, so the flag is the wet-cell criterion, not
+the water.
+
+## Package W — the cycle on, and a settle flag that means it
+
+Owner: habitat worker (Opus, medium). Files: `recipe.rs` `Water` section and
+the staged presets' `water` values, `world.rs` settle criterion, host startup
+log; `config/tachyon/voxel.toml` only if a key must move.
+
+Decision, applying the hydrology decision of 2026-09-20 (route B: closed
+cycle with a lumped atmosphere, now; drought lock is a feature, reported not
+hidden): staged recipes run `closed_water_budget = true` with
+`atmosphere_fraction` charged, evaporation above zero, and the runtime's
+shower rule. Take the shower trigger, shower volume, rain rate and evaporation
+rate from the water-cycle handoff's chosen values where it states them and
+from `Config`'s documented defaults otherwise; state the four numbers in the
+return. `Ridge` and every fixture stay on the open budget as before.
+
+Settle: `converged` means pooled volume drift under 1 % **and** wet-cell
+change under 1 % of the pooled cell count with an absolute floor of 8 cells
+over the last 100 ticks, so a resting world reports converged; keep the cap
+at 600. `dry_locked` keeps its meaning. The startup line then names the
+budget it runs (closed, with the atmosphere's share) instead of "no cycle to
+report".
+
+Tests before the change, each under a second: (1) a staged tiny world under
+the closed budget passes `validate_loaded`, holds atmosphere equal to its
+`atmosphere_fraction` share after `hydrate`, and its ledger balances after 60
+ticks; (2) the resting fixture from slice 3 now reports `converged` before
+100 ticks; (3) a fixture with a charged atmosphere and no pools is
+`dry_locked`; a fixture with pools is not. Plus one `#[ignore = "study: run
+by name"]` on `default` seed 1: settle, then step until the first shower or
+6000 ticks, and print when it fired and what it delivered. Run it once and
+put the two numbers in the return; it is not a test.
+
+Visual: `default` seed 1 at 8 px/voxel after settle into the scratch
+directory under `terrain-slice3w/`.
+
+Return (≤30 lines): commits, the four cycle numbers, settle results per
+preset, the study's two numbers, PNG path.
