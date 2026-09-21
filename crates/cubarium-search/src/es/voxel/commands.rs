@@ -693,9 +693,22 @@ pub fn evaluate(
     // The start geometry beside each row: fixture-side, recomputed after the episode,
     // so a reader can see what separates the layouts a policy fed on from the rest
     // (P2-D step 3). Nothing here was ever in an observation.
+    // The browser's own column: bites taken off a crown one voxel above its head, the
+    // food only the vertical mouth reach can get at. Fixture-side, never in the score.
+    let lifted = founder == Founder::Browser;
     println!(
-        "{:<8} {:>7} {:>6} {:>10} {:>10} {:>8} {:>9} {:>6} {:>8} {:>5}",
-        "case", "ticks", "alive", "intake", "motor", "survive", "score", "dist", "turn", "ate"
+        "{:<8} {:>7} {:>6} {:>10} {:>10} {:>8} {:>9} {:>6} {:>8} {:>5}{}",
+        "case",
+        "ticks",
+        "alive",
+        "intake",
+        "motor",
+        "survive",
+        "score",
+        "dist",
+        "turn",
+        "ate",
+        if lifted { "    h+1" } else { "" }
     );
     let mut rows = Vec::new();
     let mut geometry = Vec::new();
@@ -703,7 +716,7 @@ pub fn evaluate(
         let e = slots[li].as_ref().expect("checked complete");
         let g = prepared.start_geometry();
         println!(
-            "{:<8} {:>7} {:>6} {:>10.4} {:>10.4} {:>8.3} {:>9.4} {:>6} {:>8} {:>5}",
+            "{:<8} {:>7} {:>6} {:>10.4} {:>10.4} {:>8.3} {:>9.4} {:>6} {:>8} {:>5}{}",
             label,
             e.ticks,
             e.alive,
@@ -717,6 +730,11 @@ pub fn evaluate(
                 g.turn_to_target_rad.to_degrees()
             )),
             if e.eaten_organic > 0.0 { "yes" } else { "no" },
+            if lifted {
+                format!("{:>7}", e.head_plus_one_bites)
+            } else {
+                String::new()
+            },
         );
         rows.push(e.clone());
         geometry.push(g);
@@ -740,6 +758,17 @@ pub fn evaluate(
         rows.len(),
         rows.len()
     );
+
+    if lifted {
+        let bites: u64 = rows.iter().map(|e| e.head_plus_one_bites).sum();
+        let taken: f64 = rows.iter().map(|e| e.head_plus_one_taken).sum();
+        let layouts = rows.iter().filter(|e| e.head_plus_one_bites > 0).count();
+        println!(
+            "crowns one voxel above the head: {bites} bites on {layouts}/{} layouts, \
+             {taken:.5} organic",
+            rows.len()
+        );
+    }
 
     if founder == Founder::Blind && stage == Stage::B {
         let mut bins = [(0usize, 0usize); 4];

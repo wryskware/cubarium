@@ -297,6 +297,15 @@ pub struct Episode {
     /// Stage B's patch accounting; `None` on a Stage-A layout.
     #[serde(default)]
     pub reacquisition: Option<Reacquisition>,
+    /// **Browser only**: how many controller intervals took foliage off a stand whose
+    /// crown sits one voxel above the body's head layer — the crowns only the vertical
+    /// mouth reach can get at (`design/handoffs/voxel-browser-reach-2026-09-21.md`).
+    /// Zero for the blind founder, which has no crowns and no lift.
+    #[serde(default)]
+    pub head_plus_one_bites: u64,
+    /// The organic those intervals took, for the same stands.
+    #[serde(default)]
+    pub head_plus_one_taken: f64,
 }
 
 impl Episode {
@@ -366,6 +375,34 @@ fn episode_from(
     };
     let cadence = manifest.cadence_ticks().max(1);
 
+    // Which of this layout's stands the browser can only reach by lifting its head: a
+    // crown exactly one voxel above the body's head layer. Read from the fixture before
+    // the arena moves into the sim, and read-only — it names sites for a counter and
+    // never enters an observation, an action or the score. The arena's ground is one flat
+    // soil layer, so the body's standing height is the stands' support face throughout.
+    let elevated: Vec<Site> = if founder == Founder::Browser {
+        let standing_y = arena
+            .fauna
+            .view()
+            .animal(id)
+            .map_or(cubarium_voxel_sim::GROUND_Y, |a| a.site.y);
+        let fv = arena.flora.view();
+        arena
+            .resources
+            .iter()
+            .copied()
+            .filter(|&site| {
+                fv.stand_at(site).is_some_and(|stand| {
+                    i64::from(stand.site.y)
+                        + i64::from(fv.config.species(stand.species).crown_voxels(stand.wood))
+                        == i64::from(standing_y) + 2
+                })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     // One simulation thread per episode: the fauna leg stays off the process-wide pool.
     let mut sim = arena.into_sim_prepared(SimConfig { threads: 1 }, prepared.episode_senses());
 
@@ -407,6 +444,8 @@ fn episode_from(
         pose_z: start.pose.z,
         heading_rad: start.pose.heading_rad,
         reacquisition: None,
+        head_plus_one_bites: 0,
+        head_plus_one_taken: 0.0,
     };
 
     // Stage B's evaluator-side accounting. The two sites are the fixture's, read here
@@ -456,6 +495,7 @@ fn episode_from(
             ledger.eaten_organic_in,
         )
     };
+    let mut elevated_stock: Vec<f64> = elevated.iter().map(|&s| patch_stock(&sim, s)).collect();
     let mut forward_sum = 0.0f64;
     let mut turn_abs_sum = 0.0f64;
     let mut feed_sum = 0.0f64;
@@ -481,6 +521,20 @@ fn episode_from(
 
         sim.step();
         episode.ticks = tick + 1;
+
+        // The lifted-crown counter, at the controller's own cadence: a stand that lost
+        // stock over one interval was bitten in it. Polled at the cadence rather than
+        // every tick because a bite is one withdrawal per controller period.
+        if !elevated.is_empty() && episode.ticks.is_multiple_of(cadence) {
+            for (k, &site) in elevated.iter().enumerate() {
+                let now = patch_stock(&sim, site);
+                if now < elevated_stock[k] {
+                    episode.head_plus_one_bites += 1;
+                    episode.head_plus_one_taken += elevated_stock[k] - now;
+                    elevated_stock[k] = now;
+                }
+            }
+        }
 
         if let Some((initial, successor, r)) = patches.as_mut() {
             let now_initial = patch_stock(&sim, *initial);
@@ -519,6 +573,17 @@ fn episode_from(
                 episode.alive = false;
                 break;
             }
+        }
+    }
+
+    // The last partial interval, so a bite taken after the final cadence poll still
+    // counts.
+    for (k, &site) in elevated.iter().enumerate() {
+        let now = patch_stock(&sim, site);
+        if now < elevated_stock[k] {
+            episode.head_plus_one_bites += 1;
+            episode.head_plus_one_taken += elevated_stock[k] - now;
+            elevated_stock[k] = now;
         }
     }
 
@@ -608,6 +673,42 @@ mod tests {
             crate::es::tensor::initial_center_shape::<37, 3>(5)
         };
         EpisodeDriver::gru(&theta, founder).expect("a valid centre")
+    }
+
+    /// The lifted-crown counter is a **subset** of what the mouth actually took, and it
+    /// exists only for the founder that can lift its head.
+    ///
+    /// The browser heuristic is put on a Stage-A layout whose six tiles include two
+    /// crowns one voxel above its head: whatever it takes from those stands is organic
+    /// the rule added, so the counter can never exceed the episode's own gross eaten
+    /// organic, and a bite counted must have moved stock. The blind founder has no
+    /// crowns, so its counter is zero by construction.
+    #[test]
+    fn the_lifted_crown_counter_is_part_of_what_the_mouth_took() {
+        let cancel = AtomicBool::new(false);
+        let limits = Limits::new(&cancel);
+        for seed in TRAINING_LAYOUT_SEEDS.into_iter().take(4) {
+            let prepared = Prepared::build_stage(Founder::Browser, seed, Stage::A);
+            let teacher = EpisodeDriver::control(VoxelControl::Heuristic, Founder::Browser);
+            let e = run_prepared(&prepared, &teacher, 200, limits, "lift").expect("ok");
+            assert!(
+                e.head_plus_one_taken <= e.eaten_organic + 1e-12,
+                "seed {seed}: {} lifted of {} eaten",
+                e.head_plus_one_taken,
+                e.eaten_organic
+            );
+            assert_eq!(
+                e.head_plus_one_bites > 0,
+                e.head_plus_one_taken > 0.0,
+                "seed {seed}: a counted bite must have moved stock"
+            );
+
+            let blind = Prepared::build_stage(Founder::Blind, seed, Stage::A);
+            let feeder = EpisodeDriver::control(VoxelControl::Heuristic, Founder::Blind);
+            let b = run_prepared(&blind, &feeder, 200, limits, "flat").expect("ok");
+            assert_eq!(b.head_plus_one_bites, 0, "the blind mouth never lifts");
+            assert_eq!(b.head_plus_one_taken, 0.0);
+        }
     }
 
     /// The seam is live: the same driver on the same layout, once with actions attached
