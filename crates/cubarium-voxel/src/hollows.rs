@@ -90,6 +90,7 @@ pub fn carve(volume: &mut Volume, field: &Heightfield, r: &Recipe, seed: u64) ->
     let candidates = gallery_candidates(volume, field, &h, seed);
     let bodies = components(&volume.config, &candidates);
     connect_or_fill(volume, &h);
+    seal_unreadable_shafts(volume);
     let kept = bodies
         .iter()
         .filter(|body| body.iter().any(|&i| !volume.material[i].is_solid()))
@@ -152,6 +153,47 @@ pub fn connect_or_fill(volume: &mut Volume, h: &Hollows) -> (usize, usize) {
         }
     }
     (kept, dropped)
+}
+
+/// Fill in every shaft that broke the surface and left the ring unreadable.
+///
+/// [`skyline_survives`] checks a cut the moment it is made, and that is not enough on its
+/// own: a shaft that looked safe while a neighbouring gallery was still open stops being
+/// safe when that gallery is filled back in and its column's skyline goes back up. So
+/// the landform rule is asked once more at the end, of every column a cut broke through,
+/// and a shaft that now hides the terrain behind it is closed. Closing one raises a
+/// skyline, which can condemn another, so this goes round until nothing changes.
+fn seal_unreadable_shafts(volume: &mut Volume) -> usize {
+    let c = volume.config.clone();
+    let (w, d) = (c.width as usize, c.depth as usize);
+    let mut sealed = 0;
+    for _ in 0..4 {
+        let mut closing = Vec::new();
+        for z in 0..d {
+            for x in 0..w {
+                let terrain = volume.surface[z * w + x];
+                let Some(top) = skyline(&c, &volume.material, x as i64, z as u32) else {
+                    continue;
+                };
+                if (top as i32) >= terrain {
+                    continue;
+                }
+                if !visible_in(&c, &volume.material, x as i64, top, z as u32) {
+                    closing.push((x, z, top, terrain));
+                }
+            }
+        }
+        if closing.is_empty() {
+            break;
+        }
+        for (x, z, top, terrain) in closing {
+            for y in top + 1..=terrain.max(0) as u32 {
+                volume.material[c.index(x as i64, y, z as u32)] = Material::Rock;
+            }
+            sealed += 1;
+        }
+    }
+    sealed
 }
 
 /// Mark the void an opening just joined to the sky, so the bodies after it in the same
@@ -483,7 +525,17 @@ fn notch_banks(volume: &mut Volume, field: &Heightfield, h: &Hollows, seed: u64)
                 continue;
             }
             let void_lo = band_top - void_cells + 1;
-            if void_lo <= 1 || volume.surface[nb] >= void_lo {
+            // The mouth is a hole in rock, so what has to be out of the way is the
+            // neighbour's *rock*, not the talus lying against it: a grotto with a metre
+            // of loose sediment across its threshold is a grotto with a sill, and the
+            // sediment is the first thing the next shower moves.
+            let (nx, nz) = ((x as i64 + dx).rem_euclid(w as i64), (z as i64 + dz) as u32);
+            let mut outside = volume.surface[nb];
+            while outside > 0 && volume.material[c.index(nx, outside as u32, nz)] == Material::Soil
+            {
+                outside -= 1;
+            }
+            if void_lo <= 1 || outside >= void_lo {
                 continue;
             }
 

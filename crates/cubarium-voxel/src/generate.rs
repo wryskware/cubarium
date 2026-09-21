@@ -437,6 +437,26 @@ pub fn heightfield(c: &Config, r: &Recipe) -> Heightfield {
         }
     }
 
+    // ---- structural benches ----
+    // Where a hard stratum outcrops in a rocky region the bedrock surface sits on the
+    // top of the band instead of on the smooth relief, and the ground steps down a whole
+    // band to the next one. This is where the cliffs come from; slice 2c established
+    // that they do not come from the solver. Before the tilt, so the camera's climb is
+    // still guaranteed afterwards; before erosion, so the mantle and the exposure it
+    // makes follow the benched shape rather than a shape nothing else knows about.
+    let mantle = r.mantle_m.max(0.0);
+    if r.benches.strength > 0.0 {
+        for z in 0..d {
+            let z_m = (z as f64 + 0.5) * vm;
+            for x in 0..w {
+                let i = z * w + x;
+                let x_m = (x as f64 + 0.5) * vm;
+                let bedrock = elevation[i] - mantle;
+                elevation[i] = r.benched_m(x_m, z_m, bedrock, circumference_m, c.seed) + mantle;
+            }
+        }
+    }
+
     // The camera's climb, guaranteed per column. A linear tilt, so whatever the relief
     // did between front and back survives it; only the two ends are what the landform
     // rule and a readable diorama need.
@@ -452,7 +472,6 @@ pub fn heightfield(c: &Config, r: &Recipe) -> Heightfield {
         }
     }
 
-    let mantle = r.mantle_m.max(0.0);
     let mut field = Heightfield {
         width: w,
         depth: d,
@@ -578,9 +597,20 @@ pub fn prepare(volume: &mut Volume, field: &mut Heightfield, r: &Recipe) -> usiz
                 continue;
             }
             moved += 1;
+            // What was carved out of this column, so the rebuild below does not fill a
+            // grotto back in -- and, with it, raise the column's top back over something
+            // behind it that this very pass just decided it was hiding.
+            let void: Vec<u32> = (0..wanted[i].max(0) as u32)
+                .filter(|&y| {
+                    !volume.material[volume.config.index(x as i64, y, z as u32)].is_solid()
+                })
+                .collect();
             field.bedrock_m[i] -= (volume.surface[i] - wanted[i]) as f64 * vm;
             field.spill_m[i] = field.surface_m(i);
             voxelise_column(volume, r, field, x, z, h);
+            for y in void {
+                volume.material[volume.config.index(x as i64, y, z as u32)] = Material::Air;
+            }
         }
     }
     debug_assert!(
@@ -839,6 +869,32 @@ mod tests {
                     panic!("a preset is staged");
                 };
                 let (_, volume, report) = staged_terrain(&config, &recipe);
+                let (w, d) = (config.width as usize, config.depth as usize);
+                // The benched ground steps, and the undercut pass finds the steps. Not
+                // asked of `small`: a 1.6 m band at a 0.6 pull is a face 7.7 voxels tall
+                // and a notch there needs 9, so its ledges are ledges without grottos.
+                if p.name != "small" {
+                    let steps = (0..d)
+                        .flat_map(|z| (0..w).map(move |x| (x, z)))
+                        .filter(|&(x, z)| {
+                            let here = volume.surface[z * w + x];
+                            (here - volume.surface[z * w + (x + 1) % w]).abs() >= 3
+                                || (z + 1 < d
+                                    && (here - volume.surface[(z + 1) * w + x]).abs() >= 3)
+                        })
+                        .count();
+                    assert!(
+                        steps > 0,
+                        "{} seed {seed}: the benches made no three-voxel step anywhere",
+                        p.name
+                    );
+                    assert!(
+                        report.carved.undercuts > 0,
+                        "{} seed {seed}: {steps} steps and not one of them was notched",
+                        p.name
+                    );
+                }
+
                 let columns = (config.width * config.depth) as f64;
                 let share = report.lowered as f64 / columns;
                 assert!(
@@ -1057,7 +1113,13 @@ mod tests {
     /// is far too few for one realisation's sample spread to mean anything.
     #[test]
     fn a_wider_ring_holds_more_of_the_same_landforms() {
-        let base = Preset::find("default").unwrap().config();
+        let mut base = Preset::find("default").unwrap().config();
+        // Benches off, as in the test below and for the same reason: snapping the
+        // ground onto band tops quantises the height distribution, and two rings of
+        // different length land on that quantisation differently.
+        if let Landform::Staged(r) = &mut base.landform {
+            r.benches = crate::Benches::NONE;
+        }
         let sweep = |width: u32| -> Vec<Vec<f64>> {
             let mut rows = Vec::new();
             for seed in SEEDS {
@@ -1120,10 +1182,12 @@ mod tests {
         let Landform::Staged(mut recipe) = base.landform.clone() else {
             panic!("a preset is staged");
         };
-        // Hollows off for this one. A skylight is a hole punched through the terrain
-        // wherever a gallery happened to land, and where it lands is the noise's
-        // business, not the recipe's claim about feature size.
+        // Hollows and benches off for this one. Both put a discontinuity into the
+        // ground -- a skylight punched wherever a gallery landed, a face wherever the
+        // relief crossed a band -- and which side of a discontinuity a sample falls on
+        // is a question about sampling, not about how big the recipe's landforms are.
         recipe.hollows = crate::Hollows::NONE;
+        recipe.benches = crate::Benches::NONE;
         let base = Config {
             landform: Landform::Staged(recipe),
             ..base

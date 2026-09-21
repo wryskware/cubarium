@@ -704,6 +704,59 @@ mod tests {
         }
     }
 
+    /// Repose moves loose sediment and nothing else, so a bench face stands.
+    ///
+    /// Six voxels of bedrock step under a one-voxel veneer: afterwards the bedrock step
+    /// is exactly where it was, and the veneer has run off the top of the face and
+    /// piled at its foot. A relaxation that worked on the ground surface instead would
+    /// grade the whole thing away, and there would be no cliffs anywhere.
+    #[test]
+    fn repose_moves_the_veneer_and_leaves_the_bedrock_face_standing() {
+        let (w, d, cell) = (16usize, 4usize, 0.25);
+        let step = 6.0 * cell;
+        let mut f = field(
+            w,
+            d,
+            cell,
+            cell,
+            |x, _| {
+                if x < 8 { 3.0 + step } else { 3.0 }
+            },
+        );
+        let before = f.clone();
+        let e = Erosion {
+            rain: 0.0,
+            repose_sweeps: 4,
+            ..budget()
+        };
+        erode(&mut f, &e, 0.45, constant_hardness(0.5));
+
+        for i in 0..f.samples() {
+            assert_eq!(
+                f.bedrock_m[i].to_bits(),
+                before.bedrock_m[i].to_bits(),
+                "the bedrock moved at {i}"
+            );
+        }
+        let top = f.sediment_m[7];
+        let foot = f.sediment_m[8];
+        assert!(
+            top < before.sediment_m[7],
+            "the veneer stayed on the lip: {top:.3} m"
+        );
+        assert!(
+            foot > before.sediment_m[8],
+            "nothing reached the foot of the face: {foot:.3} m"
+        );
+        // The face loses the veneer off its lip and the veneer piled at its foot, and
+        // nothing else: two voxels out of six, not six out of six.
+        let face = f.surface_m(7) - f.surface_m(8);
+        assert!(
+            face >= step - 2.0 * cell,
+            "the face fell to {face:.3} m from {step:.3} m of bedrock"
+        );
+    }
+
     /// Zero iterations changes nothing, and the same input twice gives the same output.
     #[test]
     fn no_iterations_is_the_identity_and_the_solver_is_deterministic() {

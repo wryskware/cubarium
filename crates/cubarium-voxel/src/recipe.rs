@@ -154,6 +154,111 @@ impl Erosion {
     };
 }
 
+/// Structural benches: where a hard stratum outcrops in a rocky region, the bedrock
+/// surface follows the top of the band instead of the smooth relief.
+///
+/// Cliffs come from geology, not from the solver. Slice 2c measured what an erosion
+/// model can do here — 0.34 m of incision over a whole ring in a hundred iterations, and
+/// a surface step the angle of repose caps at less than a voxel — and the answer was
+/// nothing. A stratum that outcrops is a ledge because it is harder than what is under
+/// it, not because water wore a step into it, and that is a fact about the rock the
+/// generator already has.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Benches {
+    /// How far the bedrock surface is pulled onto the band top under it, `0..=1`,
+    /// weighted by the rocky mask. `0` is the smooth relief slice 1 made; `1` makes the
+    /// rocky ground a staircase of band tops, with faces one [`Recipe::strata_m`] tall.
+    pub strength: f64,
+    /// How much of the rocky mask's own edge is given over to ramping the pull in,
+    /// metres. A bench has to end in a ramp, not in a wall dropped across the strip;
+    /// this is what keeps the ring walkable where a rocky region stops.
+    pub ramp_m: f64,
+}
+
+impl Default for Benches {
+    fn default() -> Benches {
+        Benches::NONE
+    }
+}
+
+impl Benches {
+    /// No benching: the smooth relief.
+    pub const NONE: Benches = Benches {
+        strength: 0.0,
+        ramp_m: 2.0,
+    };
+
+    /// `default` and `wide`. Full strength: a stratum that outcrops is a ledge, not a
+    /// suggestion of one, and a partial pull leaves a face too shallow for the undercut
+    /// pass to find. How *many* benches a ring gets is not this — it is how often the
+    /// relief crosses a band inside a rocky region, which is a handful.
+    pub const ON: Benches = Benches {
+        strength: 1.0,
+        ramp_m: 2.0,
+    };
+
+    /// `small` has half the vertical room and a 1.6 m band in it, so a full pull would
+    /// put a quarter of its height into one face. Gentler.
+    pub const SMALL: Benches = Benches {
+        strength: 0.6,
+        ramp_m: 1.2,
+    };
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        for (name, v) in [("strength", self.strength), ("ramp_m", self.ramp_m)] {
+            anyhow::ensure!(
+                v.is_finite() && v >= 0.0,
+                "benches.{name} must be finite and not negative, not {v}"
+            );
+        }
+        Ok(())
+    }
+}
+
+/// The rock banding of one column: everything about the hardness field that does not
+/// depend on height, so a scan up and down a column evaluates the noise once.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Strata {
+    warp_m: f64,
+    region: f64,
+    soft: f64,
+    span: f64,
+    strata_m: f64,
+    core_m: f64,
+}
+
+impl Strata {
+    /// Hardness at a height in this column, `0..=1`.
+    pub fn hardness(&self, y_m: f64) -> f64 {
+        let band = 0.5 - 0.5 * (TAU * (y_m + self.warp_m) / self.strata_m).cos();
+        let layered = self.soft + self.span * (0.72 * band + 0.28 * self.region);
+        let core = 1.0 - smoothstep(self.core_m, self.core_m + 0.5, y_m);
+        layered.max(core).clamp(0.0, 1.0)
+    }
+
+    /// Top of the highest hard band at or below `y_m`, or `None` where the column has no
+    /// hard bands at all — all of it hard, or none of it.
+    ///
+    /// Solved rather than searched. The banding is one cosine in height and everything
+    /// else in the column is constant, so the band edges are an arc-cosine away.
+    pub fn hard_band_top_m(&self, y_m: f64, threshold: f64) -> Option<f64> {
+        if self.span.is_nan() || self.span <= 0.0 {
+            return None;
+        }
+        // Hard is `band >= t`, with the region's share already taken out.
+        let t = ((threshold - self.soft) / self.span - 0.28 * self.region) / 0.72;
+        if !(0.0..1.0).contains(&t) {
+            return None;
+        }
+        let half = (1.0 - 2.0 * t).clamp(-1.0, 1.0).acos() / TAU;
+        let top_phase = 1.0 - half;
+        let phase = (y_m + self.warp_m) / self.strata_m;
+        let k = (phase - top_phase).floor();
+        Some(self.strata_m * (k + top_phase) - self.warp_m)
+    }
+}
+
 /// Carved hollows: undercuts and grottos, galleries with mouths and skylights, and the
 /// shelves that fall out of both (`design/caves-and-hollows-plan-2026-09-21.md`).
 ///
@@ -183,6 +288,12 @@ pub struct Hollows {
     /// How far back into the bank the soft band is notched, metres.
     pub undercut_depth_m: f64,
     /// Share of eligible banks that are notched, `0..=1`. Zero carves none.
+    ///
+    /// High, because the geology is now what limits this: a bank has to carry a hard cap
+    /// over a soft band thick enough for a body, with rock cut below the notch floor
+    /// beside it, and a ring offers a dozen or so places like that. The patch field
+    /// below is there to keep a long bank from becoming one continuous slot, not to be
+    /// the thing that decides how many grottos there are.
     pub undercut_density: f64,
     /// Size of the patches the undercuts come in, metres. Without it every eligible
     /// column of a long bank is notched and the result is a slot, not a few grottos.
@@ -231,7 +342,7 @@ impl Hollows {
         undercut_depth_m: 0.75,
         undercut_density: 0.0,
         grotto_wavelength_m: 6.0,
-        front_bias: 0.75,
+        front_bias: 0.5,
         gallery_density: 0.0,
         gallery_wavelength_m: 3.0,
         gallery_flatten: 0.3,
@@ -243,7 +354,7 @@ impl Hollows {
 
     /// A handful of grottos on the `default` and `wide` rings.
     pub const GROTTOS: Hollows = Hollows {
-        undercut_density: 0.30,
+        undercut_density: 0.70,
         gallery_density: 0.28,
         ..Hollows::NONE
     };
@@ -381,7 +492,9 @@ pub struct Recipe {
 
     /// The erosion budget.
     pub erosion: Erosion,
-    /// Carved hollows. Empty until slice 2b.
+    /// Structural benches: the ledges a hard stratum makes where it outcrops.
+    pub benches: Benches,
+    /// Carved hollows.
     pub hollows: Hollows,
 
     /// The per-pass seed streams.
@@ -426,6 +539,7 @@ impl Recipe {
         core_m: 2.0,
         pockets: 3,
         erosion: Erosion::DEFAULT,
+        benches: Benches::ON,
         hollows: Hollows::GROTTOS,
         streams: Streams {
             relief: 0x_5354_4147_5F52_454C,
@@ -460,6 +574,7 @@ impl Recipe {
         hardness_region_m: 11.0,
         core_m: 1.0,
         erosion: Erosion::SMALL,
+        benches: Benches::SMALL,
         hollows: Hollows::SMALL,
         ..Recipe::DEFAULT
     };
@@ -524,6 +639,7 @@ impl Recipe {
                 "{name} must be finite and not negative, not {v}"
             );
         }
+        self.benches.validate()?;
         self.hollows.validate()?;
         anyhow::ensure!(
             self.lacunarity.is_finite() && self.lacunarity > 1.0,
@@ -600,10 +716,7 @@ impl Recipe {
             );
 
         // The rocky regions: a slow field, thresholded softly so ridges fade in.
-        let rocky_cells = ring_cells(circumference_m, self.rocky_wavelength_m);
-        let mask_at = ring_noise(x_m, zs, circumference_m, rocky_cells, seed ^ s.rocky);
-        let lo = 1.0 - 2.0 * self.rocky_fraction.clamp(0.0, 1.0);
-        let mask = smoothstep(lo, lo + 0.5, mask_at);
+        let mask = self.rocky_mask_at(x_m, z_m, circumference_m, seed);
         if mask <= 0.0 {
             return broad;
         }
@@ -652,14 +765,16 @@ impl Recipe {
         circumference_m: f64,
         seed: u64,
     ) -> f64 {
-        let x_m = if circumference_m > 0.0 {
-            x_m.rem_euclid(circumference_m)
-        } else {
-            x_m
-        };
+        self.strata_at(x_m, z_m, circumference_m, seed)
+            .hardness(y_m)
+    }
+
+    /// The rock banding of one column, evaluated once for a whole scan up or down it.
+    pub fn strata_at(&self, x_m: f64, z_m: f64, circumference_m: f64, seed: u64) -> Strata {
+        let x_m = self.on_the_ring(x_m, circumference_m);
         let zs = z_m * self.depth_scale;
         let s = self.streams;
-        let warp = self.strata_warp_m
+        let warp_m = self.strata_warp_m
             * ring_noise(
                 x_m,
                 zs,
@@ -667,8 +782,7 @@ impl Recipe {
                 ring_cells(circumference_m, self.warp_wavelength_m),
                 seed ^ s.hardness,
             );
-        let band = 0.5 - 0.5 * (TAU * (y_m + warp) / self.strata_m.max(1e-9)).cos();
-        let region = 0.5
+        let region = (0.5
             + 0.5
                 * ring_noise(
                     x_m,
@@ -676,11 +790,79 @@ impl Recipe {
                     circumference_m,
                     ring_cells(circumference_m, self.hardness_region_m),
                     seed ^ s.hardness.rotate_left(13),
-                );
-        let mixed = 0.72 * band + 0.28 * region.clamp(0.0, 1.0);
-        let layered = self.hardness_soft + (self.hardness_hard - self.hardness_soft) * mixed;
-        let core = 1.0 - smoothstep(self.core_m, self.core_m + 0.5, y_m);
-        layered.max(core).clamp(0.0, 1.0)
+                ))
+        .clamp(0.0, 1.0);
+        Strata {
+            warp_m,
+            region,
+            soft: self.hardness_soft,
+            span: self.hardness_hard - self.hardness_soft,
+            strata_m: self.strata_m.max(1e-9),
+            core_m: self.core_m,
+        }
+    }
+
+    /// How rocky this point of the ring is, `0..=1`: the field the ridged noise and the
+    /// benches are both weighted by.
+    pub fn rocky_mask_at(&self, x_m: f64, z_m: f64, circumference_m: f64, seed: u64) -> f64 {
+        let x_m = self.on_the_ring(x_m, circumference_m);
+        let zs = z_m * self.depth_scale;
+        let at = ring_noise(
+            x_m,
+            zs,
+            circumference_m,
+            ring_cells(circumference_m, self.rocky_wavelength_m),
+            seed ^ self.streams.rocky,
+        );
+        let lo = 1.0 - 2.0 * self.rocky_fraction.clamp(0.0, 1.0);
+        smoothstep(lo, lo + 0.5, at)
+    }
+
+    /// Where the bench pull puts the bedrock surface: on the top of the hard band under
+    /// it, as far as [`Benches::strength`] and the rocky mask ask for.
+    ///
+    /// The pull is downward, onto the band top **at or below** the smooth surface, which
+    /// is what makes the face point at the camera: the ground falls toward the front, so
+    /// the step down onto the next band top falls that way too, and the flat of a bench
+    /// is its band's own top. Soft ground, and the mask's own edge, are left alone, so a
+    /// bench ramps out instead of ending in a wall.
+    pub fn benched_m(
+        &self,
+        x_m: f64,
+        z_m: f64,
+        raw_m: f64,
+        circumference_m: f64,
+        seed: u64,
+    ) -> f64 {
+        let b = self.benches;
+        if b.strength <= 0.0 {
+            return raw_m;
+        }
+        let mask = self.rocky_mask_at(x_m, z_m, circumference_m, seed);
+        // `ramp_m` is a length; the mask is a field with a wavelength. A quarter of that
+        // wavelength is about the distance its smoothstep takes to rise, so this is the
+        // share of the rise given over to the ramp.
+        let edge = (4.0 * b.ramp_m / self.rocky_wavelength_m.max(1e-9)).clamp(0.05, 1.0);
+        let pull = b.strength.clamp(0.0, 1.0) * smoothstep(0.0, edge, mask);
+        if pull <= 0.0 {
+            return raw_m;
+        }
+        match self
+            .strata_at(x_m, z_m, circumference_m, seed)
+            .hard_band_top_m(raw_m, self.bedrock_hardness)
+        {
+            Some(top) => raw_m + (top - raw_m) * pull,
+            None => raw_m,
+        }
+    }
+
+    /// The ring's canonical representative of a metre coordinate.
+    fn on_the_ring(&self, x_m: f64, circumference_m: f64) -> f64 {
+        if circumference_m > 0.0 {
+            x_m.rem_euclid(circumference_m)
+        } else {
+            x_m
+        }
     }
 }
 
@@ -797,6 +979,110 @@ mod tests {
                 p.name
             );
         }
+    }
+
+    /// A recipe whose rocky mask is everywhere or nowhere, so a bench test can choose
+    /// which side of it to stand on.
+    fn benched_recipe(rocky: bool, strength: f64) -> Recipe {
+        Recipe {
+            rocky_fraction: if rocky { 1.0 } else { 0.0 },
+            benches: Benches {
+                strength,
+                ramp_m: 0.01,
+            },
+            ..Recipe::DEFAULT
+        }
+    }
+
+    /// A ramp of relief across one band thickness comes out of the bench pull as two
+    /// flats on two band tops with one face between them; the same ramp in soft ground
+    /// comes out as it went in.
+    #[test]
+    fn a_ramp_across_a_band_becomes_two_benches_and_a_face() {
+        let (circ, seed) = (32.0, 5u64);
+        let rocky = benched_recipe(true, 1.0);
+        let strata = rocky.strata_at(4.0, 1.5, circ, seed);
+        // Stand on a band top and walk down one whole band thickness.
+        let top = strata
+            .hard_band_top_m(6.0, rocky.bedrock_hardness)
+            .expect("this column has hard bands");
+        // Half open at the bottom: the sample exactly one band down stands on the next
+        // band top, and that is a third flat, not a second face.
+        let samples: Vec<f64> = (0..40)
+            .map(|i| top - rocky.strata_m * i as f64 / 40.0)
+            .collect();
+
+        let benched: Vec<f64> = samples
+            .iter()
+            .map(|&raw| rocky.benched_m(4.0, 1.5, raw, circ, seed))
+            .collect();
+        let mut flats: Vec<f64> = benched.clone();
+        flats.sort_by(f64::total_cmp);
+        flats.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+        assert_eq!(flats.len(), 2, "two band tops, not {flats:?}");
+        let face = flats[1] - flats[0];
+        assert!(
+            face >= rocky.strata_m * 0.98,
+            "the face is {face:.3} m, less than the {:.3} m band it should be",
+            rocky.strata_m
+        );
+        assert!(
+            benched
+                .iter()
+                .all(|b| flats.iter().any(|f| (f - b).abs() < 1e-9)),
+            "the bench is flat between its faces"
+        );
+
+        let soft = benched_recipe(false, 1.0);
+        for &raw in &samples {
+            let out = soft.benched_m(4.0, 1.5, raw, circ, seed);
+            assert!(
+                (out - raw).abs() < 1e-12,
+                "soft ground was benched: {raw:.3} -> {out:.3}"
+            );
+        }
+    }
+
+    /// A bench ends in a ramp, not in a wall.
+    ///
+    /// Out at the edge of a rocky region the pull has already faded to less than a
+    /// voxel, so the benched ground meets the smooth ground there without a step — while
+    /// inside the region the same recipe is stepping by whole bands. A hard switch at
+    /// the mask's threshold would pass the second of those and fail the first.
+    #[test]
+    fn a_bench_ramps_out_where_the_rocky_mask_does() {
+        let p = Preset::find("default").unwrap();
+        let (r, circ, vm) = (p.recipe, p.circumference_m(), p.voxel_m);
+        let edge = (4.0 * r.benches.ramp_m / r.rocky_wavelength_m).clamp(0.05, 1.0);
+        let mut biggest_inside = 0.0f64;
+        for seed in [1u64, 7, 77] {
+            for z in [0usize, 11, 23] {
+                let z_m = (z as f64 + 0.5) * vm;
+                for x in 0..p.width as usize {
+                    let x_m = (x as f64 + 0.5) * vm;
+                    // A raw surface that does not itself step, so what is measured is
+                    // the pull and nothing else.
+                    let raw = 5.0 + 0.4 * (x as f64 * 0.11).sin();
+                    let pull = (r.benched_m(x_m, z_m, raw, circ, seed) - raw).abs();
+                    let mask = r.rocky_mask_at(x_m, z_m, circ, seed);
+                    if mask <= edge * 0.2 {
+                        assert!(
+                            pull <= vm,
+                            "seed {seed} z {z} x {x}: {pull:.3} m of bench at the mask's \
+                             edge, more than one {vm:.3} m voxel"
+                        );
+                    }
+                    if mask >= 0.9 {
+                        biggest_inside = biggest_inside.max(pull);
+                    }
+                }
+            }
+        }
+        assert!(
+            biggest_inside >= r.strata_m * 0.5,
+            "nothing is being benched anywhere: the biggest pull inside a rocky region \
+             is {biggest_inside:.3} m"
+        );
     }
 
     /// A staged config survives a snapshot round trip: postcard is not self-describing,

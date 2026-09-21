@@ -53,7 +53,7 @@ pub use generate::{Budget, Heightfield, Volume};
 pub use hollows::Hollow;
 pub use ledger::Ledger;
 pub use material::Material;
-pub use recipe::{Erosion, Hollows, Landform, PRESETS, Preset, Recipe, Streams};
+pub use recipe::{Benches, Erosion, Hollows, Landform, PRESETS, Preset, Recipe, Strata, Streams};
 pub use viability::{BandResult, PoreBand, Viability, ViabilitySpec};
 pub use world::{Command, VoxelView, World, default_threads};
 
