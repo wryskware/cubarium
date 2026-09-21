@@ -8,10 +8,13 @@ use crate::World;
 
 /// Bumped to 2 for the plant boundary (`Ledger::transpiration_out`,
 /// `World::terrain_version`) and to 3 for the water table
-/// (`Config::initial_aquifer_head_m`, which sits inside the serialized world). Postcard
+/// (`Config::initial_aquifer_head_m`, which sits inside the serialized world), and to 4
+/// for the closed water budget (`World::atmosphere_m3`, `World::shower_left_m3`, the four
+/// new `Ledger` terms and its shower count, and the `Config` switch with its two shower
+/// knobs). Postcard
 /// is not self-describing, so a new field is a new format: earlier tags are refused,
 /// never migrated.
-pub const SCHEMA: u32 = 3;
+pub const SCHEMA: u32 = 4;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

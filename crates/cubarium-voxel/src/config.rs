@@ -50,6 +50,31 @@ pub struct Config {
     pub initial_aquifer_head_m: f64,
     /// Free water an open outlet exports, cubic metres per second.
     pub outlet_m3_per_s: f64,
+    /// Whether the world runs a **closed** water budget: evaporation, transpiration and
+    /// the outlet's export are deposited into [`crate::World::atmosphere_m3`] instead of
+    /// leaving the world, and rain falls only as showers drawn back out of that store.
+    /// Nothing but [`crate::Ledger::displaced_out`] leaves a closed world.
+    ///
+    /// False — the default — is the **open** flow-through budget every world had before:
+    /// prescribed rain every tick from nowhere, evaporation and the outlet to nowhere.
+    /// The flora study harness and every water fixture run on it, unchanged.
+    pub closed_water_budget: bool,
+    /// Water aloft at creation, cubic metres. A closed world with a dry atmosphere and a
+    /// dry outlet cell has nothing to start a shower with; this is the water the cycle
+    /// begins holding. Counted in [`crate::Ledger::initial_atmosphere`], never in
+    /// `initial_stored`. Ignored under the open budget.
+    pub initial_atmosphere_m3: f64,
+    /// Closed budget: the fraction of the world's **total** water the atmosphere store
+    /// must hold before a shower starts. Between showers no rain falls at all.
+    ///
+    /// Not tuned. It is the one knob that decides whether a world cycles or locks dry:
+    /// set it above the share of the world's water the return flows can actually lift,
+    /// and the last shower is the last shower.
+    pub shower_trigger_fraction: f64,
+    /// Closed budget: how much water one shower delivers, cubic metres, falling at
+    /// [`Config::rain_m_per_s`]. The shower ends when this much has fallen, when the
+    /// store empties, or when a brim-full world stops accepting any of it.
+    pub shower_volume_m3: f64,
     /// Largest change in one cell's `free` fraction that a single equalization substep
     /// may apply, so a filling region can be watched travelling. Zero (the default)
     /// disables the cap and a region settles to its level in one substep.
@@ -72,6 +97,10 @@ impl Default for Config {
             aquifer_porosity: 0.35,
             initial_aquifer_head_m: 0.0,
             outlet_m3_per_s: 0.05,
+            closed_water_budget: false,
+            initial_atmosphere_m3: 0.0,
+            shower_trigger_fraction: 0.02,
+            shower_volume_m3: 5.0,
             free_transfer_cap: 0.0,
         }
     }
@@ -119,12 +148,20 @@ impl Config {
             ("outlet_m3_per_s", self.outlet_m3_per_s),
             ("free_transfer_cap", self.free_transfer_cap),
             ("initial_aquifer_head_m", self.initial_aquifer_head_m),
+            ("initial_atmosphere_m3", self.initial_atmosphere_m3),
+            ("shower_trigger_fraction", self.shower_trigger_fraction),
+            ("shower_volume_m3", self.shower_volume_m3),
         ] {
             ensure!(
                 rate.is_finite() && rate >= 0.0,
                 "{name} must be finite and not negative, not {rate}"
             );
         }
+        ensure!(
+            self.shower_trigger_fraction <= 1.0,
+            "shower_trigger_fraction is a fraction of the world's water, not {}",
+            self.shower_trigger_fraction
+        );
         ensure!(
             self.water_substeps >= 1,
             "water_substeps must be at least 1, not 0"

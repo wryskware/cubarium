@@ -272,6 +272,29 @@ fn take_pore(w: &mut World, i: usize, vol: f64) -> f64 {
     (before - w.pore[i]).max(0.0) * unit
 }
 
+/// Hand water a loss phase took out of the in-world stores to wherever this world's
+/// budget sends it, and book the deposit.
+///
+/// Open budget: nowhere — it leaves, exactly as it always did. Closed budget: into the
+/// lumped atmosphere, which is why `evaporation_out`, `transpiration_out` and
+/// `outlet_out` read as flows *into* the store there. The phase books its own `*_out`
+/// term either way, so [`crate::Ledger::expected_stored`] is right under both.
+///
+/// The outlet's export goes here too rather than into a second reserve behind the
+/// spring. Reasons, in order: one store means one threshold, one residual line and one
+/// thing for route C to replace; the spring is already fed by the aquifer, which
+/// infiltration and the water table recharge from above, so a reserve would need its own
+/// recharge rule and its own head; and the outlet is the only path that empties standing
+/// water, so returning it to the sky is what keeps a full basin's water in the cycle
+/// instead of piping it underground where the surface can never see it again.
+fn release(w: &mut World, volume: f64) {
+    if !w.config.closed_water_budget || !(volume > 0.0) {
+        return;
+    }
+    w.atmosphere_m3 += volume;
+    w.ledger.atmosphere_in += volume;
+}
+
 /// Which store a transfer touches at one end.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Store {
@@ -409,7 +432,18 @@ pub fn step(world: &mut World, threads: usize) {
     });
 }
 
+/// The tick's rain. Under the open budget it is the prescribed rate falling on every
+/// sky-exposed column from nowhere; under the closed one it is [`shower`], which falls
+/// only while a shower is running and only out of the atmosphere store.
 pub fn rain(w: &mut World) {
+    if w.config.closed_water_budget {
+        shower(w);
+    } else {
+        prescribed_rain(w);
+    }
+}
+
+fn prescribed_rain(w: &mut World) {
     crate::voxel_phase!(Rain, {
         let per_column = w.config.rain_m_per_s * DT * w.config.cell_area();
         if per_column <= 0.0 {
@@ -444,6 +478,104 @@ pub fn evaporate(w: &mut World) {
             }
         }
         w.ledger.evaporation_out += debited;
+        release(w, debited);
+    });
+}
+
+/// The closed budget's rain: showers drawn out of the lumped atmosphere store.
+///
+/// A shower **starts** when the store holds at least
+/// [`crate::Config::shower_trigger_fraction`] of the world's total water, and is allowed
+/// [`crate::Config::shower_volume_m3`] (or the whole store, if that is less). While it
+/// runs, every tick reserves the volume the rate asks for *before* distributing it —
+/// withdrawn from the store, then spread over the sky-exposed cells, with whatever a full
+/// cell refuses refunded to the store in the same call
+/// (`design/terrain-and-ecosystem-proposal-2026-09-16.md`, "reserve water before
+/// distributing a rain event"). Between showers no rain falls at all.
+///
+/// The allowance is drawn down by what actually **fell**, not by what was reserved, and a
+/// tick that can place nothing at all ends the shower: a brim-full world stops raining
+/// rather than spinning against a closed sky forever.
+///
+/// Spatially uniform, like the prescribed rain it replaces. Choosing *where* a shower
+/// falls is route C's job, not this store's.
+pub fn shower(w: &mut World) {
+    crate::voxel_phase!(Rain, {
+        if w.shower_left_m3 <= 0.0 {
+            let trigger = w.config.shower_trigger_fraction * w.ledger.expected_total();
+            if !(w.atmosphere_m3 >= trigger) || w.atmosphere_m3 <= 0.0 {
+                return;
+            }
+            w.shower_left_m3 = w.config.shower_volume_m3.min(w.atmosphere_m3);
+            w.ledger.showers += 1;
+            if w.shower_left_m3 <= 0.0 {
+                return;
+            }
+        }
+
+        let per_column = w.config.rain_m_per_s * DT * w.config.cell_area();
+        if per_column <= 0.0 {
+            return;
+        }
+        let (width, depth) = (w.config.width as i64, w.config.depth);
+        let mut targets: Vec<usize> = Vec::new();
+        for z in 0..depth {
+            for x in 0..width {
+                if let Some(i) = sky_cell(w, x, z) {
+                    targets.push(i);
+                }
+            }
+        }
+        if targets.is_empty() {
+            // No sky at all: this shower can never fall, so do not hold the store hostage.
+            w.shower_left_m3 = 0.0;
+            return;
+        }
+
+        // Reserve first: the volume leaves the store before a drop of it is placed.
+        let reserved = (per_column * targets.len() as f64)
+            .min(w.shower_left_m3)
+            .min(w.atmosphere_m3);
+        if reserved <= 0.0 {
+            w.shower_left_m3 = 0.0;
+            return;
+        }
+        w.atmosphere_m3 -= reserved;
+        w.ledger.atmosphere_out += reserved;
+
+        let mut left = reserved;
+        let mut credited = 0.0;
+        for _ in 0..4 {
+            let share = left / targets.len() as f64;
+            if share <= 0.0 {
+                break;
+            }
+            let mut taken = 0.0;
+            for &i in &targets {
+                taken += add_free(w, i, share);
+            }
+            credited += taken;
+            left -= taken;
+            if taken <= 0.0 || left <= 1e-15 {
+                break;
+            }
+        }
+        w.ledger.rain_in += credited;
+        // Refund what the world refused, so the reservation never invents or loses water.
+        let refund = reserved - credited;
+        if refund > 0.0 {
+            w.atmosphere_m3 += refund;
+            w.ledger.atmosphere_out -= refund;
+        }
+
+        if credited <= 0.0 {
+            w.shower_left_m3 = 0.0;
+        } else {
+            w.shower_left_m3 = (w.shower_left_m3 - credited).max(0.0);
+        }
+        if w.atmosphere_m3 <= 0.0 {
+            w.shower_left_m3 = 0.0;
+        }
     });
 }
 
@@ -1373,6 +1505,7 @@ pub fn outlet(w: &mut World) {
         let want = w.config.outlet_m3_per_s * DT;
         let lost = take_free(w, i, want);
         w.ledger.outlet_out += lost;
+        release(w, lost);
     });
 }
 
@@ -1425,6 +1558,7 @@ pub fn apply(world: &mut World, command: Command) -> f64 {
             // which is zero where there is no pore space at all.
             let got = take_pore(world, i, volume_m3);
             world.ledger.transpiration_out += got;
+            release(world, got);
             -got
         }
         Command::SetMaterial { x, y, z, material } => {
@@ -2070,5 +2204,216 @@ mod exchange_geometry_tests {
         assert_eq!(w.free, cloned.free, "the clone diverged");
         assert_eq!(w.free, loaded.free, "the loaded world diverged");
         assert!(residual(&w).abs() < 1e-12);
+    }
+}
+/// The closed water budget: nothing leaves but `displaced_out`, and the arithmetic says
+/// so. Every assertion here is conservation, never a pinned number
+/// (`design/handoffs/voxel-water-cycle-2026-09-20.md`).
+#[cfg(test)]
+mod closed_budget_tests {
+    use super::*;
+    use crate::{Command, Config, Material};
+
+    const TICKS: u32 = 200;
+
+    fn config(closed: bool) -> Config {
+        Config {
+            width: 8,
+            height: 8,
+            depth: 2,
+            voxel_m: 0.25,
+            rain_m_per_s: 0.002,
+            evaporation_m_per_s: 0.0004,
+            outlet_m3_per_s: 0.001,
+            closed_water_budget: closed,
+            initial_atmosphere_m3: if closed { 0.2 } else { 0.0 },
+            shower_trigger_fraction: 0.02,
+            shower_volume_m3: 0.05,
+            ..Config::default()
+        }
+    }
+
+    /// Bedrock floor, one soil row on it, a puddle above that, and the outlet at the
+    /// puddle's own row so the export has something to take.
+    fn fixture(closed: bool) -> World {
+        let c = config(closed);
+        let (width, depth) = (c.width as i64, c.depth);
+        let mut w = World::empty(c);
+        for x in 0..width {
+            for z in 0..depth {
+                w.apply(Command::SetMaterial {
+                    x,
+                    y: 1,
+                    z,
+                    material: Material::Soil,
+                });
+            }
+        }
+        for x in 0..width {
+            for z in 0..depth {
+                w.apply(Command::AddWater {
+                    x,
+                    y: 2,
+                    z,
+                    volume_m3: 0.004,
+                });
+            }
+        }
+        w.set_outlet_cell(Some((0, 2, 0)));
+        w.apply(Command::SetOutlet { open: true });
+        w
+    }
+
+    fn run(w: &mut World, ticks: u32) {
+        for t in 0..ticks {
+            // One plant-sized withdrawal part way in, so transpiration is in the books
+            // too and not only evaporation and the outlet.
+            if t == ticks / 2 {
+                w.apply(Command::WithdrawPore {
+                    x: 3,
+                    y: 1,
+                    z: 0,
+                    volume_m3: 0.001,
+                });
+            }
+            w.step_with(1);
+        }
+    }
+
+    #[test]
+    fn a_closed_world_keeps_every_drop_it_started_with() {
+        let mut w = fixture(true);
+        let before = w.view().total_water_m3();
+        run(&mut w, TICKS);
+        let v = w.view();
+        assert!(
+            v.water_residual().abs() < 1e-9,
+            "in-world residual {:e}",
+            v.water_residual()
+        );
+        assert!(
+            v.atmosphere_residual().abs() < 1e-9,
+            "atmosphere residual {:e}",
+            v.atmosphere_residual()
+        );
+        assert!(
+            v.total_residual().abs() < 1e-9,
+            "total residual {:e}",
+            v.total_residual()
+        );
+        assert_eq!(v.ledger.displaced_out, 0.0, "nothing was displaced");
+        assert!(
+            (v.total_water_m3() - before).abs() < 1e-9,
+            "a closed world with no user input holds what it held: {before} then {}",
+            v.total_water_m3()
+        );
+    }
+
+    /// The three loss terms are the store's income, to the drop. This is what makes
+    /// `evaporation_out`, `transpiration_out` and `outlet_out` mean "into the store"
+    /// rather than "out of the world".
+    #[test]
+    fn the_losses_are_the_stores_income() {
+        let mut w = fixture(true);
+        run(&mut w, TICKS);
+        let l = w.view().ledger.clone();
+        assert!(l.evaporation_out > 0.0, "the puddle must evaporate");
+        assert!(l.outlet_out > 0.0, "the outlet must export");
+        assert!(l.transpiration_out > 0.0, "the withdrawal must be booked");
+        let deposited = l.evaporation_out + l.transpiration_out + l.outlet_out;
+        assert!(
+            (l.atmosphere_in - deposited).abs() < 1e-9,
+            "atmosphere_in {} is not the three losses {deposited}",
+            l.atmosphere_in
+        );
+        assert_eq!(l.user_atmosphere_in, 0.0, "no lever was pulled");
+    }
+
+    /// Rain in a closed world is the store spending itself: never more than the store
+    /// ever held, and every drop of it withdrawn before it fell.
+    #[test]
+    fn rain_only_ever_comes_out_of_the_store() {
+        let mut w = fixture(true);
+        run(&mut w, TICKS);
+        let l = w.view().ledger.clone();
+        assert!(l.showers > 0, "the store never reached the trigger");
+        assert!(
+            l.rain_in > 0.0 && (l.rain_in - l.atmosphere_out).abs() < 1e-9,
+            "rain {} is not what the store paid out {}",
+            l.rain_in,
+            l.atmosphere_out
+        );
+        assert!(
+            l.atmosphere_out <= l.initial_atmosphere + l.atmosphere_in + 1e-9,
+            "the store paid out {} of the {} it ever held",
+            l.atmosphere_out,
+            l.initial_atmosphere + l.atmosphere_in
+        );
+    }
+
+    /// Between showers the sky is shut: a closed world whose store cannot reach the
+    /// trigger books no rain at all, however long it runs.
+    #[test]
+    fn a_store_under_the_trigger_never_rains() {
+        let mut w = World::empty(Config {
+            initial_atmosphere_m3: 0.0,
+            shower_trigger_fraction: 1.0,
+            ..config(true)
+        });
+        w.apply(Command::AddWater {
+            x: 0,
+            y: 2,
+            z: 0,
+            volume_m3: 0.004,
+        });
+        run(&mut w, TICKS);
+        let v = w.view();
+        assert_eq!(v.ledger.showers, 0, "no shower may start under the trigger");
+        assert_eq!(v.ledger.rain_in, 0.0, "and no rain may fall");
+        assert!(v.total_residual().abs() < 1e-9);
+    }
+
+    /// The open budget is untouched: water still leaves, the store stays empty, and the
+    /// one residual every existing fixture checks is still zero.
+    #[test]
+    fn the_open_budget_still_flows_through() {
+        let mut w = fixture(false);
+        let before = w.view().total_water_m3();
+        run(&mut w, TICKS);
+        let v = w.view();
+        assert_eq!(v.atmosphere_m3, 0.0, "an open world holds nothing aloft");
+        assert_eq!(v.ledger.atmosphere_in, 0.0);
+        assert_eq!(v.ledger.atmosphere_out, 0.0);
+        assert_eq!(v.ledger.showers, 0);
+        assert!(v.ledger.evaporation_out > 0.0 && v.ledger.outlet_out > 0.0);
+        assert!(v.ledger.rain_in > 0.0, "the prescribed rain must fall");
+        assert!(v.water_residual().abs() < 1e-9);
+        // Flow-through, stated as arithmetic: the rain came from outside the stores
+        // (nothing was drawn) and the losses went outside them (nothing was deposited),
+        // and the change in the world's water is exactly those fluxes.
+        let l = v.ledger;
+        let flowed = l.rain_in - l.evaporation_out - l.outlet_out - l.transpiration_out;
+        assert!(
+            (v.total_water_m3() - before - flowed).abs() < 1e-9,
+            "an open world's water is {before} plus the through-flow {flowed}, not {}",
+            v.total_water_m3()
+        );
+    }
+
+    /// The store is state, so it is saved; and a world claiming an atmosphere without
+    /// the closed budget is not a world.
+    #[test]
+    fn the_store_survives_a_round_trip_and_an_open_world_may_not_hold_one() {
+        let mut w = fixture(true);
+        run(&mut w, TICKS / 2);
+        let back = World::load(&w.save()).expect("a closed world round-trips");
+        assert_eq!(back.atmosphere_m3(), w.atmosphere_m3());
+        assert_eq!(back.shower_left_m3(), w.shower_left_m3());
+        assert_eq!(back.view().ledger, w.view().ledger);
+
+        let mut bad = fixture(false);
+        bad.atmosphere_m3 = 1.0;
+        let err = World::load(&bad.save()).expect_err("an open world holds no atmosphere");
+        assert!(format!("{err:#}").contains("no atmosphere"), "{err:#}");
     }
 }

@@ -125,6 +125,8 @@ pub struct VoxelView<'a> {
     pub ledger: &'a Ledger,
     /// Aquifer store in cubic metres.
     pub aquifer_m3: f64,
+    /// The lumped atmosphere store in cubic metres; zero under the open budget.
+    pub atmosphere_m3: f64,
     /// Whether the named outlet is exporting.
     pub outlet_open: bool,
     /// The outlet cell `(x, y, z)`, if the world names one.
@@ -288,7 +290,9 @@ impl<'a> VoxelView<'a> {
         false
     }
 
-    /// Total free plus pore plus aquifer water in cubic metres.
+    /// Total free plus pore plus aquifer water in cubic metres: the **in-world** stores,
+    /// which is what [`Ledger::expected_stored`] explains. The atmosphere is not in here
+    /// under either budget; [`VoxelView::total_water_m3`] adds it.
     pub fn stored_m3(&self) -> f64 {
         let v = self.config.voxel_volume();
         let mut total = self.aquifer_m3;
@@ -297,6 +301,30 @@ impl<'a> VoxelView<'a> {
             total += self.pore[i] * v * m.pore_capacity();
         }
         total
+    }
+
+    /// Every store the world owns: [`VoxelView::stored_m3`] plus the atmosphere.
+    pub fn total_water_m3(&self) -> f64 {
+        self.stored_m3() + self.atmosphere_m3
+    }
+
+    /// The in-world conservation residual, `stored - expected`. Zero to floating-point
+    /// noise under either budget, and any term in it is a real leak.
+    pub fn water_residual(&self) -> f64 {
+        self.stored_m3() - self.ledger.expected_stored()
+    }
+
+    /// The atmosphere's own residual, `atmosphere - expected`. Zero under either budget:
+    /// an open-budget world never deposits and never draws.
+    pub fn atmosphere_residual(&self) -> f64 {
+        self.atmosphere_m3 - self.ledger.expected_atmosphere()
+    }
+
+    /// Both residuals at once — the one number a closed-budget run asserts on. Not a sum
+    /// of signed errors that could cancel: it is `total - expected_total`, and the two
+    /// halves are checkable separately above.
+    pub fn total_residual(&self) -> f64 {
+        self.total_water_m3() - self.ledger.expected_total()
     }
 }
 
@@ -316,6 +344,16 @@ pub struct World {
     pub(crate) free: Vec<f64>,
     pub(crate) pore: Vec<f64>,
     pub(crate) aquifer_m3: f64,
+    /// The lumped atmosphere: water aloft, with no position in the world. Filled by
+    /// evaporation, transpiration and the outlet's export under a closed budget
+    /// ([`Config::closed_water_budget`]) and emptied by showers; always zero under the
+    /// open budget. Route C will give the water in here a place to be; route B only
+    /// counts it.
+    pub(crate) atmosphere_m3: f64,
+    /// How much of the shower now falling is still to come, cubic metres. Zero between
+    /// showers. **Not a store**: the water is still in `atmosphere_m3` and this is only
+    /// the allowance this shower has left against it.
+    pub(crate) shower_left_m3: f64,
     pub(crate) outlet_open: bool,
     pub(crate) tick: u64,
     /// Bumped by every material change a command actually commits. See
@@ -408,6 +446,8 @@ impl World {
             free: vec![0.0; n],
             pore: vec![0.0; n],
             aquifer_m3: 0.0,
+            atmosphere_m3: 0.0,
+            shower_left_m3: 0.0,
             outlet_open: false,
             tick: 0,
             terrain_version: 0,
@@ -423,7 +463,13 @@ impl World {
         world.aquifer_m3 = world
             .config
             .aquifer_volume_for_head(world.config.initial_aquifer_head_m);
+        world.atmosphere_m3 = if world.config.closed_water_budget {
+            world.config.initial_atmosphere_m3
+        } else {
+            0.0
+        };
         world.ledger.initial_stored = world.view().stored_m3();
+        world.ledger.initial_atmosphere = world.atmosphere_m3;
         // The active sets are built here rather than lazily so that a world is never in a
         // state where its cache disagrees with its arrays.
         world.rebuild_active_sets();
@@ -448,6 +494,8 @@ impl World {
             free: vec![0.0; n],
             pore: vec![0.0; n],
             aquifer_m3: 0.0,
+            atmosphere_m3: 0.0,
+            shower_left_m3: 0.0,
             outlet_open: false,
             tick: 0,
             terrain_version: 0,
@@ -463,7 +511,13 @@ impl World {
         world.aquifer_m3 = world
             .config
             .aquifer_volume_for_head(world.config.initial_aquifer_head_m);
+        world.atmosphere_m3 = if world.config.closed_water_budget {
+            world.config.initial_atmosphere_m3
+        } else {
+            0.0
+        };
         world.ledger.initial_stored = world.view().stored_m3();
+        world.ledger.initial_atmosphere = world.atmosphere_m3;
         world.rebuild_active_sets();
         world
     }
@@ -508,6 +562,16 @@ impl World {
     }
 
     /// Aquifer head in metres above `y = 0`.
+    /// The lumped atmosphere store in cubic metres.
+    pub fn atmosphere_m3(&self) -> f64 {
+        self.atmosphere_m3
+    }
+
+    /// Cubic metres left to fall in the shower now running; zero between showers.
+    pub fn shower_left_m3(&self) -> f64 {
+        self.shower_left_m3
+    }
+
     pub fn aquifer_head_m(&self) -> f64 {
         self.config.aquifer_head_m(self.aquifer_m3)
     }
@@ -522,6 +586,7 @@ impl World {
             terrain_version: self.terrain_version,
             ledger: &self.ledger,
             aquifer_m3: self.aquifer_m3,
+            atmosphere_m3: self.atmosphere_m3,
             outlet_open: self.outlet_open,
             outlet: self.outlet_cell,
             spring: self.spring_cell,
@@ -680,6 +745,20 @@ impl World {
             "the aquifer store is {}, not a volume",
             self.aquifer_m3
         );
+        for (name, store) in [
+            ("atmosphere", self.atmosphere_m3),
+            ("shower allowance", self.shower_left_m3),
+        ] {
+            ensure!(
+                store.is_finite() && store >= 0.0,
+                "the {name} store is {store}, not a volume"
+            );
+        }
+        ensure!(
+            self.config.closed_water_budget || self.atmosphere_m3 == 0.0,
+            "an open-budget world holds no atmosphere, but this one holds {}",
+            self.atmosphere_m3
+        );
         ensure!(
             self.ledger.initial_stored.is_finite() && self.ledger.initial_stored >= 0.0,
             "initial_stored is {}, not a volume",
@@ -692,6 +771,10 @@ impl World {
             ("outlet_out", self.ledger.outlet_out),
             ("transpiration_out", self.ledger.transpiration_out),
             ("displaced_out", self.ledger.displaced_out),
+            ("atmosphere_in", self.ledger.atmosphere_in),
+            ("atmosphere_out", self.ledger.atmosphere_out),
+            ("user_atmosphere_in", self.ledger.user_atmosphere_in),
+            ("initial_atmosphere", self.ledger.initial_atmosphere),
         ] {
             ensure!(flux.is_finite(), "the ledger's {name} is {flux}");
         }
