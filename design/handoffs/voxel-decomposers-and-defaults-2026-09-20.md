@@ -10,17 +10,16 @@ Wrysk, 2026-09-20, after the closed water cycle landed (`voxel-water-cycle-
 2026-09-20.md`) and Fable's test that founders driven by the P3-C wander-seed
 GRUs survive on the generated closed world where the heuristics die (40 alive
 vs 0 after 26 simulated minutes): (1) the seeder uses the trained models;
-(2) glowcap gets a litter diet; (3) explore how a soil organic-matter pool
-would integrate with the whole ecology, not as a glowcap-only resource.
+(2) glowcap gets a litter diet; (3) a brief, not yet dispatched, on how a soil
+organic-matter pool would integrate with the whole ecology.
 
 Shared rules: explicit-path commits ending with `Co-Authored-By: Claude Fable
 5.1 <noreply@anthropic.com>`; never `git add -A`; do not edit
 `design/handoffs/README.md`; always fresh (a changed schema refuses old files);
 tests ≤ 200 ticks by conservation arithmetic, no bit-identical pins; no other
 constant changes than the ones named; runs may use all cores; `runs/` is
-disposable. Three workers run at once on disjoint files: S1 in
-`crates/cubarium` (+ a new assets directory), S2 in `cubarium-voxel-flora`,
-S3 writes one design note only. Return ≤ 40 lines each.
+disposable. Two workers run at once on disjoint files: S1 in
+`crates/cubarium` (+ a new assets directory), S2 in `cubarium-voxel-flora`. Return ≤ 40 lines each.
 
 ## S1 — the live founders are driven by the trained centres by default
 
@@ -86,31 +85,5 @@ shredder line, since the two now share a pool.
 
 ## S3 — how a soil organic-matter pool would integrate
 
-Owner: Opus 5, high. Read-only: no crate edits. Deliverable: one design note
-`design/soil-organic-matter-exploration-2026-09-20.md` with front matter
-`design_status: exploration`, at most 250 lines. Read `design/ecology-v1-
-contract.md`, `design/terrain-and-ecosystem-proposal-2026-09-16.md`,
-`design/voxel-ecology-sketch-2026-09-16.md`, the flora crate's ground pools
-(`litter`, `dead_wood`, `carrion`, their mineral and energy companions, the
-`carrion_decomposition` rule) and `design/0_Canon/DECISIONS.md` for anything
-that already binds soil or nutrients.
-
-Answer, with pointers into the code for each claim:
-1. What the world's organic and mineral flows are today, as a diagram in
-   text: sources, pools, consumers, sinks, and what leaves the world.
-2. Where a soil organic-matter pool would sit: per soil voxel, per column,
-   or per support face beside the existing ground pools; what feeds it
-   (litter decay, carrion decomposition, dead wood decay, root turnover),
-   what draws on it (saprotrophs, mineralisation into the plants' mineral
-   pool, nothing else), and at what rates the contract already implies.
-3. Its effect on the whole ecology: plant mineral nutrition (does the
-   mineral pool today have any source but the seeded stock?), the
-   shredder–glowcap competition for litter, the decomposer's floor when
-   nothing dies, and whether it closes a loop the world currently leaks.
-4. Simulation cost: state per voxel or per column, which tick phase, whether
-   it needs diffusion or only local decay, and an estimate against the
-   measured tick (`design/7_Research/voxel-tick-profile-2026-09-18.md`).
-5. What it means for presentation (soil colour, mushrooms where the soil is
-   rich) and for the game (a player enriching soil), one paragraph each.
-6. A recommendation with two or three bounded packages, each with its test
-   in one sentence. Make no decision; say what Wrysk would be deciding.
+Moved to its own brief, **not dispatched** by Wrysk's instruction:
+`voxel-soil-pool-brief-2026-09-20.md`.
