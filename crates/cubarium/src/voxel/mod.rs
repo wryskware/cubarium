@@ -75,6 +75,7 @@ use project::Projection;
 /// The stdin commands, in the one place both the banner and the usage line read them
 /// from, so a new command cannot be added to only one of the two.
 const COMMANDS: &str = "p pause/resume, s step, +/- speed, r [m3] rain, a M3 charge the aquifer (negative withdraws), \
+                        h M3 add water to the atmosphere (closed budget only), \
                         m X Y Z air|rock|soil|bedrock set material, \
                         f X Z bloomcrown|umbrellafrond [wood] seed a stand, \
                         c X Z clear a stand, \
@@ -810,6 +811,30 @@ impl Control {
                     world.aquifer_head_m()
                 );
             }
+            // The closed budget's "make it rain": water goes **aloft**, and the shower
+            // scheduler brings it down when the store passes its trigger. `r` still
+            // drops a pulse on the world now; this is the lever that feeds the cycle.
+            "h" | "atmosphere" => {
+                let volume = match rest.first().map(|t| t.parse::<f64>()) {
+                    Some(Ok(v)) if v.is_finite() && v > 0.0 => v,
+                    _ => {
+                        eprintln!("cubarium voxel: `h M3` wants a positive volume");
+                        return;
+                    }
+                };
+                let took = world.apply(VoxelCommand::AddAtmosphere { volume_m3: volume });
+                if took > 0.0 {
+                    eprintln!(
+                        "cubarium voxel: atmosphere +{took} m3, store now {:.3} m3",
+                        world.atmosphere_m3()
+                    );
+                } else {
+                    eprintln!(
+                        "cubarium voxel: refused — this world runs the open water budget \
+                         and has no atmosphere store"
+                    );
+                }
+            }
             "o" | "outlet" => {
                 self.outlet = !world.outlet_open();
                 world.apply(VoxelCommand::SetOutlet { open: self.outlet });
@@ -1325,6 +1350,21 @@ mod tests {
         ctl.handle(&mut world, &mut flora, &mut fauna, "a -10");
         assert_eq!(world.view().aquifer_m3, 0.0);
         assert_eq!(world.view().ledger.user_in, 0.0);
+        // The atmosphere lever is refused on this open-budget world, and taken on a
+        // closed one, where it books as the user's share of the store.
+        ctl.handle(&mut world, &mut flora, &mut fauna, "h 3");
+        assert_eq!(world.atmosphere_m3(), 0.0);
+        let mut closed = World::empty(cubarium_voxel::Config {
+            closed_water_budget: true,
+            ..c.clone()
+        });
+        ctl.handle(&mut closed, &mut flora, &mut fauna, "h 3");
+        assert_eq!(closed.atmosphere_m3(), 3.0);
+        assert_eq!(closed.view().ledger.user_atmosphere_in, 3.0);
+        assert!(closed.view().atmosphere_residual().abs() < 1e-12);
+        ctl.handle(&mut closed, &mut flora, &mut fauna, "h -1");
+        ctl.handle(&mut closed, &mut flora, &mut fauna, "h");
+        assert_eq!(closed.atmosphere_m3(), 3.0);
         // Nonsense, and a bad argument, change nothing.
         ctl.handle(&mut world, &mut flora, &mut fauna, "nonsense 1 2 3");
         ctl.handle(&mut world, &mut flora, &mut fauna, "r not-a-volume");

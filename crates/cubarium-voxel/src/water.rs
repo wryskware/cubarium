@@ -1573,6 +1573,15 @@ pub fn apply(world: &mut World, command: Command) -> f64 {
             }
             0.0
         }
+        Command::AddAtmosphere { volume_m3 } => {
+            if !volume_m3.is_finite() || volume_m3 <= 0.0 || !world.config.closed_water_budget {
+                return 0.0;
+            }
+            world.atmosphere_m3 += volume_m3;
+            world.ledger.atmosphere_in += volume_m3;
+            world.ledger.user_atmosphere_in += volume_m3;
+            volume_m3
+        }
         Command::ChargeAquifer { volume_m3 } => {
             if !volume_m3.is_finite() {
                 return 0.0;
@@ -2398,6 +2407,32 @@ mod closed_budget_tests {
             "an open world's water is {before} plus the through-flow {flowed}, not {}",
             v.total_water_m3()
         );
+    }
+
+    /// The user's lever: water aloft, the store's residual still zero, and the world's
+    /// total up by exactly what the lever gave it. An open world refuses it.
+    #[test]
+    fn the_lever_puts_water_aloft_and_an_open_world_refuses_it() {
+        let mut w = fixture(true);
+        let before = w.view().total_water_m3();
+        let took = w.apply(Command::AddAtmosphere { volume_m3: 0.5 });
+        assert_eq!(took, 0.5);
+        assert_eq!(w.apply(Command::AddAtmosphere { volume_m3: -1.0 }), 0.0);
+        assert_eq!(w.apply(Command::AddAtmosphere { volume_m3: f64::NAN }), 0.0);
+        run(&mut w, TICKS);
+        let v = w.view();
+        assert_eq!(v.ledger.user_atmosphere_in, 0.5);
+        assert!(v.atmosphere_residual().abs() < 1e-9);
+        assert!(v.total_residual().abs() < 1e-9);
+        assert!(
+            (v.total_water_m3() - before - 0.5).abs() < 1e-9,
+            "the lever added 0.5 to {before}, giving {}",
+            v.total_water_m3()
+        );
+
+        let mut open = fixture(false);
+        assert_eq!(open.apply(Command::AddAtmosphere { volume_m3: 0.5 }), 0.0);
+        assert_eq!(open.view().ledger.atmosphere_in, 0.0);
     }
 
     /// The store is state, so it is saved; and a world claiming an atmosphere without

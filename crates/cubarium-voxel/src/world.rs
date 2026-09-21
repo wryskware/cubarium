@@ -99,6 +99,15 @@ pub enum Command {
         z: u32,
         volume_m3: f64,
     },
+    /// Add water to the lumped atmosphere store: the closed budget's "make it rain"
+    /// lever, which puts water aloft for the next shower to bring down rather than
+    /// dropping it on the world now.
+    ///
+    /// Booked as [`Ledger::user_atmosphere_in`] and counted in `atmosphere_in`, so the
+    /// store's own residual stays zero and the world's total water rises by exactly this
+    /// much. Refused whole — nothing booked — on a non-finite or non-positive volume, or
+    /// on an **open-budget** world, which has no atmosphere to add to.
+    AddAtmosphere { volume_m3: f64 },
     /// Add to (or, negative, remove from) the aquifer store. A withdrawal is capped by
     /// the stock actually there, and `apply` returns it as a negative volume.
     ChargeAquifer { volume_m3: f64 },
