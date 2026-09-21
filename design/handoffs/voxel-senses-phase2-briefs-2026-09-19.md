@@ -449,3 +449,62 @@ green; tests ≤ 200 ticks; no bit-identical pins. Do not edit
 `design/handoffs/README.md` or this file. Return ≤ 40 lines: commits, the
 table, and the evidence for each conclusion. Fable integrates and runs the
 workspace suite.
+
+## Integration note 5 (Fable, 2026-09-20, at 95b8c09) — first reacquisition
+
+P3-B is on main (2ef798c accounting, c8f2d54 near band, 95b8c09 warm start).
+Workspace suite 1,930 passed, 1 skipped. I re-ran three landed held-out
+evaluations and every row matches the worker's report.
+
+Landed held-out eight (score mean/median, acquired, depleted, successor
+bitten, reacquired, closest approach after depletion, ticks inside the
+sensed radius summed over layouts):
+
+| arm | score | acq | depl | bit | reacq | min-succ | sense-t |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| browser P3-A gen505, cold start | .478/.489 | 8 | 7 | 0 | 0 | 2.01 m | 0 |
+| browser A→landed gen508 (warm, no near rung) | .784/.935 | 8 | 8 | 6 | **6** | 0.05 m | 8277 |
+| browser A→near→landed gen477 | .756/.888 | 8 | 8 | 6 | **6** | 0.18 m | 6688 |
+| blind P3-A gen494, cold start | .327/.236 | 3 | 1 | 0 | 0 | 3.19 m | 0 |
+| blind A→landed gen506 | .410/.479 | 6 | 6 | 0 | 0 | 1.04 m | 289 |
+| blind A→near→landed gen451 | .478/.488 | 8 | 7 | 0 | 0 | 1.71 m | 0 |
+
+Near held-out, own band (1.00–1.46 m): browser near gen511 reacquired 5/8;
+blind near gen409 reacquired 1/8 and closed to 0.08 m on 7/8 layouts.
+
+Conclusions, each with its evidence:
+
+- **The browser now reacquires 6/8 on the landed task**, depleting at ticks
+  315–500 and biting the successor at 780–2085 across separations of
+  2.26–4.04 m. The two misses (seeds 41, 60) are the two layouts it never
+  brought inside 2 m. Tests-plan §4 Stage B is met for the browser in the
+  full deplete-then-reacquire sense, not only acquisition.
+- **The cause was the cold start, not the near rung.** A→landed with no near
+  rung reaches the same 6/8 at a slightly higher score than A→near→landed
+  (.784 vs .756); the two share protocol hash, seed and layouts and differ
+  only in initialisation. P3-A's 0/8 came from cold-starting Stage B, which
+  was the only option before `--init-center` existed. Zero-shot transfer of
+  the near policy to landed keeps depletion 8/8 but reaches only 1.95 m.
+- **The blind founder reacquires nowhere on landed, in every arm**, exactly
+  as note 4 predicted: separations are 2.26–4.04 m and its cue is zero past
+  1.75 m; its closest post-depletion approach is 1.71 m and it never enters
+  the 1.5 m radius. On the near band it does depart and reach (0.08 m on 7/8)
+  but rarely bites (1/8). Its first-leg gains are real: A→near→landed is the
+  first blind Stage-B policy with 8/8 acquisition and the balanced gate MET.
+
+Decisions the worker took under the brief: band `16 ≤ d² < 36` (the brief's
+`4 ≤ d²` would have allowed 0.5 m, shorter than the first leg); the landed
+protocol string left unchanged because a test proves landed layouts already
+satisfy the near band's start-clearance filter and the P3-A table reproduces
+unchanged; `--band near|landed` on train and evaluate, with `--policy-band`
+for a disclosed cross-band transfer. I accept all three.
+
+Open, for Wrysk:
+- The near rung buys nothing measurable for the browser's landed task and
+  costs one 512-update run; it is the only arm that gets the blind founder to
+  8/8 first-patch acquisition. Keep it for the blind founder only, or drop it.
+- Blind reacquisition beyond about 1.5 m needs either a longer-reaching cue
+  (half-life or diffusion, a sensor-interface change under Wrysk's review) or
+  a task that does not ask a blind animal to find what it cannot smell. The
+  plan's "nearby" is, for the blind founder, a number: under 1.5 m.
+- The survival term is still constant; unchanged since note 3.
