@@ -34,13 +34,24 @@ const DRAIN_EPS: f64 = 1e-6;
 
 /// Run `e.iterations` of erosion over `field`.
 ///
-/// `hardness(x, z, bedrock_m)` reads the recipe's hardness field at a column's bedrock
-/// surface; the solver never sees the recipe, so a test can hand it a constant.
+/// `hardness(x, z, at_m)` reads the recipe's hardness field at the height it is asked
+/// for — the bedrock surface, which is the cell the water is cutting. The solver never
+/// sees the recipe, so a test can hand it a constant.
+///
+/// `soft_hardness` is the line between the two per-iteration caps
+/// ([`Erosion::max_cut_soft_m`] and [`Erosion::max_cut_hard_m`]). The caller passes
+/// `hollows.soft_hardness`, so the rock the water cuts fast is the same rock the carve
+/// later notches out: one definition of soft, two uses.
 ///
 /// `iterations = 0` is the identity: the layers, the budget and the spill levels are
 /// left exactly as they were. The hardness and the hard-cap flags are read either way —
 /// they describe the field, they are not something erosion did to it.
-pub fn erode(field: &mut Heightfield, e: &Erosion, hardness: impl Fn(usize, usize, f64) -> f64) {
+pub fn erode(
+    field: &mut Heightfield,
+    e: &Erosion,
+    soft_hardness: f64,
+    hardness: impl Fn(usize, usize, f64) -> f64,
+) {
     let (w, d) = (field.width, field.depth);
     let n = w * d;
     if n == 0 {
@@ -94,8 +105,16 @@ pub fn erode(field: &mut Heightfield, e: &Erosion, hardness: impl Fn(usize, usiz
                 None => 0.0,
             };
             let capacity = e.capacity * field.discharge[i] * slope;
+            // Layer-aware: the cap is the bed's, read where the water is cutting.
+            let hard = field.hardness[i].clamp(0.0, 1.0);
+            let cap = if hard <= soft_hardness {
+                e.max_cut_soft_m
+            } else {
+                e.max_cut_hard_m
+            };
+
             if load[i] < capacity {
-                let want = ((capacity - load[i]) * e.erode).min(e.max_cut_m);
+                let want = ((capacity - load[i]) * e.erode).min(cap);
                 let from_sediment = want.min(field.sediment_m[i]);
                 field.sediment_m[i] -= from_sediment;
                 cut_sediment += from_sediment;
@@ -103,8 +122,7 @@ pub fn erode(field: &mut Heightfield, e: &Erosion, hardness: impl Fn(usize, usiz
                 let left = want - from_sediment;
                 if left > 0.0 {
                     // Hardness slows the bed, it never stops the water.
-                    let h = field.hardness[i].clamp(0.0, 1.0);
-                    let from_bedrock = left / (1.0 + e.bedrock_resistance * h);
+                    let from_bedrock = left / (1.0 + e.bedrock_resistance * hard);
                     field.bedrock_m[i] -= from_bedrock;
                     cut_bedrock += from_bedrock;
                     taken += from_bedrock;
@@ -408,7 +426,7 @@ mod tests {
     fn erosion_moves_material_and_loses_none() {
         let start = field(16, 4, 0.25, 0.3, ramp(16));
         let mut f = start.clone();
-        erode(&mut f, &budget(), constant_hardness(0.5));
+        erode(&mut f, &budget(), 0.45, constant_hardness(0.5));
 
         let b = f.budget;
         let moved = b.removed_bedrock_m + b.removed_sediment_m;
@@ -440,7 +458,7 @@ mod tests {
     fn flux_crosses_the_seam() {
         let start = field(16, 4, 0.25, 0.3, ramp(16));
         let mut f = start.clone();
-        erode(&mut f, &budget(), constant_hardness(0.5));
+        erode(&mut f, &budget(), 0.45, constant_hardness(0.5));
         let gained: f64 = (0..4)
             .map(|z| f.sediment_m[z * 16 + 2] - start.sediment_m[z * 16 + 2])
             .sum();
@@ -461,8 +479,8 @@ mod tests {
         let e = ramp(w);
         let mut plain = field(w, d, 0.25, 0.3, &e);
         let mut shifted = field(w, d, 0.25, 0.3, |x, z| e((x + w - shift) % w, z));
-        erode(&mut plain, &budget(), constant_hardness(0.5));
-        erode(&mut shifted, &budget(), constant_hardness(0.5));
+        erode(&mut plain, &budget(), 0.45, constant_hardness(0.5));
+        erode(&mut shifted, &budget(), 0.45, constant_hardness(0.5));
         for z in 0..d {
             for x in 0..w {
                 let a = plain.surface_m(z * w + x);
@@ -504,7 +522,7 @@ mod tests {
             iterations: 12,
             ..budget()
         };
-        erode(&mut f, &e, constant_hardness(0.5));
+        erode(&mut f, &e, 0.45, constant_hardness(0.5));
 
         let floor: f64 = (5..=10)
             .map(|x| f.sediment_m[w + x] - start.sediment_m[w + x])
@@ -539,13 +557,112 @@ mod tests {
         }
     }
 
+    /// A hard band over a soft one becomes a bank.
+    ///
+    /// The channel cuts the soft rock as fast as the water can carry it away and the hard
+    /// rock at a cap it cannot exceed, so where the bed has already worked down into the
+    /// soft band it keeps going and the capped ground beside it does not. The same
+    /// fixture in rock of one hardness gets the same water and stays the ramp it was.
+    ///
+    /// Two things the fixture has to do for the caps to mean anything, and neither of
+    /// them is true of the presets. **Bare bedrock, no mantle**: with loose sediment over
+    /// it the flow satisfies itself from the sediment first and the rock is never
+    /// reached — measured on the presets, 0.34 m of bedrock incision over a hundred
+    /// iterations, over the whole ring. **A low hard cap**: a cap only does anything
+    /// while it is the binding constraint, and at the presets' 0.05 m the water never
+    /// asks for that much, so the two caps are the same cap.
+    #[test]
+    fn a_cap_over_soft_rock_becomes_a_step_and_uniform_rock_does_not() {
+        let (w, d, cell) = (16usize, 4usize, 0.25);
+        let soft_hardness = 0.45;
+        let run = |layered: bool| -> (Heightfield, Heightfield) {
+            let start = field(w, d, cell, 0.0, ramp(w));
+            let mut f = start.clone();
+            let e = Erosion {
+                iterations: 100,
+                max_cut_hard_m: 0.001,
+                ..Erosion::DEFAULT
+            };
+            // Hard above 4 m, soft below, so the upper ramp keeps its cap while the
+            // mid-slope the channel runs down is in the soft band.
+            erode(&mut f, &e, soft_hardness, move |_, _, at_m| {
+                if !layered {
+                    0.5
+                } else if at_m >= 4.0 {
+                    0.95
+                } else {
+                    0.15
+                }
+            });
+            (start, f)
+        };
+        let worst_step = |f: &Heightfield, bedrock: bool| -> f64 {
+            (0..d)
+                .flat_map(|z| (0..w).map(move |x| (x, z)))
+                .map(|(x, z)| {
+                    let at = |i: usize| {
+                        if bedrock {
+                            f.bedrock_m[i]
+                        } else {
+                            f.surface_m(i)
+                        }
+                    };
+                    (at(z * w + x) - at(z * w + (x + 1) % w)).abs()
+                })
+                .fold(0.0, f64::max)
+                / cell
+        };
+
+        let (start, layered) = run(true);
+        let (_, uniform) = run(false);
+        let (bank, flat) = (worst_step(&layered, true), worst_step(&uniform, true));
+        assert!(
+            bank >= 2.0,
+            "the cap made no bank: the worst bedrock step is {bank:.2} voxels"
+        );
+        assert!(
+            bank >= flat * 1.7,
+            "layered rock stepped {bank:.2} voxels against uniform rock's {flat:.2}: \
+             not the layering doing it"
+        );
+        assert!(
+            flat <= 1.25,
+            "one hardness should leave the ramp a ramp, not a {flat:.2} voxel step"
+        );
+        assert!(
+            worst_step(&layered, false) >= 1.7,
+            "the bank does not reach the surface"
+        );
+
+        // And the books still balance under the two caps.
+        let b = layered.budget;
+        let moved = b.removed_bedrock_m + b.removed_sediment_m;
+        assert!(
+            b.imbalance_m().abs() <= 1e-9 * moved.max(1.0),
+            "{b:?} does not balance"
+        );
+        let total = |g: &Heightfield| (0..g.samples()).map(|i| g.surface_m(i)).sum::<f64>();
+        assert!(
+            (total(&layered) - total(&start)).abs() <= 1e-9 * total(&start).abs().max(1.0),
+            "the ring gained or lost ground"
+        );
+        for i in 0..layered.samples() {
+            assert!(layered.sediment_m[i] >= 0.0, "negative sediment at {i}");
+            assert!(layered.surface_m(i).is_finite());
+            assert!(
+                layered.bedrock_m[i] <= start.bedrock_m[i] + 1e-12,
+                "bedrock rose at {i}"
+            );
+        }
+    }
+
     /// Hardness limits what the water can cut.
     #[test]
     fn soft_bedrock_loses_more_than_hard() {
         let cut = |h: f64| -> f64 {
             let start = field(16, 4, 0.25, 0.05, ramp(16));
             let mut f = start.clone();
-            erode(&mut f, &budget(), constant_hardness(h));
+            erode(&mut f, &budget(), 0.45, constant_hardness(h));
             (0..f.samples())
                 .map(|i| start.bedrock_m[i] - f.bedrock_m[i])
                 .sum::<f64>()
@@ -573,7 +690,7 @@ mod tests {
             rain: 0.0,
             ..budget()
         };
-        erode(&mut f, &e, constant_hardness(0.5));
+        erode(&mut f, &e, 0.45, constant_hardness(0.5));
         let limit = e.repose * cell + cell;
         for z in 0..d {
             for x in 0..w {
@@ -598,6 +715,7 @@ mod tests {
                 iterations: 0,
                 ..budget()
             },
+            0.45,
             constant_hardness(0.5),
         );
         assert_eq!(idle.bedrock_m, start.bedrock_m);
@@ -606,8 +724,8 @@ mod tests {
 
         let mut a = start.clone();
         let mut b = start.clone();
-        erode(&mut a, &budget(), constant_hardness(0.5));
-        erode(&mut b, &budget(), constant_hardness(0.5));
+        erode(&mut a, &budget(), 0.45, constant_hardness(0.5));
+        erode(&mut b, &budget(), 0.45, constant_hardness(0.5));
         assert_eq!(a.bedrock_m, b.bedrock_m);
         assert_eq!(a.sediment_m, b.sediment_m);
     }

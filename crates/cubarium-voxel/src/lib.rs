@@ -44,6 +44,7 @@ pub mod snapshot;
 mod sparse;
 /// Is this world's water cycle one a habitat could live in? Reports, never rejects.
 pub mod viability;
+pub mod walk;
 pub mod water;
 pub mod world;
 

@@ -96,9 +96,18 @@ pub struct Erosion {
     pub deposit: f64,
     /// How much slower hardness `1` bedrock yields than loose sediment.
     pub bedrock_resistance: f64,
-    /// Deepest one iteration may cut at one column, metres. A stability limit, not a
-    /// rule: without it a single steep column can cut through the floor in one pass.
-    pub max_cut_m: f64,
+    /// Deepest one iteration may cut at a column whose bed is **soft** — hardness at or
+    /// below `hollows.soft_hardness` — in metres.
+    ///
+    /// This pair is what makes the landscape layered rather than merely rough. A single
+    /// cap would let a channel lower everything it runs over at the same rate, and a
+    /// hard band over a soft one would never become a bank. Five to one, and the soft
+    /// rock under a cap goes while the cap stays: knickpoints, rocky shoulders, steps
+    /// with something to undercut.
+    pub max_cut_soft_m: f64,
+    /// The same, at a column whose bed is hard. Also the stability limit the single cap
+    /// used to be: without it a steep column cuts through the floor in one pass.
+    pub max_cut_hard_m: f64,
     /// Tangent of the angle of repose for loose sediment.
     pub repose: f64,
     /// Relaxation sweeps of the repose rule per iteration.
@@ -120,14 +129,21 @@ impl Erosion {
         erode: 0.5,
         deposit: 0.4,
         bedrock_resistance: 6.0,
-        max_cut_m: 0.05,
+        max_cut_soft_m: 0.25,
+        max_cut_hard_m: 0.05,
         repose: 0.8,
         repose_sweeps: 2,
     };
 
-    /// The `small` preset's budget: half the cell size, so half the cut per iteration.
+    /// The `small` preset's budget.
+    ///
+    /// Half the cell size, so less cut per iteration — and less again than that: at the
+    /// 0.15 m the cell size alone would ask for, incision left the front rough enough
+    /// that the skyline pass had to lower 7.8 % of the ring's columns, over the 5 % the
+    /// diorama is allowed. The bound is the bound; the cap came down instead.
     pub const SMALL: Erosion = Erosion {
-        max_cut_m: 0.03,
+        max_cut_soft_m: 0.05,
+        max_cut_hard_m: 0.01,
         ..Erosion::DEFAULT
     };
 
@@ -499,7 +515,8 @@ impl Recipe {
                 "erosion.bedrock_resistance",
                 self.erosion.bedrock_resistance,
             ),
-            ("erosion.max_cut_m", self.erosion.max_cut_m),
+            ("erosion.max_cut_soft_m", self.erosion.max_cut_soft_m),
+            ("erosion.max_cut_hard_m", self.erosion.max_cut_hard_m),
             ("erosion.repose", self.erosion.repose),
         ] {
             anyhow::ensure!(

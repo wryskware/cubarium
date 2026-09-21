@@ -367,27 +367,48 @@ fn staged(world: &mut World, r: &Recipe) {
     if w == 0 || h < 4 || d == 0 {
         return;
     }
-    let mut field = heightfield(&c, r);
-    let circumference_m = field.circumference_m;
-    let cell = field.cell_m;
-    crate::erosion::erode(&mut field, &r.erosion, |x, z, bedrock_m| {
-        r.hardness_at(
-            (x as f64 + 0.5) * cell,
-            bedrock_m,
-            (z as f64 + 0.5) * cell,
-            circumference_m,
-            c.seed,
-        )
-    });
-    crate::erosion::flag_hard_caps(&mut field, r.hollows.cap_drop_m, r.bedrock_hardness);
-
-    let mut volume = voxelise(&c, r, &field);
-    crate::hollows::carve(&mut volume, &field, r, c.seed);
-    prepare(&mut volume, &mut field, r);
-
+    let (_, volume, _) = staged_terrain(&c, r);
     world.material = volume.material;
     outlet_and_spring(world, &volume.surface, w, d, h);
     repair_isolated(world);
+}
+
+/// What one staged generation did. Diagnostics, for the tests and the dev tools: the
+/// world keeps none of it and nothing reads it back.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Report {
+    /// What [`crate::hollows::carve`] made.
+    pub carved: crate::hollows::Carved,
+    /// Columns the skyline visibility pass had to lower.
+    pub lowered: usize,
+}
+
+/// Run the staged stages and hand back what each one produced, without building a
+/// [`World`] around it. [`landform`] is this plus installing the result.
+pub fn staged_terrain(c: &Config, r: &Recipe) -> (Heightfield, Volume, Report) {
+    let mut field = heightfield(c, r);
+    let circumference_m = field.circumference_m;
+    let cell = field.cell_m;
+    crate::erosion::erode(
+        &mut field,
+        &r.erosion,
+        r.hollows.soft_hardness,
+        |x, z, at_m| {
+            r.hardness_at(
+                (x as f64 + 0.5) * cell,
+                at_m,
+                (z as f64 + 0.5) * cell,
+                circumference_m,
+                c.seed,
+            )
+        },
+    );
+    crate::erosion::flag_hard_caps(&mut field, r.hollows.cap_drop_m, r.bedrock_hardness);
+
+    let mut volume = voxelise(c, r, &field);
+    let carved = crate::hollows::carve(&mut volume, &field, r, c.seed);
+    let lowered = prepare(&mut volume, &mut field, r);
+    (field, volume, Report { carved, lowered })
 }
 
 /// Stage 1: the landscape in metres, before anything has run over it.
@@ -802,6 +823,57 @@ mod tests {
         }
     }
 
+    /// What the staged stages leave behind, on every preset at two seeds: no hollow the
+    /// camera cannot see, no void the sky cannot reach, and a skyline pass that has to
+    /// lower fewer than one column in twenty.
+    ///
+    /// The five per cent is the diorama's budget. Layer-aware incision roughens the
+    /// front, and `small` went over it at the cap its cell size alone would ask for; the
+    /// cap came down rather than the bound going up (see [`crate::Erosion::SMALL`]).
+    #[test]
+    fn every_preset_prepares_a_habitat_within_the_diorama_s_budget() {
+        for p in PRESETS {
+            for seed in STAGED_SEEDS {
+                let config = Config { seed, ..p.config() };
+                let Landform::Staged(recipe) = config.landform.clone() else {
+                    panic!("a preset is staged");
+                };
+                let (_, volume, report) = staged_terrain(&config, &recipe);
+                let columns = (config.width * config.depth) as f64;
+                let share = report.lowered as f64 / columns;
+                assert!(
+                    share < 0.05,
+                    "{} seed {seed}: the skyline pass lowered {} of {columns} columns ({:.1} %)",
+                    p.name,
+                    report.lowered,
+                    100.0 * share
+                );
+
+                // The stages already built it; wrapping their volume is a world, and
+                // generating a second one for the same seed is a second of wall clock.
+                let mut world = World::empty(config);
+                world.material = volume.material;
+                repair_isolated(&mut world);
+                world.rebuild_active_sets();
+                assert!(
+                    crate::hollows::find(&world).iter().all(|h| h.visible),
+                    "{} seed {seed} kept a hollow the camera cannot see",
+                    p.name
+                );
+                assert!(
+                    isolated_voids(&world).is_empty(),
+                    "{} seed {seed} left a sealed void",
+                    p.name
+                );
+                assert!(
+                    crate::walk::around_the_ring(&world, 0.5),
+                    "{} seed {seed} cannot be walked around",
+                    p.name
+                );
+            }
+        }
+    }
+
     /// And every ring, hollows or not, leaves no void the sky cannot reach.
     #[test]
     fn every_landform_leaves_every_void_reachable() {
@@ -824,16 +896,26 @@ mod tests {
     fn a_staged_ring_has_no_seam() {
         for p in PRESETS {
             for seed in STAGED_SEEDS {
-                let world = World::new(Config { seed, ..p.config() });
-                let v = world.view();
-                let (w, h, d) = (v.config.width as i64, v.config.height, v.config.depth);
+                let config = Config { seed, ..p.config() };
+                let Landform::Staged(recipe) = config.landform.clone() else {
+                    panic!("a preset is staged");
+                };
+                let (_, volume, _) = staged_terrain(&config, &recipe);
+                let c = &volume.config;
+                let (w, h, d) = (c.width as i64, c.height, c.depth);
                 let (mut worst_step, mut worst_change) = (0i32, 0usize);
                 let (mut seam_step, mut seam_change) = (0i32, 0usize);
                 for z in 0..d {
-                    let top = |x: i64| v.surface_y(x, z).expect("ground") as i32;
+                    // The terrain's own skyline, which is what generation is periodic
+                    // in. A carved skylight is a one-column hole wherever the gallery
+                    // noise put it, and that is not a statement about the seam.
+                    let top = |x: i64| volume.surface[z as usize * w as usize + x as usize];
                     let changed = |a: i64, b: i64| {
                         (0..h)
-                            .filter(|&y| v.material_at(a, y, z) != v.material_at(b, y, z))
+                            .filter(|&y| {
+                                volume.material[c.index(a, y, z)]
+                                    != volume.material[c.index(b, y, z)]
+                            })
                             .count()
                     };
                     for x in 0..w - 1 {

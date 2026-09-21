@@ -46,15 +46,20 @@ fn main() {
     let mut field = before.clone();
     let (circumference_m, cell) = (field.circumference_m, field.cell_m);
     let started = std::time::Instant::now();
-    cubarium_voxel::erosion::erode(&mut field, &recipe.erosion, |x, z, bedrock_m| {
-        recipe.hardness_at(
-            (x as f64 + 0.5) * cell,
-            bedrock_m,
-            (z as f64 + 0.5) * cell,
-            circumference_m,
-            seed,
-        )
-    });
+    cubarium_voxel::erosion::erode(
+        &mut field,
+        &recipe.erosion,
+        recipe.hollows.soft_hardness,
+        |x, z, bedrock_m| {
+            recipe.hardness_at(
+                (x as f64 + 0.5) * cell,
+                bedrock_m,
+                (z as f64 + 0.5) * cell,
+                circumference_m,
+                seed,
+            )
+        },
+    );
     let elapsed = started.elapsed();
 
     std::fs::create_dir_all(&dir).expect("the output directory");

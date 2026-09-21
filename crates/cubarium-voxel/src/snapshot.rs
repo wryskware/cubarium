@@ -16,10 +16,12 @@ use crate::World;
 /// field (the `Recipe` gained its `erosion` and `hollows` sections and its hardness
 /// parameters, and lost the slope-derived soil the staged generator no longer uses).
 /// and to 7 for carved hollows (the `Recipe`'s `hollows` section grew from an empty
-/// marker into the shape the carve reads). Postcard
+/// marker into the shape the carve reads), and to 8 for layer-aware incision (the
+/// `Erosion` section's single per-iteration cap became a pair, chosen by the hardness of
+/// the bed being cut). Postcard
 /// is not self-describing, so a new field is a new format: earlier tags are refused,
 /// never migrated.
-pub const SCHEMA: u32 = 7;
+pub const SCHEMA: u32 = 8;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
