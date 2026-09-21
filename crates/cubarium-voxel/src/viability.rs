@@ -360,9 +360,6 @@ mod tests {
         assert_eq!(report.showers, 0, "{report}");
         assert!(!report.viable, "{report}");
         assert!(report.residual.abs() < 1e-9, "residual {}", report.residual);
-        assert!(
-            report.to_string().contains("NOT VIABLE"),
-            "{report}"
-        );
+        assert!(report.to_string().contains("NOT VIABLE"), "{report}");
     }
 }

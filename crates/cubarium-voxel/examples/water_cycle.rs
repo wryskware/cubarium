@@ -82,7 +82,9 @@ fn main() {
         config.initial_aquifer_head_m,
     );
 
-    println!("sim_min,stored,free,pore,aquifer,atmosphere,shower_left,showers,rain_in,evap,outlet,residual");
+    println!(
+        "sim_min,stored,free,pore,aquifer,atmosphere,shower_left,showers,rain_in,evap,outlet,residual"
+    );
     let total_ticks = (hours * 3600.0 * f64::from(TICK_HZ)) as u64;
     row(&world);
     let mut lo = f64::INFINITY;
@@ -126,9 +128,15 @@ fn verdict(v: &cubarium_voxel::VoxelView<'_>, drift: f64) -> String {
             v.config.shower_trigger_fraction * v.ledger.expected_total()
         )
     } else if drift.abs() <= 0.02 {
-        format!("BOUNDED CYCLE: drift {:+.3}% over the window", 100.0 * drift)
+        format!(
+            "BOUNDED CYCLE: drift {:+.3}% over the window",
+            100.0 * drift
+        )
     } else {
-        format!("DRIFTING: {:+.3}% of total water over the window", 100.0 * drift)
+        format!(
+            "DRIFTING: {:+.3}% of total water over the window",
+            100.0 * drift
+        )
     }
 }
 

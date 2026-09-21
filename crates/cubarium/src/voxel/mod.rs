@@ -51,6 +51,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use cubarium_render::Canvas;
+use cubarium_search::es::voxel::{EpisodeDriver, VoxelPolicyFile};
 use cubarium_surface::{Scale, Topology};
 use cubarium_voxel::{Command as VoxelCommand, Material, PoreBand, ViabilitySpec, World};
 use cubarium_voxel_fauna::{
@@ -60,7 +61,6 @@ use cubarium_voxel_fauna::{
 use cubarium_voxel_flora::{
     Command as FloraCommand, Flora, FloraConfig, FloraLedger, Site, Species,
 };
-use cubarium_search::es::voxel::{EpisodeDriver, VoxelPolicyFile};
 use cubarium_voxel_sim::{Arena, Sim, SimConfig};
 use serde::{Deserialize, Serialize};
 
@@ -361,7 +361,8 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     // flows, so a closed world starts with it open — otherwise the cycle never starts and
     // the run reports a world that is only standing still. `o` still toggles it.
     if sim.world().config().closed_water_budget && !sim.world().outlet_open() {
-        sim.world_mut().apply(VoxelCommand::SetOutlet { open: true });
+        sim.world_mut()
+            .apply(VoxelCommand::SetOutlet { open: true });
         eprintln!(
             "cubarium voxel: closed water budget — the outlet is open as the return flow \
              into the atmosphere, not an export"

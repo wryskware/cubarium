@@ -18,9 +18,9 @@
 //! total litter organic. The seed report goes to
 //! stderr so it never mixes with the CSV.
 
+use cubarium::voxel::VoxelConfig;
 use cubarium::voxel::habitat;
 use cubarium::voxel::scene;
-use cubarium::voxel::VoxelConfig;
 use cubarium_voxel::{Command as WorldCommand, World};
 use cubarium_voxel_fauna::{Fauna, FaunaConfig, Founder, Senses, Species as Beast, TICK_HZ};
 use cubarium_voxel_flora::{Flora, FloraConfig, Species as Plant};
@@ -40,9 +40,10 @@ const CLOSED_EVAPORATION_M_PER_S: f64 = 0.0001;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let hours: f64 = args
-        .get(1)
-        .map_or(6.0, |a| a.parse().expect("usage: voxel_census [HOURS] [authored|generated] [open|closed]"));
+    let hours: f64 = args.get(1).map_or(6.0, |a| {
+        a.parse()
+            .expect("usage: voxel_census [HOURS] [authored|generated] [open|closed]")
+    });
     let generated = args.get(2).is_some_and(|a| a == "generated");
     let closed = args.get(3).is_some_and(|a| a == "closed");
 
@@ -72,7 +73,10 @@ fn main() {
         }
         w
     } else {
-        assert!(!closed, "the closed budget is measured on the generated world");
+        assert!(
+            !closed,
+            "the closed budget is measured on the generated world"
+        );
         scene::authored(cfg.world.clone())
     };
     eprintln!(

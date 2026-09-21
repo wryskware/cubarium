@@ -2418,7 +2418,12 @@ mod closed_budget_tests {
         let took = w.apply(Command::AddAtmosphere { volume_m3: 0.5 });
         assert_eq!(took, 0.5);
         assert_eq!(w.apply(Command::AddAtmosphere { volume_m3: -1.0 }), 0.0);
-        assert_eq!(w.apply(Command::AddAtmosphere { volume_m3: f64::NAN }), 0.0);
+        assert_eq!(
+            w.apply(Command::AddAtmosphere {
+                volume_m3: f64::NAN
+            }),
+            0.0
+        );
         run(&mut w, TICKS);
         let v = w.view();
         assert_eq!(v.ledger.user_atmosphere_in, 0.5);
