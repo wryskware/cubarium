@@ -359,3 +359,79 @@ preset × seed PNGs, plus `default` seed 1 and `wide` seed 7 at
 `px_per_voxel = 8`.
 
 Return (≤40 lines) as before.
+
+## Slice 2c — integrated 2026-09-21
+
+Landed at e88080b, d5fcd82; schema 7 → 8. Result: the mechanism is sound on a
+bare fixture (2.10-voxel step against 1.09) and **does nothing on the presets**.
+Incision there is supply-limited: the sediment mantle satisfies the flow before
+it reaches rock; the deepest cut anywhere is 0.34 m, and sweeping both caps
+over 1:1 to 50:1 gains no 3-voxel step. A detachment-limited term was tried
+and reverted: it buried the landscape in debris (bare rock 24–43 % → 2.5–7 %).
+Walkability held everywhere. `small`'s erosion cap was lowered to keep the
+skyline pass under 5 %. Kept: the traversability check, the recipe cap pair.
+Conclusion: stream-power erosion at this scale and budget will not make
+cliffs; the steps have to come from structure.
+
+## Slice 2d — structural benches
+
+Owner: the same generator worker (Opus, high). Files: `generate.rs`
+(`heightfield`), `recipe.rs`, `hollows.rs` only if the undercut pass needs a
+parameter; nothing outside `cubarium-voxel`.
+
+**Decision.** Cliffs and ledges come from geology, not from the solver. Where a
+hard stratum outcrops in a rocky region the bedrock surface is **benched**: it
+follows the top of the hard band until the relief has fallen a band's
+thickness, then steps down to the next band's top. Soft regions stay smooth.
+Erosion then does what it already does well (mantle on flats, exposure on
+slopes); the sediment-only repose rule lets bedrock faces stand and drops a
+talus at the foot; and the undercut pass finally has hard-over-soft faces to
+notch, so grottos appear under ledges. This is the "layered design" and the
+art direction's exposed layers and abrupt cliffs, produced directly.
+
+Implementation sketch, the worker's call on details:
+
+- In `heightfield`, after relief and before erosion, compute for each sample
+  the hardness column below the raw surface. With `recipe.benches.strength`
+  (0..1, in the rocky mask only, weighted by the mask) pull the bedrock
+  surface toward the nearest hard-band top at or below the raw surface. At
+  strength 1 the rocky surface is a staircase of band tops; at 0 it is the
+  slice 1 surface. The bench face height is the strata spacing (`strata_m`,
+  1.6 m on `small`, whatever `default`/`wide` carry), so faces are 4–7 voxels.
+- The pull is periodic in X and continuous where the rocky mask fades, so a
+  bench ends in a ramp, not a wall. Do not bench within `benches.ramp_m` of a
+  mask edge.
+- Faces facing the camera (step down toward the front) are the visible
+  cliffs and the undercut sites; faces facing away are what the skyline pass
+  lowers, so bias the benching so that band tops, not band bottoms, sit at
+  the front of a bench (i.e. a bench slopes gently down toward the back
+  before its face). If the skyline pass climbs past 5 % on a preset, say so.
+- The undercut pass keys off the bench faces: hard cap at the top, soft band
+  below, notch back by `undercut_depth_m`. Expect undercuts > 0.
+
+Tests before the change, each under a second:
+
+1. Bench fixture: a rocky column band with two hard strata and a linear
+   ramp of relief across one band thickness ends with the bedrock surface on
+   the upper band top for the upper part and on the lower band top for the
+   lower part, with one step of at least one band thickness between them; a
+   soft-region copy of the same ramp is unchanged.
+2. Ramp-out: at the rocky mask's edge the surface difference between benched
+   and unbenched is continuous (no step over one voxel across the edge).
+3. Repose keeps bedrock: a 6-voxel bedrock step with a one-voxel sediment
+   veneer, after `relax`, keeps its bedrock step and has its sediment at the
+   foot (extend the existing repose test).
+4. Presets: with benches on, `default` and `wide` list at least one undercut
+   at both seeds and at least one column pair with a 3-voxel drop to a 1-cell
+   neighbour; all hollows visible; `isolated_voids` empty; walkable; skyline
+   pass under 5 %; all earlier tests green.
+
+Report per preset and seed as in 2c plus bench face count. Presets carry
+`benches` sections that produce a few benches per rocky region, not a
+staircase everywhere; `small` may need `strength` lower than the others.
+
+Visual check into the scratch directory under `terrain-slice2d/`: the six
+preset × seed PNGs plus `default` seed 1 and `wide` seed 7 at
+`px_per_voxel = 8`.
+
+Return (≤40 lines) as before.
