@@ -927,8 +927,12 @@ fn the_motor_respiration_counter_and_the_ledger_split_track_one_interval() {
 /// instance.
 ///
 /// The parent here is a browser founder at full stores: `body_max` 0.05 is above the
-/// `birth_body` 0.03 and a full reserve 0.025 is above the `birth_cost` 0.01, so the
-/// first tick's birth rule fires. Nothing is free: the parcel leaves the parent's
+/// `birth_body` 0.03 and a full reserve 0.025 is above the `birth_cost` 0.01 plus this
+/// test's `surplus_floor`, so it is eligible from the first tick. The shipped hold,
+/// gestation and interval are minutes long, so this test runs the rule on **its own**
+/// short placeholders — a quarter-second hold, a quarter-second gestation, a
+/// half-second interval — which is what keeps it inside the round's 200-tick bar
+/// without weakening what it asserts. Nothing is free: the parcel leaves the parent's
 /// reserve with its mineral and energy pro rata, which the fauna residual below checks.
 #[test]
 fn a_born_founder_gets_a_fresh_controller_of_its_parents_kind() {
@@ -971,7 +975,18 @@ fn a_born_founder_gets_a_fresh_controller_of_its_parents_kind() {
 
     let world = flat_world();
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut config = FaunaConfig::default();
+    let browser = Founder::Browser.index();
+    config.founders[browser].core.reproduction = cubarium_voxel_fauna::Reproduction {
+        surplus_floor: 0.001,
+        surplus_hold_s: 0.25,
+        gestation_s: 0.25,
+        birth_interval_s: 0.5,
+        ..cubarium_voxel_fauna::Reproduction::LIVE_BIRTH_PLACEHOLDER
+    };
+    let hold = config.founders[browser].core.reproduction.hold_ticks();
+    let gestation = config.founders[browser].core.reproduction.gestation_ticks();
+    let mut fauna = Fauna::new(config);
     fauna.set_founder_factory(Founder::Browser, Arc::new(make));
     assert!(fauna.has_founder_factory(Founder::Browser));
     assert!(!fauna.has_founder_factory(Founder::Blind));
@@ -993,10 +1008,15 @@ fn a_born_founder_gets_a_fresh_controller_of_its_parents_kind() {
     assert_eq!(tally.lock().unwrap().built, 1);
 
     let organic_before = fauna.view().organic();
-    fauna.step(&world, &mut flora);
+    for _ in 0..hold + gestation {
+        fauna.step(&world, &mut flora);
+    }
 
     let born = fauna.view().ledger.born;
-    assert_eq!(born, 1, "the full-stores browser founder paid for a newborn");
+    assert_eq!(
+        born, 1,
+        "the full-stores browser founder held its surplus, gestated and gave birth"
+    );
     let newborns: Vec<u64> = fauna
         .view()
         .animals
@@ -1018,10 +1038,11 @@ fn a_born_founder_gets_a_fresh_controller_of_its_parents_kind() {
     );
 
     // Both bodies are driven from here on, each through its own controller: two distinct
-    // slots both advance. The birth rule has no cooldown — a parent that can still pay
-    // pays again on the next tick — so the count to check is one controller per body
-    // ever created, and that is what is asserted rather than a fixed number of bodies.
-    for _ in 0..20 {
+    // slots both advance. The parent now owes a refractory and then another hold and
+    // gestation before it can pay again, so the count to check is one controller per
+    // body ever created, and that is what is asserted rather than a fixed number of
+    // bodies.
+    for _ in 0..40 {
         fauna.step(&world, &mut flora);
     }
     let tally = tally.lock().unwrap();

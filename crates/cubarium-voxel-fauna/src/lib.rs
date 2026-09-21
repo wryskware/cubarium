@@ -235,6 +235,15 @@ pub struct Animal {
     /// The founder's held actions and prior-interval feedback. All-default for a
     /// heuristic body (`founder: None`), which never reads it.
     pub founder_state: FounderState,
+    /// Where this body is in its own reproductive cycle: the surplus it has held, the
+    /// refractory left after its last offspring, and the escrow it is filling.
+    ///
+    /// **On the animal and not in [`FounderState`]**, which the reproduction brief
+    /// suggested, because the rule is not a founder's: a body with no lineage runs the
+    /// same eligibility, hold and gestation ([`Reproduction::LIVE_BIRTH_PLACEHOLDER`]),
+    /// and `FounderState` is documented as the controller's interval state that a
+    /// heuristic body never reads.
+    pub reproduction: ReproductionState,
     /// Organic structure. Below `body_min` it is dead.
     pub body: f64,
     /// Organic matter maintenance is paid from before the body is.
@@ -252,9 +261,272 @@ pub struct Animal {
 }
 
 impl Animal {
-    /// Organic matter in the animal: structure plus reserve. What a corpse deposits.
+    /// Organic matter in the animal: structure plus reserve. What a corpse deposits —
+    /// a gestation is always resolved before a body dies, so its escrow is back in the
+    /// reserve by the time this is read for a corpse.
     pub fn organic(&self) -> f64 {
         self.body + self.reserve
+    }
+
+    /// Organic matter this body **holds**, the escrowed offspring included: what the
+    /// layer's stored total counts, and what leaves with a body an
+    /// [`Command::Remove`] or a collapsing floor takes out of the world.
+    ///
+    /// The escrow is not the parent's to spend — no rule reads it as reserve, and
+    /// maintenance cannot touch it — but it is still in the parent until it is born,
+    /// so a conservation check that ignored it would see matter vanish at the first
+    /// instalment.
+    pub fn stored_organic(&self) -> f64 {
+        self.organic() + self.reproduction.escrow.map_or(0.0, |e| e.organic)
+    }
+
+    /// Mineral in this body, the escrowed offspring's included.
+    pub fn stored_mineral(&self) -> f64 {
+        self.mineral + self.reproduction.escrow.map_or(0.0, |e| e.mineral)
+    }
+
+    /// Energy in this body, the escrowed offspring's included.
+    pub fn stored_energy(&self) -> f64 {
+        self.energy + self.reproduction.escrow.map_or(0.0, |e| e.energy)
+    }
+}
+
+/// Where a body is in its own reproductive cycle ([`step`]'s step 7).
+///
+/// Three pieces of state, one per clause of the rule: how long the surplus has stood,
+/// how long the body must wait after its last offspring, and the package it is
+/// currently paying for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ReproductionState {
+    /// Consecutive ticks the body has been **eligible** — structure at `birth_body` and
+    /// a reserve at or above the offspring package plus `surplus_floor`. Any tick below
+    /// resets it to zero, which is what makes the hold a *sustained* surplus and not a
+    /// momentary one.
+    pub surplus_ticks: u64,
+    /// Ticks of refractory still owed after the last birth or laying. Nothing about
+    /// eligibility advances while this is above zero.
+    pub refractory_ticks: u64,
+    /// The offspring package being filled, for a gestating body. `None` is a body that
+    /// is not gestating; an egg-laying body never has one.
+    pub escrow: Option<Escrow>,
+}
+
+/// An offspring package the parent has already paid for and cannot spend.
+///
+/// The three currencies leave the parent's reserve in equal instalments over
+/// `gestation_s` and sit here until the birth builds a body out of them. The escrow
+/// pays no upkeep of its own and the parent's maintenance is unchanged: it is not a
+/// second animal yet, and it is not the parent's reserve any more.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Escrow {
+    pub organic: f64,
+    pub mineral: f64,
+    pub energy: f64,
+    /// Instalments paid so far. The birth is at `gestation_ticks`.
+    pub ticks: u64,
+}
+
+/// A clutch of eggs: a **stationary paid package in the world**, on the support face
+/// the parent laid it on.
+///
+/// It is not an animal — it has no body, no controller, no pose and no upkeep — and it
+/// is not a plant-layer pool either: the material is still the animal layer's, and the
+/// layer's stored totals count it, until the eggs hatch into bodies or the site takes
+/// them. Nothing eats a clutch yet; the record carries its site and its three
+/// currencies so that a consumer can be added later without changing what an egg *is*.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Clutch {
+    /// The support face the eggs lie on.
+    pub site: Site,
+    /// Eggs still in the clutch. They hatch together.
+    pub count: u32,
+    /// The clutch's organic matter, all eggs together. One egg is `organic / count`.
+    pub organic: f64,
+    pub mineral: f64,
+    pub energy: f64,
+    /// The tick the clutch was laid; incubation is counted from it.
+    pub laid_tick: u64,
+    /// The lineage that laid it, which is the lineage its hatchlings carry and the
+    /// factory their controllers come from.
+    pub lineage: Founder,
+}
+
+impl Clutch {
+    /// What one egg holds: the clutch split `count` ways.
+    pub fn egg(&self) -> Taken {
+        let n = f64::from(self.count.max(1));
+        Taken {
+            organic: self.organic / n,
+            mineral: self.mineral / n,
+            energy: self.energy / n,
+        }
+    }
+}
+
+/// How a lineage puts its offspring into the world.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BirthMode {
+    /// Live birth out of a gestation escrow: one offspring at a time, at the parent's
+    /// pose, at term.
+    Gestation,
+    /// A clutch of eggs laid on the litter the parent lives in, hatching where they lie.
+    Eggs,
+}
+
+/// A lineage's reproduction: **every number here is an untuned placeholder**
+/// (`design/backlog.md` §1, `design/handoffs/voxel-reproduction-2026-09-21.md`), chosen
+/// to encode "births after a sustained surplus, one at a time, with an interval" at the
+/// scale the frozen physiology already sets. Nothing measured any of them and there was
+/// no tuning loop.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Reproduction {
+    pub mode: BirthMode,
+    /// Reserve a body must hold **above** the offspring package's price before it counts
+    /// as being in surplus.
+    pub surplus_floor: f64,
+    /// Seconds the surplus must stand, unbroken, before anything begins.
+    pub surplus_hold_s: f64,
+    /// Seconds a gestation takes, over which the escrow is filled in equal instalments.
+    /// [`BirthMode::Eggs`] does not read it.
+    pub gestation_s: f64,
+    /// The share of an interrupted gestation's escrowed **organic matter** that is
+    /// respired; the rest returns to the parent, and the mineral all returns, because
+    /// respiration in this layer never takes mineral.
+    pub gestation_loss_fraction: f64,
+    /// Seconds of refractory after a birth or a laying, before a surplus can start
+    /// accumulating again.
+    pub birth_interval_s: f64,
+    /// Eggs in one clutch. [`BirthMode::Gestation`] does not read it.
+    pub clutch_size: u32,
+    /// Organic matter in **one** egg, which must be at least the lineage's `body_min`:
+    /// a hatchling is a `body_min` juvenile with what is left over as its reserve.
+    pub egg_organic: f64,
+    /// Seconds a clutch incubates before it hatches.
+    pub incubation_s: f64,
+}
+
+impl Reproduction {
+    /// The frondgrazer's gestation placeholders, and the table a body with **no**
+    /// lineage runs: the browser founder is the frondgrazer, so the live heuristic
+    /// species and the browser lineage reproduce the same way.
+    ///
+    /// Against the frondgrazer's frozen physiology (`birth_cost` 0.01, a reserve
+    /// ceiling of 0.025 at `body_max`): eligibility at 0.015 is 60 % of a full reserve,
+    /// so it is a real surplus and not a full tank; the escrow fills at
+    /// `0.01 / 180 s` = 5.6e-5 /s against a basal upkeep of 5e-5 /s at `body_max`, so
+    /// gestating roughly doubles what the parent is paying out; and hold + gestation +
+    /// interval put at least 10 minutes between one parent's offspring.
+    pub const LIVE_BIRTH_PLACEHOLDER: Reproduction = Reproduction {
+        mode: BirthMode::Gestation,
+        surplus_floor: 0.005,
+        surplus_hold_s: 120.0,
+        gestation_s: 180.0,
+        gestation_loss_fraction: 0.25,
+        birth_interval_s: 300.0,
+        clutch_size: 0,
+        egg_organic: 0.0,
+        incubation_s: 0.0,
+    };
+
+    /// The littershredder's egg placeholders.
+    ///
+    /// `clutch_size` is **1** and that is a consequence, not a preference: the blind
+    /// founder's frozen physiology puts `body_min` at 0.003125 and caps its reserve at
+    /// `reserve_cap · body_max` = 0.00625, so a viable egg costs at least a body_min
+    /// plus something to hatch with and two of them cannot be paid for out of one
+    /// reserve at all. Raising it needs the blind body's reserve ceiling or its
+    /// `body_min` revisited, which is a physiology decision and not this round's
+    /// (`design/backlog.md` §1). The rule itself is written for any count.
+    pub const EGGS_PLACEHOLDER: Reproduction = Reproduction {
+        mode: BirthMode::Eggs,
+        surplus_floor: 0.000_625,
+        surplus_hold_s: 120.0,
+        gestation_s: 0.0,
+        gestation_loss_fraction: 0.25,
+        birth_interval_s: 300.0,
+        clutch_size: 1,
+        egg_organic: 0.004,
+        incubation_s: 300.0,
+    };
+
+    /// What one offspring package costs the parent's reserve: a gestation's `birth_cost`
+    /// or a whole clutch.
+    pub fn package_cost(&self, sc: &SpeciesConfig) -> f64 {
+        match self.mode {
+            BirthMode::Gestation => sc.birth_cost,
+            BirthMode::Eggs => f64::from(self.clutch_size) * self.egg_organic,
+        }
+    }
+
+    /// The reserve a body has to hold to be in surplus: the package plus the floor.
+    pub fn surplus_reserve(&self, sc: &SpeciesConfig) -> f64 {
+        self.package_cost(sc) + self.surplus_floor
+    }
+
+    /// Whole ticks, never below one, for a duration in seconds.
+    fn ticks(seconds: f64) -> u64 {
+        let t = (seconds * f64::from(TICK_HZ)).round();
+        if !t.is_finite() || t < 1.0 {
+            1
+        } else {
+            t as u64
+        }
+    }
+
+    pub fn hold_ticks(&self) -> u64 {
+        Reproduction::ticks(self.surplus_hold_s)
+    }
+
+    pub fn gestation_ticks(&self) -> u64 {
+        Reproduction::ticks(self.gestation_s)
+    }
+
+    pub fn interval_ticks(&self) -> u64 {
+        Reproduction::ticks(self.birth_interval_s)
+    }
+
+    pub fn incubation_ticks(&self) -> u64 {
+        Reproduction::ticks(self.incubation_s)
+    }
+
+    /// Structural refusals only, in [`SpeciesConfig::validate`]'s shape: finite
+    /// nonnegative numbers, a loss fraction that is a fraction, and — for an egg layer —
+    /// a clutch of at least one egg each of which can build a `body_min` hatchling.
+    /// **Not** a plausibility check on the placeholders themselves.
+    pub fn validate(&self, name: &str, sc: &SpeciesConfig) -> Result<(), String> {
+        let fields: [(&str, f64); 6] = [
+            ("surplus_floor", self.surplus_floor),
+            ("surplus_hold_s", self.surplus_hold_s),
+            ("gestation_s", self.gestation_s),
+            ("gestation_loss_fraction", self.gestation_loss_fraction),
+            ("birth_interval_s", self.birth_interval_s),
+            ("incubation_s", self.incubation_s),
+        ];
+        for (field, v) in fields {
+            if !v.is_finite() || v < 0.0 {
+                return Err(format!(
+                    "{name}.{field} must be finite and nonnegative, not {v}"
+                ));
+            }
+        }
+        if !(self.gestation_loss_fraction <= 1.0) {
+            return Err(format!(
+                "{name}.gestation_loss_fraction must be at most 1, not {}",
+                self.gestation_loss_fraction
+            ));
+        }
+        if self.mode == BirthMode::Eggs {
+            if self.clutch_size == 0 {
+                return Err(format!("{name}.clutch_size must be at least one egg"));
+            }
+            if !(self.egg_organic.is_finite() && self.egg_organic >= sc.body_min) {
+                return Err(format!(
+                    "{name}.egg_organic {} cannot build a hatchling of body_min {}",
+                    self.egg_organic, sc.body_min
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -371,6 +643,16 @@ pub struct SpeciesConfig {
     /// nothing else: every other unit of energy in this layer came in with a bite at the
     /// food's own density, and a newborn takes its parent's pro rata.
     pub energy_density: f64,
+    /// How a body of this kind puts offspring into the world: the gestation escrow or a
+    /// clutch of eggs, with the thresholds and intervals both rules run on
+    /// ([`Reproduction`], `design/handoffs/voxel-reproduction-2026-09-21.md`).
+    ///
+    /// It rides here, inside the founder's own physiology and inside the placeholder
+    /// species', because [`effective_config`] is already the one lookup every rule uses
+    /// to ask what numbers a body runs on, and reproduction is not a different kind of
+    /// question. A body with no lineage therefore reproduces by its species' table, and
+    /// the browser founder — which *is* the frondgrazer — shares that table with it.
+    pub reproduction: Reproduction,
 }
 
 impl SpeciesConfig {
@@ -406,6 +688,7 @@ impl SpeciesConfig {
             step_period_s: 1.0,
             sense_radius: 8,
             energy_density: 2.0,
+            reproduction: Reproduction::LIVE_BIRTH_PLACEHOLDER,
         }
     }
 
@@ -484,6 +767,7 @@ impl SpeciesConfig {
                 self.birth_cost, self.body_min
             ));
         }
+        self.reproduction.validate(name, self)?;
         Ok(())
     }
 }
@@ -634,11 +918,11 @@ pub struct FaunaLedger {
     /// founder's paid motor respiration, and anything assimilated that a full body and a
     /// full reserve could not hold. Mineral never crosses this boundary.
     ///
-    /// The three split counters below sum to this **to the bit** — every booking adds the
+    /// The four split counters below sum to this **to the bit** — every booking adds the
     /// same addend to the total and to one split at the same point — so a driver reads
-    /// an interval's or an episode's upkeep, motor and digestion charges apart without a
-    /// second ledger. The ES pilot's score needs the motor term apart from upkeep
-    /// (`design/voxel-senses-phase1-tests.md` §2).
+    /// an interval's or an episode's upkeep, motor, digestion and failed-gestation
+    /// charges apart without a second ledger. The ES pilot's score needs the motor term
+    /// apart from upkeep (`design/voxel-senses-phase1-tests.md` §2).
     pub respired_out: f64,
     /// The `respired_out` share that was basal upkeep.
     pub respired_maintenance_out: f64,
@@ -647,6 +931,11 @@ pub struct FaunaLedger {
     /// The `respired_out` share that was digestion: the undigested fraction of a bite and
     /// assimilated matter neither the body nor the reserve could hold.
     pub respired_digestion_out: f64,
+    /// The `respired_out` share that was an **interrupted gestation**:
+    /// `gestation_loss_fraction` of the escrow of a parent that could not pay its next
+    /// instalment or died carrying one. The fourth split, and the only one that is not
+    /// something a living body spent on itself.
+    pub respired_gestation_out: f64,
     /// The energy that left with it, at the density of the stock it left.
     pub heat_out: f64,
     /// Organic matter, mineral and energy handed back to the plant layer by
@@ -669,8 +958,22 @@ pub struct FaunaLedger {
     /// flux, and the source of [`Animal::id`]. `births − introduced` is how many were
     /// born here.
     pub births: u64,
-    /// Animals born of a parent's reserve.
+    /// Animals born of a parent's reserve: a live birth out of a gestation escrow, and
+    /// a hatchling out of an egg the parent paid for. `births − introduced == born`.
     pub born: u64,
+    /// The `born` share that came out of an egg.
+    pub hatched: u64,
+    /// Gestations begun, and the ones that ended without a birth because the parent
+    /// could not pay an instalment or died carrying the escrow. `opened − failed` is
+    /// the number that reached term, once no gestation is still running.
+    pub gestations_opened: u64,
+    pub gestations_failed: u64,
+    /// Clutches laid, and the eggs in them.
+    pub clutches_laid: u64,
+    pub eggs_laid: u64,
+    /// Eggs lost with their site: the face was taken away or drowned, and the clutch
+    /// went to carrion where it lay.
+    pub eggs_lost: u64,
     /// Animals an [`Command::Introduce`] put into the world.
     pub introduced: u64,
     /// Animals that died: starved below `body_min`, or drowned.
@@ -768,6 +1071,9 @@ pub struct FaunaView<'a> {
     /// Sorted by [`Animal::id`], which never changes: an animal keeps its place in this
     /// slice for its whole life, whatever it walks over.
     pub animals: &'a [Animal],
+    /// The clutches standing in the world, in the order they were laid. Not animals:
+    /// stationary paid packages this layer still owns until they hatch.
+    pub clutches: &'a [Clutch],
     pub ledger: &'a FaunaLedger,
 }
 
@@ -786,19 +1092,48 @@ impl<'a> FaunaView<'a> {
         self.animals.iter().filter(move |a| a.site == site)
     }
 
-    /// Organic matter in every animal: structure plus reserve.
+    /// Organic matter this layer holds: every animal's structure and reserve, the
+    /// escrowed offspring inside gestating parents, and the eggs standing in the world.
+    /// This is the stock the ledger's `expected_organic` is checked against, so every
+    /// package the layer owns has to be in it or a paid offspring would read as matter
+    /// created or destroyed.
     pub fn organic(&self) -> f64 {
-        self.animals.iter().map(Animal::organic).sum()
+        self.animals.iter().map(Animal::stored_organic).sum::<f64>()
+            + self.clutches.iter().map(|c| c.organic).sum::<f64>()
     }
 
-    /// Mineral in every animal's tissue.
+    /// Mineral in every animal's tissue, its escrow and every standing clutch.
     pub fn mineral(&self) -> f64 {
-        self.animals.iter().map(|a| a.mineral).sum()
+        self.animals.iter().map(Animal::stored_mineral).sum::<f64>()
+            + self.clutches.iter().map(|c| c.mineral).sum::<f64>()
     }
 
-    /// Energy in every animal's tissue.
+    /// Energy in every animal's tissue, its escrow and every standing clutch.
     pub fn energy(&self) -> f64 {
-        self.animals.iter().map(|a| a.energy).sum()
+        self.animals.iter().map(Animal::stored_energy).sum::<f64>()
+            + self.clutches.iter().map(|c| c.energy).sum::<f64>()
+    }
+
+    /// Eggs of one lineage standing in the world, over every clutch.
+    pub fn eggs_by_founder(&self, founder: Founder) -> u64 {
+        self.clutches
+            .iter()
+            .filter(|c| c.lineage == founder)
+            .map(|c| u64::from(c.count))
+            .sum()
+    }
+
+    /// Bodies of one lineage currently carrying a gestation escrow.
+    pub fn gestating_by_founder(&self, founder: Founder) -> u64 {
+        self.animals
+            .iter()
+            .filter(|a| a.founder == Some(founder) && a.reproduction.escrow.is_some())
+            .count() as u64
+    }
+
+    /// Every clutch on this face, in the order they were laid.
+    pub fn clutches_at(&self, site: Site) -> impl Iterator<Item = &'a Clutch> {
+        self.clutches.iter().filter(move |c| c.site == site)
     }
 }
 
@@ -908,6 +1243,10 @@ pub struct Fauna {
     /// A `Vec` with a binary search, never a `HashMap`: this layer iterates nothing
     /// unordered.
     animals: Vec<Animal>,
+    /// The clutches standing in the world, in the order they were laid — which is
+    /// parent id order within a tick and tick order between ticks, so every pass over
+    /// them is the same order however the world runs.
+    clutches: Vec<Clutch>,
     ledger: FaunaLedger,
     /// Whether paid births run in [`step`]. Defaults to **true**, which is the live world's
     /// rule and changes nothing. An isolated arena sets it false
@@ -965,6 +1304,7 @@ impl Fauna {
             config,
             tick: 0,
             animals: Vec::new(),
+            clutches: Vec::new(),
             ledger: FaunaLedger::default(),
             births_enabled: true,
             controllers: FounderControllers::default(),
@@ -1083,6 +1423,7 @@ impl Fauna {
             config: &self.config,
             tick: self.tick,
             animals: &self.animals,
+            clutches: &self.clutches,
             ledger: &self.ledger,
         }
     }
@@ -1246,6 +1587,7 @@ impl Fauna {
             pose,
             founder,
             founder_state: FounderState::default(),
+            reproduction: ReproductionState::default(),
             body,
             reserve,
             mineral: sc.n_tissue * organic,
@@ -1322,11 +1664,13 @@ impl Fauna {
         }
     }
 
-    /// An animal leaving the world without a corpse.
+    /// An animal leaving the world without a corpse takes **everything it holds**, the
+    /// escrowed offspring included: an unborn package is not left behind on an empty
+    /// face, and it is not a death, so it is not carrion either.
     fn book_removed(&mut self, a: &Animal) {
-        self.ledger.removed_organic_out += a.organic();
-        self.ledger.removed_mineral_out += a.mineral;
-        self.ledger.removed_energy_out += a.energy;
+        self.ledger.removed_organic_out += a.stored_organic();
+        self.ledger.removed_mineral_out += a.stored_mineral();
+        self.ledger.removed_energy_out += a.stored_energy();
         self.book_departure(a, Departure::Removed);
     }
 

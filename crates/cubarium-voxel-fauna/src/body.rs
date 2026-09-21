@@ -46,7 +46,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::controller::Actions;
 use crate::manifest::{Founder, Manifest};
-use crate::{Animal, Fauna, SpeciesConfig};
+use crate::{Animal, Fauna, Reproduction, SpeciesConfig};
 
 /// The cue-unit reference the plan fixes for the litter cue (`M_emit`, "Initial cue
 /// field settings"): the field emits `min(litter / M_EMIT, 1)` cue units per second. The
@@ -126,6 +126,8 @@ impl FounderPhysiology {
                     step_period_s: 1.0,
                     sense_radius: 8,
                     energy_density: 2.0,
+                    // The littershredder lays a clutch on the litter it lives in.
+                    reproduction: Reproduction::EGGS_PLACEHOLDER,
                 },
                 motor_respiration_per_s: 0.001,
                 organ_structure_fraction: 0.05,
@@ -135,6 +137,8 @@ impl FounderPhysiology {
                 // stand, including their deliberately mineral-hungry tissue against
                 // foliage. Only the cost settings are new.
                 core: SpeciesConfig::frondgrazer(),
+                // The frondgrazer gives live birth out of a gestation escrow, which is
+                // in `SpeciesConfig::frondgrazer`'s own table.
                 motor_respiration_per_s: 0.001,
                 organ_structure_fraction: 0.10,
             },

@@ -11,7 +11,9 @@
 //! nothing about them.
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
-use cubarium_voxel_fauna::{Command, DT, Fauna, FaunaConfig, Species, SpeciesConfig, State};
+use cubarium_voxel_fauna::{
+    Command, DT, Fauna, FaunaConfig, Reproduction, Species, SpeciesConfig, State,
+};
 use cubarium_voxel_flora::{Command as FloraCommand, Flora, FloraConfig, Site, Species as Plant};
 
 // ------------------------------------------------------------------- fixtures
@@ -108,6 +110,27 @@ fn config_with(edit: impl FnOnce(&mut SpeciesConfig)) -> FaunaConfig {
     let mut c = FaunaConfig::default();
     edit(c.species_mut(Species::Frondgrazer));
     c
+}
+
+/// The gestation rule at its **shortest**: a one-tick hold, a one-tick gestation and a
+/// one-tick interval, so a birth lands on the tick a body becomes eligible and the
+/// arithmetic of one paid parcel is visible in one step.
+///
+/// The shipped placeholders are minutes long
+/// (`design/handoffs/voxel-reproduction-2026-09-21.md`), and these cases are about
+/// **what a birth costs and what a newborn holds**, not about how long the parent had
+/// to wait for it. Running them on the shipped intervals would be a 10,000-tick test of
+/// the same three numbers. The floor is dropped to zero for the same reason: the cases
+/// were written against `reserve >= birth_cost`, which is exactly the eligibility this
+/// leaves.
+fn fast_births(s: &mut SpeciesConfig) {
+    s.reproduction = Reproduction {
+        surplus_floor: 0.0,
+        surplus_hold_s: DT,
+        gestation_s: DT,
+        birth_interval_s: DT,
+        ..Reproduction::LIVE_BIRTH_PLACEHOLDER
+    };
 }
 
 /// The animal layer's three residuals, in the shape the flora tests use.
@@ -702,11 +725,14 @@ fn a_stand_outside_the_radius_is_found_through_a_face_inside_it() {
 /// A birth is paid out of the parent's reserve, exactly `birth_cost` of it, and the
 /// newborn stands on its parent's face at `body_min` with the remainder as its reserve and
 /// its share of the parent's mineral and energy. Nothing crosses the layer's boundary.
+///
+/// On [`fast_births`], so the whole cost is one instalment on the tick the parent
+/// becomes eligible and this stays a test of what a birth **costs**.
 #[test]
 fn a_birth_pays_birth_cost_and_the_newborn_is_at_body_min() {
     let world = plain(4, 2, 0.3, 5);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(config_with(fast_births));
     let parent = grazer(&mut fauna, &world, 1, 0.05);
     let before = *fauna.view().animal(parent).unwrap();
     let sc = *fauna.config().species(Species::Frondgrazer);
@@ -826,7 +852,7 @@ fn a_newborn_s_endowment_sits_above_the_intake_ceiling_and_is_spent_normally() {
     // ---- the exception, on a newborn in a world with nothing to eat.
     let world = plain(4, 2, 0.3, 5);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(config_with(fast_births));
     let parent = grazer(&mut fauna, &world, 1, sc.body_max);
     fauna.step(&world, &mut flora);
     let newborn = fauna
@@ -871,7 +897,7 @@ fn a_newborn_s_endowment_sits_above_the_intake_ceiling_and_is_spent_normally() {
     let world = plain(8, 2, 0.3, 5);
     let mut flora = Flora::new(FloraConfig::default());
     turf(&mut flora, &world, 3);
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(config_with(fast_births));
     let parent = grazer(&mut fauna, &world, 2, sc.body_max);
     fauna.step(&world, &mut flora);
     let newborn = fauna
@@ -902,21 +928,29 @@ fn a_newborn_s_endowment_sits_above_the_intake_ceiling_and_is_spent_normally() {
     assert_residual_pair(&flora, &fauna, "a fed newborn above the ceiling");
 }
 
-/// **R9.4's cheap case: one full default adult buys two young with nothing to eat.** Two
-/// ticks, two paid births out of one full reserve, and a third tick that cannot pay for
-/// another — `0.025` of reserve against `birth_cost` 0.01 twice, with the upkeep on top.
-/// Neither newborn reproduces: `body_min` is under `birth_body`.
+/// **R9.4's cheap case: one full default adult buys two young with nothing to eat.**
+/// Two paid births out of one full reserve, an interval tick between them, and nothing
+/// afterwards — `0.025` of reserve against `birth_cost` 0.01 twice, with the upkeep on
+/// top. Neither newborn reproduces: `body_min` is under `birth_body`. On
+/// [`fast_births`], so the reserve and not the clock is what stops the third.
 #[test]
 fn a_full_adult_buys_two_young_with_nothing_to_eat() {
     let world = plain(4, 2, 0.3, 5);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(config_with(fast_births));
     let sc = *fauna.config().species(Species::Frondgrazer);
     let parent = grazer(&mut fauna, &world, 1, sc.body_max);
     let stock = fauna.view().organic();
 
     fauna.step(&world, &mut flora);
     assert_eq!(fauna.view().ledger.born, 1, "the first young");
+    // The interval: the tick after a birth is refractory, whatever the reserve holds.
+    fauna.step(&world, &mut flora);
+    assert_eq!(
+        fauna.view().ledger.born,
+        1,
+        "the tick after a birth is the interval, and it pays for nothing"
+    );
     fauna.step(&world, &mut flora);
     assert_eq!(
         fauna.view().ledger.born,
@@ -930,11 +964,13 @@ fn a_full_adult_buys_two_young_with_nothing_to_eat() {
         "what is left cannot buy a third: {after:?}"
     );
 
-    fauna.step(&world, &mut flora);
+    for _ in 0..4 {
+        fauna.step(&world, &mut flora);
+    }
     assert_eq!(
         fauna.view().ledger.born,
         2,
-        "and the third tick buys nothing"
+        "and no later tick buys another"
     );
     assert_eq!(fauna.view().ledger.bites, 0, "with nothing eaten anywhere");
     // Two births are internal: the layer's organic matter moved only by respiration.
@@ -1086,9 +1122,9 @@ fn excess_mineral_is_excreted_as_litter() {
     let before = *fauna.view().animal(id).unwrap();
     fauna.step(&world, &mut flora);
     let v = fauna.view();
-    // Read the tissue placed off the ledger rather than off the animal: a full adult also
-    // pays for a newborn on this tick, and a birth is an internal transfer, so
-    // `respired_out = upkeep + bite - placed` is the only reading that is about the bite.
+    // Read the tissue placed off the ledger rather than off the animal: a birth is an
+    // internal transfer, so `respired_out = upkeep + bite - placed` is the only reading
+    // that is about the bite.
     let upkeep = sc.maintenance_per_s * before.body * DT;
     let placed = v.ledger.eaten_organic_in + upkeep - v.ledger.respired_out;
     assert!(
@@ -1102,8 +1138,9 @@ fn excess_mineral_is_excreted_as_litter() {
         v.ledger.deposited_mineral_out
     );
     assert_eq!(
-        v.ledger.born, 1,
-        "and it paid for a newborn out of the same reserve"
+        v.ledger.born, 0,
+        "and it paid for nothing: a full reserve is not a birth until the surplus has \
+         stood for the hold"
     );
     assert_residual_pair(&flora, &fauna, "after a full animal's bite");
 

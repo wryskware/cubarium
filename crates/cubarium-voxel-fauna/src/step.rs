@@ -30,9 +30,12 @@
 //!    equivalent displacement, the pose sweeps in bounded sub-steps, and on the due tick
 //!    one local bite is attempted through the plant layer's real transfers — then record
 //!    the interval's motion and intake feedback.
-//! 7. **Births.** An adult with the reserve for one pays it and a newborn appears on its
-//!    face. Only animals that were alive at the start of the tick can give birth, so a
-//!    newborn cannot itself breed on the tick it is born.
+//! 7. **Reproduction.** A clutch whose face is gone or drowned goes to carrion; every
+//!    body's surplus counter and refractory move; a gestating frondgrazer pays its
+//!    instalment into its escrow and gives birth at term; a littershredder in surplus
+//!    lays a clutch on the litter it stands on; and clutches at term hatch. Only bodies
+//!    that were alive at the start of the tick reproduce, so a newborn cannot itself
+//!    breed on the tick it appears.
 //! 8. **Death.** Starvation (`body < body_min`) or drowning (standing water deeper than
 //!    `drown_depth_m` on its own face) hands the whole animal back as **carrion** and
 //!    books a death.
@@ -64,10 +67,10 @@ use crate::{Animal, Departure, Fauna, IntervalFeedback, SpeciesConfig, State, st
 const DOMAIN_TARGET: u64 = 1;
 const DOMAIN_STEP: u64 = 2;
 
-/// What a respiration is for, as [`FaunaLedger`](crate::FaunaLedger) books it. The three
+/// What a respiration is for, as [`FaunaLedger`](crate::FaunaLedger) books it. The four
 /// split counters sum to `respired_out` to the bit — every booking adds the same addend
 /// to the total and to one split at the same point — so a driver can read the episode's
-/// upkeep, motor and digestion charges apart without a second ledger.
+/// upkeep, motor, digestion and failed-gestation charges apart without a second ledger.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Respiration {
     /// Basal upkeep, every animal.
@@ -78,6 +81,9 @@ enum Respiration {
     /// Digestion: the undigested fraction of a bite, and anything assimilated that a full
     /// body and a full reserve could not hold.
     Digestion,
+    /// An interrupted gestation: the loss fraction of an escrow whose parent could not
+    /// pay the next instalment, or died carrying it.
+    Gestation,
 }
 
 /// A deterministic scalar stream (splitmix64), keyed by the values that **identify** a
@@ -174,7 +180,7 @@ fn tick_inner(
             sense(fauna, &view, flora, seed, tick, threads)
         });
         cubarium_voxel::voxel_phase!(FaunaAct, { act(fauna, &view, flora, &plans, seed, tick) });
-        cubarium_voxel::voxel_phase!(FaunaBirths, { births(fauna) });
+        cubarium_voxel::voxel_phase!(FaunaBirths, { reproduce(fauna, &view, flora) });
         cubarium_voxel::voxel_phase!(FaunaDeaths, { deaths(fauna, &view, flora) });
         #[cfg(feature = "profile")]
         cubarium_voxel::profile::add(
@@ -254,6 +260,7 @@ fn book_respired(fauna: &mut Fauna, paid: f64, kind: Respiration) {
         Respiration::Maintenance => fauna.ledger.respired_maintenance_out += paid,
         Respiration::Motor => fauna.ledger.respired_motor_out += paid,
         Respiration::Digestion => fauna.ledger.respired_digestion_out += paid,
+        Respiration::Gestation => fauna.ledger.respired_gestation_out += paid,
     }
 }
 
@@ -966,62 +973,67 @@ fn wrapped_dx(width: i64, a: i64, b: i64) -> i64 {
     d.min(w - d)
 }
 
-/// Step 6: one newborn per adult that can pay for it, out of the parent's reserve.
+/// Step 7: **reproduction** — the gestation escrow, live birth, egg laying, incubation
+/// and hatching, in that one place.
 ///
-/// **A founder body breeds by this same rule.** The newborn inherits the parent's
-/// lineage marker and its pose, and it is paid for exactly as any other newborn is: the
-/// parcel leaves the parent's reserve with its mineral and energy pro rata, and the
-/// newborn starts at `body_min` with what is left of the parcel as its reserve. Nothing
-/// about a founder is free here.
+/// The rule the two founder lineages were given
+/// (`design/handoffs/voxel-reproduction-2026-09-21.md`, and the escrow of
+/// `design/evolution.md` §"Birth, mutation, and lineage"), replacing the placeholder
+/// that let any adult at `birth_body` with `birth_cost` of reserve give birth every
+/// tick it could:
 ///
-/// What it does **not** inherit is a mind. A newborn founder with no controller holds
-/// [`Actions::REST`] for ever while still paying upkeep, so each one is given a *fresh*
-/// controller of its own lineage from that lineage's registered
-/// [`crate::ControllerFactory`] — never the parent's instance, which would mean two
-/// bodies sharing one memory. A lineage with no factory registered breeds resting
-/// bodies, which is the pre-existing behaviour and is stated rather than papered over.
-fn births(fauna: &mut Fauna) {
+/// 1. **Eligibility.** Structure at `birth_body` and a reserve at or above the
+///    offspring package plus `surplus_floor`, held unbroken for `surplus_hold_s`. Any
+///    tick below the floor resets the counter, and a body inside its post-offspring
+///    refractory is not accumulating at all.
+/// 2. **Gestation** ([`crate::BirthMode::Gestation`]). The package leaves the reserve in
+///    equal instalments over `gestation_s` into an [`crate::Escrow`] on the animal,
+///    mineral and energy pro rata per instalment by the same fraction rule every other
+///    transfer in this world uses. The escrow pays no upkeep and the parent cannot
+///    spend it. A parent that cannot pay an instalment — or that dies carrying one —
+///    loses `gestation_loss_fraction` of the escrowed organic matter to respiration and
+///    gets the rest back, mineral included.
+/// 3. **Birth.** At term one newborn is built out of the escrow exactly as the old rule
+///    built one out of the reserve, and `birth_interval_s` of refractory follows.
+/// 4. **Laying** ([`crate::BirthMode::Eggs`]). A whole clutch is paid out of the reserve
+///    in one tick and left on the face the parent stands on, which must hold litter;
+///    otherwise nothing happens and nothing is paid. Then the same refractory.
+/// 5. **Incubation.** Eggs pay no upkeep. A clutch whose face is gone or under water
+///    deeper than the lineage's `drown_depth_m` goes to carrion where it lies; at
+///    `incubation_s` the rest hatch together into `body_min` juveniles holding what
+///    their egg had left.
+///
+/// **Paid, never free, at every step**: an offspring's organic matter, mineral and
+/// energy are the parent's, an interrupted gestation's loss is booked as respiration
+/// with its energy as heat, and a lost clutch is deposited. The layer's stored totals
+/// count an escrow and a clutch ([`crate::FaunaView::organic`]), so none of this can
+/// create or destroy matter without the residual saying so.
+///
+/// **A newborn or hatchling inherits no mind.** Each is given a *fresh* controller of
+/// its lineage from that lineage's registered [`crate::ControllerFactory`] — never the
+/// parent's instance, which would mean two bodies sharing one memory. A lineage with no
+/// factory registered breeds resting bodies, which is the pre-existing behaviour.
+fn reproduce(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
     if !fauna.births_enabled {
         return;
     }
+    clutch_fate(fauna, view, flora);
     let parents = fauna.animals.len();
     let mut newborns: Vec<Animal> = Vec::new();
     for i in 0..parents {
         let sc = body::effective_config(&fauna.config, &fauna.animals[i]);
-        let a = &mut fauna.animals[i];
-        if !(a.body >= sc.birth_body && a.reserve >= sc.birth_cost && sc.birth_cost > 0.0) {
-            continue;
+        let rule = sc.reproduction;
+        advance_eligibility(fauna, i, &sc, &rule);
+        match rule.mode {
+            crate::BirthMode::Gestation => {
+                if let Some(newborn) = gestate(fauna, i, &sc, &rule) {
+                    newborns.push(newborn);
+                }
+            }
+            crate::BirthMode::Eggs => lay(fauna, i, flora, &sc, &rule),
         }
-        // The parcel leaves the parent as a fraction of its whole material, so its mineral
-        // and its energy leave with it by the same fraction rule every other transfer in
-        // this world uses.
-        let before = a.organic();
-        let f = (sc.birth_cost / before).clamp(0.0, 1.0);
-        a.reserve -= sc.birth_cost;
-        let mineral = (a.mineral * f).min(a.mineral);
-        let energy = (a.energy * f).min(a.energy);
-        a.mineral -= mineral;
-        a.energy -= energy;
-        let (site, species) = (a.site, a.species);
-        let (pose, founder) = (a.pose, a.founder);
-        let id = fauna.ledger.births;
-        fauna.ledger.births += 1;
-        fauna.ledger.born += 1;
-        newborns.push(Animal {
-            id,
-            species,
-            site,
-            pose,
-            founder,
-            founder_state: crate::FounderState::default(),
-            body: sc.body_min,
-            reserve: sc.birth_cost - sc.body_min,
-            mineral,
-            energy,
-            age_ticks: 0,
-            state: State::Resting,
-        });
     }
+    hatch(fauna, view, &mut newborns);
     let fresh: Vec<(u64, Founder)> = newborns
         .iter()
         .filter_map(|n| n.founder.map(|f| (n.id, f)))
@@ -1036,29 +1048,347 @@ fn births(fauna: &mut Fauna) {
     }
 }
 
+/// The refractory counts down, and the surplus counter moves: up on an eligible tick,
+/// back to zero on any tick that is not. A body already gestating is not accumulating a
+/// *second* offspring's hold, so its counter stands still.
+fn advance_eligibility(
+    fauna: &mut Fauna,
+    i: usize,
+    sc: &SpeciesConfig,
+    rule: &crate::Reproduction,
+) {
+    let a = &mut fauna.animals[i];
+    if a.reproduction.refractory_ticks > 0 {
+        a.reproduction.refractory_ticks -= 1;
+        a.reproduction.surplus_ticks = 0;
+        return;
+    }
+    if a.reproduction.escrow.is_some() {
+        return;
+    }
+    let eligible = a.body >= sc.birth_body
+        && a.reserve >= rule.surplus_reserve(sc)
+        && rule.package_cost(sc) > 0.0;
+    if eligible {
+        a.reproduction.surplus_ticks += 1;
+    } else {
+        a.reproduction.surplus_ticks = 0;
+    }
+}
+
+/// One gestating body's tick: open an escrow when the hold has elapsed, pay this tick's
+/// instalment, and hand back the newborn at term. `None` on every other tick.
+fn gestate(
+    fauna: &mut Fauna,
+    i: usize,
+    sc: &SpeciesConfig,
+    rule: &crate::Reproduction,
+) -> Option<Animal> {
+    let a = &fauna.animals[i];
+    if a.reproduction.escrow.is_none() {
+        if a.reproduction.surplus_ticks < rule.hold_ticks() {
+            return None;
+        }
+        fauna.animals[i].reproduction.escrow = Some(crate::Escrow::default());
+        fauna.ledger.gestations_opened += 1;
+    }
+    let n = rule.gestation_ticks();
+    let paid = fauna.animals[i]
+        .reproduction
+        .escrow
+        .expect("an open escrow")
+        .ticks;
+    let k = paid + 1;
+    // The instalment is the distance to this tick's **cumulative target**, so the
+    // instalments sum to `birth_cost` exactly however the division rounds, and the last
+    // one closes whatever the earlier ones left.
+    let target = rule.package_cost(sc) * (k as f64 / n as f64);
+    let want = target
+        - fauna.animals[i]
+            .reproduction
+            .escrow
+            .expect("an open escrow")
+            .organic;
+    if want > 0.0 {
+        // "If the parent's reserve hits zero mid-gestation ... the gestation fails": a
+        // reserve that cannot pay this instalment in full is that condition, and a
+        // reserve at zero cannot pay anything. Nothing is part-paid.
+        if fauna.animals[i].reserve < want {
+            fail_gestation(fauna, i, rule);
+            return None;
+        }
+        let a = &mut fauna.animals[i];
+        let before = a.organic();
+        let f = if before > 0.0 {
+            (want / before).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let mineral = (a.mineral * f).min(a.mineral);
+        let energy = (a.energy * f).min(a.energy);
+        a.reserve -= want;
+        a.mineral -= mineral;
+        a.energy -= energy;
+        let e = a.reproduction.escrow.as_mut().expect("an open escrow");
+        e.organic += want;
+        e.mineral += mineral;
+        e.energy += energy;
+    }
+    let e = fauna.animals[i]
+        .reproduction
+        .escrow
+        .as_mut()
+        .expect("an open escrow");
+    e.ticks = k;
+    if k < n {
+        return None;
+    }
+    // Term. The escrow becomes the newborn, whole: this is the same parcel the parent
+    // paid for, so nothing is clamped and nothing is rounded away.
+    let e = fauna.animals[i]
+        .reproduction
+        .escrow
+        .take()
+        .expect("an open escrow");
+    let a = &mut fauna.animals[i];
+    a.reproduction.refractory_ticks = rule.interval_ticks();
+    a.reproduction.surplus_ticks = 0;
+    let (site, species, pose, founder) = (a.site, a.species, a.pose, a.founder);
+    let id = fauna.ledger.births;
+    fauna.ledger.births += 1;
+    fauna.ledger.born += 1;
+    Some(Animal {
+        id,
+        species,
+        site,
+        pose,
+        founder,
+        founder_state: crate::FounderState::default(),
+        reproduction: crate::ReproductionState::default(),
+        body: sc.body_min,
+        reserve: e.organic - sc.body_min,
+        mineral: e.mineral,
+        energy: e.energy,
+        age_ticks: 0,
+        state: State::Resting,
+    })
+}
+
+/// An interrupted gestation: the loss fraction of the escrowed organic matter is
+/// respired with the energy that was in it, and everything else — organic matter,
+/// **all** the mineral, the rest of the energy — goes back to the parent. The mineral
+/// comes back in full because respiration in this layer never takes mineral: it takes
+/// organic matter and leaves the mineral behind, in an animal as in a plant.
+fn fail_gestation(fauna: &mut Fauna, i: usize, rule: &crate::Reproduction) {
+    let Some(e) = fauna.animals[i].reproduction.escrow.take() else {
+        return;
+    };
+    fauna.ledger.gestations_failed += 1;
+    let lost = (e.organic * rule.gestation_loss_fraction).clamp(0.0, e.organic);
+    let heat = if e.organic > 0.0 {
+        (e.energy * (lost / e.organic)).min(e.energy)
+    } else {
+        0.0
+    };
+    let a = &mut fauna.animals[i];
+    a.reserve += e.organic - lost;
+    a.mineral += e.mineral;
+    a.energy += e.energy - heat;
+    if lost > 0.0 || heat > 0.0 {
+        book_respired(fauna, lost, Respiration::Gestation);
+        fauna.ledger.heat_out += heat;
+    }
+}
+
+/// One egg-laying body's tick: a whole clutch, paid out of the reserve in one tick and
+/// left on the face the body stands on.
+///
+/// The face has to hold litter — the littershredder lays in the litter it lives in —
+/// and a laying that has nowhere to go **costs nothing**: no escrow, no partial payment,
+/// no refractory, and the surplus keeps standing for the next tick.
+fn lay(fauna: &mut Fauna, i: usize, flora: &Flora, sc: &SpeciesConfig, rule: &crate::Reproduction) {
+    if fauna.animals[i].reproduction.surplus_ticks < rule.hold_ticks() {
+        return;
+    }
+    let Some(lineage) = fauna.animals[i].founder else {
+        return;
+    };
+    let site = fauna.animals[i].site;
+    if !flora.view().ground_at(site).is_some_and(|g| g.litter > 0.0) {
+        return;
+    }
+    let cost = rule.package_cost(sc);
+    let a = &mut fauna.animals[i];
+    if !(cost > 0.0) || a.reserve < cost {
+        return;
+    }
+    let before = a.organic();
+    let f = if before > 0.0 {
+        (cost / before).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let mineral = (a.mineral * f).min(a.mineral);
+    let energy = (a.energy * f).min(a.energy);
+    a.reserve -= cost;
+    a.mineral -= mineral;
+    a.energy -= energy;
+    a.reproduction.refractory_ticks = rule.interval_ticks();
+    a.reproduction.surplus_ticks = 0;
+    let laid_tick = fauna.tick;
+    fauna.clutches.push(crate::Clutch {
+        site,
+        count: rule.clutch_size,
+        organic: cost,
+        mineral,
+        energy,
+        laid_tick,
+        lineage,
+    });
+    fauna.ledger.clutches_laid += 1;
+    fauna.ledger.eggs_laid += u64::from(rule.clutch_size);
+}
+
+/// A clutch whose face the terrain took away, or that standing water has covered deeper
+/// than its lineage drowns in, is **lost to carrion where it lies** — the same deposit
+/// path a death uses, so the material goes back to the plant layer's pools and the
+/// ledger books it.
+fn clutch_fate(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
+    if fauna.clutches.is_empty() {
+        return;
+    }
+    let lost: Vec<crate::Clutch> = fauna
+        .clutches
+        .iter()
+        .filter(|c| {
+            let drown = fauna.config.founder(c.lineage).core.drown_depth_m;
+            !view.is_support(i64::from(c.site.x), c.site.y, c.site.z)
+                || view.water_depth_m(i64::from(c.site.x), c.site.y, c.site.z) > drown
+        })
+        .copied()
+        .collect();
+    if lost.is_empty() {
+        return;
+    }
+    fauna.clutches.retain(|c| {
+        let drown = fauna.config.founder(c.lineage).core.drown_depth_m;
+        view.is_support(i64::from(c.site.x), c.site.y, c.site.z)
+            && view.water_depth_m(i64::from(c.site.x), c.site.y, c.site.z) <= drown
+    });
+    for c in lost {
+        fauna.ledger.eggs_lost += u64::from(c.count);
+        fauna.book_deposit(
+            flora,
+            c.site,
+            DepositKind::Carrion,
+            Taken {
+                organic: c.organic,
+                mineral: c.mineral,
+                energy: c.energy,
+            },
+        );
+    }
+}
+
+/// Clutches at term hatch together: `count` `body_min` juveniles at the clutch's site,
+/// each holding one egg's share of what the clutch was paid, and each carrying the
+/// lineage that laid it.
+fn hatch(fauna: &mut Fauna, view: &VoxelView<'_>, newborns: &mut Vec<Animal>) {
+    if fauna.clutches.is_empty() {
+        return;
+    }
+    let tick = fauna.tick;
+    let due: Vec<crate::Clutch> = fauna
+        .clutches
+        .iter()
+        .filter(|c| {
+            let rule = fauna.config.founder(c.lineage).core.reproduction;
+            tick.saturating_sub(c.laid_tick) >= rule.incubation_ticks()
+        })
+        .copied()
+        .collect();
+    if due.is_empty() {
+        return;
+    }
+    fauna.clutches.retain(|c| {
+        let rule = fauna.config.founder(c.lineage).core.reproduction;
+        tick.saturating_sub(c.laid_tick) < rule.incubation_ticks()
+    });
+    let voxel_m = view.config.voxel_m;
+    for c in due {
+        let sc = fauna.config.founder(c.lineage).core;
+        // The last hatchling takes the remainder, so the clutch is divided exactly: the
+        // three currencies of `count` eggs add back up to what the parent paid.
+        let (mut left_o, mut left_m, mut left_e) = (c.organic, c.mineral, c.energy);
+        for k in 0..c.count {
+            let egg = c.egg();
+            let last = k + 1 == c.count;
+            let (o, m, e) = if last {
+                (left_o, left_m, left_e)
+            } else {
+                (egg.organic, egg.mineral, egg.energy)
+            };
+            left_o -= o;
+            left_m -= m;
+            left_e -= e;
+            let id = fauna.ledger.births;
+            fauna.ledger.births += 1;
+            fauna.ledger.born += 1;
+            fauna.ledger.hatched += 1;
+            newborns.push(Animal {
+                id,
+                species: crate::Species::Frondgrazer,
+                site: c.site,
+                pose: crate::Pose::at_site(c.site, voxel_m),
+                founder: Some(c.lineage),
+                founder_state: crate::FounderState::default(),
+                reproduction: crate::ReproductionState::default(),
+                body: sc.body_min,
+                reserve: o - sc.body_min,
+                mineral: m,
+                energy: e,
+                age_ticks: 0,
+                state: State::Resting,
+            });
+        }
+    }
+}
+
 /// Step 7: starvation and drowning, and the carrion they leave.
 fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
     // The cause is read off the same two clauses the rule is made of, in the order the
     // rule reads them: this is a label on an existing decision, not a second decision.
     // A body that satisfies both is `Starved`, which the `else if` fixes explicitly.
-    let dead: Vec<(Animal, Departure)> = fauna
+    let dying: Vec<(usize, Departure)> = fauna
         .animals
         .iter()
-        .filter_map(|a| {
+        .enumerate()
+        .filter_map(|(i, a)| {
             let sc = body::effective_config(&fauna.config, a);
             if a.body < sc.body_min {
-                Some((*a, Departure::Starved))
+                Some((i, Departure::Starved))
             } else if view.water_depth_m(i64::from(a.site.x), a.site.y, a.site.z) > sc.drown_depth_m
             {
-                Some((*a, Departure::Drowned))
+                Some((i, Departure::Drowned))
             } else {
                 None
             }
         })
         .collect();
-    if dead.is_empty() {
+    if dying.is_empty() {
         return;
     }
+    // A body that dies carrying an escrow loses the gestation first: the loss fraction
+    // is respired and the rest is back in the reserve before the corpse is weighed, so
+    // "the rest returns to the reserve (or the corpse)" is one path and not two.
+    for &(i, _) in &dying {
+        let rule = body::effective_config(&fauna.config, &fauna.animals[i]).reproduction;
+        fail_gestation(fauna, i, &rule);
+    }
+    let dead: Vec<(Animal, Departure)> = dying
+        .iter()
+        .map(|&(i, cause)| (fauna.animals[i], cause))
+        .collect();
     let ids: Vec<u64> = dead.iter().map(|(a, _)| a.id).collect();
     fauna.animals.retain(|a| !ids.contains(&a.id));
     for id in &ids {

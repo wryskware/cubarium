@@ -44,9 +44,16 @@ use crate::Fauna;
 /// but not one trained centre from another, so `install_founder_controllers` could not
 /// refuse a policy-driven world handed a *different* centre for the same lineage — only
 /// a bare demotion. A world saved under schema 7 has no honest digest to fill it with.
+/// Schema 9 is **reproduction** (`design/handoffs/voxel-reproduction-2026-09-21.md`):
+/// [`crate::ReproductionState`] on every animal — the surplus hold, the refractory and
+/// the gestation [`crate::Escrow`] — the [`crate::Clutch`] records standing in the
+/// world, and the ledger's egg, hatch and gestation counters with the fourth
+/// respiration split. A world saved under schema 8 has no honest value for any of them:
+/// its bodies were breeding under the placeholder rule that this one replaces, so there
+/// is nothing to carry across and nothing to synthesize.
 /// Postcard is not self-describing, so older worlds are **refused**, not migrated
 /// (`always-fresh-never-migrate`): start a fresh world.
-pub const SCHEMA: u32 = 8;
+pub const SCHEMA: u32 = 9;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -91,6 +98,11 @@ pub fn decode(bytes: &[u8]) -> anyhow::Result<Fauna> {
 /// the world within a tick. And a founder's held actions are bounded actions with finite
 /// feedback — the loader refuses anything that would drive a body outside the manifest's
 /// caps or feed the observation a non-finite channel.
+///
+/// A [`crate::Clutch`] is held to the same three conditions as a body — finite
+/// nonnegative currencies, at least one egg, and a laying tick that is not in the
+/// layer's future — because it is a paid package the stored totals count and an
+/// incubation counted from a future tick would never hatch.
 ///
 /// Postcard bytes are not the only way in: a hand-built or hand-edited snapshot is exactly
 /// what this is for, and a round trip of a live layer cannot fail it.
@@ -153,6 +165,21 @@ fn validate(fauna: &Fauna) -> Result<(), String> {
                 ));
             }
         }
+        let r = a.reproduction;
+        if let Some(e) = r.escrow {
+            for (field, value) in [
+                ("escrowed organic", e.organic),
+                ("escrowed mineral", e.mineral),
+                ("escrowed energy", e.energy),
+            ] {
+                if !value.is_finite() || value < 0.0 {
+                    return Err(format!(
+                        "animal #{}'s {field} is {value}, not a finite nonnegative stock",
+                        a.id
+                    ));
+                }
+            }
+        }
         if let Some(prev) = last {
             if a.id <= prev {
                 return Err(format!(
@@ -168,6 +195,36 @@ fn validate(fauna: &Fauna) -> Result<(), String> {
             return Err(format!(
                 "the next id is {} and animal #{max} already holds it: an id is never reused",
                 v.ledger.births
+            ));
+        }
+    }
+    // A clutch is a paid package the layer's stored totals count, so the same three
+    // conditions apply to it as to a body: finite nonnegative currencies, and at least
+    // one egg — a clutch of nothing is matter with nowhere to go.
+    for c in v.clutches {
+        if c.count == 0 {
+            return Err(format!(
+                "the clutch at {:?} holds no eggs: a clutch of nothing cannot hatch",
+                c.site
+            ));
+        }
+        for (field, value) in [
+            ("organic", c.organic),
+            ("mineral", c.mineral),
+            ("energy", c.energy),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(format!(
+                    "the clutch at {:?} has {field} {value}, not a finite nonnegative stock",
+                    c.site
+                ));
+            }
+        }
+        if c.laid_tick > v.tick {
+            return Err(format!(
+                "the clutch at {:?} was laid on tick {} and the layer is on tick {}: a \
+                 clutch cannot be laid in the future",
+                c.site, c.laid_tick, v.tick
             ));
         }
     }
@@ -199,6 +256,7 @@ mod tests {
             pose: crate::Pose::at_site(Site { x: 1, y: 2, z: 0 }, 1.0),
             founder: None,
             founder_state: crate::FounderState::default(),
+            reproduction: crate::ReproductionState::default(),
             body,
             reserve: 0.5 * body,
             mineral: 0.05 * body,
@@ -240,7 +298,10 @@ mod tests {
         fauna.ledger.bites_by_founder[crate::Founder::Browser.index()] = 3;
         fauna.ledger.assimilated_by_founder[crate::Founder::Browser.index()] = 2.5e-4;
         // A mind installed before the save is not part of the save.
-        assert!(fauna.set_controller(0, Box::new(crate::Scripted::new(vec![body.founder_state.held]))));
+        assert!(fauna.set_controller(
+            0,
+            Box::new(crate::Scripted::new(vec![body.founder_state.held]))
+        ));
 
         let bytes = encode(&fauna);
         let mut back = decode(&bytes).expect("a founder world round-trips");
