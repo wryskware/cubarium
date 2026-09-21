@@ -242,7 +242,8 @@ fn income_and_maintenance(
     let sc = fv.config.species(stand.species);
     let n0 = fv.ground_at(stand.site).map_or(0.0, |g| g.mineral);
     let maintenance = sc.maintenance * stand.wood * DT;
-    let substrate = fv.dead_wood_in_box(view, stand.site, sc);
+    // Substrate is dead wood plus litter since S2 (3d1841b): the sum the gate and income read.
+    let substrate = fv.substrate_in_box(view, stand.site, sc);
     let income = match sc.trophic {
         Trophic::Photo => {
             let monod = if n0 + sc.nutrient_half > 0.0 {
@@ -353,8 +354,8 @@ fn failed_gates(g: &Gates, sc: &SpeciesConfig) -> String {
     }
     if !g.substrate_ok {
         out.push(format!(
-            "dead wood {:.4} < {:.3}",
-            g.dead_wood, sc.establish_substrate_min
+            "substrate (dead wood {:.4} + litter {:.4}) < {:.3}",
+            g.dead_wood, g.litter, sc.establish_substrate_min
         ));
     }
     if out.is_empty() {
@@ -370,7 +371,7 @@ fn print_header() {
     println!(
         "sim_min,tick,id,species,x,y,z,water_m,soil_voxels,mean_pore,saturated_fraction,\
          sky,light_response,mu,aeration_stress,wood,foliage,reserve,parcel,site_mineral,\
-         litter,dead_wood_in_box,income,maintenance,covered,clause"
+         litter,substrate_in_box,income,maintenance,covered,clause"
     );
 }
 
