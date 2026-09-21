@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use cubarium_surface::{Scale, Topology};
+use cubarium_voxel_fauna::Founder;
 
 use crate::scene::SceneKind;
 
@@ -118,6 +119,12 @@ pub struct Voxel {
     /// A validated voxel policy file, used only with `--arena … --controller gru`.
     #[arg(long)]
     pub policy: Option<PathBuf>,
+    /// Drive one founder lineage of the **ambient** run with a saved GRU centre instead
+    /// of its observation-only heuristic: `--founder-policy littershredder=centre.json`.
+    /// Repeatable, at most once per lineage; the lineage the file declares must be the
+    /// one named. Lineages left out keep their heuristic, which is the default for both.
+    #[arg(long, value_name = "FOUNDER=FILE", conflicts_with = "arena")]
+    pub founder_policy: Vec<String>,
     /// Frozen arena layout seed. It changes the prepared layout, never the sensory
     /// schema or controller interface.
     #[arg(long, default_value_t = 1, requires = "arena")]
@@ -172,6 +179,7 @@ pub struct Voxel {
 impl Voxel {
     /// Reject flag combinations clap cannot express.
     pub fn validate(&self) -> anyhow::Result<()> {
+        self.founder_policies()?;
         if self.arena.is_none() {
             anyhow::ensure!(
                 self.policy.is_none(),
@@ -218,6 +226,40 @@ impl Voxel {
             );
         }
         Ok(())
+    }
+
+    /// The parsed `--founder-policy` list: one `(lineage, file)` pair per flag, in the
+    /// order given.
+    ///
+    /// The spelling is the founder name the rest of the voxel tooling uses —
+    /// `blind`/`littershredder` or `browser`/`frondgrazer` — and the file is read later,
+    /// by the run, which is where a bad *file* is reported. What is refused here is a
+    /// bad *spelling*: no `=`, an empty path, an unknown lineage, or the same lineage
+    /// named twice, because a second flag for a lineage is an instruction that
+    /// contradicts the first rather than one that refines it.
+    pub fn founder_policies(&self) -> anyhow::Result<Vec<(Founder, PathBuf)>> {
+        let mut out: Vec<(Founder, PathBuf)> = Vec::new();
+        for spec in &self.founder_policy {
+            let Some((name, path)) = spec.split_once('=') else {
+                anyhow::bail!(
+                    "--founder-policy takes `<founder>=<file>`, not `{spec}` \
+                     (e.g. `littershredder=centre.json`)"
+                );
+            };
+            let founder = cubarium_search::es::voxel::parse_founder(name)
+                .map_err(|e| anyhow::anyhow!("--founder-policy `{spec}`: {e}"))?;
+            anyhow::ensure!(
+                !path.trim().is_empty(),
+                "--founder-policy `{spec}` names no file"
+            );
+            anyhow::ensure!(
+                !out.iter().any(|(f, _)| *f == founder),
+                "--founder-policy names {} twice; one policy per lineage",
+                founder.name()
+            );
+            out.push((founder, PathBuf::from(path.trim())));
+        }
+        Ok(out)
     }
 }
 
@@ -755,6 +797,78 @@ mod tests {
             Command::Voxel(v) => v,
             other => panic!("expected a voxel command, got {other:?}"),
         }
+    }
+
+    /// `--founder-policy` names a lineage of the **ambient** run and a file: repeatable,
+    /// one per lineage, either spelling of the lineage, and refused by name when the
+    /// spelling is wrong, the lineage repeats, or an arena is asked for at the same time.
+    #[test]
+    fn founder_policy_names_a_lineage_and_a_file_of_the_ambient_run() {
+        let v = voxel([
+            "cubarium",
+            "voxel",
+            "--founder-policy",
+            "littershredder=blind.json",
+            "--founder-policy",
+            "browser=b.json",
+        ]);
+        let got = v.founder_policies().expect("two well-formed pairs");
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].0, Founder::Blind);
+        assert_eq!(got[0].1, PathBuf::from("blind.json"));
+        assert_eq!(got[1].0, Founder::Browser);
+        v.validate().expect("the ambient run takes founder policies");
+
+        // The default is no policy at all: both lineages keep their heuristic.
+        assert!(
+            voxel(["cubarium", "voxel"])
+                .founder_policies()
+                .expect("no flags")
+                .is_empty()
+        );
+
+        for (spec, want) in [
+            ("centre.json", "takes `<founder>=<file>`"),
+            ("wombat=c.json", "unknown founder"),
+            ("blind=", "names no file"),
+        ] {
+            let err = format!(
+                "{:#}",
+                voxel(["cubarium", "voxel", "--founder-policy", spec])
+                    .founder_policies()
+                    .expect_err(spec)
+            );
+            assert!(err.contains(want), "{spec}: {err}");
+        }
+
+        let err = format!(
+            "{:#}",
+            voxel([
+                "cubarium",
+                "voxel",
+                "--founder-policy",
+                "blind=a.json",
+                "--founder-policy",
+                "littershredder=b.json",
+            ])
+            .founder_policies()
+            .expect_err("one policy per lineage")
+        );
+        assert!(err.contains("twice"), "{err}");
+
+        // An arena owns its own controller selection; clap rejects the combination.
+        assert!(
+            Cli::try_parse_from([
+                "cubarium",
+                "voxel",
+                "--arena",
+                "blind",
+                "--founder-policy",
+                "blind=a.json",
+            ])
+            .is_err(),
+            "--founder-policy is the ambient run's, not the arena's"
+        );
     }
 
     #[test]

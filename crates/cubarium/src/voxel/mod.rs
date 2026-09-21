@@ -60,6 +60,7 @@ use cubarium_voxel_fauna::{
 use cubarium_voxel_flora::{
     Command as FloraCommand, Flora, FloraConfig, FloraLedger, Site, Species,
 };
+use cubarium_search::es::voxel::{EpisodeDriver, VoxelPolicyFile};
 use cubarium_voxel_sim::{Arena, Sim, SimConfig};
 use serde::{Deserialize, Serialize};
 
@@ -239,6 +240,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
             };
             let mut flora = Flora::new(FloraConfig::default());
             let mut fauna = Fauna::new(FaunaConfig::default());
+            let drivers = founder_drivers(args)?;
             if !args.empty {
                 let seeded = habitat::seed(&mut world, &mut flora, &mut fauna);
                 eprintln!(
@@ -250,6 +252,18 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                     seeded.litter_tiles,
                     seeded.founders[Founder::Blind.index()],
                     seeded.founders[Founder::Browser.index()],
+                );
+            } else {
+                // An empty world grows its founders by hand; the lineages still need
+                // their recipes registered so anything born is driven.
+                habitat::install_heuristics(&mut fauna);
+            }
+            install_founder_controllers(&mut fauna, &drivers)?;
+            for (founder, driver) in &drivers {
+                eprintln!(
+                    "cubarium voxel: {} founders are driven by {}",
+                    founder.name(),
+                    driver.name(),
                 );
             }
             let label = match (&args.load, args.scene) {
@@ -455,6 +469,85 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     Ok(())
 }
 
+/// Load the `--founder-policy` files into one episode driver each, refusing a file
+/// whose own declared lineage is not the one the flag named.
+///
+/// The file is the trainer's own policy file and validates itself — schema token,
+/// lineage, vector length, finite weights, and a digest that is that founder manifest's
+/// — so all this adds is the cross-check the user's spelling makes possible: a browser
+/// centre asked to drive the blind lineage is refused by name rather than run against a
+/// schema it was never trained on.
+fn founder_drivers(args: &Voxel) -> Result<Vec<(Founder, EpisodeDriver)>> {
+    let mut out = Vec::new();
+    for (founder, path) in args.founder_policies()? {
+        let file = VoxelPolicyFile::load(&path).map_err(anyhow::Error::msg)?;
+        let declared = file.founder().map_err(anyhow::Error::msg)?;
+        anyhow::ensure!(
+            declared == founder,
+            "--founder-policy {}={}: the file declares the {} lineage",
+            founder.name(),
+            path.display(),
+            declared.name(),
+        );
+        out.push((founder, file.driver().map_err(anyhow::Error::msg)?));
+    }
+    Ok(out)
+}
+
+/// Install the ambient run's founder controllers over a whole layer: every lineage keeps
+/// the heuristic the seeder registered unless `--founder-policy` named a saved GRU for
+/// it, in which case that lineage's **birth factory and every standing body of that
+/// lineage** are switched to the policy. One factory per lineage, and `EpisodeDriver::fresh`
+/// per body, so no two bodies share a hidden state.
+///
+/// A layer that *remembers* being policy-driven — [`Fauna::policy_driven`], which a
+/// snapshot carries — and is given no flag for that lineage is **refused here**, not
+/// quietly demoted to a heuristic: a world whose animals were a trained policy is not
+/// the same world with the heuristic put back, and silently substituting one is exactly
+/// the re-anchoring `always-fresh-never-migrate` forbids.
+fn install_founder_controllers(
+    fauna: &mut Fauna,
+    drivers: &[(Founder, EpisodeDriver)],
+) -> Result<()> {
+    for founder in Founder::ALL {
+        if fauna.policy_driven(founder) && !drivers.iter().any(|(f, _)| *f == founder) {
+            bail!(
+                "this world's {} founders were driven by a saved policy; pass \
+                 `--founder-policy {}=<centre.json>` to run them again, or start a fresh \
+                 world. They are not silently put back on the heuristic.",
+                founder.name(),
+                founder.name(),
+            );
+        }
+    }
+    for (founder, driver) in drivers {
+        let driver = driver.clone();
+        fauna.set_founder_factory(
+            *founder,
+            std::sync::Arc::new(move || -> Box<dyn Controller> { driver.fresh() }),
+        );
+        fauna.set_policy_driven(*founder, true);
+    }
+    // Re-install over every standing founder body, so a loaded layer's bodies and the
+    // bodies a policy flag took over are both driven by the lineage's current recipe.
+    let bodies: Vec<(u64, Founder)> = fauna
+        .view()
+        .animals
+        .iter()
+        .filter_map(|a| a.founder.map(|f| (a.id, f)))
+        .collect();
+    for (id, founder) in bodies {
+        if drivers.iter().any(|(f, _)| *f == founder) {
+            anyhow::ensure!(
+                fauna.install_founder_controller(id, founder),
+                "the {} policy could not be installed on body {id}",
+                founder.name()
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Select the exact controller body a sensing-arena run installs. Policy files validate
 /// their own founder and digest before handing out an [`EpisodeDriver`], so this host
 /// only has to reject a user spelling that asks a blind arena to run a browser policy.
@@ -462,7 +555,7 @@ fn sensing_driver(
     args: &Voxel,
     arena: VoxelArenaArg,
 ) -> Result<(Founder, cubarium_search::es::voxel::EpisodeDriver)> {
-    use cubarium_search::es::voxel::{EpisodeDriver, VoxelControl, VoxelPolicyFile};
+    use cubarium_search::es::voxel::VoxelControl;
 
     let founder = match arena {
         VoxelArenaArg::Blind => Founder::Blind,
@@ -1238,6 +1331,69 @@ mod tests {
     /// stand: `l` refuses and the edit survives, because loading would have put the stand
     /// on another world's terrain with its ledger still describing this one. The same
     /// bytes load into a run that holds no ecology, which is what `--load` does at startup.
+    /// **A world that remembers a policy is not quietly put back on the heuristic.**
+    ///
+    /// `install_founder_controllers` switches a named lineage's birth factory and every
+    /// standing body of that lineage onto the driver, and records that the lineage is
+    /// policy-driven. A layer that already carries that record and is offered no driver
+    /// for it is refused by name. The stand-in driver here is the heuristic control —
+    /// the refusal and the install are about *which lineage a driver was supplied for*,
+    /// not about what is inside it, and using a control keeps weights out of a unit test.
+    #[test]
+    fn a_policy_driven_lineage_is_refused_rather_than_demoted_on_load() {
+        use cubarium_search::es::voxel::VoxelControl;
+        use cubarium_voxel_fauna::StartingStores;
+
+        let world = crate::voxel::scene::authored(cubarium_voxel::Config {
+            width: 32,
+            height: 16,
+            depth: 4,
+            ..cubarium_voxel::Config::default()
+        });
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        crate::voxel::habitat::install_heuristics(&mut fauna);
+        let placed = (0..32i64).any(|x| {
+            fauna.apply(
+                &world,
+                FaunaCommand::IntroduceFounder {
+                    x,
+                    z: 1,
+                    founder: Founder::Blind,
+                    stores: StartingStores::HUNGRY,
+                    heading_rad: 0.0,
+                },
+            )
+        });
+        assert!(placed, "a founder body stands somewhere on the strip");
+
+        // Nothing declared: the heuristics stand and nothing is refused.
+        install_founder_controllers(&mut fauna, &[]).expect("the default is the heuristics");
+        assert!(!fauna.policy_driven(Founder::Blind));
+
+        // A driver for the blind lineage takes it over and is recorded.
+        let driver = EpisodeDriver::control(VoxelControl::Heuristic, Founder::Blind);
+        install_founder_controllers(&mut fauna, &[(Founder::Blind, driver)])
+            .expect("a supplied driver installs");
+        assert!(fauna.policy_driven(Founder::Blind));
+        assert!(!fauna.policy_driven(Founder::Browser));
+
+        // That record survives a save and load, and the loaded layer refuses to run
+        // without the flag rather than falling back.
+        let mut loaded = Fauna::load(&fauna.save()).expect("the layer round-trips");
+        crate::voxel::habitat::install_heuristics(&mut loaded);
+        let err = format!(
+            "{:#}",
+            install_founder_controllers(&mut loaded, &[]).expect_err("a demotion in silence")
+        );
+        assert!(err.contains("littershredder"), "{err}");
+        assert!(err.contains("--founder-policy"), "{err}");
+
+        // With the flag back, it loads.
+        let driver = EpisodeDriver::control(VoxelControl::Heuristic, Founder::Blind);
+        install_founder_controllers(&mut loaded, &[(Founder::Blind, driver)])
+            .expect("the policy supplied again");
+    }
+
     #[test]
     fn a_terrain_load_is_refused_while_the_ecology_is_standing() {
         let c = cubarium_voxel::Config {
