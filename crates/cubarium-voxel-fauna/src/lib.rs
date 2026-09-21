@@ -1340,8 +1340,9 @@ impl Fauna {
 }
 
 /// Every support face of column `(x, z)` an animal on `from` could step onto, ascending in
-/// `y`: within `climb` of `from.y`, and with no more than `wade_depth_m` of standing water
-/// on it.
+/// `y`: within `climb` of `from.y`, with no more than `wade_depth_m` of standing water on
+/// it, and with `headroom` voxels of void over it — a body does not stand in a slot it
+/// does not fit in ([`crate::body::headroom_voxels`]).
 ///
 /// Public because the geometry is worth stating without a tick in the way — a test, or a
 /// harness choosing where to introduce an animal, asks exactly this question.
@@ -1351,6 +1352,7 @@ pub fn steppable(
     x: i64,
     z: u32,
     sc: &SpeciesConfig,
+    headroom: u32,
 ) -> Vec<Site> {
     let c = view.config;
     if z >= c.depth {
@@ -1360,6 +1362,9 @@ pub fn steppable(
     let mut out = Vec::new();
     for y in 0..c.height {
         if !view.is_support(x, y, z) {
+            continue;
+        }
+        if !crate::body::has_headroom(view, x, y, z, headroom) {
             continue;
         }
         if (i64::from(y) - i64::from(from.y)).abs() > climb {

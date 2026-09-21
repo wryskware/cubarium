@@ -194,6 +194,7 @@ pub(crate) fn resolve_motion(
     held: Actions,
 ) -> Motion {
     let r = footprint_radius(manifest);
+    let headroom = headroom_voxels(manifest, view.config.voxel_m);
     let v_req = held.forward * manifest.cruise_m_per_s;
     let yaw_rate = held.turn * manifest.yaw_cap_rad_per_s;
     let attempted = (v_req.abs() + r * yaw_rate.abs()) * DT;
@@ -213,7 +214,7 @@ pub(crate) fn resolve_motion(
     let mut left = v_req * DT;
     while left > 1e-12 {
         let step = left.min(r);
-        match step_advance(view, pose, standing_y, step, r, wade_depth_m) {
+        match step_advance(view, pose, standing_y, step, r, wade_depth_m, headroom) {
             Some(actual) => {
                 moved += actual;
                 left -= step;
@@ -236,8 +237,18 @@ pub(crate) fn resolve_motion(
                     if mid <= 1e-12 {
                         break;
                     }
-                    if advance_candidate(view, px, pz, h, standing_y, mid, r, wade_depth_m)
-                        .is_some()
+                    if advance_candidate(
+                        view,
+                        px,
+                        pz,
+                        h,
+                        standing_y,
+                        mid,
+                        r,
+                        wade_depth_m,
+                        headroom,
+                    )
+                    .is_some()
                     {
                         lo = mid;
                     } else {
@@ -245,9 +256,18 @@ pub(crate) fn resolve_motion(
                     }
                 }
                 if lo > 1e-12 {
-                    let (nx, nz, actual) =
-                        advance_candidate(view, px, pz, h, standing_y, lo, r, wade_depth_m)
-                            .expect("the bisection's best advance is valid");
+                    let (nx, nz, actual) = advance_candidate(
+                        view,
+                        px,
+                        pz,
+                        h,
+                        standing_y,
+                        lo,
+                        r,
+                        wade_depth_m,
+                        headroom,
+                    )
+                    .expect("the bisection's best advance is valid");
                     pose.x = nx;
                     pose.z = nz;
                     moved += actual;
@@ -275,6 +295,7 @@ fn step_advance(
     step: f64,
     r: f64,
     wade_depth_m: f64,
+    headroom: u32,
 ) -> Option<f64> {
     let (nx, nz, actual) = advance_candidate(
         view,
@@ -285,6 +306,7 @@ fn step_advance(
         step,
         r,
         wade_depth_m,
+        headroom,
     )?;
     pose.x = nx;
     pose.z = nz;
@@ -293,9 +315,9 @@ fn step_advance(
 
 /// The candidate one sub-step would move the body to, as a pure query: the new
 /// position and the distance actually covered, or `None` when the position is refused.
-/// The candidate must keep the disc off every solid voxel at the body layer, the centre
-/// column supported on the standing layer, and the standing water within the founder's
-/// wade depth.
+/// The candidate must keep the disc off every solid voxel in the `headroom` layers the
+/// body needs ([`headroom_voxels`]), the centre column supported on the standing layer,
+/// and the standing water within the founder's wade depth.
 #[allow(clippy::too_many_arguments)]
 fn advance_candidate(
     view: &VoxelView<'_>,
@@ -306,6 +328,7 @@ fn advance_candidate(
     step: f64,
     r: f64,
     wade_depth_m: f64,
+    headroom: u32,
 ) -> Option<(f64, f64, f64)> {
     let c = view.config;
     let v = c.voxel_m;
@@ -321,7 +344,7 @@ fn advance_candidate(
     } else if nz > depth_m - r {
         nz = depth_m - r;
     }
-    if disc_hits_solid(view, nx, nz, standing_y + 1, r) {
+    if (1..=headroom).any(|d| disc_hits_solid(view, nx, nz, standing_y + d, r)) {
         return None;
     }
     let cz = (nz / v).floor();
@@ -556,6 +579,28 @@ pub fn mouth_reach_up_voxels(manifest: &Manifest, voxel_m: f64) -> u32 {
     (f64::from(authored) * REFERENCE_VOXEL_M / voxel_m)
         .round()
         .clamp(f64::from(authored), f64::from(u32::MAX)) as u32
+}
+
+/// The void a body of this lineage needs over the face it stands on, in whole voxels.
+///
+/// **No new species parameter**: `SpeciesConfig` carries no geometry at all — `climb` is
+/// `0` on both founders — so the headroom is read off the manifest's own reach. The body
+/// occupies `standing_y + 1`, which is one voxel at every scale these bodies have, and a
+/// mouth that lifts needs [`mouth_reach_up_voxels`] more, because a browser that cannot
+/// raise its head into a crown is standing in a slot and not in a habitat
+/// (`design/caves-and-hollows-plan-2026-09-21.md`, "Fauna clearance"). A ground feeder
+/// asks for its one voxel, which is what `is_support` already guarantees.
+pub fn headroom_voxels(manifest: &Manifest, voxel_m: f64) -> u32 {
+    1 + mouth_reach_up_voxels(manifest, voxel_m)
+}
+
+/// Whether `headroom` whole voxels of void stand over the face `(x, y, z)`.
+pub fn has_headroom(view: &VoxelView<'_>, x: i64, y: u32, z: u32, headroom: u32) -> bool {
+    let c = view.config;
+    (1..=headroom).all(|d| {
+        let yy = y + d;
+        yy < c.height && !view.material_at(x, yy, z).is_solid()
+    })
 }
 
 /// The crown layers one mouth can take food from, standing on `standing_y`.
@@ -1119,6 +1164,57 @@ mod tests {
             "the wall the body faces is its right after a −90° turn"
         );
         assert_eq!(contacts.front, 0.0);
+    }
+
+    /// A body needs room over the face it stands on. The browser's is its own voxel and
+    /// the reach its mouth lifts through: two at 0.25 m, three at 0.125 m. A slot one
+    /// voxel shorter is not a place to stand, and it is not a place to walk to either.
+    #[test]
+    fn a_slot_shorter_than_the_body_is_not_a_place_to_stand() {
+        let browser = Founder::Browser.manifest();
+        assert_eq!(headroom_voxels(&browser, 0.25), 2);
+        assert_eq!(headroom_voxels(&browser, 0.125), 3);
+        assert_eq!(
+            headroom_voxels(&Founder::Blind.manifest(), 0.125),
+            1,
+            "a ground feeder asks for the voxel it stands in"
+        );
+
+        // Ground at y = 2 with open sky, then a roof dropped over two columns: x = 4 at
+        // y = 5, leaving two voxels of room, and x = 5 at y = 4, leaving one.
+        let mut world = flat_world();
+        for (x, roof) in [(4i64, 5u32), (5, 4)] {
+            world.apply(WorldCommand::SetMaterial {
+                x,
+                y: roof,
+                z: 2,
+                material: Material::Soil,
+            });
+        }
+        let view = world.view();
+        let need = headroom_voxels(&browser, view.config.voxel_m);
+        assert!(
+            has_headroom(&view, 4, 2, 2, need),
+            "two voxels under the roof is the browser's headroom"
+        );
+        assert!(
+            !has_headroom(&view, 5, 2, 2, need),
+            "one voxel less is a slot, not a floor"
+        );
+
+        // And the walk agrees: from the open face at x = 3 the two-voxel slot is
+        // steppable and the one-voxel slot is not.
+        let sc = *crate::FaunaConfig::default().founder(Founder::Browser);
+        let from = Site { x: 3, y: 2, z: 2 };
+        assert_eq!(
+            crate::steppable(&view, from, 4, 2, &sc.core, need).len(),
+            1,
+            "the body fits under the higher roof"
+        );
+        assert!(
+            crate::steppable(&view, from, 5, 2, &sc.core, need).is_empty(),
+            "the body does not fit under the lower one"
+        );
     }
 
     /// No step to a higher support, and no walking off a drop: a founder's centre

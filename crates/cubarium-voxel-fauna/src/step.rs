@@ -440,6 +440,7 @@ fn plan_for(
     }
     {
         let sc = *config.species(a.species);
+        let headroom = body_headroom(a, view);
         let reach = fv.reachable_foliage(view, a.site, sc.reach);
         let total: f64 = reach.iter().map(|&(_, f)| f).sum();
         let bite = sc.bite_per_s * DT;
@@ -478,7 +479,7 @@ fn plan_for(
                 }
                 for dx in -span..=span {
                     let x = i64::from(stand.site.x) + dx;
-                    for face in faces_in_column(view, x, z as u32, &sc) {
+                    for face in faces_in_column(view, x, z as u32, &sc, headroom) {
                         if wrapped_dx(width, i64::from(face.x), i64::from(a.site.x)) > sense
                             || (i64::from(face.z) - i64::from(a.site.z)).abs() > sense
                         {
@@ -539,16 +540,36 @@ fn plan_for(
     }
 }
 
+/// The void this body needs over the face it stands on. A phase-one founder's comes from
+/// its manifest ([`crate::body::headroom_voxels`]); a heuristic species carries no
+/// geometry at all, so it asks for the one voxel `is_support` already guarantees.
+fn body_headroom(a: &Animal, view: &VoxelView<'_>) -> u32 {
+    a.founder
+        .map(|f| crate::body::headroom_voxels(&f.manifest(), view.config.voxel_m))
+        .unwrap_or(1)
+}
+
 /// Every support face of a column an animal of this species could stand on: shallow
-/// enough water to wade. The `climb` bound belongs to a step and is applied there.
-fn faces_in_column(view: &VoxelView<'_>, x: i64, z: u32, sc: &SpeciesConfig) -> Vec<Site> {
+/// enough water to wade, and `headroom` voxels of void over it, so a body is not offered
+/// a slot it does not fit in ([`crate::body::headroom_voxels`]). The `climb` bound
+/// belongs to a step and is applied there.
+fn faces_in_column(
+    view: &VoxelView<'_>,
+    x: i64,
+    z: u32,
+    sc: &SpeciesConfig,
+    headroom: u32,
+) -> Vec<Site> {
     let c = view.config;
     if z >= c.depth {
         return Vec::new();
     }
     let mut out = Vec::new();
     for y in 0..c.height {
-        if view.is_support(x, y, z) && view.water_depth_m(x, y, z) <= sc.wade_depth_m {
+        if view.is_support(x, y, z)
+            && view.water_depth_m(x, y, z) <= sc.wade_depth_m
+            && crate::body::has_headroom(view, x, y, z, headroom)
+        {
             out.push(Site {
                 x: x.rem_euclid(i64::from(c.width)) as u32,
                 y,
@@ -891,6 +912,7 @@ fn toward(
     tick: u64,
 ) -> Option<Site> {
     let width = i64::from(view.config.width);
+    let headroom = body_headroom(a, view);
     let here = distance(width, a.site, target);
     if here == 0 {
         return None;
@@ -906,7 +928,7 @@ fn toward(
         // At most one face per column is a candidate: the one closest in height to the
         // face the animal is standing on, and the lower of two equally close ones. A
         // column is a place to stand, not a choice of storeys.
-        let mut faces = steppable(view, a.site, x, z as u32, sc);
+        let mut faces = steppable(view, a.site, x, z as u32, sc, headroom);
         faces.sort_by_key(|f| (f.y.abs_diff(a.site.y), f.y));
         let Some(&face) = faces.first() else { continue };
         let d = distance(width, face, target);
