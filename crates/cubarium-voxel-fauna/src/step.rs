@@ -786,18 +786,21 @@ fn founder_feed(
             &cols,
             site_y,
             geometry,
-            crate::Diet::Vascular,
+            crate::Diet::of(founder),
         )
-        .map(|(root, _)| body::Meal::Cap { root }),
+        .map(|(root, _)| body::Meal::Stand { root }),
     };
     let Some(meal) = meal else {
         return false;
     };
-    // A browser's stand is vascular and a shredder's is fungal; the class is the
-    // mouth's, not the withdrawal's.
-    let food = match (founder, meal) {
-        (Founder::Browser, _) => Food::Foliage,
-        (Founder::Blind, m) => m.food(),
+    // Which class this is: a pool names its own, and a stand's is whose mouth chose it
+    // — a shredder's stand is fungal because its diet is, a browser's vascular.
+    let food = match meal {
+        body::Meal::Pool { food, .. } => food,
+        body::Meal::Stand { .. } => match founder {
+            Founder::Blind => Food::CapTissue,
+            Founder::Browser => Food::Foliage,
+        },
     };
     // The mouth's own cell range, handed to the plant layer: a foliage bite comes out
     // of the layers the band reaches, lowest first, and the crown above them is not
@@ -806,11 +809,11 @@ fn founder_feed(
     // Whose tissue this is, read before the withdrawal, so the report says which
     // species was actually eaten.
     let plant = match meal {
-        body::Meal::Cap { root } => flora.view().stand_at(root).map(|s| s.species),
+        body::Meal::Stand { root } => flora.view().stand_at(root).map(|s| s.species),
         body::Meal::Pool { .. } => None,
     };
     let taken = match meal {
-        body::Meal::Cap { root } => flora
+        body::Meal::Stand { root } => flora
             .take_foliage_in_layers(root, want, &layers)
             .map(|t| t.taken),
         body::Meal::Pool {

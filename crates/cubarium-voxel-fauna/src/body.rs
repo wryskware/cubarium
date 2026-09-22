@@ -920,18 +920,11 @@ pub(crate) enum Meal {
     /// A withdrawal from `site`'s [`crate::Food::Litter`] or [`crate::Food::Carrion`]
     /// pool.
     Pool { site: Site, food: crate::Food },
-    /// A foliage withdrawal from the saprotroph stand rooted at `root`, bounded to the
-    /// mouth's own layer range: [`crate::Food::CapTissue`].
-    Cap { root: Site },
-}
-
-impl Meal {
-    pub(crate) fn food(self) -> crate::Food {
-        match self {
-            Meal::Pool { food, .. } => food,
-            Meal::Cap { .. } => crate::Food::CapTissue,
-        }
-    }
+    /// A foliage withdrawal from the stand rooted at `root`, bounded to the mouth's own
+    /// layer range. Which food class that is depends on whose mouth it is: a
+    /// shredder's stand is fungal ([`crate::Food::CapTissue`]) and a browser's is
+    /// vascular ([`crate::Food::Foliage`]), because the diet chose it.
+    Stand { root: Site },
 }
 
 /// **The shredder's three foods at one mouth, and which of them it would take**
@@ -971,7 +964,7 @@ pub(crate) fn mouth_detritus(
     if let Some((root, stock)) =
         mouth_foliage_stand(fv, view, cols, standing_y, body, crate::Diet::Fungal)
     {
-        consider(Meal::Cap { root }, stock);
+        consider(Meal::Stand { root }, stock);
     }
     if let Some((site, stock)) = mouth_pool_site(fv, cols, standing_y, crate::Food::Carrion) {
         consider(
