@@ -65,7 +65,7 @@ shredder's channels **mean**, and what both animals' mouths accept:
 
 | channel | trained with | the model now runs |
 | --- | --- | --- |
-| `Chem(litter)` (shredder) | a diffused field whose source at a face is that face's **litter** stock | the same field, same emission curve, transport, decay and threshold, whose source is **litter + carrion + glowcap cap tissue** — the shredder's three foods (decisions §3) |
+| `Chem(litter)` (shredder) | a diffused field whose source at a face is that face's **litter** stock | the same field, same emission curve, transport, decay and threshold, whose source is that face's **litter + carrion** — the matter that decays (decisions §3, amended: the shredder's third food, glowcap cap tissue, is found at the mouth and is not a source) |
 | `Taste(1)` (shredder) | the litter under the mouth, or bare ground | the richest of the three foods under the mouth, or bare ground; all three read the one soft resistance class the schema calls `litter` |
 | `Taste(1)` (browser) | the foliage of any stand in the band, glowcap included | the foliage of any **vascular** stand in the band; a glowcap cap is fungal tissue and is no longer offered to a browser's mouth at all |
 

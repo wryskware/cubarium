@@ -40,7 +40,9 @@ exclusions would have removed 58 % of what the D3 browser ate). Glowcap caps are
 not browser food: they are fungal tissue. **Shredder: litter, glowcap cap tissue,
 and carrion**, a detritivore with three detritus foods; the cue becomes a
 detritus field (litter + carrion + cap tissue at the face) with the litter
-field's transport. Yield per food class is an authored placeholder (backlog).
+field's transport. **Amended 2026-09-22 on the measurement
+(`design/7_Research/voxel-census-2026-09-20.md`, "Diets, 2026-09-22"): the cue is
+litter + carrion; caps are found, not smelled.** Yield per food class is an authored placeholder (backlog).
 Carrion finally has a consumer.
 
 ## 4. Layer state

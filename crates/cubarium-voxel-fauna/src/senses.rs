@@ -6,10 +6,11 @@
 //! nodes — exposed support faces, keyed by the cell of the solid voxel whose top face they
 //! are — connected only to same-height orthogonal neighbours through the open near-surface
 //! medium. Roof and floor never share a node, and there is no vertical transport. Source
-//! strength is the **actual detritus stock** per site — litter, carrion and glowcap cap
-//! tissue, the shredder's three foods (decisions §3) — so a depleted patch stops emitting
-//! while its residue decays. It was the litter stock alone until 2026-09-22, and on a
-//! world holding only litter it still is; the observation channel keeps the manifest id
+//! strength is the **actual detritus stock** per site — the litter and the carrion on
+//! it (decisions §3) — so a depleted patch stops emitting while its residue decays. The
+//! shredder's third food, glowcap cap tissue, is found at the mouth and is not a source
+//! ([`DetritusField`]). It was the litter stock alone until 2026-09-22, and on a world
+//! holding only litter it still is; the observation channel keeps the manifest id
 //! `Chem(litter)` and its slot, because those are in the trained-policy digest.
 //!
 //! # The update, in one place
@@ -50,7 +51,7 @@
 use std::collections::HashMap;
 
 use cubarium_voxel::VoxelView;
-use cubarium_voxel_flora::{FloraView, Site, Trophic};
+use cubarium_voxel_flora::{FloraView, Site};
 
 use crate::Pose;
 use crate::body::M_EMIT;
@@ -157,11 +158,23 @@ impl Connectivity {
 
 /// The **detritus** cue field: one value per support-layer node.
 ///
-/// Named for what it carries since decisions §3: the source at a face is the sum of the
-/// shredder's three foods there — litter, carrion and glowcap cap tissue — with the
-/// litter field's own emission curve, transport, decay and threshold
+/// Named for what it carries since decisions §3: the source at a face is the **litter
+/// and carrion** on it — matter that decays and smells — with the litter field's own
+/// emission curve, transport, decay and threshold
 /// (`design/handoffs/voxel-diets-2026-09-22.md`). On a world holding only litter it is
 /// the litter field it has always been, value for value.
+///
+/// **Glowcap cap tissue is a shredder's food and is not one of this field's sources**
+/// (decisions §3, amended 2026-09-22 on the measurement below): a cap is *found*, by
+/// contact and taste at the mouth, and not *smelled*. It was a source for one build and
+/// the measurement rejected it — emission is `min(stock / M_EMIT, 1)` with `M_EMIT`
+/// 0.05, so on `default` each of the nine caps (0.106) saturated exactly as each of the
+/// eight litter tiles (0.2) does, nearly tripling the source count with a food a
+/// shredder empties in a bite; the lineage went extinct at about minute 300 against 10
+/// alive at six hours without it, and 17 shredders were alive at 60 minutes with the
+/// caps out of the cue against 4 with them in
+/// (`design/7_Research/voxel-census-2026-09-20.md`, "Diets, 2026-09-22"). Weighting a
+/// source by its class was rejected as a knob.
 ///
 /// The observation channel it feeds keeps its manifest id `Chem(litter)`, its slot and
 /// its width, because those are inside the trained-policy digest and the shipped
@@ -174,22 +187,15 @@ struct DetritusField {
     graph: Connectivity,
 }
 
-/// The detritus stock at one support face: the sum of the three foods a shredder can
-/// take there, and therefore the emitter strength.
+/// The detritus stock at one support face — its litter plus its carrion — and
+/// therefore the emitter strength.
 ///
-/// Dead wood is deliberately not in it. A log is a glowcap's substrate and not a
-/// shredder's food, so a cue over one would send the animal to something it cannot eat.
+/// Two things a shredder can reach are deliberately **not** in it. A glowcap cap is its
+/// food and is found at the mouth rather than smelled across a floor
+/// ([`DetritusField`]); dead wood is a glowcap's substrate and not a shredder's food at
+/// all, so a cue over a log would send the animal to something it cannot eat.
 fn detritus_at(fv: &FloraView<'_>, site: Site) -> f64 {
-    let pools = fv.ground_at(site).map_or(0.0, |g| g.litter + g.carrion);
-    let caps: f64 = fv
-        .stands
-        .iter()
-        .filter(|s| {
-            s.site == site && matches!(fv.config.species(s.species).trophic, Trophic::Saprotroph)
-        })
-        .map(|s| s.foliage)
-        .sum();
-    pools + caps
+    fv.ground_at(site).map_or(0.0, |g| g.litter + g.carrion)
 }
 
 impl DetritusField {
@@ -259,27 +265,19 @@ impl DetritusField {
         let c = view.config;
         let graph = &self.graph;
 
-        // Sources: every site holding detritus — litter or carrion on the ground, or a
-        // fungal cap standing on it. Deterministic (the flora's ground and stands are
-        // both site-sorted); the sort and dedup below make the union one ordered set.
+        // Sources: every site holding detritus — litter or carrion on the ground.
+        // Deterministic (the flora's ground is site-sorted). A fungal cap standing on a
+        // face is food and not a source ([`detritus_at`]).
         let mut sources: Vec<usize> = Vec::new();
-        let push = |site: Site, sources: &mut Vec<usize>| {
-            let cell = c.index(site.x as i64, site.y, site.z);
-            if graph.has(cell) {
-                sources.push(cell);
-            }
-        };
         for g in fv
             .ground
             .iter()
             .filter(|g| g.litter > 0.0 || g.carrion > 0.0)
         {
-            push(g.site, &mut sources);
-        }
-        for stand in fv.stands.iter().filter(|s| {
-            s.foliage > 0.0 && matches!(fv.config.species(s.species).trophic, Trophic::Saprotroph)
-        }) {
-            push(stand.site, &mut sources);
+            let cell = c.index(g.site.x as i64, g.site.y, g.site.z);
+            if graph.has(cell) {
+                sources.push(cell);
+            }
         }
         sources.sort_unstable();
         sources.dedup();
@@ -1038,17 +1036,22 @@ mod tests {
         assert!(at_source > 0.0, "a corpse emits a cue: {at_source}");
     }
 
-    /// **A litter-only world reads what it always read.** The source term is the sum of
-    /// the shredder's three foods at the face, so the field is a function of that sum
-    /// alone: the same stock as litter, as carrion, or as glowcap cap tissue settles to
-    /// the same value, and with only litter present the sum *is* the litter and the
-    /// field *is* the litter field. Dead wood is not one of its foods and contributes
-    /// nothing, which is what pins the source set rather than "any ground pool".
+    /// **A litter-only world reads what it always read, and the source set is litter
+    /// and carrion.** The source term is the sum of the matter that decays on a face,
+    /// so the field is a function of that sum alone: the same stock as litter or as
+    /// carrion settles to the same value, and with only litter present the sum *is* the
+    /// litter and the field *is* the litter field.
+    ///
+    /// Two things a shredder can reach raise nothing. **A glowcap cap is food and not a
+    /// source** — decisions §3 as amended 2026-09-22: a cap is found at the mouth, not
+    /// smelled across a floor, and the arm that made it a source cost `default` its
+    /// shredder lineage. Dead wood is not even food. Together they pin the source set
+    /// rather than "anything a mouth could reach".
     ///
     /// Written this way deliberately: a pinned numeric cue would be a golden value of
     /// the transport constants, which this package does not touch.
     #[test]
-    fn the_three_foods_are_one_source_and_dead_wood_is_not_one() {
+    fn the_cue_sources_are_litter_and_carrion_and_nothing_else() {
         use cubarium_voxel_flora::{Command as FloraCommand, Species as Plant};
 
         let world = flat_world();
@@ -1083,7 +1086,7 @@ mod tests {
             "the same stock as carrion is the same source"
         );
 
-        // The same stock as a glowcap cap: a saprotroph stand's foliage on the face.
+        // A glowcap cap standing on the face: the shredder's food, and no cue.
         let mut fungal = Flora::new(FloraConfig::default());
         let wood_max = fungal.config().species(Plant::Glowcap).wood_max;
         assert!(fungal.apply(
@@ -1101,32 +1104,19 @@ mod tests {
             .expect("the seeded glowcap")
             .foliage;
         assert!(cap > 0.0, "the cap holds tissue");
-        let mut matched = Flora::new(FloraConfig::default());
-        assert!(matched.deposit(
-            site(2, 2),
-            Deposit {
-                kind: DepositKind::Litter,
-                organic: cap,
-                mineral: cap * 0.05,
-                energy: cap * 2.0,
-            },
-        ));
-        assert_eq!(
-            settled(&fungal),
-            settled(&matched),
-            "a cap of {cap} emits what {cap} of litter emits"
-        );
-
-        // Dead wood is a glowcap's substrate, not a shredder's food: no cue.
-        let wood = deposited(DepositKind::DeadWood);
-        let mut senses = Senses::new();
-        let (v, fv) = (world.view(), wood.view());
-        senses.settle(&v, &fv);
-        assert_eq!(
-            senses.sample_cue(&v, &probe, 2),
-            Some(0.0),
-            "a log is a valid support with no detritus cue on it"
-        );
+        let quiet = |flora: &Flora, what: &str| {
+            let mut senses = Senses::new();
+            let (v, fv) = (world.view(), flora.view());
+            senses.settle(&v, &fv);
+            assert_eq!(
+                senses.sample_cue(&v, &probe, 2),
+                Some(0.0),
+                "{what} is a valid support with no detritus cue on it"
+            );
+        };
+        quiet(&fungal, "a glowcap cap");
+        // Dead wood is a glowcap's substrate, not a shredder's food at all.
+        quiet(&deposited(DepositKind::DeadWood), "a log");
     }
 
     /// Roof and floor never share a node: a litter source on a roof does not reach the
