@@ -507,3 +507,87 @@ fn seeding_trained_animals_is_refused_on_a_ring() {
     let err = format!("{:#}", seed_neural_animals(&run, &mut cube).unwrap_err());
     assert!(err.contains("/nonexistent/policy.json"), "{err}");
 }
+
+/// A snapshot the build cannot read because the format moved on is **stale**, not
+/// damaged: Wrysk's panel held five of schema 13 against a binary that speaks 15, and
+/// refusing to start left the board showing the last thing it drew. Those are discarded
+/// and a fresh world founded. Anything else — truncated, corrupt, invalid — is still the
+/// damaged-world case, and still refuses by name.
+#[test]
+fn stale_snapshots_are_discarded_and_damaged_ones_still_refuse() {
+    let dir = std::env::temp_dir().join(format!("cubarium-p-{}", std::process::id()));
+    let state = dir.join("stale");
+    std::fs::create_dir_all(&state).unwrap();
+
+    // A snapshot of a schema this build does not speak: right magic, wrong version.
+    let stale = |n: u32| {
+        let mut b = Vec::new();
+        b.extend_from_slice(&cubarium_core::snapshot::MAGIC);
+        b.extend_from_slice(&n.to_le_bytes());
+        b.extend_from_slice(&[0u8; 8]);
+        b
+    };
+    std::fs::write(state.join("world-100.cubw"), stale(13)).unwrap();
+    std::fs::write(state.join("world-200.cubw"), stale(13)).unwrap();
+
+    let mut run = Run::parse_from(["cubarium"]);
+    run.state = state.clone();
+    let Ok((_, from, tick)) = open_world(&run) else {
+        panic!("a stale directory founds a fresh world")
+    };
+    assert_eq!((from, tick), (None, None), "nothing was resumed");
+    assert!(
+        crate::state::list_snapshots(&state).is_empty(),
+        "and the stale files are gone"
+    );
+
+    // A truncated file is a damaged world: refused by name, and left where it is.
+    let damaged = dir.join("damaged");
+    std::fs::create_dir_all(&damaged).unwrap();
+    std::fs::write(damaged.join("world-100.cubw"), [0u8; 2]).unwrap();
+    let mut run = Run::parse_from(["cubarium"]);
+    run.state = damaged.clone();
+    let err = match open_world(&run) {
+        Ok(_) => panic!("a damaged world must refuse"),
+        Err(e) => format!("{e:#}"),
+    };
+    assert!(err.contains("damaged world"), "{err}");
+    assert_eq!(crate::state::list_snapshots(&damaged).len(), 1, "kept");
+
+    // One readable snapshot beside a stale one: the readable one is resumed and **both**
+    // files stay. Discarding is only for a directory with nothing left to read.
+    let mixed = dir.join("mixed");
+    std::fs::create_dir_all(&mixed).unwrap();
+    let world = World::new(WorldConfig::default()).unwrap();
+    crate::state::write_snapshot(&mixed, 50, &encode_snapshot(&world.state, "test")).unwrap();
+    std::fs::write(mixed.join("world-100.cubw"), stale(13)).unwrap();
+    let mut run = Run::parse_from(["cubarium"]);
+    run.state = mixed.clone();
+    let Ok((_, from, tick)) = open_world(&run) else {
+        panic!("the readable snapshot resumes")
+    };
+    assert_eq!(tick, Some(50));
+    assert!(from.is_some());
+    assert_eq!(
+        crate::state::list_snapshots(&mixed).len(),
+        2,
+        "and nothing was deleted"
+    );
+
+    // `--require-resume` asked for *this* world, so a stale directory is still a refusal
+    // and the files are still there to recover.
+    let kept = dir.join("kept");
+    std::fs::create_dir_all(&kept).unwrap();
+    std::fs::write(kept.join("world-100.cubw"), stale(13)).unwrap();
+    let mut run = Run::parse_from(["cubarium"]);
+    run.state = kept.clone();
+    run.require_resume = true;
+    let err = match open_world(&run) {
+        Ok(_) => panic!("--require-resume must not found a fresh world"),
+        Err(e) => format!("{e:#}"),
+    };
+    assert!(err.contains("none of them loaded"), "{err}");
+    assert_eq!(crate::state::list_snapshots(&kept).len(), 1, "kept");
+
+    std::fs::remove_dir_all(&dir).ok();
+}

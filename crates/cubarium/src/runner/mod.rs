@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use cubarium_core::view::RenderView;
-use cubarium_core::{World, WorldConfig, encode_snapshot};
+use cubarium_core::{SnapshotError, World, WorldConfig, encode_snapshot};
 use cubarium_render::Canvas;
 use cube_proto::Frame;
 
@@ -138,10 +138,18 @@ fn open_world(run: &Run) -> Result<(World, Option<PathBuf>, Option<u64>)> {
         // Every failure is collected as well as printed: whether *any* snapshot file was
         // present and simply would not load decides between "a new world" and an error.
         let mut failures: Vec<String> = Vec::new();
+        // A refusal is *stale* when the file is a perfectly good snapshot of a format this
+        // build no longer speaks, and *damaged* when it is anything else. Told apart by
+        // the error's own type, never by its text.
+        let mut stale: Vec<(PathBuf, u32)> = Vec::new();
         let loaded = {
             let mut report = |path: &Path, failure: &state::LoadFailure| {
                 eprintln!("cubarium: skipping {}: {failure}", path.display());
                 failures.push(format!("{}: {failure}", path.display()));
+                if let state::LoadFailure::Snapshot(SnapshotError::UnsupportedSchema(had)) = failure
+                {
+                    stale.push((path.to_path_buf(), *had));
+                }
             };
             state::load_newest(&run.state, &mut report)
         };
@@ -185,6 +193,34 @@ fn open_world(run: &Run) -> Result<(World, Option<PathBuf>, Option<u64>)> {
         // ticks the pruner keeps in preference to it, and the operator would find their
         // world gone rather than merely unreadable. Only a directory with no snapshot
         // files at all is genuinely a new world.
+        // **Stale is not damaged.** A directory whose every snapshot is simply of an older
+        // format holds nothing that can be recovered — the standing rule is fresh, never
+        // migrate — and refusing to start leaves the panel showing the last frame it drew
+        // until somebody ssh's in. Wrysk, 2026-09-21, on exactly that: he does not want
+        // the saved worlds kept. So they are discarded, loudly, and a fresh world founded.
+        // Anything else is still the damaged-world case below.
+        // `--require-resume` says *resume or fail*, so there it is still a refusal: the
+        // caller has asked for this world and not for a new one in its place.
+        if !failures.is_empty() && stale.len() == failures.len() && !run.require_resume {
+            let mut had: Vec<u32> = stale.iter().map(|(_, n)| *n).collect();
+            had.sort_unstable();
+            had.dedup();
+            let names: Vec<String> = had.iter().map(|n| n.to_string()).collect();
+            for (path, _) in &stale {
+                if let Err(e) = std::fs::remove_file(path) {
+                    anyhow::bail!("{}: cannot discard a stale snapshot: {e}", path.display());
+                }
+            }
+            eprintln!(
+                "cubarium: discarded {} snapshot(s) of schema {} in {}; founding a fresh \
+                 world (schema {})",
+                stale.len(),
+                names.join(", "),
+                run.state.display(),
+                cubarium_core::snapshot::SCHEMA_VERSION,
+            );
+            failures.clear();
+        }
         if !failures.is_empty() {
             anyhow::bail!(
                 "{}: {} snapshot file(s) are present and none of them loaded:\n  {}\n\
