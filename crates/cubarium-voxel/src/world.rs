@@ -357,12 +357,26 @@ impl<'a> VoxelView<'a> {
     }
 }
 
+/// The default worker count for `available` reported cores: all but one, and never
+/// fewer than one.
+///
+/// Pure so the policy is testable without owning the machine's core count.
+fn threads_for(available: usize) -> usize {
+    available.saturating_sub(1).max(1)
+}
+
 /// The thread count the plain entry points ([`World::step`], the fauna crate's
-/// `Fauna::step`) split their read-only phases across: every core the OS reports, or one
-/// if it reports nothing. Parallel is the default (Wrysk, 2026-09-18); `step_with(1)` is
-/// the serial run, and `cubarium-voxel-sim`'s `SimConfig::threads` is the host's knob.
+/// `Fauna::step`) split their read-only phases across: **every core the OS reports but
+/// one**, or one if it reports nothing.
+///
+/// Parallel is the default (Wrysk, 2026-09-18) and the board runs nothing else, so the
+/// tick may have all of it bar a single core (Wrysk, 2026-09-21). That one is not spare
+/// capacity: the frame the tick just produced still has to be recorded, submitted and
+/// page-flipped, and a tick that owns every core starves the thread doing it.
+/// `step_with(1)` is the serial run, and `cubarium-voxel-sim`'s `SimConfig::threads` is
+/// the host's knob.
 pub fn default_threads() -> usize {
-    std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
+    threads_for(std::thread::available_parallelism().map_or(1, std::num::NonZero::get))
 }
 
 /// The world. Stepped at [`crate::TICK_HZ`]; pure given its inputs.
@@ -1006,5 +1020,29 @@ impl World {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod default_threads_tests {
+    use super::threads_for;
+
+    /// The board runs nothing else, so the tick takes every core but one (Wrysk,
+    /// 2026-09-21). The one left over is what the presenter's submit, the display
+    /// daemon's page flip and the OS run on; taking it too is what turns a 60 fps
+    /// panel into a frozen one.
+    #[test]
+    fn the_default_thread_count_leaves_one_core_to_everything_that_is_not_the_tick() {
+        assert_eq!(threads_for(8), 7, "eight cores, seven workers");
+        assert_eq!(threads_for(4), 3);
+        assert_eq!(threads_for(2), 1);
+    }
+
+    /// `available_parallelism` can report one, and a pool of zero workers is not a
+    /// serial run — it is a run with nobody in it.
+    #[test]
+    fn a_single_core_still_gets_one_worker() {
+        assert_eq!(threads_for(1), 1);
+        assert_eq!(threads_for(0), 1, "a count the OS could not report is one");
     }
 }

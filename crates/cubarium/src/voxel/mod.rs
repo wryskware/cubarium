@@ -626,9 +626,14 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     // The regular display remains its own coupled world. `--arena` is an explicit
     // development mode which instead owns a frozen P1 sensing layout and a controller
     // installed through fauna's ordinary controller boundary.
+    // `0` is the host's "decide for me", and the decision is the voxel crate's:
+    // `default_threads` is every core the OS reports but one, so the thread that
+    // records, submits and presents the frame is not competing with the tick for the
+    // last core. `SimConfig::default()` takes every core instead and is not what the
+    // panel wants.
     let sim_config = SimConfig {
         threads: if cfg.threads == 0 {
-            SimConfig::default().threads
+            cubarium_voxel::default_threads()
         } else {
             cfg.threads
         },

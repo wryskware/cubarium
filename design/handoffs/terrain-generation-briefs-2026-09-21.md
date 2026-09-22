@@ -1385,3 +1385,169 @@ runs `cubarium voxel` from Wrysk's uncommitted edit of that file, which
 the deploy script installs from the working tree. Fable ran the two
 crates: 811 passed. `docs/tachyon.md` still describes the old refusal;
 Wrysk's edit.
+
+## The live lake drains — 2026-09-22
+
+Panel, seed 14400042426867678818 (`small`, first draw accepted): lake
+1.07 m³ / 3.4 m² at founding, 0.74 at tick 589, 0.37 / 2.2 m² at tick
+4340. Fable read the tick-4340 snapshot's ledger: `outlet_out` 0.782 m³,
+`evaporation_out` 0.024, `reentry_in` 0.026, showers 0, pore 0.005 m³ —
+the loss is the outlet's, at 3.6e-3 m³/s. The outlet cell is (75, 14, 0);
+`hydrate::lake` reports `level_y` 15. **The lake stands one row above its
+own drain**, so the outlet exports it until the surface drops under row
+14. `LakeDatum.level_y` is "the level the water stands at" and the outlet
+sits *at* it; hydrate fills *to* it, inclusive — the two disagree by one
+row. T4's "small seeds 4–6 drain to a third" is very likely the same
+thing, so the gate's pass rate should rise with the fix.
+
+## Package T5 — the lake below its drain (habitat worker)
+
+Owner: habitat worker (Opus, medium). Files: `hydrate.rs`, `world.rs`,
+`water.rs`; `generate.rs::outlet_and_spring` only if the fix belongs to
+the outlet's row rather than the fill (say which and why). Host untouched.
+
+Fix the off-by-one so the lake's top wet row is **below** the outlet's row
+at creation: the outlet is the spill, dry until surplus arrives, the same
+convention `Basin` uses ("holds cells with `y < spill_y`"). Then the
+outlet exports only the stream's surplus at steady state.
+
+Tests first: (1) reproduce — `small`, seed 14400042426867678818, through
+`Preset::find("small").config()` with that seed: after 4000 ticks with
+the outlet open and the cycle on, today the lake holds under half its
+hydrated volume; after the fix it holds at least 95 % of it and
+`outlet_out ≤ reentry_in + 1e-3`. (2) The same on `small` seeds 1–8 and
+`default` seeds 1–4, under a second each or move to `#[ignore]` studies
+with one representative seed in the fast test. (3) T2's two-bowl fixture
+and T4's tests unchanged.
+
+Also rerun T4's gate table (lake before/after the gate's settle, seeds
+1–8 per preset) and report the pass counts; if small seeds 4–6 now hold,
+say so.
+
+Return (≤15 lines): commit, where the off-by-one was, the reproduce
+numbers before/after, the gate table.
+
+## T5 — negative 2026-09-22; brief T6
+
+T5 (9b8cc85, an ignored reproduce study, no fix) showed the off-by-one is
+not there: at founding the lake's top wet row is 13 and the outlet sits
+at 14; `fill_to_level` fills `y < level_y`; the snapshot's `level_y 15` is
+`Pool::level_y` = top wet row + 1 after the lake had risen. Yet
+`outlet_out` is 0.788 m³ against `reentry_in` 0.024 over 4000 ticks: every
+tick the exchange puts a sliver into the sill's cell and `water::outlet`,
+running last, takes it, so the cell reads empty at every tick's end.
+Raising the sill a row moves the fill with it (hydrate takes its level
+from the outlet); a row of freeboard reaches 85 % retention at the cost of
+a row of lake. Diagnosis: the outlet's rate (0.05 m³/s, 400× the stream)
+drains whatever the exchange delivers, and the exchange delivers water to
+a cell whose floor is at or above the lake's surface.
+
+## Package T6 — a weir, not a drain (habitat worker)
+
+Owner: habitat worker (Opus, **high**). Files: `water.rs`, `world.rs`,
+`hydrate.rs`, `config.rs`; `generate.rs::outlet_and_spring` only if the
+sill's placement is part of the answer (say why). Host untouched.
+
+1. **Instrument first.** On the T5 study world, log for the outlet cell
+   over 50 ticks: which neighbour(s) transfer into it in the exchange,
+   their `y`, free fraction and head before the transfer, and the sill
+   cell's own floor height. State whether water is moving into a cell
+   whose floor is above the lake's surface (an exchange defect: heads
+   compared in fractions rather than metres, a transfer cap or fall order
+   effect, the landing cascade's waves), or whether the lake genuinely
+   stands above the sill somewhere (a placement defect).
+2. **Fix the cause.** Whichever it is, the contract afterwards is: a sill
+   whose floor is above the lake's free surface receives nothing; a lake
+   at steady state exports **only the stream's surplus** (`outlet_out ≈
+   reentry_in` over any window once settled); with the stream off the
+   lake holds its hydrated volume within 2 % over 4000 ticks (evaporation
+   aside). If the exchange is correct and the answer is a weir — export
+   only the water standing above the sill's floor, at a rate bounded by
+   what arrives — then make `outlet` that weir and say what changed for
+   the open-budget fixtures (they must still drain as they do; check
+   their tests, do not weaken them).
+3. Tests first: an authored rock bowl (16×12×2, fill two rows, sill cell
+   one row above the fill on the rim, stream into the bowl, outlet at the
+   sill, closed budget): after 4000 ticks stored is within 2 % of the
+   start plus what the stream added minus what the outlet took, and
+   `outlet_out` within 10 % of `reentry_in`; the same with the stream off:
+   `outlet_out` 0. Then T5's study as a fast test on the panel seed:
+   retention ≥ 95 % over 4000 ticks. Existing open-budget outlet tests
+   unchanged.
+4. Rerun T4's gate table (before/after settle, seeds 1–8 per preset) and
+   report pass counts.
+
+Return (≤20 lines): commit, what the instrumentation showed (quote the
+transfers), the fix, the fixture numbers, retention on the panel seed,
+the gate table.
+
+## The panel is starved, not dead — 2026-09-22
+
+Wrysk: nothing on screen for minutes after a deploy, then one frame every
+3–5 s with black between; "it should use all the cores… leave one for the
+kernel." Debug thread's findings (782d7f6 carries its code change):
+
+- Startup dark ≈ 4 min: the shim socket attaches at process start, then
+  `report_water_cycle` (host `voxel/mod.rs:879`) blocks the loop before
+  the first frame; the probe takes 215.8 s on the A78s (60 s on the desk).
+- Flicker: `clock.rs:165-188` returns `Step::Tick`/`Step::Lagged` first
+  and `Step::Render` only when the sim is not behind wall time, so a tick
+  over 50 ms means no flip; the shim blanks after 3 s idle. At 16 Hz the
+  panel showed ~3 s of picture, ~3 s of black. Now 20 Hz / 19 fps, one
+  thread CPU-bound.
+- Two threads: `CPUAffinity=4-7` in the unit (Wrysk's dirty
+  `config/tachyon/cubarium.service`) with `core_ctl` offlining idle big
+  cores → `available_parallelism` = 2. Should be `CPUAffinity=0-6`;
+  782d7f6 makes the default `available − 1` (worse alone: 2 − 1).
+- "0-byte reply": the shim reopened the panel and the client's slots went
+  with the old device; the client bails (`shim.rs:466`) and exits; the
+  unit restarts it into another 216 s of black.
+- A78 core ≈ 3.6× slower than the desk; the 72-voxel ring with the
+  cascade is 7.8 m³ pooled in 10 380 cells (was 2 861).
+
+## Package D — the panel never goes black (display worker)
+
+Owner: a new host worker (Opus, **high** — scheduling and a thread).
+Files: host `clock.rs`, `voxel/mod.rs` (the run loop, `report_water_cycle`
+call site, startup), `shim.rs`, `sink/gpu/*` and `present.rs` only as the
+founding frame needs. Not the voxel crate (T6 runs there), not
+`config/tachyon/*`, `scripts/tachyon-*`, `docs/tachyon.md` (Wrysk's dirty
+files).
+
+1. **Render at display rate whatever the sim does.** When the sim is
+   behind, the loop still presents at the render cadence — the last
+   completed world state, again if nothing new — so a slow tick costs
+   frame freshness, never a flip. Bound catch-up as today. The invariant
+   to test: over any wall-clock second the loop yields ≥ (display rate −
+   1) renders even if every tick takes 200 ms.
+2. **Nothing blocks the first frame.** `report_water_cycle` runs on a
+   background thread on its `world.clone()` and logs when done (its line
+   unchanged); the seed gate's candidates and the founding settle run
+   while a **founding frame** is presented at display rate — the sky
+   gradient alone with a slow, dim pulse, no text (the look is Wrysk's;
+   this is a placeholder he can replace, and the normal display stays
+   free of analytical UI). The first world frame replaces it as soon as
+   the world exists.
+3. **Reconnect on handoff.** On the daemon's 0-byte reply (`shim.rs:466`)
+   the client re-opens the socket and re-attaches its slots with bounded
+   retries (the shim's `connect_when_free` idiom, 4 s) instead of exiting;
+   one log line per attempt. Only past the retries does it fail as today.
+4. Host-side threads: `threads = 0` resolves through
+   `cubarium_voxel::default_threads()` (782d7f6). Do not change it.
+
+Tests first, each under a second, no sleeps (drive `Clock` with a fake
+`now`): (a) a clock stepped with a 200 ms tick cost still yields renders
+at the display cadence; (b) the run loop presents a founding frame before
+the world exists (a fake sink counting frames); (c) the shim client on a
+0-byte reply retries and succeeds against a fake daemon that answers on
+the second attempt, and fails after the bound; (d) `report_water_cycle`
+returns immediately and its line appears later.
+
+Verify with the CPU sink locally pinned to two cores
+(`taskset -c 0,1`, seed 14400042426867678818, `config/tachyon/voxel.toml`,
+`--sink png --seconds 20`): frames from the first second, no gap over 100
+ms in the capture timestamps, the world frame within a few seconds.
+
+Return (≤25 lines): commits, the invariant numbers from the local run,
+what the founding frame looks like (one PNG in the scratch dir), test
+counts for `-p cubarium`.
