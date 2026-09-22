@@ -938,16 +938,22 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         }
         // The running report, so the panel's rate can be read without stopping it.
         if now.duration_since(since) >= SUMMARY_INTERVAL {
+            let interval = now.duration_since(since).as_secs_f64();
             eprintln!(
                 "cubarium voxel: since the last report — {}",
                 run_line(
                     &sim,
                     since_ticks,
                     since_frames,
-                    now.duration_since(since).as_secs_f64(),
+                    interval,
                     out.presented().map(|(shown, _)| shown - since_presented),
                 )
             );
+            // And what a present cost over that same interval, so a reading of the panel's
+            // rate says why it is what it is rather than leaving it to be inferred.
+            if let Some(line) = out.presenter_line(interval) {
+                eprintln!("cubarium voxel: {line}");
+            }
             since = now;
             since_ticks = 0;
             since_frames = 0;
@@ -1031,6 +1037,9 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         "cubarium voxel: {}",
         run_line(&sim, ticks, frames, elapsed, shown)
     );
+    if let Some(line) = out.presenter_line(elapsed) {
+        eprintln!("cubarium voxel: {line}");
+    }
     let (_, _, fauna) = sim.layers();
     let av = fauna.view();
     eprintln!(
@@ -1426,6 +1435,15 @@ impl Out {
         match self {
             Out::Cpu { .. } => None,
             Out::Gpu(gpu) => gpu.presented(),
+        }
+    }
+
+    /// Where the presenting thread's last `seconds` went, for the report. `None` when
+    /// nothing presents on another thread.
+    fn presenter_line(&mut self, seconds: f64) -> Option<String> {
+        match self {
+            Out::Cpu { .. } => None,
+            Out::Gpu(gpu) => gpu.presenter_line(seconds),
         }
     }
 

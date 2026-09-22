@@ -22,29 +22,55 @@
 //! thread does to the panel, and [`super::shim::ShimScanout`] is the one that really does
 //! it. That is what lets the semantics — newest frame wins, one frame in flight, a clean
 //! shutdown — be tested against a fake in microseconds.
+//!
+//! # Where the time goes
+//!
+//! The board's first reading with the thread in place: 50.9 frames a second recorded,
+//! **19.9 presented**, and the presenter thread at 81 % of a core. Eighty-one per cent of
+//! a core for twenty presents is forty milliseconds of *running* per frame, and a thread
+//! blocked on a fence or on a socket is not running — so the cost is inside the driver,
+//! not in this channel. [`PresentStats`] is therefore not decoration: every phase of a
+//! present is timed and reported, and frames that redrew the world are timed apart from
+//! frames that only put an already-drawn raster on a new slot. One reading of that line
+//! says whether the panel's ceiling is the world pass, the upscale onto 1080×1920, the
+//! daemon's pacing, or this side having nothing to give it.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Condvar, Mutex};
+use std::time::Instant;
 
 use anyhow::Result;
+
+/// A recorded frame, on its way to the panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Frame {
+    /// The slot its command buffer was recorded into.
+    pub slot: usize,
+    /// Whether it redrew the world raster, or only put the last one on a new slot. The
+    /// two cost very different amounts and are reported apart.
+    pub redrew: bool,
+}
 
 /// What the presenter thread does with a recorded frame.
 ///
 /// Slots are **indices**, `0..slots`, and not the daemon's slot ids: the ids change every
 /// time the panel changes hands and the index does not.
 pub trait Panel: Send {
-    /// Submit the command buffer recorded into `slot` and wait for its fence. The wire
-    /// carries no fence, so the daemon must not be shown a frame the GPU has not
-    /// finished — the wait stays.
-    fn submit_and_wait(&mut self, slot: usize) -> Result<()>;
+    /// Submit the command buffer recorded into `slot`.
+    fn submit(&mut self, slot: usize) -> Result<()>;
+
+    /// Wait for that submission's fence. The wire carries no fence, so the daemon must
+    /// not be shown a frame the GPU has not finished — the wait stays. It is its own call
+    /// so that the submit and the wait can be told apart in the report.
+    fn wait(&mut self, slot: usize) -> Result<()>;
 
     /// Show `slot`. It belongs to the daemon until it releases it.
     fn present(&mut self, slot: usize) -> Result<()>;
 
     /// The slots the daemon has released since the last call, and which are therefore
     /// free to be drawn into again. With `block`, wait for a reply when none is free;
-    /// without it, report only what is already known.
+    /// without it, report only what has already arrived.
     fn released(&mut self, block: bool) -> Result<Vec<usize>>;
 }
 
@@ -61,6 +87,138 @@ pub enum FromPresenter {
     Failed(String),
 }
 
+/// Every phase of every present, in nanoseconds, as the presenter thread accumulates it.
+///
+/// Read through [`PresentStats::snapshot`]; the numbers that matter are the differences
+/// between two snapshots, which is what the running report prints.
+#[derive(Debug, Default)]
+pub struct PresentStats {
+    presented: AtomicU64,
+    redrawn: AtomicU64,
+    /// Waiting for the recorder to post anything: the panel is ahead of the world.
+    idle_ns: AtomicU64,
+    submit_ns: AtomicU64,
+    fence_ns: AtomicU64,
+    /// `sendmsg(Present)`.
+    show_ns: AtomicU64,
+    /// Reading the daemon's replies, including waiting for one when no slot is free.
+    slots_ns: AtomicU64,
+    /// Submit plus fence, split by what the frame did.
+    redraw_ns: AtomicU64,
+    reshow_ns: AtomicU64,
+    /// Presents that had to wait on the daemon because the recorder held no slot.
+    starved: AtomicU64,
+}
+
+impl PresentStats {
+    fn add(&self, field: &AtomicU64, ns: u64) {
+        field.fetch_add(ns, Ordering::Relaxed);
+    }
+
+    pub fn snapshot(&self) -> PresentSample {
+        let g = |f: &AtomicU64| f.load(Ordering::Relaxed);
+        PresentSample {
+            presented: g(&self.presented),
+            redrawn: g(&self.redrawn),
+            idle_ns: g(&self.idle_ns),
+            submit_ns: g(&self.submit_ns),
+            fence_ns: g(&self.fence_ns),
+            show_ns: g(&self.show_ns),
+            slots_ns: g(&self.slots_ns),
+            redraw_ns: g(&self.redraw_ns),
+            reshow_ns: g(&self.reshow_ns),
+            starved: g(&self.starved),
+            skipped: 0,
+            refused_packs: 0,
+        }
+    }
+
+    pub fn presented(&self) -> u64 {
+        self.presented.load(Ordering::Relaxed)
+    }
+}
+
+/// Two snapshots apart: what the presenter did over one interval.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct PresentSample {
+    pub presented: u64,
+    pub redrawn: u64,
+    pub idle_ns: u64,
+    pub submit_ns: u64,
+    pub fence_ns: u64,
+    pub show_ns: u64,
+    pub slots_ns: u64,
+    pub redraw_ns: u64,
+    pub reshow_ns: u64,
+    pub starved: u64,
+    /// Frames the **recorder** could not place, filled in by the recorder's own side.
+    pub skipped: u64,
+    /// Packs the renderer refused because every staging buffer was still being read.
+    pub refused_packs: u64,
+}
+
+impl PresentSample {
+    /// This sample minus an earlier one: the interval between them.
+    pub fn since(&self, earlier: &PresentSample) -> PresentSample {
+        let d = |a: u64, b: u64| a.saturating_sub(b);
+        PresentSample {
+            presented: d(self.presented, earlier.presented),
+            redrawn: d(self.redrawn, earlier.redrawn),
+            idle_ns: d(self.idle_ns, earlier.idle_ns),
+            submit_ns: d(self.submit_ns, earlier.submit_ns),
+            fence_ns: d(self.fence_ns, earlier.fence_ns),
+            show_ns: d(self.show_ns, earlier.show_ns),
+            slots_ns: d(self.slots_ns, earlier.slots_ns),
+            redraw_ns: d(self.redraw_ns, earlier.redraw_ns),
+            reshow_ns: d(self.reshow_ns, earlier.reshow_ns),
+            starved: d(self.starved, earlier.starved),
+            skipped: d(self.skipped, earlier.skipped),
+            refused_packs: d(self.refused_packs, earlier.refused_packs),
+        }
+    }
+
+    /// One line: where a present's time went, and what never got to be one.
+    ///
+    /// Every millisecond figure is **per present**, so they add up to the interval the
+    /// thread had per frame. A thread that is not the ceiling shows most of it as idle.
+    pub fn line(&self, seconds: f64, device: &str) -> String {
+        let per = |ns: u64| {
+            if self.presented == 0 {
+                0.0
+            } else {
+                ns as f64 / self.presented as f64 / 1e6
+            }
+        };
+        let each = |ns: u64, n: u64| {
+            if n == 0 {
+                f64::NAN
+            } else {
+                ns as f64 / n as f64 / 1e6
+            }
+        };
+        let reshown = self.presented.saturating_sub(self.redrawn);
+        format!(
+            "presenter — {} shown ({:.1}/s), {} redrew the world; per present idle {:.1}, \
+             submit {:.1}, fence {:.1}, show {:.1}, slots {:.1} ms; \
+             redraw {:.1} ms vs re-present {:.1} ms ({reshown}); \
+             {} frames had no slot, {} packs refused, {} starved of a slot; on {device}",
+            self.presented,
+            self.presented as f64 / seconds.max(1e-9),
+            self.redrawn,
+            per(self.idle_ns),
+            per(self.submit_ns),
+            per(self.fence_ns),
+            per(self.show_ns),
+            per(self.slots_ns),
+            each(self.redraw_ns, self.redrawn),
+            each(self.reshow_ns, reshown),
+            self.skipped,
+            self.refused_packs,
+            self.starved,
+        )
+    }
+}
+
 /// The one frame waiting to be presented.
 ///
 /// **Newest wins, one in flight, and neither side waits for the other.** A recorder that
@@ -70,7 +228,7 @@ pub enum FromPresenter {
 /// nobody.
 #[derive(Debug, Default)]
 struct Posted {
-    frame: Option<usize>,
+    frame: Option<Frame>,
     quit: bool,
 }
 
@@ -95,11 +253,11 @@ impl Mailbox {
         }
     }
 
-    /// Put `slot` up to be presented. Returns the frame it displaced, which is the
+    /// Put `frame` up to be presented. Returns the frame it displaced, which is the
     /// recorder's again — its slot is free and its recording will never be submitted.
-    pub fn post(&self, slot: usize) -> Option<usize> {
+    pub fn post(&self, frame: Frame) -> Option<Frame> {
         let mut state = self.lock();
-        let displaced = state.frame.replace(slot);
+        let displaced = state.frame.replace(frame);
         drop(state);
         self.posted.notify_one();
         displaced
@@ -110,16 +268,16 @@ impl Mailbox {
     /// The recorder calls this **before** it records a fresher frame, so that the frame
     /// it gives up is always the newest one recorded: the renderer's ring retires frames
     /// in order and can only give back the last thing it was handed.
-    pub fn reclaim(&self) -> Option<usize> {
+    pub fn reclaim(&self) -> Option<Frame> {
         self.lock().frame.take()
     }
 
     /// The presenter's wait: the next frame, or `None` once the run is over.
-    pub fn take(&self) -> Option<usize> {
+    pub fn take(&self) -> Option<Frame> {
         let mut state = self.lock();
         loop {
-            if let Some(slot) = state.frame.take() {
-                return Some(slot);
+            if let Some(frame) = state.frame.take() {
+                return Some(frame);
             }
             if state.quit {
                 return None;
@@ -153,15 +311,15 @@ impl Mailbox {
 
 /// The presenter thread's whole body.
 ///
-/// It lends the recorder every slot the daemon is not using, waits for a frame, submits
-/// it, waits for its fence, says so, presents it, and goes looking for the next free
-/// slot. Blocking for a reply is right where it happens: nothing is waiting on this
-/// thread, and a reply is the only thing that frees a slot.
+/// It waits for a frame, submits it, waits for its fence, says so, presents it, and goes
+/// looking for the next free slot. Every one of those is timed into `stats`: the thread
+/// that turns out to be the panel's ceiling should be able to say which part of itself is
+/// the ceiling, rather than leaving it to be inferred from a load average.
 pub fn present_loop<P: Panel>(
     panel: &mut P,
     mail: &Mailbox,
     back: &Sender<FromPresenter>,
-    presented: &AtomicU64,
+    stats: &PresentStats,
     lent: Vec<usize>,
 ) -> Result<()> {
     // Slots the recorder has, or has posted back and not yet had presented. It starts
@@ -170,25 +328,50 @@ pub fn present_loop<P: Panel>(
     // every slot when the panel changes hands and offers them all again, and these are
     // the ones that are not its to offer.
     let mut lent = lent;
-    while let Some(slot) = mail.take() {
-        panel.submit_and_wait(slot)?;
+    loop {
+        let waited = Instant::now();
+        let Some(frame) = mail.take() else { break };
+        let got = Instant::now();
+        panel.submit(frame.slot)?;
+        let submitted = Instant::now();
+        panel.wait(frame.slot)?;
+        let fenced = Instant::now();
         // The fence is signalled: the staging buffer and the uniform block this frame
         // named are the recorder's to write again. This goes back before the present, so
         // the next pack is not waiting on a vsync.
         if back.send(FromPresenter::Retired).is_err() {
             break;
         }
-        panel.present(slot)?;
-        lent.retain(|s| *s != slot);
-        presented.fetch_add(1, Ordering::Relaxed);
+        panel.present(frame.slot)?;
+        let shown = Instant::now();
+        lent.retain(|s| *s != frame.slot);
         // **Only a starved recorder is worth sleeping for.** A reply arrives when the
         // daemon's flip completes, so waiting for one while the recorder still has a slot
         // would put a whole vsync between this frame and the next — 24 ms a frame instead
-        // of 16. With three slots the recorder runs out every third frame, which is often
-        // enough that the replies never pile up. A shutting-down recorder is not waiting
-        // for anything, and the daemon may be the thing that went away.
+        // of 16. A shutting-down recorder is not waiting for anything, and the daemon may
+        // be the thing that went away.
         let block = lent.is_empty() && !mail.quitting();
-        if !lend(panel.released(block)?, &mut lent, back) {
+        let free = panel.released(block)?;
+        let slotted = Instant::now();
+
+        stats.add(&stats.idle_ns, (got - waited).as_nanos() as u64);
+        stats.add(&stats.submit_ns, (submitted - got).as_nanos() as u64);
+        stats.add(&stats.fence_ns, (fenced - submitted).as_nanos() as u64);
+        stats.add(&stats.show_ns, (shown - fenced).as_nanos() as u64);
+        stats.add(&stats.slots_ns, (slotted - shown).as_nanos() as u64);
+        let work = (fenced - got).as_nanos() as u64;
+        if frame.redrew {
+            stats.add(&stats.redrawn, 1);
+            stats.add(&stats.redraw_ns, work);
+        } else {
+            stats.add(&stats.reshow_ns, work);
+        }
+        if block {
+            stats.add(&stats.starved, 1);
+        }
+        stats.add(&stats.presented, 1);
+
+        if !lend(free, &mut lent, back) {
             break;
         }
     }
@@ -215,6 +398,10 @@ mod tests {
     use super::*;
     use std::sync::mpsc::channel;
 
+    fn frame(slot: usize) -> Frame {
+        Frame { slot, redrew: true }
+    }
+
     /// A panel that records what it was asked to do and answers from a script.
     #[derive(Default)]
     struct FakePanel {
@@ -225,11 +412,15 @@ mod tests {
     }
 
     impl Panel for FakePanel {
-        fn submit_and_wait(&mut self, slot: usize) -> Result<()> {
+        fn submit(&mut self, slot: usize) -> Result<()> {
             self.log.push(format!("submit {slot}"));
             if self.fail_on_submit == Some(slot) {
                 anyhow::bail!("the device is gone");
             }
+            Ok(())
+        }
+        fn wait(&mut self, slot: usize) -> Result<()> {
+            self.log.push(format!("wait {slot}"));
             Ok(())
         }
         fn present(&mut self, slot: usize) -> Result<()> {
@@ -248,10 +439,10 @@ mod tests {
     #[test]
     fn the_newest_frame_displaces_the_one_still_waiting() {
         let mail = Mailbox::new();
-        assert_eq!(mail.post(0), None, "nothing was waiting");
-        assert_eq!(mail.post(1), Some(0), "the first frame is handed back");
-        assert_eq!(mail.post(2), Some(1));
-        assert_eq!(mail.take(), Some(2), "the presenter sees only the newest");
+        assert_eq!(mail.post(frame(0)), None, "nothing was waiting");
+        assert_eq!(mail.post(frame(1)), Some(frame(0)), "the first comes back");
+        assert_eq!(mail.post(frame(2)), Some(frame(1)));
+        assert_eq!(mail.take(), Some(frame(2)), "only the newest is presented");
     }
 
     /// The recorder takes its own frame back before recording a fresher one, so the frame
@@ -261,8 +452,8 @@ mod tests {
     fn a_frame_the_presenter_has_not_started_is_reclaimed() {
         let mail = Mailbox::new();
         assert_eq!(mail.reclaim(), None, "nothing to reclaim");
-        mail.post(2);
-        assert_eq!(mail.reclaim(), Some(2));
+        mail.post(frame(2));
+        assert_eq!(mail.reclaim(), Some(frame(2)));
         assert_eq!(mail.reclaim(), None, "and only once");
     }
 
@@ -272,38 +463,39 @@ mod tests {
     fn the_recorder_never_waits_on_the_presenter() {
         let mail = Mailbox::new();
         for i in 0..1000 {
-            mail.post(i % 3);
+            mail.post(frame(i % 3));
             mail.reclaim();
         }
         assert_eq!(mail.take_now(), None);
     }
 
-    /// One frame in flight: submit, say it has retired, present, then look for the next
-    /// free slot — in that order, because the recorder should get its staging buffer back
-    /// without waiting for a vsync.
+    /// One frame in flight: submit, wait, say it has retired, present, then look for the
+    /// next free slot — in that order, because the recorder should get its staging buffer
+    /// back without waiting for a vsync.
     #[test]
     fn a_frame_is_submitted_retired_and_then_presented() {
         let mail = Mailbox::new();
         let (tx, rx) = channel();
-        let presented = AtomicU64::new(0);
+        let stats = PresentStats::default();
         let mut panel = FakePanel {
             releases: [vec![]].into_iter().collect(),
             ..FakePanel::default()
         };
-        mail.post(0);
+        mail.post(frame(0));
         mail.quit();
-        present_loop(&mut panel, &mail, &tx, &presented, vec![0, 1, 2]).unwrap();
+        present_loop(&mut panel, &mail, &tx, &stats, vec![0, 1, 2]).unwrap();
 
         assert_eq!(
             panel.log,
             vec![
                 "submit 0",
+                "wait 0",
                 "present 0",
                 // The recorder still holds 1 and 2, so nothing sleeps on a reply.
                 "released block=false",
             ]
         );
-        assert_eq!(presented.load(Ordering::Relaxed), 1);
+        assert_eq!(stats.presented(), 1);
         let got: Vec<FromPresenter> = rx.try_iter().collect();
         assert_eq!(got, vec![FromPresenter::Retired]);
     }
@@ -315,15 +507,15 @@ mod tests {
     fn a_slot_the_recorder_already_holds_is_not_lent_twice() {
         let mail = Mailbox::new();
         let (tx, rx) = channel();
-        let presented = AtomicU64::new(0);
+        let stats = PresentStats::default();
         let mut panel = FakePanel {
             // The re-attach: the daemon has forgotten everything and offers it all.
             releases: [vec![0, 1, 2]].into_iter().collect(),
             ..FakePanel::default()
         };
-        mail.post(1);
+        mail.post(frame(1));
         mail.quit();
-        present_loop(&mut panel, &mail, &tx, &presented, vec![0, 1, 2]).unwrap();
+        present_loop(&mut panel, &mail, &tx, &stats, vec![0, 1, 2]).unwrap();
 
         let free: Vec<usize> = rx
             .try_iter()
@@ -342,11 +534,11 @@ mod tests {
     fn the_thread_stops_on_quit() {
         let mail = Mailbox::new();
         let (tx, rx) = channel();
-        let presented = AtomicU64::new(0);
+        let stats = PresentStats::default();
         let mut panel = FakePanel::default();
         mail.quit();
-        present_loop(&mut panel, &mail, &tx, &presented, vec![0]).unwrap();
-        assert_eq!(presented.load(Ordering::Relaxed), 0, "nothing went up");
+        present_loop(&mut panel, &mail, &tx, &stats, vec![0]).unwrap();
+        assert_eq!(stats.presented(), 0, "nothing went up");
         assert!(panel.log.is_empty(), "{:?}", panel.log);
         drop(rx);
     }
@@ -358,26 +550,22 @@ mod tests {
     fn a_frame_posted_as_the_run_ends_is_still_presented_and_then_the_thread_stops() {
         let mail = std::sync::Arc::new(Mailbox::new());
         let (tx, rx) = channel();
-        let presented = std::sync::Arc::new(AtomicU64::new(0));
-        let (m, p) = (mail.clone(), presented.clone());
+        let stats = std::sync::Arc::new(PresentStats::default());
+        let (m, s) = (mail.clone(), stats.clone());
         let thread = std::thread::spawn(move || {
             let mut panel = FakePanel {
                 releases: [vec![0]].into_iter().collect(),
                 ..FakePanel::default()
             };
-            present_loop(&mut panel, &m, &tx, &p, vec![0, 1]).unwrap();
+            present_loop(&mut panel, &m, &tx, &s, vec![0, 1]).unwrap();
             panel.log
         });
-        mail.post(1);
+        mail.post(frame(1));
         mail.quit();
         // The thread ran: it says the frame's resources are free again.
         assert_eq!(rx.recv().unwrap(), FromPresenter::Retired);
         let log = thread.join().expect("the presenter thread ends");
-        assert_eq!(
-            presented.load(Ordering::Relaxed),
-            1,
-            "the last frame went up"
-        );
+        assert_eq!(stats.presented(), 1, "the last frame went up");
         assert!(log.contains(&"present 1".to_string()), "{log:?}");
     }
 
@@ -387,14 +575,14 @@ mod tests {
     fn a_failing_panel_ends_the_loop() {
         let mail = Mailbox::new();
         let (tx, _rx) = channel();
-        let presented = AtomicU64::new(0);
+        let stats = PresentStats::default();
         let mut panel = FakePanel {
             fail_on_submit: Some(0),
             ..FakePanel::default()
         };
-        mail.post(0);
+        mail.post(frame(0));
         mail.quit();
-        let e = present_loop(&mut panel, &mail, &tx, &presented, vec![0]).expect_err("it failed");
+        let e = present_loop(&mut panel, &mail, &tx, &stats, vec![0]).expect_err("it failed");
         assert!(format!("{e:#}").contains("the device is gone"), "{e:#}");
     }
 
@@ -405,18 +593,104 @@ mod tests {
         let mail = Mailbox::new();
         let (tx, rx) = channel();
         drop(rx);
-        let presented = AtomicU64::new(0);
+        let stats = PresentStats::default();
         let mut panel = FakePanel::default();
-        mail.post(0);
-        present_loop(&mut panel, &mail, &tx, &presented, vec![0]).expect("no error");
-        assert_eq!(panel.log, vec!["submit 0"], "it stopped at the first send");
+        mail.post(frame(0));
+        present_loop(&mut panel, &mail, &tx, &stats, vec![0]).expect("no error");
+        assert_eq!(
+            panel.log,
+            vec!["submit 0", "wait 0"],
+            "it stopped at the first send"
+        );
+    }
+
+    /// **The point of the report.** A thread that turns out to be the panel's ceiling has
+    /// to be able to say which part of itself is the ceiling: the phases are timed apart,
+    /// and a frame that redrew the world is timed apart from one that only put an
+    /// already-drawn raster onto a new slot.
+    #[test]
+    fn the_report_splits_the_phases_and_the_two_kinds_of_frame() {
+        let mail = Mailbox::new();
+        let (tx, rx) = channel();
+        let stats = PresentStats::default();
+        let mut panel = FakePanel {
+            releases: [vec![], vec![]].into_iter().collect(),
+            ..FakePanel::default()
+        };
+        mail.post(Frame {
+            slot: 0,
+            redrew: true,
+        });
+        mail.quit();
+        present_loop(&mut panel, &mail, &tx, &stats, vec![0, 1]).unwrap();
+        mail.post(Frame {
+            slot: 1,
+            redrew: false,
+        });
+        present_loop(&mut panel, &mail, &tx, &stats, vec![1]).unwrap();
+        drop(rx);
+
+        let now = stats.snapshot();
+        assert_eq!(now.presented, 2);
+        assert_eq!(now.redrawn, 1, "one of the two redrew the world");
+        let line = now.line(60.0, "a fake panel");
+        assert!(line.contains("2 shown (0.0/s), 1 redrew"), "{line}");
+        assert!(line.contains("re-present"), "{line}");
+        assert!(line.contains("on a fake panel"), "{line}");
+
+        // An interval is the difference of two snapshots, so each report is about its own
+        // minute rather than about the whole run.
+        let d = now.since(&PresentSample {
+            presented: 1,
+            redrawn: 1,
+            ..PresentSample::default()
+        });
+        assert_eq!(d.presented, 1);
+        assert_eq!(d.redrawn, 0);
+    }
+}
+
+#[cfg(test)]
+mod report {
+    use super::*;
+
+    /// The line as the board will print it, built from the numbers the board actually
+    /// reported (1197 presented in 60 s, a thread at 81 % of a core). Forty milliseconds
+    /// of *running* per present is the whole story of the panel's rate, and the line has
+    /// to make it readable at a glance rather than inferred from `top`.
+    #[test]
+    fn the_report_reads_as_one_line() {
+        let ms = |n: f64, count: u64| (n * 1e6) as u64 * count;
+        let sample = PresentSample {
+            presented: 1197,
+            redrawn: 1180,
+            idle_ns: ms(0.4, 1197),
+            submit_ns: ms(2.1, 1197),
+            fence_ns: ms(44.9, 1197),
+            show_ns: ms(0.3, 1197),
+            slots_ns: ms(1.2, 1197),
+            redraw_ns: ms(47.6, 1180),
+            reshow_ns: ms(8.1, 17),
+            starved: 12,
+            skipped: 1853,
+            refused_packs: 0,
+        };
+        let line = sample.line(60.0, "Mali-G610 (Panfrost)");
+        println!("{line}");
+        assert!(line.contains("1197 shown (19.9/s), 1180 redrew"), "{line}");
+        assert!(line.contains("fence 44.9"), "{line}");
+        assert!(
+            line.contains("redraw 47.6 ms vs re-present 8.1 ms (17)"),
+            "{line}"
+        );
+        assert!(line.contains("1853 frames had no slot"), "{line}");
     }
 }
 
 #[cfg(test)]
 impl Mailbox {
     /// The waiting frame without waiting for one, for the tests.
-    fn take_now(&self) -> Option<usize> {
+    fn take_now(&self) -> Option<Frame> {
         self.lock().frame.take()
     }
 }

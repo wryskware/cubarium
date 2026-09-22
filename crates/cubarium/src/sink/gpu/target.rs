@@ -108,6 +108,15 @@ impl GpuTarget {
         }
     }
 
+    /// Where the presenting thread's time went, cumulatively. `None` for a target that
+    /// presents on the calling thread and has no separate story to tell.
+    pub fn sample(&self) -> Option<cubarium_gpu::target::presenter::PresentSample> {
+        match self {
+            GpuTarget::ShimThread(t) => Some(t.sample()),
+            _ => None,
+        }
+    }
+
     pub fn should_quit(&mut self) -> bool {
         match self {
             GpuTarget::Window(t) => !t.open,

@@ -269,6 +269,13 @@ pub trait FrameSource {
         usize::MAX
     }
 
+    /// Whether the frame just recorded drew the world again, or only put a raster it
+    /// already held onto a new target. A target that reports what a frame cost keeps the
+    /// two apart, because they cost very different amounts.
+    fn redrew_last(&self) -> bool {
+        true
+    }
+
     /// Milliseconds the last frame's timestamps saw, or `NaN` if they are not ready.
     fn gpu_ms(&self, gpu: &Gpu) -> f64;
 

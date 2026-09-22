@@ -531,6 +531,20 @@ pub struct VoxelRenderer {
     offsets: (u64, u64, u64, u64),
     /// Whether a staged world is waiting to be uploaded.
     dirty: bool,
+    /// Whether the world raster already holds the picture the next frame would draw.
+    ///
+    /// **A frame between two ticks is the same picture.** This renderer uploads one
+    /// texture per tick and interpolates nothing across it, so at 60 fps over a 20 Hz
+    /// world two frames in three would redraw, texel for texel, what is already in the
+    /// raster. They do not: a frame whose world has not moved records only the present
+    /// pass onto its slot, and the slab walk and the upload are skipped. Anything that
+    /// changes the picture — a pack, a parameter, the weather, the founding pulse —
+    /// clears this.
+    raster_current: bool,
+    /// Whether the last recorded frame redrew the raster or only re-presented it. The
+    /// presenter reports the two costs apart, which is what says whether the panel's
+    /// ceiling is the world pass or the upscale onto it.
+    redrew: bool,
     /// Whether anything has ever been staged: a frame before the first upload would
     /// sample undefined texels, so it is refused rather than drawn.
     staged: bool,
@@ -830,6 +844,8 @@ impl VoxelRenderer {
             ring: StagingRing::new(STAGING_RING),
             offsets,
             dirty: false,
+            raster_current: false,
+            redrew: true,
             staged: false,
             uniforms,
             nearest,
@@ -861,6 +877,7 @@ impl VoxelRenderer {
             bail!("the projection and the world's extent are fixed for a VoxelRenderer");
         }
         self.params = params;
+        self.raster_current = false;
         Ok(())
     }
 
@@ -871,6 +888,7 @@ impl VoxelRenderer {
     pub fn update_weather(&mut self, atmosphere: f32, rain_tick: f32) {
         self.params.atmosphere = atmosphere;
         self.params.rain_tick = rain_tick;
+        self.raster_current = false;
     }
 
     /// Whether a pack has a staging buffer to go into. False while every one of them is
@@ -923,6 +941,7 @@ impl VoxelRenderer {
         self.ring.packed(into);
         self.dirty = true;
         self.staged = true;
+        self.raster_current = false;
         true
     }
 
@@ -942,7 +961,15 @@ impl VoxelRenderer {
             && frame.staging.is_some()
         {
             self.dirty = true;
+            // Its upload never ran, so the raster is not what that frame would have made
+            // it: the next frame must draw the world again.
+            self.raster_current = false;
         }
+    }
+
+    /// Whether the last recorded frame redrew the world raster.
+    pub fn redrew_last(&self) -> bool {
+        self.redrew
     }
 
     /// Frames recorded and not yet retired.
@@ -981,6 +1008,11 @@ impl VoxelRenderer {
         let frame = self.ring.record();
         let upload = self.dirty && frame.staging.is_some();
         self.dirty = false;
+        // The raster already holds this picture unless something changed it, and the
+        // upload only ever comes with a change.
+        let redraw = !self.raster_current;
+        self.raster_current = true;
+        self.redrew = redraw;
         // This frame's own uniform block, written now and read by the GPU when it runs:
         // `set_params` and `update_weather` only moved `self.params`.
         self.uniforms.write_bytes_at(
@@ -999,7 +1031,7 @@ impl VoxelRenderer {
             d.cmd_reset_query_pool(cb, self.queries, q, QUERY_SLOTS);
             d.cmd_write_timestamp(cb, vk::PipelineStageFlags::TOP_OF_PIPE, self.queries, q);
 
-            if upload {
+            if upload && redraw {
                 let planes = [
                     (self.voxel_image, self.offsets.0, w, h, dd),
                     (self.roof_image, self.offsets.1, w, h, dd),
@@ -1056,25 +1088,31 @@ impl VoxelRenderer {
                 q + 1,
             );
 
-            crate::render::begin(
-                d,
-                cb,
-                self.raster_pass,
-                self.raster_framebuffer,
-                self.params.raster_w,
-                self.params.raster_h,
-            );
-            d.cmd_bind_descriptor_sets(
-                cb,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.pipeline_layout,
-                0,
-                &[self.set],
-                &[(self.uniform_stride * frame.slot as u64) as u32],
-            );
-            d.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
-            d.cmd_draw(cb, 3, 1, 0, 0);
-            d.cmd_end_render_pass(cb);
+            if redraw {
+                // The pass leaves the raster in `SHADER_READ_ONLY_OPTIMAL`, which is
+                // where the present pass wants it — so a frame that skips this one finds
+                // the image in the right layout, holding the right picture, and only one
+                // frame is ever in flight, so nothing is still writing it.
+                crate::render::begin(
+                    d,
+                    cb,
+                    self.raster_pass,
+                    self.raster_framebuffer,
+                    self.params.raster_w,
+                    self.params.raster_h,
+                );
+                d.cmd_bind_descriptor_sets(
+                    cb,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    self.pipeline_layout,
+                    0,
+                    &[self.set],
+                    &[(self.uniform_stride * frame.slot as u64) as u32],
+                );
+                d.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
+                d.cmd_draw(cb, 3, 1, 0, 0);
+                d.cmd_end_render_pass(cb);
+            }
             d.cmd_write_timestamp(
                 cb,
                 vk::PipelineStageFlags::BOTTOM_OF_PIPE,
@@ -1252,6 +1290,10 @@ impl FrameSource for VoxelRenderer {
 
     fn frame_capacity(&self) -> usize {
         STAGING_RING
+    }
+
+    fn redrew_last(&self) -> bool {
+        VoxelRenderer::redrew_last(self)
     }
 
     fn gpu_ms(&self, gpu: &Gpu) -> f64 {
