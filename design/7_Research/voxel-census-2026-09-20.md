@@ -1033,3 +1033,72 @@ surviving mat is left.
 - **One seed per preset** (base 1, 0 rejected). `small`'s own barren seeds — the recipe
   comment names five of eight — are not sampled, and `wide` was not run at all.
 - The three arms are one trajectory each; nothing here is a distribution.
+
+## Water units, 2026-09-22
+
+Package 1c (`design/handoffs/voxel-water-units-2026-09-22.md`) turned the
+solver's permeability-driven flux from a fraction of a cell per tick into a
+conductivity in metres per second: `rate_m3 = K · face_area · dt` with
+`K = permeability_per_s · pore_capacity · 0.25` m/s (soil 0.0175, rock 5e-6).
+Four sites — the water table's band uptake and its seepage, surface
+infiltration, and drainage. `permeability_per_s` and `pore_capacity` keep
+their authored values, nothing serialised changed, and the conversion factor
+is chosen so the 0.25 m reference grid is untouched. Rain and evaporation
+were already per area; the outlet weir is a share of the cell on purpose and
+was left alone. Candidate 3 of the D5 diagnosis above, measured.
+
+**The reference grid is identical, and not just in arithmetic.** On 0.25 m
+cells `pore_flux_m3` reproduces the old expression bit for bit (`to_bits()`
+equality, every material, three timesteps). End to end, over a full hour:
+`voxel_plant_autopsy 1 preset=default` writes a **byte-identical** CSV before
+and after, and so does `water_cycle 1 … preset=default`. `wide` is 0.25 m too,
+so the same holds there; `small` is the only shipped ring the fix moves.
+
+**Drownings, 1 h, seed base 1, plants-only** (before = the same binary with the
+pre-1c expression restored, so this is a controlled A/B and not a comparison
+across commits):
+
+| | small (0.125 m), 27 stands | default (0.25 m), 87 stands |
+| --- | --- | --- |
+| drowned by min 10, before | 14 (all at min 10) | 8 (5 at min 0, 3 at min 9) |
+| drowned by min 10, after | **8** | 8 — identical |
+| drowned at 60 min, before → after | 14 → **8** | 8 → 8 |
+| deaths at 60 min, before → after | 22 → **20** | 43 → 43 |
+| establishments | 19 → 19 | 42 → 42 |
+
+The first shower still drowns eight of `small`'s stands. Halving the depth of
+standing water is what the ground draining at its proper speed buys, and it is
+not by itself enough: the springturf and glowcap drown depths are 0.03 and
+0.05 m and the runoff still clears them. D5's other two findings stand.
+
+**Closed cycle, 1 h** (`water_cycle 1 1 0.02 5.0 0.0001 4 preset=…`):
+
+| | stored (m³) | pooled | pore | aloft | showers | residual |
+| --- | --- | --- | --- | --- | --- | --- |
+| default, before | 427.36–470.82 | 122.018 | 22.728 | 230.241 | 4 | 1.1e-9 |
+| default, after | identical | identical | identical | identical | 4 | 1.1e-9 |
+| small, before | 91.88–100.47 | 34.598 | 6.099 | 61.115 | 5 | 1.5e-8 |
+| small, after | 91.66–100.43 | 34.381 | 6.097 | 61.335 | 5 | 4.8e-8 |
+
+`small`'s cycle barely notices: 0.6 % less pooled and 0.4 % more aloft, the
+same five showers, the same verdict. The ring's water is in the lake and the
+aquifer, and doubling the speed at which the soil exchanges with them moves the
+standing film, not the inventory. Conservation holds on both grids, and the
+residuals are the example's own floating-point floor.
+
+### What this did not measure, and why
+
+- **One seed per preset, one trajectory each.** `wide` was not run: it is
+  0.25 m, so the fix is a no-op there by the same identity.
+- **Nothing beyond an hour.** The 6 h picture of D5's table is not re-run here.
+- **The drowning counts are the autopsy's inferred cause**, unchanged from D5:
+  a stand whose water depth passed its `drown_depth_m` on the tick it vanished.
+- **A mirror-symmetry fixture lost strength.** `core::the_mirrored_fixture_
+  gives_the_mirrored_answer` now holds to 5e-3 rather than 1e-6. Two basins
+  sealed by a sill freeze whatever split the spill left them, and that split
+  turns on one substep-level head comparison; the units change moved the
+  operating point across it. Measured constant in the poured volume (4.9–7.0
+  m³) and in the tick count (20–1000), so it is a frozen decision and not a
+  drift, and conservation and the materials are still mirrored at 1e-12. The
+  order dependence is the damp-set walk `drain`'s own doc names, not something
+  1c introduced — but nothing here measured how far it reaches.
