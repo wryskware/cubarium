@@ -793,25 +793,46 @@ pub fn stamp_terraces(field: &mut Heightfield, c: &Config, r: &Recipe) -> Vec<Po
     let notch_half = ((t.notch_width_m / vm).round().max(1.0) as i64 / 2).max(0);
     let setback = (t.front_setback_m / vm).round().max(1.0) as usize;
     let bowl_v = (t.pool_depth_m / vm).round().max(2.0) as i32;
+    // The crests first, before anything is measured against the ground: they lower a
+    // riser's lip by as much as a whole band, and a lake bowl cut to be the ring's low
+    // point against the ground as it stood *before* that is not the low point after it —
+    // which is how `lake_level` came to pick a crest instead of the lake.
+    let ramp_x = ramp_columns(field, r, (c.seed >> 33) as usize % w);
+    stamp_riser_crests(field, c, r, &ramp_x);
+
     // The chain stands over the ring's own lowest ground, so the lake it ends in is cut
     // from the lowest terrace's lowest place: then the bowl is the ring's low point by
     // construction, `lake_level` finds it, and the level it works out is the lip the
     // bowl was cut a lake's depth below.
+    // Measured the way the voxeliser will read it: sediment past `soil_max_m` never
+    // becomes ground, so a flat buried in silt stands lower in the voxels than it does in
+    // the heightfield, and a lake cut to be the low point of the one is not the low point
+    // of the other.
+    let ground_m =
+        |f: &Heightfield, i: usize| f.bedrock_m[i] + f.sediment_m[i].max(0.0).min(r.soil_max_m);
     let low_i = (0..w * d).fold(0usize, |best, i| {
-        if field.surface_m(i) < field.surface_m(best) {
+        if ground_m(field, i) < ground_m(field, best) {
             i
         } else {
             best
         }
     });
     let cx = low_i % w;
-    let ring_low = field.surface_m(low_i);
+    let ring_low = ground_m(field, low_i);
 
     let mut pools = Vec::new();
     for tier in 0..t.count {
         // The bowl's columns: the terrace's own rows, one lip row back from its front.
         let mut cells = Vec::new();
         let mut lip = Vec::new();
+        // The lake is not a pool. It is the ring's one big water, it has to read in
+        // section at the cut as well as from above, and the front wall holds it in, so it
+        // is wider than the pools and it starts at `z = 0` with no lip in front of it.
+        let (rx, setback) = if tier == 0 {
+            ((t.lake_radius_m / vm).round().max(2.0) as i64, 0usize)
+        } else {
+            (rx, setback)
+        };
         for dx in -rx..=rx {
             let x = (cx as i64 + dx).rem_euclid(w as i64) as usize;
             let front = tier_front_rows(r, c, circ, x);
@@ -830,6 +851,7 @@ pub fn stamp_terraces(field: &mut Heightfield, c: &Config, r: &Recipe) -> Vec<Po
             for z in z0..z0 + setback {
                 lip.push((x, z, dx.abs() <= notch_half));
             }
+            let _ = &lip;
             for z in z0 + setback..z1 {
                 cells.push(z * w + x);
             }
@@ -840,11 +862,22 @@ pub fn stamp_terraces(field: &mut Heightfield, c: &Config, r: &Recipe) -> Vec<Po
 
         // The bowl sits under everything that rims it, and its notch one voxel under
         // that rim, so the pool holds its depth and spills at one place.
+        // The row behind the bowl counts as rim too. A pool standing over the ground
+        // behind it is a column hiding what the camera should see, and the skyline pass
+        // would answer by cutting the terrace away.
+        let behind: Vec<usize> = cells
+            .iter()
+            .filter_map(|&i| {
+                let (x, z) = (i % w, i / w);
+                (z + 1 < d && !cells.contains(&((z + 1) * w + x))).then_some((z + 1) * w + x)
+            })
+            .collect();
         let rim_m = cells
             .iter()
             .copied()
             .chain(lip.iter().map(|&(x, z, _)| z * w + x))
-            .fold(f64::MAX, |m, i| m.min(field.surface_m(i)));
+            .chain(behind.iter().copied())
+            .fold(f64::MAX, |m, i| m.min(ground_m(field, i)));
         // The water stands at the terrace's own front level, not under a rim above it.
         // The camera will not have it otherwise: a lip standing over the water it holds
         // hides that water at one row of depth, and the skyline pass answers by cutting
@@ -860,43 +893,43 @@ pub fn stamp_terraces(field: &mut Heightfield, c: &Config, r: &Recipe) -> Vec<Po
         if floor_y <= FLOOR_Y {
             continue;
         }
-        // The lake needs a seat for the ring's outlet at its own surface, so its bowl is
-        // a dish: one cell of shelf just under the waterline around a deeper middle.
-        let shelf: std::collections::BTreeSet<usize> = if tier == 0 {
-            cells
+        // The lake is a dish, not a tank. Its outer ring sits one voxel under the
+        // waterline — that is the seat the ring's outlet needs — and the ring inside it
+        // one voxel deeper, so when the lake settles to the outlet's own level the beach
+        // is still under water and the open water the camera reads does not collapse to
+        // the deep middle. Measured on `small`: 4.9 m² of lake came out of the settle at
+        // 1.2 with a single step, and at 4.1 with this one.
+        let member: std::collections::BTreeSet<usize> = cells.iter().copied().collect();
+        let beach = |i: usize| -> i32 {
+            if tier > 0 {
+                return 99;
+            }
+            let (x, z) = (i % w, i / w);
+            let mut rings = 0;
+            for step in 1..=2i64 {
+                let edge = [
+                    ((x as i64 - step).rem_euclid(w as i64) as usize, z as i64),
+                    ((x as i64 + step).rem_euclid(w as i64) as usize, z as i64),
+                    (x, z as i64 + step),
+                ]
                 .iter()
-                .copied()
-                .filter(|&i| {
-                    let (x, z) = (i % w, i / w);
-                    [
-                        ((x + w - 1) % w, z),
-                        ((x + 1) % w, z),
-                        (x, z.wrapping_sub(1)),
-                        (x, z + 1),
-                    ]
-                    .iter()
-                    .any(|&(nx, nz)| nz >= d || !cells.contains(&(nz * w + nx)))
-                })
-                .collect()
-        } else {
-            Default::default()
+                .any(|&(nx, nz)| nz >= d as i64 || !member.contains(&(nz as usize * w + nx)));
+                if edge {
+                    return rings;
+                }
+                rings += 1;
+            }
+            rings
         };
 
         for &i in &cells {
-            let bed = if shelf.contains(&i) {
-                spill_y - 1
-            } else {
-                floor_y
-            };
-            // A pool on soil drains into its bed; the lake keeps its soil so the water
-            // table can stand under it, and the bedrock drops by what the soil adds so
-            // the ground still comes out where the bowl was cut.
-            if tier > 0 {
-                field.sediment_m[i] = 0.0;
-                field.pool_rock[i] = bed;
-            } else {
-                field.sediment_m[i] = field.sediment_m[i].min(r.mantle_m);
-            }
+            let bed = (spill_y - 1 - beach(i)).max(floor_y);
+            // Rock, the lake as much as the pools. Standing water on soil soaks into it
+            // unless the water table is standing right under it, and on a ring this small
+            // the table cannot be charged that high out of the inventory: measured on
+            // `small`, a soil-bedded lake of 4.9 m² came out of the settle at 0.9.
+            field.sediment_m[i] = 0.0;
+            field.pool_rock[i] = bed;
             field.bedrock_m[i] = bed as f64 * vm - field.sediment_m[i];
             field.pool_spill[i] = spill_y;
             field.spill_m[i] = field.surface_m(i);
@@ -904,12 +937,8 @@ pub fn stamp_terraces(field: &mut Heightfield, c: &Config, r: &Recipe) -> Vec<Po
         let mut notch = None;
         for &(x, z, is_notch) in &lip {
             let i = z * w + x;
-            if tier > 0 {
-                field.sediment_m[i] = 0.0;
-                field.pool_rock[i] = spill_y;
-            } else {
-                field.sediment_m[i] = field.sediment_m[i].min(r.mantle_m);
-            }
+            field.sediment_m[i] = 0.0;
+            field.pool_rock[i] = spill_y;
             field.bedrock_m[i] = spill_y as f64 * vm - field.sediment_m[i];
             field.spill_m[i] = field.surface_m(i);
             if is_notch && tier > 0 && notch.is_none() {
@@ -927,6 +956,73 @@ pub fn stamp_terraces(field: &mut Heightfield, c: &Config, r: &Recipe) -> Vec<Po
 
     stamp_ramps(field, c, r, cx);
     pools
+}
+
+/// The columns the ramp runs up, half a ring from the pools.
+fn ramp_columns(field: &Heightfield, r: &Recipe, pool_x: usize) -> Vec<usize> {
+    let (w, vm) = (field.width, field.cell_m);
+    let half = ((r.tiers.pool_radius_m / vm).round().max(2.0) as i64).max(2);
+    let centre = (pool_x + w / 2) % w;
+    (-half - 1..=half + 1)
+        .map(|dx| (centre as i64 + dx).rem_euclid(w as i64) as usize)
+        .collect()
+}
+
+/// Sit every riser's crest on the top of a hard band.
+///
+/// The risers are the ring's cliffs now, and a cliff's lip is a stratum, not wherever the
+/// erosion happened to stop. Snapping the front rows of each terrace onto the hard band
+/// under them puts a cap of bedrock over soft rock along the whole crest, which is the
+/// geometry the undercut pass looks for — so the grottos land in the faces the camera is
+/// pointed at instead of in whatever bank the relief left inside a terrace.
+///
+/// Runs after erosion, for the same reason the pools do: half a metre of incision is
+/// enough to knock a crest off its band and leave nothing to notch.
+fn stamp_riser_crests(field: &mut Heightfield, c: &Config, r: &Recipe, skip: &[usize]) {
+    let t = r.tiers;
+    let (w, d, vm) = (field.width, field.depth, field.cell_m);
+    let circ = field.circumference_m;
+    let rows = (r.hollows.undercut_depth_m / vm).round().max(1.0) as usize;
+    for x in 0..w {
+        if skip.contains(&x) {
+            // The ramp's own columns keep their slope: a cliff with a path up it is not
+            // a cliff at the path.
+            continue;
+        }
+        let front = tier_front_rows(r, c, circ, x);
+        let x_m = (x as f64 + 0.5) * vm;
+        for tier in 1..t.count as usize {
+            let z0 = front[tier];
+            if z0 == usize::MAX {
+                continue;
+            }
+            let next = front
+                .get(tier + 1)
+                .copied()
+                .filter(|&z| z != usize::MAX)
+                .unwrap_or(d);
+            // The same pull the benches use, so the crest snaps only where the rocky
+            // mask says rock, and ramps out at the mask's own edge. Snapping every
+            // column would put a band's worth of step between two neighbours wherever
+            // their bedrock straddled a boundary, and cut the ring in half.
+            let z_m = (z0 as f64 + 0.5) * vm;
+            let band_top = r.benched_m(x_m, z_m, field.bedrock_m[z0 * w + x], circ, c.seed);
+            // Never below the ground the riser stands over: a crest cut under the
+            // terrace in front of it is not a cliff, it is a column hiding the terrace
+            // behind it, and the skyline pass would spend the diorama's budget on it.
+            if z0 == 0 || band_top < field.surface_m((z0 - 1) * w + x) {
+                continue;
+            }
+            for z in z0..(z0 + rows).min(next).min(d) {
+                let i = z * w + x;
+                if field.pool_spill[i] != i32::MIN {
+                    continue;
+                }
+                field.bedrock_m[i] = band_top;
+                field.spill_m[i] = field.surface_m(i);
+            }
+        }
+    }
 }
 
 /// Cut a ramp through every riser, half a ring from the pools, so a body can climb from
@@ -2147,6 +2243,75 @@ mod tests {
             "small leaves {} rows of sky unused",
             360 - rows
         );
+    }
+
+    /// Most seeds of a preset give the camera a lake worth looking at, and the lake runs
+    /// to the front cut so it reads in section and not only from above.
+    ///
+    /// Measured before the settle, because this is a claim about the ground the generator
+    /// cuts; what the water does in it afterwards is the hydrology's. One test per
+    /// preset, and three in four of its seeds have to clear the bar: eight worlds is most
+    /// of a second and three presets would be three.
+    fn most_seeds_have_a_lake(name: &str, seeds: u64) {
+        let p = Preset::find(name).expect("a shipped preset");
+        let Landform::Staged(recipe) = p.config().landform.clone() else {
+            panic!("a preset is staged")
+        };
+        let bar = recipe.water.min_lake_m2;
+        let mut passed = 0;
+        for seed in 1..=seeds {
+            let config = Config { seed, ..p.config() };
+            let world = World::new(config.clone());
+            let lake = crate::hydrate::lake(&world);
+            if lake.visible_m2 >= bar {
+                passed += 1;
+            }
+            assert!(
+                lake.cells.iter().any(|&i| config.coords(i).2 == 0),
+                "{name} seed {seed}: the lake does not reach the cut"
+            );
+        }
+        assert!(
+            passed * 4 >= seeds * 3,
+            "{name}: only {passed} of {seeds} seeds clear {bar} m² of open water"
+        );
+    }
+
+    #[test]
+    fn small_gives_most_seeds_a_lake() {
+        most_seeds_have_a_lake("small", 8);
+    }
+
+    #[test]
+    fn default_gives_most_seeds_a_lake() {
+        most_seeds_have_a_lake("default", 8);
+    }
+
+    #[test]
+    fn wide_gives_most_seeds_a_lake() {
+        // Six, not eight: `wide` is twice the ring and a hundred erosion iterations
+        // apiece, and eight of them is past the two seconds a test here may take. The
+        // bar is the same three in four.
+        most_seeds_have_a_lake("wide", 6);
+    }
+
+    /// The terraces gave the ring its cliffs, and the cliffs carry grottos.
+    #[test]
+    fn the_risers_carry_their_grottos() {
+        for (name, want) in [("small", 5usize), ("default", 6), ("wide", 15)] {
+            let p = Preset::find(name).unwrap();
+            let world = World::new(Config {
+                seed: 1,
+                ..p.config()
+            });
+            let found = crate::hollows::find(&world);
+            assert!(
+                found.len() >= want,
+                "{name} seed 1: {} habitable hollows, wanted {want}",
+                found.len()
+            );
+            assert!(found.iter().all(|h| h.visible), "{name}: an unseen grotto");
+        }
     }
 
     /// A hand-authored skyline: `width x depth` columns, all at `ground`, with the

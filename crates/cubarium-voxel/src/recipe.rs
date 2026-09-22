@@ -185,6 +185,10 @@ pub struct Tiers {
     /// Radius of a terrace pool around the ring, metres. A pool spans its terrace's
     /// whole depth, so only this is free.
     pub pool_radius_m: f64,
+    /// Radius of the **lake** on terrace 0, metres. The lake is the largest water on the
+    /// ring and the one the camera reads in section, so it is not a pool: it runs to the
+    /// front cut and it is this much wider than the pools that feed it.
+    pub lake_radius_m: f64,
     /// How deep a pool's bowl is cut below its own rim, metres.
     pub pool_depth_m: f64,
     /// Width of the spillway notch in a pool's front rim, metres.
@@ -209,6 +213,7 @@ impl Tiers {
         edge_warp_m: 0.6,
         flat: 0.4,
         pool_radius_m: 1.0,
+        lake_radius_m: 3.6,
         pool_depth_m: 0.75,
         notch_width_m: 0.5,
         front_setback_m: 0.25,
@@ -230,6 +235,7 @@ impl Tiers {
         edge_wavelength_m: 7.0,
         edge_warp_m: 0.3,
         pool_radius_m: 0.5,
+        lake_radius_m: 2.4,
         pool_depth_m: 0.375,
         notch_width_m: 0.25,
         front_setback_m: 0.125,
@@ -255,6 +261,7 @@ impl Tiers {
             ("rise_m", self.rise_m),
             ("edge_wavelength_m", self.edge_wavelength_m),
             ("pool_radius_m", self.pool_radius_m),
+            ("lake_radius_m", self.lake_radius_m),
             ("pool_depth_m", self.pool_depth_m),
         ] {
             anyhow::ensure!(
@@ -422,8 +429,12 @@ pub struct Hollows {
     /// Size of the patches the undercuts come in, metres. Without it every eligible
     /// column of a long bank is notched and the result is a slot, not a few grottos.
     pub grotto_wavelength_m: f64,
-    /// How strongly hollows are pulled toward the front cut, `0..=1`. The camera is a
-    /// section through `z = 0`: a grotto at the back is a grotto nobody sees.
+    /// How strongly hollows are pulled toward the front cut, `0..=1`.
+    ///
+    /// Zero on a terraced ring, and that is not an oversight: the terraces rise toward
+    /// the back, so every riser faces the camera and a grotto in the last one is as
+    /// visible as a grotto in the first. What keeps the unseen ones out is the camera
+    /// check itself ([`crate::hollows::fill_invisible`]), not a guess about depth.
     pub front_bias: f64,
 
     /// Share of the soft rock at depth that opens into galleries, `0..=1`. Zero carves
@@ -476,6 +487,14 @@ impl Hollows {
         stream: 0x_5354_4147_5F48_4C57,
     };
 
+    /// A terraced ring: every riser faces the camera, so nothing is pulled toward the
+    /// front, and the geology is what limits the sites rather than a patch gate.
+    pub const TERRACED: Hollows = Hollows {
+        undercut_density: 0.9,
+        front_bias: 0.0,
+        ..Hollows::GROTTOS
+    };
+
     /// A handful of grottos on the `default` and `wide` rings.
     pub const GROTTOS: Hollows = Hollows {
         undercut_density: 0.70,
@@ -494,7 +513,7 @@ impl Hollows {
         gallery_min_depth_m: 0.4,
         mouth_reach_m: 0.7,
         skylight_m: 0.7,
-        ..Hollows::GROTTOS
+        ..Hollows::TERRACED
     };
 
     /// Whether anything is carved at all.
@@ -681,7 +700,7 @@ impl Water {
         // landscape rather than rejecting every seed of it — about three quarters of what
         // seed 1 reaches, so a weaker seed still has room. Raising it again is a question
         // for the generator (a real basin on tier 0), not for this number.
-        min_lake_m2: 2.5,
+        min_lake_m2: 6.0,
         reentry_m3_per_s: 1.0e-3,
         min_tier_pools: 1,
     };
@@ -718,7 +737,7 @@ impl Water {
         // against three of eight at 6 m². (`small`'s five barren seeds are the preset's
         // own — it has them at every depth, lake or no lake.)
         // 0.8 m² at seed 1 on the terraced ring, against 8.5 before the tiers.
-        min_lake_m2: 0.6,
+        min_lake_m2: 3.0,
         ..Water::DEFAULT
     };
 
@@ -726,7 +745,7 @@ impl Water {
     pub const WIDE: Water = Water {
         shower_volume_m3: 0.8,
         // Twice the ring, and its tier-0 trough is wider with it: 6.3 m² at seed 1.
-        min_lake_m2: 5.0,
+        min_lake_m2: 6.0,
         ..Water::DEFAULT
     };
 
@@ -939,6 +958,7 @@ impl Recipe {
         base_m: 4.0,
         back_rise_m: 1.2,
         tiers: Tiers::TERRACES,
+        hollows: Hollows::TERRACED,
         ..Recipe::DEFAULT
     };
 
@@ -975,10 +995,10 @@ impl Recipe {
         ridge_relief_m: 0.55,
         // Three rocky regions around twenty metres, with soft ground between them.
         rocky_wavelength_m: 7.0,
-        rocky_fraction: 0.4,
+        rocky_fraction: 0.65,
         warp_wavelength_m: 11.0,
         warp_m: 0.9,
-        mantle_m: 0.18,
+        mantle_m: 0.26,
         soil_max_m: 0.9,
         // A grotto needs a cap of 2 voxels over 7 of soft rock and a neighbour cut below
         // its floor: nine voxels of face, 1.125 m. A 1.4 m band gives eleven.

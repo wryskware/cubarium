@@ -1275,3 +1275,47 @@ looked at before returning.
 
 Return (≤25 lines): commits, lake m² per preset (seeds 1–8 pass count),
 hollows and stands per preset, PNG paths.
+
+## Package T3 — integrated 2026-09-21
+
+Landed 5232572. Lake: a lake-sized bowl with no lip in front, a stepped
+beach, the low point measured as the voxeliser reads it (sediment past
+`soil_max_m` never becomes ground), bed on rock like the pools (a lake on
+soil soaks in unless the table is right under it). Bars back to 3.0 / 6.0
+/ 6.0; pre-settle gate passes 8/8, 6/8, 5/6; every lake touches the cut.
+Hollows seed 1: small 6, default 9, wide 20 (risers carry their crests
+through the bench pull; `notch_banks` prefers the front-facing fall on a
+terraced ring; small `rocky_fraction` 0.4 → 0.65). Stands: small 21 / 18
+(panel seed) against 31 pre-tier — terraces leave less flat ground; a
+mantle sweep did not move it; accepted. Fable bumped SCHEMA 14 → 15
+(recipe layout changed) and ran the two crates: 807 passed, 5 skipped.
+
+Open, handed to T4: `small`'s lake is 4–5 m² out of `hydrate` but 1.8–3.3
+m² after settle on every inventory and head tried (water is not reaching
+it — `hydrate.rs`); `wide` seed 2 fails the ring walk (7 of 8 seeds pass).
+
+## Package T4 — the lake after settle, and the walk in the gate (habitat worker)
+
+Owner: habitat worker (Opus, medium). Files: `hydrate.rs`, `world.rs`,
+`water.rs`, host `voxel/mod.rs`. Not the generator.
+
+1. Diagnose why `small`'s lake loses a third to a half of its area during
+   settle when hydrate fills it to the outlet's level on a rock bed: where
+   the water goes (the beach's soil? the pore of the ring? the outlet
+   exporting a transient? the cascade's abandoned cells?). Fix it where it
+   is; the lake after settle should hold within one voxel of the level
+   hydrate set, on seeds 1–8 of `small` and `default`.
+2. The host's seed gate runs the ring-traversability walk (the voxel
+   crate's existing check) after the lake and pool bars, and rejects a
+   ring the animals cannot walk around, with the same one-line log. Gate
+   order: walk last, since it costs the most.
+3. The gate measures the lake **after** a short settle if that is what it
+   takes to make the bar mean the world the panel shows; measure the
+   cost per candidate on `small` and say what you chose.
+
+Tests first: a `small` seed whose lake shrinks today holds its area after
+settle within one voxel; the gate rejects a fixture whose walk fails and
+logs it; snapshot tests unchanged (SCHEMA 15 is already in).
+
+Return (≤20 lines): commits, the cause, per-preset lake area before/after
+settle on seeds 1–8, gate cost per candidate, test counts.
