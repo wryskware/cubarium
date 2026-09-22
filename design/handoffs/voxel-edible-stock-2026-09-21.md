@@ -120,3 +120,40 @@ one preset.
 The table; the sentence per preset; how you computed route connectivity and
 legal faces (cite the rule you reused); the commit list; what you could not
 measure and why.
+
+## Integration note (Fable, 2026-09-22)
+
+Landed 59c2c2a..5e9892c, rebased onto main after the shelf-landform merge
+(45eb645); 2105 tests green. Contract: `design/voxel-encounter-contract-2026-09-21.md`.
+Observer: `voxel_edible_stock HOURS preset=<name>`. Research section "Edible
+stock, 2026-09-21" in the census note (measured on 7dba001's landforms).
+
+Fable re-ran t = 0 on the rebased main (shelf landforms), which moved the
+stock numbers but not the finding:
+
+| t = 0 | small | default | wide |
+| --- | --- | --- | --- |
+| foliage reachable today, from any legal face | 0.49 | 0.72 | 0.75 |
+| reachable under the decided band | 0.42 | 0.50 | 0.49 |
+| **route-connected to a browser, today** | **0.40** | **0.25** | **0.35** |
+| bloomcrown route-connected | 0.00 | 0.00 | 0.21 |
+| shredder founders' distinct standing heights | 8 | 7 | 7 |
+
+The broken link is the route. `advance_candidate` (body.rs) refuses any
+centre column that is not a support face at the body's own standing layer
+and nothing ever writes `site.y`: **a founder cannot step up or down one
+voxel**. On terraced landscapes every founder is confined to the level
+component it was seeded on; the eight shredders start alone on eight
+heights; the bloomcrowns that hold most of the foliage share no component
+with any browser. (The legacy species motion rule has `climb`; the founders
+never got one.) Visibility is not the limit: today's fan and the decided fan
+see the same foliage on every arm. The decided band would cut reach on the
+0.25 m presets because bloomcrown's one-cell slab sits just above 0.25 m;
+that is the layers package's business (a basal rosette), not the band's.
+
+Worker's design call kept: `Mouth::decided` uses the ladder's 0.1875 m width
+(decision §1's proportions). Unmeasured, by construction: within-stand
+shares (one slab), juvenile geometry (no body height in the model), pools
+as partial occluders (no volume→height convention), shredder intake on the
+three-food diet. Residuals at 6 h: fauna ≤ 1.8e-10, flora ≤ 2.7e-8 absolute
+(≤ 1e-9 relative), water ≤ 2.1e-6 m³ over 432k ticks.
