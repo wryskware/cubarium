@@ -120,3 +120,10 @@ production art is stage 2 → 3 of that document. A package needing a look the
 document does not cover stops and asks, shipping an interim glyph named as
 interim. Assets are AI-generated and selected by Wrysk; workers do not generate
 production art on their own.
+
+## Lean delegation and Tachyon builds — correction, 2026-09-21
+
+Wrysk requests that the main thread stay lean: delegate bounded implementation
+and verification to appropriately tiered persistent workers, then integrate
+concise results. Tachyon deployment must stop `cubarium.service` before native
+compilation to free board resources.
