@@ -1726,6 +1726,18 @@ pub fn reentry(w: &mut World) {
     }
 }
 
+/// Whether `CUBARIUM_OUTLET_TRACE` asked the outlet to say what it takes and what stands
+/// around it. Read once: this sits in the tick.
+///
+/// The outlet is the hardest phase to watch from outside, because it runs **last** and
+/// leaves its cell empty — 4000 ticks of the panel's lake draining looked, from any
+/// sample taken between ticks, like a sill that never held a drop (T5). This is how T6
+/// found out otherwise.
+fn outlet_trace() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("CUBARIUM_OUTLET_TRACE").is_some())
+}
+
 pub fn outlet(w: &mut World) {
     crate::voxel_phase!(Outlet, {
         if !w.outlet_open {
@@ -1739,6 +1751,27 @@ pub fn outlet(w: &mut World) {
         }
         let i = w.config.index(x as i64, y, z);
         let want = w.config.outlet_m3_per_s * DT;
+        if outlet_trace() && w.free[i] > 0.0 {
+            let c = &w.config;
+            let plane = c.width as usize * c.depth as usize;
+            let at = |j: usize| w.free.get(j).copied().unwrap_or(0.0);
+            let solid_below = i >= plane && w.material[i - plane].is_solid();
+            eprintln!(
+                "TRACE tick {} sill ({x},{y},{z}) free {:.5} floor_solid {solid_below} | \
+                 below {:.5} above {:.5} x- {:.5} x+ {:.5} z+ {:.5}",
+                w.tick,
+                w.free[i],
+                if i >= plane { at(i - plane) } else { 0.0 },
+                at(i + plane),
+                at(c.index(x as i64 - 1, y, z)),
+                at(c.index(x as i64 + 1, y, z)),
+                if z + 1 < c.depth {
+                    at(c.index(x as i64, y, z + 1))
+                } else {
+                    0.0
+                },
+            );
+        }
         let lost = take_free(w, i, want);
         w.ledger.outlet_out += lost;
         release(w, lost);

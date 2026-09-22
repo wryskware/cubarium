@@ -1912,6 +1912,44 @@ mod tests {
         );
     }
 
+    /// **Instrumentation for T6.** Fifty ticks of the panel's world with
+    /// `CUBARIUM_OUTLET_TRACE=1`, so `water::outlet` says what was in its cell and what
+    /// stood around it each time it took anything.
+    #[test]
+    #[ignore = "study: run by name"]
+    fn trace_the_outlet() {
+        let p = crate::Preset::find("small").unwrap();
+        let mut w = World::new(Config {
+            seed: 14400042426867678818,
+            ..p.config()
+        });
+        let c = w.config().clone();
+        let (ox, oy, oz) = w.outlet_cell().unwrap();
+        let sill = c.index(i64::from(ox), oy, oz);
+        let below = sill - c.width as usize * c.depth as usize;
+        println!(
+            "sill ({ox},{oy},{oz}) floor at {:.3} m; cell below is {:?} with free {:.4}; \
+             lake top wet row {}",
+            f64::from(oy) * c.voxel_m,
+            w.material[below],
+            w.free[below],
+            lake(&w)
+                .cells
+                .iter()
+                .map(|&i| c.coords(i).1)
+                .max()
+                .unwrap_or(0),
+        );
+        w.apply(crate::Command::SetOutlet { open: true });
+        for _ in 0..50 {
+            w.step();
+        }
+        println!(
+            "outlet_out after 50 ticks: {:.5}",
+            w.view().ledger.outlet_out
+        );
+    }
+
     /// A dry recipe leaves the world exactly as it was.
     #[test]
     fn no_inventory_is_no_water() {
