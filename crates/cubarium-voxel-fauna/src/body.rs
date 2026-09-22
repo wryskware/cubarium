@@ -687,7 +687,29 @@ pub(crate) fn mouth_foliage_stands(
     standing_y: u32,
     manifest: &Manifest,
 ) -> Vec<(Site, f64)> {
-    let layers = mouth_crown_layers(standing_y, manifest, view.config.voxel_m);
+    foliage_stands_touching(
+        fv,
+        view,
+        cols,
+        &mouth_crown_layers(standing_y, manifest, view.config.voxel_m),
+    )
+}
+
+/// Every foliage-bearing stand whose crown **cells** sit at a layer in `layers` and
+/// intersect `cols`.
+///
+/// This is [`mouth_foliage_stands`]' own scan with the layer range handed in instead of
+/// derived from the manifest, because the layer range is the *only* thing that differs
+/// between today's whole-voxel mouth and a metre band measured from the standing surface
+/// (`design/voxel-encounter-contract-2026-09-21.md`, "Discretisation"): a crown is one
+/// cell thick, so any band over the surface selects a contiguous run of layers. Nothing
+/// in the live tick calls this with anything but the mouth's own range.
+pub(crate) fn foliage_stands_touching(
+    fv: &FloraView<'_>,
+    view: &VoxelView<'_>,
+    cols: &[(i64, u32)],
+    layers: &std::ops::RangeInclusive<i64>,
+) -> Vec<(Site, f64)> {
     let width = i64::from(view.config.width);
     let depth = i64::from(view.config.depth);
     let mut out = Vec::new();

@@ -63,6 +63,7 @@
 
 mod body;
 mod controller;
+mod encounter;
 mod manifest;
 mod pose;
 mod senses;
@@ -82,6 +83,12 @@ pub use controller::{
 };
 pub use cubarium_voxel::{DT, TICK_HZ};
 pub use cubarium_voxel_flora::Reach;
+pub use encounter::{
+    HEADING_SAMPLES, SightMap, band_crown_layers, crown_columns, crown_layer, crown_slab_m,
+    eye_above_surface_m, eye_origin_m, foliage_stands_in_layers, level_components,
+    mouth_columns_at, mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg,
+    standable_faces, surface_m,
+};
 pub use manifest::{
     ACTION_DEADBAND, Action, BROWSER_RAY_PITCH_OFFSETS_DEG, BROWSER_RAY_YAW_OFFSETS_DEG,
     BROWSER_SECTOR_CENTRES_DEG, BROWSER_VISIBLE_CLASSES, Founder, HIDDEN, Manifest, Module,
@@ -183,6 +190,19 @@ impl ConeHit {
     }
 }
 
+/// The one mapping from the ray march's fine class to the named hit. Shared by
+/// [`browser_cone_census`] and the encounter query's [`SightMap`].
+pub(crate) fn cone_hit_of(fine: senses::Fine) -> ConeHit {
+    match fine {
+        senses::Fine::Terrain => ConeHit::Terrain,
+        senses::Fine::Water => ConeHit::Water,
+        senses::Fine::StrippedCrown => ConeHit::StrippedCrown,
+        senses::Fine::FoliageCrown => ConeHit::FoliageCrown,
+        senses::Fine::GroundPool => ConeHit::GroundPool,
+        senses::Fine::Body => ConeHit::Body,
+    }
+}
+
 /// One ray of the census: where it was aimed and what it found.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ConeRay {
@@ -279,17 +299,7 @@ pub fn browser_cone_census(
         let (hit, distance_m) =
             match senses::ray_first_hit(view, &occupancy, animal.id, origin, dir, range) {
                 None => (ConeHit::Clear, f64::INFINITY),
-                Some((d, fine)) => (
-                    match fine {
-                        senses::Fine::Terrain => ConeHit::Terrain,
-                        senses::Fine::Water => ConeHit::Water,
-                        senses::Fine::StrippedCrown => ConeHit::StrippedCrown,
-                        senses::Fine::FoliageCrown => ConeHit::FoliageCrown,
-                        senses::Fine::GroundPool => ConeHit::GroundPool,
-                        senses::Fine::Body => ConeHit::Body,
-                    },
-                    d,
-                ),
+                Some((d, fine)) => (cone_hit_of(fine), d),
             };
         ConeRay {
             sector,

@@ -503,6 +503,23 @@ pub(crate) fn cone_occupancy(
     fv: &FloraView<'_>,
     fauna: &crate::FaunaView<'_>,
 ) -> ConeOccupancy {
+    cone_occupancy_with(view, fv, fauna, true)
+}
+
+/// [`cone_occupancy`] with the surface-pool occluder made optional.
+///
+/// The live cone always passes `true`: today a litter, carrion or dead-wood pool occludes
+/// the whole cell over its face whatever it holds. The encounter query's decided arm
+/// passes `false`, because the decision says a ground pool is a wall only above its own
+/// physical height and the model has no volume-to-height convention yet
+/// (`design/handoffs/voxel-organism-decisions-2026-09-21.md` §6;
+/// `design/voxel-encounter-contract-2026-09-21.md`, "Ground pools").
+pub(crate) fn cone_occupancy_with(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    fauna: &crate::FaunaView<'_>,
+    pools_occlude: bool,
+) -> ConeOccupancy {
     let c = view.config;
     let mut environment: HashMap<usize, Fine> = HashMap::new();
     for stand in fv.stands.iter() {
@@ -536,7 +553,7 @@ pub(crate) fn cone_occupancy(
     }
     // Surface resource pools occlude from the cell just above the face.
     for g in fv.ground.iter() {
-        if g.litter > 0.0 || g.carrion > 0.0 || g.dead_wood > 0.0 {
+        if pools_occlude && (g.litter > 0.0 || g.carrion > 0.0 || g.dead_wood > 0.0) {
             if g.site.y + 1 < c.height {
                 let cell = c.index(i64::from(g.site.x), g.site.y + 1, g.site.z);
                 environment.entry(cell).or_insert(Fine::GroundPool);
@@ -574,6 +591,21 @@ pub(crate) fn ray_first_hit(
     dir: (f64, f64, f64),
     range: f64,
 ) -> Option<(f64, Fine)> {
+    ray_first_hit_cell(view, occupancy, observer_id, origin, dir, range)
+        .map(|(distance, fine, _)| (distance, fine))
+}
+
+/// [`ray_first_hit`] with the **cell index** it struck, so a diagnostic can say which
+/// stand's crown a ray found rather than only that it found foliage. The march is the
+/// live one; [`ray_first_hit`] is this with the cell dropped.
+pub(crate) fn ray_first_hit_cell(
+    view: &VoxelView<'_>,
+    occupancy: &ConeOccupancy,
+    observer_id: u64,
+    origin: (f64, f64, f64),
+    dir: (f64, f64, f64),
+    range: f64,
+) -> Option<(f64, Fine, usize)> {
     let c = view.config;
     let v = c.voxel_m;
     let steps = ((range / v) / RAY_SUBSTEP).ceil() as u32;
@@ -597,20 +629,20 @@ pub(crate) fn ray_first_hit(
         let wx = ((px / v).floor() as i64).rem_euclid(i64::from(c.width));
         let cell = c.index(wx, iy as u32, iz as u32);
         if view.material[cell].is_solid() {
-            return Some((t - substep * 0.5, Fine::Terrain));
+            return Some((t - substep * 0.5, Fine::Terrain, cell));
         }
         if view.free[cell] > 0.0 {
-            return Some((t - substep * 0.5, Fine::Water));
+            return Some((t - substep * 0.5, Fine::Water, cell));
         }
         if occupancy
             .bodies
             .get(&cell)
             .is_some_and(|ids| ids.iter().any(|&id| id != observer_id))
         {
-            return Some((t - substep * 0.5, Fine::Body));
+            return Some((t - substep * 0.5, Fine::Body, cell));
         }
         if let Some(&class) = occupancy.environment.get(&cell) {
-            return Some((t - substep * 0.5, class));
+            return Some((t - substep * 0.5, class, cell));
         }
     }
     None
