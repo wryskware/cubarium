@@ -99,7 +99,7 @@ pub fn carve(
     if !h.any() {
         return Carved::default();
     }
-    let undercuts = notch_banks(volume, field, &h, seed, min_void_y);
+    let undercuts = notch_banks(volume, field, &h, seed, min_void_y, r.tiers.any());
     let candidates = gallery_candidates(volume, field, &h, seed, min_void_y);
     let bodies = components(&volume.config, &candidates);
     connect_or_fill(volume, &h, min_void_y);
@@ -478,6 +478,7 @@ fn notch_banks(
     h: &Hollows,
     seed: u64,
     min_void_y: i32,
+    terraced: bool,
 ) -> usize {
     let c = volume.config.clone();
     let (w, d) = (c.width as usize, c.depth as usize);
@@ -494,8 +495,12 @@ fn notch_banks(
             let i = z * w + x;
             let top = volume.surface[i];
             // The steepest fall to a neighbour, and the way back into the hill.
+            // On a terraced ring the fall toward the front comes first, however steep
+            // the others are: the risers are the cliffs, they all face the camera, and a
+            // notch cut into a bank that faces along the ring is a grotto nobody will
+            // ever see. Without terraces the steepest bank is still the best one.
             let mut fall: Option<(usize, i64, i64, f64)> = None;
-            for (dx, dz) in [(-1i64, 0i64), (1, 0), (0, -1), (0, 1)] {
+            for (dx, dz) in [(0i64, -1i64), (-1, 0), (1, 0), (0, 1)] {
                 let nz = z as i64 + dz;
                 if nz < 0 || nz >= d as i64 {
                     continue;
@@ -503,7 +508,22 @@ fn notch_banks(
                 let nx = (x as i64 + dx).rem_euclid(w as i64) as usize;
                 let nb = nz as usize * w + nx;
                 let slope = (top - volume.surface[nb]) as f64;
-                if slope > 0.0 && fall.is_none_or(|(_, _, _, best)| slope > best) {
+                if slope <= 0.0 {
+                    continue;
+                }
+                let facing = terraced && dz < 0;
+                let better = match fall {
+                    None => true,
+                    Some((_, _, fz, best)) => {
+                        let had_face = fz < 0;
+                        if facing != had_face {
+                            facing
+                        } else {
+                            slope > best
+                        }
+                    }
+                };
+                if better {
                     fall = Some((nb, dx, dz, slope));
                 }
             }
