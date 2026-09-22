@@ -57,7 +57,7 @@ pub use hydrate::{Basin, Hydrated, hydrate};
 pub use ledger::Ledger;
 pub use material::Material;
 pub use recipe::{
-    Benches, Erosion, Hollows, Landform, PRESETS, Preset, Recipe, Strata, Streams, Water,
+    Benches, Erosion, Hollows, Landform, PRESETS, Preset, Recipe, Strata, Streams, Tiers, Water,
 };
 pub use viability::{BandResult, PoreBand, Viability, ViabilitySpec};
 pub use world::{Command, SETTLE_REST, SETTLE_WINDOW, Settle, VoxelView, World, default_threads};
