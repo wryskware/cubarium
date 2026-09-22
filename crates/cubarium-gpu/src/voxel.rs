@@ -113,6 +113,7 @@ impl VoxelTexel {
         Self::pack_glyph(material, part, 0, free, dry, pore, style)
     }
 
+    #[inline]
     pub fn pack_glyph(
         material: u8,
         part: u8,
@@ -162,6 +163,7 @@ impl VoxelTexel {
     }
 }
 
+#[inline]
 fn quantise(v: f32) -> u8 {
     if !v.is_finite() || v <= 0.0 {
         return 0;
@@ -380,6 +382,10 @@ pub struct VoxelStaging<'a> {
     pub styles: &'a mut [VoxelStyle],
     /// `s × (s + rise)` face texels per glyph: front rows followed by cap rows.
     pub glyphs: &'a mut [u8],
+    /// Whether this pack must write [`VoxelStaging::roof`] and [`VoxelStaging::glyphs`]
+    /// (indexed [`PLANE_ROOF`], [`PLANE_GLYPHS`]). A plane marked false already holds the
+    /// content its key names and must be left alone. See [`SlowPlanes`].
+    pub write: [bool; SLOW_PLANES],
 }
 
 impl VoxelStaging<'_> {
@@ -501,6 +507,63 @@ impl StagingRing {
     }
 }
 
+/// The roof table's place in [`SlowPlanes`] and in a pack's keys.
+pub const PLANE_ROOF: usize = 0;
+/// The glyph atlas's place in [`SlowPlanes`] and in a pack's keys.
+pub const PLANE_GLYPHS: usize = 1;
+/// How many planes are written and uploaded only when they change.
+pub const SLOW_PLANES: usize = 2;
+
+/// What the **slow planes** — the roof table and the glyph atlas — hold, per staging
+/// buffer and in the images, so a pack writes them and a frame uploads them only when
+/// they have changed.
+///
+/// The roof is a function of the terrain and the atlas of the projection, so most ticks
+/// neither moves. The caller names each plane's content by a key (equal key, equal
+/// bytes); this remembers which key each buffer holds and which key the images will hold
+/// once every recorded frame has run. Two buffers alternate, so a changed roof is written
+/// into each of them once and uploaded once.
+///
+/// A displaced frame never ran, so after a discard the images' contents are unknown and
+/// the next upload copies both planes again. That is the safe answer, and a discard is
+/// rare enough that its cost does not matter.
+#[derive(Debug)]
+pub struct SlowPlanes {
+    buffers: Vec<[Option<u64>; SLOW_PLANES]>,
+    images: [Option<u64>; SLOW_PLANES],
+}
+
+impl SlowPlanes {
+    pub fn new(n: usize) -> SlowPlanes {
+        SlowPlanes {
+            buffers: vec![[None; SLOW_PLANES]; n.max(1)],
+            images: [None; SLOW_PLANES],
+        }
+    }
+
+    /// A pack into `buffer` will hold `keys`: which planes it must write. The buffer is
+    /// taken to hold them from here on, so the pack must write every plane named.
+    pub fn pack(&mut self, buffer: usize, keys: [u64; SLOW_PLANES]) -> [bool; SLOW_PLANES] {
+        let held = &mut self.buffers[buffer];
+        let write = std::array::from_fn(|p| held[p] != Some(keys[p]));
+        *held = keys.map(Some);
+        write
+    }
+
+    /// A frame uploads from `buffer`: which planes it must copy into their images.
+    pub fn upload(&mut self, buffer: usize) -> [bool; SLOW_PLANES] {
+        let held = self.buffers[buffer];
+        let copy = std::array::from_fn(|p| held[p].is_none() || held[p] != self.images[p]);
+        self.images = held;
+        copy
+    }
+
+    /// A frame that carried an upload was displaced before it ran.
+    pub fn forget_images(&mut self) {
+        self.images = [None; SLOW_PLANES];
+    }
+}
+
 /// The voxel strip's renderer: one texture uploaded per tick, one full-screen draw per
 /// frame, and the shared [`PresentPass`] onto a target.
 pub struct VoxelRenderer {
@@ -527,6 +590,8 @@ pub struct VoxelRenderer {
     staging: Vec<HostBuffer>,
     /// Which staging buffer the next pack may use and which the GPU is still reading.
     ring: StagingRing,
+    /// Which roof table and glyph atlas each staging buffer and the images hold.
+    slow: SlowPlanes,
     /// Byte offsets into each of [`VoxelRenderer::staging`] of the four planes.
     offsets: (u64, u64, u64, u64),
     /// Whether a staged world is waiting to be uploaded.
@@ -846,6 +911,7 @@ impl VoxelRenderer {
             uniform_stride,
             last_done: None,
             ring: StagingRing::new(STAGING_RING),
+            slow: SlowPlanes::new(STAGING_RING),
             offsets,
             dirty: false,
             raster_current: false,
@@ -908,17 +974,23 @@ impl VoxelRenderer {
     /// Write one tick's world straight into the staging buffer.
     ///
     /// The styles slice is zeroed first, so a frame with fewer stands than the last one
-    /// cannot paint with a stale colour. The voxels and the roof table are not: every
-    /// texel is written every tick, and clearing 720 KiB to then overwrite it is 720 KiB
-    /// of memory traffic nobody reads.
+    /// cannot paint with a stale colour. The voxels are not: every texel is written every
+    /// tick, and clearing them to then overwrite them is memory traffic nobody reads.
+    ///
+    /// `slow` names the roof table's and the glyph atlas's contents (equal key, equal
+    /// bytes). `fill` is told through [`VoxelStaging::write`] which of them this buffer
+    /// does not hold yet; the rest it must leave alone, and a frame uploads only the ones
+    /// the images do not hold. A tick that did not move the terrain writes and uploads no
+    /// roof.
     ///
     /// Returns `false` when every staging buffer is still being read by a frame that has
     /// not retired: the pack is **skipped**, not queued, and the next tick packs again.
     /// A tick-stale picture is the price; writing under the GPU is not an option.
-    pub fn stage(&mut self, fill: impl FnOnce(VoxelStaging<'_>)) -> bool {
+    pub fn stage(&mut self, slow: [u64; SLOW_PLANES], fill: impl FnOnce(VoxelStaging<'_>)) -> bool {
         let Some(into) = self.ring.for_pack() else {
             return false;
         };
+        let write = self.slow.pack(into, slow);
         let buffer = &self.staging[into];
         let n = self.params.voxel_count();
         let (voxels, roof, styles, glyphs) = unsafe {
@@ -944,6 +1016,7 @@ impl VoxelRenderer {
             roof,
             styles,
             glyphs,
+            write,
         });
         self.ring.packed(into);
         self.dirty = true;
@@ -969,6 +1042,8 @@ impl VoxelRenderer {
             && frame.staging.is_some()
         {
             self.dirty = true;
+            // Its slow planes never reached the images either.
+            self.slow.forget_images();
             // Its upload never ran, so the raster is not what that frame would have made
             // it: the next frame must draw the world again.
             self.raster_current = false;
@@ -1021,6 +1096,12 @@ impl VoxelRenderer {
         let frame = self.ring.record();
         let upload = self.dirty && frame.staging.is_some();
         self.dirty = false;
+        // Which of the roof and the atlas this upload carries: only the ones the images
+        // do not already hold.
+        let slow = match frame.staging {
+            Some(i) if upload => self.slow.upload(i),
+            _ => [false; SLOW_PLANES],
+        };
         // The raster already holds this picture unless something changed it, and the
         // upload only ever comes with a change.
         let redraw = !self.raster_current;
@@ -1046,10 +1127,18 @@ impl VoxelRenderer {
 
             if upload && redraw {
                 let planes = [
-                    (self.voxel_image, self.offsets.0, w, h, dd),
-                    (self.roof_image, self.offsets.1, w, h, dd),
-                    (self.style_image, self.offsets.2, 3, MAX_STYLES as u32, 1),
+                    (true, self.voxel_image, self.offsets.0, w, h, dd),
+                    (slow[PLANE_ROOF], self.roof_image, self.offsets.1, w, h, dd),
                     (
+                        true,
+                        self.style_image,
+                        self.offsets.2,
+                        3,
+                        MAX_STYLES as u32,
+                        1,
+                    ),
+                    (
+                        slow[PLANE_GLYPHS],
                         self.glyph_image,
                         self.offsets.3,
                         self.params.s,
@@ -1059,7 +1148,10 @@ impl VoxelRenderer {
                 ];
                 let source =
                     self.staging[frame.staging.expect("an upload has a staged buffer")].buffer;
-                for (image, offset, pw, ph, pd) in planes {
+                // A plane left out keeps its image, in `SHADER_READ_ONLY_OPTIMAL`, holding
+                // what an earlier frame uploaded — no barrier, since the `UNDEFINED`
+                // transition is what would throw its contents away.
+                for (_, image, offset, pw, ph, pd) in planes.into_iter().filter(|p| p.0) {
                     barrier(
                         d,
                         cb,
@@ -1683,6 +1775,56 @@ mod tests {
             vec![i],
             "and the loaded one is still reading"
         );
+    }
+
+    /// The roof and the atlas are written into each buffer once per change and uploaded
+    /// once per change, with the two buffers alternating under them.
+    #[test]
+    fn a_slow_plane_is_written_and_uploaded_only_when_its_key_moves() {
+        let mut slow = SlowPlanes::new(2);
+        assert_eq!(
+            slow.pack(0, [7, 1]),
+            [true, true],
+            "a new buffer holds nothing"
+        );
+        assert_eq!(slow.upload(0), [true, true], "and the images nothing");
+        assert_eq!(
+            slow.pack(1, [7, 1]),
+            [true, true],
+            "the other buffer is new too"
+        );
+        assert_eq!(
+            slow.upload(1),
+            [false, false],
+            "but the images already hold it"
+        );
+        assert_eq!(slow.pack(0, [7, 1]), [false, false], "nothing moved");
+        assert_eq!(slow.upload(0), [false, false]);
+
+        // The terrain moves: the roof goes into each buffer once, and up once.
+        assert_eq!(slow.pack(1, [8, 1]), [true, false]);
+        assert_eq!(slow.upload(1), [true, false]);
+        assert_eq!(slow.pack(0, [8, 1]), [true, false], "buffer 0 still held 7");
+        assert_eq!(slow.upload(0), [false, false], "the images hold 8 already");
+        assert_eq!(slow.pack(1, [8, 1]), [false, false]);
+    }
+
+    /// A displaced frame's upload never ran: whatever it carried is owed again, so the
+    /// images are not trusted to hold it.
+    #[test]
+    fn a_displaced_upload_leaves_the_slow_planes_owed() {
+        let mut slow = SlowPlanes::new(2);
+        slow.pack(0, [3, 1]);
+        slow.upload(0);
+        slow.pack(1, [4, 1]);
+        slow.upload(1);
+        slow.forget_images();
+        assert_eq!(
+            slow.pack(1, [4, 1]),
+            [false, false],
+            "the buffer still holds it"
+        );
+        assert_eq!(slow.upload(1), [true, true], "the images might not");
     }
 
     #[test]

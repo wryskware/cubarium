@@ -333,6 +333,9 @@ pub struct Animals {
     height: u32,
     depth: u32,
     grid: Vec<AnimalPart>,
+    /// Every grid index this rebuild wrote, once each: what the next rebuild clears
+    /// instead of the whole grid, and what a packer walks instead of every voxel.
+    stamped: Vec<u32>,
     styles: Vec<Style>,
 }
 
@@ -344,6 +347,7 @@ impl Animals {
             height,
             depth,
             grid: vec![AnimalPart::None; width as usize * height as usize * depth as usize],
+            stamped: Vec::new(),
             styles: Vec::new(),
         }
     }
@@ -355,7 +359,10 @@ impl Animals {
         if (self.width, self.height, self.depth) != (c.width, c.height, c.depth) {
             *self = Animals::empty(c.width, c.height, c.depth);
         } else {
-            self.grid.fill(AnimalPart::None);
+            // Only what the last rebuild stamped: the grid is otherwise all empty.
+            for i in self.stamped.drain(..) {
+                self.grid[i as usize] = AnimalPart::None;
+            }
             self.styles.clear();
         }
         let Some(fauna) = fauna else { return };
@@ -385,7 +392,21 @@ impl Animals {
             return;
         }
         let i = self.index(cell.x, cell.y, cell.z);
+        if self.grid[i] == AnimalPart::None {
+            self.stamped.push(i as u32);
+        }
         self.grid[i] = part;
+    }
+
+    /// Every cell an animal paints, as `(x, y, z)` with `x` wrapped, in no particular
+    /// order.
+    pub fn cells(&self) -> impl Iterator<Item = (u32, u32, u32)> + '_ {
+        let (w, h) = (self.width as usize, self.height as usize);
+        self.stamped.iter().map(move |&i| {
+            let i = i as usize;
+            let (col, y) = (i / h, i % h);
+            ((col % w) as u32, y as u32, (col / w) as u32)
+        })
     }
 
     #[inline]

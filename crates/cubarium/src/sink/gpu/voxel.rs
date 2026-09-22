@@ -36,10 +36,10 @@ use anyhow::{Context, Result, bail};
 
 use cubarium_gpu::vk::Gpu;
 use cubarium_gpu::voxel::{
-    MAX_GLYPHS, MAX_STYLES, PART_ANIMAL_INTERIM, PART_NONE, VoxelParams, VoxelRenderer,
-    VoxelStaging, VoxelStyle, VoxelTexel,
+    MAX_GLYPHS, MAX_STYLES, PART_ANIMAL_INTERIM, PART_NONE, PLANE_GLYPHS, PLANE_ROOF, VoxelParams,
+    VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel,
 };
-use cubarium_voxel::{VoxelView, World};
+use cubarium_voxel::{Material, VoxelView, World};
 use cubarium_voxel_flora::Flora;
 
 use crate::sink::{FrameSink, Output, WebSink};
@@ -82,18 +82,8 @@ pub struct VoxelGpuSink {
     gpu: std::sync::Arc<Gpu>,
     renderer: VoxelRenderer,
     target: GpuTarget,
-    /// The CPU presenter's own stand decomposition, rebuilt once per staged tick.
-    stands: Stands,
-    /// The frame's animals on the same grid, rebuilt per staged tick (round 5c).
-    animals: Animals,
-    /// GPU style slots, in the order they were first needed this tick.
-    styles: Vec<Style>,
-    /// `Stands` style index → GPU slot for this tick, so the dedup costs one linear scan
-    /// per stand and not one per voxel.
-    slot_of: Vec<Option<u8>>,
-    /// Plant voxels that had to reuse style 0 because the frame wanted more than
-    /// [`MAX_STYLES`] distinct styles.
-    style_overflow: u64,
+    /// Turns a tick's world into texels.
+    packer: Packer,
     capture: Option<PathBuf>,
     /// The sky this world is drawn under, kept while the founding frame dims it.
     founding_sky: Option<([f32; 3], [f32; 3])>,
@@ -155,11 +145,7 @@ impl VoxelGpuSink {
             gpu,
             renderer,
             target,
-            stands: Stands::empty(params.width, params.height, params.depth),
-            animals: Animals::empty(params.width, params.height, params.depth),
-            styles: Vec::new(),
-            slot_of: Vec::new(),
-            style_overflow: 0,
+            packer: Packer::new(&params),
             capture: options.capture,
             founding_sky: None,
             web: None,
@@ -215,84 +201,11 @@ impl VoxelGpuSink {
         }
         let started = Instant::now();
         let view = world.view();
-        self.stands.rebuild(&view, flora.view());
-        self.animals.rebuild(&view, Some(fauna.view()));
-        self.styles.clear();
-        self.slot_of.clear();
-
         let p = self.renderer.params();
-        let (w, h, d) = (p.width, p.height, p.depth);
-        // `Stands` and the style dedup are borrowed inside the closure, so take what it
-        // needs out of `self` first; the renderer owns the staging buffer.
-        let stands = &self.stands;
-        let animals = &self.animals;
-        let beasts = !animals.is_empty();
-        let styles = &mut self.styles;
-        let slot_of = &mut self.slot_of;
-        let overflow = &mut self.style_overflow;
-        self.renderer.stage(|out| {
-            roof_into(&view, w, h, d, out.roof);
-            for z in 0..d {
-                for y in 0..h {
-                    for x in 0..w {
-                        let xi = i64::from(x);
-                        let m = view.material_at(xi, y, z);
-                        // The animal after the plant in its own cell, as the CPU presenter
-                        // stamps it: a body standing in a turf covers the turf.
-                        let beast = if beasts && !m.is_solid() {
-                            animals.at(xi, i64::from(y), z)
-                        } else {
-                            AnimalPart::None
-                        };
-                        let (part, glyph, slot) = if m.is_solid() {
-                            (PART_NONE, 0, 0)
-                        } else if let Some(style) = animals.style(beast) {
-                            (
-                                PART_ANIMAL_INTERIM,
-                                beast.glyph().0,
-                                slot_for_style(style, styles, overflow),
-                            )
-                        } else {
-                            let p = stands.at(xi, i64::from(y), z);
-                            match appearance::plant_class(p) {
-                                PART_NONE => (PART_NONE, 0, 0),
-                                class => {
-                                    let s = slot_for(stands, p, styles, slot_of, overflow);
-                                    let glyph = appearance::plant_glyph(
-                                        p,
-                                        !stands.crown_continues(p, xi - 1, y, z),
-                                        !stands.crown_continues(p, xi + 1, y, z),
-                                    );
-                                    (class, glyph.0, s)
-                                }
-                            }
-                        };
-                        let free = view.free_at(xi, y, z) as f32;
-                        let pore = if m.pore_capacity() > 0.0 {
-                            view.pore_at(xi, y, z).clamp(0.0, 1.0) as f32
-                        } else {
-                            0.0
-                        };
-                        out.voxels[VoxelStaging::index(w, h, x, y, z)] = VoxelTexel::pack_glyph(
-                            m as u8,
-                            part,
-                            glyph,
-                            free,
-                            free <= cpu::WATER_EPSILON,
-                            pore,
-                            slot,
-                        );
-                    }
-                }
-            }
-            for (slot, style) in styles.iter().enumerate() {
-                out.styles[slot] = VoxelStyle::new(style.wood, style.crown, style.heart);
-            }
-            out.glyphs.fill(0);
-            let used = appearance::atlas_len(p.s, p.rise);
-            debug_assert!(used <= out.glyphs.len());
-            debug_assert!(appearance::ATLAS_GLYPHS <= MAX_GLYPHS);
-            appearance::write_atlas(p.s, p.rise, &mut out.glyphs[..used]);
+        let slow = self.packer.prepare(&view, flora, fauna);
+        let packer = &mut self.packer;
+        self.renderer.stage(slow, |out| {
+            packer.fill(&view, p.width, p.height, p.depth, out)
         });
         let atmosphere = if p.sky_gradient && view.atmosphere_m3 > 0.0 {
             (view.atmosphere_m3 as f32 / 1.5).clamp(0.1, 1.0)
@@ -482,11 +395,11 @@ impl VoxelGpuSink {
                 all.line(run, &self.gpu.name),
             );
         }
-        if self.style_overflow > 0 {
+        if self.packer.style_overflow > 0 {
             eprintln!(
                 "cubarium voxel --sink gpu: {} plant voxels fell back to style 0 \
                  (more than {MAX_STYLES} distinct plant styles in one frame)",
-                self.style_overflow
+                self.packer.style_overflow
             );
         }
         if let Some((web, _)) = self.web.as_mut() {
@@ -505,6 +418,230 @@ impl Drop for VoxelGpuSink {
     fn drop(&mut self) {
         self.target.destroy(&self.gpu);
         self.renderer.destroy(&self.gpu);
+    }
+}
+
+/// One tick's world as texels: the stage loop, and what it keeps between ticks.
+///
+/// **What it keeps.** The roof table is a function of the terrain alone, so it is built
+/// when the terrain moves and copied into a staging buffer only when that buffer does not
+/// hold it yet (`cubarium_gpu::voxel::SlowPlanes`); the glyph atlas is a function of the
+/// projection and is built once. The plant and animal grids clear only what they stamped.
+///
+/// **What it walks.** Every voxel once, in the world's own order, for material and water;
+/// then only the cells a stand or an animal stamped, in texture order — the order the old
+/// per-voxel loop met them in, so the style slots come out numbered the same.
+struct Packer {
+    /// The CPU presenter's own stand decomposition, rebuilt once per staged tick.
+    stands: Stands,
+    /// The frame's animals on the same grid, rebuilt per staged tick (round 5c).
+    animals: Animals,
+    /// GPU style slots, in the order they were first needed this tick.
+    styles: Vec<Style>,
+    /// `Stands` style index → GPU slot for this tick, so the dedup costs one linear scan
+    /// per stand and not one per voxel.
+    slot_of: Vec<Option<u8>>,
+    /// Plant voxels that had to reuse style 0 because the frame wanted more than
+    /// [`MAX_STYLES`] distinct styles.
+    style_overflow: u64,
+    /// The roof table in texture order, for the terrain in [`Packer::roof_materials`].
+    roof: Vec<u8>,
+    /// The materials `roof` was built from, and their `terrain_version`. The version says
+    /// when the terrain moved in one world, but two worlds can share a version (a fresh
+    /// world starts at zero, as the empty founding world does), so the materials
+    /// themselves are compared too — a few hundred microseconds, not a rebuild.
+    roof_materials: Vec<Material>,
+    roof_version: Option<u64>,
+    /// Bumped every time `roof` is rebuilt: the key its plane is uploaded under.
+    roof_key: u64,
+    /// The whole glyph plane, atlas and zero tail, built once.
+    glyphs: Vec<u8>,
+    /// Scratch: the overlay's texture indices.
+    overlay: Vec<u32>,
+}
+
+/// The glyph plane never changes after construction: one key for the life of a renderer.
+const GLYPHS_KEY: u64 = 0;
+
+impl Packer {
+    fn new(p: &VoxelParams) -> Packer {
+        let mut glyphs = vec![0u8; p.glyph_bytes()];
+        let used = appearance::atlas_len(p.s, p.rise);
+        debug_assert!(used <= glyphs.len());
+        debug_assert!(appearance::ATLAS_GLYPHS <= MAX_GLYPHS);
+        appearance::write_atlas(p.s, p.rise, &mut glyphs[..used]);
+        Packer {
+            stands: Stands::empty(p.width, p.height, p.depth),
+            animals: Animals::empty(p.width, p.height, p.depth),
+            styles: Vec::new(),
+            slot_of: Vec::new(),
+            style_overflow: 0,
+            roof: vec![0; p.voxel_count()],
+            roof_materials: Vec::new(),
+            roof_version: None,
+            roof_key: 0,
+            glyphs,
+            overlay: Vec::new(),
+        }
+    }
+
+    /// Everything that is not a write into the staging buffer: the plant and animal
+    /// grids, and the roof if the terrain moved. Returns the slow planes' keys.
+    fn prepare(&mut self, view: &VoxelView<'_>, flora: &Flora, fauna: &Fauna) -> [u64; 2] {
+        self.stands.rebuild(view, flora.view());
+        self.animals.rebuild(view, Some(fauna.view()));
+        if self.roof_version != Some(view.terrain_version)
+            || self.roof_materials.as_slice() != view.material
+        {
+            let c = view.config;
+            roof_table(view.material, c.width, c.height, c.depth, &mut self.roof);
+            self.roof_materials.clear();
+            self.roof_materials.extend_from_slice(view.material);
+            self.roof_version = Some(view.terrain_version);
+            self.roof_key += 1;
+        }
+        let mut keys = [0; 2];
+        keys[PLANE_ROOF] = self.roof_key;
+        keys[PLANE_GLYPHS] = GLYPHS_KEY;
+        keys
+    }
+
+    /// Write the prepared tick into `out`.
+    fn fill(&mut self, view: &VoxelView<'_>, w: u32, h: u32, d: u32, out: VoxelStaging<'_>) {
+        self.styles.clear();
+        self.slot_of.clear();
+        let (wu, hu, du) = (w as usize, h as usize, d as usize);
+        // Material and water, every voxel, walking the world's `(y · depth + z) · width
+        // + x` rows into the texture's `(z · height + y) · width + x` rows: both run x
+        // fastest, so each row is one contiguous read and one contiguous write.
+        for y in 0..hu {
+            for z in 0..du {
+                let src = (y * du + z) * wu;
+                let dst = (z * hu + y) * wu;
+                let material = &view.material[src..src + wu];
+                let free = &view.free[src..src + wu];
+                let pore = &view.pore[src..src + wu];
+                for (x, texel) in out.voxels[dst..dst + wu].iter_mut().enumerate() {
+                    *texel = texel_of(material[x], free[x], pore[x], PART_NONE, 0, 0);
+                }
+            }
+        }
+        // Then the plants and animals, only where they stand, in texture order.
+        let stands = &self.stands;
+        let animals = &self.animals;
+        let beasts = !animals.is_empty();
+        self.overlay.clear();
+        let index = |(x, y, z): (u32, u32, u32)| VoxelStaging::index(w, h, x, y, z) as u32;
+        self.overlay.extend(stands.cells().map(index));
+        if beasts {
+            self.overlay.extend(animals.cells().map(index));
+        }
+        self.overlay.sort_unstable();
+        self.overlay.dedup();
+        for &i in &self.overlay {
+            let i = i as usize;
+            let (x, y, z) = (
+                (i % wu) as u32,
+                ((i / wu) % hu) as u32,
+                (i / (wu * hu)) as u32,
+            );
+            let src = (y as usize * du + z as usize) * wu + x as usize;
+            let m = view.material[src];
+            if m.is_solid() {
+                continue;
+            }
+            let xi = i64::from(x);
+            // The animal after the plant in its own cell, as the CPU presenter stamps it:
+            // a body standing in a turf covers the turf.
+            let beast = if beasts {
+                animals.at(xi, i64::from(y), z)
+            } else {
+                AnimalPart::None
+            };
+            let (part, glyph, slot) = if let Some(style) = animals.style(beast) {
+                (
+                    PART_ANIMAL_INTERIM,
+                    beast.glyph().0,
+                    slot_for_style(style, &mut self.styles, &mut self.style_overflow),
+                )
+            } else {
+                let p = stands.at(xi, i64::from(y), z);
+                match appearance::plant_class(p) {
+                    PART_NONE => continue,
+                    class => {
+                        let s = slot_for(
+                            stands,
+                            p,
+                            &mut self.styles,
+                            &mut self.slot_of,
+                            &mut self.style_overflow,
+                        );
+                        let glyph = appearance::plant_glyph(
+                            p,
+                            !stands.crown_continues(p, xi - 1, y, z),
+                            !stands.crown_continues(p, xi + 1, y, z),
+                        );
+                        (class, glyph.0, s)
+                    }
+                }
+            };
+            out.voxels[i] = texel_of(m, view.free[src], view.pore[src], part, glyph, slot);
+        }
+        for (slot, style) in self.styles.iter().enumerate() {
+            out.styles[slot] = VoxelStyle::new(style.wood, style.crown, style.heart);
+        }
+        if out.write[PLANE_ROOF] {
+            out.roof.copy_from_slice(&self.roof);
+        }
+        if out.write[PLANE_GLYPHS] {
+            out.glyphs.copy_from_slice(&self.glyphs);
+        }
+    }
+}
+
+/// One voxel's texel: its material and water, and whatever part stands in it.
+#[inline]
+fn texel_of(m: Material, free: f64, pore: f64, part: u8, glyph: u8, slot: u8) -> VoxelTexel {
+    let free = free as f32;
+    let pore = if m.pore_capacity() > 0.0 {
+        pore.clamp(0.0, 1.0) as f32
+    } else {
+        0.0
+    };
+    VoxelTexel::pack_glyph(
+        m as u8,
+        part,
+        glyph,
+        free,
+        free <= cpu::WATER_EPSILON,
+        pore,
+        slot,
+    )
+}
+
+/// `VoxelPresenter::build_roof` in the roof texture's own index order: voxels from each
+/// one up to the nearest solid above it in its own column, `0` where the column is open
+/// to the sky, clamped into a byte. Walked a whole row of columns at a time, top down, so
+/// every read and write runs along x.
+///
+/// The clamp is lossless where it matters: `roof_shade` is `ROOF_LIGHT + (1 −
+/// ROOF_LIGHT)(1 − e^−(gap−1)/4)`, which is within 1e-5 of full light by a gap of 50 and
+/// so within a thousandth of an 8-bit code long before 255.
+fn roof_table(material: &[Material], w: u32, h: u32, d: u32, out: &mut [u8]) {
+    let (w, h, d) = (w as usize, h as usize, d as usize);
+    let mut nearest: Vec<Option<usize>> = vec![None; w];
+    for z in 0..d {
+        nearest.fill(None);
+        for y in (0..h).rev() {
+            let src = (y * d + z) * w;
+            let dst = (z * h + y) * w;
+            for x in 0..w {
+                out[dst + x] = nearest[x].map_or(0, |r| (r - y).min(255) as u8);
+                if material[src + x].is_solid() {
+                    nearest[x] = Some(y);
+                }
+            }
+        }
     }
 }
 
@@ -558,6 +695,7 @@ fn slot_for(
     slot
 }
 
+/// The pack before the cheap one, kept as the oracle `Packer` is tested against.
 /// `VoxelPresenter::build_roof`, written into the roof texture's own index order:
 /// voxels from each one up to the nearest solid above it in its own column, `0` where
 /// the column is open to the sky, clamped into a byte.
@@ -565,6 +703,7 @@ fn slot_for(
 /// The clamp is lossless where it matters: `roof_shade` is `ROOF_LIGHT + (1 −
 /// ROOF_LIGHT)(1 − e^−(gap−1)/4)`, which is within 1e-5 of full light by a gap of 50 and
 /// so within a thousandth of an 8-bit code long before 255.
+#[cfg(test)]
 fn roof_into(view: &VoxelView<'_>, w: u32, h: u32, d: u32, out: &mut [u8]) {
     for z in 0..d {
         for x in 0..w {
@@ -650,4 +789,390 @@ pub fn check(proj: Projection) -> Result<()> {
         bail!("the projection's raster is not the strip's own width");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    //! The cheap pack against the one it replaced. The bar is equal texels in every plane
+    //! the GPU reads, through the two alternating staging buffers and the slow planes'
+    //! keys, across the edits that move what a pack keeps between ticks.
+
+    use super::*;
+    use cubarium_gpu::voxel::SlowPlanes;
+    use cubarium_voxel::{Command, Config};
+    use cubarium_voxel_fauna::{Command as FaunaCommand, FaunaConfig, Species as Beast};
+    use cubarium_voxel_flora::{Command as FloraCommand, FloraConfig, Species};
+
+    /// The pack as it was before the cheap one: every voxel through the wrapping
+    /// accessors, fresh plant and animal grids, the roof walked per column and the atlas
+    /// rebuilt, every plane written.
+    fn reference(
+        view: &VoxelView<'_>,
+        flora: &Flora,
+        fauna: &Fauna,
+        p: &VoxelParams,
+        out: VoxelStaging<'_>,
+    ) {
+        let (w, h, d) = (p.width, p.height, p.depth);
+        let mut stands = Stands::empty(w, h, d);
+        let mut animals = Animals::empty(w, h, d);
+        stands.rebuild(view, flora.view());
+        animals.rebuild(view, Some(fauna.view()));
+        let (mut styles, mut slot_of, mut overflow) = (Vec::new(), Vec::new(), 0u64);
+        let (stands, animals) = (&stands, &animals);
+        let beasts = !animals.is_empty();
+        let (styles, slot_of, overflow) = (&mut styles, &mut slot_of, &mut overflow);
+        roof_into(view, w, h, d, out.roof);
+        for z in 0..d {
+            for y in 0..h {
+                for x in 0..w {
+                    let xi = i64::from(x);
+                    let m = view.material_at(xi, y, z);
+                    let beast = if beasts && !m.is_solid() {
+                        animals.at(xi, i64::from(y), z)
+                    } else {
+                        AnimalPart::None
+                    };
+                    let (part, glyph, slot) = if m.is_solid() {
+                        (PART_NONE, 0, 0)
+                    } else if let Some(style) = animals.style(beast) {
+                        (
+                            PART_ANIMAL_INTERIM,
+                            beast.glyph().0,
+                            slot_for_style(style, styles, overflow),
+                        )
+                    } else {
+                        let p = stands.at(xi, i64::from(y), z);
+                        match appearance::plant_class(p) {
+                            PART_NONE => (PART_NONE, 0, 0),
+                            class => {
+                                let s = slot_for(stands, p, styles, slot_of, overflow);
+                                let glyph = appearance::plant_glyph(
+                                    p,
+                                    !stands.crown_continues(p, xi - 1, y, z),
+                                    !stands.crown_continues(p, xi + 1, y, z),
+                                );
+                                (class, glyph.0, s)
+                            }
+                        }
+                    };
+                    let free = view.free_at(xi, y, z) as f32;
+                    let pore = if m.pore_capacity() > 0.0 {
+                        view.pore_at(xi, y, z).clamp(0.0, 1.0) as f32
+                    } else {
+                        0.0
+                    };
+                    out.voxels[VoxelStaging::index(w, h, x, y, z)] = VoxelTexel::pack_glyph(
+                        m as u8,
+                        part,
+                        glyph,
+                        free,
+                        free <= cpu::WATER_EPSILON,
+                        pore,
+                        slot,
+                    );
+                }
+            }
+        }
+        for (slot, style) in styles.iter().enumerate() {
+            out.styles[slot] = VoxelStyle::new(style.wood, style.crown, style.heart);
+        }
+        out.glyphs.fill(0);
+        let used = appearance::atlas_len(p.s, p.rise);
+        appearance::write_atlas(p.s, p.rise, &mut out.glyphs[..used]);
+    }
+
+    /// One staging buffer's planes, or the images'.
+    #[derive(Clone, PartialEq)]
+    struct Planes {
+        voxels: Vec<VoxelTexel>,
+        roof: Vec<u8>,
+        styles: Vec<VoxelStyle>,
+        glyphs: Vec<u8>,
+    }
+
+    impl Planes {
+        /// Filled with junk, so a plane a pack should have written and did not shows.
+        fn junk(p: &VoxelParams) -> Planes {
+            Planes {
+                voxels: vec![VoxelTexel([0xAB; 4]); p.voxel_count()],
+                roof: vec![0xAB; p.voxel_count()],
+                styles: vec![VoxelStyle::new([0.5; 3], [0.5; 3], [0.5; 3]); MAX_STYLES],
+                glyphs: vec![0xAB; p.glyph_bytes()],
+            }
+        }
+
+        /// As `VoxelRenderer::stage` hands it over: the styles zeroed first.
+        fn staging(&mut self, write: [bool; 2]) -> VoxelStaging<'_> {
+            self.styles.fill(VoxelStyle::default());
+            VoxelStaging {
+                voxels: &mut self.voxels,
+                roof: &mut self.roof,
+                styles: &mut self.styles,
+                glyphs: &mut self.glyphs,
+                write,
+            }
+        }
+    }
+
+    /// The renderer's side of a pack and an upload, without a device: two buffers
+    /// alternating, and the images holding whatever the slow planes' keys say was copied.
+    struct Rig {
+        params: VoxelParams,
+        packer: Packer,
+        slow: SlowPlanes,
+        buffers: [Planes; 2],
+        images: Planes,
+        ticks: usize,
+    }
+
+    impl Rig {
+        fn new(c: &Config) -> Rig {
+            let cfg = VoxelConfig {
+                world: c.clone(),
+                ..VoxelConfig::default()
+            };
+            let proj =
+                Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, c).unwrap();
+            let params = params_of(&cfg, proj, true);
+            Rig {
+                packer: Packer::new(&params),
+                slow: SlowPlanes::new(2),
+                buffers: [Planes::junk(&params), Planes::junk(&params)],
+                images: Planes::junk(&params),
+                params,
+                ticks: 0,
+            }
+        }
+
+        /// Pack and upload one tick, and hold the images to the reference pack.
+        fn tick(&mut self, world: &World, flora: &Flora, fauna: &Fauna, what: &str) {
+            let p = self.params;
+            let view = world.view();
+            let b = self.ticks % 2;
+            self.ticks += 1;
+            let keys = self.packer.prepare(&view, flora, fauna);
+            let write = self.slow.pack(b, keys);
+            self.packer.fill(
+                &view,
+                p.width,
+                p.height,
+                p.depth,
+                self.buffers[b].staging(write),
+            );
+            let copy = self.slow.upload(b);
+            let buffer = &self.buffers[b];
+            self.images.voxels.clone_from(&buffer.voxels);
+            self.images.styles.clone_from(&buffer.styles);
+            if copy[PLANE_ROOF] {
+                self.images.roof.clone_from(&buffer.roof);
+            }
+            if copy[PLANE_GLYPHS] {
+                self.images.glyphs.clone_from(&buffer.glyphs);
+            }
+
+            let mut want = Planes::junk(&p);
+            reference(&view, flora, fauna, &p, want.staging([true; 2]));
+            let differ =
+                |a: &[VoxelTexel], b: &[VoxelTexel]| a.iter().zip(b).position(|(a, b)| a != b);
+            if let Some(i) = differ(&self.images.voxels, &want.voxels) {
+                panic!(
+                    "{what}: voxel texel {i} is {:?}, the old pack wrote {:?}",
+                    self.images.voxels[i], want.voxels[i]
+                );
+            }
+            assert!(
+                self.images.roof == want.roof,
+                "{what}: the roof table differs"
+            );
+            assert!(
+                self.images.styles == want.styles,
+                "{what}: the style table differs"
+            );
+            assert!(
+                self.images.glyphs == want.glyphs,
+                "{what}: the glyph atlas differs"
+            );
+        }
+    }
+
+    fn config() -> Config {
+        Config {
+            width: 32,
+            height: 14,
+            depth: 5,
+            ..Config::default()
+        }
+    }
+
+    fn set(world: &mut World, x: i64, y: u32, z: u32, material: Material) {
+        world.apply(Command::SetMaterial { x, y, z, material });
+    }
+
+    /// Terrain, a roof, standing water, pore water, two stands (one across the seam) and
+    /// a grazer — the small world `tests/voxel_gpu.rs` draws on both renderers.
+    fn world(c: &Config) -> World {
+        let mut world = World::empty(c.clone());
+        let v = c.voxel_volume();
+        for z in 0..c.depth {
+            for x in 0..i64::from(c.width) {
+                set(&mut world, x, 0, z, Material::Bedrock);
+                set(&mut world, x, 1, z, Material::Rock);
+                set(&mut world, x, 2, z, Material::Soil);
+                if (8..20).contains(&x) {
+                    for y in 3..=3 + z {
+                        set(&mut world, x, y, z, Material::Soil);
+                    }
+                }
+            }
+        }
+        for x in 22..28i64 {
+            set(&mut world, x, 9, 0, Material::Rock);
+            set(&mut world, x, 9, 1, Material::Rock);
+        }
+        for z in 0..c.depth {
+            for x in -2..6i64 {
+                for y in 3..5u32 {
+                    world.apply(Command::AddWater {
+                        x,
+                        y,
+                        z,
+                        volume_m3: v,
+                    });
+                }
+            }
+        }
+        world.apply(Command::AddWater {
+            x: 24,
+            y: 8,
+            z: 1,
+            volume_m3: v * 0.25,
+        });
+        for x in 8..20i64 {
+            world.apply(Command::AddWater {
+                x,
+                y: 2,
+                z: 2,
+                volume_m3: v * 0.2,
+            });
+        }
+        world
+    }
+
+    fn flora(world: &World, stands: &[(i64, u32, Species, f64)]) -> Flora {
+        let mut flora = Flora::new(FloraConfig::default());
+        for &(x, z, species, of_max) in stands {
+            let wood = flora.config().species(species).wood_max * of_max;
+            assert!(
+                flora.apply(
+                    world,
+                    FloraCommand::Seed {
+                        x,
+                        z,
+                        species,
+                        wood
+                    }
+                ),
+                "a support face for the stand at ({x}, {z})"
+            );
+        }
+        flora
+    }
+
+    fn grazer(world: &World, x: i64, z: u32) -> Fauna {
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        let body = fauna.config().species(Beast::Frondgrazer).body_max;
+        let species = Beast::Frondgrazer;
+        assert!(
+            fauna.apply(
+                world,
+                FaunaCommand::Introduce {
+                    x,
+                    z,
+                    species,
+                    body
+                }
+            ),
+            "a support face for the grazer at ({x}, {z})"
+        );
+        fauna
+    }
+
+    /// The same packer, tick after tick, against the old pack run fresh each time: a
+    /// terrain edit, a moved animal, a stand that grows and one that dies all have to
+    /// leave nothing of the tick before behind.
+    #[test]
+    fn the_cheap_pack_writes_the_texels_the_old_pack_wrote() {
+        let c = config();
+        let mut rig = Rig::new(&c);
+        let mut world = world(&c);
+        let stands = [
+            (14i64, 2u32, Species::Bloomcrown, 1.0),
+            (1, 1, Species::Umbrellafrond, 1.0),
+            (26, 3, Species::Umbrellafrond, 0.4),
+        ];
+        let mut plants = flora(&world, &stands);
+        let mut beast = grazer(&world, 4, 1);
+        rig.tick(&world, &plants, &beast, "the fixture");
+        rig.tick(
+            &world,
+            &plants,
+            &beast,
+            "the fixture again, into the other buffer",
+        );
+        rig.tick(&world, &plants, &beast, "the fixture a third time");
+
+        // A terrain edit: a shelf over the pool, which moves the roof under it.
+        for x in 0..4 {
+            set(&mut world, x, 11, 2, Material::Rock);
+        }
+        rig.tick(&world, &plants, &beast, "after a shelf is added");
+        rig.tick(&world, &plants, &beast, "after a shelf, the other buffer");
+        set(&mut world, 24, 9, 0, Material::Air);
+        rig.tick(&world, &plants, &beast, "after a roof cell is dug out");
+
+        beast = grazer(&world, 29, 3);
+        rig.tick(&world, &plants, &beast, "after the grazer moves");
+        beast = grazer(&world, 31, 0);
+        rig.tick(
+            &world,
+            &plants,
+            &beast,
+            "after the grazer moves onto the seam",
+        );
+
+        let mut grown = stands;
+        grown[2].3 = 1.0;
+        plants = flora(&world, &grown);
+        rig.tick(&world, &plants, &beast, "after a stand grows");
+        assert!(plants.apply(&world, FloraCommand::Clear { x: 1, z: 1 }));
+        rig.tick(&world, &plants, &beast, "after the stand on the seam dies");
+        let none = Fauna::new(FaunaConfig::default());
+        rig.tick(&world, &plants, &none, "after the grazer is gone");
+        rig.tick(
+            &world,
+            &Flora::new(FloraConfig::default()),
+            &none,
+            "with nothing living",
+        );
+    }
+
+    /// Two worlds can share a terrain version — the empty founding world and the first
+    /// real one both start at zero — so the roof cache cannot trust the version alone.
+    #[test]
+    fn a_different_world_at_the_same_terrain_version_gets_its_own_roof() {
+        let c = config();
+        let mut rig = Rig::new(&c);
+        let (mut a, mut b) = (World::empty(c.clone()), World::empty(c.clone()));
+        set(&mut a, 3, 8, 1, Material::Rock);
+        set(&mut b, 9, 5, 2, Material::Rock);
+        assert_eq!(a.terrain_version(), b.terrain_version());
+        let (flora, fauna) = (
+            Flora::new(FloraConfig::default()),
+            Fauna::new(FaunaConfig::default()),
+        );
+        rig.tick(&a, &flora, &fauna, "world a");
+        rig.tick(&b, &flora, &fauna, "world b at a's terrain version");
+        rig.tick(&b, &flora, &fauna, "world b, the other buffer");
+    }
 }
