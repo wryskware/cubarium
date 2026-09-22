@@ -641,3 +641,32 @@ directory under `terrain-slice3w/`.
 
 Return (≤30 lines): commits, the four cycle numbers, settle results per
 preset, the study's two numbers, PNG path.
+
+## Package W — integrated 2026-09-21
+
+Landed at 704df08; schema 10 → 11. Cycle numbers from the water-cycle
+handoff's bounded study: shower rate 2e-4 m/s, evaporation 1e-4 m/s, trigger
+0.02, shower 5 m³. Finding: **at trigger 0.02 it rains back to back** (one
+shower takes ~2600 ticks, the next begins at once) and no preset's settle can
+converge because the drift is the rain; `atmosphere_fraction` 0.06 starts the
+sky above the trigger so it rains from tick 0. Two slice-3 tests that an edit
+slip had cut are restored.
+
+## Package W2 — intermittent weather
+
+Owner: habitat worker (Opus, low). Files: the staged presets' `water` values
+in `recipe.rs`; the study; nothing else.
+
+Decision, from the handoff's own range (intermittent weather at 0.10–0.24,
+dry lock at 0.26 and above): `shower_trigger_fraction` **0.12** and
+`atmosphere_fraction` **0.08** on all three staged presets, so the world
+settles its hydrostatics first and the first shower follows once evaporation
+has lifted the difference. Nothing else moves.
+
+Check: settle on the three presets (expect `converged` before the cap now),
+and the study rerun on `default` seed 1 reporting the tick of the first
+shower after settle, the tick of the second, and the dry spell between them.
+If the first shower does not arrive within the study's 6000 ticks, report it;
+do not move the numbers again.
+
+Return (≤15 lines): commit, settle per preset, the three study numbers.
