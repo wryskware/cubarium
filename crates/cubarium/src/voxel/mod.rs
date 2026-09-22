@@ -423,6 +423,19 @@ fn load_or_create_world(args: &Voxel, cfg: &VoxelConfig) -> Result<(World, Strin
     Ok((world, label, false))
 }
 
+/// Ticks a candidate world is settled for before its water is judged.
+///
+/// Two simulated seconds, and that is enough: measured on `small`, the sheet `hydrate`
+/// lays finds its own hollows inside twenty ticks and the reading does not move after
+/// forty — seed 5 goes 3.7 m² to 1.5 at tick 20 and is still 1.4 at tick 400. Two hundred
+/// ticks cost a full second per candidate on that preset, eight times what generating it
+/// cost; forty costs a fifth of that and says the same thing.
+const GATE_SETTLE_TICKS: u32 = 40;
+
+/// The step a body takes between neighbouring support faces, metres — the bound the
+/// generator's own walkability check uses.
+const WALK_STEP_M: f64 = 0.5;
+
 /// Random seeds tried before the generator gives up and keeps the wettest world it saw.
 pub const LAKE_SEED_TRIES: usize = 24;
 
@@ -472,16 +485,27 @@ fn generate_with_a_lake(
             ..cfg.clone()
         })
     };
-    // What the camera would make of this world's water: the lake, and the pools standing
-    // above it that are worth calling pools.
+    // What the camera would make of this world's water — **after a short settle**, which
+    // is the only reading that means anything. Out of `hydrate` the lake is a flat sheet
+    // laid to the outlet's datum; over a stepped bed it drains into its own hollows
+    // within a few seconds and can lose a third of its area doing it (`small` seed 5:
+    // 3.7 m² to 1.6). Judging the sheet accepts worlds the panel then shows dry.
+    //
+    // It is paid on a **clone**: the world that is returned is the freshly generated one,
+    // which the host settles again for real when it seeds the habitat.
     let read = |world: &World| {
-        let lake = cubarium_voxel::hydrate::lake(world);
+        let mut probe = world.clone();
+        probe.settle(GATE_SETTLE_TICKS);
+        let lake = cubarium_voxel::hydrate::lake(&probe);
         let tiers = cubarium_voxel::hydrate::tier_pools(
-            &cubarium_voxel::hydrate::pools(world),
+            &cubarium_voxel::hydrate::pools(&probe),
             lake.level_y,
         );
         (lake.visible_m2, tiers)
     };
+    // The ring has to be walkable, and that is the dearest question of the three, so it is
+    // asked last and only of a world that has already cleared the water bars.
+    let walkable = |world: &World| cubarium_voxel::walk::around_the_ring(world, WALK_STEP_M);
     if let Some(seed) = asked {
         let world = build(seed);
         let (got, tiers) = read(&world);
@@ -492,6 +516,12 @@ fn generate_with_a_lake(
                  and {want_tiers} a drawn seed would need"
             );
         }
+        if !walkable(&world) {
+            eprintln!(
+                "cubarium voxel: seed {seed} was asked for, so it is kept — but the ring \
+                 cannot be walked around, so its animals are in separate halves"
+            );
+        }
         return (world, seed, 0);
     }
     let mut best: Option<(f64, usize, u64, World)> = None;
@@ -499,6 +529,13 @@ fn generate_with_a_lake(
         let seed = next_seed();
         let world = build(seed);
         let (got, tiers) = read(&world);
+        if got >= want && tiers >= want_tiers && !walkable(&world) {
+            eprintln!(
+                "cubarium voxel: seed {seed} rejected: its water reads, but the ring cannot \
+                 be walked around"
+            );
+            continue;
+        }
         if got >= want && tiers >= want_tiers {
             if k > 0 {
                 eprintln!(
@@ -2097,6 +2134,45 @@ mod tests {
         // An asked-for seed is the world, bar or no bar.
         let (_, seed, rejected) = generate_with_a_lake(&cfg, Some(77), 3, seeds(vec![]));
         assert_eq!((seed, rejected), (77, 0), "a named seed is honoured");
+    }
+
+    /// A ring the animals cannot walk around is two habitats, not one, so the gate asks
+    /// the generator's own walkability question too — last, because it costs the most.
+    #[test]
+    fn the_gate_rejects_a_ring_that_cannot_be_walked() {
+        // A flat ring of rock with a wall across the whole strip: nothing climbs 0.75 m.
+        let c = cubarium_voxel::Config {
+            width: 16,
+            height: 12,
+            depth: 4,
+            voxel_m: 0.25,
+            ..cubarium_voxel::Config::default()
+        };
+        let build = |wall: bool| {
+            let mut w = World::empty(c.clone());
+            for z in 0..c.depth {
+                for x in 0..c.width as i64 {
+                    let top = if wall && x == 8 { 7 } else { 4 };
+                    for y in 1..=top {
+                        w.apply(cubarium_voxel::Command::SetMaterial {
+                            x,
+                            y,
+                            z,
+                            material: cubarium_voxel::Material::Rock,
+                        });
+                    }
+                }
+            }
+            w
+        };
+        assert!(
+            cubarium_voxel::walk::around_the_ring(&build(false), WALK_STEP_M),
+            "flat ground is walkable"
+        );
+        assert!(
+            !cubarium_voxel::walk::around_the_ring(&build(true), WALK_STEP_M),
+            "a three-voxel wall across the strip is not a step"
+        );
     }
 
     /// A config file whose `[world]` no world can be built from is an error, not a panic:

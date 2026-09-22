@@ -71,15 +71,22 @@ pub struct Pool {
 /// on. Empty geometry when no basin has sky over the whole of its floor — a world with
 /// nowhere for open water to be.
 pub fn lake(world: &World) -> Pool {
-    pools(world).into_iter().next().unwrap_or(Pool {
-        cells: Vec::new(),
-        surface_cells: Vec::new(),
-        visible_m2: 0.0,
-        visible_cells: 0,
-        level_y: 0,
-        floor_y: 0,
-        volume_m3: 0.0,
-    })
+    let all = pools(world);
+    let Some(floor) = all.iter().map(|p| p.floor_y).min() else {
+        return read_pool(world, Vec::new());
+    };
+    // **Every body at the cut, not one puddle of it.** A stepped beach holds its sheet in
+    // several disconnected bodies once it has settled — thirty-six of them on `small`
+    // seed 5, two of them the same size at the same floor — and taking the first by cell
+    // index reported a third of the water that was actually there. The water had not gone
+    // anywhere: the ring's pooled volume was unchanged. The lake is what the camera sees
+    // down there, bar or no bar between its halves.
+    let cells: Vec<usize> = all
+        .into_iter()
+        .filter(|p| p.floor_y <= floor + LAKE_FLOOR_BAND)
+        .flat_map(|p| p.cells)
+        .collect();
+    read_pool(world, cells)
 }
 
 /// Every body of **standing** water in the world that the sky can see, lowest floor
@@ -220,6 +227,13 @@ pub fn tier_pools(pools: &[Pool], lake_level_y: u32) -> usize {
         .filter(|p| p.level_y > lake_level_y && p.visible_cells >= MIN_POOL_CELLS)
         .count()
 }
+
+/// How far above the lowest standing water a body can sit and still be *the lake*.
+///
+/// The lake's bed is stepped, so its sheet breaks into bodies a voxel or two apart as it
+/// settles; they are one water feature to look at and the gate should read them as one.
+/// Anything higher is a tier's pool and is counted as one ([`tier_pools`]).
+pub const LAKE_FLOOR_BAND: u32 = 2;
 
 /// How full a void cell must be to count as **pool** water rather than runoff.
 ///
@@ -1762,6 +1776,92 @@ mod tests {
                 w.atmosphere_m3(),
                 100.0 * (w.atmosphere_m3() - sky0) / sky0.max(1e-9),
             );
+        }
+    }
+
+    /// **The lake is the water at the cut, not one puddle of it.** A stepped beach holds
+    /// its sheet in several bodies once it has settled — measured on `small` seed 5,
+    /// thirty-six of them, two the same size at the same floor — and picking one by cell
+    /// index reported a third of the water that was there.
+    #[test]
+    fn the_lake_is_every_body_at_its_own_floor() {
+        let c = Config {
+            width: 16,
+            height: 10,
+            depth: 2,
+            voxel_m: 0.25,
+            ..Config::default()
+        };
+        let mut w = World::empty(c.clone());
+        for z in 0..c.depth {
+            for x in 0..c.width as i64 {
+                for y in 1..=3 {
+                    w.material[c.index(x, y, z)] = Material::Rock;
+                }
+            }
+            // Two bowls at the same floor with a bar of rock between them.
+            for x in [2i64, 3, 4, 7, 8, 9] {
+                w.material[c.index(x, 3, z)] = Material::Air;
+            }
+        }
+        w.rebuild_active_sets();
+        for x in [2i64, 3, 4, 7, 8, 9] {
+            for z in 0..c.depth {
+                w.apply(crate::Command::AddWater {
+                    x,
+                    y: 3,
+                    z,
+                    volume_m3: c.voxel_volume(),
+                });
+            }
+        }
+        let list = pools(&w);
+        assert!(
+            list.len() >= 2,
+            "the bar really does split the water in two: {list:?}"
+        );
+        let l = lake(&w);
+        assert_eq!(
+            l.surface_cells.len(),
+            12,
+            "the lake is both halves — six columns, two deep: {l:?}"
+        );
+        assert_eq!(l.floor_y, 3);
+        assert!(
+            (l.volume_m3 - 12.0 * c.voxel_volume()).abs() < 1e-9,
+            "and all of the water in them: {l:?}"
+        );
+    }
+
+    /// **Study, not a test.** The lake out of `hydrate` and after the gate's own settle,
+    /// on eight seeds of the two presets that matter, with the ring walk beside it.
+    #[test]
+    #[ignore = "study: run by name"]
+    fn the_lake_before_and_after_settle() {
+        for name in ["small", "default", "wide"] {
+            let p = crate::Preset::find(name).unwrap();
+            let bar = p.recipe.water.min_lake_m2;
+            for seed in 1..=8u64 {
+                let w = World::new(Config { seed, ..p.config() });
+                let before = lake(&w);
+                let mut probe = w.clone();
+                probe.settle(40);
+                let after = lake(&probe);
+                println!(
+                    "{name} seed {seed}: {:.1} -> {:.1} m² (bar {bar}), {:.3} -> {:.3} m³, \
+                     {} pool(s) above; walk {}",
+                    before.visible_m2,
+                    after.visible_m2,
+                    before.volume_m3,
+                    after.volume_m3,
+                    tier_pools(&pools(&probe), after.level_y),
+                    if crate::walk::around_the_ring(&w, 0.5) {
+                        "ok"
+                    } else {
+                        "FAILS"
+                    },
+                );
+            }
         }
     }
 
