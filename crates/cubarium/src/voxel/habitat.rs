@@ -495,64 +495,48 @@ fn browser_faces(view: &VoxelView<'_>, fv: &FloraView<'_>, fauna: &Fauna) -> Vec
         return Vec::new();
     }
 
-    // The walk. A founder's pose keeps its centre column on its own standing layer, so
-    // its neighbourhood is the level one: four-adjacent columns at the same height,
-    // wrapping `x`. Faces in one component can reach each other; a component holding
-    // only one patch's feeding faces is a dead end.
-    let faces: Vec<Site> = {
-        let mut all: Vec<Site> = feeding.iter().map(|&(f, _)| f).collect();
+    // The walk. One rule, one function: `walkable_components` over **every** face this
+    // body could stand on, with the lineage's climb
+    // (`design/handoffs/voxel-founder-step-2026-09-22.md`). The route between two
+    // feeding patches runs over ordinary ground, so the component has to be built on the
+    // standable set and the feeding faces read off it — a component holding only one
+    // patch's stands is a dead end.
+    let climb = cubarium_voxel_fauna::climb_voxels(
+        fauna.config().founder(Founder::Browser),
+        view.config.voxel_m,
+    );
+    let walkable = cubarium_voxel_fauna::standable_faces(view, &manifest, sc.wade_depth_m);
+    let component = cubarium_voxel_fauna::walkable_components(&walkable, view.config.width, climb);
+    let component = {
+        let mut map: std::collections::HashMap<Site, usize> =
+            std::collections::HashMap::with_capacity(walkable.len());
+        for (f, c) in walkable.iter().zip(component) {
+            map.insert(*f, c);
+        }
+        map
+    };
+    let mut stands_in: std::collections::BTreeMap<usize, std::collections::BTreeSet<u64>> =
+        Default::default();
+    for (face, id) in &feeding {
+        if let Some(&root) = component.get(face) {
+            stands_in.entry(root).or_default().insert(*id);
+        }
+    }
+    let mut out: Vec<Site> = {
+        let mut all: Vec<Site> = feeding
+            .iter()
+            .map(|&(f, _)| f)
+            .filter(|f| {
+                component
+                    .get(f)
+                    .and_then(|root| stands_in.get(root))
+                    .is_some_and(|s| s.len() >= 2)
+            })
+            .collect();
         all.sort_unstable_by_key(|s| (s.y, s.x, s.z));
         all.dedup();
         all
     };
-    let mut component: Vec<usize> = (0..faces.len()).collect();
-    let find = |c: &mut Vec<usize>, mut i: usize| {
-        while c[i] != i {
-            c[i] = c[c[i]];
-            i = c[i];
-        }
-        i
-    };
-    let mut sorted = faces.clone();
-    sorted.sort_unstable();
-    for (i, f) in faces.iter().enumerate() {
-        for (dx, dz) in [(1i64, 0i64), (0, 1)] {
-            let nx = (i64::from(f.x) + dx).rem_euclid(width);
-            let nz = i64::from(f.z) + dz;
-            if nz >= depth {
-                continue;
-            }
-            let neighbour = Site {
-                x: nx as u32,
-                y: f.y,
-                z: nz as u32,
-            };
-            if let Some(j) = faces.iter().position(|s| *s == neighbour) {
-                let (a, b) = (find(&mut component, i), find(&mut component, j));
-                if a != b {
-                    component[a] = b;
-                }
-            }
-        }
-    }
-    let mut stands_in: std::collections::BTreeMap<usize, std::collections::BTreeSet<u64>> =
-        Default::default();
-    for (face, id) in &feeding {
-        if let Some(i) = faces.iter().position(|s| s == face) {
-            let root = find(&mut component, i);
-            stands_in.entry(root).or_default().insert(*id);
-        }
-    }
-    let mut out: Vec<Site> = faces
-        .iter()
-        .copied()
-        .enumerate()
-        .filter(|&(i, _)| {
-            let root = find(&mut component, i);
-            stands_in.get(&root).is_some_and(|s| s.len() >= 2)
-        })
-        .map(|(_, s)| s)
-        .collect();
     out.sort_by_key(|s| (s.y, s.x, s.z));
     out
 }

@@ -51,9 +51,16 @@ use crate::Fauna;
 /// respiration split. A world saved under schema 8 has no honest value for any of them:
 /// its bodies were breeding under the placeholder rule that this one replaces, so there
 /// is nothing to carry across and nothing to synthesize.
+/// Schema 10 is the **founder step rule**
+/// (`design/handoffs/voxel-founder-step-2026-09-22.md`):
+/// [`crate::FounderPhysiology`] gained `climb_m`, which is serialised inside the
+/// config, and `Animal::site.y` stopped being an invariant of a founder's life — a
+/// body now changes its standing layer, so the same `site` in a schema-9 world means
+/// something a schema-10 loader cannot assume about how it got there. There is nothing
+/// to synthesize either way.
 /// Postcard is not self-describing, so older worlds are **refused**, not migrated
 /// (`always-fresh-never-migrate`): start a fresh world.
-pub const SCHEMA: u32 = 9;
+pub const SCHEMA: u32 = 10;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

@@ -9,11 +9,72 @@
 //! a solid voxel with void over it, at any depth. Two faces are a step apart when their
 //! columns are face-neighbours in `(x, z)` and the rise between them is within
 //! `step_m`. `x` wraps; front and back are walls.
+//!
+//! # One rule, three consumers
+//!
+//! That adjacency is the **founder step rule**
+//! (`design/handoffs/voxel-founder-step-2026-09-22.md`): a body may move between
+//! face-neighbouring support faces whose standing layers differ by at most its climb.
+//! It is written here, once, in [`climb_voxels`] and [`components`], because this crate
+//! is below both the fauna crate and the host: the generator's ring gate, the fauna
+//! crate's `walkable_components` (and through it the edible-stock observer) and the
+//! seeder's feeding-face adjacency all answer the question with these.
 
 use crate::World;
 
+/// A climb height in metres as whole voxels, **rounded to nearest**: the one conversion
+/// of a physical climb to a layer count, applied at the consumer and never inside a
+/// body's definition (`design/voxel-encounter-contract-2026-09-21.md` §4).
+///
+/// The founders' placeholders (`design/backlog.md` §1) are the browser's 0.25 m — two
+/// voxels on the 0.125 m `small` preset, one on the 0.25 m `default` and `wide` — and
+/// the shredder's 0.125 m, one voxel on both. A non-finite or negative height is no
+/// climb at all.
+pub fn climb_voxels(climb_m: f64, voxel_m: f64) -> u32 {
+    if !climb_m.is_finite() || climb_m <= 0.0 || !voxel_m.is_finite() || voxel_m <= 0.0 {
+        return 0;
+    }
+    (climb_m / voxel_m).round().clamp(0.0, f64::from(u32::MAX)) as u32
+}
+
+/// The connected components of a set of support faces under the step rule: a component
+/// id per face, in the order of `faces`.
+///
+/// Two faces are joined when their columns are face-neighbours in `(x, z)` — `x` wraps
+/// over `width`, the strip's `z` ends are walls — and their layers differ by at most
+/// `climb`. `climb = 0` is the level rule this replaced. Nothing here filters the face
+/// set: headroom, wade depth and whatever else makes a face standable are the caller's,
+/// because they are the caller's body's.
+pub fn components(faces: &[(u32, u32, u32)], width: u32, climb: u32) -> Vec<usize> {
+    use std::collections::HashMap;
+    let index: HashMap<(u32, u32, u32), usize> =
+        faces.iter().enumerate().map(|(i, &f)| (f, i)).collect();
+    let mut union = Union::new(faces.len());
+    let climb = i64::from(climb);
+    for (i, &(x, y, z)) in faces.iter().enumerate() {
+        for (dx, dz) in [(1i64, 0i64), (0, 1)] {
+            let nx = (i64::from(x) + dx).rem_euclid(i64::from(width.max(1))) as u32;
+            let nz = i64::from(z) + dz;
+            if nz < 0 {
+                continue;
+            }
+            for dy in -climb..=climb {
+                let ny = i64::from(y) + dy;
+                if ny < 0 {
+                    continue;
+                }
+                if let Some(&j) = index.get(&(nx, ny as u32, nz as u32)) {
+                    union.join(i, j);
+                }
+            }
+        }
+    }
+    (0..faces.len()).map(|i| union.find(i)).collect()
+}
+
 /// Whether a closed route around the ring exists, stepping at most `step_m` in height
-/// between neighbouring support faces.
+/// between neighbouring support faces — the rise converted by [`climb_voxels`], the same
+/// conversion every other consumer of the step rule uses.
 ///
 /// Answered on the **double cover**: the ring is unrolled twice, side by side, with no
 /// wrap, and the question becomes whether some face in the first copy is connected to
@@ -25,7 +86,7 @@ pub fn around_the_ring(world: &World, step_m: f64) -> bool {
     let c = world.config().clone();
     let v = world.view();
     let (w, d) = (c.width as usize, c.depth as usize);
-    let rise = (step_m / c.voxel_m).floor().max(0.0) as i64;
+    let rise = i64::from(climb_voxels(step_m, c.voxel_m));
 
     // Support faces per column of the unrolled strip, ascending in y.
     let faces: Vec<Vec<u32>> = (0..w)

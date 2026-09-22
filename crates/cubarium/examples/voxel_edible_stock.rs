@@ -41,9 +41,9 @@ use cubarium::voxel::scene;
 use cubarium_voxel::{Command as WorldCommand, VoxelView};
 use cubarium_voxel_fauna::{
     ConeHit, Fauna, FaunaConfig, Founder, Manifest, Pose, Senses, SightMap, TICK_HZ,
-    band_crown_layers, crown_columns, crown_layer, eye_above_surface_m, eye_origin_m,
-    foliage_stands_in_layers, level_components, mouth_columns_from_face, mouth_crown_layers_at,
-    ray_direction_deg, standable_faces,
+    band_crown_layers, climb_voxels, crown_columns, crown_layer, eye_above_surface_m, eye_origin_m,
+    foliage_stands_in_layers, mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg,
+    standable_faces, walkable_components,
 };
 use cubarium_voxel_flora::{Flora, FloraConfig, Site, Species as Plant};
 use cubarium_voxel_sim::{Sim, SimConfig};
@@ -279,9 +279,15 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
 
     let today = Mouth::today();
     let decided = Mouth::decided();
-    let browser_core = sim.fauna().config().founder(Founder::Browser).core;
+    let browser_phys = *sim.fauna().config().founder(Founder::Browser);
+    let browser_core = browser_phys.core;
     let blind_manifest = Founder::Blind.manifest();
-    let blind_core = sim.fauna().config().founder(Founder::Blind).core;
+    let blind_phys = *sim.fauna().config().founder(Founder::Blind);
+    let blind_core = blind_phys.core;
+    // The route rule, one function, one climb per lineage
+    // (`design/handoffs/voxel-founder-step-2026-09-22.md`).
+    let browser_climb = climb_voxels(&browser_phys, c.voxel_m);
+    let blind_climb = climb_voxels(&blind_phys, c.voxel_m);
 
     // One set of legal standing faces, shared by both arms: a support face with wadeable
     // water and the browser's headroom over it. Keeping it the same in both arms is what
@@ -292,7 +298,7 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
         .enumerate()
         .map(|(i, f)| ((f.x, f.y, f.z), i))
         .collect();
-    let components = level_components(&faces, c.width);
+    let components = walkable_components(&faces, c.width, browser_climb);
 
     // The mouth columns of every legal face, per arm, and the index from a column back
     // to the faces that can put a mouth over it.
@@ -490,7 +496,7 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
         .enumerate()
         .map(|(i, f)| ((f.x, f.y, f.z), i))
         .collect();
-    let blind_components = level_components(&blind_faces, c.width);
+    let blind_components = walkable_components(&blind_faces, c.width, blind_climb);
     let shredder_components: HashSet<usize> = av
         .animals
         .iter()

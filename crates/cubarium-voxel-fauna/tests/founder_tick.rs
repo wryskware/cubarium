@@ -518,12 +518,14 @@ fn a_blocked_attempt_still_pays_the_motor_budget() {
     let mut world = flat_world();
     // A wall on column x = 3 at the body layer, two rows of it.
     for z in [2u32, 3] {
-        world.apply(WorldCommand::SetMaterial {
-            x: 3,
-            y: 3,
-            z,
-            material: Material::Soil,
-        });
+        for y in 3..=4 {
+            world.apply(WorldCommand::SetMaterial {
+                x: 3,
+                y,
+                z,
+                material: Material::Soil,
+            });
+        }
     }
     let mut flora = Flora::new(FloraConfig::default());
     let mut fauna = Fauna::new(FaunaConfig::default());

@@ -16,11 +16,19 @@ use cubarium_voxel_sim::{Sim, SimConfig};
 ///
 /// Every live reading the new helpers touch is upstream of these numbers: the cone feeds
 /// the trained controller, the controller's held actions move the pose, and the mouth
-/// decides the bite. The expected values were recorded by running this same measurement
-/// on the branch point (7dba001), before the extraction; they reproduced to the bit
-/// afterwards.
+/// decides the bite.
+///
+/// **The recorded trajectory is gone, 2026-09-22.** It was the evidence that package 0
+/// changed nothing, and it held to the bit. Package 1a
+/// (`design/handoffs/voxel-founder-step-2026-09-22.md`) changes the live path on
+/// purpose — a founder steps ledges, the contact receptor stops calling a steppable
+/// ledge a wall, and the seeder's walk reaches further — so there is no "before" left
+/// to defend and a re-recorded trajectory would be a pinned world, which this project
+/// does not keep. What the change did to these numbers is in
+/// `design/7_Research/voxel-census-2026-09-20.md`, "Step rule, 2026-09-22". What stays
+/// here is what the live path must always satisfy.
 #[test]
-fn two_hundred_ticks_of_the_live_path_read_what_they_read_before() {
+fn two_hundred_ticks_of_the_live_path_stand_eat_and_see() {
     let cfg = VoxelConfig::default();
     let mut world = scene::authored(cfg.world.clone());
     let mut flora = Flora::new(FloraConfig::default());
@@ -30,6 +38,14 @@ fn two_hundred_ticks_of_the_live_path_read_what_they_read_before() {
     let mut senses = Senses::new();
     senses.settle(&world.view(), &flora.view());
     let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
+    let seeded_layers: std::collections::HashSet<u32> = sim
+        .fauna()
+        .view()
+        .animals
+        .iter()
+        .filter(|a| a.founder.is_some())
+        .map(|a| a.site.y)
+        .collect();
     for _ in 0..200 {
         sim.step();
     }
@@ -44,37 +60,43 @@ fn two_hundred_ticks_of_the_live_path_read_what_they_read_before() {
     poses.sort_by_key(|p| p.0);
 
     assert_eq!(poses.len(), 16, "eight founders of each lineage");
-    assert_eq!(
-        poses.iter().map(|p| p.1).collect::<Vec<u32>>(),
-        vec![
-            12, 17, 22, 25, 28, 36, 39, 45, 13, 19, 20, 20, 20, 22, 33, 48
-        ],
-        "the standing layers a founder never leaves"
-    );
-    for (sum, want, what) in [
-        (
-            poses.iter().map(|p| p.2).sum::<f64>(),
-            211.03399667625976,
-            "pose x",
-        ),
-        (
-            poses.iter().map(|p| p.3).sum::<f64>(),
-            45.60842100665320,
-            "pose z",
-        ),
-        (
-            poses.iter().map(|p| p.4).sum::<f64>(),
-            60.24210876396594,
-            "heading",
-        ),
-        (
-            av.ledger.eaten_organic_in,
-            0.16375011862748,
-            "eaten organic",
-        ),
-    ] {
-        assert!((sum - want).abs() < 1e-12, "{what} drifted: {sum:.14}");
+    // Every founder still stands on a support face: the step rule moves `site.y` and
+    // `step::terrain` removes anything whose site is not one, so a body that stepped
+    // wrong would be gone rather than wrong.
+    let wv0 = sim.world().view();
+    for p in &poses {
+        assert!(
+            wv0.is_support(
+                i64::from((p.2 / wv0.config.voxel_m).floor() as i64),
+                p.1,
+                (p.3 / wv0.config.voxel_m).floor() as u32
+            ),
+            "founder #{} stands on air at layer {}",
+            p.0,
+            p.1
+        );
     }
+    // The step rule is live: on the shipped terraced habitat, some founder leaves the
+    // layer it was seeded on inside ten seconds.
+    assert!(
+        poses
+            .iter()
+            .map(|p| p.1)
+            .collect::<std::collections::HashSet<u32>>()
+            != seeded_layers,
+        "no founder changed its standing layer in 200 ticks"
+    );
+    for (sum, what) in [
+        (poses.iter().map(|p| p.2).sum::<f64>(), "pose x"),
+        (poses.iter().map(|p| p.3).sum::<f64>(), "pose z"),
+        (poses.iter().map(|p| p.4).sum::<f64>(), "heading"),
+    ] {
+        assert!(sum.is_finite() && sum > 0.0, "{what} is {sum}");
+    }
+    assert!(
+        av.ledger.eaten_organic_in > 0.0,
+        "the centres fed at all in 200 ticks"
+    );
 
     // The browser cone the policy is given, summed over every browser and sector: this
     // is the reading that goes through `ray_first_hit` and `cone_occupancy`.
@@ -93,7 +115,7 @@ fn two_hundred_ticks_of_the_live_path_read_what_they_read_before() {
         }
     }
     assert!(
-        (cone - 36.85297619047619).abs() < 1e-12,
-        "the browsers' cone reading drifted: {cone:.14}"
+        cone > 0.0 && cone.is_finite(),
+        "the browsers see something: {cone:.14}"
     );
 }

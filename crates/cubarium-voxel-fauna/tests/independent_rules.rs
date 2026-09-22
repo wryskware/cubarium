@@ -262,9 +262,10 @@ fn a_refused_wall_step_pays_the_requested_equivalent_displacement() {
     let outcome = |blocked: bool| {
         let mut world = flat(16, 3);
         if blocked {
-            // One voxel of rock at the body layer two columns ahead: both a disc
-            // obstruction and a column with no support face.
-            wall(&mut world, 5, GROUND_Y + 1, GROUND_Y + 1);
+            // Two voxels of rock at the body layer two columns ahead — over the
+            // founder's climb, so both a disc obstruction and a column with no support
+            // face it could step to.
+            wall(&mut world, 5, GROUND_Y + 1, GROUND_Y + 2);
         }
         let mut flora = Flora::new(FloraConfig::default());
         let (mut fauna, id) = one_founder(&world, Founder::Blind, 4, 1, EAST);

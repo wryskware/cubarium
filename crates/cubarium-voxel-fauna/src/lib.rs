@@ -75,7 +75,8 @@ use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraView, Site, Taken};
 use serde::{Deserialize, Serialize};
 
 pub use body::{
-    FounderPhysiology, effective_config, has_headroom, headroom_voxels, mouth_reach_up_voxels,
+    FounderPhysiology, climb_voxels, effective_config, has_headroom, headroom_voxels,
+    mouth_reach_up_voxels,
 };
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
@@ -85,9 +86,9 @@ pub use cubarium_voxel::{DT, TICK_HZ};
 pub use cubarium_voxel_flora::Reach;
 pub use encounter::{
     HEADING_SAMPLES, SightMap, band_crown_layers, crown_columns, crown_layer, crown_slab_m,
-    eye_above_surface_m, eye_origin_m, foliage_stands_in_layers, level_components,
-    mouth_columns_at, mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg,
-    standable_faces, surface_m,
+    eye_above_surface_m, eye_origin_m, foliage_stands_in_layers, mouth_columns_at,
+    mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg, standable_faces, surface_m,
+    walkable_components,
 };
 pub use manifest::{
     ACTION_DEADBAND, Action, BROWSER_RAY_PITCH_OFFSETS_DEG, BROWSER_RAY_YAW_OFFSETS_DEG,

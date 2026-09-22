@@ -665,26 +665,34 @@ fn founder_act(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &mut Fl
     let (motor_paid, motor_body) = respire(fauna, i, cost, Respiration::Motor);
 
     // Paid heading motion on the continuous pose: turn, then a bounded sub-step sweep.
-    let motion = {
+    // The sweep may put the body's feet on a support face within its lineage's climb of
+    // the one it started on, so the standing layer goes in and comes back out
+    // (`design/handoffs/voxel-founder-step-2026-09-22.md`).
+    let climb = body::climb_voxels(&phys, view.config.voxel_m);
+    let (motion, standing_y) = {
         let a = &mut fauna.animals[i];
-        body::resolve_motion(
+        let mut standing_y = a.site.y;
+        let motion = body::resolve_motion(
             view,
             &mut a.pose,
-            a.site.y,
+            &mut standing_y,
             &manifest,
             sc.wade_depth_m,
+            climb,
             held,
-        )
+        );
+        (motion, standing_y)
     };
     // The pose is authoritative for a founder: the support site follows the centre
-    // column at the standing layer. Movement is constrained so this always stays a
-    // support face; a pose that cannot be resolved at all leaves the site as it was.
+    // column, and its layer follows whatever ledge the sweep stepped onto. Movement is
+    // constrained so this always stays a support face; a pose that cannot be resolved at
+    // all leaves the site as it was.
     {
         let a = &mut fauna.animals[i];
         if let Some((cx, cz)) = a.pose.column(view.config.voxel_m, view.config.depth) {
             a.site = Site {
                 x: cx.rem_euclid(i64::from(view.config.width)) as u32,
-                y: a.site.y,
+                y: standing_y,
                 z: cz,
             };
         }

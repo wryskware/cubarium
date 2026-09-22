@@ -18,12 +18,12 @@
 //!   tick's `faces_in_column` both use: a support face, wadeable water, and
 //!   [`crate::headroom_voxels`] voxels of void over it.
 //!
-//! A founder body never changes its standing layer — `step::founder_act` keeps
-//! `a.site.y` and `body::advance_candidate` refuses any centre column that is not a
-//! support face at that same layer — so the walkable neighbourhood of a founder is the
-//! *level* one, which is what `browser_faces` says in as many words.
+//! A founder body changes its standing layer by at most its lineage's climb
+//! ([`crate::climb_voxels`]; `design/handoffs/voxel-founder-step-2026-09-22.md`), so the
+//! walkable neighbourhood of a founder is face-neighbouring support faces within that
+//! many layers — which is what [`walkable_components`] computes, from the one shared
+//! rule in `cubarium_voxel::walk`, for this crate, the seeder and the observer alike.
 
-use std::collections::HashMap;
 use std::ops::RangeInclusive;
 
 use cubarium_voxel::VoxelView;
@@ -242,47 +242,19 @@ impl SightMap {
     }
 }
 
-/// The connected components of a set of standing faces under the **founder** motion rule.
+/// The connected components of a set of standing faces under the **founder step rule**.
 ///
-/// A founder's pose keeps its centre column on its own standing layer
-/// (`step::founder_act` never writes `site.y`; `body::advance_candidate` refuses a centre
-/// column that is not a support face at that layer), so its neighbourhood is the level
-/// one: four-adjacent columns at the same height, wrapping `x`, with front and back as
-/// walls. That is the rule `crates/cubarium/src/voxel/habitat.rs`'s `browser_faces` states
-/// and uses, and the adjacency `crates/cubarium-voxel/src/walk.rs` walks the ring with.
+/// One function, one rule: `cubarium_voxel::walk::components`, with `climb` the
+/// lineage's climb height in whole voxels ([`crate::climb_voxels`]). Face-neighbouring
+/// columns join when their standing layers differ by at most that, `x` wrapping and the
+/// strip's `z` ends walls. The observer (`voxel_edible_stock`), the seeder's
+/// feeding-face adjacency (`crates/cubarium/src/voxel/habitat.rs`, `browser_faces`) and
+/// the generator's ring gate all go through it.
 ///
 /// Returns a component id per face, in the order of `faces`.
-pub fn level_components(faces: &[Site], width: u32) -> Vec<usize> {
-    let index: HashMap<(u32, u32, u32), usize> = faces
-        .iter()
-        .enumerate()
-        .map(|(i, f)| ((f.x, f.y, f.z), i))
-        .collect();
-    let mut parent: Vec<usize> = (0..faces.len()).collect();
-    fn find(parent: &mut [usize], mut i: usize) -> usize {
-        while parent[i] != i {
-            parent[i] = parent[parent[i]];
-            i = parent[i];
-        }
-        i
-    }
-    for (i, f) in faces.iter().enumerate() {
-        for (dx, dz) in [(1i64, 0i64), (0, 1)] {
-            let nx = (i64::from(f.x) + dx).rem_euclid(i64::from(width)) as u32;
-            let nz = i64::from(f.z) + dz;
-            if nz < 0 {
-                continue;
-            }
-            let Some(&j) = index.get(&(nx, f.y, nz as u32)) else {
-                continue;
-            };
-            let (a, b) = (find(&mut parent, i), find(&mut parent, j));
-            if a != b {
-                parent[a] = b;
-            }
-        }
-    }
-    (0..faces.len()).map(|i| find(&mut parent, i)).collect()
+pub fn walkable_components(faces: &[Site], width: u32, climb: u32) -> Vec<usize> {
+    let cells: Vec<(u32, u32, u32)> = faces.iter().map(|f| (f.x, f.y, f.z)).collect();
+    cubarium_voxel::walk::components(&cells, width, climb)
 }
 
 #[cfg(test)]
@@ -400,19 +372,21 @@ mod tests {
     }
 
     /// Two faces a column apart on one terrace are one component; a face a layer up is
-    /// its own, because a founder never changes its standing layer.
+    /// its own when the lineage cannot climb, and joins when it can.
     #[test]
-    fn a_level_step_joins_and_a_rise_does_not() {
+    fn a_level_step_joins_and_a_rise_needs_the_climb() {
         let faces = [
             Site { x: 0, y: 3, z: 1 },
             Site { x: 1, y: 3, z: 1 },
             Site { x: 2, y: 4, z: 1 },
             Site { x: 7, y: 3, z: 1 },
         ];
-        let comp = level_components(&faces, 8);
+        let comp = walkable_components(&faces, 8, 0);
         assert_eq!(comp[0], comp[1], "four-adjacent at one height");
-        assert_ne!(comp[1], comp[2], "a rise is not a step for a founder");
+        assert_ne!(comp[1], comp[2], "a rise is not a step without a climb");
         assert_eq!(comp[0], comp[3], "x wraps");
+        let comp = walkable_components(&faces, 8, 1);
+        assert_eq!(comp[1], comp[2], "one voxel of climb makes the rise a step");
     }
 
     /// Two terraces a voxel apart are one walkable component under the step rule and
