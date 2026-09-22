@@ -962,6 +962,129 @@ mod tests {
         );
     }
 
+    /// **The cue is detritus** (`design/handoffs/voxel-diets-2026-09-22.md`,
+    /// deliverable 1, written before the rule): a carrion pool on a face with no litter
+    /// anywhere raises the field over it, because carrion is now one of the shredder's
+    /// three foods and the cue is what it steers by.
+    #[test]
+    fn a_carrion_pool_with_no_litter_raises_the_cue() {
+        let world = flat_world();
+        let mut flora = Flora::new(FloraConfig::default());
+        assert!(flora.deposit(
+            site(2, 2),
+            Deposit {
+                kind: DepositKind::Carrion,
+                organic: 0.2,
+                mineral: 0.2 * 0.05,
+                energy: 0.2 * 2.0,
+            },
+        ));
+        assert_eq!(
+            flora.view().ground_at(site(2, 2)).expect("a pool").litter,
+            0.0,
+            "the fixture holds no litter at all"
+        );
+        let mut senses = Senses::new();
+        let (v, fv) = (world.view(), flora.view());
+        let (updates, converged) = senses.settle(&v, &fv);
+        assert!(converged, "the field converged after {updates} updates");
+        let at_source = senses
+            .sample_cue(&v, &pose_at(2.0 * 0.25 + 0.125, 2.0 * 0.25 + 0.125), 2)
+            .expect("supported");
+        assert!(at_source > 0.0, "a corpse emits a cue: {at_source}");
+    }
+
+    /// **A litter-only world reads what it always read.** The source term is the sum of
+    /// the shredder's three foods at the face, so the field is a function of that sum
+    /// alone: the same stock as litter, as carrion, or as glowcap cap tissue settles to
+    /// the same value, and with only litter present the sum *is* the litter and the
+    /// field *is* the litter field. Dead wood is not one of its foods and contributes
+    /// nothing, which is what pins the source set rather than "any ground pool".
+    ///
+    /// Written this way deliberately: a pinned numeric cue would be a golden value of
+    /// the transport constants, which this package does not touch.
+    #[test]
+    fn the_three_foods_are_one_source_and_dead_wood_is_not_one() {
+        use cubarium_voxel_flora::{Command as FloraCommand, Species as Plant};
+
+        let world = flat_world();
+        let probe = pose_at(2.0 * 0.25 + 0.125, 2.0 * 0.25 + 0.125);
+        let settled = |flora: &Flora| -> f64 {
+            let mut senses = Senses::new();
+            let (v, fv) = (world.view(), flora.view());
+            let (updates, converged) = senses.settle(&v, &fv);
+            assert!(converged, "the field converged after {updates} updates");
+            senses.sample_cue(&v, &probe, 2).expect("supported")
+        };
+        let stock = 0.2;
+        let deposited = |kind: DepositKind| -> Flora {
+            let mut flora = Flora::new(FloraConfig::default());
+            assert!(flora.deposit(
+                site(2, 2),
+                Deposit {
+                    kind,
+                    organic: stock,
+                    mineral: stock * 0.05,
+                    energy: stock * 2.0,
+                },
+            ));
+            flora
+        };
+
+        let litter_only = settled(&deposited(DepositKind::Litter));
+        assert!(litter_only > 0.0, "the litter fixture emits");
+        assert_eq!(
+            settled(&deposited(DepositKind::Carrion)),
+            litter_only,
+            "the same stock as carrion is the same source"
+        );
+
+        // The same stock as a glowcap cap: a saprotroph stand's foliage on the face.
+        let mut fungal = Flora::new(FloraConfig::default());
+        let wood_max = fungal.config().species(Plant::Glowcap).wood_max;
+        assert!(fungal.apply(
+            &world,
+            FloraCommand::Seed {
+                x: 2,
+                z: 2,
+                species: Plant::Glowcap,
+                wood: wood_max,
+            },
+        ));
+        let cap = fungal
+            .view()
+            .stand_at(site(2, 2))
+            .expect("the seeded glowcap")
+            .foliage;
+        assert!(cap > 0.0, "the cap holds tissue");
+        let mut matched = Flora::new(FloraConfig::default());
+        assert!(matched.deposit(
+            site(2, 2),
+            Deposit {
+                kind: DepositKind::Litter,
+                organic: cap,
+                mineral: cap * 0.05,
+                energy: cap * 2.0,
+            },
+        ));
+        assert_eq!(
+            settled(&fungal),
+            settled(&matched),
+            "a cap of {cap} emits what {cap} of litter emits"
+        );
+
+        // Dead wood is a glowcap's substrate, not a shredder's food: no cue.
+        let wood = deposited(DepositKind::DeadWood);
+        let mut senses = Senses::new();
+        let (v, fv) = (world.view(), wood.view());
+        senses.settle(&v, &fv);
+        assert_eq!(
+            senses.sample_cue(&v, &probe, 2),
+            None,
+            "a log raises no detritus cue"
+        );
+    }
+
     /// Roof and floor never share a node: a litter source on a roof does not reach the
     /// floor beneath it, and each layer's adjacency contains only its own height.
     #[test]
