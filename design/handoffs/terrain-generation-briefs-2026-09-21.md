@@ -670,3 +670,19 @@ If the first shower does not arrive within the study's 6000 ticks, report it;
 do not move the numbers again.
 
 Return (≤15 lines): commit, settle per preset, the three study numbers.
+
+## Package W2 — integrated 2026-09-21
+
+Landed at b057da7: trigger 0.12, share aloft 0.08, via `Water::DEFAULT`.
+Settle: `default` converges at 523 ticks; `small` and `wide` drift small and
+negative (draining into soil) and miss the 100-tick window by tick 600. Study
+on `default` seed 1: **no shower in 6000 ticks**; the sky rises 4.8e-5 m³ per
+tick against an 11.52 m³ trigger, so the first rain is about 74 000 ticks
+(62 simulated minutes) out in the bare voxel crate — an upper bound, since
+the live world's transpiration feeds the same store. Not a dry lock. The
+study now settles with the outlet shut and opens it afterwards, the host's
+order. Weather cadence is Wrysk's call: roughly hourly as it stands, or a
+lower trigger for more frequent showers (0.10 is the handoff's floor for
+intermittent weather).
+
+Branch state: 24 commits over `main` at 59a0dd6; fast-forward is clean.
