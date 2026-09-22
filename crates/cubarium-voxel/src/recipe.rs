@@ -452,6 +452,17 @@ pub struct Water {
     /// no schedule: showers fire whenever the store crosses the trigger.
     pub shower_interval_min_s: f64,
     pub shower_interval_max_s: f64,
+
+    /// How deep the ring's **lake** — the lowest open-sky basin — stands before it
+    /// overflows into the outlet, metres above its floor. The outlet sits at this level on
+    /// the lake's rim (not on its floor), so the lake keeps its level and only surplus
+    /// leaves; and no hollow is carved with its floor below it, so nothing hidden can act
+    /// as a sump. Zero puts the outlet on the floor, the pre-lake behaviour.
+    pub lake_depth_m: f64,
+    /// Smallest open-water surface the camera must be able to read, square metres, for a
+    /// generated world to be accepted. The host draws another seed below it. Zero accepts
+    /// any world.
+    pub min_lake_m2: f64,
 }
 
 impl Default for Water {
@@ -476,6 +487,8 @@ impl Water {
         shower_volume_m3: 5.0,
         shower_interval_min_s: 0.0,
         shower_interval_max_s: 0.0,
+        lake_depth_m: 0.0,
+        min_lake_m2: 0.0,
     };
 
     /// The staged presets' inventory: half a metre of water over the footprint, six per
@@ -516,6 +529,8 @@ impl Water {
         shower_volume_m3: 0.4,
         shower_interval_min_s: 300.0,
         shower_interval_max_s: 900.0,
+        lake_depth_m: 0.5,
+        min_lake_m2: 6.0,
     };
 
     /// `small`'s ring is 60 m² of footprint against `default`'s 192, and both the store's
@@ -547,6 +562,8 @@ impl Water {
             ("water.shower_volume_m3", self.shower_volume_m3),
             ("water.shower_interval_min_s", self.shower_interval_min_s),
             ("water.shower_interval_max_s", self.shower_interval_max_s),
+            ("water.lake_depth_m", self.lake_depth_m),
+            ("water.min_lake_m2", self.min_lake_m2),
         ] {
             anyhow::ensure!(
                 v.is_finite() && v >= 0.0,
