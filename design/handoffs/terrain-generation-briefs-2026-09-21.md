@@ -1331,3 +1331,40 @@ ring walk last; `wide` seed 2 is caught. Small seeds 4–6 genuinely drain
 to a third of their area (a flat fill over a stepped bed) and are now
 rejected, not shipped — a flatter lake bed is the generator lever if the
 rejection rate ever matters. Fable ran the two crates: 809 passed.
+
+## Wrysk on the panel's saved worlds — 2026-09-21
+
+"what if i want to reseed the world to see other variants? also i really
+dont give a shit about backing up any of the worlds on the tachyon."
+
+## Package P — refused worlds are discarded; a reseed script (habitat worker)
+
+Owner: habitat worker (Opus, medium). Files: host `voxel/mod.rs` (the
+snapshot candidate loop at the `bail!` "snapshot file(s) are present …
+and none of them loaded"), a new `scripts/tachyon-reseed.sh`. Do NOT edit
+`docs/tachyon.md` (dirty in Wrysk's working tree; Fable will note the
+wording change for him) or the deploy/install scripts.
+
+1. When every candidate in a state directory was refused **for a schema
+   mismatch** (the `snapshot::load` error that names "schema"), delete
+   those files and found a fresh world, with one loud line:
+   `cubarium voxel: discarded 5 snapshot(s) of schema 13 in …; founding a
+   fresh world (schema 15)`. A candidate refused for any other reason
+   (unreadable, truncated, a failed `validate_loaded`) keeps today's
+   refusal: that is the damaged-world case the Tachyon docs guard.
+   Distinguish by error type, not by message text, if the crate lets you;
+   otherwise add a typed error to `snapshot.rs` and match on it.
+2. `scripts/tachyon-reseed.sh`: stop the service, delete
+   `/var/lib/cubarium/state/world-*.voxel` (and nothing else), start it,
+   wait 20 s, print the last 30 journal lines; `TACHYON` env like the
+   deploy script; `--seed N` writes `--seed N` into the unit's
+   `CUBARIUM_EXTRA_ARGS` drop-in and restarts (look at how the unit reads
+   it before touching it; if it is not that simple, ship the script
+   without `--seed` and say so).
+
+Tests first: a state dir holding one schema-mismatched snapshot founds a
+fresh world and the file is gone afterwards; a truncated file still
+refuses; a dir with one good and one mismatched snapshot resumes the good
+one and leaves both files. Run `-p cubarium`.
+
+Return (≤15 lines): commit, the log line as printed, what `--seed` does.
