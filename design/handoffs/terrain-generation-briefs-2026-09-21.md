@@ -1368,3 +1368,20 @@ refuses; a dir with one good and one mismatched snapshot resumes the good
 one and leaves both files. Run `-p cubarium`.
 
 Return (≤15 lines): commit, the log line as printed, what `--seed` does.
+
+## Package P — integrated 2026-09-21
+
+Landed e51a78d (runner path, `--require-resume` still refuses) and 00efb11
+(the panel's voxel harness: `snapshot::decode` returns a typed
+`SchemaMismatch`; when every candidate failed that way the files are
+deleted and a fresh world founded with one loud line; truncated or invalid
+files still refuse). `scripts/tachyon-reseed.sh`: stop, delete
+`world-*.{cubw,voxel}`, start, tail; `--seed N` re-emits the unit's
+`CUBARIUM_EXTRA_ARGS` plus the seed in a drop-in (Environment= replaces,
+it does not append), `--no-seed` removes it; the ssh path is unexercised
+from the worktree. The first pass fixed the runner only because the
+repo's `config/tachyon/cubarium.service` says `cubarium run`; the board
+runs `cubarium voxel` from Wrysk's uncommitted edit of that file, which
+the deploy script installs from the working tree. Fable ran the two
+crates: 811 passed. `docs/tachyon.md` still describes the old refusal;
+Wrysk's edit.
