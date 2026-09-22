@@ -1726,6 +1726,14 @@ pub fn reentry(w: &mut World) {
     }
 }
 
+/// Fraction of a brim-full sill cell a weir passes in one tick, falling off as the head
+/// over the crest to the power of one and a half.
+///
+/// A full cell empties in about twenty ticks; a cell a tenth full passes a sixth of one
+/// per cent of itself, a trickle rather than a siphon. Scale-free on purpose: it is a share
+/// of the cell, so it means the same on a 0.125 m ring and a 0.25 m one.
+const OUTLET_WEIR: f64 = 0.05;
+
 /// Whether `CUBARIUM_OUTLET_TRACE` asked the outlet to say what it takes and what stands
 /// around it. Read once: this sits in the tick.
 ///
@@ -1772,7 +1780,21 @@ pub fn outlet(w: &mut World) {
                 },
             );
         }
-        let lost = take_free(w, i, want);
+        // **A weir, not a straw.** `outlet_m3_per_s` is a hard 0.05, which on `small` is
+        // 1.28 voxels a tick: once any water reaches the sill it empties its own cell and
+        // whatever the exchange levels back into it, tick after tick, and the lake goes
+        // with it. Measured on the panel's seed: 0.687 m³ exported against 0.012 m³ of
+        // stream, and with the stream off — no disturbance to reach the sill at all —
+        // nothing left and the lake held 99 % (T6).
+        //
+        // So the sill passes what a weir passes: a discharge that falls away with the
+        // head over it, `free^1.5`, which is a trickle for a film and a real flow for a
+        // brim-full cell. `outlet_m3_per_s` stays as the ceiling, so nothing is ever
+        // faster than it was. A sill the water does not reach still exports nothing,
+        // which is the whole contract.
+        let head = w.free[i].clamp(0.0, 1.0);
+        let weir = OUTLET_WEIR * head * head.sqrt() * w.config.voxel_volume();
+        let lost = take_free(w, i, want.min(weir));
         w.ledger.outlet_out += lost;
         release(w, lost);
     });
