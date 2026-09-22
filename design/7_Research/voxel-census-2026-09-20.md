@@ -1102,3 +1102,119 @@ residuals are the example's own floating-point floor.
   drift, and conservation and the materials are still mirrored at 1e-12. The
   order dependence is the damp-set walk `drain`'s own doc names, not something
   1c introduced — but nothing here measured how far it reaches.
+
+## Diets, 2026-09-22
+
+Package 3 (`design/handoffs/voxel-diets-2026-09-22.md`; decisions §3) on top of
+layers: the browser eats every **vascular** species' foliage in its band and
+nothing fungal, the shredder is a detritivore with three foods — litter,
+glowcap cap tissue and carrion — and the cue field's source is the sum of those
+three at a face. Fauna snapshot schema 11 → 12; fresh worlds. `before` is main
+at 4661f97, built from `git archive` into a scratch tree and run with the same
+binaries' arguments; it reproduces the layers note digit for digit on
+`default` (starved 34 = 23 shredder + 11 browser, drowned 2, umbrellafrond
+7,417 bites, bloomcrown 0, 2 browsers and 13 shredders alive at 60), which is
+the check that the two arms differ only by this package.
+
+### `voxel_founder_autopsy 60`, bites by food class
+
+| | small before | small after | default before | default after |
+| --- | --- | --- | --- | --- |
+| shredder bites | 10,978 | **23,629** | 61,254 | **38,104** |
+| — litter | 10,978 | 22,052 | 61,254 | 33,553 |
+| — glowcap cap tissue | – | 1,450 | – | 4,191 |
+| — carrion | – | 127 | – | 360 |
+| browser bites (all vascular foliage) | 12,280 | 4,155 | 17,526 | 10,696 |
+| browser bites on glowcap | 3,905 | **0** | 2,407 | **0** |
+| shredders alive at 60 | 3 | 6 | 13 | 4 |
+| browsers alive at 60 | 0 | 0 | 2 | 1 |
+| shredder starved / drowned | 13 / 2 | 16 / 0 | 23 / 2 | 24 / 0 |
+| browser starved / drowned | 11 / 4 | 7 / 1 | 11 / 0 | 7 / 1 |
+| browser extinct, minute | 53 | 28 | – | – |
+
+`bites_by_plant[glowcap]` equals `bites_by_food[cap_tissue]` to the bite in
+both after arms (1,450 and 4,191) and `bites_by_food[foliage]` equals the
+browser's whole bite count (4,155 and 10,696), so every glowcap bite is a
+shredder's and every browser bite is vascular: the acceptance rule is the one
+that ran. Ledger residuals over 72,000 ticks: fauna ≤ 7.3e-11, flora ≤ 3.4e-10
+absolute on both arms.
+
+**Carrion finally has a consumer, and it is a trickle**: 127 and 360 bites,
+0.013 and 0.039 organic — under 2 % of what the shredder ate. A corpse
+decomposes at `carrion_decomposition` whether or not anyone finds it, so the
+shredders are eating the few corpses that fall where they already are.
+
+**On `small` the glowcap was the browser's nursery.** Before, the browser ate
+the whole 0.624 of cap stock in the first ten minutes (3,880 bites), lived on
+it, found the bloomcrowns at minute 10 and took 3,380 bites off them before
+dying at 53. After, it has no cap, never reaches a bloomcrown at all
+(**0** bloomcrown bites) and starves at 28. That is decisions §3 working as
+written — fungal tissue is not leaf — and it is the coupled-assessment
+package's problem, not a number to tune here.
+
+### `voxel_census 6 preset=default`, shredders alive
+
+| sim hour | 1 | 2 | 3 | 4 | 5 | 6 |
+| --- | --- | --- | --- | --- | --- | --- |
+| shredders, before | 13 | 10 | 10 | 8 | 11 | **10** |
+| shredders, after | 4 | 2 | 1 | 1 | 0 | **0** |
+| standing litter, before | 4.61 | 3.50 | 3.34 | 4.11 | 6.15 | 11.33 |
+| standing litter, after | 6.25 | 4.90 | 6.68 | 8.07 | 11.28 | **15.20** |
+
+**The shredder lineage goes extinct on `default` at about minute 300, with more
+litter on the ground than the surviving arm has.** It is a foraging failure and
+not a food shortage, and it is the largest thing this package did.
+
+### Which half of the change costs it
+
+Two same-build control arms, `voxel_founder_autopsy 60`, each differing from
+the `after` build by one line:
+
+| default, 60 min | before | **after** | A: taste left litter-only | B: cap not a cue source |
+| --- | --- | --- | --- | --- |
+| shredders alive at 60 | 13 | **4** | 3 | **17** |
+| browsers alive at 60 | 2 | 1 | 2 | 2 |
+| shredder bites | 61,254 | 38,104 | 32,913 | 71,226 |
+| — litter | 61,254 | 33,553 | 27,267 | 68,836 |
+| — cap tissue | – | 4,191 | 5,146 | 1,826 |
+| — carrion | – | 360 | 500 | 564 |
+| shredder assimilated | 1.144 | 0.729 | 0.684 | 1.299 |
+
+Arm **A** leaves the shredder's **taste** on litter alone — the one channel
+change the brief did not name. It is *worse*, not better (3 alive against 4 on
+`default`, 0 against 6 on `small`), so the taste reading the richest food at
+the mouth is carrying its weight and is kept.
+
+Arm **B** keeps cap tissue as a **food** and takes it out of the **cue's
+source**, one line in `detritus_at`. It is the whole regression and then some:
+17 shredders alive against main's 13, 68,836 litter bites against main's
+61,254, and the cap and carrion edges still used (1,826 and 564 bites). So the
+diet edges are not what costs `default` its shredders — the cue's source set
+is.
+
+Why: emission is `min(stock / M_EMIT, 1)` with `M_EMIT` 0.05. A `default`
+litter tile holds 0.2 and a glowcap cap 0.106, so **every one of the nine
+glowcap stands became a fully saturated emitter**, next to eight litter tiles.
+The source set nearly tripled in count while the food behind most of it is a
+small, slowly-regrowing cap a shredder empties in a bite or two, and a policy
+that climbs the cue is led to it. `M_EMIT`, the transport and the source set
+are all things the brief holds fixed, and package 5's retrain is where a cue
+of this shape is learned. **Arm B is not applied**: which of the three — ship
+as decided and retrain, weight a source by its class, or drop cap tissue from
+the cue and keep it in the diet — is a decision for Wrysk, and it is one line
+either way.
+
+### The observer, at t = 0
+
+The browser's reach is now a permission test as well as a geometric one, so
+glowcap counts in the standing foliage and never in the reach; it is reported
+as the shredder's food in the detritus block, which already existed.
+
+| t = 0, fraction of foliage | small | default | wide |
+| --- | --- | --- | --- |
+| reachable, before → after | 0.5907 → 0.4573 | 0.5611 → 0.5137 | 0.5946 → 0.5432 |
+| route-connected, before → after | 0.5907 → 0.4573 | 0.2234 → 0.1985 | 0.3883 → 0.3369 |
+
+Every point of the fall is glowcap and nothing else (`default`: the glowcap
+row's reach 0.958 → 0.000 against an unchanged 0.958 of standing foliage). The
+`visible` columns do not move: sight has no diet.
