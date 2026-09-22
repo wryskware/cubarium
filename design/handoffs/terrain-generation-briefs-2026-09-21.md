@@ -813,3 +813,221 @@ documents: five schema-4 worlds in `/var/lib/cubarium/state` are refused
 ("schema 4 is not 12") and a state directory with refused snapshots founds
 no new world by design. Moving them aside is a remote write the agent
 sandbox refused; Wrysk clears the directory and restarts the service.
+
+## Wrysk on the deployed panel — 2026-09-21 (side quest, before slice 4)
+
+"its been raining since it was deployed … i would then expect the ground to
+become saturated and water to start pooling in lower areas … the terrain it
+generated has no water feature. i think thats essentially a must at this
+point. reject any generated terrain seeds that dont have a pond or something
+water related … theres clearly a low laying area that should be filling with
+water."
+
+Fable's diagnosis on the panel's own snapshot (`small`, random seed
+9482528745678189003, pulled to the scratchpad and rendered through the
+Tachyon config):
+
+1. **The rain is a drawing bug.** `VoxelView::is_raining` is
+   `rain_m_per_s > 0 || shower_left > 0`; under the closed cycle the config's
+   rain rate is the shower rate and always positive, so the presenter and the
+   GPU sink draw streaks every tick. Actual rain fell for one minute in ten.
+2. **The visible low area is the outlet.** `generate::outlet_and_spring`
+   puts the outlet in the void cell over the lowest ground: (65, 11, 0), the
+   floor of exactly the 285-cell open-sky basin Wrysk sees (x 65–92, floor
+   y 11, spill y 12). Hydrate gave it its catchment share; the outlet exported
+   it at 0.05 m³/s within seconds, into the sky.
+3. **All 4.76 m³ of pooled water is in sumps.** The three "rimless" basins
+   (floor y 8, spill = ceiling) are gallery floors carved **below** the
+   lowest ground (y 10–11), connected upward to the sky through their mouths.
+   `hydrate::basins` correctly calls them the ring's lowest basins and they
+   take everything; 2905 of 2906 free cells are roofed. The cyan blocks at the
+   frame's bottom corners are their sections at the cut.
+4. **The aquifer takes 21 of 30 m³.** Head 1.0 m on a 60 m² footprint at
+   porosity 0.35. Left for pore and pools: 6.6 m³.
+5. The viability probe's 180 s window is shorter than the 300 s minimum
+   interval, so it now reports "0 shower(s) TOO FEW" on every world.
+
+Fable's decisions (routine design calls; visible effect stated to Wrysk):
+
+- **D1** Closed cycle: `is_raining` is "a shower is falling".
+- **D2** The ring has a **lake**: its lowest open-sky basin, filled at
+  creation to `Water::lake_depth_m` above its floor (or to its rim if that
+  is lower). The outlet moves from the lake's floor to a void cell **at the
+  lake's level on its rim**, so the lake holds its level and only surplus
+  leaves as the return flow. `lake_depth_m = 0` is the old floor outlet.
+- **D3** No sumps: no hollow (undercut or gallery) is carved with a floor
+  below the lake level; a gallery that would be is raised or dropped.
+- **D4** Hydrate order becomes atmosphere → **lake to its level** → pore to
+  field capacity → other basins by catchment → aquifer takes the remainder
+  (head truncated and reported). The water table is raised to at least the
+  lake floor if the inventory can pay, so the lake does not soak away.
+- **D5** Seed gate in the host: a generated world is accepted only if its
+  camera-readable open-water surface is at least `Water::min_lake_m2`;
+  otherwise the next random seed is drawn, up to 24 tries, each rejection
+  one log line. An explicit `--seed` is honoured with a warning.
+- **D6** With a schedule on, the probe judges the store against the floor,
+  not a shower count its window cannot contain.
+
+Fields `Water::lake_depth_m` (DEFAULT 0.5) and `Water::min_lake_m2`
+(DEFAULT 6.0) were added by Fable with this commit so both packages compile
+against them; the numbers are the habitat package's to set per preset.
+
+## Package L — lake datum and no sumps (generator worker)
+
+Owner: generator worker (Opus, high). Files: `generate.rs`
+(`outlet_and_spring`, `staged_terrain`/`prepare` call sites), `hollows.rs`,
+`erosion.rs` only if `flood` needs a `pub(crate)` door. Nothing in
+`hydrate.rs`, `world.rs`, `recipe.rs` numbers or the host — package V owns
+those and runs in parallel.
+
+Deliverable:
+
+1. `generate::lake_level(field_or_surface, r) -> LakeDatum { floor_y,
+   level_y, rim: (x, z) }`: the lowest ground column of the surface is the
+   lake floor; `level_y` is `floor_y + round(lake_depth_m / voxel_m)`
+   capped at the spill of the basin holding that floor (a Priority-Flood
+   over the surface heightfield with the ring wrapping in `x`; the front
+   and back walls do not drain); `rim` is a column whose surface is
+   exactly `level_y − 1`… or the nearest such column to the floor, on the
+   edge of the flooded set. With `lake_depth_m = 0` the datum is the old
+   outlet: floor column, `level_y = floor_y + 1`.
+2. `outlet_and_spring` places the outlet at `(rim.x, level_y, rim.z)` for
+   staged recipes; `Ridge` keeps the floor outlet byte for byte (the seed
+   1/2/77 ridge hashes must not move).
+3. `hollows::carve` receives the datum and never leaves a hollow cell with
+   `y < level_y`: an undercut is not notched there; a gallery whose floor
+   would sit below is raised to `level_y` if the strata allow, else
+   dropped. `hollows::find` after carve reports zero floors below the
+   datum.
+
+Tests first, each under a second:
+
+- `lake_level_follows_the_recipe_depth`: an authored 8×8×2 surface with a
+  one-column pit; `lake_depth_m` 0.5 at 0.25 m gives `level_y = floor + 2`,
+  the rim column is adjacent to the pit at surface `floor + 1`; depth 0
+  reproduces the old outlet cell exactly.
+- `lake_level_stops_at_the_rim`: the same pit with a rim one voxel high
+  and lower ground beyond it; `level_y = floor + 1` however deep the recipe
+  asks.
+- `ridge_outlet_does_not_move`: the `Ridge` world's `outlet_cell()` at
+  seeds 1 and 2 equals the pre-change value (record it in the test from the
+  current build before editing).
+- `no_hollow_below_the_lake`: the three staged presets, seed 1: every
+  `Hollow` floor `y ≥ level_y`; and at least as many hollows survive on
+  `default` as before minus those the datum forbids (state both counts in
+  the commit message).
+- `staged_outlet_sits_on_the_rim`: `default` seed 1: the outlet cell is
+  void, at `level_y`, and the surface under it is `level_y − 1`.
+
+Visual: `default` and `small` seed 1 at 8 px/voxel into the scratch
+directory under `terrain-lake/` after package V lands (V will ask); none
+needed for L alone.
+
+Return (≤25 lines): commits, the datum on the three presets (floor, level,
+rim), hollows before/after per preset, ridge hashes unchanged.
+
+## Package V — visible water (habitat worker)
+
+Owner: habitat worker (Opus, high). Files: `hydrate.rs`, `world.rs`
+(`is_raining`), `viability.rs`, `recipe.rs` (**numbers** and doc only; the
+two lake fields exist), host `voxel/mod.rs` (seed gate, log lines),
+`present.rs`/`sink/gpu/voxel.rs` only if `is_raining` alone does not fix
+the streaks. Not `generate.rs`/`hollows.rs` — package L owns those in
+parallel; until L lands the outlet is still on the floor, so develop the
+lake fill against `world.outlet_cell()`'s **y** as the level and it will
+be right when L moves it.
+
+Deliverable:
+
+1. **D1**: `is_raining` is `shower_left_m3 > 0` under the closed budget,
+   `rain_m_per_s > 0` under the open one.
+2. **D4** in `hydrate`: atmosphere share; then the **lake** — the lowest
+   basin whose floor cells are open to the sky (no solid above them in
+   their column) — filled to `outlet_cell().y` (one flat head, capped at
+   its own spill); then pore to field capacity with the water table raised
+   to at least the lake floor when the inventory can pay for it; then the
+   remaining basins by catchment as now; then the aquifer takes what is
+   left. `Hydrated` gains `lake_m3`, `lake_cells`, `lake_visible_m2`.
+3. `hydrate::lake(world) -> Lake { cells, surface_cells, visible_m2,
+   level_y }` as derived geometry on any world: open-water surface cells
+   (top free cell with void above), and the share of them the camera reads
+   by `hollows::floor_is_visible`, in square metres.
+4. **D5** in the host's generated path: after `World::new` (which
+   hydrates), read `lake(world).visible_m2`; below `min_lake_m2`, log
+   `cubarium voxel: seed N rejected: lake 0.9 m² visible, need 6.0` and
+   draw the next random seed; up to 24 tries, then keep the best and log
+   it loudly. Explicit `--seed` or a seed in the TOML: warn, honour. The
+   startup water line reports the lake (`lake 7.2 m³ over 9.1 m², 6.8 m²
+   visible`).
+5. **D6** `viability::measure`: when `shower_interval_max_s > 0`,
+   `showers_enough` is "the atmosphere store ends the probe at or above
+   the floor"; the message says `store 2.4 m³ ≥ floor 0.3 (schedule on)`
+   instead of a shower count.
+6. **Numbers** per preset, from the study: `inventory_m`, `aquifer_head_m`,
+   `lake_depth_m`, `min_lake_m2`, so that on seeds 1–8 of each preset most
+   worlds pass the gate, the lake stands at its level after settle, and it
+   is still within 10 % of that level after 10 simulated minutes with the
+   cycle running (showers included). Expect `small`'s inventory to rise:
+   its 60 m² footprint makes a metre of head cost 21 m³.
+
+Tests first, each under a second:
+
+- `closed_cycle_rain_is_only_the_shower`: a closed slab with the schedule
+  off and a store under the floor: `is_raining()` false; after
+  `AddAtmosphere` over the floor and one step: true while `shower_left >
+  0`, false again when it ends. An open slab with `rain_m_per_s > 0`: true.
+- `the_lake_is_filled_first`: an authored 16×12×2 world with an open-sky
+  pit of known volume and a roofed sump lower than it (a 2-cell cavity
+  under rock with a shaft); outlet set at the pit's rim level; a small
+  inventory: the pit holds water to the outlet's `y`, the sump holds none
+  until the pit is full.
+- `the_lake_survives_ten_minutes`: the same fixture with soil under the
+  pit and head raised to its floor: after 12 000 ticks with the cycle on,
+  the lake's surface cells are within one voxel of `level_y`.
+- `lake_reports_only_open_water`: on the fixture, `lake().surface_cells`
+  excludes the sump's cells and `visible_m2` counts only cells
+  `floor_is_visible` accepts.
+- `the_gate_rejects_and_redraws` (host): a fake generator closure or a
+  recipe with `min_lake_m2` impossibly large: the log names the rejected
+  seeds and the world returned is the best of the tries; with 0 it accepts
+  the first seed.
+- `a_scheduled_probe_judges_the_store`: the viability slab with the
+  schedule on and a store above the floor reports viable without a shower;
+  with the store below the floor, not viable.
+- `Water::validate` rejects a negative `lake_depth_m`.
+
+Study (ignored, run by name): seeds 1–8 × three presets: hydrate, settle,
+`lake()` → visible m², pass/fail against `min_lake_m2`; then 10 simulated
+minutes with the cycle on and the lake level drift. Put the pass count per
+preset and the drift range in the return.
+
+Visual: `small` at 4 px/voxel through `config/tachyon/voxel.toml` for the
+panel's own seed 9482528745678189003 **and** the first accepted random
+seed, plus `default` seed 1 at 8 px, into the scratch directory under
+`terrain-lake/`. Do this after L has landed (Fable will tell you), so the
+pictures show the moved outlet and no sumps.
+
+Return (≤30 lines): commits, the numbers chosen and why, per-preset gate
+pass count and lake drift, PNG paths, test counts for the two crates.
+
+## Packages L and V — integrated 2026-09-21
+
+L landed 93d4487: `LakeDatum` (floor, level, rim) from the surface
+heightfield, outlet on the rim at the lake level for staged recipes, no
+hollow floor below it; `Ridge` byte-identical. V landed 1e1477b: closed-cycle
+`is_raining` is "a shower is falling"; hydrate fills the lake first and
+raises the water table to the lake floor (a lake stands on its table, not
+its bed — `default` seed 1 lost its whole lake in ten minutes without it),
+spare inventory goes aloft rather than into the aquifer whose head the lake
+stands on; `hydrate::lake()`; host seed gate on `min_lake_m2` with 24
+tries; probe judges the store against the floor under a schedule.
+Numbers: `small` lake 0.375 m / bar 3 m² (three voxels; at four the ring
+lost hollows), `default`/`wide` 0.75 m / 6 m²; `inventory_m` 0.5 → 1.5 to
+pay for the table. Gate passes 6/8, 6/8, 7/8 seeds; lakes drift 0–1 voxel
+over ten minutes. Known: most of the inventory now parks in the sky store
+(56 of 90 m³ on `small`), conserved and inert. Fable bumped SCHEMA 12 → 13
+(recipe fields changed under postcard) and ran the two crates: 790 passed,
+3 skipped. The panel's own seed now shows a 7.9 m² lake where it had none.
+
+Wrysk's next idea (tiers: taller world, terraces with pools, waterfalls,
+river re-entry at the top) awaits his two decisions; see the conversation.

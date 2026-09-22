@@ -25,7 +25,7 @@ use crate::World;
 /// `Water`). Postcard
 /// is not self-describing, so a new field is a new format: earlier tags are refused,
 /// never migrated.
-pub const SCHEMA: u32 = 12;
+pub const SCHEMA: u32 = 13;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

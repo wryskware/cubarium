@@ -81,15 +81,28 @@ fn visible_in(c: &Config, material: &[Material], x: i64, y: u32, z: u32) -> bool
 /// Carve the hollows a recipe asks for. Runs on the volume, after voxelisation and
 /// before habitat preparation: undercuts follow the layering the erosion exposed, and
 /// galleries follow the same soft strata.
-pub fn carve(volume: &mut Volume, field: &Heightfield, r: &Recipe, seed: u64) -> Carved {
+///
+/// Nothing is carved below `min_void_y`, which the generator sets one voxel over the
+/// lake's own surface ([`crate::generate::LakeDatum`]). A hollow whose floor is under
+/// the waterline is a sump: the ring's water runs into it and stands there, roofed, out
+/// of sight, and the open ground the camera can see stays dry. A gallery that reaches
+/// under the line keeps the part above it and loses the rest; one entirely below it is
+/// never carved at all.
+pub fn carve(
+    volume: &mut Volume,
+    field: &Heightfield,
+    r: &Recipe,
+    seed: u64,
+    min_void_y: i32,
+) -> Carved {
     let h = r.hollows;
     if !h.any() {
         return Carved::default();
     }
-    let undercuts = notch_banks(volume, field, &h, seed);
-    let candidates = gallery_candidates(volume, field, &h, seed);
+    let undercuts = notch_banks(volume, field, &h, seed, min_void_y);
+    let candidates = gallery_candidates(volume, field, &h, seed, min_void_y);
     let bodies = components(&volume.config, &candidates);
-    connect_or_fill(volume, &h);
+    connect_or_fill(volume, &h, min_void_y);
     seal_unreadable_shafts(volume);
     let kept = bodies
         .iter()
@@ -108,7 +121,7 @@ pub fn carve(volume: &mut Volume, field: &Heightfield, r: &Recipe, seed: u64) ->
 ///
 /// Returns how many sealed bodies were opened and how many were filled. A hollow nobody
 /// and nothing can get into is not a hollow; it is a bubble.
-pub fn connect_or_fill(volume: &mut Volume, h: &Hollows) -> (usize, usize) {
+pub fn connect_or_fill(volume: &mut Volume, h: &Hollows, min_void_y: i32) -> (usize, usize) {
     let c = volume.config.clone();
     let vm = c.voxel_m;
     let reach_v = (h.mouth_reach_m / vm).round().max(0.0) as u32;
@@ -130,7 +143,7 @@ pub fn connect_or_fill(volume: &mut Volume, h: &Hollows) -> (usize, usize) {
             if body.iter().any(|&i| open[i]) {
                 continue;
             }
-            let opened = cut_mouth(volume, &body, &open, reach_v, &mut scratch)
+            let opened = cut_mouth(volume, &body, &open, reach_v, min_void_y, &mut scratch)
                 .filter(|cut| skyline_survives(volume, cut))
                 .or_else(|| cut_skylight(volume, &body, sky_v));
             match opened {
@@ -459,7 +472,13 @@ fn scan(c: &Config, material: &[Material], clearance_m: f64) -> Vec<Hollow> {
 ///
 /// The notch runs *into* the hill, opposite the fall, so the cap is left as a roof and
 /// the opening faces the low ground. Where it meets a lower support it leaves a shelf.
-fn notch_banks(volume: &mut Volume, field: &Heightfield, h: &Hollows, seed: u64) -> usize {
+fn notch_banks(
+    volume: &mut Volume,
+    field: &Heightfield,
+    h: &Hollows,
+    seed: u64,
+    min_void_y: i32,
+) -> usize {
     let c = volume.config.clone();
     let (w, d) = (c.width as usize, c.depth as usize);
     let vm = c.voxel_m;
@@ -525,6 +544,10 @@ fn notch_banks(volume: &mut Volume, field: &Heightfield, h: &Hollows, seed: u64)
                 continue;
             }
             let void_lo = band_top - void_cells + 1;
+            if void_lo < min_void_y {
+                // Under the waterline: this would be a flooded notch, not a grotto.
+                continue;
+            }
             // The mouth is a hole in rock, so what has to be out of the way is the
             // neighbour's *rock*, not the talus lying against it: a grotto with a metre
             // of loose sediment across its threshold is a grotto with a sill, and the
@@ -579,6 +602,7 @@ fn gallery_candidates(
     field: &Heightfield,
     h: &Hollows,
     seed: u64,
+    min_void_y: i32,
 ) -> Vec<usize> {
     if h.gallery_density <= 0.0 {
         return Vec::new();
@@ -597,7 +621,7 @@ fn gallery_candidates(
         for x in 0..w {
             let x_m = (x as f64 + 0.5) * vm;
             let top = volume.surface[z * w + x];
-            for y in 1..=(top - min_depth).max(0) {
+            for y in min_void_y.max(1)..=(top - min_depth).max(0) {
                 let i = c.index(x as i64, y as u32, z as u32);
                 if volume.material[i] != Material::Rock {
                     continue;
@@ -628,6 +652,7 @@ fn cut_mouth(
     body: &[usize],
     open: &[bool],
     reach: u32,
+    min_void_y: i32,
     scratch: &mut Scratch,
 ) -> Option<Vec<(usize, Material)>> {
     if reach == 0 {
@@ -648,6 +673,10 @@ fn cut_mouth(
         }
         for nb in neighbours(&c, i) {
             if scratch.depth[nb] != u32::MAX {
+                continue;
+            }
+            // A mouth does not dig under the lake to find its way out.
+            if (c.coords(nb).1 as i32) < min_void_y {
                 continue;
             }
             scratch.depth[nb] = scratch.depth[i] + 1;
@@ -794,7 +823,7 @@ mod tests {
             skylight_m: 0.6,
             ..Hollows::GROTTOS
         };
-        let (kept, dropped) = connect_or_fill(&mut volume, &h);
+        let (kept, dropped) = connect_or_fill(&mut volume, &h, 1);
         install(&mut world, &volume);
 
         assert_eq!((kept, dropped), (1, 1), "one opened, one filled");
@@ -998,7 +1027,7 @@ mod tests {
             let mut volume = volume_of(&world);
             let field = flat_field(&config);
             let recipe = notch_recipe();
-            let report = carve(&mut volume, &field, &recipe, 1);
+            let report = carve(&mut volume, &field, &recipe, 1, 1);
             install(&mut world, &volume);
             repair_isolated(&mut world);
             (report, world)
@@ -1087,7 +1116,7 @@ mod tests {
             },
             ..Recipe::DEFAULT
         };
-        let report = carve(&mut volume, &field, &recipe, 3);
+        let report = carve(&mut volume, &field, &recipe, 3, 1);
         install(&mut world, &volume);
         assert!(report.galleries > 0, "no gallery survived: {report:?}");
         assert!(
@@ -1098,19 +1127,21 @@ mod tests {
 
     // ---- 7. presets ---------------------------------------------------------------
 
-    /// Every preset carves a handful of grottos, all of them visible, none of them
-    /// sealed, and the skyline still reads.
+    /// Every preset carves grottos, all of them visible, none of them sealed, and the
+    /// skyline still reads.
+    ///
+    /// Counted over the preset's seeds rather than each one: since the lake datum kept
+    /// the carve out from under the waterline, a ring whose soft strata all lie low can
+    /// come out with no habitable hollow at all. Three of nine measured seeds do. What a
+    /// preset has to do is make them, not make them everywhere.
     #[test]
     fn every_preset_carves_visible_hollows_and_leaves_nothing_sealed() {
         for p in PRESETS {
+            let mut carved = 0;
             for seed in [1u64, 77] {
                 let world = World::new(Config { seed, ..p.config() });
                 let hollows = find(&world);
-                assert!(
-                    !hollows.is_empty(),
-                    "{} seed {seed} carved no hollow at all",
-                    p.name
-                );
+                carved += hollows.len();
                 assert!(
                     hollows.iter().all(|h| h.visible),
                     "{} seed {seed} kept a hollow the camera cannot see",
@@ -1122,6 +1153,7 @@ mod tests {
                     p.name
                 );
             }
+            assert!(carved > 0, "{} carved no hollow on either seed", p.name);
         }
     }
 

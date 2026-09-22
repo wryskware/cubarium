@@ -214,7 +214,7 @@ pub fn authored(config: Config) -> World {
     //    (`cubarium_voxel::hydrate`); this hand-built fixture is charged with the same
     //    default so the authored scene is a habitat and not a desert with a puddle in it.
     //    Booked through the ledger like any other addition.
-    cubarium_voxel::hydrate(&mut world, &cubarium_voxel::Water::DEFAULT);
+    cubarium_voxel::hydrate(&mut world, &cubarium_voxel::Water::AUTHORED);
 
     world
 }

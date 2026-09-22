@@ -242,15 +242,132 @@ fn ridge(world: &mut World) {
         }
     }
 
-    outlet_and_spring(world, &surf, w, d, h);
+    outlet_and_spring(world, &surf, w, d, h, None);
 
     // Nothing above carves, so this finds nothing — it is the guard that keeps it so.
     repair_isolated(world);
 }
 
+/// Where the ring's lake stands.
+///
+/// A ring has one lowest place, and under a closed water cycle it is where the water
+/// ends up. The panel's first deployed world had no visible water at all: its outlet sat
+/// in the void cell directly over that lowest ground, so everything that drained there
+/// was exported to the sky within seconds, and what pooling there was happened in
+/// gallery floors carved *below* the open ground, out of sight under rock. The datum is
+/// the answer to both: a level for the lake, and a seat for the outlet on its rim
+/// instead of on its floor.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LakeDatum {
+    /// Topmost solid voxel of the ring's lowest ground column.
+    pub floor_y: i32,
+    /// The water surface: the highest row of void the lake fills. Surplus above it
+    /// leaves through the outlet, so this is the level the lake holds.
+    pub level_y: i32,
+    /// The `(x, z)` column of the lake's own edge that the water just covers — its
+    /// ground tops out at `level_y - 1`, so a void cell there sits at the surface. That
+    /// is where the outlet goes.
+    pub rim: (usize, usize),
+}
+
+/// Work out the datum from a skyline.
+///
+/// The lowest ground is the lake floor. The water stands [`crate::recipe::Water::lake_depth_m`]
+/// above it, capped by the ring's own highest ground — a lake cannot stand over
+/// everything — and then lowered, a voxel at a time, until some column of its edge tops
+/// out just under the surface for the outlet to sit on. `lake_depth_m = 0` puts the
+/// datum back on the floor, which is the outlet the generator always had.
+pub fn lake_level(surface: &[i32], c: &Config, r: &Recipe) -> LakeDatum {
+    let n = (c.width as usize * c.depth as usize).min(surface.len());
+    if n == 0 {
+        return LakeDatum::default();
+    }
+    let (mut low, mut floor_y) = (0usize, i32::MAX);
+    for (i, &s) in surface.iter().take(n).enumerate() {
+        if s < floor_y {
+            floor_y = s;
+            low = i;
+        }
+    }
+    let asked = (r.water.lake_depth_m / c.voxel_m).round().max(1.0) as i32;
+    let ceiling = surface
+        .iter()
+        .take(n)
+        .copied()
+        .max()
+        .unwrap_or(floor_y)
+        .max(floor_y + 1)
+        .min(c.height as i32 - 1);
+    seat_outlet(surface, c, low, floor_y, (floor_y + asked).min(ceiling))
+}
+
+/// Lower `level` until the lake has a column of edge to put its outlet on, and hand back
+/// the datum. At `floor + 1` the floor column is that edge, so this always terminates.
+fn seat_outlet(surface: &[i32], c: &Config, low: usize, floor_y: i32, level: i32) -> LakeDatum {
+    let w = c.width as usize;
+    let mut level = level.max(floor_y + 1);
+    while level > floor_y + 1 {
+        if let Some(rim) = lake_rim(surface, c, low, level) {
+            return LakeDatum {
+                floor_y,
+                level_y: level,
+                rim,
+            };
+        }
+        level -= 1;
+    }
+    LakeDatum {
+        floor_y,
+        level_y: floor_y + 1,
+        rim: (low % w, low / w),
+    }
+}
+
+/// The column of the lake nearest its floor whose ground tops out at `level - 1`.
+///
+/// Breadth first over the flooded columns — those the water at `level` covers — so the
+/// answer is the nearest one, and `x` wraps while the front and back are walls, because
+/// that is the shape of the water.
+fn lake_rim(surface: &[i32], c: &Config, low: usize, level: i32) -> Option<(usize, usize)> {
+    let (w, d) = (c.width as usize, c.depth as usize);
+    let mut seen = vec![false; w * d];
+    let mut queue = std::collections::VecDeque::new();
+    seen[low] = true;
+    queue.push_back(low);
+    while let Some(i) = queue.pop_front() {
+        let (x, z) = (i % w, i / w);
+        if surface[i] == level - 1 {
+            return Some((x, z));
+        }
+        let mut step = |nx: usize, nz: usize| {
+            let j = nz * w + nx;
+            if !seen[j] && surface[j] < level {
+                seen[j] = true;
+                queue.push_back(j);
+            }
+        };
+        step((x + w - 1) % w, z);
+        step((x + 1) % w, z);
+        if z > 0 {
+            step(x, z - 1);
+        }
+        if z + 1 < d {
+            step(x, z + 1);
+        }
+    }
+    None
+}
+
 /// Name the outlet at the lowest cell of the generated surface and the spring an eighth
 /// of the ring along from it, at mid-depth.
-fn outlet_and_spring(world: &mut World, surf: &[i32], w: usize, d: usize, h: usize) {
+fn outlet_and_spring(
+    world: &mut World,
+    surf: &[i32],
+    w: usize,
+    d: usize,
+    h: usize,
+    lake: Option<LakeDatum>,
+) {
     let at = |x: i64, z: usize| surf[z * w + x.rem_euclid(w as i64) as usize];
     let zm = d / 2;
     let mut low = (0usize, 0usize, i32::MAX);
@@ -261,8 +378,13 @@ fn outlet_and_spring(world: &mut World, surf: &[i32], w: usize, d: usize, h: usi
             }
         }
     }
-    let outlet_y = (low.2 + 1).min(h as i32 - 1) as u32;
-    world.outlet_cell = Some((low.0 as u32, outlet_y, low.1 as u32));
+    // On the lake's rim, at its own surface, so the lake holds its level and only the
+    // surplus leaves. Without a datum -- the ridge generator -- on the floor, as before.
+    let outlet = match lake {
+        Some(l) => (l.rim.0, l.level_y.min(h as i32 - 1), l.rim.1),
+        None => (low.0, (low.2 + 1).min(h as i32 - 1), low.1),
+    };
+    world.outlet_cell = Some((outlet.0 as u32, outlet.1 as u32, outlet.2 as u32));
     let sx = ((low.0 + w / 8) % w) as i64;
     let spring_y = (at(sx, zm) + 1).min(h as i32 - 1) as u32;
     world.spring_cell = Some((sx as u32, spring_y, zm as u32));
@@ -367,9 +489,9 @@ fn staged(world: &mut World, r: &Recipe) {
     if w == 0 || h < 4 || d == 0 {
         return;
     }
-    let (_, volume, _) = staged_terrain(&c, r);
+    let (_, volume, report) = staged_terrain(&c, r);
     world.material = volume.material;
-    outlet_and_spring(world, &volume.surface, w, d, h);
+    outlet_and_spring(world, &volume.surface, w, d, h, Some(report.lake));
     repair_isolated(world);
 }
 
@@ -381,6 +503,8 @@ pub struct Report {
     pub carved: crate::hollows::Carved,
     /// Columns the skyline visibility pass had to lower.
     pub lowered: usize,
+    /// Where the ring's lake stands, and where its outlet sits on the rim.
+    pub lake: LakeDatum,
 }
 
 /// Run the staged stages and hand back what each one produced, without building a
@@ -406,9 +530,36 @@ pub fn staged_terrain(c: &Config, r: &Recipe) -> (Heightfield, Volume, Report) {
     crate::erosion::flag_hard_caps(&mut field, r.hollows.cap_drop_m, r.bedrock_hardness);
 
     let mut volume = voxelise(c, r, &field);
-    let carved = crate::hollows::carve(&mut volume, &field, r, c.seed);
+    // The datum comes before the carve, because the carve has to keep out from under it:
+    // a grotto with its floor below the waterline is a sump, and the panel's first world
+    // put every drop it had into three of them.
+    let lake = lake_level(&volume.surface, c, r);
+    let carved = crate::hollows::carve(&mut volume, &field, r, c.seed, lake.level_y + 1);
     let lowered = prepare(&mut volume, &mut field, r);
-    (field, volume, Report { carved, lowered })
+    // The skyline pass may have lowered the column the outlet was going to sit on, so
+    // the seat is found again on the ground as it finally stands. The level only ever
+    // comes down, and the carve kept clear of the higher one.
+    let (low, floor_y) =
+        volume
+            .surface
+            .iter()
+            .enumerate()
+            .fold(
+                (0usize, i32::MAX),
+                |best, (i, &s)| {
+                    if s < best.1 { (i, s) } else { best }
+                },
+            );
+    let lake = seat_outlet(&volume.surface, c, low, floor_y, lake.level_y);
+    (
+        field,
+        volume,
+        Report {
+            carved,
+            lowered,
+            lake,
+        },
+    )
 }
 
 /// Stage 1: the landscape in metres, before anything has run over it.
@@ -863,6 +1014,7 @@ mod tests {
     #[test]
     fn every_preset_prepares_a_habitat_within_the_diorama_s_budget() {
         for p in PRESETS {
+            let mut notched = 0;
             for seed in STAGED_SEEDS {
                 let config = Config { seed, ..p.config() };
                 let Landform::Staged(recipe) = config.landform.clone() else {
@@ -870,8 +1022,10 @@ mod tests {
                 };
                 let (_, volume, report) = staged_terrain(&config, &recipe);
                 let (w, d) = (config.width as usize, config.depth as usize);
-                // The benched ground steps, and the undercut pass finds the steps —
-                // on every preset now, `small` included.
+                // The benched ground steps, and the undercut pass finds the steps.
+                // Notches are counted over the preset's seeds, not each one: the lake
+                // datum keeps the carve out from under the waterline, and on a ring
+                // whose ledges all stand low there is nowhere left to notch.
                 {
                     let steps = (0..d)
                         .flat_map(|z| (0..w).map(move |x| (x, z)))
@@ -887,11 +1041,7 @@ mod tests {
                         "{} seed {seed}: the benches made no three-voxel step anywhere",
                         p.name
                     );
-                    assert!(
-                        report.carved.undercuts > 0,
-                        "{} seed {seed}: {steps} steps and not one of them was notched",
-                        p.name
-                    );
+                    notched += report.carved.undercuts;
                 }
 
                 let columns = (config.width * config.depth) as f64;
@@ -926,6 +1076,11 @@ mod tests {
                     p.name
                 );
             }
+            assert!(
+                notched > 0,
+                "{}: the benches stepped and not one step was notched on either seed",
+                p.name
+            );
         }
     }
 
@@ -1298,6 +1453,150 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    /// A hand-authored skyline: `width x depth` columns, all at `ground`, with the
+    /// listed columns set to their own heights.
+    fn skyline(width: u32, depth: u32, ground: i32, dug: &[(usize, usize, i32)]) -> Vec<i32> {
+        let mut surf = vec![ground; width as usize * depth as usize];
+        for &(x, z, y) in dug {
+            surf[z * width as usize + x] = y;
+        }
+        surf
+    }
+
+    fn ring(width: u32, depth: u32, voxel_m: f64, lake_depth_m: f64) -> (Config, Recipe) {
+        let mut config = Config {
+            width,
+            height: 16,
+            depth,
+            voxel_m,
+            ..Preset::find("default").unwrap().config()
+        };
+        let Landform::Staged(mut recipe) = config.landform.clone() else {
+            panic!("a preset is staged")
+        };
+        recipe.water.lake_depth_m = lake_depth_m;
+        config.landform = Landform::Staged(recipe.clone());
+        (config, recipe)
+    }
+
+    /// The lake stands the recipe's depth over the ring's lowest ground, and its outlet
+    /// sits on the edge column the water just covers.
+    #[test]
+    fn lake_level_follows_the_recipe_depth() {
+        // Ground at 12, a pit at (3, 0) and a shelf beside it one voxel higher than the
+        // water will stand minus one.
+        let surf = skyline(8, 2, 12, &[(3, 0, 6), (4, 0, 7)]);
+
+        let (config, recipe) = ring(8, 2, 0.25, 0.5);
+        let lake = lake_level(&surf, &config, &recipe);
+        assert_eq!(lake.floor_y, 6);
+        assert_eq!(lake.level_y, 8, "half a metre at 0.25 m is two voxels");
+        assert_eq!(
+            lake.rim,
+            (4, 0),
+            "the outlet seats on the shelf the water covers"
+        );
+
+        // No lake at all: the datum is the floor outlet the generator always had.
+        let (config, recipe) = ring(8, 2, 0.25, 0.0);
+        let dry = lake_level(&surf, &config, &recipe);
+        assert_eq!((dry.floor_y, dry.level_y, dry.rim), (6, 7, (3, 0)));
+    }
+
+    /// A pit with nothing above it to hold more water keeps the water it can hold,
+    /// however deep the recipe asks.
+    #[test]
+    fn lake_level_stops_at_the_rim() {
+        let surf = skyline(8, 2, 7, &[(3, 0, 6)]);
+        for asked in [0.5, 2.0, 8.0] {
+            let (config, recipe) = ring(8, 2, 0.25, asked);
+            let lake = lake_level(&surf, &config, &recipe);
+            assert_eq!(
+                (lake.floor_y, lake.level_y),
+                (6, 7),
+                "asked for {asked} m over a one-voxel rim"
+            );
+            assert_eq!(lake.rim, (3, 0));
+        }
+    }
+
+    /// The ridge generator's outlet is where it always was.
+    #[test]
+    fn ridge_outlet_does_not_move() {
+        for (seed, cell) in [(1u64, (28, 9, 0)), (2, (0, 9, 0)), (77, (109, 9, 0))] {
+            let world = World::new(Config {
+                seed,
+                ..Config::default()
+            });
+            assert_eq!(world.outlet_cell(), Some(cell), "ridge seed {seed}");
+        }
+    }
+
+    /// No hollow is a sump: nothing the carve leaves has a floor under the waterline.
+    #[test]
+    fn no_hollow_below_the_lake() {
+        for p in PRESETS {
+            let config = Config {
+                seed: 1,
+                ..p.config()
+            };
+            let Landform::Staged(recipe) = config.landform.clone() else {
+                panic!("a preset is staged")
+            };
+            let (_, _, report) = staged_terrain(&config, &recipe);
+            let world = World::new(config.clone());
+            for hollow in crate::hollows::find(&world) {
+                for &floor in &hollow.floors {
+                    let (x, y, z) = config.coords(floor);
+                    assert!(
+                        y as i32 >= report.lake.level_y,
+                        "{}: a hollow floor at ({x}, {y}, {z}) is under the lake at {}",
+                        p.name,
+                        report.lake.level_y
+                    );
+                }
+            }
+        }
+    }
+
+    /// The staged outlet is a void cell at the lake's own surface, standing on the
+    /// column the water just covers -- so the lake holds its level and only the surplus
+    /// leaves.
+    #[test]
+    fn staged_outlet_sits_on_the_rim() {
+        for p in PRESETS {
+            let config = Config {
+                seed: 1,
+                ..p.config()
+            };
+            let Landform::Staged(recipe) = config.landform.clone() else {
+                panic!("a preset is staged")
+            };
+            let (_, _, report) = staged_terrain(&config, &recipe);
+            let world = World::new(config);
+            let (x, y, z) = world
+                .outlet_cell()
+                .expect("a staged world names its outlet");
+            let v = world.view();
+            assert!(
+                !v.material_at(x as i64, y, z).is_solid(),
+                "{}: the outlet at ({x}, {y}, {z}) is not a void cell",
+                p.name
+            );
+            assert_eq!(
+                y as i32, report.lake.level_y,
+                "{}: outlet off the datum",
+                p.name
+            );
+            assert_eq!(
+                v.surface_y(x as i64, z).map(|t| t as i32),
+                Some(report.lake.level_y - 1),
+                "{}: the outlet is not standing on its rim",
+                p.name
+            );
         }
     }
 

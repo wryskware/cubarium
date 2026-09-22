@@ -452,6 +452,17 @@ pub struct Water {
     /// no schedule: showers fire whenever the store crosses the trigger.
     pub shower_interval_min_s: f64,
     pub shower_interval_max_s: f64,
+
+    /// How deep the ring's **lake** — the lowest open-sky basin — stands before it
+    /// overflows into the outlet, metres above its floor. The outlet sits at this level on
+    /// the lake's rim (not on its floor), so the lake keeps its level and only surplus
+    /// leaves; and no hollow is carved with its floor below it, so nothing hidden can act
+    /// as a sump. Zero puts the outlet on the floor, the pre-lake behaviour.
+    pub lake_depth_m: f64,
+    /// Smallest open-water surface the camera must be able to read, square metres, for a
+    /// generated world to be accepted. The host draws another seed below it. Zero accepts
+    /// any world.
+    pub min_lake_m2: f64,
 }
 
 impl Default for Water {
@@ -476,6 +487,8 @@ impl Water {
         shower_volume_m3: 5.0,
         shower_interval_min_s: 0.0,
         shower_interval_max_s: 0.0,
+        lake_depth_m: 0.0,
+        min_lake_m2: 0.0,
     };
 
     /// The staged presets' inventory: half a metre of water over the footprint, six per
@@ -506,7 +519,7 @@ impl Water {
     /// before it infiltrates. It is also the only engine this crate has, and a weak one:
     /// see the study. Transpiration, which only the live world has, is the other.
     pub const DEFAULT: Water = Water {
-        inventory_m: 0.5,
+        inventory_m: 1.5,
         atmosphere_fraction: 0.08,
         aquifer_head_m: 1.0,
         closed_cycle: true,
@@ -516,14 +529,48 @@ impl Water {
         shower_volume_m3: 0.4,
         shower_interval_min_s: 300.0,
         shower_interval_max_s: 900.0,
+        // Three voxels at 0.25 m. The lake holds the rows **below** the datum — the outlet
+        // sits in the datum row, on a rim column whose ground tops out just under it — so
+        // this is a two-voxel, half-metre pond. Two voxels of ask leaves one voxel of
+        // water, which reads as nothing: measured over eight seeds of `default`, one
+        // voxel is a median of 0.8 m² visible and two is 9.8 m².
+        //
+        // It is not free. No hollow floor may sit under the waterline, so a deeper lake is
+        // a drier cave system: `default` goes from 7 habitable hollows over eight seeds to
+        // 6, `wide` from 18 to 15. Three voxels is where the water becomes readable for
+        // the least of that.
+        lake_depth_m: 0.75,
+        min_lake_m2: 6.0,
     };
 
     /// `small`'s ring is 60 m² of footprint against `default`'s 192, and both the store's
     /// refill and one tick of rain scale with that area. So the **shower scales with it
     /// too**: the same rain rate then puts the same minute of rain on every preset, and a
     /// shower costs the same share of what the interval lifted.
+    /// What a **hand-built fixture** is charged with: the cycle and the rates, at the
+    /// inventory the presets carried before the lake. A preset's inventory is now sized
+    /// to lift a whole ring's water table up to its lake floor, and pouring that into the
+    /// authored scene's 24 m² floods it — nine stands instead of sixteen, measured. The
+    /// fixture has its own authored pool and no lake datum, so it needs none of it.
+    pub const AUTHORED: Water = Water {
+        inventory_m: 0.5,
+        ..Water::DEFAULT
+    };
+
     pub const SMALL: Water = Water {
         shower_volume_m3: 0.125,
+        // Three voxels at 0.125 m: a two-voxel, quarter-metre pond. Deeper reads better —
+        // four voxels lifts the median from 5.2 to 7.1 m² — but four is where this ring's
+        // grottos start dying: 5 habitable hollows over eight seeds becomes 3, and the
+        // seeds with none go from 5 to 6. At three voxels the lake costs **no** hollows at
+        // all against the same ring with no lake, so the bar comes down instead of the
+        // water going up.
+        lake_depth_m: 0.375,
+        // 3 m² on a 60 m² ring is a pond twenty voxels across at 4 px each: plainly a
+        // water feature on the panel, and six of eight seeds clear it at this depth
+        // against three of eight at 6 m². (`small`'s five barren seeds are the preset's
+        // own — it has them at every depth, lake or no lake.)
+        min_lake_m2: 3.0,
         ..Water::DEFAULT
     };
 
@@ -547,6 +594,10 @@ impl Water {
             ("water.shower_volume_m3", self.shower_volume_m3),
             ("water.shower_interval_min_s", self.shower_interval_min_s),
             ("water.shower_interval_max_s", self.shower_interval_max_s),
+            ("water.lake_depth_m", self.lake_depth_m),
+            ("water.min_lake_m2", self.min_lake_m2),
+            ("water.lake_depth_m", self.lake_depth_m),
+            ("water.min_lake_m2", self.min_lake_m2),
         ] {
             anyhow::ensure!(
                 v.is_finite() && v >= 0.0,
@@ -1141,6 +1192,27 @@ impl Preset {
 
 #[cfg(test)]
 mod tests {
+
+    /// A lake cannot be a negative depth, and a world cannot be asked for a negative
+    /// area of visible water.
+    #[test]
+    fn the_lake_fields_must_be_real_lengths() {
+        let with = |depth, area| Water {
+            lake_depth_m: depth,
+            min_lake_m2: area,
+            ..Water::DEFAULT
+        };
+        with(0.5, 6.0).validate().expect("the shipped numbers");
+        with(0.0, 0.0)
+            .validate()
+            .expect("no lake asked for is valid");
+        assert!(with(-0.5, 6.0).validate().is_err(), "a negative lake depth");
+        assert!(with(0.5, -1.0).validate().is_err(), "a negative lake area");
+        assert!(
+            with(f64::NAN, 6.0).validate().is_err(),
+            "a depth that is not a number"
+        );
+    }
 
     /// The recipe decides the weather, so every number it holds has to arrive on the
     /// config the world runs on — the schedule included.

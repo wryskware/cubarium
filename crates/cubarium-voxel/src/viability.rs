@@ -119,6 +119,13 @@ pub struct Viability {
     pub atmosphere_max: f64,
     pub showers: u64,
     pub showers_enough: bool,
+    /// Whether the world's rain is on a schedule. With one, a probe window shorter than
+    /// the shortest gap can contain no shower however healthy the cycle is, so
+    /// `showers_enough` stops being a count and becomes "the store can still pay for the
+    /// next one": the atmosphere at the end of the window against the availability floor.
+    pub scheduled: bool,
+    pub store_end: f64,
+    pub store_floor: f64,
     pub soil_columns: usize,
     pub bands: Vec<BandResult>,
     /// The closed-budget conservation residual at the end of the window. A viability
@@ -133,7 +140,7 @@ impl fmt::Display for Viability {
         write!(
             f,
             "water cycle {}: stored {:.2}–{:.2} m3 (drift {:+.2}% {}), \
-             atmosphere {:.2}–{:.2} m3, {} shower(s) {}, residual {:.1e}",
+             atmosphere {:.2}–{:.2} m3, {}, residual {:.1e}",
             if self.viable { "VIABLE" } else { "NOT VIABLE" },
             self.stored_min,
             self.stored_max,
@@ -141,8 +148,20 @@ impl fmt::Display for Viability {
             if self.bounded { "bounded" } else { "DRIFTING" },
             self.atmosphere_min,
             self.atmosphere_max,
-            self.showers,
-            if self.showers_enough { "ok" } else { "TOO FEW" },
+            if self.scheduled {
+                format!(
+                    "store {:.2} m3 {} floor {:.2} (schedule on)",
+                    self.store_end,
+                    if self.showers_enough { "≥" } else { "<" },
+                    self.store_floor
+                )
+            } else {
+                format!(
+                    "{} shower(s) {}",
+                    self.showers,
+                    if self.showers_enough { "ok" } else { "TOO FEW" }
+                )
+            },
             self.residual
         )?;
         if self.soil_columns == 0 {
@@ -204,7 +223,18 @@ pub fn measure(world: &mut World, spec: &ViabilitySpec) -> Viability {
     let (soil_columns, bands) = band_columns(world, spec);
 
     let bounded = stored_drift.abs() <= spec.drift_tolerance;
-    let showers_enough = showers >= spec.min_showers;
+    // With a schedule, counting showers inside the window is the wrong question: the
+    // probe's twenty minutes is shorter than the five-to-fifteen the world waits between
+    // them, so a perfectly healthy ring reports "0 shower(s) TOO FEW" every time. What
+    // matters is whether the store can still pay for the next one when it comes due.
+    let scheduled = world.config.shower_interval_max_s > 0.0;
+    let store_end = world.atmosphere_m3;
+    let store_floor = world.config.shower_trigger_fraction * world.ledger.expected_total();
+    let showers_enough = if scheduled {
+        store_end >= store_floor
+    } else {
+        showers >= spec.min_showers
+    };
     let all_bands = bands.iter().all(|b| b.passed);
     Viability {
         ticks: spec.window_ticks,
@@ -217,6 +247,9 @@ pub fn measure(world: &mut World, spec: &ViabilitySpec) -> Viability {
         atmosphere_max: atmosphere.iter().copied().fold(f64::NEG_INFINITY, f64::max),
         showers,
         showers_enough,
+        scheduled,
+        store_end,
+        store_floor,
         soil_columns,
         bands,
         residual: world.view().total_residual(),
@@ -341,6 +374,58 @@ mod tests {
         assert!(report.soil_columns > 0, "{report}");
         assert!(report.bands[0].passed, "{report}");
         assert!(report.viable, "{report}");
+    }
+
+    /// With the rain on a schedule the probe stops counting showers it cannot wait for
+    /// and asks the question that matters: can the store still pay for the next one?
+    #[test]
+    fn a_scheduled_probe_judges_the_store() {
+        let cycling = |atmosphere_m3: f64| Config {
+            width: 8,
+            height: 8,
+            depth: 2,
+            rain_m_per_s: 3.5e-5,
+            evaporation_m_per_s: 3.0e-5,
+            closed_water_budget: true,
+            initial_atmosphere_m3: atmosphere_m3,
+            shower_trigger_fraction: 0.01,
+            shower_volume_m3: 0.05,
+            // Five minutes at least: longer than the probe's own window, which is the
+            // whole point.
+            shower_interval_min_s: 300.0,
+            shower_interval_max_s: 900.0,
+            initial_aquifer_head_m: 0.4,
+            ..Config::default()
+        };
+        let soil = |c: &Config| {
+            let mut w = World::empty(c.clone());
+            for x in 0..c.width as i64 {
+                for z in 0..c.depth {
+                    w.apply(Command::SetMaterial {
+                        x,
+                        y: 1,
+                        z,
+                        material: Material::Soil,
+                    });
+                }
+            }
+            w
+        };
+
+        let full = cycling(0.3);
+        let report = measure(&mut soil(&full), &spec());
+        assert_eq!(report.showers, 0, "the window is shorter than the gap");
+        assert!(report.scheduled && report.showers_enough, "{report}");
+        assert!(report.viable, "{report}");
+        assert!(
+            report.to_string().contains("schedule on"),
+            "the line says what it judged: {report}"
+        );
+
+        let starved = cycling(0.0);
+        let report = measure(&mut soil(&starved), &spec());
+        assert!(!report.showers_enough, "an empty store pays for nothing");
+        assert!(!report.viable, "{report}");
     }
 
     /// The same world with nothing aloft and nothing to lift: no shower ever runs, so

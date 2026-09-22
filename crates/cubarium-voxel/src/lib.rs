@@ -51,7 +51,7 @@ pub mod water;
 pub mod world;
 
 pub use config::Config;
-pub use generate::{Budget, Heightfield, Volume};
+pub use generate::{Budget, Heightfield, LakeDatum, Volume};
 pub use hollows::Hollow;
 pub use hydrate::{Basin, Hydrated, hydrate};
 pub use ledger::Ledger;

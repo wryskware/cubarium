@@ -54,7 +54,7 @@ use anyhow::{Context, Result, bail};
 use cubarium_render::Canvas;
 use cubarium_search::es::voxel::{EpisodeDriver, VoxelPolicyFile};
 use cubarium_surface::{Scale, Topology};
-use cubarium_voxel::{Command as VoxelCommand, Material, PoreBand, ViabilitySpec, World};
+use cubarium_voxel::{Command as VoxelCommand, Landform, Material, PoreBand, ViabilitySpec, World};
 use cubarium_voxel_fauna::{
     Command as FaunaCommand, Controller, Fauna, FaunaConfig, FaunaLedger, Founder, Response,
     Senses, Species as Beast,
@@ -405,25 +405,89 @@ fn load_or_create_world(args: &Voxel, cfg: &VoxelConfig) -> Result<(World, Strin
         }
     }
 
-    let mut world_cfg = cfg.world.clone();
+    let world_cfg = cfg.world.clone();
     let (world, label) = match args.scene {
         VoxelSceneArg::Authored => (scene::authored(world_cfg), "authored".to_string()),
         VoxelSceneArg::Generated => {
-            let seed = args
-                .seed
-                .or_else(|| cfg_seed_from_file(&args.config))
-                .unwrap_or_else(|| {
-                    let s = random_seed();
-                    eprintln!("cubarium voxel: procedural world generated with random seed {s}");
-                    s
-                });
-            world_cfg.seed = seed;
-            let world = World::new(world_cfg);
-            let label = format!("generated (seed {seed})");
+            let asked = args.seed.or_else(|| cfg_seed_from_file(&args.config));
+            let (world, seed, rejected) =
+                generate_with_a_lake(&world_cfg, asked, LAKE_SEED_TRIES, random_seed);
+            let label = if rejected > 0 {
+                format!("generated (seed {seed}, {rejected} rejected)")
+            } else {
+                format!("generated (seed {seed})")
+            };
             (world, label)
         }
     };
     Ok((world, label, false))
+}
+
+/// Random seeds tried before the generator gives up and keeps the wettest world it saw.
+const LAKE_SEED_TRIES: usize = 24;
+
+/// Draw generated worlds until one has a lake the camera can actually read.
+///
+/// **A ring with no visible water is not a habitat** (Wrysk, 2026-09-21: "reject any
+/// generated terrain seeds that dont have a pond or something water related"). The
+/// recipe says how much open water it wants in square metres
+/// ([`cubarium_voxel::Water::min_lake_m2`]); a seed under it is logged and redrawn, up to
+/// `tries`, and then the wettest of them is kept and said so loudly — a world is always
+/// returned, because refusing to start is worse than starting dry.
+///
+/// An **asked-for** seed is honoured whatever its lake, with a warning. Someone naming a
+/// seed wants that world, not a nearby one.
+fn generate_with_a_lake(
+    cfg: &cubarium_voxel::Config,
+    asked: Option<u64>,
+    tries: usize,
+    mut next_seed: impl FnMut() -> u64,
+) -> (World, u64, usize) {
+    let want = match &cfg.landform {
+        Landform::Staged(r) => r.water.min_lake_m2,
+        Landform::Ridge => 0.0,
+    };
+    let build = |seed: u64| {
+        World::new(cubarium_voxel::Config {
+            seed,
+            ..cfg.clone()
+        })
+    };
+    if let Some(seed) = asked {
+        let world = build(seed);
+        let got = cubarium_voxel::hydrate::lake(&world).visible_m2;
+        if want > 0.0 && got < want {
+            eprintln!(
+                "cubarium voxel: seed {seed} was asked for, so it is kept — but its lake \
+                 is {got:.1} m² visible against the {want:.1} m² a drawn seed would need"
+            );
+        }
+        return (world, seed, 0);
+    }
+    let mut best: Option<(f64, u64, World)> = None;
+    for k in 0..tries.max(1) {
+        let seed = next_seed();
+        let world = build(seed);
+        let got = cubarium_voxel::hydrate::lake(&world).visible_m2;
+        if got >= want {
+            if k > 0 {
+                eprintln!("cubarium voxel: seed {seed} accepted: lake {got:.1} m² visible");
+            } else {
+                eprintln!("cubarium voxel: procedural world generated with random seed {seed}");
+            }
+            return (world, seed, k);
+        }
+        eprintln!("cubarium voxel: seed {seed} rejected: lake {got:.1} m² visible, need {want:.1}");
+        if best.as_ref().is_none_or(|(b, _, _)| got > *b) {
+            best = Some((got, seed, world));
+        }
+    }
+    let (got, seed, world) = best.expect("at least one try");
+    eprintln!(
+        "cubarium voxel: NO SEED of {tries} had a lake of {want:.1} m²; keeping the wettest, \
+         seed {seed} with {got:.1} m² — this world will look dry"
+    );
+    (world, seed, tries)
 }
 
 /// Run `cubarium voxel`.
@@ -503,6 +567,13 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                 // moving and whether it did. The ordinary display shows none of this.
                 let st = seeded.settle;
                 let wc = world.config().clone();
+                let lake = cubarium_voxel::hydrate::lake(&world);
+                eprintln!(
+                    "cubarium voxel: lake {:.2} m³ over {:.1} m², {:.1} m² visible",
+                    lake.volume_m3,
+                    lake.surface_cells.len() as f64 * world.config().cell_area(),
+                    lake.visible_m2,
+                );
                 eprintln!(
                     "cubarium voxel: {} — water settled in {} ticks ({}), {:.2} m³ pooled \
                      in {} cells, {:.2} m³ pore, drift {:.2e} m³/100 ticks{}",
@@ -1908,6 +1979,65 @@ mod tests {
                 "{key} is the recipe's business, not the panel's"
             );
         }
+    }
+
+    /// A generated world has to have water somebody can see. The gate redraws until it
+    /// does, keeps the wettest when no seed obliges, and never argues with a seed that
+    /// was asked for by name.
+    #[test]
+    fn the_gate_rejects_and_redraws() {
+        // A short staged ring, so four generations stay well inside a second.
+        let staged = |min_lake_m2: f64| {
+            let mut recipe = cubarium_voxel::Recipe::DEFAULT;
+            recipe.water.min_lake_m2 = min_lake_m2;
+            cubarium_voxel::Config {
+                width: 32,
+                height: 24,
+                depth: 4,
+                voxel_m: 0.25,
+                landform: Landform::Staged(recipe),
+                ..cubarium_voxel::Config::default()
+            }
+        };
+        let seeds = |list: Vec<u64>| {
+            let mut it = list.into_iter();
+            move || {
+                it.next()
+                    .expect("the gate asked for more seeds than it was given")
+            }
+        };
+
+        // Nothing is asked of the lake, so the first draw is the world.
+        let (_, seed, rejected) = generate_with_a_lake(&staged(0.0), None, 4, seeds(vec![11, 12]));
+        assert_eq!(
+            (seed, rejected),
+            (11, 0),
+            "with no bar, the first seed passes"
+        );
+
+        // A bar no ring can clear: every seed is rejected and the wettest is kept.
+        let cfg = staged(1e6);
+        let (world, seed, rejected) = generate_with_a_lake(&cfg, None, 3, seeds(vec![21, 22, 23]));
+        assert_eq!(rejected, 3, "every try was rejected");
+        assert!(
+            [21, 22, 23].contains(&seed),
+            "it kept one of the tries: {seed}"
+        );
+        let kept = cubarium_voxel::hydrate::lake(&world).visible_m2;
+        for other in [21u64, 22, 23] {
+            let w = World::new(cubarium_voxel::Config {
+                seed: other,
+                ..cfg.clone()
+            });
+            assert!(
+                cubarium_voxel::hydrate::lake(&w).visible_m2 <= kept + 1e-12,
+                "seed {seed} was the wettest of the three, not seed {other}"
+            );
+        }
+
+        // An asked-for seed is the world, bar or no bar.
+        let (_, seed, rejected) = generate_with_a_lake(&cfg, Some(77), 3, seeds(vec![]));
+        assert_eq!((seed, rejected), (77, 0), "a named seed is honoured");
     }
 
     /// A config file whose `[world]` no world can be built from is an error, not a panic:
