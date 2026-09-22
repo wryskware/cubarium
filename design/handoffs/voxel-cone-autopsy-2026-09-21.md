@@ -134,3 +134,35 @@ mapping test; the ridge arm reproducing the reproduction note's browser deaths
 The table from deliverable 6; the diagnosis in one sentence; which fine class
 dominates at death per arm; the wander numbers; the commit list; what you could
 not measure and why. Evidence over conclusions: I will re-run one arm.
+
+## Integration note (Fable, 2026-09-21)
+
+Landed: 9f7a6cb (fine ray classes behind the unchanged coarse mapping, a
+200-tick test that the census maps onto the policy's reading exactly), 2f1cfed
+(`preset=<name>` arm in both examples, built as the host builds it through a
+new `voxel::ambient_world`; BCONE/CONEX/WANDER/DEATHCONE rows), 3344d50 (D4 in
+`design/7_Research/voxel-census-2026-09-20.md`). 757 tests green in the two
+crates. Fable re-ran `preset=small` for 60 min and reproduced the worker's arm
+exactly: 30 stands seeded, 12 browser deaths all starved (first 14.8 min, last
+52.1), one browser alive at 60, residuals ~1e-11.
+
+Corrections to this brief's premises, both found by the worker: since 3d80bb4
+the host's `VoxelConfig::default().world` already *is* the `default` preset,
+and `World::new` writes a staged recipe's water over the harness rain, so
+`generated closed` has been a 0.25 m staged world (not the ridge) since the
+terrain merge; and the "foliage 8.05 → 0.43" line in Fable's baseline message
+was the litter column (foliage there is 4.15 → 0.12).
+
+Finding: the cone is mostly **clear** at death in all three arms; it reads no
+foliage because the nearest living crown is almost never at once within 2 m,
+inside the ±20° pitch band and unoccluded (4 of 51 deaths). On the panel's
+`small` (0.125 m) the crowns are scaled to metres by
+`FloraConfig::for_voxel_size` while the browser's eye (1.5 voxels) and mouth
+reach are in voxels, so 8 of 12 unoccluded crowns sit at +36° above an eye
+0.19 m off the ground. On `default` (0.25 m) the nearest crown averages 1.67 m
+away, out of range for 11 of 24, and ground pools are the commonest blocker.
+Water is minor everywhere. Wander covers ground (3–10 m per browser-minute, up
+to 271 m in a life); it is not penned. Candidates ranked in D4; the first one,
+vertical geometry in metres, is a decision for Wrysk because it is the sensor
+interface. Not measured: whether a visible crown would be eatable (D3's
+mouth boundary is untouched).
