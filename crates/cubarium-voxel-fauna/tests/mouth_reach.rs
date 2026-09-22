@@ -1,14 +1,23 @@
-//! The browser's **vertical mouth reach** (`design/handoffs/voxel-browser-reach-2026-09-21.md`,
-//! step 1): the mouth accepts a crown layer in `standing_y + 1 ..= standing_y + 1 +
-//! mouth_reach_up_voxels`, which for the browser is its own head layer and the one voxel
-//! above it, and for the blind feeder is its head layer alone.
+//! The browser's **vertical mouth reach**, now a physical band
+//! (`design/handoffs/voxel-body-anchors-2026-09-22.md`, decisions §2): the mouth accepts
+//! the crown layers the interval `[0, 1.33 × body height]` over the standing surface
+//! overlaps. The whole-voxel `mouth_reach_up_voxels` rule these tests were first written
+//! for (`design/handoffs/voxel-browser-reach-2026-09-21.md`) is gone; the field survives
+//! on the `Manifest` as the trained contract's record and is not read.
 //!
-//! These four tests are the brief's, written before the rule. They are short function
-//! tests on a flat 0.25 m world whose ground support face is `y = 2`, so a body stands in
-//! layer 3 (`head`), `head + 1` is layer 4 and `head + 2` is layer 5. Crown layers are
-//! made with **bloomcrown** wood, whose `crown_height_voxels` spans `[1, 3]`: wood 0.12
-//! rounds to one voxel, 0.30 to two and 0.60 to three. Nothing here pins a trajectory;
-//! the amounts asserted are the frozen bite rate and the plant layer's own stock.
+//! The arithmetic on this fixture: the browser here is 0.8 of `body_max`, so its height
+//! is `0.1875 · 0.8^(1/3) = 0.174` m and its ceiling `1.33 ×` that, 0.2315 m — inside
+//! one 0.25 m cell. On a 0.25 m world the mouth therefore takes its own head layer and
+//! nothing above it, and a crown one voxel up is 0.25 m of air away from a 0.23 m
+//! mouth. That is the succession story decisions §2 asks for and the basal rosette of
+//! the layers package is the answer to it.
+//!
+//! Short function tests on a flat 0.25 m world whose ground support face is `y = 2`, so
+//! a body stands in layer 3 (`head`), `head + 1` is layer 4 and `head + 2` is layer 5.
+//! Crown layers are made with **bloomcrown** wood, whose `crown_height_voxels` spans
+//! `[1, 3]`: wood 0.12 rounds to one voxel, 0.30 to two and 0.60 to three. Nothing here
+//! pins a trajectory; the amounts asserted are the frozen bite rate and the plant
+//! layer's own stock.
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
 use cubarium_voxel_flora::{
@@ -114,26 +123,30 @@ fn browser_feeding(fauna: &mut Fauna, world: &World, x: i64, z: u32) -> u64 {
 /// One controller period of the frondgrazer's frozen bite rate.
 const ONE_BITE: f64 = 0.002 * 0.25;
 
-/// (a) A browser standing at `y` bites a stand whose crown layer is `y + 2` — one voxel
-/// above its own head. The stock moves by exactly one bite of the frozen rate, and the
-/// mouth diagnostic names the same stand the bite took from.
+/// (a) A browser bites a crown at its **own head layer** — the whole of the band on a
+/// 0.25 m world. The stock moves by exactly one bite of the frozen rate, and the mouth
+/// diagnostic names the same stand the bite took from.
 #[test]
-fn a_browser_bites_a_crown_one_voxel_above_its_head() {
+fn a_browser_bites_a_crown_at_its_head_layer() {
     let world = flat_world();
     let mut flora = Flora::new(FloraConfig::default());
-    let before = crown_at(&mut flora, &world, 2, 2, 0.30, 1);
+    let before = crown_at(&mut flora, &world, 2, 2, 0.12, 0);
 
     let mut fauna = Fauna::new(FaunaConfig::default());
     let id = browser_feeding(&mut fauna, &world, 2, 2);
-    let reached = cubarium_voxel_fauna::browser_mouth_foliage(
-        &world.view(),
-        &flora.view(),
-        fauna.view().animal(id).expect("the placed browser"),
-    );
+    let reached = {
+        let av = fauna.view();
+        cubarium_voxel_fauna::browser_mouth_foliage(
+            &world.view(),
+            &flora.view(),
+            av.config,
+            av.animal(id).expect("the placed browser"),
+        )
+    };
     assert_eq!(
         reached.map(|(s, _)| s),
         Some(site(2, 2)),
-        "the mouth must reach the crown one voxel above the head"
+        "the mouth must reach the crown at its own layer"
     );
 
     for _ in 0..5 {
@@ -143,13 +156,43 @@ fn a_browser_bites_a_crown_one_voxel_above_its_head() {
     assert_eq!(fauna.view().ledger.bites, 1, "one attempt, one bite");
     assert!(
         ((before - after) - ONE_BITE).abs() < 1e-12,
-        "foliage one voxel up moved by {}",
+        "foliage at the head moved by {}",
         before - after
     );
+}
+
+/// (a2) And the same browser no longer reaches a crown one 0.25 m voxel above its head:
+/// its physical ceiling is 0.2315 m. This is the rule that changed on 2026-09-22 — the
+/// manifest still records the old `mouth_reach_up_voxels` of one, and nothing reads it.
+#[test]
+fn a_crown_one_voxel_above_the_head_is_out_of_the_physical_band() {
+    let world = flat_world();
+    let mut flora = Flora::new(FloraConfig::default());
+    let before = crown_at(&mut flora, &world, 2, 2, 0.30, 1);
+
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let id = browser_feeding(&mut fauna, &world, 2, 2);
+    let reached = {
+        let av = fauna.view();
+        cubarium_voxel_fauna::browser_mouth_foliage(
+            &world.view(),
+            &flora.view(),
+            av.config,
+            av.animal(id).expect("the placed browser"),
+        )
+    };
+    assert_eq!(reached, None, "0.25 m of air is over a 0.2315 m mouth");
+
+    for _ in 0..5 {
+        fauna.step(&world, &mut flora);
+    }
+    let after = flora.view().stand_at(site(2, 2)).expect("alive").foliage;
+    assert_eq!(fauna.view().ledger.bites, 0, "no contact, no bite");
+    assert_eq!(before, after, "an unreachable crown is not cropped");
     assert_eq!(
         Founder::Browser.manifest().mouth_reach_up_voxels,
         1,
-        "the browser's declared vertical mouth reach"
+        "the recorded contract keeps the field the shipped centres were trained with"
     );
 }
 
@@ -163,13 +206,17 @@ fn a_browser_cannot_bite_a_crown_two_voxels_above_its_head() {
 
     let mut fauna = Fauna::new(FaunaConfig::default());
     let id = browser_feeding(&mut fauna, &world, 2, 2);
-    assert_eq!(
+    let reached = {
+        let av = fauna.view();
         cubarium_voxel_fauna::browser_mouth_foliage(
             &world.view(),
             &flora.view(),
-            fauna.view().animal(id).expect("the placed browser"),
-        ),
-        None,
+            av.config,
+            av.animal(id).expect("the placed browser"),
+        )
+    };
+    assert_eq!(
+        reached, None,
         "a crown two voxels above the head is out of the mouth's reach"
     );
 
@@ -261,18 +308,26 @@ fn the_mouth_diagnostic_agrees_with_the_stepping_rule_at_three_crown_heights() {
         let mut flora = flora.clone();
         let mut fauna = Fauna::new(FaunaConfig::default());
         let id = browser_feeding(&mut fauna, &world, x, 2);
-        let diagnosed = cubarium_voxel_fauna::browser_mouth_foliage(
-            &world.view(),
-            &flora.view(),
-            fauna.view().animal(id).expect("the placed browser"),
-        )
-        .map(|(s, _)| s);
-        let candidates = cubarium_voxel_fauna::browser_mouth_candidates(
-            &world.view(),
-            &flora.view(),
-            fauna.view().animal(id).expect("the placed browser"),
-        )
-        .expect("a browser has mouth candidates");
+        let (diagnosed, candidates) = {
+            let av = fauna.view();
+            let animal = av.animal(id).expect("the placed browser");
+            (
+                cubarium_voxel_fauna::browser_mouth_foliage(
+                    &world.view(),
+                    &flora.view(),
+                    av.config,
+                    animal,
+                )
+                .map(|(s, _)| s),
+                cubarium_voxel_fauna::browser_mouth_candidates(
+                    &world.view(),
+                    &flora.view(),
+                    av.config,
+                    animal,
+                )
+                .expect("a browser has mouth candidates"),
+            )
+        };
 
         for _ in 0..5 {
             fauna.step(&world, &mut flora);
@@ -293,11 +348,11 @@ fn the_mouth_diagnostic_agrees_with_the_stepping_rule_at_three_crown_heights() {
             bit,
             "crown at head + {rise}: the candidate list disagrees with the tick"
         );
+        // The band, not a voxel count: this body's ceiling is under one 0.25 m cell,
+        // so only the head layer is in reach.
         assert_eq!(
-            bit,
-            rise <= i64::from(Founder::Browser.manifest().mouth_reach_up_voxels),
-            "crown at head + {rise} against a declared reach of {}",
-            Founder::Browser.manifest().mouth_reach_up_voxels
+            bit, rise == 0,
+            "crown at head + {rise} against a 0.2315 m physical mouth band"
         );
         if bit {
             assert!(

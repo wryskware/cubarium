@@ -74,10 +74,7 @@ use cubarium_voxel::{VoxelView, World};
 use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraView, Site, Taken};
 use serde::{Deserialize, Serialize};
 
-pub use body::{
-    FounderPhysiology, climb_voxels, effective_config, has_headroom, headroom_voxels,
-    mouth_reach_up_voxels,
-};
+pub use body::{Body, FounderPhysiology, climb_voxels, effective_config, has_headroom};
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
     FounderFactories, Response, Scripted, resolve_actions,
@@ -112,6 +109,7 @@ pub fn browser_cone_readings(
         return None;
     }
     let occupancy = senses::cone_occupancy(view, flora, fauna);
+    let body = fauna.config.founder(Founder::Browser).body_at(animal.body);
     let reading = senses::cone_readings(
         view,
         &occupancy,
@@ -119,6 +117,7 @@ pub fn browser_cone_readings(
         &animal.pose,
         animal.site.y,
         &Founder::Browser.manifest(),
+        &body,
     );
     reading.valid.then_some(
         reading
@@ -293,7 +292,8 @@ pub fn browser_cone_census(
         return None;
     }
     let occupancy = senses::cone_occupancy(view, flora, fauna);
-    let origin = senses::cone_origin(view, &animal.pose, animal.site.y);
+    let geometry = fauna.config.founder(Founder::Browser).body_at(animal.body);
+    let origin = senses::cone_origin(view, &animal.pose, animal.site.y, &geometry);
     let heading = animal.pose.heading_rad;
     let range = manifest.cone_range_m;
     let march = |sector: usize, yaw_deg: f64, pitch_deg: f64, dir: (f64, f64, f64)| {
@@ -344,14 +344,22 @@ pub fn browser_cone_census(
 pub fn browser_mouth_foliage(
     view: &VoxelView<'_>,
     flora: &FloraView<'_>,
+    config: &FaunaConfig,
     animal: &Animal,
 ) -> Option<(Site, f64)> {
+    let geometry = body_of(config, animal)?;
     if animal.founder != Some(Founder::Browser) {
         return None;
     }
-    let manifest = Founder::Browser.manifest();
-    let cols = body::mouth_columns(view, &animal.pose, &manifest);
-    body::mouth_foliage_stand(flora, view, &cols, animal.site.y, &manifest)
+    let cols = body::mouth_columns(view, &animal.pose, &geometry);
+    body::mouth_foliage_stand(flora, view, &cols, animal.site.y, &geometry)
+}
+
+/// The physical geometry of one animal right now, from its lineage's physiology and its
+/// structure ([`FounderPhysiology::body_at`]). `None` for a body with no founder marker:
+/// the live heuristic species carry no dimensions at all.
+pub fn body_of(config: &FaunaConfig, animal: &Animal) -> Option<Body> {
+    Some(config.founder(animal.founder?).body_at(animal.body))
 }
 
 /// Every stand whose crown touches the browser's actual mouth probe columns.
@@ -359,19 +367,20 @@ pub fn browser_mouth_foliage(
 pub fn browser_mouth_candidates(
     view: &VoxelView<'_>,
     flora: &FloraView<'_>,
+    config: &FaunaConfig,
     animal: &Animal,
 ) -> Option<Vec<(Site, f64)>> {
     if animal.founder != Some(Founder::Browser) {
         return None;
     }
-    let manifest = Founder::Browser.manifest();
-    let cols = body::mouth_columns(view, &animal.pose, &manifest);
+    let geometry = body_of(config, animal)?;
+    let cols = body::mouth_columns(view, &animal.pose, &geometry);
     Some(body::mouth_foliage_stands(
         flora,
         view,
         &cols,
         animal.site.y,
-        &manifest,
+        &geometry,
     ))
 }
 
@@ -1057,6 +1066,37 @@ impl FaunaConfig {
                     founder.name(),
                     phys.organ_structure_fraction
                 ));
+            }
+            // The body is a physical object: every dimension positive, every anchor a
+            // finite nonnegative fraction of one. A zero-height animal has no eye, no
+            // mouth band and no clearance, so it is refused rather than clamped.
+            for (name, value) in [
+                ("adult_length_m", phys.adult_length_m),
+                ("adult_width_m", phys.adult_width_m),
+                ("adult_height_m", phys.adult_height_m),
+            ] {
+                if !value.is_finite() || value <= 0.0 {
+                    return Err(format!(
+                        "{}.{name} must be finite and positive, not {value}",
+                        founder.name()
+                    ));
+                }
+            }
+            for (name, value) in [
+                ("eye_height_fraction", phys.eye_height_fraction),
+                ("mouth_ceiling_fraction", phys.mouth_ceiling_fraction),
+                ("contact_height_fraction", phys.contact_height_fraction),
+                (
+                    "mouth_reach_length_fraction",
+                    phys.mouth_reach_length_fraction,
+                ),
+            ] {
+                if !value.is_finite() || value < 0.0 {
+                    return Err(format!(
+                        "{}.{name} must be finite and nonnegative, not {value}",
+                        founder.name()
+                    ));
+                }
             }
         }
         Ok(())

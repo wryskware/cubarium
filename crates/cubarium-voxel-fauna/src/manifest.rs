@@ -171,9 +171,21 @@ pub struct Manifest {
     pub deadband: f64,
     /// Controller period, seconds. Physics remains at the simulation tick.
     pub controller_period_s: f64,
-    /// Body length in metres. Cruise speed is `1 BL/s`.
+    /// Body length in metres, **as the trained contract recorded it**. The cruise speed
+    /// below was set at `1 BL/s` against it.
+    ///
+    /// **Not read for geometry since 2026-09-22**
+    /// (`design/handoffs/voxel-body-anchors-2026-09-22.md`, decisions §1). The animal's
+    /// real dimensions are its lineage's adult dimensions on the
+    /// [`FounderPhysiology`](crate::FounderPhysiology), scaled by
+    /// `(body / body_max)^(1/3)`, and they live there precisely because this field is
+    /// in [`Manifest::canonical_text`]: moving it would refuse the shipped centres. It
+    /// stays as the record of what the centres in `crates/cubarium/assets/policies`
+    /// were trained against, and package 5's retrain is where the two are reconciled.
     pub body_length_m: f64,
-    /// Footprint width in metres: half the body length for these two founders.
+    /// Footprint width in metres as the trained contract recorded it: half the body
+    /// length for these two founders. **Not read for geometry** — see
+    /// [`Manifest::body_length_m`].
     pub body_width_m: f64,
     /// Organic-mass reference the founder's `Self` channels are normalized against.
     pub body_reference: f64,
@@ -191,18 +203,20 @@ pub struct Manifest {
     /// controller interval** — one controller period of cruise or yaw — not the rate.
     pub forward_reference_m: f64,
     pub turn_reference_rad: f64,
-    /// Mouth/feed reach, in body lengths.
+    /// Mouth/feed reach, in body lengths, as the trained contract recorded it. **Not
+    /// read for geometry** — the live reach is `mouth_reach_length_fraction × length`
+    /// on the physiology, at the same 0.25 — see [`Manifest::body_length_m`].
     pub mouth_reach_body_lengths: f64,
-    /// How many whole voxels **above its own head layer** the mouth can still take food
-    /// from: a browser lifts its head one voxel (0.25 m, one body length) to reach a
-    /// grown crown, a ground feeder cannot (`design/handoffs/voxel-browser-reach-
-    /// 2026-09-21.md`). The accepted crown layers are
-    /// `standing_y + 1 ..= standing_y + 1 + mouth_reach_up_voxels`; the contact, taste
-    /// and cone rules are untouched.
+    /// How many whole voxels above its own head layer the mouth could take food from
+    /// under the rule of 2026-09-21 (`design/handoffs/voxel-browser-reach-2026-09-21.md`).
     ///
-    /// Only a **non-zero** reach is written into [`Manifest::canonical_text`], so a
-    /// lineage that cannot lift its head keeps the digest it had before this field
-    /// existed and its trained centres keep loading.
+    /// **Not read since 2026-09-22.** The mouth is a physical band
+    /// `[0, 1.33 × body height]` over the standing surface
+    /// ([`crate::Body::mouth_layers`]; decisions §2), which for the adult browser is
+    /// 0.249375 m — less than the one 0.25 m voxel this field claimed, and two cells on
+    /// a 0.125 m grid, which is the same air. The field stays because it is in
+    /// [`Manifest::canonical_text`] whenever it is non-zero: removing it would move the
+    /// browser's digest and refuse its shipped centre for nothing.
     pub mouth_reach_up_voxels: u32,
     /// Which cue the mouth's one taste channel means: `litter` for the blind feeder,
     /// `foliage` for the browser.

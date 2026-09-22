@@ -447,7 +447,7 @@ fn plan_for(
     }
     {
         let sc = *config.species(a.species);
-        let headroom = body_headroom(a, view);
+        let headroom = body_headroom(a, config, view);
         let reach = fv.reachable_foliage(view, a.site, sc.reach);
         let total: f64 = reach.iter().map(|&(_, f)| f).sum();
         let bite = sc.bite_per_s * DT;
@@ -547,13 +547,12 @@ fn plan_for(
     }
 }
 
-/// The void this body needs over the face it stands on. A phase-one founder's comes from
-/// its manifest ([`crate::body::headroom_voxels`]); a heuristic species carries no
-/// geometry at all, so it asks for the one voxel `is_support` already guarantees.
-fn body_headroom(a: &Animal, view: &VoxelView<'_>) -> u32 {
-    a.founder
-        .map(|f| crate::body::headroom_voxels(&f.manifest(), view.config.voxel_m))
-        .unwrap_or(1)
+/// The void this body needs over the face it stands on: a phase-one founder's own
+/// **height**, in whole voxels ([`crate::Body::headroom_voxels`]). A heuristic species
+/// carries no geometry at all, so it asks for the one voxel `is_support` already
+/// guarantees.
+fn body_headroom(a: &Animal, config: &crate::FaunaConfig, view: &VoxelView<'_>) -> u32 {
+    crate::body_of(config, a).map_or(1, |b| b.headroom_voxels(view.config.voxel_m))
 }
 
 /// Every support face of a column an animal of this species could stand on: shallow
@@ -619,7 +618,8 @@ fn act(
             continue;
         }
         let a = fauna.animals[i];
-        if let Some(to) = toward(view, &a, target, &sc, seed, tick) {
+        let config = fauna.config;
+        if let Some(to) = toward(view, &a, &config, target, &sc, seed, tick) {
             fauna.animals[i].site = to;
             // Keep the continuous pose tied to the support face the heuristic just moved
             // to; P1-A's founders do not take this path at all.
@@ -654,7 +654,10 @@ fn founder_act(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &mut Fl
     // `|v| + r·|yaw rate|` against the cruise reference. Turning while stopped is
     // permitted and paid; an attempt a wall blocks is attempted in full and paid in
     // full; zero movement is rest and pays nothing here.
-    let r = body::footprint_radius(&manifest);
+    // The body this animal has right now: its footprint, its clearance, its mouth band
+    // and its receptors are all fractions of it (decisions §1).
+    let geometry = phys.body_at(fauna.animals[i].body);
+    let r = geometry.footprint_radius();
     let v_req = held.forward * manifest.cruise_m_per_s;
     let yaw_req = held.turn * manifest.yaw_cap_rad_per_s;
     let eq_rate = v_req.abs() + r * yaw_req.abs();
@@ -677,6 +680,7 @@ fn founder_act(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &mut Fl
             &mut a.pose,
             &mut standing_y,
             &manifest,
+            &geometry,
             sc.wade_depth_m,
             climb,
             held,
@@ -715,7 +719,7 @@ fn founder_act(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &mut Fl
     // no-contact attempt transfers nothing.
     let mut fed = false;
     if due && held.feed > 0.0 {
-        fed = founder_feed(fauna, i, view, flora, &manifest, &sc, held.feed);
+        fed = founder_feed(fauna, i, view, flora, &manifest, &geometry, &sc, held.feed);
     }
 
     fauna.animals[i].state = if fed {
@@ -732,12 +736,14 @@ fn founder_act(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &mut Fl
 /// through [`Flora::take_litter`] / [`Flora::take_foliage`], debiting the real stocks,
 /// exactly one withdrawal per attempt. Nothing in reach, a mouth in the air, or an
 /// unsupported body transfers nothing at all.
+#[allow(clippy::too_many_arguments)]
 fn founder_feed(
     fauna: &mut Fauna,
     i: usize,
     view: &VoxelView<'_>,
     flora: &mut Flora,
     manifest: &crate::Manifest,
+    geometry: &crate::Body,
     sc: &SpeciesConfig,
     effort: f64,
 ) -> bool {
@@ -761,7 +767,7 @@ fn founder_feed(
     if !supported {
         return false;
     }
-    let cols = body::mouth_columns(view, &pose, manifest);
+    let cols = body::mouth_columns(view, &pose, geometry);
     match founder {
         Founder::Blind => {
             let Some(site) = body::mouth_litter_site(&flora.view(), &cols, site_y) else {
@@ -779,7 +785,7 @@ fn founder_feed(
         }
         Founder::Browser => {
             let Some((root, _)) =
-                body::mouth_foliage_stand(&flora.view(), view, &cols, site_y, manifest)
+                body::mouth_foliage_stand(&flora.view(), view, &cols, site_y, geometry)
             else {
                 return false;
             };
@@ -921,13 +927,14 @@ fn assimilate(fauna: &mut Fauna, flora: &mut Flora, i: usize, sc: &SpeciesConfig
 fn toward(
     view: &VoxelView<'_>,
     a: &Animal,
+    config: &crate::FaunaConfig,
     target: Site,
     sc: &SpeciesConfig,
     seed: u64,
     tick: u64,
 ) -> Option<Site> {
     let width = i64::from(view.config.width);
-    let headroom = body_headroom(a, view);
+    let headroom = body_headroom(a, config, view);
     let here = distance(width, a.site, target);
     if here == 0 {
         return None;

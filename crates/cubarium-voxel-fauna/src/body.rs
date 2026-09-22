@@ -2,14 +2,18 @@
 //! contact/taste receptors of the manifest, and the geometry a local bite is allowed to
 //! touch (`design/voxel-senses-phase1-plan.md`, "Phase-one body and action contract").
 //!
-//! The body is an upright disc on the support layer: footprint radius
-//! `body_width / 2` (width is half the length, so the disc fits the length), centred on
-//! the [`Pose`](crate::Pose)'s `(x, z)`, standing on the support face one layer below
-//! its centre column. The forward mouth is the footprint plus a short reach of
-//! `mouth_reach_body_lengths` body lengths beyond it, and it takes food from the body's
-//! own layer plus the manifest's `mouth_reach_up_voxels`, authored on the 0.25 m
-//! reference grid and converted to whole voxels on finer grids — one reference voxel for
-//! the browser, which lifts its head 0.25 m to a grown crown, none for the ground feeder.
+//! **The body is in metres** (`design/handoffs/voxel-body-anchors-2026-09-22.md`,
+//! decisions §1, §2, §6). Its dimensions are its lineage's adult dimensions on the
+//! [`FounderPhysiology`] times `(body / body_max)^(1/3)`, resolved into one [`Body`]
+//! value that every consumer takes. It is an upright disc of radius `width / 2` on the
+//! support layer, centred on the [`Pose`](crate::Pose)'s `(x, z)`, standing on the
+//! support face one layer below its centre column, and it needs its own **height** of
+//! void over that face. The forward mouth is the footprint plus a reach of
+//! `0.25 × length` beyond it, and it takes food from the physical band
+//! `[0, 1.33 × height]` over the standing surface — not from a whole-voxel layer count.
+//! The [`Manifest`](crate::Manifest)'s `body_length_m`, `body_width_m` and
+//! `mouth_reach_up_voxels` are the **recorded contract** the shipped centres were
+//! trained against and are no longer read for geometry.
 //!
 //! # What movement is allowed to do
 //!
@@ -36,7 +40,8 @@
 //!
 //! Front/left/right contact receptors probe the footprint's boundary arc in their
 //! direction (the arc centre and ±45°, at the footprint radius) for a solid voxel at the
-//! layer a body *one climb higher* would occupy — `standing_y + 1 + climb`. **A solid the
+//! layer a body *one climb higher* would occupy — the cell holding `0.5 × height` over
+//! the standing surface, plus `climb`. **A solid the
 //! body could step onto is not a wall**: a steppable ledge reads as open ground and a
 //! cliff face or a taller wall reads exactly as it did before (the receptor is still one
 //! layer, and the observation vector's shape is unchanged). The bodies are smaller than a
@@ -68,6 +73,94 @@ pub(crate) const M_EMIT: f64 = 0.05;
 /// requested" for the motor-delivery channel, which then reads 1 by contract.
 const NONE_REQUESTED: f64 = 1e-12;
 
+// The anchor fractions, shared by both founders and listed as placeholders in
+// `design/backlog.md` §1 (decisions §2 and §6; the brief
+// `design/handoffs/voxel-body-anchors-2026-09-22.md`). They live on the physiology, not
+// on the `Manifest`, because manifest geometry is part of the trained-policy digest.
+
+/// The eye, as a fraction of body height over the standing surface.
+const EYE_HEIGHT_FRACTION: f64 = 0.8;
+/// The mouth band's ceiling, as a fraction of body height over the standing surface.
+const MOUTH_CEILING_FRACTION: f64 = 1.33;
+/// The contact receptors, as a fraction of body height over the standing surface.
+const CONTACT_HEIGHT_FRACTION: f64 = 0.5;
+/// The mouth's horizontal reach, as a fraction of body length ahead of the footprint.
+const MOUTH_REACH_LENGTH_FRACTION: f64 = 0.25;
+
+/// **A living body's physical geometry**, in metres, resolved from its lineage's
+/// [`FounderPhysiology`] and its current structure.
+///
+/// One value, handed to every consumer, so the animal is the same animal at the tick, in
+/// the presenter, in the seeder and in a diagnostic, and the grid appears only where a
+/// length is turned into cells (`design/voxel-encounter-contract-2026-09-21.md` §4).
+/// Every field is an absolute length: the dimensions are the adult's times
+/// `(body / body_max)^(1/3)` (decisions §1) and the anchors are the physiology's
+/// fractions of those.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Body {
+    /// Nose to tail.
+    pub length_m: f64,
+    /// Across; the footprint is a disc of half this.
+    pub width_m: f64,
+    /// Standing surface to the top of the back. The void a body needs is this tall.
+    pub height_m: f64,
+    /// The eye, metres over the standing surface.
+    pub eye_m: f64,
+    /// The mouth band is `[0, mouth_ceiling_m]` over the standing surface.
+    pub mouth_ceiling_m: f64,
+    /// The contact receptors, metres over the standing surface.
+    pub contact_m: f64,
+    /// How far ahead of the footprint the mouth reaches, in metres.
+    pub mouth_reach_m: f64,
+}
+
+impl Body {
+    /// The footprint disc's radius: half the body's width.
+    pub fn footprint_radius(&self) -> f64 {
+        self.width_m / 2.0
+    }
+
+    /// The void this body needs over the face it stands on, in whole voxels:
+    /// `ceil(height / voxel)`, never below one. The clearance is the **body**, not the
+    /// mouth: `mouth_reach_up_voxels` is no longer read for geometry.
+    pub fn headroom_voxels(&self, voxel_m: f64) -> u32 {
+        if !(voxel_m > 0.0) || !self.height_m.is_finite() || self.height_m <= 0.0 {
+            return 1;
+        }
+        let cells = (self.height_m / voxel_m).ceil();
+        if !cells.is_finite() || cells < 1.0 {
+            return 1;
+        }
+        (cells as u32).max(1)
+    }
+
+    /// The crown layers the mouth band reaches from `standing_y`: the cells whose slab
+    /// overlaps `[surface, surface + mouth_ceiling_m]` by a positive amount. A touch at
+    /// exactly the ceiling contributes nothing.
+    pub fn mouth_layers(
+        &self,
+        standing_y: u32,
+        voxel_m: f64,
+    ) -> std::ops::RangeInclusive<i64> {
+        crate::encounter::band_crown_layers(standing_y, voxel_m, self.mouth_ceiling_m)
+    }
+
+    /// The layer the contact receptors probe: the cell holding `contact_m` over the
+    /// standing surface. For either founder on either shipped grid this is the body's
+    /// own layer, which is where the receptors always were — it is now *derived* from
+    /// the body rather than assumed.
+    pub fn contact_layer(&self, standing_y: u32, voxel_m: f64) -> u32 {
+        if !(voxel_m > 0.0) || !self.contact_m.is_finite() || self.contact_m < 0.0 {
+            return standing_y + 1;
+        }
+        let up = (self.contact_m / voxel_m).floor();
+        if !up.is_finite() || up < 0.0 {
+            return standing_y + 1;
+        }
+        standing_y + 1 + up.min(f64::from(u32::MAX / 2)) as u32
+    }
+}
+
 /// A founder's own physiology: the digestive and upkeep numbers in the ordinary
 /// [`SpeciesConfig`] shape, plus the two phase-one cost settings the manifest's schema
 /// deliberately does not carry (cost coefficients change how good a policy can be, not
@@ -97,6 +190,28 @@ pub struct FounderPhysiology {
     /// loading. Converted to whole voxels once at the consumer by [`climb_voxels`].
     /// Placeholders, in `design/backlog.md` §1: browser 0.25 m, shredder 0.125 m.
     pub climb_m: f64,
+    /// The **adult** body, in metres: length, width and height
+    /// (`design/handoffs/voxel-body-anchors-2026-09-22.md`; decisions §1). The ladder's
+    /// animal — browser 0.375 × 0.1875 × 0.1875 m, shredder 0.19 × 0.0625 × 0.0625 m —
+    /// and *not* the [`Manifest`](crate::Manifest)'s `body_length_m` / `body_width_m`,
+    /// which are part of the trained-policy digest and must not move. A living body's
+    /// dimensions are these times `(body / body_max)^(1/3)`
+    /// ([`FounderPhysiology::body_at`]). Placeholders, `design/backlog.md` §1.
+    pub adult_length_m: f64,
+    pub adult_width_m: f64,
+    pub adult_height_m: f64,
+    /// The eye, as a fraction of body height over the standing surface (decisions §6:
+    /// 0.8). A placeholder, `design/backlog.md` §1.
+    pub eye_height_fraction: f64,
+    /// The mouth band's ceiling, as a fraction of body height over the standing surface
+    /// (decisions §2: 1.33, the dossier's raised neck). A placeholder.
+    pub mouth_ceiling_fraction: f64,
+    /// The contact receptors' height, as a fraction of body height over the standing
+    /// surface (0.5). A placeholder.
+    pub contact_height_fraction: f64,
+    /// The mouth's horizontal reach ahead of the footprint, as a fraction of body
+    /// length (decisions §2: 0.25, "as today"). A placeholder.
+    pub mouth_reach_length_fraction: f64,
     /// `f`, the declared share of the body's **total** structure that is sensor/organ
     /// tissue: 5% for the blind founder, 10% for the browser. The body's structure
     /// stock is the total; the sensor share is counted within it once — no second
@@ -152,6 +267,14 @@ impl FounderPhysiology {
                 // A ground feeder's placeholder climb: half a browser's, one voxel on
                 // either shipped grid (`design/backlog.md` §1).
                 climb_m: 0.125,
+                // The ladder's littershredder: 0.19 m long, a third of that in section.
+                adult_length_m: 0.19,
+                adult_width_m: 0.0625,
+                adult_height_m: 0.0625,
+                eye_height_fraction: EYE_HEIGHT_FRACTION,
+                mouth_ceiling_fraction: MOUTH_CEILING_FRACTION,
+                contact_height_fraction: CONTACT_HEIGHT_FRACTION,
+                mouth_reach_length_fraction: MOUTH_REACH_LENGTH_FRACTION,
                 organ_structure_fraction: 0.05,
             },
             Founder::Browser => FounderPhysiology {
@@ -165,6 +288,14 @@ impl FounderPhysiology {
                 // The browser's placeholder climb, one body length's worth of leg:
                 // two voxels on `small`, one on `default` and `wide`.
                 climb_m: 0.25,
+                // The ladder's frondgrazer: 6 x 3 x 3 cells of 0.125 m.
+                adult_length_m: 0.375,
+                adult_width_m: 0.1875,
+                adult_height_m: 0.1875,
+                eye_height_fraction: EYE_HEIGHT_FRACTION,
+                mouth_ceiling_fraction: MOUTH_CEILING_FRACTION,
+                contact_height_fraction: CONTACT_HEIGHT_FRACTION,
+                mouth_reach_length_fraction: MOUTH_REACH_LENGTH_FRACTION,
                 organ_structure_fraction: 0.10,
             },
         }
@@ -183,12 +314,46 @@ impl FounderPhysiology {
     pub fn sensor_structure(&self, total_body: f64) -> f64 {
         self.organ_structure_fraction * total_body.max(0.0)
     }
-}
 
-/// The footprint radius: half the manifest's body width, the upright disc the plan
-/// starts these founders with.
-pub(crate) fn footprint_radius(manifest: &Manifest) -> f64 {
-    manifest.body_width_m / 2.0
+    /// The adult's geometry: the authored dimensions, and the anchors as fractions of
+    /// them.
+    pub fn adult_body(&self) -> Body {
+        self.body_scaled(1.0)
+    }
+
+    /// The geometry of a body holding `body_organic` of structure: the adult's
+    /// dimensions times `(body / body_max)^(1/3)` (decisions §1), so a newborn browser
+    /// at `body_min` is 0.46 of the adult's length. Growth changes geometry only; no
+    /// rate reads this.
+    pub fn body_at(&self, body_organic: f64) -> Body {
+        let max = self.core.body_max;
+        let fraction = if max.is_finite() && max > 0.0 && body_organic.is_finite() {
+            (body_organic / max).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        self.body_scaled(fraction.cbrt())
+    }
+
+    fn body_scaled(&self, scale: f64) -> Body {
+        let scale = if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            0.0
+        };
+        let length_m = self.adult_length_m * scale;
+        let width_m = self.adult_width_m * scale;
+        let height_m = self.adult_height_m * scale;
+        Body {
+            length_m,
+            width_m,
+            height_m,
+            eye_m: self.eye_height_fraction * height_m,
+            mouth_ceiling_m: self.mouth_ceiling_fraction * height_m,
+            contact_m: self.contact_height_fraction * height_m,
+            mouth_reach_m: self.mouth_reach_length_fraction * length_m,
+        }
+    }
 }
 
 /// One tick's resolved motion, for the interval feedback. Attempted and delivered are
@@ -220,12 +385,13 @@ pub(crate) fn resolve_motion(
     pose: &mut crate::Pose,
     standing_y: &mut u32,
     manifest: &Manifest,
+    body: &Body,
     wade_depth_m: f64,
     climb: u32,
     held: Actions,
 ) -> Motion {
-    let r = footprint_radius(manifest);
-    let headroom = headroom_voxels(manifest, view.config.voxel_m);
+    let r = body.footprint_radius();
+    let headroom = body.headroom_voxels(view.config.voxel_m);
     let v_req = held.forward * manifest.cruise_m_per_s;
     let yaw_rate = held.turn * manifest.yaw_cap_rad_per_s;
     let attempted = (v_req.abs() + r * yaw_rate.abs()) * DT;
@@ -575,7 +741,7 @@ pub(crate) fn contact_readings(
     view: &VoxelView<'_>,
     pose: &crate::Pose,
     standing_y: u32,
-    manifest: &Manifest,
+    body: &Body,
     climb: u32,
 ) -> ContactReading {
     let c = view.config;
@@ -586,9 +752,9 @@ pub(crate) fn contact_readings(
         return ContactReading::UNRESOLVED;
     }
     // A probe above the world is open sky, not a wall.
-    let layer = standing_y + 1 + climb;
+    let layer = body.contact_layer(standing_y, c.voxel_m) + climb;
     let solid_above = layer < c.height;
-    let r = footprint_radius(manifest);
+    let r = body.footprint_radius();
     let wx = cx.rem_euclid(i64::from(c.width));
     let arc = |centre: f64| {
         if solid_above {
@@ -641,12 +807,12 @@ fn boundary_arc(view: &VoxelView<'_>, pose: &crate::Pose, r: f64, layer: u32, ce
 pub(crate) fn mouth_columns(
     view: &VoxelView<'_>,
     pose: &crate::Pose,
-    manifest: &Manifest,
+    body: &Body,
 ) -> Vec<(i64, u32)> {
     let c = view.config;
     let v = c.voxel_m;
-    let r = footprint_radius(manifest);
-    let reach = manifest.mouth_reach_body_lengths * manifest.body_length_m;
+    let r = body.footprint_radius();
+    let reach = body.mouth_reach_m;
     let (fx, fz) = pose.forward();
     let (rx, rz) = (fz, -fx);
     let tip = (pose.x + (r + reach) * fx, pose.z + (r + reach) * fz);
@@ -699,50 +865,18 @@ pub(crate) fn mouth_litter_site(
     best
 }
 
-/// A manifest's authored upward mouth reach expressed on `voxel_m`.
-///
-/// Manifest geometry is part of the trained-policy digest, so its whole-voxel value stays
-/// authored for the 0.25 m reference grid. Finer worlds convert that distance at runtime;
-/// reference-sized and coarser grids retain the historical count. A zero-reach mouth
-/// remains zero at every scale.
-pub fn mouth_reach_up_voxels(manifest: &Manifest, voxel_m: f64) -> u32 {
-    const REFERENCE_VOXEL_M: f64 = 0.25;
-
-    let authored = manifest.mouth_reach_up_voxels;
-    if authored == 0 || !voxel_m.is_finite() || !(voxel_m > 0.0) || voxel_m >= REFERENCE_VOXEL_M {
-        return authored;
-    }
-    (f64::from(authored) * REFERENCE_VOXEL_M / voxel_m)
-        .round()
-        .clamp(f64::from(authored), f64::from(u32::MAX)) as u32
-}
-
 /// A founder's authored climb height expressed on `voxel_m`: the one conversion, in
 /// `cubarium_voxel::walk::climb_voxels`, applied to the lineage's own
 /// [`FounderPhysiology::climb_m`].
 ///
-/// It sits beside [`mouth_reach_up_voxels`] because it is the same kind of thing — a
-/// physical length the consumer discretises once — and differs in one way that matters:
-/// the mouth's reach is authored on the 0.25 m reference grid *in voxels*, because it is
-/// part of the trained-policy digest, while the climb is authored in metres on the
-/// physiology, which is not. So the browser's 0.25 m climb is two voxels on `small` and
-/// one on `default`/`wide`, and the shredder's 0.125 m is one on both.
+/// It is the same kind of thing as every other length on the physiology — a physical
+/// distance the consumer discretises once — and since 2026-09-22 it is not the odd one
+/// out: the mouth's reach and the body's clearance are metres too
+/// (`design/handoffs/voxel-body-anchors-2026-09-22.md`). The browser's 0.25 m climb is
+/// two voxels on `small` and one on `default`/`wide`; the shredder's 0.125 m is one on
+/// both.
 pub fn climb_voxels(phys: &FounderPhysiology, voxel_m: f64) -> u32 {
     cubarium_voxel::walk::climb_voxels(phys.climb_m, voxel_m)
-}
-
-/// The void a body of this lineage needs over the face it stands on, in whole voxels.
-///
-/// **No new species parameter**: `SpeciesConfig` carries no geometry at all — its
-/// legacy whole-voxel `climb` is `0` on both founders, and the founders' own climb is
-/// [`FounderPhysiology::climb_m`] — so the headroom is read off the manifest's own reach. The body
-/// occupies `standing_y + 1`, which is one voxel at every scale these bodies have, and a
-/// mouth that lifts needs [`mouth_reach_up_voxels`] more, because a browser that cannot
-/// raise its head into a crown is standing in a slot and not in a habitat
-/// (`design/caves-and-hollows-plan-2026-09-21.md`, "Fauna clearance"). A ground feeder
-/// asks for its one voxel, which is what `is_support` already guarantees.
-pub fn headroom_voxels(manifest: &Manifest, voxel_m: f64) -> u32 {
-    1 + mouth_reach_up_voxels(manifest, voxel_m)
 }
 
 /// Whether `headroom` whole voxels of void stand over the face `(x, y, z)`.
@@ -754,34 +888,31 @@ pub fn has_headroom(view: &VoxelView<'_>, x: i64, y: u32, z: u32, headroom: u32)
     })
 }
 
-/// The crown layers one mouth can take food from, standing on `standing_y`.
-///
-/// The body occupies `standing_y + 1`; a founder that can lift its head reaches
-/// [`mouth_reach_up_voxels`] whole voxels further up. A ground feeder's reach is zero, so
-/// the range is the single layer it always was.
+/// The crown layers one mouth can take food from, standing on `standing_y`: the cells
+/// the physical band `[0, 1.33 × body height]` over the standing surface overlaps
+/// (decisions §2). [`Body::mouth_layers`], named here because this is where the live
+/// mouth asks for it.
 pub(crate) fn mouth_crown_layers(
     standing_y: u32,
-    manifest: &Manifest,
+    body: &Body,
     voxel_m: f64,
 ) -> std::ops::RangeInclusive<i64> {
-    let body_layer = i64::from(standing_y) + 1;
-    body_layer..=body_layer + i64::from(mouth_reach_up_voxels(manifest, voxel_m))
+    body.mouth_layers(standing_y, voxel_m)
 }
 
 /// The stand whose crown cells the mouth region physically touches: a crown cell of
-/// `stand.site` in a mouth column, at a layer the mouth can get at — the body's own
-/// layer, and up to [`Manifest::mouth_reach_up_voxels`] above it, which is how a browser
-/// takes a crown that has grown past its head. The most foliage wins, ties to the
-/// smallest root site. `None` when the mouth is in air — a neighbouring stand whose crown
-/// does not reach the mouth is not mouth input.
+/// `stand.site` in a mouth column, at a layer inside the physical mouth band
+/// ([`Body::mouth_layers`]). The most foliage wins, ties to the smallest root site.
+/// `None` when the mouth is in air — a neighbouring stand whose crown does not reach the
+/// mouth is not mouth input.
 pub(crate) fn mouth_foliage_stand(
     fv: &FloraView<'_>,
     view: &VoxelView<'_>,
     cols: &[(i64, u32)],
     standing_y: u32,
-    manifest: &Manifest,
+    body: &Body,
 ) -> Option<(Site, f64)> {
-    let layers = mouth_crown_layers(standing_y, manifest, view.config.voxel_m);
+    let layers = mouth_crown_layers(standing_y, body, view.config.voxel_m);
     let width = i64::from(view.config.width);
     let depth = i64::from(view.config.depth);
     let mut best: Option<(Site, f64)> = None;
@@ -832,13 +963,13 @@ pub(crate) fn mouth_foliage_stands(
     view: &VoxelView<'_>,
     cols: &[(i64, u32)],
     standing_y: u32,
-    manifest: &Manifest,
+    body: &Body,
 ) -> Vec<(Site, f64)> {
     foliage_stands_touching(
         fv,
         view,
         cols,
-        &mouth_crown_layers(standing_y, manifest, view.config.voxel_m),
+        &mouth_crown_layers(standing_y, body, view.config.voxel_m),
     )
 }
 
@@ -921,6 +1052,7 @@ pub(crate) fn taste_reading(
     pose: &crate::Pose,
     standing_y: u32,
     manifest: &Manifest,
+    body: &Body,
     founder: Founder,
 ) -> TasteReading {
     let sat = manifest.tunings.chem_saturation;
@@ -931,7 +1063,7 @@ pub(crate) fn taste_reading(
         let c = (amount / M_EMIT).min(1.0);
         c / (c + sat)
     };
-    let cols = mouth_columns(view, pose, manifest);
+    let cols = mouth_columns(view, pose, body);
     match founder {
         Founder::Blind => match mouth_litter_site(fv, &cols, standing_y) {
             Some(site) => {
@@ -948,7 +1080,7 @@ pub(crate) fn taste_reading(
                 valid: true,
             },
         },
-        Founder::Browser => match mouth_foliage_stand(fv, view, &cols, standing_y, manifest) {
+        Founder::Browser => match mouth_foliage_stand(fv, view, &cols, standing_y, body) {
             Some((_, foliage)) => TasteReading {
                 cue: response(foliage),
                 resistance: resistance_of(manifest, "foliage"),
@@ -993,6 +1125,9 @@ pub(crate) fn observation(
         .founder
         .expect("an observation is built for a founder body");
     let phys = fauna.config.founder(founder);
+    // The body this animal actually has right now: the anchors below are fractions of
+    // it, so a growing founder's eye, mouth and receptors rise with it (decisions §1).
+    let body = phys.body_at(a.body);
     let mut obs = vec![0.0; manifest.inputs()];
 
     // Self: real body state against the manifest's fixed references.
@@ -1022,7 +1157,7 @@ pub(crate) fn observation(
         view,
         &a.pose,
         a.site.y,
-        manifest,
+        &body,
         climb_voxels(phys, view.config.voxel_m),
     );
     let valid = f64::from(reading.resolved);
@@ -1033,7 +1168,7 @@ pub(crate) fn observation(
     obs[cm.offset + 4] = valid;
     obs[wm.offset] = reading.wet;
     obs[wm.offset + 1] = valid;
-    let taste = taste_reading(fv, view, &a.pose, a.site.y, manifest, founder);
+    let taste = taste_reading(fv, view, &a.pose, a.site.y, manifest, &body, founder);
     obs[tm.offset] = taste.cue;
     obs[tm.offset + 1] = taste.resistance;
     obs[tm.offset + 2] = f64::from(taste.valid);
@@ -1070,7 +1205,9 @@ pub(crate) fn observation(
     // a senses handle.
     if let Some(cn) = module_opt(manifest, "Cone(3, foliage/body)") {
         let occupancy = cone_occupancy.expect("browser observations prepare cone occupancy");
-        let cone = crate::senses::cone_readings(view, occupancy, a.id, &a.pose, a.site.y, manifest);
+        let cone = crate::senses::cone_readings(
+            view, occupancy, a.id, &a.pose, a.site.y, manifest, &body,
+        );
         let base = cn.offset;
         for (k, sec) in cone.sectors.iter().enumerate() {
             let o = base + k * 6;
@@ -1172,6 +1309,11 @@ mod tests {
 
     const H: f64 = std::f64::consts::FRAC_PI_2; // heading east (+x)
 
+    /// One lineage's adult geometry, the body every fixture below places.
+    pub(super) fn adult(founder: Founder) -> Body {
+        crate::FounderPhysiology::frozen(founder).adult_body()
+    }
+
     /// Full cruise over one controller period (five ticks of held action) is exactly
     /// the manifest's forward reference, and the pose follows the heading it was given
     /// — including a wrap across the seam, which is an ordinary move and not a turn.
@@ -1180,6 +1322,7 @@ mod tests {
         let world = flat_world();
         let view = world.view();
         let manifest = Founder::Blind.manifest();
+        let body = adult(Founder::Blind);
         let mut standing = 2u32;
         let mut pose = pose_at(0.5, 0.5, H);
         let mut total = 0.0;
@@ -1189,6 +1332,7 @@ mod tests {
                 &mut pose,
                 &mut standing,
                 &manifest,
+                &body,
                 0.05,
                 1,
                 Actions {
@@ -1213,6 +1357,7 @@ mod tests {
                 &mut seam,
                 &mut standing,
                 &manifest,
+                &body,
                 0.05,
                 1,
                 Actions {
@@ -1236,6 +1381,7 @@ mod tests {
         let world = flat_world();
         let view = world.view();
         let manifest = Founder::Blind.manifest();
+        let body = adult(Founder::Blind);
         let mut standing = 2u32;
         let mut pose = pose_at(0.5, 0.5, 0.0);
         let mut total = 0.0;
@@ -1246,6 +1392,7 @@ mod tests {
                 &mut pose,
                 &mut standing,
                 &manifest,
+                &body,
                 0.05,
                 1,
                 Actions {
@@ -1295,6 +1442,7 @@ mod tests {
         }
         let view = world.view();
         let manifest = Founder::Blind.manifest();
+        let body = adult(Founder::Blind);
         // Heading east at z row 3, close enough to the wall that the period would
         // cross into it.
         let mut standing = 2u32;
@@ -1308,6 +1456,7 @@ mod tests {
                 &mut pose,
                 &mut standing,
                 &manifest,
+                &body,
                 0.05,
                 1,
                 Actions {
@@ -1328,13 +1477,13 @@ mod tests {
             delivered
         );
         assert!(
-            pose.x + footprint_radius(&manifest) <= 4.0 * 0.25 + 1e-9,
+            pose.x + body.footprint_radius() <= 4.0 * 0.25 + 1e-9,
             "the disc stopped at the wall's face, at x = {}",
             pose.x
         );
 
         // The wall is dead ahead: front contact, no side contact.
-        let contacts = contact_readings(&view, &pose, 2, &manifest, 1);
+        let contacts = contact_readings(&view, &pose, 2, &body, 1);
         assert_eq!(contacts.front, 1.0);
         assert_eq!(contacts.left, 0.0);
         assert_eq!(contacts.right, 0.0);
@@ -1347,7 +1496,7 @@ mod tests {
         let mut turned = pose;
         turned.heading_rad =
             (turned.heading_rad - std::f64::consts::FRAC_PI_2).rem_euclid(std::f64::consts::TAU);
-        let contacts = contact_readings(&view, &turned, 2, &manifest, 1);
+        let contacts = contact_readings(&view, &turned, 2, &body, 1);
         assert_eq!(
             contacts.right, 1.0,
             "the wall the body faces is its right after a −90° turn"
@@ -1355,23 +1504,43 @@ mod tests {
         assert_eq!(contacts.front, 0.0);
     }
 
-    /// A body needs room over the face it stands on. The browser's is its own voxel and
-    /// the reach its mouth lifts through: two at 0.25 m, three at 0.125 m. A slot one
-    /// voxel shorter is not a place to stand, and it is not a place to walk to either.
+    /// A body needs **its own height** of void over the face it stands on
+    /// (`design/handoffs/voxel-body-anchors-2026-09-22.md`), not the voxels its mouth
+    /// lifts through: the 0.1875 m browser asks for one cell at 0.25 m and two at
+    /// 0.125 m, and the 0.0625 m shredder asks for one at either. A void one cell
+    /// shorter is not a place to stand and not a place to walk to.
     #[test]
     fn a_slot_shorter_than_the_body_is_not_a_place_to_stand() {
-        let browser = Founder::Browser.manifest();
-        assert_eq!(headroom_voxels(&browser, 0.25), 2);
-        assert_eq!(headroom_voxels(&browser, 0.125), 3);
+        let browser = adult(Founder::Browser);
+        assert_eq!(browser.headroom_voxels(0.25), 1);
+        assert_eq!(browser.headroom_voxels(0.125), 2);
         assert_eq!(
-            headroom_voxels(&Founder::Blind.manifest(), 0.125),
+            adult(Founder::Blind).headroom_voxels(0.125),
             1,
             "a ground feeder asks for the voxel it stands in"
         );
 
-        // Ground at y = 2 with open sky, then a roof dropped over two columns: x = 4 at
-        // y = 5, leaving two voxels of room, and x = 5 at y = 4, leaving one.
-        let mut world = flat_world();
+        // A 0.125 m world: ground at y = 2, then a roof over two columns — x = 4 at
+        // y = 5, leaving two cells of room, and x = 5 at y = 4, leaving one.
+        let mut world = World::empty(VoxelConfig {
+            width: 8,
+            height: 8,
+            depth: 6,
+            voxel_m: 0.125,
+            ..VoxelConfig::default()
+        });
+        for z in 0..6 {
+            for x in 0..8 {
+                for y in 1..=2 {
+                    world.apply(WorldCommand::SetMaterial {
+                        x,
+                        y,
+                        z,
+                        material: Material::Soil,
+                    });
+                }
+            }
+        }
         for (x, roof) in [(4i64, 5u32), (5, 4)] {
             world.apply(WorldCommand::SetMaterial {
                 x,
@@ -1381,18 +1550,28 @@ mod tests {
             });
         }
         let view = world.view();
-        let need = headroom_voxels(&browser, view.config.voxel_m);
+        let need = browser.headroom_voxels(view.config.voxel_m);
+        assert_eq!(need, 2);
         assert!(
             has_headroom(&view, 4, 2, 2, need),
-            "two voxels under the roof is the browser's headroom"
+            "two cells under the roof is the browser's height"
         );
         assert!(
             !has_headroom(&view, 5, 2, 2, need),
-            "one voxel less is a slot, not a floor"
+            "one cell less is a slot, not a floor"
         );
+        // The shredder is half the browser's height and the same slot is a corridor
+        // for it: the clearance is the animal's, not the grid's.
+        assert!(has_headroom(
+            &view,
+            5,
+            2,
+            2,
+            adult(Founder::Blind).headroom_voxels(view.config.voxel_m)
+        ));
 
-        // And the walk agrees: from the open face at x = 3 the two-voxel slot is
-        // steppable and the one-voxel slot is not.
+        // And the walk agrees: from the open face at x = 3 the two-cell slot is
+        // steppable and the one-cell slot is not.
         let sc = *crate::FaunaConfig::default().founder(Founder::Browser);
         let from = Site { x: 3, y: 2, z: 2 };
         assert_eq!(
@@ -1425,6 +1604,7 @@ mod tests {
         }
         let view = world.view();
         let manifest = Founder::Blind.manifest();
+        let body = adult(Founder::Blind);
         assert!(view.is_support(5, 4, 2));
         assert!(!view.is_support(5, 2, 2));
         assert!(!view.is_support(5, 3, 2));
@@ -1438,6 +1618,7 @@ mod tests {
                 &mut pose,
                 &mut standing,
                 &manifest,
+                &body,
                 0.05,
                 1,
                 Actions {
@@ -1449,7 +1630,7 @@ mod tests {
             blocked |= motion.blocked;
         }
         assert!(blocked, "the higher face is not steppable");
-        let contacts = contact_readings(&view, &pose, 2, &manifest, 1);
+        let contacts = contact_readings(&view, &pose, 2, &body, 1);
         assert_eq!(
             contacts.front, 1.0,
             "the step-up's wall is at the body layer: contact"
@@ -1467,6 +1648,7 @@ mod tests {
             });
         }
         let view = world.view();
+        let body = adult(Founder::Blind);
         assert!(!view.is_support(3, 2, 4));
         assert!(!view.is_support(3, 1, 4));
         let mut pose = pose_at(3.0 * 0.25 - 0.025, 4.0 * 0.25 + 0.125, H);
@@ -1478,6 +1660,7 @@ mod tests {
                 &mut pose,
                 &mut standing,
                 &manifest,
+                &body,
                 0.05,
                 1,
                 Actions {
@@ -1489,7 +1672,7 @@ mod tests {
             blocked |= motion.blocked;
         }
         assert!(blocked, "the pit is not steppable either");
-        let contacts = contact_readings(&view, &pose, 2, &manifest, 1);
+        let contacts = contact_readings(&view, &pose, 2, &body, 1);
         assert_eq!(
             contacts.front, 0.0,
             "a drop is open air at body level: the delivery ratio is what reports it"
@@ -1516,6 +1699,7 @@ mod tests {
             view.water_depth_m(2, 2, 2)
         );
         let manifest = Founder::Blind.manifest();
+        let body = adult(Founder::Blind);
         let mut pose = pose_at(2.0 * 0.25 - 0.01, 2.0 * 0.25 + 0.125, H);
         let mut blocked = false;
         let mut standing = 2u32;
@@ -1525,6 +1709,7 @@ mod tests {
                 &mut pose,
                 &mut standing,
                 &manifest,
+                &body,
                 0.05,
                 1,
                 Actions {
@@ -1562,13 +1747,14 @@ mod tests {
         let (updates, converged) = senses.settle(&view, &flora.view());
         assert!(converged, "the field settled in {updates} updates");
         let manifest = Founder::Blind.manifest();
+        let body = adult(Founder::Blind);
         let pose = pose_at(2.0 * 0.25 + 0.125, 2.0 * 0.25 + 0.125, -H);
         let field = senses.sample_cue(&view, &pose, 2).expect("supported");
         assert!(
             field > 0.0,
             "the remote litter produces a local diffused cue"
         );
-        let t = taste_reading(&flora.view(), &view, &pose, 2, &manifest, Founder::Blind);
+        let t = taste_reading(&flora.view(), &view, &pose, 2, &manifest, &body, Founder::Blind);
         assert_eq!(t.cue, 0.0, "remote litter is not mouth chemistry");
         assert!(t.valid, "bare ground is still an actual mouth contact");
         assert!((t.resistance - 0.5).abs() < 1e-12);
@@ -1582,7 +1768,7 @@ mod tests {
                 energy: 0.2 * 2.0,
             },
         );
-        let t = taste_reading(&flora.view(), &view, &pose, 2, &manifest, Founder::Blind);
+        let t = taste_reading(&flora.view(), &view, &pose, 2, &manifest, &body, Founder::Blind);
         assert!(
             t.cue > 0.2,
             "contact with litter reads its stock: {}",
@@ -1598,8 +1784,9 @@ mod tests {
         let view = world.view();
         let flora = Flora::new(FloraConfig::default());
         let manifest = Founder::Blind.manifest();
+        let body = adult(Founder::Blind);
         let pose = pose_at(2.0 * 0.25 + 0.125, 2.0 * 0.25 + 0.125, 0.0);
-        let t = taste_reading(&flora.view(), &view, &pose, 2, &manifest, Founder::Blind);
+        let t = taste_reading(&flora.view(), &view, &pose, 2, &manifest, &body, Founder::Blind);
         assert_eq!(t.cue, 0.0);
         assert_eq!(t.resistance, 0.5);
         assert!(t.valid);
@@ -1631,10 +1818,11 @@ mod tests {
         ));
         let fv = flora.view();
         let manifest = Founder::Browser.manifest();
+        let body = adult(Founder::Browser);
 
         // Standing in the turf itself: contact.
         let pose = pose_at(2.0 * 0.25 + 0.125, 2.0 * 0.25 + 0.125, 0.0);
-        let t = taste_reading(&fv, &view, &pose, 2, &manifest, Founder::Browser);
+        let t = taste_reading(&fv, &view, &pose, 2, &manifest, &body, Founder::Browser);
         assert!(
             t.valid,
             "the crown cell is at the body's own column and layer"
@@ -1643,13 +1831,13 @@ mod tests {
 
         // Standing one column west facing east: the crown is within the mouth reach.
         let near = pose_at(1.0 * 0.25 + 0.125, 2.0 * 0.25 + 0.125, H);
-        let t = taste_reading(&fv, &view, &near, 2, &manifest, Founder::Browser);
+        let t = taste_reading(&fv, &view, &near, 2, &manifest, &body, Founder::Browser);
         assert!(t.valid, "the reach reaches the neighbouring crown cell");
 
         // Facing away, the crown is behind the mouth: no contact, invalid.
         let mut away = near;
         away.heading_rad = (H + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU);
-        let t = taste_reading(&fv, &view, &away, 2, &manifest, Founder::Browser);
+        let t = taste_reading(&fv, &view, &away, 2, &manifest, &body, Founder::Browser);
         assert!(
             !t.valid,
             "a stock behind the mouth is unreachable and stays unmouthed"
@@ -1864,26 +2052,34 @@ mod tests {
         assert!((blind.sensor_structure(total) + core - total).abs() < 1e-12);
     }
 
+    /// The mouth band is a **length**, so the same animal selects the same physical
+    /// layers on either grid: the adult browser's `1.33 × 0.1875 = 0.249375` m ceiling
+    /// is one 0.25 m cell and two 0.125 m cells, which are the same 0.25 m of air. The
+    /// shredder's 0.0831 m ceiling is the standing layer alone on both.
     #[test]
-    fn finer_voxels_preserve_the_browsers_physical_mouth_lift() {
-        let browser = Founder::Browser.manifest();
-        let blind = Founder::Blind.manifest();
-
-        assert_eq!(mouth_reach_up_voxels(&browser, 0.25), 1);
-        assert_eq!(mouth_reach_up_voxels(&browser, 0.125), 2);
-        assert_eq!(mouth_reach_up_voxels(&browser, 1.0), 1);
-        assert_eq!(mouth_reach_up_voxels(&blind, 0.125), 0);
-        assert_eq!(mouth_crown_layers(2, &browser, 0.25), 3..=4);
-        assert_eq!(mouth_crown_layers(2, &browser, 0.125), 3..=5);
+    fn the_mouth_band_selects_the_same_physical_layers_on_both_grids() {
+        let browser = adult(Founder::Browser);
+        let blind = adult(Founder::Blind);
+        assert!((browser.mouth_ceiling_m - 0.249375).abs() < 1e-12);
+        assert_eq!(mouth_crown_layers(2, &browser, 0.25), 3..=3);
+        assert_eq!(mouth_crown_layers(2, &browser, 0.125), 3..=4);
+        assert_eq!(mouth_crown_layers(2, &blind, 0.25), 3..=3);
+        assert_eq!(mouth_crown_layers(2, &blind, 0.125), 3..=3);
+        // A touch at exactly the ceiling contributes nothing: a body whose ceiling is
+        // one whole cell reaches that cell and not the one starting there.
+        let mut exact = browser;
+        exact.mouth_ceiling_m = 0.25;
+        assert_eq!(mouth_crown_layers(2, &exact, 0.25), 3..=3);
     }
 
-    /// The counterfactual behind the vertical mouth reach: the **same** fixture, the same
-    /// mouth columns and the same crown one voxel above the head, read once with a reach
-    /// of zero — the rule every build before 2026-09-21 had — and once with the browser's
-    /// declared reach of one. Zero refuses it; one takes it. Nothing else about the mouth
-    /// moves: the head-layer crown is accepted by both.
+    /// The counterfactual behind the band: the **same** fixture, the same mouth columns
+    /// and the same two crowns, read with the adult browser's 0.249 m ceiling and again
+    /// with a half-metre one. The crown one 0.25 m voxel above the head — which the old
+    /// whole-voxel reach of one accepted — is out of the adult's physical band, and the
+    /// crown at the head layer is in it either way. The band is what decides, and the
+    /// manifest's `mouth_reach_up_voxels` is not read at all.
     #[test]
-    fn a_zero_up_reach_refuses_the_crown_the_browser_can_now_lift_its_head_to() {
+    fn the_band_and_not_a_voxel_count_decides_what_the_mouth_takes() {
         use cubarium_voxel_flora::{Command as FloraCommand, Species as Plant};
 
         let world = flat_world();
@@ -1903,27 +2099,35 @@ mod tests {
             ));
         }
         let fv = flora.view();
-        let mut manifest = Founder::Browser.manifest();
-        assert_eq!(manifest.mouth_reach_up_voxels, 1);
+        let browser = adult(Founder::Browser);
 
-        let cols_over = mouth_columns(&view, &pose_at(2.5 * 0.25, 2.5 * 0.25, 0.0), &manifest);
-        let cols_head = mouth_columns(&view, &pose_at(5.5 * 0.25, 2.5 * 0.25, 0.0), &manifest);
+        let cols_over = mouth_columns(&view, &pose_at(2.5 * 0.25, 2.5 * 0.25, 0.0), &browser);
+        let cols_head = mouth_columns(&view, &pose_at(5.5 * 0.25, 2.5 * 0.25, 0.0), &browser);
 
         assert_eq!(
-            mouth_foliage_stand(&fv, &view, &cols_over, 2, &manifest).map(|(s, _)| s),
-            Some(site(2, 2)),
-            "reach one must take the crown one voxel up"
-        );
-        manifest.mouth_reach_up_voxels = 0;
-        assert_eq!(
-            mouth_foliage_stand(&fv, &view, &cols_over, 2, &manifest),
+            mouth_foliage_stand(&fv, &view, &cols_over, 2, &browser),
             None,
-            "reach zero is the old rule and must refuse it"
+            "0.25 m of crown is above a 0.249375 m ceiling"
         );
         assert_eq!(
-            mouth_foliage_stand(&fv, &view, &cols_head, 2, &manifest).map(|(s, _)| s),
+            mouth_foliage_stand(&fv, &view, &cols_head, 2, &browser).map(|(s, _)| s),
             Some(site(5, 2)),
-            "reach zero must still take a crown at the head layer"
+            "the crown at the head layer is inside the band"
+        );
+
+        // A taller animal, same fixture: the band rises with the body and the crown
+        // over the head comes into reach. Nothing else about the mouth changed.
+        let mut tall = browser;
+        tall.mouth_ceiling_m = 0.5;
+        assert_eq!(
+            mouth_foliage_stand(&fv, &view, &cols_over, 2, &tall).map(|(s, _)| s),
+            Some(site(2, 2)),
+            "a 0.5 m band reaches the crown one voxel up"
+        );
+        assert_eq!(
+            mouth_foliage_stand(&fv, &view, &cols_head, 2, &tall).map(|(s, _)| s),
+            Some(site(5, 2)),
+            "and still takes the one at its feet"
         );
     }
 }
@@ -1940,6 +2144,7 @@ mod step_rule_tests {
     //! Every case here is a handful of ticks on an 8-column fixture.
 
     use super::*;
+    use super::tests::adult;
     use crate::manifest::Founder;
     use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
 
@@ -2008,9 +2213,11 @@ mod step_rule_tests {
 
     /// Walk a body east at full cruise and report where it got to: the standing layer
     /// after each tick, in order, and the final pose. `ticks` stays small.
+    #[allow(clippy::too_many_arguments)]
     fn walk_east(
         world: &World,
         manifest: &Manifest,
+        body: &Body,
         climb: u32,
         start_x_m: f64,
         y0: u32,
@@ -2031,6 +2238,7 @@ mod step_rule_tests {
                 &mut pose,
                 &mut y,
                 manifest,
+                body,
                 0.05,
                 climb,
                 Actions {
@@ -2067,7 +2275,8 @@ mod step_rule_tests {
     fn a_browser_steps_up_and_down_one_voxel_on_the_reference_grid() {
         let world = terrace(0.25, 10, 2, 5..8, 1);
         let manifest = Founder::Browser.manifest();
-        let (pose, layers) = walk_east(&world, &manifest, 1, 3.5 * 0.25, 2, 160);
+        let body = adult(Founder::Browser);
+        let (pose, layers) = walk_east(&world, &manifest, &body, 1, 3.5 * 0.25, 2, 160);
         assert!(
             layers.contains(&3),
             "the body never got onto the terrace: {layers:?}"
@@ -2091,7 +2300,8 @@ mod step_rule_tests {
         for v in [0.125, 0.25] {
             let world = terrace(v, 12, 2, 5..8, 1);
             let manifest = Founder::Blind.manifest();
-            let (_, layers) = walk_east(&world, &manifest, 1, 3.5 * v, 2, 60);
+            let body = adult(Founder::Blind);
+            let (_, layers) = walk_east(&world, &manifest, &body, 1, 3.5 * v, 2, 60);
             assert!(
                 layers.contains(&3),
                 "a 1-voxel terrace at {v} m is not a step: {layers:?}"
@@ -2106,9 +2316,10 @@ mod step_rule_tests {
     #[test]
     fn a_two_voxel_rise_refuses_on_the_reference_grid_and_passes_on_the_fine_one() {
         let manifest = Founder::Browser.manifest();
+        let body = adult(Founder::Browser);
 
         let coarse = terrace(0.25, 10, 2, 5..8, 2);
-        let (pose, layers) = walk_east(&coarse, &manifest, 1, 3.5 * 0.25, 2, 40);
+        let (pose, layers) = walk_east(&coarse, &manifest, &body, 1, 3.5 * 0.25, 2, 40);
         assert!(
             layers.iter().all(|&y| y == 2),
             "a 0.5 m rise is a wall for a 0.25 m climb: {layers:?}"
@@ -2120,7 +2331,7 @@ mod step_rule_tests {
         );
 
         let fine = terrace(0.125, 14, 4, 5..8, 2);
-        let (_, layers) = walk_east(&fine, &manifest, 2, 3.5 * 0.125, 4, 60);
+        let (_, layers) = walk_east(&fine, &manifest, &body, 2, 3.5 * 0.125, 4, 60);
         assert!(
             layers.contains(&6),
             "the same 0.25 m rise is two voxels of climb here: {layers:?}"
@@ -2132,8 +2343,9 @@ mod step_rule_tests {
     #[test]
     fn a_drop_beyond_the_climb_refuses() {
         let manifest = Founder::Browser.manifest();
+        let body = adult(Founder::Browser);
         let world = pit(0.25, 10, 4, 5..9, 2);
-        let (pose, layers) = walk_east(&world, &manifest, 1, 3.5 * 0.25, 4, 40);
+        let (pose, layers) = walk_east(&world, &manifest, &body, 1, 3.5 * 0.25, 4, 40);
         assert!(
             layers.iter().all(|&y| y == 4),
             "the body walked off a 0.5 m cliff: {layers:?}"
@@ -2146,7 +2358,7 @@ mod step_rule_tests {
 
         // One voxel of the same pit is a step down.
         let shallow = pit(0.25, 10, 4, 5..9, 1);
-        let (_, layers) = walk_east(&shallow, &manifest, 1, 3.5 * 0.25, 4, 40);
+        let (_, layers) = walk_east(&shallow, &manifest, &body, 1, 3.5 * 0.25, 4, 40);
         assert!(
             layers.contains(&3),
             "a 0.25 m drop is within the climb: {layers:?}"
@@ -2158,7 +2370,7 @@ mod step_rule_tests {
     /// change and the underside still reads the face the body is standing on.
     #[test]
     fn contact_reads_a_steppable_ledge_as_clear_and_a_taller_one_as_solid() {
-        let manifest = Founder::Browser.manifest();
+        let body = adult(Founder::Browser);
         // Standing in column 4, facing east, pressed up against the terrace at x = 5.
         let pose = crate::Pose {
             x: 5.0 * 0.25 - 0.0624,
@@ -2167,7 +2379,7 @@ mod step_rule_tests {
         };
 
         let ledge = terrace(0.25, 10, 2, 5..8, 1);
-        let reading = contact_readings(&ledge.view(), &pose, 2, &manifest, 1);
+        let reading = contact_readings(&ledge.view(), &pose, 2, &body, 1);
         assert_eq!(
             reading.front, 0.0,
             "a one-voxel ledge within the climb is ground, not a wall"
@@ -2176,7 +2388,7 @@ mod step_rule_tests {
         assert!(reading.resolved);
 
         let wall = terrace(0.25, 10, 2, 5..8, 2);
-        let reading = contact_readings(&wall.view(), &pose, 2, &manifest, 1);
+        let reading = contact_readings(&wall.view(), &pose, 2, &body, 1);
         assert_eq!(
             reading.front, 1.0,
             "a two-voxel rise is over the climb: a wall, as before"
@@ -2184,7 +2396,7 @@ mod step_rule_tests {
         assert_eq!(reading.underside, 1.0);
 
         // A climb of zero is the old receptor exactly: the ledge is a wall again.
-        let reading = contact_readings(&ledge.view(), &pose, 2, &manifest, 0);
+        let reading = contact_readings(&ledge.view(), &pose, 2, &body, 0);
         assert_eq!(reading.front, 1.0);
     }
 }

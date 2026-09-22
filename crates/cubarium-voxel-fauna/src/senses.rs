@@ -670,13 +670,25 @@ pub(crate) fn cone_valid(
     view.is_support(wx, standing_y, cz) && manifest.sector_centres_deg.len() == 3
 }
 
-/// Where the eye is, in metres: the body's own column, and one and a half voxels over
-/// the standing face. **In voxels, not in body lengths** — on a 0.25 m world the same
-/// browser's eye is twice as high off the ground as on a 0.125 m one.
-pub(crate) fn cone_origin(view: &VoxelView<'_>, pose: &Pose, standing_y: u32) -> (f64, f64, f64) {
+/// Where the eye is, in metres: the body's own column, and `0.8 × body height` over the
+/// **standing surface** `(standing_y + 1) · voxel_m` (decisions §6;
+/// `design/handoffs/voxel-body-anchors-2026-09-22.md`).
+///
+/// It used to be one and a half **voxels** over the standing face, so the same browser's
+/// eye was twice as high on a 0.25 m world as on a 0.125 m one. It is now a length, and
+/// the grid does not appear in it at all. The pitch set, the sectors, the yaw offsets,
+/// the range and the classes are untouched: the observation keeps its 37 inputs and its
+/// digest, and the shipped centres — trained with the old eye — keep loading
+/// (`crates/cubarium/assets/policies/README.md`).
+pub(crate) fn cone_origin(
+    view: &VoxelView<'_>,
+    pose: &Pose,
+    standing_y: u32,
+    body: &crate::Body,
+) -> (f64, f64, f64) {
     (
         pose.x,
-        (f64::from(standing_y) + 1.0 + 0.5) * view.config.voxel_m,
+        crate::surface_m(standing_y, view.config.voxel_m) + body.eye_m,
         pose.z,
     )
 }
@@ -705,6 +717,7 @@ pub(crate) fn cone_readings(
     pose: &Pose,
     standing_y: u32,
     manifest: &Manifest,
+    body: &crate::Body,
 ) -> ConeReading {
     let invalid = ConeReading {
         valid: false,
@@ -714,7 +727,7 @@ pub(crate) fn cone_readings(
         return invalid;
     }
     let range = manifest.cone_range_m;
-    let origin = cone_origin(view, pose, standing_y);
+    let origin = cone_origin(view, pose, standing_y, body);
     let heading = pose.heading_rad;
     let rays = manifest.ray_yaw_offsets_deg.len() * manifest.ray_pitch_offsets_deg.len();
     let ray_count = f64::from(rays as u32);
@@ -1122,6 +1135,7 @@ mod tests {
         ));
         let fauna = crate::Fauna::new(crate::FaunaConfig::default());
         let manifest = Founder::Browser.manifest();
+        let body = crate::FounderPhysiology::frozen(Founder::Browser).adult_body();
         let fv = flora.view();
         let fv_ = fauna.view();
 
@@ -1133,7 +1147,7 @@ mod tests {
             heading_rad: H,
         };
         let occupancy = cone_occupancy(&v, &fv, &fv_);
-        let cone = cone_readings(&v, &occupancy, u64::MAX, &pose, 2, &manifest);
+        let cone = cone_readings(&v, &occupancy, u64::MAX, &pose, 2, &manifest, &body);
         assert!(cone.valid);
         let centre = cone.sectors[1];
         assert!(centre.foliage_fraction > 0.0, "foliage visible ahead");
@@ -1162,7 +1176,7 @@ mod tests {
             },
         ));
         let occupancy = cone_occupancy(&wv, &wflora.view(), &fv_);
-        let cone = cone_readings(&wv, &occupancy, u64::MAX, &pose, 2, &manifest);
+        let cone = cone_readings(&wv, &occupancy, u64::MAX, &pose, 2, &manifest, &body);
         assert_eq!(
             cone.sectors[1].foliage_fraction, 0.0,
             "the wall hides the foliage behind it"
@@ -1183,7 +1197,7 @@ mod tests {
             heading_rad: 0.0,
         };
         let occupancy = cone_occupancy(&ev, &eflora.view(), &fv_);
-        let cone = cone_readings(&ev, &occupancy, u64::MAX, &pose, 2, &manifest);
+        let cone = cone_readings(&ev, &occupancy, u64::MAX, &pose, 2, &manifest, &body);
         assert!(cone.valid);
         for sec in cone.sectors {
             assert_eq!((sec.foliage_fraction, sec.body_fraction), (0.0, 0.0));
@@ -1210,6 +1224,10 @@ mod tests {
             },
         ));
         let observer = fauna.view().animals[0];
+        let body = fauna
+            .config()
+            .founder(Founder::Browser)
+            .body_at(observer.body);
         let occupancy = cone_occupancy(&view, &flora.view(), &fauna.view());
         let alone = cone_readings(
             &view,
@@ -1218,6 +1236,7 @@ mod tests {
             &observer.pose,
             observer.site.y,
             &manifest,
+            &body,
         );
         assert!(
             alone
@@ -1245,6 +1264,7 @@ mod tests {
             &observer.pose,
             observer.site.y,
             &manifest,
+            &body,
         );
         assert!(
             with_other.sectors[1].body_fraction > 0.0,

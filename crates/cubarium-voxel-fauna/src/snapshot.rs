@@ -58,9 +58,16 @@ use crate::Fauna;
 /// body now changes its standing layer, so the same `site` in a schema-9 world means
 /// something a schema-10 loader cannot assume about how it got there. There is nothing
 /// to synthesize either way.
+/// Schema 11 is **bodies in metres**
+/// (`design/handoffs/voxel-body-anchors-2026-09-22.md`):
+/// [`crate::FounderPhysiology`] gained the adult dimensions and the four anchor
+/// fractions, seven more serialised fields inside the config. A schema-10 world's
+/// animals were the wrong size, ate out of a whole-voxel layer range and looked out of
+/// an eye anchored in cells; there is no honest value to carry across, and none is
+/// synthesized.
 /// Postcard is not self-describing, so older worlds are **refused**, not migrated
 /// (`always-fresh-never-migrate`): start a fresh world.
-pub const SCHEMA: u32 = 10;
+pub const SCHEMA: u32 = 11;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

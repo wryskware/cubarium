@@ -16,7 +16,7 @@
 //!   standing surface therefore selects a contiguous run of layers.
 //! - **Where a body may stand** is the predicate the seeder's `browser_faces` and the
 //!   tick's `faces_in_column` both use: a support face, wadeable water, and
-//!   [`crate::headroom_voxels`] voxels of void over it.
+//!   [`Body::headroom_voxels`] voxels of void over it — the body's own height.
 //!
 //! A founder body changes its standing layer by at most its lineage's climb
 //! ([`crate::climb_voxels`]; `design/handoffs/voxel-founder-step-2026-09-22.md`), so the
@@ -29,10 +29,9 @@ use std::ops::RangeInclusive;
 use cubarium_voxel::VoxelView;
 use cubarium_voxel_flora::{FloraView, Site, Stand};
 
-use crate::body::{has_headroom, mouth_columns, mouth_crown_layers};
-use crate::manifest::Manifest;
+use crate::body::{Body, has_headroom, mouth_columns, mouth_crown_layers};
 use crate::senses::{self, ConeOccupancy};
-use crate::{ConeHit, FaunaView, Pose, headroom_voxels};
+use crate::{ConeHit, FaunaView, Pose};
 
 /// How many headings a face is asked about when the question is "from *some* pose here".
 ///
@@ -50,15 +49,15 @@ pub fn surface_m(standing_y: u32, voxel_m: f64) -> f64 {
     (f64::from(standing_y) + 1.0) * voxel_m
 }
 
-/// Every face a body of this manifest could stand on, in `(y, x, z)` order.
+/// Every face a body of these dimensions could stand on, in `(y, x, z)` order.
 ///
 /// The predicate is the seeder's and the tick's, not a new one: a support face, no more
-/// than `wade_depth_m` of standing water on it, and [`headroom_voxels`] voxels of void
-/// over it (`crates/cubarium/src/voxel/habitat.rs`, `browser_faces`;
+/// than `wade_depth_m` of standing water on it, and [`Body::headroom_voxels`] voxels of
+/// void over it (`crates/cubarium/src/voxel/habitat.rs`, `browser_faces`;
 /// `crates/cubarium-voxel-fauna/src/step.rs`, `faces_in_column`).
-pub fn standable_faces(view: &VoxelView<'_>, manifest: &Manifest, wade_depth_m: f64) -> Vec<Site> {
+pub fn standable_faces(view: &VoxelView<'_>, body: &Body, wade_depth_m: f64) -> Vec<Site> {
     let c = view.config;
-    let room = headroom_voxels(manifest, c.voxel_m);
+    let room = body.headroom_voxels(c.voxel_m);
     let mut out = Vec::new();
     for y in 0..c.height {
         for x in 0..c.width {
@@ -81,8 +80,8 @@ pub fn standable_faces(view: &VoxelView<'_>, manifest: &Manifest, wade_depth_m: 
 }
 
 /// The mouth columns of one pose: [`crate::body::mouth_columns`], exposed.
-pub fn mouth_columns_at(view: &VoxelView<'_>, pose: &Pose, manifest: &Manifest) -> Vec<(i64, u32)> {
-    mouth_columns(view, pose, manifest)
+pub fn mouth_columns_at(view: &VoxelView<'_>, pose: &Pose, body: &Body) -> Vec<(i64, u32)> {
+    mouth_columns(view, pose, body)
 }
 
 /// The union of mouth columns over every heading a body standing on `face` could take.
@@ -92,7 +91,7 @@ pub fn mouth_columns_at(view: &VoxelView<'_>, pose: &Pose, manifest: &Manifest) 
 pub fn mouth_columns_from_face(
     view: &VoxelView<'_>,
     face: Site,
-    manifest: &Manifest,
+    body: &Body,
 ) -> Vec<(i64, u32)> {
     let v = view.config.voxel_m;
     let mut cols: Vec<(i64, u32)> = Vec::new();
@@ -100,7 +99,7 @@ pub fn mouth_columns_from_face(
         let heading = std::f64::consts::TAU * (k as f64) / (HEADING_SAMPLES as f64);
         let mut pose = Pose::at_site(face, v);
         pose.heading_rad = heading;
-        for entry in mouth_columns(view, &pose, manifest) {
+        for entry in mouth_columns(view, &pose, body) {
             if !cols.contains(&entry) {
                 cols.push(entry);
             }
@@ -109,14 +108,11 @@ pub fn mouth_columns_from_face(
     cols
 }
 
-/// The crown layers today's implemented mouth accepts from `standing_y`:
-/// [`crate::body::mouth_crown_layers`], exposed.
-pub fn mouth_crown_layers_at(
-    standing_y: u32,
-    manifest: &Manifest,
-    voxel_m: f64,
-) -> RangeInclusive<i64> {
-    mouth_crown_layers(standing_y, manifest, voxel_m)
+/// The crown layers the implemented mouth accepts from `standing_y`:
+/// [`crate::body::mouth_crown_layers`], exposed. Since 2026-09-22 this **is** the metre
+/// band of [`band_crown_layers`], so the two no longer name different arms.
+pub fn mouth_crown_layers_at(standing_y: u32, body: &Body, voxel_m: f64) -> RangeInclusive<i64> {
+    mouth_crown_layers(standing_y, body, voxel_m)
 }
 
 /// The crown layers a **metre band** `[0, ceiling_m]` over the standing surface reaches.
@@ -184,14 +180,19 @@ pub fn crown_columns(fv: &FloraView<'_>, view: &VoxelView<'_>, stand: &Stand) ->
     out
 }
 
-/// Where today's eye is, in metres: the body's column, one and a half **voxels** over the
-/// standing face ([`crate::senses::cone_origin`], exposed).
-pub fn eye_origin_m(view: &VoxelView<'_>, pose: &Pose, standing_y: u32) -> (f64, f64, f64) {
-    senses::cone_origin(view, pose, standing_y)
+/// Where the eye is, in metres: the body's column and `0.8 × height` over the standing
+/// surface ([`crate::senses::cone_origin`], exposed).
+pub fn eye_origin_m(
+    view: &VoxelView<'_>,
+    pose: &Pose,
+    standing_y: u32,
+    body: &Body,
+) -> (f64, f64, f64) {
+    senses::cone_origin(view, pose, standing_y, body)
 }
 
-/// An eye a stated height in **metres above the standing surface** — the decided anchor
-/// (decisions §6: `0.8 × body height`).
+/// An eye a stated height in **metres above the standing surface**, for a diagnostic
+/// measuring an arm the model does not run. The live eye is [`eye_origin_m`].
 pub fn eye_above_surface_m(
     pose: &Pose,
     standing_y: u32,
@@ -315,8 +316,8 @@ mod tests {
             ));
         }
         let fv = flora.view();
-        let manifest = Founder::Browser.manifest();
-        let layers = mouth_crown_layers_at(2, &manifest, view.config.voxel_m);
+        let body = crate::FounderPhysiology::frozen(Founder::Browser).adult_body();
+        let layers = mouth_crown_layers_at(2, &body, view.config.voxel_m);
         let mut compared = 0usize;
         let mut hits = 0usize;
         for xi in 0..8 {
@@ -328,12 +329,12 @@ mod tests {
                         z: (f64::from(zi) + 0.5) * 0.25,
                         heading_rad: heading,
                     };
-                    let cols = mouth_columns_at(&view, &pose, &manifest);
-                    let live = mouth_foliage_stand(&fv, &view, &cols, 2, &manifest);
+                    let cols = mouth_columns_at(&view, &pose, &body);
+                    let live = mouth_foliage_stand(&fv, &view, &cols, 2, &body);
                     let shared = foliage_stands_in_layers(&fv, &view, &cols, &layers);
                     assert_eq!(
                         shared,
-                        mouth_foliage_stands(&fv, &view, &cols, 2, &manifest),
+                        mouth_foliage_stands(&fv, &view, &cols, 2, &body),
                         "the diagnostic list is the shared scan"
                     );
                     let best =
