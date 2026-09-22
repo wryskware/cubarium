@@ -40,3 +40,33 @@ new Fable session in this repo.
 > `design/art-direction/species-designs-draft-2026-09-21.md`; a sheet becomes decided
 > only when I say so. Start with the glowcap log, then the frondgrazer, then the plants.
 > Keep the thread lean: no plates, no Astra rounds, no reports; the sheet is the record.
+
+## What the simulation actually has (read before designing any "log")
+
+Sprites render simulation state, never decoration. Verified 2026-09-21 in
+`crates/cubarium-voxel-flora/src/{lib.rs,step.rs}` and `crates/cubarium/src/voxel/{stand.rs,habitat.rs}`:
+
+- **There is no log object.** Dead wood is a per-column scalar pool on a ground site
+  (`Ground::dead_wood`, with its mineral and energy). It has an amount, a site, and no
+  shape, species or orientation. Litter and carrion are two more scalar pools on the same
+  site.
+- **Where it comes from.** (a) Any stand that dies (`step::die`): its wood goes to dead
+  wood on its own site, its foliage and reserve to litter; so a dead plant leaves a
+  one-column deposit where it stood. (b) A consumer that kills a stand deposits DeadWood.
+  (c) The dev habitat lays "declared logs" of 0.4 organic under each of 12 glowcap
+  founders, clustered in threes, because a fresh world has no dead wood at all.
+- **Glowcap** is a stand rooted on a site whose mycelium box (radius 1, one layer up and
+  down) sums the dead wood and litter of the neighbouring sites, eats them down, and can
+  only establish where the box holds enough dead wood. It is half a voxel tall, one cell,
+  spreads by hop 1 along whatever dead wood is adjacent, wood 0.01–0.1.
+- **The presenter today** draws a `Part::Log` in the cell above any site with dead wood
+  ≥ 0.05, a `Part::Litter` mark for litter ≥ 0.05, and the glowcap as an interim
+  one-cell cap glyph on its ground face.
+
+So the sprite work for "glowcap on a log" is three independent families that the
+presenter composes from state, not one picture: (1) **dead-wood tiles** per column,
+autotiled by neighbours (lone chunk, log middle, left end, right end) and scaled or
+staged by amount as the fungus eats it out; (2) **glowcap caps** on the site face, sized
+by stand wood, with growth and spent states; (3) **litter marks**. A multi-cell fallen
+trunk with a direction would be a simulation change (a stand's death depositing along a
+line), which is a model decision for later, not an art decision.
