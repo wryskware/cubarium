@@ -612,3 +612,90 @@ and eating a third less in that window — which the hour-long arms above say is
 transient of the first seconds and not the steady state. Nothing refused to load
 and no centre was retrained: the observation vector is the same 23 and 37 inputs
 it was.
+
+## Bodies in metres, 2026-09-22
+
+Package 1b (`design/handoffs/voxel-body-anchors-2026-09-22.md`) on the step
+rule's world: adult dimensions in metres on the founder physiology, growth by
+`(body / body_max)^(1/3)`, the eye at `0.8 × height` over the standing surface,
+the mouth band `[0, 1.33 × height]`, the horizontal reach `0.25 × length`, the
+clearance `ceil(height / voxel)`, and canopy shade over a physical crown area in
+m². Measured on this branch (`body-anchors`, from main at f1f3f1f), same command
+as the step rule's section, same seeds. "Before" is f1f3f1f re-run here, not a
+quoted number.
+
+### t = 0, `voxel_edible_stock 0 preset=<name>`
+
+| fraction of standing foliage | small | default | wide |
+| --- | --- | --- | --- |
+| reachable from any legal face, before → after | 0.494 → **0.417** | 0.718 → **0.500** | 0.749 → **0.486** |
+| route-connected to a seeded browser, before → after | 0.494 → **0.417** | 0.484 → **0.223** | 0.365 → **0.366** |
+| visible, before → after | 1.000 → 1.000 | 0.691 → 0.691 | 0.916 → 0.916 |
+| bloomcrown reachable, after | 0.000 | 0.534 | 0.334 |
+| bloomcrown route-connected, after | 0.000 | 0.000 | 0.088 |
+
+**Reach falls everywhere, and it is the band doing it.** The adult browser's
+ceiling is `1.33 × 0.1875 = 0.249375` m — a hair under one 0.25 m cell — so on
+`default` and `wide` the mouth takes the standing layer and nothing above it,
+where the old whole-voxel rule took one cell more. On `small` two 0.125 m cells
+are inside the band, which is the same 0.25 m of air. All three "after" reach
+numbers are **bit-identical to the `reach_band` column the observer printed
+before this package** (0.417351, 0.500168, 0.486236): the implementation
+reproduces the hypothesis the observer was measuring, which makes this row a
+check rather than a result.
+Clearance moved the other way (the browser now asks for `ceil(0.1875/v)` = 1 cell
+on `default`/`wide` against `1 + mouth_reach_up_voxels` = 2, and 2 on `small`
+against 3), so there are more legal faces than before; it did not offset the
+band.
+
+**Route falls on `default` because the seeder moved, not because the walk did.**
+`browser_faces` places founders on faces whose crown is in the mouth band, and
+the narrower band deleted the high feeding faces: the eight browsers were seeded
+across standing layers 17/18/19/35/36 and are now all at 17 and 18. The foliage
+on the upper terraces is still reachable (0.500) and is no longer anybody's
+component (0.223). `small` and `wide` did not move: on `small` route has equalled
+reach since the step rule, and on `wide` the seeding barely changed. Nothing here
+is a route regression — the step rule's components are unchanged — it is where
+the founders are put.
+
+### 60 simulated minutes, `voxel_founder_autopsy 60 preset=<name>`
+
+| | small before | small after | default before | default after |
+| --- | --- | --- | --- | --- |
+| deaths (accounted) | 27 | 25 | 38 | 39 |
+| starved (shredder / browser) | 22 (12 / 10) | 25 (13 / 12) | 34 (23 / 11) | 35 (22 / 13) |
+| drowned | 5 | **0** | 4 | 4 |
+| **browser extinct at minute** | 39 | **30** | never (2 alive) | **never (1 alive)** |
+| shredders alive at 60 min | 9 | 7 | 8 | 8 |
+| browser bites | 21,340 | 10,412 | 21,404 | 16,621 |
+| shredder bites | 19,385 | 16,619 | 41,057 | 49,352 |
+| born (of 32 / 48 births) | 20 | 16 | 32 | 32 |
+
+Browser intake falls with the band, as the t = 0 table says it must: half the
+bites on `small`, 22 % fewer on `default`, and the `small` extinction moved nine
+minutes earlier. What the browsers ate changed shape as well as size — on
+`default` bloomcrown went from 4,283 bites to **none at all** (its one-cell crown
+sits above the band and the seeder no longer stands anybody under a high one),
+and stonecushion, a floor tissue, went from 1,812 to 4,771. On `small`
+bloomcrown went the other way, 0 → 658, because a browser can now reach the
+0.125–0.25 m cell a bloomcrown seedling's crown sits in. This is the succession
+story decisions §2 asked for, and the answer to the hungry browser is the layers
+package's basal rosette, not a raised ceiling. Drowning on `small` went from five to zero. That is not
+isolated: the seeding, the clearance and every trajectory moved together in this
+arm, and a five-to-zero count over one seed is a small sample. It is recorded,
+not explained. Residuals over 72,000
+ticks: fauna ≤ 1.1e-10, flora ≤ 6.4e-10 absolute.
+
+### Shade
+
+`shade_k` (per cell²) became `shade_k_per_m2` = `1.5 × (0.25 m)²` = **0.09375**,
+and a crown's area became `π (radius_cells · voxel_m)²` floored at `(0.25 m)²`
+instead of `π radius_cells²` floored at 1. On the 0.25 m reference grid both
+substitutions cancel exactly — coefficient and area each pick up one factor of
+`(0.25)²`, floor included — so `default` and `wide` are numerically identical,
+which `crates/cubarium-voxel-flora/tests/shade_area.rs` asserts against the old
+expression digit for digit. On `small` the same physical crown now casts the same
+physical shade as on `default`; before, halving the cell quartered the optical
+depth. No stock number in the tables above is attributable to it: the t = 0
+observer does not step, and the two autopsy arms are 0.125 m and 0.25 m worlds
+whose light gates move only over hours.
