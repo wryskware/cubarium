@@ -15,15 +15,15 @@ sky_gradient = true
 
 [world]
 width = 160
-# 72 voxels: the terraced `small` ring. 4 px * 72 + 2 px * 24 of depth = 336 of the 360 px
-# raster; 48 would clip the staircase to its lowest terraces.
+# 72 voxels leave room for the `small` ring's raised shelves and valleys.
+# 4 px * 72 + 2 px * 24 of depth = 336 of the 360 px raster.
 height = 72
 depth = 24
 voxel_m = 0.125
 water_substeps = 4
 
-# The shipped `small` landscape: benched headlands with grottos under their ledges, soil
-# valleys between, and its own water inventory. The rain, evaporation and aquifer keys
+# The shipped `small` landscape: local shelves with grottos under their ledges, soil
+# valleys between, and connected pools. The rain, evaporation and aquifer keys
 # that used to sit here are the recipe's business now (`Recipe.water`); the panel does not
 # state them.
 [world.landform]

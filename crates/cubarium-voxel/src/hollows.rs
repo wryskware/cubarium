@@ -100,7 +100,13 @@ pub fn carve(
         return Carved::default();
     }
     let undercuts = notch_banks(volume, field, &h, seed, min_void_y, r.tiers.any());
-    let candidates = gallery_candidates(volume, field, &h, seed, min_void_y);
+    // Chambers are cut from actual front-facing banks, before the fine gallery field.
+    // Their mouths are part of the cut, so they remain first-class habitat openings
+    // rather than sealed noise pockets which connect-or-fill has to rescue.
+    let mut candidates = chamber_candidates(volume, field, &h, seed, min_void_y);
+    candidates.extend(gallery_candidates(volume, field, &h, seed, min_void_y));
+    candidates.sort_unstable();
+    candidates.dedup();
     let bodies = components(&volume.config, &candidates);
     connect_or_fill(volume, &h, min_void_y);
     seal_unreadable_shafts(volume);
@@ -113,6 +119,108 @@ pub fn carve(
         galleries: kept,
         dropped: bodies.len() - kept,
     }
+}
+
+/// Cut a small number of broad chambers behind the strongest front-facing banks.
+///
+/// This is deliberately derived from the finished surface rather than from another
+/// noise threshold.  A chamber starts one cell behind a real drop, uses the lower
+/// ground as its floor, and keeps at least one roof voxel.  Its entire front face opens
+/// onto the lower shelf, which gives the camera a readable entrance and gives fauna a
+/// supported way in.  The fine gallery pass below still supplies the less regular
+/// passages between these larger rooms.
+fn chamber_candidates(
+    volume: &mut Volume,
+    field: &Heightfield,
+    h: &Hollows,
+    seed: u64,
+    min_void_y: i32,
+) -> Vec<usize> {
+    let c = volume.config.clone();
+    let (w, d, vm) = (c.width as usize, c.depth as usize, c.voxel_m);
+    if w < 8 || d < 4 {
+        return Vec::new();
+    }
+    let clearance = (h.clearance_m / vm).ceil().max(2.0) as i32;
+    let radius_x = (h.grotto_wavelength_m * 0.30 / vm).round().max(3.0) as i64;
+    let depth = (h.undercut_depth_m * 2.5 / vm).round().max(3.0) as usize;
+    let room_h = (h.clearance_m * 1.8 / vm).round().max(clearance as f64) as i32;
+    // A few legible rooms, not a requirement to perforate every mass. Existing
+    // undercuts and galleries supply the smaller openings around them.
+    let desired = ((w as f64 * vm) / 18.0).ceil().clamp(1.0, 3.0) as usize;
+
+    let mut banks = Vec::new();
+    for x in 0..w {
+        for z in 1..d.saturating_sub(depth + 1) {
+            if field.pool_spill[z * w + x] != i32::MIN {
+                continue;
+            }
+            let front = volume.surface[(z - 1) * w + x];
+            let top = volume.surface[z * w + x];
+            let drop = top - front;
+            if drop < clearance + 2 || front + 1 < min_void_y {
+                continue;
+            }
+            // Stable seed jitter breaks ties between long faces without turning their
+            // edges into the organizing shape.
+            let jitter = ((x as u64 * 0x9e37_79b9 ^ z as u64 * 0x85eb_ca6b ^ seed).rotate_left(17)
+                & 0xff) as i32;
+            banks.push((drop * 512 + jitter, x, z));
+        }
+    }
+    banks.sort_unstable_by(|a, b| b.cmp(a));
+
+    let mut chosen: Vec<(usize, usize)> = Vec::new();
+    for &(_, x, z) in &banks {
+        let separated = chosen.iter().all(|&(cx, cz)| {
+            let dx = (x as i64 - cx as i64)
+                .abs()
+                .min(w as i64 - (x as i64 - cx as i64).abs());
+            dx > radius_x * 2 || z.abs_diff(cz) > depth
+        });
+        if separated {
+            chosen.push((x, z));
+        }
+        if chosen.len() == desired {
+            break;
+        }
+    }
+
+    let mut carved = Vec::new();
+    for (cx, z0) in chosen {
+        for dx in -radius_x..=radius_x {
+            let x = (cx as i64 + dx).rem_euclid(w as i64) as usize;
+            let side = (dx as f64 / (radius_x as f64 + 0.5)).powi(2);
+            for dz in 0..depth {
+                let z = z0 + dz;
+                if z >= d {
+                    continue;
+                }
+                if field.pool_spill[z * w + x] != i32::MIN {
+                    continue;
+                }
+                let inward = dz as f64 / depth.max(1) as f64;
+                if side + (inward * 0.72).powi(2) > 1.0 {
+                    continue;
+                }
+                let outside = volume.surface[(z0 - 1) * w + x];
+                let roof = volume.surface[z * w + x] - 1;
+                let floor = (outside + 1).max(min_void_y);
+                let ceiling = (floor + room_h - 1).min(roof);
+                if ceiling - floor + 1 < clearance {
+                    continue;
+                }
+                for y in floor..=ceiling {
+                    let i = c.index(x as i64, y as u32, z as u32);
+                    if volume.material[i].is_solid() {
+                        volume.material[i] = Material::Air;
+                        carved.push(i);
+                    }
+                }
+            }
+        }
+    }
+    carved
 }
 
 /// Open every sealed void to the sky or fill it in: a mouth cut to the nearest open void
@@ -493,6 +601,9 @@ fn notch_banks(
     for z in 0..d {
         for x in 0..w {
             let i = z * w + x;
+            if field.pool_spill[i] != i32::MIN {
+                continue;
+            }
             let top = volume.surface[i];
             // The steepest fall to a neighbour, and the way back into the hill.
             // On a terraced ring the fall toward the front comes first, however steep
@@ -598,6 +709,10 @@ fn notch_banks(
                     break;
                 }
                 let cx = x as i64 - k * dx;
+                let column = cz as usize * w + cx.rem_euclid(w as i64) as usize;
+                if field.pool_spill[column] != i32::MIN {
+                    continue;
+                }
                 for y in void_lo..=band_top {
                     let cell = c.index(cx, y as u32, cz as u32);
                     if volume.material[cell] == Material::Rock {
@@ -639,6 +754,9 @@ fn gallery_candidates(
         let z_m = (z as f64 + 0.5) * vm;
         let front = 1.0 - h.front_bias * z as f64 / (d.max(2) - 1) as f64;
         for x in 0..w {
+            if field.pool_spill[z * w + x] != i32::MIN {
+                continue;
+            }
             let x_m = (x as f64 + 0.5) * vm;
             let top = volume.surface[z * w + x];
             for y in min_void_y.max(1)..=(top - min_depth).max(0) {

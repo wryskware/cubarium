@@ -540,8 +540,8 @@ fn generate_with_a_lake(
         );
         (lake.visible_m2, tiers)
     };
-    // The ring has to be walkable, and that is the dearest question of the three, so it is
-    // asked last and only of a world that has already cleared the water bars.
+    // Walking is descriptive: some landscapes have disconnected or inaccessible regions
+    // by design. Keep the observation for development without redrawing their seeds.
     let walkable = |world: &World| cubarium_voxel::walk::around_the_ring(world, WALK_STEP_M);
     if let Some(seed) = asked {
         let world = build(seed);
@@ -555,8 +555,8 @@ fn generate_with_a_lake(
         }
         if !walkable(&world) {
             eprintln!(
-                "cubarium voxel: seed {seed} was asked for, so it is kept — but the ring \
-                 cannot be walked around, so its animals are in separate halves"
+                "cubarium voxel: seed {seed} has no {WALK_STEP_M:.1} m closed walking route \
+                 (observation only)"
             );
         }
         return (world, seed, 0);
@@ -566,14 +566,13 @@ fn generate_with_a_lake(
         let seed = next_seed();
         let world = build(seed);
         let (got, tiers) = read(&world);
-        if got >= want && tiers >= want_tiers && !walkable(&world) {
-            eprintln!(
-                "cubarium voxel: seed {seed} rejected: its water reads, but the ring cannot \
-                 be walked around"
-            );
-            continue;
-        }
         if got >= want && tiers >= want_tiers {
+            if !walkable(&world) {
+                eprintln!(
+                    "cubarium voxel: seed {seed} has no {WALK_STEP_M:.1} m closed walking \
+                     route (observation only)"
+                );
+            }
             if k > 0 {
                 eprintln!(
                     "cubarium voxel: seed {seed} accepted: lake {got:.1} m² visible, \
@@ -2512,10 +2511,10 @@ mod tests {
         assert_eq!((seed, rejected), (77, 0), "a named seed is honoured");
     }
 
-    /// A ring the animals cannot walk around is two habitats, not one, so the gate asks
-    /// the generator's own walkability question too — last, because it costs the most.
+    /// Walking remains available as a terrain observation, including for landscapes with
+    /// deliberately disconnected regions. It is not a seed-acceptance condition.
     #[test]
-    fn the_gate_rejects_a_ring_that_cannot_be_walked() {
+    fn walking_reports_disconnected_terrain_without_making_it_invalid() {
         // A flat ring of rock with a wall across the whole strip: nothing climbs 0.75 m.
         let c = cubarium_voxel::Config {
             width: 16,

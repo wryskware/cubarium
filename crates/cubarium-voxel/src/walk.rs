@@ -101,7 +101,7 @@ impl Union {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Config, Material, PRESETS, World};
+    use crate::{Config, Material, World};
 
     /// A flat ring of rock with a lid of open sky over it.
     fn flat(width: u32, depth: u32) -> World {
@@ -160,20 +160,5 @@ mod tests {
             around_the_ring(&world, step_m),
             "the ramp at the front opens the route again"
         );
-    }
-
-    /// Every preset stays walkable, at the seeds the rest of the suite uses.
-    #[test]
-    fn every_preset_can_be_walked_around() {
-        for p in PRESETS {
-            for seed in [1u64, 77] {
-                let world = World::new(Config { seed, ..p.config() });
-                assert!(
-                    around_the_ring(&world, 0.5),
-                    "{} seed {seed} cannot be walked around",
-                    p.name
-                );
-            }
-        }
     }
 }

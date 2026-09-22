@@ -154,38 +154,33 @@ impl Erosion {
     };
 }
 
-/// Terraces: a staircase of levels rising from the front cut to the back wall.
+/// Local shelf masses and the elevations available to them.
 ///
-/// The camera looks slightly down from the front, so a landform that climbs toward the
-/// back shows every one of its floors and every one of its risers. That is what a ring
-/// of terraces is for: levels the eye can read, a rock cliff between each pair, and on
-/// every level above the lowest a pool that spills over the cliff into the pool below —
-/// a chain of falls ending in the lake.
+/// Broad periodic lobes occupy different horizontal extents. Most end locally; one
+/// carries compact pools and rills from the spring down to the lake. This keeps readable
+/// floors and drops without imposing equal-depth bands across the ring.
 ///
 /// `count = 0` is the landform without any of it, exactly, so a recipe that says nothing
-/// about terraces gets the ring it always had.
+/// about shelves gets the ring it always had.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Tiers {
-    /// How many levels, front to back. `0` is no terracing at all; `1` is one level,
-    /// which is the same thing with a name.
+    /// How many shelf elevations are available. `0` is the original relief.
     pub count: u32,
     /// Height of one riser, metres. Worth making a whole [`Recipe::strata_m`]: then the
     /// benches and the terraces agree about where the rock changes, and a riser is one
     /// stratum's face rather than a cut across two.
     pub rise_m: f64,
-    /// Wavelength of the wander in a terrace's edge, metres around the ring.
+    /// Typical spacing and edge wavelength of shelf masses, metres around the ring.
     pub edge_wavelength_m: f64,
     /// How far that edge wanders, in metres of depth. A straight edge across the strip
     /// reads as a wall; this is what makes it a shoreline.
     pub edge_warp_m: f64,
-    /// How much of the recipe's relief survives inside a terrace, `0..=1`. A terrace has
-    /// to read as a floor, so most of the relief goes into the risers instead.
+    /// How much of the recipe's relief survives on shelf floors, `0..=1`.
     pub flat: f64,
-    /// Radius of a terrace pool around the ring, metres. A pool spans its terrace's
-    /// whole depth, so only this is free.
+    /// Radius of an elevated shelf pool around the ring, metres.
     pub pool_radius_m: f64,
-    /// Radius of the **lake** on terrace 0, metres. The lake is the largest water on the
+    /// Radius of the **lake** on the lowest ground, metres. The lake is the largest water on the
     /// ring and the one the camera reads in section, so it is not a pool: it runs to the
     /// front cut and it is this much wider than the pools that feed it.
     pub lake_radius_m: f64,
@@ -193,7 +188,7 @@ pub struct Tiers {
     pub pool_depth_m: f64,
     /// Width of the spillway notch in a pool's front rim, metres.
     pub notch_width_m: f64,
-    /// How far back from the terrace's front edge the bowl starts, metres: the lip the
+    /// How far back from a shelf's front edge the bowl starts, metres: the lip the
     /// notch is cut into.
     pub front_setback_m: f64,
 }
@@ -219,16 +214,14 @@ impl Tiers {
         front_setback_m: 0.25,
     };
 
-    /// `default` and `wide`: four levels, each riser one 2 m stratum — eight voxels at
-    /// 0.25 m, which reads as a floor at four pixels to the voxel.
+    /// `default` and `wide`: four elevations, each one 2 m stratum apart.
     pub const TERRACES: Tiers = Tiers {
         count: 4,
         ..Tiers::NONE
     };
 
     /// `small`: three levels on a 1.4 m stratum, and everything else at the half scale
-    /// its 0.125 m voxel asks for. Its terraces are eight samples deep, so a pool eight
-    /// voxels across fills one comfortably.
+    /// its 0.125 m voxel asks for.
     pub const SMALL: Tiers = Tiers {
         count: 3,
         rise_m: 1.4,
@@ -242,12 +235,12 @@ impl Tiers {
         ..Tiers::NONE
     };
 
-    /// Whether the landform is terraced at all.
+    /// Whether local shelf composition is enabled.
     pub fn any(&self) -> bool {
         self.count > 0
     }
 
-    /// The lift of the topmost terrace, metres.
+    /// The lift of the highest shelf elevation, metres.
     pub fn lift_m(&self) -> f64 {
         if self.count > 0 {
             (self.count - 1) as f64 * self.rise_m
@@ -431,10 +424,8 @@ pub struct Hollows {
     pub grotto_wavelength_m: f64,
     /// How strongly hollows are pulled toward the front cut, `0..=1`.
     ///
-    /// Zero on a terraced ring, and that is not an oversight: the terraces rise toward
-    /// the back, so every riser faces the camera and a grotto in the last one is as
-    /// visible as a grotto in the first. What keeps the unseen ones out is the camera
-    /// check itself ([`crate::hollows::fill_invisible`]), not a guess about depth.
+    /// Zero on a composed shelf ring: the camera check
+    /// ([`crate::hollows::fill_invisible`]) rejects unreadable rooms directly.
     pub front_bias: f64,
 
     /// Share of the soft rock at depth that opens into galleries, `0..=1`. Zero carves
@@ -487,8 +478,7 @@ impl Hollows {
         stream: 0x_5354_4147_5F48_4C57,
     };
 
-    /// A terraced ring: every riser faces the camera, so nothing is pulled toward the
-    /// front, and the geology is what limits the sites rather than a patch gate.
+    /// A composed shelf ring: geology limits sites rather than a front-bias gate.
     pub const TERRACED: Hollows = Hollows {
         undercut_density: 0.9,
         front_bias: 0.0,
@@ -882,7 +872,7 @@ pub struct Recipe {
 
     /// The erosion budget.
     pub erosion: Erosion,
-    /// Terraces: the levels the ring is built in, and the pools that chain down them.
+    /// Local shelf elevations and the pools and rills that chain down them.
     pub tiers: Tiers,
     /// Structural benches: the ledges a hard stratum makes where it outcrops.
     pub benches: Benches,
@@ -947,13 +937,12 @@ impl Recipe {
         },
     };
 
-    /// The terraced ring `default` and `wide` are built on.
+    /// The composed shelf ring `default` and `wide` are built on.
     ///
-    /// [`Recipe::DEFAULT`] itself is left alone, terraces and all: it is the landform
+    /// [`Recipe::DEFAULT`] itself is left alone: it is the landform
     /// the crate had before there were levels, it is what a hand-written recipe gets,
     /// and `tiers.count = 0` has to keep reproducing it exactly. This is that recipe
-    /// with the levels switched on, most of its relief moved out of the terrace floors
-    /// and into the risers, and a base raised to stand the staircase on.
+    /// with local shelf elevations switched on and a raised base for their relief.
     pub const TERRACED: Recipe = Recipe {
         base_m: 4.0,
         back_rise_m: 1.2,
