@@ -22,10 +22,11 @@ use crate::World;
 /// `benches` section), and to 10 for the water inventory (`Recipe.water`), and to 11 for
 /// the closed cycle the recipe turns on (five more `Water` fields), and to 12 for the
 /// shower schedule (`World::next_shower_tick`, and the interval pair in both `Config` and
-/// `Water`). Postcard
-/// is not self-describing, so a new field is a new format: earlier tags are refused,
+/// `Water`), and to 13 for the lake's recipe fields, and to **14** for
+/// `Ledger::reentry_in`, the closed cycle's second return path — a stream at the spring
+/// cell. Postcard is not self-describing, so a new field is a new format: earlier tags are refused,
 /// never migrated.
-pub const SCHEMA: u32 = 13;
+pub const SCHEMA: u32 = 14;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

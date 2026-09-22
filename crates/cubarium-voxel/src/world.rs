@@ -744,6 +744,14 @@ impl World {
     ///
     /// Nothing here is a claim about the water **cycle**: a world can be hydrostatically
     /// settled and still locked dry, which is what [`Settle::dry_locked`] reports.
+    ///
+    /// A world with a **stream running** through it settles on the same terms and the test
+    /// is still the right one: river re-entry ([`crate::water::reentry`]) moves water from
+    /// the sky to the spring and the outlet sends it back, so at steady state the *stored*
+    /// volume and the wet-cell count are both constant while the water itself never stops
+    /// moving. Flow-through converges here; only accumulation and drainage do not. And a
+    /// ring with a stream in it is not dry-locked whatever its sky holds, because
+    /// `dry_locked` asks for **no pool at all** and the stream makes one.
     pub fn settle(&mut self, cap_ticks: u32) -> Settle {
         let window = SETTLE_WINDOW as usize;
         let mut history: Vec<(f64, usize)> = Vec::with_capacity(window + 1);

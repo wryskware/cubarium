@@ -90,6 +90,11 @@ pub struct Config {
     /// drought lock kept as a feature.
     pub shower_interval_min_s: f64,
     pub shower_interval_max_s: f64,
+    /// Closed budget: water returned from the atmosphere store as a **stream at the spring
+    /// cell**, cubic metres per second, while the store stands above the shower floor.
+    /// The river that leaves at the outlet re-enters upstream. Zero — the default — is
+    /// showers only. Ignored under the open budget.
+    pub reentry_m3_per_s: f64,
     /// Largest change in one cell's `free` fraction that a single equalization substep
     /// may apply, so a filling region can be watched travelling. Zero (the default)
     /// disables the cap and a region settles to its level in one substep.
@@ -124,6 +129,7 @@ impl Default for Config {
             shower_volume_m3: 5.0,
             shower_interval_min_s: 0.0,
             shower_interval_max_s: 0.0,
+            reentry_m3_per_s: 0.0,
             free_transfer_cap: 0.0,
             landform: Landform::Ridge,
         }

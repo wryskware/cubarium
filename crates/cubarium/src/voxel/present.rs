@@ -1098,6 +1098,55 @@ impl Surface {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A falling column has to read at 4 px.** A cell mid-fall holds a small fraction of
+    /// its void, and the drawn height is `round(free · s)`, which is zero at four pixels
+    /// for anything under an eighth full. Both paths already floor it at one row —
+    /// `present::fill_px` clamps to 1, and the GPU packs the free byte as
+    /// `quantise(free).max(1)` for any cell the CPU calls wet — so a thread of water is a
+    /// pixel wide rather than nothing. This pins that agreement, because the two clamps
+    /// live in different crates and one could be *fixed* without the other.
+    #[test]
+    fn a_thin_falling_column_draws_one_row_on_both_paths() {
+        let s = 4u32;
+        for free in [1e-3f32, 0.01, 0.05, 0.1, 0.2, 0.49, 0.5, 0.9, 1.0] {
+            let cpu = fill_px(free, s);
+            assert_eq!(cpu, cpu.clamp(1, s as i32), "cpu rows are 1..={s}: {free}");
+
+            // The GPU sees the quantised byte and repeats the same arithmetic in
+            // `voxel.frag`'s `fillPxQ`.
+            let texel = cubarium_gpu::voxel::VoxelTexel::pack_glyph(
+                0,
+                0,
+                0,
+                free,
+                free <= WATER_EPSILON,
+                0.0,
+                0,
+            );
+            let q = (texel.free() * 255.0).round() as i32;
+            assert!(q >= 1, "any wet cell packs to at least one: {free}");
+            // `voxel.frag`'s `fillPxQ`: floor(q/255 · S + 0.5), clamped to 1..=S.
+            let gpu = (q as f32 / 255.0 * s as f32 + 0.5).floor() as i32;
+            let gpu = gpu.clamp(1, s as i32);
+            assert_eq!(
+                gpu, cpu,
+                "the two paths draw the same rows for free = {free}"
+            );
+        }
+        // And a dry cell draws nothing on either.
+        assert_eq!(fill_px_at_free(0.0, s), 0);
+    }
+
+    /// `fill_px_at` without a world behind it, for the row-count comparison above.
+    fn fill_px_at_free(free: f32, s: u32) -> i32 {
+        if free <= WATER_EPSILON {
+            0
+        } else {
+            fill_px(free, s)
+        }
+    }
+
     use cubarium_render::Canvas;
     use cubarium_surface::{Scale, Topology};
     use cubarium_voxel::{Command, Config, World};

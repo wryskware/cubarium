@@ -443,9 +443,9 @@ fn generate_with_a_lake(
     tries: usize,
     mut next_seed: impl FnMut() -> u64,
 ) -> (World, u64, usize) {
-    let want = match &cfg.landform {
-        Landform::Staged(r) => r.water.min_lake_m2,
-        Landform::Ridge => 0.0,
+    let (want, want_tiers) = match &cfg.landform {
+        Landform::Staged(r) => (r.water.min_lake_m2, r.water.min_tier_pools as usize),
+        Landform::Ridge => (0.0, 0),
     };
     let build = |seed: u64| {
         World::new(cubarium_voxel::Config {
@@ -453,39 +453,62 @@ fn generate_with_a_lake(
             ..cfg.clone()
         })
     };
+    // What the camera would make of this world's water: the lake, and the pools standing
+    // above it that are worth calling pools.
+    let read = |world: &World| {
+        let lake = cubarium_voxel::hydrate::lake(world);
+        let tiers = cubarium_voxel::hydrate::tier_pools(
+            &cubarium_voxel::hydrate::pools(world),
+            lake.level_y,
+        );
+        (lake.visible_m2, tiers)
+    };
     if let Some(seed) = asked {
         let world = build(seed);
-        let got = cubarium_voxel::hydrate::lake(&world).visible_m2;
-        if want > 0.0 && got < want {
+        let (got, tiers) = read(&world);
+        if (want > 0.0 && got < want) || tiers < want_tiers {
             eprintln!(
-                "cubarium voxel: seed {seed} was asked for, so it is kept — but its lake \
-                 is {got:.1} m² visible against the {want:.1} m² a drawn seed would need"
+                "cubarium voxel: seed {seed} was asked for, so it is kept — but its lake is \
+                 {got:.1} m² visible with {tiers} pool(s) above it, against the {want:.1} m² \
+                 and {want_tiers} a drawn seed would need"
             );
         }
         return (world, seed, 0);
     }
-    let mut best: Option<(f64, u64, World)> = None;
+    let mut best: Option<(f64, usize, u64, World)> = None;
     for k in 0..tries.max(1) {
         let seed = next_seed();
         let world = build(seed);
-        let got = cubarium_voxel::hydrate::lake(&world).visible_m2;
-        if got >= want {
+        let (got, tiers) = read(&world);
+        if got >= want && tiers >= want_tiers {
             if k > 0 {
-                eprintln!("cubarium voxel: seed {seed} accepted: lake {got:.1} m² visible");
+                eprintln!(
+                    "cubarium voxel: seed {seed} accepted: lake {got:.1} m² visible, \
+                     {tiers} pool(s) above it"
+                );
             } else {
                 eprintln!("cubarium voxel: procedural world generated with random seed {seed}");
             }
             return (world, seed, k);
         }
-        eprintln!("cubarium voxel: seed {seed} rejected: lake {got:.1} m² visible, need {want:.1}");
-        if best.as_ref().is_none_or(|(b, _, _)| got > *b) {
-            best = Some((got, seed, world));
+        eprintln!(
+            "cubarium voxel: seed {seed} rejected: lake {got:.1} m² visible with {tiers} \
+             pool(s) above it, need {want:.1} m² and {want_tiers}"
+        );
+        // Better means more tiers first and then more water: a ring with a cascade and a
+        // small lake is the picture Wrysk asked for; a big lake alone is the one it had.
+        if best
+            .as_ref()
+            .is_none_or(|(bw, bt, _, _)| (tiers, got) > (*bt, *bw))
+        {
+            best = Some((got, tiers, seed, world));
         }
     }
-    let (got, seed, world) = best.expect("at least one try");
+    let (got, tiers, seed, world) = best.expect("at least one try");
     eprintln!(
-        "cubarium voxel: NO SEED of {tries} had a lake of {want:.1} m²; keeping the wettest, \
-         seed {seed} with {got:.1} m² — this world will look dry"
+        "cubarium voxel: NO SEED of {tries} had a lake of {want:.1} m² with {want_tiers} \
+         pool(s) over it; keeping the wettest, seed {seed} with {got:.1} m² and {tiers} — \
+         this world will look dry"
     );
     (world, seed, tries)
 }
@@ -568,11 +591,17 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                 let st = seeded.settle;
                 let wc = world.config().clone();
                 let lake = cubarium_voxel::hydrate::lake(&world);
+                let above = cubarium_voxel::hydrate::tier_pools(
+                    &cubarium_voxel::hydrate::pools(&world),
+                    lake.level_y,
+                );
                 eprintln!(
-                    "cubarium voxel: lake {:.2} m³ over {:.1} m², {:.1} m² visible",
+                    "cubarium voxel: lake {:.2} m³ over {:.1} m², {:.1} m² visible, \
+                     {above} pool(s) above it, stream {:.4} m³/s",
                     lake.volume_m3,
                     lake.surface_cells.len() as f64 * world.config().cell_area(),
                     lake.visible_m2,
+                    world.config().reentry_m3_per_s,
                 );
                 eprintln!(
                     "cubarium voxel: {} — water settled in {} ticks ({}), {:.2} m³ pooled \
@@ -1863,10 +1892,19 @@ mod tests {
             d.world.voxel_m, 0.25,
             "the ambient default is the shipped `default` landscape, cell size and all"
         );
+        // The shipped `default` landscape, whatever that landscape currently is: the
+        // preset owns its own recipe, and pinning a copy of it here only makes this test
+        // fail every time the generator tunes one.
+        let shipped = cubarium_voxel::Preset::find("default").expect("a default preset");
         assert_eq!(
             d.world.landform,
-            cubarium_voxel::Landform::Staged(cubarium_voxel::Recipe::DEFAULT),
-            "`cubarium voxel` with no TOML generates a staged ring"
+            cubarium_voxel::Landform::Staged(shipped.recipe),
+            "`cubarium voxel` with no TOML generates the shipped staged ring"
+        );
+        assert_eq!(
+            (d.world.width, d.world.height, d.world.depth),
+            (shipped.width, shipped.height, shipped.depth),
+            "and on the ring that landscape was written for"
         );
 
         let cfg: VoxelConfig =
@@ -1965,7 +2003,7 @@ mod tests {
                 cfg.world.depth,
                 cfg.world.voxel_m
             ),
-            (160, 48, 24, 0.125),
+            (160, 72, 24, 0.125),
             "the Tachyon ring: 20 m around at 4 px per voxel"
         );
         let text = std::fs::read_to_string(&path).unwrap();
@@ -1990,6 +2028,8 @@ mod tests {
         let staged = |min_lake_m2: f64| {
             let mut recipe = cubarium_voxel::Recipe::DEFAULT;
             recipe.water.min_lake_m2 = min_lake_m2;
+            // This test is about the lake bar alone; the tier-pool bar is asked of the presets.
+            recipe.water.min_tier_pools = 0;
             cubarium_voxel::Config {
                 width: 32,
                 height: 24,

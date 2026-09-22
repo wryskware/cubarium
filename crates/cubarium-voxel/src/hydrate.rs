@@ -49,13 +49,15 @@ const LAKE_TABLE_SHARE: f64 = 0.85;
 /// is what the deployed panel did (Wrysk, 2026-09-21). Its floor is roofed, so it is not
 /// a lake.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Lake {
+pub struct Pool {
     /// Its wet cells.
     pub cells: Vec<usize>,
     /// Its **open-water surface**: a wet cell with void, and no water, directly over it.
     pub surface_cells: Vec<usize>,
-    /// The share of that surface the camera can read, square metres.
+    /// The share of that surface the camera can read, square metres — and in cells, which
+    /// is what a gate about *readability* wants: one cell is one cell at any voxel size.
     pub visible_m2: f64,
+    pub visible_cells: usize,
     /// The level the surface stands at: one above the highest wet cell, or the floor of
     /// an empty lake.
     pub level_y: u32,
@@ -65,59 +67,171 @@ pub struct Lake {
     pub volume_m3: f64,
 }
 
-/// The ring's lake as it stands now. `None` of the geometry when no basin has sky over
-/// the whole of its floor — a world with nowhere for open water to be.
-pub fn lake(world: &World) -> Lake {
-    let c = world.config();
-    let plane = c.width as usize * c.depth as usize;
-    let empty = Lake {
+/// The ring's **lake**: the lowest pool, which is the one the outlet's datum is seated
+/// on. Empty geometry when no basin has sky over the whole of its floor — a world with
+/// nowhere for open water to be.
+pub fn lake(world: &World) -> Pool {
+    pools(world).into_iter().next().unwrap_or(Pool {
         cells: Vec::new(),
         surface_cells: Vec::new(),
         visible_m2: 0.0,
+        visible_cells: 0,
         level_y: 0,
         floor_y: 0,
         volume_m3: 0.0,
-    };
-    let Some(basin) = basins(world).into_iter().find(|b| open_to_sky(world, b)) else {
-        return empty;
-    };
-    let cells: Vec<usize> = basin
-        .cells
-        .iter()
-        .copied()
-        .filter(|&i| world.free[i] > 0.0)
-        .collect();
+    })
+}
+
+/// Every body of **standing** water in the world that the sky can see, lowest floor
+/// first. The lake is the first of them; the tiers' pools are the rest.
+///
+/// A pool is water **resting on the ground**: wet cells sitting on solid, and wet cells
+/// sitting on those, taken as connected bodies. Two things fall out of that, and both had
+/// to be learned the hard way on the terraced rings:
+///
+/// - A **falling** cell has void under it, so the cascade is not part of any pool. Count
+///   it and `default`'s lake surface sits twenty voxels up its own waterfall.
+/// - A terrace puddle and the lake are *hydraulically* one basin — the puddle drains into
+///   the lake — so [`basins`] puts them in one bucket and calling that bucket "the lake"
+///   makes every pool above it disappear. Standing water splits where the water does:
+///   at the lip, where it stops resting and starts falling.
+pub fn pools(world: &World) -> Vec<Pool> {
+    let c = world.config();
+    let plane = c.width as usize * c.depth as usize;
+    let n = c.cells();
+    let wet = |i: usize| world.free[i] >= POOL_MIN_FILL && !world.material[i].is_solid();
+
+    // Standing: resting on solid, or on standing water.
+    let mut standing = vec![false; n];
+    for i in 0..n {
+        if wet(i) && (i < plane || world.material[i - plane].is_solid()) {
+            standing[i] = true;
+        }
+    }
+    for i in plane..n {
+        if wet(i) && standing[i - plane] {
+            standing[i] = true;
+        }
+    }
+
+    let mut seen = vec![false; n];
+    let mut out: Vec<Pool> = Vec::new();
+    for start in 0..n {
+        if !standing[start] || seen[start] {
+            continue;
+        }
+        let mut body = vec![start];
+        seen[start] = true;
+        let mut k = 0;
+        while k < body.len() {
+            let i = body[k];
+            k += 1;
+            let (x, y, z) = c.coords(i);
+            let mut around: Vec<usize> = vec![
+                c.index(i64::from(x) + 1, y, z),
+                c.index(i64::from(x) - 1, y, z),
+            ];
+            if z + 1 < c.depth {
+                around.push(c.index(i64::from(x), y, z + 1));
+            }
+            if z > 0 {
+                around.push(c.index(i64::from(x), y, z - 1));
+            }
+            if i >= plane {
+                around.push(i - plane);
+            }
+            if i + plane < n {
+                around.push(i + plane);
+            }
+            for j in around {
+                if standing[j] && !seen[j] {
+                    seen[j] = true;
+                    body.push(j);
+                }
+            }
+        }
+        body.sort_unstable();
+        let pool = read_pool(world, body);
+        // A body with no open surface at all is under rock: drainage, not a pool.
+        if !pool.surface_cells.is_empty() {
+            out.push(pool);
+        }
+    }
+    out.sort_by_key(|p| (p.floor_y, p.cells.first().copied().unwrap_or(0)));
+    out
+}
+
+/// One body of standing water, read: its surface, what the camera makes of it, and how
+/// much it holds.
+fn read_pool(world: &World, cells: Vec<usize>) -> Pool {
+    let c = world.config();
+    let plane = c.width as usize * c.depth as usize;
     let volume_m3 = cells.iter().map(|&i| world.free[i]).sum::<f64>() * c.voxel_volume();
-    let surface_cells: Vec<usize> = cells
-        .iter()
-        .copied()
+
+    // The **top of the water in each column**, which is what the camera reads: the
+    // highest wet cell whose own roof is open. Not "the cell above is dry" — a pool with
+    // a waterfall landing in it has water in the cell above every one of its own, and
+    // that pool has a surface like any other. A cell under rock is not a surface at all.
+    let mut top: std::collections::BTreeMap<usize, usize> = std::collections::BTreeMap::new();
+    for &i in &cells {
+        let col = i % plane;
+        if top.get(&col).is_none_or(|&best| i > best) {
+            top.insert(col, i);
+        }
+    }
+    let mut surface_cells: Vec<usize> = top
+        .into_values()
         .filter(|&i| {
             let up = i + plane;
-            up >= c.cells() || (!world.material[up].is_solid() && world.free[up] <= 0.0)
+            up >= c.cells() || !world.material[up].is_solid()
         })
         .collect();
-    let visible_m2 = surface_cells
+    surface_cells.sort_unstable();
+    let visible_cells = surface_cells
         .iter()
         .filter(|&&i| {
             let (x, y, z) = c.coords(i);
             crate::hollows::floor_is_visible(world, i64::from(x), y, z)
         })
-        .count() as f64
-        * c.cell_area();
+        .count();
+    let floor_y = cells.iter().map(|&i| c.coords(i).1).min().unwrap_or(0);
     let level_y = cells
         .iter()
         .map(|&i| c.coords(i).1)
         .max()
-        .map_or(basin.floor_y, |y| y + 1);
-    Lake {
+        .map_or(floor_y, |y| y + 1);
+    Pool {
         cells,
         surface_cells,
-        visible_m2,
+        visible_m2: visible_cells as f64 * c.cell_area(),
+        visible_cells,
         level_y,
-        floor_y: basin.floor_y,
+        floor_y,
         volume_m3,
     }
 }
+
+/// How many of `pools` stand **above** `lake` and show enough of themselves to read: the
+/// tier-pool half of the host's seed gate. Four surface cells is a quarter of a square
+/// metre at 0.25 m — under that a pool is a glint, not a water feature.
+pub fn tier_pools(pools: &[Pool], lake_level_y: u32) -> usize {
+    pools
+        .iter()
+        .filter(|p| p.level_y > lake_level_y && p.visible_cells >= MIN_POOL_CELLS)
+        .count()
+}
+
+/// How full a void cell must be to count as **pool** water rather than runoff.
+///
+/// Every surface a stream has crossed carries a film of a few thousandths of a cell, and
+/// a film is not a pond: read at `free > 0` a trickle over a shelf welds the pool above a
+/// waterfall to the lake below it into one body, and the tier pools the gate is looking
+/// for vanish. At 0.05 of a 0.25 m voxel this is twelve millimetres of water — the depth
+/// at which there is something to see.
+pub const POOL_MIN_FILL: f64 = 0.05;
+
+/// Visible surface cells a pool needs before the gate counts it.
+pub const MIN_POOL_CELLS: usize = 4;
 
 /// Whether the sky reaches **every** floor cell of this basin: nothing solid anywhere
 /// above it in its own column. One roofed floor cell and the basin is a sump.
@@ -1212,7 +1326,14 @@ mod tests {
             },
         );
         assert!(out.lake_m3 > 0.0, "the pit took water: {out:?}");
-        assert_eq!(out.lake_cells, 20, "five columns, two rows, two deep");
+        // Ten columns of pit, and `lake_cells` counts the cells holding **pool** water:
+        // the lower row, brim full. The upper row takes what is left of the inventory,
+        // which is a film — every cell of it is wet (asserted below) and none of it is a
+        // pond ([`POOL_MIN_FILL`]).
+        assert_eq!(
+            out.lake_cells, 10,
+            "five columns, two deep, one row of pool"
+        );
 
         for z in 0..c.depth {
             for x in 3..=7i64 {
@@ -1300,6 +1421,8 @@ mod tests {
                 shower_interval_max_s: 120.0,
                 lake_depth_m: 0.5,
                 min_lake_m2: 0.0,
+                reentry_m3_per_s: 0.0,
+                min_tier_pools: 0,
             },
         );
         let before = lake(&w).level_y;
@@ -1317,6 +1440,329 @@ mod tests {
         let v = w.view();
         assert!(v.total_residual().abs() <= 1e-9 * v.total_water_m3().max(1.0));
         let _ = c;
+    }
+
+    /// A rock pool on a shelf with a notch over a one-voxel drop into a lower basin that
+    /// holds the outlet on its rim: the smallest thing that is a cascade. The spring sits
+    /// on the upper pool's floor, where package T1 will put it.
+    fn two_bowls(reentry: f64) -> World {
+        let c = Config {
+            width: 16,
+            height: 14,
+            depth: 2,
+            voxel_m: 0.25,
+            rain_m_per_s: 3.5e-5,
+            evaporation_m_per_s: 0.0,
+            closed_water_budget: true,
+            initial_atmosphere_m3: 2.0,
+            shower_trigger_fraction: 0.01,
+            shower_volume_m3: 0.05,
+            shower_interval_min_s: 6000.0,
+            shower_interval_max_s: 6000.0,
+            reentry_m3_per_s: reentry,
+            ..Config::default()
+        };
+        let mut w = World::empty(c.clone());
+        for z in 0..c.depth {
+            for x in 0..c.width as i64 {
+                // The lower ground, to y = 3; the shelf behind it, to y = 7.
+                let top = if x >= 8 { 7 } else { 3 };
+                for y in 1..=top {
+                    w.material[c.index(x, y, z)] = Material::Rock;
+                }
+            }
+            // The upper pool: a rock bowl on the shelf, x 10..13, floor at y = 8, with a
+            // notch in its front rim at x = 10 one voxel below the rest.
+            for x in 10..=13i64 {
+                w.material[c.index(x, 8, z)] = Material::Rock;
+            }
+            for x in 11..=13i64 {
+                w.material[c.index(x, 9, z)] = Material::Rock;
+                w.material[c.index(x, 10, z)] = Material::Rock;
+            }
+            for x in 11..=12i64 {
+                for y in 9..=10 {
+                    w.material[c.index(x, y, z)] = Material::Air;
+                }
+            }
+            // The notch: x = 10 tops out at y = 9, a voxel under the rim at 10.
+            w.material[c.index(10, 9, z)] = Material::Rock;
+            // The lower basin: a real bowl, x 2..5, floor at y = 1, rimmed at y = 3 by the
+            // ground either side of it, so the lake has somewhere to be and a top to it.
+            for x in 2..=5i64 {
+                for y in 2..=3 {
+                    w.material[c.index(x, y, z)] = Material::Air;
+                }
+            }
+        }
+        w.rebuild_active_sets();
+        w.set_spring_cell(Some((12, 9, 0)));
+        // The datum: the outlet sits in the lake's own surface row, as `LakeDatum` seats
+        // it, so the lake holds its level and only the surplus leaves.
+        w.set_outlet_cell(Some((2, 3, 0)));
+        w
+    }
+
+    /// The stream runs: the upper pool stands at its notch, the fall column under it is
+    /// wet on **every** tick, and the world's stored water stops changing even though the
+    /// water in it never stops moving.
+    #[test]
+    fn a_stream_reaches_steady_state() {
+        let mut w = two_bowls(0.0015);
+        let c = w.config().clone();
+        hydrate(
+            &mut w,
+            &Water {
+                inventory_m: 0.04,
+                atmosphere_fraction: 0.5,
+                closed_cycle: true,
+                rain_m_per_s: 3.5e-5,
+                evaporation_m_per_s: 0.0,
+                shower_trigger_fraction: 0.01,
+                shower_volume_m3: 0.05,
+                shower_interval_min_s: 6000.0,
+                shower_interval_max_s: 6000.0,
+                ..Water::DRY
+            },
+        );
+        let settled = w.settle(600);
+        assert!(
+            !settled.dry_locked,
+            "a running stream is not a drought: {settled:?}"
+        );
+        // The outlet is the stream's way home — the host opens it after seeding, and
+        // without it the ring is a bath filling, not a river running.
+        w.apply(crate::Command::SetOutlet { open: true });
+        // Opening it is a transient of its own: the outlet's 0.05 m³/s is far more than
+        // the stream's, so the lower pool draws down to the outlet's own lip before the
+        // two rates can balance. Wait that out, then measure.
+        for _ in 0..8000 {
+            w.step();
+        }
+
+        // The fall: the void under the notch's outer lip, where the overflow drops.
+        let fall = c.index(10, 10, 0);
+        let mut wet = 0;
+        let mut stored: Vec<f64> = Vec::new();
+        for _ in 0..200 {
+            w.step();
+            if w.free[fall] > 0.0 {
+                wet += 1;
+            }
+            stored.push(w.view().stored_m3());
+        }
+        assert_eq!(
+            wet,
+            200,
+            "the fall column ran dry on {} of 200 ticks",
+            200 - wet
+        );
+
+        let found = pools(&w);
+        let upper = found
+            .iter()
+            .find(|p| p.floor_y >= 9)
+            .unwrap_or_else(|| panic!("the upper pool holds water: {found:?}"));
+        assert!(
+            upper.level_y >= 10,
+            "the upper pool stands at its notch: {upper:?}"
+        );
+
+        // The brief's test: stored water within one per cent across the last hundred ticks.
+        let last = &stored[stored.len() - 100..];
+        let (a, b) = (last[0], last[last.len() - 1]);
+        assert!(
+            (b - a).abs() <= 0.01 * a.max(1e-9),
+            "flow-through is a steady state: stored {a:.4} then {b:.4} over the last 100 ticks"
+        );
+        assert!(w.view().total_residual().abs() < 1e-9);
+    }
+
+    /// `pools` is the open water, tier by tier: the upper pool counts and the lake does
+    /// not count as a tier above itself.
+    #[test]
+    fn pools_reports_only_open_water_above_the_lake() {
+        // No stream: this is a question about reading water, not about moving it. And a
+        // thin inventory, so the lake stays in its own bowl instead of drowning the shelf
+        // the upper pool sits on.
+        let mut w = two_bowls(0.0);
+        hydrate(
+            &mut w,
+            &Water {
+                inventory_m: 0.04,
+                atmosphere_fraction: 0.2,
+                closed_cycle: true,
+                shower_interval_min_s: 6000.0,
+                shower_interval_max_s: 6000.0,
+                ..Water::DRY
+            },
+        );
+        w.settle(600);
+        // Fill the upper bowl by hand. A thin inventory puts its water in the lake, which
+        // is right — this test is about *reading* pools, not about who gets filled, and a
+        // hand-poured pool is the same geometry a tier's own spring will make.
+        let c = w.config().clone();
+        for x in 11..=12i64 {
+            for z in 0..c.depth {
+                w.apply(crate::Command::AddWater {
+                    x,
+                    y: 9,
+                    z,
+                    volume_m3: c.voxel_volume(),
+                });
+            }
+        }
+        for _ in 0..40 {
+            w.step();
+        }
+        let list = pools(&w);
+        let lake = lake(&w);
+        assert!(
+            list.iter().any(|p| p.floor_y == lake.floor_y),
+            "the lake is one of the pools: {lake:?} in {list:?}"
+        );
+        assert_eq!(
+            tier_pools(&list, lake.level_y),
+            1,
+            "one pool stands above the lake: {list:?}"
+        );
+        for p in &list {
+            for &i in &p.surface_cells {
+                let plane = w.config().width as usize * w.config().depth as usize;
+                assert!(
+                    i + plane >= w.config().cells() || !w.material[i + plane].is_solid(),
+                    "every surface cell is open water"
+                );
+            }
+        }
+    }
+
+    /// **Study, not a test.** The cascade on every preset: settle, open the outlet, then
+    /// ten simulated minutes. Per pool in the chain — where it stands against its notch —
+    /// plus the fall columns' wet ticks, the store's range, the showers fired, and the
+    /// grottos the tiers left.
+    #[test]
+    #[ignore = "study: run by name"]
+    fn the_cascade_on_every_preset() {
+        for p in crate::PRESETS {
+            let mut world = World::new(Config {
+                seed: 1,
+                ..p.config()
+            });
+            let settled = world.settle(600);
+            world.apply(crate::Command::SetOutlet { open: true });
+            let lake = lake(&world);
+            let list = pools(&world);
+            println!(
+                "=== {} seed 1: settle {} ticks {}, lake floor {} level {} ({:.1} m² visible), \
+                 {} pool(s), {} above the lake; {} hollows; stream {:.1e} m³/s",
+                p.name,
+                settled.ticks,
+                if settled.converged {
+                    "converged"
+                } else {
+                    "at the cap"
+                },
+                lake.floor_y,
+                lake.level_y,
+                lake.visible_m2,
+                list.len(),
+                tier_pools(&list, lake.level_y),
+                crate::hollows::find(&world).len(),
+                p.recipe.water.reentry_m3_per_s,
+            );
+            for pool in &list {
+                println!(
+                    "    pool floor {:2} level {:2}: {:.3} m³ over {} cell(s), {:.1} m² visible",
+                    pool.floor_y,
+                    pool.level_y,
+                    pool.volume_m3,
+                    pool.surface_cells.len(),
+                    pool.visible_m2,
+                );
+            }
+
+            // The falls: void cells directly under each pool's own surface row that are
+            // not part of any pool — where the overflow is on its way down.
+            let c = world.config().clone();
+            let plane = c.width as usize * c.depth as usize;
+            let in_a_pool: std::collections::BTreeSet<usize> =
+                list.iter().flat_map(|p| p.cells.iter().copied()).collect();
+            let falls: Vec<usize> = (0..c.cells())
+                .filter(|&i| {
+                    i >= plane
+                        && !world.material[i].is_solid()
+                        && !in_a_pool.contains(&i)
+                        && world.free[i] > 0.0
+                })
+                .collect();
+            let showers0 = world.view().ledger.showers;
+            let (mut lo, mut hi) = (world.atmosphere_m3(), world.atmosphere_m3());
+            let mut wet = vec![0u32; falls.len()];
+            for _ in 0..12_000 {
+                world.step();
+                lo = lo.min(world.atmosphere_m3());
+                hi = hi.max(world.atmosphere_m3());
+                for (n, &i) in wet.iter_mut().zip(&falls) {
+                    if world.free[i] > 0.0 {
+                        *n += 1;
+                    }
+                }
+            }
+            let always = wet.iter().filter(|&&n| n == 12_000).count();
+            println!(
+                "    {} falling cell(s) at the start, {always} wet on every one of 12 000 \
+                 ticks; store {lo:.2}..{hi:.2} m³ ({:+.1} %); {} shower(s)",
+                falls.len(),
+                100.0 * (hi - lo) / lo.max(1e-9),
+                world.view().ledger.showers - showers0,
+            );
+        }
+    }
+
+    /// **Study, not a test.** The smallest stream that reads: sweep `reentry_m3_per_s` on
+    /// the two-bowl fixture and report, per rate, how many of 200 ticks the fall column
+    /// holds water and what the sky store did. The rate that keeps it wet on every tick is
+    /// the one the presets want, scaled by voxel volume.
+    #[test]
+    #[ignore = "study: run by name"]
+    fn the_smallest_stream_that_reads() {
+        let vol = 0.25f64.powi(3);
+        for rate in [1e-5, 3e-5, 1e-4, 3e-4, 5e-4, 1e-3, 1.5e-3, 3e-3] {
+            let mut w = two_bowls(rate);
+            let c = w.config().clone();
+            hydrate(
+                &mut w,
+                &Water {
+                    inventory_m: 0.3,
+                    atmosphere_fraction: 0.5,
+                    closed_cycle: true,
+                    shower_interval_min_s: 6000.0,
+                    shower_interval_max_s: 6000.0,
+                    ..Water::DRY
+                },
+            );
+            w.settle(600);
+            w.apply(crate::Command::SetOutlet { open: true });
+            let fall = c.index(10, 10, 0);
+            let sky0 = w.atmosphere_m3();
+            let (mut wet, mut min_fill) = (0, f64::INFINITY);
+            for _ in 0..200 {
+                w.step();
+                if w.free[fall] > 0.0 {
+                    wet += 1;
+                    min_fill = min_fill.min(w.free[fall]);
+                }
+            }
+            println!(
+                "rate {rate:8.1e} m³/s ({:6.4} of a voxel per tick): fall wet {wet}/200, \
+                 thinnest fill {:.2e}, sky {sky0:.3} -> {:.3} ({:+.1} %)",
+                rate * crate::DT / vol,
+                if min_fill.is_finite() { min_fill } else { 0.0 },
+                w.atmosphere_m3(),
+                100.0 * (w.atmosphere_m3() - sky0) / sky0.max(1e-9),
+            );
+        }
     }
 
     /// A dry recipe leaves the world exactly as it was.

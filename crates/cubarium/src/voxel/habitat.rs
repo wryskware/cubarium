@@ -41,6 +41,11 @@ use cubarium_voxel_flora::{
 /// it may look (`design/terrain-generation-plan-2026-09-21.md` §4.4).
 const SETTLE_CAP: u32 = 600;
 
+/// Ticks the stream is watched for after the settle, before anything is planted. Ten
+/// simulated seconds: long enough for a spill front to finish arriving anywhere in the
+/// chain, short enough to cost nothing anybody waits for.
+const STREAM_WATCH_TICKS: u32 = 200;
+
 /// Mixed starting sizes establish low growth, middle-height clumps and occasional
 /// canopy anchors. These are actual wood stores, not cosmetic scale multipliers.
 const FOUNDER_FRACTIONS: [f64; 5] = [0.30, 0.42, 0.55, 0.70, 0.85];
@@ -163,6 +168,16 @@ pub fn seed_with_founder_counts(
     let Some(highest_y) = sites.iter().map(|s| s.y).max() else {
         return seeded;
     };
+    // **Watch the stream before planting in its way.** `settle` converges on the world's
+    // stored volume and its wet-cell count, and under river re-entry both are constant
+    // while the water is still *moving*: a spill front can be half way down the cascade
+    // when the settle reports itself converged. Founders placed on the faces it is about
+    // to reach drown in the first seconds — measured on `default`, an umbrellafrond under
+    // 0.99 m one tick after seeding and a velvetpad under 0.19 m twelve ticks later, both
+    // bone dry when they were planted. So the world runs on a little longer and every
+    // face remembers the deepest water it saw; a species is offered a face only if it
+    // could stand in that, not only in what happens to be there now.
+    let wettest = watch_the_stream(world, &sites, STREAM_WATCH_TICKS);
     let mut sky: Vec<f64> = {
         let view = world.view();
         sites
@@ -186,7 +201,10 @@ pub fn seed_with_founder_counts(
         {
             let view = world.view();
             for (i, site) in sites.iter().enumerate() {
-                if taken.contains(site) || !suitable(&view, *site, &sc, sky[i]) {
+                if taken.contains(site)
+                    || wettest[i] > sc.drown_depth_m
+                    || !suitable(&view, *site, &sc, sky[i])
+                {
                     continue;
                 }
                 pool.push(*site);
@@ -240,7 +258,7 @@ pub fn seed_with_founder_counts(
     {
         let view = world.view();
         for (i, site) in sites.iter().enumerate() {
-            if taken.contains(site) {
+            if taken.contains(site) || wettest[i] > sc.drown_depth_m {
                 continue;
             }
             // The substrate is the log this seeder is about to lay, so the gate is asked
@@ -314,12 +332,15 @@ pub fn seed_with_founder_counts(
         sites
             .iter()
             .copied()
-            .filter(|s| {
+            .enumerate()
+            .filter(|(i, s)| {
                 !taken.contains(s)
+                    && wettest[*i] <= blind.core.drown_depth_m
                     && view.material_at(i64::from(s.x), s.y, s.z) == Material::Soil
                     && view.water_depth_m(i64::from(s.x), s.y, s.z) <= 0.0
                     && has_headroom(&view, i64::from(s.x), s.y, s.z, blind_room)
             })
+            .map(|(_, s)| s)
             .collect()
     };
     let want = founder_counts[Founder::Blind.index()];
@@ -341,7 +362,6 @@ pub fn seed_with_founder_counts(
             seeded.founders[Founder::Blind.index()] += 1;
         }
     }
-    let _ = blind;
     seeded.shortfall[Founder::Blind.index()] =
         want.saturating_sub(seeded.founders[Founder::Blind.index()]);
 
@@ -350,7 +370,10 @@ pub fn seed_with_founder_counts(
     // and somewhere else to go when that patch is bare — a walkable route to a second
     // patch. There is no foodless fallback: a lineage with nowhere to live is a
     // shortfall in `Seeded` and nothing is placed (plan §5).
-    let meadow = browser_faces(&world.view(), &flora.view(), fauna);
+    let mut meadow = browser_faces(&world.view(), &flora.view(), fauna);
+    // A body drowns in the stream's way as surely as a plant does.
+    let browser_drown = fauna.config().founder(Founder::Browser).core.drown_depth_m;
+    meadow.retain(|f| index_of(&sites, *f).is_none_or(|i| wettest[i] <= browser_drown));
     let want = founder_counts[Founder::Browser.index()];
     for (k, site) in strided(&meadow, want).into_iter().enumerate() {
         if introduce_founder(
@@ -532,6 +555,26 @@ fn browser_faces(view: &VoxelView<'_>, fv: &FloraView<'_>, fauna: &Fauna) -> Vec
         .collect();
     out.sort_by_key(|s| (s.y, s.x, s.z));
     out
+}
+
+/// Run the world on and report, per site, the **deepest standing water it saw**.
+///
+/// A settled world is not a still one when a river runs through it. This is the water a
+/// face actually gets, rather than the water it happens to have at the instant the
+/// founders are chosen.
+fn watch_the_stream(world: &mut World, sites: &[Site], ticks: u32) -> Vec<f64> {
+    let mut wettest = vec![0.0f64; sites.len()];
+    for _ in 0..ticks {
+        world.step();
+        let view = world.view();
+        for (w, s) in wettest.iter_mut().zip(sites) {
+            let d = view.water_depth_m(i64::from(s.x), s.y, s.z);
+            if d > *w {
+                *w = d;
+            }
+        }
+    }
+    wettest
 }
 
 /// Every support face in the world, at any height, sorted low to high: the ground, the

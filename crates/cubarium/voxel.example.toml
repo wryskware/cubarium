@@ -36,10 +36,12 @@ sky_gradient = true
 [world]
 # `cubarium_voxel::Config`. x wraps; y is up from the foundation; z runs into the habitat.
 width = 128
-height = 48
+height = 72
 # `depth` is on purpose absent: how deep the habitat is is the core's decision, so it
 # mirrors `cubarium_voxel::Config::default().depth` — 24 slabs at the chosen camera, which
 # is 48 px of ground plane on top of the strip's own height. Write `depth = N` to override.
+# 72 voxels is what the terraced landscape needs and what the panel's raster allows:
+# 4 px per voxel times 72, plus 2 px of depth step times 24, is 336 of its 360 rows.
 # The cell size the `default` landscape below was written for. A recipe fixes its feature
 # sizes in metres, so halving this resolves the same landforms finer rather than shrinking
 # them; the shipped `small` ring runs at 0.125 m and states it.

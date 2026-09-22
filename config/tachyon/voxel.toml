@@ -15,7 +15,9 @@ sky_gradient = true
 
 [world]
 width = 160
-height = 48
+# 72 voxels: the terraced `small` ring. 4 px * 72 + 2 px * 24 of depth = 336 of the 360 px
+# raster; 48 would clip the staircase to its lowest terraces.
+height = 72
 depth = 24
 voxel_m = 0.125
 water_substeps = 4
