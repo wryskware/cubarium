@@ -450,10 +450,17 @@ pub(crate) struct VoidRuns {
     pub(crate) offset: Vec<u32>,
     /// Every run, grouped by column in ascending `(col, y0)` order.
     pub(crate) runs: Vec<VoidRun>,
-    /// One bit per non-solid row, when the world is at most 64 cells tall. This is the
-    /// same geometry as `runs`, in a form the water exchange can query without filling
-    /// a dense per-cell displacement table every substep. Taller worlds use `runs`.
-    pub(crate) mask: Vec<u64>,
+    /// One bit per non-solid row, when the world is at most [`MASK_ROWS`] cells tall.
+    /// This is the same geometry as `runs`, in a form the water exchange can query
+    /// without filling a dense per-cell displacement table every substep. Taller worlds
+    /// use `runs`.
+    pub(crate) mask: Vec<u128>,
+    /// Per column: the lowest row of the run that is open to the sky — the run whose top
+    /// is the world's top row — or `height` when the top cell itself is solid and the
+    /// sky meets nothing it can wet. Rain and evaporation read it instead of walking every
+    /// column down from the ceiling each tick; like the rest of this cache it moves only
+    /// with the terrain.
+    pub(crate) sky_floor: Vec<u32>,
     /// The `terrain_version` this cache was built from.
     version: u64,
     /// Set when the cache has never been built in this world, or after a decode.
@@ -466,9 +473,25 @@ impl Default for VoidRuns {
             offset: Vec::new(),
             runs: Vec::new(),
             mask: Vec::new(),
+            sky_floor: Vec::new(),
             version: 0,
             dirty: true,
         }
+    }
+}
+
+/// The tallest world whose columns fit one [`VoidRuns::mask`] word: the water exchange's
+/// bitmask path covers heights up to this, and the dense scan is the fallback above it.
+/// The panel's ring is 72 rows, so a 64-bit word was not enough.
+pub(crate) const MASK_ROWS: usize = 128;
+
+/// `len` set bits starting at row `y`: one run of rows in a column mask.
+#[inline]
+pub(crate) fn run_bits(y: usize, len: usize) -> u128 {
+    if len >= MASK_ROWS {
+        u128::MAX
+    } else {
+        ((1u128 << len) - 1) << y
     }
 }
 
@@ -731,17 +754,16 @@ impl World {
     }
 
     /// Advance one tick: prescribed rain and evaporation, free-water substeps,
-    /// infiltration, drainage, spring discharge, outlet export. The exchange's column
-    /// scan splits across [`default_threads`] workers; [`World::step_with`] takes the
-    /// count explicitly.
+    /// infiltration, drainage, spring discharge, outlet export. [`World::step_with`]
+    /// takes a thread count explicitly.
     pub fn step(&mut self) {
         self.step_with(default_threads());
     }
 
-    /// [`World::step`] with a thread count for the one phase that splits, the exchange's
-    /// read-only column scan. `1` runs it on this thread. Execution only: the count can
-    /// reach no result (`water::exchange`'s doc), and with the `parallel` feature off it
-    /// is ignored.
+    /// [`World::step`] with a thread count. Execution only, and since package PA
+    /// (2026-09-22) ignored: the one phase that split, the exchange's column scan, is
+    /// serial again — the pool sat on the board's little cores and the scan was 1.7 ms of
+    /// the tick. The parameter stays so callers need not change if a phase splits again.
     pub fn step_with(&mut self, threads: usize) {
         crate::water::step(self, threads);
         self.advance_tick();
@@ -869,18 +891,26 @@ impl World {
         let plane = self.config.width as usize * self.config.depth as usize;
         let height = self.config.height as usize;
         let VoidRuns {
-            offset, runs, mask, ..
+            offset,
+            runs,
+            mask,
+            sky_floor,
+            ..
         } = &mut self.void_runs;
         runs.clear();
         offset.clear();
         mask.clear();
+        sky_floor.clear();
         offset.reserve(plane + 1);
-        if height <= 64 {
+        sky_floor.reserve(plane);
+        let masked = height <= MASK_ROWS;
+        if masked {
             mask.reserve(plane);
         }
         for col in 0..plane {
             offset.push(runs.len() as u32);
-            let mut col_mask = 0u64;
+            let mut col_mask = 0u128;
+            let mut floor = height as u32;
             let mut y = 0usize;
             while y < height {
                 if self.material[y * plane + col].is_solid() {
@@ -895,20 +925,18 @@ impl World {
                     y0: y as u32,
                     top: top as u32,
                 });
-                if height <= 64 {
-                    let width = top - y + 1;
-                    let bits = if width == 64 {
-                        u64::MAX
-                    } else {
-                        ((1u64 << width) - 1) << y
-                    };
-                    col_mask |= bits;
+                if top + 1 == height {
+                    floor = y as u32;
+                }
+                if masked {
+                    col_mask |= run_bits(y, top - y + 1);
                 }
                 y = top + 1;
             }
-            if height <= 64 {
+            if masked {
                 mask.push(col_mask);
             }
+            sky_floor.push(floor);
         }
         offset.push(runs.len() as u32);
         let version = self.terrain_version;
