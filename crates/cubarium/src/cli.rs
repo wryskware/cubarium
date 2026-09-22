@@ -167,6 +167,13 @@ pub struct Voxel {
     /// Render rate in frames per second; the simulation stays at 20 Hz.
     #[arg(long, default_value_t = crate::clock::RENDER_HZ)]
     pub fps: u32,
+    /// Pin the loop thread to the highest-capacity CPU and move every other thread onto
+    /// the remaining big cores, with a `uclamp.min` floor on the loop (`voxel/placement.rs`).
+    /// For big.LITTLE boards such as the Tachyon, whose unit passes it; off by default so
+    /// no other machine has its scheduling taken over. No effect where all CPUs report one
+    /// capacity.
+    #[arg(long)]
+    pub pin_loop: bool,
     /// Port for the `web` sink (a viewer page at http://127.0.0.1:<port>/).
     #[arg(long, default_value_t = 7393)]
     pub web_port: u16,

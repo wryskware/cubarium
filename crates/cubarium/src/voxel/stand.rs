@@ -261,6 +261,9 @@ pub struct Stands {
     height: u32,
     depth: u32,
     grid: Vec<Part>,
+    /// Every grid index this rebuild wrote, once each: what the next rebuild clears
+    /// instead of the whole grid, and what a packer walks instead of every voxel.
+    stamped: Vec<u32>,
     styles: Vec<Style>,
 }
 
@@ -272,6 +275,7 @@ impl Stands {
             height,
             depth,
             grid: vec![Part::None; width as usize * height as usize * depth as usize],
+            stamped: Vec::new(),
             styles: Vec::new(),
         }
     }
@@ -283,7 +287,10 @@ impl Stands {
         if (self.width, self.height, self.depth) != (c.width, c.height, c.depth) {
             *self = Stands::empty(c.width, c.height, c.depth);
         } else {
-            self.grid.fill(Part::None);
+            // Only what the last rebuild stamped: the grid is otherwise all empty.
+            for i in self.stamped.drain(..) {
+                self.grid[i as usize] = Part::None;
+            }
             self.styles.clear();
         }
         // Stands arrive in site order, which is the order the styles are pushed in, so
@@ -397,8 +404,22 @@ impl Stands {
             Part::Trunk(_) => 5,
         };
         if rank(part) >= rank(self.grid[i]) {
+            if self.grid[i] == Part::None {
+                self.stamped.push(i as u32);
+            }
             self.grid[i] = part;
         }
+    }
+
+    /// Every cell something stands in, as `(x, y, z)` with `x` wrapped, in no particular
+    /// order. A cell may hold [`Part::None`] only if a caller placed one.
+    pub fn cells(&self) -> impl Iterator<Item = (u32, u32, u32)> + '_ {
+        let (w, h) = (self.width as usize, self.height as usize);
+        self.stamped.iter().map(move |&i| {
+            let i = i as usize;
+            let (col, y) = (i / h, i % h);
+            ((col % w) as u32, y as u32, (col / w) as u32)
+        })
     }
 
     #[inline]
