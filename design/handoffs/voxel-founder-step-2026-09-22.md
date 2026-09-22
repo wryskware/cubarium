@@ -94,3 +94,39 @@ one arm.
 The before/after route table, the two 60-min autopsy arms, what the contact
 change did to the trained centres' behaviour if anything visible, the commit
 list, and anything the rule could not express.
+
+## Integration note (Fable, 2026-09-22)
+
+Landed eb4adb6 (tests first, authored from this brief; they did not build
+until the rule existed), 75007b0 (the rule: `climb_m` on the founder
+physiology, `climb_voxels = round(climb_m / voxel_m)`, one route function
+shared by the observer, the seeder and `walk`, contact reads walls only),
+ff63dac (census section "Step rule, 2026-09-22"); rebased onto main after
+the presentation-thread merge; workspace suite green. Fauna snapshot schema
+9 → 10. Fable re-ran `voxel_founder_autopsy 60 preset=default` and the t = 0
+observer and reproduced the worker exactly: 2 browsers and 8 shredders alive
+at 60 min, starved 34 (23 shredder, 11 browser), drowned 4, route 0.4841.
+
+| | small | default | wide |
+| --- | --- | --- | --- |
+| route-connected foliage, t = 0, before → after | 0.40 → 0.49 | 0.25 → 0.48 | 0.35 → 0.36 |
+| reachable ceiling today | 0.49 | 0.72 | 0.75 |
+| browser extinct, 60-min arm | min 33 → 39 | min 44 → never | – |
+| shredders alive at 60 | 1 → 9 | 4 → 8 | – |
+
+On small and default the route is no longer the binding link; on small it
+now equals reach exactly, and reach on small is 0.49 because bloomcrown's
+one-cell crown sits above the mouth (0.13 reachable). That is the layers
+package's basal rosette. Wide barely moved: 0.25 m of climb joins little of
+its deeper relief, and the seeder's face choice moved with the new walk.
+
+Worker's rule choice, kept: disc clearance is checked over the highest
+within-climb support under the disc while `site.y` follows the centre
+column (the brief's "at the destination layer" deadlocks both directions,
+since a sub-step is capped at one radius). A body straddling a riser has its
+nominal layer inside the riser for a sub-step; contact reads clear there
+because it can step away. `browser_faces` now walks all standable faces,
+not only feeding faces. The trained centres load unchanged and behave
+visibly differently (contact semantics), which is the scheduled retrain's
+business. The package 0 trajectory pin was replaced by invariants rather
+than re-recorded (no pinned worlds).
