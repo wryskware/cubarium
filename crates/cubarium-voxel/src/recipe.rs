@@ -481,20 +481,24 @@ impl Water {
     /// rings, so this leaves roughly 0.09 m for the pools: on `default` that is 16 m³ in
     /// the basins against the 142 m³ it would take to fill every one of them to its spill.
     /// Ponds in the low ground, not a flooded ring.
-    /// The cycle's four numbers are the ones the water-cycle handoff's 24-hour study ran
-    /// on and found BOUNDED at three seeds: shower rate 2e-4 m/s, evaporation 1e-4 m/s,
-    /// trigger 0.02, shower 5 m³. Evaporation must stay below the shower rate — `evaporate`
-    /// runs straight after `rain` and lifts fresh rain before it infiltrates — and the
-    /// handoff names the trigger a placeholder that rains nearly back to back: intermittent
-    /// weather lives in 0.10 to 0.24, and above 0.26 the world locks dry. Not changed here.
+    /// The shower rate and the evaporation rate are the water-cycle handoff's 24-hour
+    /// study set, which it found BOUNDED at three seeds: 2e-4 m/s and 1e-4 m/s.
+    /// Evaporation must stay below the shower rate — `evaporate` runs straight after
+    /// `rain` and would otherwise lift fresh rain before it infiltrates.
+    ///
+    /// The **trigger is 0.12**, out of that handoff's own sweep: intermittent weather
+    /// lives at 0.10 to 0.24 and 0.26 and above locks the world dry, while its placeholder
+    /// 0.02 rains nearly back to back. `atmosphere_fraction` 0.08 is deliberately **below**
+    /// the trigger, so a fresh world settles its hydrostatics with a clear sky and the
+    /// first shower waits until evaporation has lifted the difference.
     pub const DEFAULT: Water = Water {
         inventory_m: 0.5,
-        atmosphere_fraction: 0.06,
+        atmosphere_fraction: 0.08,
         aquifer_head_m: 1.0,
         closed_cycle: true,
         rain_m_per_s: 2e-4,
         evaporation_m_per_s: 1e-4,
-        shower_trigger_fraction: 0.02,
+        shower_trigger_fraction: 0.12,
         shower_volume_m3: 5.0,
     };
 

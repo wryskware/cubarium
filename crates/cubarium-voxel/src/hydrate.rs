@@ -680,8 +680,9 @@ mod tests {
         );
     }
 
-    /// **Study, not a test.** `default` seed 1: settle, then run until the first shower
-    /// starts or 6000 ticks pass, and say when it fired and what it delivered.
+    /// **Study, not a test.** `default` seed 1: settle, then run until two showers have
+    /// started or 6000 ticks pass, and say when each fired and how long the dry spell
+    /// between them was.
     #[test]
     #[ignore = "study: run by name"]
     fn the_first_shower_on_the_default_ring() {
@@ -691,28 +692,53 @@ mod tests {
             ..p.config()
         });
         let settled = world.settle(600);
+        // In the order the ambient run does it: the habitat settles with the outlet shut
+        // and the host opens it afterwards. Under a closed budget it is the return flow
+        // into the atmosphere, not an export, and the water-cycle handoff names it the
+        // engine of the cycle -- so a study of when it rains has to have it on.
+        world.apply(crate::Command::SetOutlet { open: true });
         let during = world.view().ledger.showers;
         let falling = world.shower_left_m3();
-        let fell_by_settle = world.view().ledger.atmosphere_out;
-        let mut next: Option<u64> = None;
+        let aloft_at_settle = world.atmosphere_m3();
+        let mut starts: Vec<u64> = Vec::new();
         for t in 0..6000u64 {
             world.step();
-            if world.view().ledger.showers > during {
-                next = Some(t + 1);
-                break;
+            if world.view().ledger.showers as usize > during as usize + starts.len() {
+                starts.push(t + 1);
+                if starts.len() == 2 {
+                    break;
+                }
             }
         }
         let v = world.view();
+        let gap = match starts.as_slice() {
+            [a, b] => Some(b - a),
+            _ => None,
+        };
+        // If none fired, say how far off it is: the store's own rise over the run against
+        // what is left to the trigger. A rising store is a slow cycle, not a dry lock.
+        let trigger = v.config.shower_trigger_fraction * v.total_water_m3();
+        let rate = (world.atmosphere_m3() - aloft_at_settle) / 6000.0;
+        let eta = if starts.is_empty() && rate > 0.0 {
+            format!(
+                "; at {rate:.3e} m³/tick the trigger is another {:.0} ticks off \
+                 ({:.0} simulated minutes)",
+                (trigger - world.atmosphere_m3()) / rate,
+                (trigger - world.atmosphere_m3()) / rate / f64::from(crate::TICK_HZ) / 60.0,
+            )
+        } else {
+            String::new()
+        };
         println!(
             "settle {settled:?}\n\
-             showers started by the end of settle: {during} \
-             ({:.4} m³ fallen, {falling:.4} m³ of the current one still to come)\n\
-             next shower starts {next:?} ticks past settle; \
-             total fallen {:.4} m³; atmosphere {:.2} m³ against a trigger of {:.2} m³ \
-             of {:.2} m³ total",
-            fell_by_settle,
+             showers started by the end of settle: {during} ({falling:.4} m³ still to come)\n\
+             showers past settle at ticks {starts:?}, dry spell between them {gap:?} ticks\n\
+             total fallen {:.4} m³; atmosphere {aloft_at_settle:.5} -> {:.5} m³ \
+             (evaporated in over the whole run {:.5} m³) against a trigger of {:.2} m³ \
+             of {:.2} m³ total{eta}",
             v.ledger.atmosphere_out,
-            world.atmosphere_m3,
+            world.atmosphere_m3(),
+            v.ledger.atmosphere_in,
             v.config.shower_trigger_fraction * v.total_water_m3(),
             v.total_water_m3(),
         );
