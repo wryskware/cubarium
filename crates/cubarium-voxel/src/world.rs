@@ -148,10 +148,21 @@ pub struct VoxelView<'a> {
 }
 
 impl<'a> VoxelView<'a> {
-    /// True if rain is falling this tick (prescribed or active shower).
+    /// True if rain is **falling** this tick.
+    ///
+    /// Under the closed cycle that is a shower and nothing else:
+    /// [`Config::rain_m_per_s`] is the rate a shower falls *at*, not a statement that one
+    /// is falling, and it is always positive on a cycling world. Reading it as weather
+    /// drew rain streaks on the deployed panel every tick of a world that actually rained
+    /// one minute in ten (Wrysk, 2026-09-21). Under the open budget the rain really is
+    /// prescribed every tick, so there the rate is the answer.
     #[inline]
     pub fn is_raining(&self) -> bool {
-        self.config.rain_m_per_s > 0.0 || self.shower_left_m3 > 0.0
+        if self.config.closed_water_budget {
+            self.shower_left_m3 > 0.0
+        } else {
+            self.config.rain_m_per_s > 0.0
+        }
     }
 
     #[inline]

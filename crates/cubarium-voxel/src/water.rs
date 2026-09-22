@@ -2700,6 +2700,48 @@ mod closed_budget_tests {
     }
 
     // ---- the shower schedule ---------------------------------------------------------
+    /// **Rain is a shower falling, not a rate in the config.** Under the closed cycle
+    /// `rain_m_per_s` is the rate a shower falls *at* and is always positive, so reading
+    /// it as "is it raining" drew streaks on the panel every tick of a world that rained
+    /// one minute in ten (Wrysk, 2026-09-21).
+    #[test]
+    fn closed_cycle_rain_is_only_the_shower() {
+        let mut w = slab(0.0, 0.5, (0.0, 0.0));
+        assert!(w.config().rain_m_per_s > 0.0);
+        assert!(
+            !w.view().is_raining(),
+            "a closed world with a store under the floor is not raining"
+        );
+
+        let floor = 0.5 * w.view().ledger.expected_total();
+        w.apply(Command::AddAtmosphere {
+            volume_m3: floor * 2.0,
+        });
+        w.step();
+        assert!(
+            w.shower_left_m3() > 0.0 && w.view().is_raining(),
+            "the shower fell"
+        );
+        for _ in 0..400 {
+            w.step();
+            if w.shower_left_m3() <= 0.0 {
+                break;
+            }
+        }
+        assert_eq!(
+            w.shower_left_m3(),
+            0.0,
+            "the shower ran out inside 400 ticks"
+        );
+        assert!(!w.view().is_raining(), "and the sky is shut again");
+
+        // The open budget is unchanged: its rain really is prescribed, every tick.
+        let open = World::empty(Config {
+            rain_m_per_s: 0.002,
+            ..Config::default()
+        });
+        assert!(open.view().is_raining());
+    }
 
     /// A dry soil slab with a wet aquifer under it: the fixture the viability test uses,
     /// with the schedule's own numbers on top.

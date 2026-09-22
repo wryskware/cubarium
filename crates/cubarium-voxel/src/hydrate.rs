@@ -33,6 +33,112 @@ pub struct Basin {
     pub catchment: usize,
 }
 
+/// Most of the inventory left after the lake that may go into the water table. The table
+/// has to reach the lake floor for the lake to hold, and on these rings that is the
+/// largest single charge in the budget; this keeps it from taking the pore and the other
+/// pools with it.
+const LAKE_TABLE_SHARE: f64 = 0.85;
+
+/// The ring's **lake**: the lowest basin the sky reaches all of, and the water standing
+/// in it. Derived geometry, like [`basins`] — read off the material and free arrays, so
+/// it is true of any world at any time and nothing stores it.
+///
+/// A basin qualifies only when **every** one of its floor cells has open sky over it. A
+/// gallery bowl cut below the lowest ground reaches the sky through its mouth and is the
+/// ring's deepest basin, so it takes the catchment and hides every drop under rock; that
+/// is what the deployed panel did (Wrysk, 2026-09-21). Its floor is roofed, so it is not
+/// a lake.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Lake {
+    /// Its wet cells.
+    pub cells: Vec<usize>,
+    /// Its **open-water surface**: a wet cell with void, and no water, directly over it.
+    pub surface_cells: Vec<usize>,
+    /// The share of that surface the camera can read, square metres.
+    pub visible_m2: f64,
+    /// The level the surface stands at: one above the highest wet cell, or the floor of
+    /// an empty lake.
+    pub level_y: u32,
+    /// The basin's floor.
+    pub floor_y: u32,
+    /// Water standing in it, cubic metres.
+    pub volume_m3: f64,
+}
+
+/// The ring's lake as it stands now. `None` of the geometry when no basin has sky over
+/// the whole of its floor — a world with nowhere for open water to be.
+pub fn lake(world: &World) -> Lake {
+    let c = world.config();
+    let plane = c.width as usize * c.depth as usize;
+    let empty = Lake {
+        cells: Vec::new(),
+        surface_cells: Vec::new(),
+        visible_m2: 0.0,
+        level_y: 0,
+        floor_y: 0,
+        volume_m3: 0.0,
+    };
+    let Some(basin) = basins(world).into_iter().find(|b| open_to_sky(world, b)) else {
+        return empty;
+    };
+    let cells: Vec<usize> = basin
+        .cells
+        .iter()
+        .copied()
+        .filter(|&i| world.free[i] > 0.0)
+        .collect();
+    let volume_m3 = cells.iter().map(|&i| world.free[i]).sum::<f64>() * c.voxel_volume();
+    let surface_cells: Vec<usize> = cells
+        .iter()
+        .copied()
+        .filter(|&i| {
+            let up = i + plane;
+            up >= c.cells() || (!world.material[up].is_solid() && world.free[up] <= 0.0)
+        })
+        .collect();
+    let visible_m2 = surface_cells
+        .iter()
+        .filter(|&&i| {
+            let (x, y, z) = c.coords(i);
+            crate::hollows::floor_is_visible(world, i64::from(x), y, z)
+        })
+        .count() as f64
+        * c.cell_area();
+    let level_y = cells
+        .iter()
+        .map(|&i| c.coords(i).1)
+        .max()
+        .map_or(basin.floor_y, |y| y + 1);
+    Lake {
+        cells,
+        surface_cells,
+        visible_m2,
+        level_y,
+        floor_y: basin.floor_y,
+        volume_m3,
+    }
+}
+
+/// Whether the sky reaches **every** floor cell of this basin: nothing solid anywhere
+/// above it in its own column. One roofed floor cell and the basin is a sump.
+fn open_to_sky(world: &World, b: &Basin) -> bool {
+    let c = world.config();
+    let plane = c.width as usize * c.depth as usize;
+    b.cells
+        .iter()
+        .filter(|&&i| c.coords(i).1 == b.floor_y)
+        .all(|&i| {
+            let mut up = i + plane;
+            while up < c.cells() {
+                if world.material[up].is_solid() {
+                    return false;
+                }
+                up += plane;
+            }
+            true
+        })
+}
+
 /// What [`hydrate`] put where, in cubic metres.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Hydrated {
@@ -49,6 +155,14 @@ pub struct Hydrated {
     pub basins_filled: usize,
     /// Of `aquifer_m3`, the part that is inventory the surface could not hold.
     pub spare_m3: f64,
+    /// The lake: what went into it, how many cells it fills, and how much of its surface
+    /// the camera can read.
+    pub lake_m3: f64,
+    pub lake_cells: usize,
+    pub lake_visible_m2: f64,
+    /// The water table the pore rule was run against. Below the recipe's
+    /// `aquifer_head_m` when the inventory could not pay for it.
+    pub aquifer_head_m: f64,
 }
 
 impl Hydrated {
@@ -85,38 +199,177 @@ pub fn hydrate(world: &mut World, w: &Water) -> Hydrated {
     } else {
         0.0
     };
-    let charged = c
-        .aquifer_volume_for_head(w.aquifer_head_m)
-        .min(total - atmosphere);
-    let available = total - atmosphere - charged;
+    let available = total - atmosphere;
 
-    // **Pore first, then pools.** Water wets the ground before it stands on it: soil that
-    // has been rained on and has drained holds its field capacity, which is the retention
-    // rule the solver itself uses, and soil under the water table is saturated. Pools get
-    // what is left.
-    let pore = wet_soil(world, w.aquifer_head_m, available);
+    // **The lake first.** A ring with no water anybody can see is not a habitat, whatever
+    // its ledger says, and the panel proved that the deepest basin is not the one to fill:
+    // fill order was catchment share, and a roofed gallery bowl below the lowest ground
+    // took it all (Wrysk, 2026-09-21). So the lowest basin the sky reaches all of is
+    // filled first, to one flat head at the datum the outlet marks, and only then does the
+    // rest of the inventory go where it used to.
     let list = basins(world);
-    let pooled = fill_basins(world, &list, available - pore);
+    // No datum, no lake: a world whose generator never named an outlet — every hand-built
+    // fixture — keeps the catchment-share fill it had, with its lowest basin an ordinary
+    // basin like any other.
+    let level_y = world.outlet_cell.map(|(_, y, _)| y);
+    let lake_at = level_y.and_then(|_| list.iter().position(|b| open_to_sky(world, b)));
+    let (lake_m3, lake_floor_y) = match (lake_at, level_y) {
+        (Some(k), Some(level)) => (
+            fill_to_level(world, &list[k], level, available),
+            list[k].floor_y,
+        ),
+        _ => (0.0, 0),
+    };
 
-    let spare = (available - pore - pooled).max(0.0);
-    world.aquifer_m3 += charged + spare;
-    world.atmosphere_m3 += atmosphere;
-    world.ledger.user_in += pore + pooled + charged + spare;
-    world.ledger.atmosphere_in += atmosphere;
-    world.ledger.user_atmosphere_in += atmosphere;
+    // **The bed under the lake is saturated**, so the lake does not soak away into dry
+    // soil the moment it is poured. Locally, under the lake's own columns — *not* by
+    // raising the world's water table to the lake floor, which is what the plan's words
+    // suggest and what the arithmetic refuses: a metre of head costs
+    // `footprint x porosity` cubic metres over the **whole ring**, so a lake floor two
+    // metres up would want more than the entire inventory and leave nothing for pore or
+    // for any other pool (measured: `default` at 48 wide took every drop and came out
+    // dry-locked). The lake's own bed is a few square metres and costs almost nothing.
+    let after_lake = (available - lake_m3).max(0.0);
+    let bed = match lake_at {
+        Some(k) if lake_m3 > 0.0 => seal_lake_bed(world, &list[k], after_lake),
+        _ => 0.0,
+    };
+
+    // **The water table is raised to the lake floor**, because nothing else holds a lake
+    // up. Saturating the bed is not enough on its own: soil between the table and the
+    // lake drains downward whatever its own fill, so a lake standing five voxels over the
+    // table empties into the aquifer through its own bed — measured on `default` seed 1,
+    // where 2.33 m³ of visible lake was gone inside ten minutes and the pore stores never
+    // moved.
+    //
+    // A metre of head costs `footprint x aquifer_porosity` over the **whole ring**, so
+    // this is the expensive line in the budget and the reason the presets carry the
+    // inventory they do. It is capped so it can never starve the pore and the other
+    // pools: if the lake floor is out of reach, the recipe's own head stands and the lake
+    // is reported as the shallow thing it will become.
+    let table_ceiling = LAKE_TABLE_SHARE * (after_lake - bed);
+    let lake_head_m = f64::from(lake_floor_y) * c.voxel_m;
+    let want_head = if lake_m3 > 0.0 && c.aquifer_volume_for_head(lake_head_m) <= table_ceiling {
+        w.aquifer_head_m.max(lake_head_m)
+    } else {
+        w.aquifer_head_m
+    };
+    let charged = c.aquifer_volume_for_head(want_head).min(after_lake - bed);
+    let head_used = c.aquifer_head_m(charged);
+
+    // **Pore, then the other pools.** Water wets the ground before it stands on it: soil
+    // that has been rained on and has drained holds its field capacity, which is the
+    // retention rule the solver itself uses, and soil under the water table is saturated.
+    let pore = wet_soil(world, head_used, after_lake - bed - charged);
+    let others: Vec<Basin> = list
+        .iter()
+        .enumerate()
+        .filter(|(k, _)| Some(*k) != lake_at)
+        .map(|(_, b)| b.clone())
+        .collect();
+    let pooled = fill_basins(world, &others, after_lake - bed - charged - pore);
+
+    // **The surplus goes aloft, not underground.** Whatever the geometry would not take
+    // has to go somewhere, and the aquifer is the wrong somewhere: its head is what the
+    // lake stands on, so surplus buried there lifts the water table above the lake floor
+    // and the lake rises with it — on `small` at a 1.2 m inventory that flooded half the
+    // ring, a 30 m² lake standing nine voxels over its own datum. In the sky it is the
+    // cycle's own store, it rains back on schedule, and the table stays where the lake
+    // needs it. An open-budget world has no sky to put it in, so there it still sinks.
+    let spare = (after_lake - bed - charged - pore - pooled).max(0.0);
+    let (to_aquifer, to_sky) = if c.closed_water_budget {
+        (0.0, spare)
+    } else {
+        (spare, 0.0)
+    };
+    world.aquifer_m3 += charged + to_aquifer;
+    world.atmosphere_m3 += atmosphere + to_sky;
+    world.ledger.user_in += lake_m3 + bed + pore + pooled + charged + spare;
+    world.ledger.atmosphere_in += atmosphere + to_sky;
+    world.ledger.user_atmosphere_in += atmosphere + to_sky;
     world.rebuild_active_sets();
+    let l = lake(world);
     Hydrated {
-        pooled_m3: pooled,
-        pore_m3: pore,
-        aquifer_m3: charged + spare,
-        atmosphere_m3: atmosphere,
+        pooled_m3: pooled + lake_m3,
+        pore_m3: pore + bed,
+        aquifer_m3: charged + to_aquifer,
+        atmosphere_m3: atmosphere + to_sky,
         basins: list.len(),
         basins_filled: list
             .iter()
             .filter(|b| b.cells.iter().any(|&i| world.free[i] > 0.0))
             .count(),
         spare_m3: spare,
+        lake_m3,
+        lake_cells: l.cells.len(),
+        lake_visible_m2: l.visible_m2,
+        aquifer_head_m: c.aquifer_head_m(world.aquifer_m3),
     }
+}
+
+/// Saturate the porous ground directly under a lake, so the water it holds is not
+/// immediately drawn down into dry soil. Returns the volume it took.
+fn seal_lake_bed(world: &mut World, b: &Basin, budget: f64) -> f64 {
+    let c = world.config().clone();
+    let plane = c.width as usize * c.depth as usize;
+    let unit = c.voxel_volume();
+    let mut used = 0.0;
+    let floor: Vec<usize> = b
+        .cells
+        .iter()
+        .copied()
+        .filter(|&i| c.coords(i).1 == b.floor_y)
+        .collect();
+    for i in floor {
+        let mut below = i;
+        while below >= plane {
+            below -= plane;
+            let cap = world.material[below].pore_capacity();
+            if cap <= 0.0 {
+                continue;
+            }
+            let add = ((1.0 - world.pore[below]).max(0.0) * cap * unit).min(budget - used);
+            if add <= 0.0 {
+                return used;
+            }
+            world.pore[below] += add / (cap * unit);
+            used += add;
+        }
+    }
+    used
+}
+
+/// Fill one basin to a flat head at `level_y` — it holds the cells below that line — out
+/// of `budget`. Returns the volume placed. Raised *to* the level, never lowered.
+fn fill_to_level(world: &mut World, b: &Basin, level_y: u32, budget: f64) -> f64 {
+    let vol = world.config().voxel_volume();
+    let mut cells: Vec<usize> = b
+        .cells
+        .iter()
+        .copied()
+        .filter(|&i| world.config().coords(i).1 < level_y.min(b.spill_y))
+        .collect();
+    cells.sort_by_key(|&i| world.config().coords(i).1);
+    let mut rest = budget;
+    let mut placed = 0.0;
+    let mut k = 0;
+    while k < cells.len() && rest > 0.0 {
+        let y = world.config().coords(cells[k]).1;
+        let end = cells[k..]
+            .iter()
+            .position(|&i| world.config().coords(i).1 != y)
+            .map_or(cells.len(), |n| k + n);
+        let n = (end - k) as f64;
+        let fill = (rest / (n * vol)).min(1.0);
+        for &i in &cells[k..end] {
+            let add = (fill - world.free[i]).max(0.0);
+            world.free[i] += add;
+            rest -= add * vol;
+            placed += add * vol;
+        }
+        k = end;
+    }
+    placed
 }
 
 /// Every basin in the world, lowest floor first.
@@ -659,11 +912,24 @@ mod tests {
         );
 
         let footprint = c.width as f64 * c.depth as f64 * c.cell_area();
+        // Its share, **and** whatever the ground would not take: the surplus goes aloft
+        // rather than into the aquifer, where it would lift the table over the lake.
         let want = recipe.water.inventory_m * footprint * recipe.water.atmosphere_fraction;
         assert!(
-            (world.atmosphere_m3 - want).abs() <= 1e-9 * want,
-            "the atmosphere holds its share: {} against {want}",
+            world.atmosphere_m3 >= want - 1e-9,
+            "the atmosphere holds at least its share: {} against {want}",
             world.atmosphere_m3
+        );
+        assert!(
+            world.atmosphere_m3 <= recipe.water.inventory_m * footprint,
+            "and never more than the whole inventory"
+        );
+        // The books still add up with the surplus aloft: four stores, one inventory.
+        let total = recipe.water.inventory_m * footprint;
+        let stores = world.view().stored_m3() + world.atmosphere_m3;
+        assert!(
+            (stores - total).abs() <= 1e-9 * total,
+            "every store is the inventory: {stores} against {total}"
         );
 
         let bytes = world.save();
@@ -678,6 +944,126 @@ mod tests {
             "residual {:e} after a minute of weather",
             v.total_residual()
         );
+    }
+
+    /// **Study, not a test.** What does the lake cost in grottos? The datum forbids any
+    /// hollow floor under the waterline, so a deeper lake is a drier cave system. Sweep
+    /// the depth on eight seeds of each preset and read both sides of the trade at once.
+    #[test]
+    #[ignore = "study: run by name"]
+    fn the_lake_depth_sweep() {
+        for p in crate::PRESETS {
+            let want = p.recipe.water.min_lake_m2;
+            for depth_m in [0.25, 0.375, 0.5, 0.625, 0.75] {
+                let mut recipe = p.recipe;
+                recipe.water.lake_depth_m = depth_m;
+                let (mut pass, mut hollows, mut barren) = (0usize, 0usize, 0usize);
+                let mut areas: Vec<f64> = Vec::new();
+                for seed in 1..=8u64 {
+                    let world = World::new(Config {
+                        seed,
+                        landform: crate::Landform::Staged(recipe),
+                        ..p.config()
+                    });
+                    let l = lake(&world);
+                    pass += usize::from(l.visible_m2 >= want);
+                    areas.push(l.visible_m2);
+                    let h = crate::hollows::find(&world).len();
+                    hollows += h;
+                    barren += usize::from(h == 0);
+                }
+                areas.sort_by(f64::total_cmp);
+                let at = |bar: f64| areas.iter().filter(|&&a| a >= bar).count();
+                println!(
+                    "{:7} depth {depth_m:5.3} m ({:2} vx): visible {:?}; pass at 2/3/4.5/6 m² \
+                     = {}/{}/{}/{}; {hollows} hollows, {barren} barren; (bar {want}: {pass})",
+                    p.name,
+                    (depth_m / p.voxel_m).round() as i32,
+                    areas
+                        .iter()
+                        .map(|a| (a * 10.0).round() / 10.0)
+                        .collect::<Vec<_>>(),
+                    at(2.0),
+                    at(3.0),
+                    at(4.5),
+                    at(6.0),
+                );
+            }
+        }
+    }
+
+    /// **Study, not a test.** Is there a lake, can the camera see it, and does it stay?
+    /// Eight seeds of each preset: hydrate and settle, read the lake, judge it against
+    /// the recipe's own bar, then open the outlet and run ten simulated minutes with the
+    /// cycle on to see whether the level holds.
+    #[test]
+    #[ignore = "study: run by name"]
+    fn the_lake_on_eight_seeds_of_every_preset() {
+        for p in crate::PRESETS {
+            let want = p.recipe.water.min_lake_m2;
+            let (mut passed, mut worst_drift, mut areas) = (0, 0i64, Vec::new());
+            let mut carved = (0usize, 0usize, 0usize);
+            for seed in 1..=8u64 {
+                let mut world = World::new(Config { seed, ..p.config() });
+                let settled = world.settle(600);
+                let l = lake(&world);
+                let datum = world.outlet_cell().map_or(0, |(_, y, _)| y);
+                let ok = l.visible_m2 >= want;
+                passed += usize::from(ok);
+                areas.push(l.visible_m2);
+                let (_, _, report) = crate::generate::staged_terrain(world.config(), &p.recipe);
+                let h = crate::hollows::find(&world).len();
+                carved.0 += report.carved.undercuts;
+                carved.1 += report.carved.galleries;
+                carved.2 += h;
+
+                world.apply(crate::Command::SetOutlet { open: true });
+                for _ in 0..12_000 {
+                    world.step();
+                }
+                let after = lake(&world);
+                let drift = i64::from(after.level_y) - i64::from(l.level_y);
+                // Only the seeds the gate would keep. A rejected seed has no lake to
+                // drift: `lake` picks whatever basin is lowest and open, and on a ring
+                // with no pond that is a different basin ten minutes later.
+                if ok {
+                    worst_drift = worst_drift.max(drift.abs());
+                }
+                println!(
+                    "  {} seed {seed}: floor {} datum {datum} level {} -> {} ({drift:+}), \
+                     {:.2} m³ over {:.1} m², {:.1} m² visible {} (need {want:.1}); \
+                     settle {} ticks {}",
+                    p.name,
+                    l.floor_y,
+                    l.level_y,
+                    after.level_y,
+                    l.volume_m3,
+                    l.surface_cells.len() as f64 * p.voxel_m * p.voxel_m,
+                    l.visible_m2,
+                    if ok { "PASS" } else { "fail" },
+                    settled.ticks,
+                    if settled.converged {
+                        "converged"
+                    } else {
+                        "at the cap"
+                    },
+                );
+            }
+            areas.sort_by(f64::total_cmp);
+            println!(
+                "=== {}: depth {} m, bar {want} m²: {passed}/8 pass, visible {:.1}..{:.1} m², \
+                 worst level drift {worst_drift} voxel(s) in ten minutes (passing seeds); \
+                 over 8 seeds \
+                 {} undercuts / {} galleries carved, {} habitable hollows",
+                p.name,
+                p.recipe.water.lake_depth_m,
+                areas.first().copied().unwrap_or(0.0),
+                areas.last().copied().unwrap_or(0.0),
+                carved.0,
+                carved.1,
+                carved.2,
+            );
+        }
     }
 
     /// **Study, not a test.** The weather, on every preset: settle, open the outlet the
@@ -764,6 +1150,173 @@ mod tests {
                 v.total_water_m3(),
             );
         }
+    }
+
+    /// A ring with an **open-sky pit** and a **roofed sump lower than it** — the shape
+    /// the deployed panel had, where every drop of pooled water ended up under rock
+    /// (Wrysk, 2026-09-21). Ground to `y = 5`; the pit is open from `y = 4`; the cavity
+    /// at `y = 2` is roofed and reaches the sky only through a shaft beside it.
+    fn pit_and_sump() -> World {
+        let c = Config {
+            width: 16,
+            height: 12,
+            depth: 2,
+            voxel_m: 0.25,
+            ..Config::default()
+        };
+        let mut w = World::empty(c.clone());
+        for z in 0..c.depth {
+            for x in 0..c.width as i64 {
+                for y in 1..=5 {
+                    w.material[c.index(x, y, z)] = if y == 1 {
+                        Material::Bedrock
+                    } else {
+                        Material::Soil
+                    };
+                }
+            }
+            // The pit: open sky over it, floor cells at y = 4, spilling at y = 6.
+            for x in 3..=7i64 {
+                for y in 4..=5 {
+                    w.material[c.index(x, y, z)] = Material::Air;
+                }
+            }
+            // The sump: two cells at y = 2 under rock, with a shaft at x = 12.
+            for x in 11..=12i64 {
+                w.material[c.index(x, 2, z)] = Material::Air;
+            }
+            for y in 3..=5 {
+                w.material[c.index(12, y, z)] = Material::Air;
+            }
+        }
+        w.rebuild_active_sets();
+        // The datum package L will place: the pit's rim, two voxels over its floor.
+        w.set_outlet_cell(Some((3, 6, 0)));
+        w
+    }
+
+    /// The lake is filled **first**, and a sump does not get to be the ring's water
+    /// feature just because it is deeper.
+    #[test]
+    fn the_lake_is_filled_first() {
+        let mut w = pit_and_sump();
+        let c = w.config().clone();
+        let out = hydrate(
+            &mut w,
+            &Water {
+                inventory_m: 0.06,
+                atmosphere_fraction: 0.0,
+                aquifer_head_m: 0.0,
+                lake_depth_m: 0.5,
+                ..Water::DRY
+            },
+        );
+        assert!(out.lake_m3 > 0.0, "the pit took water: {out:?}");
+        assert_eq!(out.lake_cells, 20, "five columns, two rows, two deep");
+
+        for z in 0..c.depth {
+            for x in 3..=7i64 {
+                for y in 4..=5 {
+                    assert!(
+                        w.free[c.index(x, y, z)] > 0.0,
+                        "the pit stands full at ({x}, {y}, {z})"
+                    );
+                }
+            }
+            for x in 11..=12i64 {
+                assert_eq!(
+                    w.free[c.index(x, 2, z)],
+                    0.0,
+                    "the sump is dry while the lake is being filled"
+                );
+            }
+        }
+        let total = 0.06 * 16.0 * 2.0 * c.cell_area();
+        assert!((out.total_m3() - total).abs() <= 1e-9 * total, "{out:?}");
+    }
+
+    /// Only open water counts, and only what the camera can read of it.
+    #[test]
+    fn lake_reports_only_open_water() {
+        let mut w = pit_and_sump();
+        let c = w.config().clone();
+        hydrate(
+            &mut w,
+            &Water {
+                inventory_m: 0.2,
+                atmosphere_fraction: 0.0,
+                aquifer_head_m: 0.0,
+                lake_depth_m: 0.5,
+                ..Water::DRY
+            },
+        );
+        let l = lake(&w);
+        assert_eq!(l.floor_y, 4, "the lowest basin with sky over its floor");
+        for &i in &l.surface_cells {
+            let (x, y, z) = c.coords(i);
+            assert!(
+                (3..=7).contains(&x),
+                "a surface cell of the pit, not of the sump: ({x}, {y}, {z})"
+            );
+            assert!(
+                !w.material[i + c.width as usize * c.depth as usize].is_solid(),
+                "an open-water surface has void over it"
+            );
+        }
+        let readable = l
+            .surface_cells
+            .iter()
+            .filter(|&&i| {
+                let (x, y, z) = c.coords(i);
+                crate::hollows::floor_is_visible(&w, i64::from(x), y, z)
+            })
+            .count();
+        assert!(
+            (l.visible_m2 - readable as f64 * c.cell_area()).abs() < 1e-12,
+            "visible_m2 counts exactly the cells the camera reads"
+        );
+        assert!(l.visible_m2 > 0.0, "the pit is in shot: {l:?}");
+    }
+
+    /// The lake **keeps** its level. Soil under it drains, showers fall on it, and an
+    /// hour later it is still a lake.
+    #[test]
+    fn the_lake_survives_ten_minutes() {
+        let mut w = pit_and_sump();
+        let c = w.config().clone();
+        let level_y = w.outlet_cell().expect("the datum").1;
+        hydrate(
+            &mut w,
+            &Water {
+                inventory_m: 0.5,
+                atmosphere_fraction: 0.06,
+                aquifer_head_m: 1.0,
+                closed_cycle: true,
+                rain_m_per_s: 3.5e-5,
+                evaporation_m_per_s: 3.0e-5,
+                shower_trigger_fraction: 0.01,
+                shower_volume_m3: 0.05,
+                shower_interval_min_s: 60.0,
+                shower_interval_max_s: 120.0,
+                lake_depth_m: 0.5,
+                min_lake_m2: 0.0,
+            },
+        );
+        let before = lake(&w).level_y;
+        for _ in 0..12_000 {
+            w.step();
+        }
+        let after = lake(&w);
+        assert!(
+            after.level_y.abs_diff(level_y) <= 1,
+            "the lake stands within a voxel of its datum after ten minutes: \
+             {} against {level_y} (it began at {before})",
+            after.level_y
+        );
+        assert!(after.visible_m2 > 0.0, "and it is still visible: {after:?}");
+        let v = w.view();
+        assert!(v.total_residual().abs() <= 1e-9 * v.total_water_m3().max(1.0));
+        let _ = c;
     }
 
     /// A dry recipe leaves the world exactly as it was.
