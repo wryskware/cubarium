@@ -132,3 +132,72 @@ Before/after reach and route table with the per-layer split, the two
 autopsy arms and the two 6 h observer runs, how stage transitions re-bin,
 what the reference-grid identity test covers, the commit list, and anything
 the model could not express.
+
+## Integration note (Fable, 2026-09-22)
+
+Landed c78e5a6..cfcb347 (flora layers with per-layer stocks and a new flora
+snapshot at schema 1; mouth, cone and presenter read layers; observer per
+layer; a same-build `lollipop` control arm; census section "Layers,
+2026-09-22"). Workspace suite green (2149). Fable re-ran `voxel_founder_autopsy
+60 preset=default` and the t = 0 observer and reproduced exactly: starved 34
+(23 shredder, 11 browser), drowned 2, umbrellafrond 7,417 bites, bloomcrown
+0, 2 browsers and 13 shredders alive at 60; reach 0.5611, route 0.2234.
+
+| | small | default | wide |
+| --- | --- | --- | --- |
+| reachable foliage at t = 0, lollipop → layers | 0.42 → 0.59 | 0.50 → 0.56 | 0.49 → 0.60 |
+| route-connected | 0.42 → 0.59 | 0.22 → 0.22 | 0.37 → 0.39 |
+| browser, 60-min arm | extinct 30 → 53 min; bloomcrown bites 640 → 3,380 | 1 → 2 alive; frond seedlings 2,269 → 7,417 bites | – |
+| browser, 6 h observer | extinct either way (plant collapse predates layers) | extinct min 90 → 210; reachable share 0.07 → 0.41 | – |
+
+All the gain is the new low tissue: the adult bloomcrown rosette is 100 %
+reachable on every preset. Two things the numbers now make measurable and
+which the next packages own: default's route is flat because no seeded
+browser's component holds a bloomcrown (seeding, package 4), and browsers on
+default now eat umbrellafrond seedlings hard, the audit's "universal seedling
+browsing prevents canopy recruitment" risk (coupled assessment, package 6;
+not a tuning matter). Small's six-hour plant collapse predates this package
+and is a separate line (the small preset's water or seeding, not anatomy).
+
+Worker's calls, kept: the reference-grid identity is asserted with p = 0 and
+as `historical^(1−p)` with the authored porosity, so the three ground mats
+shade slightly less than before (their p is a backlog placeholder); porosity
+has no sight meaning (contract §8, a model decision left open); `layer_stock`
+is a fixed `[f64; 4]` because `Stand` is `Copy`; the flora snapshot exists
+but nothing writes it yet (the host still reseeds plants on restart, so
+fresh-worlds holds trivially; host wiring owed). Not benchmarked: tick cost
+against the pre-layer build (light is per layer with an envelope prefilter).
+
+The worker had copied Wrysk's untracked anatomy document into the branch to
+annotate it; Fable removed that copy so the untracked file stays Wrysk's,
+and the annotations live here instead:
+
+## Implemented as, per species of the anatomy document's §3
+
+- **Springturf**: one `Mat 0–1.0, r 1.0, share 1.0, p 0.3`, exactly as
+  written. Reachable everywhere on all three presets; the mat's disc cell is
+  `crown_voxels(wood)`, so its picture and its reach are unchanged.
+- **Velvetpad**: one `Mat 0–1.0, r 1.0, share 1.0, p 0.6`, as written.
+  Decisions §3 keeps it on the browser's diet: no diet flag, no exclusion.
+- **Stonecushion**: the two bands as written. At the shipped
+  `crown_height_voxels [0.5, 0.5]` both round into the first cell over the
+  face, so the dome is one cell tall in the picture and both layers are floor
+  food; two layers in the stock, which is what a grazer thins first.
+- **Bloomcrown**: the three stages as written, with decisions §5's
+  corrections: the adult basal rosette holds 0.25 for life and the seedling's
+  physical crown height is capped at 0.125 m. On the shipped
+  `crown_height_voxels [1, 3]` (the ladder's 3–8 v is a later package) the
+  adult's rosette sits in the first cell over the face and its crown three
+  cells up: at t = 0 a browser reaches 100 % of bloomcrown on small (0 %
+  before), 66 % on default (53 %), 54 % on wide (33 %).
+- **Umbrellafrond**: the three stages as written, seedling capped at
+  0.125 m. The default "no" kept: no hanging Drape, so adult and juvenile are
+  out of a 0.25 m mouth's reach and only a seedling is food. On default the
+  three tiers are 0 % reachable; on wide 8.7 %, all seedlings.
+- **Vaulttree, lanternberry, siphonreed**: not implemented (six live species
+  only). The profile machinery carries `Drape` and a porous `Trunk`, so the
+  vaulttree needs no new layer rule when it arrives, only its dead-wood line
+  and establishment gate; siphonreed's `water_depth_min` site rule is a
+  model addition not made here.
+- **Glowcap**: one `Foliage 0–1.0, r 1.0, share 1.0, p 0.5`, as written. The
+  interim glyph is unchanged and still drawn as its own special case.
