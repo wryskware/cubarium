@@ -267,6 +267,37 @@ pub fn sky_at(py: i32, h: i32) -> [f32; 3] {
     mix(sky(), sky_horizon(), t)
 }
 
+/// How long one breath of the founding frame's pulse takes, in seconds. Slow on purpose:
+/// it says the run is alive without being something to watch.
+pub const FOUNDING_PULSE_S: f64 = 6.0;
+/// How far the founding sky dims at the bottom of that breath.
+pub const FOUNDING_PULSE_DEPTH: f32 = 0.35;
+
+/// The founding frame's brightness at `seconds` into the run: one slow breath between
+/// full and [`FOUNDING_PULSE_DEPTH`] below it.
+///
+/// The founding frame is what the panel shows while the world is being built — minutes
+/// of seed gate and settle on the board — and it is deliberately the sky alone, with no
+/// text and nothing to read: the normal display carries no analytical UI, and this is a
+/// placeholder Wrysk can replace with whatever he wants the founding to look like.
+pub fn founding_pulse(seconds: f64) -> f32 {
+    let phase = (seconds / FOUNDING_PULSE_S) * std::f64::consts::TAU;
+    let breath = (0.5 - 0.5 * phase.cos()) as f32;
+    1.0 - FOUNDING_PULSE_DEPTH * breath
+}
+
+/// Draw the founding frame: the sky gradient alone, at the pulse's current brightness.
+pub fn founding_sky(canvas: &mut Canvas, seconds: f64) {
+    let k = founding_pulse(seconds);
+    let (cw, ch) = (canvas.width() as i32, canvas.height() as i32);
+    for r in 0..ch {
+        let row = mul(sky_at(r, ch), k);
+        for c in 0..cw {
+            canvas.pixels_mut()[r as usize * cw as usize + c as usize] = row;
+        }
+    }
+}
+
 /// How much of the top-face light a surface `gap` voxels below its roof keeps. `0` is an
 /// open column, `1` is directly under the roof.
 fn roof_shade(gap: u16) -> f32 {
