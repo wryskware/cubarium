@@ -71,7 +71,8 @@ const DECIDED_BAND_CEILING_M: f64 = 1.33 * DECIDED_BROWSER_HEIGHT_M;
 const DECIDED_EYE_HEIGHT_M: f64 = 0.8 * DECIDED_BROWSER_HEIGHT_M;
 const DECIDED_PITCHES_DEG: [f64; 5] = [-40.0, -20.0, 0.0, 20.0, 40.0];
 
-/// An observer id no animal has, so every living body occludes a diagnostic ray.
+/// An observer id no animal has: a ray cast from a face nobody occupies is occluded by
+/// every living body, as the live cone's is by every body but the observer's own.
 const NO_OBSERVER: u64 = u64::MAX;
 
 fn main() {
@@ -326,6 +327,14 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
         .map(|&i| components[i])
         .collect();
 
+    // A hypothetical eye on an occupied face is that occupant's eye, so a body does not
+    // block its own view — the live cone's rule (`senses::ray_first_hit`'s observer_id).
+    let occupant: HashMap<(u32, u32, u32), u64> = av
+        .animals
+        .iter()
+        .map(|a| ((a.site.x, a.site.y, a.site.z), a.id))
+        .collect();
+
     let sight_today = SightMap::new(&wv, &fv, &av, TODAY_FAN.pools_occlude);
     let sight_decided = SightMap::new(&wv, &fv, &av, DECIDED_FAN.pools_occlude);
 
@@ -414,7 +423,16 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
             (&TODAY_FAN, &sight_today, &mut row.visible_today),
             (&DECIDED_FAN, &sight_decided, &mut row.visible_decided),
         ] {
-            if sees_stand(&wv, sight, &faces, &columns, layer, fan, &today.manifest) {
+            if sees_stand(
+                &wv,
+                sight,
+                &faces,
+                &occupant,
+                &columns,
+                layer,
+                fan,
+                &today.manifest,
+            ) {
                 *into += stand.foliage;
             }
         }
@@ -537,10 +555,12 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
 /// The yaw is aimed at the cell, because the fan sweeps every yaw as the body turns; the
 /// pitch set and the eye height are the arm. The march, the sub-step, the step cap and
 /// the order of the occlusion tests are the live cone's.
+#[allow(clippy::too_many_arguments)]
 fn sees_stand(
     wv: &VoxelView<'_>,
     sight: &SightMap,
     faces: &[Site],
+    occupant: &HashMap<(u32, u32, u32), u64>,
     columns: &[(u32, u32)],
     layer: i64,
     fan: &Fan,
@@ -585,6 +605,10 @@ fn sees_stand(
 
     for (_, i) in near {
         let face = faces[i];
+        let observer = occupant
+            .get(&(face.x, face.y, face.z))
+            .copied()
+            .unwrap_or(NO_OBSERVER);
         let pose = Pose::at_site(face, v);
         let origin = match fan.eye_height_m {
             None => eye_origin_m(wv, &pose, face.y),
@@ -599,7 +623,7 @@ fn sees_stand(
             let yaw = dx.atan2(dz).to_degrees();
             for &pitch in fan.pitches_deg {
                 let dir = ray_direction_deg(0.0, yaw, pitch);
-                if let Some((_, hit, cell)) = sight.first_hit(wv, NO_OBSERVER, origin, dir, range) {
+                if let Some((_, hit, cell)) = sight.first_hit(wv, observer, origin, dir, range) {
                     if hit == ConeHit::FoliageCrown && cells.contains(&cell) {
                         return true;
                     }
