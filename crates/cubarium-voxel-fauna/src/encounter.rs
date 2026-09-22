@@ -414,4 +414,48 @@ mod tests {
         assert_ne!(comp[1], comp[2], "a rise is not a step for a founder");
         assert_eq!(comp[0], comp[3], "x wraps");
     }
+
+    /// Two terraces a voxel apart are one walkable component under the step rule and
+    /// two without it: the observer's route question and the seeder's are the same
+    /// question (`design/handoffs/voxel-founder-step-2026-09-22.md`, deliverable 2).
+    #[test]
+    fn the_step_rule_joins_two_terraces_and_a_climb_of_zero_does_not() {
+        // A low shelf at y = 3 in columns 0..4 and a high one at y = 4 in 4..8, on one
+        // row; the only way across is the riser between x = 3 and x = 4.
+        let mut faces: Vec<Site> = Vec::new();
+        for x in 0..4u32 {
+            faces.push(Site { x, y: 3, z: 1 });
+        }
+        for x in 4..8u32 {
+            faces.push(Site { x, y: 4, z: 1 });
+        }
+        let level = walkable_components(&faces, 8, 0);
+        assert_eq!(
+            level.iter().collect::<std::collections::HashSet<_>>().len(),
+            2,
+            "level adjacency leaves the two terraces apart"
+        );
+        let stepped = walkable_components(&faces, 8, 1);
+        assert_eq!(
+            stepped
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            1,
+            "one voxel of climb makes the riser a route"
+        );
+        // Two voxels apart is still two components for a one-voxel climb.
+        let mut apart = faces.clone();
+        for f in apart.iter_mut().filter(|f| f.y == 4) {
+            f.y = 5;
+        }
+        assert_eq!(
+            walkable_components(&apart, 8, 1)
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            2,
+            "a two-voxel riser is not a step for a one-voxel climb"
+        );
+    }
 }

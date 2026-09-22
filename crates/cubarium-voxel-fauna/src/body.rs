@@ -1752,3 +1752,264 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod step_rule_tests {
+    //! The founder step rule (`design/handoffs/voxel-founder-step-2026-09-22.md`).
+    //!
+    //! Written from the brief before the implementation: a lineage has a climb height
+    //! in metres, converted to whole voxels at the consumer, and a sub-step may move
+    //! the centre column to a support face within that many layers of the body's own,
+    //! up or down. Contact reports only solids the body could **not** step onto.
+    //!
+    //! Every case here is a handful of ticks on an 8-column fixture.
+
+    use super::*;
+    use crate::manifest::Founder;
+    use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
+
+    /// A terraced strip: 16 × `height` × 6 at `voxel_m`, soil in `1..=base`, and the
+    /// columns in `raised` carrying `rise` layers more. The support face of the low
+    /// ground is `base`; of the terrace, `base + rise`.
+    fn terrace(
+        voxel_m: f64,
+        height: u32,
+        base: u32,
+        raised: std::ops::Range<i64>,
+        rise: u32,
+    ) -> World {
+        let mut world = World::empty(VoxelConfig {
+            width: 16,
+            height,
+            depth: 6,
+            voxel_m,
+            ..VoxelConfig::default()
+        });
+        for z in 0..6 {
+            for x in 0..16 {
+                for y in 1..=base {
+                    world.apply(WorldCommand::SetMaterial {
+                        x,
+                        y,
+                        z,
+                        material: Material::Soil,
+                    });
+                }
+            }
+        }
+        for z in 0..6 {
+            for x in raised.clone() {
+                for y in base + 1..=base + rise {
+                    world.apply(WorldCommand::SetMaterial {
+                        x,
+                        y,
+                        z,
+                        material: Material::Soil,
+                    });
+                }
+            }
+        }
+        world
+    }
+
+    /// A pit: soil in `1..=base` everywhere, then the columns in `sunk` dug down by
+    /// `drop` layers, so their support face is `base - drop`.
+    fn pit(voxel_m: f64, height: u32, base: u32, sunk: std::ops::Range<i64>, drop: u32) -> World {
+        let mut world = terrace(voxel_m, height, base, 0..0, 0);
+        for z in 0..6 {
+            for x in sunk.clone() {
+                for y in base - drop + 1..=base {
+                    world.apply(WorldCommand::SetMaterial {
+                        x,
+                        y,
+                        z,
+                        material: Material::Air,
+                    });
+                }
+            }
+        }
+        world
+    }
+
+    /// Walk a body east at full cruise and report where it got to: the standing layer
+    /// after each tick, in order, and the final pose. `ticks` stays small.
+    fn walk_east(
+        world: &World,
+        manifest: &Manifest,
+        climb: u32,
+        start_x_m: f64,
+        y0: u32,
+        ticks: u32,
+    ) -> (crate::Pose, Vec<u32>) {
+        let view = world.view();
+        let v = view.config.voxel_m;
+        let mut pose = crate::Pose {
+            x: start_x_m,
+            z: 2.5 * v,
+            heading_rad: std::f64::consts::FRAC_PI_2,
+        };
+        let mut y = y0;
+        let mut layers = Vec::new();
+        for _ in 0..ticks {
+            resolve_motion(
+                &view,
+                &mut pose,
+                &mut y,
+                manifest,
+                0.05,
+                climb,
+                Actions {
+                    forward: 1.0,
+                    turn: 0.0,
+                    feed: 0.0,
+                },
+            );
+            layers.push(y);
+        }
+        (pose, layers)
+    }
+
+    /// The conversion is one rounding of a physical height, and it is the founders'
+    /// authored placeholders that go through it: the browser's 0.25 m is two voxels on
+    /// the 0.125 m preset and one on the 0.25 m presets; the shredder's 0.125 m is one
+    /// on both.
+    #[test]
+    fn the_climb_height_converts_to_whole_voxels_once() {
+        let browser = crate::FounderPhysiology::frozen(Founder::Browser);
+        let shredder = crate::FounderPhysiology::frozen(Founder::Blind);
+        assert_eq!(browser.climb_m, 0.25);
+        assert_eq!(shredder.climb_m, 0.125);
+        assert_eq!(climb_voxels(&browser, 0.125), 2);
+        assert_eq!(climb_voxels(&browser, 0.25), 1);
+        assert_eq!(climb_voxels(&shredder, 0.125), 1);
+        assert_eq!(climb_voxels(&shredder, 0.25), 1);
+    }
+
+    /// One voxel up onto a terrace and one voxel back down off it, on the 0.25 m
+    /// reference grid, for a browser whose 0.25 m climb is one voxel there. The
+    /// standing layer follows the ground under the body.
+    #[test]
+    fn a_browser_steps_up_and_down_one_voxel_on_the_reference_grid() {
+        let world = terrace(0.25, 10, 2, 5..8, 1);
+        let manifest = Founder::Browser.manifest();
+        let (pose, layers) = walk_east(&world, &manifest, 1, 3.5 * 0.25, 2, 40);
+        assert!(
+            layers.contains(&3),
+            "the body never got onto the terrace: {layers:?}"
+        );
+        assert_eq!(
+            *layers.last().unwrap(),
+            2,
+            "and never got off it again: {layers:?}"
+        );
+        assert!(
+            pose.x > 8.0 * 0.25,
+            "the body is past the terrace at {}",
+            pose.x
+        );
+    }
+
+    /// The shredder's 0.125 m climb is one voxel at either scale, so a one-voxel
+    /// terrace is a step on both presets.
+    #[test]
+    fn a_shredder_steps_one_voxel_at_either_scale() {
+        for v in [0.125, 0.25] {
+            let world = terrace(v, 12, 2, 5..8, 1);
+            let manifest = Founder::Blind.manifest();
+            let (_, layers) = walk_east(&world, &manifest, 1, 3.5 * v, 2, 60);
+            assert!(
+                layers.contains(&3),
+                "a 1-voxel terrace at {v} m is not a step: {layers:?}"
+            );
+        }
+    }
+
+    /// Two voxels is over the browser's climb on the 0.25 m grid (0.5 m of rise
+    /// against a 0.25 m climb) and exactly at it on the 0.125 m grid. The same animal,
+    /// the same physical rise of 0.25 m, refused on one grid and taken on the other is
+    /// the discretisation working, not the rule changing.
+    #[test]
+    fn a_two_voxel_rise_refuses_on_the_reference_grid_and_passes_on_the_fine_one() {
+        let manifest = Founder::Browser.manifest();
+
+        let coarse = terrace(0.25, 10, 2, 5..8, 2);
+        let (pose, layers) = walk_east(&coarse, &manifest, 1, 3.5 * 0.25, 2, 40);
+        assert!(
+            layers.iter().all(|&y| y == 2),
+            "a 0.5 m rise is a wall for a 0.25 m climb: {layers:?}"
+        );
+        assert!(
+            pose.x < 5.0 * 0.25,
+            "the body stopped at the wall, not on it: {}",
+            pose.x
+        );
+
+        let fine = terrace(0.125, 14, 4, 5..8, 2);
+        let (_, layers) = walk_east(&fine, &manifest, 2, 3.5 * 0.125, 4, 60);
+        assert!(
+            layers.contains(&6),
+            "the same 0.25 m rise is two voxels of climb here: {layers:?}"
+        );
+    }
+
+    /// A drop deeper than the climb is a cliff edge: the body stops on it and does not
+    /// fall. A drop within the climb is a step (the terrace test's descent).
+    #[test]
+    fn a_drop_beyond_the_climb_refuses() {
+        let manifest = Founder::Browser.manifest();
+        let world = pit(0.25, 10, 4, 5..9, 2);
+        let (pose, layers) = walk_east(&world, &manifest, 1, 3.5 * 0.25, 4, 40);
+        assert!(
+            layers.iter().all(|&y| y == 4),
+            "the body walked off a 0.5 m cliff: {layers:?}"
+        );
+        assert!(
+            pose.x < 5.0 * 0.25,
+            "the body should stand on the rim at {}",
+            pose.x
+        );
+
+        // One voxel of the same pit is a step down.
+        let shallow = pit(0.25, 10, 4, 5..9, 1);
+        let (_, layers) = walk_east(&shallow, &manifest, 1, 3.5 * 0.25, 4, 40);
+        assert!(
+            layers.contains(&3),
+            "a 0.25 m drop is within the climb: {layers:?}"
+        );
+    }
+
+    /// Contact is about walls, not about ground: a ledge the body could step onto
+    /// reads as open, a ledge it could not reads as solid. The channel count does not
+    /// change and the underside still reads the face the body is standing on.
+    #[test]
+    fn contact_reads_a_steppable_ledge_as_clear_and_a_taller_one_as_solid() {
+        let manifest = Founder::Browser.manifest();
+        // Standing in column 4, facing east, pressed up against the terrace at x = 5.
+        let pose = crate::Pose {
+            x: 5.0 * 0.25 - 0.0626,
+            z: 2.5 * 0.25,
+            heading_rad: std::f64::consts::FRAC_PI_2,
+        };
+
+        let ledge = terrace(0.25, 10, 2, 5..8, 1);
+        let reading = contact_readings(&ledge.view(), &pose, 2, &manifest, 1);
+        assert_eq!(
+            reading.front, 0.0,
+            "a one-voxel ledge within the climb is ground, not a wall"
+        );
+        assert_eq!(reading.underside, 1.0);
+        assert!(reading.resolved);
+
+        let wall = terrace(0.25, 10, 2, 5..8, 2);
+        let reading = contact_readings(&wall.view(), &pose, 2, &manifest, 1);
+        assert_eq!(
+            reading.front, 1.0,
+            "a two-voxel rise is over the climb: a wall, as before"
+        );
+        assert_eq!(reading.underside, 1.0);
+
+        // A climb of zero is the old receptor exactly: the ledge is a wall again.
+        let reading = contact_readings(&ledge.view(), &pose, 2, &manifest, 0);
+        assert_eq!(reading.front, 1.0);
+    }
+}
