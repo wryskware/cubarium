@@ -423,6 +423,43 @@ pub(crate) enum Class {
     Occluder,
 }
 
+/// What the ray actually struck, before [`Class`] collapses four of these into one
+/// `Occluder`. Diagnosis only: the policy never sees a `Fine`, and
+/// [`Fine::coarse`] is the single place the two are related, so a cone reading cannot
+/// drift from the census that explains it.
+///
+/// It exists because a blank cone has four unrelated causes — a slope, standing water or
+/// a shower film, a crown someone has already stripped, and a ground pool of
+/// litter/carrion/dead wood — and `Class::Occluder` cannot tell them apart
+/// (`design/handoffs/voxel-cone-autopsy-2026-09-21.md`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Fine {
+    /// A solid voxel: terrain, which on a landscape is usually the slope ahead.
+    Terrain,
+    /// A cell holding free water: the lake, a puddle, or a film left by a shower.
+    Water,
+    /// A stand's crown cell whose `foliage` is zero — grazed bare, still occluding.
+    StrippedCrown,
+    /// A stand's crown cell with foliage standing in it.
+    FoliageCrown,
+    /// The cell above a ground site holding litter, carrion or dead wood.
+    GroundPool,
+    /// Another animal's body cell.
+    Body,
+}
+
+impl Fine {
+    /// The class the policy's [`SectorReading`] is built from. **The only mapping**:
+    /// every coarse reading in the crate comes through here.
+    pub(crate) const fn coarse(self) -> Class {
+        match self {
+            Fine::FoliageCrown => Class::Foliage,
+            Fine::Body => Class::Body,
+            Fine::Terrain | Fine::Water | Fine::StrippedCrown | Fine::GroundPool => Class::Occluder,
+        }
+    }
+}
+
 /// One cone sector's accumulated reading.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct SectorReading {
@@ -457,7 +494,7 @@ pub(crate) struct ConeReading {
 /// the same cell remains visible.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ConeOccupancy {
-    environment: HashMap<usize, Class>,
+    environment: HashMap<usize, Fine>,
     bodies: HashMap<usize, Vec<u64>>,
 }
 
@@ -467,7 +504,7 @@ pub(crate) fn cone_occupancy(
     fauna: &crate::FaunaView<'_>,
 ) -> ConeOccupancy {
     let c = view.config;
-    let mut environment: HashMap<usize, Class> = HashMap::new();
+    let mut environment: HashMap<usize, Fine> = HashMap::new();
     for stand in fv.stands.iter() {
         let sc = fv.config.species(stand.species);
         let layer = i64::from(stand.site.y) + i64::from(sc.crown_voxels(stand.wood));
@@ -478,9 +515,9 @@ pub(crate) fn cone_occupancy(
         let span = radius.ceil() as i64;
         let r2 = radius * radius;
         let class = if stand.foliage > 0.0 {
-            Class::Foliage
+            Fine::FoliageCrown
         } else {
-            Class::Occluder
+            Fine::StrippedCrown
         };
         for dz in -span..=span {
             for dx in -span..=span {
@@ -502,7 +539,7 @@ pub(crate) fn cone_occupancy(
         if g.litter > 0.0 || g.carrion > 0.0 || g.dead_wood > 0.0 {
             if g.site.y + 1 < c.height {
                 let cell = c.index(i64::from(g.site.x), g.site.y + 1, g.site.z);
-                environment.entry(cell).or_insert(Class::Occluder);
+                environment.entry(cell).or_insert(Fine::GroundPool);
             }
         }
     }
@@ -523,16 +560,20 @@ pub(crate) fn cone_occupancy(
 }
 
 /// March one ray from `origin` (metres) along unit `dir`, returning the first hit's
-/// distance and class within `range`. Fixed sub-step with a conservative step cap; a ray
-/// that leaves the world's vertical or `z` bounds is a clear ray.
-fn ray_first_hit(
+/// distance and **fine** class within `range`. Fixed sub-step with a conservative step
+/// cap; a ray that leaves the world's vertical or `z` bounds is a clear ray.
+///
+/// The order of the four tests below is the occlusion policy and is unchanged: terrain,
+/// then free water, then a body, then the occupancy map. Only the returned class is
+/// finer — [`Fine::coarse`] turns it back into what the policy reads.
+pub(crate) fn ray_first_hit(
     view: &VoxelView<'_>,
     occupancy: &ConeOccupancy,
     observer_id: u64,
     origin: (f64, f64, f64),
     dir: (f64, f64, f64),
     range: f64,
-) -> Option<(f64, Class)> {
+) -> Option<(f64, Fine)> {
     let c = view.config;
     let v = c.voxel_m;
     let steps = ((range / v) / RAY_SUBSTEP).ceil() as u32;
@@ -556,17 +597,17 @@ fn ray_first_hit(
         let wx = ((px / v).floor() as i64).rem_euclid(i64::from(c.width));
         let cell = c.index(wx, iy as u32, iz as u32);
         if view.material[cell].is_solid() {
-            return Some((t - substep * 0.5, Class::Occluder)); // terrain
+            return Some((t - substep * 0.5, Fine::Terrain));
         }
         if view.free[cell] > 0.0 {
-            return Some((t - substep * 0.5, Class::Occluder)); // water surface
+            return Some((t - substep * 0.5, Fine::Water));
         }
         if occupancy
             .bodies
             .get(&cell)
             .is_some_and(|ids| ids.iter().any(|&id| id != observer_id))
         {
-            return Some((t - substep * 0.5, Class::Body));
+            return Some((t - substep * 0.5, Fine::Body));
         }
         if let Some(&class) = occupancy.environment.get(&cell) {
             return Some((t - substep * 0.5, class));
@@ -579,6 +620,52 @@ fn ray_first_hit(
 /// 2 m range at the manifest's fixed encoding reference. The eye is at the standing body's
 /// layer; it has no memory, no expansion and no body identity — a fresh reading per
 /// observation.
+/// Whether an eye can be sampled from here at all, in [`cone_readings`]' own order:
+/// the pose has to be in a column, that column has to be a support face at the standing
+/// layer, and the manifest has to declare three sectors. Shared with the diagnostic
+/// census so "the cone was invalid" means one thing in this crate.
+pub(crate) fn cone_valid(
+    view: &VoxelView<'_>,
+    pose: &Pose,
+    standing_y: u32,
+    manifest: &Manifest,
+) -> bool {
+    let c = view.config;
+    let Some((cx, cz)) = pose.column(c.voxel_m, c.depth) else {
+        return false;
+    };
+    let wx = cx.rem_euclid(i64::from(c.width));
+    view.is_support(wx, standing_y, cz) && manifest.sector_centres_deg.len() == 3
+}
+
+/// Where the eye is, in metres: the body's own column, and one and a half voxels over
+/// the standing face. **In voxels, not in body lengths** — on a 0.25 m world the same
+/// browser's eye is twice as high off the ground as on a 0.125 m one.
+pub(crate) fn cone_origin(view: &VoxelView<'_>, pose: &Pose, standing_y: u32) -> (f64, f64, f64) {
+    (
+        pose.x,
+        (f64::from(standing_y) + 1.0 + 0.5) * view.config.voxel_m,
+        pose.z,
+    )
+}
+
+/// One ray's unit direction from the heading, its sector centre and its two offsets, all
+/// in degrees. The single expression both the reading and the census use.
+pub(crate) fn ray_direction(
+    heading_rad: f64,
+    centre_deg: f64,
+    yaw_offset_deg: f64,
+    pitch_offset_deg: f64,
+) -> (f64, f64, f64) {
+    let yaw = heading_rad + centre_deg.to_radians() + yaw_offset_deg.to_radians();
+    let pitch = pitch_offset_deg.to_radians();
+    (
+        pitch.cos() * yaw.sin(),
+        pitch.sin(),
+        pitch.cos() * yaw.cos(),
+    )
+}
+
 pub(crate) fn cone_readings(
     view: &VoxelView<'_>,
     occupancy: &ConeOccupancy,
@@ -587,49 +674,30 @@ pub(crate) fn cone_readings(
     standing_y: u32,
     manifest: &Manifest,
 ) -> ConeReading {
-    let c = view.config;
     let invalid = ConeReading {
         valid: false,
         sectors: [SectorReading::ZERO; 3],
     };
-    let (cx, cz) = match pose.column(c.voxel_m, c.depth) {
-        Some(col) => col,
-        None => return invalid,
-    };
-    let wx = cx.rem_euclid(i64::from(c.width));
-    if !view.is_support(wx, standing_y, cz) {
-        return invalid;
-    }
-    if manifest.sector_centres_deg.len() != 3 {
+    if !cone_valid(view, pose, standing_y, manifest) {
         return invalid;
     }
     let range = manifest.cone_range_m;
-    let origin = (
-        pose.x,
-        (f64::from(standing_y) + 1.0 + 0.5) * c.voxel_m,
-        pose.z,
-    );
+    let origin = cone_origin(view, pose, standing_y);
     let heading = pose.heading_rad;
     let rays = manifest.ray_yaw_offsets_deg.len() * manifest.ray_pitch_offsets_deg.len();
     let ray_count = f64::from(rays as u32);
     let mut sectors = [SectorReading::ZERO; 3];
     for (si, &centre_deg) in manifest.sector_centres_deg.iter().enumerate() {
-        let centre = centre_deg.to_radians();
         let (mut clear, mut hit, mut hit_prox) = (0u32, 0u32, 0.0f64);
         let (mut fol, mut fol_prox) = (0u32, 0.0f64);
         let (mut bdy, mut bdy_prox) = (0u32, 0.0f64);
         for &oyaw in manifest.ray_yaw_offsets_deg {
             for &opitch in manifest.ray_pitch_offsets_deg {
-                let yaw = heading + centre + oyaw.to_radians();
-                let pitch = opitch.to_radians();
-                let dir = (
-                    pitch.cos() * yaw.sin(),
-                    pitch.sin(),
-                    pitch.cos() * yaw.cos(),
-                );
+                let dir = ray_direction(heading, centre_deg, oyaw, opitch);
                 match ray_first_hit(view, occupancy, observer_id, origin, dir, range) {
                     None => clear += 1,
-                    Some((dist, class)) => {
+                    Some((dist, fine)) => {
+                        let class = fine.coarse();
                         let prox = (1.0 - dist / range).clamp(0.0, 1.0);
                         hit += 1;
                         hit_prox += prox;

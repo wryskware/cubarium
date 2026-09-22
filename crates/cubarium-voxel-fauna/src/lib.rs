@@ -119,6 +119,215 @@ pub fn browser_cone_readings(
     )
 }
 
+/// What one cone ray struck first, at the resolution the policy is **not** given.
+///
+/// [`browser_cone_readings`] reports a sector's `foliage_fraction`; everything that is
+/// not foliage and not a body collapses into one occluding class, so a cone that reads
+/// no foliage is indistinguishable from a cone facing a slope, a puddle, a shower film,
+/// a crown someone already stripped, or a litter pool. This is that same first hit named
+/// (`design/handoffs/voxel-cone-autopsy-2026-09-21.md`, deliverable 2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConeHit {
+    /// Nothing within the cone's range, or the ray left the world.
+    Clear,
+    /// A solid voxel.
+    Terrain,
+    /// A cell holding free water.
+    Water,
+    /// A crown cell of a stand whose foliage is zero.
+    StrippedCrown,
+    /// A crown cell with foliage standing in it — the only hit the policy reads as food.
+    FoliageCrown,
+    /// The cell over a ground site holding litter, carrion or dead wood.
+    GroundPool,
+    /// Another animal's body.
+    Body,
+}
+
+impl ConeHit {
+    /// Its name, for a CSV column.
+    pub const fn name(self) -> &'static str {
+        match self {
+            ConeHit::Clear => "clear",
+            ConeHit::Terrain => "terrain",
+            ConeHit::Water => "water",
+            ConeHit::StrippedCrown => "stripped",
+            ConeHit::FoliageCrown => "foliage",
+            ConeHit::GroundPool => "pool",
+            ConeHit::Body => "body",
+        }
+    }
+
+    /// Every variant, in the order a census row prints them.
+    pub const ALL: [ConeHit; 7] = [
+        ConeHit::Clear,
+        ConeHit::Terrain,
+        ConeHit::Water,
+        ConeHit::StrippedCrown,
+        ConeHit::FoliageCrown,
+        ConeHit::GroundPool,
+        ConeHit::Body,
+    ];
+
+    /// Its index in [`ConeHit::ALL`].
+    pub const fn index(self) -> usize {
+        match self {
+            ConeHit::Clear => 0,
+            ConeHit::Terrain => 1,
+            ConeHit::Water => 2,
+            ConeHit::StrippedCrown => 3,
+            ConeHit::FoliageCrown => 4,
+            ConeHit::GroundPool => 5,
+            ConeHit::Body => 6,
+        }
+    }
+}
+
+/// One ray of the census: where it was aimed and what it found.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ConeRay {
+    /// Sector index in manifest order, or [`ConeRay::PROBE`] for a caller's bearing.
+    pub sector: usize,
+    /// Yaw from the body's heading, degrees — sector centre plus the ray's own offset
+    /// for a fan ray, the bearing itself for a probe.
+    pub yaw_deg: f64,
+    /// Pitch from horizontal, degrees.
+    pub pitch_deg: f64,
+    pub hit: ConeHit,
+    /// Distance in metres, or [`f64::INFINITY`] for [`ConeHit::Clear`].
+    pub distance_m: f64,
+}
+
+impl ConeRay {
+    /// The `sector` of a ray the caller aimed rather than one of the fan's.
+    pub const PROBE: usize = usize::MAX;
+}
+
+/// The browser's cone, ray by ray, at the fine resolution.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConeCensus {
+    /// The eye, in metres: the body's column, one and a half **voxels** over its
+    /// standing face.
+    pub origin_m: (f64, f64, f64),
+    pub heading_rad: f64,
+    pub range_m: f64,
+    /// The manifest's own fan, in `cone_readings`' accumulation order: sector, then yaw
+    /// offset, then pitch offset.
+    pub rays: Vec<ConeRay>,
+    /// One ray per bearing the caller asked for, in the order asked.
+    pub probes: Vec<ConeRay>,
+}
+
+impl ConeCensus {
+    /// How many fan rays of one sector struck each class, indexed by
+    /// [`ConeHit::index`].
+    pub fn counts(&self, sector: usize) -> [u32; 7] {
+        let mut out = [0u32; 7];
+        for ray in self.rays.iter().filter(|r| r.sector == sector) {
+            out[ray.hit.index()] += 1;
+        }
+        out
+    }
+
+    /// The mean distance of this sector's [`ConeHit::FoliageCrown`] hits, or `None` when
+    /// it has none.
+    pub fn nearest_foliage_mean_m(&self, sector: usize) -> Option<f64> {
+        let hits: Vec<f64> = self
+            .rays
+            .iter()
+            .filter(|r| r.sector == sector && r.hit == ConeHit::FoliageCrown)
+            .map(|r| r.distance_m)
+            .collect();
+        (!hits.is_empty()).then(|| hits.iter().sum::<f64>() / hits.len() as f64)
+    }
+}
+
+/// Run the browser's **exact** cone from its exact eye and name every first hit.
+///
+/// It is the same occupancy map, the same origin, the same ray directions, the same
+/// sub-step and the same step cap the controller's own observation uses — the geometry
+/// lives in one place (`senses::cone_origin`, `senses::ray_direction`,
+/// `senses::ray_first_hit`) and both callers read it — so a census row explains the
+/// reading the policy was given rather than a second opinion about it. What it adds is
+/// only resolution: `senses::Fine::coarse` is the one mapping back, and a test asserts
+/// the census reproduces [`browser_cone_readings`] exactly.
+///
+/// `probes` are extra bearings in radians, `(yaw_from_heading, pitch)`, for asking
+/// "is the crown over there blocked, and by what" — they are marched with the same ray
+/// and returned separately, and they change nothing.
+///
+/// `None` if the animal is not a browser founder or its eye is invalid where it stands.
+pub fn browser_cone_census(
+    view: &VoxelView<'_>,
+    flora: &FloraView<'_>,
+    fauna: &FaunaView<'_>,
+    animal: &Animal,
+    probes: &[(f64, f64)],
+) -> Option<ConeCensus> {
+    if animal.founder != Some(Founder::Browser) {
+        return None;
+    }
+    let manifest = Founder::Browser.manifest();
+    if !senses::cone_valid(view, &animal.pose, animal.site.y, &manifest) {
+        return None;
+    }
+    let occupancy = senses::cone_occupancy(view, flora, fauna);
+    let origin = senses::cone_origin(view, &animal.pose, animal.site.y);
+    let heading = animal.pose.heading_rad;
+    let range = manifest.cone_range_m;
+    let march = |sector: usize, yaw_deg: f64, pitch_deg: f64, dir: (f64, f64, f64)| {
+        let (hit, distance_m) =
+            match senses::ray_first_hit(view, &occupancy, animal.id, origin, dir, range) {
+                None => (ConeHit::Clear, f64::INFINITY),
+                Some((d, fine)) => (
+                    match fine {
+                        senses::Fine::Terrain => ConeHit::Terrain,
+                        senses::Fine::Water => ConeHit::Water,
+                        senses::Fine::StrippedCrown => ConeHit::StrippedCrown,
+                        senses::Fine::FoliageCrown => ConeHit::FoliageCrown,
+                        senses::Fine::GroundPool => ConeHit::GroundPool,
+                        senses::Fine::Body => ConeHit::Body,
+                    },
+                    d,
+                ),
+            };
+        ConeRay {
+            sector,
+            yaw_deg,
+            pitch_deg,
+            hit,
+            distance_m,
+        }
+    };
+    let mut rays = Vec::with_capacity(
+        manifest.sector_centres_deg.len()
+            * manifest.ray_yaw_offsets_deg.len()
+            * manifest.ray_pitch_offsets_deg.len(),
+    );
+    for (si, &centre_deg) in manifest.sector_centres_deg.iter().enumerate() {
+        for &oyaw in manifest.ray_yaw_offsets_deg {
+            for &opitch in manifest.ray_pitch_offsets_deg {
+                let dir = senses::ray_direction(heading, centre_deg, oyaw, opitch);
+                rays.push(march(si, centre_deg + oyaw, opitch, dir));
+            }
+        }
+    }
+    let probes = probes
+        .iter()
+        .map(|&(yaw, pitch)| {
+            let dir = senses::ray_direction(heading, yaw.to_degrees(), 0.0, pitch.to_degrees());
+            march(ConeRay::PROBE, yaw.to_degrees(), pitch.to_degrees(), dir)
+        })
+        .collect();
+    Some(ConeCensus {
+        origin_m: origin,
+        heading_rad: heading,
+        range_m: range,
+        rays,
+        probes,
+    })
+}
+
 /// The stand selected by the browser's actual mouth geometry, if any. Read-only
 /// diagnostic access for explaining a bite or a starvation event.
 pub fn browser_mouth_foliage(
@@ -1791,5 +2000,199 @@ mod starting_stores_tests {
                 assert!(bad.resolve(&sc).is_none(), "{bad:?} must be refused");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod cone_census_tests {
+    use super::*;
+    use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material};
+    use cubarium_voxel_flora::{Command as FloraCommand, FloraConfig, Species as Plant};
+
+    /// A 16 × 8 × 8 world at 0.25 m with soil to y = 2, a rock step, a pool of free
+    /// water and four stands — so the census has a terrain hit, a water hit, a stripped
+    /// crown and a standing crown to tell apart in the same run.
+    fn wall_and_water_world() -> (World, Flora, Fauna) {
+        let mut world = World::empty(VoxelConfig {
+            width: 16,
+            height: 8,
+            depth: 8,
+            voxel_m: 0.25,
+            ..VoxelConfig::default()
+        });
+        for z in 0..8 {
+            for x in 0..16 {
+                for y in 1..=2 {
+                    world.apply(WorldCommand::SetMaterial {
+                        x,
+                        y,
+                        z,
+                        material: Material::Soil,
+                    });
+                }
+            }
+        }
+        // A rock step two columns east of the middle: a terrain first hit.
+        for z in 4..=6 {
+            world.apply(WorldCommand::SetMaterial {
+                x: 11,
+                y: 3,
+                z,
+                material: Material::Rock,
+            });
+        }
+        // A puddle two columns west: a water first hit at the eye's own layer is what a
+        // shower film looks like to the ray.
+        for z in 2..=4u32 {
+            world.apply(WorldCommand::AddWater {
+                x: 5,
+                y: 3,
+                z,
+                volume_m3: 0.01,
+            });
+        }
+        let mut flora = Flora::new(FloraConfig::default());
+        for (x, z, species) in [
+            (9u32, 2u32, Plant::Springturf),
+            (8, 6, Plant::Springturf),
+            (12, 3, Plant::Stonecushion),
+            (6, 5, Plant::Stonecushion),
+        ] {
+            let wood = 0.5 * flora.config().species(species).wood_max;
+            flora.apply(
+                &world,
+                FloraCommand::Seed {
+                    x: i64::from(x),
+                    z,
+                    species,
+                    wood,
+                },
+            );
+        }
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        for (x, z, heading) in [
+            (8u32, 4u32, 0.0),
+            (9, 4, std::f64::consts::FRAC_PI_2),
+            (7, 3, std::f64::consts::PI),
+        ] {
+            assert!(fauna.apply(
+                &world,
+                Command::IntroduceFounder {
+                    x: i64::from(x),
+                    z,
+                    founder: Founder::Browser,
+                    stores: StartingStores::FULL,
+                    heading_rad: heading,
+                },
+            ));
+        }
+        (world, flora, fauna)
+    }
+
+    /// **The census is the reading.** Deliverable 2's contract: aggregating the fine
+    /// per-ray classes back through `Fine::coarse` reproduces the policy's own
+    /// `foliage_fraction` and `foliage_proximity` bit for bit, on a world that is
+    /// changing under the bodies — stands cropped, water moving, three browsers walking
+    /// into and out of each other's cones.
+    #[test]
+    fn the_fine_census_maps_onto_the_coarse_reading_exactly() {
+        let (mut world, mut flora, mut fauna) = wall_and_water_world();
+        let mut checked = 0usize;
+        let mut saw = [0usize; 7];
+        for tick in 0..=200u64 {
+            if tick > 0 {
+                world.step();
+                fauna.step(&world, &mut flora);
+            }
+            if tick % 20 != 0 {
+                continue;
+            }
+            let view = world.view();
+            let fv = flora.view();
+            let av = fauna.view();
+            for animal in av.animals {
+                let Some(census) = browser_cone_census(&view, &fv, &av, animal, &[]) else {
+                    continue;
+                };
+                let reading = browser_cone_readings(&view, &fv, &av, animal).expect("a valid cone");
+                let rays_per_sector = (Founder::Browser.manifest().ray_yaw_offsets_deg.len()
+                    * Founder::Browser.manifest().ray_pitch_offsets_deg.len())
+                    as f64;
+                for (sector, (fraction, proximity)) in reading.into_iter().enumerate() {
+                    let counts = census.counts(sector);
+                    for (i, n) in counts.iter().enumerate() {
+                        saw[i] += *n as usize;
+                    }
+                    let foliage: Vec<f64> = census
+                        .rays
+                        .iter()
+                        .filter(|r| r.sector == sector && r.hit == ConeHit::FoliageCrown)
+                        .map(|r| (1.0 - r.distance_m / census.range_m).clamp(0.0, 1.0))
+                        .collect();
+                    assert_eq!(
+                        f64::from(counts[ConeHit::FoliageCrown.index()]) / rays_per_sector,
+                        fraction,
+                        "tick {tick} body {} sector {sector}: the census's foliage count \
+                         is not the reading's fraction",
+                        animal.id,
+                    );
+                    let want = if foliage.is_empty() {
+                        0.0
+                    } else {
+                        foliage.iter().sum::<f64>() / foliage.len() as f64
+                    };
+                    assert_eq!(
+                        want, proximity,
+                        "tick {tick} body {} sector {sector}: the census's foliage \
+                         distances are not the reading's proximity",
+                        animal.id,
+                    );
+                    assert_eq!(
+                        counts.iter().sum::<u32>() as f64,
+                        rays_per_sector,
+                        "every ray of the sector is classed exactly once"
+                    );
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 0, "the test never sampled a cone");
+        // The fixture has to actually exercise the classes the coarse reading hides, or
+        // the assertion above is vacuous for them.
+        for hit in [
+            ConeHit::Clear,
+            ConeHit::Terrain,
+            ConeHit::Water,
+            ConeHit::FoliageCrown,
+        ] {
+            assert!(
+                saw[hit.index()] > 0,
+                "the fixture never produced a {} first hit",
+                hit.name()
+            );
+        }
+    }
+
+    /// A probe bearing is marched by the same ray as the fan: aimed down the heading
+    /// with no pitch, it agrees with the fan's own centre-sector, centre-offset ray.
+    #[test]
+    fn a_probe_bearing_is_the_same_ray_as_the_fan() {
+        let (world, flora, fauna) = wall_and_water_world();
+        let view = world.view();
+        let fv = flora.view();
+        let av = fauna.view();
+        let animal = av.animals.first().expect("a founder was introduced");
+        let census =
+            browser_cone_census(&view, &fv, &av, animal, &[(0.0, 0.0)]).expect("a valid cone");
+        let straight = census
+            .rays
+            .iter()
+            .find(|r| r.sector == 1 && r.yaw_deg == 0.0 && r.pitch_deg == 0.0)
+            .expect("the fan has a ray dead ahead");
+        let probe = census.probes.first().expect("one probe was asked for");
+        assert_eq!(
+            (probe.hit, probe.distance_m),
+            (straight.hit, straight.distance_m)
+        );
     }
 }
