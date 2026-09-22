@@ -14,6 +14,12 @@ date and are never a current task list.
 
 ## Open now
 
+- **Voxel performance follow-up (2026-09-18):**
+  [Sparse falling water](voxel-sparse-fall-2026-09-18.md), then
+  [cached exchange geometry](voxel-exchange-geometry-2026-09-18.md), on the
+  same water worker; [study observer caching](voxel-study-observer-cache-2026-09-18.md)
+  is separate flora/harness work. Animal sensing optimization is deferred
+  while sensing is actively redesigned. These are handoffs, not landed gains.
 - **2026-09-16 new-world planning handoff:**
   [Fable: voxel ringworld, engine choice and first wave](fable-voxel-world-first-wave-2026-09-16.md).
   Review the local-desktop terrain/water direction and prepare a small first wave.

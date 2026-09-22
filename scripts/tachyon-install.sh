@@ -59,10 +59,9 @@ chown -R "$USER_NAME:$USER_NAME" "$HOME_DIR/art"
 
 # --- the fresh-world config ----------------------------------------------
 # Root-owned and world-readable: the service reads it, and only an operator
-# edits it. Rewriting it cannot disturb a world that already exists — on a
-# resume the runner takes `capacity` and `weather.moving` from it and nothing
-# else, and the founders below are spent at creation only.
+# edits it.
 install -o root -g root -m 644 "$REPO/config/tachyon/world.toml" "$HOME_DIR/world.toml"
+install -o root -g root -m 644 "$REPO/config/tachyon/voxel.toml" "$HOME_DIR/voxel.toml"
 
 # --- the binary -----------------------------------------------------------
 # Root-owned 0755: the service user runs it and must not be able to replace it.
@@ -76,7 +75,7 @@ systemctl daemon-reload
 systemctl enable cubarium.service >/dev/null
 
 echo "installed:"
-ls -l "$BIN" "$UNIT" "$HOME_DIR/world.toml"
+ls -l "$BIN" "$UNIT" "$HOME_DIR/voxel.toml"
 ls -ld "$HOME_DIR" "$HOME_DIR/state" "$HOME_DIR/art"
 echo "art: $(find "$HOME_DIR/art" -type f | wc -l) file(s)"
 echo "$("$BIN" --version 2>/dev/null || echo 'cubarium (no --version)')"

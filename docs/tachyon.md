@@ -266,3 +266,27 @@ run and are not comparable.
 * `RUST_LOG=info` is in the unit because the brief asks for it, but the
   `cubarium` binary has no logging framework: everything it says it says on
   stderr unconditionally. The variable is inert here and live for the daemon.
+
+## Voxel world on the panel (VR-2, 2026-09-21)
+
+`cubarium voxel` running as the system service into `cube-screen-shim`'s dma-buf socket.
+
+### Geometry and panel fit
+
+* World: `160 x 48 x 24` voxels at `0.25 m/voxel`.
+* Camera: elevated orthographic 30° (`rise = 2`), `px_per_voxel = 4`.
+* World raster: `640 x 360` (`160 x 4 = 640` width; 240 rows terrain + 120 rows sky to reach `raster_height = 360`).
+* Panel transform: rotated 1 quarter turn (90°) and upscaled 3× nearest-neighbour:
+  `360 x 3 = 1080` (panel width) and `640 x 3 = 1920` (panel height).
+  **Fills 100 % of the Waveshare 1080x1920 panel with zero black bars.**
+
+### Measured on the device
+
+Board `tachyon-8968c731`, Adreno 643, `CPUAffinity=4-7`, release build, user `cubarium`:
+
+* **Display flip rate**: 52–54 fps sustained presentation through `cube-screen-shim`.
+* **GPU frame time**: ~9.0 ms/frame (upload 0.08 ms, slab walk 8.99 ms) on Adreno 643.
+* **Host CPU load**: ~35–40 % of one Cortex-A78 core; system >85 % idle.
+* **Memory footprint**: ~49 MiB RSS.
+* **Web viewer**: `--gpu-web-rate 2` serves the live GPU raster at 2 fps to `http://127.0.0.1:7393/` (tunnel with `ssh -N -L 7393:127.0.0.1:7393 root@192.168.68.68`).
+

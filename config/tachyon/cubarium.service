@@ -38,41 +38,22 @@ Environment=RUST_LOG=info
 #
 # `--gpu-web-rate 2` also belongs here rather than in the ExecStart below; see the
 # note on it.
-Environment="CUBARIUM_EXTRA_ARGS=--gpu-art-scale 2"
+Environment="CUBARIUM_EXTRA_ARGS=--gpu-web-rate 2"
 # The four A78s. Never a single core: core_ctl isolates idle big cores and a
 # one-core mask is how a 60 fps frame turns into a 20 fps one.
 CPUAffinity=4-7
 
-# Resume-if-present-else-fresh is what a plain `run` already means: with neither
-# --fresh nor --require-resume, runner::open_world loads the newest snapshot in
-# --state and only founds a new world when the directory holds no snapshot file
-# at all. A directory whose snapshots are present but unreadable is refused by
-# name rather than replaced. See docs/tachyon.md "Resume".
+# `cubarium voxel`: a 160x48x24 voxel world presented through the GPU cutaway
+# renderer straight into scanout dma-bufs for cube-screen-shim.
+# 640x360 raster rotated 90 degrees with 3x upscale fills the 1080x1920 panel exactly.
 #
-# No viewer is here either, but the one to reach for is now `--gpu-web-rate 2`,
-# not `--mirror-web`. `FanOutSink::wants_pixels` is true if any child wants
-# pixels, so mirroring makes the host pay for the whole CPU rasterisation and PNG
-# encode it otherwise skips — which is the entire reason the GPU sink is faster
-# than the CPU one. Measured on this board at 640x360 S=2 with --gpu-art-scale 2,
-# 40 s each, everything else identical:
-#
-#   no viewer              2395 frames / 40.08 s = 59.8 fps
-#   --gpu-web-rate 2       the same 59.8, 100 frames served to a polling client
-#   --mirror-web            661 frames / 40.12 s = 16.5 fps
-#
-# `--gpu-web-rate` serves the same page on the same port from the raster the GPU
-# has already drawn, at the rate given. The two are refused together. To turn the
-# cheap one on, put `--gpu-web-rate 2` beside `--gpu-art-scale 2` in
-# CUBARIUM_EXTRA_ARGS above (or in a `systemctl edit cubarium` drop-in);
-# docs/tachyon.md has the ssh -L line for reaching it.
-ExecStart=/usr/local/bin/cubarium run \
+# `--gpu-web-rate 2` serves the GPU raster to http://127.0.0.1:7393/ twice a second;
+# reach it via `ssh -N -L 7393:127.0.0.1:7393 root@192.168.68.68`.
+ExecStart=/usr/local/bin/cubarium voxel \
+    --config /var/lib/cubarium/voxel.toml \
     --state /var/lib/cubarium/state \
-    --config /var/lib/cubarium/world.toml \
-    --topology ring:640x360 \
-    --world-scale 2 \
     --sink gpu \
     --gpu-target shim \
-    --art /var/lib/cubarium/art \
     --fps 60 \
     $CUBARIUM_EXTRA_ARGS
 

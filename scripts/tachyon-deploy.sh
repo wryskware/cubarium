@@ -1,6 +1,6 @@
 #!/bin/sh
-# Deploy this checkout to the Tachyon: rsync, native release build on the board,
-# install, restart. Runs **on the development host**.
+# Deploy this checkout to the Tachyon: rsync, stop the service, native release
+# build on the board, install, restart. Runs **on the development host**.
 #
 #     ./scripts/tachyon-deploy.sh            # build, install, restart
 #     ./scripts/tachyon-deploy.sh --no-restart
@@ -25,6 +25,18 @@ rsync -a --delete \
       --exclude '/state/' \
       "$REPO/" "$TACHYON:$REMOTE/"
 
+echo "==> sync cargo registry cache"
+rsync -a --update \
+      /home/wrysk/.cargo/registry/cache/ "$TACHYON:/root/.cargo/registry/cache/" 2>/dev/null || true
+rsync -a --update \
+      /home/wrysk/.cargo/registry/index/ "$TACHYON:/root/.cargo/registry/index/" 2>/dev/null || true
+
+# Stop the running binary before compiling: the board's service and native build
+# otherwise compete for the same cores and memory. The service stays stopped if
+# build or install fails; --no-restart intentionally leaves it stopped.
+echo "==> stop cubarium.service before native build"
+ssh "$TACHYON" 'systemctl stop cubarium.service'
+
 # taskset -c 4-7, never a single core: core_ctl isolates idle big cores, and a
 # one-core mask is both a slow build and a misleading one.
 #
@@ -33,15 +45,18 @@ rsync -a --delete \
 # same toolchain to make it an incremental one:
 #     ssh $TACHYON 'cp -a /root/cubarium-gs1/target /root/cubarium-deploy/target'
 echo "==> build on the board (taskset -c 4-7, release)"
-ssh "$TACHYON" "set -eu
+if ! ssh "$TACHYON" "set -eu
     export PATH=/root/.cargo/bin:\$PATH
     export CUBARIUM_BUILD_REV=$BUILD_REV
     cd $REMOTE
     start=\$(date +%s)
-    taskset -c 4-7 cargo build --release -p cubarium --bin cubarium
+    taskset -c 4-7 cargo build --release --offline -p cubarium --bin cubarium
     end=\$(date +%s)
     echo \"build: \$((end - start)) s\"
-    ls -l target/release/cubarium"
+    ls -l target/release/cubarium"; then
+    echo "!! native build failed; cubarium.service remains stopped" >&2
+    exit 1
+fi
 
 echo "==> install"
 ssh "$TACHYON" "$REMOTE/scripts/tachyon-install.sh $REMOTE"
@@ -53,6 +68,8 @@ if [ "$RESTART" = yes ]; then
     # the stop, and `connect_when_free` retries for 4 s on top of that.
     ssh "$TACHYON" 'systemctl restart cubarium.service && sleep 5 &&
         systemctl --no-pager --full status cubarium.service | head -12'
+else
+    echo "==> leaving cubarium.service stopped (--no-restart)"
 fi
 
 echo "==> done; scripts/tachyon-status.sh for the full picture"

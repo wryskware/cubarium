@@ -16,6 +16,9 @@ task list.
 
 - [Terrain and ecosystem proposal](terrain-and-ecosystem-proposal-2026-09-16.md)
   — lead planning document: shallow voxel ringworld first, cube/panel later.
+- [Terrain generation across scales](terrain-generation-plan-2026-09-21.md)
+  — proposed staged noise, erosion, settled water, habitat-aware founders,
+  regional patch selection and larger live worlds with pan/zoom.
 - [Ecological-niches reconsideration](ecological-niches-reconsideration-2026-09-15.md)
   — food identity, paid growth, specialization with a cost.
 - [Theoretical biosphere](theoretical-biosphere-2026-09-16.md) and the
