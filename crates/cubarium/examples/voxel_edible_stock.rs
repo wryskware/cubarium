@@ -42,9 +42,9 @@ use cubarium::voxel::install_default_founders;
 use cubarium::voxel::scene;
 use cubarium_voxel::{Command as WorldCommand, VoxelView};
 use cubarium_voxel_fauna::{
-    ConeHit, Fauna, FaunaConfig, Founder, Manifest, Pose, Senses, SightMap, TICK_HZ, climb_voxels,
-    eye_origin_m, layer_columns, mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg,
-    reachable_layers_of, standable_faces, walkable_components,
+    ConeHit, Diet, Fauna, FaunaConfig, Founder, Manifest, Pose, Senses, SightMap, TICK_HZ,
+    climb_voxels, eye_origin_m, layer_columns, mouth_columns_from_face, mouth_crown_layers_at,
+    ray_direction_deg, reachable_layers_of, standable_faces, walkable_components,
 };
 use cubarium_voxel_flora::{Flora, FloraConfig, Site, Species as Plant};
 use cubarium_voxel_sim::{Sim, SimConfig};
@@ -350,6 +350,11 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
         if stand.foliage <= 0.0 {
             continue;
         }
+        // Permission, not geometry (decisions §3): a glowcap cap standing in a
+        // browser's band is reachable fungal tissue and not browser food, so it is
+        // counted in the standing foliage and never in the reach. It is the shredder's
+        // food and is reported as such in the detritus block below.
+        let edible = Diet::Vascular.accepts(fv.config.species(stand.species).trophic);
         let mut counted_site = false;
         for layer in fv.layers(stand) {
             if !(layer.stock > 0.0) {
@@ -364,7 +369,7 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
             let mut any = false;
             let mut connected = false;
             let mut connected_seeded = false;
-            for column in &columns {
+            for column in columns.iter().filter(|_| edible) {
                 for &i in reach_map.get(column).map(Vec::as_slice).unwrap_or(&[]) {
                     let face = faces[i];
                     let band = mouth_crown_layers_at(face.y, &browser_body, v);

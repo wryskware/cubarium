@@ -67,7 +67,7 @@ use cubarium::voxel::install_default_founders;
 use cubarium::voxel::scene;
 use cubarium_voxel::{Command as WorldCommand, VoxelView, World};
 use cubarium_voxel_fauna::{
-    Animal, ConeCensus, ConeHit, Departure, Fauna, FaunaConfig, Founder, Senses, TICK_HZ,
+    Animal, ConeCensus, ConeHit, Departure, Fauna, FaunaConfig, Food, Founder, Senses, TICK_HZ,
     browser_cone_census, browser_cone_readings, browser_mouth_candidates, effective_config,
 };
 use cubarium_voxel_flora::{Flora, FloraConfig, FloraView, Species as Plant};
@@ -336,6 +336,10 @@ fn main() {
     );
     println!("HEADER,MINX,tick,minute,lineage,bites,assimilated,removed,max_dist_m,births_total");
     println!("HEADER,FOOD,tick,minute,litter_organic,litter_sites,foliage,foliage_stands");
+    // What each food class of the standing stock is, and what has been bitten out of
+    // it: the shredder's three detritus foods and the browser's foliage
+    // (`design/handoffs/voxel-diets-2026-09-22.md`, deliverable 3).
+    println!("HEADER,DIET,tick,minute,food,standing,bites,eaten");
     println!(
         "HEADER,BODY,tick,minute,id,lineage,age_ticks,body,reserve,dist_m,reach_m,in_reach,nearest_species,nearest_foliage,crown_in_mouth,same_height_supports_2m,pose_x,pose_z,travelled_m,exits,held_forward,held_turn,held_feed,state,heading_rad,ahead"
     );
@@ -1173,6 +1177,7 @@ fn report_minute(
         "FOOD,{},{minute},{litter:.4},{sites},{foliage:.4},{stands}",
         minute * TICKS_PER_MIN
     );
+    report_diet(minute, &fv, &av);
     report_plants(minute, &view, &fv, &av);
     report_cone(minute, &view, &fv, &av);
     report_regrowth(minute, crown_history);
@@ -1211,6 +1216,43 @@ fn observe_crowns(sim: &Sim, history: &mut CrownHistory) {
             state.cropped = false;
         }
         state.last_foliage = stand.foliage;
+    }
+}
+
+/// **Bites by food class**, against the standing stock of each (decisions §3). The
+/// shredder eats litter, glowcap cap tissue and carrion; the browser eats vascular
+/// foliage and nothing fungal, so `foliage` here excludes the cap.
+fn report_diet(minute: u64, fv: &FloraView<'_>, av: &cubarium_voxel_fauna::FaunaView<'_>) {
+    let fungal = |s: &cubarium_voxel_flora::Stand| {
+        matches!(
+            fv.config.species(s.species).trophic,
+            cubarium_voxel_flora::Trophic::Saprotroph
+        )
+    };
+    for food in Food::ALL {
+        let standing: f64 = match food {
+            Food::Litter => fv.ground.iter().map(|g| g.litter).sum(),
+            Food::Carrion => fv.ground.iter().map(|g| g.carrion).sum(),
+            Food::CapTissue => fv
+                .stands
+                .iter()
+                .filter(|s| fungal(s))
+                .map(|s| s.foliage)
+                .sum(),
+            Food::Foliage => fv
+                .stands
+                .iter()
+                .filter(|s| !fungal(s))
+                .map(|s| s.foliage)
+                .sum(),
+        };
+        println!(
+            "DIET,{},{minute},{},{standing:.6},{},{:.7}",
+            minute * TICKS_PER_MIN,
+            food.name(),
+            av.ledger.bites_by_food[food.index()],
+            av.ledger.eaten_by_food[food.index()],
+        );
     }
 }
 
@@ -1378,6 +1420,16 @@ fn summary(sim: &Sim, ticks: u64) {
             species.name(),
             l.bites_by_plant[i],
             l.eaten_by_plant[i],
+        );
+    }
+    // The other end of the same transfer: which food class each bite came out of
+    // (decisions §3). `sum(bites_by_food) == bites` by construction.
+    for food in Food::ALL {
+        println!(
+            "SUMMARY,{ticks},food_{},bites={} eaten={:.7}",
+            food.name(),
+            l.bites_by_food[food.index()],
+            l.eaten_by_food[food.index()],
         );
     }
     // The two ledgers, on the world that actually ran: an escrow and a clutch are paid

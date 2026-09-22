@@ -56,6 +56,25 @@ disclosed default rather than a tuned one. The same caveat applies to the
 contact receptor's change of meaning in package 1a
 (`design/handoffs/voxel-founder-step-2026-09-22.md`).
 
+**2026-09-22, package 3** (`design/handoffs/voxel-diets-2026-09-22.md`): both centres
+still load. Nothing about the observation *shape* moved — same 23 and 37 inputs, same
+module ids, slots, widths, channel order and taste-resistance mapping, so both digests
+are the ones these files carry and a test pins them
+(`crates/cubarium-voxel-fauna/tests/diets.rs`). What moved is what two of the
+shredder's channels **mean**, and what both animals' mouths accept:
+
+| channel | trained with | the model now runs |
+| --- | --- | --- |
+| `Chem(litter)` (shredder) | a diffused field whose source at a face is that face's **litter** stock | the same field, same emission curve, transport, decay and threshold, whose source is **litter + carrion + glowcap cap tissue** — the shredder's three foods (decisions §3) |
+| `Taste(1)` (shredder) | the litter under the mouth, or bare ground | the richest of the three foods under the mouth, or bare ground; all three read the one soft resistance class the schema calls `litter` |
+| `Taste(1)` (browser) | the foliage of any stand in the band, glowcap included | the foliage of any **vascular** stand in the band; a glowcap cap is fungal tissue and is no longer offered to a browser's mouth at all |
+
+On a world holding only litter the shredder's cue is value-for-value the field it was,
+so the change is invisible until there is a corpse or a cap. Where there is one, a
+policy selected against a litter-only cue is being asked to read a cue that means more
+than litter: **the retrain is package 5**, and until it lands these centres remain the
+disclosed default rather than a tuned one, exactly as for the body anchors above.
+
 **A centre is replaced, never edited.** These files are the trainer's own output,
 copied byte for byte; they validate themselves against this build (schema token,
 lineage, weight count, finite weights, and the founder manifest digest), and an
