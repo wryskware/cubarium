@@ -803,3 +803,13 @@ gained the stage-2 art-pass commits (through 262c727); no file overlap, the
 merge is clean, but it is a merge commit now, not a fast-forward. Wrysk
 authorised a cheap thread to merge and deploy the Tachyon panel once cadence
 landed; dispatched after this note.
+
+## Merged and deployed — 2026-09-21
+
+Merge commit 2bcdf61 on `main` (no conflicts; Wrysk's uncommitted deploy
+edits untouched). Deploy script ran clean: board build 139 s, binary and
+`voxel.toml` installed. The panel then crash-looped as `docs/tachyon.md`
+documents: five schema-4 worlds in `/var/lib/cubarium/state` are refused
+("schema 4 is not 12") and a state directory with refused snapshots founds
+no new world by design. Moving them aside is a remote write the agent
+sandbox refused; Wrysk clears the directory and restarts the service.
