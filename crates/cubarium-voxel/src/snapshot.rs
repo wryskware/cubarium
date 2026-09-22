@@ -1,7 +1,7 @@
 //! Save/load as postcard bytes behind a schema tag. A different tag is refused; there
 //! is no migration, ever.
 
-use anyhow::{Context, bail};
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::World;
@@ -42,10 +42,40 @@ pub fn encode(world: &World) -> Vec<u8> {
     .expect("a World always serializes")
 }
 
+/// A snapshot this build cannot read because the format moved on.
+///
+/// Its own type, so a caller can tell **stale** from **damaged** without reading the
+/// message: a world of an older format holds nothing that can be recovered — the standing
+/// rule is fresh, never migrate — while a truncated or corrupt one is a damaged world and
+/// has to be named rather than replaced. The text is unchanged; only the type is new.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SchemaMismatch {
+    /// The schema the file claims.
+    pub found: u32,
+    /// The schema this build writes and reads.
+    pub expected: u32,
+}
+
+impl std::fmt::Display for SchemaMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "voxel snapshot schema {} is not {}; start a fresh world",
+            self.found, self.expected
+        )
+    }
+}
+
+impl std::error::Error for SchemaMismatch {}
+
 pub fn decode(bytes: &[u8]) -> anyhow::Result<World> {
     let tag: u32 = postcard::from_bytes(bytes).context("not a voxel world snapshot")?;
     if tag != SCHEMA {
-        bail!("voxel snapshot schema {tag} is not {SCHEMA}; start a fresh world");
+        return Err(SchemaMismatch {
+            found: tag,
+            expected: SCHEMA,
+        }
+        .into());
     }
     let mut env: Envelope = postcard::from_bytes(bytes).context("corrupt voxel world snapshot")?;
     env.world

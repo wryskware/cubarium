@@ -354,6 +354,10 @@ fn load_or_create_world(args: &Voxel, cfg: &VoxelConfig) -> Result<(World, Strin
             }
             candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
             if !candidates.is_empty() {
+                // A refusal is *stale* when the file is a perfectly good snapshot of a
+                // format this build no longer speaks, and *damaged* when it is anything
+                // else. Told apart by the error's own type, never by its text.
+                let mut stale: Vec<(PathBuf, u32)> = Vec::new();
                 for (tick, _, cand_path) in &candidates {
                     match std::fs::read(cand_path) {
                         Ok(bytes) => match World::load(&bytes) {
@@ -370,6 +374,10 @@ fn load_or_create_world(args: &Voxel, cfg: &VoxelConfig) -> Result<(World, Strin
                                     "cubarium voxel: skipping corrupt snapshot {}: {e}",
                                     cand_path.display()
                                 );
+                                if let Some(m) = e.downcast_ref::<cubarium_voxel::SchemaMismatch>()
+                                {
+                                    stale.push((cand_path.clone(), m.found));
+                                }
                             }
                         },
                         Err(e) => {
@@ -380,11 +388,39 @@ fn load_or_create_world(args: &Voxel, cfg: &VoxelConfig) -> Result<(World, Strin
                         }
                     }
                 }
-                bail!(
-                    "{} snapshot file(s) are present in {} and none of them loaded",
-                    candidates.len(),
-                    path.display()
-                );
+                // **Stale is not damaged.** A directory whose every snapshot is simply of
+                // an older format holds nothing that can be recovered — the standing rule
+                // is fresh, never migrate — and refusing to start leaves the panel showing
+                // the last frame it drew until somebody ssh's in. That is exactly what it
+                // did: five worlds of schema 13 against a build that speaks 15, and a
+                // crash loop (Wrysk, 2026-09-21, who does not want them kept). So they are
+                // discarded, loudly, and a fresh world founded. Anything else still
+                // refuses by name below.
+                if stale.len() == candidates.len() {
+                    let mut had: Vec<u32> = stale.iter().map(|(_, n)| *n).collect();
+                    had.sort_unstable();
+                    had.dedup();
+                    let names: Vec<String> = had.iter().map(|n| n.to_string()).collect();
+                    for (p, _) in &stale {
+                        std::fs::remove_file(p).with_context(|| {
+                            format!("discarding the stale snapshot {}", p.display())
+                        })?;
+                    }
+                    eprintln!(
+                        "cubarium voxel: discarded {} snapshot(s) of schema {} in {}; \
+                         founding a fresh world (schema {})",
+                        stale.len(),
+                        names.join(", "),
+                        path.display(),
+                        cubarium_voxel::snapshot::SCHEMA,
+                    );
+                } else {
+                    bail!(
+                        "{} snapshot file(s) are present in {} and none of them loaded",
+                        candidates.len(),
+                        path.display()
+                    );
+                }
             }
             eprintln!(
                 "cubarium voxel: no loadable snapshot in {}; creating a new world",
@@ -2173,6 +2209,91 @@ mod tests {
             !cubarium_voxel::walk::around_the_ring(&build(true), WALK_STEP_M),
             "a three-voxel wall across the strip is not a step"
         );
+    }
+
+    /// **The panel's own case.** Its unit runs `cubarium voxel`, its worlds are
+    /// `world-<tick>.voxel`, and it crash-looped holding five snapshots of schema 13
+    /// against a binary that speaks 15: "skipping corrupt snapshot … voxel snapshot
+    /// schema 13 is not 15" five times over, then "none of them loaded". A world of a
+    /// format this build cannot read is **stale**, not damaged — nothing migrates — so it
+    /// is discarded and a fresh world founded. Anything else still refuses by name.
+    #[test]
+    fn stale_voxel_snapshots_are_discarded_and_damaged_ones_still_refuse() {
+        let dir = std::env::temp_dir().join(format!("cubarium-voxel-p-{}", std::process::id()));
+        let cfg = VoxelConfig::default();
+        let args = |state: &Path| crate::cli::Voxel {
+            config: None,
+            sink: crate::cli::VoxelSinkArg::Web,
+            scene: crate::cli::VoxelSceneArg::Generated,
+            seed: Some(1),
+            arena: None,
+            controller: crate::cli::VoxelControllerArg::Heuristic,
+            policy: None,
+            founder_policy: Vec::new(),
+            founder_heuristic: Vec::new(),
+            arena_seed: 1,
+            arena_diagnostics: false,
+            empty: false,
+            seconds: 0.0,
+            speed: 1.0,
+            load: Some(state.to_path_buf()),
+            out: PathBuf::from("captures"),
+            every: 30,
+            fps: 60,
+            web_port: 7393,
+            gpu_target: None,
+            gpu_capture: None,
+            gpu_web_rate: 0.0,
+            gpu_roof_walk: false,
+        };
+        // A snapshot of a schema this build does not speak: postcard's varint for the tag.
+        let stale = |n: u8| vec![n, 0, 0, 0, 0, 0, 0, 0];
+
+        let state = dir.join("stale");
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::write(state.join("world-100.voxel"), stale(13)).unwrap();
+        std::fs::write(state.join("world-200.voxel"), stale(13)).unwrap();
+        let (_, label, resumed) =
+            load_or_create_world(&args(&state), &cfg).expect("a stale directory founds a world");
+        assert!(!resumed, "nothing was resumed: {label}");
+        assert!(
+            std::fs::read_dir(&state).unwrap().count() == 0,
+            "and the stale files are gone"
+        );
+
+        // A truncated file is a damaged world: refused by name, and left where it is.
+        let damaged = dir.join("damaged");
+        std::fs::create_dir_all(&damaged).unwrap();
+        std::fs::write(damaged.join("world-100.voxel"), [0xffu8; 3]).unwrap();
+        let err = match load_or_create_world(&args(&damaged), &cfg) {
+            Ok(_) => panic!("a damaged world must refuse"),
+            Err(e) => format!("{e:#}"),
+        };
+        assert!(err.contains("none of them loaded"), "{err}");
+        assert_eq!(std::fs::read_dir(&damaged).unwrap().count(), 1, "kept");
+
+        // One readable snapshot beside a stale one: the readable one is resumed and both
+        // files stay. Discarding is only for a directory with nothing left to read.
+        let mixed = dir.join("mixed");
+        std::fs::create_dir_all(&mixed).unwrap();
+        let good = World::new(cubarium_voxel::Config {
+            width: 16,
+            height: 12,
+            depth: 2,
+            ..cubarium_voxel::Config::default()
+        });
+        std::fs::write(mixed.join("world-50.voxel"), good.save()).unwrap();
+        std::fs::write(mixed.join("world-100.voxel"), stale(13)).unwrap();
+        let (_, label, resumed) =
+            load_or_create_world(&args(&mixed), &cfg).expect("the readable snapshot resumes");
+        assert!(resumed, "{label}");
+        assert_eq!(
+            std::fs::read_dir(&mixed).unwrap().count(),
+            2,
+            "and nothing was deleted"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// A config file whose `[world]` no world can be built from is an error, not a panic:
