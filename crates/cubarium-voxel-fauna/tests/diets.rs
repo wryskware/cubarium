@@ -258,14 +258,8 @@ fn a_shredder_standing_on_carrion_eats_it_and_the_pool_conserves() {
 fn a_browser_refuses_the_glowcap_and_takes_the_rosette() {
     let world = flat_world();
     let mut fungal = Flora::new(FloraConfig::default());
-    let g = seed(
-        &mut fungal,
-        &world,
-        2,
-        2,
-        Plant::Glowcap,
-        fungal.config().species(Plant::Glowcap).wood_max,
-    );
+    let cap_wood_max = fungal.config().species(Plant::Glowcap).wood_max;
+    let g = seed(&mut fungal, &world, 2, 2, Plant::Glowcap, cap_wood_max);
     let mut fauna = Fauna::new(FaunaConfig::default());
     let id = feeding(&mut fauna, &world, Founder::Browser, 2, 2);
     assert_eq!(
@@ -295,13 +289,14 @@ fn a_browser_refuses_the_glowcap_and_takes_the_rosette() {
 
     // The same browser on a vascular stand of the same shape eats it.
     let mut vascular = Flora::new(FloraConfig::default());
+    let crown_wood_max = vascular.config().species(Plant::Bloomcrown).wood_max;
     let b = seed(
         &mut vascular,
         &world,
         2,
         2,
         Plant::Bloomcrown,
-        vascular.config().species(Plant::Bloomcrown).wood_max,
+        crown_wood_max,
     );
     let mut fauna = Fauna::new(FaunaConfig::default());
     let _ = feeding(&mut fauna, &world, Founder::Browser, 2, 2);
@@ -326,7 +321,13 @@ fn a_browser_refuses_the_glowcap_and_takes_the_rosette() {
         fauna.view().ledger.bites_by_food
     );
     assert!(
-        vascular.view().layers_at(b).next().expect("a rosette").stock < rosette_before,
+        vascular
+            .view()
+            .layers_at(b)
+            .next()
+            .expect("a rosette")
+            .stock
+            < rosette_before,
         "the rosette was cropped"
     );
 }

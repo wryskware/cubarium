@@ -358,7 +358,7 @@ pub fn browser_mouth_foliage(
         return None;
     }
     let cols = body::mouth_columns(view, &animal.pose, &geometry);
-    body::mouth_foliage_stand(flora, view, &cols, animal.site.y, &geometry)
+    body::mouth_foliage_stand(flora, view, &cols, animal.site.y, &geometry, Diet::Vascular)
 }
 
 /// The physical geometry of one animal right now, from its lineage's physiology and its
@@ -387,6 +387,7 @@ pub fn browser_mouth_candidates(
         &cols,
         animal.site.y,
         &geometry,
+        Diet::Vascular,
     ))
 }
 
@@ -1157,6 +1158,92 @@ impl Departure {
     }
 }
 
+/// Which **food class** a bite came out of (decisions §3,
+/// `design/handoffs/voxel-organism-decisions-2026-09-21.md`).
+///
+/// A food class is not a species and not a pool: it is the kind of tissue a mouth took,
+/// which is what the diet rules and the per-class assimilation yields are written
+/// against. The browser has one, `Foliage`; the shredder has three, and its three are
+/// the detritus the cue field now sums.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Food {
+    /// The ground litter pool at the standing face — the shredder's original and only
+    /// food ([`cubarium_voxel_flora::Flora::take_litter`]).
+    Litter,
+    /// A glowcap cap: the foliage of a [`cubarium_voxel_flora::Trophic::Saprotroph`]
+    /// stand whose layer intersects the mouth band, taken as an ordinary foliage
+    /// withdrawal. Fungal tissue, which is why it is not the browser's.
+    CapTissue,
+    /// The ground carrion pool at the standing face
+    /// ([`cubarium_voxel_flora::Flora::take_carrion`]). Carrion had decomposition and no
+    /// consumer before this.
+    Carrion,
+    /// The foliage of a vascular ([`cubarium_voxel_flora::Trophic::Photo`]) stand: the
+    /// browser's whole diet, and nothing the shredder eats.
+    Foliage,
+}
+
+impl Food {
+    pub const ALL: [Food; 4] = [Food::Litter, Food::CapTissue, Food::Carrion, Food::Foliage];
+    pub const COUNT: usize = Food::ALL.len();
+
+    /// Index into a per-food array, in [`Food::ALL`] order.
+    pub fn index(self) -> usize {
+        match self {
+            Food::Litter => 0,
+            Food::CapTissue => 1,
+            Food::Carrion => 2,
+            Food::Foliage => 3,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Food::Litter => "litter",
+            Food::CapTissue => "cap_tissue",
+            Food::Carrion => "carrion",
+            Food::Foliage => "foliage",
+        }
+    }
+}
+
+/// Which stands' foliage a mouth accepts (decisions §3).
+///
+/// Reach and permission are separate tests (audit §2): a glowcap cap standing in a
+/// browser's band is reachable and is not food. This is the permission, applied inside
+/// the one scan both mouths run, so a stand a mouth may not eat is never offered to it
+/// as taste either.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Diet {
+    /// Every vascular species' foliage: the browser's, keeping today's broad acceptance
+    /// across bloomcrown, umbrellafrond, springturf, velvetpad and stonecushion.
+    Vascular,
+    /// Saprotroph tissue only: the shredder's glowcap cap.
+    Fungal,
+    /// No permission test at all. A diagnostic and observer scan of what physically
+    /// stands in a band, which is a geometry question and not a diet one.
+    Any,
+}
+
+impl Diet {
+    /// Whether this diet accepts a species with that income rule.
+    pub fn accepts(self, trophic: cubarium_voxel_flora::Trophic) -> bool {
+        match self {
+            Diet::Vascular => matches!(trophic, cubarium_voxel_flora::Trophic::Photo),
+            Diet::Fungal => matches!(trophic, cubarium_voxel_flora::Trophic::Saprotroph),
+            Diet::Any => true,
+        }
+    }
+
+    /// The diet a lineage's mouth runs.
+    pub fn of(founder: Founder) -> Diet {
+        match founder {
+            Founder::Blind => Diet::Fungal,
+            Founder::Browser => Diet::Vascular,
+        }
+    }
+}
+
 /// Every unit of organic matter, mineral and energy that has crossed this layer's
 /// boundary, and the counters of what happened.
 ///
@@ -1287,6 +1374,16 @@ pub struct FaunaLedger {
     /// appears in neither.
     pub bites_by_founder: [u64; Founder::COUNT],
     pub assimilated_by_founder: [f64; Founder::COUNT],
+    /// Bites and the **gross** organic matter they took, by the [`Food`] class the
+    /// mouth took them from.
+    ///
+    /// The third view of the same transfer, and the one the diets package needed: a
+    /// shredder's bites split three ways say whether carrion and cap tissue are food it
+    /// actually finds or only food it is permitted. `eaten_by_food` is gross, like
+    /// `eaten_by_plant` and unlike `assimilated_by_founder`, so it sums to
+    /// `eaten_organic_in` over every bite this layer took.
+    pub bites_by_food: [u64; Food::COUNT],
+    pub eaten_by_food: [f64; Food::COUNT],
     /// Steps taken, one voxel each.
     pub steps: u64,
 }
@@ -1894,11 +1991,16 @@ impl Fauna {
     /// One withdrawal on the boundary: the three `eaten_*` flows, and the same
     /// [`Taken`] back, so what this ledger books and what the animal received are one
     /// value and cannot drift from the plant layer's `consumed_*`.
-    fn book_eaten(&mut self, taken: Taken) -> Taken {
+    fn book_eaten(&mut self, taken: Taken, food: Food) -> Taken {
         self.ledger.eaten_organic_in += taken.organic;
         self.ledger.eaten_mineral_in += taken.mineral;
         self.ledger.eaten_energy_in += taken.energy;
         self.ledger.bites += 1;
+        // The same addend, at the same point, into the per-class split: so
+        // `sum(eaten_by_food) == eaten_organic_in` and `sum(bites_by_food) == bites`
+        // hold for every run, the way the respiration splits do.
+        self.ledger.bites_by_food[food.index()] += 1;
+        self.ledger.eaten_by_food[food.index()] += taken.organic;
         taken
     }
 

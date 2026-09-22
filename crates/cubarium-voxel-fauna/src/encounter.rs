@@ -31,7 +31,7 @@ use cubarium_voxel_flora::{FloraView, Site, Stand};
 
 use crate::body::{Body, has_headroom, mouth_columns, mouth_crown_layers};
 use crate::senses::{self, ConeOccupancy};
-use crate::{ConeHit, FaunaView, Pose};
+use crate::{ConeHit, Diet, FaunaView, Pose};
 
 /// How many headings a face is asked about when the question is "from *some* pose here".
 ///
@@ -128,15 +128,21 @@ pub fn band_crown_layers(standing_y: u32, voxel_m: f64, ceiling_m: f64) -> Range
     if hi < lo { empty } else { lo..=hi }
 }
 
-/// Every foliage-bearing stand whose crown cells sit at a layer in `layers` and cover one
-/// of `cols` — the live mouth's own scan, with the layer range handed in.
+/// Every foliage-bearing stand whose crown cells sit at a layer in `layers`, covers one
+/// of `cols`, and whose tissue `diet` accepts — the live mouth's own scan, with the
+/// layer range and the diet handed in.
+///
+/// An observer measuring what physically stands in a band asks with [`Diet::Any`]; a
+/// mouth asks with its own ([`Diet::of`]), because since decisions §3 reach and
+/// permission are different questions and a glowcap cap answers them differently.
 pub fn foliage_stands_in_layers(
     fv: &FloraView<'_>,
     view: &VoxelView<'_>,
     cols: &[(i64, u32)],
     layers: &RangeInclusive<i64>,
+    diet: Diet,
 ) -> Vec<(Site, f64)> {
-    crate::body::foliage_stands_touching(fv, view, cols, layers)
+    crate::body::foliage_stands_touching(fv, view, cols, layers, diet)
 }
 
 /// What a mouth over `cols` whose band selects `layers` can take from one stand,
@@ -378,11 +384,12 @@ mod tests {
                         heading_rad: heading,
                     };
                     let cols = mouth_columns_at(&view, &pose, &body);
-                    let live = mouth_foliage_stand(&fv, &view, &cols, 2, &body);
-                    let shared = foliage_stands_in_layers(&fv, &view, &cols, &layers);
+                    let live = mouth_foliage_stand(&fv, &view, &cols, 2, &body, Diet::Vascular);
+                    let shared =
+                        foliage_stands_in_layers(&fv, &view, &cols, &layers, Diet::Vascular);
                     assert_eq!(
                         shared,
-                        mouth_foliage_stands(&fv, &view, &cols, 2, &body),
+                        mouth_foliage_stands(&fv, &view, &cols, 2, &body, Diet::Vascular),
                         "the diagnostic list is the shared scan"
                     );
                     let best =

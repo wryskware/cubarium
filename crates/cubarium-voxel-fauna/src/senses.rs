@@ -1,20 +1,23 @@
-//! **Phase-one sensing**: the litter cue field, the chem/light receptors, the material
+//! **Phase-one sensing**: the detritus cue field, the chem/light receptors, the material
 //! cone, and the shared occupancy query they read (`design/voxel-senses.md` §1, §3, §4;
 //! `design/voxel-senses-phase1-plan.md`, "Initial cue field settings").
 //!
-//! Phase one has exactly **one cue channel**: litter. Its field is a set of support-layer
+//! Phase one has exactly **one cue channel**. Its field is a set of support-layer
 //! nodes — exposed support faces, keyed by the cell of the solid voxel whose top face they
 //! are — connected only to same-height orthogonal neighbours through the open near-surface
 //! medium. Roof and floor never share a node, and there is no vertical transport. Source
-//! strength is the **actual litter stock** per site, so a depleted patch stops emitting
-//! while its residue decays.
+//! strength is the **actual detritus stock** per site — litter, carrion and glowcap cap
+//! tissue, the shredder's three foods (decisions §3) — so a depleted patch stops emitting
+//! while its residue decays. It was the litter stock alone until 2026-09-22, and on a
+//! world holding only litter it still is; the observation channel keeps the manifest id
+//! `Chem(litter)` and its slot, because those are in the trained-policy digest.
 //!
 //! # The update, in one place
 //!
 //! Every [`UPDATE_TICKS`] ticks (0.5 s at 20 Hz), in this fixed order — the same order in
 //! settling and live updates:
 //!
-//! 1. **Emission**: each node whose site holds `litter` gains `min(litter / M_EMIT, 1) ·
+//! 1. **Emission**: each node whose site holds detritus gains `min(detritus / M_EMIT, 1) ·
 //!    UPDATE_S` cue units.
 //! 2. **Decay**: every worked node decays with half-life [`HALF_LIFE_S`].
 //! 3. **Diffusion**: a convex nearest-neighbour mix of [`DIFFUSE_FRACTION`]; a missing or
@@ -47,7 +50,7 @@
 use std::collections::HashMap;
 
 use cubarium_voxel::VoxelView;
-use cubarium_voxel_flora::{FloraView, Site};
+use cubarium_voxel_flora::{FloraView, Site, Trophic};
 
 use crate::Pose;
 use crate::body::M_EMIT;
@@ -152,15 +155,44 @@ impl Connectivity {
     }
 }
 
-/// The litter cue field: one value per support-layer node.
+/// The **detritus** cue field: one value per support-layer node.
+///
+/// Named for what it carries since decisions §3: the source at a face is the sum of the
+/// shredder's three foods there — litter, carrion and glowcap cap tissue — with the
+/// litter field's own emission curve, transport, decay and threshold
+/// (`design/handoffs/voxel-diets-2026-09-22.md`). On a world holding only litter it is
+/// the litter field it has always been, value for value.
+///
+/// The observation channel it feeds keeps its manifest id `Chem(litter)`, its slot and
+/// its width, because those are inside the trained-policy digest and the shipped
+/// centres must keep loading. The retrain (package 5) owns the meaning change; see
+/// `crates/cubarium/assets/policies/README.md`.
 #[derive(Clone, Debug, Default)]
-struct LitterField {
+struct DetritusField {
     /// Cue units per node cell.
     value: HashMap<usize, f64>,
     graph: Connectivity,
 }
 
-impl LitterField {
+/// The detritus stock at one support face: the sum of the three foods a shredder can
+/// take there, and therefore the emitter strength.
+///
+/// Dead wood is deliberately not in it. A log is a glowcap's substrate and not a
+/// shredder's food, so a cue over one would send the animal to something it cannot eat.
+fn detritus_at(fv: &FloraView<'_>, site: Site) -> f64 {
+    let pools = fv.ground_at(site).map_or(0.0, |g| g.litter + g.carrion);
+    let caps: f64 = fv
+        .stands
+        .iter()
+        .filter(|s| {
+            s.site == site && matches!(fv.config.species(s.species).trophic, Trophic::Saprotroph)
+        })
+        .map(|s| s.foliage)
+        .sum();
+    pools + caps
+}
+
+impl DetritusField {
     fn ensure_graph(&mut self, view: &VoxelView<'_>) {
         if !self.graph.current(view) {
             let old_nodes: std::collections::HashSet<usize> =
@@ -227,13 +259,27 @@ impl LitterField {
         let c = view.config;
         let graph = &self.graph;
 
-        // Sources: every site with litter. Deterministic (the flora's ground is site-sorted).
+        // Sources: every site holding detritus — litter or carrion on the ground, or a
+        // fungal cap standing on it. Deterministic (the flora's ground and stands are
+        // both site-sorted); the sort and dedup below make the union one ordered set.
         let mut sources: Vec<usize> = Vec::new();
-        for g in fv.ground.iter().filter(|g| g.litter > 0.0) {
-            let cell = c.index(g.site.x as i64, g.site.y, g.site.z);
+        let push = |site: Site, sources: &mut Vec<usize>| {
+            let cell = c.index(site.x as i64, site.y, site.z);
             if graph.has(cell) {
                 sources.push(cell);
             }
+        };
+        for g in fv
+            .ground
+            .iter()
+            .filter(|g| g.litter > 0.0 || g.carrion > 0.0)
+        {
+            push(g.site, &mut sources);
+        }
+        for stand in fv.stands.iter().filter(|s| {
+            s.foliage > 0.0 && matches!(fv.config.species(s.species).trophic, Trophic::Saprotroph)
+        }) {
+            push(stand.site, &mut sources);
         }
         sources.sort_unstable();
         sources.dedup();
@@ -262,10 +308,8 @@ impl LitterField {
             let old = self.value.get(&cell).copied().unwrap_or(0.0);
             let emit = if sources.binary_search(&cell).is_ok() {
                 let (x, y, z) = c.coords(cell);
-                let litter = fv
-                    .ground_at(Site { x: x as u32, y, z })
-                    .map_or(0.0, |g| g.litter);
-                (litter / M_EMIT).min(1.0) * UPDATE_S
+                let stock = detritus_at(fv, Site { x: x as u32, y, z });
+                (stock / M_EMIT).min(1.0) * UPDATE_S
             } else {
                 0.0
             };
@@ -322,11 +366,11 @@ struct ChemTrend {
     smoothed: f64,
 }
 
-/// Per-arena sensory state: the settled litter field plus the per-body trend stores, which
+/// Per-arena sensory state: the settled detritus field plus the per-body trend stores, which
 /// are episode-private (a fresh arena starts a fresh `Senses`).
 #[derive(Clone, Debug, Default)]
 pub struct Senses {
-    field: LitterField,
+    field: DetritusField,
     chem_trend: HashMap<u64, ChemTrend>,
 }
 
@@ -1080,8 +1124,8 @@ mod tests {
         senses.settle(&v, &fv);
         assert_eq!(
             senses.sample_cue(&v, &probe, 2),
-            None,
-            "a log raises no detritus cue"
+            Some(0.0),
+            "a log is a valid support with no detritus cue on it"
         );
     }
 

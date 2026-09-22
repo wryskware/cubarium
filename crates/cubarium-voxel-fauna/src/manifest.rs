@@ -287,6 +287,19 @@ const MODULE_TASTE1: Module = Module {
 
 const CHEM_LITTER_CHANNELS: [&str; 3] = ["response", "trend", "valid"];
 
+/// The shredder's one diffused cue channel.
+///
+/// **The id says `litter`; since 2026-09-22 the field carries detritus** — litter,
+/// carrion and glowcap cap tissue, the shredder's three foods (decisions §3,
+/// `design/handoffs/voxel-diets-2026-09-22.md`; the field is
+/// [`crate::senses`]'s `DetritusField`). The name, the slot, the width and the channel
+/// order are unchanged and stay unchanged, because they are inside the trained-policy
+/// digest and the shipped centres must keep loading: renaming the module would refuse
+/// them, and this package's rule is that no sensing *shape* moves.
+///
+/// So this is a **meaning change on an unchanged channel**, and the scheduled retrain
+/// (package 5) owns it. On a world holding only litter the value is what it always was.
+/// `crates/cubarium/assets/policies/README.md` records it beside the other two.
 const MODULE_CHEM_LITTER: Module = Module {
     name: "Chem(litter)",
     offset: 18,
@@ -403,7 +416,12 @@ const BROWSER_TUNINGS: Tunings = Tunings {
 };
 
 /// The fixed material-response resistance mapping a probing littershredder mouth feels:
-/// soft litter, firmer ground.
+/// soft detritus, firmer ground.
+///
+/// The soft class is still called `litter` and still reads 0.2 — the mapping is inside
+/// the manifest digest — but since decisions §3 it is the class of all three detritus
+/// foods, because a mouth on a corpse or a cap is not on bare ground. Adding a class
+/// would have moved the digest and refused the shipped centre.
 const BLIND_TASTE_RESISTANCES: [(&str, f64); 2] = [("litter", 0.2), ("ground", 0.5)];
 
 /// The browser's mouth mapping: pliable foliage, stiff wood, firm ground.

@@ -3107,6 +3107,28 @@ impl Flora {
         Some(self.book_consumed(taken))
     }
 
+    /// A consumer eats **carrion** off the site's ground, up to `want`, with its mineral
+    /// and its retained energy pro rata — [`Flora::take_dead_wood`]'s rule on the third
+    /// pool, and the withdrawal side of [`DepositKind::Carrion`].
+    ///
+    /// Carrion had decomposition and no consumer until decisions §3 made the shredder a
+    /// detritivore with three foods (`design/handoffs/voxel-diets-2026-09-22.md`). What
+    /// it takes is exactly what the pool holds — organic, mineral and energy at the
+    /// stock's own current density — so nothing is invented for a corpse that a
+    /// depositor's own books did not hand over, and what is left is the same stuff it
+    /// was.
+    pub fn take_carrion(&mut self, site: Site, want: f64) -> Option<Taken> {
+        let i = self.ground.binary_search_by_key(&site, |g| g.site).ok()?;
+        let g = &mut self.ground[i];
+        let taken = take_pool(
+            &mut g.carrion,
+            &mut g.carrion_mineral,
+            &mut g.carrion_energy,
+            want,
+        )?;
+        Some(self.book_consumed(taken))
+    }
+
     /// A consumer puts material **back** on `site`: a corpse into the carrion pool,
     /// droppings into the litter pool, or a log into the dead-wood pool. Returns whether it
     /// was accepted.

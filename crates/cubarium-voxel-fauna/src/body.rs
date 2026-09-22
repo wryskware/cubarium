@@ -87,6 +87,16 @@ const CONTACT_HEIGHT_FRACTION: f64 = 0.5;
 /// The mouth's horizontal reach, as a fraction of body length ahead of the footprint.
 const MOUTH_REACH_LENGTH_FRACTION: f64 = 0.25;
 
+// The authored assimilation yields per food class (decisions §3; `design/backlog.md`
+// §1). They are the two numbers the frozen table already ran on, named so that a food
+// class can be re-yielded on its own: the shredder's litter yield and the browser's
+// foliage yield. They are equal today, which is why this package moves no number.
+/// What a shredder builds out of a unit of litter — and, by the decision, of carrion.
+const LITTER_YIELD: f64 = 0.5;
+/// What a grazer builds out of a unit of foliage — and, by the decision, what a
+/// shredder builds out of a unit of glowcap cap tissue.
+const FOLIAGE_YIELD: f64 = 0.5;
+
 /// **A living body's physical geometry**, in metres, resolved from its lineage's
 /// [`FounderPhysiology`] and its current structure.
 ///
@@ -208,6 +218,21 @@ pub struct FounderPhysiology {
     /// The mouth's horizontal reach ahead of the footprint, as a fraction of body
     /// length (decisions §2: 0.25, "as today"). A placeholder.
     pub mouth_reach_length_fraction: f64,
+    /// **Assimilation yield per [`crate::Food`] class**, in [`crate::Food::ALL`] order
+    /// (decisions §3; placeholders, `design/backlog.md` §1).
+    ///
+    /// The assimilation rule itself is unchanged — `min(yield · organic, mineral /
+    /// n_tissue)` — and this is the `yield` it reads, chosen by what was eaten rather
+    /// than by who ate it, because a detritivore with three foods has no single one.
+    /// The authored placeholders keep litter at the shredder's current
+    /// [`SpeciesConfig::yield_fraction`], give cap tissue the foliage yield, and give
+    /// carrion the litter yield until told otherwise. At today's table all of them are
+    /// 0.5, so naming them changes no number; what it changes is that a later decision
+    /// can move one without moving the others.
+    ///
+    /// Every lineage fills all four honestly, including classes its diet never reaches:
+    /// a zero there would be a trap for whoever adds a food later.
+    pub yield_by_food: [f64; crate::Food::COUNT],
     /// `f`, the declared share of the body's **total** structure that is sensor/organ
     /// tissue: 5% for the blind founder, 10% for the browser. The body's structure
     /// stock is the total; the sensor share is counted within it once — no second
@@ -271,6 +296,11 @@ impl FounderPhysiology {
                 mouth_ceiling_fraction: MOUTH_CEILING_FRACTION,
                 contact_height_fraction: CONTACT_HEIGHT_FRACTION,
                 mouth_reach_length_fraction: MOUTH_REACH_LENGTH_FRACTION,
+                // Litter keeps the yield it has; cap tissue takes the foliage yield;
+                // carrion takes the litter yield. `Foliage` is the browser's class and
+                // the shredder never takes one, so it carries the same number its
+                // fungal foliage does.
+                yield_by_food: [LITTER_YIELD, FOLIAGE_YIELD, LITTER_YIELD, FOLIAGE_YIELD],
                 organ_structure_fraction: 0.05,
             },
             Founder::Browser => FounderPhysiology {
@@ -292,6 +322,9 @@ impl FounderPhysiology {
                 mouth_ceiling_fraction: MOUTH_CEILING_FRACTION,
                 contact_height_fraction: CONTACT_HEIGHT_FRACTION,
                 mouth_reach_length_fraction: MOUTH_REACH_LENGTH_FRACTION,
+                // The browser eats foliage and nothing else; the other three are the
+                // same number so that a class it cannot reach is never a silent zero.
+                yield_by_food: [FOLIAGE_YIELD; crate::Food::COUNT],
                 organ_structure_fraction: 0.10,
             },
         }
@@ -303,6 +336,11 @@ impl FounderPhysiology {
     pub fn total_structure_for_core(core: f64, fraction: f64) -> f64 {
         debug_assert!(fraction.is_finite() && fraction >= 0.0 && fraction < 1.0);
         core / (1.0 - fraction)
+    }
+
+    /// The assimilation yield this lineage gets out of one food class (decisions §3).
+    pub fn yield_for(&self, food: crate::Food) -> f64 {
+        self.yield_by_food[food.index()]
     }
 
     /// The sensor/organ share of a total structure stock — a view onto the one body
@@ -834,15 +872,29 @@ pub(crate) fn mouth_columns(
     cols
 }
 
-/// The ground site with the most litter under the mouth region, or `None` when the
-/// mouth touches no litter at all. Ties go to the smallest site, so the answer is a
-/// pure function of the state and never of storage order.
-pub(crate) fn mouth_litter_site(
+/// The stock of one ground food class at a site: what a mouth over it could take.
+fn pool_stock(fv: &FloraView<'_>, site: Site, food: crate::Food) -> f64 {
+    fv.ground_at(site).map_or(0.0, |g| match food {
+        crate::Food::Litter => g.litter,
+        crate::Food::Carrion => g.carrion,
+        // Neither is a ground pool; a mouth never asks this of them.
+        crate::Food::CapTissue | crate::Food::Foliage => 0.0,
+    })
+}
+
+/// The ground site holding the most of `food` under the mouth region, and how much, or
+/// `None` when the mouth touches none of it at all. Ties go to the smallest site, so
+/// the answer is a pure function of the state and never of storage order.
+///
+/// Since decisions §3 the shredder has two ground foods rather than one — litter and
+/// carrion — and this is the one scan, asked twice.
+pub(crate) fn mouth_pool_site(
     fv: &FloraView<'_>,
     cols: &[(i64, u32)],
     standing_y: u32,
-) -> Option<Site> {
-    let mut best: Option<Site> = None;
+    food: crate::Food,
+) -> Option<(Site, f64)> {
+    let mut best: Option<(Site, f64)> = None;
     let mut best_amount = 0.0;
     for &(x, z) in cols {
         let site = Site {
@@ -850,13 +902,85 @@ pub(crate) fn mouth_litter_site(
             y: standing_y,
             z,
         };
-        let litter = fv.ground_at(site).map_or(0.0, |g| g.litter);
-        if litter > best_amount
-            || (litter > 0.0 && litter == best_amount && best.is_some_and(|b| site < b))
+        let amount = pool_stock(fv, site, food);
+        if amount > best_amount
+            || (amount > 0.0 && amount == best_amount && best.is_some_and(|(b, _)| site < b))
         {
-            best = Some(site);
-            best_amount = litter;
+            best = Some((site, amount));
+            best_amount = amount;
         }
+    }
+    best
+}
+
+/// Where one bite of detritus would come from: a ground pool at a site, or the cap of
+/// a fungal stand rooted at one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Meal {
+    /// A withdrawal from `site`'s [`crate::Food::Litter`] or [`crate::Food::Carrion`]
+    /// pool.
+    Pool { site: Site, food: crate::Food },
+    /// A foliage withdrawal from the saprotroph stand rooted at `root`, bounded to the
+    /// mouth's own layer range: [`crate::Food::CapTissue`].
+    Cap { root: Site },
+}
+
+impl Meal {
+    pub(crate) fn food(self) -> crate::Food {
+        match self {
+            Meal::Pool { food, .. } => food,
+            Meal::Cap { .. } => crate::Food::CapTissue,
+        }
+    }
+}
+
+/// **The shredder's three foods at one mouth, and which of them it would take**
+/// (decisions §3): litter and carrion at the standing face, and glowcap cap tissue from
+/// a fungal stand whose layer intersects the mouth band.
+///
+/// There is no new action: `bite` still means "take what is at the mouth", so when more
+/// than one food is there this picks the **richest available**, which is the choice the
+/// brief allows as long as it is stated. Ties go in [`crate::Food::ALL`] order — litter,
+/// then cap tissue, then carrion — so the answer is a pure function of the state.
+///
+/// The stock it reports is the same quantity the taste channel encodes and the same one
+/// the comparison is made on: a pool's whole stock at the site, or the stand's stock in
+/// the layers the band reaches (not its whole cap).
+pub(crate) fn mouth_detritus(
+    fv: &FloraView<'_>,
+    view: &VoxelView<'_>,
+    cols: &[(i64, u32)],
+    standing_y: u32,
+    body: &Body,
+) -> Option<(Meal, f64)> {
+    let mut best: Option<(Meal, f64)> = None;
+    let mut consider = |meal: Meal, stock: f64| {
+        if stock > 0.0 && best.is_none_or(|(_, b)| stock > b) {
+            best = Some((meal, stock));
+        }
+    };
+    if let Some((site, stock)) = mouth_pool_site(fv, cols, standing_y, crate::Food::Litter) {
+        consider(
+            Meal::Pool {
+                site,
+                food: crate::Food::Litter,
+            },
+            stock,
+        );
+    }
+    if let Some((root, stock)) =
+        mouth_foliage_stand(fv, view, cols, standing_y, body, crate::Diet::Fungal)
+    {
+        consider(Meal::Cap { root }, stock);
+    }
+    if let Some((site, stock)) = mouth_pool_site(fv, cols, standing_y, crate::Food::Carrion) {
+        consider(
+            Meal::Pool {
+                site,
+                food: crate::Food::Carrion,
+            },
+            stock,
+        );
     }
     best
 }
@@ -896,21 +1020,32 @@ pub(crate) fn mouth_crown_layers(
     body.mouth_layers(standing_y, voxel_m)
 }
 
-/// The stand whose crown cells the mouth region physically touches: a crown cell of
-/// `stand.site` in a mouth column, at a layer inside the physical mouth band
-/// ([`Body::mouth_layers`]). The most foliage wins, ties to the smallest root site.
-/// `None` when the mouth is in air — a neighbouring stand whose crown does not reach the
-/// mouth is not mouth input.
+/// The stand whose crown cells the mouth region physically touches **and whose tissue
+/// this `diet` accepts**: a crown cell of `stand.site` in a mouth column, at a layer
+/// inside the physical mouth band ([`Body::mouth_layers`]). The most foliage wins, ties
+/// to the smallest root site. `None` when the mouth is in air — a neighbouring stand
+/// whose crown does not reach the mouth is not mouth input.
+///
+/// Reach and permission are separate tests (audit §2), and the permission is applied
+/// here rather than at the withdrawal so that a stand a mouth may not eat is not
+/// offered to it as taste either: since decisions §3 a glowcap cap standing in a
+/// browser's band is reachable fungal tissue and not food, and a shredder's mouth sees
+/// the cap and no leaf ([`crate::Diet`]).
 pub(crate) fn mouth_foliage_stand(
     fv: &FloraView<'_>,
     view: &VoxelView<'_>,
     cols: &[(i64, u32)],
     standing_y: u32,
     body: &Body,
+    diet: crate::Diet,
 ) -> Option<(Site, f64)> {
     let layers = mouth_crown_layers(standing_y, body, view.config.voxel_m);
     let mut best: Option<(Site, f64)> = None;
-    for stand in fv.stands.iter().filter(|s| s.foliage > 0.0) {
+    for stand in fv
+        .stands
+        .iter()
+        .filter(|s| s.foliage > 0.0 && diet.accepts(fv.config.species(s.species).trophic))
+    {
         let reachable = reachable_layer_stock(fv, view, stand, cols, &layers);
         if !(reachable > 0.0) {
             continue;
@@ -1007,17 +1142,19 @@ pub(crate) fn mouth_foliage_stands(
     cols: &[(i64, u32)],
     standing_y: u32,
     body: &Body,
+    diet: crate::Diet,
 ) -> Vec<(Site, f64)> {
     foliage_stands_touching(
         fv,
         view,
         cols,
         &mouth_crown_layers(standing_y, body, view.config.voxel_m),
+        diet,
     )
 }
 
-/// Every foliage-bearing stand whose crown **cells** sit at a layer in `layers` and
-/// intersect `cols`.
+/// Every foliage-bearing stand whose crown **cells** sit at a layer in `layers`,
+/// intersect `cols`, and whose tissue `diet` accepts.
 ///
 /// This is [`mouth_foliage_stands`]' own scan with the layer range handed in instead of
 /// derived from the manifest, because the layer range is the *only* thing that differs
@@ -1030,9 +1167,14 @@ pub(crate) fn foliage_stands_touching(
     view: &VoxelView<'_>,
     cols: &[(i64, u32)],
     layers: &std::ops::RangeInclusive<i64>,
+    diet: crate::Diet,
 ) -> Vec<(Site, f64)> {
     let mut out = Vec::new();
-    for stand in fv.stands.iter().filter(|s| s.foliage > 0.0) {
+    for stand in fv
+        .stands
+        .iter()
+        .filter(|s| s.foliage > 0.0 && diet.accepts(fv.config.species(s.species).trophic))
+    {
         let reachable = reachable_layer_stock(fv, view, stand, cols, layers);
         if reachable > 0.0 {
             out.push((stand.site, reachable));
@@ -1060,10 +1202,24 @@ impl TasteReading {
 }
 
 /// Read chemistry and resistance at the mouth's actual contact. The blind founder's
-/// mouth roots at the ground: litter under its mouth produces a litter response, while
-/// bare ground is a valid ground contact with zero litter response. The diffused
+/// mouth roots at the ground: **detritus** under its mouth produces a cue response,
+/// while bare ground is a valid ground contact with zero response. The diffused
 /// `Chem(litter)` field is deliberately not consulted. The browser's mouth is at body
 /// height and is invalid in air.
+///
+/// # What decisions §3 changed here, and what it did not
+///
+/// The shredder now has three foods, so "what is at the mouth" is the richest of the
+/// three at the mouth and not the litter alone: a shredder standing on a corpse tastes
+/// the corpse. The **channel** is untouched — one cue, one resistance, one validity, at
+/// the manifest's own slot — and so is the resistance mapping: all three foods are the
+/// one soft class the schema calls `litter`, because the taste resistances are inside
+/// the manifest digest and the shipped centres must keep loading
+/// (`crates/cubarium/assets/policies/README.md`). It is the same kind of meaning change
+/// as the one on `Chem(litter)`, and the retrain (package 5) owns both.
+///
+/// The browser's taste moves the other way: a glowcap cap is no longer offered to its
+/// mouth at all, so it no longer tastes one.
 pub(crate) fn taste_reading(
     fv: &FloraView<'_>,
     view: &VoxelView<'_>,
@@ -1083,30 +1239,29 @@ pub(crate) fn taste_reading(
     };
     let cols = mouth_columns(view, pose, body);
     match founder {
-        Founder::Blind => match mouth_litter_site(fv, &cols, standing_y) {
-            Some(site) => {
-                let litter = fv.ground_at(site).map_or(0.0, |g| g.litter);
-                TasteReading {
-                    cue: response(litter),
-                    resistance: resistance_of(manifest, "litter"),
-                    valid: true,
-                }
-            }
+        Founder::Blind => match mouth_detritus(fv, view, &cols, standing_y, body) {
+            Some((_, stock)) => TasteReading {
+                cue: response(stock),
+                resistance: resistance_of(manifest, "litter"),
+                valid: true,
+            },
             None => TasteReading {
                 cue: 0.0,
                 resistance: resistance_of(manifest, "ground"),
                 valid: true,
             },
         },
-        Founder::Browser => match mouth_foliage_stand(fv, view, &cols, standing_y, body) {
-            Some((_, foliage)) => TasteReading {
-                cue: response(foliage),
-                resistance: resistance_of(manifest, "foliage"),
-                valid: true,
-            },
-            // The mouth is in air: no contact, no taste.
-            None => TasteReading::INVALID,
-        },
+        Founder::Browser => {
+            match mouth_foliage_stand(fv, view, &cols, standing_y, body, crate::Diet::Vascular) {
+                Some((_, foliage)) => TasteReading {
+                    cue: response(foliage),
+                    resistance: resistance_of(manifest, "foliage"),
+                    valid: true,
+                },
+                // The mouth is in air: no contact, no taste.
+                None => TasteReading::INVALID,
+            }
+        }
     }
 }
 
@@ -2149,12 +2304,13 @@ mod tests {
         let cols_head = mouth_columns(&view, &pose_at(5.5 * 0.25, 2.5 * 0.25, 0.0), &browser);
 
         assert_eq!(
-            mouth_foliage_stand(&fv, &view, &cols_over, 2, &browser),
+            mouth_foliage_stand(&fv, &view, &cols_over, 2, &browser, crate::Diet::Vascular),
             None,
             "0.25 m of crown is above a 0.249375 m ceiling"
         );
         assert_eq!(
-            mouth_foliage_stand(&fv, &view, &cols_head, 2, &browser).map(|(s, _)| s),
+            mouth_foliage_stand(&fv, &view, &cols_head, 2, &browser, crate::Diet::Vascular)
+                .map(|(s, _)| s),
             Some(site(5, 2)),
             "the crown at the head layer is inside the band"
         );
@@ -2164,12 +2320,14 @@ mod tests {
         let mut tall = browser;
         tall.mouth_ceiling_m = 0.5;
         assert_eq!(
-            mouth_foliage_stand(&fv, &view, &cols_over, 2, &tall).map(|(s, _)| s),
+            mouth_foliage_stand(&fv, &view, &cols_over, 2, &tall, crate::Diet::Vascular)
+                .map(|(s, _)| s),
             Some(site(2, 2)),
             "a 0.5 m band reaches the crown one voxel up"
         );
         assert_eq!(
-            mouth_foliage_stand(&fv, &view, &cols_head, 2, &tall).map(|(s, _)| s),
+            mouth_foliage_stand(&fv, &view, &cols_head, 2, &tall, crate::Diet::Vascular)
+                .map(|(s, _)| s),
             Some(site(5, 2)),
             "and still takes the one at its feet"
         );

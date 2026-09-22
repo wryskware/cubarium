@@ -65,9 +65,16 @@ use crate::Fauna;
 /// animals were the wrong size, ate out of a whole-voxel layer range and looked out of
 /// an eye anchored in cells; there is no honest value to carry across, and none is
 /// synthesized.
+/// Schema 12 is **the diets decisions §3 chose**
+/// (`design/handoffs/voxel-diets-2026-09-22.md`):
+/// [`crate::FounderPhysiology`] gained `yield_by_food` inside the config, and
+/// [`crate::FaunaLedger`] gained the two per-[`crate::Food`] arrays. A schema-11
+/// world's ledger has no split to carry across — its shredders ate litter only, so
+/// every bite it booked would have to be *assumed* to be litter — and assuming it is
+/// exactly the synthesis the always-fresh rule refuses.
 /// Postcard is not self-describing, so older worlds are **refused**, not migrated
 /// (`always-fresh-never-migrate`): start a fresh world.
-pub const SCHEMA: u32 = 11;
+pub const SCHEMA: u32 = 12;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

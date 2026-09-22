@@ -61,7 +61,7 @@ use cubarium_voxel_flora::{DepositKind, Flora, Site, Taken};
 use crate::body;
 use crate::controller::Actions;
 use crate::manifest::Founder;
-use crate::{Animal, Departure, Fauna, IntervalFeedback, SpeciesConfig, State, steppable};
+use crate::{Animal, Departure, Fauna, Food, IntervalFeedback, SpeciesConfig, State, steppable};
 
 /// Stream keys, so two draws in one tick cannot be the same draw. One per rule that draws.
 const DOMAIN_TARGET: u64 = 1;
@@ -731,11 +731,18 @@ fn founder_act(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &mut Fl
     };
 }
 
-/// The founder's supported local bite: the blind founder takes litter off the ground
-/// under its mouth region, the browser crops a stand whose crown cells it touches —
-/// through [`Flora::take_litter`] / [`Flora::take_foliage`], debiting the real stocks,
-/// exactly one withdrawal per attempt. Nothing in reach, a mouth in the air, or an
-/// unsupported body transfers nothing at all.
+/// The founder's supported local bite: the blind founder takes **detritus** — litter or
+/// carrion off the ground under its mouth region, or cap tissue off a fungal stand in
+/// its band — and the browser crops a vascular stand whose crown cells it touches. One
+/// withdrawal per attempt, through the plant layer's own `take_*`, debiting the real
+/// stocks. Nothing in reach, a mouth in the air, or an unsupported body transfers
+/// nothing at all.
+///
+/// Decisions §3 gave the shredder its three foods. There is no new action: `bite` still
+/// means "take what is at the mouth", and [`body::mouth_detritus`] resolves which of
+/// the three that is (the richest available, ties in [`Food::ALL`] order). The
+/// assimilation rule is unchanged; what the food class chooses is the `yield` it reads
+/// ([`crate::FounderPhysiology::yield_for`]).
 #[allow(clippy::too_many_arguments)]
 fn founder_feed(
     fauna: &mut Fauna,
@@ -768,52 +775,64 @@ fn founder_feed(
         return false;
     }
     let cols = body::mouth_columns(view, &pose, geometry);
-    match founder {
+    // Which food is at this mouth, before anything is withdrawn.
+    let meal = match founder {
         Founder::Blind => {
-            let Some(site) = body::mouth_litter_site(&flora.view(), &cols, site_y) else {
-                return false;
-            };
-            let Some(taken) = flora.take_litter(site, want) else {
-                return false;
-            };
-            let taken = fauna.book_eaten(taken);
-            let placed = assimilate(fauna, flora, i, sc, taken);
-            fauna.ledger.bites_by_founder[founder.index()] += 1;
-            fauna.ledger.assimilated_by_founder[founder.index()] += placed;
-            fauna.animals[i].founder_state.feedback.intake += placed;
-            true
+            body::mouth_detritus(&flora.view(), view, &cols, site_y, geometry).map(|(meal, _)| meal)
         }
-        Founder::Browser => {
-            let Some((root, _)) =
-                body::mouth_foliage_stand(&flora.view(), view, &cols, site_y, geometry)
-            else {
-                return false;
-            };
-            // Whose foliage this is, read before the withdrawal, so the report says
-            // which species was actually eaten.
-            let plant = flora.view().stand_at(root).map(|s| s.species);
-            // The mouth's own cell range, handed to the plant layer: the bite comes out
-            // of the layers the band reaches, lowest first, and the crown above them is
-            // not offered (`design/handoffs/voxel-plant-layers-2026-09-22.md`).
-            let layers = body::mouth_crown_layers(site_y, geometry, view.config.voxel_m);
-            let Some(taken) = flora
-                .take_foliage_in_layers(root, want, &layers)
-                .map(|t| t.taken)
-            else {
-                return false;
-            };
-            let taken = fauna.book_eaten(taken);
-            if let Some(plant) = plant {
-                fauna.ledger.bites_by_plant[plant.index()] += 1;
-                fauna.ledger.eaten_by_plant[plant.index()] += taken.organic;
-            }
-            let placed = assimilate(fauna, flora, i, sc, taken);
-            fauna.ledger.bites_by_founder[founder.index()] += 1;
-            fauna.ledger.assimilated_by_founder[founder.index()] += placed;
-            fauna.animals[i].founder_state.feedback.intake += placed;
-            true
-        }
+        Founder::Browser => body::mouth_foliage_stand(
+            &flora.view(),
+            view,
+            &cols,
+            site_y,
+            geometry,
+            crate::Diet::Vascular,
+        )
+        .map(|(root, _)| body::Meal::Cap { root }),
+    };
+    let Some(meal) = meal else {
+        return false;
+    };
+    // A browser's stand is vascular and a shredder's is fungal; the class is the
+    // mouth's, not the withdrawal's.
+    let food = match (founder, meal) {
+        (Founder::Browser, _) => Food::Foliage,
+        (Founder::Blind, m) => m.food(),
+    };
+    // The mouth's own cell range, handed to the plant layer: a foliage bite comes out
+    // of the layers the band reaches, lowest first, and the crown above them is not
+    // offered (`design/handoffs/voxel-plant-layers-2026-09-22.md`).
+    let layers = body::mouth_crown_layers(site_y, geometry, view.config.voxel_m);
+    // Whose tissue this is, read before the withdrawal, so the report says which
+    // species was actually eaten.
+    let plant = match meal {
+        body::Meal::Cap { root } => flora.view().stand_at(root).map(|s| s.species),
+        body::Meal::Pool { .. } => None,
+    };
+    let taken = match meal {
+        body::Meal::Cap { root } => flora
+            .take_foliage_in_layers(root, want, &layers)
+            .map(|t| t.taken),
+        body::Meal::Pool {
+            site,
+            food: Food::Carrion,
+        } => flora.take_carrion(site, want),
+        body::Meal::Pool { site, .. } => flora.take_litter(site, want),
+    };
+    let Some(taken) = taken else {
+        return false;
+    };
+    let yield_fraction = fauna.config.founder(founder).yield_for(food);
+    let taken = fauna.book_eaten(taken, food);
+    if let Some(plant) = plant {
+        fauna.ledger.bites_by_plant[plant.index()] += 1;
+        fauna.ledger.eaten_by_plant[plant.index()] += taken.organic;
     }
+    let placed = assimilate(fauna, flora, i, sc, taken, yield_fraction);
+    fauna.ledger.bites_by_founder[founder.index()] += 1;
+    fauna.ledger.assimilated_by_founder[founder.index()] += placed;
+    fauna.animals[i].founder_state.feedback.intake += placed;
+    true
 }
 
 /// One mouthful, spent over the stands in reach in site order: the plant layer bounds each
@@ -837,17 +856,17 @@ fn crop(
         let Some(taken) = flora.take_foliage(site, left) else {
             continue;
         };
-        let taken = fauna.book_eaten(taken);
+        let taken = fauna.book_eaten(taken, Food::Foliage);
         if let Some(plant) = plant {
             fauna.ledger.bites_by_plant[plant.index()] += 1;
             fauna.ledger.eaten_by_plant[plant.index()] += taken.organic;
         }
         left -= taken.organic;
-        assimilate(fauna, flora, i, sc, taken);
+        assimilate(fauna, flora, i, sc, taken, sc.yield_fraction);
     }
 }
 
-/// A bite becoming tissue: `yield_fraction` of it is built **as far as the bite's own
+/// A bite becoming tissue: the food class's own `yield_fraction` of it is built **as far as the bite's own
 /// mineral pays for**, the rest is respired, the energy follows the organic matter at the
 /// bite's own density, and the mineral that came with more tissue than was built is
 /// excreted.
@@ -860,6 +879,11 @@ fn crop(
 /// organic matter is **respired with its energy as heat**, exactly like the fraction a
 /// full body and a full reserve cannot hold.
 ///
+/// **The yield is the food's, not the eater's** (decisions §3). The rule is unchanged;
+/// the caller hands in [`crate::FounderPhysiology::yield_for`] for what was actually
+/// eaten, because a detritivore with three foods has no single yield. Every placeholder
+/// is 0.5 today, so this moves no number.
+///
 /// **No internal mineral reserve is adopted.** [`Animal::mineral`] is an inventory of what
 /// is already in the tissue and not a stock growth may draw on — the plant layer's
 /// `Stand::mineral` is the same and says so (Astra R4.3) — so an animal holding mineral
@@ -868,7 +892,14 @@ fn crop(
 /// Returns the organic matter actually **placed** — into body and reserve — which is
 /// what a founder's prior-interval intake feedback records, and not the bite's whole
 /// organic matter.
-fn assimilate(fauna: &mut Fauna, flora: &mut Flora, i: usize, sc: &SpeciesConfig, t: Taken) -> f64 {
+fn assimilate(
+    fauna: &mut Fauna,
+    flora: &mut Flora,
+    i: usize,
+    sc: &SpeciesConfig,
+    t: Taken,
+    yield_fraction: f64,
+) -> f64 {
     let a = &mut fauna.animals[i];
     // What the yield would build, and what this bite's mineral can actually pay for.
     let funded = if sc.n_tissue > 0.0 {
@@ -876,7 +907,7 @@ fn assimilate(fauna: &mut Fauna, flora: &mut Flora, i: usize, sc: &SpeciesConfig
     } else {
         f64::INFINITY
     };
-    let assimilated = (sc.yield_fraction * t.organic).min(funded);
+    let assimilated = (yield_fraction * t.organic).min(funded);
     let mut respired = t.organic - assimilated;
 
     // Build: structure first, up to `body_max`, then the reserve, up to `reserve_cap ·
