@@ -1359,9 +1359,21 @@ pub struct FloraConfig {
     pub stonecushion: SpeciesConfig,
     pub velvetpad: SpeciesConfig,
     pub glowcap: SpeciesConfig,
-    /// Canopy attenuation: a taller stand whose crown covers a site multiplies the light
-    /// reaching that site by `exp(-shade_k · P / crown_area)`.
-    pub shade_k: f64,
+    /// Canopy attenuation, **per square metre**: a taller stand whose crown covers a
+    /// site multiplies the light reaching that site by
+    /// `exp(-shade_k_per_m2 · P / crown_area_m2)`, where the crown's area is
+    /// `π · (radius_cells · voxel_m)²` floored at one reference cell, `(0.25 m)²`.
+    ///
+    /// **It used to be per cell²** (`shade_k`, 1.5), which made optical depth a
+    /// function of the grid: the same plant with the same foliage shaded four times
+    /// less when the cell halved (the audit's §1 "shade-area units bug";
+    /// `design/handoffs/voxel-body-anchors-2026-09-22.md`). The shipped value is the
+    /// old one converted, `1.5 × (0.25 m)² = 0.09375`, so the 0.25 m reference world is
+    /// numerically identical — including the floor, which is one reference cell either
+    /// way — and only finer grids move, to the physically right value. A config written
+    /// against the old field name is refused (`deny_unknown_fields`) rather than
+    /// reinterpreted 16× too dark.
+    pub shade_k_per_m2: f64,
     /// `k_d`: litter decomposition per second. Its organic matter is respired out of the
     /// system (`respired_out`, energy to heat) and its mineral is released to the site's
     /// pool at the same fraction.
@@ -1406,7 +1418,7 @@ impl Default for FloraConfig {
             stonecushion: SpeciesConfig::stonecushion(),
             velvetpad: SpeciesConfig::velvetpad(),
             glowcap: SpeciesConfig::glowcap(),
-            shade_k: 1.5,
+            shade_k_per_m2: 0.09375,
             decomposition: 0.001,
             wood_decomposition: 0.0001,
             carrion_decomposition: 0.005,
@@ -1483,7 +1495,7 @@ impl FloraConfig {
             self.species(species).validate(species.name())?;
         }
         for (label, v) in [
-            ("shade_k", self.shade_k),
+            ("shade_k_per_m2", self.shade_k_per_m2),
             ("decomposition", self.decomposition),
             ("wood_decomposition", self.wood_decomposition),
             ("carrion_decomposition", self.carrion_decomposition),

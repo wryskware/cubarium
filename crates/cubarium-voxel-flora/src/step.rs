@@ -165,9 +165,16 @@ struct Crown {
     top: f64,
     radius: f64,
     foliage: f64,
-    /// `π r²` in voxels, at least 1: a sapling's crown is not a point source of shade.
-    area: f64,
+    /// The crown's physical area, `π (r · voxel_m)²` in **square metres**, floored at
+    /// one reference cell `(0.25 m)²`: a sapling's crown is not a point source of
+    /// shade, and the floor is a length rather than a cell so the optical depth does
+    /// not depend on the grid
+    /// (`design/handoffs/voxel-body-anchors-2026-09-22.md`).
+    area_m2: f64,
 }
+
+/// The physical floor on a crown's shading area: one cell of the 0.25 m reference grid.
+const MIN_CROWN_AREA_M2: f64 = 0.25 * 0.25;
 
 pub(crate) fn step(flora: &mut Flora, world: &mut World) {
     // The tick counter moves **first**, so that `flora.tick` is the tick this step
@@ -345,7 +352,11 @@ fn light_per_stand(flora: &mut Flora, world: &World) -> Vec<f64> {
         ..
     } = flora;
     let view = world.view();
-    let crowns: Vec<Crown> = stands.iter().map(|s| crown_of(config, s)).collect();
+    let voxel_m = view.config.voxel_m;
+    let crowns: Vec<Crown> = stands
+        .iter()
+        .map(|s| crown_of(config, s, voxel_m))
+        .collect();
     let width = view.config.width as f64;
 
     let mut out = Vec::with_capacity(stands.len());
@@ -360,23 +371,24 @@ fn light_per_stand(flora: &mut Flora, world: &World) -> Vec<f64> {
             if dx * dx + dz * dz > other.radius * other.radius {
                 continue;
             }
-            l *= (-config.shade_k * other.foliage / other.area).exp();
+            l *= (-config.shade_k_per_m2 * other.foliage / other.area_m2).exp();
         }
         out.push(light_response(config.species(stand.species), l));
     }
     out
 }
 
-fn crown_of(config: &FloraConfig, stand: &Stand) -> Crown {
+fn crown_of(config: &FloraConfig, stand: &Stand, voxel_m: f64) -> Crown {
     let sc = config.species(stand.species);
     let radius = sc.crown_radius(stand.wood);
+    let radius_m = radius * voxel_m;
     Crown {
         x: stand.site.x as f64,
         z: stand.site.z as f64,
         top: stand.site.y as f64 + sc.crown_height(stand.wood),
         radius,
         foliage: stand.foliage,
-        area: (std::f64::consts::PI * radius * radius).max(1.0),
+        area_m2: (std::f64::consts::PI * radius_m * radius_m).max(MIN_CROWN_AREA_M2),
     }
 }
 

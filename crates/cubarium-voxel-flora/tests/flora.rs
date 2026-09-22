@@ -244,7 +244,7 @@ fn a_stand_at_wilting_point_earns_nothing_and_dies_of_unpaid_maintenance() {
 #[test]
 fn a_taller_crown_lowers_the_light_and_the_income_under_it() {
     let mut config = FloraConfig::default();
-    config.shade_k = 30.0;
+    config.shade_k_per_m2 = 30.0;
 
     let mut world = plain(16, 12, 0.6);
     let mut flora = Flora::new(config);
@@ -326,7 +326,7 @@ fn a_taller_crown_lowers_the_light_and_the_income_under_it() {
 #[test]
 fn a_stand_that_cannot_pay_under_a_closed_canopy_diebacks_and_dies() {
     let mut config = FloraConfig::default();
-    config.shade_k = 30.0;
+    config.shade_k_per_m2 = 30.0;
     config.umbrellafrond.propagule_rate = 2.0;
     config.bloomcrown.maintenance = 0.0032;
     config.bloomcrown.reserve_cap = 0.001;

@@ -126,7 +126,7 @@ fn run(flora: &mut Flora, world: &mut World, ticks: u32) {
 #[test]
 fn shade_covers_exactly_the_crown_radius_the_presenter_draws() {
     let mut config = FloraConfig::default();
-    config.shade_k = 30.0;
+    config.shade_k_per_m2 = 30.0;
     config.umbrellafrond.crown_radius_voxels = [2.0, 2.0];
 
     let mut world = plain(16, 12, 0.6);
@@ -217,7 +217,7 @@ fn shade_covers_exactly_the_crown_radius_the_presenter_draws() {
 #[test]
 fn a_crown_level_with_another_does_not_shade_it_but_a_higher_one_does() {
     let mut config = FloraConfig::default();
-    config.shade_k = 30.0;
+    config.shade_k_per_m2 = 30.0;
     config.umbrellafrond.crown_radius_voxels = [2.0, 2.0];
 
     let mut world = plain(16, 12, 0.6);
