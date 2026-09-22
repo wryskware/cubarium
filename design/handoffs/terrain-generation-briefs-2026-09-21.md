@@ -1319,3 +1319,15 @@ logs it; snapshot tests unchanged (SCHEMA 15 is already in).
 
 Return (≤20 lines): commits, the cause, per-preset lake area before/after
 settle on seeds 1–8, gate cost per candidate, test counts.
+
+## Package T4 — integrated 2026-09-21
+
+Landed 0fbdd57. The small lake never lost water; it lost **count**: a flat
+sheet over the stepped beach breaks into disconnected bodies as it settles
+and `lake` named the first by index. `lake` is now every standing body
+within two voxels of the lowest floor. The gate reads a 40-tick settled
+clone (0.20 s per candidate on `small`, 0.08 on `default`) and runs the
+ring walk last; `wide` seed 2 is caught. Small seeds 4–6 genuinely drain
+to a third of their area (a flat fill over a stepped bed) and are now
+rejected, not shipped — a flatter lake bed is the generator lever if the
+rejection rate ever matters. Fable ran the two crates: 809 passed.
