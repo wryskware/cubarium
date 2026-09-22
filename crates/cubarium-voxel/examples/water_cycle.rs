@@ -2,8 +2,16 @@
 //!
 //! ```text
 //! cargo run --release -p cubarium-voxel --example water_cycle -- \
-//!     [HOURS] [SEED] [TRIGGER_FRACTION] [SHOWER_M3] [EVAP_M_PER_S] [THREADS]
+//!     [HOURS] [SEED] [TRIGGER_FRACTION] [SHOWER_M3] [EVAP_M_PER_S] [THREADS] \
+//!     [preset=<small|default|wide>]
 //! ```
+//!
+//! `preset=` runs the shipped ring of that name — its own footprint, recipe and cell
+//! size — instead of the bare `Config::default()` box. It is there because the presets
+//! are not all on the same grid (`small` is 0.125 m against 0.25 m), and since package
+//! 1c (`design/handoffs/voxel-water-units-2026-09-22.md`) the transport rates are
+//! physical rather than per cell, so the closed cycle is worth reading on each ring
+//! rather than only on the default box.
 //!
 //! One CSV row per simulated ten minutes on stdout — stored, free, pore, aquifer,
 //! atmosphere, showers so far, the residual — and a verdict on stderr. Twenty-four
@@ -48,10 +56,21 @@ fn main() {
     // world the run uses with the table charged a metre above that floor. Generation is
     // deterministic in the seed, so the second world is the first one with water in it —
     // the flora study's own move.
+    // `preset=<name>`: the shipped ring instead of the bare default box. Positional,
+    // like everything else here, except that it is named — it is not a number.
+    let preset = std::env::args().find_map(|a| {
+        a.strip_prefix("preset=").map(|name| {
+            cubarium_voxel::Preset::find(name).unwrap_or_else(|| {
+                let known: Vec<&str> = cubarium_voxel::PRESETS.iter().map(|p| p.name).collect();
+                panic!("no landform preset is called {name:?}; the shipped ones are {known:?}")
+            })
+        })
+    });
+    let base = preset.map_or_else(Config::default, |p| p.config());
     let dry = Config {
         seed,
         rain_m_per_s: HARNESS_RAIN_M_PER_S,
-        ..Config::default()
+        ..base
     };
     let basin_floor_m = World::new(dry.clone())
         .outlet_cell()
@@ -71,11 +90,17 @@ fn main() {
     let total = world.view().ledger.expected_total();
     let footprint = f64::from(config.width) * f64::from(config.depth) * config.cell_area();
     eprintln!(
-        "water_cycle: seed {seed}, {hours} h closed budget on the generated world; \
+        "water_cycle: preset {}, seed {seed}, {hours} h closed budget, \
+         {}x{}x{} at {} m; \
          shower rate {HARNESS_RAIN_M_PER_S} m/s over {footprint:.0} m2 \
          ({:.4} m3/s while raining), shower volume {shower_m3} m3, trigger {trigger} of \
          total water {total:.2} m3 ({:.3} m3 aloft), evaporation {evaporation} m/s, \
          outlet {} m3/s OPEN (the return flow), aquifer head {:.2} m",
+        preset.map_or("none (the default box)", |p| p.name),
+        config.width,
+        config.height,
+        config.depth,
+        config.voxel_m,
         HARNESS_RAIN_M_PER_S * footprint,
         trigger * total,
         config.outlet_m3_per_s,
@@ -104,11 +129,15 @@ fn main() {
     let v = world.view();
     let drift = (mean(&halves[1]) - mean(&halves[0])) / total;
     eprintln!(
-        "water_cycle: seed {seed} after {hours} h — stored {lo:.2}–{hi:.2} m3 \
-         (swing {:.2}, drift {:+.3}% of total), atmosphere {:.3} m3, {} showers, \
+        "water_cycle: preset {}, seed {seed} after {hours} h — stored {lo:.2}–{hi:.2} m3 \
+         (swing {:.2}, drift {:+.3}% of total), pooled {:.3} m3, pore {:.3} m3, \
+         atmosphere {:.3} m3, {} showers, \
          residual {:.2e} / atmosphere {:.2e} / total {:.2e}; {}",
+        preset.map_or("none (the default box)", |p| p.name),
         hi - lo,
         100.0 * drift,
+        world.pooled_m3(),
+        world.pore_m3(),
         v.atmosphere_m3,
         v.ledger.showers,
         v.water_residual(),
