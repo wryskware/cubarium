@@ -518,3 +518,97 @@ three-food diet (unimplemented, so the detritus block reports access, not
 intake — decisions §3); **path length** through a component (planar distances
 only); and decisions §8's acceptance gate itself (`N` founder-hours is a backlog
 placeholder, though the t = 0 route fraction is the number such a gate reads).
+
+## Step rule, 2026-09-22
+
+Package 1a (`design/handoffs/voxel-founder-step-2026-09-22.md`), measured on
+branch `founder-step` at 75007b0 (from main at 1d81f3a). "Before" is that
+branch point; "after" is the same binaries with the step rule in. Founders now
+have a climb height in metres on their physiology — browser 0.25 m, shredder
+0.125 m, both placeholders in `design/backlog.md` §1 — a sub-step may change the
+standing layer by up to that many whole voxels, contact reports only solids
+above it, and route connectivity everywhere is one function
+(`cubarium_voxel::walk::components`) with that one rule.
+
+### t = 0 route, `voxel_edible_stock 0 preset=…`
+
+Fractions of total standing foliage; same seed (1), same landforms, same flora
+in both arms. `reach_today` is unchanged by this package and is printed as the
+ceiling the route is now measured against.
+
+| t = 0 | small | default | wide |
+| --- | --- | --- | --- |
+| foliage reachable today (unchanged) | 0.4944 | 0.7181 | 0.7494 |
+| **route-connected, before** | 0.3994 | 0.2472 | 0.3524 |
+| **route-connected, after** | **0.4944** | **0.4841** | **0.3646** |
+| route-connected under the decided band, before | 0.3994 | 0.2345 | 0.2333 |
+| route-connected under the decided band, after | 0.4174 | 0.3921 | 0.3353 |
+| bloomcrown route-connected, before | 0.0000 | 0.0000 | 0.2137 |
+| bloomcrown route-connected, after | 0.1322 | 0.5000 | 0.2058 |
+| glowcap cap in a shredder's component, before | 0.4071 | 0.0000 | 0.4492 |
+| glowcap cap in a shredder's component, after | 1.0000 | 0.7390 | 1.0000 |
+
+Three things the table says. **On `small` and `default` the route stopped being
+the binding link**: after the rule, `route_today` equals `reach_today` to the
+digit on `small` (0.4944) and closes most of the gap on `default` (0.4841
+against 0.7181). What is left out on `small` is out of reach, not out of walk.
+**The shredders' detritus is no longer stranded**: eight founders seeded on
+seven or eight distinct heights now share components covering all or most of the
+litter and glowcap cap. **`wide` barely moved** (0.3524 → 0.3646) and its
+bloomcrown share fell slightly (0.2137 → 0.2058); on that preset the seeder's
+own choice of faces changed with the walk — one browser founder moved from layer
+35 to 43 — and 0.25 m of climb against a 256-column ring of deeper relief joins
+less than it does on the two smaller presets. `wide` is still route-limited.
+
+### 60 minutes, `voxel_founder_autopsy 60 preset=…`
+
+| 60 min | small before | small after | default before | default after |
+| --- | --- | --- | --- | --- |
+| shredder starved / drowned | 13 / 2 | 12 / 1 | 14 / 1 | 23 / 1 |
+| browser starved / drowned | 8 / 2 | 10 / 4 | 16 / 1 | 11 / 3 |
+| removed (no support face) | 0 | 0 | 0 | 0 |
+| **browser extinct at minute** | **33** | **39** | **44** | **never (2 alive)** |
+| shredders alive at 60 min | 1 | 9 | 4 | 8 |
+| shredder bites | 11,903 | 19,385 | 24,779 | 41,057 |
+| browser bites | 12,247 | 21,340 | 27,480 | 21,404 |
+| born (of 36 / 48 births) | 10 | 20 | 20 | 32 |
+| gestations failed | 3 | 0 | 3 | 4 |
+
+The browser line on `default` is the result that matters: the lineage that went
+extinct at minute 44 now still has two bodies at the hour, off 21 % fewer bites
+but spread over a component that holds twice the foliage. On `small` the
+extinction moved six minutes later and did not stop; the browser's remaining
+problem there is reach, which is package 1b's and the layers package's, not the
+route's. Both shredder arms roughly doubled their intake and their survivors —
+the litter and glowcap they were seeded next to but could not walk to is now
+theirs. Nothing was removed for standing on air in either arm, which is the
+check that the rule never puts a body on a face that is not a support face.
+Residuals over 72,000 ticks: fauna ≤ 4.6e-11, flora ≤ 1.2e-10 absolute.
+
+### What the trained centres did with the changed contact channel
+
+`crates/cubarium/tests/encounter_contract.rs` runs 200 ticks of the shipped
+authored habitat with the built-in centres and used to pin the trajectory to the
+bit. It moved, and by more than the seeding did:
+
+| 200 ticks, authored habitat | before | after |
+| --- | --- | --- |
+| standing layers, blind founders | 12 17 22 25 28 36 **39 45** | 12 17 22 25 28 36 **38 46** |
+| standing layers, browsers | **13** 19 20 20 **20 22 33** 48 | **12** 19 20 20 **23 32 36** 48 |
+| Σ pose x | 211.034 | 220.751 |
+| Σ pose z | 45.608 | 54.821 |
+| Σ heading | 60.242 | 50.742 |
+| eaten organic | 0.16375 | 0.10860 |
+| Σ browser cone reading | 36.853 | 28.603 |
+
+The blind founders' seeding is untouched by this package (they are placed from
+the litter pool, not from `browser_faces`), so their two changed layers are pure
+step-rule evidence: two of eight left the layer they were seeded on inside ten
+seconds. The browsers' larger change mixes the step with a seeding set the new
+walk enlarged. The centres were trained against a contact channel that called a
+steppable ledge a wall and now reads it as open ground; over ten seconds that
+shows up as bodies travelling further (Σ pose x and z both up) and turning less,
+and eating a third less in that window — which the hour-long arms above say is a
+transient of the first seconds and not the steady state. Nothing refused to load
+and no centre was retrained: the observation vector is the same 23 and 37 inputs
+it was.
