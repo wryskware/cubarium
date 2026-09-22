@@ -243,6 +243,9 @@ struct Report {
     lineages: Vec<(&'static str, LineageRow)>,
     detritus: Vec<(&'static str, f64, f64)>,
     residuals: [f64; 7],
+    /// The flora's organic, mineral and energy stocks: the denominators of the first
+    /// three residuals.
+    totals: [f64; 3],
 }
 
 #[derive(Clone, Default)]
@@ -554,6 +557,9 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
         detritus.push((name, total_organic, connected));
     }
 
+    // The stocks the residuals below are a residual **of**, so a relative bound can be
+    // read off the report rather than estimated from it.
+    let totals = [fv.organic(), fv.mineral(), fv.energy()];
     let residuals = [
         fv.organic() - fv.ledger.expected_organic(),
         fv.mineral() - fv.ledger.expected_mineral(),
@@ -572,6 +578,7 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
         lineages,
         detritus,
         residuals,
+        totals,
     };
     print_report(&report);
     report
@@ -722,7 +729,7 @@ fn print_headers() {
     println!("detritus,sim_min,pool,organic,in_component,fraction");
     println!(
         "ledger,sim_min,flora_organic,flora_mineral,flora_energy,fauna_organic,fauna_mineral,\
-         fauna_energy,water"
+         fauna_energy,water,flora_organic_total,flora_mineral_total,flora_energy_total"
     );
 }
 
@@ -795,7 +802,7 @@ fn print_report(r: &Report) {
         );
     }
     println!(
-        "ledger,{},{:.3e},{:.3e},{:.3e},{:.3e},{:.3e},{:.3e},{:.3e}",
+        "ledger,{},{:.3e},{:.3e},{:.3e},{:.3e},{:.3e},{:.3e},{:.3e},{:.6},{:.6},{:.6}",
         r.minute,
         r.residuals[0],
         r.residuals[1],
@@ -804,6 +811,9 @@ fn print_report(r: &Report) {
         r.residuals[4],
         r.residuals[5],
         r.residuals[6],
+        r.totals[0],
+        r.totals[1],
+        r.totals[2],
     );
 }
 

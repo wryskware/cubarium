@@ -357,6 +357,21 @@ fn light_per_stand(flora: &mut Flora, world: &World) -> Vec<f64> {
         .iter()
         .map(|s| shade_layers(config, s, voxel_m))
         .collect();
+    // A conservative bound per **stand**, so the pair loop below stays the O(n²) it was
+    // before layers instead of O(n² · layers²): no layer of a stand can shade above the
+    // stand's own highest layer top, or outside its widest layer's footprint. Skipping
+    // on the bound changes no result — it only avoids opening a stand whose every layer
+    // would have been rejected.
+    let envelope: Vec<(f64, f64)> = crowns
+        .iter()
+        .map(|layers| {
+            layers
+                .iter()
+                .fold((f64::NEG_INFINITY, 0.0f64), |(t, r), l| {
+                    (t.max(l.top), r.max(l.radius))
+                })
+        })
+        .collect();
     let width = view.config.width as f64;
 
     let mut out = Vec::with_capacity(stands.len());
@@ -382,6 +397,15 @@ fn light_per_stand(flora: &mut Flora, world: &World) -> Vec<f64> {
             let mut here = open;
             for (j, other) in crowns.iter().enumerate() {
                 if j == i {
+                    continue;
+                }
+                let (top, radius) = envelope[j];
+                if top <= layer.top {
+                    continue;
+                }
+                let sx = wrapped_delta(other.first().map_or(0.0, |o| o.x), layer.x, width);
+                let sz = other.first().map_or(0.0, |o| o.z) - layer.z;
+                if sx * sx + sz * sz > radius * radius {
                     continue;
                 }
                 for above in other {
