@@ -1631,3 +1631,29 @@ cubarium -p cubarium-gpu`.
 
 Return (≤25 lines): commits, the design as built (what each thread owns),
 test counts, what the local run shows, and any risk you see for the board.
+
+## Package D4 — integrated 2026-09-22
+
+Landed af1f61b (the first worker was stopped by a mispress; a second
+finished from its uncommitted staging ring, queue guard and `FrameSource`
+hooks, all kept). As built: the run loop records into a slot the presenter
+lent it and never blocks (no slot or a full ring is a counted drop; a
+waiting frame is reclaimed before a fresher one is recorded, so the newest
+wins); the presenter thread owns `vkQueueSubmit`, the fence wait, the
+socket, the free mask, slot ids and D3's re-attach, reporting Retired
+before Present and Free over a channel; two staging buffers, two uniform
+blocks at a dynamic offset, two timestamp sets per frame; the queue is
+mutex-guarded and `one_shot` drains it before readbacks. Shim target only.
+Semantics in `target/presenter.rs` behind a `Panel` trait, 16 new tests;
+Fable ran the three crates: 866 passed. Local: 61 frames in the first
+second, largest gap 41 ms. Merged d3492df; board round-trip pending
+(target ≥ 55 fps presented at 20 ticks/s). Risks named by the worker:
+nothing local touches the shim's slots, fences or `released` mask; a slow
+daemon release drops frames rather than queuing; the dynamic uniform
+stride is read from the device, a board-side alignment slip would show as
+a wrong sky, not a hang.
+
+Clock thread (2026-09-22): NTP enabled but never synced — DNS on the
+cellular default route times out, so `ntp.ubuntu.com` never resolves; no
+battery RTC (reads 1969). Wrysk's fix: `NTP=` IP literals in a
+timesyncd drop-in; `fake-hwclock` for monotonic boots.

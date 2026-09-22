@@ -38,7 +38,6 @@ use std::io::{IoSlice, IoSliceMut};
 use std::mem::MaybeUninit;
 use std::os::unix::io::{AsFd, BorrowedFd, OwnedFd};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::time::{Duration, Instant};
 
@@ -46,7 +45,9 @@ use anyhow::{Context, Result, anyhow, bail};
 use ash::vk;
 
 use super::dmabuf::{self, LinearImage};
-use super::presenter::{FromPresenter, Mailbox, Panel, present_loop};
+use super::presenter::{
+    Frame, FromPresenter, Mailbox, Panel, PresentSample, PresentStats, present_loop,
+};
 use crate::present::FrameSource;
 use crate::render::{PresentTransform, TargetImage};
 use crate::vk::Gpu;
@@ -293,10 +294,7 @@ impl ShimScanout {
         self.view_format
     }
 
-    /// Submit slot `i`'s recording and wait for its fence.
-    ///
-    /// **The wait stays.** The wire has no fence field, so a `Present` is a promise that
-    /// the image is finished; the only thing that moved is which thread pays for it.
+    /// Submit slot `i`'s recording.
     pub fn submit_slot(&mut self, gpu: &Gpu, i: usize) -> Result<()> {
         let slot = &self.slots[i];
         let one = [slot.command_buffer];
@@ -304,8 +302,19 @@ impl ShimScanout {
         gpu.submit(
             &[vk::SubmitInfo::default().command_buffers(&one)],
             slot.fence,
-        )?;
-        unsafe { gpu.device.wait_for_fences(&[slot.fence], true, u64::MAX) }?;
+        )
+    }
+
+    /// Wait for slot `i`'s fence.
+    ///
+    /// **The wait stays.** The wire has no fence field, so a `Present` is a promise that
+    /// the image is finished; the only thing that moved is which thread pays for it. It
+    /// is separate from the submit so that a report can say which of the two the panel's
+    /// rate is spent in — a driver that renders on the submitting thread and a GPU that
+    /// is simply slow look the same from the outside.
+    pub fn wait_slot(&mut self, gpu: &Gpu, i: usize) -> Result<()> {
+        let fence = [self.slots[i].fence];
+        unsafe { gpu.device.wait_for_fences(&fence, true, u64::MAX) }?;
         Ok(())
     }
 
@@ -490,8 +499,11 @@ struct ShimPanel {
 }
 
 impl Panel for ShimPanel {
-    fn submit_and_wait(&mut self, slot: usize) -> Result<()> {
+    fn submit(&mut self, slot: usize) -> Result<()> {
         self.shim.submit_slot(&self.gpu, slot)
+    }
+    fn wait(&mut self, slot: usize) -> Result<()> {
+        self.shim.wait_slot(&self.gpu, slot)
     }
     fn present(&mut self, slot: usize) -> Result<()> {
         self.shim.present_slot(slot)
@@ -513,7 +525,7 @@ impl Panel for ShimPanel {
 pub struct ShimPresenter {
     mail: Arc<Mailbox>,
     back: Receiver<FromPresenter>,
-    presented: Arc<AtomicU64>,
+    stats: Arc<PresentStats>,
     thread: Option<std::thread::JoinHandle<ShimScanout>>,
     /// The client, once the thread has given it back, so that `destroy` can free it.
     client: Option<ShimScanout>,
@@ -545,14 +557,14 @@ impl ShimPresenter {
         let lent: Vec<usize> = (0..slots.len()).collect();
         let free = lent.iter().copied().collect();
         let mail = Arc::new(Mailbox::new());
-        let presented = Arc::new(AtomicU64::new(0));
+        let stats = Arc::new(PresentStats::default());
         let (tx, back) = channel();
-        let (m, p) = (mail.clone(), presented.clone());
+        let (m, s) = (mail.clone(), stats.clone());
         let thread = std::thread::Builder::new()
             .name("cubarium-present".to_string())
             .spawn(move || {
                 let mut panel = ShimPanel { gpu, shim };
-                if let Err(e) = present_loop(&mut panel, &m, &tx, &p, lent) {
+                if let Err(e) = present_loop(&mut panel, &m, &tx, &s, lent) {
                     let _ = tx.send(FromPresenter::Failed(format!("{e:#}")));
                 }
                 panel.shim
@@ -561,7 +573,7 @@ impl ShimPresenter {
         Ok(ShimPresenter {
             mail,
             back,
-            presented,
+            stats,
             thread: Some(thread),
             client: None,
             slots,
@@ -579,7 +591,16 @@ impl ShimPresenter {
 
     /// Frames the daemon has been shown.
     pub fn presented(&self) -> u64 {
-        self.presented.load(Ordering::Relaxed)
+        self.stats.presented()
+    }
+
+    /// Everything the presenter has done so far, with this side's dropped-frame count
+    /// folded in. The report prints the difference between two of these, so each one is
+    /// about its own interval.
+    pub fn sample(&self) -> PresentSample {
+        let mut sample = self.stats.snapshot();
+        sample.skipped = self.skipped;
+        sample
     }
 
     /// Frames the recorder had nowhere to put.
@@ -601,9 +622,9 @@ impl ShimPresenter {
         // again, and this fresher world takes its place. Reclaiming *before* recording is
         // what keeps the frame given up the newest one recorded, which is the only one
         // the renderer's ring can give back.
-        if let Some(slot) = self.mail.reclaim() {
+        if let Some(frame) = self.mail.reclaim() {
             src.frame_discarded();
-            self.free.push_front(slot);
+            self.free.push_front(frame.slot);
         }
         if self.free.is_empty() || src.frames_in_flight() >= src.frame_capacity() {
             self.skipped += 1;
@@ -627,9 +648,16 @@ impl ShimPresenter {
                 self.transform,
             )),
         )?;
-        if let Some(displaced) = self.mail.post(index) {
+        // What the frame did is the presenter's to report: a frame that redrew the world
+        // and one that only put an already-drawn raster on a new slot cost very different
+        // amounts, and which of the two the panel's rate is made of is the whole question.
+        let frame = Frame {
+            slot: index,
+            redrew: src.redrew_last(),
+        };
+        if let Some(displaced) = self.mail.post(frame) {
             debug_assert!(false, "the recorder reclaims before it records");
-            self.free.push_back(displaced);
+            self.free.push_back(displaced.slot);
         }
         Ok(src.gpu_ms(gpu))
     }

@@ -30,6 +30,8 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
+use cubarium_gpu::target::presenter::PresentSample;
+
 use anyhow::{Context, Result, bail};
 
 use cubarium_gpu::vk::Gpu;
@@ -106,6 +108,15 @@ pub struct VoxelGpuSink {
     ticks_staged: u64,
     /// Ticks whose pack was refused because the GPU still held every staging buffer.
     packs_skipped: u64,
+    /// Frames that put an already-drawn raster on a target instead of drawing the world
+    /// again. A frame between two ticks is the same picture; this counts how many of
+    /// them the renderer was spared.
+    reshown: u64,
+    /// The presenter's totals as of the last report, so each report is about its own
+    /// interval rather than about the whole run.
+    presenter_mark: PresentSample,
+    /// When the sink opened, for the last report's own rate.
+    opened: Instant,
     gpu_ms: f64,
     gpu_stages: [f64; 3],
     present_ms: f64,
@@ -159,6 +170,9 @@ impl VoxelGpuSink {
             frames: 0,
             ticks_staged: 0,
             packs_skipped: 0,
+            reshown: 0,
+            presenter_mark: PresentSample::default(),
+            opened: Instant::now(),
             gpu_ms: 0.0,
             gpu_stages: [0.0; 3],
             present_ms: 0.0,
@@ -303,6 +317,22 @@ impl VoxelGpuSink {
         self.target.presented()
     }
 
+    /// Where a present's time went over the last `seconds`, and what never became one.
+    ///
+    /// **This is the line that says what the panel's ceiling is.** Each phase is per
+    /// present, so they sum to the interval the thread had per frame: mostly idle means
+    /// this thread is not the ceiling; mostly fence means the GPU; mostly submit means a
+    /// driver that renders on the calling thread; mostly slots means the daemon's pacing.
+    /// The redraw-versus-re-present split says whether it is the world pass or the
+    /// upscale onto the panel.
+    pub fn presenter_line(&mut self, seconds: f64) -> Option<String> {
+        let mut now = self.target.sample()?;
+        now.refused_packs = self.packs_skipped;
+        let since = now.since(&self.presenter_mark);
+        self.presenter_mark = now;
+        Some(since.line(seconds, &self.gpu.name))
+    }
+
     /// Draw one frame of whatever was last staged, and present it.
     /// Draw the founding frame: whatever is staged — an empty world, before the real one
     /// exists — under a sky at [`crate::voxel::present::founding_pulse`]'s brightness.
@@ -337,6 +367,9 @@ impl VoxelGpuSink {
         let started = Instant::now();
         let ms = self.target.draw(&self.gpu, &mut self.renderer, ())?;
         self.frames += 1;
+        if !self.renderer.redrew_last() {
+            self.reshown += 1;
+        }
         self.gpu_ms += ms;
         if let Some(split) = self.renderer.gpu_split(&self.gpu) {
             for (acc, stage) in self.gpu_stages.iter_mut().zip(split) {
@@ -404,7 +437,8 @@ impl VoxelGpuSink {
             "cubarium voxel --sink gpu: {} frames at {}x{} ({} px/voxel, depth step {}); \
              GPU {:.3} ms/frame (upload {:.3}, slab walk {:.3}, present {:.3}); \
              target draw {:.3} ms/frame; pack {:.3} ms/tick over {} ticks, \
-             {:.0} KiB per tick; roof from {}",
+             {:.0} KiB per tick; {} frames re-presented an unchanged raster; \
+             roof from {}",
             self.frames,
             p.raster_w,
             p.raster_h,
@@ -418,6 +452,7 @@ impl VoxelGpuSink {
             self.pack_ms / t,
             self.ticks_staged,
             p.upload_bytes() as f64 / 1024.0,
+            self.reshown,
             if p.roof_from_texture {
                 "the uploaded table"
             } else {
@@ -430,12 +465,15 @@ impl VoxelGpuSink {
                 self.capture_ms / n
             );
         }
-        if let Some((presented, skipped)) = self.target.presented() {
+        if self.target.sample().is_some() {
+            let run = self.opened.elapsed().as_secs_f64();
+            let mut all = self.target.sample().expect("the target has a presenter");
+            all.refused_packs = self.packs_skipped;
             eprintln!(
-                "cubarium voxel --sink gpu: the presenting thread showed {presented} of \
-                 the {} frames the loop drew; {skipped} had no free slot, {} packs had \
-                 no free staging buffer",
-                self.frames, self.packs_skipped,
+                "cubarium voxel --sink gpu: over {:.0} s the loop drew {} frames; {}",
+                run,
+                self.frames,
+                all.line(run, &self.gpu.name),
             );
         }
         if self.style_overflow > 0 {
