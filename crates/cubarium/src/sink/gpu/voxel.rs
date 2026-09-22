@@ -317,6 +317,12 @@ impl VoxelGpuSink {
         self.target.presented()
     }
 
+    /// What this sink has spent, cumulatively: packing ticks, and drawing frames. The
+    /// run loop prints the difference between two of these.
+    pub fn draw_split(&self) -> (f64, f64) {
+        (self.pack_ms, self.present_ms)
+    }
+
     /// Where a present's time went over the last `seconds`, and what never became one.
     ///
     /// **This is the line that says what the panel's ceiling is.** Each phase is per

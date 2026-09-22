@@ -46,7 +46,8 @@ use ash::vk;
 
 use super::dmabuf::{self, LinearImage};
 use super::presenter::{
-    Frame, FromPresenter, Mailbox, Panel, PresentSample, PresentStats, present_loop,
+    Frame, FromPresenter, Mailbox, Next, Panel, PresentSample, PresentStats, next_frame,
+    present_loop,
 };
 use crate::present::FrameSource;
 use crate::render::{PresentTransform, TargetImage};
@@ -553,8 +554,13 @@ pub struct ShimPresenter {
     transform: PresentTransform,
     /// Slots the presenter has lent and this side has not used yet, newest first.
     free: std::collections::VecDeque<usize>,
-    /// Frames that had nowhere to go: the panel was holding every slot.
+    /// Frames that had nowhere to go: no free slot, or the renderer already holding as
+    /// many frames as it has per-frame resources for.
     skipped: u64,
+    /// Frames not recorded because the one already waiting showed the same world.
+    held: u64,
+    /// The renderer's content version when the waiting frame was recorded.
+    posted_version: Option<u64>,
     /// Why the presenter stopped, once it has.
     stopped: Option<String>,
 }
@@ -600,6 +606,8 @@ impl ShimPresenter {
             transform,
             free,
             skipped: 0,
+            held: 0,
+            posted_version: None,
             stopped: None,
         })
     }
@@ -619,6 +627,7 @@ impl ShimPresenter {
     pub fn sample(&self) -> PresentSample {
         let mut sample = self.stats.snapshot();
         sample.skipped = self.skipped;
+        sample.held = self.held;
         sample
     }
 
@@ -636,20 +645,45 @@ impl ShimPresenter {
         frame: S::Frame<'_>,
     ) -> Result<f64> {
         self.drain(src)?;
-        // **Newest wins.** A frame the presenter has not started on is not going to be
-        // the picture on the panel; its slot comes back, the upload it carried is owed
-        // again, and this fresher world takes its place. Reclaiming *before* recording is
-        // what keeps the frame given up the newest one recorded, which is the only one
-        // the renderer's ring can give back.
-        if let Some(frame) = self.mail.reclaim() {
-            src.frame_discarded();
-            self.free.push_front(frame.slot);
+        // What to do is decided before any of it is done, so that the rules can be
+        // tested rather than read out of a board log (`presenter::next_frame`).
+        let version = src.content_version();
+        match next_frame(
+            self.mail.pending(),
+            version,
+            self.free.front().copied(),
+            src.frames_in_flight(),
+            src.frame_capacity(),
+        ) {
+            // The frame already waiting shows this same world: recording it again would
+            // build the same commands out of the same texture, and the thread that would
+            // do it has a simulation to run.
+            Next::Keep => {
+                self.held += 1;
+                return Ok(src.gpu_ms(gpu));
+            }
+            Next::Drop => {
+                self.skipped += 1;
+                return Ok(src.gpu_ms(gpu));
+            }
+            // **Newest wins.** The waiting frame is stale: its slot comes back, the
+            // upload it carried is owed again, and the fresher world takes its place.
+            // Reclaiming *before* recording is what keeps the frame given up the newest
+            // one recorded, which is the only one the renderer's ring can give back.
+            Next::Replace { .. } => {
+                if let Some(frame) = self.mail.reclaim() {
+                    src.frame_discarded();
+                    self.free.push_front(frame.slot);
+                }
+            }
+            Next::Record { .. } => {}
         }
-        if self.free.is_empty() || src.frames_in_flight() >= src.frame_capacity() {
+        // The presenter may have taken the waiting frame while that was decided, which
+        // only means there is one fewer slot in hand.
+        let Some(index) = self.free.pop_front() else {
             self.skipped += 1;
             return Ok(src.gpu_ms(gpu));
-        }
-        let index = self.free.pop_front().expect("the free list is not empty");
+        };
         let slot = self.slots[index];
         unsafe {
             gpu.device
@@ -673,7 +707,9 @@ impl ShimPresenter {
         let frame = Frame {
             slot: index,
             redrew: src.redrew_last(),
+            version,
         };
+        self.posted_version = version;
         if let Some(displaced) = self.mail.post(frame) {
             debug_assert!(false, "the recorder reclaims before it records");
             self.free.push_back(displaced.slot);

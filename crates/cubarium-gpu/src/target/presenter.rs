@@ -67,6 +67,59 @@ pub struct Frame {
     /// Whether it redrew the world raster, or only put the last one on a new slot. The
     /// two cost very different amounts and are reported apart.
     pub redrew: bool,
+    /// The renderer's content version when it was recorded, if the renderer keeps one.
+    /// A frame still waiting whose version is the current one would be re-recorded into
+    /// the same commands, so it is left alone instead.
+    pub version: Option<u64>,
+}
+
+/// What the recorder should do this frame, decided before any Vulkan is touched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Next {
+    /// A frame is already waiting that shows this same world: leave it there. Recording
+    /// it again would build the same command buffer out of the same texture, on the one
+    /// thread that has a simulation to run.
+    Keep,
+    /// Nowhere to put a frame: no slot free, or the renderer already holding as many as
+    /// it has per-frame resources for.
+    Drop,
+    /// The waiting frame is stale: take it back — its slot with it — and record the
+    /// fresher world into that same slot.
+    Replace { slot: usize },
+    /// Nothing waiting: record into this slot.
+    Record { slot: usize },
+}
+
+/// The recorder's whole policy, as a function of what it can see.
+///
+/// `pending` is the frame still waiting to be presented, `version` what the renderer
+/// would record now, `free` the slot it would use, and `in_flight`/`capacity` the
+/// renderer's per-frame resources. Pure, so the rules are tested rather than inferred
+/// from a board reading.
+pub fn next_frame(
+    pending: Option<Frame>,
+    version: Option<u64>,
+    free: Option<usize>,
+    in_flight: usize,
+    capacity: usize,
+) -> Next {
+    if let Some(waiting) = pending {
+        // **Newest wins, but only when there is a newer one.** A renderer that does not
+        // version its content never matches, so it is replaced as before.
+        if waiting.version.is_some() && waiting.version == version {
+            return Next::Keep;
+        }
+        // Taking it back frees its ring entry as well as its slot.
+        return if in_flight.saturating_sub(1) >= capacity {
+            Next::Drop
+        } else {
+            Next::Replace { slot: waiting.slot }
+        };
+    }
+    match free {
+        Some(slot) if in_flight < capacity => Next::Record { slot },
+        _ => Next::Drop,
+    }
 }
 
 /// What the presenter thread does with a recorded frame.
@@ -149,6 +202,7 @@ impl PresentStats {
             reshow_ns: g(&self.reshow_ns),
             starved: g(&self.starved),
             lent_sum: g(&self.lent_sum),
+            held: 0,
             skipped: 0,
             refused_packs: 0,
         }
@@ -174,6 +228,9 @@ pub struct PresentSample {
     pub starved: u64,
     /// Slots the recorder held at each present, summed.
     pub lent_sum: u64,
+    /// Frames the recorder did not record because the one already waiting showed the
+    /// same world.
+    pub held: u64,
     /// Frames the **recorder** could not place, filled in by the recorder's own side.
     pub skipped: u64,
     /// Packs the renderer refused because every staging buffer was still being read.
@@ -196,6 +253,7 @@ impl PresentSample {
             reshow_ns: d(self.reshow_ns, earlier.reshow_ns),
             starved: d(self.starved, earlier.starved),
             lent_sum: d(self.lent_sum, earlier.lent_sum),
+            held: d(self.held, earlier.held),
             skipped: d(self.skipped, earlier.skipped),
             refused_packs: d(self.refused_packs, earlier.refused_packs),
         }
@@ -225,7 +283,7 @@ impl PresentSample {
             "presenter — {} shown ({:.1}/s), {} redrew the world; per present idle {:.1}, \
              submit {:.1}, fence {:.1}, show {:.1}, slots {:.1} ms; \
              redraw {:.1} ms vs re-present {:.1} ms ({reshown}); \
-             {} frames had no slot, {} packs refused, {} starved of a slot, \
+             {} frames had no slot, {} already current, {} packs refused, {} starved of a slot, \
              {:.1} slots in hand; on {device}",
             self.presented,
             self.presented as f64 / seconds.max(1e-9),
@@ -238,6 +296,7 @@ impl PresentSample {
             each(self.redraw_ns, self.redrawn),
             each(self.reshow_ns, reshown),
             self.skipped,
+            self.held,
             self.refused_packs,
             self.starved,
             if self.presented == 0 {
@@ -300,6 +359,11 @@ impl Mailbox {
         drop(state);
         self.posted.notify_one();
         displaced
+    }
+
+    /// The frame still waiting, without taking it.
+    pub fn pending(&self) -> Option<Frame> {
+        self.lock().frame
     }
 
     /// Take back the waiting frame, if the presenter has not started on it yet.
@@ -486,7 +550,74 @@ mod tests {
     const POLL: Duration = Duration::from_micros(200);
 
     fn frame(slot: usize) -> Frame {
-        Frame { slot, redrew: true }
+        Frame {
+            slot,
+            redrew: true,
+            version: None,
+        }
+    }
+
+    /// A frame recorded at a known world version.
+    fn at(slot: usize, version: u64) -> Frame {
+        Frame {
+            slot,
+            redrew: true,
+            version: Some(version),
+        }
+    }
+
+    /// **The work the main thread was doing twice.** A frame is already waiting and the
+    /// world has not moved since it was recorded, so re-recording it would build the same
+    /// command buffer out of the same texture. The board's main thread is the panel's
+    /// ceiling now; this is one of the things it was spending itself on.
+    #[test]
+    fn a_waiting_frame_that_still_shows_this_world_is_left_alone() {
+        assert_eq!(
+            next_frame(Some(at(1, 7)), Some(7), Some(2), 1, 2),
+            Next::Keep
+        );
+    }
+
+    /// Once the world has moved the waiting frame is stale, and it is replaced in its own
+    /// slot — the one it gives back — so the newest world is what goes up.
+    #[test]
+    fn a_waiting_frame_whose_world_has_moved_is_replaced_in_its_own_slot() {
+        assert_eq!(
+            next_frame(Some(at(1, 7)), Some(8), Some(2), 1, 2),
+            Next::Replace { slot: 1 },
+            "its own slot, not the free one: nothing else has touched it"
+        );
+    }
+
+    /// A renderer that does not version its content is never kept — the old behaviour,
+    /// unchanged, for anything but the voxel strip.
+    #[test]
+    fn a_renderer_that_cannot_say_what_it_holds_is_always_replaced() {
+        assert_eq!(
+            next_frame(Some(frame(1)), None, Some(2), 1, 2),
+            Next::Replace { slot: 1 }
+        );
+        assert_eq!(
+            next_frame(Some(at(1, 7)), None, Some(2), 1, 2),
+            Next::Replace { slot: 1 }
+        );
+    }
+
+    /// With nothing waiting it records into the slot the presenter lent it, and with no
+    /// slot — or a ring already full — the frame is dropped rather than waited for.
+    #[test]
+    fn nothing_waiting_records_and_nothing_free_drops() {
+        assert_eq!(
+            next_frame(None, Some(7), Some(2), 0, 2),
+            Next::Record { slot: 2 }
+        );
+        assert_eq!(next_frame(None, Some(7), None, 0, 2), Next::Drop);
+        assert_eq!(next_frame(None, Some(7), Some(2), 2, 2), Next::Drop);
+        assert_eq!(
+            next_frame(Some(at(1, 7)), Some(8), Some(2), 3, 2),
+            Next::Drop,
+            "even taking the stale one back would leave the ring full"
+        );
     }
 
     /// A panel that records what it was asked to do and answers from a script.
@@ -777,12 +908,14 @@ mod tests {
         mail.post(Frame {
             slot: 0,
             redrew: true,
+            version: None,
         });
         mail.quit();
         present_loop(&mut panel, &mail, &tx, &stats, vec![0, 1], POLL).unwrap();
         mail.post(Frame {
             slot: 1,
             redrew: false,
+            version: None,
         });
         present_loop(&mut panel, &mail, &tx, &stats, vec![1], POLL).unwrap();
         drop(rx);
@@ -830,6 +963,7 @@ mod report {
             reshow_ns: ms(8.1, 17),
             starved: 12,
             lent_sum: 2 * 1197,
+            held: 402,
             skipped: 1853,
             refused_packs: 0,
         };
@@ -843,6 +977,7 @@ mod report {
         );
         assert!(line.contains("1853 frames had no slot"), "{line}");
         assert!(line.contains("2.0 slots in hand"), "{line}");
+        assert!(line.contains("402 already current"), "{line}");
     }
 }
 

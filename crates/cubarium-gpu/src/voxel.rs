@@ -541,6 +541,10 @@ pub struct VoxelRenderer {
     /// changes the picture — a pack, a parameter, the weather, the founding pulse —
     /// clears this.
     raster_current: bool,
+    /// What a frame recorded now would show, as a number that moves whenever the picture
+    /// would: a pack, a parameter, the weather. Two recordings at the same version are
+    /// the same frame, so the second one is not worth making.
+    version: u64,
     /// Whether the last recorded frame redrew the raster or only re-presented it. The
     /// presenter reports the two costs apart, which is what says whether the panel's
     /// ceiling is the world pass or the upscale onto it.
@@ -846,6 +850,7 @@ impl VoxelRenderer {
             dirty: false,
             raster_current: false,
             redrew: true,
+            version: 0,
             staged: false,
             uniforms,
             nearest,
@@ -878,6 +883,7 @@ impl VoxelRenderer {
         }
         self.params = params;
         self.raster_current = false;
+        self.version += 1;
         Ok(())
     }
 
@@ -889,6 +895,7 @@ impl VoxelRenderer {
         self.params.atmosphere = atmosphere;
         self.params.rain_tick = rain_tick;
         self.raster_current = false;
+        self.version += 1;
     }
 
     /// Whether a pack has a staging buffer to go into. False while every one of them is
@@ -942,6 +949,7 @@ impl VoxelRenderer {
         self.dirty = true;
         self.staged = true;
         self.raster_current = false;
+        self.version += 1;
         true
     }
 
@@ -970,6 +978,11 @@ impl VoxelRenderer {
     /// Whether the last recorded frame redrew the world raster.
     pub fn redrew_last(&self) -> bool {
         self.redrew
+    }
+
+    /// What a frame recorded now would show. See [`VoxelRenderer::version`].
+    pub fn content_version(&self) -> u64 {
+        self.version
     }
 
     /// Frames recorded and not yet retired.
@@ -1294,6 +1307,10 @@ impl FrameSource for VoxelRenderer {
 
     fn redrew_last(&self) -> bool {
         VoxelRenderer::redrew_last(self)
+    }
+
+    fn content_version(&self) -> Option<u64> {
+        Some(VoxelRenderer::content_version(self))
     }
 
     fn gpu_ms(&self, gpu: &Gpu) -> f64 {
