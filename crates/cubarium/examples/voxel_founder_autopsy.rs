@@ -67,8 +67,8 @@ use cubarium::voxel::install_default_founders;
 use cubarium::voxel::scene;
 use cubarium_voxel::{Command as WorldCommand, VoxelView, World};
 use cubarium_voxel_fauna::{
-    Animal, Departure, Fauna, FaunaConfig, Founder, Senses, TICK_HZ, browser_cone_readings,
-    browser_mouth_candidates, effective_config,
+    Animal, ConeCensus, ConeHit, Departure, Fauna, FaunaConfig, Founder, Senses, TICK_HZ,
+    browser_cone_census, browser_cone_readings, browser_mouth_candidates, effective_config,
 };
 use cubarium_voxel_flora::{Flora, FloraConfig, FloraView, Species as Plant};
 use cubarium_voxel_sim::{Sim, SimConfig};
@@ -85,6 +85,16 @@ const BROWSER_REACH_M: f64 = 2.0;
 
 const HARNESS_RAIN_M_PER_S: f64 = 0.0002;
 const CLOSED_EVAPORATION_M_PER_S: f64 = 0.0001;
+
+/// First seed a `preset=` arm offers the host's lake gate. The host draws random seeds;
+/// an arm has to be re-runnable, so the draws are `base`, `base + 1`, … instead. Any
+/// other base is `seed=N`.
+const PRESET_SEED_BASE: u64 = 1;
+
+/// The pitch band the browser's cone actually covers: the manifest's ray pitch offsets.
+/// A crown outside it at a given distance is not something a ray can reach, whatever the
+/// occlusion map says.
+const PITCH_BAND_DEG: f64 = 20.0;
 
 #[derive(Clone, Copy)]
 struct FoodProbe {
@@ -156,46 +166,93 @@ fn main() {
     // default, exactly as `cubarium voxel`'s ambient run installs them; `heuristic` as a
     // trailing argument keeps the old, observation-only control.
     let heuristic = args.iter().any(|a| a == "heuristic");
+    // `preset=<small|default|wide>` is the **landscape arm**: the world the host builds,
+    // not the world this file used to build for itself.
+    let preset: Option<&'static cubarium_voxel::Preset> = args
+        .iter()
+        .find_map(|a| a.strip_prefix("preset="))
+        .map(|name| {
+            cubarium_voxel::Preset::find(name).unwrap_or_else(|| {
+                let known: Vec<&str> = cubarium_voxel::PRESETS.iter().map(|p| p.name).collect();
+                panic!("no landform preset is called {name:?}; the shipped ones are {known:?}")
+            })
+        });
+    let seed_base: u64 = args
+        .iter()
+        .find_map(|a| a.strip_prefix("seed=").and_then(|s| s.parse().ok()))
+        .unwrap_or(PRESET_SEED_BASE);
     assert!(
-        !closed || generated,
+        !closed || generated || preset.is_some(),
         "closed diagnosis requires the generated world"
+    );
+    assert!(
+        preset.is_none() || !generated,
+        "a preset arm builds its own world: drop `generated closed`"
     );
 
     let cfg = VoxelConfig::default();
-    let mut world = if generated {
-        let mut world_cfg = cfg.world.clone();
-        if closed {
-            let dry = VoxelConfig::default().world;
-            let basin_floor_m = World::new(dry.clone())
-                .outlet_cell()
-                .map_or(0.0, |(_, y, _)| f64::from(y) * dry.voxel_m);
-            world_cfg = cubarium_voxel::Config {
-                rain_m_per_s: HARNESS_RAIN_M_PER_S,
-                evaporation_m_per_s: CLOSED_EVAPORATION_M_PER_S,
-                initial_aquifer_head_m: basin_floor_m + 1.0,
-                closed_water_budget: true,
-                ..world_cfg
-            };
-        }
-        let mut world = World::new(world_cfg);
-        if closed {
-            world.apply(WorldCommand::SetOutlet { open: true });
-        }
-        world
+    let (mut world, mut flora, scene_label) = if let Some(preset) = preset {
+        // Exactly what `cubarium voxel` does with no TOML, for this preset: the recipe's
+        // own extents and cell size, the recipe's own water (`World::new` writes the
+        // cycle onto the config), the lake gate over `LAKE_SEED_TRIES` draws, and the
+        // plant layer scaled to the cell size the way the host scales it.
+        let world_cfg = preset.config();
+        let (world, seed, rejected) = cubarium::voxel::ambient_world(&world_cfg, seed_base);
+        let lake = cubarium_voxel::hydrate::lake(&world);
+        let flora = Flora::new(FloraConfig::for_voxel_size(world.config().voxel_m));
+        eprintln!(
+            "scene: preset {} ({}x{}x{} at {} m, seed {seed}, {rejected} rejected), \
+             lake {:.2} m3 over {:.1} m2 visible; flora scaled for {} m cells",
+            preset.name,
+            world.config().width,
+            world.config().height,
+            world.config().depth,
+            world.config().voxel_m,
+            lake.volume_m3,
+            lake.visible_m2,
+            world.config().voxel_m,
+        );
+        (world, flora, format!("preset {} seed {seed}", preset.name))
     } else {
-        scene::authored(cfg.world.clone())
+        let mut world = if generated {
+            let mut world_cfg = cfg.world.clone();
+            if closed {
+                let dry = VoxelConfig::default().world;
+                let basin_floor_m = World::new(dry.clone())
+                    .outlet_cell()
+                    .map_or(0.0, |(_, y, _)| f64::from(y) * dry.voxel_m);
+                world_cfg = cubarium_voxel::Config {
+                    rain_m_per_s: HARNESS_RAIN_M_PER_S,
+                    evaporation_m_per_s: CLOSED_EVAPORATION_M_PER_S,
+                    initial_aquifer_head_m: basin_floor_m + 1.0,
+                    closed_water_budget: true,
+                    ..world_cfg
+                };
+            }
+            let mut world = World::new(world_cfg);
+            if closed {
+                world.apply(WorldCommand::SetOutlet { open: true });
+            }
+            world
+        } else {
+            scene::authored(cfg.world.clone())
+        };
+        let flora = Flora::new(FloraConfig::default());
+        let label = format!(
+            "{} world, {} water budget",
+            if generated { "generated" } else { "authored" },
+            if closed { "closed" } else { "open" },
+        );
+        eprintln!("scene: {label}");
+        // `world` is rebound below; the binding here keeps the two arms one expression.
+        let _ = &mut world;
+        (world, flora, label)
     };
-    let mut flora = Flora::new(FloraConfig::default());
     let mut fauna = Fauna::new(FaunaConfig::default());
     let counts = if half_founders { [4, 4] } else { [8, 8] };
     let seeded = habitat::seed_with_founder_counts(&mut world, &mut flora, &mut fauna, counts);
     let fauna_cfg = *fauna.config();
-    eprintln!(
-        "scene: {} world, {} water budget; founder counts {:?}",
-        if generated { "generated" } else { "authored" },
-        if closed { "closed" } else { "open" },
-        counts,
-    );
+    eprintln!("scene: {scene_label}; founder counts {counts:?}");
     eprintln!(
         "seeded: stands={} logs={} litter_tiles={} founders={:?}",
         seeded.stands, seeded.logs, seeded.litter_tiles, seeded.founders
@@ -245,6 +302,18 @@ fn main() {
     let mut senses = Senses::new();
     senses.settle(&world.view(), &flora.view());
     let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
+    // The host opens a closed world's outlet here — after the layers are built and
+    // before the first tick — because under a closed budget the outlet is the return
+    // flow into the atmosphere, not an export (`voxel/mod.rs`). The `generated closed`
+    // arm opened it before seeding and keeps doing so; a preset arm matches the host.
+    if sim.world().config().closed_water_budget && !sim.world().outlet_open() {
+        sim.world_mut()
+            .apply(WorldCommand::SetOutlet { open: true });
+        eprintln!("scene: closed water budget — the outlet is open as the return flow");
+    }
+    // The host also runs a viability probe here. It runs on a **clone** of the world and
+    // reports only, so it cannot reach this run; it is skipped and nothing is matched by
+    // skipping it.
 
     // One header line per record type, so a `grep MIN,` of this file is a CSV with its
     // own column names a line above it.
@@ -273,8 +342,28 @@ fn main() {
     println!(
         "HEADER,CONE,tick,minute,sampled,front_left_fraction,front_fraction,front_right_fraction,front_left_proximity,front_proximity,front_right_proximity,all_sectors_nonzero"
     );
+    println!(
+        "HEADER,BCONE,tick,minute,id,sector,rays,clear,terrain,water,stripped,foliage,pool,body,mean_foliage_m"
+    );
+    println!(
+        "HEADER,CONEX,tick,minute,sector,browsers,clear,terrain,water,stripped,foliage,pool,body,mean_foliage_m,blind_browsers"
+    );
+    println!(
+        "HEADER,WANDER,tick,minute,id,travelled_m,distinct_columns,turn_share,mean_exits,cone_samples,blind_samples"
+    );
+    println!(
+        "HEADER,DEATHCONE,tick,minute,id,cause,census_tick,clear,terrain,water,stripped,foliage,pool,body,crown_planar_m,crown_layer_offset_voxels,crown_elevation_deg,crown_in_pitch_band,probe_class,probe_m,blind_sample_share,blind_minute_share,life_travelled_m,life_columns,turn_share"
+    );
     println!("HEADER,SUMMARY,ticks,what,values");
     let mut prev: Vec<(u64, Seen)> = snapshot(&sim, &[]);
+    let mut wander: std::collections::HashMap<u64, Wander> = std::collections::HashMap::new();
+    let mut cones: std::collections::HashMap<u64, LastCone> = std::collections::HashMap::new();
+    // A body is in its terminal band when its reserve is under this many joules-equivalent
+    // of resting upkeep; read off the browser's own physiology, not a tuned number.
+    let terminal_reserve = {
+        let sc = fauna_cfg.founder(Founder::Browser).core;
+        sc.maintenance_per_s * sc.body_min * TERMINAL_UPKEEP_S
+    };
     let mut previous_causes = [[0u64; Departure::COUNT]; Founder::COUNT];
     let mut crown_history = CrownHistory::default();
     observe_crowns(&sim, &mut crown_history);
@@ -288,6 +377,67 @@ fn main() {
         sim.step();
         let now = snapshot(&sim, &prev);
         observe_crowns(&sim, &mut crown_history);
+        // Wander, every tick: the ground one browser actually covers, against the ground
+        // its cone can see. `travelled_m` alone cannot tell a body walking a circle from
+        // one crossing the ring.
+        {
+            let c = sim.world().config().clone();
+            for (id, s) in &now {
+                if s.founder != Some(Founder::Browser) {
+                    continue;
+                }
+                let w = wander.entry(*id).or_default();
+                let col = (
+                    ((s.x / c.voxel_m).floor() as i64).rem_euclid(i64::from(c.width)) as u32,
+                    (s.z / c.voxel_m).floor().clamp(0.0, f64::from(c.depth - 1)) as u32,
+                );
+                w.columns.insert(col);
+                w.life_columns.insert(col);
+                w.ticks += 1;
+                if s.held_turn.abs() > 0.1 {
+                    w.turning_ticks += 1;
+                }
+                w.exits_sum += s.exits as u64;
+                w.life_travelled_m = s.travelled_m;
+            }
+        }
+        // The cone census: at the regular cadence for every browser, and **every** tick
+        // for one in its terminal band, so the row printed at a death is the world that
+        // body last looked at.
+        {
+            let regular = tick % CONE_SAMPLE_TICKS == 0;
+            let (world, flora, fauna) = sim.layers();
+            let view = world.view();
+            let fv = flora.view();
+            let av = fauna.view();
+            for animal in av
+                .animals
+                .iter()
+                .filter(|a| a.founder == Some(Founder::Browser))
+            {
+                let terminal = animal.reserve <= terminal_reserve;
+                if !regular && !terminal {
+                    continue;
+                }
+                let Some(cone) = last_cone(&view, &fv, &av, animal, tick) else {
+                    continue;
+                };
+                if regular {
+                    let w = wander.entry(animal.id).or_default();
+                    w.samples += 1;
+                    w.life_samples += 1;
+                    let blank = cone
+                        .per_sector
+                        .iter()
+                        .all(|(counts, _)| counts[ConeHit::FoliageCrown.index()] == 0);
+                    if blank {
+                        w.blind_samples += 1;
+                        w.life_blind_samples += 1;
+                    }
+                }
+                cones.insert(animal.id, cone);
+            }
+        }
 
         // Departures: an id in the previous tick and not in this one. The **counts** by
         // cause come from the ledger and are exact; this per-body label is re-derived
@@ -317,6 +467,11 @@ fn main() {
                     was.travelled_m,
                     was.exits,
                 );
+                if was.founder == Some(Founder::Browser) {
+                    report_death_cone(tick, *id, cause.name(), cones.get(id), wander.get(id));
+                }
+                cones.remove(id);
+                wander.remove(id);
             }
         }
 
@@ -363,11 +518,325 @@ fn main() {
                 report_body(tick, minute, *id, s);
             }
             report_minute(minute, &sim, &mut previous_causes, &crown_history);
+            report_cone_classes(tick, minute, &cones, &now);
+            report_wander(tick, minute, &mut wander, &now);
         }
         prev = now;
     }
 
     summary(&sim, total_ticks);
+}
+
+/// How often the cone census is taken for a living browser, in ticks. The census
+/// rebuilds the occupancy map, so it is not free; 5 s is fine enough that "all three
+/// sectors blank" is measured and not inferred from one sample a minute, and coarse
+/// enough that a 60-minute arm stays a few minutes of wall clock.
+const CONE_SAMPLE_TICKS: u64 = 100;
+
+/// Seconds of resting upkeep below which a body is in its terminal band and its cone is
+/// censused **every** tick, so the row printed at its death is the world it last saw and
+/// not one up to five seconds stale.
+const TERMINAL_UPKEEP_S: f64 = 30.0;
+
+/// What one browser's ground covering looks like inside one minute, and over its life.
+#[derive(Clone, Default)]
+struct Wander {
+    /// `travelled_m` at the last minute boundary, so the minute's own metres are a
+    /// difference and not a running total.
+    travelled_at_minute_m: f64,
+    columns: std::collections::HashSet<(u32, u32)>,
+    ticks: u64,
+    turning_ticks: u64,
+    exits_sum: u64,
+    /// Cone censuses taken this minute, and how many of them read zero foliage in all
+    /// three sectors.
+    samples: u64,
+    blind_samples: u64,
+    /// The same two over the whole life, plus the minutes in which **every** sample was
+    /// blank: "the share of minutes with all three sectors at zero foliage".
+    life_samples: u64,
+    life_blind_samples: u64,
+    minutes: u64,
+    blind_minutes: u64,
+    life_travelled_m: f64,
+    life_columns: std::collections::HashSet<(u32, u32)>,
+}
+
+/// The cone as one browser last saw it, kept so the row can be printed once the body is
+/// gone from the view.
+#[derive(Clone)]
+struct LastCone {
+    tick: u64,
+    /// First-hit counts over the whole 27-ray fan, indexed by [`ConeHit::index`].
+    counts: [u32; 7],
+    /// Per sector, the same counts and the mean distance of its foliage hits.
+    per_sector: [([u32; 7], f64); 3],
+    /// The nearest **living** crown by straight line: planar metres, the signed voxels
+    /// between its crown layer and the eye, its elevation from the eye in degrees, and
+    /// whether that elevation is inside the fan's pitch band.
+    crown: Option<NearestCrown>,
+}
+
+#[derive(Clone, Copy)]
+struct NearestCrown {
+    planar_m: f64,
+    layer_offset_voxels: f64,
+    elevation_deg: f64,
+    in_pitch_band: bool,
+    /// What a ray aimed straight at it strikes first, and how far away.
+    probe: ConeHit,
+    probe_m: f64,
+}
+
+/// The cone census of one browser, reduced to what the rows need.
+fn last_cone(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    av: &cubarium_voxel_fauna::FaunaView<'_>,
+    animal: &Animal,
+    tick: u64,
+) -> Option<LastCone> {
+    let crown = nearest_living_crown(view, fv, animal);
+    // A probe aimed at that crown, in the ray's own frame: yaw from the body's heading,
+    // pitch from horizontal. Marched by `browser_cone_census` with the same ray the fan
+    // uses, so "blocked by what" is the fan's own answer and not a second opinion.
+    let probes: Vec<(f64, f64)> = crown.iter().map(|c| (c.0, c.1)).collect();
+    let census: ConeCensus = browser_cone_census(view, fv, av, animal, &probes)?;
+    let mut counts = [0u32; 7];
+    for ray in &census.rays {
+        counts[ray.hit.index()] += 1;
+    }
+    let per_sector = std::array::from_fn(|si| {
+        (
+            census.counts(si),
+            census.nearest_foliage_mean_m(si).unwrap_or(f64::INFINITY),
+        )
+    });
+    let crown = crown.map(|(_, elevation_rad, planar_m, layer_offset_voxels)| {
+        let probe = census.probes.first().copied();
+        NearestCrown {
+            planar_m,
+            layer_offset_voxels,
+            elevation_deg: elevation_rad.to_degrees(),
+            in_pitch_band: elevation_rad.to_degrees().abs() <= PITCH_BAND_DEG,
+            probe: probe.map_or(ConeHit::Clear, |r| r.hit),
+            probe_m: probe.map_or(f64::INFINITY, |r| r.distance_m),
+        }
+    });
+    Some(LastCone {
+        tick,
+        counts,
+        per_sector,
+        crown,
+    })
+}
+
+/// The nearest stand with foliage standing in it, as the cone would have to reach it:
+/// `(yaw from the body's heading, elevation from the eye, planar metres, signed voxels
+/// between the crown's layer and the eye)`. Straight-line nearest, ignoring occlusion —
+/// the question is whether anything edible is out there at all.
+fn nearest_living_crown(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    animal: &Animal,
+) -> Option<(f64, f64, f64, f64)> {
+    let c = view.config;
+    let v = c.voxel_m;
+    let mut best: Option<(f64, &cubarium_voxel_flora::Stand)> = None;
+    for stand in fv.stands.iter().filter(|s| s.foliage > 0.0) {
+        let d = planar_m(view, animal, stand.site.x, stand.site.z, v);
+        if best.is_none_or(|(bd, _)| d < bd) {
+            best = Some((d, stand));
+        }
+    }
+    let (planar, stand) = best?;
+    // The crown's own cell layer, the way `cone_occupancy` indexes it.
+    let sc = fv.config.species(stand.species);
+    let crown_layer = f64::from(stand.site.y) + f64::from(sc.crown_voxels(stand.wood));
+    // The eye: one and a half voxels over the standing face (`senses::cone_origin`).
+    let eye_layer = f64::from(animal.site.y) + 1.5;
+    let layer_offset = crown_layer - eye_layer;
+    // Yaw in the ray's frame: `dir = (sin yaw, ., cos yaw)`, so it is measured from +z
+    // toward +x, and `x` takes the short way round the ring.
+    let w_m = f64::from(c.width) * v;
+    let mut dx = (f64::from(stand.site.x) + 0.5) * v - animal.pose.x;
+    if dx > w_m / 2.0 {
+        dx -= w_m;
+    } else if dx < -w_m / 2.0 {
+        dx += w_m;
+    }
+    let dz = (f64::from(stand.site.z) + 0.5) * v - animal.pose.z;
+    let yaw = dx.atan2(dz) - animal.pose.heading_rad;
+    // The crown cell's centre against the eye's own height.
+    let rise = (crown_layer + 0.5) * v - (eye_layer * v);
+    let elevation = rise.atan2(planar.max(1e-9));
+    Some((yaw, elevation, planar, layer_offset))
+}
+
+/// One `BCONE` row per living browser per sector, and one `CONEX` row per sector
+/// aggregated over them: which wall the fan is looking at, named.
+fn report_cone_classes(
+    tick: u64,
+    minute: u64,
+    cones: &std::collections::HashMap<u64, LastCone>,
+    now: &[(u64, Seen)],
+) {
+    let living: Vec<&u64> = now
+        .iter()
+        .filter(|(_, s)| s.founder == Some(Founder::Browser))
+        .map(|(id, _)| id)
+        .collect();
+    let mut totals = [[0.0f64; 7]; 3];
+    let mut foliage_m = [(0.0f64, 0u64); 3];
+    let mut counted = 0u64;
+    let mut blind = 0u64;
+    for id in &living {
+        let Some(cone) = cones.get(*id) else {
+            continue;
+        };
+        counted += 1;
+        if cone
+            .per_sector
+            .iter()
+            .all(|(c, _)| c[ConeHit::FoliageCrown.index()] == 0)
+        {
+            blind += 1;
+        }
+        for (si, (counts, mean_m)) in cone.per_sector.iter().enumerate() {
+            let rays: u32 = counts.iter().sum();
+            let denom = f64::from(rays.max(1));
+            print!("BCONE,{tick},{minute},{id},{si},{rays}");
+            for hit in ConeHit::ALL {
+                let share = f64::from(counts[hit.index()]) / denom;
+                totals[si][hit.index()] += share;
+                print!(",{share:.4}");
+            }
+            if mean_m.is_finite() {
+                foliage_m[si].0 += mean_m;
+                foliage_m[si].1 += 1;
+                println!(",{mean_m:.3}");
+            } else {
+                println!(",inf");
+            }
+        }
+    }
+    for si in 0..3 {
+        let denom = f64::from(counted.max(1) as u32);
+        print!("CONEX,{tick},{minute},{si},{counted}");
+        for hit in ConeHit::ALL {
+            print!(",{:.4}", totals[si][hit.index()] / denom);
+        }
+        if foliage_m[si].1 > 0 {
+            print!(",{:.3}", foliage_m[si].0 / foliage_m[si].1 as f64);
+        } else {
+            print!(",inf");
+        }
+        println!(",{blind}");
+    }
+}
+
+/// One `WANDER` row per living browser per minute, and the minute's own accumulators
+/// rolled into the life totals and cleared.
+fn report_wander(
+    tick: u64,
+    minute: u64,
+    wander: &mut std::collections::HashMap<u64, Wander>,
+    now: &[(u64, Seen)],
+) {
+    for (id, s) in now
+        .iter()
+        .filter(|(_, s)| s.founder == Some(Founder::Browser))
+    {
+        let Some(w) = wander.get_mut(id) else {
+            continue;
+        };
+        let metres = s.travelled_m - w.travelled_at_minute_m;
+        let turn_share = if w.ticks == 0 {
+            0.0
+        } else {
+            w.turning_ticks as f64 / w.ticks as f64
+        };
+        let mean_exits = if w.ticks == 0 {
+            0.0
+        } else {
+            w.exits_sum as f64 / w.ticks as f64
+        };
+        println!(
+            "WANDER,{tick},{minute},{id},{metres:.3},{},{turn_share:.4},{mean_exits:.3},{},{}",
+            w.columns.len(),
+            w.samples,
+            w.blind_samples,
+        );
+        w.minutes += 1;
+        if w.samples > 0 && w.samples == w.blind_samples {
+            w.blind_minutes += 1;
+        }
+        w.travelled_at_minute_m = s.travelled_m;
+        w.columns.clear();
+        w.ticks = 0;
+        w.turning_ticks = 0;
+        w.exits_sum = 0;
+        w.samples = 0;
+        w.blind_samples = 0;
+    }
+}
+
+/// The census the body last took, printed once it is gone.
+fn report_death_cone(
+    tick: u64,
+    id: u64,
+    cause: &str,
+    cone: Option<&LastCone>,
+    wander: Option<&Wander>,
+) {
+    let minute = tick as f64 / TICKS_PER_MIN as f64;
+    let Some(cone) = cone else {
+        println!("DEATHCONE,{tick},{minute:.2},{id},{cause},none");
+        return;
+    };
+    print!("DEATHCONE,{tick},{minute:.2},{id},{cause},{}", cone.tick);
+    for hit in ConeHit::ALL {
+        print!(",{}", cone.counts[hit.index()]);
+    }
+    match cone.crown {
+        Some(c) => print!(
+            ",{:.3},{:.2},{:.1},{},{},{}",
+            c.planar_m,
+            c.layer_offset_voxels,
+            c.elevation_deg,
+            c.in_pitch_band,
+            c.probe.name(),
+            if c.probe_m.is_finite() {
+                format!("{:.3}", c.probe_m)
+            } else {
+                "inf".to_string()
+            },
+        ),
+        None => print!(",inf,nan,nan,false,none,inf"),
+    }
+    match wander {
+        Some(w) => println!(
+            ",{:.4},{:.4},{:.2},{},{:.4}",
+            if w.life_samples == 0 {
+                f64::NAN
+            } else {
+                w.life_blind_samples as f64 / w.life_samples as f64
+            },
+            if w.minutes == 0 {
+                f64::NAN
+            } else {
+                w.blind_minutes as f64 / w.minutes as f64
+            },
+            w.life_travelled_m,
+            w.life_columns.len(),
+            if w.ticks == 0 {
+                f64::NAN
+            } else {
+                w.turning_ticks as f64 / w.ticks as f64
+            },
+        ),
+        None => println!(",nan,nan,nan,0,nan"),
+    }
 }
 
 fn lineage(founder: Option<Founder>) -> &'static str {

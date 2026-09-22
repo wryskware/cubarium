@@ -48,21 +48,81 @@ const HARNESS_RAIN_M_PER_S: f64 = 0.0002;
 /// a model default, and the same one `cubarium-voxel`'s `water_cycle` example uses.
 const CLOSED_EVAPORATION_M_PER_S: f64 = 0.0001;
 
+/// First seed a `preset=` arm offers the host's lake gate; `seed=N` for another. The
+/// host draws at random, and an arm has to be re-runnable.
+const PRESET_SEED_BASE: u64 = 1;
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let hours: f64 = args.get(1).map_or(6.0, |a| {
         a.parse()
             .expect("usage: voxel_census [HOURS] [authored|generated] [open|closed] [heuristic]")
     });
-    let generated = args.get(2).is_some_and(|a| a == "generated");
-    let closed = args.get(3).is_some_and(|a| a == "closed");
+    let generated = args.iter().any(|a| a == "generated");
+    let closed = args.iter().any(|a| a == "closed");
+    // `preset=<small|default|wide>` is the landscape arm: the world `cubarium voxel`
+    // builds with no TOML for that preset, not the world this file builds for itself.
+    // Same construction as `voxel_founder_autopsy`'s arm, on purpose.
+    let preset: Option<&'static cubarium_voxel::Preset> = args
+        .iter()
+        .find_map(|a| a.strip_prefix("preset="))
+        .map(|name| {
+            cubarium_voxel::Preset::find(name).unwrap_or_else(|| {
+                let known: Vec<&str> = cubarium_voxel::PRESETS.iter().map(|p| p.name).collect();
+                panic!("no landform preset is called {name:?}; the shipped ones are {known:?}")
+            })
+        });
+    let seed_base: u64 = args
+        .iter()
+        .find_map(|a| a.strip_prefix("seed=").and_then(|s| s.parse().ok()))
+        .unwrap_or(PRESET_SEED_BASE);
     // The shipped world's founders are driven by the built-in trained centres by
     // default, exactly as `cubarium voxel`'s ambient run installs them — this measures
     // the world that ships, not the seeder's bare heuristics. `heuristic` as a trailing
     // argument keeps the old, observation-only control.
-    let heuristic = args.get(4).is_some_and(|a| a == "heuristic");
+    let heuristic = args.iter().any(|a| a == "heuristic");
 
     let cfg = VoxelConfig::default();
+    if let Some(preset) = preset {
+        assert!(!generated, "a preset arm builds its own world");
+        let (mut world, seed, rejected) =
+            cubarium::voxel::ambient_world(&preset.config(), seed_base);
+        let mut flora = Flora::new(FloraConfig::for_voxel_size(world.config().voxel_m));
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        eprintln!(
+            "scene: preset {} ({}x{}x{} at {} m, seed {seed}, {rejected} rejected)",
+            preset.name,
+            world.config().width,
+            world.config().height,
+            world.config().depth,
+            world.config().voxel_m,
+        );
+        let seeded = habitat::seed(&mut world, &mut flora, &mut fauna);
+        eprintln!(
+            "seeded: stands={} logs={} litter_tiles={} founders={:?} animals={}",
+            seeded.stands,
+            seeded.logs,
+            seeded.litter_tiles,
+            seeded.founders,
+            seeded.animals()
+        );
+        if heuristic {
+            eprintln!("founders: the observation-only heuristic (control)");
+        } else {
+            install_default_founders(&mut fauna).expect("the built-in centres validate");
+        }
+        let mut senses = Senses::new();
+        senses.settle(&world.view(), &flora.view());
+        let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
+        // The host opens a closed world's outlet after the layers are built and before
+        // the first tick; under a closed budget it is the return flow, not an export.
+        if sim.world().config().closed_water_budget && !sim.world().outlet_open() {
+            sim.world_mut()
+                .apply(WorldCommand::SetOutlet { open: true });
+        }
+        run(&mut sim, hours);
+        return;
+    }
     let mut world = if generated {
         // The closed budget's water is the flora study's own: the shower rate it ran on,
         // the aquifer charged a metre above the basin floor, and the outlet open — which
@@ -123,15 +183,21 @@ fn main() {
     senses.settle(&world.view(), &flora.view());
     let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
 
+    run(&mut sim, hours);
+}
+
+/// Step the coupled layers for the asked-for hours, writing one row a simulated minute.
+/// Both arms end here, so a preset world is measured by the same code path as the ridge.
+fn run(sim: &mut Sim, hours: f64) {
     let total_ticks = (hours * 3600.0 * f64::from(TICK_HZ)) as u64;
     print_header();
-    print_row(0, &sim);
+    print_row(0, sim);
     let mut tick = 0u64;
     while tick < total_ticks {
         sim.step();
         tick += 1;
         if tick % TICKS_PER_MIN == 0 {
-            print_row(tick / TICKS_PER_MIN, &sim);
+            print_row(tick / TICKS_PER_MIN, sim);
         }
     }
 }

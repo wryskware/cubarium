@@ -424,7 +424,26 @@ fn load_or_create_world(args: &Voxel, cfg: &VoxelConfig) -> Result<(World, Strin
 }
 
 /// Random seeds tried before the generator gives up and keeps the wettest world it saw.
-const LAKE_SEED_TRIES: usize = 24;
+pub const LAKE_SEED_TRIES: usize = 24;
+
+/// Build a world the way the ambient run does, for a diagnostic arm that has to be the
+/// shipped landscape and not an approximation of it.
+///
+/// It is exactly `load_or_create_world`'s generated branch — [`generate_with_a_lake`]
+/// over [`LAKE_SEED_TRIES`] draws against the recipe's own `min_lake_m2` — with the seed
+/// stream made deterministic so the arm can be re-run: the draws are
+/// `base`, `base + 1`, … rather than `random_seed()`. Nothing about the world, its
+/// water or its rejection gate differs; only which seeds are offered.
+///
+/// Read-only: it builds a world and changes no rule.
+pub fn ambient_world(cfg: &cubarium_voxel::Config, base: u64) -> (World, u64, usize) {
+    let mut next = base;
+    generate_with_a_lake(cfg, None, LAKE_SEED_TRIES, move || {
+        let seed = next;
+        next = next.wrapping_add(1);
+        seed
+    })
+}
 
 /// Draw generated worlds until one has a lake the camera can actually read.
 ///
