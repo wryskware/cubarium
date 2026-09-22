@@ -76,3 +76,21 @@ re-runs one arm.
 The site list with before/after forms, the identity and invariance test
 results, the drowning table, the commit list, anything the rule could not
 express.
+
+## Integration note (Fable, 2026-09-22)
+
+Landed 849f40e..9d0d172 (tests first; one `pore_flux_m3` helper behind
+the four flux sites; `Material::conductivity_m_per_s`; five fixtures moved;
+`water_cycle preset=` arm; census "Water units"). Suite green (2158). Fable
+re-ran `voxel_plant_autopsy 1 preset=default` on this branch and on the
+pre-1c binary: byte-identical over the hour, as required; on small the
+drowning lines fell 22 → 16 (worker: 14 → 8 stands by minute 10).
+
+Kept as the worker chose: the outlet weir still scales its export by cell
+volume, its doc calling that deliberate, so the export is not retuned here
+(a terrain-line question); the mirrored-basin fixture's tolerance loosened
+from 1e-6 to 5e-3 because the frozen spill split now lands on one substep
+head comparison, a documented order dependence, conservation still mirrored
+at 1e-12; four 1 m-cell fixtures needed 4× the ticks (transport is
+legitimately slower there), a knowing brush with the short-test line, suite
+still 5 s.
