@@ -676,8 +676,8 @@ impl Water {
         // the least of that.
         lake_depth_m: 0.75,
         min_lake_m2: 6.0,
-        reentry_m3_per_s: 0.0,
-        min_tier_pools: 0,
+        reentry_m3_per_s: 1.0e-3,
+        min_tier_pools: 1,
     };
 
     /// `small`'s ring is 60 m² of footprint against `default`'s 192, and both the store's
@@ -696,6 +696,10 @@ impl Water {
 
     pub const SMALL: Water = Water {
         shower_volume_m3: 0.125,
+        // T2's sweep: the stream's thinnest cell must clear the presenter's water
+        // threshold, and a 0.125 m voxel holds an eighth of a 0.25 m one, so an eighth of
+        // the rate gives the same fill fraction. Ten times the margin, sky within ±5 %.
+        reentry_m3_per_s: 1.2e-4,
         // Three voxels at 0.125 m: a two-voxel, quarter-metre pond. Deeper reads better —
         // four voxels lifts the median from 5.2 to 7.1 m² — but four is where this ring's
         // grottos start dying: 5 habitable hollows over eight seeds becomes 3, and the

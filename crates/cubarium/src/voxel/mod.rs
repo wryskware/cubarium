@@ -2003,7 +2003,7 @@ mod tests {
                 cfg.world.depth,
                 cfg.world.voxel_m
             ),
-            (160, 48, 24, 0.125),
+            (160, 72, 24, 0.125),
             "the Tachyon ring: 20 m around at 4 px per voxel"
         );
         let text = std::fs::read_to_string(&path).unwrap();
@@ -2028,6 +2028,8 @@ mod tests {
         let staged = |min_lake_m2: f64| {
             let mut recipe = cubarium_voxel::Recipe::DEFAULT;
             recipe.water.min_lake_m2 = min_lake_m2;
+            // This test is about the lake bar alone; the tier-pool bar is asked of the presets.
+            recipe.water.min_tier_pools = 0;
             cubarium_voxel::Config {
                 width: 32,
                 height: 24,
