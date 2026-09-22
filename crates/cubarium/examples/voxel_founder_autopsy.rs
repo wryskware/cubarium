@@ -593,7 +593,7 @@ fn last_cone(
     animal: &Animal,
     tick: u64,
 ) -> Option<LastCone> {
-    let crown = nearest_living_crown(view, fv, animal);
+    let crown = nearest_living_crown(view, fv, av.config, animal);
     // A probe aimed at that crown, in the ray's own frame: yaw from the body's heading,
     // pitch from horizontal. Marched by `browser_cone_census` with the same ray the fan
     // uses, so "blocked by what" is the fan's own answer and not a second opinion.
@@ -635,6 +635,7 @@ fn last_cone(
 fn nearest_living_crown(
     view: &VoxelView<'_>,
     fv: &FloraView<'_>,
+    config: &cubarium_voxel_fauna::FaunaConfig,
     animal: &Animal,
 ) -> Option<(f64, f64, f64, f64)> {
     let c = view.config;
@@ -650,9 +651,11 @@ fn nearest_living_crown(
     // The crown's own cell layer, the way `cone_occupancy` indexes it.
     let sc = fv.config.species(stand.species);
     let crown_layer = f64::from(stand.site.y) + f64::from(sc.crown_voxels(stand.wood));
-    // The eye: one and a half voxels over the standing face (`senses::cone_origin`).
-    let eye_layer = f64::from(animal.site.y) + 1.5;
-    let layer_offset = crown_layer - eye_layer;
+    // The eye, in metres: `0.8 × body height` over the standing surface
+    // (`senses::cone_origin`; `design/handoffs/voxel-body-anchors-2026-09-22.md`).
+    let eye_m = cubarium_voxel_fauna::surface_m(animal.site.y, v)
+        + cubarium_voxel_fauna::body_of(config, animal).map_or(0.0, |b| b.eye_m);
+    let layer_offset = crown_layer - eye_m / v;
     // Yaw in the ray's frame: `dir = (sin yaw, ., cos yaw)`, so it is measured from +z
     // toward +x, and `x` takes the short way round the ring.
     let w_m = f64::from(c.width) * v;
@@ -665,7 +668,7 @@ fn nearest_living_crown(
     let dz = (f64::from(stand.site.z) + 0.5) * v - animal.pose.z;
     let yaw = dx.atan2(dz) - animal.pose.heading_rad;
     // The crown cell's centre against the eye's own height.
-    let rise = (crown_layer + 0.5) * v - (eye_layer * v);
+    let rise = (crown_layer + 0.5) * v - eye_m;
     let elevation = rise.atan2(planar.max(1e-9));
     Some((yaw, elevation, planar, layer_offset))
 }
@@ -861,7 +864,7 @@ fn snapshot(sim: &Sim, prev: &[(u64, Seen)]) -> Vec<(u64, Seen)> {
         .map(|a| {
             let sc = effective_config(fauna.config(), a);
             let depth = view.water_depth_m(i64::from(a.site.x), a.site.y, a.site.z);
-            let food = food_probe(&view, &fv, a);
+            let food = food_probe(&view, &fv, fauna.config(), a);
             (
                 a.id,
                 Seen {
@@ -893,7 +896,12 @@ fn snapshot(sim: &Sim, prev: &[(u64, Seen)]) -> Vec<(u64, Seen)> {
 
 /// Planar distance and contact evidence for the nearest stand with foliage. The browser
 /// reach bit is checked against the actual mouth probe columns, not the wider cone.
-fn food_probe(view: &VoxelView<'_>, fv: &FloraView<'_>, a: &Animal) -> FoodProbe {
+fn food_probe(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    config: &cubarium_voxel_fauna::FaunaConfig,
+    a: &Animal,
+) -> FoodProbe {
     let voxel_m = view.config.voxel_m;
     let mut best = f64::INFINITY;
     if matches!(a.founder, Some(Founder::Blind)) {
@@ -909,7 +917,7 @@ fn food_probe(view: &VoxelView<'_>, fv: &FloraView<'_>, a: &Animal) -> FoodProbe
             crown_in_mouth: false,
         };
     }
-    let mouth = browser_mouth_candidates(view, fv, a).unwrap_or_default();
+    let mouth = browser_mouth_candidates(view, fv, config, a).unwrap_or_default();
     let mut nearest = None;
     for stand in fv.stands.iter().filter(|s| s.foliage > 0.0) {
         let dist = planar_m(view, a, stand.site.x, stand.site.z, voxel_m);
@@ -1081,7 +1089,7 @@ fn report_minute(
         let reserve: f64 = mine.iter().map(|a| a.reserve).sum();
         let dists: Vec<f64> = mine
             .iter()
-            .map(|a| food_probe(&view, &fv, a).dist_m)
+            .map(|a| food_probe(&view, &fv, fauna.config(), a).dist_m)
             .collect();
         let in_reach = dists.iter().filter(|d| **d <= reach_m(f)).count();
         let mean_dist = if n == 0 {

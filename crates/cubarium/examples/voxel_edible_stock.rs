@@ -16,18 +16,20 @@
 //! thirty simulated minutes prints three CSV blocks measuring the chain:
 //!
 //! 1. `stock`, per plant species: stands, foliage organic, and the organic that is
-//!    reachable, visible and route-connected, each under **today's implemented rules**
-//!    and under the **decided** band and fan.
+//!    reachable, visible and route-connected under the **implemented** rules, plus one
+//!    column for the part of decisions §6 that is still unimplemented — the five-pitch
+//!    fan with transparent ground pools, which package 5's retrain owns.
 //! 2. `lineage`, per founder: bodies alive, their standing-height distribution, mean
 //!    distance to the nearest reachable stand, and the share with one inside 2 m.
 //! 3. `detritus`: litter, carrion and glowcap cap organic, and the share of each lying
 //!    in a walkable component that holds a living shredder.
 //!
 //! Nothing here steps, senses or feeds: every rule it asks is the model's own, through
-//! `cubarium_voxel_fauna`'s encounter helpers. What differs between the two arms is
-//! *only* the mouth band, the body the band and the fan are anchored to, and the fan
-//! itself — the set of legal standing faces is the same in both, so the comparison
-//! isolates the anatomy and not the terrain.
+//! `cubarium_voxel_fauna`'s encounter helpers. Since package 1b
+//! (`design/handoffs/voxel-body-anchors-2026-09-22.md`) the mouth band, the body and
+//! the eye **are** the model's, so the old "today against decided" mouth arms have
+//! collapsed into one; the fan's pitch set is the only thing still measured as a
+//! hypothesis.
 //!
 //! The rules and their sources are written down in
 //! `design/voxel-encounter-contract-2026-09-21.md`.
@@ -41,9 +43,9 @@ use cubarium::voxel::scene;
 use cubarium_voxel::{Command as WorldCommand, VoxelView};
 use cubarium_voxel_fauna::{
     ConeHit, Fauna, FaunaConfig, Founder, Manifest, Pose, Senses, SightMap, TICK_HZ,
-    band_crown_layers, climb_voxels, crown_columns, crown_layer, eye_above_surface_m, eye_origin_m,
-    foliage_stands_in_layers, mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg,
-    standable_faces, walkable_components,
+    climb_voxels, crown_columns, crown_layer, eye_origin_m, foliage_stands_in_layers,
+    mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg, standable_faces,
+    walkable_components,
 };
 use cubarium_voxel_flora::{Flora, FloraConfig, Site, Species as Plant};
 use cubarium_voxel_sim::{Sim, SimConfig};
@@ -55,20 +57,13 @@ const TICKS_PER_REPORT: u64 = 30 * 60 * TICK_HZ as u64;
 const PRESET_SEED_BASE: u64 = 1;
 
 // ---------------------------------------------------------------------------
-// The decided anatomy (`design/handoffs/voxel-organism-decisions-2026-09-21.md`).
-// These are *hypotheses measured against*, not model values: nothing below is read by
-// the simulation.
+// The one part of decisions §6 the model does **not** yet run: the five-pitch fan, and
+// a ground pool that is not a wall. Both are package 5's and the backlog's, and both
+// are measured here as hypotheses. The body, the band and the eye are no longer
+// hypotheses — they are read off the live physiology.
 // ---------------------------------------------------------------------------
 
-/// Decisions §1: the browser adult is the ladder's 0.375 m animal, and the ladder draws
-/// it 6 × 3 × 3 voxels of 0.125 m, so width and height are a third of the length.
-const DECIDED_BROWSER_LENGTH_M: f64 = 0.375;
-const DECIDED_BROWSER_HEIGHT_M: f64 = DECIDED_BROWSER_LENGTH_M / 3.0;
-/// Decisions §2: one physical mouth band `[0, 1.33 × body height]` over the standing
-/// surface — 0.249375 m for the adult, the dossier's raised neck.
-const DECIDED_BAND_CEILING_M: f64 = 1.33 * DECIDED_BROWSER_HEIGHT_M;
-/// Decisions §6: the eye at 0.8 × body height, and five pitches instead of three.
-const DECIDED_EYE_HEIGHT_M: f64 = 0.8 * DECIDED_BROWSER_HEIGHT_M;
+/// Decisions §6: five pitches instead of the manifest's three.
 const DECIDED_PITCHES_DEG: [f64; 5] = [-40.0, -20.0, 0.0, 20.0, 40.0];
 
 /// An observer id no animal has: a ray cast from a face nobody occupies is occluded by
@@ -169,62 +164,22 @@ fn main() {
 // The two arms.
 // ---------------------------------------------------------------------------
 
-/// One arm's mouth: which body it measures with, and which crown layers it accepts from
-/// a face at `standing_y`.
-#[derive(Clone, Copy)]
-struct Mouth {
-    manifest: Manifest,
-    /// `None` means today's implemented whole-voxel mouth; `Some(c)` a metre band with
-    /// ceiling `c` over the standing surface.
-    band_ceiling_m: Option<f64>,
-}
-
-impl Mouth {
-    fn today() -> Mouth {
-        Mouth {
-            manifest: Founder::Browser.manifest(),
-            band_ceiling_m: None,
-        }
-    }
-
-    /// The decided body and the decided band. The manifest's own geometry is the only
-    /// thing changed: length and width take the ladder's adult, so the horizontal reach
-    /// — `0.25 × body length`, "as today" (decisions §2) — and the footprint follow.
-    fn decided() -> Mouth {
-        let mut manifest = Founder::Browser.manifest();
-        manifest.body_length_m = DECIDED_BROWSER_LENGTH_M;
-        manifest.body_width_m = DECIDED_BROWSER_HEIGHT_M;
-        Mouth {
-            manifest,
-            band_ceiling_m: Some(DECIDED_BAND_CEILING_M),
-        }
-    }
-
-    fn layers(&self, standing_y: u32, voxel_m: f64) -> std::ops::RangeInclusive<i64> {
-        match self.band_ceiling_m {
-            None => mouth_crown_layers_at(standing_y, &self.manifest, voxel_m),
-            Some(c) => band_crown_layers(standing_y, voxel_m, c),
-        }
-    }
-}
-
-/// One arm's eye: where it sits over the standing surface, and which pitches it casts.
+/// One arm's fan: the pitches it casts, and whether a ground pool blocks a ray. The
+/// **eye is the model's** on both arms now (`0.8 × body height` over the standing
+/// surface), so what is left to compare is decisions §6's pitch set and its "a ground
+/// pool is not a wall", neither of which is implemented.
 #[derive(Clone, Copy)]
 struct Fan {
-    /// `None` means today's anchor — one and a half **voxels** over the standing face.
-    eye_height_m: Option<f64>,
     pitches_deg: &'static [f64],
     pools_occlude: bool,
 }
 
-const TODAY_FAN: Fan = Fan {
-    eye_height_m: None,
+const LIVE_FAN: Fan = Fan {
     pitches_deg: &cubarium_voxel_fauna::BROWSER_RAY_PITCH_OFFSETS_DEG,
     pools_occlude: true,
 };
 
-const DECIDED_FAN: Fan = Fan {
-    eye_height_m: Some(DECIDED_EYE_HEIGHT_M),
+const FIVE_PITCH_FAN: Fan = Fan {
     pitches_deg: &DECIDED_PITCHES_DEG,
     pools_occlude: false,
 };
@@ -237,17 +192,15 @@ const DECIDED_FAN: Fan = Fan {
 struct SpeciesRow {
     stands: usize,
     foliage: f64,
-    reach_today: f64,
-    reach_band: f64,
-    visible_today: f64,
-    visible_decided: f64,
-    route_today: f64,
-    route_band: f64,
-    /// As `route_*`, but against the components the **seeded** founders stood in rather
+    reach: f64,
+    visible: f64,
+    /// What the still-unimplemented five-pitch fan would see (decisions §6, package 5).
+    visible_five_pitch: f64,
+    route: f64,
+    /// As `route`, but against the components the **seeded** founders stood in rather
     /// than the living ones. After a lineage dies out the live measure is zero by
     /// definition and says nothing about the landscape; this one still does.
-    route_seeded_today: f64,
-    route_seeded_band: f64,
+    route_seeded: f64,
 }
 
 #[derive(Clone)]
@@ -264,10 +217,8 @@ struct Report {
 struct LineageRow {
     alive: usize,
     heights: BTreeMap<u32, usize>,
-    mean_distance_today: Option<f64>,
-    mean_distance_band: Option<f64>,
-    share_within_2m_today: Option<f64>,
-    share_within_2m_band: Option<f64>,
+    mean_distance_m: Option<f64>,
+    share_within_2m: Option<f64>,
 }
 
 fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> Report {
@@ -277,22 +228,24 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
     let c = wv.config;
     let v = c.voxel_m;
 
-    let today = Mouth::today();
-    let decided = Mouth::decided();
     let browser_phys = *sim.fauna().config().founder(Founder::Browser);
     let browser_core = browser_phys.core;
-    let blind_manifest = Founder::Blind.manifest();
+    // The **adult** body of each lineage: the ceiling this landscape offers a grown
+    // animal, which is what a stock measurement is about. It is the model's own
+    // geometry now, not a hypothesis (`FounderPhysiology::adult_body`).
+    let browser_body = browser_phys.adult_body();
+    let browser_manifest = Founder::Browser.manifest();
     let blind_phys = *sim.fauna().config().founder(Founder::Blind);
     let blind_core = blind_phys.core;
+    let blind_body = blind_phys.adult_body();
     // The route rule, one function, one climb per lineage
     // (`design/handoffs/voxel-founder-step-2026-09-22.md`).
     let browser_climb = climb_voxels(&browser_phys, c.voxel_m);
     let blind_climb = climb_voxels(&blind_phys, c.voxel_m);
 
-    // One set of legal standing faces, shared by both arms: a support face with wadeable
-    // water and the browser's headroom over it. Keeping it the same in both arms is what
-    // makes the band and the fan the only variables.
-    let faces = standable_faces(&wv, &today.manifest, browser_core.wade_depth_m);
+    // The legal standing faces: a support face with wadeable water and the browser's
+    // own height of void over it.
+    let faces = standable_faces(&wv, &browser_body, browser_core.wade_depth_m);
     let face_index: HashMap<(u32, u32, u32), usize> = faces
         .iter()
         .enumerate()
@@ -300,13 +253,13 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
         .collect();
     let components = walkable_components(&faces, c.width, browser_climb);
 
-    // The mouth columns of every legal face, per arm, and the index from a column back
-    // to the faces that can put a mouth over it.
-    let mouth_cols = |mouth: &Mouth| -> (Vec<Vec<(i64, u32)>>, HashMap<(u32, u32), Vec<usize>>) {
+    // The mouth columns of every legal face, and the index from a column back to the
+    // faces that can put a mouth over it.
+    let (per_face_cols, reach_map) = {
         let mut per_face: Vec<Vec<(i64, u32)>> = Vec::with_capacity(faces.len());
         let mut map: HashMap<(u32, u32), Vec<usize>> = HashMap::new();
         for (i, face) in faces.iter().enumerate() {
-            let cols = mouth_columns_from_face(&wv, *face, &mouth.manifest);
+            let cols = mouth_columns_from_face(&wv, *face, &browser_body);
             for &(cx, cz) in &cols {
                 map.entry((cx.rem_euclid(i64::from(c.width)) as u32, cz))
                     .or_default()
@@ -316,8 +269,6 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
         }
         (per_face, map)
     };
-    let (cols_today, reach_today_map) = mouth_cols(&today);
-    let (cols_band, reach_band_map) = mouth_cols(&decided);
 
     // The components a living browser stands in.
     let browser_components: HashSet<usize> = av
@@ -341,8 +292,8 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
         .map(|a| ((a.site.x, a.site.y, a.site.z), a.id))
         .collect();
 
-    let sight_today = SightMap::new(&wv, &fv, &av, TODAY_FAN.pools_occlude);
-    let sight_decided = SightMap::new(&wv, &fv, &av, DECIDED_FAN.pools_occlude);
+    let sight_live = SightMap::new(&wv, &fv, &av, LIVE_FAN.pools_occlude);
+    let sight_five = SightMap::new(&wv, &fv, &av, FIVE_PITCH_FAN.pools_occlude);
 
     let mut rows: Vec<(&'static str, SpeciesRow)> = Plant::ALL
         .iter()
@@ -350,8 +301,7 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
         .collect();
     let mut total = SpeciesRow::default();
     // Per stand: is it reachable at all, and from a face in a browser's component?
-    let mut reachable_today_sites: Vec<(Site, f64)> = Vec::new();
-    let mut reachable_band_sites: Vec<(Site, f64)> = Vec::new();
+    let mut reachable_sites: Vec<(Site, f64)> = Vec::new();
 
     for stand in fv.stands.iter() {
         let row = &mut rows[stand.species.index()].1;
@@ -365,38 +315,19 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
         let layer = crown_layer(&fv, stand);
         let columns = crown_columns(&fv, &wv, stand);
 
-        for (mouth, map, per_face, reach, route, route_seeded, sites) in [
-            (
-                &today,
-                &reach_today_map,
-                &cols_today,
-                &mut row.reach_today,
-                &mut row.route_today,
-                &mut row.route_seeded_today,
-                &mut reachable_today_sites,
-            ),
-            (
-                &decided,
-                &reach_band_map,
-                &cols_band,
-                &mut row.reach_band,
-                &mut row.route_band,
-                &mut row.route_seeded_band,
-                &mut reachable_band_sites,
-            ),
-        ] {
+        {
             let mut any = false;
             let mut connected = false;
             let mut connected_seeded = false;
             for column in &columns {
-                for &i in map.get(column).map(Vec::as_slice).unwrap_or(&[]) {
+                for &i in reach_map.get(column).map(Vec::as_slice).unwrap_or(&[]) {
                     let face = faces[i];
-                    let layers = mouth.layers(face.y, v);
+                    let layers = mouth_crown_layers_at(face.y, &browser_body, v);
                     if !layers.contains(&layer) {
                         continue;
                     }
                     // The acceptance rule itself, not a re-derivation of it.
-                    if !foliage_stands_in_layers(&fv, &wv, &per_face[i], &layers)
+                    if !foliage_stands_in_layers(&fv, &wv, &per_face_cols[i], &layers)
                         .iter()
                         .any(|(site, _)| *site == stand.site)
                     {
@@ -414,20 +345,20 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
                 }
             }
             if any {
-                *reach += stand.foliage;
-                sites.push((stand.site, stand.foliage));
+                row.reach += stand.foliage;
+                reachable_sites.push((stand.site, stand.foliage));
             }
             if connected {
-                *route += stand.foliage;
+                row.route += stand.foliage;
             }
             if connected_seeded {
-                *route_seeded += stand.foliage;
+                row.route_seeded += stand.foliage;
             }
         }
 
         for (fan, sight, into) in [
-            (&TODAY_FAN, &sight_today, &mut row.visible_today),
-            (&DECIDED_FAN, &sight_decided, &mut row.visible_decided),
+            (&LIVE_FAN, &sight_live, &mut row.visible),
+            (&FIVE_PITCH_FAN, &sight_five, &mut row.visible_five_pitch),
         ] {
             if sees_stand(
                 &wv,
@@ -437,60 +368,50 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
                 &columns,
                 layer,
                 fan,
-                &today.manifest,
+                &browser_manifest,
+                &browser_body,
             ) {
                 *into += stand.foliage;
             }
         }
     }
     for (_, row) in &rows {
-        total.reach_today += row.reach_today;
-        total.reach_band += row.reach_band;
-        total.visible_today += row.visible_today;
-        total.visible_decided += row.visible_decided;
-        total.route_today += row.route_today;
-        total.route_band += row.route_band;
-        total.route_seeded_today += row.route_seeded_today;
-        total.route_seeded_band += row.route_seeded_band;
+        total.reach += row.reach;
+        total.visible += row.visible;
+        total.visible_five_pitch += row.visible_five_pitch;
+        total.route += row.route;
+        total.route_seeded += row.route_seeded;
     }
 
     // --- lineages ---
     let mut lineages = Vec::new();
     for founder in Founder::ALL {
         let mut lr = LineageRow::default();
-        let mut d_today: Vec<f64> = Vec::new();
-        let mut d_band: Vec<f64> = Vec::new();
+        let mut distances: Vec<f64> = Vec::new();
         for a in av.animals.iter().filter(|a| a.founder == Some(founder)) {
             lr.alive += 1;
             *lr.heights.entry(a.site.y).or_default() += 1;
             if founder != Founder::Browser {
                 continue;
             }
-            for (sites, into) in [
-                (&reachable_today_sites, &mut d_today),
-                (&reachable_band_sites, &mut d_band),
-            ] {
-                if let Some(d) = sites
-                    .iter()
-                    .map(|(site, _)| horizontal_m(&wv, &a.pose, *site))
-                    .fold(None, |best: Option<f64>, d| {
-                        Some(best.map_or(d, |b| b.min(d)))
-                    })
-                {
-                    into.push(d);
-                }
+            if let Some(d) = reachable_sites
+                .iter()
+                .map(|(site, _)| horizontal_m(&wv, &a.pose, *site))
+                .fold(None, |best: Option<f64>, d| {
+                    Some(best.map_or(d, |b| b.min(d)))
+                })
+            {
+                distances.push(d);
             }
         }
-        lr.mean_distance_today = mean(&d_today);
-        lr.mean_distance_band = mean(&d_band);
-        lr.share_within_2m_today = share_within(&d_today, 2.0);
-        lr.share_within_2m_band = share_within(&d_band, 2.0);
-        debug_assert!(founder == Founder::Browser || lr.mean_distance_today.is_none());
+        lr.mean_distance_m = mean(&distances);
+        lr.share_within_2m = share_within(&distances, 2.0);
+        debug_assert!(founder == Founder::Browser || lr.mean_distance_m.is_none());
         lineages.push((founder.name(), lr));
     }
 
     // --- detritus, against the shredders' own components ---
-    let blind_faces = standable_faces(&wv, &blind_manifest, blind_core.wade_depth_m);
+    let blind_faces = standable_faces(&wv, &blind_body, blind_core.wade_depth_m);
     let blind_index: HashMap<(u32, u32, u32), usize> = blind_faces
         .iter()
         .enumerate()
@@ -559,8 +480,9 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
 /// crown cells unoccluded, at one of the fan's pitches.
 ///
 /// The yaw is aimed at the cell, because the fan sweeps every yaw as the body turns; the
-/// pitch set and the eye height are the arm. The march, the sub-step, the step cap and
-/// the order of the occlusion tests are the live cone's.
+/// **pitch set and the pool rule** are the arm, and the eye is the model's own. The
+/// march, the sub-step, the step cap and the order of the occlusion tests are the live
+/// cone's.
 #[allow(clippy::too_many_arguments)]
 fn sees_stand(
     wv: &VoxelView<'_>,
@@ -571,6 +493,7 @@ fn sees_stand(
     layer: i64,
     fan: &Fan,
     manifest: &Manifest,
+    body: &cubarium_voxel_fauna::Body,
 ) -> bool {
     let c = wv.config;
     let v = c.voxel_m;
@@ -616,10 +539,7 @@ fn sees_stand(
             .copied()
             .unwrap_or(NO_OBSERVER);
         let pose = Pose::at_site(face, v);
-        let origin = match fan.eye_height_m {
-            None => eye_origin_m(wv, &pose, face.y),
-            Some(h) => eye_above_surface_m(&pose, face.y, v, h),
-        };
+        let origin = eye_origin_m(wv, &pose, face.y, body);
         for target in &targets {
             let dx = wrapped_delta(target.0 - origin.0, f64::from(c.width) * v);
             let dz = target.2 - origin.2;
@@ -693,15 +613,10 @@ fn share_within(xs: &[f64], limit: f64) -> Option<f64> {
 
 fn print_headers() {
     println!(
-        "stock,sim_min,species,stands,foliage,reach_today,reach_band,visible_today,\
-         visible_decided,route_today,route_band,route_seeded_today,route_seeded_band,\
-         f_reach_today,f_reach_band,f_visible_today,f_visible_decided,f_route_today,f_route_band,\
-         f_route_seeded_today,f_route_seeded_band"
+        "stock,sim_min,species,stands,foliage,reach,visible,visible_five_pitch,route,\
+         route_seeded,f_reach,f_visible,f_visible_five_pitch,f_route,f_route_seeded"
     );
-    println!(
-        "lineage,sim_min,founder,alive,heights,mean_m_to_reachable_today,\
-         mean_m_to_reachable_band,share_2m_today,share_2m_band"
-    );
+    println!("lineage,sim_min,founder,alive,heights,mean_m_to_reachable,share_2m");
     println!("detritus,sim_min,pool,organic,in_component,fraction");
     println!(
         "ledger,sim_min,flora_organic,flora_mineral,flora_energy,fauna_organic,fauna_mineral,\
@@ -715,26 +630,20 @@ fn fraction(part: f64, whole: f64) -> f64 {
 
 fn print_species(minute: u64, name: &str, r: &SpeciesRow) {
     println!(
-        "stock,{minute},{name},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},\
-         {:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4}",
+        "stock,{minute},{name},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},\
+         {:.4},{:.4},{:.4},{:.4},{:.4}",
         r.stands,
         r.foliage,
-        r.reach_today,
-        r.reach_band,
-        r.visible_today,
-        r.visible_decided,
-        r.route_today,
-        r.route_band,
-        r.route_seeded_today,
-        r.route_seeded_band,
-        fraction(r.reach_today, r.foliage),
-        fraction(r.reach_band, r.foliage),
-        fraction(r.visible_today, r.foliage),
-        fraction(r.visible_decided, r.foliage),
-        fraction(r.route_today, r.foliage),
-        fraction(r.route_band, r.foliage),
-        fraction(r.route_seeded_today, r.foliage),
-        fraction(r.route_seeded_band, r.foliage),
+        r.reach,
+        r.visible,
+        r.visible_five_pitch,
+        r.route,
+        r.route_seeded,
+        fraction(r.reach, r.foliage),
+        fraction(r.visible, r.foliage),
+        fraction(r.visible_five_pitch, r.foliage),
+        fraction(r.route, r.foliage),
+        fraction(r.route_seeded, r.foliage),
     );
 }
 
@@ -751,14 +660,12 @@ fn print_report(r: &Report) {
     for (name, l) in &r.lineages {
         let heights: Vec<String> = l.heights.iter().map(|(y, n)| format!("{y}:{n}")).collect();
         println!(
-            "lineage,{},{name},{},{},{},{},{},{}",
+            "lineage,{},{name},{},{},{},{}",
             r.minute,
             l.alive,
             heights.join(" "),
-            optional(l.mean_distance_today, 3),
-            optional(l.mean_distance_band, 3),
-            optional(l.share_within_2m_today, 4),
-            optional(l.share_within_2m_band, 4),
+            optional(l.mean_distance_m, 3),
+            optional(l.share_within_2m, 4),
         );
     }
     for (name, total, inside) in &r.detritus {
@@ -785,47 +692,32 @@ fn print_report(r: &Report) {
 
 fn print_summary(first: &Report, last: &Report) {
     println!("summary,metric,t0,final");
-    let pairs: [(&str, f64, f64); 10] = [
+    let pairs: [(&str, f64, f64); 7] = [
         ("foliage", first.total.foliage, last.total.foliage),
         (
-            "f_reach_today",
-            fraction(first.total.reach_today, first.total.foliage),
-            fraction(last.total.reach_today, last.total.foliage),
+            "f_reach",
+            fraction(first.total.reach, first.total.foliage),
+            fraction(last.total.reach, last.total.foliage),
         ),
         (
-            "f_reach_band",
-            fraction(first.total.reach_band, first.total.foliage),
-            fraction(last.total.reach_band, last.total.foliage),
+            "f_visible",
+            fraction(first.total.visible, first.total.foliage),
+            fraction(last.total.visible, last.total.foliage),
         ),
         (
-            "f_visible_today",
-            fraction(first.total.visible_today, first.total.foliage),
-            fraction(last.total.visible_today, last.total.foliage),
+            "f_visible_five_pitch",
+            fraction(first.total.visible_five_pitch, first.total.foliage),
+            fraction(last.total.visible_five_pitch, last.total.foliage),
         ),
         (
-            "f_visible_decided",
-            fraction(first.total.visible_decided, first.total.foliage),
-            fraction(last.total.visible_decided, last.total.foliage),
+            "f_route",
+            fraction(first.total.route, first.total.foliage),
+            fraction(last.total.route, last.total.foliage),
         ),
         (
-            "f_route_today",
-            fraction(first.total.route_today, first.total.foliage),
-            fraction(last.total.route_today, last.total.foliage),
-        ),
-        (
-            "f_route_band",
-            fraction(first.total.route_band, first.total.foliage),
-            fraction(last.total.route_band, last.total.foliage),
-        ),
-        (
-            "f_route_seeded_today",
-            fraction(first.total.route_seeded_today, first.total.foliage),
-            fraction(last.total.route_seeded_today, last.total.foliage),
-        ),
-        (
-            "f_route_seeded_band",
-            fraction(first.total.route_seeded_band, first.total.foliage),
-            fraction(last.total.route_seeded_band, last.total.foliage),
+            "f_route_seeded",
+            fraction(first.total.route_seeded, first.total.foliage),
+            fraction(last.total.route_seeded, last.total.foliage),
         ),
         (
             "browsers_alive",
