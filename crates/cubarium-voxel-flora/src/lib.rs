@@ -45,12 +45,18 @@
 
 #![forbid(unsafe_code)]
 
+mod layers;
+pub mod snapshot;
 mod step;
 
 use cubarium_voxel::{Material, VoxelView, World};
 use serde::{Deserialize, Serialize};
 
 pub use cubarium_voxel::{DT, TICK_HZ};
+pub use layers::{
+    Layer, LayerKind, MAX_FOLIAGE_LAYERS, MIN_LAYER_AREA_M2, Profile, StandLayer, disc_offset,
+    trunk_offsets,
+};
 /// The germination predicate the model itself uses, for a caller outside a tick: a
 /// harness picking founder columns, a diagnosis of which gate is shut. There is one
 /// predicate, and this is it.
@@ -277,6 +283,29 @@ pub struct Stand {
     /// **that**, to one recipient. The mineral of the parcel stays in the stand until the
     /// package leaves, and travels with it by the fraction rule.
     pub parcel: f64,
+    /// **Where this stand's foliage is**: one stock per foliage-bearing layer of the
+    /// profile stage `profile_stage` names, bottom-up, in organic units. Entries past
+    /// that stage's layer count are zero.
+    ///
+    /// The invariant, and the reason this exists at all: `layer_stock[..n]` sums to
+    /// [`Stand::foliage`] at all times, and `foliage` stays the scalar the ledgers, the
+    /// water rule and the mineral rule read. A scalar total cannot tell a plant grazed
+    /// from below apart from one grazed evenly — taking 0.10 from a 0.25 / 0.75 stand
+    /// leaves 0.15 / 0.75, and re-deriving fixed shares of the remaining 0.90 would give
+    /// 0.225 / 0.675 and move a twelfth of the crown into reachable tissue with no growth
+    /// (`design/7_Research/organism-systems-audit-2026-09-21.md` §5, "Persistent lower
+    /// depletion"). So the amounts are a state and not a derivation.
+    ///
+    /// A fixed array rather than a `Vec` because a [`Stand`] is `Copy` and is copied by
+    /// value throughout the crate and the host.
+    #[serde(default)]
+    pub layer_stock: [f64; MAX_FOLIAGE_LAYERS],
+    /// Which entry of the species' `profile` the stocks above are binned for. When the
+    /// stand's wood crosses a stage threshold, the tick re-bins the **existing** total
+    /// into the new stage bottom-up and updates this; nothing is created
+    /// (`design/handoffs/voxel-organism-decisions-2026-09-21.md` §4).
+    #[serde(default)]
+    pub profile_stage: u8,
 }
 
 impl Stand {
@@ -284,6 +313,76 @@ impl Stand {
     /// is paid-out material in transit, and a stand cannot live on it.
     pub fn organic(&self) -> f64 {
         self.wood + self.foliage + self.reserve
+    }
+
+    /// The stocks that are live under `count` foliage layers.
+    pub fn layer_stocks(&self, count: usize) -> &[f64] {
+        &self.layer_stock[..count.min(MAX_FOLIAGE_LAYERS)]
+    }
+
+    /// The same, mutably.
+    pub(crate) fn layer_stocks_mut(&mut self, count: usize) -> &mut [f64] {
+        &mut self.layer_stock[..count.min(MAX_FOLIAGE_LAYERS)]
+    }
+
+    /// Put `foliage` into the stage `sc` gives this stand's wood, bottom-up, and record
+    /// the stage. Used wherever a stand is **created** — a founder, a germination — and
+    /// by the stage-transition re-bin.
+    pub(crate) fn bin_foliage(&mut self, sc: &SpeciesConfig, voxel_m: f64) {
+        let index = sc.profile_index(self.wood);
+        let caps = sc.layer_capacities(self.wood);
+        self.layer_stock = [0.0; MAX_FOLIAGE_LAYERS];
+        let n = caps.len();
+        let total = self.foliage;
+        layers::rebin(self.layer_stocks_mut(n), &caps, total);
+        self.profile_stage = index as u8;
+        let _ = voxel_m;
+    }
+
+    /// Re-bin **only if** the stand has crossed a stage threshold since the stocks were
+    /// last binned. Called after every tick's wood change.
+    pub(crate) fn resync_layers(&mut self, sc: &SpeciesConfig) {
+        let index = sc.profile_index(self.wood);
+        if index as u8 != self.profile_stage {
+            let caps = sc.layer_capacities(self.wood);
+            let n = caps.len();
+            let total = self.foliage;
+            self.layer_stock = [0.0; MAX_FOLIAGE_LAYERS];
+            layers::rebin(self.layer_stocks_mut(n), &caps, total);
+            self.profile_stage = index as u8;
+        }
+    }
+
+    /// Bin this stand's `foliage` into its species' profile, bottom-up, and record the
+    /// stage. A fixture that builds a [`Stand`] by hand calls this so its layers are
+    /// consistent with its scalar; everything inside the crate is binned already.
+    pub fn bin_layers(&mut self, config: &FloraConfig) {
+        let sc = config.species(self.species);
+        self.bin_foliage(sc, config.voxel_m);
+    }
+
+    /// Settle the stocks against the scalar after an arithmetic step has moved
+    /// `foliage`: the residue of `foliage - sum(stocks)` — float dust, because the two
+    /// were moved by the same amounts in a different order — is pushed into the largest
+    /// stock, which can always absorb it. Without this the invariant would drift a few
+    /// ulps per tick and stop being an invariant.
+    pub(crate) fn settle_layers(&mut self, count: usize) {
+        let n = count.min(MAX_FOLIAGE_LAYERS);
+        if n == 0 {
+            return;
+        }
+        let sum: f64 = self.layer_stock[..n].iter().sum();
+        let residue = self.foliage - sum;
+        if residue == 0.0 {
+            return;
+        }
+        let mut best = 0;
+        for i in 1..n {
+            if self.layer_stock[i] > self.layer_stock[best] {
+                best = i;
+            }
+        }
+        self.layer_stock[best] = (self.layer_stock[best] + residue).max(0.0);
     }
 
     /// `W + P + Q + parcel`: every unit of organic matter this stand holds, which is what
@@ -651,9 +750,104 @@ pub struct SpeciesConfig {
     /// and crown half-width, in voxels, both linear in `W / W_max` between the two ends.
     pub crown_height_voxels: [f64; 2],
     pub crown_radius_voxels: [f64; 2],
+    /// **What is in that volume**: the species' anatomy, staged by `wood / wood_max`.
+    /// The first entry whose `wood_fraction_max` is at or above the fraction applies;
+    /// the last must catch a full-grown stand. Its foliage-bearing layers are the
+    /// stand's [`Stand::layer_stock`] entries, bottom-up.
+    ///
+    /// The six live species' entries are the anatomy document's §3 tables with
+    /// decisions §5's corrections, and they are **authored placeholders**
+    /// (`design/backlog.md` §1): nothing here has been measured or tuned.
+    pub profile: Vec<Profile>,
 }
 
 impl SpeciesConfig {
+    /// A foliage layer of the anatomy document's four fields.
+    pub fn foliage_layer(band: [f64; 2], radius: f64, share: f64, porosity: f64) -> Layer {
+        Layer {
+            kind: LayerKind::Foliage,
+            band,
+            radius,
+            share,
+            porosity,
+        }
+    }
+
+    /// A mat: foliage lying on the surface.
+    pub fn mat_layer(band: [f64; 2], radius: f64, share: f64, porosity: f64) -> Layer {
+        Layer {
+            kind: LayerKind::Mat,
+            ..SpeciesConfig::foliage_layer(band, radius, share, porosity)
+        }
+    }
+
+    /// A trunk: structure, no share.
+    pub fn trunk_layer(band: [f64; 2], radius: f64, porosity: f64) -> Layer {
+        Layer {
+            kind: LayerKind::Trunk,
+            band,
+            radius,
+            share: 0.0,
+            porosity,
+        }
+    }
+
+    /// One stage holding the whole life: what a species with no lifecycle shape needs.
+    pub fn one_stage(layers: Vec<Layer>) -> Vec<Profile> {
+        vec![Profile {
+            wood_fraction_max: f64::INFINITY,
+            height_m_max: None,
+            layers,
+        }]
+    }
+
+    /// Which entry of [`SpeciesConfig::profile`] a stand of this wood is in: the first
+    /// whose threshold is at or above `wood / wood_max`, and the last if none is.
+    pub fn profile_index(&self, wood: f64) -> usize {
+        if self.profile.is_empty() {
+            return 0;
+        }
+        let t = (wood / self.wood_max).clamp(0.0, 1.0);
+        self.profile
+            .iter()
+            .position(|p| p.wood_fraction_max >= t)
+            .unwrap_or(self.profile.len() - 1)
+    }
+
+    /// The stage itself.
+    pub fn profile_at(&self, wood: f64) -> &Profile {
+        &self.profile[self.profile_index(wood).min(self.profile.len() - 1)]
+    }
+
+    /// How many foliage stocks a stand of this wood holds.
+    pub fn foliage_layer_count(&self, wood: f64) -> usize {
+        self.profile_at(wood)
+            .foliage_layer_count()
+            .min(MAX_FOLIAGE_LAYERS)
+    }
+
+    /// Each foliage layer's capacity, bottom-up: its `share` of the growth model's own
+    /// foliage cap, `alpha · W` (`step`'s `p_cap`). Not a new number.
+    pub fn layer_capacities(&self, wood: f64) -> Vec<f64> {
+        let cap = self.alpha * wood.max(0.0);
+        self.profile_at(wood)
+            .foliage_layers()
+            .take(MAX_FOLIAGE_LAYERS)
+            .map(|(_, l)| l.share * cap)
+            .collect()
+    }
+
+    /// The stand's physical crown height in **voxels**, with the stage's own ceiling
+    /// applied: decisions §5's woody seedling is a ground rosette no taller than
+    /// 0.125 m however tall the wood interpolation says it is.
+    pub fn crown_height_staged(&self, wood: f64, voxel_m: f64) -> f64 {
+        let free = self.crown_height(wood);
+        match self.profile_at(wood).height_m_max {
+            Some(cap) if voxel_m > 0.0 && cap.is_finite() => free.min(cap / voxel_m),
+            _ => free,
+        }
+    }
+
     /// Height of the crown top above the support face, in voxels.
     pub fn crown_height(&self, wood: f64) -> f64 {
         let t = (wood / self.wood_max).clamp(0.0, 1.0);
@@ -759,6 +953,13 @@ impl SpeciesConfig {
             hop: 1,
             crown_height_voxels: [1.0, 3.0],
             crown_radius_voxels: [0.5, 1.5],
+            // The v1 base carries no anatomy of its own: every preset states one.
+            profile: SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer(
+                [0.0, 1.0],
+                1.0,
+                1.0,
+                0.0,
+            )]),
         }
     }
 
@@ -790,6 +991,37 @@ impl SpeciesConfig {
             hop: 2,
             crown_height_voxels: [1.0, 3.0],
             crown_radius_voxels: [0.5, 1.5],
+            // Anatomy document §3, with decisions §5's corrections. A seedling is a
+            // ground rosette capped at 0.125 m — not a small adult, and reachable
+            // whatever the interpolated crown height says. The **adult keeps its basal
+            // rosette at 0.25 of its foliage for life**: that is the floor food that
+            // makes a grazed meadow possible, and the reason a low browser can eat a
+            // mature bloomcrown at all.
+            profile: vec![
+                Profile {
+                    wood_fraction_max: 0.2,
+                    height_m_max: Some(0.125),
+                    layers: vec![SpeciesConfig::foliage_layer([0.0, 1.0], 1.0, 1.0, 0.4)],
+                },
+                Profile {
+                    wood_fraction_max: 0.5,
+                    height_m_max: None,
+                    layers: vec![
+                        SpeciesConfig::trunk_layer([0.0, 0.4], 0.15, 0.0),
+                        SpeciesConfig::foliage_layer([0.0, 0.25], 0.7, 0.4, 0.4),
+                        SpeciesConfig::foliage_layer([0.5, 1.0], 1.0, 0.6, 0.3),
+                    ],
+                },
+                Profile {
+                    wood_fraction_max: f64::INFINITY,
+                    height_m_max: None,
+                    layers: vec![
+                        SpeciesConfig::trunk_layer([0.0, 0.5], 0.15, 0.0),
+                        SpeciesConfig::foliage_layer([0.0, 0.15], 0.6, 0.25, 0.4),
+                        SpeciesConfig::foliage_layer([0.55, 1.0], 1.0, 0.75, 0.3),
+                    ],
+                },
+            ],
             ..SpeciesConfig::v1_base()
         }
     }
@@ -827,6 +1059,36 @@ impl SpeciesConfig {
             hop: 1,
             crown_height_voxels: [2.0, 5.0],
             crown_radius_voxels: [1.0, 2.5],
+            // Anatomy document §3: three tiers whose lowest is the widest, so the
+            // shade under an adult is layered. Decisions §5: the frond **escapes at the
+            // seedling → juvenile transition** — the juvenile's lowest tier is already
+            // over a low browser's band — and its seedling is a capped ground rosette.
+            profile: vec![
+                Profile {
+                    wood_fraction_max: 0.15,
+                    height_m_max: Some(0.125),
+                    layers: vec![SpeciesConfig::foliage_layer([0.0, 1.0], 1.0, 1.0, 0.4)],
+                },
+                Profile {
+                    wood_fraction_max: 0.5,
+                    height_m_max: None,
+                    layers: vec![
+                        SpeciesConfig::trunk_layer([0.0, 0.5], 0.15, 0.0),
+                        SpeciesConfig::foliage_layer([0.5, 0.65], 1.0, 0.6, 0.4),
+                        SpeciesConfig::foliage_layer([0.85, 1.0], 0.6, 0.4, 0.5),
+                    ],
+                },
+                Profile {
+                    wood_fraction_max: f64::INFINITY,
+                    height_m_max: None,
+                    layers: vec![
+                        SpeciesConfig::trunk_layer([0.0, 0.4], 0.2, 0.0),
+                        SpeciesConfig::foliage_layer([0.4, 0.55], 1.0, 0.4, 0.4),
+                        SpeciesConfig::foliage_layer([0.65, 0.8], 0.8, 0.35, 0.4),
+                        SpeciesConfig::foliage_layer([0.9, 1.0], 0.5, 0.25, 0.5),
+                    ],
+                },
+            ],
             ..SpeciesConfig::v1_base()
         }
     }
@@ -914,6 +1176,14 @@ impl SpeciesConfig {
             assimilation: 0.008,
             crown_height_voxels: [0.5, 1.0],
             crown_radius_voxels: [0.5, 1.0],
+            // Anatomy document §3: a mat, no trunk at any size, entirely inside a
+            // grazer's reach; cropping it is the mat thinning.
+            profile: SpeciesConfig::one_stage(vec![SpeciesConfig::mat_layer(
+                [0.0, 1.0],
+                1.0,
+                1.0,
+                0.3,
+            )]),
             ..SpeciesConfig::v1_base()
         }
     }
@@ -982,6 +1252,12 @@ impl SpeciesConfig {
             propagule_rate: 0.00005,
             crown_height_voxels: [0.5, 0.5],
             crown_radius_voxels: [0.5, 1.0],
+            // Anatomy document §3: a dome in two foliage bands, no trunk. Decisions
+            // §3 keeps it on the browser's menu, so there is no diet flag here.
+            profile: SpeciesConfig::one_stage(vec![
+                SpeciesConfig::foliage_layer([0.0, 0.6], 1.0, 0.7, 0.2),
+                SpeciesConfig::foliage_layer([0.6, 1.0], 0.6, 0.3, 0.2),
+            ]),
             ..SpeciesConfig::v1_base()
         }
     }
@@ -1050,6 +1326,15 @@ impl SpeciesConfig {
             propagule_rate: 0.0005,
             crown_height_voxels: [0.5, 1.0],
             crown_radius_voxels: [1.0, 2.0],
+            // Anatomy document §3: a sheet, no trunk. Decisions §3 keeps it on the
+            // browser's menu (removing it would have cut 58 % of what the D3 browser
+            // ate), so there is no diet flag here either.
+            profile: SpeciesConfig::one_stage(vec![SpeciesConfig::mat_layer(
+                [0.0, 1.0],
+                1.0,
+                1.0,
+                0.6,
+            )]),
             ..SpeciesConfig::v1_base()
         }
     }
@@ -1156,6 +1441,15 @@ impl SpeciesConfig {
             propagule_rate: 0.0005,
             crown_height_voxels: [0.5, 0.5],
             crown_radius_voxels: [0.5, 0.5],
+            // Anatomy document §3: the fruiting body on the face. `foliage` is cap
+            // tissue, which decisions §3 makes shredder food and not browser food; the
+            // diet lives on the consumer, not here.
+            profile: SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer(
+                [0.0, 1.0],
+                1.0,
+                1.0,
+                0.5,
+            )]),
             ..SpeciesConfig::v1_base()
         }
     }
@@ -1179,6 +1473,91 @@ impl SpeciesConfig {
     /// tuning rule wearing a validator's clothes.
     pub fn validate(&self, name: &str) -> Result<(), String> {
         let fail = |what: &str| Err(format!("{name}: {what}"));
+
+        // The anatomy, before anything else reads it: a stand's layer stocks are binned
+        // against this the moment it is created, so a malformed profile is a world that
+        // cannot conserve its own foliage rather than a number that looks odd later.
+        if self.profile.is_empty() {
+            return fail("profile is empty: every species states its anatomy");
+        }
+        let mut previous = 0.0f64;
+        for (i, stage) in self.profile.iter().enumerate() {
+            if !(stage.wood_fraction_max >= previous) {
+                return fail(&format!(
+                    "profile stage {i} threshold {} is below stage {}'s {previous}: the stages                      are read in order",
+                    stage.wood_fraction_max,
+                    i.saturating_sub(1)
+                ));
+            }
+            previous = stage.wood_fraction_max;
+            if stage.layers.is_empty() {
+                return fail(&format!("profile stage {i} has no layers"));
+            }
+            if stage.foliage_layer_count() > MAX_FOLIAGE_LAYERS {
+                return fail(&format!(
+                    "profile stage {i} has {} foliage layers, over the {MAX_FOLIAGE_LAYERS} a                      stand can hold stocks for",
+                    stage.foliage_layer_count()
+                ));
+            }
+            let mut share = 0.0;
+            for (j, layer) in stage.layers.iter().enumerate() {
+                let [lo, hi] = layer.band;
+                if !(lo.is_finite() && hi.is_finite() && lo >= 0.0 && hi <= 1.0 && hi > lo) {
+                    return fail(&format!(
+                        "profile stage {i} layer {j} band {:?} is not a rising interval inside                          [0, 1] of the crown height",
+                        layer.band
+                    ));
+                }
+                if !(layer.radius.is_finite() && layer.radius > 0.0 && layer.radius <= 1.0) {
+                    return fail(&format!(
+                        "profile stage {i} layer {j} radius is {}, not a fraction of the crown                          radius in (0, 1]",
+                        layer.radius
+                    ));
+                }
+                if !(layer.porosity.is_finite() && (0.0..=1.0).contains(&layer.porosity)) {
+                    return fail(&format!(
+                        "profile stage {i} layer {j} porosity is {}, not in [0, 1]",
+                        layer.porosity
+                    ));
+                }
+                if layer.kind.bears_foliage() {
+                    if !(layer.share.is_finite() && layer.share >= 0.0) {
+                        return fail(&format!(
+                            "profile stage {i} layer {j} share is {}, not finite and \
+                             nonnegative",
+                            layer.share
+                        ));
+                    }
+                    share += layer.share;
+                } else if layer.share != 0.0 {
+                    return fail(&format!(
+                        "profile stage {i} layer {j} is a trunk holding a share of {}: structure                          is not foliage",
+                        layer.share
+                    ));
+                }
+            }
+            if (share - 1.0).abs() > 1e-12 {
+                return fail(&format!(
+                    "profile stage {i} foliage shares sum to {share}, not one: a stand's layers                      would not sum to its foliage"
+                ));
+            }
+            if let Some(cap) = stage.height_m_max {
+                if !(cap.is_finite() && cap > 0.0) {
+                    return fail(&format!(
+                        "profile stage {i} height_m_max is {cap}, not finite and positive"
+                    ));
+                }
+            }
+        }
+        if !(self
+            .profile
+            .last()
+            .expect("a non-empty profile")
+            .wood_fraction_max
+            >= 1.0)
+        {
+            return fail("the last profile stage must catch a full-grown stand (threshold >= 1)");
+        }
 
         let [w_frac, p_frac, q_frac] = self.propagule_split;
         for (label, v) in [("w_frac", w_frac), ("p_frac", p_frac), ("q_frac", q_frac)] {
@@ -1359,9 +1738,21 @@ pub struct FloraConfig {
     pub stonecushion: SpeciesConfig,
     pub velvetpad: SpeciesConfig,
     pub glowcap: SpeciesConfig,
-    /// Canopy attenuation: a taller stand whose crown covers a site multiplies the light
-    /// reaching that site by `exp(-shade_k · P / crown_area)`.
-    pub shade_k: f64,
+    /// Canopy attenuation, **per square metre**: a taller stand whose crown covers a
+    /// site multiplies the light reaching that site by
+    /// `exp(-shade_k_per_m2 · P / crown_area_m2)`, where the crown's area is
+    /// `π · (radius_cells · voxel_m)²` floored at one reference cell, `(0.25 m)²`.
+    ///
+    /// **It used to be per cell²** (`shade_k`, 1.5), which made optical depth a
+    /// function of the grid: the same plant with the same foliage shaded four times
+    /// less when the cell halved (the audit's §1 "shade-area units bug";
+    /// `design/handoffs/voxel-body-anchors-2026-09-22.md`). The shipped value is the
+    /// old one converted, `1.5 × (0.25 m)² = 0.09375`, so the 0.25 m reference world is
+    /// numerically identical — including the floor, which is one reference cell either
+    /// way — and only finer grids move, to the physically right value. A config written
+    /// against the old field name is refused (`deny_unknown_fields`) rather than
+    /// reinterpreted 16× too dark.
+    pub shade_k_per_m2: f64,
     /// `k_d`: litter decomposition per second. Its organic matter is respired out of the
     /// system (`respired_out`, energy to heat) and its mineral is released to the site's
     /// pool at the same fraction.
@@ -1395,6 +1786,12 @@ pub struct FloraConfig {
     /// eagerly on every support face at creation. [`Provision::Lazy`] by default, which is
     /// the only rule that existed before the replacement study and changes nothing.
     pub provision: Provision,
+    /// The world's cell size in metres, recorded so that a rule authored in **metres**
+    /// can be applied to geometry stored in **voxels**: decisions §5's 0.125 m ceiling
+    /// on a woody seedling's height is the only one today
+    /// ([`SpeciesConfig::crown_height_staged`]). Set by
+    /// [`FloraConfig::for_voxel_size`]; the reference 0.25 m by default.
+    pub voxel_m: f64,
 }
 
 impl Default for FloraConfig {
@@ -1406,13 +1803,14 @@ impl Default for FloraConfig {
             stonecushion: SpeciesConfig::stonecushion(),
             velvetpad: SpeciesConfig::velvetpad(),
             glowcap: SpeciesConfig::glowcap(),
-            shade_k: 1.5,
+            shade_k_per_m2: 0.09375,
             decomposition: 0.001,
             wood_decomposition: 0.0001,
             carrion_decomposition: 0.005,
             litter_energy_cap: 2.0,
             initial_mineral: 1.0,
             provision: Provision::Lazy,
+            voxel_m: 0.25,
         }
     }
 }
@@ -1430,7 +1828,14 @@ impl FloraConfig {
         const REFERENCE_VOXEL_M: f64 = 0.25;
 
         let mut config = FloraConfig::default();
-        if !voxel_m.is_finite() || !(voxel_m > 0.0) || voxel_m >= REFERENCE_VOXEL_M {
+        if !voxel_m.is_finite() || !(voxel_m > 0.0) {
+            return config;
+        }
+        // The cell size is recorded whatever it is, because a metre rule has to be
+        // converted on a coarse grid too; only the authored *voxel* geometry is left
+        // alone at or above the reference size.
+        config.voxel_m = voxel_m;
+        if voxel_m >= REFERENCE_VOXEL_M {
             return config;
         }
         let scale = REFERENCE_VOXEL_M / voxel_m;
@@ -1448,6 +1853,28 @@ impl FloraConfig {
             }
         }
         config
+    }
+
+    /// Every species reduced to **one** `[0, 1.0]` foliage layer at the full crown
+    /// radius with no porosity: the lollipop the model was before plants had layers.
+    ///
+    /// For a **fixture whose subject is not the anatomy** — the shade exponent's units,
+    /// the strictness of the occlusion inequality, the mouth's physical band — where a
+    /// tiered, porous, rosette-bearing plant would be measuring something else. It is
+    /// not a shipped configuration and nothing in the tick uses it; what the authored
+    /// profiles do is `cubarium-voxel-flora/tests/layers.rs`'s and
+    /// `cubarium-voxel-fauna/tests/plant_layers.rs`'s subject.
+    pub fn one_layer_species(mut self) -> FloraConfig {
+        for species in Species::ALL {
+            self.species_mut(species).profile =
+                SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer(
+                    [0.0, 1.0],
+                    1.0,
+                    1.0,
+                    0.0,
+                )]);
+        }
+        self
     }
 
     pub fn species(&self, s: Species) -> &SpeciesConfig {
@@ -1483,7 +1910,7 @@ impl FloraConfig {
             self.species(species).validate(species.name())?;
         }
         for (label, v) in [
-            ("shade_k", self.shade_k),
+            ("shade_k_per_m2", self.shade_k_per_m2),
             ("decomposition", self.decomposition),
             ("wood_decomposition", self.wood_decomposition),
             ("carrion_decomposition", self.carrion_decomposition),
@@ -1547,6 +1974,11 @@ mod voxel_scale_tests {
             after.crown_height_voxels = before.crown_height_voxels;
             after.crown_radius_voxels = before.crown_radius_voxels;
         }
+        // The recorded cell size is not authored geometry: it is the world's, and it
+        // is what a rule written in metres is converted with
+        // ([`SpeciesConfig::crown_height_staged`]).
+        assert_eq!(geometry_reset.voxel_m, 0.125);
+        geometry_reset.voxel_m = reference.voxel_m;
         assert_eq!(geometry_reset, reference, "rates and stores stay authored");
     }
 
@@ -1554,7 +1986,12 @@ mod voxel_scale_tests {
     fn reference_and_coarser_voxels_keep_the_historical_defaults() {
         let reference = FloraConfig::default();
         assert_eq!(FloraConfig::for_voxel_size(0.25), reference);
-        assert_eq!(FloraConfig::for_voxel_size(1.0), reference);
+        let mut coarse = FloraConfig::for_voxel_size(1.0);
+        // Everything but the recorded cell size, which is always the world's own: a
+        // 1 m world still has to convert decisions §5's 0.125 m seedling ceiling.
+        assert_eq!(coarse.voxel_m, 1.0);
+        coarse.voxel_m = reference.voxel_m;
+        assert_eq!(coarse, reference);
     }
 }
 
@@ -1702,6 +2139,20 @@ pub struct Taken {
     pub energy: f64,
 }
 
+/// What a **layer-bounded** withdrawal took: the ledger entry, and the organic matter
+/// that left each of the stand's foliage layers, indexed bottom-up as
+/// [`Stand::layer_stock`] is.
+///
+/// The per-layer breakdown is the point: a caller that books a bite against a scalar
+/// cannot say whether the plant is now leaf-poor at the base or evenly thinned, and
+/// those are different plants to the next mouth and to the light
+/// (`design/7_Research/organism-systems-audit-2026-09-21.md` §5).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TakenFoliage {
+    pub taken: Taken,
+    pub per_layer: [f64; MAX_FOLIAGE_LAYERS],
+}
+
 /// A caller-owned cache of the **geometric** sky visibility of sites, for a study that
 /// asks the establishment predicate over a skyline many times.
 ///
@@ -1817,7 +2268,101 @@ pub struct FloraView<'a> {
     pub ledger: &'a FloraLedger,
 }
 
+/// Every layer of `stand`, bottom-up, with its geometry resolved and its stock read.
+///
+/// The one place a layer's geometry is computed. `config` supplies the species'
+/// anatomy; `voxel_m` is the **world's** cell size, which is what turns a radius in
+/// cells into an area in m² and a band into metres. Nothing else about the world
+/// enters: a layer is a property of the plant and not of the terrain under it.
+///
+/// In a live world `config.voxel_m` **is** `voxel_m` — [`FloraConfig::for_voxel_size`]
+/// records the world's own size — and [`FloraView::layers`] passes it, because a view
+/// has no world in hand. The tick passes the world's directly, so that a fixture whose
+/// config and world disagree shades exactly as it did before layers existed.
+pub fn layers_of(config: &FloraConfig, stand: &Stand, voxel_m: f64) -> Vec<StandLayer> {
+    let sc = config.species(stand.species);
+    let stage = sc.profile_at(stand.wood);
+    let height_v = sc.crown_height_staged(stand.wood, voxel_m);
+    let radius_v = sc.crown_radius(stand.wood).max(0.0);
+    let cap = sc.alpha * stand.wood.max(0.0);
+    let base = f64::from(stand.site.y);
+    let mut out = Vec::with_capacity(stage.layers.len());
+    let mut foliage_index = 0usize;
+    for (index, layer) in stage.layers.iter().enumerate() {
+        let is_foliage = layer.kind.bears_foliage();
+        let fi = if is_foliage {
+            let i = foliage_index;
+            foliage_index += 1;
+            (i < MAX_FOLIAGE_LAYERS).then_some(i)
+        } else {
+            None
+        };
+        if is_foliage && fi.is_none() {
+            continue;
+        }
+        let lo_v = base + layer.band[0] * height_v;
+        let hi_v = base + layer.band[1] * height_v;
+        let r_v = (layer.radius * radius_v).max(0.0);
+        let r_m = r_v * voxel_m;
+        let cell =
+            i64::from(stand.site.y) + i64::from(layers::disc_offset(layer.band[1], height_v));
+        let cells = if is_foliage {
+            (cell, cell)
+        } else {
+            let (lo, hi) = layers::trunk_offsets(layer.band, height_v);
+            (
+                i64::from(stand.site.y) + i64::from(lo),
+                i64::from(stand.site.y) + i64::from(hi),
+            )
+        };
+        out.push(StandLayer {
+            index,
+            foliage_index: fi,
+            kind: layer.kind,
+            band_v: [lo_v, hi_v],
+            band_m: [lo_v * voxel_m, hi_v * voxel_m],
+            radius_v: r_v,
+            radius_m: r_m,
+            cell,
+            cells,
+            share: if is_foliage { layer.share } else { 0.0 },
+            capacity: if is_foliage { layer.share * cap } else { 0.0 },
+            stock: fi.map_or(0.0, |i| stand.layer_stock[i]),
+            porosity: layer.porosity,
+            area_m2: (std::f64::consts::PI * r_m * r_m).max(MIN_LAYER_AREA_M2),
+        });
+    }
+    out
+}
+
 impl<'a> FloraView<'a> {
+    /// The **foliage-bearing** layers of `stand`, bottom-up: the contract's
+    /// `FloraView::layers(stand)`, yielding each layer's band in metres, radius in
+    /// metres, kind, stock and porosity. Trunk layers are not here — ask
+    /// [`layers_of`] for the whole profile, which the presenter and the cone do.
+    ///
+    /// The stocks it yields **sum to the stand's `foliage`**, always.
+    pub fn layers(&self, stand: &Stand) -> impl Iterator<Item = StandLayer> + use<> {
+        layers_of(self.config, stand, self.config.voxel_m)
+            .into_iter()
+            .filter(|l| l.kind.bears_foliage())
+    }
+
+    /// [`FloraView::layers`] of whatever stands on `site`; empty if nothing does.
+    pub fn layers_at(&self, site: Site) -> impl Iterator<Item = StandLayer> + use<> {
+        let stand = self.stand_at(site).copied();
+        stand
+            .map(|s| layers_of(self.config, &s, self.config.voxel_m))
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|l| l.kind.bears_foliage())
+    }
+
+    /// Every layer of `stand`, trunks included, bottom-up.
+    pub fn profile_layers(&self, stand: &Stand) -> Vec<StandLayer> {
+        layers_of(self.config, stand, self.config.voxel_m)
+    }
+
     pub fn stand_at(&self, site: Site) -> Option<&'a Stand> {
         self.stands
             .binary_search_by_key(&site, |s| s.site)
@@ -1902,13 +2447,25 @@ impl<'a> FloraView<'a> {
             if !(stand.foliage > 0.0) {
                 continue;
             }
-            let sc = self.config.species(stand.species);
-            if i64::from(stand.site.y) + i64::from(sc.crown_voxels(stand.wood)) > ceiling {
+            // Since layers, what is in reach is a **sum over the stand's layers** whose
+            // disc cell is at or below the ceiling, not the whole plant or none of it:
+            // a low browser at an adult bloomcrown reaches its basal rosette and never
+            // its crown. For a single-layer species the sum is the whole `foliage` and
+            // the disc cell is `crown_voxels(wood)`, so nothing about this call moved.
+            let mut reachable = 0.0;
+            let mut radius = 0.0f64;
+            for layer in self.layers(stand) {
+                if layer.cell > ceiling || !(layer.stock > 0.0) {
+                    continue;
+                }
+                reachable += layer.stock;
+                radius = radius.max(layer.radius_v);
+            }
+            if !(reachable > 0.0) {
                 continue;
             }
-            let r = sc.crown_radius(stand.wood).max(0.0);
-            let span = r.floor() as i64;
-            let r2 = r * r;
+            let span = radius.floor() as i64;
+            let r2 = radius * radius;
             let mut within = false;
             for dz in -span..=span {
                 for dx in -span..=span {
@@ -1929,7 +2486,7 @@ impl<'a> FloraView<'a> {
                 }
             }
             if within {
-                out.push((stand.site, stand.foliage));
+                out.push((stand.site, reachable));
             }
         }
         out
@@ -2164,7 +2721,7 @@ pub struct DeliveryReceipt {
 }
 
 /// The plant layer. Owns its stands and ground stocks; borrows the world per call.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Flora {
     config: FloraConfig,
     tick: u64,
@@ -2346,7 +2903,11 @@ impl Flora {
                     mineral: 0.0,
                     aeration_stress: 0.0,
                     parcel: 0.0,
+                    layer_stock: [0.0; MAX_FOLIAGE_LAYERS],
+                    profile_stage: 0,
                 };
+                // A founder arrives full, so its layers arrive at their capacities.
+                stand.bin_foliage(sc, self.config.voxel_m);
                 self.ledger.births += 1;
                 let organic = stand.organic();
                 // A founder arrives at the species' own tissue mineral content: it is
@@ -2427,12 +2988,68 @@ impl Flora {
     /// `wood < alive_min` and wood is untouched — it starves it, which is the producer
     /// response the crate doc describes.
     pub fn take_foliage(&mut self, site: Site, want: f64) -> Option<Taken> {
+        self.withdraw_foliage(site, want, None).map(|t| t.taken)
+    }
+
+    /// A consumer eats the foliage the **layers whose disc cells lie in `layers`** hold,
+    /// lowest first, up to `want`.
+    ///
+    /// This is the bite a mouth takes: `layers` is the cell range the mouth's physical
+    /// band selects over the face it stands on
+    /// (`cubarium_voxel_fauna::band_crown_layers`), so a low browser at an adult
+    /// bloomcrown withdraws from its basal rosette and the crown three cells up is not
+    /// offered. What comes back reports the withdrawal **per layer**, so the caller can
+    /// book exactly what left the stand rather than a share of a scalar.
+    ///
+    /// **A bite from below leaves the upper stock untouched.** Taking 0.10 from a
+    /// 0.25 / 0.75 stand leaves 0.15 / 0.75; nothing anywhere re-derives the shares of
+    /// what is left (`design/7_Research/organism-systems-audit-2026-09-21.md` §5).
+    ///
+    /// Everything else — the mineral fraction rule, the energy, the ledger entry, the
+    /// `None` cases — is [`Flora::take_foliage`]'s, which is this with no layer bound.
+    pub fn take_foliage_in_layers(
+        &mut self,
+        site: Site,
+        want: f64,
+        layers: &std::ops::RangeInclusive<i64>,
+    ) -> Option<TakenFoliage> {
+        self.withdraw_foliage(site, want, Some(layers))
+    }
+
+    fn withdraw_foliage(
+        &mut self,
+        site: Site,
+        want: f64,
+        layers: Option<&std::ops::RangeInclusive<i64>>,
+    ) -> Option<TakenFoliage> {
         if !(want > 0.0) || !want.is_finite() {
             return None;
         }
         let i = self.stands.binary_search_by_key(&site, |s| s.site).ok()?;
         let e_v = self.config.species(self.stands[i].species).energy_density;
-        let organic = want.min(self.stands[i].foliage);
+        // Which layers the mouth may take from, lowest first, and what each holds.
+        let offered: Vec<(usize, f64)> =
+            layers_of(&self.config, &self.stands[i], self.config.voxel_m)
+                .into_iter()
+                .filter_map(|l| {
+                    let fi = l.foliage_index?;
+                    let inside = layers.is_none_or(|range| range.contains(&l.cell));
+                    (inside && l.stock > 0.0).then_some((fi, l.stock))
+                })
+                .collect();
+        let mut per_layer = [0.0f64; MAX_FOLIAGE_LAYERS];
+        let mut organic = 0.0f64;
+        let mut left = want;
+        for (fi, stock) in offered {
+            if !(left > 0.0) {
+                break;
+            }
+            let take = left.min(stock);
+            per_layer[fi] = take;
+            self.stands[i].layer_stock[fi] -= take;
+            organic += take;
+            left -= take;
+        }
         if !(organic > 0.0) {
             return None;
         }
@@ -2441,11 +3058,20 @@ impl Flora {
         let before = self.stands[i].material();
         self.stands[i].foliage -= organic;
         let mineral = step::pull_mineral(&mut self.stands[i], before, organic);
-        Some(self.book_consumed(Taken {
+        // The stocks and the scalar were moved by the same amounts in a different
+        // order; the float residue between them goes back into the lowest layer the
+        // bite touched, so `sum(layer_stock) == foliage` holds to the ulp.
+        let count = self
+            .config
+            .species(self.stands[i].species)
+            .foliage_layer_count(self.stands[i].wood);
+        self.stands[i].settle_layers(count);
+        let taken = self.book_consumed(Taken {
             organic,
             mineral,
             energy: e_v * organic,
-        }))
+        });
+        Some(TakenFoliage { taken, per_layer })
     }
 
     /// A consumer eats **dead wood** off the site's ground, up to `want`, with its mineral

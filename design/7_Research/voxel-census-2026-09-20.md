@@ -612,3 +612,493 @@ and eating a third less in that window — which the hour-long arms above say is
 transient of the first seconds and not the steady state. Nothing refused to load
 and no centre was retrained: the observation vector is the same 23 and 37 inputs
 it was.
+
+## Bodies in metres, 2026-09-22
+
+Package 1b (`design/handoffs/voxel-body-anchors-2026-09-22.md`) on the step
+rule's world: adult dimensions in metres on the founder physiology, growth by
+`(body / body_max)^(1/3)`, the eye at `0.8 × height` over the standing surface,
+the mouth band `[0, 1.33 × height]`, the horizontal reach `0.25 × length`, the
+clearance `ceil(height / voxel)`, and canopy shade over a physical crown area in
+m². Measured on this branch (`body-anchors`, from main at f1f3f1f), same command
+as the step rule's section, same seeds. "Before" is f1f3f1f re-run here, not a
+quoted number.
+
+### t = 0, `voxel_edible_stock 0 preset=<name>`
+
+| fraction of standing foliage | small | default | wide |
+| --- | --- | --- | --- |
+| reachable from any legal face, before → after | 0.494 → **0.417** | 0.718 → **0.500** | 0.749 → **0.486** |
+| route-connected to a seeded browser, before → after | 0.494 → **0.417** | 0.484 → **0.223** | 0.365 → **0.366** |
+| visible, before → after | 1.000 → 1.000 | 0.691 → 0.691 | 0.916 → 0.916 |
+| bloomcrown reachable, after | 0.000 | 0.534 | 0.334 |
+| bloomcrown route-connected, after | 0.000 | 0.000 | 0.088 |
+
+**Reach falls everywhere, and it is the band doing it.** The adult browser's
+ceiling is `1.33 × 0.1875 = 0.249375` m — a hair under one 0.25 m cell — so on
+`default` and `wide` the mouth takes the standing layer and nothing above it,
+where the old whole-voxel rule took one cell more. On `small` two 0.125 m cells
+are inside the band, which is the same 0.25 m of air. All three "after" reach
+numbers are **bit-identical to the `reach_band` column the observer printed
+before this package** (0.417351, 0.500168, 0.486236): the implementation
+reproduces the hypothesis the observer was measuring, which makes this row a
+check rather than a result.
+Clearance moved the other way (the browser now asks for `ceil(0.1875/v)` = 1 cell
+on `default`/`wide` against `1 + mouth_reach_up_voxels` = 2, and 2 on `small`
+against 3), so there are more legal faces than before; it did not offset the
+band.
+
+**Route falls on `default` because the seeder moved, not because the walk did.**
+`browser_faces` places founders on faces whose crown is in the mouth band, and
+the narrower band deleted the high feeding faces: the eight browsers were seeded
+across standing layers 17/18/19/35/36 and are now all at 17 and 18. The foliage
+on the upper terraces is still reachable (0.500) and is no longer anybody's
+component (0.223). `small` and `wide` did not move: on `small` route has equalled
+reach since the step rule, and on `wide` the seeding barely changed. Nothing here
+is a route regression — the step rule's components are unchanged — it is where
+the founders are put.
+
+### 60 simulated minutes, `voxel_founder_autopsy 60 preset=<name>`
+
+| | small before | small after | default before | default after |
+| --- | --- | --- | --- | --- |
+| deaths (accounted) | 27 | 25 | 38 | 39 |
+| starved (shredder / browser) | 22 (12 / 10) | 25 (13 / 12) | 34 (23 / 11) | 35 (22 / 13) |
+| drowned | 5 | **0** | 4 | 4 |
+| **browser extinct at minute** | 39 | **30** | never (2 alive) | **never (1 alive)** |
+| shredders alive at 60 min | 9 | 7 | 8 | 8 |
+| browser bites | 21,340 | 10,412 | 21,404 | 16,621 |
+| shredder bites | 19,385 | 16,619 | 41,057 | 49,352 |
+| born (of 32 / 48 births) | 20 | 16 | 32 | 32 |
+
+Browser intake falls with the band, as the t = 0 table says it must: half the
+bites on `small`, 22 % fewer on `default`, and the `small` extinction moved nine
+minutes earlier. What the browsers ate changed shape as well as size — on
+`default` bloomcrown went from 4,283 bites to **none at all** (its one-cell crown
+sits above the band and the seeder no longer stands anybody under a high one),
+and stonecushion, a floor tissue, went from 1,812 to 4,771. On `small`
+bloomcrown went the other way, 0 → 658, because a browser can now reach the
+0.125–0.25 m cell a bloomcrown seedling's crown sits in. This is the succession
+story decisions §2 asked for, and the answer to the hungry browser is the layers
+package's basal rosette, not a raised ceiling. Drowning on `small` went from five to zero. That is not
+isolated: the seeding, the clearance and every trajectory moved together in this
+arm, and a five-to-zero count over one seed is a small sample. It is recorded,
+not explained. Residuals over 72,000
+ticks: fauna ≤ 1.1e-10, flora ≤ 6.4e-10 absolute.
+
+### Shade
+
+`shade_k` (per cell²) became `shade_k_per_m2` = `1.5 × (0.25 m)²` = **0.09375**,
+and a crown's area became `π (radius_cells · voxel_m)²` floored at `(0.25 m)²`
+instead of `π radius_cells²` floored at 1. On the 0.25 m reference grid both
+substitutions cancel exactly — coefficient and area each pick up one factor of
+`(0.25)²`, floor included — so `default` and `wide` are numerically identical,
+which `crates/cubarium-voxel-flora/tests/shade_area.rs` asserts against the old
+expression digit for digit. On `small` the same physical crown now casts the same
+physical shade as on `default`; before, halving the cell quartered the optical
+depth. No stock number in the tables above is attributable to it: the t = 0
+observer does not step, and the two autopsy arms are 0.125 m and 0.25 m worlds
+whose light gates move only over hours.
+
+## Layers, 2026-09-22
+
+Package 2 (`design/handoffs/voxel-plant-layers-2026-09-22.md`) on the
+bodies-in-metres world: a species carries a `profile` staged by `wood / wood_max`,
+a stand holds one stock per foliage-bearing layer of that stage summing to its
+scalar `foliage`, bites come out of the layers the mouth's band reaches lowest
+first, regrowth fills bottom-up and senescence sheds from the top, and light is
+assessed per layer. The profiles are `design/organism-anatomy-2026-09-21.md` §3's
+tables with decisions §5's corrections — the adult bloomcrown keeps a **0.25
+basal rosette for life**, a woody seedling is a ground rosette capped at 0.125 m.
+Measured on branch `plant-layers`, from main at 1447efd.
+
+**"Before" is a control arm of this same build, not a quoted number.**
+`voxel_edible_stock ... lollipop` and `voxel_founder_autopsy ... lollipop` run
+`FloraConfig::one_layer_species()` — every plant the one disc it was — on the
+same landforms, the same seed, the same bodies and the same trained centres. At
+`t = 0` it reproduces the "Bodies in metres" table above **exactly** on all three
+presets, which is what makes the differences below attributable to the anatomy
+and to nothing else. Over a stepped run it is statistically, not bitwise, the old
+model: a withdrawal now sums per-layer takes where it used to compute
+`want.min(foliage)`, and an ulp in a bite is a different trajectory an hour later.
+
+### t = 0, `voxel_edible_stock 0 preset=<name>`
+
+| fraction of standing foliage | small | default | wide |
+| --- | --- | --- | --- |
+| standing foliage organic | 4.6752 | 20.2068 | 46.6440 |
+| reachable from any legal face, before → after | 0.417 → **0.591** | 0.500 → **0.561** | 0.486 → **0.595** |
+| route-connected to a seeded browser, before → after | 0.417 → **0.591** | 0.223 → 0.223 | 0.366 → **0.388** |
+| visible, before → after | 1.000 → 1.000 | 0.691 → 0.703 | 0.916 → 0.892 |
+| bloomcrown reachable, before → after | 0.000 → **1.000** | 0.534 → **0.664** | 0.334 → **0.536** |
+| umbrellafrond reachable, before → after | — | 0.000 → 0.000 | 0.039 → **0.087** |
+
+**All of the gain is the new low tissue, and the per-layer block says so.** The
+observer now reports each species' layers separately (`layer,<min>,<species>,
+<index>,<stands>,<band_lo_m>,<band_hi_m>,<stock>,<reach>,<route>,<f_reach>`),
+with the band stock-weighted in metres above the world floor:
+
+| preset | species | layer | band (m) | stock | reachable |
+| --- | --- | --- | --- | --- | --- |
+| small | bloomcrown | 0 rosette | 3.62–3.73 | 0.811 | **1.00** |
+| small | bloomcrown | 1 crown | 3.94–4.21 | 1.913 | 0.00 |
+| default | bloomcrown | 0 rosette | 9.74–9.84 | 2.828 | **1.00** |
+| default | bloomcrown | 1 crown | 10.06–10.32 | 6.628 | 0.52 |
+| default | umbrellafrond | 0 lowest tier | 4.24–4.38 | 2.309 | 0.00 |
+| default | umbrellafrond | 1 | 4.51–4.65 | 1.804 | 0.00 |
+| default | umbrellafrond | 2 top | 4.83–4.93 | 0.795 | 0.00 |
+| wide | bloomcrown | 0 rosette | 8.95–9.05 | 6.834 | **1.00** |
+| wide | bloomcrown | 1 crown | 9.29–9.54 | 15.966 | 0.34 |
+| wide | umbrellafrond | 0 lowest tier | 4.48–4.62 | 4.171 | 0.14 |
+| wide | stonecushion | 0 skirt · 1 cap | 4.62–4.74 | 2.864 · 1.228 | 1.00 · 1.00 |
+
+- **small.** Every bloomcrown's rosette is floor food, where before *no*
+  bloomcrown foliage was reachable at all: reach 0.417 → 0.591 and route with it,
+  because on this preset every legal face is one component.
+- **default.** Reach rises 0.500 → 0.561 and the route does not move at all
+  (0.223), because the seeded browsers' walkable component holds no bloomcrown —
+  the seeding problem package 1b flagged and package 4 owns. A rosette a browser
+  cannot walk to is not food.
+- **wide.** Reach 0.486 → 0.595 and route 0.366 → 0.388: bloomcrown's rosette is
+  wholly reachable and a third of its crown still is, because on a 24-high ring
+  many faces stand a voxel above a neighbouring stand.
+
+Umbrellafrond's adult and juvenile tiers stay out of reach on every preset, which
+is decisions §5's "escape at the seedling → juvenile transition" doing exactly
+what it says. `visible` moved a little in both directions: trunks are occluders
+for the first time, and a rosette is a second thing to see.
+
+### 60 simulated minutes, `voxel_founder_autopsy 60 preset=<name>`
+
+| | small before | small after | default before | default after |
+| --- | --- | --- | --- | --- |
+| deaths (accounted) | 27 | 30 | 41 | 36 |
+| starved (shredder / browser) | 27 (15 / 12) | 24 (13 / 11) | 38 (25 / 13) | 34 (23 / 11) |
+| drowned | 0 | 6 | 3 | 2 |
+| **browser extinct at minute** | **30** | **53** | never (1 alive) | never (**2** alive) |
+| shredders alive at 60 min | 6 | 3 | 9 | **13** |
+| browser bites | 10,495 | 12,280 | 14,135 | 17,526 |
+| browser assimilated | 0.743 | **1.252** | 1.566 | 1.352 |
+| born (of 33 / 51 births) | 17 | 17 | 35 | 35 |
+| bloomcrown bites / eaten | 640 / 0.095 | **3,380 / 1.294** | 0 / 0 | 0 / 0 |
+| umbrellafrond bites / eaten | 0 / 0 | 0 / 0 | 2,269 / 0.623 | **7,417 / 0.876** |
+| springturf bites / eaten | 1,585 / 0.732 | 1,860 / 0.789 | 4,190 / 1.729 | 2,897 / 1.228 |
+
+**On `small` the rosette is the difference: the browser lineage lasts 53 minutes
+instead of 30, on 1.25 of assimilated intake against 0.74, and bloomcrown goes
+from 640 bites to 3,380.** That is the grazed meadow decisions §5 asked for,
+measured. Two things moved the other way in the same arm and are recorded rather
+than explained: six browsers drowned where none did before, and the shredders
+ended at 3 instead of 6. Both are one seed and one trajectory — a browser that
+lives twenty minutes longer walks somewhere else and leaves a different corpse —
+and neither is a rule this package changed.
+
+**On `default` the rosette changes nothing, because no browser can walk to one.**
+What the browsers ate instead is umbrellafrond, three times over: its
+**seedlings** are ground rosettes now, and a seedling frond is food where an
+adult is not. Bloomcrown stays at zero bites on both arms. The lineage still
+holds at 60 minutes and the shredder population is larger (13 against 9), which
+follows the extra litter. This is the audit's §5 warning becoming visible:
+"universal seedling browsing can instead prevent canopy recruitment", and it is
+now a measurable pressure rather than a possibility.
+
+Residuals over 72,000 ticks: fauna ≤ 6.2e-11, flora ≤ 1.6e-10 absolute on both
+arms.
+
+### 6 simulated hours, `voxel_edible_stock 6 preset=<name>`
+
+| | small before | small after | default before | default after |
+| --- | --- | --- | --- | --- |
+| standing foliage, t = 0 → 6 h | 4.675 → **0.000** | 4.675 → **0.264** | 20.207 → 29.800 | 20.207 → **12.807** |
+| species alive at 6 h | none | stonecushion | umbrellafrond 28.19, stonecushion 1.61 | umbrellafrond 11.27, stonecushion 1.54 |
+| reachable at 6 h | — | 1.000 | 0.067 | **0.414** |
+| browsers alive, 0 → 6 h | 8 → 0 (gone by min 30) | 8 → 0 (gone by min 60) | 8 → 0 (gone by min 90) | 8 → 0 (**1 alive at min 180**, gone by 210) |
+| shredders alive, 0 → 6 h | 8 → 0 (gone by min 120) | 8 → 0 (gone by min 90) | 8 → **10** | 8 → **10** |
+
+- **small.** The plant layer collapses on both arms — it did before this package
+  and it does now — but the layered world ends holding 0.264 of stonecushion
+  where the lollipop world ends at exactly zero, and all of it is floor food.
+  Neither lineage survives six hours on this preset under either model. The
+  collapse is not the layers' doing and the layers do not fix it.
+- **default.** The forest regrows either way and it is umbrellafrond that regrows
+  it. **The layered world ends with less than half the standing foliage of the
+  lollipop one (12.8 against 29.8) and four times the share of it reachable
+  (0.414 against 0.067)**, because the regenerating fronds are seedlings and a
+  seedling is a ground rosette. The browser lineage lasts twice as long
+  (min 180 against min 90) and still dies. The shredders are unaffected at 10.
+
+The honest sentence for both presets: **layers put real food on the floor and the
+browsers ate it for twice as long, and it was not enough.** Nothing here says the
+lineage persists; it says the tissue it needs now exists and is reachable, and
+that what is still missing on `default` is the route (package 4) and on `small`
+the plant layer's own six-hour collapse, which predates this package.
+
+Residuals at 6 h, over 432,000 ticks, against the stocks the observer now prints
+beside them: `small` flora organic −1.4e-10 of 1.423, mineral −4.4e-11 of 260.3,
+energy −2.7e-10 of 2.846; `default` flora organic −1.3e-8 of 42.11, mineral
+−6.9e-11 of 384.8, energy −2.6e-8 of 84.21. Every one is ≤ 1e-9 **relative**
+(worst 3.1e-10, `default` energy). Fauna ≤ 1.5e-11 absolute on both. Water
+1.6e-7 m³ (`small`) and 2.7e-6 m³ (`default`). The 6 h `after` arms were run
+twice, on two builds differing only by an added print, and reproduced digit for
+digit.
+
+### What the layers did not settle
+
+**Porosity has no sight meaning and no meaning in the picture.** It enters the
+light exponent as `(1 - p)` and nothing else reads it, so a porous canopy is
+transparent to plant light and opaque to an eye and solid in the presenter. The
+audit's §5 asked for one shared interpretation; this package records the
+simplification instead of inventing one, because resolving it is a model decision
+(`design/voxel-encounter-contract-2026-09-21.md` §8).
+
+And that `(1 - p)` is the **one** way a single-layer species' shade differs from
+what it was: springturf, velvetpad and glowcap now shade by `(1-p)` of their old
+optical depth, with p 0.3, 0.6 and 0.5. Everything else about the shade of a
+one-layer plant is the pre-layer number digit for digit — the reference height,
+the footprint, the area in m², the occlusion order and the weight — which
+`crates/cubarium-voxel-flora/tests/layers.rs` asserts in both forms. The three
+are mats and caps whose band top sits at the ground, so they occlude almost
+nothing on these landscapes, and no number in the tables above is attributable to
+it; but it is a change, and it is a one-line change to undo.
+
+## D5 — the small preset
+
+Brief: `design/handoffs/voxel-small-collapse-2026-09-22.md`. Read-only; the only
+code change is `crates/cubarium/examples/voxel_plant_autopsy.rs`, which now takes
+`preset=<name>` through `voxel::ambient_world` (the host's own build: the recipe's
+extents, cell size and water, the lake gate over 24 draws, `FloraConfig::for_voxel_size`)
+and runs either `plants-only` (the fauna the seeder introduces is never stepped) or
+`coupled` (the host's `Sim`, the settled sense field, the built-in trained founders).
+Three arms, six simulated hours, seed base 1, 0 seeds rejected on either preset:
+`small` plants-only, `small` coupled, `default` plants-only. CSVs under `runs/` are
+disposable.
+
+Both arms reproduce the "Layers" table at t = 0 exactly — standing foliage 4.675 on
+`small`, 20.207 on `default` — and the `small` **coupled** arm ends at **0.264**, the
+same 0.264 that section reports for `voxel_edible_stock 6 preset=small`. The plant
+autopsy is measuring the same collapse.
+
+### The table
+
+| | small plants-only | small coupled | default plants-only |
+| --- | --- | --- | --- |
+| species seeded (stands) | 4 (27) | 4 (27) | **6 (87)** |
+| standing foliage, t = 0 → 6 h | 4.675 → **0.664** | 4.675 → **0.264** | 20.207 → **25.754** |
+| alive at 6 h | stonecushion 0.664 | stonecushion 0.264 | umbrellafrond 23.36, stonecushion 1.48, springturf 0.84, velvetpad 0.07, glowcap 0.02 |
+| establishments / deaths | 33 / 29 | 12 / 29 | **215 / 141** |
+
+Deaths by cause. The flora ledger books `deaths` with **no cause**, so every cause
+below except drowning is inferred from the clause of the stand's own survival rule
+that was failing at the tick it died; drowning is read straight off the gate.
+
+| species | small plants-only | small coupled | default plants-only |
+| --- | --- | --- | --- |
+| bloomcrown | 9 deficit | 7 deficit, 2 no foliage | 18 deficit |
+| umbrellafrond | — | — | 5 drown, 2 thirst, 2 deficit |
+| springturf | 6 drown, 6 deficit | 6 drown, 6 no foliage | 1 drown, 1 thirst, 88 deficit |
+| stonecushion | 0 | 0 | 1 deficit |
+| velvetpad | — | — | 12 thirst, 3 deficit |
+| glowcap | 8 drown | 8 drown | 2 drown, 6 at the alive floor while solvent |
+
+Root-box pore against the band, mean over living stands, and the light beside it.
+Every species' `establish_pore_min` and wilt/saturation band is in the runs' t = 0
+block; soil's field capacity is 0.25 and rock's 0.5, so 0.25 is "drained soil".
+
+| | t = 0 | 30 min | 6 h | band (wilt → sat) | mean light, whole run |
+| --- | --- | --- | --- | --- | --- |
+| small bloomcrown | 0.2500 | 0.165 (μ 0.20) | dead at 330 min | 0.08 → 0.50 | 0.98–1.00 |
+| small springturf | 0.2500 | 0.242 (μ 0.31) | dead at 57 min | 0.15 → 0.45 | 0.94–0.96 |
+| small stonecushion | 0.2500 | 0.172 (μ 0.46) | **0.071 (μ 0.16)** | 0.02 → 0.35 | 0.95–0.97 |
+| default umbrellafrond | **0.9853** | 0.647 (μ 0.70) | **0.506 (μ 0.43)** | 0.30 → 0.80 | 0.96–0.97 |
+| default velvetpad | **0.6478** | 0.431 (μ 0.58) | 0.204 (μ 0.03) | 0.20 → 0.60 | 0.99 |
+| default bloomcrown | 0.2500 | 0.123 (μ 0.11) | dead | 0.08 → 0.50 | 0.87–0.89 |
+| default springturf | 0.2599 | 0.254 (μ 0.30) | 0.375 (μ 0.65) | 0.15 → 0.45 | 0.89–0.96 |
+
+**Light is never the constraint**: the mean light response is 0.87–1.00 for every
+species in every arm, and no death was booked on light or on mineral.
+
+The water ledger, per square metre of footprint, so the two rings are comparable
+(`small` 60 m² and 90 m³; `default` 192 m² and 288 m³ — both exactly
+`inventory_m` 1.5 m, since `Water::SMALL` inherits `Water::DEFAULT`'s inventory).
+
+| m³ per m² | small t = 0 | small 6 h | default t = 0 | default 6 h |
+| --- | --- | --- | --- | --- |
+| pore | 0.0447 | 0.0481 | 0.0681 | 0.0611 |
+| pooled | 0.0366 | 0.0084 | **0.1298** | 0.0131 |
+| aquifer (head, m) | 0.574 (1.640) | 0.606 (1.731) | 0.378 (**1.081**) | 0.553 (1.579) |
+| atmosphere | 0.845 | 0.837 | 0.924 | 0.873 |
+| rain, cumulative | — | 0.0688 | — | 0.0688 |
+| stream re-entry, cumulative | — | **0.0433** | — | **0.1127** |
+| evaporation, cumulative | — | 0.0986 | — | 0.0969 |
+| transpiration, cumulative | — | 0.0014 | — | 0.0216 |
+
+33 showers on both, and the rain each ring received per square metre is identical to
+five digits, so the per-preset `shower_volume_m3` scaling works. Residuals over
+432,000 ticks: `small` 1.5e-7 m³ of 90 (1.7e-9 relative), `default` 2.6e-6 of 288
+(9.1e-9 relative).
+
+Establishment at t = 0. **Every seeded stand passes its own predicate where it
+stands, on both presets** — `habitat::suitable` consults
+`establishment_gates_with_sky` now, so D1's "62 of 62 founders stand where their own
+seeds are refused" no longer holds. What differs is which species get planted at all,
+and the skyline says why:
+
+| eligible columns at t = 0 | small (of 3,840) | default (of 3,072) | seeded |
+| --- | --- | --- | --- |
+| bloomcrown | 3,046 (79 %) | 1,163 (38 %) | 4 / 15 |
+| **umbrellafrond** (pore ≥ 0.45) | **16 (0.4 %)** | **853 (27.8 %)** | **0 / 8** |
+| springturf | 2,709 (71 %) | 962 (31 %) | 12 / 36 |
+| stonecushion | 3,104 (81 %) | 1,226 (40 %) | 5 / 15 |
+| **velvetpad** (pore ≥ 0.30) | **7 (0.2 %)** | **157 (5.1 %)** | **0 / 4** |
+| glowcap (dead wood) | 201 (5.2 %) | 90 (2.9 %) | 6 / 9 |
+
+The seeder's own arithmetic closes it: `want = round(eligible_columns × cell_area ×
+per_m²)`. On `small` that is `round(16 × 0.015625 × 0.15) = round(0.0375) = 0` for
+umbrellafrond and `round(7 × 0.015625 × 0.4) = round(0.04) = 0` for velvetpad; on
+`default` it is `round(853 × 0.0625 × 0.15) = 8` and `round(157 × 0.0625 × 0.4) = 4`,
+which is exactly what was planted.
+
+### The sentence
+
+**The `small` preset's plants die of thirst in drained soil, and what makes that fatal
+rather than merely thinning is that its ring has no standing wet ground for the seeder
+to find, so the only two producers that are solvent anywhere — umbrellafrond and
+velvetpad, income 6–18× maintenance in soil above field capacity — are never planted,
+and every species `small` does get is one that is insolvent on `default` too.**
+
+The supporting readings: bloomcrown covers 0.73 of its maintenance on `default` and
+1.38 on `small` at 30 minutes and falls to 0.00 on both; springturf covers 0.63 and
+0.49 at 30 minutes, is gone entirely by minute 60 on `small`, and loses 88 of its 90
+`default` stands to the same deficit by the same minute (16 come back later, in the
+wet ground the surviving canopy stands in). On `default` umbrellafrond covers 12.3–17.9
+throughout and grows 8 founders into 80 stands and 23.4 of foliage; velvetpad covers
+6.4–15.1 for the first two hours and then dries out too (12 of its 15 deaths are
+thirst, and it ends at 0.065). `small`'s one solvent species is stonecushion, a ground mat that ends at
+0.664 ungrazed and 0.264 grazed. Consumption is not the cause: the plants-only arm
+reproduces the coupled arm species for species and 29 deaths for 29, including the
+same 6 drowned springturf and 8 drowned glowcap; grazing only decides how much of the
+surviving mat is left.
+
+### Candidates, proposed and not made, ranked by the evidence
+
+1. **The inventory's split, not its size.** `Water::SMALL` keeps
+   `Water::DEFAULT`'s 1.5 m, and per square metre both rings are charged the same.
+   Where it lands differs: `small` buries 38 % of it in the water table against
+   `default`'s 25 %, because `hydrate` lifts the table to the lake floor and `small`'s
+   lake floor stands at 1.625 m where `default`'s stands at 1.0 m — 0.35 × 1.625 =
+   0.57 m per m² against 0.35 — and `small` is left with 2.4 % of its water standing in
+   pools against `default`'s 8.7 % (a 7.2 m² lake on a 60 m² ring, 12 %, against 66 m²
+   on 192 m², 34 %). The wet columns are the ones near standing water, and that is the
+   whole difference in the eligibility table. The levers this points at are
+   `lake_depth_m` (0.375 on `small`, 0.75 on `default`), the terraced tier-0 trough the
+   lake sits in, and the inventory sized against a higher lake floor — not the 1.5 m.
+2. **The seeder looks at the driest moment and rounds a small niche to zero.** It runs
+   after the settle and the 200-tick stream watch, before the first shower (300–900 s),
+   and thirty minutes of weather takes `small` from 16 to 224 umbrellafrond-eligible
+   columns and from 7 to 267 velvetpad-eligible ones — 14× and 38× what the seeder saw,
+   and at 6 h 278 and 334. But establishment needs a donor of that species and there is
+   none, so the ring can never acquire them. Candidates: a floor of one founder wherever
+   the niche exists at all, or judging the ring after a shower rather than before one.
+3. **The solver's conductivity scales with the cell.** Infiltration and drainage are
+   `permeability_per_s · dt · pore_capacity · voxel_volume` per voxel
+   (`water.rs:757, 788, 1569`), which is `permeability · pore_capacity · voxel_m` metres
+   of column per second — so at 0.125 m the `small` ring's soil takes water and drains it
+   at **half** `default`'s speed in metres. Consistent with what the first shower did:
+   at minute 10 the runoff stood 0.031–0.077 m over `small`'s low ground and drowned
+   **14 of its 27 stands** (every springturf and every glowcap, against drown depths of
+   0.03 and 0.05 m), while `default`'s first shower drowned 3 of 87 at minute 9. Candidate:
+   a length per second rather than a cell fraction per second. **Not measured** — see below.
+4. **Not `FloraConfig::for_voxel_size`.** It doubles every authored voxel distance
+   exactly: a bloomcrown root box holds 22.2 soil voxels on `small` against 2.8 on
+   `default`, which is 8× the voxels for ⅛ the cell volume — the same soil in metres —
+   and the box reads the same 0.2500 mean pore on both presets at t = 0. No evidence of
+   a scaling defect in the flora config.
+5. **Not a `small` problem at all, for four of the six species.** Bloomcrown and
+   springturf are insolvent on `default` too, and glowcap ends there at 0.016. Whether a
+   producer should be able to pay its maintenance in soil at field capacity is a model
+   question this diagnosis does not answer; `default` survives by having wetland, not by
+   having healthy dryland plants.
+
+### What this did not measure, and why
+
+- **Cause of death is inferred.** `FloraLedger` has one `deaths` counter and no cause
+  field, so every cause above except drowning is the failing clause of the stand's own
+  survival rule at the tick it vanished. A stand grazed to zero foliage and a stand
+  that never had income both read as a deficit unless the foliage clause fires first.
+- **Per-species consumption is not readable here.** `consumed_organic_out` is one
+  number for the layer (4.870 on the `small` coupled arm); what the browsers took from
+  which species is the founder autopsy's measurement, not this one's.
+- **Candidate 3 is arithmetic plus a consistent observation, not an experiment.** It
+  needs one landform run at two cell sizes, which this package did not run.
+- **One seed per preset** (base 1, 0 rejected). `small`'s own barren seeds — the recipe
+  comment names five of eight — are not sampled, and `wide` was not run at all.
+- The three arms are one trajectory each; nothing here is a distribution.
+
+## Water units, 2026-09-22
+
+Package 1c (`design/handoffs/voxel-water-units-2026-09-22.md`) turned the
+solver's permeability-driven flux from a fraction of a cell per tick into a
+conductivity in metres per second: `rate_m3 = K · face_area · dt` with
+`K = permeability_per_s · pore_capacity · 0.25` m/s (soil 0.0175, rock 5e-6).
+Four sites — the water table's band uptake and its seepage, surface
+infiltration, and drainage. `permeability_per_s` and `pore_capacity` keep
+their authored values, nothing serialised changed, and the conversion factor
+is chosen so the 0.25 m reference grid is untouched. Rain and evaporation
+were already per area; the outlet weir is a share of the cell on purpose and
+was left alone. Candidate 3 of the D5 diagnosis above, measured.
+
+**The reference grid is identical, and not just in arithmetic.** On 0.25 m
+cells `pore_flux_m3` reproduces the old expression bit for bit (`to_bits()`
+equality, every material, three timesteps). End to end, over a full hour:
+`voxel_plant_autopsy 1 preset=default` writes a **byte-identical** CSV before
+and after, and so does `water_cycle 1 … preset=default`. `wide` is 0.25 m too,
+so the same holds there; `small` is the only shipped ring the fix moves.
+
+**Drownings, 1 h, seed base 1, plants-only** (before = the same binary with the
+pre-1c expression restored, so this is a controlled A/B and not a comparison
+across commits):
+
+| | small (0.125 m), 27 stands | default (0.25 m), 87 stands |
+| --- | --- | --- |
+| drowned by min 10, before | 14 (all at min 10) | 8 (5 at min 0, 3 at min 9) |
+| drowned by min 10, after | **8** | 8 — identical |
+| drowned at 60 min, before → after | 14 → **8** | 8 → 8 |
+| deaths at 60 min, before → after | 22 → **20** | 43 → 43 |
+| establishments | 19 → 19 | 42 → 42 |
+
+The first shower still drowns eight of `small`'s stands. Halving the depth of
+standing water is what the ground draining at its proper speed buys, and it is
+not by itself enough: the springturf and glowcap drown depths are 0.03 and
+0.05 m and the runoff still clears them. D5's other two findings stand.
+
+**Closed cycle, 1 h** (`water_cycle 1 1 0.02 5.0 0.0001 4 preset=…`):
+
+| | stored (m³) | pooled | pore | aloft | showers | residual |
+| --- | --- | --- | --- | --- | --- | --- |
+| default, before | 427.36–470.82 | 122.018 | 22.728 | 230.241 | 4 | 1.1e-9 |
+| default, after | identical | identical | identical | identical | 4 | 1.1e-9 |
+| small, before | 91.88–100.47 | 34.598 | 6.099 | 61.115 | 5 | 1.5e-8 |
+| small, after | 91.66–100.43 | 34.381 | 6.097 | 61.335 | 5 | 4.8e-8 |
+
+`small`'s cycle barely notices: 0.6 % less pooled and 0.4 % more aloft, the
+same five showers, the same verdict. The ring's water is in the lake and the
+aquifer, and doubling the speed at which the soil exchanges with them moves the
+standing film, not the inventory. Conservation holds on both grids, and the
+residuals are the example's own floating-point floor.
+
+### What this did not measure, and why
+
+- **One seed per preset, one trajectory each.** `wide` was not run: it is
+  0.25 m, so the fix is a no-op there by the same identity.
+- **Nothing beyond an hour.** The 6 h picture of D5's table is not re-run here.
+- **The drowning counts are the autopsy's inferred cause**, unchanged from D5:
+  a stand whose water depth passed its `drown_depth_m` on the tick it vanished.
+- **A mirror-symmetry fixture lost strength.** `core::the_mirrored_fixture_
+  gives_the_mirrored_answer` now holds to 5e-3 rather than 1e-6. Two basins
+  sealed by a sill freeze whatever split the spill left them, and that split
+  turns on one substep-level head comparison; the units change moved the
+  operating point across it. Measured constant in the poured volume (4.9–7.0
+  m³) and in the tick count (20–1000), so it is a frozen decision and not a
+  drift, and conservation and the materials are still mirrored at 1e-12. The
+  order dependence is the damp-set walk `drain`'s own doc names, not something
+  1c introduced — but nothing here measured how far it reaches.

@@ -74,10 +74,7 @@ use cubarium_voxel::{VoxelView, World};
 use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraView, Site, Taken};
 use serde::{Deserialize, Serialize};
 
-pub use body::{
-    FounderPhysiology, climb_voxels, effective_config, has_headroom, headroom_voxels,
-    mouth_reach_up_voxels,
-};
+pub use body::{Body, FounderPhysiology, climb_voxels, effective_config, has_headroom};
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
     FounderFactories, Response, Scripted, resolve_actions,
@@ -86,9 +83,9 @@ pub use cubarium_voxel::{DT, TICK_HZ};
 pub use cubarium_voxel_flora::Reach;
 pub use encounter::{
     HEADING_SAMPLES, SightMap, band_crown_layers, crown_columns, crown_layer, crown_slab_m,
-    eye_above_surface_m, eye_origin_m, foliage_stands_in_layers, mouth_columns_at,
-    mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg, standable_faces, surface_m,
-    walkable_components,
+    eye_above_surface_m, eye_origin_m, foliage_stands_in_layers, layer_columns, mouth_columns_at,
+    mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg, reachable_layers_of,
+    standable_faces, surface_m, walkable_components,
 };
 pub use manifest::{
     ACTION_DEADBAND, Action, BROWSER_RAY_PITCH_OFFSETS_DEG, BROWSER_RAY_YAW_OFFSETS_DEG,
@@ -112,6 +109,7 @@ pub fn browser_cone_readings(
         return None;
     }
     let occupancy = senses::cone_occupancy(view, flora, fauna);
+    let body = fauna.config.founder(Founder::Browser).body_at(animal.body);
     let reading = senses::cone_readings(
         view,
         &occupancy,
@@ -119,6 +117,7 @@ pub fn browser_cone_readings(
         &animal.pose,
         animal.site.y,
         &Founder::Browser.manifest(),
+        &body,
     );
     reading.valid.then_some(
         reading
@@ -144,6 +143,8 @@ pub enum ConeHit {
     Water,
     /// A crown cell of a stand whose foliage is zero.
     StrippedCrown,
+    /// A stand's trunk cell: structure, never food.
+    Trunk,
     /// A crown cell with foliage standing in it — the only hit the policy reads as food.
     FoliageCrown,
     /// The cell over a ground site holding litter, carrion or dead wood.
@@ -160,6 +161,7 @@ impl ConeHit {
             ConeHit::Terrain => "terrain",
             ConeHit::Water => "water",
             ConeHit::StrippedCrown => "stripped",
+            ConeHit::Trunk => "trunk",
             ConeHit::FoliageCrown => "foliage",
             ConeHit::GroundPool => "pool",
             ConeHit::Body => "body",
@@ -167,11 +169,12 @@ impl ConeHit {
     }
 
     /// Every variant, in the order a census row prints them.
-    pub const ALL: [ConeHit; 7] = [
+    pub const ALL: [ConeHit; 8] = [
         ConeHit::Clear,
         ConeHit::Terrain,
         ConeHit::Water,
         ConeHit::StrippedCrown,
+        ConeHit::Trunk,
         ConeHit::FoliageCrown,
         ConeHit::GroundPool,
         ConeHit::Body,
@@ -184,9 +187,10 @@ impl ConeHit {
             ConeHit::Terrain => 1,
             ConeHit::Water => 2,
             ConeHit::StrippedCrown => 3,
-            ConeHit::FoliageCrown => 4,
-            ConeHit::GroundPool => 5,
-            ConeHit::Body => 6,
+            ConeHit::Trunk => 4,
+            ConeHit::FoliageCrown => 5,
+            ConeHit::GroundPool => 6,
+            ConeHit::Body => 7,
         }
     }
 }
@@ -198,6 +202,7 @@ pub(crate) fn cone_hit_of(fine: senses::Fine) -> ConeHit {
         senses::Fine::Terrain => ConeHit::Terrain,
         senses::Fine::Water => ConeHit::Water,
         senses::Fine::StrippedCrown => ConeHit::StrippedCrown,
+        senses::Fine::Trunk => ConeHit::Trunk,
         senses::Fine::FoliageCrown => ConeHit::FoliageCrown,
         senses::Fine::GroundPool => ConeHit::GroundPool,
         senses::Fine::Body => ConeHit::Body,
@@ -242,8 +247,8 @@ pub struct ConeCensus {
 impl ConeCensus {
     /// How many fan rays of one sector struck each class, indexed by
     /// [`ConeHit::index`].
-    pub fn counts(&self, sector: usize) -> [u32; 7] {
-        let mut out = [0u32; 7];
+    pub fn counts(&self, sector: usize) -> [u32; ConeHit::ALL.len()] {
+        let mut out = [0u32; ConeHit::ALL.len()];
         for ray in self.rays.iter().filter(|r| r.sector == sector) {
             out[ray.hit.index()] += 1;
         }
@@ -293,7 +298,8 @@ pub fn browser_cone_census(
         return None;
     }
     let occupancy = senses::cone_occupancy(view, flora, fauna);
-    let origin = senses::cone_origin(view, &animal.pose, animal.site.y);
+    let geometry = fauna.config.founder(Founder::Browser).body_at(animal.body);
+    let origin = senses::cone_origin(view, &animal.pose, animal.site.y, &geometry);
     let heading = animal.pose.heading_rad;
     let range = manifest.cone_range_m;
     let march = |sector: usize, yaw_deg: f64, pitch_deg: f64, dir: (f64, f64, f64)| {
@@ -344,14 +350,22 @@ pub fn browser_cone_census(
 pub fn browser_mouth_foliage(
     view: &VoxelView<'_>,
     flora: &FloraView<'_>,
+    config: &FaunaConfig,
     animal: &Animal,
 ) -> Option<(Site, f64)> {
+    let geometry = body_of(config, animal)?;
     if animal.founder != Some(Founder::Browser) {
         return None;
     }
-    let manifest = Founder::Browser.manifest();
-    let cols = body::mouth_columns(view, &animal.pose, &manifest);
-    body::mouth_foliage_stand(flora, view, &cols, animal.site.y, &manifest)
+    let cols = body::mouth_columns(view, &animal.pose, &geometry);
+    body::mouth_foliage_stand(flora, view, &cols, animal.site.y, &geometry)
+}
+
+/// The physical geometry of one animal right now, from its lineage's physiology and its
+/// structure ([`FounderPhysiology::body_at`]). `None` for a body with no founder marker:
+/// the live heuristic species carry no dimensions at all.
+pub fn body_of(config: &FaunaConfig, animal: &Animal) -> Option<Body> {
+    Some(config.founder(animal.founder?).body_at(animal.body))
 }
 
 /// Every stand whose crown touches the browser's actual mouth probe columns.
@@ -359,19 +373,20 @@ pub fn browser_mouth_foliage(
 pub fn browser_mouth_candidates(
     view: &VoxelView<'_>,
     flora: &FloraView<'_>,
+    config: &FaunaConfig,
     animal: &Animal,
 ) -> Option<Vec<(Site, f64)>> {
     if animal.founder != Some(Founder::Browser) {
         return None;
     }
-    let manifest = Founder::Browser.manifest();
-    let cols = body::mouth_columns(view, &animal.pose, &manifest);
+    let geometry = body_of(config, animal)?;
+    let cols = body::mouth_columns(view, &animal.pose, &geometry);
     Some(body::mouth_foliage_stands(
         flora,
         view,
         &cols,
         animal.site.y,
-        &manifest,
+        &geometry,
     ))
 }
 
@@ -1057,6 +1072,37 @@ impl FaunaConfig {
                     founder.name(),
                     phys.organ_structure_fraction
                 ));
+            }
+            // The body is a physical object: every dimension positive, every anchor a
+            // finite nonnegative fraction of one. A zero-height animal has no eye, no
+            // mouth band and no clearance, so it is refused rather than clamped.
+            for (name, value) in [
+                ("adult_length_m", phys.adult_length_m),
+                ("adult_width_m", phys.adult_width_m),
+                ("adult_height_m", phys.adult_height_m),
+            ] {
+                if !value.is_finite() || value <= 0.0 {
+                    return Err(format!(
+                        "{}.{name} must be finite and positive, not {value}",
+                        founder.name()
+                    ));
+                }
+            }
+            for (name, value) in [
+                ("eye_height_fraction", phys.eye_height_fraction),
+                ("mouth_ceiling_fraction", phys.mouth_ceiling_fraction),
+                ("contact_height_fraction", phys.contact_height_fraction),
+                (
+                    "mouth_reach_length_fraction",
+                    phys.mouth_reach_length_fraction,
+                ),
+            ] {
+                if !value.is_finite() || value < 0.0 {
+                    return Err(format!(
+                        "{}.{name} must be finite and nonnegative, not {value}",
+                        founder.name()
+                    ));
+                }
             }
         }
         Ok(())
@@ -2109,7 +2155,7 @@ mod cone_census_tests {
     fn the_fine_census_maps_onto_the_coarse_reading_exactly() {
         let (mut world, mut flora, mut fauna) = wall_and_water_world();
         let mut checked = 0usize;
-        let mut saw = [0usize; 7];
+        let mut saw = [0usize; ConeHit::ALL.len()];
         for tick in 0..=200u64 {
             if tick > 0 {
                 world.step();

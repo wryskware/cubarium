@@ -650,6 +650,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "cubarium-voxel",
+ "postcard",
  "serde",
 ]
 

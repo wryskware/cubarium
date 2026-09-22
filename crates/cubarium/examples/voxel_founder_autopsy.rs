@@ -166,6 +166,11 @@ fn main() {
     // default, exactly as `cubarium voxel`'s ambient run installs them; `heuristic` as a
     // trailing argument keeps the old, observation-only control.
     let heuristic = args.iter().any(|a| a == "heuristic");
+    // The **before** arm, on this build: every plant reduced to the one-disc lollipop
+    // the model was before `design/handoffs/voxel-plant-layers-2026-09-22.md`, so an
+    // arm can be compared against the layered one on the same landforms, seed, bodies
+    // and centres rather than against a figure from another revision.
+    let lollipop = args.iter().any(|a| a == "lollipop");
     // `preset=<small|default|wide>` is the **landscape arm**: the world the host builds,
     // not the world this file used to build for itself.
     let preset: Option<&'static cubarium_voxel::Preset> = args
@@ -199,7 +204,12 @@ fn main() {
         let world_cfg = preset.config();
         let (world, seed, rejected) = cubarium::voxel::ambient_world(&world_cfg, seed_base);
         let lake = cubarium_voxel::hydrate::lake(&world);
-        let flora = Flora::new(FloraConfig::for_voxel_size(world.config().voxel_m));
+        let flora_cfg = FloraConfig::for_voxel_size(world.config().voxel_m);
+        let flora = Flora::new(if lollipop {
+            flora_cfg.one_layer_species()
+        } else {
+            flora_cfg
+        });
         eprintln!(
             "scene: preset {} ({}x{}x{} at {} m, seed {seed}, {rejected} rejected), \
              lake {:.2} m3 over {:.1} m2 visible; flora scaled for {} m cells",
@@ -237,7 +247,11 @@ fn main() {
         } else {
             scene::authored(cfg.world.clone())
         };
-        let flora = Flora::new(FloraConfig::default());
+        let flora = Flora::new(if lollipop {
+            FloraConfig::default().one_layer_species()
+        } else {
+            FloraConfig::default()
+        });
         let label = format!(
             "{} world, {} water budget",
             if generated { "generated" } else { "authored" },
@@ -254,6 +268,9 @@ fn main() {
         "seeded: stands={} logs={} litter_tiles={} founders={:?}",
         seeded.stands, seeded.logs, seeded.litter_tiles, seeded.founders
     );
+    if lollipop {
+        eprintln!("plants: one_layer_species (the pre-layers control)");
+    }
     if heuristic {
         eprintln!("founders: the observation-only heuristic (control)");
     } else {
@@ -565,9 +582,9 @@ struct Wander {
 struct LastCone {
     tick: u64,
     /// First-hit counts over the whole 27-ray fan, indexed by [`ConeHit::index`].
-    counts: [u32; 7],
+    counts: [u32; ConeHit::ALL.len()],
     /// Per sector, the same counts and the mean distance of its foliage hits.
-    per_sector: [([u32; 7], f64); 3],
+    per_sector: [([u32; ConeHit::ALL.len()], f64); 3],
     /// The nearest **living** crown by straight line: planar metres, the signed voxels
     /// between its crown layer and the eye, its elevation from the eye in degrees, and
     /// whether that elevation is inside the fan's pitch band.
@@ -593,13 +610,13 @@ fn last_cone(
     animal: &Animal,
     tick: u64,
 ) -> Option<LastCone> {
-    let crown = nearest_living_crown(view, fv, animal);
+    let crown = nearest_living_crown(view, fv, av.config, animal);
     // A probe aimed at that crown, in the ray's own frame: yaw from the body's heading,
     // pitch from horizontal. Marched by `browser_cone_census` with the same ray the fan
     // uses, so "blocked by what" is the fan's own answer and not a second opinion.
     let probes: Vec<(f64, f64)> = crown.iter().map(|c| (c.0, c.1)).collect();
     let census: ConeCensus = browser_cone_census(view, fv, av, animal, &probes)?;
-    let mut counts = [0u32; 7];
+    let mut counts = [0u32; ConeHit::ALL.len()];
     for ray in &census.rays {
         counts[ray.hit.index()] += 1;
     }
@@ -635,6 +652,7 @@ fn last_cone(
 fn nearest_living_crown(
     view: &VoxelView<'_>,
     fv: &FloraView<'_>,
+    config: &cubarium_voxel_fauna::FaunaConfig,
     animal: &Animal,
 ) -> Option<(f64, f64, f64, f64)> {
     let c = view.config;
@@ -650,9 +668,11 @@ fn nearest_living_crown(
     // The crown's own cell layer, the way `cone_occupancy` indexes it.
     let sc = fv.config.species(stand.species);
     let crown_layer = f64::from(stand.site.y) + f64::from(sc.crown_voxels(stand.wood));
-    // The eye: one and a half voxels over the standing face (`senses::cone_origin`).
-    let eye_layer = f64::from(animal.site.y) + 1.5;
-    let layer_offset = crown_layer - eye_layer;
+    // The eye, in metres: `0.8 × body height` over the standing surface
+    // (`senses::cone_origin`; `design/handoffs/voxel-body-anchors-2026-09-22.md`).
+    let eye_m = cubarium_voxel_fauna::surface_m(animal.site.y, v)
+        + cubarium_voxel_fauna::body_of(config, animal).map_or(0.0, |b| b.eye_m);
+    let layer_offset = crown_layer - eye_m / v;
     // Yaw in the ray's frame: `dir = (sin yaw, ., cos yaw)`, so it is measured from +z
     // toward +x, and `x` takes the short way round the ring.
     let w_m = f64::from(c.width) * v;
@@ -665,7 +685,7 @@ fn nearest_living_crown(
     let dz = (f64::from(stand.site.z) + 0.5) * v - animal.pose.z;
     let yaw = dx.atan2(dz) - animal.pose.heading_rad;
     // The crown cell's centre against the eye's own height.
-    let rise = (crown_layer + 0.5) * v - (eye_layer * v);
+    let rise = (crown_layer + 0.5) * v - eye_m;
     let elevation = rise.atan2(planar.max(1e-9));
     Some((yaw, elevation, planar, layer_offset))
 }
@@ -683,7 +703,7 @@ fn report_cone_classes(
         .filter(|(_, s)| s.founder == Some(Founder::Browser))
         .map(|(id, _)| id)
         .collect();
-    let mut totals = [[0.0f64; 7]; 3];
+    let mut totals = [[0.0f64; ConeHit::ALL.len()]; 3];
     let mut foliage_m = [(0.0f64, 0u64); 3];
     let mut counted = 0u64;
     let mut blind = 0u64;
@@ -861,7 +881,7 @@ fn snapshot(sim: &Sim, prev: &[(u64, Seen)]) -> Vec<(u64, Seen)> {
         .map(|a| {
             let sc = effective_config(fauna.config(), a);
             let depth = view.water_depth_m(i64::from(a.site.x), a.site.y, a.site.z);
-            let food = food_probe(&view, &fv, a);
+            let food = food_probe(&view, &fv, fauna.config(), a);
             (
                 a.id,
                 Seen {
@@ -893,7 +913,12 @@ fn snapshot(sim: &Sim, prev: &[(u64, Seen)]) -> Vec<(u64, Seen)> {
 
 /// Planar distance and contact evidence for the nearest stand with foliage. The browser
 /// reach bit is checked against the actual mouth probe columns, not the wider cone.
-fn food_probe(view: &VoxelView<'_>, fv: &FloraView<'_>, a: &Animal) -> FoodProbe {
+fn food_probe(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    config: &cubarium_voxel_fauna::FaunaConfig,
+    a: &Animal,
+) -> FoodProbe {
     let voxel_m = view.config.voxel_m;
     let mut best = f64::INFINITY;
     if matches!(a.founder, Some(Founder::Blind)) {
@@ -909,7 +934,7 @@ fn food_probe(view: &VoxelView<'_>, fv: &FloraView<'_>, a: &Animal) -> FoodProbe
             crown_in_mouth: false,
         };
     }
-    let mouth = browser_mouth_candidates(view, fv, a).unwrap_or_default();
+    let mouth = browser_mouth_candidates(view, fv, config, a).unwrap_or_default();
     let mut nearest = None;
     for stand in fv.stands.iter().filter(|s| s.foliage > 0.0) {
         let dist = planar_m(view, a, stand.site.x, stand.site.z, voxel_m);
@@ -1081,7 +1106,7 @@ fn report_minute(
         let reserve: f64 = mine.iter().map(|a| a.reserve).sum();
         let dists: Vec<f64> = mine
             .iter()
-            .map(|a| food_probe(&view, &fv, a).dist_m)
+            .map(|a| food_probe(&view, &fv, fauna.config(), a).dist_m)
             .collect();
         let in_reach = dists.iter().filter(|d| **d <= reach_m(f)).count();
         let mean_dist = if n == 0 {

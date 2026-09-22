@@ -160,3 +160,81 @@ the pool volume-to-height convention; the shade-area units; whether a founder sh
 able to change its standing layer; every rate and threshold, which stay in
 `design/backlog.md`. None of these lines is a canon ledger entry; Wrysk promotes them
 when he wishes.
+
+---
+
+## 7. What package 1b implemented, 22 September 2026
+
+**The "what today's code does" columns of §1, §2 and §4 are superseded for the
+rows below.** They record the revision named in the front matter and are kept
+because the measurements in `design/7_Research/voxel-census-2026-09-20.md`,
+"Edible stock, 2026-09-21", were taken against them. This section says what the
+model does now; it does not promote any line of this document to a decision.
+
+Implemented by `design/handoffs/voxel-body-anchors-2026-09-22.md` (decisions §1,
+§2, §6), on top of the step rule of `voxel-founder-step-2026-09-22.md`:
+
+| §1–§2 row | now |
+| --- | --- |
+| Adult length, width, height | `FounderPhysiology::adult_length_m` / `adult_width_m` / `adult_height_m`: browser 0.375 / 0.1875 / 0.1875 m, shredder 0.19 / 0.0625 / 0.0625 m |
+| Growth | `FounderPhysiology::body_at(body)`, the adult's dimensions × `(body / body_max)^(1/3)`, resolved into one `Body` value every consumer takes |
+| Footprint | `Body::footprint_radius()` = `width / 2` of the living body |
+| Clearance | `Body::headroom_voxels(v)` = `ceil(height / v)`, never below one — the body, not the mouth |
+| Eye | `0.8 × height` over the standing surface, in metres (`senses::cone_origin`) |
+| Mouth band | `[0, 1.33 × height]` over the standing surface (`Body::mouth_layers`, this document's `band_crown_layers`) |
+| Horizontal reach | `0.25 × length` ahead of the footprint |
+| Contact receptors | the cell holding `0.5 × height` over the surface, plus the lineage's climb (package 1a's wall test) |
+
+Still as §1–§4 describe them, and still not implemented: occupancy is one cell
+for drawing and occlusion (the presenter now draws the model body, but the
+occlusion map is unchanged); the mouth region is five point probes rather than a
+capsule; the fan has three pitches, not five; a ground pool occludes the whole
+cell over its face, because the volume-to-height convention is still unauthored.
+Those are package 5's and the backlog's.
+
+§4's **invariance claim** named three failures. Two are fixed: the eye is a
+length, and the mouth's up-reach is a length. The third — canopy extinction
+dividing foliage by an area in cells² — is fixed too, in
+`crates/cubarium-voxel-flora/src/step.rs`: `shade_k_per_m2` = `shade_k ×
+(0.25 m)²` over `π (radius_cells · v)²` floored at `(0.25 m)²`, which leaves the
+0.25 m reference world numerically identical and makes finer grids physical.
+
+The `Manifest`'s `body_length_m`, `body_width_m`, `mouth_reach_body_lengths` and
+`mouth_reach_up_voxels` are the **recorded contract** the shipped centres were
+trained against and are read by nothing. They stay because they are inside
+`Manifest::canonical_text` and the digest; package 5's retrain is where the
+record and the model are reconciled
+(`crates/cubarium/assets/policies/README.md`).
+
+---
+
+## 8. What package 2 implemented, 22 September 2026
+
+**§3's rule 1, the "physical foliage slab", is superseded.** A stand's foliage is no
+longer one cell-thick disc holding all of it: a species carries a `profile` staged by
+`wood / wood_max`, and a stand holds one stock per foliage-bearing layer of that stage,
+summing to the scalar `foliage` at all times
+(`design/handoffs/voxel-plant-layers-2026-09-22.md`, decisions §4 and §5). The
+within-stand shares §6 listed as unsettled, and the "could not measure 1" of
+`design/handoffs/voxel-edible-stock-2026-09-21.md`, are settled by this.
+
+| §3 rule | now |
+| --- | --- |
+| 1. Physical foliage slab | Each **layer** occupies a band `[from, to] × crown_height` over the support face, a disc of `radius × crown_radius`, and — discretised — the one cell `round(band_top × crown_height)`, never zero. For a single-layer `[0, 1.0]` profile that cell is `crown_voxels(wood)`: the slab this document already described. `FloraView::layers(stand)` yields each layer's band in metres, radius in metres, kind, stock and porosity. |
+| 2. Mouth | The band selects the **layers** whose disc cell it overlaps, and the withdrawal comes out of those, lowest first (`Flora::take_foliage_in_layers`, reported per layer). A bite from below leaves the upper stock untouched. What a mouth is offered at a stand is the **sum of its reachable layers' stocks**, not its whole foliage. |
+| 3. Sight | Every foliage-bearing layer cell holding stock is `FoliageCrown`, one holding none is `StrippedCrown`, and a **trunk cell is an occluder** (`ConeHit::Trunk`) — trunks are in the occupancy map for the first time. Foliage is written before structure, so a rosette wrapping its own stem reads as food. |
+| 4. Standing and route | Unchanged, but measured per layer: a face is route-connected *to a layer*, so an adult bloomcrown's rosette and its crown can differ. |
+
+**Porosity has no sight meaning, and that is a declared simplification.** The audit's
+§5 asked for a shared geometric interpretation across light, cone rays and the picture.
+Package 2 does not give one: `porosity` enters the light exponent as `(1 - p)` and
+nothing else reads it, so a porous canopy is transparent to plant light and opaque to an
+eye. It is recorded here rather than resolved because resolving it means deciding what a
+ray meets in a gappy canopy — a stochastic hit, a partial occluder, or authored gaps in
+the disc — and none of those is a placeholder; it is a model decision and a backlog row.
+
+**Two more things this package did not do.** Porosity is also absent from the picture:
+the presenter draws each layer's disc solid. And a single-layer species' shade is what
+it always was *except* for that `(1 - p)` factor, which is a real change for springturf,
+velvetpad and glowcap — asserted, in both forms, in
+`crates/cubarium-voxel-flora/tests/layers.rs`.

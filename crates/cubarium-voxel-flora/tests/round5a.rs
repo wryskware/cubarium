@@ -757,13 +757,13 @@ fn a_crown_two_voxels_up_is_out_of_reach_and_one_across_the_seam_is_not() {
 }
 
 /// **The same crown, out of reach from its own face and in reach from the one above**
-/// (Astra R8.4). Reach compares the crown's **absolute** cell height against the eater's
-/// ceiling, so "an adult bloomcrown is beyond reach" is a statement about *where the eater
-/// is standing* and not about the species: a founder bloomcrown on a face at `y = 2` has
-/// its crown cells at `y = 4`, which an `up: 1` eater at `y = 2` cannot reach and one at
-/// `y = 3` can. The harvest probe's own result — that no bloomcrown was ever eaten — is
-/// therefore the measured consequence of its three declared faces and not a species-wide
-/// food exclusion.
+/// (Astra R8.4), restated for layers. Reach compares a **layer's** absolute cell height
+/// against the eater's ceiling, so "an adult bloomcrown's crown is beyond reach" is
+/// still a statement about where the eater is standing and not about the species — and
+/// since the layers package there is a second, lower answer on the same plant: the
+/// basal rosette, which is in reach from both faces and is a quarter of the juvenile's
+/// foliage (decisions §5). What the low eater is offered is therefore the rosette's
+/// stock and never the crown's.
 #[test]
 fn the_same_crown_is_out_of_reach_from_its_own_face_and_in_reach_from_the_one_above() {
     // Three columns: the low eater's face, the bloomcrown's own face beside it, and a
@@ -777,6 +777,16 @@ fn the_same_crown_is_out_of_reach_from_its_own_face_and_in_reach_from_the_one_ab
     // whole claim rests on.
     assert_eq!(flora.config().bloomcrown.crown_voxels(wood), 2);
 
+    let stand = *flora.view().stand_at(bloom).expect("the bloomcrown");
+    let layers: Vec<(i64, f64)> = flora
+        .view()
+        .layers(&stand)
+        .map(|l| (l.cell, l.stock))
+        .collect();
+    assert_eq!(layers.len(), 2, "a juvenile has a rosette and a crown");
+    assert_eq!(layers[0].0, 3, "the rosette is one cell over the face");
+    assert_eq!(layers[1].0, 4, "and the crown two");
+
     let reach = Reach {
         horizontal: 2,
         up: 1,
@@ -784,10 +794,20 @@ fn the_same_crown_is_out_of_reach_from_its_own_face_and_in_reach_from_the_one_ab
     let low = flora
         .view()
         .reachable_foliage(&world.view(), Site { x: 0, y: 2, z: 0 }, reach);
-    assert!(
-        low.is_empty(),
-        "an eater on the crown's own level reached it: {low:?}"
+    assert_eq!(
+        low.iter().map(|&(s, _)| s).collect::<Vec<_>>(),
+        vec![bloom],
+        "the rosette is floor food from the low face: {low:?}"
     );
+    assert!(
+        (low[0].1 - layers[0].1).abs() < 1e-12,
+        "and it is only the rosette: {} offered against a rosette of {} and a whole plant \
+         of {}",
+        low[0].1,
+        layers[0].1,
+        stand.foliage
+    );
+
     let high = flora
         .view()
         .reachable_foliage(&world.view(), Site { x: 2, y: 3, z: 0 }, reach);
@@ -795,6 +815,11 @@ fn the_same_crown_is_out_of_reach_from_its_own_face_and_in_reach_from_the_one_ab
         high.iter().map(|&(s, _)| s).collect::<Vec<_>>(),
         vec![bloom],
         "one voxel of elevation is the whole difference: {high:?}"
+    );
+    assert!(
+        (high[0].1 - stand.foliage).abs() < 1e-12,
+        "from a voxel up the crown is in reach too, so the whole plant is: {}",
+        high[0].1
     );
 }
 

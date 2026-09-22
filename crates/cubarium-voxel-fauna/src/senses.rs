@@ -440,6 +440,11 @@ pub(crate) enum Fine {
     Water,
     /// A stand's crown cell whose `foliage` is zero — grazed bare, still occluding.
     StrippedCrown,
+    /// A stand's **trunk** cell: structure, never food, always an occluder. Its own
+    /// name because a blank cone with a stem in it is a different fact from a blank
+    /// cone with a stripped crown in it, and since plants have layers a trunk is in
+    /// the occupancy map at all.
+    Trunk,
     /// A stand's crown cell with foliage standing in it.
     FoliageCrown,
     /// The cell above a ground site holding litter, carrion or dead wood.
@@ -455,7 +460,9 @@ impl Fine {
         match self {
             Fine::FoliageCrown => Class::Foliage,
             Fine::Body => Class::Body,
-            Fine::Terrain | Fine::Water | Fine::StrippedCrown | Fine::GroundPool => Class::Occluder,
+            Fine::Terrain | Fine::Water | Fine::StrippedCrown | Fine::Trunk | Fine::GroundPool => {
+                Class::Occluder
+            }
         }
     }
 }
@@ -522,32 +529,49 @@ pub(crate) fn cone_occupancy_with(
 ) -> ConeOccupancy {
     let c = view.config;
     let mut environment: HashMap<usize, Fine> = HashMap::new();
-    for stand in fv.stands.iter() {
-        let sc = fv.config.species(stand.species);
-        let layer = i64::from(stand.site.y) + i64::from(sc.crown_voxels(stand.wood));
-        if layer <= 0 || layer as u32 >= c.height {
-            continue;
-        }
-        let radius = sc.crown_radius(stand.wood).max(0.0);
-        let span = radius.ceil() as i64;
-        let r2 = radius * radius;
-        let class = if stand.foliage > 0.0 {
-            Fine::FoliageCrown
-        } else {
-            Fine::StrippedCrown
-        };
-        for dz in -span..=span {
-            for dx in -span..=span {
-                if (dx * dx + dz * dz) as f64 > r2 {
+    // Every layer of every profile, not one disc per stand: a foliage-bearing layer
+    // holding stock is foliage to an eye, one holding none is a stripped crown, and a
+    // trunk is structure. **Porosity does not enter here**: it is a light property, and
+    // a porous canopy is still leaves to an eye — a known simplification, recorded in
+    // `design/voxel-encounter-contract-2026-09-21.md` §8.
+    //
+    // Foliage is laid down **before** structure, over both passes, so that where a
+    // rosette wraps its own stem the eye reads the food and not the stick. (`or_insert`
+    // keeps the first claim on a cell, as it always has.)
+    for foliage_pass in [true, false] {
+        for stand in fv.stands.iter() {
+            for layer in fv.profile_layers(stand) {
+                if layer.kind.bears_foliage() != foliage_pass {
                     continue;
                 }
-                let z = i64::from(stand.site.z) + dz;
-                if z < 0 || z >= i64::from(c.depth) {
-                    continue;
+                let class = if !layer.kind.bears_foliage() {
+                    Fine::Trunk
+                } else if layer.stock > 0.0 {
+                    Fine::FoliageCrown
+                } else {
+                    Fine::StrippedCrown
+                };
+                let span = layer.radius_v.ceil() as i64;
+                let r2 = layer.radius_v * layer.radius_v;
+                for cell_y in layer.cells.0..=layer.cells.1 {
+                    if cell_y <= 0 || cell_y as u32 >= c.height {
+                        continue;
+                    }
+                    for dz in -span..=span {
+                        for dx in -span..=span {
+                            if (dx * dx + dz * dz) as f64 > r2 {
+                                continue;
+                            }
+                            let z = i64::from(stand.site.z) + dz;
+                            if z < 0 || z >= i64::from(c.depth) {
+                                continue;
+                            }
+                            let cx = (i64::from(stand.site.x) + dx).rem_euclid(i64::from(c.width));
+                            let cell = c.index(cx, cell_y as u32, z as u32);
+                            environment.entry(cell).or_insert(class);
+                        }
+                    }
                 }
-                let cx = (i64::from(stand.site.x) + dx).rem_euclid(i64::from(c.width));
-                let cell = c.index(cx, layer as u32, z as u32);
-                environment.entry(cell).or_insert(class);
             }
         }
     }
@@ -670,13 +694,25 @@ pub(crate) fn cone_valid(
     view.is_support(wx, standing_y, cz) && manifest.sector_centres_deg.len() == 3
 }
 
-/// Where the eye is, in metres: the body's own column, and one and a half voxels over
-/// the standing face. **In voxels, not in body lengths** — on a 0.25 m world the same
-/// browser's eye is twice as high off the ground as on a 0.125 m one.
-pub(crate) fn cone_origin(view: &VoxelView<'_>, pose: &Pose, standing_y: u32) -> (f64, f64, f64) {
+/// Where the eye is, in metres: the body's own column, and `0.8 × body height` over the
+/// **standing surface** `(standing_y + 1) · voxel_m` (decisions §6;
+/// `design/handoffs/voxel-body-anchors-2026-09-22.md`).
+///
+/// It used to be one and a half **voxels** over the standing face, so the same browser's
+/// eye was twice as high on a 0.25 m world as on a 0.125 m one. It is now a length, and
+/// the grid does not appear in it at all. The pitch set, the sectors, the yaw offsets,
+/// the range and the classes are untouched: the observation keeps its 37 inputs and its
+/// digest, and the shipped centres — trained with the old eye — keep loading
+/// (`crates/cubarium/assets/policies/README.md`).
+pub(crate) fn cone_origin(
+    view: &VoxelView<'_>,
+    pose: &Pose,
+    standing_y: u32,
+    body: &crate::Body,
+) -> (f64, f64, f64) {
     (
         pose.x,
-        (f64::from(standing_y) + 1.0 + 0.5) * view.config.voxel_m,
+        crate::surface_m(standing_y, view.config.voxel_m) + body.eye_m,
         pose.z,
     )
 }
@@ -705,6 +741,7 @@ pub(crate) fn cone_readings(
     pose: &Pose,
     standing_y: u32,
     manifest: &Manifest,
+    body: &crate::Body,
 ) -> ConeReading {
     let invalid = ConeReading {
         valid: false,
@@ -714,7 +751,7 @@ pub(crate) fn cone_readings(
         return invalid;
     }
     let range = manifest.cone_range_m;
-    let origin = cone_origin(view, pose, standing_y);
+    let origin = cone_origin(view, pose, standing_y, body);
     let heading = pose.heading_rad;
     let rays = manifest.ray_yaw_offsets_deg.len() * manifest.ray_pitch_offsets_deg.len();
     let ray_count = f64::from(rays as u32);
@@ -1122,6 +1159,7 @@ mod tests {
         ));
         let fauna = crate::Fauna::new(crate::FaunaConfig::default());
         let manifest = Founder::Browser.manifest();
+        let body = crate::FounderPhysiology::frozen(Founder::Browser).adult_body();
         let fv = flora.view();
         let fv_ = fauna.view();
 
@@ -1133,7 +1171,7 @@ mod tests {
             heading_rad: H,
         };
         let occupancy = cone_occupancy(&v, &fv, &fv_);
-        let cone = cone_readings(&v, &occupancy, u64::MAX, &pose, 2, &manifest);
+        let cone = cone_readings(&v, &occupancy, u64::MAX, &pose, 2, &manifest, &body);
         assert!(cone.valid);
         let centre = cone.sectors[1];
         assert!(centre.foliage_fraction > 0.0, "foliage visible ahead");
@@ -1162,7 +1200,7 @@ mod tests {
             },
         ));
         let occupancy = cone_occupancy(&wv, &wflora.view(), &fv_);
-        let cone = cone_readings(&wv, &occupancy, u64::MAX, &pose, 2, &manifest);
+        let cone = cone_readings(&wv, &occupancy, u64::MAX, &pose, 2, &manifest, &body);
         assert_eq!(
             cone.sectors[1].foliage_fraction, 0.0,
             "the wall hides the foliage behind it"
@@ -1183,7 +1221,7 @@ mod tests {
             heading_rad: 0.0,
         };
         let occupancy = cone_occupancy(&ev, &eflora.view(), &fv_);
-        let cone = cone_readings(&ev, &occupancy, u64::MAX, &pose, 2, &manifest);
+        let cone = cone_readings(&ev, &occupancy, u64::MAX, &pose, 2, &manifest, &body);
         assert!(cone.valid);
         for sec in cone.sectors {
             assert_eq!((sec.foliage_fraction, sec.body_fraction), (0.0, 0.0));
@@ -1210,6 +1248,10 @@ mod tests {
             },
         ));
         let observer = fauna.view().animals[0];
+        let body = fauna
+            .config()
+            .founder(Founder::Browser)
+            .body_at(observer.body);
         let occupancy = cone_occupancy(&view, &flora.view(), &fauna.view());
         let alone = cone_readings(
             &view,
@@ -1218,6 +1260,7 @@ mod tests {
             &observer.pose,
             observer.site.y,
             &manifest,
+            &body,
         );
         assert!(
             alone
@@ -1245,6 +1288,7 @@ mod tests {
             &observer.pose,
             observer.site.y,
             &manifest,
+            &body,
         );
         assert!(
             with_other.sectors[1].body_fraction > 0.0,

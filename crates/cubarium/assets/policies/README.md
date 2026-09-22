@@ -32,6 +32,30 @@ successor bitten and 8/8 reacquired, score .840 mean / .840 median against
 P3-C's .808/.839, and takes 724 of its bites off crowns one voxel above its
 head, on all eight layouts.
 
+## What these centres were trained with, and what the model now runs
+
+**2026-09-22, package 1b** (`design/handoffs/voxel-body-anchors-2026-09-22.md`):
+both centres still load — their manifests, and so their digests, are untouched,
+because every number that moved lives on `FounderPhysiology` and not on the
+`Manifest`. What moved under them is the **body**:
+
+| | trained with | the model now runs |
+| --- | --- | --- |
+| eye | `standing_y + 1.5` cells — 0.0625 m over the surface on `small`, 0.125 m on `default`/`wide` | `0.8 x body height` in metres: 0.15 m for an adult browser, on every grid |
+| mouth | the crown cell at the head layer and, for the browser, one whole voxel above it | the physical band `[0, 1.33 x height]` over the standing surface: 0.249375 m for an adult browser, which on a 0.25 m grid is the head layer alone |
+| body | the manifest's 0.25 x 0.125 m browser, constant at every age | 0.375 x 0.1875 x 0.1875 m adult, scaled by `(body / body_max)^(1/3)` |
+| clearance | `1 + mouth_reach_up_voxels` voxels | `ceil(height / voxel)` voxels |
+
+The observation vector is the same 37 (browser) and 23 (shredder) inputs in the
+same order with the same meanings, so the weights are applicable in the sense
+the digest checks. They were not *selected* under these anchors, and the
+behaviour they produce is expected to be visibly different — a browser trained
+to lift its head into a crown one voxel up now stands under a crown it cannot
+reach. **The retrain is package 5**, and until it lands these centres are the
+disclosed default rather than a tuned one. The same caveat applies to the
+contact receptor's change of meaning in package 1a
+(`design/handoffs/voxel-founder-step-2026-09-22.md`).
+
 **A centre is replaced, never edited.** These files are the trainer's own output,
 copied byte for byte; they validate themselves against this build (schema token,
 lineage, weight count, finite weights, and the founder manifest digest), and an

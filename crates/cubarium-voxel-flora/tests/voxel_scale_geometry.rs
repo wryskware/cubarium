@@ -18,5 +18,11 @@ fn fine_voxels_keep_bloomcrown_crown_height_physical() {
 #[test]
 fn reference_and_coarser_configs_are_unchanged() {
     assert_eq!(FloraConfig::for_voxel_size(0.25), FloraConfig::default());
-    assert_eq!(FloraConfig::for_voxel_size(0.5), FloraConfig::default());
+    // A coarser grid changes no authored geometry, but the cell size is always
+    // recorded: a rule written in metres — decisions §5's 0.125 m ceiling on a woody
+    // seedling — has to be converted somewhere, and this is where.
+    let mut coarse = FloraConfig::for_voxel_size(0.5);
+    assert_eq!(coarse.voxel_m, 0.5);
+    coarse.voxel_m = FloraConfig::default().voxel_m;
+    assert_eq!(coarse, FloraConfig::default());
 }

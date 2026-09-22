@@ -33,7 +33,7 @@
 //! is submerged under the water's blend.
 
 use cubarium_voxel::VoxelView;
-use cubarium_voxel_fauna::{Animal, FaunaView, Founder, Species, State};
+use cubarium_voxel_fauna::{Animal, FaunaConfig, FaunaView, Founder, Species, State};
 
 use crate::present::srgb_linear;
 
@@ -191,7 +191,12 @@ pub fn animal_style(animal: &Animal) -> Style {
 /// **unwrapped** — a body near the seam reaches past the end of the strip and [`Animals`]
 /// is what wraps it — and `z` beyond the back wall is returned as it is and dropped on
 /// placement, exactly as [`super::stand::parts_of`] does.
-pub fn cells_of(animal: &Animal, style: u16, voxel_m: f64) -> Vec<(Cell, AnimalPart)> {
+pub fn cells_of(
+    animal: &Animal,
+    config: &FaunaConfig,
+    style: u16,
+    voxel_m: f64,
+) -> Vec<(Cell, AnimalPart)> {
     let site = animal.site;
     let sx = i64::from(site.x);
 
@@ -215,14 +220,16 @@ pub fn cells_of(animal: &Animal, style: u16, voxel_m: f64) -> Vec<(Cell, AnimalP
     if !(voxel_m > 0.0) || !animal.pose.is_finite() {
         return Vec::new();
     }
-    let manifest = founder.manifest();
-    // A readable shell is twice the model body's sampled length and width.  It is a
-    // presentation-only envelope: sensing, collision, and the mouth retain the manifest
-    // footprint and continuous pose.  At 0.125 m this gives the requested 2×1×1 crawler
-    // and 4×2×2 browser; at 0.25 m it naturally resolves to half those dimensions.
-    let length = ((2.0 * manifest.body_length_m / voxel_m).ceil() as i64).max(1);
-    let width = ((2.0 * manifest.body_width_m / voxel_m).ceil() as i64).max(1);
-    let height = ((2.0 * manifest.body_width_m / voxel_m).ceil() as u32).max(1);
+    // **The presenter draws the model body** (decisions §1;
+    // `design/handoffs/voxel-body-anchors-2026-09-22.md`): the 2x readability shell is
+    // retired, and what is drawn is the animal's own dimensions in metres, rounded up
+    // to whole cells. At 0.125 m the adult browser is 3x2x2 and the adult shredder
+    // 2x1x1; at 0.25 m they are 2x1x1 and 1x1x1. A juvenile is drawn smaller, because
+    // it is smaller.
+    let body = config.founder(founder).body_at(animal.body);
+    let length = ((body.length_m / voxel_m).ceil() as i64).max(1);
+    let width = ((body.width_m / voxel_m).ceil() as i64).max(1);
+    let height = ((body.height_m / voxel_m).ceil() as u32).max(1);
     let (fx, fz) = animal.pose.forward();
     let (step_x, step_z) = if fx.abs() >= fz.abs() {
         (if fx >= 0.0 { 1 } else { -1 }, 0)
@@ -292,7 +299,11 @@ pub fn cells_of(animal: &Animal, style: u16, voxel_m: f64) -> Vec<(Cell, AnimalP
                             }
                         },
                     ));
-                    if height > 1 && (along == 0 || along + 2 == length) {
+                    // Legs under the two ends, so the belly between them is a real
+                    // projected gap at every drawn length — including the three cells
+                    // the model body is at 0.125 m, where "the last but one" would
+                    // have put the two legs side by side.
+                    if height > 1 && (along == 0 || along + 1 == length) {
                         out.push((
                             Cell {
                                 x,
@@ -358,7 +369,7 @@ impl Animals {
                 break; // more than 65 535 animals in one strip: refuse to alias styles.
             }
             self.styles.push(animal_style(animal));
-            for (cell, part) in cells_of(animal, style, c.voxel_m) {
+            for (cell, part) in cells_of(animal, fauna.config, style, c.voxel_m) {
                 self.place(view, cell, part);
             }
         }
@@ -554,11 +565,15 @@ mod tests {
                 heading_rad: std::f64::consts::FRAC_PI_2,
             }
         ));
-        let animals = fauna.view().animals;
-        let browser = cells_of(&animals[0], 0, c.voxel_m);
-        let blind = cells_of(&animals[1], 1, c.voxel_m);
+        let av = fauna.view();
+        let animals = av.animals;
+        let browser = cells_of(&animals[0], av.config, 0, c.voxel_m);
+        let blind = cells_of(&animals[1], av.config, 1, c.voxel_m);
 
-        assert_eq!(browser.len(), 12, "4×2 raised torso plus four end legs");
+        // The **model body** since 2026-09-22: the adult browser is 0.375 × 0.1875 ×
+        // 0.1875 m, so three cells long and two wide at 0.125 m, and the adult
+        // shredder 0.19 × 0.0625 × 0.0625 m, so two cells long and one wide.
+        assert_eq!(browser.len(), 10, "3×2 raised torso plus four end legs");
         assert_eq!(blind.len(), 2, "two low crawler segments at 0.125 m");
         assert!(
             browser
@@ -568,9 +583,10 @@ mod tests {
         );
         assert!(browser.iter().any(|(c, _)| c.y == 1));
         assert!(browser.iter().all(|(c, _)| c.y <= 2));
-        assert!(browser.iter().any(|(c, _)| c.x == 4 && c.y == 1));
+        assert!(browser.iter().any(|(c, _)| c.x == 5 && c.y == 1));
+        assert!(browser.iter().any(|(c, _)| c.x == 7 && c.y == 1));
         assert!(
-            !browser.iter().any(|(c, _)| c.x == 5 && c.y == 1),
+            !browser.iter().any(|(c, _)| c.x == 6 && c.y == 1),
             "the torso leaves a visible belly gap between its legs"
         );
     }

@@ -15,7 +15,7 @@
 //! moves.
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
-use cubarium_voxel_flora::{Command, Flora, FloraConfig, Site, Species};
+use cubarium_voxel_flora::{Command, Flora, FloraConfig, Site, Species, SpeciesConfig};
 
 // Round 3 replaced the frozen `Stage::Establishing` stand with a per-site seed bank, so
 // the three propagule tests below now read `Ground::seeds` where they read a sub-`W_min`
@@ -126,8 +126,25 @@ fn run(flora: &mut Flora, world: &mut World, ticks: u32) {
 #[test]
 fn shade_covers_exactly_the_crown_radius_the_presenter_draws() {
     let mut config = FloraConfig::default();
-    config.shade_k = 30.0;
+    config.shade_k_per_m2 = 30.0;
     config.umbrellafrond.crown_radius_voxels = [2.0, 2.0];
+    // These two tests predate layers and are about the shade rule's **geometry** and
+    // the strictness of its inequality, both of which are stated over one disc. The
+    // shading species is therefore given the one-layer, zero-porosity profile the rule
+    // was written against; what a *tiered* frond does to the light under it is
+    // `tests/layers.rs`'s business, not this fixture's.
+    config.umbrellafrond.profile = SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer(
+        [0.0, 1.0],
+        1.0,
+        1.0,
+        0.0,
+    )]);
+    config.bloomcrown.profile = SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer(
+        [0.0, 1.0],
+        1.0,
+        1.0,
+        0.0,
+    )]);
 
     let mut world = plain(16, 12, 0.6);
     let mut flora = Flora::new(config);
@@ -217,8 +234,25 @@ fn shade_covers_exactly_the_crown_radius_the_presenter_draws() {
 #[test]
 fn a_crown_level_with_another_does_not_shade_it_but_a_higher_one_does() {
     let mut config = FloraConfig::default();
-    config.shade_k = 30.0;
+    config.shade_k_per_m2 = 30.0;
     config.umbrellafrond.crown_radius_voxels = [2.0, 2.0];
+    // These two tests predate layers and are about the shade rule's **geometry** and
+    // the strictness of its inequality, both of which are stated over one disc. The
+    // shading species is therefore given the one-layer, zero-porosity profile the rule
+    // was written against; what a *tiered* frond does to the light under it is
+    // `tests/layers.rs`'s business, not this fixture's.
+    config.umbrellafrond.profile = SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer(
+        [0.0, 1.0],
+        1.0,
+        1.0,
+        0.0,
+    )]);
+    config.bloomcrown.profile = SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer(
+        [0.0, 1.0],
+        1.0,
+        1.0,
+        0.0,
+    )]);
 
     let mut world = plain(16, 12, 0.6);
     let mut flora = Flora::new(config);

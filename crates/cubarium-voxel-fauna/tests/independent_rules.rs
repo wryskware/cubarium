@@ -297,8 +297,14 @@ fn a_refused_wall_step_pays_the_requested_equivalent_displacement() {
         walled_x < open_x - 0.05,
         "the wall did not constrain the body: open x {open_x}, walled x {walled_x}"
     );
-    // The face of the wall is at x = 5 * 0.25; the disc's radius is body_width / 2.
-    let face = 5.0 * VOXEL_M - Manifest::blind().body_width_m / 2.0;
+    // The face of the wall is at x = 5 * 0.25; the disc's radius is the **living
+    // body's** width / 2, which is the adult's scaled by `(body/body_max)^(1/3)`
+    // (`design/handoffs/voxel-body-anchors-2026-09-22.md`), not the manifest's
+    // recorded width.
+    let face = 5.0 * VOXEL_M
+        - cubarium_voxel_fauna::FounderPhysiology::frozen(Founder::Blind)
+            .body_at(founder_body(Founder::Blind))
+            .footprint_radius();
     assert!(
         walled_x <= face + 1e-9,
         "the body ended {walled_x} m, past the wall face at {face} m"
@@ -426,7 +432,7 @@ fn turning_while_stopped_moves_only_the_heading_and_is_paid() {
 #[test]
 fn full_cruise_cannot_tunnel_through_a_one_voxel_wall() {
     for founder in Founder::ALL {
-        let manifest = founder.manifest();
+        let _manifest = founder.manifest();
         let mut world = flat(24, 3);
         // A one-voxel-thick wall three voxels tall, so nothing can climb it either.
         wall(&mut world, 6, GROUND_Y + 1, GROUND_Y + 3);
@@ -442,7 +448,10 @@ fn full_cruise_cannot_tunnel_through_a_one_voxel_wall() {
         ));
         let mut senses = Senses::new();
 
-        let face = 6.0 * VOXEL_M - manifest.body_width_m / 2.0;
+        let radius = cubarium_voxel_fauna::FounderPhysiology::frozen(founder)
+            .body_at(founder_body(founder))
+            .footprint_radius();
+        let face = 6.0 * VOXEL_M - radius;
         for tick in 1..=120u64 {
             fauna.step_with_senses(&world, &mut flora, 1, &mut senses);
             let view = fauna.view();
@@ -463,7 +472,7 @@ fn full_cruise_cannot_tunnel_through_a_one_voxel_wall() {
         // It really did drive up to the wall rather than stall somewhere harmless.
         let reached = fauna.view().animal(id).expect("alive").pose.x;
         assert!(
-            reached > face - manifest.body_width_m,
+            reached > face - 2.0 * radius,
             "{}: the body only reached {reached} m, so the wall was never tested",
             founder.name()
         );

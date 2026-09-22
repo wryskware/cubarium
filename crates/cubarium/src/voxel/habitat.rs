@@ -29,7 +29,7 @@ use std::sync::Arc;
 use cubarium_voxel::{Material, Settle, VoxelView, World};
 use cubarium_voxel_fauna::{
     BlindForager, BrowserForager, Command as FaunaCommand, Controller, Fauna, Founder,
-    StartingStores, has_headroom, headroom_voxels,
+    StartingStores, has_headroom,
 };
 use cubarium_voxel_flora::{
     Command as FloraCommand, Deposit, DepositKind, Flora, FloraView, Site, Species, SpeciesConfig,
@@ -326,7 +326,7 @@ pub fn seed_with_founder_counts(
     // with its own starter tile of leaf litter laid under it first, so the founder
     // begins on a cue it can smell and a stock it can bite.
     let blind = *fauna.config().founder(Founder::Blind);
-    let blind_room = headroom_voxels(&Founder::Blind.manifest(), world.config().voxel_m);
+    let blind_room = blind.adult_body().headroom_voxels(world.config().voxel_m);
     let pool: Vec<Site> = {
         let view = world.view();
         sites
@@ -446,13 +446,14 @@ fn spread_heading(k: usize, of: usize) -> f64 {
 /// founder browses through a 2 m cone with no target search; a body on ground whose only
 /// crown is the one it is standing under eats that crown and then has nowhere to go.
 fn browser_faces(view: &VoxelView<'_>, fv: &FloraView<'_>, fauna: &Fauna) -> Vec<Site> {
-    let sc = fauna.config().founder(Founder::Browser).core;
-    let manifest = Founder::Browser.manifest();
-    let room = headroom_voxels(&manifest, view.config.voxel_m);
-    let reach = i64::from(cubarium_voxel_fauna::mouth_reach_up_voxels(
-        &manifest,
-        view.config.voxel_m,
-    ));
+    let phys = *fauna.config().founder(Founder::Browser);
+    let sc = phys.core;
+    // The **adult** body: a founder is placed hungry and grows into this one in place,
+    // so the seeder must not offer a slot the grown animal will not fit in. On both
+    // shipped grids the hungry body asks for the same clearance anyway
+    // (`design/handoffs/voxel-body-anchors-2026-09-22.md`).
+    let body = phys.adult_body();
+    let room = body.headroom_voxels(view.config.voxel_m);
     let width = i64::from(view.config.width);
     let depth = i64::from(view.config.depth);
 
@@ -477,8 +478,12 @@ fn browser_faces(view: &VoxelView<'_>, fv: &FloraView<'_>, fauna: &Fauna) -> Vec
                 let Some(face) = highest_support(view, cx, cz as u32) else {
                     continue;
                 };
-                let mouth_y = i64::from(face.y) + 1;
-                if crown_y < mouth_y || crown_y > mouth_y + reach {
+                // The physical mouth band from that face (decisions §2), the same
+                // rule the tick's bite uses.
+                if !body
+                    .mouth_layers(face.y, view.config.voxel_m)
+                    .contains(&crown_y)
+                {
                     continue;
                 }
                 if !has_headroom(view, cx, face.y, face.z, room) {
@@ -505,7 +510,7 @@ fn browser_faces(view: &VoxelView<'_>, fv: &FloraView<'_>, fauna: &Fauna) -> Vec
         fauna.config().founder(Founder::Browser),
         view.config.voxel_m,
     );
-    let walkable = cubarium_voxel_fauna::standable_faces(view, &manifest, sc.wade_depth_m);
+    let walkable = cubarium_voxel_fauna::standable_faces(view, &body, sc.wade_depth_m);
     let component = cubarium_voxel_fauna::walkable_components(&walkable, view.config.width, climb);
     let component = {
         let mut map: std::collections::HashMap<Site, usize> =

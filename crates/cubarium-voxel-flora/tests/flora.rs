@@ -11,7 +11,7 @@
 //! **own** config and says so. Nothing here changes a default.
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
-use cubarium_voxel_flora::{Command, Flora, FloraConfig, Site, Species, Stage};
+use cubarium_voxel_flora::{Command, Flora, FloraConfig, Site, Species, SpeciesConfig, Stage};
 
 // ------------------------------------------------------------------- fixtures
 
@@ -244,7 +244,7 @@ fn a_stand_at_wilting_point_earns_nothing_and_dies_of_unpaid_maintenance() {
 #[test]
 fn a_taller_crown_lowers_the_light_and_the_income_under_it() {
     let mut config = FloraConfig::default();
-    config.shade_k = 30.0;
+    config.shade_k_per_m2 = 30.0;
 
     let mut world = plain(16, 12, 0.6);
     let mut flora = Flora::new(config);
@@ -326,11 +326,22 @@ fn a_taller_crown_lowers_the_light_and_the_income_under_it() {
 #[test]
 fn a_stand_that_cannot_pay_under_a_closed_canopy_diebacks_and_dies() {
     let mut config = FloraConfig::default();
-    config.shade_k = 30.0;
+    config.shade_k_per_m2 = 30.0;
     config.umbrellafrond.propagule_rate = 2.0;
     config.bloomcrown.maintenance = 0.0032;
     config.bloomcrown.reserve_cap = 0.001;
     config.bloomcrown.dieback = 3000.0;
+    // A fourth, since layers: the four shading fronds are given the one-layer,
+    // zero-porosity profile this fixture was written against. Its subject is the order
+    // of §4.3, §4.6 and §4.7 under a *closed* canopy; an adult umbrellafrond's three
+    // porous tiers are a different canopy, and what they let through is
+    // `tests/layers.rs`'s subject rather than this one's.
+    config.umbrellafrond.profile = SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer(
+        [0.0, 1.0],
+        1.0,
+        1.0,
+        0.0,
+    )]);
 
     let mut world = plain(16, 12, 0.6);
     let mut flora = Flora::new(config);

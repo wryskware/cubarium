@@ -466,278 +466,168 @@ pub fn parts_of(flora: FloraView<'_>, stand: &Stand, style: u16) -> Vec<(Cell, P
             .map_or(false, |g| g.dead_wood >= 0.05);
     let base_y = site.y + if on_log { 1 } else { 0 };
 
-    match stand.species {
-        Species::Bloomcrown => {
-            let h = crown_height_voxels(sc.crown_height(stand.wood));
-            for k in 1..h {
-                out.push((
-                    Cell {
-                        x: sx,
-                        y: base_y + k,
-                        z: site.z,
-                    },
-                    Part::Trunk(style),
-                ));
-            }
-            let top = base_y + h;
-            let r = sc.crown_radius(stand.wood).max(0.0);
-            let r2 = r * r;
-            let span = r.floor() as i64;
-            for dz in -span..=span {
-                for dx in -span..=span {
-                    let dist2 = (dx * dx + dz * dz) as f64;
-                    if dist2 > r2 {
-                        continue;
-                    }
-                    let z = i64::from(site.z) + dz;
-                    if z < 0 {
-                        continue;
-                    }
-                    // A broad rim around a lowered centre reads as a cup from the
-                    // side-on view.  It never rises beyond the model crown height or
-                    // spreads past its cover; small crowns remain a single cap.
-                    let inner = (r - 0.85).max(0.45);
-                    let notch = h > 1
-                        && r >= 1.0
-                        && dist2 <= inner * inner
-                        && (dx + dz + stand.id as i64).rem_euclid(5) != 0;
-                    let crown_y = top - u32::from(notch);
-                    out.push((
-                        Cell {
-                            x: sx + dx,
-                            y: crown_y,
-                            z: z as u32,
-                        },
-                        Part::Crown {
-                            style,
-                            heart: dx == 0 && dz == 0,
-                        },
-                    ));
-                }
-            }
+    // The interim glowcap glyph is its own shape and not a profile: one stem cell and
+    // one cap, on the face or on the log. Unchanged.
+    if stand.species == Species::Glowcap {
+        let h = crown_height_voxels(sc.crown_height(stand.wood));
+        let top = if on_log { 2 } else { h };
+        for k in 1..top {
+            out.push((
+                Cell {
+                    x: sx,
+                    y: base_y + k,
+                    z: site.z,
+                },
+                Part::Trunk(style),
+            ));
         }
-        Species::Umbrellafrond => {
-            let h = crown_height_voxels(sc.crown_height(stand.wood));
-            for k in 1..h {
-                out.push((
-                    Cell {
-                        x: sx,
-                        y: base_y + k,
-                        z: site.z,
-                    },
-                    Part::Trunk(style),
-                ));
-            }
-            let top = base_y + h;
-            let r = sc.crown_radius(stand.wood).max(0.0);
-            let r2 = r * r;
-            let span = r.floor() as i64;
-            for dz in -span..=span {
-                for dx in -span..=span {
-                    let dist2 = (dx * dx + dz * dz) as f64;
-                    if dist2 > r2 {
-                        continue;
-                    }
-                    let z = i64::from(site.z) + dz;
-                    if z < 0 {
-                        continue;
-                    }
-                    // A narrow stalk opens into a broad parasol.  Only sparse rim cells
-                    // droop, so it keeps a continuous, readable canopy rather than a disc.
-                    let rim = dist2 > (r - 0.75).max(0.5).powi(2);
-                    let droops =
-                        rim && (dx - dz + stand.id as i64).rem_euclid(3) == 0 && top > base_y + 1;
-                    let crown_y = top - u32::from(droops);
-                    out.push((
-                        Cell {
-                            x: sx + dx,
-                            y: crown_y,
-                            z: z as u32,
-                        },
-                        Part::Crown {
-                            style,
-                            heart: dx == 0 && dz == 0,
-                        },
-                    ));
-                }
-            }
+        if on_log {
+            out.push((
+                Cell {
+                    x: sx,
+                    y: base_y + 1,
+                    z: site.z,
+                },
+                Part::Trunk(style),
+            ));
         }
-        Species::Glowcap => {
-            let h = crown_height_voxels(sc.crown_height(stand.wood));
-            if on_log {
-                // The cap stays rooted in the one real dead-wood site; the appearance
-                // layer may cluster its marks, but occupancy never invents neighbouring
-                // substrate.
-                out.push((
-                    Cell {
-                        x: sx,
-                        y: base_y + 1,
-                        z: site.z,
-                    },
-                    Part::Trunk(style),
-                ));
-                out.push((
-                    Cell {
-                        x: sx,
-                        y: base_y + 2,
-                        z: site.z,
-                    },
-                    Part::Crown { style, heart: true },
-                ));
-            } else {
-                for k in 1..h {
-                    out.push((
-                        Cell {
-                            x: sx,
-                            y: base_y + k,
-                            z: site.z,
-                        },
-                        Part::Trunk(style),
-                    ));
-                }
-                out.push((
-                    Cell {
-                        x: sx,
-                        y: base_y + h,
-                        z: site.z,
-                    },
-                    Part::Crown { style, heart: true },
-                ));
-            }
+        out.push((
+            Cell {
+                x: sx,
+                y: base_y + top,
+                z: site.z,
+            },
+            Part::Crown { style, heart: true },
+        ));
+        return out;
+    }
+
+    // Since the layers package the picture is the **profile**: the trunk cells, then
+    // one disc per foliage-bearing layer at that layer's own cell and its own radius,
+    // bottom-up. The per-species flourish each glyph already had — bloomcrown's cup,
+    // the frond's droop, turf's ragged skyline, the pad's scallop, the cushion's
+    // lobes — belongs to the **crown**, so it is applied to the topmost foliage layer
+    // and the layers under it are plain discs. On a single-layer species that is the
+    // glyph it always drew, cell for cell.
+    //
+    // Interim glyphs throughout, as `WORKING_POLICY.md`'s art-direction correction
+    // requires: nothing here is an art decision.
+    let layers = flora.profile_layers(stand);
+    let foliage: Vec<&cubarium_voxel_flora::StandLayer> =
+        layers.iter().filter(|l| l.kind.bears_foliage()).collect();
+    let top_cell = foliage
+        .iter()
+        .map(|l| l.cell)
+        .max()
+        .unwrap_or(i64::from(site.y) + 1);
+    let stem_to = (top_cell - i64::from(site.y)).max(0) as u32;
+
+    // The stem: every cell under the highest disc, which is what `1..h` always drew,
+    // plus whatever a `Trunk` layer claims above or beside it.
+    for k in 1..stem_to {
+        out.push((
+            Cell {
+                x: sx,
+                y: base_y + k,
+                z: site.z,
+            },
+            Part::Trunk(style),
+        ));
+    }
+    for layer in layers.iter().filter(|l| !l.kind.bears_foliage()) {
+        for cell_y in layer.cells.0..=layer.cells.1 {
+            let k = (cell_y - i64::from(site.y)).max(0) as u32;
+            out.push((
+                Cell {
+                    x: sx,
+                    y: base_y + k,
+                    z: site.z,
+                },
+                Part::Trunk(style),
+            ));
         }
-        Species::Springturf => {
-            let h = crown_height_voxels(sc.crown_height(stand.wood));
-            for k in 1..h {
-                out.push((
-                    Cell {
-                        x: sx,
-                        y: base_y + k,
-                        z: site.z,
-                    },
-                    Part::Trunk(style),
-                ));
-            }
-            let top = base_y + h;
-            let r = sc.crown_radius(stand.wood).max(0.0);
-            let r2 = r * r;
-            let span = r.floor() as i64;
-            for dz in -span..=span {
-                for dx in -span..=span {
-                    let dist2 = (dx * dx + dz * dz) as f64;
-                    if dist2 > r2 {
-                        continue;
-                    }
-                    let z = i64::from(site.z) + dz;
-                    if z < 0 {
-                        continue;
-                    }
-                    // Low tufts have a ragged skyline, deterministically varied by the
-                    // stand identity so growth does not shimmer between frames.
-                    let short =
-                        dist2 > 0.5 && (dx * 3 + dz * 5 + stand.id as i64).rem_euclid(3) == 0;
-                    out.push((
-                        Cell {
-                            x: sx + dx,
-                            y: top.saturating_sub(u32::from(short)).max(base_y + 1),
-                            z: z as u32,
-                        },
-                        Part::Crown {
-                            style,
-                            heart: dx == 0 && dz == 0,
-                        },
-                    ));
+    }
+
+    let h = crown_height_voxels(sc.crown_height(stand.wood));
+    for (i, layer) in foliage.iter().enumerate() {
+        let crown = i + 1 == foliage.len();
+        let top = base_y + (layer.cell - i64::from(site.y)).max(0) as u32;
+        let r = layer.radius_v.max(0.0);
+        let r2 = r * r;
+        let span = r.floor() as i64;
+        let lobe_shift = if stand.id & 1 == 0 { 0.5 } else { -0.5 };
+        for dz in -span..=span {
+            for dx in -span..=span {
+                let dist2 = (dx * dx + dz * dz) as f64;
+                if dist2 > r2 {
+                    continue;
                 }
-            }
-        }
-        Species::Velvetpad => {
-            let h = crown_height_voxels(sc.crown_height(stand.wood));
-            for k in 1..h {
-                out.push((
-                    Cell {
-                        x: sx,
-                        y: base_y + k,
-                        z: site.z,
-                    },
-                    Part::Trunk(style),
-                ));
-            }
-            let top = base_y + h;
-            let r = sc.crown_radius(stand.wood).max(0.0);
-            let r2 = r * r;
-            let span = r.floor() as i64;
-            for dz in -span..=span {
-                for dx in -span..=span {
-                    let dist2 = (dx * dx + dz * dz) as f64;
-                    if dist2 > r2 {
-                        continue;
-                    }
-                    // Thin mats keep a broad scalloped outline: omit alternating rim
-                    // cells, never interior cells, and retain the model's cover bounds.
-                    let rim = dist2 > (r - 0.8).max(0.0).powi(2);
-                    if rim && (dx - dz + stand.id as i64).rem_euclid(3) == 0 {
-                        continue;
-                    }
-                    let z = i64::from(site.z) + dz;
-                    if z >= 0 {
-                        out.push((
-                            Cell {
-                                x: sx + dx,
-                                y: top,
-                                z: z as u32,
-                            },
-                            Part::Crown {
-                                style,
-                                heart: dx == 0 && dz == 0,
-                            },
-                        ));
+                let z = i64::from(site.z) + dz;
+                if z < 0 {
+                    continue;
+                }
+                let mut crown_y = top;
+                if crown {
+                    match stand.species {
+                        // A broad rim around a lowered centre reads as a cup from the
+                        // side-on view. It never rises beyond the model crown height or
+                        // spreads past its cover; small crowns remain a single cap.
+                        Species::Bloomcrown => {
+                            let inner = (r - 0.85).max(0.45);
+                            let notch = h > 1
+                                && r >= 1.0
+                                && dist2 <= inner * inner
+                                && (dx + dz + stand.id as i64).rem_euclid(5) != 0;
+                            crown_y = top - u32::from(notch);
+                        }
+                        // A narrow stalk opens into a broad parasol. Only sparse rim
+                        // cells droop, so it keeps a continuous, readable canopy.
+                        Species::Umbrellafrond => {
+                            let rim = dist2 > (r - 0.75).max(0.5).powi(2);
+                            let droops = rim
+                                && (dx - dz + stand.id as i64).rem_euclid(3) == 0
+                                && top > base_y + 1;
+                            crown_y = top - u32::from(droops);
+                        }
+                        // Low tufts have a ragged skyline, deterministically varied by
+                        // the stand identity so growth does not shimmer between frames.
+                        Species::Springturf => {
+                            let short = dist2 > 0.5
+                                && (dx * 3 + dz * 5 + stand.id as i64).rem_euclid(3) == 0;
+                            crown_y = top.saturating_sub(u32::from(short)).max(base_y + 1);
+                        }
+                        // Thin mats keep a broad scalloped outline: omit alternating rim
+                        // cells, never interior cells, and retain the model's bounds.
+                        Species::Velvetpad => {
+                            let rim = dist2 > (r - 0.8).max(0.0).powi(2);
+                            if rim && (dx - dz + stand.id as i64).rem_euclid(3) == 0 {
+                                continue;
+                            }
+                        }
+                        // Two shallow lobes, stepped at their centres, a compact dome.
+                        Species::Stonecushion => {
+                            let left = (dx as f64 + lobe_shift).powi(2) + (dz as f64).powi(2);
+                            let right = (dx as f64 - lobe_shift).powi(2) + (dz as f64).powi(2);
+                            let core = left.min(right);
+                            let raised = core < (r * 0.5).max(0.45).powi(2) && h > 1;
+                            crown_y = top + u32::from(raised);
+                        }
+                        Species::Glowcap => {}
                     }
                 }
-            }
-        }
-        Species::Stonecushion => {
-            let h = crown_height_voxels(sc.crown_height(stand.wood));
-            for k in 1..h {
                 out.push((
                     Cell {
-                        x: sx,
-                        y: base_y + k,
-                        z: site.z,
+                        x: sx + dx,
+                        y: crown_y,
+                        z: z as u32,
                     },
-                    Part::Trunk(style),
+                    Part::Crown {
+                        style,
+                        // One heart per stand, in the crown: a lower layer's centre is
+                        // its own tissue, not the plant's accent.
+                        heart: crown && dx == 0 && dz == 0,
+                    },
                 ));
-            }
-            let top = base_y + h;
-            let r = sc.crown_radius(stand.wood).max(0.0);
-            let r2 = r * r;
-            let span = r.floor() as i64;
-            let lobe_shift = if stand.id & 1 == 0 { 0.5 } else { -0.5 };
-            for dz in -span..=span {
-                for dx in -span..=span {
-                    let dist2 = (dx * dx + dz * dz) as f64;
-                    if dist2 > r2 {
-                        continue;
-                    }
-                    let left = (dx as f64 + lobe_shift).powi(2) + (dz as f64).powi(2);
-                    let right = (dx as f64 - lobe_shift).powi(2) + (dz as f64).powi(2);
-                    let core = left.min(right);
-                    let z = i64::from(site.z) + dz;
-                    if z < 0 {
-                        continue;
-                    }
-                    // Two shallow lobes, stepped at their centres, make a compact dome.
-                    let raised = core < (r * 0.5).max(0.45).powi(2) && h > 1;
-                    out.push((
-                        Cell {
-                            x: sx + dx,
-                            y: top + u32::from(raised),
-                            z: z as u32,
-                        },
-                        Part::Crown {
-                            style,
-                            heart: dx == 0 && dz == 0,
-                        },
-                    ));
-                }
             }
         }
     }
@@ -895,22 +785,50 @@ mod tests {
             "the crown is one cell thick"
         );
 
-        // The disc spreads in `x` and `z`, which is what the shade model calls cover.
+        // Since the layers package the picture is the **profile**: an adult
+        // umbrellafrond is three tiers whose lowest is the widest
+        // (`design/organism-anatomy-2026-09-21.md` §3), so the wide disc is no longer
+        // at the crown top — the top tier is `r 0.5` of the crown radius and the
+        // lowest is the whole of it. That is the shade the ecology is after and the
+        // thing the lollipop could not say.
         let r = sc.crown_radius(wood);
         assert!(r > 2.0, "the fixture wants a disc wider than one cell: {r}");
+        let tiers: Vec<(i64, f64)> = flora
+            .view()
+            .layers(
+                flora
+                    .view()
+                    .stand_at(Site { x: 10, y: 3, z: 2 })
+                    .expect("the frond"),
+            )
+            .map(|l| (l.cell, l.radius_v))
+            .collect();
+        assert_eq!(tiers.len(), 3, "three tiers: {tiers:?}");
+        assert!(
+            tiers[0].1 > tiers[1].1 && tiers[1].1 > tiers[2].1,
+            "the lowest tier is the widest: {tiers:?}"
+        );
+        let (wide_y, wide_r) = tiers[0];
+        assert!(wide_r > 2.0, "and it is the whole crown radius: {wide_r}");
         assert!(matches!(
-            stands.at(12, i64::from(3 + h), 2),
+            stands.at(12, wide_y, 2),
             Part::Crown { heart: false, .. }
         ));
         assert!(matches!(
-            stands.at(10, i64::from(3 + h), 0),
+            stands.at(10, wide_y, 0),
             Part::Crown { heart: false, .. }
         ));
         // And it stops: `dx² + dz² > r²` is outside.
         assert_eq!(
-            stands.at(13, i64::from(3 + h), 2),
+            stands.at(13, wide_y, 2),
             Part::None,
-            "the disc has an edge"
+            "the widest tier has an edge"
+        );
+        // The top tier is narrow, so two cells out at the crown top is empty air.
+        assert_eq!(
+            stands.at(12, i64::from(3 + h), 2),
+            Part::None,
+            "the top tier is half the crown radius"
         );
 
         // `x` wraps with the ring, and the cells above the world's ceiling are dropped
@@ -1061,9 +979,8 @@ mod tests {
         let flora = Flora::new(FloraConfig::default());
         let make = |sp: Species, foliage: f64, moisture: f64| -> Style {
             let sc = flora.config().species(sp);
-            style_of(
-                flora.view(),
-                &Stand {
+            style_of(flora.view(), &{
+                let mut stand = Stand {
                     id: 0,
                     site: Site { x: 0, y: 0, z: 0 },
                     species: sp,
@@ -1077,8 +994,14 @@ mod tests {
                     mineral: 0.0,
                     aeration_stress: 0.0,
                     parcel: 0.0,
-                },
-            )
+                    layer_stock: [0.0; cubarium_voxel_flora::MAX_FOLIAGE_LAYERS],
+                    profile_stage: 0,
+                };
+                // A hand-built stand bins its own foliage, as every stand the model
+                // makes does.
+                stand.bin_layers(flora.config());
+                stand
+            })
         };
         let full = |sp: Species| {
             let sc = flora.config().species(sp);
@@ -1159,7 +1082,7 @@ mod tests {
         ] {
             let sc = flora.config().species(species);
             for wood in [sc.alive_min, sc.wood_max] {
-                let stand = Stand {
+                let mut stand = Stand {
                     id: 0,
                     site: Site { x: 10, y: 3, z: 2 },
                     species,
@@ -1173,7 +1096,10 @@ mod tests {
                     mineral: 0.0,
                     aeration_stress: 0.0,
                     parcel: 0.0,
+                    layer_stock: [0.0; cubarium_voxel_flora::MAX_FOLIAGE_LAYERS],
+                    profile_stage: 0,
                 };
+                stand.bin_layers(flora.config());
                 let parts = parts_of(flora.view(), &stand, 0);
                 assert_eq!(
                     crown_height_voxels(sc.crown_height(wood)),
@@ -1224,7 +1150,7 @@ mod tests {
         // is the broad one, `[1.0, 2.0]`, and that is the role's own "low and broad".
         let cells = |species: Species| -> usize {
             let sc = flora.config().species(species);
-            let stand = Stand {
+            let mut stand = Stand {
                 id: 0,
                 site: Site { x: 10, y: 3, z: 2 },
                 species,
@@ -1238,8 +1164,20 @@ mod tests {
                 mineral: 0.0,
                 aeration_stress: 0.0,
                 parcel: 0.0,
+                layer_stock: [0.0; cubarium_voxel_flora::MAX_FOLIAGE_LAYERS],
+                profile_stage: 0,
             };
-            parts_of(flora.view(), &stand, 0).len()
+            stand.bin_layers(flora.config());
+            // **Distinct cells**, not parts: since the layers package two layers of one
+            // profile may claim the same cell — stonecushion's dome is a wide skirt and
+            // a narrow cap, and at this size both round to the first cell over the face
+            // — and what this test is about is the silhouette the grid ends up with.
+            let parts = parts_of(flora.view(), &stand, 0);
+            let mut cells: Vec<(i64, u32, u32)> =
+                parts.iter().map(|(c, _)| (c.x, c.y, c.z)).collect();
+            cells.sort_unstable();
+            cells.dedup();
+            cells.len()
         };
         let (turf, cushion, pad) = (
             cells(Species::Springturf),
@@ -1389,7 +1327,7 @@ mod tests {
 
         // The geometry, at both ends of its size range.
         for wood in [sc.alive_min, sc.wood_max] {
-            let stand = Stand {
+            let mut stand = Stand {
                 id: 0,
                 site: Site { x: 10, y: 3, z: 2 },
                 species: Species::Glowcap,
@@ -1403,7 +1341,10 @@ mod tests {
                 mineral: 0.0,
                 aeration_stress: 0.0,
                 parcel: 0.0,
+                layer_stock: [0.0; cubarium_voxel_flora::MAX_FOLIAGE_LAYERS],
+                profile_stage: 0,
             };
+            stand.bin_layers(flora.config());
             let parts = parts_of(flora.view(), &stand, 0);
             assert_eq!(
                 parts.len(),
