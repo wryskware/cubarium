@@ -37,7 +37,7 @@
 use std::io::{IoSlice, IoSliceMut};
 use std::mem::MaybeUninit;
 use std::os::unix::io::{AsFd, BorrowedFd, OwnedFd};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 use ash::vk;
@@ -68,13 +68,21 @@ const REPLY_ERROR: u8 = 4;
 const ERROR_BUSY: u8 = 6;
 /// How long to wait out a busy daemon, and how often.
 const BUSY_RETRIES: u32 = 40;
-const BUSY_WAIT: std::time::Duration = std::time::Duration::from_millis(100);
+const BUSY_WAIT: Duration = Duration::from_millis(100);
+/// The same four seconds, for waiting out a daemon that has just handed the panel over:
+/// it closed this client's socket, and the slots went with the device it reopened.
+const HANDOFF_RETRIES: u32 = 40;
+const HANDOFF_WAIT: Duration = Duration::from_millis(100);
 
 struct Slot {
     /// The slot number the **daemon** assigned in its `Attached` reply. It is not the
     /// index in this vector: `Attach` carries slot 0 and the daemon picks, and the
     /// `released` bitmask is in the daemon's numbering.
     id: u8,
+    /// Our end of the dma-buf, **kept** rather than dropped after the attach: when the
+    /// daemon hands the panel over it forgets every slot, and re-attaching the same
+    /// memory is what puts this client back on the screen without re-exporting it.
+    fd: OwnedFd,
     image: LinearImage,
     target: TargetImage,
     command_buffer: vk::CommandBuffer,
@@ -139,7 +147,6 @@ impl ShimScanout {
             .take()
             .expect("a freshly exported image has its fd");
         let (socket, attached) = connect_when_free(&first, first_fd.as_fd())?;
-        drop(first_fd);
         let mut client = ShimScanout {
             socket,
             slots: Vec::with_capacity(SLOTS),
@@ -149,7 +156,7 @@ impl ShimScanout {
             seq: 0,
             next: 0,
         };
-        let mut pending = vec![(attached.slot, first)];
+        let mut pending = vec![(attached.slot, first, first_fd)];
         for _ in 1..SLOTS {
             let mut image = dmabuf::export_linear(gpu, PANEL.0, PANEL.1, shader_encode)?;
             let fd = image
@@ -157,13 +164,10 @@ impl ShimScanout {
                 .take()
                 .expect("a freshly exported image has its fd");
             let id = client.attach(&image, fd.as_fd())?;
-            // The daemon has imported the fd, so ours is dropped here rather than
-            // kept: the framebuffer it made is what lives on.
-            drop(fd);
             client.free |= 1 << id;
-            pending.push((id, image));
+            pending.push((id, image, fd));
         }
-        for (i, (id, image)) in pending.into_iter().enumerate() {
+        for (i, (id, image, fd)) in pending.into_iter().enumerate() {
             let target = TargetImage {
                 image: image.image,
                 view: image.view,
@@ -171,6 +175,7 @@ impl ShimScanout {
             };
             client.slots.push(Slot {
                 id,
+                fd,
                 image,
                 target,
                 command_buffer: command_buffers[i],
@@ -287,10 +292,43 @@ impl ShimScanout {
     /// `slot` is **reserved on the way in** — the daemon picks and says so in its
     /// `Attached` reply — so the request carries 0 and the answer is authoritative.
     fn attach(&mut self, image: &LinearImage, fd: BorrowedFd<'_>) -> Result<u8> {
-        let reply = attach_on(&self.socket, image, fd)?;
+        let reply = attach_on(&self.socket, image.pitch, image.offset, fd)?
+            .ok_or_else(|| anyhow!("the daemon closed the connection during the attach"))?;
         self.free |= reply.released;
         reply.expect(REPLY_ATTACHED)?;
         Ok(reply.slot)
+    }
+
+    /// The daemon handed the panel over: re-open the socket and put every slot back.
+    ///
+    /// The old socket is dropped first — the daemon refuses a second `accept` while this
+    /// process holds one, so keeping it would make the reconnection refuse itself. The
+    /// images and their memory are untouched; only the daemon's framebuffers over them
+    /// are new, so nothing is re-exported and nothing is re-rendered. Past the retries it
+    /// fails as it always did, and the unit restarts the client.
+    fn reattach(&mut self) -> Result<()> {
+        eprintln!("shim socket: the daemon closed the connection; re-attaching");
+        // Nothing may be in flight on a socket that is gone.
+        let images: Vec<(u32, u32, BorrowedFd<'_>)> = self
+            .slots
+            .iter()
+            .map(|s| (s.image.pitch, s.image.offset, s.fd.as_fd()))
+            .collect();
+        let (socket, ids, free) = {
+            let dead = std::mem::replace(&mut self.socket, placeholder_socket()?);
+            drop(dead);
+            reattach_all(SOCKET, &images, HANDOFF_RETRIES, HANDOFF_WAIT, |n, what| {
+                eprintln!("shim socket: re-attach attempt {} — {what}", n + 1);
+            })?
+        };
+        self.socket = socket;
+        for (slot, id) in self.slots.iter_mut().zip(ids) {
+            slot.id = id;
+        }
+        self.free = free;
+        self.next = 0;
+        self.seq = 0;
+        Ok(())
     }
 
     /// `Present` describes nothing: every geometry field is reserved and must be zero,
@@ -313,11 +351,19 @@ impl ShimScanout {
     }
 
     /// Read one reply and fold its `released` mask into the free set.
+    ///
+    /// A closed connection is the panel changing hands, not a failure: the client
+    /// re-attaches and every slot is free again, which is what the caller was waiting to
+    /// hear.
     fn read_reply(&mut self, expect: u8) -> Result<()> {
-        let reply = recv(&self.socket)?;
-        // `released` is the only signal a buffer is free.
-        self.free |= reply.released;
-        reply.expect(expect)
+        match recv(&self.socket)? {
+            Some(reply) => {
+                // `released` is the only signal a buffer is free.
+                self.free |= reply.released;
+                reply.expect(expect)
+            }
+            None => self.reattach(),
+        }
     }
 
     pub fn destroy(&mut self, gpu: &Gpu) {
@@ -327,8 +373,12 @@ impl ShimScanout {
         }
         for i in 0..self.slots.len() {
             let request = request(TAG_DETACH, self.slots[i].id, 0, 0, 0, 0, 0, 0);
-            if send(&self.socket, &request, None).is_ok() {
-                let _ = self.read_reply(REPLY_DETACHED);
+            // On the way out a closed socket is simply the end of the conversation:
+            // the reply is read if there is one, and nothing is re-attached.
+            if send(&self.socket, &request, None).is_ok()
+                && let Ok(Some(reply)) = recv(&self.socket)
+            {
+                let _ = reply.expect(REPLY_DETACHED);
             }
         }
         unsafe {
@@ -376,16 +426,33 @@ impl Reply {
     }
 }
 
+/// An unconnected socket, held in the client's field only while the dead one is dropped
+/// and the new one opened. The daemon's one-client-at-a-time rule is about *connections*,
+/// and this is not connected to anything.
+fn placeholder_socket() -> Result<OwnedFd> {
+    rustix::net::socket(
+        rustix::net::AddressFamily::UNIX,
+        rustix::net::SocketType::SEQPACKET,
+        None,
+    )
+    .context("socket(AF_UNIX, SOCK_SEQPACKET)")
+}
+
 /// A connected, unattached client socket.
 fn connect() -> Result<OwnedFd> {
+    connect_to(SOCKET)
+}
+
+/// The same, on a named socket: the tests bring their own daemon.
+fn connect_to(path: &str) -> Result<OwnedFd> {
     let socket = rustix::net::socket(
         rustix::net::AddressFamily::UNIX,
         rustix::net::SocketType::SEQPACKET,
         None,
     )
     .context("socket(AF_UNIX, SOCK_SEQPACKET)")?;
-    rustix::net::connect(&socket, &rustix::net::SocketAddrUnix::new(SOCKET)?)
-        .with_context(|| format!("connect {SOCKET} (is cube-screen-shim running?)"))?;
+    rustix::net::connect(&socket, &rustix::net::SocketAddrUnix::new(path)?)
+        .with_context(|| format!("connect {path} (is cube-screen-shim running?)"))?;
     Ok(socket)
 }
 
@@ -399,12 +466,13 @@ fn connect_when_free(image: &LinearImage, fd: BorrowedFd<'_>) -> Result<(OwnedFd
     let mut last = String::new();
     for attempt in 0..BUSY_RETRIES {
         let socket = connect()?;
-        match attach_on(&socket, image, fd) {
-            Ok(reply) if !reply.is_busy() => {
+        match attach_on(&socket, image.pitch, image.offset, fd) {
+            Ok(Some(reply)) if !reply.is_busy() => {
                 reply.expect(REPLY_ATTACHED)?;
                 return Ok((socket, reply));
             }
-            Ok(reply) => last = format!("the daemon is busy: {}", reply.message),
+            Ok(Some(reply)) => last = format!("the daemon is busy: {}", reply.message),
+            Ok(None) => last = "the daemon closed the connection".to_string(),
             // The close that follows `Error { Busy }` can break the write itself.
             Err(e) => last = format!("{e:#}"),
         }
@@ -416,19 +484,68 @@ fn connect_when_free(image: &LinearImage, fd: BorrowedFd<'_>) -> Result<(OwnedFd
 }
 
 /// Send `Attach` with the one descriptor it must carry, and read the answer.
-fn attach_on(socket: &OwnedFd, image: &LinearImage, fd: BorrowedFd<'_>) -> Result<Reply> {
-    let request = request(
-        TAG_ATTACH,
-        0,
-        0,
-        PANEL.0,
-        PANEL.1,
-        FOURCC_XR24,
-        image.pitch,
-        image.offset,
-    );
+fn attach_on(
+    socket: &OwnedFd,
+    pitch: u32,
+    offset: u32,
+    fd: BorrowedFd<'_>,
+) -> Result<Option<Reply>> {
+    let request = request(TAG_ATTACH, 0, 0, PANEL.0, PANEL.1, FOURCC_XR24, pitch, offset);
     send(socket, &request, Some(fd)).context("sendmsg(Attach)")?;
     recv(socket)
+}
+
+/// Re-open `path` and attach every one of `images` — `(pitch, offset, fd)` — again,
+/// waiting out a daemon that is not ready yet.
+///
+/// This is [`connect_when_free`]'s idiom for the other case it has to survive: not a
+/// daemon that still has another client, but one that has just dropped *this* client
+/// because it reopened the panel. Every attempt opens a fresh socket, because the daemon
+/// decides one-client-at-a-time at `accept` and a connection this process still holds is
+/// that client. `log` is called once per attempt.
+///
+/// Returns the socket, the slot id the daemon gave each image in order, and the free
+/// mask to start from — everything is free, since nothing has been presented yet.
+fn reattach_all(
+    path: &str,
+    images: &[(u32, u32, BorrowedFd<'_>)],
+    retries: u32,
+    wait: Duration,
+    mut log: impl FnMut(u32, &str),
+) -> Result<(OwnedFd, Vec<u8>, u8)> {
+    let mut last = String::new();
+    for attempt in 0..retries.max(1) {
+        match reattach_once(path, images) {
+            Ok(got) => {
+                log(attempt, "attached");
+                return Ok(got);
+            }
+            Err(e) => last = format!("{e:#}"),
+        }
+        log(attempt, &last);
+        if attempt + 1 < retries {
+            std::thread::sleep(wait);
+        }
+    }
+    bail!("could not re-attach to {path} after {retries} tries: {last}")
+}
+
+/// One attempt of [`reattach_all`]: a fresh socket and every image attached on it.
+fn reattach_once(
+    path: &str,
+    images: &[(u32, u32, BorrowedFd<'_>)],
+) -> Result<(OwnedFd, Vec<u8>, u8)> {
+    let socket = connect_to(path)?;
+    let mut ids = Vec::with_capacity(images.len());
+    let mut free = 0u8;
+    for (pitch, offset, fd) in images {
+        let reply = attach_on(&socket, *pitch, *offset, *fd)?
+            .ok_or_else(|| anyhow!("the daemon closed the connection during the attach"))?;
+        reply.expect(REPLY_ATTACHED)?;
+        free |= 1 << reply.slot;
+        ids.push(reply.slot);
+    }
+    Ok((socket, ids, free))
 }
 
 /// One datagram, with at most one descriptor.
@@ -450,8 +567,14 @@ fn send(socket: &OwnedFd, request: &[u8; 32], fd: Option<BorrowedFd<'_>>) -> Res
     Ok(())
 }
 
-/// One reply datagram.
-fn recv(socket: &OwnedFd) -> Result<Reply> {
+/// One reply datagram, or `None` when the daemon has closed the connection.
+///
+/// **A zero-byte read is a handoff, not a protocol error.** The daemon closes its client
+/// when it reopens the panel, and the slots go with the device that went away; the client
+/// used to bail here, exit, and be restarted by systemd into another founding. It now
+/// re-attaches instead ([`ShimScanout::reattach`]). A short *non-empty* datagram is still
+/// a protocol error: `SOCK_SEQPACKET` does not fragment.
+fn recv(socket: &OwnedFd) -> Result<Option<Reply>> {
     let mut buffer = [0u8; 12 + 512];
     let mut control = rustix::net::RecvAncillaryBuffer::default();
     let received = rustix::net::recvmsg(
@@ -461,6 +584,9 @@ fn recv(socket: &OwnedFd) -> Result<Reply> {
         rustix::net::RecvFlags::empty(),
     )
     .context("recvmsg")?;
+    if received.bytes == 0 {
+        return Ok(None);
+    }
     if received.bytes < 12 {
         bail!(
             "the daemon sent a {}-byte reply; the header is 12",
@@ -469,13 +595,13 @@ fn recv(socket: &OwnedFd) -> Result<Reply> {
     }
     let len = u32::from_le_bytes(buffer[8..12].try_into().unwrap()) as usize;
     let end = (12 + len).min(received.bytes);
-    Ok(Reply {
+    Ok(Some(Reply {
         tag: buffer[0],
         slot: buffer[1],
         released: buffer[2],
         code: buffer[3],
         message: String::from_utf8_lossy(&buffer[12..end]).into_owned(),
-    })
+    }))
 }
 
 /// The 32-byte request header.
@@ -505,6 +631,121 @@ fn request(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A fake daemon on `path`: it accepts `closes` clients and drops each one without
+    /// answering — the handoff — and then answers every `Attach` on the next client.
+    /// Returns its thread, which ends once that client has had `answers` attaches.
+    fn fake_daemon(path: String, closes: u32, answers: usize) -> std::thread::JoinHandle<()> {
+        let listener = rustix::net::socket(
+            rustix::net::AddressFamily::UNIX,
+            rustix::net::SocketType::SEQPACKET,
+            None,
+        )
+        .unwrap();
+        rustix::net::bind(&listener, &rustix::net::SocketAddrUnix::new(&path).unwrap()).unwrap();
+        rustix::net::listen(&listener, 8).unwrap();
+        std::thread::spawn(move || {
+            for _ in 0..closes {
+                // Accepted and dropped: the client's next read is zero bytes.
+                drop(rustix::net::accept(&listener).unwrap());
+            }
+            if answers == 0 {
+                return;
+            }
+            let client = rustix::net::accept(&listener).unwrap();
+            for slot in 0..answers {
+                let mut buffer = [0u8; 64];
+                let mut control = rustix::net::RecvAncillaryBuffer::default();
+                let got = rustix::net::recvmsg(
+                    &client,
+                    &mut [IoSliceMut::new(&mut buffer)],
+                    &mut control,
+                    rustix::net::RecvFlags::empty(),
+                )
+                .unwrap();
+                assert_eq!(got.bytes, 32, "the request is 32 bytes");
+                assert_eq!(buffer[0], TAG_ATTACH);
+                let mut reply = [0u8; 12];
+                reply[0] = REPLY_ATTACHED;
+                reply[1] = slot as u8;
+                rustix::net::sendmsg(
+                    &client,
+                    &[IoSlice::new(&reply)],
+                    &mut rustix::net::SendAncillaryBuffer::default(),
+                    rustix::net::SendFlags::empty(),
+                )
+                .unwrap();
+            }
+        })
+    }
+
+    fn socket_path(name: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("cubarium-shim-test-{name}-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        dir.join("frames.sock").to_string_lossy().into_owned()
+    }
+
+    /// **A handoff is not a failure.** The daemon closed this client when it reopened the
+    /// panel; the client re-opens the socket, attaches the same dma-bufs again and carries
+    /// on, instead of exiting into another four minutes of founding.
+    #[test]
+    fn a_closed_connection_is_re_attached_on_the_next_attempt() {
+        let path = socket_path("handoff");
+        let _ = std::fs::remove_file(&path);
+        let daemon = fake_daemon(path.clone(), 1, 3);
+        let fd = std::fs::File::open("/dev/null").unwrap();
+        let images: Vec<(u32, u32, BorrowedFd<'_>)> =
+            (0..3).map(|_| (4352u32, 0u32, fd.as_fd())).collect();
+        let mut attempts = Vec::new();
+        let (_socket, ids, free) = reattach_all(
+            &path,
+            &images,
+            4,
+            Duration::ZERO,
+            |n, what| attempts.push(format!("{n}:{what}")),
+        )
+        .expect("the second attempt attaches");
+
+        assert_eq!(ids, vec![0, 1, 2], "every slot is attached again");
+        assert_eq!(free, 0b111, "and every one of them is free to draw into");
+        assert_eq!(attempts.len(), 2, "one line per attempt: {attempts:?}");
+        assert!(!attempts[0].ends_with("attached"), "{attempts:?}");
+        assert!(attempts[1].ends_with("attached"), "{attempts:?}");
+        daemon.join().unwrap();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// The 0-byte reply itself: the daemon went away after reading, and `recv` says so
+    /// rather than calling a 0-byte datagram a broken header.
+    #[test]
+    fn a_daemon_that_goes_away_reads_as_no_reply_and_not_as_a_short_one() {
+        let (ours, theirs) = rustix::net::socketpair(
+            rustix::net::AddressFamily::UNIX,
+            rustix::net::SocketType::SEQPACKET,
+            rustix::net::SocketFlags::empty(),
+            None,
+        )
+        .unwrap();
+        drop(theirs);
+        assert!(recv(&ours).unwrap().is_none(), "a closed peer is a handoff");
+    }
+
+    /// Past the bound it fails as it always did, and says how many tries it had.
+    #[test]
+    fn a_daemon_that_never_comes_back_fails_after_the_bound() {
+        let path = socket_path("gone");
+        let _ = std::fs::remove_file(&path);
+        let daemon = fake_daemon(path.clone(), 3, 0);
+        let fd = std::fs::File::open("/dev/null").unwrap();
+        let images = [(4352u32, 0u32, fd.as_fd())];
+        let mut attempts = 0;
+        let e = reattach_all(&path, &images, 3, Duration::ZERO, |_, _| attempts += 1)
+            .expect_err("nothing ever answers");
+        assert_eq!(attempts, 3, "one line per attempt");
+        assert!(format!("{e:#}").contains("after 3 tries"), "{e:#}");
+        daemon.join().unwrap();
+        let _ = std::fs::remove_file(&path);
+    }
 
     #[test]
     fn an_attach_request_is_the_thirty_two_bytes_the_daemon_documents() {
