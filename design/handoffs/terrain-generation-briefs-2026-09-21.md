@@ -686,3 +686,98 @@ lower trigger for more frequent showers (0.10 is the handoff's floor for
 intermittent weather).
 
 Branch state: 24 commits over `main` at 59a0dd6; fast-forward is clean.
+
+## Wrysk's decision on weather cadence — 2026-09-21
+
+"i would like to see a 5-15 minute cadence for rain in ambient worlds, with
+some preference towards interval randomization if possible." Merge and panel
+deploy follow once cadence lands (a separate cheap thread).
+
+## Package W3 — scheduled showers
+
+Owner: habitat worker (Opus, medium). Files: `config.rs`, `world.rs`,
+`water.rs` (`shower`), `snapshot.rs` (SCHEMA 11 → 12), `recipe.rs`
+(`Water` + `cycle_into` + `Water::DEFAULT`), the study. Host untouched
+unless the startup water log wants the interval printed (one line, optional).
+
+Why a scheduler and not a lower trigger: on `default` the sky lifts
+4.8e-5 m³ per tick (≈0.058 m³ per simulated minute). A trigger-only cycle
+fires whenever the store crosses the line, so its period is set by the return
+flux and its intervals are regular. Wrysk wants 5–15 min with randomised
+intervals: that is a timer drawn from the world's seed, with the store's
+content deciding only whether the due shower can fall.
+
+Mechanism (decided; the interface is fixed, the numbers are the study's):
+
+- Two new `Config` fields, seconds of simulated time:
+  `shower_interval_min_s`, `shower_interval_max_s`. Default `0.0 / 0.0` =
+  **no scheduler**: the trigger-only behaviour every fixture and every
+  existing closed-budget test has, unchanged. `validate` rejects
+  `min > max`, negative or non-finite values.
+- With `max > 0` the world carries `next_shower_tick: u64` (in the
+  snapshot; SCHEMA 12, old snapshots refused, no migration). Drawn at
+  creation and again each time a shower **ends**: `end_tick + U[min, max]`
+  in ticks (`TICK_HZ` 20), from a splitmix64 stream over
+  `(config.seed, "weather", ledger.showers)` — the generator's own idiom in
+  `generate.rs:53` / `noise.rs:62`; same seed, same sequence; no clock.
+- At the due tick a shower starts if the store holds at least
+  `shower_trigger_fraction × expected_total` (the trigger is repurposed as
+  the **availability floor** and lowered accordingly); otherwise nothing
+  falls and the shower starts on the first later tick the floor holds.
+  Drought lock stays a feature: an empty sky never rains. Delivery stays
+  `min(shower_volume_m3, store)` as `water.rs:502` does today.
+- `Water` gains the two interval fields; `cycle_into` copies them.
+  `Water::DEFAULT` sets **300 s / 900 s** for all three staged presets.
+- The **numbers** — `shower_volume_m3`, `rain_m_per_s`,
+  `evaporation_m_per_s`, `atmosphere_fraction`, the floor — are yours to set
+  from the study against these targets, on `default`, `small` and `wide`
+  seed 1, 60 simulated minutes after settle: every due shower starts on its
+  due tick (never held by the floor); dry spells spread across the 5–15 min
+  range, not clustered at one end; each shower visibly rains for at least
+  30 s and at most about 3 min; the store never dry-locks; the water
+  residual stays under 1e-6 of total. A 5 m³ shower cannot be fed by a
+  0.058 m³/min lift, so expect the shower volume to come down toward what
+  one interval lifts (transpiration adds to it live) and the rain rate to
+  come down so the shower lasts long enough to read. Say what you chose and
+  the lift you measured.
+
+Tests, written before the mechanism, each under a second, in `water.rs`
+beside the closed-budget tests unless noted:
+
+1. `the_first_due_tick_is_drawn_inside_the_interval`: `World::empty`,
+   closed budget, interval 300/900 s; `next_shower_tick()` in
+   `6000..=18000`; seeds 1–4 give at least two distinct values; seed 1
+   twice gives the same value.
+2. `a_due_shower_starts_on_its_tick_and_not_before`: the tiny soil slab
+   from `viability.rs:313`, `initial_atmosphere_m3` well above the floor,
+   floor 0, interval fixed 2/2 s (40 ticks). `showers == 0` through tick 39,
+   `== 1` at the tick the due shower starts (state the off-by-one you chose
+   in the assertion message), stays 1 until the next due tick, which is at
+   least 40 ticks after that shower ended.
+3. `a_starved_sky_holds_the_shower_until_the_floor`: as 2 with
+   `initial_atmosphere_m3` 0 and a positive floor. At the due tick and 100
+   ticks past it, `showers == 0`. `Command::AddAtmosphere` over the floor;
+   a shower starts within one tick; `total_residual().abs() < 1e-9`.
+4. `no_interval_means_the_trigger_alone`: interval 0/0 on the fixture of
+   `a_store_under_the_trigger_never_rains` (`water.rs:2654`) behaves as that
+   test does; plus the existing closed-budget tests pass **unmodified** —
+   that is the regression check, do not edit them.
+5. `validate` rejects `min > max` and a negative interval; accepts 0/0
+   (in `config.rs` tests).
+6. Snapshot round trip carries `next_shower_tick` (extend
+   `the_store_survives_a_round_trip...` at `water.rs:2750`); SCHEMA 12 and
+   the existing refuse-old-schema test still passes.
+7. `cycle_into` copies both interval fields (`recipe.rs` tests).
+
+Study: replace the W2 `#[ignore]` study with one that settles, opens the
+outlet, then runs 60 simulated minutes and prints per shower: start tick,
+dry spell before it in minutes, whether the floor held it, delivered m³,
+rain duration in seconds; then store min/max and the lift per minute.
+Run it on the three presets and put the digest in the return; it is not a
+test.
+
+Visual: none needed — no geometry moves.
+
+Return (≤30 lines): commits, the numbers chosen and why, per-preset study
+digest (shower count, dry-spell range, held count, rain seconds range,
+store min), test count for `-p cubarium-voxel` and `-p cubarium`.
