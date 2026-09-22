@@ -781,3 +781,25 @@ Visual: none needed — no geometry moves.
 Return (≤30 lines): commits, the numbers chosen and why, per-preset study
 digest (shower count, dry-spell range, held count, rain seconds range,
 store min), test count for `-p cubarium-voxel` and `-p cubarium`.
+
+## Package W3 — integrated 2026-09-21
+
+Landed at 3e2aa01; schema 11 → 12. Mechanism as briefed: seeded interval
+scheduler (`shower_interval_min_s/max_s`, `next_shower_tick` in the
+snapshot, drawn at each shower's end from splitmix64 over seed and shower
+count), trigger repurposed as the 1 % availability floor. Numbers from the
+study: rain 3.5e-5 m/s, evaporation 3.0e-5 m/s, shower volume scaled to
+footprint (`Water::SMALL` 0.125, `DEFAULT` 0.4, `WIDE` 0.8 m³) so every ring
+rains for one readable minute. Sixty minutes after settle, seed 1: five
+showers per preset, gaps 6.1–15.3 min, none held by the floor, store never
+near it; lift covers delivery on `small`, breaks even on `default`, runs
+0.009 m³/min short on `wide` (about a day of headroom before transpiration,
+which the live world adds). Known: all presets share one gap sequence at a
+given seed (seed and shower count only). Fable ran `-p cubarium-voxel -p
+cubarium`: 778 passed, 1 skipped (study).
+
+Branch state: 31 commits over the fork point 59a0dd6. `main` has since
+gained the stage-2 art-pass commits (through 262c727); no file overlap, the
+merge is clean, but it is a merge commit now, not a fast-forward. Wrysk
+authorised a cheap thread to merge and deploy the Tachyon panel once cadence
+landed; dispatched after this note.
