@@ -1997,6 +1997,29 @@ impl Gates {
     }
 }
 
+/// How far a **founder-sized adult**'s light income goes toward its own upkeep at a site
+/// with this much sky: `assimilation · L_eff(sky) · α / maintenance`, per unit of wood.
+/// Both sides are proportional to the stand's wood, so the ratio is the same whatever
+/// size the founder is planted at.
+///
+/// One or more means an adult can hold its own here; below one it cannot, whatever the
+/// **seed** gate says — passing a germination threshold does not establish that a large
+/// founder can maintain itself (`design/terrain-generation-plan-2026-09-21.md` §5). Every
+/// other term in §4.2's income — the mineral Monod, the moisture multiplier, the stress
+/// factor — only reduces it, so this is a necessary condition and never a promise.
+///
+/// A [`Trophic::Saprotroph`] has no light income at all and is not judged on light: it
+/// returns infinity, and its substrate gate is the one that binds.
+pub fn adult_light_cover(sc: &SpeciesConfig, sky_visibility: f64) -> f64 {
+    match sc.trophic {
+        Trophic::Saprotroph => f64::INFINITY,
+        Trophic::Photo if sc.maintenance > 0.0 => {
+            sc.assimilation * light_response(sc, sky_visibility) * sc.alpha / sc.maintenance
+        }
+        Trophic::Photo => f64::INFINITY,
+    }
+}
+
 /// The gates at one site for one species, reading sky visibility straight off the view and
 /// the substrate as **nothing**. The one predicate, in the form that says which gate shut.
 ///

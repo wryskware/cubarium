@@ -11,10 +11,21 @@ use crate::World;
 /// (`Config::initial_aquifer_head_m`, which sits inside the serialized world), and to 4
 /// for the closed water budget (`World::atmosphere_m3`, `World::shower_left_m3`, the four
 /// new `Ledger` terms and its shower count, and the `Config` switch with its two shower
-/// knobs). Postcard
+/// knobs), and to 5 for the terrain generation recipe (`Config::landform`, which carries
+/// a whole `Recipe` inside the serialized world), and to 6 for erosion and the hardness
+/// field (the `Recipe` gained its `erosion` and `hollows` sections and its hardness
+/// parameters, and lost the slope-derived soil the staged generator no longer uses).
+/// and to 7 for carved hollows (the `Recipe`'s `hollows` section grew from an empty
+/// marker into the shape the carve reads), and to 8 for layer-aware incision (the
+/// `Erosion` section's single per-iteration cap became a pair, chosen by the hardness of
+/// the bed being cut), and to 9 for structural benches (the `Recipe` gained its
+/// `benches` section), and to 10 for the water inventory (`Recipe.water`), and to 11 for
+/// the closed cycle the recipe turns on (five more `Water` fields), and to 12 for the
+/// shower schedule (`World::next_shower_tick`, and the interval pair in both `Config` and
+/// `Water`). Postcard
 /// is not self-describing, so a new field is a new format: earlier tags are refused,
 /// never migrated.
-pub const SCHEMA: u32 = 4;
+pub const SCHEMA: u32 = 12;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

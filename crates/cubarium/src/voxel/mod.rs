@@ -108,6 +108,9 @@ const MAX_SPEED: f64 = 64.0;
 /// height = 48
 /// # depth is deliberately absent: it comes from `cubarium_voxel::Config::default()`, so
 /// # the habitat's chosen depth lives in the core and the presenter never pins its own.
+///
+/// [world.landform]
+/// preset = "default"   # small | default | wide, or `landform = "ridge"`
 /// ```
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -153,17 +156,21 @@ impl Default for VoxelConfig {
             dither: 0.04,
             sky_gradient: true,
             threads: 0,
-            // Including the depth: `cubarium_voxel` owns how deep the habitat is.
-            world: cubarium_voxel::Config {
-                voxel_m: 0.125,
-                ..cubarium_voxel::Config::default()
-            },
+            // The shipped `default` landscape, ring and all: a `cubarium voxel` with no
+            // TOML generates a staged world, not the ridge. `Config::default()` stays
+            // `Landform::Ridge` for fixtures and frozen arenas, and `landform = "ridge"`
+            // asks for it here.
+            world: cubarium_voxel::Preset::find("default")
+                .expect("the shipped presets include `default`")
+                .config(),
         }
     }
 }
 
-// A partial [world] table must use the same cell size as an omitted table. Keep
-// the core's 0.25 m defaults for frozen arenas and existing simulation fixtures.
+// A partial [world] table must use the same cell size as an omitted table, which since
+// the ambient default became the shipped `default` landscape is that landscape's own
+// 0.25 m. `cubarium_voxel::Config::default()` is untouched, so frozen arenas and the
+// simulation fixtures keep theirs.
 fn ambient_world_config<'de, D>(
     deserializer: D,
 ) -> std::result::Result<cubarium_voxel::Config, D::Error>
@@ -171,10 +178,66 @@ where
     D: serde::Deserializer<'de>,
 {
     let mut table = toml::Table::deserialize(deserializer)?;
-    table.entry("voxel_m").or_insert(toml::Value::Float(0.125));
+    let cell = toml::Value::Float(
+        cubarium_voxel::Preset::find("default")
+            .expect("the shipped presets include `default`")
+            .voxel_m,
+    );
+    table.entry("voxel_m").or_insert(cell);
+    expand_landform_preset(&mut table).map_err(serde::de::Error::custom)?;
     toml::Value::Table(table)
         .try_into()
         .map_err(serde::de::Error::custom)
+}
+
+/// Let `[world.landform]` name one of the shipped landscapes:
+///
+/// ```toml
+/// [world.landform]
+/// preset = "wide"     # small | default | wide
+/// relief_m = 3.0      # any recipe field, overriding the preset
+/// ```
+///
+/// The preset is expanded here, into the plain `landform = { staged = { .. } }` the
+/// core's serde already reads, so `cubarium_voxel::Recipe` stays an ordinary struct that
+/// postcard can read straight back out of a world snapshot. The extents stay `[world]`'s
+/// business: a preset names a landscape, not a ring size.
+///
+/// Anything else — no `landform` key, `landform = "ridge"`, or a `[world.landform.staged]`
+/// table written out in full — passes through untouched.
+fn expand_landform_preset(world: &mut toml::Table) -> std::result::Result<(), String> {
+    let Some(toml::Value::Table(landform)) = world.get("landform") else {
+        return Ok(());
+    };
+    if !landform.contains_key("preset") {
+        return Ok(());
+    }
+    let mut landform = landform.clone();
+    let name = match landform.remove("preset") {
+        Some(toml::Value::String(name)) => name,
+        Some(other) => {
+            return Err(format!(
+                "[world.landform] preset must be a name, not {other}"
+            ));
+        }
+        None => unreachable!("the key is there"),
+    };
+    let preset = cubarium_voxel::Preset::find(&name).ok_or_else(|| {
+        let known: Vec<&str> = cubarium_voxel::PRESETS.iter().map(|p| p.name).collect();
+        format!("no landform preset is called {name:?}; the shipped ones are {known:?}")
+    })?;
+    let mut staged = match toml::Value::try_from(preset.recipe) {
+        Ok(toml::Value::Table(t)) => t,
+        _ => return Err("a recipe is a table".into()),
+    };
+    // Whatever else the table said overrides the preset, field by field.
+    for (key, value) in landform {
+        staged.insert(key, value);
+    }
+    let mut wrapped = toml::Table::new();
+    wrapped.insert("staged".into(), toml::Value::Table(staged));
+    world.insert("landform".into(), toml::Value::Table(wrapped));
+    Ok(())
 }
 
 /// `[world]`: [`cubarium_voxel::Config`] with every field optional.
@@ -436,6 +499,55 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                 .collect();
             if !args.empty {
                 let seeded = habitat::seed(&mut world, &mut flora, &mut fauna);
+                // The settle report, once, at startup: how long the water took to stop
+                // moving and whether it did. The ordinary display shows none of this.
+                let st = seeded.settle;
+                let wc = world.config().clone();
+                eprintln!(
+                    "cubarium voxel: {} — water settled in {} ticks ({}), {:.2} m³ pooled \
+                     in {} cells, {:.2} m³ pore, drift {:.2e} m³/100 ticks{}",
+                    if wc.closed_water_budget {
+                        format!(
+                            "closed cycle, {:.2} m³ aloft, {}, {:.0} mm/h rain, \
+                             {:.0} mm/h evaporation",
+                            world.atmosphere_m3(),
+                            if wc.shower_interval_max_s > 0.0 {
+                                // Scheduled: the calendar says when, and the fraction is
+                                // only the floor the store has to clear to pay for it.
+                                format!(
+                                    "showers every {:.0}-{:.0} min above a {:.0} % floor",
+                                    wc.shower_interval_min_s / 60.0,
+                                    wc.shower_interval_max_s / 60.0,
+                                    wc.shower_trigger_fraction * 100.0,
+                                )
+                            } else {
+                                format!(
+                                    "showers at {:.0} % of total",
+                                    wc.shower_trigger_fraction * 100.0
+                                )
+                            },
+                            wc.rain_m_per_s * 3600.0 * 1000.0,
+                            wc.evaporation_m_per_s * 3600.0 * 1000.0,
+                        )
+                    } else {
+                        "open budget, no cycle to report".to_string()
+                    },
+                    st.ticks,
+                    if st.converged {
+                        "converged"
+                    } else {
+                        "still moving at the cap"
+                    },
+                    st.pooled_m3,
+                    st.free_cells,
+                    st.pore_m3,
+                    st.drift_m3_per_100,
+                    if st.dry_locked {
+                        " — DRY LOCKED: water aloft and no pool on the ground"
+                    } else {
+                        ""
+                    },
+                );
                 eprintln!(
                     "cubarium voxel: seeded the example habitat — {} stands, {} logs, \
                      {} litter tiles, {} littershredders, {} frondgrazer founders \
@@ -446,6 +558,16 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                     seeded.founders[Founder::Blind.index()],
                     seeded.founders[Founder::Browser.index()],
                 );
+                for founder in Founder::ALL {
+                    let short = seeded.shortfall[founder.index()];
+                    if short > 0 {
+                        eprintln!(
+                            "cubarium voxel: {} shortfall — {short} bodies not placed; \
+                             this habitat holds no site the lineage can live on",
+                            founder.name()
+                        );
+                    }
+                }
             } else {
                 // An empty world grows its founders by hand; the lineages still need
                 // their recipes registered so anything born is driven.
@@ -1666,7 +1788,15 @@ mod tests {
         assert_eq!(d.raster_height, 0);
         assert_eq!(d.haze, 0.55);
         assert_eq!(d.water_alpha, 0.5);
-        assert_eq!(d.world.voxel_m, 0.125);
+        assert_eq!(
+            d.world.voxel_m, 0.25,
+            "the ambient default is the shipped `default` landscape, cell size and all"
+        );
+        assert_eq!(
+            d.world.landform,
+            cubarium_voxel::Landform::Staged(cubarium_voxel::Recipe::DEFAULT),
+            "`cubarium voxel` with no TOML generates a staged ring"
+        );
 
         let cfg: VoxelConfig =
             toml::from_str("tilt_degrees = 35.0\n[world]\nwidth = 64\ndepth = 8\n").unwrap();
@@ -1677,14 +1807,52 @@ mod tests {
         );
         assert_eq!(cfg.world.width, 64);
         assert_eq!(cfg.world.depth, 8);
-        assert_eq!(cfg.world.voxel_m, 0.125);
-        let explicit: VoxelConfig = toml::from_str("[world]\nvoxel_m = 0.25\n").unwrap();
-        assert_eq!(explicit.world.voxel_m, 0.25);
+        assert_eq!(cfg.world.voxel_m, 0.25);
+        let explicit: VoxelConfig = toml::from_str("[world]\nvoxel_m = 0.125\n").unwrap();
+        assert_eq!(explicit.world.voxel_m, 0.125);
         assert_eq!(cfg.world.height, cubarium_voxel::Config::default().height);
 
         // A typo is an error, not a silently ignored key.
         assert!(toml::from_str::<VoxelConfig>("tilt_degree = 35.0\n").is_err());
         assert!(toml::from_str::<VoxelConfig>("[world]\nwidht = 64\n").is_err());
+    }
+
+    /// `[world.landform]` picks the generator: absent is the ridge generator every world
+    /// had, a preset name expands to that shipped recipe, and any field beside the name
+    /// overrides it. An unknown preset is an error with the names that do exist.
+    #[test]
+    fn the_world_table_chooses_a_landform_and_names_a_preset() {
+        use cubarium_voxel::Landform;
+
+        let plain: VoxelConfig = toml::from_str("[world]\nwidth = 64\n").unwrap();
+        assert_eq!(plain.world.landform, Landform::Ridge);
+
+        let ridge: VoxelConfig = toml::from_str("[world]\nlandform = \"ridge\"\n").unwrap();
+        assert_eq!(ridge.world.landform, Landform::Ridge);
+
+        let wide: VoxelConfig =
+            toml::from_str("[world]\n[world.landform]\npreset = \"wide\"\n").unwrap();
+        let wanted = cubarium_voxel::Preset::find("wide").unwrap().recipe;
+        assert_eq!(wide.world.landform, Landform::Staged(wanted));
+
+        let tweaked: VoxelConfig =
+            toml::from_str("[world]\n[world.landform]\npreset = \"small\"\nrelief_m = 2.0\n")
+                .unwrap();
+        let Landform::Staged(recipe) = tweaked.world.landform else {
+            panic!("a preset makes a staged landform");
+        };
+        assert_eq!(recipe.relief_m, 2.0, "the file overrides the preset");
+        assert_eq!(
+            recipe.relief_wavelength_m,
+            cubarium_voxel::Recipe::SMALL.relief_wavelength_m,
+            "and leaves the rest of it alone"
+        );
+        assert!(tweaked.world.validate().is_ok());
+
+        let err = toml::from_str::<VoxelConfig>("[world.landform]\npreset = \"huge\"\n")
+            .expect_err("there is no huge preset");
+        let msg = format!("{err}");
+        assert!(msg.contains("huge") && msg.contains("wide"), "{msg}");
     }
 
     /// The committed example config parses, is the default picture, and does not pin the
@@ -1704,6 +1872,42 @@ mod tests {
         );
         // The chosen camera, written down where a reader of the file will find it.
         assert!(text.contains("tilt_degrees = 30.0") && text.contains("px_per_voxel = 4"));
+    }
+
+    /// The panel's own config selects the shipped `small` landscape on the ring it was
+    /// written for, and states no water keys: the recipe decides those now.
+    #[test]
+    fn the_tachyon_config_names_the_small_landscape() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../config/tachyon/voxel.toml")
+            .canonicalize()
+            .expect("the panel config is committed");
+        let cfg = load_config(&path).unwrap();
+        assert_eq!(
+            cfg.world.landform,
+            cubarium_voxel::Landform::Staged(cubarium_voxel::Recipe::SMALL)
+        );
+        assert_eq!(
+            (
+                cfg.world.width,
+                cfg.world.height,
+                cfg.world.depth,
+                cfg.world.voxel_m
+            ),
+            (160, 48, 24, 0.125),
+            "the Tachyon ring: 20 m around at 4 px per voxel"
+        );
+        let text = std::fs::read_to_string(&path).unwrap();
+        for key in [
+            "rain_m_per_s",
+            "evaporation_m_per_s",
+            "initial_aquifer_head_m",
+        ] {
+            assert!(
+                !text.contains(key),
+                "{key} is the recipe's business, not the panel's"
+            );
+        }
     }
 
     /// A config file whose `[world]` no world can be built from is an error, not a panic:

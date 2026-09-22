@@ -207,6 +207,15 @@ pub fn authored(config: Config) -> World {
         }
     }
 
+    // 6. Moisture. The bowl is a pond and the rest of the strip was bone dry, which is a
+    //    landscape nothing can establish on: the flora layer's own establishment gates
+    //    want pore water in the root box, and a fresh `World::empty` has none anywhere.
+    //    The staged rings get this from their recipe's water inventory
+    //    (`cubarium_voxel::hydrate`); this hand-built fixture is charged with the same
+    //    default so the authored scene is a habitat and not a desert with a puddle in it.
+    //    Booked through the ledger like any other addition.
+    cubarium_voxel::hydrate(&mut world, &cubarium_voxel::Water::DEFAULT);
+
     world
 }
 

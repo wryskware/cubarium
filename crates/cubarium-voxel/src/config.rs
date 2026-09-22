@@ -1,6 +1,8 @@
 use anyhow::{Context, ensure};
 use serde::{Deserialize, Serialize};
 
+use crate::recipe::Landform;
+
 /// Everything a world is generated and stepped from. Physical units: metres and
 /// seconds; volumes in cubic metres. Depth is a free choice; the full world is deep.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -75,10 +77,29 @@ pub struct Config {
     /// [`Config::rain_m_per_s`]. The shower ends when this much has fallen, when the
     /// store empties, or when a brim-full world stops accepting any of it.
     pub shower_volume_m3: f64,
+    /// Closed budget: the shortest and longest gap between showers, in **seconds of
+    /// simulated time**. `0 / 0`, the default, is **no scheduler**: showers fire whenever
+    /// the store crosses the trigger, which is what every fixture had before.
+    ///
+    /// With a positive maximum the world draws its next shower time from its own seed —
+    /// `end of the last shower + U[min, max]` — and
+    /// [`Config::shower_trigger_fraction`] stops being a *trigger* and becomes an
+    /// **availability floor**: a due shower falls if the store can pay for it and waits
+    /// for the first later tick it can otherwise. A timer decides *when* it rains; the
+    /// store still decides *whether* it can. An empty sky never rains, which is the
+    /// drought lock kept as a feature.
+    pub shower_interval_min_s: f64,
+    pub shower_interval_max_s: f64,
     /// Largest change in one cell's `free` fraction that a single equalization substep
     /// may apply, so a filling region can be watched travelling. Zero (the default)
     /// disables the cap and a region settles to its level in one substep.
     pub free_transfer_cap: f64,
+    /// Which generator builds the terrain, and — for
+    /// [`crate::Landform::Staged`] — the recipe it builds from, in metres.
+    ///
+    /// [`crate::Landform::Ridge`], the default, is the original generator, byte for
+    /// byte: a config that never mentions a landform gets the world it always had.
+    pub landform: Landform,
 }
 
 impl Default for Config {
@@ -101,7 +122,10 @@ impl Default for Config {
             initial_atmosphere_m3: 0.0,
             shower_trigger_fraction: 0.02,
             shower_volume_m3: 5.0,
+            shower_interval_min_s: 0.0,
+            shower_interval_max_s: 0.0,
             free_transfer_cap: 0.0,
+            landform: Landform::Ridge,
         }
     }
 }
@@ -151,6 +175,8 @@ impl Config {
             ("initial_atmosphere_m3", self.initial_atmosphere_m3),
             ("shower_trigger_fraction", self.shower_trigger_fraction),
             ("shower_volume_m3", self.shower_volume_m3),
+            ("shower_interval_min_s", self.shower_interval_min_s),
+            ("shower_interval_max_s", self.shower_interval_max_s),
         ] {
             ensure!(
                 rate.is_finite() && rate >= 0.0,
@@ -166,6 +192,15 @@ impl Config {
             self.water_substeps >= 1,
             "water_substeps must be at least 1, not 0"
         );
+        ensure!(
+            self.shower_interval_min_s <= self.shower_interval_max_s,
+            "the shortest gap between showers cannot be longer than the longest: {} > {}",
+            self.shower_interval_min_s,
+            self.shower_interval_max_s
+        );
+        if let Landform::Staged(recipe) = &self.landform {
+            recipe.validate().context("the staged landform recipe")?;
+        }
         Ok(())
     }
 
@@ -220,5 +255,52 @@ impl Config {
     fn aquifer_pore_m3(&self) -> f64 {
         let area = self.width as f64 * self.depth as f64 * self.cell_area();
         (area * self.aquifer_porosity).max(1e-12)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The shower interval is a range, so it has to be one: no negatives, nothing
+    /// backwards, and zero to zero is the "no schedule" every fixture runs on.
+    #[test]
+    fn the_shower_interval_must_be_a_range() {
+        let with = |min, max| Config {
+            shower_interval_min_s: min,
+            shower_interval_max_s: max,
+            ..Config::default()
+        };
+        with(0.0, 0.0)
+            .validate()
+            .expect("no schedule is a schedule");
+        with(300.0, 900.0)
+            .validate()
+            .expect("five to fifteen minutes");
+        with(600.0, 600.0).validate().expect("a fixed gap");
+
+        let err = format!("{:#}", with(900.0, 300.0).unwrap_err_msg());
+        assert!(err.contains("cannot be longer"), "{err}");
+        assert!(
+            with(-1.0, 300.0).validate().is_err(),
+            "a negative shortest gap"
+        );
+        assert!(
+            with(300.0, -1.0).validate().is_err(),
+            "a negative longest gap"
+        );
+        assert!(
+            with(f64::NAN, 300.0).validate().is_err(),
+            "a gap that is not a number"
+        );
+    }
+
+    trait UnwrapErrMsg {
+        fn unwrap_err_msg(self) -> anyhow::Error;
+    }
+    impl UnwrapErrMsg for Config {
+        fn unwrap_err_msg(self) -> anyhow::Error {
+            self.validate().expect_err("this config is invalid")
+        }
     }
 }

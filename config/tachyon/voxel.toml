@@ -18,7 +18,11 @@ width = 160
 height = 48
 depth = 24
 voxel_m = 0.125
-rain_m_per_s = 0.0
-evaporation_m_per_s = 0.0
 water_substeps = 4
-initial_aquifer_head_m = 0.0
+
+# The shipped `small` landscape: benched headlands with grottos under their ledges, soil
+# valleys between, and its own water inventory. The rain, evaporation and aquifer keys
+# that used to sit here are the recipe's business now (`Recipe.water`); the panel does not
+# state them.
+[world.landform]
+preset = "small"
