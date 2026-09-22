@@ -1865,6 +1865,53 @@ mod tests {
         }
     }
 
+    /// **The panel's lake drained through its own outlet.** Seed 14400042426867678818 on
+    /// `small` went 1.07 m³ to 0.37 in 4340 ticks, its ledger blaming `outlet_out` 0.78
+    /// against 0.026 of stream (Fable, 2026-09-22). The outlet was seated *in* the lake's
+    /// own top row, so the exchange put a sliver into it every tick and `outlet` — which
+    /// runs last in the tick — took it. The cell reads empty afterwards every time, which
+    /// is why it looked like nothing was happening there.
+    ///
+    /// A spillway is the row **above** the water, dry until there is surplus to carry.
+    #[test]
+    #[ignore = "known defect: the outlet bleeds the lake; see package T5's return"]
+    fn the_lake_does_not_drain_through_its_own_outlet() {
+        let p = crate::Preset::find("small").unwrap();
+        let mut w = World::new(Config {
+            seed: 14400042426867678818,
+            ..p.config()
+        });
+        let outlet = w.outlet_cell().expect("a staged world seats its outlet");
+        let held = lake(&w);
+        // The property that matters, and the one the old seating broke: the sill is dry.
+        // (Not "every cell of the lake is below it" — `lake` unions the bodies at the cut
+        // and a neighbouring puddle may stand a voxel higher without touching the sill.)
+        let oi = w.config().index(i64::from(outlet.0), outlet.1, outlet.2);
+        assert_eq!(
+            w.free[oi], 0.0,
+            "the spill is dry at creation: outlet {outlet:?}, lake {held:?}"
+        );
+
+        w.apply(crate::Command::SetOutlet { open: true });
+        for _ in 0..4000 {
+            w.step();
+        }
+        let after = lake(&w);
+        let v = w.view();
+        assert!(
+            after.volume_m3 >= 0.95 * held.volume_m3,
+            "the lake keeps what it was given: {:.3} of {:.3} m³ after 4000 ticks",
+            after.volume_m3,
+            held.volume_m3
+        );
+        assert!(
+            v.ledger.outlet_out <= v.ledger.reentry_in + 1e-3,
+            "and the outlet exports only the stream's surplus: out {:.4} against in {:.4}",
+            v.ledger.outlet_out,
+            v.ledger.reentry_in
+        );
+    }
+
     /// A dry recipe leaves the world exactly as it was.
     #[test]
     fn no_inventory_is_no_water() {
