@@ -11,17 +11,14 @@ default = ["parallel"]
 # (`design/7_Research/voxel-tick-profile-2026-09-18.md`). Measurement only: it adds no
 # rule, changes no number, and with the feature off every call site is compiled away.
 profile = []
-# In-phase multithreading for `water::exchange`'s read-only scratch pass: a `bevy_tasks`
-# compute pool. **On by default** (Wrysk, 2026-09-18: "make it parallel by default"), so
-# the plain `World::step` splits across the machine's cores too; an embedded build that
-# wants no `bevy_tasks` in its tail sets `default-features = false`. Never a rule — with
-# the feature off, `exchange` ignores its thread count and runs the same arithmetic
-# serially (`design/handoffs/voxel-schedule-brief-2026-09-18.md`).
-parallel = ["dep:bevy_tasks"]
+# Formerly in-phase multithreading for `water::exchange`'s column scan on a `bevy_tasks`
+# pool. Package PA (2026-09-22) made that scan serial again — on the board the pool sat on
+# the little cores at an IPC of 0.1 and the scan was 1.7 ms of the tick — so the feature
+# pulls nothing in. Kept so `cubarium-voxel-sim`'s `features = ["parallel"]` still resolves.
+parallel = []
 
 [dependencies]
 anyhow = { workspace = true }
-bevy_tasks = { workspace = true, optional = true }
 serde = { version = "1", features = ["derive"] }
 postcard = { version = "1", features = ["use-std"] }
 png = { workspace = true }

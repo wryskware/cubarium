@@ -114,4 +114,59 @@ impl CellSet {
     pub(crate) fn len(&self) -> usize {
         self.cells.len()
     }
+
+    /// The members in **ascending index order**, written into `out`, without a sort: each
+    /// member sets one bit of `bits` and the words are then read back in order. That is
+    /// one pass over the members and one over `n / 64` words, against a comparison sort's
+    /// `m log m`; ascending index is the world's own memory order, so the phases that
+    /// walk this list read their arrays front to back instead of in swap-removal order.
+    ///
+    /// `bits` is scratch the caller keeps between calls and is left all zero again.
+    pub(crate) fn sorted_into(&self, bits: &mut Vec<u64>, out: &mut Vec<usize>) {
+        let words = self.slot.len().div_ceil(64);
+        if bits.len() != words {
+            bits.clear();
+            bits.resize(words, 0);
+        }
+        for &i in &self.cells {
+            bits[i >> 6] |= 1u64 << (i & 63);
+        }
+        out.clear();
+        for (w, word) in bits.iter_mut().enumerate() {
+            let mut b = *word;
+            if b == 0 {
+                continue;
+            }
+            *word = 0;
+            while b != 0 {
+                out.push(w * 64 + b.trailing_zeros() as usize);
+                b &= b - 1;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CellSet;
+
+    /// The sorted read-back is the set, ascending, and leaves its scratch clean for the
+    /// next call — including across the removals that scramble the insertion order.
+    #[test]
+    fn sorted_into_returns_the_members_ascending() {
+        let mut set = CellSet::default();
+        set.reset(200);
+        for i in [150, 3, 64, 63, 199, 0, 128, 77] {
+            set.insert(i);
+        }
+        set.remove(64);
+        set.remove(0);
+        let (mut bits, mut out) = (Vec::new(), Vec::new());
+        set.sorted_into(&mut bits, &mut out);
+        assert_eq!(out, [3, 63, 77, 128, 150, 199]);
+        assert!(bits.iter().all(|&w| w == 0), "scratch left dirty");
+        set.insert(64);
+        set.sorted_into(&mut bits, &mut out);
+        assert_eq!(out, [3, 63, 64, 77, 128, 150, 199]);
+    }
 }

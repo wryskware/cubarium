@@ -626,7 +626,6 @@ name = "cubarium-voxel"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bevy_tasks",
  "png",
  "postcard",
  "serde",
