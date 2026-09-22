@@ -214,7 +214,7 @@ fn main() {
         );
         (world, flora, format!("preset {} seed {seed}", preset.name))
     } else {
-        let mut world = if generated {
+        let world = if generated {
             let mut world_cfg = cfg.world.clone();
             if closed {
                 let dry = VoxelConfig::default().world;
@@ -243,9 +243,6 @@ fn main() {
             if generated { "generated" } else { "authored" },
             if closed { "closed" } else { "open" },
         );
-        eprintln!("scene: {label}");
-        // `world` is rebound below; the binding here keeps the two arms one expression.
-        let _ = &mut world;
         (world, flora, label)
     };
     let mut fauna = Fauna::new(FaunaConfig::default());

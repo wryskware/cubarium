@@ -221,3 +221,141 @@ mouth-reachable crown as a search state rather than edible progress. Evidence
 of improvement in the same 60-minute arm would be continued browser bites
 after minute 45, a higher than 2/33 death-time mouth-contact fraction, lower
 starvation, and no loss of the observed plant regrowth or closed water ledger.
+
+## D4 — cone at the wall: the shipped landscapes, 2026-09-21
+
+Brief: `design/handoffs/voxel-cone-autopsy-2026-09-21.md`. Read-only. Three
+60-simulated-minute arms of `voxel_founder_autopsy` at `2f1cfed`, default
+founder counts, the built-in trained centres, run in parallel:
+
+- `voxel_founder_autopsy 60 preset=small` — the Tachyon panel's landscape,
+  0.125 m cells, 160×48×24.
+- `voxel_founder_autopsy 60 preset=default` — `cubarium voxel` with no TOML,
+  0.25 m cells, 128×48×24.
+- `voxel_founder_autopsy 60 generated closed` — the baseline arm, unchanged.
+
+A `preset=` arm builds the world the host builds: `Preset::config()`, the
+host's own lake gate over `LAKE_SEED_TRIES` draws (deterministic seed stream so
+an arm re-runs; both presets took seed 1 with 0 rejections),
+the recipe's own water through `World::new`,
+`FloraConfig::for_voxel_size` as the host scales the plant layer,
+`habitat::seed`'s counts, `install_default_founders`, a settled `Senses`, and
+the outlet opened after the layers and before the first tick. The startup
+viability probe is skipped: it runs on a clone and only reports.
+
+**The baseline arm is not the ridge the brief expected.** Since 3d80bb4
+`VoxelConfig::default().world` *is* `Preset::find("default").config()`, and
+`World::new` writes a staged recipe's own water over the config
+(`Recipe::cycle_into`), so `generated closed` discards its harness rain and
+evaporation and differs from `preset=default` only in
+`initial_aquifer_head_m` and in which seed it draws. It seeded 47 stands,
+3 logs, 8 litter tiles and produced 15 browser deaths, all starvation, the last
+at minute 43.45 — Fable's pre-brief measurement on main at 4b985d8 exactly, and
+no longer the reproduction note's 13. Residuals ≤ 1.9e-9 on both ledgers in all
+three arms.
+
+### The table
+
+| | preset=small | preset=default | generated closed |
+|---|---|---|---|
+| cells / ring | 0.125 m / 160×24 | 0.25 m / 128×24 | 0.25 m / 128×24 |
+| stands seeded | 30 | 152 | 47 |
+| browser deaths (all starvation) | 12 | 24 | 15 |
+| extinction minute | none — 1 alive at 60 | 43 | 44 |
+| death cohorts (minute: n) | 14:1 22:1 24:1 25:3 27:1 30:2 32:1 51:1 52:1 | 23:1 25:1 26:2 27:1 32:1 33:5 35:3 36:3 38:4 39:2 42:1 | 14:1 16:1 19:1 20:1 23:1 26:1 28:2 29:1 30:2 32:1 35:1 37:1 43:1 |
+| foliage standing at the deaths | 2.70–3.47 (mean 2.84) | 6.44–9.31 (mean 7.45) | 0.10–0.62 (mean 0.21) |
+| dominant fine first hit at death | clear 0.247 | clear 0.264 | clear 0.422 |
+| next two | stripped 0.225, terrain 0.188 | terrain 0.228, stripped 0.194 | stripped 0.220, body 0.178 |
+| foliage rays at death | 0.052 | 0.009 | 0.005 |
+| nearest living crown, planar | 0.796 m | 1.668 m | 0.668 m |
+| its layer against the eye | +4.67 voxels (+0.58 m) | +1.25 voxels (+0.31 m) | −0.90 voxels (−0.23 m) |
+| its elevation from the eye (median) | +36.5° | +14.5° | −22.5° |
+| inside the fan's ±20° pitch band | 4/12 | 15/24 | 6/15 |
+| slant range ≤ 2 m | 12/12 | 13/24 | 15/15 |
+| a ray aimed at it reaches foliage | 8/12 | 6/24 | 3/15 |
+| **in range AND in band AND unoccluded** | **3/12** | **1/24** | **0/15** |
+| wander, metres per browser-minute | 3.42 | 9.69 | 5.87 |
+| distinct columns per browser-minute | 6.4 | 7.8 | 3.1 |
+| ticks holding \|turn\| > 0.1 | 0.823 | 0.908 | 0.870 |
+| legal exits, mean | 2.61 | 2.87 | 2.05 |
+| lifetime at death (median) | 93.5 m / 27 columns | 271.4 m / 37 columns | 89.7 m / 8 columns |
+| minutes blank in all three sectors | 0.494 | 0.656 | 0.711 |
+| bites / assimilated | 29,601 / 1.0186 | 33,287 / 2.4750 | 19,044 / 1.1984 |
+
+### The diagnosis, in one sentence
+
+On the shipped landscapes the browser's cone is not mostly blocked — its
+largest single first-hit class at death is `clear` (25–42 %) — and the reason it
+reads no foliage is that the nearest living crown is almost never simultaneously
+inside the 2 m range, inside the nine rays' ±20° pitch band and unoccluded
+(4 of 51 deaths across the three arms), because the cone's geometry is measured
+in **voxels** while the crowns are measured in metres.
+
+### What the fine classes added
+
+`Class::Occluder` hid four different failures and they are not the same failure
+in the three arms:
+
+- **preset=small (0.125 m).** The flora layer scales its crown heights by the
+  cell size, so a crown is the same metres tall, but the eye is fixed at 1.5
+  **voxels** — 0.19 m here against 0.375 m on a 0.25 m world. The nearest crown
+  at death sits +4.67 voxels over the eye at 0.80 m planar: a median elevation
+  of +36.5°, and 8 of 12 of those crowns are **completely unoccluded** — a ray
+  aimed at them strikes foliage. The fan simply cannot look up that far. Only
+  4/12 are inside the band, and 3/12 are both.
+- **preset=default (0.25 m).** The crowns sit near the eye's own height
+  (+1.25 voxels, median +14.5°) and 15/24 are inside the band — but 11 of 24 are
+  **outside the 2 m range altogether** (median slant 1.95 m), and of the rest the
+  commonest thing in the way is a `pool`: the litter/carrion/dead-wood occluder
+  over a ground site, 8 of 24 probes. This arm has 152 stands and the richest
+  litter layer, and its own dead matter is what stands between a body and the
+  crown it is looking at. This class did not exist in the Stage B arena.
+- **generated closed.** Here the canopy really has been eaten — 0.12 organic of
+  foliage standing at minute 60 — and the remaining crowns are **below** the eye
+  (−0.90 voxels, median −22.5°) at 0.65 m median slant, with `stripped` the
+  commonest probe answer (8/15) and `body` 0.178 of the fan at death: the bodies
+  crowd the last living crowns and occlude each other.
+
+`water` is a real but minor wall: 0.145 of the fan at death on `small`, 0.042 on
+`default`, 0.022 on the ridge. The thin-film hypothesis is not the main story on
+any shipped landscape.
+
+### Wander: the bodies move, but they do not search
+
+No arm is penned: 2.05–2.87 legal exits, 3.4–9.7 m covered per browser-minute,
+and |turn| > 0.1 in 82–91 % of ticks. But the ground **covered** is tiny against
+the ground **walked**: a ridge browser that has walked 89.7 m by its death has
+stood in 8 distinct columns, and a `small` browser 93.5 m in 27. That is a body
+turning on the spot, not one crossing a ring 20 m round. The `default` arm walks
+three times as far (271 m) over 37 columns and dies fastest of the three,
+which is consistent with turning being the cost rather than the cure. Half to
+seven-tenths of every body's minutes were blank in all three sectors before it
+died (0.494 / 0.656 / 0.711).
+
+### Proposed, not made — ranked by this evidence
+
+Wrysk's decision, not the worker's.
+
+1. **Scale the cone's vertical geometry to the cell size**, as the flora layer
+   already scales crown height: the eye at a fixed height in metres rather than
+   1.5 voxels, and `mouth_reach_up_voxels` likewise. This is the only candidate
+   the evidence names directly — `small` puts 8 of 12 unoccluded crowns outside
+   the band purely because 1.5 voxels is 0.19 m there — and it is the difference
+   between two arms of the same animal.
+2. **Widen or steer the pitch band.** ±20° with three fixed pitches covers a
+   crown between roughly −0.7 m and +0.7 m of rise at 2 m, and almost nothing
+   at 0.3 m. A fourth pitch, or a pitch that follows the terrain the body stands
+   on, addresses the `small` (+36°) and ridge (−22°) failures together. It
+   changes the observation vector, so it retrains.
+3. **Train on landscape slices, not the flat arena.** Every class that dominates
+   here — terrain from a slope, a ground pool, a stripped crown, another body —
+   is a class Stage B never contained, and the policy has never had to tell a
+   wall from an empty plain. This is the largest change and the one most likely
+   to fix the search failure the wander numbers show.
+4. **An occlusion rule for thin water.** Measurable but small on every shipped
+   landscape (0.022–0.145 of the fan at death); it would not have saved these
+   bodies.
+
+The measurement that is missing: nothing here says whether a crown the fan
+*could* see would be **eatable** — D3's mouth-access boundary is untouched by
+this package and both failures can be true at once.
