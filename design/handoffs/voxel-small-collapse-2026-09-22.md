@@ -63,3 +63,40 @@ scaling, or the seeder.
 
 The table, the sentence, the ranked candidates, the commit list, what you
 could not measure and why.
+
+## Integration note (Fable, 2026-09-22)
+
+Landed 41d0a25 (`voxel_plant_autopsy` reads a preset world; `coupled` arm)
+and f2ac848 (census "D5"). Fable re-ran both presets at t = 0 and confirmed
+the seeding picture: small seeds only springturf, glowcap, bloomcrown and
+stonecushion, every root box at pore 0.25 (field capacity, no standing
+water anywhere); default seeds all six with pore 0.48–0.65 under the wet
+species. The conductivity claim checks in `water.rs`: the per-tick rate is
+`permeability · DT · pore_capacity · voxel_volume`, a cell fraction, so the
+physical flux is `permeability · pore_capacity · voxel_m` metres per second
+and halves at 0.125 m.
+
+| 6 h | small plants-only | small coupled | default plants-only |
+| --- | --- | --- | --- |
+| species seeded | 4 | 4 | 6 |
+| foliage t = 0 → 6 h | 4.7 → 0.66 | 4.7 → 0.26 | 20.2 → 25.8 |
+| establishments / deaths | 33 / 29 | 12 / 29 | 215 / 141 |
+| drowned at minute 10, first shower | 14 of 27 | 14 of 27 | 3 of 87 |
+| umbrellafrond-eligible columns at t = 0 | 0.4 % | 0.4 % | 27.8 % |
+
+The killer: the small ring has no wet ground, so the two producers that are
+solvent anywhere (umbrellafrond, velvetpad, 6–18× maintenance) are never
+planted, and the four it does get are insolvent at field capacity on default
+too (there they persist by turnover, 215 establishments; on small there is
+no donor). Two units-and-rules findings came with it, both decided under
+Wrysk's delegation: (1) water conductivity is a cell fraction per second,
+half the physical speed at 0.125 m: package 1c, metres per second with the
+reference grid identical; (2) the seeder judges eligibility before the
+first shower and floors the wet species' founder counts to zero: package 4
+seeds after the first scheduled shower has fallen and drained. The small
+recipe's water split itself (38 % of the same 1.5 m buried under a lifted
+lake floor, 2.4 % pooled vs 8.7 %) is the terrain line's lever
+(`lake_depth_m`, the tier-0 trough) and is handed to it in
+`voxel-terrain-note-small-water-2026-09-22.md`, not decided here. Whether a
+producer should be solvent at field capacity is a model question left open
+(backlog, not tuning).
