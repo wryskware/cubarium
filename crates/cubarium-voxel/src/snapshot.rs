@@ -26,7 +26,7 @@ use crate::World;
 /// `Ledger::reentry_in`, the closed cycle's second return path — a stream at the spring
 /// cell. Postcard is not self-describing, so a new field is a new format: earlier tags are refused,
 /// never migrated.
-pub const SCHEMA: u32 = 14;
+pub const SCHEMA: u32 = 15;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
