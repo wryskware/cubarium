@@ -154,6 +154,129 @@ impl Erosion {
     };
 }
 
+/// Terraces: a staircase of levels rising from the front cut to the back wall.
+///
+/// The camera looks slightly down from the front, so a landform that climbs toward the
+/// back shows every one of its floors and every one of its risers. That is what a ring
+/// of terraces is for: levels the eye can read, a rock cliff between each pair, and on
+/// every level above the lowest a pool that spills over the cliff into the pool below —
+/// a chain of falls ending in the lake.
+///
+/// `count = 0` is the landform without any of it, exactly, so a recipe that says nothing
+/// about terraces gets the ring it always had.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Tiers {
+    /// How many levels, front to back. `0` is no terracing at all; `1` is one level,
+    /// which is the same thing with a name.
+    pub count: u32,
+    /// Height of one riser, metres. Worth making a whole [`Recipe::strata_m`]: then the
+    /// benches and the terraces agree about where the rock changes, and a riser is one
+    /// stratum's face rather than a cut across two.
+    pub rise_m: f64,
+    /// Wavelength of the wander in a terrace's edge, metres around the ring.
+    pub edge_wavelength_m: f64,
+    /// How far that edge wanders, in metres of depth. A straight edge across the strip
+    /// reads as a wall; this is what makes it a shoreline.
+    pub edge_warp_m: f64,
+    /// How much of the recipe's relief survives inside a terrace, `0..=1`. A terrace has
+    /// to read as a floor, so most of the relief goes into the risers instead.
+    pub flat: f64,
+    /// Radius of a terrace pool around the ring, metres. A pool spans its terrace's
+    /// whole depth, so only this is free.
+    pub pool_radius_m: f64,
+    /// How deep a pool's bowl is cut below its own rim, metres.
+    pub pool_depth_m: f64,
+    /// Width of the spillway notch in a pool's front rim, metres.
+    pub notch_width_m: f64,
+    /// How far back from the terrace's front edge the bowl starts, metres: the lip the
+    /// notch is cut into.
+    pub front_setback_m: f64,
+}
+
+impl Default for Tiers {
+    fn default() -> Tiers {
+        Tiers::NONE
+    }
+}
+
+impl Tiers {
+    /// No terracing: the landform before terraces existed.
+    pub const NONE: Tiers = Tiers {
+        count: 0,
+        rise_m: 2.0,
+        edge_wavelength_m: 16.0,
+        edge_warp_m: 0.6,
+        flat: 0.4,
+        pool_radius_m: 1.0,
+        pool_depth_m: 0.75,
+        notch_width_m: 0.5,
+        front_setback_m: 0.25,
+    };
+
+    /// `default` and `wide`: four levels, each riser one 2 m stratum — eight voxels at
+    /// 0.25 m, which reads as a floor at four pixels to the voxel.
+    pub const TERRACES: Tiers = Tiers {
+        count: 4,
+        ..Tiers::NONE
+    };
+
+    /// `small`: three levels on a 1.4 m stratum, and everything else at the half scale
+    /// its 0.125 m voxel asks for. Its terraces are eight samples deep, so a pool eight
+    /// voxels across fills one comfortably.
+    pub const SMALL: Tiers = Tiers {
+        count: 3,
+        rise_m: 1.4,
+        edge_wavelength_m: 7.0,
+        edge_warp_m: 0.3,
+        pool_radius_m: 0.5,
+        pool_depth_m: 0.375,
+        notch_width_m: 0.25,
+        front_setback_m: 0.125,
+        ..Tiers::NONE
+    };
+
+    /// Whether the landform is terraced at all.
+    pub fn any(&self) -> bool {
+        self.count > 0
+    }
+
+    /// The lift of the topmost terrace, metres.
+    pub fn lift_m(&self) -> f64 {
+        if self.count > 0 {
+            (self.count - 1) as f64 * self.rise_m
+        } else {
+            0.0
+        }
+    }
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        for (name, v) in [
+            ("rise_m", self.rise_m),
+            ("edge_wavelength_m", self.edge_wavelength_m),
+            ("pool_radius_m", self.pool_radius_m),
+            ("pool_depth_m", self.pool_depth_m),
+        ] {
+            anyhow::ensure!(
+                v.is_finite() && v > 0.0,
+                "tiers.{name} must be positive and finite, not {v}"
+            );
+        }
+        for (name, v) in [
+            ("edge_warp_m", self.edge_warp_m),
+            ("flat", self.flat),
+            ("notch_width_m", self.notch_width_m),
+            ("front_setback_m", self.front_setback_m),
+        ] {
+            anyhow::ensure!(
+                v.is_finite() && v >= 0.0,
+                "tiers.{name} must be finite and not negative, not {v}"
+            );
+        }
+        Ok(())
+    }
+}
+
 /// Structural benches: where a hard stratum outcrops in a rocky region, the bedrock
 /// surface follows the top of the band instead of the smooth relief.
 ///
@@ -729,6 +852,8 @@ pub struct Recipe {
 
     /// The erosion budget.
     pub erosion: Erosion,
+    /// Terraces: the levels the ring is built in, and the pools that chain down them.
+    pub tiers: Tiers,
     /// Structural benches: the ledges a hard stratum makes where it outcrops.
     pub benches: Benches,
     /// Carved hollows.
@@ -778,6 +903,7 @@ impl Recipe {
         core_m: 2.0,
         pockets: 3,
         erosion: Erosion::DEFAULT,
+        tiers: Tiers::NONE,
         benches: Benches::ON,
         hollows: Hollows::GROTTOS,
         water: Water::DEFAULT,
@@ -789,6 +915,20 @@ impl Recipe {
             hardness: 0x_5354_4147_5F48_5244,
             material: 0x_5354_4147_5F4D_4154,
         },
+    };
+
+    /// The terraced ring `default` and `wide` are built on.
+    ///
+    /// [`Recipe::DEFAULT`] itself is left alone, terraces and all: it is the landform
+    /// the crate had before there were levels, it is what a hand-written recipe gets,
+    /// and `tiers.count = 0` has to keep reproducing it exactly. This is that recipe
+    /// with the levels switched on, most of its relief moved out of the terrace floors
+    /// and into the risers, and a base raised to stand the staircase on.
+    pub const TERRACED: Recipe = Recipe {
+        base_m: 4.0,
+        back_rise_m: 1.2,
+        tiers: Tiers::TERRACES,
+        ..Recipe::DEFAULT
     };
 
     /// The `small` ring the Tachyon panel runs: 160 x 48 x 24 at 0.125 m, 20 m around,
@@ -809,8 +949,8 @@ impl Recipe {
         // 0.375 m of floor and 5.375 m of ceiling is five metres of room, and the bench
         // pull spends up to one band of it, so the smooth relief lives in the top three
         // and a half and the benches cut down into the rest.
-        base_m: 1.6,
-        back_rise_m: 1.5,
+        base_m: 2.6,
+        back_rise_m: 1.0,
         basin_floor_m: 0.9,
         // Three metres of habitat against twenty around: the fields barely change with
         // depth, so a rocky region is a stripe across the whole strip and its benches
@@ -843,6 +983,7 @@ impl Recipe {
         bedrock_hardness: 0.78,
         core_m: 0.8,
         erosion: Erosion::SMALL,
+        tiers: Tiers::SMALL,
         benches: Benches::SMALL,
         hollows: Hollows::SMALL,
         water: Water::SMALL,
@@ -856,7 +997,7 @@ impl Recipe {
         relief_m: 2.7,
         rocky_fraction: 0.4,
         water: Water::WIDE,
-        ..Recipe::DEFAULT
+        ..Recipe::TERRACED
     };
 
     /// Refuse a recipe no landscape can be built from. [`Config::validate`] calls this
@@ -910,6 +1051,7 @@ impl Recipe {
                 "{name} must be finite and not negative, not {v}"
             );
         }
+        self.tiers.validate()?;
         self.benches.validate()?;
         self.hollows.validate()?;
         self.water.validate()?;
@@ -1159,7 +1301,7 @@ pub const PRESETS: [Preset; 3] = [
     Preset {
         name: "small",
         width: 160,
-        height: 48,
+        height: 72,
         depth: 24,
         voxel_m: 0.125,
         recipe: Recipe::SMALL,
@@ -1167,15 +1309,15 @@ pub const PRESETS: [Preset; 3] = [
     Preset {
         name: "default",
         width: 128,
-        height: 48,
+        height: 72,
         depth: 24,
         voxel_m: 0.25,
-        recipe: Recipe::DEFAULT,
+        recipe: Recipe::TERRACED,
     },
     Preset {
         name: "wide",
         width: 256,
-        height: 48,
+        height: 72,
         depth: 24,
         voxel_m: 0.25,
         recipe: Recipe::WIDE,
@@ -1288,8 +1430,15 @@ mod tests {
             let r = p.recipe;
             let head_m = (p.height as f64 - 5.0) * p.voxel_m;
             let floor_m = 3.0 * p.voxel_m;
-            let high = r.base_m + r.relief_m + r.ridge_relief_m + r.back_rise_m;
-            let deep = r.base_m - r.relief_m - r.ridge_relief_m;
+            // Inside a terrace only `flat` of the relief survives, and the staircase
+            // adds its whole lift on top.
+            let swing = if r.tiers.any() {
+                r.tiers.flat * (r.relief_m + r.ridge_relief_m)
+            } else {
+                r.relief_m + r.ridge_relief_m
+            };
+            let high = r.base_m + swing + r.back_rise_m + r.tiers.lift_m();
+            let deep = r.base_m - swing;
             let low = r.basin_floor_m - (r.basin_floor_m - deep).max(0.0) * 0.12;
             assert!(
                 high < head_m,

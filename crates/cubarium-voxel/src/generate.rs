@@ -45,6 +45,7 @@
 //! in the tests that need them (see this module's tests and the presenter's authored
 //! scene), not to the world the camera has to read.
 
+use crate::noise::{ring_cells, ring_noise};
 use crate::recipe::{Landform, Recipe};
 use crate::{Config, Material, World};
 
@@ -418,6 +419,13 @@ pub struct Heightfield {
     /// Hard rock standing over a neighbour cut at least [`crate::Hollows::cap_drop_m`]
     /// below it: one of the two sources of undercut sites.
     pub hard_cap: Vec<bool>,
+    /// A pool's bed: from this voxel up, the column voxelises as rock whatever the
+    /// strata and the sediment say, because a pool standing on soil drains into it.
+    /// [`i32::MAX`] where there is no pool.
+    pub pool_rock: Vec<i32>,
+    /// The level a pool's water will stand at, for the skyline pass to read instead of
+    /// the dry bed. [`i32::MIN`] where there is no pool.
+    pub pool_spill: Vec<i32>,
     /// What the solver moved.
     pub budget: Budget,
 }
@@ -492,12 +500,21 @@ fn staged(world: &mut World, r: &Recipe) {
     let (_, volume, report) = staged_terrain(&c, r);
     world.material = volume.material;
     outlet_and_spring(world, &volume.surface, w, d, h, Some(report.lake));
+    // The river comes back in at the top of the chain, so every fall below it runs.
+    if let Some(top) = report.pools.iter().max_by_key(|p| p.tier)
+        && top.tier > 0
+        && let Some(&i) = top.cells.first()
+    {
+        let (x, z) = (i % w, i / w);
+        let y = (top.floor_y + 1).clamp(1, h as i32 - 1) as u32;
+        world.spring_cell = Some((x as u32, y, z as u32));
+    }
     repair_isolated(world);
 }
 
 /// What one staged generation did. Diagnostics, for the tests and the dev tools: the
 /// world keeps none of it and nothing reads it back.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Report {
     /// What [`crate::hollows::carve`] made.
     pub carved: crate::hollows::Carved,
@@ -505,6 +522,8 @@ pub struct Report {
     pub lowered: usize,
     /// Where the ring's lake stands, and where its outlet sits on the rim.
     pub lake: LakeDatum,
+    /// The chain of pools, lowest first. Empty when the recipe has no terraces.
+    pub pools: Vec<PoolStamp>,
 }
 
 /// Run the staged stages and hand back what each one produced, without building a
@@ -528,6 +547,9 @@ pub fn staged_terrain(c: &Config, r: &Recipe) -> (Heightfield, Volume, Report) {
         },
     );
     crate::erosion::flag_hard_caps(&mut field, r.hollows.cap_drop_m, r.bedrock_hardness);
+    // After erosion, so nothing silts the bowls up; before voxelisation, so their beds
+    // come out as rock and the lake datum sees the shape the water will actually find.
+    let pools = stamp_terraces(&mut field, c, r);
 
     let mut volume = voxelise(c, r, &field);
     // The datum comes before the carve, because the carve has to keep out from under it:
@@ -558,8 +580,48 @@ pub fn staged_terrain(c: &Config, r: &Recipe) -> (Heightfield, Volume, Report) {
             carved,
             lowered,
             lake,
+            pools,
         },
     )
+}
+
+/// Which terrace a point of the ring stands on, `0` at the front cut and `count - 1` at
+/// the back wall.
+///
+/// The edges wander around the ring — a straight one across the strip reads as a wall,
+/// not a shoreline — on a periodic field, so the staircase wraps at `x = 0` like
+/// everything else here. Counting thresholds rather than dividing makes it
+/// non-decreasing in `z` by construction, which is what the camera needs: every riser
+/// faces the front, so every floor is drawn.
+pub fn tier_at(
+    r: &Recipe,
+    x_m: f64,
+    z_m: f64,
+    circumference_m: f64,
+    depth: usize,
+    voxel_m: f64,
+    seed: u64,
+) -> u32 {
+    let t = r.tiers;
+    if !t.any() {
+        return 0;
+    }
+    let depth_m = depth as f64 * voxel_m;
+    let cells = ring_cells(circumference_m, t.edge_wavelength_m);
+    (1..t.count)
+        .filter(|&k| {
+            let nominal = depth_m * k as f64 / t.count as f64;
+            let wander = t.edge_warp_m
+                * ring_noise(
+                    x_m,
+                    k as f64 * 7.0,
+                    circumference_m,
+                    cells,
+                    seed ^ 0x_5449_4552_0000_0000u64.wrapping_add(k as u64),
+                );
+            z_m >= nominal + wander
+        })
+        .count() as u32
 }
 
 /// Stage 1: the landscape in metres, before anything has run over it.
@@ -578,7 +640,19 @@ pub fn heightfield(c: &Config, r: &Recipe) -> Heightfield {
         };
         for x in 0..w {
             let x_m = (x as f64 + 0.5) * vm;
-            let mut el = r.base_m + r.relief_m_at(x_m, z_m, circumference_m, vm, c.seed);
+            // The staircase first, then what is left of the relief on top of it: a
+            // terrace has to read as a floor, so most of the relief goes into the
+            // risers instead.
+            let (lift, flat) = if r.tiers.any() {
+                (
+                    tier_at(r, x_m, z_m, circumference_m, d, vm, c.seed) as f64 * r.tiers.rise_m,
+                    r.tiers.flat,
+                )
+            } else {
+                (0.0, 1.0)
+            };
+            let mut el =
+                r.base_m + lift + flat * r.relief_m_at(x_m, z_m, circumference_m, vm, c.seed);
             // A receiving basin with a floor, not a clipped trough: relief below the
             // floor is compressed, so the basin has a bottom and keeps its shape.
             if el < r.basin_floor_m {
@@ -634,6 +708,8 @@ pub fn heightfield(c: &Config, r: &Recipe) -> Heightfield {
         discharge: vec![0.0; w * d],
         spill_m: elevation,
         hard_cap: vec![false; w * d],
+        pool_rock: vec![i32::MAX; w * d],
+        pool_spill: vec![i32::MIN; w * d],
         budget: Budget::default(),
     };
     refresh_hardness(&mut field, r, c.seed);
@@ -653,6 +729,241 @@ fn refresh_hardness(field: &mut Heightfield, r: &Recipe, seed: u64) {
                 field.circumference_m,
                 seed,
             );
+        }
+    }
+}
+
+/// A pool cut into a terrace, and the notch its overflow leaves by.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PoolStamp {
+    /// Which terrace it sits on. `0` is the lake.
+    pub tier: u32,
+    /// The bowl's columns, in heightfield index order.
+    pub cells: Vec<usize>,
+    /// The spillway column of its front lip: `None` for the lake, which spills through
+    /// the ring's outlet instead.
+    pub notch: Option<(usize, usize)>,
+    /// Top of the bowl's floor, in voxels.
+    pub floor_y: i32,
+    /// The level the pool holds: the notch's own top, one voxel under its rim.
+    pub spill_y: i32,
+}
+
+/// The first `z` of each terrace in one column, or [`usize::MAX`] where a terrace does
+/// not reach that column at all.
+fn tier_front_rows(r: &Recipe, c: &Config, circumference_m: f64, x: usize) -> Vec<usize> {
+    let (d, vm) = (c.depth as usize, c.voxel_m);
+    let mut front = vec![usize::MAX; r.tiers.count.max(1) as usize];
+    for z in 0..d {
+        let t = tier_at(
+            r,
+            (x as f64 + 0.5) * vm,
+            (z as f64 + 0.5) * vm,
+            circumference_m,
+            d,
+            vm,
+            c.seed,
+        ) as usize;
+        if t < front.len() && front[t] == usize::MAX {
+            front[t] = z;
+        }
+    }
+    front
+}
+
+/// Cut the chain of pools into the terraces, and a ramp through every riser.
+///
+/// One chain, at one place around the ring, because a fall has to land in the pool below
+/// it: pool `k` sits across the whole depth of terrace `k`, its bowl set back one lip
+/// row from the terrace's front edge, and the notch cut into that lip drops over the
+/// riser into the row of terrace `k - 1` that the next bowl starts at. The bottom of the
+/// chain is the lake: a bowl on terrace 0, left on soil so the water table can stand
+/// under it, and cut below every other ground on the ring so [`lake_level`] finds it.
+///
+/// Runs after erosion, so nothing silts the bowls up, and before voxelisation, so the
+/// beds come out as rock and [`lake_level`] and the carve both see the finished shape.
+pub fn stamp_terraces(field: &mut Heightfield, c: &Config, r: &Recipe) -> Vec<PoolStamp> {
+    let t = r.tiers;
+    let (w, d, vm) = (field.width, field.depth, field.cell_m);
+    if !t.any() || d < 4 || w < 8 {
+        return Vec::new();
+    }
+    let circ = field.circumference_m;
+    let rx = (t.pool_radius_m / vm).round().max(2.0) as i64;
+    let notch_half = ((t.notch_width_m / vm).round().max(1.0) as i64 / 2).max(0);
+    let setback = (t.front_setback_m / vm).round().max(1.0) as usize;
+    let bowl_v = (t.pool_depth_m / vm).round().max(2.0) as i32;
+    // The chain stands over the ring's own lowest ground, so the lake it ends in is cut
+    // from the lowest terrace's lowest place: then the bowl is the ring's low point by
+    // construction, `lake_level` finds it, and the level it works out is the lip the
+    // bowl was cut a lake's depth below.
+    let low_i = (0..w * d).fold(0usize, |best, i| {
+        if field.surface_m(i) < field.surface_m(best) {
+            i
+        } else {
+            best
+        }
+    });
+    let cx = low_i % w;
+    let ring_low = field.surface_m(low_i);
+
+    let mut pools = Vec::new();
+    for tier in 0..t.count {
+        // The bowl's columns: the terrace's own rows, one lip row back from its front.
+        let mut cells = Vec::new();
+        let mut lip = Vec::new();
+        for dx in -rx..=rx {
+            let x = (cx as i64 + dx).rem_euclid(w as i64) as usize;
+            let front = tier_front_rows(r, c, circ, x);
+            let z0 = front[tier as usize];
+            if z0 == usize::MAX {
+                continue;
+            }
+            let z1 = front
+                .get(tier as usize + 1)
+                .copied()
+                .filter(|&z| z != usize::MAX)
+                .unwrap_or(d);
+            if z1 <= z0 + setback {
+                continue;
+            }
+            for z in z0..z0 + setback {
+                lip.push((x, z, dx.abs() <= notch_half));
+            }
+            for z in z0 + setback..z1 {
+                cells.push(z * w + x);
+            }
+        }
+        if cells.is_empty() {
+            continue;
+        }
+
+        // The bowl sits under everything that rims it, and its notch one voxel under
+        // that rim, so the pool holds its depth and spills at one place.
+        let rim_m = cells
+            .iter()
+            .copied()
+            .chain(lip.iter().map(|&(x, z, _)| z * w + x))
+            .fold(f64::MAX, |m, i| m.min(field.surface_m(i)));
+        // The water stands at the terrace's own front level, not under a rim above it.
+        // The camera will not have it otherwise: a lip standing over the water it holds
+        // hides that water at one row of depth, and the skyline pass answers by cutting
+        // the lip down to the dry bed. So the whole front lip is the spillway, the pool
+        // is brim full to it, and what the eye sees over the lip is water.
+        let spill_y = (rim_m / vm).round() as i32;
+        let lake_v = (r.water.lake_depth_m / vm).round().max(2.0) as i32;
+        let floor_y = if tier == 0 {
+            (spill_y - lake_v).min((ring_low / vm).round() as i32 - 1)
+        } else {
+            spill_y - bowl_v
+        };
+        if floor_y <= FLOOR_Y {
+            continue;
+        }
+        // The lake needs a seat for the ring's outlet at its own surface, so its bowl is
+        // a dish: one cell of shelf just under the waterline around a deeper middle.
+        let shelf: std::collections::BTreeSet<usize> = if tier == 0 {
+            cells
+                .iter()
+                .copied()
+                .filter(|&i| {
+                    let (x, z) = (i % w, i / w);
+                    [
+                        ((x + w - 1) % w, z),
+                        ((x + 1) % w, z),
+                        (x, z.wrapping_sub(1)),
+                        (x, z + 1),
+                    ]
+                    .iter()
+                    .any(|&(nx, nz)| nz >= d || !cells.contains(&(nz * w + nx)))
+                })
+                .collect()
+        } else {
+            Default::default()
+        };
+
+        for &i in &cells {
+            let bed = if shelf.contains(&i) {
+                spill_y - 1
+            } else {
+                floor_y
+            };
+            // A pool on soil drains into its bed; the lake keeps its soil so the water
+            // table can stand under it, and the bedrock drops by what the soil adds so
+            // the ground still comes out where the bowl was cut.
+            if tier > 0 {
+                field.sediment_m[i] = 0.0;
+                field.pool_rock[i] = bed;
+            } else {
+                field.sediment_m[i] = field.sediment_m[i].min(r.mantle_m);
+            }
+            field.bedrock_m[i] = bed as f64 * vm - field.sediment_m[i];
+            field.pool_spill[i] = spill_y;
+            field.spill_m[i] = field.surface_m(i);
+        }
+        let mut notch = None;
+        for &(x, z, is_notch) in &lip {
+            let i = z * w + x;
+            if tier > 0 {
+                field.sediment_m[i] = 0.0;
+                field.pool_rock[i] = spill_y;
+            } else {
+                field.sediment_m[i] = field.sediment_m[i].min(r.mantle_m);
+            }
+            field.bedrock_m[i] = spill_y as f64 * vm - field.sediment_m[i];
+            field.spill_m[i] = field.surface_m(i);
+            if is_notch && tier > 0 && notch.is_none() {
+                notch = Some((x, z));
+            }
+        }
+        pools.push(PoolStamp {
+            tier,
+            cells,
+            notch,
+            floor_y,
+            spill_y,
+        });
+    }
+
+    stamp_ramps(field, c, r, cx);
+    pools
+}
+
+/// Cut a ramp through every riser, half a ring from the pools, so a body can climb from
+/// the front cut to the back wall.
+///
+/// A riser is a whole stratum of rock; nothing walks up one. The ramp spreads that rise
+/// over enough rows of depth that no step is more than half a metre, which is the bound
+/// [`crate::walk::around_the_ring`] uses.
+fn stamp_ramps(field: &mut Heightfield, c: &Config, r: &Recipe, pool_x: usize) {
+    let t = r.tiers;
+    let (w, d, vm) = (field.width, field.depth, field.cell_m);
+    let rows = ((t.rise_m / 0.5).ceil().max(1.0) as usize).min(d / t.count.max(1) as usize);
+    if rows == 0 {
+        return;
+    }
+    let half = ((t.pool_radius_m / vm).round().max(2.0) as i64).max(2);
+    let circ = field.circumference_m;
+    let centre = (pool_x + w / 2) % w;
+    for dx in -half..=half {
+        let x = (centre as i64 + dx).rem_euclid(w as i64) as usize;
+        let front = tier_front_rows(r, c, circ, x);
+        for tier in 1..t.count as usize {
+            let z0 = front[tier];
+            if z0 == usize::MAX || z0 == 0 || z0 + rows >= d {
+                continue;
+            }
+            let foot = field.surface_m((z0 - 1) * w + x);
+            let head = field.surface_m((z0 + rows - 1) * w + x);
+            if head <= foot {
+                continue;
+            }
+            for k in 0..rows {
+                let i = (z0 + k) * w + x;
+                let step = foot + (head - foot) * (k + 1) as f64 / rows as f64;
+                field.bedrock_m[i] = step - field.sediment_m[i];
+                field.spill_m[i] = field.surface_m(i);
+            }
         }
     }
 }
@@ -701,7 +1012,11 @@ fn voxelise_column(
     let soil = ((sediment / vm).round().max(0.0) as i32).min(top - 1);
     let (x_m, z_m) = ((x as f64 + 0.5) * vm, (z as f64 + 0.5) * vm);
     for y in 0..=top {
-        let m = if y > top - soil {
+        let m = if y >= field.pool_rock[i] {
+            // A pool's bed and the ring of rock around it: no soil to soak into, no
+            // strata to perch on, just a bowl that holds what is poured into it.
+            Material::Rock
+        } else if y > top - soil {
             Material::Soil
         } else if r.hardness_at(x_m, y as f64 * vm, z_m, field.circumference_m, c.seed)
             >= r.bedrock_hardness
@@ -738,13 +1053,25 @@ pub fn prepare(volume: &mut Volume, field: &mut Heightfield, r: &Recipe) -> usiz
     let (w, d) = (field.width, field.depth);
     let h = volume.config.height as usize;
     let vm = volume.config.voxel_m;
-    let mut wanted = volume.surface.clone();
+    // A pool's bed is read at the level its water will stand at, not at the dry rock:
+    // otherwise the front lip of every pool is a column hiding the bed behind it, and
+    // the pass answers by cutting the lip away and draining the pool.
+    let mut wanted: Vec<i32> = (0..w * d)
+        .map(|i| {
+            if field.pool_spill[i] == i32::MIN {
+                volume.surface[i]
+            } else {
+                volume.surface[i].max(field.pool_spill[i])
+            }
+        })
+        .collect();
     visibility_pass(&mut wanted, w, d, FLOOR_Y);
     let mut moved = 0;
     for z in 0..d {
         for x in 0..w {
             let i = z * w + x;
-            if wanted[i] == volume.surface[i] {
+            // A pool is never lowered: the water is its skyline.
+            if field.pool_spill[i] != i32::MIN || wanted[i] >= volume.surface[i] {
                 continue;
             }
             moved += 1;
@@ -882,7 +1209,7 @@ pub fn repair_isolated(world: &mut World) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{PRESETS, Preset};
+    use crate::{Benches, PRESETS, Preset};
 
     const SEEDS: [u64; 3] = [1, 2, 77];
 
@@ -915,6 +1242,43 @@ mod tests {
         out
     }
 
+    /// A ring and the level each of its columns reads at: its ground, or the water
+    /// standing on it. Built from one pass of the stages, because building the world and
+    /// then generating it again to ask where the water goes costs a second of wall clock
+    /// across twelve rings.
+    fn ring_and_water_line(config: &Config) -> (World, Vec<i32>) {
+        let Landform::Staged(recipe) = config.landform.clone() else {
+            return (World::new(config.clone()), Vec::new());
+        };
+        let (field, volume, _) = staged_terrain(config, &recipe);
+        let n = config.width as usize * config.depth as usize;
+        let water = (0..n)
+            .map(|i| {
+                if field.pool_spill[i] == i32::MIN {
+                    volume.surface[i]
+                } else {
+                    volume.surface[i].max(field.pool_spill[i])
+                }
+            })
+            .collect();
+        let mut world = World::empty(config.clone());
+        world.material = volume.material;
+        repair_isolated(&mut world);
+        (world, water)
+    }
+
+    fn water_column(world: &World, water: &[i32], x: i64) -> Vec<i32> {
+        let v = world.view();
+        let w = v.config.width as usize;
+        (0..v.config.depth)
+            .map(|z| {
+                let top = v.surface_y(x, z).expect("every column has ground") as i32;
+                let i = z as usize * w + x.rem_euclid(w as i64) as usize;
+                water.get(i).copied().map_or(top, |wl| top.max(wl))
+            })
+            .collect()
+    }
+
     /// Surface heights front to back for one column, as the camera sees them.
     fn column(world: &World, x: i64) -> Vec<i32> {
         let v = world.view();
@@ -932,12 +1296,17 @@ mod tests {
             .collect()
     }
 
+    /// Nothing the camera has to read is hidden by something in front of it.
+    ///
+    /// A pool is read at the level its water stands at, not at its dry bed: the lip that
+    /// holds a pool in is by definition higher than the rock behind it, and what the eye
+    /// sees over that lip is water.
     #[test]
     fn no_surface_cell_is_hidden_by_a_nearer_one() {
         for (name, config) in rings() {
-            let world = World::new(config);
+            let (world, water) = ring_and_water_line(&config);
             for x in 0..world.config().width as i64 {
-                let ys = column(&world, x);
+                let ys = water_column(&world, &water, x);
                 for z1 in 0..ys.len() {
                     for z2 in z1 + 1..ys.len() {
                         let dz = (z2 - z1) as i32;
@@ -1267,13 +1636,11 @@ mod tests {
     /// is far too few for one realisation's sample spread to mean anything.
     #[test]
     fn a_wider_ring_holds_more_of_the_same_landforms() {
-        let mut base = Preset::find("default").unwrap().config();
-        // Benches off, as in the test below and for the same reason: snapping the
-        // ground onto band tops quantises the height distribution, and two rings of
-        // different length land on that quantisation differently.
-        if let Landform::Staged(r) = &mut base.landform {
-            r.benches = crate::Benches::NONE;
-        }
+        // The recipe the crate had before benches or terraces, on the `default` ring:
+        // both of those quantise the height distribution -- onto band tops, onto terrace
+        // levels -- and two rings of different length land on that quantisation
+        // differently, which is a fact about sampling and not about landform size.
+        let mut base = smooth_default();
         let sweep = |width: u32| -> Vec<Vec<f64>> {
             let mut rows = Vec::new();
             for seed in SEEDS {
@@ -1332,18 +1699,18 @@ mod tests {
     /// through the ground is the noise's business, not the recipe's.
     #[test]
     fn halving_the_voxel_resolves_the_same_landforms_finer() {
-        let base = Preset::find("default").unwrap().config();
+        // Hollows, benches and terraces off for this one. Each puts a discontinuity into
+        // the ground -- a skylight punched wherever a gallery landed, a face wherever the
+        // relief crossed a band, a riser at every terrace edge -- and which side of a
+        // discontinuity a sample falls on is a question about sampling, not about how big
+        // the recipe's landforms are.
+        let base = smooth_default();
         let Landform::Staged(mut recipe) = base.landform.clone() else {
             panic!("a preset is staged");
         };
-        // Hollows and benches off for this one. Both put a discontinuity into the
-        // ground -- a skylight punched wherever a gallery landed, a face wherever the
-        // relief crossed a band -- and which side of a discontinuity a sample falls on
-        // is a question about sampling, not about how big the recipe's landforms are.
         recipe.hollows = crate::Hollows::NONE;
-        recipe.benches = crate::Benches::NONE;
         let base = Config {
-            landform: Landform::Staged(recipe),
+            landform: Landform::Staged(recipe.clone()),
             ..base
         };
         // The same 32 m ring at half the cell size is twice the cells in every
@@ -1454,6 +1821,332 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The `default` ring on the recipe the crate had before benches or terraces: what
+    /// the physical-units claims are about.
+    fn smooth_default() -> Config {
+        let p = Preset::find("default").unwrap();
+        Config {
+            width: p.width,
+            height: 48,
+            depth: p.depth,
+            voxel_m: p.voxel_m,
+            landform: Landform::Staged(Recipe {
+                benches: crate::Benches::NONE,
+                ..Recipe::DEFAULT
+            }),
+            ..Config::default()
+        }
+    }
+
+    /// The staircase climbs toward the back, never toward the front, and it wraps.
+    #[test]
+    fn tiers_rise_toward_the_back_and_wrap() {
+        let p = Preset::find("default").unwrap();
+        let (c, r) = (p.config(), p.recipe);
+        let (w, d, vm) = (c.width as usize, c.depth as usize, c.voxel_m);
+        let circ = p.circumference_m();
+        let tier = |x: f64, z: usize| tier_at(&r, x, (z as f64 + 0.5) * vm, circ, d, vm, c.seed);
+        let mut front_touched = false;
+        for x in 0..w {
+            let x_m = (x as f64 + 0.5) * vm;
+            let mut last = 0;
+            for z in 0..d {
+                let t = tier(x_m, z);
+                assert!(
+                    t >= last,
+                    "x {x}: the terrace falls back from {last} to {t} at z {z}"
+                );
+                assert!(
+                    t < r.tiers.count,
+                    "x {x} z {z}: terrace {t} is off the staircase"
+                );
+                last = t;
+            }
+            assert_eq!(
+                tier(x_m, 0),
+                0,
+                "x {x}: the front cut is not on the lowest terrace"
+            );
+            front_touched = true;
+            // One lap along: the same terrace, because the edge field is periodic.
+            let lap_m = (x as f64 + w as f64 + 0.5) * vm;
+            for z in [0, d / 2, d - 1] {
+                assert_eq!(tier(x_m, z), tier(lap_m, z), "x {x} z {z} across the seam");
+            }
+        }
+        assert!(front_touched);
+        assert_eq!(
+            tier_at(&Recipe::DEFAULT, 3.0, 3.0, circ, d, vm, 1),
+            0,
+            "a recipe with no terraces is all one level"
+        );
+    }
+
+    /// With the terraces switched off the generator makes exactly the ring it made
+    /// before they existed.
+    ///
+    /// The hash is here and nowhere else, and if it ever has to be re-recorded this test
+    /// goes with it: a pinned world is not a thing this repo keeps.
+    #[test]
+    fn count_zero_is_todays_landform() {
+        let config = Config {
+            seed: 1,
+            ..smooth_default()
+        };
+        let Landform::Staged(mut recipe) = config.landform.clone() else {
+            panic!("a preset is staged")
+        };
+        recipe.benches = Benches::ON;
+        assert_eq!(
+            recipe.tiers.count, 0,
+            "the recipe under test has no terraces"
+        );
+        let (_, volume, report) = staged_terrain(&config, &recipe);
+        assert!(report.pools.is_empty(), "no terraces, no pools");
+        let mut hash = 0xcbf2_9ce4_8422_2325u64;
+        for m in &volume.material {
+            hash ^= *m as u8 as u64;
+            hash = hash.wrapping_mul(0x1000_0000_01b3);
+        }
+        assert_eq!(format!("{hash:016x}"), "33cca3db86aeec9b");
+    }
+
+    /// Every pool is a basin the water solver will find: rock all the way round its bed,
+    /// spilling at the front lip and nowhere lower.
+    #[test]
+    fn pools_are_rock_bowls_with_one_notch() {
+        for p in PRESETS {
+            let config = Config {
+                seed: 1,
+                ..p.config()
+            };
+            let Landform::Staged(recipe) = config.landform.clone() else {
+                panic!("a preset is staged")
+            };
+            let (field, volume, report) = staged_terrain(&config, &recipe);
+            assert!(
+                report.pools.len() >= 2,
+                "{}: a chain of {} pools is not a chain",
+                p.name,
+                report.pools.len()
+            );
+            let world = World::new(config.clone());
+            let basins = crate::hydrate::basins(&world);
+            for pool in &report.pools {
+                for &i in &pool.cells {
+                    let (x, z) = (i % field.width, i / field.width);
+                    let bed = volume.surface[i];
+                    let m = volume.material[config.index(x as i64, bed as u32, z as u32)];
+                    if pool.tier > 0 {
+                        assert_eq!(
+                            m,
+                            Material::Rock,
+                            "{} tier {}: ({x}, {bed}, {z}) is {m:?}, not a rock bed",
+                            p.name,
+                            pool.tier
+                        );
+                    }
+                    assert!(
+                        bed < pool.spill_y,
+                        "{} tier {}: ({x}, {z}) is not under the waterline",
+                        p.name,
+                        pool.tier
+                    );
+                }
+                // The lip is the spillway: nothing around the bowl stands below it.
+                for &i in &pool.cells {
+                    let (x, z) = (i % field.width, i / field.width);
+                    for (nx, nz) in [
+                        ((x + field.width - 1) % field.width, z),
+                        ((x + 1) % field.width, z),
+                        (x, z.saturating_sub(1)),
+                        (x, (z + 1).min(field.depth - 1)),
+                    ] {
+                        let j = nz * field.width + nx;
+                        if pool.cells.contains(&j) {
+                            continue;
+                        }
+                        assert!(
+                            volume.surface[j] >= pool.spill_y,
+                            "{} tier {}: ({nx}, {nz}) is a hole in the rim at {} under {}",
+                            p.name,
+                            pool.tier,
+                            volume.surface[j],
+                            pool.spill_y
+                        );
+                    }
+                }
+                let held = basins.iter().any(|b| {
+                    pool.cells.iter().any(|&i| {
+                        let (x, z) = (i % field.width, i / field.width);
+                        b.cells.contains(&config.index(
+                            x as i64,
+                            (pool.spill_y as u32).saturating_sub(1),
+                            z as u32,
+                        ))
+                    })
+                });
+                assert!(held, "{} tier {}: no basin holds it", p.name, pool.tier);
+            }
+        }
+    }
+
+    /// Each fall lands in the pool below it, and the last one in the lake.
+    #[test]
+    fn the_chain_lands_in_the_pool_below() {
+        for p in PRESETS {
+            let config = Config {
+                seed: 1,
+                ..p.config()
+            };
+            let Landform::Staged(recipe) = config.landform.clone() else {
+                panic!("a preset is staged")
+            };
+            let (field, _, report) = staged_terrain(&config, &recipe);
+            for pool in &report.pools {
+                let Some((nx, nz)) = pool.notch else {
+                    assert_eq!(pool.tier, 0, "{}: only the lake spills elsewhere", p.name);
+                    continue;
+                };
+                assert!(nz > 0, "{}: the notch is on the front cut", p.name);
+                let landing = (nz - 1) * field.width + nx;
+                let below = report
+                    .pools
+                    .iter()
+                    .find(|q| q.tier + 1 == pool.tier)
+                    .unwrap_or_else(|| {
+                        panic!("{}: tier {} has nothing below it", p.name, pool.tier)
+                    });
+                assert!(
+                    below.cells.contains(&landing),
+                    "{}: tier {} falls onto ({nx}, {}) and misses tier {}",
+                    p.name,
+                    pool.tier,
+                    nz - 1,
+                    below.tier
+                );
+            }
+        }
+    }
+
+    /// The river comes back in at the top of the chain.
+    #[test]
+    fn the_spring_is_in_the_top_pool() {
+        for p in PRESETS {
+            let config = Config {
+                seed: 1,
+                ..p.config()
+            };
+            let Landform::Staged(recipe) = config.landform.clone() else {
+                panic!("a preset is staged")
+            };
+            let (field, _, report) = staged_terrain(&config, &recipe);
+            let top = report
+                .pools
+                .iter()
+                .max_by_key(|q| q.tier)
+                .expect("a chain has a top");
+            let world = World::new(config.clone());
+            let (x, y, z) = world
+                .spring_cell()
+                .expect("a staged world names its spring");
+            let i = z as usize * field.width + x as usize;
+            assert!(
+                top.cells.contains(&i),
+                "{}: the spring at ({x}, {z}) is not in the top pool",
+                p.name
+            );
+            assert!(
+                (y as i32) > top.floor_y && (y as i32) <= top.spill_y,
+                "{}: the spring at y {y} is not between the top pool's floor {} and its \
+                 surface {}",
+                p.name,
+                top.floor_y,
+                top.spill_y
+            );
+        }
+    }
+
+    /// The risers are climbable: the ring is walkable, and so is the way from the front
+    /// cut to the back wall.
+    #[test]
+    fn every_riser_has_a_ramp() {
+        for p in PRESETS {
+            for seed in [1u64, 77] {
+                let world = World::new(Config { seed, ..p.config() });
+                assert!(
+                    crate::walk::around_the_ring(&world, 0.5),
+                    "{} seed {seed}: the ring cannot be walked",
+                    p.name
+                );
+                assert!(
+                    climbs_to_the_back(&world, 0.5),
+                    "{} seed {seed}: no way up from the front cut to the back wall",
+                    p.name
+                );
+            }
+        }
+    }
+
+    /// Whether some support face on the front row reaches one on the back row, stepping
+    /// at most `step_m` between face-neighbouring columns. The same rule
+    /// [`crate::walk::around_the_ring`] uses, asked across the strip instead of around
+    /// it, which is what a ramp through a riser is for.
+    fn climbs_to_the_back(world: &World, step_m: f64) -> bool {
+        let c = world.config().clone();
+        let v = world.view();
+        let (w, d) = (c.width as usize, c.depth as usize);
+        let rise = (step_m / c.voxel_m).floor().max(0.0) as i64;
+        let faces: Vec<Vec<u32>> = (0..w * d)
+            .map(|i| v.supports_in_column((i % w) as i64, (i / w) as u32))
+            .collect();
+        let mut seen: Vec<Vec<bool>> = faces.iter().map(|f| vec![false; f.len()]).collect();
+        let mut stack: Vec<(usize, usize)> = Vec::new();
+        for x in 0..w {
+            for k in 0..faces[x].len() {
+                seen[x][k] = true;
+                stack.push((x, k));
+            }
+        }
+        while let Some((i, k)) = stack.pop() {
+            let (x, z) = (i % w, i / w);
+            if z + 1 == d {
+                return true;
+            }
+            let y = faces[i][k] as i64;
+            let mut step = |j: usize, stack: &mut Vec<(usize, usize)>| {
+                for (m, &yy) in faces[j].iter().enumerate() {
+                    if !seen[j][m] && (yy as i64 - y).abs() <= rise {
+                        seen[j][m] = true;
+                        stack.push((j, m));
+                    }
+                }
+            };
+            step(z * w + (x + w - 1) % w, &mut stack);
+            step(z * w + (x + 1) % w, &mut stack);
+            if z > 0 {
+                step((z - 1) * w + x, &mut stack);
+            }
+            step((z + 1) * w + x, &mut stack);
+        }
+        false
+    }
+
+    /// `small` is the Tachyon panel's world, and the panel's raster is 640 x 360.
+    /// `Projection::new` crops anything taller, so the world plus the lift the 30° tilt
+    /// gives its depth has to fit: `4 * height + 2 * depth <= 360`.
+    #[test]
+    fn small_fits_the_panel_raster() {
+        let p = Preset::find("small").unwrap();
+        let rows = 4 * p.height + 2 * p.depth;
+        assert!(rows <= 360, "small draws {rows} rows into a 360-row raster",);
+        assert!(
+            rows >= 300,
+            "small leaves {} rows of sky unused",
+            360 - rows
+        );
     }
 
     /// A hand-authored skyline: `width x depth` columns, all at `ground`, with the

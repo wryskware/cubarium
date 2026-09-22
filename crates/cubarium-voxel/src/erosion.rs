@@ -392,6 +392,8 @@ mod tests {
             discharge: vec![0.0; w * d],
             spill_m: surface,
             hard_cap: vec![false; w * d],
+            pool_rock: vec![i32::MAX; w * d],
+            pool_spill: vec![i32::MIN; w * d],
             budget: Budget::default(),
         }
     }
