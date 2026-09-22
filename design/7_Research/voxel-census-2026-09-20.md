@@ -860,3 +860,176 @@ the footprint, the area in m², the occlusion order and the weight — which
 are mats and caps whose band top sits at the ground, so they occlude almost
 nothing on these landscapes, and no number in the tables above is attributable to
 it; but it is a change, and it is a one-line change to undo.
+
+## D5 — the small preset
+
+Brief: `design/handoffs/voxel-small-collapse-2026-09-22.md`. Read-only; the only
+code change is `crates/cubarium/examples/voxel_plant_autopsy.rs`, which now takes
+`preset=<name>` through `voxel::ambient_world` (the host's own build: the recipe's
+extents, cell size and water, the lake gate over 24 draws, `FloraConfig::for_voxel_size`)
+and runs either `plants-only` (the fauna the seeder introduces is never stepped) or
+`coupled` (the host's `Sim`, the settled sense field, the built-in trained founders).
+Three arms, six simulated hours, seed base 1, 0 seeds rejected on either preset:
+`small` plants-only, `small` coupled, `default` plants-only. CSVs under `runs/` are
+disposable.
+
+Both arms reproduce the "Layers" table at t = 0 exactly — standing foliage 4.675 on
+`small`, 20.207 on `default` — and the `small` **coupled** arm ends at **0.264**, the
+same 0.264 that section reports for `voxel_edible_stock 6 preset=small`. The plant
+autopsy is measuring the same collapse.
+
+### The table
+
+| | small plants-only | small coupled | default plants-only |
+| --- | --- | --- | --- |
+| species seeded (stands) | 4 (27) | 4 (27) | **6 (87)** |
+| standing foliage, t = 0 → 6 h | 4.675 → **0.664** | 4.675 → **0.264** | 20.207 → **25.754** |
+| alive at 6 h | stonecushion 0.664 | stonecushion 0.264 | umbrellafrond 23.36, stonecushion 1.48, springturf 0.84, velvetpad 0.07, glowcap 0.02 |
+| establishments / deaths | 33 / 29 | 12 / 29 | **215 / 141** |
+
+Deaths by cause. The flora ledger books `deaths` with **no cause**, so every cause
+below except drowning is inferred from the clause of the stand's own survival rule
+that was failing at the tick it died; drowning is read straight off the gate.
+
+| species | small plants-only | small coupled | default plants-only |
+| --- | --- | --- | --- |
+| bloomcrown | 9 deficit | 7 deficit, 2 no foliage | 18 deficit |
+| umbrellafrond | — | — | 5 drown, 2 thirst, 2 deficit |
+| springturf | 6 drown, 6 deficit | 6 drown, 6 no foliage | 1 drown, 1 thirst, 88 deficit |
+| stonecushion | 0 | 0 | 1 deficit |
+| velvetpad | — | — | 12 thirst, 3 deficit |
+| glowcap | 8 drown | 8 drown | 2 drown, 6 at the alive floor while solvent |
+
+Root-box pore against the band, mean over living stands, and the light beside it.
+Every species' `establish_pore_min` and wilt/saturation band is in the runs' t = 0
+block; soil's field capacity is 0.25 and rock's 0.5, so 0.25 is "drained soil".
+
+| | t = 0 | 30 min | 6 h | band (wilt → sat) | mean light, whole run |
+| --- | --- | --- | --- | --- | --- |
+| small bloomcrown | 0.2500 | 0.165 (μ 0.20) | dead at 330 min | 0.08 → 0.50 | 0.98–1.00 |
+| small springturf | 0.2500 | 0.242 (μ 0.31) | dead at 57 min | 0.15 → 0.45 | 0.94–0.96 |
+| small stonecushion | 0.2500 | 0.172 (μ 0.46) | **0.071 (μ 0.16)** | 0.02 → 0.35 | 0.95–0.97 |
+| default umbrellafrond | **0.9853** | 0.647 (μ 0.70) | **0.506 (μ 0.43)** | 0.30 → 0.80 | 0.96–0.97 |
+| default velvetpad | **0.6478** | 0.431 (μ 0.58) | 0.204 (μ 0.03) | 0.20 → 0.60 | 0.99 |
+| default bloomcrown | 0.2500 | 0.123 (μ 0.11) | dead | 0.08 → 0.50 | 0.87–0.89 |
+| default springturf | 0.2599 | 0.254 (μ 0.30) | 0.375 (μ 0.65) | 0.15 → 0.45 | 0.89–0.96 |
+
+**Light is never the constraint**: the mean light response is 0.87–1.00 for every
+species in every arm, and no death was booked on light or on mineral.
+
+The water ledger, per square metre of footprint, so the two rings are comparable
+(`small` 60 m² and 90 m³; `default` 192 m² and 288 m³ — both exactly
+`inventory_m` 1.5 m, since `Water::SMALL` inherits `Water::DEFAULT`'s inventory).
+
+| m³ per m² | small t = 0 | small 6 h | default t = 0 | default 6 h |
+| --- | --- | --- | --- | --- |
+| pore | 0.0447 | 0.0481 | 0.0681 | 0.0611 |
+| pooled | 0.0366 | 0.0084 | **0.1298** | 0.0131 |
+| aquifer (head, m) | 0.574 (1.640) | 0.606 (1.731) | 0.378 (**1.081**) | 0.553 (1.579) |
+| atmosphere | 0.845 | 0.837 | 0.924 | 0.873 |
+| rain, cumulative | — | 0.0688 | — | 0.0688 |
+| stream re-entry, cumulative | — | **0.0433** | — | **0.1127** |
+| evaporation, cumulative | — | 0.0986 | — | 0.0969 |
+| transpiration, cumulative | — | 0.0014 | — | 0.0216 |
+
+33 showers on both, and the rain each ring received per square metre is identical to
+five digits, so the per-preset `shower_volume_m3` scaling works. Residuals over
+432,000 ticks: `small` 1.5e-7 m³ of 90 (1.7e-9 relative), `default` 2.6e-6 of 288
+(9.1e-9 relative).
+
+Establishment at t = 0. **Every seeded stand passes its own predicate where it
+stands, on both presets** — `habitat::suitable` consults
+`establishment_gates_with_sky` now, so D1's "62 of 62 founders stand where their own
+seeds are refused" no longer holds. What differs is which species get planted at all,
+and the skyline says why:
+
+| eligible columns at t = 0 | small (of 3,840) | default (of 3,072) | seeded |
+| --- | --- | --- | --- |
+| bloomcrown | 3,046 (79 %) | 1,163 (38 %) | 4 / 15 |
+| **umbrellafrond** (pore ≥ 0.45) | **16 (0.4 %)** | **853 (27.8 %)** | **0 / 8** |
+| springturf | 2,709 (71 %) | 962 (31 %) | 12 / 36 |
+| stonecushion | 3,104 (81 %) | 1,226 (40 %) | 5 / 15 |
+| **velvetpad** (pore ≥ 0.30) | **7 (0.2 %)** | **157 (5.1 %)** | **0 / 4** |
+| glowcap (dead wood) | 201 (5.2 %) | 90 (2.9 %) | 6 / 9 |
+
+The seeder's own arithmetic closes it: `want = round(eligible_columns × cell_area ×
+per_m²)`. On `small` that is `round(16 × 0.015625 × 0.15) = round(0.0375) = 0` for
+umbrellafrond and `round(7 × 0.015625 × 0.4) = round(0.04) = 0` for velvetpad; on
+`default` it is `round(853 × 0.0625 × 0.15) = 8` and `round(157 × 0.0625 × 0.4) = 4`,
+which is exactly what was planted.
+
+### The sentence
+
+**The `small` preset's plants die of thirst in drained soil, and what makes that fatal
+rather than merely thinning is that its ring has no standing wet ground for the seeder
+to find, so the only two producers that are solvent anywhere — umbrellafrond and
+velvetpad, income 6–18× maintenance in soil above field capacity — are never planted,
+and every species `small` does get is one that is insolvent on `default` too.**
+
+The supporting readings: bloomcrown covers 0.73 of its maintenance on `default` and
+1.38 on `small` at 30 minutes and falls to 0.00 on both; springturf covers 0.63 and
+0.49 at 30 minutes, is gone entirely by minute 60 on `small`, and loses 88 of its 90
+`default` stands to the same deficit by the same minute (16 come back later, in the
+wet ground the surviving canopy stands in). On `default` umbrellafrond covers 12.3–17.9
+throughout and grows 8 founders into 80 stands and 23.4 of foliage; velvetpad covers
+6.4–15.1 for the first two hours and then dries out too (12 of its 15 deaths are
+thirst, and it ends at 0.065). `small`'s one solvent species is stonecushion, a ground mat that ends at
+0.664 ungrazed and 0.264 grazed. Consumption is not the cause: the plants-only arm
+reproduces the coupled arm species for species and 29 deaths for 29, including the
+same 6 drowned springturf and 8 drowned glowcap; grazing only decides how much of the
+surviving mat is left.
+
+### Candidates, proposed and not made, ranked by the evidence
+
+1. **The inventory's split, not its size.** `Water::SMALL` keeps
+   `Water::DEFAULT`'s 1.5 m, and per square metre both rings are charged the same.
+   Where it lands differs: `small` buries 38 % of it in the water table against
+   `default`'s 25 %, because `hydrate` lifts the table to the lake floor and `small`'s
+   lake floor stands at 1.625 m where `default`'s stands at 1.0 m — 0.35 × 1.625 =
+   0.57 m per m² against 0.35 — and `small` is left with 2.4 % of its water standing in
+   pools against `default`'s 8.7 % (a 7.2 m² lake on a 60 m² ring, 12 %, against 66 m²
+   on 192 m², 34 %). The wet columns are the ones near standing water, and that is the
+   whole difference in the eligibility table. The levers this points at are
+   `lake_depth_m` (0.375 on `small`, 0.75 on `default`), the terraced tier-0 trough the
+   lake sits in, and the inventory sized against a higher lake floor — not the 1.5 m.
+2. **The seeder looks at the driest moment and rounds a small niche to zero.** It runs
+   after the settle and the 200-tick stream watch, before the first shower (300–900 s),
+   and thirty minutes of weather takes `small` from 16 to 224 umbrellafrond-eligible
+   columns and from 7 to 267 velvetpad-eligible ones — 14× and 38× what the seeder saw,
+   and at 6 h 278 and 334. But establishment needs a donor of that species and there is
+   none, so the ring can never acquire them. Candidates: a floor of one founder wherever
+   the niche exists at all, or judging the ring after a shower rather than before one.
+3. **The solver's conductivity scales with the cell.** Infiltration and drainage are
+   `permeability_per_s · dt · pore_capacity · voxel_volume` per voxel
+   (`water.rs:757, 788, 1569`), which is `permeability · pore_capacity · voxel_m` metres
+   of column per second — so at 0.125 m the `small` ring's soil takes water and drains it
+   at **half** `default`'s speed in metres. Consistent with what the first shower did:
+   at minute 10 the runoff stood 0.031–0.077 m over `small`'s low ground and drowned
+   **14 of its 27 stands** (every springturf and every glowcap, against drown depths of
+   0.03 and 0.05 m), while `default`'s first shower drowned 3 of 87 at minute 9. Candidate:
+   a length per second rather than a cell fraction per second. **Not measured** — see below.
+4. **Not `FloraConfig::for_voxel_size`.** It doubles every authored voxel distance
+   exactly: a bloomcrown root box holds 22.2 soil voxels on `small` against 2.8 on
+   `default`, which is 8× the voxels for ⅛ the cell volume — the same soil in metres —
+   and the box reads the same 0.2500 mean pore on both presets at t = 0. No evidence of
+   a scaling defect in the flora config.
+5. **Not a `small` problem at all, for four of the six species.** Bloomcrown and
+   springturf are insolvent on `default` too, and glowcap ends there at 0.016. Whether a
+   producer should be able to pay its maintenance in soil at field capacity is a model
+   question this diagnosis does not answer; `default` survives by having wetland, not by
+   having healthy dryland plants.
+
+### What this did not measure, and why
+
+- **Cause of death is inferred.** `FloraLedger` has one `deaths` counter and no cause
+  field, so every cause above except drowning is the failing clause of the stand's own
+  survival rule at the tick it vanished. A stand grazed to zero foliage and a stand
+  that never had income both read as a deficit unless the foliage clause fires first.
+- **Per-species consumption is not readable here.** `consumed_organic_out` is one
+  number for the layer (4.870 on the `small` coupled arm); what the browsers took from
+  which species is the founder autopsy's measurement, not this one's.
+- **Candidate 3 is arithmetic plus a consistent observation, not an experiment.** It
+  needs one landform run at two cell sizes, which this package did not run.
+- **One seed per preset** (base 1, 0 rejected). `small`'s own barren seeds — the recipe
+  comment names five of eight — are not sampled, and `wide` was not run at all.
+- The three arms are one trajectory each; nothing here is a distribution.
