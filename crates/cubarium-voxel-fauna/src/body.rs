@@ -956,9 +956,19 @@ pub(crate) fn reachable_layers(
     cols: &[(i64, u32)],
     layers: &std::ops::RangeInclusive<i64>,
 ) -> Vec<(usize, f64)> {
+    let mut out = Vec::new();
+    // A cheap bound before the profile is built at all: every layer of a stand sits
+    // between the first cell over its support face and its crown cell, so a mouth
+    // whose range misses that span can skip the stand without resolving its anatomy.
+    // This scan runs over every stand for every mouth on every tick.
+    let sc = fv.config.species(stand.species);
+    let lowest = i64::from(stand.site.y) + 1;
+    let highest = i64::from(stand.site.y) + i64::from(sc.crown_voxels(stand.wood));
+    if *layers.end() < lowest || *layers.start() > highest {
+        return out;
+    }
     let width = i64::from(view.config.width);
     let depth = i64::from(view.config.depth);
-    let mut out = Vec::new();
     for layer in fv.layers(stand) {
         if !(layer.stock > 0.0) || !layers.contains(&layer.cell) {
             continue;

@@ -184,6 +184,13 @@ pub fn layer_columns(
 }
 
 /// The layer a stand's crown disc of cells sits at: `site.y + crown_voxels(wood)`.
+///
+/// **Since plants have layers this is the stand's *topmost* foliage cell and not the
+/// whole of where its foliage is** — an adult bloomcrown also holds a basal rosette
+/// three cells below it. Kept because it is the pre-layer geometry the "Edible stock,
+/// 2026-09-21" measurements were taken with; a caller that wants the whole plant asks
+/// [`FloraView::layers`] or [`reachable_layers_of`]
+/// (`design/voxel-encounter-contract-2026-09-21.md` §8).
 pub fn crown_layer(fv: &FloraView<'_>, stand: &Stand) -> i64 {
     i64::from(stand.site.y) + i64::from(fv.config.species(stand.species).crown_voxels(stand.wood))
 }
@@ -196,7 +203,8 @@ pub fn crown_slab_m(fv: &FloraView<'_>, stand: &Stand, voxel_m: f64) -> (f64, f6
 }
 
 /// The `(x, z)` columns a stand's crown disc covers, by the same disc rule the mouth and
-/// the cone both use.
+/// the cone both use. **Pre-layer geometry**, as [`crown_layer`]: one layer's own
+/// columns are [`layer_columns`].
 pub fn crown_columns(fv: &FloraView<'_>, view: &VoxelView<'_>, stand: &Stand) -> Vec<(u32, u32)> {
     let c = view.config;
     let sc = fv.config.species(stand.species);

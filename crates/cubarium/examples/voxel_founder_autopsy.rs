@@ -166,6 +166,11 @@ fn main() {
     // default, exactly as `cubarium voxel`'s ambient run installs them; `heuristic` as a
     // trailing argument keeps the old, observation-only control.
     let heuristic = args.iter().any(|a| a == "heuristic");
+    // The **before** arm, on this build: every plant reduced to the one-disc lollipop
+    // the model was before `design/handoffs/voxel-plant-layers-2026-09-22.md`, so an
+    // arm can be compared against the layered one on the same landforms, seed, bodies
+    // and centres rather than against a figure from another revision.
+    let lollipop = args.iter().any(|a| a == "lollipop");
     // `preset=<small|default|wide>` is the **landscape arm**: the world the host builds,
     // not the world this file used to build for itself.
     let preset: Option<&'static cubarium_voxel::Preset> = args
@@ -199,7 +204,12 @@ fn main() {
         let world_cfg = preset.config();
         let (world, seed, rejected) = cubarium::voxel::ambient_world(&world_cfg, seed_base);
         let lake = cubarium_voxel::hydrate::lake(&world);
-        let flora = Flora::new(FloraConfig::for_voxel_size(world.config().voxel_m));
+        let flora_cfg = FloraConfig::for_voxel_size(world.config().voxel_m);
+        let flora = Flora::new(if lollipop {
+            flora_cfg.one_layer_species()
+        } else {
+            flora_cfg
+        });
         eprintln!(
             "scene: preset {} ({}x{}x{} at {} m, seed {seed}, {rejected} rejected), \
              lake {:.2} m3 over {:.1} m2 visible; flora scaled for {} m cells",
@@ -237,7 +247,11 @@ fn main() {
         } else {
             scene::authored(cfg.world.clone())
         };
-        let flora = Flora::new(FloraConfig::default());
+        let flora = Flora::new(if lollipop {
+            FloraConfig::default().one_layer_species()
+        } else {
+            FloraConfig::default()
+        });
         let label = format!(
             "{} world, {} water budget",
             if generated { "generated" } else { "authored" },
@@ -254,6 +268,9 @@ fn main() {
         "seeded: stands={} logs={} litter_tiles={} founders={:?}",
         seeded.stands, seeded.logs, seeded.litter_tiles, seeded.founders
     );
+    if lollipop {
+        eprintln!("plants: one_layer_species (the pre-layers control)");
+    }
     if heuristic {
         eprintln!("founders: the observation-only heuristic (control)");
     } else {
