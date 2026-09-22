@@ -1682,3 +1682,144 @@ Next lever, Wrysk's call: the simulation on its own thread with the
 renderer packing from a per-tick copy, the water scan split to use the
 pool at this scale, and change-only packing — a sim-performance package
 for the water worker (high). Or accept 30 fps and go to the atlas.
+
+## Performance review before the sim package — 2026-09-22
+
+Wrysk: do the package, but review the assessment first. An independent
+review (Opus, high, read-only, with `perf` on the board's main thread)
+changed the diagnosis:
+
+- **Placement, not threads.** cpu0-3 are A55 (capacity 381), cpu4-6 A78
+  (889), cpu7 the prime A78 (1024, 2.7 GHz). Qualcomm `core_ctl` parks
+  cpu7 (min_cpus 0) and one big core; `CPUAffinity=0-6` also shut cpu7
+  out. The main thread averaged 1.35 GHz, ~30 % of samples on A55s, 49 %
+  backend-stalled, 646 k migrations. Desk→board is 8–10× for this loop,
+  not 3.6×.
+- Wrysk's live check (core_ctl min_cpus=1 on cpu7, `taskset -pc 7`):
+  step max 62–66 → 17–29 ms, loop 82 % → 53–72 % busy, presented 29 → 40
+  fps. cpu7 read at 1.06 GHz — schedutil still holds it down.
+- **Pack is mostly recomputation:** `roof_into` rebuilt every tick though
+  it is terrain-only (3.3 ms), the stage loop's per-accessor `rem_euclid`
+  (4.7 ms), `pack_glyph` per-cell `at()` on y-major grids plus two
+  memsets per tick (2.7 ms).
+- **Water:** exchange ≈ 14 ms/tick on the board; active set walked in
+  swap-remove order, nine column-major scratch arrays against the
+  row-major world, `coords()`/`index()` divisions (~12 % of desk
+  self-time). The panel's 72 rows exceed the exchange masks' `height <= 64`
+  (`water.rs:997`), so it has run the dense fallback since the terraces;
+  u128 masks passed the mask-vs-dense trajectory test at 72 in a scratch
+  copy. `evaporate` and the shower's `sky_cell` walk every column top-down
+  (2.0 ms).
+- The 60 s snapshot (4.7 MB `world.save()` + write) runs on the loop.
+- The `world` timer reads 0.0 because `Phase::WorldStep` is timed only
+  inside `water::step`; the live schedule chains the leaf systems
+  (`cubarium-voxel-sim/src/lib.rs:231-243`) and never calls it.
+- **"60 fps" counts duplicates:** the picture changes only when the sim
+  ticks, so nothing on the panel moves faster than 20 Hz until sub-tick
+  interpolation exists (a later, separate question for Wrysk).
+- The visible defect is showers: 16.8–17.7 ticks/s, step 43–46 ms, max
+  120 ms.
+
+Verdicts: sim on its own thread — deferred (buys presented fps, not tick
+headroom; stdin commands, saves and the pack all cross it; revisit only if
+the loop is still > 60 % busy after this package). Finer water-scan split
+— dropped (scan is 1.7 ms; the pool sat on A55s at IPC 0.1). Change-only
+packing — replaced by a cheap full pack. `world` timer — kept.
+`water_substeps` 4 → 2–3 would save 5–7 ms but slows falls (80 cells/s):
+Wrysk's call, only if the board still falls short.
+
+**Target for the package:** 20.0 ticks/s through a shower, step max
+< 50 ms, loop < 50 % busy, on the board. Three packages in parallel, no
+shared files. No bit-identical requirement anywhere (conservation and a
+qualitatively same world); a schema bump is fine if storage changes.
+
+## Package PA — water inner loop (water worker)
+
+Owner: Opus, **high**. Files: `crates/cubarium-voxel/src/{water.rs,
+world.rs, sparse.rs, config.rs}` as needed. Not the host, not the GPU crate.
+
+1. Exchange masks wide enough for the panel: u128 (or a width chosen from
+   the height) so the mask path covers height ≤ 128; dense stays the
+   fallback above.
+2. Exchange locality: walk the active set in index order (fall already
+   sorts a copy); scratch laid out in the world's order; neighbour
+   offsets instead of `coords()`/`index()` divisions in the hot loop;
+   f32 for head/drive and u32 for room_target/run_top where the
+   quantities allow it (conservation is accounted in f64 as today).
+3. `evaporate` and `sky_cell`: a per-column sky floor cached from
+   `void_runs` / terrain version, invalidated by any terrain edit.
+4. Small items: drain's per-tick `to_vec`, `CellSet::set`, water_table,
+   fall's sort — only where the profile shows them.
+
+Tests first, written before the change: mask-vs-dense trajectory at height
+72 and at a height above the new mask width; the conservation fixture over
+a shower on the small preset; cached sky floor equals the walked answer on
+a sky-open, a roofed and a grotto column, and after a terrain edit that
+opens and one that closes a column. Measure on the desk: release
+`cubarium voxel` with `config/tachyon/voxel.toml`, `--gpu-target headless`,
+`taskset -c 0-5`, seed 14400042426867678818, 2 min, step ms/tick before
+and after, and during a forced shower (the stdin `rain` command). Return
+(≤25 lines): commits, desk step before/after (dry and shower), test
+counts for `cargo test -p cubarium-voxel`, anything that changed the
+trajectory qualitatively.
+
+## Package PB — a cheap full pack (display worker)
+
+Owner: Opus, **medium**. Files: host `crates/cubarium/src/sink/gpu/voxel.rs`,
+`crates/cubarium/src/voxel/{stand.rs, animal.rs}` as needed, and
+`crates/cubarium-gpu/src/voxel.rs` for per-plane dirty flags. Not
+`voxel/mod.rs`, not the voxel crate.
+
+1. Roof table cached by terrain version; its plane uploaded only when it
+   changes.
+2. The glyph atlas built once.
+3. The stage loop in world order, no `rem_euclid` per accessor.
+4. Stands and animals stamped from their sparse cell lists, not a per-cell
+   `at()` on y-major grids; no per-tick full memsets of those planes (clear
+   what was stamped last tick).
+
+Tests first: the new pack's texels equal the old pack's (keep the old one
+as the test oracle) on a fixture world, again after a terrain edit, after
+a moved animal, and after a stand grows or dies. Measure on the desk the
+same way as PA: pack ms/tick before/after. Return (≤25 lines): commits,
+pack before/after, test counts for `cargo test -p cubarium -p
+cubarium-gpu` (the voxel sink modules), risks.
+
+## Package PC — the loop on the prime core (host worker)
+
+Owner: Opus, **high** (threads, capabilities, a background writer). Files:
+host `crates/cubarium/src/voxel/mod.rs`, `crates/cubarium/src/clock.rs`,
+`config/tachyon/cubarium.service`, `scripts/tachyon-install.sh`,
+`docs/tachyon.md`. Not the sink, not the voxel crate.
+
+1. Placement in code: at startup, pick the highest-`cpu_capacity` CPU in
+   the process mask (`/sys/devices/system/cpu/*/cpu_capacity`, read only)
+   and pin the sim/main thread there; the presenter and the tick pool go
+   on the remaining big cores, or where the evidence says; log one line
+   naming the choice. Falls back quietly on the desk (equal capacities).
+   If the kernel supports it (5.4 Qualcomm; check `/proc/config.gz` for
+   UCLAMP_TASK), raise the main thread's `uclamp.min` with
+   `sched_setattr` so schedutil stops holding the core at ~1 GHz; the unit
+   grants `AmbientCapabilities=CAP_SYS_NICE` if that needs it.
+2. The unit: `ExecStartPre=+` writes `core_ctl` `min_cpus` (cpu7 → 1, the
+   cpu4 cluster → 3) — **Wrysk allows core_ctl writes; no other sysfs
+   write**, and nothing else under `/sys` (DP-1 status never). Mask: all
+   cores but one A55 (e.g. `1-7`); `threads = available − 1` stays.
+3. The 60 s snapshot off the loop: encode and write on a background
+   thread (a copy of what `save` needs, or encode on the loop and write
+   off it — measure which costs the loop less); the final snapshot at
+   SIGINT stays synchronous and waits for any write in flight.
+4. The `world` timer: report the sum of the leaf water phases (as the
+   bench's `WATER_PHASES` does) instead of `Phase::WorldStep`.
+5. `docs/tachyon.md`: the topology and why the loop is on cpu7.
+
+Tests: the capacity picker on fixture sysfs trees (big.LITTLE with a
+prime, all equal, a parked prime absent from the mask); the background
+save never leaves a torn file and the exit save waits for it; the world
+timer non-zero in a short headless run. Return (≤25 lines): commits,
+thread placement as built, uclamp availability, test counts for
+`cargo test -p cubarium` (voxel module tests), risks for the board.
+
+Integration: Fable merges PA, PB, PC, deploys, and reads ≥ 15 min of rate
+lines that include a shower, plus the main thread's CPU (on 7) and clock
+(`perf stat -t`, ≥ 2 GHz).
