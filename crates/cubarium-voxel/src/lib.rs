@@ -59,6 +59,7 @@ pub use material::Material;
 pub use recipe::{
     Benches, Erosion, Hollows, Landform, PRESETS, Preset, Recipe, Strata, Streams, Tiers, Water,
 };
+pub use snapshot::SchemaMismatch;
 pub use viability::{BandResult, PoreBand, Viability, ViabilitySpec};
 pub use world::{Command, SETTLE_REST, SETTLE_WINDOW, Settle, VoxelView, World, default_threads};
 
