@@ -22,9 +22,7 @@
 //! 5. A cone ray fired at a rosette cell reads foliage.
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
-use cubarium_voxel_flora::{
-    Command as FloraCommand, Flora, FloraConfig, Site, Species as Plant,
-};
+use cubarium_voxel_flora::{Command as FloraCommand, Flora, FloraConfig, Site, Species as Plant};
 
 use cubarium_voxel_fauna::{
     Actions, Command as FaunaCommand, Fauna, FaunaConfig, Founder, Scripted, StartingStores,
@@ -131,7 +129,11 @@ fn an_adult_bloomcrowns_reachable_stock_is_its_rosette() {
         .layers_at(s)
         .map(|l| (l.cell, l.stock))
         .collect();
-    assert_eq!(layers.len(), 2, "an adult bloomcrown has a rosette and a crown");
+    assert_eq!(
+        layers.len(),
+        2,
+        "an adult bloomcrown has a rosette and a crown"
+    );
     assert!(
         layers[1].0 > layers[0].0,
         "and they sit at different cells: {layers:?}"
@@ -229,7 +231,10 @@ fn a_bite_empties_the_rosette_and_never_the_crown() {
     }
     let after = stocks(&flora, s);
     assert_eq!(fauna.view().ledger.bites, 1, "one attempt, one bite");
-    assert!(after[0] < before[0], "the rosette was cropped: {before:?} -> {after:?}");
+    assert!(
+        after[0] < before[0],
+        "the rosette was cropped: {before:?} -> {after:?}"
+    );
     assert_eq!(
         after[1], before[1],
         "the crown must be untouched: {before:?} -> {after:?}"

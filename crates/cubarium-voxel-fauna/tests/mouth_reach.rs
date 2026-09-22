@@ -358,7 +358,8 @@ fn the_mouth_diagnostic_agrees_with_the_stepping_rule_at_three_crown_heights() {
         // The band, not a voxel count: this body's ceiling is under one 0.25 m cell,
         // so only the head layer is in reach.
         assert_eq!(
-            bit, rise == 0,
+            bit,
+            rise == 0,
             "crown at head + {rise} against a 0.2315 m physical mouth band"
         );
         if bit {

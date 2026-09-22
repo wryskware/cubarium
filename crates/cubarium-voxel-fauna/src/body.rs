@@ -137,11 +137,7 @@ impl Body {
     /// The crown layers the mouth band reaches from `standing_y`: the cells whose slab
     /// overlaps `[surface, surface + mouth_ceiling_m]` by a positive amount. A touch at
     /// exactly the ceiling contributes nothing.
-    pub fn mouth_layers(
-        &self,
-        standing_y: u32,
-        voxel_m: f64,
-    ) -> std::ops::RangeInclusive<i64> {
+    pub fn mouth_layers(&self, standing_y: u32, voxel_m: f64) -> std::ops::RangeInclusive<i64> {
         crate::encounter::band_crown_layers(standing_y, voxel_m, self.mouth_ceiling_m)
     }
 
@@ -1217,9 +1213,8 @@ pub(crate) fn observation(
     // a senses handle.
     if let Some(cn) = module_opt(manifest, "Cone(3, foliage/body)") {
         let occupancy = cone_occupancy.expect("browser observations prepare cone occupancy");
-        let cone = crate::senses::cone_readings(
-            view, occupancy, a.id, &a.pose, a.site.y, manifest, &body,
-        );
+        let cone =
+            crate::senses::cone_readings(view, occupancy, a.id, &a.pose, a.site.y, manifest, &body);
         let base = cn.offset;
         for (k, sec) in cone.sectors.iter().enumerate() {
             let o = base + k * 6;
@@ -1766,7 +1761,15 @@ mod tests {
             field > 0.0,
             "the remote litter produces a local diffused cue"
         );
-        let t = taste_reading(&flora.view(), &view, &pose, 2, &manifest, &body, Founder::Blind);
+        let t = taste_reading(
+            &flora.view(),
+            &view,
+            &pose,
+            2,
+            &manifest,
+            &body,
+            Founder::Blind,
+        );
         assert_eq!(t.cue, 0.0, "remote litter is not mouth chemistry");
         assert!(t.valid, "bare ground is still an actual mouth contact");
         assert!((t.resistance - 0.5).abs() < 1e-12);
@@ -1780,7 +1783,15 @@ mod tests {
                 energy: 0.2 * 2.0,
             },
         );
-        let t = taste_reading(&flora.view(), &view, &pose, 2, &manifest, &body, Founder::Blind);
+        let t = taste_reading(
+            &flora.view(),
+            &view,
+            &pose,
+            2,
+            &manifest,
+            &body,
+            Founder::Blind,
+        );
         assert!(
             t.cue > 0.2,
             "contact with litter reads its stock: {}",
@@ -1798,7 +1809,15 @@ mod tests {
         let manifest = Founder::Blind.manifest();
         let body = adult(Founder::Blind);
         let pose = pose_at(2.0 * 0.25 + 0.125, 2.0 * 0.25 + 0.125, 0.0);
-        let t = taste_reading(&flora.view(), &view, &pose, 2, &manifest, &body, Founder::Blind);
+        let t = taste_reading(
+            &flora.view(),
+            &view,
+            &pose,
+            2,
+            &manifest,
+            &body,
+            Founder::Blind,
+        );
         assert_eq!(t.cue, 0.0);
         assert_eq!(t.resistance, 0.5);
         assert!(t.valid);
@@ -2158,8 +2177,8 @@ mod step_rule_tests {
     //!
     //! Every case here is a handful of ticks on an 8-column fixture.
 
-    use super::*;
     use super::tests::adult;
+    use super::*;
     use crate::manifest::Founder;
     use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
 

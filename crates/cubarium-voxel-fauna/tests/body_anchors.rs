@@ -331,7 +331,11 @@ fn the_horizontal_reach_is_a_quarter_of_the_body_length() {
 #[test]
 fn a_body_cannot_enter_a_void_shorter_than_its_height() {
     let adult = FounderPhysiology::frozen(Founder::Browser).adult_body();
-    assert_eq!(adult.headroom_voxels(0.125), 2, "0.1875 m of body at 0.125 m");
+    assert_eq!(
+        adult.headroom_voxels(0.125),
+        2,
+        "0.1875 m of body at 0.125 m"
+    );
     assert_eq!(adult.headroom_voxels(0.25), 1, "and one cell at 0.25 m");
     let newborn = FounderPhysiology::frozen(Founder::Browser).body_at(0.005);
     assert_eq!(

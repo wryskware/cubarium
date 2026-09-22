@@ -1866,9 +1866,13 @@ impl FloraConfig {
     /// `cubarium-voxel-fauna/tests/plant_layers.rs`'s subject.
     pub fn one_layer_species(mut self) -> FloraConfig {
         for species in Species::ALL {
-            self.species_mut(species).profile = SpeciesConfig::one_stage(vec![
-                SpeciesConfig::foliage_layer([0.0, 1.0], 1.0, 1.0, 0.0),
-            ]);
+            self.species_mut(species).profile =
+                SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer(
+                    [0.0, 1.0],
+                    1.0,
+                    1.0,
+                    0.0,
+                )]);
         }
         self
     }
@@ -2300,7 +2304,8 @@ pub fn layers_of(config: &FloraConfig, stand: &Stand, voxel_m: f64) -> Vec<Stand
         let hi_v = base + layer.band[1] * height_v;
         let r_v = (layer.radius * radius_v).max(0.0);
         let r_m = r_v * voxel_m;
-        let cell = i64::from(stand.site.y) + i64::from(layers::disc_offset(layer.band[1], height_v));
+        let cell =
+            i64::from(stand.site.y) + i64::from(layers::disc_offset(layer.band[1], height_v));
         let cells = if is_foliage {
             (cell, cell)
         } else {
@@ -3023,14 +3028,15 @@ impl Flora {
         let i = self.stands.binary_search_by_key(&site, |s| s.site).ok()?;
         let e_v = self.config.species(self.stands[i].species).energy_density;
         // Which layers the mouth may take from, lowest first, and what each holds.
-        let offered: Vec<(usize, f64)> = layers_of(&self.config, &self.stands[i], self.config.voxel_m)
-            .into_iter()
-            .filter_map(|l| {
-                let fi = l.foliage_index?;
-                let inside = layers.is_none_or(|range| range.contains(&l.cell));
-                (inside && l.stock > 0.0).then_some((fi, l.stock))
-            })
-            .collect();
+        let offered: Vec<(usize, f64)> =
+            layers_of(&self.config, &self.stands[i], self.config.voxel_m)
+                .into_iter()
+                .filter_map(|l| {
+                    let fi = l.foliage_index?;
+                    let inside = layers.is_none_or(|range| range.contains(&l.cell));
+                    (inside && l.stock > 0.0).then_some((fi, l.stock))
+                })
+                .collect();
         let mut per_layer = [0.0f64; MAX_FOLIAGE_LAYERS];
         let mut organic = 0.0f64;
         let mut left = want;

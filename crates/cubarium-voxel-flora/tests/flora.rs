@@ -336,8 +336,12 @@ fn a_stand_that_cannot_pay_under_a_closed_canopy_diebacks_and_dies() {
     // of §4.3, §4.6 and §4.7 under a *closed* canopy; an adult umbrellafrond's three
     // porous tiers are a different canopy, and what they let through is
     // `tests/layers.rs`'s subject rather than this one's.
-    config.umbrellafrond.profile =
-        SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer([0.0, 1.0], 1.0, 1.0, 0.0)]);
+    config.umbrellafrond.profile = SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer(
+        [0.0, 1.0],
+        1.0,
+        1.0,
+        0.0,
+    )]);
 
     let mut world = plain(16, 12, 0.6);
     let mut flora = Flora::new(config);

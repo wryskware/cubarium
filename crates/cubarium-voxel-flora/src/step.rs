@@ -401,11 +401,7 @@ fn light_per_stand(flora: &mut Flora, world: &World) -> Vec<f64> {
             l += w * here;
             weighed += w;
         }
-        let l = if weighed > 0.0 {
-            l / weighed
-        } else {
-            open
-        };
+        let l = if weighed > 0.0 { l / weighed } else { open };
         out.push(light_response(config.species(stand.species), l));
     }
     out

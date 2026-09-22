@@ -55,11 +55,9 @@ pub fn decode(bytes: &[u8]) -> anyhow::Result<Flora> {
     }
     let envelope: Envelope =
         postcard::from_bytes(bytes).context("decoding the flora snapshot's payload")?;
-    envelope
-        .flora
-        .config()
-        .validate()
-        .map_err(|e| anyhow::anyhow!("the saved flora config is not one a plant can live under: {e}"))?;
+    envelope.flora.config().validate().map_err(|e| {
+        anyhow::anyhow!("the saved flora config is not one a plant can live under: {e}")
+    })?;
     Ok(envelope.flora)
 }
 

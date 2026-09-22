@@ -259,7 +259,10 @@ fn a_bite_from_below_leaves_the_upper_stock_untouched() {
     let site = at(4, support);
     let before: Vec<f64> = flora.view().layers_at(site).map(|l| l.stock).collect();
     assert_eq!(before.len(), 2);
-    assert!((before[0] - 0.25).abs() < 1e-12 && (before[1] - 0.75).abs() < 1e-12, "{before:?}");
+    assert!(
+        (before[0] - 0.25).abs() < 1e-12 && (before[1] - 0.75).abs() < 1e-12,
+        "{before:?}"
+    );
 
     // The lowest layer only: the cell range of the mouth that can reach it.
     let lowest = flora.view().layers_at(site).next().expect("a layer").cell;
@@ -309,7 +312,10 @@ fn a_bite_is_bounded_by_the_layers_the_mouth_reaches() {
     ));
     let site = at(4, support);
     let cells: Vec<i64> = flora.view().layers_at(site).map(|l| l.cell).collect();
-    assert!(cells[1] > cells[0], "the fixture needs two distinct discs: {cells:?}");
+    assert!(
+        cells[1] > cells[0],
+        "the fixture needs two distinct discs: {cells:?}"
+    );
 
     let taken = flora
         .take_foliage_in_layers(site, 1.0, &(cells[0]..=cells[0]))
@@ -319,7 +325,10 @@ fn a_bite_is_bounded_by_the_layers_the_mouth_reaches() {
         "a mouth at the rosette got {taken:?}"
     );
     let after: Vec<f64> = flora.view().layers_at(site).map(|l| l.stock).collect();
-    assert!(after[0] == 0.0 && (after[1] - 0.75).abs() < 1e-12, "{after:?}");
+    assert!(
+        after[0] == 0.0 && (after[1] - 0.75).abs() < 1e-12,
+        "{after:?}"
+    );
     assert_layers_sum(&flora, "after a stripped rosette");
     assert_residuals(&flora, "after a stripped rosette");
 }
@@ -431,7 +440,11 @@ fn a_stage_transition_rebins_the_total_and_creates_nothing() {
     }
     let sc = config.species(Species::Bloomcrown).clone();
     let seedling_wood = 0.19 * sc.wood_max;
-    assert_eq!(sc.profile_index(seedling_wood), 0, "the fixture starts a seedling");
+    assert_eq!(
+        sc.profile_index(seedling_wood),
+        0,
+        "the fixture starts a seedling"
+    );
     let mut flora = Flora::new(config);
     assert!(flora.apply(
         &world,
@@ -464,7 +477,11 @@ fn a_stage_transition_rebins_the_total_and_creates_nothing() {
     let stand = *flora.view().stand_at(site).expect("alive");
     let after: Vec<f64> = flora.view().layers_at(site).map(|l| l.stock).collect();
     let caps: Vec<f64> = flora.view().layers_at(site).map(|l| l.capacity).collect();
-    assert_eq!(after.len(), 2, "the juvenile profile has a rosette and a crown");
+    assert_eq!(
+        after.len(),
+        2,
+        "the juvenile profile has a rosette and a crown"
+    );
 
     let sum: f64 = after.iter().sum();
     assert!(
@@ -595,7 +612,15 @@ fn a_single_layer_species_shades_exactly_as_it_did_before() {
 
             let mut flora = Flora::new(config);
             for (x, species, wood) in [(8i64, shader, shader_wood), (9, shaded, shaded_wood)] {
-                assert!(flora.apply(&world, Command::Seed { x, z: 0, species, wood }));
+                assert!(flora.apply(
+                    &world,
+                    Command::Seed {
+                        x,
+                        z: 0,
+                        species,
+                        wood
+                    }
+                ));
             }
             flora.step(&mut world);
 
@@ -652,7 +677,15 @@ fn a_layered_receiver_is_weighted_by_where_its_tissue_is() {
         (8i64, Species::Umbrellafrond, uc.wood_max),
         (9, Species::Bloomcrown, bc.wood_max * 0.5),
     ] {
-        assert!(flora.apply(&world, Command::Seed { x, z: 0, species, wood }));
+        assert!(flora.apply(
+            &world,
+            Command::Seed {
+                x,
+                z: 0,
+                species,
+                wood
+            }
+        ));
     }
     flora.step(&mut world);
     let both = flora
@@ -660,7 +693,10 @@ fn a_layered_receiver_is_weighted_by_where_its_tissue_is() {
         .stand_at(at(9, support))
         .expect("the receiver")
         .light;
-    assert!(both > 0.0 && both < 1.0, "the fixture must shade partly: {both}");
+    assert!(
+        both > 0.0 && both < 1.0,
+        "the fixture must shade partly: {both}"
+    );
 
     // Strip the receiver's lower layer: all of its tissue is now in the lit layer, so
     // its income rises, with the same total foliage capacity and the same geometry.
@@ -708,7 +744,15 @@ fn two_hundred_ticks_keep_the_layers_summing_and_the_ledgers_closed() {
         .collect();
     let mut flora = Flora::new(config);
     for (x, species, wood) in woods {
-        assert!(flora.apply(&world, Command::Seed { x, z: 0, species, wood }));
+        assert!(flora.apply(
+            &world,
+            Command::Seed {
+                x,
+                z: 0,
+                species,
+                wood
+            }
+        ));
     }
     for tick in 0..200 {
         flora.step(&mut world);

@@ -795,7 +795,12 @@ mod tests {
         assert!(r > 2.0, "the fixture wants a disc wider than one cell: {r}");
         let tiers: Vec<(i64, f64)> = flora
             .view()
-            .layers(flora.view().stand_at(Site { x: 10, y: 3, z: 2 }).expect("the frond"))
+            .layers(
+                flora
+                    .view()
+                    .stand_at(Site { x: 10, y: 3, z: 2 })
+                    .expect("the frond"),
+            )
             .map(|l| (l.cell, l.radius_v))
             .collect();
         assert_eq!(tiers.len(), 3, "three tiers: {tiers:?}");
@@ -974,32 +979,29 @@ mod tests {
         let flora = Flora::new(FloraConfig::default());
         let make = |sp: Species, foliage: f64, moisture: f64| -> Style {
             let sc = flora.config().species(sp);
-            style_of(
-                flora.view(),
-                &{
-                    let mut stand = Stand {
-                        id: 0,
-                        site: Site { x: 0, y: 0, z: 0 },
-                        species: sp,
-                        stage: Stage::Alive,
-                        wood: sc.wood_max,
-                        foliage,
-                        reserve: 0.0,
-                        light: 0.0,
-                        moisture,
-                        water_m3: 0.0,
-                        mineral: 0.0,
-                        aeration_stress: 0.0,
-                        parcel: 0.0,
-                        layer_stock: [0.0; cubarium_voxel_flora::MAX_FOLIAGE_LAYERS],
-                        profile_stage: 0,
-                    };
-                    // A hand-built stand bins its own foliage, as every stand the model
-                    // makes does.
-                    stand.bin_layers(flora.config());
-                    stand
-                },
-            )
+            style_of(flora.view(), &{
+                let mut stand = Stand {
+                    id: 0,
+                    site: Site { x: 0, y: 0, z: 0 },
+                    species: sp,
+                    stage: Stage::Alive,
+                    wood: sc.wood_max,
+                    foliage,
+                    reserve: 0.0,
+                    light: 0.0,
+                    moisture,
+                    water_m3: 0.0,
+                    mineral: 0.0,
+                    aeration_stress: 0.0,
+                    parcel: 0.0,
+                    layer_stock: [0.0; cubarium_voxel_flora::MAX_FOLIAGE_LAYERS],
+                    profile_stage: 0,
+                };
+                // A hand-built stand bins its own foliage, as every stand the model
+                // makes does.
+                stand.bin_layers(flora.config());
+                stand
+            })
         };
         let full = |sp: Species| {
             let sc = flora.config().species(sp);

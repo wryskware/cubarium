@@ -88,11 +88,7 @@ pub fn mouth_columns_at(view: &VoxelView<'_>, pose: &Pose, body: &Body) -> Vec<(
 ///
 /// The body is placed where the model places one on a face, [`Pose::at_site`], and the
 /// heading swept in [`HEADING_SAMPLES`] equal steps.
-pub fn mouth_columns_from_face(
-    view: &VoxelView<'_>,
-    face: Site,
-    body: &Body,
-) -> Vec<(i64, u32)> {
+pub fn mouth_columns_from_face(view: &VoxelView<'_>, face: Site, body: &Body) -> Vec<(i64, u32)> {
     let v = view.config.voxel_m;
     let mut cols: Vec<(i64, u32)> = Vec::new();
     for k in 0..HEADING_SAMPLES {

@@ -133,10 +133,18 @@ fn shade_covers_exactly_the_crown_radius_the_presenter_draws() {
     // shading species is therefore given the one-layer, zero-porosity profile the rule
     // was written against; what a *tiered* frond does to the light under it is
     // `tests/layers.rs`'s business, not this fixture's.
-    config.umbrellafrond.profile =
-        SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer([0.0, 1.0], 1.0, 1.0, 0.0)]);
-    config.bloomcrown.profile =
-        SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer([0.0, 1.0], 1.0, 1.0, 0.0)]);
+    config.umbrellafrond.profile = SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer(
+        [0.0, 1.0],
+        1.0,
+        1.0,
+        0.0,
+    )]);
+    config.bloomcrown.profile = SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer(
+        [0.0, 1.0],
+        1.0,
+        1.0,
+        0.0,
+    )]);
 
     let mut world = plain(16, 12, 0.6);
     let mut flora = Flora::new(config);
@@ -233,10 +241,18 @@ fn a_crown_level_with_another_does_not_shade_it_but_a_higher_one_does() {
     // shading species is therefore given the one-layer, zero-porosity profile the rule
     // was written against; what a *tiered* frond does to the light under it is
     // `tests/layers.rs`'s business, not this fixture's.
-    config.umbrellafrond.profile =
-        SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer([0.0, 1.0], 1.0, 1.0, 0.0)]);
-    config.bloomcrown.profile =
-        SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer([0.0, 1.0], 1.0, 1.0, 0.0)]);
+    config.umbrellafrond.profile = SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer(
+        [0.0, 1.0],
+        1.0,
+        1.0,
+        0.0,
+    )]);
+    config.bloomcrown.profile = SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer(
+        [0.0, 1.0],
+        1.0,
+        1.0,
+        0.0,
+    )]);
 
     let mut world = plain(16, 12, 0.6);
     let mut flora = Flora::new(config);

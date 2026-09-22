@@ -94,7 +94,15 @@ fn shaded_pair(voxel_m: f64, support: u32) -> (f64, f64, f64, f64) {
         (8i64, Species::Umbrellafrond, tall_wood),
         (9, Species::Bloomcrown, short_wood),
     ] {
-        assert!(flora.apply(&world, Command::Seed { x, z: 0, species, wood }));
+        assert!(flora.apply(
+            &world,
+            Command::Seed {
+                x,
+                z: 0,
+                species,
+                wood
+            }
+        ));
     }
     flora.step(&mut world);
 

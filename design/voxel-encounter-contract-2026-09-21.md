@@ -205,3 +205,36 @@ trained against and are read by nothing. They stay because they are inside
 `Manifest::canonical_text` and the digest; package 5's retrain is where the
 record and the model are reconciled
 (`crates/cubarium/assets/policies/README.md`).
+
+---
+
+## 8. What package 2 implemented, 22 September 2026
+
+**§3's rule 1, the "physical foliage slab", is superseded.** A stand's foliage is no
+longer one cell-thick disc holding all of it: a species carries a `profile` staged by
+`wood / wood_max`, and a stand holds one stock per foliage-bearing layer of that stage,
+summing to the scalar `foliage` at all times
+(`design/handoffs/voxel-plant-layers-2026-09-22.md`, decisions §4 and §5). The
+within-stand shares §6 listed as unsettled, and the "could not measure 1" of
+`design/handoffs/voxel-edible-stock-2026-09-21.md`, are settled by this.
+
+| §3 rule | now |
+| --- | --- |
+| 1. Physical foliage slab | Each **layer** occupies a band `[from, to] × crown_height` over the support face, a disc of `radius × crown_radius`, and — discretised — the one cell `round(band_top × crown_height)`, never zero. For a single-layer `[0, 1.0]` profile that cell is `crown_voxels(wood)`: the slab this document already described. `FloraView::layers(stand)` yields each layer's band in metres, radius in metres, kind, stock and porosity. |
+| 2. Mouth | The band selects the **layers** whose disc cell it overlaps, and the withdrawal comes out of those, lowest first (`Flora::take_foliage_in_layers`, reported per layer). A bite from below leaves the upper stock untouched. What a mouth is offered at a stand is the **sum of its reachable layers' stocks**, not its whole foliage. |
+| 3. Sight | Every foliage-bearing layer cell holding stock is `FoliageCrown`, one holding none is `StrippedCrown`, and a **trunk cell is an occluder** (`ConeHit::Trunk`) — trunks are in the occupancy map for the first time. Foliage is written before structure, so a rosette wrapping its own stem reads as food. |
+| 4. Standing and route | Unchanged, but measured per layer: a face is route-connected *to a layer*, so an adult bloomcrown's rosette and its crown can differ. |
+
+**Porosity has no sight meaning, and that is a declared simplification.** The audit's
+§5 asked for a shared geometric interpretation across light, cone rays and the picture.
+Package 2 does not give one: `porosity` enters the light exponent as `(1 - p)` and
+nothing else reads it, so a porous canopy is transparent to plant light and opaque to an
+eye. It is recorded here rather than resolved because resolving it means deciding what a
+ray meets in a gappy canopy — a stochastic hit, a partial occluder, or authored gaps in
+the disc — and none of those is a placeholder; it is a model decision and a backlog row.
+
+**Two more things this package did not do.** Porosity is also absent from the picture:
+the presenter draws each layer's disc solid. And a single-layer species' shade is what
+it always was *except* for that `(1 - p)` factor, which is a real change for springturf,
+velvetpad and glowcap — asserted, in both forms, in
+`crates/cubarium-voxel-flora/tests/layers.rs`.

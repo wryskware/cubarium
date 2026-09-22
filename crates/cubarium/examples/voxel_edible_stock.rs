@@ -42,10 +42,9 @@ use cubarium::voxel::install_default_founders;
 use cubarium::voxel::scene;
 use cubarium_voxel::{Command as WorldCommand, VoxelView};
 use cubarium_voxel_fauna::{
-    ConeHit, Fauna, FaunaConfig, Founder, Manifest, Pose, Senses, SightMap, TICK_HZ,
-    climb_voxels, crown_columns, crown_layer, eye_origin_m, foliage_stands_in_layers,
-    mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg, standable_faces,
-    walkable_components,
+    ConeHit, Fauna, FaunaConfig, Founder, Manifest, Pose, Senses, SightMap, TICK_HZ, climb_voxels,
+    eye_origin_m, layer_columns, mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg,
+    reachable_layers_of, standable_faces, walkable_components,
 };
 use cubarium_voxel_flora::{Flora, FloraConfig, Site, Species as Plant};
 use cubarium_voxel_sim::{Sim, SimConfig};
@@ -73,8 +72,10 @@ const NO_OBSERVER: u64 = u64::MAX;
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let hours: f64 = args.get(1).map_or(6.0, |a| {
-        a.parse()
-            .expect("usage: voxel_edible_stock [HOURS] [preset=NAME] [seed=N] [heuristic]")
+        a.parse().expect(
+            "usage: voxel_edible_stock [HOURS] [preset=NAME] [seed=N] [heuristic] \
+                 [lollipop]",
+        )
     });
     let preset: Option<&'static cubarium_voxel::Preset> = args
         .iter()
@@ -90,6 +91,12 @@ fn main() {
         .find_map(|a| a.strip_prefix("seed=").and_then(|s| s.parse().ok()))
         .unwrap_or(PRESET_SEED_BASE);
     let heuristic = args.iter().any(|a| a == "heuristic");
+    // The **before** arm, on this build: every plant reduced to the one-disc lollipop
+    // the model was before `design/handoffs/voxel-plant-layers-2026-09-22.md`, so a
+    // reach or route number can be compared against the layered one on the same
+    // landforms, the same seed and the same bodies rather than against a recorded
+    // figure from another revision.
+    let lollipop = args.iter().any(|a| a == "lollipop");
 
     let cfg = VoxelConfig::default();
     // The census's own preset arm, verbatim, so the two agree at t = 0.
@@ -112,6 +119,14 @@ fn main() {
             eprintln!("scene: authored world");
             (scene::authored(cfg.world.clone()), FloraConfig::default())
         }
+    };
+    if lollipop {
+        eprintln!("plants: one_layer_species (the pre-layers control)");
+    }
+    let flora_cfg = if lollipop {
+        flora_cfg.one_layer_species()
+    } else {
+        flora_cfg
     };
     let mut flora = Flora::new(flora_cfg);
     let mut fauna = Fauna::new(FaunaConfig::default());
@@ -203,9 +218,26 @@ struct SpeciesRow {
     route_seeded: f64,
 }
 
+/// One **foliage layer index** of one species, pooled over every stand that has one:
+/// how much tissue stands in it and how much of that a browser can reach. The band is
+/// stock-weighted, so it reads as "where this layer's tissue actually is".
+#[derive(Clone)]
+struct LayerRow {
+    species: Plant,
+    index: usize,
+    stands: usize,
+    stock: f64,
+    reach: f64,
+    route: f64,
+    /// Stock-weighted sums; divided by `stock` when printed.
+    band_lo_m: f64,
+    band_hi_m: f64,
+}
+
 #[derive(Clone)]
 struct Report {
     minute: u64,
+    layers: Vec<LayerRow>,
     rows: Vec<(&'static str, SpeciesRow)>,
     total: SpeciesRow,
     lineages: Vec<(&'static str, LineageRow)>,
@@ -303,33 +335,45 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
     // Per stand: is it reachable at all, and from a face in a browser's component?
     let mut reachable_sites: Vec<(Site, f64)> = Vec::new();
 
+    // Since the layers package the unit of the measurement is a **layer**, not a
+    // stand: an adult bloomcrown's basal rosette is reachable and its crown is not, and
+    // a per-stand answer could only say one or the other
+    // (`design/handoffs/voxel-plant-layers-2026-09-22.md`; package 0's "could not
+    // measure 1", within-stand shares).
+    let mut layer_rows: Vec<LayerRow> = Vec::new();
     for stand in fv.stands.iter() {
-        let row = &mut rows[stand.species.index()].1;
-        row.stands += 1;
+        rows[stand.species.index()].1.stands += 1;
         total.stands += 1;
         if stand.foliage <= 0.0 {
             continue;
         }
-        row.foliage += stand.foliage;
-        total.foliage += stand.foliage;
-        let layer = crown_layer(&fv, stand);
-        let columns = crown_columns(&fv, &wv, stand);
+        let mut counted_site = false;
+        for layer in fv.layers(stand) {
+            if !(layer.stock > 0.0) {
+                continue;
+            }
+            let li = layer.foliage_index.unwrap_or(0);
+            let row = &mut rows[stand.species.index()].1;
+            row.foliage += layer.stock;
+            total.foliage += layer.stock;
+            let columns = layer_columns(&wv, stand, &layer);
 
-        {
             let mut any = false;
             let mut connected = false;
             let mut connected_seeded = false;
             for column in &columns {
                 for &i in reach_map.get(column).map(Vec::as_slice).unwrap_or(&[]) {
                     let face = faces[i];
-                    let layers = mouth_crown_layers_at(face.y, &browser_body, v);
-                    if !layers.contains(&layer) {
+                    let band = mouth_crown_layers_at(face.y, &browser_body, v);
+                    if !band.contains(&layer.cell) {
                         continue;
                     }
-                    // The acceptance rule itself, not a re-derivation of it.
-                    if !foliage_stands_in_layers(&fv, &wv, &per_face_cols[i], &layers)
+                    // The acceptance rule itself, not a re-derivation of it: the
+                    // model's own per-layer scan, asked whether *this* layer is one of
+                    // the ones the mouth at this face may take from.
+                    if !reachable_layers_of(&fv, &wv, stand, &per_face_cols[i], &band)
                         .iter()
-                        .any(|(site, _)| *site == stand.site)
+                        .any(|(index, _)| *index == li)
                     {
                         continue;
                     }
@@ -345,36 +389,76 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
                 }
             }
             if any {
-                row.reach += stand.foliage;
-                reachable_sites.push((stand.site, stand.foliage));
+                row.reach += layer.stock;
+                if !counted_site {
+                    reachable_sites.push((stand.site, stand.foliage));
+                    counted_site = true;
+                }
             }
             if connected {
-                row.route += stand.foliage;
+                row.route += layer.stock;
             }
             if connected_seeded {
-                row.route_seeded += stand.foliage;
+                row.route_seeded += layer.stock;
             }
-        }
 
-        for (fan, sight, into) in [
-            (&LIVE_FAN, &sight_live, &mut row.visible),
-            (&FIVE_PITCH_FAN, &sight_five, &mut row.visible_five_pitch),
-        ] {
-            if sees_stand(
-                &wv,
-                sight,
-                &faces,
-                &occupant,
-                &columns,
-                layer,
-                fan,
-                &browser_manifest,
-                &browser_body,
-            ) {
-                *into += stand.foliage;
+            let mut seen = [false; 2];
+            for (i, (fan, sight)) in [(&LIVE_FAN, &sight_live), (&FIVE_PITCH_FAN, &sight_five)]
+                .into_iter()
+                .enumerate()
+            {
+                seen[i] = sees_stand(
+                    &wv,
+                    sight,
+                    &faces,
+                    &occupant,
+                    &columns,
+                    layer.cell,
+                    fan,
+                    &browser_manifest,
+                    &browser_body,
+                );
+            }
+            let row = &mut rows[stand.species.index()].1;
+            if seen[0] {
+                row.visible += layer.stock;
+            }
+            if seen[1] {
+                row.visible_five_pitch += layer.stock;
+            }
+
+            let slot = layer_rows
+                .iter_mut()
+                .find(|r| r.species == stand.species && r.index == li);
+            let slot = match slot {
+                Some(slot) => slot,
+                None => {
+                    layer_rows.push(LayerRow {
+                        species: stand.species,
+                        index: li,
+                        stands: 0,
+                        stock: 0.0,
+                        reach: 0.0,
+                        route: 0.0,
+                        band_lo_m: 0.0,
+                        band_hi_m: 0.0,
+                    });
+                    layer_rows.last_mut().expect("just pushed")
+                }
+            };
+            slot.stands += 1;
+            slot.stock += layer.stock;
+            slot.band_lo_m += layer.band_m[0] * layer.stock;
+            slot.band_hi_m += layer.band_m[1] * layer.stock;
+            if any {
+                slot.reach += layer.stock;
+            }
+            if connected {
+                slot.route += layer.stock;
             }
         }
     }
+    layer_rows.sort_by_key(|r| (r.species.index(), r.index));
     for (_, row) in &rows {
         total.reach += row.reach;
         total.visible += row.visible;
@@ -466,6 +550,7 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
 
     let report = Report {
         minute,
+        layers: layer_rows,
         rows,
         total,
         lineages,
@@ -616,6 +701,7 @@ fn print_headers() {
         "stock,sim_min,species,stands,foliage,reach,visible,visible_five_pitch,route,\
          route_seeded,f_reach,f_visible,f_visible_five_pitch,f_route,f_route_seeded"
     );
+    println!("layer,sim_min,species,layer,stands,band_lo_m,band_hi_m,stock,reach,route,f_reach");
     println!("lineage,sim_min,founder,alive,heights,mean_m_to_reachable,share_2m");
     println!("detritus,sim_min,pool,organic,in_component,fraction");
     println!(
@@ -657,6 +743,21 @@ fn print_report(r: &Report) {
         print_species(r.minute, name, row);
     }
     print_species(r.minute, "ALL", &r.total);
+    for l in &r.layers {
+        println!(
+            "layer,{},{},{},{},{:.4},{:.4},{:.6},{:.6},{:.6},{:.4}",
+            r.minute,
+            l.species.name(),
+            l.index,
+            l.stands,
+            fraction(l.band_lo_m, l.stock),
+            fraction(l.band_hi_m, l.stock),
+            l.stock,
+            l.reach,
+            l.route,
+            fraction(l.reach, l.stock),
+        );
+    }
     for (name, l) in &r.lineages {
         let heights: Vec<String> = l.heights.iter().map(|(y, n)| format!("{y}:{n}")).collect();
         println!(

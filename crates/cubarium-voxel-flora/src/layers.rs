@@ -192,10 +192,10 @@ pub fn fill_bottom_up(stocks: &mut [f64], caps: &[f64], amount: f64) -> f64 {
         *stock += give;
         left -= give;
     }
-    if left > 0.0 {
-        if let Some(top) = stocks.last_mut() {
-            *top += left;
-        }
+    if left > 0.0
+        && let Some(top) = stocks.last_mut()
+    {
+        *top += left;
     }
     amount
 }
@@ -269,7 +269,10 @@ mod tests {
     fn shedding_takes_the_crown_before_the_rosette() {
         let mut stocks = [0.25, 0.75];
         assert!((shed_from_top(&mut stocks, 0.8) - 0.8).abs() < 1e-15);
-        assert!((stocks[0] - 0.2).abs() < 1e-15 && stocks[1] == 0.0, "{stocks:?}");
+        assert!(
+            (stocks[0] - 0.2).abs() < 1e-15 && stocks[1] == 0.0,
+            "{stocks:?}"
+        );
     }
 
     #[test]
