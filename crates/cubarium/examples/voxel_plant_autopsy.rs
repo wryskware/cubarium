@@ -38,28 +38,172 @@
 
 use cubarium::voxel::VoxelConfig;
 use cubarium::voxel::habitat;
+use cubarium::voxel::install_default_founders;
 use cubarium::voxel::scene;
-use cubarium_voxel::{VoxelView, World};
-use cubarium_voxel_fauna::{Fauna, FaunaConfig, TICK_HZ};
+use cubarium_voxel::{Command as WorldCommand, VoxelView, World};
+use cubarium_voxel_fauna::{Fauna, FaunaConfig, Senses, TICK_HZ};
 use cubarium_voxel_flora::{
     DT, Flora, FloraConfig, Gates, Site, SkyCache, Species, SpeciesConfig, Stand, Trophic,
     highest_support,
 };
+use cubarium_voxel_sim::{Sim, SimConfig};
 
 /// One simulated minute, in ticks.
 const TICKS_PER_MIN: u64 = 60 * TICK_HZ as u64;
+
+/// The reporting period of the per-species table, in simulated minutes.
+const REPORT_MIN: u64 = 30;
 
 /// The study arena's rain tap, for the `--wet` probe: `HARNESS_RAIN_M_PER_S` of
 /// `crates/cubarium-voxel-flora/examples/harness`, restated rather than depended on.
 const PROBE_RAIN_M_PER_S: f64 = 0.0002;
 
+/// First seed a `preset=` arm offers the host's lake gate, exactly as
+/// `examples/voxel_founder_autopsy.rs` does: the host draws random seeds, an arm has to
+/// be re-runnable, so the draws are `base`, `base + 1`, … Any other base is `seed=N`.
+const PRESET_SEED_BASE: u64 = 1;
+
+/// The world and the layers, stepped either way the brief asks for.
+///
+/// **`plants-only`** steps the world and the plant layer by hand and never steps the
+/// fauna the seeder introduced, which is the control the census asks for: if a
+/// plants-only arm reproduces a coupled arm's collapse, consumption is not the cause.
+/// **`coupled`** is the host's own schedule — `Sim` with the settled [`Senses`] field and
+/// the built-in trained founders — so the same world is read with grazing on.
+enum Engine {
+    Plants(Box<World>, Box<Flora>),
+    Coupled(Box<Sim>),
+}
+
+impl Engine {
+    fn step(&mut self) {
+        match self {
+            Engine::Plants(world, flora) => {
+                world.step();
+                flora.step(world);
+            }
+            Engine::Coupled(sim) => sim.step(),
+        }
+    }
+
+    fn world(&self) -> &World {
+        match self {
+            Engine::Plants(world, _) => world,
+            Engine::Coupled(sim) => sim.world(),
+        }
+    }
+
+    fn flora(&self) -> &Flora {
+        match self {
+            Engine::Plants(_, flora) => flora,
+            Engine::Coupled(sim) => sim.flora(),
+        }
+    }
+}
+
+/// Deaths sorted by the clause of the stand's own survival rule that was failing on its
+/// last tick alive. **The flora ledger books `deaths` without a cause** (`FloraLedger`
+/// has one counter), so every cause here is *inferred* from the readings at the tick of
+/// death and named by the same `clause` the CSV prints.
+#[derive(Clone, Copy, Default)]
+struct Causes {
+    drowned: u32,
+    thirst: u32,
+    light: u32,
+    foliage: u32,
+    substrate: u32,
+    deficit: u32,
+    solvent: u32,
+}
+
+impl Causes {
+    fn record(&mut self, clause: &str) {
+        let slot = match clause.split(':').next().unwrap_or("") {
+            "drowning" => &mut self.drowned,
+            "moisture" => &mut self.thirst,
+            "light" => &mut self.light,
+            "foliage" => &mut self.foliage,
+            "substrate" => &mut self.substrate,
+            "deficit" => &mut self.deficit,
+            _ => &mut self.solvent,
+        };
+        *slot += 1;
+    }
+
+    fn total(&self) -> u32 {
+        self.drowned
+            + self.thirst
+            + self.light
+            + self.foliage
+            + self.substrate
+            + self.deficit
+            + self.solvent
+    }
+
+    /// Only the causes that actually happened, so a row is readable.
+    fn label(&self) -> String {
+        let parts = [
+            ("drown", self.drowned),
+            ("thirst", self.thirst),
+            ("light", self.light),
+            ("nofoliage", self.foliage),
+            ("substrate", self.substrate),
+            ("deficit", self.deficit),
+            ("solvent", self.solvent),
+        ];
+        let out: Vec<String> = parts
+            .iter()
+            .filter(|(_, n)| *n > 0)
+            .map(|(name, n)| format!("{name} {n}"))
+            .collect();
+        if out.is_empty() {
+            "-".to_string()
+        } else {
+            out.join(" ")
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let wet = args.iter().any(|a| a == "--wet");
-    let hours: f64 = args.iter().find(|a| !a.starts_with("--")).map_or(6.0, |a| {
-        a.parse()
-            .expect("usage: voxel_plant_autopsy [HOURS] [--wet]")
-    });
+    let hours: f64 = args
+        .iter()
+        .find_map(|a| a.parse::<f64>().ok())
+        .unwrap_or(6.0);
+    // `preset=<small|default|wide>` is the **landscape arm**: the world `cubarium voxel`
+    // builds with no TOML for that preset, through `voxel::ambient_world`, instead of the
+    // authored fixture this file used to be the only reader of.
+    let preset: Option<&'static cubarium_voxel::Preset> = args
+        .iter()
+        .find_map(|a| a.strip_prefix("preset="))
+        .map(|name| {
+            cubarium_voxel::Preset::find(name).unwrap_or_else(|| {
+                let known: Vec<&str> = cubarium_voxel::PRESETS.iter().map(|p| p.name).collect();
+                panic!("no landform preset is called {name:?}; the shipped ones are {known:?}")
+            })
+        });
+    let seed_base: u64 = args
+        .iter()
+        .find_map(|a| a.strip_prefix("seed=").and_then(|s| s.parse().ok()))
+        .unwrap_or(PRESET_SEED_BASE);
+    // The arms. `plants-only` is the default and what this file always did; `coupled`
+    // runs the host's schedule with the built-in founders so the two can be read side by
+    // side on one world.
+    let coupled = args.iter().any(|a| a == "coupled");
+    assert!(
+        !(coupled && args.iter().any(|a| a == "plants-only")),
+        "pick one arm: `plants-only` (the default) or `coupled`"
+    );
+    assert!(
+        !wet || preset.is_none(),
+        "--wet is the authored fixture's counterfactual; a preset arm carries its recipe's own water"
+    );
+
+    if let Some(preset) = preset {
+        run_preset(preset, seed_base, coupled, hours);
+        return;
+    }
 
     let cfg = VoxelConfig::default();
     let mut world_cfg = cfg.world.clone();
@@ -76,24 +220,91 @@ fn main() {
             world_cfg.rain_m_per_s, world_cfg.initial_aquifer_head_m
         );
     }
-    let mut world = scene::authored(world_cfg.clone());
-    let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let world = scene::authored(world_cfg.clone());
+    let flora = Flora::new(FloraConfig::default());
+    let fauna = Fauna::new(FaunaConfig::default());
+    run(
+        world,
+        flora,
+        fauna,
+        coupled,
+        hours,
+        &format!("authored fixture{}", if wet { ", --wet probe" } else { "" }),
+    );
+}
+
+/// The `preset=` arm: exactly what `cubarium voxel` does with no TOML for this preset —
+/// the recipe's own extents and cell size, the recipe's own water (`World::new` writes
+/// the cycle onto the config), the lake gate over `LAKE_SEED_TRIES` draws through
+/// [`cubarium::voxel::ambient_world`], and the plant layer scaled to the cell size the
+/// way the host scales it. Read-only: nothing here changes a rule or a constant.
+fn run_preset(preset: &cubarium_voxel::Preset, seed_base: u64, coupled: bool, hours: f64) {
+    let world_cfg = preset.config();
+    let (world, seed, rejected) = cubarium::voxel::ambient_world(&world_cfg, seed_base);
+    let lake = cubarium_voxel::hydrate::lake(&world);
+    let flora = Flora::new(FloraConfig::for_voxel_size(world.config().voxel_m));
+    let fauna = Fauna::new(FaunaConfig::default());
+    eprintln!(
+        "scene: preset {} ({}x{}x{} at {} m, seed {seed}, {rejected} rejected), \
+         lake {:.3} m3 over {:.2} m2 visible; flora scaled for {} m cells",
+        preset.name,
+        world.config().width,
+        world.config().height,
+        world.config().depth,
+        world.config().voxel_m,
+        lake.volume_m3,
+        lake.visible_m2,
+        world.config().voxel_m,
+    );
+    run(
+        world,
+        flora,
+        fauna,
+        coupled,
+        hours,
+        &format!("preset {} seed {seed}", preset.name),
+    );
+}
+
+/// Seed the habitat, report the gates, step the arm and write the autopsy. The only
+/// difference between the arms is which engine steps the world.
+fn run(
+    mut world: World,
+    mut flora: Flora,
+    mut fauna: Fauna,
+    coupled: bool,
+    hours: f64,
+    label: &str,
+) {
+    let world_cfg = world.config().clone();
     let seeded = habitat::seed(&mut world, &mut flora, &mut fauna);
+    eprintln!(
+        "arm: {} ({})",
+        if coupled {
+            "coupled (the host's schedule, built-in founders, grazing on)"
+        } else {
+            "plants-only (the fauna the seeder introduced is never stepped)"
+        },
+        label,
+    );
     eprintln!(
         "seeded: stands={} logs={} litter_tiles={} founders={:?}",
         seeded.stands, seeded.logs, seeded.litter_tiles, seeded.founders
     );
     eprintln!(
-        "world: {}x{}x{} voxel_m {} rain_m_per_s {} evaporation_m_per_s {} \
-         initial_aquifer_head_m {} outlet_m3_per_s {}",
+        "world: {}x{}x{} voxel_m {} closed_budget {} rain_m_per_s {} evaporation_m_per_s {} \
+         shower_volume_m3 {} shower_interval_s {}..{} aquifer_head_m {:.3} outlet_m3_per_s {}",
         world_cfg.width,
         world_cfg.height,
         world_cfg.depth,
         world_cfg.voxel_m,
+        world_cfg.closed_water_budget,
         world_cfg.rain_m_per_s,
         world_cfg.evaporation_m_per_s,
-        world_cfg.initial_aquifer_head_m,
+        world_cfg.shower_volume_m3,
+        world_cfg.shower_interval_min_s,
+        world_cfg.shower_interval_max_s,
+        world.aquifer_head_m(),
         world_cfg.outlet_m3_per_s,
     );
 
@@ -129,6 +340,52 @@ fn main() {
         }
     }
 
+    // ---- the one tally the brief asks for at t = 0: per species, how many seeded
+    // stands pass their **own** establishment predicate where the seeder put them.
+    eprintln!("\n--- t = 0: seeded stands passing their own establishment predicate ---");
+    {
+        let fv = flora.view();
+        let view = world.view();
+        let mut pass = [0u32; Species::COUNT];
+        let mut total = [0u32; Species::COUNT];
+        let mut shut: [Vec<String>; Species::COUNT] = Default::default();
+        for stand in fv.stands.iter() {
+            let i = stand.species.index();
+            let sc = fv.config.species(stand.species);
+            let g = fv.establishment_gates(&view, stand.site, stand.species);
+            total[i] += 1;
+            if g.passes() {
+                pass[i] += 1;
+            } else {
+                shut[i].push(failed_gates(&g, sc));
+            }
+        }
+        for species in Species::ALL {
+            let i = species.index();
+            if total[i] == 0 {
+                continue;
+            }
+            let sc = fv.config.species(species);
+            eprintln!(
+                "{:<14} {:>2}/{:<2} pass | bands: wilt {:.2} sat {:.2} establish_pore {:.2} \
+                 drown {:.2} m light {:.2} | shut: {}",
+                species.name(),
+                pass[i],
+                total[i],
+                sc.wilt_pore,
+                sc.sat_pore,
+                sc.establish_pore_min,
+                sc.drown_depth_m,
+                sc.establish_light_min,
+                if shut[i].is_empty() {
+                    "-".to_string()
+                } else {
+                    shut[i].join(" | ")
+                },
+            );
+        }
+    }
+
     // ---- the skyline's eligibility at the start, per species.
     let skyline = skyline_of(&world);
     let mut sky = SkyCache::default();
@@ -136,22 +393,50 @@ fn main() {
         "\n--- skyline eligibility at t = 0 ({} columns) ---",
         skyline.len()
     );
-    report_eligibility(&flora, &world, &skyline, &mut sky);
+    report_eligibility(0, &flora, &world, &skyline, &mut sky);
+
+    // ---- the engine. The coupled arm is the host's: the settled sense field, the
+    // built-in trained founders, and the outlet opened as the closed budget's return
+    // flow after the layers are built, exactly as `voxel/mod.rs` and
+    // `examples/voxel_founder_autopsy.rs` do it.
+    let mut engine = if coupled {
+        install_default_founders(&mut fauna).expect("the built-in centres validate");
+        let mut senses = Senses::new();
+        senses.settle(&world.view(), &flora.view());
+        let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
+        if sim.world().config().closed_water_budget && !sim.world().outlet_open() {
+            sim.world_mut()
+                .apply(WorldCommand::SetOutlet { open: true });
+            eprintln!("scene: closed water budget — the outlet is open as the return flow");
+        }
+        Engine::Coupled(Box::new(sim))
+    } else {
+        if world.config().closed_water_budget && !world.outlet_open() {
+            world.apply(WorldCommand::SetOutlet { open: true });
+            eprintln!("scene: closed water budget — the outlet is open as the return flow");
+        }
+        Engine::Plants(Box::new(world), Box::new(flora))
+    };
 
     // ---- the run.
     print_header();
     let total_ticks = (hours * 3600.0 * f64::from(TICK_HZ)) as u64;
-    let mut prev: Vec<(u64, Stand)> = sorted_by_id(&flora);
+    let mut prev: Vec<(u64, Stand)> = sorted_by_id(engine.flora());
     let mut max_parcel = [0.0f64; Species::COUNT];
     let mut max_bank = [0.0f64; Species::COUNT];
+    // Per species, inferred causes of death and establishments, cumulative.
+    let mut causes = [Causes::default(); Species::COUNT];
+    let mut establishments = [0u32; Species::COUNT];
 
-    print_minute(0, 0, &flora, &world);
+    print_minute(0, 0, engine.flora(), engine.world());
+    eprintln!("\n--- per species, every {REPORT_MIN} simulated minutes ---");
+    report_species(0, engine.flora(), engine.world(), &causes, &establishments);
+    report_water(0, engine.world(), engine.flora());
     for tick in 1..=total_ticks {
-        world.step();
-        flora.step(&mut world);
+        engine.step();
 
         {
-            let fv = flora.view();
+            let fv = engine.flora().view();
             for s in fv.stands.iter() {
                 let i = s.species.index();
                 max_parcel[i] = max_parcel[i].max(s.parcel);
@@ -165,16 +450,45 @@ fn main() {
             }
         }
 
-        let now = sorted_by_id(&flora);
-        if now.len() != prev.len() {
-            report_deaths(tick, &prev, &now, &flora, &world);
+        // The merge runs every tick and both ways: a birth and a death in the same tick
+        // leave the count unchanged, and the old length test would have missed both.
+        let now = sorted_by_id(engine.flora());
+        if now != prev {
+            report_deaths(
+                tick,
+                &prev,
+                &now,
+                engine.flora(),
+                engine.world(),
+                &mut causes,
+            );
+            for (id, stand) in &now {
+                if prev.binary_search_by_key(id, |e| e.0).is_err() {
+                    establishments[stand.species.index()] += 1;
+                }
+            }
         }
         prev = now;
 
         if tick % TICKS_PER_MIN == 0 {
-            print_minute(tick / TICKS_PER_MIN, tick, &flora, &world);
+            print_minute(tick / TICKS_PER_MIN, tick, engine.flora(), engine.world());
+        }
+        if tick % (REPORT_MIN * TICKS_PER_MIN) == 0 {
+            let minute = tick / TICKS_PER_MIN;
+            report_species(
+                minute,
+                engine.flora(),
+                engine.world(),
+                &causes,
+                &establishments,
+            );
+            report_water(minute, engine.world(), engine.flora());
+            let mut sky = SkyCache::default();
+            report_eligibility(minute, engine.flora(), engine.world(), &skyline, &mut sky);
         }
     }
+    let world = engine.world();
+    let flora = engine.flora();
 
     // ---- the reproduction path, which is the germination question.
     eprintln!("\n--- reproduction, whole run ---");
@@ -212,7 +526,7 @@ fn main() {
 
     eprintln!("\n--- skyline eligibility at the end ---");
     let mut sky = SkyCache::default();
-    report_eligibility(&flora, &world, &skyline, &mut sky);
+    report_eligibility((hours * 60.0) as u64, flora, world, &skyline, &mut sky);
 }
 
 // ------------------------------------------------------------------ the readings
@@ -422,6 +736,7 @@ fn report_deaths(
     now: &[(u64, Stand)],
     flora: &Flora,
     world: &World,
+    causes: &mut [Causes; Species::COUNT],
 ) {
     let fv = flora.view();
     let view = world.view();
@@ -443,6 +758,8 @@ fn report_deaths(
                 stand.wood, sc.alive_min
             )
         };
+        let clause = clause(sc, stand, &g, income, maintenance, substrate);
+        causes[stand.species.index()].record(&clause);
         eprintln!(
             "DEATH min={:>4} tick={:<7} id={:<3} {:<14} site=({:>3},{:>2},{:>2}) {} | \
              last W={:.6} P={:.6} Q={:.6} parcel={:.6} | mean_pore={} mu={:.3} sky={:.3} \
@@ -467,14 +784,127 @@ fn report_deaths(
             stand.aeration_stress,
             income,
             maintenance,
-            clause(sc, stand, &g, income, maintenance, substrate),
+            clause,
         );
     }
 }
 
+/// The brief's per-species table, one block every [`REPORT_MIN`] simulated minutes:
+/// stands, standing foliage and wood, establishments and deaths **by inferred cause**,
+/// the mean pore fraction in the species' own root boxes against its band, the mean
+/// moisture ramp it turns into, the mean light response, and how much of this tick's
+/// maintenance this tick's income covers.
+fn report_species(
+    minute: u64,
+    flora: &Flora,
+    world: &World,
+    causes: &[Causes; Species::COUNT],
+    establishments: &[u32; Species::COUNT],
+) {
+    let fv = flora.view();
+    let view = world.view();
+    let mut stands = [0u32; Species::COUNT];
+    let mut foliage = [0.0f64; Species::COUNT];
+    let mut wood = [0.0f64; Species::COUNT];
+    let mut reserve = [0.0f64; Species::COUNT];
+    let mut pore = [0.0f64; Species::COUNT];
+    let mut pore_seen = [0u32; Species::COUNT];
+    let mut mu = [0.0f64; Species::COUNT];
+    let mut light = [0.0f64; Species::COUNT];
+    let mut covered = [0.0f64; Species::COUNT];
+    let mut in_band = [0u32; Species::COUNT];
+    for stand in fv.stands.iter() {
+        let i = stand.species.index();
+        let sc = fv.config.species(stand.species);
+        let g = fv.establishment_gates(&view, stand.site, stand.species);
+        let (income, maintenance, _) = income_and_maintenance(&fv, &view, stand);
+        stands[i] += 1;
+        foliage[i] += stand.foliage;
+        wood[i] += stand.wood;
+        reserve[i] += stand.reserve;
+        if let Some(p) = g.mean_pore {
+            pore[i] += p;
+            pore_seen[i] += 1;
+            if p > sc.wilt_pore {
+                in_band[i] += 1;
+            }
+        }
+        mu[i] += stand.moisture;
+        light[i] += stand.light;
+        covered[i] += income / maintenance.max(f64::MIN_POSITIVE);
+    }
+    for species in Species::ALL {
+        let i = species.index();
+        let sc = fv.config.species(species);
+        let n = f64::from(stands[i].max(1));
+        let mean_pore = if pore_seen[i] == 0 {
+            "none".to_string()
+        } else {
+            format!("{:.4}", pore[i] / f64::from(pore_seen[i]))
+        };
+        eprintln!(
+            "SPECIES min={minute:>4} {:<14} stands={:<3} foliage={:<9.5} wood={:<9.5} \
+             reserve={:<9.5} | establishments={:<3} deaths={:<3} [{}] | mean_pore={} \
+             (wilt {:.2}, sat {:.2}; above wilt {}/{}) mu={:.3} light={:.3} covered={:.3}",
+            species.name(),
+            stands[i],
+            foliage[i],
+            wood[i],
+            reserve[i],
+            establishments[i],
+            causes[i].total(),
+            causes[i].label(),
+            mean_pore,
+            sc.wilt_pore,
+            sc.sat_pore,
+            in_band[i],
+            stands[i],
+            mu[i] / n,
+            light[i] / n,
+            covered[i] / n,
+        );
+    }
+}
+
+/// The water ledger every [`REPORT_MIN`] minutes: where the inventory is standing, how
+/// many showers have fallen, and the conservation residual that says whether any of it
+/// can be believed.
+fn report_water(minute: u64, world: &World, flora: &Flora) {
+    let view = world.view();
+    let fl = flora.view();
+    let l = view.ledger;
+    eprintln!(
+        "WATER min={minute:>4} stored={:.5} pore={:.5} pooled={:.5} aquifer_head={:.3} \
+         atmosphere={:.5} total={:.5} showers={} residual={:.3e} | cumulative rain_in={:.5} \
+         reentry_in={:.5} evaporation_out={:.5} transpiration_out={:.5} outlet_out={:.5} \
+         | flora transpired={:.5} consumed_organic={:.5}",
+        view.stored_m3(),
+        world.pore_m3(),
+        world.pooled_m3(),
+        world.aquifer_head_m(),
+        view.atmosphere_m3,
+        view.total_water_m3(),
+        l.showers,
+        view.total_residual(),
+        l.rain_in,
+        l.reentry_in,
+        l.evaporation_out,
+        l.transpiration_out,
+        l.outlet_out,
+        fl.ledger.transpired_m3,
+        fl.ledger.consumed_organic_out,
+    );
+}
+
 /// How many skyline columns each species' establishment predicate admits, and which gate
 /// refuses the rest — the germination question, read off the one predicate the tick runs.
-fn report_eligibility(flora: &Flora, world: &World, skyline: &[Site], sky: &mut SkyCache) {
+fn report_eligibility(
+    minute: u64,
+    flora: &Flora,
+    world: &World,
+    skyline: &[Site],
+    sky: &mut SkyCache,
+) {
     let fv = flora.view();
     let view = world.view();
     for species in Species::ALL {
@@ -503,7 +933,7 @@ fn report_eligibility(flora: &Flora, world: &World, skyline: &[Site], sky: &mut 
             }
         }
         eprintln!(
-            "{:<14} eligible {:>5} of {:>5} | shut: pore<{:.2} {:>5}, saturated>{:.2} {:>5}, \
+            "ELIG min={minute:>4} {:<14} eligible {:>5} of {:>5} | shut: pore<{:.2} {:>5}, saturated>{:.2} {:>5}, \
              water>{:.2} m {:>5}, sky<{:.2} {:>5}, dead wood<{:.3} {:>5}",
             species.name(),
             eligible,
