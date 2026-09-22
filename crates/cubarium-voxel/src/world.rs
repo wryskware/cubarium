@@ -372,6 +372,11 @@ pub struct World {
     /// showers. **Not a store**: the water is still in `atmosphere_m3` and this is only
     /// the allowance this shower has left against it.
     pub(crate) shower_left_m3: f64,
+    /// The tick the next shower is **due**, when
+    /// [`Config::shower_interval_max_s`] asks for a schedule. Drawn from the world's own
+    /// seed at creation and again every time a shower ends, so the weather is a property
+    /// of the world and not of the clock. Zero, and ignored, with no schedule.
+    pub(crate) next_shower_tick: u64,
     pub(crate) outlet_open: bool,
     pub(crate) tick: u64,
     /// Bumped by every material change a command actually commits. See
@@ -533,6 +538,7 @@ impl World {
             aquifer_m3: 0.0,
             atmosphere_m3: 0.0,
             shower_left_m3: 0.0,
+            next_shower_tick: 0,
             outlet_open: false,
             tick: 0,
             terrain_version: 0,
@@ -566,6 +572,7 @@ impl World {
         }
         world.ledger.initial_stored = world.view().stored_m3();
         world.ledger.initial_atmosphere = world.atmosphere_m3;
+        world.next_shower_tick = crate::water::next_shower_tick(&world.config, 0, 0);
         // The active sets are built here rather than lazily so that a world is never in a
         // state where its cache disagrees with its arrays.
         world.rebuild_active_sets();
@@ -592,6 +599,7 @@ impl World {
             aquifer_m3: 0.0,
             atmosphere_m3: 0.0,
             shower_left_m3: 0.0,
+            next_shower_tick: 0,
             outlet_open: false,
             tick: 0,
             terrain_version: 0,
@@ -614,6 +622,7 @@ impl World {
         };
         world.ledger.initial_stored = world.view().stored_m3();
         world.ledger.initial_atmosphere = world.atmosphere_m3;
+        world.next_shower_tick = crate::water::next_shower_tick(&world.config, 0, 0);
         world.rebuild_active_sets();
         world
     }
@@ -661,6 +670,12 @@ impl World {
     /// The lumped atmosphere store in cubic metres.
     pub fn atmosphere_m3(&self) -> f64 {
         self.atmosphere_m3
+    }
+
+    /// The tick the next shower is due. Meaningless without
+    /// [`Config::shower_interval_max_s`].
+    pub fn next_shower_tick(&self) -> u64 {
+        self.next_shower_tick
     }
 
     /// Cubic metres left to fall in the shower now running; zero between showers.
@@ -723,7 +738,7 @@ impl World {
         let mut history: Vec<(f64, usize)> = Vec::with_capacity(window + 1);
         let mut stored: Vec<f64> = Vec::with_capacity(window + 1);
         let mut ticks = 0;
-        let mut converged = false;
+        let mut converged;
         loop {
             let pooled = self.pooled_m3();
             let cells = self.wet_cells();

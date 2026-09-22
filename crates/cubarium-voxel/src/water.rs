@@ -482,10 +482,44 @@ pub fn evaporate(w: &mut World) {
     });
 }
 
+/// The weather stream: splitmix64 over the world seed, a fixed token and the shower
+/// count, so the same world draws the same weather however it is stepped and no clock
+/// reaches it. The generator's own idiom (`generate.rs`, `noise.rs`).
+const WEATHER_STREAM: u64 = 0x_5745_4154_4845_525F;
+
+/// The tick the next shower is due: `from` plus a draw from the configured interval.
+///
+/// Zero — never due — when no schedule is configured, which is what every fixture and
+/// every trigger-only world has. The draw is inclusive of both ends and uses the shower
+/// count as its sequence index, so a world that has rained `n` times always draws its
+/// `n + 1`th gap the same way.
+pub(crate) fn next_shower_tick(c: &Config, from: u64, showers: u64) -> u64 {
+    if !(c.shower_interval_max_s > 0.0) {
+        return 0;
+    }
+    let hz = f64::from(crate::TICK_HZ);
+    let lo = (c.shower_interval_min_s * hz).round().max(0.0) as u64;
+    let hi = ((c.shower_interval_max_s * hz).round().max(0.0) as u64).max(lo);
+    let mut z = WEATHER_STREAM
+        ^ c.seed.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        ^ showers.wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^= z >> 31;
+    from + lo + if hi > lo { z % (hi - lo + 1) } else { 0 }
+}
+
 /// The closed budget's rain: showers drawn out of the lumped atmosphere store.
 ///
-/// A shower **starts** when the store holds at least
-/// [`crate::Config::shower_trigger_fraction`] of the world's total water, and is allowed
+/// **When** it rains is either the store's business or the calendar's. With no schedule
+/// ([`crate::Config::shower_interval_max_s`] zero) a shower starts the moment the store
+/// crosses [`crate::Config::shower_trigger_fraction`] of the world's total water, which
+/// makes the period a function of the return flux and the intervals regular. With a
+/// schedule the due tick is drawn from the world's seed and that same fraction becomes an
+/// **availability floor**: a due shower falls if the store can pay for it, and waits for
+/// the first later tick it can if it cannot. Either way an empty sky never rains.
+///
+/// A shower is allowed
 /// [`crate::Config::shower_volume_m3`] (or the whole store, if that is less). While it
 /// runs, every tick reserves the volume the rate asks for *before* distributing it —
 /// withdrawn from the store, then spread over the sky-exposed cells, with whatever a full
@@ -501,9 +535,14 @@ pub fn evaporate(w: &mut World) {
 /// falls is route C's job, not this store's.
 pub fn shower(w: &mut World) {
     crate::voxel_phase!(Rain, {
+        let scheduled = w.config.shower_interval_max_s > 0.0;
         if w.shower_left_m3 <= 0.0 {
-            let trigger = w.config.shower_trigger_fraction * w.ledger.expected_total();
-            if !(w.atmosphere_m3 >= trigger) || w.atmosphere_m3 <= 0.0 {
+            // Not due yet: the calendar, not the store, is what is holding the rain.
+            if scheduled && w.tick < w.next_shower_tick {
+                return;
+            }
+            let floor = w.config.shower_trigger_fraction * w.ledger.expected_total();
+            if !(w.atmosphere_m3 >= floor) || w.atmosphere_m3 <= 0.0 {
                 return;
             }
             // The allowance decides whether a shower starts at all: a zero shower volume
@@ -515,7 +554,19 @@ pub fn shower(w: &mut World) {
             w.shower_left_m3 = allowance;
             w.ledger.showers += 1;
         }
+        deliver(w);
+        // A shower that has just run out books the next one. Drawn from where this one
+        // ended, so the gap is a gap between showers and not between their starts.
+        if scheduled && w.shower_left_m3 <= 0.0 {
+            w.next_shower_tick = next_shower_tick(&w.config, w.tick, w.ledger.showers);
+        }
+    });
+}
 
+/// One tick of a shower already in progress: reserve, spread, refund what the world
+/// refused, and draw the allowance down by what actually fell.
+fn deliver(w: &mut World) {
+    {
         let per_column = w.config.rain_m_per_s * DT * w.config.cell_area();
         if per_column <= 0.0 {
             return;
@@ -579,7 +630,7 @@ pub fn shower(w: &mut World) {
         if w.atmosphere_m3 <= 0.0 {
             w.shower_left_m3 = 0.0;
         }
-    });
+    }
 }
 
 /// Every void cell hands what it can to the void cell below. Purely vertical, so no
@@ -2648,6 +2699,191 @@ mod closed_budget_tests {
         );
     }
 
+    // ---- the shower schedule ---------------------------------------------------------
+
+    /// A dry soil slab with a wet aquifer under it: the fixture the viability test uses,
+    /// with the schedule's own numbers on top.
+    fn slab(atmosphere_m3: f64, floor: f64, interval_s: (f64, f64)) -> World {
+        let c = Config {
+            width: 8,
+            height: 8,
+            depth: 2,
+            rain_m_per_s: 0.002,
+            evaporation_m_per_s: 0.0,
+            closed_water_budget: true,
+            initial_atmosphere_m3: atmosphere_m3,
+            shower_trigger_fraction: floor,
+            shower_volume_m3: 0.0005,
+            initial_aquifer_head_m: 0.4,
+            shower_interval_min_s: interval_s.0,
+            shower_interval_max_s: interval_s.1,
+            ..Config::default()
+        };
+        let mut w = World::empty(c.clone());
+        for x in 0..c.width as i64 {
+            for z in 0..c.depth {
+                w.apply(Command::SetMaterial {
+                    x,
+                    y: 1,
+                    z,
+                    material: Material::Soil,
+                });
+            }
+        }
+        w
+    }
+
+    /// The first gap is drawn from the world's own seed, inside the interval it was
+    /// given, and it is the same draw every time that seed is used.
+    #[test]
+    fn the_first_due_tick_is_drawn_inside_the_interval() {
+        let at = |seed: u64| {
+            World::empty(Config {
+                seed,
+                closed_water_budget: true,
+                initial_atmosphere_m3: 0.1,
+                shower_interval_min_s: 300.0,
+                shower_interval_max_s: 900.0,
+                ..Config::default()
+            })
+            .next_shower_tick()
+        };
+        let drawn: Vec<u64> = (1..=4).map(at).collect();
+        for (seed, t) in drawn.iter().enumerate() {
+            assert!(
+                (6000..=18000).contains(t),
+                "seed {} drew {t}, outside 5 to 15 minutes",
+                seed + 1
+            );
+        }
+        assert!(
+            drawn
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                >= 2,
+            "four seeds drew the same gap every time: {drawn:?}"
+        );
+        assert_eq!(at(1), drawn[0], "the same seed draws the same weather");
+    }
+
+    /// The calendar decides when. Nothing falls before the due tick; the shower starts on
+    /// it; and the gap that follows is measured from where that shower **ended**.
+    #[test]
+    fn a_due_shower_starts_on_its_tick_and_not_before() {
+        // Two seconds either way, so the draw is exactly 40 ticks and the arithmetic is
+        // readable. The floor is zero: this test is about the calendar alone.
+        let mut w = slab(0.3, 0.0, (2.0, 2.0));
+        assert_eq!(w.next_shower_tick(), 40);
+
+        // `shower` runs before the tick counter moves, so the step that sees `tick == 39`
+        // is the 40th, and the due shower falls on the 41st.
+        for _ in 0..40 {
+            w.step();
+        }
+        assert_eq!(w.tick(), 40);
+        assert_eq!(
+            w.view().ledger.showers,
+            0,
+            "no rain through tick 39: the water phase of step n sees tick n - 1"
+        );
+        w.step();
+        assert_eq!(
+            w.view().ledger.showers,
+            1,
+            "the due shower falls on the step whose water phase sees tick 40"
+        );
+
+        // It ends, and the next one is booked at least a whole interval after that.
+        let mut ended_at = None;
+        for _ in 0..200 {
+            w.step();
+            if w.shower_left_m3() <= 0.0 && ended_at.is_none() {
+                ended_at = Some(w.tick());
+                break;
+            }
+        }
+        let ended_at = ended_at.expect("a 0.0005 m³ shower ends inside 200 ticks");
+        // Same convention as the start: the water phase of the step that drained the
+        // allowance saw `ended_at - 1`, and the gap is drawn from there.
+        let next = w.next_shower_tick();
+        assert_eq!(
+            next,
+            ended_at - 1 + 40,
+            "the gap runs from the last tick it rained on, not from the start"
+        );
+        while w.tick() < next {
+            w.step();
+        }
+        assert_eq!(
+            w.view().ledger.showers,
+            1,
+            "still the one shower right up to the tick the next is due"
+        );
+        w.step();
+        assert_eq!(
+            w.view().ledger.showers,
+            2,
+            "and the next one falls on its own due tick"
+        );
+    }
+
+    /// The store decides whether. A due shower with nothing to pay for it does not fall,
+    /// does not count, and does not lose its turn: it falls on the first tick the floor
+    /// holds.
+    #[test]
+    fn a_starved_sky_holds_the_shower_until_the_floor() {
+        let mut w = slab(0.0, 0.01, (2.0, 2.0));
+        for _ in 0..141 {
+            w.step();
+        }
+        assert!(w.tick() > w.next_shower_tick(), "the shower is overdue");
+        assert_eq!(
+            w.view().ledger.showers,
+            0,
+            "an empty sky does not rain, however overdue"
+        );
+
+        let floor = 0.01 * w.view().ledger.expected_total();
+        assert!(
+            w.apply(Command::AddAtmosphere {
+                volume_m3: floor * 4.0
+            }) > 0.0
+        );
+        w.step();
+        assert_eq!(
+            w.view().ledger.showers,
+            1,
+            "the held shower falls on the first tick it can be paid for"
+        );
+        assert!(w.view().total_residual().abs() < 1e-9);
+    }
+
+    /// No interval is the trigger alone: the behaviour every fixture and every existing
+    /// closed-budget test has, which those tests check unmodified.
+    #[test]
+    fn no_interval_means_the_trigger_alone() {
+        let mut w = World::empty(Config {
+            initial_atmosphere_m3: 0.0,
+            shower_trigger_fraction: 1.0,
+            shower_interval_min_s: 0.0,
+            shower_interval_max_s: 0.0,
+            ..config(true)
+        });
+        assert_eq!(w.next_shower_tick(), 0, "no schedule is drawn at all");
+        w.apply(Command::AddWater {
+            x: 0,
+            y: 2,
+            z: 0,
+            volume_m3: 0.004,
+        });
+        run(&mut w, TICKS);
+        let v = w.view();
+        assert_eq!(v.ledger.showers, 0, "no shower may start under the trigger");
+        assert_eq!(v.ledger.rain_in, 0.0, "and no rain may fall");
+        assert!(v.total_residual().abs() < 1e-9);
+    }
+
     /// Between showers the sky is shut: a closed world whose store cannot reach the
     /// trigger books no rain at all, however long it runs.
     #[test]
@@ -2754,6 +2990,14 @@ mod closed_budget_tests {
         assert_eq!(back.atmosphere_m3(), w.atmosphere_m3());
         assert_eq!(back.shower_left_m3(), w.shower_left_m3());
         assert_eq!(back.view().ledger, w.view().ledger);
+
+        // The calendar is state too: a world resumed from a snapshot owes its next shower
+        // at the tick the saved one did, not a freshly drawn one.
+        let mut scheduled = slab(0.3, 0.0, (2.0, 2.0));
+        run(&mut scheduled, 50);
+        let back = World::load(&scheduled.save()).expect("a scheduled world round-trips");
+        assert_eq!(back.next_shower_tick(), scheduled.next_shower_tick());
+        assert!(back.next_shower_tick() > 0);
 
         let mut bad = fixture(false);
         bad.atmosphere_m3 = 1.0;

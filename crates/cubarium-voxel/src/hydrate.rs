@@ -680,68 +680,90 @@ mod tests {
         );
     }
 
-    /// **Study, not a test.** `default` seed 1: settle, then run until two showers have
-    /// started or 6000 ticks pass, and say when each fired and how long the dry spell
-    /// between them was.
+    /// **Study, not a test.** The weather, on every preset: settle, open the outlet the
+    /// way the host does, then run an hour of simulated time and report every shower —
+    /// when it was due, when it fell, whether the store held it back, what it delivered
+    /// and how long it rained — plus what the store did and how fast it refills.
     #[test]
     #[ignore = "study: run by name"]
-    fn the_first_shower_on_the_default_ring() {
-        let p = crate::Preset::find("default").unwrap();
-        let mut world = World::new(Config {
-            seed: 1,
-            ..p.config()
-        });
-        let settled = world.settle(600);
-        // In the order the ambient run does it: the habitat settles with the outlet shut
-        // and the host opens it afterwards. Under a closed budget it is the return flow
-        // into the atmosphere, not an export, and the water-cycle handoff names it the
-        // engine of the cycle -- so a study of when it rains has to have it on.
-        world.apply(crate::Command::SetOutlet { open: true });
-        let during = world.view().ledger.showers;
-        let falling = world.shower_left_m3();
-        let aloft_at_settle = world.atmosphere_m3();
-        let mut starts: Vec<u64> = Vec::new();
-        for t in 0..6000u64 {
-            world.step();
-            if world.view().ledger.showers as usize > during as usize + starts.len() {
-                starts.push(t + 1);
-                if starts.len() == 2 {
-                    break;
+    fn an_hour_of_weather_on_every_preset() {
+        const MINUTES: u64 = 60;
+        let ticks = MINUTES * 60 * u64::from(crate::TICK_HZ);
+        for p in crate::PRESETS {
+            let mut world = World::new(Config {
+                seed: 1,
+                ..p.config()
+            });
+            let settled = world.settle(600);
+            world.apply(crate::Command::SetOutlet { open: true });
+            let start_tick = world.tick();
+            let aloft0 = world.atmosphere_m3();
+            let in0 = world.view().ledger.atmosphere_in;
+
+            let (mut lo, mut hi) = (aloft0, aloft0);
+            let mut showers: Vec<(u64, u64, bool, f64, f64)> = Vec::new();
+            let (mut count, mut open_at, mut open_out, mut due_at) = (0u64, 0u64, 0.0, 0u64);
+            let mut held = false;
+            for _ in 0..ticks {
+                let due = world.next_shower_tick();
+                let overdue = world.tick() >= due && world.shower_left_m3() <= 0.0;
+                world.step();
+                let v = world.view();
+                lo = lo.min(world.atmosphere_m3());
+                hi = hi.max(world.atmosphere_m3());
+                if v.ledger.showers > count {
+                    count = v.ledger.showers;
+                    open_at = world.tick();
+                    open_out = v.ledger.atmosphere_out;
+                    due_at = due;
+                    held = false;
+                } else if overdue && world.shower_left_m3() <= 0.0 {
+                    held = true;
+                }
+                if open_at > 0 && world.shower_left_m3() <= 0.0 && world.tick() > open_at {
+                    let secs = (world.tick() - open_at) as f64 / f64::from(crate::TICK_HZ);
+                    showers.push((
+                        due_at,
+                        open_at,
+                        held,
+                        v.ledger.atmosphere_out - open_out,
+                        secs,
+                    ));
+                    open_at = 0;
                 }
             }
+
+            let v = world.view();
+            let minutes = (world.tick() - start_tick) as f64 / f64::from(crate::TICK_HZ) / 60.0;
+            let gaps: Vec<f64> = showers
+                .windows(2)
+                .map(|w| (w[1].1 - w[0].1) as f64 / f64::from(crate::TICK_HZ) / 60.0)
+                .collect();
+            println!(
+                "=== {} seed 1 — settle {} ticks, converged {}",
+                p.name, settled.ticks, settled.converged
+            );
+            for (due, at, was_held, delivered, secs) in &showers {
+                println!(
+                    "  due {due}, fell {at} ({}), {delivered:.4} m³ over {secs:.0} s",
+                    if *was_held {
+                        "HELD by the floor"
+                    } else {
+                        "on time"
+                    }
+                );
+            }
+            println!(
+                "  {} showers in {minutes:.0} min; gaps {:.1}..{:.1} min; store {lo:.2}..{hi:.2} m³; \
+                 lift {:.4} m³/min; residual {:.2e} of {:.1} m³",
+                showers.len(),
+                gaps.iter().cloned().fold(f64::INFINITY, f64::min),
+                gaps.iter().cloned().fold(0.0, f64::max),
+                (v.ledger.atmosphere_in - in0) / minutes,
+                v.total_residual().abs() / v.total_water_m3().max(1.0),
+                v.total_water_m3(),
+            );
         }
-        let v = world.view();
-        let gap = match starts.as_slice() {
-            [a, b] => Some(b - a),
-            _ => None,
-        };
-        // If none fired, say how far off it is: the store's own rise over the run against
-        // what is left to the trigger. A rising store is a slow cycle, not a dry lock.
-        let trigger = v.config.shower_trigger_fraction * v.total_water_m3();
-        let rate = (world.atmosphere_m3() - aloft_at_settle) / 6000.0;
-        let eta = if starts.is_empty() && rate > 0.0 {
-            format!(
-                "; at {rate:.3e} m³/tick the trigger is another {:.0} ticks off \
-                 ({:.0} simulated minutes)",
-                (trigger - world.atmosphere_m3()) / rate,
-                (trigger - world.atmosphere_m3()) / rate / f64::from(crate::TICK_HZ) / 60.0,
-            )
-        } else {
-            String::new()
-        };
-        println!(
-            "settle {settled:?}\n\
-             showers started by the end of settle: {during} ({falling:.4} m³ still to come)\n\
-             showers past settle at ticks {starts:?}, dry spell between them {gap:?} ticks\n\
-             total fallen {:.4} m³; atmosphere {aloft_at_settle:.5} -> {:.5} m³ \
-             (evaporated in over the whole run {:.5} m³) against a trigger of {:.2} m³ \
-             of {:.2} m³ total{eta}",
-            v.ledger.atmosphere_out,
-            world.atmosphere_m3(),
-            v.ledger.atmosphere_in,
-            v.config.shower_trigger_fraction * v.total_water_m3(),
-            v.total_water_m3(),
-        );
     }
 
     /// A dry recipe leaves the world exactly as it was.
