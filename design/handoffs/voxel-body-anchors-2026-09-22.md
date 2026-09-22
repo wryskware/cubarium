@@ -109,3 +109,41 @@ deliverable 1; Fable re-runs one arm.
 Before/after reach and route table, the two autopsy arms, what the presenter
 now draws, the shade conversion, the commit list, and anything the rules
 could not express.
+
+## Integration note (Fable, 2026-09-22)
+
+Landed 56405b0..6242ee7 (tests first; the body rule, schema 10 → 11; shade
+in m²; presenter draws the model body; observer/autopsy read the implemented
+band; docs), rebased onto main after the run-loop merges; workspace suite
+green. Fable re-ran `voxel_founder_autopsy 60 preset=small` and the t = 0
+observer and reproduced exactly: starved 25 (13 shredder, 12 browser),
+drowned 0, browser extinct min 29.8, 7 shredders alive, bloomcrown 658
+bites, reach 0.4174.
+
+| t = 0 fraction of foliage | small | default | wide |
+| --- | --- | --- | --- |
+| reachable, before → after | 0.49 → 0.42 | 0.72 → 0.50 | 0.75 → 0.49 |
+| route-connected, before → after | 0.49 → 0.42 | 0.48 → 0.22 | 0.37 → 0.37 |
+
+The "after" reach values are bit-identical to the band hypothesis package 0
+printed, so the implementation is what was measured. Reach fell as decided:
+a low browser cannot eat a one-cell crown that sits above 0.25 m, which is
+bloomcrown on default (bites 4,283 → 0) and most of the wide canopy. That is
+the layers package's basal rosette, next. Short-term the arms are worse
+(small extinct min 39 → 30; default 2 → 1 alive), which is the expected shape
+of doing units before layers, and is recorded rather than tuned around.
+
+Seeding consequence, flagged not fixed: `browser_faces` seeds browsers only
+on faces whose crown is in the band, so the narrower band deleted the high
+feeding faces and all eight default browsers now start on two low layers;
+route fell 0.48 → 0.22 there for that reason alone. Package 4 (startup
+acceptance) owns it.
+
+Worker's calls, kept: seeder standability uses the adult body (a founder is
+not seeded into a slot it grows out of); `shade_k` renamed to
+`shade_k_per_m2` = 1.5 × 0.25² so an old config is refused rather than
+misread; cruise still derives from the manifest's recorded 0.25 m length
+(the browser now cruises 0.67 body lengths per second), untouched because it
+is in the digest, for the retrain; the observer keeps one hypothetical
+column, `visible_five_pitch`, for the unimplemented fan. Digests pinned in a
+test; the shipped centres validate.
