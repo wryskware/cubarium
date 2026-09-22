@@ -1480,3 +1480,74 @@ sill's placement is part of the answer (say why). Host untouched.
 Return (≤20 lines): commit, what the instrumentation showed (quote the
 transfers), the fix, the fixture numbers, retention on the panel seed,
 the gate table.
+
+## The panel is starved, not dead — 2026-09-22
+
+Wrysk: nothing on screen for minutes after a deploy, then one frame every
+3–5 s with black between; "it should use all the cores… leave one for the
+kernel." Debug thread's findings (782d7f6 carries its code change):
+
+- Startup dark ≈ 4 min: the shim socket attaches at process start, then
+  `report_water_cycle` (host `voxel/mod.rs:879`) blocks the loop before
+  the first frame; the probe takes 215.8 s on the A78s (60 s on the desk).
+- Flicker: `clock.rs:165-188` returns `Step::Tick`/`Step::Lagged` first
+  and `Step::Render` only when the sim is not behind wall time, so a tick
+  over 50 ms means no flip; the shim blanks after 3 s idle. At 16 Hz the
+  panel showed ~3 s of picture, ~3 s of black. Now 20 Hz / 19 fps, one
+  thread CPU-bound.
+- Two threads: `CPUAffinity=4-7` in the unit (Wrysk's dirty
+  `config/tachyon/cubarium.service`) with `core_ctl` offlining idle big
+  cores → `available_parallelism` = 2. Should be `CPUAffinity=0-6`;
+  782d7f6 makes the default `available − 1` (worse alone: 2 − 1).
+- "0-byte reply": the shim reopened the panel and the client's slots went
+  with the old device; the client bails (`shim.rs:466`) and exits; the
+  unit restarts it into another 216 s of black.
+- A78 core ≈ 3.6× slower than the desk; the 72-voxel ring with the
+  cascade is 7.8 m³ pooled in 10 380 cells (was 2 861).
+
+## Package D — the panel never goes black (display worker)
+
+Owner: a new host worker (Opus, **high** — scheduling and a thread).
+Files: host `clock.rs`, `voxel/mod.rs` (the run loop, `report_water_cycle`
+call site, startup), `shim.rs`, `sink/gpu/*` and `present.rs` only as the
+founding frame needs. Not the voxel crate (T6 runs there), not
+`config/tachyon/*`, `scripts/tachyon-*`, `docs/tachyon.md` (Wrysk's dirty
+files).
+
+1. **Render at display rate whatever the sim does.** When the sim is
+   behind, the loop still presents at the render cadence — the last
+   completed world state, again if nothing new — so a slow tick costs
+   frame freshness, never a flip. Bound catch-up as today. The invariant
+   to test: over any wall-clock second the loop yields ≥ (display rate −
+   1) renders even if every tick takes 200 ms.
+2. **Nothing blocks the first frame.** `report_water_cycle` runs on a
+   background thread on its `world.clone()` and logs when done (its line
+   unchanged); the seed gate's candidates and the founding settle run
+   while a **founding frame** is presented at display rate — the sky
+   gradient alone with a slow, dim pulse, no text (the look is Wrysk's;
+   this is a placeholder he can replace, and the normal display stays
+   free of analytical UI). The first world frame replaces it as soon as
+   the world exists.
+3. **Reconnect on handoff.** On the daemon's 0-byte reply (`shim.rs:466`)
+   the client re-opens the socket and re-attaches its slots with bounded
+   retries (the shim's `connect_when_free` idiom, 4 s) instead of exiting;
+   one log line per attempt. Only past the retries does it fail as today.
+4. Host-side threads: `threads = 0` resolves through
+   `cubarium_voxel::default_threads()` (782d7f6). Do not change it.
+
+Tests first, each under a second, no sleeps (drive `Clock` with a fake
+`now`): (a) a clock stepped with a 200 ms tick cost still yields renders
+at the display cadence; (b) the run loop presents a founding frame before
+the world exists (a fake sink counting frames); (c) the shim client on a
+0-byte reply retries and succeeds against a fake daemon that answers on
+the second attempt, and fails after the bound; (d) `report_water_cycle`
+returns immediately and its line appears later.
+
+Verify with the CPU sink locally pinned to two cores
+(`taskset -c 0,1`, seed 14400042426867678818, `config/tachyon/voxel.toml`,
+`--sink png --seconds 20`): frames from the first second, no gap over 100
+ms in the capture timestamps, the world frame within a few seconds.
+
+Return (≤25 lines): commits, the invariant numbers from the local run,
+what the founding frame looks like (one PNG in the scratch dir), test
+counts for `-p cubarium`.
