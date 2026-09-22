@@ -20,8 +20,8 @@
 //!    evaporate.
 //! 3. **`water_substeps` free-water substeps**, each in this order: *infiltrate* (free
 //!    water into the porous cell directly below it, the **receiving** cell's material
-//!    setting the rate at `permeability_per_s * sub_dt` of its own `pore_capacity`, per
-//!    voxel volume), then *fall* (every void cell hands its water to the void cell below
+//!    setting the rate at its own `conductivity_m_per_s` across the cell face,
+//!    `K * cell_area * sub_dt`), then *fall* (every void cell hands its water to the void cell below
 //!    while that has room, one cell per substep), then *[`exchange`]* (every wet cell
 //!    offers water to its four horizontal neighbours and the cell below, driven by the
 //!    difference in column head).
@@ -29,8 +29,8 @@
 //!    the pore space below, into the aquifer where a porous cell sits on bedrock or on
 //!    the foundation, or as a drip into free water where a porous cell roofs a void. A
 //!    voxel inside the saturated zone is skipped: it has nowhere lower to go. The
-//!    **donor** cell's material sets both the threshold and the rate
-//!    (`permeability_per_s * DT` of its own pore capacity). This is field-capacity
+//!    **donor** cell's material sets both the threshold and the rate (its own
+//!    `conductivity_m_per_s` across the cell face). This is field-capacity
 //!    drainage, not "saturated soil only": rock above its field capacity drips too, just
 //!    very slowly, and soil stops draining at `field_capacity` rather than at zero —
 //!    that fraction is the retained water ecology gets to read.
@@ -161,6 +161,7 @@
 
 use std::cell::RefCell;
 
+use crate::material::REFERENCE_VOXEL_M;
 use crate::world::VoidRun;
 use crate::{Command, Config, DT, Material, World};
 
@@ -192,6 +193,37 @@ const HEAD_PASSES: u32 = 4;
 #[inline]
 fn voxel(w: &World) -> f64 {
     w.config.voxel_volume()
+}
+
+/// The volume one cell face passes in `dt` at the material's hydraulic conductivity:
+/// the solver's one transport rate (package 1c,
+/// `design/handoffs/voxel-water-units-2026-09-22.md`).
+///
+/// **The rule.** A flux between two cells is a conductivity in metres per second times
+/// the shared face area in m² times the timestep, `K · A · dt`, with `K =
+/// Material::conductivity_m_per_s()`. What stood here before was `permeability_per_s ·
+/// dt · pore_capacity · voxel_volume` — a *fraction of a cell* per tick, so the physical
+/// flux was `permeability · pore_capacity · voxel_m` metres per second and halved with
+/// the cell: on the panel's 0.125 m ring the ground drained at half the speed the 0.25 m
+/// ring's did, and the first shower stood 0.03–0.08 m deep and drowned half the stands
+/// (D5, `design/handoffs/voxel-small-collapse-2026-09-22.md`).
+///
+/// **Why the factors are in this order.** Mathematically this is `K · A · dt`. It is
+/// written as `(permeability · dt) · pore_capacity · (A · REFERENCE_VOXEL_M)` because on
+/// the 0.25 m reference grid `A · 0.25` *is* `voxel_volume()` exactly — both are powers
+/// of two times the cell, so no rounding enters — and the whole expression then
+/// reproduces the pre-1c one bit for bit rather than to within an ulp. Reassociating
+/// `permeability · dt · pore_capacity` into `(permeability · pore_capacity) · dt` is what
+/// costs that last place; the reference grid is meant to be untouched, so it is not paid.
+/// `units_tests` pins both halves: bit identity against the old expression on 0.25 m, and
+/// agreement with `K · A · dt` to within one ulp on both grids.
+///
+/// Storage terms — `pore_room_m3`, the `room` a seepage target has, a cell's `unit` of
+/// pore capacity — stay volumes and are **not** this. Rain and evaporation were already
+/// per area (`rain_m_per_s · DT · cell_area()`) and are untouched.
+#[inline]
+fn pore_flux_m3(m: Material, c: &Config, dt: f64) -> f64 {
+    m.permeability_per_s() * dt * m.pore_capacity() * (c.cell_area() * REFERENCE_VOXEL_M)
 }
 
 fn free_m3(w: &World, i: usize) -> f64 {
@@ -695,7 +727,7 @@ fn submerged(c: &Config, y: u32, table: f64) -> bool {
 ///
 /// 1. **Saturation.** Every permeable voxel whose centre lies at or below the table has
 ///    its pores filled toward `pore = 1` from the aquifer, at that material's
-///    `permeability_per_s * DT` of its own pore capacity, capped by the aquifer's stock.
+///    `conductivity_m_per_s` across the cell face, capped by the aquifer's stock.
 ///    `drain` leaves those voxels alone, so soil under the table sits saturated instead
 ///    of settling back to its field capacity.
 /// 2. **Seepage.** A void voxel the table reaches, standing on a permeable voxel that is
@@ -754,7 +786,7 @@ pub fn water_table(w: &mut World) {
                     if m.pore_capacity() <= 0.0 || m.permeability_per_s() <= 0.0 {
                         continue;
                     }
-                    let rate = m.permeability_per_s() * DT * m.pore_capacity() * c.voxel_volume();
+                    let rate = pore_flux_m3(m, &c, DT);
                     let want = rate.min(pore_room_m3(w, i)).min((charged - taken).max(0.0));
                     if want <= 0.0 {
                         continue;
@@ -785,7 +817,7 @@ pub fn water_table(w: &mut World) {
                     if w.pore[below] < 1.0 - 1e-9 {
                         continue;
                     }
-                    let rate = m.permeability_per_s() * DT * m.pore_capacity() * c.voxel_volume();
+                    let rate = pore_flux_m3(m, &c, DT);
                     let room = (level - w.free[i]) * c.voxel_volume();
                     let want = rate.min(room).min((charged - taken).max(0.0));
                     if want <= 0.0 {
@@ -1566,7 +1598,7 @@ pub fn infiltrate(w: &mut World, dt: f64) {
             if m.pore_capacity() <= 0.0 || m.permeability_per_s() <= 0.0 {
                 continue;
             }
-            let rate = m.permeability_per_s() * dt * m.pore_capacity() * c.voxel_volume();
+            let rate = pore_flux_m3(m, &c, dt);
             transfer(w, (i, Store::Free), (below, Store::Pore), rate);
         }
     });
@@ -1584,7 +1616,7 @@ pub fn drain(w: &mut World) {
         // with no pore water can never drain, so nothing is lost; and the walk is no longer
         // bottom-up, so a stack of wet soil can pass water down more than one cell in a tick
         // where the grid walk passed it exactly one. It is a trickle either way — one tick's
-        // drainage is `permeability_per_s * DT` of a cell's capacity — and the soil profile is
+        // drainage is one `pore_flux_m3`, well under a millimetre — and the soil profile is
         // a statistical claim, not a per-cell one.
         let active: Vec<usize> = w.damp.cells().to_vec();
         #[cfg(feature = "profile")]
@@ -1604,7 +1636,7 @@ pub fn drain(w: &mut World) {
             if excess <= 0.0 {
                 continue;
             }
-            let want = excess.min(m.permeability_per_s() * DT * unit);
+            let want = excess.min(pore_flux_m3(m, &c, DT));
             if y == 0 {
                 // Sitting on the foundation: what drains joins the aquifer.
                 let lost = take_pore(w, i, want);
@@ -3288,5 +3320,93 @@ mod closed_budget_tests {
         bad.atmosphere_m3 = 1.0;
         let err = World::load(&bad.save()).expect_err("an open world holds no atmosphere");
         assert!(format!("{err:#}").contains("no atmosphere"), "{err:#}");
+    }
+}
+
+/// Package 1c's loud deterministic check, at the level of the rate expression itself:
+/// the world's stores round-trip a volume through a cell fraction, so an end-to-end
+/// measurement can only be right to a couple of ulps (`tests/water_units.rs` pins that
+/// half). Here the arithmetic is compared directly, bit for bit.
+#[cfg(test)]
+mod units_tests {
+    use super::{Config, DT, Material, pore_flux_m3};
+    use crate::material::REFERENCE_VOXEL_M;
+
+    /// What the solver computed before package 1c: a fraction of a cell per tick.
+    fn pre_1c(m: Material, c: &Config, dt: f64) -> f64 {
+        m.permeability_per_s() * dt * m.pore_capacity() * c.voxel_volume()
+    }
+
+    fn grid(voxel_m: f64) -> Config {
+        Config {
+            voxel_m,
+            ..Config::default()
+        }
+    }
+
+    /// On the 0.25 m reference grid the new expression is the old one **bit for bit**,
+    /// for every material and for a substep's `dt` as well as a tick's. Nothing on the
+    /// reference grid is retuned by this package, and the check is exact rather than
+    /// approximate so a reassociation can never creep in unnoticed.
+    #[test]
+    fn the_reference_grid_is_identical_bit_for_bit() {
+        let c = grid(REFERENCE_VOXEL_M);
+        for m in [
+            Material::Air,
+            Material::Bedrock,
+            Material::Rock,
+            Material::Soil,
+        ] {
+            for dt in [DT, DT / 4.0, DT / 3.0] {
+                let (got, want) = (pore_flux_m3(m, &c, dt), pre_1c(m, &c, dt));
+                assert_eq!(
+                    got.to_bits(),
+                    want.to_bits(),
+                    "{m:?} at dt {dt}: {got} is not the pre-1c {want}"
+                );
+            }
+        }
+    }
+
+    /// And off the reference grid it is the *conductivity* form — `K · A · dt` — to
+    /// within two ulps, which is the whole point: the flux per unit area no longer
+    /// depends on the cell. Two and not zero because the two orderings round
+    /// `permeability · dt · pore_capacity` and `(permeability · pore_capacity) · dt`
+    /// differently; see `pore_flux_m3` for why this side is the one that gives.
+    #[test]
+    fn the_helper_is_the_conductivity_form() {
+        for voxel_m in [0.25, 0.125, 0.5, 1.0, 0.1] {
+            let c = grid(voxel_m);
+            for m in [Material::Rock, Material::Soil] {
+                let got = pore_flux_m3(m, &c, DT);
+                let want = m.conductivity_m_per_s() * c.cell_area() * DT;
+                assert!(
+                    (got - want).abs() <= 2.0 * f64::EPSILON * want,
+                    "{m:?} on {voxel_m} m cells: {got} against K·A·dt = {want}"
+                );
+            }
+        }
+    }
+
+    /// The physical claim, stated on its own: the flux **per square metre** is the same
+    /// on every grid, where before it was proportional to the cell.
+    #[test]
+    fn the_flux_per_unit_area_no_longer_depends_on_the_cell() {
+        let m = Material::Soil;
+        let reference = pore_flux_m3(m, &grid(0.25), DT) / grid(0.25).cell_area();
+        for voxel_m in [0.125, 0.5, 1.0, 0.1] {
+            let c = grid(voxel_m);
+            let per_area = pore_flux_m3(m, &c, DT) / c.cell_area();
+            assert!(
+                (per_area - reference).abs() <= 1e-18,
+                "{voxel_m} m cells pass {per_area} m per tick against {reference}"
+            );
+            // The bug this replaces, stated so it cannot come back silently.
+            let pre = pre_1c(m, &c, DT) / c.cell_area();
+            assert!(
+                (pre - reference * (voxel_m / 0.25)).abs() <= 1e-18,
+                "the pre-1c form was not proportional to the cell after all"
+            );
+        }
     }
 }
