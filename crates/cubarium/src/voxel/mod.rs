@@ -909,6 +909,9 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     let (mut ticks, mut frames) = (0u64, 0u64);
     // The running report's own counters: what happened since the last one was printed.
     let (mut since, mut since_ticks, mut since_frames) = (start, 0u64, 0u64);
+    // The presented count is the target's own running total, so the interval's share is
+    // what it has grown by.
+    let mut since_presented = out.presented().map_or(0, |(shown, _)| shown);
     let mut ctl = Control::new(speed, proj);
     let mut debt = 0.0f64;
     // Whether the world or the plant layer has moved since the last frame drawn. The CPU
@@ -942,12 +945,14 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                     &sim,
                     since_ticks,
                     since_frames,
-                    now.duration_since(since).as_secs_f64()
+                    now.duration_since(since).as_secs_f64(),
+                    out.presented().map(|(shown, _)| shown - since_presented),
                 )
             );
             since = now;
             since_ticks = 0;
             since_frames = 0;
+            since_presented = out.presented().map_or(0, |(shown, _)| shown);
         }
 
         while let Ok(line) = commands.try_recv() {
@@ -992,7 +997,9 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
             }
             Step::Render { .. } => {
                 let (world, flora, fauna) = sim.layers();
-                out.render(world, flora, fauna, std::mem::take(&mut moved))?;
+                // A pack the renderer refused is still owed: the flag goes straight back
+                // up rather than being lost with the tick that set it.
+                moved = out.render(world, flora, fauna, std::mem::take(&mut moved))?;
                 frames += 1;
                 since_frames += 1;
             }
@@ -1020,7 +1027,11 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         save_voxel_snapshot(dir, world);
     }
     let elapsed = clock.elapsed(Instant::now()).as_secs_f64();
-    eprintln!("cubarium voxel: {}", run_line(&sim, ticks, frames, elapsed));
+    let shown = out.presented().map(|(shown, _)| shown);
+    eprintln!(
+        "cubarium voxel: {}",
+        run_line(&sim, ticks, frames, elapsed, shown)
+    );
     let (_, _, fauna) = sim.layers();
     let av = fauna.view();
     eprintln!(
@@ -1379,7 +1390,17 @@ impl Out {
     /// Draw one frame. `moved` says the world has changed since the last one, which is
     /// what the GPU path packs a new voxel texture on; the CPU path reads the world
     /// afresh every frame and ignores it.
-    fn render(&mut self, world: &World, flora: &Flora, fauna: &Fauna, moved: bool) -> Result<()> {
+    ///
+    /// Returns whether the world is **still** owed a pack: the GPU path refuses one while
+    /// it is reading every staging buffer it has, and the caller must keep its flag rather
+    /// than lose the tick's world.
+    fn render(
+        &mut self,
+        world: &World,
+        flora: &Flora,
+        fauna: &Fauna,
+        moved: bool,
+    ) -> Result<bool> {
         match self {
             Out::Cpu {
                 sink,
@@ -1389,14 +1410,23 @@ impl Out {
             } => {
                 presenter.draw_with_fauna(&world.view(), flora.view(), Some(fauna.view()), canvas);
                 canvas.encode_raster(raster);
-                sink.submit(Output::Ring(raster))
+                sink.submit(Output::Ring(raster))?;
+                Ok(false)
             }
             Out::Gpu(gpu) => {
-                if moved {
-                    gpu.stage_world(world, flora, fauna);
-                }
-                gpu.render()
+                let owed = moved && !gpu.stage_world(world, flora, fauna);
+                gpu.render()?;
+                Ok(owed)
             }
+        }
+    }
+
+    /// What the panel has been shown, where the target counts it separately from what the
+    /// loop drew — the presenting thread does.
+    fn presented(&self) -> Option<(u64, u64)> {
+        match self {
+            Out::Cpu { .. } => None,
+            Out::Gpu(gpu) => gpu.presented(),
         }
     }
 
@@ -1438,6 +1468,7 @@ impl Out {
             let world = World::empty(cfg.clone());
             let flora = Flora::new(FloraConfig::for_voxel_size(world.config().voxel_m));
             let fauna = Fauna::new(FaunaConfig::default());
+            // Before the first frame nothing is in flight, so this is never refused.
             gpu.stage_world(&world, &flora, &fauna);
         }
     }
@@ -1470,15 +1501,23 @@ const SUMMARY_INTERVAL: Duration = Duration::from_secs(60);
 
 /// What was done in `elapsed` seconds, and what the world holds now — the run's one
 /// summary line, printed periodically while it runs and once when it ends.
-fn run_line(sim: &Sim, ticks: u64, frames: u64, elapsed: f64) -> String {
+fn run_line(sim: &Sim, ticks: u64, frames: u64, elapsed: f64, presented: Option<u64>) -> String {
     let (world, flora, _) = sim.layers();
     let view = world.view();
     let fv = flora.view();
+    let per_s = |n: u64| n as f64 / elapsed.max(1e-9);
+    // The frames the loop drew are not the frames the panel was shown once presentation
+    // is on its own thread, and the rate that matters is the one the panel saw.
+    let shown = presented.map_or(String::new(), |n| {
+        format!(", {n} presented ({:.1} fps)", per_s(n))
+    });
     format!(
         "{ticks} ticks, {frames} frames in {elapsed:.2} s ({:.1} fps); \
+         {:.1} ticks/s{shown}; \
          stored {:.3} m3, residual {:.3e} m3; \
          {} stands, flora residual {:.3e} organic, {:.3e} mineral, {:.3e} energy",
-        frames as f64 / elapsed.max(1e-9),
+        per_s(frames),
+        per_s(ticks),
         view.stored_m3(),
         view.stored_m3() - view.ledger.expected_stored(),
         fv.stands.len(),
@@ -2283,12 +2322,40 @@ mod tests {
             SimConfig { threads: 1 },
             None,
         );
-        let line = run_line(&sim, 1_200, 3_600, 60.0);
+        let line = run_line(&sim, 1_200, 3_600, 60.0, None);
         assert!(
             line.starts_with("1200 ticks, 3600 frames in 60.00 s (60.0 fps);"),
             "{line}"
         );
         assert!(line.contains("0 stands"), "{line}");
+        assert!(line.contains("20.0 ticks/s"), "{line}");
+        assert!(
+            !line.contains("presented"),
+            "a target that shows every frame it is given says nothing: {line}"
+        );
+    }
+
+    /// With presentation on its own thread the frames the loop drew are not the frames
+    /// the panel was shown, and the rate that matters is the second one. Both are in the
+    /// line, with the tick rate beside them.
+    #[test]
+    fn the_running_report_names_the_tick_rate_and_what_the_panel_was_shown() {
+        let c = cubarium_voxel::Config {
+            width: 16,
+            height: 8,
+            depth: 2,
+            ..Default::default()
+        };
+        let sim = Sim::new(
+            World::empty(c.clone()),
+            Flora::new(FloraConfig::for_voxel_size(c.voxel_m)),
+            Fauna::new(FaunaConfig::default()),
+            SimConfig { threads: 1 },
+            None,
+        );
+        let line = run_line(&sim, 1_200, 3_600, 60.0, Some(3_580));
+        assert!(line.contains("20.0 ticks/s"), "{line}");
+        assert!(line.contains("3580 presented (59.7 fps)"), "{line}");
     }
 
     /// The start-up viability probe is off the loop: the call returns while the work is

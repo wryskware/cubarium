@@ -390,6 +390,117 @@ impl VoxelStaging<'_> {
     }
 }
 
+/// Frames the CPU may have in hand at once, and so the width of every per-frame
+/// resource: the staging buffers, the uniform blocks and the timestamp sets.
+///
+/// **Two.** One frame is on the GPU while the next is packed and recorded; a third would
+/// only help if a third frame could be outstanding, and the presenter never lets one be —
+/// it replaces the frame waiting to go up rather than queueing another behind it.
+pub const STAGING_RING: usize = 2;
+
+/// One recorded frame's claim on the ring.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Recorded {
+    /// The staging buffer it uploads from, or `None` when it re-presents a world the GPU
+    /// already holds.
+    pub staging: Option<usize>,
+    /// The slot it reads its uniforms from and writes its timestamps into. Everything the
+    /// CPU writes for one frame is indexed by this, so a frame the GPU is reading and the
+    /// frame being recorded never share a byte.
+    pub slot: usize,
+}
+
+/// Which per-frame resources the next frame may write, and which ones recorded frames
+/// still read.
+///
+/// The whole hazard of packing off the present thread lives here: a
+/// `vkCmdCopyBufferToImage` reads the staging buffer when the GPU runs it, not when it is
+/// recorded, so the CPU may not write anything a recorded-but-unfinished frame names. The
+/// rules are three:
+///
+/// * a pack overwrites the buffer of an earlier pack that has not been recorded yet —
+///   nothing has read it, and the newer world is the one that should go up;
+/// * a buffer a recorded frame names is untouchable until that frame retires;
+/// * a frame that is *displaced* before it is ever submitted gives its buffer back and
+///   the pack it carried is owed again, or the world would never reach the GPU.
+#[derive(Debug)]
+pub struct StagingRing {
+    n: usize,
+    /// The buffer holding a pack the GPU has not been shown yet.
+    packed: Option<usize>,
+    /// One entry per recorded frame, oldest first.
+    recorded: std::collections::VecDeque<Recorded>,
+}
+
+impl StagingRing {
+    pub fn new(n: usize) -> StagingRing {
+        StagingRing {
+            n: n.max(1),
+            packed: None,
+            recorded: std::collections::VecDeque::new(),
+        }
+    }
+
+    /// The buffer the next pack may write, or `None` when every one of them is spoken for
+    /// by a frame that has not retired — then the pack is skipped and the world goes up
+    /// next tick, one tick stale, which is the cheap half of the trade.
+    pub fn for_pack(&self) -> Option<usize> {
+        if let Some(i) = self.packed {
+            return Some(i);
+        }
+        (0..self.n).find(|i| !self.recorded.iter().any(|f| f.staging == Some(*i)))
+    }
+
+    /// A pack has been written into `i`.
+    pub fn packed(&mut self, i: usize) {
+        self.packed = Some(i);
+    }
+
+    /// A frame is being recorded: it uploads whatever was packed and takes the first slot
+    /// no outstanding frame is using, and both are its own until it retires.
+    pub fn record(&mut self) -> Recorded {
+        let slot = (0..self.n)
+            .find(|s| !self.recorded.iter().any(|f| f.slot == *s))
+            // Only reachable if the caller records more frames at once than the ring is
+            // wide, which is what `in_flight` is there to stop. Sharing the oldest slot
+            // is the least bad answer: a stale uniform, never a wild pointer.
+            .unwrap_or(0);
+        let frame = Recorded {
+            staging: self.packed.take(),
+            slot,
+        };
+        self.recorded.push_back(frame);
+        frame
+    }
+
+    /// The oldest recorded frame has completed on the GPU. Frames retire in the order
+    /// they were submitted, so the oldest is always the one that finished.
+    pub fn retire(&mut self) -> Option<Recorded> {
+        self.recorded.pop_front()
+    }
+
+    /// The newest recorded frame will never be submitted — a fresher one displaced it.
+    /// Its buffer is free again and the upload it carried is owed again.
+    pub fn discard(&mut self) -> Option<Recorded> {
+        let frame = self.recorded.pop_back()?;
+        if frame.staging.is_some() {
+            self.packed = frame.staging;
+        }
+        Some(frame)
+    }
+
+    /// How many frames are recorded and not yet retired.
+    pub fn in_flight(&self) -> usize {
+        self.recorded.len()
+    }
+
+    /// The buffers recorded frames are reading, for the tests.
+    #[cfg(test)]
+    fn reading(&self) -> Vec<usize> {
+        self.recorded.iter().filter_map(|f| f.staging).collect()
+    }
+}
+
 /// The voxel strip's renderer: one texture uploaded per tick, one full-screen draw per
 /// frame, and the shared [`PresentPass`] onto a target.
 pub struct VoxelRenderer {
@@ -413,15 +524,24 @@ pub struct VoxelRenderer {
     glyph_image: vk::Image,
     glyph_memory: vk::DeviceMemory,
     glyph_view: vk::ImageView,
-    staging: HostBuffer,
-    /// Byte offsets into [`VoxelRenderer::staging`] of the three planes.
+    staging: Vec<HostBuffer>,
+    /// Which staging buffer the next pack may use and which the GPU is still reading.
+    ring: StagingRing,
+    /// Byte offsets into each of [`VoxelRenderer::staging`] of the four planes.
     offsets: (u64, u64, u64, u64),
-    /// Whether the staging buffer holds a world the GPU has not seen yet.
+    /// Whether a staged world is waiting to be uploaded.
     dirty: bool,
     /// Whether anything has ever been staged: a frame before the first upload would
     /// sample undefined texels, so it is refused rather than drawn.
     staged: bool,
+    /// One uniform block per ring slot, bound at a dynamic offset: the frame the GPU is
+    /// reading and the frame being recorded never share one.
     uniforms: HostBuffer,
+    /// Bytes between those blocks — `minUniformBufferOffsetAlignment`, measured.
+    uniform_stride: u64,
+    /// The slot of the last frame that retired, i.e. the one whose timestamps are the
+    /// newest complete set. `None` before the first frame finishes.
+    last_done: Option<usize>,
     nearest: vk::Sampler,
     set_layout: vk::DescriptorSetLayout,
     set: vk::DescriptorSet,
@@ -451,7 +571,9 @@ impl VoxelRenderer {
             d.create_query_pool(
                 &vk::QueryPoolCreateInfo::default()
                     .query_type(vk::QueryType::TIMESTAMP)
-                    .query_count(QUERY_SLOTS),
+                    // One set of timestamps per ring slot: two frames may be in the
+                    // command stream at once and each writes its own.
+                    .query_count(QUERY_SLOTS * STAGING_RING as u32),
                 None,
             )
         }?;
@@ -548,15 +670,31 @@ impl VoxelRenderer {
             align16(voxel_bytes) + align16(roof_bytes),
             align16(voxel_bytes) + align16(roof_bytes) + align16(style_bytes),
         );
-        let staging = gpu.host_buffer(
-            offsets.3 + params.glyph_bytes() as u64,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-        )?;
-        let uniforms = gpu.host_buffer(
+        let staging = (0..STAGING_RING)
+            .map(|_| {
+                gpu.host_buffer(
+                    offsets.3 + params.glyph_bytes() as u64,
+                    vk::BufferUsageFlags::TRANSFER_SRC,
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
+        // One block per ring slot. The stride is `minUniformBufferOffsetAlignment`,
+        // which is 256 bytes on some devices and 64 on others, so it is measured rather
+        // than assumed; the frame binds its own slot's offset.
+        let uniform_stride = align_to(
             std::mem::size_of::<VoxelUniforms>() as u64,
+            unsafe { gpu.instance.get_physical_device_properties(gpu.pdev) }
+                .limits
+                .min_uniform_buffer_offset_alignment
+                .max(1),
+        );
+        let uniforms = gpu.host_buffer(
+            uniform_stride * STAGING_RING as u64,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
         )?;
-        uniforms.write(&[params.uniforms()]);
+        for slot in 0..STAGING_RING as u64 {
+            uniforms.write_bytes_at(uniform_stride * slot, &[params.uniforms()]);
+        }
 
         let nearest = unsafe {
             d.create_sampler(
@@ -577,7 +715,10 @@ impl VoxelRenderer {
         let bindings = [
             vk::DescriptorSetLayoutBinding::default()
                 .binding(0)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                // Dynamic: one descriptor over the whole ring, the frame's slot chosen at
+                // bind time. A per-slot descriptor set would have to be rewritten while a
+                // frame was reading it.
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
                 .descriptor_count(1)
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT),
             sampled(1),
@@ -593,7 +734,7 @@ impl VoxelRenderer {
         }?;
         let sizes = [
             vk::DescriptorPoolSize::default()
-                .ty(vk::DescriptorType::UNIFORM_BUFFER)
+                .ty(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
                 .descriptor_count(1),
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
@@ -636,7 +777,7 @@ impl VoxelRenderer {
                     vk::WriteDescriptorSet::default()
                         .dst_set(set)
                         .dst_binding(0)
-                        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
                         .buffer_info(&buffer_info),
                     sampled_write(set, 1, &iv),
                     sampled_write(set, 2, &ir),
@@ -684,6 +825,9 @@ impl VoxelRenderer {
             glyph_memory,
             glyph_view,
             staging,
+            uniform_stride,
+            last_done: None,
+            ring: StagingRing::new(STAGING_RING),
             offsets,
             dirty: false,
             staged: false,
@@ -717,15 +861,23 @@ impl VoxelRenderer {
             bail!("the projection and the world's extent are fixed for a VoxelRenderer");
         }
         self.params = params;
-        self.uniforms.write(&[params.uniforms()]);
         Ok(())
     }
 
     /// Update dynamic atmosphere moisture and rain animation tick uniforms.
+    /// **Nothing is written to the GPU here.** The uniform block a frame reads is written
+    /// when that frame is recorded, into that frame's own slot; writing it now would write
+    /// under whatever frame the GPU is reading.
     pub fn update_weather(&mut self, atmosphere: f32, rain_tick: f32) {
         self.params.atmosphere = atmosphere;
         self.params.rain_tick = rain_tick;
-        self.uniforms.write(&[self.params.uniforms()]);
+    }
+
+    /// Whether a pack has a staging buffer to go into. False while every one of them is
+    /// being read by a frame that has not retired — the caller keeps the world owed and
+    /// packs it next tick rather than doing the work and throwing it away.
+    pub fn can_stage(&self) -> bool {
+        self.ring.for_pack().is_some()
     }
 
     /// Write one tick's world straight into the staging buffer.
@@ -734,21 +886,29 @@ impl VoxelRenderer {
     /// cannot paint with a stale colour. The voxels and the roof table are not: every
     /// texel is written every tick, and clearing 720 KiB to then overwrite it is 720 KiB
     /// of memory traffic nobody reads.
-    pub fn stage(&mut self, fill: impl FnOnce(VoxelStaging<'_>)) {
+    ///
+    /// Returns `false` when every staging buffer is still being read by a frame that has
+    /// not retired: the pack is **skipped**, not queued, and the next tick packs again.
+    /// A tick-stale picture is the price; writing under the GPU is not an option.
+    pub fn stage(&mut self, fill: impl FnOnce(VoxelStaging<'_>)) -> bool {
+        let Some(into) = self.ring.for_pack() else {
+            return false;
+        };
+        let buffer = &self.staging[into];
         let n = self.params.voxel_count();
         let (voxels, roof, styles, glyphs) = unsafe {
             (
                 std::slice::from_raw_parts_mut(
-                    self.staging.ptr.add(self.offsets.0 as usize) as *mut VoxelTexel,
+                    buffer.ptr.add(self.offsets.0 as usize) as *mut VoxelTexel,
                     n,
                 ),
-                std::slice::from_raw_parts_mut(self.staging.ptr.add(self.offsets.1 as usize), n),
+                std::slice::from_raw_parts_mut(buffer.ptr.add(self.offsets.1 as usize), n),
                 std::slice::from_raw_parts_mut(
-                    self.staging.ptr.add(self.offsets.2 as usize) as *mut VoxelStyle,
+                    buffer.ptr.add(self.offsets.2 as usize) as *mut VoxelStyle,
                     MAX_STYLES,
                 ),
                 std::slice::from_raw_parts_mut(
-                    self.staging.ptr.add(self.offsets.3 as usize),
+                    buffer.ptr.add(self.offsets.3 as usize),
                     self.params.glyph_bytes(),
                 ),
             )
@@ -760,8 +920,34 @@ impl VoxelRenderer {
             styles,
             glyphs,
         });
+        self.ring.packed(into);
         self.dirty = true;
         self.staged = true;
+        true
+    }
+
+    /// The oldest recorded frame has completed: its staging buffer may be packed again,
+    /// and its timestamps are now the newest complete set.
+    pub fn retire_frame(&mut self) {
+        if let Some(frame) = self.ring.retire() {
+            self.last_done = Some(frame.slot);
+        }
+    }
+
+    /// The newest recorded frame was displaced before it was ever submitted. Its buffer
+    /// comes back and its upload is owed again — without this the world it carried would
+    /// never reach the GPU, because recording cleared the dirty flag.
+    pub fn discard_frame(&mut self) {
+        if let Some(frame) = self.ring.discard()
+            && frame.staging.is_some()
+        {
+            self.dirty = true;
+        }
+    }
+
+    /// Frames recorded and not yet retired.
+    pub fn frames_in_flight(&self) -> usize {
+        self.ring.in_flight()
     }
 
     /// The world raster, for a readback or a blit.
@@ -789,8 +975,20 @@ impl VoxelRenderer {
             })
             .transpose()?;
         let (w, h, dd) = (self.params.width, self.params.height, self.params.depth);
-        let upload = self.dirty;
+        // Whatever was packed is this frame's to upload, and its buffer is this frame's
+        // until it retires. A frame that uploads nothing still takes a place in the
+        // ring's order, so retirements and frames stay one to one.
+        let frame = self.ring.record();
+        let upload = self.dirty && frame.staging.is_some();
         self.dirty = false;
+        // This frame's own uniform block, written now and read by the GPU when it runs:
+        // `set_params` and `update_weather` only moved `self.params`.
+        self.uniforms.write_bytes_at(
+            self.uniform_stride * frame.slot as u64,
+            &[self.params.uniforms()],
+        );
+        // and its own four timestamps.
+        let q = frame.slot as u32 * QUERY_SLOTS;
 
         unsafe {
             d.begin_command_buffer(
@@ -798,8 +996,8 @@ impl VoxelRenderer {
                 &vk::CommandBufferBeginInfo::default()
                     .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
             )?;
-            d.cmd_reset_query_pool(cb, self.queries, 0, QUERY_SLOTS);
-            d.cmd_write_timestamp(cb, vk::PipelineStageFlags::TOP_OF_PIPE, self.queries, 0);
+            d.cmd_reset_query_pool(cb, self.queries, q, QUERY_SLOTS);
+            d.cmd_write_timestamp(cb, vk::PipelineStageFlags::TOP_OF_PIPE, self.queries, q);
 
             if upload {
                 let planes = [
@@ -814,6 +1012,8 @@ impl VoxelRenderer {
                         1,
                     ),
                 ];
+                let source =
+                    self.staging[frame.staging.expect("an upload has a staged buffer")].buffer;
                 for (image, offset, pw, ph, pd) in planes {
                     barrier(
                         d,
@@ -824,7 +1024,7 @@ impl VoxelRenderer {
                     );
                     d.cmd_copy_buffer_to_image(
                         cb,
-                        self.staging.buffer,
+                        source,
                         image,
                         vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                         &[vk::BufferImageCopy::default()
@@ -849,7 +1049,12 @@ impl VoxelRenderer {
                     );
                 }
             }
-            d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, 1);
+            d.cmd_write_timestamp(
+                cb,
+                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+                self.queries,
+                q + 1,
+            );
 
             crate::render::begin(
                 d,
@@ -865,18 +1070,28 @@ impl VoxelRenderer {
                 self.pipeline_layout,
                 0,
                 &[self.set],
-                &[],
+                &[(self.uniform_stride * frame.slot as u64) as u32],
             );
             d.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
             d.cmd_draw(cb, 3, 1, 0, 0);
             d.cmd_end_render_pass(cb);
-            d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, 2);
+            d.cmd_write_timestamp(
+                cb,
+                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+                self.queries,
+                q + 2,
+            );
 
             if let Some((image, extent, xform, pass, pipeline)) = target {
                 self.present
                     .record(d, cb, image, extent, xform, pass, pipeline);
             }
-            d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, 3);
+            d.cmd_write_timestamp(
+                cb,
+                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+                self.queries,
+                q + 3,
+            );
             d.end_command_buffer(cb)?;
         }
         Ok(())
@@ -884,12 +1099,16 @@ impl VoxelRenderer {
 
     /// The frame's three GPU stages in milliseconds — uploads, the slab-walk pass, the
     /// present pass — or `None` if the queries are not ready.
+    /// The timestamps read are the **last retired** frame's. With a frame in flight and
+    /// another being recorded, the newest set in the pool is not finished, and reading it
+    /// would subtract a stamp that had not been written.
     pub fn gpu_split(&self, gpu: &Gpu) -> Option<[f64; 3]> {
+        let base = self.last_done? as u32 * QUERY_SLOTS;
         let mut ts = [0u64; QUERY_SLOTS as usize];
         if unsafe {
             gpu.device.get_query_pool_results(
                 self.queries,
-                0,
+                base,
                 &mut ts,
                 vk::QueryResultFlags::TYPE_64,
             )
@@ -962,7 +1181,9 @@ impl VoxelRenderer {
             d.destroy_descriptor_pool(self.pool, None);
             d.destroy_descriptor_set_layout(self.set_layout, None);
             d.destroy_sampler(self.nearest, None);
-            self.staging.destroy(gpu);
+            for buffer in &self.staging {
+                buffer.destroy(gpu);
+            }
             self.uniforms.destroy(gpu);
             for (view, image, memory) in [
                 (self.voxel_view, self.voxel_image, self.voxel_memory),
@@ -1015,6 +1236,22 @@ impl FrameSource for VoxelRenderer {
         target: Option<TargetSlot<'_>>,
     ) -> Result<()> {
         VoxelRenderer::record(self, gpu, cb, target)
+    }
+
+    fn frame_retired(&mut self) {
+        VoxelRenderer::retire_frame(self);
+    }
+
+    fn frame_discarded(&mut self) {
+        VoxelRenderer::discard_frame(self);
+    }
+
+    fn frames_in_flight(&self) -> usize {
+        VoxelRenderer::frames_in_flight(self)
+    }
+
+    fn frame_capacity(&self) -> usize {
+        STAGING_RING
     }
 
     fn gpu_ms(&self, gpu: &Gpu) -> f64 {
@@ -1083,6 +1320,11 @@ pub fn slab_hit(params: &VoxelParams, sy: i32, z: u32) -> Option<SlabHit> {
 
 fn align16(n: u64) -> u64 {
     (n + 15) & !15
+}
+
+/// `n` rounded up to a multiple of `to` (a power of two, as every Vulkan alignment is).
+fn align_to(n: u64, to: u64) -> u64 {
+    (n + to - 1) & !(to - 1)
 }
 
 fn image_3d(
@@ -1296,6 +1538,92 @@ mod tests {
         );
         // Below the floor line there is nothing, in this slab or any deeper one.
         assert_eq!(slab_hit(&p, 240, 0), None);
+    }
+
+    /// The hazard the ring exists for: `vkCmdCopyBufferToImage` reads the staging buffer
+    /// when the GPU *runs* it, not when it was recorded. So the buffer a recorded frame
+    /// named must never be the one the next tick is packed into — and when both are
+    /// spoken for, the pack is refused rather than written under the GPU.
+    #[test]
+    fn a_buffer_a_recorded_frame_reads_is_never_handed_to_the_next_pack() {
+        let mut ring = StagingRing::new(STAGING_RING);
+        let a = ring.for_pack().expect("nothing is in flight");
+        ring.packed(a);
+        let first = ring.record();
+        assert_eq!(first.staging, Some(a));
+        assert_eq!(ring.reading(), vec![a], "the GPU has that one");
+
+        let b = ring.for_pack().expect("the other buffer is free");
+        assert_ne!(b, a, "packing there would write under the frame in flight");
+        ring.packed(b);
+        let second = ring.record();
+        assert_ne!(
+            second.slot, first.slot,
+            "and its uniforms and timestamps are its own too"
+        );
+
+        assert_eq!(ring.for_pack(), None, "both are spoken for: no pack");
+        assert_eq!(ring.retire(), Some(first), "frames retire in order");
+        assert_eq!(ring.for_pack(), Some(a), "and its buffer comes back");
+    }
+
+    /// A pack nothing has read yet is simply overwritten: the newer world is the one that
+    /// should go up, and no buffer is spent holding a world that has been superseded.
+    #[test]
+    fn a_pack_no_frame_has_taken_is_overwritten_rather_than_queued() {
+        let mut ring = StagingRing::new(STAGING_RING);
+        let first = ring.for_pack().expect("free");
+        ring.packed(first);
+        assert_eq!(ring.for_pack(), Some(first), "the same buffer again");
+        ring.packed(first);
+        assert_eq!(ring.record().staging, Some(first));
+        assert_eq!(ring.in_flight(), 1);
+    }
+
+    /// A frame the presenter never took is discarded, and the upload it carried is owed
+    /// again — without that the world it held would never reach the GPU, because
+    /// recording had already cleared the dirty flag.
+    #[test]
+    fn a_displaced_frame_gives_its_buffer_back_and_owes_its_upload_again() {
+        let mut ring = StagingRing::new(STAGING_RING);
+        let i = ring.for_pack().expect("free");
+        ring.packed(i);
+        let frame = ring.record();
+        assert_eq!(
+            ring.discard(),
+            Some(frame),
+            "the newest, and only the newest"
+        );
+        assert_eq!(ring.in_flight(), 0);
+        assert_eq!(
+            ring.for_pack(),
+            Some(i),
+            "the pack it carried is owed again"
+        );
+        assert_eq!(ring.record().staging, Some(i), "and goes up next frame");
+    }
+
+    /// A frame that re-presents a world the GPU already holds uploads nothing, but it is
+    /// still a frame: it takes a slot of its own and one retirement, or the retirements
+    /// and the frames would drift apart and a buffer would be freed too early.
+    #[test]
+    fn a_frame_that_uploads_nothing_still_takes_its_place_in_the_order() {
+        let mut ring = StagingRing::new(STAGING_RING);
+        let bare = ring.record();
+        assert_eq!(bare.staging, None);
+        assert_eq!(ring.in_flight(), 1);
+
+        let i = ring.for_pack().expect("every buffer is free");
+        ring.packed(i);
+        let loaded = ring.record();
+        assert_eq!(loaded.staging, Some(i));
+        assert_ne!(loaded.slot, bare.slot, "two live frames, two slots");
+        assert_eq!(ring.retire(), Some(bare), "the bare one finished first");
+        assert_eq!(
+            ring.reading(),
+            vec![i],
+            "and the loaded one is still reading"
+        );
     }
 
     #[test]

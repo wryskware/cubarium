@@ -244,6 +244,31 @@ pub trait FrameSource {
         target: Option<TargetSlot<'_>>,
     ) -> Result<()>;
 
+    /// A recorded frame has completed on the GPU — the oldest outstanding one, since
+    /// frames retire in the order they were submitted. Anything the recording named, such
+    /// as a staging buffer it uploads from, may be reused. A target that waits for its own
+    /// fence calls this itself; a target that presents on another thread calls it when
+    /// that thread reports the frame done.
+    fn frame_retired(&mut self) {}
+
+    /// The newest recorded frame will never be submitted: a fresher one displaced it
+    /// before the presenter took it. Whatever the recording claimed is owed again.
+    fn frame_discarded(&mut self) {}
+
+    /// Recorded frames that have not retired: what the recorder has handed the GPU and
+    /// not been told about yet. A target that keeps frames in flight refuses to record
+    /// another once this reaches the renderer's ring width, since a further frame would
+    /// have no per-frame resources of its own to write.
+    fn frames_in_flight(&self) -> usize {
+        0
+    }
+
+    /// How many frames this renderer has per-frame resources for — staging buffers,
+    /// uniform blocks, timestamp sets. A target must not record past it.
+    fn frame_capacity(&self) -> usize {
+        usize::MAX
+    }
+
     /// Milliseconds the last frame's timestamps saw, or `NaN` if they are not ready.
     fn gpu_ms(&self, gpu: &Gpu) -> f64;
 

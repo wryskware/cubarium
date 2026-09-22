@@ -72,7 +72,9 @@ pub struct GpuSink {
     presenter: ArtPresenter,
     geom: ArtGeometry,
     atlas: Atlas,
-    gpu: Gpu,
+    /// Shared so a presenting thread could hold it too; the ring does not use one, but
+    /// the device is opened the same way for both renderers.
+    gpu: std::sync::Arc<Gpu>,
     renderer: Renderer,
     target: GpuTarget,
     lanternjaw: Lanternjaw,
@@ -228,7 +230,9 @@ impl GpuSink {
             .with_context(|| format!("loading the art pack {}", art.display()))?;
         let atlas = Atlas::load(art)
             .with_context(|| format!("loading {} for the GPU atlas", art.display()))?;
-        let gpu = Gpu::open(&[]).context("opening the Vulkan device for --sink gpu")?;
+        let gpu = std::sync::Arc::new(
+            Gpu::open(&[]).context("opening the Vulkan device for --sink gpu")?,
+        );
         eprintln!("cubarium: --sink gpu on {}", gpu.name);
         let mut renderer = Renderer::new(&gpu, &atlas, layout)?;
         renderer.bend_substep =
@@ -238,7 +242,9 @@ impl GpuSink {
         // Default 1: what `art_present` does, whatever the world's S. `--gpu-art-scale`
         // is how the plan's "the sprite tile scales with S" gets looked at on the panel.
         renderer.art_scale = art_scale.unwrap_or(1.0);
-        let target = GpuTarget::open(kind, &gpu, &mut renderer, "cubarium — ring (GPU)")?;
+        // Not threaded: this renderer writes its instance buffers every frame and has
+        // no ring to keep them off a frame the GPU is still reading.
+        let target = GpuTarget::open(kind, &gpu, &mut renderer, "cubarium — ring (GPU)", false)?;
         // The canopy line comes from `ArtGeometry::new`, which is `CANOPY_TOP = 0.67` on
         // a ring — FW-5's constant, so the GPU and the CPU cannot disagree about where
         // the canopy starts.
