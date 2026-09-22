@@ -99,7 +99,8 @@ fn main() {
     // The census's own preset arm, verbatim, so the two agree at t = 0.
     let (mut world, flora_cfg) = match preset {
         Some(preset) => {
-            let (world, seed, rejected) = cubarium::voxel::ambient_world(&preset.config(), seed_base);
+            let (world, seed, rejected) =
+                cubarium::voxel::ambient_world(&preset.config(), seed_base);
             eprintln!(
                 "scene: preset {} ({}x{}x{} at {} m, seed {seed}, {rejected} rejected)",
                 preset.name,
@@ -136,11 +137,20 @@ fn main() {
     senses.settle(&world.view(), &flora.view());
     let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
     if sim.world().config().closed_water_budget && !sim.world().outlet_open() {
-        sim.world_mut().apply(WorldCommand::SetOutlet { open: true });
+        sim.world_mut()
+            .apply(WorldCommand::SetOutlet { open: true });
     }
 
     print_headers();
-    let first = report(&sim, 0);
+    let seeded_browser_faces: Vec<(u32, u32, u32)> = sim
+        .fauna()
+        .view()
+        .animals
+        .iter()
+        .filter(|a| a.founder == Some(Founder::Browser))
+        .map(|a| (a.site.x, a.site.y, a.site.z))
+        .collect();
+    let first = report(&sim, 0, &seeded_browser_faces);
     let mut last = first.clone();
     let total_ticks = (hours * 3600.0 * f64::from(TICK_HZ)) as u64;
     let mut tick = 0u64;
@@ -148,7 +158,7 @@ fn main() {
         sim.step();
         tick += 1;
         if tick % TICKS_PER_REPORT == 0 {
-            last = report(&sim, tick / (60 * TICK_HZ as u64));
+            last = report(&sim, tick / (60 * TICK_HZ as u64), &seeded_browser_faces);
         }
     }
     print_summary(&first, &last);
@@ -232,6 +242,11 @@ struct SpeciesRow {
     visible_decided: f64,
     route_today: f64,
     route_band: f64,
+    /// As `route_*`, but against the components the **seeded** founders stood in rather
+    /// than the living ones. After a lineage dies out the live measure is zero by
+    /// definition and says nothing about the landscape; this one still does.
+    route_seeded_today: f64,
+    route_seeded_band: f64,
 }
 
 #[derive(Clone)]
@@ -254,7 +269,7 @@ struct LineageRow {
     share_within_2m_band: Option<f64>,
 }
 
-fn report(sim: &Sim, minute: u64) -> Report {
+fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> Report {
     let wv = sim.world().view();
     let fv = sim.flora().view();
     let av = sim.fauna().view();
@@ -305,12 +320,19 @@ fn report(sim: &Sim, minute: u64) -> Report {
         .filter_map(|a| face_index.get(&(a.site.x, a.site.y, a.site.z)))
         .map(|&i| components[i])
         .collect();
+    let seeded_components: HashSet<usize> = seeded_browser_faces
+        .iter()
+        .filter_map(|key| face_index.get(key))
+        .map(|&i| components[i])
+        .collect();
 
     let sight_today = SightMap::new(&wv, &fv, &av, TODAY_FAN.pools_occlude);
     let sight_decided = SightMap::new(&wv, &fv, &av, DECIDED_FAN.pools_occlude);
 
-    let mut rows: Vec<(&'static str, SpeciesRow)> =
-        Plant::ALL.iter().map(|s| (s.name(), SpeciesRow::default())).collect();
+    let mut rows: Vec<(&'static str, SpeciesRow)> = Plant::ALL
+        .iter()
+        .map(|s| (s.name(), SpeciesRow::default()))
+        .collect();
     let mut total = SpeciesRow::default();
     // Per stand: is it reachable at all, and from a face in a browser's component?
     let mut reachable_today_sites: Vec<(Site, f64)> = Vec::new();
@@ -328,13 +350,14 @@ fn report(sim: &Sim, minute: u64) -> Report {
         let layer = crown_layer(&fv, stand);
         let columns = crown_columns(&fv, &wv, stand);
 
-        for (mouth, map, per_face, reach, route, sites) in [
+        for (mouth, map, per_face, reach, route, route_seeded, sites) in [
             (
                 &today,
                 &reach_today_map,
                 &cols_today,
                 &mut row.reach_today,
                 &mut row.route_today,
+                &mut row.route_seeded_today,
                 &mut reachable_today_sites,
             ),
             (
@@ -343,11 +366,13 @@ fn report(sim: &Sim, minute: u64) -> Report {
                 &cols_band,
                 &mut row.reach_band,
                 &mut row.route_band,
+                &mut row.route_seeded_band,
                 &mut reachable_band_sites,
             ),
         ] {
             let mut any = false;
             let mut connected = false;
+            let mut connected_seeded = false;
             for column in &columns {
                 for &i in map.get(column).map(Vec::as_slice).unwrap_or(&[]) {
                     let face = faces[i];
@@ -363,12 +388,13 @@ fn report(sim: &Sim, minute: u64) -> Report {
                         continue;
                     }
                     any = true;
-                    if browser_components.contains(&components[i]) {
-                        connected = true;
+                    connected |= browser_components.contains(&components[i]);
+                    connected_seeded |= seeded_components.contains(&components[i]);
+                    if connected && connected_seeded {
                         break;
                     }
                 }
-                if connected {
+                if connected && connected_seeded {
                     break;
                 }
             }
@@ -378,6 +404,9 @@ fn report(sim: &Sim, minute: u64) -> Report {
             }
             if connected {
                 *route += stand.foliage;
+            }
+            if connected_seeded {
+                *route_seeded += stand.foliage;
             }
         }
 
@@ -397,6 +426,8 @@ fn report(sim: &Sim, minute: u64) -> Report {
         total.visible_decided += row.visible_decided;
         total.route_today += row.route_today;
         total.route_band += row.route_band;
+        total.route_seeded_today += row.route_seeded_today;
+        total.route_seeded_band += row.route_seeded_band;
     }
 
     // --- lineages ---
@@ -633,8 +664,9 @@ fn share_within(xs: &[f64], limit: f64) -> Option<f64> {
 fn print_headers() {
     println!(
         "stock,sim_min,species,stands,foliage,reach_today,reach_band,visible_today,\
-         visible_decided,route_today,route_band,f_reach_today,f_reach_band,f_visible_today,\
-         f_visible_decided,f_route_today,f_route_band"
+         visible_decided,route_today,route_band,route_seeded_today,route_seeded_band,\
+         f_reach_today,f_reach_band,f_visible_today,f_visible_decided,f_route_today,f_route_band,\
+         f_route_seeded_today,f_route_seeded_band"
     );
     println!(
         "lineage,sim_min,founder,alive,heights,mean_m_to_reachable_today,\
@@ -653,8 +685,8 @@ fn fraction(part: f64, whole: f64) -> f64 {
 
 fn print_species(minute: u64, name: &str, r: &SpeciesRow) {
     println!(
-        "stock,{minute},{name},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.4},{:.4},{:.4},\
-         {:.4},{:.4},{:.4}",
+        "stock,{minute},{name},{},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},\
+         {:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4}",
         r.stands,
         r.foliage,
         r.reach_today,
@@ -663,12 +695,16 @@ fn print_species(minute: u64, name: &str, r: &SpeciesRow) {
         r.visible_decided,
         r.route_today,
         r.route_band,
+        r.route_seeded_today,
+        r.route_seeded_band,
         fraction(r.reach_today, r.foliage),
         fraction(r.reach_band, r.foliage),
         fraction(r.visible_today, r.foliage),
         fraction(r.visible_decided, r.foliage),
         fraction(r.route_today, r.foliage),
         fraction(r.route_band, r.foliage),
+        fraction(r.route_seeded_today, r.foliage),
+        fraction(r.route_seeded_band, r.foliage),
     );
 }
 
@@ -683,11 +719,7 @@ fn print_report(r: &Report) {
     }
     print_species(r.minute, "ALL", &r.total);
     for (name, l) in &r.lineages {
-        let heights: Vec<String> = l
-            .heights
-            .iter()
-            .map(|(y, n)| format!("{y}:{n}"))
-            .collect();
+        let heights: Vec<String> = l.heights.iter().map(|(y, n)| format!("{y}:{n}")).collect();
         println!(
             "lineage,{},{name},{},{},{},{},{},{}",
             r.minute,
@@ -723,7 +755,7 @@ fn print_report(r: &Report) {
 
 fn print_summary(first: &Report, last: &Report) {
     println!("summary,metric,t0,final");
-    let pairs: [(&str, f64, f64); 8] = [
+    let pairs: [(&str, f64, f64); 10] = [
         ("foliage", first.total.foliage, last.total.foliage),
         (
             "f_reach_today",
@@ -754,6 +786,16 @@ fn print_summary(first: &Report, last: &Report) {
             "f_route_band",
             fraction(first.total.route_band, first.total.foliage),
             fraction(last.total.route_band, last.total.foliage),
+        ),
+        (
+            "f_route_seeded_today",
+            fraction(first.total.route_seeded_today, first.total.foliage),
+            fraction(last.total.route_seeded_today, last.total.foliage),
+        ),
+        (
+            "f_route_seeded_band",
+            fraction(first.total.route_seeded_band, first.total.foliage),
+            fraction(last.total.route_seeded_band, last.total.foliage),
         ),
         (
             "browsers_alive",
