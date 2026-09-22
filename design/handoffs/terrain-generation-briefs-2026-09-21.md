@@ -1426,3 +1426,57 @@ say so.
 
 Return (≤15 lines): commit, where the off-by-one was, the reproduce
 numbers before/after, the gate table.
+
+## T5 — negative 2026-09-22; brief T6
+
+T5 (9b8cc85, an ignored reproduce study, no fix) showed the off-by-one is
+not there: at founding the lake's top wet row is 13 and the outlet sits
+at 14; `fill_to_level` fills `y < level_y`; the snapshot's `level_y 15` is
+`Pool::level_y` = top wet row + 1 after the lake had risen. Yet
+`outlet_out` is 0.788 m³ against `reentry_in` 0.024 over 4000 ticks: every
+tick the exchange puts a sliver into the sill's cell and `water::outlet`,
+running last, takes it, so the cell reads empty at every tick's end.
+Raising the sill a row moves the fill with it (hydrate takes its level
+from the outlet); a row of freeboard reaches 85 % retention at the cost of
+a row of lake. Diagnosis: the outlet's rate (0.05 m³/s, 400× the stream)
+drains whatever the exchange delivers, and the exchange delivers water to
+a cell whose floor is at or above the lake's surface.
+
+## Package T6 — a weir, not a drain (habitat worker)
+
+Owner: habitat worker (Opus, **high**). Files: `water.rs`, `world.rs`,
+`hydrate.rs`, `config.rs`; `generate.rs::outlet_and_spring` only if the
+sill's placement is part of the answer (say why). Host untouched.
+
+1. **Instrument first.** On the T5 study world, log for the outlet cell
+   over 50 ticks: which neighbour(s) transfer into it in the exchange,
+   their `y`, free fraction and head before the transfer, and the sill
+   cell's own floor height. State whether water is moving into a cell
+   whose floor is above the lake's surface (an exchange defect: heads
+   compared in fractions rather than metres, a transfer cap or fall order
+   effect, the landing cascade's waves), or whether the lake genuinely
+   stands above the sill somewhere (a placement defect).
+2. **Fix the cause.** Whichever it is, the contract afterwards is: a sill
+   whose floor is above the lake's free surface receives nothing; a lake
+   at steady state exports **only the stream's surplus** (`outlet_out ≈
+   reentry_in` over any window once settled); with the stream off the
+   lake holds its hydrated volume within 2 % over 4000 ticks (evaporation
+   aside). If the exchange is correct and the answer is a weir — export
+   only the water standing above the sill's floor, at a rate bounded by
+   what arrives — then make `outlet` that weir and say what changed for
+   the open-budget fixtures (they must still drain as they do; check
+   their tests, do not weaken them).
+3. Tests first: an authored rock bowl (16×12×2, fill two rows, sill cell
+   one row above the fill on the rim, stream into the bowl, outlet at the
+   sill, closed budget): after 4000 ticks stored is within 2 % of the
+   start plus what the stream added minus what the outlet took, and
+   `outlet_out` within 10 % of `reentry_in`; the same with the stream off:
+   `outlet_out` 0. Then T5's study as a fast test on the panel seed:
+   retention ≥ 95 % over 4000 ticks. Existing open-budget outlet tests
+   unchanged.
+4. Rerun T4's gate table (before/after settle, seeds 1–8 per preset) and
+   report pass counts.
+
+Return (≤20 lines): commit, what the instrumentation showed (quote the
+transfers), the fix, the fixture numbers, retention on the panel seed,
+the gate table.
