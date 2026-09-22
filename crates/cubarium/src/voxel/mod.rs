@@ -1007,7 +1007,12 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
 
     // Last, so every thread this process has — the presenter, the tick pool, the stdin
     // reader, the start-up probe — already exists to be moved off the loop's core.
-    let placed = placement::place_loop();
+    // Opt-in (`--pin-loop`, the Tachyon unit): no other machine's scheduling is touched.
+    let placed = if args.pin_loop {
+        placement::place_loop()
+    } else {
+        None
+    };
     if let Some(s) = snapshots.as_mut() {
         s.placement = placed;
     }
@@ -3090,6 +3095,7 @@ mod tests {
             out: PathBuf::from("captures"),
             every: 30,
             fps: 60,
+            pin_loop: false,
             web_port: 7393,
             gpu_target: None,
             gpu_capture: None,
@@ -3810,6 +3816,7 @@ mod tests {
             out: PathBuf::from("captures"),
             every: 30,
             fps: 60,
+            pin_loop: false,
             web_port: 7393,
             gpu_target: None,
             gpu_capture: None,
@@ -3859,6 +3866,7 @@ mod tests {
             out: PathBuf::from("captures"),
             every: 30,
             fps: 60,
+            pin_loop: false,
             web_port: 7393,
             gpu_target: None,
             gpu_capture: None,

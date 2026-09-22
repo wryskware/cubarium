@@ -46,7 +46,8 @@ So, as built:
   so Qualcomm's core control does not park the prime or an A78 (a parked CPU
   refuses an affinity of only itself with `EINVAL`). Those two are the only
   sysfs writes; they last until reboot.
-* **`cubarium voxel`**, at the top of its loop (`voxel/placement.rs`), reads
+* **`cubarium voxel --pin-loop`** (the unit passes it; off by default on any
+  other machine), at the top of its loop (`voxel/placement.rs`), reads
   `/sys/devices/system/cpu/cpu*/cpu_capacity` for the CPUs in its mask, pins
   the loop thread to the highest (falling to the next big core if one refuses),
   and moves every other thread of the process — presenter, tick pool, web

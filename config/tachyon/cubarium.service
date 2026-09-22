@@ -44,6 +44,7 @@ Environment="CUBARIUM_EXTRA_ARGS=--gpu-web-rate 2"
 # cpu7 is the prime A78 (capacity 1024, 2.7 GHz) and must be in the mask: at the
 # top of its loop `cubarium voxel` pins the loop thread to the highest-capacity
 # CPU it can see and moves every other thread onto the other big cores, 4-6
+# (only with `--pin-loop`, which the ExecStart below passes)
 # (docs/tachyon.md, "Where the threads run"). The old 0-6 shut the prime out.
 CPUAffinity=1-7
 # Qualcomm `core_ctl` parks idle big cores, and a parked CPU refuses an affinity
@@ -75,6 +76,7 @@ ExecStart=/usr/local/bin/cubarium voxel \
     --sink gpu \
     --gpu-target shim \
     --fps 60 \
+    --pin-loop \
     $CUBARIUM_EXTRA_ARGS
 
 # `ctrlc` is built without its `termination` feature, so the clean-stop flag is
