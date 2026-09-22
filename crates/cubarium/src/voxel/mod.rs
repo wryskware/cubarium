@@ -911,6 +911,10 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     // The presented count is the target's own running total, so the interval's share is
     // what it has grown by.
     let mut since_presented = out.presented().map_or(0, |(shown, _)| shown);
+    // Where this thread's milliseconds go, printed with the same report. The founding
+    // frames are behind us, so the sink's counters start from where they are.
+    let mut budget = Budget::default();
+    budget.mark(out.draw_split());
     let mut ctl = Control::new(speed, proj);
     let mut debt = 0.0f64;
     // Whether the world or the plant layer has moved since the last frame drawn. The CPU
@@ -954,6 +958,10 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
             if let Some(line) = out.presenter_line(interval) {
                 eprintln!("cubarium voxel: {line}");
             }
+            eprintln!(
+                "cubarium voxel: {}",
+                budget.line(interval, since_ticks, since_frames, out.draw_split())
+            );
             since = now;
             since_ticks = 0;
             since_frames = 0;
@@ -961,7 +969,9 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         }
 
         while let Ok(line) = commands.try_recv() {
+            let at = Instant::now();
             sim.with_layers_mut(|world, flora, fauna| ctl.handle(world, flora, fauna, &line));
+            budget.commands_ns += at.elapsed().as_nanos() as u64;
             // A command may have moved a cell, seeded a stand or loaded a world; which
             // ones did is the command's business, and one extra pack is cheaper than a
             // rule here that has to be kept in step with `Control::handle`.
@@ -977,7 +987,9 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                     // A single `s` still advances exactly one world tick.
                     if ctl.pending_steps > 0 {
                         ctl.pending_steps -= 1;
+                        let (at, before) = (Instant::now(), Phases::now());
                         sim.step();
+                        budget.tick(at.elapsed().as_nanos() as u64, before);
                         ticks += 1;
                         since_ticks += 1;
                         moved = true;
@@ -986,7 +998,9 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                     debt += ctl.speed;
                     while debt >= 1.0 {
                         debt -= 1.0;
+                        let (at, before) = (Instant::now(), Phases::now());
                         sim.step();
+                        budget.tick(at.elapsed().as_nanos() as u64, before);
                         ticks += 1;
                         since_ticks += 1;
                         moved = true;
@@ -1004,7 +1018,9 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                 let (world, flora, fauna) = sim.layers();
                 // A pack the renderer refused is still owed: the flag goes straight back
                 // up rather than being lost with the tick that set it.
+                let at = Instant::now();
                 moved = out.render(world, flora, fauna, std::mem::take(&mut moved))?;
+                budget.frame(at.elapsed().as_nanos() as u64);
                 frames += 1;
                 since_frames += 1;
             }
@@ -1040,6 +1056,10 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     if let Some(line) = out.presenter_line(elapsed) {
         eprintln!("cubarium voxel: {line}");
     }
+    eprintln!(
+        "cubarium voxel: {}",
+        budget.line(elapsed, ticks, frames, out.draw_split())
+    );
     let (_, _, fauna) = sim.layers();
     let av = fauna.view();
     eprintln!(
@@ -1438,6 +1458,15 @@ impl Out {
         }
     }
 
+    /// The sink's own cumulative milliseconds: packing a tick, and drawing a frame.
+    /// `None` from a sink that does not separate them.
+    fn draw_split(&self) -> Option<(f64, f64)> {
+        match self {
+            Out::Cpu { .. } => None,
+            Out::Gpu(gpu) => Some(gpu.draw_split()),
+        }
+    }
+
     /// Where the presenting thread's last `seconds` went, for the report. `None` when
     /// nothing presents on another thread.
     fn presenter_line(&mut self, seconds: f64) -> Option<String> {
@@ -1508,6 +1537,148 @@ impl Out {
             Out::Cpu { sink, .. } => sink.finish(),
             Out::Gpu(gpu) => gpu.finish(),
         }
+    }
+}
+
+/// Where the main thread's interval went.
+///
+/// **The panel's rate is this thread's budget.** Once presentation moved to its own
+/// thread the loop became the ceiling — the board showed presented frames tracking
+/// recorded ones exactly, and the tick rate itself falling as the world grew — so the
+/// running report has to say which part of the loop is spending the second. The three
+/// layers come from the voxel crate's own phase timers (`cubarium_voxel::profile`, an
+/// `Instant` per phase per tick and no rule); the rest is timed at the call sites here.
+#[derive(Default)]
+struct Budget {
+    step_ns: u64,
+    step_max_ns: u64,
+    render_ns: u64,
+    render_max_ns: u64,
+    commands_ns: u64,
+    /// The phase counters, summed over the windows the loop's own ticks ran in.
+    phases: Phases,
+    pack_mark: f64,
+    record_mark: f64,
+}
+
+/// The voxel crate's phase counters, read at one instant.
+///
+/// **They are global and count every thread**, so they are read around each of the loop's
+/// own `Sim::step` calls rather than once a minute: the start-up viability probe
+/// simulates a clone of the world on its own thread for the first few minutes and would
+/// otherwise land in these numbers. What still overlaps a step's own window is bounded by
+/// that window, and the line says so when the layers add up to more than the step did.
+#[derive(Default, Clone, Copy)]
+struct Phases {
+    world: u64,
+    flora: u64,
+    fauna: u64,
+    wet: u64,
+    band: u64,
+    search: u64,
+}
+
+impl Phases {
+    fn now() -> Phases {
+        use cubarium_voxel::profile::{self, Count, Phase};
+        Phases {
+            world: profile::nanos(Phase::WorldStep),
+            flora: profile::nanos(Phase::FloraStep),
+            fauna: profile::nanos(Phase::FaunaStep),
+            wet: profile::count(Count::ExchangeWet),
+            band: profile::count(Count::WaterTableCells),
+            search: profile::count(Count::FallCells),
+        }
+    }
+
+    fn add_since(&mut self, before: Phases) {
+        let now = Phases::now();
+        self.world += now.world.saturating_sub(before.world);
+        self.flora += now.flora.saturating_sub(before.flora);
+        self.fauna += now.fauna.saturating_sub(before.fauna);
+        self.wet += now.wet.saturating_sub(before.wet);
+        self.band += now.band.saturating_sub(before.band);
+        self.search += now.search.saturating_sub(before.search);
+    }
+}
+
+impl Budget {
+    /// Start an interval from where the sink's own counters are now.
+    fn mark(&mut self, draw: Option<(f64, f64)>) {
+        if let Some((pack, record)) = draw {
+            self.pack_mark = pack;
+            self.record_mark = record;
+        }
+    }
+
+    fn tick(&mut self, ns: u64, before: Phases) {
+        self.step_ns += ns;
+        self.step_max_ns = self.step_max_ns.max(ns);
+        self.phases.add_since(before);
+    }
+
+    fn frame(&mut self, ns: u64) {
+        self.render_ns += ns;
+        self.render_max_ns = self.render_max_ns.max(ns);
+    }
+
+    /// One line for the interval, and the interval starts again.
+    ///
+    /// `draw` is the sink's own cumulative (pack, record) milliseconds, where it keeps
+    /// them; `ticks` and `frames` are what the interval did.
+    fn line(&mut self, seconds: f64, ticks: u64, frames: u64, draw: Option<(f64, f64)>) -> String {
+        let ms = |ns: u64| ns as f64 / 1e6;
+        let per = |ns: u64, n: u64| ms(ns) / n.max(1) as f64;
+        let p = self.phases;
+        let (world, flora, fauna) = (p.world, p.flora, p.fauna);
+        let (wet, band, search) = (p.wet, p.band, p.search);
+        // Another thread was simulating inside the loop's own step windows — the
+        // start-up probe — so the layer split is an over-count until it finishes.
+        let shared = if world + flora + fauna > self.step_ns {
+            " (+ another thread simulating)"
+        } else {
+            ""
+        };
+        // The CPU sink draws the world afresh every frame and separates nothing, so it
+        // has no split to report; the whole of it is in `render`.
+        let split = draw.map(|(p, r)| {
+            let d = (p - self.pack_mark, r - self.record_mark);
+            self.pack_mark = p;
+            self.record_mark = r;
+            format!(
+                "; pack {:.2}/tick, record {:.2}/frame",
+                d.0 / ticks.max(1) as f64,
+                d.1 / frames.max(1) as f64
+            )
+        });
+        let busy = (self.step_ns + self.render_ns + self.commands_ns) as f64 / 1e9;
+        let line = format!(
+            "tick cost — step {:.1} ms/tick (max {:.1}: world {:.1}, flora {:.1}, \
+             fauna {:.1}{shared}), render {:.2} ms/frame (max {:.1}{}), commands {:.2} ms; \
+             the loop was busy {:.0} % of {seconds:.1} s; \
+             water per tick (summed over its substeps) — {} exchanging, {} band, \
+             {} falling cells",
+            per(self.step_ns, ticks),
+            ms(self.step_max_ns),
+            per(world, ticks),
+            per(flora, ticks),
+            per(fauna, ticks),
+            per(self.render_ns, frames),
+            ms(self.render_max_ns),
+            split.unwrap_or_default(),
+            ms(self.commands_ns),
+            100.0 * busy / seconds.max(1e-9),
+            wet / ticks.max(1),
+            band / ticks.max(1),
+            search / ticks.max(1),
+        );
+        self.phases = Phases::default();
+        self.step_ns = 0;
+        self.step_max_ns = 0;
+        self.render_ns = 0;
+        self.render_max_ns = 0;
+        self.commands_ns = 0;
+        line
     }
 }
 

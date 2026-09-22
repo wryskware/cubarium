@@ -269,6 +269,15 @@ pub trait FrameSource {
         usize::MAX
     }
 
+    /// What this renderer would put in a frame recorded now, as a number that changes
+    /// whenever the picture would. A frame already recorded and still waiting at this
+    /// version would come out the same, so it is left alone rather than recorded again —
+    /// which matters on a main thread that also has a world to step. `None` from a
+    /// renderer that cannot say, and then nothing is ever held.
+    fn content_version(&self) -> Option<u64> {
+        None
+    }
+
     /// Whether the frame just recorded drew the world again, or only put a raster it
     /// already held onto a new target. A target that reports what a frame cost keeps the
     /// two apart, because they cost very different amounts.
