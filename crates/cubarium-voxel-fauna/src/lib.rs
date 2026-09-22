@@ -83,9 +83,9 @@ pub use cubarium_voxel::{DT, TICK_HZ};
 pub use cubarium_voxel_flora::Reach;
 pub use encounter::{
     HEADING_SAMPLES, SightMap, band_crown_layers, crown_columns, crown_layer, crown_slab_m,
-    eye_above_surface_m, eye_origin_m, foliage_stands_in_layers, mouth_columns_at,
-    mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg, standable_faces, surface_m,
-    walkable_components,
+    eye_above_surface_m, eye_origin_m, foliage_stands_in_layers, layer_columns, mouth_columns_at,
+    mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg, reachable_layers_of,
+    standable_faces, surface_m, walkable_components,
 };
 pub use manifest::{
     ACTION_DEADBAND, Action, BROWSER_RAY_PITCH_OFFSETS_DEG, BROWSER_RAY_YAW_OFFSETS_DEG,
@@ -143,6 +143,8 @@ pub enum ConeHit {
     Water,
     /// A crown cell of a stand whose foliage is zero.
     StrippedCrown,
+    /// A stand's trunk cell: structure, never food.
+    Trunk,
     /// A crown cell with foliage standing in it — the only hit the policy reads as food.
     FoliageCrown,
     /// The cell over a ground site holding litter, carrion or dead wood.
@@ -159,6 +161,7 @@ impl ConeHit {
             ConeHit::Terrain => "terrain",
             ConeHit::Water => "water",
             ConeHit::StrippedCrown => "stripped",
+            ConeHit::Trunk => "trunk",
             ConeHit::FoliageCrown => "foliage",
             ConeHit::GroundPool => "pool",
             ConeHit::Body => "body",
@@ -166,11 +169,12 @@ impl ConeHit {
     }
 
     /// Every variant, in the order a census row prints them.
-    pub const ALL: [ConeHit; 7] = [
+    pub const ALL: [ConeHit; 8] = [
         ConeHit::Clear,
         ConeHit::Terrain,
         ConeHit::Water,
         ConeHit::StrippedCrown,
+        ConeHit::Trunk,
         ConeHit::FoliageCrown,
         ConeHit::GroundPool,
         ConeHit::Body,
@@ -183,9 +187,10 @@ impl ConeHit {
             ConeHit::Terrain => 1,
             ConeHit::Water => 2,
             ConeHit::StrippedCrown => 3,
-            ConeHit::FoliageCrown => 4,
-            ConeHit::GroundPool => 5,
-            ConeHit::Body => 6,
+            ConeHit::Trunk => 4,
+            ConeHit::FoliageCrown => 5,
+            ConeHit::GroundPool => 6,
+            ConeHit::Body => 7,
         }
     }
 }
@@ -197,6 +202,7 @@ pub(crate) fn cone_hit_of(fine: senses::Fine) -> ConeHit {
         senses::Fine::Terrain => ConeHit::Terrain,
         senses::Fine::Water => ConeHit::Water,
         senses::Fine::StrippedCrown => ConeHit::StrippedCrown,
+        senses::Fine::Trunk => ConeHit::Trunk,
         senses::Fine::FoliageCrown => ConeHit::FoliageCrown,
         senses::Fine::GroundPool => ConeHit::GroundPool,
         senses::Fine::Body => ConeHit::Body,
@@ -241,8 +247,8 @@ pub struct ConeCensus {
 impl ConeCensus {
     /// How many fan rays of one sector struck each class, indexed by
     /// [`ConeHit::index`].
-    pub fn counts(&self, sector: usize) -> [u32; 7] {
-        let mut out = [0u32; 7];
+    pub fn counts(&self, sector: usize) -> [u32; ConeHit::ALL.len()] {
+        let mut out = [0u32; ConeHit::ALL.len()];
         for ray in self.rays.iter().filter(|r| r.sector == sector) {
             out[ray.hit.index()] += 1;
         }
@@ -2149,7 +2155,7 @@ mod cone_census_tests {
     fn the_fine_census_maps_onto_the_coarse_reading_exactly() {
         let (mut world, mut flora, mut fauna) = wall_and_water_world();
         let mut checked = 0usize;
-        let mut saw = [0usize; 7];
+        let mut saw = [0usize; ConeHit::ALL.len()];
         for tick in 0..=200u64 {
             if tick > 0 {
                 world.step();

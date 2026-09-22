@@ -1855,6 +1855,24 @@ impl FloraConfig {
         config
     }
 
+    /// Every species reduced to **one** `[0, 1.0]` foliage layer at the full crown
+    /// radius with no porosity: the lollipop the model was before plants had layers.
+    ///
+    /// For a **fixture whose subject is not the anatomy** — the shade exponent's units,
+    /// the strictness of the occlusion inequality, the mouth's physical band — where a
+    /// tiered, porous, rosette-bearing plant would be measuring something else. It is
+    /// not a shipped configuration and nothing in the tick uses it; what the authored
+    /// profiles do is `cubarium-voxel-flora/tests/layers.rs`'s and
+    /// `cubarium-voxel-fauna/tests/plant_layers.rs`'s subject.
+    pub fn one_layer_species(mut self) -> FloraConfig {
+        for species in Species::ALL {
+            self.species_mut(species).profile = SpeciesConfig::one_stage(vec![
+                SpeciesConfig::foliage_layer([0.0, 1.0], 1.0, 1.0, 0.0),
+            ]);
+        }
+        self
+    }
+
     pub fn species(&self, s: Species) -> &SpeciesConfig {
         match s {
             Species::Bloomcrown => &self.bloomcrown,

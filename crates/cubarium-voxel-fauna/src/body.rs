@@ -913,17 +913,62 @@ pub(crate) fn mouth_foliage_stand(
     body: &Body,
 ) -> Option<(Site, f64)> {
     let layers = mouth_crown_layers(standing_y, body, view.config.voxel_m);
-    let width = i64::from(view.config.width);
-    let depth = i64::from(view.config.depth);
     let mut best: Option<(Site, f64)> = None;
     for stand in fv.stands.iter().filter(|s| s.foliage > 0.0) {
-        let sc = fv.config.species(stand.species);
-        if !layers.contains(&(i64::from(stand.site.y) + i64::from(sc.crown_voxels(stand.wood)))) {
+        let reachable = reachable_layer_stock(fv, view, stand, cols, &layers);
+        if !(reachable > 0.0) {
             continue;
         }
-        let radius = sc.crown_radius(stand.wood).max(0.0);
-        let span = radius.floor() as i64;
-        let r2 = radius * radius;
+        let better = match best {
+            None => true,
+            Some((site, stock)) => reachable > stock || (reachable == stock && stand.site < site),
+        };
+        if better {
+            best = Some((stand.site, reachable));
+        }
+    }
+    best
+}
+
+/// What a mouth over `cols` whose band selects the cell range `layers` can take from
+/// **one stand**: the sum of the stocks of its foliage layers whose disc cell is in
+/// range and whose own disc — its own radius, which is a fraction of the crown's —
+/// covers one of the columns.
+///
+/// This is the whole of what layers changed about reach. Before, a stand was in reach
+/// or it was not and the answer was its whole `foliage`; now an adult bloomcrown offers
+/// a low mouth its basal rosette and keeps its crown three cells up.
+pub(crate) fn reachable_layer_stock(
+    fv: &FloraView<'_>,
+    view: &VoxelView<'_>,
+    stand: &cubarium_voxel_flora::Stand,
+    cols: &[(i64, u32)],
+    layers: &std::ops::RangeInclusive<i64>,
+) -> f64 {
+    reachable_layers(fv, view, stand, cols, layers)
+        .iter()
+        .map(|(_, stock)| *stock)
+        .sum()
+}
+
+/// The same, **per layer**: `(index among the stand's foliage layers, stock)`, which is
+/// what an observer reporting a per-layer split reads.
+pub(crate) fn reachable_layers(
+    fv: &FloraView<'_>,
+    view: &VoxelView<'_>,
+    stand: &cubarium_voxel_flora::Stand,
+    cols: &[(i64, u32)],
+    layers: &std::ops::RangeInclusive<i64>,
+) -> Vec<(usize, f64)> {
+    let width = i64::from(view.config.width);
+    let depth = i64::from(view.config.depth);
+    let mut out = Vec::new();
+    for layer in fv.layers(stand) {
+        if !(layer.stock > 0.0) || !layers.contains(&layer.cell) {
+            continue;
+        }
+        let span = layer.radius_v.floor() as i64;
+        let r2 = layer.radius_v * layer.radius_v;
         let mut touching = false;
         'cells: for dz in -span..=span {
             for dx in -span..=span {
@@ -942,18 +987,10 @@ pub(crate) fn mouth_foliage_stand(
             }
         }
         if touching {
-            let better = match best {
-                None => true,
-                Some((site, foliage)) => {
-                    stand.foliage > foliage || (stand.foliage == foliage && stand.site < site)
-                }
-            };
-            if better {
-                best = Some((stand.site, stand.foliage));
-            }
+            out.push((layer.foliage_index.unwrap_or(0), layer.stock));
         }
     }
-    best
+    out
 }
 
 /// Every foliage-bearing stand whose crown touches the actual mouth probe columns.
@@ -988,36 +1025,11 @@ pub(crate) fn foliage_stands_touching(
     cols: &[(i64, u32)],
     layers: &std::ops::RangeInclusive<i64>,
 ) -> Vec<(Site, f64)> {
-    let width = i64::from(view.config.width);
-    let depth = i64::from(view.config.depth);
     let mut out = Vec::new();
     for stand in fv.stands.iter().filter(|s| s.foliage > 0.0) {
-        let sc = fv.config.species(stand.species);
-        if !layers.contains(&(i64::from(stand.site.y) + i64::from(sc.crown_voxels(stand.wood)))) {
-            continue;
-        }
-        let radius = sc.crown_radius(stand.wood).max(0.0);
-        let span = radius.floor() as i64;
-        let r2 = radius * radius;
-        let mut touching = false;
-        'cells: for dz in -span..=span {
-            for dx in -span..=span {
-                if (dx * dx + dz * dz) as f64 > r2 {
-                    continue;
-                }
-                let cx = (i64::from(stand.site.x) + dx).rem_euclid(width);
-                let cz = i64::from(stand.site.z) + dz;
-                if cz < 0 || cz >= depth {
-                    continue;
-                }
-                if cols.contains(&(cx, cz as u32)) {
-                    touching = true;
-                    break 'cells;
-                }
-            }
-        }
-        if touching {
-            out.push((stand.site, stand.foliage));
+        let reachable = reachable_layer_stock(fv, view, stand, cols, layers);
+        if reachable > 0.0 {
+            out.push((stand.site, reachable));
         }
     }
     out
@@ -2084,7 +2096,10 @@ mod tests {
 
         let world = flat_world();
         let view = world.view();
-        let mut flora = Flora::new(FloraConfig::default());
+        // The subject is the **band**, so the plants are the one-disc lollipops this
+        // test was written against: what an adult bloomcrown's basal rosette does under
+        // the same band is `tests/plant_layers.rs`'s claim.
+        let mut flora = Flora::new(FloraConfig::default().one_layer_species());
         // bloomcrown wood 0.30 rounds to a two-voxel crown, so its crown layer is the
         // body's head layer plus one; wood 0.12 rounds to one and sits at the head.
         for (x, wood) in [(2i64, 0.30), (5, 0.12)] {

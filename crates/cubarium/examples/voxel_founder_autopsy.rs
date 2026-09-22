@@ -565,9 +565,9 @@ struct Wander {
 struct LastCone {
     tick: u64,
     /// First-hit counts over the whole 27-ray fan, indexed by [`ConeHit::index`].
-    counts: [u32; 7],
+    counts: [u32; ConeHit::ALL.len()],
     /// Per sector, the same counts and the mean distance of its foliage hits.
-    per_sector: [([u32; 7], f64); 3],
+    per_sector: [([u32; ConeHit::ALL.len()], f64); 3],
     /// The nearest **living** crown by straight line: planar metres, the signed voxels
     /// between its crown layer and the eye, its elevation from the eye in degrees, and
     /// whether that elevation is inside the fan's pitch band.
@@ -599,7 +599,7 @@ fn last_cone(
     // uses, so "blocked by what" is the fan's own answer and not a second opinion.
     let probes: Vec<(f64, f64)> = crown.iter().map(|c| (c.0, c.1)).collect();
     let census: ConeCensus = browser_cone_census(view, fv, av, animal, &probes)?;
-    let mut counts = [0u32; 7];
+    let mut counts = [0u32; ConeHit::ALL.len()];
     for ray in &census.rays {
         counts[ray.hit.index()] += 1;
     }
@@ -686,7 +686,7 @@ fn report_cone_classes(
         .filter(|(_, s)| s.founder == Some(Founder::Browser))
         .map(|(id, _)| id)
         .collect();
-    let mut totals = [[0.0f64; 7]; 3];
+    let mut totals = [[0.0f64; ConeHit::ALL.len()]; 3];
     let mut foliage_m = [(0.0f64, 0u64); 3];
     let mut counted = 0u64;
     let mut blind = 0u64;

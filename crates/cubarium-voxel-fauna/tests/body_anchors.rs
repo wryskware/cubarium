@@ -27,6 +27,11 @@ use cubarium_voxel_fauna::{
 // Fixtures
 // ---------------------------------------------------------------------------
 
+// Since the layers package these fixtures use `one_layer_species()`: the subject is
+// the **body's anchors in metres**, so each plant is the one-disc lollipop the claims
+// were written against. What the authored anatomy puts under the same band is
+// `tests/plant_layers.rs`'s subject.
+
 /// A flat world of `voxel_m` cells whose ground support face is the highest soil layer.
 /// Soil fills `1..=support`, so a body stands on the face at `y = support` and occupies
 /// the layer over it.
@@ -235,7 +240,7 @@ fn a_crown_at_0_20_m_is_reachable_on_both_grids_and_one_at_0_30_m_is_not() {
     for (v, support, height) in [(0.125f64, 5u32, 14u32), (0.25, 2, 10)] {
         for (target, reachable) in [(0.20f64, true), (0.30, false)] {
             let world = flat_world(v, support, height);
-            let mut flora = Flora::new(FloraConfig::for_voxel_size(v));
+            let mut flora = Flora::new(FloraConfig::for_voxel_size(v).one_layer_species());
             let before = crown_containing(&mut flora, &world, 4, 4, support, target);
 
             let mut fauna = Fauna::new(FaunaConfig::default());
@@ -391,7 +396,7 @@ fn a_body_cannot_enter_a_void_shorter_than_its_height() {
 #[test]
 fn the_ledgers_conserve_across_a_bite_under_the_band() {
     let mut world = flat_world(0.25, 2, 10);
-    let mut flora = Flora::new(FloraConfig::default());
+    let mut flora = Flora::new(FloraConfig::default().one_layer_species());
     crown_containing(&mut flora, &world, 4, 4, 2, 0.20);
     let mut fauna = Fauna::new(FaunaConfig::default());
     adult_browser_feeding(&mut fauna, &world, 4, 4);

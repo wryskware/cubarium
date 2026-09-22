@@ -35,6 +35,13 @@ use cubarium_voxel_fauna::{
 /// it changes, and every browser centre trained before this build is refused.
 const BLIND_DIGEST_BEFORE_THE_VERTICAL_REACH: u64 = 6_080_287_729_887_670_217;
 
+// Since the layers package these fixtures use `one_layer_species()`: every plant is
+// the one-disc lollipop the model was when these claims were written, because the
+// subject here is the **mouth's physical band** and not the anatomy under it. An adult
+// bloomcrown's basal rosette — the anatomy that now answers the reach these tests
+// measure — is `tests/plant_layers.rs`'s subject
+// (`design/handoffs/voxel-plant-layers-2026-09-22.md`).
+
 /// A flat world: 8 × 6 × 6 voxels at 0.25 m, soil 1..=2, ground support face at y = 2.
 fn flat_world() -> World {
     let mut world = World::empty(VoxelConfig {
@@ -129,7 +136,7 @@ const ONE_BITE: f64 = 0.002 * 0.25;
 #[test]
 fn a_browser_bites_a_crown_at_its_head_layer() {
     let world = flat_world();
-    let mut flora = Flora::new(FloraConfig::default());
+    let mut flora = Flora::new(FloraConfig::default().one_layer_species());
     let before = crown_at(&mut flora, &world, 2, 2, 0.12, 0);
 
     let mut fauna = Fauna::new(FaunaConfig::default());
@@ -167,7 +174,7 @@ fn a_browser_bites_a_crown_at_its_head_layer() {
 #[test]
 fn a_crown_one_voxel_above_the_head_is_out_of_the_physical_band() {
     let world = flat_world();
-    let mut flora = Flora::new(FloraConfig::default());
+    let mut flora = Flora::new(FloraConfig::default().one_layer_species());
     let before = crown_at(&mut flora, &world, 2, 2, 0.30, 1);
 
     let mut fauna = Fauna::new(FaunaConfig::default());
@@ -201,7 +208,7 @@ fn a_crown_one_voxel_above_the_head_is_out_of_the_physical_band() {
 #[test]
 fn a_browser_cannot_bite_a_crown_two_voxels_above_its_head() {
     let world = flat_world();
-    let mut flora = Flora::new(FloraConfig::default());
+    let mut flora = Flora::new(FloraConfig::default().one_layer_species());
     let before = crown_at(&mut flora, &world, 2, 2, 0.60, 2);
 
     let mut fauna = Fauna::new(FaunaConfig::default());
@@ -234,7 +241,7 @@ fn a_browser_cannot_bite_a_crown_two_voxels_above_its_head() {
 #[test]
 fn the_blind_founders_litter_mouth_and_digest_are_unchanged() {
     let world = flat_world();
-    let mut flora = Flora::new(FloraConfig::default());
+    let mut flora = Flora::new(FloraConfig::default().one_layer_species());
     assert!(flora.deposit(
         site(2, 2),
         Deposit {
@@ -298,7 +305,7 @@ fn the_mouth_diagnostic_agrees_with_the_stepping_rule_at_three_crown_heights() {
     let world = flat_world();
     // Three columns two apart, so no crown disc reaches its neighbour's mouth probes.
     let cases = [(1i64, 0.12, 0i64), (3, 0.30, 1), (5, 0.60, 2)];
-    let mut flora = Flora::new(FloraConfig::default());
+    let mut flora = Flora::new(FloraConfig::default().one_layer_species());
     let mut before = Vec::new();
     for (x, wood, rise) in cases {
         before.push(crown_at(&mut flora, &world, x, 2, wood, rise));

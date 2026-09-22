@@ -143,6 +143,50 @@ pub fn foliage_stands_in_layers(
     crate::body::foliage_stands_touching(fv, view, cols, layers)
 }
 
+/// What a mouth over `cols` whose band selects `layers` can take from one stand,
+/// **per foliage layer**: `(index among the stand's foliage layers, stock)`, bottom-up.
+///
+/// This is what closes package 0's "could not measure 1" (within-stand shares): an
+/// observer can now say that a browser reaches an adult bloomcrown's rosette and not
+/// its crown, rather than that it reaches the stand or does not
+/// (`design/handoffs/voxel-edible-stock-2026-09-21.md`, integration note).
+pub fn reachable_layers_of(
+    fv: &FloraView<'_>,
+    view: &VoxelView<'_>,
+    stand: &Stand,
+    cols: &[(i64, u32)],
+    layers: &RangeInclusive<i64>,
+) -> Vec<(usize, f64)> {
+    crate::body::reachable_layers(fv, view, stand, cols, layers)
+}
+
+/// The `(x, z)` columns one **layer** covers, by the same disc rule the mouth and the
+/// cone both use — its own radius, which is a fraction of the crown's.
+pub fn layer_columns(
+    view: &VoxelView<'_>,
+    stand: &Stand,
+    layer: &cubarium_voxel_flora::StandLayer,
+) -> Vec<(u32, u32)> {
+    let c = view.config;
+    let span = layer.radius_v.floor() as i64;
+    let r2 = layer.radius_v * layer.radius_v;
+    let mut out = Vec::new();
+    for dz in -span..=span {
+        for dx in -span..=span {
+            if (dx * dx + dz * dz) as f64 > r2 {
+                continue;
+            }
+            let z = i64::from(stand.site.z) + dz;
+            if z < 0 || z >= i64::from(c.depth) {
+                continue;
+            }
+            let x = (i64::from(stand.site.x) + dx).rem_euclid(i64::from(c.width));
+            out.push((x as u32, z as u32));
+        }
+    }
+    out
+}
+
 /// The layer a stand's crown disc of cells sits at: `site.y + crown_voxels(wood)`.
 pub fn crown_layer(fv: &FloraView<'_>, stand: &Stand) -> i64 {
     i64::from(stand.site.y) + i64::from(fv.config.species(stand.species).crown_voxels(stand.wood))

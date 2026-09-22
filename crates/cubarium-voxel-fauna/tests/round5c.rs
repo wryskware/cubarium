@@ -611,7 +611,11 @@ fn a_feeding_face_outside_the_sensing_radius_is_not_selectable() {
         let mut world = plain(40, 2, 0.3, 5);
         let raised = (bx + 1).rem_euclid(40);
         raise(&mut world, raised, 2, 3, 0.3);
-        let mut flora = Flora::new(FloraConfig::default());
+        // The premise below is "the crown is food from exactly one face", which is a
+        // claim about the **sensing radius** and needs a plant with one disc: an adult
+        // bloomcrown's basal rosette is food from every face beside it, which is the
+        // layers package's point and `tests/plant_layers.rs`'s subject.
+        let mut flora = Flora::new(FloraConfig::default().one_layer_species());
         bloom(&mut flora, &world, bx);
         let mut fauna = Fauna::new(config_with(|s| s.sense_radius = radius));
         let sc = *fauna.config().species(Species::Frondgrazer);

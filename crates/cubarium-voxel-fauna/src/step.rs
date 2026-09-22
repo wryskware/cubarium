@@ -792,7 +792,14 @@ fn founder_feed(
             // Whose foliage this is, read before the withdrawal, so the report says
             // which species was actually eaten.
             let plant = flora.view().stand_at(root).map(|s| s.species);
-            let Some(taken) = flora.take_foliage(root, want) else {
+            // The mouth's own cell range, handed to the plant layer: the bite comes out
+            // of the layers the band reaches, lowest first, and the crown above them is
+            // not offered (`design/handoffs/voxel-plant-layers-2026-09-22.md`).
+            let layers = body::mouth_crown_layers(site_y, geometry, view.config.voxel_m);
+            let Some(taken) = flora
+                .take_foliage_in_layers(root, want, &layers)
+                .map(|t| t.taken)
+            else {
                 return false;
             };
             let taken = fauna.book_eaten(taken);
