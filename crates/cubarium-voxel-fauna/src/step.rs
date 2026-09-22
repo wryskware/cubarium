@@ -816,11 +816,13 @@ fn founder_feed(
         body::Meal::Stand { root } => flora
             .take_foliage_in_layers(root, want, &layers)
             .map(|t| t.taken),
-        body::Meal::Pool {
-            site,
-            food: Food::Carrion,
-        } => flora.take_carrion(site, want),
-        body::Meal::Pool { site, .. } => flora.take_litter(site, want),
+        body::Meal::Pool { site, food } => match food {
+            Food::Litter => flora.take_litter(site, want),
+            Food::Carrion => flora.take_carrion(site, want),
+            Food::CapTissue | Food::Foliage => {
+                unreachable!("a stand's tissue is not a ground pool")
+            }
+        },
     };
     let Some(taken) = taken else {
         return false;
@@ -840,6 +842,13 @@ fn founder_feed(
 
 /// One mouthful, spent over the stands in reach in site order: the plant layer bounds each
 /// withdrawal by the foliage it finds, so what comes back is what the animal got.
+///
+/// **This is the legacy heuristic-species path and it has no diet.** Decisions §3's
+/// acceptance rule is written against the two founder *lineages* and is applied at
+/// [`crate::Diet`] in the founder mouth; a non-founder body still reaches through
+/// `reachable_foliage`, which is species-agnostic, so a heuristic grazer standing at a
+/// glowcap would still crop it. Giving the live species a diet means a field on
+/// [`SpeciesConfig`] and is not this package's (the live world runs founders).
 fn crop(
     fauna: &mut Fauna,
     flora: &mut Flora,
