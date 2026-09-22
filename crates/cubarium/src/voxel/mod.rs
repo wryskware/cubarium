@@ -907,6 +907,8 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     let start = Instant::now();
     let mut clock = Clock::with_fps(start, args.fps);
     let (mut ticks, mut frames) = (0u64, 0u64);
+    // The running report's own counters: what happened since the last one was printed.
+    let (mut since, mut since_ticks, mut since_frames) = (start, 0u64, 0u64);
     let mut ctl = Control::new(speed, proj);
     let mut debt = 0.0f64;
     // Whether the world or the plant layer has moved since the last frame drawn. The CPU
@@ -932,6 +934,21 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         if out.should_quit() || stop.load(Ordering::Relaxed) {
             break;
         }
+        // The running report, so the panel's rate can be read without stopping it.
+        if now.duration_since(since) >= SUMMARY_INTERVAL {
+            eprintln!(
+                "cubarium voxel: since the last report — {}",
+                run_line(
+                    &sim,
+                    since_ticks,
+                    since_frames,
+                    now.duration_since(since).as_secs_f64()
+                )
+            );
+            since = now;
+            since_ticks = 0;
+            since_frames = 0;
+        }
 
         while let Ok(line) = commands.try_recv() {
             sim.with_layers_mut(|world, flora, fauna| ctl.handle(world, flora, fauna, &line));
@@ -952,6 +969,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                         ctl.pending_steps -= 1;
                         sim.step();
                         ticks += 1;
+                        since_ticks += 1;
                         moved = true;
                     }
                 } else {
@@ -960,6 +978,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                         debt -= 1.0;
                         sim.step();
                         ticks += 1;
+                        since_ticks += 1;
                         moved = true;
                     }
                 }
@@ -975,6 +994,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                 let (world, flora, fauna) = sim.layers();
                 out.render(world, flora, fauna, std::mem::take(&mut moved))?;
                 frames += 1;
+                since_frames += 1;
             }
             Step::Sleep(d) => std::thread::sleep(d),
             Step::Lagged { behind, log } => {
@@ -1000,21 +1020,8 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         save_voxel_snapshot(dir, world);
     }
     let elapsed = clock.elapsed(Instant::now()).as_secs_f64();
-    let (world, flora, fauna) = sim.layers();
-    let view = world.view();
-    let fv = flora.view();
-    eprintln!(
-        "cubarium voxel: {ticks} ticks, {frames} frames in {elapsed:.2} s ({:.1} fps); \
-         stored {:.3} m3, residual {:.3e} m3; \
-         {} stands, flora residual {:.3e} organic, {:.3e} mineral, {:.3e} energy",
-        frames as f64 / elapsed.max(1e-9),
-        view.stored_m3(),
-        view.stored_m3() - view.ledger.expected_stored(),
-        fv.stands.len(),
-        fv.organic() - fv.ledger.expected_organic(),
-        fv.mineral() - fv.ledger.expected_mineral(),
-        fv.energy() - fv.ledger.expected_energy(),
-    );
+    eprintln!("cubarium voxel: {}", run_line(&sim, ticks, frames, elapsed));
+    let (_, _, fauna) = sim.layers();
     let av = fauna.view();
     eprintln!(
         "cubarium voxel: {} animals ({} born, {} dead, {} bites, {} steps), \
@@ -1454,6 +1461,31 @@ impl Out {
             Out::Gpu(gpu) => gpu.finish(),
         }
     }
+}
+
+/// How often the running report is printed. The same line the run ends with, for the
+/// numbers **since the last one**: a service that only reports at shutdown cannot be
+/// asked how fast it is going without being stopped.
+const SUMMARY_INTERVAL: Duration = Duration::from_secs(60);
+
+/// What was done in `elapsed` seconds, and what the world holds now — the run's one
+/// summary line, printed periodically while it runs and once when it ends.
+fn run_line(sim: &Sim, ticks: u64, frames: u64, elapsed: f64) -> String {
+    let (world, flora, _) = sim.layers();
+    let view = world.view();
+    let fv = flora.view();
+    format!(
+        "{ticks} ticks, {frames} frames in {elapsed:.2} s ({:.1} fps); \
+         stored {:.3} m3, residual {:.3e} m3; \
+         {} stands, flora residual {:.3e} organic, {:.3e} mineral, {:.3e} energy",
+        frames as f64 / elapsed.max(1e-9),
+        view.stored_m3(),
+        view.stored_m3() - view.ledger.expected_stored(),
+        fv.stands.len(),
+        fv.organic() - fv.ledger.expected_organic(),
+        fv.mineral() - fv.ledger.expected_mineral(),
+        fv.energy() - fv.ledger.expected_energy(),
+    )
 }
 
 /// Open the output this run draws into, for a world of `proj`'s geometry.
@@ -2231,6 +2263,32 @@ mod tests {
         assert!((present::founding_pulse(0.0) - 1.0).abs() < 1e-6);
         assert!(present::founding_pulse(present::FOUNDING_PULSE_S / 2.0) < 0.7);
         assert!((present::founding_pulse(present::FOUNDING_PULSE_S) - 1.0).abs() < 1e-6);
+    }
+
+    /// The running report is the line the run ends with, over the interval it names, so
+    /// the panel's frame rate can be read without stopping the service.
+    #[test]
+    fn the_running_report_is_the_summary_line_for_its_own_interval() {
+        assert_eq!(SUMMARY_INTERVAL, Duration::from_secs(60));
+        let c = cubarium_voxel::Config {
+            width: 16,
+            height: 8,
+            depth: 2,
+            ..Default::default()
+        };
+        let sim = Sim::new(
+            World::empty(c.clone()),
+            Flora::new(FloraConfig::for_voxel_size(c.voxel_m)),
+            Fauna::new(FaunaConfig::default()),
+            SimConfig { threads: 1 },
+            None,
+        );
+        let line = run_line(&sim, 1_200, 3_600, 60.0);
+        assert!(
+            line.starts_with("1200 ticks, 3600 frames in 60.00 s (60.0 fps);"),
+            "{line}"
+        );
+        assert!(line.contains("0 stands"), "{line}");
     }
 
     /// The start-up viability probe is off the loop: the call returns while the work is
