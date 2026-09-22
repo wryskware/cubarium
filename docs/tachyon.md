@@ -79,13 +79,17 @@ there is not."** No wrapper computes it and no flag selects it; this is what
    `cubarium: resuming /var/lib/cubarium/state/world-1730.cubw at tick 1730` —
    and that line in the journal is the check that a restart did not found a new
    world.
-2. If snapshot files are **present but none load**, the run is *refused*:
-   "this is a damaged world, not an empty directory, so no new world is created
-   here." With `Restart=always` that shows up as a restart loop and a black
-   panel, which is the intended outcome — the standing rule is *always fresh,
-   never migrate*, and silently founding a new world every boot is the one
-   failure this whole arrangement exists to avoid. Move the files aside
-   deliberately.
+2. If snapshot files are present but every one of them is refused **for its
+   schema** (an older world under a newer build), the run deletes them and
+   founds a fresh world, saying so:
+   `cubarium voxel: discarded 5 snapshot(s) of schema 13 in
+   /var/lib/cubarium/state; founding a fresh world (schema 15)`. Wrysk,
+   2026-09-22: the panel's worlds are disposable and never backed up. A file
+   that is unreadable, truncated or invalid for any *other* reason still
+   refuses by name — that is a damaged world, not a stale one — and shows up
+   as a restart loop and a black panel until the files are moved aside.
+   `scripts/tachyon-reseed.sh` stops the service, deletes the saved worlds and
+   starts it again (`--seed N` pins a seed in a drop-in, `--no-seed` unpins).
 3. Only a directory with **no snapshot file at all** founds a new world:
    `cubarium: no loadable snapshot in /var/lib/cubarium/state; creating a new
    world`, built from `/var/lib/cubarium/world.toml` plus the `--topology` and

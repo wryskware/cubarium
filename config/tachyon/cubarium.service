@@ -39,9 +39,10 @@ Environment=RUST_LOG=info
 # `--gpu-web-rate 2` also belongs here rather than in the ExecStart below; see the
 # note on it.
 Environment="CUBARIUM_EXTRA_ARGS=--gpu-web-rate 2"
-# The four A78s. Never a single core: core_ctl isolates idle big cores and a
-# one-core mask is how a 60 fps frame turns into a 20 fps one.
-CPUAffinity=4-7
+# Every core but one: the board runs nothing else (Wrysk, 2026-09-22). The old
+# 4-7 mask met core_ctl offlining idle big cores and left the sim two threads;
+# the tick's default thread count is now whatever it can see minus one.
+CPUAffinity=0-6
 
 # `cubarium voxel`: a 160x48x24 voxel world presented through the GPU cutaway
 # renderer straight into scanout dma-bufs for cube-screen-shim.
