@@ -40,6 +40,7 @@
 pub mod animal;
 pub mod appearance;
 pub mod habitat;
+pub mod placement;
 pub mod present;
 pub mod project;
 pub mod scene;
@@ -311,15 +312,89 @@ fn prune_voxel_snapshots(dir: &Path, keep: usize) {
 }
 
 /// Atomically write a snapshot to `dir` and prune older snapshots.
+///
+/// The bytes reach the disk before the rename makes them the snapshot: a
+/// `world-N.voxel` is either whole or absent, even across a power cut, and a crash
+/// mid-write leaves only a `tmp-` file nothing reads.
 fn save_voxel_snapshot(dir: &Path, world: &World) {
+    use std::io::Write;
     let tick = world.tick();
     let snap_file = dir.join(format!("world-{tick}.voxel"));
     let tmp_file = dir.join(format!("tmp-{tick}.voxel"));
-    if let Ok(()) = std::fs::write(&tmp_file, world.save()) {
-        if std::fs::rename(&tmp_file, &snap_file).is_ok() {
-            eprintln!("cubarium voxel: saved snapshot {}", snap_file.display());
-            prune_voxel_snapshots(dir, 5);
+    let bytes = world.save();
+    let written = std::fs::File::create(&tmp_file).and_then(|mut f| {
+        f.write_all(&bytes)?;
+        f.sync_all()
+    });
+    if written.is_ok() && std::fs::rename(&tmp_file, &snap_file).is_ok() {
+        eprintln!("cubarium voxel: saved snapshot {}", snap_file.display());
+        prune_voxel_snapshots(dir, 5);
+    } else {
+        let _ = std::fs::remove_file(&tmp_file);
+    }
+}
+
+/// The running snapshot, off the loop.
+///
+/// **Clone on the loop, encode and write on a thread.** `World::save` clones the world
+/// and then postcard-encodes the clone, so the clone is a strict subset of what the loop
+/// used to pay: on the desk (release, the panel's 160x72x24 world, 4.7 MB) the clone is
+/// 0.1–0.3 ms against 0.6–1.4 ms for the encode and 0.4–0.5 ms for the write, and the
+/// board is 8–10x slower than the desk for this loop. One write in flight at a time: a
+/// snapshot due while the last is still writing is skipped, not queued, and the exit save
+/// ([`SnapshotWriter::save_now`]) waits for the one in flight before it writes its own.
+struct SnapshotWriter {
+    dir: PathBuf,
+    in_flight: Option<JoinHandle<()>>,
+    /// Where a thread spawned by the pinned loop goes instead of the loop's own core.
+    placement: Option<placement::Placement>,
+}
+
+impl SnapshotWriter {
+    fn new(dir: PathBuf) -> SnapshotWriter {
+        SnapshotWriter {
+            dir,
+            in_flight: None,
+            placement: None,
         }
+    }
+
+    /// Start writing `world` in the background, unless the last write is still going.
+    /// Returns whether it started.
+    fn save_in_background(&mut self, world: &World) -> bool {
+        let world = world.clone();
+        let dir = self.dir.clone();
+        self.spawn(move || save_voxel_snapshot(&dir, &world))
+    }
+
+    /// Run `job` as the one write in flight. The seam the tests hold a write open with.
+    fn spawn(&mut self, job: impl FnOnce() + Send + 'static) -> bool {
+        if self.in_flight.as_ref().is_some_and(|h| !h.is_finished()) {
+            eprintln!("cubarium voxel: the last snapshot is still writing; skipping this one");
+            return false;
+        }
+        self.wait();
+        let placement = self.placement.clone();
+        self.in_flight = Some(std::thread::spawn(move || {
+            if let Some(p) = placement {
+                p.leave_loop_core();
+            }
+            job();
+        }));
+        true
+    }
+
+    /// Wait for the write in flight, if there is one.
+    fn wait(&mut self) {
+        if let Some(h) = self.in_flight.take() {
+            let _ = h.join();
+        }
+    }
+
+    /// The exit save: synchronous, after whatever was already writing.
+    fn save_now(&mut self, world: &World) {
+        self.wait();
+        save_voxel_snapshot(&self.dir, world);
     }
 }
 
@@ -922,13 +997,20 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     // texture per *tick*, so it needs to be told.
     let mut moved = true;
 
-    let state_dir: Option<PathBuf> = args.load.as_ref().and_then(|p| {
+    let mut snapshots: Option<SnapshotWriter> = args.load.as_ref().and_then(|p| {
         if p.is_dir() || (p.extension().is_none() && !p.is_file()) {
-            Some(p.clone())
+            Some(SnapshotWriter::new(p.clone()))
         } else {
             None
         }
     });
+
+    // Last, so every thread this process has — the presenter, the tick pool, the stdin
+    // reader, the start-up probe — already exists to be moved off the loop's core.
+    let placed = placement::place_loop();
+    if let Some(s) = snapshots.as_mut() {
+        s.placement = placed;
+    }
 
     while !ctl.quit {
         let now = Instant::now();
@@ -1007,11 +1089,12 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                     }
                 }
                 out.observe_tick(sim.world().tick());
-                if let Some(ref dir) = state_dir {
-                    if ticks > 0 && ticks % 1200 == 0 {
-                        let (world, _, _) = sim.layers();
-                        save_voxel_snapshot(dir, world);
-                    }
+                if let Some(s) = snapshots.as_mut()
+                    && ticks > 0
+                    && ticks % 1200 == 0
+                {
+                    let (world, _, _) = sim.layers();
+                    s.save_in_background(world);
                 }
             }
             Step::Render { .. } => {
@@ -1043,9 +1126,9 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     }
 
     out.finish()?;
-    if let Some(ref dir) = state_dir {
+    if let Some(s) = snapshots.as_mut() {
         let (world, _, _) = sim.layers();
-        save_voxel_snapshot(dir, world);
+        s.save_now(world);
     }
     let elapsed = clock.elapsed(Instant::now()).as_secs_f64();
     let shown = out.presented().map(|(shown, _)| shown);
@@ -1578,11 +1661,32 @@ struct Phases {
     search: u64,
 }
 
+/// The water leaves, in tick order: what the `world` column sums.
+///
+/// The live schedule runs the water phases as its own chained systems and never calls
+/// `World::step`, so `Phase::WorldStep` (and `Substeps`) never open there and read zero;
+/// the water's time is the **sum of its leaves**, as `cubarium-voxel-sim`'s bench counts
+/// it (`WATER_PHASES` in `examples/bench.rs`).
+const WATER_PHASES: [cubarium_voxel::profile::Phase; 9] = {
+    use cubarium_voxel::profile::Phase;
+    [
+        Phase::Rain,
+        Phase::Evaporate,
+        Phase::Infiltrate,
+        Phase::Fall,
+        Phase::Exchange,
+        Phase::Drain,
+        Phase::WaterTable,
+        Phase::Spring,
+        Phase::Outlet,
+    ]
+};
+
 impl Phases {
     fn now() -> Phases {
         use cubarium_voxel::profile::{self, Count, Phase};
         Phases {
-            world: profile::nanos(Phase::WorldStep),
+            world: WATER_PHASES.iter().copied().map(profile::nanos).sum(),
             flora: profile::nanos(Phase::FloraStep),
             fauna: profile::nanos(Phase::FaunaStep),
             wet: profile::count(Count::ExchangeWet),
@@ -2563,6 +2667,157 @@ mod tests {
         release.send(()).unwrap();
         handle.join().unwrap();
         assert!(done.load(Ordering::Relaxed), "the line comes later");
+    }
+
+    /// The `world` column is the water's leaves, which the live schedule does time —
+    /// `Phase::WorldStep` never opens there, which is why it read 0.0 on the board.
+    #[test]
+    fn the_world_timer_counts_the_live_schedules_water() {
+        let c = cubarium_voxel::Config {
+            width: 16,
+            height: 8,
+            depth: 2,
+            ..Default::default()
+        };
+        let mut sim = Sim::new(
+            World::new(c.clone()),
+            Flora::new(FloraConfig::for_voxel_size(c.voxel_m)),
+            Fauna::new(FaunaConfig::default()),
+            SimConfig { threads: 1 },
+            None,
+        );
+        let mut budget = Budget::default();
+        for _ in 0..3 {
+            let (at, before) = (Instant::now(), Phases::now());
+            sim.step();
+            budget.tick(at.elapsed().as_nanos() as u64, before);
+        }
+        assert!(budget.phases.world > 0, "the water leaves were timed");
+        let line = budget.line(1.0, 3, 0, None);
+        assert!(line.contains("world "), "{line}");
+    }
+
+    /// A scratch state directory, removed when dropped.
+    struct StateDir(PathBuf);
+
+    impl StateDir {
+        fn new(tag: &str) -> StateDir {
+            let dir =
+                std::env::temp_dir().join(format!("cubarium-snap-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            StateDir(dir)
+        }
+
+        fn snapshots(&self) -> Vec<PathBuf> {
+            let mut v: Vec<PathBuf> = std::fs::read_dir(&self.0)
+                .unwrap()
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.file_name()
+                        .and_then(|n| n.to_str())
+                        .and_then(parse_voxel_tick)
+                        .is_some()
+                })
+                .collect();
+            v.sort();
+            v
+        }
+    }
+
+    impl Drop for StateDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A reader polling the directory while the background writer works never finds a
+    /// `world-N.voxel` that does not load: the file appears whole or not at all.
+    #[test]
+    fn a_background_snapshot_is_never_seen_half_written() {
+        let dir = StateDir::new("torn");
+        let c = cubarium_voxel::Config {
+            width: 64,
+            height: 32,
+            depth: 16,
+            ..Default::default()
+        };
+        let mut world = World::new(c);
+        let mut writer = SnapshotWriter::new(dir.0.clone());
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let reader = {
+            let (stop, path) = (stop.clone(), dir.0.clone());
+            std::thread::spawn(move || {
+                let mut loads = 0;
+                while !stop.load(Ordering::Relaxed) {
+                    for p in std::fs::read_dir(&path)
+                        .unwrap()
+                        .flatten()
+                        .map(|e| e.path())
+                    {
+                        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                        if parse_voxel_tick(name).is_some() {
+                            // Pruned between the listing and the read is fine; a read that
+                            // succeeds must be a whole world.
+                            if let Ok(bytes) = std::fs::read(&p) {
+                                World::load(&bytes).unwrap_or_else(|e| panic!("{name}: {e}"));
+                                loads += 1;
+                            }
+                        }
+                    }
+                }
+                loads
+            })
+        };
+        for _ in 0..3 {
+            assert!(writer.save_in_background(&world));
+            writer.wait();
+            world.step();
+        }
+        writer.save_now(&world);
+        stop.store(true, Ordering::Relaxed);
+        assert!(reader.join().unwrap() > 0, "the reader saw snapshots");
+        assert_eq!(dir.snapshots().len(), 4);
+        let leftovers = std::fs::read_dir(&dir.0)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with("tmp-"))
+            .count();
+        assert_eq!(leftovers, 0, "no temporary file outlives its write");
+    }
+
+    /// A snapshot due while one is writing is skipped, and the exit save waits for the
+    /// write in flight before it writes its own.
+    #[test]
+    fn the_exit_snapshot_waits_for_the_write_in_flight() {
+        let dir = StateDir::new("exit");
+        let c = cubarium_voxel::Config {
+            width: 16,
+            height: 8,
+            depth: 2,
+            ..Default::default()
+        };
+        let world = World::new(c);
+        let mut writer = SnapshotWriter::new(dir.0.clone());
+        let (release, held) = mpsc::channel::<()>();
+        let finished = std::sync::Arc::new(AtomicBool::new(false));
+        let flag = finished.clone();
+        assert!(writer.spawn(move || {
+            held.recv().unwrap();
+            std::thread::sleep(Duration::from_millis(50));
+            flag.store(true, Ordering::SeqCst);
+        }));
+        assert!(
+            !writer.save_in_background(&world),
+            "one write in flight at a time"
+        );
+        release.send(()).unwrap();
+        writer.save_now(&world);
+        assert!(finished.load(Ordering::SeqCst), "the exit save waited");
+        let snaps = dir.snapshots();
+        assert_eq!(snaps.len(), 1);
+        World::load(&std::fs::read(&snaps[0]).unwrap()).unwrap();
     }
 
     /// The documented defaults, and a partial config file that only overrides some of
