@@ -463,6 +463,16 @@ pub struct Water {
     /// generated world to be accepted. The host draws another seed below it. Zero accepts
     /// any world.
     pub min_lake_m2: f64,
+    /// **River re-entry**, cubic metres per second: under the closed budget the water the
+    /// outlet sends aloft comes back not only as showers but as a stream emerging at the
+    /// spring cell, drawn from the atmosphere store while it stands above the shower
+    /// floor. The ring is a slice of a wider world; the river that leaves at the bottom
+    /// lake re-enters at the top. Zero is showers only, the 2026-09-20 route B cycle.
+    /// Wrysk's decision, 2026-09-21.
+    pub reentry_m3_per_s: f64,
+    /// How many open-sky pools **above the lake** a generated world must hold water in
+    /// to be accepted, beside `min_lake_m2`. Zero asks for none.
+    pub min_tier_pools: u32,
 }
 
 impl Default for Water {
@@ -489,6 +499,8 @@ impl Water {
         shower_interval_max_s: 0.0,
         lake_depth_m: 0.0,
         min_lake_m2: 0.0,
+        reentry_m3_per_s: 0.0,
+        min_tier_pools: 0,
     };
 
     /// The staged presets' inventory: half a metre of water over the footprint, six per
@@ -541,6 +553,8 @@ impl Water {
         // the least of that.
         lake_depth_m: 0.75,
         min_lake_m2: 6.0,
+        reentry_m3_per_s: 0.0,
+        min_tier_pools: 0,
     };
 
     /// `small`'s ring is 60 m² of footprint against `default`'s 192, and both the store's
@@ -598,6 +612,7 @@ impl Water {
             ("water.min_lake_m2", self.min_lake_m2),
             ("water.lake_depth_m", self.lake_depth_m),
             ("water.min_lake_m2", self.min_lake_m2),
+            ("water.reentry_m3_per_s", self.reentry_m3_per_s),
         ] {
             anyhow::ensure!(
                 v.is_finite() && v >= 0.0,
@@ -631,6 +646,7 @@ impl Water {
         c.shower_volume_m3 = self.shower_volume_m3;
         c.shower_interval_min_s = self.shower_interval_min_s;
         c.shower_interval_max_s = self.shower_interval_max_s;
+        c.reentry_m3_per_s = self.reentry_m3_per_s;
     }
 }
 

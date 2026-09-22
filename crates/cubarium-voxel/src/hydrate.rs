@@ -1300,6 +1300,8 @@ mod tests {
                 shower_interval_max_s: 120.0,
                 lake_depth_m: 0.5,
                 min_lake_m2: 0.0,
+                reentry_m3_per_s: 0.0,
+                min_tier_pools: 0,
             },
         );
         let before = lake(&w).level_y;

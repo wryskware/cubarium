@@ -1031,3 +1031,188 @@ over ten minutes. Known: most of the inventory now parks in the sky store
 
 Wrysk's next idea (tiers: taller world, terraces with pools, waterfalls,
 river re-entry at the top) awaits his two decisions; see the conversation.
+
+## Wrysk's decisions on tiers — 2026-09-21
+
+After seeing the lake on the panel Wrysk asked for terrain that uses the
+panel's vertical space: "multi-level terrains. water features on other
+levels, waterfalls possibly even (works well if the only outlet is on the
+bottom most lake)", with a concept picture of stacked terraces, pools, a
+waterfall between levels and an ant-farm cave layer. Decided: **river
+re-entry** (a stream at the spring cell fed from the sky store; the
+2026-09-20 route B cycle keeps its lumped store and gains a second return
+path) and **tiers before the atlas** (slice 4 moves behind this).
+
+Geometry facts the packages rest on: the panel raster is a fixed 640×360
+and `Projection::new` crops a taller world; at 4 px/voxel and a 30° tilt
+the depth costs 2 px per voxel, so the world may be at most 78 voxels tall
+(4·78 + 2·24 = 360). Today's 48 uses 240 px, and its terrain 21 voxels.
+The solver already carries a waterfall as a column of void cells handing
+water down (`water.rs` header); the spring today is aquifer-head driven.
+
+Fields added by Fable with this commit so both packages compile:
+`Water::reentry_m3_per_s` (copied into `Config::reentry_m3_per_s` by
+`cycle_into`; 0 = showers only) and `Water::min_tier_pools` (gate, 0 =
+none). T2 owns the mechanism behind the config field; T1 owns `recipe.rs`
+entirely — T2 does not edit it, and reports the numbers it wants instead.
+
+## Package T1 — tiers (generator worker)
+
+Owner: generator worker (Opus, high). Files: `recipe.rs` (a `Tiers`
+section, preset heights and numbers), `generate.rs`, `hollows.rs`,
+`noise.rs`, `erosion.rs`. Not `hydrate.rs`, `water.rs`, `world.rs`,
+`config.rs`, `viability.rs`, the host — T2 runs there in parallel.
+
+The form: a staircase of terraces rising from the front cut to the back
+wall (the camera rule: front low, back high, so every terrace floor and
+every riser face the camera), each riser a rock cliff with the benches and
+undercuts the strata already give, and on every terrace above the lowest a
+**rock-bedded pool** near the terrace's front edge whose rim is lowest at a
+**spillway notch on its front side**, so its overflow falls over the riser
+straight into the pool below it — a chain of waterfalls ending in the lake.
+The spring cell moves to the top pool's floor: that is where the river
+re-enters. Wrysk's concept picture is the reference for the *idea*; the
+look stays the dev-mode autotile, no art decisions here.
+
+Deliverable:
+
+1. `Recipe.tiers: Tiers { count, rise_m, edge_wavelength_m, edge_warp_m,
+   flat: relief scale inside a terrace, pool_radius_m, pool_depth_m,
+   notch_width_m, front_setback_m }`, serde-defaulted, `count = 0` is
+   today's landform exactly (no preset moves until you set it).
+2. A tier field `t(x, z) ∈ 0..count`, non-decreasing in `z` for every
+   `x`, edges warped by periodic noise in `x`, added to the heightfield as
+   `t · rise_m` before relief; relief inside a terrace scaled by `flat`.
+   `back_rise_m` stays for the residual slope. Exact periodicity in `x`.
+3. Pool stamps on tiers `1..count`: a bowl of `pool_radius_m` and
+   `pool_depth_m` whose floor and walls are `Rock` (an upper pool has no
+   water table to stand on — package V found a lake on soil drains into
+   its bed), rimmed on every side except the notch, the notch on the
+   front rim at the riser's edge. Pool `k`'s notch column lands, one
+   voxel in front of the riser's foot, inside pool `k−1`'s bowl; the
+   lowest chained pool's notch lands in the **lake** — stamp the lake's
+   low point there (a bowl on tier 0 like the others, on soil, so
+   `LakeDatum` finds it) so `hydrate::lake` and the falls agree.
+4. The spring cell is the top pool's lowest floor cell (staged recipes
+   with `count > 0`; `Ridge` and `count = 0` keep today's placement).
+5. Every riser has at least one **ramp** — a path of steps of at most
+   0.5 m — so the ring-traversability walk still passes; cut it where the
+   pool chain is not.
+6. Presets: `small` height 48 → **72** (4·72 + 48 = 336 px, 24 px of sky),
+   3 tiers; `default` and `wide` also 72 voxels with 3–4 tiers (the web
+   viewer has no fixed raster). Set the numbers so a terrace reads as a
+   floor at 4 px (say ≥ 8 voxels of rise), a pool is at least 6 voxels
+   across, and grottos survive (report `hollows::find` counts per preset
+   as L did). Keep the `hollows` datum rule as it is: nothing below the
+   lake level.
+
+Tests first, each under a second:
+
+- `tiers_rise_toward_the_back_and_wrap`: on `default` with 3 tiers, for
+  every `x` the tier index is non-decreasing in `z`, the field at `x = 0`
+  equals `x = width`, and tier 0 touches the front row somewhere.
+- `count_zero_is_todays_landform`: `default` seed 1 with `tiers.count = 0`
+  gives the same `Volume` as before the change (hash it once before
+  editing, keep the hash only for this test, delete it if it ever needs
+  re-recording — the no-pinned-hashes rule).
+- `pools_are_rock_bowls_with_one_notch`: on the staged fixture every
+  stamped pool is a `hydrate::basins` basin whose floor is `Rock`, whose
+  spill is the notch level, and whose rim cells at spill height are all
+  higher than the notch except the notch itself, on the front side.
+- `the_chain_lands_in_the_pool_below`: every pool's notch column, one
+  voxel in front of the riser foot, indexes a cell of the next pool
+  down; the last one a cell of the lake basin.
+- `the_spring_is_in_the_top_pool`: `spring_cell()` is a floor cell of the
+  top pool.
+- `every_riser_has_a_ramp`: the traversability walk (existing) passes on
+  the three presets, seeds 1 and 77.
+- `small_fits_the_panel_raster`: `4 · height + 2 · depth ≤ 360` for the
+  `small` preset, with a comment naming `Projection::new`.
+
+Visual: `small` seed 1 and the panel's seed 9482528745678189003 at
+4 px/voxel through `config/tachyon/voxel.toml`, and `default` seed 1 at
+8 px, into the scratch directory under `terrain-tiers/`, **dry** (before T2
+lands the stream the pools hold only what hydrate gives them — say so in
+the return). Look at them yourself before returning: every terrace floor
+visible, risers front-facing, pools readable.
+
+Return (≤30 lines): commits, the `Tiers` numbers per preset, tier/pool/
+notch table per preset seed 1, hollows kept, walk results, PNG paths.
+
+## Package T2 — river re-entry and the cascade (habitat worker)
+
+Owner: habitat worker (Opus, high). Files: `config.rs` (doc only; the
+field exists), `world.rs`, `water.rs`, `ledger.rs`, `snapshot.rs`
+(SCHEMA 13 → 14), `hydrate.rs`, `viability.rs`, host `voxel/mod.rs`,
+`present.rs` and `sink/gpu/voxel.rs` only if the falls do not read. Not
+`recipe.rs`, `generate.rs`, `hollows.rs` — T1 owns those in parallel;
+develop against today's spring cell and it will be right when T1 moves it
+to the top pool.
+
+Deliverable:
+
+1. **Re-entry**: each tick under the closed budget, while
+   `atmosphere_m3` stands above the shower floor, move
+   `min(reentry_m3_per_s · DT, atmosphere − floor)` out of the store into
+   the spring cell through the spring's own emergence loop (at the cell,
+   or the cells above it when brim full; blocked by a solid roof, and
+   then not withdrawn). Booked as `Ledger::reentry_in` (new) and
+   `atmosphere_out`; `expected_stored`/`expected_total` stay exact. The
+   aquifer-head spring is untouched and adds to it. `is_raining` is not
+   affected. Open budget: ignored. SCHEMA 14, no migration.
+2. **Settle** with a stream running: `World::settle` judges stored water
+   as now; state in the doc that a flow-through steady state converges
+   because stored volume is constant while water moves. Check
+   `dry_locked` does not misfire with the stream on.
+3. **Gate**: `hydrate::pools(world) -> Vec<Pool { cells, surface_cells,
+   visible_m2, level_y }>` for every open-sky basin holding water; the
+   host's seed gate also requires `min_tier_pools` pools with
+   `level_y > lake.level_y` and at least 4 visible surface cells. The
+   startup water line reports them (`lake 7.9 m², 2 pools above it,
+   stream 0.004 m³/s`).
+4. **Numbers**: `reentry_m3_per_s` for the three presets — the smallest
+   rate at which every fall column in the chain stays wet on every tick
+   after settle (a void cell under each notch holds free water every
+   tick for 2 simulated minutes) and the sky store holds within ±5 % over
+   10 simulated minutes; and `min_tier_pools` (expect 1). Report them for
+   T1 to write into `Water::DEFAULT/SMALL/WIDE`; do not edit `recipe.rs`.
+5. **The falls must read at 4 px.** A falling cell holds a small fraction
+   of its void, and the presenter draws `round(free · s)` rows, which is
+   zero at 4 px for a thin stream. If the study's stream is invisible at
+   the panel's scale, draw at least one row for any void cell with free
+   water above a void cell (a falling column), CPU presenter and GPU slab
+   walk alike, and prove both paths agree on the fixture; if the GPU path
+   cannot be rendered locally, say exactly what you checked.
+
+Tests first, each under a second:
+
+- `reentry_moves_store_to_spring_and_conserves`: a closed slab with a
+  spring cell on open ground, store above the floor, `reentry` set: after
+  100 ticks `ledger.reentry_in ≈ 100 · rate · DT`, the store fell by the
+  same, `total_residual().abs() < 1e-9`; with the store at the floor,
+  nothing moves; with `reentry = 0`, nothing moves.
+- `a_roofed_spring_keeps_the_store`: the spring cell under rock: no
+  withdrawal, no booking.
+- `the_open_budget_ignores_reentry`: open slab, `reentry` set: ledger
+  field stays 0.
+- `a_stream_reaches_steady_state`: authored two-bowl fixture (an upper
+  rock pool with a notch over a one-voxel drop into a lower basin holding
+  the outlet at its rim): with re-entry on, after settle the upper pool
+  stands at its notch, the fall column holds free water every tick over
+  200 ticks, and stored water is within 1 % across the last 100 ticks.
+- `pools_reports_only_open_water_above_the_lake`: on the fixture,
+  `pools()` lists the upper pool and not the lake, and the gate helper
+  counts 1.
+- Snapshot round trip carries `reentry_in`; the refuse-old-schema test
+  still passes.
+
+Study (ignored, run by name), after T1 lands (Fable will tell you): the
+three presets seed 1, settle, then 10 simulated minutes: per pool in the
+chain, level vs notch, fall-column wet ticks, store min/max, showers
+fired. Visual: `small` panel seed 9482528745678189003 and seed 1 at
+4 px through the Tachyon config, `default` seed 1 at 8 px, into
+`terrain-tiers/wet/`, and look at them: the falls must be visible.
+
+Return (≤30 lines): commits, rates chosen and why, per-preset study
+digest, whether the presenter needed the falling-column rule, PNG paths,
+test counts.
