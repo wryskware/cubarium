@@ -699,3 +699,164 @@ physical shade as on `default`; before, halving the cell quartered the optical
 depth. No stock number in the tables above is attributable to it: the t = 0
 observer does not step, and the two autopsy arms are 0.125 m and 0.25 m worlds
 whose light gates move only over hours.
+
+## Layers, 2026-09-22
+
+Package 2 (`design/handoffs/voxel-plant-layers-2026-09-22.md`) on the
+bodies-in-metres world: a species carries a `profile` staged by `wood / wood_max`,
+a stand holds one stock per foliage-bearing layer of that stage summing to its
+scalar `foliage`, bites come out of the layers the mouth's band reaches lowest
+first, regrowth fills bottom-up and senescence sheds from the top, and light is
+assessed per layer. The profiles are `design/organism-anatomy-2026-09-21.md` §3's
+tables with decisions §5's corrections — the adult bloomcrown keeps a **0.25
+basal rosette for life**, a woody seedling is a ground rosette capped at 0.125 m.
+Measured on branch `plant-layers`, from main at 1447efd.
+
+**"Before" is a control arm of this same build, not a quoted number.**
+`voxel_edible_stock ... lollipop` and `voxel_founder_autopsy ... lollipop` run
+`FloraConfig::one_layer_species()` — every plant the one disc it was — on the
+same landforms, the same seed, the same bodies and the same trained centres. At
+`t = 0` it reproduces the "Bodies in metres" table above **exactly** on all three
+presets, which is what makes the differences below attributable to the anatomy
+and to nothing else. Over a stepped run it is statistically, not bitwise, the old
+model: a withdrawal now sums per-layer takes where it used to compute
+`want.min(foliage)`, and an ulp in a bite is a different trajectory an hour later.
+
+### t = 0, `voxel_edible_stock 0 preset=<name>`
+
+| fraction of standing foliage | small | default | wide |
+| --- | --- | --- | --- |
+| standing foliage organic | 4.6752 | 20.2068 | 46.6440 |
+| reachable from any legal face, before → after | 0.417 → **0.591** | 0.500 → **0.561** | 0.486 → **0.595** |
+| route-connected to a seeded browser, before → after | 0.417 → **0.591** | 0.223 → 0.223 | 0.366 → **0.388** |
+| visible, before → after | 1.000 → 1.000 | 0.691 → 0.703 | 0.916 → 0.892 |
+| bloomcrown reachable, before → after | 0.000 → **1.000** | 0.534 → **0.664** | 0.334 → **0.536** |
+| umbrellafrond reachable, before → after | — | 0.000 → 0.000 | 0.039 → **0.087** |
+
+**All of the gain is the new low tissue, and the per-layer block says so.** The
+observer now reports each species' layers separately (`layer,<min>,<species>,
+<index>,<stands>,<band_lo_m>,<band_hi_m>,<stock>,<reach>,<route>,<f_reach>`),
+with the band stock-weighted in metres above the world floor:
+
+| preset | species | layer | band (m) | stock | reachable |
+| --- | --- | --- | --- | --- | --- |
+| small | bloomcrown | 0 rosette | 3.62–3.73 | 0.811 | **1.00** |
+| small | bloomcrown | 1 crown | 3.94–4.21 | 1.913 | 0.00 |
+| default | bloomcrown | 0 rosette | 9.74–9.84 | 2.828 | **1.00** |
+| default | bloomcrown | 1 crown | 10.06–10.32 | 6.628 | 0.52 |
+| default | umbrellafrond | 0 lowest tier | 4.24–4.38 | 2.309 | 0.00 |
+| default | umbrellafrond | 1 | 4.51–4.65 | 1.804 | 0.00 |
+| default | umbrellafrond | 2 top | 4.83–4.93 | 0.795 | 0.00 |
+| wide | bloomcrown | 0 rosette | 8.95–9.05 | 6.834 | **1.00** |
+| wide | bloomcrown | 1 crown | 9.29–9.54 | 15.966 | 0.34 |
+| wide | umbrellafrond | 0 lowest tier | 4.48–4.62 | 4.171 | 0.14 |
+| wide | stonecushion | 0 skirt · 1 cap | 4.62–4.74 | 2.864 · 1.228 | 1.00 · 1.00 |
+
+- **small.** Every bloomcrown's rosette is floor food, where before *no*
+  bloomcrown foliage was reachable at all: reach 0.417 → 0.591 and route with it,
+  because on this preset every legal face is one component.
+- **default.** Reach rises 0.500 → 0.561 and the route does not move at all
+  (0.223), because the seeded browsers' walkable component holds no bloomcrown —
+  the seeding problem package 1b flagged and package 4 owns. A rosette a browser
+  cannot walk to is not food.
+- **wide.** Reach 0.486 → 0.595 and route 0.366 → 0.388: bloomcrown's rosette is
+  wholly reachable and a third of its crown still is, because on a 24-high ring
+  many faces stand a voxel above a neighbouring stand.
+
+Umbrellafrond's adult and juvenile tiers stay out of reach on every preset, which
+is decisions §5's "escape at the seedling → juvenile transition" doing exactly
+what it says. `visible` moved a little in both directions: trunks are occluders
+for the first time, and a rosette is a second thing to see.
+
+### 60 simulated minutes, `voxel_founder_autopsy 60 preset=<name>`
+
+| | small before | small after | default before | default after |
+| --- | --- | --- | --- | --- |
+| deaths (accounted) | 27 | 30 | 41 | 36 |
+| starved (shredder / browser) | 27 (15 / 12) | 24 (13 / 11) | 38 (25 / 13) | 34 (23 / 11) |
+| drowned | 0 | 6 | 3 | 2 |
+| **browser extinct at minute** | **30** | **53** | never (1 alive) | never (**2** alive) |
+| shredders alive at 60 min | 6 | 3 | 9 | **13** |
+| browser bites | 10,495 | 12,280 | 14,135 | 17,526 |
+| browser assimilated | 0.743 | **1.252** | 1.566 | 1.352 |
+| born (of 33 / 51 births) | 17 | 17 | 35 | 35 |
+| bloomcrown bites / eaten | 640 / 0.095 | **3,380 / 1.294** | 0 / 0 | 0 / 0 |
+| umbrellafrond bites / eaten | 0 / 0 | 0 / 0 | 2,269 / 0.623 | **7,417 / 0.876** |
+| springturf bites / eaten | 1,585 / 0.732 | 1,860 / 0.789 | 4,190 / 1.729 | 2,897 / 1.228 |
+
+**On `small` the rosette is the difference: the browser lineage lasts 53 minutes
+instead of 30, on 1.25 of assimilated intake against 0.74, and bloomcrown goes
+from 640 bites to 3,380.** That is the grazed meadow decisions §5 asked for,
+measured. Two things moved the other way in the same arm and are recorded rather
+than explained: six browsers drowned where none did before, and the shredders
+ended at 3 instead of 6. Both are one seed and one trajectory — a browser that
+lives twenty minutes longer walks somewhere else and leaves a different corpse —
+and neither is a rule this package changed.
+
+**On `default` the rosette changes nothing, because no browser can walk to one.**
+What the browsers ate instead is umbrellafrond, three times over: its
+**seedlings** are ground rosettes now, and a seedling frond is food where an
+adult is not. Bloomcrown stays at zero bites on both arms. The lineage still
+holds at 60 minutes and the shredder population is larger (13 against 9), which
+follows the extra litter. This is the audit's §5 warning becoming visible:
+"universal seedling browsing can instead prevent canopy recruitment", and it is
+now a measurable pressure rather than a possibility.
+
+Residuals over 72,000 ticks: fauna ≤ 6.2e-11, flora ≤ 1.6e-10 absolute on both
+arms.
+
+### 6 simulated hours, `voxel_edible_stock 6 preset=<name>`
+
+| | small before | small after | default before | default after |
+| --- | --- | --- | --- | --- |
+| standing foliage, t = 0 → 6 h | 4.675 → **0.000** | 4.675 → **0.264** | 20.207 → 29.800 | 20.207 → **12.807** |
+| species alive at 6 h | none | stonecushion | umbrellafrond 28.19, stonecushion 1.61 | umbrellafrond 11.27, stonecushion 1.54 |
+| reachable at 6 h | — | 1.000 | 0.067 | **0.414** |
+| browsers alive, 0 → 6 h | 8 → 0 (gone by min 30) | 8 → 0 (gone by min 60) | 8 → 0 (gone by min 90) | 8 → 0 (**1 alive at min 180**, gone by 210) |
+| shredders alive, 0 → 6 h | 8 → 0 (gone by min 120) | 8 → 0 (gone by min 90) | 8 → **10** | 8 → **10** |
+
+- **small.** The plant layer collapses on both arms — it did before this package
+  and it does now — but the layered world ends holding 0.264 of stonecushion
+  where the lollipop world ends at exactly zero, and all of it is floor food.
+  Neither lineage survives six hours on this preset under either model. The
+  collapse is not the layers' doing and the layers do not fix it.
+- **default.** The forest regrows either way and it is umbrellafrond that regrows
+  it. **The layered world ends with less than half the standing foliage of the
+  lollipop one (12.8 against 29.8) and four times the share of it reachable
+  (0.414 against 0.067)**, because the regenerating fronds are seedlings and a
+  seedling is a ground rosette. The browser lineage lasts twice as long
+  (min 180 against min 90) and still dies. The shredders are unaffected at 10.
+
+The honest sentence for both presets: **layers put real food on the floor and the
+browsers ate it for twice as long, and it was not enough.** Nothing here says the
+lineage persists; it says the tissue it needs now exists and is reachable, and
+that what is still missing on `default` is the route (package 4) and on `small`
+the plant layer's own six-hour collapse, which predates this package.
+
+Residuals at 6 h, over 432,000 ticks, against the stocks the observer now prints
+beside them: `small` flora organic −1.4e-10 of 1.423, mineral −4.4e-11 of 260.3,
+energy −2.7e-10 of 2.846; `default` flora organic −1.3e-8 of 42.11, mineral
+−6.9e-11 of 384.8, energy −2.6e-8 of 84.21. Every one is ≤ 1e-9 **relative**
+(worst 3.1e-10, `default` energy). Fauna ≤ 1.5e-11 absolute on both. Water
+1.6e-7 m³ (`small`) and 2.7e-6 m³ (`default`). The 6 h `after` arms were run
+twice, on two builds differing only by an added print, and reproduced digit for
+digit.
+
+### What the layers did not settle
+
+**Porosity has no sight meaning and no meaning in the picture.** It enters the
+light exponent as `(1 - p)` and nothing else reads it, so a porous canopy is
+transparent to plant light and opaque to an eye and solid in the presenter. The
+audit's §5 asked for one shared interpretation; this package records the
+simplification instead of inventing one, because resolving it is a model decision
+(`design/voxel-encounter-contract-2026-09-21.md` §8).
+
+And that `(1 - p)` is the **one** way a single-layer species' shade differs from
+what it was: springturf, velvetpad and glowcap now shade by `(1-p)` of their old
+optical depth, with p 0.3, 0.6 and 0.5. Everything else about the shade of a
+one-layer plant is the pre-layer number digit for digit — the reference height,
+the footprint, the area in m², the occlusion order and the weight — which
+`crates/cubarium-voxel-flora/tests/layers.rs` asserts in both forms. The three
+are mats and caps whose band top sits at the ground, so they occlude almost
+nothing on these landscapes, and no number in the tables above is attributable to
+it; but it is a change, and it is a one-line change to undo.
