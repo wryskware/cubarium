@@ -6,6 +6,16 @@
 //! interpolation fraction `f` of the tick in progress — the presenter walks each
 //! organism's last-tick path by that fraction, so a 20 Hz world reads as continuous
 //! motion (one tick of latency, by design).
+//!
+//! **A slow tick costs frame freshness, never a flip.** Once the simulation has fallen
+//! more than one tick behind, a frame that is due outranks the tick that is owed, and the
+//! frames that came due *while* a long tick ran are presented rather than dropped: the
+//! same world state again, at the display's own rate. The panel's daemon blanks the
+//! screen after three seconds without a flip, so a 200 ms tick that withheld the frame
+//! turned a slow world into a black one (Wrysk, 2026-09-22). The drain is bounded by the
+//! instant it started at, so a renderer that cannot keep up re-bases its schedule instead
+//! of chasing a backlog for ever — and the simulation, which only runs when no frame is
+//! due, is never starved.
 
 use std::time::{Duration, Instant};
 
@@ -18,7 +28,8 @@ pub const RENDER_HZ: u32 = 60;
 /// The range `--fps` accepts.
 pub const MIN_FPS: u32 = 1;
 pub const MAX_FPS: u32 = 240;
-/// Catch-up ticks allowed in one pass before render work is dropped.
+/// Catch-up ticks allowed in one pass before the loop is handed back to the frames it
+/// owes. Nothing is dropped: the next pass keeps ticking.
 pub const MAX_CATCHUP_TICKS: u32 = 4;
 /// Being further behind than this is a suspend, not a stall: the clock re-bases rather
 /// than fast-forwarding the simulation.
@@ -54,8 +65,10 @@ pub enum Step {
     Render { f: f64 },
     /// Nothing is due: sleep this long (never a busy-wait).
     Sleep(Duration),
-    /// More than [`MAX_CATCHUP_TICKS`] behind: render work for this pass is dropped.
-    /// `log` is true at most once per [`LAG_LOG_INTERVAL`].
+    /// More than [`MAX_CATCHUP_TICKS`] behind: this pass runs no further catch-up tick,
+    /// so the loop gets back to the frames it owes. No render work is dropped for it —
+    /// the simulation falls behind, the picture does not. `log` is true at most once per
+    /// [`LAG_LOG_INTERVAL`].
     Lagged { behind: Duration, log: bool },
     /// The process was suspended (or stalled past [`PAUSE_THRESHOLD`]). The clock has
     /// re-based; no ticks are fast-forwarded across the gap.
@@ -76,6 +89,10 @@ pub struct Clock {
     render_index: u64,
     tick: u64,
     catchup: u32,
+    /// While a backlog of frames is draining, the instant the drain started: frames due
+    /// at or before it are still presented, and everything that came due during the
+    /// drain is dropped when it ends. `None` when the schedule is caught up.
+    drain_until: Option<Instant>,
     last_lag_log: Option<Instant>,
 }
 
@@ -99,6 +116,7 @@ impl Clock {
             render_index: 0,
             tick: 0,
             catchup: 0,
+            drain_until: None,
             last_lag_log: None,
         }
     }
@@ -162,16 +180,26 @@ impl Clock {
             return Step::Paused { gap };
         }
 
-        if now >= self.next_tick {
+        let tick_due = now >= self.next_tick;
+        let frame_due = now >= self.render_at(self.render_index);
+
+        // On schedule, the tick goes first: a frame landing exactly on a tick boundary
+        // belongs to the tick that boundary starts, and taking it first is what hands the
+        // presenter a fraction of 0 there rather than one just short of 1. Once the
+        // simulation is a whole tick or more behind — a tick that took longer than its
+        // own period — the frame goes first instead, and keeps going first until the
+        // picture is current again.
+        if tick_due && !(frame_due && behind >= self.tick_period) {
             if self.catchup < MAX_CATCHUP_TICKS {
                 self.catchup += 1;
                 self.tick += 1;
                 self.next_tick += self.tick_period;
                 return Step::Tick;
             }
-            // Still behind after a full run of catch-up ticks: give up the frame, report
-            // the lag at most once a second, and keep ticking on the next pass. Ticks are
-            // never skipped here, only render work.
+            // Still behind after a full run of catch-up ticks: stop ticking for this pass
+            // so the frames that came due meanwhile are presented, report the lag at most
+            // once a second, and keep ticking on the next pass. Nothing is skipped here —
+            // not a tick, and no longer a frame either.
             self.catchup = 0;
             let log = match self.last_lag_log {
                 Some(t) if now.duration_since(t) < LAG_LOG_INTERVAL => false,
@@ -180,25 +208,31 @@ impl Clock {
                     true
                 }
             };
-            // The dropped frame must not pile up either.
-            if now >= self.render_at(self.render_index) {
-                self.reschedule_renders(now);
-            }
             return Step::Lagged { behind, log };
         }
 
-        self.catchup = 0;
-
-        if now >= self.render_at(self.render_index) {
+        if frame_due {
+            // The frames that came due while the last tick ran are owed, one per pass,
+            // until the schedule reaches the instant this drain started. Freezing that
+            // deadline is what bounds it: a renderer slower than the frame period would
+            // otherwise chase a backlog it can never catch and never tick again, so when
+            // the drain ends anything that came due *during* it is dropped and the
+            // schedule re-based on now.
+            let deadline = *self.drain_until.get_or_insert(now);
             self.render_index += 1;
-            if self.render_at(self.render_index) <= now {
-                // A single late frame does not turn into a burst of catch-up frames.
-                self.reschedule_renders(now);
+            if self.render_at(self.render_index) > deadline {
+                self.drain_until = None;
+                if self.render_at(self.render_index) <= now {
+                    self.reschedule_renders(now);
+                }
             }
             return Step::Render {
                 f: self.fraction(now),
             };
         }
+
+        self.catchup = 0;
+        self.drain_until = None;
 
         let due = self.next_tick.min(self.render_at(self.render_index));
         Step::Sleep(due.saturating_duration_since(now))
@@ -219,6 +253,7 @@ impl Clock {
         self.render_base = now;
         self.render_index = 0;
         self.catchup = 0;
+        self.drain_until = None;
     }
 }
 
@@ -340,30 +375,36 @@ mod tests {
         assert!(late < 1.0 && late > 1.0 - 1e-12, "late fraction {late}");
     }
 
+    /// A stall runs every owed tick in runs of at most [`MAX_CATCHUP_TICKS`] — and the
+    /// frames it owes are presented, not dropped. This is the flicker the panel showed:
+    /// a tick over 50 ms used to mean no flip at all, and the daemon blanked the screen
+    /// three seconds later.
     #[test]
-    fn a_stall_runs_at_most_four_catch_up_ticks_then_drops_render_work() {
+    fn a_stall_runs_every_owed_tick_and_still_presents_its_frames() {
         let t0 = Instant::now();
         let mut c = Clock::new(t0);
-        // One second of stall: twenty ticks are owed.
+        // One second of stall: twenty ticks are owed, and sixty frames came due.
         let now = t0 + Duration::from_millis(1_000);
-        let mut ticks = 0;
-        let mut lagged = 0;
-        let mut logged = 0;
-        for _ in 0..40 {
+        let (mut ticks, mut renders, mut lagged, mut logged) = (0, 0, 0, 0);
+        for _ in 0..200 {
             match c.next_step(now) {
                 Step::Tick => ticks += 1,
+                Step::Render { .. } => renders += 1,
                 Step::Lagged { log, .. } => {
                     lagged += 1;
                     if log {
                         logged += 1;
                     }
                 }
-                Step::Render { .. } => panic!("render work must be dropped while behind"),
                 Step::Sleep(_) => break,
                 other => panic!("unexpected {other:?}"),
             }
         }
         assert_eq!(ticks, 20, "every owed tick still runs");
+        assert!(
+            (59..=61).contains(&renders),
+            "the second's worth of frames is presented, got {renders}"
+        );
         assert!(lagged >= 4, "the lag must be reported, got {lagged}");
         assert_eq!(logged, 1, "the lag logs at most once per second");
     }
@@ -397,24 +438,81 @@ mod tests {
         assert!((19..=20).contains(&ticks), "ticks {ticks}");
     }
 
+    /// The frames a late pass owes are presented once — exactly the ones that were due —
+    /// and the schedule then carries on from where it was, without replaying them again.
     #[test]
-    fn renders_do_not_burst_after_a_single_late_frame() {
+    fn a_late_pass_presents_the_frames_it_owed_once() {
         let t0 = Instant::now();
         let mut c = Clock::new(t0);
-        // 100 ms late, but under the tick backlog limit after four catch-up ticks.
+        // 100 ms late at 60 fps: frames 0..=6 are due (0, 16.6, ... 100 ms).
         let now = t0 + Duration::from_millis(100);
         let mut renders = 0;
-        for _ in 0..20 {
+        let mut ticks = 0;
+        for _ in 0..40 {
             match c.next_step(now) {
                 Step::Render { .. } => renders += 1,
+                Step::Tick => ticks += 1,
                 Step::Sleep(_) => break,
-                Step::Tick | Step::Lagged { .. } => {}
+                Step::Lagged { .. } => {}
                 other => panic!("unexpected {other:?}"),
             }
         }
-        assert!(
-            renders <= 1,
-            "a late frame must not replay missed frames, got {renders}"
-        );
+        assert_eq!(renders, 7, "the frames that were due, and no more");
+        assert_eq!(ticks, 2, "the two owed ticks run once the picture is current");
+        // Nothing further is owed at this instant: the next frame is in the future.
+        assert!(matches!(c.next_step(now), Step::Sleep(_)));
+    }
+
+    /// **The invariant of package D.** Whatever the simulation does, a wall-clock second
+    /// holds a second's worth of frames: a tick that takes 200 ms — four times its own
+    /// period, which is where the panel was — costs frame *freshness* and never a flip.
+    /// The frames that came due while such a tick ran arrive together when it ends, so
+    /// they are a burst of the same picture; what the panel needs is that no second is
+    /// short of flips and no hole is longer than the tick that made it.
+    #[test]
+    fn a_two_hundred_millisecond_tick_still_presents_at_the_display_rate() {
+        for fps in [20u32, 30, 60] {
+            let t0 = Instant::now();
+            let mut c = Clock::with_fps(t0, fps);
+            let mut now = t0;
+            let (mut ticks, mut paused) = (0u32, 0u32);
+            let mut at: Vec<Duration> = Vec::new();
+            while now < t0 + Duration::from_secs(3) {
+                match c.next_step(now) {
+                    // Every tick costs 200 ms of wall clock.
+                    Step::Tick => {
+                        ticks += 1;
+                        now += Duration::from_millis(200);
+                    }
+                    Step::Render { .. } => at.push(now - t0),
+                    Step::Sleep(d) => now += d,
+                    Step::Lagged { .. } => {}
+                    // A simulation this far behind its own rate never catches up, so the
+                    // clock eventually calls it a stall and re-bases. The picture carries
+                    // on across that, which is the whole point.
+                    Step::Paused { .. } => paused += 1,
+                }
+            }
+            assert!(paused <= 2, "fps {fps}: {paused} re-bases in three seconds");
+            // A settled second, so the run's first frame and its last tick are not the
+            // measurement.
+            let second = Duration::from_secs(1)..Duration::from_secs(2);
+            let frames = at.iter().filter(|t| second.contains(t)).count() as u32;
+            assert!(
+                frames + 1 >= fps,
+                "fps {fps}: {frames} frames in the second, wanted at least {}",
+                fps - 1
+            );
+            assert!(ticks >= 12, "fps {fps}: the world still ticks, got {ticks}");
+            let worst = at
+                .windows(2)
+                .map(|w| w[1] - w[0])
+                .max()
+                .expect("frames were presented");
+            assert!(
+                worst <= Duration::from_millis(250),
+                "fps {fps}: {worst:?} between frames"
+            );
+        }
     }
 }

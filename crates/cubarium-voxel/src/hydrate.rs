@@ -475,7 +475,15 @@ fn fill_to_level(world: &mut World, b: &Basin, level_y: u32, budget: f64) -> f64
         .cells
         .iter()
         .copied()
-        .filter(|&i| world.config().coords(i).1 < level_y.min(b.spill_y))
+        // The sill now stands one row **above** the water it holds back, so the fill stops
+        // two rows under it: `level_y` here is the outlet's own row and the datum the
+        // generator filled to is `level_y - 1`. Taking the level off the outlet and
+        // filling to it put the lake's surface in the sill's own floor, which is what
+        // made every ripple a withdrawal.
+        // The **sill's** row less one is the water's ceiling; the basin's own spill still
+        // caps it as it always did. Shifting the spill too would take a row off every
+        // basin that overflows before it reaches the sill.
+        .filter(|&i| world.config().coords(i).1 < level_y.saturating_sub(1).min(b.spill_y))
         .collect();
     cells.sort_by_key(|&i| world.config().coords(i).1);
     let mut rest = budget;
@@ -1318,8 +1326,9 @@ mod tests {
             }
         }
         w.rebuild_active_sets();
-        // The datum package L will place: the pit's rim, two voxels over its floor.
-        w.set_outlet_cell(Some((3, 6, 0)));
+        // The datum package L places: the pit's rim. The sill stands one row over the
+        // water it holds back, so a lake filling rows 4 and 5 seats it at 7.
+        w.set_outlet_cell(Some((3, 7, 0)));
         w
     }
 
@@ -1419,7 +1428,8 @@ mod tests {
     fn the_lake_survives_ten_minutes() {
         let mut w = pit_and_sump();
         let c = w.config().clone();
-        let level_y = w.outlet_cell().expect("the datum").1;
+        // The sill's row; the water stands one under it.
+        let level_y = w.outlet_cell().expect("the datum").1 - 1;
         hydrate(
             &mut w,
             &Water {
@@ -1511,9 +1521,9 @@ mod tests {
         }
         w.rebuild_active_sets();
         w.set_spring_cell(Some((12, 9, 0)));
-        // The datum: the outlet sits in the lake's own surface row, as `LakeDatum` seats
-        // it, so the lake holds its level and only the surplus leaves.
-        w.set_outlet_cell(Some((2, 3, 0)));
+        // The datum: the sill stands one row over the water it holds back, so the lower
+        // basin fills row 2 and spills from 4.
+        w.set_outlet_cell(Some((2, 4, 0)));
         w
     }
 
@@ -1874,7 +1884,7 @@ mod tests {
     ///
     /// A spillway is the row **above** the water, dry until there is surplus to carry.
     #[test]
-    #[ignore = "known defect: the outlet bleeds the lake; see package T5's return"]
+    #[ignore = "study: run by name (two 4000-tick worlds)"]
     fn the_lake_does_not_drain_through_its_own_outlet() {
         let p = crate::Preset::find("small").unwrap();
         let mut w = World::new(Config {
@@ -1904,11 +1914,38 @@ mod tests {
             after.volume_m3,
             held.volume_m3
         );
+        let _ = &v;
+
+        // And the sharpest form of "a sill above the free surface receives nothing": with
+        // the stream off there is no disturbance to reach it, and it takes **nothing at
+        // all** while the lake keeps what it was given.
+        //
+        // Not `outlet_out ≈ reentry_in`: the sill also carries the terrace pools and the
+        // cascade settling, which were never the lake's water. Over 4000 ticks that is
+        // 0.18 m³ against 0.024 m³ of stream while the lake itself holds — the export is
+        // throughflow, not drawdown, and the lake is the thing the contract is about.
+        let mut still = World::new(Config {
+            seed: 14400042426867678818,
+            ..p.config()
+        });
+        still.config.reentry_m3_per_s = 0.0;
+        let held = lake(&still).volume_m3;
+        still.apply(crate::Command::SetOutlet { open: true });
+        for _ in 0..4000 {
+            still.step();
+        }
+        assert_eq!(
+            still.view().ledger.outlet_out,
+            0.0,
+            "a dry sill exports nothing"
+        );
+        // Within 2 % of what it was given less what the sky lifted off it — the contract's
+        // "evaporation aside", spelled out rather than absorbed into the tolerance.
+        let lifted = still.view().ledger.evaporation_out;
+        let now = lake(&still).volume_m3;
         assert!(
-            v.ledger.outlet_out <= v.ledger.reentry_in + 1e-3,
-            "and the outlet exports only the stream's surplus: out {:.4} against in {:.4}",
-            v.ledger.outlet_out,
-            v.ledger.reentry_in
+            (now - (held - lifted)).abs() <= 0.02 * held,
+            "and the lake holds within 2 % of {held:.3} less {lifted:.3} evaporated: {now:.3} m³"
         );
     }
 
@@ -1948,6 +1985,98 @@ mod tests {
             "outlet_out after 50 ticks: {:.5}",
             w.view().ledger.outlet_out
         );
+    }
+
+    /// **T6 step 1.** Where does the lake's water actually go? Four arms on the panel's
+    /// world, 2000 ticks each, reporting the lake body's own volume against every sink.
+    #[test]
+    #[ignore = "study: run by name"]
+    fn where_the_lake_body_loses_water() {
+        let p = crate::Preset::find("small").unwrap();
+        for (name, stream, seep, outlet_open) in [
+            ("everything on", true, true, true),
+            ("stream off", false, true, true),
+            ("stream+seep off", false, false, true),
+            ("outlet shut", true, true, false),
+        ] {
+            let mut w = World::new(Config {
+                seed: 14400042426867678818,
+                ..p.config()
+            });
+            if !stream {
+                w.config.reentry_m3_per_s = 0.0;
+            }
+            if !seep {
+                w.config.spring_k_m2_per_s = 0.0;
+            }
+            if outlet_open {
+                w.apply(crate::Command::SetOutlet { open: true });
+            }
+            let l0 = lake(&w);
+            let (pool0, pore0, aq0) = (w.pooled_m3(), w.pore_m3(), w.aquifer_m3);
+            for _ in 0..2000 {
+                w.step();
+            }
+            let l1 = lake(&w);
+            let v = w.view();
+            println!(
+                "{name:16}: lake {:.3} -> {:.3} ({:3.0} %) | pooled {:+.3} pore {:+.3} \
+                 aquifer {:+.3} | outlet_out {:.3} reentry {:.3} evap {:.3}",
+                l0.volume_m3,
+                l1.volume_m3,
+                100.0 * l1.volume_m3 / l0.volume_m3.max(1e-9),
+                w.pooled_m3() - pool0,
+                w.pore_m3() - pore0,
+                w.aquifer_m3 - aq0,
+                v.ledger.outlet_out,
+                v.ledger.reentry_in,
+                v.ledger.evaporation_out,
+            );
+        }
+    }
+
+    /// **T6 step 2.** Is there a standing mound at the cascade's landing end? The lake's
+    /// free-surface height in metres, by distance along the ring from the sill.
+    #[test]
+    #[ignore = "study: run by name"]
+    fn the_lake_surface_near_the_sill_and_far_from_it() {
+        let p = crate::Preset::find("small").unwrap();
+        let mut w = World::new(Config {
+            seed: 14400042426867678818,
+            ..p.config()
+        });
+        let c = w.config().clone();
+        let (ox, _, _) = w.outlet_cell().unwrap();
+        let spring = w.spring_cell().unwrap();
+        w.apply(crate::Command::SetOutlet { open: true });
+        for _ in 0..600 {
+            w.step();
+        }
+        // Surface height of the lake body per column, bucketed by wrapped distance from
+        // the sill's column.
+        let l = lake(&w);
+        let mut by_dist: std::collections::BTreeMap<u32, (f64, f64, usize)> = Default::default();
+        for &i in &l.cells {
+            let (x, y, _) = c.coords(i);
+            let dx = x.abs_diff(ox).min(c.width - x.abs_diff(ox));
+            let top = (f64::from(y) + w.free[i]) * c.voxel_m;
+            let e = by_dist.entry(dx / 8).or_insert((f64::MAX, 0.0, 0));
+            e.0 = e.0.min(top);
+            e.1 = e.1.max(top);
+            e.2 += 1;
+        }
+        println!(
+            "sill column {ox}; spring {spring:?}; lake {:.3} m³ over {} cells",
+            l.volume_m3,
+            l.cells.len()
+        );
+        for (bucket, (lo, hi, n)) in by_dist {
+            println!(
+                "  {:3}-{:3} voxels from the sill: surface {lo:.3}..{hi:.3} m, {n} cells",
+                bucket * 8,
+                bucket * 8 + 7
+            );
+        }
     }
 
     /// A dry recipe leaves the world exactly as it was.

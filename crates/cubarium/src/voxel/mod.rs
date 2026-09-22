@@ -48,6 +48,7 @@ pub mod stand;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
@@ -66,7 +67,7 @@ use cubarium_voxel_sim::{Arena, Sim, SimConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::cli::{Voxel, VoxelArenaArg, VoxelControllerArg, VoxelSceneArg, VoxelSinkArg};
-use crate::clock::{Clock, Step};
+use crate::clock::{Clock, MAX_FPS, MIN_FPS, Step};
 use crate::sink::gpu::voxel::{VoxelGpuSink, VoxelGpuSinkOptions};
 use crate::sink::{FrameSink, GpuTargetKind, Output, PngSink, WebSink, WorldShape};
 
@@ -638,6 +639,35 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
             cfg.threads
         },
     };
+    let speed = args.speed.clamp(MIN_SPEED, MAX_SPEED);
+    // **The output is opened before the world exists.** Founding one is minutes of work
+    // on the board — a seed gate of up to `LAKE_SEED_TRIES` candidates, each settled,
+    // then the habitat's own settle — and the shim's daemon blanks the panel three
+    // seconds after the last flip, so a process that draws nothing until its world is
+    // ready is a process the panel shows as dead. The sink is opened on the geometry the
+    // config file already fixes, and a founding frame is presented at the display's rate
+    // while the world is built on another thread.
+    //
+    // The sensing arena is not founded: it builds in milliseconds and has no wait to
+    // cover.
+    let mut out: Option<Out> = match args.arena {
+        Some(_) => None,
+        None => {
+            let proj = Projection::new(
+                cfg.tilt_degrees,
+                cfg.px_per_voxel,
+                cfg.raster_height,
+                &cfg.world,
+            )?;
+            let mut out = open_out(args, &cfg, proj, speed)?;
+            // The GPU draws whatever was last staged, and nothing has been staged yet:
+            // an empty world of this config makes the founding frame sky over nothing
+            // rather than whatever the staging buffer happened to hold.
+            out.stage_empty(&cfg.world);
+            Some(out)
+        }
+    };
+
     let (mut sim, scene_label) = match args.arena {
         Some(arena) => {
             let (founder, driver) = sensing_driver(args, arena)?;
@@ -672,7 +702,11 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                 format!("sensing {} arena seed {}", founder.name(), args.arena_seed),
             )
         }
-        None => {
+        None => found_while_presenting(
+            out.as_mut().expect("the ordinary run opens its output first"),
+            args.fps,
+            stop,
+            || {
             let (mut world, scene_label, _resumed) = load_or_create_world(args, &cfg)?;
             let mut flora = Flora::new(FloraConfig::for_voxel_size(world.config().voxel_m));
             let mut fauna = Fauna::new(FaunaConfig::default());
@@ -792,62 +826,44 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
             // walk over nothing.
             let mut senses = Senses::new();
             senses.settle(&world.view(), &flora.view());
-            (
+            Ok((
                 Sim::new(world, flora, fauna, sim_config, Some(senses)),
                 scene_label,
-            )
-        }
+            ))
+            },
+        )?,
     };
 
+    // The world that was built is the world the config drew, unless a snapshot was
+    // resumed that describes a different one — then the founding output is on the wrong
+    // geometry and is reopened on the world that actually exists.
     let proj = Projection::new(
         cfg.tilt_degrees,
         cfg.px_per_voxel,
         cfg.raster_height,
         sim.world().config(),
     )?;
-    let topology = Topology::Ring {
-        w: proj.raster_w,
-        h: proj.raster_h,
-    };
-    let shape = WorldShape::new(topology, Scale::ONE);
-
-    let speed = args.speed.clamp(MIN_SPEED, MAX_SPEED);
-    let web = |port| {
-        WebSink::with_world(
-            port,
-            "voxel strip",
-            crate::sink::web::Source {
-                speed,
-                ..Default::default()
-            },
-            None,
-            shape,
-        )
-    };
-    let mut out: Out = match args.sink {
-        VoxelSinkArg::Png => Out::cpu(
-            Box::new(PngSink::new(&args.out, args.every)?),
-            cfg.clone(),
-            proj,
-        ),
-        VoxelSinkArg::Web => Out::cpu(Box::new(web(args.web_port)?), cfg.clone(), proj),
-        VoxelSinkArg::Gpu => {
-            crate::sink::gpu::voxel::check(proj)?;
-            let mut gpu = VoxelGpuSink::new(
-                &cfg,
-                proj,
-                VoxelGpuSinkOptions {
-                    target: args.gpu_target.unwrap_or_else(GpuTargetKind::detect),
-                    capture: args.gpu_capture.clone(),
-                    roof_from_texture: !args.gpu_roof_walk,
-                },
-            )?;
-            if args.gpu_web_rate > 0.0 {
-                gpu = gpu.with_web(web(args.web_port)?, args.gpu_web_rate);
-            }
-            Out::Gpu(Box::new(gpu))
+    let mut out = match out {
+        Some(out) if same_extent(&cfg.world, sim.world().config()) => out,
+        Some(old) => {
+            let c = sim.world().config();
+            eprintln!(
+                "cubarium voxel: the world in hand is {}x{}x{}, not the {}x{}x{} the \
+                 config draws; reopening the output on it",
+                c.width,
+                c.height,
+                c.depth,
+                cfg.world.width,
+                cfg.world.height,
+                cfg.world.depth,
+            );
+            drop(old);
+            open_out(args, &cfg, proj, speed)?
         }
+        None => open_out(args, &cfg, proj, speed)?,
     };
+    // The world exists: the founding sky goes back to the palette's.
+    out.founded()?;
 
     eprintln!(
         "cubarium voxel: tick schedule on {} thread(s)",
@@ -881,7 +897,8 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
              into the atmosphere, not an export"
         );
     }
-    report_water_cycle(sim.world(), sim.flora(), sim.config().threads);
+    // Off the loop: the run starts now, and this line arrives when it arrives.
+    let _probe = report_water_cycle(sim.world(), sim.flora(), sim.config().threads);
     eprintln!("cubarium voxel: stdin commands — {COMMANDS}");
 
     let commands = spawn_stdin_reader();
@@ -890,6 +907,8 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     let start = Instant::now();
     let mut clock = Clock::with_fps(start, args.fps);
     let (mut ticks, mut frames) = (0u64, 0u64);
+    // The running report's own counters: what happened since the last one was printed.
+    let (mut since, mut since_ticks, mut since_frames) = (start, 0u64, 0u64);
     let mut ctl = Control::new(speed, proj);
     let mut debt = 0.0f64;
     // Whether the world or the plant layer has moved since the last frame drawn. The CPU
@@ -915,6 +934,21 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         if out.should_quit() || stop.load(Ordering::Relaxed) {
             break;
         }
+        // The running report, so the panel's rate can be read without stopping it.
+        if now.duration_since(since) >= SUMMARY_INTERVAL {
+            eprintln!(
+                "cubarium voxel: since the last report — {}",
+                run_line(
+                    &sim,
+                    since_ticks,
+                    since_frames,
+                    now.duration_since(since).as_secs_f64()
+                )
+            );
+            since = now;
+            since_ticks = 0;
+            since_frames = 0;
+        }
 
         while let Ok(line) = commands.try_recv() {
             sim.with_layers_mut(|world, flora, fauna| ctl.handle(world, flora, fauna, &line));
@@ -935,6 +969,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                         ctl.pending_steps -= 1;
                         sim.step();
                         ticks += 1;
+                        since_ticks += 1;
                         moved = true;
                     }
                 } else {
@@ -943,6 +978,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                         debt -= 1.0;
                         sim.step();
                         ticks += 1;
+                        since_ticks += 1;
                         moved = true;
                     }
                 }
@@ -958,6 +994,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                 let (world, flora, fauna) = sim.layers();
                 out.render(world, flora, fauna, std::mem::take(&mut moved))?;
                 frames += 1;
+                since_frames += 1;
             }
             Step::Sleep(d) => std::thread::sleep(d),
             Step::Lagged { behind, log } => {
@@ -983,21 +1020,8 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         save_voxel_snapshot(dir, world);
     }
     let elapsed = clock.elapsed(Instant::now()).as_secs_f64();
-    let (world, flora, fauna) = sim.layers();
-    let view = world.view();
-    let fv = flora.view();
-    eprintln!(
-        "cubarium voxel: {ticks} ticks, {frames} frames in {elapsed:.2} s ({:.1} fps); \
-         stored {:.3} m3, residual {:.3e} m3; \
-         {} stands, flora residual {:.3e} organic, {:.3e} mineral, {:.3e} energy",
-        frames as f64 / elapsed.max(1e-9),
-        view.stored_m3(),
-        view.stored_m3() - view.ledger.expected_stored(),
-        fv.stands.len(),
-        fv.organic() - fv.ledger.expected_organic(),
-        fv.mineral() - fv.ledger.expected_mineral(),
-        fv.energy() - fv.ledger.expected_energy(),
-    );
+    eprintln!("cubarium voxel: {}", run_line(&sim, ticks, frames, elapsed));
+    let (_, _, fauna) = sim.layers();
     let av = fauna.view();
     eprintln!(
         "cubarium voxel: {} animals ({} born, {} dead, {} bites, {} steps), \
@@ -1376,6 +1400,48 @@ impl Out {
         }
     }
 
+    /// Draw the founding frame — the sky alone, pulsing — at `seconds` into the run.
+    ///
+    /// This is what the panel shows while the world is being founded. It carries no text
+    /// and no reading of any kind: the normal display holds no analytical UI, and what
+    /// the wait should look like is Wrysk's to decide. Until he does, this is the
+    /// placeholder.
+    fn founding(&mut self, seconds: f64) -> Result<()> {
+        match self {
+            Out::Cpu {
+                sink,
+                canvas,
+                raster,
+                ..
+            } => {
+                present::founding_sky(canvas, seconds);
+                canvas.encode_raster(raster);
+                sink.submit(Output::Ring(raster))
+            }
+            Out::Gpu(gpu) => gpu.founding(seconds),
+        }
+    }
+
+    /// The world exists: undo whatever the founding frame changed.
+    fn founded(&mut self) -> Result<()> {
+        match self {
+            Out::Cpu { .. } => Ok(()),
+            Out::Gpu(gpu) => gpu.founded(),
+        }
+    }
+
+    /// Stage an empty world of `cfg`, so the GPU path has defined contents to draw before
+    /// the real world exists. The CPU path reads the world it is handed every frame and
+    /// has nothing to stage.
+    fn stage_empty(&mut self, cfg: &cubarium_voxel::Config) {
+        if let Out::Gpu(gpu) = self {
+            let world = World::empty(cfg.clone());
+            let flora = Flora::new(FloraConfig::for_voxel_size(world.config().voxel_m));
+            let fauna = Fauna::new(FaunaConfig::default());
+            gpu.stage_world(&world, &flora, &fauna);
+        }
+    }
+
     fn observe_tick(&mut self, tick: u64) {
         if let Out::Cpu { sink, .. } = self {
             sink.observe_tick(tick);
@@ -1397,24 +1463,163 @@ impl Out {
     }
 }
 
+/// How often the running report is printed. The same line the run ends with, for the
+/// numbers **since the last one**: a service that only reports at shutdown cannot be
+/// asked how fast it is going without being stopped.
+const SUMMARY_INTERVAL: Duration = Duration::from_secs(60);
+
+/// What was done in `elapsed` seconds, and what the world holds now — the run's one
+/// summary line, printed periodically while it runs and once when it ends.
+fn run_line(sim: &Sim, ticks: u64, frames: u64, elapsed: f64) -> String {
+    let (world, flora, _) = sim.layers();
+    let view = world.view();
+    let fv = flora.view();
+    format!(
+        "{ticks} ticks, {frames} frames in {elapsed:.2} s ({:.1} fps); \
+         stored {:.3} m3, residual {:.3e} m3; \
+         {} stands, flora residual {:.3e} organic, {:.3e} mineral, {:.3e} energy",
+        frames as f64 / elapsed.max(1e-9),
+        view.stored_m3(),
+        view.stored_m3() - view.ledger.expected_stored(),
+        fv.stands.len(),
+        fv.organic() - fv.ledger.expected_organic(),
+        fv.mineral() - fv.ledger.expected_mineral(),
+        fv.energy() - fv.ledger.expected_energy(),
+    )
+}
+
+/// Open the output this run draws into, for a world of `proj`'s geometry.
+///
+/// Its own function because it is called **before** the world exists: the founding frame
+/// goes through this same sink (see [`found_while_presenting`]).
+fn open_out(args: &Voxel, cfg: &VoxelConfig, proj: Projection, speed: f64) -> Result<Out> {
+    let shape = WorldShape::new(
+        Topology::Ring {
+            w: proj.raster_w,
+            h: proj.raster_h,
+        },
+        Scale::ONE,
+    );
+    let web = |port| {
+        WebSink::with_world(
+            port,
+            "voxel strip",
+            crate::sink::web::Source {
+                speed,
+                ..Default::default()
+            },
+            None,
+            shape,
+        )
+    };
+    Ok(match args.sink {
+        VoxelSinkArg::Png => Out::cpu(
+            Box::new(PngSink::new(&args.out, args.every)?),
+            cfg.clone(),
+            proj,
+        ),
+        VoxelSinkArg::Web => Out::cpu(Box::new(web(args.web_port)?), cfg.clone(), proj),
+        VoxelSinkArg::Gpu => {
+            crate::sink::gpu::voxel::check(proj)?;
+            let mut gpu = VoxelGpuSink::new(
+                cfg,
+                proj,
+                VoxelGpuSinkOptions {
+                    target: args.gpu_target.unwrap_or_else(GpuTargetKind::detect),
+                    capture: args.gpu_capture.clone(),
+                    roof_from_texture: !args.gpu_roof_walk,
+                },
+            )?;
+            if args.gpu_web_rate > 0.0 {
+                gpu = gpu.with_web(web(args.web_port)?, args.gpu_web_rate);
+            }
+            Out::Gpu(Box::new(gpu))
+        }
+    })
+}
+
+/// Whether two world configs project to the same picture — the only thing the output is
+/// opened on before the world exists.
+fn same_extent(a: &cubarium_voxel::Config, b: &cubarium_voxel::Config) -> bool {
+    (a.width, a.height, a.depth) == (b.width, b.height, b.depth)
+}
+
+/// Run `found` on another thread and present the founding frame at `fps` until it is
+/// done, then return what it built.
+///
+/// **Nothing blocks the first frame.** Founding a world is minutes of seed gate and
+/// settle on the board; the panel's daemon blanks the screen three seconds after the last
+/// flip. So the wait is covered rather than waited out, at the display's own rate.
+///
+/// `stop` ends the presenting early — the build itself cannot be cancelled, so the wait
+/// for it is still paid, silently.
+fn found_while_presenting<T: Send>(
+    out: &mut Out,
+    fps: u32,
+    stop: &AtomicBool,
+    found: impl FnOnce() -> Result<T> + Send,
+) -> Result<T> {
+    std::thread::scope(|scope| {
+        let worker = scope.spawn(found);
+        let period = Duration::from_nanos(1_000_000_000 / u64::from(fps.clamp(MIN_FPS, MAX_FPS)));
+        let start = Instant::now();
+        let mut next = start;
+        let mut frames = 0u64;
+        while !worker.is_finished() {
+            let now = Instant::now();
+            if now < next {
+                std::thread::sleep((next - now).min(period));
+                continue;
+            }
+            out.founding(now.duration_since(start).as_secs_f64())?;
+            frames += 1;
+            next += period;
+            let now = Instant::now();
+            if next <= now {
+                // The sink is slower than the frame rate asked for: draw at the rate it
+                // can rather than chasing a schedule it will never meet.
+                next = now + period;
+            }
+            if stop.load(Ordering::Relaxed) {
+                break;
+            }
+        }
+        let founded = worker
+            .join()
+            .map_err(|_| anyhow::anyhow!("the thread founding the world panicked"))?;
+        if frames > 0 {
+            eprintln!(
+                "cubarium voxel: founding frame held the panel for {:.1} s ({frames} frames)",
+                start.elapsed().as_secs_f64()
+            );
+        }
+        founded
+    })
+}
+
 /// Simulated seconds the start-up viability probe watches. Short on purpose: it runs on
 /// a **clone** of the world before the first frame, so the person waiting to see the
 /// habitat pays for it in wall clock.
 const VIABILITY_WINDOW_S: u64 = 180;
 
-/// Say at start whether this world's water cycle is one the seeded species could live
-/// in. Reports only — nothing is rejected, that is a later decision
+/// Say whether this world's water cycle is one the seeded species could live in. Reports
+/// only — nothing is rejected, that is a later decision
 /// (`design/handoffs/voxel-water-cycle-2026-09-20.md`).
 ///
 /// Measured on a clone, so the run itself starts on the world the scene built and not on
-/// one this probe has already stepped two minutes forward.
-fn report_water_cycle(world: &World, flora: &Flora, threads: usize) {
+/// one this probe has already stepped two minutes forward — and **off the loop**: the
+/// probe is `VIABILITY_WINDOW_S` of simulation twice over, which is 216 s of wall clock
+/// on the board's cores. Paid on the loop, that was four minutes of black panel before
+/// the first frame (Wrysk, 2026-09-22). It now runs on its own thread and prints its one
+/// line, unchanged, whenever it gets there. The returned handle is the caller's to keep
+/// or drop; dropping it only detaches the thread.
+fn report_water_cycle(world: &World, flora: &Flora, threads: usize) -> Option<JoinHandle<()>> {
     if !world.config().closed_water_budget {
         eprintln!(
             "cubarium voxel: open water budget — rain from nowhere, evaporation and the \
              outlet to nowhere; no cycle to report"
         );
-        return;
+        return None;
     }
     // The bands are the plant layer's own establishment gate. `establish_pore_min` is a
     // floor, so the band's ceiling is saturation: too wet is drowning, which the plant
@@ -1433,14 +1638,24 @@ fn report_water_cycle(world: &World, flora: &Flora, threads: usize) {
         threads,
         ..ViabilitySpec::default()
     };
-    let started = Instant::now();
     let mut probe = world.clone();
-    let report = cubarium_voxel::viability::measure(&mut probe, &spec);
-    eprintln!(
-        "cubarium voxel: {report} (probed {VIABILITY_WINDOW_S} simulated s after a \
-         {VIABILITY_WINDOW_S} s warm-up, in {:.1} s)",
-        started.elapsed().as_secs_f64()
-    );
+    Some(report_off_the_loop(move || {
+        let started = Instant::now();
+        let report = cubarium_voxel::viability::measure(&mut probe, &spec);
+        format!(
+            "{report} (probed {VIABILITY_WINDOW_S} simulated s after a \
+             {VIABILITY_WINDOW_S} s warm-up, in {:.1} s)",
+            started.elapsed().as_secs_f64()
+        )
+    }))
+}
+
+/// Run `probe` on its own thread and print the line it returns when it is done.
+///
+/// The one place a start-up diagnostic is taken off the loop, so there is one place to
+/// look when a report arrives late and out of order — which it will.
+fn report_off_the_loop(probe: impl FnOnce() -> String + Send + 'static) -> JoinHandle<()> {
+    std::thread::spawn(move || eprintln!("cubarium voxel: {}", probe()))
 }
 
 /// The run state a stdin command may change, and the one function that changes it.
@@ -1974,6 +2189,126 @@ fn spawn_stdin_reader() -> Receiver<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A sink that counts what it is handed and keeps the last frame's brightest pixel.
+    struct CountingSink {
+        frames: std::sync::Arc<std::sync::atomic::AtomicU64>,
+        brightest: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    }
+
+    impl crate::sink::FrameSink for CountingSink {
+        fn submit(&mut self, out: Output<'_>) -> Result<()> {
+            if let Output::Ring(r) = out {
+                let mut top = 0u64;
+                for y in 0..r.height() {
+                    for x in 0..r.width() {
+                        let p = r.get(x, y);
+                        top = top.max(u64::from(p[0]) + u64::from(p[1]) + u64::from(p[2]));
+                    }
+                }
+                self.brightest.store(top, Ordering::Relaxed);
+            }
+            self.frames.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+    }
+
+    /// **The panel has a picture before the world does.** The frames are presented while
+    /// the world is still being founded on the other thread, through the run's own sink,
+    /// and they are the sky rather than black.
+    #[test]
+    fn the_founding_frame_is_presented_before_the_world_exists() {
+        let frames = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let brightest = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let cfg = VoxelConfig {
+            world: cubarium_voxel::Config {
+                width: 16,
+                height: 8,
+                depth: 2,
+                ..Default::default()
+            },
+            ..VoxelConfig::default()
+        };
+        let proj = Projection::new(30.0, 4, 0, &cfg.world).unwrap();
+        let mut out = Out::cpu(
+            Box::new(CountingSink {
+                frames: frames.clone(),
+                brightest: brightest.clone(),
+            }),
+            cfg,
+            proj,
+        );
+
+        // The "world" is not built until four founding frames have gone out.
+        let seen = frames.clone();
+        let stop = AtomicBool::new(false);
+        let built = found_while_presenting(&mut out, MAX_FPS, &stop, || {
+            while seen.load(Ordering::Relaxed) < 4 {
+                std::hint::spin_loop();
+            }
+            Ok("the world")
+        })
+        .unwrap();
+
+        assert_eq!(built, "the world");
+        assert!(
+            frames.load(Ordering::Relaxed) >= 4,
+            "frames went out before the world existed"
+        );
+        assert!(
+            brightest.load(Ordering::Relaxed) > 0,
+            "the founding frame is the sky, not black"
+        );
+        // The pulse is a pulse: one breath is dimmer in the middle than at its ends.
+        assert!((present::founding_pulse(0.0) - 1.0).abs() < 1e-6);
+        assert!(present::founding_pulse(present::FOUNDING_PULSE_S / 2.0) < 0.7);
+        assert!((present::founding_pulse(present::FOUNDING_PULSE_S) - 1.0).abs() < 1e-6);
+    }
+
+    /// The running report is the line the run ends with, over the interval it names, so
+    /// the panel's frame rate can be read without stopping the service.
+    #[test]
+    fn the_running_report_is_the_summary_line_for_its_own_interval() {
+        assert_eq!(SUMMARY_INTERVAL, Duration::from_secs(60));
+        let c = cubarium_voxel::Config {
+            width: 16,
+            height: 8,
+            depth: 2,
+            ..Default::default()
+        };
+        let sim = Sim::new(
+            World::empty(c.clone()),
+            Flora::new(FloraConfig::for_voxel_size(c.voxel_m)),
+            Fauna::new(FaunaConfig::default()),
+            SimConfig { threads: 1 },
+            None,
+        );
+        let line = run_line(&sim, 1_200, 3_600, 60.0);
+        assert!(
+            line.starts_with("1200 ticks, 3600 frames in 60.00 s (60.0 fps);"),
+            "{line}"
+        );
+        assert!(line.contains("0 stands"), "{line}");
+    }
+
+    /// The start-up viability probe is off the loop: the call returns while the work is
+    /// still running, and its line arrives later.
+    #[test]
+    fn the_water_cycle_report_returns_before_it_has_anything_to_say() {
+        let (release, wait) = mpsc::channel::<()>();
+        let done = std::sync::Arc::new(AtomicBool::new(false));
+        let flag = done.clone();
+        let handle = report_off_the_loop(move || {
+            wait.recv().expect("released");
+            flag.store(true, Ordering::Relaxed);
+            "the probe's line".to_string()
+        });
+        // The probe cannot have finished: nothing has released it.
+        assert!(!done.load(Ordering::Relaxed), "the call did not return early");
+        release.send(()).unwrap();
+        handle.join().unwrap();
+        assert!(done.load(Ordering::Relaxed), "the line comes later");
+    }
 
     /// The documented defaults, and a partial config file that only overrides some of
     /// them: everything else keeps the default rather than being refused.

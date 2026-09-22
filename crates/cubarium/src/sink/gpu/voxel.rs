@@ -92,6 +92,8 @@ pub struct VoxelGpuSink {
     /// [`MAX_STYLES`] distinct styles.
     style_overflow: u64,
     capture: Option<PathBuf>,
+    /// The sky this world is drawn under, kept while the founding frame dims it.
+    founding_sky: Option<([f32; 3], [f32; 3])>,
     /// The operator's viewer, fed from this renderer's own readback.
     web: Option<(WebSink, f64)>,
     web_raster: Option<cube_proto::Raster>,
@@ -139,6 +141,7 @@ impl VoxelGpuSink {
             slot_of: Vec::new(),
             style_overflow: 0,
             capture: options.capture,
+            founding_sky: None,
             web: None,
             web_raster: None,
             web_last: None,
@@ -273,6 +276,35 @@ impl VoxelGpuSink {
     }
 
     /// Draw one frame of whatever was last staged, and present it.
+    /// Draw the founding frame: whatever is staged — an empty world, before the real one
+    /// exists — under a sky at [`crate::voxel::present::founding_pulse`]'s brightness.
+    ///
+    /// The uniform block is the only thing that moves, so this costs one buffer write and
+    /// the same draw every other frame pays.
+    pub fn founding(&mut self, seconds: f64) -> Result<()> {
+        let mut params = self.renderer.params();
+        let base = *self
+            .founding_sky
+            .get_or_insert((params.sky, params.sky_horizon));
+        let k = crate::voxel::present::founding_pulse(seconds);
+        let dim = |c: [f32; 3]| [c[0] * k, c[1] * k, c[2] * k];
+        params.sky = dim(base.0);
+        params.sky_horizon = dim(base.1);
+        self.renderer.set_params(params)?;
+        self.render()
+    }
+
+    /// The world exists: put the sky back where the palette had it.
+    pub fn founded(&mut self) -> Result<()> {
+        if let Some((sky, horizon)) = self.founding_sky.take() {
+            let mut params = self.renderer.params();
+            params.sky = sky;
+            params.sky_horizon = horizon;
+            self.renderer.set_params(params)?;
+        }
+        Ok(())
+    }
+
     pub fn render(&mut self) -> Result<()> {
         let started = Instant::now();
         let ms = self.target.draw(&self.gpu, &mut self.renderer, ())?;

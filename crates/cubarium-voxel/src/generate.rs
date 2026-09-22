@@ -379,10 +379,14 @@ fn outlet_and_spring(
             }
         }
     }
-    // On the lake's rim, at its own surface, so the lake holds its level and only the
-    // surplus leaves. Without a datum -- the ridge generator -- on the floor, as before.
+    // On the lake's rim, **one row above** the water it holds back, so the lake holds its
+    // level and only genuine overflow leaves. Seated at the surface it is awash: the lake
+    // is hydrated to exactly the sill's floor, so any disturbance puts water in the sill
+    // and the outlet takes it — and takes what the exchange levels back in after it. With
+    // the stream off, nothing reaches the sill and the lake holds 99 %; with it on, the
+    // panel's seed exported 0.687 m³ against 0.012 m³ of stream (T6). Without a datum -- the ridge generator -- on the floor, as before.
     let outlet = match lake {
-        Some(l) => (l.rim.0, l.level_y.min(h as i32 - 1), l.rim.1),
+        Some(l) => (l.rim.0, (l.level_y + 1).min(h as i32 - 1), l.rim.1),
         None => (low.0, (low.2 + 1).min(h as i32 - 1), low.1),
     };
     world.outlet_cell = Some((outlet.0 as u32, outlet.1 as u32, outlet.2 as u32));
@@ -2444,15 +2448,19 @@ mod tests {
                 "{}: the outlet at ({x}, {y}, {z}) is not a void cell",
                 p.name
             );
+            // One row **above** the datum: the sill is what the surplus goes over, and it
+            // is dry until there is surplus. Seated on the datum itself it stands in the
+            // lake's own surface and drains it (T6).
             assert_eq!(
-                y as i32, report.lake.level_y,
+                y as i32,
+                report.lake.level_y + 1,
                 "{}: outlet off the datum",
                 p.name
             );
             assert_eq!(
                 v.surface_y(x as i64, z).map(|t| t as i32),
                 Some(report.lake.level_y - 1),
-                "{}: the outlet is not standing on its rim",
+                "{}: the outlet is not standing over its rim",
                 p.name
             );
         }

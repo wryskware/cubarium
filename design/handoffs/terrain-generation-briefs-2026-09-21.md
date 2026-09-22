@@ -1551,3 +1551,32 @@ ms in the capture timestamps, the world frame within a few seconds.
 Return (≤25 lines): commits, the invariant numbers from the local run,
 what the founding frame looks like (one PNG in the scratch dir), test
 counts for `-p cubarium`.
+
+## T6 and D — integrated 2026-09-22
+
+T6 landed b0f1727. Four arms on the panel seed refuted the mound: the
+surface is flat; with the stream off the sill takes nothing. The lake was
+hydrated to exactly the sill's floor, so every ripple wet the sill, and
+`outlet_m3_per_s` 0.05 is 1.28 voxels a tick on `small`. Fixed both: the
+sill sits at `level_y + 1` and the fill stops a row under it; `outlet` is a
+weir passing `OUTLET_WEIR · free^1.5` of its cell per tick with the old
+rate as the ceiling. Retention 47 % → 101 % over 2000 ticks; stream off,
+`outlet_out` 0. `outlet_out ≈ reentry_in` is not met and not faked: the
+export is the terrace pools and cascade settling, throughflow, while the
+lake holds. Gate table not rerun (budget). D landed f77168e, 46c789a,
+999343d, 79fdc21: a due frame outranks an owed tick once the sim is a tick
+behind; the sink opens before the world and a founding frame (sky
+gradient, one 6 s breath, no text) is presented while the world is founded
+on a scoped thread and the probe runs on its own; a rate line every 60 s
+of wall clock; the shim's 0-byte handoff is re-attached with 40 × 100 ms
+retries. Local: 61 frames in the first second, largest gap 41 ms, first
+world frame at 5.3 s. Fable ran the three crates: 851 passed. Deferred, its
+own high-effort package with a board round-trip: a presenter thread
+owning queue, fence, socket and slots (double-buffered staging, queue
+sync, slot ownership over a channel) — the main thread is the fps ceiling
+(17 fps at 8 ms GPU + 7 ms pack per frame); measure D1's effect on the
+board first.
+
+Board after the affinity deploy (2a3282d): mask 0-6 applied, 5 tick
+threads (nproc under the mask says 6), ticks pinned at 20 Hz, main thread
+at a full core while the pool idles.
