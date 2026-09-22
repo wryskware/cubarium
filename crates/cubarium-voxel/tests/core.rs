@@ -297,9 +297,19 @@ fn the_mirrored_fixture_gives_the_mirrored_answer() {
         column(&here, 0) > column(&here, 3),
         "the basin did not stay deeper"
     );
-    // 1e-6 rather than 1e-12: the spill decays toward its stopping point, so the
-    // substep it stops on turns on a float comparison and the two runs settle a few
-    // times 1e-8 apart.
+    // 5e-3 rather than 1e-12, and 1e-6 until package 1c
+    // (`design/handoffs/voxel-water-units-2026-09-22.md`). The sill at `2·dir` and the
+    // wall at `5·dir` seal two basins off from each other, so what this fixture really
+    // pins is the *split* the spill froze between them, and that split is decided by a
+    // single substep-level head comparison: one packet more or less over the sill is
+    // worth 2.5e-3 of a cell in the resting levels, for ever, because nothing can level
+    // across the sill afterwards. Moving the rock's uptake from a fraction of a cell per
+    // tick to a conductivity in metres per second moved the operating point across that
+    // comparison, and the mirror pair now settles 2.45e-3 apart (0.05 % of the 5 m³
+    // poured) instead of exactly together; measured constant in the poured volume from
+    // 4.9 to 7.0 m³ and constant in the tick count from 20 to 1000, so it is a frozen
+    // decision and not a drift. Conservation, the materials and `stored_m3` are still
+    // mirrored exactly, which is asserted above at 1e-12.
     for y in 0..here.config().height {
         for x in 0..8 {
             assert_eq!(
@@ -308,7 +318,7 @@ fn the_mirrored_fixture_gives_the_mirrored_answer() {
                 "material {x},{y}"
             );
             let (f, g) = (a.free_at(x, y, 0), b.free_at(-x, y, 0));
-            assert!((f - g).abs() < 1e-6, "free {x},{y}: {f} vs {g}");
+            assert!((f - g).abs() < 5e-3, "free {x},{y}: {f} vs {g}");
         }
     }
 }
@@ -1680,7 +1690,15 @@ fn staircase() -> World {
         depth: 1,
         voxel_m: 1.0,
         seed: 11,
-        rain_m_per_s: 0.01,
+        // 0.0025 and not 0.01 since package 1c
+        // (`design/handoffs/voxel-water-units-2026-09-22.md`). This fixture's premise,
+        // stated on both tests below, is that the rain is far under what the soil can
+        // take — a seventh of it — so nothing the staircase does is runoff for want of
+        // capacity. On these 1 m cells, four times the reference, the units fix makes
+        // infiltration four times slower (8.75e-4 m3 a tick against the old 3.5e-3), so
+        // the rain is quartered with it and the ratio is exactly what it was. A fixture
+        // value, not a tuning: `rain_m_per_s` is untouched everywhere else.
+        rain_m_per_s: 0.0025,
         water_substeps: 4,
         ..Config::default()
     };
@@ -1706,8 +1724,8 @@ fn staircase() -> World {
 }
 
 /// Rain has to wet a slope. The rate here is far below what the soil can take —
-/// `rain_m_per_s * DT * cell_area` is 5e-4 m3 per column per tick against an
-/// infiltration capacity of 3.5e-3 — so the only thing that can keep a sloping support
+/// `rain_m_per_s * DT * cell_area` is 1.25e-4 m3 per column per tick against an
+/// infiltration capacity of 8.75e-4 — so the only thing that can keep a sloping support
 /// dry is the tick's own ordering: free water that is carried downhill before it is
 /// offered to the soil under it never infiltrates at all.
 #[test]
@@ -1848,12 +1866,25 @@ fn a_table_at_zero_changes_nothing() {
         0.0,
         "the default is a dry aquifer"
     );
-    run(&mut w, 400);
+    // 1600 ticks and not 400: the fixture's rain is a quarter of what it was (see
+    // `staircase`), so it takes four times as long to deliver the same 0.2 m3 a column
+    // and put every support past its field capacity with drainage carrying the rest.
+    // The claim — a table at zero leaves the staircase exactly where it stood without
+    // one, down to the last bit — is unchanged, and this is still a settled state.
+    run(&mut w, 1600);
     let v = w.view();
     for x in 0..8i64 {
         let top = if x < 2 { 1 } else { x as u32 };
         assert_eq!(v.pore_at(x, top, 0), 0.25, "x {x} moved");
-        assert_eq!(v.free_at(x, top + 1, 0), 0.0, "x {x} is standing in water");
+        // The pore fraction is still exact; the free crumb above it is 8e-18 rather
+        // than a hard zero since package 1c, because the tick now delivers the rain in
+        // four times as many, four times smaller infiltration steps and the last one
+        // leaves a rounding of the cell behind. Not standing water by any reading.
+        assert!(
+            v.free_at(x, top + 1, 0) < 1e-12,
+            "x {x} is standing in water: {}",
+            v.free_at(x, top + 1, 0)
+        );
     }
     // The aquifer took the rest, and its head stayed under the soil it would saturate.
     assert!((v.aquifer_m3 - 0.9).abs() < 1e-9, "{}", v.aquifer_m3);

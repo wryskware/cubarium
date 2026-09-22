@@ -106,7 +106,12 @@ fn a_permeable_voxel_just_above_the_head_is_not_saturated() {
         "head {}",
         w.aquifer_head_m()
     );
-    run(&mut w, 200);
+    // 500 ticks and not 200: these fixtures are 1 m cells, and since package 1c
+    // (`design/handoffs/voxel-water-units-2026-09-22.md`) the aquifer exchange is a
+    // conductivity in metres per second rather than a fraction of a cell per tick, so
+    // on a cell four times the reference it is four times slower. 0.0025 of the voxel's
+    // capacity a tick, so saturation takes 400. The claim is unchanged.
+    run(&mut w, 500);
 
     let v = w.view();
     assert!(
@@ -137,9 +142,9 @@ fn a_permeable_voxel_just_above_the_head_is_not_saturated() {
 /// step and held fixed, so the water that rises into the cell during a step is water the
 /// aquifer no longer has, and the head that rose it is already gone by the time the step
 /// ends. The settled surface therefore sits above the *final* head by exactly the fall
-/// its own last withdrawal caused — bounded by one transfer, `permeability · DT ·
-/// pore_capacity · voxel_volume` over the aquifer's capacity per metre of head, 3.5e-6 m
-/// in this fixture against a 2.3 m table, of which 1.9e-6 m is realized. Both halves are
+/// its own last withdrawal caused — bounded by one transfer, `conductivity_m_per_s ·
+/// cell_area · DT` over the aquifer's capacity per metre of head (package 1c), 8.75e-7 m
+/// in this fixture against a 2.3 m table, of which a fraction is realized. Both halves are
 /// asserted: per step the surface never passes the head that step read, and at rest it
 /// is within one transfer of the head. The gap scales as `1 / aquifer_porosity`, so at
 /// the default 0.35 it would be a few millimetres of a 0.25 m voxel.
@@ -155,7 +160,9 @@ fn seepage_stops_exactly_at_the_head() {
         z: 0,
         material: Material::Air,
     });
-    for tick in 0..400 {
+    // 1200 ticks: on these 1 m cells `y = 1` saturates in 400 and the pond then fills
+    // to its 0.3 of a cell at 8.75e-4 of the cell a tick, another 343 (package 1c).
+    for tick in 0..1200 {
         let level = w.aquifer_head_m() - 2.0;
         let before = w.view().free_at(0, 2, 0);
         w.step();
@@ -168,10 +175,7 @@ fn seepage_stops_exactly_at_the_head() {
 
     // One transfer of the seeping material, expressed as metres of head.
     let soil = Material::Soil;
-    let one_transfer_m = soil.permeability_per_s()
-        * cubarium_voxel::DT
-        * soil.pore_capacity()
-        * w.config().voxel_volume()
+    let one_transfer_m = soil.conductivity_m_per_s() * w.config().cell_area() * cubarium_voxel::DT
         / (w.config().width as f64 * w.config().depth as f64 * w.config().cell_area() * 1000.0);
     let level = w.aquifer_head_m() - 2.0;
     let free = w.view().free_at(0, 2, 0);
@@ -222,7 +226,8 @@ fn seepage_stops_exactly_at_the_head() {
 fn drain_resumes_for_a_voxel_the_head_has_fallen_below() {
     // Head 2.9 m: both soil voxels (centres 1.5 and 2.5) are under it.
     let mut w = table_column(0.0, 0.0, 2.9);
-    run(&mut w, 200);
+    // 500 for the same reason as above: 1 m cells fill at 0.0025 of capacity a tick.
+    run(&mut w, 500);
     assert!(
         w.view().pore_at(0, 1, 0) > 0.999,
         "y=1 {}",
