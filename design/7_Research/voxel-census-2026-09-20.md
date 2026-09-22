@@ -359,3 +359,162 @@ Wrysk's decision, not the worker's.
 The measurement that is missing: nothing here says whether a crown the fan
 *could* see would be **eatable** — D3's mouth-access boundary is untouched by
 this package and both failures can be true at once.
+
+## Edible stock, 2026-09-21
+
+Package 0 of the organism audit
+(`design/handoffs/voxel-edible-stock-2026-09-21.md`; audit §2 "Seeded and
+six-hour edible fraction", §10 order 0). The measurement D4 said was missing —
+whether a crown the fan *could* see would be **eatable** — now exists.
+Read-only: no controller input, `body.rs` rule, manifest value, `senses.rs`
+reading, flora, water or seeding was changed, and
+`crates/cubarium/tests/encounter_contract.rs` pins the live 200-tick readings
+against the branch point.
+
+Three six-simulated-hour arms of the new
+`crates/cubarium/examples/voxel_edible_stock.rs` at `fe654fb`, run in parallel,
+one report block every thirty simulated minutes. Each arm is the census's own
+preset construction — `Preset::config()`, the host's lake gate (all three took
+seed 1 with 0 rejections), `FloraConfig::for_voxel_size`, `habitat::seed`,
+`install_default_founders`, a settled `Senses`, the outlet opened before the
+first tick. CSVs are disposable (`runs/edible-stock-{small,default,wide}-6h.csv`).
+Verified against `voxel_census 0.25 preset=small seed=1`: identical stand
+counts per species (4/0/7/5/0/5), identical litter (1.6000) and identical water
+residual (6.237e-11) at `t = 0`.
+
+### How each column is computed
+
+A **legal face** is a support face with no more than `wade_depth_m` of standing
+water and `headroom_voxels` of void over it — the predicate
+`habitat::browser_faces` and `step::faces_in_column` already use. **One** set of
+legal faces serves both arms, so the band, the body it is anchored to and the
+fan are the only variables.
+
+- **reachable** — the live mouth acceptance rule, `body::mouth_foliage_stand`'s
+  own scan, asked of the union of mouth columns over 72 headings from each
+  legal face. *Today* is the manifest's whole-voxel layer range; *band* is the
+  decided `[0, 1.33 × body height]` with the decided adult body (0.375 m long,
+  0.1875 m wide and tall), converted to the layers whose one-cell-thick crown
+  slab it overlaps by a positive amount: two layers on `small`, one on
+  `default`/`wide`, against today's three and two.
+- **visible** — the live ray march from a legal face's eye, aimed at each of the
+  stand's crown cells at each pitch of the arm's fan, occlusion order unchanged.
+  *Today* is the eye at 1.5 voxels with pitches −20/0/+20; *decided* is the eye
+  at `0.8 × body height` = 0.15 m with pitches −40/−20/0/+20/+40 and ground
+  pools transparent (decisions §6 makes a pool a wall only above its physical
+  height, and no volume-to-height convention is authored).
+- **route-connected** — reachable from a legal face in the same walkable
+  component as a living browser. The component rule is **not invented**: a
+  founder's tick never writes `site.y` and `body::advance_candidate` refuses any
+  centre column that is not a support face at the standing layer, so its
+  neighbourhood is the level one — four-adjacent columns at its own height, `x`
+  wrapping, the `z` ends walls — exactly as `habitat::browser_faces` states and
+  as `cubarium-voxel/src/walk.rs` walks the ring. A founder cannot step up or
+  down one voxel, ever.
+- **route (seeded)** — the same, against the components the **seeded** founders
+  stood in. After extinction the living measure is zero by definition; this one
+  still describes the landscape.
+
+### The table
+
+| | preset=small | preset=default | preset=wide |
+| --- | --- | --- | --- |
+| cells / ring | 0.125 m / 160×24 | 0.25 m / 128×24 | 0.25 m / 256×24 |
+| stands seeded | 21 | 98 | 197 |
+| **t = 0** foliage organic | 4.0348 | 19.3256 | 40.3728 |
+| reachable, today's mouth | **1.0000** | **0.9472** | **0.9495** |
+| reachable, decided band | 0.9108 | 0.6330 | 0.6187 |
+| visible, today's fan | **1.0000** | **1.0000** | **0.9730** |
+| visible, decided fan | 1.0000 | 1.0000 | 0.9730 |
+| route-connected, today's mouth | **0.2827** | **0.4905** | **0.2412** |
+| route-connected, decided band | 0.2679 | 0.3128 | 0.1746 |
+| **t = 6 h** foliage organic | 0.4548 | 1.9953 | 3.2376 |
+| reachable, today / band | 1.0000 / 1.0000 | 1.0000 / 1.0000 | 1.0000 / 1.0000 |
+| visible, today / decided | 1.0000 / 1.0000 | 1.0000 / 1.0000 | 0.9921 / 0.9921 |
+| route-connected, today / band | 0.0000 / 0.0000 | 0.0000 / 0.0000 | 0.0000 / 0.0000 |
+| route (seeded comp.), today / band | 0.0088 / 0.0000 | 0.2927 / 0.1725 | 0.0448 / 0.0107 |
+| browsers alive, 0 → 6 h | 8 → 0 (gone by min 30) | 8 → 0 (2 at 60, 0 at 90) | 8 → 0 (1 at 90, 0 at 120) |
+| shredders alive, 0 → 6 h | 8 → 0 (gone by min 60) | 8 → 0 (1 at 60, 0 at 90) | 8 → **5** |
+| species surviving at 6 h | stonecushion | stonecushion | stonecushion, +traces |
+
+Per species at `t = 0`, reachable today / reachable band / route today:
+
+| species | small | default | wide |
+| --- | --- | --- | --- |
+| bloomcrown | 1.00 / 0.86 / **0.00** | 0.92 / **0.43** / 0.35 | 0.91 / **0.41** / **0.05** |
+| umbrellafrond | — | — | 1.00 / **0.37** / **0.00** |
+| springturf | 1.00 / 1.00 / 0.86 | 1.00 / 1.00 / 0.95 | 1.00 / 1.00 / 0.57 |
+| stonecushion | 1.00 / 1.00 / 0.37 | 1.00 / 1.00 / 0.43 | 1.00 / 1.00 / 0.40 |
+| velvetpad | — | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 0.73 |
+| glowcap | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 0.82 | 1.00 / 1.00 / 0.89 |
+
+Detritus, organic and the share in a component holding a living shredder:
+
+| | small | default | wide |
+| --- | --- | --- | --- |
+| litter, t = 0 | 1.6000 / 1.00 | 1.6000 / 1.00 | 1.6000 / 1.00 |
+| litter, 6 h | 0.1531 / 0.00 | 0.6917 / 0.00 | 0.9485 / 0.30 |
+| glowcap cap, t = 0 | 0.5640 / **0.70** | 1.3820 / **0.22** | 2.8800 / **0.11** |
+| carrion, t = 0 and 6 h | 0 | 0 | ~1e-6 |
+
+Residuals at 6 h: fauna ≤ 1.8e-10 on all three currencies in every arm; flora
+organic ≤ 2.7e-8 and energy ≤ 5.3e-8 (relative to stocks of 0.5–40, ≤ 1e-9
+relative); water ≤ 2.1e-6 m³. These are accumulated floating-point drift over
+432,000 ticks, not a leak: at `t = 0` every residual is ≤ 1.4e-14 except water
+at ≤ 3.9e-9.
+
+### One sentence per preset
+
+- **small.** Every unit of standing foliage is inside today's mouth from some
+  legal face and visible to today's fan from some legal face, yet only 28 % of
+  it shares a level walkable component with a browser and the four bloomcrowns
+  holding 63 % of the foliage share **none** — the broken link on `small` is the
+  route, not the mouth and not the eye.
+- **default.** The route is again the tightest live link (49 % at seeding,
+  dropping to 29 % of the surviving stock by six hours), but this is the preset
+  where the *decided* band would become the binding one: it cuts reachable stock
+  from 95 % to 63 %, because bloomcrown carries 65 % of the foliage and its
+  crown sits one voxel above a 0.25 m ceiling that today's 0.5 m acceptance slab
+  clears.
+- **wide.** The worst route of the three — 24 % at seeding and 4 % of what
+  survives, with bloomcrown at 5 % and umbrellafrond at 0 % — so twice the ring
+  with the same eight founders is not more habitat but more terraces the
+  founders cannot leave; it is also the only arm where a lineage persists
+  (5 shredders at six hours), on 30 % of the litter.
+
+### What the numbers decide, and what they do not
+
+1. **"Low food is unreachable or unseen" is refused, in the geometric sense.**
+   At seeding, 95–100 % of the foliage organic is inside today's mouth from some
+   legal face and 97–100 % is visible to today's fan from some legal face. The
+   *reachable from somewhere* and *visible from somewhere* numbers are upper
+   bounds over every legal face and heading; D4's numbers are the same question
+   asked at the body's actual pose, and both can be true — the food is
+   geometrically available and the body is not at it.
+2. **"Not route-connected" is the link that is broken at seeding**, on every
+   preset: 24–49 %. The cause is named and structural, not a tuning: a founder
+   cannot change its standing layer, so its world is one terrace.
+3. **The eight shredders are seeded at eight different standing heights** on all
+   three presets (`small` 21/23/24/26/31/36/41/43), so each one begins alone in
+   its own level component — which is why the glowcap caps that decisions §3
+   makes their food are 11–70 % out of reach before anything has moved.
+4. **Adopting decisions §2's band as written would take stock away**, not add
+   it: 1.33 × 0.1875 m = 0.249 m is *tighter* than today's converted acceptance
+   slab (0.375 m on `small`, 0.5 m on `default`/`wide`), and the loss lands
+   almost entirely on bloomcrown and umbrellafrond. Whatever else the band
+   fixes, it does not fix access.
+5. **The decided fan changes nothing measurable here** (identical to today's on
+   every arm and every snapshot), because with the yaw free and any legal face
+   allowed, three pitches already reach what five do. Its value is at the body's
+   actual pose, which this observer does not measure.
+
+Not measurable with today's model, and why: the **share** of a stand's foliage
+inside a band (the model holds one cell-thick slab and one undivided `foliage`
+stock, so reach is all-or-nothing per stand — decisions §4, audit §10 order 2);
+a **juvenile's** band, eye and footprint (no body height exists and the manifest
+is static, so both arms use the adult — decisions §1); a ground pool as a
+**partial** occluder (no volume-to-height convention); the shredder's decided
+three-food diet (unimplemented, so the detritus block reports access, not
+intake — decisions §3); **path length** through a component (planar distances
+only); and decisions §8's acceptance gate itself (`N` founder-hours is a backlog
+placeholder, though the t = 0 route fraction is the number such a gate reads).
