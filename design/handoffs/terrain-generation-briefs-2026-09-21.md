@@ -1385,3 +1385,44 @@ runs `cubarium voxel` from Wrysk's uncommitted edit of that file, which
 the deploy script installs from the working tree. Fable ran the two
 crates: 811 passed. `docs/tachyon.md` still describes the old refusal;
 Wrysk's edit.
+
+## The live lake drains — 2026-09-22
+
+Panel, seed 14400042426867678818 (`small`, first draw accepted): lake
+1.07 m³ / 3.4 m² at founding, 0.74 at tick 589, 0.37 / 2.2 m² at tick
+4340. Fable read the tick-4340 snapshot's ledger: `outlet_out` 0.782 m³,
+`evaporation_out` 0.024, `reentry_in` 0.026, showers 0, pore 0.005 m³ —
+the loss is the outlet's, at 3.6e-3 m³/s. The outlet cell is (75, 14, 0);
+`hydrate::lake` reports `level_y` 15. **The lake stands one row above its
+own drain**, so the outlet exports it until the surface drops under row
+14. `LakeDatum.level_y` is "the level the water stands at" and the outlet
+sits *at* it; hydrate fills *to* it, inclusive — the two disagree by one
+row. T4's "small seeds 4–6 drain to a third" is very likely the same
+thing, so the gate's pass rate should rise with the fix.
+
+## Package T5 — the lake below its drain (habitat worker)
+
+Owner: habitat worker (Opus, medium). Files: `hydrate.rs`, `world.rs`,
+`water.rs`; `generate.rs::outlet_and_spring` only if the fix belongs to
+the outlet's row rather than the fill (say which and why). Host untouched.
+
+Fix the off-by-one so the lake's top wet row is **below** the outlet's row
+at creation: the outlet is the spill, dry until surplus arrives, the same
+convention `Basin` uses ("holds cells with `y < spill_y`"). Then the
+outlet exports only the stream's surplus at steady state.
+
+Tests first: (1) reproduce — `small`, seed 14400042426867678818, through
+`Preset::find("small").config()` with that seed: after 4000 ticks with
+the outlet open and the cycle on, today the lake holds under half its
+hydrated volume; after the fix it holds at least 95 % of it and
+`outlet_out ≤ reentry_in + 1e-3`. (2) The same on `small` seeds 1–8 and
+`default` seeds 1–4, under a second each or move to `#[ignore]` studies
+with one representative seed in the fast test. (3) T2's two-bowl fixture
+and T4's tests unchanged.
+
+Also rerun T4's gate table (lake before/after the gate's settle, seeds
+1–8 per preset) and report the pass counts; if small seeds 4–6 now hold,
+say so.
+
+Return (≤15 lines): commit, where the off-by-one was, the reproduce
+numbers before/after, the gate table.
