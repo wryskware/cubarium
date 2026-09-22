@@ -459,6 +459,22 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
         }
     }
     layer_rows.sort_by_key(|r| (r.species.index(), r.index));
+    // The invariant the whole per-layer measurement rests on, checked where it is
+    // measured and not only in a unit test: what the layers report **is** the standing
+    // foliage, so no stock is counted twice and none is lost between the two views.
+    {
+        let scalar: f64 = fv.stands.iter().map(|s| s.foliage.max(0.0)).sum();
+        let layered: f64 = layer_rows.iter().map(|r| r.stock).sum();
+        assert!(
+            (layered - scalar).abs() <= 1e-9 * scalar.abs().max(1.0),
+            "the per-layer stocks sum to {layered} and the stands hold {scalar}"
+        );
+        assert!(
+            (total.foliage - scalar).abs() <= 1e-9 * scalar.abs().max(1.0),
+            "the species rows sum to {} and the stands hold {scalar}",
+            total.foliage
+        );
+    }
     for (_, row) in &rows {
         total.reach += row.reach;
         total.visible += row.visible;
