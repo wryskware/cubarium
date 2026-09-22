@@ -156,26 +156,6 @@ fn mix(mut z: u64) -> u64 {
     z ^ (z >> 31)
 }
 
-/// One stand's crown as the shade model sees it, taken before anything moves.
-#[derive(Clone, Copy, Debug)]
-struct Crown {
-    x: f64,
-    z: f64,
-    /// Crown top in voxels above `y = 0`: the support face plus the species' crown height.
-    top: f64,
-    radius: f64,
-    foliage: f64,
-    /// The crown's physical area, `π (r · voxel_m)²` in **square metres**, floored at
-    /// one reference cell `(0.25 m)²`: a sapling's crown is not a point source of
-    /// shade, and the floor is a length rather than a cell so the optical depth does
-    /// not depend on the grid
-    /// (`design/handoffs/voxel-body-anchors-2026-09-22.md`).
-    area_m2: f64,
-}
-
-/// The physical floor on a crown's shading area: one cell of the 0.25 m reference grid.
-const MIN_CROWN_AREA_M2: f64 = 0.25 * 0.25;
-
 pub(crate) fn step(flora: &mut Flora, world: &mut World) {
     // The tick counter moves **first**, so that `flora.tick` is the tick this step
     // produces: the one whose state the caller will read when the step returns. Everything
@@ -340,10 +320,30 @@ fn drown(flora: &mut Flora, world: &World) {
 
 // -------------------------------------------------------------------- 4. light
 
-/// Light for every stand, in `stands` order: the site's own sky visibility times the
-/// attenuation of every *taller* crown that covers its column, then the species' light
-/// response. A stand never shades itself, and a crown level with another's crown top
-/// does not shade it — only a strictly higher one does.
+/// Light for every stand, in `stands` order.
+///
+/// **Receivers as well as occluders** (the audit's §5, "Light needs receivers as well
+/// as occluders"). A stand's income is assessed **per foliage layer**, at that layer's
+/// own physical height, and the stand's light is the average over its layers weighted
+/// by each layer's share of its **stock** — where its leaves actually are. A stand
+/// whose rosette is in shade and whose crown is in the sun earns between the two, and
+/// a plant browsed down to its crown earns more light than one browsed down to its
+/// rosette, at the same total foliage.
+///
+/// An **occluder** is any foliage-bearing layer of another stand whose band top is
+/// strictly above the receiving layer's band top and whose footprint contains the
+/// receiver's column; it attenuates by `exp(-k · (1-p) · stock / area_m2)` over its own
+/// physical area. Porosity is the layer's transmission and enters only here — the cone
+/// sees a porous canopy as leaves all the same
+/// (`design/voxel-encounter-contract-2026-09-21.md` §8).
+///
+/// A stand never shades itself, and a layer level with another's top does not shade
+/// it — only a strictly higher one does, which is the pre-layer rule verbatim.
+///
+/// **On a single-layer species this is numerically what it always was**: the one layer's
+/// band top is the crown top the old model compared, its radius is the crown radius, its
+/// stock is the whole of `P`, its weight is one, and its area is the crown's. The
+/// authored porosity is the only new factor (`tests/layers.rs`).
 fn light_per_stand(flora: &mut Flora, world: &World) -> Vec<f64> {
     let Flora {
         config,
@@ -353,43 +353,95 @@ fn light_per_stand(flora: &mut Flora, world: &World) -> Vec<f64> {
     } = flora;
     let view = world.view();
     let voxel_m = view.config.voxel_m;
-    let crowns: Vec<Crown> = stands
+    let crowns: Vec<Vec<Shade>> = stands
         .iter()
-        .map(|s| crown_of(config, s, voxel_m))
+        .map(|s| shade_layers(config, s, voxel_m))
         .collect();
     let width = view.config.width as f64;
 
     let mut out = Vec::with_capacity(stands.len());
     for (i, stand) in stands.iter().enumerate() {
-        let mut l = sky_at(sky, &view, stand.site);
-        for (j, other) in crowns.iter().enumerate() {
-            if j == i || other.top <= crowns[i].top {
+        let open = sky_at(sky, &view, stand.site);
+        let mine = &crowns[i];
+        // The weights: where this stand's tissue is. A stand with no foliage left has
+        // no tissue to weight, so it is assessed at its layers' capacities instead —
+        // its income is zero either way (`A ∝ P`), and this keeps the number defined.
+        let total: f64 = mine.iter().map(|l| l.stock).sum();
+        let weight_by_stock = total > 0.0;
+        let mut l = 0.0;
+        let mut weighed = 0.0;
+        for layer in mine {
+            let w = if weight_by_stock {
+                layer.stock
+            } else {
+                layer.share
+            };
+            if !(w > 0.0) {
                 continue;
             }
-            let dx = wrapped_delta(other.x, crowns[i].x, width);
-            let dz = other.z - crowns[i].z;
-            if dx * dx + dz * dz > other.radius * other.radius {
-                continue;
+            let mut here = open;
+            for (j, other) in crowns.iter().enumerate() {
+                if j == i {
+                    continue;
+                }
+                for above in other {
+                    if above.top <= layer.top {
+                        continue;
+                    }
+                    let dx = wrapped_delta(above.x, layer.x, width);
+                    let dz = above.z - layer.z;
+                    if dx * dx + dz * dz > above.radius * above.radius {
+                        continue;
+                    }
+                    here *= (-config.shade_k_per_m2 * (1.0 - above.porosity) * above.stock
+                        / above.area_m2)
+                        .exp();
+                }
             }
-            l *= (-config.shade_k_per_m2 * other.foliage / other.area_m2).exp();
+            l += w * here;
+            weighed += w;
         }
+        let l = if weighed > 0.0 {
+            l / weighed
+        } else {
+            open
+        };
         out.push(light_response(config.species(stand.species), l));
     }
     out
 }
 
-fn crown_of(config: &FloraConfig, stand: &Stand, voxel_m: f64) -> Crown {
-    let sc = config.species(stand.species);
-    let radius = sc.crown_radius(stand.wood);
-    let radius_m = radius * voxel_m;
-    Crown {
-        x: stand.site.x as f64,
-        z: stand.site.z as f64,
-        top: stand.site.y as f64 + sc.crown_height(stand.wood),
-        radius,
-        foliage: stand.foliage,
-        area_m2: (std::f64::consts::PI * radius_m * radius_m).max(MIN_CROWN_AREA_M2),
-    }
+/// One foliage layer as the shade model sees it: where its top is, what it covers, and
+/// what it holds.
+struct Shade {
+    x: f64,
+    z: f64,
+    /// The band's **top**, in voxels above the world floor. For a `[0, 1.0]` layer this
+    /// is `site.y + crown_height(wood)`: the pre-layer crown top, unchanged.
+    top: f64,
+    /// Radius in **cells**, for the footprint test.
+    radius: f64,
+    stock: f64,
+    share: f64,
+    porosity: f64,
+    area_m2: f64,
+}
+
+fn shade_layers(config: &FloraConfig, stand: &Stand, voxel_m: f64) -> Vec<Shade> {
+    crate::layers_of(config, stand, voxel_m)
+        .into_iter()
+        .filter(|l| l.kind.bears_foliage())
+        .map(|l| Shade {
+            x: stand.site.x as f64,
+            z: stand.site.z as f64,
+            top: l.band_v[1],
+            radius: l.radius_v,
+            stock: l.stock,
+            share: l.share,
+            porosity: l.porosity,
+            area_m2: l.area_m2,
+        })
+        .collect()
 }
 
 /// `L_eff = L (1 + light_half) / (L + light_half)`: a species with a small `light_half`
@@ -1119,6 +1171,17 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink], substrate: &[Substrat
         };
         stands[si].reserve -= build * dp_q;
         stands[si].foliage += dp_a + dp_q;
+        // Where the new foliage goes: **bottom-up to each layer's capacity**, in
+        // profile order, which is what makes a browsed plant refill its floor tissue
+        // first and look browsed from below (decisions §4). The capacities are read at
+        // the wood this tick started with, because `dw` below has not been applied yet.
+        {
+            let sc = config.species(species);
+            let caps = sc.layer_capacities(stands[si].wood);
+            let n = caps.len();
+            crate::layers::fill_bottom_up(stands[si].layer_stocks_mut(n), &caps, dp_a + dp_q);
+            stands[si].settle_layers(n);
+        }
 
         let dw = (rem / build).min(d_w).min(tissue_left).max(0.0);
         rem -= build * dw;
@@ -1166,6 +1229,14 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink], substrate: &[Substrat
         let shed = (sc.senescence * stands[si].foliage * DT).min(stands[si].foliage);
         let organic_before = stands[si].material();
         stands[si].foliage -= shed;
+        // Senescence loses from the **top** foliage layer first: a plant drops its
+        // canopy before its rosette, and the rosette persists
+        // (`design/organism-anatomy-2026-09-21.md` §3, bloomcrown).
+        {
+            let n = sc.foliage_layer_count(stands[si].wood);
+            crate::layers::shed_from_top(stands[si].layer_stocks_mut(n), shed);
+            stands[si].settle_layers(n);
+        }
         let shed_mineral = pull_mineral(&mut stands[si], organic_before, shed);
         add_litter(
             config,
@@ -1184,6 +1255,15 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink], substrate: &[Substrat
         ground[gi].dead_wood += die_back;
         ground[gi].dead_wood_mineral += die_back_mineral;
         ground[gi].dead_wood_energy += e_v * die_back;
+
+        // ---- 4.6b the stage, after every change to the wood
+        //
+        // Growth and dieback both move `W`, and the profile is staged by `W / W_max`.
+        // A stand that has crossed a threshold re-bins the tissue it **already holds**
+        // into the new stage's layers, bottom-up: a seedling rosette that has grown a
+        // stem does not conjure a crown, it lifts what it had. Nothing is created and
+        // nothing is destroyed (decisions §4).
+        stands[si].resync_layers(config.species(species));
 
         // ---- 4.7 death
         if stands[si].wood < sc.alive_min {
@@ -1502,24 +1582,27 @@ fn seed_bank(flora: &mut Flora, world: &World) {
         let (wood, foliage, reserve) = newborn_stocks(sc, organic);
         let id = ledger.births;
         ledger.births += 1;
-        stands.insert(
-            at,
-            Stand {
-                id,
-                site: g.site,
-                species,
-                stage: Stage::Alive,
-                wood,
-                foliage,
-                reserve,
-                light: 0.0,
-                moisture: 0.0,
-                water_m3: 0.0,
-                mineral,
-                aeration_stress: 0.0,
-                parcel: 0.0,
-            },
-        );
+        let mut born = Stand {
+            id,
+            site: g.site,
+            species,
+            stage: Stage::Alive,
+            wood,
+            foliage,
+            reserve,
+            light: 0.0,
+            moisture: 0.0,
+            water_m3: 0.0,
+            mineral,
+            aeration_stress: 0.0,
+            parcel: 0.0,
+            layer_stock: [0.0; crate::MAX_FOLIAGE_LAYERS],
+            profile_stage: 0,
+        };
+        // A newborn's foliage goes into its seedling profile bottom-up, like any other
+        // tissue: the stocks sum to `foliage` from the first tick of its life.
+        born.bin_foliage(sc, config.voxel_m);
+        stands.insert(at, born);
         ledger.establishments += 1;
     }
     // Then the decay, on what is left: a bin the germination above emptied pays nothing,

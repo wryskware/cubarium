@@ -67,7 +67,15 @@ fn light_response(l: f64, half: f64) -> f64 {
 /// cells, the shaded species' light_half)`.
 fn shaded_pair(voxel_m: f64, support: u32) -> (f64, f64, f64, f64) {
     let mut world = plain(voxel_m, 16, 16, support, 0.6);
-    let config = FloraConfig::for_voxel_size(voxel_m);
+    let mut config = FloraConfig::for_voxel_size(voxel_m);
+    // Since layers, the shading frond is given the one-layer, zero-porosity profile
+    // this fixture was written against: both claims below are about the **units** of
+    // the shade exponent, and a tiered, porous canopy would be measuring something
+    // else. That a single-layer species shades exactly as it did before layers is
+    // `tests/layers.rs`'s own claim.
+    config.umbrellafrond.profile = cubarium_voxel_flora::SpeciesConfig::one_stage(vec![
+        cubarium_voxel_flora::SpeciesConfig::foliage_layer([0.0, 1.0], 1.0, 1.0, 0.0),
+    ]);
     let tall_wood = 0.6;
     let short_wood = 0.1;
     let uc = config.species(Species::Umbrellafrond).clone();
