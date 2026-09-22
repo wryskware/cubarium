@@ -1628,41 +1628,102 @@ pub fn drain(w: &mut World) {
     });
 }
 
+/// What comes out of the spring cell: the aquifer's own head-driven seep, and — under the
+/// closed cycle — the [`reentry`] stream on top of it.
+///
+/// One phase, not two, so `cubarium-voxel-sim`'s schedule stays the same chain of public
+/// phases as [`step`] without having to learn a new one. They are the same cell and the
+/// same emergence rule; only the store they draw on differs.
 pub fn spring(w: &mut World) {
     crate::voxel_phase!(Spring, {
+        aquifer_seep(w);
+        reentry(w);
+    });
+}
+
+/// The head-driven part: water the aquifer pushes up while its table stands over the cell.
+fn aquifer_seep(w: &mut World) {
+    let Some((x, y, z)) = w.spring_cell else {
+        return;
+    };
+    if w.aquifer_m3 <= 0.0 || w.config.spring_k_m2_per_s <= 0.0 {
+        return;
+    }
+    if y >= w.config.height || z >= w.config.depth {
+        return;
+    }
+    let head = w.config.aquifer_head_m(w.aquifer_m3);
+    let h_spring = y as f64 * w.config.voxel_m;
+    let drive = (head - h_spring).max(0.0);
+    if drive <= 0.0 {
+        return;
+    }
+    let want = (w.config.spring_k_m2_per_s * drive * DT).min(w.aquifer_m3);
+    let got = emerge(w, (x, y, z), want);
+    w.aquifer_m3 -= got;
+}
+
+/// Water pushed out at a named cell, and what it actually took.
+///
+/// It emerges at the cell and, if that is already brim full, in the cells above it: a
+/// spring under standing water still reaches the surface. A **solid roof** over the seep
+/// stops it there, and whatever could not be pushed out is not withdrawn — the caller
+/// subtracts only the return value, so a blocked spring keeps its water in its store.
+fn emerge(w: &mut World, (x, y, z): (u32, u32, u32), want: f64) -> f64 {
+    let mut left = want;
+    for at in y..w.config.height {
+        let i = w.config.index(x as i64, at, z);
+        if w.material[i].is_solid() {
+            break;
+        }
+        let got = add_free(w, i, left);
+        left -= got;
+        if left <= 1e-15 {
+            break;
+        }
+    }
+    want - left
+}
+
+/// **River re-entry**: the closed cycle's second return path.
+///
+/// Route B lifts water into one lumped store and rains it back as showers. That is a
+/// whole ring's weather arriving as weather, and it leaves the top of a tiered landscape
+/// with nothing running through it. So the store also feeds a **stream at the spring
+/// cell** — Wrysk, 2026-09-21: "water features on other levels, waterfalls possibly even
+/// (works well if the only outlet is on the bottom most lake)". The ring is a slice of a
+/// wider world: the river that leaves at the bottom lake re-enters at the top.
+///
+/// It draws [`crate::Config::reentry_m3_per_s`] per second while the store stands **above
+/// the shower floor**, and never below it, so the stream can never eat the rain: the
+/// drought lock stays exactly where [`shower`] put it. Booked as
+/// [`crate::Ledger::reentry_in`] and `atmosphere_out`, so the conservation identity holds
+/// term for term. The aquifer-driven [`spring`] is untouched and adds to it. Nothing here
+/// is rain, so `is_raining` does not see it. The open budget has no store and is ignored.
+pub fn reentry(w: &mut World) {
+    {
+        if !w.config.closed_water_budget || w.config.reentry_m3_per_s <= 0.0 {
+            return;
+        }
         let Some((x, y, z)) = w.spring_cell else {
             return;
         };
-        if w.aquifer_m3 <= 0.0 || w.config.spring_k_m2_per_s <= 0.0 {
-            return;
-        }
         if y >= w.config.height || z >= w.config.depth {
             return;
         }
-        let head = w.config.aquifer_head_m(w.aquifer_m3);
-        let h_spring = y as f64 * w.config.voxel_m;
-        let drive = (head - h_spring).max(0.0);
-        if drive <= 0.0 {
+        let floor = w.config.shower_trigger_fraction * w.ledger.expected_total();
+        let spare = w.atmosphere_m3 - floor;
+        if spare <= 0.0 {
             return;
         }
-        let want = (w.config.spring_k_m2_per_s * drive * DT).min(w.aquifer_m3);
-        // The seep emerges at the named cell and, if that is already brim full, in the
-        // cells above it: a spring under standing water still reaches the surface. A solid
-        // roof over the seep blocks it, and the aquifer keeps what it could not push out.
-        let mut left = want;
-        for at in y..w.config.height {
-            let i = w.config.index(x as i64, at, z);
-            if w.material[i].is_solid() {
-                break;
-            }
-            let got = add_free(w, i, left);
-            w.aquifer_m3 -= got;
-            left -= got;
-            if left <= 1e-15 {
-                break;
-            }
+        let want = (w.config.reentry_m3_per_s * DT).min(spare);
+        let got = emerge(w, (x, y, z), want);
+        if got > 0.0 {
+            w.atmosphere_m3 -= got;
+            w.ledger.atmosphere_out += got;
+            w.ledger.reentry_in += got;
         }
-    });
+    }
 }
 
 pub fn outlet(w: &mut World) {
@@ -2699,6 +2760,124 @@ mod closed_budget_tests {
         );
     }
 
+    // ---- river re-entry ---------------------------------------------------------------
+
+    /// A slab with a named spring cell on open ground and a charged sky.
+    fn stream_slab(atmosphere_m3: f64, rate: f64, roofed: bool) -> World {
+        let c = Config {
+            width: 8,
+            height: 8,
+            depth: 2,
+            voxel_m: 0.25,
+            rain_m_per_s: 3.5e-5,
+            evaporation_m_per_s: 0.0,
+            closed_water_budget: true,
+            initial_atmosphere_m3: atmosphere_m3,
+            shower_trigger_fraction: 0.01,
+            shower_volume_m3: 0.05,
+            // No schedule and a floor the store starts over would rain at once and muddy
+            // the arithmetic; the interval parks the shower far outside these windows.
+            shower_interval_min_s: 600.0,
+            shower_interval_max_s: 600.0,
+            reentry_m3_per_s: rate,
+            ..Config::default()
+        };
+        let mut w = World::empty(c.clone());
+        for x in 0..c.width as i64 {
+            for z in 0..c.depth {
+                w.apply(Command::SetMaterial {
+                    x,
+                    y: 1,
+                    z,
+                    material: Material::Soil,
+                });
+            }
+        }
+        if roofed {
+            // The seep's own cell is rock: `emerge` stops at the first solid, so there is
+            // nowhere for the stream to come out and nothing is withdrawn.
+            w.apply(Command::SetMaterial {
+                x: 3,
+                y: 2,
+                z: 0,
+                material: Material::Rock,
+            });
+        }
+        w.set_spring_cell(Some((3, 2, 0)));
+        w
+    }
+
+    /// The stream moves water out of the sky and into the world, and the books hold it
+    /// term for term. It stops at the shower floor — it may never eat the rain — and a
+    /// rate of zero is no stream at all.
+    #[test]
+    fn reentry_moves_store_to_spring_and_conserves() {
+        let rate = 0.002;
+        let mut w = stream_slab(0.5, rate, false);
+        let before = w.atmosphere_m3();
+        run(&mut w, 100);
+        let v = w.view();
+        let want = 100.0 * rate * DT;
+        assert!(
+            (v.ledger.reentry_in - want).abs() <= 1e-9 * want,
+            "a hundred ticks of stream: {} against {want}",
+            v.ledger.reentry_in
+        );
+        // The sky paid exactly that out. Its *net* change is smaller, because the
+        // harness's one plant-sized withdrawal transpires back into it part way through —
+        // which is the point of booking the two directions apart.
+        assert!(
+            (v.ledger.atmosphere_out - want).abs() <= 1e-9 * want,
+            "the sky paid for every drop: out {} against {want}",
+            v.ledger.atmosphere_out
+        );
+        assert!(
+            (before - w.atmosphere_m3() - (want - v.ledger.transpiration_out)).abs() <= 1e-9,
+            "and its net change is what it paid less what came back: {} -> {}, ledger {:?}",
+            before,
+            w.atmosphere_m3(),
+            v.ledger
+        );
+        assert!(v.total_residual().abs() < 1e-9, "{}", v.total_residual());
+        assert_eq!(v.ledger.showers, 0, "no shower muddied this window");
+
+        // At the floor the stream stops: the drought lock is where `shower` put it.
+        let mut starved = stream_slab(0.0, rate, false);
+        run(&mut starved, 100);
+        assert_eq!(starved.view().ledger.reentry_in, 0.0);
+
+        // And no rate is no stream.
+        let mut off = stream_slab(0.5, 0.0, false);
+        run(&mut off, 100);
+        assert_eq!(off.view().ledger.reentry_in, 0.0);
+        assert_eq!(off.atmosphere_m3(), 0.5);
+    }
+
+    /// A spring under rock pushes nothing out, and keeps what it could not push.
+    #[test]
+    fn a_roofed_spring_keeps_the_store() {
+        let mut w = stream_slab(0.5, 0.002, true);
+        run(&mut w, 100);
+        let v = w.view();
+        assert_eq!(v.ledger.reentry_in, 0.0, "the roof stopped it");
+        assert_eq!(w.atmosphere_m3(), 0.5, "and nothing was withdrawn");
+        assert!(v.total_residual().abs() < 1e-9);
+    }
+
+    /// The open budget has no store to draw on, so there is nothing to return.
+    #[test]
+    fn the_open_budget_ignores_reentry() {
+        let mut w = World::empty(Config {
+            closed_water_budget: false,
+            reentry_m3_per_s: 0.002,
+            ..config(false)
+        });
+        w.set_spring_cell(Some((3, 2, 0)));
+        run(&mut w, 100);
+        assert_eq!(w.view().ledger.reentry_in, 0.0);
+        assert_eq!(w.atmosphere_m3(), 0.0);
+    }
+
     // ---- the shower schedule ---------------------------------------------------------
     /// **Rain is a shower falling, not a rate in the config.** Under the closed cycle
     /// `rain_m_per_s` is the rate a shower falls *at* and is always positive, so reading
@@ -3040,6 +3219,15 @@ mod closed_budget_tests {
         let back = World::load(&scheduled.save()).expect("a scheduled world round-trips");
         assert_eq!(back.next_shower_tick(), scheduled.next_shower_tick());
         assert!(back.next_shower_tick() > 0);
+
+        // And the stream's own books: `reentry_in` is an inflow like any other, so a
+        // resumed world's conservation identity has to carry it.
+        let mut stream = stream_slab(0.5, 0.002, false);
+        run(&mut stream, 50);
+        assert!(stream.view().ledger.reentry_in > 0.0);
+        let back = World::load(&stream.save()).expect("a streaming world round-trips");
+        assert_eq!(back.view().ledger, stream.view().ledger);
+        assert!(back.view().total_residual().abs() < 1e-9);
 
         let mut bad = fixture(false);
         bad.atmosphere_m3 = 1.0;

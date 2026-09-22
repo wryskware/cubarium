@@ -46,11 +46,20 @@ pub struct Ledger {
     pub initial_atmosphere: f64,
     /// Showers **started** since the world began. A count, not a flux.
     pub showers: u64,
+    /// Water the closed cycle returned as a **stream at the spring cell**, cubic metres.
+    ///
+    /// The second return path of route B (`design/handoffs/voxel-water-cycle-2026-09-20.md`
+    /// plus Wrysk's decision of 2026-09-21): the river that leaves the bottom lake at the
+    /// outlet re-enters at the top of the ring instead of only falling back as showers.
+    /// It comes **out of** [`crate::World::atmosphere_m3`] — counted again in
+    /// `atmosphere_out` — and **into** the in-world stores, so it is an inflow here
+    /// exactly as `rain_in` is. Zero under the open budget, which has no store to draw on.
+    pub reentry_in: f64,
 }
 
 impl Ledger {
     pub fn net_in(&self) -> f64 {
-        self.rain_in + self.user_in
+        self.rain_in + self.user_in + self.reentry_in
             - self.evaporation_out
             - self.outlet_out
             - self.transpiration_out
