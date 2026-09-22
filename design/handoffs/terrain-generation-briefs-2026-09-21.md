@@ -1009,3 +1009,25 @@ pictures show the moved outlet and no sumps.
 
 Return (≤30 lines): commits, the numbers chosen and why, per-preset gate
 pass count and lake drift, PNG paths, test counts for the two crates.
+
+## Packages L and V — integrated 2026-09-21
+
+L landed 93d4487: `LakeDatum` (floor, level, rim) from the surface
+heightfield, outlet on the rim at the lake level for staged recipes, no
+hollow floor below it; `Ridge` byte-identical. V landed 1e1477b: closed-cycle
+`is_raining` is "a shower is falling"; hydrate fills the lake first and
+raises the water table to the lake floor (a lake stands on its table, not
+its bed — `default` seed 1 lost its whole lake in ten minutes without it),
+spare inventory goes aloft rather than into the aquifer whose head the lake
+stands on; `hydrate::lake()`; host seed gate on `min_lake_m2` with 24
+tries; probe judges the store against the floor under a schedule.
+Numbers: `small` lake 0.375 m / bar 3 m² (three voxels; at four the ring
+lost hollows), `default`/`wide` 0.75 m / 6 m²; `inventory_m` 0.5 → 1.5 to
+pay for the table. Gate passes 6/8, 6/8, 7/8 seeds; lakes drift 0–1 voxel
+over ten minutes. Known: most of the inventory now parks in the sky store
+(56 of 90 m³ on `small`), conserved and inert. Fable bumped SCHEMA 12 → 13
+(recipe fields changed under postcard) and ran the two crates: 790 passed,
+3 skipped. The panel's own seed now shows a 7.9 m² lake where it had none.
+
+Wrysk's next idea (tiers: taller world, terraces with pools, waterfalls,
+river re-entry at the top) awaits his two decisions; see the conversation.
