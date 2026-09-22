@@ -19,13 +19,65 @@ and nothing more. It runs as the unprivileged system user `cubarium`, simulates
 the world, renders it on the Adreno 643 with Vulkan straight into scanout-linear
 images, exports those images as dma-bufs and hands the file descriptors to the
 daemon over the socket with `SCM_RIGHTS`. No copy of a frame is ever made: the
-GPU writes the buffer the display controller scans out. The only privilege the
-service has is two supplementary groups — `video` for the socket and the
+GPU writes the buffer the display controller scans out. The service's privileges
+are two supplementary groups — `video` for the socket and the
 read-only connector probe, `render` for `/dev/dri/renderD128`, which the Vulkan
 loader opens and which fails with `vkCreateInstance: A host memory allocation
-has failed` if you forget it. The daemon is never stopped or reconfigured by
+has failed` if you forget it — and the ambient `CAP_SYS_NICE` its loop thread
+uses for a utilisation floor (below). The daemon is never stopped or reconfigured by
 anything here; if it restarts, the client dies with it and `Restart=always`
 brings the client back.
+
+## Where the threads run
+
+The QCM6490 is big.LITTLE with a prime: cpu0-3 are Cortex-A55 (`cpu_capacity`
+381), cpu4-6 Cortex-A78 (889), cpu7 the prime A78 (1024, 2.7 GHz). The panel's
+tick rate is the **main thread's** budget — it steps the world, packs the frame
+and hands it to the presenter — so where that one thread runs is most of the
+performance. Left to the scheduler (2026-09-22 review, `perf` on the board) it
+spent ~30 % of its samples on A55s, migrated 646 k times and averaged 1.35 GHz;
+the unit's old `CPUAffinity=0-6` also shut the prime out. Pinned to cpu7 by hand
+its worst step fell from 62-66 ms to 17-29 ms.
+
+So, as built:
+
+* **The unit** masks the service to `1-7` (every core but one A55) and, before
+  start, writes `core_ctl` `min_cpus` — cpu7's cluster 1, the cpu4 cluster 3 —
+  so Qualcomm's core control does not park the prime or an A78 (a parked CPU
+  refuses an affinity of only itself with `EINVAL`). Those two are the only
+  sysfs writes; they last until reboot.
+* **`cubarium voxel`**, at the top of its loop (`voxel/placement.rs`), reads
+  `/sys/devices/system/cpu/cpu*/cpu_capacity` for the CPUs in its mask, pins
+  the loop thread to the highest (falling to the next big core if one refuses),
+  and moves every other thread of the process — presenter, tick pool, web
+  encoder, stdin, ctrl-c — onto the **other big cores, 4-6**. The tick pool is
+  fork-join over equal column chunks, so a chunk on an A55 is the straggler the
+  whole scope waits for. The snapshot writer, spawned later, moves itself there
+  too. On a machine whose CPUs all report one capacity (the desk) nothing is
+  pinned and nothing is said.
+* The loop thread then sets **`uclamp.min` 1024** (`sched_setattr`), so
+  schedutil runs cpu7 at full clock while the loop is runnable (it held a
+  pinned, half-idle loop at ~1.06 GHz). The loop sleeps between ticks and
+  frames, so this is fast-while-working, not hot all the time.
+
+The start-up log says which of this happened, in one line:
+
+```
+cubarium voxel: the loop is on cpu7 (capacity 1024 of 381..1024), 8 other thread(s) on cpu 4,5,6; uclamp.min 1024
+```
+
+`no uclamp.min (<error>)` there means the kernel refused the floor; "no big
+core would take the loop" means every big core was parked. To check the clock
+the loop actually gets: `perf stat -e cycles,task-clock -t <main tid> -- sleep 10`
+(cycles / task-clock ≥ 2 GHz is the target). If the floor took and the clock
+is still low, suspect the cgroup: on 5.4 a task's `uclamp.min` is capped by its
+cgroup's `cpu.uclamp.min`, which is `0.00` for `system.slice/cubarium.service`
+(later kernels treat the cgroup value as a floor instead). Raising it is a
+`/sys/fs/cgroup` write, which the unit is not allowed to make.
+
+The 60 s snapshot is cloned on the loop and encoded, written and `fsync`ed on a
+background thread; the stop snapshot (SIGINT) waits for any write in flight and
+is written synchronously.
 
 ## Install
 

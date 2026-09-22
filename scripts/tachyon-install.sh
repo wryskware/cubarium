@@ -28,8 +28,9 @@ DOC_DIR=/usr/local/share/doc/cubarium
 
 # --- the user -------------------------------------------------------------
 # A system user with no login and no password. `video` is the frame socket's
-# group, `render` is /dev/dri/renderD128 (the Vulkan loader). It gets no
-# capability beyond those two groups: the daemon keeps root and KMS.
+# group, `render` is /dev/dri/renderD128 (the Vulkan loader). Beyond those two
+# groups the unit grants it only CAP_SYS_NICE (the loop thread's uclamp floor,
+# docs/tachyon.md "Where the threads run"): the daemon keeps root and KMS.
 if id "$USER_NAME" >/dev/null 2>&1; then
     echo "user $USER_NAME exists: $(id "$USER_NAME")"
 else

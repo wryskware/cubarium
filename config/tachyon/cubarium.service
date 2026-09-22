@@ -39,10 +39,29 @@ Environment=RUST_LOG=info
 # `--gpu-web-rate 2` also belongs here rather than in the ExecStart below; see the
 # note on it.
 Environment="CUBARIUM_EXTRA_ARGS=--gpu-web-rate 2"
-# Every core but one: the board runs nothing else (Wrysk, 2026-09-22). The old
-# 4-7 mask met core_ctl offlining idle big cores and left the sim two threads;
-# the tick's default thread count is now whatever it can see minus one.
-CPUAffinity=0-6
+# Every core but one A55: the board runs nothing else (Wrysk, 2026-09-22), and
+# the tick's default thread count is whatever it can see minus one (six here).
+# cpu7 is the prime A78 (capacity 1024, 2.7 GHz) and must be in the mask: at the
+# top of its loop `cubarium voxel` pins the loop thread to the highest-capacity
+# CPU it can see and moves every other thread onto the other big cores, 4-6
+# (docs/tachyon.md, "Where the threads run"). The old 0-6 shut the prime out.
+CPUAffinity=1-7
+# Qualcomm `core_ctl` parks idle big cores, and a parked CPU refuses an affinity
+# of only itself. Keep the prime and all three A78s awake: cpu7's cluster holds
+# at least 1, the cpu4 cluster at least 3. `+` runs these as root despite
+# `User=`; `-` lets the service start on a kernel without core_ctl. These are
+# the ONLY sysfs writes this unit makes (Wrysk allows core_ctl, nothing else
+# under /sys), and they persist until reboot.
+ExecStartPre=-+/bin/sh -c 'echo 1 > /sys/devices/system/cpu/cpu7/core_ctl/min_cpus'
+ExecStartPre=-+/bin/sh -c 'echo 3 > /sys/devices/system/cpu/cpu4/core_ctl/min_cpus'
+# The loop thread asks for `uclamp.min` 1024 (`sched_setattr`) so schedutil runs
+# the prime at speed while the loop works instead of at the ~1 GHz it held a
+# pinned but half-idle thread to. Android kernels gate uclamp on CAP_SYS_NICE;
+# the capability reaches the unprivileged user as an ambient one, which
+# NoNewPrivileges does not strip. The start-up line
+# "the loop is on cpuN ...; uclamp.min 1024" (or "no uclamp.min (<errno>)")
+# says whether it took.
+AmbientCapabilities=CAP_SYS_NICE
 
 # `cubarium voxel`: a 160x48x24 voxel world presented through the GPU cutaway
 # renderer straight into scanout dma-bufs for cube-screen-shim.
