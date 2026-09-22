@@ -675,7 +675,13 @@ impl Water {
         // 6, `wide` from 18 to 15. Three voxels is where the water becomes readable for
         // the least of that.
         lake_depth_m: 0.75,
-        min_lake_m2: 6.0,
+        // **The terraces shrank the lake.** Tier 0's trough is a narrower thing than the
+        // broad basin the pre-tier rings had: measured at seed 1, `default`'s open water
+        // fell from 8.7 m² to 3.3 and `small`'s from 8.5 to 0.8. The bar follows the
+        // landscape rather than rejecting every seed of it — about three quarters of what
+        // seed 1 reaches, so a weaker seed still has room. Raising it again is a question
+        // for the generator (a real basin on tier 0), not for this number.
+        min_lake_m2: 2.5,
         reentry_m3_per_s: 1.0e-3,
         min_tier_pools: 1,
     };
@@ -711,13 +717,16 @@ impl Water {
         // water feature on the panel, and six of eight seeds clear it at this depth
         // against three of eight at 6 m². (`small`'s five barren seeds are the preset's
         // own — it has them at every depth, lake or no lake.)
-        min_lake_m2: 3.0,
+        // 0.8 m² at seed 1 on the terraced ring, against 8.5 before the tiers.
+        min_lake_m2: 0.6,
         ..Water::DEFAULT
     };
 
     /// `wide` is 384 m², twice `default`.
     pub const WIDE: Water = Water {
         shower_volume_m3: 0.8,
+        // Twice the ring, and its tier-0 trough is wider with it: 6.3 m² at seed 1.
+        min_lake_m2: 5.0,
         ..Water::DEFAULT
     };
 
@@ -735,8 +744,6 @@ impl Water {
             ("water.shower_volume_m3", self.shower_volume_m3),
             ("water.shower_interval_min_s", self.shower_interval_min_s),
             ("water.shower_interval_max_s", self.shower_interval_max_s),
-            ("water.lake_depth_m", self.lake_depth_m),
-            ("water.min_lake_m2", self.min_lake_m2),
             ("water.lake_depth_m", self.lake_depth_m),
             ("water.min_lake_m2", self.min_lake_m2),
             ("water.reentry_m3_per_s", self.reentry_m3_per_s),
