@@ -1657,3 +1657,28 @@ Clock thread (2026-09-22): NTP enabled but never synced — DNS on the
 cellular default route times out, so `ntp.ubuntu.com` never resolves; no
 battery RTC (reads 1969). Wrysk's fix: `NTP=` IP literals in a
 timesyncd drop-in; `fake-hwclock` for monotonic boots.
+
+## D4 rounds on the board — 2026-09-22
+
+- d3492df (af1f61b): presenter thread. Board: recorded 50–55 fps,
+  presented 20, presenter at 81 % — ~40 ms running per present.
+- a7ce126 (bbc2bd0): frames between ticks re-present without redrawing
+  (2.3 vs 9.7 ms); per-present timing line. Board: GPU work ~10 ms, idle
+  17→35 ms climbing, every present "starved of a slot".
+- c218675 (4732592): the daemon reports a freed slot only in its
+  flip-complete reply (`led-cube-shim … handoff/slots.rs`); the presenter
+  now drains the socket every 2 ms while waiting, a presented slot leaves
+  the lent set at once, four slots attached. Board: starvation gone, peak
+  42 fps, then decay with ticks falling to 15/s — the main thread.
+- 3a27198 (aaa8704): tick-cost line; a current frame is not re-recorded.
+  Board, stable over minutes: 20.0 ticks/s, **29–30 fps presented**, loop
+  busy 83 %: step 28 ms/tick (flora 0.6, fauna 0.6, the rest the water
+  substeps — the crate's `world` timer reads 0.0 and needs a look), pack
+  12 ms/tick, record 0.17 ms/frame; water region flat (13.5 k exchanging,
+  38 400 band, 14.3 k falling cells per tick); pool threads idle because
+  the exchange's column scan barely splits at this ring size.
+
+Next lever, Wrysk's call: the simulation on its own thread with the
+renderer packing from a per-tick copy, the water scan split to use the
+pool at this scale, and change-only packing — a sim-performance package
+for the water worker (high). Or accept 30 fps and go to the atlas.
