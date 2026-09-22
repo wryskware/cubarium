@@ -1216,3 +1216,62 @@ fired. Visual: `small` panel seed 9482528745678189003 and seed 1 at
 Return (≤30 lines): commits, rates chosen and why, per-preset study
 digest, whether the presenter needed the falling-column rule, PNG paths,
 test counts.
+
+## Packages T1 and T2 — integrated 2026-09-21
+
+T1 landed 000bb4c/6a4b491: `Recipe.tiers` (small 3 × 1.4 m, default/wide
+4 × 2.0 m), every preset 72 voxels tall, rock pool chain with the whole
+front lip as the spillway (the skyline pass cuts any lip standing above its
+own water, so the pool is brim full to it), spring in the top pool, a ramp
+per riser, `count = 0` byte-identical, Ridge unchanged. T2 landed
+c851a09/0e230d3: re-entry inside `spring` (a new phase would not have run
+in `cubarium-voxel-sim`'s schedule), `Ledger::reentry_in`, SCHEMA 14,
+`hydrate::pools` as connected bodies of standing water (a cascade is not a
+lake; a film is not a pond), founders placed only on faces whose deepest
+water in a 200-tick post-settle window their species could stand in —
+`settle` converges on stored volume while a spill front is still
+descending, which drowned two founders on `default`. Rates 1e-3 / 1.2e-4
+m³/s hold every established fall column wet on all 12 000 ticks with the
+sky within ±0.3 %. The falls read at 4 px on both presenters. Fable ran the
+two crates: 803 passed, 5 skipped; panel TOML height 72.
+
+Costs of the terraces, all generator-side, handed to T3: the lake shrank
+(small 8.5 → 0.8 m², default 8.7 → 3.3) because the tier-0 bowl was
+stamped at pool size, so T2 lowered `min_lake_m2` to 0.6 / 2.5 / 5.0 as a
+stopgap; hollows fell to 2 per ring on small and default; small carries
+19–21 stands against 31 before.
+
+## Package T3 — a real lake, grottos and soil on the terraces (generator worker)
+
+Owner: generator worker (Opus, high). Files: `generate.rs`, `hollows.rs`,
+`recipe.rs` (numbers, bars), `erosion.rs`, `noise.rs`. Not the host, not
+`hydrate.rs`/`water.rs`/`world.rs`.
+
+1. **The lake is a lake.** Tier 0 gets a proper basin, not a pool-sized
+   bowl: `Tiers.lake_radius_m` (small ≈ 2 m, default/wide ≈ 3 m; the lake
+   is the largest water on the ring), `lake_depth_m` deep, on soil, placed
+   so it **touches the front cut** (it reads in section as well as from
+   above) and so the chain's last fall lands in it; `LakeDatum` finds it.
+   Then `min_lake_m2` goes back up: small 3.0, default 6.0, wide 6.0, and
+   at least 6 of 8 seeds per preset pass the gate.
+2. **Grottos on the risers.** The risers are the ring's cliffs now; carry
+   the strata banding and the hard-cap-over-soft geometry into them so
+   undercuts and galleries form there (their floors are above the lake by
+   construction). Target: habitable hollows at least back to the pre-tier
+   counts (small 5, default 6, wide 15 at seed 1), datum rule unchanged.
+3. **Soil on the terraces.** Terrace floors keep a sediment mantle deep
+   enough for founders (the flora's establishment gates decide); target:
+   `small` seeds carry stands back near 31 — report the count from the
+   host's seeded-habitat line on seed 1 and the panel seed.
+
+Tests first, each under a second: lake area ≥ bar on ≥ 6 of 8 seeds per
+preset (`hydrate::lake`, no settle); the lake basin has a cell at `z = 0`;
+the last notch lands in the lake; hollows per preset seed 1 at least the
+targets; the walk still passes; `count = 0` still byte-identical.
+
+Visual: the same three pictures (small panel seed and seed 1 at 4 px via
+the Tachyon config, default seed 1 at 8 px), dry, into `terrain-tiers3/`,
+looked at before returning.
+
+Return (≤25 lines): commits, lake m² per preset (seeds 1–8 pass count),
+hollows and stands per preset, PNG paths.
