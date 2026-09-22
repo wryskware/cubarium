@@ -147,6 +147,7 @@ pub struct FrameTiming {
 }
 
 /// One target attachment the present pass can draw into.
+#[derive(Clone, Copy, Debug)]
 pub struct TargetImage {
     pub image: vk::Image,
     pub view: vk::ImageView,

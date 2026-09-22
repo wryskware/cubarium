@@ -37,12 +37,16 @@
 use std::io::{IoSlice, IoSliceMut};
 use std::mem::MaybeUninit;
 use std::os::unix::io::{AsFd, BorrowedFd, OwnedFd};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 use ash::vk;
 
 use super::dmabuf::{self, LinearImage};
+use super::presenter::{FromPresenter, Mailbox, Panel, present_loop};
 use crate::present::FrameSource;
 use crate::render::{PresentTransform, TargetImage};
 use crate::vk::Gpu;
@@ -233,17 +237,15 @@ impl ShimScanout {
                 )),
             )?;
             let one = [slot.command_buffer];
-            unsafe {
-                d.reset_fences(&[slot.fence])?;
-                d.queue_submit(
-                    gpu.queue,
-                    &[vk::SubmitInfo::default().command_buffers(&one)],
-                    slot.fence,
-                )?;
-                d.wait_for_fences(&[slot.fence], true, u64::MAX)?;
-            }
+            unsafe { d.reset_fences(&[slot.fence]) }?;
+            gpu.submit(
+                &[vk::SubmitInfo::default().command_buffers(&one)],
+                slot.fence,
+            )?;
+            unsafe { d.wait_for_fences(&[slot.fence], true, u64::MAX) }?;
         }
         let submitted = Instant::now();
+        src.frame_retired();
         self.present(self.slots[index].id)?;
         Ok((
             src.gpu_ms(gpu),
@@ -269,6 +271,81 @@ impl ShimScanout {
             vk::ImageLayout::GENERAL,
         )?;
         Ok((PANEL.0, PANEL.1, rgba))
+    }
+
+    /// Every slot's command buffer and attachment, for a recorder that is not this
+    /// thread. They are fixed when the slot is attached — a re-attach changes the
+    /// daemon's slot *id*, never the image or the buffer — so the recorder can keep them
+    /// while the client itself lives on the presenter thread.
+    pub fn record_slots(&self) -> Vec<SlotRecord> {
+        self.slots
+            .iter()
+            .map(|s| SlotRecord {
+                command_buffer: s.command_buffer,
+                image: s.target,
+            })
+            .collect()
+    }
+
+    /// The attachment format every slot's view has, which the recorder needs to ask for
+    /// the right present pass.
+    pub fn view_format(&self) -> vk::Format {
+        self.view_format
+    }
+
+    /// Submit slot `i`'s recording and wait for its fence.
+    ///
+    /// **The wait stays.** The wire has no fence field, so a `Present` is a promise that
+    /// the image is finished; the only thing that moved is which thread pays for it.
+    pub fn submit_slot(&mut self, gpu: &Gpu, i: usize) -> Result<()> {
+        let slot = &self.slots[i];
+        let one = [slot.command_buffer];
+        unsafe { gpu.device.reset_fences(&[slot.fence]) }?;
+        gpu.submit(
+            &[vk::SubmitInfo::default().command_buffers(&one)],
+            slot.fence,
+        )?;
+        unsafe { gpu.device.wait_for_fences(&[slot.fence], true, u64::MAX) }?;
+        Ok(())
+    }
+
+    /// Show slot `i`.
+    pub fn present_slot(&mut self, i: usize) -> Result<()> {
+        self.present(self.slots[i].id)
+    }
+
+    /// The slots the daemon has released and this client has not handed on yet.
+    ///
+    /// With `block` it reads replies until one comes back — `released` is the only signal
+    /// a buffer is free — and fails as the synchronous path does if the daemon releases
+    /// nothing at all. Without it, it reports what is already known and reads nothing, so
+    /// a presenter that still has slots to lend never waits on a vsync.
+    pub fn take_released(&mut self, block: bool) -> Result<Vec<usize>> {
+        if block && self.free == 0 {
+            for _ in 0..(SLOTS + 2) {
+                self.read_reply(REPLY_PRESENTED)?;
+                if self.free != 0 {
+                    break;
+                }
+            }
+            if self.free == 0 {
+                bail!("the daemon released no slot after {SLOTS} replies");
+            }
+        } else {
+            // Take the replies that have already arrived, and only those. Waiting for one
+            // would cost a vsync; leaving them unread would keep the free mask a frame or
+            // two stale and drop frames the daemon had already released a slot for.
+            while ready_to_read(&self.socket)? {
+                self.read_reply(REPLY_PRESENTED)?;
+            }
+        }
+        let free: Vec<usize> = (0..self.slots.len())
+            .filter(|i| self.free & (1 << self.slots[*i].id) != 0)
+            .collect();
+        for i in &free {
+            self.free &= !(1 << self.slots[*i].id);
+        }
+        Ok(free)
     }
 
     /// The next slot the daemon has given back, blocking on replies until one arrives.
@@ -394,6 +471,207 @@ impl ShimScanout {
     }
 }
 
+/// What a recorder needs to draw into one slot: the command buffer it records into and
+/// the attachment the present pass draws onto.
+///
+/// Both are fixed when the slot is attached and neither is owned here — the client on the
+/// presenter thread owns them and destroys them — so this is a handle a second thread may
+/// hold, not a second owner.
+#[derive(Clone, Copy, Debug)]
+pub struct SlotRecord {
+    pub command_buffer: vk::CommandBuffer,
+    pub image: TargetImage,
+}
+
+/// The shim client as the presenter thread uses it.
+struct ShimPanel {
+    gpu: Arc<Gpu>,
+    shim: ShimScanout,
+}
+
+impl Panel for ShimPanel {
+    fn submit_and_wait(&mut self, slot: usize) -> Result<()> {
+        self.shim.submit_slot(&self.gpu, slot)
+    }
+    fn present(&mut self, slot: usize) -> Result<()> {
+        self.shim.present_slot(slot)
+    }
+    fn released(&mut self, block: bool) -> Result<Vec<usize>> {
+        self.shim.take_released(block)
+    }
+}
+
+/// The panel, presented from its own thread.
+///
+/// The recorder keeps this: it records a frame into a slot the presenter lent it and
+/// posts it, and that is all it does. The queue submit, the fence wait, the socket, the
+/// free mask and the re-attach are on the other side of the channel — which is the whole
+/// point, since together they were 8 of the 15 ms that held the board to 20 fps.
+///
+/// **It never blocks.** No free slot, or the renderer already holding as many frames as
+/// it has per-frame resources for, is a dropped frame and a counter, never a wait.
+pub struct ShimPresenter {
+    mail: Arc<Mailbox>,
+    back: Receiver<FromPresenter>,
+    presented: Arc<AtomicU64>,
+    thread: Option<std::thread::JoinHandle<ShimScanout>>,
+    /// The client, once the thread has given it back, so that `destroy` can free it.
+    client: Option<ShimScanout>,
+    slots: Vec<SlotRecord>,
+    view_format: vk::Format,
+    transform: PresentTransform,
+    /// Slots the presenter has lent and this side has not used yet, newest first.
+    free: std::collections::VecDeque<usize>,
+    /// Frames that had nowhere to go: the panel was holding every slot.
+    skipped: u64,
+    /// Why the presenter stopped, once it has.
+    stopped: Option<String>,
+}
+
+impl ShimPresenter {
+    /// Attach to the daemon and start presenting on another thread.
+    pub fn open<S: FrameSource>(
+        gpu: Arc<Gpu>,
+        src: &mut S,
+        quarter_turns: u32,
+    ) -> Result<ShimPresenter> {
+        let shim = ShimScanout::open(&gpu, src, quarter_turns)?;
+        let slots = shim.record_slots();
+        let view_format = shim.view_format();
+        let transform = shim.transform();
+        // Nothing has been presented, so the daemon is using no slot and the recorder
+        // starts holding all of them. The presenter is told so, and therefore does not
+        // offer them again — its own free list is what a re-attach refills.
+        let lent: Vec<usize> = (0..slots.len()).collect();
+        let free = lent.iter().copied().collect();
+        let mail = Arc::new(Mailbox::new());
+        let presented = Arc::new(AtomicU64::new(0));
+        let (tx, back) = channel();
+        let (m, p) = (mail.clone(), presented.clone());
+        let thread = std::thread::Builder::new()
+            .name("cubarium-present".to_string())
+            .spawn(move || {
+                let mut panel = ShimPanel { gpu, shim };
+                if let Err(e) = present_loop(&mut panel, &m, &tx, &p, lent) {
+                    let _ = tx.send(FromPresenter::Failed(format!("{e:#}")));
+                }
+                panel.shim
+            })
+            .context("starting the presenting thread")?;
+        Ok(ShimPresenter {
+            mail,
+            back,
+            presented,
+            thread: Some(thread),
+            client: None,
+            slots,
+            view_format,
+            transform,
+            free,
+            skipped: 0,
+            stopped: None,
+        })
+    }
+
+    pub fn transform(&self) -> PresentTransform {
+        self.transform
+    }
+
+    /// Frames the daemon has been shown.
+    pub fn presented(&self) -> u64 {
+        self.presented.load(Ordering::Relaxed)
+    }
+
+    /// Frames the recorder had nowhere to put.
+    pub fn skipped(&self) -> u64 {
+        self.skipped
+    }
+
+    /// Record one frame and post it. Returns the GPU milliseconds the last **finished**
+    /// frame's timestamps saw; this one has not run yet.
+    pub fn draw<S: FrameSource>(
+        &mut self,
+        gpu: &Gpu,
+        src: &mut S,
+        frame: S::Frame<'_>,
+    ) -> Result<f64> {
+        self.drain(src)?;
+        // **Newest wins.** A frame the presenter has not started on is not going to be
+        // the picture on the panel; its slot comes back, the upload it carried is owed
+        // again, and this fresher world takes its place. Reclaiming *before* recording is
+        // what keeps the frame given up the newest one recorded, which is the only one
+        // the renderer's ring can give back.
+        if let Some(slot) = self.mail.reclaim() {
+            src.frame_discarded();
+            self.free.push_front(slot);
+        }
+        if self.free.is_empty() || src.frames_in_flight() >= src.frame_capacity() {
+            self.skipped += 1;
+            return Ok(src.gpu_ms(gpu));
+        }
+        let index = self.free.pop_front().expect("the free list is not empty");
+        let slot = self.slots[index];
+        unsafe {
+            gpu.device
+                .reset_command_buffer(slot.command_buffer, vk::CommandBufferResetFlags::empty())
+        }?;
+        src.record_frame(
+            gpu,
+            slot.command_buffer,
+            frame,
+            Some((
+                &slot.image,
+                PANEL,
+                self.view_format,
+                vk::ImageLayout::GENERAL,
+                self.transform,
+            )),
+        )?;
+        if let Some(displaced) = self.mail.post(index) {
+            debug_assert!(false, "the recorder reclaims before it records");
+            self.free.push_back(displaced);
+        }
+        Ok(src.gpu_ms(gpu))
+    }
+
+    /// Take everything the presenter has said since the last frame: which frames have
+    /// retired, which slots are free, and whether it has stopped.
+    fn drain<S: FrameSource>(&mut self, src: &mut S) -> Result<()> {
+        loop {
+            match self.back.try_recv() {
+                Ok(FromPresenter::Retired) => src.frame_retired(),
+                Ok(FromPresenter::Free(slot)) => self.free.push_back(slot),
+                Ok(FromPresenter::Failed(why)) => {
+                    self.stopped = Some(why.clone());
+                    bail!("the presenting thread stopped: {why}");
+                }
+                Err(TryRecvError::Empty) => return Ok(()),
+                Err(TryRecvError::Disconnected) => {
+                    let why = self
+                        .stopped
+                        .clone()
+                        .unwrap_or_else(|| "it ended without saying why".to_string());
+                    bail!("the presenting thread is gone: {why}");
+                }
+            }
+        }
+    }
+
+    /// Stop the thread, take the client back and free everything.
+    pub fn destroy(&mut self, gpu: &Gpu) {
+        self.mail.quit();
+        if let Some(thread) = self.thread.take() {
+            match thread.join() {
+                Ok(shim) => self.client = Some(shim),
+                Err(_) => eprintln!("shim socket: the presenting thread panicked"),
+            }
+        }
+        if let Some(mut shim) = self.client.take() {
+            shim.destroy(gpu);
+        }
+    }
+}
+
 /// One decoded reply.
 struct Reply {
     tag: u8,
@@ -423,6 +701,27 @@ impl Reply {
     /// worth waiting out rather than failing on.
     fn is_busy(&self) -> bool {
         self.tag == REPLY_ERROR && self.code == ERROR_BUSY
+    }
+}
+
+/// Whether a reply is already waiting, so that it can be read without blocking.
+///
+/// A closed connection polls as readable and `recv` reports it as the handoff it is, so
+/// this does not hide one.
+fn ready_to_read(socket: &OwnedFd) -> Result<bool> {
+    use rustix::event::{PollFd, PollFlags, poll};
+    let now = rustix::event::Timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    let mut fds = [PollFd::new(socket, PollFlags::IN)];
+    loop {
+        match poll(&mut fds, Some(&now)) {
+            Ok(0) => return Ok(false),
+            Ok(_) => return Ok(true),
+            Err(rustix::io::Errno::INTR) => continue,
+            Err(e) => return Err(e.into()),
+        }
     }
 }
 
@@ -490,7 +789,16 @@ fn attach_on(
     offset: u32,
     fd: BorrowedFd<'_>,
 ) -> Result<Option<Reply>> {
-    let request = request(TAG_ATTACH, 0, 0, PANEL.0, PANEL.1, FOURCC_XR24, pitch, offset);
+    let request = request(
+        TAG_ATTACH,
+        0,
+        0,
+        PANEL.0,
+        PANEL.1,
+        FOURCC_XR24,
+        pitch,
+        offset,
+    );
     send(socket, &request, Some(fd)).context("sendmsg(Attach)")?;
     recv(socket)
 }
@@ -680,7 +988,8 @@ mod tests {
     }
 
     fn socket_path(name: &str) -> String {
-        let dir = std::env::temp_dir().join(format!("cubarium-shim-test-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("cubarium-shim-test-{name}-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         dir.join("frames.sock").to_string_lossy().into_owned()
     }
@@ -697,13 +1006,9 @@ mod tests {
         let images: Vec<(u32, u32, BorrowedFd<'_>)> =
             (0..3).map(|_| (4352u32, 0u32, fd.as_fd())).collect();
         let mut attempts = Vec::new();
-        let (_socket, ids, free) = reattach_all(
-            &path,
-            &images,
-            4,
-            Duration::ZERO,
-            |n, what| attempts.push(format!("{n}:{what}")),
-        )
+        let (_socket, ids, free) = reattach_all(&path, &images, 4, Duration::ZERO, |n, what| {
+            attempts.push(format!("{n}:{what}"))
+        })
         .expect("the second attempt attaches");
 
         assert_eq!(ids, vec![0, 1, 2], "every slot is attached again");
@@ -745,6 +1050,41 @@ mod tests {
         assert!(format!("{e:#}").contains("after 3 tries"), "{e:#}");
         daemon.join().unwrap();
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// The presenting thread reads the replies that have arrived and does not wait for
+    /// one: waiting would put the daemon's whole vsync between one frame and the next.
+    #[test]
+    fn a_reply_that_has_not_arrived_is_not_waited_for() {
+        let (ours, theirs) = rustix::net::socketpair(
+            rustix::net::AddressFamily::UNIX,
+            rustix::net::SocketType::SEQPACKET,
+            rustix::net::SocketFlags::empty(),
+            None,
+        )
+        .unwrap();
+        assert!(!ready_to_read(&ours).unwrap(), "nothing has been sent");
+
+        let mut reply = [0u8; 12];
+        reply[0] = REPLY_PRESENTED;
+        reply[2] = 0b010;
+        rustix::net::sendmsg(
+            &theirs,
+            &[IoSlice::new(&reply)],
+            &mut rustix::net::SendAncillaryBuffer::default(),
+            rustix::net::SendFlags::empty(),
+        )
+        .unwrap();
+        assert!(ready_to_read(&ours).unwrap(), "this one is waiting");
+        assert_eq!(recv(&ours).unwrap().expect("a reply").released, 0b010);
+        assert!(!ready_to_read(&ours).unwrap(), "and it was the only one");
+
+        // A daemon that has gone away is readable, so the handoff is never missed.
+        drop(theirs);
+        assert!(
+            ready_to_read(&ours).unwrap(),
+            "the close is a readable event"
+        );
     }
 
     #[test]

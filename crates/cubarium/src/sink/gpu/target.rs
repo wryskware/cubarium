@@ -1,5 +1,7 @@
 //! Where `--sink gpu`'s frames go: the panel, a development window, or nowhere.
 
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
 use clap::ValueEnum;
 
@@ -38,21 +40,37 @@ impl GpuTargetKind {
 /// present render pass and one `record_frame`, which is all a window or a panel needs.
 /// That is why `--sink gpu` on the ring and on the voxel strip share this file.
 pub enum GpuTarget {
+    /// The panel, presented on this thread: record, submit, wait, present, return.
     Shim(Box<cubarium_gpu::target::ShimScanout>),
+    /// The panel, presented on its own thread — everything after the recording is
+    /// waiting, and the run loop has a world to simulate. `--sink gpu` on the voxel strip
+    /// asks for this; the ring keeps the synchronous one, because its renderer writes its
+    /// instance buffers every frame and has no ring to keep them off a frame in flight.
+    ShimThread(Box<cubarium_gpu::target::ShimPresenter>),
+    /// The desktop. **Not threaded**: `minifb`'s window is not `Send`, and a person
+    /// looking at a development window is not waiting on 60 fps.
     Window(Box<WindowTarget>),
     Headless(Box<Headless>),
 }
 
 impl GpuTarget {
     /// Open a target for `src`. `title` names the development window and is ignored by
-    /// every other target.
+    /// every other target, and `present_thread` asks the panel to be presented on its own thread. It is ignored
+    /// by every other target: the window is not `Send` and the headless path has nothing
+    /// to present to.
     pub fn open<S: FrameSource>(
         kind: GpuTargetKind,
-        gpu: &Gpu,
+        gpu: &Arc<Gpu>,
         src: &mut S,
         title: &str,
+        present_thread: bool,
     ) -> Result<GpuTarget> {
         match kind {
+            GpuTargetKind::Shim if present_thread => {
+                let shim = cubarium_gpu::target::ShimPresenter::open(gpu.clone(), src, 1)
+                    .context("attaching to cube-screen-shim's frame socket")?;
+                Ok(GpuTarget::ShimThread(Box::new(shim)))
+            }
             GpuTargetKind::Shim => {
                 let shim = cubarium_gpu::target::ShimScanout::open(gpu, src, 1)
                     .context("attaching to cube-screen-shim's frame socket")?;
@@ -74,8 +92,19 @@ impl GpuTarget {
     ) -> Result<f64> {
         match self {
             GpuTarget::Shim(t) => Ok(t.draw(gpu, src, frame)?.0),
+            GpuTarget::ShimThread(t) => t.draw(gpu, src, frame),
             GpuTarget::Window(t) => t.draw(gpu, src, frame),
             GpuTarget::Headless(t) => t.draw(gpu, src, frame),
+        }
+    }
+
+    /// Frames the panel has actually been shown, where that is not the same as the frames
+    /// the loop drew: a presenting thread is the one that knows. `None` for a target that
+    /// presents every frame it is given.
+    pub fn presented(&self) -> Option<(u64, u64)> {
+        match self {
+            GpuTarget::ShimThread(t) => Some((t.presented(), t.skipped())),
+            _ => None,
         }
     }
 
@@ -93,6 +122,7 @@ impl GpuTarget {
     pub fn destroy(&mut self, gpu: &Gpu) {
         match self {
             GpuTarget::Shim(t) => t.destroy(gpu),
+            GpuTarget::ShimThread(t) => t.destroy(gpu),
             GpuTarget::Window(t) => t.destroy(gpu),
             GpuTarget::Headless(t) => t.destroy(gpu),
         }

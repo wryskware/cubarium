@@ -22,6 +22,8 @@ use ash::vk;
 use crate::present::FrameSource;
 use crate::vk::Gpu;
 
+pub mod presenter;
+
 #[cfg(feature = "scanout")]
 pub mod dmabuf;
 #[cfg(feature = "scanout")]
@@ -33,7 +35,7 @@ mod shim;
 #[cfg(feature = "scanout")]
 pub use scanout::Scanout;
 #[cfg(feature = "scanout")]
-pub use shim::{SOCKET as SHIM_SOCKET, ShimScanout};
+pub use shim::{SOCKET as SHIM_SOCKET, ShimPresenter, ShimScanout};
 
 /// Render into the world raster and nothing else.
 pub struct Headless {
@@ -73,13 +75,16 @@ impl Headless {
         let one = [self.command_buffer];
         unsafe {
             d.reset_fences(&[self.fence])?;
-            d.queue_submit(
-                gpu.queue,
-                &[vk::SubmitInfo::default().command_buffers(&one)],
-                self.fence,
-            )?;
+        }
+        gpu.submit(
+            &[vk::SubmitInfo::default().command_buffers(&one)],
+            self.fence,
+        )?;
+        unsafe {
             d.wait_for_fences(&[self.fence], true, u64::MAX)?;
         }
+        // This target waits for its own frame, so the frame is done here.
+        src.frame_retired();
         Ok(src.gpu_ms(gpu))
     }
 

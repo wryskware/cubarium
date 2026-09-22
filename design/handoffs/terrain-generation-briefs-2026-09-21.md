@@ -1580,3 +1580,54 @@ board first.
 Board after the affinity deploy (2a3282d): mask 0-6 applied, 5 tick
 threads (nproc under the mask says 6), ticks pinned at 20 Hz, main thread
 at a full core while the pool idles.
+
+## Board after D (a1f49b3) — 2026-09-22
+
+Service start → live world 13 s (founding frame at 56 fps for 12.5 s);
+ticks 20 Hz; **19–21 fps**, shim confirms flips; two hot threads at ~85 %
+each, pool lightly used. The panel is a 60 fps display. Wrysk: do the
+presenter thread before the atlas; and find out why the board's clock is
+wrong.
+
+## Package D4 — presentation on its own thread (display worker)
+
+Owner: display worker (Opus, **high** — concurrency, GPU queue, sockets).
+Files: host `voxel/mod.rs` run loop, `sink/gpu/*`, `shim.rs`, `clock.rs`
+as needed, `cubarium-gpu` (`VoxelRenderer` staging, `ShimScanout`). Not
+the voxel crate, not `config/tachyon/*` or the scripts.
+
+Goal: the panel presents at its display rate (60 fps) while the sim ticks
+at 20 Hz, on the board. Today the main thread packs (~7 ms), draws and
+waits for fences (~8 ms) serially with tick dispatch, so it caps near 20.
+
+Design, as the D worker scoped it: a presenter thread that owns the
+VkQueue submit, the fence wait, the shim socket and the slot/free-mask
+bookkeeping, fed the last recorded frame by the main loop over a channel
+(one in flight; a newer frame replaces an unpresented one, never queues
+up). Needs (a) double-buffered staging in `VoxelRenderer` — packing tick
+N+1 while the GPU reads N — a ring with a per-frame descriptor offset;
+(b) external synchronisation of the single VkQueue (a mutex, or a second
+queue opened at device creation if the device offers one); (c) slot
+ownership wholly on that thread, the main loop asking for a slot over the
+channel; (d) shim target only — the window target is not `Send` and keeps
+today's path. `wait_for_fences` before `Present` stays: the wire has no
+fence field. The founding frame and the 60 s rate line keep working; the
+rate line now reports both the tick rate and the presented fps.
+
+Tests first, no sleeps: the channel semantics (newest frame wins, one in
+flight, the loop never blocks on present); the staging ring never hands
+the GPU the buffer being packed (a fake device that records which buffer
+each submit reads while a pack writes the other); the presenter thread
+shuts down cleanly on quit and on a shim handoff (D3's re-attach now runs
+on the presenter thread); the window path unchanged. Existing
+`cubarium-gpu` and host tests untouched.
+
+Verification is a **board round-trip**, not local: after the package is
+committed, Fable merges and deploys; the deploy thread reads the 60 s
+rate lines (target ≥ 55 fps presented at 20 ticks/s) and `top -H`. Budget
+one repair round on evidence from the board. Locally: `taskset -c 0,1`
+CPU-sink run still gives frames from the first second; `cargo test -p
+cubarium -p cubarium-gpu`.
+
+Return (≤25 lines): commits, the design as built (what each thread owns),
+test counts, what the local run shows, and any risk you see for the board.

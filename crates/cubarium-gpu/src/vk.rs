@@ -13,6 +13,7 @@
 //!   dynamic rendering, no timeline semaphores, no `VK_KHR_synchronization2`.
 
 use std::ffi::{CStr, c_char};
+use std::sync::Mutex;
 
 use anyhow::{Context, Result, anyhow};
 use ash::vk;
@@ -33,6 +34,12 @@ pub struct Gpu {
     /// Whether `VK_EXT_external_memory_dma_buf` and friends came up, i.e. whether
     /// [`crate::target::Scanout`] can work at all.
     pub has_dma_buf: bool,
+    /// **The queue is externally synchronised.** One device, one queue, and since the
+    /// presenter runs on its own thread there are two threads that submit to it: the
+    /// presenter for every frame, and whoever reads the raster back for the viewer or a
+    /// capture. Vulkan requires the caller to serialise that, so every submission goes
+    /// through [`Gpu::submit`] and nothing calls `queue_submit` directly.
+    queue_guard: Mutex<()>,
 }
 
 impl Gpu {
@@ -130,6 +137,7 @@ impl Gpu {
             queue_family,
             name,
             has_dma_buf,
+            queue_guard: Mutex::new(()),
         })
     }
 
@@ -262,14 +270,45 @@ impl Gpu {
             f(cb);
             d.end_command_buffer(cb)?;
             let one = [cb];
-            d.queue_submit(
-                self.queue,
-                &[vk::SubmitInfo::default().command_buffers(&one)],
-                vk::Fence::null(),
-            )?;
-            d.queue_wait_idle(self.queue)?;
+            {
+                // `vkQueueWaitIdle` is a queue operation too, so the whole one-shot is
+                // taken under the lock rather than just its submit.
+                //
+                // **It drains the queue before it submits.** A one-shot is a readback or
+                // a blit of an image a presented frame may still be writing, and two
+                // submissions to one queue are not ordered against each other. Draining
+                // first makes the copy see a finished frame instead of half of one; the
+                // presenter pays for it only while a viewer or a capture is reading,
+                // which is a few times a second at most.
+                let _held = self
+                    .queue_guard
+                    .lock()
+                    .expect("the queue lock is never poisoned");
+                d.queue_wait_idle(self.queue)?;
+                d.queue_submit(
+                    self.queue,
+                    &[vk::SubmitInfo::default().command_buffers(&one)],
+                    vk::Fence::null(),
+                )?;
+                d.queue_wait_idle(self.queue)?;
+            }
             d.free_command_buffers(pool, &one);
         }
+        Ok(())
+    }
+
+    /// Submit to the device's one queue, holding the queue's lock.
+    ///
+    /// Every submission in the process goes through here. The lock is held only for the
+    /// call itself: waiting on the fence afterwards is not a queue operation and must not
+    /// hold it, or the presenter's eight milliseconds would block a readback that has
+    /// nothing to do with it.
+    pub fn submit(&self, infos: &[vk::SubmitInfo<'_>], fence: vk::Fence) -> Result<()> {
+        let _held = self
+            .queue_guard
+            .lock()
+            .expect("the queue lock is never poisoned");
+        unsafe { self.device.queue_submit(self.queue, infos, fence) }?;
         Ok(())
     }
 
@@ -308,6 +347,20 @@ impl HostBuffer {
     /// rather than concatenated into a scratch `Vec` and copied again.
     pub fn write_at<T: bytemuck::Pod>(&self, first: usize, data: &[T]) {
         let offset = first * std::mem::size_of::<T>();
+        let bytes = bytemuck::cast_slice(data);
+        let n = bytes.len().min((self.size as usize).saturating_sub(offset));
+        if n > 0 {
+            unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), self.ptr.add(offset), n) };
+        }
+    }
+
+    /// Copy a `Pod` slice in at a **byte** offset, truncated at the buffer's size.
+    ///
+    /// [`HostBuffer::write_at`] counts in elements, which cannot express a ring of
+    /// uniform blocks: `minUniformBufferOffsetAlignment` is 256 bytes on some devices and
+    /// the block is not a multiple of it, so the stride is a byte count.
+    pub fn write_bytes_at<T: bytemuck::Pod>(&self, offset: u64, data: &[T]) {
+        let offset = offset as usize;
         let bytes = bytemuck::cast_slice(data);
         let n = bytes.len().min((self.size as usize).saturating_sub(offset));
         if n > 0 {

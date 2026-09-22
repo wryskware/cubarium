@@ -76,7 +76,8 @@ impl Default for VoxelGpuSinkOptions {
 
 /// `cubarium voxel --sink gpu`.
 pub struct VoxelGpuSink {
-    gpu: Gpu,
+    /// Shared with the presenting thread, which submits on the same queue.
+    gpu: std::sync::Arc<Gpu>,
     renderer: VoxelRenderer,
     target: GpuTarget,
     /// The CPU presenter's own stand decomposition, rebuilt once per staged tick.
@@ -103,6 +104,8 @@ pub struct VoxelGpuSink {
     // --- measurements ---
     frames: u64,
     ticks_staged: u64,
+    /// Ticks whose pack was refused because the GPU still held every staging buffer.
+    packs_skipped: u64,
     gpu_ms: f64,
     gpu_stages: [f64; 3],
     present_ms: f64,
@@ -118,18 +121,24 @@ impl VoxelGpuSink {
         options: VoxelGpuSinkOptions,
     ) -> Result<VoxelGpuSink> {
         let params = params_of(cfg, proj, options.roof_from_texture);
-        let gpu = Gpu::open(&[]).context("opening the Vulkan device for --sink gpu")?;
+        let gpu = std::sync::Arc::new(
+            Gpu::open(&[]).context("opening the Vulkan device for --sink gpu")?,
+        );
         eprintln!(
             "cubarium voxel: --sink gpu on {} ({:.0} KiB per tick)",
             gpu.name,
             params.upload_bytes() as f64 / 1024.0
         );
         let mut renderer = VoxelRenderer::new(&gpu, params)?;
+        // The panel is presented on its own thread: the queue submit and the fence wait
+        // are 8 ms the run loop has better things to do with. Every other target is
+        // unchanged (`sink/gpu/target.rs`).
         let target = GpuTarget::open(
             options.target,
             &gpu,
             &mut renderer,
             "cubarium — voxel strip (GPU)",
+            true,
         )?;
         Ok(VoxelGpuSink {
             gpu,
@@ -149,6 +158,7 @@ impl VoxelGpuSink {
             web_ms: 0.0,
             frames: 0,
             ticks_staged: 0,
+            packs_skipped: 0,
             gpu_ms: 0.0,
             gpu_stages: [0.0; 3],
             present_ms: 0.0,
@@ -178,7 +188,17 @@ impl VoxelGpuSink {
     /// Pack one tick's world into the renderer's staging buffer. Call it whenever the
     /// world or the plant layer has moved — a tick, or a stdin command that changed a
     /// cell — and not per frame: a frame is one draw over whatever was last staged.
-    pub fn stage_world(&mut self, world: &World, flora: &Flora, fauna: &Fauna) {
+    ///
+    /// Returns false when the renderer had no staging buffer free — the GPU is still
+    /// reading every one of them. **The world is then still owed a pack**: the caller
+    /// keeps its `moved` flag and tries again next frame, which is a tick-stale picture
+    /// rather than a wrong one. Nothing is rebuilt in that case, so a refused pack costs
+    /// nothing but the check.
+    pub fn stage_world(&mut self, world: &World, flora: &Flora, fauna: &Fauna) -> bool {
+        if !self.renderer.can_stage() {
+            self.packs_skipped += 1;
+            return false;
+        }
         let started = Instant::now();
         let view = world.view();
         self.stands.rebuild(&view, flora.view());
@@ -273,6 +293,14 @@ impl VoxelGpuSink {
         self.renderer.update_weather(atmosphere, rain_tick);
         self.ticks_staged += 1;
         self.pack_ms += (Instant::now() - started).as_secs_f64() * 1e3;
+        true
+    }
+
+    /// What the panel has actually been shown, where the target knows: presented frames
+    /// and frames the loop had nowhere to put. `None` when every frame drawn is
+    /// presented, which is every target but the panel's presenting thread.
+    pub fn presented(&self) -> Option<(u64, u64)> {
+        self.target.presented()
     }
 
     /// Draw one frame of whatever was last staged, and present it.
@@ -400,6 +428,14 @@ impl VoxelGpuSink {
             eprintln!(
                 "cubarium voxel --sink gpu: captures cost {:.2} ms/frame (readback + PNG)",
                 self.capture_ms / n
+            );
+        }
+        if let Some((presented, skipped)) = self.target.presented() {
+            eprintln!(
+                "cubarium voxel --sink gpu: the presenting thread showed {presented} of \
+                 the {} frames the loop drew; {skipped} had no free slot, {} packs had \
+                 no free staging buffer",
+                self.frames, self.packs_skipped,
             );
         }
         if self.style_overflow > 0 {
