@@ -54,13 +54,26 @@ use crate::vk::Gpu;
 
 /// The daemon's socket.
 pub const SOCKET: &str = "/run/cube-screen-shim/frames.sock";
+/// How long the presenter will sit on the mailbox before going to look at the socket.
+///
+/// A freed slot arrives in a reply and nowhere else, so this is the worst case between a
+/// flip completing and the recorder being told it may draw again — a fraction of the
+/// 16.7 ms the panel gives a frame, for one `poll` every two milliseconds.
+const SOCKET_POLL: Duration = Duration::from_millis(2);
 /// The panel, which the daemon fixes: the client rotates into it.
 pub const PANEL: (u32, u32) = (1080, 1920);
 /// `XR24`, the only format the spike's modifier-free `AddFB2` accepted.
 const FOURCC_XR24: u32 = u32::from_le_bytes(*b"XR24");
-/// Slots to attach. Three lets one be scanned out, one be rendered into and one be in
-/// flight, which is what keeps the render off the flip's critical path.
-const SLOTS: usize = 3;
+/// Slots to attach — **every one the daemon takes** (`MAX_SLOTS` is 4 in
+/// `led-cube-shim`'s `handoff/wire.rs`, and `Slots::attach` refuses the fifth).
+///
+/// Four is the number the pipeline needs: one on the panel, one queued for the next
+/// vblank, one the GPU is drawing and one the recorder can record into. With three the
+/// recorder holds exactly one at a time once the daemon is a frame ahead, so every frame
+/// waits for a flip to give a slot back before it can even be recorded — which is what
+/// the board showed: every present starved of a slot and the panel at a third of its
+/// rate.
+const SLOTS: usize = 4;
 
 const TAG_ATTACH: u8 = 1;
 const TAG_PRESENT: u8 = 2;
@@ -319,6 +332,10 @@ impl ShimScanout {
     }
 
     /// Show slot `i`.
+    ///
+    /// Presenting faster than the panel refreshes is safe and is not waste: the daemon's
+    /// `Present` is latest-wins, and the frame it overtakes is freed at the next flip
+    /// along with the one leaving the screen (`handoff/slots.rs`).
     pub fn present_slot(&mut self, i: usize) -> Result<()> {
         self.present(self.slots[i].id)
     }
@@ -330,7 +347,16 @@ impl ShimScanout {
     /// nothing at all. Without it, it reports what is already known and reads nothing, so
     /// a presenter that still has slots to lend never waits on a vsync.
     pub fn take_released(&mut self, block: bool) -> Result<Vec<usize>> {
+        // **Always take what has already arrived.** A slot the panel has finished with
+        // does not exist until the reply carrying it is read, so every one of these that
+        // is left in the socket is a slot the recorder could have been drawing into. This
+        // costs one `poll` and no wait.
+        while ready_to_read(&self.socket)? {
+            self.read_reply(REPLY_PRESENTED)?;
+        }
         if block && self.free == 0 {
+            // Nothing to draw into at all: now a reply is worth waiting for, because it
+            // is the only thing that can free one.
             for _ in 0..(SLOTS + 2) {
                 self.read_reply(REPLY_PRESENTED)?;
                 if self.free != 0 {
@@ -339,13 +365,6 @@ impl ShimScanout {
             }
             if self.free == 0 {
                 bail!("the daemon released no slot after {SLOTS} replies");
-            }
-        } else {
-            // Take the replies that have already arrived, and only those. Waiting for one
-            // would cost a vsync; leaving them unread would keep the free mask a frame or
-            // two stale and drop frames the daemon had already released a slot for.
-            while ready_to_read(&self.socket)? {
-                self.read_reply(REPLY_PRESENTED)?;
             }
         }
         let free: Vec<usize> = (0..self.slots.len())
@@ -564,7 +583,7 @@ impl ShimPresenter {
             .name("cubarium-present".to_string())
             .spawn(move || {
                 let mut panel = ShimPanel { gpu, shim };
-                if let Err(e) = present_loop(&mut panel, &m, &tx, &s, lent) {
+                if let Err(e) = present_loop(&mut panel, &m, &tx, &s, lent, SOCKET_POLL) {
                     let _ = tx.send(FromPresenter::Failed(format!("{e:#}")));
                 }
                 panel.shim

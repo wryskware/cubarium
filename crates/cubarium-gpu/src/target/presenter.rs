@@ -23,6 +23,23 @@
 //! it. That is what lets the semantics — newest frame wins, one frame in flight, a clean
 //! shutdown — be tested against a fake in microseconds.
 //!
+//! # Why it polls while it waits
+//!
+//! The daemon reports a freed slot **only** in the `Presented` reply it sends when a flip
+//! completes (`led-cube-shim`, `handoff/slots.rs`: `flip_complete` drains the released
+//! set into that one reply), so a slot the panel finished with is not free until this
+//! thread reads the socket. The first version read it only after a present, and only when
+//! it had nothing left to lend — so a release that arrived while the thread sat in
+//! `Mailbox::take` waited there until the next frame happened to come. That is a cycle the
+//! recorder cannot get out of: it has no slot, so it records nothing; nothing is posted,
+//! so this thread keeps waiting; and the reply that would have broken it is already in the
+//! socket, unread. The board showed it exactly — every present starved of a slot, idle
+//! climbing 16.6 → 34.8 ms as the main loop slowed, and the panel falling 52 → 22 fps.
+//!
+//! So the wait is bounded: the thread drains the socket before it waits and every few
+//! milliseconds while it waits, and a released slot reaches the recorder within that poll
+//! rather than within a frame.
+//!
 //! # Where the time goes
 //!
 //! The board's first reading with the thread in place: 50.9 frames a second recorded,
@@ -108,6 +125,9 @@ pub struct PresentStats {
     reshow_ns: AtomicU64,
     /// Presents that had to wait on the daemon because the recorder held no slot.
     starved: AtomicU64,
+    /// Slots the recorder was holding at each present, summed: the pipeline's depth, and
+    /// the number that says whether the panel's rate is a slot supply problem.
+    lent_sum: AtomicU64,
 }
 
 impl PresentStats {
@@ -128,6 +148,7 @@ impl PresentStats {
             redraw_ns: g(&self.redraw_ns),
             reshow_ns: g(&self.reshow_ns),
             starved: g(&self.starved),
+            lent_sum: g(&self.lent_sum),
             skipped: 0,
             refused_packs: 0,
         }
@@ -151,6 +172,8 @@ pub struct PresentSample {
     pub redraw_ns: u64,
     pub reshow_ns: u64,
     pub starved: u64,
+    /// Slots the recorder held at each present, summed.
+    pub lent_sum: u64,
     /// Frames the **recorder** could not place, filled in by the recorder's own side.
     pub skipped: u64,
     /// Packs the renderer refused because every staging buffer was still being read.
@@ -172,6 +195,7 @@ impl PresentSample {
             redraw_ns: d(self.redraw_ns, earlier.redraw_ns),
             reshow_ns: d(self.reshow_ns, earlier.reshow_ns),
             starved: d(self.starved, earlier.starved),
+            lent_sum: d(self.lent_sum, earlier.lent_sum),
             skipped: d(self.skipped, earlier.skipped),
             refused_packs: d(self.refused_packs, earlier.refused_packs),
         }
@@ -201,7 +225,8 @@ impl PresentSample {
             "presenter — {} shown ({:.1}/s), {} redrew the world; per present idle {:.1}, \
              submit {:.1}, fence {:.1}, show {:.1}, slots {:.1} ms; \
              redraw {:.1} ms vs re-present {:.1} ms ({reshown}); \
-             {} frames had no slot, {} packs refused, {} starved of a slot; on {device}",
+             {} frames had no slot, {} packs refused, {} starved of a slot, \
+             {:.1} slots in hand; on {device}",
             self.presented,
             self.presented as f64 / seconds.max(1e-9),
             self.redrawn,
@@ -215,6 +240,11 @@ impl PresentSample {
             self.skipped,
             self.refused_packs,
             self.starved,
+            if self.presented == 0 {
+                0.0
+            } else {
+                self.lent_sum as f64 / self.presented as f64
+            },
         )
     }
 }
@@ -230,6 +260,15 @@ impl PresentSample {
 struct Posted {
     frame: Option<Frame>,
     quit: bool,
+}
+
+/// What a bounded wait on the mailbox found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Waited {
+    Frame(Frame),
+    /// Nothing yet — go and read the socket, then come back.
+    Nothing,
+    Quit,
 }
 
 /// The recorder's end and the presenter's end of that one frame.
@@ -274,18 +313,45 @@ impl Mailbox {
 
     /// The presenter's wait: the next frame, or `None` once the run is over.
     pub fn take(&self) -> Option<Frame> {
+        loop {
+            match self.take_until(std::time::Duration::from_millis(100)) {
+                Waited::Frame(frame) => return Some(frame),
+                Waited::Quit => return None,
+                Waited::Nothing => continue,
+            }
+        }
+    }
+
+    /// The same, but giving up after `poll` so the caller can go and read the socket.
+    ///
+    /// **The daemon reports a freed slot only in a reply**, and a reply only arrives when
+    /// a flip completes. A presenter asleep here is a presenter not reading them, and a
+    /// recorder with no slot cannot post the frame that would wake it.
+    pub fn take_until(&self, poll: std::time::Duration) -> Waited {
         let mut state = self.lock();
         loop {
             if let Some(frame) = state.frame.take() {
-                return Some(frame);
+                return Waited::Frame(frame);
             }
             if state.quit {
-                return None;
+                return Waited::Quit;
             }
-            state = self
+            let (next, timeout) = self
                 .posted
-                .wait(state)
+                .wait_timeout(state, poll)
                 .expect("the mailbox lock is never poisoned");
+            state = next;
+            if timeout.timed_out() {
+                // One more look under the lock before giving the caller its turn.
+                if let Some(frame) = state.frame.take() {
+                    return Waited::Frame(frame);
+                }
+                return if state.quit {
+                    Waited::Quit
+                } else {
+                    Waited::Nothing
+                };
+            }
         }
     }
 
@@ -321,6 +387,7 @@ pub fn present_loop<P: Panel>(
     back: &Sender<FromPresenter>,
     stats: &PresentStats,
     lent: Vec<usize>,
+    poll: std::time::Duration,
 ) -> Result<()> {
     // Slots the recorder has, or has posted back and not yet had presented. It starts
     // holding every slot — nothing has been presented, so the daemon is using none — and
@@ -330,7 +397,23 @@ pub fn present_loop<P: Panel>(
     let mut lent = lent;
     loop {
         let waited = Instant::now();
-        let Some(frame) = mail.take() else { break };
+        // **Take what the daemon has said before going to sleep on the recorder.** A
+        // freed slot only exists once this thread has read the reply carrying it, and the
+        // recorder cannot record without one.
+        if !lend(panel.released(false)?, &mut lent, back) {
+            break;
+        }
+        let frame = loop {
+            match mail.take_until(poll) {
+                Waited::Frame(frame) => break frame,
+                Waited::Quit => return Ok(()),
+                Waited::Nothing => {
+                    if !lend(panel.released(false)?, &mut lent, back) {
+                        return Ok(());
+                    }
+                }
+            }
+        };
         let got = Instant::now();
         panel.submit(frame.slot)?;
         let submitted = Instant::now();
@@ -345,11 +428,10 @@ pub fn present_loop<P: Panel>(
         panel.present(frame.slot)?;
         let shown = Instant::now();
         lent.retain(|s| *s != frame.slot);
-        // **Only a starved recorder is worth sleeping for.** A reply arrives when the
-        // daemon's flip completes, so waiting for one while the recorder still has a slot
-        // would put a whole vsync between this frame and the next — 24 ms a frame instead
-        // of 16. A shutting-down recorder is not waiting for anything, and the daemon may
-        // be the thing that went away.
+        stats.add(&stats.lent_sum, lent.len() as u64);
+        // Everything that has arrived, always; and only a recorder with nothing left to
+        // draw into is worth *waiting* on the daemon for. A shutting-down recorder is not
+        // waiting for anything, and the daemon may be the thing that went away.
         let block = lent.is_empty() && !mail.quitting();
         let free = panel.released(block)?;
         let slotted = Instant::now();
@@ -397,6 +479,11 @@ fn lend(free: Vec<usize>, lent: &mut Vec<usize>, back: &Sender<FromPresenter>) -
 mod tests {
     use super::*;
     use std::sync::mpsc::channel;
+    use std::time::Duration;
+
+    /// The tests' poll interval. Short enough that a timeout costs nothing and long
+    /// enough that a loop with nothing to do is not a spin.
+    const POLL: Duration = Duration::from_micros(200);
 
     fn frame(slot: usize) -> Frame {
         Frame { slot, redrew: true }
@@ -483,15 +570,18 @@ mod tests {
         };
         mail.post(frame(0));
         mail.quit();
-        present_loop(&mut panel, &mail, &tx, &stats, vec![0, 1, 2]).unwrap();
+        present_loop(&mut panel, &mail, &tx, &stats, vec![0, 1, 2], POLL).unwrap();
 
         assert_eq!(
             panel.log,
             vec![
+                // Every pass reads what the daemon has already said, before anything else.
+                "released block=false",
                 "submit 0",
                 "wait 0",
                 "present 0",
                 // The recorder still holds 1 and 2, so nothing sleeps on a reply.
+                "released block=false",
                 "released block=false",
             ]
         );
@@ -510,12 +600,12 @@ mod tests {
         let stats = PresentStats::default();
         let mut panel = FakePanel {
             // The re-attach: the daemon has forgotten everything and offers it all.
-            releases: [vec![0, 1, 2]].into_iter().collect(),
+            releases: [vec![], vec![0, 1, 2]].into_iter().collect(),
             ..FakePanel::default()
         };
         mail.post(frame(1));
         mail.quit();
-        present_loop(&mut panel, &mail, &tx, &stats, vec![0, 1, 2]).unwrap();
+        present_loop(&mut panel, &mail, &tx, &stats, vec![0, 1, 2], POLL).unwrap();
 
         let free: Vec<usize> = rx
             .try_iter()
@@ -537,9 +627,9 @@ mod tests {
         let stats = PresentStats::default();
         let mut panel = FakePanel::default();
         mail.quit();
-        present_loop(&mut panel, &mail, &tx, &stats, vec![0]).unwrap();
+        present_loop(&mut panel, &mail, &tx, &stats, vec![0], POLL).unwrap();
         assert_eq!(stats.presented(), 0, "nothing went up");
-        assert!(panel.log.is_empty(), "{:?}", panel.log);
+        assert_eq!(panel.log, vec!["released block=false"], "{:?}", panel.log);
         drop(rx);
     }
 
@@ -557,7 +647,7 @@ mod tests {
                 releases: [vec![0]].into_iter().collect(),
                 ..FakePanel::default()
             };
-            present_loop(&mut panel, &m, &tx, &s, vec![0, 1]).unwrap();
+            present_loop(&mut panel, &m, &tx, &s, vec![0, 1], POLL).unwrap();
             panel.log
         });
         mail.post(frame(1));
@@ -582,7 +672,7 @@ mod tests {
         };
         mail.post(frame(0));
         mail.quit();
-        let e = present_loop(&mut panel, &mail, &tx, &stats, vec![0]).expect_err("it failed");
+        let e = present_loop(&mut panel, &mail, &tx, &stats, vec![0], POLL).expect_err("it failed");
         assert!(format!("{e:#}").contains("the device is gone"), "{e:#}");
     }
 
@@ -596,12 +686,79 @@ mod tests {
         let stats = PresentStats::default();
         let mut panel = FakePanel::default();
         mail.post(frame(0));
-        present_loop(&mut panel, &mail, &tx, &stats, vec![0]).expect("no error");
+        present_loop(&mut panel, &mail, &tx, &stats, vec![0], POLL).expect("no error");
         assert_eq!(
             panel.log,
-            vec!["submit 0", "wait 0"],
+            vec!["released block=false", "submit 0", "wait 0"],
             "it stopped at the first send"
         );
+    }
+
+    /// **The stall the board found.** The daemon reports a freed slot only in a reply,
+    /// and only when a flip completes. A presenter asleep waiting for a frame is not
+    /// reading those replies — and the recorder, holding no slot, cannot record the frame
+    /// that would wake it. So the wait is bounded: with nothing posted at all, the slot
+    /// the daemon frees still reaches the recorder.
+    #[test]
+    fn a_slot_freed_while_nothing_is_posted_still_reaches_the_recorder() {
+        let mail = std::sync::Arc::new(Mailbox::new());
+        let (tx, rx) = channel();
+        let stats = std::sync::Arc::new(PresentStats::default());
+        let (m, s) = (mail.clone(), stats.clone());
+        let thread = std::thread::spawn(move || {
+            let mut panel = FakePanel {
+                // Nothing on the first look; the flip completes on the second.
+                releases: [vec![], vec![2]].into_iter().collect(),
+                ..FakePanel::default()
+            };
+            // The recorder holds nothing: exactly the state the board was stuck in.
+            present_loop(&mut panel, &m, &tx, &s, Vec::new(), POLL).unwrap();
+            panel.log
+        });
+        // No frame is ever posted, and the slot still arrives.
+        assert_eq!(rx.recv().unwrap(), FromPresenter::Free(2));
+        mail.quit();
+        let log = thread.join().expect("the presenter thread ends");
+        assert!(
+            log.iter().all(|l| l.starts_with("released")),
+            "it read the socket and did nothing else: {log:?}"
+        );
+        assert_eq!(stats.presented(), 0);
+    }
+
+    /// A lent slot is the recorder's for as short a time as it can be: the moment a frame
+    /// is presented its slot leaves the lent set, so the next reply that frees it hands it
+    /// straight back. The average number in hand is reported, because that depth is what
+    /// says whether the panel's rate is a slot supply problem.
+    #[test]
+    fn a_presented_slot_leaves_the_lent_set_and_comes_back_on_the_next_reply() {
+        let mail = Mailbox::new();
+        let (tx, rx) = channel();
+        let stats = PresentStats::default();
+        let mut panel = FakePanel {
+            // Before the frame: nothing. After presenting it: the daemon frees it.
+            releases: [vec![], vec![0], vec![]].into_iter().collect(),
+            ..FakePanel::default()
+        };
+        mail.post(frame(0));
+        mail.quit();
+        present_loop(&mut panel, &mail, &tx, &stats, vec![0], POLL).unwrap();
+
+        let free: Vec<usize> = rx
+            .try_iter()
+            .filter_map(|m| match m {
+                FromPresenter::Free(s) => Some(s),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(free, vec![0], "handed back as soon as the daemon freed it");
+        let now = stats.snapshot();
+        assert_eq!(now.lent_sum, 0, "the recorder held nothing at that present");
+        assert_eq!(
+            now.starved, 0,
+            "a recorder that is shutting down is never waited on"
+        );
+        assert!(now.line(1.0, "a fake panel").contains("0.0 slots in hand"));
     }
 
     /// **The point of the report.** A thread that turns out to be the panel's ceiling has
@@ -622,12 +779,12 @@ mod tests {
             redrew: true,
         });
         mail.quit();
-        present_loop(&mut panel, &mail, &tx, &stats, vec![0, 1]).unwrap();
+        present_loop(&mut panel, &mail, &tx, &stats, vec![0, 1], POLL).unwrap();
         mail.post(Frame {
             slot: 1,
             redrew: false,
         });
-        present_loop(&mut panel, &mail, &tx, &stats, vec![1]).unwrap();
+        present_loop(&mut panel, &mail, &tx, &stats, vec![1], POLL).unwrap();
         drop(rx);
 
         let now = stats.snapshot();
@@ -672,6 +829,7 @@ mod report {
             redraw_ns: ms(47.6, 1180),
             reshow_ns: ms(8.1, 17),
             starved: 12,
+            lent_sum: 2 * 1197,
             skipped: 1853,
             refused_packs: 0,
         };
@@ -684,6 +842,7 @@ mod report {
             "{line}"
         );
         assert!(line.contains("1853 frames had no slot"), "{line}");
+        assert!(line.contains("2.0 slots in hand"), "{line}");
     }
 }
 
