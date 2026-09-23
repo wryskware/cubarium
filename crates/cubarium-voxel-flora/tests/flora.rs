@@ -117,7 +117,7 @@ fn run(flora: &mut Flora, world: &mut World, ticks: u32) {
 
 // --------------------------------------------------------------- income and growth
 
-/// Wet enough that `μ` saturates (pore 0.6 is past bloomcrown's `sat_pore` of 0.5) and
+/// Wet enough that `μ` saturates (pore 0.6 is past bloomcrown's `full_water` on any soil) and
 /// in open sky, so the only limits are the model's own caps.
 #[test]
 fn a_seeded_stand_in_open_sky_earns_income_and_grows() {
@@ -139,7 +139,7 @@ fn a_seeded_stand_in_open_sky_earns_income_and_grows() {
 
     let after = *flora.view().stand_at(site(3)).expect("still there");
     assert_eq!(after.light, 1.0, "open sky and a saturating light response");
-    assert_eq!(after.moisture, 1.0, "pore 0.6 is past sat_pore");
+    assert_eq!(after.moisture, 1.0, "pore 0.6 is past full_water");
     assert!(
         after.wood > before.wood,
         "wood {} -> {}",
@@ -427,9 +427,18 @@ fn shared_root_world(pore: f64) -> World {
     plain(3, 8, pore)
 }
 
+/// The soil pore fraction at which the available water (package F's scale: 0 at the
+/// wilting point, 1 at field capacity) is `a`, on whatever numbers the soil carries.
+fn soil_pore_at(a: f64) -> f64 {
+    let wp = Material::Soil.wilting_point();
+    wp + a * (Material::Soil.field_capacity() - wp)
+}
+
 #[test]
 fn two_stands_sharing_a_root_box_take_their_demand_and_the_core_books_the_sum() {
-    let mut world = shared_root_world(0.2);
+    // Ample water on any soil: eight tenths of what drained ground offers, full
+    // moisture for an upland bloomcrown (package F's scale).
+    let mut world = shared_root_world(soil_pore_at(0.8));
     let mut flora = Flora::new(FloraConfig::default());
     assert!(flora.apply(
         &world,
@@ -493,11 +502,13 @@ fn two_stands_sharing_a_root_box_take_their_demand_and_the_core_books_the_sum() 
 }
 
 /// Starved: `transpiration_m3_per_s` is 500 here against the placeholder 2e-5, so the
-/// two stands between them ask for more than the whole strip's pore water in one tick.
-/// One withdrawal per voxel, capped by the stock, split proportional to demand.
+/// two stands between them ask for more than the whole strip's drinkable water in one
+/// tick. One withdrawal per voxel, capped by the water above the wilting point, split
+/// proportional to demand; the box is left at the wilting point and not below it.
 #[test]
 fn a_starved_shared_root_box_is_emptied_once_and_split_by_demand() {
-    let mut world = shared_root_world(0.1);
+    let mut world = shared_root_world(soil_pore_at(0.8));
+    let floor = pore_stock(&shared_root_world(Material::Soil.wilting_point()));
     let mut config = FloraConfig::default();
     config.bloomcrown.transpiration_m3_per_s = 500.0;
     let mut flora = Flora::new(config);
@@ -527,11 +538,15 @@ fn a_starved_shared_root_box_is_emptied_once_and_split_by_demand() {
     let a = flora.view().stand_at(site(0)).unwrap().water_m3;
     let b = flora.view().stand_at(site(1)).unwrap().water_m3;
     assert!(
-        (a + b - stock0).abs() < 1e-15,
-        "{a} + {b} is not the {stock0} that was there"
+        (a + b - (stock0 - floor)).abs() < 1e-15,
+        "{a} + {b} is not the {} above the wilting point that was there",
+        stock0 - floor
     );
-    assert!(pore_stock(&world) < 1e-15, "the box is empty, not negative");
-    assert!(pore_stock(&world) >= 0.0);
+    assert!(
+        (pore_stock(&world) - floor).abs() < 1e-15,
+        "the box is at the wilting point, not under it: {} against {floor}",
+        pore_stock(&world)
+    );
     assert!(
         (b / a - 2.0).abs() < 1e-9,
         "the split follows demand: {a} and {b}"
@@ -995,8 +1010,8 @@ fn a_donor_saves_a_parcel_and_lands_one_whole_package_on_one_site() {
 /// A cohort on a site its species cannot establish on ages, pays its attrition into the
 /// site's litter, and finally falls to litter whole. It never becomes a stand.
 ///
-/// `bloomcrown.establish_pore_min` is 0.9 here against the placeholder 0.1, which no site
-/// in this fixture reaches, so the predicate fails everywhere and germination is the one
+/// `bloomcrown.establish_water_min` is 100 here against the placeholder 0.1, which no site
+/// on any soil reaches (saturation is a few times field capacity), so the predicate fails everywhere and germination is the one
 /// thing that cannot happen; `seed_max_age_s` is 1 s (placeholder 600) so the age limit
 /// fires inside a short test, and its bin is a fifth of that, five ticks.
 /// `propagule_rate` is 0.18 /s (placeholder 2e-4) so the donor's parcel is a whole package
@@ -1009,7 +1024,7 @@ fn a_donor_saves_a_parcel_and_lands_one_whole_package_on_one_site() {
 #[test]
 fn a_cohort_on_a_site_that_fails_the_predicate_decays_to_litter_and_never_stands() {
     let mut config = FloraConfig::default();
-    config.bloomcrown.establish_pore_min = 0.9;
+    config.bloomcrown.establish_water_min = 100.0;
     config.bloomcrown.seed_max_age_s = 1.0;
     config.bloomcrown.propagule_rate = 0.18;
     config.decomposition = 0.0;
@@ -1540,7 +1555,7 @@ fn growth_stops_when_the_site_s_mineral_is_spent_though_light_and_water_are_ampl
     );
     assert_eq!(
         stand.moisture, 1.0,
-        "pore 0.6 is past sat_pore: nor is water"
+        "pore 0.6 is past full_water: nor is water"
     );
     // The pool does not reach zero and should not: senescence keeps shedding foliage
     // into litter and decomposition keeps handing that litter's mineral back, so the
@@ -1663,7 +1678,7 @@ fn a_saturated_root_box_stresses_bloomcrown_to_nothing_and_leaves_umbrellafrond_
         "drowning is not what is being tested"
     );
     assert_eq!(b.light, 1.0, "open sky: light is not what stopped it");
-    assert_eq!(b.moisture, 1.0, "pore 1.0 is past sat_pore: nor is water");
+    assert_eq!(b.moisture, 1.0, "pore 1.0 is past full_water: nor is water");
     assert!(
         1.0 - b.aeration_stress < 1e-6,
         "bloomcrown should be fully stressed: {b:?}"

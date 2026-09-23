@@ -76,7 +76,11 @@ fn moisture_after_one_tick(world: &mut World, flora: &mut Flora, x: u32, species
         }
     ));
     flora.step(world);
-    flora.view().stand_at(site(x)).expect("still standing").moisture
+    flora
+        .view()
+        .stand_at(site(x))
+        .expect("still standing")
+        .moisture
 }
 
 // ------------------------------------------------------------------ 1. the scale
@@ -92,9 +96,15 @@ fn available_water_is_zero_at_the_wilting_point_one_at_field_capacity_and_more_a
         assert!(available_water(m, wp).abs() < 1e-12, "{m:?} at wp");
         assert!((available_water(m, fc) - 1.0).abs() < 1e-12, "{m:?} at fc");
         let wetter = available_water(m, 0.5 * (fc + 1.0));
-        assert!(wetter > 1.0, "{m:?} between fc and saturation reads {wetter}");
+        assert!(
+            wetter > 1.0,
+            "{m:?} between fc and saturation reads {wetter}"
+        );
         let sat = (1.0 - wp) / (fc - wp);
-        assert!((available_water(m, 1.0) - sat).abs() < 1e-12, "{m:?} saturated");
+        assert!(
+            (available_water(m, 1.0) - sat).abs() < 1e-12,
+            "{m:?} saturated"
+        );
         assert_eq!(available_water(m, 0.5 * wp), 0.0, "{m:?}: floored at zero");
         assert_eq!(available_water(m, 0.0), 0.0, "{m:?}: dry");
     }
@@ -132,7 +142,10 @@ fn moisture_is_zero_at_the_wilt_threshold_and_one_at_the_full_threshold() {
         let mut world = plain(6, soil_pore_at(a));
         let mut flora = Flora::new(FloraConfig::default());
         let mu = moisture_after_one_tick(&mut world, &mut flora, 2, Species::Velvetpad);
-        assert!((mu - want).abs() < 1e-9, "velvetpad at a = {a}: μ {mu}, want {want}");
+        assert!(
+            (mu - want).abs() < 1e-9,
+            "velvetpad at a = {a}: μ {mu}, want {want}"
+        );
     }
 }
 
@@ -146,7 +159,10 @@ fn an_upland_stand_on_soil_at_field_capacity_reads_full_moisture() {
         let mut world = plain(8, Material::Soil.field_capacity());
         let mut flora = Flora::new(FloraConfig::default());
         let mu = moisture_after_one_tick(&mut world, &mut flora, 3, species);
-        assert!((mu - 1.0).abs() < 1e-12, "{species:?} at field capacity: μ {mu}");
+        assert!(
+            (mu - 1.0).abs() < 1e-12,
+            "{species:?} at field capacity: μ {mu}"
+        );
     }
 }
 
@@ -226,7 +242,11 @@ fn a_wetland_species_on_soil_at_field_capacity_reads_no_moisture() {
 #[test]
 fn the_establishment_water_gate_reads_the_available_water_scale() {
     let config = FloraConfig::default();
-    for species in [Species::Springturf, Species::Velvetpad, Species::Umbrellafrond] {
+    for species in [
+        Species::Springturf,
+        Species::Velvetpad,
+        Species::Umbrellafrond,
+    ] {
         let sc = config.species(species);
         let min = sc.establish_water_min;
         let wet = plain(6, soil_pore_at(min + 0.01));

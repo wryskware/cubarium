@@ -555,7 +555,7 @@ fn gate_diagnosis(world: &World, flora: &Flora, skyline: &[Site], when: &str, sk
             if g.soil_voxels == 0 {
                 no_soil += 1;
             }
-            if let Some(mean) = g.mean_pore {
+            if let Some(mean) = g.mean_water {
                 mean_pore_sum += mean;
                 mean_pore_n += 1;
             }
@@ -588,9 +588,9 @@ fn gate_diagnosis(world: &World, flora: &Flora, skyline: &[Site], when: &str, sk
             f64::NAN
         };
         println!(
-            "  {:>14}: {eligible} eligible; shut gates (a column can fail several): no soil in the root box {no_soil}, mean pore < {:.2} {pore}, saturated fraction > {:.2} {aeration}, water over {:.2} m {depth}, sky < {:.2} {light}{}",
+            "  {:>14}: {eligible} eligible; shut gates (a column can fail several): no soil in the root box {no_soil}, mean available water < {:.2} {pore}, saturated fraction > {:.2} {aeration}, water over {:.2} m {depth}, sky < {:.2} {light}{}",
             species.name(),
-            sc.establish_pore_min,
+            sc.establish_water_min,
             sc.establish_saturated_max,
             sc.drown_depth_m,
             sc.establish_light_min,
@@ -604,7 +604,7 @@ fn gate_diagnosis(world: &World, flora: &Flora, skyline: &[Site], when: &str, sk
             }
         );
         println!(
-            "  {:>14}: sole cause — pore alone {only_pore}, saturation alone {only_aeration}, light alone {only_light}; mean root-box pore over the {mean_pore_n} columns with soil {mean_pore:.3}",
+            "  {:>14}: sole cause — pore alone {only_pore}, saturation alone {only_aeration}, light alone {only_light}; mean root-box available water over the {mean_pore_n} columns with soil {mean_pore:.3}",
             ""
         );
         // The dispersal side of eligibility: a donor's packages can only recruit where they

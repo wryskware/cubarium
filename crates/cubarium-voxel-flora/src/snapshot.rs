@@ -35,7 +35,13 @@ use crate::Flora;
 /// Schema 3: package N (`design/handoffs/voxel-new-plants-2026-09-23.md`) appends three
 /// species (the per-species ledger arrays grow to nine) and two config fields
 /// (`water_depth_min_m`, `falls`): refused, not migrated.
-pub const SCHEMA: u32 = 3;
+///
+/// Schema 4: package F (`design/handoffs/voxel-plant-viability-2026-09-23.md`) moves every
+/// species' water thresholds from pore fraction to available water (`wilt_water`,
+/// `full_water`, `establish_water_min`). The bytes keep their shape and change their
+/// meaning, so a schema-3 config would read its pore thresholds on the new scale:
+/// refused, not migrated.
+pub const SCHEMA: u32 = 4;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
