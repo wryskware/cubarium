@@ -814,7 +814,9 @@ fn a_springturf_package_under_a_shut_sky_never_germinates_and_goes_to_litter() {
 /// crowns. Only germination light is canopy-blind.
 #[test]
 fn springturf_gives_up_first_on_dry_ground_and_loses_light_under_a_crown() {
-    let config = FloraConfig::default();
+    // Package L: crowns are metres; this 1 m-cell fixture keeps the crowns it was
+    // written against, four times the 0.25 m-cell ladder (`FloraConfig::crowns_scaled`).
+    let config = FloraConfig::default().crowns_scaled(4.0);
 
     // Dry ground: 0.2 of capacity, below soil's own retained 0.25.
     let dry = pillars(4, &[0, 1, 2, 3], 0.2);
@@ -1105,7 +1107,9 @@ fn a_newborn_velvetpad_earns_its_upkeep_under_a_founder_s_crown() {
     let mut world = pillars(8, &[0, 1, 2], 0.45);
     let mut birth = paid_birth(
         &mut world,
-        fast_donor(Species::Velvetpad),
+        // Package L: crowns are metres; this 1 m-cell fixture keeps the crowns it was
+        // written against, four times the 0.25 m-cell ladder (`FloraConfig::crowns_scaled`).
+        fast_donor(Species::Velvetpad).crowns_scaled(4.0),
         Species::Velvetpad,
         0,
         at(1),

@@ -746,10 +746,14 @@ pub struct SpeciesConfig {
     /// How many support sites away, in `x` and `z`, a propagule may land.
     pub hop: u32,
     /// Crown geometry from wood, shared by the shade model and the presenter so what
-    /// shades is exactly what is drawn: crown top above the support face, in voxels,
-    /// and crown half-width, in voxels, both linear in `W / W_max` between the two ends.
-    pub crown_height_voxels: [f64; 2],
-    pub crown_radius_voxels: [f64; 2],
+    /// shades is exactly what is drawn: crown top above the support face and crown
+    /// half-width, both **in metres**, `[min, max]` (package L,
+    /// `design/handoffs/voxel-ladder-growth-2026-09-23.md` §1). They are physical sizes
+    /// and are **not** rescaled per voxel size: every grid grows the same plant, and
+    /// the voxel readings ([`SpeciesConfig::crown_height`]) divide by the world's cell.
+    /// How wood moves a stand between the two ends is [`SpeciesConfig::crown_height_m_at`].
+    pub crown_height_m: [f64; 2],
+    pub crown_radius_m: [f64; 2],
     /// **What is in that volume**: the species' anatomy, staged by `wood / wood_max`.
     /// The first entry whose `wood_fraction_max` is at or above the fraction applies;
     /// the last must catch a full-grown stand. Its foliage-bearing layers are the
@@ -837,29 +841,60 @@ impl SpeciesConfig {
             .collect()
     }
 
-    /// The stand's physical crown height in **voxels**, with the stage's own ceiling
-    /// applied: decisions §5's woody seedling is a ground rosette no taller than
-    /// 0.125 m however tall the wood interpolation says it is.
-    pub fn crown_height_staged(&self, wood: f64, voxel_m: f64) -> f64 {
-        let free = self.crown_height(wood);
-        match self.profile_at(wood).height_m_max {
-            Some(cap) if voxel_m > 0.0 && cap.is_finite() => free.min(cap / voxel_m),
-            _ => free,
+    /// The **capped seedling** this species opens with, if it does: `(w0, cap)`, where
+    /// `w0` is stage 0's `wood_fraction_max` and `cap` its `height_m_max`. Decisions §5's
+    /// woody seedling (today bloomcrown and umbrellafrond). `None` for a species whose
+    /// first stage has no ceiling, or whose first stage is its whole life.
+    pub fn capped_seedling(&self) -> Option<(f64, f64)> {
+        let first = self.profile.first()?;
+        let cap = first.height_m_max?;
+        let w0 = first.wood_fraction_max;
+        (cap.is_finite() && cap >= 0.0 && w0.is_finite() && w0 > 0.0 && w0 < 1.0)
+            .then_some((w0, cap))
+    }
+
+    /// One crown dimension in metres at `wood`, from its `[min, max]` range: package L's
+    /// growth rule (`design/handoffs/voxel-ladder-growth-2026-09-23.md` §2).
+    ///
+    /// - No capped seedling: linear, `min + t · (max − min)`, `t = W / W_max`.
+    /// - A capped seedling `(w0, cap)`: while `t ≤ w0` (stage 0) the dimension is at
+    ///   most `cap` — the seedling's **height and radius** both, so a seedling is a small
+    ///   rosette and not a flat star as wide as the adult; after it, growth starts from
+    ///   the seedling, `cap + (max − cap) · (t − w0) / (1 − w0)`, and the range's `min`
+    ///   is unused.
+    fn crown_dimension_m(&self, wood: f64, range: [f64; 2]) -> f64 {
+        let t = (wood / self.wood_max).clamp(0.0, 1.0);
+        let linear = range[0] + t * (range[1] - range[0]);
+        match self.capped_seedling() {
+            Some((_, cap)) if self.profile_index(wood) == 0 => linear.min(cap),
+            Some((w0, cap)) => {
+                let from = cap.min(range[1]);
+                let s = ((t - w0) / (1.0 - w0)).clamp(0.0, 1.0);
+                from + s * (range[1] - from)
+            }
+            None => linear,
         }
     }
 
-    /// Height of the crown top above the support face, in voxels.
-    pub fn crown_height(&self, wood: f64) -> f64 {
-        let t = (wood / self.wood_max).clamp(0.0, 1.0);
-        self.crown_height_voxels[0]
-            + t * (self.crown_height_voxels[1] - self.crown_height_voxels[0])
+    /// Height of the crown top above the support face, **in metres**, seedling cap and
+    /// growth rule applied ([`SpeciesConfig::crown_dimension_m`]).
+    pub fn crown_height_m_at(&self, wood: f64) -> f64 {
+        self.crown_dimension_m(wood, self.crown_height_m)
     }
 
-    /// Half-width of the crown, in voxels.
-    pub fn crown_radius(&self, wood: f64) -> f64 {
-        let t = (wood / self.wood_max).clamp(0.0, 1.0);
-        self.crown_radius_voxels[0]
-            + t * (self.crown_radius_voxels[1] - self.crown_radius_voxels[0])
+    /// Half-width of the crown, **in metres**, seedling cap and growth rule applied.
+    pub fn crown_radius_m_at(&self, wood: f64) -> f64 {
+        self.crown_dimension_m(wood, self.crown_radius_m)
+    }
+
+    /// Height of the crown top above the support face, in voxels of `voxel_m`.
+    pub fn crown_height(&self, wood: f64, voxel_m: f64) -> f64 {
+        self.crown_height_m_at(wood) / voxel_m
+    }
+
+    /// Half-width of the crown, in voxels of `voxel_m`.
+    pub fn crown_radius(&self, wood: f64, voxel_m: f64) -> f64 {
+        self.crown_radius_m_at(wood) / voxel_m
     }
 
     /// How many voxels above its support face the crown's **cells** sit:
@@ -873,8 +908,8 @@ impl SpeciesConfig {
     /// this crown in reach, which cell does the picture paint — has to ask. The presenter's
     /// `cubarium::voxel::stand::crown_height_voxels` is the same rounding, and this is the
     /// model-side statement of it.
-    pub fn crown_voxels(&self, wood: f64) -> u32 {
-        let h = self.crown_height(wood);
+    pub fn crown_voxels(&self, wood: f64, voxel_m: f64) -> u32 {
+        let h = self.crown_height(wood, voxel_m);
         if !h.is_finite() {
             return 1;
         }
@@ -951,8 +986,8 @@ impl SpeciesConfig {
             establish_saturated_max: 0.5,
             drown_depth_m: 0.0,
             hop: 1,
-            crown_height_voxels: [1.0, 3.0],
-            crown_radius_voxels: [0.5, 1.5],
+            crown_height_m: [0.25, 0.75],
+            crown_radius_m: [0.125, 0.375],
             // The v1 base carries no anatomy of its own: every preset states one.
             profile: SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer(
                 [0.0, 1.0],
@@ -989,8 +1024,8 @@ impl SpeciesConfig {
             // placeholder, not a tuned one.
             drown_depth_m: 0.05,
             hop: 2,
-            crown_height_voxels: [1.0, 3.0],
-            crown_radius_voxels: [0.5, 1.5],
+            crown_height_m: [0.375, 1.0],
+            crown_radius_m: [0.125, 0.3125],
             // Anatomy document §3, with decisions §5's corrections. A seedling is a
             // ground rosette capped at 0.125 m — not a small adult, and reachable
             // whatever the interpolated crown height says. The **adult keeps its basal
@@ -1057,8 +1092,8 @@ impl SpeciesConfig {
             establish_saturated_max: 1.0,
             drown_depth_m: 0.5,
             hop: 1,
-            crown_height_voxels: [2.0, 5.0],
-            crown_radius_voxels: [1.0, 2.5],
+            crown_height_m: [1.0, 2.0],
+            crown_radius_m: [0.375, 0.75],
             // Anatomy document §3: three tiers whose lowest is the widest, so the
             // shade under an adult is layered. Decisions §5: the frond **escapes at the
             // seedling → juvenile transition** — the juvenile's lowest tier is already
@@ -1149,9 +1184,9 @@ impl SpeciesConfig {
     /// - **Short-lived.** `maintenance` 0.002 is ten times the base, so a springturf whose
     ///   income stops burns its whole reserve in 250 s and diebacks, where bloomcrown
     ///   waits 2,500 s.
-    /// - **Shape.** `hop` 3 is the wide hop of a pioneer; the crown is `[0.5, 1.0]` tall
-    ///   and `[0.5, 1.0]` wide, which the presenter draws as one cell on the ground with
-    ///   no stem at all.
+    /// - **Shape.** `hop` 3 is the wide hop of a pioneer; the crown is `[0.125, 0.1875]` m
+    ///   tall and `[0.125, 0.25]` m in radius (package L's ladder): a mat on the ground
+    ///   with no stem at all.
     pub fn springturf() -> SpeciesConfig {
         SpeciesConfig {
             light_half: 1.0,
@@ -1174,8 +1209,8 @@ impl SpeciesConfig {
             wood_rate: 0.01,
             propagule_rate: 0.002,
             assimilation: 0.008,
-            crown_height_voxels: [0.5, 1.0],
-            crown_radius_voxels: [0.5, 1.0],
+            crown_height_m: [0.125, 0.1875],
+            crown_radius_m: [0.125, 0.25],
             // Anatomy document §3: a mat, no trunk at any size, entirely inside a
             // grazer's reach; cropping it is the mat thinning.
             profile: SpeciesConfig::one_stage(vec![SpeciesConfig::mat_layer(
@@ -1226,8 +1261,8 @@ impl SpeciesConfig {
     ///   saving, `0.025 / (0.00005 / 1.2)`: *twice* bloomcrown's already long 300 s and
     ///   not four times, because the smaller package cancels half of the slower rate
     ///   (Astra R7.6). `alive_min` 0.01 against `wood_max` 0.1 and `donor_min` 0.05.
-    /// - **Shape.** `hop` 1; the crown is `[0.5, 0.5]` tall — a cushion has no stem at any
-    ///   size — and `[0.5, 1.0]` wide, so it is one cell young and a five-cell plus grown.
+    /// - **Shape.** `hop` 1; the crown is `[0.125, 0.1875]` m tall — a cushion has no stem
+    ///   at any size — and `[0.125, 0.15625]` m in radius (package L's ladder).
     pub fn stonecushion() -> SpeciesConfig {
         SpeciesConfig {
             light_half: 0.3,
@@ -1250,8 +1285,8 @@ impl SpeciesConfig {
             foliage_rate: 0.0005,
             wood_rate: 0.0002,
             propagule_rate: 0.00005,
-            crown_height_voxels: [0.5, 0.5],
-            crown_radius_voxels: [0.5, 1.0],
+            crown_height_m: [0.125, 0.1875],
+            crown_radius_m: [0.125, 0.15625],
             // Anatomy document §3: a dome in two foliage bands, no trunk. Decisions
             // §3 keeps it on the browser's menu, so there is no diet flag here.
             profile: SpeciesConfig::one_stage(vec![
@@ -1300,9 +1335,9 @@ impl SpeciesConfig {
     ///   of bloomcrown's body; `wood_rate` 0.002 and `foliage_rate` 0.004 are twice the
     ///   base and `propagule_rate` 0.0005 is two and a half times, a pad that fills in
     ///   quickly once it is under cover.
-    /// - **Shape.** `hop` 1; the crown is `[0.5, 1.0]` tall and `[1.0, 2.0]` wide — low and
-    ///   broad, a mat on the floor rather than a stem, and the widest ground cover of the
-    ///   five relative to its height.
+    /// - **Shape.** `hop` 1; the crown is 0.125 m tall at every size and `[0.1875, 0.375]` m
+    ///   in radius (package L's ladder) — low and broad, a mat on the floor rather than a
+    ///   stem, and the widest ground cover relative to its height.
     pub fn velvetpad() -> SpeciesConfig {
         SpeciesConfig {
             light_half: 0.1,
@@ -1324,8 +1359,8 @@ impl SpeciesConfig {
             foliage_rate: 0.004,
             wood_rate: 0.002,
             propagule_rate: 0.0005,
-            crown_height_voxels: [0.5, 1.0],
-            crown_radius_voxels: [1.0, 2.0],
+            crown_height_m: [0.125, 0.125],
+            crown_radius_m: [0.1875, 0.375],
             // Anatomy document §3: a sheet, no trunk. Decisions §3 keeps it on the
             // browser's menu (removing it would have cut 58 % of what the D3 browser
             // ate), so there is no diet flag here either.
@@ -1405,8 +1440,9 @@ impl SpeciesConfig {
     ///   half times the base, so one 0.025 package is **60 s** of a fully funded donor's
     ///   saving — the fastest of the six, because a fruiting body's whole job is spores.
     /// - **Spread.** `hop` 1: the eight faces around it. A grove follows its log.
-    /// - **Shape.** `crown_height_voxels` `[0.5, 0.5]` and `crown_radius_voxels`
-    ///   `[0.5, 0.5]`: **one cell, at every size**, on the face above its support. That is
+    /// - **Shape.** `crown_height_m` `[0.125, 0.25]` and `crown_radius_m`
+    ///   `[0.0625, 0.0625]` (package L's ladder): a cap one or two small cells tall on the
+    ///   face above its support, a single column wide. That is
     ///   the interim glyph and not a design — the art direction of the voxel world is its
     ///   own thread, and `crates/cubarium/src/voxel/stand.rs` names the palette interim too.
     ///   One consequence in the model: a crown top of `y + 0.5` is the lowest of the six, so
@@ -1439,8 +1475,8 @@ impl SpeciesConfig {
             foliage_rate: 0.004,
             wood_rate: 0.002,
             propagule_rate: 0.0005,
-            crown_height_voxels: [0.5, 0.5],
-            crown_radius_voxels: [0.5, 0.5],
+            crown_height_m: [0.125, 0.25],
+            crown_radius_m: [0.0625, 0.0625],
             // Anatomy document §3: the fruiting body on the face. `foliage` is cap
             // tissue, which decisions §3 makes shredder food and not browser food; the
             // diet lives on the consumer, not here.
@@ -1671,8 +1707,8 @@ impl SpeciesConfig {
             }
         }
         for (label, pair) in [
-            ("crown_height_voxels", self.crown_height_voxels),
-            ("crown_radius_voxels", self.crown_radius_voxels),
+            ("crown_height_m", self.crown_height_m),
+            ("crown_radius_m", self.crown_radius_m),
         ] {
             if !pair.iter().all(|v| v.is_finite() && *v >= 0.0) {
                 return fail(&format!("{label} is {pair:?}, not finite and nonnegative"));
@@ -1786,10 +1822,9 @@ pub struct FloraConfig {
     /// eagerly on every support face at creation. [`Provision::Lazy`] by default, which is
     /// the only rule that existed before the replacement study and changes nothing.
     pub provision: Provision,
-    /// The world's cell size in metres, recorded so that a rule authored in **metres**
-    /// can be applied to geometry stored in **voxels**: decisions §5's 0.125 m ceiling
-    /// on a woody seedling's height is the only one today
-    /// ([`SpeciesConfig::crown_height_staged`]). Set by
+    /// The world's cell size in metres, recorded so that geometry authored in **metres** can
+    /// be applied to a grid stored in **voxels**: every crown is in metres since package
+    /// L, and the voxel readings ([`SpeciesConfig::crown_height`]) divide by this. Set by
     /// [`FloraConfig::for_voxel_size`]; the reference 0.25 m by default.
     pub voxel_m: f64,
 }
@@ -1819,8 +1854,9 @@ impl FloraConfig {
     /// The authored default flora, with spatial geometry expressed for `voxel_m`.
     ///
     /// The presets were authored on 0.25 m voxels. Finer grids multiply every spatial
-    /// distance stored in voxel units so crowns, roots, mycelium access and propagule
-    /// travel retain their approximate physical size. The ecological rates and stores
+    /// distance stored in voxel units so roots, mycelium access and propagule travel
+    /// retain their approximate physical size. Crowns are stated in metres and are not
+    /// touched. The ecological rates and stores
     /// are copied unchanged. Reference-sized and coarser grids deliberately retain the
     /// historical defaults, as do invalid sizes (which the world config rejects at its
     /// own input boundary).
@@ -1845,12 +1881,8 @@ impl FloraConfig {
             sc.rooting_radius = scaled_voxel_distance(sc.rooting_radius, scale);
             sc.substrate_reach_up_down = scaled_voxel_distance(sc.substrate_reach_up_down, scale);
             sc.hop = scaled_voxel_distance(sc.hop, scale);
-            for height in &mut sc.crown_height_voxels {
-                *height *= scale;
-            }
-            for radius in &mut sc.crown_radius_voxels {
-                *radius *= scale;
-            }
+            // The crown is in metres (package L) and needs no rescale: it is the same
+            // physical plant on every grid.
         }
         config
     }
@@ -1873,6 +1905,27 @@ impl FloraConfig {
                     1.0,
                     0.0,
                 )]);
+        }
+        self
+    }
+
+    /// Every crown — both ranges and each stage's seedling ceiling — multiplied by `k`.
+    ///
+    /// For a **fixture on a coarse grid** whose subject is a rule and not a plant's
+    /// size: the 1 m-cell fixtures were written when crowns were stated in 0.25 m
+    /// reference cells and read as cells, so a 1 m fixture's crowns were four times the
+    /// ladder. `crowns_scaled(4.0)` states that geometry in metres now crowns are metres
+    /// (package L). Not a shipped configuration; nothing in the tick uses it.
+    pub fn crowns_scaled(mut self, k: f64) -> FloraConfig {
+        for species in Species::ALL {
+            let sc = self.species_mut(species);
+            sc.crown_height_m = sc.crown_height_m.map(|v| v * k);
+            sc.crown_radius_m = sc.crown_radius_m.map(|v| v * k);
+            for stage in &mut sc.profile {
+                if let Some(cap) = &mut stage.height_m_max {
+                    *cap *= k;
+                }
+            }
         }
         self
     }
@@ -1953,14 +2006,9 @@ mod voxel_scale_tests {
                 before.substrate_reach_up_down * 2
             );
             assert_eq!(after.hop, before.hop * 2);
-            assert_eq!(
-                after.crown_height_voxels,
-                before.crown_height_voxels.map(|v| v * 2.0)
-            );
-            assert_eq!(
-                after.crown_radius_voxels,
-                before.crown_radius_voxels.map(|v| v * 2.0)
-            );
+            // Crowns are metres since package L: the same on every grid.
+            assert_eq!(after.crown_height_m, before.crown_height_m);
+            assert_eq!(after.crown_radius_m, before.crown_radius_m);
         }
 
         let mut geometry_reset = scaled;
@@ -1971,12 +2019,10 @@ mod voxel_scale_tests {
             after.rooting_radius = before.rooting_radius;
             after.substrate_reach_up_down = before.substrate_reach_up_down;
             after.hop = before.hop;
-            after.crown_height_voxels = before.crown_height_voxels;
-            after.crown_radius_voxels = before.crown_radius_voxels;
         }
         // The recorded cell size is not authored geometry: it is the world's, and it
         // is what a rule written in metres is converted with
-        // ([`SpeciesConfig::crown_height_staged`]).
+        // ([`SpeciesConfig::crown_height`]).
         assert_eq!(geometry_reset.voxel_m, 0.125);
         geometry_reset.voxel_m = reference.voxel_m;
         assert_eq!(geometry_reset, reference, "rates and stores stay authored");
@@ -2282,8 +2328,8 @@ pub struct FloraView<'a> {
 pub fn layers_of(config: &FloraConfig, stand: &Stand, voxel_m: f64) -> Vec<StandLayer> {
     let sc = config.species(stand.species);
     let stage = sc.profile_at(stand.wood);
-    let height_v = sc.crown_height_staged(stand.wood, voxel_m);
-    let radius_v = sc.crown_radius(stand.wood).max(0.0);
+    let height_v = sc.crown_height(stand.wood, voxel_m);
+    let radius_v = sc.crown_radius(stand.wood, voxel_m).max(0.0);
     let cap = sc.alpha * stand.wood.max(0.0);
     let base = f64::from(stand.site.y);
     let mut out = Vec::with_capacity(stage.layers.len());

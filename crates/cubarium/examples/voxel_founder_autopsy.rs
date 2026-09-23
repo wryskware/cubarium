@@ -725,7 +725,7 @@ fn nearest_living_crown(
     let (planar, stand) = best?;
     // The crown's own cell layer, the way `cone_occupancy` indexes it.
     let sc = fv.config.species(stand.species);
-    let crown_layer = f64::from(stand.site.y) + f64::from(sc.crown_voxels(stand.wood));
+    let crown_layer = f64::from(stand.site.y) + f64::from(sc.crown_voxels(stand.wood, fv.config.voxel_m));
     // The eye, in metres: `0.8 × body height` over the standing surface
     // (`senses::cone_origin`; `design/handoffs/voxel-body-anchors-2026-09-22.md`).
     let eye_m = cubarium_voxel_fauna::surface_m(animal.site.y, v)

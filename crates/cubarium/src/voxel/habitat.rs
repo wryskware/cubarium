@@ -433,6 +433,7 @@ pub fn seed_pre_rolled(
     let rise = (STEP_M / world.config().voxel_m).floor().max(1.0) as u32;
     let spacing = (PATCH_SPACING_M / world.config().voxel_m).round().max(1.0) as u32;
     let width = world.config().width;
+    let voxel_m = world.config().voxel_m;
     let mut taken: Vec<Site> = Vec::new();
 
     // The five producers. Suitability is the **flora layer's own** establishment gates
@@ -489,7 +490,7 @@ pub fn seed_pre_rolled(
                 taken.push(site);
                 seeded.stands += 1;
                 seeded.stands_by_species[species.index()] += 1;
-                shade_under(sites, &mut sky, site, &sc, wood, width);
+                shade_under(sites, &mut sky, site, &sc, wood, width, voxel_m);
             }
         }
     }
@@ -1022,9 +1023,10 @@ fn shade_under(
     sc: &SpeciesConfig,
     wood: f64,
     width: u32,
+    voxel_m: f64,
 ) {
-    let radius = sc.crown_radius(wood).max(0.0);
-    let top = at.y + sc.crown_voxels(wood);
+    let radius = sc.crown_radius(wood, voxel_m).max(0.0);
+    let top = at.y + sc.crown_voxels(wood, voxel_m);
     for (i, s) in sites.iter().enumerate() {
         if s.y > top {
             continue;

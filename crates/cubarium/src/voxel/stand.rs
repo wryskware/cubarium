@@ -490,7 +490,7 @@ pub fn parts_of(flora: FloraView<'_>, stand: &Stand, style: u16) -> Vec<(Cell, P
     // The interim glowcap glyph is its own shape and not a profile: one stem cell and
     // one cap, on the face or on the log. Unchanged.
     if stand.species == Species::Glowcap {
-        let h = crown_height_voxels(sc.crown_height(stand.wood));
+        let h = crown_height_voxels(sc.crown_height(stand.wood, flora.config.voxel_m));
         let top = if on_log { 2 } else { h };
         for k in 1..top {
             out.push((
@@ -569,7 +569,7 @@ pub fn parts_of(flora: FloraView<'_>, stand: &Stand, style: u16) -> Vec<(Cell, P
         }
     }
 
-    let h = crown_height_voxels(sc.crown_height(stand.wood));
+    let h = crown_height_voxels(sc.crown_height(stand.wood, flora.config.voxel_m));
     for (i, layer) in foliage.iter().enumerate() {
         let crown = i + 1 == foliage.len();
         let top = base_y + (layer.cell - i64::from(site.y)).max(0) as u32;
@@ -782,9 +782,10 @@ mod tests {
         stands.rebuild(&view, flora.view());
 
         let sc = flora.config().species(sp);
-        let h = crown_height_voxels(sc.crown_height(wood));
-        assert_eq!(h, 5, "umbrellafrond's full crown height is 5 voxels");
-        // The support is the soil skyline at y = 3, so the trunk runs y = 4..=8.
+        let h = crown_height_voxels(sc.crown_height(wood, flora.config().voxel_m));
+        // Package L's ladder: a full-grown umbrellafrond is 2 m, eight 0.25 m voxels.
+        assert_eq!(h, 8, "umbrellafrond's full crown height is 8 voxels");
+        // The support is the soil skyline at y = 3, so the trunk runs y = 4..=11.
         for y in 4..3 + h {
             assert!(
                 matches!(stands.at(10, i64::from(y), 2), Part::Trunk(_)),
@@ -812,7 +813,7 @@ mod tests {
         // at the crown top — the top tier is `r 0.5` of the crown radius and the
         // lowest is the whole of it. That is the shade the ecology is after and the
         // thing the lollipop could not say.
-        let r = sc.crown_radius(wood);
+        let r = sc.crown_radius(wood, flora.config().voxel_m);
         assert!(r > 2.0, "the fixture wants a disc wider than one cell: {r}");
         let tiers: Vec<(i64, f64)> = flora
             .view()
@@ -839,9 +840,10 @@ mod tests {
             stands.at(10, wide_y, 0),
             Part::Crown { heart: false, .. }
         ));
-        // And it stops: `dx² + dz² > r²` is outside.
+        // And it stops: `dx² + dz² > r²` is outside (the widest tier's radius is the
+        // ladder's 0.75 m, three cells).
         assert_eq!(
-            stands.at(13, wide_y, 2),
+            stands.at(14, wide_y, 2),
             Part::None,
             "the widest tier has an edge"
         );
@@ -1084,8 +1086,8 @@ mod tests {
     /// own size range, its sprout mark is its own, and every one of the five crowns is
     /// distinct from the other four in linear light.
     ///
-    /// The three new crowns are one cell tall by design — `crown_height_voxels` starts at
-    /// 0.5 for all three, which `crown_height_voxels()` rounds to 1 — so they have **no
+    /// The three new crowns are one cell tall by design — on package L's ladder they are
+    /// 0.125–0.1875 m, which `crown_height_voxels()` rounds to 1 at 0.25 m — so they have **no
     /// trunk at all**: the crown disc sits straight on the ground, which is what a turf, a
     /// cushion and a pad are. That is the case the geometry has to get right, because the
     /// trunk loop is `1..h` and an `h` of 1 runs it zero times.
@@ -1123,7 +1125,7 @@ mod tests {
                 stand.bin_layers(flora.config());
                 let parts = parts_of(flora.view(), &stand, 0);
                 assert_eq!(
-                    crown_height_voxels(sc.crown_height(wood)),
+                    crown_height_voxels(sc.crown_height(wood, flora.config().voxel_m)),
                     1,
                     "{} at wood {wood} is not one cell tall",
                     species.name()
@@ -1164,11 +1166,9 @@ mod tests {
                 );
             }
         }
-        // And the shapes at full size. The brief gives springturf and stonecushion the
-        // **same** radius range, `[0.5, 1.0]`, so at `wood_max` they draw the same
-        // five-cell plus and what separates them in the picture is the palette — which is
-        // why stonecushion is the one low-chroma crown of the five, checked below. The pad
-        // is the broad one, `[1.0, 2.0]`, and that is the role's own "low and broad".
+        // And the shapes at full size, on package L's ladder at 0.25 m: springturf's
+        // 0.25 m radius draws the five-cell plus, stonecushion's 0.156 m stays one cell,
+        // and the pad's 0.375 m is the broad one — the role's own "low and broad".
         let cells = |species: Species| -> usize {
             let sc = flora.config().species(species);
             let mut stand = Stand {
@@ -1209,9 +1209,9 @@ mod tests {
             turf >= 1 && cushion >= 1 && pad >= 1,
             "turf {turf}, cushion {cushion}, pad {pad}"
         );
-        assert_eq!(
-            turf, cushion,
-            "the two share a radius range: {turf}, {cushion}"
+        assert!(
+            turf > cushion,
+            "the turf is wider than the cushion on the ladder: {turf} against {cushion}"
         );
         assert!(
             pad > turf,
@@ -1385,7 +1385,7 @@ mod tests {
                 },
                 "{parts:?}"
             );
-            assert_eq!(crown_height_voxels(sc.crown_height(wood)), 1);
+            assert_eq!(crown_height_voxels(sc.crown_height(wood, flora.config().voxel_m)), 1);
         }
 
         // And on the grid, through the whole presenter path.

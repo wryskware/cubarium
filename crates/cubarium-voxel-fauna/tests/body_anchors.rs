@@ -66,7 +66,7 @@ fn wood_for_crown_voxels(config: &FloraConfig, voxels: u32) -> f64 {
     let sc: &PlantCfg = config.species(Plant::Bloomcrown);
     let mut wood = 0.02;
     while wood < sc.wood_max {
-        if sc.crown_voxels(wood) == voxels {
+        if sc.crown_voxels(wood, config.voxel_m) == voxels {
             return wood;
         }
         wood += 0.005;
@@ -109,7 +109,7 @@ fn crown_containing(
         flora
             .config()
             .species(Plant::Bloomcrown)
-            .crown_voxels(stand.wood),
+            .crown_voxels(stand.wood, flora.config().voxel_m),
         cells,
         "the seeded wood moved the crown off the cell holding {height_m} m"
     );

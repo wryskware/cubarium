@@ -89,7 +89,7 @@ fn crown_at(flora: &mut Flora, world: &World, x: i64, z: u32, wood: f64, rise: i
             flora
                 .config()
                 .species(Plant::Bloomcrown)
-                .crown_voxels(stand.wood),
+                .crown_voxels(stand.wood, flora.config().voxel_m),
         );
     // The body stands in `site.y + 1`; `rise` is how far above that the crown sits.
     assert_eq!(

@@ -1091,7 +1091,7 @@ pub(crate) fn reachable_layers(
     // This scan runs over every stand for every mouth on every tick.
     let sc = fv.config.species(stand.species);
     let lowest = i64::from(stand.site.y) + 1;
-    let highest = i64::from(stand.site.y) + i64::from(sc.crown_voxels(stand.wood));
+    let highest = i64::from(stand.site.y) + i64::from(sc.crown_voxels(stand.wood, fv.config.voxel_m));
     if *layers.end() < lowest || *layers.start() > highest {
         return out;
     }

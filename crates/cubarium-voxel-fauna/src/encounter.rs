@@ -37,10 +37,12 @@ use crate::{ConeHit, Diet, FaunaView, Pose};
 /// How many headings a face is asked about when the question is "from *some* pose here".
 ///
 /// The mouth region's furthest probe is `2 · footprint_radius + reach` from the body's
-/// centre — under 0.2 m for either founder — so a five-degree turn moves it by about a
-/// hundredth of a voxel. Seventy-two headings therefore enumerate the whole union of
-/// mouth columns a body standing on one face could ever cover, and the acceptance rule
-/// is a pure OR over headings, so the union may be tested in one call.
+/// centre — 0.5625 m for package L's adult browser, 0.22 m for the shredder — so a
+/// five-degree turn moves it by at most 0.05 m, under half a 0.125 m voxel. Seventy-two
+/// headings therefore enumerate the union of mouth columns a body standing on one face
+/// could cover, short of a column the region only clips at a corner for less than five
+/// degrees; the acceptance rule is a pure OR over headings, so the union may be tested
+/// in one call.
 pub const HEADING_SAMPLES: usize = 72;
 
 /// The standing surface of a support face, in metres: `Site.y` indexes the **solid**
@@ -199,7 +201,7 @@ pub fn layer_columns(
 /// [`FloraView::layers`] or [`reachable_layers_of`]
 /// (`design/voxel-encounter-contract-2026-09-21.md` §8).
 pub fn crown_layer(fv: &FloraView<'_>, stand: &Stand) -> i64 {
-    i64::from(stand.site.y) + i64::from(fv.config.species(stand.species).crown_voxels(stand.wood))
+    i64::from(stand.site.y) + i64::from(fv.config.species(stand.species).crown_voxels(stand.wood, fv.config.voxel_m))
 }
 
 /// The stand's foliage slab in **metres above the world floor**: the one cell-thick disc
@@ -215,7 +217,7 @@ pub fn crown_slab_m(fv: &FloraView<'_>, stand: &Stand, voxel_m: f64) -> (f64, f6
 pub fn crown_columns(fv: &FloraView<'_>, view: &VoxelView<'_>, stand: &Stand) -> Vec<(u32, u32)> {
     let c = view.config;
     let sc = fv.config.species(stand.species);
-    let radius = sc.crown_radius(stand.wood).max(0.0);
+    let radius = sc.crown_radius(stand.wood, fv.config.voxel_m).max(0.0);
     let span = radius.floor() as i64;
     let r2 = radius * radius;
     let mut out = Vec::new();

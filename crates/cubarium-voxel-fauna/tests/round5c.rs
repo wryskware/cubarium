@@ -569,11 +569,13 @@ fn a_step_crosses_neither_a_wall_nor_a_pool() {
 
 // ------------------------------------------------- R9.5: sensing in face coordinates
 
-/// A bloomcrown founder at half its own `wood_max`: wood 0.3, foliage `α · W` = 0.6, and a
-/// crown whose lowest cell is **two** voxels above its support face, so a browser with
-/// `reach.up` 1 can only eat it from a face at least one voxel higher than the stand's.
+/// A one-layer bloomcrown at a fifth of its own `wood_max`: wood 0.12, foliage `α · W` =
+/// 0.24, and on package L's ladder a 0.5 m crown whose cell is **two** 0.25 m voxels above
+/// its support face, so a browser with `reach.up` 1 can only eat it from a face at least
+/// one voxel higher than the stand's. (Half its `wood_max` was two voxels before the
+/// ladder; it is three now.)
 fn bloom(flora: &mut Flora, world: &World, x: i64) {
-    let wood = 0.5 * flora.config().bloomcrown.wood_max;
+    let wood = 0.2 * flora.config().bloomcrown.wood_max;
     assert!(
         flora.apply(
             world,
@@ -587,7 +589,7 @@ fn bloom(flora: &mut Flora, world: &World, x: i64) {
         "a bloomcrown founder at x {x}"
     );
     assert_eq!(
-        flora.config().bloomcrown.crown_voxels(wood),
+        flora.config().bloomcrown.crown_voxels(wood, flora.config().voxel_m),
         2,
         "the fixture's premise"
     );

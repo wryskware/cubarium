@@ -193,7 +193,8 @@ fn the_decided_corrections_are_in_the_profiles() {
             species.name()
         );
         // And the cap actually binds: the interpolated height is taller than the cap.
-        let free = sc.crown_height(sc.alive_min) * 0.25;
+        // Since package L the range's own minimum is what the cap trims.
+        let free = sc.crown_height_m[0];
         assert!(
             free > 0.125,
             "{}: the cap would be inert ({free} m free)",
@@ -568,10 +569,11 @@ fn light_response(l: f64, half: f64) -> f64 {
 #[test]
 fn a_single_layer_species_shades_exactly_as_it_did_before() {
     let support = 2;
-    for (shader, shaded) in [
-        (Species::Velvetpad, Species::Glowcap),
-        (Species::Springturf, Species::Glowcap),
-    ] {
+    // Package L's ladder: velvetpad (0.125 m) is now the lowest full-grown crown and
+    // glowcap (0.25 m) one of the taller small ones, too narrow (0.0625 m) to cover a
+    // neighbour, so the one single-layer pair left is springturf (0.1875 m, one cell
+    // wide) over a velvetpad.
+    for (shader, shaded) in [(Species::Springturf, Species::Velvetpad)] {
         for porosity in [0.0, -1.0] {
             let mut config = FloraConfig::default();
             let shader_sc = config.species(shader).clone();
@@ -603,12 +605,12 @@ fn a_single_layer_species_shades_exactly_as_it_did_before() {
             let shader_wood = shader_sc.wood_max;
             let shaded_wood = shaded_sc.wood_max;
             assert!(
-                shader_sc.crown_height(shader_wood) > shaded_sc.crown_height(shaded_wood),
+                shader_sc.crown_height(shader_wood, 0.25) > shaded_sc.crown_height(shaded_wood, 0.25),
                 "{} must stand over {}",
                 shader.name(),
                 shaded.name()
             );
-            assert!(shader_sc.crown_radius(shader_wood) >= 1.0, "and cover it");
+            assert!(shader_sc.crown_radius(shader_wood, 0.25) >= 1.0, "and cover it");
 
             let mut flora = Flora::new(config);
             for (x, species, wood) in [(8i64, shader, shader_wood), (9, shaded, shaded_wood)] {
@@ -631,7 +633,7 @@ fn a_single_layer_species_shades_exactly_as_it_did_before() {
                 .light;
             // The pre-layer expression, verbatim: one disc holding the whole of `P`,
             // over `π (r · v)²` floored at one reference cell.
-            let r_m = shader_sc.crown_radius(shader_wood) * 0.25;
+            let r_m = shader_sc.crown_radius(shader_wood, 0.25) * 0.25;
             let area = (std::f64::consts::PI * r_m * r_m).max(0.25 * 0.25);
             let foliage = shader_sc.alpha * shader_wood;
             let historical = (-FloraConfig::default().shade_k_per_m2 * foliage / area).exp();

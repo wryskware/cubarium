@@ -243,7 +243,9 @@ fn a_stand_at_wilting_point_earns_nothing_and_dies_of_unpaid_maintenance() {
 /// is changed.
 #[test]
 fn a_taller_crown_lowers_the_light_and_the_income_under_it() {
-    let mut config = FloraConfig::default();
+    // Package L: crowns are metres; this 1 m-cell fixture keeps the crowns it was
+    // written against, four times the 0.25 m-cell ladder (`FloraConfig::crowns_scaled`).
+    let mut config = FloraConfig::default().crowns_scaled(4.0);
     config.shade_k_per_m2 = 30.0;
 
     let mut world = plain(16, 12, 0.6);
@@ -325,7 +327,9 @@ fn a_taller_crown_lowers_the_light_and_the_income_under_it() {
 /// the sites the four donors fed, which it is.
 #[test]
 fn a_stand_that_cannot_pay_under_a_closed_canopy_diebacks_and_dies() {
-    let mut config = FloraConfig::default();
+    // Package L: crowns are metres; this 1 m-cell fixture keeps the crowns it was
+    // written against, four times the 0.25 m-cell ladder (`FloraConfig::crowns_scaled`).
+    let mut config = FloraConfig::default().crowns_scaled(4.0);
     config.shade_k_per_m2 = 30.0;
     config.umbrellafrond.propagule_rate = 2.0;
     config.bloomcrown.maintenance = 0.0032;

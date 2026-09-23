@@ -103,16 +103,30 @@ const CROWN_HEIGHT_SALT: u64 = 0x_C807_4E16_4854_5321;
 /// The species and wood that put a crown `rise` voxels above the browser's head layer.
 ///
 /// Springturf's crown height tops out at one voxel, so the two taller rungs are
-/// bloomcrown, whose `crown_height_voxels` spans `[1, 3]` — the same species whose grown
-/// crowns leave the browser's head layer in the live world (`design/7_Research/
-/// voxel-census-2026-09-20.md` §D3). Half its `wood_max` rounds to a two-voxel crown and
-/// all of it to three.
+/// bloomcrown — the same species whose grown crowns leave the browser's head layer in
+/// the live world (`design/7_Research/voxel-census-2026-09-20.md` §D3). Since package L
+/// its crown is `[0.375, 1.0]` m with a capped seedling, so the wood for a two- and a
+/// three-voxel crown is looked up, not written down: the middle of the run of wood
+/// fractions whose [`cubarium_voxel_flora::SpeciesConfig::crown_voxels`] is `rise + 1`.
 fn crown_wood(config: &FloraConfig, rise: u32) -> (Plant, f64) {
-    match rise {
-        0 => (Plant::Springturf, 0.5 * config.springturf.wood_max),
-        1 => (Plant::Bloomcrown, 0.5 * config.bloomcrown.wood_max),
-        _ => (Plant::Bloomcrown, config.bloomcrown.wood_max),
-    }
+    let species = if rise == 0 {
+        Plant::Springturf
+    } else {
+        Plant::Bloomcrown
+    };
+    let sc = config.species(species);
+    const STEPS: u32 = 256;
+    let hits: Vec<f64> = (1..=STEPS)
+        .map(|k| sc.wood_max * f64::from(k) / f64::from(STEPS))
+        .filter(|&w| w >= sc.alive_min && sc.crown_voxels(w, config.voxel_m) == rise + 1)
+        .collect();
+    let wood = match (hits.first(), hits.last()) {
+        (Some(lo), Some(hi)) => 0.5 * (lo + hi),
+        // No wood gives that crown: the tallest there is, which the caller's debug
+        // assertion names.
+        _ => sc.wood_max,
+    };
+    (species, wood)
 }
 
 /// The crown rise of each browser stand in a layout, in the resource order the caller
@@ -530,7 +544,10 @@ impl Arena {
                         .stand_at(site)
                         .expect("the browser stand was seeded");
                     debug_assert_eq!(
-                        flora.config().species(species).crown_voxels(stand.wood),
+                        flora
+                            .config()
+                            .species(species)
+                            .crown_voxels(stand.wood, flora.config().voxel_m),
                         rise + 1,
                         "{species:?} at wood {wood} is not a crown {rise} above the head"
                     );
@@ -1091,7 +1108,7 @@ mod tests {
         let voxels = flora
             .config()
             .species(stand.species)
-            .crown_voxels(stand.wood);
+            .crown_voxels(stand.wood, flora.config().voxel_m);
         i64::from(voxels) - 1
     }
 

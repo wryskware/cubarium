@@ -664,7 +664,7 @@ mod tests {
         let rise = |arena: &cubarium_voxel_sim::Arena, site: Site| -> i64 {
             let fv = arena.flora.view();
             let stand = fv.stand_at(site).expect("a browser stand");
-            i64::from(fv.config.species(stand.species).crown_voxels(stand.wood)) - 1
+            i64::from(fv.config.species(stand.species).crown_voxels(stand.wood, fv.config.voxel_m)) - 1
         };
 
         let mut seen_a = [0usize; 3];

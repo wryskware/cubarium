@@ -476,7 +476,7 @@ fn plan_for(
             let crown = fv
                 .config
                 .species(stand.species)
-                .crown_radius(stand.wood)
+                .crown_radius(stand.wood, fv.config.voxel_m)
                 .max(0.0);
             let span = i64::from(sc.reach.horizontal) + crown.floor() as i64;
             for dz in -span..=span {

@@ -394,7 +394,7 @@ fn episode_from(
             .filter(|&site| {
                 fv.stand_at(site).is_some_and(|stand| {
                     i64::from(stand.site.y)
-                        + i64::from(fv.config.species(stand.species).crown_voxels(stand.wood))
+                        + i64::from(fv.config.species(stand.species).crown_voxels(stand.wood, fv.config.voxel_m))
                         == i64::from(standing_y) + 2
                 })
             })

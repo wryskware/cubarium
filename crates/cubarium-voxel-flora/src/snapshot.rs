@@ -26,7 +26,12 @@ use crate::Flora;
 /// `design/handoffs/voxel-plant-layers-2026-09-22.md`. Postcard is not
 /// self-describing, so a new field is a new format: other tags are refused, never
 /// migrated.
-pub const SCHEMA: u32 = 1;
+///
+/// Schema 2: package L (`design/handoffs/voxel-ladder-growth-2026-09-23.md`) states every
+/// crown in metres (`SpeciesConfig::crown_height_m` / `crown_radius_m`) at the size
+/// ladder, with the capped-seedling growth rule. The serialised config's fields changed,
+/// and a schema-1 stand's wood would grow a different plant: refused, not migrated.
+pub const SCHEMA: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
