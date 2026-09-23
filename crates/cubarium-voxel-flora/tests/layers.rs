@@ -730,7 +730,8 @@ fn a_layered_receiver_is_weighted_by_where_its_tissue_is() {
 #[test]
 fn two_hundred_ticks_keep_the_layers_summing_and_the_ledgers_closed() {
     let support = 2;
-    let mut world = plain(0.25, 24, 16, support, 0.6);
+    // 32 columns wide since package N: nine species three columns apart need 28.
+    let mut world = plain(0.25, 32, 16, support, 0.6);
     let config = FloraConfig::default();
     let woods: Vec<(i64, Species, f64)> = Species::ALL
         .iter()

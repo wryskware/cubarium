@@ -121,6 +121,7 @@ use crate::{
 /// draws.
 const DOMAIN_DISPERSAL: u64 = 1;
 const DOMAIN_GERMINATION: u64 = 2;
+const DOMAIN_FALL: u64 = 3;
 
 /// A deterministic scalar stream (splitmix64), keyed by the values that **identify** a
 /// draw rather than seeded from stored state: the same world, the same place and the same
@@ -192,7 +193,9 @@ pub(crate) fn step(flora: &mut Flora, world: &mut World) {
         let light = cubarium_voxel::voxel_phase!(Light, { light_per_stand(flora, world) });
         let moisture = cubarium_voxel::voxel_phase!(Drink, { drink(flora, world) });
         let substrate = cubarium_voxel::voxel_phase!(Feed, { feed(flora, world, &moisture) });
-        cubarium_voxel::voxel_phase!(Grow, { grow(flora, &light, &moisture, &substrate) });
+        cubarium_voxel::voxel_phase!(Grow, {
+            grow(flora, world, &light, &moisture, &substrate)
+        });
         cubarium_voxel::voxel_phase!(Decompose, { decompose(flora, &pre) });
         cubarium_voxel::voxel_phase!(SeedBank, { seed_bank(flora, world) });
         cubarium_voxel::voxel_phase!(Propagate, { propagate(flora, world) });
@@ -312,8 +315,7 @@ fn drown(flora: &mut Flora, world: &World) {
     }
     for &i in doomed.iter().rev() {
         let stand = stands[i];
-        let gi = ground_slot(ground, stand.site);
-        die(config, &stand, &mut ground[gi], ledger);
+        die(config, &view, &stand, ground, ledger);
         stands.remove(i);
     }
 }
@@ -513,6 +515,13 @@ fn drink(flora: &mut Flora, world: &mut World) -> Vec<Drink> {
             let sc = flora.config.species(stand.species);
             let box_ = root_box(&view, stand.site, sc);
             out[i].moisture = moisture_of(&view, &box_, sc);
+            // A species that needs standing water (package N) and has lost it reads
+            // `μ = 0`: it earns nothing and pays its upkeep out of reserve.
+            if sc.water_depth_min_m > 0.0
+                && standing_water_beside(&view, stand.site) < sc.water_depth_min_m
+            {
+                out[i].moisture = 0.0;
+            }
             out[i].saturated = saturated_fraction(&view, &box_, sc);
             let demand =
                 (sc.transpiration_m3_per_s * stand.foliage * out[i].moisture * DT).max(0.0);
@@ -1011,7 +1020,13 @@ fn split_shares(taken: Taken, wants: &[Want], shares: &mut Vec<Taken>) {
 
 // ------------------------------------------- 6. income, growth, senescence, death
 
-fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink], substrate: &[Substrate]) {
+fn grow(
+    flora: &mut Flora,
+    world: &World,
+    light: &[f64],
+    drink: &[Drink],
+    substrate: &[Substrate],
+) {
     let Flora {
         config,
         stands,
@@ -1291,10 +1306,10 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink], substrate: &[Substrat
         }
     }
 
+    let view = world.view();
     for &si in dead.iter().rev() {
         let stand = stands[si];
-        let gi = ground_slot(ground, stand.site);
-        die(config, &stand, &mut ground[gi], ledger);
+        die(config, &view, &stand, ground, ledger);
         stands.remove(si);
     }
 }
@@ -1326,30 +1341,151 @@ pub(crate) fn pull_mineral(stand: &mut Stand, before: f64, moved: f64) -> f64 {
 /// energy cap,
 /// and the stand's mineral split between the two in proportion to the organic matter
 /// each takes.
-fn die(config: &FloraConfig, stand: &Stand, g: &mut Ground, ledger: &mut FloraLedger) {
-    let e_v = config.species(stand.species).energy_density;
+///
+/// The one death path, whatever killed the stand. For a species with
+/// [`crate::SpeciesConfig::falls`] (the vaulttree, package N) the wood, its mineral and
+/// its energy are laid in equal shares along its [`fall_line`] instead of on its own site;
+/// the litter stays where the stand stood. Every other species' line is its own site.
+fn die(
+    config: &FloraConfig,
+    view: &VoxelView<'_>,
+    stand: &Stand,
+    ground: &mut Vec<Ground>,
+    ledger: &mut FloraLedger,
+) {
+    let sc = config.species(stand.species);
+    let e_v = sc.energy_density;
     let organic = stand.material();
     let wood_mineral = if organic > 0.0 {
         (stand.mineral * (stand.wood / organic)).min(stand.mineral)
     } else {
         0.0
     };
-    g.dead_wood += stand.wood;
-    g.dead_wood_mineral += wood_mineral;
-    g.dead_wood_energy += e_v * stand.wood;
+    let wood_energy = e_v * stand.wood;
+    let line = if sc.falls {
+        fall_line(config, view, stand)
+    } else {
+        vec![(stand.site, 1)]
+    };
+    let n: usize = line.iter().map(|l| l.1).sum();
+    let (mut wood_left, mut mineral_left, mut energy_left) =
+        (stand.wood, wood_mineral, wood_energy);
+    for (i, &(site, parts)) in line.iter().enumerate() {
+        // Equal shares, and the last destination takes exactly what is left, so the
+        // line's total is the wood at death to the last bit.
+        let (w, m, e) = if i + 1 == line.len() {
+            (wood_left, mineral_left, energy_left)
+        } else {
+            let f = parts as f64 / n as f64;
+            (stand.wood * f, wood_mineral * f, wood_energy * f)
+        };
+        wood_left -= w;
+        mineral_left -= m;
+        energy_left -= e;
+        let gi = if site == stand.site {
+            ground_slot(ground, site)
+        } else {
+            provisioned_slot(config, ground, site, ledger)
+        };
+        let g = &mut ground[gi];
+        g.dead_wood += w;
+        g.dead_wood_mineral += m;
+        g.dead_wood_energy += e;
+    }
     // A parcel dies with its donor: material saved for a package that will never be sent
     // falls where the foliage and the reserve fall, and its mineral goes with it.
     let shed = stand.foliage + stand.reserve + stand.parcel;
     let shed_mineral = (stand.mineral - wood_mineral).max(0.0);
+    let gi = ground_slot(ground, stand.site);
     add_litter_cap(
         config.litter_energy_cap,
-        g,
+        &mut ground[gi],
         shed,
         shed_mineral,
         e_v * shed,
         ledger,
     );
     ledger.deaths += 1;
+}
+
+/// **The fall** (package N, model addition 1): where a falling stand's wood lands, as
+/// `(site, shares)` with the shares summing to `round(crown_radius / voxel)`, at least
+/// one.
+///
+/// The line runs from the stand's own site in a direction hashed from the world seed and
+/// the site alone — not the terrain, not the tick — one site per step along the major
+/// axis of that direction (the minor axis rounded), so share `k` lies `k` sites out. The
+/// site in a column is its highest support face no higher than the crown's top; a column
+/// with none there is **unsupported**, and its share goes to the nearest supported site on
+/// the line (the nearer the origin on a tie), which the origin always is.
+fn fall_line(config: &FloraConfig, view: &VoxelView<'_>, stand: &Stand) -> Vec<(Site, usize)> {
+    let sc = config.species(stand.species);
+    let c = view.config;
+    let voxel_m = c.voxel_m;
+    let n = ((sc.crown_radius_m_at(stand.wood) / voxel_m).round().max(1.0)) as usize;
+    let origin = stand.site;
+    let index = c.index(i64::from(origin.x), origin.y, origin.z) as u64;
+    let mut rng = Rng::keyed(DOMAIN_FALL, c.seed, index, 0);
+    let angle = (rng.next_u64() >> 11) as f64 / (1u64 << 53) as f64 * std::f64::consts::TAU;
+    let (dx, dz) = (angle.cos(), angle.sin());
+    let major = dx.abs().max(dz.abs());
+    let (sx, sz) = (dx / major, dz / major);
+    let top = origin.y.saturating_add(sc.crown_voxels(stand.wood, voxel_m));
+    let width = i64::from(c.width);
+
+    // Each share's own site, or `None` where the column holds no support under the crown.
+    let own: Vec<Option<Site>> = (0..n)
+        .map(|k| {
+            if k == 0 {
+                return Some(origin);
+            }
+            let x = (i64::from(origin.x) + (k as f64 * sx).round() as i64).rem_euclid(width);
+            let z = i64::from(origin.z) + (k as f64 * sz).round() as i64;
+            if z < 0 || z >= i64::from(c.depth) {
+                return None;
+            }
+            let z = z as u32;
+            (0..=top.min(c.height.saturating_sub(1)))
+                .rev()
+                .find(|&y| view.is_support(x, y, z))
+                .map(|y| Site { x: x as u32, y, z })
+        })
+        .collect();
+    let mut out: Vec<(Site, usize)> = Vec::new();
+    for k in 0..n {
+        let site = match own[k] {
+            Some(s) => s,
+            None => (1..n)
+                .flat_map(|d| [k.checked_sub(d), Some(k + d)])
+                .flatten()
+                .find_map(|j| own.get(j).copied().flatten())
+                .unwrap_or(origin),
+        };
+        match out.iter_mut().find(|e| e.0 == site) {
+            Some(e) => e.1 += 1,
+            None => out.push((site, 1)),
+        }
+    }
+    out
+}
+
+/// The site's ground entry, **provisioned** if the site has none: a fallen log is a
+/// landing like a package or a deposit, so an unrepresented site gets its
+/// `initial_mineral`, booked as `seeded_mineral_in` ([`crate::Provision::Lazy`]).
+fn provisioned_slot(
+    config: &FloraConfig,
+    ground: &mut Vec<Ground>,
+    site: Site,
+    ledger: &mut FloraLedger,
+) -> usize {
+    match ground.binary_search_by_key(&site, |g| g.site) {
+        Ok(i) => i,
+        Err(i) => {
+            ledger.seeded_mineral_in += config.initial_mineral;
+            ground.insert(i, Ground::new(site, config.initial_mineral));
+            i
+        }
+    }
 }
 
 fn add_litter(
@@ -2096,6 +2232,13 @@ pub struct Gates {
     /// `substrate() >= establish_substrate_min` — and **always true for a `Photo`
     /// species**, whose substrate gate is open by construction.
     pub substrate_ok: bool,
+    /// Settled standing water on the site or beside it, metres
+    /// ([`standing_water_beside`]). Read only for a species with a
+    /// `water_depth_min_m`; zero, unread, for every other.
+    pub standing_depth_m: f64,
+    /// `standing_depth_m >= water_depth_min_m` — and **always true** for a species with
+    /// no standing-water requirement.
+    pub standing_ok: bool,
 }
 
 impl Gates {
@@ -2108,7 +2251,12 @@ impl Gates {
 
     /// The predicate itself: every gate, and nothing else.
     pub fn passes(&self) -> bool {
-        self.pore_ok && self.aeration_ok && self.depth_ok && self.light_ok && self.substrate_ok
+        self.pore_ok
+            && self.aeration_ok
+            && self.depth_ok
+            && self.light_ok
+            && self.substrate_ok
+            && self.standing_ok
     }
 }
 
@@ -2197,6 +2345,11 @@ fn gates(
     let mean_pore = mean_pore(view, &box_);
     let saturated_fraction = saturated_fraction(view, &box_, sc);
     let water_depth_m = view.water_depth_m(site.x as i64, site.y, site.z);
+    let standing_depth_m = if sc.water_depth_min_m > 0.0 {
+        standing_water_beside(view, site)
+    } else {
+        0.0
+    };
     Gates {
         soil_voxels: box_.len(),
         mean_pore,
@@ -2219,7 +2372,38 @@ fn gates(
             Trophic::Photo => true,
             Trophic::Saprotroph => dead_wood + litter >= sc.establish_substrate_min,
         },
+        standing_depth_m,
+        standing_ok: sc.water_depth_min_m <= 0.0 || standing_depth_m >= sc.water_depth_min_m,
     }
+}
+
+/// The deepest **settled standing water** on `site`'s own face or beside it, metres
+/// (package N, model addition 2): [`VoxelView::standing_depth_m`] on the site, and on
+/// the highest support face of each of the four neighbouring columns **at or below** the
+/// site's face, when its standing water reaches up to the site's own support voxel —
+/// water lapping at the bank, and not a pool at the foot of a cliff beside it.
+pub(crate) fn standing_water_beside(view: &VoxelView<'_>, site: Site) -> f64 {
+    let c = view.config;
+    let x = site.x as i64;
+    let mut best = view.standing_depth_m(x, site.y, site.z);
+    let bank_m = f64::from(site.y) * c.voxel_m;
+    for (dx, dz) in [(-1i64, 0i64), (1, 0), (0, -1), (0, 1)] {
+        let z = site.z as i64 + dz;
+        if z < 0 || z >= c.depth as i64 {
+            continue;
+        }
+        let (nx, nz) = (x + dx, z as u32);
+        // The neighbour's highest face at or below the site's: the ground beside the
+        // bank. A face under that one is under solid and its water cannot be beside it.
+        let Some(y) = (0..=site.y).rev().find(|&y| view.is_support(nx, y, nz)) else {
+            continue;
+        };
+        let depth = view.standing_depth_m(nx, y, nz);
+        if depth > 0.0 && f64::from(y + 1) * c.voxel_m + depth >= bank_m {
+            best = best.max(depth);
+        }
+    }
+    best
 }
 
 #[cfg(test)]

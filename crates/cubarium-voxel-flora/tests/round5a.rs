@@ -142,6 +142,9 @@ fn species_mut(config: &mut FloraConfig, species: Species) -> &mut SpeciesConfig
         // Round 5b's sixth species. The one line a new `Species` variant forces on an
         // exhaustive match; nothing this file asserts changed.
         Species::Glowcap => &mut config.glowcap,
+        Species::Vaulttree => &mut config.vaulttree,
+        Species::Lanternberry => &mut config.lanternberry,
+        Species::Siphonreed => &mut config.siphonreed,
     }
 }
 

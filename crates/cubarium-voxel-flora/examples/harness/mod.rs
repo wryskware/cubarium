@@ -97,6 +97,11 @@ pub fn habitat_of(species: Species) -> Habitat {
         Species::Stonecushion => Habitat::RockWithAPocket,
         Species::Velvetpad => Habitat::UnderACrown,
         Species::Glowcap => Habitat::OnALog,
+        // Package N: the canopy on the high open ground, the shrub on open soil, the reed
+        // in the wet hollow. Harness placement only; the gates still decide.
+        Species::Vaulttree => Habitat::Ridge,
+        Species::Lanternberry => Habitat::OpenSoil,
+        Species::Siphonreed => Habitat::Hollow,
     }
 }
 

@@ -100,6 +100,16 @@ pub enum Species {
     /// The wood fungus of the decomposer grove: **not a plant**. It earns nothing from
     /// light, eats the dead wood under and around it, and fruits one cap.
     Glowcap,
+    /// The canopy builder of deep aerated soil (package N): establishes only in an open
+    /// gap, slow, long-lived, a large reserve; at death its wood falls as a line of dead
+    /// wood as long as the crown was wide.
+    Vaulttree,
+    /// The fruiting shrub of grove edges and moist bright gaps (package N): a fan of
+    /// stems under low, wide foliage that a ground browser crops below its band.
+    Lanternberry,
+    /// The emergent of saturated soil and shallow standing water (package N): needs
+    /// settled standing water on or beside its site and pays for its aeration.
+    Siphonreed,
 }
 
 impl Species {
@@ -107,13 +117,18 @@ impl Species {
     /// [`FloraLedger`]. Derived from [`Species::ALL`] so the two can never disagree.
     pub const COUNT: usize = Species::ALL.len();
 
-    pub const ALL: [Species; 6] = [
+    /// Package N's three are **appended**, so every ledger slot of the six before them
+    /// keeps its meaning.
+    pub const ALL: [Species; 9] = [
         Species::Bloomcrown,
         Species::Umbrellafrond,
         Species::Springturf,
         Species::Stonecushion,
         Species::Velvetpad,
         Species::Glowcap,
+        Species::Vaulttree,
+        Species::Lanternberry,
+        Species::Siphonreed,
     ];
 
     /// This species' slot in the per-species arrays of [`FloraLedger`], and the same index
@@ -126,6 +141,9 @@ impl Species {
             Species::Stonecushion => 3,
             Species::Velvetpad => 4,
             Species::Glowcap => 5,
+            Species::Vaulttree => 6,
+            Species::Lanternberry => 7,
+            Species::Siphonreed => 8,
         }
     }
 
@@ -137,6 +155,9 @@ impl Species {
             Species::Stonecushion => "stonecushion",
             Species::Velvetpad => "velvetpad",
             Species::Glowcap => "glowcap",
+            Species::Vaulttree => "vaulttree",
+            Species::Lanternberry => "lanternberry",
+            Species::Siphonreed => "siphonreed",
         }
     }
 
@@ -743,6 +764,24 @@ pub struct SpeciesConfig {
     /// species whose limit is literally zero drowns everywhere it rains. Give even the
     /// least water-tolerant species a fraction of a voxel.
     pub drown_depth_m: f64,
+    /// **Settled standing water**, metres, the species needs on its own support face or
+    /// on a 4-neighbouring one to establish and to stay healthy (package N, model
+    /// addition 2). Read with [`cubarium_voxel::VoxelView::standing_depth_m`], which does
+    /// not count water in transit, and not with `water_depth_m`, which does. `0.0` is no
+    /// requirement, and is what every species but the siphonreed carries.
+    ///
+    /// A neighbour counts when its face is at or below this site's and its standing water
+    /// reaches up to this site's support voxel — water *beside* the site, not a pool at
+    /// the foot of a cliff (`step`'s `standing_water_beside`). A stand whose water has
+    /// gone reads `μ = 0`: it earns nothing, pays its upkeep out of reserve and then
+    /// diebacks, which is what "stays healthy only there" means in this model.
+    pub water_depth_min_m: f64,
+    /// **The fall** (package N, model addition 1): at death this species' wood is laid
+    /// as dead wood along a line of `round(crown_radius / voxel)` sites in a direction
+    /// hashed from its site, each an equal share (`step`'s `fall_line`), so the log a
+    /// glowcap colonises is as long as the crown was wide. `false` — the wood falls on
+    /// the site — for every species but the vaulttree.
+    pub falls: bool,
     /// How many support sites away, in `x` and `z`, a propagule may land.
     pub hop: u32,
     /// Crown geometry from wood, shared by the shade model and the presenter so what
@@ -985,6 +1024,8 @@ impl SpeciesConfig {
             relax_rate_per_s: 0.05,
             establish_saturated_max: 0.5,
             drown_depth_m: 0.0,
+            water_depth_min_m: 0.0,
+            falls: false,
             hop: 1,
             crown_height_m: [0.25, 0.75],
             crown_radius_m: [0.125, 0.375],
@@ -1490,6 +1531,204 @@ impl SpeciesConfig {
         }
     }
 
+    /// **Vaulttree — the canopy builder of deep aerated soil** (package N,
+    /// `design/handoffs/voxel-new-plants-2026-09-23.md`; dossier D11). Establishes only in
+    /// an open gap, grows slowly into a large, long-lived crown on a large reserve, and at
+    /// death lays its wood as a line of dead wood (`step`'s `die`).
+    ///
+    /// Every number is a **placeholder** (`design/backlog.md` §1):
+    ///
+    /// - **Light.** `establish_light_min` 0.9, the brief's gap gate. Germination light is
+    ///   geometric sky with **no living canopy in it** (`step`'s `Gates`), so "needs a
+    ///   gap" is "needs open sky" here: a vault seed under another stand's crown in open
+    ///   terrain still passes. A canopy-aware gate is a separate rule (Astra R6.2).
+    ///   `light_half` 0.6: a sun canopy, under bloomcrown's 0.8.
+    /// - **Water.** Deep, wide roots (`rooting_depth` 6, `rooting_radius` 2 at 0.25 m),
+    ///   drained-soil thresholds (`establish_pore_min` 0.2, `wilt_pore` 0.12, `sat_pore`
+    ///   0.5), and an aerated root zone: `establish_saturated_max` 0.2 with a **slow**
+    ///   `stress_rate_per_s` 0.005, so it stresses on long saturation and shrugs off a
+    ///   wet week. `drown_depth_m` 0.1.
+    /// - **Slow, long-lived, large reserve.** `wood_max` 5.0 (bloomcrown 0.6),
+    ///   `wood_rate` 0.0003 and `foliage_rate` 0.001, `maintenance` 0.0001 and
+    ///   `senescence` 0.0005, half the base; `reserve_cap` 1.5, three times the base.
+    ///   `alive_min` 0.02 (the base's 0.05 package, 300 s of a funded donor at
+    ///   `propagule_rate` 0.0002), `donor_min` 2.5, `hop` 4.
+    /// - **Shape.** Crown `[2.25, 3.5]` m × `[0.625, 1.0]` m, grown from the capped seedling
+    ///   (package L §2); the profile is anatomy §3's table.
+    pub fn vaulttree() -> SpeciesConfig {
+        SpeciesConfig {
+            light_half: 0.6,
+            establish_light_min: 0.9,
+            rooting_depth: 6,
+            rooting_radius: 2,
+            wilt_pore: 0.12,
+            sat_pore: 0.5,
+            establish_pore_min: 0.2,
+            establish_saturated_max: 0.2,
+            stress_rate_per_s: 0.005,
+            relax_rate_per_s: 0.02,
+            drown_depth_m: 0.1,
+            falls: true,
+            hop: 4,
+            wood_max: 5.0,
+            alive_min: 0.02,
+            donor_min: 2.5,
+            reserve_cap: 1.5,
+            maintenance: 0.0001,
+            senescence: 0.0005,
+            foliage_rate: 0.001,
+            wood_rate: 0.0003,
+            propagule_rate: 0.0002,
+            crown_height_m: [2.25, 3.5],
+            crown_radius_m: [0.625, 1.0],
+            // Anatomy document §3. The limbs are a sparse Trunk (structure, no foliage);
+            // the lobes' sky gaps are porosity 0.45; the drape hangs under the limbs.
+            profile: vec![
+                Profile {
+                    wood_fraction_max: 0.1,
+                    height_m_max: Some(0.125),
+                    layers: vec![SpeciesConfig::foliage_layer([0.0, 1.0], 1.0, 1.0, 0.4)],
+                },
+                Profile {
+                    wood_fraction_max: 0.4,
+                    height_m_max: None,
+                    layers: vec![
+                        SpeciesConfig::trunk_layer([0.0, 0.6], 0.15, 0.0),
+                        SpeciesConfig::foliage_layer([0.6, 1.0], 1.0, 1.0, 0.4),
+                    ],
+                },
+                Profile {
+                    wood_fraction_max: f64::INFINITY,
+                    height_m_max: None,
+                    layers: vec![
+                        SpeciesConfig::trunk_layer([0.0, 0.5], 0.15, 0.0),
+                        SpeciesConfig::trunk_layer([0.5, 0.7], 0.6, 0.85),
+                        Layer {
+                            kind: LayerKind::Drape,
+                            ..SpeciesConfig::foliage_layer([0.35, 0.5], 0.7, 0.15, 0.9)
+                        },
+                        SpeciesConfig::foliage_layer([0.7, 1.0], 1.0, 0.85, 0.45),
+                    ],
+                },
+            ],
+            ..SpeciesConfig::v1_base()
+        }
+    }
+
+    /// **Lanternberry — the fruiting shrub of grove edges and moist bright gaps** (package
+    /// N; dossier D12). Its fruit is the ordinary parcel for now: a donor saves only out of
+    /// reserve above a high floor, so each crop waits for the reserve to recover.
+    ///
+    /// Every number is a **placeholder** (`design/backlog.md` §1):
+    ///
+    /// - **Light** between umbrellafrond and bloomcrown: `light_half` 0.4,
+    ///   `establish_light_min` 0.35.
+    /// - **Moist**: `establish_pore_min` 0.3, `wilt_pore` 0.15, `sat_pore` 0.6,
+    ///   `establish_saturated_max` 0.5, `drown_depth_m` 0.1.
+    /// - **Repeated paid fruit**: `donor_reserve_floor` 0.7 (base 0.5) and `propagule_rate`
+    ///   0.0004; `wood_max` 1.0, `alive_min` 0.02, `donor_min` 0.4, `hop` 2.
+    /// - **Shape.** Crown `[0.625, 1.125]` m × `[0.25, 0.4375]` m from the capped seedling.
+    ///
+    /// **The browse line.** Anatomy §3 gives the adult one foliage layer `0.3–1.0`. A
+    /// layer is reached by the one disc cell at its band's top, so as one layer a grown
+    /// shrub's whole foliage would sit above a 0.5 m mouth and nothing would be cropped —
+    /// not the brief's accepted browse line. The layer is therefore **cut in two at 0.45**
+    /// of the height, same kind, radius and porosity, shares in proportion to band length
+    /// (3/14 and 11/14): the same anatomy, with a lower skirt whose top is 0.51 m on a
+    /// full-grown 1.125 m shrub, inside the browser's band on both grids, and an upper
+    /// crown above it. A young adult is inside the band entirely.
+    pub fn lanternberry() -> SpeciesConfig {
+        SpeciesConfig {
+            light_half: 0.4,
+            establish_light_min: 0.35,
+            rooting_depth: 3,
+            rooting_radius: 1,
+            wilt_pore: 0.15,
+            sat_pore: 0.6,
+            establish_pore_min: 0.3,
+            establish_saturated_max: 0.5,
+            stress_rate_per_s: 0.1,
+            relax_rate_per_s: 0.05,
+            drown_depth_m: 0.1,
+            hop: 2,
+            wood_max: 1.0,
+            alive_min: 0.02,
+            donor_min: 0.4,
+            donor_reserve_floor: 0.7,
+            propagule_rate: 0.0004,
+            crown_height_m: [0.625, 1.125],
+            crown_radius_m: [0.25, 0.4375],
+            profile: vec![
+                Profile {
+                    wood_fraction_max: 0.2,
+                    height_m_max: Some(0.125),
+                    layers: vec![SpeciesConfig::foliage_layer([0.0, 1.0], 1.0, 1.0, 0.5)],
+                },
+                Profile {
+                    wood_fraction_max: f64::INFINITY,
+                    height_m_max: None,
+                    layers: vec![
+                        SpeciesConfig::trunk_layer([0.0, 0.3], 0.4, 0.7),
+                        SpeciesConfig::foliage_layer([0.3, 0.45], 1.0, 3.0 / 14.0, 0.5),
+                        SpeciesConfig::foliage_layer([0.45, 1.0], 1.0, 11.0 / 14.0, 0.5),
+                    ],
+                },
+            ],
+            ..SpeciesConfig::v1_base()
+        }
+    }
+
+    /// **Siphonreed — the emergent of saturated soil and shallow standing water**
+    /// (package N; dossier D13). It needs settled standing water on or beside its site
+    /// ([`SpeciesConfig::water_depth_min_m`]) and tolerates a waterlogged root box at a
+    /// cost.
+    ///
+    /// Every number is a **placeholder** (`design/backlog.md` §1):
+    ///
+    /// - **Water.** `water_depth_min_m` 0.1: a pool, not a rain film (bloomcrown's 0.05
+    ///   drown depth is the precedent for "a pool"). `drown_depth_m` 0.5: it stands in the
+    ///   water it needs, up to a third of a full-grown reed. `establish_pore_min` 0.45,
+    ///   `wilt_pore` 0.3, `sat_pore` 0.8: wet soil.
+    /// - **Aeration at a cost.** `establish_saturated_max` 1.0, like umbrellafrond — and
+    ///   for the same reason not "slightly below 1" (its doc: every tolerance below 1
+    ///   drives a wholly saturated box to stress 1). The cost is **upkeep** instead:
+    ///   `maintenance` 0.0004, twice the base, which is the aerenchyma it pays for.
+    /// - **Light** high: `light_half` 0.8, `establish_light_min` 0.6.
+    /// - **Local paid spread**: `hop` 1, `wood_max` 0.3, `alive_min` 0.02, `donor_min`
+    ///   0.15, `propagule_rate` 0.0003.
+    /// - **Shape.** Crown `[0.75, 1.5]` m × `[0.0625, 0.125]` m, one porous column for life.
+    pub fn siphonreed() -> SpeciesConfig {
+        SpeciesConfig {
+            light_half: 0.8,
+            establish_light_min: 0.6,
+            rooting_depth: 2,
+            rooting_radius: 1,
+            wilt_pore: 0.3,
+            sat_pore: 0.8,
+            establish_pore_min: 0.45,
+            establish_saturated_max: 1.0,
+            stress_rate_per_s: 0.01,
+            relax_rate_per_s: 0.05,
+            drown_depth_m: 0.5,
+            water_depth_min_m: 0.1,
+            maintenance: 0.0004,
+            hop: 1,
+            wood_max: 0.3,
+            alive_min: 0.02,
+            donor_min: 0.15,
+            propagule_rate: 0.0003,
+            crown_height_m: [0.75, 1.5],
+            crown_radius_m: [0.0625, 0.125],
+            profile: SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer(
+                [0.0, 1.0],
+                1.0,
+                1.0,
+                0.7,
+            )]),
+            ..SpeciesConfig::v1_base()
+        }
+    }
+
     /// Whether this preset can produce a living stand at all, checked where the numbers
     /// enter the system rather than where they first go wrong (Astra R6.2 asks for exactly
     /// this list: a finite nonnegative split summing to one, a positive wood fraction,
@@ -1656,7 +1895,7 @@ impl SpeciesConfig {
         // Every scalar the tick multiplies a stock by. A `NaN` or an infinity in any of
         // them reaches the ledger within one step, and none of them has a meaning below
         // zero — a negative rate would run a flow backwards past its own `min` guard.
-        let rates: [(&str, f64); 27] = [
+        let rates: [(&str, f64); 28] = [
             ("substrate_uptake_per_s", self.substrate_uptake_per_s),
             ("establish_substrate_min", self.establish_substrate_min),
             ("alpha", self.alpha),
@@ -1684,6 +1923,7 @@ impl SpeciesConfig {
             ("stress_rate_per_s", self.stress_rate_per_s),
             ("relax_rate_per_s", self.relax_rate_per_s),
             ("drown_depth_m", self.drown_depth_m),
+            ("water_depth_min_m", self.water_depth_min_m),
         ];
         for (label, v) in rates {
             if !v.is_finite() || v < 0.0 {
@@ -1774,6 +2014,9 @@ pub struct FloraConfig {
     pub stonecushion: SpeciesConfig,
     pub velvetpad: SpeciesConfig,
     pub glowcap: SpeciesConfig,
+    pub vaulttree: SpeciesConfig,
+    pub lanternberry: SpeciesConfig,
+    pub siphonreed: SpeciesConfig,
     /// Canopy attenuation, **per square metre**: a taller stand whose crown covers a
     /// site multiplies the light reaching that site by
     /// `exp(-shade_k_per_m2 · P / crown_area_m2)`, where the crown's area is
@@ -1838,6 +2081,9 @@ impl Default for FloraConfig {
             stonecushion: SpeciesConfig::stonecushion(),
             velvetpad: SpeciesConfig::velvetpad(),
             glowcap: SpeciesConfig::glowcap(),
+            vaulttree: SpeciesConfig::vaulttree(),
+            lanternberry: SpeciesConfig::lanternberry(),
+            siphonreed: SpeciesConfig::siphonreed(),
             shade_k_per_m2: 0.09375,
             decomposition: 0.001,
             wood_decomposition: 0.0001,
@@ -1938,6 +2184,9 @@ impl FloraConfig {
             Species::Stonecushion => &self.stonecushion,
             Species::Velvetpad => &self.velvetpad,
             Species::Glowcap => &self.glowcap,
+            Species::Vaulttree => &self.vaulttree,
+            Species::Lanternberry => &self.lanternberry,
+            Species::Siphonreed => &self.siphonreed,
         }
     }
 
@@ -1951,6 +2200,9 @@ impl FloraConfig {
             Species::Stonecushion => &mut self.stonecushion,
             Species::Velvetpad => &mut self.velvetpad,
             Species::Glowcap => &mut self.glowcap,
+            Species::Vaulttree => &mut self.vaulttree,
+            Species::Lanternberry => &mut self.lanternberry,
+            Species::Siphonreed => &mut self.siphonreed,
         }
     }
 
