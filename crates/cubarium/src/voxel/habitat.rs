@@ -433,6 +433,7 @@ pub fn seed_pre_rolled(
     let rise = (STEP_M / world.config().voxel_m).floor().max(1.0) as u32;
     let spacing = (PATCH_SPACING_M / world.config().voxel_m).round().max(1.0) as u32;
     let width = world.config().width;
+    let voxel_m = world.config().voxel_m;
     let mut taken: Vec<Site> = Vec::new();
 
     // The five producers. Suitability is the **flora layer's own** establishment gates
@@ -489,7 +490,7 @@ pub fn seed_pre_rolled(
                 taken.push(site);
                 seeded.stands += 1;
                 seeded.stands_by_species[species.index()] += 1;
-                shade_under(sites, &mut sky, site, &sc, wood, width);
+                shade_under(sites, &mut sky, site, &sc, wood, width, voxel_m);
             }
         }
     }
@@ -1022,9 +1023,10 @@ fn shade_under(
     sc: &SpeciesConfig,
     wood: f64,
     width: u32,
+    voxel_m: f64,
 ) {
-    let radius = sc.crown_radius(wood).max(0.0);
-    let top = at.y + sc.crown_voxels(wood);
+    let radius = sc.crown_radius(wood, voxel_m).max(0.0);
+    let top = at.y + sc.crown_voxels(wood, voxel_m);
     for (i, s) in sites.iter().enumerate() {
         if s.y > top {
             continue;
@@ -1445,9 +1447,20 @@ mod tests {
         }
         let faces = browser_faces(&world.view(), &flora.view(), &fauna);
         assert!(!faces.is_empty(), "the rosette admits the faces round the stem");
+        // How many columns from its own a mouth reaches: the probe furthest from the
+        // face's centre is `2 r + reach` ahead of it (0.5625 m, 2.25 cells, for package
+        // L's 0.75 m browser; the one-column rosette is at most two columns away).
+        let reach_cells = ((2.0 * body.footprint_radius() + body.mouth_reach_m) / 0.25 + 0.5)
+            .floor() as u32;
+        assert_eq!(reach_cells, 2);
         for f in &faces {
-            let near = [6u32, 16].iter().any(|&x| wrapped(f.x, x, 24) <= 1);
-            assert!(near && f.z.abs_diff(3) <= 1, "{f:?} is not beside a stem");
+            let near = [6u32, 16]
+                .iter()
+                .any(|&x| wrapped(f.x, x, 24) <= reach_cells);
+            assert!(
+                near && f.z.abs_diff(3) <= reach_cells,
+                "{f:?} is not within a mouth's reach of a stem"
+            );
         }
 
         let sites: Vec<Site> = flora.view().stands.iter().map(|s| s.site).collect();

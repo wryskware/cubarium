@@ -692,9 +692,9 @@ fn a_crown_two_voxels_up_is_out_of_reach_and_one_across_the_seam_is_not() {
     let mut flora = Flora::new(FloraConfig::default());
     let turf = 0.5 * flora.config().springturf.wood_max;
     // A springturf crown at this wood is one cell, one voxel above its own face.
-    assert_eq!(flora.config().springturf.crown_voxels(turf), 1);
+    assert_eq!(flora.config().springturf.crown_voxels(turf, 0.25), 1);
     assert!(
-        flora.config().springturf.crown_radius(turf) < 1.0,
+        flora.config().springturf.crown_radius(turf, 0.25) < 1.0,
         "one cell wide"
     );
 
@@ -775,7 +775,7 @@ fn the_same_crown_is_out_of_reach_from_its_own_face_and_in_reach_from_the_one_ab
     assert_eq!(bloom, at(1), "the founder stands on the low face");
     // An adult's crown cells are two voxels above its own support: this is the geometry the
     // whole claim rests on.
-    assert_eq!(flora.config().bloomcrown.crown_voxels(wood), 2);
+    assert_eq!(flora.config().bloomcrown.crown_voxels(wood, 0.25), 2);
 
     let stand = *flora.view().stand_at(bloom).expect("the bloomcrown");
     let layers: Vec<(i64, f64)> = flora
@@ -831,22 +831,23 @@ fn the_same_crown_is_out_of_reach_from_its_own_face_and_in_reach_from_the_one_ab
 fn a_broad_crown_is_reached_by_its_cells_and_a_stripped_stand_is_not_listed() {
     let world = ledges(12, &[(0, 2), (4, 2)]);
     let mut flora = Flora::new(FloraConfig::default());
-    // Velvetpad at its own `wood_max` is the widest crown of the five: radius 2 voxels, and
-    // one voxel tall, so its cells run from column 2 to column 6.
+    // Velvetpad at its own `wood_max` is a broad, flat crown: on package L's ladder
+    // radius 0.375 m, 1.5 of the config's 0.25 m cells, and one cell tall, so its cells
+    // run from column 3 to column 5.
     let pad_wood = flora.config().velvetpad.wood_max;
-    assert_eq!(flora.config().velvetpad.crown_radius(pad_wood), 2.0);
-    assert_eq!(flora.config().velvetpad.crown_voxels(pad_wood), 1);
+    assert_eq!(flora.config().velvetpad.crown_radius(pad_wood, 0.25), 1.5);
+    assert_eq!(flora.config().velvetpad.crown_voxels(pad_wood, 0.25), 1);
     let pad = plant_wood(&mut flora, &world, 4, Species::Velvetpad, pad_wood);
 
     let from = Site { x: 0, y: 2, z: 0 };
     let reach = Reach {
-        horizontal: 2,
+        horizontal: 3,
         up: 1,
     };
     assert_eq!(
         flora.view().reachable_foliage(&world.view(), from, reach),
         vec![(pad, flora.view().stand_at(pad).expect("planted").foliage)],
-        "the crown's nearest cell is two columns away, and the box is two"
+        "the crown's nearest cell is three columns away, and the box is three"
     );
     // Its trunk alone would be out of reach: the centre is four columns away.
     assert!(
@@ -856,12 +857,12 @@ fn a_broad_crown_is_reached_by_its_cells_and_a_stripped_stand_is_not_listed() {
                 &world.view(),
                 from,
                 Reach {
-                    horizontal: 1,
+                    horizontal: 2,
                     up: 1
                 }
             )
             .is_empty(),
-        "a one-voxel box cannot reach a crown whose nearest cell is two away"
+        "a two-voxel box cannot reach a crown whose nearest cell is three away"
     );
 
     // Eat all of it, and it is no longer food.

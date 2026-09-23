@@ -1171,7 +1171,7 @@ fn a_rock_in_front_of_foliage_is_an_all_hit_with_a_zero_foliage_fraction() {
         let mut flora = Flora::new(FloraConfig::default());
         let wood = 0.5 * flora.config().species(Plant::Springturf).wood_max;
         assert_eq!(
-            flora.config().species(Plant::Springturf).crown_voxels(wood),
+            flora.config().species(Plant::Springturf).crown_voxels(wood, flora.config().voxel_m),
             1,
             "this fixture needs a crown sitting one voxel above its face"
         );

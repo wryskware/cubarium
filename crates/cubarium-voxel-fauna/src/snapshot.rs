@@ -72,9 +72,14 @@ use crate::Fauna;
 /// world's ledger has no split to carry across — its shredders ate litter only, so
 /// every bite it booked would have to be *assumed* to be litter — and assuming it is
 /// exactly the synthesis the always-fresh rule refuses.
+/// Schema 13 is **package L's size ladder**
+/// (`design/handoffs/voxel-ladder-growth-2026-09-23.md` §3): the founders' adult bodies
+/// doubled (frondgrazer 0.75 × 0.375 × 0.375 m, littershredder 0.375 × 0.125 × 0.125 m).
+/// The format did not change, but a schema-12 world's bodies stand on faces chosen for
+/// the old headroom and its stands grew under the old crowns: refused, not re-anchored.
 /// Postcard is not self-describing, so older worlds are **refused**, not migrated
 /// (`always-fresh-never-migrate`): start a fresh world.
-pub const SCHEMA: u32 = 12;
+pub const SCHEMA: u32 = 13;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

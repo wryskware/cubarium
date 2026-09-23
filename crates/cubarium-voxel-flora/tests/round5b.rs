@@ -795,26 +795,22 @@ fn validate_covers_the_three_new_fields() {
 }
 
 /// The glowcap's own shape, in the model rather than in the picture: **one crown cell at
-/// every size**, and the lowest crown top of the six, so it shades nothing.
+/// every size** on the 0.25 m grid. Package L put its crown on the ladder, 0.125–0.25 m
+/// tall and 0.0625 m in radius, so it is no longer the lowest crown of the six — a
+/// full-grown cap stands over a velvetpad's 0.125 m pad — and that old half of this
+/// test went with the old size.
 #[test]
 fn a_glowcap_crown_is_one_cell_high_at_every_size() {
     let config = config();
     let sc = &config.glowcap;
     for wood in [sc.alive_min, 0.5 * sc.wood_max, sc.wood_max] {
-        assert_eq!(sc.crown_voxels(wood), 1, "at wood {wood}");
-        assert_eq!(sc.crown_height(wood), 0.5, "at wood {wood}");
-        assert_eq!(sc.crown_radius(wood), 0.5, "at wood {wood}");
-    }
-    for species in Species::ALL {
-        if species == Species::Glowcap {
-            continue;
-        }
-        let other = config.species(species);
+        let t = wood / sc.wood_max;
+        assert_eq!(sc.crown_voxels(wood, 0.25), 1, "at wood {wood}");
         assert!(
-            other.crown_height(other.alive_min) >= sc.crown_height(sc.wood_max),
-            "{} starts lower than a full-grown glowcap",
-            species.name()
+            (sc.crown_height_m_at(wood) - (0.125 + t * 0.125)).abs() < 1e-12,
+            "at wood {wood}"
         );
+        assert_eq!(sc.crown_radius_m_at(wood), 0.0625, "at wood {wood}");
     }
 }
 

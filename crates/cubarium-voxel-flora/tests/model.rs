@@ -119,15 +119,15 @@ fn run(flora: &mut Flora, world: &mut World, ticks: u32) {
 /// its light is open sky to the bit. The attenuation the covered stand receives is the
 /// brief's formula in the crown's own published geometry, not an approximation of it.
 ///
-/// `umbrellafrond.crown_radius_voxels` is `[2.0, 2.0]` here against the placeholder
-/// `[1.0, 2.5]`, so the boundary falls on a whole voxel and "exactly at the radius" is a
+/// `umbrellafrond.crown_radius_m` is `[2.0, 2.0]` (two 1 m voxels) here against the placeholder
+/// `[0.375, 0.75]`, so the boundary falls on a whole voxel and "exactly at the radius" is a
 /// thing a fixture can express; `shade_k` is 30 against the placeholder 1.5, so one
 /// crown's attenuation is unmistakable in a single tick. Nothing else is changed.
 #[test]
 fn shade_covers_exactly_the_crown_radius_the_presenter_draws() {
     let mut config = FloraConfig::default();
     config.shade_k_per_m2 = 30.0;
-    config.umbrellafrond.crown_radius_voxels = [2.0, 2.0];
+    config.umbrellafrond.crown_radius_m = [2.0, 2.0];
     // These two tests predate layers and are about the shade rule's **geometry** and
     // the strictness of its inequality, both of which are stated over one disc. The
     // shading species is therefore given the one-layer, zero-porosity profile the rule
@@ -180,22 +180,22 @@ fn shade_covers_exactly_the_crown_radius_the_presenter_draws() {
     let uc = flora.config().species(Species::Umbrellafrond).clone();
     let bc = flora.config().species(Species::Bloomcrown).clone();
     assert_eq!(
-        uc.crown_radius(0.6),
+        uc.crown_radius(0.6, 1.0),
         2.0,
         "the fixture's premise: a whole-voxel radius"
     );
     assert!(
-        uc.crown_height(0.6) > bc.crown_height(0.1),
+        uc.crown_height(0.6, 1.0) > bc.crown_height(0.1, 1.0),
         "the shading crown has to be the taller one: {} against {}",
-        uc.crown_height(0.6),
-        bc.crown_height(0.1)
+        uc.crown_height(0.6, 1.0),
+        bc.crown_height(0.1, 1.0)
     );
 
     flora.step(&mut world);
 
     // The exact attenuation the brief asks for, in the crown's published geometry: the
     // shading stand's foliage is `α · W` as `Seed` left it, spread over `π r²`.
-    let area = (std::f64::consts::PI * uc.crown_radius(0.6).powi(2)).max(1.0);
+    let area = (std::f64::consts::PI * uc.crown_radius(0.6, 1.0).powi(2)).max(1.0);
     let l = (-30.0 * (uc.alpha * 0.6) / area).exp();
     let expect = l * (1.0 + bc.light_half) / (l + bc.light_half);
     let covered = flora
@@ -235,7 +235,7 @@ fn shade_covers_exactly_the_crown_radius_the_presenter_draws() {
 fn a_crown_level_with_another_does_not_shade_it_but_a_higher_one_does() {
     let mut config = FloraConfig::default();
     config.shade_k_per_m2 = 30.0;
-    config.umbrellafrond.crown_radius_voxels = [2.0, 2.0];
+    config.umbrellafrond.crown_radius_m = [2.0, 2.0];
     // These two tests predate layers and are about the shade rule's **geometry** and
     // the strictness of its inequality, both of which are stated over one disc. The
     // shading species is therefore given the one-layer, zero-porosity profile the rule
@@ -292,11 +292,11 @@ fn a_crown_level_with_another_does_not_shade_it_but_a_higher_one_does() {
     // The level pair covers itself — one voxel apart against a two-voxel radius — so
     // "not shaded" can only be the strictness of the inequality on the tops.
     assert!(
-        1.0 <= uc.crown_radius(0.6),
+        1.0 <= uc.crown_radius(0.6, 1.0),
         "the level pair must cover each other"
     );
     assert!(
-        uc.crown_height(0.3) < uc.crown_height(0.6),
+        uc.crown_height(0.3, 1.0) < uc.crown_height(0.6, 1.0),
         "and the unequal pair is not level"
     );
 
@@ -318,7 +318,7 @@ fn a_crown_level_with_another_does_not_shade_it_but_a_higher_one_does() {
         "nor does a lower crown shade a higher"
     );
     // The lower crown is shaded, by exactly the taller crown's own attenuation.
-    let area = (std::f64::consts::PI * uc.crown_radius(0.6).powi(2)).max(1.0);
+    let area = (std::f64::consts::PI * uc.crown_radius(0.6, 1.0).powi(2)).max(1.0);
     let l = (-30.0 * (uc.alpha * 0.6) / area).exp();
     let expect = l * (1.0 + uc.light_half) / (l + uc.light_half);
     let lower = v.stand_at(site(11)).unwrap().light;
@@ -956,7 +956,9 @@ fn a_canopy_changes_no_sky_visibility_and_all_of_the_plant_s_light() {
         "the fixture is an open plain: {before:?}"
     );
 
-    let mut flora = Flora::new(FloraConfig::default());
+    // Package L: crowns are metres; this 1 m-cell fixture keeps the crowns it was
+    // written against, four times the 0.25 m-cell ladder (`FloraConfig::crowns_scaled`).
+    let mut flora = Flora::new(FloraConfig::default().crowns_scaled(4.0));
     assert!(flora.apply(
         &world,
         Command::Seed {

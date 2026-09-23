@@ -81,11 +81,11 @@ fn shaded_pair(voxel_m: f64, support: u32) -> (f64, f64, f64, f64) {
     let uc = config.species(Species::Umbrellafrond).clone();
     let bc = config.species(Species::Bloomcrown).clone();
     assert!(
-        uc.crown_height(tall_wood) > bc.crown_height(short_wood),
+        uc.crown_height(tall_wood, voxel_m) > bc.crown_height(short_wood, voxel_m),
         "the fixture's premise: the shading crown is the taller one at {voxel_m} m"
     );
     assert!(
-        uc.crown_radius(tall_wood) >= 1.0,
+        uc.crown_radius(tall_wood, voxel_m) >= 1.0,
         "and it covers its neighbour"
     );
 
@@ -131,7 +131,7 @@ fn shaded_pair(voxel_m: f64, support: u32) -> (f64, f64, f64, f64) {
     (
         shaded,
         uc.alpha * tall_wood,
-        uc.crown_radius(tall_wood),
+        uc.crown_radius(tall_wood, voxel_m),
         bc.light_half,
     )
 }

@@ -282,8 +282,8 @@ pub fn canopy_over(world: &World, flora: &Flora, planned: &[Founder]) -> Vec<Can
         out.push(Canopy {
             x: f64::from(stand.site.x),
             z: f64::from(stand.site.z),
-            top: f64::from(stand.site.y) + sc.crown_height(stand.wood),
-            radius: sc.crown_radius(stand.wood),
+            top: f64::from(stand.site.y) + sc.crown_height(stand.wood, flora.config().voxel_m),
+            radius: sc.crown_radius(stand.wood, flora.config().voxel_m),
             foliage: stand.foliage,
         });
     }
@@ -304,8 +304,8 @@ pub fn canopy_over(world: &World, flora: &Flora, planned: &[Founder]) -> Vec<Can
         out.push(Canopy {
             x: f64::from(f.x),
             z: f64::from(f.z),
-            top: f64::from(site.y) + sc.crown_height(wood),
-            radius: sc.crown_radius(wood),
+            top: f64::from(site.y) + sc.crown_height(wood, flora.config().voxel_m),
+            radius: sc.crown_radius(wood, flora.config().voxel_m),
             // What `Command::Seed` will give it: `alpha · wood`, full foliage.
             foliage: sc.alpha * wood,
         });
@@ -404,7 +404,7 @@ pub fn under_a_crown(
     site: Site,
 ) -> bool {
     let sc = flora.config().species(species);
-    let own_top = f64::from(site.y) + sc.crown_height(founder_wood(sc));
+    let own_top = f64::from(site.y) + sc.crown_height(founder_wood(sc), flora.config().voxel_m);
     covered_by(canopy, width, site, own_top)
 }
 
