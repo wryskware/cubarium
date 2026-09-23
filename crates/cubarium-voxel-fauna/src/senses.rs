@@ -61,7 +61,7 @@
 use std::collections::HashMap;
 
 use cubarium_voxel::VoxelView;
-use cubarium_voxel_flora::{FloraView, Site};
+use cubarium_voxel_flora::{FloraView, Ground, Site, StandLayer};
 
 use crate::Pose;
 use crate::body::M_EMIT;
@@ -553,20 +553,276 @@ pub(crate) struct ConeReading {
     pub sectors: [SectorReading; 3],
 }
 
+/// What the march asks of an occupancy, one cell at a time: another body than the
+/// observer's, a stand's class, a ground pool's top. [`ConeOccupancy`] is the live one;
+/// the march is generic so a test can run the very same march against a reference.
+pub(crate) trait CellOccupancy {
+    /// Whether anything at all may be in `cell` — a cheap pre-check the march may skip
+    /// the three queries on. `true` is always a safe answer.
+    fn any(&self, _cell: usize) -> bool {
+        true
+    }
+    /// A body other than `observer_id` occupies `cell`.
+    fn other_body(&self, cell: usize, observer_id: u64) -> bool;
+    /// The stand class claiming `cell`, if any.
+    fn environment(&self, cell: usize) -> Option<Fine>;
+    /// The top, in metres, of the ground pool reaching into `cell`, if any.
+    fn pool_top(&self, cell: usize) -> Option<f64>;
+}
+
+/// The two low bits of a [`ConeOccupancy`] cell: which stand class claims it.
+const ENV_MASK: u8 = 0b0011;
+const ENV_FOLIAGE: u8 = 1;
+const ENV_STRIPPED: u8 = 2;
+const ENV_TRUNK: u8 = 3;
+/// A ground pool reaches into the cell; its top is in [`ConeOccupancy::pools`].
+const POOL_BIT: u8 = 0b0100;
+/// At least one body stands in the cell; which ones are in [`ConeOccupancy::bodies`].
+const BODY_BIT: u8 = 0b1000;
+
+const fn env_code(fine: Fine) -> u8 {
+    match fine {
+        Fine::FoliageCrown => ENV_FOLIAGE,
+        Fine::StrippedCrown => ENV_STRIPPED,
+        _ => ENV_TRUNK,
+    }
+}
+
 /// Occupancy shared by every cone sampled in one controller stage. Environment geometry
 /// and bodies are indexed once; a ray ignores only its observer's id, so another body in
 /// the same cell remains visible.
 ///
+/// **Dense**: one byte per world cell ([`cubarium_voxel::Config::index`]) holds the stand
+/// class claiming it, whether a ground pool reaches into it, and whether a body stands in
+/// it; the pools' tops and the bodies' ids sit in short side lists sorted by cell, read
+/// only when the byte says so. A ray step is one byte load (cone-speed item 2; it was
+/// three SipHash map lookups).
+///
 /// A **windowed** build ([`cone_occupancy_window`]) indexes only the columns a set of
 /// observers' rays can reach; a ray from one of those observers reads exactly what it
 /// would read against the full build, because nothing outside the window is on its path.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct ConeOccupancy {
-    environment: HashMap<usize, Fine>,
-    bodies: HashMap<usize, Vec<u64>>,
-    /// Ground pools: every cell a pool reaches into, with the pool's top in metres. A ray
-    /// point in the cell is inside the pool only below that top (D3).
-    pools: HashMap<usize, f64>,
+    cells: Vec<u8>,
+    /// `(cell, top in metres)` for every cell carrying [`POOL_BIT`], sorted by cell.
+    pools: Vec<(u32, f64)>,
+    /// `(cell, body id)` for every indexed body, sorted by cell, in animal order within
+    /// a cell.
+    bodies: Vec<(u32, u64)>,
+}
+
+impl CellOccupancy for ConeOccupancy {
+    #[inline]
+    fn any(&self, cell: usize) -> bool {
+        self.byte(cell) != 0
+    }
+
+    #[inline]
+    fn other_body(&self, cell: usize, observer_id: u64) -> bool {
+        if self.byte(cell) & BODY_BIT == 0 {
+            return false;
+        }
+        let cell = cell as u32;
+        let from = self.bodies.partition_point(|&(c, _)| c < cell);
+        self.bodies[from..]
+            .iter()
+            .take_while(|&&(c, _)| c == cell)
+            .any(|&(_, id)| id != observer_id)
+    }
+
+    #[inline]
+    fn environment(&self, cell: usize) -> Option<Fine> {
+        match self.byte(cell) & ENV_MASK {
+            0 => None,
+            ENV_FOLIAGE => Some(Fine::FoliageCrown),
+            ENV_STRIPPED => Some(Fine::StrippedCrown),
+            _ => Some(Fine::Trunk),
+        }
+    }
+
+    #[inline]
+    fn pool_top(&self, cell: usize) -> Option<f64> {
+        if self.byte(cell) & POOL_BIT == 0 {
+            return None;
+        }
+        let cell = cell as u32;
+        self.pools
+            .binary_search_by_key(&cell, |&(c, _)| c)
+            .ok()
+            .map(|i| self.pools[i].1)
+    }
+}
+
+impl ConeOccupancy {
+    fn empty(cells: usize) -> ConeOccupancy {
+        ConeOccupancy {
+            cells: vec![0; cells],
+            pools: Vec::new(),
+            bodies: Vec::new(),
+        }
+    }
+
+    #[inline]
+    fn byte(&self, cell: usize) -> u8 {
+        self.cells.get(cell).copied().unwrap_or(0)
+    }
+
+    /// Every layer of every profile, not one disc per stand: a foliage-bearing layer
+    /// holding stock is foliage to an eye, one holding none is a stripped crown, and a
+    /// trunk is structure. **Porosity does not enter here**: it is a light property, and
+    /// a porous canopy is still leaves to an eye — a known simplification, recorded in
+    /// `design/voxel-encounter-contract-2026-09-21.md` §8.
+    ///
+    /// Foliage is laid down **before** structure, over both passes, so that where a
+    /// rosette wraps its own stem the eye reads the food and not the stick. The first
+    /// claim on a cell keeps it, as it always has. `claim` sees every foliage claim as
+    /// `(cell, stand index, layer position)` — the held occupancy's record of who owns a
+    /// crown cell, which a bite can re-class but never move.
+    fn lay_stands(
+        &mut self,
+        view: &VoxelView<'_>,
+        fv: &FloraView<'_>,
+        window: Option<&[bool]>,
+        mut claim: impl FnMut(usize, usize, usize),
+    ) {
+        for foliage_pass in [true, false] {
+            for (si, stand) in fv.stands.iter().enumerate() {
+                for (li, layer) in fv.profile_layers(stand).iter().enumerate() {
+                    if layer.kind.bears_foliage() != foliage_pass {
+                        continue;
+                    }
+                    let code = env_code(layer_class(layer));
+                    for_each_layer_cell(view, stand.site, layer, window, |cell| {
+                        let b = &mut self.cells[cell];
+                        if *b & ENV_MASK == 0 {
+                            *b |= code;
+                            if foliage_pass {
+                                claim(cell, si, li);
+                            }
+                        }
+                    });
+                }
+            }
+        }
+    }
+
+    /// Ground pools occlude up to their physical height over the face (D3): organic /
+    /// (cell area × bulk density), from the face's top — a film under a cell, or a heap
+    /// spanning several. A stand's claim on a cell comes first, and the first pool (in
+    /// site order) to reach a cell keeps it.
+    fn lay_pools<'g>(
+        &mut self,
+        view: &VoxelView<'_>,
+        ground: impl IntoIterator<Item = &'g Ground>,
+        window: Option<&[bool]>,
+    ) {
+        let c = view.config;
+        for g in ground {
+            let Some(top) = pool_top_m(g, c.voxel_m) else {
+                continue;
+            };
+            if !column_seen(c, window, i64::from(g.site.x)) {
+                continue;
+            }
+            let mut y = g.site.y + 1;
+            while y < c.height && f64::from(y) * c.voxel_m < top {
+                let cell = c.index(i64::from(g.site.x), y, g.site.z);
+                let b = &mut self.cells[cell];
+                if *b & (ENV_MASK | POOL_BIT) == 0 {
+                    *b |= POOL_BIT;
+                    self.pools.push((cell as u32, top));
+                }
+                y += 1;
+            }
+        }
+    }
+
+    /// Every body's occupied cell (the layer over its standing face), in animal order.
+    fn lay_bodies(
+        &mut self,
+        view: &VoxelView<'_>,
+        fauna: &crate::FaunaView<'_>,
+        window: Option<&[bool]>,
+    ) {
+        let c = view.config;
+        for a in fauna.animals {
+            if let Some((ax, az)) = a.pose.column(c.voxel_m, c.depth) {
+                if !column_seen(c, window, ax) {
+                    continue;
+                }
+                let layer = i64::from(a.site.y) + 1;
+                if layer > 0 && layer < i64::from(c.height) {
+                    let cell = c.index(ax, layer as u32, az);
+                    self.cells[cell] |= BODY_BIT;
+                    self.bodies.push((cell as u32, a.id));
+                }
+            }
+        }
+        // Stable: bodies sharing a cell stay in animal order.
+        self.bodies.sort_by_key(|&(cell, _)| cell);
+    }
+}
+
+/// The stand class a profile layer shows an eye.
+fn layer_class(layer: &StandLayer) -> Fine {
+    if !layer.kind.bears_foliage() {
+        Fine::Trunk
+    } else if layer.stock > 0.0 {
+        Fine::FoliageCrown
+    } else {
+        Fine::StrippedCrown
+    }
+}
+
+/// A ground entry's pool top in metres, or `None` when it holds no organic matter.
+fn pool_top_m(g: &Ground, voxel_m: f64) -> Option<f64> {
+    let organic = g.litter + g.carrion + g.dead_wood;
+    (organic > 0.0).then(|| {
+        crate::surface_m(g.site.y, voxel_m) + organic / (voxel_m * voxel_m * POOL_BULK_DENSITY)
+    })
+}
+
+fn column_seen(c: &cubarium_voxel::Config, window: Option<&[bool]>, cx: i64) -> bool {
+    window.is_none_or(|w| w[cx.rem_euclid(i64::from(c.width)) as usize])
+}
+
+/// Every cell a profile layer's disc covers — its rows, the integer disc of its radius
+/// around the stand's column, clipped to the strip's `z` range and the window.
+fn for_each_layer_cell(
+    view: &VoxelView<'_>,
+    site: Site,
+    layer: &StandLayer,
+    window: Option<&[bool]>,
+    mut f: impl FnMut(usize),
+) {
+    let c = view.config;
+    let span = layer.radius_v.ceil() as i64;
+    let r2 = layer.radius_v * layer.radius_v;
+    let root = i64::from(site.x);
+    if window.is_some() && !(root - span..=root + span).any(|cx| column_seen(c, window, cx)) {
+        return;
+    }
+    for cell_y in layer.cells.0..=layer.cells.1 {
+        if cell_y <= 0 || cell_y as u32 >= c.height {
+            continue;
+        }
+        for dz in -span..=span {
+            for dx in -span..=span {
+                if (dx * dx + dz * dz) as f64 > r2 {
+                    continue;
+                }
+                let z = i64::from(site.z) + dz;
+                if z < 0 || z >= i64::from(c.depth) {
+                    continue;
+                }
+                let cx = (root + dx).rem_euclid(i64::from(c.width));
+                if !column_seen(c, window, cx) {
+                    continue;
+                }
+                f(c.index(cx, cell_y as u32, z as u32));
+            }
+        }
+    }
 }
 
 pub(crate) fn cone_occupancy(
@@ -625,110 +881,21 @@ pub(crate) fn cone_occupancy_window(
 
 /// The one occupancy builder: every stand layer, ground pool and body, restricted to the
 /// columns `window` marks when there is one.
-fn build_occupancy(
+pub(crate) fn build_occupancy(
     view: &VoxelView<'_>,
     fv: &FloraView<'_>,
     fauna: &crate::FaunaView<'_>,
     pools_occlude: bool,
     window: Option<&[bool]>,
 ) -> ConeOccupancy {
-    let c = view.config;
-    let v = c.voxel_m;
-    let seen = |cx: i64| window.is_none_or(|w| w[cx.rem_euclid(i64::from(c.width)) as usize]);
-    let mut environment: HashMap<usize, Fine> = HashMap::new();
-    // Every layer of every profile, not one disc per stand: a foliage-bearing layer
-    // holding stock is foliage to an eye, one holding none is a stripped crown, and a
-    // trunk is structure. **Porosity does not enter here**: it is a light property, and
-    // a porous canopy is still leaves to an eye — a known simplification, recorded in
-    // `design/voxel-encounter-contract-2026-09-21.md` §8.
-    //
-    // Foliage is laid down **before** structure, over both passes, so that where a
-    // rosette wraps its own stem the eye reads the food and not the stick. (`or_insert`
-    // keeps the first claim on a cell, as it always has.)
-    for foliage_pass in [true, false] {
-        for stand in fv.stands.iter() {
-            for layer in fv.profile_layers(stand) {
-                if layer.kind.bears_foliage() != foliage_pass {
-                    continue;
-                }
-                let class = if !layer.kind.bears_foliage() {
-                    Fine::Trunk
-                } else if layer.stock > 0.0 {
-                    Fine::FoliageCrown
-                } else {
-                    Fine::StrippedCrown
-                };
-                let span = layer.radius_v.ceil() as i64;
-                let r2 = layer.radius_v * layer.radius_v;
-                let root = i64::from(stand.site.x);
-                if window.is_some() && !(root - span..=root + span).any(&seen) {
-                    continue;
-                }
-                for cell_y in layer.cells.0..=layer.cells.1 {
-                    if cell_y <= 0 || cell_y as u32 >= c.height {
-                        continue;
-                    }
-                    for dz in -span..=span {
-                        for dx in -span..=span {
-                            if (dx * dx + dz * dz) as f64 > r2 {
-                                continue;
-                            }
-                            let z = i64::from(stand.site.z) + dz;
-                            if z < 0 || z >= i64::from(c.depth) {
-                                continue;
-                            }
-                            let cx = (i64::from(stand.site.x) + dx).rem_euclid(i64::from(c.width));
-                            if !seen(cx) {
-                                continue;
-                            }
-                            let cell = c.index(cx, cell_y as u32, z as u32);
-                            environment.entry(cell).or_insert(class);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    // Ground pools occlude up to their physical height over the face (D3): organic /
-    // (cell area × bulk density), from the face's top — a film under a cell, or a heap
-    // spanning several. A stand's claim on a cell comes first, as it always has.
-    let mut pools: HashMap<usize, f64> = HashMap::new();
+    let mut occ = ConeOccupancy::empty(view.config.cells());
+    occ.lay_stands(view, fv, window, |_, _, _| {});
     if pools_occlude {
-        for g in fv.ground.iter() {
-            let organic = g.litter + g.carrion + g.dead_wood;
-            if !(organic > 0.0) || !seen(i64::from(g.site.x)) {
-                continue;
-            }
-            let floor = crate::surface_m(g.site.y, v);
-            let top = floor + organic / (v * v * POOL_BULK_DENSITY);
-            let mut y = g.site.y + 1;
-            while y < c.height && f64::from(y) * v < top {
-                let cell = c.index(i64::from(g.site.x), y, g.site.z);
-                if !environment.contains_key(&cell) {
-                    pools.entry(cell).or_insert(top);
-                }
-                y += 1;
-            }
-        }
+        occ.lay_pools(view, fv.ground.iter(), window);
+        occ.pools.sort_unstable_by_key(|&(cell, _)| cell);
     }
-    let mut bodies: HashMap<usize, Vec<u64>> = HashMap::new();
-    for a in fauna.animals {
-        if let Some((ax, az)) = a.pose.column(c.voxel_m, c.depth) {
-            if !seen(ax) {
-                continue;
-            }
-            let layer = i64::from(a.site.y) + 1;
-            if layer > 0 && layer < i64::from(c.height) {
-                let cell = c.index(ax, layer as u32, az);
-                bodies.entry(cell).or_default().push(a.id);
-            }
-        }
-    }
-    ConeOccupancy {
-        environment,
-        bodies,
-        pools,
-    }
+    occ.lay_bodies(view, fauna, window);
+    occ
 }
 
 /// March one ray from `origin` (metres) along unit `dir`, returning the first hit's
@@ -758,6 +925,18 @@ pub(crate) fn ray_first_hit(
 pub(crate) fn ray_first_hit_cell(
     view: &VoxelView<'_>,
     occupancy: &ConeOccupancy,
+    observer_id: u64,
+    origin: (f64, f64, f64),
+    dir: (f64, f64, f64),
+    range: f64,
+) -> Option<(f64, Fine, usize)> {
+    ray_first_hit_cell_in(view, occupancy, observer_id, origin, dir, range)
+}
+
+/// The march itself, over any [`CellOccupancy`].
+pub(crate) fn ray_first_hit_cell_in<O: CellOccupancy>(
+    view: &VoxelView<'_>,
+    occupancy: &O,
     observer_id: u64,
     origin: (f64, f64, f64),
     dir: (f64, f64, f64),
@@ -801,17 +980,16 @@ pub(crate) fn ray_first_hit_cell(
         if fill > 0.0 && py < (iy as f64 + fill.min(1.0)) * v {
             return Some((t - substep * 0.5, Fine::Water, cell));
         }
-        if occupancy
-            .bodies
-            .get(&cell)
-            .is_some_and(|ids| ids.iter().any(|&id| id != observer_id))
-        {
+        if !occupancy.any(cell) {
+            continue;
+        }
+        if occupancy.other_body(cell, observer_id) {
             return Some((t - substep * 0.5, Fine::Body, cell));
         }
-        if let Some(&class) = occupancy.environment.get(&cell) {
+        if let Some(class) = occupancy.environment(cell) {
             return Some((t - substep * 0.5, class, cell));
         }
-        if occupancy.pools.get(&cell).is_some_and(|&top| py < top) {
+        if occupancy.pool_top(cell).is_some_and(|top| py < top) {
             return Some((t - substep * 0.5, Fine::GroundPool, cell));
         }
     }

@@ -252,7 +252,7 @@ fn landscape(seed: u64) -> (World, Flora, Fauna) {
         if flora.apply(
             &world,
             FloraCommand::Seed {
-                x,
+                x: i64::from(x),
                 z,
                 species: sp,
                 wood,
