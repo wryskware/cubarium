@@ -1052,7 +1052,15 @@ impl SpeciesConfig {
             // half, germinates on a fifth of it.
             wilt_water: 0.1,
             full_water: 0.5,
-            transpiration_m3_per_s: 2e-5,
+            // Package F measurement (a v1_base number: proposed, Fable's call). At 2e-5 a
+            // founder drew its root box from field capacity to the wilting point in
+            // 10–30 min, while a default-preset shower (0.4 m³ over 576 m², ~0.7 mm)
+            // gives a 3×3 root footprint ~1/20 of that demand back: bloomcrown,
+            // vaulttree and lanternberry starved in full light at μ ≈ 0.1 on either
+            // soil. At 1e-6 a full-grown bloomcrown (P 1.2) asks ~2× the mean rain on
+            // its footprint, so boxes dry between showers and under dense cover only,
+            // and every upland species holds its donors for 3 h (nofauna census).
+            transpiration_m3_per_s: 1e-6,
             establish_water_min: 0.2,
             establish_light_min: 0.3,
             saturated_pore: 0.95,
