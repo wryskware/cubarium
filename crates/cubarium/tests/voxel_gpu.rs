@@ -109,6 +109,7 @@ fn the_gpu_draws_the_same_small_world_as_the_cpu_presenter() {
             target: GpuTargetKind::Headless,
             capture: None,
             roof_from_texture: true,
+            models: None,
         },
     ) {
         Ok(sink) => sink,
