@@ -314,6 +314,7 @@ fn add_pore(w: &mut World, i: usize, vol: f64) -> f64 {
     let before = w.pore[i];
     w.pore[i] = (before + vol / unit).min(1.0);
     w.damp.set(i, w.pore[i] > 0.0);
+    w.drainable.set(i, drains(w, i));
     (w.pore[i] - before).max(0.0) * unit
 }
 
@@ -326,7 +327,21 @@ fn take_pore(w: &mut World, i: usize, vol: f64) -> f64 {
     let before = w.pore[i];
     w.pore[i] = (before - vol / unit).max(0.0);
     w.damp.set(i, w.pore[i] > 0.0);
+    w.drainable.set(i, drains(w, i));
     (before - w.pore[i]).max(0.0) * unit
+}
+
+/// Whether `drain` can move pore water out of cell `i`: a porous, permeable cell holding
+/// more than its material's field capacity (package D's set). The same arithmetic as the
+/// drain's own `excess > 0` test, so the set and the phase can never disagree about a cell.
+pub(crate) fn drains(w: &World, i: usize) -> bool {
+    let m = w.material[i];
+    let cap = m.pore_capacity();
+    if cap <= 0.0 || w.pore[i] <= 0.0 || m.permeability_per_s() <= 0.0 {
+        return false;
+    }
+    let unit = cap * w.config.voxel_volume();
+    pore_m3(w, i) - m.field_capacity() * unit > 0.0
 }
 
 /// Hand water a loss phase took out of the in-world stores to wherever this world's
@@ -521,6 +536,7 @@ pub fn begin(world: &mut World) {
     crate::voxel_phase!(Begin, {
         if world.wet.needs_rebuild(world.config.cells())
             || world.damp.needs_rebuild(world.config.cells())
+            || world.drainable.needs_rebuild(world.config.cells())
         {
             world.rebuild_active_sets();
         }
@@ -1911,15 +1927,18 @@ pub fn drain(w: &mut World) {
         // The table as it stands at the start of the step: a voxel inside the saturated
         // zone has nowhere lower to drain to, because the aquifer is what is holding it up.
         let table = c.aquifer_head_m(w.aquifer_m3);
-        // Over the damp set — the cells that hold any pore water — instead of the grid
-        // (`design/7_Research/voxel-tick-profile-2026-09-18.md`): a cell with no pore water
-        // can never drain, so nothing is lost. The set is read back **ascending**, which is
-        // bottom-up, so a stack of wet soil passes water down one cell a tick exactly as
-        // the grid walk did (until package PA the walk was in swap-removal order and could
-        // pass it several).
+        // Over the **drainable** set — the porous cells over their field capacity
+        // (package D) — rather than every damp cell, and before that the grid
+        // (`design/7_Research/voxel-tick-profile-2026-09-18.md`): a cell at or under field
+        // capacity never drains, so nothing is lost. The set is read back **ascending**,
+        // which is bottom-up, so a stack of wet soil passes water down one cell a tick as
+        // the grid walk did. The snapshot visits the cells the damp scan drained, and in
+        // the same order: a cell only gains pore water from the cell above it, which the
+        // ascending walk reaches later, so none is over capacity when visited that was not
+        // over it at the start.
         SCRATCH.with(|slot| {
             let sc = &mut *slot.borrow_mut();
-            w.damp.sorted_into(&mut sc.bits, &mut sc.fall);
+            w.drainable.sorted_into(&mut sc.bits, &mut sc.fall);
             rows_of(&sc.fall, plane, &mut sc.rows);
             #[cfg(feature = "profile")]
             crate::profile::add(crate::profile::Count::DrainCells, sc.fall.len() as u64);
@@ -2302,6 +2321,7 @@ fn set_material(w: &mut World, i: usize, material: Material) -> f64 {
     // the material below decides what it can keep.
     w.wet.remove(i);
     w.damp.remove(i);
+    w.drainable.remove(i);
     if water <= 0.0 {
         return 0.0;
     }
@@ -3272,6 +3292,177 @@ mod exchange_geometry_tests {
         assert_eq!(masked.offers, reference.offers, "offers from y={y}");
     }
 }
+/// **The drainable set** (package D): `drain` walks the porous cells over their field
+/// capacity instead of every damp cell. A pure optimisation, so the oracle is the drain it
+/// replaced, kept here verbatim over the damp set.
+#[cfg(test)]
+mod drain_set_tests {
+    use super::{
+        DT, SCRATCH, Store, begin, drains, evaporate, exchange, fall, infiltrate, outlet, pore_m3,
+        rain, rows_of, spring, submerged, take_pore, transfer, water_table,
+    };
+    use crate::{Command, Config, Material, World};
+
+    /// The drain before package D: every damp cell, ascending.
+    fn drain_by_damp_scan(w: &mut World) {
+        let c = w.config.clone();
+        let plane = c.width as usize * c.depth as usize;
+        let table = c.aquifer_head_m(w.aquifer_m3);
+        SCRATCH.with(|slot| {
+            let sc = &mut *slot.borrow_mut();
+            w.damp.sorted_into(&mut sc.bits, &mut sc.fall);
+            rows_of(&sc.fall, plane, &mut sc.rows);
+            for k in 0..sc.fall.len() {
+                let (i, y) = (sc.fall[k], sc.rows[k]);
+                if submerged(&c, y, table) {
+                    continue;
+                }
+                let m = w.material[i];
+                let cap = m.pore_capacity();
+                if cap <= 0.0 || w.pore[i] <= 0.0 || m.permeability_per_s() <= 0.0 {
+                    continue;
+                }
+                let unit = cap * c.voxel_volume();
+                let excess = pore_m3(w, i) - m.field_capacity() * unit;
+                if excess <= 0.0 {
+                    continue;
+                }
+                let want = excess.min(super::pore_flux_m3(m, &c, DT));
+                if y == 0 {
+                    let lost = take_pore(w, i, want);
+                    w.aquifer_m3 += lost;
+                    continue;
+                }
+                let below = i - plane;
+                match w.material[below] {
+                    Material::Bedrock => {
+                        let lost = take_pore(w, i, want);
+                        w.aquifer_m3 += lost;
+                    }
+                    Material::Air => {
+                        transfer(w, (i, Store::Pore), (below, Store::Free), want);
+                    }
+                    _ => {
+                        transfer(w, (i, Store::Pore), (below, Store::Pore), want);
+                    }
+                }
+            }
+        });
+    }
+
+    /// `water::step`, with the oracle's drain in it.
+    fn step_by_damp_scan(w: &mut World) {
+        begin(w);
+        rain(w);
+        evaporate(w);
+        let substeps = w.config.water_substeps.max(1);
+        for _ in 0..substeps {
+            infiltrate(w, DT / substeps as f64);
+            fall(w);
+            exchange(w, 1);
+        }
+        drain_by_damp_scan(w);
+        water_table(w);
+        spring(w);
+        outlet(w);
+        w.advance_tick();
+    }
+
+    fn set(w: &mut World, x: i64, y: u32, z: u32, material: Material) {
+        w.apply(Command::SetMaterial { x, y, z, material });
+    }
+
+    /// Soil and rock side by side over bedrock, a soil roof over an air pocket (a drip),
+    /// a water table half a metre up (the band the drain skips), rain on it all and a
+    /// pond poured on the soil.
+    fn fixture() -> World {
+        let mut w = World::empty(Config {
+            width: 6,
+            height: 8,
+            depth: 2,
+            voxel_m: 0.25,
+            seed: 7,
+            rain_m_per_s: 2e-4,
+            initial_aquifer_head_m: 0.5,
+            ..Config::default()
+        });
+        for z in 0..2 {
+            for x in 0..6i64 {
+                for y in 1..=4 {
+                    let m = if x >= 4 && y <= 3 {
+                        Material::Rock
+                    } else {
+                        Material::Soil
+                    };
+                    set(&mut w, x, y, z, m);
+                }
+            }
+            // The drip: an air pocket under the soil.
+            set(&mut w, 2, 2, z, Material::Air);
+        }
+        for x in 0..3 {
+            w.apply(Command::AddWater {
+                x,
+                y: 5,
+                z: 0,
+                volume_m3: 0.01,
+            });
+        }
+        w
+    }
+
+    /// The set is exactly the porous cells over their field capacity.
+    fn assert_drainable_is_true(w: &World, when: &str) {
+        let mut got = w.drainable.cells().to_vec();
+        got.sort_unstable();
+        let want: Vec<usize> = (0..w.config.cells()).filter(|&i| drains(w, i)).collect();
+        assert_eq!(got, want, "drainable set wrong {when}");
+    }
+
+    #[test]
+    fn the_drainable_set_drains_exactly_as_the_damp_scan_did() {
+        let mut fast = fixture();
+        let mut reference = fast.clone();
+        let mut drained_ticks = 0;
+        for tick in 0..300 {
+            if tick == 100 {
+                // Mid-run material edits: wet soil to rock, rock to soil, soil to air.
+                for w in [&mut fast, &mut reference] {
+                    set(w, 1, 3, 0, Material::Rock);
+                    set(w, 4, 2, 1, Material::Soil);
+                    set(w, 3, 4, 1, Material::Air);
+                }
+            }
+            if !fast.drainable.cells().is_empty() {
+                drained_ticks += 1;
+            }
+            fast.step();
+            step_by_damp_scan(&mut reference);
+            assert_drainable_is_true(&fast, &format!("after tick {tick}"));
+            let worst = |a: &[f64], b: &[f64]| {
+                a.iter()
+                    .zip(b)
+                    .map(|(x, y)| (x - y).abs())
+                    .fold(0.0, f64::max)
+            };
+            assert!(
+                worst(&fast.pore, &reference.pore) <= 1e-15,
+                "pore diverged at tick {tick}"
+            );
+            assert!(
+                worst(&fast.free, &reference.free) <= 1e-15,
+                "free diverged at tick {tick}"
+            );
+            assert!((fast.aquifer_m3 - reference.aquifer_m3).abs() <= 1e-15);
+        }
+        assert!(drained_ticks > 250, "the drain was idle: {drained_ticks}");
+        for w in [&fast, &reference] {
+            let r = w.view().stored_m3() - w.view().ledger.expected_stored();
+            assert!(r.abs() < 1e-12, "residual {r}");
+        }
+    }
+}
+
 /// **Still water settles** (package P): what one column's stack sends across one face into
 /// one neighbouring column is capped at what that face would send from a single row, so a
 /// deep interface levels instead of swapping the two columns' levels every substep.

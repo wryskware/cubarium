@@ -192,7 +192,7 @@ pub enum Count {
     ExchangeColumns,
     /// Cells of the saturated band `water_table` scanned.
     WaterTableCells,
-    /// Damp cells `drain` looked at.
+    /// Cells `drain` looked at: the drainable set since package D.
     DrainCells,
     /// Columns scanned by `rain` and `evaporate` (sky/open-water search included).
     ColumnScans,
@@ -283,7 +283,7 @@ impl Count {
             Count::ExchangeWet => "exchange: wet cells offering water",
             Count::ExchangeColumns => "exchange: columns walked",
             Count::WaterTableCells => "water_table: band cells scanned",
-            Count::DrainCells => "drain: damp cells scanned",
+            Count::DrainCells => "drain: drainable cells scanned",
             Count::ColumnScans => "column scans (rain, evaporate, ...)",
             Count::ColumnSearchCells => "cells walked by those column searches",
             Count::Stands => "stands stepped",

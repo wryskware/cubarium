@@ -423,6 +423,11 @@ pub struct World {
     pub(crate) wet: crate::sparse::CellSet,
     #[serde(skip)]
     pub(crate) damp: crate::sparse::CellSet,
+    /// **A cache, not state:** the porous cells whose pore water is over their material's
+    /// field capacity — the cells `drain` can move water out of (package D), a subset of
+    /// `damp`. Maintained by the same pore primitives and rebuilt with the other two.
+    #[serde(skip)]
+    pub(crate) drainable: crate::sparse::CellSet,
     /// **A cache, not state:** every column's void runs, derived from `material` alone.
     /// Rebuilt lazily when [`World::terrain_version`] moves and never otherwise. Not
     /// serialized, so a decoded world starts dirty. World-owned rather than thread-local:
@@ -595,6 +600,7 @@ impl World {
             spring_cell: None,
             wet: crate::sparse::CellSet::default(),
             damp: crate::sparse::CellSet::default(),
+            drainable: crate::sparse::CellSet::default(),
             void_runs: VoidRuns::default(),
             config,
         };
@@ -656,6 +662,7 @@ impl World {
             spring_cell: None,
             wet: crate::sparse::CellSet::default(),
             damp: crate::sparse::CellSet::default(),
+            drainable: crate::sparse::CellSet::default(),
             void_runs: VoidRuns::default(),
             material,
             config,
@@ -890,12 +897,16 @@ impl World {
         let n = self.config.cells();
         self.wet.reset(n);
         self.damp.reset(n);
+        self.drainable.reset(n);
         for i in 0..n {
             if !self.material[i].is_solid() && self.free[i] > 0.0 {
                 self.wet.insert(i);
             }
             if self.material[i].pore_capacity() > 0.0 && self.pore[i] > 0.0 {
                 self.damp.insert(i);
+            }
+            if crate::water::drains(self, i) {
+                self.drainable.insert(i);
             }
         }
     }
