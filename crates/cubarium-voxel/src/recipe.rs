@@ -199,6 +199,11 @@ pub struct Tiers {
     pub shore_m: f64,
     /// The shore's rise, metres per metre out from the water.
     pub shore_slope: f64,
+    /// Width of the shore's **dry lip**, metres: next to the water its soil starts at the
+    /// waterline instead of under it, wide enough that a root box on the lake's bed
+    /// reaches no soil, so the wettest ground a founder is offered is the bank and not
+    /// the shallows a shower floods.
+    pub shore_lip_m: f64,
 }
 
 impl Default for Tiers {
@@ -222,6 +227,7 @@ impl Tiers {
         front_setback_m: 0.25,
         shore_m: 0.0,
         shore_slope: 0.25,
+        shore_lip_m: 0.0,
     };
 
     /// `default` and `wide`: four elevations, each one 2 m stratum apart.
@@ -245,10 +251,12 @@ impl Tiers {
         // Package SW: three metres of shore rising a voxel per half metre, so the bank
         // stands one to five voxels over the waterline for its first two metres. At seed
         // 1 the columns an umbrellafrond may establish on at seeding go from 0.4 % to
-        // 22.3 % and a velvetpad's from 0.2 % to 5.8 %; the other four judged seeds were
-        // already there and stay there (22.6-25.5 % and 3.7-6.9 %).
+        // 21.5 % and a velvetpad's from 0.2 % to 5.9 %; the other four judged seeds were
+        // already there and stay there (21.3-25.5 % and 4.2-7.1 %).
         shore_m: 3.0,
         shore_slope: 0.25,
+        // Three cells: an umbrellafrond's root box on `small` reaches two either side.
+        shore_lip_m: 0.375,
         ..Tiers::NONE
     };
 
@@ -286,6 +294,7 @@ impl Tiers {
             ("front_setback_m", self.front_setback_m),
             ("shore_m", self.shore_m),
             ("shore_slope", self.shore_slope),
+            ("shore_lip_m", self.shore_lip_m),
         ] {
             anyhow::ensure!(
                 v.is_finite() && v >= 0.0,

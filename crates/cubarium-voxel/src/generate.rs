@@ -528,9 +528,17 @@ pub struct Report {
     pub lake: LakeDatum,
     /// The chain of pools, lowest first. Empty when the recipe has no terraces.
     pub pools: Vec<PoolStamp>,
-    /// The columns the lake's wet shore was laid on, in heightfield index order. Empty
-    /// when the recipe asks for no shore.
-    pub shore: Vec<usize>,
+    /// What the lake's wet shore was laid on. Empty when the recipe asks for no shore.
+    pub shore: Shore,
+}
+
+/// The columns [`stamp_shore`] laid, in heightfield index order.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Shore {
+    /// The soil bank.
+    pub bank: Vec<usize>,
+    /// The dry lip between the bank and the water.
+    pub lip: Vec<usize>,
 }
 
 /// Run the staged stages and hand back what each one produced, without building a
@@ -565,7 +573,7 @@ pub fn staged_terrain(c: &Config, r: &Recipe) -> (Heightfield, Volume, Report) {
     let lake = lake_level(&volume.surface, c, r);
     let shore = match pools.iter().find(|p| p.tier == 0) {
         Some(stamp) => stamp_shore(&mut field, &mut volume, r, stamp, lake),
-        None => Vec::new(),
+        None => Shore::default(),
     };
     let carved = crate::hollows::carve(&mut volume, &field, r, c.seed, lake.level_y + 1);
     let lowered = prepare(&mut volume, &mut field, r);
@@ -610,7 +618,8 @@ pub fn staged_terrain(c: &Config, r: &Recipe) -> (Heightfield, Volume, Report) {
 /// filling it makes the bank the catchment's sump and a shower then stands on the plants
 /// there (package SW measured it). **Tier 0 only**, and the lake, its rim and the pools
 /// keep the shape they were cut to. **Soil to three rows under the waterline**, because a
-/// root box reads soil and nothing else.
+/// root box reads soil and nothing else, behind a **dry lip** of
+/// [`crate::recipe::Tiers::shore_lip_m`] at the water's edge.
 ///
 /// It runs on the datum — after [`lake_level`] has seated the water — because a bank has
 /// to be graded from the waterline, and the rim a stamp starts from can stand up to two
@@ -621,9 +630,9 @@ fn stamp_shore(
     r: &Recipe,
     lake: &PoolStamp,
     datum: LakeDatum,
-) -> Vec<usize> {
+) -> Shore {
     let t = r.tiers;
-    let mut laid = Vec::new();
+    let mut laid = Shore::default();
     if !(t.shore_m > 0.0) || lake.cells.is_empty() {
         return laid;
     }
@@ -672,13 +681,24 @@ fn stamp_shore(
             if bank >= volume.surface[i] {
                 continue;
             }
-            let soil_rows = ((bank - soil_floor) as f64).min((r.soil_max_m / vm).floor());
+            // **A dry lip at the water's edge.** A root box on the lake's own bed that
+            // reaches the bank's wet soil makes the shallows the wettest ground on the
+            // ring, and the seeder puts its wetland founders there, under the water the
+            // first shower lifts. So for a lip's width the soil starts at the first dry
+            // row, above any box on the bed, and the wet bank begins behind it.
+            let lip = near * vm < t.shore_lip_m;
+            let floor = if lip { first_dry - 1 } else { soil_floor };
+            let soil_rows = ((bank - floor) as f64).min((r.soil_max_m / vm).floor());
             let soil_m = soil_rows.max(0.0) * vm;
             field.sediment_m[i] = soil_m;
             field.bedrock_m[i] = bank as f64 * vm - soil_m;
             field.spill_m[i] = field.surface_m(i);
             voxelise_column(volume, r, field, x, z, h);
-            laid.push(i);
+            if lip {
+                laid.lip.push(i);
+            } else {
+                laid.bank.push(i);
+            }
         }
     }
     laid
@@ -2450,16 +2470,30 @@ mod tests {
                 report.lake, bare_report.lake,
                 "seed {seed}: the shore moved the lake"
             );
-            assert!(bare_report.shore.is_empty());
+            assert_eq!(bare_report.shore, Shore::default());
             let level = report.lake.level_y;
-            let laid = report.shore.len();
-            for &i in &report.shore {
+            let laid = report.shore.bank.len();
+            for &i in report.shore.bank.iter().chain(&report.shore.lip) {
                 let (x, z) = (i % config.width as usize, i / config.width as usize);
                 let top = volume.surface[i];
                 assert!(
                     top > level,
                     "seed {seed} ({x}, {z}): bank at {top}, water to {level}"
                 );
+            }
+            for &i in &report.shore.lip {
+                let (x, z) = (i % config.width as usize, i / config.width as usize);
+                for y in 0..level as u32 {
+                    assert_ne!(
+                        volume.material[config.index(x as i64, y, z as u32)],
+                        Material::Soil,
+                        "seed {seed} ({x}, {y}, {z}): soil under the water on the lip"
+                    );
+                }
+            }
+            for &i in &report.shore.bank {
+                let (x, z) = (i % config.width as usize, i / config.width as usize);
+                let top = volume.surface[i];
                 // Seven rows of soil is the recipe's most; a bank higher than five over
                 // the water has its soil above it, which is dry ground by design.
                 if top > level + 5 {
@@ -2472,6 +2506,7 @@ mod tests {
                     "seed {seed} ({x}, {z}): no soil under the waterline"
                 );
             }
+            assert!(!report.shore.lip.is_empty(), "seed {seed}: no lip");
             assert!(
                 laid > 100,
                 "seed {seed}: the shore laid only {laid} columns"

@@ -24,8 +24,8 @@ use crate::World;
 /// shower schedule (`World::next_shower_tick`, and the interval pair in both `Config` and
 /// `Water`), and to 13 for the lake's recipe fields, and to **14** for
 /// `Ledger::reentry_in`, the closed cycle's second return path — a stream at the spring
-/// cell, and to **16** for the lake's wet shore (`Tiers::shore_m` and `shore_slope`,
-/// package SW). Postcard is not self-describing, so a new field is a new format: earlier
+/// cell, and to **16** for the lake's wet shore (`Tiers::shore_m`, `shore_slope` and
+/// `shore_lip_m`, package SW). Postcard is not self-describing, so a new field is a new format: earlier
 /// tags are refused, never migrated.
 pub const SCHEMA: u32 = 16;
 
