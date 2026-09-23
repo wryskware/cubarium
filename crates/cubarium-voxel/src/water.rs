@@ -175,6 +175,25 @@ use crate::{Command, Config, DT, Material, World};
 /// measured it. It is the only number in the local exchange.
 const FLOW_PER_SUBSTEP: f64 = 0.5;
 
+/// **Minimum spreading depth** (package C, agreed by Wrysk 2026-09-22): free water
+/// shallower than this — metres of depth in its own cell, so `free < MIN_SPREAD_DEPTH_M /
+/// voxel_m` — makes no **horizontal** offers in the exchange. It stays where it is and still
+/// infiltrates, evaporates, falls and offers downward; nothing is deleted. It is the
+/// shallow-water solvers' wet/dry threshold. The test is on the giver's **own** `free`,
+/// never its head or drive, so the thin surface cell of a lake does not stop the full
+/// cells under it from pushing.
+///
+/// Without it every film spreads into every empty neighbour on its row, because an empty
+/// cell's head is its own floor, and rain multiplies near-empty wet cells.
+///
+/// **Placeholder** (`design/backlog.md`). 0.125 µm, a millionth of a 0.125 m cell: the
+/// smallest decade past which the shower stops getting steeply cheaper on the desktop
+/// world (census, 2026-09-22 — proposals per tick 303 k with no threshold, 171 k here,
+/// 135 k and 125 k at ten and a hundred times it). The next decade is also where the
+/// shipped `small` landform's spring-route fixture fails, because what it counts at the
+/// spring is invisible spray; see the package C commit.
+const MIN_SPREAD_DEPTH_M: f64 = 1.25e-7;
+
 /// A cell with less than this much room left counts as full, so a float hair of room
 /// cannot make the displacement target a cell that cannot actually take anything.
 const ROOM_EPS: f64 = 1e-12;
@@ -1134,6 +1153,8 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
     let plane = width * depth;
     let n = plane * height;
     let transfer_cap = w.config.free_transfer_cap;
+    // The spreading depth in this world's cell units (package C).
+    let min_spread = MIN_SPREAD_DEPTH_M / w.config.voxel_m;
     // The void-run geometry the scan needs is terrain-only, so it is built once per
     // terrain version and not per substep.
     w.ensure_void_runs();
@@ -1297,7 +1318,11 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
             // or above that neighbour, inside the neighbour's own void run, bottom first.
             // That is what lifts a submerged column's surface instead of throttling the
             // flow to the hair of room its floor cell has left.
-            for face in 0..4 {
+            //
+            // A giver shallower than the spreading depth offers across none of them
+            // (package C): it keeps its water, and still offers downward below.
+            let horizontal = if have < min_spread { 0 } else { 4 };
+            for face in 0..horizontal {
                 let nb = sc.nbr[col][face];
                 if nb == u32::MAX {
                     continue;
@@ -3051,7 +3076,9 @@ mod exchange_geometry_tests {
                 material: Material::Rock,
             });
         }
-        for (y, volume_m3) in [(1, 1e-10), (2, 1e-10), (3, 0.5)] {
+        // Films deeper than the spreading depth (package C), so the bottom one still
+        // offers sideways and the test is about its head.
+        for (y, volume_m3) in [(1, 1e-3), (2, 1e-3), (3, 0.5)] {
             w.apply(Command::AddWater {
                 x: 0,
                 y,
@@ -3115,6 +3142,207 @@ mod exchange_geometry_tests {
         assert_eq!(masked.offers, reference.offers, "offers from y={y}");
     }
 }
+/// **Minimum spreading depth** (package C): a giver whose own free water is shallower than
+/// [`MIN_SPREAD_DEPTH_M`] makes no horizontal offer. Everything else it does is unchanged,
+/// and nothing is deleted. The fixtures are 1 m cells, so the threshold in cell units is
+/// the constant itself.
+#[cfg(test)]
+mod spread_tests {
+    use super::{MIN_SPREAD_DEPTH_M, evaporate, exchange, fall, infiltrate};
+    use crate::{Command, Config, DT, Material, World};
+
+    fn cfg(width: u32, height: u32) -> Config {
+        Config {
+            width,
+            height,
+            depth: 1,
+            voxel_m: 1.0,
+            seed: 7,
+            ..Config::default()
+        }
+    }
+
+    /// The threshold in cell units on a 1 m fixture.
+    fn threshold() -> f64 {
+        MIN_SPREAD_DEPTH_M / 1.0
+    }
+
+    fn rock(w: &mut World, x: i64, y: u32, material: Material) {
+        w.apply(Command::SetMaterial {
+            x,
+            y,
+            z: 0,
+            material,
+        });
+    }
+
+    fn add(w: &mut World, x: i64, y: u32, volume_m3: f64) {
+        w.apply(Command::AddWater {
+            x,
+            y,
+            z: 0,
+            volume_m3,
+        });
+    }
+
+    fn free_at(w: &World, x: i64, y: u32) -> f64 {
+        w.view().free_at(x, y, 0)
+    }
+
+    fn residual(w: &World) -> f64 {
+        w.view().stored_m3() - w.view().ledger.expected_stored()
+    }
+
+    /// A film on the bedrock of column 0; column 1 is dry and column 2 is rock, so the
+    /// film has exactly one horizontal neighbour and nothing below it to fall into.
+    fn film_beside_a_dry_cell(film: f64) -> World {
+        let mut w = World::empty(cfg(3, 4));
+        for y in 1..4 {
+            rock(&mut w, 2, y, Material::Rock);
+        }
+        add(&mut w, 0, 1, film);
+        w
+    }
+
+    #[test]
+    fn a_film_below_the_threshold_stays_beside_a_dry_cell() {
+        let film = 0.5 * threshold();
+        let mut w = film_beside_a_dry_cell(film);
+        assert_eq!(free_at(&w, 0, 1), film);
+        exchange(&mut w, 1);
+        assert_eq!(free_at(&w, 0, 1), film, "the film moved");
+        assert_eq!(free_at(&w, 1, 1), 0.0, "the dry neighbour got water");
+    }
+
+    #[test]
+    fn a_film_just_above_the_threshold_spreads_as_before() {
+        let film = 1.01 * threshold();
+        let mut w = film_beside_a_dry_cell(film);
+        exchange(&mut w, 1);
+        assert!(free_at(&w, 1, 1) > 0.0, "the film did not spread");
+        assert!(free_at(&w, 0, 1) < film);
+        assert!(residual(&w).abs() < 1e-15);
+    }
+
+    #[test]
+    fn a_film_below_the_threshold_still_soaks_in_evaporates_and_falls() {
+        let film = 0.5 * threshold();
+
+        // Soaks in: the film on a soil cell.
+        let mut w = World::empty(cfg(1, 4));
+        rock(&mut w, 0, 1, Material::Soil);
+        add(&mut w, 0, 2, film);
+        infiltrate(&mut w, DT / 4.0);
+        assert!(free_at(&w, 0, 2) < film, "the film did not soak in");
+
+        // Evaporates: on the bedrock of an open column.
+        let mut w = World::empty(Config {
+            evaporation_m_per_s: 1e-6,
+            ..cfg(1, 4)
+        });
+        add(&mut w, 0, 1, film);
+        evaporate(&mut w);
+        assert!(free_at(&w, 0, 1) < film, "the film did not evaporate");
+
+        // Falls, and offers downward in the exchange: the film in the air over an empty
+        // cell.
+        let mut w = World::empty(cfg(1, 5));
+        add(&mut w, 0, 3, film);
+        fall(&mut w);
+        assert_eq!(free_at(&w, 0, 2), film, "the film did not fall");
+        exchange(&mut w, 1);
+        assert_eq!(free_at(&w, 0, 1), film, "the exchange did not move it down");
+        assert_eq!(free_at(&w, 0, 2), 0.0);
+    }
+
+    /// The thin top cell of a lake does not hold back the full cells under it: they push by
+    /// their own `free`, and the lake levels against a lower pool.
+    ///
+    /// The lake and the pool are joined by a one-row passage, as the U-tube fixtures are.
+    /// Two columns side by side over two or more full rows would not do: each row pushes
+    /// half of the same head difference, so two rows move the whole of it and the pair
+    /// swaps back and forth every substep — a 2-cycle the exchange has with or without the
+    /// spreading depth, which this test is not about.
+    #[test]
+    fn a_lake_with_a_thin_surface_cell_still_levels_against_a_lower_pool() {
+        // Column 0 is the lake shaft, column 1 a dry passage along row 1, column 2 the
+        // pool's shaft and column 3 rock.
+        let mut w = World::empty(cfg(4, 7));
+        for y in 1..7 {
+            rock(&mut w, 3, y, Material::Rock);
+            if y >= 2 {
+                rock(&mut w, 1, y, Material::Rock);
+            }
+        }
+        for y in 1..4 {
+            add(&mut w, 0, y, 1.0);
+        }
+        add(&mut w, 0, 4, 0.5 * threshold());
+        add(&mut w, 2, 1, 0.5);
+        exchange(&mut w, 1);
+        assert!(
+            free_at(&w, 1, 1) > 0.0,
+            "the lake's full cells did not push into the passage"
+        );
+        for _ in 0..200 {
+            w.step();
+        }
+        let column = |x: i64| (1..7).map(|y| free_at(&w, x, y)).sum::<f64>();
+        assert!(
+            (free_at(&w, 1, 1) - 1.0).abs() < 1e-9,
+            "the passage is not full"
+        );
+        assert!(
+            (column(0) - column(2)).abs() < 1e-3,
+            "not level: {} against {}",
+            column(0),
+            column(2)
+        );
+        assert!(residual(&w).abs() < 1e-12);
+    }
+
+    /// Rain in films on a staircase of rock and soil — much of it shallower than the
+    /// threshold, some of it deeper — conserves water.
+    #[test]
+    fn a_shower_of_films_conserves_water() {
+        let mut w = World::empty(Config {
+            evaporation_m_per_s: 1e-7,
+            ..cfg(8, 6)
+        });
+        for x in 0..8i64 {
+            for y in 1..=(x as u32 % 4) {
+                rock(
+                    &mut w,
+                    x,
+                    y,
+                    if y == 1 {
+                        Material::Soil
+                    } else {
+                        Material::Rock
+                    },
+                );
+            }
+        }
+        for tick in 0..200 {
+            let per_column = if tick % 5 == 0 { 30.0 } else { 0.3 } * threshold();
+            w.apply(Command::RainPulse {
+                volume_m3: 8.0 * per_column,
+            });
+            w.step();
+        }
+        let thin = w
+            .free
+            .iter()
+            .filter(|&&f| f > 0.0 && f < threshold())
+            .count();
+        assert!(
+            thin > 0,
+            "no film under the threshold: the rule went unexercised"
+        );
+        assert!(residual(&w).abs() < 1e-12, "residual {}", residual(&w));
+    }
+}
+
 /// The cached sky (package PA): the per-column sky floor from the terrain cache plus the
 /// wet set give the same cells the ceiling-down walk found, on every kind of column and
 /// across terrain edits; and a real shower on the shipped `small` ring conserves water.
