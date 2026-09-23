@@ -86,4 +86,16 @@ impl Material {
             Material::Soil => 0.25,
         }
     }
+
+    /// Fraction of the pore capacity held too tightly for roots to draw. Pore water
+    /// between this and [`Material::field_capacity`] is what drained ground offers a
+    /// plant. Provisional numbers (sand-like, a bit under half of the retained water);
+    /// the soil-retention package sets them.
+    pub fn wilting_point(self) -> f64 {
+        match self {
+            Material::Air | Material::Bedrock => 0.0,
+            Material::Rock => 0.2,
+            Material::Soil => 0.1,
+        }
+    }
 }

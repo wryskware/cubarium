@@ -81,24 +81,41 @@ fn main() {
     // the world that ships, not the seeder's bare heuristics. `heuristic` as a trailing
     // argument keeps the old, observation-only control.
     let heuristic = args.iter().any(|a| a == "heuristic");
+    // `config=<path>` is a landscape arm from a host TOML (the Tachyon terrarium, say),
+    // founded exactly like a preset arm. `nofauna` seeds no founders: the plants alone.
+    let file_arm: Option<(String, cubarium_voxel::Config)> = args
+        .iter()
+        .find_map(|a| a.strip_prefix("config="))
+        .map(|p| {
+            let cfg = cubarium::voxel::load_config(std::path::Path::new(p))
+                .unwrap_or_else(|e| panic!("config {p:?}: {e}"));
+            (p.to_string(), cfg.world)
+        });
+    let arm: Option<(String, cubarium_voxel::Config)> =
+        file_arm.or_else(|| preset.map(|p| (p.name.to_string(), p.config())));
+    let founder_counts = if args.iter().any(|a| a == "nofauna") {
+        [0; habitat::FOUNDER_COUNTS.len()]
+    } else {
+        habitat::FOUNDER_COUNTS
+    };
 
     let cfg = VoxelConfig::default();
-    if let Some(preset) = preset {
+    if let Some((arm_name, arm_config)) = arm {
         assert!(!generated, "a preset arm builds its own world");
         // The host's founding loop, verbatim: lake gate, pre-roll with the opening
         // shower, seeding and the acceptance check, redrawn on a refusal. The world
         // comes back already seeded.
         let founded = cubarium::voxel::ambient_habitat(
-            &preset.config(),
+            &arm_config,
             seed_base,
             FloraConfig::for_voxel_size,
-            habitat::FOUNDER_COUNTS,
+            founder_counts,
         );
         let (world, flora, mut fauna, seeded) =
             (founded.world, founded.flora, founded.fauna, founded.seeded);
         eprintln!(
             "scene: preset {} ({}x{}x{} at {} m, seed {}, {} lake / {} habitat rejected, {})",
-            preset.name,
+            arm_name,
             world.config().width,
             world.config().height,
             world.config().depth,
@@ -235,6 +252,10 @@ fn print_header() {
     }
     header.push_str(",flora_births,flora_deaths,fauna_births,fauna_deaths,fauna_hatched,litter");
     header.push_str(",stored,atmosphere,showers,residual");
+    header.push_str(",fixed_in,consumed_organic,standing_foliage");
+    for s in Plant::ALL {
+        header.push_str(&format!(",donors_{}", s.name()));
+    }
     println!("{header}");
 }
 
@@ -294,5 +315,15 @@ fn print_row(minute: u64, sim: &Sim) {
     row.push(format!("{:.4}", w.atmosphere_m3));
     row.push(w.ledger.showers.to_string());
     row.push(format!("{:.3e}", w.total_residual()));
+    // Production and offtake, cumulative: consumed / fixed is the herbivores' share.
+    row.push(format!("{:.4}", f.ledger.fixed_in));
+    row.push(format!("{:.4}", f.ledger.consumed_organic_out));
+    let foliage: f64 = f.stands.iter().map(|st| st.foliage).sum();
+    row.push(format!("{foliage:.4}"));
+    for s in Plant::ALL {
+        let donor_min = f.config.species(s).donor_min;
+        let n = f.stands.iter().filter(|st| st.species == s && st.wood >= donor_min).count();
+        row.push(n.to_string());
+    }
     println!("{}", row.join(","));
 }
