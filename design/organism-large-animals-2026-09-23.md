@@ -31,6 +31,23 @@ body design but the scales are correct for me." So the roster additions (loftstr
 lanternjaw at coyote scale, chorister), their niches and the sizes in §7 are agreed;
 the body plans in §3–5 remain proposals.
 
+**Later still (Wrysk, 2026-09-23), on the open questions:**
+- **Bodies go to the ladder now** ("rip off the bandaid"), plant growth and ladder sizes
+  with them, even though the retrain in flight learned the old sizes. Wrysk notifies the
+  trainer thread; retraining may start from the existing checkpoints on the new bodies.
+- **Headroom** for the loftstrider was already handed to the landscape thread.
+- **Small populations: deferred.** Ideas Wrysk is weighing: the tiny world may simply
+  host a different community; or choristers need only one large meal and then rest or
+  hibernate for a long time, so one loftstrider kill carries a pack a long way.
+- **The growth fix's frond consequence is accepted:** a young umbrellafrond is browsable
+  until its lowest tier grows out of the grazer's band.
+- Order: plant illustration round and the anatomy tables first, then the plant packages
+  (`design/handoffs/voxel-ladder-growth-2026-09-23.md`,
+  `voxel-new-plants-2026-09-23.md`, `voxel-organism-models-2026-09-23.md`); predation
+  and flight go to an ecology-adjacent thread
+  (`design/handoffs/predation-and-flight-2026-09-23.md`); the loftstrider is its own
+  package later.
+
 ## 2. Growth fix (the agreed adjustments, as numbers)
 
 Today crown height and radius are linear in wood fraction from each range's minimum,

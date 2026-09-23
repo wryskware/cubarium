@@ -14,6 +14,13 @@ date and are never a current task list.
 
 ## Open now
 
+- **Organism design, 2026-09-23:** plant packages in order
+  [L: sizes to the ladder + growth fix](voxel-ladder-growth-2026-09-23.md),
+  [N: vaulttree, lanternberry, siphonreed](voxel-new-plants-2026-09-23.md),
+  [V: voxel organism models baked from Blender](voxel-organism-models-2026-09-23.md);
+  dispatch waits for Wrysk's look at the plant illustration round and anatomy tables.
+  Thread handoffs: [predation and flight](predation-and-flight-2026-09-23.md),
+  [environment render plan](environment-render-plan-2026-09-23.md).
 - **Water algorithm findings (2026-09-22):**
   [Game/literature comparison and next experiments](voxel-water-algorithms-2026-09-22.md).
   Current solver and measured PA gains; sleeping water and layered-column
