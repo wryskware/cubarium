@@ -1,12 +1,12 @@
 //! Startup acceptance: what the founding loop drew, refused and kept, per preset.
 //!
 //! ```text
-//! cargo run --release -p cubarium --example voxel_startup_acceptance -- small default wide
+//! cargo run --release -p cubarium --example voxel_startup_acceptance -- small default wide [seed=N]
 //! ```
 //!
 //! The founding loop is the host's own (`cubarium::voxel::ambient_habitat`: lake gate,
 //! pre-roll with the opening shower, seeding, the acceptance check, redrawn on a
-//! refusal), from seed base 1 as the census arms use. The loop says why it refused each
+//! refusal), from seed base 1 as the census arms use, or `seed=N`. The loop says why it refused each
 //! try on stderr; this prints what it kept, as CSV blocks on stdout:
 //!
 //! - `startup`: seed, tries refused, accepted, pre-roll ticks and the wall seconds one
@@ -25,10 +25,16 @@ use cubarium_voxel::World;
 use cubarium_voxel_fauna::Founder;
 use cubarium_voxel_flora::{FloraConfig, Species};
 
+/// The founding loop's first draw unless `seed=N` names another.
 const SEED_BASE: u64 = 1;
 
 fn main() {
-    let names: Vec<String> = std::env::args().skip(1).collect();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let seed_base: u64 = args
+        .iter()
+        .find_map(|a| a.strip_prefix("seed=").and_then(|s| s.parse().ok()))
+        .unwrap_or(SEED_BASE);
+    let names: Vec<String> = args.into_iter().filter(|a| !a.starts_with("seed=")).collect();
     let names = if names.is_empty() {
         vec!["small".into(), "default".into(), "wide".into()]
     } else {
@@ -51,7 +57,7 @@ fn main() {
         let t = Instant::now();
         let founded = cubarium::voxel::ambient_habitat(
             &cfg,
-            SEED_BASE,
+            seed_base,
             FloraConfig::for_voxel_size,
             habitat::FOUNDER_COUNTS,
         );

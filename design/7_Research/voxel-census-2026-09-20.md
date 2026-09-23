@@ -1117,6 +1117,17 @@ scratch tree; it reproduces the layers note digit for digit on `default`
 bloomcrown 0, 2 browsers and 13 shredders alive at 60), which is the check that
 the two arms differ only by this package.
 
+**Base, added 2026-09-22.** Every number in this section was measured on base
+4661f97, before the terrain line's PA (the water loop walks cells in index
+order) reached main. After the rebase the same rule gives different one-seed
+arms: at ae13ef3 `voxel_founder_autopsy 60 preset=default` ends with **6**
+shredders alive and 48,323 shredder bites (here: 17 and 71,226), and
+`voxel_census 6 preset=default` with **7** shredders at six hours (here: 12),
+each reproduced exactly on a second run. A one-seed arm moves that much across
+a change that touches no ecological rule, so it is inside the noise; the
+multi-seed tables in "Startup acceptance, 2026-09-22" are the comparison to
+read.
+
 ### `voxel_founder_autopsy 60`, bites by food class — the applied rule
 
 | | small before | small after | default before | default after |
@@ -1236,17 +1247,22 @@ ae13ef3 from `git archive`; `after` is this branch. Seed base 1 throughout.
 
 | | small | default | wide |
 | --- | --- | --- | --- |
-| seed kept; lake / habitat tries refused | 1; 0 / 0 | 1; 0 / 0 | 1; 0 / 0 |
-| pre-roll ticks: settle + shower + drain + watch | 282 + 1,484 + 100 + 200 = **2,066** | 600 + 2,156 + 1,889 + 200 = **4,845** | 600 + 1,700 + 1,235 + 200 = **3,735** |
-| pre-roll wall, desk, release, one process | 10.5 s | 14.2 s | 15.7 s |
-| drain converged under its cap (2,400) | yes | yes | yes |
-| stands (before → after) | 27 → 27 | 87 → **74** | 217 → **190** |
-| stands per m² of footprint | 0.450 | 0.385 | 0.495 |
-| unmet niches (eligible faces = 0) | none | none | none |
-| imported organic (stands, logs, starter litter, bodies) | 12.76 | 35.18 | 86.24 |
+| **bases 1–8: habitat check passed on the first try** | **8 / 8** (4 worlds: seeds 1, 2, 4, 12) | **8 / 8** | **8 / 8** |
+| bases 1–8: pre-roll ticks, range | 2,066–2,531 | 1,953–4,845 | 2,212–5,032 |
+| bases 1–8: stands, range | 20–27 | 74–111 | 184–256 |
+| bases 1–8: worst accepted stock / upkeep (browser) | 1.06 (seed 2) | 2.54 (seed 1) | 8.47 |
+| seed 1: seed kept; lake / habitat tries refused | 1; 0 / 0 | 1; 0 / 0 | 1; 0 / 0 |
+| seed 1: pre-roll ticks, settle + shower + drain + watch | 282 + 1,484 + 100 + 200 = **2,066** | 600 + 2,156 + 1,889 + 200 = **4,845** | 600 + 1,700 + 1,235 + 200 = **3,735** |
+| seed 1: pre-roll wall, desk, release, one process | 10.5 s | 14.2 s | 15.7 s |
+| seed 1: drain converged under its cap (2,400) | yes | yes | yes |
+| seed 1: stands (before → after) | 27 → 27 | 87 → **74** | 217 → **190** |
+| seed 1: stands per m² of footprint | 0.450 | 0.385 | 0.495 |
+| seed 1: unmet niches (eligible faces = 0) | none | none | none |
+| seed 1: imported organic (stands, logs, starter litter, bodies) | 12.76 | 35.18 | 86.24 |
 
-Every preset passes on its **first** draw: at `N = 1` the bar refuses nothing
-on a shipped ring at seed 1, so `small` is not a terrain-line finding. The
+Every preset passes on its **first** habitat try at every base: at `N = 1` the
+bar refuses nothing on a shipped ring, so `small` is not a terrain-line finding
+(its lake gate, not the habitat check, is what redraws it). The
 stands lost are mostly springturf, the soil producer with the shallowest drown
 depth (0.03 m): `default` −6 springturf, −2 bloomcrown, −2 stonecushion, −2
 glowcap, −1 umbrellafrond; `wide` −19 springturf of −27. The shower is the
@@ -1292,20 +1308,31 @@ holds the stock they were admitted on. (The observer's detritus block now uses
 the mouth's pool rule through the shared route map; `default`'s cap row reads
 1.000 in component where it read 0.739.)
 
-### `voxel_founder_autopsy 60`
+### `voxel_founder_autopsy 60`, eight seed bases
 
-| | small before | small after | default before | default after | wide before | wide after |
+`seed=1..8` per preset and arm, the same bases through each build's own draw
+loop. `small`'s lake gate redraws six of the eight bases (3 → 4; 5–8 → 12), in
+both builds, so `small` has **four distinct worlds** (1, 2, 4, 12) and its
+columns are over those four; `default` and `wide` keep all eight bases. Every
+one of the 24 `after` draws passed the habitat check on its first try; the
+worst accepted component was `small` seed 2's browsers, 7 founders at **1.06**
+founder-hours each. Causes are the ledger's (`SUMMARY`); the first browser
+death's cause is the ledger's count for that minute, because the autopsy's
+per-body `DEATH` label reads the previous tick and calls a body that stepped
+into deep water "starved" (default seed 1's 3.4-minute death is one).
+
+| alive at 60 min, median [min–max] | small before | small after | default before | default after | wide before | wide after |
 | --- | --- | --- | --- | --- | --- | --- |
-| shredders alive at 30 / 60 | 6 / 10 | 11 / **0** | 10 / 6 | 14 / **23** | 16 / 10 | 10 / 15 |
-| browsers alive at 30 / 60 | 0 / 0 | 4 / 0 | 9 / 1 | 4 / 0 | 22 / 9 | 19 / 7 |
-| shredder starved / drowned | 10 / 2 | 12 / 0 | 25 / 2 | 22 / 0 | 41 / 0 | 25 / 0 |
-| browser starved / drowned | 8 / 1 | 13 / 0 | 15 / 0 | 8 / 3 | 19 / 0 | 19 / 0 |
-| shredder bites: litter / cap / carrion | 17,882 / 1,642 / 122 | 6,769 / 2,217 / 43 | 47,338 / 659 / 326 | 80,784 / 3,597 / 453 | 74,474 / 3,482 / 720 | 55,494 / 37 / 290 |
-| browser bites (foliage) | 5,971 | 18,358 | 19,559 | 6,423 | 68,918 | 55,214 |
-| first browser death, minute | 10.2 | 15.8 | 18.2 | 3.4 | 31.5 | 11.7 |
+| shredders | 1.5 [0–10] | 0 [0–26] | 7 [3–83] | **20.5** [0–52] | 28 [6–65] | **38.5** [4–83] |
+| browsers | 0 [0–0] | 0 [0–0] | 0 [0–1] | **2** [0–4] | 4.5 [0–9] | **7** [1–13] |
+| first browser death, min (median) | 10.9 | 13.7 | 13.2 | 12.8 | 12.5 | 13.9 |
+| — its cause, drowned / starved (worlds) | 4 / 0 | **0 / 4** | 4 / 4 | 4 / 4 | 4 / 4 | 1 / 7 |
+| starved, shredder / browser (total) | 50 / 27 | 48 / 48 | 191 / 93 | 196 / 120 | 245 / 174 | 239 / 157 |
+| drowned, shredder / browser (total) | 6 / 9 | 1 / 0 | 13 / 19 | 21 / 19 | 5 / 19 | 2 / 10 |
+| browser bites (median) | 6,028 | **16,650** | 13,904 | **31,240** | 50,330 | 56,136 |
+| seed 1: shredders / browsers at 60 | 10 / 0 | 0 / 0 | 6 / 1 | 23 / 0 | 10 / 9 | 15 / 7 |
 
-Each arm was run once; `default` both arms were run twice and reproduced to
-the row. Ledger residuals over 72,000 ticks ≤ 8.1e-11 fauna, ≤ 7.0e-10 flora.
+Ledger residuals over every 72,000-tick run ≤ 8.5e-9.
 
 ### `voxel_census 6 preset=default`
 
@@ -1323,17 +1350,25 @@ causes or foods; those are the autopsy's rows above.
 
 ### What this says
 
-- The startup guarantee holds as specified and **changes the start, not the
-  outcome**. Every preset's founders stand in components holding at least 1.8
-  founder-hours each, `default`'s seeded route doubles, and the browser lineage
-  is still gone inside the first hour on `default` and `small`.
-  Browsers placed on food they can reach still starve: the next question is
-  acquisition and upkeep against intake (package 5's retrain), not placement.
-- `small`'s shredders collapse from 11 at 30 minutes to 0 at 60 after, against
-  10 alive before. One seed, one run; not diagnosed here.
-- **`before` does not reproduce the Diets section's `default` row.** At
-  ae13ef3 `voxel_founder_autopsy 60 preset=default` gives 6 shredders alive at
-  60 and 48,323 shredder bites, twice, where the Diets table's applied arm says
-  17 and 71,226; and the census's before arm ends at 7 shredders where
-  "Census: the applied rule's numbers" says 12. The before numbers here are
-  what that build does today.
+- Across eight bases the package **raises the median of both lineages at 60
+  minutes on `default` and `wide`** (shredders 7 → 20.5 and 28 → 38.5, browsers
+  0 → 2 and 4.5 → 7) and more than doubles the browsers' bites on `small` and
+  `default`. The ranges overlap everywhere; eight worlds is a direction, not a
+  proof.
+- The opening shower does what it was for on `small`: before, the first browser
+  death in every world was a **drowning**; after, none is, and browser
+  drownings go 9 → 0. They starve instead, a few minutes later.
+- **`small`'s 10 → 0 shredders was one world.** Over its four worlds the
+  shredder survives in two before (10, 3) and one after (26): both lineages
+  mostly die on `small` in either build.
+- **The 3.4-minute browser death on `default` seed 1 is a drowning, and the
+  policy's, not the placement's.** Founder 11 was placed at (5.9, 5.6) m with a
+  springturf 0.25 m away inside its mouth's reach (`in_reach`, 0.084 of
+  foliage) and ate: its structure rose 0.0250 → 0.0291 in the first minute.
+  It then walked 10.8 m across the strip to the front edge (z = 0.08 m), a
+  one-exit face with a drop ahead, where it held full forward and moved 0 m
+  for a minute while paying upkeep (0.0291 → 0.0221, reserve 0). In minute
+  four it moved 2.8 m more, its cone 27 rays of water, and the ledger books
+  one browser **drowned** in that minute; its structure at death, 0.0208, is
+  four times `body_min`, so it cannot have starved. Placement put it on food it
+  could eat; the policy walked it off the food and into the lake.
