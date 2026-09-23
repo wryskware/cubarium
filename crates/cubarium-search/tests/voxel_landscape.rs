@@ -77,9 +77,8 @@ fn a_landscape_episode_is_deterministic_given_its_seed() {
         let b = run(&prepared, &heuristic, 11);
         assert_eq!(a, b, "{founder:?}: the same seed is the same episode");
         let c = run(&prepared, &heuristic, 12);
-        let sizes = |e: &driver::Episode| -> Vec<f64> {
-            e.bodies.iter().map(|b| b.start_body).collect()
-        };
+        let sizes =
+            |e: &driver::Episode| -> Vec<f64> { e.bodies.iter().map(|b| b.start_body).collect() };
         assert_ne!(
             sizes(&a),
             sizes(&c),
@@ -104,15 +103,9 @@ fn frozen_water_does_not_move_during_a_landscape_episode() {
     );
     let cancel = AtomicBool::new(false);
     let driver = EpisodeDriver::control(VoxelControl::Cruise, Founder::Blind);
-    let (_, sim) = driver::run_landscape_sim(
-        &prepared,
-        &driver,
-        TICKS,
-        Limits::new(&cancel),
-        "frozen",
-        3,
-    )
-    .expect("the episode completes");
+    let (_, sim) =
+        driver::run_landscape_sim(&prepared, &driver, TICKS, Limits::new(&cancel), "frozen", 3)
+            .expect("the episode completes");
     let (before, after) = (prepared.world().view(), sim.world().view());
     assert_eq!(after.free, before.free, "no free water moved");
     assert_eq!(after.pore, before.pore, "no pore water moved");

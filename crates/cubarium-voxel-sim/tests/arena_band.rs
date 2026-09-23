@@ -15,16 +15,23 @@ use cubarium_voxel_sim::{Arena, ArenaGrid, SuccessorBand};
 
 /// What a mouth band standing at `standing_y` could take off `patch`: the ground pools
 /// the founder eats at that face, and the in-band layers of any stand its diet accepts.
-fn in_band_stock(arena: &Arena, founder: Founder, patch: Site, body: &Body, standing_y: u32) -> f64 {
+fn in_band_stock(
+    arena: &Arena,
+    founder: Founder,
+    patch: Site,
+    body: &Body,
+    standing_y: u32,
+) -> f64 {
     let fv = arena.flora.view();
     let voxel_m = arena.world.config().voxel_m;
     let band = body.mouth_layers(standing_y, voxel_m);
     let pools = match founder {
-        Founder::Blind => fv.ground_at(Site {
-            y: standing_y,
-            ..patch
-        })
-        .map_or(0.0, |g| g.litter + g.carrion),
+        Founder::Blind => fv
+            .ground_at(Site {
+                y: standing_y,
+                ..patch
+            })
+            .map_or(0.0, |g| g.litter + g.carrion),
         Founder::Browser => 0.0,
     };
     let stands: f64 = fv

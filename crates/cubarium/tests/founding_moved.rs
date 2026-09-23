@@ -40,12 +40,20 @@ fn the_moved_founding_loop_founds_default_seed_1_as_main_did() {
     );
     assert_eq!(got, (1, 0, 0, true, true), "seed, refusals and the verdict");
     assert_eq!(
-        (s.pre_roll.ticks, s.pre_roll.shower_ticks, s.pre_roll.drain.ticks),
+        (
+            s.pre_roll.ticks,
+            s.pre_roll.shower_ticks,
+            s.pre_roll.drain.ticks
+        ),
         (4845, 2156, 1889),
         "the pre-roll stepped what it stepped on main"
     );
     assert_eq!(s.stands, 74, "stands planted");
-    assert_eq!(s.stands_by_species, [13, 7, 30, 13, 4, 7], "stands by species");
+    assert_eq!(
+        s.stands_by_species,
+        [13, 7, 30, 13, 4, 7],
+        "stands by species"
+    );
     assert_eq!(s.founders, FOUNDERS, "founders placed, by lineage");
     assert_eq!(s.shortfall, [0; Founder::COUNT], "no founder short");
     assert_eq!(

@@ -187,9 +187,7 @@ fn found(
         };
         if accept(&founded.seeded) {
             if k > 0 {
-                eprintln!(
-                    "cubarium voxel: seed {seed} accepted as a habitat after {k} refused"
-                );
+                eprintln!("cubarium voxel: seed {seed} accepted as a habitat after {k} refused");
             }
             return Founded {
                 accepted: true,
@@ -478,7 +476,10 @@ mod tests {
         };
         let seeds = |list: Vec<u64>| {
             let mut it = list.into_iter();
-            move || it.next().expect("the loop asked for more seeds than it was given")
+            move || {
+                it.next()
+                    .expect("the loop asked for more seeds than it was given")
+            }
         };
         let layers = |w: &World| {
             (
@@ -504,7 +505,11 @@ mod tests {
         assert_eq!(judged.get(), 2, "two worlds were judged");
         assert_eq!(founded.seed, 6, "the refused first draw was replaced");
         assert!(founded.accepted && founded.habitat_rejected == 1);
-        assert!(founded.seeded.stands > 0, "returned seeded: {:?}", founded.seeded);
+        assert!(
+            founded.seeded.stands > 0,
+            "returned seeded: {:?}",
+            founded.seeded
+        );
         assert_eq!(
             founded.flora.view().stands.len(),
             founded.seeded.stands,
@@ -515,7 +520,10 @@ mod tests {
             founded.seeded.animals(),
             "the founders are the loop's"
         );
-        assert!(founded.seeded.pre_roll.opening_shower, "the world opened with rain");
+        assert!(
+            founded.seeded.pre_roll.opening_shower,
+            "the world opened with rain"
+        );
 
         // An asked-for seed is honoured whatever the verdict, and says so. (Seed 6, whose
         // ring has stands on it, so "seeded" is something that can be checked.)
