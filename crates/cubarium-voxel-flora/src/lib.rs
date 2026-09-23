@@ -46,6 +46,7 @@
 #![forbid(unsafe_code)]
 
 mod layers;
+mod seeds;
 pub mod snapshot;
 mod step;
 
