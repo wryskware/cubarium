@@ -220,12 +220,55 @@ fn run(sim: &mut Sim, hours: f64) {
     print_header();
     print_row(0, sim);
     let mut tick = 0u64;
+    let mut window = SeedWindow::default();
     while tick < total_ticks {
         sim.step();
         tick += 1;
         if tick % TICKS_PER_MIN == 0 {
             print_row(tick / TICKS_PER_MIN, sim);
         }
+        if tick % (60 * TICKS_PER_MIN) == 0 || tick == total_ticks {
+            window.report(tick, sim);
+        }
+    }
+}
+
+/// The seed-bank line on stderr, once a simulated hour: how many sites hold a bank (what
+/// D5's seed marks draw), recruits so far, and the SeedBank / Propagate phases' cost per
+/// tick over the hour just past. Measurement only.
+#[derive(Default)]
+struct SeedWindow {
+    nanos: [u64; 3],
+    calls: [u64; 3],
+}
+
+impl SeedWindow {
+    fn report(&mut self, tick: u64, sim: &Sim) {
+        use cubarium_voxel::profile::{Phase, calls, nanos};
+        let f = sim.flora().view();
+        let sites = f.ground.iter().filter(|g| !g.seeds.is_empty()).count();
+        let mut ms = [0.0; 3];
+        for (i, p) in [Phase::SeedBank, Phase::Propagate, Phase::FloraStep]
+            .into_iter()
+            .enumerate()
+        {
+            let (n, c) = (nanos(p), calls(p));
+            let dc = c.saturating_sub(self.calls[i]).max(1);
+            ms[i] = n.saturating_sub(self.nanos[i]) as f64 / dc as f64 / 1e6;
+            self.nanos[i] = n;
+            self.calls[i] = c;
+        }
+        eprintln!(
+            "seedbank: h={:.2} bank_sites={sites} ground={} stands={} establishments={} \
+             seed_bank_ms={:.4} propagate_ms={:.4} flora_ms={:.3}",
+            tick as f64 / (3600.0 * f64::from(TICK_HZ)),
+            f.ground.len(),
+            f.stands.len(),
+            f.ledger.establishments,
+            ms[0],
+            ms[1],
+            ms[2],
+        );
     }
 }
 
