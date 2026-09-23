@@ -573,10 +573,11 @@ impl Controller for BlindForager {
 /// hollow reads the same way, its surface being below the bank.
 #[derive(Clone, Debug)]
 pub struct BrowserForager {
-    /// The side the gaze last turned to, which an escape turns by.
+    /// The remembered wander preference, flipped every three no-signal samples; also the
+    /// side an escape turns to. The browser keeps this search: the correlated walk (S3)
+    /// measured 0.846 → 0.708 on its held-out landscapes and was reverted for it.
     wander_bias: f64,
-    /// The no-signal search (S3).
-    wander: Wander,
+    wander_ticks: u32,
     escape: u32,
     contact: crate::manifest::Module,
     taste: crate::manifest::Module,
@@ -589,7 +590,7 @@ impl BrowserForager {
         let manifest = Founder::Browser.manifest();
         BrowserForager {
             wander_bias: 1.0,
-            wander: Wander::default(),
+            wander_ticks: 0,
             escape: 0,
             contact: module_slot(&manifest, "Contact(4)"),
             taste: module_slot(&manifest, "Taste(1)"),
@@ -625,7 +626,7 @@ impl Controller for BrowserForager {
         let away = self.wander_bias;
         if let Some((forward, turn)) = escape(&mut self.escape, o[7] < MOTOR_REFUSED || drop, away)
         {
-            self.wander.interrupt();
+            self.wander_ticks = 0;
             return Response::Bounded(Actions {
                 forward,
                 turn,
@@ -637,7 +638,7 @@ impl Controller for BrowserForager {
         // Gaze: turn toward the richest sector — sector 0 is −60° (left of forward), so
         // facing it needs a negative turn effort; sector 2 (+60°) needs positive.
         if frac[0] > 0.02 || frac[1] > 0.02 || frac[2] > 0.02 {
-            self.wander.interrupt();
+            self.wander_ticks = 0;
             if frac[0] >= frac[1] && frac[0] >= frac[2] {
                 turn = -0.8;
                 self.wander_bias = -1.0;
@@ -648,11 +649,12 @@ impl Controller for BrowserForager {
                 turn = 0.0;
             }
         } else {
-            // No signal: cover ground with a correlated walk (S3).
-            turn = self.wander.turn(o);
-            if turn != 0.0 {
-                self.wander_bias = turn.signum();
+            self.wander_ticks += 1;
+            if self.wander_ticks >= 3 {
+                self.wander_ticks = 0;
+                self.wander_bias = -self.wander_bias;
             }
+            turn = self.wander_bias * 0.6;
         }
         let forward = if front > 0.5 { 0.1 } else { 1.0 };
         Response::Bounded(Actions {
@@ -664,7 +666,7 @@ impl Controller for BrowserForager {
 
     fn reset(&mut self) {
         self.wander_bias = 1.0;
-        self.wander = Wander::default();
+        self.wander_ticks = 0;
         self.escape = 0;
     }
 }
@@ -674,13 +676,14 @@ mod tests {
     use super::*;
     use crate::manifest::Founder;
 
-    /// S3: with no signal both teachers walk a correlated walk — they hold their heading
+    /// S3: with no signal the shredder's teacher walks a correlated walk — they hold their heading
     /// for at least `WANDER_HOLD.0` samples between turns, a turn lasts at most
     /// `WANDER_TURN_SAMPLES.1` samples, both signs occur, and two bodies with different
     /// senses walk different walks.
     #[test]
     fn the_no_signal_walk_holds_heading_between_bounded_turns() {
-        for founder in [Founder::Blind, Founder::Browser] {
+        {
+            let founder = Founder::Blind;
             let manifest = founder.manifest();
             let walk = |salt: f64| -> Vec<f64> {
                 let mut c: Box<dyn Controller> = match founder {
