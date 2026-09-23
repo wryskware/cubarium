@@ -208,3 +208,83 @@ fn landscape_teacher_recording_keeps_one_stream_per_body() {
         }
     }
 }
+
+/// P5-C (C1, C2): a mixed run trains on the arena half plus that generation's draw of
+/// landscapes, and scores the centre on the held-out fixtures at update 0 and every
+/// `held_out_every` updates, writing a policy file holding exactly the weights scored.
+/// Plumbing only: one pair, two updates, 60-tick episodes on the tiny ring.
+#[test]
+fn a_mixed_run_draws_landscapes_and_writes_held_out_checkpoints() {
+    use cubarium_search::es::voxel::store::VoxelPolicyFile;
+    use cubarium_search::es::voxel::task::{Band, Stage};
+    use cubarium_search::es::voxel::trainer::{self, LandscapeMix, TrainSpec};
+
+    let land = landscape();
+    let fixture = |founder, water| {
+        Prepared::Landscape(Box::new(
+            land.prepare(founder, water)
+                .expect("the tiny ring rains")
+                .with_horizon(60),
+        ))
+    };
+    let founder = Founder::Blind;
+    let pool = vec![
+        fixture(founder, WaterState::Drained),
+        fixture(founder, WaterState::MidShower),
+    ];
+    let held_out = vec![fixture(founder, WaterState::Drained)];
+    let out = std::env::temp_dir().join(format!("cubarium-p5c-mix-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&out);
+    let spec = TrainSpec {
+        founder,
+        stage: Stage::B,
+        band: Band::Landed,
+        init_center: None,
+        pairs: 1,
+        layouts: 1,
+        updates: 2,
+        horizon: 60,
+        workers: 2,
+        wall_seconds: 120,
+        episode_limit: u64::MAX,
+        train_seed: 5,
+        evaluate_center: true,
+        out: out.clone(),
+        mix: Some(LandscapeMix {
+            pool,
+            per_generation: 1,
+            held_out,
+            held_out_every: 1,
+            collapse_checkpoints: 4,
+        }),
+    };
+    let cancel = AtomicBool::new(false);
+    let report = trainer::train(&spec, &cancel).expect("the mixed run runs");
+    assert_eq!(report.generations_completed, 2);
+    // Initial centre on 1 arena + 1 landscape; then (2 signs + centre) × 2 fixtures × 2.
+    assert_eq!(report.episodes_attempted, 2 + 2 * 3 * 2);
+    let updates: Vec<u32> = report.held_out.iter().map(|h| h.updates).collect();
+    assert_eq!(updates, vec![0, 1, 2], "held-out at 0 and after every update");
+    let cp = trainer::load_checkpoint(&out.join("checkpoint.json"), None).expect("checkpoint");
+    let mix = cp.protocol.mix.as_ref().expect("the mix is in the protocol");
+    assert_eq!(mix.pool.len(), 2);
+    assert_eq!(mix.arena_grids, vec!["0.25m".to_string()]);
+    for h in &report.held_out {
+        let file = VoxelPolicyFile::load(&out.join(&h.file)).expect("a held-out policy file");
+        assert_eq!(file.score, Some(h.score));
+        let d = file.driver().expect("drives");
+        let episodes = trainer::evaluate_fixtures(
+            &d,
+            &spec.mix.as_ref().expect("mix").held_out,
+            1,
+            Limits::new(&cancel),
+            "recheck",
+        )
+        .expect("re-evaluated");
+        assert_eq!(
+            episodes[0].score.score, h.score,
+            "the file holds exactly the weights that were scored"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&out);
+}

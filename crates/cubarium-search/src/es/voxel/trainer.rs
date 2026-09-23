@@ -93,7 +93,35 @@ pub struct VoxelProtocol {
     pub controller: String,
     /// How a candidate's per-layout scores combine: `mean` over its layouts.
     pub aggregate: String,
+    /// P5-C's mixed set (C1, C2), when the run trains on one. Absent — and so absent
+    /// from the hash — on an arena-only run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mix: Option<MixProtocol>,
 }
+
+/// What a P5-C run's generations and checkpoints ran on besides the arenas
+/// (`design/handoffs/voxel-retrain-c-2026-09-22.md`, C1–C2). Part of the protocol hash.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MixProtocol {
+    /// [`super::landscape::LANDSCAPE_PROTOCOL`].
+    pub landscape_protocol: String,
+    pub landscape_horizon: u64,
+    /// The grid of each arena layout, in `layout_seeds` order.
+    pub arena_grids: Vec<String>,
+    /// Every training landscape fixture the draw chooses from: `preset/base/water@world`.
+    pub pool: Vec<String>,
+    /// Landscapes drawn per generation.
+    pub per_generation: usize,
+    /// How the draw is made ([`super::landscape::generation_draw`]).
+    pub draw: String,
+    /// The held-out fixtures the checkpoints are scored on.
+    pub held_out: Vec<String>,
+    /// Updates between held-out checkpoints.
+    pub held_out_every: u32,
+}
+
+/// The draw's name in [`MixProtocol::draw`].
+pub const LANDSCAPE_DRAW: &str = "p5c-per-generation-without-replacement-1";
 
 impl VoxelProtocol {
     pub fn new(
@@ -131,6 +159,7 @@ impl VoxelProtocol {
             reference_mass: manifest.body_reference,
             controller: "gru".into(),
             aggregate: "mean".into(),
+            mix: None,
         }
     }
 
@@ -537,6 +566,24 @@ pub struct VoxelCheckpoint {
     /// Where this run's starting weights came from, when it was warm-started.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub init_center: Option<InitProvenance>,
+    /// P5-C (C2): the held-out checkpoints, oldest first. Empty on an arena-only run.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub held_out: Vec<HeldOutRecord>,
+}
+
+/// One held-out checkpoint (C2): the centre after `updates` updates, scored on the
+/// held-out landscapes, and the file holding exactly those weights.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HeldOutRecord {
+    pub updates: u32,
+    /// Mean episode score over the held-out fixtures.
+    pub score: f64,
+    /// Mean score per preset, in the order the presets first appear.
+    pub by_preset: Vec<(String, f64)>,
+    /// Mean fraction of the horizon the acting bodies lived.
+    pub survived: f64,
+    pub file: String,
+    pub weights_fnv1a: u64,
 }
 
 /// Where a warm-started run's initial weights came from. Provenance only: the run's own
@@ -650,6 +697,7 @@ impl VoxelCheckpoint {
             discarded: Discarded::default(),
             centers: Vec::new(),
             init_center: None,
+            held_out: Vec::new(),
         }
     }
 
@@ -716,6 +764,25 @@ pub struct TrainSpec {
     pub train_seed: u64,
     pub evaluate_center: bool,
     pub out: PathBuf,
+    /// P5-C's mixed set and held-out checkpoints. `None` trains on the arena layouts
+    /// alone, as every run before P5-C did.
+    pub mix: Option<LandscapeMix>,
+}
+
+/// P5-C's per-generation landscapes (C1) and held-out checkpoints (C2). With a mix, the
+/// arena half is [`task::p5_arena_layouts`] (both grids) rather than the standard grid.
+pub struct LandscapeMix {
+    /// Every training landscape fixture of the lineage ([`super::landscape::training_pool`]).
+    pub pool: Vec<Prepared>,
+    /// Landscapes drawn from `pool` per generation.
+    pub per_generation: usize,
+    /// The held-out fixtures ([`super::landscape::held_out_pool`]).
+    pub held_out: Vec<Prepared>,
+    /// Score the centre on `held_out` at update 0 and every this many updates.
+    pub held_out_every: u32,
+    /// C5: stop when the held-out score has fallen at every one of this many consecutive
+    /// checkpoints (4 × 32 = 128 updates). Zero never stops.
+    pub collapse_checkpoints: usize,
 }
 
 /// Why a training run stopped.
@@ -727,6 +794,8 @@ pub enum TrainStop {
     Wall,
     /// The episode limit stopped it before the next generation.
     EpisodeLimit,
+    /// C5: the held-out score fell at every one of the last checkpoints.
+    Collapse,
 }
 
 impl std::fmt::Display for TrainStop {
@@ -735,6 +804,10 @@ impl std::fmt::Display for TrainStop {
             TrainStop::Updates => write!(f, "completed every update"),
             TrainStop::Wall => write!(f, "stopped at the wall cap"),
             TrainStop::EpisodeLimit => write!(f, "stopped at the episode limit"),
+            TrainStop::Collapse => write!(
+                f,
+                "STOPPED: the held-out score fell at every one of the last checkpoints (C5)"
+            ),
         }
     }
 }
@@ -756,6 +829,9 @@ pub struct TrainReport {
     /// The mean absolute spread of each generation's perturbation scores.
     pub score_spreads: Vec<f64>,
     pub checkpoint: String,
+    /// The held-out checkpoints, and the best of them: the ship candidate (C2).
+    pub held_out: Vec<HeldOutRecord>,
+    pub best_held_out: Option<HeldOutRecord>,
 }
 
 /// Run the bounded training.
@@ -782,7 +858,7 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
 
     let started = Instant::now();
     let deadline = started + Duration::from_secs(spec.wall_seconds.max(1));
-    let protocol = VoxelProtocol::new(
+    let mut protocol = VoxelProtocol::new(
         spec.founder,
         spec.stage,
         spec.band,
@@ -791,7 +867,51 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
         spec.train_seed,
         &task::TRAINING_LAYOUT_SEEDS[..spec.layouts],
     );
-    let layouts = task::training_layouts(spec.founder, spec.stage, spec.band);
+    let layouts = match &spec.mix {
+        Some(_) => task::p5_arena_layouts(spec.founder, spec.stage, spec.band),
+        None => task::training_layouts(spec.founder, spec.stage, spec.band),
+    };
+    let arena_layouts = &layouts[..spec.layouts];
+    if let Some(mix) = &spec.mix {
+        if mix.pool.is_empty() || mix.per_generation == 0 {
+            return Err("a landscape mix needs a pool and a per-generation draw".into());
+        }
+        if mix.held_out.is_empty() || mix.held_out_every == 0 {
+            return Err("a landscape mix needs held-out fixtures and a checkpoint interval".into());
+        }
+        let label = |p: &Prepared| match p.landscape() {
+            Some(l) => format!("{}@{}", l.label(), l.world_seed),
+            None => p.label(),
+        };
+        protocol.mix = Some(MixProtocol {
+            landscape_protocol: super::landscape::LANDSCAPE_PROTOCOL.into(),
+            landscape_horizon: super::landscape::LANDSCAPE_HORIZON_TICKS,
+            arena_grids: arena_layouts
+                .iter()
+                .map(|p| p.arena().map_or("?".into(), |a| a.grid.as_str().to_string()))
+                .collect(),
+            pool: mix.pool.iter().map(label).collect(),
+            per_generation: mix.per_generation,
+            draw: LANDSCAPE_DRAW.into(),
+            held_out: mix.held_out.iter().map(label).collect(),
+            held_out_every: mix.held_out_every,
+        });
+    }
+    // One generation's fixtures: the arena half, then (with a mix) that generation's draw.
+    let generation_set = |generation: u32| -> Vec<Prepared> {
+        let mut set = arena_layouts.to_vec();
+        if let Some(mix) = &spec.mix {
+            for i in super::landscape::generation_draw(
+                spec.train_seed,
+                generation,
+                mix.pool.len(),
+                mix.per_generation,
+            ) {
+                set.push(mix.pool[i].clone());
+            }
+        }
+        set
+    };
     let run_dir = spec.out.clone();
     std::fs::create_dir_all(run_dir.join("centers"))
         .map_err(|e| format!("cannot create {}: {e}", run_dir.display()))?;
@@ -822,6 +942,52 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
     let mut score_spreads = Vec::new();
     let mut stop = TrainStop::Updates;
 
+    // The held-out checkpoint (C2): the centre's exact weights, scored on the held-out
+    // landscapes, written beside the per-generation centres.
+    let held_out_checkpoint = |cp: &mut VoxelCheckpoint, updates: u32| -> Result<(), String> {
+        let Some(mix) = &spec.mix else {
+            return Ok(());
+        };
+        let t = Instant::now();
+        let driver = center_driver(cp)?;
+        let episodes = evaluate_fixtures(
+            &driver,
+            &mix.held_out,
+            spec.workers,
+            Limits::new(cancel),
+            &format!("heldout/upd{updates}"),
+        )?;
+        let (score, by_preset, survived) = held_out_summary(&mix.held_out, &episodes);
+        let file = format!("centers/upd{updates}-heldout.json");
+        write_center_policy(&run_dir, &file, cp, &cp.theta, updates, score)?;
+        let record = HeldOutRecord {
+            updates,
+            score,
+            by_preset,
+            survived,
+            file,
+            weights_fnv1a: fnv1a_hex(&cp.theta),
+        };
+        println!(
+            "held-out upd {updates:>3}  score {score:.4}  survived {survived:.3}  {}  {:.1}s",
+            record
+                .by_preset
+                .iter()
+                .map(|(p, s)| format!("{p} {s:.4}"))
+                .collect::<Vec<_>>()
+                .join("  "),
+            t.elapsed().as_secs_f64(),
+        );
+        cp.held_out.push(record);
+        Ok(())
+    };
+    let collapsed = |cp: &VoxelCheckpoint| -> bool {
+        spec.mix.as_ref().is_some_and(|mix| {
+            let scores: Vec<f64> = cp.held_out.iter().map(|h| h.score).collect();
+            held_out_collapsed(&scores, mix.collapse_checkpoints)
+        })
+    };
+
     // 0. The initial centre evaluation — generation 0's centre record. The plan's episode
     //    accounting starts here ("2,180 episodes including the initial centre").
     let initial = {
@@ -829,12 +995,13 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
         let mut scores = Vec::new();
         let mut attempted = 0u64;
         let mut ticks = 0u64;
-        for layout in layouts.iter().take(spec.layouts) {
+        let set = generation_set(0);
+        for (li, layout) in set.iter().enumerate() {
             if cancel.load(Ordering::Relaxed) {
                 break;
             }
             attempted += 1;
-            match driver::run_prepared(
+            match driver::run_prepared_seeded(
                 layout,
                 &driver,
                 layout.horizon().unwrap_or(spec.horizon),
@@ -843,6 +1010,7 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
                     deadline: Some(deadline),
                 },
                 &format!("gen0/center/seed{}", layout.layout_seed()),
+                episode_seed(spec.train_seed, 0, li),
             ) {
                 Ok(e) => {
                     ticks += e.ticks;
@@ -866,7 +1034,7 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
         let mean = (!scores.is_empty()).then(|| scores.iter().sum::<f64>() / scores.len() as f64);
         if let Some(score) = mean {
             let file = "centers/gen0-center.json";
-            write_center_policy(&run_dir, file, &cp, 0, score)?;
+            write_center_policy(&run_dir, file, &cp, &cp.theta, 0, score)?;
             cp.centers.push(CenterRecord {
                 generation: 0,
                 score,
@@ -876,6 +1044,8 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
         }
         mean
     };
+    held_out_checkpoint(&mut cp, 0)?;
+    save_checkpoint(&checkpoint_path, &cp)?;
 
     // 1. The updates.
     let mut cancelled_at: Option<String> = None;
@@ -884,19 +1054,23 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
             stop = TrainStop::Wall;
             break;
         }
+        let set = generation_set(generation);
         let next_generation_episodes =
-            (2 * spec.pairs as u64 + u64::from(spec.evaluate_center)) * spec.layouts as u64;
+            (2 * spec.pairs as u64 + u64::from(spec.evaluate_center)) * set.len() as u64;
         if cp.episodes_attempted + next_generation_episodes > spec.episode_limit {
             stop = TrainStop::EpisodeLimit;
             break;
         }
         let plan = GenerationPlan {
-            layouts: &layouts[..spec.layouts],
+            layouts: &set,
             horizon: spec.horizon,
             workers: spec.workers,
             evaluate_center: spec.evaluate_center,
             deadline: Some(deadline),
         };
+        // The centre a generation scores is the one it started from; the file written
+        // for it holds exactly those weights, not the updated ones.
+        let evaluated = cp.theta.clone();
         match run_generation(
             &mut cp.theta,
             &mut cp.adam,
@@ -913,12 +1087,12 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
                 score_spreads.push(report.score_spread);
                 if let Some(score) = report.center_score {
                     let file = format!("centers/gen{generation}-center.json");
-                    write_center_policy(&run_dir, &file, &cp, generation, score)?;
+                    write_center_policy(&run_dir, &file, &cp, &evaluated, generation, score)?;
                     cp.centers.push(CenterRecord {
                         generation,
                         score,
                         file,
-                        weights_fnv1a: fnv1a_hex(&cp.theta),
+                        weights_fnv1a: fnv1a_hex(&evaluated),
                     });
                 }
                 println!(
@@ -949,6 +1123,17 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
                 return Err(format!("invalid episode in {job}: {detail}"));
             }
         }
+        let updates = generation + 1;
+        if let Some(mix) = &spec.mix
+            && updates.is_multiple_of(mix.held_out_every)
+        {
+            held_out_checkpoint(&mut cp, updates)?;
+            if collapsed(&cp) {
+                save_checkpoint(&checkpoint_path, &cp)?;
+                stop = TrainStop::Collapse;
+                break;
+            }
+        }
         save_checkpoint(&checkpoint_path, &cp)?;
     }
     if let Some(what) = cancelled_at {
@@ -958,6 +1143,11 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
     save_checkpoint(&checkpoint_path, &cp)?;
     let best = cp
         .centers
+        .iter()
+        .max_by(|a, b| a.score.partial_cmp(&b.score).expect("scores are finite"))
+        .cloned();
+    let best_held_out = cp
+        .held_out
         .iter()
         .max_by(|a, b| a.score.partial_cmp(&b.score).expect("scores are finite"))
         .cloned();
@@ -975,7 +1165,101 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
         best,
         score_spreads,
         checkpoint: checkpoint_path.display().to_string(),
+        held_out: cp.held_out.clone(),
+        best_held_out,
     })
+}
+
+/// C5's stop rule: the held-out score fell at every one of the last `k` checkpoints
+/// (`k + 1` scores, each below the one before). `k = 0` never stops.
+pub fn held_out_collapsed(scores: &[f64], k: usize) -> bool {
+    k > 0
+        && scores.len() > k
+        && scores[scores.len() - k - 1..]
+            .windows(2)
+            .all(|w| w[1] < w[0])
+}
+
+/// Run `driver` once on every fixture, on up to `workers` threads, each on its own seed
+/// ([`driver::run_prepared`]), and return the episodes in fixture order. A cancelled or
+/// invalid episode is an error: a partial evaluation is not a score.
+pub fn evaluate_fixtures(
+    driver: &EpisodeDriver,
+    fixtures: &[Prepared],
+    workers: usize,
+    limits: Limits<'_>,
+    tag: &str,
+) -> Result<Vec<Episode>, String> {
+    let slots: Mutex<Vec<Option<Episode>>> = Mutex::new(vec![None; fixtures.len()]);
+    let failure: Mutex<Option<String>> = Mutex::new(None);
+    let cursor = AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        for _ in 0..workers.max(1).min(fixtures.len().max(1)) {
+            scope.spawn(|| {
+                loop {
+                    let i = cursor.fetch_add(1, Ordering::SeqCst);
+                    let Some(fixture) = fixtures.get(i) else {
+                        return;
+                    };
+                    if failure.lock().expect("failure").is_some() {
+                        return;
+                    }
+                    match driver::run_prepared(
+                        fixture,
+                        driver,
+                        fixture.horizon().unwrap_or(task::STAGE_B_HORIZON_TICKS),
+                        limits,
+                        &format!("{tag}/{}", fixture.label()),
+                    ) {
+                        Ok(e) => slots.lock().expect("slots")[i] = Some(e),
+                        Err(e) => {
+                            *failure.lock().expect("failure") =
+                                Some(format!("{tag}/{}: {e}", fixture.label()));
+                            return;
+                        }
+                    }
+                }
+            });
+        }
+    });
+    if let Some(e) = failure.into_inner().expect("failure") {
+        return Err(e);
+    }
+    Ok(slots
+        .into_inner()
+        .expect("slots")
+        .into_iter()
+        .map(|e| e.expect("every fixture ran"))
+        .collect())
+}
+
+/// The held-out summary: mean score, mean score per preset (landscapes; an arena counts
+/// under `arena`), and the mean survived fraction.
+pub fn held_out_summary(
+    fixtures: &[Prepared],
+    episodes: &[Episode],
+) -> (f64, Vec<(String, f64)>, f64) {
+    let n = episodes.len().max(1) as f64;
+    let score = episodes.iter().map(|e| e.score.score).sum::<f64>() / n;
+    let survived = episodes.iter().map(Episode::survived_fraction).sum::<f64>() / n;
+    let mut by: Vec<(String, f64, usize)> = Vec::new();
+    for (f, e) in fixtures.iter().zip(episodes) {
+        let key = f
+            .landscape()
+            .map_or_else(|| "arena".to_string(), |l| l.preset.clone());
+        match by.iter_mut().find(|(k, _, _)| *k == key) {
+            Some(slot) => {
+                slot.1 += e.score.score;
+                slot.2 += 1;
+            }
+            None => by.push((key, e.score.score, 1)),
+        }
+    }
+    (
+        score,
+        by.into_iter().map(|(k, s, c)| (k, s / c as f64)).collect(),
+        survived,
+    )
 }
 
 /// The centre's driver, rebuilt from the checkpoint's exact weights.
@@ -989,6 +1273,7 @@ fn write_center_policy(
     run_dir: &std::path::Path,
     relative: &str,
     cp: &VoxelCheckpoint,
+    theta: &[f64],
     generation: u32,
     score: f64,
 ) -> Result<(), String> {
@@ -1007,7 +1292,7 @@ fn write_center_policy(
         protocol_hash: Some(cp.protocol_hash),
         imitation: None,
         stage: cp.protocol.stage.clone(),
-        theta: cp.theta.clone(),
+        theta: theta.to_vec(),
     };
     file.write(&run_dir.join(relative))
 }
@@ -1075,6 +1360,7 @@ mod tests {
             train_seed: 20_260_918,
             evaluate_center: true,
             out: PathBuf::from("/tmp/opencode/cubarium-voxel-es-test"),
+            mix: None,
         }
     }
 
@@ -1346,6 +1632,16 @@ mod tests {
     }
 
     /// A temporary run directory under the approved external path.
+    #[test]
+    fn the_collapse_rule_needs_every_one_of_the_last_checkpoints_to_fall() {
+        assert!(held_out_collapsed(&[0.5, 0.4, 0.3, 0.2, 0.1], 4));
+        assert!(held_out_collapsed(&[0.9, 0.5, 0.4, 0.3, 0.2, 0.1], 4));
+        assert!(!held_out_collapsed(&[0.5, 0.4, 0.3, 0.2], 4), "only 96 updates");
+        assert!(!held_out_collapsed(&[0.5, 0.4, 0.45, 0.2, 0.1], 4), "one rise resets");
+        assert!(!held_out_collapsed(&[0.5, 0.4, 0.4, 0.3, 0.2], 4), "a tie is not a fall");
+        assert!(!held_out_collapsed(&[0.5, 0.4, 0.3, 0.2, 0.1], 0), "k = 0 never stops");
+    }
+
     fn tempfile_guard() -> PathBuf {
         let dir = PathBuf::from(format!(
             "/tmp/opencode/cubarium-voxel-es-test-{}",

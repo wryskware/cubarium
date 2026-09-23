@@ -338,6 +338,9 @@ pub fn train(
     train_seed: u64,
     center_eval: bool,
     out: PathBuf,
+    p5: bool,
+    per_generation: usize,
+    held_out_every: u32,
 ) -> Result<(), Boxed> {
     let controller = controller.trim().to_ascii_lowercase();
     if controller != "gru" {
@@ -362,6 +365,28 @@ pub fn train(
         )
         .into());
     }
+    let mix = if p5 {
+        let t = Instant::now();
+        let pool = super::landscape::training_pool(founder, workers)?;
+        let held_out = super::landscape::held_out_pool(founder, workers)?;
+        println!(
+            "# P5-C mix: {} training landscape fixtures, {per_generation} drawn per \
+             generation; {} held-out fixtures every {held_out_every} updates; founded in \
+             {:.1} s",
+            pool.len(),
+            held_out.len(),
+            t.elapsed().as_secs_f64()
+        );
+        Some(trainer::LandscapeMix {
+            pool,
+            per_generation,
+            held_out,
+            held_out_every,
+            collapse_checkpoints: 4,
+        })
+    } else {
+        None
+    };
     let spec = TrainSpec {
         founder,
         stage,
@@ -377,6 +402,7 @@ pub fn train(
         train_seed,
         evaluate_center: center_eval,
         out: out.clone(),
+        mix,
     };
     let cancel = AtomicBool::new(false);
     let report = trainer::train(&spec, &cancel)?;
@@ -414,6 +440,18 @@ pub fn train(
         println!(
             "best centre: generation {} score {:.4} → {}",
             best.generation, best.score, best.file
+        );
+    }
+    for h in &report.held_out {
+        println!(
+            "held-out upd {:>3}  score {:.4}  survived {:.3}  {}",
+            h.updates, h.score, h.survived, h.file
+        );
+    }
+    if let Some(best) = &report.best_held_out {
+        println!(
+            "best held-out checkpoint: {} updates, score {:.4} → {}",
+            best.updates, best.score, best.file
         );
     }
     if report.score_spreads.iter().all(|s| *s == 0.0) {
@@ -924,6 +962,8 @@ pub fn imitate(
     clip: f64,
     fit_seed: u64,
     out: PathBuf,
+    p5: bool,
+    write: bool,
 ) -> Result<(), Boxed> {
     let worker_limit = task::episode_worker_limit();
     if workers == 0 || workers > worker_limit {
@@ -931,6 +971,7 @@ pub fn imitate(
     }
     let founder = parse_founder(&founder)?;
     let band = task::parse_band(&band)?;
+    let mut held_out: Vec<task::Prepared> = Vec::new();
     let stages: Vec<Stage> = stages
         .split(',')
         .map(str::trim)
@@ -958,11 +999,41 @@ pub fn imitate(
 
     let mut all = Vec::new();
     let recorded = stages.clone();
-    for stage in stages {
-        let horizon = horizon.unwrap_or_else(|| stage.horizon());
+    // P5-C (C4): the arena layouts on both grids per stage, then every training
+    // landscape, one stream per acting body.
+    let mut groups: Vec<(String, Vec<task::Prepared>)> = Vec::new();
+    for &stage in &stages {
+        let fixtures = if p5 {
+            task::p5_arena_layouts(founder, stage, band)
+        } else {
+            task::training_layouts(founder, stage, band)
+        };
+        let n = layouts.min(fixtures.len());
+        groups.push((
+            format!("stage {}", stage.as_str()),
+            fixtures.into_iter().take(n).collect(),
+        ));
+    }
+    if p5 {
         let t = Instant::now();
-        let streams = imitate::record_streams(founder, stage, band, layouts, horizon, workers)?;
-        let paths = imitate::write_streams(&out.join("streams"), &streams)?;
+        let pool = super::landscape::training_pool(founder, workers)?;
+        held_out = super::landscape::held_out_pool(founder, workers)?;
+        println!(
+            "# founded {} training and {} held-out landscape fixtures in {:.1} s",
+            pool.len(),
+            held_out.len(),
+            t.elapsed().as_secs_f64()
+        );
+        groups.push(("landscapes".into(), pool));
+    }
+    for (group, fixtures) in groups {
+        let t = Instant::now();
+        let streams = imitate::record_fixtures(founder, &fixtures, horizon, workers)?;
+        let paths = if write {
+            imitate::write_streams(&out.join("streams"), &streams)?
+        } else {
+            Vec::new()
+        };
         let steps: usize = streams.iter().map(|s| s.steps).sum();
         let mut moving = 0usize;
         let mut feeding = 0usize;
@@ -977,9 +1048,9 @@ pub fn imitate(
         }
         let f = |n: usize| 100.0 * n as f64 / steps.max(1) as f64;
         println!(
-            "stage {}  horizon {horizon}  {} streams  {steps} steps  \
+            "{group}  {} fixtures  {} streams  {steps} steps  \
              forward {:.1}%  turning {:.1}%  feeding {:.1}%  {:.2} s  -> {}",
-            stage.as_str(),
+            fixtures.len(),
             streams.len(),
             f(moving),
             f(turning),
@@ -1084,6 +1155,23 @@ pub fn imitate(
         .validate_for_band(&clone_path.display().to_string(), band)?;
     println!();
     println!("clone {}", clone_path.display());
+    if p5 {
+        // C4: clone against its teacher, and against standing still, on the held-out
+        // landscapes before any search.
+        println!();
+        let arms: Vec<HoldoutArm> = vec![
+            (
+                "heuristic".into(),
+                EpisodeDriver::control(VoxelControl::Heuristic, founder),
+            ),
+            ("clone".into(), EpisodeDriver::gru(&file.theta, founder)?),
+            (
+                "stationary-feeding".into(),
+                EpisodeDriver::control(VoxelControl::StationaryFeeding, founder),
+            ),
+        ];
+        holdout_table(founder, &arms, &held_out, workers, false)?;
+    }
     println!(
         "evaluate with: cargo run --release -p cubarium-search -- voxel-evaluate --policy {} \
          --founder {} --stage {} --band {} --set holdout",
@@ -1270,5 +1358,145 @@ pub fn landscapes(
             horizon as f64 / single,
         );
     }
+    Ok(())
+}
+
+/// One arm of a held-out comparison: a name and the driver it runs.
+pub type HoldoutArm = (String, EpisodeDriver);
+
+/// Run every arm on the held-out landscapes (C2) and print one summary row per arm —
+/// mean score, per preset, survival, intake, walking, blocked motor, time near a drop,
+/// departures by cause — then, with `per_fixture`, one row per fixture per arm.
+pub fn holdout_table(
+    founder: Founder,
+    arms: &[HoldoutArm],
+    fixtures: &[task::Prepared],
+    workers: usize,
+    per_fixture: bool,
+) -> Result<Vec<(String, f64)>, Boxed> {
+    let cancel = AtomicBool::new(false);
+    println!(
+        "# held-out landscapes — {} ({}), {} fixtures, horizon {} ticks, protocol {}",
+        founder.name(),
+        founder.role(),
+        fixtures.len(),
+        super::landscape::LANDSCAPE_HORIZON_TICKS,
+        super::landscape::LANDSCAPE_PROTOCOL,
+    );
+    println!(
+        "holdout,arm,score,small,default,wide,survived,intake,motor,walked_m,unique_m2,\
+         blocked_motor_share,near_drop_share,starved,drowned,bodies"
+    );
+    let mut rows = Vec::new();
+    let mut per = Vec::new();
+    for (name, d) in arms {
+        let episodes = trainer::evaluate_fixtures(
+            d,
+            fixtures,
+            workers,
+            driver::Limits::new(&cancel),
+            &format!("holdout/{name}"),
+        )?;
+        let (score, by_preset, survived) = trainer::held_out_summary(fixtures, &episodes);
+        let n = episodes.len().max(1) as f64;
+        let mean = |f: &dyn Fn(&driver::Episode) -> f64| episodes.iter().map(f).sum::<f64>() / n;
+        let preset = |p: &str| {
+            by_preset
+                .iter()
+                .find(|(k, _)| k == p)
+                .map_or(f64::NAN, |(_, s)| *s)
+        };
+        let deaths = |i: usize| -> u64 {
+            episodes
+                .iter()
+                .map(|e| e.diagnostics.deaths_by_cause[i])
+                .sum()
+        };
+        let bodies: usize = episodes.iter().map(|e| e.bodies.len()).sum();
+        println!(
+            "holdout,{name},{score:.4},{:.4},{:.4},{:.4},{survived:.3},{:.4},{:.4},{:.2},{:.2},\
+             {:.3},{:.3},{},{},{bodies}",
+            preset("small"),
+            preset("default"),
+            preset("wide"),
+            mean(&|e| e.intake_organic),
+            mean(&|e| e.motor_organic),
+            mean(&|e| e.diagnostics.walked_m),
+            mean(&|e| e.diagnostics.unique_area_m2),
+            mean(&|e| e.diagnostics.blocked_motor_share),
+            mean(&|e| e.diagnostics.near_drop_or_edge_share),
+            deaths(cubarium_voxel_fauna::Departure::Starved.index()),
+            deaths(cubarium_voxel_fauna::Departure::Drowned.index()),
+        );
+        rows.push((name.clone(), score));
+        if per_fixture {
+            per.push((name.clone(), episodes));
+        }
+    }
+    if per_fixture {
+        println!("fixture,arm,label,score,survived,intake,walked_m,blocked_motor_share,starved,drowned");
+        for (name, episodes) in &per {
+            for e in episodes {
+                println!(
+                    "fixture,{name},{},{:.4},{:.3},{:.4},{:.2},{:.3},{},{}",
+                    e.fixture,
+                    e.score.score,
+                    e.survived_fraction(),
+                    e.intake_organic,
+                    e.diagnostics.walked_m,
+                    e.diagnostics.blocked_motor_share,
+                    e.diagnostics.deaths_by_cause
+                        [cubarium_voxel_fauna::Departure::Starved.index()],
+                    e.diagnostics.deaths_by_cause
+                        [cubarium_voxel_fauna::Departure::Drowned.index()],
+                );
+            }
+        }
+    }
+    Ok(rows)
+}
+
+/// `voxel-holdout` (P5-C): the held-out landscapes against the controls named in
+/// `controls` (comma-separated: `heuristic`, `stationary-feeding`, `no-intake`,
+/// `cruise`) and each policy file.
+pub fn holdout(
+    founder: String,
+    policies: Vec<PathBuf>,
+    controls: String,
+    workers: usize,
+    per_fixture: bool,
+) -> Result<(), Boxed> {
+    let founder = parse_founder(&founder)?;
+    let worker_limit = task::episode_worker_limit();
+    if workers == 0 || workers > worker_limit {
+        return Err(format!("--workers must be in 1..={worker_limit}").into());
+    }
+    let mut arms: Vec<HoldoutArm> = Vec::new();
+    for c in controls.split(',').map(str::trim).filter(|c| !c.is_empty()) {
+        let control = match c {
+            "heuristic" => VoxelControl::Heuristic,
+            "stationary-feeding" | "stationary" => VoxelControl::StationaryFeeding,
+            "no-intake" => VoxelControl::NoIntake,
+            "cruise" => VoxelControl::Cruise,
+            other => return Err(format!("unknown control `{other}`").into()),
+        };
+        arms.push((c.to_string(), EpisodeDriver::control(control, founder)));
+    }
+    for path in &policies {
+        let file = super::store::VoxelPolicyFile::load(path)?;
+        let d = file.driver()?;
+        if d.founder() != founder {
+            return Err(format!("{} is not a {} policy", path.display(), founder.name()).into());
+        }
+        arms.push((path.display().to_string(), d));
+    }
+    let t = Instant::now();
+    let fixtures = super::landscape::held_out_pool(founder, workers)?;
+    println!(
+        "# founded and prepared {} held-out fixtures in {:.1} s",
+        fixtures.len(),
+        t.elapsed().as_secs_f64()
+    );
+    holdout_table(founder, &arms, &fixtures, workers, per_fixture)?;
     Ok(())
 }

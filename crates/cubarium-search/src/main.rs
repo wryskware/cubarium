@@ -720,6 +720,14 @@ enum Command {
         /// Directory for `streams/` and `clone-center.json`. Disposable run output.
         #[arg(long, default_value = "runs/voxel-imitate-blind")]
         out: PathBuf,
+        /// P5-C (C4): record the arenas on both grids and every training landscape
+        /// (one stream per acting body), then report the clone against its teacher and
+        /// standing still on the held-out landscapes.
+        #[arg(long, default_value_t = false)]
+        p5: bool,
+        /// Write the recorded streams under `--out/streams`.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        write_streams: bool,
     },
     /// Phase-one voxel slice (P1-D): the bounded ES run over one founder's manifest, with
     /// shape-aware antithetic pairs, the initial centre evaluation, and the plan's caps.
@@ -781,6 +789,34 @@ enum Command {
         /// Directory for `checkpoint.json` and `centers/`.
         #[arg(long, default_value = "runs/voxel-es-blind")]
         out: PathBuf,
+        /// P5-C (C1, C2): the arena half on both grids plus a fresh draw of training
+        /// landscapes every generation, and held-out checkpoints.
+        #[arg(long, default_value_t = false)]
+        p5: bool,
+        /// Training landscapes drawn per generation (with `--p5`).
+        #[arg(long, default_value_t = 16)]
+        landscapes_per_generation: usize,
+        /// Updates between held-out checkpoints (with `--p5`).
+        #[arg(long, default_value_t = 32)]
+        held_out_every: u32,
+    },
+    /// P5-C: the held-out landscapes (seeds 201-208 × three presets, drained) against
+    /// disclosed controls and saved policies.
+    VoxelHoldout {
+        /// `blind` (littershredder) or `browser` (frondgrazer).
+        #[arg(long, default_value = "blind")]
+        founder: String,
+        /// Saved policy files to run, each its own arm.
+        #[arg(long)]
+        policy: Vec<PathBuf>,
+        /// Comma-separated controls: heuristic, stationary-feeding, no-intake, cruise.
+        #[arg(long, default_value = "heuristic,stationary-feeding")]
+        controls: String,
+        #[arg(long, default_value_t = cubarium_search::es::voxel::task::episode_worker_limit())]
+        workers: usize,
+        /// Also print one row per fixture per arm.
+        #[arg(long, default_value_t = false)]
+        per_fixture: bool,
     },
     /// Voxel sensing evaluation: one saved policy or a disclosed control over the
     /// training, held-out, or balanced blind-offset diagnostic set.
@@ -1133,6 +1169,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             clip,
             fit_seed,
             out,
+            p5,
+            write_streams,
         } => es::voxel::commands::imitate(
             founder,
             stages,
@@ -1147,7 +1185,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             clip,
             fit_seed,
             out,
+            p5,
+            write_streams,
         ),
+        Command::VoxelHoldout {
+            founder,
+            policy,
+            controls,
+            workers,
+            per_fixture,
+        } => es::voxel::commands::holdout(founder, policy, controls, workers, per_fixture),
         Command::VoxelTrain {
             founder,
             stage,
@@ -1165,6 +1212,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             center_eval,
             overwrite,
             out,
+            p5,
+            landscapes_per_generation,
+            held_out_every,
         } => {
             if overwrite {
                 let _ = std::fs::remove_dir_all(&out);
@@ -1185,6 +1235,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 train_seed,
                 center_eval,
                 out,
+                p5,
+                landscapes_per_generation,
+                held_out_every,
             )
         }
         Command::VoxelEvaluate {

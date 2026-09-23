@@ -63,7 +63,7 @@
 
 use cubarium::voxel::VoxelConfig;
 use cubarium::voxel::habitat;
-use cubarium::voxel::install_default_founders;
+use cubarium::voxel::{install_founders_with, policy_args};
 use cubarium::voxel::scene;
 use cubarium_voxel::{Command as WorldCommand, VoxelView, World};
 use cubarium_voxel_fauna::{
@@ -153,6 +153,9 @@ struct Seen {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // `policy=<lineage>=<file>`: that lineage runs a saved policy instead of the
+    // built-in centre (P5-C).
+    let policies = policy_args(&args).expect("policy=<lineage>=<file>");
     let minutes: f64 = args
         .iter()
         .skip(1)
@@ -286,7 +289,7 @@ fn main() {
     if heuristic {
         eprintln!("founders: the observation-only heuristic (control)");
     } else {
-        install_default_founders(&mut fauna).expect("the built-in centres validate");
+        install_founders_with(&mut fauna, &policies).expect("the founder centres validate");
     }
     for f in Founder::ALL {
         let sc = fauna_cfg.founder(f).core;

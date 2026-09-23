@@ -114,17 +114,14 @@ pub const EVALUATION_LAYOUT_SEEDS: [u64; 8] = [0, 1, 4, 5, 9, 41, 60, 61];
 /// policy file's own field.
 pub const START_HEADING_PROTOCOL: &str = "p2b-varied-1";
 
-/// How full this build's arenas introduce a founder (P2-C):
-/// `cubarium_voxel_sim::FOUNDER_START`, half the body and no reserve. A policy trained
-/// against a full start was trained where intake could only repay upkeep, which is a
-/// different task; it is refused rather than reinterpreted.
-///
-/// **Not yet moved for D11** (P5-B draws each acting body's structure per episode,
-/// uniform between `body_min` and `body_max`, still with no reserve): the host's
-/// built-in centres are checked against this string, and on this branch alone moving it
-/// would stop the live run instead of falling back. It moves to
-/// `p5-sampled-body-no-reserve` when the retrain branch carries P5-A's fallback.
-pub const STARTING_STORES_PROTOCOL: &str = "p2c-half-body-no-reserve";
+/// How full this build's episodes introduce an acting body: D11's draw, structure
+/// uniform between the lineage's newborn `body_min` and its adult `body_max`, no reserve
+/// ([`super::driver::sampled_stores`]). P2-C's `p2c-half-body-no-reserve` (half the body,
+/// no reserve) is a different task; a policy trained under it is refused rather than
+/// reinterpreted. Moved by P5-C before its training runs, so the centres it trains carry
+/// the string of the task they were trained on (P5-B held it back only so the host would
+/// still start; the retrain branch's host falls back to the heuristics instead).
+pub const STARTING_STORES_PROTOCOL: &str = "p5-sampled-body-no-reserve";
 
 /// Stage B's landed fixture revision. P3-A halves only the initial edible stock while
 /// retaining the successor stock and the browser crown. A Stage-B centre from the
@@ -599,7 +596,7 @@ impl Prepared {
     pub fn horizon(&self) -> Option<u64> {
         match self {
             Prepared::Arena(_) => None,
-            Prepared::Landscape(_) => Some(super::landscape::LANDSCAPE_HORIZON_TICKS),
+            Prepared::Landscape(l) => Some(l.horizon()),
         }
     }
 
@@ -660,6 +657,24 @@ pub fn training_layouts(founder: Founder, stage: Stage, band: Band) -> Vec<Prepa
     TRAINING_LAYOUT_SEEDS
         .map(|seed| Prepared::build_stage_in(founder, seed, stage, band))
         .into()
+}
+
+/// P5-C's arena half (C1): the sixteen training seeds as Stage-`stage` layouts in
+/// `band`, the first eight on the standard 0.25 m grid and the last eight on the
+/// 0.125 m grid (D11's variant) — sixteen distinct layouts, both grids equally.
+pub fn p5_arena_layouts(founder: Founder, stage: Stage, band: Band) -> Vec<Prepared> {
+    TRAINING_LAYOUT_SEEDS
+        .iter()
+        .enumerate()
+        .map(|(i, &seed)| {
+            let grid = if i < TRAINING_LAYOUT_SEEDS.len() / 2 {
+                ArenaGrid::Standard
+            } else {
+                ArenaGrid::Fine
+            };
+            PreparedArena::build_stage_on(founder, seed, stage, band, grid).into()
+        })
+        .collect()
 }
 
 /// The evaluation layout seeds, as [`Prepared`] layouts of `stage`, in the frozen order.

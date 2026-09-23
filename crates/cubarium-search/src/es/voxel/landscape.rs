@@ -188,6 +188,7 @@ impl Landscape {
             flora: self.flora.clone(),
             placements: self.placements.clone(),
             senses,
+            horizon: LANDSCAPE_HORIZON_TICKS,
         })
     }
 }
@@ -208,9 +209,24 @@ pub struct PreparedLandscape {
     flora: Flora,
     placements: Vec<Placement>,
     senses: Senses,
+    /// The episode horizon this fixture fixes: [`LANDSCAPE_HORIZON_TICKS`] (D8), or a
+    /// test's shorter one ([`PreparedLandscape::with_horizon`]).
+    horizon: u64,
 }
 
 impl PreparedLandscape {
+    /// The horizon every episode on this fixture runs.
+    pub fn horizon(&self) -> u64 {
+        self.horizon
+    }
+
+    /// The same fixture with a shorter horizon, for a test that must stay within a few
+    /// hundred ticks. Training and evaluation always run D8's.
+    pub fn with_horizon(mut self, ticks: u64) -> PreparedLandscape {
+        self.horizon = ticks;
+        self
+    }
+
     /// The frozen world, as every episode starts it.
     pub fn world(&self) -> &World {
         &self.world
@@ -396,4 +412,95 @@ pub fn prepare_sets(
         }
     }
     out
+}
+
+/// P5-C (C1): every training landscape fixture of `founder` — the sixteen training bases
+/// × three presets × both water states, 96 when every world rained — as trainer
+/// fixtures, founded on up to `workers` threads.
+pub fn training_pool(
+    founder: Founder,
+    workers: usize,
+) -> Result<Vec<super::task::Prepared>, String> {
+    let sets = LandscapeSet::training();
+    let lands = found_landscapes(&sets, workers)?;
+    Ok(prepare_sets(&lands, &sets, founder)
+        .into_iter()
+        .map(super::task::Prepared::from)
+        .collect())
+}
+
+/// P5-C (C2): the held-out landscape fixtures of `founder` — the eight held-out bases ×
+/// three presets, **drained** only, 24 — as trainer fixtures. Never trained on and never
+/// drawn from; the ship candidate is chosen on these.
+pub fn held_out_pool(
+    founder: Founder,
+    workers: usize,
+) -> Result<Vec<super::task::Prepared>, String> {
+    let sets: Vec<LandscapeSet> = LandscapeSet::held_out()
+        .into_iter()
+        .filter(|s| s.water_state == WaterState::Drained)
+        .collect();
+    let lands = found_landscapes(&sets, workers)?;
+    Ok(prepare_sets(&lands, &sets, founder)
+        .into_iter()
+        .map(super::task::Prepared::from)
+        .collect())
+}
+
+/// C1's per-generation draw: `k` distinct indices into a pool of `pool` fixtures, a pure
+/// function of `(train_seed, generation)` in the trainer's own stream — the same for
+/// every candidate of that generation (both signs of a pair and the centre see the same
+/// worlds) and a fresh draw the next. A partial Fisher–Yates over splitmix64; `k` is
+/// clamped to the pool.
+pub fn generation_draw(train_seed: u64, generation: u32, pool: usize, k: usize) -> Vec<usize> {
+    let mut state = train_seed
+        ^ u64::from(generation).wrapping_mul(0xD1B5_4A32_D192_ED03)
+        ^ DRAW_SALT;
+    let mut next = move || {
+        state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    };
+    let mut order: Vec<usize> = (0..pool).collect();
+    let k = k.min(pool);
+    for i in 0..k {
+        let j = i + (next() % (pool - i) as u64) as usize;
+        order.swap(i, j);
+    }
+    order.truncate(k);
+    order
+}
+
+/// The landscape draw's own salt, so it never shares a stream with a perturbation or a
+/// body-size draw.
+const DRAW_SALT: u64 = 0x_1A4D_5CA9_E0C1_0000;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_generation_draw_is_distinct_repeatable_and_moves_between_generations() {
+        let a = generation_draw(7, 3, 96, 16);
+        assert_eq!(a.len(), 16);
+        let mut sorted = a.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), 16, "sixteen distinct worlds");
+        assert!(a.iter().all(|&i| i < 96));
+        assert_eq!(a, generation_draw(7, 3, 96, 16), "a pure function of its seed");
+        assert_ne!(a, generation_draw(7, 4, 96, 16), "a fresh draw each generation");
+        assert_ne!(a, generation_draw(8, 3, 96, 16), "and each run seed");
+        assert_eq!(generation_draw(7, 3, 5, 16).len(), 5, "clamped to the pool");
+        // Over many generations every world is drawn.
+        let mut seen = [false; 96];
+        for g in 0..64 {
+            for i in generation_draw(7, g, 96, 16) {
+                seen[i] = true;
+            }
+        }
+        assert!(seen.iter().all(|s| *s));
+    }
 }

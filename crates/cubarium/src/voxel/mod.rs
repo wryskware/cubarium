@@ -1217,21 +1217,64 @@ fn built_in_or_fallback(founder: Founder) -> Option<EpisodeDriver> {
 /// A lineage whose built-in centre this build refuses keeps the seeder's heuristic, with
 /// a loud line saying so ([`built_in_or_fallback`]).
 pub fn install_default_founders(fauna: &mut Fauna) -> Result<()> {
+    install_founders_with(fauna, &[])
+}
+
+/// [`install_default_founders`], with each lineage named in `policies` driven by that
+/// saved policy file instead of the built-in centre (P5-C: `policy=<lineage>=<file>` on
+/// the examples, so a candidate runs in the live tools). The file validates itself
+/// against this build exactly as `--founder-policy` does, and a file declaring another
+/// lineage than the one it is named for is refused.
+pub fn install_founders_with(fauna: &mut Fauna, policies: &[(Founder, PathBuf)]) -> Result<()> {
     let mut drivers = Vec::with_capacity(Founder::ALL.len());
+    let mut sources = Vec::with_capacity(Founder::ALL.len());
     for founder in Founder::ALL {
-        if let Some(driver) = built_in_or_fallback(founder) {
+        if let Some((_, path)) = policies.iter().find(|(f, _)| *f == founder) {
+            let file = VoxelPolicyFile::load(path).map_err(anyhow::Error::msg)?;
+            let declared = file.founder().map_err(anyhow::Error::msg)?;
+            anyhow::ensure!(
+                declared == founder,
+                "policy={}={}: the file declares the {} lineage",
+                founder.name(),
+                path.display(),
+                declared.name(),
+            );
+            drivers.push((founder, file.driver().map_err(anyhow::Error::msg)?));
+            sources.push(format!("the policy file {}", path.display()));
+        } else if let Some(driver) = built_in_or_fallback(founder) {
             drivers.push((founder, driver));
+            sources.push("the built-in centre".to_string());
         }
     }
     install_founder_controllers(fauna, &drivers)?;
-    for (founder, driver) in &drivers {
+    for ((founder, driver), source) in drivers.iter().zip(&sources) {
         eprintln!(
-            "{} founders are driven by {} (the built-in centre)",
+            "{} founders are driven by {} ({source})",
             founder.name(),
             driver.name(),
         );
     }
     Ok(())
+}
+
+/// The examples' `policy=<lineage>=<file>` arguments, in order: one per lineage at most.
+pub fn policy_args(args: &[String]) -> Result<Vec<(Founder, PathBuf)>> {
+    let mut out: Vec<(Founder, PathBuf)> = Vec::new();
+    for spec in args.iter().filter_map(|a| a.strip_prefix("policy=")) {
+        let Some((name, path)) = spec.split_once('=') else {
+            bail!("policy= takes `<lineage>=<file>`, not `{spec}`");
+        };
+        let founder = cubarium_search::es::voxel::parse_founder(name)
+            .map_err(|e| anyhow::anyhow!("policy={spec}: {e}"))?;
+        anyhow::ensure!(!path.trim().is_empty(), "policy={spec} names no file");
+        anyhow::ensure!(
+            !out.iter().any(|(f, _)| *f == founder),
+            "policy= names {} twice; one policy per lineage",
+            founder.name()
+        );
+        out.push((founder, PathBuf::from(path.trim())));
+    }
+    Ok(out)
 }
 
 /// What one founder lineage of the ambient run is driven by, and how it was chosen. The
@@ -3308,6 +3351,39 @@ mod tests {
     /// on the retrain branch the schema-1 centres are refused and each lineage falls back
     /// to its heuristic until P5-C copies the new centres in; a centre that validates
     /// drives its own lineage.
+    #[test]
+    fn policy_arguments_name_one_file_per_lineage() {
+        let args = |v: &[&str]| -> Vec<String> { v.iter().map(|s| s.to_string()).collect() };
+        let got = policy_args(&args(&[
+            "voxel_census",
+            "6",
+            "policy=browser=a.json",
+            "preset=default",
+            "policy=littershredder=b.json",
+        ]))
+        .expect("parsed");
+        assert_eq!(
+            got,
+            vec![
+                (Founder::Browser, PathBuf::from("a.json")),
+                (Founder::Blind, PathBuf::from("b.json")),
+            ]
+        );
+        assert!(policy_args(&args(&["x", "policy=browser"])).is_err(), "no file");
+        assert!(policy_args(&args(&["x", "policy=hunter=a.json"])).is_err(), "no lineage");
+        assert!(
+            policy_args(&args(&["x", "policy=browser=a", "policy=frondgrazer=b"])).is_err(),
+            "one per lineage"
+        );
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        let err = install_founders_with(
+            &mut fauna,
+            &[(Founder::Browser, PathBuf::from("/nonexistent/centre.json"))],
+        )
+        .expect_err("a missing file is refused, not replaced by the built-in");
+        assert!(format!("{err:#}").contains("centre.json"), "{err:#}");
+    }
+
     #[test]
     fn the_built_in_centres_drive_their_own_lineage_by_default() {
         use clap::Parser;

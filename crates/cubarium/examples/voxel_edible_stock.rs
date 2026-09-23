@@ -38,7 +38,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use cubarium::voxel::VoxelConfig;
 use cubarium::voxel::habitat;
-use cubarium::voxel::install_default_founders;
+use cubarium::voxel::{install_founders_with, policy_args};
 use cubarium::voxel::scene;
 use cubarium_voxel::{Command as WorldCommand, VoxelView};
 use cubarium_voxel_fauna::{
@@ -70,6 +70,9 @@ const NO_OBSERVER: u64 = u64::MAX;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // `policy=<lineage>=<file>`: that lineage runs a saved policy instead of the
+    // built-in centre (P5-C).
+    let policies = policy_args(&args).expect("policy=<lineage>=<file>");
     let hours: f64 = args.get(1).map_or(6.0, |a| {
         a.parse().expect(
             "usage: voxel_edible_stock [HOURS] [preset=NAME] [seed=N] [heuristic] \
@@ -152,7 +155,7 @@ fn main() {
     if heuristic {
         eprintln!("founders: the observation-only heuristic (control)");
     } else {
-        install_default_founders(&mut fauna).expect("the built-in centres validate");
+        install_founders_with(&mut fauna, &policies).expect("the founder centres validate");
     }
     let mut senses = Senses::new();
     senses.settle(&world.view(), &flora.view());
