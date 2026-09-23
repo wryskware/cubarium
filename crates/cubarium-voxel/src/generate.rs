@@ -94,6 +94,9 @@ pub fn landform(world: &mut World) {
     match world.config.landform.clone() {
         Landform::Ridge => ridge(world),
         Landform::Staged(recipe) => staged(world, &recipe),
+        Landform::Terrarium(t) => {
+            crate::terrarium::build(world, &t);
+        }
     }
 }
 
@@ -304,7 +307,13 @@ pub fn lake_level(surface: &[i32], c: &Config, r: &Recipe) -> LakeDatum {
 
 /// Lower `level` until the lake has a column of edge to put its outlet on, and hand back
 /// the datum. At `floor + 1` the floor column is that edge, so this always terminates.
-fn seat_outlet(surface: &[i32], c: &Config, low: usize, floor_y: i32, level: i32) -> LakeDatum {
+pub(crate) fn seat_outlet(
+    surface: &[i32],
+    c: &Config,
+    low: usize,
+    floor_y: i32,
+    level: i32,
+) -> LakeDatum {
     let w = c.width as usize;
     let mut level = level.max(floor_y + 1);
     while level > floor_y + 1 {

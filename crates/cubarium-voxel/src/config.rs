@@ -207,6 +207,9 @@ impl Config {
         if let Landform::Staged(recipe) = &self.landform {
             recipe.validate().context("the staged landform recipe")?;
         }
+        if let Landform::Terrarium(t) = &self.landform {
+            t.validate().context("the terrarium landform")?;
+        }
         Ok(())
     }
 

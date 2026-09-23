@@ -224,8 +224,26 @@ fn expand_landform_preset(world: &mut toml::Table) -> std::result::Result<(), St
         }
         None => unreachable!("the key is there"),
     };
+    // A terrarium preset names the other generator: `landform = { terrarium = { .. } }`.
+    if let Some(terrarium) = cubarium_voxel::Terrarium::preset(&name) {
+        let mut table = match toml::Value::try_from(terrarium) {
+            Ok(toml::Value::Table(t)) => t,
+            _ => return Err("a terrarium is a table".into()),
+        };
+        for (key, value) in landform {
+            table.insert(key, value);
+        }
+        let mut wrapped = toml::Table::new();
+        wrapped.insert("terrarium".into(), toml::Value::Table(table));
+        world.insert("landform".into(), toml::Value::Table(wrapped));
+        return Ok(());
+    }
     let preset = cubarium_voxel::Preset::find(&name).ok_or_else(|| {
-        let known: Vec<&str> = cubarium_voxel::PRESETS.iter().map(|p| p.name).collect();
+        let known: Vec<&str> = cubarium_voxel::PRESETS
+            .iter()
+            .map(|p| p.name)
+            .chain(cubarium_voxel::Terrarium::PRESETS.iter().map(|(n, _)| *n))
+            .collect();
         format!("no landform preset is called {name:?}; the shipped ones are {known:?}")
     })?;
     let mut staged = match toml::Value::try_from(preset.recipe) {
@@ -784,6 +802,7 @@ fn generate_with_a_lake(
 ) -> (World, u64, usize) {
     let (want, want_tiers) = match &cfg.landform {
         Landform::Staged(r) => (r.water.min_lake_m2, r.water.min_tier_pools as usize),
+        Landform::Terrarium(t) => (t.water.min_lake_m2, t.water.min_tier_pools as usize),
         Landform::Ridge => (0.0, 0),
     };
     let build = |seed: u64| {

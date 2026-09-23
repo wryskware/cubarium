@@ -1,7 +1,6 @@
 use anyhow::{bail, ensure};
 use serde::{Deserialize, Serialize};
 
-use crate::recipe::Landform;
 use crate::{Config, Ledger, Material};
 
 /// The sky-visibility fan: `(dx, dy, dz, weight)` for each of 17 rays. The zenith
@@ -580,8 +579,8 @@ impl World {
         // states it before anything is built, so the config the world runs on — and the
         // config its snapshot carries — is the one the recipe asked for.
         let mut config = config;
-        if let Landform::Staged(recipe) = config.landform.clone() {
-            recipe.water.cycle_into(&mut config);
+        if let Some(water) = config.landform.water().copied() {
+            water.cycle_into(&mut config);
         }
         let n = config.cells();
         let mut world = World {
@@ -620,8 +619,8 @@ impl World {
         // holds water. This world does not: it has just been generated, so the inventory
         // **is** what it began with, and the booking is dropped in favour of recording it
         // as the initial stores below.
-        if let Landform::Staged(recipe) = world.config.landform.clone() {
-            crate::hydrate::hydrate(&mut world, &recipe.water);
+        if let Some(water) = world.config.landform.water().copied() {
+            crate::hydrate::hydrate(&mut world, &water);
             world.ledger = Ledger::default();
         }
         world.ledger.initial_stored = world.view().stored_m3();

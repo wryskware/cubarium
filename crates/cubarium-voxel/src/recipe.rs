@@ -41,6 +41,20 @@ pub enum Landform {
     /// warped into rocky regions, and restrained fine detail, voxelised through the same
     /// layering and camera pass.
     Staged(Recipe),
+    /// The designed terrarium: a ring of tree and tower built up from parts
+    /// ([`crate::terrarium`]).
+    Terrarium(crate::terrarium::Terrarium),
+}
+
+impl Landform {
+    /// The water a landscape states for itself, if it states any.
+    pub fn water(&self) -> Option<&Water> {
+        match self {
+            Landform::Ridge => None,
+            Landform::Staged(r) => Some(&r.water),
+            Landform::Terrarium(t) => Some(&t.water),
+        }
+    }
 }
 
 /// One deterministic stream per generation pass. Distinct constants, xored into the

@@ -43,6 +43,10 @@ pub mod profile;
 /// What a landscape is made of, in metres, and which generator builds it.
 pub mod recipe;
 pub mod snapshot;
+/// The designed terrarium: a ring of tree and tower, built up from parts.
+pub mod terrarium;
+/// The two-voxel rule: no one-voxel fins, slots, sheets or slits.
+pub mod tidy;
 mod sparse;
 /// Is this world's water cycle one a habitat could live in? Reports, never rejects.
 pub mod viability;
@@ -56,6 +60,7 @@ pub use hollows::Hollow;
 pub use hydrate::{Basin, Hydrated, hydrate};
 pub use ledger::Ledger;
 pub use material::Material;
+pub use terrarium::Terrarium;
 pub use recipe::{
     Benches, Erosion, Hollows, Landform, PRESETS, Preset, Recipe, Strata, Streams, Tiers, Water,
 };
