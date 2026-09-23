@@ -11,7 +11,8 @@ use std::sync::atomic::AtomicBool;
 use cubarium_search::es::voxel::driver::{self, Limits};
 use cubarium_search::es::voxel::landscape::{Landscape, WaterState};
 use cubarium_search::es::voxel::task::Prepared;
-use cubarium_search::es::voxel::{EpisodeDriver, VoxelControl};
+use cubarium_search::es::voxel::imitate;
+use cubarium_search::es::voxel::{EpisodeDriver, VoxelControl, teacher_sink};
 use cubarium_voxel::{Landform, World};
 use cubarium_voxel_fauna::{Fauna, FaunaConfig, Founder};
 use cubarium_voxel_flora::{Flora, FloraConfig};
@@ -149,6 +150,61 @@ fn every_founder_in_a_landscape_episode_runs_the_candidate() {
                 "{founder:?}: body {} never sampled the candidate",
                 b.id
             );
+        }
+    }
+}
+
+/// P5-C: teacher recording on a landscape keeps **one buffer per acting body**. The
+/// shared buffer P5-B found interleaved the bodies' samples into one stream and every
+/// body's `reset()` wiped the others'. Each body's buffer holds exactly the samples that
+/// body's controller took, the recorded episode is the unrecorded one, and
+/// [`imitate::record_fixtures`] turns it into one valid stream per body.
+#[test]
+fn landscape_teacher_recording_keeps_one_stream_per_body() {
+    let land = landscape();
+    for founder in Founder::ALL {
+        let prepared = Prepared::Landscape(Box::new(
+            land.prepare(founder, WaterState::Drained)
+                .expect("the drained state always exists"),
+        ));
+        let plain = EpisodeDriver::control(VoxelControl::Heuristic, founder);
+        let bare = run(&prepared, &plain, 9);
+        assert!(
+            bare.bodies.len() >= 2,
+            "{founder:?}: the tiny ring must place several bodies of this lineage, or the \
+             test proves nothing"
+        );
+
+        let sink = teacher_sink();
+        let recorded = run(&prepared, &plain.clone().recording(sink.clone()), 9);
+        assert_eq!(recorded, bare, "{founder:?}: the recording wrapper is transparent");
+
+        let buffers = sink.lock().expect("sink").clone();
+        assert_eq!(
+            buffers.len(),
+            recorded.bodies.len(),
+            "{founder:?}: one buffer per acting body"
+        );
+        for (buffer, body) in buffers.iter().zip(&recorded.bodies) {
+            assert_eq!(
+                buffer.len() as u64,
+                body.samples,
+                "{founder:?}: body {}'s buffer holds exactly its own samples",
+                body.id
+            );
+        }
+        assert_ne!(
+            buffers[0][0].observation, buffers[1][0].observation,
+            "{founder:?}: two bodies' streams are two bodies' observations"
+        );
+
+        let streams = imitate::record_fixtures(founder, &[prepared], Some(TICKS), 1)
+            .expect("the landscape records");
+        assert_eq!(streams.len(), recorded.bodies.len(), "{founder:?}");
+        for (k, s) in streams.iter().enumerate() {
+            s.validate("landscape stream", founder).expect("valid");
+            assert_eq!(s.body, k);
+            assert_eq!(s.stage, imitate::LANDSCAPE_STAGE);
         }
     }
 }

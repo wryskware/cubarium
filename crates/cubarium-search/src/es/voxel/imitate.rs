@@ -15,7 +15,8 @@
 //! - **Recording.** [`record_streams`] runs the heuristic through the ordinary episode
 //!   driver with [`super::controller::RecordingController`] attached, so the episode is
 //!   the real one and the pairs are the real observations and the real *adapted* actions
-//!   (the fauna's own `resolve_actions`). One [`TeacherStream`] per layout per stage.
+//!   (the fauna's own `resolve_actions`). One [`TeacherStream`] per acting body per
+//!   fixture ([`record_fixtures`]; a landscape has one body per placed founder).
 //! - **Fitting.** [`fit`] minimises the squared error between the GRU's adapted actions
 //!   and the teacher's over those streams, **teacher-forced**: the network reads the
 //!   recorded observation at every step and never the simulation, so no episode runs per
@@ -52,7 +53,8 @@ use cubarium_voxel_fauna::{Founder, Manifest, Transfer};
 use serde::{Deserialize, Serialize};
 
 use super::controller::{EpisodeDriver, VoxelControl, teacher_sink};
-use super::task::{self, Band, Stage};
+use super::landscape::{LANDSCAPE_HORIZON_TICKS, LANDSCAPE_PROTOCOL};
+use super::task::{self, Band, Prepared, Stage};
 use super::{driver, voxel_schema_digest};
 use crate::es::bits::hex_f64s;
 use crate::es::optimizer::Adam;
@@ -88,6 +90,14 @@ pub struct TeacherStream {
     pub start_heading: String,
     pub starting_stores: String,
     pub layout_seed: u64,
+    /// The fixture's label ([`task::Prepared::label`]): an arena's seed with its grid, or
+    /// a landscape's `preset/base/water`. Empty in a stream written before P5-C.
+    #[serde(default)]
+    pub fixture: String,
+    /// Which acting body of the episode this stream is, in the driver's body order. An
+    /// arena has one; a landscape one per placed founder of the lineage (D7).
+    #[serde(default)]
+    pub body: usize,
     pub horizon: u64,
     /// Observation width, so a truncated file is refused on arithmetic rather than
     /// silently reshaped.
@@ -169,17 +179,27 @@ impl TeacherStream {
                 task::STARTING_STORES_PROTOCOL
             ));
         }
-        let stage = task::parse_stage(&self.stage).map_err(|e| format!("{name}: {e}"))?;
-        let band = task::parse_band(&self.band).map_err(|e| format!("{name}: {e}"))?;
-        let want = task::arena_protocol(founder, stage, band);
-        if self.arena_protocol != want {
-            return Err(format!(
-                "{name}: stream arena protocol is `{}`, this build's stage {} band {} uses \
-                 `{want}`: the task differs",
-                self.arena_protocol,
-                stage.as_str(),
-                band.as_str()
-            ));
+        if self.stage == LANDSCAPE_STAGE {
+            if self.arena_protocol != LANDSCAPE_PROTOCOL {
+                return Err(format!(
+                    "{name}: landscape stream protocol is `{}`, this build's landscapes \
+                     are `{LANDSCAPE_PROTOCOL}`: the task differs",
+                    self.arena_protocol
+                ));
+            }
+        } else {
+            let stage = task::parse_stage(&self.stage).map_err(|e| format!("{name}: {e}"))?;
+            let band = task::parse_band(&self.band).map_err(|e| format!("{name}: {e}"))?;
+            let want = task::arena_protocol(founder, stage, band);
+            if self.arena_protocol != want {
+                return Err(format!(
+                    "{name}: stream arena protocol is `{}`, this build's stage {} band {} \
+                     uses `{want}`: the task differs",
+                    self.arena_protocol,
+                    stage.as_str(),
+                    band.as_str()
+                ));
+            }
         }
         let inputs = founder.manifest().inputs();
         if self.inputs != inputs {
@@ -236,17 +256,19 @@ pub fn streams_digest(streams: &[TeacherStream]) -> u64 {
         bytes.push_str(&s.stage);
         bytes.push_str(&s.band);
         bytes.push_str(&s.layout_seed.to_string());
+        bytes.push_str(&s.fixture);
+        bytes.push_str(&s.body.to_string());
         bytes.push_str(&crate::es::bits::encode(&s.observations));
         bytes.push_str(&crate::es::bits::encode(&s.actions));
     }
     crate::es::fixture::fnv1a(bytes.as_bytes())
 }
 
-/// Record the heuristic on the training layouts of one `(stage, band)`.
-///
-/// The episode is the ordinary one: same prepared layout, same driver, same fauna tick.
-/// The only difference is the transparent recording wrapper, which returns the teacher's
-/// response untouched — so a recorded episode is an episode, not a simulation of one.
+/// The `stage` a landscape stream carries: a landscape is not an arena stage.
+pub const LANDSCAPE_STAGE: &str = "landscape";
+
+/// Record the heuristic on the training layouts of one `(stage, band)`, on the
+/// standard grid: one stream per layout (an arena has one acting body).
 pub fn record_streams(
     founder: Founder,
     stage: Stage,
@@ -257,9 +279,27 @@ pub fn record_streams(
 ) -> Result<Vec<TeacherStream>, String> {
     let prepared = task::training_layouts(founder, stage, band);
     let prepared = &prepared[..layouts.min(prepared.len())];
+    record_fixtures(founder, prepared, Some(horizon), workers)
+}
+
+/// Record the heuristic on any fixtures — arenas of either stage and grid, landscapes —
+/// as **one stream per acting body** in fixture order and then body order.
+///
+/// The episode is the ordinary one: same prepared fixture, same driver, same fauna tick,
+/// the body sizes the fixture's own seed draws. The only difference is the transparent
+/// recording wrapper, which returns the teacher's response untouched — so a recorded
+/// episode is an episode, not a simulation of one. `horizon` overrides every fixture's
+/// own (an arena's stage horizon, a landscape's [`LANDSCAPE_HORIZON_TICKS`]). A body
+/// that never sampled leaves no stream.
+pub fn record_fixtures(
+    founder: Founder,
+    prepared: &[Prepared],
+    horizon: Option<u64>,
+    workers: usize,
+) -> Result<Vec<TeacherStream>, String> {
     let inputs = founder.manifest().inputs();
     let cancel = AtomicBool::new(false);
-    let slots: std::sync::Mutex<Vec<Option<TeacherStream>>> =
+    let slots: std::sync::Mutex<Vec<Option<Vec<TeacherStream>>>> =
         std::sync::Mutex::new(vec![None; prepared.len()]);
     let cursor = std::sync::atomic::AtomicUsize::new(0);
     let failure: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
@@ -271,52 +311,77 @@ pub fn record_streams(
                     if index >= prepared.len() {
                         return;
                     }
+                    let fixture = &prepared[index];
+                    let (stage, band, protocol) = match fixture {
+                        Prepared::Arena(a) => (
+                            a.stage.as_str().to_string(),
+                            a.band.as_str().to_string(),
+                            task::arena_protocol(founder, a.stage, a.band),
+                        ),
+                        Prepared::Landscape(_) => (
+                            LANDSCAPE_STAGE.to_string(),
+                            "none".to_string(),
+                            LANDSCAPE_PROTOCOL.to_string(),
+                        ),
+                    };
+                    let horizon = horizon.unwrap_or_else(|| {
+                        fixture.horizon().unwrap_or_else(|| {
+                            fixture.arena().map_or(LANDSCAPE_HORIZON_TICKS, |a| a.stage.horizon())
+                        })
+                    });
                     let sink = teacher_sink();
                     let d = EpisodeDriver::control(VoxelControl::Heuristic, founder)
                         .recording(sink.clone());
                     let outcome = driver::run_prepared(
-                        &prepared[index],
+                        fixture,
                         &d,
                         horizon,
                         driver::Limits::new(&cancel),
-                        &format!("imitate/{}/{index}", stage.as_str()),
+                        &format!("imitate/{stage}/{}", fixture.label()),
                     );
-                    match outcome {
-                        Ok(_) => {}
-                        Err(e) => {
-                            *failure.lock().expect("failure") = Some(e.to_string());
-                            return;
-                        }
+                    if let Err(e) = outcome {
+                        *failure.lock().expect("failure") = Some(e.to_string());
+                        return;
                     }
-                    let pairs = sink.lock().expect("sink").clone();
-                    let mut observations = Vec::with_capacity(pairs.len() * inputs);
-                    let mut actions = Vec::with_capacity(pairs.len() * 3);
-                    for p in &pairs {
-                        observations.extend_from_slice(&p.observation);
-                        actions.extend_from_slice(&[
-                            p.action.forward,
-                            p.action.turn,
-                            p.action.feed,
-                        ]);
-                    }
-                    slots.lock().expect("slots")[index] = Some(TeacherStream {
-                        schema: TEACHER_SCHEMA.into(),
-                        build: crate::evaluate::BUILD_ID.into(),
-                        teacher: TEACHER_CONTROLLER.into(),
-                        founder: founder.name().into(),
-                        digest: voxel_schema_digest(founder),
-                        stage: stage.as_str().into(),
-                        band: band.as_str().into(),
-                        arena_protocol: task::arena_protocol(founder, stage, band),
-                        start_heading: task::START_HEADING_PROTOCOL.into(),
-                        starting_stores: task::STARTING_STORES_PROTOCOL.into(),
-                        layout_seed: prepared[index].layout_seed(),
-                        horizon,
-                        inputs,
-                        steps: pairs.len(),
-                        observations,
-                        actions,
-                    });
+                    let buffers = sink.lock().expect("sink").clone();
+                    let streams = buffers
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, pairs)| !pairs.is_empty())
+                        .map(|(body, pairs)| {
+                            let mut observations = Vec::with_capacity(pairs.len() * inputs);
+                            let mut actions = Vec::with_capacity(pairs.len() * 3);
+                            for p in pairs {
+                                observations.extend_from_slice(&p.observation);
+                                actions.extend_from_slice(&[
+                                    p.action.forward,
+                                    p.action.turn,
+                                    p.action.feed,
+                                ]);
+                            }
+                            TeacherStream {
+                                schema: TEACHER_SCHEMA.into(),
+                                build: crate::evaluate::BUILD_ID.into(),
+                                teacher: TEACHER_CONTROLLER.into(),
+                                founder: founder.name().into(),
+                                digest: voxel_schema_digest(founder),
+                                stage: stage.clone(),
+                                band: band.clone(),
+                                arena_protocol: protocol.clone(),
+                                start_heading: task::START_HEADING_PROTOCOL.into(),
+                                starting_stores: task::STARTING_STORES_PROTOCOL.into(),
+                                layout_seed: fixture.layout_seed(),
+                                fixture: fixture.label(),
+                                body,
+                                horizon,
+                                inputs,
+                                steps: pairs.len(),
+                                observations,
+                                actions,
+                            }
+                        })
+                        .collect();
+                    slots.lock().expect("slots")[index] = Some(streams);
                 }
             });
         }
@@ -325,18 +390,24 @@ pub fn record_streams(
         return Err(format!("a recording episode failed: {detail}"));
     }
     let slots = slots.into_inner().map_err(|e| e.to_string())?;
-    let streams: Vec<TeacherStream> = slots.into_iter().flatten().collect();
+    let streams: Vec<TeacherStream> = slots.into_iter().flatten().flatten().collect();
     for (i, s) in streams.iter().enumerate() {
         s.validate(&format!("stream {i}"), founder)?;
     }
     Ok(streams)
 }
 
-/// Write one run's streams under `dir`, one file per layout, and return their paths.
+/// Write one run's streams under `dir`, one file per body per fixture, and return their
+/// paths.
 pub fn write_streams(dir: &Path, streams: &[TeacherStream]) -> Result<Vec<PathBuf>, String> {
     let mut paths = Vec::new();
     for s in streams {
-        let path = dir.join(format!("stage{}-seed{}.json", s.stage, s.layout_seed));
+        let fixture = if s.fixture.is_empty() {
+            s.layout_seed.to_string()
+        } else {
+            s.fixture.replace('/', "-")
+        };
+        let path = dir.join(format!("stage{}-{fixture}-body{}.json", s.stage, s.body));
         s.write(&path)?;
         paths.push(path);
     }
@@ -944,6 +1015,8 @@ mod tests {
             start_heading: task::START_HEADING_PROTOCOL.into(),
             starting_stores: task::STARTING_STORES_PROTOCOL.into(),
             layout_seed: 0,
+            fixture: String::new(),
+            body: 0,
             horizon: 40,
             inputs,
             steps,
@@ -1054,6 +1127,8 @@ mod tests {
             start_heading: task::START_HEADING_PROTOCOL.into(),
             starting_stores: task::STARTING_STORES_PROTOCOL.into(),
             layout_seed: 7,
+            fixture: String::new(),
+            body: 0,
             horizon: 100,
             inputs,
             steps: 2,
@@ -1162,7 +1237,9 @@ mod tests {
         assert_eq!(recorded.eaten_organic, bare.eaten_organic);
         assert_eq!(recorded.driver, "heuristic", "the wrapper keeps the name");
 
-        let pairs = sink.lock().expect("sink").clone();
+        let buffers = sink.lock().expect("sink").clone();
+        assert_eq!(buffers.len(), 1, "an arena has one acting body, so one buffer");
+        let pairs = buffers[0].clone();
         let cadence = founder.manifest().cadence_ticks();
         assert_eq!(pairs.len() as u64, ticks / cadence);
         let inputs = founder.manifest().inputs();

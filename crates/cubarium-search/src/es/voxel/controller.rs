@@ -187,9 +187,16 @@ pub struct TeacherStep {
     pub action: Actions,
 }
 
-/// Where a [`RecordingController`] puts its pairs. Shared because the controller itself is
-/// moved into the fauna's table and never handed back.
-pub type TeacherSink = Arc<Mutex<Vec<TeacherStep>>>;
+/// Where [`RecordingController`]s put their pairs: **one buffer per controller**, in the
+/// order the controllers were made. Shared because each controller is moved into the
+/// fauna's table and never handed back.
+///
+/// Per controller, not per sink: a landscape episode hands one fresh controller to each
+/// of its acting bodies (D7), and a single shared buffer interleaved their samples into
+/// one incoherent stream — and every body's `reset()` cleared what the others had
+/// recorded (P5-B's finding; the P5-C fix). The episode driver hands controllers out in
+/// acting-body order, so buffer `k` is body `k`'s stream.
+pub type TeacherSink = Arc<Mutex<Vec<Vec<TeacherStep>>>>;
 
 /// A fresh, empty sink.
 pub fn teacher_sink() -> TeacherSink {
@@ -197,7 +204,7 @@ pub fn teacher_sink() -> TeacherSink {
 }
 
 /// A transparent wrapper around any [`Controller`] that records `(observation, adapted
-/// action)` for every sample.
+/// action)` for every sample into its own buffer of a [`TeacherSink`].
 ///
 /// Transparent is the contract: the wrapped controller sees the same observation, and the
 /// **unmodified** response goes back to the fauna, so an episode recorded is an episode
@@ -207,19 +214,33 @@ pub struct RecordingController {
     inner: Box<dyn Controller>,
     manifest: cubarium_voxel_fauna::Manifest,
     sink: TeacherSink,
+    /// This controller's buffer in the sink.
+    slot: usize,
 }
 
 impl RecordingController {
+    /// Wrap `inner`, opening a new buffer at the end of `sink` for it.
     pub fn new(
         inner: Box<dyn Controller>,
         manifest: cubarium_voxel_fauna::Manifest,
         sink: TeacherSink,
     ) -> RecordingController {
+        let slot = {
+            let mut buffers = sink.lock().expect("teacher sink");
+            buffers.push(Vec::new());
+            buffers.len() - 1
+        };
         RecordingController {
             inner,
             manifest,
             sink,
+            slot,
         }
+    }
+
+    /// Which buffer of the sink this controller writes.
+    pub fn slot(&self) -> usize {
+        self.slot
     }
 }
 
@@ -228,7 +249,7 @@ impl Controller for RecordingController {
         let response = self.inner.drive(observation);
         let action = resolve_actions(response, &self.manifest);
         if let Ok(mut sink) = self.sink.lock() {
-            sink.push(TeacherStep {
+            sink[self.slot].push(TeacherStep {
                 observation: observation.to_vec(),
                 action,
             });
@@ -236,12 +257,13 @@ impl Controller for RecordingController {
         response
     }
 
-    /// Fresh memory means a fresh recording: one episode is one stream, so the sink is
-    /// emptied with the wrapped controller's memory.
+    /// Fresh memory means a fresh recording: one body's episode is one stream, so this
+    /// controller's own buffer is emptied with the wrapped controller's memory. Nobody
+    /// else's is touched.
     fn reset(&mut self) {
         self.inner.reset();
         if let Ok(mut sink) = self.sink.lock() {
-            sink.clear();
+            sink[self.slot].clear();
         }
     }
 }
@@ -335,8 +357,9 @@ impl EpisodeDriver {
     }
 
     /// The same driver, recording every `(observation, adapted action)` pair it produces
-    /// into `sink`. One sink per episode: [`EpisodeDriver::fresh`] clears it through the
-    /// wrapper's `reset`, so a reused sink holds the last episode only.
+    /// into `sink`: every controller [`EpisodeDriver::fresh`] hands out opens its own
+    /// buffer there, so an episode with `n` acting bodies leaves `n` buffers, in body
+    /// order. Use one sink per episode.
     pub fn recording(mut self, sink: TeacherSink) -> EpisodeDriver {
         self.record = Some(sink);
         self
