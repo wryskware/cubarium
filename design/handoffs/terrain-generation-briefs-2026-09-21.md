@@ -1906,3 +1906,28 @@ Return (≤30 lines): commits, the levers chosen and why (with the numbers
 that decided them), eligibility and founders before/after per seed, 1 h
 and 6 h foliage, drownings, gate tries per seed, the two capture paths,
 test counts for `cargo test -p cubarium-voxel` and the host's voxel tests.
+
+## Package SW — integrated 2026-09-22
+
+Landed 28e62ac (tests first), cf810c6 (wet shore: tier-0 ground within
+`Tiers::shore_m` 3.0 of the lake cut to a soil bank rising one row per
+0.5 m, soil to 3 rows under the waterline; `small` only; SCHEMA 16),
+9dd6ad5 (dry lip `shore_lip_m` 0.375, so the seeder does not stand
+umbrellafronds on the lake bed), e61f824 (Fable's call: the shore stops
+at any other closed hollow's rim — it must not drain features it did not
+make). `default`/`wide` hydrate within 0.1 % of before. Tests: voxel 124 +
+54, host voxel 80 (+2 release studies).
+
+Finding: only seed 1 was truly dry; seeds 2/4/12/77 already had
+18–19 % umbrellafrond-eligible ground. Eligible at seeding now 13.8–24.7 %
+/ 3.4–8.8 % on the five bases (bar 12 / 2 met). Seed 1, 6 h: 0.83 → 2.20
+foliage, 18 umbrellafrond (9.20 without the rim stop). Seed 4 loses its
+1 h springturf (a perched saturated flat at row 22 is trimmed at its
+lake edge and dries) but ends higher at 6 h (1.22 → 1.85). Single
+trajectories are noisy — seed 4's 6 h read 0.87 and 1.85 across two runs
+with the same seeding — so no further terrain tuning on one-run
+evidence. Drownings over the first hour are roughly unchanged (seed 1
+8 → 13); they are the seeder placing shallow-tolerance species on wet
+flats before the first shower — the organism line's package 4. Walk
+gate: same seeds pass/fail as before (1 and 7 fail); Wrysk is not sure
+walkability should be a hard gate — his call, pending.
