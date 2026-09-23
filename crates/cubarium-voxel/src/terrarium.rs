@@ -236,9 +236,9 @@ impl Terrarium {
             evaporation_m_per_s: 1.0e-5,
             atmosphere_fraction: 0.02,
             // Groundwater now, so its size is for the eye and costs the weather nothing.
-            reentry_m3_per_s: 4.0e-4,
+            reentry_m3_per_s: 1.6e-3,
             reentry_from_aquifer: true,
-            lake_drain_m2_per_s: 0.05,
+            lake_drain_m2_per_s: 0.2,
             min_lake_m2: 2.0,
             lake_depth_m: 0.375,
             ..Water::SMALL
@@ -309,9 +309,9 @@ impl Terrarium {
             evaporation_m_per_s: 1.0e-5,
             atmosphere_fraction: 0.02,
             // Groundwater now, so its size is for the eye and costs the weather nothing.
-            reentry_m3_per_s: 2.5e-3,
+            reentry_m3_per_s: 8.0e-3,
             reentry_from_aquifer: true,
-            lake_drain_m2_per_s: 0.25,
+            lake_drain_m2_per_s: 0.8,
             min_lake_m2: 3.0,
             lake_depth_m: 0.5,
             ..Water::DEFAULT
@@ -403,6 +403,8 @@ pub struct Report {
     /// The stream: its length from the spring to the lake, and how far it falls.
     pub river_m: f64,
     pub river_drop_m: f64,
+    /// The stream's course, spring first, as `(x, z)` columns.
+    pub river: Vec<(u32, u32)>,
     /// What the two-voxel rule changed.
     pub tidied: crate::tidy::Thin,
     /// Solid cells with no path to the floor, removed.
@@ -1212,7 +1214,9 @@ fn river(b: &mut Build) -> Option<(u32, u32, u32)> {
             (0..h).rev().find(|&y| b.g.solid(x, y, z)).unwrap_or(0)
         })
         .collect();
-    let wet: Vec<bool> = (0..n).map(|i| b.lake[i] || top[i] < b.water_y).collect();
+    // The stream ends in **the lake**, not in whatever the raised level flooded nearest:
+    // those it may cross, the lake it must reach.
+    let wet: Vec<bool> = (0..n).map(|i| b.lake[i]).collect();
     let arch = b.arch.clone();
     let water = |i: usize| wet[i];
     let blocked = |i: usize| arch[i];
@@ -1301,12 +1305,8 @@ fn river(b: &mut Build) -> Option<(u32, u32, u32)> {
             .windows(2)
             .map(|p| (top[col(p[1].0, p[1].1)] - top[col(p[0].0, p[0].1)]).max(0) as f64)
             .sum();
-        let end = path.last().copied().unwrap_or((x, z));
-        let span = {
-            let o = (end.0 - x).rem_euclid(w);
-            o.min(w - o) as f64
-        };
-        let score = drop + 0.3 * visible + 3.0 * falls + 0.25 * span - 3.0 * climb;
+        // No reward for distance: the long way round to the lake reads as the wrong way.
+        let score = drop + 0.3 * visible + 3.0 * falls - 3.0 * climb;
         if best.as_ref().is_none_or(|c| score > c.score) {
             best = Some(Course { path, score });
         }
@@ -1324,10 +1324,13 @@ fn river(b: &mut Build) -> Option<(u32, u32, u32)> {
     b.report.pools += 1;
     let spring = Some((sx.rem_euclid(w) as u32, (ys - 1) as u32, sz as u32));
 
-    // The channel: a groove one row deep, its bed never rising downstream, two wide —
+    // The channel: a groove two rows deep, its bed never rising downstream, two wide —
     // the path's column and whichever neighbour across the flow stands nearer its height.
-    let mut bed = ys - 1;
+    // It leaves the pool a row under the plateau's surface, so the pool's only way out is
+    // the channel and it never brims over onto the plateau and down every face.
+    let mut bed = ys - 2;
     let path = course.path;
+    b.report.river = path.iter().map(|&(x, z)| (x.rem_euclid(w) as u32, z as u32)).collect();
     for k in 1..path.len() {
         let (px, _) = path[k - 1];
         let (x, z) = path[k];
@@ -1341,8 +1344,13 @@ fn river(b: &mut Build) -> Option<(u32, u32, u32)> {
             break;
         }
         let here = top[col(x, z)];
-        let fell = bed - here;
-        bed = bed.min(here - 1);
+        let fell = bed - (here - 1);
+        bed = bed.min(here - 2);
+        // A level run still falls a voxel every few columns, so the water does not have
+        // to pile up at the spring to push itself along and thin to nothing downstream.
+        if k % 5 == 0 {
+            bed = (bed - 1).max(here - 3).min(bed);
+        }
         // Across the flow: `x` for a step in `z`, `z` otherwise.
         let (ox, oz) = if x == px { (1i64, 0i32) } else { (0, 1) };
         let pair = [(x + ox, z + oz), (x - ox, z - oz)]
@@ -1350,9 +1358,16 @@ fn river(b: &mut Build) -> Option<(u32, u32, u32)> {
             .filter(|&(_, zz)| (0..d).contains(&zz))
             .min_by_key(|&(xx, zz)| (top[col(xx, zz)] - here).abs())
             .unwrap_or((x, z));
-        for (cx, cz) in [(x, z), pair] {
+        // Water only passes between cells that share a face: a diagonal step also cuts
+        // the corner cell between the two, or the channel leaks at every one.
+        let (_, pz) = path[k - 1];
+        let corner = (x != px && z != pz).then_some((x, pz));
+        for (k2, (cx, cz)) in [Some((x, z)), corner, Some(pair)].into_iter().flatten().enumerate() {
             let t = top[col(cx, cz)];
-            if t > bed + 3 {
+            // The course's own column is always cut, a notch through any rise it climbs,
+            // and so is a corner; the partner only where it stands near the bed, not up a
+            // riser beside it.
+            if k2 > 0 && Some((cx, cz)) == Some(pair) && t > bed + 4 {
                 continue;
             }
             for y in bed + 1..=t.max(bed + 1) {
@@ -1367,7 +1382,7 @@ fn river(b: &mut Build) -> Option<(u32, u32, u32)> {
         }
         // The fall itself, open from the lip down.
         if fell > 1 {
-            for y in here + 1..=bed + fell {
+            for y in here + 1..=here + fell {
                 b.g.keep_air(x, y, z);
                 b.g.keep_air(pair.0, y, pair.1);
             }
@@ -1530,8 +1545,10 @@ fn groves(b: &Build) -> (usize, usize) {
                 if !is_soil(x, y, z) || b.g.solid(x, y + 1, z) {
                     continue;
                 }
-                // Roots in saturated soil drown: the whole root depth stands above the water.
-                if y + head >= h || y - soil + 1 < b.water_y || !(1..soil).all(|k| is_soil(x, y - k, z)) || (1..=head).any(|k| b.g.solid(x, y + k, z)) {
+                // Roots need air: at least the upper half of the root depth stands above the
+                // water table. (How much saturation a species bears is its own
+                // `establish_saturated_max`; this is the measure until the vaulttree has one.)
+                if y + head >= h || y - soil / 2 + 1 < b.water_y || !(1..soil).all(|k| is_soil(x, y - k, z)) || (1..=head).any(|k| b.g.solid(x, y + k, z)) {
                     continue;
                 }
                 let crown = (-r..=r).all(|dz| {

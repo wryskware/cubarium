@@ -3,7 +3,7 @@
 //! lake, the water table, the sky store and the tier pools once a simulated minute.
 //! Development diagnostics only.
 
-use cubarium_voxel::{Config, Landform, TICK_HZ, Terrarium, World, hydrate};
+use cubarium_voxel::{Config, Landform, TICK_HZ, Terrarium, World, hydrate, terrarium};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -21,6 +21,11 @@ fn main() {
         seed,
         landform: Landform::Terrarium(t),
         ..Config::default()
+    };
+    // The same terrain again, for its report: where the stream runs.
+    let course = {
+        let mut probe = World::empty(config.clone());
+        terrarium::build(&mut probe, &t).river
     };
     let mut world = World::new(config);
     let vm = world.config().voxel_m;
@@ -76,6 +81,23 @@ fn main() {
             free - in_lake,
             v.aquifer_m3,
         );
+        if std::env::var_os("COURSE").is_some() {
+            // Water in the stream's columns, spring to lake: the most free water in any
+            // cell of the column, sampled every few columns.
+            let c = world.config();
+            let v = world.view();
+            let line: Vec<String> = course
+                .iter()
+                .step_by(3)
+                .map(|&(x, z)| {
+                    let most = (0..c.height)
+                        .map(|y| v.free[c.index(x as i64, y, z)])
+                        .fold(0.0f64, f64::max);
+                    format!("{most:.2}")
+                })
+                .collect();
+            println!("  stream: {}", line.join(" "));
+        }
         for _ in 0..60 * TICK_HZ as u64 {
             world.step_with(threads);
         }
