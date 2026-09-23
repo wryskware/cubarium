@@ -35,7 +35,10 @@ use crate::Flora;
 /// Schema 3: package N (`design/handoffs/voxel-new-plants-2026-09-23.md`) appends three
 /// species (the per-species ledger arrays grow to nine) and two config fields
 /// (`water_depth_min_m`, `falls`): refused, not migrated.
-pub const SCHEMA: u32 = 3;
+///
+/// Schema 4: package G (`design/handoffs/voxel-plant-viability-2026-09-23.md` §G) adds
+/// `SpeciesConfig::graze_refuge` to the serialised config: refused, not migrated.
+pub const SCHEMA: u32 = 4;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

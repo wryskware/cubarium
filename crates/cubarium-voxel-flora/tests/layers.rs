@@ -300,6 +300,8 @@ fn a_bite_is_bounded_by_the_layers_the_mouth_reaches() {
             SpeciesConfig::foliage_layer([0.34, 1.0], 1.0, 0.75, 0.0),
         ],
     }];
+    // The claim is the layer bound, not the grazing refuge: no floor here.
+    config.species_mut(Species::Bloomcrown).graze_refuge = 0.0;
     let alpha = config.species(Species::Bloomcrown).alpha;
     let mut flora = Flora::new(config);
     assert!(flora.apply(
@@ -342,7 +344,9 @@ fn a_bite_is_bounded_by_the_layers_the_mouth_reaches() {
 fn regrowth_fills_from_the_bottom_and_senescence_loses_from_the_top() {
     let support = 2;
     let mut world = plain(0.25, 8, 10, support, 0.6);
-    let config = FloraConfig::default();
+    let mut config = FloraConfig::default();
+    // The rosette is stripped to nothing here, which predates the grazing refuge.
+    config.species_mut(Species::Bloomcrown).graze_refuge = 0.0;
     let alpha = config.species(Species::Bloomcrown).alpha;
     let wood_max = config.species(Species::Bloomcrown).wood_max;
     let mut flora = Flora::new(config);

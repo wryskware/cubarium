@@ -11,6 +11,8 @@
 //!    leaves as heat at the animal's own current density; the **mineral stays**, as it
 //!    does in a plant: respiration takes organic matter and leaves mineral behind. Ages
 //!    advance here, so `age_ticks` is the number of maintenance payments it has made.
+//!    Then **growth**: the reserve pays for new structure at no more than
+//!    `growth_max_per_s`, scaled by how full it is, until `body_max` (package G).
 //! 3. **Cue field.** On due ticks, update emission, decay and diffusion after maintenance
 //!    and before any controller samples.
 //! 4. **Controllers** — the sampling point, explicit and shared. Every founder whose
@@ -29,7 +31,10 @@
 //!    founder, resolve the held actions — the motor budget is paid on the requested
 //!    equivalent displacement, the pose sweeps in bounded sub-steps, and on the due tick
 //!    one local bite is attempted through the plant layer's real transfers — then record
-//!    the interval's motion and intake feedback.
+//!    the interval's motion and intake feedback. Every bite is **sated** (package G): it
+//!    asks in proportion to hunger, takes `E / (E + K)` of that from food holding `E`,
+//!    and never more than the reserve's room after yield, so a full animal takes nothing
+//!    and nothing eaten is respired as surplus.
 //! 7. **Reproduction.** A clutch whose face is gone or drowned goes to carrion; every
 //!    body's surplus counter and refractory move; a gestating frondgrazer pays its
 //!    instalment into its escrow and gives birth at term; a littershredder in surplus
@@ -78,8 +83,9 @@ enum Respiration {
     /// The founder's paid motion, `motor_respiration_per_s` scaled by the requested
     /// equivalent displacement.
     Motor,
-    /// Digestion: the undigested fraction of a bite, and anything assimilated that a full
-    /// body and a full reserve could not hold.
+    /// Digestion: the undigested fraction of a bite. Anything assimilated that the reserve
+    /// could not hold would be booked here too, but the sated bite (package G) never takes
+    /// more than the room after yield, so that share is zero by construction.
     Digestion,
     /// An interrupted gestation: the loss fraction of an escrow whose parent could not
     /// pay the next instalment, or died carrying it.
@@ -163,7 +169,10 @@ fn tick_inner(
 
     cubarium_voxel::voxel_phase!(FaunaStep, {
         cubarium_voxel::voxel_phase!(FaunaTerrain, { terrain(fauna, &view) });
-        cubarium_voxel::voxel_phase!(FaunaMaintenance, { maintenance(fauna) });
+        cubarium_voxel::voxel_phase!(FaunaMaintenance, {
+            maintenance(fauna);
+            grow(fauna);
+        });
         // Maintenance and age settle first. A due field update then reads the litter as
         // it stands after the previous tick's feeding, before this tick's controllers.
         if let Some(s) = senses.as_deref_mut() {
@@ -276,6 +285,81 @@ fn maintenance(fauna: &mut Fauna) {
         if is_founder && from_body > 0.0 {
             fauna.animals[i].founder_state.feedback.structural_loss += from_body;
         }
+    }
+}
+
+/// Step 2, second half: **growth on plant time** (package G, decision 4). New structure is
+/// paid out of the reserve — a relabelling inside the body, so mineral and energy stay
+/// where they are and no ledger moves — at `growth_max_per_s · DT · fullness`, where
+/// `fullness` is the reserve over `reserve_cap · body`, at most one, and never past
+/// `body_max` or what the reserve holds.
+///
+/// So however much a juvenile eats it cannot outgrow the cap, and one short of food slows
+/// its growth instead of spending the reserve it lives on. Intake never builds structure
+/// directly any more: it goes to the reserve ([`assimilate`]), and this is the only way
+/// in to the body.
+fn grow(fauna: &mut Fauna) {
+    for i in 0..fauna.animals.len() {
+        let sc = body::effective_config(&fauna.config, &fauna.animals[i]);
+        let a = &mut fauna.animals[i];
+        let room = (sc.body_max - a.body).max(0.0);
+        if !(room > 0.0) || !(a.reserve > 0.0) {
+            continue;
+        }
+        let cap = sc.reserve_of(a.body);
+        let fullness = if cap > 0.0 {
+            (a.reserve / cap).min(1.0)
+        } else {
+            1.0
+        };
+        let built = (sc.growth_max_per_s * DT * fullness)
+            .min(room)
+            .min(a.reserve);
+        if built > 0.0 {
+            a.reserve -= built;
+            a.body += built;
+        }
+    }
+}
+
+/// **Hunger**: how far the reserve is short of its cap `reserve_cap · body`, from 0 (full)
+/// to 1 (empty). A newborn's paid endowment above the cap reads as sated.
+fn hunger(a: &Animal, sc: &SpeciesConfig) -> f64 {
+    let cap = sc.reserve_of(a.body);
+    if !(cap > 0.0) {
+        return 0.0;
+    }
+    (1.0 - a.reserve / cap).clamp(0.0, 1.0)
+}
+
+/// **The sated bite** (package G, decisions 1 and 2): `want · E / (E + K)` from food
+/// holding `E` at the mouth, and never more than `room / yield` — the organic matter
+/// whose assimilated share exactly fills the reserve's room. Assimilation is at most
+/// `yield ·` the bite (less when the bite's mineral binds), so what is built always fits
+/// and nothing is respired as surplus.
+fn sated_bite(want: f64, stock: f64, sc: &SpeciesConfig, a: &Animal, yield_fraction: f64) -> f64 {
+    if !(want > 0.0) || !(stock > 0.0) {
+        return 0.0;
+    }
+    let k = sc.bite_half_stock;
+    let diminished = if k > 0.0 {
+        want * (stock / (stock + k))
+    } else {
+        want
+    };
+    diminished
+        .min(room_after_yield(a, sc, yield_fraction))
+        .max(0.0)
+}
+
+/// The most organic matter a bite may take: the reserve's room over the yield, so that
+/// what the bite builds exactly fills it. Unbounded for a food that builds nothing.
+fn room_after_yield(a: &Animal, sc: &SpeciesConfig, yield_fraction: f64) -> f64 {
+    let room = (sc.reserve_of(a.body) - a.reserve).max(0.0);
+    if yield_fraction > 0.0 {
+        room / yield_fraction
+    } else {
+        f64::INFINITY
     }
 }
 
@@ -605,8 +689,14 @@ fn act(
         let bite = sc.bite_per_s * DT;
         let plan = &plans[i];
         if plan.total >= bite && bite > 0.0 {
-            crop(fauna, flora, i, &sc, bite, &plan.reach);
-            fauna.animals[i].state = State::Cropping;
+            // At food: a sated body rests where it is, a hungry one crops.
+            let want = bite * hunger(&fauna.animals[i], &sc);
+            fauna.animals[i].state = if want > 0.0 {
+                crop(fauna, flora, i, &sc, want, &plan.reach);
+                State::Cropping
+            } else {
+                State::Resting
+            };
             continue;
         }
         let Some(target) = plan.target else {
@@ -754,7 +844,9 @@ fn founder_feed(
     sc: &SpeciesConfig,
     effort: f64,
 ) -> bool {
-    let want = sc.bite_per_s * manifest.controller_period_s * effort;
+    // The hungry rate, scaled by hunger: a full reserve asks for nothing at all.
+    let want =
+        sc.bite_per_s * manifest.controller_period_s * effort * hunger(&fauna.animals[i], sc);
     if !(want > 0.0) {
         return false;
     }
@@ -775,11 +867,10 @@ fn founder_feed(
         return false;
     }
     let cols = body::mouth_columns(view, &pose, geometry);
-    // Which food is at this mouth, before anything is withdrawn.
+    // Which food is at this mouth, and how much of it — the `E` the bite diminishes
+    // with — before anything is withdrawn.
     let meal = match founder {
-        Founder::Blind => {
-            body::mouth_detritus(&flora.view(), view, &cols, site_y, geometry).map(|(meal, _)| meal)
-        }
+        Founder::Blind => body::mouth_detritus(&flora.view(), view, &cols, site_y, geometry),
         Founder::Browser => body::mouth_foliage_stand(
             &flora.view(),
             view,
@@ -788,9 +879,9 @@ fn founder_feed(
             geometry,
             crate::Diet::of(founder),
         )
-        .map(|(root, _)| body::Meal::Stand { root }),
+        .map(|(root, stock)| (body::Meal::Stand { root }, stock)),
     };
-    let Some(meal) = meal else {
+    let Some((meal, stock)) = meal else {
         return false;
     };
     // Which class this is: a pool names its own, and a stand's is whose mouth chose it
@@ -802,6 +893,12 @@ fn founder_feed(
             Founder::Browser => Food::Foliage,
         },
     };
+    // The bite this hunger, this stock and this room allow.
+    let yield_fraction = fauna.config.founder(founder).yield_for(food);
+    let bite = sated_bite(want, stock, sc, &fauna.animals[i], yield_fraction);
+    if !(bite > 0.0) {
+        return false;
+    }
     // The mouth's own cell range, handed to the plant layer: a foliage bite comes out
     // of the layers the band reaches, lowest first, and the crown above them is not
     // offered (`design/handoffs/voxel-plant-layers-2026-09-22.md`).
@@ -814,11 +911,11 @@ fn founder_feed(
     };
     let taken = match meal {
         body::Meal::Stand { root } => flora
-            .take_foliage_in_layers(root, want, &layers)
+            .take_foliage_in_layers(root, bite, &layers)
             .map(|t| t.taken),
         body::Meal::Pool { site, food } => match food {
-            Food::Litter => flora.take_litter(site, want),
-            Food::Carrion => flora.take_carrion(site, want),
+            Food::Litter => flora.take_litter(site, bite),
+            Food::Carrion => flora.take_carrion(site, bite),
             Food::CapTissue | Food::Foliage => {
                 unreachable!("a stand's tissue is not a ground pool")
             }
@@ -827,7 +924,6 @@ fn founder_feed(
     let Some(taken) = taken else {
         return false;
     };
-    let yield_fraction = fauna.config.founder(founder).yield_for(food);
     let taken = fauna.book_eaten(taken, food);
     if let Some(plant) = plant {
         fauna.ledger.bites_by_plant[plant.index()] += 1;
@@ -843,6 +939,10 @@ fn founder_feed(
 /// One mouthful, spent over the stands in reach in site order: the plant layer bounds each
 /// withdrawal by the foliage it finds, so what comes back is what the animal got.
 ///
+/// `want` is already scaled by hunger. The sated bite applies here as in the founder
+/// mouth: each stand holding `E` edible gives `E / (E + K)` of what is still wanted, and
+/// the whole mouthful is capped at the reserve's room after yield.
+///
 /// **This is the legacy heuristic-species path and it has no diet.** Decisions §3's
 /// acceptance rule is written against the two founder *lineages* and is applied at
 /// [`crate::Diet`] in the founder mouth; a non-founder body still reaches through
@@ -854,18 +954,27 @@ fn crop(
     flora: &mut Flora,
     i: usize,
     sc: &SpeciesConfig,
-    bite: f64,
+    want: f64,
     reach: &[(Site, f64)],
 ) {
-    let mut left = bite;
-    for &(site, _) in reach {
+    // The room cap, once for the whole mouthful.
+    let mut left = want.min(room_after_yield(&fauna.animals[i], sc, sc.yield_fraction));
+    for &(site, stock) in reach {
         if !(left > 0.0) {
             break;
+        }
+        let ask = if sc.bite_half_stock > 0.0 {
+            left * (stock / (stock + sc.bite_half_stock))
+        } else {
+            left
+        };
+        if !(ask > 0.0) {
+            continue;
         }
         // Whose foliage this is, read before the withdrawal, so the report can say which
         // species was eaten rather than which species is in principle edible.
         let plant = flora.view().stand_at(site).map(|s| s.species);
-        let Some(taken) = flora.take_foliage(site, left) else {
+        let Some(taken) = flora.take_foliage(site, ask) else {
             continue;
         };
         let taken = fauna.book_eaten(taken, Food::Foliage);
@@ -901,7 +1010,7 @@ fn crop(
 /// `Stand::mineral` is the same and says so (Astra R4.3) — so an animal holding mineral
 /// still builds nothing out of a mineral-free bite. Storing mineral for later, and
 /// spending it, is a rule decision and not a repair.
-/// Returns the organic matter actually **placed** — into body and reserve — which is
+/// Returns the organic matter actually **placed** — into the reserve — which is
 /// what a founder's prior-interval intake feedback records, and not the bite's whole
 /// organic matter.
 fn assimilate(
@@ -922,18 +1031,16 @@ fn assimilate(
     let assimilated = (yield_fraction * t.organic).min(funded);
     let mut respired = t.organic - assimilated;
 
-    // Build: structure first, up to `body_max`, then the reserve, up to `reserve_cap ·
-    // body`. What neither can hold is respired — an animal cannot store what it cannot
-    // carry, and refusing the bite instead would need a rule about hunger this round does
-    // not have.
-    let to_body = (sc.body_max - a.body).max(0.0).min(assimilated);
-    a.body += to_body;
-    let rest = assimilated - to_body;
+    // Store: into the reserve, up to `reserve_cap · body`. Structure is built out of the
+    // reserve at the growth rate ([`grow`]), never straight from a bite. What the reserve
+    // cannot hold is respired, but the sated bite ([`sated_bite`]) never takes more than
+    // the room after yield, so this is the conservation backstop and not a rule that
+    // fires (package G: an animal never takes food it cannot store).
     let room = (sc.reserve_of(a.body) - a.reserve).max(0.0);
-    let to_reserve = rest.min(room);
+    let to_reserve = assimilated.min(room);
     a.reserve += to_reserve;
-    respired += rest - to_reserve;
-    let placed = to_body + to_reserve;
+    respired += assimilated - to_reserve;
+    let placed = to_reserve;
 
     // Energy: the density of what was eaten, so nothing is created for any food.
     let kept_energy = if t.organic > 0.0 {

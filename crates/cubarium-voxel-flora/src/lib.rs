@@ -795,6 +795,22 @@ pub struct SpeciesConfig {
     /// How wood moves a stand between the two ends is [`SpeciesConfig::crown_height_m_at`].
     pub crown_height_m: [f64; 2],
     pub crown_radius_m: [f64; 2],
+    /// **The grazing refuge** (package G, `design/handoffs/voxel-plant-viability-2026-09-23.md`
+    /// §G.3): the share of the foliage its wood carries that no bite can take — basal
+    /// buds, tissue pressed to the ground, leaves too tough or too few to be worth a mouth.
+    /// Each foliage layer keeps `graze_refuge ×` its own capacity (`share · alpha · wood`),
+    /// so the floors sum to `graze_refuge · alpha · wood`; [`StandLayer::edible`] is what
+    /// stands above it, and it is the one reading every consumer takes and the one
+    /// withdrawals are bounded by. A floor is not a height refuge: the lanternberry's browse
+    /// line and the tall crowns keep theirs in their profiles, on top of this.
+    ///
+    /// **0.15** in the base, for every species the brief does not name: enough stock left
+    /// on a stripped plant to refoliate from without making it inedible. Springturf and
+    /// velvetpad **0.3** (their growth points sit at the base, under a mouth), stonecushion
+    /// **0.4** (a cushion is mostly skirt pressed to rock). Glowcap keeps the base 0.15: its
+    /// income is substrate, not cap, so its refuge only protects the tissue that fruits
+    /// again, and the shredder has litter to fall back on.
+    pub graze_refuge: f64,
     /// **What is in that volume**: the species' anatomy, staged by `wood / wood_max`.
     /// The first entry whose `wood_fraction_max` is at or above the fraction applies;
     /// the last must catch a full-grown stand. Its foliage-bearing layers are the
@@ -1038,6 +1054,8 @@ impl SpeciesConfig {
             hop: 1,
             crown_height_m: [0.25, 0.75],
             crown_radius_m: [0.125, 0.375],
+            // The refuge a plant the brief does not name keeps (`graze_refuge`'s doc).
+            graze_refuge: 0.15,
             // The v1 base carries no anatomy of its own: every preset states one.
             profile: SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer(
                 [0.0, 1.0],
@@ -1261,6 +1279,8 @@ impl SpeciesConfig {
             assimilation: 0.008,
             crown_height_m: [0.125, 0.1875],
             crown_radius_m: [0.125, 0.25],
+            // Grazing refuge: basal buds under a grazer's mouth (`graze_refuge`'s doc).
+            graze_refuge: 0.3,
             // Anatomy document §3: a mat, no trunk at any size, entirely inside a
             // grazer's reach; cropping it is the mat thinning.
             profile: SpeciesConfig::one_stage(vec![SpeciesConfig::mat_layer(
@@ -1337,6 +1357,8 @@ impl SpeciesConfig {
             propagule_rate: 0.00005,
             crown_height_m: [0.125, 0.1875],
             crown_radius_m: [0.125, 0.15625],
+            // Grazing refuge: a cushion is mostly skirt pressed to the rock (`graze_refuge`'s doc).
+            graze_refuge: 0.4,
             // Anatomy document §3: a dome in two foliage bands, no trunk. Decisions
             // §3 keeps it on the browser's menu, so there is no diet flag here.
             profile: SpeciesConfig::one_stage(vec![
@@ -1411,6 +1433,8 @@ impl SpeciesConfig {
             propagule_rate: 0.0005,
             crown_height_m: [0.125, 0.125],
             crown_radius_m: [0.1875, 0.375],
+            // Grazing refuge: basal buds under a grazer's mouth (`graze_refuge`'s doc).
+            graze_refuge: 0.3,
             // Anatomy document §3: a sheet, no trunk. Decisions §3 keeps it on the
             // browser's menu (removing it would have cut 58 % of what the D3 browser
             // ate), so there is no diet flag here either.
@@ -1963,6 +1987,14 @@ impl SpeciesConfig {
                 return fail(&format!("{label} is {pair:?}, not finite and nonnegative"));
             }
         }
+        // A refuge is a share of the foliage: zero is no refuge, and one would be a plant
+        // no mouth could ever take anything from.
+        if !(self.graze_refuge >= 0.0 && self.graze_refuge < 1.0) {
+            return fail(&format!(
+                "graze_refuge is {}, not a fraction in [0, 1)",
+                self.graze_refuge
+            ));
+        }
         Ok(())
     }
 }
@@ -2160,6 +2192,20 @@ impl FloraConfig {
                     1.0,
                     0.0,
                 )]);
+        }
+        self
+    }
+
+    /// Every species with **no grazing refuge** (`graze_refuge` 0): a stand can be
+    /// withdrawn to nothing, as before package G.
+    ///
+    /// For the frozen training arenas, whose finite patches are seeded crowns trimmed to a
+    /// fixed stock with the ordinary withdrawal and eaten down to nothing by policies
+    /// trained before the refuge existed; the retrain decides whether its arenas keep a
+    /// floor. Not a shipped configuration: the live world's plants keep theirs.
+    pub fn without_graze_refuge(mut self) -> FloraConfig {
+        for species in Species::ALL {
+            self.species_mut(species).graze_refuge = 0.0;
         }
         self
     }
@@ -2635,6 +2681,11 @@ pub fn layers_of(config: &FloraConfig, stand: &Stand, voxel_m: f64) -> Vec<Stand
             share: if is_foliage { layer.share } else { 0.0 },
             capacity: if is_foliage { layer.share * cap } else { 0.0 },
             stock: fi.map_or(0.0, |i| stand.layer_stock[i]),
+            floor: if is_foliage {
+                sc.graze_refuge * layer.share * cap
+            } else {
+                0.0
+            },
             porosity: layer.porosity,
             area_m2: (std::f64::consts::PI * r_m * r_m).max(MIN_LAYER_AREA_M2),
         });
@@ -2759,13 +2810,16 @@ impl<'a> FloraView<'a> {
             // a low browser at an adult bloomcrown reaches its basal rosette and never
             // its crown. For a single-layer species the sum is the whole `foliage` and
             // the disc cell is `crown_voxels(wood)`, so nothing about this call moved.
+            // Since the grazing refuge the sum is of what stands above each layer's floor
+            // ([`StandLayer::edible`]), which is all a mouth can take.
             let mut reachable = 0.0;
             let mut radius = 0.0f64;
             for layer in self.layers(stand) {
-                if layer.cell > ceiling || !(layer.stock > 0.0) {
+                let edible = layer.edible();
+                if layer.cell > ceiling || !(edible > 0.0) {
                     continue;
                 }
-                reachable += layer.stock;
+                reachable += edible;
                 radius = radius.max(layer.radius_v);
             }
             if !(reachable > 0.0) {
@@ -3310,7 +3364,8 @@ impl Flora {
     }
 
     /// A consumer eats the **foliage** of the stand on `site`, up to `want`: at most what
-    /// the stand's `P` holds, never its wood and never its reserve.
+    /// the stand's `P` holds above its grazing floor ([`SpeciesConfig::graze_refuge`],
+    /// [`StandLayer::edible`]), never its wood and never its reserve.
     ///
     /// The mineral leaves by the same fraction rule every other outflow uses
     /// ([`Stand::mineral`]): a transfer of a fraction of the stand's material takes that
@@ -3318,7 +3373,8 @@ impl Flora {
     /// the organic matter taken.
     ///
     /// `None`, booking nothing at all, when there is nothing to take: no stand on the site,
-    /// a stand with no foliage left, or a `want` that is not a positive finite number.
+    /// a stand with no foliage left above its floor, or a `want` that is not a positive
+    /// finite number.
     /// `Some` therefore always carries a strictly positive `organic`.
     ///
     /// Applied **between** ticks, like a [`Command`]: nothing here reads or moves the
@@ -3355,6 +3411,9 @@ impl Flora {
         self.withdraw_foliage(site, want, Some(layers))
     }
 
+    /// The one foliage withdrawal: lowest layer first, each layer giving at most its
+    /// [`StandLayer::edible`] stock, so no bite takes a layer below its grazing floor
+    /// (package G). Everything that takes foliage comes through here.
     fn withdraw_foliage(
         &mut self,
         site: Site,
@@ -3366,14 +3425,16 @@ impl Flora {
         }
         let i = self.stands.binary_search_by_key(&site, |s| s.site).ok()?;
         let e_v = self.config.species(self.stands[i].species).energy_density;
-        // Which layers the mouth may take from, lowest first, and what each holds.
+        // Which layers the mouth may take from, lowest first, and what each offers: its
+        // edible stock, above the grazing floor, and never the floor itself.
         let offered: Vec<(usize, f64)> =
             layers_of(&self.config, &self.stands[i], self.config.voxel_m)
                 .into_iter()
                 .filter_map(|l| {
                     let fi = l.foliage_index?;
                     let inside = layers.is_none_or(|range| range.contains(&l.cell));
-                    (inside && l.stock > 0.0).then_some((fi, l.stock))
+                    let edible = l.edible();
+                    (inside && edible > 0.0).then_some((fi, edible))
                 })
                 .collect();
         let mut per_layer = [0.0f64; MAX_FOLIAGE_LAYERS];

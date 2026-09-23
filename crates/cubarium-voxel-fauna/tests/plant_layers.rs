@@ -79,9 +79,10 @@ fn browser_feeding(fauna: &mut Fauna, world: &World, x: i64, z: u32) -> u64 {
             x,
             z,
             founder: Founder::Browser,
+            // An empty reserve: hungry, so package G's satiety asks for a real bite.
             stores: StartingStores {
                 body: 0.8,
-                reserve: 1.0,
+                reserve: 0.0,
             },
             heading_rad: 0.0,
         },
@@ -112,6 +113,12 @@ fn reached(fauna: &Fauna, world: &World, flora: &Flora, id: u64) -> Option<(Site
 /// The per-layer stocks of the stand at `s`.
 fn stocks(flora: &Flora, s: Site) -> Vec<f64> {
     flora.view().layers_at(s).map(|l| l.stock).collect()
+}
+
+/// The per-layer **edible** stocks of the stand at `s`: what stands above each layer's
+/// grazing floor (package G), which is what a mouth is offered.
+fn edible(flora: &Flora, s: Site) -> Vec<f64> {
+    flora.view().layers_at(s).map(|l| l.edible()).collect()
 }
 
 // ------------------------------------------------------------------ the claims
@@ -151,11 +158,12 @@ fn an_adult_bloomcrowns_reachable_stock_is_its_rosette() {
     let id = browser_feeding(&mut fauna, &world, 2, 2);
     let got = reached(&fauna, &world, &flora, id).expect("a reachable rosette");
     assert_eq!(got.0, s);
+    let rosette = edible(&flora, s)[0];
     assert!(
-        (got.1 - layers[0].1).abs() < 1e-12,
-        "the mouth was offered {} and the rosette holds {}",
+        (got.1 - rosette).abs() < 1e-12,
+        "the mouth was offered {} and the rosette holds {} above its floor",
         got.1,
-        layers[0].1
+        rosette
     );
     assert!(
         got.1 < stand.foliage,
@@ -182,12 +190,14 @@ fn a_seedling_bloomcrown_is_wholly_reachable() {
     let mut fauna = Fauna::new(FaunaConfig::default());
     let id = browser_feeding(&mut fauna, &world, 2, 2);
     let got = reached(&fauna, &world, &flora, id).expect("a reachable seedling");
+    let above_floor: f64 = edible(&flora, s).iter().sum();
     assert!(
-        (got.1 - stand.foliage).abs() < 1e-12,
-        "a seedling offered {} of its {}",
+        (got.1 - above_floor).abs() < 1e-12,
+        "a seedling offered {} of the {} it holds above its floor",
         got.1,
-        stand.foliage
+        above_floor
     );
+    assert!(above_floor < stand.foliage, "the floor stays on the plant");
 }
 
 /// (3) Package L's accepted consequence (`design/handoffs/voxel-ladder-growth-2026-09-23.md`
@@ -215,11 +225,12 @@ fn a_juvenile_umbrellafrond_offers_its_lowest_tier_and_an_adult_nothing() {
     let id = browser_feeding(&mut fauna, &world, 2, 2);
     let got = reached(&fauna, &world, &flora, id).expect("the lowest tier is in band");
     assert_eq!(got.0, s);
+    let lowest = edible(&flora, s)[0];
     assert!(
-        (got.1 - layers[0]).abs() < 1e-12,
-        "the mouth was offered {} and the lowest tier holds {}",
+        (got.1 - lowest).abs() < 1e-12,
+        "the mouth was offered {} and the lowest tier holds {} above its floor",
         got.1,
-        layers[0]
+        lowest
     );
     assert!(got.1 < stand.foliage, "and not the upper tier");
 
@@ -254,8 +265,9 @@ fn a_bite_empties_the_rosette_and_never_the_crown() {
         after[0] < before[0],
         "the rosette was cropped: {before:?} -> {after:?}"
     );
-    assert_eq!(
-        after[1], before[1],
+    // Untouched up to the float residue `settle_layers` parks on the largest layer.
+    assert!(
+        (after[1] - before[1]).abs() <= 1e-15,
         "the crown must be untouched: {before:?} -> {after:?}"
     );
     let lost = organic_before - flora.view().organic();

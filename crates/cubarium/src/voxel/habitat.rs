@@ -1431,8 +1431,8 @@ mod tests {
 
     /// **Browser faces by layer** (item 3). An adult bloomcrown's crown is out of the
     /// browser's band and its rosette is in it: the faces round its stem are admitted.
-    /// Crop the rosette to nothing and the only in-band layer holds no stock, so they
-    /// are refused.
+    /// Crop the rosette to its grazing floor and the only in-band layer holds no edible
+    /// stock, so they are refused.
     #[test]
     fn a_browser_face_is_admitted_by_a_stocked_layer_in_its_band_not_the_crown_top() {
         let world = plain(24, 6);
@@ -1479,7 +1479,7 @@ mod tests {
         }
         for stand in flora.view().stands.iter() {
             let rosette = flora.view().layers(stand).next().unwrap();
-            assert!(rosette.stock <= 0.0, "cropped to nothing");
+            assert!(rosette.edible() <= 0.0, "cropped to its grazing floor");
         }
         assert!(
             browser_faces(&world.view(), &flora.view(), &fauna).is_empty(),
