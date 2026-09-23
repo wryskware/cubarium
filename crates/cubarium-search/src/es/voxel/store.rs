@@ -358,7 +358,11 @@ mod tests {
 
         let mut current_b = sample(Founder::Blind);
         current_b.stage = "b".into();
-        current_b.arena_protocol = crate::es::voxel::task::STAGE_B_LANDED_ARENA_PROTOCOL.into();
+        current_b.arena_protocol = crate::es::voxel::task::arena_protocol(
+            Founder::Blind,
+            crate::es::voxel::task::Stage::B,
+            crate::es::voxel::task::Band::Landed,
+        );
         assert!(current_b.validate_named("current-b.json").is_ok());
     }
 

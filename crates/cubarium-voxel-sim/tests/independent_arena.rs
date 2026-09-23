@@ -78,6 +78,9 @@ fn litter_pools(flora: &cubarium_voxel_flora::Flora) -> (f64, f64, f64, f64) {
 #[test]
 fn an_arena_bite_closes_the_three_currencies_across_stock_animal_and_respiration() {
     let mut arena = Arena::build(Founder::Blind, 1);
+    // The founder alone: the ledger below is the layer's, so the bystanders go.
+    arena.bystanders.clear();
+    arena.refound(cubarium_voxel_sim::FOUNDER_START);
     let id = arena.animal_id.expect("the arena placed its founder");
     let stand_on = arena
         .fauna

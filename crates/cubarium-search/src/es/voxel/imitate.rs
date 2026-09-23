@@ -310,7 +310,7 @@ pub fn record_streams(
                         arena_protocol: task::arena_protocol(founder, stage, band),
                         start_heading: task::START_HEADING_PROTOCOL.into(),
                         starting_stores: task::STARTING_STORES_PROTOCOL.into(),
-                        layout_seed: prepared[index].layout_seed,
+                        layout_seed: prepared[index].layout_seed(),
                         horizon,
                         inputs,
                         steps: pairs.len(),

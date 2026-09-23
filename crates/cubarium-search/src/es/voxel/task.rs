@@ -18,7 +18,9 @@
 //! ([`Prepared::rebuilt`]) so the bench can measure the two setup paths against each other.
 
 use cubarium_voxel_fauna::{Founder, Senses};
-use cubarium_voxel_sim::{ARENA_VOXEL_M, ARENA_WIDTH, Arena, Site, SuccessorBand};
+use cubarium_voxel_sim::{Arena, ArenaGrid, Site, SuccessorBand};
+
+use super::landscape::PreparedLandscape;
 
 /// The phase-one pilot's episode horizon: 1,200 ticks is 60 simulated seconds at 20 Hz
 /// (`design/voxel-senses-phase1-tests.md` §2). "Ample for multiple body lengths without
@@ -116,6 +118,12 @@ pub const START_HEADING_PROTOCOL: &str = "p2b-varied-1";
 /// `cubarium_voxel_sim::FOUNDER_START`, half the body and no reserve. A policy trained
 /// against a full start was trained where intake could only repay upkeep, which is a
 /// different task; it is refused rather than reinterpreted.
+///
+/// **Not yet moved for D11** (P5-B draws each acting body's structure per episode,
+/// uniform between `body_min` and `body_max`, still with no reserve): the host's
+/// built-in centres are checked against this string, and on this branch alone moving it
+/// would stop the live run instead of falling back. It moves to
+/// `p5-sampled-body-no-reserve` when the retrain branch carries P5-A's fallback.
 pub const STARTING_STORES_PROTOCOL: &str = "p2c-half-body-no-reserve";
 
 /// Stage B's landed fixture revision. P3-A halves only the initial edible stock while
@@ -165,11 +173,19 @@ pub fn arena_protocol(founder: Founder, stage: Stage, band: Band) -> String {
         Stage::A => STAGE_A_ARENA_PROTOCOL,
         Stage::B => stage_b_arena_protocol(band),
     };
+    let base = format!("{base}+{P5_ARENA_REVISION}");
     match founder {
-        Founder::Blind => base.to_string(),
+        Founder::Blind => base,
         Founder::Browser => format!("{base}+{BROWSER_CROWN_HEIGHT_REVISION}"),
     }
 }
+
+/// P5-B's arena revision, both founders (`design/handoffs/voxel-retrain-2026-09-22.md`,
+/// item 3): every patch in the mouth band (seedlings, basal rosettes, a stripped upper
+/// crown as a Stage-A distractor; litter, carrion and glowcap caps for the shredder) and
+/// two bystander bodies of the other lineage. Neither founder's earlier centre is a
+/// policy for this task.
+pub const P5_ARENA_REVISION: &str = "p5-arena-1";
 
 /// Stage A's fixture revision, shared by both founders.
 pub const STAGE_A_ARENA_PROTOCOL: &str = "p2b-stage-a-1";
@@ -295,11 +311,11 @@ impl StartGeometry {
     }
 }
 
-/// The face centre of a site, in metres.
-fn site_center_m(site: Site) -> (f64, f64) {
+/// The face centre of a site on `grid`, in metres.
+fn site_center_m(site: Site, grid: ArenaGrid) -> (f64, f64) {
     (
-        (f64::from(site.x) + 0.5) * ARENA_VOXEL_M,
-        (f64::from(site.z) + 0.5) * ARENA_VOXEL_M,
+        (f64::from(site.x) + 0.5) * grid.voxel_m(),
+        (f64::from(site.z) + 0.5) * grid.voxel_m(),
     )
 }
 
@@ -307,20 +323,20 @@ fn site_center_m(site: Site) -> (f64, f64) {
 ///
 /// **Fixture-side only**, like [`StartGeometry`]: the Stage-B evaluator reads it after
 /// a tick has already been simulated, and no observation or reward term can reach it.
-pub fn distance_to_site_m(x: f64, z: f64, site: Site) -> f64 {
-    let (cx, cz) = site_center_m(site);
-    wrapped_dx_m(x, cx).hypot(cz - z)
+pub fn distance_to_site_m(x: f64, z: f64, site: Site, grid: ArenaGrid) -> f64 {
+    let (cx, cz) = site_center_m(site, grid);
+    wrapped_dx_m(x, cx, grid).hypot(cz - z)
 }
 
 /// Metres between two sites' face centres, across the wrapped strip. Fixture-side.
-pub fn site_separation_m(a: Site, b: Site) -> f64 {
-    let (ax, az) = site_center_m(a);
-    distance_to_site_m(ax, az, b)
+pub fn site_separation_m(a: Site, b: Site, grid: ArenaGrid) -> f64 {
+    let (ax, az) = site_center_m(a, grid);
+    distance_to_site_m(ax, az, b, grid)
 }
 
 /// The shortest signed x displacement across the wrapped strip, in metres.
-fn wrapped_dx_m(from_x: f64, to_x: f64) -> f64 {
-    let width = f64::from(ARENA_WIDTH) * ARENA_VOXEL_M;
+fn wrapped_dx_m(from_x: f64, to_x: f64, grid: ArenaGrid) -> f64 {
+    let width = f64::from(grid.width()) * grid.voxel_m();
     let raw = to_x - from_x;
     [raw, raw - width, raw + width]
         .into_iter()
@@ -330,10 +346,13 @@ fn wrapped_dx_m(from_x: f64, to_x: f64) -> f64 {
 
 /// One immutable prepared arena: the terrain, the pond, the finite resources and the
 /// placed founder, exactly as [`Arena::build`] left them.
-pub struct Prepared {
+#[derive(Clone)]
+pub struct PreparedArena {
     pub founder: Founder,
     pub layout_seed: u64,
     pub stage: Stage,
+    /// The cells the arena is laid on (D11's 0.125 m variant).
+    pub grid: ArenaGrid,
     /// Stage B's successor separation band. Stage A carries the default and ignores it.
     pub band: Band,
     /// Stage B's two patch sites, `(initial, successor)`. **Evaluator-only**: the
@@ -346,15 +365,15 @@ pub struct Prepared {
     senses: Senses,
 }
 
-impl Prepared {
+impl PreparedArena {
     /// Build the prepared Stage-A layout: one [`Arena::build`], kept immutable.
-    pub fn build(founder: Founder, layout_seed: u64) -> Prepared {
-        Prepared::build_stage(founder, layout_seed, Stage::A)
+    pub fn build(founder: Founder, layout_seed: u64) -> PreparedArena {
+        PreparedArena::build_stage(founder, layout_seed, Stage::A)
     }
 
     /// Build the prepared layout for `stage` in the landed band, kept immutable.
-    pub fn build_stage(founder: Founder, layout_seed: u64, stage: Stage) -> Prepared {
-        Prepared::build_stage_in(founder, layout_seed, stage, Band::Landed)
+    pub fn build_stage(founder: Founder, layout_seed: u64, stage: Stage) -> PreparedArena {
+        PreparedArena::build_stage_in(founder, layout_seed, stage, Band::Landed)
     }
 
     /// Build the prepared layout for `stage` with the Stage-B successor in `band`.
@@ -363,19 +382,31 @@ impl Prepared {
         layout_seed: u64,
         stage: Stage,
         band: Band,
-    ) -> Prepared {
+    ) -> PreparedArena {
+        PreparedArena::build_stage_on(founder, layout_seed, stage, band, ArenaGrid::Standard)
+    }
+
+    /// [`PreparedArena::build_stage_in`] laid on `grid`.
+    pub fn build_stage_on(
+        founder: Founder,
+        layout_seed: u64,
+        stage: Stage,
+        band: Band,
+        grid: ArenaGrid,
+    ) -> PreparedArena {
         let (arena, patches) = match stage {
-            Stage::A => (Arena::build(founder, layout_seed), None),
+            Stage::A => (Arena::build_on(founder, layout_seed, grid), None),
             Stage::B => {
                 let (arena, initial, successor) =
-                    Arena::build_reacquisition_in(founder, layout_seed, band).into_parts();
+                    Arena::build_reacquisition_on(founder, layout_seed, band, grid).into_parts();
                 (arena, Some((initial, successor)))
             }
         };
-        Prepared {
+        PreparedArena {
             founder,
             layout_seed,
             stage,
+            grid,
             band,
             patches,
             senses: arena.prepare_senses(),
@@ -389,14 +420,15 @@ impl Prepared {
         founder: Founder,
         layout_seed: u64,
         turn_to_initial_rad: f64,
-    ) -> Prepared {
+    ) -> PreparedArena {
         let (arena, initial, successor) =
             Arena::build_reacquisition_with_start_turn(founder, layout_seed, turn_to_initial_rad)
                 .into_parts();
-        Prepared {
+        PreparedArena {
             founder,
             layout_seed,
             stage: Stage::B,
+            grid: ArenaGrid::Standard,
             band: Band::Landed,
             patches: Some((initial, successor)),
             senses: arena.prepare_senses(),
@@ -417,15 +449,17 @@ impl Prepared {
             Some((initial, _)) => initial,
             None => *self.arena.resources.iter().min_by(|a, b| {
                 let d = |s: &Site| {
-                    let dx = wrapped_dx_m(pose.x, (f64::from(s.x) + 0.5) * ARENA_VOXEL_M);
-                    let dz = (f64::from(s.z) + 0.5) * ARENA_VOXEL_M - pose.z;
+                    let (cx, cz) = site_center_m(*s, self.grid);
+                    let dx = wrapped_dx_m(pose.x, cx, self.grid);
+                    let dz = cz - pose.z;
                     dx * dx + dz * dz
                 };
                 d(a).partial_cmp(&d(b)).expect("finite")
             })?,
         };
-        let dx = wrapped_dx_m(pose.x, (f64::from(target.x) + 0.5) * ARENA_VOXEL_M);
-        let dz = (f64::from(target.z) + 0.5) * ARENA_VOXEL_M - pose.z;
+        let (cx, cz) = site_center_m(target, self.grid);
+        let dx = wrapped_dx_m(pose.x, cx, self.grid);
+        let dz = cz - pose.z;
         // The arena's own heading convention: atan2(dx, dz).
         let bearing = dx.atan2(dz);
         let delta = bearing - pose.heading_rad;
@@ -443,15 +477,7 @@ impl Prepared {
     /// The clone carries `births = false` (the arena set it at build) and the placed
     /// founder at its starting pose.
     pub fn episode_arena(&self) -> Arena {
-        Arena {
-            founder: self.arena.founder,
-            layout_seed: self.arena.layout_seed,
-            world: self.arena.world.clone(),
-            flora: self.arena.flora.clone(),
-            fauna: self.arena.fauna.clone(),
-            resources: self.arena.resources.clone(),
-            animal_id: self.arena.animal_id,
-        }
+        self.arena.clone()
     }
 
     /// A fresh copy of the settled cue field for one private episode simulator.
@@ -463,9 +489,11 @@ impl Prepared {
     /// clone path by the bench. Both must prepare the identical arena.
     pub fn rebuilt(&self) -> Arena {
         match self.stage {
-            Stage::A => Arena::build(self.founder, self.layout_seed),
-            Stage::B => Arena::build_reacquisition_in(self.founder, self.layout_seed, self.band)
-                .into_arena(),
+            Stage::A => Arena::build_on(self.founder, self.layout_seed, self.grid),
+            Stage::B => {
+                Arena::build_reacquisition_on(self.founder, self.layout_seed, self.band, self.grid)
+                    .into_arena()
+            }
         }
     }
 
@@ -482,16 +510,148 @@ impl Prepared {
     }
 }
 
-impl std::fmt::Debug for Prepared {
+impl std::fmt::Debug for PreparedArena {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Prepared")
+        f.debug_struct("PreparedArena")
             .field("founder", &self.arena.founder.name())
             .field("stage", &self.stage.as_str())
+            .field("grid", &self.grid.as_str())
             .field("band", &self.band.as_str())
             .field("layout_seed", &self.layout_seed)
             .field("animal_id", &self.arena.animal_id)
             .field("resources", &self.arena.resources.len())
             .finish()
+    }
+}
+
+/// One immutable episode fixture (P5-B item 2): a frozen arena, or a frozen landscape.
+#[derive(Clone, Debug)]
+pub enum Prepared {
+    Arena(PreparedArena),
+    Landscape(Box<PreparedLandscape>),
+}
+
+impl From<PreparedArena> for Prepared {
+    fn from(p: PreparedArena) -> Prepared {
+        Prepared::Arena(p)
+    }
+}
+
+impl From<PreparedLandscape> for Prepared {
+    fn from(p: PreparedLandscape) -> Prepared {
+        Prepared::Landscape(Box::new(p))
+    }
+}
+
+impl Prepared {
+    /// [`PreparedArena::build`], as a fixture.
+    pub fn build(founder: Founder, layout_seed: u64) -> Prepared {
+        PreparedArena::build(founder, layout_seed).into()
+    }
+
+    /// [`PreparedArena::build_stage`], as a fixture.
+    pub fn build_stage(founder: Founder, layout_seed: u64, stage: Stage) -> Prepared {
+        PreparedArena::build_stage(founder, layout_seed, stage).into()
+    }
+
+    /// [`PreparedArena::build_stage_in`], as a fixture.
+    pub fn build_stage_in(
+        founder: Founder,
+        layout_seed: u64,
+        stage: Stage,
+        band: Band,
+    ) -> Prepared {
+        PreparedArena::build_stage_in(founder, layout_seed, stage, band).into()
+    }
+
+    /// [`PreparedArena::build_reacquisition_with_start_turn`], as a fixture.
+    pub fn build_reacquisition_with_start_turn(
+        founder: Founder,
+        layout_seed: u64,
+        turn_to_initial_rad: f64,
+    ) -> Prepared {
+        PreparedArena::build_reacquisition_with_start_turn(
+            founder,
+            layout_seed,
+            turn_to_initial_rad,
+        )
+        .into()
+    }
+
+    /// The lineage whose body — or bodies — run the candidate.
+    pub fn founder(&self) -> Founder {
+        match self {
+            Prepared::Arena(a) => a.founder,
+            Prepared::Landscape(l) => l.founder,
+        }
+    }
+
+    /// The fixture's seed: an arena's layout seed, a landscape's seed base.
+    pub fn layout_seed(&self) -> u64 {
+        match self {
+            Prepared::Arena(a) => a.layout_seed,
+            Prepared::Landscape(l) => l.seed_base,
+        }
+    }
+
+    /// The horizon this fixture fixes for itself, if any: a landscape's
+    /// [`super::landscape::LANDSCAPE_HORIZON_TICKS`] (D8). An arena runs the caller's.
+    pub fn horizon(&self) -> Option<u64> {
+        match self {
+            Prepared::Arena(_) => None,
+            Prepared::Landscape(_) => Some(super::landscape::LANDSCAPE_HORIZON_TICKS),
+        }
+    }
+
+    /// The arena, if this is one.
+    pub fn arena(&self) -> Option<&PreparedArena> {
+        match self {
+            Prepared::Arena(a) => Some(a),
+            Prepared::Landscape(_) => None,
+        }
+    }
+
+    /// The landscape, if this is one.
+    pub fn landscape(&self) -> Option<&PreparedLandscape> {
+        match self {
+            Prepared::Arena(_) => None,
+            Prepared::Landscape(l) => Some(l),
+        }
+    }
+
+    /// The immutable arena ([`PreparedArena::fixture_arena`]). **Panics on a
+    /// landscape**: it is the arena fixture's validation surface, for commands and tests
+    /// that built an arena.
+    pub fn fixture_arena(&self) -> &Arena {
+        self.arena()
+            .expect("fixture_arena is an arena fixture's surface")
+            .fixture_arena()
+    }
+
+    /// An arena's start geometry ([`PreparedArena::start_geometry`]); `None` on a
+    /// landscape.
+    pub fn start_geometry(&self) -> Option<StartGeometry> {
+        self.arena().and_then(PreparedArena::start_geometry)
+    }
+
+    /// An arena's Stage-B patches; `None` on Stage A and on a landscape.
+    pub fn patches(&self) -> Option<(Site, Site)> {
+        self.arena().and_then(PreparedArena::patches)
+    }
+
+    /// A short label for job names and reports.
+    pub fn label(&self) -> String {
+        match self {
+            Prepared::Arena(a) => format!(
+                "{}{}",
+                a.layout_seed,
+                match a.grid {
+                    ArenaGrid::Standard => "",
+                    ArenaGrid::Fine => "f",
+                }
+            ),
+            Prepared::Landscape(l) => l.label(),
+        }
     }
 }
 
@@ -530,12 +690,13 @@ pub fn offset_sweep_layouts() -> Vec<(String, Prepared)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cubarium_voxel_sim::{ARENA_VOXEL_M, ARENA_WIDTH};
 
     #[test]
     fn the_blind_stage_b_holdout_is_balanced_by_side_and_range() {
         let mut bins = [0usize; 4];
         for seed in EVALUATION_LAYOUT_SEEDS {
-            let turn = Prepared::build_stage(Founder::Blind, seed, Stage::B)
+            let turn = PreparedArena::build_stage(Founder::Blind, seed, Stage::B)
                 .start_geometry()
                 .expect("the held-out layout places a founder")
                 .turn_to_target_rad
@@ -557,9 +718,9 @@ mod tests {
         for ((label, prepared), expected) in cases.iter().zip(OFFSET_SWEEP_DEGREES) {
             let pose = prepared.fixture_arena().animal_pose().expect("founder");
             let geometry = prepared.start_geometry().expect("geometry");
-            assert_eq!(prepared.founder, Founder::Blind);
-            assert_eq!(prepared.stage, Stage::B);
-            assert_eq!(prepared.layout_seed, OFFSET_SWEEP_LAYOUT_SEED);
+            assert_eq!(prepared.founder(), Founder::Blind);
+            assert_eq!(prepared.arena().expect("arena").stage, Stage::B);
+            assert_eq!(prepared.layout_seed(), OFFSET_SWEEP_LAYOUT_SEED);
             assert_eq!(pose.x, first_pose.x, "{label}");
             assert_eq!(pose.z, first_pose.z, "{label}");
             assert_eq!(geometry.target, first_geometry.target, "{label}");
@@ -599,14 +760,14 @@ mod tests {
             .chain(EVALUATION_LAYOUT_SEEDS)
         {
             for founder in Founder::ALL {
-                let p = Prepared::build_stage_in(founder, seed, Stage::B, Band::Near);
+                let p = PreparedArena::build_stage_in(founder, seed, Stage::B, Band::Near);
                 let (initial, successor) = p.patches().expect("Stage B names its patches");
                 let separation = columns(initial, successor);
                 assert!(
                     Band::Near.contains(separation),
                     "{founder:?} seed {seed}: successor {separation} squared columns off"
                 );
-                let metres = site_separation_m(initial, successor);
+                let metres = site_separation_m(initial, successor, ArenaGrid::Standard);
                 assert!(
                     (1.0..1.5).contains(&metres),
                     "{founder:?} seed {seed}: {metres} m apart"
@@ -646,97 +807,53 @@ mod tests {
         }
     }
 
-    /// The browser's crown-height mix, over the sixteen training layouts and the
-    /// held-out eight (`design/handoffs/voxel-browser-reach-2026-09-21.md`, step 2).
-    ///
-    /// A Stage-A layout lays six stands whose crowns sit at the body's head layer, one
-    /// voxel above it and two above it — two tiles each, so all three heights are in the
-    /// training set and in every single layout, and four of the six are inside the
-    /// browser's vertical mouth reach. Stage B's two patches are both scored, so both are
-    /// reachable and the pattern there is head and head + 1. Every stand carries exactly
-    /// the stock it carried before heights varied, and the blind founder's litter arenas
-    /// have no crowns at all.
+    /// P5-B's layouts on the frozen seeds: every Stage-A layout lays each kind twice at
+    /// the arena's stock, and every Stage-B pair is two kinds the band reaches, the
+    /// initial one at half the successor. A stripped crown is Stage A's only.
     #[test]
-    fn the_browsers_crowns_stand_at_three_heights_and_every_layout_keeps_a_reachable_one() {
-        use cubarium_voxel_sim::BROWSER_FOLIAGE_PER_STAND;
+    fn every_frozen_layout_lays_its_kinds_at_the_arenas_stock() {
+        use cubarium_voxel_sim::{BROWSER_FOLIAGE_PER_STAND, PatchKind};
 
-        let reach = i64::from(Founder::Browser.manifest().mouth_reach_up_voxels);
-        let rise = |arena: &cubarium_voxel_sim::Arena, site: Site| -> i64 {
-            let fv = arena.flora.view();
-            let stand = fv.stand_at(site).expect("a browser stand");
-            i64::from(fv.config.species(stand.species).crown_voxels(stand.wood)) - 1
-        };
-
-        let mut seen_a = [0usize; 3];
-        let mut seen_b = [0usize; 3];
-        for seed in TRAINING_LAYOUT_SEEDS
-            .into_iter()
-            .chain(EVALUATION_LAYOUT_SEEDS)
-        {
-            // Stage A: six tiles, two at each height, and the stock per stand unmoved.
-            let a = Prepared::build_stage(Founder::Browser, seed, Stage::A);
-            let arena = a.fixture_arena();
-            let mut per_layout = [0usize; 3];
-            for &site in &arena.resources {
-                let r = rise(arena, site);
-                assert!(
-                    (0..=2).contains(&r),
-                    "seed {seed}: a Stage-A crown {r} above the head"
+        for founder in Founder::ALL {
+            for seed in TRAINING_LAYOUT_SEEDS
+                .into_iter()
+                .chain(EVALUATION_LAYOUT_SEEDS)
+            {
+                let a = PreparedArena::build_stage(founder, seed, Stage::A);
+                let arena = a.fixture_arena();
+                let mut kinds = arena.resource_kinds.clone();
+                kinds.sort_by_key(|k| k.as_str());
+                kinds.dedup();
+                assert_eq!(
+                    kinds.len(),
+                    3,
+                    "{founder:?} seed {seed}: every kind in Stage A"
                 );
-                per_layout[r as usize] += 1;
-                seen_a[r as usize] += 1;
+                for (&site, &kind) in arena.resources.iter().zip(&arena.resource_kinds) {
+                    let want = match (founder, kind) {
+                        (_, PatchKind::Stripped) => 0.0,
+                        (Founder::Browser, _) => BROWSER_FOLIAGE_PER_STAND,
+                        (Founder::Blind, _) => 0.2,
+                    };
+                    assert!(
+                        (arena.patch_stock(site) - want).abs() < 1e-12,
+                        "{founder:?} seed {seed}: {kind:?} at {site:?} holds {}",
+                        arena.patch_stock(site)
+                    );
+                }
+                let b = PreparedArena::build_stage_in(founder, seed, Stage::B, Band::Landed);
+                let arena = b.fixture_arena();
+                let (initial, successor) = b.patches().expect("Stage B names its patches");
                 assert!(
-                    (arena.patch_stock(site) - BROWSER_FOLIAGE_PER_STAND).abs() < 1e-12,
-                    "seed {seed}: stand {site:?} holds {}",
-                    arena.patch_stock(site)
+                    !arena.resource_kinds.contains(&PatchKind::Stripped),
+                    "{founder:?} seed {seed}: a scored patch nobody can eat"
+                );
+                let (i, s) = (arena.patch_stock(initial), arena.patch_stock(successor));
+                assert!(
+                    s > 0.0 && (i / s - 0.5).abs() < 1e-12,
+                    "{founder:?} seed {seed}"
                 );
             }
-            assert_eq!(
-                per_layout,
-                [2, 2, 2],
-                "seed {seed}: Stage A's height mix is not two of each"
-            );
-            assert!(
-                per_layout[..=reach as usize].iter().sum::<usize>() > 0,
-                "seed {seed}: no reachable crown in the Stage-A layout"
-            );
-
-            // Stage B: both patches scored, so both inside the mouth's vertical reach.
-            let b = Prepared::build_stage_in(Founder::Browser, seed, Stage::B, Band::Landed);
-            let arena = b.fixture_arena();
-            let (initial, successor) = b.patches().expect("Stage B names its patches");
-            let mut rises = Vec::new();
-            for site in [initial, successor] {
-                let r = rise(arena, site);
-                assert!(
-                    (0..=reach).contains(&r),
-                    "seed {seed}: a scored Stage-B crown {r} above the head is unreachable"
-                );
-                seen_b[r as usize] += 1;
-                rises.push(r);
-            }
-            assert_ne!(rises[0], rises[1], "seed {seed}: Stage B lays one of each");
-            assert!(
-                (arena.patch_stock(successor) - BROWSER_FOLIAGE_PER_STAND).abs() < 1e-12
-                    && (arena.patch_stock(initial) - 0.5 * BROWSER_FOLIAGE_PER_STAND).abs() < 1e-12,
-                "seed {seed}: the two-patch stock moved with the crown height"
-            );
-        }
-        assert!(
-            seen_a.iter().all(|&n| n > 0),
-            "the training and held-out Stage-A set misses a height: {seen_a:?}"
-        );
-        assert!(
-            seen_b[0] > 0 && seen_b[1] > 0 && seen_b[2] == 0,
-            "Stage B must mix head and head + 1 and lay nothing out of reach: {seen_b:?}"
-        );
-        // The blind founder's arenas are litter on the ground: no stands, no heights.
-        for seed in TRAINING_LAYOUT_SEEDS {
-            let blind = Prepared::build_stage(Founder::Blind, seed, Stage::A);
-            assert!(
-                blind.fixture_arena().flora.view().stands.is_empty(),
-                "seed {seed}: the blind arena grew a crown"
-            );
         }
     }
 
@@ -751,12 +868,12 @@ mod tests {
             .chain(EVALUATION_LAYOUT_SEEDS)
         {
             for founder in Founder::ALL {
-                let p = Prepared::build_stage_in(founder, seed, Stage::B, Band::Landed);
+                let p = PreparedArena::build_stage_in(founder, seed, Stage::B, Band::Landed);
                 let (initial, successor) = p.patches().expect("patches");
-                assert!(site_separation_m(initial, successor) >= 2.0);
+                assert!(site_separation_m(initial, successor, ArenaGrid::Standard) >= 2.0);
                 let pose = p.fixture_arena().animal_pose().expect("founder");
                 for patch in [initial, successor] {
-                    let d = distance_to_site_m(pose.x, pose.z, patch);
+                    let d = distance_to_site_m(pose.x, pose.z, patch, ArenaGrid::Standard);
                     assert!(
                         d >= 0.5,
                         "{founder:?} seed {seed}: start {d} m from {patch:?}"
@@ -776,11 +893,11 @@ mod tests {
         );
         assert_eq!(
             arena_protocol(Founder::Blind, Stage::A, Band::Near),
-            "p2b-stage-a-1"
+            "p2b-stage-a-1+p5-arena-1"
         );
         assert_eq!(
             arena_protocol(Founder::Blind, Stage::A, Band::Landed),
-            "p2b-stage-a-1"
+            "p2b-stage-a-1+p5-arena-1"
         );
         // The browser's crown-height revision rides on every one of its own strings and
         // on none of the blind founder's.
@@ -847,7 +964,7 @@ mod tests {
         {
             for founder in Founder::ALL {
                 for stage in [Stage::A, Stage::B] {
-                    let p = Prepared::build_stage(founder, seed, stage);
+                    let p = PreparedArena::build_stage(founder, seed, stage);
                     assert!(
                         p.animal_id().is_some(),
                         "{founder:?} seed {seed} stage {}: no founder was placed",
@@ -890,15 +1007,24 @@ mod tests {
     fn wrapped_site_distances_take_the_short_way_round() {
         let at = |x, z| Site { x, y: 4, z };
         // Four columns of z apart, 0.25 m each.
-        assert!((site_separation_m(at(5, 2), at(5, 6)) - 1.0).abs() < 1e-12);
+        assert!((site_separation_m(at(5, 2), at(5, 6), ArenaGrid::Standard) - 1.0).abs() < 1e-12);
         // Two columns apart across the seam of a 32-wide strip, not thirty.
-        let seam = site_separation_m(at(31, 3), at(1, 3));
+        let seam = site_separation_m(at(31, 3), at(1, 3), ArenaGrid::Standard);
         assert!((seam - 0.5).abs() < 1e-12, "{seam}");
-        assert_eq!(seam, site_separation_m(at(1, 3), at(31, 3)));
+        assert_eq!(
+            seam,
+            site_separation_m(at(1, 3), at(31, 3), ArenaGrid::Standard)
+        );
         // A point reading agrees with the site-to-site reading it is built from.
-        let (cx, cz) = site_center_m(at(31, 3));
-        assert_eq!(distance_to_site_m(cx, cz, at(1, 3)), seam);
-        assert_eq!(distance_to_site_m(cx, cz, at(31, 3)), 0.0);
+        let (cx, cz) = site_center_m(at(31, 3), ArenaGrid::Standard);
+        assert_eq!(
+            distance_to_site_m(cx, cz, at(1, 3), ArenaGrid::Standard),
+            seam
+        );
+        assert_eq!(
+            distance_to_site_m(cx, cz, at(31, 3), ArenaGrid::Standard),
+            0.0
+        );
     }
 
     #[test]
@@ -916,7 +1042,7 @@ mod tests {
     #[test]
     fn clone_and_rebuild_prepare_identical_arenas() {
         for founder in Founder::ALL {
-            let p = Prepared::build(founder, TRAINING_LAYOUT_SEEDS[2]);
+            let p = PreparedArena::build(founder, TRAINING_LAYOUT_SEEDS[2]);
             let cloned = p.episode_arena();
             let rebuilt = p.rebuilt();
             assert_eq!(cloned.animal_id, rebuilt.animal_id);
@@ -939,7 +1065,7 @@ mod tests {
         for seed in EVALUATION_LAYOUT_SEEDS {
             for founder in Founder::ALL {
                 for stage in [Stage::A, Stage::B] {
-                    let p = Prepared::build_stage(founder, seed, stage);
+                    let p = PreparedArena::build_stage(founder, seed, stage);
                     let g = p.start_geometry().expect("a placed body has a geometry");
                     assert!(
                         (0.5..=1.02).contains(&g.distance_m),
@@ -971,7 +1097,7 @@ mod tests {
     /// the driver never does.
     #[test]
     fn an_episode_leaves_the_prepared_layout_and_other_copies_untouched() {
-        let p = Prepared::build(Founder::Blind, TRAINING_LAYOUT_SEEDS[0]);
+        let p = PreparedArena::build(Founder::Blind, TRAINING_LAYOUT_SEEDS[0]);
         let before = p.fixture_arena().resource_stock();
         assert!(
             before.is_finite() && before > 0.0,

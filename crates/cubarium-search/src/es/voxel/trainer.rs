@@ -272,6 +272,19 @@ pub struct GenerationPlan<'a> {
     pub deadline: Option<Instant>,
 }
 
+/// The seed one generation's episodes on one layout draw their body sizes from (D11):
+/// the same for every candidate of the generation — both signs of a pair, and the centre
+/// — so a pair still runs identical worlds, and different from one generation to the
+/// next, so the sizes a centre is ranked on keep moving. From the trainer's own stream.
+pub fn episode_seed(train_seed: u64, generation: u32, layout_index: usize) -> u64 {
+    let mut z = train_seed
+        ^ u64::from(generation).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        ^ (layout_index as u64).rotate_left(40);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
 /// Run one generation and, if every job completed, apply the Adam ascent to `theta`.
 ///
 /// Returns `Err(Cancelled)` without touching `theta` or `adam` when the run was stopped;
@@ -345,7 +358,7 @@ pub fn run_generation(
             format!(
                 "gen{generation}/{}/seed{}",
                 candidates[i / layouts.len()].label(),
-                layouts[i % layouts.len()].layout_seed
+                layouts[i % layouts.len()].layout_seed()
             )
         })
         .collect();
@@ -377,12 +390,14 @@ pub fn run_generation(
                     }
                     attempted.fetch_add(1, Ordering::SeqCst);
                     let candidate = candidates[index / layouts.len()];
-                    match driver::run_prepared(
-                        &layouts[index % layouts.len()],
+                    let layout = &layouts[index % layouts.len()];
+                    match driver::run_prepared_seeded(
+                        layout,
                         &drivers[index / layouts.len()],
-                        plan.horizon,
+                        layout.horizon().unwrap_or(plan.horizon),
                         limits,
                         &names[index],
+                        episode_seed(protocol.train_seed, generation, index % layouts.len()),
                     ) {
                         Ok(e) => {
                             completed.fetch_add(1, Ordering::SeqCst);
@@ -449,7 +464,7 @@ pub fn run_generation(
             jobs.push(Job {
                 generation,
                 candidate: c.label(),
-                layout_seed: layouts[li].layout_seed,
+                layout_seed: layouts[li].layout_seed(),
                 episode: e.clone(),
             });
         }
@@ -822,12 +837,12 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
             match driver::run_prepared(
                 layout,
                 &driver,
-                spec.horizon,
+                layout.horizon().unwrap_or(spec.horizon),
                 Limits {
                     cancel,
                     deadline: Some(deadline),
                 },
-                &format!("gen0/center/seed{}", layout.layout_seed),
+                &format!("gen0/center/seed{}", layout.layout_seed()),
             ) {
                 Ok(e) => {
                     ticks += e.ticks;
@@ -840,7 +855,7 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
                 Err(EpisodeError::Invalid { ticks: t, detail }) => {
                     return Err(format!(
                         "gen0/center/seed{}: invalid after {t} ticks: {detail}",
-                        layout.layout_seed
+                        layout.layout_seed()
                     ));
                 }
             }
@@ -1170,7 +1185,7 @@ mod tests {
         assert_ne!(cp.protocol_hash, 0xdead_beef, "the run hashes as itself");
         assert_eq!(
             cp.protocol.arena_protocol,
-            task::stage_b_arena_protocol(task::Band::Near)
+            task::arena_protocol(Founder::Blind, Stage::B, task::Band::Near)
         );
         cp.validate().expect("a warm-started checkpoint is valid");
         std::fs::remove_dir_all(&dir).ok();

@@ -655,6 +655,27 @@ enum Command {
         #[arg(long, default_value_t = cubarium_search::es::voxel::task::episode_worker_limit())]
         workers: usize,
     },
+    /// P5-B: found the training (or held-out) landscape sets, report what they kept and
+    /// what preparing them cost, and measure arena and landscape episode throughput.
+    VoxelLandscapes {
+        /// `blind` (littershredder) or `browser` (frondgrazer).
+        #[arg(long, default_value = "blind")]
+        founder: String,
+        /// Comma-separated presets.
+        #[arg(long, default_value = "small,default,wide")]
+        presets: String,
+        /// The held-out seed bases instead of the training ones.
+        #[arg(long)]
+        held_out: bool,
+        /// Ticks per measured episode.
+        #[arg(long, default_value_t = 600)]
+        ticks: u64,
+        /// Episodes per pool at one worker (and per worker in the parallel batch).
+        #[arg(long, default_value_t = 4)]
+        episodes: usize,
+        #[arg(long, default_value_t = cubarium_search::es::voxel::task::episode_worker_limit())]
+        workers: usize,
+    },
     /// Phase-three voxel slice (P3-C): record the fauna's own foraging heuristic on the
     /// training layouts as `(observation, adapted action)` streams — the teacher an
     /// imitation seed is fitted to. The held-out seeds are never recorded.
@@ -1090,6 +1111,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             episodes,
             workers,
         } => es::voxel::commands::bench(founder, stage, ticks, episodes, workers),
+        Command::VoxelLandscapes {
+            founder,
+            presets,
+            held_out,
+            ticks,
+            episodes,
+            workers,
+        } => es::voxel::commands::landscapes(founder, presets, held_out, ticks, episodes, workers),
         Command::VoxelImitate {
             founder,
             stages,

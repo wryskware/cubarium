@@ -204,7 +204,8 @@ pub fn bench(
         return Err(format!("--workers must be in 1..={worker_limit}").into());
     }
     let founder = parse_founder(&founder)?;
-    let prepared = task::Prepared::build_stage(founder, task::TRAINING_LAYOUT_SEEDS[0], stage);
+    let fixture = task::PreparedArena::build_stage(founder, task::TRAINING_LAYOUT_SEEDS[0], stage);
+    let prepared = task::Prepared::from(fixture.clone());
     let theta = if founder == Founder::Blind {
         crate::es::tensor::initial_center_shape::<23, 3>(task::TRAINING_SEED)
     } else {
@@ -230,12 +231,12 @@ pub fn bench(
     let rebuild = t.elapsed().as_secs_f64() / builds as f64;
     let t = Instant::now();
     for _ in 0..builds {
-        let _ = prepared.episode_arena();
+        let _ = fixture.episode_arena();
     }
     let clone = t.elapsed().as_secs_f64() / builds as f64;
     let t = Instant::now();
     for _ in 0..builds {
-        let _ = prepared.rebuilt();
+        let _ = fixture.rebuilt();
     }
     let arena_rebuild = t.elapsed().as_secs_f64() / builds as f64;
     println!(
@@ -594,11 +595,11 @@ pub fn evaluate(
     let prepared_layouts: Vec<(String, task::Prepared)> = match set.as_str() {
         "training" => task::training_layouts(founder, stage, band)
             .into_iter()
-            .map(|p| (p.layout_seed.to_string(), p))
+            .map(|p| (p.layout_seed().to_string(), p))
             .collect(),
         "holdout" | "evaluation" => task::evaluation_layouts(founder, stage, band)
             .into_iter()
-            .map(|p| (p.layout_seed.to_string(), p))
+            .map(|p| (p.layout_seed().to_string(), p))
             .collect(),
         "offset-sweep" | "offsets" => {
             if founder != Founder::Blind || stage != Stage::B {
@@ -695,9 +696,8 @@ pub fn evaluate(
     // (P2-D step 3). Nothing here was ever in an observation.
     // The browser's own column: bites taken off a crown one voxel above its head, the
     // food only the vertical mouth reach can get at. Fixture-side, never in the score.
-    let lifted = founder == Founder::Browser;
     println!(
-        "{:<8} {:>7} {:>6} {:>10} {:>10} {:>8} {:>9} {:>6} {:>8} {:>5}{}",
+        "{:<8} {:>7} {:>6} {:>10} {:>10} {:>8} {:>9} {:>6} {:>8} {:>5} {:>7} {:>7} {:>5} {:>5}",
         "case",
         "ticks",
         "alive",
@@ -708,7 +708,10 @@ pub fn evaluate(
         "dist",
         "turn",
         "ate",
-        if lifted { "    h+1" } else { "" }
+        "walk_m",
+        "area_m2",
+        "blk",
+        "edge",
     );
     let mut rows = Vec::new();
     let mut geometry = Vec::new();
@@ -716,7 +719,7 @@ pub fn evaluate(
         let e = slots[li].as_ref().expect("checked complete");
         let g = prepared.start_geometry();
         println!(
-            "{:<8} {:>7} {:>6} {:>10.4} {:>10.4} {:>8.3} {:>9.4} {:>6} {:>8} {:>5}{}",
+            "{:<8} {:>7} {:>6} {:>10.4} {:>10.4} {:>8.3} {:>9.4} {:>6} {:>8} {:>5} {:>7.2} {:>7.2} {:>5.2} {:>5.2}",
             label,
             e.ticks,
             e.alive,
@@ -730,11 +733,10 @@ pub fn evaluate(
                 g.turn_to_target_rad.to_degrees()
             )),
             if e.eaten_organic > 0.0 { "yes" } else { "no" },
-            if lifted {
-                format!("{:>7}", e.head_plus_one_bites)
-            } else {
-                String::new()
-            },
+            e.diagnostics.walked_m,
+            e.diagnostics.unique_area_m2,
+            e.diagnostics.blocked_motor_share,
+            e.diagnostics.near_drop_or_edge_share,
         );
         rows.push(e.clone());
         geometry.push(g);
@@ -758,17 +760,6 @@ pub fn evaluate(
         rows.len(),
         rows.len()
     );
-
-    if lifted {
-        let bites: u64 = rows.iter().map(|e| e.head_plus_one_bites).sum();
-        let taken: f64 = rows.iter().map(|e| e.head_plus_one_taken).sum();
-        let layouts = rows.iter().filter(|e| e.head_plus_one_bites > 0).count();
-        println!(
-            "crowns one voxel above the head: {bites} bites on {layouts}/{} layouts, \
-             {taken:.5} organic",
-            rows.len()
-        );
-    }
 
     if founder == Founder::Blind && stage == Stage::B {
         let mut bins = [(0usize, 0usize); 4];
@@ -1101,5 +1092,183 @@ pub fn imitate(
         clone_stage.as_str(),
         band.as_str(),
     );
+    Ok(())
+}
+
+/// `voxel-landscapes` (P5-B item 6): found the training (or held-out) landscape sets,
+/// report what the founding kept and what preparing them cost, then measure episode
+/// throughput — arena on both grids and landscape — at one worker and at `workers`.
+/// A measurement, not a training run: the GRU is the seeded centre, the episodes are
+/// `ticks` long, nothing is written.
+pub fn landscapes(
+    founder: String,
+    presets: String,
+    held_out: bool,
+    ticks: u64,
+    episodes: usize,
+    workers: usize,
+) -> Result<(), Boxed> {
+    use super::landscape::{self, LandscapeSet};
+
+    let founder = parse_founder(&founder)?;
+    let worker_limit = task::episode_worker_limit();
+    if workers == 0 || workers > worker_limit {
+        return Err(format!("--workers must be in 1..={worker_limit}").into());
+    }
+    let wanted: Vec<&str> = presets.split(',').map(str::trim).collect();
+    let sets: Vec<LandscapeSet> = if held_out {
+        LandscapeSet::held_out()
+    } else {
+        LandscapeSet::training()
+    }
+    .into_iter()
+    .filter(|s| wanted.contains(&s.preset.as_str()))
+    .collect();
+    if sets.is_empty() {
+        return Err(format!("no landscape set on presets {presets:?}").into());
+    }
+    println!(
+        "# voxel landscapes — {} ({}), {} sets, protocol {}, build {BUILD_ID}",
+        founder.name(),
+        founder.role(),
+        sets.len(),
+        landscape::LANDSCAPE_PROTOCOL
+    );
+
+    let t = Instant::now();
+    let lands = landscape::found_landscapes(&sets, workers)?;
+    let founding_s = t.elapsed().as_secs_f64();
+    let t = Instant::now();
+    let fixtures = landscape::prepare_sets(&lands, &sets, founder);
+    let prepare_s = t.elapsed().as_secs_f64();
+    println!(
+        "founded {} landscapes in {founding_s:.1} s wall at {workers} workers; prepared {} \
+         {} fixtures in {prepare_s:.1} s",
+        lands.len(),
+        fixtures.len(),
+        founder.name()
+    );
+    println!("landscape,preset,seed_base,world_seed,accepted,acting,bystanders,mid_shower");
+    for l in &lands {
+        let acting = l
+            .placements()
+            .iter()
+            .filter(|p| p.founder == founder)
+            .count();
+        println!(
+            "landscape,{},{},{},{},{acting},{},{}",
+            l.preset,
+            l.seed_base,
+            l.world_seed,
+            l.accepted,
+            l.placements().len() - acting,
+            l.has_mid_shower()
+        );
+    }
+
+    let theta = if founder == Founder::Blind {
+        crate::es::tensor::initial_center_shape::<23, 3>(task::TRAINING_SEED)
+    } else {
+        crate::es::tensor::initial_center_shape::<37, 3>(task::TRAINING_SEED)
+    };
+    let gru = EpisodeDriver::gru(&theta, founder)?;
+    let cancel = AtomicBool::new(false);
+    let limits = super::driver::Limits::new(&cancel);
+
+    // One pool of fixtures per kind; the throughput is measured on the same pool at one
+    // worker and at `workers`.
+    let arena = |grid| -> Vec<task::Prepared> {
+        task::TRAINING_LAYOUT_SEEDS
+            .iter()
+            .take(4)
+            .map(|&seed| {
+                task::PreparedArena::build_stage_on(
+                    founder,
+                    seed,
+                    Stage::A,
+                    task::Band::Landed,
+                    grid,
+                )
+                .into()
+            })
+            .collect()
+    };
+    let pools: Vec<(String, Vec<task::Prepared>)> = vec![
+        (
+            "arena-0.25m".into(),
+            arena(cubarium_voxel_sim::ArenaGrid::Standard),
+        ),
+        (
+            "arena-0.125m".into(),
+            arena(cubarium_voxel_sim::ArenaGrid::Fine),
+        ),
+    ]
+    .into_iter()
+    .chain(landscape::LANDSCAPE_PRESETS.iter().filter_map(|preset| {
+        let pool: Vec<task::Prepared> = fixtures
+            .iter()
+            .filter(|f| f.preset == *preset)
+            .cloned()
+            .map(task::Prepared::from)
+            .collect();
+        (!pool.is_empty()).then(|| (format!("landscape-{preset}"), pool))
+    }))
+    .collect();
+
+    println!();
+    println!(
+        "throughput,pool,bodies_acting,ticks_per_s_1_worker,ticks_per_s_per_worker_at_{workers},\
+         aggregate_ticks_per_s_at_{workers},horizon_s_1_worker"
+    );
+    for (name, pool) in &pools {
+        let run_one = |i: usize| -> Result<(u64, usize), Boxed> {
+            let p = &pool[i % pool.len()];
+            let e = driver::run_prepared_seeded(
+                p,
+                &gru,
+                ticks,
+                limits,
+                &format!("{name}/{i}"),
+                i as u64,
+            )
+            .map_err(|err| format!("{name} episode {i}: {err}"))?;
+            Ok((e.ticks, e.bodies.len()))
+        };
+        let t = Instant::now();
+        let mut done = 0u64;
+        let mut bodies = 0usize;
+        for i in 0..episodes.max(1) {
+            let (ticks_run, n) = run_one(i)?;
+            done += ticks_run;
+            bodies += n;
+        }
+        let single = done as f64 / t.elapsed().as_secs_f64();
+        let jobs = episodes.max(1) * workers;
+        let cursor = AtomicUsize::new(0);
+        let total = AtomicU64::new(0);
+        let t = Instant::now();
+        std::thread::scope(|scope| {
+            for _ in 0..workers {
+                scope.spawn(|| {
+                    loop {
+                        let i = cursor.fetch_add(1, Ordering::SeqCst);
+                        if i >= jobs {
+                            return;
+                        }
+                        let (ticks_run, _) = run_one(i).expect("a measured episode completes");
+                        total.fetch_add(ticks_run, Ordering::SeqCst);
+                    }
+                });
+            }
+        });
+        let aggregate = total.load(Ordering::SeqCst) as f64 / t.elapsed().as_secs_f64();
+        let horizon = pool[0].horizon().unwrap_or(Stage::A.horizon());
+        println!(
+            "throughput,{name},{:.1},{single:.0},{:.0},{aggregate:.0},{:.2}",
+            bodies as f64 / episodes.max(1) as f64,
+            aggregate / workers as f64,
+            horizon as f64 / single,
+        );
+    }
     Ok(())
 }

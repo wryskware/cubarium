@@ -23,6 +23,8 @@
 //!   the three disclosed open-loop controls (`no-intake`, `stationary-feeding`,
 //!   `cruise`), the P2-B sense ablation, and the observation-only heuristic slot,
 //!   which is the fauna's own `BlindForager`/`BrowserForager`.
+//! - [`landscape`]: P5-B's training landscapes — whole worlds founded by the live
+//!   founding loop, frozen in two water states, every placed founder acting.
 //! - [`score`]: the capability-training score of the tests plan §2 and its components.
 //! - [`trainer`]: shape-aware antithetic pairs, bounded workers, cancellation that counts
 //!   its discarded work, and the run/checkpoint store.
@@ -66,6 +68,7 @@ pub mod commands;
 pub mod controller;
 pub mod driver;
 pub mod imitate;
+pub mod landscape;
 pub mod score;
 pub mod store;
 pub mod task;
@@ -76,7 +79,7 @@ pub use controller::{
     GruPolicy, NoIntake, RecordingController, SELF_CHANNELS, StationaryFeeding, TeacherSink,
     TeacherStep, VoxelControl, teacher_sink,
 };
-pub use driver::{Episode, EpisodeError, Limits, ScoreCounters};
+pub use driver::{BodyDiagnostics, Diagnostics, Episode, EpisodeError, Limits, ScoreCounters};
 pub use score::{SURVIVAL_WEIGHT, ScoreComponents};
 pub use store::VoxelPolicyFile;
 pub use task::{EVALUATION_LAYOUT_SEEDS, HORIZON_TICKS, TRAINING_LAYOUT_SEEDS, TRAINING_SEED};

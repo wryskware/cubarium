@@ -21,6 +21,9 @@ cubarium-surface = { workspace = true }
 # landed P1-A/P1-B/P1-C interfaces this crate builds against.
 cubarium-voxel-sim = { workspace = true }
 cubarium-voxel-fauna = { workspace = true }
+# The training landscapes (P5-B): a founded world, its plants and its presets.
+cubarium-voxel = { workspace = true }
+cubarium-voxel-flora = { workspace = true }
 clap = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 # `float_roundtrip`: the default parser is not correctly rounded (about one value in nine

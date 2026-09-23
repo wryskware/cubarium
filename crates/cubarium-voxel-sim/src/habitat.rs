@@ -298,7 +298,20 @@ pub fn seed_with_founder_counts(
     fauna: &mut Fauna,
     founder_counts: [usize; Founder::COUNT],
 ) -> Seeded {
-    let pre = pre_roll(world, true);
+    seed_with_founder_counts_capturing(world, flora, fauna, founder_counts, None)
+}
+
+/// [`seed_with_founder_counts`], handing `mid_shower` a copy of the world half way
+/// through the pre-roll's opening shower ([`pre_roll_capturing`]). What is seeded, and
+/// on which world, is exactly what [`seed_with_founder_counts`] does.
+pub fn seed_with_founder_counts_capturing(
+    world: &mut World,
+    flora: &mut Flora,
+    fauna: &mut Fauna,
+    founder_counts: [usize; Founder::COUNT],
+    mid_shower: Option<&mut Option<World>>,
+) -> Seeded {
+    let pre = pre_roll_capturing(world, true, mid_shower);
     seed_pre_rolled(world, flora, fauna, &pre, founder_counts)
 }
 
@@ -333,6 +346,19 @@ const DRAIN_CAP: u32 = 2400;
 ///
 /// `open_with_a_shower` is `false` for a **resumed** world, which has had its weather.
 pub fn pre_roll(world: &mut World, open_with_a_shower: bool) -> PreRoll {
+    pre_roll_capturing(world, open_with_a_shower, None)
+}
+
+/// [`pre_roll`], and when `mid_shower` is given, a copy of the world **half way through
+/// the opening shower** put into it: the first tick after the shower started on which
+/// the allowance left has fallen to half of what it was after the shower's first tick,
+/// or the shower's last tick if it ends sooner. Left `None` when the world did not rain.
+/// The copy is taken, never stepped: the pre-roll itself runs exactly as [`pre_roll`].
+pub fn pre_roll_capturing(
+    world: &mut World,
+    open_with_a_shower: bool,
+    mut mid_shower: Option<&mut Option<World>>,
+) -> PreRoll {
     let settle = world.settle(SETTLE_CAP);
     let sites = support_sites(world);
     let mut wettest = vec![0.0f64; sites.len()];
@@ -356,11 +382,22 @@ pub fn pre_roll(world: &mut World, open_with_a_shower: bool) -> PreRoll {
         let before = world.view().ledger.showers;
         world.bring_shower_forward();
         let mut ticks = 0u32;
+        let mut half_left: Option<f64> = None;
         while ticks < SHOWER_CAP {
             world.step();
             ticks += 1;
             watch(world, &mut wettest);
             let started = world.view().ledger.showers > before;
+            if started
+                && let Some(slot) = mid_shower.as_deref_mut()
+                && slot.is_none()
+            {
+                let left = world.shower_left_m3();
+                let half = *half_left.get_or_insert(0.5 * left);
+                if left <= half {
+                    *slot = Some(world.clone());
+                }
+            }
             // A store under its floor cannot pay for the shower on its due tick; it
             // stays due and falls when the store can, in the running world.
             if !started || world.shower_left_m3() <= 0.0 {
@@ -1204,7 +1241,7 @@ mod tests {
     /// wetland frond keeps a hollow floor the sun-demanding bloomcrown cannot hold.
     #[test]
     fn shade_keeps_the_bloomcrown_out_of_a_hollow_and_lets_the_frond_in() {
-        let (world, flora, _, _) = seeded(crate::voxel::scene::authored(config()));
+        let (world, flora, _, _) = seeded(crate::scene::authored(config()));
         let frond = flora.config().species(Species::Umbrellafrond).clone();
         let crown = flora.config().species(Species::Bloomcrown).clone();
         let view = world.view();
@@ -1658,8 +1695,8 @@ mod tests {
     /// The one thing the launch needs: a populated world, from the same world bytes twice.
     #[test]
     fn the_example_habitat_is_populated_and_deterministic() {
-        let a = seeded(crate::voxel::scene::authored(config())).3;
-        let b = seeded(crate::voxel::scene::authored(config())).3;
+        let a = seeded(crate::scene::authored(config())).3;
+        let b = seeded(crate::scene::authored(config())).3;
         assert_eq!(a, b, "the same world seeds the same habitat");
         assert!(a.stands >= 10, "a populated picture, not a specimen: {a:?}");
         assert!(a.logs > 0, "the glowcap grove has its wood: {a:?}");
@@ -1687,7 +1724,7 @@ mod tests {
     #[test]
     fn both_founder_kinds_take_a_bite_in_the_first_ten_seconds() {
         use cubarium_voxel_fauna::{Response, Senses};
-        use cubarium_voxel_sim::{Sim, SimConfig};
+        use crate::{Sim, SimConfig};
         use std::sync::{Arc, Mutex};
 
         /// Passes the packet through untouched and remembers the largest intake channel
@@ -1709,7 +1746,7 @@ mod tests {
             }
         }
 
-        let (world, flora, mut fauna, seeded) = seeded(crate::voxel::scene::authored(config()));
+        let (world, flora, mut fauna, seeded) = seeded(crate::scene::authored(config()));
         // One watcher per founder kind, wrapped around the controller the seeder
         // installed, so the heuristic under test is the one the habitat ships.
         let best: [Arc<Mutex<f64>>; Founder::COUNT] = std::array::from_fn(|_| Arc::default());
@@ -1764,7 +1801,7 @@ mod tests {
     /// support faces and hollow floors has to step as cleanly as one off a skyline.
     #[test]
     fn the_seeded_habitat_steps_with_closed_ledgers() {
-        steps_with_closed_ledgers(crate::voxel::scene::authored(config()));
+        steps_with_closed_ledgers(crate::scene::authored(config()));
     }
 
     #[test]

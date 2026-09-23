@@ -18,6 +18,21 @@
 //! decomposition nor growth runs in the static schedule. [`Arena::resource_stock`] reads
 //! the live total, so a test can watch a bite lower it.
 //!
+//! # What P5-B changed (`design/handoffs/voxel-retrain-2026-09-22.md`, item 3)
+//!
+//! The mouth is a physical band `[0, 1.33·H]` over the standing surface now, and the old
+//! browser crowns a voxel above the head were out of it. Every site holds a
+//! [`PatchKind`]: the shredder's **litter**, **carrion** and a **glowcap cap** fruiting
+//! on litter; the browser's bloomcrown **seedling** (a ground rosette no taller than
+//! 0.125 m), an adult's **basal rosette** under its upper crown, and — Stage A only, to
+//! be seen and not eaten — a **stripped** adult whose rosette is gone. Every scored patch
+//! is in the band of every body size an episode samples (`tests/arena_band.rs`); the
+//! stocks are the ones the layouts always carried. The arena gains a **0.125 m variant**
+//! ([`ArenaGrid::Fine`]), the same layout at twice the resolution, and two **bystander
+//! bodies** of the other lineage ([`ARENA_BYSTANDERS`]), because other bodies are normal
+//! (D7). [`Arena::refound`] rebuilds the animal layer so an episode can give its founder
+//! a sampled body (D11).
+//!
 //! # What P1-A does *not* do
 //!
 //! The placed founder is idle. It has a continuous pose and a support face, but no
@@ -36,7 +51,7 @@ use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, W
 use cubarium_voxel_fauna::{Command as FaunaCommand, Fauna, FaunaConfig, Founder, Pose, Senses};
 use cubarium_voxel_flora::{
     Command as FloraCommand, Deposit, DepositKind, Flora, FloraConfig, Site, Species as Plant,
-    Taken,
+    Taken, Trophic,
 };
 
 use crate::Sim;
@@ -87,55 +102,213 @@ const RESOURCE_TILES: usize = 6;
 /// needs and then trimmed back to this.
 pub const BROWSER_FOLIAGE_PER_STAND: f64 = 0.06;
 
-/// How far above the browser's head layer a stand's crown may be laid, in whole voxels
-/// (`design/handoffs/voxel-browser-reach-2026-09-21.md`, step 2). Zero is the crown at
-/// the head, one is inside the new vertical mouth reach, and two is out of reach and has
-/// to be learned as such. A Stage-A layout lays each rise twice; Stage B's two patches
-/// are both scored, so an unreachable successor would be an impossible task and its
-/// pattern is `[0, 1]`.
-pub const BROWSER_CROWN_RISES: [u32; 3] = [0, 1, 2];
+/// The grid an arena is laid on (P5-B, decision D11's "0.125 m variant"). Both are the
+/// **same physical arena** — 8 m around, 3 m deep, the ground's surface 1.25 m up — and
+/// the same layout from the same seed: the plan is drawn on the 0.25 m lattice and a fine
+/// arena lays each 0.25 m cell as the 2 × 2 fine cells under it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ArenaGrid {
+    /// 0.25 m voxels: the arena every phase-one to P3 policy trained on.
+    #[default]
+    Standard,
+    /// 0.125 m voxels: the `small` preset's cell size.
+    Fine,
+}
 
-/// A private stream for the crown-height draw, so the pond, the resource sites and the
-/// start placement are drawn from exactly the numbers they were before: only the crowns
-/// move.
-const CROWN_HEIGHT_SALT: u64 = 0x_C807_4E16_4854_5321;
+impl ArenaGrid {
+    /// Fine cells per standard cell along one axis.
+    fn scale(self) -> u32 {
+        match self {
+            ArenaGrid::Standard => 1,
+            ArenaGrid::Fine => 2,
+        }
+    }
 
-/// The species and wood that put a crown `rise` voxels above the browser's head layer.
-///
-/// Springturf's crown height tops out at one voxel, so the two taller rungs are
-/// bloomcrown, whose `crown_height_voxels` spans `[1, 3]` — the same species whose grown
-/// crowns leave the browser's head layer in the live world (`design/7_Research/
-/// voxel-census-2026-09-20.md` §D3). Half its `wood_max` rounds to a two-voxel crown and
-/// all of it to three.
-fn crown_wood(config: &FloraConfig, rise: u32) -> (Plant, f64) {
-    match rise {
-        0 => (Plant::Springturf, 0.5 * config.springturf.wood_max),
-        1 => (Plant::Bloomcrown, 0.5 * config.bloomcrown.wood_max),
-        _ => (Plant::Bloomcrown, config.bloomcrown.wood_max),
+    pub fn voxel_m(self) -> f64 {
+        ARENA_VOXEL_M / f64::from(self.scale())
+    }
+
+    pub fn width(self) -> u32 {
+        ARENA_WIDTH * self.scale()
+    }
+
+    pub fn height(self) -> u32 {
+        ARENA_HEIGHT * self.scale()
+    }
+
+    pub fn depth(self) -> u32 {
+        ARENA_DEPTH * self.scale()
+    }
+
+    /// The `y` of the ground's support faces: the top of `GROUND_Y + 1` standard cells.
+    pub fn ground_y(self) -> u32 {
+        (GROUND_Y + 1) * self.scale() - 1
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ArenaGrid::Standard => "0.25m",
+            ArenaGrid::Fine => "0.125m",
+        }
     }
 }
 
-/// The crown rise of each browser stand in a layout, in the resource order the caller
-/// lays them.
-///
-/// Deterministic per seed and **balanced by construction**: a Stage-A layout gets each of
-/// [`BROWSER_CROWN_RISES`] twice over its six tiles, Stage B gets one crown at the head
-/// and one a voxel above it, and the shuffle only decides which tile is which. So every
-/// layout carries a reachable crown and the training set carries all three heights
-/// without depending on a draw coming out right.
-fn browser_crown_rises(layout_seed: u64, kind: LayoutKind, tiles: usize) -> Vec<u32> {
-    let palette: &[u32] = match kind {
-        LayoutKind::StageA => &BROWSER_CROWN_RISES,
-        // Both Stage-B patches are scored — the initial one has to be depleted and the
-        // successor bitten — so neither may be out of reach.
-        LayoutKind::Reacquisition(_) => &BROWSER_CROWN_RISES[..2],
-    };
-    let mut rises: Vec<u32> = (0..tiles).map(|i| palette[i % palette.len()]).collect();
-    let mut rng = Rng::new(layout_seed ^ CROWN_HEIGHT_SALT);
-    for i in (1..rises.len()).rev() {
-        rises.swap(i, rng.below(i + 1));
+/// What one resource site of an arena holds (P5-B item 3). Each is food the founder's
+/// **mouth band** `[0, 1.33·H]` reaches from the ground — row e of the retrain brief —
+/// except [`PatchKind::Stripped`], which is laid to be seen and not eaten.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PatchKind {
+    /// Shredder: a litter pool on the ground.
+    Litter,
+    /// Shredder: a carrion pool on the ground (decisions §3: the shredder's third food).
+    Carrion,
+    /// Shredder: a glowcap's cap tissue, standing on half the patch's stock as litter —
+    /// a saprotroph fruits on the litter it lives on, and the litter carries the cue.
+    Cap,
+    /// Browser: a bloomcrown **seedling**, the ground rosette no taller than 0.125 m
+    /// (decisions §5): its whole crown is in the band.
+    Seedling,
+    /// Browser: an adult bloomcrown's **basal rosette** in the band, its upper crown
+    /// above it — the floor food of a grazed meadow.
+    Rosette,
+    /// Browser: an adult bloomcrown whose rosette has been **stripped**: only the upper
+    /// crown is left, above every body's band. Stage A only, and never a scored patch.
+    Stripped,
+}
+
+impl PatchKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PatchKind::Litter => "litter",
+            PatchKind::Carrion => "carrion",
+            PatchKind::Cap => "cap",
+            PatchKind::Seedling => "seedling",
+            PatchKind::Rosette => "rosette",
+            PatchKind::Stripped => "stripped",
+        }
     }
-    rises
+}
+
+/// A private stream for the patch-kind draw, so the pond, the resource sites and the
+/// start placement are drawn from exactly the numbers they were before: only what each
+/// site holds moves. (The value is the old crown-height stream's: that draw is this one.)
+const PATCH_KIND_SALT: u64 = 0x_C807_4E16_4854_5321;
+
+/// A private stream for the bystanders, for the same reason.
+const BYSTANDER_SALT: u64 = 0x_B157_A4DE_5EED_0002;
+
+/// Bystander bodies an arena places (P5-B item 3, decision D7: other bodies are normal).
+/// They are the **other** lineage, so they never eat the candidate's food and Stage B's
+/// patch accounting stays exact, and they arrive the way the seeder's founders do
+/// (`StartingStores::HUNGRY`). Placeholder, `design/backlog.md` §1.
+pub const ARENA_BYSTANDERS: usize = 2;
+
+/// Squared standard columns a bystander keeps from the start and from every resource,
+/// so it is never placed in the candidate's mouth or on its food. Placeholder.
+const BYSTANDER_CLEARANCE: i64 = 9;
+
+/// The kind of each resource site in a layout, in the sorted resource order.
+///
+/// Deterministic per seed and **balanced by construction**, as the crown heights it
+/// replaces were: the palette is cycled over the sites from a seeded rotation and then
+/// shuffled, so a Stage-A layout carries every kind twice and a Stage-B pair two kinds.
+/// Stage B's palette holds only kinds the band reaches — both patches are scored.
+fn patch_kinds(
+    founder: Founder,
+    layout_seed: u64,
+    kind: LayoutKind,
+    sites: usize,
+) -> Vec<PatchKind> {
+    let palette: &[PatchKind] = match (founder, kind) {
+        (Founder::Blind, _) => &[PatchKind::Litter, PatchKind::Carrion, PatchKind::Cap],
+        (Founder::Browser, LayoutKind::StageA) => {
+            &[PatchKind::Seedling, PatchKind::Rosette, PatchKind::Stripped]
+        }
+        (Founder::Browser, LayoutKind::Reacquisition(_)) => {
+            &[PatchKind::Seedling, PatchKind::Rosette]
+        }
+    };
+    let mut rng = Rng::new(layout_seed ^ PATCH_KIND_SALT);
+    let rotation = rng.below(palette.len());
+    let mut kinds: Vec<PatchKind> = (0..sites)
+        .map(|i| palette[(i + rotation) % palette.len()])
+        .collect();
+    for i in (1..kinds.len()).rev() {
+        kinds.swap(i, rng.below(i + 1));
+    }
+    kinds
+}
+
+/// One body an arena or a landscape places: its lineage, its support face and its
+/// heading. The stores it arrives with are the caller's.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Placement {
+    pub founder: Founder,
+    pub site: Site,
+    pub heading_rad: f64,
+}
+
+/// A fresh animal layer holding exactly `bodies`, **births off**, each introduced on its
+/// own face with its own stores: the ids come back in `bodies` order, `None` where the
+/// layer refused one. No controller is installed — a body without one rests until its
+/// driver attaches one.
+pub fn populate(
+    world: &World,
+    config: FaunaConfig,
+    bodies: impl IntoIterator<Item = (Placement, cubarium_voxel_fauna::StartingStores)>,
+) -> (Fauna, Vec<Option<u64>>) {
+    let mut fauna = Fauna::new(config);
+    fauna.set_births_enabled(false);
+    let ids = bodies
+        .into_iter()
+        .map(|(p, stores)| {
+            fauna
+                .apply(
+                    world,
+                    FaunaCommand::IntroduceFounderOnFace {
+                        site: p.site,
+                        founder: p.founder,
+                        stores,
+                        heading_rad: p.heading_rad,
+                    },
+                )
+                .then(|| fauna.view().ledger.births - 1)
+        })
+        .collect();
+    (fauna, ids)
+}
+
+/// Edible stock at `site` for `founder`'s mouth band standing at `standing_y` with the
+/// **adult** body: the shredder's litter and carrion pools there and a glowcap's cap
+/// layers in the band; the browser's vascular foliage layers in the band. An upper crown
+/// above the band is not stock — it cannot be eaten from the ground.
+pub fn edible_stock(
+    founder: Founder,
+    flora: &Flora,
+    voxel_m: f64,
+    standing_y: u32,
+    site: Site,
+) -> f64 {
+    let fv = flora.view();
+    let band = FaunaConfig::default()
+        .founder(founder)
+        .adult_body()
+        .mouth_layers(standing_y, voxel_m);
+    let pools = match founder {
+        Founder::Blind => fv.ground_at(site).map_or(0.0, |g| g.litter + g.carrion),
+        Founder::Browser => 0.0,
+    };
+    let stand = fv.stand_at(site).filter(|s| {
+        let fungal = fv.config.species(s.species).trophic == Trophic::Saprotroph;
+        fungal == (founder == Founder::Blind)
+    });
+    pools
+        + stand.map_or(0.0, |s| {
+            fv.layers(s)
+                .filter(|l| band.contains(&l.cell))
+                .map(|l| l.stock)
+                .sum()
+        })
 }
 
 /// How full an arena founder arrives: **half its structure and no reserve** (P2-C).
@@ -175,19 +348,31 @@ impl Rng {
     }
 }
 
-/// A built arena and the founder it placed.
+/// A built arena and the founder it placed. Cloning it clones the three layers — the
+/// fauna's controller table clones empty, as it always does.
+#[derive(Clone)]
 pub struct Arena {
     /// Which founder this arena feeds.
     pub founder: Founder,
     /// The layout seed the terrain, pond and resources were drawn from.
     pub layout_seed: u64,
+    /// The cells it is laid on.
+    pub grid: ArenaGrid,
     pub world: World,
     pub flora: Flora,
     pub fauna: Fauna,
-    /// The finite resource sites, in column order: litter tiles or foliage stands.
+    /// The finite resource sites, in column order.
     pub resources: Vec<Site>,
+    /// What each of `resources` holds, in the same order.
+    pub resource_kinds: Vec<PatchKind>,
+    /// Where the founder starts and which way it faces, if the layout found a start.
+    pub start: Option<Placement>,
+    /// The bystander bodies' placements (the other lineage).
+    pub bystanders: Vec<Placement>,
     /// The id of the idle founder body placed at build time, if it landed.
     pub animal_id: Option<u64>,
+    /// The bystanders' ids in the current animal layer, in `bystanders` order.
+    pub bystander_ids: Vec<u64>,
 }
 
 /// Stage B's two real, finite patches. The metadata is fixture-facing only: it never
@@ -266,7 +451,12 @@ impl Arena {
     /// ground is direct `SetMaterial`, so there is no settling cost and nothing to freeze
     /// afterwards.
     pub fn build(founder: Founder, layout_seed: u64) -> Arena {
-        Self::build_kind(founder, layout_seed, LayoutKind::StageA, None).0
+        Self::build_on(founder, layout_seed, ArenaGrid::Standard)
+    }
+
+    /// [`Arena::build`] on `grid`: the same layout, laid on 0.25 m or 0.125 m cells.
+    pub fn build_on(founder: Founder, layout_seed: u64, grid: ArenaGrid) -> Arena {
+        Self::build_kind(founder, layout_seed, LayoutKind::StageA, None, grid).0
     }
 
     /// Build Stage B with the successor in `band` ([`SuccessorBand`]).
@@ -275,7 +465,17 @@ impl Arena {
         layout_seed: u64,
         band: SuccessorBand,
     ) -> ReacquisitionArena {
-        Self::build_reacquisition_kind(founder, layout_seed, band, None)
+        Self::build_reacquisition_on(founder, layout_seed, band, ArenaGrid::Standard)
+    }
+
+    /// [`Arena::build_reacquisition_in`] on `grid`.
+    pub fn build_reacquisition_on(
+        founder: Founder,
+        layout_seed: u64,
+        band: SuccessorBand,
+        grid: ArenaGrid,
+    ) -> ReacquisitionArena {
+        Self::build_reacquisition_kind(founder, layout_seed, band, None, grid)
     }
 
     /// Build Stage B's smallest real continuation task: one reachable finite patch and
@@ -283,7 +483,7 @@ impl Arena {
     /// static sensory field; this type only records which physical sites form the two
     /// patches for an evaluator after the controller has acted.
     pub fn build_reacquisition(founder: Founder, layout_seed: u64) -> ReacquisitionArena {
-        Self::build_reacquisition_kind(founder, layout_seed, SuccessorBand::Landed, None)
+        Self::build_reacquisition_in(founder, layout_seed, SuccessorBand::Landed)
     }
 
     /// Build the same Stage-B layout and start position as [`Self::build_reacquisition`],
@@ -306,6 +506,7 @@ impl Arena {
             layout_seed,
             SuccessorBand::Landed,
             Some(turn_to_initial_rad),
+            ArenaGrid::Standard,
         )
     }
 
@@ -314,12 +515,14 @@ impl Arena {
         layout_seed: u64,
         band: SuccessorBand,
         start_turn_override: Option<f64>,
+        grid: ArenaGrid,
     ) -> ReacquisitionArena {
         let (arena, initial_patch) = Self::build_kind(
             founder,
             layout_seed,
             LayoutKind::Reacquisition(band),
             start_turn_override,
+            grid,
         );
         let initial_patch = initial_patch.expect("the two-patch layout records its initial patch");
         let successor_patch = arena
@@ -335,28 +538,36 @@ impl Arena {
         }
     }
 
+    /// The layout is **planned on the 0.25 m lattice** — pond, resource sites, start and
+    /// heading, from the same draws in the same order the arena has always made — and
+    /// then **laid** on `grid`, each planned cell becoming the `scale × scale` cells under
+    /// it. So a fine arena is the standard arena's layout at twice the resolution, and a
+    /// standard arena's pond, sites and start are exactly what they were before P5-B.
     fn build_kind(
         founder: Founder,
         layout_seed: u64,
         kind: LayoutKind,
         start_turn_override: Option<f64>,
+        grid: ArenaGrid,
     ) -> (Arena, Option<Site>) {
+        let scale = grid.scale();
+        let ground_y = grid.ground_y();
         let config = VoxelConfig {
-            width: ARENA_WIDTH,
-            height: ARENA_HEIGHT,
-            depth: ARENA_DEPTH,
-            voxel_m: ARENA_VOXEL_M,
+            width: grid.width(),
+            height: grid.height(),
+            depth: grid.depth(),
+            voxel_m: grid.voxel_m(),
             seed: layout_seed,
             ..VoxelConfig::default()
         };
         let mut world = World::empty(config);
         world.apply(WorldCommand::SetOutlet { open: false });
 
-        // Ground: soil 1..=GROUND_Y, bedrock already at 0. Wrap the x walk so the seam
+        // Ground: soil 1..=ground_y, bedrock already at 0. Wrap the x walk so the seam
         // column is an ordinary interior column.
-        for z in 0..ARENA_DEPTH {
-            for x in 0..ARENA_WIDTH as i64 {
-                for y in 1..=GROUND_Y {
+        for z in 0..grid.depth() {
+            for x in 0..i64::from(grid.width()) {
+                for y in 1..=ground_y {
                     world.apply(WorldCommand::SetMaterial {
                         x,
                         y,
@@ -366,12 +577,19 @@ impl Arena {
                 }
             }
         }
+        // A planned 0.25 m cell `(x, z)` laid on the grid: its lowest-corner fine cell.
+        let laid = |site: Site| Site {
+            x: site.x * scale,
+            y: ground_y,
+            z: site.z * scale,
+        };
 
         let mut rng = Rng::new(layout_seed);
-        let voxel_volume = ARENA_VOXEL_M * ARENA_VOXEL_M * ARENA_VOXEL_M;
+        let voxel_volume = grid.voxel_m().powi(3);
         let mut pond = vec![false; (ARENA_WIDTH * ARENA_DEPTH) as usize];
         // A shallow prepared pond: a rock-free patch of ground with free water standing on
-        // it. One direct write, never solved, and the static schedule never moves it.
+        // it, the same 0.2 m deep on either grid. One direct write, never solved, and the
+        // static schedule never moves it.
         let px = rng.below(ARENA_WIDTH as usize) as i64;
         let pz = rng.below(ARENA_DEPTH as usize) as u32;
         for dz in 0..2u32 {
@@ -384,20 +602,26 @@ impl Arena {
                 let idx =
                     (x.rem_euclid(ARENA_WIDTH as i64) as usize) * ARENA_DEPTH as usize + z as usize;
                 pond[idx] = true;
-                let _ = world.apply(WorldCommand::AddWater {
-                    x,
-                    y: GROUND_Y + 1,
-                    z,
-                    volume_m3: POND_FILL * voxel_volume,
-                });
+                for fz in 0..scale {
+                    for fx in 0..i64::from(scale) {
+                        for fy in 1..=scale {
+                            let _ = world.apply(WorldCommand::AddWater {
+                                x: x * i64::from(scale) + fx,
+                                y: ground_y + fy,
+                                z: z * scale + fz,
+                                volume_m3: POND_FILL * voxel_volume,
+                            });
+                        }
+                    }
+                }
             }
         }
 
-        let mut flora = Flora::new(FloraConfig::default());
+        let mut flora = Flora::new(FloraConfig::for_voxel_size(grid.voxel_m()));
 
         // Candidate support faces: soil ground, not the pond, and — unless this layout is
         // the seam layout — at least two columns off the wrapped seam, so a default layout
-        // does not accidentally test wrap geometry.
+        // does not accidentally test wrap geometry. Planned on the 0.25 m lattice.
         let seam_layout = layout_seed % 4 == 3;
         let mut candidates: Vec<Site> = Vec::new();
         for z in 0..ARENA_DEPTH {
@@ -473,90 +697,23 @@ impl Arena {
         };
         resources.sort();
 
-        // Crown heights, in the sorted resource order, drawn from their own stream so the
-        // pond, the resource sites and the start placement are untouched.
-        let crown_rises = match founder {
-            Founder::Browser => browser_crown_rises(layout_seed, kind, resources.len()),
-            Founder::Blind => Vec::new(),
-        };
-
-        for (index, &site) in resources.iter().enumerate() {
-            match founder {
-                Founder::Blind => {
-                    let organic = match kind {
-                        LayoutKind::StageA => LITTER_PER_TILE,
-                        LayoutKind::Reacquisition(_) => {
-                            let fraction = if Some(site) == initial_patch {
-                                REACQUISITION_INITIAL_PATCH_FRACTION
-                            } else {
-                                1.0
-                            };
-                            fraction * REACQUISITION_LITTER_PER_PATCH
-                        }
-                    };
-                    let accepted = flora.deposit(
-                        site,
-                        Deposit {
-                            kind: DepositKind::Litter,
-                            organic,
-                            mineral: organic * LITTER_MINERAL_FRACTION,
-                            energy: organic * LITTER_ENERGY_DENSITY,
-                        },
-                    );
-                    debug_assert!(accepted, "a litter deposit on a support face");
-                }
-                Founder::Browser => {
-                    // The stand's **wood carries its crown height** and nothing else: it
-                    // is seeded at the wood its rise needs and then trimmed back to
-                    // `BROWSER_FOLIAGE_PER_STAND`, which is what every browser stand held
-                    // before heights varied. The browser crops `bite_per_s = 0.002`
-                    // organic per second, so 0.06 is thirty seconds of feeding — the same
-                    // quarter of the Stage-B horizon the blind patch is sized to — and the
-                    // initial Stage-B patch is still half of it.
-                    let rise = crown_rises[index];
-                    let (species, wood) = crown_wood(flora.config(), rise);
-                    let accepted = flora.apply(
-                        &world,
-                        FloraCommand::Seed {
-                            x: i64::from(site.x),
-                            z: site.z,
-                            species,
-                            wood,
-                        },
-                    );
-                    debug_assert!(accepted, "a browser stand on a support face");
-                    let stand = flora
-                        .view()
-                        .stand_at(site)
-                        .expect("the browser stand was seeded");
-                    debug_assert_eq!(
-                        flora.config().species(species).crown_voxels(stand.wood),
-                        rise + 1,
-                        "{species:?} at wood {wood} is not a crown {rise} above the head"
-                    );
-                    let want = match kind {
-                        LayoutKind::StageA => BROWSER_FOLIAGE_PER_STAND,
-                        LayoutKind::Reacquisition(_) if Some(site) == initial_patch => {
-                            REACQUISITION_INITIAL_PATCH_FRACTION * BROWSER_FOLIAGE_PER_STAND
-                        }
-                        LayoutKind::Reacquisition(_) => BROWSER_FOLIAGE_PER_STAND,
-                    };
-                    let trim = stand.foliage - want;
-                    debug_assert!(
-                        trim >= -1e-15,
-                        "a seeded crown must carry at least the arena's stock"
-                    );
-                    // A crown at the head is the old half-grown springturf and already
-                    // holds exactly the stock; the taller ones are seeded large and cut
-                    // back to it.
-                    if trim > 0.0 {
-                        let removed = flora
-                            .take_foliage(site, trim)
-                            .expect("the seeded crown has foliage to trim");
-                        debug_assert!((removed.organic - trim).abs() < 1e-12);
-                    }
-                }
-            }
+        // What each site holds, in the sorted resource order, drawn from its own stream
+        // so the pond, the resource sites and the start placement are untouched.
+        let kinds = patch_kinds(founder, layout_seed, kind, resources.len());
+        for (index, &planned) in resources.iter().enumerate() {
+            // The stock a scored patch carries: Stage A's tile, or Stage B's patch with
+            // the initial one at half the successor.
+            let full = match (founder, kind) {
+                (Founder::Blind, LayoutKind::StageA) => LITTER_PER_TILE,
+                (Founder::Blind, LayoutKind::Reacquisition(_)) => REACQUISITION_LITTER_PER_PATCH,
+                (Founder::Browser, _) => BROWSER_FOLIAGE_PER_STAND,
+            };
+            let organic = if Some(planned) == initial_patch {
+                REACQUISITION_INITIAL_PATCH_FRACTION * full
+            } else {
+                full
+            };
+            lay_patch(&mut flora, &world, laid(planned), kinds[index], organic);
         }
 
         // Stage A begins off food but already inside a useful signal. Pick a dry support
@@ -599,11 +756,7 @@ impl Arena {
         starts.sort_by_key(|(site, target, distance)| (*distance, *site, *target));
         let start = (!starts.is_empty()).then(|| starts[rng.below(starts.len())]);
 
-        let mut fauna = Fauna::new(FaunaConfig::default());
-        // Isolated arenas disable paid births (plan, "Frozen arena contract").
-        fauna.set_births_enabled(false);
-        let mut animal_id = None;
-        if let Some((site, target, _)) = start {
+        let start = start.map(|(site, target, _)| {
             // The start heading (P2-B step 2). Phase one aimed both founders at the
             // in-signal resource with a +/-5 degree jitter, which made "go forward and
             // keep feeding" a winning open-loop policy and left sensing untested. The
@@ -630,57 +783,112 @@ impl Arena {
                     }
                 }
             };
-            if fauna.apply(
-                &world,
-                FaunaCommand::IntroduceFounder {
-                    x: i64::from(site.x),
-                    z: site.z,
-                    founder,
-                    stores: FOUNDER_START,
-                    heading_rad,
-                },
-            ) {
-                animal_id = Some(fauna.view().ledger.births - 1);
-            }
-        }
-
-        (
-            Arena {
+            Placement {
                 founder,
-                layout_seed,
-                world,
-                flora,
-                fauna,
-                resources,
-                animal_id,
-            },
-            initial_patch,
-        )
+                site,
+                heading_rad,
+            }
+        });
+
+        // Bystanders (D7): the other lineage, on dry ground clear of the start and the
+        // food, from their own stream.
+        let other = match founder {
+            Founder::Blind => Founder::Browser,
+            Founder::Browser => Founder::Blind,
+        };
+        let mut brng = Rng::new(layout_seed ^ BYSTANDER_SALT);
+        let mut pool: Vec<Site> = candidates
+            .iter()
+            .copied()
+            .filter(|s| !resources.contains(s))
+            .filter(|s| {
+                resources
+                    .iter()
+                    .chain(start.as_ref().map(|p| &p.site))
+                    .all(|r| arena_distance_squared(*s, *r) >= BYSTANDER_CLEARANCE)
+            })
+            .collect();
+        pool.sort();
+        let mut bystanders = Vec::new();
+        for _ in 0..ARENA_BYSTANDERS.min(pool.len()) {
+            let site = pool.swap_remove(brng.below(pool.len()));
+            bystanders.push(Placement {
+                founder: other,
+                site: laid(site),
+                heading_rad: brng.unit() * std::f64::consts::TAU,
+            });
+        }
+        let start = start.map(|p| Placement {
+            site: laid(p.site),
+            ..p
+        });
+
+        let mut arena = Arena {
+            founder,
+            layout_seed,
+            grid,
+            world,
+            flora,
+            fauna: Fauna::new(FaunaConfig::default()),
+            resources: resources.iter().map(|&r| laid(r)).collect(),
+            resource_kinds: kinds,
+            start,
+            bystanders,
+            animal_id: None,
+            bystander_ids: Vec::new(),
+        };
+        arena.refound(FOUNDER_START);
+        let initial_patch = initial_patch.map(laid);
+        (arena, initial_patch)
     }
 
-    /// The live finite stock in the resource layout: litter organic matter for a blind
-    /// arena, stand foliage for a browser arena. This is what a bite lowers.
+    /// Rebuild the animal layer from the arena's placements: the founder at its start
+    /// with `stores`, and the bystanders hungry, **births off** (plan, "Frozen arena
+    /// contract"). What an episode calls to give its founder a sampled body (D11); the
+    /// build calls it with [`FOUNDER_START`]. No controller is installed.
+    pub fn refound(&mut self, stores: cubarium_voxel_fauna::StartingStores) {
+        let bodies = self.start.map(|p| (p, stores)).into_iter().chain(
+            self.bystanders
+                .iter()
+                .map(|p| (*p, cubarium_voxel_fauna::StartingStores::HUNGRY)),
+        );
+        let (fauna, ids) = populate(&self.world, FaunaConfig::default(), bodies);
+        let mut ids = ids.into_iter();
+        self.animal_id = if self.start.is_some() {
+            ids.next().flatten()
+        } else {
+            None
+        };
+        self.bystander_ids = ids.flatten().collect();
+        self.fauna = fauna;
+    }
+
+    /// The face the founder starts on, if the layout found one.
+    pub fn start_face(&self) -> Option<Site> {
+        self.start.map(|p| p.site)
+    }
+
+    /// The live edible stock in the resource layout ([`edible_stock`] summed over it).
+    /// This is what a bite lowers.
     pub fn resource_stock(&self) -> f64 {
-        let fv = self.flora.view();
         self.resources
             .iter()
-            .map(|&site| match self.founder {
-                Founder::Blind => fv.ground_at(site).map_or(0.0, |g| g.litter),
-                Founder::Browser => fv.stand_at(site).map_or(0.0, |s| s.foliage),
-            })
+            .map(|&site| self.patch_stock(site))
             .sum()
     }
 
-    /// The live stock on **one** site of this arena's resource layout: litter organic
-    /// matter for a blind arena, stand foliage for a browser arena. The Stage-B
-    /// evaluator's per-patch reading; like [`Arena::resource_stock`] it is fixture
-    /// surface, never an observation or a reward.
+    /// The live edible stock on **one** site of this arena's resource layout, for the
+    /// adult band from the ground ([`edible_stock`]). The Stage-B evaluator's per-patch
+    /// reading; like [`Arena::resource_stock`] it is fixture surface, never an
+    /// observation or a reward.
     pub fn patch_stock(&self, site: Site) -> f64 {
-        let fv = self.flora.view();
-        match self.founder {
-            Founder::Blind => fv.ground_at(site).map_or(0.0, |g| g.litter),
-            Founder::Browser => fv.stand_at(site).map_or(0.0, |s| s.foliage),
-        }
+        edible_stock(
+            self.founder,
+            &self.flora,
+            self.grid.voxel_m(),
+            self.grid.ground_y(),
+            site,
+        )
     }
 
     /// The placed founder's pose, if it landed.
@@ -690,14 +898,46 @@ impl Arena {
             .map(|a| a.pose)
     }
 
-    /// Take up to `want` of the finite stock off one resource site, through the plant
-    /// layer's production withdrawals — the same call P1-B's litter feeder and browser will
-    /// make. `None` when the site holds nothing.
+    /// Take up to `want` of the edible stock off one resource site, through the plant
+    /// layer's production withdrawals — the ones the founder's mouth makes: litter, then
+    /// carrion, then cap tissue in the band for the shredder; foliage in the band for the
+    /// browser. `None` when the site holds nothing edible.
     pub fn take(&mut self, site: Site, want: f64) -> Option<Taken> {
-        match self.founder {
-            Founder::Blind => self.flora.take_litter(site, want),
-            Founder::Browser => self.flora.take_foliage(site, want),
+        let band = FaunaConfig::default()
+            .founder(self.founder)
+            .adult_body()
+            .mouth_layers(self.grid.ground_y(), self.grid.voxel_m());
+        fn add(got: &mut Taken, t: Option<Taken>) {
+            if let Some(t) = t {
+                got.organic += t.organic;
+                got.mineral += t.mineral;
+                got.energy += t.energy;
+            }
         }
+        let mut got = Taken {
+            organic: 0.0,
+            mineral: 0.0,
+            energy: 0.0,
+        };
+        match self.founder {
+            Founder::Blind => {
+                add(&mut got, self.flora.take_litter(site, want));
+                let left = want - got.organic;
+                if left > 0.0 {
+                    add(&mut got, self.flora.take_carrion(site, left));
+                }
+                let left = want - got.organic;
+                if left > 0.0 {
+                    let t = self.flora.take_foliage_in_layers(site, left, &band);
+                    add(&mut got, t.map(|t| t.taken));
+                }
+            }
+            Founder::Browser => {
+                let t = self.flora.take_foliage_in_layers(site, want, &band);
+                add(&mut got, t.map(|t| t.taken));
+            }
+        }
+        (got.organic > 0.0).then_some(got)
     }
 
     /// Settle a reusable cue field for this exact frozen source layout. Episode-private
@@ -717,6 +957,92 @@ impl Arena {
     /// arena's unchanged source layout.
     pub fn into_sim_prepared(self, config: crate::SimConfig, senses: Senses) -> Sim {
         Sim::new_static_prepared(self.world, self.flora, self.fauna, config, senses)
+    }
+}
+
+/// Lay one patch of `kind` holding `organic` of edible stock on `site`.
+fn lay_patch(flora: &mut Flora, world: &World, site: Site, kind: PatchKind, organic: f64) {
+    let pool = |flora: &mut Flora, deposit: DepositKind, organic: f64| {
+        let accepted = flora.deposit(
+            site,
+            Deposit {
+                kind: deposit,
+                organic,
+                mineral: organic * LITTER_MINERAL_FRACTION,
+                energy: organic * LITTER_ENERGY_DENSITY,
+            },
+        );
+        debug_assert!(accepted, "a deposit on a support face");
+    };
+    let seed = |flora: &mut Flora, species: Plant, wood: f64| {
+        let accepted = flora.apply(
+            world,
+            FloraCommand::Seed {
+                x: i64::from(site.x),
+                z: site.z,
+                species,
+                wood,
+            },
+        );
+        assert!(
+            accepted,
+            "{species:?} seeded on the arena's ground at {site:?}"
+        );
+    };
+    // The lowest foliage layer's cell of the stand on `site`: a rosette's.
+    let lowest = |flora: &Flora| -> i64 {
+        flora
+            .view()
+            .layers_at(site)
+            .map(|l| l.cell)
+            .min()
+            .expect("a seeded stand has a foliage layer")
+    };
+    // Trim a stand's layers in `cells` down to `keep`.
+    let trim = |flora: &mut Flora, cells: std::ops::RangeInclusive<i64>, keep: f64| {
+        let held: f64 = flora
+            .view()
+            .layers_at(site)
+            .filter(|l| cells.contains(&l.cell))
+            .map(|l| l.stock)
+            .sum();
+        assert!(
+            held >= keep - 1e-15,
+            "{kind:?} at {site:?} holds {held} in {cells:?}, less than the patch's {keep}"
+        );
+        if held > keep {
+            let taken = flora
+                .take_foliage_in_layers(site, held - keep, &cells)
+                .expect("the seeded stand has foliage to trim");
+            debug_assert!((taken.taken.organic - (held - keep)).abs() < 1e-12);
+        }
+    };
+    let config = flora.config().clone();
+    match kind {
+        PatchKind::Litter => pool(flora, DepositKind::Litter, organic),
+        PatchKind::Carrion => pool(flora, DepositKind::Carrion, organic),
+        PatchKind::Cap => {
+            // Half the stock is the glowcap's cap, half the litter it fruits on.
+            seed(flora, Plant::Glowcap, config.glowcap.wood_max);
+            let cap = lowest(flora);
+            trim(flora, cap..=cap, 0.5 * organic);
+            pool(flora, DepositKind::Litter, 0.5 * organic);
+        }
+        PatchKind::Seedling => {
+            // Decisions §5's seedling stage is `wood / wood_max <= 0.2`.
+            seed(flora, Plant::Bloomcrown, 0.2 * config.bloomcrown.wood_max);
+            trim(flora, i64::MIN..=i64::MAX, organic);
+        }
+        PatchKind::Rosette => {
+            seed(flora, Plant::Bloomcrown, config.bloomcrown.wood_max);
+            let rosette = lowest(flora);
+            trim(flora, rosette..=rosette, organic);
+        }
+        PatchKind::Stripped => {
+            seed(flora, Plant::Bloomcrown, config.bloomcrown.wood_max);
+            let rosette = lowest(flora);
+            trim(flora, rosette..=rosette, 0.0);
+        }
     }
 }
 
@@ -746,6 +1072,47 @@ mod tests {
     const SEEDS: [u64; 4] = [1, 2, 3, 95];
     const STAGE_A_SEEDS: [u64; 12] = [1, 2, 4, 5, 6, 8, 9, 10, 13, 14, 17, 18];
     const REACQUISITION_SEEDS: [u64; 4] = [1, 2, 17, 95];
+
+    /// P5-B's arena: every kind is laid, the stripped crown holds stock only above the
+    /// band, the fine arena is the standard layout at twice the resolution, and the
+    /// bystanders are the other lineage, placed and alive.
+    #[test]
+    fn the_rebuilt_arena_lays_every_kind_on_both_grids_with_bystanders() {
+        for founder in Founder::ALL {
+            for seed in [1u64, 6, 20] {
+                let standard = Arena::build(founder, seed);
+                let fine = Arena::build_on(founder, seed, ArenaGrid::Fine);
+                assert_eq!(standard.resource_kinds, fine.resource_kinds);
+                for (s, f) in standard.resources.iter().zip(&fine.resources) {
+                    assert_eq!((2 * s.x, 2 * s.z), (f.x, f.z), "{founder:?} seed {seed}");
+                    assert_eq!(f.y, ArenaGrid::Fine.ground_y());
+                }
+                let c = fine.world.config();
+                assert_eq!((c.width, c.height, c.depth, c.voxel_m), (64, 32, 24, 0.125));
+                for arena in [&standard, &fine] {
+                    for (&site, &kind) in arena.resources.iter().zip(&arena.resource_kinds) {
+                        let stock = arena.patch_stock(site);
+                        if kind == PatchKind::Stripped {
+                            assert_eq!(stock, 0.0, "a stripped crown is not in the band");
+                            let crown = arena.flora.view().stand_at(site).expect("a crown").foliage;
+                            assert!(crown > 0.0, "but it is there to be seen");
+                        } else {
+                            assert!(stock > 0.0, "{founder:?} {kind:?} at {site:?}");
+                        }
+                    }
+                    assert_eq!(arena.bystanders.len(), ARENA_BYSTANDERS);
+                    assert_eq!(arena.bystander_ids.len(), ARENA_BYSTANDERS, "all placed");
+                    for &id in &arena.bystander_ids {
+                        let b = arena.fauna.view().animal(id).expect("a bystander");
+                        assert_ne!(b.founder, Some(founder), "the other lineage");
+                    }
+                }
+                let kinds: std::collections::BTreeSet<_> =
+                    standard.resource_kinds.iter().map(|k| k.as_str()).collect();
+                assert_eq!(kinds.len(), 3, "{founder:?}: Stage A lays every kind");
+            }
+        }
+    }
 
     /// [`Arena::build`]'s resource sites are always unique, including the seam layout
     /// (seeds `% 4 == 3`), where the seam tile used to collide with an interior pick
@@ -971,18 +1338,9 @@ mod tests {
                 (20.0..=40.0).contains(&(successor / bite_per_s)),
                 "{founder:?}: the successor is not about one quarter of 120 s"
             );
-            if founder == Founder::Browser {
-                // The two patches no longer share a wood — wood is what carries the
-                // crown height now — but both Stage-B crowns must be inside the
-                // browser's own vertical mouth reach, or the task is impossible.
-                let reach = i64::from(Founder::Browser.manifest().mouth_reach_up_voxels);
-                for patch in [stage.initial_patch, stage.successor_patch] {
-                    assert!(
-                        (0..=reach).contains(&crown_rise(&stage.arena.flora, patch)),
-                        "{patch:?}: a Stage-B crown out of the browser's mouth reach"
-                    );
-                }
-            }
+            // Both Stage-B patches' stock is in the band, or the task is impossible
+            // (`tests/arena_band.rs` sweeps every layout, both grids and both ends of the
+            // body sizes).
             // And Stage A's tiles are deliberately not that: they cannot deplete.
             let a = Arena::build(founder, 6);
             let tile = a.patch_stock(a.resources[0]);
@@ -1037,6 +1395,7 @@ mod tests {
             .map(|s| (s.site, s.species, s.wood, s.foliage))
             .collect();
         let before_stock = arena.resource_stock();
+        let resources = arena.resources.clone();
         let before_animal = *arena.fauna.view().animal(arena.animal_id.unwrap()).unwrap();
 
         let mut sim = arena.into_sim(SimConfig { threads: 1 });
@@ -1078,27 +1437,20 @@ mod tests {
 
         let (_, flora, _) = sim.layers();
         let stock = match before_animal.founder {
-            Some(Founder::Browser) => arena_stock(flora),
+            Some(Founder::Browser) => arena_stock(flora, Founder::Browser, &resources),
             _ => unreachable!("browser arena"),
         };
         assert_eq!(stock, before_stock, "the idle body ate nothing");
     }
 
-    /// How far above the body's head layer one stand's crown sits: the layer a body
-    /// standing on the stand's own support face would have to lift its mouth to.
-    fn crown_rise(flora: &Flora, site: Site) -> i64 {
-        let stand = flora.view().stand_at(site).expect("a seeded stand");
-        let voxels = flora
-            .config()
-            .species(stand.species)
-            .crown_voxels(stand.wood);
-        i64::from(voxels) - 1
-    }
-
-    fn arena_stock(flora: &Flora) -> f64 {
-        // The browser layout's stock: every seeded stand's foliage, whatever species
-        // carries the crown height that stand was laid at.
-        flora.view().stands.iter().map(|s| s.foliage).sum()
+    /// The layout's edible stock off a flora that has left the arena: what
+    /// [`Arena::resource_stock`] reads, the band's stock on every resource site.
+    fn arena_stock(flora: &Flora, founder: Founder, resources: &[Site]) -> f64 {
+        let grid = ArenaGrid::Standard;
+        resources
+            .iter()
+            .map(|&r| edible_stock(founder, flora, grid.voxel_m(), grid.ground_y(), r))
+            .sum()
     }
 
     fn patch_stock(arena: &Arena, site: Site) -> f64 {
@@ -1221,7 +1573,14 @@ mod tests {
     #[test]
     fn a_controller_driven_founder_moves_and_feeds_through_the_static_schedule() {
         let arena = Arena::build(Founder::Browser, 11);
-        let stand_site = arena.resources[0];
+        let resources = arena.resources.clone();
+        // The first stand whose stock the band reaches (a stripped crown is not food).
+        let stand_site = arena
+            .resources
+            .iter()
+            .copied()
+            .find(|&r| arena.patch_stock(r) > 0.0)
+            .expect("a reachable stand");
         let stock_before = arena.resource_stock();
         let idle_id = arena.animal_id.expect("the arena placed an idle body");
 
@@ -1312,7 +1671,7 @@ mod tests {
         );
         // The browser layout's finite stock: every seeded stand's foliage, read through
         // the sim's flora — the same read `Arena::resource_stock` does.
-        let stock_after: f64 = sim.flora().view().stands.iter().map(|s| s.foliage).sum();
+        let stock_after = arena_stock(sim.flora(), Founder::Browser, &resources);
         assert!(
             stock_after < stock_before,
             "the finite stock went down through the production withdrawals"
