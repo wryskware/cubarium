@@ -27,7 +27,7 @@ use crate::World;
 /// cell, and to **16** for the lake's wet shore (`Tiers::shore_m`, `shore_slope` and
 /// `shore_lip_m`, package SW). Postcard is not self-describing, so a new field is a new format: earlier
 /// tags are refused, never migrated.
-pub const SCHEMA: u32 = 16;
+pub const SCHEMA: u32 = 17;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

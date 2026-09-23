@@ -1,0 +1,21 @@
+# Cubarium on a desktop: the designed terrarium (a ring of tree and tower).
+#
+# `cubarium voxel --config config/desktop/terrarium.toml`
+# (or `./scripts/run-voxel.sh --config config/desktop/terrarium.toml`)
+
+tilt_degrees = 30.0
+px_per_voxel = 4
+raster_height = 0
+haze = 0.55
+water_alpha = 0.5
+dither = 0.04
+sky_gradient = true
+
+[world]
+width = 256
+height = 128
+depth = 48
+voxel_m = 0.125
+
+[world.landform]
+preset = "terrarium"

@@ -224,8 +224,24 @@ fn expand_landform_preset(world: &mut toml::Table) -> std::result::Result<(), St
         }
         None => unreachable!("the key is there"),
     };
+    // A terrarium preset names the other generator: `landform = { terrarium = { .. } }`.
+    if let Some(terrarium) = cubarium_voxel::Terrarium::preset(&name) {
+        let mut table = match toml::Value::try_from(terrarium) {
+            Ok(toml::Value::Table(t)) => t,
+            _ => return Err("a terrarium is a table".into()),
+        };
+        merge_over(&mut table, landform);
+        let mut wrapped = toml::Table::new();
+        wrapped.insert("terrarium".into(), toml::Value::Table(table));
+        world.insert("landform".into(), toml::Value::Table(wrapped));
+        return Ok(());
+    }
     let preset = cubarium_voxel::Preset::find(&name).ok_or_else(|| {
-        let known: Vec<&str> = cubarium_voxel::PRESETS.iter().map(|p| p.name).collect();
+        let known: Vec<&str> = cubarium_voxel::PRESETS
+            .iter()
+            .map(|p| p.name)
+            .chain(cubarium_voxel::Terrarium::PRESETS.iter().map(|(n, _)| *n))
+            .collect();
         format!("no landform preset is called {name:?}; the shipped ones are {known:?}")
     })?;
     let mut staged = match toml::Value::try_from(preset.recipe) {
@@ -233,13 +249,25 @@ fn expand_landform_preset(world: &mut toml::Table) -> std::result::Result<(), St
         _ => return Err("a recipe is a table".into()),
     };
     // Whatever else the table said overrides the preset, field by field.
-    for (key, value) in landform {
-        staged.insert(key, value);
-    }
+    merge_over(&mut staged, landform);
     let mut wrapped = toml::Table::new();
     wrapped.insert("staged".into(), toml::Value::Table(staged));
     world.insert("landform".into(), toml::Value::Table(wrapped));
     Ok(())
+}
+
+/// Lay `over` onto `base` field by field, into nested tables too: a config that says
+/// `[world.landform.water] inventory_m = 2.0` changes that one field of the preset's
+/// water and keeps the rest, rather than replacing the whole table with a dry default.
+fn merge_over(base: &mut toml::Table, over: toml::Table) {
+    for (key, value) in over {
+        match (base.get_mut(&key), value) {
+            (Some(toml::Value::Table(inner)), toml::Value::Table(value)) => merge_over(inner, value),
+            (_, value) => {
+                base.insert(key, value);
+            }
+        }
+    }
 }
 
 /// `[world]`: [`cubarium_voxel::Config`] with every field optional.
@@ -784,6 +812,7 @@ fn generate_with_a_lake(
 ) -> (World, u64, usize) {
     let (want, want_tiers) = match &cfg.landform {
         Landform::Staged(r) => (r.water.min_lake_m2, r.water.min_tier_pools as usize),
+        Landform::Terrarium(t) => (t.water.min_lake_m2, t.water.min_tier_pools as usize),
         Landform::Ridge => (0.0, 0),
     };
     let build = |seed: u64| {

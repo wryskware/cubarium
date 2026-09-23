@@ -1,0 +1,20 @@
+# The designed terrarium on the panel's ring: a try-out beside `voxel.toml`, which is
+# what the panel installs. 160 x 72 x 24 at 0.125 m, 4 px/voxel on the 640 x 360 raster.
+
+tilt_degrees = 30.0
+px_per_voxel = 4
+raster_height = 360
+haze = 0.55
+water_alpha = 0.5
+dither = 0.04
+sky_gradient = true
+
+[world]
+width = 160
+height = 72
+depth = 24
+voxel_m = 0.125
+water_substeps = 4
+
+[world.landform]
+preset = "terrarium-small"

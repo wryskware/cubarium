@@ -1,7 +1,6 @@
 use anyhow::{bail, ensure};
 use serde::{Deserialize, Serialize};
 
-use crate::recipe::Landform;
 use crate::{Config, Ledger, Material};
 
 /// The sky-visibility fan: `(dx, dy, dz, weight)` for each of 17 rays. The zenith
@@ -414,6 +413,15 @@ pub struct World {
     /// Where the aquifer discharges when its head rises above the cell. Generation
     /// picks a low void cell part way up the basin flank.
     pub(crate) spring_cell: Option<(u32, u32, u32)>,
+    /// A lake's floor drain, joining it to the aquifer (see
+    /// [`Config::lake_drain_m2_per_s`]): the void cells on the lake's floor, the
+    /// conductance shared among them. Empty is no drain.
+    #[serde(default)]
+    pub(crate) lake_drain: Vec<(u32, u32, u32)>,
+    /// The row a generator asks its lake filled to — the lake holds the rows below it —
+    /// when no outlet marks it. Read once, by [`crate::hydrate::hydrate`].
+    #[serde(default)]
+    pub(crate) lake_datum_y: Option<u32>,
     /// **A cache, not state:** the void cells that hold free water, and the porous cells
     /// that hold pore water — the active sets the water phases iterate instead of the
     /// grid (`design/7_Research/voxel-tick-profile-2026-09-18.md`). Maintained by the
@@ -580,8 +588,8 @@ impl World {
         // states it before anything is built, so the config the world runs on — and the
         // config its snapshot carries — is the one the recipe asked for.
         let mut config = config;
-        if let Landform::Staged(recipe) = config.landform.clone() {
-            recipe.water.cycle_into(&mut config);
+        if let Some(water) = config.landform.water().copied() {
+            water.cycle_into(&mut config);
         }
         let n = config.cells();
         let mut world = World {
@@ -598,6 +606,8 @@ impl World {
             ledger: Ledger::default(),
             outlet_cell: None,
             spring_cell: None,
+            lake_drain: Vec::new(),
+            lake_datum_y: None,
             wet: crate::sparse::CellSet::default(),
             damp: crate::sparse::CellSet::default(),
             drainable: crate::sparse::CellSet::default(),
@@ -620,8 +630,8 @@ impl World {
         // holds water. This world does not: it has just been generated, so the inventory
         // **is** what it began with, and the booking is dropped in favour of recording it
         // as the initial stores below.
-        if let Landform::Staged(recipe) = world.config.landform.clone() {
-            crate::hydrate::hydrate(&mut world, &recipe.water);
+        if let Some(water) = world.config.landform.water().copied() {
+            crate::hydrate::hydrate(&mut world, &water);
             world.ledger = Ledger::default();
         }
         world.ledger.initial_stored = world.view().stored_m3();
@@ -660,6 +670,8 @@ impl World {
             ledger: Ledger::default(),
             outlet_cell: None,
             spring_cell: None,
+            lake_drain: Vec::new(),
+            lake_datum_y: None,
             wet: crate::sparse::CellSet::default(),
             damp: crate::sparse::CellSet::default(),
             drainable: crate::sparse::CellSet::default(),
@@ -712,6 +724,11 @@ impl World {
     }
 
     /// The cell the aquifer discharges into, if the world has one.
+    /// The lake's floor drain: the cells on its floor, empty if the world has none.
+    pub fn lake_drain(&self) -> &[(u32, u32, u32)] {
+        &self.lake_drain
+    }
+
     pub fn spring_cell(&self) -> Option<(u32, u32, u32)> {
         self.spring_cell
     }
@@ -1074,7 +1091,8 @@ impl World {
         ] {
             ensure!(flux.is_finite(), "the ledger's {name} is {flux}");
         }
-        for (name, cell) in [("outlet", self.outlet_cell), ("spring", self.spring_cell)] {
+        let drains = self.lake_drain.iter().map(|&c| ("lake drain", Some(c)));
+        for (name, cell) in [("outlet", self.outlet_cell), ("spring", self.spring_cell)].into_iter().chain(drains) {
             if let Some((x, y, z)) = cell {
                 ensure!(
                     x < self.config.width && y < self.config.height && z < self.config.depth,
