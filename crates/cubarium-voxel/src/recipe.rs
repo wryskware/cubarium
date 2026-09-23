@@ -191,6 +191,14 @@ pub struct Tiers {
     /// How far back from a shelf's front edge the bowl starts, metres: the lip the
     /// notch is cut into.
     pub front_setback_m: f64,
+    /// How far out from the lake its **wet shore** reaches, metres. Tier-0 ground this
+    /// close to the lake is cut down to a soil bank that rises from just above the
+    /// waterline ([`Tiers::shore_slope`]), so the water table under the lake has ground
+    /// near enough to it to wet. Zero, the default, is no shore: the lake cut into the
+    /// ground as it stands. Package SW, for `small`.
+    pub shore_m: f64,
+    /// The shore's rise, metres per metre out from the water.
+    pub shore_slope: f64,
 }
 
 impl Default for Tiers {
@@ -212,6 +220,8 @@ impl Tiers {
         pool_depth_m: 0.75,
         notch_width_m: 0.5,
         front_setback_m: 0.25,
+        shore_m: 0.0,
+        shore_slope: 0.25,
     };
 
     /// `default` and `wide`: four elevations, each one 2 m stratum apart.
@@ -232,6 +242,13 @@ impl Tiers {
         pool_depth_m: 0.375,
         notch_width_m: 0.25,
         front_setback_m: 0.125,
+        // Package SW: three metres of shore rising a voxel per half metre, so the bank
+        // stands one to five voxels over the waterline for its first two metres. At seed
+        // 1 the columns an umbrellafrond may establish on at seeding go from 0.4 % to
+        // 22.3 % and a velvetpad's from 0.2 % to 5.8 %; the other four judged seeds were
+        // already there and stay there (22.6-25.5 % and 3.7-6.9 %).
+        shore_m: 3.0,
+        shore_slope: 0.25,
         ..Tiers::NONE
     };
 
@@ -267,6 +284,8 @@ impl Tiers {
             ("flat", self.flat),
             ("notch_width_m", self.notch_width_m),
             ("front_setback_m", self.front_setback_m),
+            ("shore_m", self.shore_m),
+            ("shore_slope", self.shore_slope),
         ] {
             anyhow::ensure!(
                 v.is_finite() && v >= 0.0,

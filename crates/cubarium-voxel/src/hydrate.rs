@@ -2092,7 +2092,10 @@ mod tests {
         ];
         for (name, want) in before {
             let p = crate::Preset::find(name).expect("a shipped preset");
-            let world = World::new(Config { seed: 1, ..p.config() });
+            let world = World::new(Config {
+                seed: 1,
+                ..p.config()
+            });
             let got = [
                 world.pooled_m3(),
                 world.pore_m3(),

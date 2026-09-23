@@ -3152,8 +3152,14 @@ mod tests {
                  {tiers} tier pool(s), walkable {walks}",
                 lake.visible_m2
             );
-            assert!(rejected < LAKE_SEED_TRIES, "base {base}: no seed passed the gate");
-            assert!(lake.visible_m2 >= water.min_lake_m2, "base {base}: lake too small");
+            assert!(
+                rejected < LAKE_SEED_TRIES,
+                "base {base}: no seed passed the gate"
+            );
+            assert!(
+                lake.visible_m2 >= water.min_lake_m2,
+                "base {base}: lake too small"
+            );
             assert!(
                 tiers >= water.min_tier_pools as usize,
                 "base {base}: no tier pool"

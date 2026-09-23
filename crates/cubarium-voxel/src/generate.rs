@@ -528,6 +528,9 @@ pub struct Report {
     pub lake: LakeDatum,
     /// The chain of pools, lowest first. Empty when the recipe has no terraces.
     pub pools: Vec<PoolStamp>,
+    /// The columns the lake's wet shore was laid on, in heightfield index order. Empty
+    /// when the recipe asks for no shore.
+    pub shore: Vec<usize>,
 }
 
 /// Run the staged stages and hand back what each one produced, without building a
@@ -560,6 +563,10 @@ pub fn staged_terrain(c: &Config, r: &Recipe) -> (Heightfield, Volume, Report) {
     // a grotto with its floor below the waterline is a sump, and the panel's first world
     // put every drop it had into three of them.
     let lake = lake_level(&volume.surface, c, r);
+    let shore = match pools.iter().find(|p| p.tier == 0) {
+        Some(stamp) => stamp_shore(&mut field, &mut volume, r, stamp, lake),
+        None => Vec::new(),
+    };
     let carved = crate::hollows::carve(&mut volume, &field, r, c.seed, lake.level_y + 1);
     let lowered = prepare(&mut volume, &mut field, r);
     // The skyline pass may have lowered the column the outlet was going to sit on, so
@@ -585,8 +592,96 @@ pub fn staged_terrain(c: &Config, r: &Recipe) -> (Heightfield, Volume, Report) {
             lowered,
             lake,
             pools,
+            shore,
         },
     )
+}
+
+/// Cut the tier-0 ground around the lake down into a **wet shore**: a soil bank that rises
+/// from one voxel over the lake's waterline at [`crate::recipe::Tiers::shore_slope`], out
+/// to [`crate::recipe::Tiers::shore_m`] from the water.
+///
+/// The water table stands under the lake, and ground only gets wet from it where it lies
+/// within a root's depth of the table. On `small` the lake is cut into the front row of a
+/// terrace whose ground climbs behind it, so on some seeds the water sits in a pit half a
+/// metre below the ground beside it, on a bench of thin soil over a hard band, and no
+/// column near it was wet (D5: 0.4 % at seed 1). This lays the bank the water would have
+/// made. **Lowered only**: a hollow already under the grade is left as it is, because
+/// filling it makes the bank the catchment's sump and a shower then stands on the plants
+/// there (package SW measured it). **Tier 0 only**, and the lake, its rim and the pools
+/// keep the shape they were cut to. **Soil to three rows under the waterline**, because a
+/// root box reads soil and nothing else.
+///
+/// It runs on the datum — after [`lake_level`] has seated the water — because a bank has
+/// to be graded from the waterline, and the rim a stamp starts from can stand up to two
+/// voxels over it. Nothing it lays reaches the waterline, so the datum it read stands.
+fn stamp_shore(
+    field: &mut Heightfield,
+    volume: &mut Volume,
+    r: &Recipe,
+    lake: &PoolStamp,
+    datum: LakeDatum,
+) -> Vec<usize> {
+    let t = r.tiers;
+    let mut laid = Vec::new();
+    if !(t.shore_m > 0.0) || lake.cells.is_empty() {
+        return laid;
+    }
+    let c = volume.config.clone();
+    let (w, d, h, vm) = (field.width, field.depth, c.height as usize, field.cell_m);
+    let circ = field.circumference_m;
+    let reach = t.shore_m / vm;
+    let water: Vec<(i64, i64)> = lake
+        .cells
+        .iter()
+        .map(|&i| ((i % w) as i64, (i / w) as i64))
+        .collect();
+    // The water fills the rows under `level_y`; the first dry row is `level_y` itself.
+    let first_dry = datum.level_y;
+    let soil_floor = first_dry - 4;
+    for z in 0..d {
+        for x in 0..w {
+            let i = z * w + x;
+            // The lake, its rim and every pool's structure keep the shape they were cut to.
+            if field.pool_spill[i] != i32::MIN || field.pool_rock[i] != i32::MAX {
+                continue;
+            }
+            let near = water
+                .iter()
+                .map(|&(lx, lz)| {
+                    let dx = (x as i64 - lx).rem_euclid(w as i64);
+                    let dx = dx.min(w as i64 - dx) as f64;
+                    let dz = (z as i64 - lz) as f64;
+                    (dx * dx + dz * dz).sqrt()
+                })
+                .fold(f64::MAX, f64::min);
+            if near > reach {
+                continue;
+            }
+            let (x_m, z_m) = ((x as f64 + 0.5) * vm, (z as f64 + 0.5) * vm);
+            if tier_at(r, x_m, z_m, circ, d, vm, c.seed) != 0 {
+                continue;
+            }
+            // Top solid row of the bank: one over the first dry row beside the water,
+            // then the slope, a row at a time. Lowered only, and never under the front of
+            // its own column: the ground climbs from the cut to the back wall, and a bank
+            // behind a rim left standing at the front would be the one place it did not.
+            // Rows run front to back, so the front row is already laid.
+            let bank = (first_dry + 1 + ((near - 1.0).max(0.0) * t.shore_slope).floor() as i32)
+                .max(if z > 0 { volume.surface[x] } else { i32::MIN });
+            if bank >= volume.surface[i] {
+                continue;
+            }
+            let soil_rows = ((bank - soil_floor) as f64).min((r.soil_max_m / vm).floor());
+            let soil_m = soil_rows.max(0.0) * vm;
+            field.sediment_m[i] = soil_m;
+            field.bedrock_m[i] = bank as f64 * vm - soil_m;
+            field.spill_m[i] = field.surface_m(i);
+            voxelise_column(volume, r, field, x, z, h);
+            laid.push(i);
+        }
+    }
+    laid
 }
 
 /// Which local shelf mass a point belongs to.
@@ -2332,6 +2427,56 @@ mod tests {
         // apiece, and eight of them is past the two seconds a test here may take. The
         // bar is the same three in four.
         most_seeds_have_a_lake("wide", 6);
+    }
+
+    /// **The shore is ground, not water** (package SW). On `small` it grades the tier-0
+    /// ground beside the lake into a soil bank: every column it lays stands above the
+    /// waterline, carries soil down under it, and the lake's datum is the one the ring
+    /// had without a shore. `default` and `wide` ask for none.
+    #[test]
+    fn the_shore_is_a_soil_bank_above_the_waterline_and_leaves_the_lake_alone() {
+        for name in ["default", "wide"] {
+            let p = Preset::find(name).unwrap();
+            assert_eq!(p.recipe.tiers.shore_m, 0.0, "{name} has no shore");
+        }
+        let p = Preset::find("small").unwrap();
+        for seed in [1u64, 77] {
+            let config = Config { seed, ..p.config() };
+            let (_, volume, report) = staged_terrain(&config, &p.recipe);
+            let mut bare = p.recipe;
+            bare.tiers.shore_m = 0.0;
+            let (_, _, bare_report) = staged_terrain(&config, &bare);
+            assert_eq!(
+                report.lake, bare_report.lake,
+                "seed {seed}: the shore moved the lake"
+            );
+            assert!(bare_report.shore.is_empty());
+            let level = report.lake.level_y;
+            let laid = report.shore.len();
+            for &i in &report.shore {
+                let (x, z) = (i % config.width as usize, i / config.width as usize);
+                let top = volume.surface[i];
+                assert!(
+                    top > level,
+                    "seed {seed} ({x}, {z}): bank at {top}, water to {level}"
+                );
+                // Seven rows of soil is the recipe's most; a bank higher than five over
+                // the water has its soil above it, which is dry ground by design.
+                if top > level + 5 {
+                    continue;
+                }
+                let soil_under = config.index(x as i64, (level - 1) as u32, z as u32);
+                assert_eq!(
+                    volume.material[soil_under],
+                    Material::Soil,
+                    "seed {seed} ({x}, {z}): no soil under the waterline"
+                );
+            }
+            assert!(
+                laid > 100,
+                "seed {seed}: the shore laid only {laid} columns"
+            );
+        }
     }
 
     /// Local shelf banks carry a sparse set of visible rooms and grottos.
