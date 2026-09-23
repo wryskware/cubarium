@@ -3194,19 +3194,33 @@ mod tests {
         assert!(text.contains("tilt_degrees = 30.0") && text.contains("px_per_voxel = 4"));
     }
 
-    /// The panel's own config selects the shipped `small` landscape on the ring it was
-    /// written for, and states no water keys: the recipe decides those now.
+    /// The panel's own config selects the designed terrarium (Wrysk, 2026-09-23), and
+    /// `natural.toml` beside it keeps the shipped `small` landscape, both on the ring they
+    /// were written for. Neither states water keys: the recipe decides those now.
     #[test]
-    fn the_tachyon_config_names_the_small_landscape() {
+    fn the_tachyon_configs_name_the_terrarium_and_the_small_landscape() {
+        for (file, landform) in [
+            (
+                "voxel.toml",
+                cubarium_voxel::Landform::Terrarium(cubarium_voxel::Terrarium::SMALL),
+            ),
+            (
+                "natural.toml",
+                cubarium_voxel::Landform::Staged(cubarium_voxel::Recipe::SMALL),
+            ),
+        ] {
+            tachyon_config_names(file, landform);
+        }
+    }
+
+    fn tachyon_config_names(file: &str, landform: cubarium_voxel::Landform) {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../config/tachyon/voxel.toml")
+            .join("../../config/tachyon")
+            .join(file)
             .canonicalize()
             .expect("the panel config is committed");
         let cfg = load_config(&path).unwrap();
-        assert_eq!(
-            cfg.world.landform,
-            cubarium_voxel::Landform::Staged(cubarium_voxel::Recipe::SMALL)
-        );
+        assert_eq!(cfg.world.landform, landform, "{file}");
         assert_eq!(
             (
                 cfg.world.width,

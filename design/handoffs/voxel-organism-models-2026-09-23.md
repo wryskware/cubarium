@@ -3,13 +3,13 @@
 Wrysk, 2026-09-23: "for the voxel world rendering, we should totally use your voxelated
 renderings from Blender as the new models." Today the presenter draws every plant as a
 trunk column under one crown disc (`crates/cubarium/src/voxel/stand.rs` `parts_of`
-L475) and every animal as a shell block (`animal.rs` `cells_of` L194). This package
+L500) and every animal as a shell block (`animal.rs` `cells_of` L194). This package
 replaces both with **voxel models baked by the Blender scripts from the simulation's own
 numbers**. That is the voxel presentation (art direction §03 stage 1, "voxels describe
 occupancy"); the stage-2 sprite pass is separate and unaffected.
 
-After package L (sizes in metres, growth fix); the three new plants follow package N.
-Lands on main. Recommended worker: Opus, **high** effort (new rendering construction).
+After packages L (sizes in metres, growth fix; merged ca71618) and N (vaulttree,
+lanternberry, siphonreed with interim colours in `stand.rs`; merged 3a75720). Lands on main. Recommended worker: Opus, **high** effort (new rendering construction).
 
 Read first: `scripts/blender/organism_lineup.py` (the plant and animal builders and the
 0.125 m voxelizer; renders in `runs/scale-lineup-2026-09-22/panel-ladder-vox*.png`),
@@ -79,5 +79,6 @@ is missing; the source dump round-trips the model's numbers exactly.
 ## Return (≤ 40 lines)
 
 Commits, tests, file sizes of the model library, presenter and pack cost before/after,
-screenshots at 1080p of the small ring (one `--background` run, 2 minutes in), and any
+screenshots at 1080p of the panel config (`config/tachyon/voxel.toml`, now the
+terrarium; one `--background` run, 2 minutes in), and any
 species whose model does not read at 6 px per voxel.
