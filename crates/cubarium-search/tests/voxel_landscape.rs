@@ -423,3 +423,84 @@ fn a_fixture_without_bystanders_holds_only_the_acting_lineage() {
         assert_eq!(without.fauna().view().animals.len(), acting);
     }
 }
+
+/// S1 (replay): recorded production, replayed onto the frozen world tick by tick with
+/// the dead pools decomposing at the model's rates, reproduces the live run's litter on
+/// every face; and an episode hands the plant layer exactly the recorded deposits, with
+/// the plant ledger closing.
+#[test]
+fn replayed_production_matches_the_live_litter_and_is_booked() {
+    use cubarium_search::es::voxel::landscape::record_production;
+    let land = landscape();
+    let prepared = land
+        .prepare(Founder::Blind, WaterState::Drained)
+        .expect("drained");
+    let ticks = 150;
+    let p = record_production(prepared.world(), prepared.flora(), ticks, 1);
+    assert!(
+        p.litter_total() > 0.0,
+        "the tiny ring sheds litter in 150 ticks"
+    );
+
+    // The live run, again, for its final litter.
+    let mut live = cubarium_voxel_sim::Sim::new(
+        prepared.world().clone(),
+        prepared.flora().clone(),
+        Fauna::new(FaunaConfig::default()),
+        cubarium_voxel_sim::SimConfig { threads: 1 },
+        None,
+    );
+    for _ in 0..ticks {
+        live.step();
+    }
+    // The replay on the frozen plant layer.
+    let mut replay = prepared.flora().clone();
+    for t in 0..ticks {
+        p.apply(&mut replay, t);
+    }
+    let (lv, rv) = (live.flora().view(), replay.view());
+    for g in lv.ground {
+        let r = rv.ground_at(g.site).map_or(0.0, |r| r.litter);
+        assert!(
+            (g.litter - r).abs() <= 1e-12 * (1.0 + g.litter),
+            "face {:?}: live litter {} vs replayed {}",
+            g.site,
+            g.litter,
+            r
+        );
+    }
+    assert!(
+        (rv.organic() - rv.ledger.expected_organic()).abs() < 1e-9,
+        "replay ledger closes"
+    );
+
+    // An episode receives exactly the bucketed deposits.
+    let p = record_production(prepared.world(), prepared.flora(), ticks, 50);
+    let want: f64 = p.buckets.iter().flatten().map(|(_, d)| d.organic).sum();
+    assert!(
+        p.buckets
+            .iter()
+            .all(|b| b.iter().all(|(_, d)| d.organic > 0.0))
+    );
+    let fixture = prepared
+        .clone()
+        .with_horizon(ticks)
+        .with_production(std::sync::Arc::new(p));
+    let cancel = AtomicBool::new(false);
+    let d = EpisodeDriver::control(VoxelControl::NoIntake, Founder::Blind);
+    let before = fixture.flora().view().ledger.deposited_organic_in;
+    let (_, sim) =
+        driver::run_landscape_sim(&fixture, &d, ticks, Limits::new(&cancel), "replay", 3)
+            .expect("runs");
+    let fv = sim.flora().view();
+    let deposited = fv.ledger.deposited_organic_in - before;
+    // Bodies deposit nothing in 150 ticks without eating or dying; the rest is the replay.
+    assert!(
+        (deposited - want).abs() < 1e-12,
+        "deposited {deposited} vs recorded {want}"
+    );
+    assert!(
+        (fv.organic() - fv.ledger.expected_organic()).abs() < 1e-9,
+        "episode ledger closes"
+    );
+}

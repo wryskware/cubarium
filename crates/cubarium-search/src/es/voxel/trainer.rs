@@ -106,6 +106,8 @@ pub struct MixProtocol {
     /// [`super::landscape::LANDSCAPE_PROTOCOL`].
     pub landscape_protocol: String,
     pub landscape_horizon: u64,
+    /// Whether the landscapes carried replayed litter production (S1).
+    pub landscape_live_plants: bool,
     /// The grid of each arena layout, in `layout_seeds` order.
     pub arena_grids: Vec<String>,
     /// Every training landscape fixture the draw chooses from: `preset/base/water@world`.
@@ -885,7 +887,8 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
         };
         protocol.mix = Some(MixProtocol {
             landscape_protocol: super::landscape::LANDSCAPE_PROTOCOL.into(),
-            landscape_horizon: super::landscape::LANDSCAPE_HORIZON_TICKS,
+            landscape_horizon: super::landscape::lineage_horizon(spec.founder),
+            landscape_live_plants: super::landscape::lineage_production(spec.founder),
             arena_grids: arena_layouts
                 .iter()
                 .map(|p| {

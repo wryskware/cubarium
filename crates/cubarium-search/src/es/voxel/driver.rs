@@ -580,6 +580,7 @@ fn arena_episode(
         limits,
         job,
         stage_b,
+        None,
     )?;
     episode.layout_seed = prepared.layout_seed;
     episode.kind = "arena".into();
@@ -638,6 +639,9 @@ fn landscape_episode(
         SimConfig { threads: 1 },
         prepared.episode_senses(),
     );
+    if prepared.live_plants() {
+        sim.set_mode(cubarium_voxel_sim::ScheduleMode::FrozenWater);
+    }
     let mut episode = drive(
         &mut sim,
         driver,
@@ -647,6 +651,7 @@ fn landscape_episode(
         limits,
         job,
         None,
+        prepared.production(),
     )?;
     episode.layout_seed = prepared.seed_base;
     episode.kind = "landscape".into();
@@ -857,6 +862,7 @@ fn drive(
     limits: Limits<'_>,
     job: &str,
     mut stage_b: Option<StageB>,
+    production: Option<&super::landscape::Production>,
 ) -> Result<Episode, EpisodeError> {
     let founder = driver.founder();
     let manifest = founder.manifest();
@@ -944,6 +950,15 @@ fn drive(
         }
         let deaths_before = sim.fauna().view().ledger.deaths_by_founder_cause[founder.index()];
 
+        // S1: the world's replayed litter production, handed in through the ordinary
+        // deposit path, and its dead pools rotting at the model's rates — the plant leg's
+        // part of the tick, ahead of the fauna leg as in the live order.
+        // S1: the world's replayed litter production, through the ordinary deposit and
+        // withdrawal paths, and its dead pools rotting at the model's rates — the plant
+        // leg's part of the tick, ahead of the fauna leg as in the live order.
+        if let Some(p) = production {
+            p.apply(sim.flora_mut(), tick);
+        }
         sim.step();
         ticks = tick + 1;
 
@@ -1160,6 +1175,7 @@ mod tests {
                     200,
                     Limits::new(&cancel),
                     "t",
+                    None,
                     None,
                 )
                 .expect("ok");

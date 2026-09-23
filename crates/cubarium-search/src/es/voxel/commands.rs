@@ -1719,3 +1719,43 @@ pub fn start_probe(founder: String, horizons: String, workers: usize) -> Result<
     );
     Ok(())
 }
+
+/// `voxel-flora-cost` (P5-C S1): the cost of one shredder landscape episode on the
+/// held-out landscapes of `presets`, heuristic, one thread, with the plant leg off and
+/// on, at `ticks`.
+pub fn flora_cost(presets: String, ticks: u64, workers: usize) -> Result<(), Boxed> {
+    let founder = Founder::Blind;
+    let wanted: Vec<&str> = presets.split(',').map(str::trim).collect();
+    let base: Vec<super::landscape::PreparedLandscape> =
+        super::landscape::held_out_pool(founder, workers)?
+            .into_iter()
+            .filter_map(|p| p.landscape().cloned())
+            .filter(|l| wanted.contains(&l.preset.as_str()))
+            .collect();
+    let cancel = AtomicBool::new(false);
+    let d = EpisodeDriver::control(VoxelControl::Heuristic, founder);
+    println!("flora_cost,preset,live_plants,episodes,ticks,seconds_per_episode,us_per_tick,score");
+    for preset in &wanted {
+        for live in [false, true] {
+            let fixtures: Vec<task::Prepared> = base
+                .iter()
+                .filter(|l| l.preset == *preset)
+                .map(|l| task::Prepared::from(l.clone().with_horizon(ticks).with_live_plants(live)))
+                .collect();
+            let t = Instant::now();
+            let mut score = 0.0;
+            for f in &fixtures {
+                let e = driver::run_prepared(f, &d, ticks, driver::Limits::new(&cancel), "cost")?;
+                score += e.score.score;
+            }
+            let s = t.elapsed().as_secs_f64() / fixtures.len().max(1) as f64;
+            println!(
+                "flora_cost,{preset},{live},{},{ticks},{s:.3},{:.1},{:.4}",
+                fixtures.len(),
+                1e6 * s / ticks as f64,
+                score / fixtures.len().max(1) as f64
+            );
+        }
+    }
+    Ok(())
+}

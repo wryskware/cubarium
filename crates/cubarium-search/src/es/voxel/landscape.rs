@@ -34,17 +34,39 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use cubarium_voxel::World;
 use cubarium_voxel_fauna::{Fauna, FaunaConfig, Founder, RouteMap, Senses};
 use cubarium_voxel_flora::Site;
-use cubarium_voxel_flora::{Flora, FloraConfig};
+use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraConfig};
 use cubarium_voxel_sim::Placement;
 use cubarium_voxel_sim::found::{self, Founded};
 use cubarium_voxel_sim::habitat;
 
-/// The landscape episode protocol: whole frozen worlds, two water states, every placed
-/// founder acting, bodies sampled per episode, 4,800 ticks.
-pub const LANDSCAPE_PROTOCOL: &str = "p5-landscape-1";
+/// The landscape episode protocol: whole frozen worlds, two water states, as many acting
+/// bodies as the seeder placed, started on drawn faces of the judged components, bodies
+/// sampled per episode; the browser 4,800 ticks fully static, the shredder 24,000 ticks
+/// with the live plant leg on frozen water (P5-C S1, S2).
+pub const LANDSCAPE_PROTOCOL: &str = "p5-landscape-2";
 
-/// D8: four simulated minutes.
+/// D8: four simulated minutes — the browser's landscape horizon.
 pub const LANDSCAPE_HORIZON_TICKS: u64 = 4_800;
+
+/// P5-C S2: the shredder's landscape horizon, twenty simulated minutes. Its food is
+/// production, and four minutes of a frozen world held none.
+pub const SHREDDER_LANDSCAPE_HORIZON_TICKS: u64 = 24_000;
+
+/// The landscape horizon a lineage's episodes run (D8, S2).
+pub fn lineage_horizon(founder: Founder) -> u64 {
+    match founder {
+        Founder::Blind => SHREDDER_LANDSCAPE_HORIZON_TICKS,
+        Founder::Browser => LANDSCAPE_HORIZON_TICKS,
+    }
+}
+
+/// P5-C S1: shredder landscape episodes carry their world's replayed litter production
+/// ([`Production`]); browser episodes stay fully static. The live plant leg on frozen
+/// water was measured at 2.1× (small), 3.5× (default) and 7.2× (wide) a 24,000-tick
+/// shredder episode's cost, past the 2× the decision allowed, so production is replayed.
+pub fn lineage_production(founder: Founder) -> bool {
+    founder == Founder::Blind
+}
 
 /// D10: the sixteen training seed bases.
 pub const TRAINING_LANDSCAPE_SEEDS: [u64; 16] = [
@@ -225,8 +247,10 @@ impl Landscape {
             placements: self.placements.clone(),
             start_faces,
             senses,
-            horizon: LANDSCAPE_HORIZON_TICKS,
+            horizon: lineage_horizon(founder),
             no_bystanders: false,
+            live_plants: false,
+            production: None,
         })
     }
 }
@@ -255,6 +279,11 @@ pub struct PreparedLandscape {
     horizon: u64,
     /// Diagnostic: leave the other lineage out ([`PreparedLandscape::without_bystanders`]).
     no_bystanders: bool,
+    /// Diagnostic: run the live plant leg on the frozen water.
+    live_plants: bool,
+    /// The world's replayed litter production (S1), when this lineage's episodes carry
+    /// it ([`attach_production`]).
+    production: Option<std::sync::Arc<Production>>,
 }
 
 impl PreparedLandscape {
@@ -339,6 +368,28 @@ impl PreparedLandscape {
         self.placements
             .iter()
             .filter(move |p| keep && p.founder != self.founder)
+    }
+
+    /// Whether episodes on this fixture run the live plant leg on frozen water.
+    pub fn live_plants(&self) -> bool {
+        self.live_plants
+    }
+
+    /// The replayed production this fixture's episodes receive, if any.
+    pub fn production(&self) -> Option<&Production> {
+        self.production.as_deref()
+    }
+
+    /// The same fixture carrying `production`.
+    pub fn with_production(mut self, production: std::sync::Arc<Production>) -> PreparedLandscape {
+        self.production = Some(production);
+        self
+    }
+
+    /// The same fixture with the plant leg on or off: a cost diagnostic's switch.
+    pub fn with_live_plants(mut self, on: bool) -> PreparedLandscape {
+        self.live_plants = on;
+        self
     }
 
     /// The same fixture with the other lineage left out: a diagnostic, never training.
@@ -551,10 +602,46 @@ pub fn training_pool(
 ) -> Result<Vec<super::task::Prepared>, String> {
     let sets = LandscapeSet::training();
     let lands = found_landscapes(&sets, workers)?;
-    Ok(prepare_sets(&lands, &sets, founder)
+    let mut fixtures = prepare_sets(&lands, &sets, founder);
+    if lineage_production(founder) {
+        attach_production(&mut fixtures, workers);
+    }
+    Ok(fixtures
         .into_iter()
         .map(super::task::Prepared::from)
         .collect())
+}
+
+/// Record every fixture's production over its own horizon ([`record_production`], one
+/// live run per fixture from its own water state) on up to `workers` threads and attach
+/// it (S1).
+pub fn attach_production(fixtures: &mut [PreparedLandscape], workers: usize) {
+    let t = std::time::Instant::now();
+    let slots: Mutex<Vec<Option<Production>>> = Mutex::new(vec![None; fixtures.len()]);
+    let cursor = AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        for _ in 0..workers.max(1).min(fixtures.len().max(1)) {
+            scope.spawn(|| {
+                loop {
+                    let i = cursor.fetch_add(1, Ordering::SeqCst);
+                    let Some(f) = fixtures.get(i) else {
+                        return;
+                    };
+                    let p =
+                        record_production(&f.world, &f.flora, f.horizon, PRODUCTION_BUCKET_TICKS);
+                    slots.lock().expect("slots")[i] = Some(p);
+                }
+            });
+        }
+    });
+    for (f, p) in fixtures.iter_mut().zip(slots.into_inner().expect("slots")) {
+        f.production = p.map(std::sync::Arc::new);
+    }
+    eprintln!(
+        "landscapes: recorded production for {} fixtures in {:.1} s",
+        fixtures.len(),
+        t.elapsed().as_secs_f64()
+    );
 }
 
 /// P5-C (C2): the held-out landscape fixtures of `founder` — the eight held-out bases ×
@@ -569,7 +656,11 @@ pub fn held_out_pool(
         .filter(|s| s.water_state == WaterState::Drained)
         .collect();
     let lands = found_landscapes(&sets, workers)?;
-    Ok(prepare_sets(&lands, &sets, founder)
+    let mut fixtures = prepare_sets(&lands, &sets, founder);
+    if lineage_production(founder) {
+        attach_production(&mut fixtures, workers);
+    }
+    Ok(fixtures
         .into_iter()
         .map(super::task::Prepared::from)
         .collect())
@@ -637,5 +728,188 @@ mod tests {
             }
         }
         assert!(seen.iter().all(|s| *s));
+    }
+}
+
+/// Ticks per production bucket: a replay's deposits are summed over this many ticks and
+/// handed to the frozen episode at the bucket's first tick. A fixture choice, not a rate
+/// (backlog §1 placeholder).
+pub const PRODUCTION_BUCKET_TICKS: u64 = 100;
+
+/// A world's **replayed litter production** (P5-C S1, the replay branch): what its live
+/// run — water and plants, no animals — added to each face's litter pool, summed per
+/// [`PRODUCTION_BUCKET_TICKS`], as ordinary [`Deposit`]s. The frozen episode hands them
+/// to its plant layer through [`Flora::deposit`] (booked in as deposits) and lets its own
+/// dead pools decompose at the model's rates ([`Flora::decompose_dead_pools`]); carrion
+/// stays whatever bodies drop.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Production {
+    pub bucket_ticks: u64,
+    /// Bucket `b` holds the deposits of ticks `[b · bucket_ticks, (b + 1) · bucket_ticks)`,
+    /// sorted by site.
+    pub buckets: Vec<Vec<(Site, Deposit)>>,
+    /// Per bucket, the litter organic something else in the live run took off a face —
+    /// a glowcap's mycelium feeding on it — net of what fell there: withdrawn in the
+    /// episode through [`Flora::take_litter`], because the frozen fungus does not feed.
+    pub withdrawals: Vec<Vec<(Site, f64)>>,
+    /// Glowcap cap-tissue growth the live run made, organic, whole run: reported, not
+    /// replayed — a stand's growth is not a deposit.
+    pub cap_growth: f64,
+    /// The footprint the litter fell over, m²: the world's cell area times its columns.
+    pub footprint_m2: f64,
+}
+
+impl Production {
+    /// Litter organic the replay deposits over its whole length.
+    pub fn litter_total(&self) -> f64 {
+        self.buckets.iter().flatten().map(|(_, d)| d.organic).sum()
+    }
+
+    /// What to deposit at episode tick `tick`: the bucket starting there, if any.
+    pub fn due(&self, tick: u64) -> Option<&[(Site, Deposit)]> {
+        if self.bucket_ticks == 0 || !tick.is_multiple_of(self.bucket_ticks) {
+            return None;
+        }
+        self.buckets
+            .get((tick / self.bucket_ticks) as usize)
+            .map(Vec::as_slice)
+    }
+
+    /// What to withdraw at episode tick `tick`: the bucket starting there, if any.
+    pub fn withdrawals_due(&self, tick: u64) -> Option<&[(Site, f64)]> {
+        if self.bucket_ticks == 0 || !tick.is_multiple_of(self.bucket_ticks) {
+            return None;
+        }
+        self.withdrawals
+            .get((tick / self.bucket_ticks) as usize)
+            .map(Vec::as_slice)
+    }
+
+    /// Apply tick `tick`'s share to a plant layer: its dead pools decompose (the model's
+    /// own rates, off the tick-start stocks), then the bucket's withdrawals and deposits
+    /// land — after, because what the live tick adds is not in its own decomposition
+    /// snapshot either.
+    pub fn apply(&self, flora: &mut Flora, tick: u64) {
+        flora.decompose_dead_pools();
+        for (site, want) in self.withdrawals_due(tick).unwrap_or(&[]) {
+            let _ = flora.take_litter(*site, *want);
+        }
+        for (site, d) in self.due(tick).unwrap_or(&[]) {
+            flora.deposit(*site, *d);
+        }
+    }
+}
+
+/// Run `world` and `flora` live — water and plants, an empty animal layer — for `ticks`
+/// and record every litter addition per face, per `bucket_ticks`.
+///
+/// A face's change over one tick is its litter after the tick less what it held before
+/// less that tick's decomposition of it (the model's own `k_d · dt` of the tick-start
+/// stock, capped by the stock, mineral and energy at the stock's density): shedding,
+/// senescence, drowning and seed-bank expiry put litter there, and a glowcap's mycelium
+/// takes it. Summed per bucket per face, a net gain is a deposit and a net loss a
+/// withdrawal.
+pub fn record_production(
+    world: &World,
+    flora: &Flora,
+    ticks: u64,
+    bucket_ticks: u64,
+) -> Production {
+    let voxel_m = world.config().voxel_m;
+    let footprint_m2 =
+        f64::from(world.config().width) * f64::from(world.config().depth) * voxel_m * voxel_m;
+    let mut sim = cubarium_voxel_sim::Sim::new(
+        world.clone(),
+        flora.clone(),
+        Fauna::new(FaunaConfig::default()),
+        cubarium_voxel_sim::SimConfig { threads: 1 },
+        None,
+    );
+    let k = flora.config().decomposition * cubarium_voxel::DT;
+    let caps = |f: &Flora| -> f64 {
+        let v = f.view();
+        v.stands
+            .iter()
+            .filter(|s| s.species == cubarium_voxel_flora::Species::Glowcap)
+            .map(|s| v.layers(s).map(|l| l.stock).sum::<f64>())
+            .sum()
+    };
+    let mut cap_growth = 0.0;
+    let bucket_ticks = bucket_ticks.max(1);
+    let mut buckets: Vec<Vec<(Site, Deposit)>> = Vec::new();
+    let mut acc: std::collections::BTreeMap<(u32, u32, u32), (Site, [f64; 3])> =
+        std::collections::BTreeMap::new();
+    let mut withdrawals: Vec<Vec<(Site, f64)>> = Vec::new();
+    for tick in 0..ticks {
+        let before: Vec<(Site, f64, f64, f64)> = sim
+            .flora()
+            .view()
+            .ground
+            .iter()
+            .map(|g| (g.site, g.litter, g.litter_mineral, g.litter_energy))
+            .collect();
+        let caps0 = caps(sim.flora());
+        sim.step();
+        cap_growth += (caps(sim.flora()) - caps0).max(0.0);
+        let fv = sim.flora().view();
+        for g in fv.ground {
+            let (l0, m0, e0) = before
+                .binary_search_by_key(&g.site, |b| b.0)
+                .map_or((0.0, 0.0, 0.0), |i| (before[i].1, before[i].2, before[i].3));
+            let dec = (k * l0).min(l0).max(0.0);
+            let keep = if l0 > 0.0 { 1.0 - dec / l0 } else { 1.0 };
+            let organic = g.litter - (l0 - dec);
+            if organic.abs() <= 1e-15 {
+                continue;
+            }
+            let (mineral, energy) = if organic > 0.0 {
+                (
+                    (g.litter_mineral - m0 * keep).max(0.0),
+                    (g.litter_energy - e0 * keep).max(0.0),
+                )
+            } else {
+                (0.0, 0.0)
+            };
+            let e = acc
+                .entry((g.site.x, g.site.y, g.site.z))
+                .or_insert((g.site, [0.0; 3]));
+            e.1[0] += organic;
+            e.1[1] += mineral;
+            e.1[2] += energy;
+        }
+        if (tick + 1) % bucket_ticks == 0 || tick + 1 == ticks {
+            let (gains, losses): (Vec<_>, Vec<_>) = std::mem::take(&mut acc)
+                .into_values()
+                .partition(|(_, [organic, _, _])| *organic > 0.0);
+            buckets.push(
+                gains
+                    .into_iter()
+                    .map(|(site, [organic, mineral, energy])| {
+                        (
+                            site,
+                            Deposit {
+                                kind: DepositKind::Litter,
+                                organic,
+                                mineral,
+                                energy,
+                            },
+                        )
+                    })
+                    .collect(),
+            );
+            withdrawals.push(
+                losses
+                    .into_iter()
+                    .map(|(site, [organic, _, _])| (site, -organic))
+                    .collect(),
+            );
+        }
+    }
+    Production {
+        bucket_ticks,
+        buckets,
+        withdrawals,
+        cap_growth,
+        footprint_m2,
     }
 }

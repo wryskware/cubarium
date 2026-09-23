@@ -2880,6 +2880,16 @@ impl Flora {
         step::step(self, world);
     }
 
+    /// One tick of the **dead pools only**: litter, dead wood and carrion decompose at
+    /// their own rates off the tick-start stocks, respired and released exactly as in
+    /// [`Flora::step`]'s decomposition phase, booked in the same ledger lines. No clock,
+    /// growth, shedding, seed bank or propagation. A frozen world that replays its
+    /// production through [`Flora::deposit`] calls this each tick so what it was handed
+    /// rots as it would have (P5-C S1).
+    pub fn decompose_dead_pools(&mut self) {
+        step::decompose_only(self);
+    }
+
     /// Apply a command now. Returns whether it was accepted.
     pub fn apply(&mut self, world: &World, command: Command) -> bool {
         let view = world.view();
