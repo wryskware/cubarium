@@ -3388,6 +3388,19 @@ mod tests {
     /// seed the panel would actually get after it.
     const SW_BASES: [u64; 5] = [1, 2, 3, 7, 77];
 
+    /// The host's lake gate from a seed base, as the founding loop draws it. The public
+    /// `ambient_world` went when the founding loop replaced it (203f9d6) and these two
+    /// studies still named it, which kept this module from compiling; this is the same
+    /// body, kept here.
+    fn ambient_world(cfg: &cubarium_voxel::Config, base: u64) -> (World, u64, usize) {
+        let mut next = base;
+        generate_with_a_lake(cfg, None, LAKE_SEED_TRIES, move || {
+            let seed = next;
+            next = next.wrapping_add(1);
+            seed
+        })
+    }
+
     /// Per species, how many of the skyline's columns pass the flora layer's own
     /// establishment gates **when the seeder runs**: `habitat::seed` on the gate's world —
     /// its settle and its stream watch — and then the skyline counted through
