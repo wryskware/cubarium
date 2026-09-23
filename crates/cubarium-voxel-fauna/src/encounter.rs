@@ -283,8 +283,8 @@ impl SightMap {
         }
     }
 
-    /// March one ray and name its first hit, with the cell it struck. The march, the
-    /// sub-step, the step cap and the order of the occlusion tests are the live cone's.
+    /// March one ray and name its first hit, with the cell it struck. The march — the
+    /// cell-exact traversal and the order of the occlusion tests — is the live cone's.
     pub fn first_hit(
         &self,
         view: &VoxelView<'_>,

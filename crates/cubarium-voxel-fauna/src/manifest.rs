@@ -70,6 +70,14 @@ pub const CRUISE_BODY_LENGTHS_PER_S: f64 = 1.0;
 pub const OCCLUSION_RULE: &str =
     "terrain;water<surface=fill*cell;pool<organic/(cell_area*density);z_edge=solid;sky=open";
 
+/// How a cone ray is traversed, as the canonical text records it (cone-speed item 3): a
+/// cell-exact voxel walk (Amanatides–Woo) that visits every cell the ray passes through,
+/// a hit at the ray's entry into the struck cell, and water and pools entered at the
+/// plane of their surface. It replaced a fixed quarter-voxel sub-step that could skip a
+/// corner-clipped cell and reported half a sub-step short of its sample. Only a manifest
+/// with a cone carries it.
+pub const CONE_TRAVERSAL: &str = "dda:every_cell;hit=cell_entry;water,pool=surface_plane_entry";
+
 /// What `Self.birth_readiness` reads 1 for, as the canonical text records it: the birth
 /// step would act on this body this tick — eligible (structure at `birth_body`, reserve
 /// at the package plus the floor), not in its refractory, not gestating, the surplus
@@ -723,6 +731,7 @@ impl Manifest {
                 let _ = write!(s, "{d},");
             }
             let _ = write!(s, "|range:{}", self.cone_range_m);
+            let _ = write!(s, "|traversal:{CONE_TRAVERSAL}");
         } else {
             let _ = write!(s, "|sectors:none");
         }

@@ -315,8 +315,8 @@ impl ConeCensus {
 
 /// Run the browser's **exact** cone from its exact eye and name every first hit.
 ///
-/// It is the same occupancy map, the same origin, the same ray directions, the same
-/// sub-step and the same step cap the controller's own observation uses — the geometry
+/// It is the same occupancy map, the same origin, the same ray directions and the same
+/// cell-exact traversal the controller's own observation uses — the geometry
 /// lives in one place (`senses::cone_origin`, `senses::ray_direction`,
 /// `senses::ray_first_hit`) and both callers read it — so a census row explains the
 /// reading the policy was given rather than a second opinion about it. What it adds is

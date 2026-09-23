@@ -50,6 +50,11 @@
 //! a miss, because a body cannot go there. A ray leaving the top of the world is open sky.
 //! The same clauses are [`crate::manifest::OCCLUSION_RULE`], in the digest.
 //!
+//! A ray is walked **cell by cell** (Amanatides–Woo, [`Dda`]): every cell it passes
+//! through, once, in order; a hit is at the ray's entry into the struck cell, and water
+//! and a pool are entered where the ray crosses their surface plane
+//! ([`crate::manifest::CONE_TRAVERSAL`], in the browser's digest).
+//!
 //! # Ownership
 //!
 //! A [`Senses`] is **per-arena state**, owned by the arena that builds it and settled
@@ -83,10 +88,6 @@ pub const SETTLE_MAX_UPDATES: usize = 120;
 /// [`SETTLE_STABLE`] consecutive updates.
 const SETTLE_EPS: f64 = 1e-4;
 const SETTLE_STABLE: u32 = 8;
-/// Conservative fixed ray-traversal cap, in sub-steps, per cone ray.
-const RAY_STEP_CAP: u32 = 64;
-/// Cone ray sub-step, in voxels.
-const RAY_SUBSTEP: f64 = 0.25;
 
 /// The bulk density of a ground pool of litter, carrion and dead wood, in organic units
 /// per cubic metre (D3): a pool of organic `m` on a face of area `A` stands `m / (A ·
@@ -899,9 +900,12 @@ pub(crate) fn build_occupancy(
 }
 
 /// March one ray from `origin` (metres) along unit `dir`, returning the first hit's
-/// distance and **fine** class within `range`. Fixed sub-step with a conservative step
-/// cap; a ray that leaves the top or the bottom of the world is a clear ray, and one that
-/// leaves the strip's `z` range **hits the edge** as terrain (D4).
+/// distance and **fine** class within `range`. The traversal is **cell-exact** ([`Dda`]):
+/// every cell the ray passes through is visited once, in order, and a hit's distance is
+/// the ray's entry into the struck cell — or, for water and a ground pool, its entry
+/// into the part below the surface, solved against the plane. A ray that leaves the top
+/// or the bottom of the world is a clear ray, and one that leaves the strip's `z` range
+/// **hits the edge** as terrain (D4), at the edge.
 ///
 /// The order of the tests below is the occlusion policy: the world's bounds, terrain,
 /// free water below its surface (D3), a body, a stand's cell, then a ground pool below
@@ -944,56 +948,183 @@ pub(crate) fn ray_first_hit_cell_in<O: CellOccupancy>(
 ) -> Option<(f64, Fine, usize)> {
     let c = view.config;
     let v = c.voxel_m;
-    let steps = ((range / v) / RAY_SUBSTEP).ceil() as u32;
-    let substep = v * RAY_SUBSTEP;
-    for k in 1..=(steps.min(RAY_STEP_CAP)) {
-        let t = f64::from(k) * substep;
-        if t > range {
-            break;
-        }
-        let px = origin.0 + dir.0 * t;
-        let py = origin.1 + dir.1 * t;
-        let pz = origin.2 + dir.2 * t;
-        let iy = (py / v).floor() as i64;
-        if iy < 0 || iy as u32 >= c.height {
+    let (width, height, depth) = (i64::from(c.width), i64::from(c.height), i64::from(c.depth));
+    for step in Dda::new(v, origin, dir, range) {
+        let t = step.t_in;
+        if step.y < 0 || step.y >= height {
             return None; // escaped upward or below the world: clear
         }
-        let iz = (pz / v).floor() as i64;
-        let wx = ((px / v).floor() as i64).rem_euclid(i64::from(c.width));
-        if iz < 0 || iz as u32 >= c.depth {
+        let (y, wx) = (step.y as u32, step.x.rem_euclid(width));
+        if step.z < 0 || step.z >= depth {
             // The edge of the world is a wall (D4): the cell reported is the last one
-            // inside the strip, at the ray's own height.
-            let edge = iz.clamp(0, i64::from(c.depth) - 1) as u32;
-            return Some((
-                t - substep * 0.5,
-                Fine::Terrain,
-                c.index(wx, iy as u32, edge),
-            ));
+            // inside the strip, at the height the ray reached the edge.
+            let edge = step.z.clamp(0, depth - 1) as u32;
+            return Some((t, Fine::Terrain, c.index(wx, y, edge)));
         }
-        let cell = c.index(wx, iy as u32, iz as u32);
+        let cell = c.index(wx, y, step.z as u32);
         if view.material[cell].is_solid() {
-            return Some((t - substep * 0.5, Fine::Terrain, cell));
+            return Some((t, Fine::Terrain, cell));
         }
         // Water is a surface, not a cell (D3): a cell holding fill `f` is water from its
         // floor to `f × cell height`, and the ray passes through the air above.
         let fill = view.free[cell];
-        if fill > 0.0 && py < (iy as f64 + fill.min(1.0)) * v {
-            return Some((t - substep * 0.5, Fine::Water, cell));
+        if fill > 0.0 {
+            let surface = (f64::from(y) + fill.min(1.0)) * v;
+            if let Some(te) = entry_below(origin.1, dir.1, &step, surface, range) {
+                return Some((te, Fine::Water, cell));
+            }
         }
         if !occupancy.any(cell) {
             continue;
         }
         if occupancy.other_body(cell, observer_id) {
-            return Some((t - substep * 0.5, Fine::Body, cell));
+            return Some((t, Fine::Body, cell));
         }
         if let Some(class) = occupancy.environment(cell) {
-            return Some((t - substep * 0.5, class, cell));
+            return Some((t, class, cell));
         }
-        if occupancy.pool_top(cell).is_some_and(|top| py < top) {
-            return Some((t - substep * 0.5, Fine::GroundPool, cell));
+        if let Some(top) = occupancy.pool_top(cell) {
+            if let Some(te) = entry_below(origin.1, dir.1, &step, top, range) {
+                return Some((te, Fine::GroundPool, cell));
+            }
         }
     }
     None
+}
+
+/// Where the ray's stretch through `step` first lies **below** the horizontal plane
+/// `surface` (metres), within `range`: the cell entry if it is already under it, else
+/// the plane crossing on the way down, else nowhere.
+#[inline]
+fn entry_below(oy: f64, dy: f64, step: &DdaCell, surface: f64, range: f64) -> Option<f64> {
+    if oy + dy * step.t_in < surface {
+        return Some(step.t_in);
+    }
+    if dy < 0.0 {
+        let ts = (surface - oy) / dy;
+        if ts < step.t_out && ts <= range {
+            return Some(ts.max(step.t_in));
+        }
+    }
+    None
+}
+
+/// One cell a ray passes through: its **unwrapped** coordinates (the march wraps `x` and
+/// checks the bounds) and the ray parameter, metres, at which it enters and leaves.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct DdaCell {
+    pub x: i64,
+    pub y: i64,
+    pub z: i64,
+    pub t_in: f64,
+    pub t_out: f64,
+}
+
+/// The cell-exact traversal of a ray through the voxel grid (Amanatides–Woo): every
+/// cell the ray passes through, once, in order, while its entry is within `range`. The
+/// first cell is the one holding the origin, entered at 0 (on a face, the one the ray
+/// moves into). Each crossing is solved from the face it crosses, not accumulated, so a
+/// distance is the analytic one. A non-finite origin, direction or range yields
+/// nothing.
+pub(crate) struct Dda {
+    cell: [i64; 3],
+    step: [i64; 3],
+    origin: [f64; 3],
+    dir: [f64; 3],
+    voxel_m: f64,
+    /// The ray parameter at which it crosses the next face on each axis.
+    next: [f64; 3],
+    /// Entry into the current cell.
+    t: f64,
+    range: f64,
+}
+
+impl Dda {
+    pub(crate) fn new(
+        voxel_m: f64,
+        origin: (f64, f64, f64),
+        dir: (f64, f64, f64),
+        range: f64,
+    ) -> Dda {
+        let o = [origin.0, origin.1, origin.2];
+        let d = [dir.0, dir.1, dir.2];
+        let sane = voxel_m > 0.0
+            && voxel_m.is_finite()
+            && range.is_finite()
+            && o.iter().chain(&d).all(|x| x.is_finite());
+        let mut dda = Dda {
+            cell: [0; 3],
+            step: [0; 3],
+            origin: o,
+            dir: d,
+            voxel_m,
+            next: [f64::INFINITY; 3],
+            t: if sane { 0.0 } else { f64::INFINITY },
+            range: if sane { range } else { f64::NEG_INFINITY },
+        };
+        if !sane {
+            return dda;
+        }
+        for a in 0..3 {
+            let u = o[a] / voxel_m;
+            dda.step[a] = if d[a] > 0.0 {
+                1
+            } else if d[a] < 0.0 {
+                -1
+            } else {
+                0
+            };
+            // On a face and moving down the axis, the cell is the one below the face.
+            dda.cell[a] = if dda.step[a] < 0 {
+                u.ceil() as i64 - 1
+            } else {
+                u.floor() as i64
+            };
+            dda.next[a] = dda.face(a);
+        }
+        dda
+    }
+
+    /// The ray parameter at the current cell's exit face on axis `a`.
+    #[inline]
+    fn face(&self, a: usize) -> f64 {
+        match self.step[a] {
+            0 => f64::INFINITY,
+            s => {
+                let f = (self.cell[a] + i64::from(s > 0)) as f64 * self.voxel_m;
+                (f - self.origin[a]) / self.dir[a]
+            }
+        }
+    }
+}
+
+impl Iterator for Dda {
+    type Item = DdaCell;
+
+    #[inline]
+    fn next(&mut self) -> Option<DdaCell> {
+        if !(self.t <= self.range) {
+            return None;
+        }
+        let a = if self.next[0] <= self.next[1] && self.next[0] <= self.next[2] {
+            0
+        } else if self.next[1] <= self.next[2] {
+            1
+        } else {
+            2
+        };
+        let out = DdaCell {
+            x: self.cell[0],
+            y: self.cell[1],
+            z: self.cell[2],
+            t_in: self.t,
+            t_out: self.next[a],
+        };
+        self.t = self.next[a];
+        self.cell[a] += self.step[a];
+        self.next[a] = self.face(a);
+        Some(out)
+    }
 }
 
 /// Whether an eye can be sampled from here at all, in [`cone_readings`]' own order:
