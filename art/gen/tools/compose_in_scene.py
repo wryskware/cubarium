@@ -29,12 +29,24 @@ SCENE_ROOT = pathlib.Path("art/gen/runs/_scene")
 
 
 def to_alpha(img: Image.Image, cut: int = 24) -> Image.Image:
-    """Near-black generation background -> transparent, then trim to the bounding box."""
+    """Get a cut-out sprite: keep a real alpha channel, else key the near-black background.
+
+    Qwen's RGBA wrapper returns genuine transparency, and re-keying such an image by
+    luminance would punch holes in its own near-black outline pixels. So an input that
+    already carries a meaningful transparent region is trusted as-is; only opaque inputs
+    (black-background providers) get the luminance key.
+    """
     a = np.asarray(img.convert("RGBA")).copy()
-    lum = a[:, :, :3].max(axis=2)
-    a[:, :, 3] = np.where(lum <= cut, 0, 255).astype(np.uint8)
+    if (a[:, :, 3] < 10).mean() < 0.02:  # opaque input: key the near-black background
+        lum = a[:, :, :3].max(axis=2)
+        a[:, :, 3] = np.where(lum <= cut, 0, 255).astype(np.uint8)
+    # Qwen writes a solid colour into RGB *underneath* alpha 0, so Image.getbbox() (which
+    # tests all four channels) returns the whole frame and the sprite would be scaled as if
+    # it filled it. Crop on the alpha channel alone, and clear the hidden RGB so that
+    # nearest-resampling cannot drag it into the sprite's edge.
+    a[a[:, :, 3] < 10] = 0
     out = Image.fromarray(a, "RGBA")
-    box = out.getbbox()
+    box = Image.fromarray(a[:, :, 3], "L").getbbox()
     return out.crop(box) if box else out
 
 

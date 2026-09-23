@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Build a labelled contact sheet from the run.json files in a round directory.
 
-One cell per candidate: the candidate itself, its `@8px` in-scene crop when one exists,
-and a caption of id / lane / arm / model / seed. Plates have no in-scene crop (a plate is
+One cell per candidate: the candidate itself over a checkerboard (so its alpha shows), the
+post-pixelated version blown up x4 nearest when `run.json` names one in `pixel`, the
+`@8px` and `@4px` in-scene pastes side by side when both exist, and a caption of
+id / lane / arm / model / seed. Plates have no in-scene crop (a plate is
 the scene), so `--scale-bars` draws the 8 px and 4 px per-voxel rules on each cell
 instead.
 
@@ -17,6 +19,8 @@ import argparse
 import json
 import pathlib
 import sys
+
+import numpy as np
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -53,6 +57,30 @@ def scale_bars(d: ImageDraw.ImageDraw, x: int, y: int, f: ImageFont.ImageFont) -
         d.text((x + 10 * px + 8, yy - 2), f"10 voxels @ {px} px/voxel", font=f, fill=(190, 190, 205))
 
 
+def clip(d: ImageDraw.ImageDraw, s: str, f: ImageFont.ImageFont, w: int) -> str:
+    """Longest prefix of s that fits in w pixels, with an ellipsis when cut."""
+    if d.textlength(s, font=f) <= w:
+        return s
+    while s and d.textlength(s + "\u2026", font=f) > w:
+        s = s[:-1]
+    return s + "\u2026"
+
+
+def on_checker(img: Image.Image, step: int = 16) -> Image.Image:
+    """Show a cut-out sprite over a checkerboard, so its alpha is visible on the sheet."""
+    img = img.convert("RGBA")
+    if (np.asarray(img)[:, :, 3] < 10).mean() < 0.02:
+        return img.convert("RGB")
+    bg = Image.new("RGBA", img.size, (78, 78, 92, 255))
+    dd = ImageDraw.Draw(bg)
+    for yy in range(0, img.height, step):
+        for xx in range(0, img.width, step):
+            if ((xx // step) + (yy // step)) % 2 == 0:
+                dd.rectangle([xx, yy, xx + step - 1, yy + step - 1], fill=(56, 56, 68, 255))
+    bg.alpha_composite(img)
+    return bg.convert("RGB")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("dir")
@@ -82,7 +110,9 @@ def main() -> int:
     img_h = min(int(a.cell * 0.62), int((a.cell - 16) * aspect) + 8)
     has_second = any(m.get("in_scene") for m in metas)
     scene_h = (int(a.cell * 0.40) if not a.scale_bars else img_h) if has_second else 0
-    cell_h = img_h + scene_h + bars_h + cap_h
+    has_pixel = any(m.get("pixel") for m in metas)
+    pix_h = int(a.cell * 0.34) if has_pixel else 0
+    cell_h = img_h + pix_h + scene_h + bars_h + cap_h
     cols = a.cols
     rows = (len(runs) + cols - 1) // cols
     head = 44
@@ -101,12 +131,33 @@ def main() -> int:
         cy = head + (n // cols) * cell_h
         cand = root / meta.get("file", rj.name.replace(".run.json", ".png"))
         if cand.exists():
-            im = fit(Image.open(cand).convert("RGB"), cell_w - 16, img_h - 8)
+            im = fit(on_checker(Image.open(cand)), cell_w - 16, img_h - 8)
             sheet.paste(im, (cx + 8 + (cell_w - 16 - im.width) // 2, cy + 4))
         y = cy + img_h
+        if pix_h:
+            # the chosen post-processing path: pixel_snap to 6 px/voxel then palette_quantise
+            px_name = meta.get("pixel")
+            px4 = root / (px_name.replace(".png", "-x4.png") if px_name else "")
+            if px_name and px4.exists():
+                im = fit(on_checker(Image.open(px4), step=8), cell_w - 16, pix_h - 20)
+                sheet.paste(im, (cx + 8 + (cell_w - 16 - im.width) // 2, y + 16))
+                q = Image.open(root / px_name)
+                d.text((cx + 10, y + 2), f"post-pixelated {q.width}x{q.height} logical "
+                       f"(6 px/voxel), shown x4", font=fl, fill=(150, 210, 255))
+            y += pix_h
         if scene_h:
             scenes = [p for p in meta.get("in_scene", []) if "@8px" in p]
-            if scenes and (root / scenes[0]).exists():
+            fours = [p for p in meta.get("in_scene", []) if "@4px" in p]
+            if not a.scale_bars and scenes and fours and (root / scenes[0]).exists() and (root / fours[0]).exists():
+                # the round is judged at both brackets, so show 8 px and 4 px side by side
+                half = (cell_w - 24) // 2
+                xo = cx + 8
+                for lab, path in (("8", scenes[0]), ("4", fours[0])):
+                    im = fit(Image.open(root / path).convert("RGB"), half, scene_h - 8)
+                    sheet.paste(im, (xo, y + 4))
+                    d.text((xo + 2, y + 4), f"{lab} px/vox", font=fl, fill=(235, 235, 245))
+                    xo += half + 8
+            elif scenes and (root / scenes[0]).exists():
                 src = Image.open(root / scenes[0]).convert("RGB")
                 if a.scale_bars:
                     # a plate at 8 px per voxel is judged 1:1, so crop rather than shrink
@@ -129,21 +180,22 @@ def main() -> int:
         sid = rj.name.replace(".run.json", "")
         d.text(
             (cx + 10, y + 2),
-            f"{sid}  {meta.get('subject','?')}  arm {meta.get('arm','-')}  "
-            f"{meta.get('provider','?')}/{meta.get('model','?')}",
+            clip(d, f"{sid}  {meta.get('subject','?')}  arm {meta.get('arm','-')}  "
+                    f"{meta.get('provider','?')}/{meta.get('model','?')}", fs, cell_w - 20),
             font=fs,
             fill=(225, 225, 235),
         )
         d.text(
             (cx + 10, y + 20),
-            f"seed {meta.get('seed','?')}  {('x'.join(str(v) for v in meta.get('size', [])))}  "
-            f"style {meta.get('style_block','?')}  by {meta.get('by','?')}",
+            clip(d, f"seed {meta.get('seed','?')}  "
+                    f"{('x'.join(str(v) for v in meta.get('size', [])))}  "
+                    f"style {meta.get('style_block','?')}  by {meta.get('by','?')}", fl, cell_w - 20),
             font=fl,
             fill=(160, 160, 180),
         )
         d.text(
             (cx + 10, y + 36),
-            (meta.get("largest_failure", "") or "")[: int(cell_w / 6.0)],
+            clip(d, meta.get("largest_failure", "") or "", fl, cell_w - 20),
             font=fl,
             fill=(235, 150, 120),
         )

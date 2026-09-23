@@ -2,6 +2,7 @@
 name: sprite-forge
 description: Cubarium Stage 2 sprite-candidate generator. Takes one subject card from art/gen/PROMPT-KIT.md, generates candidates on the local ComfyUI (Qwen-Image 2.1 first) and through the GPT-image lane (art/gen/tools/gpt_image.sh), checks them in-scene, logs every one, and returns a contact sheet for Wrysk to judge. Never decides look, never promotes to the artbook.
 model: opus
+effort: low
 mcpServers:
   - comfyui:
       type: stdio
