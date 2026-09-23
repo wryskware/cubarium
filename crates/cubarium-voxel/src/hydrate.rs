@@ -2079,6 +2079,38 @@ mod tests {
         }
     }
 
+    /// **Package SW changed `small` and nothing else.** `default` and `wide` at seed 1 put
+    /// their inventory where they did before it: each store within 0.1 % of the reading
+    /// taken on the tree SW started from (1fab7d6). A tolerance on four sums, not a hash:
+    /// a change that moves either ring's water by more than that is a change to them.
+    #[test]
+    fn default_and_wide_hydrate_as_before_sw() {
+        // (pooled, pore, aquifer, atmosphere), m³, at `World::new`, seed 1.
+        let before = [
+            ("default", [35.296875, 8.184414, 67.2, 177.318711]),
+            ("wide", [53.3125, 16.756602, 134.4, 371.530898]),
+        ];
+        for (name, want) in before {
+            let p = crate::Preset::find(name).expect("a shipped preset");
+            let world = World::new(Config {
+                seed: 1,
+                ..p.config()
+            });
+            let got = [
+                world.pooled_m3(),
+                world.pore_m3(),
+                world.aquifer_m3,
+                world.atmosphere_m3,
+            ];
+            for (k, (g, w)) in got.iter().zip(want.iter()).enumerate() {
+                assert!(
+                    (g - w).abs() <= 1e-3 * w.abs().max(1e-6),
+                    "{name} store {k} moved: {g} against {w} before SW"
+                );
+            }
+        }
+    }
+
     /// A dry recipe leaves the world exactly as it was.
     #[test]
     fn no_inventory_is_no_water() {

@@ -528,6 +528,17 @@ pub struct Report {
     pub lake: LakeDatum,
     /// The chain of pools, lowest first. Empty when the recipe has no terraces.
     pub pools: Vec<PoolStamp>,
+    /// What the lake's wet shore was laid on. Empty when the recipe asks for no shore.
+    pub shore: Shore,
+}
+
+/// The columns [`stamp_shore`] laid, in heightfield index order.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Shore {
+    /// The soil bank.
+    pub bank: Vec<usize>,
+    /// The dry lip between the bank and the water.
+    pub lip: Vec<usize>,
 }
 
 /// Run the staged stages and hand back what each one produced, without building a
@@ -560,6 +571,10 @@ pub fn staged_terrain(c: &Config, r: &Recipe) -> (Heightfield, Volume, Report) {
     // a grotto with its floor below the waterline is a sump, and the panel's first world
     // put every drop it had into three of them.
     let lake = lake_level(&volume.surface, c, r);
+    let shore = match pools.iter().find(|p| p.tier == 0) {
+        Some(stamp) => stamp_shore(&mut field, &mut volume, r, stamp, lake),
+        None => Shore::default(),
+    };
     let carved = crate::hollows::carve(&mut volume, &field, r, c.seed, lake.level_y + 1);
     let lowered = prepare(&mut volume, &mut field, r);
     // The skyline pass may have lowered the column the outlet was going to sit on, so
@@ -585,8 +600,223 @@ pub fn staged_terrain(c: &Config, r: &Recipe) -> (Heightfield, Volume, Report) {
             lowered,
             lake,
             pools,
+            shore,
         },
     )
+}
+
+/// Cut the tier-0 ground around the lake down into a **wet shore**: a soil bank that rises
+/// from one voxel over the lake's waterline at [`crate::recipe::Tiers::shore_slope`], out
+/// to [`crate::recipe::Tiers::shore_m`] from the water.
+///
+/// The water table stands under the lake, and ground only gets wet from it where it lies
+/// within a root's depth of the table. On `small` the lake is cut into the front row of a
+/// terrace whose ground climbs behind it, so on some seeds the water sits in a pit half a
+/// metre below the ground beside it, on a bench of thin soil over a hard band, and no
+/// column near it was wet (D5: 0.4 % at seed 1). This lays the bank the water would have
+/// made. **Lowered only**: a hollow already under the grade is left as it is, because
+/// filling it makes the bank the catchment's sump and a shower then stands on the plants
+/// there (package SW measured it). **Tier 0 only**, and the lake, its rim and the pools
+/// keep the shape they were cut to. **Soil to three rows under the waterline**, because a
+/// root box reads soil and nothing else, behind a **dry lip** of
+/// [`crate::recipe::Tiers::shore_lip_m`] at the water's edge. It **stops at the rim of
+/// any other closed hollow** and leaves the ground behind that rim alone, so no pond the
+/// ring already had is drained into the lake.
+///
+/// It runs on the datum — after [`lake_level`] has seated the water — because a bank has
+/// to be graded from the waterline, and the rim a stamp starts from can stand up to two
+/// voxels over it. Nothing it lays reaches the waterline, so the datum it read stands.
+fn stamp_shore(
+    field: &mut Heightfield,
+    volume: &mut Volume,
+    r: &Recipe,
+    lake: &PoolStamp,
+    datum: LakeDatum,
+) -> Shore {
+    let t = r.tiers;
+    let mut laid = Shore::default();
+    if !(t.shore_m > 0.0) || lake.cells.is_empty() {
+        return laid;
+    }
+    let c = volume.config.clone();
+    let (w, d, h, vm) = (field.width, field.depth, c.height as usize, field.cell_m);
+    let circ = field.circumference_m;
+    let reach = t.shore_m / vm;
+    let water: Vec<(i64, i64)> = lake
+        .cells
+        .iter()
+        .map(|&i| ((i % w) as i64, (i / w) as i64))
+        .collect();
+    // The water fills the rows under `level_y`; the first dry row is `level_y` itself.
+    let first_dry = datum.level_y;
+    let soil_floor = first_dry - 4;
+    let kept = other_hollows_and_rims(&volume.surface, w, d, &lake.cells, first_dry - 1);
+    let in_lake: std::collections::BTreeSet<usize> = lake.cells.iter().copied().collect();
+    // Where the bank may go: in reach, on tier 0, not the lake's or a pool's own
+    // structure, not another hollow or its rim.
+    let mut candidate = vec![false; w * d];
+    let mut near_of = vec![f64::MAX; w * d];
+    for z in 0..d {
+        for x in 0..w {
+            let i = z * w + x;
+            if kept[i] || field.pool_spill[i] != i32::MIN || field.pool_rock[i] != i32::MAX {
+                continue;
+            }
+            let near = water
+                .iter()
+                .map(|&(lx, lz)| {
+                    let dx = (x as i64 - lx).rem_euclid(w as i64);
+                    let dx = dx.min(w as i64 - dx) as f64;
+                    let dz = (z as i64 - lz) as f64;
+                    (dx * dx + dz * dz).sqrt()
+                })
+                .fold(f64::MAX, f64::min);
+            if near > reach {
+                continue;
+            }
+            let (x_m, z_m) = ((x as f64 + 0.5) * vm, (z as f64 + 0.5) * vm);
+            if tier_at(r, x_m, z_m, circ, d, vm, c.seed) != 0 {
+                continue;
+            }
+            candidate[i] = true;
+            near_of[i] = near;
+        }
+    }
+    // **Only what the water can reach.** The bank is laid outward from the lake through
+    // candidate ground (and across the lake's own rim, which it does not cut), so a
+    // hollow's rim stops it and everything behind that rim is left as it stood: a bank
+    // run through a rim drains the hollow into the lake and dries the soil it kept wet.
+    let mut reached = vec![false; w * d];
+    let mut queue: std::collections::VecDeque<usize> = lake.cells.iter().copied().collect();
+    let mut seen = vec![false; w * d];
+    for &i in &lake.cells {
+        seen[i] = true;
+    }
+    while let Some(i) = queue.pop_front() {
+        let (x, z) = (i % w, i / w);
+        let mut around = vec![z * w + (x + 1) % w, z * w + (x + w - 1) % w];
+        if z > 0 {
+            around.push(i - w);
+        }
+        if z + 1 < d {
+            around.push(i + w);
+        }
+        for j in around {
+            if seen[j] {
+                continue;
+            }
+            let lake_rim = field.pool_spill[j] == lake.spill_y && !in_lake.contains(&j) && !kept[j];
+            if candidate[j] || lake_rim {
+                seen[j] = true;
+                reached[j] = candidate[j];
+                queue.push_back(j);
+            }
+        }
+    }
+    for z in 0..d {
+        for x in 0..w {
+            let i = z * w + x;
+            if !reached[i] {
+                continue;
+            }
+            let near = near_of[i];
+            // Top solid row of the bank: one over the first dry row beside the water,
+            // then the slope, a row at a time. Lowered only, and never under the front of
+            // its own column: the ground climbs from the cut to the back wall, and a bank
+            // behind a rim left standing at the front would be the one place it did not.
+            // Rows run front to back, so the front row is already laid.
+            let bank = (first_dry + 1 + ((near - 1.0).max(0.0) * t.shore_slope).floor() as i32)
+                .max(if z > 0 { volume.surface[x] } else { i32::MIN });
+            if bank >= volume.surface[i] {
+                continue;
+            }
+            // **A dry lip at the water's edge.** A root box on the lake's own bed that
+            // reaches the bank's wet soil makes the shallows the wettest ground on the
+            // ring, and the seeder puts its wetland founders there, under the water the
+            // first shower lifts. So for a lip's width the soil starts at the first dry
+            // row, above any box on the bed, and the wet bank begins behind it.
+            let lip = near * vm < t.shore_lip_m;
+            let floor = if lip { first_dry - 1 } else { soil_floor };
+            let soil_rows = ((bank - floor) as f64).min((r.soil_max_m / vm).floor());
+            let soil_m = soil_rows.max(0.0) * vm;
+            field.sediment_m[i] = soil_m;
+            field.bedrock_m[i] = bank as f64 * vm - soil_m;
+            field.spill_m[i] = field.surface_m(i);
+            voxelise_column(volume, r, field, x, z, h);
+            if lip {
+                laid.lip.push(i);
+            } else {
+                laid.bank.push(i);
+            }
+        }
+    }
+    laid
+}
+
+/// Every column of a **closed hollow other than the lake**, and the columns that rim it.
+///
+/// A priority flood outward from the lake over the skyline, `x` wrapping and the front
+/// and back walls closed: each column's level is the lowest its water could stand at and
+/// still reach the lake. Where that is above the ground, the column sits in a hollow that
+/// holds water before it spills — unless it is under the lake's own waterline
+/// (`lake_top`, the top row the lake's water fills), where it is simply part of the lake.
+/// A hollow's rim is every column beside it that is not in it.
+fn other_hollows_and_rims(
+    surface: &[i32],
+    w: usize,
+    d: usize,
+    lake: &[usize],
+    lake_top: i32,
+) -> Vec<bool> {
+    use std::cmp::Reverse;
+    let n = w * d;
+    let mut level = vec![i32::MAX; n];
+    let mut heap = std::collections::BinaryHeap::new();
+    for &i in lake {
+        level[i] = surface[i].max(lake_top);
+        heap.push(Reverse((level[i], i)));
+    }
+    while let Some(Reverse((l, i))) = heap.pop() {
+        if l > level[i] {
+            continue;
+        }
+        let (x, z) = (i % w, i / w);
+        let mut around = vec![z * w + (x + 1) % w, z * w + (x + w - 1) % w];
+        if z > 0 {
+            around.push(i - w);
+        }
+        if z + 1 < d {
+            around.push(i + w);
+        }
+        for j in around {
+            let lj = surface[j].max(l);
+            if lj < level[j] {
+                level[j] = lj;
+                heap.push(Reverse((lj, j)));
+            }
+        }
+    }
+    let hollow: Vec<bool> = (0..n)
+        .map(|i| level[i] > surface[i] && level[i] > lake_top)
+        .collect();
+    let mut out = hollow.clone();
+    for i in 0..n {
+        if !hollow[i] {
+            continue;
+        }
+        let (x, z) = (i % w, i / w);
+        let mut around = vec![z * w + (x + 1) % w, z * w + (x + w - 1) % w];
+        if z > 0 {
+            around.push(i - w);
+        }
+        if z + 1 < d {
+            around.push(i + w);
+        }
+        for j in around {
+            out[j] = true;
+        }
+    }
+    out
 }
 
 /// Which local shelf mass a point belongs to.
@@ -2332,6 +2562,170 @@ mod tests {
         // apiece, and eight of them is past the two seconds a test here may take. The
         // bar is the same three in four.
         most_seeds_have_a_lake("wide", 6);
+    }
+
+    /// **The shore does not drain another hollow.** A closed hollow inside the shore's
+    /// reach keeps its rim, and the ground behind that rim is left as it stood: cutting
+    /// the rim lets the hollow's water run to the lake and dries the soil it kept wet
+    /// (seed 4: springturf 0.63 of foliage at an hour before SW, none after).
+    #[test]
+    fn the_shore_stops_at_another_hollow_s_rim() {
+        // A flat strip at row 20, a lake at x 0..6 cut to row 12 that spills at 16, and a
+        // hollow three rows deep at x 14..16, z 1..4, well inside three metres of it.
+        let (w, d, vm) = (96usize, 6usize, 0.125);
+        let mut recipe = Recipe::DEFAULT;
+        recipe.tiers.shore_m = 3.0;
+        recipe.tiers.shore_slope = 0.25;
+        recipe.tiers.shore_lip_m = 0.375;
+        let config = Config {
+            width: w as u32,
+            height: 40,
+            depth: d as u32,
+            voxel_m: vm,
+            landform: Landform::Staged(recipe),
+            ..Config::default()
+        };
+        let top = |row: i32| row as f64 * vm;
+        let mut field = heightfield(&config, &recipe);
+        let hollow = |x: usize, z: usize| (14..=16).contains(&x) && (1..=4).contains(&z);
+        let mut lake = Vec::new();
+        for z in 0..d {
+            for x in 0..w {
+                let i = z * w + x;
+                field.sediment_m[i] = 0.25;
+                field.bedrock_m[i] = top(20) - 0.25;
+                field.pool_rock[i] = i32::MAX;
+                field.pool_spill[i] = i32::MIN;
+                if x < 6 {
+                    field.sediment_m[i] = 0.0;
+                    field.bedrock_m[i] = top(12);
+                    field.pool_rock[i] = 12;
+                    field.pool_spill[i] = 16;
+                    lake.push(i);
+                } else if x == 6 || x == w - 1 {
+                    field.pool_spill[i] = 16;
+                } else if hollow(x, z) {
+                    field.bedrock_m[i] = top(17) - 0.25;
+                }
+            }
+        }
+        let mut volume = voxelise(&config, &recipe, &field);
+        let before = volume.surface.clone();
+        let stamp = PoolStamp {
+            tier: 0,
+            cells: lake,
+            notch: None,
+            floor_y: 13,
+            spill_y: 16,
+        };
+        let datum = LakeDatum {
+            floor_y: 12,
+            level_y: 15,
+            rim: (6, 0),
+        };
+        let shore = stamp_shore(&mut field, &mut volume, &recipe, &stamp, datum);
+        assert!(
+            !shore.bank.is_empty(),
+            "the ground between them is still a shore"
+        );
+        for z in 0..d {
+            for x in 13..=17 {
+                let i = z * w + x;
+                // The hollow and the cells beside it; a diagonal corner is no rim.
+                let corner = (x == 13 || x == 17) && (z == 0 || z == d - 1);
+                let rim_or_hollow = !corner;
+                if rim_or_hollow {
+                    assert_eq!(
+                        volume.surface[i], before[i],
+                        "({x}, {z}): the hollow or its rim was cut"
+                    );
+                }
+            }
+            // Behind the rim, out to where the shore would have reached: twelve metres of
+            // ring, so the far way round is out of reach too.
+            for x in 18..=30 {
+                let i = z * w + x;
+                assert_eq!(
+                    volume.surface[i], before[i],
+                    "({x}, {z}): ground behind the hollow's rim was cut"
+                );
+            }
+        }
+        // It still holds water: every rim cell stands over the hollow's floor.
+        let floor = before[w + 14];
+        for z in 0..d {
+            for x in 13..=17 {
+                let corner = (x == 13 || x == 17) && (z == 0 || z == d - 1);
+                if !hollow(x, z) && !corner {
+                    assert!(volume.surface[z * w + x] > floor, "({x}, {z}) is a spill");
+                }
+            }
+        }
+    }
+
+    /// **The shore is ground, not water** (package SW). On `small` it grades the tier-0
+    /// ground beside the lake into a soil bank: every column it lays stands above the
+    /// waterline, carries soil down under it, and the lake's datum is the one the ring
+    /// had without a shore. `default` and `wide` ask for none.
+    #[test]
+    fn the_shore_is_a_soil_bank_above_the_waterline_and_leaves_the_lake_alone() {
+        for name in ["default", "wide"] {
+            let p = Preset::find(name).unwrap();
+            assert_eq!(p.recipe.tiers.shore_m, 0.0, "{name} has no shore");
+        }
+        let p = Preset::find("small").unwrap();
+        for seed in [1u64, 77] {
+            let config = Config { seed, ..p.config() };
+            let (_, volume, report) = staged_terrain(&config, &p.recipe);
+            let mut bare = p.recipe;
+            bare.tiers.shore_m = 0.0;
+            let (_, _, bare_report) = staged_terrain(&config, &bare);
+            assert_eq!(
+                report.lake, bare_report.lake,
+                "seed {seed}: the shore moved the lake"
+            );
+            assert_eq!(bare_report.shore, Shore::default());
+            let level = report.lake.level_y;
+            let laid = report.shore.bank.len();
+            for &i in report.shore.bank.iter().chain(&report.shore.lip) {
+                let (x, z) = (i % config.width as usize, i / config.width as usize);
+                let top = volume.surface[i];
+                assert!(
+                    top > level,
+                    "seed {seed} ({x}, {z}): bank at {top}, water to {level}"
+                );
+            }
+            for &i in &report.shore.lip {
+                let (x, z) = (i % config.width as usize, i / config.width as usize);
+                for y in 0..level as u32 {
+                    assert_ne!(
+                        volume.material[config.index(x as i64, y, z as u32)],
+                        Material::Soil,
+                        "seed {seed} ({x}, {y}, {z}): soil under the water on the lip"
+                    );
+                }
+            }
+            for &i in &report.shore.bank {
+                let (x, z) = (i % config.width as usize, i / config.width as usize);
+                let top = volume.surface[i];
+                // Seven rows of soil is the recipe's most; a bank higher than five over
+                // the water has its soil above it, which is dry ground by design.
+                if top > level + 5 {
+                    continue;
+                }
+                let soil_under = config.index(x as i64, (level - 1) as u32, z as u32);
+                assert_eq!(
+                    volume.material[soil_under],
+                    Material::Soil,
+                    "seed {seed} ({x}, {z}): no soil under the waterline"
+                );
+            }
+            assert!(!report.shore.lip.is_empty(), "seed {seed}: no lip");
+            assert!(
+                laid > 100,
+                "seed {seed}: the shore laid only {laid} columns"
+            );
+        }
     }
 
     /// Local shelf banks carry a sparse set of visible rooms and grottos.

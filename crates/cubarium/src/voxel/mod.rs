@@ -3383,6 +3383,107 @@ mod tests {
         );
     }
 
+    /// The seed bases package SW is judged on: seeds 1, 7 and 77 and bases 2 and 3, each
+    /// through the host's own gate ([`ambient_world`]), so a base the gate refuses is the
+    /// seed the panel would actually get after it.
+    const SW_BASES: [u64; 5] = [1, 2, 3, 7, 77];
+
+    /// Per species, how many of the skyline's columns pass the flora layer's own
+    /// establishment gates **when the seeder runs**: `habitat::seed` on the gate's world —
+    /// its settle and its stream watch — and then the skyline counted through
+    /// `establishment_gates_over`, which is `voxel_plant_autopsy`'s eligibility block.
+    fn eligible_at_seeding(world: &World) -> ([usize; Species::COUNT], usize) {
+        let mut w = world.clone();
+        let mut flora = Flora::new(FloraConfig::for_voxel_size(w.config().voxel_m));
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        habitat::seed(&mut w, &mut flora, &mut fauna);
+        let view = w.view();
+        let skyline: Vec<Site> = (0..w.config().depth)
+            .flat_map(|z| (0..i64::from(w.config().width)).map(move |x| (x, z)))
+            .filter_map(|(x, z)| cubarium_voxel_flora::highest_support(&view, x, z))
+            .collect();
+        let fv = flora.view();
+        let mut sky = cubarium_voxel_flora::SkyCache::default();
+        let mut out = [0usize; Species::COUNT];
+        for species in Species::ALL {
+            out[species.index()] = fv
+                .establishment_gates_over(&view, &skyline, species, &mut sky)
+                .iter()
+                .filter(|g| g.passes())
+                .count();
+        }
+        (out, skyline.len())
+    }
+
+    /// **`small` has wet ground when the seeder looks** (package SW). The two producers
+    /// that pay their upkeep anywhere establish only in soil wetter than field capacity —
+    /// umbrellafrond at pore 0.45, velvetpad at 0.30 — and D5 measured 0.4 % and 0.2 % of
+    /// `small`'s columns eligible at seed 1, so the seeder planted neither. The bar is
+    /// `default`'s kind of ground: 12 % and 2 %, on every seed the panel is judged on.
+    #[test]
+    #[ignore = "study: run by name (release; five gated worlds and their seeding)"]
+    fn small_has_wet_ground_when_the_seeder_runs() {
+        let preset = cubarium_voxel::Preset::find("small").expect("small is shipped");
+        let mut short = Vec::new();
+        for base in SW_BASES {
+            let (world, seed, rejected) = ambient_world(&preset.config(), base);
+            let (eligible, columns) = eligible_at_seeding(&world);
+            let share = |s: Species| eligible[s.index()] as f64 / columns as f64;
+            let (u, v) = (share(Species::Umbrellafrond), share(Species::Velvetpad));
+            println!(
+                "small base {base}: seed {seed} ({rejected} rejected) umbrellafrond {:.1} % \
+                 velvetpad {:.1} % of {columns}",
+                100.0 * u,
+                100.0 * v
+            );
+            if u < 0.12 || v < 0.02 {
+                short.push((base, seed, u, v));
+            }
+        }
+        assert!(short.is_empty(), "short of wet ground: {short:?}");
+    }
+
+    /// **The gate still passes on the same seeds** after SW: a readable lake and a tier
+    /// pool above it after the gate's settle, found within the tries. Walking is reported,
+    /// not asserted — it is an observation, not an acceptance condition (Wrysk, 2026-09-22).
+    #[test]
+    #[ignore = "study: run by name (release; five gated worlds)"]
+    fn small_keeps_its_lake_and_pools_on_the_sw_seeds() {
+        let preset = cubarium_voxel::Preset::find("small").expect("small is shipped");
+        let water = match preset.recipe.water {
+            w if w.min_lake_m2 > 0.0 => w,
+            _ => panic!("small asks for a lake"),
+        };
+        for base in SW_BASES {
+            let (world, seed, rejected) = ambient_world(&preset.config(), base);
+            let mut probe = world.clone();
+            probe.settle(GATE_SETTLE_TICKS);
+            let lake = cubarium_voxel::hydrate::lake(&probe);
+            let tiers = cubarium_voxel::hydrate::tier_pools(
+                &cubarium_voxel::hydrate::pools(&probe),
+                lake.level_y,
+            );
+            let walks = cubarium_voxel::walk::around_the_ring(&world, WALK_STEP_M);
+            println!(
+                "small base {base}: seed {seed} after {rejected} rejected, lake {:.1} m², \
+                 {tiers} tier pool(s), walkable {walks}",
+                lake.visible_m2
+            );
+            assert!(
+                rejected < LAKE_SEED_TRIES,
+                "base {base}: no seed passed the gate"
+            );
+            assert!(
+                lake.visible_m2 >= water.min_lake_m2,
+                "base {base}: lake too small"
+            );
+            assert!(
+                tiers >= water.min_tier_pools as usize,
+                "base {base}: no tier pool"
+            );
+        }
+    }
+
     /// **The panel's own case.** Its unit runs `cubarium voxel`, its worlds are
     /// `world-<tick>.voxel`, and it crash-looped holding five snapshots of schema 13
     /// against a binary that speaks 15: "skipping corrupt snapshot … voxel snapshot
