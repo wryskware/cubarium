@@ -399,3 +399,27 @@ fn acting_bodies_start_on_drawn_faces_of_the_judged_components() {
         }
     }
 }
+
+/// The diagnostic `without_bystanders` leaves the other lineage out of the episode.
+#[test]
+fn a_fixture_without_bystanders_holds_only_the_acting_lineage() {
+    let land = landscape();
+    let cancel = AtomicBool::new(false);
+    for founder in Founder::ALL {
+        let prepared = land.prepare(founder, WaterState::Drained).expect("drained");
+        let acting = prepared.acting().count();
+        let others = prepared.bystanders().count();
+        assert!(others > 0, "{founder:?}: the ring places the other lineage");
+        let d = EpisodeDriver::control(VoxelControl::StationaryFeeding, founder);
+        let (_, with) =
+            driver::run_landscape_sim(&prepared, &d, 2, Limits::new(&cancel), "with", 1)
+                .expect("runs");
+        let alone = prepared.without_bystanders();
+        assert_eq!(alone.bystanders().count(), 0);
+        let (_, without) =
+            driver::run_landscape_sim(&alone, &d, 2, Limits::new(&cancel), "without", 1)
+                .expect("runs");
+        assert_eq!(with.fauna().view().animals.len(), acting + others);
+        assert_eq!(without.fauna().view().animals.len(), acting);
+    }
+}

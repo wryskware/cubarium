@@ -226,6 +226,7 @@ impl Landscape {
             start_faces,
             senses,
             horizon: LANDSCAPE_HORIZON_TICKS,
+            no_bystanders: false,
         })
     }
 }
@@ -252,6 +253,8 @@ pub struct PreparedLandscape {
     /// The episode horizon this fixture fixes: [`LANDSCAPE_HORIZON_TICKS`] (D8), or a
     /// test's shorter one ([`PreparedLandscape::with_horizon`]).
     horizon: u64,
+    /// Diagnostic: leave the other lineage out ([`PreparedLandscape::without_bystanders`]).
+    no_bystanders: bool,
 }
 
 impl PreparedLandscape {
@@ -260,8 +263,8 @@ impl PreparedLandscape {
         self.horizon
     }
 
-    /// The same fixture with a shorter horizon, for a test that must stay within a few
-    /// hundred ticks. Training and evaluation always run D8's.
+    /// The same fixture with another horizon: a test's shorter one, or a diagnostic's
+    /// longer one. Training and evaluation always run D8's.
     pub fn with_horizon(mut self, ticks: u64) -> PreparedLandscape {
         self.horizon = ticks;
         self
@@ -332,7 +335,16 @@ impl PreparedLandscape {
 
     /// The other lineage's placements, which run their own heuristics.
     pub fn bystanders(&self) -> impl Iterator<Item = &Placement> {
-        self.placements.iter().filter(|p| p.founder != self.founder)
+        let keep = !self.no_bystanders;
+        self.placements
+            .iter()
+            .filter(move |p| keep && p.founder != self.founder)
+    }
+
+    /// The same fixture with the other lineage left out: a diagnostic, never training.
+    pub fn without_bystanders(mut self) -> PreparedLandscape {
+        self.no_bystanders = true;
+        self
     }
 
     /// A fresh copy of the settled cue field.
