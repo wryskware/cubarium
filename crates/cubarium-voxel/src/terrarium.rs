@@ -18,21 +18,25 @@
 //! laid over it all and [`crate::erosion`] runs: the veneer slides off the risers into
 //! talus, channels cut the slopes, soil gathers on the treads.
 //!
-//! Then the solid work: wherever erosion left a cliff standing, a **gallery** — an open
-//! level under the terrace above, arched, in bays between pillars, narrow near the ground
-//! and wide higher up — is carved back into it, and the terrace's slab reaches out over
-//! the mouth as a lip.
+//! Then the solid work. Two or three **shelves** carry an upper level forward toward the
+//! glass, the massif rising on behind them, and a **hall** is opened under each: an open,
+//! roofed floor carrying on from the level in front of its mouth, arched across bays
+//! between pillars, seen through the glass in section. The first hall has headroom for
+//! the tallest trees. One or two **arches** span a saddle along the back wall, a deck from
+//! one mass to the next with sky under it.
 //!
 //! Water: the **lake** is graded into a yard held clear at the massif's foot, and a
 //! chain of **pools** is cut into the treads above it, each spilling over its tread's
 //! edge into the pool below and the last into the lake. The finish applies the
 //! two-voxel rule ([`crate::tidy`]), removes anything unsupported and lays soil on every
-//! open floor.
+//! open floor, deep on gentle ground. The report counts **grove sites**: floors with the
+//! headroom, crown room and soil the tallest trees need.
 //!
 //! The camera is [`crate::hollows`]'s: a 30° section through `z = 0`, where a voxel of
-//! height hides two of depth. The terracing only ever rises toward the back and a
-//! gallery is never deeper than twice its height, so floors stay in view by construction
-//! rather than by a pass that cuts them down afterwards.
+//! height hides two of depth. The terracing only ever rises toward the back, a hall is
+//! never deeper than one and a half times its height, and an arch stands against the back
+//! wall, so floors stay in view by construction rather than by a pass that cuts them down
+//! afterwards.
 
 use serde::{Deserialize, Serialize};
 
@@ -94,23 +98,37 @@ pub struct Terrarium {
     pub hardness: f64,
     /// The erosion run over the designed terrain.
     pub erosion: Erosion,
-    /// Thickness of the slab over a gallery.
+    /// Thickness of the rock left over a hall.
     pub slab_m: f64,
-    /// How far the slab reaches out over a gallery's mouth.
-    pub overhang_m: f64,
-    /// A gallery's height: the least cliff worth opening, and the most it opens.
-    pub gallery_height_m: [f64; 2],
-    /// A gallery's depth into the cliff, in multiples of its height. The camera sees two
-    /// voxels of floor per voxel of height, so more than two hides the back.
-    pub gallery_depth: f64,
-    /// Width of one bay in the galleries above the ground floor.
-    pub bay_m: [f64; 2],
-    /// Width of one bay on the ground floor: smaller rooms, more of them.
-    pub base_bay_m: [f64; 2],
-    /// Width of a pillar between bays.
+    /// How many shelves reach out toward the glass over a hall: an upper level carried
+    /// forward over an open, roofed floor, seen through the glass in section.
+    pub shelves: [u32; 2],
+    /// A shelf's length around the ring.
+    pub shelf_m: [f64; 2],
+    /// Headroom in a hall. The first takes the most: a grove floor for the tallest trees.
+    pub hall_m: [f64; 2],
+    /// Where a shelf's edge stands, as a share of the depth from the glass.
+    pub shelf_front: [f64; 2],
+    /// The widest a hall spans without a pillar.
+    pub hall_span_m: f64,
+    /// Width of a pillar in a hall.
     pub pillar_m: [f64; 2],
-    /// Chance a bay is opened; the rest stay solid between open stretches.
-    pub bay_chance: f64,
+    /// How many arches span a saddle along the back wall, sky under them.
+    pub arches: [u32; 2],
+    /// An arch's span, abutment to abutment.
+    pub arch_span_m: [f64; 2],
+    /// Thickness of an arch's deck at its crown.
+    pub arch_m: f64,
+    /// How far an arch's deck reaches from the back wall toward the glass.
+    pub arch_depth_m: [f64; 2],
+    /// The least clear height under an arch's crown.
+    pub arch_window_m: f64,
+    /// What a grove site for the tallest trees needs: clear headroom, room for a crown
+    /// of this radius from half that height up, and soil this deep. Level floors that
+    /// wide gather soil that deep. Measured, not forced.
+    pub grove_headroom_m: f64,
+    pub grove_radius_m: f64,
+    pub grove_soil_m: f64,
     /// How many spires rise from the crest. The first straddles the seam.
     pub spires: [u32; 2],
     /// Top of a spire.
@@ -146,13 +164,13 @@ impl Default for Terrarium {
 impl Terrarium {
     /// The panel's ring: 160 x 72 x 24 at 0.125 m, 20 m around, 9 m tall, 3 m deep.
     pub const SMALL: Terrarium = Terrarium {
-        ground_m: 0.5,
+        ground_m: 1.0,
         ground_rise_m: 0.25,
         ground_relief_m: 0.0625,
         ground_fall: 0.04,
         soil_m: 0.25,
         mantle_m: 0.25,
-        crest_m: [1.5, 7.0],
+        crest_m: [1.5, 6.5],
         crest_wavelength_m: 6.0,
         foot: [-0.3, 0.3],
         foot_wavelength_m: 5.0,
@@ -168,14 +186,21 @@ impl Terrarium {
         roll_wavelength_m: 2.5,
         hardness: 0.6,
         erosion: Erosion::SMALL,
-        slab_m: 0.375,
-        overhang_m: 0.375,
-        gallery_height_m: [0.75, 2.25],
-        gallery_depth: 1.6,
-        bay_m: [1.0, 2.5],
-        base_bay_m: [0.625, 1.25],
-        pillar_m: [0.375, 0.75],
-        bay_chance: 0.8,
+        slab_m: 0.75,
+        shelves: [2, 3],
+        shelf_m: [3.0, 6.0],
+        hall_m: [1.5, 2.75],
+        shelf_front: [0.0, 0.15],
+        hall_span_m: 3.0,
+        pillar_m: [0.75, 1.25],
+        arches: [1, 2],
+        arch_span_m: [2.0, 6.0],
+        arch_m: 0.5,
+        arch_depth_m: [0.75, 1.0],
+        arch_window_m: 0.5,
+        grove_headroom_m: 4.0,
+        grove_radius_m: 1.0,
+        grove_soil_m: 0.75,
         spires: [1, 2],
         spire_top_m: [7.25, 8.0],
         spire_radius_m: [0.5, 0.75],
@@ -196,7 +221,7 @@ impl Terrarium {
 
     /// The desktop ring: 256 x 128 x 48 at 0.125 m, 32 m around, 16 m tall, 6 m deep.
     pub const DESK: Terrarium = Terrarium {
-        ground_m: 0.75,
+        ground_m: 1.25,
         ground_rise_m: 0.5,
         ground_relief_m: 0.0625,
         ground_fall: 0.03,
@@ -218,14 +243,21 @@ impl Terrarium {
         roll_wavelength_m: 3.5,
         hardness: 0.6,
         erosion: Erosion::DEFAULT,
-        slab_m: 0.5,
-        overhang_m: 0.5,
-        gallery_height_m: [1.0, 3.0],
-        gallery_depth: 1.6,
-        bay_m: [1.25, 3.0],
-        base_bay_m: [0.75, 1.5],
-        pillar_m: [0.5, 1.0],
-        bay_chance: 0.8,
+        slab_m: 1.0,
+        shelves: [3, 4],
+        shelf_m: [4.0, 8.0],
+        hall_m: [2.0, 3.5],
+        shelf_front: [0.0, 0.2],
+        hall_span_m: 4.0,
+        pillar_m: [1.0, 1.5],
+        arches: [1, 2],
+        arch_span_m: [3.0, 9.0],
+        arch_m: 0.75,
+        arch_depth_m: [1.0, 1.5],
+        arch_window_m: 0.75,
+        grove_headroom_m: 4.0,
+        grove_radius_m: 1.0,
+        grove_soil_m: 0.75,
         spires: [1, 2],
         spire_top_m: [13.0, 14.5],
         spire_radius_m: [0.75, 1.1],
@@ -262,10 +294,11 @@ impl Terrarium {
         let ranges = [
             ("crest_m", self.crest_m),
             ("storey_m", self.storey_m),
-            ("gallery_height_m", self.gallery_height_m),
-            ("bay_m", self.bay_m),
-            ("base_bay_m", self.base_bay_m),
+            ("shelf_m", self.shelf_m),
+            ("hall_m", self.hall_m),
             ("pillar_m", self.pillar_m),
+            ("arch_span_m", self.arch_span_m),
+            ("arch_depth_m", self.arch_depth_m),
             ("spire_top_m", self.spire_top_m),
             ("spire_radius_m", self.spire_radius_m),
             ("lake_m", self.lake_m),
@@ -299,9 +332,12 @@ impl Terrarium {
         ] {
             anyhow::ensure!(v > 0.0 && v.is_finite(), "terrarium.{name} must be positive");
         }
+        for (name, [lo, hi]) in [("spires", self.spires), ("shelves", self.shelves), ("arches", self.arches)] {
+            anyhow::ensure!(lo <= hi, "terrarium.{name} is [least, most]");
+        }
         anyhow::ensure!(
-            self.spires[0] <= self.spires[1],
-            "terrarium.spires is [least, most]"
+            (0.0..1.0).contains(&self.shelf_front[0]) && self.shelf_front[0] <= self.shelf_front[1] && self.shelf_front[1] < 1.0,
+            "terrarium.shelf_front is a [least, most] share of the depth"
         );
         self.water.validate()
     }
@@ -313,8 +349,14 @@ pub struct Report {
     pub spires: usize,
     /// Cubic metres of rock and loose material erosion moved.
     pub eroded_m3: u64,
-    /// Voxels opened into galleries.
+    /// Halls opened under shelves, and the voxels carved out of them.
+    pub halls: usize,
     pub carved: usize,
+    pub arches: usize,
+    /// Grove sites for the tallest trees (headroom, crown room, soil; crowns apart), and
+    /// the floor area any one could stand on.
+    pub groves: usize,
+    pub grove_m2: u32,
     pub pools: usize,
     /// What the two-voxel rule changed.
     pub tidied: crate::tidy::Thin,
@@ -351,9 +393,6 @@ impl Rng {
         }
         lo + (self.next_u64() % (hi - lo + 1) as u64) as i64
     }
-    fn chance(&mut self, p: f64) -> bool {
-        self.unit() < p
-    }
 }
 
 /// What put a cell where it is. Decides what the finish may touch.
@@ -364,8 +403,6 @@ enum Tag {
     Keep,
     Ground,
     Mass,
-    Pad,
-    Post,
     /// A bowl's bed and rim, the lake's bed: rock that holds water, never soil.
     Basin,
 }
@@ -431,15 +468,6 @@ impl Grid {
             self.tag[i] = Tag::Keep;
         }
     }
-    /// First solid `z` at height `y` in column `x`, from the front.
-    fn face(&self, x: i64, y: i32, from: i32) -> Option<i32> {
-        (from.max(0)..self.d).find(|&z| self.solid(x, y, z))
-    }
-    /// The nearest face across rows `lo..=hi`: a face wanders a voxel in and out from row
-    /// to row, and whatever stands in front of it has to clear all of them.
-    fn face_over(&self, x: i64, lo: i32, hi: i32, from: i32) -> Option<i32> {
-        (lo..=hi).filter_map(|y| self.face(x, y, from)).min()
-    }
     /// Keep a void cell open; leave a solid one alone.
     fn keep_air(&mut self, x: i64, y: i32, z: i32) {
         if let Some(i) = self.at(x, y, z)
@@ -488,6 +516,11 @@ struct Build<'a> {
     tread: Vec<f64>,
     riser: Vec<f64>,
     spires: Vec<Spire>,
+    shelves: Vec<Shelf>,
+    /// The lake's middle column, which the ground falls toward.
+    lake_x: i64,
+    /// The ground under everything, per column, voxels.
+    base: Vec<f64>,
     /// Top solid row of each column after erosion: the terrain as a heightfield.
     ground: Vec<i32>,
     /// Loose material over each column's bedrock after erosion, voxels.
@@ -546,7 +579,24 @@ impl Build<'_> {
                 }
             })
             .fold(0.0f64, f64::max);
-        terraced.max(spire)
+        let (w, d) = (self.g.w as f64, self.g.d as f64);
+        let shelf = self.shelves.iter().map(|s| s.height(x, z, w, d)).fold(0.0f64, f64::max);
+        terraced.max(spire).max(shelf)
+    }
+
+    /// The ground under everything at `(x, z)`, voxels: low at the glass, climbing gently
+    /// to the back and away from the lake.
+    fn base_at(&self, x: i64, z: i32) -> f64 {
+        let (w, d) = (self.g.w, self.g.d);
+        let vm = self.c.voxel_m;
+        let circ = w as f64 * vm;
+        let (xm, zm) = ((x.rem_euclid(w) as f64 + 0.5) * vm, (z as f64 + 0.5) * vm);
+        let around = (x - self.lake_x).rem_euclid(w).min((self.lake_x - x).rem_euclid(w));
+        let relief = ring_noise(xm, zm, circ, ring_cells(circ, 3.0), self.c.seed ^ STREAM ^ 0x47);
+        self.t.ground_m / vm
+            + self.t.ground_fall * around as f64
+            + self.t.ground_rise_m / vm * z as f64 / (d - 1).max(1) as f64
+            + self.t.ground_relief_m / vm * relief.clamp(-1.0, 1.0)
     }
 }
 
@@ -567,20 +617,27 @@ pub fn build(world: &mut World, t: &Terrarium) -> Report {
         tread: vec![0.0; w],
         riser: vec![0.0; w],
         spires: Vec::new(),
+        shelves: Vec::new(),
+        lake_x: 0,
+        base: vec![0.0; cells],
         ground: vec![0; cells],
         loose: vec![0; cells],
         lake: vec![false; cells],
         report: Report::default(),
     };
     let site = layout(&mut b);
-    heightfield(&mut b, site.centre);
+    heightfield(&mut b);
     lay_lake(&mut b, &site);
     lay_ground(&mut b);
-    galleries(&mut b);
+    halls(&mut b);
+    arches(&mut b);
     let spring = pools(&mut b, site.centre);
     finish(&mut b);
 
     b.report.spires = b.spires.len();
+    let (sites, cells) = groves(&b);
+    b.report.groves = sites;
+    b.report.grove_m2 = (cells as f64 * c.voxel_m * c.voxel_m).round() as u32;
     let lake = datum(&b);
     b.report.lake = lake;
     let h = c.height as i32;
@@ -664,17 +721,22 @@ fn layout(b: &mut Build) -> Site {
     let lake_off = |x: i64| (x - centre).rem_euclid(w).min((centre - x).rem_euclid(w));
     for s in 0..count {
         let r = b.draw(t.spire_radius_m) as f64;
-        let cx = if s == 0 {
+        // Clear of the lake and a quarter of the ring from any other spire.
+        let far = |x: i64| {
+            lake_off(x) > 4 * r as i64
+                && b.spires.iter().all(|sp| {
+                    let o = (x as f64 + 0.5 - sp.cx).rem_euclid(w as f64);
+                    o.min(w as f64 - o) > w as f64 / 4.0
+                })
+        };
+        let cx = if s == 0 && far(0) {
             0
         } else {
-            (w / 4..3 * w / 4)
-                .filter(|&x| lake_off(x) > 4 * r as i64)
-                .max_by(|&a, &c| b.crest[a as usize].total_cmp(&b.crest[c as usize]))
-                .unwrap_or(w / 2)
+            let Some(cx) = (0..w).filter(|&x| far(x)).max_by(|&a, &c| b.crest[a as usize].total_cmp(&b.crest[c as usize])) else {
+                continue;
+            };
+            cx
         };
-        if lake_off(cx) <= 3 * r as i64 {
-            continue;
-        }
         let top = (b.draw(t.spire_top_m) as f64).min(h - 3.0);
         b.spires.push(Spire {
             cx: cx as f64 + 0.5,
@@ -682,6 +744,49 @@ fn layout(b: &mut Build) -> Site {
             top,
             r,
         });
+    }
+
+    // Shelves: the first, over the tallest hall, where the crest stands highest; the rest
+    // spread round the ring, clear of the lake and of each other. Each stands a hall and a
+    // slab above the level in front of its edge.
+    b.lake_x = centre;
+    let count = b.rng.int(t.shelves[0] as i64, t.shelves[1] as i64) as usize;
+    let clear = len / 2 + b.v(1.0) as i64;
+    let gap = b.v(1.0) as i64;
+    let mut taken = vec![(centre - clear, 2 * clear + 1)];
+    for k in 0..count {
+        let slen = b.draw(t.shelf_m) as i64;
+        let fits: Vec<i64> = (0..w).filter(|&x0| taken.iter().all(|&s| apart(s, (x0, slen), gap, w))).collect();
+        if fits.is_empty() {
+            break;
+        }
+        let x0 = if k == 0 {
+            let crest = |x0: i64| b.crest[(x0 + slen / 2).rem_euclid(w) as usize];
+            fits.iter().copied().max_by(|&a, &c| crest(a).total_cmp(&crest(c))).unwrap_or(0)
+        } else {
+            fits[b.rng.int(0, fits.len() as i64 - 1) as usize]
+        };
+        // The first hall is a grove floor: headroom for the tallest trees.
+        let hall = if k == 0 { b.v(t.hall_m[1].max(t.grove_headroom_m + 0.5)) } else { b.draw(t.hall_m) };
+        let front = b.rng.range(t.shelf_front[0], t.shelf_front[1]) * d;
+        let zf = (front - 1.0).max(0.0);
+        let before = (x0..x0 + slen)
+            .map(|x| b.terraced(x as f64 + 0.5, zf + 0.5).max(b.base_at(x, zf as i32)))
+            .fold(0.0, f64::max);
+        let top = (before + (hall + b.v(t.slab_m) + 1) as f64).min(h - 6.0);
+        let tilt = b.rng.range(-0.1, 0.1);
+        // The massif rises on behind a shelf: it is one level of a stack, not a table.
+        let storey = b.storey[(x0 + slen / 2).rem_euclid(w) as usize];
+        let reach = b.v(1.5) as f64;
+        for dx in -(reach as i64)..slen + reach as i64 {
+            let to_end = if dx < 0 { -dx as f64 } else if dx >= slen { (dx - slen + 1) as f64 } else { 0.0 };
+            let blend = 1.0 - smoothstep(0.0, reach, to_end);
+            let i = (x0 + dx).rem_euclid(w) as usize;
+            let want = (top + 0.75 * storey).min(h - 4.0);
+            b.crest[i] = b.crest[i].max(b.crest[i] + (want - b.crest[i]).max(0.0) * blend);
+        }
+        taken.push((x0, slen));
+        b.shelves.push(Shelf { x0, len: slen, front, hall, top, tilt });
     }
     Site { centre, span }
 }
@@ -691,7 +796,7 @@ fn layout(b: &mut Build) -> Site {
 /// Sample the designed terrain through a gentle warp of the plan, lay loose material on
 /// it, and let erosion work: the veneer slides off the risers into talus at their feet,
 /// channels cut the ramps, and the treads collect soil.
-fn heightfield(b: &mut Build, lake_x: i64) {
+fn heightfield(b: &mut Build) {
     let (w, d) = (b.g.w, b.g.d);
     let vm = b.c.voxel_m;
     let circ = w as f64 * vm;
@@ -699,7 +804,6 @@ fn heightfield(b: &mut Build, lake_x: i64) {
     let warp_cells = ring_cells(circ, b.t.warp_wavelength_m);
     let roll = b.t.roll_m / vm;
     let roll_cells = ring_cells(circ, b.t.roll_wavelength_m);
-    let relief_cells = ring_cells(circ, 3.0);
     let seed = b.c.seed ^ STREAM;
     let n = (w * d as i64) as usize;
     let mut bedrock = vec![0.0f64; n];
@@ -709,11 +813,8 @@ fn heightfield(b: &mut Build, lake_x: i64) {
             let (xm, zm) = ((x as f64 + 0.5) * vm, (z as f64 + 0.5) * vm);
             // The ground in front of and under the massif: low, climbing gently to the
             // back and away from the lake.
-            let around = (x - lake_x).rem_euclid(w).min((lake_x - x).rem_euclid(w));
-            let ground = b.t.ground_m / vm
-                + b.t.ground_fall * around as f64
-                + b.t.ground_rise_m / vm * z as f64 / (d - 1).max(1) as f64
-                + b.t.ground_relief_m / vm * ring_noise(xm, zm, circ, relief_cells, seed ^ 0x47).clamp(-1.0, 1.0);
+            let ground = b.base_at(x, z);
+            b.base[(z as i64 * w + x) as usize] = ground;
             let px = x as f64 + 0.5 + warp * ring_noise(xm, zm, circ, warp_cells, seed ^ 1);
             let pz = z as f64 + 0.5 + warp * ring_noise(xm, zm + 50.0, circ, warp_cells, seed ^ 3);
             let mut top = b.terraced(px, pz);
@@ -815,129 +916,203 @@ fn lay_ground(b: &mut Build) {
     }
 }
 
-// --- galleries ------------------------------------------------------------------------------------
+// --- shelves, halls and arches -------------------------------------------------------------------
 
-/// Carve an open level into every cliff erosion left standing: behind the foot of a
-/// riser, under the terrace above it less a slab, back no deeper than the camera sees,
-/// in bays between pillars — narrow near the ground, wide higher up. The terrace's slab
-/// reaches out over the mouth as a lip.
-fn galleries(b: &mut Build) {
-    let (w, h, d) = (b.g.w, b.g.h, b.g.d);
-    let t = b.t;
-    let slab = b.v(t.slab_m).max(2);
-    let lowest = b.v(t.gallery_height_m[0]).max(4);
-    let tallest = b.v(t.gallery_height_m[1]).max(lowest);
-    let lip = b.v(t.overhang_m);
-    let e = b.v(t.edge_m) as f64;
-    let near_ground = b.foot_y as i32 + b.v(t.gallery_height_m[1]) + 2;
-    // Bay rhythms around the ring: one for the ground floor, several for the floors
-    // above, chosen by a floor's height so stacked galleries do not line their pillars up.
-    let mut rhythms: Vec<Vec<(f64, f64)>> = Vec::new();
-    for k in 0..5 {
-        rhythms.push(ring_bays(b, k == 0));
+/// A shelf: an upper level carried forward toward the glass, a hall under it.
+#[derive(Clone, Debug)]
+struct Shelf {
+    /// Its first column around the ring and its length, columns.
+    x0: i64,
+    len: i64,
+    /// Where its edge stands from the glass across its middle, voxels.
+    front: f64,
+    /// Headroom in its hall, voxels, the height of its top at its middle, and how much
+    /// the top climbs per column around the ring.
+    hall: i32,
+    top: f64,
+    tilt: f64,
+}
+
+impl Shelf {
+    /// How far column `x` is into the shelf, `None` outside it.
+    fn into(&self, x: f64, w: f64) -> Option<f64> {
+        let dx = (x - self.x0 as f64).rem_euclid(w);
+        (dx < self.len as f64).then_some(dx)
     }
-    let bay_of = |x: i64, floor: i32| -> Option<(f64, f64)> {
-        let k = if floor <= near_ground { 0 } else { 1 + (floor / 12).rem_euclid(4) as usize };
-        let xf = x as f64 + 0.5;
-        rhythms[k].iter().find_map(|&(start, width)| {
-            let into = (xf - start).rem_euclid(w as f64);
-            (into < width).then_some((into, width))
-        })
-    };
-    let surf: Vec<i32> = b.ground.clone();
+    /// Where the shelf's edge stands at column `x`: at its front across the middle,
+    /// curving back to the wall at its ends, so in plan it is a rounded tongue.
+    fn edge(&self, x: f64, w: f64, d: f64) -> Option<f64> {
+        let dx = self.into(x, w)?;
+        let to_end = dx.min(self.len as f64 - dx);
+        let r = (self.len as f64 / 4.0).clamp(1.0, 10.0);
+        let u = smoothstep(0.0, r, to_end);
+        Some(self.front + (d - self.front) * (1.0 - u).powf(1.5))
+    }
+    /// The shelf's height at a point of the plan, zero off it: level, rising a little to
+    /// the back.
+    fn height(&self, x: f64, z: f64, w: f64, d: f64) -> f64 {
+        match self.edge(x, w, d) {
+            Some(edge) if z >= edge => {
+                let dx = self.into(x, w).unwrap_or(0.0) - self.len as f64 / 2.0;
+                self.top + self.tilt * dx + 0.08 * (z - edge)
+            }
+            _ => 0.0,
+        }
+    }
+}
+
+/// Whether two stretches of the ring, `(start, length)`, stand at least `gap` apart.
+fn apart(a: (i64, i64), b: (i64, i64), gap: i64, w: i64) -> bool {
+    (b.0 - a.0).rem_euclid(w) >= a.1 + gap && (a.0 - b.0).rem_euclid(w) >= b.1 + gap
+}
+
+/// Open a hall under every shelf: from the level in front of its mouth, back no deeper
+/// than the camera sees, under the shelf less a slab, arched across bays between
+/// pillars, the back wall rounding into the ceiling.
+fn halls(b: &mut Build) {
+    let (w, d) = (b.g.w, b.g.d);
+    let slab = b.v(b.t.slab_m).max(2);
+    let span = (b.v(b.t.hall_span_m).max(8)) as i64;
+    let shelves = b.shelves.clone();
+    let surf = b.ground.clone();
     let at = |x: i64, z: i32| surf[(z.clamp(0, d - 1) as i64 * w + x.rem_euclid(w)) as usize];
     let mut carved = 0usize;
-    let mut lips: Vec<(i64, i32, i32)> = Vec::new();
-    for x in 0..w {
-        let mut z = 1;
-        while z < d - 4 {
-            let lower = at(x, z - 1);
-            let upper = (z..(z + 3).min(d)).map(|zz| at(x, zz)).max().unwrap_or(lower);
-            let lake = b.lake[((z - 1) as i64 * w + x) as usize];
-            if lake || upper - lower < lowest + slab {
-                z += 1;
+    let mut halls = 0usize;
+    for s in &shelves {
+        // Flanks at both ends bear the shelf; pillars split what lies between into bays.
+        let flank = (b.v(b.t.pillar_m[0]) * 2 / 3) as i64;
+        let open = s.len - 2 * flank;
+        if open < 8 {
+            continue;
+        }
+        let bays = ((open + span - 1) / span).max(1);
+        let pillar = if bays > 1 { b.draw(b.t.pillar_m) as i64 } else { 0 };
+        let bay = (open - pillar * (bays - 1)) as f64 / bays as f64;
+        let hall = s.hall as f64;
+        let before = carved;
+        for dx in 0..open {
+            let x = s.x0 + flank + dx;
+            let u = dx as f64 + 0.5;
+            let k = (u / (bay + pillar as f64)).floor();
+            let into = u - k * (bay + pillar as f64);
+            if into > bay {
                 continue;
             }
-            let height = (upper - slab - lower).min(tallest);
-            let depth = ((t.gallery_depth * height as f64) as i32).min(d - 4 - z);
-            let Some((into, width)) = bay_of(x, lower) else {
-                z += 3;
+            // The mouth: the first row back from the glass where the shelf stands, and
+            // the level in front of it, which the hall's floor carries on from.
+            let Some(mouth) = (0..d).find(|&z| at(x, z) >= s.top as i32 - slab) else {
                 continue;
             };
-            if depth < 3 {
-                z += 3;
-                continue;
-            }
-            let a = (e * 1.5).min(width / 2.0).min(height as f64 / 2.0);
-            let to_side = into.min(width - into);
-            let rounded_off = |u: f64, v: f64| u < a && v < a && (a - u).powi(2) + (a - v).powi(2) > a * a;
-            let mut mouth = None;
-            for zz in z..z + depth {
-                let ceil = (at(x, zz) - slab).min(lower + height);
-                for y in lower + 1..=ceil {
-                    let below_ceiling = (ceil + 1 - y) as f64;
-                    let to_back = (z + depth - zz) as f64;
-                    if rounded_off(below_ceiling, to_side) || rounded_off(below_ceiling, to_back) {
-                        continue;
-                    }
-                    if b.g.tag(x, y, zz) == Tag::Ground {
-                        b.g.clear(x, y, zz);
+            let floor = if mouth > 0 { at(x, mouth - 1) } else { b.base[x.rem_euclid(w) as usize].round() as i32 };
+            let arch = (hall * 0.35).min(bay / 2.0);
+            let to_side = into.min(bay - into);
+            let head = hall - round_in(arch, to_side);
+            // Every wall flares into the floor.
+            let foot = round_in(3.0, to_side).round() as i32;
+            let deep = ((1.5 * head) as i32).min(d - 4 - mouth);
+            for z in mouth..mouth + deep {
+                let fl = floor + ((z - mouth) as f64 * 0.1) as i32;
+                let to_back = (mouth + deep - z) as f64 - 0.5;
+                let ceil = (floor as f64 + head - round_in(head * 0.4, to_back)) as i32;
+                let ceil = ceil.min(at(x, z) - slab);
+                for y in fl + 1 + foot..=ceil {
+                    if b.g.solid(x, y, z) && b.g.tag(x, y, z) == Tag::Ground {
+                        b.g.clear(x, y, z);
                         carved += 1;
-                        mouth.get_or_insert(zz);
-                    }
-                }
-            }
-            if let Some(m) = mouth {
-                lips.push((x, m, at(x, m).min(h - 1)));
-            }
-            z += depth + 2;
-        }
-    }
-    // Lips: the slab over each mouth reaches out, its underside and tip rounded.
-    if lip > 0 {
-        for (x, mouth, top) in lips {
-            for k in 1..=lip {
-                let zz = mouth - k;
-                if zz < 1 {
-                    break;
-                }
-                let tip = (lip - k) as f64 + 0.5;
-                for y in top - slab + 1..=top {
-                    let under = (y - (top - slab + 1)) as f64 + 0.5;
-                    let over = (top - y) as f64 + 0.5;
-                    if round_in(e.min(slab as f64 / 2.0), under) > tip || round_in(e, over) > tip {
-                        continue;
-                    }
-                    if b.g.free(x, y, zz) {
-                        b.g.put(x, y, zz, Tag::Mass);
                     }
                 }
             }
         }
+        if carved > before {
+            halls += 1;
+        }
     }
+    b.report.halls = halls;
     b.report.carved = carved;
 }
 
-/// Bays around the whole ring, pillars between: narrow at the base, wide in the mids.
-/// Some bays stay solid, rooms between open stretches.
-fn ring_bays(b: &mut Build, base: bool) -> Vec<(f64, f64)> {
-    let w = b.g.w as f64;
-    let range = if base { b.t.base_bay_m } else { b.t.bay_m };
-    let mut out = Vec::new();
-    let start = b.rng.range(0.0, w);
-    let mut x = 0.0;
-    loop {
-        let pillar = b.draw(b.t.pillar_m) as f64;
-        let bay = b.draw(range) as f64;
-        if x + pillar + bay > w - b.v(b.t.pillar_m[0]) as f64 {
+/// Span a saddle along the back wall with an arch: a deck from one mass to the next,
+/// its underside vaulted, sky under it. Sitting against the wall, it hides no floor.
+fn arches(b: &mut Build) {
+    let (w, d) = (b.g.w, b.g.d);
+    let t = b.t;
+    let count = b.rng.int(t.arches[0] as i64, t.arches[1] as i64) as usize;
+    let deck = b.v(t.arch_m).max(3);
+    let window = b.v(t.arch_window_m).max(4);
+    let (smin, smax) = (b.v(t.arch_span_m[0]).max(6) as i64, b.v(t.arch_span_m[1]) as i64);
+    let (bmin, bmax) = (b.v(t.arch_depth_m[0]).max(3), b.v(t.arch_depth_m[1]));
+    let bmax = bmax.max(bmin).min(d / 2);
+    // The skyline along the back wall: each column's highest ground within the deck's reach.
+    let back: Vec<i32> = (0..w)
+        .map(|x| (d - bmax..d).map(|z| b.ground_at(x, z)).max().unwrap_or(0))
+        .collect();
+    let sky = |x: i64| back[x.rem_euclid(w) as usize];
+    // Every saddle an arch could span: both abutments solid masses at least as high as
+    // the deck, the window under the middle of it at least `window` clear.
+    let mut spans: Vec<(i64, i64, i32, i32)> = Vec::new();
+    for xa in 0..w {
+        for len in smin..=smax.max(smin) {
+            let xb = xa + len;
+            let top = sky(xa).min(sky(xb)) - 1;
+            if sky(xa - 1) < top || sky(xb + 1) < top {
+                continue;
+            }
+            // The middle half of the span must clear the window; toward the abutments
+            // the underside comes down to meet whatever stands there.
+            let valley = (xa + len / 4..=xb - len / 4).map(sky).max().unwrap_or(top);
+            let clear = top - deck - valley;
+            if clear >= window {
+                spans.push((xa, len, top, clear));
+            }
+        }
+    }
+    let mut made: Vec<(i64, i64)> = Vec::new();
+    let gap = b.v(1.0) as i64;
+    for _ in 0..count {
+        let open: Vec<&(i64, i64, i32, i32)> = spans
+            .iter()
+            .filter(|s| made.iter().all(|&m| apart(m, (s.0, s.1 + 1), gap, w)))
+            .collect();
+        if open.is_empty() {
             break;
         }
-        if b.rng.chance(b.t.bay_chance) {
-            out.push(((start + x + pillar).rem_euclid(w), bay));
+        // Prefer a generous window, not the deepest gorge.
+        let best = open.iter().map(|s| s.3.min(3 * window)).max().unwrap_or(0);
+        let good: Vec<&&(i64, i64, i32, i32)> = open.iter().filter(|s| s.3.min(3 * window) >= best - 2).collect();
+        let &&(xa, len, top, clear) = good[b.rng.int(0, good.len() as i64 - 1) as usize];
+        let reach = b.rng.int(bmin as i64, bmax as i64) as i32;
+        let under = (top - deck) as f64;
+        // No two arches alike: a round, flat or pointed vault, a deck that humps or sags,
+        // a gentle waver on every edge, in steps two columns wide.
+        let p = b.rng.range(1.7, 2.8);
+        let hump = b.rng.range(-1.0, 2.5);
+        let phase: [f64; 3] = [b.rng.range(0.0, 6.3), b.rng.range(0.0, 6.3), b.rng.range(0.0, 6.3)];
+        let waver = |x: i64, k: usize| {
+            let u = (x & !1) as f64 / 7.0;
+            (u + phase[k]).sin() * 0.6 + (2.3 * u + phase[(k + 1) % 3]).sin() * 0.4
+        };
+        for x in xa..=xa + len {
+            let v = 2.0 * (x - xa) as f64 / len as f64 - 1.0;
+            let vault = 1.0 - (1.0 - v.abs().powf(p)).max(0.0).powf(1.0 / p);
+            let underside = under - clear as f64 * vault + 1.5 * waver(x, 0);
+            let top = top + (hump * (1.0 - v * v) + waver(x, 1)).round() as i32;
+            // The deck widens into its abutments.
+            let deep = reach + (2.0 * v.abs().powi(4) + 1.2 * waver(x, 2)).round() as i32;
+            for z in d - deep..d {
+                let ground = b.ground_at(x, z);
+                let lo = (underside.round() as i32).max(ground + 1);
+                // Its front top edge chamfered.
+                let hi = top - i32::from(z == d - deep);
+                for y in lo..=hi {
+                    if b.g.free(x, y, z) {
+                        b.g.put(x, y, z, Tag::Mass);
+                    }
+                }
+            }
         }
-        x += pillar + bay;
+        made.push((xa, len + 1));
     }
-    out
+    b.report.arches = made.len();
 }
 
 // --- pools ---------------------------------------------------------------------------------------
@@ -1129,7 +1304,9 @@ fn unsupported(b: &mut Build) -> usize {
 /// Soil on every open floor: the top `soil_m` of each solid run under open air, except
 /// where water is held by rock.
 fn soil(b: &mut Build) {
-    let depth = b.v(b.t.soil_m).max(1);
+    let shallow = b.v(b.t.soil_m).max(1);
+    let deep = b.v(b.t.grove_soil_m).max(shallow);
+    let r = b.v(b.t.grove_radius_m).max(1);
     let (w, h, d) = (b.g.w, b.g.h, b.g.d);
     for z in 0..d {
         for x in 0..w {
@@ -1138,8 +1315,12 @@ fn soil(b: &mut Build) {
                 if !b.g.mat[i].is_solid() || b.g.solid(x, y + 1, z) {
                     continue;
                 }
+                let depth = if level(&b.g, x, y, z, r) { deep } else { shallow };
                 for k in 0..depth {
                     let Some(j) = b.g.at(x, y - k, z) else { break };
+                    if b.g.mat[j] == Material::Soil {
+                        continue;
+                    }
                     if b.g.mat[j] != Material::Rock || b.g.tag[j] == Tag::Basin || y - k < 2 {
                         break;
                     }
@@ -1148,6 +1329,72 @@ fn soil(b: &mut Build) {
             }
         }
     }
+}
+
+/// Whether the floor at `(x, y, z)` is gentle ground that gathers soil: at `r / 2` round
+/// it, six of the eight neighbours inside the walls have a floor within two voxels of it.
+fn level(g: &Grid, x: i64, y: i32, z: i32, r: i32) -> bool {
+    let floor_near = |x: i64, z: i32| (y - 2..=y + 2).any(|yy| g.solid(x, yy, z) && !g.solid(x, yy + 1, z));
+    let k = (r / 2).max(1);
+    let (mut inside, mut near) = (0, 0);
+    for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)] {
+        let (nx, nz) = (x + (dx * k) as i64, z + dz * k);
+        if nz < 0 || nz >= g.d {
+            continue;
+        }
+        inside += 1;
+        near += i32::from(floor_near(nx, nz));
+    }
+    near >= inside - 2
+}
+
+/// Grove sites for the tallest trees: soil `grove_soil_m` deep, `grove_headroom_m` clear
+/// over it, and no solid within `grove_radius_m` from half that height up, where a crown
+/// spreads. Returns the sites, a crown's width apart, and the floor cells any one could
+/// stand on.
+fn groves(b: &Build) -> (usize, usize) {
+    let (w, h, d) = (b.g.w, b.g.h, b.g.d);
+    let head = b.v(b.t.grove_headroom_m);
+    let r = b.v(b.t.grove_radius_m);
+    let soil = b.v(b.t.grove_soil_m);
+    let is_soil = |x: i64, y: i32, z: i32| b.g.at(x, y, z).is_some_and(|i| b.g.mat[i] == Material::Soil);
+    let mut cells: Vec<(i64, i32)> = Vec::new();
+    for z in 0..d {
+        for x in 0..w {
+            for y in 2..h {
+                if !is_soil(x, y, z) || b.g.solid(x, y + 1, z) {
+                    continue;
+                }
+                if y + head >= h || !(1..soil).all(|k| is_soil(x, y - k, z)) || (1..=head).any(|k| b.g.solid(x, y + k, z)) {
+                    continue;
+                }
+                let crown = (-r..=r).all(|dz| {
+                    (-r..=r).all(|dx| {
+                        if dx * dx + dz * dz > r * r {
+                            return true;
+                        }
+                        let zz = z + dz;
+                        (0..d).contains(&zz) && (y + head / 2..=y + head).all(|yy| !b.g.solid(x + dx as i64, yy, zz))
+                    })
+                });
+                if crown {
+                    cells.push((x, z));
+                }
+            }
+        }
+    }
+    let mut sites: Vec<(i64, i32)> = Vec::new();
+    for &(x, z) in &cells {
+        let far = sites.iter().all(|&(sx, sz)| {
+            let o = (x - sx).rem_euclid(w);
+            let o = o.min(w - o);
+            o * o + ((z - sz) as i64).pow(2) >= (4 * r * r) as i64
+        });
+        if far {
+            sites.push((x, z));
+        }
+    }
+    (sites.len(), cells.len())
 }
 
 /// The lake's datum on the ground it was graded into: the rim is the lowest ground
