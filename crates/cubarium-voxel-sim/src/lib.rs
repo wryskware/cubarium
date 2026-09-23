@@ -412,6 +412,28 @@ impl Sim {
     /// Select the live or static schedule.
     pub fn set_mode(&mut self, mode: ScheduleMode) {
         self.mode = mode;
+        // What the senses may hold depends on what the schedule freezes. The held cone
+        // occupancy pays only while plants are frozen: with the plant leg running every
+        // stand's crown moves between stages and a held grid would be rebuilt whole every
+        // stage, dearer than the per-stage window. The light memo reads terrain alone, so
+        // frozen water keeps it; the live schedule holds neither, as it never did.
+        if let Some(mut field) = self.ecs.get_resource_mut::<SenseField>() {
+            let senses = &mut field.0;
+            match mode {
+                ScheduleMode::Static => {
+                    senses.hold_cone();
+                    senses.hold_light();
+                }
+                ScheduleMode::FrozenWater => {
+                    senses.release_cone();
+                    senses.hold_light();
+                }
+                ScheduleMode::Live => {
+                    senses.release_cone();
+                    senses.release_light();
+                }
+            }
+        }
     }
 
     /// Add systems to [`TickPhase::Sample`]: a host's observers, run once per tick after

@@ -434,6 +434,17 @@ impl Senses {
         }
     }
 
+    /// Stop holding the cone occupancy: every controller stage builds its own window
+    /// again (a schedule whose plants grow).
+    pub fn release_cone(&mut self) {
+        self.cone = None;
+    }
+
+    /// Stop memoing the light receptor.
+    pub fn release_light(&mut self) {
+        self.light = None;
+    }
+
     /// The standing face's sky visibility through the held memo, or `None` when this
     /// senses handle does not hold one.
     pub(crate) fn held_sky(&mut self, view: &VoxelView<'_>, x: i64, y: u32, z: u32) -> Option<f64> {
