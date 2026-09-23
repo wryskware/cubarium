@@ -61,6 +61,9 @@ use cubarium_voxel_fauna::{Fauna, Senses};
 use cubarium_voxel_flora::Flora;
 
 mod arena;
+pub mod found;
+pub mod habitat;
+pub mod scene;
 pub use arena::{
     ARENA_DEPTH, ARENA_HEIGHT, ARENA_VOXEL_M, ARENA_WIDTH, Arena, BROWSER_CROWN_RISES,
     BROWSER_FOLIAGE_PER_STAND, GROUND_Y, REACQUISITION_INITIAL_PATCH_FRACTION,
