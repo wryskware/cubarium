@@ -40,6 +40,7 @@
 pub mod animal;
 pub mod appearance;
 pub mod habitat;
+pub mod model;
 pub mod placement;
 pub mod present;
 pub mod project;

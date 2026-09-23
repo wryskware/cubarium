@@ -38,7 +38,19 @@ use cubarium_voxel_fauna::{Animal, FaunaConfig, FaunaView, Founder, Species, Sta
 use crate::present::srgb_linear;
 
 use super::appearance::{self, GlyphId};
-use super::stand::{Cell, Style};
+use super::model::{self, ModelCell, ModelLibrary, Tag};
+use super::stand::{Cell, Style, wilted};
+
+/// The cells of `animal`'s founder model at its body's length, if the library has one.
+fn model_cells<'l>(
+    lib: &'l ModelLibrary,
+    config: &FaunaConfig,
+    animal: &Animal,
+) -> Option<&'l [ModelCell]> {
+    let founder = animal.founder?;
+    let length = config.founder(founder).body_at(animal.body).length_m;
+    lib.animal(founder)?.select(length)
+}
 
 /// The interim body colour: a placeholder, and chosen to look like one.
 ///
@@ -82,6 +94,9 @@ pub enum AnimalPart {
     },
     /// An articulated head cell.
     Head { style: u16, facing_right: bool },
+    /// One cell of a baked voxel model ([`crate::voxel::model`]): a plain lit block in
+    /// its palette material.
+    Model(u16),
 }
 
 impl AnimalPart {
@@ -89,7 +104,10 @@ impl AnimalPart {
     pub fn is_block(self) -> bool {
         matches!(
             self,
-            AnimalPart::Interim(_) | AnimalPart::Body { .. } | AnimalPart::Head { .. }
+            AnimalPart::Interim(_)
+                | AnimalPart::Body { .. }
+                | AnimalPart::Head { .. }
+                | AnimalPart::Model(_)
         )
     }
 
@@ -99,7 +117,8 @@ impl AnimalPart {
             AnimalPart::None => None,
             AnimalPart::Interim(s)
             | AnimalPart::Body { style: s, .. }
-            | AnimalPart::Head { style: s, .. } => Some(s),
+            | AnimalPart::Head { style: s, .. }
+            | AnimalPart::Model(s) => Some(s),
         }
     }
 
@@ -123,6 +142,12 @@ pub fn interim_style(species: Species) -> Style {
     }
 }
 
+/// Whether an animal shows as starving: reserve empty and body under 0.015 (D3's
+/// starving flag).
+pub fn is_starving(animal: &Animal) -> bool {
+    animal.reserve <= 0.001 && animal.body <= 0.015
+}
+
 /// One animal's style this frame: distinct palettes for founders, cropping flash,
 /// starvation desaturation, or interim fallback.
 pub fn animal_style(animal: &Animal) -> Style {
@@ -131,7 +156,7 @@ pub fn animal_style(animal: &Animal) -> Style {
     };
 
     let is_cropping = animal.state == State::Cropping;
-    let is_starving = animal.reserve <= 0.001 && animal.body <= 0.015;
+    let is_starving = is_starving(animal);
 
     match founder {
         Founder::Blind => {
@@ -339,7 +364,14 @@ pub struct Animals {
     /// instead of the whole grid, and what a packer walks instead of every voxel.
     stamped: Vec<u32>,
     styles: Vec<Style>,
+    /// This rebuild's style index for each `(model material, starving)`, or `u16::MAX`:
+    /// the model path's styles are shared across animals.
+    model_styles: Vec<u16>,
 }
+
+/// How far a starving animal's body falls toward grey and dark: the wilt tint at half
+/// strength. Its accent turns D3/D4's `#7A2A78` instead.
+pub const STARVING_TINT: f32 = 0.5;
 
 impl Animals {
     /// An empty grid for a world of this shape.
@@ -351,12 +383,36 @@ impl Animals {
             grid: vec![AnimalPart::None; width as usize * height as usize * depth as usize],
             stamped: Vec::new(),
             styles: Vec::new(),
+            model_styles: vec![u16::MAX; 256 * 2],
         }
     }
 
-    /// Rebuild from an animal view, or clear when a run has no animal layer. Reuses the
-    /// allocation: the presenter calls this every frame.
+    /// Rebuild from an animal view with the **dev-mode glyphs** ([`cells_of`]), or clear
+    /// when a run has no animal layer. Reuses the allocation: the presenter calls this
+    /// every frame.
     pub fn rebuild(&mut self, view: &VoxelView<'_>, fauna: Option<FaunaView<'_>>) {
+        self.rebuild_inner(view, fauna, None);
+    }
+
+    /// Rebuild with the **baked models** ([`crate::voxel::model`]): a founder with a
+    /// model stamps the size bin nearest its body's length, turned to the nearest quarter
+    /// heading; one without draws [`cells_of`] exactly as [`Animals::rebuild`] does.
+    pub fn rebuild_with(
+        &mut self,
+        view: &VoxelView<'_>,
+        fauna: Option<FaunaView<'_>>,
+        lib: &ModelLibrary,
+    ) {
+        let lib = lib.serves(view.config.voxel_m).then_some(lib);
+        self.rebuild_inner(view, fauna, lib);
+    }
+
+    fn rebuild_inner(
+        &mut self,
+        view: &VoxelView<'_>,
+        fauna: Option<FaunaView<'_>>,
+        lib: Option<&ModelLibrary>,
+    ) {
         let c = view.config;
         if (self.width, self.height, self.depth) != (c.width, c.height, c.depth) {
             *self = Animals::empty(c.width, c.height, c.depth);
@@ -367,12 +423,19 @@ impl Animals {
             }
             self.styles.clear();
         }
+        self.model_styles.fill(u16::MAX);
         let Some(fauna) = fauna else { return };
         // Animals arrive in id order, which is the order the styles are pushed in, so the
         // grid is a pure function of the view and not of any iteration accident. Two
         // animals on one face paint the same cells and the later id wins; which of two
         // identical interim blocks won is not a visible fact.
         for animal in fauna.animals {
+            if let Some(cells) = lib.and_then(|lib| model_cells(lib, fauna.config, animal)) {
+                if !self.stamp_model(view, animal, c.voxel_m, cells) {
+                    break;
+                }
+                continue;
+            }
             let style = self.styles.len().min(u16::MAX as usize) as u16;
             if usize::from(style) != self.styles.len() {
                 break; // more than 65 535 animals in one strip: refuse to alias styles.
@@ -382,6 +445,61 @@ impl Animals {
                 self.place(view, cell, part);
             }
         }
+    }
+
+    /// Stamp one animal's model cells. False when the styles would alias.
+    fn stamp_model(
+        &mut self,
+        view: &VoxelView<'_>,
+        animal: &Animal,
+        voxel_m: f64,
+        cells: &[ModelCell],
+    ) -> bool {
+        if !(voxel_m > 0.0) || !animal.pose.is_finite() {
+            return true;
+        }
+        let anchor = Cell {
+            x: (animal.pose.x / voxel_m).floor() as i64,
+            y: animal.site.y + 1,
+            z: (animal.pose.z / voxel_m).floor().max(0.0) as u32,
+        };
+        let starving = is_starving(animal);
+        let mut ok = true;
+        model::each_animal_cell(cells, anchor, animal.pose.heading_rad, view, |cell, m| {
+            if !ok {
+                return;
+            }
+            let Some(style) = self.model_style(m.material, m.tag == Tag::Accent, starving) else {
+                ok = false;
+                return;
+            };
+            self.place(view, cell, AnimalPart::Model(style));
+        });
+        ok
+    }
+
+    /// The style of a model material, starving or not, shared across animals.
+    fn model_style(&mut self, material: u8, accent: bool, starving: bool) -> Option<u16> {
+        let key = usize::from(material) * 2 + usize::from(starving);
+        let cached = self.model_styles[key];
+        if cached != u16::MAX {
+            return Some(cached);
+        }
+        let style = u16::try_from(self.styles.len())
+            .ok()
+            .filter(|&s| s != u16::MAX)?;
+        let c = match (starving, accent) {
+            (false, _) => srgb_linear(model::palette_srgb(material)),
+            (true, true) => srgb_linear(model::palette_srgb(model::STARVED)),
+            (true, false) => wilted(srgb_linear(model::palette_srgb(material)), STARVING_TINT),
+        };
+        self.styles.push(Style {
+            wood: c,
+            crown: c,
+            heart: c,
+        });
+        self.model_styles[key] = style;
+        Some(style)
     }
 
     /// Write one cell, unless it is outside the world or inside solid terrain: a body does
@@ -615,7 +733,9 @@ mod tests {
             assert!(browser.iter().any(|(c, _)| c.x == 8 && c.y == leg_y));
         }
         assert!(
-            !browser.iter().any(|(c, _)| (4..=7).contains(&c.x) && c.y < 3),
+            !browser
+                .iter()
+                .any(|(c, _)| (4..=7).contains(&c.x) && c.y < 3),
             "the torso leaves a visible belly gap between its legs"
         );
     }
