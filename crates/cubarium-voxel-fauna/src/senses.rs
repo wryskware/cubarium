@@ -386,6 +386,9 @@ struct ChemTrend {
 pub struct Senses {
     field: DetritusField,
     chem_trend: HashMap<u64, ChemTrend>,
+    /// The static episode's held cone occupancy ([`Senses::hold_cone`]); `None` builds
+    /// one per controller stage.
+    cone: Option<Box<HeldCone>>,
 }
 
 impl Senses {
@@ -401,6 +404,29 @@ impl Senses {
     /// trend and read a false gradient.
     pub fn reset_trends(&mut self) {
         self.chem_trend.clear();
+    }
+
+    /// Hold the browser cone's occupancy across controller stages instead of building
+    /// it per stage: the **static** schedule's choice, where terrain, water and growth are
+    /// frozen and only bodies, bites and deaths move ([`HeldCone`]). The held grid always
+    /// equals a fresh build, so this changes no reading; it is a cost choice, and the
+    /// live world, whose plants grow every tick, does not make it. A clone carries the
+    /// grid it holds.
+    pub fn hold_cone(&mut self) {
+        if self.cone.is_none() {
+            self.cone = Some(Box::default());
+        }
+    }
+
+    /// Lend the held occupancy out for a controller stage (see [`Senses::return_cone`]).
+    pub(crate) fn take_cone(&mut self) -> Option<Box<HeldCone>> {
+        self.cone.take()
+    }
+
+    pub(crate) fn return_cone(&mut self, cone: Option<Box<HeldCone>>) {
+        if cone.is_some() {
+            self.cone = cone;
+        }
     }
 
     /// One field update (`view` + current flora as read, `dt = UPDATE_S`).
@@ -738,6 +764,14 @@ impl ConeOccupancy {
         }
     }
 
+    /// Clear every body's bit and forget the list, for a re-index.
+    fn clear_bodies(&mut self) {
+        for &(cell, _) in &self.bodies {
+            self.cells[cell as usize] &= !BODY_BIT;
+        }
+        self.bodies.clear();
+    }
+
     /// Every body's occupied cell (the layer over its standing face), in animal order.
     fn lay_bodies(
         &mut self,
@@ -897,6 +931,229 @@ pub(crate) fn build_occupancy(
     }
     occ.lay_bodies(view, fauna, window);
     occ
+}
+
+/// The cone occupancy **held across controller stages** of a static episode (cone-speed
+/// item 4). In a static episode the terrain, the water and the plants' growth are
+/// frozen; what changes is bodies (every tick) and what they eat or leave behind (a bite
+/// strips a crown or shrinks a pool; a death lays carrion). So the grid is built over
+/// the whole world once, and each stage then
+///
+/// - re-indexes the bodies,
+/// - re-classes the crown cells of any stand whose layers' stocked/bare pattern moved —
+///   a bite can turn a crown cell bare but never moves it, so the cell's claimant (which
+///   stand and layer laid it, recorded at the build) is unchanged, and
+/// - re-lays the pool cells of any column whose ground entries changed.
+///
+/// What changed is found by **comparing** the plant layer with the snapshot the grid was
+/// built from — every stand's site, species, wood and stocked-layer mask, every ground
+/// entry's organic total — not by trusting the caller to report its bites: a training
+/// world holds tens of stands and ground entries, so the comparison is cheap, and any
+/// change it cannot patch (a stand added, removed or grown; the terrain or the shape
+/// moved) is a full rebuild. A held grid therefore always equals a fresh build; holding
+/// it is only a question of cost, which is why the live world (whose plants grow every
+/// tick) does not.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct HeldCone {
+    occ: ConeOccupancy,
+    built: bool,
+    shape: (u64, u32, u32, u32, u64),
+    stands: Vec<HeldStand>,
+    /// `(site, organic bits)` for every ground entry, in the plant layer's site order.
+    ground: Vec<(Site, u64)>,
+    /// Per cell: `0`, or `1 + (stand index << 8 | layer position)` of the foliage layer
+    /// that claimed it.
+    claims: Vec<u32>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct HeldStand {
+    site: Site,
+    species: cubarium_voxel_flora::Species,
+    wood: u64,
+    /// Bit `i`: foliage layer `i` holds stock.
+    stocked: u8,
+}
+
+impl HeldStand {
+    fn of(stand: &cubarium_voxel_flora::Stand) -> HeldStand {
+        let mut stocked = 0u8;
+        for (i, &s) in stand.layer_stock.iter().enumerate() {
+            if s > 0.0 {
+                stocked |= 1 << i;
+            }
+        }
+        HeldStand {
+            site: stand.site,
+            species: stand.species,
+            wood: stand.wood.to_bits(),
+            stocked,
+        }
+    }
+
+    fn same_geometry(&self, other: &HeldStand) -> bool {
+        self.site == other.site && self.species == other.species && self.wood == other.wood
+    }
+}
+
+fn claim_code(stand: usize, layer: usize) -> u32 {
+    1 + ((stand as u32) << 8 | layer as u32)
+}
+
+impl HeldCone {
+    /// Bring the held grid up to date with the world, the plant layer and the bodies as
+    /// they stand, and hand it out. Equal to [`cone_occupancy`] on the same state.
+    pub(crate) fn refresh(
+        &mut self,
+        view: &VoxelView<'_>,
+        fv: &FloraView<'_>,
+        fauna: &crate::FaunaView<'_>,
+    ) -> &ConeOccupancy {
+        let c = view.config;
+        let shape = (
+            view.terrain_version,
+            c.width,
+            c.height,
+            c.depth,
+            c.voxel_m.to_bits(),
+        );
+        let stands: Vec<HeldStand> = fv.stands.iter().map(HeldStand::of).collect();
+        let geometry_held = self.built
+            && self.shape == shape
+            && self.stands.len() == stands.len()
+            && self
+                .stands
+                .iter()
+                .zip(&stands)
+                .all(|(a, b)| a.same_geometry(b));
+        if !geometry_held {
+            self.rebuild(view, fv, fauna, shape, stands);
+            return &self.occ;
+        }
+        // Bites: re-class the crown cells of every stand whose stocked mask moved.
+        for (si, (old, new)) in self.stands.iter_mut().zip(&stands).enumerate() {
+            if old.stocked == new.stocked {
+                continue;
+            }
+            *old = *new;
+            let stand = &fv.stands[si];
+            for (li, layer) in fv.profile_layers(stand).iter().enumerate() {
+                if !layer.kind.bears_foliage() {
+                    continue;
+                }
+                let (code, claim) = (env_code(layer_class(layer)), claim_code(si, li));
+                let (cells, claims) = (&mut self.occ.cells, &self.claims);
+                for_each_layer_cell(view, stand.site, layer, None, |cell| {
+                    if claims[cell] == claim {
+                        cells[cell] = (cells[cell] & !ENV_MASK) | code;
+                    }
+                });
+            }
+        }
+        // Meals and deaths: re-lay the pools of every column whose ground moved.
+        let ground: Vec<(Site, u64)> = fv
+            .ground
+            .iter()
+            .map(|g| (g.site, (g.litter + g.carrion + g.dead_wood).to_bits()))
+            .collect();
+        if ground != self.ground {
+            let mut dirty: Vec<(u32, u32)> = Vec::new();
+            let (mut i, mut j) = (0, 0);
+            while i < self.ground.len() || j < ground.len() {
+                let (a, b) = (self.ground.get(i), ground.get(j));
+                match (a, b) {
+                    (Some(a), Some(b)) if a.0 == b.0 => {
+                        if a.1 != b.1 {
+                            dirty.push((a.0.x, a.0.z));
+                        }
+                        i += 1;
+                        j += 1;
+                    }
+                    (Some(a), Some(b)) if a.0 < b.0 => {
+                        dirty.push((a.0.x, a.0.z));
+                        i += 1;
+                    }
+                    (Some(_), Some(b)) | (None, Some(b)) => {
+                        dirty.push((b.0.x, b.0.z));
+                        j += 1;
+                    }
+                    (Some(a), None) => {
+                        dirty.push((a.0.x, a.0.z));
+                        i += 1;
+                    }
+                    (None, None) => unreachable!(),
+                }
+            }
+            dirty.sort_unstable();
+            dirty.dedup();
+            self.relay_pools(view, fv, &dirty);
+            self.ground = ground;
+        }
+        self.occ.clear_bodies();
+        self.occ.lay_bodies(view, fauna, None);
+        &self.occ
+    }
+
+    fn rebuild(
+        &mut self,
+        view: &VoxelView<'_>,
+        fv: &FloraView<'_>,
+        fauna: &crate::FaunaView<'_>,
+        shape: (u64, u32, u32, u32, u64),
+        stands: Vec<HeldStand>,
+    ) {
+        let cells = view.config.cells();
+        let mut occ = ConeOccupancy::empty(cells);
+        let mut claims = std::mem::take(&mut self.claims);
+        claims.clear();
+        claims.resize(cells, 0);
+        occ.lay_stands(view, fv, None, |cell, si, li| {
+            claims[cell] = claim_code(si, li);
+        });
+        occ.lay_pools(view, fv.ground.iter(), None);
+        occ.pools.sort_unstable_by_key(|&(cell, _)| cell);
+        occ.lay_bodies(view, fauna, None);
+        *self = HeldCone {
+            occ,
+            built: true,
+            shape,
+            stands,
+            ground: fv
+                .ground
+                .iter()
+                .map(|g| (g.site, (g.litter + g.carrion + g.dead_wood).to_bits()))
+                .collect(),
+            claims,
+        };
+    }
+
+    /// Clear and re-lay the pool cells of the `(x, z)` columns in `dirty` (sorted), from
+    /// every ground entry in those columns in site order — only an entry in a column can
+    /// reach a cell of it, so this is exactly what a fresh build lays there.
+    fn relay_pools(&mut self, view: &VoxelView<'_>, fv: &FloraView<'_>, dirty: &[(u32, u32)]) {
+        if dirty.is_empty() {
+            return;
+        }
+        let c = view.config;
+        for &(x, z) in dirty {
+            for y in 0..c.height {
+                self.occ.cells[c.index(i64::from(x), y, z)] &= !POOL_BIT;
+            }
+        }
+        self.occ.pools.retain(|&(cell, _)| {
+            let (x, _, z) = c.coords(cell as usize);
+            dirty.binary_search(&(x, z)).is_err()
+        });
+        for &(x, z) in dirty {
+            let from = fv.ground.partition_point(|g| g.site.x < x);
+            let column = fv.ground[from..]
+                .iter()
+                .take_while(|g| g.site.x == x)
+                .filter(|g| g.site.z == z);
+            self.occ.lay_pools(view, column, None);
+        }
+        self.occ.pools.sort_unstable_by_key(|&(cell, _)| cell);
+    }
 }
 
 /// March one ray from `origin` (metres) along unit `dir`, returning the first hit's

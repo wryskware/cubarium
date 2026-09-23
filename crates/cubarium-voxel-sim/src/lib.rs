@@ -287,6 +287,9 @@ impl Sim {
         let (w, f) = (sim.world(), sim.flora());
         let mut senses = Senses::new();
         senses.settle(&w.view(), &f.view());
+        // Terrain, water and growth are frozen here: the cone occupancy is held across
+        // controller stages and patched from bites and deaths (cone-speed item 4).
+        senses.hold_cone();
         sim.ecs.insert_resource(SenseField(senses));
         sim
     }
@@ -306,6 +309,7 @@ impl Sim {
         let mut sim = Sim::new(world, flora, fauna, config, None);
         sim.mode = ScheduleMode::Static;
         senses.reset_trends();
+        senses.hold_cone();
         sim.ecs.insert_resource(SenseField(senses));
         sim
     }

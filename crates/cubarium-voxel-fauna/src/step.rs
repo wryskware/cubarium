@@ -313,21 +313,29 @@ fn controllers(
     // The cone occupancy is built once per stage, and only over the columns the due
     // browsers' rays can reach (P5-A item 7): a ray reads exactly what it would against
     // the whole world, and a stage with one browser due indexes one browser's share of
-    // the ring.
+    // the ring. A static episode's senses hold it instead (cone-speed item 4): built
+    // once, patched from bites and deaths, bodies re-indexed — the same grid either way.
     let observers: Vec<f64> = due
         .iter()
         .filter(|&&i| fauna.animals[i].founder == Some(Founder::Browser))
         .map(|&i| fauna.animals[i].pose.x)
         .collect();
-    let cone_occupancy = (!observers.is_empty()).then(|| {
-        crate::senses::cone_occupancy_window(
+    let mut held = senses.as_deref_mut().and_then(|s| s.take_cone());
+    let windowed;
+    let cone_occupancy = if observers.is_empty() {
+        None
+    } else if let Some(held) = held.as_mut() {
+        Some(held.refresh(view, &fv, &fauna.view()))
+    } else {
+        windowed = crate::senses::cone_occupancy_window(
             view,
             &fv,
             &fauna.view(),
             observers.iter().copied(),
             Founder::Browser.manifest().cone_range_m,
-        )
-    });
+        );
+        Some(&windowed)
+    };
     for i in due {
         let id = fauna.animals[i].id;
         let founder = fauna.animals[i].founder.expect("a due founder");
@@ -352,11 +360,11 @@ fn controllers(
             &fv,
             &manifest,
             senses.as_deref_mut(),
-            cone_occupancy.as_ref(),
+            cone_occupancy,
         );
         // Reject rather than train through: an observation with a non-finite channel
         // holds rest instead of reaching the controller at all.
-        let held = if obs.iter().all(|v| v.is_finite()) {
+        let actions = if obs.iter().all(|v| v.is_finite()) {
             let response = fauna.controllers.drive(id, &obs);
             response.map_or(Actions::REST, |r| {
                 crate::controller::resolve_actions(r, &manifest)
@@ -365,8 +373,11 @@ fn controllers(
             Actions::REST
         };
         let a = &mut fauna.animals[i];
-        a.founder_state.held = held;
+        a.founder_state.held = actions;
         a.founder_state.feedback = IntervalFeedback::default();
+    }
+    if let Some(s) = senses {
+        s.return_cone(held);
     }
 }
 

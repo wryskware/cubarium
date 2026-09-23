@@ -807,6 +807,10 @@ fn stepping_with_a_held_occupancy_changes_nothing() {
             "tick {tick}: the stands diverged"
         );
     }
+    assert!(
+        flora_a.view().ledger.consumed_organic_out > 0.0,
+        "the fixture's bodies never ate: nothing was patched"
+    );
 }
 
 /// The traversal is part of what the browser's policy sees, so its digest records it; the
