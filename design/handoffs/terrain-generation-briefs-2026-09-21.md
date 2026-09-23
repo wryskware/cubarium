@@ -1846,3 +1846,63 @@ TaskPool threads sit on A55s at 0 % (the exchange is serial now; they
 were created outside the placement pass) — harmless. Sim-thread package
 stays deferred; 60 fps is presented but the picture changes at 20 Hz until
 sub-tick interpolation exists (Wrysk's question).
+
+## Package SW — wet ground on `small` (habitat worker)
+
+Wrysk, 2026-09-22: "fix small" (keep the panel on `small`, give it a
+wetland; not a 0.25 m world at 5 px). Evidence: the organism line's D5
+(`design/7_Research/voxel-census-2026-09-20.md`, "D5 — the small preset"
+and "Water units") and its note
+`design/handoffs/voxel-terrain-note-small-water-2026-09-22.md`.
+
+The finding: the only producers that pay their upkeep are the wet-soil ones
+(umbrellafrond, establish at pore ≥ 0.45; velvetpad ≥ 0.30). At seeding,
+`small` has 16 and 7 eligible columns of 3,840 (0.4 %, 0.2 %) against
+`default`'s 28 % and 5 %, so the seeder plants none and the ring decays to a
+ground mat in six hours. Cause on our side: `small`'s lake is 12 % of the
+ring (default 34 %), `hydrate` lifts the water table to the lake floor
+(`LAKE_TABLE_SHARE`, `hydrate.rs`), and `small`'s floor stands at 1.625 m
+(default 1.0) — 38 % of the inventory buried, 2.4 % standing (default
+25 % / 8.7 %). Wet columns are the ones beside standing water.
+
+Owner: Opus, **high** (landform + hydration coupling, judgment-dense).
+Files: `crates/cubarium-voxel/src/{recipe.rs, generate.rs, hydrate.rs,
+viability.rs}` as needed; the host's seed gate in
+`crates/cubarium/src/voxel/mod.rs` only if a gate bar must move. **Not**
+the flora or fauna crates and **not** the seeder (`voxel/habitat.rs`,
+`stand.rs`): seeding after the first shower is the organism line's
+package 4. `default` and `wide` must not change (their recipes and a
+seed-1 world stay as they are; say so with a check, not a hash pin).
+
+Levers, the worker's choice on evidence: the lake lower and wider relative
+to the ring (`Water::SMALL.lake_depth_m`, the tier-0 trough, its floor
+height); shallow **wet margins** — shelves around the lake and the tier
+pools where the table stands at or just under the surface; the water
+table's rule in `hydrate` for a high lake floor; the inventory sized
+against where it lands. Keep: the visible-lake gate (`min_lake_m2`), at
+least one tier pool with its waterfall, the weir retention (T6), grottos,
+walkability, height 72 (the panel's vertical room), the seed gate's pass
+rate (report tries per accepted seed before and after). A SCHEMA bump is
+fine; always fresh.
+
+Tests first, written before the change: (1) on `small`, at the moment the
+seeder runs, umbrellafrond-eligible columns ≥ 12 % and velvetpad ≥ 2 %
+on seeds 1, 7, 77 and on the first gate-accepted seed of bases 2 and 3 —
+use `habitat::suitable`'s gates or the autopsy's eligibility counter, not
+a private copy of the thresholds; (2) `default` and `wide` hydrate as
+before at seed 1 (stores within 0.1 %); (3) the lake, tier-pool and walk
+checks the gate already makes, on the same seeds. Measure: the eligibility
+block of `cargo run --release -p cubarium --example voxel_plant_autopsy --
+1 preset=small` (1 simulated hour, plants-only) on those seeds before and
+after — founders per species, drownings, standing foliage at 60 min — and
+one 6 h run at seed 1 after. First-shower drownings must not get worse
+than today's 8 of 27 (1c). Short runs otherwise.
+
+Look check for Wrysk: a headless capture of seed 1 before and after
+(`--gpu-target headless` or the png sink, `--background`), in the
+scratchpad, paths in the return.
+
+Return (≤30 lines): commits, the levers chosen and why (with the numbers
+that decided them), eligibility and founders before/after per seed, 1 h
+and 6 h foliage, drownings, gate tries per seed, the two capture paths,
+test counts for `cargo test -p cubarium-voxel` and the host's voxel tests.
