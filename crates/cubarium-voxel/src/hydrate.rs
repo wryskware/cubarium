@@ -339,15 +339,31 @@ pub fn hydrate(world: &mut World, w: &Water) -> Hydrated {
     // No datum, no lake: a world whose generator never named an outlet — every hand-built
     // fixture — keeps the catchment-share fill it had, with its lowest basin an ordinary
     // basin like any other.
-    let level_y = world.outlet_cell.map(|(_, y, _)| y);
+    //
+    // A lake **joined to the aquifer** through a floor drain has no outlet: its generator
+    // names the row it stands at instead, and the water table is raised to its surface,
+    // so the lake is the table showing. Every open basin under that line floods with it —
+    // a raised level spreads over more than the one hollow it was graded into.
+    let connected = !world.lake_drain.is_empty();
+    let level_y = world.lake_datum_y.or(world.outlet_cell.map(|(_, y, _)| y));
     let lake_at = level_y.and_then(|_| list.iter().position(|b| open_to_sky(world, b)));
-    let (lake_m3, lake_floor_y) = match (lake_at, level_y) {
+    let (mut lake_m3, lake_floor_y) = match (lake_at, level_y) {
         (Some(k), Some(level)) => (
             fill_to_level(world, &list[k], level, available),
             list[k].floor_y,
         ),
         _ => (0.0, 0),
     };
+    let mut flooded: Vec<usize> = lake_at.into_iter().collect();
+    if let (true, Some(level)) = (connected, level_y) {
+        for (k, b) in list.iter().enumerate() {
+            if flooded.contains(&k) || b.floor_y + 1 >= level || !open_to_sky(world, b) {
+                continue;
+            }
+            lake_m3 += fill_to_level(world, b, level, (available - lake_m3).max(0.0));
+            flooded.push(k);
+        }
+    }
 
     // **The bed under the lake is saturated**, so the lake does not soak away into dry
     // soil the moment it is poured. Locally, under the lake's own columns — *not* by
@@ -376,7 +392,10 @@ pub fn hydrate(world: &mut World, w: &Water) -> Hydrated {
     // pools: if the lake floor is out of reach, the recipe's own head stands and the lake
     // is reported as the shallow thing it will become.
     let table_ceiling = LAKE_TABLE_SHARE * (after_lake - bed);
-    let lake_head_m = f64::from(lake_floor_y) * c.voxel_m;
+    let lake_head_m = match (connected, level_y) {
+        (true, Some(level)) => f64::from(level.saturating_sub(1)) * c.voxel_m,
+        _ => f64::from(lake_floor_y) * c.voxel_m,
+    };
     let want_head = if lake_m3 > 0.0 && c.aquifer_volume_for_head(lake_head_m) <= table_ceiling {
         w.aquifer_head_m.max(lake_head_m)
     } else {
@@ -392,7 +411,7 @@ pub fn hydrate(world: &mut World, w: &Water) -> Hydrated {
     let others: Vec<Basin> = list
         .iter()
         .enumerate()
-        .filter(|(k, _)| Some(*k) != lake_at)
+        .filter(|(k, _)| !flooded.contains(k))
         .map(|(_, b)| b.clone())
         .collect();
     let pooled = fill_basins(world, &others, after_lake - bed - charged - pore);
@@ -404,11 +423,28 @@ pub fn hydrate(world: &mut World, w: &Water) -> Hydrated {
     // ring, a 30 m² lake standing nine voxels over its own datum. In the sky it is the
     // cycle's own store, it rains back on schedule, and the table stays where the lake
     // needs it. An open-budget world has no sky to put it in, so there it still sinks.
-    let spare = (after_lake - bed - charged - pore - pooled).max(0.0);
+    //
+    // A lake joined to the aquifer is sized by its level, not by its inventory: the
+    // inventory is a ceiling there, and what the level did not need is never poured.
+    let spare = if connected {
+        0.0
+    } else {
+        (after_lake - bed - charged - pore - pooled).max(0.0)
+    };
     let (to_aquifer, to_sky) = if c.closed_water_budget {
         (0.0, spare)
     } else {
         (spare, 0.0)
+    };
+    // A level-sized world's sky is a share of the water it was actually given, not of the
+    // ceiling its inventory states: whatever stands aloft above the shower floor rains
+    // down in the first day and lifts the level by as much.
+    let (atmosphere, to_sky) = if connected && c.closed_water_budget {
+        let poured = lake_m3 + bed + pore + pooled + charged;
+        let f = w.atmosphere_fraction.clamp(0.0, 0.9);
+        (poured * f / (1.0 - f), 0.0)
+    } else {
+        (atmosphere, to_sky)
     };
     world.aquifer_m3 += charged + to_aquifer;
     world.atmosphere_m3 += atmosphere + to_sky;
@@ -1447,6 +1483,8 @@ mod tests {
                 min_lake_m2: 0.0,
                 reentry_m3_per_s: 0.0,
                 min_tier_pools: 0,
+                reentry_from_aquifer: false,
+                lake_drain_m2_per_s: 0.0,
             },
         );
         let before = lake(&w).level_y;

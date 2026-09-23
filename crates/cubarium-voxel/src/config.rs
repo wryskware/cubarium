@@ -95,6 +95,18 @@ pub struct Config {
     /// The river that leaves at the outlet re-enters upstream. Zero — the default — is
     /// showers only. Ignored under the open budget.
     pub reentry_m3_per_s: f64,
+    /// Where that stream draws from: the atmosphere store (false, the default), or the
+    /// **aquifer** (true) — groundwater emerging at the spring, which leaves the weather
+    /// alone. From the aquifer it runs under either budget while the water table stands
+    /// above [`Config::reentry_floor_head_m`].
+    pub reentry_from_aquifer: bool,
+    /// The water table, metres above `y = 0`, at which the aquifer-fed stream stops.
+    pub reentry_floor_head_m: f64,
+    /// A lake joined to the aquifer through its floor at the world's lake drain: cubic
+    /// metres per second per metre its surface stands above the water table, passing down
+    /// while the lake stands higher and up while the table does. Zero, the default, is no
+    /// drain.
+    pub lake_drain_m2_per_s: f64,
     /// Largest change in one cell's `free` fraction that a single equalization substep
     /// may apply, so a filling region can be watched travelling. Zero (the default)
     /// disables the cap and a region settles to its level in one substep.
@@ -130,6 +142,9 @@ impl Default for Config {
             shower_interval_min_s: 0.0,
             shower_interval_max_s: 0.0,
             reentry_m3_per_s: 0.0,
+            reentry_from_aquifer: false,
+            reentry_floor_head_m: 0.0,
+            lake_drain_m2_per_s: 0.0,
             free_transfer_cap: 0.0,
             landform: Landform::Ridge,
         }
@@ -177,6 +192,8 @@ impl Config {
             ("spring_k_m2_per_s", self.spring_k_m2_per_s),
             ("outlet_m3_per_s", self.outlet_m3_per_s),
             ("free_transfer_cap", self.free_transfer_cap),
+            ("reentry_floor_head_m", self.reentry_floor_head_m),
+            ("lake_drain_m2_per_s", self.lake_drain_m2_per_s),
             ("initial_aquifer_head_m", self.initial_aquifer_head_m),
             ("initial_atmosphere_m3", self.initial_atmosphere_m3),
             ("shower_trigger_fraction", self.shower_trigger_fraction),

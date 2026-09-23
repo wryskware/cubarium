@@ -25,9 +25,14 @@
 //! the tallest trees. One or two **arches** span a saddle along the back wall, a deck from
 //! one mass to the next with sky under it.
 //!
-//! Water: the **lake** is graded into a yard held clear at the massif's foot, and a
-//! chain of **pools** is cut into the treads above it, each spilling over its tread's
-//! edge into the pool below and the last into the lake. The finish applies the
+//! Water: the **lake** is graded into a yard held clear at the massif's foot and stands
+//! at the **water level**, which is the water table: the lake is joined to the aquifer
+//! through a drain across its floor, so there is no outlet and it rises and falls with the
+//! table, and everything open below that line floods with it. The **stream** rises in a
+//! pool on a high plateau, the one whose course scores best — how far it falls, how much
+//! of it the camera sees, its waterfalls, how far round the ring it runs — and follows a
+//! channel cut down to the lake. It is groundwater, the aquifer coming up at the spring,
+//! so the weather keeps its own water. The finish applies the
 //! two-voxel rule ([`crate::tidy`]), removes anything unsupported and lays soil on every
 //! open floor, deep on gentle ground. The report counts **grove sites**: floors with the
 //! headroom, crown room and soil the tallest trees need.
@@ -40,7 +45,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::generate::{Budget, Heightfield, LakeDatum, repair_isolated, seat_outlet};
+use crate::generate::{Budget, Heightfield, LakeDatum, repair_isolated};
 use crate::noise::{ring_cells, ring_noise, smoothstep};
 use crate::recipe::{Erosion, Water};
 use crate::{Config, Material, World};
@@ -145,6 +150,11 @@ pub struct Terrarium {
     pub lake_m: [f64; 2],
     /// Depth of the lake's middle below the ground.
     pub lake_depth_m: f64,
+    /// Where the water stands, above the ground the lake is graded into. It is the water
+    /// table: the lake is joined to the aquifer through a drain in its floor and rises and
+    /// falls with it, and everything open below this line floods with the lake. Soil below
+    /// it is saturated, so a grove wants its roots above it.
+    pub water_level_m: f64,
     /// How deep the yard held clear for the lake is, as a share of the depth.
     pub yard: f64,
     /// A pool's radius around the ring.
@@ -167,7 +177,7 @@ impl Terrarium {
         ground_m: 1.0,
         ground_rise_m: 0.25,
         ground_relief_m: 0.0625,
-        ground_fall: 0.04,
+        ground_fall: 0.08,
         soil_m: 0.25,
         mantle_m: 0.25,
         crest_m: [1.5, 6.5],
@@ -208,11 +218,27 @@ impl Terrarium {
         warp_m: 0.375,
         warp_wavelength_m: 3.0,
         lake_m: [3.0, 4.5],
+        water_level_m: 0.25,
         lake_depth_m: 0.375,
         yard: 0.35,
         pool_m: [0.5, 0.875],
         pool_depth_m: 0.25,
         water: Water {
+            // The stream no longer returns the sky's water, so the showers must. A shower
+            // rains whatever the sky holds, up to more than it ever holds, so rain follows
+            // evaporation; the low trigger sets how often. A small sky: the level is set by
+            // the ground, not by what is aloft.
+            shower_volume_m3: 1.0,
+            shower_trigger_fraction: 0.005,
+            // Evaporation well under the rain rate, so a shower reaches the ground rather
+            // than lifting straight back off the films it wets. It no longer has to power
+            // the stream, only the weather.
+            evaporation_m_per_s: 1.0e-5,
+            atmosphere_fraction: 0.02,
+            // Groundwater now, so its size is for the eye and costs the weather nothing.
+            reentry_m3_per_s: 4.0e-4,
+            reentry_from_aquifer: true,
+            lake_drain_m2_per_s: 0.05,
             min_lake_m2: 2.0,
             lake_depth_m: 0.375,
             ..Water::SMALL
@@ -224,7 +250,7 @@ impl Terrarium {
         ground_m: 1.25,
         ground_rise_m: 0.5,
         ground_relief_m: 0.0625,
-        ground_fall: 0.03,
+        ground_fall: 0.06,
         soil_m: 0.25,
         mantle_m: 0.375,
         crest_m: [2.5, 12.5],
@@ -265,11 +291,27 @@ impl Terrarium {
         warp_m: 0.5,
         warp_wavelength_m: 4.0,
         lake_m: [4.0, 6.0],
+        water_level_m: 0.375,
         lake_depth_m: 0.5,
         yard: 0.32,
         pool_m: [0.75, 1.25],
         pool_depth_m: 0.375,
         water: Water {
+            // The stream no longer returns the sky's water, so the showers must. A shower
+            // rains whatever the sky holds, up to more than it ever holds, so rain follows
+            // evaporation; the low trigger sets how often. A small sky: the level is set by
+            // the ground, not by what is aloft.
+            shower_volume_m3: 3.0,
+            shower_trigger_fraction: 0.005,
+            // Evaporation well under the rain rate, so a shower reaches the ground rather
+            // than lifting straight back off the films it wets. It no longer has to power
+            // the stream, only the weather.
+            evaporation_m_per_s: 1.0e-5,
+            atmosphere_fraction: 0.02,
+            // Groundwater now, so its size is for the eye and costs the weather nothing.
+            reentry_m3_per_s: 2.5e-3,
+            reentry_from_aquifer: true,
+            lake_drain_m2_per_s: 0.25,
             min_lake_m2: 3.0,
             lake_depth_m: 0.5,
             ..Water::DEFAULT
@@ -344,7 +386,7 @@ impl Terrarium {
 }
 
 /// What one terrarium build made. Diagnostics: nothing reads it back.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Report {
     pub spires: usize,
     /// Cubic metres of rock and loose material erosion moved.
@@ -358,6 +400,9 @@ pub struct Report {
     pub groves: usize,
     pub grove_m2: u32,
     pub pools: usize,
+    /// The stream: its length from the spring to the lake, and how far it falls.
+    pub river_m: f64,
+    pub river_drop_m: f64,
     /// What the two-voxel rule changed.
     pub tidied: crate::tidy::Thin,
     /// Solid cells with no path to the floor, removed.
@@ -527,6 +572,11 @@ struct Build<'a> {
     loose: Vec<i32>,
     /// Columns graded into the lake.
     lake: Vec<bool>,
+    /// Columns an arch's deck stands over: no stream is routed under one.
+    arch: Vec<bool>,
+    /// The rows the water fills: everything below this row, open to the sky and joined
+    /// to the lake, is under water.
+    water_y: i32,
     report: Report,
 }
 
@@ -623,6 +673,8 @@ pub fn build(world: &mut World, t: &Terrarium) -> Report {
         ground: vec![0; cells],
         loose: vec![0; cells],
         lake: vec![false; cells],
+        water_y: 0,
+        arch: vec![false; cells],
         report: Report::default(),
     };
     let site = layout(&mut b);
@@ -631,7 +683,7 @@ pub fn build(world: &mut World, t: &Terrarium) -> Report {
     lay_ground(&mut b);
     halls(&mut b);
     arches(&mut b);
-    let spring = pools(&mut b, site.centre);
+    let spring = river(&mut b);
     finish(&mut b);
 
     b.report.spires = b.spires.len();
@@ -640,13 +692,27 @@ pub fn build(world: &mut World, t: &Terrarium) -> Report {
     b.report.grove_m2 = (cells as f64 * c.voxel_m * c.voxel_m).round() as u32;
     let lake = datum(&b);
     b.report.lake = lake;
-    let h = c.height as i32;
+    // The drain is the lake's whole graded floor: the first void over every lake column.
+    let (w, d) = (c.width as i64, c.depth as i32);
+    let drain: Vec<(u32, u32, u32)> = (0..(w * d as i64) as usize)
+        .filter(|&i| b.lake[i])
+        .filter_map(|i| {
+            let (x, z) = (i as i64 % w, (i as i64 / w) as i32);
+            let y = (0..c.height as i32).find(|&y| !b.g.solid(x, y, z))?;
+            Some((x as u32, y as u32, z as u32))
+        })
+        .collect();
     world.material = b.g.mat;
-    world.outlet_cell = Some((
-        lake.rim.0 as u32,
-        (lake.level_y + 1).min(h - 1) as u32,
-        lake.rim.1 as u32,
-    ));
+    world.lake_drain = drain;
+    // No outlet: the lake stands at the water table, joined to the aquifer through a
+    // drain in its floor, and the stream at the spring is that aquifer coming up. The
+    // hydrate fills everything open below the water row; the datum is the row above it.
+    world.outlet_cell = None;
+    world.lake_datum_y = Some((b.water_y + 1) as u32);
+    world.config.reentry_floor_head_m = (lake.floor_y + 1) as f64 * c.voxel_m;
+    // The stream is the only spring: no head-driven seep, which under a table raised to
+    // the lake would gush wherever the spring sat below it.
+    world.config.spring_k_m2_per_s = 0.0;
     world.spring_cell = spring;
     repair_isolated(world);
     b.report
@@ -872,6 +938,7 @@ fn lay_lake(b: &mut Build, site: &Site) {
         .map(|(x, z)| b.ground_at(x, z))
         .min()
         .unwrap_or(0);
+    b.water_y = reference + 1 + b.v(b.t.water_level_m);
     for x in span.0..=span.1 {
         let u = (x - centre) as f64 / half;
         let dep = (depth * (1.0 - u * u)).round() as i32;
@@ -1004,6 +1071,8 @@ fn halls(b: &mut Build) {
                 continue;
             };
             let floor = if mouth > 0 { at(x, mouth - 1) } else { b.base[x.rem_euclid(w) as usize].round() as i32 };
+            // A hall stands above the water: its floor is dry ground, not a flooded bowl.
+            let floor = floor.max(b.water_y);
             let arch = (hall * 0.35).min(bay / 2.0);
             let to_side = into.min(bay - into);
             let head = hall - round_in(arch, to_side);
@@ -1108,6 +1177,7 @@ fn arches(b: &mut Build) {
                         b.g.put(x, y, z, Tag::Mass);
                     }
                 }
+                b.arch[(z as i64 * w + x.rem_euclid(w)) as usize] = true;
             }
         }
         made.push((xa, len + 1));
@@ -1115,98 +1185,193 @@ fn arches(b: &mut Build) {
     b.report.arches = made.len();
 }
 
-// --- pools ---------------------------------------------------------------------------------------
+// --- the river ----------------------------------------------------------------------------------
 
-/// Cut a chain of pools into the treads above the lake, top down. Each sits on open,
-/// gently sloping ground, takes the fall from the pool above, and spills through a notch
-/// over its tread's edge; the lowest spills into the lake. The spring is in the top pool.
-fn pools(b: &mut Build, centre: i64) -> Option<(u32, u32, u32)> {
+/// What one candidate spring's stream would be: the columns it runs through to the
+/// water, and how it scores.
+struct Course {
+    path: Vec<(i64, i32)>,
+    score: f64,
+}
+
+/// Where the stream rises and how it runs to the lake. Every column is given its cheapest
+/// way down to the water — downhill or level costs its length, climbing a voxel costs a
+/// notch cut through it — and every high, level plateau is scored as a spring by the
+/// stream it would feed: how far it falls, how much of it the camera sees, how many
+/// waterfalls it makes and how far round the ring it carries. The best is cut in: a pool
+/// at the spring, a two-wide channel down every tread, the falls kept open, a plunge pool
+/// under each tall one. The spring sits in the top pool.
+fn river(b: &mut Build) -> Option<(u32, u32, u32)> {
     let (w, h, d) = (b.g.w, b.g.h, b.g.d);
-    let x = centre + b.rng.int(-1, 1);
-    let dep = b.v(b.t.pool_depth_m).max(2);
-    // The open floor of columns `x` and `x + 1`, front to back.
-    let surface = |b: &Build, z: i32| -> Option<i32> {
-        let ys = (2..h - 1).rev().find(|&y| b.g.solid(x, y, z))?;
-        (ys + 1..h)
-            .all(|y| !b.g.solid(x + 1, y, z))
-            .then_some(ys)
-            .filter(|_| b.g.solid(x + 1, ys, z) || b.g.solid(x + 1, ys - 1, z))
+    let n = (w * d as i64) as usize;
+    let col = |x: i64, z: i32| (z as i64 * w + x.rem_euclid(w)) as usize;
+    // The open surface: each column's highest solid.
+    let top: Vec<i32> = (0..n)
+        .map(|i| {
+            let (x, z) = (i as i64 % w, (i as i64 / w) as i32);
+            (0..h).rev().find(|&y| b.g.solid(x, y, z)).unwrap_or(0)
+        })
+        .collect();
+    let wet: Vec<bool> = (0..n).map(|i| b.lake[i] || top[i] < b.water_y).collect();
+    let arch = b.arch.clone();
+    let water = |i: usize| wet[i];
+    let blocked = |i: usize| arch[i];
+    let seen = |x: i64, z: i32| -> bool {
+        let (mut ry, mut rz) = (top[col(x, z)] as f64 + 1.01, z as f64 + 0.5);
+        while rz >= 0.0 && ry < h as f64 {
+            if b.g.solid(x, ry as i32, rz as i32) {
+                return false;
+            }
+            rz -= 0.25;
+            ry += 0.125;
+        }
+        true
     };
-    let open: Vec<Option<i32>> = (0..d).map(|z| surface(b, z)).collect();
-    // Treads: runs of open floor rising or falling no more than a voxel a step.
-    let mut treads: Vec<(i32, i32)> = Vec::new();
-    let mut z = 0;
-    while z < d {
-        if b.lake[(z as i64 * w + x.rem_euclid(w)) as usize] || open[z as usize].is_none() {
-            z += 1;
+    // Cheapest way down from every column, searched out from the water.
+    const CLIMB: f64 = 30.0;
+    const FALL: f64 = 0.35;
+    let mut cost = vec![f64::INFINITY; n];
+    let mut next = vec![usize::MAX; n];
+    let mut heap = std::collections::BinaryHeap::new();
+    for i in 0..n {
+        if water(i) {
+            cost[i] = 0.0;
+            heap.push(std::cmp::Reverse((0u64, i)));
+        }
+    }
+    let steps = [(1i64, 0i32, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0), (1, 1, 1.4), (1, -1, 1.4), (-1, 1, 1.4), (-1, -1, 1.4)];
+    while let Some(std::cmp::Reverse((c, i))) = heap.pop() {
+        let c = c as f64 / 1000.0;
+        if c > cost[i] {
             continue;
         }
-        let start = z;
-        while z + 1 < d
-            && let (Some(a), Some(c)) = (open[z as usize], open[z as usize + 1])
-            && (a - c).abs() <= 1
-        {
-            z += 1;
+        let (x, z) = (i as i64 % w, (i as i64 / w) as i32);
+        for &(dx, dz, len) in &steps {
+            let (ax, az) = (x + dx, z + dz);
+            if az < 0 || az >= d {
+                continue;
+            }
+            let a = col(ax, az);
+            if water(a) || blocked(a) {
+                continue;
+            }
+            // Water at `a` runs into `i`: its length, a little for every voxel it drops so
+            // it follows a ramp where there is one, and a notch cut for every voxel it climbs.
+            let climb = (top[i] - top[a]).max(0) as f64;
+            let fall = (top[a] - top[i] - 1).max(0) as f64;
+            let ca = c + len + FALL * fall + CLIMB * climb;
+            if ca < cost[a] {
+                cost[a] = ca;
+                next[a] = i;
+                heap.push(std::cmp::Reverse(((ca * 1000.0) as u64, a)));
+            }
         }
-        treads.push((start, z));
-        z += 1;
     }
-    let tread_of = |z: i32| treads.iter().copied().find(|&(lo, hi)| z >= lo && z <= hi);
-    let mut landing: Option<i32> = None;
-    let mut spring = None;
-    // Start on the highest tread long enough to hold a pool.
-    let mut next = treads
-        .iter()
-        .copied()
-        .filter(|&(lo, hi)| hi - lo >= 7)
-        .max_by_key(|&(lo, _)| open[lo as usize].unwrap_or(0));
-    while let Some((z_lo, z_hi)) = next {
-        let rx = b.draw(b.t.pool_m).max(3);
-        let mut r = rx;
-        let centre = |r: i32| landing.map_or(z_lo + 2 + r, |z| z - (r - 2));
-        while r >= 2 && (centre(r) - r < z_lo + 2 || centre(r) + r > z_hi + 2) {
-            r -= 1;
+    // Springs: level plateaus in the upper half of the ring's height, room for a pool.
+    let highest = (0..n).filter(|&i| !blocked(i)).map(|i| top[i]).max().unwrap_or(0);
+    let water_y = b.water_y;
+    let lowest_spring = water_y + (highest - water_y) / 2;
+    let level = |x: i64, z: i32| {
+        (-3..=3).all(|dx| {
+            (-2..=2).all(|dz| {
+                let zz = z + dz;
+                (1..d - 1).contains(&zz) && (top[col(x + dx, zz)] - top[col(x, z)]).abs() <= 1
+            })
+        })
+    };
+    let mut best: Option<Course> = None;
+    for i in 0..n {
+        let (x, z) = (i as i64 % w, (i as i64 / w) as i32);
+        if top[i] < lowest_spring || !cost[i].is_finite() || blocked(i) || water(i) || !level(x, z) {
+            continue;
         }
-        if r < 2 {
+        let mut path = vec![(x, z)];
+        let mut j = i;
+        while !water(j) && next[j] != usize::MAX {
+            j = next[j];
+            path.push((j as i64 % w, (j as i64 / w) as i32));
+        }
+        let drop = (top[i] - water_y) as f64;
+        let visible = path.iter().filter(|&&(x, z)| seen(x, z)).count() as f64;
+        let falls = path
+            .windows(2)
+            .filter(|p| top[col(p[0].0, p[0].1)] - top[col(p[1].0, p[1].1)] >= 3)
+            .count() as f64;
+        let climb: f64 = path
+            .windows(2)
+            .map(|p| (top[col(p[1].0, p[1].1)] - top[col(p[0].0, p[0].1)]).max(0) as f64)
+            .sum();
+        let end = path.last().copied().unwrap_or((x, z));
+        let span = {
+            let o = (end.0 - x).rem_euclid(w);
+            o.min(w - o) as f64
+        };
+        let score = drop + 0.3 * visible + 3.0 * falls + 0.25 * span - 3.0 * climb;
+        if best.as_ref().is_none_or(|c| score > c.score) {
+            best = Some(Course { path, score });
+        }
+    }
+    let course = best?;
+    b.report.river_m = course.path.len() as f64 * b.c.voxel_m;
+    let &(sx, sz) = course.path.first()?;
+    b.report.river_drop_m = (top[col(sx, sz)] - b.water_y) as f64 * b.c.voxel_m;
+
+    // The spring's pool.
+    let dep = b.v(b.t.pool_depth_m).max(2);
+    let ys = top[col(sx, sz)];
+    let rx = b.draw(b.t.pool_m).max(3);
+    carve_pool(b, sx, ys, sz, rx, 2, dep);
+    b.report.pools += 1;
+    let spring = Some((sx.rem_euclid(w) as u32, (ys - 1) as u32, sz as u32));
+
+    // The channel: a groove one row deep, its bed never rising downstream, two wide —
+    // the path's column and whichever neighbour across the flow stands nearer its height.
+    let mut bed = ys - 1;
+    let path = course.path;
+    for k in 1..path.len() {
+        let (px, _) = path[k - 1];
+        let (x, z) = path[k];
+        if water(col(x, z)) {
+            // Into the lake: keep the last fall open.
+            let mut y = bed;
+            while y > 0 && !b.g.solid(x, y, z) {
+                b.g.keep_air(x, y, z);
+                y -= 1;
+            }
             break;
         }
-        let cz = centre(r);
-        let ys = (cz - r..=cz + r)
-            .filter_map(|z| open.get(z as usize).copied().flatten())
-            .max()
-            .unwrap_or(0);
-        carve_pool(b, x, ys, cz, rx, r, dep);
-        // The notch: a groove one row deep and two wide from the bowl to the edge.
-        let mut z = cz - r;
-        while z >= 0 && (b.g.solid(x, ys, z) || b.g.solid(x + 1, ys, z)) {
-            for xx in [x, x + 1] {
-                b.g.keep(xx, ys, z);
-                b.g.put(xx, ys - 1, z, Tag::Basin);
+        let here = top[col(x, z)];
+        let fell = bed - here;
+        bed = bed.min(here - 1);
+        // Across the flow: `x` for a step in `z`, `z` otherwise.
+        let (ox, oz) = if x == px { (1i64, 0i32) } else { (0, 1) };
+        let pair = [(x + ox, z + oz), (x - ox, z - oz)]
+            .into_iter()
+            .filter(|&(_, zz)| (0..d).contains(&zz))
+            .min_by_key(|&(xx, zz)| (top[col(xx, zz)] - here).abs())
+            .unwrap_or((x, z));
+        for (cx, cz) in [(x, z), pair] {
+            let t = top[col(cx, cz)];
+            if t > bed + 3 {
+                continue;
             }
-            for xx in [x - 1, x + 2] {
-                if b.g.solid(xx, ys, z) {
-                    b.g.put(xx, ys, z, Tag::Basin);
-                }
+            for y in bed + 1..=t.max(bed + 1) {
+                b.g.keep(cx, y, cz);
             }
-            z -= 1;
+            b.g.put(cx, bed, cz, Tag::Basin);
         }
-        // The fall, kept open to whatever it lands on.
-        let fall = z.max(0);
-        let mut y = ys;
-        while y > 0 && !b.g.solid(x, y, fall) && !b.g.solid(x + 1, y, fall) {
-            b.g.keep_air(x, y, fall);
-            b.g.keep_air(x + 1, y, fall);
-            y -= 1;
+        // A tall fall lands in a plunge pool, if the landing is level enough to hold one.
+        if fell >= 5 && k + 2 < path.len() && level(x, z) {
+            carve_pool(b, x, here, z, 3, 2, 2);
+            b.report.pools += 1;
         }
-        b.report.pools += 1;
-        if spring.is_none() {
-            spring = Some((x.rem_euclid(w) as u32, (ys - 1) as u32, cz as u32));
+        // The fall itself, open from the lip down.
+        if fell > 1 {
+            for y in here + 1..=bed + fell {
+                b.g.keep_air(x, y, z);
+                b.g.keep_air(pair.0, y, pair.1);
+            }
         }
-        landing = Some(fall);
-        if b.lake[(fall as i64 * w + x.rem_euclid(w)) as usize] {
-            break;
-        }
-        next = tread_of(fall).filter(|&(lo, _)| lo < z_lo);
     }
     spring
 }
@@ -1365,7 +1530,8 @@ fn groves(b: &Build) -> (usize, usize) {
                 if !is_soil(x, y, z) || b.g.solid(x, y + 1, z) {
                     continue;
                 }
-                if y + head >= h || !(1..soil).all(|k| is_soil(x, y - k, z)) || (1..=head).any(|k| b.g.solid(x, y + k, z)) {
+                // Roots in saturated soil drown: the whole root depth stands above the water.
+                if y + head >= h || y - soil + 1 < b.water_y || !(1..soil).all(|k| is_soil(x, y - k, z)) || (1..=head).any(|k| b.g.solid(x, y + k, z)) {
                     continue;
                 }
                 let crown = (-r..=r).all(|dz| {
@@ -1397,45 +1563,26 @@ fn groves(b: &Build) -> (usize, usize) {
     (sites.len(), cells.len())
 }
 
-/// The lake's datum on the ground it was graded into: the rim is the lowest ground
-/// around it, and the outlet sits on a column of its own edge just under that.
+/// The lake's datum: its lowest floor, where the drain sits, and the row the water
+/// stands at. `rim` is the drain's column.
 fn datum(b: &Build) -> LakeDatum {
-    let c = b.c;
     let (w, d) = (b.g.w, b.g.d);
-    // The top of each column's first solid run: the ground as water standing on it sees it.
-    let mut floor = vec![0i32; (w * d as i64) as usize];
-    let lake = &b.lake;
-    for z in 0..d {
-        for x in 0..w {
-            let mut y = 0;
-            while b.g.solid(x, y + 1, z) {
-                y += 1;
-            }
-            floor[(z as i64 * w + x) as usize] = y;
-        }
-    }
-    let Some(low) = (0..floor.len()).filter(|&i| lake[i]).min_by_key(|&i| floor[i]) else {
+    let low = (0..(w * d as i64) as usize)
+        .filter(|&i| b.lake[i])
+        .min_by_key(|&i| {
+            let (x, z) = (i as i64 % w, (i as i64 / w) as i32);
+            (0..b.g.h).take_while(|&y| b.g.solid(x, y, z)).count()
+        });
+    let Some(i) = low else {
         return LakeDatum::default();
     };
-    let mut rim = i32::MAX;
-    for i in 0..floor.len() {
-        if !lake[i] {
-            continue;
-        }
-        let (x, z) = (i as i64 % w, (i as i64 / w) as i32);
-        for (dx, dz) in [(-1i64, 0i32), (1, 0), (0, -1), (0, 1)] {
-            let (nx, nz) = ((x + dx).rem_euclid(w), z + dz);
-            if nz < 0 || nz >= d {
-                continue;
-            }
-            let j = (nz as i64 * w + nx) as usize;
-            if !lake[j] {
-                rim = rim.min(floor[j]);
-            }
-        }
+    let (x, z) = (i as i64 % w, (i as i64 / w) as i32);
+    let floor = (0..b.g.h).take_while(|&y| b.g.solid(x, y, z)).count() as i32 - 1;
+    LakeDatum {
+        floor_y: floor,
+        level_y: b.water_y - 1,
+        rim: (x as usize, z as usize),
     }
-    let level = if rim == i32::MAX { floor[low] + 1 } else { rim };
-    seat_outlet(&floor, c, low, floor[low], level)
 }
 
 /// Floor cells — solid with open air above — and how many of them the camera sees: a ray

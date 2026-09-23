@@ -926,6 +926,14 @@ pub fn water_table(w: &mut World) {
                     if w.material[i].is_solid() || w.free[i] >= level {
                         continue;
                     }
+                    // Only a **surface** seeps: a cell with water standing over it is under
+                    // that water's own pressure, and a shortfall there is the solver moving
+                    // it along, gone by the next substep. Topping those up from the aquifer
+                    // pumped it into any lake the table stood over, tick after tick.
+                    let above = i + (c.width as usize * c.depth as usize);
+                    if y + 1 < c.height && !w.material[above].is_solid() && w.free[above] > 1e-9 {
+                        continue;
+                    }
                     let below = c.index(x, y - 1, z);
                     let m = w.material[below];
                     if m.pore_capacity() <= 0.0 || m.permeability_per_s() <= 0.0 {
@@ -1965,6 +1973,13 @@ pub fn drain(w: &mut World) {
                     let lost = take_pore(w, i, want);
                     w.aquifer_m3 += lost;
                     lost
+                } else if submerged(&c, y - 1, table) && w.material[i - plane].pore_capacity() > 0.0 {
+                    // Reaching the water table: what drains **recharges** the aquifer. The
+                    // saturated cell below has no room, and without this the water above
+                    // a table raised near the surface perched there for good.
+                    let lost = take_pore(w, i, want);
+                    w.aquifer_m3 += lost;
+                    lost
                 } else {
                     let below = i - plane;
                     match w.material[below] {
@@ -2074,13 +2089,31 @@ fn emerge(w: &mut World, (x, y, z): (u32, u32, u32), want: f64) -> f64 {
 /// is rain, so `is_raining` does not see it. The open budget has no store and is ignored.
 pub fn reentry(w: &mut World) {
     {
-        if !w.config.closed_water_budget || w.config.reentry_m3_per_s <= 0.0 {
+        if w.config.reentry_m3_per_s <= 0.0 {
             return;
         }
         let Some((x, y, z)) = w.spring_cell else {
             return;
         };
         if y >= w.config.height || z >= w.config.depth {
+            return;
+        }
+        // **Groundwater**, when the world asks for it: the stream is the aquifer emerging,
+        // an internal transfer the ledger has nothing to say about, and the weather keeps
+        // every drop of its own store. It stops at the floor the world set, so it cannot
+        // pump the water table out from under the lake.
+        if w.config.reentry_from_aquifer {
+            let floor = w.config.aquifer_volume_for_head(w.config.reentry_floor_head_m);
+            let spare = w.aquifer_m3 - floor;
+            if spare <= 0.0 {
+                return;
+            }
+            let want = (w.config.reentry_m3_per_s * DT).min(spare);
+            let got = emerge(w, (x, y, z), want);
+            w.aquifer_m3 -= got;
+            return;
+        }
+        if !w.config.closed_water_budget {
             return;
         }
         let floor = w.config.shower_trigger_fraction * w.ledger.expected_total();
@@ -2106,6 +2139,59 @@ pub fn reentry(w: &mut World) {
 /// of the cell, so it means the same on a 0.125 m ring and a 0.25 m one.
 const OUTLET_WEIR: f64 = 0.05;
 
+/// **The lake's floor drain**: a lake joined to the aquifer through its bed, at every
+/// cell of [`World::lake_drain`]. Water passes whichever way the heads say — down into the
+/// aquifer while the lake stands above the water table, up into it while the table stands
+/// above the lake — at [`crate::Config::lake_drain_m2_per_s`] per metre of difference,
+/// shared across the floor so no one column has to carry it. So the lake is the water
+/// table showing, and it rises and falls with it rather than standing at a sill. With the
+/// aquifer-fed stream ([`reentry`]) it closes the river's loop underground: out through
+/// the lake floor, up at the spring.
+///
+/// Run inside the outlet phase, so `cubarium-voxel-sim`'s schedule keeps its chain of
+/// public phases. Internal both ways, so the ledger has nothing to book.
+fn lake_drain(w: &mut World) {
+    let n = w.lake_drain.len();
+    let k = w.config.lake_drain_m2_per_s;
+    if n == 0 || k <= 0.0 {
+        return;
+    }
+    let (h, d, vm) = (w.config.height, w.config.depth, w.config.voxel_m);
+    let share = k / n as f64;
+    let table_m = w.config.aquifer_head_m(w.aquifer_m3);
+    for c in 0..n {
+        let (x, y, z) = w.lake_drain[c];
+        if y >= h || z >= d {
+            continue;
+        }
+        let at = |w: &World, yy: u32| w.config.index(x as i64, yy, z);
+        // The surface over this cell: the top of the water standing in its column.
+        let mut top = y;
+        while top + 1 < h && w.free[at(w, top)] >= 0.99 && !w.material[at(w, top + 1)].is_solid() {
+            top += 1;
+        }
+        let surface_m = (top as f64 + w.free[at(w, top)].clamp(0.0, 1.0)) * vm;
+        let flow = share * (surface_m - table_m) * DT;
+        if flow > 0.0 {
+            // Down: taken off the top of the column.
+            let mut left = flow;
+            for yy in (y..=top).rev() {
+                let i = at(w, yy);
+                left -= take_free(w, i, left);
+                if left <= 1e-15 {
+                    break;
+                }
+            }
+            w.aquifer_m3 += flow - left.max(0.0);
+        } else if flow < 0.0 {
+            // Up: the aquifer pushes into the lake through its floor.
+            let want = (-flow).min(w.aquifer_m3);
+            let got = emerge(w, (x, y, z), want);
+            w.aquifer_m3 -= got;
+        }
+    }
+}
+
 /// Whether `CUBARIUM_OUTLET_TRACE` asked the outlet to say what it takes and what stands
 /// around it. Read once: this sits in the tick.
 ///
@@ -2123,6 +2209,7 @@ pub fn outlet(w: &mut World) {
     #[cfg(feature = "profile")]
     let census = crate::profile::census::before(w, crate::profile::census::Tag::Outlet);
     crate::voxel_phase!(Outlet, {
+        lake_drain(w);
         if !w.outlet_open {
             return;
         }

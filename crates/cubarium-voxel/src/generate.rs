@@ -307,7 +307,7 @@ pub fn lake_level(surface: &[i32], c: &Config, r: &Recipe) -> LakeDatum {
 
 /// Lower `level` until the lake has a column of edge to put its outlet on, and hand back
 /// the datum. At `floor + 1` the floor column is that edge, so this always terminates.
-pub(crate) fn seat_outlet(
+fn seat_outlet(
     surface: &[i32],
     c: &Config,
     low: usize,
