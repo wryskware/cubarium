@@ -134,10 +134,12 @@
 //! same answer at half a head difference per substep per face: a U-tube levels in about a
 //! second, a ten-column roofed passage in a few, and the answers the fixtures in
 //! `tests/core.rs` pin — the spill thresholds, the mirrored shelf, the symmetric spill,
-//! the U-tube's own levels — come out the same. A **closed, surcharged** passage is the one
-//! case that does not settle flat: a local rule with no pressure solve leaves the surface
-//! above a flooded roof uneven by a few tenths of a cell, which
-//! `a_roofed_passage_pushes_the_far_shaft_above_the_roof` states rather than asserts away.
+//! the U-tube's own levels — come out the same. A **closed, surcharged** passage used to be
+//! the one case that did not settle flat: two columns facing each other over several full
+//! rows each sent half their head difference per row, so they swapped levels every substep
+//! and the surface above a flooded roof stayed uneven by a few tenths of a cell. Package P
+//! caps what a stack sends across one face at one row's worth, and that fixture now levels
+//! (`a_roofed_passage_pushes_the_far_shaft_above_the_roof`).
 //!
 //! Both numbers in it — `FLOW_PER_SUBSTEP` and `HEAD_PASSES` — are **placeholders**
 //! (`design/backlog.md`), and so is `water_substeps` 4, which is unchanged.
@@ -153,8 +155,9 @@
 //!   difference, so a wide body relaxes over ticks. `Config::free_transfer_cap` above zero
 //!   caps what one face may pass and slows it further without changing where the water ends
 //!   up.
-//! - **A surcharged closed passage does not settle flat.** See above: the one case where
-//!   the local rule visibly differs from the old region solver.
+//! - **Still water settles by relaxation, not at once.** Two columns side by side level in
+//!   one substep; a pool six columns wide agrees to the last bit after a few hundred
+//!   (package P). There is no pressure solve: head reaches `HEAD_PASSES` cells a substep.
 //! - **Water above the level is not carried down at once.** A film running down a slope
 //!   descends a cell per substep.
 //! - **`f64` stores.** `free` and `pore` are `f64` fractions, so an internal transfer
@@ -963,6 +966,15 @@ struct Scratch {
     /// One cell's offers this pass, `(destination, volume)`, before the giver's own stock
     /// scales them.
     offers: Vec<(usize, f64)>,
+    /// Package P: every giver's offers this substep, `(destination, volume, face)` with
+    /// face 0-3 horizontal and 4 down, kept until its stack's totals are known; and the
+    /// givers themselves, in the active set's order.
+    offer_list: Vec<(u32, f64, u8)>,
+    givers: Vec<Giver>,
+    /// Package P: each wet cell's stack this substep (an index into `stacks`), and each
+    /// stack's per-face totals.
+    stack_of: Vec<u32>,
+    stacks: Vec<StackFaces>,
     /// The **driving** head: a cell's own surface head, raised to the highest head that
     /// reaches it through submerged water. A giver pushes with its `drive`; a receiver
     /// resists with its own `head`, because what a neighbour presents to the water arriving
@@ -1019,6 +1031,7 @@ impl Scratch {
             self.drive_next = vec![0.0; n];
             self.room_target = vec![u32::MAX; n];
             self.run_top = vec![u32::MAX; n];
+            self.stack_of = vec![0; n];
             self.touch_stamp = vec![0; n];
             self.proposed_in = vec![0.0; n];
             self.accept = vec![0.0; n];
@@ -1052,6 +1065,29 @@ impl Scratch {
             self.stamp = 1;
         }
     }
+}
+
+/// One giver's offers in [`Scratch::offer_list`] (`start..end`), and what it placed across
+/// each horizontal face and down, before its stack's cap and the Jacobi division.
+struct Giver {
+    i: u32,
+    #[cfg(feature = "profile")]
+    y: u32,
+    stack: u32,
+    start: u32,
+    end: u32,
+    have: f64,
+    placed: [f64; 4],
+    down: f64,
+}
+
+/// A **stack**'s offers across each horizontal face (package P): the sum over its rows and
+/// the most any single row placed, and whether its bottom cell offers down out of it.
+#[derive(Default)]
+struct StackFaces {
+    placed: [f64; 4],
+    best: [f64; 4],
+    down: bool,
 }
 
 thread_local! {
@@ -1293,6 +1329,9 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
         );
         sc.edges.clear();
         sc.touched.clear();
+        sc.offer_list.clear();
+        sc.givers.clear();
+        sc.stacks.clear();
         for k in 0..sc.active.len() {
             let i = sc.active[k];
             let have = w.free[i];
@@ -1303,15 +1342,24 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
             let base = y * plane;
             let col = i - base;
             let here = sc.drive[i];
+            // **The stack** (package P): a wet cell continues the stack of the wet cell under
+            // it when the two carry the same head — the full cells under a partial top share
+            // that top's surface (package H) — and starts a stack of its own otherwise. The
+            // set is walked ascending, so the cell below has its stack already.
+            let continues = y > 0 && {
+                let below = i - plane;
+                w.free[below] > 0.0 && sc.head[below] == sc.head[i]
+            };
+            let stack = if continues {
+                sc.stack_of[i - plane] as usize
+            } else {
+                sc.stacks.push(StackFaces::default());
+                sc.stacks.len() - 1
+            };
+            sc.stack_of[i] = stack as u32;
             sc.offers.clear();
-            let mut total = 0.0;
-            // How many faces this cell is offering across. Its offers are divided by that
-            // count below: `FLOW_PER_SUBSTEP` is safe for **one** pair — half a difference
-            // levels a pair exactly — and a cell with two low neighbours would otherwise
-            // hand each of them half its head and empty itself, which flip-flops instead
-            // of relaxing. This is the ordinary Jacobi damping and it is what makes the
-            // exchange settle rather than ring.
-            let mut faces = 0usize;
+            let start = sc.offer_list.len() as u32;
+            let mut placed_by_face = [0.0f64; 4];
 
             // The four horizontal faces. A push against a **full** neighbour is not
             // refused, it is displaced: the water goes into the lowest cells with room at
@@ -1341,19 +1389,28 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
                     continue;
                 }
                 let q = cap_flux(transfer_cap, FLOW_PER_SUBSTEP * drop);
+                let before = sc.offers.len();
                 let placed = if use_masks {
                     offer_up_the_run_mask(w, plane, nb as usize, y, q, sc)
                 } else {
                     offer_up_the_run(w, plane, j, q, sc)
                 };
+                for &(target, q) in &sc.offers[before..] {
+                    sc.offer_list.push((target as u32, q, face as u8));
+                }
                 if placed > 0.0 {
-                    faces += 1;
-                    total += placed;
+                    placed_by_face[face] = placed;
+                    let st = &mut sc.stacks[stack];
+                    st.placed[face] += placed;
+                    if placed > st.best[face] {
+                        st.best[face] = placed;
+                    }
                 }
             }
 
             // And straight down, into the cell's own room below: the same rule, and the
             // reason a film keeps moving when `fall` has already taken what it can.
+            let mut down = 0.0;
             if y > 0 {
                 let below = i - plane;
                 if !w.material[below].is_solid() {
@@ -1367,9 +1424,13 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
                     if drop > 0.0 && room > 0.0 {
                         let q = cap_flux(transfer_cap, FLOW_PER_SUBSTEP * drop).min(room);
                         if q > 0.0 {
-                            sc.offers.push((below, q));
-                            faces += 1;
-                            total += q;
+                            sc.offer_list.push((below as u32, q, 4));
+                            down = q;
+                            // Only a stack's bottom cell offers *out* of it downward; a
+                            // sliver into the stack's own cell below is inside it.
+                            if !continues {
+                                sc.stacks[stack].down = true;
+                            }
                         }
                     }
                 }
@@ -1381,20 +1442,76 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
             // Lifting a cell's own water into the cell above it instead only shuffles a
             // column against `fall` — the two fight, and a roofed passage never fills.
 
-            if sc.offers.is_empty() || total <= 0.0 {
+            let end = sc.offer_list.len() as u32;
+            if end > start {
+                sc.givers.push(Giver {
+                    i: i as u32,
+                    #[cfg(feature = "profile")]
+                    y: y as u32,
+                    stack: stack as u32,
+                    start,
+                    end,
+                    have,
+                    placed: placed_by_face,
+                    down,
+                });
+            }
+        }
+
+        // ---- the stack's caps and the Jacobi division, then the edges.
+        //
+        // **One face, one row's worth** (package P, 2026-09-22). What a stack sends across
+        // one horizontal face into one neighbouring column is capped at what the best single
+        // row of it would send: its rows share that amount in proportion to their offers.
+        // `FLOW_PER_SUBSTEP` is safe for one pair of cells — half a difference levels them
+        // exactly — but a stack facing its neighbour over `k` rows used to send `k` halves,
+        // so two columns side by side over two full rows swapped levels every substep and
+        // never settled (the shimmer on still water). A one-row interface, a film and a
+        // lone cell are unchanged.
+        //
+        // Then the ordinary Jacobi damping, **counted per stack**: every offer is divided by
+        // the number of faces the stack offers across — its horizontal faces and, if its
+        // bottom cell offers down out of it, that one — so a stack with two low neighbours
+        // hands each half of what one would get, and relaxes instead of ringing. Finally a
+        // cell cannot give more than it holds: its offers are scaled together if they still
+        // ask for more, so no face is ever preferred.
+        for gi in 0..sc.givers.len() {
+            let g = &sc.givers[gi];
+            let (i, have) = (g.i as usize, g.have);
+            let st = &sc.stacks[g.stack as usize];
+            let mut cap = [1.0f64; 4];
+            let mut faces = usize::from(st.down);
+            for face in 0..4 {
+                if st.placed[face] > 0.0 {
+                    faces += 1;
+                    if st.placed[face] > st.best[face] {
+                        cap[face] = st.best[face] / st.placed[face];
+                    }
+                }
+            }
+            let mut total = 0.0;
+            for face in 0..4 {
+                if g.placed[face] > 0.0 {
+                    total += g.placed[face] * cap[face];
+                }
+            }
+            total += g.down;
+            if total <= 0.0 {
                 continue;
             }
-            // A cell cannot give more than it holds, and no one face may drain it: its
-            // offers are divided by the faces it offers across and then scaled together if
-            // they still ask for more than it has, so no face is ever preferred.
             let share = 1.0 / faces.max(1) as f64;
             let total = total * share;
             let scale = share * if total > have { have / total } else { 1.0 };
             #[cfg(feature = "profile")]
-            let edges_before = sc.edges.len();
-            for oi in 0..sc.offers.len() {
-                let (target, q) = sc.offers[oi];
-                let q = q * scale;
+            let (y, base, edges_before) = (g.y as usize, g.y as usize * plane, sc.edges.len());
+            for oi in g.start as usize..g.end as usize {
+                let (target, q, face) = sc.offer_list[oi];
+                let target = target as usize;
+                let q = q * if face < 4 {
+                    scale * cap[face as usize]
+                } else {
+                    scale
+                };
                 if q <= 0.0 {
                     continue;
                 }
@@ -1413,6 +1530,7 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
             }
             #[cfg(feature = "profile")]
             if census {
+                let col = i - base;
                 let b = crate::profile::census::bin(have);
                 let made = (sc.edges.len() - edges_before) as u64;
                 edge_depth[b] += made;
@@ -1805,6 +1923,8 @@ pub fn drain(w: &mut World) {
             rows_of(&sc.fall, plane, &mut sc.rows);
             #[cfg(feature = "profile")]
             crate::profile::add(crate::profile::Count::DrainCells, sc.fall.len() as u64);
+            #[cfg(feature = "profile")]
+            let (mut over, mut moved) = (0u64, 0u64);
             for k in 0..sc.fall.len() {
                 let (i, y) = (sc.fall[k], sc.rows[k]);
                 if submerged(&c, y, table) {
@@ -1821,25 +1941,35 @@ pub fn drain(w: &mut World) {
                     continue;
                 }
                 let want = excess.min(pore_flux_m3(m, &c, DT));
-                if y == 0 {
+                let _drained = if y == 0 {
                     // Sitting on the foundation: what drains joins the aquifer.
                     let lost = take_pore(w, i, want);
                     w.aquifer_m3 += lost;
-                    continue;
+                    lost
+                } else {
+                    let below = i - plane;
+                    match w.material[below] {
+                        Material::Bedrock => {
+                            let lost = take_pore(w, i, want);
+                            w.aquifer_m3 += lost;
+                            lost
+                        }
+                        Material::Air => transfer(w, (i, Store::Pore), (below, Store::Free), want),
+                        _ => transfer(w, (i, Store::Pore), (below, Store::Pore), want),
+                    }
+                };
+                #[cfg(feature = "profile")]
+                {
+                    over += 1;
+                    if _drained > 0.0 {
+                        moved += 1;
+                    }
                 }
-                let below = i - plane;
-                match w.material[below] {
-                    Material::Bedrock => {
-                        let lost = take_pore(w, i, want);
-                        w.aquifer_m3 += lost;
-                    }
-                    Material::Air => {
-                        transfer(w, (i, Store::Pore), (below, Store::Free), want);
-                    }
-                    _ => {
-                        transfer(w, (i, Store::Pore), (below, Store::Pore), want);
-                    }
-                }
+            }
+            #[cfg(feature = "profile")]
+            {
+                crate::profile::add(crate::profile::Count::DrainOver, over);
+                crate::profile::add(crate::profile::Count::DrainMoved, moved);
             }
         });
     });
@@ -3142,6 +3272,155 @@ mod exchange_geometry_tests {
         assert_eq!(masked.offers, reference.offers, "offers from y={y}");
     }
 }
+/// **Still water settles** (package P): what one column's stack sends across one face into
+/// one neighbouring column is capped at what that face would send from a single row, so a
+/// deep interface levels instead of swapping the two columns' levels every substep.
+#[cfg(test)]
+mod settle_tests {
+    use super::{SCRATCH, exchange, fall};
+    use crate::{Command, Config, Material, World};
+
+    fn cfg(width: u32, height: u32) -> Config {
+        Config {
+            width,
+            height,
+            depth: 1,
+            voxel_m: 1.0,
+            seed: 7,
+            ..Config::default()
+        }
+    }
+
+    fn rock_column(w: &mut World, x: i64) {
+        for y in 1..w.config.height {
+            w.apply(Command::SetMaterial {
+                x,
+                y,
+                z: 0,
+                material: Material::Rock,
+            });
+        }
+    }
+
+    /// Pour `units` into column `x` from the floor up, as settled water.
+    fn pour(w: &mut World, x: i64, mut units: f64) {
+        for y in 1..w.config.height {
+            if units <= 0.0 {
+                break;
+            }
+            let got = w.apply(Command::AddWater {
+                x,
+                y,
+                z: 0,
+                volume_m3: units.min(1.0),
+            });
+            units -= got;
+        }
+    }
+
+    fn column(w: &World, x: i64) -> f64 {
+        (1..w.config.height)
+            .map(|y| w.view().free_at(x, y, 0))
+            .sum()
+    }
+
+    fn residual(w: &World) -> f64 {
+        w.view().stored_m3() - w.view().ledger.expected_stored()
+    }
+
+    /// Two columns side by side on a bedrock floor, walled on their other sides, with
+    /// `k` full rows each under a partial top: 0.8 on the left, 0.2 on the right. They
+    /// face each other across `k + 1` wet rows. The level is `k + 0.5` above the floor.
+    fn pair(k: u32) -> World {
+        let mut w = World::empty(cfg(4, k + 4));
+        rock_column(&mut w, 2);
+        rock_column(&mut w, 3);
+        pour(&mut w, 0, f64::from(k) + 0.8);
+        pour(&mut w, 1, f64::from(k) + 0.2);
+        w
+    }
+
+    /// The two-column cycle the C tests found: joined over one row or four, the high
+    /// column only ever loses water, the heads never cross, and the pair levels and stops.
+    #[test]
+    fn two_columns_joined_over_several_rows_level_without_swapping() {
+        for k in [1, 2, 4] {
+            let mut w = pair(k);
+            let mut last = column(&w, 0);
+            let mut still = None;
+            for substep in 0..400 {
+                fall(&mut w);
+                exchange(&mut w, 1);
+                let (a, b) = (column(&w, 0), column(&w, 1));
+                assert!(
+                    a - b >= -1e-12,
+                    "k = {k}: the heads crossed at substep {substep}: {a} against {b}"
+                );
+                let change = a - last;
+                assert!(
+                    change <= 1e-15,
+                    "k = {k}: the high column gained {change} at substep {substep}"
+                );
+                if change.abs() < 1e-12 {
+                    still.get_or_insert(substep);
+                } else {
+                    still = None;
+                }
+                last = a;
+            }
+            let (a, b) = (column(&w, 0), column(&w, 1));
+            assert!((a - b).abs() < 1e-9, "k = {k}: not level: {a} against {b}");
+            assert!(
+                (a - (f64::from(k) + 0.5)).abs() < 1e-9,
+                "k = {k}: level {a}, not {}",
+                f64::from(k) + 0.5
+            );
+            let still = still.expect("still moving at the end");
+            assert!(still < 100, "k = {k}: still only from substep {still}");
+            assert!(residual(&w).abs() < 1e-12);
+        }
+    }
+
+    /// A pool six columns wide, two rows deep with a heap in one column, and nothing
+    /// forcing it: it spreads, levels, and then the exchange proposes nothing at all,
+    /// substep after substep. The slowest mode of a six-column pool relaxes by about 6 %
+    /// a substep, so the columns agree to the last bit after roughly 550 substeps (under
+    /// half a minute of world time); before package P two full rows swapped forever.
+    #[test]
+    fn a_pool_at_rest_proposes_nothing() {
+        let mut w = World::empty(cfg(8, 6));
+        rock_column(&mut w, 6);
+        rock_column(&mut w, 7);
+        for x in 0..6 {
+            pour(&mut w, x, if x == 0 { 3.5 } else { 2.0 });
+        }
+        let mut quiet_from = None;
+        for substep in 0..900 {
+            fall(&mut w);
+            exchange(&mut w, 1);
+            let edges = SCRATCH.with(|s| s.borrow().edges.len());
+            if edges == 0 {
+                quiet_from.get_or_insert(substep);
+            } else {
+                assert!(
+                    substep < 700,
+                    "{edges} proposals at substep {substep}, after the pool should be still"
+                );
+                quiet_from = None;
+            }
+        }
+        assert!(
+            quiet_from.is_some_and(|s| s < 700),
+            "never still: {quiet_from:?}"
+        );
+        let level = column(&w, 0);
+        for x in 1..6 {
+            assert!((column(&w, x) - level).abs() < 1e-9, "column {x}");
+        }
+        assert!(residual(&w).abs() < 1e-12);
+    }
+}
+
 /// **Minimum spreading depth** (package C): a giver whose own free water is shallower than
 /// [`MIN_SPREAD_DEPTH_M`] makes no horizontal offer. Everything else it does is unchanged,
 /// and nothing is deleted. The fixtures are 1 m cells, so the threshold in cell units is

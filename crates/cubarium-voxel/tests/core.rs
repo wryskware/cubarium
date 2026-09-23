@@ -364,12 +364,13 @@ fn a_roofed_passage_fills_and_the_far_side_rises() {
 /// up through the submerged gap.
 ///
 /// The claim is qualitative on purpose. A local exchange carries head one cell per pass and
-/// has no pressure solve in it, so a *closed, surcharged* passage does not settle to one
-/// flat surface the way the old region solver made it: the surface above the roof stays
-/// uneven by a few tenths of a cell and keeps relaxing. That is a stated limitation of the
-/// first-pass local model, not a conservation fault — the residual below is the check that
-/// matters — and it is recorded in
-/// `design/7_Research/voxel-tick-profile-2026-09-18.md`.
+/// has no pressure solve in it, so a *closed, surcharged* passage did not settle to one
+/// flat surface the way the old region solver made it: the surface above the roof stayed
+/// uneven by a few tenths of a cell (0.40 at 200 ticks; 0.26 after package H). Package P,
+/// which caps what a stack sends across one face at one row's worth, ended the swapping
+/// behind that: at 200 ticks the surface over the roof is flat to 1e-4 and every passage
+/// cell is full. The residual below is still the check that matters; see
+/// `design/7_Research/voxel-tick-profile-2026-09-18.md` for the history.
 #[test]
 fn a_roofed_passage_pushes_the_far_shaft_above_the_roof() {
     let w = roofed(7.0, 7.0);
@@ -1014,9 +1015,12 @@ fn the_transfer_cap_makes_a_fill_travel_more_slowly() {
 
     // One tick spreads a fill a few cells and nowhere near its level: the far side of an
     // eight-column ring is a long way short of 2 / 8 either way, and the cap is behind.
+    // (Package P moved the far column's first-tick fill from 0.094 to 0.125, half its
+    // level: the two-row fill no longer overshoots out of column 0, so the two fronts
+    // meet at column 4 a little fuller. The bound was 0.1.)
     let (quick, slow) = (ring(0.0, 1), ring(0.02, 1));
     assert!(
-        column(&quick, 4) < 0.1,
+        column(&quick, 4) < 0.15,
         "uncapped levelled in one tick: {}",
         column(&quick, 4)
     );

@@ -234,10 +234,14 @@ pub enum Count {
     FallMoved,
     /// Rebuilds of the terrain-owned void-run cache (terrain edits and fresh worlds).
     VoidRunRebuilds,
+    /// Damp cells `drain` found over their field capacity and above the water table.
+    DrainOver,
+    /// Of those, the cells it actually moved pore water out of.
+    DrainMoved,
 }
 
 impl Count {
-    pub const ALL: [Count; 25] = [
+    pub const ALL: [Count; 27] = [
         Count::FallCells,
         Count::InfiltrateCells,
         Count::ExchangeWet,
@@ -263,6 +267,8 @@ impl Count {
         Count::ExchangeRaised,
         Count::FallMoved,
         Count::VoidRunRebuilds,
+        Count::DrainOver,
+        Count::DrainMoved,
     ];
     pub const COUNT: usize = Count::ALL.len();
 
@@ -297,6 +303,8 @@ impl Count {
             Count::ExchangeRaised => "exchange: proposals above the giver's row",
             Count::FallMoved => "fall: cells that moved water down",
             Count::VoidRunRebuilds => "void-run cache rebuilds",
+            Count::DrainOver => "drain: damp cells over field capacity",
+            Count::DrainMoved => "drain: cells that moved pore water",
         }
     }
 }
