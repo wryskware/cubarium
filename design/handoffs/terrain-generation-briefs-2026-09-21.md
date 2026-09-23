@@ -1823,3 +1823,26 @@ thread placement as built, uclamp availability, test counts for
 Integration: Fable merges PA, PB, PC, deploys, and reads ≥ 15 min of rate
 lines that include a shower, plus the main thread's CPU (on 7) and clock
 (`perf stat -t`, ≥ 2 GHz).
+
+## PA, PB, PC — integrated and on the board 2026-09-22
+
+Merged perf-pc (65756cb), perf-pb (c8416a5), Fable's opt-in `--pin-loop`
+(9e857af; Wrysk: pinning only where the unit asks), perf-pa; main 75d9b6f,
+deployed. Tests: host 348, gpu 54, voxel lib 121, sim 15; workspace
+all-targets check clean. Desk: pack 2.6 → 0.53 ms/tick (texel-equal to the
+old pack), step 6.1 → 3.8 dry / 11.7 → 8.3 shower (wet cells within 0.1 %);
+f32 heads rejected (thin films stop spreading) — the next water lever if
+ever needed, Wrysk's call.
+
+Board, 17 min after start: "the loop is on cpu7 (capacity 1024 …), 10
+other thread(s) on cpu 4,5,6; uclamp.min 1024"; core_ctl minimums
+written. Every window **20.0 ticks/s and 58.5–60.0 fps presented**; step
+6–10 ms dry, 14.5–17.1 ms in the wetter windows (max 26.6); pack 1.2–2.3
+ms/tick (was 11); loop **19–39 % busy** (was 82 %). Target met (20 Hz
+through showers, step max < 50, loop < 50 %). The loop's clock averages
+1.43 GHz under `perf stat -t` — uclamp barely lifts it (likely the
+cgroup's `cpu.uclamp.min` 0 caps it); not needed at this headroom. The
+TaskPool threads sit on A55s at 0 % (the exchange is serial now; they
+were created outside the placement pass) — harmless. Sim-thread package
+stays deferred; 60 fps is presented but the picture changes at 20 Hz until
+sub-tick interpolation exists (Wrysk's question).
