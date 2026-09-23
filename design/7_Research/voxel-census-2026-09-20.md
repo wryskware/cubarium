@@ -1218,3 +1218,122 @@ Every point of the fall is glowcap and nothing else (`default`: the glowcap
 row's reach 0.958 → 0.000 against an unchanged 0.958 of standing foliage). The
 `visible` columns do not move: sight has no diet. These are the diet gate and
 not the cue, so the applied rule reads them identically to the first build.
+
+## Startup acceptance, 2026-09-22
+
+Package 4 (`design/handoffs/voxel-startup-acceptance-2026-09-22.md`; decisions
+§8). A fresh world now opens with its first shower and is seeded only after it
+has fallen and drained; the seeder plants and places on the face it checked;
+a browser face is admitted by a **stocked layer** in its band; founders go only
+into walkable components holding `N = 1` founder-hour of reachable edible stock
+each (upkeep = adult basal maintenance, browser 0.18 and shredder 0.045 organic
+per hour) and, for the shredder, a living litter-shedder or glowcap rooted in
+the component; and the founding loop redraws the terrain on a refusal. No
+snapshot schema moved (commands are not persisted). `before` is main at
+ae13ef3 from `git archive`; `after` is this branch. Seed base 1 throughout.
+
+### The founding loop, per preset
+
+| | small | default | wide |
+| --- | --- | --- | --- |
+| seed kept; lake / habitat tries refused | 1; 0 / 0 | 1; 0 / 0 | 1; 0 / 0 |
+| pre-roll ticks: settle + shower + drain + watch | 282 + 1,484 + 100 + 200 = **2,066** | 600 + 2,156 + 1,889 + 200 = **4,845** | 600 + 1,700 + 1,235 + 200 = **3,735** |
+| pre-roll wall, desk, release, one process | 10.5 s | 14.2 s | 15.7 s |
+| drain converged under its cap (2,400) | yes | yes | yes |
+| stands (before → after) | 27 → 27 | 87 → **74** | 217 → **190** |
+| stands per m² of footprint | 0.450 | 0.385 | 0.495 |
+| unmet niches (eligible faces = 0) | none | none | none |
+| imported organic (stands, logs, starter litter, bodies) | 12.76 | 35.18 | 86.24 |
+
+Every preset passes on its **first** draw: at `N = 1` the bar refuses nothing
+on a shipped ring at seed 1, so `small` is not a terrain-line finding. The
+stands lost are mostly springturf, the soil producer with the shallowest drown
+depth (0.03 m): `default` −6 springturf, −2 bloomcrown, −2 stonecushion, −2
+glowcap, −1 umbrellafrond; `wide` −19 springturf of −27. The shower is the
+expensive part of the pre-roll (a minute and a half of simulated rain on
+`default`); a tick costs 5 ms on `small` and 3–4 ms on the larger rings, so at
+the board's 8–10× a try is on the order of two minutes there.
+
+Per species after (stands; eligible faces after the pre-roll):
+
+| | bloomcrown | umbrellafrond | springturf | stonecushion | velvetpad | glowcap |
+| --- | --- | --- | --- | --- | --- | --- |
+| small | 4; 2,732 | 1; 230 | 11; 2,257 | 5; 2,575 | 1; 167 | 5; 2,123 |
+| default | 13; 1,010 | 7; 748 | 30; 788 | 13; 1,005 | 4; 180 | 7; 844 |
+| wide | 33; 2,657 | 16; 1,677 | 82; 2,190 | 32; 2,564 | 8; 348 | 19; 2,099 |
+
+The accepted components, per lineage (stock and production in founder-hours of
+upkeep per founder; production is reported, not gated — browser: the reached
+stands' regrowth ceiling `r_p · W`, shredder: rooted litterfall `m_p · P`):
+
+| | component founders | stock / upkeep | production / upkeep |
+| --- | --- | --- | --- |
+| small, shredder | 8 | 6.0 | 42.8 |
+| small, browser | 8 | 1.8 | 27.7 |
+| default, shredder | 8 | 6.4 | 60.9 |
+| default, browser | 7 + 1 | 5.2, 2.5 | 71.7, 30.5 |
+| wide, shredder | 8 | 10.2 | 216.8 |
+| wide, browser | 7 + 1 | 11.2, 17.3 | 185.0, 108.2 |
+
+The shredder's stock is mostly its own starter litter (0.2 a founder, 4.4
+founder-hours by itself), so for that lineage the gate that can bite is the
+living producer, not the stock. `small`'s browsers stand on the thinnest
+margin of the three: 1.8 founder-hours each.
+
+### `voxel_edible_stock 0`, route from the seeded browsers' components
+
+| t = 0, f_route_seeded | small | default | wide |
+| --- | --- | --- | --- |
+| before | 0.457 | 0.201 | 0.320 |
+| after | **0.514** | **0.398** | **0.391** |
+
+`default`'s route doubles: the seeded browsers now stand in the component that
+holds the stock they were admitted on. (The observer's detritus block now uses
+the mouth's pool rule through the shared route map; `default`'s cap row reads
+1.000 in component where it read 0.739.)
+
+### `voxel_founder_autopsy 60`
+
+| | small before | small after | default before | default after | wide before | wide after |
+| --- | --- | --- | --- | --- | --- | --- |
+| shredders alive at 30 / 60 | 6 / 10 | 11 / **0** | 10 / 6 | 14 / **23** | 16 / 10 | 10 / 15 |
+| browsers alive at 30 / 60 | 0 / 0 | 4 / 0 | 9 / 1 | 4 / 0 | 22 / 9 | 19 / 7 |
+| shredder starved / drowned | 10 / 2 | 12 / 0 | 25 / 2 | 22 / 0 | 41 / 0 | 25 / 0 |
+| browser starved / drowned | 8 / 1 | 13 / 0 | 15 / 0 | 8 / 3 | 19 / 0 | 19 / 0 |
+| shredder bites: litter / cap / carrion | 17,882 / 1,642 / 122 | 6,769 / 2,217 / 43 | 47,338 / 659 / 326 | 80,784 / 3,597 / 453 | 74,474 / 3,482 / 720 | 55,494 / 37 / 290 |
+| browser bites (foliage) | 5,971 | 18,358 | 19,559 | 6,423 | 68,918 | 55,214 |
+| first browser death, minute | 10.2 | 15.8 | 18.2 | 3.4 | 31.5 | 11.7 |
+
+Each arm was run once; `default` both arms were run twice and reproduced to
+the row. Ledger residuals over 72,000 ticks ≤ 8.1e-11 fauna, ≤ 7.0e-10 flora.
+
+### `voxel_census 6 preset=default`
+
+| sim hour | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| shredders, before | 8 | 6 | 6 | 5 | 5 | 8 | **7** |
+| shredders, after | 8 | 23 | 19 | 11 | 10 | 6 | **6** |
+| browsers, before | 8 | 1 | 0 | 0 | 0 | 0 | 0 |
+| browsers, after | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
+| standing litter, before | 1.60 | 4.60 | 4.08 | 6.06 | 11.73 | 14.35 | 20.02 |
+| standing litter, after | 1.60 | 8.96 | 12.51 | 24.24 | 22.89 | 22.51 | 27.04 |
+
+Water residual at six hours 2.69e-6 m³ (before 2.65e-6). The census prints no
+causes or foods; those are the autopsy's rows above.
+
+### What this says
+
+- The startup guarantee holds as specified and **changes the start, not the
+  outcome**. Every preset's founders stand in components holding at least 1.8
+  founder-hours each, `default`'s seeded route doubles, and the browser lineage
+  is still gone inside the first hour on `default` and `small`.
+  Browsers placed on food they can reach still starve: the next question is
+  acquisition and upkeep against intake (package 5's retrain), not placement.
+- `small`'s shredders collapse from 11 at 30 minutes to 0 at 60 after, against
+  10 alive before. One seed, one run; not diagnosed here.
+- **`before` does not reproduce the Diets section's `default` row.** At
+  ae13ef3 `voxel_founder_autopsy 60 preset=default` gives 6 shredders alive at
+  60 and 48,323 shredder bites, twice, where the Diets table's applied arm says
+  17 and 71,226; and the census's before arm ends at 7 shredders where
+  "Census: the applied rule's numbers" says 12. The before numbers here are
+  what that build does today.
