@@ -136,6 +136,14 @@ pub struct VoxelConfig {
     pub dither: f32,
     /// Whether to render a vertical sky gradient.
     pub sky_gradient: bool,
+    /// How organisms are drawn: `"models"`, the voxel models baked from the simulation's
+    /// numbers (package V, `assets/voxel-models`), or `"glyphs"`, the dev-mode glyphs that
+    /// every species and founder without a model falls back to anyway.
+    pub organisms: OrganismLook,
+    /// Where the baked models are: `<models_dir>/<voxel mm>/manifest.json`. A relative path
+    /// is from the working directory: the repository on the desktop, `/var/lib/cubarium`
+    /// under the panel's unit. Missing models are said once and drawn as glyphs.
+    pub models_dir: PathBuf,
     /// Worker threads for the in-phase splits of the tick
     /// (`cubarium_voxel_sim::SimConfig::threads`); `0` means
     /// [`std::thread::available_parallelism`]. Execution only — it reaches no rule, no
@@ -158,6 +166,8 @@ impl Default for VoxelConfig {
             water_alpha: 0.5,
             dither: 0.04,
             sky_gradient: true,
+            organisms: OrganismLook::Models,
+            models_dir: PathBuf::from("assets/voxel-models"),
             threads: 0,
             // The shipped `default` landscape, ring and all: a `cubarium voxel` with no
             // TOML generates a staged world, not the ridge. `Config::default()` stays
@@ -166,6 +176,41 @@ impl Default for VoxelConfig {
             world: cubarium_voxel::Preset::find("default")
                 .expect("the shipped presets include `default`")
                 .config(),
+        }
+    }
+}
+
+/// `organisms` in the config: which drawing of plants and animals.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OrganismLook {
+    /// The baked voxel models.
+    #[default]
+    Models,
+    /// The dev-mode glyphs (`stand::parts_of`, `animal::cells_of`).
+    Glyphs,
+}
+
+/// The model library a run with `cfg` draws with, or `None` for the glyphs: asked for,
+/// or asked for models that are not there, which is said on stderr.
+pub fn load_models(cfg: &VoxelConfig) -> Option<std::sync::Arc<model::ModelLibrary>> {
+    if cfg.organisms == OrganismLook::Glyphs {
+        eprintln!("cubarium voxel: organisms = \"glyphs\": drawing the dev-mode glyphs");
+        return None;
+    }
+    match model::ModelLibrary::load(&cfg.models_dir, cfg.world.voxel_m) {
+        Ok(lib) => {
+            eprintln!(
+                "cubarium voxel: {} voxel models from {}/{}",
+                lib.len(),
+                cfg.models_dir.display(),
+                model::voxel_dir(cfg.world.voxel_m)
+            );
+            Some(std::sync::Arc::new(lib))
+        }
+        Err(e) => {
+            eprintln!("cubarium voxel: no voxel models ({e:#}); drawing the glyphs");
+            None
         }
     }
 }
@@ -1755,14 +1800,19 @@ enum Out {
 }
 
 impl Out {
-    fn cpu(sink: Box<dyn FrameSink>, cfg: VoxelConfig, proj: Projection) -> Out {
+    fn cpu(
+        sink: Box<dyn FrameSink>,
+        cfg: VoxelConfig,
+        proj: Projection,
+        models: Option<std::sync::Arc<model::ModelLibrary>>,
+    ) -> Out {
         let topology = Topology::Ring {
             w: proj.raster_w,
             h: proj.raster_h,
         };
         Out::Cpu {
             sink,
-            presenter: VoxelPresenter::new(cfg, proj),
+            presenter: VoxelPresenter::new(cfg, proj).with_models(models),
             canvas: Canvas::new(topology, Scale::ONE),
             raster: cube_proto::Raster::black(proj.raster_w, proj.raster_h),
         }
@@ -2118,8 +2168,14 @@ fn open_out(args: &Voxel, cfg: &VoxelConfig, proj: Projection, speed: f64) -> Re
             Box::new(PngSink::new(&args.out, args.every)?),
             cfg.clone(),
             proj,
+            load_models(cfg),
         ),
-        VoxelSinkArg::Web => Out::cpu(Box::new(web(args.web_port)?), cfg.clone(), proj),
+        VoxelSinkArg::Web => Out::cpu(
+            Box::new(web(args.web_port)?),
+            cfg.clone(),
+            proj,
+            load_models(cfg),
+        ),
         VoxelSinkArg::Gpu => {
             crate::sink::gpu::voxel::check(proj)?;
             let mut gpu = VoxelGpuSink::new(
@@ -2129,6 +2185,7 @@ fn open_out(args: &Voxel, cfg: &VoxelConfig, proj: Projection, speed: f64) -> Re
                     target: args.gpu_target.unwrap_or_else(GpuTargetKind::detect),
                     capture: args.gpu_capture.clone(),
                     roof_from_texture: !args.gpu_roof_walk,
+                    models: load_models(cfg),
                 },
             )?;
             if args.gpu_web_rate > 0.0 {
@@ -2838,6 +2895,7 @@ mod tests {
             }),
             cfg,
             proj,
+            None,
         );
 
         // The "world" is not built until four founding frames have gone out.

@@ -28,6 +28,7 @@
 //! [`MAX_STYLES`] distinct styles paints the excess with style 0 and says how many times.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 
 use cubarium_gpu::target::presenter::PresentSample;
@@ -46,6 +47,7 @@ use crate::sink::{FrameSink, Output, WebSink};
 use crate::voxel::VoxelConfig;
 use crate::voxel::animal::{AnimalPart, Animals};
 use crate::voxel::appearance;
+use crate::voxel::model::ModelLibrary;
 use crate::voxel::present as cpu;
 use crate::voxel::project::Projection;
 use crate::voxel::stand::{Part, Stands, Style};
@@ -64,6 +66,9 @@ pub struct VoxelGpuSinkOptions {
     /// shader. Both draw the same picture; `--gpu-roof-walk` turns the table off so the
     /// two can be timed against each other.
     pub roof_from_texture: bool,
+    /// The baked voxel models organisms are drawn with (package V), or `None` for the
+    /// dev-mode glyphs.
+    pub models: Option<Arc<ModelLibrary>>,
 }
 
 impl Default for VoxelGpuSinkOptions {
@@ -72,6 +77,7 @@ impl Default for VoxelGpuSinkOptions {
             target: GpuTargetKind::Headless,
             capture: None,
             roof_from_texture: true,
+            models: None,
         }
     }
 }
@@ -145,7 +151,7 @@ impl VoxelGpuSink {
             gpu,
             renderer,
             target,
-            packer: Packer::new(&params),
+            packer: Packer::new(&params, options.models.clone()),
             capture: options.capture,
             founding_sky: None,
             web: None,
@@ -436,6 +442,8 @@ struct Packer {
     stands: Stands,
     /// The frame's animals on the same grid, rebuilt per staged tick (round 5c).
     animals: Animals,
+    /// The baked voxel models, or `None` for the dev-mode glyphs.
+    models: Option<Arc<ModelLibrary>>,
     /// GPU style slots, in the order they were first needed this tick.
     styles: Vec<Style>,
     /// `Stands` style index → GPU slot for this tick, so the dedup costs one linear scan
@@ -464,7 +472,7 @@ struct Packer {
 const GLYPHS_KEY: u64 = 0;
 
 impl Packer {
-    fn new(p: &VoxelParams) -> Packer {
+    fn new(p: &VoxelParams, models: Option<Arc<ModelLibrary>>) -> Packer {
         let mut glyphs = vec![0u8; p.glyph_bytes()];
         let used = appearance::atlas_len(p.s, p.rise);
         debug_assert!(used <= glyphs.len());
@@ -473,6 +481,7 @@ impl Packer {
         Packer {
             stands: Stands::empty(p.width, p.height, p.depth),
             animals: Animals::empty(p.width, p.height, p.depth),
+            models,
             styles: Vec::new(),
             slot_of: Vec::new(),
             style_overflow: 0,
@@ -488,8 +497,16 @@ impl Packer {
     /// Everything that is not a write into the staging buffer: the plant and animal
     /// grids, and the roof if the terrain moved. Returns the slow planes' keys.
     fn prepare(&mut self, view: &VoxelView<'_>, flora: &Flora, fauna: &Fauna) -> [u64; 2] {
-        self.stands.rebuild(view, flora.view());
-        self.animals.rebuild(view, Some(fauna.view()));
+        match self.models.as_deref() {
+            Some(lib) => {
+                self.stands.rebuild_with(view, flora.view(), lib);
+                self.animals.rebuild_with(view, Some(fauna.view()), lib);
+            }
+            None => {
+                self.stands.rebuild(view, flora.view());
+                self.animals.rebuild(view, Some(fauna.view()));
+            }
+        }
         if self.roof_version != Some(view.terrain_version)
             || self.roof_materials.as_slice() != view.material
         {
@@ -936,7 +953,7 @@ mod tests {
                 Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, c).unwrap();
             let params = params_of(&cfg, proj, true);
             Rig {
-                packer: Packer::new(&params),
+                packer: Packer::new(&params, None),
                 slow: SlowPlanes::new(2),
                 buffers: [Planes::junk(&params), Planes::junk(&params)],
                 images: Planes::junk(&params),

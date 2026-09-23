@@ -314,11 +314,12 @@ fn model_cells<'l>(
     flora: FloraView<'_>,
     stand: &Stand,
 ) -> Option<&'l [ModelCell]> {
-    let height = flora
-        .config
-        .species(stand.species)
-        .crown_height_m_at(stand.wood);
-    lib.plant(stand.species)?.select(height, stand.id)
+    let sc = flora.config.species(stand.species);
+    lib.plant(stand.species)?.select_sized(
+        sc.crown_height_m_at(stand.wood),
+        sc.crown_radius_m_at(stand.wood),
+        stand.id,
+    )
 }
 
 impl Stands {
@@ -504,9 +505,17 @@ impl Stands {
         };
         let unripe = model::unripe_material(stand.species);
         let fruit = stand.species == Species::Lanternberry;
+        // A glowcap on dead wood perches on the log, as the glyph does: the log is drawn
+        // in the cell above the face, and the fungus grows out of it.
+        let on_log = stand.species == Species::Glowcap
+            && flora
+                .ground
+                .iter()
+                .find(|g| g.site == stand.site)
+                .is_some_and(|g| g.dead_wood >= 0.05);
         let anchor = Cell {
             x: i64::from(stand.site.x),
-            y: stand.site.y + 1,
+            y: stand.site.y + 1 + u32::from(on_log),
             z: stand.site.z,
         };
         let mut ok = true;

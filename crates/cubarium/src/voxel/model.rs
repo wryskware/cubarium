@@ -126,12 +126,36 @@ impl PlantModel {
     /// phase. `None` with no steps, or a step with no variants.
     pub fn select(&self, height_m: f64, stand_id: u64) -> Option<&[ModelCell]> {
         let step = &self.steps[nearest(self.steps.iter().map(|s| s.height_m), height_m)?];
-        let n = step.variants.len() as u64;
-        if n == 0 {
-            return None;
-        }
-        Some(&step.variants[(mix64(stand_id ^ VARIANT_SALT) % n) as usize])
+        variant(step, stand_id)
     }
+
+    /// [`PlantModel::select`], and among the steps at the chosen height the one whose
+    /// `radius_m` is nearest `radius_m` (a tie to the wider). The bake makes a step
+    /// wherever the crown's height crosses a voxel **or** its radius a half voxel, so a
+    /// species that grows sideways (velvetpad) has several steps at one height; this is
+    /// what the presenter calls. With one step per height it is exactly `select`.
+    pub fn select_sized(
+        &self,
+        height_m: f64,
+        radius_m: f64,
+        stand_id: u64,
+    ) -> Option<&[ModelCell]> {
+        let h = self.steps[nearest(self.steps.iter().map(|s| s.height_m), height_m)?].height_m;
+        // Steps ascend by height, so the ones at `h` are one run.
+        let from = self.steps.iter().position(|s| s.height_m == h)?;
+        let run = self.steps[from..].iter().take_while(|s| s.height_m == h);
+        let i = nearest(run.map(|s| s.radius_m), radius_m)?;
+        variant(&self.steps[from + i], stand_id)
+    }
+}
+
+/// The variant of `step` that `stand_id` picks, by the id alone.
+fn variant(step: &PlantStep, stand_id: u64) -> Option<&[ModelCell]> {
+    let n = step.variants.len() as u64;
+    if n == 0 {
+        return None;
+    }
+    Some(&step.variants[(mix64(stand_id ^ VARIANT_SALT) % n) as usize])
 }
 
 /// One size bin of a founder, facing +x.

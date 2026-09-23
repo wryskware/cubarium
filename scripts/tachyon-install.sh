@@ -58,6 +58,12 @@ install -d -o "$USER_NAME" -g "$USER_NAME" -m 755 "$HOME_DIR/art"
 rsync -a --delete "$REPO/assets/atelier/" "$HOME_DIR/art/"
 chown -R "$USER_NAME:$USER_NAME" "$HOME_DIR/art"
 
+# The baked voxel organism models (package V): the unit's working directory is
+# $HOME_DIR, and `models_dir` defaults to `assets/voxel-models` under it.
+install -d -o "$USER_NAME" -g "$USER_NAME" -m 755 "$HOME_DIR/assets"
+rsync -a --delete "$REPO/assets/voxel-models/" "$HOME_DIR/assets/voxel-models/"
+chown -R "$USER_NAME:$USER_NAME" "$HOME_DIR/assets"
+
 # --- the fresh-world config ----------------------------------------------
 # Root-owned and world-readable: the service reads it, and only an operator
 # edits it.
