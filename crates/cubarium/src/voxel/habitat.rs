@@ -1447,9 +1447,20 @@ mod tests {
         }
         let faces = browser_faces(&world.view(), &flora.view(), &fauna);
         assert!(!faces.is_empty(), "the rosette admits the faces round the stem");
+        // How many columns from its own a mouth reaches: the probe furthest from the
+        // face's centre is `2 r + reach` ahead of it (0.5625 m, 2.25 cells, for package
+        // L's 0.75 m browser; the one-column rosette is at most two columns away).
+        let reach_cells = ((2.0 * body.footprint_radius() + body.mouth_reach_m) / 0.25 + 0.5)
+            .floor() as u32;
+        assert_eq!(reach_cells, 2);
         for f in &faces {
-            let near = [6u32, 16].iter().any(|&x| wrapped(f.x, x, 24) <= 1);
-            assert!(near && f.z.abs_diff(3) <= 1, "{f:?} is not beside a stem");
+            let near = [6u32, 16]
+                .iter()
+                .any(|&x| wrapped(f.x, x, 24) <= reach_cells);
+            assert!(
+                near && f.z.abs_diff(3) <= reach_cells,
+                "{f:?} is not within a mouth's reach of a stem"
+            );
         }
 
         let sites: Vec<Site> = flora.view().stands.iter().map(|s| s.site).collect();

@@ -597,8 +597,9 @@ fn a_blocked_attempt_still_pays_the_motor_budget() {
             < 1e-12
     );
     // The pressed body stands at the wall's face, and the wall is its front contact.
+    // Package L's shredder is 0.125 m wide: its footprint radius is 0.0625 m.
     assert!(
-        (blocked.pose.x - (3.0 * 0.25 - 0.03125)).abs() < 1e-6,
+        (blocked.pose.x - (3.0 * 0.25 - 0.0625)).abs() < 1e-6,
         "pressed against the wall at x = {}",
         blocked.pose.x
     );

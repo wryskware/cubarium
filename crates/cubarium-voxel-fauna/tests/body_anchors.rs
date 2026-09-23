@@ -153,16 +153,16 @@ fn adult_and_newborn_dimensions_are_metres_on_the_physiology() {
     let adult = browser.adult_body();
     assert_eq!(
         (adult.length_m, adult.width_m, adult.height_m),
-        (0.375, 0.1875, 0.1875),
-        "the browser adult is the ladder's 6 × 3 × 3 animal"
+        (0.75, 0.375, 0.375),
+        "the browser adult is the ladder's 6 × 3 × 3 animal (package L)"
     );
 
     let shredder = FounderPhysiology::frozen(Founder::Blind);
     let adult_s = shredder.adult_body();
     assert_eq!(
         (adult_s.length_m, adult_s.width_m, adult_s.height_m),
-        (0.19, 0.0625, 0.0625),
-        "the shredder adult"
+        (0.375, 0.125, 0.125),
+        "the shredder adult (package L)"
     );
 
     let core = browser.core;
@@ -173,9 +173,9 @@ fn adult_and_newborn_dimensions_are_metres_on_the_physiology() {
         "the cube-root convention: {scale}"
     );
     for (got, want) in [
-        (newborn.length_m, 0.375 * scale),
-        (newborn.width_m, 0.1875 * scale),
-        (newborn.height_m, 0.1875 * scale),
+        (newborn.length_m, 0.75 * scale),
+        (newborn.width_m, 0.375 * scale),
+        (newborn.height_m, 0.375 * scale),
     ] {
         assert!((got - want).abs() < 1e-12, "{got} against {want}");
     }
@@ -188,7 +188,7 @@ fn adult_and_newborn_dimensions_are_metres_on_the_physiology() {
     // A body at its full structure is the adult, and the footprint is half the width.
     let full = browser.body_at(core.body_max);
     assert_eq!(full, adult);
-    assert!((adult.footprint_radius() - 0.09375).abs() < 1e-12);
+    assert!((adult.footprint_radius() - 0.1875).abs() < 1e-12);
 }
 
 /// Decisions §6: the eye is `0.8 × body height` above the standing surface, in metres.
@@ -199,7 +199,7 @@ fn adult_and_newborn_dimensions_are_metres_on_the_physiology() {
 fn the_eye_is_the_same_height_in_metres_on_both_grids() {
     let browser = FounderPhysiology::frozen(Founder::Browser);
     let adult = browser.adult_body();
-    let want = 0.8 * 0.1875;
+    let want = 0.8 * 0.375;
 
     // Support faces chosen so the standing surface is 0.75 m on both worlds.
     for (v, support) in [(0.125, 5u32), (0.25, 2u32)] {
@@ -226,19 +226,19 @@ fn the_eye_is_the_same_height_in_metres_on_both_grids() {
 // ---------------------------------------------------------------------------
 
 /// Decisions §2: the mouth band is `[0, 1.33 × height]` over the standing surface —
-/// 0.249375 m for the adult browser. A crown slab holding 0.20 m over the surface is
-/// inside it on **both** cell sizes; one holding 0.30 m is outside on both. The bite is
-/// the judge, not a helper: the stock moves only where the band reaches.
+/// 0.49875 m for package L's adult browser. A crown slab holding 0.40 m over the
+/// surface is inside it on **both** cell sizes; one holding 0.60 m is outside on both.
+/// The bite is the judge, not a helper: the stock moves only where the band reaches.
 #[test]
 fn a_crown_at_0_20_m_is_reachable_on_both_grids_and_one_at_0_30_m_is_not() {
     let adult = FounderPhysiology::frozen(Founder::Browser).adult_body();
     assert!(
-        (adult.mouth_ceiling_m - 0.249375).abs() < 1e-12,
-        "the adult ceiling is 1.33 × 0.1875"
+        (adult.mouth_ceiling_m - 0.49875).abs() < 1e-12,
+        "the adult ceiling is 1.33 × 0.375"
     );
 
     for (v, support, height) in [(0.125f64, 5u32, 14u32), (0.25, 2, 10)] {
-        for (target, reachable) in [(0.20f64, true), (0.30, false)] {
+        for (target, reachable) in [(0.40f64, true), (0.60, false)] {
             let world = flat_world(v, support, height);
             let mut flora = Flora::new(FloraConfig::for_voxel_size(v).one_layer_species());
             let before = crown_containing(&mut flora, &world, 4, 4, support, target);
@@ -289,21 +289,20 @@ fn a_crown_at_0_20_m_is_reachable_on_both_grids_and_one_at_0_30_m_is_not() {
 }
 
 /// Decisions §2: the horizontal reach is `0.25 × body length` ahead of the footprint,
-/// so an adult browser's mouth region is the disc of radius `W/2` swept out to
-/// `0.25 × L` — 0.09375 m each — and reaches 0.28125 m ahead of its centre and no
-/// further. The old animal (0.25 m long, 0.125 m wide) reached 0.1875 m, so the column
-/// this test names is one the adult reaches and the old body did not.
+/// so package L's adult browser's mouth region is the disc of radius `W/2` swept out
+/// to `0.25 × L` — 0.1875 m each — and reaches 0.5625 m ahead of its centre and no
+/// further: across two 0.25 m columns ahead of its own, and not a third.
 #[test]
 fn the_horizontal_reach_is_a_quarter_of_the_body_length() {
     let adult = FounderPhysiology::frozen(Founder::Browser).adult_body();
-    assert!((adult.mouth_reach_m - 0.09375).abs() < 1e-12);
+    assert!((adult.mouth_reach_m - 0.1875).abs() < 1e-12);
 
     let v = 0.25;
     let world = flat_world(v, 2, 10);
     let view = world.view();
     // Just inside column 3, facing +x. The mouth's furthest probe is
-    // `2 · r + reach = 0.28125` m ahead of the centre, so it crosses into column 4 and
-    // stops well short of column 5.
+    // `2 · r + reach = 0.5625` m ahead of the centre, so it crosses columns 4 and 5
+    // and stops short of column 6.
     let pose = Pose {
         x: 3.0 * v + 0.01,
         z: 4.5 * v,
@@ -311,12 +310,12 @@ fn the_horizontal_reach_is_a_quarter_of_the_body_length() {
     };
     let cols = cubarium_voxel_fauna::mouth_columns_at(&view, &pose, &adult);
     assert!(
-        cols.contains(&(3, 4)) && cols.contains(&(4, 4)),
-        "the adult's mouth covers its own column and the one ahead: {cols:?}"
+        cols.contains(&(3, 4)) && cols.contains(&(4, 4)) && cols.contains(&(5, 4)),
+        "the adult's mouth covers its own column and the two ahead: {cols:?}"
     );
     assert!(
-        !cols.iter().any(|&(x, _)| x == 5),
-        "and nothing two columns ahead: {cols:?}"
+        !cols.iter().any(|&(x, _)| x == 6),
+        "and nothing three columns ahead: {cols:?}"
     );
 }
 
@@ -325,28 +324,29 @@ fn the_horizontal_reach_is_a_quarter_of_the_body_length() {
 // ---------------------------------------------------------------------------
 
 /// The body needs its own **height** of void over the face it stands on, so a void
-/// shorter than the body is not a place to stand. On the 0.125 m grid the adult
-/// browser's 0.1875 m needs two cells: a one-cell slot refuses it and a two-cell slot
-/// admits it. The clearance no longer comes from the mouth's voxel reach.
+/// shorter than the body is not a place to stand. On the 0.125 m grid package L's
+/// adult browser's 0.375 m needs three cells: a two-cell slot refuses it and a
+/// three-cell slot admits it. The clearance no longer comes from the mouth's voxel
+/// reach.
 #[test]
 fn a_body_cannot_enter_a_void_shorter_than_its_height() {
     let adult = FounderPhysiology::frozen(Founder::Browser).adult_body();
     assert_eq!(
         adult.headroom_voxels(0.125),
-        2,
-        "0.1875 m of body at 0.125 m"
+        3,
+        "0.375 m of body at 0.125 m"
     );
-    assert_eq!(adult.headroom_voxels(0.25), 1, "and one cell at 0.25 m");
+    assert_eq!(adult.headroom_voxels(0.25), 2, "and two cells at 0.25 m");
     let newborn = FounderPhysiology::frozen(Founder::Browser).body_at(0.005);
     assert_eq!(
         newborn.headroom_voxels(0.125),
-        1,
-        "a 0.087 m newborn fits under one 0.125 m cell"
+        2,
+        "a 0.174 m newborn needs two 0.125 m cells"
     );
 
-    // A roofed corridor east of x = 8, one cell of void over the ground, then the same
-    // fixture with two.
-    for (void, admitted) in [(1u32, false), (2, true)] {
+    // A roofed corridor east of x = 8, two cells of void over the ground, then the
+    // same fixture with three.
+    for (void, admitted) in [(2u32, false), (3, true)] {
         let mut world = flat_world(0.125, 5, 14);
         for z in 0..8 {
             for x in 8..16 {
@@ -401,7 +401,8 @@ fn a_body_cannot_enter_a_void_shorter_than_its_height() {
 fn the_ledgers_conserve_across_a_bite_under_the_band() {
     let mut world = flat_world(0.25, 2, 10);
     let mut flora = Flora::new(FloraConfig::default().one_layer_species());
-    crown_containing(&mut flora, &world, 4, 4, 2, 0.20);
+    // 0.40 m: a two-cell bloomcrown, the lowest the ladder's crown can be.
+    crown_containing(&mut flora, &world, 4, 4, 2, 0.40);
     let mut fauna = Fauna::new(FaunaConfig::default());
     adult_browser_feeding(&mut fauna, &world, 4, 4);
 

@@ -223,9 +223,9 @@ pub fn cells_of(
     // **The presenter draws the model body** (decisions §1;
     // `design/handoffs/voxel-body-anchors-2026-09-22.md`): the 2x readability shell is
     // retired, and what is drawn is the animal's own dimensions in metres, rounded up
-    // to whole cells. At 0.125 m the adult browser is 3x2x2 and the adult shredder
-    // 2x1x1; at 0.25 m they are 2x1x1 and 1x1x1. A juvenile is drawn smaller, because
-    // it is smaller.
+    // to whole cells. On package L's ladder at 0.125 m the adult browser is 6x3x3 and
+    // the adult shredder 3x1x1; at 0.25 m they are 3x2x2 and 2x1x1. A juvenile is drawn
+    // smaller, because it is smaller.
     let body = config.founder(founder).body_at(animal.body);
     let length = ((body.length_m / voxel_m).ceil() as i64).max(1);
     let width = ((body.width_m / voxel_m).ceil() as i64).max(1);
@@ -300,22 +300,24 @@ pub fn cells_of(
                         },
                     ));
                     // Legs under the two ends, so the belly between them is a real
-                    // projected gap at every drawn length — including the three cells
-                    // the model body is at 0.125 m, where "the last but one" would
-                    // have put the two legs side by side.
+                    // projected gap at every drawn length. They run from the ground to
+                    // the torso: package L's 0.375 m browser is three cells tall at
+                    // 0.125 m, and a one-cell leg left its torso floating.
                     if height > 1 && (along == 0 || along + 1 == length) {
-                        out.push((
-                            Cell {
-                                x,
-                                y: site.y + 1,
-                                z,
-                            },
-                            AnimalPart::Body {
-                                style,
-                                head: false,
-                                facing_right,
-                            },
-                        ));
+                        for leg_y in 1..height {
+                            out.push((
+                                Cell {
+                                    x,
+                                    y: site.y + leg_y,
+                                    z,
+                                },
+                                AnimalPart::Body {
+                                    style,
+                                    head: false,
+                                    facing_right,
+                                },
+                            ));
+                        }
                     }
                 }
             }
@@ -591,23 +593,29 @@ mod tests {
         let browser = cells_of(&animals[0], av.config, 0, c.voxel_m);
         let blind = cells_of(&animals[1], av.config, 1, c.voxel_m);
 
-        // The **model body** since 2026-09-22: the adult browser is 0.375 × 0.1875 ×
-        // 0.1875 m, so three cells long and two wide at 0.125 m, and the adult
-        // shredder 0.19 × 0.0625 × 0.0625 m, so two cells long and one wide.
-        assert_eq!(browser.len(), 10, "3×2 raised torso plus four end legs");
-        assert_eq!(blind.len(), 2, "two low crawler segments at 0.125 m");
+        // The **model body** on package L's ladder: the adult browser is 0.75 × 0.375 ×
+        // 0.375 m, so six cells long, three wide and three tall at 0.125 m, and the adult
+        // shredder 0.375 × 0.125 × 0.125 m, so three cells long and one wide.
+        assert_eq!(
+            browser.len(),
+            6 * 3 + 2 * 3 * 2,
+            "6×3 raised torso plus two-cell legs under both ends"
+        );
+        assert_eq!(blind.len(), 3, "three low crawler segments at 0.125 m");
         assert!(
             browser
                 .iter()
-                .any(|(c, p)| { c.x == 7 && c.y == 2 && matches!(p, AnimalPart::Head { .. }) }),
-            "the browser head is one front column from its pose, on the mouth layer"
+                .any(|(c, p)| { c.x == 8 && c.y == 3 && matches!(p, AnimalPart::Head { .. }) }),
+            "the browser head is the front column, on the torso layer"
         );
         assert!(browser.iter().any(|(c, _)| c.y == 1));
-        assert!(browser.iter().all(|(c, _)| c.y <= 2));
-        assert!(browser.iter().any(|(c, _)| c.x == 5 && c.y == 1));
-        assert!(browser.iter().any(|(c, _)| c.x == 7 && c.y == 1));
+        assert!(browser.iter().all(|(c, _)| c.y <= 3));
+        for leg_y in 1..=2 {
+            assert!(browser.iter().any(|(c, _)| c.x == 3 && c.y == leg_y));
+            assert!(browser.iter().any(|(c, _)| c.x == 8 && c.y == leg_y));
+        }
         assert!(
-            !browser.iter().any(|(c, _)| c.x == 6 && c.y == 1),
+            !browser.iter().any(|(c, _)| (4..=7).contains(&c.x) && c.y < 3),
             "the torso leaves a visible belly gap between its legs"
         );
     }
