@@ -155,7 +155,7 @@ fn a_full_animal_takes_nothing_and_the_plant_keeps_its_foliage() {
 /// Test 2: a hungry animal's bite is capped by the room it has left after yield, and
 /// none of it is respired as surplus.
 ///
-/// This case's mouth is a hundred times the shipped one — `bite_per_s` 0.2 — so that
+/// This case's mouth is five hundred times the shipped one — `bite_per_s` 1.0 — so that
 /// the room and not the mouth is what binds inside one bite. The body is at `body_max`
 /// (no growth to move the reserve) with its reserve half full: the room is half a
 /// reserve, and the bite may take no more than `room / yield`.
@@ -166,7 +166,7 @@ fn a_hungry_bite_is_capped_by_its_room_and_none_of_it_is_respired_as_surplus() {
     turf(&mut flora, &world, 2, 2);
     turf(&mut flora, &world, 2, 3);
 
-    let config = still_browser(|core| core.bite_per_s = 0.2);
+    let config = still_browser(|core| core.bite_per_s = 1.0);
     let phys = *config.founder(Founder::Browser);
     let sc = phys.core;
     let mut fauna = Fauna::new(config);
@@ -367,7 +367,9 @@ fn a_newborn_fed_at_the_most_it_can_eat_grows_no_faster_than_the_cap() {
 }
 
 /// Test 6: two births by one parent are at least the interval apart — refractory, then
-/// a fresh hold, then a whole gestation.
+/// a fresh hold, then a whole gestation. The escrow opens and pays its first instalment
+/// on the tick the hold completes, so the least gap the rule allows is one tick under
+/// the three durations summed.
 ///
 /// The case's own table (10-tick hold, 10-tick gestation, 40-tick refractory), a full
 /// parent with no upkeep, and turf to refill from.
@@ -400,7 +402,7 @@ fn two_births_by_one_parent_are_at_least_the_interval_apart() {
     }
     assert!(births.len() >= 2, "two births in the window: {births:?}");
     let gap = u64::from(births[1] - births[0]);
-    let least = rule.interval_ticks() + rule.hold_ticks() + rule.gestation_ticks();
+    let least = rule.interval_ticks() + rule.hold_ticks() + rule.gestation_ticks() - 1;
     assert!(
         gap >= least,
         "births {births:?} are {gap} ticks apart, under {least}"

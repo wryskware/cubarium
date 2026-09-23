@@ -407,7 +407,7 @@ impl Arena {
             }
         }
 
-        let mut flora = Flora::new(FloraConfig::default());
+        let mut flora = Flora::new(FloraConfig::default().without_graze_refuge());
 
         // Candidate support faces: soil ground, not the pond, and — unless this layout is
         // the seam layout — at least two columns off the wrapped seam, so a default layout

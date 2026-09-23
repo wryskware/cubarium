@@ -114,6 +114,37 @@ fn founder_stores(founder: Founder) -> StartingStores {
     }
 }
 
+/// [`one_founder`], **hungry and with no diminishing bite**: an empty reserve, so package
+/// G's satiety asks for a whole bite, and `bite_half_stock` 0, so the bite is not
+/// shrunk by the stock at the mouth. For the cases that count whole bites.
+fn hungry_founder(
+    world: &World,
+    founder: Founder,
+    x: i64,
+    z: u32,
+    heading_rad: f64,
+) -> (Fauna, u64) {
+    let mut config = FaunaConfig::default();
+    config.founders[founder.index()].core.bite_half_stock = 0.0;
+    let mut fauna = Fauna::new(config);
+    fauna.set_births_enabled(false);
+    let id = fauna.view().ledger.births;
+    assert!(fauna.apply(
+        world,
+        Command::IntroduceFounder {
+            x,
+            z,
+            founder,
+            stores: StartingStores {
+                reserve: 0.0,
+                ..founder_stores(founder)
+            },
+            heading_rad,
+        },
+    ));
+    (fauna, id)
+}
+
 /// A fauna layer with births disabled (the frozen arena contract) holding one founder at
 /// column `(x, z)` with heading `heading_rad`. Returns the layer and the body's id.
 fn one_founder(world: &World, founder: Founder, x: i64, z: u32, heading_rad: f64) -> (Fauna, u64) {
@@ -496,7 +527,7 @@ fn a_bite_debits_the_stock_once_per_interval_and_conserves_the_three_currencies(
     let food = site(4, 1);
     litter(&mut flora, food, 0.2);
 
-    let (mut fauna, id) = one_founder(&world, Founder::Blind, 4, 1, EAST);
+    let (mut fauna, id) = hungry_founder(&world, Founder::Blind, 4, 1, EAST);
     assert!(fauna.set_controller(
         id,
         Box::new(Scripted::new(vec![Actions {
@@ -539,9 +570,12 @@ fn a_bite_debits_the_stock_once_per_interval_and_conserves_the_three_currencies(
         .bite_per_s
         * manifest.controller_period_s;
     let debited = before_ground.0 - after_ground.0;
+    // The first bite of an empty reserve is a whole one; the second is scaled by what
+    // the first left short of the cap (package G's satiety), so it is smaller. A bite a
+    // tick would have been ten of them.
     assert!(
-        close(debited, 2.0 * want, 1e-9),
-        "two bites debited {debited} of litter, not 2 x {want}"
+        debited > want && debited < 2.0 * want,
+        "two bites debited {debited} of litter: one whole bite of {want} and a smaller one"
     );
 
     // The debit is the same number on both sides of the boundary.
