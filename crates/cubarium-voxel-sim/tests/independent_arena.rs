@@ -372,7 +372,7 @@ fn eating_the_tile_underfoot_lowers_both_the_taste_and_the_field_reading() {
     };
     let taste = named("Taste(1)", "cue");
     let taste_valid = named("Taste(1)", "valid");
-    let chem = named("Chem(litter)", "response");
+    let chem = named("Chem(detritus)", "response");
 
     let samples = log.lock().expect("the log").clone();
     assert_eq!(samples.len(), 12);

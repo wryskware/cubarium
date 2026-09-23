@@ -1190,9 +1190,10 @@ mod tests {
             1.0,
             "bare ground remains a valid taste contact"
         );
-        let initial_chem = module_channel(&initial_obs, Founder::Blind, "Chem(litter)", "response");
+        let initial_chem =
+            module_channel(&initial_obs, Founder::Blind, "Chem(detritus)", "response");
         let successor_chem =
-            module_channel(&successor_obs, Founder::Blind, "Chem(litter)", "response");
+            module_channel(&successor_obs, Founder::Blind, "Chem(detritus)", "response");
         assert!(
             successor_chem > initial_chem,
             "the surviving successor remains a stronger local cue: initial {}, successor {}",

@@ -362,7 +362,10 @@ fn the_observed_birth_readiness_is_the_step_rule() {
             },
         ));
         let log = record(&mut fauna, id, Actions::REST);
-        fauna.step_with(&world, &mut flora, 1);
+        // Ages advance before the controller stage, so the first sampling is at age 5.
+        for _ in 0..founder.manifest().cadence_ticks() {
+            fauna.step_with(&world, &mut flora, 1);
+        }
         let first = log.lock().unwrap()[0].clone();
         assert_eq!(first[2], 0.0, "{founder:?}: no surplus has been held yet");
     }
@@ -425,9 +428,12 @@ fn the_windowed_occupancy_reads_what_the_full_build_reads() {
             logs.push((id, record(&mut fauna, id, Actions::REST)));
         }
     }
-    // One step: every founder is due at age 0 and rests, so the state after the step is
-    // the state the controller stage observed.
-    fauna.step_with(&world, &mut flora, 1);
+    // To the first sampling (ages advance before the controller stage, so it is at age
+    // 5): every founder rests, and maintenance runs before the stage, so the state after
+    // that tick is the state the controller stage observed.
+    for _ in 0..Founder::Browser.manifest().cadence_ticks() {
+        fauna.step_with(&world, &mut flora, 1);
+    }
     let cone = Founder::Browser
         .manifest()
         .modules

@@ -10,8 +10,8 @@
 //! it (decisions §3) — so a depleted patch stops emitting while its residue decays. The
 //! shredder's third food, glowcap cap tissue, is found at the mouth and is not a source
 //! ([`DetritusField`]). It was the litter stock alone until 2026-09-22, and on a world
-//! holding only litter it still is; the observation channel keeps the manifest id
-//! `Chem(litter)` and its slot, because those are in the trained-policy digest.
+//! holding only litter it still is; the observation channel is `Chem(detritus)` since
+//! contract v2 (it was `Chem(litter)` under schema 1), in the same slot.
 //!
 //! # The update, in one place
 //!
@@ -39,6 +39,16 @@
 //! invisible). The browser's `Cone` runs a fixed ray fan against a shared occupancy map of
 //! stands, surface resources and animal bodies, with terrain/water/wood/litter occluding
 //! without being exposed as classes.
+//!
+//! # Occlusion, contract v2 (D3, D4)
+//!
+//! Terrain stops a ray. **Free water stops it only below its surface**: a cell holding
+//! fill `f` is water from its floor up to `f × cell height`, and air above that — no new
+//! constant. **A ground pool stops it only below its physical height**, `organic / (cell
+//! area × `[`POOL_BULK_DENSITY`]`)` over the face, which may be less than a cell or span
+//! several. **The strip's `z` edge is solid**: a ray leaving the `z` range is a hit, not
+//! a miss, because a body cannot go there. A ray leaving the top of the world is open sky.
+//! The same clauses are [`crate::manifest::OCCLUSION_RULE`], in the digest.
 //!
 //! # Ownership
 //!
@@ -77,6 +87,13 @@ const SETTLE_STABLE: u32 = 8;
 const RAY_STEP_CAP: u32 = 64;
 /// Cone ray sub-step, in voxels.
 const RAY_SUBSTEP: f64 = 0.25;
+
+/// The bulk density of a ground pool of litter, carrion and dead wood, in organic units
+/// per cubic metre (D3): a pool of organic `m` on a face of area `A` stands `m / (A ·
+/// density)` tall. **An authored placeholder** (`design/backlog.md` §1): at 80 a
+/// reference litter tile (`M_EMIT` = 0.05) is a centimetre deep on a 0.25 m face and four
+/// on a 0.125 m one, so a ground pool is a film to an eye, not a wall (decisions §6).
+pub const POOL_BULK_DENSITY: f64 = 80.0;
 
 fn decay_factor() -> f64 {
     (-(std::f64::consts::LN_2 * UPDATE_S / HALF_LIFE_S)).exp()
@@ -176,10 +193,8 @@ impl Connectivity {
 /// (`design/7_Research/voxel-census-2026-09-20.md`, "Diets, 2026-09-22"). Weighting a
 /// source by its class was rejected as a knob.
 ///
-/// The observation channel it feeds keeps its manifest id `Chem(litter)`, its slot and
-/// its width, because those are inside the trained-policy digest and the shipped
-/// centres must keep loading. The retrain (package 5) owns the meaning change; see
-/// `crates/cubarium/assets/policies/README.md`.
+/// The observation channel it feeds is `Chem(detritus)` (contract v2; `Chem(litter)`
+/// under schema 1), in the same slot and width.
 #[derive(Clone, Debug, Default)]
 struct DetritusField {
     /// Cue units per node cell.
@@ -489,7 +504,7 @@ pub(crate) enum Fine {
     Trunk,
     /// A stand's crown cell with foliage standing in it.
     FoliageCrown,
-    /// The cell above a ground site holding litter, carrion or dead wood.
+    /// A ground pool of litter, carrion or dead wood, below its physical height.
     GroundPool,
     /// Another animal's body cell.
     Body,
@@ -541,10 +556,17 @@ pub(crate) struct ConeReading {
 /// Occupancy shared by every cone sampled in one controller stage. Environment geometry
 /// and bodies are indexed once; a ray ignores only its observer's id, so another body in
 /// the same cell remains visible.
+///
+/// A **windowed** build ([`cone_occupancy_window`]) indexes only the columns a set of
+/// observers' rays can reach; a ray from one of those observers reads exactly what it
+/// would read against the full build, because nothing outside the window is on its path.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ConeOccupancy {
     environment: HashMap<usize, Fine>,
     bodies: HashMap<usize, Vec<u64>>,
+    /// Ground pools: every cell a pool reaches into, with the pool's top in metres. A ray
+    /// point in the cell is inside the pool only below that top (D3).
+    pools: HashMap<usize, f64>,
 }
 
 pub(crate) fn cone_occupancy(
@@ -555,21 +577,64 @@ pub(crate) fn cone_occupancy(
     cone_occupancy_with(view, fv, fauna, true)
 }
 
-/// [`cone_occupancy`] with the surface-pool occluder made optional.
+/// [`cone_occupancy`] with the ground-pool occluder made optional.
 ///
-/// The live cone always passes `true`: today a litter, carrion or dead-wood pool occludes
-/// the whole cell over its face whatever it holds. The encounter query's decided arm
-/// passes `false`, because the decision says a ground pool is a wall only above its own
-/// physical height and the model has no volume-to-height convention yet
-/// (`design/handoffs/voxel-organism-decisions-2026-09-21.md` §6;
-/// `design/voxel-encounter-contract-2026-09-21.md`, "Ground pools").
+/// The live cone always passes `true`: a litter, carrion or dead-wood pool occludes up
+/// to its physical height (D3). `false` leaves pools out altogether, for a diagnostic
+/// arm that asks what the eye would see with no pools at all.
 pub(crate) fn cone_occupancy_with(
     view: &VoxelView<'_>,
     fv: &FloraView<'_>,
     fauna: &crate::FaunaView<'_>,
     pools_occlude: bool,
 ) -> ConeOccupancy {
+    build_occupancy(view, fv, fauna, pools_occlude, None)
+}
+
+/// The live occupancy for **one controller stage**: indexed only over the columns the
+/// observers at `observer_x_m` can see within `range_m`, plus a column of margin either
+/// side (P5-A item 7). A ray from one of those observers never leaves that window
+/// horizontally, so it reads exactly what the full build would give it; the cost is
+/// proportional to the observers' share of the ring instead of to the whole world.
+pub(crate) fn cone_occupancy_window(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    fauna: &crate::FaunaView<'_>,
+    observer_x_m: impl IntoIterator<Item = f64>,
+    range_m: f64,
+) -> ConeOccupancy {
     let c = view.config;
+    let width = i64::from(c.width);
+    let mut window = vec![false; c.width as usize];
+    for x in observer_x_m {
+        if !x.is_finite() || !range_m.is_finite() {
+            // Nothing sane to bound: fall back to the whole ring.
+            return build_occupancy(view, fv, fauna, true, None);
+        }
+        let lo = ((x - range_m) / c.voxel_m).floor() as i64 - 1;
+        let hi = ((x + range_m) / c.voxel_m).floor() as i64 + 1;
+        if hi - lo + 1 >= width {
+            return build_occupancy(view, fv, fauna, true, None);
+        }
+        for cx in lo..=hi {
+            window[cx.rem_euclid(width) as usize] = true;
+        }
+    }
+    build_occupancy(view, fv, fauna, true, Some(&window))
+}
+
+/// The one occupancy builder: every stand layer, ground pool and body, restricted to the
+/// columns `window` marks when there is one.
+fn build_occupancy(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    fauna: &crate::FaunaView<'_>,
+    pools_occlude: bool,
+    window: Option<&[bool]>,
+) -> ConeOccupancy {
+    let c = view.config;
+    let v = c.voxel_m;
+    let seen = |cx: i64| window.is_none_or(|w| w[cx.rem_euclid(i64::from(c.width)) as usize]);
     let mut environment: HashMap<usize, Fine> = HashMap::new();
     // Every layer of every profile, not one disc per stand: a foliage-bearing layer
     // holding stock is foliage to an eye, one holding none is a stripped crown, and a
@@ -595,6 +660,10 @@ pub(crate) fn cone_occupancy_with(
                 };
                 let span = layer.radius_v.ceil() as i64;
                 let r2 = layer.radius_v * layer.radius_v;
+                let root = i64::from(stand.site.x);
+                if window.is_some() && !(root - span..=root + span).any(&seen) {
+                    continue;
+                }
                 for cell_y in layer.cells.0..=layer.cells.1 {
                     if cell_y <= 0 || cell_y as u32 >= c.height {
                         continue;
@@ -609,6 +678,9 @@ pub(crate) fn cone_occupancy_with(
                                 continue;
                             }
                             let cx = (i64::from(stand.site.x) + dx).rem_euclid(i64::from(c.width));
+                            if !seen(cx) {
+                                continue;
+                            }
                             let cell = c.index(cx, cell_y as u32, z as u32);
                             environment.entry(cell).or_insert(class);
                         }
@@ -617,18 +689,34 @@ pub(crate) fn cone_occupancy_with(
             }
         }
     }
-    // Surface resource pools occlude from the cell just above the face.
-    for g in fv.ground.iter() {
-        if pools_occlude && (g.litter > 0.0 || g.carrion > 0.0 || g.dead_wood > 0.0) {
-            if g.site.y + 1 < c.height {
-                let cell = c.index(i64::from(g.site.x), g.site.y + 1, g.site.z);
-                environment.entry(cell).or_insert(Fine::GroundPool);
+    // Ground pools occlude up to their physical height over the face (D3): organic /
+    // (cell area × bulk density), from the face's top — a film under a cell, or a heap
+    // spanning several. A stand's claim on a cell comes first, as it always has.
+    let mut pools: HashMap<usize, f64> = HashMap::new();
+    if pools_occlude {
+        for g in fv.ground.iter() {
+            let organic = g.litter + g.carrion + g.dead_wood;
+            if !(organic > 0.0) || !seen(i64::from(g.site.x)) {
+                continue;
+            }
+            let floor = crate::surface_m(g.site.y, v);
+            let top = floor + organic / (v * v * POOL_BULK_DENSITY);
+            let mut y = g.site.y + 1;
+            while y < c.height && f64::from(y) * v < top {
+                let cell = c.index(i64::from(g.site.x), y, g.site.z);
+                if !environment.contains_key(&cell) {
+                    pools.entry(cell).or_insert(top);
+                }
+                y += 1;
             }
         }
     }
     let mut bodies: HashMap<usize, Vec<u64>> = HashMap::new();
     for a in fauna.animals {
         if let Some((ax, az)) = a.pose.column(c.voxel_m, c.depth) {
+            if !seen(ax) {
+                continue;
+            }
             let layer = i64::from(a.site.y) + 1;
             if layer > 0 && layer < i64::from(c.height) {
                 let cell = c.index(ax, layer as u32, az);
@@ -639,16 +727,19 @@ pub(crate) fn cone_occupancy_with(
     ConeOccupancy {
         environment,
         bodies,
+        pools,
     }
 }
 
 /// March one ray from `origin` (metres) along unit `dir`, returning the first hit's
 /// distance and **fine** class within `range`. Fixed sub-step with a conservative step
-/// cap; a ray that leaves the world's vertical or `z` bounds is a clear ray.
+/// cap; a ray that leaves the top or the bottom of the world is a clear ray, and one that
+/// leaves the strip's `z` range **hits the edge** as terrain (D4).
 ///
-/// The order of the four tests below is the occlusion policy and is unchanged: terrain,
-/// then free water, then a body, then the occupancy map. Only the returned class is
-/// finer — [`Fine::coarse`] turns it back into what the policy reads.
+/// The order of the tests below is the occlusion policy: the world's bounds, terrain,
+/// free water below its surface (D3), a body, a stand's cell, then a ground pool below
+/// its height (D3). Only the returned class is finer — [`Fine::coarse`] turns it back
+/// into what the policy reads.
 pub(crate) fn ray_first_hit(
     view: &VoxelView<'_>,
     occupancy: &ConeOccupancy,
@@ -689,15 +780,25 @@ pub(crate) fn ray_first_hit_cell(
             return None; // escaped upward or below the world: clear
         }
         let iz = (pz / v).floor() as i64;
-        if iz < 0 || iz as u32 >= c.depth {
-            return None;
-        }
         let wx = ((px / v).floor() as i64).rem_euclid(i64::from(c.width));
+        if iz < 0 || iz as u32 >= c.depth {
+            // The edge of the world is a wall (D4): the cell reported is the last one
+            // inside the strip, at the ray's own height.
+            let edge = iz.clamp(0, i64::from(c.depth) - 1) as u32;
+            return Some((
+                t - substep * 0.5,
+                Fine::Terrain,
+                c.index(wx, iy as u32, edge),
+            ));
+        }
         let cell = c.index(wx, iy as u32, iz as u32);
         if view.material[cell].is_solid() {
             return Some((t - substep * 0.5, Fine::Terrain, cell));
         }
-        if view.free[cell] > 0.0 {
+        // Water is a surface, not a cell (D3): a cell holding fill `f` is water from its
+        // floor to `f × cell height`, and the ray passes through the air above.
+        let fill = view.free[cell];
+        if fill > 0.0 && py < (iy as f64 + fill.min(1.0)) * v {
             return Some((t - substep * 0.5, Fine::Water, cell));
         }
         if occupancy
@@ -710,14 +811,13 @@ pub(crate) fn ray_first_hit_cell(
         if let Some(&class) = occupancy.environment.get(&cell) {
             return Some((t - substep * 0.5, class, cell));
         }
+        if occupancy.pools.get(&cell).is_some_and(|&top| py < top) {
+            return Some((t - substep * 0.5, Fine::GroundPool, cell));
+        }
     }
     None
 }
 
-/// The browser's material cone: sectors and their offsets as the manifest declares them,
-/// 2 m range at the manifest's fixed encoding reference. The eye is at the standing body's
-/// layer; it has no memory, no expansion and no body identity — a fresh reading per
-/// observation.
 /// Whether an eye can be sampled from here at all, in [`cone_readings`]' own order:
 /// the pose has to be in a column, that column has to be a support face at the standing
 /// layer, and the manifest has to declare three sectors. Shared with the diagnostic
@@ -742,10 +842,8 @@ pub(crate) fn cone_valid(
 ///
 /// It used to be one and a half **voxels** over the standing face, so the same browser's
 /// eye was twice as high on a 0.25 m world as on a 0.125 m one. It is now a length, and
-/// the grid does not appear in it at all. The pitch set, the sectors, the yaw offsets,
-/// the range and the classes are untouched: the observation keeps its 37 inputs and its
-/// digest, and the shipped centres — trained with the old eye — keep loading
-/// (`crates/cubarium/assets/policies/README.md`).
+/// the grid does not appear in it at all. Contract v2 writes the eye fraction into the
+/// manifest's digest (D1).
 pub(crate) fn cone_origin(
     view: &VoxelView<'_>,
     pose: &Pose,
@@ -776,6 +874,10 @@ pub(crate) fn ray_direction(
     )
 }
 
+/// The browser's material cone: sectors and their offsets as the manifest declares them,
+/// 2 m range at the manifest's fixed encoding reference, five pitches −40..+40 (45 rays;
+/// decisions §6). Each sector value is a fraction of the whole fan's ray count. It has
+/// no memory, no expansion and no body identity — a fresh reading per observation.
 pub(crate) fn cone_readings(
     view: &VoxelView<'_>,
     occupancy: &ConeOccupancy,

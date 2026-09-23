@@ -269,9 +269,9 @@ pub struct SightMap {
 }
 
 impl SightMap {
-    /// Build it. `pools_occlude` is `true` for today's rule — a surface pool blocks the
-    /// whole cell over its face — and `false` for the decided arm, where a ground pool is
-    /// not a wall (decisions §6).
+    /// Build it. `pools_occlude` is `true` for the live rule — since contract v2 a ground
+    /// pool blocks a ray only below its physical height (D3) — and `false` for a
+    /// diagnostic arm with no pools at all.
     pub fn new(
         view: &VoxelView<'_>,
         fv: &FloraView<'_>,

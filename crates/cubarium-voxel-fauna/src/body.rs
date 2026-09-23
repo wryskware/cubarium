@@ -11,16 +11,15 @@
 //! void over that face. The forward mouth is the footprint plus a reach of
 //! `0.25 × length` beyond it, and it takes food from the physical band
 //! `[0, 1.33 × height]` over the standing surface — not from a whole-voxel layer count.
-//! The [`Manifest`](crate::Manifest)'s `body_length_m`, `body_width_m` and
-//! `mouth_reach_up_voxels` are the **recorded contract** the shipped centres were
-//! trained against and are no longer read for geometry.
+//! Contract v2 writes the same adult dimensions and anchor fractions into the
+//! [`Manifest`](crate::Manifest)'s digest (D1); the geometry is still read from here.
 //!
 //! # What movement is allowed to do
 //!
 //! Forward effort sweeps the disc along the heading in bounded sub-steps of at most one
 //! footprint radius, so a wall (a solid voxel at the body layer is at least one voxel
 //! thick) cannot be tunnelled between endpoint checks. `x` wraps; the strip's `z` ends
-//! are hard walls.
+//! are hard walls, and since contract v2 (D4) the contact receptors feel them as walls.
 //!
 //! **The body steps ledges.** A lineage has a climb height in metres on its
 //! [`FounderPhysiology`], converted to whole voxels once at the consumer by
@@ -45,7 +44,9 @@
 //! body could step onto is not a wall**: a steppable ledge reads as open ground and a
 //! cliff face or a taller wall reads exactly as it did before (the receptor is still one
 //! layer, and the observation vector's shape is unchanged). The bodies are smaller than a
-//! voxel, so a touching solid always covers one of the samples. The underside receptor reads the support face under the centre.
+//! voxel, so a touching solid always covers one of the samples. A sample past the strip's
+//! `z` edge reads solid at any height (D4): the edge of the world is a wall. The
+//! underside receptor reads the support face under the centre.
 //! `Wet` is the standing water at the foot, a valid zero when dry. `Taste` reads only
 //! what the mouth region physically contacts: the browser tastes the foliage of a stand
 //! whose crown cells reach the mouth region; the blind founder tastes actual litter stock
@@ -785,18 +786,12 @@ pub(crate) fn contact_readings(
     if standing_y + 1 >= c.height {
         return ContactReading::UNRESOLVED;
     }
-    // A probe above the world is open sky, not a wall.
+    // A probe above the world is open sky, not a wall; one past the strip's `z` edge is
+    // a wall at any height (D4).
     let layer = body.contact_layer(standing_y, c.voxel_m) + climb;
-    let solid_above = layer < c.height;
     let r = body.footprint_radius();
     let wx = cx.rem_euclid(i64::from(c.width));
-    let arc = |centre: f64| {
-        if solid_above {
-            boundary_arc(view, pose, r, layer, centre)
-        } else {
-            0.0
-        }
-    };
+    let arc = |centre: f64| boundary_arc(view, pose, r, layer, centre);
     ContactReading {
         front: arc(pose.heading_rad),
         left: arc(pose.heading_rad - std::f64::consts::FRAC_PI_2),
@@ -810,7 +805,9 @@ pub(crate) fn contact_readings(
 /// One boundary arc: probe at the arc's centre and ±45°, a hair beyond the footprint
 /// radius so a body pressed against a wall by the sweep's snap reads the wall it is
 /// standing on. A body smaller than a voxel that touches a solid covers at least one
-/// probe.
+/// probe. A probe past the strip's `z` edge is solid (D4) — the sweep's clamp holds the
+/// disc exactly at the edge, so a body pressed there reads it the way it reads a wall; a
+/// probe above the world is open.
 fn boundary_arc(view: &VoxelView<'_>, pose: &crate::Pose, r: f64, layer: u32, centre: f64) -> f64 {
     let c = view.config;
     let probe = r * (1.0 + 1e-6);
@@ -824,6 +821,9 @@ fn boundary_arc(view: &VoxelView<'_>, pose: &crate::Pose, r: f64, layer: u32, ce
         let pz = pose.z + probe * a.cos();
         let z = (pz / c.voxel_m).floor();
         if z < 0.0 || z >= f64::from(c.depth) {
+            return 1.0;
+        }
+        if layer >= c.height {
             continue;
         }
         let wx = ((px / c.voxel_m).floor() as i64).rem_euclid(i64::from(c.width));
@@ -1197,7 +1197,7 @@ impl TasteReading {
 /// Read chemistry and resistance at the mouth's actual contact. The blind founder's
 /// mouth roots at the ground: **detritus** under its mouth produces a cue response,
 /// while bare ground is a valid ground contact with zero response. The diffused
-/// `Chem(litter)` field is deliberately not consulted. The browser's mouth is at body
+/// `Chem(detritus)` field is deliberately not consulted. The browser's mouth is at body
 /// height and is invalid in air.
 ///
 /// # What decisions §3 changed here, and what it did not
@@ -1207,9 +1207,7 @@ impl TasteReading {
 /// the corpse. The **channel** is untouched — one cue, one resistance, one validity, at
 /// the manifest's own slot — and so is the resistance mapping: all three foods are the
 /// one soft class the schema calls `litter`, because the taste resistances are inside
-/// the manifest digest and the shipped centres must keep loading
-/// (`crates/cubarium/assets/policies/README.md`). It is the same kind of meaning change
-/// as the one on `Chem(litter)`, and the retrain (package 5) owns both.
+/// the manifest digest; contract v2 left them as they were.
 ///
 /// The browser's taste moves the other way: a glowcap cap is no longer offered to its
 /// mouth at all, so it no longer tastes one.
@@ -1300,11 +1298,7 @@ pub(crate) fn observation(
     let fb = &a.founder_state.feedback;
     obs[0] = clamp01(a.energy / manifest.adult_energy_reference);
     obs[1] = clamp01(a.reserve / manifest.adult_reserve_reference);
-    obs[2] = f64::from(
-        phys.core.birth_cost > 0.0
-            && a.body >= phys.core.birth_body
-            && a.reserve >= phys.core.birth_cost,
-    );
+    obs[2] = f64::from(birth_readiness(&fauna.config, a, fv));
     obs[3] = clamp01(fb.structural_loss / manifest.structural_reference);
     obs[4] = clamp01(fb.intake / manifest.body_reference);
     obs[5] = clamp01(fb.delivered_forward / manifest.forward_reference_m);
@@ -1339,10 +1333,10 @@ pub(crate) fn observation(
     obs[tm.offset + 1] = taste.resistance;
     obs[tm.offset + 2] = f64::from(taste.valid);
 
-    // Chem(litter): the arena's litter field at the receptor, response then trend then
-    // validity. Blind founder only. Without a senses handle the module reads zero with
-    // validity 0.
-    if let Some(cm) = module_opt(manifest, "Chem(litter)") {
+    // Chem(detritus): the arena's detritus field at the receptor, response then trend
+    // then validity. Blind founder only. Without a senses handle the module reads zero
+    // with validity 0.
+    if let Some(cm) = module_opt(manifest, "Chem(detritus)") {
         if let Some(senses) = senses.as_deref_mut() {
             if let Some(cue) = senses.sample_cue(view, &a.pose, a.site.y) {
                 let sat = manifest.tunings.chem_saturation;
@@ -1387,6 +1381,46 @@ pub(crate) fn observation(
     }
 
     obs
+}
+
+/// **`Self.birth_readiness`** (contract v2; [`crate::manifest::BIRTH_READINESS_RULE`]):
+/// whether this tick's reproduction step would act on `animal` — start a gestation or
+/// lay a clutch — read off the rules the step applies, from the pre-action state.
+///
+/// It is 1 only when the body is **eligible** (structure at `birth_body`, reserve at
+/// the offspring package plus `surplus_floor`, a package that costs something), **not in
+/// its refractory**, **not already gestating**, the **surplus hold elapses this tick**
+/// (the counter the step is about to advance reaches `hold_ticks`), and — for an
+/// egg-layer — the face it stands on **holds litter**. Schema 1 read 1 for any body at
+/// `birth_body` holding `birth_cost`, which was true through the whole hold, the whole
+/// refractory and every tick of a gestation.
+///
+/// A gestating body's step opens the escrow on the very tick the hold elapses, so for a
+/// browser this is a one-tick pulse; an egg-layer holding its surplus off litter reads 1
+/// on every tick until it stands on some.
+pub fn birth_readiness(
+    config: &crate::FaunaConfig,
+    animal: &Animal,
+    flora: &FloraView<'_>,
+) -> bool {
+    let sc = effective_config(config, animal);
+    let rule = sc.reproduction;
+    let state = &animal.reproduction;
+    if state.refractory_ticks > 0 || state.escrow.is_some() {
+        return false;
+    }
+    let cost = rule.package_cost(&sc);
+    let eligible =
+        cost > 0.0 && animal.body >= sc.birth_body && animal.reserve >= rule.surplus_reserve(&sc);
+    if !eligible || state.surplus_ticks + 1 < rule.hold_ticks() {
+        return false;
+    }
+    match rule.mode {
+        crate::BirthMode::Gestation => true,
+        crate::BirthMode::Eggs => {
+            animal.founder.is_some() && flora.ground_at(animal.site).is_some_and(|g| g.litter > 0.0)
+        }
+    }
 }
 
 /// [`module`] without the panic: `None` when this manifest has no such module.
@@ -1513,7 +1547,7 @@ mod tests {
             "one period at full cruise = {}",
             total
         );
-        assert!((pose.x - (0.5 + 0.03125)).abs() < 1e-12);
+        assert!((pose.x - (0.5 + manifest.forward_reference_m)).abs() < 1e-12);
         // Wrap on x: starting just before the seam, the same period lands past it.
         let mut seam = pose_at(8.0 * 0.25 - 0.01, 0.5, H);
         for _ in 0..manifest.cadence_ticks() {
@@ -2148,11 +2182,12 @@ mod tests {
         let manifest = Founder::Blind.manifest();
         let obs = observation(&fauna, 0, &view, &fv, &manifest, None, None);
         assert_eq!(obs.len(), 23);
-        // Introduced at the adult reference: energy and reserve read 1, birth
-        // readiness is the real threshold state (adult body, full adult reserve).
+        // Introduced at the adult reference: energy and reserve read 1. Birth readiness
+        // is the step's own rule (contract v2): an adult in surplus that has held none
+        // of it yet is not about to lay.
         assert!((obs[0] - 1.0).abs() < 1e-9, "energy {}", obs[0]);
         assert!((obs[1] - 1.0).abs() < 1e-9, "reserve {}", obs[1]);
-        assert_eq!(obs[2], 1.0);
+        assert_eq!(obs[2], 0.0);
         // Initial feedback is zero, so no delivery was requested: motor delivery 1.
         assert_eq!(obs[3], 0.0);
         assert_eq!(obs[4], 0.0);

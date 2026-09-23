@@ -1465,16 +1465,44 @@ fn built_in_driver(founder: Founder) -> Result<EpisodeDriver> {
         .map_err(|e| anyhow::anyhow!("the built-in centre {name}: {e}"))
 }
 
+/// The built-in centre for `founder` if it validates against this build, else `None`
+/// with a **loud** line on stderr: the lineage falls back to the observation-only
+/// heuristic the seeder registered.
+///
+/// Contract v2 (`design/handoffs/voxel-retrain-2026-09-22.md`, P5-A item 10) moved both
+/// founder manifests' digests, so the centres shipped under schema 1 are refused until the
+/// retrain (P5-C) replaces them. A refused centre is never reinterpreted and never
+/// silently swapped: the run says which lineage is on the fallback and why.
+fn built_in_or_fallback(founder: Founder) -> Option<EpisodeDriver> {
+    match built_in_driver(founder) {
+        Ok(driver) => Some(driver),
+        Err(e) => {
+            eprintln!(
+                "WARNING: {e:#}\nWARNING: the {} founders fall back to the observation-only \
+                 heuristic: the built-in centre was trained against another founder manifest \
+                 and is refused, not reinterpreted.",
+                founder.name()
+            );
+            None
+        }
+    }
+}
+
 /// Install the ambient run's built-in trained centres on every founder lineage of an
 /// already-seeded layer, and say so on stderr — one line per lineage naming its driver,
 /// the same announcement `cubarium voxel`'s ambient run makes by default. An example that
 /// wants to measure the shipped world's founders, and not the seeder's bare
 /// observation-only heuristics, calls this once after `habitat::seed` (or
 /// `habitat::install_heuristics` on an empty world), before stepping the sim.
+///
+/// A lineage whose built-in centre this build refuses keeps the seeder's heuristic, with
+/// a loud line saying so ([`built_in_or_fallback`]).
 pub fn install_default_founders(fauna: &mut Fauna) -> Result<()> {
     let mut drivers = Vec::with_capacity(Founder::ALL.len());
     for founder in Founder::ALL {
-        drivers.push((founder, built_in_driver(founder)?));
+        if let Some(driver) = built_in_or_fallback(founder) {
+            drivers.push((founder, driver));
+        }
     }
     install_founder_controllers(fauna, &drivers)?;
     for (founder, driver) in &drivers {
@@ -1539,10 +1567,19 @@ fn founder_recipes(args: &Voxel) -> Result<Vec<FounderRecipe>> {
                 .find(|(f, _, _)| *f == founder)
                 .map(|(_, n, _)| *n)
                 .unwrap_or("none");
+            let driver = built_in_or_fallback(founder);
+            let source = if driver.is_some() {
+                format!("the built-in centre {name}")
+            } else {
+                format!(
+                    "the observation-only heuristic — FALLBACK: the built-in centre {name} \
+                     is refused by this build's founder manifest"
+                )
+            };
             out.push(FounderRecipe {
                 founder,
-                driver: Some(built_in_driver(founder)?),
-                source: format!("the built-in centre {name}"),
+                driver,
+                source,
             });
         }
     }
@@ -3725,26 +3762,41 @@ mod tests {
         assert!(loaded.policy_driven(Founder::Blind));
     }
 
-    /// **The ambient run's default is the trained centres, and the binary carries them.**
+    /// **The ambient run's default is the trained centres, and the binary carries them —
+    /// or, when this build refuses one, the heuristic, loudly.**
     ///
     /// The two embedded files are the trainer's own output and validate themselves
     /// against *this* build — schema token, declared lineage, weight count, finite
-    /// weights, and the founder-manifest digest — so this test fails loudly the moment a
-    /// manifest change makes the shipped default a policy for a schema that no longer
-    /// exists. That is the whole reason the centres are committed rather than fetched.
+    /// weights, and the founder-manifest digest. Contract v2 (P5-A) moved the digests, so
+    /// on the retrain branch the schema-1 centres are refused and each lineage falls back
+    /// to its heuristic until P5-C copies the new centres in; a centre that validates
+    /// drives its own lineage.
     #[test]
     fn the_built_in_centres_drive_their_own_lineage_by_default() {
         use clap::Parser;
 
-        for founder in Founder::ALL {
-            let driver = built_in_driver(founder).expect("the built-in centre validates");
-            assert!(
-                driver.name().contains("gru"),
-                "{} runs a trained centre, not a control: {}",
-                founder.name(),
-                driver.name()
-            );
-        }
+        let validates: Vec<bool> = Founder::ALL
+            .iter()
+            .map(|&founder| match built_in_driver(founder) {
+                Ok(driver) => {
+                    assert!(
+                        driver.name().contains("gru"),
+                        "{} runs a trained centre, not a control: {}",
+                        founder.name(),
+                        driver.name()
+                    );
+                    true
+                }
+                Err(e) => {
+                    assert!(
+                        format!("{e:#}").contains("digest"),
+                        "{}: refused for its manifest digest, not something else: {e:#}",
+                        founder.name()
+                    );
+                    false
+                }
+            })
+            .collect();
 
         let voxel = |args: &[&str]| -> crate::cli::Voxel {
             let mut line = vec!["cubarium", "voxel"];
@@ -3755,16 +3807,22 @@ mod tests {
             }
         };
 
-        // No flags: every lineage is driven by its built-in centre.
+        // No flags: every lineage is driven by its built-in centre, or says loudly that
+        // it fell back.
         let recipes = founder_recipes(&voxel(&[])).expect("the default run");
         assert_eq!(recipes.len(), Founder::ALL.len());
         for recipe in &recipes {
-            assert!(
+            assert_eq!(
                 recipe.driver.is_some(),
-                "{} has a centre",
-                recipe.founder.name()
+                validates[recipe.founder.index()],
+                "{}: {}",
+                recipe.founder.name(),
+                recipe.source
             );
             assert!(recipe.source.contains("built-in"), "{}", recipe.source);
+            if recipe.driver.is_none() {
+                assert!(recipe.source.contains("FALLBACK"), "{}", recipe.source);
+            }
         }
 
         // `--founder-heuristic all` is the control: no driver for either lineage, so the
@@ -3789,7 +3847,17 @@ mod tests {
             .find(|r| r.founder == Founder::Browser)
             .expect("the browser lineage");
         assert!(blind.driver.is_none(), "{}", blind.source);
-        assert!(browser.driver.is_some(), "{}", browser.source);
+        assert!(
+            blind.source.contains("--founder-heuristic"),
+            "{}",
+            blind.source
+        );
+        assert_eq!(
+            browser.driver.is_some(),
+            validates[Founder::Browser.index()],
+            "{}",
+            browser.source
+        );
     }
 
     #[test]
