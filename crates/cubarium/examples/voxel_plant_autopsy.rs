@@ -854,7 +854,7 @@ fn report_species(
         eprintln!(
             "SPECIES min={minute:>4} {:<14} stands={:<3} foliage={:<9.5} wood={:<9.5} \
              reserve={:<9.5} | establishments={:<3} deaths={:<3} [{}] | mean_water={} \
-             (wilt {:.2}, sat {:.2}; above wilt {}/{}) mu={:.3} light={:.3} covered={:.3}",
+             (wilt {:.2}, full {:.2}; above wilt {}/{}) mu={:.3} light={:.3} covered={:.3}",
             species.name(),
             stands[i],
             foliage[i],
