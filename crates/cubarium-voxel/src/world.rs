@@ -115,6 +115,12 @@ pub enum Command {
     SetOutlet { open: bool },
 }
 
+/// The fill a cell must hold for the water above it to count as **standing** on it:
+/// [`VoxelView::standing_depth_m`]'s one threshold. Half a cell: a pool's cells sit
+/// 0.87–0.96 full, a shower's falling column a third or less. A placeholder
+/// (`design/backlog.md` §1).
+pub const STANDING_SUPPORT_FILL: f64 = 0.5;
+
 /// Read-only access to the world for drawing and inspection. Borrowed from a `World`;
 /// never owned by a renderer.
 #[derive(Clone, Copy, Debug)]
@@ -224,6 +230,43 @@ impl<'a> VoxelView<'a> {
                 break;
             }
             depth += f;
+        }
+        depth * c.voxel_m
+    }
+
+    /// Depth of the **settled standing water** on the support face `(x, y, z)`, metres:
+    /// water held up from below, and not water in transit
+    /// (`design/handoffs/voxel-terrain-note-standing-depth-2026-09-22.md`).
+    ///
+    /// The same walk as [`VoxelView::water_depth_m`], with one more stop: a cell's water
+    /// counts only while the cell **under** it is the face itself or at least
+    /// [`STANDING_SUPPORT_FILL`] full. A pool's cells sit 0.87–0.96 full with water on
+    /// them and read whole; a shower's falling column (fills 0.11 / 0.25 / 0.37 … over a
+    /// film) reads as its bottom cell and nothing above it, because a third-full cell is
+    /// not holding up the water over it.
+    ///
+    /// A **reader over the fills, not solver state.** The solver has no per-cell
+    /// "at rest" flag, so moving water that is deeper than half a cell — a full stream
+    /// channel — reads as standing here, and the partial top cell of a pool sitting on a
+    /// half-full cell counts. What it does refuse is the case the note measured: a falling
+    /// column read as depth over a film.
+    pub fn standing_depth_m(&self, x: i64, y: u32, z: u32) -> f64 {
+        let c = self.config;
+        if z >= c.depth {
+            return 0.0;
+        }
+        let mut depth = 0.0;
+        let mut below = 1.0;
+        for yy in y + 1..c.height {
+            if self.material_at(x, yy, z).is_solid() {
+                break;
+            }
+            let f = self.free_at(x, yy, z);
+            if !(f > 0.0) || below < STANDING_SUPPORT_FILL {
+                break;
+            }
+            depth += f;
+            below = f;
         }
         depth * c.voxel_m
     }
