@@ -66,8 +66,9 @@ pub mod habitat;
 pub mod scene;
 pub use arena::{
     ARENA_BYSTANDERS, ARENA_DEPTH, ARENA_HEIGHT, ARENA_VOXEL_M, ARENA_WIDTH, Arena, ArenaGrid,
-    BROWSER_FOLIAGE_PER_STAND, FOUNDER_START, GROUND_Y, PatchKind, Placement, REACQUISITION_INITIAL_PATCH_FRACTION,
-    REACQUISITION_LITTER_PER_PATCH, ReacquisitionArena, SuccessorBand, edible_stock, populate,
+    BROWSER_FOLIAGE_PER_STAND, FOUNDER_START, GROUND_Y, PatchKind, Placement,
+    REACQUISITION_INITIAL_PATCH_FRACTION, REACQUISITION_LITTER_PER_PATCH, ReacquisitionArena,
+    SuccessorBand, edible_stock, populate,
 };
 /// A support face: the coordinate a resource patch, a stand and a deposit all live at.
 /// Re-exported so a caller holding an [`Arena`] can name its patch sites without
@@ -157,6 +158,13 @@ pub struct Substep;
 #[derive(ScheduleLabel, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct StaticTick;
 
+/// The label of the **frozen-water** schedule: the static schedule with the live `Flora`
+/// leg put back — plants grow, shed litter, decompose it and feed the cue's sources — and
+/// still no `Begin` or `Water` leg (P5-C S1: shredder landscape episodes carry the
+/// litter production the live world has, on water that does not move).
+#[derive(ScheduleLabel, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct FrozenWaterTick;
+
 /// Which schedule [`Sim::step`] runs. The live schedule is the default and is unchanged.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum ScheduleMode {
@@ -165,6 +173,8 @@ pub enum ScheduleMode {
     Live,
     /// Fauna and advance only: a frozen arena.
     Static,
+    /// Flora, fauna and advance: live plants on frozen water ([`FrozenWaterTick`]).
+    FrozenWater,
 }
 
 /// One coupled voxel simulation: the three layers, the schedule that steps them, and the
@@ -259,6 +269,23 @@ impl Sim {
         stat.add_systems(sys_fauna_static.in_set(TickPhase::Fauna));
         stat.add_systems(sys_advance.in_set(TickPhase::Advance));
         ecs.add_schedule(stat);
+
+        // Frozen water: the static schedule plus the live plant leg, in the live order.
+        let mut frozen = Schedule::new(FrozenWaterTick);
+        frozen.set_executor(SingleThreadedExecutor::new());
+        frozen.configure_sets(
+            (
+                TickPhase::Flora,
+                TickPhase::Fauna,
+                TickPhase::Advance,
+                TickPhase::Sample,
+            )
+                .chain(),
+        );
+        frozen.add_systems(sys_flora.in_set(TickPhase::Flora));
+        frozen.add_systems(sys_fauna_static.in_set(TickPhase::Fauna));
+        frozen.add_systems(sys_advance.in_set(TickPhase::Advance));
+        ecs.add_schedule(frozen);
 
         Sim {
             ecs,
@@ -364,6 +391,7 @@ impl Sim {
         match self.mode {
             ScheduleMode::Live => self.ecs.run_schedule(Tick),
             ScheduleMode::Static => self.ecs.run_schedule(StaticTick),
+            ScheduleMode::FrozenWater => self.ecs.run_schedule(FrozenWaterTick),
         }
     }
 

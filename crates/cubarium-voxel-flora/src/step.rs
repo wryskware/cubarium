@@ -1417,6 +1417,24 @@ fn ground_slot(ground: &mut Vec<Ground>, site: Site) -> usize {
 /// is conserved exactly and a decomposing stock's mineral density never moves. Energy
 /// leaves at the stock's current density for the same reason, which is what lets the
 /// `e_d_max` cap survive without a re-clamp.
+/// The dead pools' tick alone: the tick-start snapshot and [`decompose`], exactly as
+/// [`step`] runs them, and nothing else — no clock, no growth, no litterfall. For a frozen
+/// episode that replays a world's production and must still let its dead pools rot at
+/// the model's own rates (P5-C S1).
+pub(crate) fn decompose_only(flora: &mut Flora) {
+    let pre: Vec<Pre> = flora
+        .ground
+        .iter()
+        .map(|g| Pre {
+            site: g.site,
+            litter: g.litter,
+            dead_wood: g.dead_wood,
+            carrion: g.carrion,
+        })
+        .collect();
+    decompose(flora, &pre);
+}
+
 fn decompose(flora: &mut Flora, pre: &[Pre]) {
     let Flora {
         config,

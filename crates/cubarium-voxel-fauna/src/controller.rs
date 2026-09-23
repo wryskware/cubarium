@@ -329,6 +329,97 @@ const HALF_RAY: f64 = 0.5 / 15.0;
 /// two voxels ≈0.47.
 const DROP_PROXIMITY: f64 = 0.55;
 
+// The teachers' no-signal search (P5-C S3): a **correlated walk**. Heuristic internals,
+// backlog §1 placeholders: nothing in the world reads them.
+
+/// Samples a wander holds its heading, drawn uniformly from this range: 2–6 s at the
+/// 0.25 s cadence.
+const WANDER_HOLD: (u32, u32) = (8, 24);
+/// Samples a wander turn lasts, drawn uniformly from this range, at [`WANDER_TURN`]
+/// effort: a bounded random angle.
+const WANDER_TURN_SAMPLES: (u32, u32) = (1, 4);
+/// Turn effort while a wander turn runs.
+const WANDER_TURN: f64 = 0.8;
+
+/// A **correlated walk** for when a teacher has no signal: hold the heading for a random
+/// number of samples, then turn by a bounded random angle (a random number of samples at
+/// a fixed effort, either way), and hold again. The randomness is the controller's own
+/// memory — seeded from the bits of the first observation it is handed, so two bodies
+/// with different senses walk different walks — and nothing here reads a coordinate.
+/// Blocks and hazards are the caller's escape and contact rules, which run first.
+#[derive(Clone, Debug, Default)]
+struct Wander {
+    state: u64,
+    seeded: bool,
+    /// Samples left holding the heading.
+    hold: u32,
+    /// Samples left turning, and which way.
+    turning: u32,
+    sign: f64,
+}
+
+impl Wander {
+    fn next(&mut self) -> u64 {
+        self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    fn draw(&mut self, (lo, hi): (u32, u32)) -> u32 {
+        lo + (self.next() % u64::from(hi - lo + 1)) as u32
+    }
+
+    /// Seed from the observation on the first call after a reset.
+    fn seed(&mut self, o: &[f64]) {
+        if self.seeded {
+            return;
+        }
+        self.seeded = true;
+        self.state = o.iter().fold(0x5EED_0F_A11C_E5u64, |h, v| {
+            (h ^ v.to_bits()).wrapping_mul(0x0100_0000_01B3)
+        });
+        self.hold = self.draw(WANDER_HOLD);
+    }
+
+    /// This sample's wander turn effort.
+    fn turn(&mut self, o: &[f64]) -> f64 {
+        self.seed(o);
+        if self.turning > 0 {
+            self.turning -= 1;
+            if self.turning == 0 {
+                self.hold = self.draw(WANDER_HOLD);
+            }
+            return self.sign * WANDER_TURN;
+        }
+        if self.hold > 0 {
+            self.hold -= 1;
+            return 0.0;
+        }
+        self.sign = if self.next() & 1 == 0 { 1.0 } else { -1.0 };
+        self.turning = self.draw(WANDER_TURN_SAMPLES) - 1;
+        if self.turning == 0 {
+            self.hold = self.draw(WANDER_HOLD);
+        }
+        self.sign * WANDER_TURN
+    }
+
+    /// Whichever way the walk last turned: the side an escape turns to when nothing else
+    /// picks one.
+    fn side(&self) -> f64 {
+        if self.sign == 0.0 { 1.0 } else { self.sign }
+    }
+
+    /// A block or a signal interrupts the walk: hold again afterwards.
+    fn interrupt(&mut self) {
+        self.turning = 0;
+        if self.seeded {
+            self.hold = self.draw(WANDER_HOLD);
+        }
+    }
+}
+
 /// The escape reflex both teachers share: returns `Some((forward, turn))` while an
 /// escape is running, arming it when `hazard` is seen.
 fn escape(escape: &mut u32, hazard: bool, turn: f64) -> Option<(f64, f64)> {
@@ -354,11 +445,11 @@ fn escape(escape: &mut u32, hazard: bool, turn: f64) -> Option<(f64, f64)> {
 /// few samples, rather than holding full forward against a drop.
 #[derive(Clone, Debug)]
 pub struct BlindForager {
-    /// The remembered turn preference while wandering without a signal: the controller's
-    /// own memory, never a world direction.
+    /// The remembered turn preference a falling cue turns by: the controller's own
+    /// memory, never a world direction.
     turn_bias: f64,
-    /// Controller samples spent moving without a signal before the preference flips.
-    wander_ticks: u32,
+    /// The no-signal search (S3).
+    wander: Wander,
     /// Samples left in the current escape.
     escape: u32,
     contact: crate::manifest::Module,
@@ -372,7 +463,7 @@ impl BlindForager {
         let manifest = Founder::Blind.manifest();
         BlindForager {
             turn_bias: 1.0,
-            wander_ticks: 0,
+            wander: Wander::default(),
             escape: 0,
             contact: module_slot(&manifest, "Contact(4)"),
             taste: module_slot(&manifest, "Taste(1)"),
@@ -416,10 +507,10 @@ impl Controller for BlindForager {
         } else if right > left {
             1.0
         } else {
-            self.turn_bias
+            self.wander.side()
         };
         if let Some((forward, turn)) = escape(&mut self.escape, o[7] < MOTOR_REFUSED, away) {
-            self.wander_ticks = 0;
+            self.wander.interrupt();
             return Response::Bounded(Actions {
                 forward,
                 turn,
@@ -428,17 +519,17 @@ impl Controller for BlindForager {
         }
         let turn = if front_blocked {
             // A wall is a physical feature, not a target: turn away from the contacted
-            // side, or fall back on the remembered preference.
-            self.wander_ticks = 0;
+            // side, or fall back on the walk's last side.
+            self.wander.interrupt();
             if left > right {
                 -1.0
             } else if right > left {
                 1.0
             } else {
-                self.turn_bias * 0.8
+                self.wander.side() * 0.8
             }
         } else if chem_valid > 0.5 && chem_resp >= 0.02 {
-            self.wander_ticks = 0;
+            self.wander.interrupt();
             if chem_trend > 0.05 {
                 // A rising signal: hold the heading the body already faces.  The
                 // Stage-A arena deliberately starts aimed at the food; even the old
@@ -455,13 +546,8 @@ impl Controller for BlindForager {
                 0.0
             }
         } else {
-            // No signal: cover ground with an alternating turn preference.
-            self.wander_ticks += 1;
-            if self.wander_ticks >= 3 {
-                self.wander_ticks = 0;
-                self.turn_bias = -self.turn_bias;
-            }
-            self.turn_bias * 0.6
+            // No signal: cover ground with a correlated walk (S3).
+            self.wander.turn(o)
         };
         Response::Bounded(Actions {
             forward,
@@ -472,7 +558,7 @@ impl Controller for BlindForager {
 
     fn reset(&mut self) {
         self.turn_bias = 1.0;
-        self.wander_ticks = 0;
+        self.wander = Wander::default();
         self.escape = 0;
     }
 }
@@ -487,6 +573,9 @@ impl Controller for BlindForager {
 /// hollow reads the same way, its surface being below the bank.
 #[derive(Clone, Debug)]
 pub struct BrowserForager {
+    /// The remembered wander preference, flipped every three no-signal samples; also the
+    /// side an escape turns to. The browser keeps this search: the correlated walk (S3)
+    /// measured 0.846 → 0.708 on its held-out landscapes and was reverted for it.
     wander_bias: f64,
     wander_ticks: u32,
     escape: u32,
@@ -586,6 +675,65 @@ impl Controller for BrowserForager {
 mod tests {
     use super::*;
     use crate::manifest::Founder;
+
+    /// S3: with no signal the shredder's teacher walks a correlated walk — they hold their heading
+    /// for at least `WANDER_HOLD.0` samples between turns, a turn lasts at most
+    /// `WANDER_TURN_SAMPLES.1` samples, both signs occur, and two bodies with different
+    /// senses walk different walks.
+    #[test]
+    fn the_no_signal_walk_holds_heading_between_bounded_turns() {
+        {
+            let founder = Founder::Blind;
+            let manifest = founder.manifest();
+            let walk = |salt: f64| -> Vec<f64> {
+                let mut c: Box<dyn Controller> = match founder {
+                    Founder::Blind => Box::new(BlindForager::new()),
+                    Founder::Browser => Box::new(BrowserForager::new()),
+                };
+                c.reset();
+                let mut o = quiet(&manifest);
+                o[0] = salt;
+                (0..400)
+                    .map(|_| match c.drive(&o) {
+                        Response::Bounded(a) => a.turn,
+                        Response::Logits(_) => unreachable!("teachers answer bounded"),
+                    })
+                    .collect()
+            };
+            let turns = walk(0.3);
+            let mut runs: Vec<(bool, u32)> = Vec::new();
+            for t in &turns {
+                let turning = *t != 0.0;
+                match runs.last_mut() {
+                    Some((k, n)) if *k == turning => *n += 1,
+                    _ => runs.push((turning, 1)),
+                }
+            }
+            let holds: Vec<u32> = runs[1..runs.len() - 1]
+                .iter()
+                .filter(|r| !r.0)
+                .map(|r| r.1)
+                .collect();
+            assert!(
+                holds.len() >= 5,
+                "{founder:?}: several turns in 400 samples"
+            );
+            assert!(
+                holds.iter().all(|&h| h >= WANDER_HOLD.0),
+                "{founder:?}: the heading is held between turns: {holds:?}"
+            );
+            assert!(
+                runs.iter()
+                    .filter(|r| r.0)
+                    .all(|r| r.1 <= WANDER_TURN_SAMPLES.1),
+                "{founder:?}: a turn is a bounded angle"
+            );
+            let turning = turns.iter().filter(|t| **t != 0.0).count();
+            assert!(turning * 4 < turns.len(), "{founder:?}: turns are rare");
+            assert!(turns.iter().any(|t| *t > 0.0) && turns.iter().any(|t| *t < 0.0));
+            assert_ne!(turns, walk(0.7), "{founder:?}: another body, another walk");
+        }
+    }
 
     /// A zero observation with `motor_delivery` at 1 — "everything asked for was
     /// delivered", which is what the channel reads when nothing was asked — so a test
@@ -776,24 +924,25 @@ mod tests {
         assert_eq!(actions.forward, 0.1);
         assert_eq!(actions.turn, -1.0);
 
-        // No signal alternates from the controller's own memory and remains in
-        // the declared action bounds.  Reset returns to the initial preference.
+        // No signal walks the correlated walk (S3): bounded, and `reset` restarts the
+        // same walk from the same senses.
         cue.fill(0.0);
         cue[7] = 1.0;
-        let mut no_signal = Vec::new();
-        for _ in 0..3 {
-            let Response::Bounded(actions) = blind.drive(&cue) else {
-                panic!("blind diagnostic answers bounded actions");
-            };
-            assert!((-1.0..=1.0).contains(&actions.turn));
-            no_signal.push(actions.turn);
-        }
-        assert_eq!(no_signal, [0.6, 0.6, -0.6]);
-        blind.reset();
-        let Response::Bounded(actions) = blind.drive(&cue) else {
-            panic!("blind diagnostic answers bounded actions");
+        let mut walk = |c: &mut BlindForager| -> Vec<f64> {
+            (0..60)
+                .map(|_| {
+                    let Response::Bounded(actions) = c.drive(&cue) else {
+                        panic!("blind diagnostic answers bounded actions");
+                    };
+                    assert!((-1.0..=1.0).contains(&actions.turn));
+                    actions.turn
+                })
+                .collect()
         };
-        assert_eq!(actions.turn, 0.6, "reset restores the initial wander bias");
+        blind.reset();
+        let first = walk(&mut blind);
+        blind.reset();
+        assert_eq!(walk(&mut blind), first, "reset restarts the walk");
     }
 
     /// The scripted diagnostic emits its bounded script in order, cycles, and `reset`

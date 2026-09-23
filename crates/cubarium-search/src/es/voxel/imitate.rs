@@ -326,7 +326,9 @@ pub fn record_fixtures(
                     };
                     let horizon = horizon.unwrap_or_else(|| {
                         fixture.horizon().unwrap_or_else(|| {
-                            fixture.arena().map_or(LANDSCAPE_HORIZON_TICKS, |a| a.stage.horizon())
+                            fixture
+                                .arena()
+                                .map_or(LANDSCAPE_HORIZON_TICKS, |a| a.stage.horizon())
                         })
                     });
                     let sink = teacher_sink();
@@ -1238,7 +1240,11 @@ mod tests {
         assert_eq!(recorded.driver, "heuristic", "the wrapper keeps the name");
 
         let buffers = sink.lock().expect("sink").clone();
-        assert_eq!(buffers.len(), 1, "an arena has one acting body, so one buffer");
+        assert_eq!(
+            buffers.len(),
+            1,
+            "an arena has one acting body, so one buffer"
+        );
         let pairs = buffers[0].clone();
         let cadence = founder.manifest().cadence_ticks();
         assert_eq!(pairs.len() as u64, ticks / cadence);
@@ -1250,11 +1256,9 @@ mod tests {
             assert!((-1.0..=1.0).contains(&p.action.turn));
             assert!((0.0..=1.0).contains(&p.action.feed));
         }
-        // The teacher wanders: it does not hold one single action for a whole episode.
-        assert!(
-            pairs.iter().any(|p| p.action.turn != pairs[0].action.turn),
-            "the heuristic alternates its turn"
-        );
+        // (Whether the teacher wanders is the fauna crate's test of the correlated walk:
+        // on a Stage-A start aimed up the cue it rightly holds one heading for 20
+        // samples.)
     }
 
     /// Recording the training layouts yields one stream per layout, each a valid file.

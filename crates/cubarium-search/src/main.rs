@@ -800,6 +800,25 @@ enum Command {
         #[arg(long, default_value_t = 32)]
         held_out_every: u32,
     },
+    /// P5-C S1: a shredder landscape episode's cost with the plant leg off and on.
+    VoxelFloraCost {
+        #[arg(long, default_value = "small,default")]
+        presets: String,
+        #[arg(long, default_value_t = 24_000)]
+        ticks: u64,
+        #[arg(long, default_value_t = cubarium_search::es::voxel::task::episode_worker_limit())]
+        workers: usize,
+    },
+    /// P5-C diagnostic: held-out baselines from the drawn starts at several horizons,
+    /// with and without the other lineage, and the t = 0 distance and cue per body.
+    VoxelStartProbe {
+        #[arg(long, default_value = "blind")]
+        founder: String,
+        #[arg(long, default_value = "4800,12000,24000")]
+        horizons: String,
+        #[arg(long, default_value_t = cubarium_search::es::voxel::task::episode_worker_limit())]
+        workers: usize,
+    },
     /// P5-C: the held-out landscapes (seeds 201-208 × three presets, drained) against
     /// disclosed controls and saved policies.
     VoxelHoldout {
@@ -1188,6 +1207,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             p5,
             write_streams,
         ),
+        Command::VoxelFloraCost {
+            presets,
+            ticks,
+            workers,
+        } => es::voxel::commands::flora_cost(presets, ticks, workers),
+        Command::VoxelStartProbe {
+            founder,
+            horizons,
+            workers,
+        } => es::voxel::commands::start_probe(founder, horizons, workers),
         Command::VoxelHoldout {
             founder,
             policy,

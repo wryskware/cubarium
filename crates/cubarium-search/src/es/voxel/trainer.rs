@@ -106,6 +106,8 @@ pub struct MixProtocol {
     /// [`super::landscape::LANDSCAPE_PROTOCOL`].
     pub landscape_protocol: String,
     pub landscape_horizon: u64,
+    /// Whether the landscapes carried replayed litter production (S1).
+    pub landscape_live_plants: bool,
     /// The grid of each arena layout, in `layout_seeds` order.
     pub arena_grids: Vec<String>,
     /// Every training landscape fixture the draw chooses from: `preset/base/water@world`.
@@ -885,10 +887,14 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
         };
         protocol.mix = Some(MixProtocol {
             landscape_protocol: super::landscape::LANDSCAPE_PROTOCOL.into(),
-            landscape_horizon: super::landscape::LANDSCAPE_HORIZON_TICKS,
+            landscape_horizon: super::landscape::lineage_horizon(spec.founder),
+            landscape_live_plants: super::landscape::lineage_production(spec.founder),
             arena_grids: arena_layouts
                 .iter()
-                .map(|p| p.arena().map_or("?".into(), |a| a.grid.as_str().to_string()))
+                .map(|p| {
+                    p.arena()
+                        .map_or("?".into(), |a| a.grid.as_str().to_string())
+                })
                 .collect(),
             pool: mix.pool.iter().map(label).collect(),
             per_generation: mix.per_generation,
@@ -1636,10 +1642,22 @@ mod tests {
     fn the_collapse_rule_needs_every_one_of_the_last_checkpoints_to_fall() {
         assert!(held_out_collapsed(&[0.5, 0.4, 0.3, 0.2, 0.1], 4));
         assert!(held_out_collapsed(&[0.9, 0.5, 0.4, 0.3, 0.2, 0.1], 4));
-        assert!(!held_out_collapsed(&[0.5, 0.4, 0.3, 0.2], 4), "only 96 updates");
-        assert!(!held_out_collapsed(&[0.5, 0.4, 0.45, 0.2, 0.1], 4), "one rise resets");
-        assert!(!held_out_collapsed(&[0.5, 0.4, 0.4, 0.3, 0.2], 4), "a tie is not a fall");
-        assert!(!held_out_collapsed(&[0.5, 0.4, 0.3, 0.2, 0.1], 0), "k = 0 never stops");
+        assert!(
+            !held_out_collapsed(&[0.5, 0.4, 0.3, 0.2], 4),
+            "only 96 updates"
+        );
+        assert!(
+            !held_out_collapsed(&[0.5, 0.4, 0.45, 0.2, 0.1], 4),
+            "one rise resets"
+        );
+        assert!(
+            !held_out_collapsed(&[0.5, 0.4, 0.4, 0.3, 0.2], 4),
+            "a tie is not a fall"
+        );
+        assert!(
+            !held_out_collapsed(&[0.5, 0.4, 0.3, 0.2, 0.1], 0),
+            "k = 0 never stops"
+        );
     }
 
     fn tempfile_guard() -> PathBuf {

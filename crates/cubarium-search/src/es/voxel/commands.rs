@@ -1434,7 +1434,9 @@ pub fn holdout_table(
         }
     }
     if per_fixture {
-        println!("fixture,arm,label,score,survived,intake,walked_m,blocked_motor_share,starved,drowned");
+        println!(
+            "fixture,arm,label,score,survived,intake,walked_m,blocked_motor_share,starved,drowned"
+        );
         for (name, episodes) in &per {
             for e in episodes {
                 println!(
@@ -1445,10 +1447,8 @@ pub fn holdout_table(
                     e.intake_organic,
                     e.diagnostics.walked_m,
                     e.diagnostics.blocked_motor_share,
-                    e.diagnostics.deaths_by_cause
-                        [cubarium_voxel_fauna::Departure::Starved.index()],
-                    e.diagnostics.deaths_by_cause
-                        [cubarium_voxel_fauna::Departure::Drowned.index()],
+                    e.diagnostics.deaths_by_cause[cubarium_voxel_fauna::Departure::Starved.index()],
+                    e.diagnostics.deaths_by_cause[cubarium_voxel_fauna::Departure::Drowned.index()],
                 );
             }
         }
@@ -1498,5 +1498,264 @@ pub fn holdout(
         t.elapsed().as_secs_f64()
     );
     holdout_table(founder, &arms, &fixtures, workers, per_fixture)?;
+    Ok(())
+}
+
+/// `voxel-start-probe` (P5-C diagnostic, coordinator's horizon-or-economy question): the
+/// held-out landscapes from the drawn starts, at several horizons, with and without the
+/// other lineage; then, at t = 0, each acting body's distance to the nearest stocked
+/// face and its cue, and what the heuristic's first minute does with it. A measurement;
+/// nothing here reaches training.
+pub fn start_probe(founder: String, horizons: String, workers: usize) -> Result<(), Boxed> {
+    use cubarium_voxel_fauna::{Departure, FaunaConfig, Food, RouteMap};
+    let founder = parse_founder(&founder)?;
+    let horizons: Vec<u64> = horizons
+        .split(',')
+        .map(|h| h.trim().parse::<u64>())
+        .collect::<Result<_, _>>()?;
+    let t = Instant::now();
+    let base = super::landscape::held_out_pool(founder, workers)?;
+    println!(
+        "# start probe — {}, {} held-out fixtures founded in {:.1} s",
+        founder.name(),
+        base.len(),
+        t.elapsed().as_secs_f64()
+    );
+    let lands: Vec<super::landscape::PreparedLandscape> = base
+        .iter()
+        .map(|p| p.landscape().expect("landscapes").clone())
+        .collect();
+    let cancel = AtomicBool::new(false);
+    let phys = *FaunaConfig::default().founder(founder);
+    let foods: Vec<Food> = match founder {
+        Founder::Blind => vec![Food::Litter, Food::CapTissue, Food::Carrion],
+        Founder::Browser => vec![Food::Foliage],
+    };
+    println!(
+        "probe,bystanders,horizon,arm,score,survived,starved,drowned,{},motor,maintenance,\
+         walked_m,intake_per_upkeep",
+        foods
+            .iter()
+            .map(|f| format!("intake_{}", f.name()))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    for bystanders in [true, false] {
+        for &h in &horizons {
+            let fixtures: Vec<task::Prepared> = lands
+                .iter()
+                .map(|l| {
+                    let l = l.clone().with_horizon(h);
+                    let l = if bystanders {
+                        l
+                    } else {
+                        l.without_bystanders()
+                    };
+                    task::Prepared::from(l)
+                })
+                .collect();
+            for (name, control) in [
+                ("stationary", VoxelControl::StationaryFeeding),
+                ("cruise", VoxelControl::Cruise),
+                ("heuristic", VoxelControl::Heuristic),
+            ] {
+                let d = EpisodeDriver::control(control, founder);
+                let eps = trainer::evaluate_fixtures(
+                    &d,
+                    &fixtures,
+                    workers,
+                    driver::Limits::new(&cancel),
+                    "probe",
+                )?;
+                let bodies: usize = eps.iter().map(|e| e.bodies.len()).sum();
+                let n = eps.len().max(1) as f64;
+                let mean = |f: &dyn Fn(&driver::Episode) -> f64| eps.iter().map(f).sum::<f64>() / n;
+                let deaths = |d: Departure| -> u64 {
+                    eps.iter()
+                        .map(|e| e.diagnostics.deaths_by_cause[d.index()])
+                        .sum()
+                };
+                // Intake by class per body: the class split is the lineage's gross, so
+                // divide by the episode's acting bodies.
+                let by_food: Vec<String> = foods
+                    .iter()
+                    .map(|f| {
+                        let per_body = eps
+                            .iter()
+                            .map(|e| {
+                                e.diagnostics.intake_by_food[f.index()]
+                                    / e.bodies.len().max(1) as f64
+                            })
+                            .sum::<f64>()
+                            / n;
+                        format!("{per_body:.5}")
+                    })
+                    .collect();
+                let intake = mean(&|e| e.intake_organic);
+                let upkeep = mean(&|e| e.maintenance_organic);
+                println!(
+                    "probe,{bystanders},{h},{name},{:.4},{:.3},{},{},{},{:.5},{:.5},{:.2},{:.3}  ({bodies} bodies)",
+                    mean(&|e| e.score.score),
+                    mean(&driver::Episode::survived_fraction),
+                    deaths(Departure::Starved),
+                    deaths(Departure::Drowned),
+                    by_food.join(","),
+                    mean(&|e| e.motor_organic),
+                    upkeep,
+                    mean(&|e| e.diagnostics.walked_m),
+                    intake / upkeep.max(1e-12),
+                );
+            }
+        }
+    }
+
+    // t = 0: distance from each start to the nearest stocked face, and the cue there.
+    // The starts are the evaluation's own (`run_prepared` seeds on the base).
+    let manifest = founder.manifest();
+    let slot = |name: &str| {
+        manifest
+            .modules
+            .iter()
+            .find(|m| m.name == name)
+            .map(|m| m.offset)
+    };
+    let chem = slot("Chem(detritus)");
+    let taste = slot("Taste(1)").expect("a taste module");
+    println!(
+        "start,fixture,body,dist_nearest_stock_m,dist_nearest_litter_m,cue0,cue_max_1min,\
+         taste_gate_s,ate_1min"
+    );
+    let mut dists = Vec::new();
+    let mut cue_nonzero = 0usize;
+    let mut cue_gate = 0usize;
+    let mut reached = Vec::new();
+    let mut ate = 0usize;
+    let mut total = 0usize;
+    for land in &lands {
+        let world = land.world();
+        let view = world.view();
+        let voxel_m = world.config().voxel_m;
+        let width_m = f64::from(world.config().width) * voxel_m;
+        let map = RouteMap::for_founder(&view, &phys);
+        let fv = land.flora().view();
+        let stocked: Vec<(f64, f64, bool)> = map
+            .faces
+            .iter()
+            .filter_map(|f| {
+                let s = cubarium_voxel_sim::edible_stock(founder, land.flora(), voxel_m, f.y, *f);
+                (s > 0.0).then(|| {
+                    let litter = fv.ground_at(*f).is_some_and(|g| g.litter > 0.0);
+                    (
+                        (f64::from(f.x) + 0.5) * voxel_m,
+                        (f64::from(f.z) + 0.5) * voxel_m,
+                        litter,
+                    )
+                })
+            })
+            .collect();
+        let starts = land.acting_starts(land.seed_base);
+        let one = task::Prepared::from(land.clone().with_horizon(1_200));
+        let sink = super::controller::teacher_sink();
+        let d = EpisodeDriver::control(VoxelControl::Heuristic, founder).recording(sink.clone());
+        let e = driver::run_prepared(&one, &d, 1_200, driver::Limits::new(&cancel), "probe/start")?;
+        let buffers = sink.lock().expect("sink").clone();
+        let cadence_s = manifest.cadence_ticks() as f64 / f64::from(cubarium_voxel_fauna::TICK_HZ);
+        for (k, p) in starts.iter().enumerate() {
+            let (x, z) = (
+                (f64::from(p.site.x) + 0.5) * voxel_m,
+                (f64::from(p.site.z) + 0.5) * voxel_m,
+            );
+            let dist = |litter_only: bool| {
+                stocked
+                    .iter()
+                    .filter(|s| !litter_only || s.2)
+                    .map(|s| {
+                        let dx = (s.0 - x).abs();
+                        let dx = dx.min(width_m - dx);
+                        (dx * dx + (s.1 - z).powi(2)).sqrt()
+                    })
+                    .fold(f64::INFINITY, f64::min)
+            };
+            let steps = buffers.get(k).cloned().unwrap_or_default();
+            let cue =
+                |i: usize| chem.map_or(0.0, |c| steps.get(i).map_or(0.0, |s| s.observation[c]));
+            let cue0 = cue(0);
+            let cue_max = (0..steps.len()).map(cue).fold(0.0, f64::max);
+            let gate = steps
+                .iter()
+                .position(|s| s.observation[taste + 2] > 0.5 && s.observation[taste] > 0.2)
+                .map(|i| i as f64 * cadence_s);
+            let ate_1 = e.bodies.get(k).is_some_and(|b| b.intake_organic > 0.0);
+            let d_any = dist(false);
+            println!(
+                "start,{},{k},{d_any:.2},{:.2},{cue0:.4},{cue_max:.4},{},{ate_1}",
+                land.label(),
+                dist(true),
+                gate.map_or("never".to_string(), |g| format!("{g:.1}")),
+            );
+            dists.push(d_any);
+            cue_nonzero += usize::from(cue0 > 0.0);
+            cue_gate += usize::from(cue0 >= 0.02);
+            if let Some(g) = gate {
+                reached.push(g);
+            }
+            ate += usize::from(ate_1);
+            total += 1;
+        }
+    }
+    dists.sort_by(|a, b| a.partial_cmp(b).expect("finite"));
+    let q = |f: f64| dists[((dists.len() - 1) as f64 * f).round() as usize];
+    reached.sort_by(|a, b| a.partial_cmp(b).expect("finite"));
+    println!(
+        "summary,{total} starts; nearest stocked face m: p10 {:.2} median {:.2} p90 {:.2} max {:.2}; \
+         cue0 > 0: {cue_nonzero}; cue0 >= 0.02 (the heuristic's follow gate): {cue_gate}; \
+         taste gate reached in the first minute: {} (median {:.1} s); ate in the first minute: {ate}",
+        q(0.1),
+        q(0.5),
+        q(0.9),
+        q(1.0),
+        reached.len(),
+        reached.get(reached.len() / 2).copied().unwrap_or(f64::NAN),
+    );
+    Ok(())
+}
+
+/// `voxel-flora-cost` (P5-C S1): the cost of one shredder landscape episode on the
+/// held-out landscapes of `presets`, heuristic, one thread, with the plant leg off and
+/// on, at `ticks`.
+pub fn flora_cost(presets: String, ticks: u64, workers: usize) -> Result<(), Boxed> {
+    let founder = Founder::Blind;
+    let wanted: Vec<&str> = presets.split(',').map(str::trim).collect();
+    let base: Vec<super::landscape::PreparedLandscape> =
+        super::landscape::held_out_pool(founder, workers)?
+            .into_iter()
+            .filter_map(|p| p.landscape().cloned())
+            .filter(|l| wanted.contains(&l.preset.as_str()))
+            .collect();
+    let cancel = AtomicBool::new(false);
+    let d = EpisodeDriver::control(VoxelControl::Heuristic, founder);
+    println!("flora_cost,preset,live_plants,episodes,ticks,seconds_per_episode,us_per_tick,score");
+    for preset in &wanted {
+        for live in [false, true] {
+            let fixtures: Vec<task::Prepared> = base
+                .iter()
+                .filter(|l| l.preset == *preset)
+                .map(|l| task::Prepared::from(l.clone().with_horizon(ticks).with_live_plants(live)))
+                .collect();
+            let t = Instant::now();
+            let mut score = 0.0;
+            for f in &fixtures {
+                let e = driver::run_prepared(f, &d, ticks, driver::Limits::new(&cancel), "cost")?;
+                score += e.score.score;
+            }
+            let s = t.elapsed().as_secs_f64() / fixtures.len().max(1) as f64;
+            println!(
+                "flora_cost,{preset},{live},{},{ticks},{s:.3},{:.1},{:.4}",
+                fixtures.len(),
+                1e6 * s / ticks as f64,
+                score / fixtures.len().max(1) as f64
+            );
+        }
+    }
     Ok(())
 }
