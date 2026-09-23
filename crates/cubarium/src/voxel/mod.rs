@@ -230,9 +230,7 @@ fn expand_landform_preset(world: &mut toml::Table) -> std::result::Result<(), St
             Ok(toml::Value::Table(t)) => t,
             _ => return Err("a terrarium is a table".into()),
         };
-        for (key, value) in landform {
-            table.insert(key, value);
-        }
+        merge_over(&mut table, landform);
         let mut wrapped = toml::Table::new();
         wrapped.insert("terrarium".into(), toml::Value::Table(table));
         world.insert("landform".into(), toml::Value::Table(wrapped));
@@ -251,13 +249,25 @@ fn expand_landform_preset(world: &mut toml::Table) -> std::result::Result<(), St
         _ => return Err("a recipe is a table".into()),
     };
     // Whatever else the table said overrides the preset, field by field.
-    for (key, value) in landform {
-        staged.insert(key, value);
-    }
+    merge_over(&mut staged, landform);
     let mut wrapped = toml::Table::new();
     wrapped.insert("staged".into(), toml::Value::Table(staged));
     world.insert("landform".into(), toml::Value::Table(wrapped));
     Ok(())
+}
+
+/// Lay `over` onto `base` field by field, into nested tables too: a config that says
+/// `[world.landform.water] inventory_m = 2.0` changes that one field of the preset's
+/// water and keeps the rest, rather than replacing the whole table with a dry default.
+fn merge_over(base: &mut toml::Table, over: toml::Table) {
+    for (key, value) in over {
+        match (base.get_mut(&key), value) {
+            (Some(toml::Value::Table(inner)), toml::Value::Table(value)) => merge_over(inner, value),
+            (_, value) => {
+                base.insert(key, value);
+            }
+        }
+    }
 }
 
 /// `[world]`: [`cubarium_voxel::Config`] with every field optional.
