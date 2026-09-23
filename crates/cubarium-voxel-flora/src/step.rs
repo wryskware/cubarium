@@ -1418,7 +1418,10 @@ fn die(
 /// site in a column is its highest support face no higher than the crown's top; a column
 /// with none there is **unsupported**, and its share goes to the nearest supported site on
 /// the line (the nearer the origin on a tie), which the origin always is.
-fn fall_line(config: &FloraConfig, view: &VoxelView<'_>, stand: &Stand) -> Vec<(Site, usize)> {
+///
+/// Public so a diagnostic can say where a stand that died would have fallen; `die` is the
+/// only caller in the model.
+pub fn fall_line(config: &FloraConfig, view: &VoxelView<'_>, stand: &Stand) -> Vec<(Site, usize)> {
     let sc = config.species(stand.species);
     let c = view.config;
     let voxel_m = c.voxel_m;

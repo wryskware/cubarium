@@ -68,17 +68,18 @@ const LOG_ORGANIC: f64 = 0.4;
 /// Package N's three are placed wherever their own gates pass, on the same terms: the
 /// vaulttree **first**, as a few single canopy anchors, so the crowns it places shade the
 /// sites the rest are then chosen on; the siphonreed in clumps on the banks its
-/// standing-water gate finds; the lanternberry in small groups. Their rates and caps are
-/// placeholders (`design/backlog.md` §1).
+/// standing-water gate finds (a dense rate over a narrow habitat: a reed bed), the
+/// lanternberry in small groups. Their rates and caps are placeholders
+/// (`design/backlog.md` §1).
 const PRODUCERS: [(Species, f64, usize, usize); 8] = [
-    (Species::Vaulttree, 0.03, 1, 12),
+    (Species::Vaulttree, 0.1, 1, 12),
     (Species::Bloomcrown, 0.25, 3, 64),
     (Species::Umbrellafrond, 0.15, 3, 40),
-    (Species::Siphonreed, 0.3, 6, 64),
+    (Species::Siphonreed, 4.0, 6, 64),
     (Species::Springturf, 0.6, 6, 160),
     (Species::Velvetpad, 0.4, 6, 120),
     (Species::Stonecushion, 0.2, 3, 64),
-    (Species::Lanternberry, 0.1, 3, 40),
+    (Species::Lanternberry, 0.25, 3, 40),
 ];
 
 /// The decomposer grove, on the same terms.

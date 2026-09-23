@@ -68,6 +68,8 @@ pub use step::{Gates, establishment_gates, establishment_gates_on_substrate};
 /// it — the batch observation path, [`FloraView::establishment_gates_over`], where one ray
 /// per site is shared across species.
 pub use step::{adult_light_cover, establishment_gates_with_sky};
+/// Where a falling stand's wood lands (package N's fall), for a diagnostic.
+pub use step::fall_line;
 
 /// The **stands** of the voxel ecology, each one a role: see the preset that carries its
 /// numbers ([`SpeciesConfig::bloomcrown`] and the five after it) for the sentence of
