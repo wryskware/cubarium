@@ -90,6 +90,20 @@ fade), under `assets/atelier`, replacing the `Mask::Axial` cut in `habitat.rs`; 
 G's notes: the stripped-canopy silhouette is less articulated than the side-face plant; the
 water band shows nothing for dead wood; a tall dead column has no authored crown.
 
+Queued by the package V colour pass (2026-09-23; Wrysk: "do a colour pass. feel free to get
+creative with it. we dont need a strict 8/16bit color palette"): **every organism colour on
+the model path is a look placeholder** for Wrysk to judge, all in one file,
+`crates/cubarium/src/voxel/colours.rs`. One hue family per species (bloomcrown hot pink,
+umbrellafrond turquoise, vaulttree emerald with cyan drapes, lanternberry lime with orange
+lanterns, siphonreed pale celadon with magenta heads, springturf mint, velvetpad cobalt,
+stonecushion pale lilac, glowcap aqua); a base-to-tip ramp in `BANDS` **4** height bands;
+shadows pulled **0.55** toward indigo `#140A3C`; coral frondgrazers with cyan eyes, gold
+littershredders; the cropping flash pale yellow `#FFF27A`. Judge with
+`cargo run -p cubarium --release --example voxel_specimens -- OUT.png [--wilt W]`, which
+draws every species at three sizes on a flat strip. Known and not colour: the adult
+siphonreed bakes as a solid 3×3 column (its stems merge at 0.125 m), and glowcap and
+littershredder are one or two cells.
+
 Queued by voxel round 5c: **the frondgrazer's glyph is an interim placeholder.** The
 presenter draws an animal as a 2x1x2 block of voxels in one chartreuse placeholder colour
 (`crates/cubarium/src/voxel/animal.rs`, `INTERIM_ANIMAL_SRGB`), with no articulation, no

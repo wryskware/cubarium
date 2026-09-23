@@ -428,9 +428,10 @@ impl<'a> Reader<'a> {
 
 // --- the palette ---------------------------------------------------------------------
 
-/// The model palette: brief §3's colours, which are the art direction's
-/// (`design/art-direction/Cubarium_Art_Direction_v0.1.md`), by the names the Blender
-/// builders use. `starved` is D3/D4's desaturated sense patch.
+/// The model palette: the material names the Blender builders use, which is what a baked
+/// cell's `material` indexes. The hex values are the builders' own reference colours
+/// (brief §3); the presenter paints from [`super::colours`], by species and height, and
+/// uses the material only to tell a part's shades apart.
 pub const PALETTE: [(&str, u32); 11] = [
     ("plum", 0x002A_0E4A),
     ("violet", 0x003A_1A7A),
@@ -479,19 +480,13 @@ const fn const_eq(a: &str, b: &str) -> bool {
     true
 }
 
-pub const PLUM: u8 = named("plum");
-pub const P1: u8 = named("p1");
+/// The index of a palette name, for a name this module knows is there.
+pub const fn named_index(name: &str) -> u8 {
+    named(name)
+}
+
 pub const WARM: u8 = named("warm");
 pub const MAGENTA: u8 = named("magenta");
-pub const STARVED: u8 = named("starved");
-
-/// A palette colour as sRGB hex. A material the palette does not have (a hand-built test
-/// model's arbitrary numbers) paints in the first entry rather than failing.
-pub fn palette_srgb(material: u8) -> u32 {
-    PALETTE
-        .get(usize::from(material))
-        .map_or(PALETTE[0].1, |(_, c)| *c)
-}
 
 /// How many wilt tints a foliage cell can take, `0` (turgid) to `WILT_LEVELS − 1` (at
 /// `μ = 0`). Quantised so a meadow shares a handful of styles: the GPU path holds 256.
@@ -511,16 +506,6 @@ pub fn wilt_level(moisture: f64) -> u8 {
 /// The ripe fraction at which a bloom opens: a parcel holding half a package
 /// (`design/art-direction/species-dossiers-2026-09-21.md`, "ripe").
 pub const RIPE_AT: f64 = 0.5;
-
-/// What a warm accent paints while it is not ripe: the bloomcrown's core is `p1` until it
-/// turns warm (D9), and a lanternberry bell is closed plum (D12). Other species' warm
-/// accents take the core colour.
-pub fn unripe_material(species: Species) -> u8 {
-    match species {
-        Species::Lanternberry => PLUM,
-        _ => P1,
-    }
-}
 
 /// The hash layer lanternberry fruit is thinned under, apart from every foliage index.
 pub const FRUIT_LAYER: u8 = 0xff;

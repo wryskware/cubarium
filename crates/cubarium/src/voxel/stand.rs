@@ -48,6 +48,7 @@ use cubarium_voxel_flora::{FloraView, MAX_FOLIAGE_LAYERS, Species, Stand};
 
 use crate::present::{mix, srgb_linear};
 
+use super::colours;
 use super::model::{self, ModelCell, ModelLibrary, Tag};
 
 // --- The five palettes ---------------------------------------------------------------
@@ -301,11 +302,52 @@ pub struct Stands {
 const NO_STYLE: u16 = u16::MAX;
 
 /// Which existing part a model cell is drawn as, so it takes that part's lighting.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum PartKind {
     Trunk,
     Crown,
     Heart,
+}
+
+/// Everything a model cell's colours depend on ([`colours::plant`] plus the wilt tint and
+/// whether the face shows its heart stripe), as a dense index for the per-rebuild cache.
+#[derive(Clone, Copy)]
+struct ModelKey {
+    species: Species,
+    tag: Tag,
+    material: u8,
+    band: u8,
+    wilt: u8,
+    heart: bool,
+    ripe: bool,
+}
+
+impl ModelKey {
+    const MATERIALS: usize = model::PALETTE.len();
+    const COUNT: usize = Species::ALL.len()
+        * 4
+        * Self::MATERIALS
+        * colours::BANDS as usize
+        * model::WILT_LEVELS as usize
+        * 4;
+
+    fn index(self) -> usize {
+        // The layer index does not change a colour; only the kind of cell does.
+        let class = match self.tag {
+            Tag::Trunk => 0,
+            Tag::Foliage(_) => 1,
+            Tag::Drape(_) => 2,
+            Tag::Accent => 3,
+        };
+        // A hand-built test model's out-of-palette material paints as the first entry.
+        let material = usize::from(self.material).min(Self::MATERIALS - 1);
+        let mut i = self.species.index();
+        i = i * 4 + class;
+        i = i * Self::MATERIALS + material;
+        i = i * colours::BANDS as usize + usize::from(self.band.min(colours::BANDS - 1));
+        i = i * model::WILT_LEVELS as usize + usize::from(self.wilt.min(model::WILT_LEVELS - 1));
+        i * 4 + usize::from(self.heart) * 2 + usize::from(self.ripe)
+    }
 }
 
 /// The cells of `stand`'s model at its crown height, if the library has one.
@@ -332,7 +374,7 @@ impl Stands {
             grid: vec![Part::None; width as usize * height as usize * depth as usize],
             stamped: Vec::new(),
             styles: Vec::new(),
-            model_styles: vec![NO_STYLE; 256 * usize::from(model::WILT_LEVELS)],
+            model_styles: vec![NO_STYLE; ModelKey::COUNT],
         }
     }
 
@@ -503,8 +545,9 @@ impl Stands {
         } else {
             0.0
         };
-        let unripe = model::unripe_material(stand.species);
         let fruit = stand.species == Species::Lanternberry;
+        // The model's highest cell: each cell's colour comes from its height in the model.
+        let top = cells.iter().map(|m| m.offset[1]).max().unwrap_or(0);
         // A glowcap on dead wood perches on the log, as the glyph does: the log is drawn
         // in the cell above the face, and the fungus grows out of it.
         let on_log = stand.species == Species::Glowcap
@@ -523,9 +566,10 @@ impl Stands {
             if !ok {
                 return;
             }
-            let (material, tint, part) = match m.tag {
-                Tag::Trunk => (m.material, 0, PartKind::Trunk),
-                Tag::Foliage(_) | Tag::Drape(_) => (m.material, wilt, PartKind::Crown),
+            let band = colours::band(m.offset[1], top);
+            let (tint, shown, part) = match m.tag {
+                Tag::Trunk => (0, true, PartKind::Trunk),
+                Tag::Foliage(_) | Tag::Drape(_) => (wilt, true, PartKind::Crown),
                 Tag::Accent => {
                     let shown = m.material != model::WARM
                         || if fruit {
@@ -533,10 +577,19 @@ impl Stands {
                         } else {
                             ripe >= model::RIPE_AT
                         };
-                    (if shown { m.material } else { unripe }, 0, PartKind::Heart)
+                    (0, shown, PartKind::Heart)
                 }
             };
-            let Some(style) = self.model_style(material, tint) else {
+            let key = ModelKey {
+                species: stand.species,
+                tag: m.tag,
+                material: m.material,
+                band,
+                wilt: tint,
+                heart: part == PartKind::Heart,
+                ripe: shown,
+            };
+            let Some(style) = self.model_style(key) else {
                 ok = false;
                 return;
             };
@@ -553,28 +606,27 @@ impl Stands {
         ok
     }
 
-    /// The style of a model material at a wilt level: one per pair per rebuild, shared by
-    /// every stand, so a meadow is a handful of styles and not one per stand. `None` when
-    /// the strip is out of styles.
-    fn model_style(&mut self, material: u8, wilt: u8) -> Option<u16> {
-        let key = usize::from(material) * usize::from(model::WILT_LEVELS) + usize::from(wilt);
-        let cached = self.model_styles[key];
+    /// The style of one model cell's colour key: one per key per rebuild, shared by every
+    /// stand, so a meadow is a handful of styles and not one per stand. `None` when the
+    /// strip is out of styles. The colours are [`colours::plant`]'s.
+    fn model_style(&mut self, key: ModelKey) -> Option<u16> {
+        let index = key.index();
+        let cached = self.model_styles[index];
         if cached != NO_STYLE {
             return Some(cached);
         }
         let style = u16::try_from(self.styles.len())
             .ok()
             .filter(|&s| s != NO_STYLE)?;
-        let c = wilted(
-            srgb_linear(model::palette_srgb(material)),
-            f32::from(wilt) / f32::from(model::WILT_LEVELS - 1),
-        );
+        let sw = colours::plant(key.species, key.tag, key.material, key.band, key.ripe);
+        let wilt = f32::from(key.wilt) / f32::from(model::WILT_LEVELS - 1);
+        let c = |rgb| wilted(srgb_linear(rgb), wilt);
         self.styles.push(Style {
-            wood: c,
-            crown: c,
-            heart: c,
+            wood: c(sw.shadow),
+            crown: c(sw.body),
+            heart: c(sw.glint),
         });
-        self.model_styles[key] = style;
+        self.model_styles[index] = style;
         Some(style)
     }
 

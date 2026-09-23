@@ -39,6 +39,7 @@
 
 pub mod animal;
 pub mod appearance;
+pub mod colours;
 pub mod habitat;
 pub mod model;
 pub mod placement;

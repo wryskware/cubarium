@@ -38,6 +38,7 @@ use cubarium_voxel_fauna::{Animal, FaunaConfig, FaunaView, Founder, Species, Sta
 use crate::present::srgb_linear;
 
 use super::appearance::{self, GlyphId};
+use super::colours;
 use super::model::{self, ModelCell, ModelLibrary, Tag};
 use super::stand::{Cell, Style, wilted};
 
@@ -139,6 +140,37 @@ pub fn interim_style(species: Species) -> Style {
         wood: c,
         crown: c,
         heart: c,
+    }
+}
+
+/// Everything a model cell's colours depend on, as a dense index for the per-rebuild
+/// cache.
+#[derive(Clone, Copy)]
+struct AnimalKey {
+    founder: Founder,
+    material: u8,
+    band: u8,
+    accent: bool,
+    starving: bool,
+    cropping: bool,
+}
+
+impl AnimalKey {
+    const MATERIALS: usize = model::PALETTE.len();
+    const COUNT: usize = 2 * Self::MATERIALS * colours::BANDS as usize * 8;
+
+    fn index(self) -> usize {
+        let founder = match self.founder {
+            Founder::Blind => 0,
+            Founder::Browser => 1,
+        };
+        let material = usize::from(self.material).min(Self::MATERIALS - 1);
+        let mut i = founder * Self::MATERIALS + material;
+        i = i * colours::BANDS as usize + usize::from(self.band.min(colours::BANDS - 1));
+        i * 8
+            + usize::from(self.accent) * 4
+            + usize::from(self.starving) * 2
+            + usize::from(self.cropping)
     }
 }
 
@@ -383,7 +415,7 @@ impl Animals {
             grid: vec![AnimalPart::None; width as usize * height as usize * depth as usize],
             stamped: Vec::new(),
             styles: Vec::new(),
-            model_styles: vec![u16::MAX; 256 * 2],
+            model_styles: vec![u16::MAX; AnimalKey::COUNT],
         }
     }
 
@@ -464,12 +496,26 @@ impl Animals {
             z: (animal.pose.z / voxel_m).floor().max(0.0) as u32,
         };
         let starving = is_starving(animal);
+        let cropping = animal.state == State::Cropping;
+        let Some(founder) = animal.founder else {
+            return true;
+        };
+        // The body's highest cell: the back is lit and the belly dark.
+        let top = cells.iter().map(|m| m.offset[1]).max().unwrap_or(0);
         let mut ok = true;
         model::each_animal_cell(cells, anchor, animal.pose.heading_rad, view, |cell, m| {
             if !ok {
                 return;
             }
-            let Some(style) = self.model_style(m.material, m.tag == Tag::Accent, starving) else {
+            let key = AnimalKey {
+                founder,
+                material: m.material,
+                band: colours::band(m.offset[1], top),
+                accent: m.tag == Tag::Accent,
+                starving,
+                cropping,
+            };
+            let Some(style) = self.model_style(key) else {
                 ok = false;
                 return;
             };
@@ -478,27 +524,41 @@ impl Animals {
         ok
     }
 
-    /// The style of a model material, starving or not, shared across animals.
-    fn model_style(&mut self, material: u8, accent: bool, starving: bool) -> Option<u16> {
-        let key = usize::from(material) * 2 + usize::from(starving);
-        let cached = self.model_styles[key];
+    /// The style of one model cell's colour key, shared across animals. The colours are
+    /// [`colours::animal`]'s; a starving body takes the wilt tint and its sense patch
+    /// the starved accent.
+    fn model_style(&mut self, key: AnimalKey) -> Option<u16> {
+        let index = key.index();
+        let cached = self.model_styles[index];
         if cached != u16::MAX {
             return Some(cached);
         }
         let style = u16::try_from(self.styles.len())
             .ok()
             .filter(|&s| s != u16::MAX)?;
-        let c = match (starving, accent) {
-            (false, _) => srgb_linear(model::palette_srgb(material)),
-            (true, true) => srgb_linear(model::palette_srgb(model::STARVED)),
-            (true, false) => wilted(srgb_linear(model::palette_srgb(material)), STARVING_TINT),
+        let sw = colours::animal(
+            key.founder,
+            key.material,
+            key.band,
+            key.accent,
+            key.cropping,
+        );
+        let paint = |rgb| {
+            let c = srgb_linear(rgb);
+            if key.starving {
+                wilted(c, STARVING_TINT)
+            } else {
+                c
+            }
         };
-        self.styles.push(Style {
-            wood: c,
-            crown: c,
-            heart: c,
-        });
-        self.model_styles[key] = style;
+        let (wood, crown, heart) = if key.starving && key.accent {
+            let c = srgb_linear(colours::STARVED_ACCENT);
+            (c, c, c)
+        } else {
+            (paint(sw.shadow), paint(sw.body), paint(sw.glint))
+        };
+        self.styles.push(Style { wood, crown, heart });
+        self.model_styles[index] = style;
         Some(style)
     }
 
