@@ -1,0 +1,30 @@
+# The natural `small` ring on the panel (VR-2): what the panel ran until the terrarium
+# replaced it on 2026-09-23. Not installed; copy it over `voxel.toml` to run it.
+#
+# 160 voxels wide * 4 px/voxel = 640 px raster width.
+# 360 px raster height rotated 90 degrees with 3x nearest-neighbour upscale
+# fills the 1080x1920 Waveshare panel exactly without letterbox or pillarbox.
+
+tilt_degrees = 30.0
+px_per_voxel = 4
+raster_height = 360
+haze = 0.55
+water_alpha = 0.5
+dither = 0.04
+sky_gradient = true
+
+[world]
+width = 160
+# 72 voxels leave room for the `small` ring's raised shelves and valleys.
+# 4 px * 72 + 2 px * 24 of depth = 336 of the 360 px raster.
+height = 72
+depth = 24
+voxel_m = 0.125
+water_substeps = 4
+
+# The shipped `small` landscape: local shelves with grottos under their ledges, soil
+# valleys between, and connected pools. The rain, evaporation and aquifer keys
+# that used to sit here are the recipe's business now (`Recipe.water`); the panel does not
+# state them.
+[world.landform]
+preset = "small"
