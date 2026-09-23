@@ -9,9 +9,9 @@
 use std::sync::atomic::AtomicBool;
 
 use cubarium_search::es::voxel::driver::{self, Limits};
+use cubarium_search::es::voxel::imitate;
 use cubarium_search::es::voxel::landscape::{Landscape, WaterState};
 use cubarium_search::es::voxel::task::Prepared;
-use cubarium_search::es::voxel::imitate;
 use cubarium_search::es::voxel::{EpisodeDriver, VoxelControl, teacher_sink};
 use cubarium_voxel::{Landform, World};
 use cubarium_voxel_fauna::{Fauna, FaunaConfig, Founder};
@@ -177,7 +177,10 @@ fn landscape_teacher_recording_keeps_one_stream_per_body() {
 
         let sink = teacher_sink();
         let recorded = run(&prepared, &plain.clone().recording(sink.clone()), 9);
-        assert_eq!(recorded, bare, "{founder:?}: the recording wrapper is transparent");
+        assert_eq!(
+            recorded, bare,
+            "{founder:?}: the recording wrapper is transparent"
+        );
 
         let buffers = sink.lock().expect("sink").clone();
         assert_eq!(
@@ -264,9 +267,17 @@ fn a_mixed_run_draws_landscapes_and_writes_held_out_checkpoints() {
     // Initial centre on 1 arena + 1 landscape; then (2 signs + centre) × 2 fixtures × 2.
     assert_eq!(report.episodes_attempted, 2 + 2 * 3 * 2);
     let updates: Vec<u32> = report.held_out.iter().map(|h| h.updates).collect();
-    assert_eq!(updates, vec![0, 1, 2], "held-out at 0 and after every update");
+    assert_eq!(
+        updates,
+        vec![0, 1, 2],
+        "held-out at 0 and after every update"
+    );
     let cp = trainer::load_checkpoint(&out.join("checkpoint.json"), None).expect("checkpoint");
-    let mix = cp.protocol.mix.as_ref().expect("the mix is in the protocol");
+    let mix = cp
+        .protocol
+        .mix
+        .as_ref()
+        .expect("the mix is in the protocol");
     assert_eq!(mix.pool.len(), 2);
     assert_eq!(mix.arena_grids, vec!["0.25m".to_string()]);
     for h in &report.held_out {
@@ -287,4 +298,104 @@ fn a_mixed_run_draws_landscapes_and_writes_held_out_checkpoints() {
         );
     }
     let _ = std::fs::remove_dir_all(&out);
+}
+
+/// P5-C (coordinator's decision): a landscape's acting bodies start on faces drawn from
+/// the standable faces of the lineage's judged components, not on the seeder's founder
+/// faces — deterministic per episode seed, each start standable and in one of those
+/// components, distinct, and (mid-shower) still standable in that water.
+#[test]
+fn acting_bodies_start_on_drawn_faces_of_the_judged_components() {
+    use cubarium_voxel_fauna::RouteMap;
+
+    let founded = found::found_a_landscape(
+        &tiny(),
+        Some(TINY_SEED),
+        1,
+        1,
+        || unreachable!("an asked-for seed draws nothing"),
+        |w: &World| {
+            (
+                Flora::new(FloraConfig::for_voxel_size(w.config().voxel_m)),
+                Fauna::new(FaunaConfig::default()),
+            )
+        },
+        [3, 3],
+        |_| true,
+    );
+    let cfg = FaunaConfig::default();
+    for founder in Founder::ALL {
+        let map = RouteMap::for_founder(&founded.world.view(), cfg.founder(founder));
+        let verdict = &founded.seeded.acceptance.lineages[founder.index()];
+        let habitable: Vec<usize> = verdict
+            .components
+            .iter()
+            .filter(|c| c.habitable)
+            .map(|c| c.component)
+            .collect();
+        let judged: Vec<usize> = if habitable.is_empty() {
+            verdict.components.iter().map(|c| c.component).collect()
+        } else {
+            habitable
+        };
+        assert!(
+            !judged.is_empty(),
+            "{founder:?}: the seeder judged a component"
+        );
+        let land_faces =
+            cubarium_search::es::voxel::landscape::start_faces_of(&founded, &cfg, founder);
+        assert!(
+            land_faces.len() > 3,
+            "{founder:?}: a pool to draw from, or the test proves nothing"
+        );
+        for f in &land_faces {
+            let c = map.component_of(*f).expect("every start face is standable");
+            assert!(
+                judged.contains(&c),
+                "{founder:?}: {f:?} is in a judged component"
+            );
+        }
+    }
+
+    let land = Landscape::from_founded("tiny", TINY_SEED, founded);
+    for founder in Founder::ALL {
+        for water in WaterState::ALL {
+            let prepared = land.prepare(founder, water).expect("the tiny ring rains");
+            let a = prepared.acting_starts(11);
+            assert_eq!(a, prepared.acting_starts(11), "a pure function of the seed");
+            assert_ne!(a, prepared.acting_starts(12), "another seed, other starts");
+            assert_eq!(a.len(), prepared.acting().count(), "the seeder's count");
+            let mut sites: Vec<_> = a.iter().map(|p| (p.site.x, p.site.y, p.site.z)).collect();
+            sites.sort_unstable();
+            sites.dedup();
+            assert_eq!(sites.len(), a.len(), "distinct faces");
+            for p in &a {
+                assert_eq!(p.founder, founder);
+                assert!(prepared.start_faces().contains(&p.site));
+                assert!((0.0..std::f64::consts::TAU).contains(&p.heading_rad));
+            }
+            let seeder: Vec<_> = prepared.acting().map(|p| p.site).collect();
+            assert!(
+                a.iter().any(|p| !seeder.contains(&p.site)),
+                "{founder:?}: the starts are drawn, not the seeder's faces"
+            );
+            if water == WaterState::MidShower {
+                let standable =
+                    RouteMap::for_founder(&prepared.world().view(), cfg.founder(founder));
+                for p in &a {
+                    assert!(
+                        standable.face(p.site).is_some(),
+                        "{founder:?}: a mid-shower start is standable in that water"
+                    );
+                }
+            }
+            // The episode runs them all.
+            let e = run(
+                &Prepared::Landscape(Box::new(prepared)),
+                &EpisodeDriver::control(VoxelControl::StationaryFeeding, founder),
+                11,
+            );
+            assert_eq!(e.bodies.len(), a.len());
+        }
+    }
 }

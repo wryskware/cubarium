@@ -1434,7 +1434,9 @@ pub fn holdout_table(
         }
     }
     if per_fixture {
-        println!("fixture,arm,label,score,survived,intake,walked_m,blocked_motor_share,starved,drowned");
+        println!(
+            "fixture,arm,label,score,survived,intake,walked_m,blocked_motor_share,starved,drowned"
+        );
         for (name, episodes) in &per {
             for e in episodes {
                 println!(
@@ -1445,10 +1447,8 @@ pub fn holdout_table(
                     e.intake_organic,
                     e.diagnostics.walked_m,
                     e.diagnostics.blocked_motor_share,
-                    e.diagnostics.deaths_by_cause
-                        [cubarium_voxel_fauna::Departure::Starved.index()],
-                    e.diagnostics.deaths_by_cause
-                        [cubarium_voxel_fauna::Departure::Drowned.index()],
+                    e.diagnostics.deaths_by_cause[cubarium_voxel_fauna::Departure::Starved.index()],
+                    e.diagnostics.deaths_by_cause[cubarium_voxel_fauna::Departure::Drowned.index()],
                 );
             }
         }

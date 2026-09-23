@@ -601,7 +601,7 @@ fn landscape_episode(
 ) -> Result<(Episode, Sim), EpisodeError> {
     let founder = prepared.founder;
     check_founder(driver, founder, job)?;
-    let acting: Vec<Placement> = prepared.acting().copied().collect();
+    let acting: Vec<Placement> = prepared.acting_starts(episode_seed);
     let others: Vec<Placement> = prepared.bystanders().copied().collect();
     if acting.is_empty() {
         return invalid(

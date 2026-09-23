@@ -32,7 +32,8 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use cubarium_voxel::World;
-use cubarium_voxel_fauna::{Fauna, FaunaConfig, Founder, Senses};
+use cubarium_voxel_fauna::{Fauna, FaunaConfig, Founder, RouteMap, Senses};
+use cubarium_voxel_flora::Site;
 use cubarium_voxel_flora::{Flora, FloraConfig};
 use cubarium_voxel_sim::Placement;
 use cubarium_voxel_sim::found::{self, Founded};
@@ -97,6 +98,12 @@ pub struct Landscape {
     mid_shower: Option<World>,
     flora: Flora,
     placements: Vec<Placement>,
+    /// Per lineage ([`Founder::index`]): the standable faces of the walkable components
+    /// the seeder's acceptance judged habitable, on the drained world — where acting
+    /// bodies start ([`start_faces_of`]).
+    start_faces: [Vec<Site>; Founder::COUNT],
+    /// Per lineage: the faces a body of it can stand on at all in the mid-shower world.
+    mid_shower_standable: Option<[Vec<Site>; Founder::COUNT]>,
 }
 
 impl Landscape {
@@ -134,6 +141,15 @@ impl Landscape {
     /// A landscape out of a founding the caller ran itself (a test's small ring, say).
     /// The founders' faces and headings are read off the seeded animal layer.
     pub fn from_founded(preset: &str, seed_base: u64, founded: Founded) -> Landscape {
+        let cfg = FaunaConfig::default();
+        let start_faces = Founder::ALL.map(|f| start_faces_of(&founded, &cfg, f));
+        let mid_shower_standable = founded.mid_shower.as_ref().map(|w| {
+            Founder::ALL.map(|f| {
+                let mut faces = RouteMap::for_founder(&w.view(), cfg.founder(f)).faces;
+                faces.sort_unstable_by_key(|s| (s.x, s.y, s.z));
+                faces
+            })
+        });
         let placements = founded
             .fauna
             .view()
@@ -156,7 +172,14 @@ impl Landscape {
             mid_shower: founded.mid_shower,
             flora: founded.flora,
             placements,
+            start_faces,
+            mid_shower_standable,
         }
+    }
+
+    /// The faces `founder`'s acting bodies start on in the drained world.
+    pub fn start_faces(&self, founder: Founder) -> &[Site] {
+        &self.start_faces[founder.index()]
     }
 
     /// Every founder the seeder placed, both lineages, in id order.
@@ -176,6 +199,19 @@ impl Landscape {
             WaterState::Drained => self.drained.clone(),
             WaterState::MidShower => self.mid_shower.clone()?,
         };
+        // Mid-shower, a start must still be a face the body can stand on in that water.
+        let start_faces: Vec<Site> = match (water, &self.mid_shower_standable) {
+            (WaterState::MidShower, Some(standable)) => self.start_faces[founder.index()]
+                .iter()
+                .copied()
+                .filter(|s| {
+                    standable[founder.index()]
+                        .binary_search_by_key(&(s.x, s.y, s.z), |f| (f.x, f.y, f.z))
+                        .is_ok()
+                })
+                .collect(),
+            _ => self.start_faces[founder.index()].clone(),
+        };
         let mut senses = Senses::new();
         senses.settle(&world.view(), &self.flora.view());
         Some(PreparedLandscape {
@@ -187,6 +223,7 @@ impl Landscape {
             world,
             flora: self.flora.clone(),
             placements: self.placements.clone(),
+            start_faces,
             senses,
             horizon: LANDSCAPE_HORIZON_TICKS,
         })
@@ -208,6 +245,9 @@ pub struct PreparedLandscape {
     world: World,
     flora: Flora,
     placements: Vec<Placement>,
+    /// Where this lineage's acting bodies may start: the drained world's accepted
+    /// components' standable faces, still standable in this water state.
+    start_faces: Vec<Site>,
     senses: Senses,
     /// The episode horizon this fixture fixes: [`LANDSCAPE_HORIZON_TICKS`] (D8), or a
     /// test's shorter one ([`PreparedLandscape::with_horizon`]).
@@ -241,9 +281,53 @@ impl PreparedLandscape {
         &self.placements
     }
 
-    /// The placements whose bodies run the candidate: this fixture's lineage.
+    /// The seeder's placements of this fixture's lineage. Acting bodies do **not**
+    /// start here ([`PreparedLandscape::acting_starts`]); their count is the episode's.
     pub fn acting(&self) -> impl Iterator<Item = &Placement> {
         self.placements.iter().filter(|p| p.founder == self.founder)
+    }
+
+    /// Where this lineage's acting bodies may start.
+    pub fn start_faces(&self) -> &[Site] {
+        &self.start_faces
+    }
+
+    /// Where one episode's acting bodies start (P5-C, coordinator's decision): as many
+    /// bodies as the seeder placed of this lineage, each on a face drawn uniformly from
+    /// [`PreparedLandscape::start_faces`] — distinct while the pool lasts — with a
+    /// heading drawn uniformly, both a pure function of `episode_seed`. Not the seeder's
+    /// founder faces: live, only the eight t0 founders ever stand on a starter tile, and
+    /// every later body has to forage. With no start face at all the seeder's own
+    /// placements are kept.
+    pub fn acting_starts(&self, episode_seed: u64) -> Vec<Placement> {
+        let seeder: Vec<Placement> = self.acting().copied().collect();
+        if self.start_faces.is_empty() {
+            return seeder;
+        }
+        let mut state = episode_seed ^ self.seed_base.rotate_left(17) ^ START_SALT;
+        let mut next = move || {
+            state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = state;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^ (z >> 31)
+        };
+        let mut pool: Vec<Site> = self.start_faces.clone();
+        let mut out = Vec::with_capacity(seeder.len());
+        for _ in 0..seeder.len() {
+            if pool.is_empty() {
+                pool = self.start_faces.clone();
+            }
+            let i = (next() % pool.len() as u64) as usize;
+            let site = pool.swap_remove(i);
+            let heading_rad = (next() >> 11) as f64 / (1u64 << 53) as f64 * std::f64::consts::TAU;
+            out.push(Placement {
+                founder: self.founder,
+                site,
+                heading_rad,
+            });
+        }
+        out
     }
 
     /// The other lineage's placements, which run their own heuristics.
@@ -278,6 +362,38 @@ impl std::fmt::Debug for PreparedLandscape {
             .field("acting", &self.acting().count())
             .finish()
     }
+}
+
+/// The start draw's own salt.
+const START_SALT: u64 = 0x_57A2_7F0C_E5D1_0000;
+
+/// The standable faces of `founder`'s walkable components that the seeder's acceptance
+/// judged **habitable**, on the founded (drained) world, sorted. The route map is the
+/// acceptance's own ([`RouteMap::for_founder`] on the same world and physiology), so its
+/// component indices are the verdict's. A world whose verdict holds no habitable
+/// component for the lineage (a test ring accepted unconditionally) falls back to the
+/// components the lineage's founders were placed in.
+pub fn start_faces_of(founded: &Founded, cfg: &FaunaConfig, founder: Founder) -> Vec<Site> {
+    let map = RouteMap::for_founder(&founded.world.view(), cfg.founder(founder));
+    let verdict = &founded.seeded.acceptance.lineages[founder.index()];
+    let mut keep: Vec<usize> = verdict
+        .components
+        .iter()
+        .filter(|c| c.habitable)
+        .map(|c| c.component)
+        .collect();
+    if keep.is_empty() {
+        keep = verdict.components.iter().map(|c| c.component).collect();
+    }
+    let mut faces: Vec<Site> = map
+        .faces
+        .iter()
+        .zip(&map.components)
+        .filter(|(_, c)| keep.contains(c))
+        .map(|(f, _)| *f)
+        .collect();
+    faces.sort_unstable_by_key(|s| (s.x, s.y, s.z));
+    faces
 }
 
 /// A set of landscapes to train or evaluate on: one preset, its seed bases, one water
@@ -453,9 +569,8 @@ pub fn held_out_pool(
 /// worlds) and a fresh draw the next. A partial Fisher–Yates over splitmix64; `k` is
 /// clamped to the pool.
 pub fn generation_draw(train_seed: u64, generation: u32, pool: usize, k: usize) -> Vec<usize> {
-    let mut state = train_seed
-        ^ u64::from(generation).wrapping_mul(0xD1B5_4A32_D192_ED03)
-        ^ DRAW_SALT;
+    let mut state =
+        train_seed ^ u64::from(generation).wrapping_mul(0xD1B5_4A32_D192_ED03) ^ DRAW_SALT;
     let mut next = move || {
         state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
         let mut z = state;
@@ -490,8 +605,16 @@ mod tests {
         sorted.dedup();
         assert_eq!(sorted.len(), 16, "sixteen distinct worlds");
         assert!(a.iter().all(|&i| i < 96));
-        assert_eq!(a, generation_draw(7, 3, 96, 16), "a pure function of its seed");
-        assert_ne!(a, generation_draw(7, 4, 96, 16), "a fresh draw each generation");
+        assert_eq!(
+            a,
+            generation_draw(7, 3, 96, 16),
+            "a pure function of its seed"
+        );
+        assert_ne!(
+            a,
+            generation_draw(7, 4, 96, 16),
+            "a fresh draw each generation"
+        );
         assert_ne!(a, generation_draw(8, 3, 96, 16), "and each run seed");
         assert_eq!(generation_draw(7, 3, 5, 16).len(), 5, "clamped to the pool");
         // Over many generations every world is drawn.
