@@ -395,6 +395,8 @@ fn neighbours(c: &Config, i: usize) -> [Option<usize>; 6] {
 /// Above the highest wet cell of the sky's run there is only dry air, which is exactly
 /// what the walk stepped over.
 fn sky_tops(w: &mut World) -> Vec<u32> {
+    #[cfg(feature = "profile")]
+    let _timer = crate::profile::start(crate::profile::Phase::SkyTops);
     // The wet set is a cache and may be stale between ticks (a decoded world, a command
     // before the first step); this reads it, so it must be true first.
     begin(w);
@@ -491,11 +493,13 @@ fn open_water_cell_walk(w: &World, x: i64, z: u32) -> Option<usize> {
 /// has to rebuild them first. Every entry point that runs phases — [`step`] here and the
 /// schedule in `cubarium-voxel-sim` — calls this once before the first phase of a tick.
 pub fn begin(world: &mut World) {
-    if world.wet.needs_rebuild(world.config.cells())
-        || world.damp.needs_rebuild(world.config.cells())
-    {
-        world.rebuild_active_sets();
-    }
+    crate::voxel_phase!(Begin, {
+        if world.wet.needs_rebuild(world.config.cells())
+            || world.damp.needs_rebuild(world.config.cells())
+        {
+            world.rebuild_active_sets();
+        }
+    });
 }
 
 /// One tick of water, as one call. **The phase order is the rule** and it is written out
@@ -530,11 +534,15 @@ pub fn step(world: &mut World, threads: usize) {
 /// sky-exposed column from nowhere; under the closed one it is [`shower`], which falls
 /// only while a shower is running and only out of the atmosphere store.
 pub fn rain(w: &mut World) {
+    #[cfg(feature = "profile")]
+    let census = crate::profile::census::before(w, crate::profile::census::Tag::Rain);
     if w.config.closed_water_budget {
         shower(w);
     } else {
         prescribed_rain(w);
     }
+    #[cfg(feature = "profile")]
+    crate::profile::census::after(w, census);
 }
 
 fn prescribed_rain(w: &mut World) {
@@ -552,6 +560,10 @@ fn prescribed_rain(w: &mut World) {
 }
 
 pub fn evaporate(w: &mut World) {
+    // Measurement only. An early return inside the phase skips `after`, and every early
+    // return in these phases comes before any water has moved, so nothing is missed.
+    #[cfg(feature = "profile")]
+    let census = crate::profile::census::before(w, crate::profile::census::Tag::Evaporate);
     crate::voxel_phase!(Evaporate, {
         let per_column = w.config.evaporation_m_per_s * DT * w.config.cell_area();
         if per_column <= 0.0 {
@@ -567,6 +579,8 @@ pub fn evaporate(w: &mut World) {
         w.ledger.evaporation_out += debited;
         release(w, debited);
     });
+    #[cfg(feature = "profile")]
+    crate::profile::census::after(w, census);
 }
 
 /// The weather stream: splitmix64 over the world seed, a fixed token and the shower
@@ -725,13 +739,19 @@ fn deliver(w: &mut World) {
 /// a bitmap ([`crate::sparse::CellSet::sorted_into`]) rather than sorted, and that is
 /// measured as part of the phase (`design/handoffs/voxel-sparse-fall-2026-09-18.md`).
 pub fn fall(w: &mut World) {
+    #[cfg(feature = "profile")]
+    let census = crate::profile::census::before(w, crate::profile::census::Tag::Fall);
     crate::voxel_phase!(Fall, {
         let plane = w.config.width as usize * w.config.depth as usize;
         SCRATCH.with(|slot| {
             let sc = &mut *slot.borrow_mut();
+            #[cfg(feature = "profile")]
+            let set = crate::profile::start(crate::profile::Phase::FallSet);
             w.wet.sorted_into(&mut sc.bits, &mut sc.fall);
             #[cfg(feature = "profile")]
-            let mut visited = 0u64;
+            drop(set);
+            #[cfg(feature = "profile")]
+            let (mut visited, mut moved) = (0u64, 0u64);
             for &i in &sc.fall {
                 // The bottom row has nowhere to fall to; it is in the snapshot only because
                 // the snapshot is the whole wet set.
@@ -748,13 +768,22 @@ pub fn fall(w: &mut World) {
                 let below = i - plane;
                 let want = free_m3(w, i).min(free_room_m3(w, below));
                 if want > 0.0 {
-                    transfer(w, (i, Store::Free), (below, Store::Free), want);
+                    let _got = transfer(w, (i, Store::Free), (below, Store::Free), want);
+                    #[cfg(feature = "profile")]
+                    if _got > 0.0 {
+                        moved += 1;
+                    }
                 }
             }
             #[cfg(feature = "profile")]
-            crate::profile::add(crate::profile::Count::FallCells, visited);
+            {
+                crate::profile::add(crate::profile::Count::FallCells, visited);
+                crate::profile::add(crate::profile::Count::FallMoved, moved);
+            }
         });
     });
+    #[cfg(feature = "profile")]
+    crate::profile::census::after(w, census);
 }
 
 /// Whether the centre of row `y` lies at or below the water table `table`, in metres
@@ -792,6 +821,9 @@ fn submerged(c: &Config, y: u32, table: f64) -> bool {
 /// The named spring is untouched and still one cell with its own conductance: it is the
 /// world's one *feature*, while this is the ambient boundary the whole world sits on.
 pub fn water_table(w: &mut World) {
+    // Measurement only; an early return skips `after` before anything has moved.
+    #[cfg(feature = "profile")]
+    let census = crate::profile::census::before(w, crate::profile::census::Tag::WaterTable);
     crate::voxel_phase!(WaterTable, {
         let c = w.config.clone();
         let table = c.aquifer_head_m(w.aquifer_m3);
@@ -875,6 +907,8 @@ pub fn water_table(w: &mut World) {
 
         w.aquifer_m3 = (charged - taken).max(0.0);
     });
+    #[cfg(feature = "profile")]
+    crate::profile::census::after(w, census);
 }
 
 /// Scratch buffers for [`exchange`], reused for the life of the thread so the phase
@@ -949,6 +983,10 @@ struct Scratch {
     /// row's neighbour cell is `y * plane + nbr[col][k]`: no `coords`, no `rem_euclid`.
     nbr: Vec<[u32; 4]>,
     nbr_dims: (usize, usize),
+    /// Measurement only: the substep's stamp on every cell an edge actually moved water
+    /// into or out of, for the census's no-edge count.
+    #[cfg(feature = "profile")]
+    moved_stamp: Vec<u32>,
 }
 
 impl Scratch {
@@ -963,6 +1001,10 @@ impl Scratch {
             self.proposed_in = vec![0.0; n];
             self.accept = vec![0.0; n];
             self.delta = vec![0.0; n];
+            #[cfg(feature = "profile")]
+            {
+                self.moved_stamp = vec![0; n];
+            }
             self.stamp = 0;
         }
         if self.col_stamp.len() != plane {
@@ -983,6 +1025,8 @@ impl Scratch {
         if self.stamp == 0 {
             self.col_stamp.fill(0);
             self.touch_stamp.fill(0);
+            #[cfg(feature = "profile")]
+            self.moved_stamp.fill(0);
             self.stamp = 1;
         }
     }
@@ -1065,7 +1109,11 @@ fn rows_of(cells: &[usize], plane: usize, rows: &mut Vec<u32>) {
 /// `threads` is unused since package PA: the scan it split is serial again (see
 /// [`Scratch`]). It stays in the signature so the schedule's callers are unchanged.
 pub fn exchange(w: &mut World, threads: usize) {
-    crate::voxel_phase!(Exchange, { exchange_inner(w, threads) })
+    #[cfg(feature = "profile")]
+    let census = crate::profile::census::before(w, crate::profile::census::Tag::Exchange);
+    crate::voxel_phase!(Exchange, { exchange_inner(w, threads) });
+    #[cfg(feature = "profile")]
+    crate::profile::census::after(w, census);
 }
 
 fn exchange_inner(w: &mut World, threads: usize) {
@@ -1087,6 +1135,8 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
     w.ensure_void_runs();
     SCRATCH.with(|slot| {
         let sc = &mut *slot.borrow_mut();
+        #[cfg(feature = "profile")]
+        let mut lap = crate::profile::start(crate::profile::Phase::ExchangeSet);
         sc.ensure(n, plane, width, depth);
         sc.next_stamp();
         let stamp = sc.stamp;
@@ -1136,7 +1186,11 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
 
         // ---- one pass per active column: heads, and (dense fallback only) where a push
         // displaces to.
+        #[cfg(feature = "profile")]
+        lap.next(crate::profile::Phase::ExchangeScan);
         scan_columns(w, plane, use_masks, sc);
+        #[cfg(feature = "profile")]
+        lap.next(crate::profile::Phase::ExchangeHeads);
 
         // ---- head through submerged water. A full cell has no free surface of its own,
         // so it carries the highest head that reaches it across its horizontal faces: that
@@ -1155,7 +1209,13 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
                 sc.full.push(k as u32);
             }
         }
+        #[cfg(feature = "profile")]
+        let mut passes = 0u64;
         for _ in 0..HEAD_PASSES {
+            #[cfg(feature = "profile")]
+            {
+                passes += 1;
+            }
             let mut raised = false;
             for f in 0..sc.full.len() {
                 let k = sc.full[f] as usize;
@@ -1187,8 +1247,25 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
                 break;
             }
         }
+        #[cfg(feature = "profile")]
+        {
+            use crate::profile::{Count, add};
+            let full = sc.full.len() as u64;
+            add(Count::ExchangeFull, full);
+            add(Count::HeadPasses, passes);
+            add(Count::HeadPassCells, passes * full);
+            lap.next(crate::profile::Phase::ExchangeOffers);
+        }
 
         // ---- the proposals, all read from the old water.
+        #[cfg(feature = "profile")]
+        let census = crate::profile::census::open();
+        #[cfg(feature = "profile")]
+        let (mut raised, mut edge_depth, mut edge_depth_unpacked) = (
+            0u64,
+            [0u64; crate::profile::census::BINS],
+            [0u64; crate::profile::census::BINS],
+        );
         sc.edges.clear();
         sc.touched.clear();
         for k in 0..sc.active.len() {
@@ -1284,11 +1361,17 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
             let share = 1.0 / faces.max(1) as f64;
             let total = total * share;
             let scale = share * if total > have { have / total } else { 1.0 };
+            #[cfg(feature = "profile")]
+            let edges_before = sc.edges.len();
             for oi in 0..sc.offers.len() {
                 let (target, q) = sc.offers[oi];
                 let q = q * scale;
                 if q <= 0.0 {
                     continue;
+                }
+                #[cfg(feature = "profile")]
+                if target >= base + plane {
+                    raised += 1;
                 }
                 sc.edges.push((i as u32, target as u32, q));
                 sc.proposed_in[target] += q;
@@ -1299,6 +1382,25 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
                     }
                 }
             }
+            #[cfg(feature = "profile")]
+            if census {
+                let b = crate::profile::census::bin(have);
+                let made = (sc.edges.len() - edges_before) as u64;
+                edge_depth[b] += made;
+                // Unpacked: not full, with a wet cell above it in its own column, so its
+                // head is its run's top however little water lies between.
+                let above = sc.wet_mask[col].checked_shr(y as u32 + 1).unwrap_or(0) & 1;
+                if use_masks && have < 1.0 - ROOM_EPS && above != 0 {
+                    edge_depth_unpacked[b] += made;
+                }
+            }
+        }
+
+        #[cfg(feature = "profile")]
+        {
+            crate::profile::add(crate::profile::Count::ExchangeEdges, sc.edges.len() as u64);
+            crate::profile::add(crate::profile::Count::ExchangeRaised, raised);
+            lap.next(crate::profile::Phase::ExchangeApply);
         }
 
         // ---- what each destination can actually take, whoever offered it.
@@ -1315,6 +1417,8 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
 
         // ---- apply: one subtraction and one addition per edge, accumulated per cell so
         // that a cell touched by several edges is written once.
+        #[cfg(feature = "profile")]
+        let (mut moved_edges, mut net_cells) = (0u64, 0u64);
         for ei in 0..sc.edges.len() {
             let (from, to, q) = sc.edges[ei];
             let moved = q * sc.accept[to as usize];
@@ -1323,6 +1427,14 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
             }
             sc.delta[from as usize] -= moved;
             sc.delta[to as usize] += moved;
+            #[cfg(feature = "profile")]
+            {
+                moved_edges += 1;
+                if census {
+                    sc.moved_stamp[from as usize] = stamp;
+                    sc.moved_stamp[to as usize] = stamp;
+                }
+            }
         }
         for ti in 0..sc.touched.len() {
             let cell = sc.touched[ti];
@@ -1333,6 +1445,47 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
             if d != 0.0 {
                 w.free[cell] = (w.free[cell] + d).clamp(0.0, 1.0);
                 w.wet.set(cell, w.free[cell] > 0.0);
+                #[cfg(feature = "profile")]
+                {
+                    net_cells += 1;
+                }
+            }
+        }
+        #[cfg(feature = "profile")]
+        {
+            crate::profile::add(crate::profile::Count::ExchangeMoved, moved_edges);
+            crate::profile::add(crate::profile::Count::ExchangeNet, net_cells);
+            drop(lap);
+            if census {
+                // The substep's shape, for the census only: the active wet cells no
+                // accepted edge touched; the wet runs and columns of its masks; and the
+                // **unpacked** cells, wet and not full under a wet cell, whose head is
+                // their run's top although the water between is not there.
+                let no_edge = sc
+                    .active
+                    .iter()
+                    .filter(|&&i| sc.moved_stamp[i] != stamp)
+                    .count() as u64;
+                let (mut runs, mut columns, mut unpacked) = (0u64, 0u64, 0u64);
+                if use_masks {
+                    for &col in &sc.columns {
+                        let (m, f) = (sc.wet_mask[col], sc.full_mask[col]);
+                        if m != 0 {
+                            columns += 1;
+                            runs += u64::from((m & !(m << 1)).count_ones());
+                            unpacked += u64::from((m & !f & (m >> 1)).count_ones());
+                        }
+                    }
+                }
+                crate::profile::census::exchange_substep(crate::profile::census::Substep {
+                    wet: sc.active.len() as u64,
+                    no_edge,
+                    runs,
+                    columns,
+                    unpacked,
+                    edge_depth,
+                    edge_depth_unpacked,
+                });
             }
         }
     });
@@ -1522,6 +1675,8 @@ fn scan_column(
 }
 
 pub fn infiltrate(w: &mut World, dt: f64) {
+    #[cfg(feature = "profile")]
+    let census = crate::profile::census::before(w, crate::profile::census::Tag::Infiltrate);
     crate::voxel_phase!(Infiltrate, {
         let c = w.config.clone();
         let plane = c.width as usize * c.depth as usize;
@@ -1531,7 +1686,11 @@ pub fn infiltrate(w: &mut World, dt: f64) {
         // Ascending, read back through the shared scratch rather than copied fresh.
         SCRATCH.with(|slot| {
             let sc = &mut *slot.borrow_mut();
+            #[cfg(feature = "profile")]
+            let set = crate::profile::start(crate::profile::Phase::InfiltrateSet);
             w.wet.sorted_into(&mut sc.bits, &mut sc.fall);
+            #[cfg(feature = "profile")]
+            drop(set);
             #[cfg(feature = "profile")]
             crate::profile::add(crate::profile::Count::InfiltrateCells, sc.fall.len() as u64);
             for &i in &sc.fall {
@@ -1548,9 +1707,13 @@ pub fn infiltrate(w: &mut World, dt: f64) {
             }
         });
     });
+    #[cfg(feature = "profile")]
+    crate::profile::census::after(w, census);
 }
 
 pub fn drain(w: &mut World) {
+    #[cfg(feature = "profile")]
+    let census = crate::profile::census::before(w, crate::profile::census::Tag::Drain);
     crate::voxel_phase!(Drain, {
         let c = w.config.clone();
         let plane = c.width as usize * c.depth as usize;
@@ -1607,6 +1770,8 @@ pub fn drain(w: &mut World) {
             }
         });
     });
+    #[cfg(feature = "profile")]
+    crate::profile::census::after(w, census);
 }
 
 /// What comes out of the spring cell: the aquifer's own head-driven seep, and — under the
@@ -1616,10 +1781,14 @@ pub fn drain(w: &mut World) {
 /// phases as [`step`] without having to learn a new one. They are the same cell and the
 /// same emergence rule; only the store they draw on differs.
 pub fn spring(w: &mut World) {
+    #[cfg(feature = "profile")]
+    let census = crate::profile::census::before(w, crate::profile::census::Tag::Spring);
     crate::voxel_phase!(Spring, {
         aquifer_seep(w);
         reentry(w);
     });
+    #[cfg(feature = "profile")]
+    crate::profile::census::after(w, census);
 }
 
 /// The head-driven part: water the aquifer pushes up while its table stands over the cell.
@@ -1728,6 +1897,9 @@ fn outlet_trace() -> bool {
 }
 
 pub fn outlet(w: &mut World) {
+    // Measurement only; an early return skips `after` before anything has moved.
+    #[cfg(feature = "profile")]
+    let census = crate::profile::census::before(w, crate::profile::census::Tag::Outlet);
     crate::voxel_phase!(Outlet, {
         if !w.outlet_open {
             return;
@@ -1779,6 +1951,8 @@ pub fn outlet(w: &mut World) {
         w.ledger.outlet_out += lost;
         release(w, lost);
     });
+    #[cfg(feature = "profile")]
+    crate::profile::census::after(w, census);
 }
 
 // ---------------------------------------------------------------- commands
@@ -1804,7 +1978,12 @@ pub fn apply(world: &mut World, command: Command) -> f64 {
             if !volume_m3.is_finite() || volume_m3 <= 0.0 {
                 return 0.0;
             }
-            rain_pulse(world, volume_m3)
+            #[cfg(feature = "profile")]
+            let census = crate::profile::census::before(world, crate::profile::census::Tag::Rain);
+            let got = rain_pulse(world, volume_m3);
+            #[cfg(feature = "profile")]
+            crate::profile::census::after(world, census);
+            got
         }
         Command::AddWater { x, y, z, volume_m3 } => {
             if !volume_m3.is_finite() || volume_m3 < 0.0 {

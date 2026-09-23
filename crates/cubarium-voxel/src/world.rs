@@ -911,6 +911,10 @@ impl World {
         if !self.void_runs.dirty && self.void_runs.version == self.terrain_version {
             return;
         }
+        #[cfg(feature = "profile")]
+        let _timer = crate::profile::start(crate::profile::Phase::VoidRuns);
+        #[cfg(feature = "profile")]
+        crate::profile::add(crate::profile::Count::VoidRunRebuilds, 1);
         let plane = self.config.width as usize * self.config.depth as usize;
         let height = self.config.height as usize;
         let VoidRuns {
