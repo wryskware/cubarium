@@ -125,7 +125,6 @@ struct Seen {
     nearest_foliage: f64,
     nearest_crown_in_mouth: bool,
     same_height_2m: usize,
-    deep_water: bool,
     /// Where it stood, and where it has been: the pose, and the metres of ground it has
     /// covered since it appeared. A body that pays the motor budget every tick and
     /// covers nothing is **penned**, and only the second number says so.
@@ -396,6 +395,9 @@ fn main() {
         sc.maintenance_per_s * sc.body_min * TERMINAL_UPKEEP_S
     };
     let mut previous_causes = [[0u64; Departure::COUNT]; Founder::COUNT];
+    // The ledger's per-lineage cause counters as of the last tick: each tick's delta is
+    // exactly what died of what, and the per-body `DEATH` label is read off it.
+    let mut ledger_causes = sim.fauna().view().ledger.deaths_by_founder_cause;
     let mut crown_history = CrownHistory::default();
     observe_crowns(&sim, &mut crown_history);
     for (id, s) in &prev {
@@ -470,18 +472,57 @@ fn main() {
             }
         }
 
-        // Departures: an id in the previous tick and not in this one. The **counts** by
-        // cause come from the ledger and are exact; this per-body label is re-derived
-        // from the last state the body was seen in, so it is a best attribution and says
-        // so. It agrees with the ledger's split wherever the two can be compared.
-        for (id, was) in &prev {
-            if now.binary_search_by_key(id, |(i, _)| *i).is_err() {
-                let sc = founder_config(&fauna_cfg, was);
-                let cause = if was.deep_water && was.body >= sc.body_min {
-                    Departure::Drowned
-                } else {
-                    Departure::Starved
-                };
+        // Departures: an id in the previous tick and not in this one. The **cause** is the
+        // ledger's: this tick's change in its per-lineage counters says exactly how many
+        // of each lineage starved and drowned. Within one lineage and one tick the model
+        // calls a body below `body_min` starved and any other departing body drowned, so
+        // when both happen at once the lightest bodies take the starvations. (Until
+        // 2026-09-22 this re-derived the cause from the previous tick's water, and a body
+        // that walked into deep water on its last tick was labelled starved.)
+        let now_causes = sim.fauna().view().ledger.deaths_by_founder_cause;
+        let mut departed: Vec<(u64, Seen)> = prev
+            .iter()
+            .filter(|(id, _)| now.binary_search_by_key(id, |(i, _)| *i).is_err())
+            .copied()
+            .collect();
+        departed.sort_by(|a, b| a.1.body.total_cmp(&b.1.body).then(a.0.cmp(&b.0)));
+        let mut labels: Vec<(u64, Departure)> = Vec::with_capacity(departed.len());
+        for f in Founder::ALL {
+            let delta: Vec<u64> = Departure::ALL
+                .iter()
+                .map(|c| now_causes[f.index()][c.index()] - ledger_causes[f.index()][c.index()])
+                .collect();
+            let mut causes = Departure::ALL
+                .iter()
+                .zip(&delta)
+                .flat_map(|(c, n)| std::iter::repeat_n(*c, *n as usize));
+            let mine: Vec<u64> = departed
+                .iter()
+                .filter(|(_, was)| was.founder == Some(f))
+                .map(|(id, _)| *id)
+                .collect();
+            for id in &mine {
+                let cause = causes
+                    .next()
+                    .expect("a departure the ledger did not book");
+                labels.push((*id, cause));
+            }
+            assert!(
+                causes.next().is_none(),
+                "tick {tick}: the ledger booked {:?} {} departures and {} bodies left",
+                delta,
+                f.name(),
+                mine.len()
+            );
+        }
+        ledger_causes = now_causes;
+        for (id, was) in &departed {
+            {
+                let cause = labels
+                    .iter()
+                    .find(|(i, _)| i == id)
+                    .map(|(_, c)| *c)
+                    .expect("every departed founder is labelled");
                 println!(
                     "DEATH,{tick},{:.2},{id},{},{},{},{:.7},{:.7},{:.3},{},{:.7},{},{},{:.3},{}",
                     tick as f64 / TICKS_PER_MIN as f64,
@@ -897,7 +938,6 @@ fn snapshot(sim: &Sim, prev: &[(u64, Seen)]) -> Vec<(u64, Seen)> {
         .iter()
         .map(|a| {
             let sc = effective_config(fauna.config(), a);
-            let depth = view.water_depth_m(i64::from(a.site.x), a.site.y, a.site.z);
             let food = food_probe(&view, &fv, fauna.config(), a);
             (
                 a.id,
@@ -911,7 +951,6 @@ fn snapshot(sim: &Sim, prev: &[(u64, Seen)]) -> Vec<(u64, Seen)> {
                     nearest_foliage: food.foliage,
                     nearest_crown_in_mouth: food.crown_in_mouth,
                     same_height_2m: same_height_supports_2m(&view, a),
-                    deep_water: depth > sc.drown_depth_m,
                     x: a.pose.x,
                     z: a.pose.z,
                     heading_rad: a.pose.heading_rad,
