@@ -950,9 +950,6 @@ fn drive(
         }
         let deaths_before = sim.fauna().view().ledger.deaths_by_founder_cause[founder.index()];
 
-        // S1: the world's replayed litter production, handed in through the ordinary
-        // deposit path, and its dead pools rotting at the model's rates — the plant leg's
-        // part of the tick, ahead of the fauna leg as in the live order.
         // S1: the world's replayed litter production, through the ordinary deposit and
         // withdrawal paths, and its dead pools rotting at the model's rates — the plant
         // leg's part of the tick, ahead of the fauna leg as in the live order.
