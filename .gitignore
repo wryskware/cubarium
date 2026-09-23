@@ -26,3 +26,8 @@
 
 # Python bytecode from study scripts.
 __pycache__/
+
+# Machine-local agent/tool config and agent worktrees.
+/.claude/worktrees/
+/opencode.json
+/.agents/mcp_config.json
