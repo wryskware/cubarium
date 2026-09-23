@@ -398,8 +398,75 @@ impl SnapshotWriter {
     }
 }
 
+/// A fresh generated world's founding: the layers the founding loop seeded it with.
+type Seeding = (Flora, Fauna, habitat::Seeded);
+
 /// Resume from a file/directory or create a fresh world according to CLI and config.
-fn load_or_create_world(args: &Voxel, cfg: &VoxelConfig) -> Result<(World, String, bool)> {
+///
+/// A **fresh generated** world that is going to be seeded goes through the founding loop
+/// ([`found_a_habitat`]) and comes back with its layers, already seeded; every other
+/// world comes back bare, `None`, for the caller to seed.
+fn load_or_create_world(
+    args: &Voxel,
+    cfg: &VoxelConfig,
+) -> Result<(World, String, bool, Option<Seeding>)> {
+    let (world, label, resumed) = match load_world(args)? {
+        Some(found) => found,
+        None => {
+            let world_cfg = cfg.world.clone();
+            match args.scene {
+                VoxelSceneArg::Authored => {
+                    (scene::authored(world_cfg), "authored".to_string(), false)
+                }
+                VoxelSceneArg::Generated => {
+                    let asked = args.seed.or_else(|| cfg_seed_from_file(&args.config));
+                    if args.empty {
+                        let (world, seed, rejected) =
+                            generate_with_a_lake(&world_cfg, asked, LAKE_SEED_TRIES, random_seed);
+                        let label = if rejected > 0 {
+                            format!("generated (seed {seed}, {rejected} rejected)")
+                        } else {
+                            format!("generated (seed {seed})")
+                        };
+                        (world, label, false)
+                    } else {
+                        let founded = found_a_habitat(
+                            &world_cfg,
+                            asked,
+                            LAKE_SEED_TRIES,
+                            HABITAT_TRIES,
+                            random_seed,
+                            |w: &World| {
+                                (
+                                    Flora::new(FloraConfig::for_voxel_size(w.config().voxel_m)),
+                                    Fauna::new(FaunaConfig::default()),
+                                )
+                            },
+                            habitat::FOUNDER_COUNTS,
+                            |s: &habitat::Seeded| s.acceptance.accepted,
+                        );
+                        let rejected = founded.lake_rejected + founded.habitat_rejected;
+                        let label = if rejected > 0 {
+                            format!("generated (seed {}, {rejected} rejected)", founded.seed)
+                        } else {
+                            format!("generated (seed {})", founded.seed)
+                        };
+                        return Ok((
+                            founded.world,
+                            label,
+                            false,
+                            Some((founded.flora, founded.fauna, founded.seeded)),
+                        ));
+                    }
+                }
+            }
+        }
+    };
+    Ok((world, label, resumed, None))
+}
+
+/// Resume a world from `--load`, if there is one to resume: `None` means found a new one.
+fn load_world(args: &Voxel) -> Result<Option<(World, String, bool)>> {
     if let Some(path) = &args.load {
         if path.is_file() {
             let bytes = std::fs::read(path)
@@ -408,7 +475,7 @@ fn load_or_create_world(args: &Voxel, cfg: &VoxelConfig) -> Result<(World, Strin
                 World::load(&bytes).with_context(|| format!("loading {}", path.display()))?;
             let label = path.display().to_string();
             eprintln!("cubarium voxel: resumed world from {}", path.display());
-            return Ok((world, label, true));
+            return Ok(Some((world, label, true)));
         } else if path.is_dir() {
             let mut candidates: Vec<(u64, std::time::SystemTime, PathBuf)> = Vec::new();
             for entry in std::fs::read_dir(path)
@@ -443,7 +510,7 @@ fn load_or_create_world(args: &Voxel, cfg: &VoxelConfig) -> Result<(World, Strin
                                     cand_path.display()
                                 );
                                 let label = format!("resumed from {}", cand_path.display());
-                                return Ok((world, label, true));
+                                return Ok(Some((world, label, true)));
                             }
                             Err(e) => {
                                 eprintln!(
@@ -517,22 +584,7 @@ fn load_or_create_world(args: &Voxel, cfg: &VoxelConfig) -> Result<(World, Strin
         }
     }
 
-    let world_cfg = cfg.world.clone();
-    let (world, label) = match args.scene {
-        VoxelSceneArg::Authored => (scene::authored(world_cfg), "authored".to_string()),
-        VoxelSceneArg::Generated => {
-            let asked = args.seed.or_else(|| cfg_seed_from_file(&args.config));
-            let (world, seed, rejected) =
-                generate_with_a_lake(&world_cfg, asked, LAKE_SEED_TRIES, random_seed);
-            let label = if rejected > 0 {
-                format!("generated (seed {seed}, {rejected} rejected)")
-            } else {
-                format!("generated (seed {seed})")
-            };
-            (world, label)
-        }
-    };
-    Ok((world, label, false))
+    Ok(None)
 }
 
 /// Ticks a candidate world is settled for before its water is judged.
@@ -550,25 +602,6 @@ const WALK_STEP_M: f64 = 0.5;
 
 /// Random seeds tried before the generator gives up and keeps the wettest world it saw.
 pub const LAKE_SEED_TRIES: usize = 24;
-
-/// Build a world the way the ambient run does, for a diagnostic arm that has to be the
-/// shipped landscape and not an approximation of it.
-///
-/// It is exactly `load_or_create_world`'s generated branch — [`generate_with_a_lake`]
-/// over [`LAKE_SEED_TRIES`] draws against the recipe's own `min_lake_m2` — with the seed
-/// stream made deterministic so the arm can be re-run: the draws are
-/// `base`, `base + 1`, … rather than `random_seed()`. Nothing about the world, its
-/// water or its rejection gate differs; only which seeds are offered.
-///
-/// Read-only: it builds a world and changes no rule.
-pub fn ambient_world(cfg: &cubarium_voxel::Config, base: u64) -> (World, u64, usize) {
-    let mut next = base;
-    generate_with_a_lake(cfg, None, LAKE_SEED_TRIES, move || {
-        let seed = next;
-        next = next.wrapping_add(1);
-        seed
-    })
-}
 
 /// Habitat tries: how many lake-gated worlds the founding loop pre-rolls, seeds and
 /// judges before it keeps the best of them. Bounded apart from [`LAKE_SEED_TRIES`]:
@@ -606,8 +639,130 @@ pub fn found_a_habitat(
     founder_counts: [usize; Founder::COUNT],
     accept: impl Fn(&habitat::Seeded) -> bool,
 ) -> Founded {
-    let _ = (cfg, asked, lake_tries, habitat_tries, next_seed, layers, founder_counts, accept);
-    todo!("found_a_habitat")
+    let mut next_seed = next_seed;
+    let mut lake_rejected = 0usize;
+    let found = |world: World| {
+        let mut world = world;
+        let (mut flora, mut fauna) = layers(&world);
+        let seeded =
+            habitat::seed_with_founder_counts(&mut world, &mut flora, &mut fauna, founder_counts);
+        (world, flora, fauna, seeded)
+    };
+    if let Some(seed) = asked {
+        let (world, seed, _) = generate_with_a_lake(cfg, Some(seed), lake_tries, &mut next_seed);
+        let (world, flora, fauna, seeded) = found(world);
+        let accepted = accept(&seeded);
+        let mut warnings = Vec::new();
+        if !accepted {
+            let w = format!(
+                "cubarium voxel: seed {seed} was asked for, so it is kept — but its habitat \
+                 fails the acceptance check ({})",
+                seeded.acceptance.reasons()
+            );
+            eprintln!("{w}");
+            warnings.push(w);
+        }
+        return Founded {
+            world,
+            flora,
+            fauna,
+            seeded,
+            seed,
+            lake_rejected: 0,
+            habitat_rejected: 0,
+            accepted,
+            warnings,
+        };
+    }
+    let tries = habitat_tries.max(1);
+    let mut best: Option<Founded> = None;
+    for k in 0..tries {
+        let (world, seed, rejected) = generate_with_a_lake(cfg, None, lake_tries, &mut next_seed);
+        lake_rejected += rejected;
+        let (world, flora, fauna, seeded) = found(world);
+        let founded = Founded {
+            world,
+            flora,
+            fauna,
+            seeded,
+            seed,
+            lake_rejected,
+            habitat_rejected: k,
+            accepted: false,
+            warnings: Vec::new(),
+        };
+        if accept(&founded.seeded) {
+            if k > 0 {
+                eprintln!(
+                    "cubarium voxel: seed {seed} accepted as a habitat after {k} refused"
+                );
+            }
+            return Founded {
+                accepted: true,
+                ..founded
+            };
+        }
+        eprintln!(
+            "cubarium voxel: seed {seed} refused as a habitat: {} (worse lineage at {:.2} \
+             founder-hours per founder)",
+            founded.seeded.acceptance.reasons(),
+            founded.seeded.acceptance.worse_ratio(),
+        );
+        let ratio = founded.seeded.acceptance.worse_ratio();
+        if best
+            .as_ref()
+            .is_none_or(|b| ratio > b.seeded.acceptance.worse_ratio())
+        {
+            best = Some(founded);
+        }
+    }
+    let mut best = best.expect("at least one try");
+    let w = format!(
+        "cubarium voxel: NO SEED of {tries} passed the habitat acceptance check; keeping \
+         seed {} with the best worse-lineage stock of {:.2} founder-hours per founder — \
+         {}",
+        best.seed,
+        best.seeded.acceptance.worse_ratio(),
+        best.seeded.acceptance.reasons(),
+    );
+    eprintln!("{w}");
+    best.warnings.push(w);
+    best.habitat_rejected = tries;
+    best.lake_rejected = lake_rejected;
+    best
+}
+
+/// Found the world the ambient run founds for `cfg`, deterministically: the lake gate
+/// and the habitat loop drawing `base`, `base + 1`, … rather than random seeds, the
+/// plant layer scaled to the cell size as the host scales it, `FaunaConfig::default()`
+/// and the real acceptance check. For a diagnostic arm that has to be the shipped
+/// landscape, **already seeded** — it must not be seeded again.
+pub fn ambient_habitat(
+    cfg: &cubarium_voxel::Config,
+    base: u64,
+    flora_config: impl Fn(f64) -> FloraConfig,
+    founder_counts: [usize; Founder::COUNT],
+) -> Founded {
+    let mut next = base;
+    found_a_habitat(
+        cfg,
+        None,
+        LAKE_SEED_TRIES,
+        HABITAT_TRIES,
+        move || {
+            let seed = next;
+            next = next.wrapping_add(1);
+            seed
+        },
+        |w: &World| {
+            (
+                Flora::new(flora_config(w.config().voxel_m)),
+                Fauna::new(FaunaConfig::default()),
+            )
+        },
+        founder_counts,
+        |s: &habitat::Seeded| s.acceptance.accepted,
+    )
 }
 
 /// Draw generated worlds until one has a lake the camera can actually read.
@@ -821,16 +976,36 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
             args.fps,
             stop,
             || {
-            let (mut world, scene_label, _resumed) = load_or_create_world(args, &cfg)?;
-            let mut flora = Flora::new(FloraConfig::for_voxel_size(world.config().voxel_m));
-            let mut fauna = Fauna::new(FaunaConfig::default());
+            let (world, scene_label, resumed, founded) = load_or_create_world(args, &cfg)?;
+            let mut world = world;
             let recipes = founder_recipes(args)?;
             let drivers: Vec<(Founder, EpisodeDriver)> = recipes
                 .iter()
                 .filter_map(|r| r.driver.clone().map(|d| (r.founder, d)))
                 .collect();
-            if !args.empty {
-                let seeded = habitat::seed(&mut world, &mut flora, &mut fauna);
+            // A fresh generated world comes out of the founding loop **already seeded**
+            // and judged; an authored or resumed one is pre-rolled and seeded here — a
+            // resumed one without the opening shower, which it has had, and never redrawn.
+            let (flora, mut fauna, seeded) = match founded {
+                Some((flora, fauna, seeded)) => (flora, fauna, Some(seeded)),
+                None => {
+                    let mut flora =
+                        Flora::new(FloraConfig::for_voxel_size(world.config().voxel_m));
+                    let mut fauna = Fauna::new(FaunaConfig::default());
+                    let seeded = (!args.empty).then(|| {
+                        let pre = habitat::pre_roll(&mut world, !resumed);
+                        habitat::seed_pre_rolled(
+                            &mut world,
+                            &mut flora,
+                            &mut fauna,
+                            &pre,
+                            habitat::FOUNDER_COUNTS,
+                        )
+                    });
+                    (flora, fauna, seeded)
+                }
+            };
+            if let Some(seeded) = seeded {
                 // The settle report, once, at startup: how long the water took to stop
                 // moving and whether it did. The ordinary display shows none of this.
                 let st = seeded.settle;
@@ -913,6 +1088,26 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                         );
                     }
                 }
+                let pr = seeded.pre_roll;
+                eprintln!(
+                    "cubarium voxel: pre-roll {} ticks — {}; habitat {}",
+                    pr.ticks,
+                    if pr.opening_shower {
+                        format!(
+                            "opened with a {}-tick shower, drained in {} ticks ({})",
+                            pr.shower_ticks,
+                            pr.drain.ticks,
+                            if pr.drain.converged { "converged" } else { "at the cap" },
+                        )
+                    } else {
+                        "no opening shower".to_string()
+                    },
+                    if seeded.acceptance.accepted {
+                        "accepted".to_string()
+                    } else {
+                        format!("NOT accepted: {}", seeded.acceptance.reasons())
+                    },
+                );
             } else {
                 // An empty world grows its founders by hand; the lineages still need
                 // their recipes registered so anything born is driven.
@@ -3127,10 +3322,11 @@ mod tests {
         );
         assert!(founded.seeded.pre_roll.opening_shower, "the world opened with rain");
 
-        // An asked-for seed is honoured whatever the verdict, and says so.
+        // An asked-for seed is honoured whatever the verdict, and says so. (Seed 6, whose
+        // ring has stands on it, so "seeded" is something that can be checked.)
         let founded = found_a_habitat(
             &cfg,
-            Some(77),
+            Some(6),
             1,
             4,
             seeds(vec![]),
@@ -3138,7 +3334,7 @@ mod tests {
             [2, 2],
             |_: &habitat::Seeded| false,
         );
-        assert_eq!(founded.seed, 77);
+        assert_eq!(founded.seed, 6);
         assert!(!founded.accepted);
         assert!(founded.seeded.stands > 0, "still seeded");
         assert!(
@@ -3209,7 +3405,7 @@ mod tests {
             founder_heuristic: Vec::new(),
             arena_seed: 1,
             arena_diagnostics: false,
-            empty: false,
+            empty: true, // about loading and seeds, not founding a habitat
             seconds: 0.0,
             speed: 1.0,
             load: Some(state.to_path_buf()),
@@ -3230,7 +3426,7 @@ mod tests {
         std::fs::create_dir_all(&state).unwrap();
         std::fs::write(state.join("world-100.voxel"), stale(13)).unwrap();
         std::fs::write(state.join("world-200.voxel"), stale(13)).unwrap();
-        let (_, label, resumed) =
+        let (_, label, resumed, _) =
             load_or_create_world(&args(&state), &cfg).expect("a stale directory founds a world");
         assert!(!resumed, "nothing was resumed: {label}");
         assert!(
@@ -3261,7 +3457,7 @@ mod tests {
         });
         std::fs::write(mixed.join("world-50.voxel"), good.save()).unwrap();
         std::fs::write(mixed.join("world-100.voxel"), stale(13)).unwrap();
-        let (_, label, resumed) =
+        let (_, label, resumed, _) =
             load_or_create_world(&args(&mixed), &cfg).expect("the readable snapshot resumes");
         assert!(resumed, "{label}");
         assert_eq!(
@@ -3930,7 +4126,7 @@ mod tests {
             founder_heuristic: Vec::new(),
             arena_seed: 1,
             arena_diagnostics: false,
-            empty: false,
+            empty: true, // about loading and seeds, not founding a habitat
             seconds: 0.0,
             speed: 1.0,
             load: None,
@@ -3947,7 +4143,7 @@ mod tests {
 
         // Explicit seed is respected
         let args = make_args(Some(42));
-        let (world, label, resumed) = load_or_create_world(&args, &cfg).unwrap();
+        let (world, label, resumed, _) = load_or_create_world(&args, &cfg).unwrap();
         assert!(!resumed);
         assert_eq!(world.config().seed, 42);
         assert_eq!(label, "generated (seed 42)");
@@ -3955,8 +4151,8 @@ mod tests {
         // Default seed is randomized (two calls should produce different seeds)
         let args_default1 = make_args(None);
         let args_default2 = make_args(None);
-        let (world1, _, _) = load_or_create_world(&args_default1, &cfg).unwrap();
-        let (world2, _, _) = load_or_create_world(&args_default2, &cfg).unwrap();
+        let (world1, _, _, _) = load_or_create_world(&args_default1, &cfg).unwrap();
+        let (world2, _, _, _) = load_or_create_world(&args_default2, &cfg).unwrap();
         // Probability of random seed collision is 1 in 2^64
         assert_ne!(world1.config().seed, world2.config().seed);
     }
@@ -3980,7 +4176,7 @@ mod tests {
             founder_heuristic: Vec::new(),
             arena_seed: 1,
             arena_diagnostics: false,
-            empty: false,
+            empty: true, // about loading and seeds, not founding a habitat
             seconds: 0.0,
             speed: 1.0,
             load: Some(dir.clone()),
@@ -3996,7 +4192,7 @@ mod tests {
         };
 
         // 1. Initial run into empty state dir creates a fresh world
-        let (world1, _, resumed1) = load_or_create_world(&base_args, &cfg).unwrap();
+        let (world1, _, resumed1, _) = load_or_create_world(&base_args, &cfg).unwrap();
         assert!(!resumed1, "fresh directory has no snapshot to resume");
 
         // Save a snapshot with a unique marker (e.g. edited cell)
@@ -4015,7 +4211,7 @@ mod tests {
         assert!(snap_file.exists());
 
         // 2. Second run into same state dir resumes that snapshot without regenerating
-        let (resumed_world, label, resumed2) = load_or_create_world(&base_args, &cfg).unwrap();
+        let (resumed_world, label, resumed2, _) = load_or_create_world(&base_args, &cfg).unwrap();
         assert!(resumed2, "must resume from existing snapshot in directory");
         assert!(
             label.contains("world-"),

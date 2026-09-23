@@ -196,33 +196,46 @@ fn main() {
     );
 
     let cfg = VoxelConfig::default();
-    let (mut world, mut flora, scene_label) = if let Some(preset) = preset {
+    let counts = if half_founders { [4, 4] } else { [8, 8] };
+    let (world, flora, mut fauna, seeded, scene_label) = if let Some(preset) = preset {
         // Exactly what `cubarium voxel` does with no TOML, for this preset: the recipe's
-        // own extents and cell size, the recipe's own water (`World::new` writes the
-        // cycle onto the config), the lake gate over `LAKE_SEED_TRIES` draws, and the
-        // plant layer scaled to the cell size the way the host scales it.
+        // own extents, cell size and water, the lake gate, the pre-roll with its opening
+        // shower, the seeding and the acceptance check, redrawn on a refusal — through
+        // `voxel::ambient_habitat`, which returns the world **already seeded**.
         let world_cfg = preset.config();
-        let (world, seed, rejected) = cubarium::voxel::ambient_world(&world_cfg, seed_base);
+        let founded = cubarium::voxel::ambient_habitat(
+            &world_cfg,
+            seed_base,
+            |v| {
+                let flora_cfg = FloraConfig::for_voxel_size(v);
+                if lollipop {
+                    flora_cfg.one_layer_species()
+                } else {
+                    flora_cfg
+                }
+            },
+            counts,
+        );
+        let world = founded.world;
         let lake = cubarium_voxel::hydrate::lake(&world);
-        let flora_cfg = FloraConfig::for_voxel_size(world.config().voxel_m);
-        let flora = Flora::new(if lollipop {
-            flora_cfg.one_layer_species()
-        } else {
-            flora_cfg
-        });
         eprintln!(
-            "scene: preset {} ({}x{}x{} at {} m, seed {seed}, {rejected} rejected), \
+            "scene: preset {} ({}x{}x{} at {} m, seed {}, {} lake / {} habitat rejected, {}), \
              lake {:.2} m3 over {:.1} m2 visible; flora scaled for {} m cells",
             preset.name,
             world.config().width,
             world.config().height,
             world.config().depth,
             world.config().voxel_m,
+            founded.seed,
+            founded.lake_rejected,
+            founded.habitat_rejected,
+            if founded.accepted { "accepted" } else { "NOT accepted" },
             lake.volume_m3,
             lake.visible_m2,
             world.config().voxel_m,
         );
-        (world, flora, format!("preset {} seed {seed}", preset.name))
+        let label = format!("preset {} seed {}", preset.name, founded.seed);
+        (world, founded.flora, founded.fauna, founded.seeded, label)
     } else {
         let world = if generated {
             let mut world_cfg = cfg.world.clone();
@@ -257,11 +270,11 @@ fn main() {
             if generated { "generated" } else { "authored" },
             if closed { "closed" } else { "open" },
         );
-        (world, flora, label)
+        let (mut world, mut flora) = (world, flora);
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        let seeded = habitat::seed_with_founder_counts(&mut world, &mut flora, &mut fauna, counts);
+        (world, flora, fauna, seeded, label)
     };
-    let mut fauna = Fauna::new(FaunaConfig::default());
-    let counts = if half_founders { [4, 4] } else { [8, 8] };
-    let seeded = habitat::seed_with_founder_counts(&mut world, &mut flora, &mut fauna, counts);
     let fauna_cfg = *fauna.config();
     eprintln!("scene: {scene_label}; founder counts {counts:?}");
     eprintln!(

@@ -85,19 +85,29 @@ fn main() {
     let cfg = VoxelConfig::default();
     if let Some(preset) = preset {
         assert!(!generated, "a preset arm builds its own world");
-        let (mut world, seed, rejected) =
-            cubarium::voxel::ambient_world(&preset.config(), seed_base);
-        let mut flora = Flora::new(FloraConfig::for_voxel_size(world.config().voxel_m));
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        // The host's founding loop, verbatim: lake gate, pre-roll with the opening
+        // shower, seeding and the acceptance check, redrawn on a refusal. The world
+        // comes back already seeded.
+        let founded = cubarium::voxel::ambient_habitat(
+            &preset.config(),
+            seed_base,
+            FloraConfig::for_voxel_size,
+            habitat::FOUNDER_COUNTS,
+        );
+        let (world, flora, mut fauna, seeded) =
+            (founded.world, founded.flora, founded.fauna, founded.seeded);
         eprintln!(
-            "scene: preset {} ({}x{}x{} at {} m, seed {seed}, {rejected} rejected)",
+            "scene: preset {} ({}x{}x{} at {} m, seed {}, {} lake / {} habitat rejected, {})",
             preset.name,
             world.config().width,
             world.config().height,
             world.config().depth,
             world.config().voxel_m,
+            founded.seed,
+            founded.lake_rejected,
+            founded.habitat_rejected,
+            if founded.accepted { "accepted" } else { "NOT accepted" },
         );
-        let seeded = habitat::seed(&mut world, &mut flora, &mut fauna);
         eprintln!(
             "seeded: stands={} logs={} litter_tiles={} founders={:?} animals={}",
             seeded.stands,

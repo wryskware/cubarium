@@ -792,22 +792,7 @@ impl World {
     /// `watch` is called with the world after every tick this steps, for a caller that
     /// has to see the water on its way to rest (the habitat's startup pre-roll remembers
     /// the deepest water every face saw).
-    pub fn settle_watching(&mut self, cap_ticks: u32, watch: impl FnMut(&World)) -> Settle {
-        let _ = (watch, cap_ticks);
-        todo!("settle_watching")
-    }
-
-    /// Make the next scheduled shower **due now**: the world opens with a shower instead
-    /// of waiting out its first drawn gap. Later gaps are drawn exactly as before, from
-    /// where this shower ends. Returns whether the world has a schedule at all; a world
-    /// without one ([`Config::shower_interval_max_s`] zero) is untouched.
-    pub fn bring_shower_forward(&mut self) -> bool {
-        todo!("bring_shower_forward")
-    }
-
-    /// Step until the water has stopped moving, or until `cap_ticks`: see
-    /// [`World::settle_watching`] for the rule, which this is with nobody watching.
-    pub fn settle(&mut self, cap_ticks: u32) -> Settle {
+    pub fn settle_watching(&mut self, cap_ticks: u32, mut watch: impl FnMut(&World)) -> Settle {
         let window = SETTLE_WINDOW as usize;
         let mut history: Vec<(f64, usize)> = Vec::with_capacity(window + 1);
         let mut stored: Vec<f64> = Vec::with_capacity(window + 1);
@@ -823,6 +808,7 @@ impl World {
                 break;
             }
             self.step();
+            watch(self);
             ticks += 1;
         }
         let pooled_m3 = history.last().map(|h| h.0).unwrap_or(0.0);
@@ -842,6 +828,24 @@ impl World {
                 && self.atmosphere_m3
                     > self.config.shower_trigger_fraction * self.view().total_water_m3(),
         }
+    }
+
+    /// Make the next scheduled shower **due now**: the world opens with a shower instead
+    /// of waiting out its first drawn gap. Later gaps are drawn exactly as before, from
+    /// where this shower ends. Returns whether the world has a schedule at all; a world
+    /// without one ([`Config::shower_interval_max_s`] zero) is untouched.
+    pub fn bring_shower_forward(&mut self) -> bool {
+        if !(self.config.shower_interval_max_s > 0.0) {
+            return false;
+        }
+        self.next_shower_tick = self.tick;
+        true
+    }
+
+    /// Step until the water has stopped moving, or until `cap_ticks`: see
+    /// [`World::settle_watching`] for the rule, which this is with nobody watching.
+    pub fn settle(&mut self, cap_ticks: u32) -> Settle {
+        self.settle_watching(cap_ticks, |_| {})
     }
 
     /// Free water standing in the world, cubic metres.

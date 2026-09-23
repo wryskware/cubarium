@@ -24,6 +24,7 @@
 //! many layers — which is what [`walkable_components`] computes, from the one shared
 //! rule in `cubarium_voxel::walk`, for this crate, the seeder and the observer alike.
 
+use std::collections::HashMap;
 use std::ops::RangeInclusive;
 
 use cubarium_voxel::VoxelView;
@@ -326,24 +327,68 @@ pub struct RouteMap {
     pub faces: Vec<Site>,
     /// The walkable component of each face, in the order of `faces`.
     pub components: Vec<usize>,
+    index: HashMap<Site, usize>,
+    /// The union of mouth columns over every heading, per face.
+    columns: Vec<Vec<(i64, u32)>>,
+    /// From an `(x, z)` column back to every face whose mouth can cover it.
+    by_column: HashMap<(u32, u32), Vec<usize>>,
+    body: Body,
+    voxel_m: f64,
 }
 
 impl RouteMap {
     /// The route map of a founder lineage's **adult** body, wade depth and climb.
     pub fn for_founder(view: &VoxelView<'_>, phys: &crate::FounderPhysiology) -> RouteMap {
-        let _ = (view, phys);
-        todo!("RouteMap::for_founder")
+        RouteMap::new(
+            view,
+            phys.adult_body(),
+            phys.core.wade_depth_m,
+            crate::climb_voxels(phys, view.config.voxel_m),
+        )
+    }
+
+    /// The route map of any body, wade depth and climb (whole voxels).
+    pub fn new(view: &VoxelView<'_>, body: Body, wade_depth_m: f64, climb: u32) -> RouteMap {
+        let c = view.config;
+        let faces = standable_faces(view, &body, wade_depth_m);
+        let components = walkable_components(&faces, c.width, climb);
+        let index: HashMap<Site, usize> = faces.iter().enumerate().map(|(i, f)| (*f, i)).collect();
+        let mut columns: Vec<Vec<(i64, u32)>> = Vec::with_capacity(faces.len());
+        let mut by_column: HashMap<(u32, u32), Vec<usize>> = HashMap::new();
+        for (i, face) in faces.iter().enumerate() {
+            let cols = mouth_columns_from_face(view, *face, &body);
+            for &(cx, cz) in &cols {
+                by_column
+                    .entry((cx.rem_euclid(i64::from(c.width)) as u32, cz))
+                    .or_default()
+                    .push(i);
+            }
+            columns.push(cols);
+        }
+        RouteMap {
+            faces,
+            components,
+            index,
+            columns,
+            by_column,
+            body,
+            voxel_m: c.voxel_m,
+        }
     }
 
     /// The index of `site` among [`RouteMap::faces`], if a body can stand there.
     pub fn face(&self, site: Site) -> Option<usize> {
-        let _ = site;
-        todo!("RouteMap::face")
+        self.index.get(&site).copied()
     }
 
     /// The walkable component a body standing on `site` is in.
     pub fn component_of(&self, site: Site) -> Option<usize> {
         self.face(site).map(|i| self.components[i])
+    }
+
+    /// The mouth columns of face `i`, over every heading.
+    pub fn mouth_columns(&self, i: usize) -> &[(i64, u32)] {
+        &self.columns[i]
     }
 
     /// Every face whose mouth takes from this foliage layer of `stand`: the diet
@@ -358,16 +403,43 @@ impl RouteMap {
         layer: &cubarium_voxel_flora::StandLayer,
         diet: Diet,
     ) -> Vec<usize> {
-        let _ = (fv, view, stand, layer, diet);
-        todo!("RouteMap::faces_reaching_layer")
+        let mut out = Vec::new();
+        if !diet.accepts(fv.config.species(stand.species).trophic) || !(layer.stock > 0.0) {
+            return out;
+        }
+        let li = layer.foliage_index.unwrap_or(0);
+        for column in layer_columns(view, stand, layer) {
+            for &i in self.by_column.get(&column).map(Vec::as_slice).unwrap_or(&[]) {
+                if out.contains(&i) {
+                    continue;
+                }
+                let band = mouth_crown_layers_at(self.faces[i].y, &self.body, self.voxel_m);
+                if !band.contains(&layer.cell) {
+                    continue;
+                }
+                if reachable_layers_of(fv, view, stand, &self.columns[i], &band)
+                    .iter()
+                    .any(|(index, _)| *index == li)
+                {
+                    out.push(i);
+                }
+            }
+        }
+        out
     }
 
     /// Every face whose mouth takes from a ground pool (litter, carrion) at `site`: the
     /// live mouth reads a pool at the standing face's own height under one of its
     /// columns (`body::mouth_pool_site`).
     pub fn faces_reaching_pool(&self, site: Site) -> Vec<usize> {
-        let _ = site;
-        todo!("RouteMap::faces_reaching_pool")
+        self.by_column
+            .get(&(site.x, site.z))
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+            .iter()
+            .copied()
+            .filter(|&i| self.faces[i].y == site.y)
+            .collect()
     }
 }
 

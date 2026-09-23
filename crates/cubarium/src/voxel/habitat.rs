@@ -35,7 +35,7 @@ use cubarium_voxel_fauna::{
 };
 use cubarium_voxel_flora::{
     Command as FloraCommand, Deposit, DepositKind, Flora, FloraView, Site, Species, SpeciesConfig,
-    adult_light_cover, establishment_gates_with_sky, highest_support,
+    adult_light_cover, establishment_gates_with_sky,
 };
 
 /// Hard cap on the startup settle, in ticks. `World::settle` stops as soon as the pooled
@@ -198,7 +198,44 @@ pub struct Acceptance {
 impl Acceptance {
     /// The lower of the two lineages' ratios: what "best of a bad lot" ranks on.
     pub fn worse_ratio(&self) -> f64 {
-        todo!("worse_ratio")
+        self.lineages
+            .iter()
+            .map(|l| l.ratio)
+            .fold(f64::INFINITY, f64::min)
+    }
+
+    /// Why a world was refused, one clause per failing lineage; empty when accepted.
+    pub fn reasons(&self) -> String {
+        let mut out: Vec<String> = Vec::new();
+        for founder in Founder::ALL {
+            let l = &self.lineages[founder.index()];
+            if l.accepted {
+                continue;
+            }
+            let mut why: Vec<String> = Vec::new();
+            if l.placed < l.wanted {
+                why.push(format!("placed {} of {}", l.placed, l.wanted));
+            }
+            if l.stranded > 0 {
+                why.push(format!("{} off the route map", l.stranded));
+            }
+            for c in l.components.iter().filter(|c| !c.habitable) {
+                why.push(format!(
+                    "component {} holds {:.3} for {} founder(s) needing {:.3}{}",
+                    c.component,
+                    c.food.stock,
+                    c.founders,
+                    ACCEPT_FOUNDER_HOURS * l.upkeep_per_h * c.founders as f64,
+                    if founder == Founder::Blind && c.food.producers == 0 {
+                        " and has no living producer"
+                    } else {
+                        ""
+                    },
+                ));
+            }
+            out.push(format!("{}: {}", founder.name(), why.join("; ")));
+        }
+        out.join(" | ")
     }
 }
 
@@ -222,6 +259,15 @@ pub struct Seeded {
     pub pre_roll: PreRollReport,
     /// The acceptance check on the seeded world.
     pub acceptance: Acceptance,
+    /// Founder stands planted, by [`Species::index`].
+    pub stands_by_species: [usize; Species::COUNT],
+    /// Faces each species was eligible for after the pre-roll (its establishment gates,
+    /// adult upkeep and the water it would have stood in), by [`Species::index`]. A zero
+    /// is an unmet niche.
+    pub eligible_by_species: [usize; Species::COUNT],
+    /// Everything the seeder brought in from outside, organic units: founder stands,
+    /// logs, starter litter and founder bodies.
+    pub imported_organic: f64,
 }
 
 impl Seeded {
@@ -231,12 +277,16 @@ impl Seeded {
     }
 }
 
-/// Seed the example habitat. The world's water is settled first — measured, not assumed —
-/// and then every unit enters through the ordinary founder, deposit and introduction
-/// inflows the layers already name. Deterministic for a given world.
+/// Seed the example habitat on a **fresh** world: its [`pre_roll`] first — settle, the
+/// opening shower and its drain, the stream watched — and then every unit enters through
+/// the ordinary founder, deposit and introduction inflows the layers already name.
+/// Deterministic for a given world.
 pub fn seed(world: &mut World, flora: &mut Flora, fauna: &mut Fauna) -> Seeded {
     seed_with_founder_counts(world, flora, fauna, [SHREDDERS, BROWSERS])
 }
+
+/// The default founder count per lineage: what [`seed`] places.
+pub const FOUNDER_COUNTS: [usize; Founder::COUNT] = [SHREDDERS, BROWSERS];
 
 /// Seed the example habitat with a caller-selected number of bodies per sensed lineage.
 /// The normal ambient scene uses [`seed`]; this variant exists for bounded diagnosis arms
@@ -248,30 +298,128 @@ pub fn seed_with_founder_counts(
     fauna: &mut Fauna,
     founder_counts: [usize; Founder::COUNT],
 ) -> Seeded {
-    let settle = world.settle(SETTLE_CAP);
-    let mut seeded = Seeded {
-        settle,
-        ..Seeded::default()
-    };
+    let pre = pre_roll(world, true);
+    seed_pre_rolled(world, flora, fauna, &pre, founder_counts)
+}
 
-    // Every **support face**, not the skyline: a hollow's floor is a place to live, and
-    // since slice 2b the rings have them (caves plan, "Ecology and presentation
-    // follow-ups"). Sky visibility is read once per site and then carried, so a crown
-    // placed here shades the sites under it for every species chosen after it.
+/// Hard cap on the opening shower, in ticks: five simulated minutes. A preset's shower
+/// is sized to fall in about a minute on its own footprint (`cubarium_voxel::Water`), so
+/// this only ends a shower that could not finish.
+const SHOWER_CAP: u32 = 6000;
+
+/// Hard cap on the drain after the opening shower, in ticks: a simulated minute. The
+/// drain stops as soon as `World::settle`'s convergence says the water has stopped
+/// moving; this is only the bound on how long it may look.
+const DRAIN_CAP: u32 = 1200;
+
+/// The startup pre-roll, before anything is seeded.
+///
+/// 1. **Settle** as the startup always has ([`SETTLE_CAP`]).
+/// 2. For a fresh world with a scheduled cycle, **open with a shower**: the first shower
+///    is made due now instead of at its drawn 5–15 minutes (later ones are drawn exactly
+///    as before, from where this one ends), falls, and the water **drains** to rest
+///    again under the settle's own convergence, capped at [`DRAIN_CAP`]. A closed
+///    world's outlet is opened first, as the live run opens it before its first tick:
+///    the shower the founders are judged against is the shower the running world has.
+/// 3. **Watch the stream** for [`STREAM_WATCH_TICKS`], as before.
+///
+/// From the end of the settle on, every support face remembers the deepest water it
+/// stood under, so a species is offered only a face it could have stood through that
+/// shower on. The settle itself is not watched: out of the generator a lake is a flat
+/// sheet laid to its datum that finds its own hollows in the first ticks, which is the
+/// world arriving, not weather.
+///
+/// `open_with_a_shower` is `false` for a **resumed** world, which has had its weather.
+pub fn pre_roll(world: &mut World, open_with_a_shower: bool) -> PreRoll {
+    let settle = world.settle(SETTLE_CAP);
     let sites = support_sites(world);
-    let Some(highest_y) = sites.iter().map(|s| s.y).max() else {
-        return seeded;
+    let mut wettest = vec![0.0f64; sites.len()];
+    let watch = |w: &World, wettest: &mut [f64]| {
+        let view = w.view();
+        for (d, s) in wettest.iter_mut().zip(&sites) {
+            let here = view.water_depth_m(i64::from(s.x), s.y, s.z);
+            if here > *d {
+                *d = here;
+            }
+        }
     };
+    let mut report = PreRollReport {
+        ticks: settle.ticks,
+        ..PreRollReport::default()
+    };
+    if open_with_a_shower && world.config().shower_interval_max_s > 0.0 {
+        if world.config().closed_water_budget && !world.outlet_open() {
+            world.apply(cubarium_voxel::Command::SetOutlet { open: true });
+        }
+        let before = world.view().ledger.showers;
+        world.bring_shower_forward();
+        let mut ticks = 0u32;
+        while ticks < SHOWER_CAP {
+            world.step();
+            ticks += 1;
+            watch(world, &mut wettest);
+            let started = world.view().ledger.showers > before;
+            // A store under its floor cannot pay for the shower on its due tick; it
+            // stays due and falls when the store can, in the running world.
+            if !started || world.shower_left_m3() <= 0.0 {
+                break;
+            }
+        }
+        report.opening_shower = world.view().ledger.showers > before;
+        report.shower_ticks = ticks;
+        report.drain = world.settle_watching(DRAIN_CAP, |w| watch(w, &mut wettest));
+        report.ticks += ticks + report.drain.ticks;
+    }
     // **Watch the stream before planting in its way.** `settle` converges on the world's
     // stored volume and its wet-cell count, and under river re-entry both are constant
     // while the water is still *moving*: a spill front can be half way down the cascade
     // when the settle reports itself converged. Founders placed on the faces it is about
     // to reach drown in the first seconds — measured on `default`, an umbrellafrond under
     // 0.99 m one tick after seeding and a velvetpad under 0.19 m twelve ticks later, both
-    // bone dry when they were planted. So the world runs on a little longer and every
-    // face remembers the deepest water it saw; a species is offered a face only if it
-    // could stand in that, not only in what happens to be there now.
-    let wettest = watch_the_stream(world, &sites, STREAM_WATCH_TICKS);
+    // bone dry when they were planted.
+    for _ in 0..STREAM_WATCH_TICKS {
+        world.step();
+        watch(world, &mut wettest);
+    }
+    report.ticks += STREAM_WATCH_TICKS;
+    PreRoll {
+        settle,
+        report,
+        sites,
+        wettest,
+    }
+}
+
+/// Seed the habitat on a world that has had its [`pre_roll`]. Every eligibility gate
+/// reads the world as the pre-roll left it, and every water gate reads the deepest water
+/// the pre-roll saw.
+pub fn seed_pre_rolled(
+    world: &mut World,
+    flora: &mut Flora,
+    fauna: &mut Fauna,
+    pre: &PreRoll,
+    founder_counts: [usize; Founder::COUNT],
+) -> Seeded {
+    let mut seeded = Seeded {
+        settle: pre.settle,
+        pre_roll: pre.report,
+        ..Seeded::default()
+    };
+    let organic_before = flora.view().ledger.seeded_organic_in
+        + flora.view().ledger.deposited_organic_in
+        + fauna.view().ledger.introduced_organic_in;
+
+    // Every **support face**, not the skyline: a hollow's floor is a place to live, and
+    // since slice 2b the rings have them (caves plan, "Ecology and presentation
+    // follow-ups"). Sky visibility is read once per site and then carried, so a crown
+    // placed here shades the sites under it for every species chosen after it. Since
+    // package 4 the face checked is the face planted (`Command::SeedOnFace`).
+    let sites = &pre.sites;
+    let wettest = &pre.wettest;
+    let Some(highest_y) = sites.iter().map(|s| s.y).max() else {
+        seeded.acceptance = accept(world, flora, fauna, founder_counts);
+        return seeded;
+    };
     let mut sky: Vec<f64> = {
         let view = world.view();
         sites
@@ -295,10 +443,11 @@ pub fn seed_with_founder_counts(
         {
             let view = world.view();
             for (i, site) in sites.iter().enumerate() {
-                if taken.contains(site)
-                    || wettest[i] > sc.drown_depth_m
-                    || !suitable(&view, *site, &sc, sky[i])
-                {
+                if wettest[i] > sc.drown_depth_m || !suitable(&view, *site, &sc, sky[i]) {
+                    continue;
+                }
+                seeded.eligible_by_species[species.index()] += 1;
+                if taken.contains(site) {
                     continue;
                 }
                 pool.push(*site);
@@ -320,7 +469,7 @@ pub fn seed_with_founder_counts(
         {
             // The light may have gone since the pool was built: a crown placed two
             // founders ago can shade this one out.
-            let Some(k) = index_of(&sites, site) else {
+            let Some(k) = index_of(sites, site) else {
                 continue;
             };
             if sky[k] < sc.establish_light_min || adult_light_cover(&sc, sky[k]) < 1.0 {
@@ -329,16 +478,16 @@ pub fn seed_with_founder_counts(
             let wood = FOUNDER_FRACTIONS[i % FOUNDER_FRACTIONS.len()] * wood_max;
             if flora.apply(
                 world,
-                FloraCommand::Seed {
-                    x: i64::from(site.x),
-                    z: site.z,
+                FloraCommand::SeedOnFace {
+                    site,
                     species,
                     wood,
                 },
             ) {
                 taken.push(site);
                 seeded.stands += 1;
-                shade_under(&sites, &mut sky, site, &sc, wood, width);
+                seeded.stands_by_species[species.index()] += 1;
+                shade_under(sites, &mut sky, site, &sc, wood, width);
             }
         }
     }
@@ -352,7 +501,7 @@ pub fn seed_with_founder_counts(
     {
         let view = world.view();
         for (i, site) in sites.iter().enumerate() {
-            if taken.contains(site) || wettest[i] > sc.drown_depth_m {
+            if wettest[i] > sc.drown_depth_m {
                 continue;
             }
             // The substrate is the log this seeder is about to lay, so the gate is asked
@@ -361,7 +510,10 @@ pub fn seed_with_founder_counts(
             if gates.passes()
                 && view.material_at(i64::from(site.x), site.y, site.z) == Material::Soil
             {
-                pool.push(*site);
+                seeded.eligible_by_species[Species::Glowcap.index()] += 1;
+                if !taken.contains(site) {
+                    pool.push(*site);
+                }
             }
         }
     }
@@ -388,15 +540,15 @@ pub fn seed_with_founder_counts(
         let wood = FOUNDER_FRACTIONS[i % FOUNDER_FRACTIONS.len()] * sc.wood_max;
         if flora.apply(
             world,
-            FloraCommand::Seed {
-                x: i64::from(site.x),
-                z: site.z,
+            FloraCommand::SeedOnFace {
+                site,
                 species: Species::Glowcap,
                 wood,
             },
         ) {
             taken.push(site);
             seeded.stands += 1;
+            seeded.stands_by_species[Species::Glowcap.index()] += 1;
         }
     }
 
@@ -416,11 +568,21 @@ pub fn seed_with_founder_counts(
     // going through `cubarium voxel` gets the heuristics and nothing else.
     install_heuristics(fauna);
 
+    // **Founders only where they can live** (decisions §8). Each lineage's walkable
+    // components are read on its own adult body, wade depth and climb, with the food a
+    // mouth reaches from each; a component takes founders only while its stock covers
+    // `N` founder-hours of upkeep for every one of them, and (shredder) only if a living
+    // producer of its renewable food is rooted in it.
+
     // Littershredders on litter-bearing soil: dry open soil away from the stands, each
     // with its own starter tile of leaf litter laid under it first, so the founder
-    // begins on a cue it can smell and a stock it can bite.
+    // begins on a cue it can smell and a stock it can bite. The starter tile is stock
+    // too, and it is counted.
     let blind = *fauna.config().founder(Founder::Blind);
     let blind_room = blind.adult_body().headroom_voxels(world.config().voxel_m);
+    let blind_need = ACCEPT_FOUNDER_HOURS * upkeep_per_hour(&blind);
+    let (blind_map, blind_food) =
+        lineage_food(&world.view(), &flora.view(), &blind, Founder::Blind);
     let pool: Vec<Site> = {
         let view = world.view();
         sites
@@ -433,12 +595,25 @@ pub fn seed_with_founder_counts(
                     && view.material_at(i64::from(s.x), s.y, s.z) == Material::Soil
                     && view.water_depth_m(i64::from(s.x), s.y, s.z) <= 0.0
                     && has_headroom(&view, i64::from(s.x), s.y, s.z, blind_room)
+                    && blind_map
+                        .component_of(*s)
+                        .and_then(|c| blind_food.get(&c))
+                        .is_some_and(|f| f.producers > 0)
             })
             .map(|(_, s)| s)
             .collect()
     };
     let want = founder_counts[Founder::Blind.index()];
-    for (k, site) in strided(&pool, want).into_iter().enumerate() {
+    let chosen = place(
+        &pool,
+        want,
+        |s| blind_map.component_of(s),
+        |c, k| {
+            let stock = blind_food.get(&c).map_or(0.0, |f| f.stock);
+            stock + k as f64 * LITTER_ORGANIC >= blind_need * k as f64
+        },
+    );
+    for (k, site) in chosen.into_iter().enumerate() {
         if !flora.deposit(
             site,
             Deposit {
@@ -460,16 +635,25 @@ pub fn seed_with_founder_counts(
         want.saturating_sub(seeded.founders[Founder::Blind.index()]);
 
     // Frondgrazer founders, **after the food**. A browser needs a face with room for its
-    // body, water under its wade depth, foliage its mouth actually reaches from there,
-    // and somewhere else to go when that patch is bare — a walkable route to a second
-    // patch. There is no foodless fallback: a lineage with nowhere to live is a
-    // shortfall in `Seeded` and nothing is placed (plan §5).
-    let mut meadow = browser_faces(&world.view(), &flora.view(), fauna);
+    // body, water under its wade depth, a stocked foliage layer its mouth actually
+    // reaches from there, and somewhere else to go when that patch is bare — a
+    // walkable route to a second stand. There is no foodless fallback: a lineage with
+    // nowhere to live is a shortfall in `Seeded` and nothing is placed (plan §5).
+    let browser = *fauna.config().founder(Founder::Browser);
+    let browser_need = ACCEPT_FOUNDER_HOURS * upkeep_per_hour(&browser);
+    let browser_map = RouteMap::for_founder(&world.view(), &browser);
+    let browser_food = food_on(&browser_map, &world.view(), &flora.view(), Founder::Browser);
+    let mut meadow = browser_faces_on(&browser_map, &browser_food, &world.view(), &flora.view());
     // A body drowns in the stream's way as surely as a plant does.
-    let browser_drown = fauna.config().founder(Founder::Browser).core.drown_depth_m;
-    meadow.retain(|f| index_of(&sites, *f).is_none_or(|i| wettest[i] <= browser_drown));
+    meadow.retain(|f| index_of(sites, *f).is_none_or(|i| wettest[i] <= browser.core.drown_depth_m));
     let want = founder_counts[Founder::Browser.index()];
-    for (k, site) in strided(&meadow, want).into_iter().enumerate() {
+    let chosen = place(
+        &meadow,
+        want,
+        |s| browser_map.component_of(s),
+        |c, k| browser_food.get(&c).map_or(0.0, |f| f.stock) >= browser_need * k as f64,
+    );
+    for (k, site) in chosen.into_iter().enumerate() {
         if introduce_founder(
             world,
             fauna,
@@ -483,35 +667,51 @@ pub fn seed_with_founder_counts(
     seeded.shortfall[Founder::Browser.index()] =
         want.saturating_sub(seeded.founders[Founder::Browser.index()]);
 
+    seeded.imported_organic = flora.view().ledger.seeded_organic_in
+        + flora.view().ledger.deposited_organic_in
+        + fauna.view().ledger.introduced_organic_in
+        - organic_before;
+    seeded.acceptance = accept(world, flora, fauna, founder_counts);
     seeded
 }
 
-/// The startup pre-roll, before anything is seeded: settle as ever, then — for a fresh
-/// world whose cycle is scheduled — **open with a shower** and let it fall and drain,
-/// then watch the stream. Every support face remembers the deepest water it saw after
-/// the settle.
-pub fn pre_roll(world: &mut World, open_with_a_shower: bool) -> PreRoll {
-    let _ = (world, open_with_a_shower);
-    todo!("pre_roll")
-}
-
-/// Seed the habitat on a world that has had its [`pre_roll`].
-pub fn seed_pre_rolled(
-    world: &mut World,
-    flora: &mut Flora,
-    fauna: &mut Fauna,
-    pre: &PreRoll,
-    founder_counts: [usize; Founder::COUNT],
-) -> Seeded {
-    let _ = (world, flora, fauna, pre, founder_counts);
-    todo!("seed_pre_rolled")
+/// Choose up to `want` faces from `pool`, spread over it: a stride sample first and then
+/// the rest of the pool in order, taking a face only while `fits(component, k)` says its
+/// component can carry `k` founders with this one among them. A face on no component is
+/// never taken.
+fn place(
+    pool: &[Site],
+    want: usize,
+    component: impl Fn(Site) -> Option<usize>,
+    fits: impl Fn(usize, usize) -> bool,
+) -> Vec<Site> {
+    let mut chosen: Vec<Site> = Vec::new();
+    let mut count: BTreeMap<usize, usize> = BTreeMap::new();
+    let first = strided(pool, want);
+    for site in first.iter().chain(pool.iter()) {
+        if chosen.len() >= want {
+            break;
+        }
+        if chosen.contains(site) {
+            continue;
+        }
+        let Some(c) = component(*site) else {
+            continue;
+        };
+        let k = count.get(&c).copied().unwrap_or(0) + 1;
+        if fits(c, k) {
+            count.insert(c, k);
+            chosen.push(*site);
+        }
+    }
+    chosen
 }
 
 /// A lineage's adult **basal upkeep per hour**, organic units:
-/// `core.maintenance_per_s · core.body_max · 3600`.
+/// `core.maintenance_per_s · core.body_max · 3600`. Basal maintenance only — no motor
+/// respiration, no gestation — of a body at the size a founder grows into.
 pub fn upkeep_per_hour(phys: &FounderPhysiology) -> f64 {
-    let _ = phys;
-    todo!("upkeep_per_hour")
+    phys.core.maintenance_per_s * phys.core.body_max * 3600.0
 }
 
 /// Each walkable component's food for a lineage, and the route map it was read on.
@@ -521,22 +721,152 @@ pub fn lineage_food(
     phys: &FounderPhysiology,
     founder: Founder,
 ) -> (RouteMap, BTreeMap<usize, ComponentFood>) {
-    let _ = (view, fv, phys, founder);
-    todo!("lineage_food")
+    let map = RouteMap::for_founder(view, phys);
+    let food = food_on(&map, view, fv, founder);
+    (map, food)
+}
+
+/// The food each component of `map` holds for `founder`'s mouth.
+///
+/// - **Browser**: the foliage stock of every vascular stand's layers a mouth reaches
+///   from a face in the component ([`RouteMap::faces_reaching_layer`], the tick's own
+///   band and per-layer scan with the diet gate). Every such stand is its own producer.
+/// - **Shredder**: litter and carrion a mouth reaches at a face's own height
+///   ([`RouteMap::faces_reaching_pool`]), plus glowcap cap tissue in its band; its
+///   producers are the living stands **rooted** in the component that renew any of it —
+///   a stand that sheds litter, or a glowcap.
+///
+/// Each stock counts once per component however many faces reach it.
+fn food_on(
+    map: &RouteMap,
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    founder: Founder,
+) -> BTreeMap<usize, ComponentFood> {
+    let diet = cubarium_voxel_fauna::Diet::of(founder);
+    let mut food: BTreeMap<usize, ComponentFood> = BTreeMap::new();
+    for stand in fv.stands.iter().filter(|s| s.foliage > 0.0) {
+        let sc = fv.config.species(stand.species);
+        if !diet.accepts(sc.trophic) {
+            continue;
+        }
+        let mut reached: std::collections::BTreeSet<usize> = Default::default();
+        for layer in fv.layers(stand) {
+            let comps: std::collections::BTreeSet<usize> = map
+                .faces_reaching_layer(fv, view, stand, &layer, diet)
+                .into_iter()
+                .map(|i| map.components[i])
+                .collect();
+            for c in comps {
+                food.entry(c).or_default().stock += layer.stock;
+                reached.insert(c);
+            }
+        }
+        for c in reached {
+            let f = food.entry(c).or_default();
+            f.stands += 1;
+            if founder == Founder::Browser {
+                f.producers += 1;
+                f.production_per_h += sc.foliage_rate * stand.wood * 3600.0;
+            }
+        }
+    }
+    if founder == Founder::Blind {
+        for g in fv.ground.iter() {
+            let amount = g.litter.max(0.0) + g.carrion.max(0.0);
+            if !(amount > 0.0) {
+                continue;
+            }
+            let comps: std::collections::BTreeSet<usize> = map
+                .faces_reaching_pool(g.site)
+                .into_iter()
+                .map(|i| map.components[i])
+                .collect();
+            for c in comps {
+                food.entry(c).or_default().stock += amount;
+            }
+        }
+        for stand in fv.stands.iter() {
+            let sc = fv.config.species(stand.species);
+            let sheds = sc.senescence > 0.0 && stand.foliage > 0.0;
+            let cap = stand.species == Species::Glowcap;
+            if !(sheds || cap) {
+                continue;
+            }
+            let Some(c) = map.component_of(stand.site) else {
+                continue;
+            };
+            let f = food.entry(c).or_default();
+            f.producers += 1;
+            f.production_per_h += sc.senescence * stand.foliage.max(0.0) * 3600.0;
+        }
+    }
+    food
 }
 
 /// **The acceptance check** (decisions §8), read off the world as it stands: for each
 /// lineage, the components its living founders stand in, each component's reachable
 /// edible stock against `N · founders · upkeep`, and (shredder) a living producer rooted
-/// in it.
+/// in it. A world is accepted when every lineage has placed `wanted` founders, all of
+/// them in habitable components.
 pub fn accept(
     world: &World,
     flora: &Flora,
     fauna: &Fauna,
     wanted: [usize; Founder::COUNT],
 ) -> Acceptance {
-    let _ = (world, flora, fauna, wanted);
-    todo!("accept")
+    let view = world.view();
+    let fv = flora.view();
+    let av = fauna.view();
+    let mut out = Acceptance::default();
+    for founder in Founder::ALL {
+        let phys = *fauna.config().founder(founder);
+        let (map, food) = lineage_food(&view, &fv, &phys, founder);
+        let u = upkeep_per_hour(&phys);
+        let mut v = LineageVerdict {
+            wanted: wanted[founder.index()],
+            upkeep_per_h: u,
+            ..LineageVerdict::default()
+        };
+        let mut count: BTreeMap<usize, usize> = BTreeMap::new();
+        for a in av.animals.iter().filter(|a| a.founder == Some(founder)) {
+            v.placed += 1;
+            match map.component_of(a.site) {
+                Some(c) => *count.entry(c).or_default() += 1,
+                None => v.stranded += 1,
+            }
+        }
+        let mut worst = f64::INFINITY;
+        for (c, n) in count {
+            let f = food.get(&c).copied().unwrap_or_default();
+            let need = ACCEPT_FOUNDER_HOURS * u * n as f64;
+            let habitable =
+                f.stock >= need && (founder != Founder::Blind || f.producers > 0);
+            worst = worst.min(if u > 0.0 { f.stock / (u * n as f64) } else { f64::INFINITY });
+            v.components.push(ComponentVerdict {
+                component: c,
+                founders: n,
+                food: f,
+                habitable,
+            });
+        }
+        if v.stranded > 0 {
+            worst = 0.0;
+        }
+        v.accepted = v.placed >= v.wanted
+            && v.stranded == 0
+            && v.components.iter().all(|c| c.habitable);
+        v.ratio = if v.wanted == 0 {
+            f64::INFINITY
+        } else if v.placed == 0 {
+            0.0
+        } else {
+            worst * (v.placed.min(v.wanted) as f64 / v.wanted as f64)
+        };
+        out.lineages[founder.index()] = v;
+    }
+    out.accepted = out.lineages.iter().all(|l| l.accepted);
+    out
 }
 
 /// Register each lineage's own observation-only heuristic as its birth factory: every
@@ -565,9 +895,8 @@ fn introduce_founder(
 ) -> bool {
     if !fauna.apply(
         world,
-        FaunaCommand::IntroduceFounder {
-            x: i64::from(site.x),
-            z: site.z,
+        FaunaCommand::IntroduceFounderOnFace {
+            site,
             founder,
             stores: StartingStores::HUNGRY,
             heading_rad,
@@ -585,132 +914,50 @@ fn spread_heading(k: usize, of: usize) -> f64 {
     std::f64::consts::TAU * (k as f64) / (of.max(1) as f64)
 }
 
-/// The faces a browser founder could actually live on: its body fits, the water is
-/// wadeable, a seeded crown is inside its mouth's reach from there, and the walk from
-/// there reaches a **second** foliage patch.
+/// The faces a browser founder could actually live on: its adult body fits, the water
+/// is wadeable, its mouth reaches a **foliage layer with stock** of a stand its diet
+/// accepts — the tick's own band and per-layer scan, not the crown top against the band
+/// — and the walk from there reaches a **second** stand.
 ///
 /// The last one is why this returns nothing rather than falling back to bare soil. A
 /// founder browses through a 2 m cone with no target search; a body on ground whose only
-/// crown is the one it is standing under eats that crown and then has nowhere to go.
+/// stand is the one it is standing under eats that stand and then has nowhere to go.
+#[cfg(test)]
 fn browser_faces(view: &VoxelView<'_>, fv: &FloraView<'_>, fauna: &Fauna) -> Vec<Site> {
     let phys = *fauna.config().founder(Founder::Browser);
-    let sc = phys.core;
-    // The **adult** body: a founder is placed hungry and grows into this one in place,
-    // so the seeder must not offer a slot the grown animal will not fit in. On both
-    // shipped grids the hungry body asks for the same clearance anyway
-    // (`design/handoffs/voxel-body-anchors-2026-09-22.md`).
-    let body = phys.adult_body();
-    let room = body.headroom_voxels(view.config.voxel_m);
-    let width = i64::from(view.config.width);
-    let depth = i64::from(view.config.depth);
-
-    // Feeding faces, by the stand whose crown they reach.
-    let mut feeding: Vec<(Site, u64)> = Vec::new();
-    for stand in fv.stands.iter().filter(|s| s.foliage > 0.0) {
-        let sp = fv.config.species(stand.species);
-        let crown_y = i64::from(stand.site.y) + i64::from(sp.crown_voxels(stand.wood));
-        let radius = sp.crown_radius(stand.wood).max(0.0);
-        let span = radius.floor() as i64;
-        let r2 = radius * radius;
-        for dz in -span..=span {
-            for dx in -span..=span {
-                if (dx * dx + dz * dz) as f64 > r2 {
-                    continue;
-                }
-                let cx = (i64::from(stand.site.x) + dx).rem_euclid(width);
-                let cz = i64::from(stand.site.z) + dz;
-                if cz < 0 || cz >= depth {
-                    continue;
-                }
-                let Some(face) = highest_support(view, cx, cz as u32) else {
-                    continue;
-                };
-                // The physical mouth band from that face (decisions §2), the same
-                // rule the tick's bite uses.
-                if !body
-                    .mouth_layers(face.y, view.config.voxel_m)
-                    .contains(&crown_y)
-                {
-                    continue;
-                }
-                if !has_headroom(view, cx, face.y, face.z, room) {
-                    continue;
-                }
-                if view.water_depth_m(cx, face.y, face.z) > sc.wade_depth_m {
-                    continue;
-                }
-                feeding.push((face, stand.id));
-            }
-        }
-    }
-    if feeding.is_empty() {
-        return Vec::new();
-    }
-
-    // The walk. One rule, one function: `walkable_components` over **every** face this
-    // body could stand on, with the lineage's climb
-    // (`design/handoffs/voxel-founder-step-2026-09-22.md`). The route between two
-    // feeding patches runs over ordinary ground, so the component has to be built on the
-    // standable set and the feeding faces read off it — a component holding only one
-    // patch's stands is a dead end.
-    let climb = cubarium_voxel_fauna::climb_voxels(
-        fauna.config().founder(Founder::Browser),
-        view.config.voxel_m,
-    );
-    let walkable = cubarium_voxel_fauna::standable_faces(view, &body, sc.wade_depth_m);
-    let component = cubarium_voxel_fauna::walkable_components(&walkable, view.config.width, climb);
-    let component = {
-        let mut map: std::collections::HashMap<Site, usize> =
-            std::collections::HashMap::with_capacity(walkable.len());
-        for (f, c) in walkable.iter().zip(component) {
-            map.insert(*f, c);
-        }
-        map
-    };
-    let mut stands_in: std::collections::BTreeMap<usize, std::collections::BTreeSet<u64>> =
-        Default::default();
-    for (face, id) in &feeding {
-        if let Some(&root) = component.get(face) {
-            stands_in.entry(root).or_default().insert(*id);
-        }
-    }
-    let mut out: Vec<Site> = {
-        let mut all: Vec<Site> = feeding
-            .iter()
-            .map(|&(f, _)| f)
-            .filter(|f| {
-                component
-                    .get(f)
-                    .and_then(|root| stands_in.get(root))
-                    .is_some_and(|s| s.len() >= 2)
-            })
-            .collect();
-        all.sort_unstable_by_key(|s| (s.y, s.x, s.z));
-        all.dedup();
-        all
-    };
-    out.sort_by_key(|s| (s.y, s.x, s.z));
-    out
+    let map = RouteMap::for_founder(view, &phys);
+    let food = food_on(&map, view, fv, Founder::Browser);
+    browser_faces_on(&map, &food, view, fv)
 }
 
-/// Run the world on and report, per site, the **deepest standing water it saw**.
-///
-/// A settled world is not a still one when a river runs through it. This is the water a
-/// face actually gets, rather than the water it happens to have at the instant the
-/// founders are chosen.
-fn watch_the_stream(world: &mut World, sites: &[Site], ticks: u32) -> Vec<f64> {
-    let mut wettest = vec![0.0f64; sites.len()];
-    for _ in 0..ticks {
-        world.step();
-        let view = world.view();
-        for (w, s) in wettest.iter_mut().zip(sites) {
-            let d = view.water_depth_m(i64::from(s.x), s.y, s.z);
-            if d > *w {
-                *w = d;
+/// [`browser_faces`] on a route map and its food already built.
+fn browser_faces_on(
+    map: &RouteMap,
+    food: &BTreeMap<usize, ComponentFood>,
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+) -> Vec<Site> {
+    let diet = cubarium_voxel_fauna::Diet::of(Founder::Browser);
+    let mut out: Vec<Site> = Vec::new();
+    for stand in fv.stands.iter().filter(|s| s.foliage > 0.0) {
+        for layer in fv.layers(stand) {
+            for i in map.faces_reaching_layer(fv, view, stand, &layer, diet) {
+                // The walk: one rule, `walkable_components` over every face this body
+                // could stand on, with the lineage's climb
+                // (`design/handoffs/voxel-founder-step-2026-09-22.md`). A component
+                // holding only one stand is a dead end.
+                if food
+                    .get(&map.components[i])
+                    .is_some_and(|f| f.stands >= 2)
+                {
+                    out.push(map.faces[i]);
+                }
             }
         }
     }
-    wettest
+    out.sort_unstable_by_key(|s| (s.y, s.x, s.z));
+    out.dedup();
+    out
 }
 
 /// Every support face in the world, at any height, sorted low to high: the ground, the
@@ -1301,10 +1548,10 @@ mod tests {
         );
     }
 
-    /// A closed, scheduled cycle on the plain, with a shower that falls hard for a
-    /// second and a half and then soaks away.
+    /// A closed, scheduled cycle over a metre of soil, with a shower that falls hard for
+    /// a second and a half, stands a few centimetres deep on the ground, and soaks away.
     fn showery_plain() -> World {
-        let mut world = plain_with(Config {
+        let cfg = Config {
             width: 16,
             height: 12,
             depth: 4,
@@ -1316,8 +1563,26 @@ mod tests {
             shower_interval_min_s: 300.0,
             shower_interval_max_s: 900.0,
             ..Config::default()
-        });
-        cubarium_voxel::hydrate(&mut world, &cubarium_voxel::Water::AUTHORED);
+        };
+        let mut world = World::empty(cfg.clone());
+        for z in 0..cfg.depth {
+            for x in 0..cfg.width as i64 {
+                for y in 1..=4 {
+                    world.apply(cubarium_voxel::Command::SetMaterial {
+                        x,
+                        y,
+                        z,
+                        material: Material::Soil,
+                    });
+                }
+            }
+        }
+        let water = cubarium_voxel::Water {
+            inventory_m: 0.2,
+            aquifer_head_m: 0.3,
+            ..cubarium_voxel::Water::AUTHORED
+        };
+        cubarium_voxel::hydrate(&mut world, &water);
         world
     }
 
@@ -1335,49 +1600,48 @@ mod tests {
         assert!(world.shower_left_m3() <= 0.0, "and it ended");
         assert!(world.next_shower_tick() > world.tick(), "the next one is drawn");
 
-        // The plain flooded past springturf's drown depth and drained again.
-        let flora_cfg = cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25);
-        let drown = flora_cfg.species(Species::Springturf).drown_depth_m;
+        // The plain stood under water and is dry again.
         let view = world.view();
-        let flooded: Vec<Site> = pre
-            .sites
-            .iter()
-            .zip(&pre.wettest)
-            .filter(|(s, w)| {
-                **w > drown && view.water_depth_m(i64::from(s.x), s.y, s.z) <= 0.0
-            })
-            .map(|(s, _)| *s)
-            .collect();
-        assert!(!flooded.is_empty(), "the shower flooded faces that dried: {pre:?}");
+        let dried = |i: usize| {
+            let s = pre.sites[i];
+            view.water_depth_m(i64::from(s.x), s.y, s.z) <= 0.0
+        };
+        assert!(
+            (0..pre.sites.len()).all(|i| pre.wettest[i] > 0.02 && dried(i)),
+            "the shower flooded the plain and it drained: {:?}",
+            &pre.wettest[..4]
+        );
 
+        let flora_cfg = cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25);
         let mut flora = Flora::new(flora_cfg.clone());
         let mut fauna = Fauna::new(Default::default());
         let seeded = seed_pre_rolled(&mut world, &mut flora, &mut fauna, &pre, [0, 0]);
         assert_eq!(seeded.pre_roll, pre.report);
+        let drowned_on = |species: Species, site: Site| {
+            let i = index_of(&pre.sites, site).expect("a support face");
+            pre.wettest[i] > flora_cfg.species(species).drown_depth_m
+        };
         for stand in flora.view().stands.iter() {
-            let sc = flora_cfg.species(stand.species);
-            let i = index_of(&pre.sites, stand.site).expect("a support face");
             assert!(
-                pre.wettest[i] <= sc.drown_depth_m,
-                "{} planted where the shower stood {:.3} m deep",
-                stand.species.name(),
-                pre.wettest[i]
+                !drowned_on(stand.species, stand.site),
+                "{} planted where the shower stood deeper than it can",
+                stand.species.name()
             );
         }
-        // The same world without the opening shower would have planted springturf on
-        // those faces: the shower is what took them away.
-        let mut dry = showery_plain();
-        let calm = pre_roll(&mut dry, false);
-        let mut dry_flora = Flora::new(flora_cfg);
-        let mut dry_fauna = Fauna::new(Default::default());
-        seed_pre_rolled(&mut dry, &mut dry_flora, &mut dry_fauna, &calm, [0, 0]);
+        // The same world without the opening shower plants a species on faces the shower
+        // would have drowned it on: the shower is what took them away.
+        let mut calm = showery_plain();
+        let calm_pre = pre_roll(&mut calm, false);
+        let mut calm_flora = Flora::new(flora_cfg.clone());
+        let mut calm_fauna = Fauna::new(Default::default());
+        seed_pre_rolled(&mut calm, &mut calm_flora, &mut calm_fauna, &calm_pre, [0, 0]);
         assert!(
-            dry_flora
+            calm_flora
                 .view()
                 .stands
                 .iter()
-                .any(|s| s.species == Species::Springturf && flooded.contains(&s.site)),
-            "without the shower, springturf is planted on the faces it flooded"
+                .any(|s| drowned_on(s.species, s.site)),
+            "without the shower something is planted on a face it would have drowned on"
         );
     }
 
@@ -1512,10 +1776,12 @@ mod tests {
         // The opening shower is shortened to a few seconds so the pre-roll fits; the
         // ledgers are what is being asked, through the shower, the drain and the seeding.
         let preset = cubarium_voxel::Preset::find("default").unwrap();
+        let mut recipe = preset.recipe;
+        recipe.water.shower_volume_m3 = 0.01;
         let world = World::new(Config {
             seed: 1,
             width: 48,
-            shower_volume_m3: 0.01,
+            landform: cubarium_voxel::Landform::Staged(recipe),
             ..preset.config()
         });
         assert!(world.config().shower_interval_max_s > 0.0, "a scheduled cycle");

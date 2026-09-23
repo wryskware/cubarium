@@ -1860,10 +1860,13 @@ impl Fauna {
                 let Some((body, reserve)) = stores.resolve(&core) else {
                     return false;
                 };
+                let view = world.view();
+                let Some(site) = cubarium_voxel_flora::highest_support(&view, x, z) else {
+                    return false;
+                };
                 self.introduce_body(
                     world,
-                    x,
-                    z,
+                    site,
                     Species::Frondgrazer,
                     Some(founder),
                     body,
@@ -1871,7 +1874,35 @@ impl Fauna {
                     heading_rad,
                 )
             }
-            Command::IntroduceFounderOnFace { .. } => todo!("IntroduceFounderOnFace"),
+            Command::IntroduceFounderOnFace {
+                site,
+                founder,
+                stores,
+                heading_rad,
+            } => {
+                let view = world.view();
+                let c = view.config;
+                if site.x >= c.width
+                    || site.z >= c.depth
+                    || site.y + 1 >= c.height
+                    || !view.is_support(i64::from(site.x), site.y, site.z)
+                {
+                    return false;
+                }
+                let core = self.config.founder(founder).core;
+                let Some((body, reserve)) = stores.resolve(&core) else {
+                    return false;
+                };
+                self.introduce_body(
+                    world,
+                    site,
+                    Species::Frondgrazer,
+                    Some(founder),
+                    body,
+                    Some(reserve),
+                    heading_rad,
+                )
+            }
             Command::Remove { x, z } => {
                 let view = world.view();
                 let Some(site) = cubarium_voxel_flora::highest_support(&view, x, z) else {
@@ -1911,7 +1942,11 @@ impl Fauna {
         body: f64,
         heading_rad: f64,
     ) -> bool {
-        self.introduce_body(world, x, z, species, founder, body, None, heading_rad)
+        let view = world.view();
+        let Some(site) = cubarium_voxel_flora::highest_support(&view, x, z) else {
+            return false;
+        };
+        self.introduce_body(world, site, species, founder, body, None, heading_rad)
     }
 
     /// The placement itself. `reserve` `None` is the full reserve `body` can carry — what
@@ -1921,8 +1956,7 @@ impl Fauna {
     fn introduce_body(
         &mut self,
         world: &World,
-        x: i64,
-        z: u32,
+        site: Site,
         species: Species,
         founder: Option<Founder>,
         body: f64,
@@ -1930,9 +1964,6 @@ impl Fauna {
         heading_rad: f64,
     ) -> bool {
         let view = world.view();
-        let Some(site) = cubarium_voxel_flora::highest_support(&view, x, z) else {
-            return false;
-        };
         // A founder body is introduced under its **own** physiology: thresholds,
         // densities and tissue mineral content come from the founder table, not from
         // the placeholder species it shares a [`Species`] tag with.

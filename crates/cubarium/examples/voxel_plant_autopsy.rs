@@ -172,7 +172,7 @@ fn main() {
         .find_map(|a| a.parse::<f64>().ok())
         .unwrap_or(6.0);
     // `preset=<small|default|wide>` is the **landscape arm**: the world `cubarium voxel`
-    // builds with no TOML for that preset, through `voxel::ambient_world`, instead of the
+    // builds with no TOML for that preset, through `voxel::ambient_habitat`, instead of the
     // authored fixture this file used to be the only reader of.
     let preset: Option<&'static cubarium_voxel::Preset> = args
         .iter()
@@ -227,6 +227,7 @@ fn main() {
         world,
         flora,
         fauna,
+        None,
         coupled,
         hours,
         &format!("authored fixture{}", if wet { ", --wet probe" } else { "" }),
@@ -236,33 +237,44 @@ fn main() {
 /// The `preset=` arm: exactly what `cubarium voxel` does with no TOML for this preset —
 /// the recipe's own extents and cell size, the recipe's own water (`World::new` writes
 /// the cycle onto the config), the lake gate over `LAKE_SEED_TRIES` draws through
-/// [`cubarium::voxel::ambient_world`], and the plant layer scaled to the cell size the
+/// [`cubarium::voxel::ambient_habitat`], and the plant layer scaled to the cell size the
 /// way the host scales it. Read-only: nothing here changes a rule or a constant.
 fn run_preset(preset: &cubarium_voxel::Preset, seed_base: u64, coupled: bool, hours: f64) {
     let world_cfg = preset.config();
-    let (world, seed, rejected) = cubarium::voxel::ambient_world(&world_cfg, seed_base);
+    // The host's founding loop: lake gate, pre-roll with the opening shower, seeding and
+    // the acceptance check. The world comes back **already seeded**.
+    let founded = cubarium::voxel::ambient_habitat(
+        &world_cfg,
+        seed_base,
+        FloraConfig::for_voxel_size,
+        habitat::FOUNDER_COUNTS,
+    );
+    let world = founded.world;
     let lake = cubarium_voxel::hydrate::lake(&world);
-    let flora = Flora::new(FloraConfig::for_voxel_size(world.config().voxel_m));
-    let fauna = Fauna::new(FaunaConfig::default());
     eprintln!(
-        "scene: preset {} ({}x{}x{} at {} m, seed {seed}, {rejected} rejected), \
+        "scene: preset {} ({}x{}x{} at {} m, seed {}, {} lake / {} habitat rejected, {}), \
          lake {:.3} m3 over {:.2} m2 visible; flora scaled for {} m cells",
         preset.name,
         world.config().width,
         world.config().height,
         world.config().depth,
         world.config().voxel_m,
+        founded.seed,
+        founded.lake_rejected,
+        founded.habitat_rejected,
+        if founded.accepted { "accepted" } else { "NOT accepted" },
         lake.volume_m3,
         lake.visible_m2,
         world.config().voxel_m,
     );
     run(
         world,
-        flora,
-        fauna,
+        founded.flora,
+        founded.fauna,
+        Some(founded.seeded),
         coupled,
         hours,
-        &format!("preset {} seed {seed}", preset.name),
+        &format!("preset {} seed {}", preset.name, founded.seed),
     );
 }
 
@@ -272,12 +284,18 @@ fn run(
     mut world: World,
     mut flora: Flora,
     mut fauna: Fauna,
+    seeded: Option<habitat::Seeded>,
     coupled: bool,
     hours: f64,
     label: &str,
 ) {
     let world_cfg = world.config().clone();
-    let seeded = habitat::seed(&mut world, &mut flora, &mut fauna);
+    // A preset arm arrives seeded by the founding loop; the authored fixture is seeded
+    // here, once.
+    let seeded = match seeded {
+        Some(seeded) => seeded,
+        None => habitat::seed(&mut world, &mut flora, &mut fauna),
+    };
     eprintln!(
         "arm: {} ({})",
         if coupled {

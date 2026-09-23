@@ -42,9 +42,8 @@ use cubarium::voxel::install_default_founders;
 use cubarium::voxel::scene;
 use cubarium_voxel::{Command as WorldCommand, VoxelView};
 use cubarium_voxel_fauna::{
-    ConeHit, Diet, Fauna, FaunaConfig, Founder, Manifest, Pose, Senses, SightMap, TICK_HZ,
-    climb_voxels, eye_origin_m, layer_columns, mouth_columns_from_face, mouth_crown_layers_at,
-    ray_direction_deg, reachable_layers_of, standable_faces, walkable_components,
+    ConeHit, Diet, Fauna, FaunaConfig, Founder, Manifest, Pose, RouteMap, Senses, SightMap,
+    TICK_HZ, eye_origin_m, layer_columns, ray_direction_deg,
 };
 use cubarium_voxel_flora::{Flora, FloraConfig, Site, Species as Plant};
 use cubarium_voxel_sim::{Sim, SimConfig};
@@ -99,38 +98,49 @@ fn main() {
     let lollipop = args.iter().any(|a| a == "lollipop");
 
     let cfg = VoxelConfig::default();
-    // The census's own preset arm, verbatim, so the two agree at t = 0.
-    let (mut world, flora_cfg) = match preset {
-        Some(preset) => {
-            let (world, seed, rejected) =
-                cubarium::voxel::ambient_world(&preset.config(), seed_base);
-            eprintln!(
-                "scene: preset {} ({}x{}x{} at {} m, seed {seed}, {rejected} rejected)",
-                preset.name,
-                world.config().width,
-                world.config().height,
-                world.config().depth,
-                world.config().voxel_m,
-            );
-            let flora_cfg = FloraConfig::for_voxel_size(world.config().voxel_m);
-            (world, flora_cfg)
-        }
-        None => {
-            eprintln!("scene: authored world");
-            (scene::authored(cfg.world.clone()), FloraConfig::default())
-        }
-    };
     if lollipop {
         eprintln!("plants: one_layer_species (the pre-layers control)");
     }
-    let flora_cfg = if lollipop {
-        flora_cfg.one_layer_species()
-    } else {
-        flora_cfg
+    let layered = |flora_cfg: FloraConfig| {
+        if lollipop {
+            flora_cfg.one_layer_species()
+        } else {
+            flora_cfg
+        }
     };
-    let mut flora = Flora::new(flora_cfg);
-    let mut fauna = Fauna::new(FaunaConfig::default());
-    let seeded = habitat::seed(&mut world, &mut flora, &mut fauna);
+    // The census's own preset arm, verbatim, so the two agree at t = 0: the host's
+    // founding loop, which returns the world already seeded.
+    let (world, flora, mut fauna, seeded) = match preset {
+        Some(preset) => {
+            let founded = cubarium::voxel::ambient_habitat(
+                &preset.config(),
+                seed_base,
+                |v| layered(FloraConfig::for_voxel_size(v)),
+                habitat::FOUNDER_COUNTS,
+            );
+            eprintln!(
+                "scene: preset {} ({}x{}x{} at {} m, seed {}, {} lake / {} habitat rejected, {})",
+                preset.name,
+                founded.world.config().width,
+                founded.world.config().height,
+                founded.world.config().depth,
+                founded.world.config().voxel_m,
+                founded.seed,
+                founded.lake_rejected,
+                founded.habitat_rejected,
+                if founded.accepted { "accepted" } else { "NOT accepted" },
+            );
+            (founded.world, founded.flora, founded.fauna, founded.seeded)
+        }
+        None => {
+            eprintln!("scene: authored world");
+            let mut world = scene::authored(cfg.world.clone());
+            let mut flora = Flora::new(layered(FloraConfig::default()));
+            let mut fauna = Fauna::new(FaunaConfig::default());
+            let seeded = habitat::seed(&mut world, &mut flora, &mut fauna);
+            (world, flora, fauna, seeded)
+        }
+    };
     eprintln!(
         "seeded: stands={} logs={} litter_tiles={} founders={:?} animals={}",
         seeded.stands,
@@ -260,63 +270,33 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
     let wv = sim.world().view();
     let fv = sim.flora().view();
     let av = sim.fauna().view();
-    let c = wv.config;
-    let v = c.voxel_m;
 
     let browser_phys = *sim.fauna().config().founder(Founder::Browser);
-    let browser_core = browser_phys.core;
     // The **adult** body of each lineage: the ceiling this landscape offers a grown
     // animal, which is what a stock measurement is about. It is the model's own
     // geometry now, not a hypothesis (`FounderPhysiology::adult_body`).
     let browser_body = browser_phys.adult_body();
     let browser_manifest = Founder::Browser.manifest();
     let blind_phys = *sim.fauna().config().founder(Founder::Blind);
-    let blind_core = blind_phys.core;
-    let blind_body = blind_phys.adult_body();
-    // The route rule, one function, one climb per lineage
-    // (`design/handoffs/voxel-founder-step-2026-09-22.md`).
-    let browser_climb = climb_voxels(&browser_phys, c.voxel_m);
-    let blind_climb = climb_voxels(&blind_phys, c.voxel_m);
 
-    // The legal standing faces: a support face with wadeable water and the browser's
-    // own height of void over it.
-    let faces = standable_faces(&wv, &browser_body, browser_core.wade_depth_m);
-    let face_index: HashMap<(u32, u32, u32), usize> = faces
-        .iter()
-        .enumerate()
-        .map(|(i, f)| ((f.x, f.y, f.z), i))
-        .collect();
-    let components = walkable_components(&faces, c.width, browser_climb);
-
-    // The mouth columns of every legal face, and the index from a column back to the
-    // faces that can put a mouth over it.
-    let (per_face_cols, reach_map) = {
-        let mut per_face: Vec<Vec<(i64, u32)>> = Vec::with_capacity(faces.len());
-        let mut map: HashMap<(u32, u32), Vec<usize>> = HashMap::new();
-        for (i, face) in faces.iter().enumerate() {
-            let cols = mouth_columns_from_face(&wv, *face, &browser_body);
-            for &(cx, cz) in &cols {
-                map.entry((cx.rem_euclid(i64::from(c.width)) as u32, cz))
-                    .or_default()
-                    .push(i);
-            }
-            per_face.push(cols);
-        }
-        (per_face, map)
-    };
+    // The route rule, one function, one climb per lineage, and the **same** route map
+    // the seeder's acceptance check reads (`cubarium_voxel_fauna::RouteMap`; package
+    // 4): the legal standing faces, their walkable components and every face's mouth
+    // columns over all headings.
+    let browser_map = RouteMap::for_founder(&wv, &browser_phys);
+    let faces = &browser_map.faces;
+    let components = &browser_map.components;
 
     // The components a living browser stands in.
     let browser_components: HashSet<usize> = av
         .animals
         .iter()
         .filter(|a| a.founder == Some(Founder::Browser))
-        .filter_map(|a| face_index.get(&(a.site.x, a.site.y, a.site.z)))
-        .map(|&i| components[i])
+        .filter_map(|a| browser_map.component_of(a.site))
         .collect();
     let seeded_components: HashSet<usize> = seeded_browser_faces
         .iter()
-        .filter_map(|key| face_index.get(key))
-        .map(|&i| components[i])
+        .filter_map(|&(x, y, z)| browser_map.component_of(Site { x, y, z }))
         .collect();
 
     // A hypothetical eye on an occupied face is that occupant's eye, so a body does not
@@ -366,36 +346,20 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
             total.foliage += layer.stock;
             let columns = layer_columns(&wv, stand, &layer);
 
-            let mut any = false;
-            let mut connected = false;
-            let mut connected_seeded = false;
-            for column in columns.iter().filter(|_| edible) {
-                for &i in reach_map.get(column).map(Vec::as_slice).unwrap_or(&[]) {
-                    let face = faces[i];
-                    let band = mouth_crown_layers_at(face.y, &browser_body, v);
-                    if !band.contains(&layer.cell) {
-                        continue;
-                    }
-                    // The acceptance rule itself, not a re-derivation of it: the
-                    // model's own per-layer scan, asked whether *this* layer is one of
-                    // the ones the mouth at this face may take from.
-                    if !reachable_layers_of(&fv, &wv, stand, &per_face_cols[i], &band)
-                        .iter()
-                        .any(|(index, _)| *index == li)
-                    {
-                        continue;
-                    }
-                    any = true;
-                    connected |= browser_components.contains(&components[i]);
-                    connected_seeded |= seeded_components.contains(&components[i]);
-                    if connected && connected_seeded {
-                        break;
-                    }
-                }
-                if connected && connected_seeded {
-                    break;
-                }
-            }
+            // The acceptance rule itself, not a re-derivation of it: every face whose
+            // mouth the model's own band and per-layer scan let take from this layer.
+            let reaching = if edible {
+                browser_map.faces_reaching_layer(&fv, &wv, stand, &layer, Diet::Vascular)
+            } else {
+                Vec::new()
+            };
+            let any = !reaching.is_empty();
+            let connected = reaching
+                .iter()
+                .any(|&i| browser_components.contains(&components[i]));
+            let connected_seeded = reaching
+                .iter()
+                .any(|&i| seeded_components.contains(&components[i]));
             if any {
                 row.reach += layer.stock;
                 if !counted_site {
@@ -418,7 +382,7 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
                 seen[i] = sees_stand(
                     &wv,
                     sight,
-                    &faces,
+                    faces,
                     &occupant,
                     &columns,
                     layer.cell,
@@ -519,25 +483,40 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
     }
 
     // --- detritus, against the shredders' own components ---
-    let blind_faces = standable_faces(&wv, &blind_body, blind_core.wade_depth_m);
-    let blind_index: HashMap<(u32, u32, u32), usize> = blind_faces
-        .iter()
-        .enumerate()
-        .map(|(i, f)| ((f.x, f.y, f.z), i))
-        .collect();
-    let blind_components = walkable_components(&blind_faces, c.width, blind_climb);
+    //
+    // The same reach the seeder's acceptance reads: a pool counts when a mouth on a
+    // face of a living shredder's component takes from it (a pool at the face's own
+    // height under one of its columns), and cap tissue when one of its layers is in
+    // such a mouth's band.
+    let blind_map = RouteMap::for_founder(&wv, &blind_phys);
     let shredder_components: HashSet<usize> = av
         .animals
         .iter()
         .filter(|a| a.founder == Some(Founder::Blind))
-        .filter_map(|a| blind_index.get(&(a.site.x, a.site.y, a.site.z)))
-        .map(|&i| blind_components[i])
+        .filter_map(|a| blind_map.component_of(a.site))
         .collect();
     let in_shredder_reach = |site: Site| -> bool {
-        blind_index
-            .get(&(site.x, site.y, site.z))
-            .is_some_and(|&i| shredder_components.contains(&blind_components[i]))
+        blind_map
+            .faces_reaching_pool(site)
+            .iter()
+            .any(|&i| shredder_components.contains(&blind_map.components[i]))
     };
+    let caps: Vec<(f64, bool)> = fv
+        .stands
+        .iter()
+        .filter(|s| s.species == Plant::Glowcap)
+        .flat_map(|s| {
+            fv.layers(s)
+                .map(|layer| {
+                    let inside = blind_map
+                        .faces_reaching_layer(&fv, &wv, s, &layer, Diet::Fungal)
+                        .iter()
+                        .any(|&i| shredder_components.contains(&blind_map.components[i]));
+                    (layer.stock, inside)
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
     let mut detritus = Vec::new();
     for (name, total_organic, connected) in [
         pool(
@@ -550,17 +529,14 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
             fv.ground.iter().map(|g| (g.site, g.carrion)),
             &in_shredder_reach,
         ),
-        pool(
-            "glowcap_cap",
-            fv.stands
-                .iter()
-                .filter(|s| s.species == Plant::Glowcap)
-                .map(|s| (s.site, s.foliage)),
-            &in_shredder_reach,
-        ),
     ] {
         detritus.push((name, total_organic, connected));
     }
+    detritus.push((
+        "glowcap_cap",
+        caps.iter().map(|c| c.0.max(0.0)).sum(),
+        caps.iter().filter(|c| c.1).map(|c| c.0.max(0.0)).sum(),
+    ));
 
     // The stocks the residuals below are a residual **of**, so a relative bound can be
     // read off the report rather than estimated from it.

@@ -2893,49 +2893,23 @@ impl Flora {
                 let Some(site) = highest_support(&view, x, z) else {
                     return false;
                 };
-                let sc = self.config.species(species);
-                if !(wood.is_finite() && wood >= sc.alive_min) {
-                    return false;
-                }
-                let Err(at) = self.stands.binary_search_by_key(&site, |s| s.site) else {
-                    return false;
-                };
-                let mut stand = Stand {
-                    id: self.ledger.births,
-                    site,
-                    species,
-                    stage: Stage::Alive,
-                    wood,
-                    foliage: sc.alpha * wood,
-                    reserve: sc.reserve_cap * wood,
-                    light: 0.0,
-                    moisture: 0.0,
-                    water_m3: 0.0,
-                    mineral: 0.0,
-                    aeration_stress: 0.0,
-                    parcel: 0.0,
-                    layer_stock: [0.0; MAX_FOLIAGE_LAYERS],
-                    profile_stage: 0,
-                };
-                // A founder arrives full, so its layers arrive at their capacities.
-                stand.bin_foliage(sc, self.config.voxel_m);
-                self.ledger.births += 1;
-                let organic = stand.organic();
-                // A founder arrives at the species' own tissue mineral content: it is
-                // grown outside the system, so its mineral is seeded in with it.
-                stand.mineral = sc.n_tissue * organic;
-                self.ledger.seeded_organic_in += organic;
-                self.ledger.seeded_mineral_in += stand.mineral;
-                self.ledger.seeded_energy_in += sc.energy_density * organic;
-                self.stands.insert(at, stand);
-                if let Err(g) = self.ground.binary_search_by_key(&site, |g| g.site) {
-                    self.ledger.seeded_mineral_in += self.config.initial_mineral;
-                    self.ground
-                        .insert(g, Ground::new(site, self.config.initial_mineral));
-                }
-                true
+                self.seed_founder(site, species, wood)
             }
-            Command::SeedOnFace { .. } => todo!("SeedOnFace"),
+            Command::SeedOnFace {
+                site,
+                species,
+                wood,
+            } => {
+                let c = view.config;
+                if site.x >= c.width
+                    || site.z >= c.depth
+                    || site.y + 1 >= c.height
+                    || !view.is_support(i64::from(site.x), site.y, site.z)
+                {
+                    return false;
+                }
+                self.seed_founder(site, species, wood)
+            }
             Command::Clear { x, z } => {
                 let Some(site) = highest_support(&view, x, z) else {
                     return false;
@@ -2980,6 +2954,52 @@ impl Flora {
                 true
             }
         }
+    }
+
+    /// Plant a founder stand on `site`, a support face the caller has resolved: the one
+    /// body [`Command::Seed`] and [`Command::SeedOnFace`] share.
+    fn seed_founder(&mut self, site: Site, species: Species, wood: f64) -> bool {
+        let sc = self.config.species(species);
+        if !(wood.is_finite() && wood >= sc.alive_min) {
+            return false;
+        }
+        let Err(at) = self.stands.binary_search_by_key(&site, |s| s.site) else {
+            return false;
+        };
+        let mut stand = Stand {
+            id: self.ledger.births,
+            site,
+            species,
+            stage: Stage::Alive,
+            wood,
+            foliage: sc.alpha * wood,
+            reserve: sc.reserve_cap * wood,
+            light: 0.0,
+            moisture: 0.0,
+            water_m3: 0.0,
+            mineral: 0.0,
+            aeration_stress: 0.0,
+            parcel: 0.0,
+            layer_stock: [0.0; MAX_FOLIAGE_LAYERS],
+            profile_stage: 0,
+        };
+        // A founder arrives full, so its layers arrive at their capacities.
+        stand.bin_foliage(sc, self.config.voxel_m);
+        self.ledger.births += 1;
+        let organic = stand.organic();
+        // A founder arrives at the species' own tissue mineral content: it is
+        // grown outside the system, so its mineral is seeded in with it.
+        stand.mineral = sc.n_tissue * organic;
+        self.ledger.seeded_organic_in += organic;
+        self.ledger.seeded_mineral_in += stand.mineral;
+        self.ledger.seeded_energy_in += sc.energy_density * organic;
+        self.stands.insert(at, stand);
+        if let Err(g) = self.ground.binary_search_by_key(&site, |g| g.site) {
+            self.ledger.seeded_mineral_in += self.config.initial_mineral;
+            self.ground
+                .insert(g, Ground::new(site, self.config.initial_mineral));
+        }
+        true
     }
 
     /// A consumer eats the **foliage** of the stand on `site`, up to `want`: at most what
