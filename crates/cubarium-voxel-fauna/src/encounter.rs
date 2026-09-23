@@ -312,6 +312,65 @@ pub fn walkable_components(faces: &[Site], width: u32, climb: u32) -> Vec<usize>
     cubarium_voxel::walk::components(&cells, width, climb)
 }
 
+/// One lineage's **route map** over a world: every face its adult body can stand on,
+/// the walkable component of each under the lineage's climb, and the mouth columns a body
+/// standing there could cover at any heading.
+///
+/// This is the route computation `voxel_edible_stock` used to carry privately, lifted so
+/// that the observer and the seeder's acceptance check ask the same thing
+/// (`design/handoffs/voxel-startup-acceptance-2026-09-22.md` item 4). Every rule in it is
+/// one of the helpers above: [`standable_faces`], [`walkable_components`],
+/// [`mouth_columns_from_face`], the mouth band and [`reachable_layers_of`].
+pub struct RouteMap {
+    /// The standable faces, in [`standable_faces`] order.
+    pub faces: Vec<Site>,
+    /// The walkable component of each face, in the order of `faces`.
+    pub components: Vec<usize>,
+}
+
+impl RouteMap {
+    /// The route map of a founder lineage's **adult** body, wade depth and climb.
+    pub fn for_founder(view: &VoxelView<'_>, phys: &crate::FounderPhysiology) -> RouteMap {
+        let _ = (view, phys);
+        todo!("RouteMap::for_founder")
+    }
+
+    /// The index of `site` among [`RouteMap::faces`], if a body can stand there.
+    pub fn face(&self, site: Site) -> Option<usize> {
+        let _ = site;
+        todo!("RouteMap::face")
+    }
+
+    /// The walkable component a body standing on `site` is in.
+    pub fn component_of(&self, site: Site) -> Option<usize> {
+        self.face(site).map(|i| self.components[i])
+    }
+
+    /// Every face whose mouth takes from this foliage layer of `stand`: the diet
+    /// accepts the stand's tissue, the layer holds stock, the layer's cell is in the
+    /// mouth band from that face, and the model's own per-layer scan
+    /// ([`reachable_layers_of`]) offers it to a mouth over that face's columns.
+    pub fn faces_reaching_layer(
+        &self,
+        fv: &FloraView<'_>,
+        view: &VoxelView<'_>,
+        stand: &Stand,
+        layer: &cubarium_voxel_flora::StandLayer,
+        diet: Diet,
+    ) -> Vec<usize> {
+        let _ = (fv, view, stand, layer, diet);
+        todo!("RouteMap::faces_reaching_layer")
+    }
+
+    /// Every face whose mouth takes from a ground pool (litter, carrion) at `site`: the
+    /// live mouth reads a pool at the standing face's own height under one of its
+    /// columns (`body::mouth_pool_site`).
+    pub fn faces_reaching_pool(&self, site: Site) -> Vec<usize> {
+        let _ = site;
+        todo!("RouteMap::faces_reaching_pool")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

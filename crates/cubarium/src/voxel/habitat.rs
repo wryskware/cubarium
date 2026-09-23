@@ -26,10 +26,12 @@
 
 use std::sync::Arc;
 
+use std::collections::BTreeMap;
+
 use cubarium_voxel::{Material, Settle, VoxelView, World};
 use cubarium_voxel_fauna::{
     BlindForager, BrowserForager, Command as FaunaCommand, Controller, Fauna, Founder,
-    StartingStores, has_headroom,
+    FounderPhysiology, RouteMap, StartingStores, has_headroom,
 };
 use cubarium_voxel_flora::{
     Command as FloraCommand, Deposit, DepositKind, Flora, FloraView, Site, Species, SpeciesConfig,
@@ -112,8 +114,96 @@ const LITTER_ORGANIC: f64 = 0.2;
 const LITTER_MINERAL_FRACTION: f64 = 0.02;
 const LITTER_ENERGY_DENSITY: f64 = 2.0;
 
-/// What [`seed`] put into the world.
+/// **N**, the acceptance bar: a lineage's component must hold at least this many
+/// founder-hours of adult basal upkeep in reachable edible stock for every founder
+/// placed in it (decisions §8). An authored placeholder, `design/backlog.md` §1.
+pub const ACCEPT_FOUNDER_HOURS: f64 = 1.0;
+
+/// What the startup pre-roll did before anything was seeded.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PreRollReport {
+    /// Whether the world opened with a shower (a scheduled closed cycle whose store
+    /// could pay for one).
+    pub opening_shower: bool,
+    /// Ticks the opening shower fell for.
+    pub shower_ticks: u32,
+    /// The drain after it: the same convergence as the startup settle.
+    pub drain: Settle,
+    /// Every tick the pre-roll stepped: settle, shower, drain and the stream watch.
+    pub ticks: u32,
+}
+
+/// The pre-roll's result: what it did, and the deepest standing water each support face
+/// saw over the **whole** of it, shower included.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PreRoll {
+    /// The startup settle, before the shower.
+    pub settle: Settle,
+    pub report: PreRollReport,
+    /// Every support face, in [`support_sites`] order.
+    pub sites: Vec<Site>,
+    /// The deepest water each of `sites` stood under at any tick after the settle.
+    pub wettest: Vec<f64>,
+}
+
+/// One walkable component's food for one lineage, at seeding.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ComponentFood {
+    /// Edible organic matter a mouth reaches from faces in this component.
+    pub stock: f64,
+    /// Stands that stock comes from (browser: vascular stands; shredder: glowcaps).
+    pub stands: usize,
+    /// Living producers of the renewable part rooted in the component (shredder:
+    /// litter-shedding stands and glowcaps; browser: the reached stands themselves).
+    pub producers: usize,
+    /// **Reported, not gated.** Browser: the reached stands' foliage regrowth ceiling
+    /// `r_p · W`; shredder: the rooted producers' litterfall `m_p · P`; per hour.
+    pub production_per_h: f64,
+}
+
+/// One component a lineage's founders were placed in, judged.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ComponentVerdict {
+    pub component: usize,
+    pub founders: usize,
+    pub food: ComponentFood,
+    pub habitable: bool,
+}
+
+/// One lineage's acceptance.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LineageVerdict {
+    pub wanted: usize,
+    pub placed: usize,
+    /// Adult basal upkeep per founder per hour ([`upkeep_per_hour`]).
+    pub upkeep_per_h: f64,
+    /// Every component holding at least one of this lineage's founders.
+    pub components: Vec<ComponentVerdict>,
+    /// Founders standing on no face of the lineage's route map at all.
+    pub stranded: usize,
+    pub accepted: bool,
+    /// The worst founder-occupied component's `stock / (founders · upkeep_per_h)`,
+    /// scaled by `placed / wanted`; zero when nothing was placed and something was wanted.
+    pub ratio: f64,
+}
+
+/// The world's acceptance (decisions §8): every lineage placed its full count, each in a
+/// habitable component.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Acceptance {
+    pub lineages: [LineageVerdict; Founder::COUNT],
+    pub accepted: bool,
+}
+
+impl Acceptance {
+    /// The lower of the two lineages' ratios: what "best of a bad lot" ranks on.
+    pub fn worse_ratio(&self) -> f64 {
+        todo!("worse_ratio")
+    }
+}
+
+/// What [`seed`] put into the world.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Seeded {
     pub stands: usize,
     pub logs: usize,
@@ -128,6 +218,10 @@ pub struct Seeded {
     pub litter_tiles: usize,
     /// What the startup settle measured before anything was planted.
     pub settle: Settle,
+    /// What the rest of the pre-roll did.
+    pub pre_roll: PreRollReport,
+    /// The acceptance check on the seeded world.
+    pub acceptance: Acceptance,
 }
 
 impl Seeded {
@@ -390,6 +484,59 @@ pub fn seed_with_founder_counts(
         want.saturating_sub(seeded.founders[Founder::Browser.index()]);
 
     seeded
+}
+
+/// The startup pre-roll, before anything is seeded: settle as ever, then — for a fresh
+/// world whose cycle is scheduled — **open with a shower** and let it fall and drain,
+/// then watch the stream. Every support face remembers the deepest water it saw after
+/// the settle.
+pub fn pre_roll(world: &mut World, open_with_a_shower: bool) -> PreRoll {
+    let _ = (world, open_with_a_shower);
+    todo!("pre_roll")
+}
+
+/// Seed the habitat on a world that has had its [`pre_roll`].
+pub fn seed_pre_rolled(
+    world: &mut World,
+    flora: &mut Flora,
+    fauna: &mut Fauna,
+    pre: &PreRoll,
+    founder_counts: [usize; Founder::COUNT],
+) -> Seeded {
+    let _ = (world, flora, fauna, pre, founder_counts);
+    todo!("seed_pre_rolled")
+}
+
+/// A lineage's adult **basal upkeep per hour**, organic units:
+/// `core.maintenance_per_s · core.body_max · 3600`.
+pub fn upkeep_per_hour(phys: &FounderPhysiology) -> f64 {
+    let _ = phys;
+    todo!("upkeep_per_hour")
+}
+
+/// Each walkable component's food for a lineage, and the route map it was read on.
+pub fn lineage_food(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    phys: &FounderPhysiology,
+    founder: Founder,
+) -> (RouteMap, BTreeMap<usize, ComponentFood>) {
+    let _ = (view, fv, phys, founder);
+    todo!("lineage_food")
+}
+
+/// **The acceptance check** (decisions §8), read off the world as it stands: for each
+/// lineage, the components its living founders stand in, each component's reachable
+/// edible stock against `N · founders · upkeep`, and (shredder) a living producer rooted
+/// in it.
+pub fn accept(
+    world: &World,
+    flora: &Flora,
+    fauna: &Fauna,
+    wanted: [usize; Founder::COUNT],
+) -> Acceptance {
+    let _ = (world, flora, fauna, wanted);
+    todo!("accept")
 }
 
 /// Register each lineage's own observation-only heuristic as its birth factory: every
@@ -892,6 +1039,348 @@ mod tests {
         }
     }
 
+    /// A flat soil plain at 0.25 m: soil in `y = 1..=2`, so every column's support face
+    /// is `y = 2`, with room for either body over it.
+    fn plain(width: u32, depth: u32) -> World {
+        plain_with(Config {
+            width,
+            height: 12,
+            depth,
+            ..Config::default()
+        })
+    }
+
+    fn plain_with(cfg: Config) -> World {
+        let mut world = World::empty(cfg.clone());
+        for z in 0..cfg.depth {
+            for x in 0..cfg.width as i64 {
+                for y in 1..=2 {
+                    world.apply(cubarium_voxel::Command::SetMaterial {
+                        x,
+                        y,
+                        z,
+                        material: Material::Soil,
+                    });
+                }
+            }
+        }
+        world
+    }
+
+    fn plant(flora: &mut Flora, world: &World, x: u32, z: u32, species: Species, frac: f64) {
+        let wood = frac * flora.config().species(species).wood_max;
+        assert!(
+            flora.apply(
+                world,
+                FloraCommand::SeedOnFace {
+                    site: Site { x, y: 2, z },
+                    species,
+                    wood,
+                },
+            ),
+            "{} on ({x}, 2, {z})",
+            species.name()
+        );
+    }
+
+    fn introduce(fauna: &mut Fauna, world: &World, founder: Founder, site: Site) {
+        assert!(fauna.apply(
+            world,
+            FaunaCommand::IntroduceFounderOnFace {
+                site,
+                founder,
+                stores: StartingStores::HUNGRY,
+                heading_rad: 0.0,
+            },
+        ));
+    }
+
+    /// **The checked face is the seeded face** (item 2). Under a roofed shelf the column
+    /// command resolves the roof; the face command lands on the floor it was given, for
+    /// a stand and for a founder body alike.
+    #[test]
+    fn a_stand_and_a_founder_seeded_under_a_shelf_land_on_the_checked_face() {
+        let cfg = Config {
+            width: 8,
+            height: 12,
+            depth: 2,
+            ..Config::default()
+        };
+        let mut world = plain_with(cfg.clone());
+        for z in 0..cfg.depth {
+            world.apply(cubarium_voxel::Command::SetMaterial {
+                x: 4,
+                y: 5,
+                z,
+                material: Material::Rock,
+            });
+        }
+        let under = |z| Site { x: 4, y: 2, z };
+        assert!(support_sites(&world).contains(&under(0)), "the floor is a face");
+
+        let mut flora = Flora::new(Default::default());
+        let wood = 0.8 * flora.config().species(Species::Springturf).wood_max;
+        assert!(flora.apply(
+            &world,
+            FloraCommand::SeedOnFace {
+                site: under(0),
+                species: Species::Springturf,
+                wood,
+            },
+        ));
+        assert_eq!(flora.view().stands[0].site, under(0), "planted on the floor");
+        // The column command, for contrast, plants the roof.
+        assert!(flora.apply(
+            &world,
+            FloraCommand::Seed {
+                x: 4,
+                z: 1,
+                species: Species::Springturf,
+                wood,
+            },
+        ));
+        assert!(
+            flora.view().stands.iter().any(|s| s.site == Site { x: 4, y: 5, z: 1 }),
+            "the column command still resolves the skyline"
+        );
+        // A face that is not a support face is refused.
+        assert!(!flora.apply(
+            &world,
+            FloraCommand::SeedOnFace {
+                site: Site { x: 4, y: 3, z: 0 },
+                species: Species::Springturf,
+                wood,
+            },
+        ));
+
+        let mut fauna = Fauna::new(Default::default());
+        introduce(&mut fauna, &world, Founder::Browser, under(1));
+        let a = fauna.view().animals[0];
+        assert_eq!(a.site, under(1), "the body stands on the floor, not the roof");
+        assert!(!fauna.apply(
+            &world,
+            FaunaCommand::IntroduceFounderOnFace {
+                site: Site { x: 4, y: 4, z: 1 },
+                founder: Founder::Browser,
+                stores: StartingStores::HUNGRY,
+                heading_rad: 0.0,
+            },
+        ));
+    }
+
+    /// **Browser faces by layer** (item 3). An adult bloomcrown's crown is out of the
+    /// browser's band and its rosette is in it: the faces round its stem are admitted.
+    /// Crop the rosette to nothing and the only in-band layer holds no stock, so they
+    /// are refused.
+    #[test]
+    fn a_browser_face_is_admitted_by_a_stocked_layer_in_its_band_not_the_crown_top() {
+        let world = plain(24, 6);
+        let mut flora = Flora::new(cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25));
+        let fauna = Fauna::new(Default::default());
+        // Two stands, so the "a second patch" rule is not what is being tested.
+        plant(&mut flora, &world, 6, 3, Species::Bloomcrown, 0.85);
+        plant(&mut flora, &world, 16, 3, Species::Bloomcrown, 0.85);
+        let body = fauna.config().founder(Founder::Browser).adult_body();
+        let band = body.mouth_layers(2, 0.25);
+        {
+            let fv = flora.view();
+            let stand = &fv.stands[0];
+            let layers: Vec<_> = fv.layers(stand).collect();
+            assert_eq!(layers.len(), 2, "an adult: rosette and crown");
+            assert!(band.contains(&layers[0].cell), "the rosette is in the band");
+            assert!(layers[0].stock > 0.0, "and holds stock");
+            assert!(
+                !band.contains(&cubarium_voxel_fauna::crown_layer(&fv, stand)),
+                "the crown top is out of it"
+            );
+        }
+        let faces = browser_faces(&world.view(), &flora.view(), &fauna);
+        assert!(!faces.is_empty(), "the rosette admits the faces round the stem");
+        for f in &faces {
+            let near = [6u32, 16].iter().any(|&x| wrapped(f.x, x, 24) <= 1);
+            assert!(near && f.z.abs_diff(3) <= 1, "{f:?} is not beside a stem");
+        }
+
+        let sites: Vec<Site> = flora.view().stands.iter().map(|s| s.site).collect();
+        for site in sites {
+            assert!(flora.take_foliage_in_layers(site, 1e9, &band).is_some());
+        }
+        for stand in flora.view().stands.iter() {
+            let rosette = flora.view().layers(stand).next().unwrap();
+            assert!(rosette.stock <= 0.0, "cropped to nothing");
+        }
+        assert!(
+            browser_faces(&world.view(), &flora.view(), &fauna).is_empty(),
+            "an in-band layer with no stock admits nothing"
+        );
+    }
+
+    /// **Two food patches joined only by bare walkable ground are one component** (item
+    /// 4): the route runs over ordinary ground, not from feeding face to feeding face.
+    #[test]
+    fn two_patches_joined_by_bare_ground_are_one_component() {
+        let world = plain(32, 4);
+        let mut flora = Flora::new(cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25));
+        let fauna = Fauna::new(Default::default());
+        plant(&mut flora, &world, 3, 1, Species::Springturf, 0.8);
+        plant(&mut flora, &world, 20, 2, Species::Springturf, 0.8);
+        let phys = *fauna.config().founder(Founder::Browser);
+        let (map, food) = lineage_food(&world.view(), &flora.view(), &phys, Founder::Browser);
+        let a = map.component_of(Site { x: 3, y: 2, z: 1 }).expect("standable");
+        let b = map.component_of(Site { x: 20, y: 2, z: 2 }).expect("standable");
+        assert_eq!(a, b, "one walk joins them");
+        let with_food: Vec<_> = food.iter().filter(|(_, f)| f.stock > 0.0).collect();
+        assert_eq!(with_food.len(), 1, "{food:?}");
+        assert_eq!(with_food[0].1.stands, 2, "both patches are in it: {food:?}");
+    }
+
+    /// **The acceptance bar** (item 4, decisions §8): a browser component passes with
+    /// founders up to `stock / (N · upkeep)` and fails with one more; a shredder
+    /// component with starter litter and no living producer rooted in it fails until a
+    /// litter-shedding stand grows there.
+    #[test]
+    fn acceptance_needs_n_founder_hours_of_stock_and_a_living_producer() {
+        let world = plain(24, 6);
+        let mut flora = Flora::new(cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25));
+        plant(&mut flora, &world, 6, 3, Species::Bloomcrown, 0.85);
+        plant(&mut flora, &world, 16, 3, Species::Bloomcrown, 0.85);
+        let probe = Fauna::new(Default::default());
+        let phys = *probe.config().founder(Founder::Browser);
+        let u = upkeep_per_hour(&phys);
+        assert!(
+            (u - phys.core.maintenance_per_s * phys.core.body_max * 3600.0).abs() < 1e-12,
+            "upkeep is adult basal maintenance per hour"
+        );
+        let (_, food) = lineage_food(&world.view(), &flora.view(), &phys, Founder::Browser);
+        let stock: f64 = food.values().map(|f| f.stock).sum();
+        let fits = (stock / (ACCEPT_FOUNDER_HOURS * u)).floor() as usize;
+        assert!(fits >= 1, "the fixture feeds at least one founder: {stock} vs {u}");
+
+        let with = |n: usize| {
+            let mut fauna = Fauna::new(Default::default());
+            for _ in 0..n {
+                introduce(&mut fauna, &world, Founder::Browser, Site { x: 6, y: 2, z: 3 });
+            }
+            accept(&world, &flora, &fauna, [0, n])
+        };
+        let at = with(fits);
+        let v = &at.lineages[Founder::Browser.index()];
+        assert!(v.accepted && at.accepted, "{fits} founders on {stock}: {at:?}");
+        assert_eq!(v.components.len(), 1);
+        assert!(v.components[0].habitable);
+        let over = with(fits + 1);
+        assert!(
+            !over.lineages[Founder::Browser.index()].accepted && !over.accepted,
+            "{} founders on {stock}: {over:?}",
+            fits + 1
+        );
+
+        // The shredder: litter on the ground and nothing alive to renew it.
+        let mut bare = Flora::new(cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25));
+        let at_site = Site { x: 4, y: 2, z: 2 };
+        assert!(bare.deposit(
+            at_site,
+            Deposit {
+                kind: DepositKind::Litter,
+                organic: LITTER_ORGANIC,
+                mineral: LITTER_ORGANIC * LITTER_MINERAL_FRACTION,
+                energy: LITTER_ORGANIC * LITTER_ENERGY_DENSITY,
+            },
+        ));
+        let mut fauna = Fauna::new(Default::default());
+        introduce(&mut fauna, &world, Founder::Blind, at_site);
+        let got = accept(&world, &bare, &fauna, [1, 0]);
+        let v = &got.lineages[Founder::Blind.index()];
+        assert!(v.components[0].food.stock >= LITTER_ORGANIC - 1e-12, "{got:?}");
+        assert!(!v.accepted && !got.accepted, "litter with no producer: {got:?}");
+        plant(&mut bare, &world, 12, 2, Species::Springturf, 0.8);
+        let got = accept(&world, &bare, &fauna, [1, 0]);
+        assert!(
+            got.lineages[Founder::Blind.index()].accepted && got.accepted,
+            "a litter-shedding stand rooted in the component: {got:?}"
+        );
+    }
+
+    /// A closed, scheduled cycle on the plain, with a shower that falls hard for a
+    /// second and a half and then soaks away.
+    fn showery_plain() -> World {
+        let mut world = plain_with(Config {
+            width: 16,
+            height: 12,
+            depth: 4,
+            closed_water_budget: true,
+            initial_atmosphere_m3: 0.5,
+            rain_m_per_s: 0.04,
+            shower_volume_m3: 0.25,
+            shower_trigger_fraction: 0.01,
+            shower_interval_min_s: 300.0,
+            shower_interval_max_s: 900.0,
+            ..Config::default()
+        });
+        cubarium_voxel::hydrate(&mut world, &cubarium_voxel::Water::AUTHORED);
+        world
+    }
+
+    /// **The pre-roll** (item 1). The world opens with its shower: by the time anything
+    /// is planted it has fallen and ended, and the next one is drawn. A face that stood
+    /// under more than a species' drown depth **during** the shower is not offered to
+    /// that species, even though it is dry again when the founders are placed.
+    #[test]
+    fn the_world_opens_with_a_shower_and_a_face_it_flooded_is_not_offered() {
+        let mut world = showery_plain();
+        assert!(world.next_shower_tick() > 1000, "the drawn gap is minutes away");
+        let pre = pre_roll(&mut world, true);
+        assert!(pre.report.opening_shower, "{:?}", pre.report);
+        assert_eq!(world.view().ledger.showers, 1, "exactly the opening shower fell");
+        assert!(world.shower_left_m3() <= 0.0, "and it ended");
+        assert!(world.next_shower_tick() > world.tick(), "the next one is drawn");
+
+        // The plain flooded past springturf's drown depth and drained again.
+        let flora_cfg = cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25);
+        let drown = flora_cfg.species(Species::Springturf).drown_depth_m;
+        let view = world.view();
+        let flooded: Vec<Site> = pre
+            .sites
+            .iter()
+            .zip(&pre.wettest)
+            .filter(|(s, w)| {
+                **w > drown && view.water_depth_m(i64::from(s.x), s.y, s.z) <= 0.0
+            })
+            .map(|(s, _)| *s)
+            .collect();
+        assert!(!flooded.is_empty(), "the shower flooded faces that dried: {pre:?}");
+
+        let mut flora = Flora::new(flora_cfg.clone());
+        let mut fauna = Fauna::new(Default::default());
+        let seeded = seed_pre_rolled(&mut world, &mut flora, &mut fauna, &pre, [0, 0]);
+        assert_eq!(seeded.pre_roll, pre.report);
+        for stand in flora.view().stands.iter() {
+            let sc = flora_cfg.species(stand.species);
+            let i = index_of(&pre.sites, stand.site).expect("a support face");
+            assert!(
+                pre.wettest[i] <= sc.drown_depth_m,
+                "{} planted where the shower stood {:.3} m deep",
+                stand.species.name(),
+                pre.wettest[i]
+            );
+        }
+        // The same world without the opening shower would have planted springturf on
+        // those faces: the shower is what took them away.
+        let mut dry = showery_plain();
+        let calm = pre_roll(&mut dry, false);
+        let mut dry_flora = Flora::new(flora_cfg);
+        let mut dry_fauna = Fauna::new(Default::default());
+        seed_pre_rolled(&mut dry, &mut dry_flora, &mut dry_fauna, &calm, [0, 0]);
+        assert!(
+            dry_flora
+                .view()
+                .stands
+                .iter()
+                .any(|s| s.species == Species::Springturf && flooded.contains(&s.site)),
+            "without the shower, springturf is planted on the faces it flooded"
+        );
+    }
+
     fn seeded(world: World) -> (World, Flora, Fauna, Seeded) {
         let mut world = world;
         let mut flora = Flora::new(Default::default());
@@ -1019,17 +1508,32 @@ mod tests {
         // the ambient run builds is `the_config_defaults_are_the_documented_ones`'s
         // business; this one asks whether a habitat seeded off support faces steps with
         // its books closed.
+        //
+        // The opening shower is shortened to a few seconds so the pre-roll fits; the
+        // ledgers are what is being asked, through the shower, the drain and the seeding.
         let preset = cubarium_voxel::Preset::find("default").unwrap();
-        steps_with_closed_ledgers(World::new(Config {
+        let world = World::new(Config {
             seed: 1,
             width: 48,
+            shower_volume_m3: 0.01,
             ..preset.config()
-        }));
+        });
+        assert!(world.config().shower_interval_max_s > 0.0, "a scheduled cycle");
+        steps_with_closed_ledgers(world);
     }
 
     fn steps_with_closed_ledgers(world: World) {
         let (mut world, mut flora, mut fauna, seeded) = seeded(world);
         assert!(seeded.stands > 0, "a habitat with plants in it: {seeded:?}");
+        if world.config().shower_interval_max_s > 0.0 {
+            assert!(seeded.pre_roll.opening_shower, "{:?}", seeded.pre_roll);
+        }
+        let water = world.view().total_residual();
+        let scale = world.view().total_water_m3().max(1.0);
+        assert!(
+            water.abs() < 1e-9 * scale,
+            "water residual {water:e} through the pre-roll and the seeding"
+        );
         let before: Vec<(u64, Species)> = flora
             .view()
             .stands
@@ -1069,5 +1573,11 @@ mod tests {
         ] {
             assert!(got.abs() < 1e-9, "fauna {expected} residual {got:e}");
         }
+        let water = world.view().total_residual();
+        let scale = world.view().total_water_m3().max(1.0);
+        assert!(
+            water.abs() < 1e-9 * scale,
+            "water residual {water:e} after 40 ticks"
+        );
     }
 }

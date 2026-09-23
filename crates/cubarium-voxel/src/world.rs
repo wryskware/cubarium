@@ -788,6 +788,25 @@ impl World {
     /// moving. Flow-through converges here; only accumulation and drainage do not. And a
     /// ring with a stream in it is not dry-locked whatever its sky holds, because
     /// `dry_locked` asks for **no pool at all** and the stream makes one.
+    ///
+    /// `watch` is called with the world after every tick this steps, for a caller that
+    /// has to see the water on its way to rest (the habitat's startup pre-roll remembers
+    /// the deepest water every face saw).
+    pub fn settle_watching(&mut self, cap_ticks: u32, watch: impl FnMut(&World)) -> Settle {
+        let _ = (watch, cap_ticks);
+        todo!("settle_watching")
+    }
+
+    /// Make the next scheduled shower **due now**: the world opens with a shower instead
+    /// of waiting out its first drawn gap. Later gaps are drawn exactly as before, from
+    /// where this shower ends. Returns whether the world has a schedule at all; a world
+    /// without one ([`Config::shower_interval_max_s`] zero) is untouched.
+    pub fn bring_shower_forward(&mut self) -> bool {
+        todo!("bring_shower_forward")
+    }
+
+    /// Step until the water has stopped moving, or until `cap_ticks`: see
+    /// [`World::settle_watching`] for the rule, which this is with nobody watching.
     pub fn settle(&mut self, cap_ticks: u32) -> Settle {
         let window = SETTLE_WINDOW as usize;
         let mut history: Vec<(f64, usize)> = Vec::with_capacity(window + 1);

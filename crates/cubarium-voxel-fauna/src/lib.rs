@@ -85,7 +85,7 @@ pub use encounter::{
     HEADING_SAMPLES, SightMap, band_crown_layers, crown_columns, crown_layer, crown_slab_m,
     eye_above_surface_m, eye_origin_m, foliage_stands_in_layers, layer_columns, mouth_columns_at,
     mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg, reachable_layers_of,
-    standable_faces, surface_m, walkable_components,
+    RouteMap, standable_faces, surface_m, walkable_components,
 };
 pub use manifest::{
     ACTION_DEADBAND, Action, BROWSER_RAY_PITCH_OFFSETS_DEG, BROWSER_RAY_YAW_OFFSETS_DEG,
@@ -1538,6 +1538,17 @@ pub enum Command {
         stores: StartingStores,
         heading_rad: f64,
     },
+    /// [`Command::IntroduceFounder`] on **exactly this support face** — a hollow's floor,
+    /// the ground under a shelf — rather than the skyline of its column. The seeder uses
+    /// it so that the face it checked is the face the body stands on
+    /// (`design/handoffs/voxel-startup-acceptance-2026-09-22.md` item 2). Refused as
+    /// `IntroduceFounder` is, and also when `site` is not a support face.
+    IntroduceFounderOnFace {
+        site: Site,
+        founder: Founder,
+        stores: StartingStores,
+        heading_rad: f64,
+    },
     /// Take every animal off the highest support face of column `(x, z)`, booking their
     /// material as `removed_*_out`. No corpse: this is a frontend's undo, not a death.
     /// Refused if there is none.
@@ -1860,6 +1871,7 @@ impl Fauna {
                     heading_rad,
                 )
             }
+            Command::IntroduceFounderOnFace { .. } => todo!("IntroduceFounderOnFace"),
             Command::Remove { x, z } => {
                 let view = world.view();
                 let Some(site) = cubarium_voxel_flora::highest_support(&view, x, z) else {

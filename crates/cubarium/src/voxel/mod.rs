@@ -570,6 +570,46 @@ pub fn ambient_world(cfg: &cubarium_voxel::Config, base: u64) -> (World, u64, us
     })
 }
 
+/// Habitat tries: how many lake-gated worlds the founding loop pre-rolls, seeds and
+/// judges before it keeps the best of them. Bounded apart from [`LAKE_SEED_TRIES`]:
+/// each try draws its own world through the lake gate.
+pub const HABITAT_TRIES: usize = 8;
+
+/// A founded world: generated, lake-gated, pre-rolled, **already seeded** and judged.
+pub struct Founded {
+    pub world: World,
+    pub flora: Flora,
+    pub fauna: Fauna,
+    pub seeded: habitat::Seeded,
+    pub seed: u64,
+    /// Seeds the lake gate rejected, over every habitat try.
+    pub lake_rejected: usize,
+    /// Worlds that were seeded and failed the acceptance check.
+    pub habitat_rejected: usize,
+    /// Whether the returned world passed the acceptance check.
+    pub accepted: bool,
+    /// What the loop said loudly about the returned world, if anything.
+    pub warnings: Vec<String>,
+}
+
+/// The founding loop: lake gate → pre-roll → seed → acceptance, redrawing the terrain
+/// seed on a rejection, up to `habitat_tries`; the accepted world is returned already
+/// seeded. `accept` is the verdict (the real one is `|s| s.acceptance.accepted`).
+#[allow(clippy::too_many_arguments)]
+pub fn found_a_habitat(
+    cfg: &cubarium_voxel::Config,
+    asked: Option<u64>,
+    lake_tries: usize,
+    habitat_tries: usize,
+    next_seed: impl FnMut() -> u64,
+    layers: impl Fn(&World) -> (Flora, Fauna),
+    founder_counts: [usize; Founder::COUNT],
+    accept: impl Fn(&habitat::Seeded) -> bool,
+) -> Founded {
+    let _ = (cfg, asked, lake_tries, habitat_tries, next_seed, layers, founder_counts, accept);
+    todo!("found_a_habitat")
+}
+
 /// Draw generated worlds until one has a lake the camera can actually read.
 ///
 /// **A ring with no visible water is not a habitat** (Wrysk, 2026-09-21: "reject any
@@ -3025,6 +3065,87 @@ mod tests {
         // An asked-for seed is the world, bar or no bar.
         let (_, seed, rejected) = generate_with_a_lake(&cfg, Some(77), 3, seeds(vec![]));
         assert_eq!((seed, rejected), (77, 0), "a named seed is honoured");
+    }
+
+    /// **The founding loop** (item 5): lake gate, pre-roll, seed, acceptance. A world the
+    /// verdict refuses is redrawn and the next one is returned **already seeded**, never
+    /// seeded twice; a seed that was asked for is kept whatever its verdict, with a
+    /// warning.
+    #[test]
+    fn the_founding_loop_redraws_a_refused_habitat_and_returns_it_seeded() {
+        let mut recipe = cubarium_voxel::Recipe::DEFAULT;
+        recipe.water.min_lake_m2 = 0.0;
+        recipe.water.min_tier_pools = 0;
+        // A shower of a few seconds, so two pre-rolls stay short.
+        recipe.water.shower_volume_m3 = 0.005;
+        let cfg = cubarium_voxel::Config {
+            width: 32,
+            height: 24,
+            depth: 4,
+            voxel_m: 0.25,
+            landform: Landform::Staged(recipe),
+            ..cubarium_voxel::Config::default()
+        };
+        let seeds = |list: Vec<u64>| {
+            let mut it = list.into_iter();
+            move || it.next().expect("the loop asked for more seeds than it was given")
+        };
+        let layers = |w: &World| {
+            (
+                Flora::new(FloraConfig::for_voxel_size(w.config().voxel_m)),
+                Fauna::new(FaunaConfig::default()),
+            )
+        };
+        let judged = std::cell::Cell::new(0usize);
+        let first_fails = |_: &habitat::Seeded| {
+            judged.set(judged.get() + 1);
+            judged.get() > 1
+        };
+        let founded = found_a_habitat(
+            &cfg,
+            None,
+            1,
+            4,
+            seeds(vec![5, 6]),
+            layers,
+            [2, 2],
+            first_fails,
+        );
+        assert_eq!(judged.get(), 2, "two worlds were judged");
+        assert_eq!(founded.seed, 6, "the refused first draw was replaced");
+        assert!(founded.accepted && founded.habitat_rejected == 1);
+        assert!(founded.seeded.stands > 0, "returned seeded: {:?}", founded.seeded);
+        assert_eq!(
+            founded.flora.view().stands.len(),
+            founded.seeded.stands,
+            "seeded once, by the loop, and not again"
+        );
+        assert_eq!(
+            founded.fauna.view().animals.len(),
+            founded.seeded.animals(),
+            "the founders are the loop's"
+        );
+        assert!(founded.seeded.pre_roll.opening_shower, "the world opened with rain");
+
+        // An asked-for seed is honoured whatever the verdict, and says so.
+        let founded = found_a_habitat(
+            &cfg,
+            Some(77),
+            1,
+            4,
+            seeds(vec![]),
+            layers,
+            [2, 2],
+            |_: &habitat::Seeded| false,
+        );
+        assert_eq!(founded.seed, 77);
+        assert!(!founded.accepted);
+        assert!(founded.seeded.stands > 0, "still seeded");
+        assert!(
+            founded.warnings.iter().any(|w| w.contains("asked")),
+            "{:?}",
+            founded.warnings
+        );
     }
 
     /// Walking remains available as a terrain observation, including for landscapes with

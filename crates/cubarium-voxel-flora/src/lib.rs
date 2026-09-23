@@ -2618,6 +2618,17 @@ pub enum Command {
         species: Species,
         wood: f64,
     },
+    /// Plant a founder stand on **exactly this support face**, which may be a hollow's
+    /// floor or the ground under a shelf: [`Command::Seed`] with the face named rather
+    /// than resolved to the column's skyline. The seeder uses it so that the face it
+    /// checked is the face it plants (`design/handoffs/voxel-startup-acceptance-2026-09-22.md`
+    /// item 2). Refused if `site` is not a support face, already holds a stand, or `wood`
+    /// is below the species' `alive_min`.
+    SeedOnFace {
+        site: Site,
+        species: Species,
+        wood: f64,
+    },
     /// Remove the stand on the highest support face of column `(x, z)`, booking its
     /// material and energy as removed. Refused if there is none.
     Clear { x: i64, z: u32 },
@@ -2924,6 +2935,7 @@ impl Flora {
                 }
                 true
             }
+            Command::SeedOnFace { .. } => todo!("SeedOnFace"),
             Command::Clear { x, z } => {
                 let Some(site) = highest_support(&view, x, z) else {
                     return false;
