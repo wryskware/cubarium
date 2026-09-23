@@ -993,7 +993,7 @@ fn a_pruned_site_books_its_stand_its_bank_and_its_pool_in_three_currencies() {
 /// so one species drowns where the other can stand.
 #[test]
 fn a_drowned_stand_s_gap_is_filled_by_its_bank_in_the_same_tick() {
-    let mut config = FloraConfig::default();
+    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
     config.umbrellafrond.propagule_rate = 3.0;
     let mut world = strip(5, 1, 0.6);
     let mut flora = Flora::new(config);
@@ -1134,7 +1134,7 @@ fn a_drowned_stand_s_gap_is_filled_by_its_bank_in_the_same_tick() {
 /// (placeholder 2) so both donors reach the contested column and no other.
 #[test]
 fn a_contested_gap_is_drawn_by_weight_and_the_losing_bank_stays() {
-    let mut config = FloraConfig::default();
+    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
     config.bloomcrown.propagule_rate = 3.0;
     config.bloomcrown.hop = 1;
     config.bloomcrown.reserve_cap = 40.0;
@@ -1301,7 +1301,7 @@ fn a_contested_gap_is_drawn_by_weight_and_the_losing_bank_stays() {
 /// spans four bins, which is what makes "oldest first" observable.
 #[test]
 fn an_oversized_bank_spends_one_package_out_of_its_oldest_bins() {
-    let mut config = FloraConfig::default();
+    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
     config.bloomcrown.propagule_rate = 3.0;
     config.bloomcrown.hop = 1;
     config.bloomcrown.reserve_cap = 40.0;
@@ -1376,27 +1376,37 @@ fn an_oversized_bank_spends_one_package_out_of_its_oldest_bins() {
         "the surplus was spent or lost: {} of {bank} less {package}",
         g.seed_organic(Species::Bloomcrown)
     );
-    // Oldest first: the bin that held the run's first packages is the one that paid, and
-    // it paid all of itself — it held less than a package — so the bank is one bin shorter
-    // and the next-oldest is now the front.
+    // Oldest first, in whole seeds (package S): the seed came out of the bin that held
+    // the run's first packages — one seed fewer there, or the bin gone whole if it held
+    // just one — and every bin left holds whole seeds, so no float dust is left behind.
+    let n_oldest = (oldest.organic / package).round();
+    assert!(n_oldest >= 1.0, "the oldest bin holds no whole seed: {oldest:?}");
+    if n_oldest == 1.0 {
+        assert_eq!(
+            g.seeds.len(),
+            bins_before - 1,
+            "a one-seed bin should have gone whole: {:?}",
+            g.seeds
+        );
+        assert!(
+            g.seeds[0].bin_start_tick > oldest.bin_start_tick,
+            "the oldest bin is still the front of the bank: {:?}",
+            g.seeds
+        );
+    } else {
+        assert_eq!(g.seeds[0].bin_start_tick, oldest.bin_start_tick);
+        assert!(
+            (g.seeds[0].organic / package - (n_oldest - 1.0)).abs() < 1e-9,
+            "the oldest bin did not give up exactly one seed: {:?}",
+            g.seeds[0]
+        );
+    }
     assert!(
-        oldest.organic < package,
-        "the fixture wants an oldest bin under one package: {oldest:?}"
-    );
-    assert_eq!(
-        g.seeds.len(),
-        bins_before - 1,
-        "a whole bin should have gone: {:?}",
-        g.seeds
-    );
-    assert!(
-        g.seeds[0].bin_start_tick > oldest.bin_start_tick,
-        "the oldest bin is still the front of the bank: {:?}",
-        g.seeds
-    );
-    assert!(
-        g.seeds.iter().all(|c| c.organic > 0.0),
-        "a spent bin was left behind as float dust: {:?}",
+        g.seeds.iter().all(|c| {
+            let n = c.organic / package;
+            (n - n.round()).abs() < 1e-9 && n.round() >= 1.0
+        }),
+        "a bin that is not whole seeds: {:?}",
         g.seeds
     );
     assert_residuals(&flora, "after an oversized bank spent one package");
@@ -1418,7 +1428,7 @@ fn an_oversized_bank_spends_one_package_out_of_its_oldest_bins() {
 /// pay for a hundred of them. The fixture's void column leaves exactly one recipient.
 #[test]
 fn a_fed_bank_holds_one_cohort_per_arrival_bin_and_its_age_never_stops_rising() {
-    let mut config = FloraConfig::default();
+    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
     config.bloomcrown.hop = 1;
     config.bloomcrown.seed_max_age_s = 2.0;
     config.bloomcrown.propagule_rate = 2.0;
@@ -1546,7 +1556,7 @@ fn a_fed_bank_holds_one_cohort_per_arrival_bin_and_its_age_never_stops_rising() 
 /// exactly one recipient.
 #[test]
 fn tiny_continuing_arrivals_cannot_keep_old_seed_material_alive() {
-    let mut config = FloraConfig::default();
+    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
     config.bloomcrown.hop = 1;
     config.bloomcrown.seed_max_age_s = 0.1;
     config.bloomcrown.establish_light_min = 2.0;
@@ -1657,7 +1667,7 @@ fn tiny_continuing_arrivals_cannot_keep_old_seed_material_alive() {
 fn a_pulsing_donor_cannot_rejuvenate_a_bank_and_the_bins_bound_it() {
     let pulses = 50u64;
     for cap in [1usize, 4, 8] {
-        let mut config = FloraConfig::default();
+        let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
         config.bloomcrown.hop = 1;
         config.bloomcrown.establish_light_min = 2.0;
         config.bloomcrown.seed_max_age_s = 2.0;
@@ -1751,11 +1761,15 @@ fn a_pulsing_donor_cannot_rejuvenate_a_bank_and_the_bins_bound_it() {
 /// few ticks. The donor, twenty times its wood, outlives the window.
 #[test]
 fn a_descendant_born_and_dead_inside_the_window_is_still_a_birth() {
-    let mut config = FloraConfig::default();
+    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
     config.bloomcrown.propagule_rate = 3.0;
     config.bloomcrown.hop = 1;
     config.bloomcrown.assimilation = 0.0;
     config.bloomcrown.maintenance = 0.4;
+    // 0.75 (placeholder 0.5): the founder's starting reserve funds exactly **one** package.
+    // A second one would be a whole seed that waits in the bank (package S) and recruits
+    // into the gap the first descendant leaves, which is a second lineage in the window.
+    config.bloomcrown.donor_reserve_floor = 0.75;
     let sc = config.bloomcrown.clone();
     let mut world = strip_gap(0.6);
     let mut flora = Flora::new(config);
@@ -1867,7 +1881,7 @@ fn a_descendant_born_and_dead_inside_the_window_is_still_a_birth() {
 /// exactly one bin.
 #[test]
 fn an_expiring_bin_gets_one_last_germination_and_then_goes_to_litter() {
-    let mut config = FloraConfig::default();
+    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
     config.bloomcrown.seed_max_age_s = 0.1;
     config.bloomcrown.seed_cohorts_max = 1;
     config.bloomcrown.seed_attrition_per_s = 0.0;
@@ -2076,7 +2090,7 @@ fn an_expiring_bin_gets_one_last_germination_and_then_goes_to_litter() {
 /// reads.
 #[test]
 fn a_founder_replaced_by_its_own_species_in_one_tick_is_still_a_death_and_a_birth() {
-    let mut config = FloraConfig::default();
+    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
     config.bloomcrown.assimilation = 0.0;
     config.bloomcrown.maintenance = 0.4;
     config.bloomcrown.propagule_rate = 3.0;
@@ -2494,7 +2508,7 @@ fn income_is_multiplied_by_one_minus_the_stress_this_tick() {
 /// threshold is read off the bank whenever it has enough. The saturation is the fixture's.
 #[test]
 fn the_saturation_ceiling_is_non_strict_and_umbrellafrond_s_is_inert() {
-    let mut config = FloraConfig::default();
+    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
     config.bloomcrown.propagule_rate = 3.0;
     config.bloomcrown.hop = 1;
     config.bloomcrown.reserve_cap = 40.0;

@@ -32,20 +32,17 @@
 //!    dead wood and carrion respire their organic matter out of the system and release
 //!    their mineral to the site's pool at the same fraction; each pool's energy leaves as
 //!    heat at its own current density.
-//! 8. **The seed bank.** Every site with no stand holds a local lottery among the species
-//!    whose bank there holds at least one whole package and which pass that species'
-//!    establishment predicate, weighted by the packages each holds; the winner spends
-//!    exactly **one** package out of its oldest bins and every other bank stays. This runs
-//!    *after* the deaths of step 6, so a gap opened this tick can be filled this tick.
-//!    **Then** every arrival bin still banked pays its attrition into litter and falls to
-//!    litter whole once its **start** is past its species' `seed_max_age_s`. Germination
-//!    before decay, so that one package — exactly one minimum viable stand's material —
-//!    is one recruit and not 0.1 % short of one.
-//! 9. **Propagules** (§4.8), from one snapshot of donors and recipients. A package lands
-//!    as a seed cohort, on a support face within the donor's `hop` whether it is occupied
-//!    or not: the bank waits for the gap. A landing joins the arrival bin whose window
-//!    covers this tick — creating it if it is not there — so the age of what is already
-//!    banked does not move, and the bank is bounded by construction.
+//! 8. **The seed bank** (`seeds.rs`). A bank holds **whole seeds**, and a banked site is
+//!    tested only on its own slow, staggered check (every 30 s) and on the tick a shower
+//!    ends: a lottery among the species with at least one seed that pass the predicate,
+//!    weighted by seeds, and the winner spends one. This runs *after* the deaths of step
+//!    6, so a gap opened this tick is filled at its site's next check. The same check
+//!    then kills whole seeds by attrition (to litter) and sends a bin past its species'
+//!    `seed_max_age_s` to litter whole.
+//! 9. **Propagules** (§4.8, `seeds.rs`), from one snapshot of donors and recipients. A
+//!    whole package is either a **runner** daughter on a free neighbouring face (the
+//!    species' `clonal_share`) or one seed, landed by the species' [`crate::Dispersal`]
+//!    mode into the arrival bin whose window covers this tick.
 //!
 //! Dropped from v1 by the brief: fruit (3c), downhill transport of litter (3f) and
 //! nutrient diffusion (3g).
@@ -113,24 +110,29 @@
 use cubarium_voxel::{Command as WorldCommand, DT, Material, VoxelView, World};
 
 use crate::{
-    Flora, FloraConfig, FloraLedger, Ground, SeedCohort, Site, Species, SpeciesConfig, Stage,
-    Stand, Taken, Trophic,
+    Flora, FloraConfig, FloraLedger, Ground, Site, SpeciesConfig, Stand, Taken, Trophic,
 };
 
 /// Stream keys, so two draws in one tick cannot be the same draw. One per rule that
-/// draws.
-const DOMAIN_DISPERSAL: u64 = 1;
-const DOMAIN_GERMINATION: u64 = 2;
+/// draws; the seed bank's and dispersal's are drawn in `seeds.rs`.
+pub(crate) const DOMAIN_DISPERSAL: u64 = 1;
+pub(crate) const DOMAIN_GERMINATION: u64 = 2;
 const DOMAIN_FALL: u64 = 3;
+pub(crate) const DOMAIN_WIND: u64 = 4;
+pub(crate) const DOMAIN_SPORES: u64 = 5;
+pub(crate) const DOMAIN_WATER: u64 = 6;
+pub(crate) const DOMAIN_CLONAL: u64 = 7;
+pub(crate) const DOMAIN_RUNNER: u64 = 8;
+pub(crate) const DOMAIN_ATTRITION: u64 = 9;
 
 /// A deterministic scalar stream (splitmix64), keyed by the values that **identify** a
 /// draw rather than seeded from stored state: the same world, the same place and the same
 /// tick always produce the same numbers, and nothing about iteration or storage order can
 /// reach them. No clock and no thread state, like the core generator's own stream.
-struct Rng(u64);
+pub(crate) struct Rng(u64);
 
 impl Rng {
-    fn keyed(domain: u64, a: u64, b: u64, c: u64) -> Rng {
+    pub(crate) fn keyed(domain: u64, a: u64, b: u64, c: u64) -> Rng {
         let mut state = 0u64;
         for part in [domain, a, b, c] {
             state = mix(state ^ part);
@@ -138,20 +140,25 @@ impl Rng {
         Rng(state)
     }
 
-    fn next_u64(&mut self) -> u64 {
+    pub(crate) fn next_u64(&mut self) -> u64 {
         self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
         mix(self.0)
     }
 
+    /// A uniform draw in `[0, 1)`: the top 53 bits, so every value is an exact `f64`.
+    pub(crate) fn unit(&mut self) -> f64 {
+        (self.next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64)
+    }
+
     /// A uniform index below `n`, which must be positive. Modulo, whose bias against
     /// `2^64` is 1e-18 for the handful of candidates anything here draws among.
-    fn below(&mut self, n: usize) -> usize {
+    pub(crate) fn below(&mut self, n: usize) -> usize {
         (self.next_u64() % n as u64) as usize
     }
 }
 
 /// splitmix64's finalizer: the avalanche that makes neighbouring keys independent.
-fn mix(mut z: u64) -> u64 {
+pub(crate) fn mix(mut z: u64) -> u64 {
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
     z ^ (z >> 31)
@@ -197,8 +204,8 @@ pub(crate) fn step(flora: &mut Flora, world: &mut World) {
             grow(flora, world, &light, &moisture, &substrate)
         });
         cubarium_voxel::voxel_phase!(Decompose, { decompose(flora, &pre) });
-        cubarium_voxel::voxel_phase!(SeedBank, { seed_bank(flora, world) });
-        cubarium_voxel::voxel_phase!(Propagate, { propagate(flora, world) });
+        cubarium_voxel::voxel_phase!(SeedBank, { crate::seeds::seed_bank(flora, world) });
+        cubarium_voxel::voxel_phase!(Propagate, { crate::seeds::propagate(flora, world) });
         #[cfg(feature = "profile")]
         {
             use cubarium_voxel::profile::{Count, add};
@@ -282,7 +289,7 @@ fn refresh_sky_cache(flora: &mut Flora, world: &World) {
     }
 }
 
-fn sky_at(cache: &mut Vec<(Site, f64)>, view: &VoxelView<'_>, site: Site) -> f64 {
+pub(crate) fn sky_at(cache: &mut Vec<(Site, f64)>, view: &VoxelView<'_>, site: Site) -> f64 {
     match cache.binary_search_by_key(&site, |e| e.0) {
         Ok(i) => cache[i].1,
         Err(i) => {
@@ -1475,7 +1482,7 @@ pub fn fall_line(config: &FloraConfig, view: &VoxelView<'_>, stand: &Stand) -> V
 /// The site's ground entry, **provisioned** if the site has none: a fallen log is a
 /// landing like a package or a deposit, so an unrepresented site gets its
 /// `initial_mineral`, booked as `seeded_mineral_in` ([`crate::Provision::Lazy`]).
-fn provisioned_slot(
+pub(crate) fn provisioned_slot(
     config: &FloraConfig,
     ground: &mut Vec<Ground>,
     site: Site,
@@ -1638,514 +1645,9 @@ fn decompose_pool(
     ledger.respired_out += dec;
 }
 
-// ----------------------------------------------------------------- 8. seed bank
+// ------------------------------------------------------ 8–9. seed bank, propagules
 
-/// The seed bank: **germinate first**, out of the bank as it stands at the start of the
-/// tick, and then charge attrition and expiry on whatever is still banked.
-///
-/// The order matters because a package is exactly one minimum viable stand's material
-/// (`alive_min / w_frac`). Charging attrition first left a single package 0.1 % short of
-/// the germination threshold for ever, so every recruit cost **two** packages and one
-/// package's worth of paid material could never become a stand at all — which is not the
-/// rule the package size states. Germination therefore reads the bank before anything
-/// decays out of it, and attrition applies to what stays.
-///
-/// Two consequences, both deliberate. A package that lands on tick `t` on a passing site
-/// is born at tick `t + 1` with the whole package. And a bin on the tick its own
-/// `seed_max_age_s` runs out gets one last chance to germinate before it falls to litter:
-/// it is paid material on a site that passes the predicate, and throwing it away in the
-/// same tick that could have used it would be the same arbitrariness one step further out.
-///
-/// # The expiry boundary, exactly (Astra R5.5)
-///
-/// [`age_cohorts`] removes a bin on the first tick whose age is **greater than**
-/// `seed_max_age_s`, and it runs after the lottery. So for a lifetime of `L` ticks and a
-/// bin that opened at tick `b`:
-///
-/// - ticks `b..=b + L` — the bin is in the bank and can be drawn on.
-/// - tick `b + L + 1` — the lottery still sees it: **this is its last chance**, and a site
-///   whose gate opens on exactly this tick recruits out of it. Whatever is left of it
-///   afterwards goes to litter whole, with its mineral and its energy.
-/// - tick `b + L + 2` and after — there is nothing there. A gate that opens one tick too
-///   late finds an empty bank, and the material is in the litter.
-///
-/// A bin therefore cannot linger: it recruits once on its removal tick or it is gone. The
-/// rule is the `>` in [`age_cohorts`] plus this phase order, and changing either is a rule
-/// decision and not a tidy-up. Pinned by
-/// `tests/round3.rs::an_expiring_bin_gets_one_last_germination_and_then_goes_to_litter`.
-fn seed_bank(flora: &mut Flora, world: &World) {
-    let Flora {
-        config,
-        tick,
-        stands,
-        ground,
-        ledger,
-        sky,
-        ..
-    } = flora;
-    let tick = *tick;
-    let view = world.view();
-    // In site order. Which species takes a bare site is a **local lottery** among the
-    // banks that can build a stand here, weighted by the whole packages each holds, drawn
-    // from a stream keyed by the world, the site and the tick. The winner spends exactly
-    // one package out of its oldest bins; its own remainder and every loser's bank stay
-    // where they are and go on ageing.
-    let world_seed = view.config.seed;
-    // The lottery is drawn in a **read-only** pass, and only then are the winners' banks
-    // spent. Round 5b's reason: a saprotroph's substrate gate reads the dead wood of
-    // *other* sites in its mycelium box, which cannot be looked up while this site is
-    // borrowed for mutation. The order, the keys and the draw are unchanged — the sweep is
-    // still `ground`'s own site order — so no `Photo` species' behaviour moves.
-    let mut winners: Vec<(usize, Species)> = Vec::new();
-    for (gi, g) in ground.iter().enumerate() {
-        if g.seeds.is_empty() || stands.binary_search_by_key(&g.site, |s| s.site).is_ok() {
-            continue;
-        }
-        // Candidates in `Species::ALL` order — a fixed order, and the lottery sorts them
-        // again so that not even a caller's order can reach the draw.
-        let mut candidates: Vec<(Species, u64)> = Vec::new();
-        for species in Species::ALL {
-            let sc = config.species(species);
-            let package = package_of(sc);
-            if package <= 0.0 {
-                continue;
-            }
-            let packages = (g.seed_organic(species) / package).floor();
-            if packages < 1.0 {
-                continue;
-            }
-            if !establishes(&view, sky, ground, g.site, sc) {
-                continue;
-            }
-            candidates.push((species, packages.min(u32::MAX as f64) as u64));
-        }
-        let site_index = view.config.index(g.site.x as i64, g.site.y, g.site.z) as u64;
-        if let Some(species) = lottery(world_seed, site_index, tick, &candidates) {
-            winners.push((gi, species));
-        }
-    }
-    for (gi, species) in winners {
-        let g = &mut ground[gi];
-        let sc = config.species(species);
-        // The slot first and the bank second: a bank must never be spent on a birth that
-        // does not happen. The pass above skipped occupied sites and nothing inserts a
-        // stand on *this* site in between, so this is unreachable rather than a real
-        // branch — and it is in this order so that it stays harmless if that ever changes.
-        let at = match stands.binary_search_by_key(&g.site, |s| s.site) {
-            Ok(_) => continue,
-            Err(at) => at,
-        };
-        // Exactly one package, oldest bins first, with each bin's own mineral in
-        // proportion to what it gave up.
-        let (organic, mineral) = spend_bank(g, species, package_of(sc));
-        let (wood, foliage, reserve) = newborn_stocks(sc, organic);
-        let id = ledger.births;
-        ledger.births += 1;
-        let mut born = Stand {
-            id,
-            site: g.site,
-            species,
-            stage: Stage::Alive,
-            wood,
-            foliage,
-            reserve,
-            light: 0.0,
-            moisture: 0.0,
-            water_m3: 0.0,
-            mineral,
-            aeration_stress: 0.0,
-            parcel: 0.0,
-            layer_stock: [0.0; crate::MAX_FOLIAGE_LAYERS],
-            profile_stage: 0,
-        };
-        // A newborn's foliage goes into its seedling profile bottom-up, like any other
-        // tissue: the stocks sum to `foliage` from the first tick of its life.
-        born.bin_foliage(sc, config.voxel_m);
-        stands.insert(at, born);
-        ledger.establishments += 1;
-    }
-    // Then the decay, on what is left: a bin the germination above emptied pays nothing,
-    // because there is nothing left of it to pay with.
-    for g in ground.iter_mut() {
-        age_cohorts(config, g, ledger, tick);
-    }
-}
-
-/// The three stocks a funded newborn is built out of `organic` units of banked material:
-/// wood at **exactly** `alive_min`, foliage at the preset's `p_frac` of the material, and
-/// the remainder — including every unit of floating-point difference — in the reserve.
-///
-/// Astra's R5.1. `spend_bank` accumulates the material it takes bin by bin, so across
-/// several bins the sum is the intended package to within an ulp or two rather than to the
-/// bit: Astra's case is bins of `0.001, 0.009, 0.04` against the default package
-/// `0.02 / 0.4 = 0.049999999999999996`, which spends `0.04999999999999999` — short by
-/// 6.9e-18. `w_frac · that` is `0.019999999999999997`, which is **below** `alive_min` by
-/// 3.5e-18, so the next growth pass killed a newborn that had just been paid for in full,
-/// with no loss of wood anywhere. A funded package buys a stand that is alive: the wood is
-/// the threshold itself, and the rounding difference goes where it can do no harm.
-///
-/// The reserve is the compartment that absorbs it because it is the buffer — it feeds no
-/// income and no death test. The paid organic total and the transferred mineral are
-/// preserved: `wood + foliage + reserve` re-sums to `organic` (exactly, in Astra's case),
-/// and `mineral` is untouched by this. Every stock is non-negative by construction, even
-/// for a preset whose `q_frac` is zero, because `foliage` is capped at what is left after
-/// the wood and the reserve is that remainder.
-fn newborn_stocks(sc: &SpeciesConfig, organic: f64) -> (f64, f64, f64) {
-    let wood = sc.alive_min.min(organic.max(0.0));
-    let left = (organic - wood).max(0.0);
-    let foliage = (sc.propagule_split[1] * organic).clamp(0.0, left);
-    (wood, foliage, left - foliage)
-}
-
-/// Which species takes a gap, among the banks that can build a stand on it: a draw
-/// weighted by the **whole packages** each holds, from a stream keyed by the world's seed,
-/// the site's voxel index and the tick. `None` when nothing qualifies.
-///
-/// Astra's R4.5: the old rule gave the gap to the first qualifying species in
-/// `Species::ALL`, so bloomcrown pre-empted umbrellafrond in every contested gap in the
-/// world whatever the two banks held, and adding three species after it would have built
-/// that precedence into the whole ecology. A fixed enum order is not a `HashMap` iteration,
-/// but it is not an ecological rule either.
-///
-/// The candidates are sorted by species before the walk, so the caller's order — which is
-/// `Species::ALL` today and could be a storage order tomorrow — cannot select the winner.
-/// Weights are integer package counts, so the draw is one bounded integer and there is no
-/// float comparison in it.
-fn lottery(
-    world_seed: u64,
-    site_index: u64,
-    tick: u64,
-    candidates: &[(Species, u64)],
-) -> Option<Species> {
-    match candidates {
-        [] => return None,
-        [(one, _)] => return Some(*one),
-        _ => {}
-    }
-    let mut sorted: Vec<(Species, u64)> = candidates.to_vec();
-    sorted.sort_unstable_by_key(|&(species, _)| species);
-    let total: u64 = sorted.iter().map(|&(_, w)| w).sum();
-    if total == 0 {
-        return None;
-    }
-    let mut draw =
-        Rng::keyed(DOMAIN_GERMINATION, world_seed, site_index, tick).below(total as usize) as u64;
-    for (species, weight) in sorted {
-        if draw < weight {
-            return Some(species);
-        }
-        draw -= weight;
-    }
-    None
-}
-
-/// Spend `want` of one species' banked organic matter, **oldest bin first**, taking each
-/// bin's mineral in proportion to the organic matter taken from it. Returns what was
-/// actually spent, which is `want` unless the bank held less.
-///
-/// A bin that is emptied is removed whole, mineral included, so no float dust is left
-/// behind claiming to be a cohort; a bin that is partly spent keeps its `bin_start_tick`
-/// and goes on ageing toward its own expiry. Nothing is deleted: what is not spent stays
-/// banked (Astra's R4.5 — germination used to spend the whole bank, however large, and
-/// build an oversized "small" stand out of it).
-fn spend_bank(g: &mut Ground, species: Species, want: f64) -> (f64, f64) {
-    let mut left = want;
-    let (mut organic, mut mineral) = (0.0, 0.0);
-    let mut i = 0;
-    while i < g.seeds.len() && left > 0.0 {
-        if g.seeds[i].species != species {
-            i += 1;
-            continue;
-        }
-        let c = g.seeds[i];
-        if c.organic <= left {
-            organic += c.organic;
-            mineral += c.mineral;
-            left -= c.organic;
-            g.seeds.remove(i);
-            continue;
-        }
-        let m = (c.mineral * (left / c.organic)).min(c.mineral);
-        g.seeds[i].organic -= left;
-        g.seeds[i].mineral -= m;
-        organic += left;
-        mineral += m;
-        left = 0.0;
-    }
-    (organic, mineral)
-}
-
-/// One tick of decay for one site's bank. A bin whose **start** is past `seed_max_age_s`
-/// falls to litter whole; every other bin pays `seed_attrition_per_s · dt` of itself into
-/// litter, with the matching fraction of its mineral and its energy. Paid decay, never
-/// deletion.
-///
-/// Nothing here writes an age: a bin's age is `tick - bin_start_tick`, so it rises by one
-/// every tick on its own and a landing cannot lower it.
-fn age_cohorts(config: &FloraConfig, g: &mut Ground, ledger: &mut FloraLedger, tick: u64) {
-    if g.seeds.is_empty() {
-        return;
-    }
-    let cap = config.litter_energy_cap;
-    let taken = std::mem::take(&mut g.seeds);
-    let mut kept: Vec<SeedCohort> = Vec::with_capacity(taken.len());
-    for mut c in taken {
-        let sc = config.species(c.species);
-        let e_v = sc.energy_density;
-        if c.age_s(tick) > sc.seed_max_age_s {
-            add_litter_cap(cap, g, c.organic, c.mineral, e_v * c.organic, ledger);
-            continue;
-        }
-        let loss = (sc.seed_attrition_per_s * DT * c.organic)
-            .min(c.organic)
-            .max(0.0);
-        if loss > 0.0 {
-            let mineral = if c.organic > 0.0 {
-                (c.mineral * (loss / c.organic)).min(c.mineral)
-            } else {
-                0.0
-            };
-            c.organic -= loss;
-            c.mineral -= mineral;
-            add_litter_cap(cap, g, loss, mineral, e_v * loss, ledger);
-        }
-        if c.organic > 0.0 || c.mineral > 0.0 {
-            kept.push(c);
-        }
-    }
-    g.seeds = kept;
-}
-
-/// The width of one arrival bin in ticks: `seed_max_age_s / seed_cohorts_max`, **rounded
-/// up**, at least one tick. Derived, not a knob of its own — the placeholders' 600 s over 4
-/// bins is 150 s, which is 3,000 ticks exactly.
-///
-/// Rounded up rather than truncated so that the bound on the bank is exact: a lifetime of
-/// `life` ticks in bins of `ceil(life / n)` can hold at most `n + 1` live bins, where
-/// truncating could fit one more (a 2 s lifetime over 7 bins truncates to 5 ticks, and
-/// 40 ticks of lifetime is nine such bins). Rounding up can only make a bin coarser than
-/// asked for, never let a bank hold more of them.
-fn bin_ticks(sc: &SpeciesConfig) -> u64 {
-    let ticks = sc.seed_max_age_s / sc.seed_cohorts_max.max(1) as f64 / DT;
-    if ticks.is_finite() && ticks >= 1.0 {
-        ticks.ceil() as u64
-    } else {
-        1
-    }
-}
-
-/// The first tick of the bin that `tick` falls in.
-fn bin_start(tick: u64, sc: &SpeciesConfig) -> u64 {
-    let w = bin_ticks(sc);
-    tick - tick % w
-}
-
-/// Land a fresh package on a site's bank, in the bin whose window covers `tick`: a bin
-/// that is already there sums the organic matter and the mineral and keeps its start, and
-/// one that is not is inserted. `seeds` stays sorted by species then `bin_start_tick`,
-/// oldest first, so one species' bins are a contiguous run and germination can spend the
-/// oldest of them first.
-///
-/// No cap and no merge: a bin's age never decreases, so `seed_max_age_s` bounds how many
-/// bins of one species can be alive at `seed_cohorts_max + 1` by construction.
-fn add_cohort(
-    g: &mut Ground,
-    species: Species,
-    organic: f64,
-    mineral: f64,
-    tick: u64,
-    sc: &SpeciesConfig,
-) {
-    if organic <= 0.0 && mineral <= 0.0 {
-        return;
-    }
-    let start = bin_start(tick, sc);
-    match g
-        .seeds
-        .binary_search_by(|c| (c.species, c.bin_start_tick).cmp(&(species, start)))
-    {
-        Ok(i) => {
-            g.seeds[i].organic += organic;
-            g.seeds[i].mineral += mineral;
-        }
-        Err(i) => g.seeds.insert(
-            i,
-            SeedCohort {
-                species,
-                organic,
-                mineral,
-                bin_start_tick: start,
-            },
-        ),
-    }
-}
-
-// ---------------------------------------------------------------- 9. propagules
-
-/// The smallest package worth sending: the seed-bank organic matter a germination needs to
-/// build a stand at exactly `alive_min` of wood, `alive_min / w_frac` — 0.05 at the
-/// placeholders. Stated as a division guarded by the caller, never a tuned constant.
-///
-/// Zero for a species whose `w_frac` is zero, which can never germinate anything.
-fn package_of(sc: &SpeciesConfig) -> f64 {
-    let w_frac = sc.propagule_split[0];
-    if w_frac > 0.0 {
-        sc.alive_min / w_frac
-    } else {
-        0.0
-    }
-}
-
-/// §4.8, round 3b: a stand doing well **saves** for one neighbour at a time, and nothing
-/// arrives from outside.
-///
-/// Every tick, a stand over `donor_min` asks for one recipient's worth of material —
-/// `propagule_rate · dt`, gross — and is funded out of whatever its reserve holds above
-/// its own `donor_reserve_floor`. What it can pay is respired for construction (`c_g`) and
-/// the rest is saved in [`Stand::parcel`]. When the parcel holds one whole minimum package
-/// ([`package_of`], `alive_min / w_frac`), that package lands on **one** support face
-/// within the donor's `hop`, and the remainder keeps saving.
-///
-/// Astra's R4.4 is the reason: the old rule multiplied the budget by the recipient count
-/// and then split it, so `propagule_rate` was a rate *per recipient* paid out of one
-/// reserve. A bloomcrown with 24 recipients in `hop` 2 gave each of them a
-/// twenty-fourth of what it could afford, and no bank came within a seventh of the
-/// germination threshold in 2,000 s. The rate is unchanged; what changed is that the donor
-/// pays for one package instead of pretending to pay for two dozen.
-///
-/// The recipient is drawn from the donor's own deterministic stream, keyed by the world's
-/// seed, the donor's site and the tick — never its own site, and with **no habitat
-/// screening**: the predicate is germination's test, not landing's, so a package can land
-/// on an occupied site and wait for the gap, or on a site that will never germinate it and
-/// decay there. Two species' cohorts can share one site, and there is no contest to
-/// settle until germination.
-fn propagate(flora: &mut Flora, world: &World) {
-    let Flora {
-        config,
-        tick,
-        stands,
-        ground,
-        ledger,
-        deliveries,
-        ..
-    } = flora;
-    let tick = *tick;
-    let view = world.view();
-    let world_seed = view.config.seed;
-
-    for si in 0..stands.len() {
-        let donor = stands[si];
-        let sc = config.species(donor.species);
-        let e_v = sc.energy_density;
-        let slot = donor.species.index();
-        let build = 1.0 + sc.build;
-
-        // ---- what the rate asks for, and what the reserve can fund.
-        if donor.wood >= sc.donor_min {
-            let ask = (sc.propagule_rate * DT).max(0.0);
-            ledger.propagule_requested[slot] += ask / build;
-            let floor = sc.donor_reserve_floor * sc.reserve_cap * donor.wood;
-            let take = (donor.reserve - floor)
-                .max(0.0)
-                .min(ask)
-                .min(donor.reserve.max(0.0));
-            if take > 0.0 {
-                let net = take / build;
-                stands[si].reserve -= take;
-                stands[si].parcel += net;
-                ledger.propagule_funded[slot] += net;
-                // Construction respiration, paid when the material is set aside: organic
-                // matter out of the system, energy to heat, and no mineral moves — the
-                // parcel's mineral is still in the stand and travels only when the package
-                // does.
-                ledger.respired_out += take - net;
-                ledger.heat_out += e_v * (take - net);
-            }
-        }
-
-        // ---- one whole package or nothing. A stand that has fallen below `donor_min`
-        // still delivers material it has already paid for; nothing that is paid for is
-        // stranded.
-        let package = package_of(sc);
-        if package <= 0.0 || stands[si].parcel < package {
-            continue;
-        }
-        let Some(site) = dispersal_target(&view, sc, &donor, world_seed, tick) else {
-            continue;
-        };
-        let before = stands[si].material();
-        stands[si].parcel -= package;
-        // The package takes the same fraction of the donor's mineral as it is of the
-        // donor's whole material, parcel included: the fraction rule, with the parcel
-        // counted because its mineral never left the stand.
-        let mineral = pull_mineral(&mut stands[si], before, package);
-        ledger.propagule_landed[slot] += package;
-
-        let gi = match ground.binary_search_by_key(&site, |g| g.site) {
-            Ok(i) => i,
-            Err(i) => {
-                ledger.seeded_mineral_in += config.initial_mineral;
-                ground.insert(i, Ground::new(site, config.initial_mineral));
-                i
-            }
-        };
-        add_cohort(&mut ground[gi], donor.species, package, mineral, tick, sc);
-        // The receipt, written where the destination is actually known. Nothing downstream
-        // reads it and no total includes it (Astra R10.3).
-        deliveries.push(crate::DeliveryReceipt {
-            tick,
-            donor: donor.id,
-            species: donor.species,
-            recipient: site,
-            organic: package,
-            mineral,
-        });
-    }
-}
-
-/// The one site this tick's package lands on: the **highest** support face of each column
-/// within `hop` of the donor in `x` and `z` is a candidate — one per column, so a stand
-/// cannot seed the terraces below its own — and one of them is drawn uniformly from a
-/// stream keyed by the world's seed, the donor's own site and the tick. Never the donor's
-/// own site, and no habitat screening.
-///
-/// The candidate list is built in a fixed geometric order and the draw is an index into
-/// it, so nothing about how the stands were reached or how the ground is stored can move
-/// the choice; the same world, donor and tick always choose the same site.
-fn dispersal_target(
-    view: &VoxelView<'_>,
-    sc: &SpeciesConfig,
-    donor: &Stand,
-    world_seed: u64,
-    tick: u64,
-) -> Option<Site> {
-    let mut targets: Vec<Site> = Vec::new();
-    let hop = sc.hop as i64;
-    for dz in -hop..=hop {
-        let z = donor.site.z as i64 + dz;
-        if z < 0 || z >= view.config.depth as i64 {
-            continue;
-        }
-        for dx in -hop..=hop {
-            let x = donor.site.x as i64 + dx;
-            let Some(site) = crate::highest_support(view, x, z as u32) else {
-                continue;
-            };
-            if site == donor.site || targets.contains(&site) {
-                continue;
-            }
-            targets.push(site);
-        }
-    }
-    if targets.is_empty() {
-        return None;
-    }
-    let home = view
-        .config
-        .index(donor.site.x as i64, donor.site.y, donor.site.z) as u64;
-    let mut rng = Rng::keyed(DOMAIN_DISPERSAL, world_seed, home, tick);
-    Some(targets[rng.below(targets.len())])
-}
+// `seeds.rs`: the bank's checks, germination, attrition and every dispersal mode.
 
 /// The species' establishment predicate: wet enough for its roots, **aerated** enough for
 /// them, bright enough for its leaves, something to eat if it eats wood, and not already
@@ -2155,7 +1657,7 @@ fn dispersal_target(
 /// cohort has no way to carry. It is the half of correction 2 that makes saturation cost
 /// something on the way in: the intolerant species is shut out of the basin instead of
 /// merely doing badly there, which is what Chesson's test needs to have anywhere to bite.
-fn establishes(
+pub(crate) fn establishes(
     view: &VoxelView<'_>,
     sky: &mut Vec<(Site, f64)>,
     ground: &[Ground],
@@ -2334,7 +1836,7 @@ pub fn establishment_gates_with_sky(
 
 /// The same, for a caller that already has a sky reading — `step`'s memoized cache, which
 /// is the same geometry by construction.
-fn gates(
+pub(crate) fn gates(
     view: &VoxelView<'_>,
     site: Site,
     sc: &SpeciesConfig,
@@ -2412,6 +1914,7 @@ pub(crate) fn standing_water_beside(view: &VoxelView<'_>, site: Site) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Species;
 
     #[test]
     fn a_share_is_proportional_and_never_zero_over_zero() {
@@ -2463,146 +1966,6 @@ mod tests {
         }
     }
 
-    /// The package a donor saves for is the material a germination needs to build a stand
-    /// at exactly `alive_min` of wood, so `w_frac · package` must not land **under**
-    /// `alive_min` in f64 — a newborn a hair under it would be born and die on its first
-    /// tick. It is exact at every preset's placeholders, and this is the test a new preset
-    /// has to keep passing: round 4 added three, whose packages are 0.015, 0.025 and 0.0375
-    /// against the original pair's 0.05.
-    #[test]
-    fn one_package_builds_a_stand_at_exactly_alive_min() {
-        let config = FloraConfig::default();
-        for species in Species::ALL {
-            let sc = config.species(species).clone();
-            let package = package_of(&sc);
-            let want = sc.alive_min / 0.4;
-            assert!(
-                (package - want).abs() < 1e-15,
-                "{}: a {package} package for a {want} split",
-                species.name()
-            );
-            let wood = sc.propagule_split[0] * package;
-            assert!(
-                wood >= sc.alive_min,
-                "a package builds {wood} of wood, under {}",
-                sc.alive_min
-            );
-            assert!(
-                wood - sc.alive_min <= 1e-15,
-                "a package builds {wood}, which is not alive_min {}",
-                sc.alive_min
-            );
-        }
-        // A species that cannot put anything into wood has no package at all, and
-        // `propagate` and germination both skip it rather than dividing by zero.
-        let mut odd = SpeciesConfig::bloomcrown();
-        odd.propagule_split = [0.0, 0.5, 0.5];
-        assert_eq!(package_of(&odd), 0.0);
-    }
-
-    /// The gap lottery: weighted by whole packages, reproducible per (world, site, tick),
-    /// and **blind to the order the candidates arrive in** — which is R4.5's requirement,
-    /// since that order is `Species::ALL` today and could be a storage order tomorrow.
-    ///
-    /// Two hundred seeded draws at weights 1 and 3: both species win somewhere, the counts
-    /// sit near the weights, and swapping the two candidates round gives the identical
-    /// winner on all two hundred.
-    #[test]
-    fn the_gap_lottery_follows_the_weights_and_not_the_order_it_is_handed() {
-        let (b, u) = (Species::Bloomcrown, Species::Umbrellafrond);
-        let mut wins = [0usize; 2];
-        let mut swapped_disagreements = 0;
-        for site in 0..200u64 {
-            let one = lottery(11, site, 3, &[(b, 1), (u, 3)]).expect("two candidates");
-            let other = lottery(11, site, 3, &[(u, 3), (b, 1)]).expect("two candidates");
-            if one != other {
-                swapped_disagreements += 1;
-            }
-            wins[one.index()] += 1;
-        }
-        assert_eq!(
-            swapped_disagreements, 0,
-            "the order the candidates came in moved the winner"
-        );
-        assert!(
-            wins[0] > 0 && wins[1] > 0,
-            "one species never won: {wins:?}"
-        );
-        // 1:3 over 200 draws is 50 against 150; anything inside 35..65 is the weights and
-        // not the enum order, which would be 200 against 0.
-        assert!(
-            (35..=65).contains(&wins[0]),
-            "weights 1 and 3 gave {wins:?}"
-        );
-        assert_eq!(wins[0] + wins[1], 200);
-
-        // Degenerate cases: nothing to draw among, and one candidate that always wins
-        // whatever its weight.
-        assert_eq!(lottery(11, 0, 0, &[]), None);
-        assert_eq!(lottery(11, 0, 0, &[(u, 1)]), Some(u));
-        assert_eq!(
-            lottery(11, 0, 0, &[(b, 0), (u, 0)]),
-            None,
-            "no packages, no winner"
-        );
-    }
-
-    /// Spending a bank takes the **oldest** bin first, leaves a part-spent bin ageing on
-    /// its own start tick, and removes an emptied one whole with its mineral.
-    #[test]
-    fn spending_a_bank_empties_its_oldest_bins_first() {
-        let mut g = Ground::new(Site { x: 0, y: 1, z: 0 }, 0.0);
-        for (start, organic) in [(0u64, 0.02), (10, 0.04), (20, 0.06)] {
-            g.seeds.push(SeedCohort {
-                species: Species::Bloomcrown,
-                organic,
-                mineral: 0.02 * organic,
-                bin_start_tick: start,
-            });
-        }
-        // Another species' bin, to be left strictly alone.
-        g.seeds.push(SeedCohort {
-            species: Species::Umbrellafrond,
-            organic: 1.0,
-            mineral: 0.02,
-            bin_start_tick: 0,
-        });
-
-        let (organic, mineral) = spend_bank(&mut g, Species::Bloomcrown, 0.05);
-        assert!((organic - 0.05).abs() < 1e-15, "spent {organic}");
-        // Density is uniform here, so the mineral is the same fraction.
-        assert!(
-            (mineral - 0.02 * 0.05).abs() < 1e-15,
-            "took {mineral} of mineral"
-        );
-        // The 0.02 bin is gone whole and the 0.04 one is down to 0.01, still on tick 10.
-        let bloom: Vec<&SeedCohort> = g
-            .seeds
-            .iter()
-            .filter(|c| c.species == Species::Bloomcrown)
-            .collect();
-        assert_eq!(bloom.len(), 2, "{:?}", g.seeds);
-        assert_eq!(bloom[0].bin_start_tick, 10);
-        assert!((bloom[0].organic - 0.01).abs() < 1e-15, "{:?}", bloom[0]);
-        assert_eq!(bloom[1].bin_start_tick, 20);
-        assert!((bloom[1].organic - 0.06).abs() < 1e-15, "{:?}", bloom[1]);
-        // The other species is untouched, and a bank with less than is asked for gives
-        // what it has rather than going negative.
-        let frond = g
-            .seeds
-            .iter()
-            .find(|c| c.species == Species::Umbrellafrond)
-            .expect("kept");
-        assert_eq!((frond.organic, frond.mineral), (1.0, 0.02));
-        let (rest, _) = spend_bank(&mut g, Species::Bloomcrown, 1.0);
-        assert!((rest - 0.07).abs() < 1e-15, "a short bank gave {rest}");
-        assert!(
-            g.seeds.iter().all(|c| c.species == Species::Umbrellafrond),
-            "{:?}",
-            g.seeds
-        );
-    }
-
     /// A world of one soil slab holding `pore` of soil's own pore capacity: bedrock at
     /// `y = 0`, soil at `y = 1..=2`, air above, so every column's support face is `y = 2`
     /// in open sky. Built the way the integration fixtures build one — water into the void
@@ -2637,205 +2000,6 @@ mod tests {
             }
         }
         w
-    }
-
-    /// The three residuals, as the integration fixtures compute them.
-    fn residuals(flora: &Flora) -> (f64, f64, f64) {
-        let v = flora.view();
-        (
-            v.organic() - v.ledger.expected_organic(),
-            v.mineral() - v.ledger.expected_mineral(),
-            v.energy() - v.ledger.expected_energy(),
-        )
-    }
-
-    /// **Astra's R5.1 case, end to end.** A bank of three oldest-first bins holding
-    /// `0.001, 0.009, 0.04` is one whole default package — and spending it across the three
-    /// of them returns `0.04999999999999999`, 6.9e-18 short of the package itself, so the
-    /// old `w_frac · organic` built wood of `0.019999999999999997`: **below** `alive_min`
-    /// by 3.5e-18. Frozen (`assimilation`, `maintenance` and `senescence` all zero, so
-    /// nothing can take a unit of wood off it), the next growth pass killed that newborn on
-    /// the §4.7 death test. Now the wood is `alive_min` exactly and the difference is in
-    /// the reserve.
-    ///
-    /// The bank is injected rather than donated because no donor can produce these three
-    /// amounts: a landing is always exactly one package. It is booked in as seeded material
-    /// the way `Command::Seed` books a founder, so the three residuals still mean something.
-    #[test]
-    fn a_funded_birth_across_three_bins_is_born_alive_and_stays_alive() {
-        let mut config = FloraConfig::default();
-        config.bloomcrown.assimilation = 0.0;
-        config.bloomcrown.maintenance = 0.0;
-        config.bloomcrown.senescence = 0.0;
-        let sc = config.bloomcrown.clone();
-        let e_v = sc.energy_density;
-        let n_tissue = sc.n_tissue;
-        let package = package_of(&sc);
-        assert_eq!(
-            package, 0.049999999999999996,
-            "the default package this case is about"
-        );
-
-        let mut world = slab(4, 0.6);
-        let mut flora = Flora::new(config);
-        let site = Site { x: 1, y: 2, z: 0 };
-
-        // The bank: three bins, oldest first, summing to exactly 0.05 of organic matter.
-        // Their start ticks are hand-set one tick apart to force the three-bin spend; the
-        // placeholders' bin is 3,000 ticks wide, so a donor would have put all of this in
-        // one bin.
-        let mut g = Ground::new(site, 1.0);
-        let mut banked_organic = 0.0;
-        let mut banked_mineral = 0.0;
-        for (start, organic) in [(0u64, 0.001), (1, 0.009), (2, 0.04)] {
-            let mineral = n_tissue * organic;
-            g.seeds.push(SeedCohort {
-                species: Species::Bloomcrown,
-                organic,
-                mineral,
-                bin_start_tick: start,
-            });
-            banked_organic += organic;
-            banked_mineral += mineral;
-        }
-        assert_eq!(
-            banked_organic, 0.05,
-            "the bank is one package, and a hair over it"
-        );
-        assert!(
-            banked_organic > package,
-            "it has to be able to buy the package"
-        );
-        flora.ground.push(g);
-        flora.ledger.seeded_organic_in += banked_organic;
-        flora.ledger.seeded_mineral_in += banked_mineral + 1.0; // the site's own pool
-        flora.ledger.seeded_energy_in += e_v * banked_organic;
-        let (o, n, e) = residuals(&flora);
-        assert!(
-            o.abs() < 1e-18 && n.abs() < 1e-18 && e.abs() < 1e-18,
-            "{o} {n} {e}"
-        );
-
-        // The birth.
-        flora.step(&mut world);
-        assert_eq!(
-            flora.view().ledger.establishments,
-            1,
-            "the bank did not germinate"
-        );
-        let born = *flora.view().stand_at(site).expect("nothing stands here");
-        assert_eq!(born.wood, sc.alive_min, "born with {} of wood", born.wood);
-        assert!(
-            born.wood >= sc.alive_min,
-            "born under the death threshold: {}",
-            born.wood
-        );
-        // What it holds is what was spent, to the bit in this case.
-        let spent = 0.04999999999999999;
-        assert_eq!(born.organic(), spent, "born holding {}", born.organic());
-        assert!(
-            born.organic() < package,
-            "the fixture's premise: the spend is short"
-        );
-        // The intended split is recovered to a hair, and the difference is in the reserve.
-        assert!(
-            (born.foliage - sc.propagule_split[1] * spent).abs() < 1e-17,
-            "{born:?}"
-        );
-        assert!(
-            (born.reserve - sc.propagule_split[2] * spent).abs() < 1e-17,
-            "{born:?}"
-        );
-        assert!(born.reserve > 0.0 && born.foliage > 0.0, "{born:?}");
-        // Its mineral is the consumed bins' own, at the bank's density.
-        assert!(
-            (born.mineral / born.organic() - n_tissue).abs() < 1e-15,
-            "mineral density {} against the bank's {n_tissue}",
-            born.mineral / born.organic()
-        );
-        // What is left of the third bin is the 6.9e-18 the spend could not take, with its
-        // mineral: real material, not deleted, and it ages out on its own bin's schedule.
-        let left = flora
-            .view()
-            .ground_at(site)
-            .expect("ground")
-            .seed_organic(Species::Bloomcrown);
-        assert!(left > 0.0 && left < 1e-17, "the third bin left {left}");
-
-        // One frozen growth tick: nothing can take wood off it, so the only thing that
-        // could kill it is the death test reading a rounded-down wood.
-        flora.step(&mut world);
-        assert_eq!(flora.view().ledger.deaths, 0, "the paid newborn was killed");
-        let still = *flora
-            .view()
-            .stand_at(site)
-            .expect("it died on its first growth tick");
-        assert_eq!(still.wood, sc.alive_min, "its wood moved: {}", still.wood);
-        assert_eq!(still.id, born.id, "a different stand is standing here");
-        let (o, n, e) = residuals(&flora);
-        let v = flora.view();
-        assert!(
-            o.abs() <= 1e-9 * v.organic().max(1.0),
-            "organic residual {o}"
-        );
-        assert!(
-            n.abs() <= 1e-9 * v.mineral().max(1.0),
-            "mineral residual {n}"
-        );
-        assert!(e.abs() <= 1e-9 * v.energy().max(1.0), "energy residual {e}");
-    }
-
-    /// The same allocation against **every one of the five presets' own splits**, on the value Astra's three
-    /// bins produce and on an exact package: the wood is `alive_min` on the nose, no stock
-    /// is negative, the total is preserved, and the foliage and reserve are the intended
-    /// fractions to within the rounding that is being corrected. The last two cases are the
-    /// degenerate splits a future preset could bring — no reserve at all, and a bank that
-    /// somehow holds less than `alive_min`.
-    #[test]
-    fn a_newborn_s_wood_is_exactly_alive_min_for_every_split() {
-        let config = FloraConfig::default();
-        for species in Species::ALL {
-            let sc = config.species(species).clone();
-            let [w_frac, p_frac, q_frac] = sc.propagule_split;
-            assert!(
-                (w_frac + p_frac + q_frac - 1.0).abs() < 1e-15,
-                "the split sums to one"
-            );
-            assert!(sc.alive_min <= sc.wood_max, "alive_min over wood_max");
-            for organic in [0.04999999999999999, package_of(&sc), 0.2] {
-                let (wood, foliage, reserve) = newborn_stocks(&sc, organic);
-                assert_eq!(wood, sc.alive_min, "wood {wood} for {organic} of material");
-                assert!(
-                    foliage >= 0.0 && reserve >= 0.0,
-                    "{wood} {foliage} {reserve}"
-                );
-                assert!(
-                    ((wood + foliage + reserve) - organic).abs() <= 4e-18,
-                    "{wood} + {foliage} + {reserve} against {organic} paid"
-                );
-                assert!(
-                    (foliage - p_frac * organic).abs() <= 1e-17,
-                    "foliage {foliage}"
-                );
-                if organic <= package_of(&sc) {
-                    assert!(
-                        (reserve - q_frac * organic).abs() <= 1e-17,
-                        "reserve {reserve}"
-                    );
-                }
-            }
-        }
-        // A split with nothing in the reserve: the remainder is zero and never negative.
-        let mut dry = SpeciesConfig::bloomcrown();
-        dry.propagule_split = [0.5, 0.5, 0.0];
-        let (wood, foliage, reserve) = newborn_stocks(&dry, package_of(&dry));
-        assert_eq!(wood, dry.alive_min);
-        assert!(reserve >= 0.0 && reserve < 1e-17, "reserve {reserve}");
-        assert!((wood + foliage + reserve - package_of(&dry)).abs() <= 4e-18);
-        // And a bank under `alive_min`, which the candidate filter cannot produce: the wood
-        // takes all of it and the stand is born dying rather than born rich.
-        let (wood, foliage, reserve) = newborn_stocks(&dry, 0.01);
-        assert_eq!((wood, foliage, reserve), (0.01, 0.0, 0.0));
     }
 
     /// `can_establish` is `Gates::passes()` and nothing else, so there is still exactly one
@@ -2905,36 +2069,6 @@ mod tests {
         assert!(g.water_depth_m > sc.drown_depth_m && !g.depth_ok, "{g:?}");
         assert!(g.pore_ok && g.aeration_ok && g.light_ok, "{g:?}");
         assert_eq!(g.passes(), can_establish(&view, site, &sc));
-    }
-
-    /// The bank's size bound is by construction and not by a cap: a lifetime in bins of
-    /// `ceil(lifetime / seed_cohorts_max)` holds at most `seed_cohorts_max + 1` of them,
-    /// whatever the two numbers are and whether or not they divide.
-    #[test]
-    fn the_bin_width_bounds_a_bank_at_the_cohort_cap_plus_one() {
-        for cap in 1..=12usize {
-            for &life_s in &[0.05, 0.1, 1.0, 2.0, 7.0, 600.0] {
-                let mut sc = SpeciesConfig::bloomcrown();
-                sc.seed_max_age_s = life_s;
-                sc.seed_cohorts_max = cap;
-                let w = bin_ticks(&sc);
-                assert!(w >= 1, "a zero-width bin at cap {cap}, life {life_s}");
-                // Every bin start a landing can produce, over one lifetime of ticks: the
-                // bins alive at once are the distinct starts inside the lifetime, plus the
-                // one the oldest is expiring out of.
-                let life_ticks = (life_s / DT) as u64;
-                let live = life_ticks / w + 1;
-                assert!(
-                    live <= cap as u64 + 1,
-                    "cap {cap}, life {life_s}: {live} live bins of {w} ticks"
-                );
-            }
-        }
-        // The placeholders themselves: 600 s over 4 bins is 3,000 ticks, exactly.
-        assert_eq!(bin_ticks(&SpeciesConfig::bloomcrown()), 3000);
-        assert_eq!(bin_start(0, &SpeciesConfig::bloomcrown()), 0);
-        assert_eq!(bin_start(2999, &SpeciesConfig::bloomcrown()), 0);
-        assert_eq!(bin_start(3000, &SpeciesConfig::bloomcrown()), 3000);
     }
 
     /// One draw is one draw: the same world, site and tick give the same index, a

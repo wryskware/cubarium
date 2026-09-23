@@ -553,6 +553,27 @@ pub enum Trophic {
     Saprotroph,
 }
 
+/// **How a species' seeds travel** (package S, `design/handoffs/voxel-plant-viability-2026-09-23.md`).
+/// Every mode lands one whole seed — one package — per delivery; what differs is where.
+/// `seeds.rs`'s `landing` is the rule, and [`SpeciesConfig::hop`] is each mode's distance.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Dispersal {
+    /// Uniform over the highest support faces within `hop`, habitat unscreened: the bank
+    /// waits for the gap. Round 3b's kernel, unchanged.
+    #[default]
+    Drop,
+    /// A fat-tailed, isotropic distance at a scale of `hop`: 79 % within three hops, 4 %
+    /// past ten, capped at the world, habitat unscreened.
+    Wind,
+    /// Lands only on a face whose ground passes the species' gates — every gate but light
+    /// — within a wide radius `hop`; the rain that finds none is litter. A spore rain
+    /// mostly falls where nothing grows, and only what lands where it could is modelled.
+    Spores,
+    /// Lands only on a standing-water margin within a wide radius `hop`, downhill first;
+    /// with no margin in reach it is litter under the parent.
+    Water,
+}
+
 /// The plant model of one species: `design/ecology-v1-contract.md` §4 parameters, plus
 /// the terrain couplings that replace the old noise fields.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -658,11 +679,18 @@ pub struct SpeciesConfig {
     pub propagule_split: [f64; 3],
     /// `e_v`: energy per unit of organic matter in every plant tissue. Light is the source.
     pub energy_density: f64,
-    /// Fraction of a seed cohort that falls to litter each second, with its mineral:
-    /// paid decay, not deletion. **Placeholder**.
+    /// Per-seed death rate in the bank, per second: at each of its site's checks a seed
+    /// survives the time since the last one with probability `exp(−rate · t)`, and a dead
+    /// seed is litter with its mineral — whole seeds, paid decay, never deletion (package S).
+    /// Every preset sets it to `1 / seed_max_age_s`, an e-folding time equal to the
+    /// lifetime: about a third of a cohort that never finds a gap is still there to go to
+    /// litter at its age limit, and attrition has taken the rest along the way.
+    /// **Placeholder**.
     pub seed_attrition_per_s: f64,
-    /// A bin whose start is older than this many seconds falls to litter whole, with its
-    /// mineral and its energy. **Placeholder**.
+    /// **Dormancy.** A bin whose start is older than this many seconds falls to litter
+    /// whole, with its mineral and its energy, at its site's next check. Hours, not
+    /// minutes (package S): the base is 8 h, a species' own preset says why it differs.
+    /// **Placeholder**.
     pub seed_max_age_s: f64,
     /// How many arrival bins one species' bank is divided into: the bin width is
     /// `seed_max_age_s / seed_cohorts_max`, at least one tick, and a landing joins the bin
@@ -785,8 +813,19 @@ pub struct SpeciesConfig {
     /// glowcap colonises is as long as the crown was wide. `false` — the wood falls on
     /// the site — for every species but the vaulttree.
     pub falls: bool,
-    /// How many support sites away, in `x` and `z`, a propagule may land.
+    /// How many support sites away, in `x` and `z`, a propagule may land: the radius of a
+    /// [`Dispersal::Drop`], the kernel scale of a [`Dispersal::Wind`], and the wide radius a
+    /// [`Dispersal::Spores`] or [`Dispersal::Water`] seed searches. In reference 0.25 m
+    /// voxels, scaled by [`FloraConfig::for_voxel_size`].
     pub hop: u32,
+    /// How this species' seeds travel ([`Dispersal`]). [`Dispersal::Drop`] at the base.
+    pub dispersal: Dispersal,
+    /// The share of a donor's whole packages that leave as a **runner or rhizome** — a
+    /// daughter stand on a free neighbouring face within a voxel of the parent's height
+    /// that passes the gates, built from the package, nothing banked — instead of as a
+    /// seed. Drawn per package from the donor's keyed stream; a runner with nowhere to go
+    /// leaves as a seed. `0..=1`, zero at the base. **Placeholder**.
+    pub clonal_share: f64,
     /// Crown geometry from wood, shared by the shade model and the presenter so what
     /// shades is exactly what is drawn: crown top above the support face and crown
     /// half-width, both **in metres**, `[min, max]` (package L,
@@ -1005,8 +1044,10 @@ impl SpeciesConfig {
             propagule_rate: 0.0002,
             propagule_split: [0.4, 0.4, 0.2],
             energy_density: 2.0,
-            seed_attrition_per_s: 0.001,
-            seed_max_age_s: 600.0,
+            // Eight hours, e-folding at the lifetime (the field docs): the middle of the
+            // brief's 6–12 h for seeds; each preset below says why it moves.
+            seed_attrition_per_s: 1.0 / 28_800.0,
+            seed_max_age_s: 28_800.0,
             seed_cohorts_max: 4,
             n_tissue: 0.02,
             reserve_share: 0.2,
@@ -1030,6 +1071,8 @@ impl SpeciesConfig {
             water_depth_min_m: 0.0,
             falls: false,
             hop: 1,
+            dispersal: Dispersal::Drop,
+            clonal_share: 0.0,
             crown_height_m: [0.25, 0.75],
             crown_radius_m: [0.125, 0.375],
             // The v1 base carries no anatomy of its own: every preset states one.
@@ -1067,6 +1110,9 @@ impl SpeciesConfig {
             // water, so the species could not exist anywhere it rained. A wrong
             // placeholder, not a tuned one.
             drown_depth_m: 0.05,
+            // Seeds (package S): dropped within `hop` 2 — animal vectors are a later
+            // package — into the base's 8 h bank. A meadow forb's seed that waits a
+            // working day for a gap, not a pioneer's.
             hop: 2,
             crown_height_m: [0.375, 1.0],
             crown_radius_m: [0.125, 0.3125],
@@ -1135,7 +1181,17 @@ impl SpeciesConfig {
             relax_rate_per_s: 0.05,
             establish_saturated_max: 1.0,
             drown_depth_m: 0.5,
-            hop: 1,
+            // Seeds (package S): **spores to wet ground** within a wide `hop` 6 (1.5 m at
+            // the reference voxel) — the pore gate is what "wet" means here — and
+            // **rhizomes** for half the packages, which is how a frond fills the hollow it
+            // is already in while the spores find the next one. Spores are short-lived:
+            // 4 h, the top of the brief's 2–4 h, because a hollow can take a shower or two
+            // to come back.
+            hop: 6,
+            dispersal: Dispersal::Spores,
+            clonal_share: 0.5,
+            seed_max_age_s: 14_400.0,
+            seed_attrition_per_s: 1.0 / 14_400.0,
             crown_height_m: [1.0, 2.0],
             crown_radius_m: [0.375, 0.75],
             // Anatomy document §3: three tiers whose lowest is the widest, so the
@@ -1244,7 +1300,15 @@ impl SpeciesConfig {
             relax_rate_per_s: 0.05,
             establish_saturated_max: 0.3,
             drown_depth_m: 0.03,
+            // Seeds (package S): dropped within the pioneer's wide `hop` 3, and **runners**
+            // for half the packages (the brief's ~0.5), so a turf closes its own patch
+            // while its seed goes looking. The longest bank, 12 h, the top of the brief's
+            // 6–12 h: a pioneer's seed bank is the persistent one, waiting under whatever
+            // replaced it for the next bare ground.
             hop: 3,
+            clonal_share: 0.5,
+            seed_max_age_s: 43_200.0,
+            seed_attrition_per_s: 1.0 / 43_200.0,
             wood_max: 0.06,
             alive_min: 0.006,
             donor_min: 0.03,
@@ -1320,7 +1384,14 @@ impl SpeciesConfig {
             relax_rate_per_s: 0.02,
             establish_saturated_max: 0.4,
             drown_depth_m: 0.02,
+            // Seeds (package S): **wind**, at a kernel scale of `hop` 1 — the cushion is
+            // tiny and its seed is dust — so most stay within a metre and a few percent
+            // cross the rock to the next crack. 12 h, the top of the range: a seed on
+            // bare rock waits for a crack to wet.
             hop: 1,
+            dispersal: Dispersal::Wind,
+            seed_max_age_s: 43_200.0,
+            seed_attrition_per_s: 1.0 / 43_200.0,
             wood_max: 0.1,
             alive_min: 0.01,
             donor_min: 0.05,
@@ -1395,7 +1466,14 @@ impl SpeciesConfig {
             relax_rate_per_s: 0.05,
             establish_saturated_max: 0.6,
             drown_depth_m: 0.1,
-            hop: 1,
+            // Seeds (package S): **spores to damp ground** within a wide `hop` 6, and
+            // **runners** for half the packages — a pad spreads across the floor it is on
+            // and spores reach the next damp patch. 3 h, the middle of the spores' 2–4 h.
+            hop: 6,
+            dispersal: Dispersal::Spores,
+            clonal_share: 0.5,
+            seed_max_age_s: 10_800.0,
+            seed_attrition_per_s: 1.0 / 10_800.0,
             wood_max: 0.2,
             alive_min: 0.015,
             donor_min: 0.1,
@@ -1512,7 +1590,14 @@ impl SpeciesConfig {
             relax_rate_per_s: 0.05,
             drown_depth_m: 0.05,
             transpiration_m3_per_s: 0.0,
-            hop: 1,
+            // Spores (package S): land only on a face whose box holds the substrate (and
+            // the damp) it needs, within a wide `hop` 6 — the next log over, not only its
+            // own. The shortest bank, 2 h, the bottom of the spores' range: a grove's
+            // spore rain is continuous, and a fungal spore on bare ground does not last.
+            hop: 6,
+            dispersal: Dispersal::Spores,
+            seed_max_age_s: 7_200.0,
+            seed_attrition_per_s: 1.0 / 7_200.0,
             wood_max: 0.1,
             alive_min: 0.01,
             donor_min: 0.05,
@@ -1572,7 +1657,14 @@ impl SpeciesConfig {
             relax_rate_per_s: 0.02,
             drown_depth_m: 0.1,
             falls: true,
+            // Seeds (package S): a **winged seed on the wind** at a kernel scale of `hop` 4
+            // (1 m): most land under or beside the crown and a few percent 10 m out. 6 h,
+            // the bottom of the range: a large tree seed does not keep, and the tree's
+            // bet is a seedling in the next gap, not a long bank.
             hop: 4,
+            dispersal: Dispersal::Wind,
+            seed_max_age_s: 21_600.0,
+            seed_attrition_per_s: 1.0 / 21_600.0,
             wood_max: 5.0,
             alive_min: 0.02,
             donor_min: 2.5,
@@ -1653,6 +1745,9 @@ impl SpeciesConfig {
             stress_rate_per_s: 0.1,
             relax_rate_per_s: 0.05,
             drown_depth_m: 0.1,
+            // Seeds (package S): the fruit **drops beneath** the crown, `hop` 2 (the
+            // seedporter that carries it further is a later package), into the base's 8 h
+            // bank.
             hop: 2,
             wood_max: 1.0,
             alive_min: 0.02,
@@ -1715,7 +1810,15 @@ impl SpeciesConfig {
             drown_depth_m: 0.5,
             water_depth_min_m: 0.1,
             maintenance: 0.0004,
-            hop: 1,
+            // Seeds (package S): carried by **water** to a standing-water margin within a
+            // wide `hop` 6, downhill first, and **rhizomes** for 0.7 of the packages — a
+            // reed bed is mostly one clone. 10 h: a wetland seed waits for the water level
+            // to suit it.
+            hop: 6,
+            dispersal: Dispersal::Water,
+            clonal_share: 0.7,
+            seed_max_age_s: 36_000.0,
+            seed_attrition_per_s: 1.0 / 36_000.0,
             wood_max: 0.3,
             alive_min: 0.02,
             donor_min: 0.15,
@@ -1933,6 +2036,13 @@ impl SpeciesConfig {
                 return fail(&format!("{label} is {v}, not finite and nonnegative"));
             }
         }
+        // A share of the packages, so a probability.
+        if !(0.0..=1.0).contains(&self.clonal_share) {
+            return fail(&format!(
+                "clonal_share is {}, not a share in 0..=1",
+                self.clonal_share
+            ));
+        }
         // The water and aeration thresholds and the crown geometry: fractions and lengths,
         // read as bounds rather than multiplied by a stock, so only finiteness is checked.
         let bounds: [(&str, f64); 7] = [
@@ -2068,6 +2178,14 @@ pub struct FloraConfig {
     /// eagerly on every support face at creation. [`Provision::Lazy`] by default, which is
     /// the only rule that existed before the replacement study and changes nothing.
     pub provision: Provision,
+    /// **How often a banked site is tested**, seconds (package S): germination, attrition
+    /// and age are read at each site's own check, staggered across this period, and at the
+    /// end of every shower — never in between. **30 s**, the fast end of the brief's
+    /// "~30–60 s": a gap waits at most that long for its bank, which is nothing against
+    /// hours of dormancy, and the bank costs `banked sites / 600` site visits a tick.
+    /// Rounded to whole ticks, at least one; a fixture that wants the old every-tick bank
+    /// sets it to `DT` ([`FloraConfig::drop_seeds_checked_each_tick`]).
+    pub seed_check_s: f64,
     /// The world's cell size in metres, recorded so that geometry authored in **metres** can
     /// be applied to a grid stored in **voxels**: every crown is in metres since package
     /// L, and the voxel readings ([`SpeciesConfig::crown_height`]) divide by this. Set by
@@ -2094,6 +2212,7 @@ impl Default for FloraConfig {
             litter_energy_cap: 2.0,
             initial_mineral: 1.0,
             provision: Provision::Lazy,
+            seed_check_s: 30.0,
             voxel_m: 0.25,
         }
     }
@@ -2155,6 +2274,31 @@ impl FloraConfig {
                     0.0,
                 )]);
         }
+        self
+    }
+
+    /// Every species' seeds **dropped** within its round-3b `hop` — no wind, spores, water
+    /// or runners — and every banked site tested **every tick**: the seed bank as it was
+    /// before package S, apart from whole seeds and the lifetimes.
+    ///
+    /// For a **fixture whose subject is not dispersal or the bank's clock** — an
+    /// establishment gate, a birth's stoichiometry, the lottery's weights — written when a
+    /// landing on a passing site germinated on the next tick and a spore landed where a
+    /// seed did. Not a shipped configuration; nothing in the tick uses it.
+    pub fn drop_seeds_checked_each_tick(mut self) -> FloraConfig {
+        let scale = (0.25 / self.voxel_m).max(1.0);
+        for species in Species::ALL {
+            let sc = self.species_mut(species);
+            sc.dispersal = Dispersal::Drop;
+            sc.clonal_share = 0.0;
+            if matches!(
+                species,
+                Species::Umbrellafrond | Species::Velvetpad | Species::Glowcap | Species::Siphonreed
+            ) {
+                sc.hop = scaled_voxel_distance(1, scale);
+            }
+        }
+        self.seed_check_s = DT;
         self
     }
 
@@ -2224,6 +2368,7 @@ impl FloraConfig {
             ("carrion_decomposition", self.carrion_decomposition),
             ("litter_energy_cap", self.litter_energy_cap),
             ("initial_mineral", self.initial_mineral),
+            ("seed_check_s", self.seed_check_s),
         ] {
             if !v.is_finite() || v < 0.0 {
                 return Err(format!("flora: {label} is {v}, not finite and nonnegative"));
@@ -2372,7 +2517,8 @@ pub struct FloraLedger {
     /// - `propagule_funded`: what the reserves actually paid into parcels, above each
     ///   donor's own reserve floor. `funded / requested` is how much of the advertised
     ///   reproductive effort the world can afford.
-    /// - `propagule_landed`: what left donors as whole packages and arrived in seed banks.
+    /// - `propagule_landed`: what left donors as whole packages — into a seed bank, a
+    ///   runner daughter, or (a spore or water seed that found no ground) the litter.
     ///
     /// Astra's R4.4 asked for exactly this split: "distinguish requested, funded and
     /// landed reproductive flux in the diagnosis", because raising a rate that is already
@@ -2395,6 +2541,21 @@ pub struct FloraLedger {
     /// leaves the system out of that uptake is the part the fungus does not keep, and that
     /// is `respired_out` like every other respiration.
     pub substrate_uptake: [f64; Species::COUNT],
+    /// **Seed counts per species** (package S), indexed by [`Species::index`], cumulative:
+    /// diagnostics like the `propagule_*` arrays, in no `expected_*` total.
+    ///
+    /// - `seeds_landed`: seeds that arrived in a bank.
+    /// - `seeds_germinated`: seeds that became stands — recruits from seed.
+    /// - `seeds_died`: seeds attrition killed or age sent to litter.
+    /// - `seeds_lost`: spore and water seeds that found no ground and fell as litter.
+    /// - `clonal_births`: runner and rhizome daughters — recruits without a seed.
+    ///
+    /// `establishments` is `seeds_germinated + clonal_births` summed over species.
+    pub seeds_landed: [u64; Species::COUNT],
+    pub seeds_germinated: [u64; Species::COUNT],
+    pub seeds_died: [u64; Species::COUNT],
+    pub seeds_lost: [u64; Species::COUNT],
+    pub clonal_births: [u64; Species::COUNT],
 }
 
 impl FloraLedger {
@@ -3049,6 +3210,15 @@ pub struct Flora {
     /// This tick's [`DeliveryReceipt`]s, in the order `propagate` sent them. Cleared at the
     /// start of every tick: **observation, not state** (see [`DeliveryReceipt`]).
     deliveries: Vec<DeliveryReceipt>,
+    /// The seed bank's **check wheel** (`seeds.rs`): the banked sites, one bucket per phase
+    /// of the check period, so a tick visits only the sites due on it. Derived from
+    /// `ground` and rebuilt from it whenever it is missing, so it is not saved.
+    #[serde(skip)]
+    pub(crate) bank_wheel: Vec<Vec<Site>>,
+    /// Whether it was raining at the last seed-bank phase: the tick it stops is the
+    /// shower's end, when every bank is tested at once.
+    #[serde(default)]
+    pub(crate) was_raining: bool,
 }
 
 impl Flora {
@@ -3136,6 +3306,8 @@ impl Flora {
             sky: Vec::new(),
             sky_version: None,
             deliveries: Vec::new(),
+            bank_wheel: Vec::new(),
+            was_raining: false,
         }
     }
 

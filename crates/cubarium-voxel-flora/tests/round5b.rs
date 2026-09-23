@@ -566,7 +566,7 @@ fn germination_needs_a_log_and_never_needs_light() {
 fn one_spore_package_births_a_glowcap_at_exactly_alive_min_and_only_over_the_substrate() {
     let birth = |substrate_min: f64| -> (Flora, World, f64) {
         let mut world = pillars(4, &[1, 2], 0.5);
-        let mut config = config();
+        let mut config = config().drop_seeds_checked_each_tick();
         // A fast donor, so the 0.025 package is saved in tens of ticks rather than 60 s.
         // It changes the saving rate only: the reserve, its floor and every other stock
         // are the preset's.

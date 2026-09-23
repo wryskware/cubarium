@@ -535,7 +535,7 @@ fn frozen(sc: &mut cubarium_voxel_flora::SpeciesConfig) {
 /// read against what landed — nine packages on two sites would otherwise recruit.
 #[test]
 fn two_species_banks_share_one_site_and_each_donor_pays_only_its_own() {
-    let mut config = FloraConfig::default();
+    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
     config.bloomcrown.propagule_rate = 0.36;
     config.bloomcrown.hop = 1;
     config.bloomcrown.reserve_cap = 4.0;

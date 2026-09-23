@@ -1008,7 +1008,7 @@ fn a_donor_saves_a_parcel_and_lands_one_whole_package_on_one_site() {
 /// neighbours, so the test finds the bank rather than naming the column.
 #[test]
 fn a_cohort_on_a_site_that_fails_the_predicate_decays_to_litter_and_never_stands() {
-    let mut config = FloraConfig::default();
+    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
     config.bloomcrown.establish_pore_min = 0.9;
     config.bloomcrown.seed_max_age_s = 1.0;
     config.bloomcrown.propagule_rate = 0.18;
@@ -1041,8 +1041,9 @@ fn a_cohort_on_a_site_that_fails_the_predicate_decays_to_litter_and_never_stands
     let landed = flora.view().ground_at(banked).unwrap().seeds[0];
     assert!(landed.organic > 0.0, "nothing landed: {landed:?}");
 
-    // Ten ticks of attrition: the cohort shrinks and the site's litter grows by what it
-    // lost, mineral included. Paid decay, not deletion.
+    // Ten ticks in the bank. Attrition kills **whole seeds** (package S): at bloomcrown's
+    // 8 h e-folding the one seed survives ten ticks whole, its bin ageing, and nothing is
+    // in the litter yet.
     run(&mut flora, &mut world, 10);
     let g = flora.view().ground_at(banked).unwrap().clone();
     let c = g.seeds[0];
@@ -1053,33 +1054,9 @@ fn a_cohort_on_a_site_that_fails_the_predicate_decays_to_litter_and_never_stands
         "not the bin the landing tick belonged to: {c:?}"
     );
     assert_eq!(c.age_ticks(flora.tick()), 12, "the bin did not age");
-    // Attrition from its **first banked tick**, not from the tick it landed on: the
-    // package arrives in step 9, after that tick's decay has been charged, so ten ticks in
-    // the bank is ten factors of `1 − seed_attrition_per_s · dt` and no more. K7 moved
-    // germination in front of the decay; it did not move the decay itself.
-    let attrition = flora
-        .config()
-        .species(Species::Bloomcrown)
-        .seed_attrition_per_s;
-    let want = landed.organic * (1.0 - attrition * cubarium_voxel::DT).powi(10);
-    assert!(
-        (c.organic - want).abs() <= 1e-15,
-        "{} banked after ten ticks of attrition, not {want}",
-        c.organic
-    );
-    assert!(c.organic < landed.organic, "it did not decay: {c:?}");
-    assert!(
-        (g.litter - (landed.organic - c.organic)).abs() < 1e-15,
-        "the litter is {} for {} lost",
-        g.litter,
-        landed.organic - c.organic
-    );
-    let lost_mineral = landed.mineral - c.mineral;
-    assert!(
-        (g.litter_mineral - lost_mineral).abs() < 1e-9 * lost_mineral,
-        "the litter's mineral is {} for {lost_mineral} lost",
-        g.litter_mineral
-    );
+    assert_eq!(c.organic, landed.organic, "a whole seed does not shrink: {c:?}");
+    assert_eq!(c.mineral, landed.mineral);
+    assert_eq!(g.litter, 0.0, "nothing has died yet");
     assert!(
         flora.view().stands.is_empty(),
         "something germinated on a failing site"
@@ -1131,7 +1108,7 @@ fn a_cohort_on_a_site_that_fails_the_predicate_decays_to_litter_and_never_stands
 /// reserve is exactly what `Seed` gave it minus what reproduction cost.
 #[test]
 fn a_bank_over_the_threshold_germinates_into_a_stand_of_its_own_pooled_cohorts() {
-    let mut config = FloraConfig::default();
+    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
     config.bloomcrown.propagule_rate = 3.0;
     config.bloomcrown.hop = 1;
     config.bloomcrown.reserve_cap = 4.0;
@@ -1258,7 +1235,7 @@ fn a_bank_over_the_threshold_germinates_into_a_stand_of_its_own_pooled_cohorts()
 /// standing on it.
 #[test]
 fn a_bank_waits_under_a_living_stand_and_germinates_when_it_dies() {
-    let mut config = FloraConfig::default();
+    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
     config.bloomcrown.propagule_rate = 3.0;
     config.bloomcrown.hop = 1;
     config.umbrellafrond.assimilation = 0.0;

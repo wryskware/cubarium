@@ -262,7 +262,7 @@ fn assert_residuals(flora: &Flora, when: &str) {
 /// A config in which one species funds a whole package in a single tick: see the module
 /// doc for why, and `round3.rs` for the same two rates.
 fn fast_donor(species: Species) -> FloraConfig {
-    let mut config = FloraConfig::default();
+    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
     {
         let sc = species_mut(&mut config, species);
         sc.propagule_rate = 3.0;

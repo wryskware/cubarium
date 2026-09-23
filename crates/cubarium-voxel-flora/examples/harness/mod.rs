@@ -1019,10 +1019,12 @@ mod cap_tests {
         }
         // Accelerated, and stated as such: a hundredfold assimilation, a rich pool, a fast
         // parcel and fast wood. Nothing here is a preset proposal — the point is to walk all
-        // four stages inside a short test.
+        // four stages inside a short test. The timeline's germination stage is the next
+        // tick, so the bank is checked every tick and the seeds are dropped (package S's
+        // fixture config).
         let mut config = FloraConfig {
             initial_mineral: 500.0,
-            ..FloraConfig::default()
+            ..FloraConfig::default().drop_seeds_checked_each_tick()
         };
         {
             let sc = config.species_mut(Species::Bloomcrown);
