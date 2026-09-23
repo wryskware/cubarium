@@ -1372,3 +1372,74 @@ causes or foods; those are the autopsy's rows above.
   one browser **drowned** in that minute; its structure at death, 0.0208, is
   four times `body_min`, so it cannot have starved. Placement put it on food it
   could eat; the policy walked it off the food and into the lake.
+
+## Retrain, 2026-09-23
+
+Package 5 part C (`design/handoffs/voxel-retrain-c-2026-09-22.md`) on branch
+`retrain`, with the coordinator's amendments: landscape bodies start on faces drawn
+from the seeder's judged components (not on starter tiles); shredder landscapes run
+24,000 ticks with replayed litter production; the shredder's teacher searches by a
+correlated walk; the browser's teacher keeps its zig-zag. Cone-speed (DDA) traversal
+merged before any recording. **Not shipped: the gate fails on drownings.**
+
+### Held-out landscapes (201–208 × three presets, drained, drawn starts)
+
+| | stationary | teacher (heuristic) | clone | ES, chosen checkpoint |
+| --- | --- | --- | --- | --- |
+| browser (4,800 ticks) | 0.278 | 0.855 | 0.802 | **1.165** (update 512) |
+| shredder (24,000 ticks, production replayed) | 0.177 | 0.415 | 0.461 | **1.801** (update 288) |
+
+Held-out score at updates 0 / 128 / 256 / 384 / 512: browser 0.802 / 0.974 / 1.024 /
+1.127 / 1.165; shredder 0.461 / 1.608 / 1.675 / 1.685 / 1.761 (best 1.801 at 288).
+Neither run tripped the C5 stop. Runs: 32 antithetic pairs, 512 updates, 16 Stage-B
+arena layouts (8 at 0.25 m, 8 at 0.125 m) plus 16 of 96 training landscapes drawn per
+generation; browser 4.5 h at 7 workers, shredder 12.3 h at 16.
+
+### `voxel_founder_autopsy 60`, seed bases 1–8
+
+`main` is main at the merge base (79faf64, old centres); `heur` is this branch with
+the observation-only heuristics (the fallback); `cand` is this branch with the two
+chosen centres (`policy=`). `penned` is a proxy for blocked-motor share: body-minutes
+holding forward ≥ 0.5 and covering under 5 cm, over body-minutes holding forward.
+
+| alive at 60, median [min–max] | small | default | wide |
+| --- | --- | --- | --- |
+| shredders, main | 0 [0–26] | 20.5 [0–52] | 38.5 [4–83] |
+| shredders, heur | 0 [0–0] | 2.5 [0–24] | 10 [0–28] |
+| shredders, **cand** | 0 [0–1] | **42.5** [12–61] | **101** [8–242] |
+| browsers, main | 0 [0–0] | 2 [0–4] | 7 [1–13] |
+| browsers, heur | 2 [1–3] | 4.5 [1–8] | 12 [4–20] |
+| browsers, **cand** | 0 [0–0] | **3.5** [1–9] | **22** [3–28] |
+
+| totals over eight worlds | small | default | wide |
+| --- | --- | --- | --- |
+| drowned shr/brw: main · heur · cand | 4/0 · 0/0 · 4/0 | 21/19 · 6/12 · **64/51** | 2/10 · 2/7 · **21/17** |
+| drowned per 10 body-hours shr/brw: main · cand | 0.69/0 · 0.56/0 | 1.55/2.63 · **2.78/4.40** | 0.11/0.84 · **0.49**/0.84 |
+| starved shr/brw: main · cand | 104/101 · 198/108 | 196/120 · 373/122 | 239/157 · 618/155 |
+| born (both lineages): main · cand | 133 · 184 | 436 · 810 | 660 · 1,702 |
+| first browser death, median min: main · heur · cand | 16 · 22 · 22 | 13 · 24.5 · 19 | 14.5 · 23.5 · 23 |
+| bites litter/cap/carrion/foliage, median: main | 9,095/3,132/221/14,956 | 83,496/737/474/31,240 | 127,276/4,852/338/56,136 |
+| same: cand | 8,794/4,968/465/35,648 | 108,968/10,922/2,029/93,095 | 221,956/20,854/2,445/202,982 |
+| walked m shr/brw, median of body means: main · cand | 188/154 · 180/113 | 139/219 · 167/126 | 140/327 · 165/212 |
+| penned share: main · heur · cand | .172 · .015 · .055 | .134 · .008 · .058 | .083 · .013 · .021 |
+
+`main` reproduces the "Startup acceptance" table above exactly.
+
+### `voxel_census 6 preset=default`, bases 1–3 (shredders; browsers at 6 h)
+
+| | hour 0 → 6, shredders | browsers at 6 h |
+| --- | --- | --- |
+| main, seed 1 / 2 / 3 | 8 23 19 11 10 6 6 / 8 0 … 0 / 8 25 67 161 449 713 802 | 0 / 0 / 0 |
+| cand, seed 1 / 2 / 3 | 8 42 61 83 105 469 479 / 8 13 2 1 0 0 0 / 8 12 27 32 179 355 500 | 3 / 0 / 0 |
+
+### Verdict
+
+Against main, both medians clear their bars: browsers above 0 on `default` and `wide`
+and not lower anywhere, shredders not lower anywhere. **Drownings are up** on
+`default` (21/19 → 64/51) and on `wide` (2/10 → 21/17), and they are up **per
+body-hour** too, not just because there are more bodies (default 1.55 → 2.78
+shredders, 2.63 → 4.40 browsers per 10 body-hours). By the gate's rule this does not
+ship. The drownings are spread over seven of the eight `default` worlds, where main's
+were mostly one world (seed 3, 31 of 40). 85 of the 115 on `default` were bodies born
+during the run. Training froze the water (D6): no centre ever saw water rise, and
+none was scored on drowning. The live world's showers raise it.
