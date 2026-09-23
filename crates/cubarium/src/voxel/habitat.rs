@@ -64,12 +64,21 @@ const LOG_ORGANIC: f64 = 0.4;
 /// gets more geography's worth of plants rather than the same number spread thinner
 /// (plan §5: "count founders by usable physical area and intended starting coverage,
 /// with small-world caps, rather than fixed totals").
-const PRODUCERS: [(Species, f64, usize, usize); 5] = [
+///
+/// Package N's three are placed wherever their own gates pass, on the same terms: the
+/// vaulttree **first**, as a few single canopy anchors, so the crowns it places shade the
+/// sites the rest are then chosen on; the siphonreed in clumps on the banks its
+/// standing-water gate finds; the lanternberry in small groups. Their rates and caps are
+/// placeholders (`design/backlog.md` §1).
+const PRODUCERS: [(Species, f64, usize, usize); 8] = [
+    (Species::Vaulttree, 0.03, 1, 12),
     (Species::Bloomcrown, 0.25, 3, 64),
     (Species::Umbrellafrond, 0.15, 3, 40),
+    (Species::Siphonreed, 0.3, 6, 64),
     (Species::Springturf, 0.6, 6, 160),
     (Species::Velvetpad, 0.4, 6, 120),
     (Species::Stonecushion, 0.2, 3, 64),
+    (Species::Lanternberry, 0.1, 3, 40),
 ];
 
 /// The decomposer grove, on the same terms.
@@ -436,7 +445,7 @@ pub fn seed_pre_rolled(
     let voxel_m = world.config().voxel_m;
     let mut taken: Vec<Site> = Vec::new();
 
-    // The five producers. Suitability is the **flora layer's own** establishment gates
+    // The producers. Suitability is the **flora layer's own** establishment gates
     // plus its adult-upkeep check — a seed gate alone does not establish that a founder
     // can keep itself standing — and the terrain-sector proxy only decides which species
     // *prefers* a site it is already allowed to live on.
