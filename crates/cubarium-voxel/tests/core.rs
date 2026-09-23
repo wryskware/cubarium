@@ -1847,7 +1847,7 @@ fn the_water_table_saturates_the_basin_and_leaves_the_ridge_to_drain() {
     for x in [0, 1, 6, 7] {
         let pore = v.pore_at(x, 6, 0);
         assert!(
-            pore <= 0.25 + 1e-9,
+            pore <= Material::Soil.field_capacity() + 1e-9,
             "the ridge cap at x {x} held {pore}, above field capacity"
         );
     }
@@ -1879,7 +1879,8 @@ fn a_table_at_zero_changes_nothing() {
     let v = w.view();
     for x in 0..8i64 {
         let top = if x < 2 { 1 } else { x as u32 };
-        assert_eq!(v.pore_at(x, top, 0), 0.25, "x {x} moved");
+        let (pore, fc) = (v.pore_at(x, top, 0), Material::Soil.field_capacity());
+        assert!((pore - fc).abs() < 1e-12, "x {x} moved: {pore} against {fc}");
         // The pore fraction is still exact; the free crumb above it is 8e-18 rather
         // than a hard zero since package 1c, because the tick now delivers the rain in
         // four times as many, four times smaller infiltration steps and the last one

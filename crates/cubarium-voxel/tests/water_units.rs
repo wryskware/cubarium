@@ -372,3 +372,43 @@ fn standing_water_soaks_in_at_the_same_depth_on_both_grids() {
         "0.125 m residual {fine_residual}"
     );
 }
+
+// ------------------------------------------------------------ 3. retention
+
+/// Soil drained from saturation keeps exactly its field capacity: a metre of
+/// saturated soil over the foundation, under a table that cannot rise, drains
+/// until every voxel holds `field_capacity · pore_capacity · voxel volume` and the
+/// rest has joined the aquifer. On both grids, since the retained share is a
+/// property of the soil and not of the cell.
+#[test]
+fn saturated_soil_drains_to_its_field_capacity_and_keeps_it() {
+    let soil = Material::Soil;
+    for voxel_m in [0.25, 0.125] {
+        let cells = (1.0 / voxel_m) as u32;
+        let mut w = column(cells + 2, voxel_m, 1e4, 0.0);
+        for y in 1..=cells {
+            wet_soil(&mut w, y, 1.0);
+        }
+        let charged = w.view().stored_m3();
+        // A metre drains `(1 - fc) · pore` metres at `K · dt` a tick: under 300
+        // ticks at any field capacity the brief allows. 800 is well past it.
+        for _ in 0..800 {
+            w.step();
+        }
+        let want = soil.field_capacity() * soil.pore_capacity() * w.config().voxel_volume();
+        for y in 1..=cells {
+            let held = pore_m3(&w, y);
+            assert!(
+                (held - want).abs() <= 1e-9 * want,
+                "{voxel_m} m, y={y}: holds {held} m³, field capacity is {want} m³"
+            );
+        }
+        let drained = charged - f64::from(cells) * want;
+        assert!(
+            (w.view().aquifer_m3 - drained).abs() <= 1e-9,
+            "{voxel_m} m: the aquifer took {} of the {drained} m³ that drained",
+            w.view().aquifer_m3
+        );
+        assert!(residual(&w).abs() < 1e-12, "{voxel_m} m residual {}", residual(&w));
+    }
+}
