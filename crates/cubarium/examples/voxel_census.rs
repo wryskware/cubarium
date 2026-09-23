@@ -269,6 +269,37 @@ impl SeedWindow {
             ms[1],
             ms[2],
         );
+        // Package S's counters: per species, g seeds germinated, c runner/rhizome
+        // daughters, l seeds landed in a bank, d seeds died in it, x spore/water seeds
+        // that found no ground; and the whole seeds banked now.
+        let l = f.ledger;
+        let mut modes = String::new();
+        for s in Plant::ALL {
+            let i = s.index();
+            let (g, c, ld, d, x) = (
+                l.seeds_germinated[i],
+                l.clonal_births[i],
+                l.seeds_landed[i],
+                l.seeds_died[i],
+                l.seeds_lost[i],
+            );
+            if g + c + ld + d + x > 0 {
+                modes.push_str(&format!(" {}:g{g}/c{c}/l{ld}/d{d}/x{x}", s.name()));
+            }
+        }
+        let banked: f64 = f
+            .ground
+            .iter()
+            .flat_map(|g| g.seeds.iter())
+            .map(|c| {
+                let sc = f.config.species(c.species);
+                c.organic / (sc.alive_min / sc.propagule_split[0])
+            })
+            .sum();
+        eprintln!(
+            "seedmodes: h={:.2} banked_seeds={banked:.0}{modes}",
+            tick as f64 / (3600.0 * f64::from(TICK_HZ))
+        );
     }
 }
 
