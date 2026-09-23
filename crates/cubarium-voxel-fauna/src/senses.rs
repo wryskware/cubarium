@@ -63,7 +63,7 @@
 //! [`Fauna::step`](crate::Fauna::step) signature is untouched and has no senses). There is
 //! no per-read energy bill: sensing is computed, not billed.
 
-use std::collections::HashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use cubarium_voxel::VoxelView;
 use cubarium_voxel_flora::{FloraView, Ground, Site, StandLayer};
@@ -116,7 +116,7 @@ struct Connectivity {
     /// Node cells (`Config::index` of the support face's solid voxel), sorted.
     nodes: Vec<usize>,
     /// Node cell -> its same-height orthogonal neighbour cells, sorted.
-    neighbors: HashMap<usize, Vec<usize>>,
+    neighbors: FxHashMap<usize, Vec<usize>>,
 }
 
 impl Connectivity {
@@ -142,7 +142,7 @@ impl Connectivity {
             }
         }
         nodes.sort_unstable();
-        let mut neighbors: HashMap<usize, Vec<usize>> = HashMap::with_capacity(nodes.len());
+        let mut neighbors: FxHashMap<usize, Vec<usize>> = FxHashMap::with_capacity_and_hasher(nodes.len(), Default::default());
         for &cell in &nodes {
             let (x, y, z) = c.coords(cell);
             let mut nb: Vec<usize> = Vec::with_capacity(4);
@@ -199,7 +199,7 @@ impl Connectivity {
 #[derive(Clone, Debug, Default)]
 struct DetritusField {
     /// Cue units per node cell.
-    value: HashMap<usize, f64>,
+    value: FxHashMap<usize, f64>,
     graph: Connectivity,
 }
 
@@ -217,7 +217,7 @@ fn detritus_at(fv: &FloraView<'_>, site: Site) -> f64 {
 impl DetritusField {
     fn ensure_graph(&mut self, view: &VoxelView<'_>) {
         if !self.graph.current(view) {
-            let old_nodes: std::collections::HashSet<usize> =
+            let old_nodes: FxHashSet<usize> =
                 self.graph.nodes.iter().copied().collect();
             self.graph = Connectivity::build(view);
             // Terrain changed: drop values for nodes that no longer exist and keep the
@@ -329,13 +329,13 @@ impl DetritusField {
             };
             prime.push((cell, (old + emit) * decay));
         }
-        let by_cell: HashMap<usize, f64> = prime.iter().copied().collect();
+        let by_cell: FxHashMap<usize, f64> = prime.iter().copied().collect();
 
         // Order 3: convex nearest-neighbour diffusion. A missing/blocked neighbour
         // (a direction with no node) reflects the local value, so the mix is always over
         // four directions.
         let mut max_change = 0.0f64;
-        let mut next: HashMap<usize, f64> = HashMap::with_capacity(work.len());
+        let mut next: FxHashMap<usize, f64> = FxHashMap::with_capacity_and_hasher(work.len(), Default::default());
         for &(cell, p) in &prime {
             let (x, y, z) = c.coords(cell);
             let mut total = 0.0;
@@ -385,7 +385,7 @@ struct ChemTrend {
 #[derive(Clone, Debug, Default)]
 pub struct Senses {
     field: DetritusField,
-    chem_trend: HashMap<u64, ChemTrend>,
+    chem_trend: FxHashMap<u64, ChemTrend>,
     /// The static episode's held cone occupancy ([`Senses::hold_cone`]); `None` builds
     /// one per controller stage.
     cone: Option<Box<HeldCone>>,

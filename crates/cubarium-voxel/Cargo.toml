@@ -19,6 +19,7 @@ parallel = []
 
 [dependencies]
 anyhow = { workspace = true }
+rustc-hash = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 postcard = { version = "1", features = ["use-std"] }
 png = { workspace = true }

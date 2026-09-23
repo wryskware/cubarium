@@ -24,7 +24,7 @@
 //! many layers — which is what [`walkable_components`] computes, from the one shared
 //! rule in `cubarium_voxel::walk`, for this crate, the seeder and the observer alike.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::ops::RangeInclusive;
 
 use cubarium_voxel::VoxelView;
@@ -327,11 +327,11 @@ pub struct RouteMap {
     pub faces: Vec<Site>,
     /// The walkable component of each face, in the order of `faces`.
     pub components: Vec<usize>,
-    index: HashMap<Site, usize>,
+    index: FxHashMap<Site, usize>,
     /// The union of mouth columns over every heading, per face.
     columns: Vec<Vec<(i64, u32)>>,
     /// From an `(x, z)` column back to every face whose mouth can cover it.
-    by_column: HashMap<(u32, u32), Vec<usize>>,
+    by_column: FxHashMap<(u32, u32), Vec<usize>>,
     body: Body,
     voxel_m: f64,
 }
@@ -352,9 +352,9 @@ impl RouteMap {
         let c = view.config;
         let faces = standable_faces(view, &body, wade_depth_m);
         let components = walkable_components(&faces, c.width, climb);
-        let index: HashMap<Site, usize> = faces.iter().enumerate().map(|(i, f)| (*f, i)).collect();
+        let index: FxHashMap<Site, usize> = faces.iter().enumerate().map(|(i, f)| (*f, i)).collect();
         let mut columns: Vec<Vec<(i64, u32)>> = Vec::with_capacity(faces.len());
-        let mut by_column: HashMap<(u32, u32), Vec<usize>> = HashMap::new();
+        let mut by_column: FxHashMap<(u32, u32), Vec<usize>> = FxHashMap::default();
         for (i, face) in faces.iter().enumerate() {
             let cols = mouth_columns_from_face(view, *face, &body);
             for &(cx, cz) in &cols {

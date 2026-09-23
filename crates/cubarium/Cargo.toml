@@ -32,6 +32,7 @@ cubarium-voxel-fauna = { workspace = true }
 cubarium-voxel-sim = { workspace = true, features = ["profile"] }
 anyhow = { workspace = true }
 clap = { workspace = true }
+rustc-hash = { workspace = true }
 minifb = { workspace = true }
 png = { workspace = true }
 toml = "0.8"

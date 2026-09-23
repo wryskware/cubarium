@@ -46,8 +46,7 @@ pub fn climb_voxels(climb_m: f64, voxel_m: f64) -> u32 {
 /// set: headroom, wade depth and whatever else makes a face standable are the caller's,
 /// because they are the caller's body's.
 pub fn components(faces: &[(u32, u32, u32)], width: u32, climb: u32) -> Vec<usize> {
-    use std::collections::HashMap;
-    let index: HashMap<(u32, u32, u32), usize> =
+    let index: rustc_hash::FxHashMap<(u32, u32, u32), usize> =
         faces.iter().enumerate().map(|(i, &f)| (f, i)).collect();
     let mut union = Union::new(faces.len());
     let climb = i64::from(climb);

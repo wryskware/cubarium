@@ -38,6 +38,9 @@ cubarium-voxel-sim = { path = "crates/cubarium-voxel-sim" }
 bevy_ecs = { version = "0.19", default-features = false, features = ["std"] }
 bevy_tasks = { version = "0.19", default-features = false, features = ["multi_threaded"] }
 anyhow = "1"
+# FxHash on the sim path (cone-speed item 5): deterministic, unseeded, fast for the
+# integer and small-tuple keys the simulation uses.
+rustc-hash = "2"
 clap = { version = "4", features = ["derive"] }
 minifb = "0.28"
 png = "0.18"

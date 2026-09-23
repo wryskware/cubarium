@@ -388,7 +388,7 @@ pub struct ArtPresenter {
     tall_dead_prev: Vec<TallGrowth>,
     /// The state each live body is in and when it last changed, for the cross-clip fade.
     /// Bodies the view no longer carries are dropped in `observe`.
-    bodies: std::collections::HashMap<OrganismId, BodyMemory>,
+    bodies: rustc_hash::FxHashMap<OrganismId, BodyMemory>,
     /// The measured bend budget of every plant and every tall family in the pack, by asset
     /// name, in pack order: plants first, then tall families. Measured once here
     /// ([`plant_bend_budget`], [`tall_bend_budget`]) and never per frame, so a pose that is
@@ -497,7 +497,7 @@ impl ArtPresenter {
             growth_prev: vec![Growth::snapped(None, false); cells_n],
             dead: vec![Growth::snapped(None, false); cells_n],
             dead_prev: vec![Growth::snapped(None, false); cells_n],
-            bodies: std::collections::HashMap::new(),
+            bodies: rustc_hash::FxHashMap::default(),
             budgets,
             last_tick: None,
             lanternjaw: Lanternjaw::new(),
@@ -677,7 +677,7 @@ impl ArtPresenter {
             self.hunters.clear();
             self.outgoing_prey.clear();
         }
-        let live: std::collections::HashSet<OrganismId> =
+        let live: rustc_hash::FxHashSet<OrganismId> =
             view.organisms.iter().map(|o| o.id).collect();
         let mut listed = Vec::with_capacity(hunters.len());
         for h in hunters {
@@ -1032,7 +1032,7 @@ impl ArtPresenter {
             }
         }
         if self.bodies.len() > view.organisms.len() {
-            let live: std::collections::HashSet<OrganismId> =
+            let live: rustc_hash::FxHashSet<OrganismId> =
                 view.organisms.iter().map(|o| o.id).collect();
             self.bodies.retain(|id, _| live.contains(id));
         }

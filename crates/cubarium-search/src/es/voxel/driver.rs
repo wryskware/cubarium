@@ -48,7 +48,7 @@
 //! `Δorganic + maintenance + motor + corpse`; digestive respiration is deliberately
 //! excluded, because it is the share of a bite that never became animal tissue.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
@@ -712,7 +712,7 @@ struct Tracked {
     motor: f64,
     walked: f64,
     blocked_motor: f64,
-    visited: HashSet<(i64, u32)>,
+    visited: FxHashSet<(i64, u32)>,
     near_ticks: u64,
     ticks_alive: u64,
     alive: bool,
@@ -894,7 +894,7 @@ fn drive(
             motor: 0.0,
             walked: 0.0,
             blocked_motor: 0.0,
-            visited: HashSet::new(),
+            visited: FxHashSet::default(),
             near_ticks: 0,
             ticks_alive: 0,
             alive: true,

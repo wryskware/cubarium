@@ -183,7 +183,7 @@ impl Meals {
         }
         // Bounded by the living: an id the view no longer carries is forgotten (the skipped
         // ids are never in here, so the counts cannot be compared to decide this cheaply).
-        let live: std::collections::HashSet<OrganismId> = view
+        let live: rustc_hash::FxHashSet<OrganismId> = view
             .organisms
             .iter()
             .filter(|o| !skip(o.id))

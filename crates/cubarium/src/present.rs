@@ -27,7 +27,7 @@ use cubarium_surface::{
     Edge, PathSegment, PixelImage, ScalarField, SurfacePoint, Travel, Vec2, cell_of, pixel_neighbor,
 };
 use cube_proto::Face;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 // --- Appearance constants ----------------------------------------------------------
 //
@@ -361,7 +361,7 @@ fn anchor_on(topo: Topology, face: Face, p: Vec2) -> SurfacePoint {
 
 /// Presentation state that outlives a single frame: one trail per live organism.
 pub struct Presenter {
-    trails: HashMap<OrganismId, Trail>,
+    trails: FxHashMap<OrganismId, Trail>,
     /// Reused so pushing a view's segments into a trail allocates nothing per organism.
     travel: Travel,
     producer: ScalarField,
@@ -379,7 +379,7 @@ impl Default for Presenter {
 impl Presenter {
     pub fn new() -> Presenter {
         Presenter {
-            trails: HashMap::new(),
+            trails: FxHashMap::default(),
             travel: Travel::default(),
             producer: ScalarField::zeros(Topology::Cube, Scale::ONE),
             detritus: ScalarField::zeros(Topology::Cube, Scale::ONE),
@@ -416,7 +416,7 @@ impl Presenter {
         if self.trails.len() != self.live.len() {
             // An ID that disappeared is gone for good: slots bump their generation on
             // reuse, so a recycled slot never inherits the dead organism's trail.
-            let live: std::collections::HashSet<OrganismId> = self.live.iter().copied().collect();
+            let live: rustc_hash::FxHashSet<OrganismId> = self.live.iter().copied().collect();
             self.trails.retain(|id, _| live.contains(id));
         }
     }

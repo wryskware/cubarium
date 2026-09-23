@@ -91,7 +91,7 @@ pub struct GpuSink {
     slots: Vec<crate::art_present::Slot>,
     /// Each plant family's measured bend budget, by name, so the per-cell lookup is not a
     /// linear scan over the pack with a string compare at every step.
-    budgets: std::collections::HashMap<&'static str, f64>,
+    budgets: rustc_hash::FxHashMap<&'static str, f64>,
     /// Each column's height as the previous `observe` left it.
     ///
     /// `ArtPresenter` keeps its own `tall_prev` and interpolates across the tick, but

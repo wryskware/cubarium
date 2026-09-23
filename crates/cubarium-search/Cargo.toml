@@ -25,6 +25,7 @@ cubarium-voxel-fauna = { workspace = true }
 cubarium-voxel = { workspace = true }
 cubarium-voxel-flora = { workspace = true }
 clap = { workspace = true }
+rustc-hash = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 # `float_roundtrip`: the default parser is not correctly rounded (about one value in nine
 # comes back one ULP off), which would make `replay` and any exact-weights claim unsafe.
