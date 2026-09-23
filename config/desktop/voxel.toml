@@ -1,0 +1,26 @@
+# Cubarium on a desktop: the `default` landscape at twice the resolution.
+#
+# `cubarium voxel --config config/desktop/voxel.toml`
+# (or `./scripts/run-voxel.sh --config config/desktop/voxel.toml`)
+#
+# The same 32 m x 6 m ring as `default`, drawn in 0.125 m voxels instead of 0.25 m:
+# width and depth double. Height would double to 144 but is held at 128 voxels (16 m),
+# the water solver's column-mask limit; the `default` recipe's terrain sits well under it.
+# The recipe is written in metres, so the landscape itself is the same one.
+
+tilt_degrees = 30.0
+px_per_voxel = 4
+raster_height = 0
+haze = 0.55
+water_alpha = 0.5
+dither = 0.04
+sky_gradient = true
+
+[world]
+width = 256
+height = 128
+depth = 48
+voxel_m = 0.125
+
+[world.landform]
+preset = "default"
