@@ -721,18 +721,31 @@ impl Arena {
         // contact; four keeps low foliage large enough for the deliberately sparse ray
         // fan and remains inside the settled litter gradient. The pool and pick remain
         // seed-deterministic.
+        //
+        // The signal is the **food's**: a stripped adult is not a start target (P5-B
+        // repair). Aimed at the nearest site of any kind, seed 6's browser started two
+        // columns from a stripped crown with no edible patch it could see in a whole
+        // turn on the spot.
+        let edible: Vec<Site> = resources
+            .iter()
+            .zip(&kinds)
+            .filter(|(_, k)| **k != PatchKind::Stripped)
+            .map(|(r, _)| *r)
+            .collect();
         let start_targets: &[Site] = initial_patch
             .as_ref()
-            .map_or(resources.as_slice(), std::slice::from_ref);
+            .map_or(edible.as_slice(), std::slice::from_ref);
         // The near band puts the successor within 6 columns of the initial patch, which
         // is inside the 2-to-4-column ring the start is drawn from: without this the
         // founder could be placed in feeding contact with the patch it is supposed to
         // have to find. The landed band satisfies the same rule for free — its patches
         // are 8 columns apart and the start is at most 4 from the initial one — so it is
-        // scoped to `Near` and the landed pool is left exactly as it was.
+        // scoped to `Near` and the landed pool is left exactly as it was. Stage A keeps
+        // the same two columns from **every** site, stripped crowns included, now that
+        // those are no longer targets that already kept the start off them.
         let start_clearance = match kind {
-            LayoutKind::Reacquisition(SuccessorBand::Near) => 4,
-            _ => 0,
+            LayoutKind::Reacquisition(SuccessorBand::Near) | LayoutKind::StageA => 4,
+            LayoutKind::Reacquisition(SuccessorBand::Landed) => 0,
         };
         let mut starts: Vec<(Site, Site, i64)> = candidates
             .iter()
@@ -783,10 +796,12 @@ impl Arena {
                     }
                 }
             };
+            // In the fauna's own `[0, 2pi)`, which its motion step wraps every heading
+            // into, so an idle body's pose is the pose it was placed with.
             Placement {
                 founder,
                 site,
-                heading_rad,
+                heading_rad: heading_rad.rem_euclid(std::f64::consts::TAU),
             }
         });
 
@@ -1772,6 +1787,19 @@ mod tests {
     /// must hold either way is that the foliage is *there to be found*: a founder that
     /// simply turns on the spot sees it within one revolution (pi seconds at the
     /// 2 rad/s yaw cap) on every layout.
+    ///
+    /// **Since P5 (the 45-ray fan at pitches -40..+40 and the rebuilt arena) the promise
+    /// is about edible foliage.** A Stage-A browser layout also carries stripped adults,
+    /// and every rosette keeps its upper crown: foliage that is seen and cannot be eaten,
+    /// a legitimate signal to learn about. With every layout as built, all 12 starts see
+    /// *some* foliage at the first sample. So the "not aimed" half is measured on the
+    /// layout with its inedible foliage removed (only what the adult band reaches left):
+    /// there 11 of 12 starts see edible foliage at once — main's 11 of 12 — never all.
+    /// The revolution half keeps the food **and the crowns standing over it** (a crown
+    /// over a rosette is the honest mark of food) and removes only the stripped adults:
+    /// every layout finds foliage within one turn on the spot. That needed the start to
+    /// be aimed at edible patches only; aimed at the nearest site of any kind, seed 6's
+    /// browser started beside a stripped crown and saw no food in a whole turn.
     #[test]
     fn stage_a_starts_present_the_promised_initial_signal() {
         let mut browser_immediate = 0usize;
@@ -1789,9 +1817,19 @@ mod tests {
                         assert!(obs[18] > 0.0, "seed {seed}: start is outside the cue");
                     }
                     Founder::Browser => {
+                        // The first sample, with only edible foliage standing.
+                        let mut edible = Arena::build(founder, seed);
+                        strip_inedible_foliage(&mut edible, false);
+                        let first = first_sample_of_built_founder(
+                            edible.into_sim(SimConfig { threads: 1 }),
+                            id,
+                        );
+                        // The revolution, with the food and the crowns over it.
+                        let mut marked = arena;
+                        strip_inedible_foliage(&mut marked, true);
                         // 80 ticks is 4 s: more than the pi seconds one revolution costs.
                         let samples = samples_of_built_founder(
-                            arena.into_sim(SimConfig { threads: 1 }),
+                            marked.into_sim(SimConfig { threads: 1 }),
                             id,
                             80,
                             1.0,
@@ -1802,7 +1840,7 @@ mod tests {
                             samples.iter().all(|o| o[36] == 1.0),
                             "seed {seed}: material cone invalid"
                         );
-                        if foliage(&samples[0]) > 0.0 {
+                        if foliage(&first) > 0.0 {
                             browser_immediate += 1;
                         }
                         assert!(
@@ -1816,9 +1854,40 @@ mod tests {
         assert!(
             browser_immediate < STAGE_A_SEEDS.len(),
             "the browser start is still aimed: {browser_immediate} of {} layouts hit \
-             foliage on the first sample",
+             edible foliage on the first sample",
             STAGE_A_SEEDS.len()
         );
+    }
+
+    /// Strip a browser arena's inedible foliage: the stripped adults go whole, and —
+    /// unless `keep_marking_crowns` — every rosette's upper crown too, leaving exactly
+    /// [`Arena::patch_stock`] standing.
+    fn strip_inedible_foliage(arena: &mut Arena, keep_marking_crowns: bool) {
+        let band = FaunaConfig::default()
+            .founder(arena.founder)
+            .adult_body()
+            .mouth_layers(arena.grid.ground_y(), arena.grid.voxel_m());
+        for (site, kind) in arena
+            .resources
+            .clone()
+            .into_iter()
+            .zip(arena.resource_kinds.clone())
+        {
+            if keep_marking_crowns && kind != PatchKind::Stripped {
+                continue;
+            }
+            let above = (*band.end() + 1)..=i64::MAX;
+            let foliage = arena.flora.view().stand_at(site).map_or(0.0, |s| s.foliage);
+            if foliage > 0.0 {
+                let _ = arena.flora.take_foliage_in_layers(site, foliage, &above);
+            }
+            let left = arena.flora.view().stand_at(site).map_or(0.0, |s| s.foliage);
+            assert!(
+                (left - arena.patch_stock(site)).abs() < 1e-12,
+                "{site:?}: {left} left against an edible {}",
+                arena.patch_stock(site)
+            );
+        }
     }
 
     /// Put a resting, recording founder on a litter tile of a static sim and return its
