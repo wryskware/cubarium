@@ -31,7 +31,11 @@ use crate::Flora;
 /// crown in metres (`SpeciesConfig::crown_height_m` / `crown_radius_m`) at the size
 /// ladder, with the capped-seedling growth rule. The serialised config's fields changed,
 /// and a schema-1 stand's wood would grow a different plant: refused, not migrated.
-pub const SCHEMA: u32 = 2;
+///
+/// Schema 3: package N (`design/handoffs/voxel-new-plants-2026-09-23.md`) appends three
+/// species (the per-species ledger arrays grow to nine) and two config fields
+/// (`water_depth_min_m`, `falls`): refused, not migrated.
+pub const SCHEMA: u32 = 3;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

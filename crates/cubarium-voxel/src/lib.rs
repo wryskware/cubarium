@@ -66,7 +66,10 @@ pub use recipe::{
 };
 pub use snapshot::SchemaMismatch;
 pub use viability::{BandResult, PoreBand, Viability, ViabilitySpec};
-pub use world::{Command, SETTLE_REST, SETTLE_WINDOW, Settle, VoxelView, World, default_threads};
+pub use world::{
+    Command, SETTLE_REST, SETTLE_WINDOW, STANDING_SUPPORT_FILL, Settle, VoxelView, World,
+    default_threads,
+};
 
 /// Simulation ticks per second. Matches `cubarium-core::TICK_HZ` so a frontend can
 /// drive both worlds with the same clock.

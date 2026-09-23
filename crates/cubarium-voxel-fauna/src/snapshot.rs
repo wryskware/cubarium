@@ -77,9 +77,12 @@ use crate::Fauna;
 /// doubled (frondgrazer 0.75 × 0.375 × 0.375 m, littershredder 0.375 × 0.125 × 0.125 m).
 /// The format did not change, but a schema-12 world's bodies stand on faces chosen for
 /// the old headroom and its stands grew under the old crowns: refused, not re-anchored.
+/// Schema 14 is **package N** (`design/handoffs/voxel-new-plants-2026-09-23.md`): the
+/// plant layer gained three species, so [`crate::FaunaLedger`]'s per-plant bite arrays
+/// grew from six slots to nine.
 /// Postcard is not self-describing, so older worlds are **refused**, not migrated
 /// (`always-fresh-never-migrate`): start a fresh world.
-pub const SCHEMA: u32 = 13;
+pub const SCHEMA: u32 = 14;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

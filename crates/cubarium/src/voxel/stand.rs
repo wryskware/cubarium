@@ -134,6 +134,31 @@ pub const GLOWCAP_INTERIM_CAP_SRGB: u32 = 0x00C8_F03C;
 /// green. **Interim.**
 pub const GLOWCAP_INTERIM_HEART_SRGB: u32 = 0x00EF_FFC0;
 
+// --- Package N's three: interim glyph colours ----------------------------------------
+//
+// **Interim, and named so**, like the glowcap's. Taken straight from the body-plan hexes of
+// `design/art-direction/species-dossiers-2026-09-21.md` D11–D13 (wood, main foliage, one
+// accent each); no look is decided here, and the crown shape is the generic disc.
+
+/// Vaulttree bark (D11 `#2A0E4A`). **Interim.**
+pub const VAULT_INTERIM_WOOD_SRGB: u32 = 0x002A_0E4A;
+/// Vaulttree lobes (D11 body `#2B6AD0`). **Interim.**
+pub const VAULT_INTERIM_CROWN_SRGB: u32 = 0x002B_6AD0;
+/// Vaulttree lobe rim (D11 `#42C5F8`). **Interim.**
+pub const VAULT_INTERIM_HEART_SRGB: u32 = 0x0042_C5F8;
+/// Lanternberry stems (D12 `#3A1A7A`). **Interim.**
+pub const LANTERN_INTERIM_WOOD_SRGB: u32 = 0x003A_1A7A;
+/// Lanternberry leaflets (D12 `#2B6AD0`). **Interim.**
+pub const LANTERN_INTERIM_CROWN_SRGB: u32 = 0x002B_6AD0;
+/// Lanternberry bell seam (D12 `#FF2AFC`). **Interim.**
+pub const LANTERN_INTERIM_HEART_SRGB: u32 = 0x00FF_2AFC;
+/// Siphonreed stem below the water line (D13 `#1E2798`). **Interim.**
+pub const REED_INTERIM_WOOD_SRGB: u32 = 0x001E_2798;
+/// Siphonreed stem above the water line (D13 `#2B6AD0`). **Interim.**
+pub const REED_INTERIM_CROWN_SRGB: u32 = 0x002B_6AD0;
+/// Siphonreed ripe tuft (D13 `#B99BE6`). **Interim.**
+pub const REED_INTERIM_HEART_SRGB: u32 = 0x00B9_9BE6;
+
 /// How far a crown with no foliage left falls back toward its own wood colour. Crown
 /// fill is `P / (α·W)`, so a stand that has shed its canopy reads as bare structure
 /// rather than as a full crown that happens to be dark.
@@ -633,7 +658,10 @@ pub fn parts_of(flora: FloraView<'_>, stand: &Stand, style: u16) -> Vec<(Cell, P
                             let raised = core < (r * 0.5).max(0.45).powi(2) && h > 1;
                             crown_y = top + u32::from(raised);
                         }
-                        Species::Glowcap => {}
+                        Species::Glowcap
+                        | Species::Vaulttree
+                        | Species::Lanternberry
+                        | Species::Siphonreed => {}
                     }
                 }
                 out.push((
@@ -671,6 +699,22 @@ fn palette(species: Species) -> (u32, u32, u32) {
         Species::Springturf => (TURF_WOOD_SRGB, TURF_CROWN_SRGB, TURF_HEART_SRGB),
         Species::Stonecushion => (CUSHION_WOOD_SRGB, CUSHION_CROWN_SRGB, CUSHION_HEART_SRGB),
         Species::Velvetpad => (PAD_WOOD_SRGB, PAD_CROWN_SRGB, PAD_HEART_SRGB),
+        // Interim, and named so: package N's block above the constants.
+        Species::Vaulttree => (
+            VAULT_INTERIM_WOOD_SRGB,
+            VAULT_INTERIM_CROWN_SRGB,
+            VAULT_INTERIM_HEART_SRGB,
+        ),
+        Species::Lanternberry => (
+            LANTERN_INTERIM_WOOD_SRGB,
+            LANTERN_INTERIM_CROWN_SRGB,
+            LANTERN_INTERIM_HEART_SRGB,
+        ),
+        Species::Siphonreed => (
+            REED_INTERIM_WOOD_SRGB,
+            REED_INTERIM_CROWN_SRGB,
+            REED_INTERIM_HEART_SRGB,
+        ),
         // Interim, and named so: see the block above the constants.
         Species::Glowcap => (
             GLOWCAP_INTERIM_WOOD_SRGB,
@@ -1218,7 +1262,8 @@ mod tests {
             "the pad must be the broad one: {pad} against {turf}"
         );
 
-        // A stand of each of the five actually reaches the grid, on its own support face.
+        // A stand of each species actually reaches the grid, on its own support face:
+        // three columns apart since package N, so nine fit on the 32-wide ring.
         let mut flora = Flora::new(FloraConfig::default());
         for (x, species) in Species::ALL.into_iter().enumerate() {
             let sc = flora.config().species(species);
@@ -1226,7 +1271,7 @@ mod tests {
             assert!(flora.apply(
                 &world,
                 Command::Seed {
-                    x: x as i64 * 4,
+                    x: x as i64 * 3,
                     z: 1,
                     species,
                     wood
@@ -1237,7 +1282,7 @@ mod tests {
         let mut stands = Stands::empty(32, 16, 4);
         stands.rebuild(&view, flora.view());
         for (x, species) in Species::ALL.into_iter().enumerate() {
-            let part = stands.at(x as i64 * 4, 4, 1);
+            let part = stands.at(x as i64 * 3, 4, 1);
             assert!(
                 part.is_block(),
                 "{} stamped nothing at all: {part:?}",
@@ -1251,7 +1296,7 @@ mod tests {
                     flora
                         .view()
                         .stand_at(Site {
-                            x: x as u32 * 4,
+                            x: x as u32 * 3,
                             y: 3,
                             z: 1
                         })
@@ -1261,9 +1306,13 @@ mod tests {
         }
 
         // The palettes: every pair of the five crowns apart in linear light, and the same
-        // for the sprout marks, which are the unmoved palette.
-        let crowns: Vec<(Species, [f32; 3])> = Species::ALL
-            .into_iter()
+        // for the sprout marks, which are the unmoved palette. The six this test was
+        // written over; package N's three carry **interim** dossier colours, which are
+        // not a look decision and are not held to this spacing (vaulttree's lobe blue is
+        // 0.30 from velvetpad's violet).
+        let crowns: Vec<(Species, [f32; 3])> = Species::ALL[..6]
+            .iter()
+            .copied()
             .map(|s| (s, seed_style(s).crown))
             .collect();
         let dist = |a: [f32; 3], b: [f32; 3]| {
