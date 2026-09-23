@@ -894,6 +894,13 @@ impl SpeciesConfig {
             .then_some((w0, cap))
     }
 
+    /// The one minimum propagule package a donor saves before it sends one (the
+    /// tick's own `package_of`). Read-only: the presenter shows a stand whose `parcel`
+    /// holds half of this as ripe (`cubarium::voxel::model`).
+    pub fn propagule_package(&self) -> f64 {
+        step::package_of(self)
+    }
+
     /// One crown dimension in metres at `wood`, from its `[min, max]` range: package L's
     /// growth rule (`design/handoffs/voxel-ladder-growth-2026-09-23.md` §2).
     ///

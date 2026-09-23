@@ -44,9 +44,11 @@
 //! per voxel.
 
 use cubarium_voxel::VoxelView;
-use cubarium_voxel_flora::{FloraView, Species, Stand};
+use cubarium_voxel_flora::{FloraView, MAX_FOLIAGE_LAYERS, Species, Stand};
 
 use crate::present::{mix, srgb_linear};
+
+use super::model::{self, ModelCell, ModelLibrary, Tag};
 
 // --- The five palettes ---------------------------------------------------------------
 //
@@ -290,6 +292,34 @@ pub struct Stands {
     /// instead of the whole grid, and what a packer walks instead of every voxel.
     stamped: Vec<u32>,
     styles: Vec<Style>,
+    /// This rebuild's style index for each `(model material, wilt level)`, or
+    /// [`NO_STYLE`]: the model path's styles are shared across stands.
+    model_styles: Vec<u16>,
+}
+
+/// No style yet (and the one index a style never takes).
+const NO_STYLE: u16 = u16::MAX;
+
+/// Which existing part a model cell is drawn as, so it takes that part's lighting.
+#[derive(Clone, Copy)]
+enum PartKind {
+    Trunk,
+    Crown,
+    Heart,
+}
+
+/// The cells of `stand`'s model at its crown height, if the library has one.
+fn model_cells<'l>(
+    lib: &'l ModelLibrary,
+    flora: FloraView<'_>,
+    stand: &Stand,
+) -> Option<&'l [ModelCell]> {
+    let sc = flora.config.species(stand.species);
+    lib.plant(stand.species)?.select_sized(
+        sc.crown_height_m_at(stand.wood),
+        sc.crown_radius_m_at(stand.wood),
+        stand.id,
+    )
 }
 
 impl Stands {
@@ -302,12 +332,32 @@ impl Stands {
             grid: vec![Part::None; width as usize * height as usize * depth as usize],
             stamped: Vec::new(),
             styles: Vec::new(),
+            model_styles: vec![NO_STYLE; 256 * usize::from(model::WILT_LEVELS)],
         }
     }
 
-    /// Rebuild from a flora view. Reuses the allocation: the presenter calls this every
-    /// frame.
+    /// Rebuild from a flora view with the **dev-mode glyphs**: every stand drawn by
+    /// [`parts_of`]. Reuses the allocation: the presenter calls this every frame.
     pub fn rebuild(&mut self, view: &VoxelView<'_>, flora: FloraView<'_>) {
+        self.rebuild_inner(view, flora, None);
+    }
+
+    /// Rebuild from a flora view with the **baked models**
+    /// ([`crate::voxel::model`]): each stand stamps its species' model at the step
+    /// nearest its crown height, in the variant its id picks, thinned by its own layer
+    /// stocks. A species the library has no model for, or a library baked for another
+    /// voxel size, draws [`parts_of`] exactly as [`Stands::rebuild`] does.
+    pub fn rebuild_with(&mut self, view: &VoxelView<'_>, flora: FloraView<'_>, lib: &ModelLibrary) {
+        let lib = lib.serves(view.config.voxel_m).then_some(lib);
+        self.rebuild_inner(view, flora, lib);
+    }
+
+    fn rebuild_inner(
+        &mut self,
+        view: &VoxelView<'_>,
+        flora: FloraView<'_>,
+        lib: Option<&ModelLibrary>,
+    ) {
         let c = view.config;
         if (self.width, self.height, self.depth) != (c.width, c.height, c.depth) {
             *self = Stands::empty(c.width, c.height, c.depth);
@@ -318,9 +368,16 @@ impl Stands {
             }
             self.styles.clear();
         }
+        self.model_styles.fill(NO_STYLE);
         // Stands arrive in site order, which is the order the styles are pushed in, so
         // the grid is a pure function of the view and not of any iteration accident.
         for stand in flora.stands {
+            if let Some(cells) = lib.and_then(|lib| model_cells(lib, flora, stand)) {
+                if !self.stamp_model(view, flora, stand, cells) {
+                    break;
+                }
+                continue;
+            }
             let style = self.styles.len().min(u16::MAX as usize) as u16;
             if usize::from(style) != self.styles.len() {
                 break; // more than 65 535 stands in one strip: refuse to alias styles.
@@ -408,6 +465,117 @@ impl Stands {
                 Part::Sprout(style),
             );
         }
+    }
+
+    /// Stamp one stand's model cells. False when the styles would alias (the strip's
+    /// 65 535-style cap), which stops the stand loop as the glyph path does.
+    fn stamp_model(
+        &mut self,
+        view: &VoxelView<'_>,
+        flora: FloraView<'_>,
+        stand: &Stand,
+        cells: &[ModelCell],
+    ) -> bool {
+        let sc = flora.config.species(stand.species);
+        // Each foliage layer's `stock / capacity`, as `layers_of` resolves them: the stage
+        // the stand's wood is in, `share · α · W` each. A layer index the stage does not
+        // have (a model step from a neighbouring stage) reads the stand's whole fill.
+        let cap = sc.alpha * stand.wood.max(0.0);
+        let whole = if cap > 0.0 { stand.foliage / cap } else { 0.0 };
+        let mut foliage = [whole; MAX_FOLIAGE_LAYERS];
+        for (fi, (_, layer)) in sc
+            .profile_at(stand.wood)
+            .foliage_layers()
+            .take(MAX_FOLIAGE_LAYERS)
+            .enumerate()
+        {
+            let c = layer.share * cap;
+            foliage[fi] = if c > 0.0 {
+                stand.layer_stock[fi] / c
+            } else {
+                0.0
+            };
+        }
+        let wilt = model::wilt_level(stand.moisture);
+        let package = sc.propagule_package();
+        let ripe = if package > 0.0 {
+            stand.parcel / package
+        } else {
+            0.0
+        };
+        let unripe = model::unripe_material(stand.species);
+        let fruit = stand.species == Species::Lanternberry;
+        // A glowcap on dead wood perches on the log, as the glyph does: the log is drawn
+        // in the cell above the face, and the fungus grows out of it.
+        let on_log = stand.species == Species::Glowcap
+            && flora
+                .ground
+                .iter()
+                .find(|g| g.site == stand.site)
+                .is_some_and(|g| g.dead_wood >= 0.05);
+        let anchor = Cell {
+            x: i64::from(stand.site.x),
+            y: stand.site.y + 1 + u32::from(on_log),
+            z: stand.site.z,
+        };
+        let mut ok = true;
+        model::each_plant_cell(cells, anchor, stand.id, &foliage, view, |cell, m| {
+            if !ok {
+                return;
+            }
+            let (material, tint, part) = match m.tag {
+                Tag::Trunk => (m.material, 0, PartKind::Trunk),
+                Tag::Foliage(_) | Tag::Drape(_) => (m.material, wilt, PartKind::Crown),
+                Tag::Accent => {
+                    let shown = m.material != model::WARM
+                        || if fruit {
+                            model::keeps(stand.id, m.offset, model::FRUIT_LAYER, ripe)
+                        } else {
+                            ripe >= model::RIPE_AT
+                        };
+                    (if shown { m.material } else { unripe }, 0, PartKind::Heart)
+                }
+            };
+            let Some(style) = self.model_style(material, tint) else {
+                ok = false;
+                return;
+            };
+            let part = match part {
+                PartKind::Trunk => Part::Trunk(style),
+                PartKind::Crown => Part::Crown {
+                    style,
+                    heart: false,
+                },
+                PartKind::Heart => Part::Crown { style, heart: true },
+            };
+            self.place(view, cell, part);
+        });
+        ok
+    }
+
+    /// The style of a model material at a wilt level: one per pair per rebuild, shared by
+    /// every stand, so a meadow is a handful of styles and not one per stand. `None` when
+    /// the strip is out of styles.
+    fn model_style(&mut self, material: u8, wilt: u8) -> Option<u16> {
+        let key = usize::from(material) * usize::from(model::WILT_LEVELS) + usize::from(wilt);
+        let cached = self.model_styles[key];
+        if cached != NO_STYLE {
+            return Some(cached);
+        }
+        let style = u16::try_from(self.styles.len())
+            .ok()
+            .filter(|&s| s != NO_STYLE)?;
+        let c = wilted(
+            srgb_linear(model::palette_srgb(material)),
+            f32::from(wilt) / f32::from(model::WILT_LEVELS - 1),
+        );
+        self.styles.push(Style {
+            wood: c,
+            crown: c,
+            heart: c,
+        });
+        self.model_styles[key] = style;
+        Some(style)
     }
 
     /// Write one part, letting the stronger claim keep the cell. Wood beats canopy —
@@ -764,7 +932,7 @@ pub fn style_of(flora: FloraView<'_>, stand: &Stand) -> Style {
 
 /// Desaturate toward the colour's own luminance and darken a little: the one change that
 /// reads as thirst at four pixels across without inventing a third hue.
-fn wilted(c: [f32; 3], wilt: f32) -> [f32; 3] {
+pub(crate) fn wilted(c: [f32; 3], wilt: f32) -> [f32; 3] {
     if wilt <= 0.0 {
         return c;
     }
@@ -1434,7 +1602,10 @@ mod tests {
                 },
                 "{parts:?}"
             );
-            assert_eq!(crown_height_voxels(sc.crown_height(wood, flora.config().voxel_m)), 1);
+            assert_eq!(
+                crown_height_voxels(sc.crown_height(wood, flora.config().voxel_m)),
+                1
+            );
         }
 
         // And on the grid, through the whole presenter path.

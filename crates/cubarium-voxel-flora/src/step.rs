@@ -1987,7 +1987,7 @@ fn add_cohort(
 /// placeholders. Stated as a division guarded by the caller, never a tuned constant.
 ///
 /// Zero for a species whose `w_frac` is zero, which can never germinate anything.
-fn package_of(sc: &SpeciesConfig) -> f64 {
+pub(crate) fn package_of(sc: &SpeciesConfig) -> f64 {
     let w_frac = sc.propagule_split[0];
     if w_frac > 0.0 {
         sc.alive_min / w_frac
