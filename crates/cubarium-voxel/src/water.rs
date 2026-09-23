@@ -97,10 +97,13 @@
 //!
 //! There is no region search and no connected-component solve. Each substep, every **wet**
 //! cell offers water across its four horizontal faces and to the cell below, and the drive
-//! is the difference in **column head**: the surface level `y + free` at the top of the
-//! contiguous water column the cell belongs to. A dry cell's head is its own floor, so
-//! water runs into an empty neighbour and off a ledge; a deep column's bottom cell carries
-//! its whole column's head, so it pushes hard sideways; and a **full** cell carries the
+//! is the difference in **column head**: the surface level `s + free[s]` of the packed
+//! full stack the cell sits at the foot of, `s` being the first row at or above it that is
+//! not full — a partial cell's own level, a full cell's the partial cell capping its stack
+//! (package H; until then it was the top of the whole wet run, packed or not). A dry
+//! cell's head is its own floor, so water runs into an empty neighbour and off a ledge; a
+//! deep column's bottom cell carries its whole column's head, so it pushes hard sideways;
+//! and a **full** cell carries the
 //! highest head that reaches it across its horizontal faces ([`HEAD_PASSES`] local passes
 //! per substep), which is how the weight of one column arrives at the foot of another
 //! through a flooded passage.
@@ -923,9 +926,9 @@ pub fn water_table(w: &mut World) {
 /// board's little cores at an IPC of 0.1 and the scan was 1.7 ms of the tick).
 #[derive(Default)]
 struct Scratch {
-    /// Surface level of the contiguous water column a wet cell belongs to, in cell units
-    /// (`y + free` of the run's top cell). Valid for the wet cells of this substep's
-    /// active columns.
+    /// A wet cell's head, in cell units: the surface of the full stack it sits at the foot
+    /// of (package H, [`scan_column_mask`]) — its own `y + free` if it is not full. Valid
+    /// for the wet cells of this substep's active columns.
     head: Vec<f64>,
     /// Dense fallback only (worlds taller than [`MASK_ROWS`]): for every non-solid cell of
     /// an active column, the lowest cell **at or above** it, inside its own void run, that
@@ -1080,7 +1083,8 @@ fn rows_of(cells: &[usize], plane: usize, rows: &mut Vec<u32>) {
 ///
 /// Each substep every wet cell offers water to its four horizontal neighbours and to the
 /// cell below, driven by the difference in **column head** — the surface level of the
-/// contiguous water column the cell belongs to, `y + free` at the run's top. That one
+/// packed full stack the cell sits at the foot of ([`scan_column_mask`]): its own
+/// `y + free` if it is not full. That one
 /// definition is what carries pressure without any connectivity search: the bottom cell of
 /// a deep column has its whole column's head, so it pushes hard sideways; a full cell in a
 /// submerged gap has the head of the body it is part of and passes the push along; and a
@@ -1580,7 +1584,14 @@ fn scan_columns(w: &World, plane: usize, use_masks: bool, sc: &mut Scratch) {
     let free = &w.free[..];
     if use_masks {
         for &col in &sc.columns {
-            scan_column_mask(free, plane, col, sc.wet_mask[col], &mut sc.head);
+            scan_column_mask(
+                free,
+                plane,
+                col,
+                sc.wet_mask[col],
+                sc.full_mask[col],
+                &mut sc.head,
+            );
         }
         return;
     }
@@ -1599,19 +1610,47 @@ fn scan_columns(w: &World, plane: usize, use_masks: bool, sc: &mut Scratch) {
     }
 }
 
-/// Every wet run of one column carries its top cell's surface, `top + free[top]`. Writes
-/// `head` at the column's own world indices.
+/// **Head from the packed full stack** (package H, 2026-09-22). A wet cell at row `y`
+/// takes the surface of the full stack it sits at the foot of: with `s` the first row at
+/// or above `y` that is not full, the head is `s + free[s]` when row `s` is wet — the
+/// partial cell capping the stack — so a partial cell is its own `s` and its head is its
+/// own level. A full stack capped by a dry cell, a roof or the world top keeps its top
+/// cell's own surface, `top + free[top]`: the old run-top answer, which is `s` to within
+/// `ROOM_EPS`. A packed run (full cells under one partial top) therefore has exactly the
+/// head it always had, and a lake, a U-tube and a full-to-the-roof passage are unchanged.
+///
+/// What changed is a **hollow** run, wet cells that are not full stacked on each other:
+/// until H every cell of it carried the run top's surface, so the bottom film of a falling
+/// stack pushed at a dry neighbour with a drop the height of the stack and displaced
+/// slivers up the neighbour's column (the census at 382ef3a: 78 % of a shower's active
+/// wet cells, 96 % of its proposals).
+///
+/// Per wet run, from the top down: the top cell carries its own surface, and each cell
+/// below carries the head of the cell above it if it is full, or its own level if it is
+/// not. `full` is the exchange's own full mask (`free >= 1 - ROOM_EPS`). Writes `head` at
+/// the column's own world indices.
 #[inline]
-fn scan_column_mask(free: &[f64], plane: usize, col: usize, mut wet: u128, head: &mut [f64]) {
+fn scan_column_mask(
+    free: &[f64],
+    plane: usize,
+    col: usize,
+    mut wet: u128,
+    full: u128,
+    head: &mut [f64],
+) {
     while wet != 0 {
         let y = wet.trailing_zeros() as usize;
         let run = (wet >> y).trailing_ones() as usize;
         let top = y + run - 1;
-        let surface = top as f64 + free[top * plane + col];
-        let mut at = y * plane + col;
-        for _ in 0..run {
+        let mut at = top * plane + col;
+        let mut surface = top as f64 + free[at];
+        head[at] = surface;
+        for r in (y..top).rev() {
+            at -= plane;
+            if (full >> r) & 1 == 0 {
+                surface = r as f64 + free[at];
+            }
             head[at] = surface;
-            at += plane;
         }
         wet &= !run_bits(y, run);
     }
@@ -1623,7 +1662,8 @@ fn scan_column_mask(free: &[f64], plane: usize, col: usize, mut wet: u128, head:
 /// A **void run** is a maximal stack of non-solid cells; the displacement target of a cell
 /// is the lowest cell with room at or above it *within its own run*, because a solid
 /// ceiling is where a push stops. A **water run** is a maximal stack of wet cells inside a
-/// void run, and every cell of it carries the run's own surface level.
+/// void run; its heads follow [`scan_column_mask`]'s rule, from the packed full stack,
+/// with the same operations in the same order so the two paths stay bit-identical.
 ///
 /// The runs themselves are **static geometry**, handed in from [`World::void_runs`], so
 /// this pass never rediscovers them from `material`; only the water-dependent values —
@@ -1662,9 +1702,17 @@ fn scan_column(
                 while t + 1 <= top && free[(t + 1) * plane + col] > 0.0 {
                     t += 1;
                 }
-                let surface = t as f64 + free[t * plane + col];
-                for m in k..=t {
-                    head[m * plane + col] = surface;
+                // From the top down: a full cell carries the head above it, a partial
+                // cell its own level (package H).
+                let mut at = t * plane + col;
+                let mut surface = t as f64 + free[at];
+                head[at] = surface;
+                for m in (k..t).rev() {
+                    at -= plane;
+                    if free[at] < 1.0 - ROOM_EPS {
+                        surface = m as f64 + free[at];
+                    }
+                    head[at] = surface;
                 }
                 k = t + 1;
             } else {
@@ -2357,8 +2405,8 @@ mod fall_tests {
 #[cfg(test)]
 mod exchange_geometry_tests {
     use super::{
-        MASK_ROWS, ROOM_EPS, Scratch, exchange, exchange_inner_with_masks, offer_up_the_run,
-        offer_up_the_run_mask, scan_column, scan_column_mask,
+        MASK_ROWS, ROOM_EPS, SCRATCH, Scratch, exchange, exchange_inner_with_masks,
+        offer_up_the_run, offer_up_the_run_mask, scan_column, scan_column_mask,
     };
     use crate::{Command, Config, Material, World};
 
@@ -2455,8 +2503,15 @@ mod exchange_geometry_tests {
                     while t + 1 <= top && free[(t + 1) * plane + col] > 0.0 {
                         t += 1;
                     }
-                    let surface = t as f64 + free[t * plane + col];
-                    for m in k..=t {
+                    // Package H: from the top down, a full cell carries the head above
+                    // it and a partial cell its own level.
+                    let mut surface = t as f64 + free[t * plane + col];
+                    head[t] = surface;
+                    for m in (k..t).rev() {
+                        let f = free[m * plane + col];
+                        if f < 1.0 - ROOM_EPS {
+                            surface = m as f64 + f;
+                        }
                         head[m] = surface;
                     }
                     k = t + 1;
@@ -2890,7 +2945,9 @@ mod exchange_geometry_tests {
             };
             assert_eq!(w.void_runs.mask, [expected_mask]);
             let mut head = vec![0.0; height as usize];
-            scan_column_mask(&w.free, 1, 0, expected_mask, &mut head);
+            // Every row full but the top one.
+            let full = expected_mask & !(1u128 << (height - 1));
+            scan_column_mask(&w.free, 1, 0, expected_mask, full, &mut head);
             assert!(
                 head.iter().all(|&h| h == f64::from(height - 1) + 0.25),
                 "wrong head at height {height}: {head:?}"
@@ -2910,6 +2967,124 @@ mod exchange_geometry_tests {
                 assert_offer_paths_match(&w, last, 0.75);
             }
         }
+    }
+
+    /// One column, `cfg(1, 8)`, with `fills` poured from row 1 up and rock at `roof`:
+    /// its heads by the mask scan and by the dense walk, for the wet rows only.
+    fn heads_both_ways(fills: &[f64], roof: Option<u32>) -> (Vec<f64>, Vec<f64>) {
+        let mut w = World::empty(cfg(1, 8));
+        if let Some(y) = roof {
+            w.apply(Command::SetMaterial {
+                x: 0,
+                y,
+                z: 0,
+                material: Material::Rock,
+            });
+        }
+        for (k, &volume_m3) in fills.iter().enumerate() {
+            w.apply(Command::AddWater {
+                x: 0,
+                y: 1 + k as u32,
+                z: 0,
+                volume_m3,
+            });
+        }
+        w.ensure_void_runs();
+        // One column, so a world index is a row. The masks as the exchange builds them.
+        let (mut wet, mut full) = (0u128, 0u128);
+        for (y, &f) in w.free.iter().enumerate() {
+            if f > 0.0 {
+                wet |= 1 << y;
+                if f >= 1.0 - ROOM_EPS {
+                    full |= 1 << y;
+                }
+            }
+        }
+        let mut masked = vec![0.0; w.free.len()];
+        scan_column_mask(&w.free, 1, 0, wet, full, &mut masked);
+        let dense = cached_scan(&w, 0).0;
+        let rows = 1..=fills.len();
+        (masked[rows.clone()].to_vec(), dense[rows].to_vec())
+    }
+
+    /// **Head from the packed full stack** (package H). A wet cell's head is the surface
+    /// of the full stack it sits at the foot of — `s + free[s]` for the first row `s` at
+    /// or above it that is not full — so a partial cell is its own level and a full
+    /// stack takes the partial cell capping it. A stack capped by a roof (or a dry cell,
+    /// or the world top) keeps its top cell's own surface, the old answer. Masks and the
+    /// dense walk agree on every column.
+    #[test]
+    fn a_wet_cell_takes_the_head_of_the_full_stack_it_is_under() {
+        for (fills, roof, expected) in [
+            // Hollow: films under a half cell. Each is its own level.
+            (
+                vec![1e-10, 1e-10, 0.5],
+                None,
+                vec![1.0 + 1e-10, 2.0 + 1e-10, 3.5],
+            ),
+            // Packed: the old run-top answer, unchanged.
+            (vec![1.0, 1.0, 0.5], None, vec![3.5, 3.5, 3.5]),
+            // Full to a roof at row 4: the roof row.
+            (vec![1.0, 1.0, 1.0], Some(4), vec![4.0, 4.0, 4.0]),
+            // Unpacked: a partial cell under a full stack capped by a partial one.
+            (vec![0.3, 1.0, 1.0, 0.2], None, vec![1.3, 4.2, 4.2, 4.2]),
+        ] {
+            let (masked, dense) = heads_both_ways(&fills, roof);
+            assert_eq!(masked, expected, "mask scan of {fills:?}");
+            assert_eq!(dense, expected, "dense walk of {fills:?}");
+        }
+    }
+
+    /// The defect the census found (382ef3a): the bottom film of a hollow stack used to
+    /// push with the stack top's head and displace slivers up a dry neighbour's column.
+    /// Now it offers only across its own row. Read off the proposals the exchange made.
+    #[test]
+    fn a_hollow_stack_does_not_push_its_bottom_film_up_a_dry_neighbour() {
+        // Column 0 holds the stack, column 1 is dry, column 2 is rock to the top so the
+        // stack has exactly one horizontal neighbour.
+        let mut w = World::empty(cfg(3, 8));
+        for y in 1..8 {
+            w.apply(Command::SetMaterial {
+                x: 2,
+                y,
+                z: 0,
+                material: Material::Rock,
+            });
+        }
+        for (y, volume_m3) in [(1, 1e-10), (2, 1e-10), (3, 0.5)] {
+            w.apply(Command::AddWater {
+                x: 0,
+                y,
+                z: 0,
+                volume_m3,
+            });
+        }
+        let plane = 3;
+        let bottom = plane; // (0, 1)
+        exchange(&mut w, 1);
+        let from_bottom: Vec<(u32, u32, f64)> = SCRATCH.with(|s| {
+            s.borrow()
+                .edges
+                .iter()
+                .copied()
+                .filter(|&(from, _, _)| from as usize == bottom)
+                .collect()
+        });
+        assert!(
+            from_bottom
+                .iter()
+                .any(|&(_, to, _)| to as usize == bottom + 1),
+            "the bottom film offered nothing across its own row: {from_bottom:?}"
+        );
+        let raised: Vec<_> = from_bottom
+            .iter()
+            .filter(|&&(_, to, _)| to as usize >= 2 * plane)
+            .collect();
+        assert!(
+            raised.is_empty(),
+            "the bottom film pushed up the neighbour's column: {raised:?}"
+        );
+        assert!(residual(&w).abs() < 1e-12);
     }
 
     fn assert_offer_paths_match(w: &World, y: usize, q: f64) {

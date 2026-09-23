@@ -189,6 +189,12 @@ fn window(sim: &mut Sim, name: &str, ticks: u64, pulse: f64, every: u64, budget:
         sim.world().view().ledger.showers,
     );
     println!(
+        "at the close: {} wet cells, {:.4} m³ free (pooled), {:.4} m³ pore",
+        sim.world().wet_cells(),
+        sim.world().pooled_m3(),
+        sim.world().pore_m3(),
+    );
+    println!(
         "step {:.2} ms/tick (max {:.1}); water {:.2} ({:.0} %), flora {:.2}, fauna {:.2}",
         ms(step_ns),
         step_max as f64 / 1e6,
