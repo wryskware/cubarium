@@ -1793,8 +1793,13 @@ mod tests {
     /// and every rosette keeps its upper crown: foliage that is seen and cannot be eaten,
     /// a legitimate signal to learn about. With every layout as built, all 12 starts see
     /// *some* foliage at the first sample. So the "not aimed" half is measured on the
-    /// layout with its inedible foliage removed (only what the adult band reaches left):
-    /// there 11 of 12 starts see edible foliage at once — main's 11 of 12 — never all.
+    /// layout with its inedible foliage removed (only what the adult band reaches left),
+    /// and on the **centre** sector: the food is not straight ahead on every start. (It
+    /// was "11 of 12 starts see edible foliage in any sector at once, never all" under
+    /// the fixed sub-step march; the cell-exact traversal of cone-speed item 3 now
+    /// catches a crown seed 17's left sector only clipped, so all 12 see some edible
+    /// foliage somewhere — which the freed heading never promised to prevent — while 6
+    /// of 12 centre sectors see none, as before.)
     /// The revolution half keeps the food **and the crowns standing over it** (a crown
     /// over a rosette is the honest mark of food) and removes only the stripped adults:
     /// every layout finds foliage within one turn on the spot. That needed the start to
@@ -1840,7 +1845,7 @@ mod tests {
                             samples.iter().all(|o| o[36] == 1.0),
                             "seed {seed}: material cone invalid"
                         );
-                        if foliage(&first) > 0.0 {
+                        if first[26] > 0.0 {
                             browser_immediate += 1;
                         }
                         assert!(
@@ -1854,7 +1859,7 @@ mod tests {
         assert!(
             browser_immediate < STAGE_A_SEEDS.len(),
             "the browser start is still aimed: {browser_immediate} of {} layouts hit \
-             edible foliage on the first sample",
+             edible foliage dead ahead (the centre sector) on the first sample",
             STAGE_A_SEEDS.len()
         );
     }
