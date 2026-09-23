@@ -288,8 +288,10 @@ impl Sim {
         let mut senses = Senses::new();
         senses.settle(&w.view(), &f.view());
         // Terrain, water and growth are frozen here: the cone occupancy is held across
-        // controller stages and patched from bites and deaths (cone-speed item 4).
+        // controller stages and patched from bites and deaths (cone-speed item 4), and
+        // the light receptor is memoed per standing face.
         senses.hold_cone();
+        senses.hold_light();
         sim.ecs.insert_resource(SenseField(senses));
         sim
     }
@@ -310,6 +312,7 @@ impl Sim {
         sim.mode = ScheduleMode::Static;
         senses.reset_trends();
         senses.hold_cone();
+        senses.hold_light();
         sim.ecs.insert_resource(SenseField(senses));
         sim
     }

@@ -1354,7 +1354,12 @@ pub(crate) fn observation(
         if let Some((cx, cz)) = a.pose.column(view.config.voxel_m, view.config.depth) {
             let wx = cx.rem_euclid(i64::from(view.config.width));
             if view.is_support(wx, a.site.y, cz) {
-                obs[lm.offset] = clamp01(view.sky_visibility(wx, a.site.y, cz));
+                // A static episode's senses memo the reading per face (frozen terrain).
+                let sky = senses
+                    .as_deref_mut()
+                    .and_then(|s| s.held_sky(view, wx, a.site.y, cz))
+                    .unwrap_or_else(|| view.sky_visibility(wx, a.site.y, cz));
+                obs[lm.offset] = clamp01(sky);
                 obs[lm.offset + 1] = 1.0;
             }
         }

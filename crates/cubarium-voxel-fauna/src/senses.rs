@@ -142,7 +142,8 @@ impl Connectivity {
             }
         }
         nodes.sort_unstable();
-        let mut neighbors: FxHashMap<usize, Vec<usize>> = FxHashMap::with_capacity_and_hasher(nodes.len(), Default::default());
+        let mut neighbors: FxHashMap<usize, Vec<usize>> =
+            FxHashMap::with_capacity_and_hasher(nodes.len(), Default::default());
         for &cell in &nodes {
             let (x, y, z) = c.coords(cell);
             let mut nb: Vec<usize> = Vec::with_capacity(4);
@@ -217,8 +218,7 @@ fn detritus_at(fv: &FloraView<'_>, site: Site) -> f64 {
 impl DetritusField {
     fn ensure_graph(&mut self, view: &VoxelView<'_>) {
         if !self.graph.current(view) {
-            let old_nodes: FxHashSet<usize> =
-                self.graph.nodes.iter().copied().collect();
+            let old_nodes: FxHashSet<usize> = self.graph.nodes.iter().copied().collect();
             self.graph = Connectivity::build(view);
             // Terrain changed: drop values for nodes that no longer exist and keep the
             // rest. The fresh graph is what defines the nodes from here on.
@@ -335,7 +335,8 @@ impl DetritusField {
         // (a direction with no node) reflects the local value, so the mix is always over
         // four directions.
         let mut max_change = 0.0f64;
-        let mut next: FxHashMap<usize, f64> = FxHashMap::with_capacity_and_hasher(work.len(), Default::default());
+        let mut next: FxHashMap<usize, f64> =
+            FxHashMap::with_capacity_and_hasher(work.len(), Default::default());
         for &(cell, p) in &prime {
             let (x, y, z) = c.coords(cell);
             let mut total = 0.0;
@@ -389,6 +390,9 @@ pub struct Senses {
     /// The static episode's held cone occupancy ([`Senses::hold_cone`]); `None` builds
     /// one per controller stage.
     cone: Option<Box<HeldCone>>,
+    /// The static episode's light memo ([`Senses::hold_light`]); `None` computes the
+    /// sky fan at every observation.
+    light: Option<Box<LightMemo>>,
 }
 
 impl Senses {
@@ -416,6 +420,24 @@ impl Senses {
         if self.cone.is_none() {
             self.cone = Some(Box::default());
         }
+    }
+
+    /// Memo the `Light` receptor for the episode: the static schedule's choice. The
+    /// reading is [`VoxelView::sky_visibility`] of the standing face, which is pure
+    /// terrain geometry — no water, no plants, no bodies — so on a frozen world it is a
+    /// function of the face alone. The memo keys on the world's `terrain_version` and
+    /// shape and recomputes when either moves, so it always returns the direct call's
+    /// value, bit for bit.
+    pub fn hold_light(&mut self) {
+        if self.light.is_none() {
+            self.light = Some(Box::default());
+        }
+    }
+
+    /// The standing face's sky visibility through the held memo, or `None` when this
+    /// senses handle does not hold one.
+    pub(crate) fn held_sky(&mut self, view: &VoxelView<'_>, x: i64, y: u32, z: u32) -> Option<f64> {
+        self.light.as_deref_mut().map(|m| m.sky(view, x, y, z))
     }
 
     /// Lend the held occupancy out for a controller stage (see [`Senses::return_cone`]).
@@ -931,6 +953,39 @@ pub(crate) fn build_occupancy(
     }
     occ.lay_bodies(view, fauna, window);
     occ
+}
+
+/// The `Light` receptor's memo for a frozen world (cone-speed follow-up): one entry per
+/// `(x, z)` column holding the last standing face's `y` and its sky visibility. A body
+/// standing on another face of the same column (a ledge over a floor) recomputes and
+/// replaces the entry — still the direct call's value. Dense, no hashing.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct LightMemo {
+    shape: (u64, u32, u32, u32),
+    /// `(face y, sky)` per column `z * width + x`; `y == u32::MAX` is empty.
+    columns: Vec<(u32, f64)>,
+}
+
+impl LightMemo {
+    pub(crate) fn sky(&mut self, view: &VoxelView<'_>, x: i64, y: u32, z: u32) -> f64 {
+        let c = view.config;
+        let shape = (view.terrain_version, c.width, c.height, c.depth);
+        let n = c.width as usize * c.depth as usize;
+        if self.shape != shape || self.columns.len() != n {
+            self.shape = shape;
+            self.columns.clear();
+            self.columns.resize(n, (u32::MAX, 0.0));
+        }
+        if z >= c.depth {
+            return view.sky_visibility(x, y, z);
+        }
+        let wx = x.rem_euclid(i64::from(c.width)) as usize;
+        let entry = &mut self.columns[z as usize * c.width as usize + wx];
+        if entry.0 != y {
+            *entry = (y, view.sky_visibility(x, y, z));
+        }
+        entry.1
+    }
 }
 
 /// The cone occupancy **held across controller stages** of a static episode (cone-speed

@@ -831,3 +831,74 @@ fn the_browser_digest_records_the_traversal() {
             .contains("|traversal:")
     );
 }
+
+/// The light memo: on a seeded static world, every support face's memoed reading is the
+/// direct call's, bit for bit, on the first (filling) and second (cached) pass, and the
+/// observation's `Light` slot through the memo equals the direct one as the bodies stand
+/// and after every one of them moves to another face.
+#[test]
+fn the_light_memo_reads_what_the_direct_call_reads() {
+    let (world, flora, fauna) = landscape(53);
+    let v = world.view();
+    let c = v.config;
+    let mut senses = senses::Senses::new();
+    senses.settle(&v, &flora.view());
+    senses.hold_light();
+    let faces: Vec<(i64, u32, u32)> = (0..c.depth)
+        .flat_map(|z| {
+            (0..c.width).flat_map(move |x| (0..c.height).map(move |y| (i64::from(x), y, z)))
+        })
+        .filter(|&(x, y, z)| v.is_support(x, y, z))
+        .collect();
+    assert!(
+        faces.len() > c.width as usize * c.depth as usize,
+        "the fixture has ledges"
+    );
+    for pass in 0..2 {
+        for &(x, y, z) in &faces {
+            let memo = senses.held_sky(&v, x, y, z).expect("held");
+            assert_eq!(
+                memo.to_bits(),
+                v.sky_visibility(x, y, z).to_bits(),
+                "pass {pass} face {x},{y},{z}"
+            );
+        }
+    }
+    // The observation's Light slot, held vs direct, as bodies stand and after every one
+    // is moved to another face (ledges included).
+    let light_slots = |fauna: &Fauna, senses: &mut senses::Senses| {
+        let fv = flora.view();
+        (0..fauna.animals.len())
+            .map(|i| {
+                let m = fauna.animals[i].founder.expect("a founder").manifest();
+                let lm = m
+                    .modules
+                    .iter()
+                    .find(|m| m.name == "Light")
+                    .copied()
+                    .expect("light");
+                let held =
+                    crate::body::observation(fauna, i, &v, &fv, &m, Some(senses), None)[lm.offset];
+                let direct = crate::body::observation(fauna, i, &v, &fv, &m, None, None)[lm.offset];
+                (held.to_bits(), direct.to_bits())
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut fauna = fauna;
+    // A browser's observation also needs a cone occupancy; the Light slot is all that is
+    // compared here, so the shredders carry it.
+    fauna.animals.retain(|a| a.founder == Some(Founder::Blind));
+    assert!(!fauna.animals.is_empty());
+    for (h, d) in light_slots(&fauna, &mut senses) {
+        assert_eq!(h, d, "as placed");
+    }
+    for (k, a) in fauna.animals.iter_mut().enumerate() {
+        let (x, y, z) = faces[(k * 37 + 11) % faces.len()];
+        a.site = Site { x: x as u32, y, z };
+        a.pose.x = (x as f64 + 0.5) * V;
+        a.pose.z = (f64::from(z) + 0.5) * V;
+    }
+    for (h, d) in light_slots(&fauna, &mut senses) {
+        assert_eq!(h, d, "after the bodies moved");
+    }
+}
