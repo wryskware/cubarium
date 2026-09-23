@@ -307,10 +307,12 @@ pub fn seed_with_founder_counts(
 /// this only ends a shower that could not finish.
 const SHOWER_CAP: u32 = 6000;
 
-/// Hard cap on the drain after the opening shower, in ticks: a simulated minute. The
+/// Hard cap on the drain after the opening shower, in ticks: two simulated minutes. The
 /// drain stops as soon as `World::settle`'s convergence says the water has stopped
-/// moving; this is only the bound on how long it may look.
-const DRAIN_CAP: u32 = 1200;
+/// moving; this is only the bound on how long it may look. Measured at seed 1 with no
+/// cap: `small` converges in 100 ticks, `wide` in 1,235, `default` in 1,889 — a
+/// one-minute cap stopped both larger rings still moving.
+const DRAIN_CAP: u32 = 2400;
 
 /// The startup pre-roll, before anything is seeded.
 ///
