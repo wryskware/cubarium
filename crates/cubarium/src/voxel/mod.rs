@@ -3288,7 +3288,7 @@ mod tests {
                 cfg.world.voxel_m
             ),
             (160, 72, 24, 0.125),
-            "the Tachyon ring: 20 m around at 4 px per voxel"
+            "the Tachyon ring: 20 m around, 9 m tall, 3 m deep"
         );
         let text = std::fs::read_to_string(&path).unwrap();
         for key in [
