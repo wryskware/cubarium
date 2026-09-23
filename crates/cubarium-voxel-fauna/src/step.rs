@@ -310,10 +310,24 @@ fn controllers(
         return;
     }
     let fv = flora.view();
-    let cone_occupancy = due
+    // The cone occupancy is built once per stage, and only over the columns the due
+    // browsers' rays can reach (P5-A item 7): a ray reads exactly what it would against
+    // the whole world, and a stage with one browser due indexes one browser's share of
+    // the ring.
+    let observers: Vec<f64> = due
         .iter()
-        .any(|&i| fauna.animals[i].founder == Some(Founder::Browser))
-        .then(|| crate::senses::cone_occupancy(view, &fv, &fauna.view()));
+        .filter(|&&i| fauna.animals[i].founder == Some(Founder::Browser))
+        .map(|&i| fauna.animals[i].pose.x)
+        .collect();
+    let cone_occupancy = (!observers.is_empty()).then(|| {
+        crate::senses::cone_occupancy_window(
+            view,
+            &fv,
+            &fauna.view(),
+            observers.iter().copied(),
+            Founder::Browser.manifest().cone_range_m,
+        )
+    });
     for i in due {
         let id = fauna.animals[i].id;
         let founder = fauna.animals[i].founder.expect("a due founder");

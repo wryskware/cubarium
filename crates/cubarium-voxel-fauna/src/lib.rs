@@ -74,7 +74,9 @@ use cubarium_voxel::{VoxelView, World};
 use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraView, Site, Taken};
 use serde::{Deserialize, Serialize};
 
-pub use body::{Body, FounderPhysiology, climb_voxels, effective_config, has_headroom};
+pub use body::{
+    Body, FounderPhysiology, birth_readiness, climb_voxels, effective_config, has_headroom,
+};
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
     FounderFactories, Response, Scripted, resolve_actions,
@@ -82,18 +84,19 @@ pub use controller::{
 pub use cubarium_voxel::{DT, TICK_HZ};
 pub use cubarium_voxel_flora::Reach;
 pub use encounter::{
-    HEADING_SAMPLES, SightMap, band_crown_layers, crown_columns, crown_layer, crown_slab_m,
-    eye_above_surface_m, eye_origin_m, foliage_stands_in_layers, layer_columns, mouth_columns_at,
-    mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg, reachable_layers_of,
-    RouteMap, standable_faces, surface_m, walkable_components,
+    HEADING_SAMPLES, RouteMap, SightMap, band_crown_layers, crown_columns, crown_layer,
+    crown_slab_m, eye_above_surface_m, eye_origin_m, foliage_stands_in_layers, layer_columns,
+    mouth_columns_at, mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg,
+    reachable_layers_of, standable_faces, surface_m, walkable_components,
 };
 pub use manifest::{
-    ACTION_DEADBAND, Action, BROWSER_RAY_PITCH_OFFSETS_DEG, BROWSER_RAY_YAW_OFFSETS_DEG,
-    BROWSER_SECTOR_CENTRES_DEG, BROWSER_VISIBLE_CLASSES, Founder, HIDDEN, Manifest, Module,
-    SCHEMA_VERSION, Transfer, Tunings, gru32_parameter_count,
+    ACTION_DEADBAND, Action, BIRTH_READINESS_RULE, BROWSER_RAY_PITCH_OFFSETS_DEG,
+    BROWSER_RAY_YAW_OFFSETS_DEG, BROWSER_SECTOR_CENTRES_DEG, BROWSER_VISIBLE_CLASSES,
+    CRUISE_BODY_LENGTHS_PER_S, Founder, HIDDEN, Manifest, Module, OCCLUSION_RULE, SCHEMA_VERSION,
+    Transfer, Tunings, gru32_parameter_count,
 };
 pub use pose::Pose;
-pub use senses::{Senses, UPDATE_TICKS};
+pub use senses::{POOL_BULK_DENSITY, Senses, UPDATE_TICKS};
 pub use snapshot::SCHEMA;
 
 /// The browser's three cone sectors as `(foliage_fraction, foliage_proximity)` pairs.
@@ -124,6 +127,45 @@ pub fn browser_cone_readings(
             .sectors
             .map(|sector| (sector.foliage_fraction, sector.foliage_proximity)),
     )
+}
+
+/// The browser's whole `Cone(3, foliage/body)` module — the 19 values its observation
+/// carries, in manifest order — from a **full** occupancy build. A read-only diagnostic:
+/// the live controller stage builds a window around its due observers instead
+/// (`senses::cone_occupancy_window`), and this is what that window must agree with.
+pub fn browser_cone_observation(
+    view: &VoxelView<'_>,
+    flora: &FloraView<'_>,
+    fauna: &FaunaView<'_>,
+    animal: &Animal,
+) -> Option<[f64; 19]> {
+    if animal.founder != Some(Founder::Browser) {
+        return None;
+    }
+    let occupancy = senses::cone_occupancy(view, flora, fauna);
+    let body = fauna.config.founder(Founder::Browser).body_at(animal.body);
+    let reading = senses::cone_readings(
+        view,
+        &occupancy,
+        animal.id,
+        &animal.pose,
+        animal.site.y,
+        &Founder::Browser.manifest(),
+        &body,
+    );
+    let mut out = [0.0; 19];
+    for (k, sec) in reading.sectors.iter().enumerate() {
+        out[k * 6..k * 6 + 6].copy_from_slice(&[
+            sec.clear,
+            sec.all_proximity,
+            sec.foliage_fraction,
+            sec.foliage_proximity,
+            sec.body_fraction,
+            sec.body_proximity,
+        ]);
+    }
+    out[18] = f64::from(reading.valid);
+    Some(out)
 }
 
 /// What one cone ray struck first, at the resolution the policy is **not** given.

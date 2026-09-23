@@ -379,7 +379,9 @@ fn a_body_cannot_enter_a_void_shorter_than_its_height() {
             }])),
         ));
         let mut flora = Flora::new(FloraConfig::for_voxel_size(0.125));
-        for _ in 0..200 {
+        // Long enough to cross into the corridor at 1 BL/s, short of wrapping the 2 m
+        // ring back to the start.
+        for _ in 0..60 {
             fauna.step(&world, &mut flora);
         }
         let x = fauna.view().animal(id).expect("alive").pose.x;
@@ -430,21 +432,31 @@ fn the_ledgers_conserve_across_a_bite_under_the_band() {
 // 5. The trained contract
 // ---------------------------------------------------------------------------
 
-/// The observation vector and its digest do not move. Every number this package
-/// changes lives on the **physiology**, never on the `Manifest`, whose geometry fields
-/// are in the trained-policy digest — so the shipped centres keep loading and the
-/// browser keeps its 37 inputs. Recorded at f1f3f1f, before the anchors changed.
+/// The observation vector keeps its widths. Contract v2 (P5-A, D1) moved the digest on
+/// purpose — the anchors this package put on the physiology are now written into it —
+/// so what stays fixed is the shape: 37 inputs for the browser, 23 for the shredder, and
+/// the manifest's geometry is the physiology's.
 #[test]
-fn the_manifest_digests_and_the_input_widths_are_unchanged() {
+fn the_input_widths_are_unchanged_and_the_contract_carries_the_body() {
     let blind = Founder::Blind.manifest();
     let browser = Founder::Browser.manifest();
-    assert_eq!(blind.digest(), 6_080_287_729_887_670_217, "littershredder");
-    assert_eq!(browser.digest(), 5_231_006_656_698_958_532, "frondgrazer");
     assert_eq!(browser.inputs(), 37, "the browser's observation width");
     assert_eq!(blind.inputs(), 23, "the shredder's observation width");
-    // The recorded contract's geometry fields are still there, still what they were.
-    assert_eq!((browser.body_length_m, browser.body_width_m), (0.25, 0.125));
-    assert_eq!(browser.mouth_reach_up_voxels, 1);
-    assert_eq!(browser.mouth_reach_body_lengths, 0.25);
-    assert_eq!(browser.ray_pitch_offsets_deg, &[-20.0, 0.0, 20.0]);
+    let adult = FounderPhysiology::frozen(Founder::Browser);
+    assert_eq!(
+        (
+            browser.body_length_m,
+            browser.body_width_m,
+            browser.body_height_m
+        ),
+        (
+            adult.adult_length_m,
+            adult.adult_width_m,
+            adult.adult_height_m
+        )
+    );
+    assert_eq!(
+        browser.mouth_reach_body_lengths,
+        adult.mouth_reach_length_fraction
+    );
 }

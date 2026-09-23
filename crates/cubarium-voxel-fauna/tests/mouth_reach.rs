@@ -28,13 +28,6 @@ use cubarium_voxel_fauna::{
     Actions, Command as FaunaCommand, Fauna, FaunaConfig, Founder, Scripted, StartingStores,
 };
 
-/// The blind founder's manifest digest as recorded **before** the vertical-reach change
-/// (`cargo test -p cubarium-voxel-fauna`, 2026-09-21, at ffac8a1). The blind lineage's
-/// behaviour is identical under the new field, so its digest must not move and its
-/// trained centres must keep loading. The browser's digest is deliberately not pinned:
-/// it changes, and every browser centre trained before this build is refused.
-const BLIND_DIGEST_BEFORE_THE_VERTICAL_REACH: u64 = 6_080_287_729_887_670_217;
-
 // Since the layers package these fixtures use `one_layer_species()`: every plant is
 // the one-disc lollipop the model was when these claims were written, because the
 // subject here is the **mouth's physical band** and not the anatomy under it. An adult
@@ -290,11 +283,6 @@ fn the_blind_founders_litter_mouth_and_digest_are_unchanged() {
 
     let blind = Founder::Blind.manifest();
     assert_eq!(blind.mouth_reach_up_voxels, 0, "the blind mouth stays flat");
-    assert_eq!(
-        blind.digest(),
-        BLIND_DIGEST_BEFORE_THE_VERTICAL_REACH,
-        "the blind manifest digest moved: its centres would be refused for nothing"
-    );
 }
 
 /// (d) The read-only D3 diagnostic and the stepping rule are the same rule. On one

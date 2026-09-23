@@ -249,9 +249,7 @@ impl FounderFactories {
 
     /// A fresh controller for this lineage, or `None` when none is registered.
     pub fn make(&self, founder: Founder) -> Option<Box<dyn Controller>> {
-        self.per_founder[founder.index()]
-            .as_ref()
-            .map(|f| f.make())
+        self.per_founder[founder.index()].as_ref().map(|f| f.make())
     }
 }
 
@@ -262,7 +260,9 @@ impl std::fmt::Debug for FounderFactories {
             .filter(|founder| self.has(*founder))
             .map(Founder::name)
             .collect();
-        f.debug_tuple("FounderFactories").field(&registered).finish()
+        f.debug_tuple("FounderFactories")
+            .field(&registered)
+            .finish()
     }
 }
 
@@ -307,11 +307,51 @@ fn module_slot(manifest: &Manifest, name: &str) -> crate::manifest::Module {
         .unwrap_or_else(|| panic!("manifest has no {name} module"))
 }
 
+// The teachers' escape reflex (contract v2, P5-A item 9). Heuristic internals, not model
+// numbers: they shape a teacher's behaviour and nothing in the world reads them.
+
+/// `Self.motor_delivery` below this is a refused motor: a wall, a drop past the climb,
+/// water past the wade depth, or the strip's edge.
+const MOTOR_REFUSED: f64 = 0.5;
+/// Controller samples an escape lasts once triggered: a full-effort turn, the first
+/// sample standing still and the rest creeping.
+const ESCAPE_SAMPLES: u32 = 3;
+/// Forward effort while turning away, after the first sample.
+const ESCAPE_CREEP: f64 = 0.3;
+/// The share of a sector's 15 rays that are clear on flat open ground: the two
+/// downward pitch rows (−40°, −20°) hit the floor and the other nine do not. More clear
+/// than that, by half a ray, means a downward ray found nothing within range ahead.
+const FLAT_CLEAR: f64 = 9.0 / 15.0;
+const HALF_RAY: f64 = 0.5 / 15.0;
+/// A forward sector whose only hits are the floor rows, reading this far away on
+/// average, is looking over an edge rather than at the ground ahead: the floor rows of
+/// an adult on flat ground read ≈0.83, a one-voxel step down ≈0.65 (walkable), a drop of
+/// two voxels ≈0.47.
+const DROP_PROXIMITY: f64 = 0.55;
+
+/// The escape reflex both teachers share: returns `Some((forward, turn))` while an
+/// escape is running, arming it when `hazard` is seen.
+fn escape(escape: &mut u32, hazard: bool, turn: f64) -> Option<(f64, f64)> {
+    if hazard {
+        *escape = ESCAPE_SAMPLES;
+        return Some((0.0, turn));
+    }
+    if *escape > 0 {
+        *escape -= 1;
+        return Some((ESCAPE_CREEP, turn));
+    }
+    None
+}
+
 /// Observation-only **blind foraging** heuristic: go up the litter cue's response and
 /// trend while they support it, feed when the mouth tastes litter, turn away from contact
 /// and cover ground with a remembered, alternating turn preference when there is no
 /// signal. It reads only the observation vector — never a coordinate, a site, a route or
 /// a stock total (`design/voxel-senses-phase1-tests.md` §2's observation-only control).
+///
+/// Since contract v2 it **backs off a refused motor**: when `Self.motor_delivery` says
+/// most of what it asked for was not delivered, it stops pushing and turns away for a
+/// few samples, rather than holding full forward against a drop.
 #[derive(Clone, Debug)]
 pub struct BlindForager {
     /// The remembered turn preference while wandering without a signal: the controller's
@@ -319,6 +359,8 @@ pub struct BlindForager {
     turn_bias: f64,
     /// Controller samples spent moving without a signal before the preference flips.
     wander_ticks: u32,
+    /// Samples left in the current escape.
+    escape: u32,
     contact: crate::manifest::Module,
     taste: crate::manifest::Module,
     chem: crate::manifest::Module,
@@ -331,9 +373,10 @@ impl BlindForager {
         BlindForager {
             turn_bias: 1.0,
             wander_ticks: 0,
+            escape: 0,
             contact: module_slot(&manifest, "Contact(4)"),
             taste: module_slot(&manifest, "Taste(1)"),
-            chem: module_slot(&manifest, "Chem(litter)"),
+            chem: module_slot(&manifest, "Chem(detritus)"),
         }
     }
 }
@@ -366,6 +409,23 @@ impl Controller for BlindForager {
         } else {
             0.0
         };
+        // A refused motor: stop pushing and turn away — from the contacted side if there
+        // is one, else the remembered way.
+        let away = if left > right {
+            -1.0
+        } else if right > left {
+            1.0
+        } else {
+            self.turn_bias
+        };
+        if let Some((forward, turn)) = escape(&mut self.escape, o[7] < MOTOR_REFUSED, away) {
+            self.wander_ticks = 0;
+            return Response::Bounded(Actions {
+                forward,
+                turn,
+                feed,
+            });
+        }
         let turn = if front_blocked {
             // A wall is a physical feature, not a target: turn away from the contacted
             // side, or fall back on the remembered preference.
@@ -413,16 +473,23 @@ impl Controller for BlindForager {
     fn reset(&mut self) {
         self.turn_bias = 1.0;
         self.wander_ticks = 0;
+        self.escape = 0;
     }
 }
 
 /// Observation-only **sighted browser** heuristic: gaze at the cone sector with the most
 /// foliage, hold a centre-sector heading, creep around front contact, and feed only when
 /// the mouth's taste reports foliage. No coordinate, site, route or stock total is read.
+///
+/// Since contract v2 it **turns away from a hazard** before trying anything else: a
+/// refused motor, or a forward sector whose downward rays read a drop — more of them
+/// clear than flat ground leaves clear, or the floor rows' hits far off. Water in a
+/// hollow reads the same way, its surface being below the bank.
 #[derive(Clone, Debug)]
 pub struct BrowserForager {
     wander_bias: f64,
     wander_ticks: u32,
+    escape: u32,
     contact: crate::manifest::Module,
     taste: crate::manifest::Module,
     cone: crate::manifest::Module,
@@ -435,6 +502,7 @@ impl BrowserForager {
         BrowserForager {
             wander_bias: 1.0,
             wander_ticks: 0,
+            escape: 0,
             contact: module_slot(&manifest, "Contact(4)"),
             taste: module_slot(&manifest, "Taste(1)"),
             cone: module_slot(&manifest, "Cone(3, foliage/body)"),
@@ -461,6 +529,21 @@ impl Controller for BrowserForager {
         } else {
             0.0
         };
+        // The forward sector (s1) read against flat ground: its downward rows escaping,
+        // or its only hits far below.
+        let (clear, proximity) = (o[base + 6], o[base + 7]);
+        let drop = clear > FLAT_CLEAR + HALF_RAY
+            || (clear >= FLAT_CLEAR - HALF_RAY && proximity < DROP_PROXIMITY);
+        let away = self.wander_bias;
+        if let Some((forward, turn)) = escape(&mut self.escape, o[7] < MOTOR_REFUSED || drop, away)
+        {
+            self.wander_ticks = 0;
+            return Response::Bounded(Actions {
+                forward,
+                turn,
+                feed,
+            });
+        }
 
         let turn;
         // Gaze: turn toward the richest sector — sector 0 is −60° (left of forward), so
@@ -495,6 +578,7 @@ impl Controller for BrowserForager {
     fn reset(&mut self) {
         self.wander_bias = 1.0;
         self.wander_ticks = 0;
+        self.escape = 0;
     }
 }
 
@@ -502,6 +586,15 @@ impl Controller for BrowserForager {
 mod tests {
     use super::*;
     use crate::manifest::Founder;
+
+    /// A zero observation with `motor_delivery` at 1 — "everything asked for was
+    /// delivered", which is what the channel reads when nothing was asked — so a test
+    /// about one signal does not also trip the escape reflex.
+    fn quiet(manifest: &Manifest) -> Vec<f64> {
+        let mut o = vec![0.0; manifest.inputs()];
+        o[7] = 1.0;
+        o
+    }
 
     /// The adapter is the policy boundary's other half: logits go through the
     /// manifest's transfers and then the deadband, bounded actions only through the
@@ -571,10 +664,10 @@ mod tests {
         let (c, t, ch) = (
             module_slot(&blind_manifest, "Contact(4)"),
             module_slot(&blind_manifest, "Taste(1)"),
-            module_slot(&blind_manifest, "Chem(litter)"),
+            module_slot(&blind_manifest, "Chem(detritus)"),
         );
         let mut blind = BlindForager::new();
-        let mut o = vec![0.0; blind_manifest.inputs()];
+        let mut o = quiet(&blind_manifest);
 
         // Front contact: creep, turn away from the contacted side (here, a remembered
         // preference since neither side reads harder).
@@ -588,7 +681,7 @@ mod tests {
         // A flat, strong, valid cue: hold the heading and keep moving.  This is the
         // first valid sample at an arena start, so a deterministic diagnostic must not
         // turn away from the prepared food-facing heading.
-        let mut o = vec![0.0; blind_manifest.inputs()];
+        let mut o = quiet(&blind_manifest);
         o[ch.offset] = 0.6;
         o[ch.offset + 2] = 1.0;
         let Response::Bounded(a) = blind.drive(&o) else {
@@ -598,7 +691,7 @@ mod tests {
         assert_eq!(a.turn, 0.0, "a held-heading response does not steer");
 
         // Litter in the mouth: feed.
-        let mut o = vec![0.0; blind_manifest.inputs()];
+        let mut o = quiet(&blind_manifest);
         o[t.offset] = 0.6;
         o[t.offset + 2] = 1.0;
         let Response::Bounded(a) = blind.drive(&o) else {
@@ -614,7 +707,7 @@ mod tests {
             module_slot(&browser_manifest, "Cone(3, foliage/body)"),
         );
         let mut browser = BrowserForager::new();
-        let mut o = vec![0.0; browser_manifest.inputs()];
+        let mut o = quiet(&browser_manifest);
         o[cb.offset + 2] = 0.6; // left sector's foliage fraction
         let Response::Bounded(a) = browser.drive(&o) else {
             panic!("bounded");
@@ -622,14 +715,14 @@ mod tests {
         assert!(a.turn < -0.5, "left foliage turns left, got {}", a.turn);
         assert_eq!(a.feed, 0.0, "no mouth contact yet");
 
-        let mut o = vec![0.0; browser_manifest.inputs()];
+        let mut o = quiet(&browser_manifest);
         o[cb.offset + 14] = 0.6; // right sector's foliage fraction
         let Response::Bounded(a) = browser.drive(&o) else {
             panic!("bounded");
         };
         assert!(a.turn > 0.5, "right foliage turns right, got {}", a.turn);
 
-        let mut o = vec![0.0; browser_manifest.inputs()];
+        let mut o = quiet(&browser_manifest);
         o[tb.offset] = 0.6;
         o[tb.offset + 2] = 1.0;
         let Response::Bounded(a) = browser.drive(&o) else {
@@ -646,11 +739,11 @@ mod tests {
         let manifest = Founder::Blind.manifest();
         let (contact, chem) = (
             module_slot(&manifest, "Contact(4)"),
-            module_slot(&manifest, "Chem(litter)"),
+            module_slot(&manifest, "Chem(detritus)"),
         );
         let mut blind = BlindForager::new();
 
-        let mut cue = vec![0.0; manifest.inputs()];
+        let mut cue = quiet(&manifest);
         cue[chem.offset] = 0.6;
         cue[chem.offset + 2] = 1.0;
 
@@ -673,6 +766,7 @@ mod tests {
         };
         assert_eq!(actions.turn, -0.8);
         cue.fill(0.0);
+        cue[7] = 1.0;
         cue[contact.offset] = 1.0;
         cue[contact.offset + 1] = 0.8;
         cue[contact.offset + 2] = 0.1;
@@ -685,6 +779,7 @@ mod tests {
         // No signal alternates from the controller's own memory and remains in
         // the declared action bounds.  Reset returns to the initial preference.
         cue.fill(0.0);
+        cue[7] = 1.0;
         let mut no_signal = Vec::new();
         for _ in 0..3 {
             let Response::Bounded(actions) = blind.drive(&cue) else {

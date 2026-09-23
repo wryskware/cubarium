@@ -765,7 +765,7 @@ fn self_feedback_reports_the_previous_interval_only_and_starts_at_zero() {
     let forward = slot(&manifest, "Self", "resolved_forward");
     let turn = slot(&manifest, "Self", "resolved_turn");
     let delivery = slot(&manifest, "Self", "motor_delivery");
-    let trend = slot(&manifest, "Chem(litter)", "trend");
+    let trend = slot(&manifest, "Chem(detritus)", "trend");
 
     let world = flat(16, 3);
     let mut flora = Flora::new(FloraConfig::default());
@@ -954,8 +954,8 @@ fn two_receptor_positions_inside_one_gradient_cell_read_differently() {
     assert_eq!(still.len(), 3);
     assert_eq!(moved.len(), 3);
 
-    let response = slot(&Manifest::blind(), "Chem(litter)", "response");
-    let valid = slot(&Manifest::blind(), "Chem(litter)", "valid");
+    let response = slot(&Manifest::blind(), "Chem(detritus)", "response");
+    let valid = slot(&Manifest::blind(), "Chem(detritus)", "valid");
     assert_eq!(still[0].0[valid], 1.0, "the settled field read as invalid");
     assert!(
         still[0].0[response] > 1e-3,
@@ -1038,8 +1038,8 @@ fn a_one_voxel_wall_between_two_nodes_blocks_the_cue_and_its_interpolation() {
     };
 
     let manifest = Manifest::blind();
-    let response = slot(&manifest, "Chem(litter)", "response");
-    let valid = slot(&manifest, "Chem(litter)", "valid");
+    let response = slot(&manifest, "Chem(detritus)", "response");
+    let valid = slot(&manifest, "Chem(detritus)", "valid");
 
     let open = outcome(false);
     let walled = outcome(true);
@@ -1106,7 +1106,7 @@ fn removing_the_source_stops_emission_and_the_residue_decays_at_the_stated_half_
     run(&mut fauna, &world, &mut flora, &mut senses, 50);
 
     let manifest = Manifest::blind();
-    let response = slot(&manifest, "Chem(litter)", "response");
+    let response = slot(&manifest, "Chem(detritus)", "response");
     let saturation = manifest.tunings.chem_saturation;
     let samples = log.lock().expect("log").clone();
     assert_eq!(samples.len(), 12, "expected a sample every five ticks");
@@ -1450,8 +1450,8 @@ fn moving_a_resource_outside_sensing_range_changes_no_observation_value() {
     };
 
     let manifest = Manifest::blind();
-    let response = slot(&manifest, "Chem(litter)", "response");
-    let valid = slot(&manifest, "Chem(litter)", "valid");
+    let response = slot(&manifest, "Chem(detritus)", "response");
+    let valid = slot(&manifest, "Chem(detritus)", "valid");
     let a = blind_sample(24);
     let b = blind_sample(34);
     assert_eq!(a[valid], 1.0, "an out-of-range cue read as invalid");
@@ -1502,7 +1502,7 @@ fn a_receptor_at_a_face_centre_reads_that_face_symmetrically() {
         assert!(fauna.set_controller(id, Box::new(recorder)));
         run(&mut fauna, &world, &mut flora, &mut senses, 6);
         let o = log.lock().expect("log").first().cloned().expect("a sample");
-        o[slot(&Manifest::blind(), "Chem(litter)", "response")]
+        o[slot(&Manifest::blind(), "Chem(detritus)", "response")]
     };
 
     // One column either side of the single source, both at their face centres.
@@ -1527,7 +1527,7 @@ fn a_receptor_at_a_face_centre_reads_that_face_symmetrically() {
         assert!(fauna.set_controller(id, Box::new(recorder)));
         run(&mut fauna, &world, &mut flora, &mut senses, 6);
         let o = log.lock().expect("log").first().cloned().expect("a sample");
-        o[slot(&Manifest::blind(), "Chem(litter)", "response")]
+        o[slot(&Manifest::blind(), "Chem(detritus)", "response")]
     };
     let front = sample_z(1);
     let back = sample_z(3);

@@ -332,28 +332,16 @@ fn a_browser_refuses_the_glowcap_and_takes_the_rosette() {
     );
 }
 
-/// (4) **The manifests did not move.** The two shipped centres validate against this
-/// build by founder-manifest digest, so the diets must not touch a module id, a slot, a
-/// width or a taste mapping. The digests are the ones the shipped files carry
-/// (`crates/cubarium/assets/policies/*.json`); the retrain owns the *meaning* change on
-/// `Chem(litter)`, which is not a schema change.
+/// (4) **The cue channel kept its slot.** The diets did not touch a module slot, a
+/// width or a taste mapping; contract v2 (P5-A) later renamed the cue to what it carries,
+/// `Chem(detritus)`, in the same place.
 #[test]
-fn the_founder_manifests_keep_the_digests_the_shipped_centres_were_trained_against() {
-    assert_eq!(
-        Manifest::blind().digest(),
-        6_080_287_729_887_670_217,
-        "the littershredder centre would stop loading"
-    );
-    assert_eq!(
-        Manifest::browser().digest(),
-        5_231_006_656_698_958_532,
-        "the frondgrazer centre would stop loading"
-    );
+fn the_shredder_cue_keeps_its_slot() {
     let blind = Manifest::blind();
     let chem = blind
         .modules
         .iter()
-        .find(|m| m.name == "Chem(litter)")
-        .expect("the shredder's one cue channel keeps its id");
+        .find(|m| m.name == "Chem(detritus)")
+        .expect("the shredder's one cue channel");
     assert_eq!((chem.offset, chem.width), (18, 3));
 }

@@ -469,7 +469,7 @@ fn the_live_schedule_senses_the_litter_only_when_it_holds_a_field() {
     let chem = manifest
         .modules
         .iter()
-        .find(|m| m.name == "Chem(litter)")
+        .find(|m| m.name == "Chem(detritus)")
         .copied()
         .expect("the blind schema carries the litter cue");
 

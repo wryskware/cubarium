@@ -118,7 +118,9 @@ fn a_full_founder_pays_and_moves_on_the_held_actions() {
     let a = fauna.view().animal(id).expect("alive");
     assert_eq!(a.age_ticks, 5);
     assert!(
-        (a.pose.x - ((2.0 + 0.5) * 0.25 + 0.125 * (1.0 / 20.0))).abs() < 1e-12,
+        (a.pose.x - ((2.0 + 0.5) * 0.25 + Founder::Blind.manifest().cruise_m_per_s * (1.0 / 20.0)))
+            .abs()
+            < 1e-12,
         "one tick of full cruise = {}",
         a.pose.x
     );
@@ -128,7 +130,8 @@ fn a_full_founder_pays_and_moves_on_the_held_actions() {
     let a = fauna.view().animal(id).expect("alive");
     // A full period of cruise is exactly the manifest's forward reference.
     assert!(
-        (a.pose.x - ((2.0 + 0.5) * 0.25 + 0.03125)).abs() < 1e-9,
+        (a.pose.x - ((2.0 + 0.5) * 0.25 + Founder::Blind.manifest().forward_reference_m)).abs()
+            < 1e-9,
         "a full period at cruise moved {}",
         a.pose.x
     );
@@ -504,7 +507,10 @@ fn full_cruise_motor_respiration_equals_the_basal_rate() {
     // Heading 0 faces +z, so the travel is in z.
     let cruiser = fauna.view().animal(ids[0]).unwrap();
     assert!(
-        (cruiser.pose.z - ((2.0 + 0.5) * 0.25 + 6.0 * 0.125 * (1.0 / 20.0))).abs() < 1e-9,
+        (cruiser.pose.z
+            - ((2.0 + 0.5) * 0.25 + 6.0 * Founder::Blind.manifest().cruise_m_per_s * (1.0 / 20.0)))
+            .abs()
+            < 1e-9,
         "the cruiser is at z = {}",
         cruiser.pose.z
     );

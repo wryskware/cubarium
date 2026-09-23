@@ -18,6 +18,19 @@
 //! Both carry the same three actions. `Self`, `Contact(4)`, `Wet` and `Taste(1)` occupy the
 //! same slots in both, so a policy over a shared prefix has the same meaning in each.
 //!
+//! # Contract v2 (2026-09-22)
+//!
+//! Schema 2 (`design/handoffs/voxel-retrain-2026-09-22.md`, D1–D4). The body's meaning
+//! changed twice on 2026-09-22 — bodies in metres, then the step rule — without the digest
+//! noticing, so the canonical text now carries the **physical anchors** a slot's meaning
+//! depends on: the adult's length, width and height, the eye / mouth-band / reach /
+//! contact fractions, the climb, wade and drown depths, the cruise (1 BL/s, D2), the
+//! five pitches, the cue's name `Chem(detritus)`, the occlusion rule (D3, D4) with the
+//! pool bulk density it reads, and the birth-readiness rule. The anchors are **read off
+//! [`FounderPhysiology::frozen`](crate::FounderPhysiology::frozen)**, not restated, so the
+//! contract and the body it describes are one set of numbers. Every centre trained
+//! against schema 1 is refused.
+//!
 //! # Digest
 //!
 //! [`Manifest::digest`] is FNV-1a 64 over [`Manifest::canonical_text`], mirroring
@@ -43,13 +56,32 @@ pub const HIDDEN: usize = 32;
 
 /// The schema-version token folded into every manifest's canonical text. A change to the
 /// meaning of an existing slot bumps this and invalidates old digests.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
+
+/// Cruise speed in body lengths per second (D2, the standing rule "pace in body
+/// lengths"): the manifest's `cruise_m_per_s` is this times the adult length.
+pub const CRUISE_BODY_LENGTHS_PER_S: f64 = 1.0;
+
+/// The occlusion rule a cone ray and a contact probe are marched under, as the canonical
+/// text records it (D3, D4): terrain stops a ray; free water only below its surface
+/// (`fill × cell height`); a ground pool only below its physical height
+/// `organic / (cell area × bulk density)`; the strip's `z` edge is solid for rays and
+/// probes; above the world is open sky. Changing any clause is a new contract.
+pub const OCCLUSION_RULE: &str =
+    "terrain;water<surface=fill*cell;pool<organic/(cell_area*density);z_edge=solid;sky=open";
+
+/// What `Self.birth_readiness` reads 1 for, as the canonical text records it: the birth
+/// step would act on this body this tick — eligible (structure at `birth_body`, reserve
+/// at the package plus the floor), not in its refractory, not gestating, the surplus
+/// hold elapsing this tick, and for an egg-layer a face holding litter.
+pub const BIRTH_READINESS_RULE: &str =
+    "eligible&!refractory&!gestating&hold_elapses_now&eggs_on_litter";
 
 /// Which phase-one founder this is: a lineage identity, not a controller.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Founder {
-    /// The blind litter feeder (littershredder): `Self`, `Contact(4)`, `Wet`, `Taste(1)`,
-    /// `Chem(litter)` and `Light` — **23 inputs**.
+    /// The blind detritus feeder (littershredder): `Self`, `Contact(4)`, `Wet`, `Taste(1)`,
+    /// `Chem(detritus)` and `Light` — **23 inputs**.
     Blind,
     /// The sighted foliage browser (frondgrazer founder): the same shared prefix plus
     /// `Cone(3, foliage/body)` — **37 inputs**.
@@ -171,22 +203,27 @@ pub struct Manifest {
     pub deadband: f64,
     /// Controller period, seconds. Physics remains at the simulation tick.
     pub controller_period_s: f64,
-    /// Body length in metres, **as the trained contract recorded it**. The cruise speed
-    /// below was set at `1 BL/s` against it.
-    ///
-    /// **Not read for geometry since 2026-09-22**
-    /// (`design/handoffs/voxel-body-anchors-2026-09-22.md`, decisions §1). The animal's
-    /// real dimensions are its lineage's adult dimensions on the
-    /// [`FounderPhysiology`](crate::FounderPhysiology), scaled by
-    /// `(body / body_max)^(1/3)`, and they live there precisely because this field is
-    /// in [`Manifest::canonical_text`]: moving it would refuse the shipped centres. It
-    /// stays as the record of what the centres in `crates/cubarium/assets/policies`
-    /// were trained against, and package 5's retrain is where the two are reconciled.
+    /// The **adult** body in metres — length, width, height — as the contract records
+    /// it (D1): the [`FounderPhysiology`](crate::FounderPhysiology)'s own adult
+    /// dimensions. The live geometry is read from the physiology, scaled by
+    /// `(body / body_max)^(1/3)`; these are the same numbers, written into the digest so a
+    /// centre trained on one body is refused by another.
     pub body_length_m: f64,
-    /// Footprint width in metres as the trained contract recorded it: half the body
-    /// length for these two founders. **Not read for geometry** — see
-    /// [`Manifest::body_length_m`].
     pub body_width_m: f64,
+    pub body_height_m: f64,
+    /// The anchors, as fractions of the living body (decisions §§1, 2, 6): the eye and the
+    /// contact receptors over the standing surface as fractions of height, the mouth
+    /// band `[0, mouth_ceiling_fraction × height]`. The mouth's horizontal reach is
+    /// [`Manifest::mouth_reach_body_lengths`].
+    pub eye_height_fraction: f64,
+    pub mouth_ceiling_fraction: f64,
+    pub contact_height_fraction: f64,
+    /// The lineage's climb height, metres: what the step rule and the contact receptors
+    /// treat as a ledge rather than a wall.
+    pub climb_m: f64,
+    /// Standing water the body may walk into, and standing water it drowns in, metres.
+    pub wade_depth_m: f64,
+    pub drown_depth_m: f64,
     /// Organic-mass reference the founder's `Self` channels are normalized against.
     pub body_reference: f64,
     /// Fixed `Self` normalization references (plan, "Exact starting manifests"): an adult's
@@ -195,7 +232,8 @@ pub struct Manifest {
     pub adult_energy_reference: f64,
     pub adult_reserve_reference: f64,
     pub structural_reference: f64,
-    /// Cruise speed in metres per second (`1 BL/s`).
+    /// Cruise speed in metres per second: [`CRUISE_BODY_LENGTHS_PER_S`] × the adult
+    /// length (D2).
     pub cruise_m_per_s: f64,
     /// Yaw cap in radians per second.
     pub yaw_cap_rad_per_s: f64,
@@ -203,20 +241,17 @@ pub struct Manifest {
     /// controller interval** — one controller period of cruise or yaw — not the rate.
     pub forward_reference_m: f64,
     pub turn_reference_rad: f64,
-    /// Mouth/feed reach, in body lengths, as the trained contract recorded it. **Not
-    /// read for geometry** — the live reach is `mouth_reach_length_fraction × length`
-    /// on the physiology, at the same 0.25 — see [`Manifest::body_length_m`].
+    /// The mouth's horizontal reach ahead of the footprint, in body lengths: the
+    /// physiology's `mouth_reach_length_fraction`.
     pub mouth_reach_body_lengths: f64,
     /// How many whole voxels above its own head layer the mouth could take food from
     /// under the rule of 2026-09-21 (`design/handoffs/voxel-browser-reach-2026-09-21.md`).
     ///
-    /// **Not read since 2026-09-22.** The mouth is a physical band
-    /// `[0, 1.33 × body height]` over the standing surface
-    /// ([`crate::Body::mouth_layers`]; decisions §2), which for the adult browser is
-    /// 0.249375 m — less than the one 0.25 m voxel this field claimed, and two cells on
-    /// a 0.125 m grid, which is the same air. The field stays because it is in
-    /// [`Manifest::canonical_text`] whenever it is non-zero: removing it would move the
-    /// browser's digest and refuse its shipped centre for nothing.
+    /// **Not part of the contract and not read by the tick.** The mouth is the physical
+    /// band `[0, mouth_ceiling_fraction × height]` ([`crate::Body::mouth_layers`];
+    /// decisions §2), which the canonical text carries instead. The field survives only
+    /// for the arena layouts' own reachability checks, which package 5's arena rebuild
+    /// (P5-B) replaces; it is deliberately left out of [`Manifest::canonical_text`].
     pub mouth_reach_up_voxels: u32,
     /// Which cue the mouth's one taste channel means: `litter` for the blind feeder,
     /// `foliage` for the browser.
@@ -236,6 +271,15 @@ pub struct Manifest {
     pub ray_pitch_offsets_deg: &'static [f64],
     /// Maximum cone ray range, metres; zero for a blind founder.
     pub cone_range_m: f64,
+    /// The bulk density a ground pool's physical height is computed with,
+    /// `organic / (cell area × density)`, organic units per cubic metre (D3). An authored
+    /// placeholder (`design/backlog.md` §1); the cone reads the same constant.
+    pub pool_bulk_density: f64,
+    /// [`OCCLUSION_RULE`]: the occlusion the eye and the contact receptors are marched
+    /// under.
+    pub occlusion_rule: &'static str,
+    /// [`BIRTH_READINESS_RULE`]: what `Self.birth_readiness` reads 1 for.
+    pub birth_readiness_rule: &'static str,
 }
 
 // ---------------------------------------------------------------- static layout
@@ -285,26 +329,18 @@ const MODULE_TASTE1: Module = Module {
     channels: &TASTE1_CHANNELS,
 };
 
-const CHEM_LITTER_CHANNELS: [&str; 3] = ["response", "trend", "valid"];
+const CHEM_DETRITUS_CHANNELS: [&str; 3] = ["response", "trend", "valid"];
 
-/// The shredder's one diffused cue channel.
-///
-/// **The id says `litter`; since 2026-09-22 the field carries detritus** — litter,
-/// carrion and glowcap cap tissue, the shredder's three foods (decisions §3,
-/// `design/handoffs/voxel-diets-2026-09-22.md`; the field is
-/// [`crate::senses`]'s `DetritusField`). The name, the slot, the width and the channel
-/// order are unchanged and stay unchanged, because they are inside the trained-policy
-/// digest and the shipped centres must keep loading: renaming the module would refuse
-/// them, and this package's rule is that no sensing *shape* moves.
-///
-/// So this is a **meaning change on an unchanged channel**, and the scheduled retrain
-/// (package 5) owns it. On a world holding only litter the value is what it always was.
-/// `crates/cubarium/assets/policies/README.md` records it beside the other two.
-const MODULE_CHEM_LITTER: Module = Module {
-    name: "Chem(litter)",
+/// The shredder's one diffused cue channel: the **detritus** field, litter plus carrion
+/// (decisions §3 as amended 2026-09-22; the field is [`crate::senses`]'s
+/// `DetritusField`). Called `Chem(litter)` under schema 1, when the field carried litter
+/// alone; renamed with contract v2 (P5-A item 4). Name and canonical text only: the slot,
+/// the width and the channel order are unchanged.
+const MODULE_CHEM_DETRITUS: Module = Module {
+    name: "Chem(detritus)",
     offset: 18,
     width: 3,
-    channels: &CHEM_LITTER_CHANNELS,
+    channels: &CHEM_DETRITUS_CHANNELS,
 };
 
 const LIGHT_CHANNELS: [&str; 2] = ["response", "valid"];
@@ -350,7 +386,7 @@ const BLIND_MODULES: [Module; 6] = [
     MODULE_CONTACT4,
     MODULE_WET,
     MODULE_TASTE1,
-    MODULE_CHEM_LITTER,
+    MODULE_CHEM_DETRITUS,
     MODULE_LIGHT,
 ];
 const BROWSER_MODULES: [Module; 5] = [
@@ -392,8 +428,10 @@ pub const ACTION_DEADBAND: f64 = 0.05;
 pub const BROWSER_SECTOR_CENTRES_DEG: [f64; 3] = [-60.0, 0.0, 60.0];
 /// Per-sector ray yaw offsets, degrees.
 pub const BROWSER_RAY_YAW_OFFSETS_DEG: [f64; 3] = [-30.0, 0.0, 30.0];
-/// Per-sector ray pitch offsets, degrees.
-pub const BROWSER_RAY_PITCH_OFFSETS_DEG: [f64; 3] = [-20.0, 0.0, 20.0];
+/// Per-sector pitch ray offsets, degrees: the decided fan, −40..+40 (decisions §6), so
+/// the eye sees basal food at its feet, a drop ahead, and a crown above. 45 rays; the
+/// sector values are fractions of the ray count, so the channel count does not move.
+pub const BROWSER_RAY_PITCH_OFFSETS_DEG: [f64; 5] = [-40.0, -20.0, 0.0, 20.0, 40.0];
 /// The classes a browser's cone exposes. Terrain and wood still occlude.
 pub const BROWSER_VISIBLE_CLASSES: [&str; 2] = ["foliage", "body"];
 
@@ -428,27 +466,72 @@ const BLIND_TASTE_RESISTANCES: [(&str, f64); 2] = [("litter", 0.2), ("ground", 0
 const BROWSER_TASTE_RESISTANCES: [(&str, f64); 3] =
     [("foliage", 0.3), ("wood", 0.8), ("ground", 0.5)];
 
+/// The controller period every founder is sampled at, seconds.
+const CONTROLLER_PERIOD_S: f64 = 0.25;
+
+/// The fields of a manifest that are the founder's **physical anchors**, read off its
+/// frozen physiology (D1) so the contract and the body cannot drift apart.
+struct Anchors {
+    length: f64,
+    width: f64,
+    height: f64,
+    eye: f64,
+    mouth_ceiling: f64,
+    contact: f64,
+    reach: f64,
+    climb: f64,
+    wade: f64,
+    drown: f64,
+    cruise: f64,
+}
+
+fn anchors(founder: Founder) -> Anchors {
+    let p = crate::FounderPhysiology::frozen(founder);
+    Anchors {
+        length: p.adult_length_m,
+        width: p.adult_width_m,
+        height: p.adult_height_m,
+        eye: p.eye_height_fraction,
+        mouth_ceiling: p.mouth_ceiling_fraction,
+        contact: p.contact_height_fraction,
+        reach: p.mouth_reach_length_fraction,
+        climb: p.climb_m,
+        wade: p.core.wade_depth_m,
+        drown: p.core.drown_depth_m,
+        cruise: CRUISE_BODY_LENGTHS_PER_S * p.adult_length_m,
+    }
+}
+
 impl Manifest {
-    /// The blind littershredder: 23 inputs, no eyes. Body 0.125 m, cruise 0.125 m/s.
+    /// The blind littershredder: 23 inputs, no eyes. The ladder's 0.19 m body, cruising
+    /// at one body length per second.
     pub fn blind() -> Manifest {
+        let a = anchors(Founder::Blind);
         Manifest {
             schema_version: SCHEMA_VERSION,
             founder: Founder::Blind,
             modules: &BLIND_MODULES,
             actions: &ACTIONS,
             deadband: ACTION_DEADBAND,
-            controller_period_s: 0.25,
-            body_length_m: 0.125,
-            body_width_m: 0.0625,
+            controller_period_s: CONTROLLER_PERIOD_S,
+            body_length_m: a.length,
+            body_width_m: a.width,
+            body_height_m: a.height,
+            eye_height_fraction: a.eye,
+            mouth_ceiling_fraction: a.mouth_ceiling,
+            contact_height_fraction: a.contact,
+            climb_m: a.climb,
+            wade_depth_m: a.wade,
+            drown_depth_m: a.drown,
             body_reference: 0.0125,
             adult_energy_reference: 0.0375,
             adult_reserve_reference: 0.00625,
             structural_reference: 0.0125,
-            cruise_m_per_s: 0.125,
+            cruise_m_per_s: a.cruise,
             yaw_cap_rad_per_s: 2.0,
-            forward_reference_m: 0.03125,
+            forward_reference_m: a.cruise * CONTROLLER_PERIOD_S,
             turn_reference_rad: 0.5,
-            mouth_reach_body_lengths: 0.25,
+            mouth_reach_body_lengths: a.reach,
             mouth_reach_up_voxels: 0,
             taste_cue: "litter",
             taste_resistances: &BLIND_TASTE_RESISTANCES,
@@ -458,30 +541,41 @@ impl Manifest {
             ray_yaw_offsets_deg: &[],
             ray_pitch_offsets_deg: &[],
             cone_range_m: 0.0,
+            pool_bulk_density: crate::senses::POOL_BULK_DENSITY,
+            occlusion_rule: OCCLUSION_RULE,
+            birth_readiness_rule: BIRTH_READINESS_RULE,
         }
     }
 
-    /// The sighted browser: 37 inputs with a three-sector cone. Body 0.25 m, cruise
-    /// 0.25 m/s, 2 m ray range and 27 rays.
+    /// The sighted browser: 37 inputs with a three-sector cone. The ladder's 0.375 m
+    /// body, cruising at one body length per second; 2 m ray range and 45 rays.
     pub fn browser() -> Manifest {
+        let a = anchors(Founder::Browser);
         Manifest {
             schema_version: SCHEMA_VERSION,
             founder: Founder::Browser,
             modules: &BROWSER_MODULES,
             actions: &ACTIONS,
             deadband: ACTION_DEADBAND,
-            controller_period_s: 0.25,
-            body_length_m: 0.25,
-            body_width_m: 0.125,
+            controller_period_s: CONTROLLER_PERIOD_S,
+            body_length_m: a.length,
+            body_width_m: a.width,
+            body_height_m: a.height,
+            eye_height_fraction: a.eye,
+            mouth_ceiling_fraction: a.mouth_ceiling,
+            contact_height_fraction: a.contact,
+            climb_m: a.climb,
+            wade_depth_m: a.wade,
+            drown_depth_m: a.drown,
             body_reference: 0.05,
             adult_energy_reference: 0.15,
             adult_reserve_reference: 0.025,
             structural_reference: 0.05,
-            cruise_m_per_s: 0.25,
+            cruise_m_per_s: a.cruise,
             yaw_cap_rad_per_s: 2.0,
-            forward_reference_m: 0.0625,
+            forward_reference_m: a.cruise * CONTROLLER_PERIOD_S,
             turn_reference_rad: 0.5,
-            mouth_reach_body_lengths: 0.25,
+            mouth_reach_body_lengths: a.reach,
             mouth_reach_up_voxels: 1,
             taste_cue: "foliage",
             taste_resistances: &BROWSER_TASTE_RESISTANCES,
@@ -491,6 +585,9 @@ impl Manifest {
             ray_yaw_offsets_deg: &BROWSER_RAY_YAW_OFFSETS_DEG,
             ray_pitch_offsets_deg: &BROWSER_RAY_PITCH_OFFSETS_DEG,
             cone_range_m: 2.0,
+            pool_bulk_density: crate::senses::POOL_BULK_DENSITY,
+            occlusion_rule: OCCLUSION_RULE,
+            birth_readiness_rule: BIRTH_READINESS_RULE,
         }
     }
 
@@ -556,22 +653,34 @@ impl Manifest {
         }
         let _ = write!(
             s,
-            "|deadband:{}|cadence:{}|body_len:{}|body_width:{}|body_ref:{}|cruise:{}|yaw:{}|mouth_bl:{}",
+            "|deadband:{}|cadence:{}|body_len:{}|body_width:{}|body_height:{}|body_ref:{}|cruise:{}|yaw:{}|mouth_bl:{}",
             self.deadband,
             self.controller_period_s,
             self.body_length_m,
             self.body_width_m,
+            self.body_height_m,
             self.body_reference,
             self.cruise_m_per_s,
             self.yaw_cap_rad_per_s,
             self.mouth_reach_body_lengths
         );
-        // Written only when the mouth actually lifts: a zero reach is the behaviour every
-        // earlier build had, so its canonical text — and its digest — stay exactly as they
-        // were. A lineage that can lift declares it, and its old centres are refused.
-        if self.mouth_reach_up_voxels > 0 {
-            let _ = write!(s, "|mouth_up:{}", self.mouth_reach_up_voxels);
-        }
+        // The physical anchors (D1): where the eye, the mouth band and the receptors sit
+        // on the living body, what the legs can step, and the water it wades and drowns in.
+        let _ = write!(
+            s,
+            "|anchor:eye={}H,mouth=[0,{}H],contact={}H|climb:{}|wade:{}|drown:{}",
+            self.eye_height_fraction,
+            self.mouth_ceiling_fraction,
+            self.contact_height_fraction,
+            self.climb_m,
+            self.wade_depth_m,
+            self.drown_depth_m
+        );
+        let _ = write!(
+            s,
+            "|occlusion:{}|pool_density:{}|birth_ready:{}",
+            self.occlusion_rule, self.pool_bulk_density, self.birth_readiness_rule
+        );
         let _ = write!(
             s,
             "|self_ref:energy={},reserve={},structural={}|move_ref:forward={},turn={}",
@@ -671,7 +780,7 @@ mod tests {
         assert_eq!((MODULE_WET.offset, MODULE_WET.end()), (13, 14));
         assert_eq!((MODULE_TASTE1.offset, MODULE_TASTE1.end()), (15, 17));
         assert_eq!(
-            (MODULE_CHEM_LITTER.offset, MODULE_CHEM_LITTER.end()),
+            (MODULE_CHEM_DETRITUS.offset, MODULE_CHEM_DETRITUS.end()),
             (18, 20)
         );
         assert_eq!((MODULE_LIGHT.offset, MODULE_LIGHT.end()), (21, 22));
@@ -680,7 +789,7 @@ mod tests {
         assert_eq!(browser.inputs(), 37, "browser manifest width");
         assert_eq!(browser.modules.len(), 5);
         assert_eq!((MODULE_CONE3.offset, MODULE_CONE3.end()), (18, 36));
-        assert_eq!(browser.ray_count(), 27, "3 sectors x 3 x 3 rays");
+        assert_eq!(browser.ray_count(), 45, "3 sectors x 3 yaws x 5 pitches");
         assert_eq!(blind.ray_count(), 0);
         // The plan's named taste cue per founder and its fixed resistance mapping.
         assert_eq!(blind.taste_cue, "litter");
@@ -736,7 +845,7 @@ mod tests {
         assert_eq!(browser.digest(), browser.digest());
         assert_eq!(blind.digest(), fnv1a(blind.canonical_text().as_bytes()));
         assert_ne!(blind.digest(), browser.digest());
-        assert!(blind.canonical_text().contains("Chem(litter)"));
+        assert!(blind.canonical_text().contains("Chem(detritus)"));
         assert!(browser.canonical_text().contains("Cone(3, foliage/body)"));
         assert!(
             blind
