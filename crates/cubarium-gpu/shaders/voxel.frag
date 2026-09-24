@@ -39,12 +39,17 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
     vec4 waterK;        // SKIN_ALPHA_GAIN, WATER_TOP_ALPHA, -, -
     vec4 plantA;        // PLANT_TOP_GAIN, PLANT_TOP_TINT, PLANT_RIM, CROWN_EDGE
     vec4 plantB;        // CROWN_UNDER, TRUNK_SHADE[0], TRUNK_SHADE[1], TRUNK_LIGHT_AT
+    ivec4 tex;          // the face textures present, one bit per slot; -, -, -
 } u;
 
 layout(set = 0, binding = 1) uniform usampler3D voxels;  // rgba8ui, one texel per voxel
 layout(set = 0, binding = 2) uniform usampler3D roofTex; // r8ui, voxels to the solid above
 layout(set = 0, binding = 3) uniform sampler2D styleTex; // 3 x MAX_STYLES: wood, crown, heart
 layout(set = 0, binding = 4) uniform usampler2D glyphTex; // shared organism face texels
+// The face textures at this px_per_voxel (`cubarium_gpu::voxel::VoxelTextures`): slot k,
+// variant v is the S x S cell at (v*S, k*S), a top face in its first RISE rows. Texels
+// are sRGB-encoded.
+layout(set = 0, binding = 5) uniform sampler2D faceTex;
 
 layout(location = 0) out vec4 outColour;
 
@@ -99,6 +104,36 @@ bool waterOpenUp(int x, int y, int z) {
 
 int frontRow(int y, int z) { return BASE - (y + 1) * S - z * RISE; }
 
+// --- face textures --------------------------------------------------------------------
+
+// `TEXTURE_SLOTS`: terrain material m has its side at 2(m-1) and its top at 2(m-1)+1.
+const int TEX_TURF_SIDE = 6;
+
+bool texOn(int slot) { return slot >= 0 && (u.tex.x & (1 << slot)) != 0; }
+
+// Which of a face's four variants a voxel shows: a hash of its position, so a wall is not
+// one tile repeating, and the same voxel shows the same variant every frame.
+int texVariant(int x, int y, int z, int salt) {
+    uint h = uint(x) * 0x9E3779B1u ^ uint(y) * 0x85EBCA77u ^ uint(z) * 0xC2B2AE3Du
+        ^ uint(salt) * 0x27D4EB2Fu;
+    h ^= h >> 15;
+    h *= 0x2C1B3C6Du;
+    h ^= h >> 12;
+    return int(h & 3u);
+}
+
+// Face texel (dx, dy) of `slot`: dx across the face, dy down a side face from its top row
+// or across a top face from its back edge. The level is px_per_voxel itself, so this is
+// one texel per screen pixel and never filtered.
+vec4 faceTexel(int slot, int x, int y, int z, int salt, int dx, int dy) {
+    int v = texVariant(x, y, z, salt);
+    return texelFetch(faceTex, ivec2(v * S + dx, slot * S + dy), 0);
+}
+
+vec3 srgbToLinear(vec3 c) {
+    return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+}
+
 // --- colour ---------------------------------------------------------------------------
 
 vec3 strataOf(int m) {
@@ -144,10 +179,17 @@ vec3 plantLit(vec3 c, float shade) {
     return shade < 1.0 ? mix(c, lit, shade) : lit;
 }
 
-vec3 blockBody(uvec4 v) {
+// A solid face's colour before wetness and light: its texture's texel where the slot is
+// present, the material's strata colour where it is not.
+vec3 faceBase(int m, int slot, int x, int y, int z, int salt, int dx, int dy) {
+    if (!texOn(slot)) { return strataOf(m); }
+    return srgbToLinear(faceTexel(slot, x, y, z, salt, dx, dy).rgb);
+}
+
+vec3 blockBody(uvec4 v, vec3 base) {
     int m = matOf(v);
     float wet = holdsPore(m) ? clamp(float(v.b) / 255.0, 0.0, 1.0) : 0.0;
-    return mix(strataOf(m), u.waterDeepC.rgb, wet * u.shadeB.w);
+    return mix(base, u.waterDeepC.rgb, wet * u.shadeB.w);
 }
 
 vec3 blockLit(vec3 body, float shade) {
@@ -174,8 +216,10 @@ vec3 blockFront(int x, int y, int z, uvec4 v, int r, int dx) {
     bool riser = openUp && z > 0 && !solidAt(x, y, z - 1) && solidAt(x, y - 1, z - 1);
     bool onSide = (dx == 0 && openLeft) || (dx + 1 == S && openRight);
 
-    vec3 body = blockBody(v);
     int m = matOf(v);
+    // Soil under open sky wears the turf: the same soil, with a fringe over its top rows.
+    int slot = (m == 3 && openUp && texOn(TEX_TURF_SIDE)) ? TEX_TURF_SIDE : 2 * (m - 1);
+    vec3 body = blockBody(v, faceBase(m, slot, x, y, z, 0, dx, dy));
     if (m != 0 && u.roofK.z > 0.0) {
         body = body * (1.0 + faceGrain(x, y, z, dx, dy) * (u.roofK.z / 0.04));
     }
@@ -207,8 +251,8 @@ vec3 blockTop(int x, int y, int z, uvec4 v, int r, int dx) {
     bool dropRight = openRight && !solidAt(x + 1, y - 1, z);
     bool backContinues = z + 1 < D && solidAt(x, y, z + 1) && !solidAt(x, y + 1, z + 1);
 
-    vec3 body = blockBody(v);
     int m = matOf(v);
+    vec3 body = blockBody(v, faceBase(m, 2 * (m - 1) + 1, x, y, z, 1, dx, dy));
     if (m != 0 && u.roofK.z > 0.0) {
         body = body * (1.0 + faceGrain(x, y, z, dx, dy + 100) * (u.roofK.z / 0.04));
     }

@@ -62,6 +62,9 @@ chown -R "$USER_NAME:$USER_NAME" "$HOME_DIR/art"
 # $HOME_DIR, and `models_dir` defaults to `assets/voxel-models` under it.
 install -d -o "$USER_NAME" -g "$USER_NAME" -m 755 "$HOME_DIR/assets"
 rsync -a --delete "$REPO/assets/voxel-models/" "$HOME_DIR/assets/voxel-models/"
+# The GPU renderer's face textures, `textures_dir` = `assets/voxel-textures`: the panel
+# reads only lod/6 and override/6, but the masters let any level derive.
+rsync -a --delete "$REPO/assets/voxel-textures/" "$HOME_DIR/assets/voxel-textures/"
 chown -R "$USER_NAME:$USER_NAME" "$HOME_DIR/assets"
 
 # --- the fresh-world config ----------------------------------------------

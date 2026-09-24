@@ -3,7 +3,12 @@
 //!
 //! ```text
 //! cargo run -p cubarium --release --example voxel_specimens -- OUT.png [--glyphs] [--wilt W]
+//!     [--gpu [--px N] [--textures DIR]]
 //! ```
+//!
+//! `--gpu` draws the same strip with the GPU renderer instead (headless), at `--px`
+//! (default 6) with the face textures in `--textures` (default `assets/voxel-textures`;
+//! a directory that does not exist draws untextured). The CPU picture is always at 6.
 //!
 //! Each producer stands at three sizes (wood at 10 %, 40 % and 100 % of its maximum),
 //! left to right, in the front slab. Bloomcrown and lanternberry get a fourth, adult and
@@ -16,6 +21,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 
+use cubarium::sink::gpu::{VoxelGpuSink, VoxelGpuSinkOptions};
 use cubarium::voxel::model::ModelLibrary;
 use cubarium::voxel::present::VoxelPresenter;
 use cubarium::voxel::project::Projection;
@@ -33,10 +39,16 @@ fn main() -> Result<()> {
     let mut out = None;
     let mut glyphs = false;
     let mut wilt = 0.0f64;
+    let mut gpu = false;
+    let mut px = 6u32;
+    let mut textures: Option<PathBuf> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--glyphs" => glyphs = true,
+            "--gpu" => gpu = true,
+            "--px" => px = args.next().context("--px N")?.parse()?,
+            "--textures" => textures = Some(PathBuf::from(args.next().context("--textures DIR")?)),
             "--wilt" => wilt = args.next().context("--wilt W")?.parse()?,
             _ if out.is_none() => out = Some(PathBuf::from(a)),
             _ => bail!("unexpected argument {a}"),
@@ -167,6 +179,30 @@ fn main() -> Result<()> {
             ModelLibrary::load(&cfg.models_dir, voxel_m).context("the baked models")?,
         ))
     };
+    if gpu {
+        let cfg = VoxelConfig {
+            px_per_voxel: px,
+            textures_dir: textures.unwrap_or_else(|| cfg.textures_dir.clone()),
+            ..cfg
+        };
+        let proj = Projection::new(cfg.tilt_degrees, px, 0, &world_cfg)?;
+        let mut sink = VoxelGpuSink::new(
+            &cfg,
+            proj,
+            VoxelGpuSinkOptions {
+                models,
+                ..Default::default()
+            },
+        )?;
+        anyhow::ensure!(
+            sink.stage_view(&world.view(), view, fauna.view()),
+            "no staging buffer"
+        );
+        sink.render()?;
+        let rgba = sink.read_raster()?;
+        let rgb: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+        return write_2x(&out, u32::from(proj.raster_w), u32::from(proj.raster_h), &rgb);
+    }
     let proj = Projection::new(cfg.tilt_degrees, 6, 0, &world_cfg)?;
     let topology = Topology::Ring {
         w: proj.raster_w,
@@ -186,7 +222,23 @@ fn main() -> Result<()> {
     canvas.encode_raster(&mut raster);
 
     let (w, h) = (u32::from(proj.raster_w), u32::from(proj.raster_h));
-    let src = raster.as_bytes();
+    write_2x(&out, w, h, raster.as_bytes())?;
+    println!(
+        "{} specimens and {} animals on a {}x{}x{} strip -> {} ({}x{})",
+        plan.len(),
+        animal_x.len(),
+        world_cfg.width,
+        world_cfg.height,
+        world_cfg.depth,
+        out.display(),
+        w * 2,
+        h * 2
+    );
+    Ok(())
+}
+
+/// Write `src` (`w × h` RGB8) at 2× nearest, the panel's own upscale.
+fn write_2x(out: &std::path::Path, w: u32, h: u32, src: &[u8]) -> Result<()> {
     let mut rgb = vec![0u8; (w * 2 * h * 2 * 3) as usize];
     for y in 0..h * 2 {
         for x in 0..w * 2 {
@@ -200,16 +252,5 @@ fn main() -> Result<()> {
     enc.set_color(png::ColorType::Rgb);
     enc.set_depth(png::BitDepth::Eight);
     enc.write_header()?.write_image_data(&rgb)?;
-    println!(
-        "{} specimens and {} animals on a {}x{}x{} strip -> {} ({}x{})",
-        plan.len(),
-        animal_x.len(),
-        world_cfg.width,
-        world_cfg.height,
-        world_cfg.depth,
-        out.display(),
-        w * 2,
-        h * 2
-    );
     Ok(())
 }

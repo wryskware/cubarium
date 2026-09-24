@@ -38,10 +38,10 @@ use anyhow::{Context, Result, bail};
 use cubarium_gpu::vk::Gpu;
 use cubarium_gpu::voxel::{
     MAX_GLYPHS, MAX_STYLES, PART_ANIMAL_INTERIM, PART_NONE, PLANE_GLYPHS, PLANE_ROOF, VoxelParams,
-    VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel,
+    VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel, VoxelTextures,
 };
 use cubarium_voxel::{Material, VoxelView, World};
-use cubarium_voxel_flora::Flora;
+use cubarium_voxel_flora::{Flora, FloraView};
 
 use crate::sink::{FrameSink, Output, WebSink};
 use crate::voxel::VoxelConfig;
@@ -51,7 +51,7 @@ use crate::voxel::model::ModelLibrary;
 use crate::voxel::present as cpu;
 use crate::voxel::project::Projection;
 use crate::voxel::stand::{Part, Stands, Style};
-use cubarium_voxel_fauna::Fauna;
+use cubarium_voxel_fauna::{Fauna, FaunaView};
 
 use super::target::{GpuTarget, GpuTargetKind};
 
@@ -136,7 +136,8 @@ impl VoxelGpuSink {
             gpu.name,
             params.upload_bytes() as f64 / 1024.0
         );
-        let mut renderer = VoxelRenderer::new(&gpu, params)?;
+        let textures = load_textures(cfg, &params);
+        let mut renderer = VoxelRenderer::new(&gpu, params, &textures)?;
         // The panel is presented on its own thread: the queue submit and the fence wait
         // are 8 ms the run loop has better things to do with. Every other target is
         // unchanged (`sink/gpu/target.rs`).
@@ -201,17 +202,27 @@ impl VoxelGpuSink {
     /// rather than a wrong one. Nothing is rebuilt in that case, so a refused pack costs
     /// nothing but the check.
     pub fn stage_world(&mut self, world: &World, flora: &Flora, fauna: &Fauna) -> bool {
+        self.stage_view(&world.view(), flora.view(), fauna.view())
+    }
+
+    /// [`VoxelGpuSink::stage_world`] from views: what a tool drawing a posed flora (its
+    /// stands' moisture or parcel set by hand) stages.
+    pub fn stage_view(
+        &mut self,
+        view: &VoxelView<'_>,
+        flora: FloraView<'_>,
+        fauna: FaunaView<'_>,
+    ) -> bool {
         if !self.renderer.can_stage() {
             self.packs_skipped += 1;
             return false;
         }
         let started = Instant::now();
-        let view = world.view();
         let p = self.renderer.params();
-        let slow = self.packer.prepare(&view, flora, fauna);
+        let slow = self.packer.prepare(view, flora, fauna);
         let packer = &mut self.packer;
         self.renderer.stage(slow, |out| {
-            packer.fill(&view, p.width, p.height, p.depth, out)
+            packer.fill(view, p.width, p.height, p.depth, out)
         });
         let atmosphere = if p.sky_gradient && view.atmosphere_m3 > 0.0 {
             (view.atmosphere_m3 as f32 / 1.5).clamp(0.1, 1.0)
@@ -496,15 +507,20 @@ impl Packer {
 
     /// Everything that is not a write into the staging buffer: the plant and animal
     /// grids, and the roof if the terrain moved. Returns the slow planes' keys.
-    fn prepare(&mut self, view: &VoxelView<'_>, flora: &Flora, fauna: &Fauna) -> [u64; 2] {
+    fn prepare(
+        &mut self,
+        view: &VoxelView<'_>,
+        flora: FloraView<'_>,
+        fauna: FaunaView<'_>,
+    ) -> [u64; 2] {
         match self.models.as_deref() {
             Some(lib) => {
-                self.stands.rebuild_with(view, flora.view(), lib);
-                self.animals.rebuild_with(view, Some(fauna.view()), lib);
+                self.stands.rebuild_with(view, flora, lib);
+                self.animals.rebuild_with(view, Some(fauna), lib);
             }
             None => {
-                self.stands.rebuild(view, flora.view());
-                self.animals.rebuild(view, Some(fauna.view()));
+                self.stands.rebuild(view, flora);
+                self.animals.rebuild(view, Some(fauna));
             }
         }
         if self.roof_version != Some(view.terrain_version)
@@ -790,6 +806,43 @@ pub fn params_of(cfg: &VoxelConfig, proj: Projection, roof_from_texture: bool) -
     }
 }
 
+/// The face textures at this projection's level, from `cfg.textures_dir`, said once on
+/// stderr. Anything wrong with them draws the faces solid rather than refusing to run.
+pub fn load_textures(cfg: &VoxelConfig, params: &VoxelParams) -> VoxelTextures {
+    let dir = &cfg.textures_dir;
+    if !dir.exists() {
+        eprintln!(
+            "cubarium voxel: no face textures at {}; drawing solid faces",
+            dir.display()
+        );
+        return VoxelTextures::empty(params.s, params.rise);
+    }
+    match crate::voxel::textures::load(dir, params.s, params.rise) {
+        Ok((atlas, p)) => {
+            let slots = atlas.mask().count_ones();
+            eprintln!(
+                "cubarium voxel: face textures at {} px from {}: {slots} of {} faces \
+                 ({} override, {} level, {} derived here, {} repeated variants)",
+                params.s,
+                dir.display(),
+                cubarium_gpu::voxel::TEXTURE_SLOTS.len(),
+                p.overrides,
+                p.levels,
+                p.derived,
+                p.repeated,
+            );
+            atlas
+        }
+        Err(e) => {
+            eprintln!(
+                "cubarium voxel: the face textures in {} did not load ({e:#}); drawing solid faces",
+                dir.display()
+            );
+            VoxelTextures::empty(params.s, params.rise)
+        }
+    }
+}
+
 /// Refuse a world the renderer cannot hold, before the device is opened.
 pub fn check(proj: Projection) -> Result<()> {
     if proj.cropped {
@@ -968,7 +1021,7 @@ mod tests {
             let view = world.view();
             let b = self.ticks % 2;
             self.ticks += 1;
-            let keys = self.packer.prepare(&view, flora, fauna);
+            let keys = self.packer.prepare(&view, flora.view(), fauna.view());
             let write = self.slow.pack(b, keys);
             self.packer.fill(
                 &view,

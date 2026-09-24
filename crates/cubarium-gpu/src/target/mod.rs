@@ -35,7 +35,7 @@ mod shim;
 #[cfg(feature = "scanout")]
 pub use scanout::Scanout;
 #[cfg(feature = "scanout")]
-pub use shim::{SOCKET as SHIM_SOCKET, ShimPresenter, ShimScanout};
+pub use shim::{PANEL as SHIM_PANEL, SOCKET as SHIM_SOCKET, ShimPresenter, ShimScanout};
 
 /// Render into the world raster and nothing else.
 pub struct Headless {
