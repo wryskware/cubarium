@@ -63,8 +63,8 @@
 
 use cubarium::voxel::VoxelConfig;
 use cubarium::voxel::habitat;
-use cubarium::voxel::{install_founders_with, policy_args};
 use cubarium::voxel::scene;
+use cubarium::voxel::{install_founders_with, policy_args};
 use cubarium_voxel::{Command as WorldCommand, VoxelView, World};
 use cubarium_voxel_fauna::{
     Animal, ConeCensus, ConeHit, Departure, Fauna, FaunaConfig, Food, Founder, Senses, TICK_HZ,
@@ -231,7 +231,11 @@ fn main() {
             founded.seed,
             founded.lake_rejected,
             founded.habitat_rejected,
-            if founded.accepted { "accepted" } else { "NOT accepted" },
+            if founded.accepted {
+                "accepted"
+            } else {
+                "NOT accepted"
+            },
             lake.volume_m3,
             lake.visible_m2,
             world.config().voxel_m,
@@ -505,9 +509,7 @@ fn main() {
                 .map(|(id, _)| *id)
                 .collect();
             for id in &mine {
-                let cause = causes
-                    .next()
-                    .expect("a departure the ledger did not book");
+                let cause = causes.next().expect("a departure the ledger did not book");
                 labels.push((*id, cause));
             }
             assert!(
@@ -1506,4 +1508,134 @@ fn summary(sim: &Sim, ticks: u64) {
         l.deaths_accounted(),
         "the cause counters must account for every death"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cubarium_voxel::{Config as WorldConfig, Material};
+    use cubarium_voxel_fauna::{Command, StartingStores};
+
+    /// A flat one-row plain at 1 m cells, soil in `1..=2`, dry: every support face is
+    /// `y = 2`.
+    fn plain() -> World {
+        let mut w = World::empty(WorldConfig {
+            width: 6,
+            height: 10,
+            depth: 1,
+            voxel_m: 1.0,
+            seed: 5,
+            ..WorldConfig::default()
+        });
+        for x in 0..6 {
+            for y in 1..=2 {
+                w.apply(WorldCommand::SetMaterial {
+                    x,
+                    y,
+                    z: 0,
+                    material: Material::Soil,
+                });
+            }
+        }
+        w
+    }
+
+    /// Package S item 4: a body drowned on a hand-flooded face gets its `DROWN` row —
+    /// the depth the rule read and how many cells it summed, the bottom cell's fill, the
+    /// rain flag, and the same face's depth 100 ticks earlier (dry).
+    #[test]
+    fn a_hand_built_drowning_prints_its_drown_row() {
+        let mut world = plain();
+        let mut flora = Flora::new(FloraConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        assert!(fauna.apply(
+            &world,
+            Command::IntroduceFounder {
+                x: 4,
+                z: 0,
+                founder: Founder::Browser,
+                stores: StartingStores::FULL,
+                heading_rad: 0.0,
+            }
+        ));
+        let (id, site) = {
+            let a = &fauna.view().animals[0];
+            (a.id, a.site)
+        };
+        let founders = vec![id];
+        let mut history = WaterHistory::default();
+        for tick in 0..=100 {
+            history.observe(tick, &world.view());
+        }
+
+        // One whole voxel of water over the face: 1 m, past every drown depth.
+        let volume = world.config().voxel_volume();
+        let got = world.apply(WorldCommand::AddWater {
+            x: 4,
+            y: site.y + 1,
+            z: 0,
+            volume_m3: volume,
+        });
+        assert!(got > 0.0);
+        fauna.step(&world, &mut flora);
+        assert!(fauna.view().animals.is_empty(), "the body drowned");
+        assert_eq!(fauna.view().ledger.departed(Departure::Drowned), 1);
+        history.observe(101, &world.view());
+
+        let view = world.view();
+        let read = depth_read(&view, site);
+        assert_eq!(
+            read.depth_m,
+            view.water_depth_m(i64::from(site.x), site.y, site.z),
+            "the rule's own reader"
+        );
+        assert_eq!(read.cells, 1);
+        assert_eq!(read.bottom_fill, 1.0);
+        assert_eq!(history.depth_back(101, &view, site), Some(0.0));
+
+        let lines = drowning_lines(
+            101,
+            &[(id, Some(Founder::Browser), site)],
+            &founders,
+            &view,
+            false,
+            &history,
+        );
+        assert_eq!(lines.len(), 1);
+        let fields: Vec<&str> = lines[0].split(',').collect();
+        assert_eq!(fields[0], "DROWN");
+        assert_eq!(fields[1], "101");
+        assert_eq!(fields[3], id.to_string());
+        assert_eq!(fields[4], "frondgrazer");
+        assert_eq!(fields[5], "founder");
+        assert_eq!(
+            &fields[6..9],
+            &[
+                site.x.to_string().as_str(),
+                site.y.to_string().as_str(),
+                site.z.to_string().as_str()
+            ]
+        );
+        assert_eq!(fields[9].parse::<f64>().expect("depth"), 1.0);
+        assert_eq!(fields[10], "1");
+        assert_eq!(fields[11].parse::<f64>().expect("fill"), 1.0);
+        assert_eq!(fields[12], "0", "no rain fell");
+        assert_eq!(fields[13].parse::<f64>().expect("earlier"), 0.0);
+
+        // A body born in the run says so, and a history too short says `na`.
+        let short = WaterHistory::default();
+        let born = drowning_lines(
+            101,
+            &[(id + 1, Some(Founder::Blind), site)],
+            &founders,
+            &view,
+            true,
+            &short,
+        );
+        let fields: Vec<&str> = born[0].split(',').collect();
+        assert_eq!(fields[4], "littershredder");
+        assert_eq!(fields[5], "born");
+        assert_eq!(fields[12], "1");
+        assert_eq!(fields[13], "na");
+    }
 }

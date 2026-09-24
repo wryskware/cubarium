@@ -1367,6 +1367,7 @@ mod tests {
             evaluate_center: true,
             out: PathBuf::from("/tmp/opencode/cubarium-voxel-es-test"),
             mix: None,
+            remotes: None,
         }
     }
 
@@ -1544,6 +1545,7 @@ mod tests {
             workers: 1,
             evaluate_center: false,
             deadline: None,
+            remote: None,
         };
         let out = run_generation(&mut theta, &mut adam, &protocol, 0, &plan, &cancel);
         let err = out.expect_err("the cancellation flag must stop it");
@@ -1624,6 +1626,7 @@ mod tests {
                 workers,
                 evaluate_center: false,
                 deadline: None,
+                remote: None,
             };
             let report =
                 run_generation(&mut theta, &mut adam, &protocol, 0, &plan, &cancel).expect("ok");
@@ -1667,5 +1670,117 @@ mod tests {
         ));
         std::fs::remove_dir_all(&dir).ok();
         dir
+    }
+
+    /// A blind centre file authored against `digest`, holding `theta`.
+    fn centre_file(dir: &std::path::Path, name: &str, digest: u64, theta: &[f64]) -> PathBuf {
+        let file = crate::es::voxel::store::VoxelPolicyFile {
+            schema: crate::es::voxel::store::POLICY_SCHEMA.into(),
+            build: "test".into(),
+            founder: Founder::Blind.name().into(),
+            digest,
+            train_seed: 1,
+            generation: Some(288),
+            score: Some(1.8),
+            start_heading: task::START_HEADING_PROTOCOL.into(),
+            starting_stores: task::STARTING_STORES_PROTOCOL.into(),
+            arena_protocol: task::arena_protocol(Founder::Blind, Stage::B, task::Band::Landed),
+            protocol_hash: Some(0xfeed),
+            imitation: None,
+            stage: Stage::B.as_str().into(),
+            theta: theta.to_vec(),
+        };
+        let path = dir.join(name);
+        file.write(&path).expect("written");
+        path
+    }
+
+    /// Package S item 1: a transfer start takes a centre whose digest is another
+    /// manifest's but whose vector is this manifest's length, and records the source
+    /// file and its digest in the run's provenance; a wrong-length centre is refused by
+    /// name; `--init-center` stays strict about the digest.
+    #[test]
+    fn a_transfer_start_takes_a_same_length_centre_across_a_digest_change() {
+        let dir = std::env::temp_dir().join(format!("cubarium-transfer-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let digest = voxel_schema_digest(Founder::Blind);
+        let other = digest ^ 0x5a5a;
+        let theta = super::super::super::tensor::initial_center_shape::<23, 3>(77);
+        let moved = centre_file(&dir, "moved.json", other, &theta);
+
+        // `--init-center` refuses the digest mismatch, as it always did.
+        let strict = InitCenter::load(&moved, Founder::Blind).expect_err("strict");
+        assert!(strict.contains("digest"), "{strict}");
+
+        // The transfer takes it, exactly, and says where it came from.
+        let init = InitCenter::transfer(&moved, Founder::Blind).expect("same length");
+        assert_eq!(init.theta, theta, "the exact weights");
+        assert_eq!(init.provenance.file, moved.display().to_string());
+        assert_eq!(init.provenance.transfer_digest, Some(other));
+        assert_eq!(init.provenance.weights_fnv1a, fnv1a_hex(&theta));
+
+        // A run started from it records the source file and digest in its checkpoint,
+        // under this build's own digest and protocol.
+        let out = dir.join("run");
+        let spec = TrainSpec {
+            out: out.clone(),
+            init_center: Some(init),
+            ..smoke_spec()
+        };
+        let cancel = AtomicBool::new(false);
+        train(&spec, &cancel).expect("the transferred run trains");
+        let cp = load_checkpoint(&out.join("checkpoint.json"), None).expect("valid checkpoint");
+        let recorded = cp.init_center.as_ref().expect("provenance recorded");
+        assert_eq!(recorded.file, moved.display().to_string());
+        assert_eq!(recorded.transfer_digest, Some(other));
+        assert_eq!(cp.protocol.digest, digest, "the run is this manifest's");
+
+        // A centre one weight short is refused by name, before anything runs.
+        let short = centre_file(&dir, "short.json", other, &theta[..theta.len() - 1]);
+        let err = InitCenter::transfer(&short, Founder::Blind).expect_err("wrong length");
+        assert!(
+            err.contains("short.json")
+                && err.contains(&format!("{}", theta.len() - 1))
+                && err.contains(&format!("{}", theta.len())),
+            "{err}"
+        );
+        // Another lineage's centre is still another lineage's.
+        assert!(InitCenter::transfer(&moved, Founder::Browser).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Package S item 2: the plateau rule stops when the held-out best has not risen by
+    /// a relative `g` over the last `N` checkpoints, and never on a rising series.
+    #[test]
+    fn the_plateau_rule_stops_a_flat_series_and_not_a_rising_one() {
+        // P5-C's browser shape: most of the gain by the first checkpoints, then a creep.
+        let flat = [0.80, 1.02, 1.03, 1.035, 1.04];
+        assert!(!held_out_plateaued(&flat[..4], 3, 0.02), "too few checkpoints");
+        assert!(held_out_plateaued(&flat, 3, 0.02), "1.04 < 1.02 · 1.02");
+        let rising = [0.80, 0.90, 1.00, 1.10, 1.20, 1.30, 1.40];
+        for k in 1..=rising.len() {
+            assert!(!held_out_plateaued(&rising[..k], 3, 0.02), "rising at {k}");
+        }
+        // A fall after the best is still no rise; a late jump past the bar resets it.
+        assert!(held_out_plateaued(&[1.0, 1.5, 1.4, 1.3, 1.2], 3, 0.02));
+        assert!(!held_out_plateaued(&[1.0, 1.5, 1.4, 1.3, 1.6], 3, 0.02));
+        // Negative scores rise towards zero.
+        assert!(!held_out_plateaued(&[-1.0, -0.9, -0.8, -0.7], 3, 0.02));
+        assert!(held_out_plateaued(&[-1.0, -1.0, -0.995, -0.99], 3, 0.02));
+        // Zero checkpoints never stops.
+        assert!(!held_out_plateaued(&flat, 0, 0.02));
+
+        assert_eq!(
+            Plateau::parse("3,0.02").expect("parses"),
+            Some(Plateau {
+                checkpoints: 3,
+                gain: 0.02
+            })
+        );
+        assert_eq!(Plateau::parse("off").expect("off"), None);
+        assert!(Plateau::parse("3").is_err());
+        assert!(Plateau::parse("0,0.02").is_err());
+        assert!(Plateau::parse("3,-0.1").is_err());
+        assert_eq!(Some(Plateau::P5_DEFAULT), Plateau::parse("3,0.02").expect("ok"));
     }
 }

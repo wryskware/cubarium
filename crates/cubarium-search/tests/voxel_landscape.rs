@@ -259,7 +259,9 @@ fn a_mixed_run_draws_landscapes_and_writes_held_out_checkpoints() {
             held_out,
             held_out_every: 1,
             collapse_checkpoints: 4,
+            plateau: None,
         }),
+        remotes: None,
     };
     let cancel = AtomicBool::new(false);
     let report = trainer::train(&spec, &cancel).expect("the mixed run runs");
