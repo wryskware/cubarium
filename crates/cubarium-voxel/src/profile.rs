@@ -63,6 +63,7 @@ pub enum Phase {
     Drink,
     Feed,
     Grow,
+    Cover,
     Decompose,
     SeedBank,
     Propagate,
@@ -76,7 +77,7 @@ pub enum Phase {
 }
 
 impl Phase {
-    pub const ALL: [Phase; 40] = [
+    pub const ALL: [Phase; 41] = [
         Phase::WorldStep,
         Phase::Begin,
         Phase::Rain,
@@ -107,6 +108,7 @@ impl Phase {
         Phase::Drink,
         Phase::Feed,
         Phase::Grow,
+        Phase::Cover,
         Phase::Decompose,
         Phase::SeedBank,
         Phase::Propagate,
@@ -164,6 +166,7 @@ impl Phase {
             Phase::Drink => "  drink",
             Phase::Feed => "  feed (substrate)",
             Phase::Grow => "  grow",
+            Phase::Cover => "  latticevine cover",
             Phase::Decompose => "  decompose",
             Phase::SeedBank => "  seed_bank",
             Phase::Propagate => "  propagate",

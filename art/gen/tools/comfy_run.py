@@ -63,19 +63,58 @@ def apply_set(wf: dict, spec: str) -> None:
         node[last] = value
 
 
+def _upload(host: str, path: pathlib.Path) -> str:
+    boundary = "----cubariumref"
+    body = (
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"overwrite\"\r\n\r\ntrue\r\n"
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; "
+        f"filename=\"{path.name}\"\r\nContent-Type: image/png\r\n\r\n"
+    ).encode() + path.read_bytes() + f"\r\n--{boundary}--\r\n".encode()
+    req = urllib.request.Request(host + "/upload/image", data=body,
+                                 headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return json.loads(r.read())["name"]
+
+
+def wire_refs(wf: dict, refs: list[str], host: str) -> None:
+    """Refs go to images.image_1.. on the TextEncodeQwenImage21 node (API autogrow names)."""
+    enc = next(n for n in wf.values() if n.get("class_type") == "TextEncodeQwenImage21")
+    for k in [k for k in enc["inputs"] if k.startswith("images.")]:
+        del enc["inputs"][k]
+    for k in [k for k, n in wf.items() if n.get("class_type") == "LoadImage"]:
+        del wf[k]
+    for i, r in enumerate(refs, 1):
+        nid = str(479 + i)
+        wf[nid] = {"class_type": "LoadImage", "inputs": {"image": _upload(host, pathlib.Path(r))}}
+        enc["inputs"][f"images.image_{i}"] = [nid, 0]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("workflow")
     ap.add_argument("--out", required=True, help="where to write the first output image")
     ap.add_argument("--set", action="append", default=[], dest="sets")
     ap.add_argument("--host", default=DEFAULT_HOST)
+    ap.add_argument("--ref", action="append", default=[],
+                    help="reference image (repeatable): uploaded, wired to images.image_N of "
+                         "the TextEncodeQwenImage21 node via LoadImage nodes 480+N-1; "
+                         "unused LoadImage slots in the workflow are removed")
+    ap.add_argument("--batch", type=int, default=0,
+                    help="set batch_size on every EmptyLatentImage node; all images share the seed "
+                         "and are saved as <stem>-b<i>.png (batch_index i)")
     ap.add_argument("--timeout", type=float, default=900.0)
     a = ap.parse_args()
 
     wf = json.loads(pathlib.Path(a.workflow).read_text())
     for s in a.sets:
         apply_set(wf, s)
+    if a.ref or any(n.get("class_type") == "LoadImage" for n in wf.values()):
+        wire_refs(wf, a.ref, a.host)
 
+    if a.batch:
+        for n in wf.values():
+            if n.get("class_type") in ("EmptyLatentImage", "EmptySD3LatentImage"):
+                n["inputs"]["batch_size"] = a.batch
     t0 = time.time()
     resp = _post(a.host, "/prompt", {"prompt": wf})
     pid = resp["prompt_id"]
@@ -101,21 +140,22 @@ def main() -> int:
     if not images:
         print("no output images", file=sys.stderr)
         return 4
-    im = images[0]
-    q = urllib.parse.urlencode(
-        {"filename": im["filename"], "subfolder": im.get("subfolder", ""), "type": "output"}
-    )
     out = pathlib.Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(f"{a.host}/view?{q}", timeout=120) as r, out.open("wb") as f:
-        shutil.copyfileobj(r, f)
+    outs = [out] if len(images) == 1 else [out.with_name(f"{out.stem}-b{i}{out.suffix}") for i in range(len(images))]
+    sizes = []
+    for im, dst in zip(images, outs):
+        q = urllib.parse.urlencode(
+            {"filename": im["filename"], "subfolder": im.get("subfolder", ""), "type": "output"}
+        )
+        with urllib.request.urlopen(f"{a.host}/view?{q}", timeout=120) as r, dst.open("wb") as f:
+            shutil.copyfileobj(r, f)
+        try:
+            from PIL import Image
 
-    try:
-        from PIL import Image
-
-        size = "x".join(str(v) for v in Image.open(out).size)
-    except Exception:
-        size = "?"
+            sizes.append("x".join(str(v) for v in Image.open(dst).size))
+        except Exception:
+            sizes.append("?")
     seed = next(
         (
             n["inputs"]["seed"]
@@ -124,7 +164,8 @@ def main() -> int:
         ),
         "?",
     )
-    print(f"{out} | {size} | seed={seed} | {time.time() - t0:.1f}s")
+    for i, (dst, size) in enumerate(zip(outs, sizes)):
+        print(f"{dst} | {size} | seed={seed} | batch_index={i} | {time.time() - t0:.1f}s")
     return 0
 
 

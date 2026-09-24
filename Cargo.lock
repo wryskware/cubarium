@@ -684,6 +684,7 @@ dependencies = [
  "bevy_tasks",
  "cubarium-voxel",
  "postcard",
+ "rustc-hash",
  "serde",
 ]
 

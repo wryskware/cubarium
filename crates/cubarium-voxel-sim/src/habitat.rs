@@ -269,6 +269,8 @@ pub struct Seeded {
     pub pre_roll: PreRollReport,
     /// The acceptance check on the seeded world.
     pub acceptance: Acceptance,
+    /// Latticevine founders rooted.
+    pub vines: usize,
     /// Founder stands planted, by [`Species::index`].
     pub stands_by_species: [usize; Species::COUNT],
     /// Faces each species was eligible for after the pre-roll (its establishment gates,
@@ -608,6 +610,10 @@ pub fn seed_pre_rolled(
             seeded.stands_by_species[Species::Glowcap.index()] += 1;
         }
     }
+
+    // Latticevine founders (D15 Revision 2): soil at the foot of a wall or on a ledge's
+    // lip, as many as `FloraConfig::latticevine.founders` asks for.
+    seeded.vines = flora.seed_vine_founders(world);
 
     // The two **sensed founder lineages**, which is what walks this habitat now. Both
     // arrive hungry (`StartingStores::HUNGRY`, the arenas' P2-C start): a body placed

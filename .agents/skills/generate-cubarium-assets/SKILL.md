@@ -55,10 +55,12 @@ Wrysk are accepted as-is: they bypass generation and go straight to sprite prep.
 3. Inspect full size and at sprite scale. State the largest visible failure. Change one
    thing. Hold the seed for prompt changes; change the seed for composition.
 4. Breadth: ≤ 8 candidates per lane per round. Heavy models sequentially on the 5090.
+   Candidates for one prompt go in a single latent batch (`batch_size` = count, `comfy_run.py --batch N`, saved `<stem>-b<i>.png`), logged as `seed` + `batch_index`.
 5. In-scene check: `art/gen/tools/compose_in_scene.py` pastes each candidate onto a
    current voxel capture at 8 and 4 px per voxel. Every sheet shows both.
 6. Contact sheet: labelled grid, candidate id, lane, arm, model, seed. Save as
-   `<run-dir>/sheet.png`. Write `LOG.md` for the round.
+   `<run-dir>/sheet.png`. Write `LOG.md` for the round. After finishing a run, rerun
+   `python3 art/gen/tools/build_index.py` to refresh `art/gen/index.html`.
 7. Return: counts, sheet path, failures, and proposed kit revisions. Stop; Wrysk judges.
 
 ## Body angles (the world is 3D)

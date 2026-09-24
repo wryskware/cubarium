@@ -206,3 +206,10 @@ panel must never depend on it.
 
 - Shoulder 0.85 vs 0.95: Wrysk does not want to tune now; 0.95 stays on the cube by env
   override, 0.85 stays the shipped default. Revisit when the GUI exists.
+
+## 7. CPU voxel renderer stays basic (Wrysk, 2026-09-23)
+
+The CPU renderer keeps its current flat look for good: it is the PNG diagnostics path,
+and less detail helps there. Textures and other art go into the GPU renderer only.
+Later, not now: layers in the CPU renderer that can be toggled on and off (terrain,
+water, flora, fauna, haze) for diagnostic captures.
