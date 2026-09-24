@@ -1704,4 +1704,168 @@ mod tests {
         assert_eq!(bin_start(143_999, &bloom), 0);
         assert_eq!(bin_start(144_000, &bloom), 144_000);
     }
+
+    // ------------------------------------------------ package SU: succession
+
+    /// Plant a founder of `species` on column `x` of a one-row slab.
+    fn founder(flora: &mut Flora, world: &World, x: i64, species: Species, wood: f64) {
+        assert!(flora.apply(
+            world,
+            crate::Command::Seed {
+                x,
+                z: 0,
+                species,
+                wood
+            }
+        ));
+    }
+
+    /// SU 1. A woody seed banked under a **ground cover** comes up through it at a check
+    /// whose draw says so: the cover dies an "overtopped" death, booked like any other —
+    /// its wood to dead wood, its foliage and reserve to litter — and the woody seedling
+    /// stands on the site. One stand per site, and every unit accounted for.
+    #[test]
+    fn a_woody_seed_comes_up_through_ground_cover_and_the_cover_is_overtopped() {
+        let mut config = FloraConfig::default();
+        // The test's own: a certain draw, so the check names the tick; no attrition, and a
+        // cover that sends nothing, so the site holds exactly what the test put there.
+        config.bloomcrown.overtop_per_check = 1.0;
+        config.bloomcrown.seed_attrition_per_s = 0.0;
+        config.springturf.propagule_rate = 0.0;
+        assert!(config.springturf.ground_cover, "springturf is a ground cover");
+        let mut world = slab(4, 1, 0.6);
+        let mut flora = Flora::new(config);
+        let site = Site { x: 1, y: 2, z: 0 };
+        founder(&mut flora, &world, 1, Species::Springturf, 0.05);
+        inject(&mut flora, site, Species::Bloomcrown, 1);
+        let t = next_check(site, flora.tick);
+        run_to(&mut flora, &mut world, t - 1);
+        assert_eq!(flora.view().stand_at(site).unwrap().species, Species::Springturf);
+        flora.step(&mut world);
+        let v = flora.view();
+        let now = v.stand_at(site).expect("a stand");
+        assert_eq!(now.species, Species::Bloomcrown, "the woody seedling came up through");
+        assert_eq!(v.stands.iter().filter(|s| s.site == site).count(), 1);
+        assert_eq!(v.ledger.overtopped[Species::Springturf.index()], 1);
+        assert_eq!(v.ledger.deaths, 1, "the cover's death is booked");
+        assert_eq!(v.ledger.seeds_germinated[Species::Bloomcrown.index()], 1);
+        let g = v.ground_at(site).unwrap();
+        assert!(g.dead_wood > 0.0 && g.litter > 0.0, "the cover's tissue: {g:?}");
+        assert_conserved(&flora, "after the overtopping");
+    }
+
+    /// SU 1, the other half: only a **woody** seed overtops, and only a **ground cover**
+    /// is overtopped. A ground cover's seed waits under another cover, and a woody seed
+    /// waits under a stand that is not a cover.
+    #[test]
+    fn only_woody_seeds_overtop_and_only_ground_covers_are_overtopped() {
+        let mut config = FloraConfig::default();
+        config.bloomcrown.overtop_per_check = 1.0;
+        for sc in [&mut config.bloomcrown, &mut config.springturf] {
+            sc.seed_attrition_per_s = 0.0;
+        }
+        config.velvetpad.propagule_rate = 0.0;
+        config.umbrellafrond.propagule_rate = 0.0;
+        assert!(!config.springturf.overtop_per_check.is_normal(), "springturf is no tree");
+        assert!(!config.umbrellafrond.ground_cover, "a frond is not a ground cover");
+        let mut world = slab(6, 1, 0.6);
+        let mut flora = Flora::new(config);
+        founder(&mut flora, &world, 1, Species::Velvetpad, 0.15);
+        founder(&mut flora, &world, 4, Species::Umbrellafrond, 0.3);
+        let (pad, frond) = (Site { x: 1, y: 2, z: 0 }, Site { x: 4, y: 2, z: 0 });
+        inject(&mut flora, pad, Species::Springturf, 3);
+        inject(&mut flora, frond, Species::Bloomcrown, 3);
+        let t = next_check(pad, flora.tick).max(next_check(frond, flora.tick));
+        run_to(&mut flora, &mut world, t);
+        let v = flora.view();
+        assert_eq!(v.stand_at(pad).unwrap().species, Species::Velvetpad);
+        assert_eq!(v.stand_at(frond).unwrap().species, Species::Umbrellafrond);
+        assert_eq!(v.ledger.overtopped.iter().sum::<u64>(), 0);
+        assert_eq!(v.ledger.establishments, 0);
+    }
+
+    /// SU 1: coming up through a mat is **harder** than taking a gap — a per-check draw
+    /// below one, keyed like every other draw. The frequency is the chance.
+    #[test]
+    fn the_overtop_chance_is_a_keyed_per_check_draw() {
+        let n = 20_000u64;
+        let hits = (0..n).filter(|&t| overtops(3, 77, t, 0.02)).count() as f64 / n as f64;
+        assert!((0.015..=0.025).contains(&hits), "{hits}");
+        assert!((0..1000).all(|t| !overtops(3, 77, t, 0.0)));
+        assert!((0..1000).all(|t| overtops(3, 77, t, 1.0)));
+        assert_eq!(overtops(3, 77, 5, 0.5), overtops(3, 77, 5, 0.5));
+        let config = FloraConfig::default();
+        for species in [Species::Bloomcrown, Species::Vaulttree, Species::Lanternberry] {
+            let p = config.species(species).overtop_per_check;
+            assert!(p > 0.0 && p < 1.0, "{}: {p}", species.name());
+        }
+    }
+
+    /// SU 2. Shrubs and trees carry **fewer, bigger seeds**: a seed is `seed_mass` minimum
+    /// packages, the parent pays for all of it, and the seedling it starts is bigger —
+    /// wood `w_frac` of the seed, not the bare `alive_min`. Ground covers keep one.
+    #[test]
+    fn a_bigger_seed_costs_its_mass_and_starts_a_bigger_seedling() {
+        let config = FloraConfig::default();
+        for species in [Species::Springturf, Species::Velvetpad, Species::Stonecushion] {
+            assert_eq!(config.species(species).seed_mass, 1, "{}", species.name());
+        }
+        for species in [Species::Bloomcrown, Species::Vaulttree, Species::Lanternberry] {
+            let sc = config.species(species);
+            assert!(sc.seed_mass >= 2, "{}: {}", species.name(), sc.seed_mass);
+            let minimum = sc.alive_min / sc.propagule_split[0];
+            let seed = package_of(sc);
+            assert!((seed - f64::from(sc.seed_mass) * minimum).abs() < 1e-15);
+            let (wood, foliage, reserve) = newborn_stocks(sc, seed);
+            assert!(wood > sc.alive_min, "{}: a bigger seedling", species.name());
+            assert!((wood - sc.propagule_split[0] * seed).abs() < 1e-15);
+            assert!(((wood + foliage + reserve) - seed).abs() < 1e-15);
+        }
+    }
+
+    /// SU 2. The gap lottery weighs **seed count × seed mass**: one seed four times the
+    /// minimum weighs what four minimum seeds do.
+    #[test]
+    fn the_gap_lottery_weighs_seed_count_by_seed_mass() {
+        let mut big = SpeciesConfig::vaulttree();
+        big.seed_mass = 4;
+        let small = SpeciesConfig::springturf();
+        assert_eq!(lottery_weight(1, &big), 4);
+        assert_eq!(lottery_weight(4, &small), 4);
+        assert_eq!(lottery_weight(3, &small), 3);
+    }
+
+    /// SU 3. The ground covers' shortcuts, reined in: a velvetpad's spore rain tries
+    /// **two** faces, not eight — so on a patchy floor more of it falls where nothing
+    /// grows — and a springturf sends 0.3 of its packages as runners, not 0.5.
+    #[test]
+    fn velvetpad_spores_try_twice_and_springturf_runs_less() {
+        let config = FloraConfig::default();
+        assert_eq!(config.velvetpad.spore_tries, 2);
+        assert_eq!(config.umbrellafrond.spore_tries, 8);
+        assert_eq!(config.springturf.clonal_share, 0.3);
+        let (width, depth) = (16u32, 16u32);
+        let mut world = slab(width, depth, 0.05);
+        for z in 0..depth {
+            for x in 0..width as i64 {
+                if (x as u32 / 4 + z / 4) % 2 == 0 {
+                    wet(&mut world, x, z, 0.6);
+                }
+            }
+        }
+        let view = world.view();
+        let home = Site { x: 8, y: 2, z: 8 };
+        let ground: Vec<Ground> = Vec::new();
+        let banked = |tries: u32| {
+            let mut sc = config.velvetpad.clone();
+            sc.hop = 5;
+            sc.spore_tries = tries;
+            (0..400u64)
+                .filter(|&t| matches!(landing(&view, &ground, &sc, home, 11, t), Landing::Bank(_)))
+                .count()
+        };
+        let (two, eight) = (banked(2), banked(8));
+        assert!(two < eight, "two tries banked {two}, eight {eight}");
+        assert!(two > 0, "two tries still land some");
+    }
 }
