@@ -230,6 +230,17 @@ fn voxel_ao_is_a_crease_band_along_occluded_edges() {
 /// rounding.
 #[test]
 fn a_pillar_casts_its_analytic_shadow_one_rung_down() {
+    pillar_shadow(2, |sky, sun| sky.round() + sun);
+}
+
+/// The same pillar in smooth light (`levels = 0`): a floor texel is its base times
+/// `GAIN × (sky + sun / 3)`, the sky unrounded, and the shadow keeps its hard texel edge.
+#[test]
+fn in_smooth_light_the_pillar_shadow_is_a_third_of_full_light_down() {
+    pillar_shadow(0, |sky, sun| sky + sun / 3.0);
+}
+
+fn pillar_shadow(levels: u32, light_of: impl Fn(f32, f32) -> f32) {
     const GAIN: f32 = 2.0;
     let c = Config {
         width: 16,
@@ -260,7 +271,7 @@ fn a_pillar_casts_its_analytic_shadow_one_rung_down() {
         sky_gradient: false,
         lighting: Lighting::Lit,
         light: LightConfig {
-            levels: 2,
+            levels,
             ambient_gain: GAIN,
             ambient_floor: 0.0,
             ao: 0.0,
@@ -324,7 +335,7 @@ fn a_pillar_casts_its_analytic_shadow_one_rung_down() {
                     } else {
                         lit += 1;
                     }
-                    let light = GAIN * ((sky as f32).round() + sun);
+                    let light = GAIN * light_of(sky as f32, sun);
                     let want: Vec<u8> = rock
                         .iter()
                         .map(|b| (srgb(b * light) * 255.0).round() as u8)

@@ -102,6 +102,8 @@ pub struct VoxelGpuSink {
     capture: Option<PathBuf>,
     /// The lit tier's water animation rate (`[light] water_hz`).
     water_hz: f32,
+    /// Whether the water moves every frame rather than in steps (`[light] water_smooth`).
+    water_smooth: bool,
     /// The sky this world is drawn under, kept while the founding frame dims it.
     founding_sky: Option<([f32; 3], [f32; 3])>,
     /// When the founding frame's pulse started, so a held founding frame keeps its phase.
@@ -180,6 +182,7 @@ impl VoxelGpuSink {
             ),
             capture: options.capture,
             water_hz: cfg.light.water_hz,
+            water_smooth: cfg.light.water_smooth,
             founding_sky: None,
             founding_since: None,
             awaiting_light: false,
@@ -291,6 +294,7 @@ impl VoxelGpuSink {
             fraction,
             f64::from(self.water_hz),
             f64::from(cubarium_voxel::TICK_HZ),
+            self.water_smooth,
         ));
     }
 
@@ -1163,7 +1167,7 @@ pub fn params_of(cfg: &VoxelConfig, proj: Projection, roof_from_texture: bool) -
         lit: cfg.lighting == Lighting::Lit,
         ambient_gain: cfg.light.ambient_gain,
         ambient_floor: cfg.light.ambient_floor.clamp(0.0, 1.0),
-        light_levels: cfg.light.levels.max(2),
+        light_levels: cfg.light.levels,
         ao_strength: cfg.light.ao.clamp(0.0, 1.0),
         ambient_colour: ambient_colour(cpu::sky(), cfg.light.ambient_tint),
         sun: sun_direction(cfg.light.sun),

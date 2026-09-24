@@ -555,8 +555,8 @@ pub struct VoxelParams {
     pub lit: bool,
     /// The lit tier's ambient: what full light is worth (`ambient_gain`), the darkest
     /// rung as a fraction of it (`ambient_floor`), how many rungs the ladder has
-    /// (`light_levels`, at least 2), and how far an AO crease line darkens the light
-    /// (`ao_strength`).
+    /// (`light_levels`: 0 or 1 for smooth, continuous light; 2 or more for a ladder), and
+    /// how far an AO crease line darkens the light (`ao_strength`).
     pub ambient_gain: f32,
     pub ambient_floor: f32,
     pub light_levels: u32,
@@ -767,7 +767,7 @@ impl VoxelParams {
             light_k: [
                 self.ambient_gain,
                 self.ambient_floor,
-                self.light_levels.max(2) as f32,
+                if self.light_levels < 2 { 0.0 } else { self.light_levels as f32 },
                 self.ao_strength,
             ],
             ambient: v(self.ambient_colour),
@@ -780,7 +780,7 @@ impl VoxelParams {
             ],
             clock: [
                 clock.time,
-                clock.step as f32,
+                clock.step,
                 if self.debug_flow { 1.0 } else { 0.0 },
                 0.0,
             ],
@@ -790,13 +790,16 @@ impl VoxelParams {
 
 /// The frame's clock, as the lit tier's water reads it: sim time in ticks (the tick plus
 /// the fraction of it elapsed), and the water's animation step, both wrapped where the
-/// shader's patterns repeat so a long run keeps its precision.
+/// shader's patterns repeat so a long run keeps its precision. The step is whole (the
+/// water moves in steps) unless the clock is smooth, when it runs on between them and
+/// the water moves every frame at the same speed.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FrameClock {
     /// Ticks, wrapped at [`FrameClock::TICK_WRAP`].
     pub time: f32,
-    /// Animation steps, wrapped at [`FrameClock::STEP_WRAP`].
-    pub step: u32,
+    /// Animation steps, wrapped at [`FrameClock::STEP_WRAP`]: whole, or fractional when
+    /// smooth.
+    pub step: f32,
 }
 
 impl FrameClock {
@@ -806,17 +809,19 @@ impl FrameClock {
     pub const TICK_WRAP: u64 = 1 << 20;
 
     /// The clock at `tick` plus `fraction` of the next, for water animated at `hz` steps a
-    /// second over a sim running `tick_hz` ticks a second.
-    pub fn at(tick: u64, fraction: f64, hz: f64, tick_hz: f64) -> FrameClock {
+    /// second over a sim running `tick_hz` ticks a second; `smooth` keeps the step's
+    /// fraction.
+    pub fn at(tick: u64, fraction: f64, hz: f64, tick_hz: f64, smooth: bool) -> FrameClock {
         let t = tick as f64 + fraction.clamp(0.0, 1.0);
         let step = if hz > 0.0 && tick_hz > 0.0 {
-            (t * hz / tick_hz).floor() as u64
+            let s = t * hz / tick_hz;
+            if smooth { s } else { s.floor() }
         } else {
-            0
+            0.0
         };
         FrameClock {
             time: ((tick % Self::TICK_WRAP) as f64 + fraction.clamp(0.0, 1.0)) as f32,
-            step: (step % Self::STEP_WRAP) as u32,
+            step: step.rem_euclid(Self::STEP_WRAP as f64) as f32,
         }
     }
 }
@@ -2481,15 +2486,19 @@ pub(crate) mod tests {
     /// and its time where the shader's patterns repeat.
     #[test]
     fn the_frame_clock_steps_at_the_water_rate_and_wraps() {
-        let at = |tick: u64, f: f64| FrameClock::at(tick, f, 12.0, 20.0);
-        assert_eq!(at(0, 0.0).step, 0);
-        assert_eq!(at(1, 0.6).step, 0);
-        assert_eq!(at(1, 0.7).step, 1);
-        assert_eq!(at(5, 0.0).step, 3);
+        let at = |tick: u64, f: f64| FrameClock::at(tick, f, 12.0, 20.0, false);
+        assert_eq!(at(0, 0.0).step, 0.0);
+        assert_eq!(at(1, 0.6).step, 0.0);
+        assert_eq!(at(1, 0.7).step, 1.0);
+        assert_eq!(at(5, 0.0).step, 3.0);
         assert_eq!(at(100, 0.25).time, 100.25);
         // 3415 ticks are 2049 steps: one past the wrap.
-        assert_eq!(at(3415, 0.0).step, 1);
+        assert_eq!(at(3415, 0.0).step, 1.0);
         assert_eq!(at(FrameClock::TICK_WRAP + 3, 0.5).time, 3.5);
+        // Smooth, the step runs on between whole steps, and wraps the same.
+        let smooth = |tick: u64, f: f64| FrameClock::at(tick, f, 12.0, 20.0, true).step;
+        assert!((smooth(1, 0.5) - 0.9).abs() < 1e-6);
+        assert!((smooth(3415, 0.5) - 1.3).abs() < 1e-3);
     }
 
     /// Any water at all packs to a non-zero fraction, so the presenter's "at least one

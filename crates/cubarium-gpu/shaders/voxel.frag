@@ -314,9 +314,10 @@ vec3 blockLit(vec3 body, float shade) {
 // lies at (x + (dx+1/2)/S, y+1 - (dy+1/2)/S, z) on a front face and at
 // (x + (dx+1/2)/S, y+1, z+1 - (dy+1/2)/RISE) on a top face.
 //
-// The ambient is sky x AO x canopy, snapped to a ladder of `lightK.z` rungs between the
-// floor `lightK.y` and one, times the gain `lightK.x`, in the ambient colour. The light
-// is quantised; the base colour it multiplies is not.
+// The ambient is sky x AO x canopy, between the floor `lightK.y` and one, times the gain
+// `lightK.x`, in the ambient colour: continuous by default (`lightK.z` 0, Wrysk: "lighting
+// yes"), or snapped to a ladder of `lightK.z` rungs. The base colour it multiplies is never
+// quantised.
 
 // A cell that darkens the corners of a face beside it: terrain and block parts (trunk,
 // crown, heart, log, animal). Sprouts, floor marks and vine cells do not. Outside the
@@ -402,26 +403,34 @@ float plantCanopy(uvec4 v) { return float(v.b & 15u) / 15.0; }
 // nibble), so a ray straight down through all of them keeps what the model lets through.
 float crownPass(uvec4 v) { return float(v.b >> 4) / 15.0; }
 
-// The quantised light: the ambient product's rung on the ladder, one rung higher where
-// the sun reaches (so a shadow is exactly one rung darker than the sunlit texel beside
-// it, and never below the floor), times the gain, in the ambient colour.
+// What the sun adds to the ambient product when the light is smooth: the default 4-rung
+// ladder's one rung, so a shadow darkens as much as it did (continuously, not by a rung).
+const float SMOOTH_SUN = 1.0 / 3.0;
+
+// The light: the ambient product, plus the sun's share where the sun reaches (so a shadow
+// is a hard-edged texel step darker than the sunlit texel beside it, and never below the
+// floor), times the gain, in the ambient colour. Smooth (`lightK.z` under 2), the product
+// is used as it is and the sun adds SMOOTH_SUN; on a ladder of `lightK.z` rungs the product
+// is snapped to its rung and the sun adds one rung.
 //
 // `local` is the emitters' light at the texel (`glowAt`), added to the ambient product
-// before it is snapped: its luminance raises the product, and the light's hue leans from
-// the ambient colour toward the emitters' by their share of the sum, itself snapped to
-// the ladder's steps. With no local light this is exactly the ambient ladder.
+// before any snapping: its luminance raises the product, and the light's hue leans from
+// the ambient colour toward the emitters' by their share of the sum (on a ladder, itself
+// snapped to the ladder's steps). With no local light this is exactly the ambient term.
 vec3 ladderLight(float a, float sun, vec3 local) {
+    bool smoothLight = u.lightK.z < 1.5;
     float n = max(u.lightK.z - 1.0, 1.0);
     vec3 hue = u.ambientC.rgb;
     float l = dot(local, vec3(0.2126, 0.7152, 0.0722));
     if (l > 1.0 / 512.0) {
         float sum = clamp(a, 0.0, 1.0) + l;
-        float share = floor(l / sum * n + 0.5) / n;
+        float share = smoothLight ? l / sum : floor(l / sum * n + 0.5) / n;
         hue = mix(hue, local / l, share);
         a = sum;
     }
-    float rung = floor(clamp(a, 0.0, 1.0) * n + 0.5) + sun;
-    return hue * (u.lightK.x * (u.lightK.y + (1.0 - u.lightK.y) * rung / n));
+    float t = smoothLight ? clamp(a, 0.0, 1.0) + sun * SMOOTH_SUN
+                          : (floor(clamp(a, 0.0, 1.0) * n + 0.5) + sun) / n;
+    return hue * (u.lightK.x * (u.lightK.y + (1.0 - u.lightK.y) * t));
 }
 
 // The emitters' light at world point `p` (voxel units), trilinear over the glow volume
@@ -1301,7 +1310,7 @@ bool fallStreak(int px, int py, float st) {
     int period = S >= 8 ? 32 : 16;
     int len = max(2, S / 3) + int((h >> 8) & 1u);
     int speed = max(1, S / 4);
-    int ph = wrapI(py - int(st) * speed + int(h >> 16), period);
+    int ph = wrapI(py - int(floor(st * float(speed))) + int(h >> 16), period);
     return ph < len;
 }
 

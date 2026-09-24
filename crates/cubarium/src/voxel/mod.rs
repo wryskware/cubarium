@@ -232,7 +232,7 @@ pub enum Lighting {
 ///
 /// ```toml
 /// [light]
-/// levels = 4          # rungs on the ambient ladder, floor to full
+/// levels = 0          # 0: smooth light; 2 or more: rungs on an ambient ladder, floor to full
 /// ambient_gain = 1.4  # what full ambient light multiplies a base colour by
 /// ambient_floor = 0.2 # the lowest rung, as a fraction of full
 /// ao = 0.5            # how far an AO crease line darkens the light
@@ -249,12 +249,16 @@ pub enum Lighting {
 /// water_reflect = 6.0  # the surface's Fresnel reflectance times this (physical is ~5 %)
 /// water_ripple = 0.2   # how far a ripple tilts the quantised surface normal
 /// water_hz = 12.0      # the water's animation steps a second
+/// water_smooth = false # true: the water moves every frame, at the same speed
 /// water_reflect_cells = 64 # cells a reflected ray is marched before it is sky
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LightConfig {
-    /// Rungs on the ambient ladder, the floor and full included; at least 2.
+    /// `0` (or `1`): the light is smooth, sky x AO x canopy, the glow and the sun applied as
+    /// continuous values (the default; Wrysk, 2026-09-24). `2` or more: the ambient is
+    /// snapped to a ladder of this many rungs, the floor and full included, and the sun
+    /// adds one rung (package L's look at 4).
     pub levels: u32,
     /// What full ambient light (open sky, no occlusion, no canopy) multiplies a base
     /// colour by. The default puts an open top near the flat tier's lit top and a wall
@@ -315,6 +319,10 @@ pub struct LightConfig {
     pub water_ripple: f32,
     /// The water's animation rate, steps a second of sim time (ripples, streaks).
     pub water_hz: f32,
+    /// The water moves every frame instead of in `water_hz` steps, at the same speed (the
+    /// clock's step keeps its fraction). Off by default until Wrysk picks (2026-09-24:
+    /// "12fps might have a charm").
+    pub water_smooth: bool,
     /// Cells a reflected ray is marched before it counts as sky.
     pub water_reflect_cells: u32,
 }
@@ -322,7 +330,7 @@ pub struct LightConfig {
 impl Default for LightConfig {
     fn default() -> LightConfig {
         LightConfig {
-            levels: 4,
+            levels: 0,
             ambient_gain: 1.4,
             ambient_floor: 0.2,
             ao: 0.5,
@@ -339,6 +347,7 @@ impl Default for LightConfig {
             water_reflect: 6.0,
             water_ripple: 0.2,
             water_hz: 12.0,
+            water_smooth: false,
             water_reflect_cells: 64,
         }
     }
