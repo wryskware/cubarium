@@ -410,13 +410,16 @@ fn quantise(v: f32) -> u8 {
 /// One plant style as the style texture carries it: wood, crown, heart, in linear light.
 /// `wood`'s alpha is the style's texture role (`ROLE_*`); `crown`'s and `heart`'s alphas
 /// are its **face slots**, the named atlas slot its side and top faces draw with, plus
-/// one (`0` is none: the role's generic slot, tinted by the style colour).
+/// one (`0` is none: the role's generic slot, tinted by the style colour). `emit` is the
+/// lit tier's emissive colour in linear light, zero for none: a texel of the glyph atlas's
+/// emissive tone draws it unlit at full value (package L step 4).
 #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct VoxelStyle {
     pub wood: [f32; 4],
     pub crown: [f32; 4],
     pub heart: [f32; 4],
+    pub emit: [f32; 4],
 }
 
 impl VoxelStyle {
@@ -426,7 +429,15 @@ impl VoxelStyle {
             wood: [wood[0], wood[1], wood[2], f32::from(ROLE_NONE)],
             crown: v(crown),
             heart: v(heart),
+            emit: [0.0; 4],
         }
+    }
+
+    /// The same style, its emissive-tone texels drawn in `emit` (linear light) in the lit
+    /// tier. `None` is no emission.
+    pub fn with_emit(mut self, emit: Option<[f32; 3]>) -> VoxelStyle {
+        self.emit = emit.map_or([0.0; 4], |c| [c[0], c[1], c[2], 0.0]);
+        self
     }
 
     /// The same style, its side and top faces drawn with these named atlas slots
@@ -536,6 +547,13 @@ pub struct VoxelParams {
     pub sun_tint: f32,
 }
 
+/// Texels per style in the style texture: wood, crown, heart, emit.
+const STYLE_COLUMNS: u32 = 4;
+
+/// Voxels per glow-volume cell along each axis: the lit tier's local light from emitters
+/// is built at a quarter of the world's resolution ([`VoxelStaging::glow`]).
+pub const GLOW_CELL: u32 = 4;
+
 /// Foliage steps the canopy plane holds per column ([`VoxelStaging::canopy`]).
 pub const CANOPY_STEPS: usize = 4;
 
@@ -546,7 +564,8 @@ const AT_STYLES: usize = 2;
 const AT_GLYPHS: usize = 3;
 const AT_SKY: usize = 4;
 const AT_CANOPY: usize = 5;
-const AT_END: usize = 6;
+const AT_GLOW: usize = 6;
+const AT_END: usize = 7;
 
 impl VoxelParams {
     fn validate(&self) -> Result<()> {
@@ -609,6 +628,30 @@ impl VoxelParams {
     pub fn canopy_bytes(&self) -> usize {
         if self.lit {
             self.width as usize * self.depth as usize * CANOPY_STEPS * 2
+        } else {
+            0
+        }
+    }
+
+    /// The glow volume's extent: one texel per [`GLOW_CELL`]³ voxels, rounded up, in the
+    /// lit tier; one texel in the flat one.
+    pub fn glow_extent(&self) -> (u32, u32, u32) {
+        if self.lit {
+            (
+                self.width.div_ceil(GLOW_CELL),
+                self.height.div_ceil(GLOW_CELL),
+                self.depth.div_ceil(GLOW_CELL),
+            )
+        } else {
+            (1, 1, 1)
+        }
+    }
+
+    /// The glow volume's bytes: RGBA8 per texel in the lit tier, none in the flat one.
+    pub fn glow_bytes(&self) -> usize {
+        if self.lit {
+            let (w, h, d) = self.glow_extent();
+            w as usize * h as usize * d as usize * 4
         } else {
             0
         }
@@ -738,8 +781,14 @@ pub struct VoxelStaging<'a> {
     /// takes the transmission of the last step whose cell is above `y`; a cell of 0 ends
     /// the list. Written every pack. Empty in the flat tier.
     pub canopy: &'a mut [u8],
-    /// Whether this pack must write [`VoxelStaging::roof`], [`VoxelStaging::glyphs`] and
-    /// [`VoxelStaging::sky`] (indexed [`PLANE_ROOF`], [`PLANE_GLYPHS`], [`PLANE_SKY`]). A
+    /// The lit tier's glow volume: the local light of the frame's emitters, RGBA8 (alpha
+    /// unused) at [`GLOW_CELL`]³ voxels a texel, `((z · h + y) · w + x) · 4` over
+    /// [`VoxelParams::glow_extent`], in units of full ambient light. A slow plane
+    /// ([`PLANE_GLOW`]): written only when its key moves. Empty in the flat tier.
+    pub glow: &'a mut [u8],
+    /// Whether this pack must write [`VoxelStaging::roof`], [`VoxelStaging::glyphs`],
+    /// [`VoxelStaging::sky`] and [`VoxelStaging::glow`] (indexed [`PLANE_ROOF`],
+    /// [`PLANE_GLYPHS`], [`PLANE_SKY`], [`PLANE_GLOW`]). A
     /// plane marked false already holds the content its key names and must be left
     /// alone. See [`SlowPlanes`].
     pub write: [bool; SLOW_PLANES],
@@ -870,8 +919,10 @@ pub const PLANE_ROOF: usize = 0;
 pub const PLANE_GLYPHS: usize = 1;
 /// The lit tier's sky plane's place in [`SlowPlanes`] and in a pack's keys.
 pub const PLANE_SKY: usize = 2;
+/// The lit tier's glow volume's place in [`SlowPlanes`] and in a pack's keys.
+pub const PLANE_GLOW: usize = 3;
 /// How many planes are written and uploaded only when they change.
-pub const SLOW_PLANES: usize = 3;
+pub const SLOW_PLANES: usize = 4;
 
 /// What the **slow planes** — the roof table, the glyph atlas and the sky plane — hold,
 /// per staging buffer and in the images, so a pack writes them and a frame uploads them
@@ -966,6 +1017,13 @@ pub struct VoxelRenderer {
     canopy_image: vk::Image,
     canopy_memory: vk::DeviceMemory,
     canopy_view: vk::ImageView,
+    /// The lit tier's glow volume (`R8G8B8A8_UNORM`, sampled trilinearly); a 1-texel
+    /// stand-in in the flat tier.
+    glow_image: vk::Image,
+    glow_memory: vk::DeviceMemory,
+    glow_view: vk::ImageView,
+    /// The glow volume's trilinear sampler: wraps in x like the strip, clamps in y and z.
+    linear: vk::Sampler,
     staging: Vec<HostBuffer>,
     /// Which staging buffer the next pack may use and which the GPU is still reading.
     ring: StagingRing,
@@ -974,7 +1032,7 @@ pub struct VoxelRenderer {
     slow: SlowPlanes,
     /// Byte offsets into each of [`VoxelRenderer::staging`] of the six planes, indexed
     /// by the `AT_*` constants; the last is the buffer's size.
-    offsets: [u64; 7],
+    offsets: [u64; 8],
     /// Whether a staged world is waiting to be uploaded.
     dirty: bool,
     /// Whether the world raster already holds the picture the next frame would draw.
@@ -1110,7 +1168,7 @@ impl VoxelRenderer {
             vk::Format::R8_UINT,
         )?;
         let (style_image, style_memory) = gpu.image(
-            3,
+            STYLE_COLUMNS,
             MAX_STYLES as u32,
             vk::Format::R32G32B32A32_SFLOAT,
             vk::ImageTiling::OPTIMAL,
@@ -1152,6 +1210,9 @@ impl VoxelRenderer {
             vk::ImageTiling::OPTIMAL,
             vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST,
         )?;
+        let (glow_w, glow_h, glow_d) = params.glow_extent();
+        let (glow_image, glow_memory) =
+            image_3d(gpu, glow_w, glow_h, glow_d, vk::Format::R8G8B8A8_UNORM)?;
         let (vine_w, vine_h) = VoxelTextures::vine_size(params.s);
         let (vine_image, vine_memory) = gpu.image(
             vine_w,
@@ -1176,6 +1237,7 @@ impl VoxelRenderer {
                 glyph_image,
                 sky_image,
                 canopy_image,
+                glow_image,
             ] {
                 barrier(
                     d,
@@ -1260,6 +1322,7 @@ impl VoxelRenderer {
         let glyph_view = gpu.view(glyph_image, vk::Format::R8_UINT)?;
         let sky_view = view_3d(gpu, sky_image, vk::Format::R8_UINT)?;
         let canopy_view = gpu.view(canopy_image, vk::Format::R8G8B8A8_UINT)?;
+        let glow_view = view_3d(gpu, glow_image, vk::Format::R8G8B8A8_UNORM)?;
 
         let n = params.voxel_count();
         let sizes = [
@@ -1269,10 +1332,11 @@ impl VoxelRenderer {
             params.glyph_bytes() as u64,
             params.sky_bytes() as u64,
             params.canopy_bytes() as u64,
+            params.glow_bytes() as u64,
         ];
         // Each plane starts on a 16-byte boundary: `vkCmdCopyBufferToImage` wants the
         // offset to be a multiple of the texel size, and the style texels are 16 bytes.
-        let mut offsets = [0u64; 7];
+        let mut offsets = [0u64; 8];
         for (i, size) in sizes.iter().enumerate() {
             offsets[i + 1] = offsets[i] + align16(*size);
         }
@@ -1313,6 +1377,19 @@ impl VoxelRenderer {
             )
         }?;
 
+        let linear = unsafe {
+            d.create_sampler(
+                &vk::SamplerCreateInfo::default()
+                    .mag_filter(vk::Filter::LINEAR)
+                    .min_filter(vk::Filter::LINEAR)
+                    .mipmap_mode(vk::SamplerMipmapMode::NEAREST)
+                    .address_mode_u(vk::SamplerAddressMode::REPEAT)
+                    .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+                    .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE),
+                None,
+            )
+        }?;
+
         let bindings = [
             vk::DescriptorSetLayoutBinding::default()
                 .binding(0)
@@ -1330,6 +1407,7 @@ impl VoxelRenderer {
             sampled(6),
             sampled(7),
             sampled(8),
+            sampled(9),
         ];
         let set_layout = unsafe {
             d.create_descriptor_set_layout(
@@ -1343,7 +1421,7 @@ impl VoxelRenderer {
                 .descriptor_count(1),
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .descriptor_count(8),
+                .descriptor_count(9),
         ];
         let pool = unsafe {
             d.create_descriptor_pool(
@@ -1379,6 +1457,10 @@ impl VoxelRenderer {
             image_info(vine_view),
         );
         let (isk, ica) = (image_info(sky_view), image_info(canopy_view));
+        let igl = [vk::DescriptorImageInfo::default()
+            .sampler(linear)
+            .image_view(glow_view)
+            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
         unsafe {
             d.update_descriptor_sets(
                 &[
@@ -1395,6 +1477,7 @@ impl VoxelRenderer {
                     sampled_write(set, 6, &ivn),
                     sampled_write(set, 7, &isk),
                     sampled_write(set, 8, &ica),
+                    sampled_write(set, 9, &igl),
                 ],
                 &[],
             )
@@ -1468,6 +1551,10 @@ impl VoxelRenderer {
             canopy_image,
             canopy_memory,
             canopy_view,
+            glow_image,
+            glow_memory,
+            glow_view,
+            linear,
             staging,
             uniform_stride,
             last_done: None,
@@ -1559,7 +1646,7 @@ impl VoxelRenderer {
         let n = self.params.voxel_count();
         let at = |plane: usize| self.offsets[plane] as usize;
         // Disjoint by construction: each plane is its own aligned range of the buffer.
-        let (voxels, roof, styles, glyphs, sky, canopy) = unsafe {
+        let (voxels, roof, styles, glyphs, sky, canopy, glow) = unsafe {
             (
                 std::slice::from_raw_parts_mut(
                     buffer.ptr.add(at(AT_VOXELS)) as *mut VoxelTexel,
@@ -1579,6 +1666,7 @@ impl VoxelRenderer {
                     buffer.ptr.add(at(AT_CANOPY)),
                     self.params.canopy_bytes(),
                 ),
+                std::slice::from_raw_parts_mut(buffer.ptr.add(at(AT_GLOW)), self.params.glow_bytes()),
             )
         };
         styles.fill(VoxelStyle::default());
@@ -1589,6 +1677,7 @@ impl VoxelRenderer {
             glyphs,
             sky,
             canopy,
+            glow,
             write,
         });
         self.ring.packed(into);
@@ -1701,6 +1790,7 @@ impl VoxelRenderer {
             if upload && redraw {
                 let lit = self.params.lit;
                 let (cw, ch) = self.params.canopy_extent();
+                let (gw, gh, gd) = self.params.glow_extent();
                 let planes = [
                     (true, self.voxel_image, self.offsets[AT_VOXELS], w, h, dd),
                     (slow[PLANE_ROOF], self.roof_image, self.offsets[AT_ROOF], w, h, dd),
@@ -1708,7 +1798,7 @@ impl VoxelRenderer {
                         true,
                         self.style_image,
                         self.offsets[AT_STYLES],
-                        3,
+                        STYLE_COLUMNS,
                         MAX_STYLES as u32,
                         1,
                     ),
@@ -1729,6 +1819,14 @@ impl VoxelRenderer {
                         dd,
                     ),
                     (lit, self.canopy_image, self.offsets[AT_CANOPY], cw, ch, 1),
+                    (
+                        lit && slow[PLANE_GLOW],
+                        self.glow_image,
+                        self.offsets[AT_GLOW],
+                        gw,
+                        gh,
+                        gd,
+                    ),
                 ];
                 let source =
                     self.staging[frame.staging.expect("an upload has a staged buffer")].buffer;
@@ -1908,6 +2006,7 @@ impl VoxelRenderer {
             d.destroy_descriptor_pool(self.pool, None);
             d.destroy_descriptor_set_layout(self.set_layout, None);
             d.destroy_sampler(self.nearest, None);
+            d.destroy_sampler(self.linear, None);
             for buffer in &self.staging {
                 buffer.destroy(gpu);
             }
@@ -1921,6 +2020,7 @@ impl VoxelRenderer {
                 (self.vine_view, self.vine_image, self.vine_memory),
                 (self.sky_view, self.sky_image, self.sky_memory),
                 (self.canopy_view, self.canopy_image, self.canopy_memory),
+                (self.glow_view, self.glow_image, self.glow_memory),
             ] {
                 d.destroy_image_view(view, None);
                 d.destroy_image(image, None);
@@ -2384,27 +2484,27 @@ mod tests {
         let mut slow = SlowPlanes::new(2);
         let all = [true; SLOW_PLANES];
         let none = [false; SLOW_PLANES];
-        assert_eq!(slow.pack(0, [7, 1, 7]), all, "a new buffer holds nothing");
+        assert_eq!(slow.pack(0, [7, 1, 7, 0]), all, "a new buffer holds nothing");
         assert_eq!(slow.upload(0), all, "and the images nothing");
-        assert_eq!(slow.pack(1, [7, 1, 7]), all, "the other buffer is new too");
+        assert_eq!(slow.pack(1, [7, 1, 7, 0]), all, "the other buffer is new too");
         assert_eq!(slow.upload(1), none, "but the images already hold it");
-        assert_eq!(slow.pack(0, [7, 1, 7]), none, "nothing moved");
+        assert_eq!(slow.pack(0, [7, 1, 7, 0]), none, "nothing moved");
         assert_eq!(slow.upload(0), none);
 
         // The terrain moves: the roof goes into each buffer once, and up once.
-        assert_eq!(slow.pack(1, [8, 1, 7]), [true, false, false]);
-        assert_eq!(slow.upload(1), [true, false, false]);
+        assert_eq!(slow.pack(1, [8, 1, 7, 0]), [true, false, false, false]);
+        assert_eq!(slow.upload(1), [true, false, false, false]);
         assert_eq!(
-            slow.pack(0, [8, 1, 7]),
-            [true, false, false],
+            slow.pack(0, [8, 1, 7, 0]),
+            [true, false, false, false],
             "buffer 0 still held 7"
         );
         assert_eq!(slow.upload(0), none, "the images hold 8 already");
-        assert_eq!(slow.pack(1, [8, 1, 7]), none);
+        assert_eq!(slow.pack(1, [8, 1, 7, 0]), none);
 
         // The sky for it arrives later, from its own thread: it alone moves.
-        assert_eq!(slow.pack(0, [8, 1, 8]), [false, false, true]);
-        assert_eq!(slow.upload(0), [false, false, true]);
+        assert_eq!(slow.pack(0, [8, 1, 8, 0]), [false, false, true, false]);
+        assert_eq!(slow.upload(0), [false, false, true, false]);
     }
 
     /// A displaced frame's upload never ran: whatever it carried is owed again, so the
@@ -2412,13 +2512,13 @@ mod tests {
     #[test]
     fn a_displaced_upload_leaves_the_slow_planes_owed() {
         let mut slow = SlowPlanes::new(2);
-        slow.pack(0, [3, 1, 3]);
+        slow.pack(0, [3, 1, 3, 0]);
         slow.upload(0);
-        slow.pack(1, [4, 1, 4]);
+        slow.pack(1, [4, 1, 4, 0]);
         slow.upload(1);
         slow.forget_images();
         assert_eq!(
-            slow.pack(1, [4, 1, 4]),
+            slow.pack(1, [4, 1, 4, 0]),
             [false; SLOW_PLANES],
             "the buffer still holds it"
         );
@@ -2440,7 +2540,7 @@ mod tests {
         assert_eq!(params().voxel_count(), 128 * 48 * 24);
         assert_eq!(
             params().upload_bytes(),
-            128 * 48 * 24 * 5 + 256 * 48 + 4 * (4 + 2) * MAX_GLYPHS
+            128 * 48 * 24 * 5 + 256 * 64 + 4 * (4 + 2) * MAX_GLYPHS
         );
     }
 

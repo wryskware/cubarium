@@ -55,7 +55,7 @@ layout(constant_id = 0) const bool LIT = false;
 
 layout(set = 0, binding = 1) uniform usampler3D voxels;  // rgba8ui, one texel per voxel
 layout(set = 0, binding = 2) uniform usampler3D roofTex; // r8ui, voxels to the solid above
-layout(set = 0, binding = 3) uniform sampler2D styleTex; // 3 x MAX_STYLES: wood, crown, heart
+layout(set = 0, binding = 3) uniform sampler2D styleTex; // 4 x MAX_STYLES: wood, crown, heart, emit
 layout(set = 0, binding = 4) uniform usampler2D glyphTex; // shared organism face texels
 // The face textures at this px_per_voxel (`cubarium_gpu::voxel::VoxelTextures`): slot k,
 // variant v is the S x S cell at (v*S, k*S), a top face in its first RISE rows. Texels
@@ -72,6 +72,10 @@ layout(set = 0, binding = 7) uniform usampler3D skyTex;
 // Lit tier only. The model's canopy per column: texels (x, 2z) and (x, 2z+1) hold four
 // (cell, cumulative transmission) steps, highest cell first; a cell of 0 ends the list.
 layout(set = 0, binding = 8) uniform usampler2D canopyTex;
+// Lit tier only. The local light of the frame's emitters, one texel per 4x4x4 voxels
+// (`GLOW_CELL`), in units of full ambient light: built on the CPU from the emitter list,
+// spread a few cells through open terrain, and sampled trilinearly here.
+layout(set = 0, binding = 9) uniform sampler3D glowTex;
 
 layout(location = 0) out vec4 outColour;
 
@@ -247,6 +251,18 @@ int roofGap(int x, int y, int z) {
 
 vec3 styleAt(int style, int part) { return texelFetch(styleTex, ivec2(part, style), 0).rgb; }
 
+// A style's emissive colour in linear light (`VoxelStyle::with_emit`), zero for none.
+vec3 styleEmit(int style) { return texelFetch(styleTex, ivec2(3, style), 0).rgb; }
+
+// The glyph atlas's emissive tone (`appearance::TONE_EMIT`): a texel that draws its
+// style's emissive colour, unlit and at full value, in the lit tier. A style with no
+// emissive colour, and the flat tier, draw it as a plain texel.
+const int TONE_EMIT = 6;
+
+// A vine tile texel the host flagged as emitting (`textures::flag_vine_emitters`): alpha
+// 254 instead of 255. Drawn at its own colour, unlit, in the lit tier.
+bool vineEmits(vec4 t) { return t.a >= 0.5 && t.a < 0.998; }
+
 vec3 plantLit(vec3 c, float shade) {
     vec3 lit = mix(c * u.plantA.x, u.lightC.rgb, u.plantA.y);
     return shade < 1.0 ? mix(c, lit, shade) : lit;
@@ -367,10 +383,32 @@ float crownPass(uvec4 v) { return float(v.b >> 4) / 15.0; }
 // The quantised light: the ambient product's rung on the ladder, one rung higher where
 // the sun reaches (so a shadow is exactly one rung darker than the sunlit texel beside
 // it, and never below the floor), times the gain, in the ambient colour.
-vec3 ladderLight(float a, float sun) {
+//
+// `local` is the emitters' light at the texel (`glowAt`), added to the ambient product
+// before it is snapped: its luminance raises the product, and the light's hue leans from
+// the ambient colour toward the emitters' by their share of the sum, itself snapped to
+// the ladder's steps. With no local light this is exactly the ambient ladder.
+vec3 ladderLight(float a, float sun, vec3 local) {
     float n = max(u.lightK.z - 1.0, 1.0);
+    vec3 hue = u.ambientC.rgb;
+    float l = dot(local, vec3(0.2126, 0.7152, 0.0722));
+    if (l > 1.0 / 512.0) {
+        float sum = clamp(a, 0.0, 1.0) + l;
+        float share = floor(l / sum * n + 0.5) / n;
+        hue = mix(hue, local / l, share);
+        a = sum;
+    }
     float rung = floor(clamp(a, 0.0, 1.0) * n + 0.5) + sun;
-    return u.ambientC.rgb * (u.lightK.x * (u.lightK.y + (1.0 - u.lightK.y) * rung / n));
+    return hue * (u.lightK.x * (u.lightK.y + (1.0 - u.lightK.y) * rung / n));
+}
+
+// The emitters' light at world point `p` (voxel units), trilinear over the glow volume
+// whose texel i covers voxels 4i .. 4i + 4.
+vec3 glowAt(vec3 p) {
+    vec3 n = vec3(textureSize(glowTex, 0)) * 4.0;
+    // Explicit level: the walk is divergent per pixel, and an implicit-derivative sample
+    // there costs as much as the rest of the lit shading together.
+    return textureLod(glowTex, p / n, 0.0).rgb;
 }
 
 // --- the sun (the lit tier) --------------------------------------------------------------
@@ -445,8 +483,8 @@ float sunReaches(vec3 p, ivec3 c) {
 // A lit colour: the base under the quantised light, and where the sun reaches, leaning
 // toward the palette's light by the sun tint times N·L (the flat tier's lean of a top
 // face toward `lightC`, now gated by the sun).
-vec3 litBy(vec3 base, float ambient, float sun, float ndl) {
-    vec3 c = base * ladderLight(ambient, sun);
+vec3 litBy(vec3 base, float ambient, float sun, float ndl, vec3 local) {
+    vec3 c = base * ladderLight(ambient, sun, local);
     return mix(c, u.lightC.rgb, clamp(u.sunK.w * sun * ndl, 0.0, 1.0));
 }
 
@@ -454,12 +492,15 @@ vec3 litBy(vec3 base, float ambient, float sun, float ndl) {
 vec3 shadeFront(vec3 base, int x, int y, int z, int dx, int dy, float canopy) {
     float ndl = max(-u.sunK.z, 0.0);
     float sun = 0.0;
+    vec3 p = vec3(float(x) + (float(dx) + 0.5) / float(S),
+                  float(y + 1) - (float(dy) + 0.5) / float(S), float(z));
     if (ndl > 0.0 && u.sunK.y > 0.0) {
-        vec3 p = vec3(float(x) + (float(dx) + 0.5) / float(S),
-                      float(y + 1) - (float(dy) + 0.5) / float(S), float(z));
         sun = sunReaches(p, ivec3(x, y, z - 1));
     }
-    return litBy(base, skyOpen(x, y, z - 1) * aoFront(x, y, z, dx, dy) * canopy, sun, ndl);
+    // The local light half a voxel into the open cell in front of the face.
+    vec3 local = glowAt(p - vec3(0.0, 0.0, 0.5));
+    return litBy(base, skyOpen(x, y, z - 1) * aoFront(x, y, z, dx, dy) * canopy, sun, ndl,
+                 local);
 }
 
 // The top face of (x, y, z) at texel (dx, dy), dy = 0 at the back, lit, with `canopy`
@@ -467,12 +508,14 @@ vec3 shadeFront(vec3 base, int x, int y, int z, int dx, int dy, float canopy) {
 vec3 shadeTop(vec3 base, int x, int y, int z, int dx, int dy, float canopy) {
     float ndl = max(u.sunK.y, 0.0);
     float sun = 0.0;
+    vec3 p = vec3(float(x) + (float(dx) + 0.5) / float(S), float(y + 1),
+                  float(z + 1) - (float(dy) + 0.5) / float(RISE));
     if (ndl > 0.0) {
-        vec3 p = vec3(float(x) + (float(dx) + 0.5) / float(S), float(y + 1),
-                      float(z + 1) - (float(dy) + 0.5) / float(RISE));
         sun = sunReaches(p, ivec3(x, y + 1, z));
     }
-    return litBy(base, skyOpen(x, y + 1, z) * aoTop(x, y, z, dx, dy) * canopy, sun, ndl);
+    // The local light half a voxel into the open cell above the face.
+    vec3 local = glowAt(p + vec3(0.0, 0.5, 0.0));
+    return litBy(base, skyOpen(x, y + 1, z) * aoTop(x, y, z, dx, dy) * canopy, sun, ndl, local);
 }
 
 // --- the faces ------------------------------------------------------------------------
@@ -656,6 +699,14 @@ bool glyphFront(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb) {
     vec3 base = glyphPigment(v, q);
     int tone = int(q >> 2);
     if (tone == 63) { return false; }
+    if (LIT && tone == TONE_EMIT) {
+        // An emitter: its style's emissive colour, unshadowed and at full value.
+        vec3 e = styleEmit(int(v.a));
+        if (any(greaterThan(e, vec3(0.0)))) {
+            rgb = hazed(e, hazeAt(float(z)));
+            return true;
+        }
+    }
     if (!plantTexel(x, y, z, v, false, dx, localY, base)) { return false; }
     bool coveredUp = solidAt(x, y + 1, z)
         || (inY(y + 1) && isBlockPart(partOf(at(x, y + 1, z))));
@@ -708,8 +759,15 @@ bool glyphCap(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb) {
     int atlasY = (partOf(v) * 8 + glyphOf(v)) * (S + RISE) + S + localY;
     uint q = texelFetch(glyphTex, ivec2(dx, atlasY), 0).r;
     vec3 base = glyphPigment(v, q);
-    if (!plantTexel(x, y, z, v, true, dx, localY, base)) { return false; }
     int tone = int(q >> 2);
+    if (LIT && tone == TONE_EMIT) {
+        vec3 e = styleEmit(int(v.a));
+        if (any(greaterThan(e, vec3(0.0)))) {
+            rgb = hazed(e, hazeAt(float(z) + float(r) / float(RISE)));
+            return true;
+        }
+    }
+    if (!plantTexel(x, y, z, v, true, dx, localY, base)) { return false; }
     if (LIT) {
         // The cap's own tone is the base under its light; the edge tones lean toward it
         // over PLANT_TOP_GAIN, as the flat tier leans toward the unlit base.
@@ -871,7 +929,7 @@ void main() {
                     if (isVine(f) && vineKind(f) == VINE_FLUSH) {
                         vec4 t = vineTexel(f, x, level, z - 1, dx, S - 1 - r);
                         if (t.a >= 0.5) {
-                            if (LIT) {
+                            if (LIT && !vineEmits(t)) {
                                 t.rgb = shadeFront(t.rgb, x, level, z, dx, S - 1 - r,
                                                    canopyAt(x, z - 1, level));
                             }
@@ -895,7 +953,7 @@ void main() {
                     || (k == VINE_SLIVER_R && dx >= S - q)) {
                     vec4 t = vineTexel(v, x, level, z, dx, S - 1 - r);
                     if (t.a >= 0.5) {
-                        if (LIT) {
+                        if (LIT && !vineEmits(t)) {
                             t.rgb = shadeFront(t.rgb, x, level, z, dx, S - 1 - r,
                                                canopyAt(x, z - 1, level));
                         }

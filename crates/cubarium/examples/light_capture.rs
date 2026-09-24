@@ -224,6 +224,24 @@ fn capture(
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     let light_s = started.elapsed().as_secs_f64();
+    // Where the emitters are, as raster pixels (the front face's top-left corner), for a
+    // crop around them.
+    let emitters: Vec<_> = sink.emitters().to_vec();
+    if !emitters.is_empty() {
+        let p = sink.params();
+        let mut at: Vec<String> = emitters
+            .iter()
+            .take(24)
+            .map(|((x, y, z), _)| {
+                let row = p.base - (*y as i32 + 1) * p.s as i32 - *z as i32 * p.rise as i32;
+                format!("({x},{y},{z})@[{},{}]", x * p.s, row)
+            })
+            .collect();
+        if emitters.len() > 24 {
+            at.push("…".into());
+        }
+        println!("{tag}: {} emitting voxels: {}", emitters.len(), at.join(" "));
+    }
     sink.render()?;
     let p = sink.params();
     let rgba = sink.read_raster()?;

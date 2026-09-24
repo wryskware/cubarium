@@ -109,6 +109,7 @@ fn voxel_ao_darkens_each_corner_by_its_neighbour_count() {
             // No sun: every texel is its ambient rung alone.
             sun: [0.0; 3],
             sun_tint: 0.0,
+            ..LightConfig::default()
         },
         ..VoxelConfig::default()
     };
@@ -239,6 +240,7 @@ fn a_pillar_casts_its_analytic_shadow_one_rung_down() {
             ambient_tint: 0.0,
             sun,
             sun_tint: 0.0,
+            ..LightConfig::default()
         },
         ..VoxelConfig::default()
     };

@@ -461,7 +461,13 @@ pub fn load_layers(roots: &[&Path], s: u32, rise: u32) -> Result<(VoxelTextures,
             };
         }
         match img {
-            Some(img) => {
+            Some(mut img) => {
+                if row == super::vine::ACCENT_ROW
+                    && let Some(&accent) = super::vine::Accent::DRAWN.get(col as usize)
+                    && let Some(rgb) = super::colours::vine_emission(accent)
+                {
+                    flag_vine_emitters(&mut img.rgba, rgb);
+                }
                 atlas.put_vine(row, col, &img.rgba)?;
                 prov.vine_tiles += 1;
             }
@@ -469,6 +475,20 @@ pub fn load_layers(roots: &[&Path], s: u32, rise: u32) -> Result<(VoxelTextures,
         }
     }
     Ok((atlas, prov))
+}
+
+/// Mark an accent tile's emitting texels: the opaque ones painted exactly in the accent's
+/// emissive colour (`colours::vine_emission`, the dossier's bell-mouth cyan) get alpha 254
+/// instead of 255. Still opaque to every reader of the cutout; the lit tier's shader
+/// (`vineEmits`) draws them unlit at full value. The tiles are direct colour snapped to
+/// their master's palette, so the mouth's pixels are that colour at every level.
+pub fn flag_vine_emitters(rgba: &mut [u8], rgb: super::colours::Rgb) {
+    let want = [(rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8];
+    for px in rgba.chunks_exact_mut(4) {
+        if px[3] >= 128 && px[..3] == want {
+            px[3] = 254;
+        }
+    }
 }
 
 fn vine_file(root: &Path, dir: &str, s: Option<u32>, stem: &str) -> PathBuf {

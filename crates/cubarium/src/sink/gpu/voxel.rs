@@ -37,16 +37,17 @@ use anyhow::{Context, Result, bail};
 
 use cubarium_gpu::vk::Gpu;
 use cubarium_gpu::voxel::{
-    MAX_GLYPHS, MAX_STYLES, PART_ANIMAL_INTERIM, PART_NONE, PLANE_GLYPHS, PLANE_ROOF, PLANE_SKY,
-    SLOW_PLANES, VoxelParams, VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel, VoxelTextures,
+    MAX_GLYPHS, MAX_STYLES, PART_ANIMAL_INTERIM, PART_NONE, PLANE_GLOW, PLANE_GLYPHS, PLANE_ROOF,
+    PLANE_SKY, SLOW_PLANES, VoxelParams, VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel, VoxelTextures,
 };
 use cubarium_voxel::{Material, VoxelView, World};
 use cubarium_voxel_flora::{FaceDraw, Flora, FloraView};
 
+use crate::present::srgb_linear;
 use crate::sink::{FrameSink, Output, WebSink};
 use crate::voxel::{Lighting, VoxelConfig};
 use crate::voxel::animal::{AnimalPart, Animals};
-use crate::voxel::appearance;
+use crate::voxel::{appearance, colours};
 use crate::voxel::model::{ModelLibrary, Tag};
 use crate::voxel::present as cpu;
 use crate::voxel::project::Projection;
@@ -55,7 +56,7 @@ use crate::voxel::textures::SpeciesFaces;
 use crate::voxel::vine::{self, VineCell};
 use cubarium_voxel_fauna::{Fauna, FaunaView};
 
-use super::light::{Canopy, SkyWorker};
+use super::light::{Canopy, Glow, SkyWorker};
 use super::target::{GpuTarget, GpuTargetKind};
 
 /// The knobs `cubarium voxel --sink gpu` takes.
@@ -168,7 +169,13 @@ impl VoxelGpuSink {
             gpu,
             renderer,
             target,
-            packer: Packer::new(&params, options.models.clone(), textures.vine_on, species),
+            packer: Packer::new(
+                &params,
+                options.models.clone(),
+                textures.vine_on,
+                species,
+                Emission::of(cfg),
+            ),
             capture: options.capture,
             founding_sky: None,
             founding_since: None,
@@ -276,6 +283,12 @@ impl VoxelGpuSink {
     /// again until this is false.
     pub fn light_pending(&self) -> bool {
         self.packer.light_pending()
+    }
+
+    /// The lit tier's emitting voxels in the last pack, with their emissive colours in
+    /// linear light: empty in the flat tier and with emission off. For captures.
+    pub fn emitters(&self) -> &[((u32, u32, u32), [f32; 3])] {
+        self.packer.light.as_ref().map_or(&[], |l| &l.emitters)
     }
 
     /// Draw these covered faces instead of the flora's own (`None` goes back to the
@@ -566,6 +579,32 @@ struct Packer {
     light: Option<LightPlanes>,
 }
 
+/// The lit tier's emitters ([`crate::voxel::LightConfig`]'s `emission`, `glow`,
+/// `glow_reach`). Off in the flat tier whatever the config says.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Emission {
+    on: bool,
+    glow: f32,
+    reach: u32,
+}
+
+impl Emission {
+    #[cfg(test)]
+    pub(crate) const OFF: Emission = Emission {
+        on: false,
+        glow: 0.0,
+        reach: 0,
+    };
+
+    fn of(cfg: &VoxelConfig) -> Emission {
+        Emission {
+            on: cfg.lighting == Lighting::Lit && cfg.light.emission,
+            glow: cfg.light.glow.max(0.0),
+            reach: cfg.light.glow_reach,
+        }
+    }
+}
+
 /// What the packer keeps for the lit tier.
 struct LightPlanes {
     /// The sky plane the images should hold, in texture order: open sky everywhere until
@@ -582,6 +621,12 @@ struct LightPlanes {
     canopy: Canopy,
     /// This tick's canopy plane, built in `prepare` from the flora and copied in `fill`.
     canopy_plane: Vec<u8>,
+    /// The emitters' local light, rebuilt in `prepare` when the emitters or the terrain
+    /// moved, and its settings.
+    glow: Glow,
+    emission: Emission,
+    /// Scratch: this tick's emitting voxels and their colours.
+    emitters: Vec<((u32, u32, u32), [f32; 3])>,
 }
 
 /// The glyph plane never changes after construction: one key for the life of a renderer.
@@ -595,6 +640,7 @@ impl Packer {
         models: Option<Arc<ModelLibrary>>,
         tiles: bool,
         species: SpeciesFaces,
+        emission: Emission,
     ) -> Packer {
         let mut glyphs = vec![0u8; p.glyph_bytes()];
         let used = appearance::atlas_len(p.s, p.rise);
@@ -606,6 +652,7 @@ impl Packer {
         if p.lit {
             // The lit tier divides a stand's own shade out of its own cells.
             stands.track_owners();
+            stands.set_emission(emission.on);
         }
         Packer {
             stands,
@@ -632,6 +679,9 @@ impl Packer {
                 worker: SkyWorker::spawn(),
                 canopy: Canopy::new(p.width, p.depth),
                 canopy_plane: vec![0; p.canopy_bytes()],
+                glow: Glow::new(p.width, p.height, p.depth),
+                emission,
+                emitters: Vec::new(),
             }),
         }
     }
@@ -685,6 +735,7 @@ impl Packer {
                 l.submitted += 1;
                 l.current = false;
                 l.worker.submit(l.submitted, view.config, view.material);
+                l.glow.set_terrain(view.config, view.material);
             }
         }
         let mut keys = [0; SLOW_PLANES];
@@ -709,6 +760,23 @@ impl Packer {
                     .map(|(x, _, z)| (x, z)),
             );
             keys[PLANE_SKY] = l.sky_key;
+            // The emitters: every stamped cell whose style emits, and the tile layer's
+            // flowering vine cells. A cell an animal stands in still counts: the glow
+            // volume is coarse.
+            l.emitters.clear();
+            if l.emission.on {
+                l.emitters.extend(stands.cells().filter_map(|(x, y, z)| {
+                    let rgb = stands.emission(stands.at(i64::from(x), i64::from(y), z))?;
+                    Some(((x, y, z), rgb))
+                }));
+                for c in self.vines.iter().filter(|c| c.kind.tiled()) {
+                    if let Some(rgb) = colours::vine_emission(c.accent) {
+                        l.emitters.push(((c.x, c.y, c.z), srgb_linear(rgb)));
+                    }
+                }
+            }
+            l.glow.build(l.emitters.iter().copied(), l.emission.glow, l.emission.reach);
+            keys[PLANE_GLOW] = l.glow.key;
         }
         keys[PLANE_ROOF] = self.roof_key;
         keys[PLANE_GLYPHS] = GLYPHS_KEY;
@@ -774,7 +842,7 @@ impl Packer {
                     PART_ANIMAL_INTERIM,
                     beast.glyph().0,
                     slot_for_style(
-                        (style, 0, [None; 2]),
+                        (style, 0, [None; 2], None),
                         &mut self.styles,
                         &mut self.style_overflow,
                     ),
@@ -792,11 +860,16 @@ impl Packer {
                             &mut self.slot_of,
                             &mut self.style_overflow,
                         );
-                        let glyph = appearance::plant_glyph(
+                        let mut glyph = appearance::plant_glyph(
                             p,
                             !stands.crown_continues(p, xi - 1, y, z),
                             !stands.crown_continues(p, xi + 1, y, z),
                         );
+                        // An emitting crown or heart cell draws the atlas's emissive
+                        // variant (only the lit tier with emission gives a style one).
+                        if matches!(p, Part::Crown { .. }) && stands.emission(p).is_some() {
+                            glyph = appearance::emissive_glyph(glyph);
+                        }
                         plant = Some(p);
                         (class, glyph.0, s)
                     }
@@ -818,10 +891,11 @@ impl Packer {
                 out.voxels[i] = t.with_vine(glyph, b, a);
             }
         }
-        for (slot, (style, role, faces)) in self.styles.iter().enumerate() {
+        for (slot, (style, role, faces, emit)) in self.styles.iter().enumerate() {
             out.styles[slot] = VoxelStyle::new(style.wood, style.crown, style.heart)
                 .with_role(*role)
-                .with_faces(*faces);
+                .with_faces(*faces)
+                .with_emit(emit.map(|e| e.map(f32::from_bits)));
         }
         if out.write[PLANE_ROOF] {
             out.roof.copy_from_slice(&self.roof);
@@ -834,6 +908,9 @@ impl Packer {
                 out.sky.copy_from_slice(&l.sky);
             }
             out.canopy.copy_from_slice(&l.canopy_plane);
+            if out.write[PLANE_GLOW] {
+                out.glow.copy_from_slice(&l.glow.bytes);
+            }
         }
     }
 }
@@ -886,7 +963,7 @@ fn roof_table(material: &[Material], w: u32, h: u32, d: u32, out: &mut [u8]) {
 
 /// One GPU style slot's contents: the colours, the texture role (`ROLE_*`) and the
 /// species face slots (`VoxelStyle::with_faces`).
-type StyleKey = (Style, u8, [Option<u16>; 2]);
+type StyleKey = (Style, u8, [Option<u16>; 2], Option<[u32; 3]>);
 
 /// The GPU slot for a style that has no plant part index to cache under (an animal's),
 /// deduplicated by value against the same table the plants fill.
@@ -939,7 +1016,8 @@ fn slot_for(
     };
     let cell = stands.model_cell(part);
     let faces = cell.map_or([None; 2], |(sp, tag)| species.faces(sp, tag));
-    let style = (style, role_of(cell.map(|(_, tag)| tag)), faces);
+    let emit = stands.emission(part).map(|e| e.map(f32::to_bits));
+    let style = (style, role_of(cell.map(|(_, tag)| tag)), faces, emit);
     let slot = match styles.iter().position(|s| *s == style) {
         Some(at) => at as u8,
         None if styles.len() < MAX_STYLES => {
@@ -1184,7 +1262,7 @@ mod tests {
                         (
                             PART_ANIMAL_INTERIM,
                             beast.glyph().0,
-                            slot_for_style((style, 0, [None; 2]), styles, overflow),
+                            slot_for_style((style, 0, [None; 2], None), styles, overflow),
                         )
                     } else {
                         let p = stands.at(xi, i64::from(y), z);
@@ -1226,7 +1304,7 @@ mod tests {
                 }
             }
         }
-        for (slot, (style, role, faces)) in styles.iter().enumerate() {
+        for (slot, (style, role, faces, _)) in styles.iter().enumerate() {
             out.styles[slot] = VoxelStyle::new(style.wood, style.crown, style.heart)
                 .with_role(*role)
                 .with_faces(*faces);
@@ -1267,6 +1345,7 @@ mod tests {
                 glyphs: &mut self.glyphs,
                 sky: &mut [],
                 canopy: &mut [],
+                glow: &mut [],
                 write,
             }
         }
@@ -1293,7 +1372,13 @@ mod tests {
                 Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, c).unwrap();
             let params = params_of(&cfg, proj, true);
             Rig {
-                packer: Packer::new(&params, None, false, SpeciesFaces::default()),
+                packer: Packer::new(
+                    &params,
+                    None,
+                    false,
+                    SpeciesFaces::default(),
+                    Emission::OFF,
+                ),
                 slow: SlowPlanes::new(2),
                 buffers: [Planes::junk(&params), Planes::junk(&params)],
                 images: Planes::junk(&params),

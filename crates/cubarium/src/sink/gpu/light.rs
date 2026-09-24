@@ -16,10 +16,19 @@
 //!   `shade_layers_into`): each layer is a disc of `radius_v` cells about its stand's
 //!   column at its own drawn cell, and lets `exp(−k · (1 − porosity) · stock / area)`
 //!   through to anything under it. Rebuilt every pack ([`Canopy`]).
+//!
+//! And one that is not the model's, because the model has no emitters: the **glow
+//! volume** ([`Glow`]), the local light of the parts the dossiers name as luminous. It is
+//! built at a quarter of the world's resolution from the frame's emitter list, spread a
+//! few cells through open terrain and stopped by solid terrain, and added to the ambient
+//! before the shader snaps it to the ladder.
 
 use std::sync::mpsc::{self, Receiver, Sender};
 
-use cubarium_gpu::voxel::CANOPY_STEPS;
+use std::collections::VecDeque;
+use std::hash::{Hash, Hasher};
+
+use cubarium_gpu::voxel::{CANOPY_STEPS, GLOW_CELL};
 use cubarium_voxel::{Config, Ledger, Material, VoxelView};
 use cubarium_voxel_flora::FloraView;
 
@@ -393,6 +402,194 @@ impl Canopy {
     }
 }
 
+/// The glow volume: the emitters' light on a grid of [`GLOW_CELL`]³ voxels.
+///
+/// Each emitting voxel adds its emissive colour times `gain` to its glow cell. From every
+/// cell that has a source the light spreads cell to cell over the six faces, at most
+/// `reach` steps, falling off linearly to nothing one step past `reach`, and sources add.
+/// **Terrain stops it:** a cell with no air receives nothing, and a cell less than half air
+/// receives but passes nothing on, so a cell behind a wall gets light only by a way round
+/// it within the reach. The strip wraps in x as the world does.
+///
+/// A function of the terrain and of the emitter list alone: [`Glow::build`] recomputes only
+/// when either moved, and bumps [`Glow::key`], the key the plane is uploaded under.
+pub(crate) struct Glow {
+    dims: (u32, u32, u32),
+    /// Per glow cell: its voxels inside the world, and how many of them are air.
+    total: Vec<u16>,
+    air: Vec<u16>,
+    /// Bumped when the terrain changes.
+    terrain: u64,
+    /// The terrain and sources the volume was last built from.
+    built: Option<u64>,
+    /// The volume as the plane holds it: RGBA8, alpha unused.
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) key: u64,
+    light: Vec<[f32; 3]>,
+    sources: Vec<(u32, [f32; 3])>,
+    /// The spread's scratch: the source a cell was last reached from, plus one.
+    seen: Vec<u32>,
+    queue: VecDeque<(u32, u8)>,
+}
+
+impl Glow {
+    pub(crate) fn new(width: u32, height: u32, depth: u32) -> Glow {
+        let dims = (
+            width.div_ceil(GLOW_CELL),
+            height.div_ceil(GLOW_CELL),
+            depth.div_ceil(GLOW_CELL),
+        );
+        let n = dims.0 as usize * dims.1 as usize * dims.2 as usize;
+        Glow {
+            dims,
+            total: vec![0; n],
+            air: vec![0; n],
+            terrain: 0,
+            built: None,
+            bytes: vec![0; n * 4],
+            key: 0,
+            light: vec![[0.0; 3]; n],
+            sources: Vec::new(),
+            seen: vec![0; n],
+            queue: VecDeque::new(),
+        }
+    }
+
+    /// The glow cell of voxel `(x, y, z)`, in the plane's order.
+    #[inline]
+    fn cell_of(&self, x: u32, y: u32, z: u32) -> u32 {
+        let (cx, cy, cz) = (x / GLOW_CELL, y / GLOW_CELL, z / GLOW_CELL);
+        (cz * self.dims.1 + cy) * self.dims.0 + cx
+    }
+
+    /// Count each cell's air from `material` (the world's `(y · depth + z) · width + x`
+    /// order). Called when the terrain moves.
+    pub(crate) fn set_terrain(&mut self, config: &Config, material: &[Material]) {
+        let (w, h, d) = (config.width, config.height, config.depth);
+        self.total.fill(0);
+        self.air.fill(0);
+        for y in 0..h {
+            for z in 0..d {
+                let row = ((y * d + z) * w) as usize;
+                for x in 0..w {
+                    let c = self.cell_of(x, y, z) as usize;
+                    self.total[c] += 1;
+                    if !material[row + x as usize].is_solid() {
+                        self.air[c] += 1;
+                    }
+                }
+            }
+        }
+        self.terrain += 1;
+    }
+
+    /// Rebuild from this frame's emitters, each a voxel and its emissive colour in linear
+    /// light, if they or the terrain moved since the last build. `gain` is one emitting
+    /// voxel's light at its own cell, in units of full ambient light; `reach` the steps
+    /// it spreads. Returns whether the volume changed.
+    pub(crate) fn build(
+        &mut self,
+        emitters: impl Iterator<Item = ((u32, u32, u32), [f32; 3])>,
+        gain: f32,
+        reach: u32,
+    ) -> bool {
+        self.sources.clear();
+        for ((x, y, z), rgb) in emitters {
+            let c = self.cell_of(x, y, z);
+            self.sources.push((c, rgb.map(|k| k * gain)));
+        }
+        self.sources.sort_unstable_by_key(|s| s.0);
+        self.sources.dedup_by(|b, a| {
+            if a.0 == b.0 {
+                for k in 0..3 {
+                    a.1[k] += b.1[k];
+                }
+                true
+            } else {
+                false
+            }
+        });
+        let mut h = rustc_hash::FxHasher::default();
+        self.terrain.hash(&mut h);
+        reach.hash(&mut h);
+        gain.to_bits().hash(&mut h);
+        for (c, rgb) in &self.sources {
+            c.hash(&mut h);
+            rgb.map(|k| (k * 4096.0) as u32).hash(&mut h);
+        }
+        let id = h.finish();
+        if self.built == Some(id) {
+            return false;
+        }
+        self.built = Some(id);
+        self.spread(reach);
+        for (px, l) in self.bytes.chunks_exact_mut(4).zip(&self.light) {
+            for k in 0..3 {
+                px[k] = (l[k].clamp(0.0, 1.0) * 255.0).round() as u8;
+            }
+            px[3] = 255;
+        }
+        self.key += 1;
+        true
+    }
+
+    fn spread(&mut self, reach: u32) {
+        self.light.fill([0.0; 3]);
+        self.seen.fill(0);
+        let (dw, dh, dd) = (self.dims.0 as i64, self.dims.1 as i64, self.dims.2 as i64);
+        let reach = reach.min(254) as u8;
+        let fall = 1.0 / (f32::from(reach) + 1.0);
+        for (k, &(src, rgb)) in self.sources.iter().enumerate() {
+            let mark = k as u32 + 1;
+            self.queue.clear();
+            self.queue.push_back((src, 0));
+            self.seen[src as usize] = mark;
+            while let Some((c, steps)) = self.queue.pop_front() {
+                let ci = c as usize;
+                let f = 1.0 - f32::from(steps) * fall;
+                for (l, v) in self.light[ci].iter_mut().zip(rgb) {
+                    *l += v * f;
+                }
+                // A cell under half air takes light but passes none on; the source's own
+                // cell always does.
+                if steps >= reach || (steps > 0 && u32::from(self.air[ci]) * 2 < u32::from(self.total[ci])) {
+                    continue;
+                }
+                let (x, y, z) = (
+                    i64::from(c) % dw,
+                    (i64::from(c) / dw) % dh,
+                    i64::from(c) / (dw * dh),
+                );
+                for (nx, ny, nz) in [
+                    (x - 1, y, z),
+                    (x + 1, y, z),
+                    (x, y - 1, z),
+                    (x, y + 1, z),
+                    (x, y, z - 1),
+                    (x, y, z + 1),
+                ] {
+                    if !(0..dh).contains(&ny) || !(0..dd).contains(&nz) {
+                        continue;
+                    }
+                    let n = ((nz * dh + ny) * dw + nx.rem_euclid(dw)) as usize;
+                    if self.seen[n] == mark || self.air[n] == 0 {
+                        continue;
+                    }
+                    self.seen[n] = mark;
+                    self.queue.push_back((n as u32, steps + 1));
+                }
+            }
+        }
+    }
+
+    /// The light the plane holds at glow cell `(cx, cy, cz)`.
+    #[cfg(test)]
+    fn at(&self, cx: u32, cy: u32, cz: u32) -> [u8; 3] {
+        let i = (((cz * self.dims.1 + cy) * self.dims.0 + cx) * 4) as usize;
+        [self.bytes[i], self.bytes[i + 1], self.bytes[i + 2]]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -406,6 +603,39 @@ mod tests {
             depth: 6,
             ..Config::default()
         }
+    }
+
+    /// An emitter lights the open glow cell beside it, and nothing behind a wall of
+    /// terrain: not the wall's own cells, not the cell past it, and not by the way round
+    /// the ring, which is longer than the reach.
+    #[test]
+    fn an_emitter_lights_its_open_neighbour_and_not_behind_terrain() {
+        let c = Config {
+            width: 32,
+            height: 8,
+            depth: 12,
+            ..Config::default()
+        };
+        let material: Vec<Material> = (0..c.width * c.height * c.depth)
+            .map(|i| {
+                let x = i % c.width;
+                if (12..16).contains(&x) { Material::Rock } else { Material::Air }
+            })
+            .collect();
+        let mut glow = Glow::new(c.width, c.height, c.depth);
+        glow.set_terrain(&c, &material);
+        let cyan = [0.05, 0.56, 0.94];
+        assert!(glow.build(std::iter::once(((6, 4, 6), cyan)), 0.5, 3));
+        let lit = glow.at(2, 1, 1);
+        assert!(lit[2] > 0 && lit[1] > 0, "the open neighbour is lit: {lit:?}");
+        assert!(glow.at(1, 1, 1)[2] > lit[2], "and less than the source's own cell");
+        for cy in 0..2 {
+            for cz in 0..3 {
+                assert_eq!(glow.at(3, cy, cz), [0; 3], "the wall");
+                assert_eq!(glow.at(4, cy, cz), [0; 3], "behind the wall");
+            }
+        }
+        assert!(!glow.build(std::iter::once(((6, 4, 6), cyan)), 0.5, 3), "nothing moved");
     }
 
     fn set(world: &mut World, x: i64, y: u32, z: u32, material: Material) {
