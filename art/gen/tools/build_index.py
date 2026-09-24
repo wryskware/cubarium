@@ -145,17 +145,18 @@ document.getElementById('filter').addEventListener('input',function(){
   document.querySelectorAll('section').forEach(function(s){s.hidden=!s.dataset.name.includes(q)});
   document.querySelectorAll('nav a').forEach(function(a){a.hidden=!a.dataset.name.includes(q)});
 });
-// Lightbox: click an image to view it here; Esc or a click closes it, arrows step
-// through the images of the same run. Ctrl/middle-click still opens the file.
+// Lightbox: click an image to view it here; Esc or a click closes it, arrows cycle
+// through every image on the page (past the filter; wraps). Ctrl/middle-click opens the file.
 var lb=document.createElement('div');lb.id='lb';
 lb.innerHTML='<img alt=""><div></div>';document.body.appendChild(lb);
 var cur=null;
 function show(a){cur=a;lb.firstChild.src=a.getAttribute('href');
   lb.lastChild.textContent=a.getAttribute('href');lb.classList.add('on');}
-function step(d){if(!cur)return;var s=cur.closest('section');
-  var all=[].slice.call(s.querySelectorAll('figure a'));var i=all.indexOf(cur)+d;
-  if(i>=0&&i<all.length){var n=all[i];var det=n.closest('details');
-    if(det)det.open=true;show(n);}}
+function step(d){if(!cur)return;
+  var all=[].slice.call(document.querySelectorAll('section:not([hidden]) figure a'));
+  var i=all.indexOf(cur);if(i<0||!all.length)return;
+  var n=all[(i+d+all.length)%all.length];var det=n.closest('details');
+  if(det)det.open=true;show(n);}
 document.addEventListener('click',function(e){
   var a=e.target.closest('figure a');
   if(a&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey&&e.button===0){e.preventDefault();show(a);return;}
