@@ -3,7 +3,7 @@
 //! full cell.
 
 use cubarium_voxel::generate;
-use cubarium_voxel::{Command, Config, Material, World};
+use cubarium_voxel::{Command, Config, DT, Material, World};
 
 fn cfg(width: u32, height: u32) -> Config {
     Config {
@@ -1818,10 +1818,14 @@ fn water_table_basin(head_m: f64) -> World {
 /// the aquifer and a voxel, so the ledger is untouched and the residual must not move.
 #[test]
 fn the_water_table_saturates_the_basin_and_leaves_the_ridge_to_drain() {
-    let mut w = water_table_basin(3.5);
+    // 3.75 m and not 3.5 since soil retention: saturating the basin's eight soil voxels
+    // costs 0.7 m of this aquifer's head, and the ridge caps now return only 0.12 m of
+    // it as they drain to field capacity 0.65 (0.26 m at 0.25), so 3.5 settled at
+    // 2.92 m, under the pond's floor.
+    let mut w = water_table_basin(3.75);
     let charged = w.view().stored_m3();
     assert!(
-        (w.aquifer_head_m() - 3.5).abs() < 1e-12,
+        (w.aquifer_head_m() - 3.75).abs() < 1e-12,
         "head {}",
         w.aquifer_head_m()
     );
@@ -1847,7 +1851,7 @@ fn the_water_table_saturates_the_basin_and_leaves_the_ridge_to_drain() {
     for x in [0, 1, 6, 7] {
         let pore = v.pore_at(x, 6, 0);
         assert!(
-            pore <= 0.25 + 1e-9,
+            pore <= Material::Soil.field_capacity() + 1e-9,
             "the ridge cap at x {x} held {pore}, above field capacity"
         );
     }
@@ -1875,11 +1879,18 @@ fn a_table_at_zero_changes_nothing() {
     // and put every support past its field capacity with drainage carrying the rest.
     // The claim — a table at zero leaves the staircase exactly where it stood without
     // one, down to the last bit — is unchanged, and this is still a settled state.
-    run(&mut w, 1600);
+    // 2400 since soil retention: a support at field capacity 0.65 holds 0.2275 m3, more
+    // than 1600 ticks' 0.2 m3 of rain, so it takes 0.3 m3 to put every one past it.
+    const TICKS: u32 = 2400;
+    run(&mut w, TICKS);
     let v = w.view();
     for x in 0..8i64 {
         let top = if x < 2 { 1 } else { x as u32 };
-        assert_eq!(v.pore_at(x, top, 0), 0.25, "x {x} moved");
+        let (pore, fc) = (v.pore_at(x, top, 0), Material::Soil.field_capacity());
+        assert!(
+            (pore - fc).abs() < 1e-12,
+            "x {x} moved: {pore} against {fc}"
+        );
         // The pore fraction is still exact; the free crumb above it is 8e-18 rather
         // than a hard zero since package 1c, because the tick now delivers the rain in
         // four times as many, four times smaller infiltration steps and the last one
@@ -1891,7 +1902,14 @@ fn a_table_at_zero_changes_nothing() {
         );
     }
     // The aquifer took the rest, and its head stayed under the soil it would saturate.
-    assert!((v.aquifer_m3 - 0.9).abs() < 1e-9, "{}", v.aquifer_m3);
+    let soil = Material::Soil;
+    let rained = w.config().rain_m_per_s * DT * f64::from(TICKS);
+    let rest = 8.0 * (rained - soil.field_capacity() * soil.pore_capacity());
+    assert!(
+        (v.aquifer_m3 - rest).abs() < 1e-9,
+        "{} against {rest}",
+        v.aquifer_m3
+    );
     assert!(
         w.aquifer_head_m() < 1.5,
         "the table reached the soil: {}",
