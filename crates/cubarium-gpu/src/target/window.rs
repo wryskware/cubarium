@@ -449,7 +449,10 @@ impl WindowPanel {
         }?;
         // Mailbox where the driver offers it: the newest frame replaces a queued one and
         // the present does not wait for a vsync. FIFO otherwise, which every driver has.
-        self.mode = if modes.contains(&vk::PresentModeKHR::MAILBOX) {
+        // `CUBARIUM_WINDOW_FIFO=1` forces FIFO where mailbox exists: the case this thread
+        // is for (a FIFO present to a hidden window that never returns), on demand.
+        let fifo = std::env::var("CUBARIUM_WINDOW_FIFO").as_deref() == Ok("1");
+        self.mode = if !fifo && modes.contains(&vk::PresentModeKHR::MAILBOX) {
             vk::PresentModeKHR::MAILBOX
         } else {
             vk::PresentModeKHR::FIFO
