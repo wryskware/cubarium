@@ -564,7 +564,7 @@ fn light_per_stand(flora: &mut Flora, world: &World, threads: usize) -> Vec<f64>
 }
 
 /// Columns per side of one [`ShadeIndex`] bucket.
-const SHADE_BUCKET: u32 = 4;
+const SHADE_BUCKET: u32 = 2;
 
 /// One stand filed under a bucket: its index and the envelope the sweep tests first,
 /// packed so a receiver streams its bucket without chasing into the layers.
