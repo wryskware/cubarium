@@ -1127,7 +1127,7 @@ fn budget_config() -> FloraConfig {
 /// of: that is the standing R4.3 limitation, and this fixture is where it bites.
 #[test]
 fn a_mineral_free_log_pays_the_upkeep_and_builds_nothing() {
-    let mut world = pillars(4, &[1], 0.5);
+    let mut world = pillars(4, &[1], Material::Soil.field_capacity());
     let mut flora = Flora::new(budget_config());
     let site = plant_glowcap(&mut flora, &world, 1);
     let (organic, _, energy) = log_with(&mut flora, site, 1.0, 0.0);
@@ -1203,7 +1203,7 @@ fn a_partly_mineralised_log_builds_exactly_what_its_mineral_funds() {
     /// One tick on a log of `organic` holding `mineral`: the wood built, and the site's
     /// mineral pool and the log's own mineral afterwards.
     fn one_tick(mineral: f64) -> (f64, f64, f64) {
-        let mut world = pillars(4, &[1], 0.5);
+        let mut world = pillars(4, &[1], Material::Soil.field_capacity());
         let mut flora = Flora::new(budget_config());
         let site = plant_glowcap(&mut flora, &world, 1);
         log_with(&mut flora, site, 1.0, mineral);
@@ -1499,7 +1499,7 @@ fn a_glowcap_on_litter_alone_gains_tissue_and_the_pool_falls_by_what_it_took() {
 /// below both pools, so nothing but the split is being measured.
 #[test]
 fn the_draw_splits_pro_rata_between_the_two_pools_and_sums_to_the_rate_bound() {
-    let mut world = pillars(4, &[1], 0.5);
+    let mut world = pillars(4, &[1], Material::Soil.field_capacity());
     let mut flora = Flora::new(isolating());
     let site = plant_glowcap(&mut flora, &world, 1);
     let sc = flora.config().species(Species::Glowcap).clone();

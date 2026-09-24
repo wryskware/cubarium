@@ -70,6 +70,9 @@ pub use step::{Gates, establishment_gates, establishment_gates_on_substrate};
 pub use step::{adult_light_cover, establishment_gates_with_sky};
 /// Where a falling stand's wood lands (package N's fall), for a diagnostic.
 pub use step::fall_line;
+/// What one cell of ground offers a root (package F): the scale `μ` and the establishment
+/// water gate read.
+pub use step::available_water;
 
 /// The **stands** of the voxel ecology, each one a role: see the preset that carries its
 /// numbers ([`SpeciesConfig::bloomcrown`] and the five after it) for the sentence of
@@ -718,17 +721,27 @@ pub struct SpeciesConfig {
     /// soil voxels in that box hold water for the stand.
     pub rooting_depth: u32,
     pub rooting_radius: u32,
-    /// Pore fraction (0..1 of capacity) at and below which `μ = 0` (wilting), and at and
-    /// above which `μ = 1`; linear between. Read as the water-volume-weighted mean over
-    /// the root box.
-    pub wilt_pore: f64,
-    pub sat_pore: f64,
+    /// **Available water** ([`available_water`]) at and below which `μ = 0` (wilting), and
+    /// at and above which `μ = 1`; linear between ([`SpeciesConfig::moisture_at`]). Read as
+    /// the root box's mean available water, each cell on its own material's wilting point
+    /// and field capacity (package F, `design/handoffs/voxel-plant-viability-2026-09-23.md`).
+    ///
+    /// The scale is `0` at the wilting point, `1` at field capacity — what drained ground
+    /// holds — and `(1 − wp)/(fc − wp)` at saturation. So an upland plant is comfortable
+    /// through the top half of what drained ground offers (`full_water` 0.5), and only a
+    /// wetland plant needs ground wetter than drained (`wilt_water` 1.0). Both numbers
+    /// were on the pore-fraction scale (`wilt_pore`, `sat_pore`) before package F, which
+    /// anchored the ramps near saturation and read drained soil as dry.
+    pub wilt_water: f64,
+    pub full_water: f64,
     /// Water transpired per second per unit foliage at `μ = 1`, cubic metres. Withdrawn
-    /// from the root box through `Command::WithdrawPore`, never by reading `pore` twice.
+    /// from the root box through `Command::WithdrawPore`, never by reading `pore` twice,
+    /// and never below a cell's wilting point: water under it is not the plant's to take.
     pub transpiration_m3_per_s: f64,
-    /// A seed cohort may germinate only on a site whose root-box mean pore fraction is at
-    /// least this and whose sky visibility is at least `establish_light_min`.
-    pub establish_pore_min: f64,
+    /// A seed cohort may germinate only on a site whose root box's mean **available
+    /// water** is at least this — the same scale as `wilt_water` and `full_water` — and
+    /// whose sky visibility is at least `establish_light_min`.
+    pub establish_water_min: f64,
     pub establish_light_min: f64,
     /// Pore fraction (0..1 of capacity) at and above which a root voxel counts as
     /// **saturated** — no air in it for a root. **Placeholder**.
@@ -981,6 +994,24 @@ impl SpeciesConfig {
     }
 }
 
+/// Water: what the ground offers this species (package F).
+impl SpeciesConfig {
+    /// `μ` at root-box available water `a`: zero at and below `wilt_water`, one at and
+    /// above `full_water`, linear between. A `full_water` at or below `wilt_water` is a
+    /// step at `full_water`.
+    pub fn moisture_at(&self, available: f64) -> f64 {
+        crate::step::ramp(available, self.wilt_water, self.full_water)
+    }
+
+    /// `establish_water_min` as a pore fraction of `material`: `wp + a · (fc − wp)`. For a
+    /// caller that thinks in pore fractions — the host's water-cycle report bands soil
+    /// columns by it — and not for the gate itself, which reads available water.
+    pub fn establish_pore_min_on(&self, material: Material) -> f64 {
+        let (wp, fc) = (material.wilting_point(), material.field_capacity());
+        wp + self.establish_water_min * (fc - wp)
+    }
+}
+
 /// How far a ground consumer can get at food from the face it is standing on: sideways in
 /// whole voxels, and up in whole voxels.
 ///
@@ -1039,10 +1070,21 @@ impl SpeciesConfig {
             light_half: 0.5,
             rooting_depth: 2,
             rooting_radius: 1,
-            wilt_pore: 0.15,
-            sat_pore: 0.6,
-            transpiration_m3_per_s: 2e-5,
-            establish_pore_min: 0.2,
+            // Package F's upland scale (available water, 1 = field capacity): wilts only
+            // in the bottom tenth of what drained ground offers, full through its top
+            // half, germinates on a fifth of it.
+            wilt_water: 0.1,
+            full_water: 0.5,
+            // Package F measurement (a v1_base number: proposed, Fable's call). At 2e-5 a
+            // founder drew its root box from field capacity to the wilting point in
+            // 10–30 min, while a default-preset shower (0.4 m³ over 576 m², ~0.7 mm)
+            // gives a 3×3 root footprint ~1/20 of that demand back: bloomcrown,
+            // vaulttree and lanternberry starved in full light at μ ≈ 0.1 on either
+            // soil. At 1e-6 a full-grown bloomcrown (P 1.2) asks ~2× the mean rain on
+            // its footprint, so boxes dry between showers and under dense cover only,
+            // and every upland species holds its donors for 3 h (nofauna census).
+            transpiration_m3_per_s: 1e-6,
+            establish_water_min: 0.2,
             establish_light_min: 0.3,
             saturated_pore: 0.95,
             stress_rate_per_s: 0.05,
@@ -1073,9 +1115,12 @@ impl SpeciesConfig {
             light_half: 0.8,
             rooting_depth: 2,
             rooting_radius: 1,
-            wilt_pore: 0.08,
-            sat_pore: 0.5,
-            establish_pore_min: 0.1,
+            // Upland (package F): the most drought-hardy of the three upland plants —
+            // wilts only in the bottom twentieth of drained ground's water, full through
+            // its top half, germinates on a tenth of it.
+            wilt_water: 0.05,
+            full_water: 0.5,
+            establish_water_min: 0.1,
             establish_light_min: 0.6,
             // The sun producer of ridges and terraces: it will not germinate on a site
             // that is even a quarter waterlogged, and past that quarter it stresses
@@ -1134,9 +1179,14 @@ impl SpeciesConfig {
             light_half: 0.15,
             rooting_depth: 4,
             rooting_radius: 1,
-            wilt_pore: 0.3,
-            sat_pore: 0.8,
-            establish_pore_min: 0.45,
+            // Wetland (package F): needs ground wetter than drained. Wilts at field
+            // capacity (1.0) and is full at 1.5: pore 0.84 on a loam of fc 0.65 / wp
+            // 0.28, and short of saturation (≥ 1.67) everywhere in the soil-retention
+            // window, so saturated ground is always full moisture. Germinates only
+            // where the ground is clearly wetter than drained (1.2).
+            wilt_water: 1.0,
+            full_water: 1.5,
+            establish_water_min: 1.2,
             establish_light_min: 0.1,
             // The wet producer of hollows: no aeration bound on establishment at all,
             // which — since the same number is the stress target's tolerance — is also no
@@ -1209,25 +1259,22 @@ impl SpeciesConfig {
     /// Every number is a **placeholder** (`design/backlog.md` §1), chosen to encode that
     /// sentence and nothing else:
     ///
-    /// - **Water, the three thresholds together.** `establish_pore_min` 0.25 is soil's own
-    ///   retained fraction, so springturf germinates on ordinary drained soil and no
-    ///   drier. That is **germination permission and not a positive newborn budget**, and
-    ///   the two are separate claims (Astra R7.3): a newborn on passing soil at pore 0.26,
-    ///   with ordinary preset stocks, fixes `0.008 · 1 · 0.36667 · 0.006 · (2/3) =
-    ///   1.17333e-5` organic per second against maintenance `0.002 · 0.006 = 1.2e-5` and
-    ///   pays the difference out of reserve — 1.06667e-5 at the 0.25 floor itself
-    ///   (`tests/round4.rs`,
-    ///   `springturf_germinates_on_retained_water_soil_and_is_maintenance_deficient_there`).
-    ///   The species' own income fixture runs at pore **0.6**, so what it establishes is
-    ///   solvency on *ample* water, not a viable pioneer on retained-water soil. Whether
-    ///   recruitment has to be solvent on drained soil is a deliberate contract question
-    ///   for a later round and explicitly **not** a reason to raise `assimilation`.
-    ///   `wilt_pore` 0.15 is twice bloomcrown's 0.08, so it is the species that
-    ///   gives up first on a dry ridge; `sat_pore` 0.45 is where it reaches full moisture,
-    ///   just above the germination floor, because a turf's shallow roots either have
-    ///   water in the top row or do not. `establish_saturated_max` 0.3 keeps it out of a
-    ///   waterlogged hollow, and `drown_depth_m` 0.03 is under a voxel of pool but well
-    ///   over the millimetres of transit water the harness's rain leaves on a face.
+    /// - **Water, the three thresholds together**, on package F's available-water scale
+    ///   (0 at the wilting point, 1 at field capacity). `wilt_water` 0.1 and `full_water`
+    ///   0.5 are the upland pair: drained ground is full moisture, and a turf only wilts
+    ///   in the bottom tenth of what it offers. `wilt_water` is twice bloomcrown's 0.05,
+    ///   so it is still the upland species that gives up first on a dry ridge.
+    ///   `establish_water_min` 0.3 is the highest upland germination floor: a turf's
+    ///   shallow roots see only the support row, so a seed waits for ground that holds a
+    ///   third of drained soil's water there. That is **germination permission and not a
+    ///   positive newborn budget** (Astra R7.3; `tests/round4.rs`,
+    ///   `springturf_germinates_on_retained_water_soil_and_is_maintenance_deficient_there`,
+    ///   measures the newborn's deficit at the floor). Before package F the three were
+    ///   pore fractions (0.25, 0.15, 0.45), which read drained soil as `μ ≈ 0.33`: every
+    ///   springturf of the nofauna census starved in full light between min 35 and 60.
+    ///   `establish_saturated_max` 0.3 keeps it out of a waterlogged hollow, and
+    ///   `drown_depth_m` 0.03 is under a voxel of pool but well over the millimetres of
+    ///   transit water the harness's rain leaves on a face.
     /// - **Light.** `light_half` 1.0 and `establish_light_min` 0.75 are both above
     ///   bloomcrown's 0.8 and 0.6: it needs open sky to germinate and earns badly in
     ///   shade. Note that a *living crown* cannot shut that gate — germination light is
@@ -1260,9 +1307,9 @@ impl SpeciesConfig {
             light_half: 1.0,
             rooting_depth: 1,
             rooting_radius: 1,
-            wilt_pore: 0.15,
-            sat_pore: 0.45,
-            establish_pore_min: 0.25,
+            wilt_water: 0.1,
+            full_water: 0.5,
+            establish_water_min: 0.3,
             establish_light_min: 0.75,
             stress_rate_per_s: 0.2,
             relax_rate_per_s: 0.05,
@@ -1310,13 +1357,14 @@ impl SpeciesConfig {
     ///
     /// Every number is a **placeholder** (`design/backlog.md` §1):
     ///
-    /// - **Water, the three thresholds together.** `establish_pore_min` 0.05 and
-    ///   `wilt_pore` 0.02 are the lowest of the five by a factor of four: a pocket holding
-    ///   a twentieth of its capacity is enough to start on and a fiftieth is still not
-    ///   wilting. `sat_pore` 0.35 is also the lowest, because the point of the role is that
-    ///   a little water is *enough* — the cushion is at full moisture on a pocket the other
-    ///   four would call dry. `establish_saturated_max` 0.4 and `drown_depth_m` 0.02: a
-    ///   rock face does not hold a pool, and a cushion under one is finished.
+    /// - **Water, the three thresholds together**, on package F's available-water scale
+    ///   (0 at the wilting point, 1 at field capacity). `wilt_water` 0 — it earns on any
+    ///   water a root can draw at all — `full_water` 0.2 and `establish_water_min` 0.05 are
+    ///   the lowest of every species, because the point of the role is that a little water
+    ///   is *enough*: a pocket holding a twentieth of drained soil's water is enough to
+    ///   start on, and one holding a fifth is full moisture. `establish_saturated_max` 0.4
+    ///   and `drown_depth_m` 0.02: a rock face does not hold a pool, and a cushion under
+    ///   one is finished.
     /// - **Roots.** `rooting_depth` 2 and `rooting_radius` 1: the 3 × 2 × 3 box around and
     ///   under the rock face, which is where a crack with soil in it is.
     /// - **Light.** `light_half` 0.3 and `establish_light_min` 0.4: an exposed rock face has
@@ -1338,9 +1386,9 @@ impl SpeciesConfig {
             light_half: 0.3,
             rooting_depth: 2,
             rooting_radius: 1,
-            wilt_pore: 0.02,
-            sat_pore: 0.35,
-            establish_pore_min: 0.05,
+            wilt_water: 0.0,
+            full_water: 0.2,
+            establish_water_min: 0.05,
             establish_light_min: 0.4,
             stress_rate_per_s: 0.1,
             relax_rate_per_s: 0.02,
@@ -1376,13 +1424,14 @@ impl SpeciesConfig {
     ///
     /// Every number is a **placeholder** (`design/backlog.md` §1):
     ///
-    /// - **Water, the three thresholds together.** `establish_pore_min` 0.3, `wilt_pore`
-    ///   0.2, `sat_pore` 0.6: damp, and consistently so — it germinates a little above
-    ///   drained soil's own 0.25, wilts just below it, and is at full moisture at 0.6,
-    ///   which is *below* umbrellafrond's own 0.8 (Astra R7.6). The difference from the
-    ///   wetland role is
-    ///   entirely the ceiling: `establish_saturated_max` 0.6 against umbrellafrond's 1.0,
-    ///   so a wholly saturated box refuses a velvetpad cohort and targets an adult's
+    /// - **Water, the three thresholds together**, on package F's available-water scale
+    ///   (0 at the wilting point, 1 at field capacity). `wilt_water` 0.25, `full_water`
+    ///   0.9, `establish_water_min` 0.4: a damp-lover — it wilts in the bottom quarter of
+    ///   what drained ground offers and needs nearly all of it to be at full moisture, so
+    ///   a pad on a drying ridge earns badly long before an upland plant does, while
+    ///   drained ground itself is still full moisture. The difference from the wetland
+    ///   role (umbrellafrond wilts at 1.0) is the floor, and above all the ceiling:
+    ///   `establish_saturated_max` 0.6 against umbrellafrond's 1.0, so a wholly saturated box refuses a velvetpad cohort and targets an adult's
     ///   `aeration_stress` at 1 — waterlogging costs this species something, which is the
     ///   whole of what "aerated" means here. `stress_rate_per_s` 0.1 and
     ///   `relax_rate_per_s` 0.05: it closes on that stress twice as fast as it lets go.
@@ -1415,9 +1464,9 @@ impl SpeciesConfig {
             light_half: 0.1,
             rooting_depth: 2,
             rooting_radius: 1,
-            wilt_pore: 0.2,
-            sat_pore: 0.6,
-            establish_pore_min: 0.3,
+            wilt_water: 0.25,
+            full_water: 0.9,
+            establish_water_min: 0.4,
             establish_light_min: 0.05,
             stress_rate_per_s: 0.1,
             relax_rate_per_s: 0.05,
@@ -1478,13 +1527,15 @@ impl SpeciesConfig {
     ///   stand it would feed is made of, counting its litter as well as its wood. Below it
     ///   there is nothing there to eat and the gate shuts, which is how a decomposer grove
     ///   *ends* — on a floor with litter on it, later than it used to.
-    /// - **Water, the three thresholds together.** `establish_pore_min` 0.1 and
+    /// - **Water, the three thresholds together.** `establish_water_min` 0.2 and
     ///   `establish_saturated_max` 0.5 are the brief's "pore between the species' floor and
     ///   its saturation ceiling", read in the model's own terms — the existing pore gate is
     ///   the floor and the existing aeration gate is the ceiling, and **no new rule was
-    ///   added**. `wilt_pore` 0.1 and `sat_pore` 0.4: full uptake on ordinary drained soil,
-    ///   nothing at all on a dry one, because `μ` multiplies uptake exactly as it multiplies
-    ///   assimilation. `drown_depth_m` 0.05 — a cap under a pool is finished.
+    ///   added**. `wilt_water` 0.2 and `full_water` 0.9 (package F's available-water scale,
+    ///   1 = field capacity; the damp-lovers' pair): full uptake on ordinary drained soil,
+    ///   nothing at all on a dry one, because `μ` multiplies uptake exactly as it
+    ///   multiplies assimilation. The germination floor sits at the wilt threshold, as it
+    ///   did on the pore scale (0.1 and 0.1). `drown_depth_m` 0.05 — a cap under a pool is finished.
     ///
     ///   **A stated limitation, and the one this preset is most likely to be wrong about.**
     ///   The ceiling is a *germination* ceiling: a spore will not take a waterlogged log,
@@ -1534,9 +1585,9 @@ impl SpeciesConfig {
             establish_light_min: 0.0,
             rooting_depth: 1,
             rooting_radius: 1,
-            wilt_pore: 0.1,
-            sat_pore: 0.4,
-            establish_pore_min: 0.1,
+            wilt_water: 0.2,
+            full_water: 0.9,
+            establish_water_min: 0.2,
             establish_saturated_max: 0.5,
             stress_rate_per_s: 0.1,
             relax_rate_per_s: 0.05,
@@ -1577,8 +1628,9 @@ impl SpeciesConfig {
     ///   terrain still passes. A canopy-aware gate is a separate rule (Astra R6.2).
     ///   `light_half` 0.6: a sun canopy, under bloomcrown's 0.8.
     /// - **Water.** Deep, wide roots (`rooting_depth` 6, `rooting_radius` 2 at 0.25 m),
-    ///   drained-soil thresholds (`establish_pore_min` 0.2, `wilt_pore` 0.12, `sat_pore`
-    ///   0.5), and an aerated root zone: `establish_saturated_max` 0.2 with a **slow**
+    ///   upland thresholds on package F's available-water scale (`establish_water_min`
+    ///   0.2, `wilt_water` 0.1, `full_water` 0.5: full moisture through the top half of
+    ///   what drained ground offers), and an aerated root zone: `establish_saturated_max` 0.2 with a **slow**
     ///   `stress_rate_per_s` 0.005, so it stresses on long saturation and shrugs off a
     ///   wet week. `drown_depth_m` 0.1.
     /// - **Slow, long-lived, large reserve.** `wood_max` 5.0 (bloomcrown 0.6),
@@ -1594,9 +1646,9 @@ impl SpeciesConfig {
             establish_light_min: 0.9,
             rooting_depth: 6,
             rooting_radius: 2,
-            wilt_pore: 0.12,
-            sat_pore: 0.5,
-            establish_pore_min: 0.2,
+            wilt_water: 0.1,
+            full_water: 0.5,
+            establish_water_min: 0.2,
             establish_saturated_max: 0.2,
             stress_rate_per_s: 0.005,
             relax_rate_per_s: 0.02,
@@ -1656,7 +1708,9 @@ impl SpeciesConfig {
     ///
     /// - **Light** between umbrellafrond and bloomcrown: `light_half` 0.4,
     ///   `establish_light_min` 0.35.
-    /// - **Moist**: `establish_pore_min` 0.3, `wilt_pore` 0.15, `sat_pore` 0.6,
+    /// - **Moist**, a damp-lover on package F's available-water scale (1 = field
+    ///   capacity): `establish_water_min` 0.4, `wilt_water` 0.2, `full_water` 0.9 — full
+    ///   moisture on drained ground, earning badly once a dry spell takes a fifth of it —
     ///   `establish_saturated_max` 0.5, `drown_depth_m` 0.1.
     /// - **Repeated paid fruit**: `donor_reserve_floor` 0.7 (base 0.5) and `propagule_rate`
     ///   0.0004; `wood_max` 1.0, `alive_min` 0.02, `donor_min` 0.4, `hop` 2.
@@ -1676,9 +1730,9 @@ impl SpeciesConfig {
             establish_light_min: 0.35,
             rooting_depth: 3,
             rooting_radius: 1,
-            wilt_pore: 0.15,
-            sat_pore: 0.6,
-            establish_pore_min: 0.3,
+            wilt_water: 0.2,
+            full_water: 0.9,
+            establish_water_min: 0.4,
             establish_saturated_max: 0.5,
             stress_rate_per_s: 0.1,
             relax_rate_per_s: 0.05,
@@ -1720,8 +1774,9 @@ impl SpeciesConfig {
     ///
     /// - **Water.** `water_depth_min_m` 0.1: a pool, not a rain film (bloomcrown's 0.05
     ///   drown depth is the precedent for "a pool"). `drown_depth_m` 0.5: it stands in the
-    ///   water it needs, up to a third of a full-grown reed. `establish_pore_min` 0.45,
-    ///   `wilt_pore` 0.3, `sat_pore` 0.8: wet soil.
+    ///   water it needs, up to a third of a full-grown reed. Wetland thresholds on package
+    ///   F's available-water scale (1 = field capacity), umbrellafrond's: `wilt_water`
+    ///   1.0, `full_water` 1.5, `establish_water_min` 1.2 — ground wetter than drained.
     /// - **Aeration at a cost.** `establish_saturated_max` 1.0, like umbrellafrond — and
     ///   for the same reason not "slightly below 1" (its doc: every tolerance below 1
     ///   drives a wholly saturated box to stress 1). The cost is **upkeep** instead:
@@ -1736,9 +1791,9 @@ impl SpeciesConfig {
             establish_light_min: 0.6,
             rooting_depth: 2,
             rooting_radius: 1,
-            wilt_pore: 0.3,
-            sat_pore: 0.8,
-            establish_pore_min: 0.45,
+            wilt_water: 1.0,
+            full_water: 1.5,
+            establish_water_min: 1.2,
             establish_saturated_max: 1.0,
             stress_rate_per_s: 0.01,
             relax_rate_per_s: 0.05,
@@ -1966,9 +2021,9 @@ impl SpeciesConfig {
         // The water and aeration thresholds and the crown geometry: fractions and lengths,
         // read as bounds rather than multiplied by a stock, so only finiteness is checked.
         let bounds: [(&str, f64); 7] = [
-            ("wilt_pore", self.wilt_pore),
-            ("sat_pore", self.sat_pore),
-            ("establish_pore_min", self.establish_pore_min),
+            ("wilt_water", self.wilt_water),
+            ("full_water", self.full_water),
+            ("establish_water_min", self.establish_water_min),
             ("establish_light_min", self.establish_light_min),
             ("saturated_pore", self.saturated_pore),
             ("establish_saturated_max", self.establish_saturated_max),

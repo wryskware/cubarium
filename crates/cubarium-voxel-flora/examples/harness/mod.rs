@@ -368,12 +368,12 @@ pub fn gate_line(world: &World, flora: &Flora, species: Species, site: Site) -> 
         .view()
         .establishment_gates(&world.view(), site, species);
     format!(
-        "mean pore {} (>= {:.2}), saturated fraction {:.3} (<= {:.2}), water {:.3} m \
+        "mean available water {} (>= {:.2}), saturated fraction {:.3} (<= {:.2}), water {:.3} m \
          (<= {:.2}), sky {:.3} (>= {:.2}), {} soil voxels, dead wood in the box {:.3} \
          (>= {:.3})",
-        g.mean_pore
+        g.mean_water
             .map_or_else(|| "none".to_string(), |m| format!("{m:.3}")),
-        sc.establish_pore_min,
+        sc.establish_water_min,
         g.saturated_fraction,
         sc.establish_saturated_max,
         g.water_depth_m,

@@ -339,7 +339,7 @@ fn run(
             let g = fv.establishment_gates(&view, stand.site, stand.species);
             eprintln!(
                 "seed id={:<3} {:<14} site=({:>3},{:>2},{:>2}) water={:.4} m soil_vox={} \
-                 mean_pore={} sat_frac={:.3} sky={:.3} | mu={:.3} | gates {} [{}]",
+                 mean_water={} sat_frac={:.3} sky={:.3} | mu={:.3} | gates {} [{}]",
                 stand.id,
                 stand.species.name(),
                 stand.site.x,
@@ -347,11 +347,11 @@ fn run(
                 stand.site.z,
                 g.water_depth_m,
                 g.soil_voxels,
-                g.mean_pore
+                g.mean_water
                     .map_or("none".to_string(), |p| format!("{p:.4}")),
                 g.saturated_fraction,
                 g.sky_visibility,
-                mu_of(g.mean_pore, sc),
+                mu_of(g.mean_water, sc),
                 if g.passes() { "pass" } else { "REFUSE" },
                 failed_gates(&g, sc),
             );
@@ -390,9 +390,9 @@ fn run(
                 species.name(),
                 pass[i],
                 total[i],
-                sc.wilt_pore,
-                sc.sat_pore,
-                sc.establish_pore_min,
+                sc.wilt_water,
+                sc.full_water,
+                sc.establish_water_min,
                 sc.drown_depth_m,
                 sc.establish_light_min,
                 if shut[i].is_empty() {
@@ -549,19 +549,10 @@ fn run(
 
 // ------------------------------------------------------------------ the readings
 
-/// `μ`, the species' moisture ramp over its root box's mean pore fraction. An empty box
-/// wilts, which is `moisture_of`'s own rule.
-fn mu_of(mean_pore: Option<f64>, sc: &SpeciesConfig) -> f64 {
-    match mean_pore {
-        None => 0.0,
-        Some(mean) => {
-            if sc.sat_pore <= sc.wilt_pore {
-                if mean >= sc.sat_pore { 1.0 } else { 0.0 }
-            } else {
-                ((mean - sc.wilt_pore) / (sc.sat_pore - sc.wilt_pore)).clamp(0.0, 1.0)
-            }
-        }
-    }
+/// `μ`, the species' moisture ramp over its root box's mean available water (package F).
+/// An empty box wilts, which is `moisture_of`'s own rule.
+fn mu_of(mean_water: Option<f64>, sc: &SpeciesConfig) -> f64 {
+    mean_water.map_or(0.0, |a| sc.moisture_at(a))
 }
 
 /// This tick's income and maintenance for one stand, in organic-matter units: the
@@ -626,14 +617,14 @@ fn clause(
         );
     }
     if stand.moisture <= 0.0 {
-        return match g.mean_pore {
+        return match g.mean_water {
             None => format!(
                 "moisture: no soil voxel in the root box ({} of them), mu = 0",
                 g.soil_voxels
             ),
             Some(p) => format!(
-                "moisture: mean_pore {:.4} <= wilt_pore {:.2}, mu = 0",
-                p, sc.wilt_pore
+                "moisture: mean_water {:.4} <= wilt_water {:.2}, mu = 0",
+                p, sc.wilt_water
             ),
         };
     }
@@ -661,9 +652,9 @@ fn failed_gates(g: &Gates, sc: &SpeciesConfig) -> String {
     if !g.pore_ok {
         out.push(format!(
             "pore {} < {:.2}",
-            g.mean_pore
+            g.mean_water
                 .map_or("none".to_string(), |p| format!("{p:.4}")),
-            sc.establish_pore_min
+            sc.establish_water_min
         ));
     }
     if !g.aeration_ok {
@@ -701,7 +692,7 @@ fn failed_gates(g: &Gates, sc: &SpeciesConfig) -> String {
 
 fn print_header() {
     println!(
-        "sim_min,tick,id,species,x,y,z,water_m,soil_voxels,mean_pore,saturated_fraction,\
+        "sim_min,tick,id,species,x,y,z,water_m,soil_voxels,mean_water,saturated_fraction,\
          sky,light_response,mu,aeration_stress,wood,foliage,reserve,parcel,site_mineral,\
          litter,substrate_in_box,income,maintenance,covered,clause"
     );
@@ -725,7 +716,7 @@ fn print_minute(minute: u64, tick: u64, flora: &Flora, world: &World) {
             stand.site.z,
             g.water_depth_m,
             g.soil_voxels,
-            g.mean_pore.map_or("".to_string(), |p| format!("{p:.5}")),
+            g.mean_water.map_or("".to_string(), |p| format!("{p:.5}")),
             g.saturated_fraction,
             g.sky_visibility,
             stand.light,
@@ -780,7 +771,7 @@ fn report_deaths(
         causes[stand.species.index()].record(&clause);
         eprintln!(
             "DEATH min={:>4} tick={:<7} id={:<3} {:<14} site=({:>3},{:>2},{:>2}) {} | \
-             last W={:.6} P={:.6} Q={:.6} parcel={:.6} | mean_pore={} mu={:.3} sky={:.3} \
+             last W={:.6} P={:.6} Q={:.6} parcel={:.6} | mean_water={} mu={:.3} sky={:.3} \
              L={:.3} stress={:.3} | income={:.3e} maintenance={:.3e} | {}",
             tick / TICKS_PER_MIN,
             tick,
@@ -794,7 +785,7 @@ fn report_deaths(
             stand.foliage,
             stand.reserve,
             stand.parcel,
-            g.mean_pore
+            g.mean_water
                 .map_or("none".to_string(), |p| format!("{p:.5}")),
             stand.moisture,
             g.sky_visibility,
@@ -809,7 +800,7 @@ fn report_deaths(
 
 /// The brief's per-species table, one block every [`REPORT_MIN`] simulated minutes:
 /// stands, standing foliage and wood, establishments and deaths **by inferred cause**,
-/// the mean pore fraction in the species' own root boxes against its band, the mean
+/// the mean available water in the species' own root boxes against its band, the mean
 /// moisture ramp it turns into, the mean light response, and how much of this tick's
 /// maintenance this tick's income covers.
 fn report_species(
@@ -840,10 +831,10 @@ fn report_species(
         foliage[i] += stand.foliage;
         wood[i] += stand.wood;
         reserve[i] += stand.reserve;
-        if let Some(p) = g.mean_pore {
+        if let Some(p) = g.mean_water {
             pore[i] += p;
             pore_seen[i] += 1;
-            if p > sc.wilt_pore {
+            if p > sc.wilt_water {
                 in_band[i] += 1;
             }
         }
@@ -855,15 +846,15 @@ fn report_species(
         let i = species.index();
         let sc = fv.config.species(species);
         let n = f64::from(stands[i].max(1));
-        let mean_pore = if pore_seen[i] == 0 {
+        let mean_water = if pore_seen[i] == 0 {
             "none".to_string()
         } else {
             format!("{:.4}", pore[i] / f64::from(pore_seen[i]))
         };
         eprintln!(
             "SPECIES min={minute:>4} {:<14} stands={:<3} foliage={:<9.5} wood={:<9.5} \
-             reserve={:<9.5} | establishments={:<3} deaths={:<3} [{}] | mean_pore={} \
-             (wilt {:.2}, sat {:.2}; above wilt {}/{}) mu={:.3} light={:.3} covered={:.3}",
+             reserve={:<9.5} | establishments={:<3} deaths={:<3} [{}] | mean_water={} \
+             (wilt {:.2}, full {:.2}; above wilt {}/{}) mu={:.3} light={:.3} covered={:.3}",
             species.name(),
             stands[i],
             foliage[i],
@@ -872,9 +863,9 @@ fn report_species(
             establishments[i],
             causes[i].total(),
             causes[i].label(),
-            mean_pore,
-            sc.wilt_pore,
-            sc.sat_pore,
+            mean_water,
+            sc.wilt_water,
+            sc.full_water,
             in_band[i],
             stands[i],
             mu[i] / n,
@@ -956,7 +947,7 @@ fn report_eligibility(
             species.name(),
             eligible,
             skyline.len(),
-            sc.establish_pore_min,
+            sc.establish_water_min,
             pore,
             sc.establish_saturated_max,
             aer,

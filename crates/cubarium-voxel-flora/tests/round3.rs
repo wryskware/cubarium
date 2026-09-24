@@ -28,6 +28,15 @@ use cubarium_voxel_flora::{Command, Flora, FloraConfig, Ground, Site, Species, S
 
 /// A strip of `depth` slabs: bedrock at `y = 0`, soil at `y = 1..=2` at a chosen pore
 /// fraction, air above. Every column's support face is `y = 2`, in open sky.
+/// Wet enough for every species of these fixtures on any soil: available water 1.5 on
+/// package F's scale (field capacity is 1), so the wetland umbrellafrond is at full
+/// moisture and can germinate, the upland bloomcrown is too, and no voxel reaches
+/// `saturated_pore` on any soil in the soil-retention window.
+fn wet() -> f64 {
+    let wp = Material::Soil.wilting_point();
+    wp + 1.5 * (Material::Soil.field_capacity() - wp)
+}
+
 fn strip(width: u32, depth: u32, pore: f64) -> World {
     let config = VoxelConfig {
         width,
@@ -197,7 +206,7 @@ fn mineral_is_conserved_across_a_whole_life_cycle() {
     let mut config = FloraConfig::default();
     config.umbrellafrond.propagule_rate = 2.0;
     config.bloomcrown.maintenance = 0.4;
-    let mut world = strip(8, 1, 0.6);
+    let mut world = strip(8, 1, wet());
     let mut flora = Flora::new(config);
 
     // The donor: umbrellafrond, below `wood_max` so it really grows, with `hop` 1 so it
@@ -556,7 +565,7 @@ fn a_starving_stand_gets_mineral_rich_and_a_paying_one_tends_to_n_tissue() {
         config.umbrellafrond.n_tissue, n_tissue,
         "the two species share it this round"
     );
-    let mut world = strip(8, 1, 0.6);
+    let mut world = strip(8, 1, wet());
     let mut flora = Flora::new(config);
     assert!(flora.apply(
         &world,
@@ -652,7 +661,7 @@ fn a_bare_mineral_pool_stops_the_income_and_not_just_the_growth() {
 
     let s = *bare.view().stand_at(site(1)).expect("alive");
     assert_eq!(s.light, 1.0, "open sky");
-    assert_eq!(s.moisture, 1.0, "past sat_pore");
+    assert_eq!(s.moisture, 1.0, "past full_water");
     assert_eq!(
         s.aeration_stress, 0.0,
         "pore 0.6 is nowhere near saturated_pore"
@@ -995,7 +1004,7 @@ fn a_pruned_site_books_its_stand_its_bank_and_its_pool_in_three_currencies() {
 fn a_drowned_stand_s_gap_is_filled_by_its_bank_in_the_same_tick() {
     let mut config = FloraConfig::default();
     config.umbrellafrond.propagule_rate = 3.0;
-    let mut world = strip(5, 1, 0.6);
+    let mut world = strip(5, 1, wet());
     let mut flora = Flora::new(config);
     assert!(flora.apply(
         &world,
@@ -1140,7 +1149,7 @@ fn a_contested_gap_is_drawn_by_weight_and_the_losing_bank_stays() {
     config.bloomcrown.reserve_cap = 40.0;
     config.umbrellafrond.propagule_rate = 3.0;
     config.umbrellafrond.reserve_cap = 40.0;
-    let mut world = strip(5, 1, 0.6);
+    let mut world = strip(5, 1, wet());
     let mut flora = Flora::new(config);
     let contested = site(2);
     // The two donors, either side of the contested column, and the placeholder occupant
@@ -2575,7 +2584,7 @@ fn the_saturation_ceiling_is_non_strict_and_umbrellafrond_s_is_inert() {
 
 /// **The root box admits only `Material::Soil`**, so every voxel in it has the same pore
 /// capacity — which makes both of the weighting decisions in the water read unobservable:
-/// `mean_pore`'s capacity weighting and `saturated_fraction`'s deliberate lack of it can
+/// `mean_water`'s band weighting and `saturated_fraction`'s deliberate lack of it can
 /// never differ, today, on any fixture. And rock, which the core gives a real pore
 /// capacity of 0.02, is invisible: a stand rooted wholly in saturated rock reads `μ = 0`
 /// and a saturated fraction of 0, and a bank on such a site can never germinate however
@@ -2718,7 +2727,7 @@ fn umbrellafrond_never_stresses_from_saturation_and_drowns_only_by_depth() {
     assert_eq!(s.light, 1.0, "open sky");
     assert_eq!(
         s.moisture, 1.0,
-        "wetter than sat_pore: water is not a limit either"
+        "wetter than full_water: water is not a limit either"
     );
     assert!(s.wood > 0.1, "it did not grow: wood {}", s.wood);
     let fixed = flora.view().ledger.fixed_in;

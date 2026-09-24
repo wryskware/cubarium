@@ -528,12 +528,14 @@ fn drink(flora: &mut Flora, world: &mut World) -> Vec<Drink> {
             if demand <= 0.0 || box_.is_empty() {
                 continue;
             }
-            let stock: f64 = box_.iter().map(|&v| pore_m3(&view, v)).sum();
+            // Shared over the box in proportion to what each cell holds **above its
+            // wilting point**: water under it is held too tightly for a root.
+            let stock: f64 = box_.iter().map(|&v| drinkable_m3(&view, v)).sum();
             if stock <= 0.0 {
                 continue;
             }
             for &v in box_.iter() {
-                let share = demand * pore_m3(&view, v) / stock;
+                let share = demand * drinkable_m3(&view, v) / stock;
                 if share > 0.0 {
                     wants.push((v, i, share));
                 }
@@ -552,13 +554,20 @@ fn drink(flora: &mut Flora, world: &mut World) -> Vec<Drink> {
             end += 1;
         }
         let (x, y, z) = world.config().coords(voxel);
+        // Never below the wilting point, however many stands asked: the voxel's first and
+        // only withdrawal this tick, so the reading is still the pre-withdrawal one.
+        let volume = total.min(drinkable_m3(&world.view(), voxel));
         // One bounded operation for the whole voxel, whatever asked for it.
-        let accepted = -world.apply(WorldCommand::WithdrawPore {
-            x: x as i64,
-            y,
-            z,
-            volume_m3: total,
-        });
+        let accepted = if volume > 0.0 {
+            -world.apply(WorldCommand::WithdrawPore {
+                x: x as i64,
+                y,
+                z,
+                volume_m3: volume,
+            })
+        } else {
+            0.0
+        };
         flora.ledger.transpired_m3 += accepted;
         for &(_, stand, want) in &wants[at..end] {
             out[stand].taken_m3 += split_proportional(accepted, want, total);
@@ -617,25 +626,46 @@ fn root_box(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> Vec<usize> 
     out
 }
 
-fn pore_m3(view: &VoxelView<'_>, i: usize) -> f64 {
-    view.pore[i] * view.material[i].pore_capacity() * view.config.voxel_volume()
+/// What one cell of ground offers a root, on the scale `μ` and the establishment water
+/// gate read (package F, `design/handoffs/voxel-plant-viability-2026-09-23.md`):
+/// `a = (p − wp)/(fc − wp)` with `p` the cell's pore fraction and `wp`, `fc` its **own**
+/// material's wilting point and field capacity, floored at zero.
+///
+/// `a` is 0 at the wilting point, 1 at field capacity — what drained ground holds — and
+/// `(1 − wp)/(fc − wp)` at saturation. A material with no band between the two (air,
+/// bedrock) offers nothing.
+pub fn available_water(material: Material, pore: f64) -> f64 {
+    let (wp, fc) = (material.wilting_point(), material.field_capacity());
+    if fc <= wp {
+        return 0.0;
+    }
+    ((pore - wp) / (fc - wp)).max(0.0)
 }
 
-/// The capacity-weighted mean pore fraction of a root box, `None` for a box with no
-/// pore space in it at all. Weighted, not a plain mean, so a box that mixes materials
-/// reads as the water it could actually hold.
-fn mean_pore(view: &VoxelView<'_>, box_: &[usize]) -> Option<f64> {
+/// Cubic metres of cell `i`'s pore water above its wilting point: what a root may drink.
+fn drinkable_m3(view: &VoxelView<'_>, i: usize) -> f64 {
+    let m = view.material[i];
+    (view.pore[i] - m.wilting_point()).max(0.0) * m.pore_capacity() * view.config.voxel_volume()
+}
+
+/// The mean [`available_water`] of a root box, `None` for a box with no plant-available
+/// band in it at all. Each cell is weighted by the volume of its band,
+/// `(fc − wp) · pore_capacity`, so the mean is the drinkable water the box holds over what
+/// it would hold at field capacity: a box that mixes materials reads as the water it can
+/// actually offer.
+fn mean_available(view: &VoxelView<'_>, box_: &[usize]) -> Option<f64> {
     let mut water = 0.0;
-    let mut capacity = 0.0;
+    let mut band = 0.0;
     for &i in box_ {
-        let cap = view.material[i].pore_capacity();
-        water += view.pore[i] * cap;
-        capacity += cap;
+        let m = view.material[i];
+        let w = (m.field_capacity() - m.wilting_point()).max(0.0) * m.pore_capacity();
+        water += available_water(m, view.pore[i]) * w;
+        band += w;
     }
-    if capacity <= 0.0 {
+    if band <= 0.0 {
         None
     } else {
-        Some(water / capacity)
+        Some(water / band)
     }
 }
 
@@ -678,18 +708,18 @@ fn aeration_target(saturated: f64, sc: &SpeciesConfig) -> f64 {
     ((saturated - tol) / (1.0 - tol)).clamp(0.0, 1.0)
 }
 
-/// `μ`: a linear ramp of the root box's mean pore fraction between `wilt_pore` and
-/// `sat_pore`. An empty box is a wilting one.
+/// `μ`: the species' ramp ([`SpeciesConfig::moisture_at`]) over the root box's mean
+/// available water, between `wilt_water` and `full_water`. An empty box is a wilting one.
 fn moisture_of(view: &VoxelView<'_>, box_: &[usize], sc: &SpeciesConfig) -> f64 {
-    match mean_pore(view, box_) {
+    match mean_available(view, box_) {
         None => 0.0,
-        Some(mean) => ramp(mean, sc.wilt_pore, sc.sat_pore),
+        Some(mean) => sc.moisture_at(mean),
     }
 }
 
 /// Zero at or below `lo`, one at or above `hi`, linear between. A `hi` at or below `lo`
 /// is a step at `hi`.
-fn ramp(value: f64, lo: f64, hi: f64) -> f64 {
+pub(crate) fn ramp(value: f64, lo: f64, hi: f64) -> f64 {
     if hi <= lo {
         return if value >= hi { 1.0 } else { 0.0 };
     }
@@ -2204,9 +2234,9 @@ pub struct Gates {
     /// Soil voxels in the species' root box. Zero means there is no soil under this site
     /// at all: rock, or a box that falls outside the world.
     pub soil_voxels: usize,
-    /// Capacity-weighted mean pore fraction of the root box, `None` for a box with no pore
-    /// space in it at all.
-    pub mean_pore: Option<f64>,
+    /// Mean [`available_water`] of the root box (package F): 0 at the wilting point, 1 at
+    /// field capacity. `None` for a box with no plant-available band in it at all.
+    pub mean_water: Option<f64>,
     /// Fraction of the root box's voxels at or above the species' `saturated_pore`.
     pub saturated_fraction: f64,
     /// Free water standing on the support face, metres.
@@ -2223,7 +2253,8 @@ pub struct Gates {
     /// `dead_wood` alone: the two are reported apart only so a diagnosis can say which
     /// food a site holds.
     pub litter: f64,
-    /// `mean_pore >= establish_pore_min`, and false for a box with no soil in it.
+    /// The pore-water gate: `mean_water >= establish_water_min`, on the available-water
+    /// scale, and false for a box with no soil in it.
     pub pore_ok: bool,
     /// `saturated_fraction <= establish_saturated_max`.
     pub aeration_ok: bool,
@@ -2345,7 +2376,7 @@ fn gates(
     #[cfg(feature = "profile")]
     cubarium_voxel::profile::add(cubarium_voxel::profile::Count::GatesEvaluated, 1);
     let box_ = root_box(view, site, sc);
-    let mean_pore = mean_pore(view, &box_);
+    let mean_water = mean_available(view, &box_);
     let saturated_fraction = saturated_fraction(view, &box_, sc);
     let water_depth_m = view.water_depth_m(site.x as i64, site.y, site.z);
     let standing_depth_m = if sc.water_depth_min_m > 0.0 {
@@ -2355,13 +2386,13 @@ fn gates(
     };
     Gates {
         soil_voxels: box_.len(),
-        mean_pore,
+        mean_water,
         saturated_fraction,
         water_depth_m,
         sky_visibility,
         dead_wood,
         litter,
-        pore_ok: mean_pore.is_some_and(|mean| mean >= sc.establish_pore_min),
+        pore_ok: mean_water.is_some_and(|mean| mean >= sc.establish_water_min),
         aeration_ok: saturated_fraction <= sc.establish_saturated_max,
         depth_ok: water_depth_m <= sc.drown_depth_m,
         light_ok: match sc.trophic {
@@ -2859,7 +2890,8 @@ mod tests {
         assert_eq!(g.saturated_fraction, 0.0);
         assert_eq!(g.water_depth_m, 0.0);
         assert_eq!(g.sky_visibility, 1.0, "open sky");
-        assert!((g.mean_pore.expect("soil") - 0.6).abs() < 1e-12);
+        let a = available_water(Material::Soil, 0.6);
+        assert!((g.mean_water.expect("soil") - a).abs() < 1e-12);
         drop(view);
 
         // A site with no soil under it at all: the pore gate shuts, and the saturated
@@ -2878,7 +2910,7 @@ mod tests {
         let view = rock.view();
         let g = establishment_gates(&view, site, &sc);
         assert_eq!(g.soil_voxels, 0, "{g:?}");
-        assert_eq!(g.mean_pore, None);
+        assert_eq!(g.mean_water, None);
         assert!(!g.pore_ok && g.aeration_ok, "{g:?}");
         assert_eq!(g.passes(), can_establish(&view, site, &sc));
         assert!(!g.passes());
