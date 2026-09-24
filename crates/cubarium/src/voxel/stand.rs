@@ -32,11 +32,13 @@
 //! solid terrain is dropped, so a stand whose support has been buried does not paint
 //! inside rock.
 //!
-//! A site whose [`cubarium_voxel_flora::Ground`] holds a **seed cohort** is a single
-//! **sprout** cell just above its support: dormant propagule material, not yet a plant.
-//! Round 3 moved the glyph there from the deleted `Stage::Establishing`, so the picture
-//! still shows waiting propagules. A site can hold a bank *and* a living stand, and the
-//! stand's own cells outrank the sprout, so the mark shows only where the gap is open.
+//! A site whose [`cubarium_voxel_flora::Ground`] shows a **seed mark** — a seed landed in
+//! the last two minutes, or the bank is about to sprout ([`Ground::seed_mark`], package
+//! SM) — is a single **sprout** cell just above its support. A bank that is only waiting
+//! draws nothing. A site can hold a bank *and* a living stand, and the stand's own cells
+//! outrank the sprout, so the mark shows only where the gap is open.
+//!
+//! [`Ground::seed_mark`]: cubarium_voxel_flora::Ground::seed_mark
 //!
 //! Whole voxels are the picture's own quantisation. The model's crown top is a float and
 //! its disc a float radius; the drawing rounds both, so a stand's drawn top can sit half
@@ -486,10 +488,11 @@ impl Stands {
                 );
             }
         }
-        // Then the seed banks, also in site order: one sprout mark per site that holds a
-        // cohort, in the colours of whichever species' cohorts hold the most there.
+        // Then the seed banks, also in site order: one sprout mark per site whose seed
+        // landed recently or is about to sprout (package SM), in that species' colours. A
+        // bank that is only waiting draws nothing.
         for g in flora.ground {
-            let Some(species) = g.seed_species() else {
+            let Some(species) = g.seed_mark(flora.tick) else {
                 continue;
             };
             let style = self.styles.len().min(u16::MAX as usize) as u16;
@@ -1216,9 +1219,9 @@ mod tests {
             g
         };
         let ground = vec![
-            bank(4, tick - 10, None),                        // recent
-            bank(8, tick - recent - 1, None),                // waiting
-            bank(12, 0, Some(Species::Bloomcrown)),          // about to sprout
+            bank(4, tick - 10, None),               // recent
+            bank(8, tick - recent - 1, None),       // waiting
+            bank(12, 0, Some(Species::Bloomcrown)), // about to sprout
         ];
         let ledger = FloraLedger::default();
         let fv = FloraView {
@@ -1234,7 +1237,11 @@ mod tests {
         let at = |x: i64| stands.at(x, 4, 1);
         assert!(matches!(at(4), Part::Sprout(_)), "recent: {:?}", at(4));
         assert_eq!(at(8), Part::None, "a waiting bank draws nothing");
-        assert!(matches!(at(12), Part::Sprout(_)), "about to sprout: {:?}", at(12));
+        assert!(
+            matches!(at(12), Part::Sprout(_)),
+            "about to sprout: {:?}",
+            at(12)
+        );
     }
 
     /// Two species' cohorts can share one site now, and the picture has one glyph per

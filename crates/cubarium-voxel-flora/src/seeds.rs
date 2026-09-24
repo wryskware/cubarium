@@ -194,7 +194,7 @@ pub(crate) fn bin_start(tick: u64, sc: &SpeciesConfig) -> u64 {
 /// Land material on a site's bank, in the bin whose window covers `tick`: a bin already
 /// there sums the organic matter and the mineral and keeps its start, and one that is not
 /// is inserted. `seeds` stays sorted by species then `bin_start_tick`, oldest first.
-fn add_cohort(
+pub(crate) fn add_cohort(
     g: &mut Ground,
     species: Species,
     organic: f64,
@@ -205,6 +205,8 @@ fn add_cohort(
     if organic <= 0.0 && mineral <= 0.0 {
         return;
     }
+    // Package SM: the D5 mark shows a recent landing.
+    g.last_landing = Some((species, tick));
     let start = bin_start(tick, sc);
     match g
         .seeds
@@ -354,6 +356,7 @@ fn germinate(
     for &gi in tested {
         let site = ground[gi].site;
         if stands.binary_search_by_key(&site, |s| s.site).is_ok() {
+            ground[gi].sprouting = None;
             continue;
         }
         let mut counts = [0u64; Species::COUNT];
@@ -372,7 +375,13 @@ fn germinate(
             candidates.push((species, n));
         }
         let site_index = view.config.index(site.x as i64, site.y, site.z) as u64;
-        if let Some(species) = lottery(world_seed, site_index, tick, &candidates) {
+        let drawn = || lottery(world_seed, site_index, tick, &candidates);
+        let now = if config.sprout_after_arming {
+            arm_or_sprout(&mut ground[gi], &candidates, drawn)
+        } else {
+            drawn()
+        };
+        if let Some(species) = now {
             winners.push((gi, species));
         }
     }
@@ -395,6 +404,27 @@ fn germinate(
         ledger.establishments += 1;
         ledger.seeds_germinated[species.index()] += 1;
     }
+}
+
+/// Package SM's one-check delay, for one tested site with no stand on it. A site armed at
+/// the last check sprouts its armed species now if that species still passes
+/// (`passing`); otherwise this check's lottery (`draw`) arms the site for the next one, or
+/// clears it when nothing passes. Returns the species to germinate now.
+///
+/// The lottery is drawn once, at the arming check, and not again at the sprouting one: a
+/// second draw would make a winner win twice running, which squares the lottery's weights.
+pub(crate) fn arm_or_sprout(
+    g: &mut Ground,
+    passing: &[(Species, u64)],
+    draw: impl FnOnce() -> Option<Species>,
+) -> Option<Species> {
+    if let Some(armed) = g.sprouting.take()
+        && passing.iter().any(|&(s, _)| s == armed)
+    {
+        return Some(armed);
+    }
+    g.sprouting = draw();
+    None
 }
 
 /// A stand built out of one funded package: the seed that germinated or the runner that
@@ -1142,8 +1172,10 @@ mod tests {
     #[test]
     fn a_lone_seed_waits_hours_and_germinates_at_the_first_check_after_the_gate_opens() {
         let mut config = FloraConfig::default();
-        // This test is about waiting, not about attrition.
+        // This test is about waiting, not about attrition — nor about package SM's arming
+        // check (`seed_marks_tests`), so a passing check sprouts.
         config.bloomcrown.seed_attrition_per_s = 0.0;
+        config.sprout_after_arming = false;
         assert!(
             config.bloomcrown.seed_max_age_s >= 3.0 * 3600.0,
             "bloomcrown's bank must outlive the wait"
@@ -1453,6 +1485,8 @@ mod tests {
     fn a_site_is_not_tested_between_checks_except_on_a_shower_flush() {
         let mut config = FloraConfig::default();
         config.bloomcrown.seed_attrition_per_s = 0.0;
+        // When a site is tested, not package SM's arming (`seed_marks_tests`).
+        config.sprout_after_arming = false;
         let mut world = slab(4, 1, 0.6); // open: a bloomcrown passes everywhere
         let mut flora = Flora::new(config);
 
