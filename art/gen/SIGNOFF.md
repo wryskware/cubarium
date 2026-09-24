@@ -99,3 +99,23 @@ Blockouts in `runs/animal-bodies-2026-09-24/`:
   pink eyes, short legs, on a log).
 - **All animals:** "we need more colour variety and texture on all the animals in
   general." The 2026-09-23 colour pass reads well in the world; keep its spirit.
+
+## Animal bodies and colour: final (Wrysk, 2026-09-24)
+
+Blockouts are in `runs/animal-bodies-2026-09-24/`; script `scripts/blender/animal_bodies_r2.py`.
+Hexes are in that folder's `README.md`.
+
+| code | body (final) | colour (final) | kept alternate |
+| --- | --- | --- | --- |
+| CH | CH-A2 v3 (`row-chorister-v3.png`, `strip-CH-A2-v3.png`) | colourway 1, violet stalker | colourway 2, rust |
+| RS | RS-D2 v2 (`row-ripple-snail-v2.png`, `strip-RS-D2-v2.png`) | colourway 1, azure dome | colourway 2, jade |
+| CG | CG-D2 v2 (`row-capgnawer-v2.png`, `strip-CG-D2-v2.png`) | colourway 1, rose-mauve | colourway 2, lichen |
+| SP | SP-AB2 (`row-seedporter.png`, `strip-SP-AB2-v2.png`) | colourway 1, moss | **colourway 2, orchid pink (Wrysk likes it)** |
+| FG | saddle shield (settled) | colourway 1, coral | **colourway 2, periwinkle blue (Wrysk likes it)** |
+| LT | plough segment (settled) | colourway 1, gold | colourway 2, teal |
+| BW | A (final) | **original colours, not recoloured** | — |
+
+Wrysk: "top row for everything … except bellwing, which we should keep the original and
+not try to recolor." The chorister is good; GPT-image does the final details pass.
+Alternates stay available ("maybe different lineages, or just an option to pick from").
+See backlog §8.

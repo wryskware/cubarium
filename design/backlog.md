@@ -213,3 +213,11 @@ The CPU renderer keeps its current flat look for good: it is the PNG diagnostics
 and less detail helps there. Textures and other art go into the GPU renderer only.
 Later, not now: layers in the CPU renderer that can be toggled on and off (terrain,
 water, flora, fauna, haze) for diagnostic captures.
+
+## 8. Colour morphs: alternate colourways as lineages or an option (Wrysk, 2026-09-24)
+
+Each animal has a final colourway plus a kept alternate
+(`art/gen/SIGNOFF.md`, "Animal bodies and colour: final"). Wrysk likes some alternates
+(the orchid-pink seedporter, the periwinkle frondgrazer), so keep them. Later, not now:
+either a heritable colour morph (a lineage trait the presenter reads, so a population
+visibly carries its founder's colouring) or an operator option to pick the colourway.
