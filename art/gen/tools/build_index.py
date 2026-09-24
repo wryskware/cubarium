@@ -132,6 +132,11 @@ figure{margin:0;background:#0a0b0d;padding:4px}
 img{width:100%;height:auto;display:block;image-rendering:pixelated}
 figcaption{font-size:11px;color:#888;word-break:break-all;margin-top:2px}
 summary{cursor:pointer;color:#aaa;margin-top:8px}
+#lb{position:fixed;inset:0;background:rgba(0,0,0,.9);display:none;flex-direction:column;
+align-items:center;justify-content:center;z-index:9;cursor:zoom-out}
+#lb.on{display:flex}
+#lb img{max-width:96vw;max-height:90vh;image-rendering:pixelated;background:#222}
+#lb div{color:#ccc;font-size:12px;margin-top:6px;word-break:break-all}
 """
 
 JS = """
@@ -139,6 +144,27 @@ document.getElementById('filter').addEventListener('input',function(){
   var q=this.value.toLowerCase();
   document.querySelectorAll('section').forEach(function(s){s.hidden=!s.dataset.name.includes(q)});
   document.querySelectorAll('nav a').forEach(function(a){a.hidden=!a.dataset.name.includes(q)});
+});
+// Lightbox: click an image to view it here; Esc or a click closes it, arrows step
+// through the images of the same run. Ctrl/middle-click still opens the file.
+var lb=document.createElement('div');lb.id='lb';
+lb.innerHTML='<img alt=""><div></div>';document.body.appendChild(lb);
+var cur=null;
+function show(a){cur=a;lb.firstChild.src=a.getAttribute('href');
+  lb.lastChild.textContent=a.getAttribute('href');lb.classList.add('on');}
+function step(d){if(!cur)return;var s=cur.closest('section');
+  var all=[].slice.call(s.querySelectorAll('figure a'));var i=all.indexOf(cur)+d;
+  if(i>=0&&i<all.length){var n=all[i];var det=n.closest('details');
+    if(det)det.open=true;show(n);}}
+document.addEventListener('click',function(e){
+  var a=e.target.closest('figure a');
+  if(a&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey&&e.button===0){e.preventDefault();show(a);return;}
+  if(lb.classList.contains('on')&&lb.contains(e.target)){lb.classList.remove('on');cur=null;}
+});
+document.addEventListener('keydown',function(e){
+  if(!lb.classList.contains('on'))return;
+  if(e.key==='Escape'){lb.classList.remove('on');cur=null;}
+  else if(e.key==='ArrowRight')step(1);else if(e.key==='ArrowLeft')step(-1);
 });
 """
 
