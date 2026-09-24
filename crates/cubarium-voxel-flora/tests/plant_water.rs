@@ -257,3 +257,29 @@ fn the_establishment_water_gate_reads_the_available_water_scale() {
         assert!(!g.pore_ok, "{species:?} just below its floor: {g:?}");
     }
 }
+
+// ------------------------------------------------------------- lanternberry (LB)
+
+/// Package LB: a lanternberry keeps full moisture through the top half of what drained
+/// ground offers — the upland ramp — so a root box drying from field capacity to half of
+/// it between showers does not cut its income, while it still germinates only on moist
+/// ground (a floor above the ramp's bottom).
+#[test]
+fn a_lanternberry_is_at_full_moisture_on_half_drained_ground_and_germinates_only_on_moist() {
+    let config = FloraConfig::default();
+    let sc = config.species(Species::Lanternberry);
+    assert_eq!(sc.moisture_at(0.5), 1.0, "half of field capacity's water");
+    assert!(
+        sc.establish_water_min > sc.wilt_water + 0.2,
+        "germinates on moist ground only: floor {} over wilt {}",
+        sc.establish_water_min,
+        sc.wilt_water
+    );
+    let mut world = plain(6, soil_pore_at(0.5));
+    let mut flora = Flora::new(FloraConfig::default());
+    let mu = moisture_after_one_tick(&mut world, &mut flora, 2, Species::Lanternberry);
+    assert!(
+        (mu - 1.0).abs() < 1e-12,
+        "a lanternberry at a = 0.5: μ {mu}"
+    );
+}
