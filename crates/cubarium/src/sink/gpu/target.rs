@@ -178,15 +178,7 @@ impl WindowTarget {
     fn draw<S: FrameSource>(&mut self, gpu: &Gpu, src: &mut S, frame: S::Frame<'_>) -> Result<f64> {
         let ms = self.headless.draw(gpu, src, frame)?;
         let rgba = src.read_raster(gpu)?;
-        let w = src.raster_size().0 as usize;
-        for y in 0..self.size.1 {
-            let sy = y / self.zoom;
-            for x in 0..self.size.0 {
-                let i = (sy * w + x / self.zoom) * 4;
-                self.buffer[y * self.size.0 + x] =
-                    u32::from(rgba[i]) << 16 | u32::from(rgba[i + 1]) << 8 | u32::from(rgba[i + 2]);
-            }
-        }
+        upscale(&rgba, src.raster_size().0 as usize, self.zoom, &mut self.buffer);
         if !self.window.is_open() || self.window.is_key_down(minifb::Key::Escape) {
             self.open = false;
             return Ok(ms);
@@ -199,5 +191,36 @@ impl WindowTarget {
 
     fn destroy(&mut self, gpu: &Gpu) {
         self.headless.destroy(gpu);
+    }
+}
+
+/// `rgba` (`w` pixels a row) into minifb's `0RGB` words at `zoom`× nearest: each source
+/// row converted once, and its zoomed copies taken from the first.
+fn upscale(rgba: &[u8], w: usize, zoom: usize, out: &mut [u32]) {
+    let row = w * zoom;
+    for (src, band) in rgba.chunks_exact(w * 4).zip(out.chunks_exact_mut(row * zoom)) {
+        let (first, rest) = band.split_at_mut(row);
+        for (p, dst) in src.chunks_exact(4).zip(first.chunks_exact_mut(zoom)) {
+            dst.fill(u32::from(p[0]) << 16 | u32::from(p[1]) << 8 | u32::from(p[2]));
+        }
+        for copy in rest.chunks_exact_mut(row) {
+            copy.copy_from_slice(first);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_window_upscale_is_nearest_at_the_zoom() {
+        // 2 x 1 pixels, red then blue, at 2x: a 4 x 2 block of each colour's word.
+        let rgba = [255, 0, 0, 255, 0, 0, 255, 255];
+        let mut out = vec![0u32; 8];
+        super::upscale(&rgba, 2, 2, &mut out);
+        let (r, b) = (0x00FF_0000, 0x0000_00FF);
+        assert_eq!(out, [r, r, b, b, r, r, b, b]);
+        let mut one = vec![0u32; 2];
+        super::upscale(&rgba, 2, 1, &mut one);
+        assert_eq!(one, [r, b]);
     }
 }

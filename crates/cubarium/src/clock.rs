@@ -94,6 +94,14 @@ pub struct Clock {
     /// drain is dropped when it ends. `None` when the schedule is caught up.
     drain_until: Option<Instant>,
     last_lag_log: Option<Instant>,
+    /// When the last `Render` was handed out, until the next call measures it.
+    render_began: Option<Instant>,
+    /// The last render took longer than a frame period: the renderer, not the tick, is
+    /// what is behind, and frames stop going first (see [`Clock::next_step`]).
+    render_slow: bool,
+    /// A full run of catch-up ticks has been taken since the last frame: the next due
+    /// frame goes first even when the renderer is slow, so the picture still moves.
+    frame_owed: bool,
 }
 
 impl Clock {
@@ -118,6 +126,9 @@ impl Clock {
             catchup: 0,
             drain_until: None,
             last_lag_log: None,
+            render_began: None,
+            render_slow: false,
+            frame_owed: false,
         }
     }
 
@@ -182,6 +193,9 @@ impl Clock {
 
         let tick_due = now >= self.next_tick;
         let frame_due = now >= self.render_at(self.render_index);
+        if let Some(began) = self.render_began.take() {
+            self.render_slow = now.saturating_duration_since(began) > self.render_period;
+        }
 
         // On schedule, the tick goes first: a frame landing exactly on a tick boundary
         // belongs to the tick that boundary starts, and taking it first is what hands the
@@ -189,7 +203,16 @@ impl Clock {
         // simulation is a whole tick or more behind — a tick that took longer than its
         // own period — the frame goes first instead, and keeps going first until the
         // picture is current again.
-        if tick_due && !(frame_due && behind >= self.tick_period) {
+        //
+        // **Unless the renderer is what is slow.** A frame that takes longer than the
+        // frame period finds the next one already due when it ends, so "frame first while
+        // behind" would never tick again: a 3328 x 2048 development window at ~120 ms a
+        // frame held the world at 0 ticks/s. Then ticks go first, and a frame is drawn
+        // after each full run of catch-up ticks.
+        let frame_first = frame_due
+            && behind >= self.tick_period
+            && (!self.render_slow || self.frame_owed);
+        if tick_due && !frame_first {
             if self.catchup < MAX_CATCHUP_TICKS {
                 self.catchup += 1;
                 self.tick += 1;
@@ -201,6 +224,7 @@ impl Clock {
             // once a second, and keep ticking on the next pass. Nothing is skipped here —
             // not a tick, and no longer a frame either.
             self.catchup = 0;
+            self.frame_owed = true;
             let log = match self.last_lag_log {
                 Some(t) if now.duration_since(t) < LAG_LOG_INTERVAL => false,
                 _ => {
@@ -226,6 +250,12 @@ impl Clock {
                     self.reschedule_renders(now);
                 }
             }
+            self.frame_owed = false;
+            self.render_began = Some(now);
+            // A run of catch-up ticks is consecutive ticks: a frame between them ends it.
+            // Otherwise a busy loop that never sleeps counts every tick of the run into
+            // one catch-up and reports a lag it does not have.
+            self.catchup = 0;
             return Step::Render {
                 f: self.fraction(now),
             };
@@ -513,6 +543,36 @@ mod tests {
                 worst <= Duration::from_millis(250),
                 "fps {fps}: {worst:?} between frames"
             );
+        }
+    }
+
+    /// A renderer slower than the frame period must not stop the world: ticks of 25 ms
+    /// and frames of 120 ms (the 13 px development window before its readback was fixed)
+    /// still tick close to 20 Hz, and still draw.
+    #[test]
+    fn a_renderer_slower_than_the_frame_period_does_not_starve_the_ticks() {
+        for render_ms in [20u64, 40, 120] {
+            let t0 = Instant::now();
+            let mut c = Clock::new(t0);
+            let mut now = t0;
+            let (mut ticks, mut renders) = (0u32, 0u32);
+            let end = t0 + Duration::from_secs(10);
+            while now < end {
+                match c.next_step(now) {
+                    Step::Tick => {
+                        ticks += 1;
+                        now += Duration::from_millis(25);
+                    }
+                    Step::Render { .. } => {
+                        renders += 1;
+                        now += Duration::from_millis(render_ms);
+                    }
+                    Step::Sleep(d) => now += d,
+                    Step::Lagged { .. } | Step::Paused { .. } => {}
+                }
+            }
+            assert!(ticks >= 170, "{render_ms} ms frames: {ticks} ticks in 10 s");
+            assert!(renders >= 30, "{render_ms} ms frames: {renders} frames in 10 s");
         }
     }
 }

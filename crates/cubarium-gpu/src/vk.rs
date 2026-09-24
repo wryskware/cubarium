@@ -220,6 +220,23 @@ impl Gpu {
 
     /// A host-visible, persistently mapped buffer: how every per-frame upload travels.
     pub fn host_buffer(&self, size: u64, usage: vk::BufferUsageFlags) -> Result<HostBuffer> {
+        self.mapped_buffer(size, usage, false)
+    }
+
+    /// A buffer the GPU writes and the CPU **reads**: host-cached memory where the device
+    /// has it. Upload memory is write-combined, and reading a 3328 x 2048 raster back out
+    /// of it costs ~50 ms on the desktop — the development window's whole frame budget
+    /// three times over.
+    pub fn readback_buffer(&self, size: u64) -> Result<HostBuffer> {
+        self.mapped_buffer(size, vk::BufferUsageFlags::TRANSFER_DST, true)
+    }
+
+    fn mapped_buffer(
+        &self,
+        size: u64,
+        usage: vk::BufferUsageFlags,
+        cached: bool,
+    ) -> Result<HostBuffer> {
         let d = &self.device;
         let buffer = unsafe {
             d.create_buffer(
@@ -232,7 +249,15 @@ impl Gpu {
         }?;
         let req = unsafe { d.get_buffer_memory_requirements(buffer) };
         let want = vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT;
-        let index = self.memory_type(req.memory_type_bits, want)?;
+        let index = match cached {
+            true => self
+                .memory_type(
+                    req.memory_type_bits,
+                    want | vk::MemoryPropertyFlags::HOST_CACHED,
+                )
+                .or_else(|_| self.memory_type(req.memory_type_bits, want))?,
+            false => self.memory_type(req.memory_type_bits, want)?,
+        };
         let memory = unsafe {
             d.allocate_memory(
                 &vk::MemoryAllocateInfo::default()

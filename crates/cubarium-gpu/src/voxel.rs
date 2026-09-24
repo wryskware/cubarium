@@ -1495,7 +1495,7 @@ impl VoxelRenderer {
     pub fn read_raster(&self, gpu: &Gpu) -> Result<Vec<u8>> {
         let (w, h) = (self.params.raster_w, self.params.raster_h);
         let size = u64::from(w) * u64::from(h) * 4;
-        let host = gpu.host_buffer(size, vk::BufferUsageFlags::TRANSFER_DST)?;
+        let host = gpu.readback_buffer(size)?;
         let d = &gpu.device;
         gpu.one_shot(self.command_pool, |cb| unsafe {
             barrier(
