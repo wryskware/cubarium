@@ -45,6 +45,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod cover;
 mod layers;
 #[cfg(test)]
 mod seed_marks_tests;
@@ -56,6 +57,12 @@ use cubarium_voxel::{Material, VoxelView, World};
 use serde::{Deserialize, Serialize};
 
 pub use cubarium_voxel::{DT, TICK_HZ};
+
+/// The latticevine face cover (D15 Revision 2): see [`cover`].
+pub use cover::{
+    Cover, CoveredFace, Face, FaceDir, FaceDraw, SpurPhase, Vine, VineConfig, VineId, VineSeed,
+    face_eligible, face_light,
+};
 
 /// How long a seed landing keeps its site's D5 mark: **two simulated minutes** (package
 /// SM, the brief's "recent"). Long enough to see a donor's fall of seed arrive; short
@@ -2274,6 +2281,9 @@ pub struct FloraConfig {
     pub vaulttree: SpeciesConfig,
     pub lanternberry: SpeciesConfig,
     pub siphonreed: SpeciesConfig,
+    /// The latticevine, which is not a stand: a vine rooted on a support face covering rock
+    /// faces ([`cover`]).
+    pub latticevine: VineConfig,
     /// Canopy attenuation, **per square metre**: a taller stand whose crown covers a
     /// site multiplies the light reaching that site by
     /// `exp(-shade_k_per_m2 · P / crown_area_m2)`, where the crown's area is
@@ -2357,6 +2367,7 @@ impl Default for FloraConfig {
             vaulttree: SpeciesConfig::vaulttree(),
             lanternberry: SpeciesConfig::lanternberry(),
             siphonreed: SpeciesConfig::siphonreed(),
+            latticevine: VineConfig::default(),
             shade_k_per_m2: 0.09375,
             decomposition: 0.001,
             wood_decomposition: 0.0001,
@@ -2897,6 +2908,9 @@ pub struct FloraView<'a> {
     /// Sorted by site. At most one entry per site.
     pub ground: &'a [Ground],
     pub ledger: &'a FloraLedger,
+    /// The latticevines and their covered faces: what the tile layer draws from
+    /// ([`Cover::draw`]).
+    pub cover: &'a Cover,
 }
 
 /// Every layer of `stand`, bottom-up, with its geometry resolved and its stock read.
@@ -3378,6 +3392,8 @@ pub struct Flora {
     stands: Vec<Stand>,
     ground: Vec<Ground>,
     ledger: FloraLedger,
+    /// The latticevines and their covered faces ([`cover`]).
+    cover: Cover,
     /// Sky visibility per site, sorted by site: pure terrain geometry, so it is dropped
     /// whole when the world's `terrain_version` moves and refilled lazily. A `Vec` with
     /// a binary search, never a `HashMap`: this layer iterates nothing unordered.
@@ -3480,6 +3496,7 @@ impl Flora {
             stands: Vec::new(),
             ground: Vec::new(),
             ledger: FloraLedger::default(),
+            cover: Cover::default(),
             sky: Vec::new(),
             sky_version: None,
             deliveries: Vec::new(),
@@ -3520,6 +3537,7 @@ impl Flora {
             stands: &self.stands,
             ground: &self.ground,
             ledger: &self.ledger,
+            cover: &self.cover,
         }
     }
 

@@ -1230,6 +1230,7 @@ mod tests {
             stands: &[],
             ground: &ground,
             ledger: &ledger,
+            cover: &cubarium_voxel_flora::Cover::default(),
         };
         let view = world.view();
         let mut stands = Stands::empty(32, 16, 4);
