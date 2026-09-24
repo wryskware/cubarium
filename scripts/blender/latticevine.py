@@ -999,28 +999,56 @@ def frame(name, col, ppm, pad=0.12):
 # One 0.125 m square of rock face seen face-on, 48 px, flat material colour (the dossier
 # hexes), transparent film, alpha cut out. Mask bits: 0 up, 1 right, 2 down, 3 left.
 #
-# Joins. A runner leaves the tile through the midpoint of every edge whose bit is set,
-# square to the edge, at the same radius and colour (young violet), and runs a little past
-# it (cropped), so the neighbour's runner meets it pixel for pixel. Each set edge also
-# carries one "edge rosette" defined in the edge's own coordinates (along / across), so
-# the two tiles that share the edge each draw the same rosette and each keep their half.
-# Edge rosettes sit in front of everything else, vertical-edge ones in front of
-# horizontal-edge ones, so the halves agree in both tiles. Interior rosettes stay inside
-# the tile, at a random margin from each edge (the ragged side of a clear edge).
+# Exits. A runner leaves through each set edge at one of two positions, a third or
+# two-thirds along it, measured from the top edge's left end (up/down edges) or the left
+# edge's top end (left/right edges). The exits digit uses the mask's bit order: bit set =
+# the two-thirds position. The presenter picks each edge's position from a hash of the
+# edge's world position, so both tiles agree. The runner meets its edge square, at one
+# radius and colour (young violet), and runs a little past it (cropped).
+#
+# Edge rosettes. Each set edge carries one rosette defined by its orientation and exit
+# position only, centred near the exit, so both tiles draw the same rosette and each keeps
+# its half. They are drawn frontmost, vertical-edge ones in front of horizontal-edge ones.
+#
+# Inside the tile everything is seeded per file: the junction point, the S-bends of the
+# runners, and the interior rosettes, which stay inside the tile (a random margin from a
+# clear edge gives the ragged border).
+#
+# Names: vine-<density>-<mask>-<exits>.png, vine-root-<density>-<mask>-<exits>.png and
+# vine-root-<density>-<mask>-<exits>-hang.png (mask and exits one hex digit each).
 
 TILE = VOX
 TPX = 48
-EDGE_MID = {0: (0.5, 1.0), 1: (1.0, 0.5), 2: (0.5, 0.0), 3: (0.0, 0.5)}
 EDGE_N = {0: (0, 1), 1: (1, 0), 2: (0, -1), 3: (-1, 0)}
 R_EDGE, R_CORE = 0.0085, 0.0105
-# edge rosettes: (along offset, across offset, radius) in metres, one spec per orientation
-EDGE_ROSETTE = {"h": (0.012, 0.002, 0.044), "v": (-0.010, -0.003, 0.041)}
+# edge rosettes by (orientation, exit position): (along offset toward the tile centre, across
+# offset, radius), metres
+EDGE_ROSETTE = {("h", 0): (0.006, 0.002, 0.040), ("h", 1): (-0.006, -0.002, 0.041),
+                ("v", 0): (-0.005, -0.003, 0.038), ("v", 1): (0.005, 0.003, 0.039)}
 TILE_MATS = {"lv_den": "#12093A"}
 L.PAL.update(TILE_MATS)
 
 
+def exit_point(e, pos):
+    """pos 0: a third along the edge, 1: two-thirds (from the left end / the top end)."""
+    f = (1 + pos) / 3
+    if e == 0:
+        return (f * TILE, TILE)
+    if e == 2:
+        return (f * TILE, 0.0)
+    return (TILE if e == 1 else 0.0, TILE - f * TILE)
+
+
+def exit_combos(mask):
+    bits = [e for e in range(4) if mask >> e & 1]
+    out = []
+    for n in range(1 << len(bits)):
+        out.append(sum(1 << b for k, b in enumerate(bits) if n >> k & 1))
+    return out
+
+
 class TileCtx:
-    """Quacks like a Stand for Stand._rosette / Stand._pad."""
+    """Quacks like a Stand for Stand._rosette."""
 
     def __init__(self):
         self.geo = Geo()
@@ -1047,54 +1075,67 @@ def _tube(g, pts, r0, r1, mat):
         g.ell(b, (rb, rb, rb), mat, u=10, v=6)
 
 
-def _runner_to_edge(g, c, e, mat_core="lv_runner_young"):
-    from mathutils import Vector as V2
-    E = V2((EDGE_MID[e][0] * TILE, EDGE_MID[e][1] * TILE))
-    n = V2(EDGE_N[e])
-    perp = V2((-n.y, n.x))
-    p2 = E - n * 0.35 * TILE
-    p1 = c + (p2 - c) * 0.35 + perp * (0.006 if e % 2 else -0.005)
-    pts = [_bez(c, p1, p2, E, k / 12) for k in range(13)]
-    _tube(g, pts, R_CORE, R_EDGE, mat_core if mat_core else "lv_runner_young")
+def _v2(x, y):
+    from mathutils import Vector as V
+    return V((x, y))
+
+
+def _runner(g, rng, j, e, pos, r0=R_CORE, mat="lv_runner_young"):
+    """An S-bent runner from the junction j out through exit (e, pos), square to the edge."""
+    E = _v2(*exit_point(e, pos))
+    n = _v2(*EDGE_N[e])
+    chord = E - j
+    side = _v2(-chord.y, chord.x).normalized() if chord.length > 1e-6 else _v2(1, 0)
+    bend = rng.uniform(0.012, 0.022) * rng.choice((-1, 1))
+    p1 = j + chord * 0.3 + side * bend
+    p2 = E - n * 0.3 * TILE - side * bend * 0.6
+    pts = [_bez(j, p1, p2, E, k / 14) for k in range(15)]
+    _tube(g, pts, r0, R_EDGE, mat)
     _tube(g, [E, E + n * 0.014], R_EDGE, R_EDGE, "lv_runner_young")
 
 
-def _braid(g, c):
-    """Two strands twisting once between the bottom and top edge midpoints, pinched to
-    one runner at each edge so the braid joins the next tile's."""
-    x0 = 0.5 * TILE
+def _braid(g, rng, pos_down, pos_up):
+    """Two strands twisting once along an S-curve from the bottom exit to the top exit,
+    pinched to one runner at each edge; returns the path's midpoint (the junction)."""
+    Ed, Eu = _v2(*exit_point(2, pos_down)), _v2(*exit_point(0, pos_up))
+    b1, b2 = rng.uniform(0.012, 0.024) * rng.choice((-1, 1)), rng.uniform(0.01, 0.02)
+    p1 = Ed + _v2(b1, 0.35 * TILE)
+    p2 = Eu + _v2(-b1 * b2 / 0.015, -0.35 * TILE)
+    path = [_bez(Ed, p1, p2, Eu, m / 28) for m in range(29)]
     for s_i in (0, 1):
         prev = None
-        for m in range(25):
-            s = m / 24
+        for m, p in enumerate(path):
+            s = m / 28
+            t = (path[min(m + 1, 28)] - path[max(m - 1, 0)]).normalized()
+            nrm = _v2(-t.y, t.x)
             ph = 2 * math.pi * s + s_i * math.pi
             env = math.sin(math.pi * s)
-            x = x0 + 0.011 * env * math.sin(ph)
+            q = p + nrm * 0.011 * env * math.sin(ph)
             y = -(0.007 + BACK) - 0.01 * env * (0.5 + 0.5 * math.cos(ph))
-            p = Vector((x, y, s * TILE))
+            v = Vector((q.x, y, q.y))
             r = 0.0068 + 0.0017 * (1 - env)
             if prev is not None:
-                g.cyl(prev, p, r, r, "lv_runner_young", seg=10)
-                g.ell(p, (r, r, r), "lv_runner_young", u=10, v=6)
-            prev = p
-    for e in (0, 2):
-        E = Vector((EDGE_MID[e][0] * TILE, -(R_EDGE + BACK), EDGE_MID[e][1] * TILE))
-        g.cyl(E, E + Vector((0, 0, 0.014 * EDGE_N[e][1])), R_EDGE, R_EDGE, "lv_runner_young", seg=10)
+                g.cyl(prev, v, r, r, "lv_runner_young", seg=10)
+                g.ell(v, (r, r, r), "lv_runner_young", u=10, v=6)
+            prev = v
+    for E, dz in ((Ed, -0.014), (Eu, 0.014)):
+        a = Vector((E.x, -(R_EDGE + BACK), E.y))
+        g.cyl(a, a + Vector((0, 0, dz)), R_EDGE, R_EDGE, "lv_runner_young", seg=10)
+    return path[14]
 
 
-def _root_arch(g, hang):
-    """The root arch across the bottom edge (climbing) or hanging from the top (hang),
-    a dark den under it, claws running out past the edge, and the old runner rising
-    from its apex to the tile centre."""
+def _root_arch(g, rng, hang):
+    """A small root arch in the lower third (climbing) or the upper third (hang), a small
+    dark den under it, claws running out past the edge; returns the apex."""
     def z(v):
         return TILE - v if hang else v
-    w, h, ra = 0.8 * TILE, 0.4 * TILE, 0.009
-    x0 = 0.5 * TILE
-    g.ell((x0, 0.0005, z(0.0)), (0.36 * w, 0.002, 0.85 * h), "lv_den", u=20, v=10)
+    w, h, ra = 0.55 * TILE, 0.27 * TILE, 0.0075
+    x0 = rng.uniform(0.38, 0.62) * TILE
+    g.ell((x0, 0.0005, z(0.0)), (0.3 * w, 0.002, 0.75 * h), "lv_den", u=20, v=10)
     prev = None
     for k in range(17):
         t = k / 16
-        p = Vector((x0 + (t - 0.5) * w, -(ra + BACK) - 0.012 * math.sin(math.pi * t), z(h * math.sin(math.pi * t))))
+        p = Vector((x0 + (t - 0.5) * w, -(ra + BACK) - 0.01 * math.sin(math.pi * t), z(h * math.sin(math.pi * t))))
         if prev is not None:
             g.cyl(prev, p, ra, ra, "lv_root", seg=10)
             g.ell(p, (ra, ra, ra), "lv_root", u=10, v=6)
@@ -1102,69 +1143,75 @@ def _root_arch(g, hang):
     for side in (-1, 1):
         lx = x0 + side * w / 2
         for sp in (-1, 0.4):
-            g.cyl((lx, -(ra + BACK), z(0.006)), (lx + sp * 0.012 + side * 0.006, -(ra + BACK), z(-0.02)),
+            g.cyl((lx, -(ra + BACK), z(0.005)), (lx + sp * 0.01 + side * 0.005, -(ra + BACK), z(-0.02)),
                   ra * 0.7, ra * 0.5, "lv_root", seg=8)
-    apex = Vector((x0, z(h)))
-    c = Vector((0.5 * TILE, 0.5 * TILE))
-    _tube(g, [apex.lerp(c, k / 4) for k in range(5)], R_CORE + 0.002, R_CORE, "lv_runner_old")
+    return _v2(x0, z(h))
 
 
-def build_tile(density, mask, root=None):
-    """root: None, 'climb' or 'hang'."""
+def tile_name(kind, density, mask, exits):
+    base = {"plain": "vine-", "climb": "vine-root-", "hang": "vine-root-"}[kind]
+    return f"{base}{density}-{mask:x}-{exits:x}{'-hang' if kind == 'hang' else ''}.png"
+
+
+def build_tile(density, mask, exits, kind="plain"):
     ctx = TileCtx()
     g = ctx.geo
-    rng = random.Random(f"tile:{density}:{mask}:{root}")
+    rng = random.Random(f"tile:{kind}:{density}:{mask:x}:{exits:x}")
     bits = [e for e in range(4) if mask >> e & 1]
-    c = Vector((0.5 * TILE, 0.5 * TILE))
-    braided = 0 in bits and 2 in bits
-    # runners
-    if braided:
-        _braid(g, c)
+    pos = {e: exits >> e & 1 for e in bits}
+    root = None if kind == "plain" else kind
+    # the junction: seeded near the centre, above the arch on a climbing root, below on a hang
+    jz = {None: (0.36, 0.64), "climb": (0.5, 0.68), "hang": (0.32, 0.5)}[root]
+    j = _v2(rng.uniform(0.36, 0.64) * TILE, rng.uniform(*jz) * TILE)
+    if 0 in bits and 2 in bits:
+        j = _braid(g, rng, pos[2], pos[0])
         for e in bits:
             if e in (1, 3):
-                _runner_to_edge(g, c, e)
+                _runner(g, rng, j, e, pos[e])
     else:
         for e in bits:
-            _runner_to_edge(g, c, e)
-    if not bits and root is None:  # an isolated face: a short curling runner
-        pts = [c + Vector((0.018 * math.sin(a), -0.02 + 0.03 * (1 - math.cos(a)) * 0.6))
-               for a in [k * 0.35 for k in range(7)]]
-        _tube(g, pts, R_CORE, 0.006, "lv_runner_young")
+            _runner(g, rng, j, e, pos[e])
     if root:
-        _root_arch(g, root == "hang")
-    # the holdfast at the junction, scaled to the tile (the model's 3 px pad would be 24 px here)
-    g.cyl((c.x, -0.004, c.y), (c.x, -0.006, c.y), 0.0145, 0.0145, "lv_pad_rim", seg=16)
-    g.cyl((c.x, -0.0045, c.y), (c.x, -0.009, c.y), 0.011, 0.011, "lv_pad", seg=16)
+        apex = _root_arch(g, rng, root == "hang")
+        mid = apex.lerp(j, 0.5) + _v2(rng.uniform(-0.01, 0.01), 0)
+        _tube(g, [_bez(apex, apex.lerp(mid, 0.6), mid, j, k / 8) for k in range(9)], R_CORE + 0.0015, R_CORE,
+              "lv_runner_old")
+    elif not bits:  # an isolated face: a short curling runner
+        a0 = rng.uniform(0, 6.28)
+        pts = [j + _v2(0.02 * math.cos(a0 + a) * (1 - a / 3), 0.02 * math.sin(a0 + a) * (1 - a / 3))
+               for a in [k * 0.4 for k in range(7)]]
+        _tube(g, pts, R_CORE, 0.006, "lv_runner_young")
+    # the holdfast at the junction, scaled to the tile
+    g.cyl((j.x, -0.004, j.y), (j.x, -0.006, j.y), 0.0145, 0.0145, "lv_pad_rim", seg=16)
+    g.cyl((j.x, -0.0045, j.y), (j.x, -0.009, j.y), 0.011, 0.011, "lv_pad", seg=16)
     if density == "bare":
         return ctx
     # edge rosettes (identical in full and thin, so mixed-density neighbours still join)
     for e in bits:
         o = "h" if e in (0, 2) else "v"
-        a, d, R = EDGE_ROSETTE[o]
-        Ex, Ez = EDGE_MID[e][0] * TILE, EDGE_MID[e][1] * TILE
-        if o == "h":
-            x, z = Ex + a, Ez + d
-        else:
-            x, z = Ex + d, Ez + a
-        ctx.rosette(x, z, R, -0.05 if o == "v" else -0.043, f"edge-{o}")
+        a, d, R = EDGE_ROSETTE[(o, pos[e])]
+        Ex, Ez = exit_point(e, pos[e])
+        x, z = (Ex + a, Ez + d) if o == "h" else (Ex + d, Ez + a)
+        ctx.rosette(x, z, R, -0.05 if o == "v" else -0.043, f"edge-{o}-{pos[e]}")
     # interior clump: full always; thin only where the face is a tip or isolated
     if density == "full" or len(bits) <= 1:
         n = {"full": 4 if len(bits) >= 2 else 3, "thin": 1}[density]
-        zlo, zhi = (0.45 * TILE, TILE) if root == "climb" else ((0.0, 0.55 * TILE) if root == "hang" else (0.0, TILE))
+        zlo, zhi = {None: (0.0, TILE), "climb": (0.36 * TILE, TILE), "hang": (0.0, 0.64 * TILE)}[root]
         placed = 0
-        for _ in range(200):
+        for _ in range(300):
             if placed == n:
                 break
-            R = rng.uniform(0.036, 0.048) if density == "full" else rng.uniform(0.028, 0.036)
-            # margins: tight on a covered edge (the edge rosette takes over), ragged on a clear one
+            R = rng.uniform(0.034, 0.048) if density == "full" else rng.uniform(0.028, 0.036)
             m = [rng.uniform(0.0, 0.004) if e in bits else rng.uniform(0.003, 0.014) for e in range(4)]
             x = rng.uniform(R + m[3], TILE - R - m[1])
-            z = rng.uniform(max(R + m[2], zlo + R * 0.6), min(TILE - R - m[0], zhi - R * 0.6))
-            if x != x or z != z or not (R + m[3] <= x <= TILE - R - m[1] and R + m[2] <= z <= TILE - R - m[0]):
+            z = rng.uniform(R + m[2], TILE - R - m[0])
+            if not (R + m[3] <= x <= TILE - R - m[1] and R + m[2] <= z <= TILE - R - m[0]):
+                continue
+            if not (zlo + 0.6 * R <= z <= zhi - 0.6 * R):
                 continue
             if any((x - px) ** 2 + (z - pz) ** 2 < (0.75 * R) ** 2 for px, pz, _ in ctx.rosettes):
                 continue
-            ctx.rosette(x, z, R, -0.03 - 0.004 * placed, f"tile:{density}:{mask}:{root}:{placed}")
+            ctx.rosette(x, z, R, -0.03 - 0.004 * placed, f"tile:{kind}:{density}:{mask:x}:{exits:x}:{placed}")
             placed += 1
     return ctx
 
@@ -1251,22 +1298,28 @@ def render_geo(sc, g, path):
 def render_tiles(out_dir):
     import subprocess
     os.makedirs(out_dir, exist_ok=True)
+    for f in os.listdir(out_dir):  # the set is replaced whole
+        if f.startswith("vine-") and f.endswith(".png"):
+            os.remove(os.path.join(out_dir, f))
     sc = tile_scene()
     n = 0
     for density in ("full", "thin", "bare"):
         for mask in range(16):
-            for root, name in ((None, f"vine-{density}-{mask:x}.png"),
-                               ("climb", f"vine-root-{density}-{mask:x}.png"),
-                               ("hang", f"vine-root-{density}-{mask:x}-hang.png")):
-                render_geo(sc, build_tile(density, mask, root).geo, os.path.join(out_dir, name))
-                n += 1
+            for exits in exit_combos(mask):
+                for kind in ("plain", "climb", "hang"):
+                    render_geo(sc, build_tile(density, mask, exits, kind).geo,
+                               os.path.join(out_dir, tile_name(kind, density, mask, exits)))
+                    n += 1
     for phase in ("bud", "flower", "fruit"):
         render_geo(sc, build_accent(phase), os.path.join(out_dir, f"vine-accent-{phase}.png"))
         n += 1
     print(f"rendered {n} vine tiles into {out_dir}", flush=True)
     sheet = os.path.join(HERE, "vine_tiles_sheet.py")
     out_sheet = arg("--sheet", os.path.join(REPO, "runs", "latticevine-model-2026-09-23", "tiles-sheet.png"))
-    subprocess.run(["python3", sheet, out_dir, out_sheet], check=True)
+    cmd = ["python3", sheet, out_dir, out_sheet]
+    if arg("--old"):
+        cmd.append(arg("--old"))
+    subprocess.run(cmd, check=True)
 
 
 def main():
