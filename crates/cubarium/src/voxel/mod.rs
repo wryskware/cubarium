@@ -248,8 +248,8 @@ pub enum Lighting {
 /// water_absorb = 0.1  # water absorption a voxel of path, in units of the deep water colour
 /// water_reflect = 6.0  # the surface's Fresnel reflectance times this (physical is ~5 %)
 /// water_ripple = 0.2   # how far a ripple tilts the quantised surface normal
-/// water_hz = 12.0      # the water's animation steps a second
-/// water_smooth = false # true: the water moves every frame, at the same speed
+/// water_hz = 12.0      # the water's animation speed, steps a second (its steps if not smooth)
+/// water_smooth = true  # false: the water moves in water_hz steps instead of every frame
 /// water_reflect_cells = 64 # cells a reflected ray is marched before it is sky
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -320,8 +320,8 @@ pub struct LightConfig {
     /// The water's animation rate, steps a second of sim time (ripples, streaks).
     pub water_hz: f32,
     /// The water moves every frame instead of in `water_hz` steps, at the same speed (the
-    /// clock's step keeps its fraction). Off by default until Wrysk picks (2026-09-24:
-    /// "12fps might have a charm").
+    /// clock's step keeps its fraction). On by default: Wrysk, 2026-09-24, after the 12 Hz
+    /// and smooth clips: "smooth waterfall is good".
     pub water_smooth: bool,
     /// Cells a reflected ray is marched before it counts as sky.
     pub water_reflect_cells: u32,
@@ -347,7 +347,7 @@ impl Default for LightConfig {
             water_reflect: 6.0,
             water_ripple: 0.2,
             water_hz: 12.0,
-            water_smooth: false,
+            water_smooth: true,
             water_reflect_cells: 64,
         }
     }

@@ -1140,35 +1140,50 @@ int wrapI(int a, int m) {
 const float FLOW_CYCLE = 64.0;
 const float FLOW_ADVECT = 1.0 / 12.0;
 // The ripple lines: segments this many voxels long along x (a line takes part of one),
-// and the share of (row, segment) places that carry a line at the height of its cycle.
+// and the share of (row, segment) places that carry a line some time in its cycle.
 const float LINE_SEG = 2.0;
-const float LINE_DENSITY = 0.10;
+const float LINE_DENSITY = 0.16;
+// A line lives this share of its copy's cycle (between the two), starting at a random
+// point in it; it fades in and out over its life (sin²) and grows from its middle.
+const float LINE_LIFE_MIN = 0.3;
+const float LINE_LIFE_MAX = 0.6;
+// A breeze: each row of lines slides along +x at its own speed, between these voxels a
+// second at full water speed, on still and moving water alike.
+const float BREEZE_MIN = 0.1;
+const float BREEZE_MAX = 0.3;
 
 // One copy of the ripple lines at world (x, z), `phase` of the way through cycle `cycle`:
-// 0 for none, else the tilt's sign along z. A line is one raster row of a top face (RISE
-// rows a voxel of z) and part of a LINE_SEG-voxel segment, shown while the copy's weight
-// (0 at the cycle's ends, 1 at its middle) is over the line's own threshold.
+// 0 for none, else the tilt along z, signed, times the line's fade (0 to 1). A line is one
+// raster row of a top face (RISE rows a voxel of z) and part of a LINE_SEG-voxel segment.
 float rippleLine(vec2 w, vec2 flow, float phase, int cycle, int salt) {
-    vec2 a = w - flow * phase * FLOW_CYCLE * FLOW_ADVECT;
+    float t = phase * FLOW_CYCLE * FLOW_ADVECT;
+    vec2 a = w - flow * t;
     int row = int(floor(a.y * float(RISE)));
+    uint hr = cellHash(row, 0, cycle, salt);
+    a.x -= mix(BREEZE_MIN, BREEZE_MAX, float((hr >> 8) & 0xFFu) / 255.0) * t;
     // Segments across the ring: a whole number, so the pattern meets itself at the seam.
     int segs = max(1, int(float(W) / LINE_SEG + 0.5));
-    float sx = a.x * float(segs) / float(W) + float(cellHash(row, 0, cycle, salt) & 0xFFu) / 256.0;
+    float sx = a.x * float(segs) / float(W) + float(hr & 0xFFu) / 256.0;
     int seg = int(floor(sx));
     uint h = cellHash(wrapI(seg, segs), row, cycle, salt + 1);
-    float weight = 1.0 - abs(1.0 - 2.0 * phase);
-    if (float(h & 0xFFFFu) / 65535.0 >= LINE_DENSITY * weight) { return 0.0; }
+    if (float(h & 0xFFFFu) / 65535.0 >= LINE_DENSITY) { return 0.0; }
+    uint hl = cellHash(wrapI(seg, segs), row, cycle, salt + 2);
+    float life = mix(LINE_LIFE_MIN, LINE_LIFE_MAX, float(hl & 0xFFu) / 255.0);
+    float age = (phase - float((hl >> 8) & 0xFFu) / 255.0 * (1.0 - life)) / life;
+    if (age <= 0.0 || age >= 1.0) { return 0.0; }
+    float fade = sin(3.14159265 * age);
+    fade *= fade;
     float f = sx - float(seg);
-    float start = float((h >> 16) & 0xFFu) / 255.0 * 0.5;
-    float len = 0.2 + float((h >> 24) & 0x7Fu) / 127.0 * 0.3;
-    if (f < start || f >= start + len) { return 0.0; }
-    return (h & 0x80000000u) != 0u ? 1.0 : -1.0;
+    float mid = 0.25 + float((h >> 16) & 0xFFu) / 255.0 * 0.5;
+    float halfLen = (0.1 + float((h >> 24) & 0x7Fu) / 127.0 * 0.15) * sqrt(fade);
+    if (abs(f - mid) >= halfLen) { return 0.0; }
+    return ((h & 0x80000000u) != 0u ? 1.0 : -1.0) * fade;
 }
 
-// The quantised surface normal at world (x, z) under flow `flow`: straight up, or, on a
-// ripple line, tilted by the ripple knob along z (toward or away from the camera). Lines
-// are sparse, thin and horizontal; on still water they appear and fade in place, on moving
-// water they drift along the flow.
+// The surface normal at world (x, z) under flow `flow`: straight up, or, on a ripple line,
+// tilted along z (toward or away from the camera) by up to the ripple knob. Lines are
+// sparse, thin and horizontal; they fade in, glide with the breeze (and the flow, on
+// moving water) and fade out.
 vec3 rippleNormal(vec2 w, vec2 flow) {
     float st = u.clock.y;
     float c1 = st / FLOW_CYCLE;

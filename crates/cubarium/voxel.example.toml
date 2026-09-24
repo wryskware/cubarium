@@ -75,7 +75,7 @@ water_absorb = 0.1
 water_reflect = 6.0
 water_ripple = 0.2
 water_hz = 12.0
-water_smooth = false  # true: the water moves every frame (same speed) instead of in steps
+water_smooth = true  # false: the water moves in water_hz steps instead of every frame
 water_reflect_cells = 64
 
 [world]
