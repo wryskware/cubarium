@@ -42,8 +42,11 @@ fn conditioned() -> (World, Flora, Fauna) {
     };
     let mut world = World::new(config);
     world.apply(WorldCommand::SetOutlet { open: true });
+    // On one thread: `World::step` splits the water across its default pool, whose sums
+    // land in whatever order the workers deliver them, and the arms must start from one
+    // condition.
     for _ in 0..WARMUP_TICKS {
-        world.step();
+        world.step_with(1);
     }
 
     let mut flora = Flora::new(FloraConfig::default());

@@ -169,6 +169,9 @@ fn the_parallel_exchange_agrees_with_the_serial_one() {
 
 // ------------------------------------------------------------------ the column phases
 
+/// Serial against the pool, so only with the rayon drivers (`par`, on in the workspace
+/// through `cubarium-voxel`'s default `parallel`).
+#[cfg(feature = "par")]
 mod columns {
     use cubarium_rules::water::Grid;
     use cubarium_rules::water::column::{Ground, Table};

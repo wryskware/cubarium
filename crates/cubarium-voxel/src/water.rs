@@ -840,12 +840,14 @@ fn grounds(c: &Config, dt: f64) -> [Ground; 4] {
 /// `small` ring after a rain pulse, 2026-09-24): at 192 columns the pool's water tick was
 /// 26 % slower than one thread's, at 384 columns 28 % faster, at 768 twice as fast. 512
 /// leaves room for the board's slower wake-ups; every preset is at least 3,072 columns.
+#[cfg_attr(not(feature = "parallel"), allow(dead_code))]
 const SERIAL_BELOW_COLUMNS: usize = 512;
 
 /// Whether `threads` put a world `plane` columns wide on the pool.
+#[cfg(feature = "parallel")]
 #[inline]
 fn pooled(plane: usize, threads: usize) -> bool {
-    cfg!(feature = "parallel") && threads > 1 && plane >= SERIAL_BELOW_COLUMNS
+    threads > 1 && plane >= SERIAL_BELOW_COLUMNS
 }
 
 /// `f` with where the column phases run: the process's pool of `threads` workers
