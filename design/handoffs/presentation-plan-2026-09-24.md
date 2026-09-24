@@ -323,3 +323,14 @@ Open for Wrysk, as style calls, since the big value structure works:
 - Half-voxel dapples break up crowns. Whole-cell dapples are the alternative.
 
 Step 4 (emissive) proceeds meanwhile, without touching those knobs.
+
+**Wrysk's calls on checkpoint 2 (2026-09-24):**
+
+- **`sun_tint`:** 0.18 stays.
+- **Shadows:** the per-texel "realistic" shadows stay; Wrysk likes them.
+- **AO → crease line:** block faces stay flat and crisp. There is only a thin darker
+  band along an edge where the neighbouring surface occludes, plus a corner square
+  where only the diagonal neighbour does. The bilinear fade goes.
+- **Dapples → whole-block spots:** a crown cell passes or blocks the sun as a whole
+  cell (a hash per cell), with the same mean transmission.
+- **Front brightness:** not raised; it stays as built.
