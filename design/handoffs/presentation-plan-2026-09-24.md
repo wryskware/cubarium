@@ -19,9 +19,11 @@ visual all merged.
 - **Textures stay experimental** (`textures = false` by default). Plain voxels remain
   the main look, so every package below must also improve, or at least not break, the
   untextured picture.
-- **Pixel art is still the look.** Lighting shades the px-per-voxel picture and never
-  replaces it with smooth 3D. Cel steps: two tones plus a highlight (kit v0.4). No
-  blur that dissolves pixels.
+- **Pixel art is the rule for illustration only** (Wrysk, 2026-09-24: "the pixel art rule
+  is only for illustration. nothing in our current scope falls under that category."):
+  sprites, textures and drawn art. Rendering effects — lighting, shadows, bloom, water —
+  are not bound by it and may be smooth. Quantisation stays only where Wrysk has seen
+  and accepted it (the light ladder, the ripple lines).
 - **The ecology's light model is the source of truth** (backlog §5): the picture may
   shade more finely than the model's sky-visibility fan, but never differently.
 - **Tiers:** a `lighting = "flat" | "lit"` key. The Tachyon panel and the cube keep
@@ -403,3 +405,18 @@ Wrysk's calls:
 
 These go in after L5, in the same worktree, and W checkpoint 2 (refraction, foam,
 glints, rain ripples) follows.
+
+## L5 and W fixes, round 2 (2026-09-24)
+
+L5 is at `2a30d197` on the W branch: bloom, the bloomcrown core glowing, and the
+animal emission path. Its bloom was blocky, which followed my brief, not a limit of
+the technique.
+
+Wrysk: "yes" to both of these:
+
+- **Smooth bloom by default:** the emission buffer is downsampled, blurred and
+  upsampled with bilinear filtering, then added. Emitters stay crisp. The blocky halo
+  is kept as an option.
+- **The three W-1 fixes:** calmer ripple lines, dark lake edge, bright waterfall.
+
+A fresh worker does both in the W worktree.
