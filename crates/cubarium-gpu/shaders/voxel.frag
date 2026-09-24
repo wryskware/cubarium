@@ -861,7 +861,8 @@ bool nearerOwns(int x, int y, int z, int row) {
 // costs every pixel occupancy, water or not: +1.7 ms at 13 px with the entry point, its
 // open cell and its canopy carried).
 
-int wEntry;         // the first water: y | z << 12 | top-row << 24, or -1 for none
+int wEntry;         // the first water: y | z << 12 | top-row << 24 | flat << 25 | falling << 26,
+                    // or -1 for none
 vec3 wScatter;      // in-scatter so far, unlit and unhazed, weighted by transmission
 float wHaze;        // the haze share of that in-scatter (its weight, averaged over the channels)
 float wSurf;        // the height of the entered water's surface
@@ -878,6 +879,22 @@ void waterLitReset() {
 // Per-channel absorption per voxel of water path.
 vec3 waterSigma() { return -log(max(u.waterDeepC.rgb, vec3(1.0 / 4096.0))) * u.waterL.x; }
 
+// Entry flags: the pixel's water is drawn by the flat tier's rule (`waterAt`), and its
+// first water is falling.
+const int ENTRY_FLAT = 1 << 25;
+const int ENTRY_FALLING = 1 << 26;
+
+// Whether the water in cell (x, y, z) is falling: the cell under it is neither solid nor
+// full (in drawn pixels). `flowAt` reads the same.
+bool fallingAt(int x, int y, int z) {
+    return y > 0 && !solidAt(x, y - 1, z) && fillPxAt(x, y - 1, z) < S;
+}
+
+// The lit water for one screen row. A pixel whose first water is the lake's cut face at
+// the world's front edge, or falling water, takes the flat tier's rule for all of its
+// water (`waterAt`'s colours and opacities, off the ladder), carried in the lit tier's
+// own accumulators: running the flat code itself in the walk costs +0.8 ms at 13 px in
+// occupancy.
 void waterAtLit(int x, int y, int z, uvec4 v, int row, inout vec3 acc, inout vec3 trans) {
     int fill = fillPxQ(int(v.g));
     int R = frontRow(y, z);
@@ -904,21 +921,52 @@ void waterAtLit(int x, int y, int z, uvec4 v, int row, inout vec3 acc, inout vec
     if (wEntry < 0) {
         if (!topRow && !bodyRow) { return; }
         wEntry = y | (z << 12) | (topRow ? 1 << 24 : 0);
-        // The surface over the entry: its own top face, or up the column a front face
-        // belongs to.
-        int ys = y;
-        for (int i = 0; i < 8 && !topRow; ++i) {
-            if (solidAt(x, ys + 1, z) || freeQ(x, ys + 1, z) == 0) { break; }
-            ++ys;
+        // The lake's cut face at the world's front edge keeps the flat tier's deep indigo,
+        // and falling water its bright surface colour: both by the flat rule, off the
+        // ladder (the finish adds the fall's streaks).
+        bool falling = fallingAt(x, y, z);
+        if ((z == 0 && !topRow) || falling) {
+            wEntry |= ENTRY_FLAT | (falling ? ENTRY_FALLING : 0);
+        } else {
+            // The surface over the entry: its own top face, or up the column a front face
+            // belongs to.
+            int ys = y;
+            for (int i = 0; i < 8 && !topRow; ++i) {
+                if (solidAt(x, ys + 1, z) || freeQ(x, ys + 1, z) == 0) { break; }
+                ++ys;
+            }
+            wSurf = float(ys) + float(topRow ? fill : fillPxAt(x, ys, z)) / float(S);
+            if (bodyRow && row == skinRow && openUp) {
+                // The front's top row: the flat tier's skin line, in the surface colour.
+                float a = min(clamp(u.knobs.y, 0.0, 1.0) * u.waterK.x, 0.95);
+                wScatter += trans * a * (1.0 - h) * u.waterSurfaceC.rgb;
+                wHaze += dot(trans, vec3(a * h / 3.0));
+                trans *= 1.0 - a;
+            }
         }
-        wSurf = float(ys) + float(topRow ? fill : fillPxAt(x, ys, z)) / float(S);
-        if (bodyRow && row == skinRow && openUp) {
-            // The front's top row: the flat tier's skin line, in the surface colour.
-            float a = min(clamp(u.knobs.y, 0.0, 1.0) * u.waterK.x, 0.95);
-            wScatter += trans * a * (1.0 - h) * u.waterSurfaceC.rgb;
-            wHaze += dot(trans, vec3(a * h / 3.0));
-            trans *= 1.0 - a;
+    }
+    if ((wEntry & ENTRY_FLAT) != 0) {
+        float alpha = clamp(u.knobs.y, 0.0, 1.0);
+        float skinAlpha = min(alpha * u.waterK.x, 0.95);
+        float a;
+        vec3 c;
+        float hf;
+        if (topRow) {
+            a = skinAlpha * u.waterK.y;
+            c = u.waterSurfaceC.rgb;
+            hf = hazeAt(float(z) + float(RISE - 1 - (row - (skinRow - RISE))) / float(RISE));
+        } else if (bodyRow) {
+            bool isSkin = row == skinRow && openUp;
+            a = isSkin ? skinAlpha : alpha;
+            c = isSkin ? u.waterSurfaceC.rgb : u.waterDeepC.rgb;
+            hf = hazeAt(float(z));
+        } else {
+            return;
         }
+        wScatter += trans * a * (1.0 - hf) * c;
+        wHaze += dot(trans, vec3(a * hf / 3.0));
+        trans *= 1.0 - a;
+        return;
     }
     // The ray's piece in this cell's water, in this slab.
     float top = float(y) + float(fill) / float(S);
@@ -1076,81 +1124,53 @@ int wrapI(int a, int m) {
     return r < 0 ? r + m : r;
 }
 
-float latticeValue(int x, int z, int t, int salt) {
-    return float(cellHash(x, z, t, salt) & 0xFFFFu) / 65535.0;
-}
-
-// Value noise over (x, z, time), its lattice tiled in x with period `px` (so the ring has
-// no seam) and in time with period `pt` (so the animation step's wrap has none).
-float vnoise3(vec3 p, int px, int pt, int salt) {
-    vec3 f = floor(p);
-    vec3 t = p - f;
-    t = t * t * (3.0 - 2.0 * t);
-    ivec3 c = ivec3(f);
-    int x0 = wrapI(c.x, px);
-    int x1 = wrapI(c.x + 1, px);
-    int t0 = wrapI(c.z, pt);
-    int t1 = wrapI(c.z + 1, pt);
-    float a = mix(mix(latticeValue(x0, c.y, t0, salt), latticeValue(x1, c.y, t0, salt), t.x),
-                  mix(latticeValue(x0, c.y + 1, t0, salt), latticeValue(x1, c.y + 1, t0, salt), t.x),
-                  t.y);
-    float b = mix(mix(latticeValue(x0, c.y, t1, salt), latticeValue(x1, c.y, t1, salt), t.x),
-                  mix(latticeValue(x0, c.y + 1, t1, salt), latticeValue(x1, c.y + 1, t1, salt), t.x),
-                  t.y);
-    return mix(a, b, t.z);
-}
-
-// Lattice cells across the ring for a noise `cells_per_voxel` fine: a whole number, so the
-// pattern meets itself at the ring's seam.
-int ringCells(float cellsPerVoxel) { return max(1, int(float(W) * cellsPerVoxel + 0.5)); }
-
-// The ripple height field at world (x, z) and animation step `st`: two octaves, two
-// voxels and one voxel across, evolving in place (the step is the noise's third axis).
-// The step wraps at 2048 (`VoxelRenderer::set_clock`); both time periods divide it.
-float rippleHeight(vec2 w, float st) {
-    int na = ringCells(0.5);
-    int nb = ringCells(1.0);
-    float a = vnoise3(vec3(w.x * float(na) / float(W), w.y * 0.5, st / 4.0), na, 512, 40);
-    float b = vnoise3(vec3(w.x * float(nb) / float(W), w.y, st / 2.0), nb, 1024, 41);
-    return a + 0.5 * b;
-}
-
 // Steps in one flow-map cycle, and voxels the ripples move a step at full speed (one
-// voxel a second at 12 Hz). Two copies half a cycle apart cross-fade, so the advection
-// never runs away and a cycle's restart is never seen.
+// voxel a second at 12 Hz). Two copies half a cycle apart take turns: a ripple line
+// appears, drifts along the flow and fades within its copy's cycle, so the advection never
+// runs away and a restart is never seen.
 const float FLOW_CYCLE = 64.0;
 const float FLOW_ADVECT = 1.0 / 12.0;
-// The slope under which a texel's normal stays straight up.
-const float RIPPLE_FLAT = 0.45;
+// The ripple lines: segments this many voxels long along x (a line takes part of one),
+// and the share of (row, segment) places that carry a line at the height of its cycle.
+const float LINE_SEG = 2.0;
+const float LINE_DENSITY = 0.10;
 
-// The quantised surface normal at world (x, z) under flow `flow`: straight up, or tilted
-// by the ripple knob toward one of the four axis directions.
+// One copy of the ripple lines at world (x, z), `phase` of the way through cycle `cycle`:
+// 0 for none, else the tilt's sign along z. A line is one raster row of a top face (RISE
+// rows a voxel of z) and part of a LINE_SEG-voxel segment, shown while the copy's weight
+// (0 at the cycle's ends, 1 at its middle) is over the line's own threshold.
+float rippleLine(vec2 w, vec2 flow, float phase, int cycle, int salt) {
+    vec2 a = w - flow * phase * FLOW_CYCLE * FLOW_ADVECT;
+    int row = int(floor(a.y * float(RISE)));
+    // Segments across the ring: a whole number, so the pattern meets itself at the seam.
+    int segs = max(1, int(float(W) / LINE_SEG + 0.5));
+    float sx = a.x * float(segs) / float(W) + float(cellHash(row, 0, cycle, salt) & 0xFFu) / 256.0;
+    int seg = int(floor(sx));
+    uint h = cellHash(wrapI(seg, segs), row, cycle, salt + 1);
+    float weight = 1.0 - abs(1.0 - 2.0 * phase);
+    if (float(h & 0xFFFFu) / 65535.0 >= LINE_DENSITY * weight) { return 0.0; }
+    float f = sx - float(seg);
+    float start = float((h >> 16) & 0xFFu) / 255.0 * 0.5;
+    float len = 0.2 + float((h >> 24) & 0x7Fu) / 127.0 * 0.3;
+    if (f < start || f >= start + len) { return 0.0; }
+    return (h & 0x80000000u) != 0u ? 1.0 : -1.0;
+}
+
+// The quantised surface normal at world (x, z) under flow `flow`: straight up, or, on a
+// ripple line, tilted by the ripple knob along z (toward or away from the camera). Lines
+// are sparse, thin and horizontal; on still water they appear and fade in place, on moving
+// water they drift along the flow.
 vec3 rippleNormal(vec2 w, vec2 flow) {
     float st = u.clock.y;
-    float e = 0.125;
-    vec2 g;
-    if (dot(flow, flow) > 0.0) {
-        float p1 = fract(st / FLOW_CYCLE);
-        float p2 = fract(st / FLOW_CYCLE + 0.5);
-        float w1 = 1.0 - abs(1.0 - 2.0 * p1);
-        float w2 = 1.0 - w1;
-        vec2 o1 = w - flow * p1 * FLOW_CYCLE * FLOW_ADVECT;
-        vec2 o2 = w - flow * p2 * FLOW_CYCLE * FLOW_ADVECT + vec2(0.5, 0.5);
-        vec2 g1 = vec2(rippleHeight(o1 + vec2(e, 0.0), st) - rippleHeight(o1 - vec2(e, 0.0), st),
-                       rippleHeight(o1 + vec2(0.0, e), st) - rippleHeight(o1 - vec2(0.0, e), st));
-        vec2 g2 = vec2(rippleHeight(o2 + vec2(e, 0.0), st) - rippleHeight(o2 - vec2(e, 0.0), st),
-                       rippleHeight(o2 + vec2(0.0, e), st) - rippleHeight(o2 - vec2(0.0, e), st));
-        // The blend's slope keeps its contrast through the cross-fade.
-        g = (w1 * g1 + w2 * g2) / (2.0 * e) / sqrt(w1 * w1 + w2 * w2);
-    } else {
-        g = vec2(rippleHeight(w + vec2(e, 0.0), st) - rippleHeight(w - vec2(e, 0.0), st),
-                 rippleHeight(w + vec2(0.0, e), st) - rippleHeight(w - vec2(0.0, e), st))
-            / (2.0 * e);
+    float c1 = st / FLOW_CYCLE;
+    float c2 = c1 + 0.5;
+    // The step wraps at 2048 (`VoxelRenderer::set_clock`): 32 cycles.
+    float s = rippleLine(w, flow, fract(c1), wrapI(int(floor(c1)), 32), 60);
+    if (s == 0.0) {
+        s = rippleLine(w + vec2(0.37, 0.0), flow, fract(c2), wrapI(int(floor(c2)), 32), 62);
     }
-    if (max(abs(g.x), abs(g.y)) < RIPPLE_FLAT) { return vec3(0.0, 1.0, 0.0); }
-    vec2 s = abs(g.x) >= abs(g.y) ? vec2(sign(g.x), 0.0) : vec2(0.0, sign(g.y));
-    float tilt = u.waterL.z;
-    return normalize(vec3(-s.x * tilt, 1.0, -s.y * tilt));
+    if (s == 0.0) { return vec3(0.0, 1.0, 0.0); }
+    return normalize(vec3(0.0, 1.0, -s * u.waterL.z));
 }
 
 // A ceiling seen in a reflection: the underside of a solid, which the picture never
@@ -1172,10 +1192,23 @@ ivec2 reflectTexel(vec3 hp, ivec3 c, int axis, float dirX) {
     return ivec2(S - 1 - dy, dx);
 }
 
+bool glyphFilled(int base, int col, int row) {
+    if (col < 0 || col >= S || row < 0 || row >= S) { return true; }
+    return (texelFetch(glyphTex, ivec2(col, base + row), 0).r >> 2) != 63u;
+}
+
+// Whether a reflected ray stops at a block part's face texel: the texel and its four
+// neighbours on the face all drawn (past the face's edge counts as drawn, so a body of
+// several cells keeps its edges). Thin parts (stems, sprigs, a berry's pixel) are passed
+// through: in a rippled mirror they are specks that blink.
 bool glyphTexelAt(uvec4 v, vec3 hp, ivec3 c, int axis, float dirX) {
     ivec2 t = reflectTexel(hp, c, axis, dirX);
-    int atlasY = (partOf(v) * 8 + glyphOf(v)) * (S + RISE) + S - 1 - t.x;
-    return (texelFetch(glyphTex, ivec2(t.y, atlasY), 0).r >> 2) != 63u;
+    int base = (partOf(v) * 8 + glyphOf(v)) * (S + RISE);
+    int row = S - 1 - t.x;
+    int col = t.y;
+    return glyphFilled(base, col, row) && glyphFilled(base, col - 1, row)
+        && glyphFilled(base, col + 1, row) && glyphFilled(base, col, row - 1)
+        && glyphFilled(base, col, row + 1);
 }
 
 // What the surface at `p` mirrors along `r`: a DDA through the volume, at most
@@ -1303,6 +1336,16 @@ vec3 flowDebug(vec3 fl, bool top, vec3 p) {
 // recomputed from `wEntry`: its cell, whether it is the surface, the point where the ray
 // entered, and the open cell whose light it reads.
 vec3 litWaterFinish(vec3 colour) {
+    if ((wEntry & ENTRY_FLAT) != 0) {
+        colour += wScatter + wHaze * u.hazeC.rgb;
+        if ((wEntry & ENTRY_FALLING) == 0) { return colour; }
+        if (u.clock.z > 0.5) { return fallStreak(PX, PY, u.clock.y) ? vec3(1.0) : vec3(0.35, 0.05, 0.5); }
+        // A fall's streaks over the flat tier's sheet: the surface colour itself (opaque,
+        // hazed), a third of the columns, moving down. The palette has nothing brighter,
+        // and the sheet between them keeps the flat tier's brightness.
+        int zf = (wEntry >> 12) & 0xFFF;
+        return fallStreak(PX, PY, u.clock.y) ? hazed(u.waterSurfaceC.rgb, hazeAt(float(zf))) : colour;
+    }
     int y = wEntry & 0xFFF;
     int z = (wEntry >> 12) & 0xFFF;
     bool top = (wEntry >> 24) != 0;
@@ -1326,15 +1369,6 @@ vec3 litWaterFinish(vec3 colour) {
     vec3 here = ladderLight(skyOpen(open.x, open.y, open.z) * canopy, sun, glow);
     vec3 ratio = here / max(ladderLight(1.0, sunOn, vec3(0.0)), vec3(1e-4));
     colour += wScatter * ratio + wHaze * u.hazeC.rgb;
-    if (fl.z > 0.5) {
-        // Falling water is a film too thin to scatter much by its path, so it keeps the
-        // flat tier's reading of it (the surface colour at the skin's opacity, here under
-        // the ladder's light): at that opacity on the streaks, and at half of it between
-        // them, so the streaks run down a translucent sheet.
-        float a = min(clamp(u.knobs.y, 0.0, 1.0) * u.waterK.x, 0.95);
-        a *= fallStreak(PX, PY, u.clock.y) ? 1.0 : 0.5;
-        return mix(colour, hazed(u.waterSurfaceC.rgb * ratio, hazeAt(p.z)), a);
-    }
     if (!top) { return colour; }
     vec3 n = rippleNormal(p.xz, fl.xy);
     vec3 d = normalize(vec3(0.0, -k, 1.0));
