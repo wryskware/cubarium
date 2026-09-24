@@ -235,7 +235,7 @@ pub enum Lighting {
 /// levels = 4          # rungs on the ambient ladder, floor to full
 /// ambient_gain = 1.4  # what full ambient light multiplies a base colour by
 /// ambient_floor = 0.2 # the lowest rung, as a fraction of full
-/// ao = 0.5            # how far a fully occluded face corner darkens
+/// ao = 0.5            # how far an AO crease line darkens the light
 /// ambient_tint = 0.15 # how far the ambient leans toward the sky's hue
 /// sun = [-1.0, 2.0, -1.0] # toward the sun: x right, y up, z into the scene
 /// sun_tint = 0.18     # how far a sunlit face leans toward the palette's light, at N·L = 1
@@ -254,7 +254,8 @@ pub struct LightConfig {
     pub ambient_gain: f32,
     /// The lowest rung, as a fraction of full: what a face that sees no sky still gets.
     pub ambient_floor: f32,
-    /// How far a face corner with both sides occluded darkens, `0..=1`.
+    /// How far an AO crease line (a band along a face edge whose neighbour occludes, or a
+    /// corner square where only the diagonal does) darkens the light, `0..=1`.
     pub ao: f32,
     /// How far the ambient light leans toward the sky's hue, `0..=1`, at unit luminance.
     pub ambient_tint: f32,

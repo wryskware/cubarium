@@ -1,12 +1,13 @@
-//! The lit tier on the GPU, on hand-built fixtures: the voxel AO (each face's four corner
-//! counts, from the eight cells of its open plane, interpolated across its texels), and the
-//! sun's cast shadow (a pillar on a flat floor, against its analytic shadow).
+//! The lit tier on the GPU, on hand-built fixtures: the voxel AO's crease lines (a band
+//! along each face edge whose side neighbour in the open plane occludes, and a corner
+//! square where only the diagonal does), and the sun's cast shadow (a pillar on a flat
+//! floor, against its analytic shadow).
 //!
 //! Needs a device and **skips with a printed reason** when there is none, as
 //! `tests/voxel_gpu.rs` does. The ladder is set fine (256 rungs, no floor, no tint, no
 //! haze, no grain) so a texel's colour is its base times `sky × AO` and nothing else, and
 //! the sky is the core's own number for the face's open cell, so every expected colour is
-//! computed here from the corner counts written out by hand.
+//! computed here from the occluders written out by hand.
 
 use cubarium::sink::GpuTargetKind;
 use cubarium::sink::gpu::voxel::{VoxelGpuSink, VoxelGpuSinkOptions};
@@ -27,19 +28,26 @@ fn srgb(l: f32) -> f32 {
     }
 }
 
-/// One face under test: which voxel, which face, its corners (0 = both sides occluded,
-/// 3 = open) as `[c00, c10, c01, c11]` — u across +x, v up (+y) on a front face and back
-/// (+z) on a top face — and the voxel whose sky it reads (the foot of its open cell).
+/// One face under test: which voxel, which face, which of its open plane's neighbours
+/// occlude — sides `[left, right, lo, hi]` and diagonals `[lo-left, lo-right, hi-left,
+/// hi-right]`, where lo/hi are down/up on a front face and near/far on a top face — and
+/// the voxel whose sky it reads (the foot of its open cell).
 struct Face {
     what: &'static str,
     voxel: (i64, u32, u32),
     top: bool,
-    corners: [f32; 4],
+    sides: [bool; 4],
+    corners: [bool; 4],
     foot: (i64, u32, u32),
 }
 
+/// The crease width the shader draws on a face `rows` texels tall at `s` px a voxel.
+fn crease_width(s: u32, rows: u32) -> u32 {
+    ((s + 4) / 8).max(1).min((rows / 2).max(1))
+}
+
 #[test]
-fn voxel_ao_darkens_each_corner_by_its_neighbour_count() {
+fn voxel_ao_is_a_crease_band_along_occluded_edges() {
     let c = Config {
         width: 16,
         height: 8,
@@ -62,40 +70,54 @@ fn voxel_ao_darkens_each_corner_by_its_neighbour_count() {
     set(10, 2, 1, Material::Rock);
     set(9, 2, 2, Material::Rock);
 
+    let no = [false; 4];
     let faces = [
         Face {
-            what: "the floor left of the pillar: its right side occluded",
+            what: "the floor left of the pillar: a band on its right",
             voxel: (5, 1, 1),
             top: true,
-            corners: [3.0, 2.0, 3.0, 2.0],
+            sides: [false, true, false, false],
+            corners: no,
             foot: (5, 1, 1),
         },
         Face {
-            what: "the floor in front of the pillar: its back side occluded",
+            what: "the floor in front of the pillar: a band at its back",
             voxel: (6, 1, 0),
             top: true,
-            corners: [3.0, 3.0, 2.0, 2.0],
+            sides: [false, false, false, true],
+            corners: no,
             foot: (6, 1, 0),
         },
         Face {
-            what: "the floor in the concave corner: right and back, so that corner is 0",
+            what: "the floor in the concave corner: bands on the right and at the back",
             voxel: (9, 1, 1),
             top: true,
-            corners: [3.0, 2.0, 2.0, 0.0],
+            sides: [false, true, false, true],
+            corners: no,
             foot: (9, 1, 1),
         },
         Face {
-            what: "the pillar's front: the floor in front occludes its lower corners",
+            what: "the floor diagonal to the corner block: a square in its back right corner",
+            voxel: (8, 1, 1),
+            top: true,
+            sides: no,
+            corners: [false, false, false, true],
+            foot: (8, 1, 1),
+        },
+        Face {
+            what: "the pillar's front: the floor in front puts a band along its bottom",
             voxel: (6, 2, 1),
             top: false,
-            corners: [1.0, 1.0, 3.0, 3.0],
+            sides: [false, false, true, false],
+            corners: [true, true, false, false],
             foot: (6, 1, 0),
         },
     ];
 
     let cfg = VoxelConfig {
         world: c.clone(),
-        px_per_voxel: 6,
+        // 16 px: a 2-px crease, so it reaches inside the edge rows the test leaves out.
+        px_per_voxel: 16,
         haze: 0.0,
         dither: 0.0,
         sky_gradient: false,
@@ -104,7 +126,7 @@ fn voxel_ao_darkens_each_corner_by_its_neighbour_count() {
             levels: 256,
             ambient_gain: GAIN,
             ambient_floor: 0.0,
-            ao: 1.0,
+            ao: 0.5,
             ambient_tint: 0.0,
             // No sun: every texel is its ambient rung alone.
             sun: [0.0; 3],
@@ -165,14 +187,18 @@ fn voxel_ao_darkens_each_corner_by_its_neighbour_count() {
         assert_eq!((fw, fh), (s, if face.top { rise } else { s }));
         // Every texel but the face's edge rows and columns, where the flat tier's edge
         // treatments (the contour row, the side columns) would lean the colour.
+        let bw = crease_width(s, fh);
+        let mut banded = 0;
         for dy in 1..fh - 1 {
             for dx in 1..fw - 1 {
-                let fu = (dx as f32 + 0.5) / fw as f32;
-                let fv = 1.0 - (dy as f32 + 0.5) / fh as f32;
-                let [c00, c10, c01, c11] = face.corners;
-                let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
-                let a = lerp(lerp(c00, c10, fu), lerp(c01, c11, fu), fv);
-                let ao = a / 3.0;
+                let (l, r) = (dx < bw, dx >= fw - bw);
+                let (hi, lo) = (dy < bw, dy >= fh - bw);
+                let [sl, sr, slo, shi] = face.sides;
+                let [cll, clr, chl, chr] = face.corners;
+                let band = (l && sl) || (r && sr) || (lo && slo) || (hi && shi)
+                    || (l && lo && cll) || (r && lo && clr) || (l && hi && chl) || (r && hi && chr);
+                banded += usize::from(band);
+                let ao = if band { 0.5 } else { 1.0 };
                 let rung = (sky * ao * 255.0 + 0.5).floor() / 255.0;
                 let want: Vec<u8> = rock
                     .iter()
@@ -189,6 +215,7 @@ fn voxel_ao_darkens_each_corner_by_its_neighbour_count() {
                 }
             }
         }
+        assert!(banded > 0, "{}: the crease reaches inside the edge rows", face.what);
     }
 }
 

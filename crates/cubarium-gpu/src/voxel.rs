@@ -530,7 +530,7 @@ pub struct VoxelParams {
     pub lit: bool,
     /// The lit tier's ambient: what full light is worth (`ambient_gain`), the darkest
     /// rung as a fraction of it (`ambient_floor`), how many rungs the ladder has
-    /// (`light_levels`, at least 2), and how far a fully occluded corner darkens
+    /// (`light_levels`, at least 2), and how far an AO crease line darkens the light
     /// (`ao_strength`).
     pub ambient_gain: f32,
     pub ambient_floor: f32,

@@ -306,45 +306,46 @@ float occluder(int x, int y, int z) {
     return (solidV(v) || isBlockPart(partOf(v))) ? 1.0 : 0.0;
 }
 
-// One corner of a face, classic voxel AO from its two sides and its diagonal in the
-// face's open plane: 3 is open, 0 is both sides occluded.
-float cornerAO(float side1, float side2, float corner) {
-    return (side1 + side2 > 1.5) ? 0.0 : 3.0 - (side1 + side2 + corner);
+// The AO is a **crease line** (Wrysk, checkpoint 2): a face stays flat, and only a thin
+// band along an edge whose side neighbour in the face's open plane occludes, and a small
+// square in a corner where only the diagonal neighbour does, take the AO step: the light
+// times 1 - strength, before the ladder snaps it (one rung down at the default 0.5 on a
+// 4-rung ladder). The band is about S/8 wide, at least 1 px (1 px at 6 px a voxel, 2 at 13),
+// on a top face at most half its rows.
+int creaseWidth(int rows) { return min(max(1, (S + 4) / 8), max(1, rows / 2)); }
+
+// The crease factor at texel (du, dv) of a face nu x nv texels, dv = 0 on its `hi` side,
+// from its four side neighbours and four diagonals (lo/hi x left/right).
+float crease(float l, float r, float lo, float hi,
+             float cLL, float cRL, float cLH, float cRH, int du, int dv, int nu, int nv) {
+    int b = creaseWidth(nv);
+    bool inL = du < b, inR = du >= nu - b, inH = dv < b, inLo = dv >= nv - b;
+    bool band = (inL && l > 0.5) || (inR && r > 0.5) || (inH && hi > 0.5) || (inLo && lo > 0.5)
+        || (inL && inLo && cLL > 0.5) || (inR && inLo && cRL > 0.5)
+        || (inL && inH && cLH > 0.5) || (inR && inH && cRH > 0.5);
+    return band ? 1.0 - u.lightK.w : 1.0;
 }
 
-// The four corners interpolated bilinearly to the texel at (fu, fv) in 0..1 of the face,
-// as a light factor: 1 open, 1 - strength fully occluded.
-float aoBlend(float c00, float c10, float c01, float c11, float fu, float fv) {
-    float a = mix(mix(c00, c10, fu), mix(c01, c11, fu), fv);
-    return 1.0 - u.lightK.w * (3.0 - a) / 3.0;
-}
-
-// AO of a front face of (x, y, z) at texel (dx, dy): the open plane is z-1, u runs +x
-// and v runs +y.
+// AO of a front face of (x, y, z) at texel (dx, dy), dy = 0 at the top: the open plane is
+// z-1.
 float aoFront(int x, int y, int z, int dx, int dy) {
     int p = z - 1;
-    float l = occluder(x - 1, y, p), r = occluder(x + 1, y, p);
-    float b = occluder(x, y - 1, p), t = occluder(x, y + 1, p);
-    float fu = (float(dx) + 0.5) / float(S);
-    float fv = 1.0 - (float(dy) + 0.5) / float(S);
-    return aoBlend(
-        cornerAO(l, b, occluder(x - 1, y - 1, p)), cornerAO(r, b, occluder(x + 1, y - 1, p)),
-        cornerAO(l, t, occluder(x - 1, y + 1, p)), cornerAO(r, t, occluder(x + 1, y + 1, p)),
-        fu, fv);
+    return crease(
+        occluder(x - 1, y, p), occluder(x + 1, y, p), occluder(x, y - 1, p), occluder(x, y + 1, p),
+        occluder(x - 1, y - 1, p), occluder(x + 1, y - 1, p),
+        occluder(x - 1, y + 1, p), occluder(x + 1, y + 1, p),
+        dx, dy, S, S);
 }
 
 // AO of a top face of (x, y, z) at texel (dx, dy), dy = 0 at the back: the open plane is
-// y+1, u runs +x and w runs +z.
+// y+1; its near side (z-1) is the face's bottom rows.
 float aoTop(int x, int y, int z, int dx, int dy) {
     int p = y + 1;
-    float l = occluder(x - 1, p, z), r = occluder(x + 1, p, z);
-    float n = occluder(x, p, z - 1), f = occluder(x, p, z + 1);
-    float fu = (float(dx) + 0.5) / float(S);
-    float fw = 1.0 - (float(dy) + 0.5) / float(RISE);
-    return aoBlend(
-        cornerAO(l, n, occluder(x - 1, p, z - 1)), cornerAO(r, n, occluder(x + 1, p, z - 1)),
-        cornerAO(l, f, occluder(x - 1, p, z + 1)), cornerAO(r, f, occluder(x + 1, p, z + 1)),
-        fu, fw);
+    return crease(
+        occluder(x - 1, p, z), occluder(x + 1, p, z), occluder(x, p, z - 1), occluder(x, p, z + 1),
+        occluder(x - 1, p, z - 1), occluder(x + 1, p, z - 1),
+        occluder(x - 1, p, z + 1), occluder(x + 1, p, z + 1),
+        dx, dy, S, RISE);
 }
 
 // The sky plane at open cell (x, y, z). Above the world, and in front of it (a front
@@ -416,29 +417,16 @@ vec3 glowAt(vec3 p) {
 // The sun term is binary per texel: a ray from the texel's world point toward the sun
 // (`sunK.xyz`), walked cell by cell, either leaves the world (lit) or meets something in
 // the way (one rung darker). Terrain and block parts (trunk, log, animal) stop it. A crown
-// cell lets it through where a hash of the cell and of which half-voxel of the cell the
-// ray crosses falls under the cell's pass chance, so crown shade is dappled in half-voxel
-// patches with the model's transmission as its mean; with textures on, a ray leaving the
-// cell through a hole in its leaf cutout passes too. Sprouts, floor marks, vine cells and
-// water do not stop it.
+// cell passes or blocks it **as a whole cell** (Wrysk, checkpoint 2): a hash of the cell
+// under the cell's pass chance, so crown shade falls in whole-block spots with the model's
+// transmission as its mean. Sprouts, floor marks, vine cells and water do not stop it.
 
 // Cells a shadow ray crosses before it gives up and counts as lit.
 const int SUN_MARCH = 128;
 
-bool plantTexel(int x, int y, int z, uvec4 v, bool top, int dx, int dy, inout vec3 base);
-
-// Does a ray crossing crown cell `c` get through it? `fm` is where it crosses the middle
-// of its path through the cell and `fe` where it leaves, both in the cell's own 0..1, and
-// `axis` which face it leaves by (0 the -x side, 1 the top, 2 the front).
-bool crownLets(uvec4 v, ivec3 c, vec3 fm, vec3 fe, int axis) {
-    bool top = axis == 1;
-    int dx = clamp(int((axis == 0 ? fe.z : fe.x) * float(S)), 0, S - 1);
-    int dy = top ? clamp(int((1.0 - fe.z) * float(RISE)), 0, RISE - 1)
-                 : clamp(int((1.0 - fe.y) * float(S)), 0, S - 1);
-    vec3 scratch = vec3(0.0);
-    if (!plantTexel(c.x, c.y, c.z, v, top, dx, dy, scratch)) { return true; }
-    ivec3 half_ = clamp(ivec3(fm * 2.0), ivec3(0), ivec3(1));
-    uint h = cellHash(wrapX(c.x), c.y, c.z, 32 + half_.x + 2 * half_.y + 4 * half_.z);
+// Does a ray get through crown cell `c`? The same answer for every ray through the cell.
+bool crownLets(uvec4 v, ivec3 c) {
+    uint h = cellHash(wrapX(c.x), c.y, c.z, 32);
     return float(h & 0xFFFFu) / 65536.0 < crownPass(v);
 }
 
@@ -456,23 +444,17 @@ float sunReaches(vec3 p, ivec3 c) {
         (dir.x > 0 ? float(c.x + 1) - p.x : p.x - float(c.x)) * inv.x,
         (dir.y > 0 ? float(c.y + 1) - p.y : p.y - float(c.y)) * inv.y,
         (dir.z > 0 ? float(c.z + 1) - p.z : p.z - float(c.z)) * inv.z);
-    float tIn = 0.0;
     for (int i = 0; i < SUN_MARCH; ++i) {
         if (c.y >= H || c.z < 0 || c.z >= D) { return 1.0; }
         if (c.y < 0) { return 0.0; }
         int axis = (next.x < next.y && next.x < next.z) ? 0 : (next.y < next.z ? 1 : 2);
-        float tOut = axis == 0 ? next.x : (axis == 1 ? next.y : next.z);
         uvec4 v = at(c.x, c.y, c.z);
         if (solidV(v)) { return 0.0; }
         int part = partOf(v);
         if (part == TRUNK || part == LOG || part == ANIMAL_INTERIM) { return 0.0; }
-        if (part == CROWN || part == CROWN_HEART) {
-            vec3 cell = vec3(c);
-            if (!crownLets(v, c, p + L * (0.5 * (tIn + tOut)) - cell, p + L * tOut - cell, axis)) {
-                return 0.0;
-            }
+        if ((part == CROWN || part == CROWN_HEART) && !crownLets(v, c)) {
+            return 0.0;
         }
-        tIn = tOut;
         if (axis == 0) { c.x += dir.x; next.x += inv.x; }
         else if (axis == 1) { c.y += dir.y; next.y += inv.y; }
         else { c.z += dir.z; next.z += inv.z; }
