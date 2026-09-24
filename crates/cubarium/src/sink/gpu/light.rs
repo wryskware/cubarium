@@ -44,21 +44,7 @@ pub(crate) fn sky_plane(config: &Config, material: &[Material], threads: usize, 
     assert_eq!(material.len(), w * h * d, "one material per voxel");
     assert_eq!(out.len(), w * h * d, "one sky byte per voxel");
     let ledger = Ledger::default();
-    let view = VoxelView {
-        config,
-        material,
-        free: &[],
-        pore: &[],
-        tick: 0,
-        terrain_version: 0,
-        ledger: &ledger,
-        aquifer_m3: 0.0,
-        atmosphere_m3: 0.0,
-        shower_left_m3: 0.0,
-        outlet_open: false,
-        outlet: None,
-        spring: None,
-    };
+    let view = VoxelView::of_terrain(config, material, &ledger);
     let top = material
         .iter()
         .enumerate()
