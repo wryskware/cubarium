@@ -860,7 +860,7 @@ mod cap_tests {
     /// growth and 600 s for one 0.025 package, which is why a 6,000 s cap cannot resolve it.
     #[test]
     fn the_cap_arithmetic_reproduces_the_two_predeclared_numbers() {
-        let config = FloraConfig::default();
+        let config = FloraConfig::default().minimum_seeds();
 
         let bloom = observation_cap(Species::Bloomcrown, config.species(Species::Bloomcrown));
         assert_eq!(bloom.growth_ticks, 54_163);
@@ -927,7 +927,7 @@ mod cap_tests {
     /// end.
     #[test]
     fn the_timeline_adds_the_two_stages_the_published_cap_leaves_out() {
-        let config = FloraConfig::default();
+        let config = FloraConfig::default().minimum_seeds();
         let bloom = replacement_timeline(Species::Bloomcrown, config.species(Species::Bloomcrown));
         // Stage 1 by repeated addition is **6,001** and not 6,000: 6,000 additions of
         // 8.3333e-6 give 0.049999999999996936 against the package's 0.049999999999999996.
@@ -1024,7 +1024,9 @@ mod cap_tests {
         // fixture config).
         let mut config = FloraConfig {
             initial_mineral: 500.0,
-            ..FloraConfig::default().drop_seeds_checked_each_tick()
+            ..FloraConfig::default()
+                .drop_seeds_checked_each_tick()
+                .minimum_seeds()
         };
         {
             let sc = config.species_mut(Species::Bloomcrown);
