@@ -299,3 +299,27 @@ Calls made at the checkpoint:
 - **Also for Wrysk's eye:** AO at 0.5 gives every riser a darker lower band, which
   reads as horizontal striping on terraces at 13 px. Quantised bilinear AO makes
   diagonal wedges inside faces.
+
+## L checkpoint 2 review (2026-09-24)
+
+Sun and cast shadows landed at `feff1bed` on the L branch (not merged).
+
+- **Cost:** lit takes 4.95 ms of GPU at 13 px (5.35 textured), inside the 8 ms budget,
+  so no occupancy mip. The pack costs +0.50 ms, at the budget line.
+- **Flat:** at the Tachyon config it is byte-identical to main.
+- **Defaults:** `sun = [-1, 2, -1]` (upper left, about 55° up); `sun_tint` 0.18. The
+  sun adds one rung, so a shadow is one rung down, open tops come out at 1.77 × base,
+  and sunlit fronts at 1.4 × base (flat has 1.0).
+- **Screenshots:** `.claude/worktrees/agent-a7dfd042149480812/captures/presentation/L-2/`.
+
+Open for Wrysk, as style calls, since the big value structure works:
+
+- `sun_tint` 0.18 (lavender tops back) or 0 (deeper purple).
+- Fronts brighter than in flat.
+- Per-texel shadow edges run diagonally down stepped cliffs as sawtooth teeth.
+  Per-face shadows would be blockier and cleaner.
+- Bilinear AO leaves triangular wedges inside faces. AO as a contact band along the
+  occluded edge is the alternative.
+- Half-voxel dapples break up crowns. Whole-cell dapples are the alternative.
+
+Step 4 (emissive) proceeds meanwhile, without touching those knobs.
