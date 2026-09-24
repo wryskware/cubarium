@@ -379,7 +379,11 @@ fn one_voxel_shared_by_two_species_splits_exactly_by_demand() {
     config.bloomcrown.transpiration_m3_per_s = 500.0;
     config.umbrellafrond.transpiration_m3_per_s = 500.0;
 
-    let pore = 0.6;
+    // Wet enough that bloomcrown is at full moisture and umbrellafrond, a wetland plant,
+    // is part way up its ramp: available water 1.3 on package F's scale.
+    let a = 1.3;
+    let wp = Material::Soil.wilting_point();
+    let pore = wp + a * (Material::Soil.field_capacity() - wp);
     let mut world = one_shared_voxel(pore);
     let mut flora = Flora::new(config);
     assert!(flora.apply(
@@ -402,10 +406,12 @@ fn one_voxel_shared_by_two_species_splits_exactly_by_demand() {
     ));
 
     // One voxel's stock, and the whole strip's: four two-voxel columns and one of one.
-    let per_voxel = pore * Material::Soil.pore_capacity() * world.config().voxel_volume();
+    // What a root may drink of it is the water above the wilting point.
+    let held = pore * Material::Soil.pore_capacity() * world.config().voxel_volume();
+    let per_voxel = (pore - wp) * Material::Soil.pore_capacity() * world.config().voxel_volume();
     let stock0 = pore_stock(&world);
     assert!(
-        (stock0 - 9.0 * per_voxel).abs() < 1e-12,
+        (stock0 - 9.0 * held).abs() < 1e-12,
         "{stock0} is not nine voxels of soil"
     );
 
@@ -419,11 +425,11 @@ fn one_voxel_shared_by_two_species_splits_exactly_by_demand() {
     let us = flora.config().species(Species::Umbrellafrond).clone();
     assert_eq!(
         b.moisture, 1.0,
-        "pore 0.6 is past bloomcrown's sat_pore of {}",
-        bs.sat_pore
+        "available water {a} is past bloomcrown's full_water of {}",
+        bs.full_water
     );
     assert!(
-        (u.moisture - 0.6).abs() < 1e-12,
+        (u.moisture - us.moisture_at(a)).abs() < 1e-12 && u.moisture > 0.0 && u.moisture < 1.0,
         "umbrellafrond's ramp: {}",
         u.moisture
     );
@@ -470,14 +476,15 @@ fn one_voxel_shared_by_two_species_splits_exactly_by_demand() {
         "the shares do not sum to what was taken: {} against {total}",
         flora.view().ledger.transpired_m3
     );
-    assert!(pore_stock(&world) >= 0.0, "the soil went negative");
+    // Every root voxel is drawn down to its wilting point and no further.
+    let floor = 9.0 * wp * Material::Soil.pore_capacity() * world.config().voxel_volume();
     assert!(
-        pore_stock(&world) < 1e-15,
-        "every root voxel should be dry: {}",
+        (pore_stock(&world) - floor).abs() < 1e-12,
+        "every root voxel should be at the wilting point: {} against {floor}",
         pore_stock(&world)
     );
     assert!(
-        (stock0 - total).abs() < 1e-12 * stock0,
+        (stock0 - floor - total).abs() < 1e-12 * stock0,
         "the soil lost {} for {total} taken",
         stock0 - pore_stock(&world)
     );
@@ -535,7 +542,7 @@ fn frozen(sc: &mut cubarium_voxel_flora::SpeciesConfig) {
 /// read against what landed — nine packages on two sites would otherwise recruit.
 #[test]
 fn two_species_banks_share_one_site_and_each_donor_pays_only_its_own() {
-    let mut config = FloraConfig::default();
+    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
     config.bloomcrown.propagule_rate = 0.36;
     config.bloomcrown.hop = 1;
     config.bloomcrown.reserve_cap = 4.0;

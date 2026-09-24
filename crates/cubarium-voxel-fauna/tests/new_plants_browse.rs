@@ -146,7 +146,8 @@ fn an_adult_lanternberry_is_cropped_below_half_a_metre_and_full_above() {
         let (mut low, mut high) = (0.0, 0.0);
         for l in &layers {
             if band.contains(&l.cell) {
-                low += l.stock;
+                // What a mouth is offered: the layer's stock above its grazing floor.
+                low += l.edible();
                 assert!(
                     l.band_m[0] - base_m < LINE_M,
                     "{what}: an in-reach layer starts above the line: {l:?}"
@@ -191,18 +192,30 @@ fn an_adult_lanternberry_is_cropped_below_half_a_metre_and_full_above() {
         assert_eq!(after.len(), layers.len());
         for (b, a) in layers.iter().zip(&after) {
             if band.contains(&b.cell) {
-                assert!(a.stock <= 0.0, "{what}: cropped to nothing below the line");
+                assert!(
+                    a.edible() <= 0.0,
+                    "{what}: cropped to its grazing floor below the line"
+                );
             } else {
-                assert_eq!(
-                    a.stock, b.stock,
-                    "{what}: the foliage above the line is full"
+                // Full, up to the float residue `settle_layers` parks on the largest layer.
+                assert!(
+                    (a.stock - b.stock).abs() <= 1e-12,
+                    "{what}: the foliage above the line is full: {} -> {}",
+                    b.stock,
+                    a.stock
                 );
             }
         }
+        // Left standing: everything above the line, and the in-reach layers' floors.
+        let floors: f64 = layers
+            .iter()
+            .filter(|l| band.contains(&l.cell))
+            .map(|l| l.stock - l.edible())
+            .sum();
         let left = flora.view().stand_at(s).expect("the shrub lives").foliage;
         assert!(
-            (left - high).abs() < 1e-12,
-            "{what}: {left} left, {high} above the line"
+            (left - (high + floors)).abs() < 1e-12,
+            "{what}: {left} left, {high} above the line and {floors} of floor below it"
         );
     }
 }

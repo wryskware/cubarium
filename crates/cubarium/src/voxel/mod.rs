@@ -2280,12 +2280,19 @@ fn report_water_cycle(world: &World, flora: &Flora, threads: usize) -> Option<Jo
         );
         return None;
     }
-    // The bands are the plant layer's own establishment gate. `establish_pore_min` is a
-    // floor, so the band's ceiling is saturation: too wet is drowning, which the plant
-    // layer judges from standing water and not from pore.
+    // The bands are the plant layer's own establishment gate, read back as a soil pore
+    // fraction (the gate itself reads available water, package F). It is a floor, so
+    // the band's ceiling is saturation: too wet is drowning, which the plant layer
+    // judges from standing water and not from pore.
     let bands: Vec<PoreBand> = Species::ALL
         .iter()
-        .map(|&s| PoreBand::new(s.name(), flora.config().species(s).establish_pore_min, 1.0))
+        .map(|&s| {
+            let floor = flora
+                .config()
+                .species(s)
+                .establish_pore_min_on(cubarium_voxel::Material::Soil);
+            PoreBand::new(s.name(), floor, 1.0)
+        })
         .collect();
     let spec = ViabilitySpec {
         // The same again as a warm-up: a cycle that has not started yet is not a cycle

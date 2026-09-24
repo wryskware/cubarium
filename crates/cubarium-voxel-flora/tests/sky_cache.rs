@@ -32,7 +32,9 @@ fn plain(width: u32, height: u32) -> World {
                 x,
                 y,
                 z: 0,
-                volume_m3: 0.2 * cap,
+                // Drained soil (package F's available water 1): every species' water
+                // gate but the wetland pair's is open on any soil numbers.
+                volume_m3: Material::Soil.field_capacity() * cap,
             });
             w.apply(WorldCommand::SetMaterial {
                 x,

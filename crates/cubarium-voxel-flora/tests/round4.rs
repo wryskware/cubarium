@@ -231,6 +231,13 @@ fn at(x: u32) -> Site {
     Site { x, y: 2, z: 0 }
 }
 
+/// The soil pore fraction at which the available water (package F's scale: 0 at the
+/// wilting point, 1 at field capacity) is `a`, on whatever numbers the soil carries.
+fn soil_pore_at(a: f64) -> f64 {
+    let wp = Material::Soil.wilting_point();
+    wp + a * (Material::Soil.field_capacity() - wp)
+}
+
 fn run(flora: &mut Flora, world: &mut World, ticks: u32) {
     for _ in 0..ticks {
         flora.step(world);
@@ -262,7 +269,7 @@ fn assert_residuals(flora: &Flora, when: &str) {
 /// A config in which one species funds a whole package in a single tick: see the module
 /// doc for why, and `round3.rs` for the same two rates.
 fn fast_donor(species: Species) -> FloraConfig {
-    let mut config = FloraConfig::default();
+    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
     {
         let sc = species_mut(&mut config, species);
         sc.propagule_rate = 3.0;
@@ -603,39 +610,31 @@ fn a_newborn_springturf_earns_its_upkeep_on_open_moist_soil() {
     );
 }
 
-/// **Germination permission is not a positive newborn income** (Astra R7.3). The two are
-/// separate claims about the same soil and this fixture holds them apart: springturf's
-/// `establish_pore_min` 0.25 is soil's own retained fraction, so a package germinates on
-/// ordinary drained soil — and the stand that germination buys, on exactly that soil and
-/// with **ordinary preset stocks**, fixes less per second than its own maintenance and pays
-/// the difference out of reserve.
+/// **Germination permission and the newborn budget, held apart** (Astra R7.3). The two
+/// are separate claims about the same soil, and this fixture reads both on ground just
+/// above springturf's germination floor, with **ordinary preset stocks**.
 ///
-/// The fixture sits one point above the floor, pore **0.26**, so the gate is passing and not
-/// on its knife edge. With `rooting_depth` 1 the root box is the support row alone, so the
-/// mean pore fraction the model reads is 0.26 and `μ = (0.26 − 0.15) / (0.45 − 0.15) =
-/// 0.36667`. The newborn is one 0.015 package split `[0.4, 0.4, 0.2]`, so `W = P = 0.006`.
-/// At open sky `L_eff = 1`, site mineral 1 gives a Monod factor of 2/3 and there is no
-/// aeration stress, so the income expression gives
-/// `0.008 · 1 · 0.36667 · 0.006 · (2/3) = 1.17333e-5` organic per second against maintenance
-/// `0.002 · 0.006 = 1.2e-5`. At the 0.25 floor itself `μ` is exactly 1/3 and the income is
-/// `1.06667e-5` against the same 1.2e-5. Reserve pays the difference, and no income is left
-/// to build the foliage the newborn does not yet have.
-///
-/// This is **not** an argument for raising `assimilation`, and R7.3 says so: a species may
-/// germinate into a site it cannot yet run a surplus on, and nothing here is tuned. What it
-/// does mean is that `a_newborn_springturf_earns_its_upkeep_on_open_moist_soil` — pore
-/// **0.6**, ample water — establishes solvency on *ample* water and not on retained-water
-/// soil. Whether recruitment has to be solvent on ordinary drained soil is a contract
-/// question for a later round, not a number to move here.
+/// Before package F the floor was pore 0.25 and the ramp `0.15..0.45`, so a newborn there
+/// read `μ = 1/3` and fixed less than its own maintenance: permission without a budget.
+/// On the available-water scale the floor is `establish_water_min` 0.3 and the ramp
+/// `0.1..0.5`, so at 0.02 above the floor `μ = 0.55`. The newborn is one 0.015 package
+/// split `[0.4, 0.4, 0.2]`, so `W = P = 0.006`; at open sky `L_eff = 1`, site mineral 1
+/// gives a Monod factor of 2/3 and there is no aeration stress, so it fixes
+/// `0.008 · 0.55 · 0.006 · (2/3) = 1.76e-5` organic per second against maintenance
+/// `0.002 · 0.006 = 1.2e-5`: a pioneer that may germinate somewhere can now pay its way
+/// there, and this test measures that it does. Solvency starts at `μ = 0.375`, a = 0.25,
+/// under the floor — the floor is a choice, and moving it under 0.25 would bring the old
+/// deficit back.
 #[test]
-fn springturf_germinates_on_retained_water_soil_and_is_maintenance_deficient_there() {
-    let mut world = pillars(8, &[0, 1], 0.26);
+fn springturf_germinates_just_above_its_water_floor_and_pays_its_upkeep_there() {
     let sc = FloraConfig::default().springturf.clone();
+    let a = sc.establish_water_min + 0.02;
+    let mut world = pillars(8, &[0, 1], soil_pore_at(a));
 
-    // Permission: every gate open at 0.26, and the shallow box is the support row alone.
+    // Permission: every gate open, and the shallow box is the support row alone.
     let g = establishment_gates(&world.view(), at(1), &sc);
-    assert!(g.passes(), "0.26 is meant to be a passing site: {g:?}");
-    assert!((g.mean_pore.expect("soil") - 0.26).abs() < 1e-12, "{g:?}");
+    assert!(g.passes(), "{a} is meant to be a passing site: {g:?}");
+    assert!((g.mean_water.expect("soil") - a).abs() < 1e-12, "{g:?}");
     assert_eq!(
         g.soil_voxels, 2,
         "the root box is the two soil faces: {g:?}"
@@ -664,59 +663,41 @@ fn springturf_germinates_on_retained_water_soil_and_is_maintenance_deficient_the
     );
     let mineral = birth.flora.view().ground_at(at(1)).expect("ground").mineral;
 
-    // The per-second budget in the model's own factors, at the fixture's own pore fraction.
-    let mu = (0.26 - sc.wilt_pore) / (sc.sat_pore - sc.wilt_pore);
+    // The per-second budget in the model's own factors, at the fixture's own water.
+    let mu = sc.moisture_at(a);
     let monod = mineral / (mineral + sc.nutrient_half);
     let rate = sc.assimilation * 1.0 * mu * born.foliage * monod;
     let upkeep = sc.maintenance * born.wood;
-    assert!((mu - 11.0 / 30.0).abs() < 1e-12, "mu {mu}");
+    assert!((mu - 0.55).abs() < 1e-12, "mu {mu}");
     assert!(
         (monod - 2.0 / 3.0).abs() < 1e-12,
         "the site's pool is not 1: {mineral}"
     );
-    assert!((rate - 1.173333e-5).abs() < 1e-10, "income rate {rate}");
+    assert!((rate - 1.76e-5).abs() < 1e-10, "income rate {rate}");
     assert!((upkeep - 1.2e-5).abs() < 1e-18, "upkeep {upkeep}");
-    assert!(rate < upkeep, "income {rate} is not below upkeep {upkeep}");
-    // Astra's own figure at the floor: mu exactly 1/3, income 1.06667e-5.
-    let floor_mu = (sc.establish_pore_min - sc.wilt_pore) / (sc.sat_pore - sc.wilt_pore);
-    assert!((floor_mu - 1.0 / 3.0).abs() < 1e-12, "floor mu {floor_mu}");
-    let floor_rate = sc.assimilation * floor_mu * born.foliage * monod;
-    assert!(
-        (floor_rate - 1.066667e-5).abs() < 1e-10,
-        "income at the floor {floor_rate}"
-    );
+    assert!(rate > upkeep, "income {rate} is not above upkeep {upkeep}");
 
-    // And measured: over five seconds the stand fixes less than its own maintenance bill,
-    // the reserve pays the difference, and nothing is built.
+    // And measured: over five seconds the stand fixes more than its own maintenance bill
+    // and draws nothing from its reserve. (Replacing senesced foliage, `0.001 · P` a
+    // second, takes most of the rest: at the floor a newborn holds its own and no more.)
     let fixed0 = birth.flora.view().ledger.fixed_in;
     run(&mut birth.flora, &mut world, 100);
     let v = birth.flora.view();
-    let now = *v.stand_at(at(1)).expect("it is short of income, not dead");
+    let now = *v.stand_at(at(1)).expect("alive");
     let fixed = v.ledger.fixed_in - fixed0;
     let bill = upkeep * 100.0 * cubarium_voxel::DT;
     assert!(
-        fixed < bill,
+        fixed > bill,
         "fixed {fixed} against a {bill} maintenance bill"
     );
     assert!(
-        fixed > 0.0,
-        "it fixed nothing at all, which is a different fixture"
+        now.reserve >= born.reserve,
+        "it paid its upkeep out of reserve: {born:?} to {now:?}"
     );
-    assert!(
-        now.reserve < born.reserve,
-        "the deficit was not paid out of reserve"
+    assert_residuals(
+        &birth.flora,
+        "after a solvent newborn window at the water floor",
     );
-    assert!(
-        now.wood <= born.wood + 1e-18,
-        "it grew on a deficit: {} to {}",
-        born.wood,
-        now.wood
-    );
-    assert!(
-        now.foliage <= born.foliage + 1e-18,
-        "it built foliage on a deficit"
-    );
-    assert_residuals(&birth.flora, "after a maintenance-deficient newborn window");
 }
 
 /// **Failing neighbour.** The same package, on the same column, with the sky shut: it never
@@ -813,7 +794,7 @@ fn a_springturf_package_under_a_shut_sky_never_germinates_and_goes_to_litter() {
 /// up first on dry ground, and an adult springturf under a crown reads less light than one
 /// in the open.
 ///
-/// The dry half is a gate reading — at 0.2 of pore capacity springturf's 0.25 floor shuts
+/// The dry half is a gate reading — at available water 0.2 springturf's 0.3 floor shuts
 /// and bloomcrown's 0.1 does not — and the canopy half is the shade model, which *does* see
 /// crowns. Only germination light is canopy-blind.
 #[test]
@@ -822,8 +803,8 @@ fn springturf_gives_up_first_on_dry_ground_and_loses_light_under_a_crown() {
     // written against, four times the 0.25 m-cell ladder (`FloraConfig::crowns_scaled`).
     let config = FloraConfig::default().crowns_scaled(4.0);
 
-    // Dry ground: 0.2 of capacity, below soil's own retained 0.25.
-    let dry = pillars(4, &[0, 1, 2, 3], 0.2);
+    // Dry ground: a fifth of what drained soil offers a root.
+    let dry = pillars(4, &[0, 1, 2, 3], soil_pore_at(0.2));
     let turf = establishment_gates(&dry.view(), at(1), &config.springturf);
     let bloom = establishment_gates(&dry.view(), at(1), &config.bloomcrown);
     assert!(!turf.pore_ok, "springturf accepted dry ground: {turf:?}");
@@ -832,7 +813,7 @@ fn springturf_gives_up_first_on_dry_ground_and_loses_light_under_a_crown() {
         "bloomcrown refused the same ground: {bloom:?}"
     );
     assert!(
-        (turf.mean_pore.expect("soil") - 0.2).abs() < 1e-12,
+        (turf.mean_water.expect("soil") - 0.2).abs() < 1e-12,
         "the fixture is not at 0.2: {turf:?}"
     );
 
@@ -914,7 +895,7 @@ fn a_paid_stonecushion_birth_on_a_rock_ledge_beside_a_soil_pocket() {
     let bare = rock_only(0.6);
     let bare_gates = establishment_gates(&bare.view(), at(2), &sc);
     assert_eq!(bare_gates.soil_voxels, 0, "no pocket: {bare_gates:?}");
-    assert_eq!(bare_gates.mean_pore, None);
+    assert_eq!(bare_gates.mean_water, None);
     assert!(
         !bare_gates.pore_ok && !bare_gates.passes(),
         "{bare_gates:?}"
@@ -967,34 +948,22 @@ fn a_newborn_stonecushion_earns_its_upkeep_on_a_rock_ledge() {
         Species::Stonecushion,
         &income,
     );
-    // Drought tolerance, as a reading rather than a claim, and stated as the assertion
-    // below actually measures it (Astra R7.6): a pocket drawn down to a tenth of capacity
-    // is not *full* moisture for this species — it is about **0.2424** of its ramp,
-    // `(0.1 - 0.02) / (0.35 - 0.02)` — while the wet species is at exactly zero there.
-    // What the reading pins is the ordering and that this species is still drinking at a
-    // tenth of capacity, not that a tenth is plenty.
+    // Drought tolerance, as a reading rather than a claim (Astra R7.6), on package F's
+    // available-water scale: a pocket drawn down to a tenth of what drained ground offers
+    // is **half** of this species' ramp, `0.1 / 0.2`, while the wetland species is at
+    // exactly zero there. What the reading pins is the ordering and that this species is
+    // still drinking at a tenth, not that a tenth is plenty.
     let sc = birth.flora.config().species(Species::Stonecushion);
     let frond = birth.flora.config().species(Species::Umbrellafrond);
-    let ramp = |v: f64, lo: f64, hi: f64| ((v - lo) / (hi - lo)).clamp(0.0, 1.0);
     assert!(
-        ramp(0.1, sc.wilt_pore, sc.sat_pore) > 0.2,
-        "a cushion at 0.1 of capacity"
+        sc.moisture_at(0.1) > 0.2,
+        "a cushion at a tenth of drained water"
     );
-    assert_eq!(
-        ramp(0.1, frond.wilt_pore, frond.sat_pore),
-        0.0,
-        "umbrellafrond at 0.1"
-    );
+    assert_eq!(frond.moisture_at(0.1), 0.0, "umbrellafrond at a tenth");
     // And at its own germination floor it is not wilting, where the wetland species is: the
     // three thresholds were chosen together, so the gate and the moisture ramp agree.
-    assert!(
-        ramp(sc.establish_pore_min, sc.wilt_pore, sc.sat_pore) > 0.0,
-        "{sc:?}"
-    );
-    assert_eq!(
-        ramp(sc.establish_pore_min, frond.wilt_pore, frond.sat_pore),
-        0.0
-    );
+    assert!(sc.moisture_at(sc.establish_water_min) > 0.0, "{sc:?}");
+    assert_eq!(frond.moisture_at(sc.establish_water_min), 0.0);
 }
 
 /// **Failing neighbour.** The same package on a rock face with **no** soil pocket in reach:
@@ -1071,11 +1040,12 @@ fn a_stonecushion_package_on_rock_with_no_soil_pocket_never_germinates_and_goes_
 // The moist, aerated understory pad — the niche Astra's R4.6 separated from
 // umbrellafrond's wetland. Damp soil that still has air in it, under somebody else's crown.
 
-/// **Paid birth.** A velvetpad donor on damp aerated soil at 0.45 of capacity funds one
-/// 0.0375 package and the next tick builds a stand at exactly `alive_min` 0.015 of wood.
+/// **Paid birth.** A velvetpad donor on damp aerated soil at field capacity — drained
+/// ground, full moisture for a damp-lover on package F's scale — funds one 0.0375 package
+/// and the next tick builds a stand at exactly `alive_min` 0.015 of wood.
 #[test]
 fn a_paid_velvetpad_birth_on_damp_aerated_soil() {
-    let mut world = pillars(8, &[0, 1, 2], 0.45);
+    let mut world = pillars(8, &[0, 1, 2], soil_pore_at(1.0));
     let birth = paid_birth(
         &mut world,
         fast_donor(Species::Velvetpad),
@@ -1089,16 +1059,22 @@ fn a_paid_velvetpad_birth_on_damp_aerated_soil() {
         birth.package
     );
     assert_paid_birth(&birth, Species::Velvetpad);
-    // Damp and aerated, both read off the gates after the run: over its 0.3 floor, under
-    // `saturated_pore` 0.95 everywhere, and a hair under the fixture's 0.45 because two
-    // ticks of a donor's transpiration came out of these same voxels.
+    // Damp and aerated, both read off the gates after the run: over its germination
+    // floor, under `saturated_pore` 0.95 everywhere, and a hair under the fixture's
+    // field capacity because two ticks of a donor's transpiration came out of these
+    // same voxels.
     let g = establishment_gates(
         &world.view(),
         at(1),
         birth.flora.config().species(Species::Velvetpad),
     );
-    let mean = g.mean_pore.expect("soil");
-    assert!((0.3..0.45).contains(&mean) && (0.45 - mean) < 1e-6, "{g:?}");
+    let mean = g.mean_water.expect("soil");
+    let floor = birth
+        .flora
+        .config()
+        .species(Species::Velvetpad)
+        .establish_water_min;
+    assert!(mean >= floor && mean < 1.0 && (1.0 - mean) < 1e-4, "{g:?}");
     assert_eq!(g.saturated_fraction, 0.0, "{g:?}");
 }
 
@@ -1108,7 +1084,10 @@ fn a_paid_velvetpad_birth_on_damp_aerated_soil() {
 /// `light_half` 0.1 against 0.8 buys.
 #[test]
 fn a_newborn_velvetpad_earns_its_upkeep_under_a_founder_s_crown() {
-    let mut world = pillars(8, &[0, 1, 2], 0.45);
+    // Wetter than drained, 1.3 on package F's scale: the edge of the hollow the founder
+    // umbrellafrond stands for, so that the wetland crown earns something too (it wilts
+    // at field capacity) and the system's own income is not all the pad's.
+    let mut world = pillars(8, &[0, 1, 2], soil_pore_at(1.3));
     let mut birth = paid_birth(
         &mut world,
         // Package L: crowns are metres; this 1 m-cell fixture keeps the crowns it was

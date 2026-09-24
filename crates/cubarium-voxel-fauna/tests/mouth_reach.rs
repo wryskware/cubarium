@@ -115,7 +115,20 @@ fn crown_at(flora: &mut Flora, world: &World, x: i64, z: u32, rise: i64) -> f64 
     stand.foliage
 }
 
-/// Place a browser founder at one column, facing `+z`, and give it a full feed action.
+/// The shipped founders with **no diminishing bite** (`bite_half_stock` 0): these cases
+/// measure one whole bite of the frozen rate, which package G's `E / (E + K)` would
+/// shrink by whatever stock is at the mouth. Their bodies start with an empty reserve,
+/// so package G's satiety asks for the whole bite too.
+fn exact_bites() -> FaunaConfig {
+    let mut c = FaunaConfig::default();
+    for f in Founder::ALL {
+        c.founders[f.index()].core.bite_half_stock = 0.0;
+    }
+    c
+}
+
+/// Place a hungry browser founder at one column, facing `+z`, and give it a full feed
+/// action.
 fn browser_feeding(fauna: &mut Fauna, world: &World, x: i64, z: u32) -> u64 {
     assert!(fauna.apply(
         world,
@@ -125,7 +138,7 @@ fn browser_feeding(fauna: &mut Fauna, world: &World, x: i64, z: u32) -> u64 {
             founder: Founder::Browser,
             stores: StartingStores {
                 body: 0.8,
-                reserve: 1.0,
+                reserve: 0.0,
             },
             heading_rad: 0.0,
         },
@@ -154,7 +167,7 @@ fn a_browser_bites_a_crown_at_its_head_layer() {
     let mut flora = Flora::new(FloraConfig::default().one_layer_species());
     let before = crown_at(&mut flora, &world, 2, 2, 0);
 
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(exact_bites());
     let id = browser_feeding(&mut fauna, &world, 2, 2);
     let reached = {
         let av = fauna.view();
@@ -194,7 +207,7 @@ fn a_crown_one_voxel_above_the_head_is_inside_the_physical_band() {
     let mut flora = Flora::new(FloraConfig::default().one_layer_species());
     let before = crown_at(&mut flora, &world, 2, 2, 1);
 
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(exact_bites());
     let id = browser_feeding(&mut fauna, &world, 2, 2);
     let reached = {
         let av = fauna.view();
@@ -237,7 +250,7 @@ fn a_browser_cannot_bite_a_crown_two_voxels_above_its_head() {
     let mut flora = Flora::new(FloraConfig::default().one_layer_species());
     let before = crown_at(&mut flora, &world, 2, 2, 2);
 
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(exact_bites());
     let id = browser_feeding(&mut fauna, &world, 2, 2);
     let reached = {
         let av = fauna.view();
@@ -279,7 +292,7 @@ fn the_blind_founders_litter_mouth_and_digest_are_unchanged() {
     ));
     let before = flora.view().ground_at(site(2, 2)).expect("ground").litter;
 
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(exact_bites());
     assert!(fauna.apply(
         &world,
         FaunaCommand::IntroduceFounder {
@@ -288,7 +301,7 @@ fn the_blind_founders_litter_mouth_and_digest_are_unchanged() {
             founder: Founder::Blind,
             stores: StartingStores {
                 body: 0.8,
-                reserve: 1.0,
+                reserve: 0.0,
             },
             heading_rad: 0.0,
         },
@@ -339,7 +352,7 @@ fn the_mouth_diagnostic_agrees_with_the_stepping_rule_at_three_crown_heights() {
 
     for (i, (x, rise)) in cases.into_iter().enumerate() {
         let mut flora = flora.clone();
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(exact_bites());
         let id = browser_feeding(&mut fauna, &world, x, 2);
         let (diagnosed, candidates) = {
             let av = fauna.view();

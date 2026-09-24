@@ -564,7 +564,9 @@ fn a_layer_thins_by_its_own_stock_and_trunk_and_accents_never_do() {
 fn a_browsed_layer_empties_on_the_model_while_the_crown_stays_full() {
     let w = world(32, 16, 8, 3);
     let sp = Species::Bloomcrown;
-    let mut flora = Flora::new(FloraConfig::default());
+    // No graze refuge: the drawing of an emptied layer is what is under test, and a
+    // refuge keeps a browsed layer at its floor instead of empty.
+    let mut flora = Flora::new(FloraConfig::default().without_graze_refuge());
     let wood_max = flora.config().species(sp).wood_max;
     let height_m = flora.config().species(sp).crown_height_m_at(wood_max);
     assert!(flora.apply(

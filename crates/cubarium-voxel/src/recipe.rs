@@ -689,8 +689,8 @@ impl Water {
     /// atmosphere store), and a metre of water table.
     ///
     /// A metre of head costs `aquifer_porosity` metres of the inventory -- 0.35 -- and
-    /// bringing every soil voxel to field capacity costs another 0.025 to 0.035 on these
-    /// rings, so this leaves roughly 0.09 m for the pools: on `default` that is 16 m³ in
+    /// bringing every soil voxel to field capacity costs another 0.08 to 0.09 on these
+    /// rings (0.04 before soil retention raised field capacity from 0.25 to 0.65), so this leaves roughly 0.09 m for the pools: on `default` that is 16 m³ in
     /// the basins against the 142 m³ it would take to fill every one of them to its spill.
     /// Ponds in the low ground, not a flooded ring.
     /// The weather, chosen against package W3's hour-long study on all three presets.

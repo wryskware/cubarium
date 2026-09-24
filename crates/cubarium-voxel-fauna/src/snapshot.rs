@@ -80,9 +80,13 @@ use crate::Fauna;
 /// Schema 14 is **package N** (`design/handoffs/voxel-new-plants-2026-09-23.md`): the
 /// plant layer gained three species, so [`crate::FaunaLedger`]'s per-plant bite arrays
 /// grew from six slots to nine.
+/// Schema 15 is **package G** (`design/handoffs/voxel-plant-viability-2026-09-23.md` §G):
+/// [`crate::SpeciesConfig`] gained `bite_half_stock` and `growth_max_per_s`, and a body's
+/// structure is now built out of its reserve at a capped rate, so a schema-14 juvenile grew
+/// under a rule this build does not run: refused, not re-anchored.
 /// Postcard is not self-describing, so older worlds are **refused**, not migrated
 /// (`always-fresh-never-migrate`): start a fresh world.
-pub const SCHEMA: u32 = 14;
+pub const SCHEMA: u32 = 15;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

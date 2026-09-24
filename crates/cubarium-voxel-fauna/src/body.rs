@@ -261,9 +261,16 @@ impl FounderPhysiology {
                 core: SpeciesConfig {
                     maintenance_per_s: 0.001,
                     bite_per_s: 0.0005,
+                    // The browser's K scaled by body (0.0125 / 0.05): a fortieth of the
+                    // litter cue's reference stock `M_EMIT`, so a litter film gives crumbs
+                    // and a real pile nearly a whole bite.
+                    bite_half_stock: 0.00125,
                     yield_fraction: 0.5,
                     n_tissue: 0.02,
                     body_max: 0.0125,
+                    // From body_min to birth_body (0.009375) in ≥ 2,757 s, so that with the
+                    // 900 s hold a hatchling's first clutch is ≥ 3,657 s after it hatched.
+                    growth_max_per_s: 3.4e-6,
                     body_min: 0.003125,
                     birth_body: 0.0125,
                     birth_cost: 0.00625,
@@ -1069,9 +1076,10 @@ pub(crate) fn mouth_foliage_stand(
 }
 
 /// What a mouth over `cols` whose band selects the cell range `layers` can take from
-/// **one stand**: the sum of the stocks of its foliage layers whose disc cell is in
-/// range and whose own disc — its own radius, which is a fraction of the crown's —
-/// covers one of the columns.
+/// **one stand**: the sum of the edible stocks ([`cubarium_voxel_flora::StandLayer::edible`],
+/// above the grazing floor) of its foliage layers whose disc cell is in range and whose
+/// own disc — its own radius, which is a fraction of the crown's — covers one of the
+/// columns.
 ///
 /// This is the whole of what layers changed about reach. Before, a stand was in reach
 /// or it was not and the answer was its whole `foliage`; now an adult bloomcrown offers
@@ -1112,7 +1120,10 @@ pub(crate) fn reachable_layers(
     let width = i64::from(view.config.width);
     let depth = i64::from(view.config.depth);
     for layer in fv.layers(stand) {
-        if !(layer.stock > 0.0) || !layers.contains(&layer.cell) {
+        // What a mouth could take is what stands above the grazing floor: the flora
+        // layer's one reading of food (package G).
+        let edible = layer.edible();
+        if !(edible > 0.0) || !layers.contains(&layer.cell) {
             continue;
         }
         let span = layer.radius_v.floor() as i64;
@@ -1135,7 +1146,7 @@ pub(crate) fn reachable_layers(
             }
         }
         if touching {
-            out.push((layer.foliage_index.unwrap_or(0), layer.stock));
+            out.push((layer.foliage_index.unwrap_or(0), edible));
         }
     }
     out

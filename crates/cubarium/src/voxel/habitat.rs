@@ -1431,8 +1431,8 @@ mod tests {
 
     /// **Browser faces by layer** (item 3). An adult bloomcrown's crown is out of the
     /// browser's band and its rosette is in it: the faces round its stem are admitted.
-    /// Crop the rosette to nothing and the only in-band layer holds no stock, so they
-    /// are refused.
+    /// Crop the rosette to its grazing floor and the only in-band layer holds no edible
+    /// stock, so they are refused.
     #[test]
     fn a_browser_face_is_admitted_by_a_stocked_layer_in_its_band_not_the_crown_top() {
         let world = plain(24, 6);
@@ -1479,7 +1479,7 @@ mod tests {
         }
         for stand in flora.view().stands.iter() {
             let rosette = flora.view().layers(stand).next().unwrap();
-            assert!(rosette.stock <= 0.0, "cropped to nothing");
+            assert!(rosette.edible() <= 0.0, "cropped to its grazing floor");
         }
         assert!(
             browser_faces(&world.view(), &flora.view(), &fauna).is_empty(),
@@ -1637,7 +1637,13 @@ mod tests {
             &pre.wettest[..4]
         );
 
-        let flora_cfg = cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25);
+        // The drown screen is under test, not the establishment water gate: on loam the
+        // calm plain's metre of soil sits below every species' establishment water, so
+        // that gate is opened for both arms.
+        let mut flora_cfg = cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25);
+        for species in Species::ALL {
+            flora_cfg.species_mut(species).establish_water_min = 0.0;
+        }
         let mut flora = Flora::new(flora_cfg.clone());
         let mut fauna = Fauna::new(Default::default());
         let seeded = seed_pre_rolled(&mut world, &mut flora, &mut fauna, &pre, [0, 0]);

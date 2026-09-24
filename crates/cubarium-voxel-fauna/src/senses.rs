@@ -588,7 +588,7 @@ pub(crate) fn cone_occupancy_with(
                 }
                 let class = if !layer.kind.bears_foliage() {
                     Fine::Trunk
-                } else if layer.stock > 0.0 {
+                } else if layer.edible() > 0.0 {
                     Fine::FoliageCrown
                 } else {
                     Fine::StrippedCrown

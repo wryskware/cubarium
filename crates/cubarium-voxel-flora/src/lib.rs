@@ -46,6 +46,7 @@
 #![forbid(unsafe_code)]
 
 mod layers;
+mod seeds;
 pub mod snapshot;
 mod step;
 
@@ -70,6 +71,9 @@ pub use step::{Gates, establishment_gates, establishment_gates_on_substrate};
 pub use step::{adult_light_cover, establishment_gates_with_sky};
 /// Where a falling stand's wood lands (package N's fall), for a diagnostic.
 pub use step::fall_line;
+/// What one cell of ground offers a root (package F): the scale `μ` and the establishment
+/// water gate read.
+pub use step::available_water;
 
 /// The **stands** of the voxel ecology, each one a role: see the preset that carries its
 /// numbers ([`SpeciesConfig::bloomcrown`] and the five after it) for the sentence of
@@ -552,6 +556,27 @@ pub enum Trophic {
     Saprotroph,
 }
 
+/// **How a species' seeds travel** (package S, `design/handoffs/voxel-plant-viability-2026-09-23.md`).
+/// Every mode lands one whole seed — one package — per delivery; what differs is where.
+/// `seeds.rs`'s `landing` is the rule, and [`SpeciesConfig::hop`] is each mode's distance.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Dispersal {
+    /// Uniform over the highest support faces within `hop`, habitat unscreened: the bank
+    /// waits for the gap. Round 3b's kernel, unchanged.
+    #[default]
+    Drop,
+    /// A fat-tailed, isotropic distance at a scale of `hop`: 79 % within three hops, 4 %
+    /// past ten, capped at the world, habitat unscreened.
+    Wind,
+    /// Lands only on a face whose ground passes the species' gates — every gate but light
+    /// — within a wide radius `hop`; the rain that finds none is litter. A spore rain
+    /// mostly falls where nothing grows, and only what lands where it could is modelled.
+    Spores,
+    /// Lands only on a standing-water margin within a wide radius `hop`, downhill first;
+    /// with no margin in reach it is litter under the parent.
+    Water,
+}
+
 /// The plant model of one species: `design/ecology-v1-contract.md` §4 parameters, plus
 /// the terrain couplings that replace the old noise fields.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -657,11 +682,18 @@ pub struct SpeciesConfig {
     pub propagule_split: [f64; 3],
     /// `e_v`: energy per unit of organic matter in every plant tissue. Light is the source.
     pub energy_density: f64,
-    /// Fraction of a seed cohort that falls to litter each second, with its mineral:
-    /// paid decay, not deletion. **Placeholder**.
+    /// Per-seed death rate in the bank, per second: at each of its site's checks a seed
+    /// survives the time since the last one with probability `exp(−rate · t)`, and a dead
+    /// seed is litter with its mineral — whole seeds, paid decay, never deletion (package S).
+    /// Every preset sets it to `1 / seed_max_age_s`, an e-folding time equal to the
+    /// lifetime: about a third of a cohort that never finds a gap is still there to go to
+    /// litter at its age limit, and attrition has taken the rest along the way.
+    /// **Placeholder**.
     pub seed_attrition_per_s: f64,
-    /// A bin whose start is older than this many seconds falls to litter whole, with its
-    /// mineral and its energy. **Placeholder**.
+    /// **Dormancy.** A bin whose start is older than this many seconds falls to litter
+    /// whole, with its mineral and its energy, at its site's next check. Hours, not
+    /// minutes (package S): the base is 8 h, a species' own preset says why it differs.
+    /// **Placeholder**.
     pub seed_max_age_s: f64,
     /// How many arrival bins one species' bank is divided into: the bin width is
     /// `seed_max_age_s / seed_cohorts_max`, at least one tick, and a landing joins the bin
@@ -718,17 +750,27 @@ pub struct SpeciesConfig {
     /// soil voxels in that box hold water for the stand.
     pub rooting_depth: u32,
     pub rooting_radius: u32,
-    /// Pore fraction (0..1 of capacity) at and below which `μ = 0` (wilting), and at and
-    /// above which `μ = 1`; linear between. Read as the water-volume-weighted mean over
-    /// the root box.
-    pub wilt_pore: f64,
-    pub sat_pore: f64,
+    /// **Available water** ([`available_water`]) at and below which `μ = 0` (wilting), and
+    /// at and above which `μ = 1`; linear between ([`SpeciesConfig::moisture_at`]). Read as
+    /// the root box's mean available water, each cell on its own material's wilting point
+    /// and field capacity (package F, `design/handoffs/voxel-plant-viability-2026-09-23.md`).
+    ///
+    /// The scale is `0` at the wilting point, `1` at field capacity — what drained ground
+    /// holds — and `(1 − wp)/(fc − wp)` at saturation. So an upland plant is comfortable
+    /// through the top half of what drained ground offers (`full_water` 0.5), and only a
+    /// wetland plant needs ground wetter than drained (`wilt_water` 1.0). Both numbers
+    /// were on the pore-fraction scale (`wilt_pore`, `sat_pore`) before package F, which
+    /// anchored the ramps near saturation and read drained soil as dry.
+    pub wilt_water: f64,
+    pub full_water: f64,
     /// Water transpired per second per unit foliage at `μ = 1`, cubic metres. Withdrawn
-    /// from the root box through `Command::WithdrawPore`, never by reading `pore` twice.
+    /// from the root box through `Command::WithdrawPore`, never by reading `pore` twice,
+    /// and never below a cell's wilting point: water under it is not the plant's to take.
     pub transpiration_m3_per_s: f64,
-    /// A seed cohort may germinate only on a site whose root-box mean pore fraction is at
-    /// least this and whose sky visibility is at least `establish_light_min`.
-    pub establish_pore_min: f64,
+    /// A seed cohort may germinate only on a site whose root box's mean **available
+    /// water** is at least this — the same scale as `wilt_water` and `full_water` — and
+    /// whose sky visibility is at least `establish_light_min`.
+    pub establish_water_min: f64,
     pub establish_light_min: f64,
     /// Pore fraction (0..1 of capacity) at and above which a root voxel counts as
     /// **saturated** — no air in it for a root. **Placeholder**.
@@ -784,8 +826,19 @@ pub struct SpeciesConfig {
     /// glowcap colonises is as long as the crown was wide. `false` — the wood falls on
     /// the site — for every species but the vaulttree.
     pub falls: bool,
-    /// How many support sites away, in `x` and `z`, a propagule may land.
+    /// How many support sites away, in `x` and `z`, a propagule may land: the radius of a
+    /// [`Dispersal::Drop`], the kernel scale of a [`Dispersal::Wind`], and the wide radius a
+    /// [`Dispersal::Spores`] or [`Dispersal::Water`] seed searches. In reference 0.25 m
+    /// voxels, scaled by [`FloraConfig::for_voxel_size`].
     pub hop: u32,
+    /// How this species' seeds travel ([`Dispersal`]). [`Dispersal::Drop`] at the base.
+    pub dispersal: Dispersal,
+    /// The share of a donor's whole packages that leave as a **runner or rhizome** — a
+    /// daughter stand on a free neighbouring face within a voxel of the parent's height
+    /// that passes the gates, built from the package, nothing banked — instead of as a
+    /// seed. Drawn per package from the donor's keyed stream; a runner with nowhere to go
+    /// leaves as a seed. `0..=1`, zero at the base. **Placeholder**.
+    pub clonal_share: f64,
     /// Crown geometry from wood, shared by the shade model and the presenter so what
     /// shades is exactly what is drawn: crown top above the support face and crown
     /// half-width, both **in metres**, `[min, max]` (package L,
@@ -795,6 +848,22 @@ pub struct SpeciesConfig {
     /// How wood moves a stand between the two ends is [`SpeciesConfig::crown_height_m_at`].
     pub crown_height_m: [f64; 2],
     pub crown_radius_m: [f64; 2],
+    /// **The grazing refuge** (package G, `design/handoffs/voxel-plant-viability-2026-09-23.md`
+    /// §G.3): the share of the foliage its wood carries that no bite can take — basal
+    /// buds, tissue pressed to the ground, leaves too tough or too few to be worth a mouth.
+    /// Each foliage layer keeps `graze_refuge ×` its own capacity (`share · alpha · wood`),
+    /// so the floors sum to `graze_refuge · alpha · wood`; [`StandLayer::edible`] is what
+    /// stands above it, and it is the one reading every consumer takes and the one
+    /// withdrawals are bounded by. A floor is not a height refuge: the lanternberry's browse
+    /// line and the tall crowns keep theirs in their profiles, on top of this.
+    ///
+    /// **0.15** in the base, for every species the brief does not name: enough stock left
+    /// on a stripped plant to refoliate from without making it inedible. Springturf and
+    /// velvetpad **0.3** (their growth points sit at the base, under a mouth), stonecushion
+    /// **0.4** (a cushion is mostly skirt pressed to rock). Glowcap keeps the base 0.15: its
+    /// income is substrate, not cap, so its refuge only protects the tissue that fruits
+    /// again, and the shredder has litter to fall back on.
+    pub graze_refuge: f64,
     /// **What is in that volume**: the species' anatomy, staged by `wood / wood_max`.
     /// The first entry whose `wood_fraction_max` is at or above the fraction applies;
     /// the last must catch a full-grown stand. Its foliage-bearing layers are the
@@ -898,7 +967,7 @@ impl SpeciesConfig {
     /// tick's own `package_of`). Read-only: the presenter shows a stand whose `parcel`
     /// holds half of this as ripe (`cubarium::voxel::model`).
     pub fn propagule_package(&self) -> f64 {
-        step::package_of(self)
+        seeds::package_of(self)
     }
 
     /// One crown dimension in metres at `wood`, from its `[min, max]` range: package L's
@@ -965,6 +1034,24 @@ impl SpeciesConfig {
     }
 }
 
+/// Water: what the ground offers this species (package F).
+impl SpeciesConfig {
+    /// `μ` at root-box available water `a`: zero at and below `wilt_water`, one at and
+    /// above `full_water`, linear between. A `full_water` at or below `wilt_water` is a
+    /// step at `full_water`.
+    pub fn moisture_at(&self, available: f64) -> f64 {
+        crate::step::ramp(available, self.wilt_water, self.full_water)
+    }
+
+    /// `establish_water_min` as a pore fraction of `material`: `wp + a · (fc − wp)`. For a
+    /// caller that thinks in pore fractions — the host's water-cycle report bands soil
+    /// columns by it — and not for the gate itself, which reads available water.
+    pub fn establish_pore_min_on(&self, material: Material) -> f64 {
+        let (wp, fc) = (material.wilting_point(), material.field_capacity());
+        wp + self.establish_water_min * (fc - wp)
+    }
+}
+
 /// How far a ground consumer can get at food from the face it is standing on: sideways in
 /// whole voxels, and up in whole voxels.
 ///
@@ -1011,8 +1098,10 @@ impl SpeciesConfig {
             propagule_rate: 0.0002,
             propagule_split: [0.4, 0.4, 0.2],
             energy_density: 2.0,
-            seed_attrition_per_s: 0.001,
-            seed_max_age_s: 600.0,
+            // Eight hours, e-folding at the lifetime (the field docs): the middle of the
+            // brief's 6–12 h for seeds; each preset below says why it moves.
+            seed_attrition_per_s: 1.0 / 28_800.0,
+            seed_max_age_s: 28_800.0,
             seed_cohorts_max: 4,
             n_tissue: 0.02,
             reserve_share: 0.2,
@@ -1023,10 +1112,21 @@ impl SpeciesConfig {
             light_half: 0.5,
             rooting_depth: 2,
             rooting_radius: 1,
-            wilt_pore: 0.15,
-            sat_pore: 0.6,
-            transpiration_m3_per_s: 2e-5,
-            establish_pore_min: 0.2,
+            // Package F's upland scale (available water, 1 = field capacity): wilts only
+            // in the bottom tenth of what drained ground offers, full through its top
+            // half, germinates on a fifth of it.
+            wilt_water: 0.1,
+            full_water: 0.5,
+            // Package F measurement (a v1_base number: proposed, Fable's call). At 2e-5 a
+            // founder drew its root box from field capacity to the wilting point in
+            // 10–30 min, while a default-preset shower (0.4 m³ over 576 m², ~0.7 mm)
+            // gives a 3×3 root footprint ~1/20 of that demand back: bloomcrown,
+            // vaulttree and lanternberry starved in full light at μ ≈ 0.1 on either
+            // soil. At 1e-6 a full-grown bloomcrown (P 1.2) asks ~2× the mean rain on
+            // its footprint, so boxes dry between showers and under dense cover only,
+            // and every upland species holds its donors for 3 h (nofauna census).
+            transpiration_m3_per_s: 1e-6,
+            establish_water_min: 0.2,
             establish_light_min: 0.3,
             saturated_pore: 0.95,
             stress_rate_per_s: 0.05,
@@ -1036,8 +1136,12 @@ impl SpeciesConfig {
             water_depth_min_m: 0.0,
             falls: false,
             hop: 1,
+            dispersal: Dispersal::Drop,
+            clonal_share: 0.0,
             crown_height_m: [0.25, 0.75],
             crown_radius_m: [0.125, 0.375],
+            // The refuge a plant the brief does not name keeps (`graze_refuge`'s doc).
+            graze_refuge: 0.15,
             // The v1 base carries no anatomy of its own: every preset states one.
             profile: SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer(
                 [0.0, 1.0],
@@ -1055,9 +1159,12 @@ impl SpeciesConfig {
             light_half: 0.8,
             rooting_depth: 2,
             rooting_radius: 1,
-            wilt_pore: 0.08,
-            sat_pore: 0.5,
-            establish_pore_min: 0.1,
+            // Upland (package F): the most drought-hardy of the three upland plants —
+            // wilts only in the bottom twentieth of drained ground's water, full through
+            // its top half, germinates on a tenth of it.
+            wilt_water: 0.05,
+            full_water: 0.5,
+            establish_water_min: 0.1,
             establish_light_min: 0.6,
             // The sun producer of ridges and terraces: it will not germinate on a site
             // that is even a quarter waterlogged, and past that quarter it stresses
@@ -1073,6 +1180,9 @@ impl SpeciesConfig {
             // water, so the species could not exist anywhere it rained. A wrong
             // placeholder, not a tuned one.
             drown_depth_m: 0.05,
+            // Seeds (package S): dropped within `hop` 2 — animal vectors are a later
+            // package — into the base's 8 h bank. A meadow forb's seed that waits a
+            // working day for a gap, not a pioneer's.
             hop: 2,
             crown_height_m: [0.375, 1.0],
             crown_radius_m: [0.125, 0.3125],
@@ -1116,9 +1226,14 @@ impl SpeciesConfig {
             light_half: 0.15,
             rooting_depth: 4,
             rooting_radius: 1,
-            wilt_pore: 0.3,
-            sat_pore: 0.8,
-            establish_pore_min: 0.45,
+            // Wetland (package F): needs ground wetter than drained. Wilts at field
+            // capacity (1.0) and is full at 1.5: pore 0.84 on a loam of fc 0.65 / wp
+            // 0.28, and short of saturation (≥ 1.67) everywhere in the soil-retention
+            // window, so saturated ground is always full moisture. Germinates only
+            // where the ground is clearly wetter than drained (1.2).
+            wilt_water: 1.0,
+            full_water: 1.5,
+            establish_water_min: 1.2,
             establish_light_min: 0.1,
             // The wet producer of hollows: no aeration bound on establishment at all,
             // which — since the same number is the stress target's tolerance — is also no
@@ -1141,7 +1256,17 @@ impl SpeciesConfig {
             relax_rate_per_s: 0.05,
             establish_saturated_max: 1.0,
             drown_depth_m: 0.5,
-            hop: 1,
+            // Seeds (package S): **spores to wet ground** within a wide `hop` 6 (1.5 m at
+            // the reference voxel) — the water gate is what "wet" means here — and
+            // **rhizomes** for half the packages, which is how a frond fills the hollow it
+            // is already in while the spores find the next one. Spores are short-lived:
+            // 4 h, the top of the brief's 2–4 h, because a hollow can take a shower or two
+            // to come back.
+            hop: 6,
+            dispersal: Dispersal::Spores,
+            clonal_share: 0.5,
+            seed_max_age_s: 14_400.0,
+            seed_attrition_per_s: 1.0 / 14_400.0,
             crown_height_m: [1.0, 2.0],
             crown_radius_m: [0.375, 0.75],
             // Anatomy document §3: three tiers whose lowest is the widest, so the
@@ -1191,25 +1316,22 @@ impl SpeciesConfig {
     /// Every number is a **placeholder** (`design/backlog.md` §1), chosen to encode that
     /// sentence and nothing else:
     ///
-    /// - **Water, the three thresholds together.** `establish_pore_min` 0.25 is soil's own
-    ///   retained fraction, so springturf germinates on ordinary drained soil and no
-    ///   drier. That is **germination permission and not a positive newborn budget**, and
-    ///   the two are separate claims (Astra R7.3): a newborn on passing soil at pore 0.26,
-    ///   with ordinary preset stocks, fixes `0.008 · 1 · 0.36667 · 0.006 · (2/3) =
-    ///   1.17333e-5` organic per second against maintenance `0.002 · 0.006 = 1.2e-5` and
-    ///   pays the difference out of reserve — 1.06667e-5 at the 0.25 floor itself
-    ///   (`tests/round4.rs`,
-    ///   `springturf_germinates_on_retained_water_soil_and_is_maintenance_deficient_there`).
-    ///   The species' own income fixture runs at pore **0.6**, so what it establishes is
-    ///   solvency on *ample* water, not a viable pioneer on retained-water soil. Whether
-    ///   recruitment has to be solvent on drained soil is a deliberate contract question
-    ///   for a later round and explicitly **not** a reason to raise `assimilation`.
-    ///   `wilt_pore` 0.15 is twice bloomcrown's 0.08, so it is the species that
-    ///   gives up first on a dry ridge; `sat_pore` 0.45 is where it reaches full moisture,
-    ///   just above the germination floor, because a turf's shallow roots either have
-    ///   water in the top row or do not. `establish_saturated_max` 0.3 keeps it out of a
-    ///   waterlogged hollow, and `drown_depth_m` 0.03 is under a voxel of pool but well
-    ///   over the millimetres of transit water the harness's rain leaves on a face.
+    /// - **Water, the three thresholds together**, on package F's available-water scale
+    ///   (0 at the wilting point, 1 at field capacity). `wilt_water` 0.1 and `full_water`
+    ///   0.5 are the upland pair: drained ground is full moisture, and a turf only wilts
+    ///   in the bottom tenth of what it offers. `wilt_water` is twice bloomcrown's 0.05,
+    ///   so it is still the upland species that gives up first on a dry ridge.
+    ///   `establish_water_min` 0.3 is the highest upland germination floor: a turf's
+    ///   shallow roots see only the support row, so a seed waits for ground that holds a
+    ///   third of drained soil's water there. That is **germination permission and not a
+    ///   positive newborn budget** (Astra R7.3; `tests/round4.rs`,
+    ///   `springturf_germinates_on_retained_water_soil_and_is_maintenance_deficient_there`,
+    ///   measures the newborn's deficit at the floor). Before package F the three were
+    ///   pore fractions (0.25, 0.15, 0.45), which read drained soil as `μ ≈ 0.33`: every
+    ///   springturf of the nofauna census starved in full light between min 35 and 60.
+    ///   `establish_saturated_max` 0.3 keeps it out of a waterlogged hollow, and
+    ///   `drown_depth_m` 0.03 is under a voxel of pool but well over the millimetres of
+    ///   transit water the harness's rain leaves on a face.
     /// - **Light.** `light_half` 1.0 and `establish_light_min` 0.75 are both above
     ///   bloomcrown's 0.8 and 0.6: it needs open sky to germinate and earns badly in
     ///   shade. Note that a *living crown* cannot shut that gate — germination light is
@@ -1242,15 +1364,23 @@ impl SpeciesConfig {
             light_half: 1.0,
             rooting_depth: 1,
             rooting_radius: 1,
-            wilt_pore: 0.15,
-            sat_pore: 0.45,
-            establish_pore_min: 0.25,
+            wilt_water: 0.1,
+            full_water: 0.5,
+            establish_water_min: 0.3,
             establish_light_min: 0.75,
             stress_rate_per_s: 0.2,
             relax_rate_per_s: 0.05,
             establish_saturated_max: 0.3,
             drown_depth_m: 0.03,
+            // Seeds (package S): dropped within the pioneer's wide `hop` 3, and **runners**
+            // for half the packages (the brief's ~0.5), so a turf closes its own patch
+            // while its seed goes looking. The longest bank, 12 h, the top of the brief's
+            // 6–12 h: a pioneer's seed bank is the persistent one, waiting under whatever
+            // replaced it for the next bare ground.
             hop: 3,
+            clonal_share: 0.5,
+            seed_max_age_s: 43_200.0,
+            seed_attrition_per_s: 1.0 / 43_200.0,
             wood_max: 0.06,
             alive_min: 0.006,
             donor_min: 0.03,
@@ -1261,6 +1391,8 @@ impl SpeciesConfig {
             assimilation: 0.008,
             crown_height_m: [0.125, 0.1875],
             crown_radius_m: [0.125, 0.25],
+            // Grazing refuge: basal buds under a grazer's mouth (`graze_refuge`'s doc).
+            graze_refuge: 0.3,
             // Anatomy document §3: a mat, no trunk at any size, entirely inside a
             // grazer's reach; cropping it is the mat thinning.
             profile: SpeciesConfig::one_stage(vec![SpeciesConfig::mat_layer(
@@ -1290,13 +1422,14 @@ impl SpeciesConfig {
     ///
     /// Every number is a **placeholder** (`design/backlog.md` §1):
     ///
-    /// - **Water, the three thresholds together.** `establish_pore_min` 0.05 and
-    ///   `wilt_pore` 0.02 are the lowest of the five by a factor of four: a pocket holding
-    ///   a twentieth of its capacity is enough to start on and a fiftieth is still not
-    ///   wilting. `sat_pore` 0.35 is also the lowest, because the point of the role is that
-    ///   a little water is *enough* — the cushion is at full moisture on a pocket the other
-    ///   four would call dry. `establish_saturated_max` 0.4 and `drown_depth_m` 0.02: a
-    ///   rock face does not hold a pool, and a cushion under one is finished.
+    /// - **Water, the three thresholds together**, on package F's available-water scale
+    ///   (0 at the wilting point, 1 at field capacity). `wilt_water` 0 — it earns on any
+    ///   water a root can draw at all — `full_water` 0.2 and `establish_water_min` 0.05 are
+    ///   the lowest of every species, because the point of the role is that a little water
+    ///   is *enough*: a pocket holding a twentieth of drained soil's water is enough to
+    ///   start on, and one holding a fifth is full moisture. `establish_saturated_max` 0.4
+    ///   and `drown_depth_m` 0.02: a rock face does not hold a pool, and a cushion under
+    ///   one is finished.
     /// - **Roots.** `rooting_depth` 2 and `rooting_radius` 1: the 3 × 2 × 3 box around and
     ///   under the rock face, which is where a crack with soil in it is.
     /// - **Light.** `light_half` 0.3 and `establish_light_min` 0.4: an exposed rock face has
@@ -1318,15 +1451,22 @@ impl SpeciesConfig {
             light_half: 0.3,
             rooting_depth: 2,
             rooting_radius: 1,
-            wilt_pore: 0.02,
-            sat_pore: 0.35,
-            establish_pore_min: 0.05,
+            wilt_water: 0.0,
+            full_water: 0.2,
+            establish_water_min: 0.05,
             establish_light_min: 0.4,
             stress_rate_per_s: 0.1,
             relax_rate_per_s: 0.02,
             establish_saturated_max: 0.4,
             drown_depth_m: 0.02,
+            // Seeds (package S): **wind**, at a kernel scale of `hop` 1 — the cushion is
+            // tiny and its seed is dust — so most stay within a metre and a few percent
+            // cross the rock to the next crack. 12 h, the top of the range: a seed on
+            // bare rock waits for a crack to wet.
             hop: 1,
+            dispersal: Dispersal::Wind,
+            seed_max_age_s: 43_200.0,
+            seed_attrition_per_s: 1.0 / 43_200.0,
             wood_max: 0.1,
             alive_min: 0.01,
             donor_min: 0.05,
@@ -1337,6 +1477,8 @@ impl SpeciesConfig {
             propagule_rate: 0.00005,
             crown_height_m: [0.125, 0.1875],
             crown_radius_m: [0.125, 0.15625],
+            // Grazing refuge: a cushion is mostly skirt pressed to the rock (`graze_refuge`'s doc).
+            graze_refuge: 0.4,
             // Anatomy document §3: a dome in two foliage bands, no trunk. Decisions
             // §3 keeps it on the browser's menu, so there is no diet flag here.
             profile: SpeciesConfig::one_stage(vec![
@@ -1354,13 +1496,14 @@ impl SpeciesConfig {
     ///
     /// Every number is a **placeholder** (`design/backlog.md` §1):
     ///
-    /// - **Water, the three thresholds together.** `establish_pore_min` 0.3, `wilt_pore`
-    ///   0.2, `sat_pore` 0.6: damp, and consistently so — it germinates a little above
-    ///   drained soil's own 0.25, wilts just below it, and is at full moisture at 0.6,
-    ///   which is *below* umbrellafrond's own 0.8 (Astra R7.6). The difference from the
-    ///   wetland role is
-    ///   entirely the ceiling: `establish_saturated_max` 0.6 against umbrellafrond's 1.0,
-    ///   so a wholly saturated box refuses a velvetpad cohort and targets an adult's
+    /// - **Water, the three thresholds together**, on package F's available-water scale
+    ///   (0 at the wilting point, 1 at field capacity). `wilt_water` 0.25, `full_water`
+    ///   0.9, `establish_water_min` 0.4: a damp-lover — it wilts in the bottom quarter of
+    ///   what drained ground offers and needs nearly all of it to be at full moisture, so
+    ///   a pad on a drying ridge earns badly long before an upland plant does, while
+    ///   drained ground itself is still full moisture. The difference from the wetland
+    ///   role (umbrellafrond wilts at 1.0) is the floor, and above all the ceiling:
+    ///   `establish_saturated_max` 0.6 against umbrellafrond's 1.0, so a wholly saturated box refuses a velvetpad cohort and targets an adult's
     ///   `aeration_stress` at 1 — waterlogging costs this species something, which is the
     ///   whole of what "aerated" means here. `stress_rate_per_s` 0.1 and
     ///   `relax_rate_per_s` 0.05: it closes on that stress twice as fast as it lets go.
@@ -1393,15 +1536,22 @@ impl SpeciesConfig {
             light_half: 0.1,
             rooting_depth: 2,
             rooting_radius: 1,
-            wilt_pore: 0.2,
-            sat_pore: 0.6,
-            establish_pore_min: 0.3,
+            wilt_water: 0.25,
+            full_water: 0.9,
+            establish_water_min: 0.4,
             establish_light_min: 0.05,
             stress_rate_per_s: 0.1,
             relax_rate_per_s: 0.05,
             establish_saturated_max: 0.6,
             drown_depth_m: 0.1,
-            hop: 1,
+            // Seeds (package S): **spores to damp ground** within a wide `hop` 6, and
+            // **runners** for half the packages — a pad spreads across the floor it is on
+            // and spores reach the next damp patch. 3 h, the middle of the spores' 2–4 h.
+            hop: 6,
+            dispersal: Dispersal::Spores,
+            clonal_share: 0.5,
+            seed_max_age_s: 10_800.0,
+            seed_attrition_per_s: 1.0 / 10_800.0,
             wood_max: 0.2,
             alive_min: 0.015,
             donor_min: 0.1,
@@ -1411,6 +1561,8 @@ impl SpeciesConfig {
             propagule_rate: 0.0005,
             crown_height_m: [0.125, 0.125],
             crown_radius_m: [0.1875, 0.375],
+            // Grazing refuge: basal buds under a grazer's mouth (`graze_refuge`'s doc).
+            graze_refuge: 0.3,
             // Anatomy document §3: a sheet, no trunk. Decisions §3 keeps it on the
             // browser's menu (removing it would have cut 58 % of what the D3 browser
             // ate), so there is no diet flag here either.
@@ -1454,13 +1606,15 @@ impl SpeciesConfig {
     ///   stand it would feed is made of, counting its litter as well as its wood. Below it
     ///   there is nothing there to eat and the gate shuts, which is how a decomposer grove
     ///   *ends* — on a floor with litter on it, later than it used to.
-    /// - **Water, the three thresholds together.** `establish_pore_min` 0.1 and
+    /// - **Water, the three thresholds together.** `establish_water_min` 0.2 and
     ///   `establish_saturated_max` 0.5 are the brief's "pore between the species' floor and
     ///   its saturation ceiling", read in the model's own terms — the existing pore gate is
     ///   the floor and the existing aeration gate is the ceiling, and **no new rule was
-    ///   added**. `wilt_pore` 0.1 and `sat_pore` 0.4: full uptake on ordinary drained soil,
-    ///   nothing at all on a dry one, because `μ` multiplies uptake exactly as it multiplies
-    ///   assimilation. `drown_depth_m` 0.05 — a cap under a pool is finished.
+    ///   added**. `wilt_water` 0.2 and `full_water` 0.9 (package F's available-water scale,
+    ///   1 = field capacity; the damp-lovers' pair): full uptake on ordinary drained soil,
+    ///   nothing at all on a dry one, because `μ` multiplies uptake exactly as it
+    ///   multiplies assimilation. The germination floor sits at the wilt threshold, as it
+    ///   did on the pore scale (0.1 and 0.1). `drown_depth_m` 0.05 — a cap under a pool is finished.
     ///
     ///   **A stated limitation, and the one this preset is most likely to be wrong about.**
     ///   The ceiling is a *germination* ceiling: a spore will not take a waterlogged log,
@@ -1510,15 +1664,22 @@ impl SpeciesConfig {
             establish_light_min: 0.0,
             rooting_depth: 1,
             rooting_radius: 1,
-            wilt_pore: 0.1,
-            sat_pore: 0.4,
-            establish_pore_min: 0.1,
+            wilt_water: 0.2,
+            full_water: 0.9,
+            establish_water_min: 0.2,
             establish_saturated_max: 0.5,
             stress_rate_per_s: 0.1,
             relax_rate_per_s: 0.05,
             drown_depth_m: 0.05,
             transpiration_m3_per_s: 0.0,
-            hop: 1,
+            // Spores (package S): land only on a face whose box holds the substrate (and
+            // the damp) it needs, within a wide `hop` 6 — the next log over, not only its
+            // own. The shortest bank, 2 h, the bottom of the spores' range: a grove's
+            // spore rain is continuous, and a fungal spore on bare ground does not last.
+            hop: 6,
+            dispersal: Dispersal::Spores,
+            seed_max_age_s: 7_200.0,
+            seed_attrition_per_s: 1.0 / 7_200.0,
             wood_max: 0.1,
             alive_min: 0.01,
             donor_min: 0.05,
@@ -1553,8 +1714,9 @@ impl SpeciesConfig {
     ///   terrain still passes. A canopy-aware gate is a separate rule (Astra R6.2).
     ///   `light_half` 0.6: a sun canopy, under bloomcrown's 0.8.
     /// - **Water.** Deep, wide roots (`rooting_depth` 6, `rooting_radius` 2 at 0.25 m),
-    ///   drained-soil thresholds (`establish_pore_min` 0.2, `wilt_pore` 0.12, `sat_pore`
-    ///   0.5), and an aerated root zone: `establish_saturated_max` 0.2 with a **slow**
+    ///   upland thresholds on package F's available-water scale (`establish_water_min`
+    ///   0.2, `wilt_water` 0.1, `full_water` 0.5: full moisture through the top half of
+    ///   what drained ground offers), and an aerated root zone: `establish_saturated_max` 0.2 with a **slow**
     ///   `stress_rate_per_s` 0.005, so it stresses on long saturation and shrugs off a
     ///   wet week. `drown_depth_m` 0.1.
     /// - **Slow, long-lived, large reserve.** `wood_max` 5.0 (bloomcrown 0.6),
@@ -1570,15 +1732,22 @@ impl SpeciesConfig {
             establish_light_min: 0.9,
             rooting_depth: 6,
             rooting_radius: 2,
-            wilt_pore: 0.12,
-            sat_pore: 0.5,
-            establish_pore_min: 0.2,
+            wilt_water: 0.1,
+            full_water: 0.5,
+            establish_water_min: 0.2,
             establish_saturated_max: 0.2,
             stress_rate_per_s: 0.005,
             relax_rate_per_s: 0.02,
             drown_depth_m: 0.1,
             falls: true,
+            // Seeds (package S): a **winged seed on the wind** at a kernel scale of `hop` 4
+            // (1 m): most land under or beside the crown and a few percent 10 m out. 6 h,
+            // the bottom of the range: a large tree seed does not keep, and the tree's
+            // bet is a seedling in the next gap, not a long bank.
             hop: 4,
+            dispersal: Dispersal::Wind,
+            seed_max_age_s: 21_600.0,
+            seed_attrition_per_s: 1.0 / 21_600.0,
             wood_max: 5.0,
             alive_min: 0.02,
             donor_min: 2.5,
@@ -1632,7 +1801,9 @@ impl SpeciesConfig {
     ///
     /// - **Light** between umbrellafrond and bloomcrown: `light_half` 0.4,
     ///   `establish_light_min` 0.35.
-    /// - **Moist**: `establish_pore_min` 0.3, `wilt_pore` 0.15, `sat_pore` 0.6,
+    /// - **Moist**, a damp-lover on package F's available-water scale (1 = field
+    ///   capacity): `establish_water_min` 0.4, `wilt_water` 0.2, `full_water` 0.9 — full
+    ///   moisture on drained ground, earning badly once a dry spell takes a fifth of it —
     ///   `establish_saturated_max` 0.5, `drown_depth_m` 0.1.
     /// - **Repeated paid fruit**: `donor_reserve_floor` 0.7 (base 0.5) and `propagule_rate`
     ///   0.0004; `wood_max` 1.0, `alive_min` 0.02, `donor_min` 0.4, `hop` 2.
@@ -1652,13 +1823,16 @@ impl SpeciesConfig {
             establish_light_min: 0.35,
             rooting_depth: 3,
             rooting_radius: 1,
-            wilt_pore: 0.15,
-            sat_pore: 0.6,
-            establish_pore_min: 0.3,
+            wilt_water: 0.2,
+            full_water: 0.9,
+            establish_water_min: 0.4,
             establish_saturated_max: 0.5,
             stress_rate_per_s: 0.1,
             relax_rate_per_s: 0.05,
             drown_depth_m: 0.1,
+            // Seeds (package S): the fruit **drops beneath** the crown, `hop` 2 (the
+            // seedporter that carries it further is a later package), into the base's 8 h
+            // bank.
             hop: 2,
             wood_max: 1.0,
             alive_min: 0.02,
@@ -1696,8 +1870,9 @@ impl SpeciesConfig {
     ///
     /// - **Water.** `water_depth_min_m` 0.1: a pool, not a rain film (bloomcrown's 0.05
     ///   drown depth is the precedent for "a pool"). `drown_depth_m` 0.5: it stands in the
-    ///   water it needs, up to a third of a full-grown reed. `establish_pore_min` 0.45,
-    ///   `wilt_pore` 0.3, `sat_pore` 0.8: wet soil.
+    ///   water it needs, up to a third of a full-grown reed. Wetland thresholds on package
+    ///   F's available-water scale (1 = field capacity), umbrellafrond's: `wilt_water`
+    ///   1.0, `full_water` 1.5, `establish_water_min` 1.2 — ground wetter than drained.
     /// - **Aeration at a cost.** `establish_saturated_max` 1.0, like umbrellafrond — and
     ///   for the same reason not "slightly below 1" (its doc: every tolerance below 1
     ///   drives a wholly saturated box to stress 1). The cost is **upkeep** instead:
@@ -1712,16 +1887,24 @@ impl SpeciesConfig {
             establish_light_min: 0.6,
             rooting_depth: 2,
             rooting_radius: 1,
-            wilt_pore: 0.3,
-            sat_pore: 0.8,
-            establish_pore_min: 0.45,
+            wilt_water: 1.0,
+            full_water: 1.5,
+            establish_water_min: 1.2,
             establish_saturated_max: 1.0,
             stress_rate_per_s: 0.01,
             relax_rate_per_s: 0.05,
             drown_depth_m: 0.5,
             water_depth_min_m: 0.1,
             maintenance: 0.0004,
-            hop: 1,
+            // Seeds (package S): carried by **water** to a standing-water margin within a
+            // wide `hop` 6, downhill first, and **rhizomes** for 0.7 of the packages — a
+            // reed bed is mostly one clone. 10 h: a wetland seed waits for the water level
+            // to suit it.
+            hop: 6,
+            dispersal: Dispersal::Water,
+            clonal_share: 0.7,
+            seed_max_age_s: 36_000.0,
+            seed_attrition_per_s: 1.0 / 36_000.0,
             wood_max: 0.3,
             alive_min: 0.02,
             donor_min: 0.15,
@@ -1939,12 +2122,19 @@ impl SpeciesConfig {
                 return fail(&format!("{label} is {v}, not finite and nonnegative"));
             }
         }
+        // A share of the packages, so a probability.
+        if !(0.0..=1.0).contains(&self.clonal_share) {
+            return fail(&format!(
+                "clonal_share is {}, not a share in 0..=1",
+                self.clonal_share
+            ));
+        }
         // The water and aeration thresholds and the crown geometry: fractions and lengths,
         // read as bounds rather than multiplied by a stock, so only finiteness is checked.
         let bounds: [(&str, f64); 7] = [
-            ("wilt_pore", self.wilt_pore),
-            ("sat_pore", self.sat_pore),
-            ("establish_pore_min", self.establish_pore_min),
+            ("wilt_water", self.wilt_water),
+            ("full_water", self.full_water),
+            ("establish_water_min", self.establish_water_min),
             ("establish_light_min", self.establish_light_min),
             ("saturated_pore", self.saturated_pore),
             ("establish_saturated_max", self.establish_saturated_max),
@@ -1962,6 +2152,14 @@ impl SpeciesConfig {
             if !pair.iter().all(|v| v.is_finite() && *v >= 0.0) {
                 return fail(&format!("{label} is {pair:?}, not finite and nonnegative"));
             }
+        }
+        // A refuge is a share of the foliage: zero is no refuge, and one would be a plant
+        // no mouth could ever take anything from.
+        if !(self.graze_refuge >= 0.0 && self.graze_refuge < 1.0) {
+            return fail(&format!(
+                "graze_refuge is {}, not a fraction in [0, 1)",
+                self.graze_refuge
+            ));
         }
         Ok(())
     }
@@ -2074,6 +2272,14 @@ pub struct FloraConfig {
     /// eagerly on every support face at creation. [`Provision::Lazy`] by default, which is
     /// the only rule that existed before the replacement study and changes nothing.
     pub provision: Provision,
+    /// **How often a banked site is tested**, seconds (package S): germination, attrition
+    /// and age are read at each site's own check, staggered across this period, and at the
+    /// end of every shower — never in between. **30 s**, the fast end of the brief's
+    /// "~30–60 s": a gap waits at most that long for its bank, which is nothing against
+    /// hours of dormancy, and the bank costs `banked sites / 600` site visits a tick.
+    /// Rounded to whole ticks, at least one; a fixture that wants the old every-tick bank
+    /// sets it to `DT` ([`FloraConfig::drop_seeds_checked_each_tick`]).
+    pub seed_check_s: f64,
     /// The world's cell size in metres, recorded so that geometry authored in **metres** can
     /// be applied to a grid stored in **voxels**: every crown is in metres since package
     /// L, and the voxel readings ([`SpeciesConfig::crown_height`]) divide by this. Set by
@@ -2100,6 +2306,7 @@ impl Default for FloraConfig {
             litter_energy_cap: 2.0,
             initial_mineral: 1.0,
             provision: Provision::Lazy,
+            seed_check_s: 30.0,
             voxel_m: 0.25,
         }
     }
@@ -2160,6 +2367,45 @@ impl FloraConfig {
                     1.0,
                     0.0,
                 )]);
+        }
+        self
+    }
+
+    /// Every species' seeds **dropped** within its round-3b `hop` — no wind, spores, water
+    /// or runners — and every banked site tested **every tick**: the seed bank as it was
+    /// before package S, apart from whole seeds and the lifetimes.
+    ///
+    /// For a **fixture whose subject is not dispersal or the bank's clock** — an
+    /// establishment gate, a birth's stoichiometry, the lottery's weights — written when a
+    /// landing on a passing site germinated on the next tick and a spore landed where a
+    /// seed did. Not a shipped configuration; nothing in the tick uses it.
+    pub fn drop_seeds_checked_each_tick(mut self) -> FloraConfig {
+        let scale = (0.25 / self.voxel_m).max(1.0);
+        for species in Species::ALL {
+            let sc = self.species_mut(species);
+            sc.dispersal = Dispersal::Drop;
+            sc.clonal_share = 0.0;
+            if matches!(
+                species,
+                Species::Umbrellafrond | Species::Velvetpad | Species::Glowcap | Species::Siphonreed
+            ) {
+                sc.hop = scaled_voxel_distance(1, scale);
+            }
+        }
+        self.seed_check_s = DT;
+        self
+    }
+
+    /// Every species with **no grazing refuge** (`graze_refuge` 0): a stand can be
+    /// withdrawn to nothing, as before package G.
+    ///
+    /// For the frozen training arenas, whose finite patches are seeded crowns trimmed to a
+    /// fixed stock with the ordinary withdrawal and eaten down to nothing by policies
+    /// trained before the refuge existed; the retrain decides whether its arenas keep a
+    /// floor. Not a shipped configuration: the live world's plants keep theirs.
+    pub fn without_graze_refuge(mut self) -> FloraConfig {
+        for species in Species::ALL {
+            self.species_mut(species).graze_refuge = 0.0;
         }
         self
     }
@@ -2230,6 +2476,7 @@ impl FloraConfig {
             ("carrion_decomposition", self.carrion_decomposition),
             ("litter_energy_cap", self.litter_energy_cap),
             ("initial_mineral", self.initial_mineral),
+            ("seed_check_s", self.seed_check_s),
         ] {
             if !v.is_finite() || v < 0.0 {
                 return Err(format!("flora: {label} is {v}, not finite and nonnegative"));
@@ -2378,7 +2625,8 @@ pub struct FloraLedger {
     /// - `propagule_funded`: what the reserves actually paid into parcels, above each
     ///   donor's own reserve floor. `funded / requested` is how much of the advertised
     ///   reproductive effort the world can afford.
-    /// - `propagule_landed`: what left donors as whole packages and arrived in seed banks.
+    /// - `propagule_landed`: what left donors as whole packages — into a seed bank, a
+    ///   runner daughter, or (a spore or water seed that found no ground) the litter.
     ///
     /// Astra's R4.4 asked for exactly this split: "distinguish requested, funded and
     /// landed reproductive flux in the diagnosis", because raising a rate that is already
@@ -2401,6 +2649,21 @@ pub struct FloraLedger {
     /// leaves the system out of that uptake is the part the fungus does not keep, and that
     /// is `respired_out` like every other respiration.
     pub substrate_uptake: [f64; Species::COUNT],
+    /// **Seed counts per species** (package S), indexed by [`Species::index`], cumulative:
+    /// diagnostics like the `propagule_*` arrays, in no `expected_*` total.
+    ///
+    /// - `seeds_landed`: seeds that arrived in a bank.
+    /// - `seeds_germinated`: seeds that became stands — recruits from seed.
+    /// - `seeds_died`: seeds attrition killed or age sent to litter.
+    /// - `seeds_lost`: spore and water seeds that found no ground and fell as litter.
+    /// - `clonal_births`: runner and rhizome daughters — recruits without a seed.
+    ///
+    /// `establishments` is `seeds_germinated + clonal_births` summed over species.
+    pub seeds_landed: [u64; Species::COUNT],
+    pub seeds_germinated: [u64; Species::COUNT],
+    pub seeds_died: [u64; Species::COUNT],
+    pub seeds_lost: [u64; Species::COUNT],
+    pub clonal_births: [u64; Species::COUNT],
 }
 
 impl FloraLedger {
@@ -2635,6 +2898,11 @@ pub fn layers_of(config: &FloraConfig, stand: &Stand, voxel_m: f64) -> Vec<Stand
             share: if is_foliage { layer.share } else { 0.0 },
             capacity: if is_foliage { layer.share * cap } else { 0.0 },
             stock: fi.map_or(0.0, |i| stand.layer_stock[i]),
+            floor: if is_foliage {
+                sc.graze_refuge * layer.share * cap
+            } else {
+                0.0
+            },
             porosity: layer.porosity,
             area_m2: (std::f64::consts::PI * r_m * r_m).max(MIN_LAYER_AREA_M2),
         });
@@ -2759,13 +3027,16 @@ impl<'a> FloraView<'a> {
             // a low browser at an adult bloomcrown reaches its basal rosette and never
             // its crown. For a single-layer species the sum is the whole `foliage` and
             // the disc cell is `crown_voxels(wood)`, so nothing about this call moved.
+            // Since the grazing refuge the sum is of what stands above each layer's floor
+            // ([`StandLayer::edible`]), which is all a mouth can take.
             let mut reachable = 0.0;
             let mut radius = 0.0f64;
             for layer in self.layers(stand) {
-                if layer.cell > ceiling || !(layer.stock > 0.0) {
+                let edible = layer.edible();
+                if layer.cell > ceiling || !(edible > 0.0) {
                     continue;
                 }
-                reachable += layer.stock;
+                reachable += edible;
                 radius = radius.max(layer.radius_v);
             }
             if !(reachable > 0.0) {
@@ -3055,6 +3326,15 @@ pub struct Flora {
     /// This tick's [`DeliveryReceipt`]s, in the order `propagate` sent them. Cleared at the
     /// start of every tick: **observation, not state** (see [`DeliveryReceipt`]).
     deliveries: Vec<DeliveryReceipt>,
+    /// The seed bank's **check wheel** (`seeds.rs`): the banked sites, one bucket per phase
+    /// of the check period, so a tick visits only the sites due on it. Derived from
+    /// `ground` and rebuilt from it whenever it is missing, so it is not saved.
+    #[serde(skip)]
+    pub(crate) bank_wheel: Vec<Vec<Site>>,
+    /// Whether it was raining at the last seed-bank phase: the tick it stops is the
+    /// shower's end, when every bank is tested at once.
+    #[serde(default)]
+    pub(crate) was_raining: bool,
 }
 
 impl Flora {
@@ -3142,6 +3422,8 @@ impl Flora {
             sky: Vec::new(),
             sky_version: None,
             deliveries: Vec::new(),
+            bank_wheel: Vec::new(),
+            was_raining: false,
         }
     }
 
@@ -3310,7 +3592,8 @@ impl Flora {
     }
 
     /// A consumer eats the **foliage** of the stand on `site`, up to `want`: at most what
-    /// the stand's `P` holds, never its wood and never its reserve.
+    /// the stand's `P` holds above its grazing floor ([`SpeciesConfig::graze_refuge`],
+    /// [`StandLayer::edible`]), never its wood and never its reserve.
     ///
     /// The mineral leaves by the same fraction rule every other outflow uses
     /// ([`Stand::mineral`]): a transfer of a fraction of the stand's material takes that
@@ -3318,7 +3601,8 @@ impl Flora {
     /// the organic matter taken.
     ///
     /// `None`, booking nothing at all, when there is nothing to take: no stand on the site,
-    /// a stand with no foliage left, or a `want` that is not a positive finite number.
+    /// a stand with no foliage left above its floor, or a `want` that is not a positive
+    /// finite number.
     /// `Some` therefore always carries a strictly positive `organic`.
     ///
     /// Applied **between** ticks, like a [`Command`]: nothing here reads or moves the
@@ -3355,6 +3639,9 @@ impl Flora {
         self.withdraw_foliage(site, want, Some(layers))
     }
 
+    /// The one foliage withdrawal: lowest layer first, each layer giving at most its
+    /// [`StandLayer::edible`] stock, so no bite takes a layer below its grazing floor
+    /// (package G). Everything that takes foliage comes through here.
     fn withdraw_foliage(
         &mut self,
         site: Site,
@@ -3366,14 +3653,16 @@ impl Flora {
         }
         let i = self.stands.binary_search_by_key(&site, |s| s.site).ok()?;
         let e_v = self.config.species(self.stands[i].species).energy_density;
-        // Which layers the mouth may take from, lowest first, and what each holds.
+        // Which layers the mouth may take from, lowest first, and what each offers: its
+        // edible stock, above the grazing floor, and never the floor itself.
         let offered: Vec<(usize, f64)> =
             layers_of(&self.config, &self.stands[i], self.config.voxel_m)
                 .into_iter()
                 .filter_map(|l| {
                     let fi = l.foliage_index?;
                     let inside = layers.is_none_or(|range| range.contains(&l.cell));
-                    (inside && l.stock > 0.0).then_some((fi, l.stock))
+                    let edible = l.edible();
+                    (inside && edible > 0.0).then_some((fi, edible))
                 })
                 .collect();
         let mut per_layer = [0.0f64; MAX_FOLIAGE_LAYERS];
