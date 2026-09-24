@@ -32,3 +32,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 # The calibration exports its selected configuration as the TOML `cubarium run --config` reads.
 toml = "0.8"
+# Worker pinning (sched_setaffinity) and per-thread hardware counters (perf_event_open)
+# for the cache study: es::voxel::pin, es::voxel::counters.
+libc = "0.2"

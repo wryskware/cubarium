@@ -68,9 +68,11 @@ use cubarium_voxel_fauna::Founder;
 
 pub mod commands;
 pub mod controller;
+pub mod counters;
 pub mod driver;
 pub mod imitate;
 pub mod landscape;
+pub mod pin;
 pub mod remote;
 pub mod score;
 pub mod store;

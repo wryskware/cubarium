@@ -26,6 +26,9 @@ macro_rules! voxel_phase {
 }
 
 pub mod config;
+/// The machine's CPU and cache topology from sysfs: the trainer's worker pinning and the
+/// live loop's chiplet. Execution only.
+pub mod cpus;
 /// Hydraulic erosion on a heightfield. Generation only; geological time is iterations.
 pub mod erosion;
 pub mod generate;

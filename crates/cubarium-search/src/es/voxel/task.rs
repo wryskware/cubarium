@@ -255,9 +255,24 @@ pub const MAX_EPISODE_WORKERS: usize = 16;
 
 /// The available voxel episode workers: obey the machine-wide CPU reserve and the
 /// workload-specific saturation cap. Every episode itself stays single-threaded.
+///
+/// The reserve is the **machine's** (ten percent of its online CPUs, at least one); the
+/// result is then capped at the CPUs this process may use. Under
+/// `taskset -c 0-7,16-23` on the 32-thread desktop that is all sixteen of them — the
+/// other chiplet is the reserve — where reserving ten percent of the mask as well left
+/// two of the sixteen idle.
 pub fn episode_worker_limit() -> usize {
-    worker_limit_for(std::thread::available_parallelism().map_or(1, std::num::NonZero::get))
-        .min(MAX_EPISODE_WORKERS)
+    let mask = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    let machine = std::fs::read_to_string("/sys/devices/system/cpu/online")
+        .ok()
+        .and_then(|s| super::pin::parse_cpu_list(&s).ok())
+        .map_or(mask, |cpus| cpus.len());
+    worker_limit_within(machine, mask).min(MAX_EPISODE_WORKERS)
+}
+
+/// [`worker_limit_for`] the machine, capped at the process's own CPUs.
+fn worker_limit_within(machine: usize, mask: usize) -> usize {
+    worker_limit_for(machine.max(mask)).min(mask.max(1))
 }
 
 fn worker_limit_for(cpus: usize) -> usize {

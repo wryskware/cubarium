@@ -348,6 +348,16 @@ impl RemoteSpec {
         }
     }
 
+    /// Tell the remote worker the coordinator's `--pin` policy ([`super::pin::PinSpec::remote_arg`]):
+    /// `auto` reads the remote's own topology; an explicit list here is this machine's CPU
+    /// numbers, so the remote is told `auto`.
+    pub fn with_pin(mut self, pin: &super::pin::PinSpec) -> RemoteSpec {
+        if let Some(cmd) = self.argv.last_mut() {
+            cmd.push_str(&format!(" --pin {}", pin.remote_arg()));
+        }
+        self
+    }
+
     /// `--remote host:threads`.
     pub fn parse(arg: &str, bin: &str) -> Result<RemoteSpec, String> {
         let (host, threads) = arg
@@ -924,10 +934,11 @@ pub fn serve(options: WorkerOptions) -> Result<(), String> {
     let centre: Arc<Mutex<Option<Arc<Centre>>>> = Arc::new(Mutex::new(None));
     let (tx, rx) = mpsc::channel::<UnitJob>();
     let rx = Arc::new(Mutex::new(rx));
-    for _ in 0..threads {
+    for w in 0..threads {
         let (outbox, fixtures, centre, rx) =
             (outbox.clone(), fixtures.clone(), centre.clone(), rx.clone());
         std::thread::spawn(move || {
+            super::pin::pin_worker(w);
             let never = AtomicBool::new(false);
             loop {
                 let Ok(job) = rx.lock().expect("jobs").recv() else {

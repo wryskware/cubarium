@@ -675,6 +675,21 @@ enum Command {
         episodes: usize,
         #[arg(long, default_value_t = cubarium_search::es::voxel::task::episode_worker_limit())]
         workers: usize,
+        /// Worker pinning: `auto` (physical cores first, the largest L3 first, within the
+        /// affinity mask), `off`, or a CPU list in order (`0-7,16-23`); worker i takes one.
+        #[arg(long, default_value = cubarium_search::es::voxel::pin::DEFAULT_PIN)]
+        pin: String,
+        /// The cache study's arms instead of the per-pool table: `workers:pin` separated
+        /// by `;` (`16:off;16:0-7,16-23;8:0-7`), each run `--repeats` times, interleaved,
+        /// over P5-C's training pool. `--ticks 0` runs the lineage's horizon.
+        #[arg(long)]
+        arms: Option<String>,
+        #[arg(long, default_value_t = 3)]
+        repeats: usize,
+        /// With `--arms`: the CPUs the founding runs on (a CPU list); the arms still place
+        /// their workers within the process's own mask.
+        #[arg(long)]
+        setup_pin: Option<String>,
     },
     /// Phase-three voxel slice (P3-C): record the fauna's own foraging heuristic on the
     /// training layouts as `(observation, adapted action)` streams — the teacher an
@@ -823,6 +838,10 @@ enum Command {
         /// founding its own before starting without it (it joins later when ready).
         #[arg(long, default_value_t = 900)]
         remote_wait: u64,
+        /// Worker pinning: `auto` (physical cores first, the largest L3 first, within the
+        /// affinity mask), `off`, or a CPU list in order (`0-7,16-23`); worker i takes one.
+        #[arg(long, default_value = cubarium_search::es::voxel::pin::DEFAULT_PIN)]
+        pin: String,
     },
     /// Package S: a remote episode worker. Speaks `voxel-train --remote`'s protocol on
     /// stdin and stdout — started by it over ssh, never by hand.
@@ -839,6 +858,11 @@ enum Command {
         /// Test hook: go silent, pipe open, after sending this many results.
         #[arg(long, hide = true)]
         hang_after: Option<u64>,
+        /// Worker pinning: `auto` (physical cores first, the largest L3 first, within the
+        /// affinity mask), `off`, or a CPU list in order (`0-7,16-23`); worker i takes one.
+        /// `voxel-train --remote` passes its own policy.
+        #[arg(long, default_value = "off")]
+        pin: String,
     },
     /// P5-C S1: a shredder landscape episode's cost with the plant leg off and on.
     VoxelFloraCost {
@@ -876,6 +900,10 @@ enum Command {
         /// Also print one row per fixture per arm.
         #[arg(long, default_value_t = false)]
         per_fixture: bool,
+        /// Worker pinning: `auto` (physical cores first, the largest L3 first, within the
+        /// affinity mask), `off`, or a CPU list in order (`0-7,16-23`); worker i takes one.
+        #[arg(long, default_value = cubarium_search::es::voxel::pin::DEFAULT_PIN)]
+        pin: String,
     },
     /// Voxel sensing evaluation: one saved policy or a disclosed control over the
     /// training, held-out, or balanced blind-offset diagnostic set.
@@ -1213,7 +1241,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ticks,
             episodes,
             workers,
-        } => es::voxel::commands::landscapes(founder, presets, held_out, ticks, episodes, workers),
+            pin,
+            arms,
+            repeats,
+            setup_pin,
+        } => match arms {
+            Some(arms) => es::voxel::commands::landscape_arms(
+                founder, ticks, episodes, arms, repeats, setup_pin, workers,
+            ),
+            None => set_pin(&pin).and_then(|_| {
+                es::voxel::commands::landscapes(
+                    founder, presets, held_out, ticks, episodes, workers,
+                )
+            }),
+        },
         Command::VoxelImitate {
             founder,
             stages,
@@ -1263,7 +1304,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             controls,
             workers,
             per_fixture,
-        } => es::voxel::commands::holdout(founder, policy, controls, workers, per_fixture),
+            pin,
+        } => set_pin(&pin).and_then(|_| {
+            es::voxel::commands::holdout(founder, policy, controls, workers, per_fixture)
+        }),
         Command::VoxelTrain {
             founder,
             stage,
@@ -1289,10 +1333,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             remotes,
             remote_bin,
             remote_wait,
+            pin,
         } => {
             if overwrite {
                 let _ = std::fs::remove_dir_all(&out);
             }
+            let pin = set_pin(&pin)?;
             es::voxel::commands::train(es::voxel::commands::TrainArgs {
                 founder,
                 stage,
@@ -1317,6 +1363,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 remotes,
                 remote_bin,
                 remote_wait,
+                pin,
             })
         }
         Command::VoxelEvalWorker {
@@ -1324,13 +1371,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             heartbeat_ms,
             die_after,
             hang_after,
-        } => es::voxel::remote::serve(es::voxel::remote::WorkerOptions {
-            threads,
-            heartbeat: std::time::Duration::from_millis(heartbeat_ms.max(1)),
-            die_after,
-            hang_after,
-        })
-        .map_err(Into::into),
+            pin,
+        } => set_pin(&pin).and_then(|_| {
+            es::voxel::remote::serve(es::voxel::remote::WorkerOptions {
+                threads,
+                heartbeat: std::time::Duration::from_millis(heartbeat_ms.max(1)),
+                die_after,
+                hang_after,
+            })
+            .map_err(Into::into)
+        }),
         Command::VoxelEvaluate {
             policy,
             founder,
@@ -1585,6 +1635,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
     }
+}
+
+/// Set the process's episode-worker pinning from `--pin` (`es::voxel::pin`).
+fn set_pin(pin: &str) -> Result<es::voxel::pin::PinSpec, Box<dyn std::error::Error>> {
+    let spec = es::voxel::pin::PinSpec::parse(pin)?;
+    es::voxel::pin::set_process(&spec)?;
+    Ok(spec)
 }
 
 fn print_params() -> Result<(), Box<dyn std::error::Error>> {

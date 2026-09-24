@@ -398,6 +398,25 @@ impl Unit {
     }
 }
 
+/// The order a generation's units are queued in: **longest first** (a landscape's
+/// horizon before an arena's) so the generation's tail is short, and within one length
+/// **fixture-major** — every pair on one fixture, then the next fixture — so the workers
+/// running at once read one frozen world, and it stays in the chiplet's L3 while they
+/// clone it (cache study C, `design/handoffs/voxel-cache-and-pinning-2026-09-24.md`:
+/// L3 misses about −60 %, a generation about 1 % shorter). A unit is both signs of one
+/// pair, so pairs stay whole whatever the order; every result still lands at its fixed
+/// slot, so the reduction cannot see it.
+fn dispatch_order(units: &[Unit], horizon_of: impl Fn(usize) -> u64) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..units.len()).collect();
+    order.sort_by_key(|&u| {
+        (
+            std::cmp::Reverse(horizon_of(units[u].layout) * units[u].candidates().len() as u64),
+            units[u].layout,
+        )
+    });
+    order
+}
+
 /// The generation's shared board: who may take which unit, and the results.
 struct Board {
     /// Units anyone may take, longest first.
@@ -506,10 +525,7 @@ pub fn run_generation(
                 .map(|layout| Unit { pair: None, layout }),
         )
         .collect();
-    let mut order: Vec<usize> = (0..units.len()).collect();
-    order.sort_by_key(|&u| {
-        std::cmp::Reverse(horizon_of(units[u].layout) * units[u].candidates().len() as u64)
-    });
+    let order = dispatch_order(&units, horizon_of);
 
     let remotes: Vec<&super::remote::Remote> = plan
         .remote
@@ -747,8 +763,14 @@ pub fn run_generation(
                 }
             });
         }
-        for _ in 0..workers {
-            scope.spawn(|| {
+        for w in 0..workers {
+            let (board, wakeup, attempted, completed, ticks, failure, fill) = (
+                &board, &wakeup, &attempted, &completed, &ticks, &failure, &fill,
+            );
+            let (units, names, drivers) = (&units, &names, &drivers);
+            scope.spawn(move || {
+                super::pin::pin_worker(w);
+                let mut probe = super::counters::Probe::start();
                 loop {
                     let unit = {
                         let mut b = board.lock().expect("board");
@@ -775,6 +797,7 @@ pub fn run_generation(
                     let mut episodes = Vec::with_capacity(2);
                     for c in u.candidates() {
                         attempted.fetch_add(1, Ordering::SeqCst);
+                        let since = Instant::now();
                         let slot = slot_of(c, u.layout);
                         match driver::run_prepared_seeded(
                             &layouts[u.layout],
@@ -787,6 +810,9 @@ pub fn run_generation(
                             Ok(e) => {
                                 completed.fetch_add(1, Ordering::SeqCst);
                                 ticks.fetch_add(e.ticks, Ordering::SeqCst);
+                                if let Some(p) = probe.as_mut() {
+                                    p.episode(e.ticks, since);
+                                }
                                 episodes.push(e);
                             }
                             Err(EpisodeError::Cancelled { ticks: t }) => {
@@ -1480,6 +1506,13 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
             Limits::new(cancel),
             &format!("heldout/upd{updates}"),
         )?;
+        if super::counters::enabled() {
+            println!(
+                "{}",
+                super::counters::take()
+                    .line(&format!("heldout-upd{updates}"), t.elapsed().as_secs_f64())
+            );
+        }
         let (score, by_preset, survived) = held_out_summary(&mix.held_out, &episodes);
         let file = format!("centers/upd{updates}-heldout.json");
         write_center_policy(&run_dir, &file, cp, &cp.theta, updates, score)?;
@@ -1608,6 +1641,10 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
         // The centre a generation scores is the one it started from; the file written
         // for it holds exactly those weights, not the updated ones.
         let evaluated = cp.theta.clone();
+        if generation == 0 && super::counters::enabled() {
+            println!("{}", super::counters::Sample::HEADER);
+        }
+        let _ = super::counters::take();
         match run_generation(
             &mut cp.theta,
             &mut cp.adam,
@@ -1643,6 +1680,13 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
                     report.episodes_run,
                     report.wall_seconds,
                 );
+                if super::counters::enabled() {
+                    println!(
+                        "{}",
+                        super::counters::take()
+                            .line(&format!("gen{generation}"), report.wall_seconds)
+                    );
+                }
                 if !report.shares.is_empty() {
                     println!(
                         "        {}{}",
@@ -1755,13 +1799,17 @@ pub fn evaluate_fixtures(
     let failure: Mutex<Option<String>> = Mutex::new(None);
     let cursor = AtomicUsize::new(0);
     std::thread::scope(|scope| {
-        for _ in 0..workers.max(1).min(fixtures.len().max(1)) {
-            scope.spawn(|| {
+        for w in 0..workers.max(1).min(fixtures.len().max(1)) {
+            let (slots, failure, cursor) = (&slots, &failure, &cursor);
+            scope.spawn(move || {
+                super::pin::pin_worker(w);
+                let mut probe = super::counters::Probe::start();
                 loop {
                     let i = cursor.fetch_add(1, Ordering::SeqCst);
                     let Some(fixture) = fixtures.get(i) else {
                         return;
                     };
+                    let since = Instant::now();
                     if failure.lock().expect("failure").is_some() {
                         return;
                     }
@@ -1772,7 +1820,12 @@ pub fn evaluate_fixtures(
                         limits,
                         &format!("{tag}/{}", fixture.label()),
                     ) {
-                        Ok(e) => slots.lock().expect("slots")[i] = Some(e),
+                        Ok(e) => {
+                            if let Some(p) = probe.as_mut() {
+                                p.episode(e.ticks, since);
+                            }
+                            slots.lock().expect("slots")[i] = Some(e)
+                        }
                         Err(e) => {
                             *failure.lock().expect("failure") =
                                 Some(format!("{tag}/{}: {e}", fixture.label()));

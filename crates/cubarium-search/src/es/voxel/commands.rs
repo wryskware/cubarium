@@ -347,6 +347,8 @@ pub struct TrainArgs {
     pub remotes: Vec<String>,
     pub remote_bin: String,
     pub remote_wait: u64,
+    /// The process's `--pin` ([`super::pin`]); the remotes are told its policy.
+    pub pin: super::pin::PinSpec,
 }
 
 /// `voxel-train`: the bounded ES run. Requires founder, controller, seed, episode limit,
@@ -377,6 +379,7 @@ pub fn train(args: TrainArgs) -> Result<(), Boxed> {
         remotes,
         remote_bin,
         remote_wait,
+        pin,
     } = args;
     let controller = controller.trim().to_ascii_lowercase();
     if controller != "gru" {
@@ -390,6 +393,11 @@ pub fn train(args: TrainArgs) -> Result<(), Boxed> {
     let founder = parse_founder(&founder)?;
     let stage = task::parse_stage(&stage)?;
     let band = task::parse_band(&band)?;
+    // Before the minutes of founding, not after them.
+    let worker_limit = task::episode_worker_limit();
+    if workers == 0 || workers > worker_limit {
+        return Err(format!("--workers must be in 1..={worker_limit}").into());
+    }
     let horizon = horizon.unwrap_or_else(|| stage.horizon());
     let init_center = match (init_center, transfer_from) {
         (Some(_), Some(_)) => {
@@ -422,7 +430,7 @@ pub fn train(args: TrainArgs) -> Result<(), Boxed> {
     } else {
         let specs = remotes
             .iter()
-            .map(|r| RemoteSpec::parse(r, &remote_bin))
+            .map(|r| RemoteSpec::parse(r, &remote_bin).map(|s| s.with_pin(&pin)))
             .collect::<Result<Vec<_>, _>>()?;
         let fixtures = FixtureSpec {
             founder: founder.name().into(),
@@ -1275,7 +1283,10 @@ pub fn landscapes(
     use super::landscape::{self, LandscapeSet};
 
     let founder = parse_founder(&founder)?;
-    let worker_limit = task::episode_worker_limit();
+    // A bench, not a training run: up to every CPU the process may use, so the cache
+    // study's arms (16 workers on one chiplet's 16 threads, 32 on the whole machine, 12 on
+    // eidolon) can run. Training keeps [`task::episode_worker_limit`].
+    let worker_limit = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
     if workers == 0 || workers > worker_limit {
         return Err(format!("--workers must be in 1..={worker_limit}").into());
     }
@@ -1384,6 +1395,7 @@ pub fn landscapes(
         "throughput,pool,bodies_acting,ticks_per_s_1_worker,ticks_per_s_per_worker_at_{workers},\
          aggregate_ticks_per_s_at_{workers},horizon_s_1_worker"
     );
+    let mut counter_lines: Vec<String> = Vec::new();
     for (name, pool) in &pools {
         let run_one = |i: usize| -> Result<(u64, usize), Boxed> {
             let p = &pool[i % pool.len()];
@@ -1410,22 +1422,34 @@ pub fn landscapes(
         let jobs = episodes.max(1) * workers;
         let cursor = AtomicUsize::new(0);
         let total = AtomicU64::new(0);
+        let _ = super::counters::take();
         let t = Instant::now();
         std::thread::scope(|scope| {
-            for _ in 0..workers {
-                scope.spawn(|| {
+            for w in 0..workers {
+                let (cursor, total, run_one) = (&cursor, &total, &run_one);
+                scope.spawn(move || {
+                    super::pin::pin_worker(w);
+                    let mut probe = super::counters::Probe::start();
                     loop {
                         let i = cursor.fetch_add(1, Ordering::SeqCst);
                         if i >= jobs {
                             return;
                         }
+                        let since = Instant::now();
                         let (ticks_run, _) = run_one(i).expect("a measured episode completes");
+                        if let Some(p) = probe.as_mut() {
+                            p.episode(ticks_run, since);
+                        }
                         total.fetch_add(ticks_run, Ordering::SeqCst);
                     }
                 });
             }
         });
-        let aggregate = total.load(Ordering::SeqCst) as f64 / t.elapsed().as_secs_f64();
+        let wall = t.elapsed().as_secs_f64();
+        if super::counters::enabled() {
+            counter_lines.push(super::counters::take().line(name, wall));
+        }
+        let aggregate = total.load(Ordering::SeqCst) as f64 / wall;
         let horizon = pool[0].horizon().unwrap_or(Stage::A.horizon());
         println!(
             "throughput,{name},{:.1},{single:.0},{:.0},{aggregate:.0},{:.2}",
@@ -1433,6 +1457,212 @@ pub fn landscapes(
             aggregate / workers as f64,
             horizon as f64 / single,
         );
+    }
+    if !counter_lines.is_empty() {
+        println!();
+        println!("{}", super::counters::Sample::HEADER);
+        for l in &counter_lines {
+            println!("{l}");
+        }
+    }
+    Ok(())
+}
+
+/// The cache study's arms (`voxel-landscapes --arms`): found P5-C's training landscape
+/// pool once (with the shredder's recorded production), then run each arm — a worker
+/// count and a placement — `repeats` times, interleaved so a busy moment on the shared
+/// machine does not land on one arm. Each run is `episodes` episodes per worker drawn
+/// from one generation's sixteen landscapes, spread the way a generation spreads them
+/// (consecutive jobs on different fixtures). One CSV row per run: the counters, then
+/// the busy share of each L3 group (every process's, not only this one's) and the
+/// 1-minute load average.
+///
+/// `setup_pin` restricts the founding threads (a full-machine arm still founds on the
+/// chiplet the agent may use); the arms place their workers within the process's
+/// original mask.
+#[allow(clippy::too_many_arguments)]
+pub fn landscape_arms(
+    founder: String,
+    ticks: u64,
+    episodes: usize,
+    arms: String,
+    repeats: usize,
+    setup_pin: Option<String>,
+    setup_workers: usize,
+) -> Result<(), Boxed> {
+    use super::pin::{self, PinSpec, Pinning};
+    let founder = parse_founder(&founder)?;
+    let mask = pin::own_affinity()?;
+    let root = Path::new("/sys/devices/system/cpu");
+    // `workers:pin[:order]`; order `spread` (consecutive jobs on different fixtures, as a
+    // generation's pair-major units run) or `affine` (runs of jobs on one fixture).
+    let arms: Vec<(usize, PinSpec, Option<Pinning>, bool)> = arms
+        .split(';')
+        .map(str::trim)
+        .filter(|a| !a.is_empty())
+        .map(|a| -> Result<_, Boxed> {
+            let mut f = a.split(':');
+            let (Some(w), Some(p)) = (f.next(), f.next()) else {
+                return Err(format!("an arm is `workers:pin[:order]`, not `{a}`").into());
+            };
+            let affine = match f.next().map(str::trim) {
+                None | Some("spread") => false,
+                Some("affine") => true,
+                Some(o) => return Err(format!("order `{o}` is spread or affine").into()),
+            };
+            let w: usize = w
+                .trim()
+                .parse()
+                .map_err(|_| format!("`{w}` is not a count"))?;
+            let spec = PinSpec::parse(p)?;
+            let pinning = Pinning::resolve(&spec, root, &mask)?;
+            Ok((w, spec, pinning, affine))
+        })
+        .collect::<Result<_, _>>()?;
+    if arms.is_empty() {
+        return Err("--arms names no arm".into());
+    }
+    if let Some(list) = &setup_pin {
+        pin::set_affinity(&pin::parse_cpu_list(list)?)?;
+    }
+    let t = Instant::now();
+    // P5-C's pool without the shredder's recorded production: recording it is one live
+    // 24,000-tick run per fixture (minutes each), and the replay it feeds is a deposit
+    // every hundred ticks — not the per-tick loop this measures.
+    let pool: Vec<task::Prepared> = {
+        let sets = super::landscape::LandscapeSet::training();
+        let lands = super::landscape::found_landscapes(&sets, setup_workers)?;
+        super::landscape::prepare_sets(&lands, &sets, founder)
+            .into_iter()
+            .map(task::Prepared::from)
+            .collect()
+    };
+    pin::set_affinity(&mask)?;
+    let draw: Vec<usize> =
+        super::landscape::generation_draw(task::TRAINING_SEED, 0, pool.len(), 16);
+    let ticks = if ticks == 0 {
+        super::landscape::lineage_horizon(founder)
+    } else {
+        ticks
+    };
+    // The L3 groups of the whole machine, for the load columns.
+    let all: Vec<usize> = (0..std::thread::available_parallelism().map_or(1, |n| n.get()))
+        .chain(mask.iter().copied())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let online = std::fs::read_to_string("/sys/devices/system/cpu/online")
+        .ok()
+        .and_then(|s| pin::parse_cpu_list(&s).ok())
+        .unwrap_or(all);
+    let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
+    for c in pin::read_topology(root, &online) {
+        match groups.iter_mut().find(|(g, _)| *g == c.l3_group) {
+            Some((_, v)) => v.push(c.cpu),
+            None => groups.push((c.l3_group, vec![c.cpu])),
+        }
+    }
+    println!(
+        "# cache arms — {} ({}), {} pool fixtures founded in {:.1} s, draw {:?}, {ticks} \
+         ticks, {episodes} episodes per worker, mask {}, build {BUILD_ID}",
+        founder.name(),
+        founder.role(),
+        pool.len(),
+        t.elapsed().as_secs_f64(),
+        draw,
+        pin::format_cpu_list(&mask),
+    );
+    let theta = if founder == Founder::Blind {
+        crate::es::tensor::initial_center_shape::<23, 3>(task::TRAINING_SEED)
+    } else {
+        crate::es::tensor::initial_center_shape::<37, 3>(task::TRAINING_SEED)
+    };
+    let gru = EpisodeDriver::gru(&theta, founder)?;
+    let cancel = AtomicBool::new(false);
+    let limits = super::driver::Limits::new(&cancel);
+    println!(
+        "{},arm,pin,repeat,{},load1,user_s,sys_s,minor_faults",
+        super::counters::Sample::HEADER,
+        groups
+            .iter()
+            .map(|(_, v)| format!("busy_l3_{}", pin::format_cpu_list(v).replace(',', "+")))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    for repeat in 0..repeats.max(1) {
+        for (a, (workers, spec, pinning, affine)) in arms.iter().enumerate() {
+            let jobs = episodes.max(1) * workers;
+            let affine = *affine;
+            let cursor = AtomicUsize::new(0);
+            let _ = super::counters::take();
+            let before = super::counters::cpu_times();
+            let proc0 = super::counters::process_times();
+            let t = Instant::now();
+            std::thread::scope(|scope| {
+                for w in 0..*workers {
+                    let (cursor, pool, draw, gru, mask) = (&cursor, &pool, &draw, &gru, &mask);
+                    let pinning = pinning.as_ref();
+                    scope.spawn(move || {
+                        pin::place_worker(pinning, w, mask);
+                        let mut probe = super::counters::Probe::start();
+                        loop {
+                            let i = cursor.fetch_add(1, Ordering::SeqCst);
+                            if i >= jobs {
+                                return;
+                            }
+                            let since = Instant::now();
+                            // The same (fixture, k-th episode on it) set either way,
+                            // so the two orders run the same episodes.
+                            let (f, k) = if affine {
+                                let per = jobs.div_ceil(draw.len());
+                                (i / per, i % per)
+                            } else {
+                                (i % draw.len(), i / draw.len())
+                            };
+                            let e = driver::run_prepared_seeded(
+                                &pool[draw[f]],
+                                gru,
+                                ticks,
+                                limits,
+                                &format!("arm/{i}"),
+                                k as u64,
+                            )
+                            .expect("a measured episode completes");
+                            if let Some(p) = probe.as_mut() {
+                                p.episode(e.ticks, since);
+                            }
+                        }
+                    });
+                }
+            });
+            let wall = t.elapsed().as_secs_f64();
+            let after = super::counters::cpu_times();
+            let proc1 = super::counters::process_times();
+            let load1 = std::fs::read_to_string("/proc/loadavg")
+                .ok()
+                .and_then(|l| l.split_whitespace().next().map(str::to_string))
+                .unwrap_or_default();
+            println!(
+                "{},{a},{},{repeat},{},{load1},{:.2},{:.2},{}",
+                super::counters::take().line(
+                    &format!("{workers}w-{}", if affine { "affine" } else { "spread" }),
+                    wall
+                ),
+                match spec {
+                    PinSpec::List(l) => pin::format_cpu_list(l).replace(',', "+"),
+                    PinSpec::Auto => "auto".into(),
+                    PinSpec::Off => "off".into(),
+                },
+                groups
+                    .iter()
+                    .map(|(_, v)| format!("{:.2}", super::counters::busy_share(&before, &after, v)))
+                    .collect::<Vec<_>>()
+                    .join(","),
+                proc1.0 - proc0.0,
+                proc1.1 - proc0.1,
+                proc1.2 - proc0.2,
+            );
+        }
     }
     Ok(())
 }

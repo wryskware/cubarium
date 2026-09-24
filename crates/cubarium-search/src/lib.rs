@@ -33,7 +33,10 @@
 //!   crate's build stamp and worker pattern and nothing else; every M1 command above is
 //!   untouched by it.
 
-#![forbid(unsafe_code)]
+// `deny`, not `forbid`: the voxel trainer's worker pinning and hardware counters
+// (`es::voxel::pin`, `es::voxel::counters`) make audited scheduler and perf syscalls on
+// the calling thread, each under its own `allow`.
+#![deny(unsafe_code)]
 
 pub mod apex_audit;
 pub mod calibrate;

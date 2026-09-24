@@ -628,6 +628,7 @@ dependencies = [
  "cubarium-voxel-fauna",
  "cubarium-voxel-flora",
  "cubarium-voxel-sim",
+ "libc",
  "rustc-hash",
  "serde",
  "serde_json",
