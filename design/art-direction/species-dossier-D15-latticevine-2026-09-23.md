@@ -6,6 +6,10 @@ decision_refs: []
 
 # D15 · Latticevine (*Reticulum rupis*, "latticevine")
 
+> **Colour note (2026-09-24):** the hexes in this document are superseded by
+> `design/art-direction/species-colours-2026-09-24.md`. Parts, counts, shapes and
+> states here still bind.
+
 A new plant for Wrysk's species session (request 2026-09-23): an ivy-like colonist of
 rock faces that gives flying and climbing animals somewhere to live and feeds them in
 turn. Same ground rules, palette, unit (1 voxel = 0.125 m = 6 logical px) and plant axes
