@@ -166,6 +166,14 @@ impl Causes {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // `threads=N`: this run's share of the machine. The gate runs many of these side by
+    // side; without it each takes every core (`cubarium_voxel::set_thread_override`).
+    if let Some(n) = args
+        .iter()
+        .find_map(|a| a.strip_prefix("threads=").and_then(|s| s.parse().ok()))
+    {
+        cubarium_voxel::set_thread_override(n);
+    }
     let wet = args.iter().any(|a| a == "--wet");
     let hours: f64 = args
         .iter()

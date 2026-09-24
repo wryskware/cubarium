@@ -106,7 +106,9 @@ pub struct FaunaLayer(pub Fauna);
 #[derive(Resource, Clone, Copy, Debug)]
 pub struct SimConfig {
     /// Worker threads for the in-phase splits. `1` runs every phase serially and never
-    /// touches the pool at all; the default is [`std::thread::available_parallelism`].
+    /// touches the pool at all; the default is [`cubarium_voxel::thread_override`] when a
+    /// tool pinned one (`threads=`, `CUBARIUM_THREADS`), else
+    /// [`std::thread::available_parallelism`].
     ///
     /// **Placeholder** (`design/backlog.md` §1): nothing measured a best value, and the
     /// bench addendum in `design/7_Research/voxel-tick-profile-2026-09-18.md` is the only
@@ -117,7 +119,9 @@ pub struct SimConfig {
 impl Default for SimConfig {
     fn default() -> SimConfig {
         SimConfig {
-            threads: std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
+            threads: cubarium_voxel::thread_override().unwrap_or_else(|| {
+                std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
+            }),
         }
     }
 }

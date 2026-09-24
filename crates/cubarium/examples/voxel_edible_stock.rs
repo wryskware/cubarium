@@ -70,6 +70,14 @@ const NO_OBSERVER: u64 = u64::MAX;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // `threads=N`: this run's share of the machine. The gate runs many of these side by
+    // side; without it each takes every core (`cubarium_voxel::set_thread_override`).
+    if let Some(n) = args
+        .iter()
+        .find_map(|a| a.strip_prefix("threads=").and_then(|s| s.parse().ok()))
+    {
+        cubarium_voxel::set_thread_override(n);
+    }
     // `policy=<lineage>=<file>`: that lineage runs a saved policy instead of the
     // built-in centre (P5-C).
     let policies = policy_args(&args).expect("policy=<lineage>=<file>");

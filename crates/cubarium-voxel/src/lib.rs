@@ -68,7 +68,7 @@ pub use snapshot::SchemaMismatch;
 pub use viability::{BandResult, PoreBand, Viability, ViabilitySpec};
 pub use world::{
     Command, SETTLE_REST, SETTLE_WINDOW, STANDING_SUPPORT_FILL, Settle, VoxelView, World,
-    default_threads,
+    default_threads, set_thread_override, thread_override,
 };
 
 /// Simulation ticks per second. Matches `cubarium-core::TICK_HZ` so a frontend can

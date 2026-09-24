@@ -418,7 +418,36 @@ fn threads_for(available: usize) -> usize {
 /// `step_with(1)` is the serial run, and `cubarium-voxel-sim`'s `SimConfig::threads` is
 /// the host's knob.
 pub fn default_threads() -> usize {
-    threads_for(std::thread::available_parallelism().map_or(1, std::num::NonZero::get))
+    thread_override().unwrap_or_else(|| {
+        threads_for(std::thread::available_parallelism().map_or(1, std::num::NonZero::get))
+    })
+}
+
+/// Set by [`set_thread_override`]; `0` is unset.
+static THREAD_OVERRIDE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Pin the process's default thread count: [`default_threads`], and so [`World::step`],
+/// `Fauna::step` and `cubarium-voxel-sim`'s `SimConfig::default()`, all return `threads`
+/// from now on. `0` clears it. For a tool run many times side by side (the gate's
+/// autopsies and censuses), so each run takes its share of the machine, not all of it
+/// (`threads=` on those examples). Execution only, like every thread count here.
+pub fn set_thread_override(threads: usize) {
+    THREAD_OVERRIDE.store(threads, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The pinned thread count, if any: [`set_thread_override`]'s, else a positive
+/// `CUBARIUM_THREADS` from the environment (read once), else `None`.
+pub fn thread_override() -> Option<usize> {
+    static ENV: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
+    match THREAD_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => *ENV.get_or_init(|| {
+            std::env::var("CUBARIUM_THREADS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .filter(|&n: &usize| n > 0)
+        }),
+        n => Some(n),
+    }
 }
 
 /// The world. Stepped at [`crate::TICK_HZ`]; pure given its inputs.

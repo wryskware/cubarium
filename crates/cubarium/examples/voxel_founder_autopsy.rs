@@ -12,7 +12,8 @@
 //! `habitat::seed`, the settled live [`Senses`] field, exactly the setup
 //! `examples/voxel_census.rs` uses — steps it for the given number of simulated minutes
 //! (default 60) and writes every event the question needs. Add `half` for the founder-count
-//! comparison or `heuristic` for the disclosed control.
+//! comparison or `heuristic` for the disclosed control, and `threads=N` to run on `N`
+//! threads instead of every core (for runs side by side).
 //!
 //! **It is read-only on the model.** Nothing here changes a birth, feeding, movement or
 //! physiology rule, the seeder, or a constant.
@@ -164,6 +165,14 @@ struct Seen {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // `threads=N`: this run's share of the machine. The gate runs many of these side by
+    // side; without it each takes every core (`cubarium_voxel::set_thread_override`).
+    if let Some(n) = args
+        .iter()
+        .find_map(|a| a.strip_prefix("threads=").and_then(|s| s.parse().ok()))
+    {
+        cubarium_voxel::set_thread_override(n);
+    }
     // `policy=<lineage>=<file>`: that lineage runs a saved policy instead of the
     // built-in centre (P5-C).
     let policies = policy_args(&args).expect("policy=<lineage>=<file>");
