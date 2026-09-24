@@ -167,6 +167,9 @@
 
 use std::cell::RefCell;
 
+use cubarium_rules::water::column::{self, Cells, Ground, Sets, Table};
+use cubarium_rules::water::host::{self, Exec, Water};
+
 use crate::material::REFERENCE_VOXEL_M;
 use crate::world::{MASK_ROWS, VoidRun};
 use crate::{Command, Config, DT, Material, World};
@@ -257,6 +260,7 @@ fn pore_m3(w: &World, i: usize) -> f64 {
     w.pore[i] * voxel(w) * w.material[i].pore_capacity()
 }
 
+#[cfg(test)]
 fn pore_room_m3(w: &World, i: usize) -> f64 {
     let cap = w.material[i].pore_capacity();
     if cap <= 0.0 {
@@ -349,7 +353,9 @@ fn release(w: &mut World, volume: f64) {
     w.ledger.atmosphere_in += volume;
 }
 
-/// Which store a transfer touches at one end.
+/// Which store a transfer touches at one end. The world-level transfer is the test
+/// oracles' now; the phases move water through `cubarium_rules::water::column`.
+#[cfg(test)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Store {
     Free,
@@ -358,6 +364,7 @@ enum Store {
 
 /// Move at most `vol` from one cell's store to another's, crediting the destination
 /// with what it gained and debiting the source with exactly that same volume.
+#[cfg(test)]
 fn transfer(w: &mut World, from: (usize, Store), to: (usize, Store), vol: f64) -> f64 {
     let have = match from {
         (i, Store::Free) => free_m3(w, i),
@@ -413,9 +420,9 @@ fn neighbours(c: &Config, i: usize) -> [Option<usize>; 6] {
 /// This is what rain and evaporation used to find by walking every column down from the
 /// ceiling each tick, one cache line per row (2.0 ms a tick on the board, package PA).
 /// The sky floor moves only with the terrain and is cached with the void runs; the water
-/// part is read off the wet set, so the cost is the wet cells plus one entry per column.
-/// Above the highest wet cell of the sky's run there is only dry air, which is exactly
-/// what the walk stepped over.
+/// part is read off the wet set — one word per column where the set keeps row masks, the
+/// wet cells where it keeps a list. Above the highest wet cell of the sky's run there is
+/// only dry air, which is exactly what the walk stepped over.
 fn sky_tops(w: &mut World) -> Vec<u32> {
     #[cfg(feature = "profile")]
     let _timer = crate::profile::start(crate::profile::Phase::SkyTops);
@@ -425,8 +432,23 @@ fn sky_tops(w: &mut World) -> Vec<u32> {
     w.ensure_void_runs();
     let plane = w.config.width as usize * w.config.depth as usize;
     let floor = &w.void_runs.sky_floor;
+    if let Some(masks) = w.wet.columns() {
+        // The highest wet row at or above the sky floor.
+        return masks
+            .iter()
+            .zip(floor)
+            .map(|(&m, &f)| {
+                let open = if f as usize >= MASK_ROWS { 0 } else { m >> f << f };
+                if open == 0 {
+                    u32::MAX
+                } else {
+                    127 - open.leading_zeros()
+                }
+            })
+            .collect();
+    }
     let mut top = vec![u32::MAX; plane];
-    for &i in w.wet.cells() {
+    for i in w.wet.members() {
         let y = i / plane;
         let col = i - y * plane;
         let y = y as u32;
@@ -515,14 +537,17 @@ fn open_water_cell_walk(w: &World, x: i64, z: u32) -> Option<usize> {
 /// has to rebuild them first. Every entry point that runs phases — [`step`] here and the
 /// schedule in `cubarium-voxel-sim` — calls this once before the first phase of a tick.
 pub fn begin(world: &mut World) {
-    crate::voxel_phase!(Begin, {
-        if world.wet.needs_rebuild(world.config.cells())
-            || world.damp.needs_rebuild(world.config.cells())
-            || world.drainable.needs_rebuild(world.config.cells())
-        {
-            world.rebuild_active_sets();
-        }
-    });
+    crate::voxel_phase!(Begin, { ensure_sets(world) });
+}
+
+/// Rebuild the active sets if any of them is stale: [`begin`]'s work, untimed, for a phase
+/// that may be called on its own.
+fn ensure_sets(world: &mut World) {
+    let n = world.config.cells();
+    if world.wet.needs_rebuild(n) || world.damp.needs_rebuild(n) || world.drainable.needs_rebuild(n)
+    {
+        world.rebuild_active_sets();
+    }
 }
 
 /// One tick of water, as one call. **The phase order is the rule** and it is written out
@@ -542,13 +567,13 @@ pub fn step(world: &mut World, threads: usize) {
                 // Infiltration first, and inside the substep: water standing on a permeable
                 // cell is offered to it before anything moves the water somewhere else. See
                 // the module doc on why runoff is what infiltration refuses.
-                infiltrate(world, sub_dt);
-                fall(world);
+                infiltrate(world, sub_dt, threads);
+                fall(world, threads);
                 exchange(world, threads);
             }
         });
-        drain(world);
-        water_table(world);
+        drain(world, threads);
+        water_table(world, threads);
         spring(world);
         outlet(world);
     });
@@ -753,66 +778,249 @@ fn deliver(w: &mut World) {
 /// Every void cell hands what it can to the void cell below. Purely vertical, so no
 /// horizontal direction is picked; a column compacts by one cell per substep.
 ///
-/// Iterated over a **snapshot of the wet cells taken at the start of this call**, ordered
-/// bottom-up, instead of walking every wet column through its full height. Ascending world
-/// index is bottom-up: `y` is the outer index, so every row is visited before the row above
-/// it, and within one column the lower cell is always met first. The snapshot is what keeps
-/// the rule: a cell wetted by a transfer from the cell above it is **not** in the snapshot,
-/// so it does not carry that arrival farther down in the same call, while a wet cell above
-/// still gets its own turn later and makes room. The snapshot is read back ascending through
-/// a bitmap ([`crate::sparse::CellSet::sorted_into`]) rather than sorted, and that is
-/// measured as part of the phase (`design/handoffs/voxel-sparse-fall-2026-09-18.md`).
-pub fn fall(w: &mut World) {
+/// Over a **snapshot of the wet cells taken at the start of this call**, bottom-up in each
+/// column (`cubarium_rules::water::column::fall`). The snapshot is what keeps the rule: a
+/// cell wetted by a transfer from the cell above it is **not** in the snapshot, so it does
+/// not carry that arrival farther down in the same call, while a wet cell above still gets
+/// its own turn later and makes room. Every move is inside one column, so the columns are
+/// independent and split across `threads` ([`exchange`] says how the pool is chosen); the
+/// old walk of the whole ascending wet set visited each column's rows in this same order
+/// (`design/handoffs/voxel-sparse-fall-2026-09-18.md`).
+pub fn fall(w: &mut World, threads: usize) {
     #[cfg(feature = "profile")]
     let census = crate::profile::census::before(w, crate::profile::census::Tag::Fall);
     crate::voxel_phase!(Fall, {
-        let plane = w.config.width as usize * w.config.depth as usize;
-        SCRATCH.with(|slot| {
-            let sc = &mut *slot.borrow_mut();
-            #[cfg(feature = "profile")]
-            let set = crate::profile::start(crate::profile::Phase::FallSet);
-            w.wet.sorted_into(&mut sc.bits, &mut sc.fall);
-            #[cfg(feature = "profile")]
-            drop(set);
-            #[cfg(feature = "profile")]
-            let (mut visited, mut moved) = (0u64, 0u64);
-            for &i in &sc.fall {
-                // The bottom row has nowhere to fall to; it is in the snapshot only because
-                // the snapshot is the whole wet set.
-                if i < plane || w.material[i].is_solid() {
-                    continue;
-                }
-                #[cfg(feature = "profile")]
-                {
-                    visited += 1;
-                }
-                if w.free[i] <= 0.0 {
-                    continue;
-                }
-                let below = i - plane;
-                let want = free_m3(w, i).min(free_room_m3(w, below));
-                if want > 0.0 {
-                    let _got = transfer(w, (i, Store::Free), (below, Store::Free), want);
-                    #[cfg(feature = "profile")]
-                    if _got > 0.0 {
-                        moved += 1;
-                    }
-                }
-            }
-            #[cfg(feature = "profile")]
-            {
-                crate::profile::add(crate::profile::Count::FallCells, visited);
-                crate::profile::add(crate::profile::Count::FallMoved, moved);
-            }
-        });
+        column_phase(w, threads, ColumnPhase::Fall, DT);
     });
     #[cfg(feature = "profile")]
     crate::profile::census::after(w, census);
 }
 
+// ---------------------------------------------------------------- the column phases
+
+/// Which of the phases that move water only up and down a column [`column_phase`] runs.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ColumnPhase {
+    Fall,
+    Infiltrate,
+    Drain,
+    WaterTable,
+}
+
+/// Every material, in the order of its discriminant: what [`grounds`] is indexed by.
+const MATERIALS: [Material; 4] = [
+    Material::Air,
+    Material::Bedrock,
+    Material::Rock,
+    Material::Soil,
+];
+const _: () = {
+    assert!(Material::Air as usize == 0 && Material::Bedrock as usize == 1);
+    assert!(Material::Rock as usize == 2 && Material::Soil as usize == 3);
+};
+
+/// What the column phases read about each material, with every flux over `dt`: the
+/// per-column rules' view of [`Material`] and [`pore_flux_m3`].
+fn grounds(c: &Config, dt: f64) -> [Ground; 4] {
+    MATERIALS.map(|m| Ground {
+        solid: m.is_solid(),
+        bedrock: m == Material::Bedrock,
+        capacity: m.pore_capacity(),
+        permeable: m.permeability_per_s() > 0.0,
+        field_capacity: m.field_capacity(),
+        flux: pore_flux_m3(m, c, dt),
+    })
+}
+
+/// **The serial threshold**: a world with fewer columns (`width × depth`) than this runs
+/// every water phase on the calling thread whatever `threads` says, because below it the
+/// pool's hand-off costs more than the columns it splits.
+///
+/// **Placeholder**, measured once on the desktop (7 workers on 8 cores, slices of the
+/// `small` ring after a rain pulse, 2026-09-24): at 192 columns the pool's water tick was
+/// 26 % slower than one thread's, at 384 columns 28 % faster, at 768 twice as fast. 512
+/// leaves room for the board's slower wake-ups; every preset is at least 3,072 columns.
+const SERIAL_BELOW_COLUMNS: usize = 512;
+
+/// Whether `threads` put a world `plane` columns wide on the pool.
+#[inline]
+fn pooled(plane: usize, threads: usize) -> bool {
+    cfg!(feature = "parallel") && threads > 1 && plane >= SERIAL_BELOW_COLUMNS
+}
+
+/// `f` with where the column phases run: the process's pool of `threads` workers
+/// ([`cubarium_rules::water::host::pool`]) when [`pooled`], else the calling thread.
+fn with_exec<R>(plane: usize, threads: usize, f: impl FnOnce(Exec<'_>) -> R) -> R {
+    #[cfg(feature = "parallel")]
+    if pooled(plane, threads) {
+        let pool = cubarium_rules::water::host::pool(threads);
+        return f(Exec::on(&pool));
+    }
+    let _ = (plane, threads);
+    f(Exec::serial())
+}
+
+/// A tall world's sets as the column rules keep them: member lists.
+struct ListSets<'a> {
+    wet: &'a mut crate::sparse::CellSet,
+    damp: &'a mut crate::sparse::CellSet,
+    drainable: &'a mut crate::sparse::CellSet,
+}
+
+impl Sets for ListSets<'_> {
+    fn wet(&mut self, i: usize, _: usize, member: bool) {
+        self.wet.set(i, member);
+    }
+    fn damp(&mut self, i: usize, _: usize, member: bool) {
+        self.damp.set(i, member);
+    }
+    fn drainable(&mut self, i: usize, _: usize, member: bool) {
+        self.drainable.set(i, member);
+    }
+}
+
+/// Run one column phase over the world, its flux over `dt` (the substep for
+/// infiltration, the tick for the others). Returns what the aquifer gained (drainage) or
+/// gave up (the water table), m³; the caller books it.
+///
+/// Up to [`MASK_ROWS`] rows the sets are row masks and the phase runs through
+/// `cubarium_rules::water::host` on `threads` ([`with_exec`]). Taller worlds keep member
+/// lists and run the same per-column rules serially, column by column.
+fn column_phase(w: &mut World, threads: usize, phase: ColumnPhase, dt: f64) -> f64 {
+    ensure_sets(w);
+    let grid = cubarium_rules::water::Grid {
+        width: w.config.width as usize,
+        depth: w.config.depth as usize,
+        height: w.config.height as usize,
+    };
+    let (plane, height) = (grid.plane(), grid.height);
+    let table = grounds(&w.config, dt);
+    let voxel = w.config.voxel_volume();
+    let voxel_m = w.config.voxel_m;
+    let level = w.config.aquifer_head_m(w.aquifer_m3);
+    let charged = w.aquifer_m3;
+    let World {
+        material,
+        free,
+        pore,
+        wet,
+        damp,
+        drainable,
+        ..
+    } = w;
+    let material: &[Material] = material;
+    let ground = |i: usize| table[material[i] as usize];
+
+    if height <= MASK_ROWS {
+        let (deltas, volume) = with_exec(plane, threads, |exec| {
+            let water = Water {
+                grid,
+                voxel,
+                free,
+                pore,
+                wet: wet.columns_mut().expect("a short world's sets are row masks"),
+                damp: damp.columns_mut().expect("a short world's sets are row masks"),
+                drainable: drainable
+                    .columns_mut()
+                    .expect("a short world's sets are row masks"),
+            };
+            match phase {
+                ColumnPhase::Fall => (host::fall(exec, water, &ground), 0.0),
+                ColumnPhase::Infiltrate => (host::infiltrate(exec, water, &ground), 0.0),
+                ColumnPhase::Drain => host::drain(exec, water, &ground, voxel_m, level),
+                ColumnPhase::WaterTable => host::water_table(
+                    exec,
+                    water,
+                    &ground,
+                    Table::new(level, voxel_m, height),
+                    charged,
+                ),
+            }
+        });
+        wet.adjust(deltas[0]);
+        damp.adjust(deltas[1]);
+        drainable.adjust(deltas[2]);
+        return volume;
+    }
+
+    // Taller than a row mask: member lists, serially.
+    let (free, pore): (&mut [f64], &mut [f64]) = (free, pore);
+    if phase == ColumnPhase::WaterTable {
+        // Index order, which is how the rule shares a scarce stock.
+        let t = Table::new(level, voxel_m, height);
+        let mut sets = ListSets {
+            wet,
+            damp,
+            drainable,
+        };
+        let mut c = Cells {
+            free,
+            pore,
+            sets: &mut sets,
+            voxel,
+            plane,
+        };
+        let mut taken = 0.0;
+        for y in 0..t.band {
+            if !t.submerged(y) {
+                continue;
+            }
+            for col in 0..plane {
+                let i = y * plane + col;
+                taken += column::saturate(&mut c, (i, y, ground(i)), charged - taken);
+            }
+        }
+        for y in 1..t.seep_top {
+            let (level, top_row) = (t.level(y), y + 1 == height);
+            for col in 0..plane {
+                let i = y * plane + col;
+                taken += column::seep(&mut c, i, y, level, top_row, &ground, charged - taken);
+            }
+        }
+        return taken;
+    }
+    let mut rows = Vec::new();
+    let mut gained = 0.0;
+    for col in 0..plane {
+        let snapshot: &crate::sparse::CellSet = if phase == ColumnPhase::Drain {
+            drainable
+        } else {
+            wet
+        };
+        rows.clear();
+        rows.extend((0..height).filter(|&y| snapshot.contains(y * plane + col)));
+        if rows.is_empty() {
+            continue;
+        }
+        let mut sets = ListSets {
+            wet: &mut *wet,
+            damp: &mut *damp,
+            drainable: &mut *drainable,
+        };
+        let mut c = Cells {
+            free: &mut *free,
+            pore: &mut *pore,
+            sets: &mut sets,
+            voxel,
+            plane,
+        };
+        let rows = rows.iter().copied();
+        match phase {
+            ColumnPhase::Fall => column::fall(&mut c, col, rows, &ground),
+            ColumnPhase::Infiltrate => column::infiltrate(&mut c, col, rows, &ground),
+            ColumnPhase::Drain => {
+                gained += column::drain(&mut c, col, rows, &ground, voxel_m, level);
+            }
+            ColumnPhase::WaterTable => unreachable!("walked in index order above"),
+        }
+    }
+    gained
+}
+
 /// Whether the centre of row `y` lies at or below the water table `table`, in metres
 /// above `y = 0`. The centre, not the floor: a voxel counts as part of the saturated
 /// zone once the table has reached the middle of it.
+#[cfg(test)]
 #[inline]
 fn submerged(c: &Config, y: u32, table: f64) -> bool {
     (y as f64 + 0.5) * c.voxel_m <= table
@@ -844,99 +1052,30 @@ fn submerged(c: &Config, y: u32, table: f64) -> bool {
 ///
 /// The named spring is untouched and still one cell with its own conductance: it is the
 /// world's one *feature*, while this is the ambient boundary the whole world sits on.
-pub fn water_table(w: &mut World) {
+pub fn water_table(w: &mut World, threads: usize) {
     // Measurement only; an early return skips `after` before anything has moved.
     #[cfg(feature = "profile")]
     let census = crate::profile::census::before(w, crate::profile::census::Tag::WaterTable);
     crate::voxel_phase!(WaterTable, {
-        let c = w.config.clone();
-        let table = c.aquifer_head_m(w.aquifer_m3);
+        let table = w.config.aquifer_head_m(w.aquifer_m3);
         if !(table > 0.0) {
             return;
         }
         // The saturated **band** and not the grid: `submerged` is monotone in `y`, so every
-        // row above the table's own row can be skipped without looking at it at all
-        // (`design/7_Research/voxel-tick-profile-2026-09-18.md`). Same rows, same rule.
-        let band = {
-            let rows = (table / c.voxel_m - 0.5).floor() + 1.0;
-            if rows <= 0.0 {
-                0
-            } else {
-                (rows as u32).min(c.height)
-            }
-        };
+        // row above the table's own row is skipped without looking at it at all
+        // (`design/7_Research/voxel-tick-profile-2026-09-18.md`); `column::Table` holds the
+        // band. What the aquifer gives up is accumulated and debited once: subtracting a
+        // microlitre from a store of tens of cubic metres forty thousand times a tick is
+        // forty thousand roundings against the store's own ulp; one subtraction is one.
         #[cfg(feature = "profile")]
         crate::profile::add(
             crate::profile::Count::WaterTableCells,
-            u64::from(c.depth) * u64::from(c.width) * u64::from(band),
+            u64::from(w.config.depth)
+                * u64::from(w.config.width)
+                * Table::new(table, w.config.voxel_m, w.config.height as usize).band as u64,
         );
-        // What the aquifer gives up this step, accumulated and debited once. Subtracting a
-        // microlitre from a store of tens of cubic metres forty thousand times a tick is
-        // forty thousand roundings against the store's own ulp; one subtraction is one.
-        let mut taken = 0.0;
         let charged = w.aquifer_m3;
-
-        for y in 0..band {
-            if !submerged(&c, y, table) {
-                continue;
-            }
-            for z in 0..c.depth {
-                for x in 0..c.width as i64 {
-                    let i = c.index(x, y, z);
-                    let m = w.material[i];
-                    if m.pore_capacity() <= 0.0 || m.permeability_per_s() <= 0.0 {
-                        continue;
-                    }
-                    let rate = pore_flux_m3(m, &c, DT);
-                    let want = rate.min(pore_room_m3(w, i)).min((charged - taken).max(0.0));
-                    if want <= 0.0 {
-                        continue;
-                    }
-                    taken += add_pore(w, i, want);
-                }
-            }
-        }
-
-        for y in 1..c.height {
-            // Above the table there is nothing to seep into.
-            if (y as f64) * c.voxel_m >= table {
-                break;
-            }
-            let level = ((table - y as f64 * c.voxel_m) / c.voxel_m).clamp(0.0, 1.0);
-            for z in 0..c.depth {
-                for x in 0..c.width as i64 {
-                    let i = c.index(x, y, z);
-                    if w.material[i].is_solid() || w.free[i] >= level {
-                        continue;
-                    }
-                    // Only a **surface** seeps: a cell with water standing over it is under
-                    // that water's own pressure, and a shortfall there is the solver moving
-                    // it along, gone by the next substep. Topping those up from the aquifer
-                    // pumped it into any lake the table stood over, tick after tick.
-                    let above = i + (c.width as usize * c.depth as usize);
-                    if y + 1 < c.height && !w.material[above].is_solid() && w.free[above] > 1e-9 {
-                        continue;
-                    }
-                    let below = c.index(x, y - 1, z);
-                    let m = w.material[below];
-                    if m.pore_capacity() <= 0.0 || m.permeability_per_s() <= 0.0 {
-                        continue;
-                    }
-                    // Only saturated ground seeps: unsaturated soil takes the water itself.
-                    if w.pore[below] < 1.0 - 1e-9 {
-                        continue;
-                    }
-                    let rate = pore_flux_m3(m, &c, DT);
-                    let room = (level - w.free[i]) * c.voxel_volume();
-                    let want = rate.min(room).min((charged - taken).max(0.0));
-                    if want <= 0.0 {
-                        continue;
-                    }
-                    taken += add_free(w, i, want);
-                }
-            }
-        }
-
+        let taken = column_phase(w, threads, ColumnPhase::WaterTable, DT);
         w.aquifer_m3 = (charged - taken).max(0.0);
     });
     #[cfg(feature = "profile")]
@@ -995,10 +1134,6 @@ struct Scratch {
     /// The bitmap [`crate::sparse::CellSet::sorted_into`] sorts through; all zero between
     /// calls.
     bits: Vec<u64>,
-    /// The wet cells at the start of a [`fall`] call, ascending, reused across substeps and
-    /// ticks so the phase allocates nothing. `fall` and `exchange` never overlap, so they
-    /// share this one scratch.
-    fall: Vec<usize>,
     /// The **full** cells of the active set, as positions in `active`: the submerged ones,
     /// which are the only cells that carry another column's head.
     full: Vec<u32>,
@@ -1159,8 +1294,9 @@ fn rows_of(cells: &[usize], plane: usize, rows: &mut Vec<u32>) {
 /// proposal into one cell is scaled by the same factor when they overfill it together).
 /// Both ends of every proposal are read from the **old** water and the whole of it is
 /// applied at the end, so no cell's result depends on the order the set was walked in
-/// beyond the rounding of the per-cell sums; the set is walked in ascending index order,
-/// which is the world's memory order.
+/// beyond the rounding of the per-cell sums; the rule walks column by column
+/// (`cubarium_rules::water`), and on a pool a cell's incoming proposals are summed in
+/// whatever order the workers deliver them.
 ///
 /// **What this is not.** There is no momentum, no velocity field and no free surface: a
 /// lake no longer levels in one substep, it relaxes at half of its head difference per
@@ -1187,7 +1323,7 @@ fn exchange_inner(w: &mut World, threads: usize) {
         return;
     }
     #[cfg(feature = "parallel")]
-    if threads > 1 {
+    if pooled(w.config.width as usize * w.config.depth as usize, threads) {
         PARALLEL.with(|slot| {
             let mut slot = slot.borrow_mut();
             if slot.as_ref().is_none_or(|p| p.threads() != threads) {
@@ -1226,8 +1362,6 @@ thread_local! {
     /// on the shared pool of the thread count it was last asked for.
     #[cfg(feature = "parallel")]
     static PARALLEL: RefCell<Option<Parallel>> = const { RefCell::new(None) };
-    /// The wet set's flips an exchange reports, reused.
-    static FLIPS: RefCell<Vec<(usize, bool)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// **The exchange through `cubarium_rules::water`** (from the single-source trial,
@@ -1240,6 +1374,7 @@ thread_local! {
 /// restructured per column: see `cubarium_rules::water`. It agrees with that path to
 /// rounding, not to the bit.
 pub fn exchange_with(w: &mut World, backend: &mut dyn ExchangeBackend) {
+    ensure_sets(w);
     if w.wet.len() == 0 {
         return;
     }
@@ -1252,9 +1387,7 @@ pub fn exchange_with(w: &mut World, backend: &mut dyn ExchangeBackend) {
         height <= MASK_ROWS,
         "the per-column exchange covers worlds up to {MASK_ROWS} rows, not {height}"
     );
-    if w.wet.columns().len() != width * depth {
-        w.rebuild_active_sets();
-    }
+    debug_assert_eq!(w.wet.columns().map_or(0, <[u128]>::len), width * depth);
     w.ensure_void_runs();
     let grid = cubarium_rules::water::Grid {
         width,
@@ -1267,21 +1400,9 @@ pub fn exchange_with(w: &mut World, backend: &mut dyn ExchangeBackend) {
     };
     #[cfg(feature = "profile")]
     census_substep(w);
-    FLIPS.with(|slot| {
-        let flips = &mut *slot.borrow_mut();
-        flips.clear();
-        backend.exchange(
-            grid,
-            &mut w.free,
-            &w.void_runs.mask,
-            w.wet.columns(),
-            &p,
-            flips,
-        );
-        for &(i, now) in flips.iter() {
-            w.wet.set(i, now);
-        }
-    });
+    let wet = w.wet.columns_mut().expect("a short world's wet set is row masks");
+    let delta = backend.exchange(grid, &mut w.free, &w.void_runs.mask, wet, &p);
+    w.wet.adjust(delta);
 }
 
 /// The census's view of one substep of the per-column exchange (profile builds only,
@@ -1303,7 +1424,7 @@ fn census_substep(w: &mut World) {
     }
     let mut moved: FxHashSet<usize> = FxHashSet::default();
     let (mut edge_depth, mut edge_depth_unpacked) = ([0u64; BINS], [0u64; BINS]);
-    let masks = w.wet.columns().to_vec();
+    let masks = w.wet.columns().expect("row masks").to_vec();
     for &(from, to, q) in &edges {
         let acc = cubarium_rules::water::accept(proposed[&to], w.free[to]);
         if q * acc > 0.0 {
@@ -1336,7 +1457,7 @@ fn census_substep(w: &mut World) {
         runs += u64::from((m & !(m << 1)).count_ones());
         unpacked += u64::from((m & !full & (m >> 1)).count_ones());
     }
-    let wet = w.wet.cells();
+    let wet = w.wet.members();
     census::exchange_substep(Substep {
         wet: wet.len() as u64,
         no_edge: wet.iter().filter(|i| !moved.contains(i)).count() as u64,
@@ -1483,7 +1604,8 @@ fn exchange_dense(w: &mut World) {
         #[cfg(feature = "profile")]
         let census = crate::profile::census::open();
         #[cfg(feature = "profile")]
-        let (mut raised, mut edge_depth, mut edge_depth_unpacked) = (
+        // The dense path keeps no row masks, so it counts no unpacked edges.
+        let (mut raised, mut edge_depth, edge_depth_unpacked) = (
             0u64,
             [0u64; crate::profile::census::BINS],
             [0u64; crate::profile::census::BINS],
@@ -1913,123 +2035,38 @@ fn scan_column(
     }
 }
 
-pub fn infiltrate(w: &mut World, dt: f64) {
+/// Free water into the pores of the permeable cell directly below it, the **receiving**
+/// cell's material setting the rate, over `dt` (the substep). Over the wet cells at the
+/// start of the call, per column (`cubarium_rules::water::column::infiltrate`): source and
+/// destination are a void cell and the porous cell under it, so the columns are
+/// independent and split across `threads` like [`fall`].
+pub fn infiltrate(w: &mut World, dt: f64, threads: usize) {
     #[cfg(feature = "profile")]
     let census = crate::profile::census::before(w, crate::profile::census::Tag::Infiltrate);
     crate::voxel_phase!(Infiltrate, {
-        let c = w.config.clone();
-        let plane = c.width as usize * c.depth as usize;
-        // Over the wet set: a cell with no free water in it has nothing to offer the ground,
-        // and source and destination are disjoint (a void cell and the porous cell under it),
-        // so the order the set is walked in cannot change the answer.
-        // Ascending, read back through the shared scratch rather than copied fresh.
-        SCRATCH.with(|slot| {
-            let sc = &mut *slot.borrow_mut();
-            #[cfg(feature = "profile")]
-            let set = crate::profile::start(crate::profile::Phase::InfiltrateSet);
-            w.wet.sorted_into(&mut sc.bits, &mut sc.fall);
-            #[cfg(feature = "profile")]
-            drop(set);
-            #[cfg(feature = "profile")]
-            crate::profile::add(crate::profile::Count::InfiltrateCells, sc.fall.len() as u64);
-            for &i in &sc.fall {
-                if i < plane || w.material[i].is_solid() || w.free[i] <= 0.0 {
-                    continue;
-                }
-                let below = i - plane;
-                let m = w.material[below];
-                if m.pore_capacity() <= 0.0 || m.permeability_per_s() <= 0.0 {
-                    continue;
-                }
-                let rate = pore_flux_m3(m, &c, dt);
-                transfer(w, (i, Store::Free), (below, Store::Pore), rate);
-            }
-        });
+        #[cfg(feature = "profile")]
+        crate::profile::add(crate::profile::Count::InfiltrateCells, w.wet.len() as u64);
+        column_phase(w, threads, ColumnPhase::Infiltrate, dt);
     });
     #[cfg(feature = "profile")]
     crate::profile::census::after(w, census);
 }
 
-pub fn drain(w: &mut World) {
+/// Pore water above the cell's field capacity moves down (see the module doc, step 4), over
+/// the **drainable** set — the porous cells over their field capacity (package D) — per
+/// column, bottom-up (`cubarium_rules::water::column::drain`): a cell only gains pore water
+/// from the cell above it, which its column's walk reaches later, so none is over capacity
+/// when visited that was not over it at the start. The table is read as it stands at the
+/// start of the step: a voxel inside the saturated zone has nowhere lower to drain to.
+/// Columns split across `threads`; what they hand the aquifer is summed.
+pub fn drain(w: &mut World, threads: usize) {
     #[cfg(feature = "profile")]
     let census = crate::profile::census::before(w, crate::profile::census::Tag::Drain);
     crate::voxel_phase!(Drain, {
-        let c = w.config.clone();
-        let plane = c.width as usize * c.depth as usize;
-        // The table as it stands at the start of the step: a voxel inside the saturated
-        // zone has nowhere lower to drain to, because the aquifer is what is holding it up.
-        let table = c.aquifer_head_m(w.aquifer_m3);
-        // Over the **drainable** set — the porous cells over their field capacity
-        // (package D) — rather than every damp cell, and before that the grid
-        // (`design/7_Research/voxel-tick-profile-2026-09-18.md`): a cell at or under field
-        // capacity never drains, so nothing is lost. The set is read back **ascending**,
-        // which is bottom-up, so a stack of wet soil passes water down one cell a tick as
-        // the grid walk did. The snapshot visits the cells the damp scan drained, and in
-        // the same order: a cell only gains pore water from the cell above it, which the
-        // ascending walk reaches later, so none is over capacity when visited that was not
-        // over it at the start.
-        SCRATCH.with(|slot| {
-            let sc = &mut *slot.borrow_mut();
-            w.drainable.sorted_into(&mut sc.bits, &mut sc.fall);
-            rows_of(&sc.fall, plane, &mut sc.rows);
-            #[cfg(feature = "profile")]
-            crate::profile::add(crate::profile::Count::DrainCells, sc.fall.len() as u64);
-            #[cfg(feature = "profile")]
-            let (mut over, mut moved) = (0u64, 0u64);
-            for k in 0..sc.fall.len() {
-                let (i, y) = (sc.fall[k], sc.rows[k]);
-                if submerged(&c, y, table) {
-                    continue;
-                }
-                let m = w.material[i];
-                let cap = m.pore_capacity();
-                if cap <= 0.0 || w.pore[i] <= 0.0 || m.permeability_per_s() <= 0.0 {
-                    continue;
-                }
-                let unit = cap * c.voxel_volume();
-                let excess = pore_m3(w, i) - m.field_capacity() * unit;
-                if excess <= 0.0 {
-                    continue;
-                }
-                let want = excess.min(pore_flux_m3(m, &c, DT));
-                let _drained = if y == 0 {
-                    // Sitting on the foundation: what drains joins the aquifer.
-                    let lost = take_pore(w, i, want);
-                    w.aquifer_m3 += lost;
-                    lost
-                } else if submerged(&c, y - 1, table) && w.material[i - plane].pore_capacity() > 0.0 {
-                    // Reaching the water table: what drains **recharges** the aquifer. The
-                    // saturated cell below has no room, and without this the water above
-                    // a table raised near the surface perched there for good.
-                    let lost = take_pore(w, i, want);
-                    w.aquifer_m3 += lost;
-                    lost
-                } else {
-                    let below = i - plane;
-                    match w.material[below] {
-                        Material::Bedrock => {
-                            let lost = take_pore(w, i, want);
-                            w.aquifer_m3 += lost;
-                            lost
-                        }
-                        Material::Air => transfer(w, (i, Store::Pore), (below, Store::Free), want),
-                        _ => transfer(w, (i, Store::Pore), (below, Store::Pore), want),
-                    }
-                };
-                #[cfg(feature = "profile")]
-                {
-                    over += 1;
-                    if _drained > 0.0 {
-                        moved += 1;
-                    }
-                }
-            }
-            #[cfg(feature = "profile")]
-            {
-                crate::profile::add(crate::profile::Count::DrainOver, over);
-                crate::profile::add(crate::profile::Count::DrainMoved, moved);
-            }
-        });
+        #[cfg(feature = "profile")]
+        crate::profile::add(crate::profile::Count::DrainCells, w.drainable.len() as u64);
+        let gained = column_phase(w, threads, ColumnPhase::Drain, DT);
+        w.aquifer_m3 += gained;
     });
     #[cfg(feature = "profile")]
     crate::profile::census::after(w, census);
@@ -2519,7 +2556,7 @@ pub(crate) fn rules_proposals(w: &mut World) -> Vec<(usize, usize, f64)> {
         height: w.config.height as usize,
     };
     let (n, plane) = (grid.cells(), grid.plane());
-    let wet = w.wet.columns().to_vec();
+    let wet = w.wet.columns().expect("row masks").to_vec();
     let mut full = vec![0u128; plane];
     let mut head = vec![0.0; n];
     for col in 0..plane {

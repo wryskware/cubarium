@@ -638,7 +638,7 @@ pub mod census {
             let s = &mut *s.borrow_mut();
             let stamp = s.next_stamp();
             s.snap.clear();
-            for &i in w.wet.cells() {
+            for i in w.wet.members() {
                 s.mark[i] = stamp;
                 s.snap.push((i as u32, w.free[i]));
             }
@@ -666,7 +666,7 @@ pub mod census {
                 }
             }
             s.snap = snap;
-            for &i in w.wet.cells() {
+            for i in w.wet.members() {
                 if s.mark[i] != stamp {
                     s.touch(i, tag, 0.0);
                     changed += 1;
@@ -713,7 +713,7 @@ pub mod census {
                 let (z, x) = (col / width, col % width);
                 (z / TILE) * tiles_x + x / TILE
             };
-            for &i in w.wet.cells() {
+            for i in w.wet.members() {
                 let f = w.free[i];
                 t.wet += 1;
                 let b = bin(f);

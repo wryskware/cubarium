@@ -26,11 +26,16 @@
 //! are in [`host`]; the trial's CUDA kernels (`crates/cubarium-rules-ptx`) stayed on the
 //! `rules-trial` branch.
 //!
+//! The phases that move water only up and down a column — fall, infiltration, drainage
+//! and the water table — are per-column rules too, in [`column`](mod@column), with their drivers in
+//! [`host`] (`design/handoffs/voxel-water-parallel-2026-09-24.md`).
+//!
 //! **Parity is statistical.** The received volume is `Σq × accept` instead of `Σ(q ×
 //! accept)`, and proposals into one cell are summed in column order (or in whatever order
 //! the atomics land), so a trajectory leaves the old one in the last place. Conservation
 //! holds to rounding: every volume one cell loses another gains.
 
+pub mod column;
 #[cfg(not(target_arch = "nvptx64"))]
 pub mod host;
 

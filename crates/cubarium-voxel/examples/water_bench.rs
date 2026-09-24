@@ -73,16 +73,16 @@ fn tick(w: &mut World, threads: usize, ms: &mut [f64; 10]) -> f64 {
     let substeps = w.config().water_substeps.max(1);
     let sub_dt = cubarium_voxel::DT / substeps as f64;
     for _ in 0..substeps {
-        water::infiltrate(w, sub_dt);
+        water::infiltrate(w, sub_dt, threads);
         mark(3, &mut lap);
-        water::fall(w);
+        water::fall(w, threads);
         mark(4, &mut lap);
         water::exchange(w, threads);
         mark(5, &mut lap);
     }
-    water::drain(w);
+    water::drain(w, threads);
     mark(6, &mut lap);
-    water::water_table(w);
+    water::water_table(w, threads);
     mark(7, &mut lap);
     water::spring(w);
     mark(8, &mut lap);

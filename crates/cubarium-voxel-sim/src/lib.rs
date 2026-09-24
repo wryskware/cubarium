@@ -28,10 +28,11 @@
 //!
 //! | phase | parallel? | why |
 //! | --- | --- | --- |
-//! | `rain`, `evaporate` | no | both write free water through the shared active sets |
-//! | `infiltrate`, `fall` | no | same: `CellSet::insert`/`remove` is one shared structure |
-//! | `exchange` | **yes**, its scratch pass | read-old/write-new, and columns are disjoint |
-//! | `drain`, `water_table`, `spring`, `outlet` | no | they share one scalar aquifer stock, and `water_table` shares a scarce stock in index order **by rule** |
+//! | `rain`, `evaporate` | no | one sky cell per column, a few hundredths of a millisecond on the desktop terrarium |
+//! | `infiltrate`, `fall`, `drain` | **yes**, by column | every move is up or down one column; the active sets are per-column row masks each task keeps for its own columns; drainage sums what it hands the aquifer per chunk |
+//! | `exchange` | **yes**, by column | read-old/write-new; a proposal into a neighbour's cell is an atomic add |
+//! | `water_table` | **yes**, by column, when the aquifer can pay | it shares a scarce stock in index order **by rule**, so when the stock binds it runs in that order on one thread |
+//! | `spring`, `outlet` | no | one cell each |
 //! | `flora` | no | 0.6 % of the tick; see [`Sim::step`] |
 //! | `fauna` | **yes**, its `sense` | one read-only plan per animal, applied serially in id order |
 //!
@@ -190,7 +191,10 @@ impl Sim {
     /// The compute pool is **process-global** (`bevy_tasks::ComputeTaskPool`), so the
     /// first `Sim` in a process fixes its size; a second one with a different
     /// `SimConfig::threads` gets the pool that already exists. That is why the bench runs
-    /// one process per thread count.
+    /// one process per thread count. The water phases' rayon pool is process-global too
+    /// (`cubarium_voxel::water::prepare_pool`), one per thread count, so sims side by side
+    /// asking for the same count share one; `threads = 1` builds neither and runs every
+    /// phase on the calling thread.
     ///
     /// `senses` is the **live schedule's** optional sensory state: a [`Senses`] already
     /// settled by the caller against the layers it is passing in (settling is not done
@@ -559,26 +563,26 @@ fn sys_substeps(ecs: &mut World) {
     }
 }
 
-fn sys_infiltrate(mut w: ResMut<VoxelWorld>) {
+fn sys_infiltrate(mut w: ResMut<VoxelWorld>, config: Res<SimConfig>) {
     let substeps = w.0.config().water_substeps.max(1);
     let sub_dt = cubarium_voxel::DT / substeps as f64;
-    water::infiltrate(&mut w.0, sub_dt);
+    water::infiltrate(&mut w.0, sub_dt, config.threads);
 }
 
-fn sys_fall(mut w: ResMut<VoxelWorld>) {
-    water::fall(&mut w.0);
+fn sys_fall(mut w: ResMut<VoxelWorld>, config: Res<SimConfig>) {
+    water::fall(&mut w.0, config.threads);
 }
 
 fn sys_exchange(mut w: ResMut<VoxelWorld>, config: Res<SimConfig>) {
     water::exchange(&mut w.0, config.threads);
 }
 
-fn sys_drain(mut w: ResMut<VoxelWorld>) {
-    water::drain(&mut w.0);
+fn sys_drain(mut w: ResMut<VoxelWorld>, config: Res<SimConfig>) {
+    water::drain(&mut w.0, config.threads);
 }
 
-fn sys_water_table(mut w: ResMut<VoxelWorld>) {
-    water::water_table(&mut w.0);
+fn sys_water_table(mut w: ResMut<VoxelWorld>, config: Res<SimConfig>) {
+    water::water_table(&mut w.0, config.threads);
 }
 
 fn sys_spring(mut w: ResMut<VoxelWorld>) {

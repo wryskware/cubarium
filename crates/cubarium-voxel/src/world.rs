@@ -948,22 +948,40 @@ impl World {
     pub(crate) fn rebuild_active_sets(&mut self) {
         let n = self.config.cells();
         let plane = self.config.width as usize * self.config.depth as usize;
-        if self.config.height as usize <= MASK_ROWS {
-            self.wet.reset_with_columns(n, plane);
-        } else {
+        let height = self.config.height as usize;
+        if height > MASK_ROWS {
             self.wet.reset(n);
+            self.damp.reset(n);
+            self.drainable.reset(n);
+            for i in 0..n {
+                if !self.material[i].is_solid() && self.free[i] > 0.0 {
+                    self.wet.insert(i);
+                }
+                if self.material[i].pore_capacity() > 0.0 && self.pore[i] > 0.0 {
+                    self.damp.insert(i);
+                }
+                if crate::water::drains(self, i) {
+                    self.drainable.insert(i);
+                }
+            }
+            return;
         }
-        self.damp.reset(n);
-        self.drainable.reset(n);
-        for i in 0..n {
-            if !self.material[i].is_solid() && self.free[i] > 0.0 {
-                self.wet.insert(i);
-            }
-            if self.material[i].pore_capacity() > 0.0 && self.pore[i] > 0.0 {
-                self.damp.insert(i);
-            }
-            if crate::water::drains(self, i) {
-                self.drainable.insert(i);
+        // At most 128 rows: every set is one row mask per column.
+        self.wet.reset_columns(n, plane);
+        self.damp.reset_columns(n, plane);
+        self.drainable.reset_columns(n, plane);
+        for y in 0..height {
+            for col in 0..plane {
+                let i = y * plane + col;
+                if !self.material[i].is_solid() && self.free[i] > 0.0 {
+                    self.wet.insert_at(y, col);
+                }
+                if self.material[i].pore_capacity() > 0.0 && self.pore[i] > 0.0 {
+                    self.damp.insert_at(y, col);
+                }
+                if crate::water::drains(self, i) {
+                    self.drainable.insert_at(y, col);
+                }
             }
         }
     }

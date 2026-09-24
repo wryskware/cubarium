@@ -1,17 +1,21 @@
 //! A hand-rolled sparse set of cells: the **active set** a phase iterates instead of the
 //! grid.
 //!
-//! One `Vec` of the cells that are in the set and one dense slot array over every cell, so
-//! `insert`, `remove` and `contains` are all constant time and the iteration is a linear
-//! walk of a small `Vec`. No hashing, no unsafe, and **no iteration order that depends on
-//! storage history** in the sense that matters here: the order is the order of insertion
-//! with swap-removal, which is why every consumer of a set either does per-cell work or
-//! accumulates into a per-cell buffer rather than into a shared scalar
-//! (`design/7_Research/voxel-tick-profile-2026-09-18.md`).
+//! Two storages, chosen when the set is built:
 //!
-//! This is the shape the profile's step 3 asked for, chosen over an ECS crate for the
-//! reasons the note records: the core keeps `#![forbid(unsafe_code)]` and pulls no
-//! dependency tail for it.
+//! - **Row masks** ([`CellSet::reset_columns`]), for a world at most
+//!   [`crate::world::MASK_ROWS`] cells tall — every preset: one `u128` per column, bit `y`
+//!   set when the cell at row `y` is a member. The water phases walk a column's rows
+//!   straight off its word and keep it as they go, so a phase split across a pool keeps
+//!   the set without touching anything another task owns
+//!   (`design/handoffs/voxel-water-parallel-2026-09-24.md`). Membership is a bit test;
+//!   there is no member list to keep, sort or swap-remove from.
+//! - **A member list** ([`CellSet::reset`]), for taller worlds: one `Vec` of the members and
+//!   one dense slot array over every cell, so `insert`, `remove` and `contains` are all
+//!   constant time and the iteration is a linear walk of a small `Vec`. The order is the
+//!   order of insertion with swap-removal, which is why every consumer either does
+//!   per-cell work or reads the members back ascending ([`CellSet::sorted_into`])
+//!   (`design/7_Research/voxel-tick-profile-2026-09-18.md`).
 //!
 //! **Not serialized.** A set is a cache of what the water arrays already say, so
 //! [`World`](crate::World)'s copy is `#[serde(skip)]` and comes back from a snapshot empty
@@ -24,20 +28,22 @@ use serde::{Deserialize, Serialize};
 /// A set of cell indices with O(1) insert, remove and membership.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct CellSet {
-    /// The members, in insertion order with swap-removal.
+    /// List storage: the members, in insertion order with swap-removal.
     cells: Vec<usize>,
-    /// Per cell: its index in `cells` plus one, or zero when it is not a member.
+    /// List storage: per cell, its index in `cells` plus one, or zero when it is not a
+    /// member.
     slot: Vec<u32>,
+    /// Mask storage: per column (`index % plane`), the member rows, bit `index / plane`.
+    cols: Vec<u128>,
+    /// Columns per row when the set keeps row masks; zero for list storage.
+    plane: usize,
+    /// The number of cells the set covers.
+    n: usize,
+    /// Mask storage: how many members.
+    count: usize,
     /// Set when something wrote the water arrays directly — a snapshot, generation, a
     /// resize — so the next step rebuilds instead of trusting the cache.
     dirty: bool,
-    /// Per column (`index % plane`), the rows that are members, bit `index / plane`: kept
-    /// only when `plane` is nonzero ([`CellSet::reset_with_columns`]), for a world at most
-    /// 128 cells tall. The single-source exchange reads the wet set this way
-    /// (`cubarium_rules::water`), so it walks columns and never sorts the members.
-    /// Updated only when membership actually changes, so the division is paid per flip.
-    cols: Vec<u128>,
-    plane: usize,
 }
 
 impl Default for CellSet {
@@ -45,9 +51,11 @@ impl Default for CellSet {
         CellSet {
             cells: Vec::new(),
             slot: Vec::new(),
-            dirty: true,
             cols: Vec::new(),
             plane: 0,
+            n: 0,
+            count: 0,
+            dirty: true,
         }
     }
 }
@@ -61,13 +69,13 @@ impl PartialEq for CellSet {
         if self.dirty || other.dirty {
             return true;
         }
-        self.cells.len() == other.cells.len()
-            && self.slot.len() == other.slot.len()
-            && self
-                .slot
-                .iter()
-                .zip(other.slot.iter())
-                .all(|(a, b)| (*a == 0) == (*b == 0))
+        if self.n != other.n || self.len() != other.len() {
+            return false;
+        }
+        if self.plane != 0 && self.plane == other.plane {
+            return self.cols == other.cols;
+        }
+        (0..self.n).all(|i| self.contains(i) == other.contains(i))
     }
 }
 
@@ -75,45 +83,103 @@ impl CellSet {
     /// Whether this set has to be rebuilt before it is trusted: a fresh or decoded world,
     /// or one whose cell count no longer matches.
     pub(crate) fn needs_rebuild(&self, n: usize) -> bool {
-        self.dirty || self.slot.len() != n
+        self.dirty || self.n != n
     }
 
-    /// Start again over `n` cells. The caller fills it.
+    /// Start again over `n` cells as a member list. The caller fills it.
     pub(crate) fn reset(&mut self, n: usize) {
         self.cells.clear();
         self.slot.clear();
         self.slot.resize(n, 0);
-        self.dirty = false;
-        self.cols.clear();
+        self.cols = Vec::new();
         self.plane = 0;
+        self.n = n;
+        self.count = 0;
+        self.dirty = false;
     }
 
-    /// [`CellSet::reset`], keeping the per-column row masks of a world with `plane`
-    /// columns (at most 128 rows).
-    pub(crate) fn reset_with_columns(&mut self, n: usize, plane: usize) {
-        self.reset(n);
-        self.plane = plane;
+    /// Start again over `n` cells as per-column row masks of a world with `plane` columns
+    /// (at most 128 rows). The caller fills it.
+    pub(crate) fn reset_columns(&mut self, n: usize, plane: usize) {
+        debug_assert!(plane > 0 && n.div_ceil(plane) <= 128);
+        self.cells = Vec::new();
+        self.slot = Vec::new();
+        self.cols.clear();
         self.cols.resize(plane, 0);
+        self.plane = plane;
+        self.n = n;
+        self.count = 0;
+        self.dirty = false;
     }
 
-    /// The per-column row masks, or empty when this set keeps none.
-    pub(crate) fn columns(&self) -> &[u128] {
-        &self.cols
+    /// The per-column row masks, or `None` for a member list.
+    pub(crate) fn columns(&self) -> Option<&[u128]> {
+        (self.plane != 0).then_some(&self.cols[..])
+    }
+
+    /// The row masks for a phase to keep in place, and the member count it reports back
+    /// through [`CellSet::adjust`]. `None` for a member list.
+    pub(crate) fn columns_mut(&mut self) -> Option<&mut [u128]> {
+        (self.plane != 0).then_some(&mut self.cols[..])
+    }
+
+    /// Account for `delta` members a phase added (or, negative, removed) through
+    /// [`CellSet::columns_mut`].
+    pub(crate) fn adjust(&mut self, delta: isize) {
+        self.count = self
+            .count
+            .checked_add_signed(delta)
+            .expect("a set cannot hold fewer than no members");
+    }
+
+    /// Row `y` of column `col`, for a set keeping row masks.
+    #[inline]
+    pub(crate) fn insert_at(&mut self, y: usize, col: usize) {
+        let bit = 1u128 << y;
+        if self.cols[col] & bit == 0 {
+            self.cols[col] |= bit;
+            self.count += 1;
+        }
+    }
+
+    pub(crate) fn contains(&self, i: usize) -> bool {
+        if i >= self.n {
+            return false;
+        }
+        if self.plane != 0 {
+            return (self.cols[i % self.plane] >> (i / self.plane)) & 1 != 0;
+        }
+        self.slot[i] != 0
     }
 
     pub(crate) fn insert(&mut self, i: usize) {
-        if self.slot.len() <= i || self.slot[i] != 0 {
+        if i >= self.n {
+            return;
+        }
+        if self.plane != 0 {
+            self.insert_at(i / self.plane, i % self.plane);
+            return;
+        }
+        if self.slot[i] != 0 {
             return;
         }
         self.cells.push(i);
         self.slot[i] = self.cells.len() as u32;
-        if self.plane != 0 {
-            self.cols[i % self.plane] |= 1u128 << (i / self.plane);
-        }
     }
 
     pub(crate) fn remove(&mut self, i: usize) {
-        if self.slot.len() <= i || self.slot[i] == 0 {
+        if i >= self.n {
+            return;
+        }
+        if self.plane != 0 {
+            let (col, bit) = (i % self.plane, 1u128 << (i / self.plane));
+            if self.cols[col] & bit != 0 {
+                self.cols[col] &= !bit;
+                self.count -= 1;
+            }
+            return;
+        }
+        if self.slot[i] == 0 {
             return;
         }
         let at = self.slot[i] as usize - 1;
@@ -123,9 +189,6 @@ impl CellSet {
             self.slot[last] = at as u32 + 1;
         }
         self.slot[i] = 0;
-        if self.plane != 0 {
-            self.cols[i % self.plane] &= !(1u128 << (i / self.plane));
-        }
     }
 
     /// Insert or remove by a predicate the caller has just made true or false.
@@ -137,22 +200,45 @@ impl CellSet {
         }
     }
 
-    pub(crate) fn cells(&self) -> &[usize] {
-        &self.cells
-    }
-
     pub(crate) fn len(&self) -> usize {
-        self.cells.len()
+        if self.plane != 0 {
+            self.count
+        } else {
+            self.cells.len()
+        }
     }
 
-    /// The members in **ascending index order**, written into `out`, without a sort: each
-    /// member sets one bit of `bits` and the words are then read back in order. That is
-    /// one pass over the members and one over `n / 64` words, against a comparison sort's
-    /// `m log m`; ascending index is the world's own memory order, so the phases that
-    /// walk this list read their arrays front to back instead of in swap-removal order.
+    /// The members, ascending. Allocates: for tests, the census and cold paths.
+    pub(crate) fn members(&self) -> Vec<usize> {
+        let (mut bits, mut out) = (Vec::new(), Vec::new());
+        self.sorted_into(&mut bits, &mut out);
+        out
+    }
+
+    /// The members in **ascending index order**, written into `out`, without a comparison
+    /// sort. A member list sets one bit of `bits` per member and reads the words back in
+    /// order: one pass over the members and one over `n / 64` words, against a sort's
+    /// `m log m`. Row masks read row by row across the columns.
     ///
     /// `bits` is scratch the caller keeps between calls and is left all zero again.
     pub(crate) fn sorted_into(&self, bits: &mut Vec<u64>, out: &mut Vec<usize>) {
+        out.clear();
+        if self.plane != 0 {
+            let rows = self.n.div_ceil(self.plane);
+            let any = self.cols.iter().fold(0u128, |a, &m| a | m);
+            for y in 0..rows {
+                if (any >> y) & 1 == 0 {
+                    continue;
+                }
+                let base = y * self.plane;
+                for (col, &m) in self.cols.iter().enumerate() {
+                    if (m >> y) & 1 != 0 {
+                        out.push(base + col);
+                    }
+                }
+            }
+            return;
+        }
         let words = self.slot.len().div_ceil(64);
         if bits.len() != words {
             bits.clear();
@@ -161,7 +247,6 @@ impl CellSet {
         for &i in &self.cells {
             bits[i >> 6] |= 1u64 << (i & 63);
         }
-        out.clear();
         for (w, word) in bits.iter_mut().enumerate() {
             let mut b = *word;
             if b == 0 {
