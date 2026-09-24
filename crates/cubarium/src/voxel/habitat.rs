@@ -1637,7 +1637,13 @@ mod tests {
             &pre.wettest[..4]
         );
 
-        let flora_cfg = cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25);
+        // The drown screen is under test, not the establishment water gate: on loam the
+        // calm plain's metre of soil sits below every species' establishment water, so
+        // that gate is opened for both arms.
+        let mut flora_cfg = cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25);
+        for species in Species::ALL {
+            flora_cfg.species_mut(species).establish_water_min = 0.0;
+        }
         let mut flora = Flora::new(flora_cfg.clone());
         let mut fauna = Fauna::new(Default::default());
         let seeded = seed_pre_rolled(&mut world, &mut flora, &mut fauna, &pre, [0, 0]);
