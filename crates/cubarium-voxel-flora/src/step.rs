@@ -164,7 +164,7 @@ pub(crate) fn mix(mut z: u64) -> u64 {
     z ^ (z >> 31)
 }
 
-pub(crate) fn step(flora: &mut Flora, world: &mut World) {
+pub(crate) fn step(flora: &mut Flora, world: &mut World, threads: usize) {
     // The tick counter moves **first**, so that `flora.tick` is the tick this step
     // produces: the one whose state the caller will read when the step returns. Everything
     // dated inside a tick — an arrival bin's start, a bin's age, the germination lottery's
@@ -197,8 +197,9 @@ pub(crate) fn step(flora: &mut Flora, world: &mut World) {
         cubarium_voxel::voxel_phase!(SkyCache, { refresh_sky_cache(flora, world) });
         cubarium_voxel::voxel_phase!(Drown, { drown(flora, world) });
 
-        let light = cubarium_voxel::voxel_phase!(Light, { light_per_stand(flora, world) });
-        let moisture = cubarium_voxel::voxel_phase!(Drink, { drink(flora, world) });
+        let light =
+            cubarium_voxel::voxel_phase!(Light, { light_per_stand(flora, world, threads) });
+        let moisture = cubarium_voxel::voxel_phase!(Drink, { drink(flora, world, threads) });
         let substrate = cubarium_voxel::voxel_phase!(Feed, { feed(flora, world, &moisture) });
         cubarium_voxel::voxel_phase!(Grow, {
             grow(flora, world, &light, &moisture, &substrate)
@@ -215,6 +216,61 @@ pub(crate) fn step(flora: &mut Flora, world: &mut World) {
     });
 }
 
+/// The fewest stands a worker is handed: under this a split costs more than it saves.
+const MIN_CHUNK: usize = 256;
+
+/// How many contiguous chunks [`for_chunks`] splits `n` stands into for `threads` workers.
+fn chunk_count(n: usize, threads: usize) -> usize {
+    if cfg!(feature = "parallel") {
+        threads.max(1).min(n / MIN_CHUNK).max(1)
+    } else {
+        1
+    }
+}
+
+/// Run `f` over `0..n` split into [`chunk_count`] contiguous ranges, chunk `k` with
+/// `states[k]` (grown with `fresh` as needed), on the compute pool when there is more than
+/// one chunk. The results come back **in chunk order** whatever order the workers finished
+/// in, so a caller that folds them in that order gets exactly what one pass over `0..n`
+/// would have built.
+fn for_chunks<S: Send, T: Send + 'static>(
+    n: usize,
+    threads: usize,
+    states: &mut Vec<S>,
+    fresh: impl Fn() -> S,
+    f: impl Fn(std::ops::Range<usize>, &mut S) -> T + Sync,
+) -> Vec<T> {
+    let chunks = chunk_count(n, threads);
+    while states.len() < chunks {
+        states.push(fresh());
+    }
+    let per = n.div_ceil(chunks);
+    let range = |k: usize| (k * per).min(n)..((k + 1) * per).min(n);
+    #[cfg(feature = "parallel")]
+    if chunks > 1 {
+        let pool = bevy_tasks::ComputeTaskPool::get_or_init(|| {
+            bevy_tasks::TaskPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+        });
+        let f = &f;
+        let mut parts: Vec<(usize, T)> = pool.scope(|scope| {
+            for (k, state) in states.iter_mut().take(chunks).enumerate() {
+                let r = range(k);
+                scope.spawn(async move { (k, f(r, state)) });
+            }
+        });
+        parts.sort_by_key(|&(k, _)| k);
+        return parts.into_iter().map(|(_, t)| t).collect();
+    }
+    states
+        .iter_mut()
+        .take(chunks)
+        .enumerate()
+        .map(|(k, state)| f(range(k), state))
+        .collect()
+}
+
 // ------------------------------------------------------------------ 1. terrain
 
 /// Drop every site whose support face a terrain edit took away, booking its stocks out.
@@ -229,23 +285,28 @@ fn prune_unsupported(flora: &mut Flora, world: &World) {
     let view = world.view();
     let supported = |site: &Site| view.is_support(site.x as i64, site.y, site.z);
 
-    let mut kept = Vec::with_capacity(stands.len());
-    for stand in stands.iter() {
-        if supported(&stand.site) {
-            kept.push(*stand);
-        } else {
-            // The parcel is organic matter this layer holds, so it is booked out with the
-            // stand that was saving it.
-            let organic = stand.material();
-            ledger.removed_organic_out += organic;
-            ledger.removed_mineral_out += stand.mineral;
-            ledger.removed_energy_out += config.species(stand.species).energy_density * organic;
+    // Nearly every tick every site is still supported: then nothing is copied at all.
+    if !stands.iter().all(|s| supported(&s.site)) {
+        let mut kept = Vec::with_capacity(stands.len());
+        for stand in stands.iter() {
+            if supported(&stand.site) {
+                kept.push(*stand);
+            } else {
+                // The parcel is organic matter this layer holds, so it is booked out with
+                // the stand that was saving it.
+                let organic = stand.material();
+                ledger.removed_organic_out += organic;
+                ledger.removed_mineral_out += stand.mineral;
+                ledger.removed_energy_out +=
+                    config.species(stand.species).energy_density * organic;
+            }
         }
-    }
-    if kept.len() != stands.len() {
         *stands = kept;
     }
 
+    if ground.iter().all(|g| supported(&g.site)) {
+        return;
+    }
     let taken = std::mem::take(ground);
     let mut kept = Vec::with_capacity(taken.len());
     for g in taken {
@@ -321,10 +382,56 @@ fn drown(flora: &mut Flora, world: &World) {
         }
     }
     for &i in doomed.iter().rev() {
-        let stand = stands[i];
-        die(config, &view, &stand, ground, ledger);
-        stands.remove(i);
+        die(config, &view, &stands[i], ground, ledger);
     }
+    remove_at(stands, &doomed);
+}
+
+/// Remove the stands at `doomed` — ascending, distinct indices — in one pass, keeping the
+/// rest in order. One compaction instead of a `Vec::remove` (a shift of every later stand)
+/// per death.
+pub(crate) fn remove_at(stands: &mut Vec<Stand>, doomed: &[usize]) {
+    if doomed.is_empty() {
+        return;
+    }
+    let mut next = 0;
+    let mut i = 0;
+    stands.retain(|_| {
+        let gone = next < doomed.len() && doomed[next] == i;
+        if gone {
+            next += 1;
+        }
+        i += 1;
+        !gone
+    });
+}
+
+/// Insert `born` into the site-sorted `stands`, keeping it sorted: every site in `born` is
+/// distinct and holds no stand yet. One merge instead of a `Vec::insert` (a shift of every
+/// later stand) per birth; a lone birth is still one insert.
+pub(crate) fn insert_sorted(stands: &mut Vec<Stand>, mut born: Vec<Stand>) {
+    if born.len() <= 1 {
+        for s in born {
+            let at = stands
+                .binary_search_by_key(&s.site, |t| t.site)
+                .expect_err("a birth on a free site");
+            stands.insert(at, s);
+        }
+        return;
+    }
+    born.sort_unstable_by_key(|s| s.site);
+    let old = std::mem::take(stands);
+    let mut out = Vec::with_capacity(old.len() + born.len());
+    let mut born = born.into_iter().peekable();
+    for s in old {
+        while let Some(b) = born.next_if(|b| b.site < s.site) {
+            out.push(b);
+        }
+        debug_assert!(born.peek().is_none_or(|b| b.site != s.site));
+        out.push(s);
+    }
+    out.extend(born);
+    *stands = out;
 }
 
 // -------------------------------------------------------------------- 4. light
@@ -353,7 +460,7 @@ fn drown(flora: &mut Flora, world: &World) {
 /// band top is the crown top the old model compared, its radius is the crown radius, its
 /// stock is the whole of `P`, its weight is one, and its area is the crown's. The
 /// authored porosity is the only new factor (`tests/layers.rs`).
-fn light_per_stand(flora: &mut Flora, world: &World) -> Vec<f64> {
+fn light_per_stand(flora: &mut Flora, world: &World, threads: usize) -> Vec<f64> {
     let Flora {
         config,
         stands,
@@ -362,19 +469,23 @@ fn light_per_stand(flora: &mut Flora, world: &World) -> Vec<f64> {
     } = flora;
     let view = world.view();
     let voxel_m = view.config.voxel_m;
-    let crowns: Vec<Vec<Shade>> = stands
-        .iter()
-        .map(|s| shade_layers(config, s, voxel_m))
-        .collect();
+    // Every stand's foliage layers, flat: stand `j`'s are `layers[span[j].0..span[j].1]`.
+    let mut layers: Vec<Shade> = Vec::with_capacity(stands.len() * 2);
+    let mut span: Vec<(u32, u32)> = Vec::with_capacity(stands.len());
+    for s in stands.iter() {
+        let from = layers.len() as u32;
+        shade_layers_into(config, s, voxel_m, &mut layers);
+        span.push((from, layers.len() as u32));
+    }
     // A conservative bound per **stand**, so the pair loop below stays the O(n²) it was
     // before layers instead of O(n² · layers²): no layer of a stand can shade above the
     // stand's own highest layer top, or outside its widest layer's footprint. Skipping
     // on the bound changes no result — it only avoids opening a stand whose every layer
     // would have been rejected.
-    let envelope: Vec<(f64, f64)> = crowns
+    let envelope: Vec<(f64, f64)> = span
         .iter()
-        .map(|layers| {
-            layers
+        .map(|&(from, to)| {
+            layers[from as usize..to as usize]
                 .iter()
                 .fold((f64::NEG_INFINITY, 0.0f64), |(t, r), l| {
                     (t.max(l.top), r.max(l.radius))
@@ -382,11 +493,21 @@ fn light_per_stand(flora: &mut Flora, world: &World) -> Vec<f64> {
         })
         .collect();
     let width = view.config.width as f64;
+    // Only a stand whose widest footprint can reach a receiver's column can shade it, so
+    // each receiver walks the stands filed under its own bucket instead of every stand
+    // in the world. The buckets hold stand indices in ascending order, which is the order
+    // the full sweep visited them in: the same factors multiply in the same order, and
+    // the result is the full sweep's to the bit (`the_bucketed_light_is_the_full_sweep`).
+    let index = ShadeIndex::build(stands, &envelope, view.config.width, view.config.depth);
 
-    let mut out = Vec::with_capacity(stands.len());
-    for (i, stand) in stands.iter().enumerate() {
-        let open = sky_at(sky, &view, stand.site);
-        let mine = &crowns[i];
+    // The sky first, serially: it is the one read that fills a cache.
+    let open: Vec<f64> = stands.iter().map(|s| sky_at(sky, &view, s.site)).collect();
+    let stands = &stands[..];
+    let receive = |i: usize| -> f64 {
+        let stand = &stands[i];
+        let open = open[i];
+        let mine = &layers[span[i].0 as usize..span[i].1 as usize];
+        let near = index.near(stand.site);
         // The weights: where this stand's tissue is. A stand with no foliage left has
         // no tissue to weight, so it is assessed at its layers' capacities instead —
         // its income is zero either way (`A ∝ P`), and this keeps the number defined.
@@ -404,20 +525,17 @@ fn light_per_stand(flora: &mut Flora, world: &World) -> Vec<f64> {
                 continue;
             }
             let mut here = open;
-            for (j, other) in crowns.iter().enumerate() {
-                if j == i {
+            for c in near {
+                if c.j as usize == i || c.top <= layer.top {
                     continue;
                 }
-                let (top, radius) = envelope[j];
-                if top <= layer.top {
+                let sx = wrapped_delta(c.x, layer.x, width);
+                let sz = c.z - layer.z;
+                if sx * sx + sz * sz > c.radius * c.radius {
                     continue;
                 }
-                let sx = wrapped_delta(other.first().map_or(0.0, |o| o.x), layer.x, width);
-                let sz = other.first().map_or(0.0, |o| o.z) - layer.z;
-                if sx * sx + sz * sz > radius * radius {
-                    continue;
-                }
-                for above in other {
+                let (from, to) = span[c.j as usize];
+                for above in &layers[from as usize..to as usize] {
                     if above.top <= layer.top {
                         continue;
                     }
@@ -426,18 +544,139 @@ fn light_per_stand(flora: &mut Flora, world: &World) -> Vec<f64> {
                     if dx * dx + dz * dz > above.radius * above.radius {
                         continue;
                     }
-                    here *= (-config.shade_k_per_m2 * (1.0 - above.porosity) * above.stock
-                        / above.area_m2)
-                        .exp();
+                    here *= above.attenuation;
                 }
             }
             l += w * here;
             weighed += w;
         }
         let l = if weighed > 0.0 { l / weighed } else { open };
-        out.push(light_response(config.species(stand.species), l));
+        light_response(config.species(stand.species), l)
+    };
+    for_chunks(
+        stands.len(),
+        threads,
+        &mut Vec::new(),
+        || (),
+        |r, _| r.map(receive).collect::<Vec<f64>>(),
+    )
+    .concat()
+}
+
+/// Columns per side of one [`ShadeIndex`] bucket.
+const SHADE_BUCKET: u32 = 4;
+
+/// One stand filed under a bucket: its index and the envelope the sweep tests first,
+/// packed so a receiver streams its bucket without chasing into the layers.
+#[derive(Clone, Copy)]
+struct Candidate {
+    j: u32,
+    top: f64,
+    x: f64,
+    z: f64,
+    radius: f64,
+}
+
+/// Every stand filed under each bucket of `SHADE_BUCKET²` columns that its widest layer's
+/// footprint reaches, in ascending stand order: a superset of the stands that can shade any
+/// receiver in that bucket, and exactly the stands the full sweep would not have skipped
+/// on its envelope test. Stored flat (CSR): bucket `b`'s stands are
+/// `stands[start[b]..start[b + 1]]`.
+struct ShadeIndex {
+    nbx: usize,
+    start: Vec<u32>,
+    stands: Vec<Candidate>,
+}
+
+impl ShadeIndex {
+    fn build(stands: &[Stand], envelope: &[(f64, f64)], width: u32, depth: u32) -> ShadeIndex {
+        let b = SHADE_BUCKET as usize;
+        let nbx = (width as usize).div_ceil(b).max(1);
+        let nbz = (depth as usize).div_ceil(b).max(1);
+        let w = i64::from(width.max(1));
+        let d = i64::from(depth.max(1));
+        // (bucket, stand) for every bucket a stand's footprint touches, generated in
+        // ascending stand order. A footprint of radius `r` cells holds the receiver
+        // columns at integer offsets `|dx|, |dz| <= floor(r)` — the envelope test compares
+        // integer offsets against `r²` — with `x` wrapped and `z` clipped.
+        let mut pairs: Vec<(u32, u32)> = Vec::new();
+        let mut seen = vec![u32::MAX; nbx];
+        let mut xs: Vec<usize> = Vec::with_capacity(nbx);
+        for (j, stand) in stands.iter().enumerate() {
+            let (top, radius) = envelope[j];
+            // A stand with no foliage layer shades nothing: the sweep skips it on `top`.
+            if top == f64::NEG_INFINITY {
+                continue;
+            }
+            let reach = if radius.is_finite() {
+                radius.max(0.0).floor() as i64
+            } else {
+                w
+            };
+            xs.clear();
+            if 2 * reach + 1 >= w {
+                xs.extend(0..nbx);
+            } else {
+                let x0 = i64::from(stand.site.x);
+                for cx in x0 - reach..=x0 + reach {
+                    let bx = (cx.rem_euclid(w) as usize) / b;
+                    if seen[bx] != j as u32 {
+                        seen[bx] = j as u32;
+                        xs.push(bx);
+                    }
+                }
+            }
+            let z0 = i64::from(stand.site.z);
+            let lo = (z0 - reach).clamp(0, d - 1) as usize / b;
+            let hi = (z0 + reach).clamp(0, d - 1) as usize / b;
+            for bz in lo..=hi {
+                for &bx in &xs {
+                    pairs.push(((bz * nbx + bx) as u32, j as u32));
+                }
+            }
+        }
+        // A stable counting sort by bucket keeps each bucket's stands ascending.
+        let mut start = vec![0u32; nbx * nbz + 1];
+        for &(k, _) in &pairs {
+            start[k as usize + 1] += 1;
+        }
+        for k in 0..nbx * nbz {
+            start[k + 1] += start[k];
+        }
+        let mut fill = start.clone();
+        let blank = Candidate {
+            j: 0,
+            top: 0.0,
+            x: 0.0,
+            z: 0.0,
+            radius: 0.0,
+        };
+        let mut filed = vec![blank; pairs.len()];
+        for &(k, j) in &pairs {
+            let (top, radius) = envelope[j as usize];
+            let site = stands[j as usize].site;
+            filed[fill[k as usize] as usize] = Candidate {
+                j,
+                top,
+                x: site.x as f64,
+                z: site.z as f64,
+                radius,
+            };
+            fill[k as usize] += 1;
+        }
+        ShadeIndex {
+            nbx,
+            start,
+            stands: filed,
+        }
     }
-    out
+
+    /// The stands filed under `site`'s bucket, ascending.
+    fn near(&self, site: Site) -> &[Candidate] {
+        let b = SHADE_BUCKET as usize;
+        let k = (site.z as usize / b) * self.nbx + site.x as usize / b;
+        &self.stands[self.start[k] as usize..self.start[k + 1] as usize]
+    }
 }
 
 /// One foliage layer as the shade model sees it: where its top is, what it covers, and
@@ -452,25 +691,29 @@ struct Shade {
     radius: f64,
     stock: f64,
     share: f64,
-    porosity: f64,
-    area_m2: f64,
+    /// What this layer lets through to a layer under it:
+    /// `exp(-k · (1-p) · stock / area_m2)`, the one factor the sweep multiplies in, taken
+    /// once per layer rather than once per layer it shades.
+    attenuation: f64,
 }
 
-fn shade_layers(config: &FloraConfig, stand: &Stand, voxel_m: f64) -> Vec<Shade> {
-    crate::layers_of(config, stand, voxel_m)
-        .into_iter()
-        .filter(|l| l.kind.bears_foliage())
-        .map(|l| Shade {
-            x: stand.site.x as f64,
-            z: stand.site.z as f64,
-            top: l.band_v[1],
-            radius: l.radius_v,
-            stock: l.stock,
-            share: l.share,
-            porosity: l.porosity,
-            area_m2: l.area_m2,
-        })
-        .collect()
+/// A stand's foliage layers as the shade model sees them, appended to `out`.
+fn shade_layers_into(config: &FloraConfig, stand: &Stand, voxel_m: f64, out: &mut Vec<Shade>) {
+    out.extend(
+        crate::layers_of(config, stand, voxel_m)
+            .into_iter()
+            .filter(|l| l.kind.bears_foliage())
+            .map(|l| Shade {
+                x: stand.site.x as f64,
+                z: stand.site.z as f64,
+                top: l.band_v[1],
+                radius: l.radius_v,
+                stock: l.stock,
+                share: l.share,
+                attenuation: (-config.shade_k_per_m2 * (1.0 - l.porosity) * l.stock / l.area_m2)
+                    .exp(),
+            }),
+    );
 }
 
 /// `L_eff = L (1 + light_half) / (L + light_half)`: a species with a small `light_half`
@@ -511,75 +754,225 @@ pub(crate) struct Drink {
 
 /// Collect every stand's demand per voxel, then withdraw once per voxel and split what
 /// the core accepted proportional to demand.
-fn drink(flora: &mut Flora, world: &mut World) -> Vec<Drink> {
-    let mut out = vec![Drink::default(); flora.stands.len()];
-    // (voxel index, stand, wanted) — sorted, so the withdrawal order is the world's own
-    // index order and nothing depends on how the stands were reached.
-    let mut wants: Vec<(usize, usize, f64)> = Vec::new();
-    {
-        let view = world.view();
-        for (i, stand) in flora.stands.iter().enumerate() {
-            let sc = flora.config.species(stand.species);
-            let box_ = root_box(&view, stand.site, sc);
-            out[i].moisture = moisture_of(&view, &box_, sc);
-            // A species that needs standing water (package N) and has lost it reads
-            // `μ = 0`: it earns nothing and pays its upkeep out of reserve.
-            if sc.water_depth_min_m > 0.0
-                && standing_water_beside(&view, stand.site) < sc.water_depth_min_m
-            {
-                out[i].moisture = 0.0;
-            }
-            out[i].saturated = saturated_fraction(&view, &box_, sc);
-            let demand =
-                (sc.transpiration_m3_per_s * stand.foliage * out[i].moisture * DT).max(0.0);
-            if demand <= 0.0 || box_.is_empty() {
-                continue;
-            }
-            // Shared over the box in proportion to what each cell holds **above its
-            // wilting point**: water under it is held too tightly for a root.
-            let stock: f64 = box_.iter().map(|&v| drinkable_m3(&view, v)).sum();
-            if stock <= 0.0 {
-                continue;
-            }
-            for &v in box_.iter() {
-                let share = demand * drinkable_m3(&view, v) / stock;
-                if share > 0.0 {
-                    wants.push((v, i, share));
-                }
+///
+/// The demands are summed per voxel into a dense per-cell scratch rather than sorted by
+/// voxel: generated stand by stand, each voxel's total adds its demands in ascending stand
+/// order — the order the sort handed them over in — and the withdrawals walk the touched
+/// voxels in ascending index order, as before, so every total, every withdrawal and every
+/// ledger sum is the sorted sweep's to the bit. Only the order a stand's own shares are
+/// added into its observational `taken_m3` differs (`the_scratch_drink_is_the_sorted_sweep`).
+fn drink(flora: &mut Flora, world: &mut World, threads: usize) -> Vec<Drink> {
+    DRINK_SCRATCH.with_borrow_mut(|scratch| drink_with(flora, world, threads, scratch))
+}
+
+thread_local! {
+    /// [`drink`]'s per-cell scratch, kept between ticks so a tick does not allocate and
+    /// zero a world-sized array. All zero between calls.
+    static DRINK_SCRATCH: std::cell::RefCell<DrinkScratch> =
+        std::cell::RefCell::new(DrinkScratch::default());
+}
+
+/// Per-cell demand totals, what each touched cell gave up, and which cells were touched.
+#[derive(Default)]
+struct DrinkScratch {
+    /// `[total asked, accepted]` per cell, side by side so one read fetches both.
+    cell: Vec<[f64; 2]>,
+    /// One bit per cell: set when a demand first lands on it.
+    touched: Vec<u64>,
+    /// One per chunk of stands, reused tick to tick.
+    chunks: Vec<DrinkChunk>,
+}
+
+/// What one chunk of stands read out of its root boxes.
+#[derive(Default)]
+struct DrinkChunk {
+    /// The chunk's own stands' [`Drink`]s, in stand order.
+    out: Vec<Drink>,
+    /// (voxel, stand, wanted), in stand order.
+    wants: Vec<(u32, u32, f64)>,
+    box_: Vec<usize>,
+    drinkable: Vec<f64>,
+}
+
+impl DrinkScratch {
+    fn fit(&mut self, cells: usize) {
+        if self.cell.len() != cells {
+            self.cell = vec![[0.0; 2]; cells];
+            self.touched = vec![0; cells.div_ceil(64)];
+        }
+    }
+}
+
+/// One stand's root box read once for everything [`drink`] needs from it: the box's soil
+/// voxels into `box_`, each one's [`drinkable_m3`] into `drinkable`, and the `(water, band,
+/// saturated)` sums [`mean_available`] and [`saturated_fraction`] take over the same box —
+/// the same arithmetic in the same order, one pass instead of four.
+fn read_root_box(
+    view: &VoxelView<'_>,
+    site: Site,
+    sc: &SpeciesConfig,
+    box_: &mut Vec<usize>,
+    drinkable: &mut Vec<f64>,
+) -> (f64, f64, usize) {
+    root_box_into(view, site, sc, box_);
+    drinkable.clear();
+    let volume = view.config.voxel_volume();
+    let (mut water, mut band, mut saturated) = (0.0, 0.0, 0usize);
+    for &i in box_.iter() {
+        let m = view.material[i];
+        let pore = view.pore[i];
+        let w = (m.field_capacity() - m.wilting_point()).max(0.0) * m.pore_capacity();
+        water += available_water(m, pore) * w;
+        band += w;
+        if pore >= sc.saturated_pore {
+            saturated += 1;
+        }
+        drinkable.push((pore - m.wilting_point()).max(0.0) * m.pore_capacity() * volume);
+    }
+    (water, band, saturated)
+}
+
+/// Step 5's read for stands `range`: each one's moisture, saturation and demand, and its
+/// demand shared over its box into `chunk.wants`.
+fn drink_read(
+    flora: &Flora,
+    view: &VoxelView<'_>,
+    range: std::ops::Range<usize>,
+    chunk: &mut DrinkChunk,
+) {
+    let DrinkChunk {
+        out,
+        wants,
+        box_,
+        drinkable,
+    } = chunk;
+    out.clear();
+    wants.clear();
+    for i in range {
+        let stand = &flora.stands[i];
+        let sc = flora.config.species(stand.species);
+        let mut d = Drink::default();
+        let (water, band, saturated) = read_root_box(view, stand.site, sc, box_, drinkable);
+        // `moisture_of`: the species' ramp over the box's mean available water, and an
+        // empty box is a wilting one.
+        d.moisture = if band <= 0.0 {
+            0.0
+        } else {
+            sc.moisture_at(water / band)
+        };
+        // A species that needs standing water (package N) and has lost it reads
+        // `μ = 0`: it earns nothing and pays its upkeep out of reserve.
+        if sc.water_depth_min_m > 0.0
+            && standing_water_beside(view, stand.site) < sc.water_depth_min_m
+        {
+            d.moisture = 0.0;
+        }
+        // `saturated_fraction`: an empty box is not waterlogged.
+        d.saturated = if box_.is_empty() {
+            0.0
+        } else {
+            saturated as f64 / box_.len() as f64
+        };
+        out.push(d);
+        let demand = (sc.transpiration_m3_per_s * stand.foliage * d.moisture * DT).max(0.0);
+        if demand <= 0.0 || box_.is_empty() {
+            continue;
+        }
+        // Shared over the box in proportion to what each cell holds **above its
+        // wilting point**: water under it is held too tightly for a root.
+        let stock: f64 = drinkable.iter().sum();
+        if stock <= 0.0 {
+            continue;
+        }
+        for (&v, &d) in box_.iter().zip(drinkable.iter()) {
+            let share = demand * d / stock;
+            if share > 0.0 {
+                wants.push((v as u32, i as u32, share));
             }
         }
     }
-    wants.sort_unstable_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+}
 
-    let mut at = 0;
-    while at < wants.len() {
-        let voxel = wants[at].0;
-        let mut end = at;
-        let mut total = 0.0;
-        while end < wants.len() && wants[end].0 == voxel {
-            total += wants[end].2;
-            end += 1;
+fn drink_with(
+    flora: &mut Flora,
+    world: &mut World,
+    threads: usize,
+    scratch: &mut DrinkScratch,
+) -> Vec<Drink> {
+    scratch.fit(world.config().cells());
+    let DrinkScratch {
+        cell,
+        touched,
+        chunks,
+    } = scratch;
+    let n = flora.stands.len();
+    {
+        let view = world.view();
+        let flora = &*flora;
+        for_chunks(n, threads, chunks, DrinkChunk::default, |range, chunk| {
+            drink_read(flora, &view, range, chunk)
+        });
+    }
+    let used = chunk_count(n, threads);
+    // Each voxel's total, summed in ascending stand order: the chunks are in stand order.
+    for chunk in chunks.iter().take(used) {
+        for &(v, _, share) in chunk.wants.iter() {
+            let v = v as usize;
+            touched[v / 64] |= 1 << (v % 64);
+            cell[v][0] += share;
         }
-        let (x, y, z) = world.config().coords(voxel);
-        // Never below the wilting point, however many stands asked: the voxel's first and
-        // only withdrawal this tick, so the reading is still the pre-withdrawal one.
-        let volume = total.min(drinkable_m3(&world.view(), voxel));
-        // One bounded operation for the whole voxel, whatever asked for it.
-        let accepted = if volume > 0.0 {
-            -world.apply(WorldCommand::WithdrawPore {
-                x: x as i64,
-                y,
-                z,
-                volume_m3: volume,
-            })
-        } else {
-            0.0
-        };
-        flora.ledger.transpired_m3 += accepted;
-        for &(_, stand, want) in &wants[at..end] {
-            out[stand].taken_m3 += split_proportional(accepted, want, total);
+    }
+
+    // One bounded withdrawal per voxel, in ascending voxel order.
+    for (word_at, word) in touched.iter().enumerate() {
+        let mut bits = *word;
+        while bits != 0 {
+            let voxel = word_at * 64 + bits.trailing_zeros() as usize;
+            bits &= bits - 1;
+            let (x, y, z) = world.config().coords(voxel);
+            // Never below the wilting point, however many stands asked: the voxel's first
+            // and only withdrawal this tick, so the reading is still the pre-withdrawal one.
+            let volume = cell[voxel][0].min(drinkable_m3(&world.view(), voxel));
+            // One bounded operation for the whole voxel, whatever asked for it.
+            let got = if volume > 0.0 {
+                -world.apply(WorldCommand::WithdrawPore {
+                    x: x as i64,
+                    y,
+                    z,
+                    volume_m3: volume,
+                })
+            } else {
+                0.0
+            };
+            flora.ledger.transpired_m3 += got;
+            cell[voxel][1] = got;
         }
-        at = end;
+    }
+    // What each stand got: its own shares of what each of its voxels gave up.
+    {
+        // The same split as the read, so each chunk's `out` is its own stands'.
+        let cell = &cell[..];
+        for_chunks(n, threads, chunks, DrinkChunk::default, |range, chunk| {
+            let first = range.start;
+            for &(v, stand, want) in chunk.wants.iter() {
+                let [total, got] = cell[v as usize];
+                chunk.out[stand as usize - first].taken_m3 +=
+                    split_proportional(got, want, total);
+            }
+        });
+    }
+    // Leave the scratch all zero for the next call.
+    for (word_at, word) in touched.iter_mut().enumerate() {
+        let mut bits = *word;
+        while bits != 0 {
+            cell[word_at * 64 + bits.trailing_zeros() as usize] = [0.0; 2];
+            bits &= bits - 1;
+        }
+        *word = 0;
+    }
+    let mut out = Vec::with_capacity(n);
+    for chunk in chunks.iter().take(used) {
+        out.extend_from_slice(&chunk.out);
     }
     out
 }
@@ -601,6 +994,14 @@ pub(crate) fn split_proportional(accepted: f64, want: f64, total: f64) -> f64 {
 /// support.y`, `x` wrapped and `z` clipped at the walls. Membership is per voxel, not
 /// contiguous: a soil pocket under a stratum is in the box if it is in the box.
 fn root_box(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> Vec<usize> {
+    let mut out = Vec::new();
+    root_box_into(view, site, sc, &mut out);
+    out
+}
+
+/// [`root_box`] into a buffer the caller reuses, which is cleared first.
+fn root_box_into(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig, out: &mut Vec<usize>) {
+    out.clear();
     #[cfg(feature = "profile")]
     cubarium_voxel::profile::add(
         cubarium_voxel::profile::Count::BoxVoxels,
@@ -611,26 +1012,36 @@ fn root_box(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> Vec<usize> 
     let c = view.config;
     let span = sc.rooting_depth.min(site.y + 1);
     if span == 0 {
-        return Vec::new();
+        return;
     }
     let y_lo = site.y + 1 - span;
     let r = sc.rooting_radius as i64;
-    let mut out = Vec::new();
+    // `c.index`'s own arithmetic with the `x` wrap taken once per box rather than once per
+    // voxel: row `(y, z)` starts at `(y · depth + z) · width`, and `x` steps from the box's
+    // wrapped west edge, wrapping at the seam. Same voxels, same order.
+    let width = c.width as usize;
+    let x_west = (site.x as i64 - r).rem_euclid(c.width as i64) as usize;
+    let row_len = (2 * r + 1) as usize;
     for dz in -r..=r {
         let z = site.z as i64 + dz;
         if z < 0 || z >= c.depth as i64 {
             continue;
         }
         for y in y_lo..=site.y {
-            for dx in -r..=r {
-                let i = c.index(site.x as i64 + dx, y, z as u32);
+            let row = (y as usize * c.depth as usize + z as usize) * width;
+            let mut x = x_west;
+            for _ in 0..row_len {
+                let i = row + x;
                 if view.material[i] == Material::Soil {
                     out.push(i);
+                }
+                x += 1;
+                if x == width {
+                    x = 0;
                 }
             }
         }
     }
-    out
 }
 
 /// What one cell of ground offers a root, on the scale `μ` and the establishment water
@@ -717,6 +1128,9 @@ fn aeration_target(saturated: f64, sc: &SpeciesConfig) -> f64 {
 
 /// `μ`: the species' ramp ([`SpeciesConfig::moisture_at`]) over the root box's mean
 /// available water, between `wilt_water` and `full_water`. An empty box is a wilting one.
+/// [`drink`] reads the same thing in one pass with the rest of its box ([`read_root_box`]);
+/// this is the reference its test holds it to.
+#[cfg(test)]
 fn moisture_of(view: &VoxelView<'_>, box_: &[usize], sc: &SpeciesConfig) -> f64 {
     match mean_available(view, box_) {
         None => 0.0,
@@ -762,6 +1176,9 @@ fn mycelium_sites(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> Vec<S
     let y_hi = (i64::from(site.y) + up_down).min(i64::from(c.height.max(1) - 1)) as u32;
     let r = sc.rooting_radius as i64;
     let width = c.width.max(1) as i64;
+    // Only a box wider than the world can meet a column twice (the `x` wrap); otherwise
+    // every site generated is new and the dedup scan is skipped.
+    let may_repeat = 2 * r + 1 > width;
     let mut out: Vec<Site> = Vec::new();
     for dz in -r..=r {
         let z = site.z as i64 + dz;
@@ -772,7 +1189,7 @@ fn mycelium_sites(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> Vec<S
             for dx in -r..=r {
                 let x = (site.x as i64 + dx).rem_euclid(width) as u32;
                 let s = Site { x, y, z: z as u32 };
-                if !out.contains(&s) {
+                if !may_repeat || !out.contains(&s) {
                     out.push(s);
                 }
             }
@@ -1345,10 +1762,9 @@ fn grow(
 
     let view = world.view();
     for &si in dead.iter().rev() {
-        let stand = stands[si];
-        die(config, &view, &stand, ground, ledger);
-        stands.remove(si);
+        die(config, &view, &stands[si], ground, ledger);
     }
+    remove_at(stands, &dead);
 }
 
 /// The mineral belonging to `moved` units of a stand's organic matter, taken out of the
@@ -1600,11 +2016,16 @@ fn decompose(flora: &mut Flora, pre: &[Pre]) {
         ledger,
         ..
     } = flora;
+    // Both are in site order, so one walk pairs each site with its tick-start stocks.
+    let mut i = 0;
     for g in ground.iter_mut() {
+        while i < pre.len() && pre[i].site < g.site {
+            i += 1;
+        }
         // A site the tick created has nothing eligible yet.
-        let Ok(i) = pre.binary_search_by_key(&g.site, |e| e.site) else {
+        if i == pre.len() || pre[i].site != g.site {
             continue;
-        };
+        }
         let (litter0, wood0, carrion0) = (pre[i].litter, pre[i].dead_wood, pre[i].carrion);
         decompose_pool(
             &mut g.litter,
@@ -2222,5 +2643,336 @@ mod tests {
         );
         let uptake = flora.view().ledger.substrate_uptake[Species::Glowcap.index()];
         assert_eq!(uptake, 4e-5, "the diagnostic flux is the whole withdrawal");
+    }
+
+    /// The full O(n²) sweep the bucketed light replaced, verbatim: the reference
+    /// [`light_per_stand`] must equal to the bit.
+    fn light_full_sweep(flora: &mut Flora, world: &World) -> Vec<f64> {
+        let Flora {
+            config,
+            stands,
+            sky,
+            ..
+        } = flora;
+        let view = world.view();
+        let voxel_m = view.config.voxel_m;
+        struct Shade {
+            x: f64,
+            z: f64,
+            top: f64,
+            radius: f64,
+            stock: f64,
+            share: f64,
+            porosity: f64,
+            area_m2: f64,
+        }
+        let crowns: Vec<Vec<Shade>> = stands
+            .iter()
+            .map(|s| {
+                crate::layers_of(config, s, voxel_m)
+                    .into_iter()
+                    .filter(|l| l.kind.bears_foliage())
+                    .map(|l| Shade {
+                        x: s.site.x as f64,
+                        z: s.site.z as f64,
+                        top: l.band_v[1],
+                        radius: l.radius_v,
+                        stock: l.stock,
+                        share: l.share,
+                        porosity: l.porosity,
+                        area_m2: l.area_m2,
+                    })
+                    .collect()
+            })
+            .collect();
+        let envelope: Vec<(f64, f64)> = crowns
+            .iter()
+            .map(|layers| {
+                layers
+                    .iter()
+                    .fold((f64::NEG_INFINITY, 0.0f64), |(t, r), l| {
+                        (t.max(l.top), r.max(l.radius))
+                    })
+            })
+            .collect();
+        let width = view.config.width as f64;
+        let mut out = Vec::with_capacity(stands.len());
+        for (i, stand) in stands.iter().enumerate() {
+            let open = sky_at(sky, &view, stand.site);
+            let mine = &crowns[i];
+            let total: f64 = mine.iter().map(|l| l.stock).sum();
+            let weight_by_stock = total > 0.0;
+            let mut l = 0.0;
+            let mut weighed = 0.0;
+            for layer in mine {
+                let w = if weight_by_stock {
+                    layer.stock
+                } else {
+                    layer.share
+                };
+                if !(w > 0.0) {
+                    continue;
+                }
+                let mut here = open;
+                for (j, other) in crowns.iter().enumerate() {
+                    if j == i {
+                        continue;
+                    }
+                    let (top, radius) = envelope[j];
+                    if top <= layer.top {
+                        continue;
+                    }
+                    let sx = wrapped_delta(other.first().map_or(0.0, |o| o.x), layer.x, width);
+                    let sz = other.first().map_or(0.0, |o| o.z) - layer.z;
+                    if sx * sx + sz * sz > radius * radius {
+                        continue;
+                    }
+                    for above in other {
+                        if above.top <= layer.top {
+                            continue;
+                        }
+                        let dx = wrapped_delta(above.x, layer.x, width);
+                        let dz = above.z - layer.z;
+                        if dx * dx + dz * dz > above.radius * above.radius {
+                            continue;
+                        }
+                        here *= (-config.shade_k_per_m2 * (1.0 - above.porosity) * above.stock
+                            / above.area_m2)
+                            .exp();
+                    }
+                }
+                l += w * here;
+                weighed += w;
+            }
+            let l = if weighed > 0.0 { l / weighed } else { open };
+            out.push(light_response(config.species(stand.species), l));
+        }
+        out
+    }
+
+    /// A soil plain `width × depth` at 0.125 m with a ragged skyline, densely seeded with
+    /// every species at keyed sizes between `alive_min` and `wood_max`.
+    fn crowded(width: u32, depth: u32, fill: f64, seed: u64) -> (Flora, World) {
+        let voxel_m = 0.125;
+        let mut world = World::empty(cubarium_voxel::Config {
+            width,
+            height: 40,
+            depth,
+            voxel_m,
+            seed: 5,
+            ..cubarium_voxel::Config::default()
+        });
+        let mut rng = Rng::keyed(99, seed, 0, 0);
+        for z in 0..depth {
+            for x in 0..width as i64 {
+                let top = 2 + rng.below(4) as u32;
+                for y in 1..=top {
+                    let pore = 0.05 + 0.9 * rng.unit();
+                    let cap = Material::Soil.pore_capacity() * world.config().voxel_volume();
+                    world.apply(WorldCommand::AddWater {
+                        x,
+                        y,
+                        z,
+                        volume_m3: pore * cap,
+                    });
+                    world.apply(WorldCommand::SetMaterial {
+                        x,
+                        y,
+                        z,
+                        material: Material::Soil,
+                    });
+                }
+            }
+        }
+        let mut flora = Flora::new(FloraConfig::for_voxel_size(voxel_m));
+        for z in 0..depth {
+            for x in 0..width as i64 {
+                if rng.unit() >= fill {
+                    continue;
+                }
+                let species = Species::ALL[rng.below(Species::ALL.len())];
+                let sc = flora.config.species(species).clone();
+                let wood = sc.alive_min + rng.unit() * (sc.wood_max - sc.alive_min);
+                flora.apply(
+                    &world,
+                    crate::Command::Seed {
+                        x,
+                        z,
+                        species,
+                        wood,
+                    },
+                );
+            }
+        }
+        (flora, world)
+    }
+
+    #[test]
+    fn the_bucketed_light_is_the_full_sweep() {
+        // A wide plain (buckets, the x seam), a narrow one (footprints wider than the
+        // world), and a browsed one (layer stocks moved off their capacities).
+        // The first plain holds over a thousand stands, so four threads split it.
+        for (width, depth, fill, seed) in [(64, 24, 0.7, 1), (6, 5, 0.9, 2), (33, 9, 0.5, 3)] {
+            let (mut flora, world) = crowded(width, depth, fill, seed);
+            assert!(
+                flora.stands.len() > (width * depth) as usize / 3,
+                "a crowded plain"
+            );
+            if seed == 3 {
+                let sites: Vec<Site> = flora.stands.iter().map(|s| s.site).step_by(2).collect();
+                for site in sites {
+                    let _ = flora.take_foliage(site, 0.01);
+                }
+            }
+            let mut reference = flora.clone();
+            let full = light_full_sweep(&mut reference, &world);
+            for threads in [1, 4] {
+                let bucketed = light_per_stand(&mut flora.clone(), &world, threads);
+                assert_eq!(bucketed, full, "{width}x{depth}, {threads} threads");
+            }
+            assert!(
+                full.iter()
+                    .any(|&l| l < 0.99 * full.iter().cloned().fold(0.0, f64::max))
+            );
+        }
+    }
+
+    /// The sorted sweep the scratch [`drink`] replaced, verbatim.
+    fn drink_sorted_sweep(flora: &mut Flora, world: &mut World) -> Vec<Drink> {
+        let mut out = vec![Drink::default(); flora.stands.len()];
+        let mut wants: Vec<(usize, usize, f64)> = Vec::new();
+        {
+            let view = world.view();
+            for (i, stand) in flora.stands.iter().enumerate() {
+                let sc = flora.config.species(stand.species);
+                let box_ = root_box(&view, stand.site, sc);
+                out[i].moisture = moisture_of(&view, &box_, sc);
+                if sc.water_depth_min_m > 0.0
+                    && standing_water_beside(&view, stand.site) < sc.water_depth_min_m
+                {
+                    out[i].moisture = 0.0;
+                }
+                out[i].saturated = saturated_fraction(&view, &box_, sc);
+                let demand =
+                    (sc.transpiration_m3_per_s * stand.foliage * out[i].moisture * DT).max(0.0);
+                if demand <= 0.0 || box_.is_empty() {
+                    continue;
+                }
+                let stock: f64 = box_.iter().map(|&v| drinkable_m3(&view, v)).sum();
+                if stock <= 0.0 {
+                    continue;
+                }
+                for &v in box_.iter() {
+                    let share = demand * drinkable_m3(&view, v) / stock;
+                    if share > 0.0 {
+                        wants.push((v, i, share));
+                    }
+                }
+            }
+        }
+        wants.sort_unstable_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+        let mut at = 0;
+        while at < wants.len() {
+            let voxel = wants[at].0;
+            let mut end = at;
+            let mut total = 0.0;
+            while end < wants.len() && wants[end].0 == voxel {
+                total += wants[end].2;
+                end += 1;
+            }
+            let (x, y, z) = world.config().coords(voxel);
+            let volume = total.min(drinkable_m3(&world.view(), voxel));
+            let accepted = if volume > 0.0 {
+                -world.apply(WorldCommand::WithdrawPore {
+                    x: x as i64,
+                    y,
+                    z,
+                    volume_m3: volume,
+                })
+            } else {
+                0.0
+            };
+            flora.ledger.transpired_m3 += accepted;
+            for &(_, stand, want) in &wants[at..end] {
+                out[stand].taken_m3 += split_proportional(accepted, want, total);
+            }
+            at = end;
+        }
+        out
+    }
+
+    #[test]
+    fn the_scratch_drink_is_the_sorted_sweep() {
+        // The first plain holds over a thousand stands, so four threads split it.
+        for (width, depth, fill, seed, threads) in [
+            (64, 24, 0.7, 4, 4),
+            (64, 24, 0.7, 4, 1),
+            (6, 5, 0.9, 5, 1),
+            (33, 9, 0.5, 6, 2),
+        ] {
+            let (mut flora, mut world) = crowded(width, depth, fill, seed);
+            let (mut ref_flora, mut ref_world) = (flora.clone(), world.clone());
+            // Twice, so the second call runs on the scratch the first one left behind.
+            for round in 0..2 {
+                let got = drink(&mut flora, &mut world, threads);
+                let want = drink_sorted_sweep(&mut ref_flora, &mut ref_world);
+                assert_eq!(got.len(), want.len());
+                assert!(want.iter().any(|d| d.taken_m3 > 0.0), "stands drank");
+                for (g, w) in got.iter().zip(&want) {
+                    assert_eq!((g.moisture, g.saturated), (w.moisture, w.saturated));
+                    assert!(
+                        (g.taken_m3 - w.taken_m3).abs() <= 1e-12 * w.taken_m3.abs(),
+                        "round {round}: {} vs {}",
+                        g.taken_m3,
+                        w.taken_m3
+                    );
+                }
+                assert_eq!(flora.ledger.transpired_m3, ref_flora.ledger.transpired_m3);
+                assert_eq!(world.view().pore, ref_world.view().pore, "the same withdrawals");
+                assert_eq!(
+                    world.view().ledger.transpiration_out,
+                    ref_world.view().ledger.transpiration_out
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_root_box_is_the_indexed_walk_across_the_seam() {
+        for (width, depth, seed) in [(40, 14, 7), (6, 5, 8), (3, 4, 9)] {
+            let (flora, world) = crowded(width, depth, 0.0, seed);
+            let view = world.view();
+            let c = view.config;
+            let mut got = Vec::new();
+            for species in Species::ALL {
+                let sc = flora.config.species(species);
+                for z in 0..depth {
+                    for x in 0..width {
+                        let Some(site) = crate::highest_support(&view, i64::from(x), z) else {
+                            continue;
+                        };
+                        let span = sc.rooting_depth.min(site.y + 1);
+                        let r = sc.rooting_radius as i64;
+                        let mut want = Vec::new();
+                        for dz in -r..=r {
+                            let zz = site.z as i64 + dz;
+                            if span == 0 || zz < 0 || zz >= c.depth as i64 {
+                                continue;
+                            }
+                            for y in site.y + 1 - span..=site.y {
+                                for dx in -r..=r {
+                                    let i = c.index(site.x as i64 + dx, y, zz as u32);
+                                    if view.material[i] == Material::Soil {
+                                        want.push(i);
+                                    }
+                                }
+                            }
+                        }
+                        root_box_into(&view, site, sc, &mut got);
+                        assert_eq!(got, want, "{species:?} at {site:?} on {width}x{depth}");
+                    }
+                }
+            }
+        }
     }
 }

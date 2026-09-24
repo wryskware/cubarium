@@ -3466,7 +3466,14 @@ impl Flora {
     /// Withdraws root water through `Command::WithdrawPore`; that is the only way this
     /// layer changes the world. The order within the tick is `step`'s module doc.
     pub fn step(&mut self, world: &mut World) {
-        step::step(self, world);
+        step::step(self, world, 1);
+    }
+
+    /// [`Flora::step`] with the per-stand reads of light and water split over up to
+    /// `threads` workers of the `bevy_tasks` compute pool (with the `parallel` feature).
+    /// The chunks are folded back in stand order, so every number is the serial step's.
+    pub fn step_with(&mut self, world: &mut World, threads: usize) {
+        step::step(self, world, threads);
     }
 
     /// Apply a command now. Returns whether it was accepted.
