@@ -249,9 +249,13 @@ pub const CENTER_EVALUATIONS: usize = TRAINING_LAYOUT_SEEDS.len();
 /// cap, not this, is what should stop a run.
 pub const MAX_UPDATES: u32 = 512;
 
-/// The voxel trainer's measured saturation point. The machine-wide policy also reserves
-/// ten percent of logical CPUs, but this workload gains little beyond sixteen workers.
-pub const MAX_EPISODE_WORKERS: usize = 16;
+/// The voxel trainer's cap on episode workers in one process. It was sixteen, a
+/// saturation point measured before the P5 landscapes; the cache study (2026-09-24,
+/// `design/handoffs/voxel-cache-and-pinning-2026-09-24.md`) measured browser landscapes
+/// at 258-265k ticks/s on 16 workers spread over both chiplets and 297-310k on 32, so
+/// the cap is now the desktop's thread count and the ten-percent reserve and the
+/// affinity mask (`taskset`) are what bound a run.
+pub const MAX_EPISODE_WORKERS: usize = 32;
 
 /// The available voxel episode workers: obey the machine-wide CPU reserve and the
 /// workload-specific saturation cap. Every episode itself stays single-threaded.
@@ -1067,12 +1071,12 @@ mod tests {
     }
 
     #[test]
-    fn worker_limit_reserves_ten_percent_then_stops_at_measured_saturation() {
+    fn worker_limit_reserves_ten_percent_then_stops_at_the_cap() {
         assert_eq!(worker_limit_for(1), 1);
         assert_eq!(worker_limit_for(2), 1);
         assert_eq!(worker_limit_for(10), 9);
-        assert_eq!(worker_limit_for(32).min(MAX_EPISODE_WORKERS), 16);
-        assert_eq!(worker_limit_for(128).min(MAX_EPISODE_WORKERS), 16);
+        assert_eq!(worker_limit_for(32).min(MAX_EPISODE_WORKERS), 28);
+        assert_eq!(worker_limit_for(128).min(MAX_EPISODE_WORKERS), 32);
     }
 
     /// The reserve is the machine's, the cap the process's own CPUs (cache study B).
@@ -1083,7 +1087,7 @@ mod tests {
             16,
             "`taskset -c 0-7,16-23` on the 32-thread desktop: the other chiplet is the reserve"
         );
-        assert_eq!(worker_limit_within(32, 32).min(MAX_EPISODE_WORKERS), 16);
+        assert_eq!(worker_limit_within(32, 32).min(MAX_EPISODE_WORKERS), 28);
         assert_eq!(worker_limit_within(32, 4), 4);
         assert_eq!(
             worker_limit_within(12, 12),
