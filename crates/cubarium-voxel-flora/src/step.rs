@@ -195,6 +195,7 @@ pub(crate) fn step(flora: &mut Flora, world: &mut World, threads: usize) {
     cubarium_voxel::voxel_phase!(FloraStep, {
         cubarium_voxel::voxel_phase!(Prune, { prune_unsupported(flora, world) });
         cubarium_voxel::voxel_phase!(SkyCache, { refresh_sky_cache(flora, world) });
+        cubarium_voxel::voxel_phase!(Cover, { crate::cover::prep(flora, world) });
         cubarium_voxel::voxel_phase!(Drown, { drown(flora, world) });
 
         let light =
@@ -204,6 +205,7 @@ pub(crate) fn step(flora: &mut Flora, world: &mut World, threads: usize) {
         cubarium_voxel::voxel_phase!(Grow, {
             grow(flora, world, &light, &moisture, &substrate)
         });
+        cubarium_voxel::voxel_phase!(Cover, { crate::cover::grow(flora, world) });
         cubarium_voxel::voxel_phase!(Decompose, { decompose(flora, &pre) });
         cubarium_voxel::voxel_phase!(SeedBank, { crate::seeds::seed_bank(flora, world) });
         cubarium_voxel::voxel_phase!(Propagate, { crate::seeds::propagate(flora, world) });
@@ -781,6 +783,10 @@ struct DrinkScratch {
     touched: Vec<u64>,
     /// One per chunk of stands, reused tick to tick.
     chunks: Vec<DrinkChunk>,
+    /// The latticevines' (voxel, vine index, wanted), in vine order, and their box scratch.
+    vine_wants: Vec<(u32, u32, f64)>,
+    vine_box: Vec<usize>,
+    vine_drinkable: Vec<f64>,
 }
 
 /// What one chunk of stands read out of its root boxes.
@@ -904,6 +910,9 @@ fn drink_with(
         cell,
         touched,
         chunks,
+        vine_wants,
+        vine_box,
+        vine_drinkable,
     } = scratch;
     let n = flora.stands.len();
     {
@@ -921,6 +930,17 @@ fn drink_with(
             touched[v / 64] |= 1 << (v % 64);
             cell[v][0] += share;
         }
+    }
+    // Then the latticevines' demands, in vine order, into the same totals: a vine and a
+    // stand over one cell share its one withdrawal.
+    {
+        let view = world.view();
+        crate::cover::drink_wants(flora, &view, vine_box, vine_drinkable, vine_wants);
+    }
+    for &(v, _, share) in vine_wants.iter() {
+        let v = v as usize;
+        touched[v / 64] |= 1 << (v % 64);
+        cell[v][0] += share;
     }
 
     // One bounded withdrawal per voxel, in ascending voxel order.
@@ -961,6 +981,11 @@ fn drink_with(
             }
         });
     }
+    for &(v, vine, want) in vine_wants.iter() {
+        let [total, got] = cell[v as usize];
+        crate::cover::drink_credit(flora, vine as usize, split_proportional(got, want, total));
+    }
+    crate::cover::drink_done(flora);
     // Leave the scratch all zero for the next call.
     for (word_at, word) in touched.iter_mut().enumerate() {
         let mut bits = *word;
@@ -1001,21 +1026,33 @@ fn root_box(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> Vec<usize> 
 
 /// [`root_box`] into a buffer the caller reuses, which is cleared first.
 fn root_box_into(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig, out: &mut Vec<usize>) {
+    root_box_dims_into(view, site, sc.rooting_depth, sc.rooting_radius, out);
+}
+
+/// [`root_box_into`] for a box given by its own depth and radius: the stands' and the
+/// latticevines' one root box.
+pub(crate) fn root_box_dims_into(
+    view: &VoxelView<'_>,
+    site: Site,
+    rooting_depth: u32,
+    rooting_radius: u32,
+    out: &mut Vec<usize>,
+) {
     out.clear();
     #[cfg(feature = "profile")]
     cubarium_voxel::profile::add(
         cubarium_voxel::profile::Count::BoxVoxels,
-        u64::from(sc.rooting_depth.min(site.y + 1))
-            * u64::from(2 * sc.rooting_radius + 1)
-            * u64::from(2 * sc.rooting_radius + 1),
+        u64::from(rooting_depth.min(site.y + 1))
+            * u64::from(2 * rooting_radius + 1)
+            * u64::from(2 * rooting_radius + 1),
     );
     let c = view.config;
-    let span = sc.rooting_depth.min(site.y + 1);
+    let span = rooting_depth.min(site.y + 1);
     if span == 0 {
         return;
     }
     let y_lo = site.y + 1 - span;
-    let r = sc.rooting_radius as i64;
+    let r = rooting_radius as i64;
     // `c.index`'s own arithmetic with the `x` wrap taken once per box rather than once per
     // voxel: row `(y, z)` starts at `(y · depth + z) · width`, and `x` steps from the box's
     // wrapped west edge, wrapping at the seam. Same voxels, same order.

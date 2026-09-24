@@ -2416,6 +2416,10 @@ impl FloraConfig {
             // The crown is in metres (package L) and needs no rescale: it is the same
             // physical plant on every grid.
         }
+        // The latticevine's root box, like a stand's. Its per-face numbers stay per face.
+        let vc = &mut config.latticevine;
+        vc.rooting_depth = scaled_voxel_distance(vc.rooting_depth, scale);
+        vc.rooting_radius = scaled_voxel_distance(vc.rooting_radius, scale);
         config
     }
 
@@ -2541,6 +2545,7 @@ impl FloraConfig {
         for species in Species::ALL {
             self.species(species).validate(species.name())?;
         }
+        self.latticevine.validate()?;
         for (label, v) in [
             ("shade_k_per_m2", self.shade_k_per_m2),
             ("decomposition", self.decomposition),
@@ -2600,6 +2605,12 @@ mod voxel_scale_tests {
             after.substrate_reach_up_down = before.substrate_reach_up_down;
             after.hop = before.hop;
         }
+        // The latticevine's root box is voxel geometry like a stand's.
+        let (vb, va) = (&reference.latticevine, &mut geometry_reset.latticevine);
+        assert_eq!(va.rooting_depth, vb.rooting_depth * 2);
+        assert_eq!(va.rooting_radius, vb.rooting_radius * 2);
+        va.rooting_depth = vb.rooting_depth;
+        va.rooting_radius = vb.rooting_radius;
         // The recorded cell size is not authored geometry: it is the world's, and it
         // is what a rule written in metres is converted with
         // ([`SpeciesConfig::crown_height`]).
@@ -2736,6 +2747,20 @@ pub struct FloraLedger {
     pub seeds_died: [u64; Species::COUNT],
     pub seeds_lost: [u64; Species::COUNT],
     pub clonal_births: [u64; Species::COUNT],
+    /// **Latticevine counters** ([`cover`]), cumulative diagnostics in no `expected_*`
+    /// total: founders and hand-seeded vines, sisters rooted, vines dead, faces covered by
+    /// spreading, faces lost (terrain, starvation), faces that changed hands in a contest,
+    /// and dormancies begun.
+    pub vine_births: u64,
+    pub vine_sisters: u64,
+    pub vine_deaths: u64,
+    pub vine_faces_spread: u64,
+    pub vine_faces_lost: u64,
+    pub vine_faces_contested: u64,
+    pub vine_dormancies: u64,
+    /// Organic matter the vines sent to litter: leaf fall, spent fruit, dropped runners
+    /// and dead vines' reserves. A diagnostic; the litter itself is in the ground totals.
+    pub vine_litter: f64,
 }
 
 impl FloraLedger {
@@ -3027,10 +3052,11 @@ impl<'a> FloraView<'a> {
             .map(|i| &self.ground[i])
     }
 
-    /// Organic matter in every living and dead stock, the seed banks included. The site's
-    /// mineral pool is not organic matter and is not in here.
+    /// Organic matter in every living and dead stock, the seed banks and the latticevines
+    /// included. The site's mineral pool is not organic matter and is not in here.
     pub fn organic(&self) -> f64 {
-        self.stands.iter().map(|s| s.material()).sum::<f64>()
+        self.cover.organic(&self.config.latticevine)
+            + self.stands.iter().map(|s| s.material()).sum::<f64>()
             + self
                 .ground
                 .iter()
@@ -3236,12 +3262,14 @@ impl<'a> FloraView<'a> {
             .collect()
     }
 
-    /// Energy in every living and dead stock.
+    /// Energy in every living and dead stock, the latticevines included.
     pub fn energy(&self) -> f64 {
-        self.stands
-            .iter()
-            .map(|s| self.config.species(s.species).energy_density * s.material())
-            .sum::<f64>()
+        self.config.latticevine.energy_density * self.cover.organic(&self.config.latticevine)
+            + self
+                .stands
+                .iter()
+                .map(|s| self.config.species(s.species).energy_density * s.material())
+                .sum::<f64>()
             + self
                 .ground
                 .iter()

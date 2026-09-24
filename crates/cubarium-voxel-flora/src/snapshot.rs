@@ -46,7 +46,12 @@ use crate::Flora;
 ///
 /// Schema 5: package SM (the follow-up round) adds two fields to every `Ground` — the latest
 /// landing and the about-to-sprout flag the D5 seed mark reads: refused, not migrated.
-pub const SCHEMA: u32 = 5;
+///
+/// Schema 6: the latticevine face cover (D15 Revision 2,
+/// `design/handoffs/latticevine-cover-sim-2026-09-23.md`): `Flora` gains its vines and
+/// covered faces, `FloraConfig` the `latticevine` section, and the ledger the vine
+/// counters. Refused, not migrated.
+pub const SCHEMA: u32 = 6;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

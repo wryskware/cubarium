@@ -19,6 +19,8 @@ profile = ["cubarium-voxel/profile"]
 anyhow = { workspace = true }
 cubarium-voxel = { workspace = true }
 postcard = { version = "1", features = ["use-std"] }
+# FxHash for the face-keyed indexes on the sim path (the latticevine cover).
+rustc-hash = "2"
 serde = { version = "1", features = ["derive"] }
 bevy_tasks = { workspace = true, optional = true }
 
