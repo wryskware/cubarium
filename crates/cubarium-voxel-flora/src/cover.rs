@@ -763,11 +763,30 @@ pub struct VineConfig {
 }
 
 impl Default for VineConfig {
+    /// The reference defaults, on the 0.25 m voxel (a face of 0.0625 m²). Placeholders
+    /// (`design/backlog.md` §1), chosen for the dossier's pace — "slow to cover, like
+    /// stonecushion" — with the pace set by what a face earns, not by a timer:
+    ///
+    /// - **Earning back a face.** A new face costs `spread_cost` 0.05 (its runner 0.02, the
+    ///   rest construction) plus its leaf, 0.05 at full leaf: 0.1 in all. A lit side face
+    ///   (sky about 0.7) nets about `0.7 · 9e-5 − 1e-5 − 2e-6 ≈ 5.1e-5` a second at full
+    ///   leaf, so it pays for a new face in about half an hour, and a colony that
+    ///   reinvests everything (a new face also regrows from 0.2 leaf at `regrow_rate`
+    ///   0.002/s) doubles in roughly half an hour: one founder covers a few faces in its
+    ///   first ten minutes, about 25 in two hours and about 100 of a lit, watered wall in
+    ///   three (`tests/latticevine.rs` t16–t17), where stonecushion takes about 11,500 s
+    ///   to grow up.
+    /// - **Water per leaf area like the ground plants.** Per square metre of leaf,
+    ///   springturf transpires about `1e-6 · 0.12 / 0.196 ≈ 6e-7` m³/s at full size and
+    ///   stonecushion about `1e-6 · 0.2 / 0.077 ≈ 2.6e-6`; the vine's 6e-8 m³/s per full
+    ///   face is `9.6e-7` per square metre, between the two. A colony of a hundred faces
+    ///   drinks 6e-6 m³/s, about half a litre an hour per ten faces, from one root box:
+    ///   a big cover on a dry foot runs its root out of water and goes dormant.
     fn default() -> VineConfig {
         VineConfig {
             rooting_depth: 2,
             rooting_radius: 1,
-            transpiration_m3_per_s: 5e-8,
+            transpiration_m3_per_s: 6e-8,
             wilt_water: 0.1,
             full_water: 0.5,
             dry_water: 0.15,
@@ -775,20 +794,20 @@ impl Default for VineConfig {
             dry_spell_s: 600.0,
             wet_spell_s: 300.0,
             leaf_fall_s: 60.0,
-            assimilation: 0.001,
+            assimilation: 9e-5,
             underside_light: 0.15,
             leaf_mass: 0.05,
             runner_mass: 0.02,
-            leaf_upkeep: 0.0001,
-            wood_upkeep: 0.00001,
-            regrow_rate: 0.01,
-            spread_cost: 0.03,
+            leaf_upkeep: 1e-5,
+            wood_upkeep: 2e-6,
+            regrow_rate: 0.002,
+            spread_cost: 0.05,
             spread_check_s: 5.0,
-            sister_cost: 0.2,
+            sister_cost: 0.1,
             sister_min_dist: 4,
             contest_threshold: 0.2,
             contest_check_s: 30.0,
-            spur_reserve_min: 0.02,
+            spur_reserve_min: 0.005,
             spur_window_s: 120.0,
             spur_jitter_s: 60.0,
             bud_s: 60.0,
@@ -799,12 +818,36 @@ impl Default for VineConfig {
             fruit: 0.005,
             energy_density: 1.0,
             founders: 6,
-            founder_reserve: 0.3,
+            founder_reserve: 0.1,
         }
     }
 }
 
 impl VineConfig {
+    /// Every per-face amount times `k`, the ratio of a face's area to the reference face's:
+    /// a face on a finer grid is a smaller piece of the same plant, so it holds, earns,
+    /// costs and drinks in proportion to its area, and a colony's pace in square metres is
+    /// the same on every grid. Rates per second, fractions, thresholds on the water scale,
+    /// times and distances along the cover are not amounts and are left alone.
+    pub fn scale_face_area(&mut self, k: f64) {
+        for v in [
+            &mut self.transpiration_m3_per_s,
+            &mut self.assimilation,
+            &mut self.leaf_mass,
+            &mut self.runner_mass,
+            &mut self.leaf_upkeep,
+            &mut self.wood_upkeep,
+            &mut self.spread_cost,
+            &mut self.sister_cost,
+            &mut self.spur_reserve_min,
+            &mut self.nectar,
+            &mut self.fruit,
+            &mut self.founder_reserve,
+        ] {
+            *v *= k;
+        }
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         for (label, v) in [
             ("transpiration_m3_per_s", self.transpiration_m3_per_s),
@@ -1527,8 +1570,11 @@ fn contest(cover: &mut Cover, c: &WorldConfig, f: Face, thr: f64, ledger: &mut F
 }
 
 /// A starving vine's outermost face — greatest path distance from its root, a face cut off
-/// from the root first, the root face last — goes: its tissue to the litter below it, the
-/// face to bare rock.
+/// from the root first, the root face last — goes: the runner's wood is drawn back into
+/// the reserve (the dossier's "the plant's reserve sits in the runners"), so the next
+/// runner goes only once that is spent too and a drought shrinks the colony over hours
+/// rather than ticks; what leaf, nectar and fruit it still held fall as litter; the face is
+/// bare rock.
 fn drop_outermost(
     cover: &mut Cover,
     c: &WorldConfig,
@@ -1557,7 +1603,8 @@ fn drop_outermost(
     let root = cover.vines[vi].root;
     let site = litter_site(view, cover.faces[s].face, root);
     let cf = cover.remove_slot(s);
-    litter.push((site, cf.organic(vc)));
+    cover.vines[vi].reserve += vc.runner_mass;
+    litter.push((site, cf.organic(vc) - vc.runner_mass));
     ledger.vine_faces_lost += 1;
 }
 

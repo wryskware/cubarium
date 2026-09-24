@@ -2416,10 +2416,12 @@ impl FloraConfig {
             // The crown is in metres (package L) and needs no rescale: it is the same
             // physical plant on every grid.
         }
-        // The latticevine's root box, like a stand's. Its per-face numbers stay per face.
+        // The latticevine's root box, like a stand's; and a face is `1 / scale²` of the
+        // reference face's area, so every per-face amount shrinks with it.
         let vc = &mut config.latticevine;
         vc.rooting_depth = scaled_voxel_distance(vc.rooting_depth, scale);
         vc.rooting_radius = scaled_voxel_distance(vc.rooting_radius, scale);
+        vc.scale_face_area(1.0 / (scale * scale));
         config
     }
 
@@ -2611,6 +2613,10 @@ mod voxel_scale_tests {
         assert_eq!(va.rooting_radius, vb.rooting_radius * 2);
         va.rooting_depth = vb.rooting_depth;
         va.rooting_radius = vb.rooting_radius;
+        // A half-size face is a quarter of the area: every per-face amount is a quarter.
+        assert_eq!(va.leaf_mass, vb.leaf_mass / 4.0);
+        assert_eq!(va.transpiration_m3_per_s, vb.transpiration_m3_per_s / 4.0);
+        va.scale_face_area(4.0);
         // The recorded cell size is not authored geometry: it is the world's, and it
         // is what a rule written in metres is converted with
         // ([`SpeciesConfig::crown_height`]).

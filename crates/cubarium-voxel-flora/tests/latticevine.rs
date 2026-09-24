@@ -1403,3 +1403,110 @@ fn t15_the_view_exposes_owner_leafiness_rooted_dormant_and_spur_per_face() {
     run_into_dormancy(&mut flora, &mut dry, id);
     check(&flora, true);
 }
+
+// ------------------------------------------------------------------ 16–17. pace (the defaults)
+
+/// The pace fixture: a rock wall at `x = 6`, 38 faces tall and 5 slabs deep (190 west
+/// faces), on the reference voxel, soil at `avail`, and one founder at the foot of the
+/// middle slab on the **shipped defaults**. The dossier's "slow to cover (like
+/// stonecushion, a long-lived rock plant)": a founder's cover is paid for by what its
+/// faces earn, and a face earns back its cost over a long time.
+fn pace_world(avail: f64, thin: bool) -> (Flora, World, u64) {
+    let mut plan = Plan::wall(12, 48, 5, 40);
+    if thin {
+        // A thin pocket: rock under one layer of soil, so the root box holds half the soil.
+        for x in 0..12 {
+            for z in 0..5 {
+                plan.set(x, 1, z, Material::Rock);
+            }
+        }
+    }
+    let world = plan.world(avail, false);
+    let config = FloraConfig::default();
+    let reserve = config.latticevine.founder_reserve;
+    let mut flora = Flora::new(config);
+    let id = seed(&mut flora, &world, foot(2), wf(3, 2), reserve);
+    let lineage = vine(&flora, id).lineage;
+    (flora, world, lineage)
+}
+
+/// Faces covered by the founder's lineage after each checkpoint, stepping flora alone.
+/// Also the founder's root water at the end (the available-water scale).
+fn pace_run(avail: f64, thin: bool, checkpoints_s: &[f64]) -> (Vec<usize>, f64) {
+    let (mut flora, mut world, lineage) = pace_world(avail, thin);
+    let mut out = Vec::new();
+    let mut done = 0;
+    for &t in checkpoints_s {
+        let n = ticks(t);
+        for _ in done..n {
+            flora.step(&mut world);
+        }
+        done = n;
+        out.push(lineage_faces(&flora, lineage).len());
+    }
+    assert_residuals(&flora, &format!("pace at avail {avail}"));
+    let root = flora
+        .view()
+        .cover
+        .vines()
+        .iter()
+        .find(|v| v.lineage == lineage && v.root == foot(2))
+        .map_or(f64::NAN, |v| v.water);
+    (out, root)
+}
+
+/// Well watered (soil near saturation) and lit, a founder covers at most fifteen faces in
+/// its first ten minutes: no doubling every couple of minutes.
+#[test]
+fn t16_a_watered_founder_covers_at_most_fifteen_faces_in_ten_minutes() {
+    let n = pace_run(1.9, false, &[600.0]).0[0];
+    assert!(
+        n <= 15,
+        "slow to cover: one founder covered {n} faces in 600 s"
+    );
+}
+
+/// The same wall over three hours: at least sixty faces and still growing (or the wall
+/// full). And a **dry root** at the same light — the same wall over a thin pocket (one
+/// layer of soil over rock) at half its drained water, so the root box holds a small store
+/// the cover itself drinks down — plateaus well below that: its peak is at most half the
+/// watered cover, its last hour's growth at most a fifth of the watered one's, and what
+/// stopped it is water — its root box has fallen deep into the moisture ramp while the
+/// watered root still reads full moisture — and not any cap (the wall has 190 faces).
+/// Flora stepped alone, one run each on its own thread, sampled every ten minutes.
+#[test]
+fn t17_three_hours_cover_sixty_faces_when_watered_and_a_dry_root_plateaus_below() {
+    let every: Vec<f64> = (1..=18).map(|k| 600.0 * k as f64).collect();
+    let (wet, dry) = std::thread::scope(|s| {
+        let wet = s.spawn(|| pace_run(1.9, false, &every));
+        let dry = s.spawn(|| pace_run(0.5, true, &every));
+        (wet.join().unwrap(), dry.join().unwrap())
+    });
+    let ((wet, wet_water), (dry, dry_water)) = (wet, dry);
+    eprintln!(
+        "faces every 10 min over 3 h — wet {wet:?} (root water {wet_water:.3}), \
+         dry {dry:?} (root water {dry_water:.3})"
+    );
+    let vc = FloraConfig::default().latticevine;
+    let w3 = wet[17];
+    assert!(w3 >= 60, "three watered hours cover at least 60 faces: {wet:?}");
+    assert!(
+        w3 > wet[14] || w3 >= 190,
+        "and are still growing in the last half hour, or have filled the wall: {wet:?}"
+    );
+    let peak = dry.iter().copied().max().unwrap_or(0);
+    assert!(
+        2 * peak <= w3,
+        "a dry root plateaus well below the watered one: dry {dry:?}, wet {wet:?}"
+    );
+    assert!(
+        5 * dry[17].saturating_sub(dry[11]) <= w3 - wet[11],
+        "the dry cover has all but stopped in the last hour: dry {dry:?}, wet {wet:?}"
+    );
+    let low = vc.wilt_water + 0.4 * (vc.full_water - vc.wilt_water);
+    assert!(
+        dry_water < low && wet_water >= vc.full_water,
+        "water is the limit: the dry root reads {dry_water:.3} (under {low:.3}), the \
+         watered root {wet_water:.3}"
+    );
+}
