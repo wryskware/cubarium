@@ -209,8 +209,11 @@ pub struct FounderPhysiology {
     /// voxels once at the consumer by [`FounderPhysiology::step_limits`], which rounds
     /// **down**: a riser is a step when its height is within the limit.
     ///
-    /// Browser **0.375 m up** (its own height) and **0.75 m down** (its own length), the
-    /// brief's numbers. Shredder **0.25 m both ways**: a long crawler steps what its
+    /// Browser **0.375 m both ways**, its own height (Fable, 2026-09-23). The brief had
+    /// 0.75 m down (its own length), but a drop it cannot climb back is a pit, and the
+    /// heuristic browsers walked into them and starved (seed 4's browser #15, two
+    /// voxels down a hollow at 32 min). A longer drop comes back after the retrain, when
+    /// a policy can learn to avoid pits. Shredder **0.25 m both ways**: a long crawler steps what its
     /// front segments reach, two thirds of its 0.375 m length, and taller risers are walls
     /// it climbs. That is the step it effectively had on the 0.25 m presets, where the old
     /// 0.125 m rounded up to a whole voxel. Measured: at a literal 0.125 m every 0.25 m
@@ -371,9 +374,10 @@ impl FounderPhysiology {
                 // The frondgrazer gives live birth out of a gestation escrow, which is
                 // in `SpeciesConfig::frondgrazer`'s own table.
                 motor_respiration_per_s: 0.001,
-                // Up its own height, down its own length (package mobility).
+                // Its own height both ways; a longer drop waits for the retrain (see the
+                // field).
                 step_up_m: 0.375,
-                step_down_m: 0.75,
+                step_down_m: 0.375,
                 climbs_walls: false,
                 wall_climb_cost_factor: WALL_CLIMB_COST_FACTOR,
                 wade_height_fraction: 0.5,
@@ -2788,21 +2792,21 @@ mod step_rule_tests {
     }
 
     /// The conversion rounds a physical step **down** (package mobility): the browser's
-    /// 0.375 m up / 0.75 m down is 3 / 6 voxels on the 0.125 m preset and 1 / 3 on the
+    /// 0.375 m both ways is 3 voxels on the 0.125 m preset and 1 on the
     /// 0.25 m presets; the shredder's 0.25 m is two voxels on the fine grid and one on
     /// the coarse one.
     #[test]
     fn the_step_converts_to_whole_voxels_rounding_down() {
         let browser = crate::FounderPhysiology::frozen(Founder::Browser);
         let shredder = crate::FounderPhysiology::frozen(Founder::Blind);
-        assert_eq!((browser.step_up_m, browser.step_down_m), (0.375, 0.75));
+        assert_eq!((browser.step_up_m, browser.step_down_m), (0.375, 0.375));
         assert_eq!((shredder.step_up_m, shredder.step_down_m), (0.25, 0.25));
         let l = |p: &crate::FounderPhysiology, v| {
             let s = p.step_limits(v);
             (s.up, s.down)
         };
-        assert_eq!(l(&browser, 0.125), (3, 6));
-        assert_eq!(l(&browser, 0.25), (1, 3));
+        assert_eq!(l(&browser, 0.125), (3, 3));
+        assert_eq!(l(&browser, 0.25), (1, 1));
         assert_eq!(l(&shredder, 0.125), (2, 2));
         assert_eq!(l(&shredder, 0.25), (1, 1));
     }

@@ -10,8 +10,8 @@ use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, DT, Materia
 use cubarium_voxel_flora::{Command as FloraCommand, Flora, FloraConfig, Site, Species as Plant};
 
 use cubarium_voxel_fauna::{
-    Actions, Command as FaunaCommand, Departure, Fauna, FaunaConfig, Founder, RouteMap, Scripted,
-    StartingStores,
+    Actions, Command as FaunaCommand, Departure, Fauna, FaunaConfig, Founder, RouteMap, RouteRule,
+    Scripted, StartingStores, StepLimits,
 };
 
 const EAST: f64 = std::f64::consts::FRAC_PI_2;
@@ -303,26 +303,27 @@ fn browser_after_drop(drop: u32) -> Site {
     fauna.view().animal(id).expect("alive").site
 }
 
-/// Test 5: a browser steps up 0.375 m (its own height) but not 0.5 m, and down 0.75 m
-/// (its own length) but not 1.0 m. On a 0.125 m grid: up 3 voxels not 4, down 6 not 8.
+/// Test 5: a browser steps up 0.375 m (its own height) but not 0.5 m, and down the same
+/// (Fable's decision: the brief's 0.75 m down made pits the heuristics starved in; a
+/// longer drop comes back after the retrain). On a 0.125 m grid: 3 voxels, not 4.
 #[test]
-fn a_browser_steps_up_its_height_and_down_its_length() {
+fn a_browser_steps_up_and_down_its_height() {
     let phys = *FaunaConfig::default().founder(Founder::Browser);
     assert!(!phys.climbs_walls, "a browser does not climb walls");
     let l = phys.step_limits(0.125);
-    assert_eq!((l.up, l.down), (3, 6));
+    assert_eq!((l.up, l.down), (3, 3));
     let l = phys.step_limits(0.25);
     assert_eq!(
         (l.up, l.down),
-        (1, 3),
+        (1, 1),
         "0.375 m is one 0.25 m voxel, never two"
     );
 
     assert_eq!(browser_after_riser(3).y, 5, "a 0.375 m riser is a step up");
     assert_eq!(browser_after_riser(4).y, 2, "a 0.5 m riser is a wall");
-    assert_eq!(browser_after_drop(6).y, 2, "a 0.75 m drop is a step down");
-    assert_eq!(browser_after_drop(7).y, 9, "a 0.875 m drop is refused");
-    assert_eq!(browser_after_drop(8).y, 10, "a 1.0 m drop is refused");
+    assert_eq!(browser_after_drop(3).y, 2, "a 0.375 m drop is a step down");
+    assert_eq!(browser_after_drop(4).y, 6, "a 0.5 m drop is refused");
+    assert_eq!(browser_after_drop(6).y, 8, "a 0.75 m drop is refused");
 }
 
 // ------------------------------------------------------------------ 6. wading
@@ -466,9 +467,10 @@ fn a_body_in_deep_water_can_step_toward_shallower() {
 
 // -------------------------------------------------------------- 9. components
 
-/// Test 9: a shredder's walkable components join a wall's foot and its top; a browser's
-/// join two faces only when each can reach the other (up 0.375 m and down 0.75 m, so a
-/// 0.5 m riser separates them and a 0.25 m one does not).
+/// Test 9: a shredder's walkable components join a wall's foot and its top; route
+/// components join two faces only when each can reach the other — under a rule of one
+/// voxel up and three down, a two-voxel riser (down, not up) separates them — and the
+/// browser's own 0.375 m both ways joins a 0.25 m step and not a 0.5 m one.
 #[test]
 fn route_maps_join_a_climbable_wall_and_browsers_use_mutual_reachability() {
     let c = FaunaConfig::default();
@@ -481,7 +483,26 @@ fn route_maps_join_a_climbable_wall_and_browsers_use_mutual_reachability() {
     assert_eq!(foot, top, "a shredder's route joins a wall's foot and top");
 
     let high = plateau(16, 3, 2, 8, 12);
-    let map = RouteMap::for_founder(&high.view(), c.founder(Founder::Browser));
+    let browser = c.founder(Founder::Browser);
+    let asymmetric = RouteMap::new(
+        &high.view(),
+        browser.adult_body(),
+        browser.wade_depth_m(&browser.adult_body()),
+        RouteRule {
+            step: StepLimits { up: 1, down: 3 },
+            climbs_walls: false,
+        },
+    );
+    assert_ne!(
+        asymmetric
+            .component_of(at(7, 2))
+            .expect("the ground is standable"),
+        asymmetric
+            .component_of(at(8, 4))
+            .expect("the plateau is standable"),
+        "a riser that can be stepped down but not up does not join"
+    );
+    let map = RouteMap::for_founder(&high.view(), browser);
     let (below, above) = (
         map.component_of(at(7, 2)).expect("the ground is standable"),
         map.component_of(at(8, 4))
@@ -489,7 +510,7 @@ fn route_maps_join_a_climbable_wall_and_browsers_use_mutual_reachability() {
     );
     assert_ne!(
         below, above,
-        "a 0.5 m riser can be stepped down but not up, so it does not join"
+        "a 0.5 m riser is over the browser's step both ways"
     );
     let low = plateau(16, 3, 1, 8, 12);
     let map = RouteMap::for_founder(&low.view(), c.founder(Founder::Browser));
