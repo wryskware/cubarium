@@ -474,9 +474,12 @@ fn the_manifest_carries_the_physiologys_anchors_and_cruises_at_one_body_length()
         assert_eq!(m.mouth_ceiling_fraction, p.mouth_ceiling_fraction);
         assert_eq!(m.mouth_reach_body_lengths, p.mouth_reach_length_fraction);
         assert_eq!(m.contact_height_fraction, p.contact_height_fraction);
-        assert_eq!(m.climb_m, p.climb_m);
-        assert_eq!(m.wade_depth_m, p.core.wade_depth_m);
-        assert_eq!(m.drown_depth_m, p.core.drown_depth_m);
+        assert_eq!(m.step_up_m, p.step_up_m);
+        assert_eq!(m.step_down_m, p.step_down_m);
+        assert_eq!(m.climbs_walls, p.climbs_walls);
+        assert_eq!(m.wade_height_fraction, p.wade_height_fraction);
+        assert_eq!(m.drown_height_fraction, p.drown_height_fraction);
+        assert_eq!(m.drown_after_s, p.drown_after_s);
         assert_eq!(m.cruise_m_per_s, p.adult_length_m, "{founder:?}: 1 BL/s");
         assert!(
             (m.forward_reference_m - m.cruise_m_per_s * m.controller_period_s).abs() < 1e-15,
@@ -519,14 +522,23 @@ fn the_canonical_text_changes_when_any_anchor_changes() {
         m.contact_height_fraction = 0.4;
         changed.push(("contact", m));
         let mut m = base;
-        m.climb_m *= 2.0;
-        changed.push(("climb", m));
+        m.step_up_m *= 2.0;
+        changed.push(("step up", m));
         let mut m = base;
-        m.wade_depth_m = 0.06;
+        m.step_down_m *= 2.0;
+        changed.push(("step down", m));
+        let mut m = base;
+        m.climbs_walls = !m.climbs_walls;
+        changed.push(("walls", m));
+        let mut m = base;
+        m.wade_height_fraction = 0.3;
         changed.push(("wade", m));
         let mut m = base;
-        m.drown_depth_m = 0.3;
+        m.drown_height_fraction = 0.9;
         changed.push(("drown", m));
+        let mut m = base;
+        m.drown_after_s = 30.0;
+        changed.push(("drown time", m));
         let mut m = base;
         m.cruise_m_per_s *= 1.1;
         changed.push(("cruise", m));
@@ -575,6 +587,11 @@ fn quiet_observation(founder: Founder) -> Vec<f64> {
         }
         if let Some(valid) = module.channels.iter().position(|c| *c == "valid") {
             o[module.offset + valid] = 1.0;
+        }
+        // Standing on ground: the underside receptor feels the support face (a body with
+        // nothing under it is on a terrain face since package mobility).
+        if module.name == "Contact(4)" {
+            o[module.offset + 3] = 1.0;
         }
     }
     o

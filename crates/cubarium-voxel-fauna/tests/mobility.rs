@@ -279,7 +279,7 @@ fn a_stand_is_never_climbed() {
 /// riser of `rise` voxels at column 16.
 fn browser_after_riser(rise: u32) -> Site {
     let world = terrain(48, 6, 24, 0.125, |x| {
-        if (16..=30).contains(&x) { 2 + rise } else { 2 }
+        if (16..=46).contains(&x) { 2 + rise } else { 2 }
     });
     let mut flora = Flora::new(FloraConfig::default());
     let (mut fauna, id) = walker(&world, Founder::Browser, 8, 3, EAST, 1.0);

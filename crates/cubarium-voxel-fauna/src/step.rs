@@ -763,6 +763,14 @@ fn founder_act(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &mut Fl
     let manifest = founder.manifest();
     let phys = *fauna.config.founder(founder);
     let sc = phys.core;
+    fauna.ledger.founder_ticks_by_founder[founder.index()] += 1;
+
+    // On a wall the tick is the climb's, and nothing else: no feeding, no sweep.
+    if fauna.animals[i].mobility.climb.is_some() {
+        fauna.ledger.wall_ticks_by_founder[founder.index()] += 1;
+        climb_tick(fauna, i, view, &manifest, &phys, held);
+        return;
+    }
 
     // The motor budget: `motor_respiration_per_s` of organic matter per unit of body
     // per second at full cruise, scaled by the requested equivalent displacement
@@ -783,10 +791,11 @@ fn founder_act(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &mut Fl
     let (motor_paid, motor_body) = respire(fauna, i, cost, Respiration::Motor);
 
     // Paid heading motion on the continuous pose: turn, then a bounded sub-step sweep.
-    // The sweep may put the body's feet on a support face within its lineage's climb of
-    // the one it started on, so the standing layer goes in and comes back out
-    // (`design/handoffs/voxel-founder-step-2026-09-22.md`).
-    let climb = body::climb_voxels(&phys, view.config.voxel_m);
+    // The sweep may put the body's feet on a support face within its lineage's step up
+    // or down of the one it started on, so the standing layer goes in and comes back out
+    // (`design/handoffs/voxel-founder-step-2026-09-22.md`; split up/down and the water
+    // read against the body's own height by package mobility).
+    let step_limits = phys.step_limits(view.config.voxel_m);
     let (motion, standing_y) = {
         let a = &mut fauna.animals[i];
         let mut standing_y = a.site.y;
@@ -796,12 +805,21 @@ fn founder_act(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &mut Fl
             &mut standing_y,
             &manifest,
             &geometry,
-            sc.wade_depth_m,
-            climb,
+            phys.wade_depth_m(&geometry),
+            step_limits,
             held,
         );
         (motion, standing_y)
     };
+    {
+        let from = fauna.animals[i].site.y;
+        let l = &mut fauna.ledger;
+        if standing_y > from {
+            l.ledges_up_by_founder[founder.index()] += 1;
+        } else if standing_y < from {
+            l.ledges_down_by_founder[founder.index()] += 1;
+        }
+    }
     // The pose is authoritative for a founder: the support site follows the centre
     // column, and its layer follows whatever ledge the sweep stepped onto. Movement is
     // constrained so this always stays a support face; a pose that cannot be resolved at
@@ -829,6 +847,18 @@ fn founder_act(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &mut Fl
         fb.motor_respiration += motor_paid;
     }
 
+    // A climber stopped by terrain it could go up or down attaches to the face instead;
+    // one stopped under an overhang turns back (package mobility, decision 1).
+    if motion.blocked && held.forward > 0.0 && phys.climbs_walls {
+        match attach(fauna, i, view, &phys, &geometry, step_limits) {
+            Attach::Climbing => {
+                fauna.animals[i].state = State::Climbing;
+                return;
+            }
+            Attach::TurnedBack | Attach::Nothing => {}
+        }
+    }
+
     // Feeding: one attempt per controller interval, on the due tick, from the
     // post-motion mouth, through the plant layer's real withdrawals. A failed or
     // no-contact attempt transfers nothing.
@@ -844,6 +874,266 @@ fn founder_act(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &mut Fl
     } else {
         State::Resting
     };
+}
+
+/// What a blocked climber did with the face in front of it.
+enum Attach {
+    /// It is on the face now.
+    Climbing,
+    /// The way along the face was shut (an overhang, a roof, no room at the far end): it
+    /// turned round.
+    TurnedBack,
+    /// There was no face: it stays blocked, as any body does.
+    Nothing,
+}
+
+/// The axis step `(dx, dz)` nearest a heading, and the heading that points exactly along
+/// it (`Pose::forward` is `(sin h, cos h)`).
+fn axis_of(heading: f64) -> ((i64, i64), f64) {
+    let (fx, fz) = (heading.sin(), heading.cos());
+    let dir = if fx.abs() >= fz.abs() {
+        (if fx >= 0.0 { 1 } else { -1 }, 0)
+    } else {
+        (0, if fz >= 0.0 { 1 } else { -1 })
+    };
+    (dir, heading_of(dir))
+}
+
+/// The heading that points exactly along an axis step.
+fn heading_of(dir: (i64, i64)) -> f64 {
+    match dir {
+        (1, 0) => std::f64::consts::FRAC_PI_2,
+        (-1, 0) => 3.0 * std::f64::consts::FRAC_PI_2,
+        (0, 1) => 0.0,
+        _ => std::f64::consts::PI,
+    }
+}
+
+/// The coordinate, along the axis of `dir`, of the plane between column `col` and the
+/// next one along `dir`, and the pose coordinate `r` beyond it on side `side` (`1` past
+/// the plane in `dir`, `-1` short of it).
+fn beside_plane(col: i64, dir: i64, voxel_m: f64, r: f64, side: f64) -> f64 {
+    let plane = if dir > 0 {
+        (col + 1) as f64
+    } else {
+        col as f64
+    } * voxel_m;
+    // A hair more than the radius, so the disc is tangent to the face and never in it.
+    plane + side * dir as f64 * r * (1.0 + 1e-9)
+}
+
+/// **Attach to a face** (package mobility, decision 1). The body's sweep was refused
+/// while it held forward effort; if the column ahead along its heading's axis is a wall
+/// taller than its step ([`body::wall_ascent`]) or a cliff deeper than its step down
+/// ([`body::wall_descent`]) and the body is pressed against it, it goes onto the face:
+/// heading snapped into the face, pose tangent to it (hanging beside the cliff for a
+/// descent), and a [`crate::WallClimb`] on the body. Its `site` stays where it stood.
+///
+/// The way along the face is checked **whole, here**, for the column (overhang, roof,
+/// room at the end) and for the body's disc over every layer it will pass; a shut way
+/// turns the body round (the brief's overhang rule). Water at the far end deeper than it
+/// wades refuses the face the way it refuses a step, without a turn. An open way is
+/// climbed on the following ticks by [`climb_tick`].
+fn attach(
+    fauna: &mut Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    phys: &crate::FounderPhysiology,
+    geometry: &crate::Body,
+    step_limits: crate::StepLimits,
+) -> Attach {
+    let c = view.config;
+    let v = c.voxel_m;
+    let a = fauna.animals[i];
+    let r = geometry.footprint_radius();
+    let headroom = geometry.headroom_voxels(v);
+    let Some((cx, cz)) = a.pose.column(v, c.depth) else {
+        return Attach::Nothing;
+    };
+    let cx = cx.rem_euclid(i64::from(c.width));
+    let (dir, into) = axis_of(a.pose.heading_rad);
+    // Pressed against it: the centre within a radius of the plane it faces.
+    let (along, col) = if dir.0 != 0 {
+        (a.pose.x, cx)
+    } else {
+        (a.pose.z, i64::from(cz))
+    };
+    let plane = beside_plane(col, if dir.0 != 0 { dir.0 } else { dir.1 }, v, 0.0, 0.0);
+    let gap = if dir.0 != 0 {
+        // x wraps: measure the short way round.
+        let w = f64::from(c.width) * v;
+        let d = (plane - along).rem_euclid(w);
+        d.min(w - d)
+    } else {
+        (plane - along).abs()
+    };
+    if gap > r * (1.0 + 1e-3) {
+        return Attach::Nothing;
+    }
+    let y = a.site.y;
+    let up = body::wall_ascent(view, cx, y, cz, dir, headroom, step_limits.up);
+    let (face, ascending) = match up {
+        body::Face::Not => (
+            body::wall_descent(view, cx, y, cz, dir, headroom, step_limits.down),
+            false,
+        ),
+        other => (other, true),
+    };
+    let turn_back = |fauna: &mut Fauna| {
+        let a = &mut fauna.animals[i];
+        a.pose.heading_rad =
+            (a.pose.heading_rad + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU);
+        Attach::TurnedBack
+    };
+    let to_y = match face {
+        body::Face::Not => return Attach::Nothing,
+        body::Face::Blocked => return turn_back(fauna),
+        body::Face::Climb(to_y) => to_y,
+    };
+    let ax = (cx + dir.0).rem_euclid(i64::from(c.width));
+    let az = (i64::from(cz) + dir.1) as u32;
+    let to = Site {
+        x: ax as u32,
+        y: to_y,
+        z: az,
+    };
+    // The body's own passage: its disc at the pose it climbs at, over every layer it
+    // will pass, and at the pose it will stand in at the end.
+    let s = if dir.0 != 0 { dir.0 } else { dir.1 };
+    let hang_side = if ascending { -1.0 } else { 1.0 };
+    let climb_at = beside_plane(col, s, v, r, hang_side);
+    let end_at = beside_plane(col, s, v, r, 1.0);
+    let at = |coord: f64| -> (f64, f64) {
+        if dir.0 != 0 {
+            (coord.rem_euclid(f64::from(c.width) * v), a.pose.z)
+        } else {
+            (a.pose.x, coord)
+        }
+    };
+    let (px, pz) = at(climb_at);
+    let (ex, ez) = at(end_at);
+    let (lo, hi) = (y.min(to_y) + 1, (y.max(to_y) + headroom).min(c.height - 1));
+    let end_layers = to_y + 1..=(to_y + headroom).min(c.height - 1);
+    if !body::disc_clear(view, px, pz, r, lo..=hi) || !body::disc_clear(view, ex, ez, r, end_layers)
+    {
+        return turn_back(fauna);
+    }
+    // Water at the far end deeper than it wades is refused the way a step into it is:
+    // the body stays where it is and does not turn on its own.
+    if view.water_depth_m(ax, to_y, az) > phys.wade_depth_m(geometry) {
+        return Attach::Nothing;
+    }
+    let a = &mut fauna.animals[i];
+    a.pose.x = px;
+    a.pose.z = pz;
+    a.pose.heading_rad = if ascending {
+        into
+    } else {
+        (into + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU)
+    };
+    a.mobility.climb = Some(crate::WallClimb {
+        ascending,
+        from: a.site,
+        to,
+        dir: (dir.0 as i8, dir.1 as i8),
+        progress_m: 0.0,
+        rise_m: f64::from(y.abs_diff(to_y)) * v,
+    });
+    Attach::Climbing
+}
+
+/// **One tick on a face** (package mobility, decision 1). The feet move along it at half
+/// the walking pace the held forward effort asks for, `0.5 · forward · cruise`, and the
+/// motor cost is the walking cost at that effort × [`crate::FounderPhysiology::
+/// wall_climb_cost_factor`]. Turn effort is not read on a face: the heading stays into
+/// it. The interval's motion feedback books the climbing gait's own request (half pace at
+/// the held effort) as attempted and what the feet covered as delivered, so an open face
+/// reads as an open road on the motor-delivery channel. At the end of the face it stands
+/// on the far face, beside the plane, heading on in the direction it came: a wall's top
+/// or a cliff's foot. If the far face is gone by then (terrain moved) it slides back to
+/// where it started and turns round.
+fn climb_tick(
+    fauna: &mut Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    manifest: &crate::Manifest,
+    phys: &crate::FounderPhysiology,
+    held: Actions,
+) {
+    let founder = fauna.animals[i].founder.expect("a founder body");
+    let effort = held.forward.clamp(0.0, 1.0);
+    let cost = phys.motor_respiration_per_s
+        * fauna.animals[i].body
+        * effort
+        * phys.wall_climb_cost_factor
+        * DT;
+    let (motor_paid, motor_body) = respire(fauna, i, cost, Respiration::Motor);
+    let rate = 0.5 * effort * manifest.cruise_m_per_s;
+    let a = &mut fauna.animals[i];
+    let mut climb = a.mobility.climb.expect("a body on a face");
+    let before = climb.progress_m;
+    climb.progress_m = (climb.progress_m + rate * DT).min(climb.rise_m);
+    let moved = climb.progress_m - before;
+    {
+        let fb = &mut a.founder_state.feedback;
+        // What the climbing gait was asked for — half pace at this effort — so a face
+        // with nothing in the way delivers all of it, as open ground does.
+        fb.attempted_equivalent += rate * DT;
+        fb.delivered_equivalent += moved;
+        fb.delivered_forward += moved;
+        fb.structural_loss += motor_body;
+        fb.motor_respiration += motor_paid;
+    }
+    a.state = State::Climbing;
+    if climb.progress_m < climb.rise_m - 1e-12 {
+        a.mobility.climb = Some(climb);
+        return;
+    }
+    // The end of the face.
+    let c = view.config;
+    let v = c.voxel_m;
+    let geometry = phys.body_at(a.body);
+    let r = geometry.footprint_radius();
+    let headroom = geometry.headroom_voxels(v);
+    let dir = (i64::from(climb.dir.0), i64::from(climb.dir.1));
+    let s = if dir.0 != 0 { dir.0 } else { dir.1 };
+    let col = if dir.0 != 0 {
+        i64::from(climb.from.x)
+    } else {
+        i64::from(climb.from.z)
+    };
+    let end_at = beside_plane(col, s, v, r, 1.0);
+    let (ex, ez) = if dir.0 != 0 {
+        (end_at.rem_euclid(f64::from(c.width) * v), a.pose.z)
+    } else {
+        (a.pose.x, end_at)
+    };
+    let to = climb.to;
+    let top = (to.y + headroom).min(c.height - 1);
+    let travel = heading_of(dir);
+    a.mobility.climb = None;
+    if view.is_support(i64::from(to.x), to.y, to.z)
+        && body::disc_clear(view, ex, ez, r, to.y + 1..=top)
+    {
+        a.pose.x = ex;
+        a.pose.z = ez;
+        a.pose.heading_rad = travel;
+        a.site = to;
+        if climb.ascending {
+            fauna.ledger.wall_ascents_by_founder[founder.index()] += 1;
+        } else {
+            fauna.ledger.wall_descents_by_founder[founder.index()] += 1;
+        }
+    } else {
+        // Back where it started, facing away from the face.
+        let back = beside_plane(col, s, v, r, -1.0);
+        if dir.0 != 0 {
+            a.pose.x = back.rem_euclid(f64::from(c.width) * v);
+        } else {
+            a.pose.z = back;
+        }
+        a.pose.heading_rad = (travel + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU);
+    }
 }
 
 /// The founder's supported local bite: the blind founder takes **detritus** — litter or
@@ -1368,6 +1658,7 @@ fn gestate(
         energy: e.energy,
         age_ticks: 0,
         state: State::Resting,
+        mobility: crate::Mobility::default(),
     })
 }
 
@@ -1405,6 +1696,10 @@ fn fail_gestation(fauna: &mut Fauna, i: usize, rule: &crate::Reproduction) {
 /// no refractory, and the surplus keeps standing for the next tick.
 fn lay(fauna: &mut Fauna, i: usize, flora: &Flora, sc: &SpeciesConfig, rule: &crate::Reproduction) {
     if fauna.animals[i].reproduction.surplus_ticks < rule.hold_ticks() {
+        return;
+    }
+    // Not on a wall: a clutch goes on the litter the body is standing in.
+    if fauna.animals[i].mobility.climb.is_some() {
         return;
     }
     let Some(lineage) = fauna.animals[i].founder else {
@@ -1546,13 +1841,48 @@ fn hatch(fauna: &mut Fauna, view: &VoxelView<'_>, newborns: &mut Vec<Animal>) {
                 energy: e,
                 age_ticks: 0,
                 state: State::Resting,
+                mobility: crate::Mobility::default(),
             });
         }
     }
 }
 
+/// The standing water over a body's feet, metres: the water on its face on the ground;
+/// on a wall, the water on the lower face less the feet's height over it (up a wall from
+/// a flooded foot it climbs out; down a cliff into a pool it goes under as it nears the
+/// foot).
+fn water_over_feet(view: &VoxelView<'_>, a: &Animal) -> f64 {
+    let depth = |s: Site| view.water_depth_m(i64::from(s.x), s.y, s.z);
+    match a.mobility.climb {
+        None => depth(a.site),
+        Some(c) if c.ascending => depth(c.from) - c.progress_m,
+        Some(c) => depth(c.to) - (c.rise_m - c.progress_m),
+    }
+}
+
 /// Step 7: starvation and drowning, and the carrion they leave.
 fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
+    // A founder drowns **by its own height and over time** (package mobility, decision
+    // 3): each tick the water over its feet is deeper than its drown depth advances its
+    // count, any other tick resets it, and it drowns when the count reaches the lineage's
+    // `drown_ticks`. A body with no lineage keeps the instant rule on `drown_depth_m`.
+    let mut drowning: Vec<bool> = Vec::with_capacity(fauna.animals.len());
+    for i in 0..fauna.animals.len() {
+        let a = fauna.animals[i];
+        let sc = body::effective_config(&fauna.config, &a);
+        let Some(founder) = a.founder else {
+            drowning.push(
+                view.water_depth_m(i64::from(a.site.x), a.site.y, a.site.z) > sc.drown_depth_m,
+            );
+            continue;
+        };
+        let phys = fauna.config.founder(founder);
+        let geometry = phys.body_at(a.body);
+        let under = water_over_feet(view, &a) > phys.drown_depth_m(&geometry);
+        let m = &mut fauna.animals[i].mobility;
+        m.submerged_ticks = if under { m.submerged_ticks + 1 } else { 0 };
+        drowning.push(m.submerged_ticks >= phys.drown_ticks());
+    }
     // The cause is read off the same two clauses the rule is made of, in the order the
     // rule reads them: this is a label on an existing decision, not a second decision.
     // A body that satisfies both is `Starved`, which the `else if` fixes explicitly.
@@ -1564,8 +1894,7 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
             let sc = body::effective_config(&fauna.config, a);
             if a.body < sc.body_min {
                 Some((i, Departure::Starved))
-            } else if view.water_depth_m(i64::from(a.site.x), a.site.y, a.site.z) > sc.drown_depth_m
-            {
+            } else if drowning[i] {
                 Some((i, Departure::Drowned))
             } else {
                 None

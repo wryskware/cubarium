@@ -84,9 +84,13 @@ use crate::Fauna;
 /// [`crate::SpeciesConfig`] gained `bite_half_stock` and `growth_max_per_s`, and a body's
 /// structure is now built out of its reserve at a capped rate, so a schema-14 juvenile grew
 /// under a rule this build does not run: refused, not re-anchored.
+/// Schema 16 is **package mobility** (`design/handoffs/voxel-mobility-2026-09-23.md`):
+/// an [`crate::Animal`] carries its [`crate::Mobility`] (the wall it is on, its time under
+/// water), the [`crate::FounderPhysiology`] its step up/down, wall climbing and water
+/// fractions, and the ledger six movement counters: refused, not migrated.
 /// Postcard is not self-describing, so older worlds are **refused**, not migrated
 /// (`always-fresh-never-migrate`): start a fresh world.
-pub const SCHEMA: u32 = 15;
+pub const SCHEMA: u32 = 16;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -296,6 +300,7 @@ mod tests {
             energy: 2.0 * body,
             age_ticks: 0,
             state: State::Resting,
+            mobility: crate::Mobility::default(),
         }
     }
 

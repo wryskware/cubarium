@@ -78,7 +78,8 @@ use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraView, Site, Taken};
 use serde::{Deserialize, Serialize};
 
 pub use body::{
-    Body, FounderPhysiology, birth_readiness, climb_voxels, effective_config, has_headroom,
+    Body, Face, FounderPhysiology, StepLimits, birth_readiness, effective_config, has_headroom,
+    step_voxels, wall_ascent, wall_descent,
 };
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
@@ -87,10 +88,10 @@ pub use controller::{
 pub use cubarium_voxel::{DT, TICK_HZ};
 pub use cubarium_voxel_flora::Reach;
 pub use encounter::{
-    HEADING_SAMPLES, RouteMap, SightMap, band_crown_layers, crown_columns, crown_layer,
+    HEADING_SAMPLES, RouteMap, RouteRule, SightMap, band_crown_layers, crown_columns, crown_layer,
     crown_slab_m, eye_above_surface_m, eye_origin_m, foliage_stands_in_layers, layer_columns,
     mouth_columns_at, mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg,
-    reachable_layers_of, standable_faces, surface_m, walkable_components,
+    reachable_layers_of, route_components, standable_faces, surface_m, walkable_components,
 };
 pub use manifest::{
     ACTION_DEADBAND, Action, BIRTH_READINESS_RULE, BROWSER_RAY_PITCH_OFFSETS_DEG,
@@ -482,6 +483,54 @@ pub enum State {
     Walking,
     /// Nothing in reach and nothing in sense, or nowhere closer it could stand.
     Resting,
+    /// On a terrain face, going up or down it ([`Mobility::climb`]).
+    Climbing,
+}
+
+/// A body's movement state that outlives a tick (package mobility,
+/// `design/handoffs/voxel-mobility-2026-09-23.md`): the face it is on, if any, and how
+/// long it has been under water deeper than its height.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Mobility {
+    /// The wall it is climbing, or `None` on the ground.
+    pub climb: Option<WallClimb>,
+    /// Consecutive ticks under water deeper than its drown depth. It drowns when this
+    /// reaches [`FounderPhysiology::drown_ticks`]; any tick not under resets it.
+    pub submerged_ticks: u64,
+}
+
+/// A body **on a terrain face** (package mobility, decision 1): a shredder going up a
+/// wall from the face it stood on to the top of the neighbouring column, or down a cliff
+/// from the edge it stood on to the foot of the neighbouring column.
+///
+/// While it climbs, the animal's `site` stays the face it started from — a real support
+/// face, so nothing that asks where a body stands is handed a hole — and `progress_m` is
+/// how far along the face its feet have gone. Its pose stays beside the face, heading into
+/// it; it does not feed. At `rise_m` it stands on `to`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WallClimb {
+    /// Up a wall (`true`) or down a cliff.
+    pub ascending: bool,
+    /// The face it started from, and the one it will stand on at the end.
+    pub from: Site,
+    pub to: Site,
+    /// The unit step, in `(x, z)`, from `from`'s column toward the column of `to`.
+    pub dir: (i8, i8),
+    /// Metres along the face so far, and the whole height of the face.
+    pub progress_m: f64,
+    pub rise_m: f64,
+}
+
+impl WallClimb {
+    /// The feet's height over `from`'s standing surface, signed: up the wall on the way
+    /// up, down the cliff on the way down.
+    pub fn offset_m(&self) -> f64 {
+        if self.ascending {
+            self.progress_m
+        } else {
+            -self.progress_m
+        }
+    }
 }
 
 /// One animal: an identity, the support face it stands on, and the three currencies it
@@ -539,9 +588,27 @@ pub struct Animal {
     /// born on different ticks do not step in lockstep.
     pub age_ticks: u64,
     pub state: State,
+    /// On a wall, and how long under water (package mobility).
+    pub mobility: Mobility,
 }
 
 impl Animal {
+    /// The feet's height over the standing surface of `site`, metres: zero on the ground,
+    /// the climb's signed progress on a wall.
+    pub fn wall_offset_m(&self) -> f64 {
+        self.mobility.climb.map_or(0.0, |c| c.offset_m())
+    }
+
+    /// The layer this body's receptors read from and its body is drawn over: `site.y` on
+    /// the ground, and on a wall the layer its feet have reached, to the nearest voxel.
+    pub fn sense_layer(&self, voxel_m: f64) -> u32 {
+        let offset = self.wall_offset_m();
+        if offset == 0.0 || !(voxel_m > 0.0) {
+            return self.site.y;
+        }
+        (f64::from(self.site.y) + offset / voxel_m).round().max(0.0) as u32
+    }
+
     /// Organic matter in the animal: structure plus reserve. What a corpse deposits —
     /// a gestation is always resolved before a body dies, so its escrow is back in the
     /// reserve by the time this is read for a corpse.
@@ -1474,6 +1541,16 @@ pub struct FaunaLedger {
     pub eaten_by_food: [f64; Food::COUNT],
     /// Steps taken, one voxel each.
     pub steps: u64,
+    /// Package mobility's movement counters, per lineage: walls climbed to the top and
+    /// cliffs climbed to the foot (each counted once, on arrival); ticks spent on a face
+    /// and ticks alive, so the share of time on walls is the one over the other; and
+    /// sweeps that moved the standing layer up or down a ledge.
+    pub wall_ascents_by_founder: [u64; Founder::COUNT],
+    pub wall_descents_by_founder: [u64; Founder::COUNT],
+    pub wall_ticks_by_founder: [u64; Founder::COUNT],
+    pub founder_ticks_by_founder: [u64; Founder::COUNT],
+    pub ledges_up_by_founder: [u64; Founder::COUNT],
+    pub ledges_down_by_founder: [u64; Founder::COUNT],
 }
 
 impl FaunaLedger {
@@ -2088,6 +2165,7 @@ impl Fauna {
             energy: sc.energy_density * organic,
             age_ticks: 0,
             state: State::Resting,
+            mobility: crate::Mobility::default(),
         };
         self.ledger.births += 1;
         self.ledger.introduced += 1;

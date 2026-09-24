@@ -18,11 +18,12 @@
 //!   tick's `faces_in_column` both use: a support face, wadeable water, and
 //!   [`Body::headroom_voxels`] voxels of void over it — the body's own height.
 //!
-//! A founder body changes its standing layer by at most its lineage's climb
-//! ([`crate::climb_voxels`]; `design/handoffs/voxel-founder-step-2026-09-22.md`), so the
-//! walkable neighbourhood of a founder is face-neighbouring support faces within that
-//! many layers — which is what [`walkable_components`] computes, from the one shared
-//! rule in `cubarium_voxel::walk`, for this crate, the seeder and the observer alike.
+//! A founder body changes its standing layer by at most its lineage's step up or down
+//! ([`crate::FounderPhysiology::step_limits`]; `design/handoffs/voxel-founder-step-2026-09-22.md`),
+//! or — a shredder — by climbing a terrain wall (package mobility), so the walkable
+//! neighbourhood of a founder is what [`route_components`] computes, from the one shared
+//! rule in `cubarium_voxel::walk` plus the wall rule, for this crate, the seeder and the
+//! observer alike.
 
 use rustc_hash::FxHashMap;
 use std::ops::RangeInclusive;
@@ -201,7 +202,12 @@ pub fn layer_columns(
 /// [`FloraView::layers`] or [`reachable_layers_of`]
 /// (`design/voxel-encounter-contract-2026-09-21.md` §8).
 pub fn crown_layer(fv: &FloraView<'_>, stand: &Stand) -> i64 {
-    i64::from(stand.site.y) + i64::from(fv.config.species(stand.species).crown_voxels(stand.wood, fv.config.voxel_m))
+    i64::from(stand.site.y)
+        + i64::from(
+            fv.config
+                .species(stand.species)
+                .crown_voxels(stand.wood, fv.config.voxel_m),
+        )
 }
 
 /// The stand's foliage slab in **metres above the world floor**: the one cell-thick disc
@@ -300,10 +306,11 @@ impl SightMap {
     }
 }
 
-/// The connected components of a set of standing faces under the **founder step rule**.
+/// The connected components of a set of standing faces under a **symmetric step**.
 ///
-/// One function, one rule: `cubarium_voxel::walk::components`, with `climb` the
-/// lineage's climb height in whole voxels ([`crate::climb_voxels`]). Face-neighbouring
+/// One function, one rule: `cubarium_voxel::walk::components`, with `climb` a step in
+/// whole voxels. A founder lineage's own components are [`route_components`]' (its step
+/// up and down, and its walls). Face-neighbouring
 /// columns join when their standing layers differ by at most that, `x` wrapping and the
 /// strip's `z` ends walls. The observer (`voxel_edible_stock`), the seeder's
 /// feeding-face adjacency (`crates/cubarium/src/voxel/habitat.rs`, `browser_faces`) and
@@ -313,6 +320,59 @@ impl SightMap {
 pub fn walkable_components(faces: &[Site], width: u32, climb: u32) -> Vec<usize> {
     let cells: Vec<(u32, u32, u32)> = faces.iter().map(|f| (f.x, f.y, f.z)).collect();
     cubarium_voxel::walk::components(&cells, width, climb)
+}
+
+/// How a lineage's standable faces join into walkable components (package mobility).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RouteRule {
+    /// Its step up and down, whole voxels.
+    pub step: crate::StepLimits,
+    /// Whether it goes up and down terrain walls.
+    pub climbs_walls: bool,
+}
+
+/// The walkable components of `faces` under a lineage's [`RouteRule`], in the order of
+/// `faces`.
+///
+/// **Undirected, by mutual reachability**: a component is a set of faces every one of
+/// which a body can walk to from every other, so two neighbouring faces join only when
+/// the rise between them is within both the step up and the step down
+/// ([`crate::StepLimits::mutual`]) — a browser's 0.5 m riser, which it can step down but
+/// not up, is two components. A climber's wall joins its foot to its top when
+/// [`crate::wall_ascent`] says the face can be climbed from the foot; the wall rule's
+/// descent is its exact mirror, so the edge goes both ways. The column rule alone: the live
+/// body also checks its disc along the face, which a route map does not.
+pub fn route_components(
+    view: &VoxelView<'_>,
+    faces: &[Site],
+    rule: RouteRule,
+    headroom: u32,
+) -> Vec<usize> {
+    let c = view.config;
+    let cells: Vec<(u32, u32, u32)> = faces.iter().map(|f| (f.x, f.y, f.z)).collect();
+    let mut links: Vec<(usize, usize)> = Vec::new();
+    if rule.climbs_walls {
+        let index: FxHashMap<Site, usize> =
+            faces.iter().enumerate().map(|(i, f)| (*f, i)).collect();
+        for (i, f) in faces.iter().enumerate() {
+            for dir in [(1i64, 0i64), (-1, 0), (0, 1), (0, -1)] {
+                let crate::Face::Climb(top) =
+                    crate::wall_ascent(view, i64::from(f.x), f.y, f.z, dir, headroom, rule.step.up)
+                else {
+                    continue;
+                };
+                let to = Site {
+                    x: (i64::from(f.x) + dir.0).rem_euclid(i64::from(c.width)) as u32,
+                    y: top,
+                    z: (i64::from(f.z) + dir.1) as u32,
+                };
+                if let Some(&j) = index.get(&to) {
+                    links.push((i, j));
+                }
+            }
+        }
+    }
+    cubarium_voxel::walk::components_linked(&cells, c.width, rule.step.mutual(), &links)
 }
 
 /// One lineage's **route map** over a world: every face its adult body can stand on,
@@ -339,22 +399,29 @@ pub struct RouteMap {
 }
 
 impl RouteMap {
-    /// The route map of a founder lineage's **adult** body, wade depth and climb.
+    /// The route map of a founder lineage's **adult** body: its wade depth (a fraction of
+    /// its height), its step up and down, and — for a climber — the walls it goes up and
+    /// down (package mobility).
     pub fn for_founder(view: &VoxelView<'_>, phys: &crate::FounderPhysiology) -> RouteMap {
+        let body = phys.adult_body();
         RouteMap::new(
             view,
-            phys.adult_body(),
-            phys.core.wade_depth_m,
-            crate::climb_voxels(phys, view.config.voxel_m),
+            body,
+            phys.wade_depth_m(&body),
+            RouteRule {
+                step: phys.step_limits(view.config.voxel_m),
+                climbs_walls: phys.climbs_walls,
+            },
         )
     }
 
-    /// The route map of any body, wade depth and climb (whole voxels).
-    pub fn new(view: &VoxelView<'_>, body: Body, wade_depth_m: f64, climb: u32) -> RouteMap {
+    /// The route map of any body, wade depth and route rule.
+    pub fn new(view: &VoxelView<'_>, body: Body, wade_depth_m: f64, rule: RouteRule) -> RouteMap {
         let c = view.config;
         let faces = standable_faces(view, &body, wade_depth_m);
-        let components = walkable_components(&faces, c.width, climb);
-        let index: FxHashMap<Site, usize> = faces.iter().enumerate().map(|(i, f)| (*f, i)).collect();
+        let components = route_components(view, &faces, rule, body.headroom_voxels(c.voxel_m));
+        let index: FxHashMap<Site, usize> =
+            faces.iter().enumerate().map(|(i, f)| (*f, i)).collect();
         let mut columns: Vec<Vec<(i64, u32)>> = Vec::with_capacity(faces.len());
         let mut by_column: FxHashMap<(u32, u32), Vec<usize>> = FxHashMap::default();
         for (i, face) in faces.iter().enumerate() {
@@ -411,7 +478,12 @@ impl RouteMap {
         }
         let li = layer.foliage_index.unwrap_or(0);
         for column in layer_columns(view, stand, layer) {
-            for &i in self.by_column.get(&column).map(Vec::as_slice).unwrap_or(&[]) {
+            for &i in self
+                .by_column
+                .get(&column)
+                .map(Vec::as_slice)
+                .unwrap_or(&[])
+            {
                 if out.contains(&i) {
                     continue;
                 }

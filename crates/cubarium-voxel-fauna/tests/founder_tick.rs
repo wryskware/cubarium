@@ -555,7 +555,11 @@ fn a_blocked_attempt_still_pays_the_motor_budget() {
         }
     }
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    // The shredder does not climb here: the claim is the sweep's (package mobility's
+    // climb is `tests/mobility.rs`'s).
+    let mut config = FaunaConfig::default();
+    config.founders[Founder::Blind.index()].climbs_walls = false;
+    let mut fauna = Fauna::new(config);
     // One founder heading into the wall, one heading into open ground.
     assert!(fauna.apply(
         &world,

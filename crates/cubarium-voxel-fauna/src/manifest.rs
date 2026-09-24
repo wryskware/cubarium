@@ -226,12 +226,17 @@ pub struct Manifest {
     pub eye_height_fraction: f64,
     pub mouth_ceiling_fraction: f64,
     pub contact_height_fraction: f64,
-    /// The lineage's climb height, metres: what the step rule and the contact receptors
-    /// treat as a ledge rather than a wall.
-    pub climb_m: f64,
-    /// Standing water the body may walk into, and standing water it drowns in, metres.
-    pub wade_depth_m: f64,
-    pub drown_depth_m: f64,
+    /// The lineage's step up and step down, metres: what the step rule treats as a ledge
+    /// rather than a wall or a cliff (the contact receptors read the step up), and
+    /// whether it climbs terrain walls (package mobility).
+    pub step_up_m: f64,
+    pub step_down_m: f64,
+    pub climbs_walls: bool,
+    /// Standing water the body walks into, and water it is under, as fractions of its
+    /// current height, and the seconds under before it drowns (package mobility).
+    pub wade_height_fraction: f64,
+    pub drown_height_fraction: f64,
+    pub drown_after_s: f64,
     /// Organic-mass reference the founder's `Self` channels are normalized against.
     pub body_reference: f64,
     /// Fixed `Self` normalization references (plan, "Exact starting manifests"): an adult's
@@ -487,9 +492,12 @@ struct Anchors {
     mouth_ceiling: f64,
     contact: f64,
     reach: f64,
-    climb: f64,
+    step_up: f64,
+    step_down: f64,
+    walls: bool,
     wade: f64,
     drown: f64,
+    drown_after: f64,
     cruise: f64,
 }
 
@@ -503,9 +511,12 @@ fn anchors(founder: Founder) -> Anchors {
         mouth_ceiling: p.mouth_ceiling_fraction,
         contact: p.contact_height_fraction,
         reach: p.mouth_reach_length_fraction,
-        climb: p.climb_m,
-        wade: p.core.wade_depth_m,
-        drown: p.core.drown_depth_m,
+        step_up: p.step_up_m,
+        step_down: p.step_down_m,
+        walls: p.climbs_walls,
+        wade: p.wade_height_fraction,
+        drown: p.drown_height_fraction,
+        drown_after: p.drown_after_s,
         cruise: CRUISE_BODY_LENGTHS_PER_S * p.adult_length_m,
     }
 }
@@ -528,9 +539,12 @@ impl Manifest {
             eye_height_fraction: a.eye,
             mouth_ceiling_fraction: a.mouth_ceiling,
             contact_height_fraction: a.contact,
-            climb_m: a.climb,
-            wade_depth_m: a.wade,
-            drown_depth_m: a.drown,
+            step_up_m: a.step_up,
+            step_down_m: a.step_down,
+            climbs_walls: a.walls,
+            wade_height_fraction: a.wade,
+            drown_height_fraction: a.drown,
+            drown_after_s: a.drown_after,
             body_reference: 0.0125,
             adult_energy_reference: 0.0375,
             adult_reserve_reference: 0.00625,
@@ -572,9 +586,12 @@ impl Manifest {
             eye_height_fraction: a.eye,
             mouth_ceiling_fraction: a.mouth_ceiling,
             contact_height_fraction: a.contact,
-            climb_m: a.climb,
-            wade_depth_m: a.wade,
-            drown_depth_m: a.drown,
+            step_up_m: a.step_up,
+            step_down_m: a.step_down,
+            climbs_walls: a.walls,
+            wade_height_fraction: a.wade,
+            drown_height_fraction: a.drown,
+            drown_after_s: a.drown_after,
             body_reference: 0.05,
             adult_energy_reference: 0.15,
             adult_reserve_reference: 0.025,
@@ -676,13 +693,16 @@ impl Manifest {
         // on the living body, what the legs can step, and the water it wades and drowns in.
         let _ = write!(
             s,
-            "|anchor:eye={}H,mouth=[0,{}H],contact={}H|climb:{}|wade:{}|drown:{}",
+            "|anchor:eye={}H,mouth=[0,{}H],contact={}H|step:up={},down={},walls={}|wade:{}H|drown:{}H/{}s",
             self.eye_height_fraction,
             self.mouth_ceiling_fraction,
             self.contact_height_fraction,
-            self.climb_m,
-            self.wade_depth_m,
-            self.drown_depth_m
+            self.step_up_m,
+            self.step_down_m,
+            self.climbs_walls,
+            self.wade_height_fraction,
+            self.drown_height_fraction,
+            self.drown_after_s
         );
         let _ = write!(
             s,

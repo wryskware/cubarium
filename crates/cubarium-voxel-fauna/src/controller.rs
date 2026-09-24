@@ -489,6 +489,17 @@ impl Controller for BlindForager {
             o[self.chem.offset + 2],
         );
 
+        // On a terrain face (package mobility): nothing is under the body — on the
+        // ground there always is. Keep climbing at full effort: the turn is not read on a
+        // face, and slowing for "a wall ahead" would only leave it hanging there.
+        let (underside, contact_valid) = (o[c.offset + 3], o[c.offset + 4]);
+        if contact_valid > 0.5 && underside < 0.5 {
+            return Response::Bounded(Actions {
+                forward: 1.0,
+                turn: 0.0,
+                feed: 0.0,
+            });
+        }
         let front_blocked = front > 0.5;
         let forward = if front_blocked { 0.1 } else { 1.0 };
         // The feed gate is calibrated to the field's own scale: a settled full tile

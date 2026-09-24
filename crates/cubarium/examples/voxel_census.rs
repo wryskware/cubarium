@@ -32,7 +32,9 @@ use cubarium::voxel::habitat;
 use cubarium::voxel::{install_founders_with, policy_args};
 use cubarium::voxel::scene;
 use cubarium_voxel::{Command as WorldCommand, World};
-use cubarium_voxel_fauna::{Fauna, FaunaConfig, Founder, Senses, Species as Beast, TICK_HZ};
+use cubarium_voxel_fauna::{
+    Departure, Fauna, FaunaConfig, Founder, Senses, Species as Beast, TICK_HZ,
+};
 use cubarium_voxel_flora::{Flora, FloraConfig, Species as Plant};
 use cubarium_voxel_sim::{Sim, SimConfig};
 
@@ -343,6 +345,19 @@ fn print_header() {
     // landing or about to sprout), the marked sites that are about to sprout, and every
     // support face in the world, the share's denominator.
     header.push_str(",banked_sites,marked_sites,sprouting_sites,support_sites");
+    // Package mobility: deaths by cause per lineage, cumulative.
+    for f in Founder::ALL {
+        header.push_str(&format!(",starved_{0},drowned_{0}", f.name()));
+    }
+    // Package mobility's movement counters per lineage, cumulative: walls climbed to the
+    // top, cliffs climbed to the foot, founder-ticks on a face and alive, ledge steps up
+    // and down.
+    for f in Founder::ALL {
+        header.push_str(&format!(
+            ",ascents_{0},descents_{0},wall_ticks_{0},alive_ticks_{0},ledges_up_{0},ledges_down_{0}",
+            f.name()
+        ));
+    }
     println!("{header}");
 }
 
@@ -453,5 +468,24 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64) {
     row.push(marked.to_string());
     row.push(sprouting.to_string());
     row.push(supports.to_string());
+    for founder in Founder::ALL {
+        for cause in [Departure::Starved, Departure::Drowned] {
+            row.push(a.ledger.departed_founder(founder, cause).to_string());
+        }
+    }
+    for founder in Founder::ALL {
+        let k = founder.index();
+        let l = &a.ledger;
+        for n in [
+            l.wall_ascents_by_founder[k],
+            l.wall_descents_by_founder[k],
+            l.wall_ticks_by_founder[k],
+            l.founder_ticks_by_founder[k],
+            l.ledges_up_by_founder[k],
+            l.ledges_down_by_founder[k],
+        ] {
+            row.push(n.to_string());
+        }
+    }
     println!("{}", row.join(","));
 }

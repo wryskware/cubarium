@@ -240,7 +240,13 @@ fn a_founder_s_departure_is_split_by_lineage_and_cause() {
     let mut world = plain(6, 2);
     flood(&mut world, 4, 2);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(starving_config());
+    // A founder drowns after its lineage's `drown_after_s` under (package mobility); here
+    // one tick, because the case is the label and not the time it takes.
+    let mut config = starving_config();
+    for f in Founder::ALL {
+        config.founders[f.index()].drown_after_s = 0.0;
+    }
+    let mut fauna = Fauna::new(config);
     founder(&mut fauna, &world, 1, Founder::Blind);
     founder(&mut fauna, &world, 4, Founder::Browser);
 

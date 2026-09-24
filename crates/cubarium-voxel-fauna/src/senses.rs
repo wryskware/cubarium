@@ -818,7 +818,7 @@ impl ConeOccupancy {
                 if !column_seen(c, window, ax) {
                     continue;
                 }
-                let layer = i64::from(a.site.y) + 1;
+                let layer = i64::from(a.sense_layer(c.voxel_m)) + 1;
                 if layer > 0 && layer < i64::from(c.height) {
                     let cell = c.index(ax, layer as u32, az);
                     self.cells[cell] |= BODY_BIT;

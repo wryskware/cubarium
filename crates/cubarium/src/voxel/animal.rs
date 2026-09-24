@@ -53,6 +53,18 @@ fn model_cells<'l>(
     lib.animal(founder)?.select(length)
 }
 
+/// The unit `(dx, dz)` from a climbing body's column into the face it is on: the wall
+/// ahead on the way up, the cliff it hangs from (behind the way it walked) on the way
+/// down.
+fn wall_toward(climb: &cubarium_voxel_fauna::WallClimb) -> (i32, i32) {
+    let (dx, dz) = (i32::from(climb.dir.0), i32::from(climb.dir.1));
+    if climb.ascending {
+        (dx, dz)
+    } else {
+        (-dx, -dz)
+    }
+}
+
 /// The interim body colour: a placeholder, and chosen to look like one.
 ///
 /// The five plants own magenta, turquoise, cyan, stone-lilac and violet
@@ -300,6 +312,40 @@ pub fn cells_of(
     let mut out = Vec::new();
 
     match founder {
+        Founder::Blind if animal.mobility.climb.is_some() => {
+            // On a wall (package mobility, interim): the crawler stood on end in the air
+            // column beside the face, head up the face or down it.
+            let climb = animal.mobility.climb.expect("a body on a wall");
+            let feet = i64::from(animal.sense_layer(voxel_m)) + 1;
+            for along in 0..length {
+                let y = if climb.ascending {
+                    feet + along
+                } else {
+                    feet - along
+                };
+                if y < 0 {
+                    continue;
+                }
+                let cell = Cell {
+                    x: anchor_x,
+                    y: y as u32,
+                    z: anchor_z.max(0) as u32,
+                };
+                let part = if along + 1 == length {
+                    AnimalPart::Head {
+                        style,
+                        facing_right,
+                    }
+                } else {
+                    AnimalPart::Body {
+                        style,
+                        head: false,
+                        facing_right,
+                    }
+                };
+                out.push((cell, part));
+            }
+        }
         Founder::Blind => {
             // Low, tapered, segmented crawler.  Its head is the first shell cell in the
             // real forward mouth direction, never a decorative cell beyond the probe.
@@ -490,9 +536,10 @@ impl Animals {
         if !(voxel_m > 0.0) || !animal.pose.is_finite() {
             return true;
         }
+        // A body on a wall is drawn at the layer its feet have reached (package mobility).
         let anchor = Cell {
             x: (animal.pose.x / voxel_m).floor() as i64,
-            y: animal.site.y + 1,
+            y: animal.sense_layer(voxel_m) + 1,
             z: (animal.pose.z / voxel_m).floor().max(0.0) as u32,
         };
         let starving = is_starving(animal);
@@ -503,7 +550,7 @@ impl Animals {
         // The body's highest cell: the back is lit and the belly dark.
         let top = cells.iter().map(|m| m.offset[1]).max().unwrap_or(0);
         let mut ok = true;
-        model::each_animal_cell(cells, anchor, animal.pose.heading_rad, view, |cell, m| {
+        let mut stamp = |cell: Cell, m: ModelCell| {
             if !ok {
                 return;
             }
@@ -520,7 +567,24 @@ impl Animals {
                 return;
             };
             self.place(view, cell, AnimalPart::Model(style));
-        });
+        };
+        match animal.mobility.climb {
+            // Interim wall pose: pitched flat against the face, head up or down it.
+            Some(climb) => {
+                let toward = wall_toward(&climb);
+                model::each_animal_cell_on_wall(
+                    cells,
+                    anchor,
+                    toward,
+                    climb.ascending,
+                    view,
+                    &mut stamp,
+                )
+            }
+            None => {
+                model::each_animal_cell(cells, anchor, animal.pose.heading_rad, view, &mut stamp)
+            }
+        }
         ok
     }
 

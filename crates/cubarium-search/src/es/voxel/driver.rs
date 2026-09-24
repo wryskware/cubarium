@@ -804,7 +804,7 @@ impl Tracked {
 /// Whether a body standing at `pose` on layer `standing_y` is within `reach_m` of the
 /// strip's `z` edge, or of a **drop**: a column whose centre is within `reach_m` where
 /// the cell at head height is open (not a wall) and there is no support face within the
-/// lineage's climb of the body's own layer. A wall is not a drop; water is not a drop.
+/// lineage's step up or down of the body's own layer. A wall is not a drop; water is not a drop.
 pub fn near_drop_or_edge(
     view: &cubarium_voxel::VoxelView<'_>,
     pose: &Pose,
@@ -818,7 +818,8 @@ pub fn near_drop_or_edge(
     if pose.z < reach_m || pose.z > depth_m - reach_m {
         return true;
     }
-    let climb = i64::from(cubarium_voxel_fauna::climb_voxels(phys, v));
+    let step = phys.step_limits(v);
+    let (up, down) = (i64::from(step.up), i64::from(step.down));
     let span = (reach_m / v).ceil() as i64 + 1;
     let (px, pz) = ((pose.x / v).floor() as i64, (pose.z / v).floor() as i64);
     let y = i64::from(standing_y);
@@ -838,7 +839,7 @@ pub fn near_drop_or_edge(
             {
                 continue;
             }
-            let supported = (y - climb..=y + climb)
+            let supported = (y - down..=y + up)
                 .filter(|&yy| yy >= 0 && yy < i64::from(c.height))
                 .any(|yy| view.is_support(x, yy as u32, z as u32));
             if !supported {

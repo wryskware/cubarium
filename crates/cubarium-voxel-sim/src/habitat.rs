@@ -648,7 +648,7 @@ pub fn seed_pre_rolled(
             .enumerate()
             .filter(|(i, s)| {
                 !taken.contains(s)
-                    && wettest[*i] <= blind.core.drown_depth_m
+                    && wettest[*i] <= blind.drown_depth_m(&blind.adult_body())
                     && view.material_at(i64::from(s.x), s.y, s.z) == Material::Soil
                     && view.water_depth_m(i64::from(s.x), s.y, s.z) <= 0.0
                     && has_headroom(&view, i64::from(s.x), s.y, s.z, blind_room)
@@ -702,7 +702,9 @@ pub fn seed_pre_rolled(
     let browser_food = food_on(&browser_map, &world.view(), &flora.view(), Founder::Browser);
     let mut meadow = browser_faces_on(&browser_map, &browser_food, &world.view(), &flora.view());
     // A body drowns in the stream's way as surely as a plant does.
-    meadow.retain(|f| index_of(sites, *f).is_none_or(|i| wettest[i] <= browser.core.drown_depth_m));
+    // Under its own height of water it would be drowning (package mobility).
+    let browser_drown = browser.drown_depth_m(&browser.adult_body());
+    meadow.retain(|f| index_of(sites, *f).is_none_or(|i| wettest[i] <= browser_drown));
     let want = founder_counts[Founder::Browser.index()];
     let chosen = place(
         &meadow,

@@ -148,7 +148,35 @@ fn hungry_founder(
 /// A fauna layer with births disabled (the frozen arena contract) holding one founder at
 /// column `(x, z)` with heading `heading_rad`. Returns the layer and the body's id.
 fn one_founder(world: &World, founder: Founder, x: i64, z: u32, heading_rad: f64) -> (Fauna, u64) {
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    one_founder_with(world, founder, x, z, heading_rad, FaunaConfig::default())
+}
+
+/// [`one_founder`] with **no lineage climbing walls**: for the cases about the sweep
+/// against a wall, which since package mobility a shredder would otherwise go up
+/// (`tests/mobility.rs` has the climb).
+fn one_grounded_founder(
+    world: &World,
+    founder: Founder,
+    x: i64,
+    z: u32,
+    heading_rad: f64,
+) -> (Fauna, u64) {
+    let mut config = FaunaConfig::default();
+    for f in Founder::ALL {
+        config.founders[f.index()].climbs_walls = false;
+    }
+    one_founder_with(world, founder, x, z, heading_rad, config)
+}
+
+fn one_founder_with(
+    world: &World,
+    founder: Founder,
+    x: i64,
+    z: u32,
+    heading_rad: f64,
+    config: FaunaConfig,
+) -> (Fauna, u64) {
+    let mut fauna = Fauna::new(config);
     fauna.set_births_enabled(false);
     let id = fauna.view().ledger.births;
     assert!(
@@ -299,7 +327,7 @@ fn a_refused_wall_step_pays_the_requested_equivalent_displacement() {
             wall(&mut world, 5, GROUND_Y + 1, GROUND_Y + 2);
         }
         let mut flora = Flora::new(FloraConfig::default());
-        let (mut fauna, id) = one_founder(&world, Founder::Blind, 4, 1, EAST);
+        let (mut fauna, id) = one_grounded_founder(&world, Founder::Blind, 4, 1, EAST);
         let (recorder, log) = Recorder::new(drive);
         assert!(fauna.set_controller(id, Box::new(recorder)));
         let mut senses = Senses::new();
@@ -465,10 +493,11 @@ fn full_cruise_cannot_tunnel_through_a_one_voxel_wall() {
     for founder in Founder::ALL {
         let _manifest = founder.manifest();
         let mut world = flat(24, 3);
-        // A one-voxel-thick wall three voxels tall, so nothing can climb it either.
+        // A one-voxel-thick wall three voxels tall, so no step goes over it; and no
+        // lineage climbs walls here, because the claim is about the sweep.
         wall(&mut world, 6, GROUND_Y + 1, GROUND_Y + 3);
         let mut flora = Flora::new(FloraConfig::default());
-        let (mut fauna, id) = one_founder(&world, founder, 3, 1, EAST);
+        let (mut fauna, id) = one_grounded_founder(&world, founder, 3, 1, EAST);
         assert!(fauna.set_controller(
             id,
             Box::new(Scripted::new(vec![Actions {

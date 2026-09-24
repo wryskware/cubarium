@@ -46,9 +46,26 @@ pub fn climb_voxels(climb_m: f64, voxel_m: f64) -> u32 {
 /// set: headroom, wade depth and whatever else makes a face standable are the caller's,
 /// because they are the caller's body's.
 pub fn components(faces: &[(u32, u32, u32)], width: u32, climb: u32) -> Vec<usize> {
+    components_linked(faces, width, climb, &[])
+}
+
+/// [`components`], with `links` — pairs of indices into `faces` — joined as well: the
+/// edges a caller's own rule adds to the step rule's, such as a wall a climber goes up and
+/// down (`cubarium-voxel-fauna`'s route maps, package mobility).
+pub fn components_linked(
+    faces: &[(u32, u32, u32)],
+    width: u32,
+    climb: u32,
+    links: &[(usize, usize)],
+) -> Vec<usize> {
     let index: rustc_hash::FxHashMap<(u32, u32, u32), usize> =
         faces.iter().enumerate().map(|(i, &f)| (f, i)).collect();
     let mut union = Union::new(faces.len());
+    for &(a, b) in links {
+        if a < faces.len() && b < faces.len() {
+            union.join(a, b);
+        }
+    }
     let climb = i64::from(climb);
     for (i, &(x, y, z)) in faces.iter().enumerate() {
         for (dx, dz) in [(1i64, 0i64), (0, 1)] {

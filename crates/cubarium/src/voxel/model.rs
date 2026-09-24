@@ -665,6 +665,49 @@ pub(crate) fn each_animal_cell(
     }
 }
 
+/// [`each_animal_cell`] for a body **on a wall** (package mobility, decision 5; an
+/// interim stage-1 look, not an art decision): the model pitched flat against the face,
+/// its belly on it, head up the face when `head_up` and down it otherwise. `toward` is
+/// the unit `(dx, dz)` from the body's column into the face; `anchor` is the air cell
+/// beside the face at the feet's layer.
+///
+/// The model's own axes — forward `+x`, back `+y`, side `+z` — go to up (or down) the
+/// face, straight out of it, and their cross product, so it is a rotation and never a
+/// mirror.
+pub(crate) fn each_animal_cell_on_wall(
+    cells: &[ModelCell],
+    anchor: Cell,
+    toward: (i32, i32),
+    head_up: bool,
+    view: &VoxelView<'_>,
+    mut f: impl FnMut(Cell, ModelCell),
+) {
+    let c = view.config;
+    let (h, d) = (i64::from(c.height), i64::from(c.depth));
+    let fy: i64 = if head_up { 1 } else { -1 };
+    // Back: out of the face. Side: forward × back.
+    let (ux, uz) = (-i64::from(toward.0), -i64::from(toward.1));
+    let (sx, sy, sz) = (fy * uz, 0i64, -fy * ux);
+    for m in cells {
+        let (ox, oy, oz) = (
+            i64::from(m.offset[0]),
+            i64::from(m.offset[1]),
+            i64::from(m.offset[2]),
+        );
+        let x = anchor.x + oy * ux + oz * sx;
+        let y = i64::from(anchor.y) + ox * fy + oz * sy;
+        let z = i64::from(anchor.z) + oy * uz + oz * sz;
+        if y < 0 || y >= h || z < 0 || z >= d {
+            continue;
+        }
+        let (y, z) = (y as u32, z as u32);
+        if view.material_at(x, y, z).is_solid() {
+            continue;
+        }
+        f(Cell { x, y, z }, *m);
+    }
+}
+
 // --- the source dump -----------------------------------------------------------------
 
 /// The model's own numbers for the Blender bake (§1 of the brief): every species' crown
@@ -866,5 +909,44 @@ mod tests {
             parse(&b[..b.len() - 1]).is_err(),
             "a truncated file is refused"
         );
+    }
+
+    /// Package mobility's interim wall pose: a body three cells long with a one-cell back
+    /// is stood on end beside the face — its length up the face (or down it), its back
+    /// out of it, never into the solid.
+    #[test]
+    fn a_body_on_a_wall_is_pitched_flat_against_the_face() {
+        let world = cubarium_voxel::World::empty(cubarium_voxel::Config {
+            width: 8,
+            height: 12,
+            depth: 8,
+            voxel_m: 0.25,
+            ..cubarium_voxel::Config::default()
+        });
+        let view = world.view();
+        let cell = |x: i32, y: i32| ModelCell {
+            offset: [x, y, 0],
+            material: 0,
+            tag: Tag::Trunk,
+        };
+        let model = [cell(0, 0), cell(1, 0), cell(2, 0), cell(1, 1)];
+        let anchor = Cell { x: 3, y: 5, z: 3 };
+        for (head_up, dy) in [(true, 1i64), (false, -1)] {
+            let mut got = Vec::new();
+            // The face is at +x of the body's column.
+            each_animal_cell_on_wall(&model, anchor, (1, 0), head_up, &view, |c, m| {
+                got.push((c, m.offset))
+            });
+            assert_eq!(got.len(), 4);
+            for (c, o) in &got {
+                assert_eq!(
+                    i64::from(c.y),
+                    5 + dy * i64::from(o[0]),
+                    "length along the face"
+                );
+                assert_eq!(c.x, 3 - i64::from(o[1]), "the back points out of the face");
+                assert_eq!(c.z, 3);
+            }
+        }
     }
 }

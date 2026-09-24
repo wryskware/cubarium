@@ -57,6 +57,14 @@ fn two_hundred_ticks_of_the_live_path_stand_eat_and_see() {
         .filter(|a| a.founder.is_some())
         .map(|a| (a.id, a.site.y, a.pose.x, a.pose.z, a.pose.heading_rad))
         .collect();
+    // A shredder on a terrain face (package mobility) keeps the face it started from as
+    // its site while its pose hangs beside the face; its site is what must be a face.
+    let climbing: std::collections::HashMap<u64, cubarium_voxel_flora::Site> = av
+        .animals
+        .iter()
+        .filter(|a| a.mobility.climb.is_some())
+        .map(|a| (a.id, a.site))
+        .collect();
     poses.sort_by_key(|p| p.0);
 
     assert_eq!(poses.len(), 16, "eight founders of each lineage");
@@ -65,6 +73,14 @@ fn two_hundred_ticks_of_the_live_path_stand_eat_and_see() {
     // wrong would be gone rather than wrong.
     let wv0 = sim.world().view();
     for p in &poses {
+        if let Some(s) = climbing.get(&p.0) {
+            assert!(
+                wv0.is_support(i64::from(s.x), s.y, s.z),
+                "climbing founder #{} started from air",
+                p.0
+            );
+            continue;
+        }
         assert!(
             wv0.is_support(
                 i64::from((p.2 / wv0.config.voxel_m).floor() as i64),

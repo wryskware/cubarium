@@ -21,14 +21,23 @@
 //! thick) cannot be tunnelled between endpoint checks. `x` wraps; the strip's `z` ends
 //! are hard walls, and since contract v2 (D4) the contact receptors feel them as walls.
 //!
-//! **The body steps ledges.** A lineage has a climb height in metres on its
+//! **The body steps ledges.** A lineage has a step up and a step down in metres on its
 //! [`FounderPhysiology`], converted to whole voxels once at the consumer by
-//! [`climb_voxels`], and a sub-step may put the centre column on a support face whose
-//! standing layer is within that many voxels of the body's own, up or down
-//! (`design/handoffs/voxel-founder-step-2026-09-22.md`). A candidate is refused when the
-//! centre column carries no such face — a wall, or a cliff edge: there is still no
-//! falling — when the disc would overlap a solid in the layers the body needs, or when
-//! the standing water there is deeper than the founder can wade. The standing layer, and
+//! [`FounderPhysiology::step_limits`], and a sub-step may put the centre column on a
+//! support face at most `up` voxels above the body's own standing layer or `down` below
+//! it (`design/handoffs/voxel-founder-step-2026-09-22.md`; the split is package
+//! mobility's, `design/handoffs/voxel-mobility-2026-09-23.md`). A candidate is refused
+//! when the centre column carries no such face — a wall, or a cliff edge: there is still
+//! no falling — when the disc would overlap a solid in the layers the body needs, or when
+//! the standing water there is deeper than the body can wade (a fraction of its current
+//! height) **and** no shallower than the water it already stands in: a body caught in
+//! deep water may always step toward the shallows.
+//!
+//! **A shredder climbs terrain walls** ([`FounderPhysiology::climbs_walls`]). Where its
+//! sweep is refused by a riser taller than its step, or by an edge deeper than its step
+//! down, it attaches to the face ([`wall_ascent`], [`wall_descent`]) and the step's
+//! `founder_act` moves it along the face on later ticks; `step`'s module doc has the
+//! rule. The standing layer, and
 //! with it `site.y` and the pose's height, follow the destination. A refused step stops
 //! the sweep: movement is constrained, the delivered motion is what actually happened,
 //! and the requested equivalent displacement is paid for anyway. There is no graph
@@ -92,6 +101,11 @@ const MOUTH_REACH_LENGTH_FRACTION: f64 = 0.25;
 // §1). They are the two numbers the frozen table already ran on, named so that a food
 // class can be re-yielded on its own: the shredder's litter yield and the browser's
 // foliage yield. They are equal today, which is why this package moves no number.
+/// [`FounderPhysiology::wall_climb_cost_factor`], both lineages: see the field.
+const WALL_CLIMB_COST_FACTOR: f64 = 2.0;
+/// [`FounderPhysiology::drown_after_s`], both lineages.
+const DROWN_AFTER_S: f64 = 60.0;
+
 /// What a shredder builds out of a unit of litter — and, by the decision, of carrion.
 const LITTER_YIELD: f64 = 0.5;
 /// What a grazer builds out of a unit of foliage — and, by the decision, what a
@@ -188,15 +202,45 @@ pub struct FounderPhysiology {
     /// turning while stopped pays. The frozen default sets full cruise at the same rate
     /// as basal upkeep.
     pub motor_respiration_per_s: f64,
-    /// The lineage's **climb height in metres**: how far up or down a body may put its
-    /// feet in one sub-step, and therefore what counts as a ledge rather than a wall
-    /// (`design/handoffs/voxel-founder-step-2026-09-22.md`).
+    /// The lineage's **step up and step down in metres**: how far up, and how far down, a
+    /// body may put its feet in one sub-step, and therefore what counts as a ledge rather
+    /// than a wall or a cliff (`design/handoffs/voxel-founder-step-2026-09-22.md`, split
+    /// in two by package mobility). The contract records both (D1). Converted to whole
+    /// voxels once at the consumer by [`FounderPhysiology::step_limits`], which rounds
+    /// **down**: a riser is a step when its height is within the limit.
     ///
-    /// It lives here and not on the [`Manifest`](crate::Manifest) deliberately: manifest
-    /// geometry is part of the trained-policy digest, and the shipped centres must keep
-    /// loading. Converted to whole voxels once at the consumer by [`climb_voxels`].
-    /// Placeholders, in `design/backlog.md` §1: browser 0.25 m, shredder 0.125 m.
-    pub climb_m: f64,
+    /// Browser **0.375 m up** (its own height) and **0.75 m down** (its own length), the
+    /// brief's numbers. Shredder **0.25 m both ways**: a long crawler steps what its
+    /// front segments reach, two thirds of its 0.375 m length, and taller risers are walls
+    /// it climbs. That is the step it effectively had on the 0.25 m presets, where the old
+    /// 0.125 m rounded up to a whole voxel. Measured: at a literal 0.125 m every 0.25 m
+    /// terrace of the default preset became a wall, and the shredders spent 51 % of their
+    /// time on faces (≈ 500 climbs an hour, seeds 1–2) against 8–10 % at 0.25 m.
+    pub step_up_m: f64,
+    pub step_down_m: f64,
+    /// Whether this lineage **climbs vertical terrain** (package mobility, decision 1): a
+    /// riser taller than its step up is a face it can go up, an edge deeper than its step
+    /// down a face it can go down, at half its walking pace. Stands are never faces. The
+    /// shredder does ("basically centipedes"); the browser does not.
+    pub climbs_walls: bool,
+    /// The motor cost of a second on a wall, **× the walking cost at the same effort**.
+    ///
+    /// **2.0.** Climbing at half pace the legs still cycle as they would walking, and the
+    /// body is lifted besides: at the shredder's 0.375 m/s cruise, lifting at 0.19 m/s
+    /// costs `g · w / η` ≈ 9.8 × 0.19 / 0.25 ≈ 7.4 W/kg, against ≈ 7–10 W/kg for level
+    /// walking at a small arthropod's cost of transport (≈ 20–28 J/kg/m) — so about as
+    /// much again. The browser never climbs a wall and never pays it.
+    pub wall_climb_cost_factor: f64,
+    /// The deepest standing water the body walks into, **× its current height**: browser
+    /// 0.5 (0.19 m for the adult), shredder 0.25 (≈ 3 cm), the brief's numbers. A juvenile
+    /// is shorter, so it wades shallower water.
+    pub wade_height_fraction: f64,
+    /// Standing water deeper than this **× its current height** over its feet is water it
+    /// is under: 1.0, its own height (package mobility, decision 3).
+    pub drown_height_fraction: f64,
+    /// Seconds it must be under, **continuously**, before it drowns: 60, the brief's
+    /// number. A tick out of the water resets the count.
+    pub drown_after_s: f64,
     /// The **adult** body, in metres: length, width and height
     /// (`design/handoffs/voxel-body-anchors-2026-09-22.md`; decisions §1). The ladder's
     /// animal at package L's sizes — browser 0.75 × 0.375 × 0.375 m, shredder 0.375 ×
@@ -294,9 +338,14 @@ impl FounderPhysiology {
                     reproduction: Reproduction::EGGS_PLACEHOLDER,
                 },
                 motor_respiration_per_s: 0.001,
-                // A ground feeder's placeholder climb: half a browser's, one voxel on
-                // either shipped grid (`design/backlog.md` §1).
-                climb_m: 0.125,
+                // Two thirds of its length both ways; everything taller is a wall.
+                step_up_m: 0.25,
+                step_down_m: 0.25,
+                climbs_walls: true,
+                wall_climb_cost_factor: WALL_CLIMB_COST_FACTOR,
+                wade_height_fraction: 0.25,
+                drown_height_fraction: 1.0,
+                drown_after_s: DROWN_AFTER_S,
                 // The ladder's littershredder (package L,
                 // `design/handoffs/voxel-ladder-growth-2026-09-23.md` §3): 0.375 m long,
                 // a third of that in section — 3 x 1 x 1 cells of 0.125 m.
@@ -322,9 +371,14 @@ impl FounderPhysiology {
                 // The frondgrazer gives live birth out of a gestation escrow, which is
                 // in `SpeciesConfig::frondgrazer`'s own table.
                 motor_respiration_per_s: 0.001,
-                // The browser's placeholder climb, one body length's worth of leg:
-                // two voxels on `small`, one on `default` and `wide`.
-                climb_m: 0.25,
+                // Up its own height, down its own length (package mobility).
+                step_up_m: 0.375,
+                step_down_m: 0.75,
+                climbs_walls: false,
+                wall_climb_cost_factor: WALL_CLIMB_COST_FACTOR,
+                wade_height_fraction: 0.5,
+                drown_height_fraction: 1.0,
+                drown_after_s: DROWN_AFTER_S,
                 // The ladder's frondgrazer (package L, same brief §3): 0.75 x 0.375 x
                 // 0.375 m, 6 x 3 x 3 cells of 0.125 m.
                 adult_length_m: 0.75,
@@ -348,6 +402,38 @@ impl FounderPhysiology {
     pub fn total_structure_for_core(core: f64, fraction: f64) -> f64 {
         debug_assert!(fraction.is_finite() && fraction >= 0.0 && fraction < 1.0);
         core / (1.0 - fraction)
+    }
+
+    /// The step up and step down in whole voxels of `voxel_m`, each rounded **down**
+    /// ([`step_voxels`]): a riser of `k` voxels is a step when `k · voxel_m` is within the
+    /// limit. The browser's 0.375 m is three 0.125 m voxels and one 0.25 m voxel, never
+    /// two.
+    pub fn step_limits(&self, voxel_m: f64) -> StepLimits {
+        StepLimits {
+            up: step_voxels(self.step_up_m, voxel_m),
+            down: step_voxels(self.step_down_m, voxel_m),
+        }
+    }
+
+    /// The deepest standing water `body` walks into: `wade_height_fraction × height`.
+    pub fn wade_depth_m(&self, body: &Body) -> f64 {
+        self.wade_height_fraction * body.height_m
+    }
+
+    /// Standing water deeper than this over its feet is water `body` is under:
+    /// `drown_height_fraction × height`.
+    pub fn drown_depth_m(&self, body: &Body) -> f64 {
+        self.drown_height_fraction * body.height_m
+    }
+
+    /// [`FounderPhysiology::drown_after_s`] in whole ticks, never below one.
+    pub fn drown_ticks(&self) -> u64 {
+        let t = (self.drown_after_s * f64::from(cubarium_voxel::TICK_HZ)).round();
+        if !t.is_finite() || t < 1.0 {
+            1
+        } else {
+            t as u64
+        }
     }
 
     /// The assimilation yield this lineage gets out of one food class (decisions §3).
@@ -433,7 +519,7 @@ pub(crate) fn resolve_motion(
     manifest: &Manifest,
     body: &Body,
     wade_depth_m: f64,
-    climb: u32,
+    step_limits: StepLimits,
     held: Actions,
 ) -> Motion {
     let r = body.footprint_radius();
@@ -465,7 +551,7 @@ pub(crate) fn resolve_motion(
             r,
             wade_depth_m,
             headroom,
-            climb,
+            step_limits,
         ) {
             Some(actual) => {
                 moved += actual;
@@ -490,8 +576,19 @@ pub(crate) fn resolve_motion(
                     if mid <= 1e-12 {
                         break;
                     }
-                    if advance_candidate(view, px, pz, h, y0, mid, r, wade_depth_m, headroom, climb)
-                        .is_some()
+                    if advance_candidate(
+                        view,
+                        px,
+                        pz,
+                        h,
+                        y0,
+                        mid,
+                        r,
+                        wade_depth_m,
+                        headroom,
+                        step_limits,
+                    )
+                    .is_some()
                     {
                         lo = mid;
                     } else {
@@ -509,7 +606,7 @@ pub(crate) fn resolve_motion(
                         r,
                         wade_depth_m,
                         headroom,
-                        climb,
+                        step_limits,
                     )
                     .expect("the bisection's best advance is valid");
                     pose.x = nx;
@@ -542,7 +639,7 @@ fn step_advance(
     r: f64,
     wade_depth_m: f64,
     headroom: u32,
-    climb: u32,
+    step_limits: StepLimits,
 ) -> Option<f64> {
     let (nx, nz, actual, ny) = advance_candidate(
         view,
@@ -554,7 +651,7 @@ fn step_advance(
         r,
         wade_depth_m,
         headroom,
-        climb,
+        step_limits,
     )?;
     pose.x = nx;
     pose.z = nz;
@@ -566,8 +663,8 @@ fn step_advance(
 /// position, the distance actually covered and the **standing layer it would leave the
 /// body on**, or `None` when the position is refused.
 ///
-/// The centre column must carry a support face within `climb` voxels of `standing_y`,
-/// up or down — the nearest one, ties to the higher — and that face is the standing
+/// The centre column must carry a support face at most `up` voxels above `standing_y` or
+/// `down` below it — the nearest one, ties to the higher — and that face is the standing
 /// layer the body ends on. It is the *centre* column's, not a neighbour's, because
 /// `site` has to stay a support face: `step::terrain` removes an animal whose site is
 /// not one.
@@ -582,7 +679,10 @@ fn step_advance(
 /// only faces are outside the climb — a wall, a cliff — contributes nothing, so its
 /// solid is checked and refuses exactly as before.
 ///
-/// The standing water at the destination must be within the founder's wade depth.
+/// The standing water at the destination must be within the body's wade depth, **or
+/// shallower than the water at the column the sub-step starts from** (package mobility,
+/// decision 3): a body caught deeper than it can wade may always step toward the
+/// shallows, and never deeper; it may also move about the face it stands on.
 #[allow(clippy::too_many_arguments)]
 fn advance_candidate(
     view: &VoxelView<'_>,
@@ -594,7 +694,7 @@ fn advance_candidate(
     r: f64,
     wade_depth_m: f64,
     headroom: u32,
-    climb: u32,
+    step_limits: StepLimits,
 ) -> Option<(f64, f64, f64, u32)> {
     let c = view.config;
     let v = c.voxel_m;
@@ -616,16 +716,24 @@ fn advance_candidate(
     }
     let cx = ((nx / v).floor() as i64).rem_euclid(i64::from(c.width));
     // The step rule: the centre column's support face nearest the body's own standing
-    // layer, within the climb. No such face is a wall or a cliff edge, and refuses.
-    let ny = step_target_layer(view, cx, cz as u32, standing_y, climb)?;
+    // layer, within the step. No such face is a wall or a cliff edge, and refuses.
+    let ny = step_target_layer(view, cx, cz as u32, standing_y, step_limits)?;
     // The body rests on the highest ground under its disc while it straddles a riser,
     // so the clearance is checked from there.
-    let clearance = disc_ground_layer(view, nx, nz, r, standing_y, climb).max(standing_y.max(ny));
+    let clearance =
+        disc_ground_layer(view, nx, nz, r, standing_y, step_limits).max(standing_y.max(ny));
     if (1..=headroom).any(|d| disc_hits_solid(view, nx, nz, clearance + d, r)) {
         return None;
     }
-    if view.water_depth_m(cx, ny, cz as u32) > wade_depth_m {
-        return None;
+    let there = view.water_depth_m(cx, ny, cz as u32);
+    if there > wade_depth_m {
+        // The escape: within the face it stands on, or to a face shallower than it.
+        let hz = ((pz / v).floor().max(0.0) as u32).min(c.depth.saturating_sub(1));
+        let hx = ((px / v).floor() as i64).rem_euclid(i64::from(c.width));
+        let same_face = (hx, hz) == (cx, cz as u32) && ny == standing_y;
+        if !same_face && !(there < view.water_depth_m(hx, standing_y, hz)) {
+            return None;
+        }
     }
     // The projection of the move onto the heading, wrap-aware, so a clamp at the z
     // ends is delivered as the short move it is.
@@ -639,20 +747,21 @@ fn advance_candidate(
 }
 
 /// The support face of column `(x, z)` a body standing on `standing_y` could put its
-/// feet on: the one nearest its own layer within `climb` voxels, ties to the higher.
+/// feet on: the one nearest its own layer, at most `up` above it or `down` below, ties
+/// to the higher.
 ///
 /// A column cannot hold two support faces one layer apart — a support face is a solid
-/// with void over it — so ties only arise for a climb of two or more, and the higher
+/// with void over it — so ties only arise for a step of two or more, and the higher
 /// face is the ground a body walking over the terrain meets first.
 fn step_target_layer(
     view: &VoxelView<'_>,
     x: i64,
     z: u32,
     standing_y: u32,
-    climb: u32,
+    step: StepLimits,
 ) -> Option<u32> {
-    let lo = standing_y.saturating_sub(climb);
-    let hi = (standing_y + climb).min(view.config.height.saturating_sub(1));
+    let lo = standing_y.saturating_sub(step.down);
+    let hi = (standing_y + step.up).min(view.config.height.saturating_sub(1));
     let mut best: Option<u32> = None;
     for y in lo..=hi {
         if !view.is_support(x, y, z) {
@@ -668,7 +777,7 @@ fn step_target_layer(
     best
 }
 
-/// The highest within-climb support face under the disc at `(cx, cz)`: the surface a
+/// The highest within-step support face under the disc at `(cx, cz)`: the surface a
 /// disc body straddling a riser actually rests on. `standing_y` when nothing under the
 /// disc is higher and reachable.
 ///
@@ -680,9 +789,9 @@ fn disc_ground_layer(
     cz: f64,
     r: f64,
     standing_y: u32,
-    climb: u32,
+    step: StepLimits,
 ) -> u32 {
-    if climb == 0 {
+    if step.up == 0 {
         return standing_y;
     }
     let c = view.config;
@@ -704,7 +813,7 @@ fn disc_ground_layer(
                 continue;
             }
             let wx = x.rem_euclid(i64::from(c.width));
-            if let Some(y) = step_target_layer(view, wx, z as u32, standing_y, climb) {
+            if let Some(y) = step_target_layer(view, wx, z as u32, standing_y, step) {
                 best = best.max(y);
             }
         }
@@ -745,6 +854,125 @@ fn disc_hits_solid(view: &VoxelView<'_>, cx: f64, cz: f64, layer: u32, r: f64) -
     false
 }
 
+/// What a face a climbing lineage has run into offers ([`wall_ascent`], [`wall_descent`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Face {
+    /// Not a wall: level ground, a step within the lineage's limits, open air with no
+    /// ground under it, or the strip's end. Nothing to climb.
+    Not,
+    /// A wall, but the way along it is shut: an overhang or a roof over the path, or no
+    /// room for the body at the far end. The body turns back.
+    Blocked,
+    /// A climbable face ending on this standing layer of the neighbouring column (the top
+    /// of a wall, or the foot of a cliff).
+    Climb(u32),
+}
+
+/// **The wall rule, going up** (package mobility, decision 1): a body standing on
+/// `(x, y, z)` faces the column one step along `dir` (`(±1, 0)` or `(0, ±1)`).
+///
+/// It is a wall when that column is **solid at the body's layer** `y + 1` and its first
+/// support face above `y` — the top of the wall, every layer from `y + 1` to it solid —
+/// is more than `up` layers higher (a lower one is a step, not a wall). The way up is
+/// shut ([`Face::Blocked`]) when anything solid stands in the body's **own column**
+/// between its feet and `headroom` layers over the top (an overhang: ceilings are a later
+/// package), or when the top has no `headroom` of void over it. Terrain only: a stand is
+/// not a voxel and is never a face.
+///
+/// Column-level, so the route maps can ask it of faces as well as bodies; the live body
+/// also checks its disc along the way (`step`'s attach).
+pub fn wall_ascent(
+    view: &VoxelView<'_>,
+    x: i64,
+    y: u32,
+    z: u32,
+    dir: (i64, i64),
+    headroom: u32,
+    up: u32,
+) -> Face {
+    let c = view.config;
+    let wz = i64::from(z) + dir.1;
+    if wz < 0 || wz >= i64::from(c.depth) || y + 1 >= c.height {
+        return Face::Not;
+    }
+    let (wx, wz) = ((x + dir.0).rem_euclid(i64::from(c.width)), wz as u32);
+    if !view.material_at(wx, y + 1, wz).is_solid() {
+        return Face::Not;
+    }
+    let Some(top) = (y + 1..c.height).find(|&yy| view.is_support(wx, yy, wz)) else {
+        return Face::Not;
+    };
+    if top - y <= up {
+        return Face::Not;
+    }
+    let ceiling = (top + headroom).min(c.height - 1);
+    if (y + 1..=ceiling).any(|yy| view.material_at(x, yy, z).is_solid())
+        || !has_headroom(view, wx, top, wz, headroom)
+    {
+        return Face::Blocked;
+    }
+    Face::Climb(top)
+}
+
+/// **The wall rule, going down**: a body standing on `(x, y, z)` at the edge toward the
+/// column along `dir`. It is a cliff when that column is **open at the body's own
+/// standing layer** `y` and its highest support face below — the foot of the cliff — is
+/// more than `down` layers lower. The face is the body's own column's side, so it must be
+/// **solid from the foot up to `y`** (a ledge with air under it is an overhang); the way
+/// down must be open up to `headroom` layers over `y` (no roof over the lip), and the
+/// foot must have `headroom` of void over it. A column with no ground under it at all is
+/// not a cliff, it is a hole: [`Face::Not`], refused as before.
+///
+/// The exact mirror of [`wall_ascent`] from the foot, so a face that can be climbed up
+/// can be climbed down and the route maps may join the two ends as one undirected edge.
+pub fn wall_descent(
+    view: &VoxelView<'_>,
+    x: i64,
+    y: u32,
+    z: u32,
+    dir: (i64, i64),
+    headroom: u32,
+    down: u32,
+) -> Face {
+    let c = view.config;
+    let az = i64::from(z) + dir.1;
+    if az < 0 || az >= i64::from(c.depth) {
+        return Face::Not;
+    }
+    let (ax, az) = ((x + dir.0).rem_euclid(i64::from(c.width)), az as u32);
+    if view.material_at(ax, y, az).is_solid() {
+        return Face::Not;
+    }
+    let Some(foot) = (0..y).rev().find(|&yy| view.is_support(ax, yy, az)) else {
+        return Face::Not;
+    };
+    if y - foot <= down {
+        return Face::Not;
+    }
+    let ceiling = (y + headroom).min(c.height - 1);
+    if !(foot + 1..=y).all(|yy| view.material_at(x, yy, z).is_solid())
+        || (y + 1..=ceiling).any(|yy| view.material_at(ax, yy, az).is_solid())
+        || !has_headroom(view, ax, foot, az, headroom)
+    {
+        return Face::Blocked;
+    }
+    Face::Climb(foot)
+}
+
+/// Whether the disc at `(cx, cz)` is clear of solid over every layer in `layers`: the
+/// live body's own check along a face, on top of the column rule.
+pub(crate) fn disc_clear(
+    view: &VoxelView<'_>,
+    cx: f64,
+    cz: f64,
+    r: f64,
+    layers: std::ops::RangeInclusive<u32>,
+) -> bool {
+    layers
+        .into_iter()
+        .all(|l| !disc_hits_solid(view, cx, cz, l, r))
+}
+
 /// The contact and wet readings of one body, from its geometry right now. `resolved`
 /// is false only when the pose cannot be mapped onto the strip at all; every channel
 /// that was evaluated is a valid reading, a zero included.
@@ -775,7 +1003,8 @@ impl ContactReading {
 /// standing water at the foot, a valid zero when dry.
 ///
 /// **Semantic change, 2026-09-22** (`design/handoffs/voxel-founder-step-2026-09-22.md`):
-/// the arcs are probed at `standing_y + 1 + climb`, not at the body layer, because a
+/// the arcs are probed at `standing_y + 1 + climb` (the step **up**, since package
+/// mobility), not at the body layer, because a
 /// solid the body could step onto is not a wall. A ledge within the lineage's climb now
 /// reads as open ground; a cliff face, a taller rise and a wall read exactly as they did.
 /// The receptor is still one layer and one channel — the observation vector's shape and
@@ -1000,18 +1229,32 @@ pub(crate) fn mouth_detritus(
     best
 }
 
-/// A founder's authored climb height expressed on `voxel_m`: the one conversion, in
-/// `cubarium_voxel::walk::climb_voxels`, applied to the lineage's own
-/// [`FounderPhysiology::climb_m`].
-///
-/// It is the same kind of thing as every other length on the physiology — a physical
-/// distance the consumer discretises once — and since 2026-09-22 it is not the odd one
-/// out: the mouth's reach and the body's clearance are metres too
-/// (`design/handoffs/voxel-body-anchors-2026-09-22.md`). The browser's 0.25 m climb is
-/// two voxels on `small` and one on `default`/`wide`; the shredder's 0.125 m is one on
-/// both.
-pub fn climb_voxels(phys: &FounderPhysiology, voxel_m: f64) -> u32 {
-    cubarium_voxel::walk::climb_voxels(phys.climb_m, voxel_m)
+/// A lineage's step in whole voxels: how many layers up, and how many down, one
+/// sub-step may move its standing face ([`FounderPhysiology::step_limits`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct StepLimits {
+    pub up: u32,
+    pub down: u32,
+}
+
+impl StepLimits {
+    /// The largest rise a body can take **both ways** between two faces: the undirected
+    /// adjacency a component or an acceptance check needs is mutual reachability, and a
+    /// face `d` layers above another is reachable from it and back only when `d` is
+    /// within both limits.
+    pub fn mutual(&self) -> u32 {
+        self.up.min(self.down)
+    }
+}
+
+/// A length in metres as whole voxels, **rounded down** (with a hair of tolerance for a
+/// limit that is an exact multiple): a riser of `k` voxels is within a step of `m` metres
+/// when `k · voxel_m <= m`. A non-finite or negative length is no step at all.
+pub fn step_voxels(m: f64, voxel_m: f64) -> u32 {
+    if !m.is_finite() || m <= 0.0 || !voxel_m.is_finite() || voxel_m <= 0.0 {
+        return 0;
+    }
+    (m / voxel_m + 1e-9).floor().clamp(0.0, f64::from(u32::MAX)) as u32
 }
 
 /// Whether `headroom` whole voxels of void stand over the face `(x, y, z)`.
@@ -1114,7 +1357,8 @@ pub(crate) fn reachable_layers(
     // This scan runs over every stand for every mouth on every tick.
     let sc = fv.config.species(stand.species);
     let lowest = i64::from(stand.site.y) + 1;
-    let highest = i64::from(stand.site.y) + i64::from(sc.crown_voxels(stand.wood, fv.config.voxel_m));
+    let highest =
+        i64::from(stand.site.y) + i64::from(sc.crown_voxels(stand.wood, fv.config.voxel_m));
     if *layers.end() < lowest || *layers.start() > highest {
         return out;
     }
@@ -1319,6 +1563,9 @@ pub(crate) fn observation(
     // it, so a growing founder's eye, mouth and receptors rise with it (decisions §1).
     let body = phys.body_at(a.body);
     let mut obs = vec![0.0; manifest.inputs()];
+    // Where the receptors are: the standing face, or on a wall the layer the feet have
+    // reached (package mobility: "its senses read from where it is").
+    let standing_y = a.sense_layer(view.config.voxel_m);
 
     // Self: real body state against the manifest's fixed references.
     let fb = &a.founder_state.feedback;
@@ -1342,9 +1589,9 @@ pub(crate) fn observation(
     let reading = contact_readings(
         view,
         &a.pose,
-        a.site.y,
+        standing_y,
         &body,
-        climb_voxels(phys, view.config.voxel_m),
+        phys.step_limits(view.config.voxel_m).up,
     );
     let valid = f64::from(reading.resolved);
     obs[cm.offset] = reading.front;
@@ -1354,7 +1601,7 @@ pub(crate) fn observation(
     obs[cm.offset + 4] = valid;
     obs[wm.offset] = reading.wet;
     obs[wm.offset + 1] = valid;
-    let taste = taste_reading(fv, view, &a.pose, a.site.y, manifest, &body, founder);
+    let taste = taste_reading(fv, view, &a.pose, standing_y, manifest, &body, founder);
     obs[tm.offset] = taste.cue;
     obs[tm.offset + 1] = taste.resistance;
     obs[tm.offset + 2] = f64::from(taste.valid);
@@ -1364,7 +1611,7 @@ pub(crate) fn observation(
     // with validity 0.
     if let Some(cm) = module_opt(manifest, "Chem(detritus)") {
         if let Some(senses) = senses.as_deref_mut() {
-            if let Some(cue) = senses.sample_cue(view, &a.pose, a.site.y) {
+            if let Some(cue) = senses.sample_cue(view, &a.pose, standing_y) {
                 let sat = manifest.tunings.chem_saturation;
                 let q = cue / (cue + sat);
                 obs[cm.offset] = clamp01(q);
@@ -1379,12 +1626,12 @@ pub(crate) fn observation(
     if let Some(lm) = module_opt(manifest, "Light") {
         if let Some((cx, cz)) = a.pose.column(view.config.voxel_m, view.config.depth) {
             let wx = cx.rem_euclid(i64::from(view.config.width));
-            if view.is_support(wx, a.site.y, cz) {
+            if view.is_support(wx, standing_y, cz) {
                 // A static episode's senses memo the reading per face (frozen terrain).
                 let sky = senses
                     .as_deref_mut()
-                    .and_then(|s| s.held_sky(view, wx, a.site.y, cz))
-                    .unwrap_or_else(|| view.sky_visibility(wx, a.site.y, cz));
+                    .and_then(|s| s.held_sky(view, wx, standing_y, cz))
+                    .unwrap_or_else(|| view.sky_visibility(wx, standing_y, cz));
                 obs[lm.offset] = clamp01(sky);
                 obs[lm.offset + 1] = 1.0;
             }
@@ -1396,8 +1643,9 @@ pub(crate) fn observation(
     // a senses handle.
     if let Some(cn) = module_opt(manifest, "Cone(3, foliage/body)") {
         let occupancy = cone_occupancy.expect("browser observations prepare cone occupancy");
-        let cone =
-            crate::senses::cone_readings(view, occupancy, a.id, &a.pose, a.site.y, manifest, &body);
+        let cone = crate::senses::cone_readings(
+            view, occupancy, a.id, &a.pose, standing_y, manifest, &body,
+        );
         let base = cn.offset;
         for (k, sec) in cone.sectors.iter().enumerate() {
             let o = base + k * 6;
@@ -1564,7 +1812,7 @@ mod tests {
                 &manifest,
                 &body,
                 0.05,
-                1,
+                StepLimits { up: 1, down: 1 },
                 Actions {
                     forward: 1.0,
                     turn: 0.0,
@@ -1591,7 +1839,7 @@ mod tests {
                 &manifest,
                 &body,
                 0.05,
-                1,
+                StepLimits { up: 1, down: 1 },
                 Actions {
                     forward: 1.0,
                     turn: 0.0,
@@ -1629,7 +1877,7 @@ mod tests {
                 &manifest,
                 &body,
                 0.05,
-                1,
+                StepLimits { up: 1, down: 1 },
                 Actions {
                     forward: 0.0,
                     turn: 1.0,
@@ -1698,7 +1946,7 @@ mod tests {
                 &manifest,
                 &body,
                 0.05,
-                1,
+                StepLimits { up: 1, down: 1 },
                 Actions {
                     forward: 1.0,
                     turn: 0.0,
@@ -1860,7 +2108,7 @@ mod tests {
                 &manifest,
                 &body,
                 0.05,
-                1,
+                StepLimits { up: 1, down: 1 },
                 Actions {
                     forward: 1.0,
                     turn: 0.0,
@@ -1902,7 +2150,7 @@ mod tests {
                 &manifest,
                 &body,
                 0.05,
-                1,
+                StepLimits { up: 1, down: 1 },
                 Actions {
                     forward: 1.0,
                     turn: 0.0,
@@ -1951,7 +2199,7 @@ mod tests {
                 &manifest,
                 &body,
                 0.05,
-                1,
+                StepLimits { up: 1, down: 1 },
                 Actions {
                     forward: 1.0,
                     turn: 0.0,
@@ -2362,7 +2610,10 @@ mod tests {
         // the body's head layer plus two; a half-grown springturf rounds to one voxel and
         // sits at the head.
         let turf = 0.5 * flora.config().springturf.wood_max;
-        for (x, species, wood) in [(2i64, Plant::Bloomcrown, 0.30), (5, Plant::Springturf, turf)] {
+        for (x, species, wood) in [
+            (2i64, Plant::Bloomcrown, 0.30),
+            (5, Plant::Springturf, turf),
+        ] {
             assert!(flora.apply(
                 &world,
                 FloraCommand::Seed {
@@ -2521,7 +2772,10 @@ mod step_rule_tests {
                 manifest,
                 body,
                 0.05,
-                climb,
+                StepLimits {
+                    up: climb,
+                    down: climb,
+                },
                 Actions {
                     forward: 1.0,
                     turn: 0.0,
@@ -2533,20 +2787,24 @@ mod step_rule_tests {
         (pose, layers)
     }
 
-    /// The conversion is one rounding of a physical height, and it is the founders'
-    /// authored placeholders that go through it: the browser's 0.25 m is two voxels on
-    /// the 0.125 m preset and one on the 0.25 m presets; the shredder's 0.125 m is one
-    /// on both.
+    /// The conversion rounds a physical step **down** (package mobility): the browser's
+    /// 0.375 m up / 0.75 m down is 3 / 6 voxels on the 0.125 m preset and 1 / 3 on the
+    /// 0.25 m presets; the shredder's 0.25 m is two voxels on the fine grid and one on
+    /// the coarse one.
     #[test]
-    fn the_climb_height_converts_to_whole_voxels_once() {
+    fn the_step_converts_to_whole_voxels_rounding_down() {
         let browser = crate::FounderPhysiology::frozen(Founder::Browser);
         let shredder = crate::FounderPhysiology::frozen(Founder::Blind);
-        assert_eq!(browser.climb_m, 0.25);
-        assert_eq!(shredder.climb_m, 0.125);
-        assert_eq!(climb_voxels(&browser, 0.125), 2);
-        assert_eq!(climb_voxels(&browser, 0.25), 1);
-        assert_eq!(climb_voxels(&shredder, 0.125), 1);
-        assert_eq!(climb_voxels(&shredder, 0.25), 1);
+        assert_eq!((browser.step_up_m, browser.step_down_m), (0.375, 0.75));
+        assert_eq!((shredder.step_up_m, shredder.step_down_m), (0.25, 0.25));
+        let l = |p: &crate::FounderPhysiology, v| {
+            let s = p.step_limits(v);
+            (s.up, s.down)
+        };
+        assert_eq!(l(&browser, 0.125), (3, 6));
+        assert_eq!(l(&browser, 0.25), (1, 3));
+        assert_eq!(l(&shredder, 0.125), (2, 2));
+        assert_eq!(l(&shredder, 0.25), (1, 1));
     }
 
     /// One voxel up onto a terrace and one voxel back down off it, on the 0.25 m
@@ -2574,18 +2832,23 @@ mod step_rule_tests {
         );
     }
 
-    /// The shredder's 0.125 m climb is one voxel at either scale, so a one-voxel
-    /// terrace is a step on both presets.
+    /// The shredder's 0.25 m step is two voxels on the 0.125 m grid and one on the
+    /// 0.25 m grid: a one-voxel terrace is a step on both, and a 0.5 m (two coarse
+    /// voxels) terrace is a wall the sweep refuses (the founder path climbs it instead:
+    /// `tests/mobility.rs`).
     #[test]
-    fn a_shredder_steps_one_voxel_at_either_scale() {
-        for v in [0.125, 0.25] {
-            let world = terrace(v, 12, 2, 5..8, 1);
+    fn a_shredder_steps_a_quarter_metre_and_meets_half_a_metre_as_a_wall() {
+        let phys = crate::FounderPhysiology::frozen(Founder::Blind);
+        for (v, rise, steps) in [(0.125, 2, true), (0.25, 1, true), (0.25, 2, false)] {
+            let world = terrace(v, 12, 2, 5..8, rise);
             let manifest = Founder::Blind.manifest();
             let body = adult(Founder::Blind);
-            let (_, layers) = walk_east(&world, &manifest, &body, 1, 3.5 * v, 2, 60);
-            assert!(
-                layers.contains(&3),
-                "a 1-voxel terrace at {v} m is not a step: {layers:?}"
+            let up = phys.step_limits(v).up;
+            let (_, layers) = walk_east(&world, &manifest, &body, up, 3.5 * v, 2, 60);
+            assert_eq!(
+                layers.contains(&(2 + rise)),
+                steps,
+                "a {rise}-voxel terrace at {v} m: {layers:?}"
             );
         }
     }
