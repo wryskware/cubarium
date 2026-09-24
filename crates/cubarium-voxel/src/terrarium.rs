@@ -161,6 +161,10 @@ pub struct Terrarium {
     pub pool_m: [f64; 2],
     /// A pool's depth.
     pub pool_depth_m: f64,
+    /// The stream's bed: how wide its trough is bank to bank and how deep under the
+    /// ground it runs, graded into the worn heightfield with even banks.
+    pub stream_width_m: f64,
+    pub stream_depth_m: f64,
     /// The water it starts with and the weather after, as a staged recipe states it.
     pub water: Water,
 }
@@ -223,6 +227,8 @@ impl Terrarium {
         yard: 0.35,
         pool_m: [0.5, 0.875],
         pool_depth_m: 0.25,
+        stream_width_m: 0.75,
+        stream_depth_m: 0.25,
         water: Water {
             // The stream no longer returns the sky's water, so the showers must. A shower
             // rains whatever the sky holds, up to more than it ever holds, so rain follows
@@ -296,6 +302,8 @@ impl Terrarium {
         yard: 0.32,
         pool_m: [0.75, 1.25],
         pool_depth_m: 0.375,
+        stream_width_m: 1.0,
+        stream_depth_m: 0.25,
         water: Water {
             // The stream no longer returns the sky's water, so the showers must. A shower
             // rains whatever the sky holds, up to more than it ever holds, so rain follows
@@ -371,6 +379,8 @@ impl Terrarium {
             ("texture_wavelength_m", self.texture_wavelength_m),
             ("roll_wavelength_m", self.roll_wavelength_m),
             ("warp_wavelength_m", self.warp_wavelength_m),
+            ("stream_width_m", self.stream_width_m),
+            ("stream_depth_m", self.stream_depth_m),
         ] {
             anyhow::ensure!(v > 0.0 && v.is_finite(), "terrarium.{name} must be positive");
         }
@@ -574,8 +584,12 @@ struct Build<'a> {
     loose: Vec<i32>,
     /// Columns graded into the lake.
     lake: Vec<bool>,
-    /// Columns an arch's deck stands over: no stream is routed under one.
+    /// Columns an arch's deck stands over.
     arch: Vec<bool>,
+    /// The stream's course, spring first, routed and graded into the heightfield after
+    /// erosion; and the columns its trough lowered, which no arch is built over.
+    course: Vec<(i64, i32)>,
+    stream: Vec<bool>,
     /// The rows the water fills: everything below this row, open to the sky and joined
     /// to the lake, is under water.
     water_y: i32,
@@ -677,9 +691,14 @@ pub fn build(world: &mut World, t: &Terrarium) -> Report {
         lake: vec![false; cells],
         water_y: 0,
         arch: vec![false; cells],
+        course: Vec::new(),
+        stream: vec![false; cells],
         report: Report::default(),
     };
     let site = layout(&mut b);
+    for (x, z, _) in lake_bed(&b, &site) {
+        b.lake[(z as i64 * w as i64 + x.rem_euclid(w as i64)) as usize] = true;
+    }
     heightfield(&mut b);
     lay_lake(&mut b, &site);
     lay_ground(&mut b);
@@ -913,11 +932,23 @@ fn heightfield(b: &mut Build) {
     };
     let hardness = b.t.hardness;
     crate::erosion::erode(&mut field, &b.t.erosion, 0.45, |_, _, _| hardness);
+    // The stream is routed over the worn ground and its trough graded into it here, not
+    // before: erosion silts a cut trough up and wears its banks down under the bed.
+    let mut surf: Vec<f64> = (0..n).map(|i| field.surface_m(i) / vm).collect();
+    let mut soft: Vec<f64> = (0..n).map(|i| field.sediment_m[i] / vm).collect();
+    if let Some(course) = route(b, &surf) {
+        for (i, cut) in trough(b, &surf, &course).into_iter().enumerate() {
+            let Some(to) = cut else { continue };
+            soft[i] = (soft[i] - (surf[i] - to)).max(0.0);
+            surf[i] = to;
+            b.stream[i] = true;
+        }
+        b.course = course;
+    }
     let h = b.g.h;
     for i in 0..n {
-        let top = (field.surface_m(i) / vm).round() as i32;
-        b.ground[i] = top.clamp(2, h - 3);
-        b.loose[i] = (field.sediment_m[i] / vm).round() as i32;
+        b.ground[i] = (surf[i].round() as i32).clamp(2, h - 3);
+        b.loose[i] = soft[i].round() as i32;
     }
     b.report.eroded_m3 = ((field.budget.removed_bedrock_m + field.budget.removed_sediment_m) * vm * vm).round() as u64;
 }
@@ -926,37 +957,49 @@ fn heightfield(b: &mut Build) {
 /// ends, from the glass back toward the massif's foot. Nothing may be built over it.
 fn lay_lake(b: &mut Build, site: &Site) {
     let w = b.g.w;
-    let (span, centre) = (site.span, site.centre);
-    let half = ((span.1 - span.0) as f64 / 2.0).max(1.0);
-    let depth = b.v(b.t.lake_depth_m).max(2) as f64;
+    let (span, _) = (site.span, site.centre);
     let reach = b.v(b.t.warp_m) + 2;
     let back = |b: &Build, x: i64| -> i32 {
         (Build::at(&b.foot, x as f64 + 0.5).floor() as i32 - reach).clamp(2, b.g.d - 4)
     };
     // Graded from one flat reference, the lowest ground it is cut into, so the ground's
-    // own relief leaves no bumps in its bed.
+    // own relief leaves no bumps in its bed. Not the stream's trough: that runs under it.
     let reference = (span.0..=span.1)
         .flat_map(|x| (0..=back(b, x)).map(move |z| (x, z)))
+        .filter(|&(x, z)| !b.stream[(z as i64 * w + x.rem_euclid(w)) as usize])
         .map(|(x, z)| b.ground_at(x, z))
         .min()
         .unwrap_or(0);
     b.water_y = reference + 1 + b.v(b.t.water_level_m);
+    for (x, z, dep) in lake_bed(b, site) {
+        let i = (z as i64 * w + x.rem_euclid(w)) as usize;
+        b.ground[i] = b.ground[i].min(reference - dep);
+        b.lake[i] = true;
+        let top = b.ground[i];
+        for y in top + 1..b.g.h {
+            b.g.keep(x, y, z);
+        }
+    }
+}
+
+/// The lake's columns and how deep each is graded: deepest across its middle, shelving
+/// to nothing at its ends, from the glass back to the massif's foot. Known from the
+/// layout alone, so the stream can be routed to it before erosion.
+fn lake_bed(b: &Build, site: &Site) -> Vec<(i64, i32, i32)> {
+    let (span, centre) = (site.span, site.centre);
+    let half = ((span.1 - span.0) as f64 / 2.0).max(1.0);
+    let depth = b.v(b.t.lake_depth_m).max(2) as f64;
+    let reach = b.v(b.t.warp_m) + 2;
+    let back = |x: i64| -> i32 { (Build::at(&b.foot, x as f64 + 0.5).floor() as i32 - reach).clamp(2, b.g.d - 4) };
+    let mut bed = Vec::new();
     for x in span.0..=span.1 {
         let u = (x - centre) as f64 / half;
         let dep = (depth * (1.0 - u * u)).round() as i32;
-        if dep < 1 {
-            continue;
-        }
-        for z in 0..=back(b, x) {
-            let i = (z as i64 * w + x.rem_euclid(w)) as usize;
-            b.ground[i] = b.ground[i].min(reference - dep);
-            b.lake[i] = true;
-            let top = b.ground[i];
-            for y in top + 1..b.g.h {
-                b.g.keep(x, y, z);
-            }
+        if dep >= 1 {
+            bed.extend((0..=back(x)).map(|z| (x, z, dep)));
         }
     }
+    bed
 }
 
 /// Lay the heightfield as voxels: rock, with the loose material erosion left on top as
@@ -1118,6 +1161,16 @@ fn arches(b: &mut Build) {
         .map(|x| (d - bmax..d).map(|z| b.ground_at(x, z)).max().unwrap_or(0))
         .collect();
     let sky = |x: i64| back[x.rem_euclid(w) as usize];
+    // No deck over the stream's trough, whose feet would dam it, nor over the lake, which
+    // must stand open to the sky.
+    let stream: Vec<bool> = (0..w)
+        .map(|x| {
+            (d - bmax..d).any(|z| {
+                let i = (z as i64 * w + x) as usize;
+                b.stream[i] || b.lake[i]
+            })
+        })
+        .collect();
     // Every saddle an arch could span: both abutments solid masses at least as high as
     // the deck, the window under the middle of it at least `window` clear.
     let mut spans: Vec<(i64, i64, i32, i32)> = Vec::new();
@@ -1125,7 +1178,7 @@ fn arches(b: &mut Build) {
         for len in smin..=smax.max(smin) {
             let xb = xa + len;
             let top = sky(xa).min(sky(xb)) - 1;
-            if sky(xa - 1) < top || sky(xb + 1) < top {
+            if sky(xa - 1) < top || sky(xb + 1) < top || (xa..=xb).any(|x| stream[x.rem_euclid(w) as usize]) {
                 continue;
             }
             // The middle half of the span must clear the window; toward the abutments
@@ -1196,34 +1249,22 @@ struct Course {
     score: f64,
 }
 
-/// Where the stream rises and how it runs to the lake. Every column is given its cheapest
-/// way down to the water — downhill or level costs its length, climbing a voxel costs a
-/// notch cut through it — and every high, level plateau is scored as a spring by the
-/// stream it would feed: how far it falls, how much of it the camera sees, how many
-/// waterfalls it makes and how far round the ring it carries. The best is cut in: a pool
-/// at the spring, a two-wide channel down every tread, the falls kept open, a plunge pool
-/// under each tall one. The spring sits in the top pool.
-fn river(b: &mut Build) -> Option<(u32, u32, u32)> {
-    let (w, h, d) = (b.g.w, b.g.h, b.g.d);
+/// Where the stream rises and how it runs to the lake, over the worn ground `top` (voxels,
+/// per column). Every column is given its cheapest way down to the
+/// lake — downhill or level costs its length, climbing costs a notch cut through — never
+/// across the ring's seam, which is the screen's edge. Every high, level plateau is scored
+/// as a spring by the stream it would feed: how far it falls and how much of it the camera
+/// sees. The best one's course, spring first.
+fn route(b: &Build, top: &[f64]) -> Option<Vec<(i64, i32)>> {
+    let (w, h, d) = (b.g.w, b.g.h as f64, b.g.d);
     let n = (w * d as i64) as usize;
-    let col = |x: i64, z: i32| (z as i64 * w + x.rem_euclid(w)) as usize;
-    // The open surface: each column's highest solid.
-    let top: Vec<i32> = (0..n)
-        .map(|i| {
-            let (x, z) = (i as i64 % w, (i as i64 / w) as i32);
-            (0..h).rev().find(|&y| b.g.solid(x, y, z)).unwrap_or(0)
-        })
-        .collect();
-    // The stream ends in **the lake**, not in whatever the raised level flooded nearest:
-    // those it may cross, the lake it must reach.
-    let wet: Vec<bool> = (0..n).map(|i| b.lake[i]).collect();
-    let arch = b.arch.clone();
-    let water = |i: usize| wet[i];
-    let blocked = |i: usize| arch[i];
+    let col = |x: i64, z: i32| (z.clamp(0, d - 1) as i64 * w + x.rem_euclid(w)) as usize;
+    let water = |i: usize| b.lake[i];
+    // Seen from the camera: nothing in front rises into the ray from the column's top.
     let seen = |x: i64, z: i32| -> bool {
-        let (mut ry, mut rz) = (top[col(x, z)] as f64 + 1.01, z as f64 + 0.5);
-        while rz >= 0.0 && ry < h as f64 {
-            if b.g.solid(x, ry as i32, rz as i32) {
+        let (mut ry, mut rz) = (top[col(x, z)] + 1.01, z as f64 + 0.5);
+        while rz >= 0.0 && ry < h {
+            if top[col(x, rz as i32)] + 1.0 > ry {
                 return false;
             }
             rz -= 0.25;
@@ -1232,8 +1273,11 @@ fn river(b: &mut Build) -> Option<(u32, u32, u32)> {
         true
     };
     // Cheapest way down from every column, searched out from the water.
+    // A voxel dropped over a lip costs about a column: the stream takes a ramp down where
+    // there is one, and a fall only to save a long way round.
     const CLIMB: f64 = 30.0;
-    const FALL: f64 = 0.35;
+    const FALL: f64 = 1.0;
+    const SIDE: f64 = 6.0;
     let mut cost = vec![f64::INFINITY; n];
     let mut next = vec![usize::MAX; n];
     let mut heap = std::collections::BinaryHeap::new();
@@ -1252,18 +1296,26 @@ fn river(b: &mut Build) -> Option<(u32, u32, u32)> {
         let (x, z) = (i as i64 % w, (i as i64 / w) as i32);
         for &(dx, dz, len) in &steps {
             let (ax, az) = (x + dx, z + dz);
-            if az < 0 || az >= d {
+            // Not off the back or the glass, and not round the seam.
+            if az < 0 || az >= d || ax < 0 || ax >= w {
                 continue;
             }
             let a = col(ax, az);
-            if water(a) || blocked(a) {
+            if water(a) {
                 continue;
             }
             // Water at `a` runs into `i`: its length, a little for every voxel it drops so
             // it follows a ramp where there is one, and a notch cut for every voxel it climbs.
-            let climb = (top[i] - top[a]).max(0) as f64;
-            let fall = (top[a] - top[i] - 1).max(0) as f64;
-            let ca = c + len + FALL * fall + CLIMB * climb;
+            let climb = (top[i] - top[a]).max(0.0);
+            let fall = (top[a] - top[i] - 1.0).max(0.0);
+            // And whatever the ground either side of it falls away more than the trough's
+            // bank holds: water runs down the hill, not along it.
+            let side: f64 = [(dz as i64, -dx as i32), (-dz as i64, dx as i32)]
+                .iter()
+                .filter(|&&(_, sz)| (0..d).contains(&(az + sz)))
+                .map(|&(sx, sz)| (top[a] - 1.0 - top[col(ax + sx, az + sz)]).max(0.0))
+                .sum();
+            let ca = c + len + FALL * fall + CLIMB * climb + SIDE * side;
             if ca < cost[a] {
                 cost[a] = ca;
                 next[a] = i;
@@ -1271,22 +1323,39 @@ fn river(b: &mut Build) -> Option<(u32, u32, u32)> {
             }
         }
     }
-    // Springs: level plateaus in the upper half of the ring's height, room for a pool.
-    let highest = (0..n).filter(|&i| !blocked(i)).map(|i| top[i]).max().unwrap_or(0);
-    let water_y = b.water_y;
-    let lowest_spring = water_y + (highest - water_y) / 2;
-    let level = |x: i64, z: i32| {
+    // Springs: level plateaus in the upper half of the height over the water, room for a
+    // pool. The water stands `water_level_m` over the lowest ground the lake is cut into.
+    let highest = top.iter().copied().fold(0.0, f64::max);
+    let low = (0..n).filter(|&i| water(i)).map(|i| top[i]).fold(f64::INFINITY, f64::min);
+    let water_y = low + 1.0 + b.v(b.t.water_level_m) as f64;
+    let lowest_spring = water_y + (highest - water_y) / 2.0;
+    let level = |x: i64, z: i32, tol: f64| {
         (-3..=3).all(|dx| {
             (-2..=2).all(|dz| {
                 let zz = z + dz;
-                (1..d - 1).contains(&zz) && (top[col(x + dx, zz)] - top[col(x, z)]).abs() <= 1
+                (1..d - 1).contains(&zz) && (top[col(x + dx, zz)] - top[col(x, z)]).abs() <= tol
             })
         })
     };
+    // Its pool stays clear of the seam.
+    let margin = b.v(b.t.pool_m[1]) as i64 + 3;
+    // The levellest ground there is: worn ground may have no plateau flat to a voxel.
+    let tol = [1.0, 2.0, 3.0]
+        .into_iter()
+        .find(|&tol| {
+            (0..n).any(|i| {
+                let (x, z) = (i as i64 % w, (i as i64 / w) as i32);
+                top[i] >= lowest_spring && cost[i].is_finite() && level(x, z, tol)
+            })
+        })
+        .unwrap_or(3.0);
     let mut best: Option<Course> = None;
     for i in 0..n {
         let (x, z) = (i as i64 % w, (i as i64 / w) as i32);
-        if top[i] < lowest_spring || !cost[i].is_finite() || blocked(i) || water(i) || !level(x, z) {
+        if top[i] < lowest_spring || !cost[i].is_finite() || water(i) || !level(x, z, tol) {
+            continue;
+        }
+        if x < margin || x >= w - margin {
             continue;
         }
         let mut path = vec![(x, z)];
@@ -1295,46 +1364,102 @@ fn river(b: &mut Build) -> Option<(u32, u32, u32)> {
             j = next[j];
             path.push((j as i64 % w, (j as i64 / w) as i32));
         }
-        let drop = (top[i] - water_y) as f64;
+        let drop = top[i] - water_y;
         let visible = path.iter().filter(|&&(x, z)| seen(x, z)).count() as f64;
-        let falls = path
-            .windows(2)
-            .filter(|p| top[col(p[0].0, p[0].1)] - top[col(p[1].0, p[1].1)] >= 3)
-            .count() as f64;
         let climb: f64 = path
             .windows(2)
-            .map(|p| (top[col(p[1].0, p[1].1)] - top[col(p[0].0, p[0].1)]).max(0) as f64)
+            .map(|p| (top[col(p[1].0, p[1].1)] - top[col(p[0].0, p[0].1)]).max(0.0))
             .sum();
         // No reward for distance: the long way round to the lake reads as the wrong way.
-        let score = drop + 0.3 * visible + 3.0 * falls - 3.0 * climb;
+        let score = drop + 0.3 * visible - 3.0 * climb;
         if best.as_ref().is_none_or(|c| score > c.score) {
             best = Some(Course { path, score });
         }
     }
-    let course = best?;
-    b.report.river_m = course.path.len() as f64 * b.c.voxel_m;
-    let &(sx, sz) = course.path.first()?;
-    b.report.river_drop_m = (top[col(sx, sz)] - b.water_y) as f64 * b.c.voxel_m;
+    best.map(|c| c.path)
+}
 
-    // The spring's pool.
+/// The trough the stream runs in, as the height each column is cut down to (voxels), `None`
+/// where it is left alone. The bed runs `stream_depth_m` under the ground, never rising
+/// and falling a little on the flat so the water moves, but never more than a voxel
+/// deeper than that; the banks climb from it evenly to the ground `stream_width_m` apart.
+/// Past a column beyond that the ground is left as it stands: a cliff beside the stream
+/// stays a cliff.
+fn trough(b: &Build, top: &[f64], course: &[(i64, i32)]) -> Vec<Option<f64>> {
+    let (w, d) = (b.g.w, b.g.d);
+    let col = |x: i64, z: i32| (z as i64 * w + x.rem_euclid(w)) as usize;
+    let depth = b.t.stream_depth_m / b.c.voxel_m;
+    let half = (b.t.stream_width_m / b.c.voxel_m / 2.0).max(1.0);
+    const SLOPE: f64 = 0.2;
+    let mut bed = Vec::with_capacity(course.len());
+    for (k, &(x, z)) in course.iter().enumerate() {
+        let under = top[col(x, z)] - depth;
+        bed.push(match k {
+            0 => under,
+            _ => {
+                let (px, pz) = course[k - 1];
+                let len = if px != x && pz != z { 1.4 } else { 1.0 };
+                under.min(bed[k - 1] - SLOPE * len).max(under - 1.0)
+            }
+        });
+    }
+    let reach = half + 1.0;
+    // A shallow V: the columns beside the thalweg already stand a voxel or so up, so the
+    // water keeps to a line instead of spreading into a sheet.
+    let bank = |r: f64| depth * r / half;
+    let mut cut = vec![None; (w * d as i64) as usize];
+    for z in 0..d {
+        for x in 0..w {
+            let i = col(x, z);
+            // Banks stand on the nearest reach of the bed: where the course falls steeply
+            // the bed further down must not pull its banks down into a wide chute.
+            let near = course
+                .iter()
+                .zip(&bed)
+                .map(|(&(cx, cz), &y)| {
+                    let dx = (x - cx).rem_euclid(w).min((cx - x).rem_euclid(w)) as f64;
+                    let dz = (z - cz) as f64;
+                    ((dx * dx + dz * dz).sqrt(), y)
+                })
+                .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+            let Some((r, y)) = near.filter(|&(r, _)| r <= reach) else { continue };
+            let floor = y + bank(r);
+            if floor < top[i] && !b.lake[i] {
+                cut[i] = Some(floor);
+            }
+        }
+    }
+    cut
+}
+
+/// The stream in voxels, along the graded course: a pool at the spring, and the bed made
+/// sure after rounding to whole voxels — it never rises and still falls a voxel every
+/// few columns, cutting no more than a voxel under the ground to do it — with a lip
+/// wherever the bank beside it rounded down under the water.
+fn river(b: &mut Build) -> Option<(u32, u32, u32)> {
+    let (w, h, d) = (b.g.w, b.g.h, b.g.d);
+    let path = std::mem::take(&mut b.course);
+    let &(sx, sz) = path.first()?;
+    let col = |x: i64, z: i32| (z as i64 * w + x.rem_euclid(w)) as usize;
+    let top = |g: &Grid, x: i64, z: i32| (0..h).rev().find(|&y| g.solid(x, y, z)).unwrap_or(0);
+    let ys = top(&b.g, sx, sz);
+    b.report.river_m = path.len() as f64 * b.c.voxel_m;
+    b.report.river_drop_m = (ys - b.water_y) as f64 * b.c.voxel_m;
+    b.report.river = path.iter().map(|&(x, z)| (x.rem_euclid(w) as u32, z as u32)).collect();
+
+    // The spring's pool, in the head of the trough.
     let dep = b.v(b.t.pool_depth_m).max(2);
-    let ys = top[col(sx, sz)];
     let rx = b.draw(b.t.pool_m).max(3);
     carve_pool(b, sx, ys, sz, rx, 2, dep);
     b.report.pools += 1;
     let spring = Some((sx.rem_euclid(w) as u32, (ys - 1) as u32, sz as u32));
 
-    // The channel: a groove two rows deep, its bed never rising downstream, two wide —
-    // the path's column and whichever neighbour across the flow stands nearer its height.
-    // It leaves the pool a row under the plateau's surface, so the pool's only way out is
-    // the channel and it never brims over onto the plateau and down every face.
-    let mut bed = ys - 2;
-    let path = course.path;
-    b.report.river = path.iter().map(|&(x, z)| (x.rem_euclid(w) as u32, z as u32)).collect();
+    // It leaves the pool a row under the brim, so the pool's way out is the stream.
+    let mut bed = ys - 1;
     for k in 1..path.len() {
-        let (px, _) = path[k - 1];
+        let (px, pz) = path[k - 1];
         let (x, z) = path[k];
-        if water(col(x, z)) {
+        if b.lake[col(x, z)] {
             // Into the lake: keep the last fall open.
             let mut y = bed;
             while y > 0 && !b.g.solid(x, y, z) {
@@ -1343,49 +1468,53 @@ fn river(b: &mut Build) -> Option<(u32, u32, u32)> {
             }
             break;
         }
-        let here = top[col(x, z)];
-        let fell = bed - (here - 1);
-        bed = bed.min(here - 2);
-        // A level run still falls a voxel every few columns, so the water does not have
-        // to pile up at the spring to push itself along and thin to nothing downstream.
-        if k % 5 == 0 {
-            bed = (bed - 1).max(here - 3).min(bed);
+        // Still in the pool: its floor is not the stream's bed.
+        let (u, v) = ((x - sx) as f64 / rx as f64, (z - sz) as f64 / 2.0);
+        if u * u + v * v <= 1.0 {
+            continue;
         }
-        // Across the flow: `x` for a step in `z`, `z` otherwise.
-        let (ox, oz) = if x == px { (1i64, 0i32) } else { (0, 1) };
-        let pair = [(x + ox, z + oz), (x - ox, z - oz)]
-            .into_iter()
-            .filter(|&(_, zz)| (0..d).contains(&zz))
-            .min_by_key(|&(xx, zz)| (top[col(xx, zz)] - here).abs())
-            .unwrap_or((x, z));
+        let here = top(&b.g, x, z);
+        let lip = bed;
+        bed = bed.min(here);
+        if k % 5 == 0 {
+            bed = (bed - 1).max(here - 1).min(bed);
+        }
         // Water only passes between cells that share a face: a diagonal step also cuts
         // the corner cell between the two, or the channel leaks at every one.
-        let (_, pz) = path[k - 1];
         let corner = (x != px && z != pz).then_some((x, pz));
-        for (k2, (cx, cz)) in [Some((x, z)), corner, Some(pair)].into_iter().flatten().enumerate() {
-            let t = top[col(cx, cz)];
-            // The course's own column is always cut, a notch through any rise it climbs,
-            // and so is a corner; the partner only where it stands near the bed, not up a
-            // riser beside it.
-            if k2 > 0 && Some((cx, cz)) == Some(pair) && t > bed + 4 {
+        for (cx, cz) in [Some((x, z)), corner].into_iter().flatten() {
+            if !(0..d).contains(&cz) {
                 continue;
             }
-            for y in bed + 1..=t.max(bed + 1) {
+            // The water's own rows are kept open even where the bed is the ground as it
+            // stands: the tidy fills any one-wide slot, and the bottom of a V is one.
+            let t = top(&b.g, cx, cz);
+            for y in bed + 1..=t.max(bed + 2) {
                 b.g.keep(cx, y, cz);
             }
             b.g.put(cx, bed, cz, Tag::Basin);
         }
-        // A tall fall lands in a plunge pool, if the landing is level enough to hold one.
-        if fell >= 5 && k + 2 < path.len() && level(x, z) {
-            carve_pool(b, x, here, z, 3, 2, 2);
-            b.report.pools += 1;
-        }
-        // The fall itself, open from the lip down.
-        if fell > 1 {
-            for y in here + 1..=here + fell {
-                b.g.keep_air(x, y, z);
-                b.g.keep_air(pair.0, y, pair.1);
+        // Where the ground beside the bed dips a voxel or two under the water, a lip:
+        // erosion wore the bank down there. A deeper drop is a fall the route chose.
+        let along = |cx: i64, cz: i32| {
+            path[k.saturating_sub(2)..(k + 3).min(path.len())].iter().any(|&(ox, oz)| ox == cx && oz == cz)
+                || corner == Some((cx, cz))
+        };
+        for (sx, sz) in [(1i64, 0i32), (-1, 0), (0, 1), (0, -1)] {
+            let (nx, nz) = (x + sx, z + sz);
+            if !(0..d).contains(&nz) || along(nx, nz) || b.lake[col(nx, nz)] {
+                continue;
             }
+            let t = top(&b.g, nx, nz);
+            if t <= bed && t >= bed - 1 {
+                for y in t + 1..=bed + 1 {
+                    b.g.put(nx, y, nz, Tag::Basin);
+                }
+            }
+        }
+        // A fall, open from the lip down.
+        for y in here + 1..=lip {
+            b.g.keep_air(x, y, z);
         }
     }
     spring
