@@ -26,12 +26,24 @@ visual all merged.
   shade more finely than the model's sky-visibility fan, but never differently.
 - **Tiers:** a `lighting = "flat" | "lit"` key. The Tachyon panel and the cube keep
   `flat` (backlog §5) unless Wrysk says otherwise after a measured board test.
-  Desktop defaults to `lit`.
+  Desktop defaults to `lit`. *(Review:)* the code default is `flat` and
+  `config/desktop/*.toml` set `lit`, so the panel and cube configs need no edit and
+  can't drift into `lit`. `lit` is a pipeline specialization constant (or a second
+  SPIR-V), so the flat pipeline runs today's shader code on the panel's GPU. The flat
+  picture at the panel config (6 px) matches main in a one-off comparison, not a
+  pinned test.
 - **GPU only.** The CPU renderer stays basic.
 - Desktop target: 60 fps at auto px (9–13) with `lit` on. The desktop window's frame
-  readback currently caps 13 px at about 22–26 fps (package P).
+  readback currently caps 13 px at about 22–26 fps (package P). *(Review:)* budget
+  for `lit`: at most 8 ms of GPU time per frame at 13 px on the 5090. The main loop's
+  pack stays within +0.5 ms a tick. Slow planes are recomputed off the loop thread.
 - Fixed elevated-orthographic camera: visibility and many light terms can be
-  precomputed per voxel and updated only when terrain changes.
+  precomputed per voxel and updated only when terrain changes. Terrain is static in a
+  run except for the development `SetMaterial` command (`water.rs` `apply`).
+- *(Review:)* **No new look.** Light colours come from the existing palette only: the
+  sun is `lightC`, and the ambient follows the sky colours. New numbers (sun
+  direction, gains, the light ladder) are config knobs with stated defaults. A package
+  that needs a colour or a look the art direction doesn't cover stops and asks.
 
 ## Packages
 
@@ -49,65 +61,215 @@ rock. That's a mechanical palette-shift pass on the tile generator.
 
 ### L: light and shadow (the big win)
 
-In order, each step with screenshots before and after:
+*(Revised in review, 2026-09-24.)*
 
-1. **Voxel ambient occlusion.** Darken the texels of each visible face by how many of
-   its edge and corner neighbours are solid (the classic 4-corner voxel AO), quantised
-   to the cel steps. Cheap, and it immediately separates terraces, crevices and crown
-   interiors.
-2. **Sky light.** Use the ecology's sky-visibility per voxel (the same hemisphere the
-   flora reads light from, in a 3D texture refreshed on `terrain_version` change) as
-   the ambient term. Overhangs, caves and deep canopy go dim exactly where the model
-   says they're shaded.
-3. **Sun and cast shadows.** A configurable sun direction. From each lit face texel,
-   march a shadow ray through the voxel volume (terrain solid; organism cells
-   partially transmissive by foliage fullness, so canopy casts **dappled** shade, and
-   cutout holes let light through). Cap the march length. Use a coarse occupancy mip if
-   the march is too slow, or precompute per-voxel sun visibility when the terrain
-   changes and march only for the moving organism cells. Hard-edged pixel shadows, one
-   cel step darker.
-4. **Emissive bioluminescence.** Parts the art direction marks as glowing (glowcap,
-   bloomcrown core, lanternberry lanterns, latticevine bell mouths, sense patches)
-   emit. A low-resolution light volume (e.g. ¼ res, propagated a few steps) adds
-   coloured local light to nearby faces, and a restrained pixel bloom on the emitters
-   themselves (art direction: glow supports forms, never haze over them).
+**What the picture can show.** Only two faces of a voxel are ever drawn: the front
+(normal −z, toward the camera) and the top (+y). A front face's open cell is
+(x, y, z−1), and a top face's is (x, y+1, z). Face texel (dx, dy) lies at world point
+(x + (dx+½)/S, y+1 − (dy+½)/S, z) on a front face and at
+(x + (dx+½)/S, y+1, z+1 − (dy+½)/RISE) on a top face, using `voxel.frag`'s dx/dy
+conventions. The view ray is (0, −RISE/S, 1).
+
+**Replace the flat tier's fake light; don't stack on it.** In `lit`, the new terms
+replace the flat tier's stand-ins for light: the column roof shade
+(`roofShade`/`roofGap`) and the "lit" mixes on tops and plants (`TOP_GAIN`,
+`TOP_TINT`, `PLANT_TOP_GAIN`, `PLANT_TOP_TINT`). The edge treatment stays exactly as
+it is: rim, chamfer, bevel, `EDGE_DARK`, riser lean, contour row, grain, the glyph
+atlas's baked tones, and haze.
+
+**Quantise the light, not the colour.** A texel's base colour (strata colour, texture
+texel or pigment) is unchanged. It is multiplied by a light value that is quantised
+first. The sun term is binary per texel: lit, or one hard step darker in shadow. The
+ambient product (sky × AO × canopy) snaps to a short ladder (`light_levels`,
+default 4). No dithering, no blur.
+
+1. **Voxel ambient occlusion, in the shader.** Classic 4-corner AO from the 8
+   neighbours in the face's open plane, interpolated bilinearly across the face's
+   texels, then snapped to the ambient ladder. Terrain and block parts (trunk, crown,
+   heart, log, animal) occlude. Sprouts and vine cells don't. Test: corner counts on a
+   hand-built fixture.
+2. **Sky light and canopy.**
+   - *Sky:* add a new slow plane (r8, keyed on `terrain_version`, like the roof table)
+     holding the ecology's own `World::sky_visibility`, called unchanged. Fill it for
+     every cell that can open onto a visible face. Open cell (x, y, z) stores
+     `sky_visibility(x, y−1, z)`, so a top face reads exactly the model's number, and
+     a wall reads the fan from the foot of its open cell (about ⅔ under open sky).
+     Compute it off the loop thread. The flat tier's roof table stays.
+   - *Canopy:* the model shades a stand by the Beer–Lambert attenuation of each layer
+     above it, straight down (`crates/cubarium-voxel-flora/src/step.rs`,
+     `shade_layers_into`). The picture does the same for the ambient term: crown cells
+     above a texel attenuate it, so ground under a crown is as dim as the model says.
+     A tilted sun alone would put that shade in the wrong place. The worker chooses
+     how crown transmission reaches the GPU (per style, a per-stand plane, or at pack
+     time), within the budget.
+3. **Sun and cast shadows.**
+   - *Direction:* a `sun` knob. The default must sit in the front hemisphere, from the
+     upper left: light travels away from the camera, so front faces are lit and
+     shadows fall back into the scene. A sun behind the scene would leave every
+     visible front face in self-shadow.
+   - *March:* a per-texel DDA from the texel's world point toward the sun. Terrain and
+     block parts are opaque. Crown cells are transmissive, using step 2's crown
+     transmission, with a per-cell hash choosing which texels pass. That makes the
+     shade dappled, with a mean equal to the transmission. Where textures are on, leaf
+     cutout holes let light through. Cap the march. Add a coarse occupancy mip for
+     skipping empty space only if the budget needs it.
+   - *Test:* a headless render of a pillar on a flat floor. Texels inside the pillar's
+     analytic shadow are the shadow step; texels outside it are lit.
+4. **Emissive.**
+   - *Data:* which texels emit is data, not shader code: a per-style emissive colour
+     and a reserved glyph-atlas tone for emitting texels.
+   - *What emits:* mark only parts that the dossiers name as luminous and that exist
+     in today's models and appearance data: the glowcap lip, bloomcrown core,
+     lanternberry lanterns, latticevine bell mouths and sense patches. Report which
+     were marked and which were skipped.
+   - *Look:* emitters draw unshadowed at full value.
+   - *Local light:* a coarse (¼-res) RGB volume built on the CPU from the emitter
+     list, propagated a few cells and blocked by terrain. It is added to the ambient
+     before quantisation.
+   - *No bloom pass.* The art direction says glow supports forms and never becomes
+     haze. Offer bloom once Wrysk has seen step 4.
+
+Checkpoints: stop and report after steps 1–2, after 3, and after 4. Each checkpoint
+is a commit with its screenshots and frame times.
 
 ### W: water that reads as water (after L; same shader)
 
-The water boundary must stay exact (art direction). Within it:
+*(Revised in review, 2026-09-24.)*
 
-- **Depth absorption:** colour and opacity from the depth along the view ray. Clear
-  shallows show the bed, deep water goes dark indigo.
-- **Surface:** an animated normal from tiled noise on sim time, plus rain ripple rings
-  while raining. It drives a **Fresnel** mix toward a reflection.
-- **Reflection:** march the reflected ray through the voxel volume a short distance
-  (terrain, crowns, sky gradient). A mirror image of the far bank in still pools.
-- **Refraction:** offset the bed sample by the surface normal.
-- **Shore foam** where depth is small, and pixel **glints** on ripple crests,
-  quantised to the palette.
-- Waterfalls and moving water streak along the flow if the water solver exposes it
-  cheaply. Otherwise skip that and say so.
+**What the water data is.** One free-water byte per voxel (the g channel of
+`VoxelTexel`). No velocity or flux reaches the renderer. The boundary rules stay
+exactly the flat tier's (`fillPxQ`, the skin row, `nearerOwns`, `stop`), and W changes
+colour only inside them. Test: on a fixture with a pool, a falling column and a
+brim-full cell, `flat` and `lit` mark exactly the same pixels as water.
 
-### P: direct GPU presentation on the desktop (optional, perf)
+- **Depth absorption:** per-channel Beer–Lambert over the water path along the walk
+  (each slab is √(1 + (RISE/S)²) voxels of path). The palette's surface-to-deep water
+  colours are the in-scatter ramp. Clear shallows show the bed; deep water goes dark
+  indigo.
+- **Surface:**
+  - The skin (top-face) rows get an animated normal from tiled noise on sim time. That
+    needs a new per-frame time uniform: the tick plus the fraction of it elapsed.
+  - The normal is quantised to a few directions and stepped at an animation rate
+    (default 12 Hz), so it moves like pixel animation.
+  - Rain ripple rings while it rains.
+  - Animated water means every `lit` frame redraws. `flat` keeps its redraw skip.
+- **Reflection, with a Fresnel mix:** march the reflected ray ((0, RISE/S, 1),
+  perturbed by the normal) a capped distance through the volume. Shade the hit with
+  L's lit face colour, or with the sky gradient if the ray escapes. Still pools mirror
+  the far bank. Add a reflection gain knob: physical Fresnel at this angle is about
+  5%, too weak to read.
+- **Refraction:** behind the surface, the walk continues from a pixel offset by the
+  normal, in whole pixels.
+- **Shore foam and glints:** foam on skin texels next to a solid, and single-pixel
+  glints where the quantised normal faces the sun. Palette colours only.
+- **Waterfalls:** no flow reaches the renderer. Skip streaks unless the solver can
+  expose a per-cell flux byte cheaply, and say which way it went.
 
-The desktop window reads every frame back to the CPU (minifb). Presenting straight
-from the GPU swapchain removes the 22–26 fps ceiling at 13 px, which `lit` fullscreen
-needs. The panel path is untouched.
+### P: direct GPU presentation on the desktop (perf; alongside L)
+
+*(Revised in review, 2026-09-24.)* Today `WindowTarget`
+(`crates/cubarium/src/sink/gpu/target.rs`) does all of this on the loop thread:
+render, wait, read the whole raster back, upscale it on the CPU, and hand it to
+minifb's shm buffer. At 13 px, a raster 3328 px wide on the 4K screen, that comes to
+about 22–26 fps.
+
+- **Swapchain on the existing window.**
+  - minifb 0.28 exposes raw-window-handle 0.6 handles: Wayland on Hyprland, Xlib
+    elsewhere. Create the Vulkan surface with ash's `khr::wayland_surface` /
+    `xlib_surface`. No new crates.
+  - If minifb's Wayland backend fights the WSI for the surface, fall back to a bare
+    wayland-client 0.29 xdg-toplevel. That crate is already in the lockfile.
+  - Use winit only behind a non-default feature, and only after asking.
+- **Never block the loop.**
+  - On Wayland with NVIDIA, a FIFO present to a hidden window (on another workspace)
+    can block indefinitely.
+  - So present on a thread of its own, following the ShimPresenter pattern
+    (`cubarium_gpu::target::presenter`). The loop hands over a finished frame and
+    never waits. A frame the presenter can't take is dropped and counted.
+  - Use mailbox where the driver offers it, otherwise FIFO on that thread.
+- **Upscale on the GPU:**
+  - Use the existing present pass (`present.frag`): integer nearest zoom, letterboxed.
+  - Recreate the swapchain on resize, OUT_OF_DATE and SUBOPTIMAL.
+  - A window smaller than the raster downscales nearest. It's a development window.
+- Escape and close quit as they do today. The readback path stays as the fallback
+  when surface creation fails. The panel's targets are untouched.
+- Evidence: presented fps and ticks/s at 13 px before and after (flat, plus lit if L
+  has landed). Also 30 s with the window on another workspace, with ticks/s holding
+  at 20.
 
 ## Order and workers
 
-- **Now, in parallel:**
-  - Stage Q art (sprite-forge, local Qwen): redo the plant sheets with the four fixes,
-    and per-species texture exploration swatches.
-  - **S** (one worker, medium).
-- **Then:** **L** (one worker at high effort, checkpoint after each numbered step), and
-  **W** after L in the same worker, since both live in `voxel.frag`. **P** can run
-  alongside L in another worker (sink and window code, not the shader).
-- **Codex art pass (Wrysk's thread):** starts on subjects Wrysk marks `final` in
-  `art/gen/SIGNOFF.md`. S should land first, so finals can be previewed per species.
+*(Revised in review, 2026-09-24.)*
 
-Every package ends with the same evidence: screenshots (same seed and tick) at 6 px and
-auto, plain and `--textures`, frame times, and the panel config at 6 px on the desktop
-GPU to show `flat` is unchanged. Short function tests only for the deterministic
-pieces (AO neighbour counts, the shadow march against a known occluder, tile or
-species lookup fallbacks).
+- **S landed** (merge `52625be`), so the L worker starts from S's `voxel.frag`.
+- **L and P now, in parallel.** Each gets its own worktree off main and one
+  `renderer-worker` (Opus, high effort). L is new substantial rendering; P is
+  presentation threading.
+- **W after L merges, by a fresh worker** from the brief below. By then the L worker's
+  context is too large to resume cheaply.
+- Stage Q art and the Codex art pass are unchanged.
+
+Evidence for every package:
+
+- Screenshots from the same seed and tick, at 6 px and auto, plain and `--textures`.
+- Frame times.
+- The panel config at 6 px on the desktop GPU, showing `flat` is unchanged.
+
+Screenshots go under `captures/presentation/<package>-<step>/` (untracked), and the
+report gives their absolute paths. Short function tests only, for the deterministic
+pieces: AO neighbour counts, the shadow march against a known occluder, the sky plane
+against `sky_visibility`, and the water mask being the same in flat and lit.
+
+## Worker briefs
+
+Common to all three:
+
+- **Setup:** work in your own worktree, with `cargo -j 8`, under
+  `taskset -c 8-15,24-31`.
+- **Commits:** commit with explicit paths. Never `commit -a`. Never merge, deploy, or
+  touch the board.
+- **Windows:** open any window with `./scripts/run-voxel.sh --background`. It must
+  not take focus or re-tile.
+- **Scope:** don't touch the CPU renderer, the Tachyon and cube configs, or the panel
+  targets.
+- **Tests:** run only the crates you touched, `cubarium-gpu` needing the GPU. Rebuild
+  SPIR-V with `crates/cubarium-gpu/shaders/compile.sh`.
+- **The commit message is the report.** Return at most about 40 lines: commits,
+  screenshot absolute paths, GPU ms flat/lit at 6 px and 13 px, the pack-ms change,
+  the defaults you chose and their visible effect, and open questions.
+- **Stop and ask** on any look question the art direction
+  (`design/art-direction/Cubarium_Art_Direction_v0.1.md`) doesn't answer. Make routine
+  implementation calls yourself and say what they do.
+
+**L.**
+
+- *Deliverable:* package L above, steps 1–4, with the revised standing constraints:
+  the `lighting` key, the specialization constant, the budget, and no new look.
+- *Checkpoints:* stop after steps 1–2, 3 and 4.
+- *Files:*
+  - `crates/cubarium-gpu/shaders/voxel.frag`
+  - `crates/cubarium-gpu/src/voxel.rs` (uniforms, slow planes, pipeline)
+  - `crates/cubarium/src/sink/gpu/voxel.rs` (Packer)
+  - `crates/cubarium/src/voxel/mod.rs` (config)
+  - `config/desktop/*.toml`
+  - Read only: `World::sky_visibility` (`crates/cubarium-voxel/src/world.rs`) and
+    `shade_layers_into` (`crates/cubarium-voxel-flora/src/step.rs`).
+- *Out of scope:* water shading (W) and window presentation (P).
+
+**P.**
+
+- *Deliverable:* package P above.
+- *Files:*
+  - `crates/cubarium/src/sink/gpu/target.rs`
+  - `crates/cubarium-gpu/src/target/` (presenter pattern)
+  - `crates/cubarium-gpu/src/present.rs`
+- *Out of scope:* shaders other than the present pass.
+- *Evidence:* measure before and after, including the hidden-window run.
+
+**W** (spawned after L merges).
+
+- *Deliverable:* package W above, on top of L's shading functions.
+- *Files:* `voxel.frag` water path (`waterAt` and the walk), the uniform block, and
+  the time uniform through `crates/cubarium/src/sink/gpu/voxel.rs`.
+- *Order:* depth absorption and the boundary test first, then surface and
+  reflection, then refraction, foam and glints, each a commit with screenshots.
