@@ -144,6 +144,18 @@ fn a_loopback_generation_gives_the_local_update() {
     assert_same_update(&local, &remote);
 }
 
+/// Cache study B: a worker told `--pin auto` (what `voxel-train --remote` passes under
+/// the coordinator's own `--pin`) pins its threads and still gives the local update.
+#[test]
+fn a_pinned_loopback_worker_gives_the_local_update() {
+    let local = generation(None);
+    let pool = connected("--pin auto");
+    let remote = generation(Some(&pool));
+    assert!(remote_units(&remote.2) > 0, "{:?}", remote.2.shares);
+    assert_eq!(remote.2.requeued, 0);
+    assert_same_update(&local, &remote);
+}
+
 /// A worker that dies mid-generation — it exits after answering one unit, with another
 /// still in hand — has its outstanding work re-queued locally, and the generation
 /// completes with the local update.

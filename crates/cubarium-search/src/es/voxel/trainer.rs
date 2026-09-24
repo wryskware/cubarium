@@ -2304,6 +2304,54 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// Cache study C: longest first, then fixture-major, every unit once, pairs whole.
+    #[test]
+    fn units_queue_longest_first_then_fixture_major() {
+        let (pairs, layouts) = (3usize, 4usize);
+        let units: Vec<Unit> = (0..pairs)
+            .flat_map(|p| {
+                (0..layouts).map(move |layout| Unit {
+                    pair: Some(p),
+                    layout,
+                })
+            })
+            .chain((0..layouts).map(|layout| Unit { pair: None, layout }))
+            .collect();
+        // Layouts 2 and 3 are landscapes (longer), 0 and 1 arenas.
+        let horizon = |layout: usize| if layout >= 2 { 4_800 } else { 2_400 };
+        let order = dispatch_order(&units, horizon);
+        let mut seen = order.clone();
+        seen.sort_unstable();
+        assert_eq!(
+            seen,
+            (0..units.len()).collect::<Vec<_>>(),
+            "every unit once"
+        );
+        let cost = |u: usize| horizon(units[u].layout) * units[u].candidates().len() as u64;
+        assert!(
+            order.windows(2).all(|w| cost(w[0]) >= cost(w[1])),
+            "longest first"
+        );
+        // Within one cost, one fixture's units run together.
+        for w in order.windows(2) {
+            if cost(w[0]) == cost(w[1]) {
+                assert!(units[w[0]].layout <= units[w[1]].layout, "fixture-major");
+            }
+        }
+        let head: Vec<usize> = order[..pairs].iter().map(|&u| units[u].layout).collect();
+        assert_eq!(
+            head,
+            vec![2; pairs],
+            "every pair on the first landscape first"
+        );
+        assert!(
+            order
+                .iter()
+                .all(|&u| units[u].candidates().len() == 1 + usize::from(units[u].pair.is_some())),
+            "a pair unit carries both signs"
+        );
+    }
+
     /// Package S item 2: the plateau rule stops when the held-out best has not risen by
     /// a relative `g` over the last `N` checkpoints, and never on a rising series.
     #[test]

@@ -1060,6 +1060,30 @@ mod tests {
         assert_eq!(worker_limit_for(128).min(MAX_EPISODE_WORKERS), 16);
     }
 
+    /// The reserve is the machine's, the cap the process's own CPUs (cache study B).
+    #[test]
+    fn the_reserve_is_the_machines_and_the_affinity_mask_caps_it() {
+        assert_eq!(
+            worker_limit_within(32, 16),
+            16,
+            "`taskset -c 0-7,16-23` on the 32-thread desktop: the other chiplet is the reserve"
+        );
+        assert_eq!(worker_limit_within(32, 32).min(MAX_EPISODE_WORKERS), 16);
+        assert_eq!(worker_limit_within(32, 4), 4);
+        assert_eq!(
+            worker_limit_within(12, 12),
+            10,
+            "eidolon, all of it: still reserves"
+        );
+        assert_eq!(worker_limit_within(16, 16), 14);
+        assert_eq!(
+            worker_limit_within(8, 16),
+            14,
+            "a mask wider than a stale count"
+        );
+        assert_eq!(worker_limit_within(1, 1), 1);
+    }
+
     /// The two setup paths prepare the identical arena: cloning the immutable layout and
     /// rebuilding from the seed give the same placed animal, the same stock and the same
     /// world material.
