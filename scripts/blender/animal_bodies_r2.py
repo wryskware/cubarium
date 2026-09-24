@@ -2,6 +2,7 @@
 
     blender -b -P scripts/blender/animal_bodies_r2.py -- OUT_DIR           rows, true scale, .blend, strips
     blender -b -P scripts/blender/animal_bodies_r2.py -- OUT_DIR --v2      rebuilt CH/RS/CG, colourways, v2 strips
+    blender -b -P scripts/blender/animal_bodies_r2.py -- OUT_DIR --v3      the lofted chorister, its cells, strip, comparison
     blender -b -P scripts/blender/animal_bodies_r2.py -- --strip CODE OUT [--v2]  (internal: one strip's views)
 
 Source: design/animal-body-reimagining-2026-09-24.md, the Body paragraphs of
@@ -43,6 +44,7 @@ import bpy
 from mathutils import Matrix, Vector
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, HERE)
 import organism_lineup as L  # noqa: E402
 import animal_bodies as A  # noqa: E402  (import-safe; adds check0/check1 etc. to L.PAL)
@@ -761,7 +763,7 @@ def build_v2(out):
     return cells
 
 
-def stitch_colourways(out, cells_dir):
+def stitch_colourways(out, cells_dir, name="colourways.png"):
     """Stitch the colourway cells with labels (system python + PIL)."""
     script = r'''
 import json, os, sys
@@ -788,7 +790,7 @@ im.save(out)
                      "cw": {str(k): {"name": v[0], "hex": list(v[1].values()), "mark": v[2]}
                             for k, v in COLOURWAYS[code].items()}})
     import json
-    subprocess.run(["python3", "-c", script, cells_dir, os.path.join(out, "colourways.png"), json.dumps(meta)], check=True)
+    subprocess.run(["python3", "-c", script, cells_dir, os.path.join(out, name), json.dumps(meta)], check=True)
 
 
 def main_v2(out):
@@ -840,6 +842,213 @@ def stitch_strip(views, code, path):
     strip.save()
 
 
+# === v3 chorister: one lofted body, muscular limbs (2026-09-24, second review) =========
+#
+# The v2 chorister still read as an insect. v3 skins ONE continuous tapered body from the
+# neck through a deep chest and narrow hips into the tail (no seams, no bands), lofts every
+# leg as a single limb with a thick upper segment sunk into the body and a slimmer lower
+# leg, sets the middle pair close behind the front pair, and gives it a head about a fifth
+# of the body length. Markings: countershading (dark back, pale belly) and soft rosettes.
+
+
+def _catmull(pts, n):
+    """Resample a polyline of tuples through a Catmull-Rom spline to n points."""
+    P = [pts[0]] + list(pts) + [pts[-1]]
+    out = []
+    segs = len(pts) - 1
+    for k in range(n):
+        u = k / (n - 1) * segs
+        i = min(int(u), segs - 1)
+        t = u - i
+        p0, p1, p2, p3 = P[i], P[i + 1], P[i + 2], P[i + 3]
+        out.append(tuple(0.5 * ((2 * b) + (-a + c_) * t + (2 * a - 5 * b + 4 * c_ - d) * t * t
+                                + (-a + 3 * b - 3 * c_ + d) * t ** 3) for a, b, c_, d in zip(p0, p1, p2, p3)))
+    return out
+
+
+def loft(stations, mats, zone, nring=72, nseg=20):
+    """One closed smooth mesh through stations (x, y, z, ry, rz). zone(i_frac, angle_sin)
+    picks the material index per face; mats are material keys."""
+    S = _catmull(stations, nring)
+    bm = bmesh.new()
+    rings = []
+    for i, (px, py, pz, ry_, rz_) in enumerate(S):
+        a = Vector(S[max(i - 1, 0)][:3])
+        b = Vector(S[min(i + 1, len(S) - 1)][:3])
+        t = (b - a).normalized()
+        ref = Vector((0, 0, 1)) if abs(t.z) < 0.9 else Vector((1, 0, 0))
+        side = t.cross(ref).normalized()
+        up = side.cross(t).normalized()
+        if up.z < 0:
+            up, side = -up, -side
+        c0 = Vector((px, py, pz))
+        rings.append([bm.verts.new(c0 + side * ry_ * math.cos(2 * math.pi * k / nseg)
+                                   + up * rz_ * math.sin(2 * math.pi * k / nseg)) for k in range(nseg)])
+    for i in range(len(rings) - 1):
+        for k in range(nseg):
+            f = bm.faces.new((rings[i][k], rings[i][(k + 1) % nseg], rings[i + 1][(k + 1) % nseg], rings[i + 1][k]))
+            f.material_index = zone(i / (len(rings) - 1), math.sin(2 * math.pi * (k + 0.5) / nseg))
+            f.smooth = True
+    for ring, rev in ((rings[0], True), (rings[-1], False)):
+        cen = bm.verts.new(sum((v.co for v in ring), Vector()) / len(ring))
+        for k in range(nseg):
+            tri = (cen, ring[(k + 1) % nseg], ring[k]) if rev else (cen, ring[k], ring[(k + 1) % nseg])
+            f = bm.faces.new(tri)
+            f.material_index = zone(0.0 if rev else 1.0, 0.0)
+            f.smooth = True
+    bm.normal_update()
+    me = bpy.data.meshes.new("loft")
+    bm.to_mesh(me)
+    bm.free()
+    ob = bpy.data.objects.new("loft", me)
+    for m in mats:
+        ob.data.materials.append(L.M(m))
+    L.COL.objects.link(ob)
+    L.ORG.append(ob)
+    return ob
+
+
+def ch_v3(x, y, pose="stand"):
+    stride = pose == "stride"
+    # spine: neck -> deep chest -> waist -> narrow hips -> tail tip; (x, y, z, half-width, half-depth)
+    spine = [(0.5, 0, 0.53, 0.06, 0.07), (0.38, 0, 0.53, 0.1, 0.12), (0.2, 0, 0.5, 0.14, 0.17),
+             (0.0, 0, 0.46, 0.12, 0.13), (-0.2, 0, 0.42, 0.1, 0.1), (-0.4, 0, 0.38, 0.105, 0.1),
+             (-0.58, 0, 0.36, 0.075, 0.07), (-0.85, 0, 0.33, 0.045, 0.042), (-1.1, 0, 0.31, 0.022, 0.02),
+             (-1.3, 0, 0.3, 0.004, 0.004)]
+    spine = [(x + a, y + b, c_, d, e) for a, b, c_, d, e in spine]
+
+    def body_zone(f, s):  # 0 main flank, 1 dark back, 2 pale belly
+        return 1 if s > 0.5 else (2 if s < -0.3 else 0)
+    loft(spine, [c("main"), c("shadow"), c("sec")], body_zone, nring=90, nseg=24)
+    # soft rosettes on the flanks and back: a dark ring with a main-coloured heart
+    S = _catmull(spine, 40)
+    for idx, ang in ((6, 0.9), (9, 0.35), (12, 1.3), (15, 0.6), (18, 1.05), (21, 0.4), (24, 0.95), (27, 0.55),
+                     (8, 1.6), (17, 1.55)):
+        px, py, pz, ry_, rz_ = S[idx]
+        for sy in (-1, 1):
+            p = Vector((px, py + sy * ry_ * math.cos(ang) * 0.97, pz + rz_ * math.sin(ang) * 0.97))
+            n = Vector((0, sy * math.cos(ang), math.sin(ang)))
+            rot = Vector((0, 0, 1)).rotation_difference(n).to_matrix().to_4x4()
+            rr = 0.022 if ry_ > 0.08 else 0.015
+            ell(p, (rr, rr, 0.006), c("mark"), rot=rot)
+            ell(p + n * 0.003, (rr * 0.5, rr * 0.5, 0.005), c("main"), rot=rot)
+    # head, about a fifth of the body length: pale skull, two lobes swept back flat along it,
+    # a darker face with a large magenta eye patch, and the cyan jaw
+    ell((x + 0.58, y, 0.535), (0.14, 0.085, 0.085), c("sec"), rot=ry(8))
+    ell((x + 0.6, y, 0.47), (0.12, 0.075, 0.055), c("main"), rot=ry(8))
+    for sy in (-1, 1):
+        ell((x + 0.5, y + sy * 0.05, 0.6), (0.17, 0.035, 0.032), c("sec"), rot=ry(10) @ rx(sy * 18))
+        ell((x + 0.63, y + sy * 0.07, 0.5), (0.055, 0.016, 0.04), c("glow2"))
+    jaw = 0.04 if stride else 0.032
+    ell((x + 0.69, y, 0.44), (0.07, 0.055, jaw), c("glow"))
+
+    def leg_zone(f, s):  # thigh / upper arm in main, lower leg in shadow
+        return 0 if f < 0.38 else 1
+    legs = [  # front: reaching forward; middle: close behind it; hind: digitigrade, crouched
+        [(0.26, 0.07, 0.48, 0.075), (0.3, 0.13, 0.28, 0.04), (0.5, 0.15, 0.06, 0.026), (0.6, 0.15, 0.012, 0.02)],
+        [(0.1, 0.07, 0.46, 0.07), (0.06, 0.14, 0.26, 0.038), (0.16, 0.16, 0.06, 0.025), (0.22, 0.16, 0.012, 0.02)],
+        [(-0.38, 0.06, 0.38, 0.085), (-0.22, 0.13, 0.24, 0.045), (-0.44, 0.15, 0.1, 0.028),
+         (-0.4, 0.15, 0.012, 0.02)],
+    ]
+    for li, leg in enumerate(legs):
+        for sy in (-1, 1):
+            lifted = stride and ((li % 2 == 0) == (sy > 0))
+            pts = []
+            for k, (lx, ly, lz, r) in enumerate(leg):
+                last2 = k >= len(leg) - 2
+                dx = (0.14 if lifted else -0.05) if (stride and last2) else 0.0
+                dz = 0.07 if (lifted and last2) else 0.0
+                pts.append((x + lx + dx, y + sy * ly, lz + dz, r, r))
+            loft(pts, [c("main"), c("shadow")], leg_zone, nring=36, nseg=14)
+            fx, fy, fz = pts[-1][:3]
+            ell((fx + 0.03, fy, max(fz, 0.012)), (0.05, 0.03, 0.012), c("shadow"))
+
+
+def main_v3(out):
+    import shutil
+    os.makedirs(out, exist_ok=True)
+    sc = L.setup_scene()
+    sc.display.shading.show_specular_highlight = False
+    L.PAL.update({"check0": "#6E6C78", "check1": "#7E7C88"})
+    use("CH", 1)
+    CUR["_mark"] = "rosettes"
+    group("row-chorister-v3")
+    sp = 2.6
+    views = [("side", 0.0, None), ("yaw 45 toward", -45.0, None), ("yaw 45 away", 45.0, None), ("stride", 0.0, "stride")]
+    for k, (name, yaw, pose) in enumerate(views):
+        xx = k * sp * 1.25
+        place(ch_v3, xx, 0.0, yaw, **({"pose": pose} if pose else {}))
+        label(name, xx, -sp * 0.56, sp * 0.05, "sublabel")
+    xe = 3 * sp * 1.25
+    A.checker(-sp * 0.7, xe + sp * 0.7, -sp * 0.5, sp * 0.5)
+    label("CH-A2 v3: one lofted body, muscular limbs (11 x 3 x 5 v + tail 6.5), colourway 1", xe / 2, -sp * 0.7, sp * 0.065)
+    for cw in (1, 2):
+        use("CH", cw)
+        CUR["_mark"] = "rosettes"
+        group(f"cw-CH-{cw}")
+        X = 400.0 + cw * 12.0
+        place(ch_v3, X, 0.0)
+        A.checker(X - sp * 0.6, X + sp * 0.6, -sp * 0.35, sp * 0.35)
+    group("compare")  # three-quarter view like the image: turned 25 deg toward the viewer
+    use("CH", 1)
+    CUR["_mark"] = "rosettes"
+    place(ch_v3, 600.0, 0.0, -25.0)
+    A.checker(600.0 - 1.6, 600.0 + 1.3, -0.8, 0.8)
+    cams = []
+    for name, col in GROUPS:
+        cams.append((name, *frame(f"cam-{name}", col, 900 if name.startswith(("cw-", "compare")) else 2000)))
+    bpy.ops.wm.save_as_mainfile(filepath=os.path.join(out, "animal_bodies_r2_v3.blend"))
+    shear = Matrix.Identity(4)
+    shear[2][1] = 0.5
+    root = bpy.data.objects.new("oblique", None)
+    sc.collection.objects.link(root)
+    for ob in list(sc.objects):
+        if ob.type in {"MESH", "FONT"}:
+            ob.parent = root
+            ob.matrix_parent_inverse = shear
+    cells_old = os.path.join(out, "colourway-cells")
+    cells = os.path.join(out, "colourway-cells-v3")
+    os.makedirs(cells, exist_ok=True)
+    for f in os.listdir(cells_old):
+        if not f.startswith("cw-CH-"):
+            shutil.copy(os.path.join(cells_old, f), os.path.join(cells, f))
+    for name, cam, w, h in cams:
+        if name.startswith("cw-"):
+            path = os.path.join(cells, f"{name}.png")
+        elif name == "compare":
+            path = os.path.join(cells, "compare-ch.png")
+        else:
+            path = os.path.join(out, f"{name}.png")
+        L.render(cam, path, w, h)
+    stitch_colourways(out, cells, "colourways-v3.png")
+    views_dir = os.path.join(out, "strip-views-v3")
+    subprocess.run([bpy.app.binary_path, "-b", "-P", os.path.abspath(__file__), "--", "--strip", "CH-A2", views_dir,
+                    "--v3"], check=True, stdout=subprocess.DEVNULL)
+    stitch_strip(views_dir, "CH-A2", os.path.join(out, "strip-CH-A2-v3.png"))
+    # the image lives beside the run (art/gen/runs is not in every worktree): out's repo first
+    rel = os.path.join("art", "gen", "runs", "2026-09-24-reimagining-concepts", "CH-A2-2401-b0.png")
+    img = next(p for p in (os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(out))), rel),
+                           os.path.join(REPO_ROOT, rel)) if os.path.exists(p))
+    script = r'''
+import sys
+from PIL import Image, ImageDraw
+img, render, q3, out = sys.argv[1:5]
+a = Image.open(img).convert("RGB"); b = Image.open(render).convert("RGB"); c = Image.open(q3).convert("RGB")
+H = 560
+a = a.resize((int(a.width * H / a.height), H)); b = b.resize((int(b.width * H / b.height), H)); c = c.resize((H, H))
+im = Image.new("RGB", (a.width + b.width + c.width + 40, H + 40), (20, 18, 28))
+im.paste(a, (10, 30)); im.paste(b, (a.width + 20, 30)); im.paste(c, (a.width + b.width + 30, 30))
+d = ImageDraw.Draw(im)
+d.text((10, 8), "Qwen image CH-A2-2401-b0 (the target)", fill=(230, 221, 248))
+d.text((a.width + 20, 8), "v3 blockout, colourway 1, panel oblique, turned 25 deg toward the viewer", fill=(230, 221, 248))
+d.text((a.width + b.width + 30, 8), "v3 blockout, 3/4 front (method-B strip view)", fill=(230, 221, 248))
+im.save(out)
+'''
+    subprocess.run(["python3", "-c", script, img, os.path.join(cells, "compare-ch.png"),
+                    os.path.join(views_dir, "CH-A2-q3front.png"), os.path.join(out, "chorister-vs-image.png")], check=True)
+    print("done v3", flush=True)
+
+
 def strip_mode(code, out):
     """Stand in an animal_bodies module with this round's codes and run blockout_strip."""
     import runpy
@@ -848,7 +1057,11 @@ def strip_mode(code, out):
         code0, pose = code[:-6], "glide"
     else:
         code0 = code
-    if "--v2" in sys.argv:  # colourway 1 of the v2 builders
+    if "--v3" in sys.argv:  # the v3 chorister, colourway 1
+        use("CH", 1)
+        CUR["_mark"] = "rosettes"
+        fn = ch_v3
+    elif "--v2" in sys.argv:  # colourway 1 of the v2 builders
         short = {v: k for k, v in STRIP_CODES.items()}[code0]
         use(short, 1)
         fn = V2_BY[short][3]
@@ -869,6 +1082,9 @@ def main():
         return
     if "--v2" in args:
         main_v2([a for a in args if a != "--v2"][0])
+        return
+    if "--v3" in args:
+        main_v3([a for a in args if a != "--v3"][0])
         return
     out = args[0] if args else "/tmp/animal-bodies-r2"
     os.makedirs(out, exist_ok=True)
