@@ -276,6 +276,37 @@ fn profile_run(mut sim: Sim, ticks: u64) {
             println!("  {:<48} {:8.3} ms/tick", p.name(), per(p));
         }
     }
+    // A digest of the state the run ended in, for comparing two builds on one snapshot:
+    // the same rules give the same bits (the stands' observational `water_m3` is left out).
+    {
+        let (world, flora, fauna) = sim.layers();
+        let f = flora.view();
+        let sum = |g: &dyn Fn(&cubarium_voxel_flora::Stand) -> f64| -> f64 {
+            f.stands.iter().map(g).sum()
+        };
+        let parts = [
+            sum(&|s| s.wood),
+            sum(&|s| s.foliage),
+            sum(&|s| s.reserve),
+            sum(&|s| s.mineral),
+            sum(&|s| s.light),
+            sum(&|s| s.moisture),
+            f.ground.iter().map(|g| g.litter + g.dead_wood + g.mineral).sum(),
+            f.ledger.fixed_in,
+            f.ledger.respired_out,
+            world.view().stored_m3(),
+            fauna.view().animals.iter().map(|a| a.body).sum(),
+        ];
+        let bits: Vec<String> = parts.iter().map(|x| format!("{:016x}", x.to_bits())).collect();
+        println!(
+            "digest stands={} ground={} births={} deaths={} {}",
+            f.stands.len(),
+            f.ground.len(),
+            f.ledger.births,
+            f.ledger.deaths,
+            bits.join(" ")
+        );
+    }
     for c in profile::Count::ALL {
         let n = profile::count(c);
         if n > 0 {

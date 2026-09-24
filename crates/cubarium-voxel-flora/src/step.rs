@@ -2975,4 +2975,29 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn one_compaction_and_one_merge_are_the_removes_and_inserts_they_replace() {
+        let (flora, _) = crowded(24, 9, 0.8, 11);
+        let all = flora.stands.clone();
+        assert!(all.len() > 100);
+        // Every third stand dies; the rest keep their order.
+        let doomed: Vec<usize> = (0..all.len()).step_by(3).collect();
+        let mut one_by_one = all.clone();
+        for &i in doomed.iter().rev() {
+            one_by_one.remove(i);
+        }
+        let mut compacted = all.clone();
+        remove_at(&mut compacted, &doomed);
+        assert_eq!(compacted, one_by_one);
+
+        // The dead are born again, handed over out of order, in batches of one and many.
+        let born: Vec<Stand> = doomed.iter().rev().map(|&i| all[i]).collect();
+        let mut merged = compacted.clone();
+        insert_sorted(&mut merged, born[..1].to_vec());
+        insert_sorted(&mut merged, born[1..].to_vec());
+        assert_eq!(merged, all);
+        insert_sorted(&mut merged, Vec::new());
+        assert_eq!(merged, all);
+    }
 }
