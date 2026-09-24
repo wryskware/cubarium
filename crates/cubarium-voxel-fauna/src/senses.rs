@@ -63,7 +63,7 @@
 //! [`Fauna::step`](crate::Fauna::step) signature is untouched and has no senses). There is
 //! no per-read energy bill: sensing is computed, not billed.
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use cubarium_voxel::VoxelView;
 use cubarium_voxel_flora::{FloraView, Ground, Site, StandLayer};
@@ -107,17 +107,34 @@ fn decay_factor() -> f64 {
 /// adjacent — a column with no support face at that height is a barrier, so a wall breaks
 /// the layer and a roof never meets the floor beneath it. Pure geometry: rebuilt only when
 /// `terrain_version` or the shape changes.
+///
+/// **Dense** (`design/handoffs/voxel-hot-path-geometry-2026-09-24.md`, item 5): nodes are
+/// numbered column by column, a column's nodes found from its first node, and each node
+/// carries its neighbour in each of the four directions — no hashing on the update path.
+/// Shared by reference between the clones of a settled field: an episode's clone of a
+/// fixture's field copies no geometry.
 #[derive(Clone, Debug, Default)]
 struct Connectivity {
     version: u64,
     width: u32,
     height: u32,
     depth: u32,
-    /// Node cells (`Config::index` of the support face's solid voxel), sorted.
-    nodes: Vec<usize>,
-    /// Node cell -> its same-height orthogonal neighbour cells, sorted.
-    neighbors: FxHashMap<usize, Vec<usize>>,
+    /// Per column `z * width + x`, its first node; `plane + 1` entries, so column `k`'s
+    /// nodes are `col_start[k]..col_start[k + 1]`, ascending in `y`.
+    col_start: Vec<u32>,
+    /// Per node: the `Config::index` of its support face's solid voxel, and its row.
+    cell: Vec<usize>,
+    y: Vec<u32>,
+    /// Per node: its same-height neighbour node in the directions `-x`, `+x`, `-z`, `+z`
+    /// ([`DIRS`]), [`NO_NODE`] where there is none (a barrier or the strip's end).
+    neighbors: Vec<[u32; 4]>,
 }
+
+/// The four same-height directions, in the order the diffusion sums them.
+const DIRS: [(i64, i64); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
+
+/// No node in that direction.
+const NO_NODE: u32 = u32::MAX;
 
 impl Connectivity {
     fn current(&self, view: &VoxelView<'_>) -> bool {
@@ -130,48 +147,81 @@ impl Connectivity {
 
     fn build(view: &VoxelView<'_>) -> Connectivity {
         let c = view.config;
-        let mut is_node = vec![false; c.cells()];
-        let mut nodes: Vec<usize> = Vec::new();
+        let plane = c.width as usize * c.depth as usize;
+        let mut col_start: Vec<u32> = Vec::with_capacity(plane + 1);
+        let mut cell: Vec<usize> = Vec::new();
+        let mut ys: Vec<u32> = Vec::new();
         for z in 0..c.depth {
             for x in 0..c.width as i64 {
-                for y in view.supports_in_column(x, z) {
-                    let cell = c.index(x, y, z);
-                    nodes.push(cell);
-                    is_node[cell] = true;
+                col_start.push(cell.len() as u32);
+                let mut from = 0;
+                while let Some(y) = view.lowest_support_in(x, z, from, c.height) {
+                    cell.push(c.index(x, y, z));
+                    ys.push(y);
+                    from = y + 1;
                 }
             }
         }
-        nodes.sort_unstable();
-        let mut neighbors: FxHashMap<usize, Vec<usize>> =
-            FxHashMap::with_capacity_and_hasher(nodes.len(), Default::default());
-        for &cell in &nodes {
-            let (x, y, z) = c.coords(cell);
-            let mut nb: Vec<usize> = Vec::with_capacity(4);
-            for (dx, dz) in [(-1i64, 0i64), (1i64, 0i64), (0, -1), (0, 1)] {
-                let nz = i64::from(z) + dz;
-                if nz < 0 || nz >= i64::from(c.depth) {
-                    continue;
-                }
-                let ncell = c.index(i64::from(x) + dx, y, nz as u32);
-                if is_node[ncell] {
-                    nb.push(ncell);
-                }
-            }
-            nb.sort_unstable();
-            neighbors.insert(cell, nb);
-        }
-        Connectivity {
+        col_start.push(cell.len() as u32);
+        let mut graph = Connectivity {
             version: view.terrain_version,
             width: c.width,
             height: c.height,
             depth: c.depth,
-            nodes,
-            neighbors,
+            col_start,
+            cell,
+            y: ys,
+            neighbors: Vec::new(),
+        };
+        let mut neighbors = Vec::with_capacity(graph.cell.len());
+        for z in 0..c.depth {
+            for x in 0..c.width as i64 {
+                let col = graph.column(x, z);
+                for n in graph.col_start[col]..graph.col_start[col + 1] {
+                    let y = graph.y[n as usize];
+                    let mut nb = [NO_NODE; 4];
+                    for (k, (dx, dz)) in DIRS.into_iter().enumerate() {
+                        let nz = i64::from(z) + dz;
+                        if nz < 0 || nz >= i64::from(c.depth) {
+                            continue;
+                        }
+                        nb[k] = graph.node_at(graph.column(x + dx, nz as u32), y).unwrap_or(NO_NODE);
+                    }
+                    neighbors.push(nb);
+                }
+            }
         }
+        graph.neighbors = neighbors;
+        graph
     }
 
-    fn has(&self, cell: usize) -> bool {
-        self.neighbors.contains_key(&cell)
+    /// The column index of `(x, z)`, `x` wrapped; `z` in range.
+    fn column(&self, x: i64, z: u32) -> usize {
+        z as usize * self.width as usize + x.rem_euclid(i64::from(self.width)) as usize
+    }
+
+    /// The node on row `y` of column `col`, if that face is one.
+    fn node_at(&self, col: usize, y: u32) -> Option<u32> {
+        let (a, b) = (
+            *self.col_start.get(col)? as usize,
+            *self.col_start.get(col + 1)? as usize,
+        );
+        self.y[a..b]
+            .iter()
+            .position(|&ny| ny == y)
+            .map(|k| (a + k) as u32)
+    }
+
+    /// The node on the face `(x, y, z)`, if it is one.
+    fn node(&self, x: i64, y: u32, z: u32) -> Option<u32> {
+        if z >= self.depth || self.width == 0 {
+            return None;
+        }
+        self.node_at(self.column(x, z), y)
+    }
+
+    fn len(&self) -> usize {
+        self.cell.len()
     }
 }
 
@@ -197,11 +247,26 @@ impl Connectivity {
 ///
 /// The observation channel it feeds is `Chem(detritus)` (contract v2; `Chem(litter)`
 /// under schema 1), in the same slot and width.
+///
+/// **Dense** (hot-path geometry, item 5): one value per node of the graph, the nodes
+/// holding one listed, and per-node scratch reused across updates — no hash map and no
+/// sort on the update path. The arithmetic is the map field's, node for node and in the
+/// same order, so every reading is the map field's.
 #[derive(Clone, Debug, Default)]
-struct DetritusField {
-    /// Cue units per node cell.
-    value: FxHashMap<usize, f64>,
-    graph: Connectivity,
+pub(crate) struct DetritusField {
+    /// Cue units per node; zero where the node holds nothing (every held value is at
+    /// least [`THRESHOLD`]).
+    value: Vec<f64>,
+    /// The nodes holding a value.
+    active: Vec<u32>,
+    graph: std::sync::Arc<Connectivity>,
+    /// Per-node scratch for one update: the update it was last put in the working set
+    /// (`epoch`), its emission, its value after emission and decay.
+    seen: Vec<u32>,
+    emit: Vec<f64>,
+    prime: Vec<f64>,
+    epoch: u32,
+    work: Vec<u32>,
 }
 
 /// The detritus stock at one support face — its litter plus its carrion — and
@@ -211,33 +276,90 @@ struct DetritusField {
 /// food and is found at the mouth rather than smelled across a floor
 /// ([`DetritusField`]); dead wood is a glowcap's substrate and not a shredder's food at
 /// all, so a cue over a log would send the animal to something it cannot eat.
-fn detritus_at(fv: &FloraView<'_>, site: Site) -> f64 {
-    fv.ground_at(site).map_or(0.0, |g| g.litter + g.carrion)
+fn detritus_of(g: &Ground) -> f64 {
+    g.litter + g.carrion
 }
 
 impl DetritusField {
     fn ensure_graph(&mut self, view: &VoxelView<'_>) {
-        if !self.graph.current(view) {
-            let old_nodes: FxHashSet<usize> = self.graph.nodes.iter().copied().collect();
-            self.graph = Connectivity::build(view);
-            // Terrain changed: drop values for nodes that no longer exist and keep the
-            // rest. The fresh graph is what defines the nodes from here on.
-            self.value.retain(|cell, _| self.graph.has(*cell));
-            let _ = old_nodes;
+        if self.graph.current(view) {
+            return;
         }
+        let graph = Connectivity::build(view);
+        // Terrain changed: drop values for nodes that no longer exist and keep the
+        // rest. The fresh graph is what defines the nodes from here on.
+        let mut value = vec![0.0; graph.len()];
+        let mut active = Vec::with_capacity(self.active.len());
+        for &n in &self.active {
+            let cell = self.graph.cell[n as usize];
+            let (x, y, z) = view.config.coords(cell);
+            if let Some(m) = graph.node(i64::from(x), y, z) {
+                value[m as usize] = self.value[n as usize];
+                active.push(m);
+            }
+        }
+        self.value = value;
+        self.active = active;
+        self.seen = vec![0; graph.len()];
+        self.emit = vec![0.0; graph.len()];
+        self.prime = vec![0.0; graph.len()];
+        self.epoch = 0;
+        self.graph = std::sync::Arc::new(graph);
+    }
+
+    /// The value on the node at `cell` (`Config::index` of a support face), zero where
+    /// there is none or the cell is not a node.
+    #[cfg(test)]
+    pub(crate) fn value_at(&self, cell: usize) -> f64 {
+        let (w, d) = (self.graph.width as usize, self.graph.depth as usize);
+        if w == 0 || d == 0 {
+            return 0.0;
+        }
+        let (x, rest) = (cell % w, cell / w);
+        let (z, y) = (rest % d, rest / d);
+        self.graph
+            .node(x as i64, y as u32, z as u32)
+            .map_or(0.0, |n| self.value[n as usize])
+    }
+
+    /// The cells holding a value, ascending.
+    #[cfg(test)]
+    fn active_cells(&self) -> Vec<usize> {
+        let mut cells: Vec<usize> = self
+            .active
+            .iter()
+            .map(|&n| self.graph.cell[n as usize])
+            .collect();
+        cells.sort_unstable();
+        cells
+    }
+
+    /// The neighbour cells of the node at `cell`, ascending; `None` if it is no node.
+    #[cfg(test)]
+    fn neighbor_cells(&self, view: &VoxelView<'_>, cell: usize) -> Option<Vec<usize>> {
+        let (x, y, z) = view.config.coords(cell);
+        let n = self.graph.node(i64::from(x), y, z)?;
+        let mut out: Vec<usize> = self.graph.neighbors[n as usize]
+            .iter()
+            .filter(|&&m| m != NO_NODE)
+            .map(|&m| self.graph.cell[m as usize])
+            .collect();
+        out.sort_unstable();
+        out.dedup();
+        Some(out)
     }
 
     /// The cue concentration at the receptor, interpolated among the connected same-layer
     /// nodes of its cell. `None` when the pose is off the strip, unsupported, or no corner
     /// is a node (e.g. standing inside a solid — a wall — which is out of medium).
-    fn sample(&self, view: &VoxelView<'_>, pose: &Pose, standing_y: u32) -> Option<f64> {
+    pub(crate) fn sample(&self, view: &VoxelView<'_>, pose: &Pose, standing_y: u32) -> Option<f64> {
         let c = view.config;
         let (cx, cz) = pose.column(c.voxel_m, c.depth)?;
         let wx = cx.rem_euclid(i64::from(c.width));
         if !view.is_support(wx, standing_y, cz) {
             return None;
         }
-        if !self.graph.current(view) || !self.graph.has(c.index(wx, standing_y, cz)) {
+        if !self.graph.current(view) || self.graph.node(wx, standing_y, cz).is_none() {
             return None;
         }
         // A node's value sits at its face centre, so the bilinear stencil is centred on
@@ -262,11 +384,11 @@ impl DetritusField {
             if z < 0 || z >= i64::from(c.depth) {
                 continue;
             }
-            let cell = c.index(x0 + odx, standing_y, z as u32);
-            if !self.graph.has(cell) {
+            let Some(n) = self.graph.node(x0 + odx, standing_y, z as u32) else {
                 continue;
-            }
-            if let Some(&value) = self.value.get(&cell) {
+            };
+            let value = self.value[n as usize];
+            if value != 0.0 {
                 sum += w * value;
             }
             wsum += w;
@@ -276,101 +398,100 @@ impl DetritusField {
 
     /// One field update. Returns the largest per-node absolute change (the settling
     /// criterion).
-    fn update(&mut self, view: &VoxelView<'_>, fv: &FloraView<'_>) -> f64 {
+    pub(crate) fn update(&mut self, view: &VoxelView<'_>, fv: &FloraView<'_>) -> f64 {
         self.ensure_graph(view);
-        let c = view.config;
-        let graph = &self.graph;
+        let graph = std::sync::Arc::clone(&self.graph);
+        // A fresh epoch marks this update's working set; on wrapping, clear the marks.
+        self.epoch = self.epoch.wrapping_add(1);
+        if self.epoch == 0 {
+            self.seen.fill(0);
+            self.epoch = 1;
+        }
+        let epoch = self.epoch;
 
-        // Sources: every site holding detritus — litter or carrion on the ground.
-        // Deterministic (the flora's ground is site-sorted). A fungal cap standing on a
-        // face is food and not a source ([`detritus_at`]).
-        let mut sources: Vec<usize> = Vec::new();
+        // Sources: every site holding detritus — litter or carrion on the ground — that
+        // is a node. A fungal cap standing on a face is food and not a source
+        // ([`detritus_of`]). Each is a root, with its emission noted.
+        self.work.clear();
         for g in fv
             .ground
             .iter()
             .filter(|g| g.litter > 0.0 || g.carrion > 0.0)
         {
-            let cell = c.index(g.site.x as i64, g.site.y, g.site.z);
-            if graph.has(cell) {
-                sources.push(cell);
-            }
-        }
-        sources.sort_unstable();
-        sources.dedup();
-
-        // Working set: active (nodes holding a value) + sources + exactly their
-        // immediate same-height neighbours. Deduplicate the roots before traversing
-        // them: walking a growing work list would follow the cyclic graph transitively
-        // and never terminate.
-        let mut work: Vec<usize> = self.value.keys().copied().collect();
-        work.extend(sources.iter().copied());
-        work.sort_unstable();
-        work.dedup();
-        let roots = work.clone();
-        for cell in roots {
-            if let Some(nb) = graph.neighbors.get(&cell) {
-                work.extend_from_slice(nb);
-            }
-        }
-        work.sort_unstable();
-        work.dedup();
-
-        // Order 1+2: emission then decay, into a scratch prime map.
-        let decay = decay_factor();
-        let mut prime: Vec<(usize, f64)> = Vec::with_capacity(work.len());
-        for &cell in &work {
-            let old = self.value.get(&cell).copied().unwrap_or(0.0);
-            let emit = if sources.binary_search(&cell).is_ok() {
-                let (x, y, z) = c.coords(cell);
-                let stock = detritus_at(fv, Site { x: x as u32, y, z });
-                (stock / M_EMIT).min(1.0) * UPDATE_S
-            } else {
-                0.0
+            let Some(n) = graph.node(i64::from(g.site.x), g.site.y, g.site.z) else {
+                continue;
             };
-            prime.push((cell, (old + emit) * decay));
+            let n = n as usize;
+            // Ground is one entry per site, so a face is a source once.
+            self.emit[n] = (detritus_of(g) / M_EMIT).min(1.0) * UPDATE_S;
+            self.seen[n] = epoch;
+            self.work.push(n as u32);
         }
-        let by_cell: FxHashMap<usize, f64> = prime.iter().copied().collect();
+        // Working set: active (nodes holding a value) + sources + exactly their
+        // immediate same-height neighbours — not transitively. Every node that is not a
+        // source emits nothing this update.
+        for &n in &self.active {
+            if self.seen[n as usize] != epoch {
+                self.seen[n as usize] = epoch;
+                self.emit[n as usize] = 0.0;
+                self.work.push(n);
+            }
+        }
+        let roots = self.work.len();
+        for r in 0..roots {
+            let n = self.work[r] as usize;
+            for &m in &graph.neighbors[n] {
+                if m != NO_NODE && self.seen[m as usize] != epoch {
+                    self.seen[m as usize] = epoch;
+                    self.emit[m as usize] = 0.0;
+                    self.work.push(m);
+                }
+            }
+        }
+
+        // Order 1+2: emission then decay.
+        let decay = decay_factor();
+        for &n in &self.work {
+            let n = n as usize;
+            self.prime[n] = (self.value[n] + self.emit[n]) * decay;
+        }
 
         // Order 3: convex nearest-neighbour diffusion. A missing/blocked neighbour
         // (a direction with no node) reflects the local value, so the mix is always over
-        // four directions.
+        // four directions. A connected neighbour outside the working set holds nothing.
+        // Diffusion reads only `prime`, so each node's new value is written in place.
         let mut max_change = 0.0f64;
-        let mut next: FxHashMap<usize, f64> =
-            FxHashMap::with_capacity_and_hasher(work.len(), Default::default());
-        for &(cell, p) in &prime {
-            let (x, y, z) = c.coords(cell);
+        self.active.clear();
+        for &n in &self.work {
+            let n = n as usize;
+            let p = self.prime[n];
+            let z = (graph.cell[n] / graph.width as usize) % graph.depth as usize;
             let mut total = 0.0;
-            for (dx, dz) in [(-1i64, 0i64), (1i64, 0i64), (0, -1), (0, 1)] {
-                let nz = i64::from(z) + dz;
-                let nb_value = if nz < 0 || nz >= i64::from(c.depth) {
+            for (k, (_, dz)) in DIRS.into_iter().enumerate() {
+                let nz = z as i64 + dz;
+                let nb_value = if nz < 0 || nz >= i64::from(graph.depth) {
                     p // the world's non-wrapping z boundary reflects
                 } else {
-                    let ncell = c.index(i64::from(x) + dx, y, nz as u32);
-                    if graph
-                        .neighbors
-                        .get(&cell)
-                        .is_some_and(|nb| nb.contains(&ncell))
-                    {
-                        // A connected but inactive node has concentration zero. It is
-                        // deliberately outside `by_cell` when it lies beyond the one-hop
-                        // working fringe, and must not be mistaken for a blocked edge.
-                        by_cell.get(&ncell).copied().unwrap_or(0.0)
-                    } else {
-                        p // blocked/missing support reflects the local value
+                    match graph.neighbors[n][k] {
+                        NO_NODE => p, // blocked/missing support reflects the local value
+                        m if self.seen[m as usize] == epoch => self.prime[m as usize],
+                        _ => 0.0,
                     }
                 };
                 total += nb_value;
             }
             let mean = total / 4.0;
             let updated = (1.0 - DIFFUSE_FRACTION) * p + DIFFUSE_FRACTION * mean;
-            let old = self.value.get(&cell).copied().unwrap_or(0.0);
+            let old = self.value[n];
             max_change = max_change.max((updated - old).abs());
             // Order 4: discard below the threshold.
             if updated >= THRESHOLD {
-                next.insert(cell, updated);
+                self.value[n] = updated;
+                self.active.push(n as u32);
+            } else {
+                self.value[n] = 0.0;
             }
         }
-        self.value = next;
         max_change
     }
 }
@@ -431,6 +552,16 @@ impl Senses {
     pub fn hold_light(&mut self) {
         if self.light.is_none() {
             self.light = Some(Box::default());
+        }
+    }
+
+    /// Fill the held light memo for every support face of `view`'s terrain now, so every
+    /// clone of this handle — each episode of a frozen fixture — starts with the whole
+    /// sky read and computes none of it. Nothing without [`Senses::hold_light`]. The
+    /// values are the direct call's, as the lazy memo's are.
+    pub fn warm_light(&mut self, view: &VoxelView<'_>) {
+        if let Some(memo) = self.light.as_deref_mut() {
+            memo.warm(view);
         }
     }
 
@@ -966,36 +1097,81 @@ pub(crate) fn build_occupancy(
     occ
 }
 
-/// The `Light` receptor's memo for a frozen world (cone-speed follow-up): one entry per
-/// `(x, z)` column holding the last standing face's `y` and its sky visibility. A body
-/// standing on another face of the same column (a ledge over a floor) recomputes and
-/// replaces the entry — still the direct call's value. Dense, no hashing.
+/// The `Light` receptor's memo for a frozen world (cone-speed follow-up): the sky
+/// visibility of every support face, computed the first time a body stands on it — or
+/// for every face at once when a fixture is warmed ([`Senses::warm_light`]) — and read
+/// from then on. Keyed on the terrain version and shape, so it always returns the direct
+/// call's value; a ledge and the floor under it are two entries, not one slot they take
+/// turns in. Dense, no hashing (hot-path geometry, item 6).
 #[derive(Clone, Debug, Default)]
 pub(crate) struct LightMemo {
     shape: (u64, u32, u32, u32),
-    /// `(face y, sky)` per column `z * width + x`; `y == u32::MAX` is empty.
-    columns: Vec<(u32, f64)>,
+    /// Per column `z * width + x`, its first face in `faces`; `plane + 1` entries, empty
+    /// until the index is built for `shape`.
+    col_start: Vec<u32>,
+    /// `(face y, sky)`, grouped by column and ascending in `y`; `NaN` until computed.
+    faces: Vec<(u32, f64)>,
 }
 
 impl LightMemo {
-    pub(crate) fn sky(&mut self, view: &VoxelView<'_>, x: i64, y: u32, z: u32) -> f64 {
+    /// Index every support face of the current terrain, none of them computed yet.
+    fn ensure_index(&mut self, view: &VoxelView<'_>) {
         let c = view.config;
         let shape = (view.terrain_version, c.width, c.height, c.depth);
-        let n = c.width as usize * c.depth as usize;
-        if self.shape != shape || self.columns.len() != n {
-            self.shape = shape;
-            self.columns.clear();
-            self.columns.resize(n, (u32::MAX, 0.0));
+        let plane = c.width as usize * c.depth as usize;
+        if self.shape == shape && self.col_start.len() == plane + 1 {
+            return;
         }
+        self.shape = shape;
+        self.col_start.clear();
+        self.faces.clear();
+        self.col_start.reserve(plane + 1);
+        for z in 0..c.depth {
+            for x in 0..c.width as i64 {
+                self.col_start.push(self.faces.len() as u32);
+                let mut from = 0;
+                while let Some(y) = view.lowest_support_in(x, z, from, c.height) {
+                    self.faces.push((y, f64::NAN));
+                    from = y + 1;
+                }
+            }
+        }
+        self.col_start.push(self.faces.len() as u32);
+    }
+
+    pub(crate) fn sky(&mut self, view: &VoxelView<'_>, x: i64, y: u32, z: u32) -> f64 {
+        let c = view.config;
         if z >= c.depth {
             return view.sky_visibility(x, y, z);
         }
-        let wx = x.rem_euclid(i64::from(c.width)) as usize;
-        let entry = &mut self.columns[z as usize * c.width as usize + wx];
-        if entry.0 != y {
-            *entry = (y, view.sky_visibility(x, y, z));
+        self.ensure_index(view);
+        let col = z as usize * c.width as usize + x.rem_euclid(i64::from(c.width)) as usize;
+        let (a, b) = (self.col_start[col] as usize, self.col_start[col + 1] as usize);
+        let Some(entry) = self.faces[a..b].iter_mut().find(|f| f.0 == y) else {
+            // Not a support face: nothing a body stands on, so nothing to keep.
+            return view.sky_visibility(x, y, z);
+        };
+        if entry.1.is_nan() {
+            entry.1 = view.sky_visibility(x, y, z);
         }
         entry.1
+    }
+
+    /// Compute every face not yet computed.
+    fn warm(&mut self, view: &VoxelView<'_>) {
+        self.ensure_index(view);
+        let c = view.config;
+        for z in 0..c.depth {
+            for x in 0..c.width as usize {
+                let col = z as usize * c.width as usize + x;
+                let (a, b) = (self.col_start[col] as usize, self.col_start[col + 1] as usize);
+                for f in &mut self.faces[a..b] {
+                    if f.1.is_nan() {
+                        f.1 = view.sky_visibility(x as i64, f.0, z);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1672,11 +1848,11 @@ mod tests {
         senses.update(&world.view(), &flora.view());
 
         assert_eq!(
-            senses.field.value.len(),
+            senses.field.active_cells().len(),
             5,
             "one source plus four neighbors"
         );
-        for &cell in senses.field.value.keys() {
+        for cell in senses.field.active_cells() {
             let (x, y, z) = world.view().config.coords(cell);
             let dx = (i64::from(x) - 2).abs().min((i64::from(x) + 8 - 2).abs());
             let dz = (i64::from(z) - 2).abs();
@@ -1701,7 +1877,7 @@ mod tests {
         let middle_cell = world.view().config.index(2, 2, 2);
 
         assert!(
-            edge.field.value[&edge_cell] > middle.field.value[&middle_cell],
+            edge.field.value_at(edge_cell) > middle.field.value_at(middle_cell),
             "the missing z neighbor reflects instead of disappearing from the average"
         );
     }
@@ -1887,9 +2063,7 @@ mod tests {
         assert!(
             senses
                 .field
-                .graph
-                .neighbors
-                .get(&floor_cell)
+                .neighbor_cells(&v, floor_cell)
                 .is_some_and(|nb| nb.iter().all(|&n| {
                     let (_, ny, _) = v.config.coords(n);
                     ny == 2

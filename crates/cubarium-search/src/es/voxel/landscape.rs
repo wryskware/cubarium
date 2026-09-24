@@ -236,6 +236,10 @@ impl Landscape {
         };
         let mut senses = Senses::new();
         senses.settle(&world.view(), &self.flora.view());
+        // The terrain is frozen for every episode of the fixture: read every face's sky
+        // once here, and each episode's clone of the field starts with all of it.
+        senses.hold_light();
+        senses.warm_light(&world.view());
         Some(PreparedLandscape {
             founder,
             preset: self.preset.clone(),

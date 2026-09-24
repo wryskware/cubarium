@@ -835,13 +835,14 @@ pub fn near_drop_or_edge(
                 continue;
             }
             let head = y + 1;
-            if head >= i64::from(c.height) || view.material_at(x, head as u32, z as u32).is_solid()
-            {
+            if head >= i64::from(c.height) || view.is_solid(x, head as u32, z as u32) {
                 continue;
             }
-            let supported = (y - down..=y + up)
-                .filter(|&yy| yy >= 0 && yy < i64::from(c.height))
-                .any(|yy| view.is_support(x, yy as u32, z as u32));
+            let (lo, hi) = ((y - down).max(0), (y + up).min(i64::from(c.height) - 1));
+            let supported = lo <= hi
+                && view
+                    .lowest_support_in(x, z as u32, lo as u32, hi as u32)
+                    .is_some();
             if !supported {
                 return true;
             }

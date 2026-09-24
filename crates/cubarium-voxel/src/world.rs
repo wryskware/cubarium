@@ -150,6 +150,45 @@ pub struct VoxelView<'a> {
     pub outlet: Option<(u32, u32, u32)>,
     /// The spring cell `(x, y, z)`, if the world names one.
     pub spring: Option<(u32, u32, u32)>,
+    /// Every column's solid cells as bits, the world's [`SolidColumns`]: what
+    /// [`VoxelView::is_support`], [`VoxelView::is_solid`] and the column queries read.
+    /// Empty while a world is being generated and on a world taller than
+    /// [`SOLID_MASK_ROWS`], and every reader then takes the direct test over `material`.
+    solid: &'a [u128],
+}
+
+/// The tallest world whose columns [`SolidColumns`] keeps as one bit mask each. Taller
+/// worlds answer the support queries from `material` directly.
+pub const SOLID_MASK_ROWS: u32 = 128;
+
+/// `x` wrapped into `0..width` without a division when it is already there, which it
+/// nearly always is: `Config::index`'s wrap, for the per-column lookups.
+#[inline]
+fn wrap_x(x: i64, width: u32) -> usize {
+    let w = i64::from(width);
+    if (0..w).contains(&x) {
+        x as usize
+    } else {
+        x.rem_euclid(w) as usize
+    }
+}
+
+/// The support faces of one column's solid mask: a solid row with a non-solid row over
+/// it, below the top row of a `height`-row world.
+#[inline]
+fn support_bits(solid: u128, height: u32) -> u128 {
+    let below_top = match height {
+        0 | 1 => 0,
+        h if h - 1 >= 128 => u128::MAX,
+        h => (1u128 << (h - 1)) - 1,
+    };
+    solid & !(solid >> 1) & below_top
+}
+
+/// Rows `lo..=hi` of a column mask; `lo <= hi < 128`.
+#[inline]
+fn row_range(lo: u32, hi: u32) -> u128 {
+    (u128::MAX >> (127 - hi)) & (u128::MAX << lo)
 }
 
 impl<'a> VoxelView<'a> {
@@ -192,7 +231,28 @@ impl<'a> VoxelView<'a> {
     /// exposed to void inside the world. Plants stand on these, never on a column's
     /// skyline as such: the skyline solid at `y = height - 1` has no room above it and
     /// is not a support, while a roofed floor is one.
+    ///
+    /// Read from the world's per-column solid bits ([`SolidColumns`]), one load and a
+    /// shift, and the same answer as [`VoxelView::is_support_direct`] in every cell.
+    #[inline]
     pub fn is_support(&self, x: i64, y: u32, z: u32) -> bool {
+        let c = self.config;
+        if !(y + 1 < c.height && z < c.depth) {
+            return false;
+        }
+        match self.solid_column(x, z) {
+            Some(m) => {
+                let support = (m >> y) & 0b11 == 0b01;
+                debug_assert_eq!(support, self.is_support_direct(x, y, z), "({x}, {y}, {z})");
+                support
+            }
+            None => self.is_support_direct(x, y, z),
+        }
+    }
+
+    /// [`VoxelView::is_support`] read off `material` itself: the definition the lookup is
+    /// checked against, and what a world without the lookup answers with.
+    pub fn is_support_direct(&self, x: i64, y: u32, z: u32) -> bool {
         let c = self.config;
         y + 1 < c.height
             && z < c.depth
@@ -200,14 +260,194 @@ impl<'a> VoxelView<'a> {
             && !self.material_at(x, y + 1, z).is_solid()
     }
 
+    /// Whether `(x, y, z)` is solid: `material_at(x, y, z).is_solid()` read from the
+    /// column bits. `y` and `z` must be in range, as for [`VoxelView::material_at`].
+    #[inline]
+    pub fn is_solid(&self, x: i64, y: u32, z: u32) -> bool {
+        debug_assert!(y < self.config.height && z < self.config.depth);
+        match self.solid_column(x, z) {
+            Some(m) => (m >> y) & 1 == 1,
+            None => self.material_at(x, y, z).is_solid(),
+        }
+    }
+
+    /// Whether column `(x, z)` holds a solid anywhere in rows `lo..=hi` (`hi` may run past
+    /// the world): `(lo..=hi).any(|y| self.is_solid(x, y, z))` in one mask operation.
+    #[inline]
+    pub fn solid_in(&self, x: i64, z: u32, lo: u32, hi: u32) -> bool {
+        let c = self.config;
+        if z >= c.depth || c.height == 0 {
+            return false;
+        }
+        let hi = hi.min(c.height - 1);
+        if lo > hi {
+            return false;
+        }
+        match self.solid_column(x, z) {
+            Some(m) => m & row_range(lo, hi) != 0,
+            None => (lo..=hi).any(|y| self.material_at(x, y, z).is_solid()),
+        }
+    }
+
+    /// Column `(x, z)`'s solid bits, when the world keeps them. `z` must be in range.
+    #[inline]
+    fn solid_column(&self, x: i64, z: u32) -> Option<u128> {
+        if self.solid.is_empty() {
+            return None;
+        }
+        let c = self.config;
+        self.solid
+            .get(z as usize * c.width as usize + wrap_x(x, c.width))
+            .copied()
+    }
+
+    /// The lowest support face of column `(x, z)` in rows `lo..=hi` (`hi` may run past
+    /// the world), or `None`: `(lo..=hi).find(|&y| self.is_support(x, y, z))` in one
+    /// mask operation.
+    #[inline]
+    pub fn lowest_support_in(&self, x: i64, z: u32, lo: u32, hi: u32) -> Option<u32> {
+        let c = self.config;
+        if z >= c.depth || c.height < 2 {
+            return None;
+        }
+        let hi = hi.min(c.height - 2);
+        if lo > hi {
+            return None;
+        }
+        let found = match self.solid_column(x, z) {
+            Some(m) => {
+                let s = support_bits(m, c.height) & row_range(lo, hi);
+                (s != 0).then(|| s.trailing_zeros())
+            }
+            None => (lo..=hi).find(|&y| self.is_support_direct(x, y, z)),
+        };
+        debug_assert_eq!(found, (lo..=hi).find(|&y| self.is_support_direct(x, y, z)));
+        found
+    }
+
+    /// The highest support face of column `(x, z)` in rows `lo..=hi`, or `None`:
+    /// `(lo..=hi).rev().find(|&y| self.is_support(x, y, z))` in one mask operation.
+    #[inline]
+    pub fn highest_support_in(&self, x: i64, z: u32, lo: u32, hi: u32) -> Option<u32> {
+        let c = self.config;
+        if z >= c.depth || c.height < 2 {
+            return None;
+        }
+        let hi = hi.min(c.height - 2);
+        if lo > hi {
+            return None;
+        }
+        let found = match self.solid_column(x, z) {
+            Some(m) => {
+                let s = support_bits(m, c.height) & row_range(lo, hi);
+                (s != 0).then(|| 127 - s.leading_zeros())
+            }
+            None => (lo..=hi).rev().find(|&y| self.is_support_direct(x, y, z)),
+        };
+        debug_assert_eq!(found, (lo..=hi).rev().find(|&y| self.is_support_direct(x, y, z)));
+        found
+    }
+
+    /// The support face of column `(x, z)` nearest the row `standing`, at most `down`
+    /// rows below it or `up` above (clipped to the world), **ties to the higher**; `None`
+    /// when there is none. The step rule's own question
+    /// (`cubarium_voxel_fauna`'s `step_target_layer`): the nearest face at or above and
+    /// the nearest below, one mask operation each.
+    #[inline]
+    pub fn nearest_support(
+        &self,
+        x: i64,
+        z: u32,
+        standing: u32,
+        down: u32,
+        up: u32,
+    ) -> Option<u32> {
+        let c = self.config;
+        if z >= c.depth {
+            return None;
+        }
+        let lo = standing.saturating_sub(down);
+        let hi = standing.saturating_add(up).min(c.height.saturating_sub(1));
+        if lo > hi {
+            return None;
+        }
+        if let Some(m) = self.solid_column(x, z) {
+            // One mask: the column's faces in range, split at `standing`.
+            let top = hi.min(c.height.saturating_sub(2));
+            if c.height < 2 || lo > top {
+                return None;
+            }
+            let s = support_bits(m, c.height) & row_range(lo, top);
+            let at_or_above = s & (u128::MAX << standing.min(127));
+            let at_or_above = if standing > 127 { 0 } else { at_or_above };
+            let below = s & !at_or_above;
+            let found = match (at_or_above != 0, below != 0) {
+                (false, false) => None,
+                (true, false) => Some(at_or_above.trailing_zeros()),
+                (false, true) => Some(127 - below.leading_zeros()),
+                (true, true) => {
+                    let (a, b) = (at_or_above.trailing_zeros(), 127 - below.leading_zeros());
+                    Some(if a - standing <= standing - b { a } else { b })
+                }
+            };
+            debug_assert_eq!(found, self.nearest_support_direct(x, z, standing, down, up));
+            return found;
+        }
+        self.nearest_support_direct(x, z, standing, down, up)
+    }
+
+    /// [`VoxelView::nearest_support`] by the column queries (each the walk it stands
+    /// for when the world keeps no mask).
+    fn nearest_support_direct(
+        &self,
+        x: i64,
+        z: u32,
+        standing: u32,
+        down: u32,
+        up: u32,
+    ) -> Option<u32> {
+        let c = self.config;
+        let lo = standing.saturating_sub(down);
+        let hi = standing.saturating_add(up).min(c.height.saturating_sub(1));
+        if z >= c.depth || lo > hi {
+            return None;
+        }
+        let above = if standing <= hi {
+            self.lowest_support_in(x, z, lo.max(standing), hi)
+        } else {
+            None
+        };
+        let below = if standing > lo {
+            self.highest_support_in(x, z, lo, (standing - 1).min(hi))
+        } else {
+            None
+        };
+        match (above, below) {
+            (Some(a), Some(b)) => Some(if a - standing <= standing - b { a } else { b }),
+            (a, b) => a.or(b),
+        }
+    }
+
     /// Every support face in column `(x, z)`, ascending in `y`.
     pub fn supports_in_column(&self, x: i64, z: u32) -> Vec<u32> {
-        if z >= self.config.depth {
+        let c = self.config;
+        if z >= c.depth {
             return Vec::new();
         }
-        (0..self.config.height)
-            .filter(|&y| self.is_support(x, y, z))
-            .collect()
+        match self.solid_column(x, z) {
+            Some(m) => {
+                let mut s = support_bits(m, c.height);
+                let mut out = Vec::with_capacity(s.count_ones() as usize);
+                while s != 0 {
+                    out.push(s.trailing_zeros());
+                    s &= s - 1;
+                }
+                out
+            }
+            None => (0..c.height)
+                .filter(|&y| self.is_support_direct(x, y, z))
+                .collect(),
+        }
     }
 
     /// Depth of the free water standing on the support face `(x, y, z)`, in metres, as
@@ -515,6 +755,72 @@ pub struct World {
     /// (`design/handoffs/voxel-exchange-geometry-2026-09-18.md`).
     #[serde(skip)]
     pub(crate) void_runs: VoidRuns,
+    /// **A cache, not state:** every column's solid cells as bits, what the support-face
+    /// lookup reads ([`SolidColumns`]). Not serialized: a decoded world rebuilds it with
+    /// its active sets.
+    #[serde(skip)]
+    pub(crate) solid: SolidColumns,
+}
+
+/// Every column's **solid cells**, one bit per row (bit `y` of entry `z * width + x`):
+/// the terrain half of the support-face test, so [`VoxelView::is_support`] is one load
+/// and a shift and the step rule's nearest face one mask operation
+/// (`design/handoffs/voxel-hot-path-geometry-2026-09-24.md`, item 3).
+///
+/// Terrain alone: water and plants never enter the test, so nothing but a material
+/// change moves it. **A cache, not state**, derived from `material` and kept current by
+/// every path that writes `material` once a world is built — `SetMaterial` sets its one
+/// bit, `repair_isolated` its pockets', and [`World::rebuild_active_sets`] (the end of
+/// construction, a snapshot's decode, a fixture's direct write) rebuilds it whole. A
+/// clone copies it, which is right: a clone shares the terrain. Empty — and every reader
+/// then takes the direct test — before a world's first rebuild (mid-generation) and on a
+/// world taller than [`SOLID_MASK_ROWS`].
+#[derive(Clone, Debug, Default)]
+pub(crate) struct SolidColumns {
+    bits: Vec<u128>,
+}
+
+/// A cache compares equal to anything: `material`, which `World`'s equality compares,
+/// is what it is derived from.
+impl PartialEq for SolidColumns {
+    fn eq(&self, _: &SolidColumns) -> bool {
+        true
+    }
+}
+
+impl SolidColumns {
+    /// Rebuild from `material` whole.
+    fn rebuild(&mut self, config: &Config, material: &[Material]) {
+        self.bits.clear();
+        if config.height > SOLID_MASK_ROWS {
+            return;
+        }
+        let plane = config.width as usize * config.depth as usize;
+        self.bits.resize(plane, 0);
+        for (y, row) in material.chunks_exact(plane).enumerate() {
+            for (col, m) in row.iter().enumerate() {
+                if m.is_solid() {
+                    self.bits[col] |= 1u128 << y;
+                }
+            }
+        }
+    }
+
+    /// Record one cell's new material: `i` is its `Config::index`. Nothing to do while
+    /// the cache is not built.
+    pub(crate) fn set(&mut self, config: &Config, i: usize, material: Material) {
+        if self.bits.is_empty() {
+            return;
+        }
+        let plane = config.width as usize * config.depth as usize;
+        let (col, y) = (i % plane, i / plane);
+        let bit = 1u128 << y;
+        if material.is_solid() {
+            self.bits[col] |= bit;
+        } else {
+            self.bits[col] &= !bit;
+        }
+    }
 }
 
 /// Every column's **void runs**: the maximal stacks of non-solid cells, one entry per run.
@@ -677,6 +983,7 @@ impl World {
             damp: crate::sparse::CellSet::default(),
             drainable: crate::sparse::CellSet::default(),
             void_runs: VoidRuns::default(),
+            solid: SolidColumns::default(),
             config,
         };
         crate::generate::landform(&mut world);
@@ -741,6 +1048,7 @@ impl World {
             damp: crate::sparse::CellSet::default(),
             drainable: crate::sparse::CellSet::default(),
             void_runs: VoidRuns::default(),
+            solid: SolidColumns::default(),
             material,
             config,
         };
@@ -839,6 +1147,7 @@ impl World {
             outlet_open: self.outlet_open,
             outlet: self.outlet_cell,
             spring: self.spring_cell,
+            solid: &self.solid.bits,
         }
     }
 
@@ -974,7 +1283,11 @@ impl World {
     /// Rebuild the water active sets from the arrays, which is the only thing that can
     /// re-establish them after a snapshot, generation, or any other direct write. One
     /// full scan; the step calls it when a set says it is stale.
+    ///
+    /// It rebuilds the support-face lookup ([`SolidColumns`]) too: every path that writes
+    /// `material` directly ends here, and so does a decoded world.
     pub(crate) fn rebuild_active_sets(&mut self) {
+        self.solid.rebuild(&self.config, &self.material);
         let n = self.config.cells();
         let plane = self.config.width as usize * self.config.depth as usize;
         let height = self.config.height as usize;

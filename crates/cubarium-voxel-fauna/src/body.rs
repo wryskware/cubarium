@@ -545,12 +545,15 @@ pub(crate) fn resolve_motion(
     let mut moved = 0.0;
     let mut blocked = false;
     let mut left = v_req * DT;
+    // The heading is fixed for the sweep: its unit vector is taken once, not per probe.
+    let dir = (pose.heading_rad.sin(), pose.heading_rad.cos());
     while left > 1e-12 {
         let step = left.min(r);
         match step_advance(
             view,
             pose,
             standing_y,
+            dir,
             step,
             r,
             wade_depth_m,
@@ -571,7 +574,7 @@ pub(crate) fn resolve_motion(
                 // advance from where the sweep stopped, without committing the probes,
                 // then take it once. The gap left under a wall is a few hundredths of
                 // the footprint radius.
-                let (px, pz, h) = (pose.x, pose.z, pose.heading_rad);
+                let (px, pz) = (pose.x, pose.z);
                 let y0 = *standing_y;
                 let mut lo = 0.0;
                 let mut hi = step;
@@ -584,7 +587,7 @@ pub(crate) fn resolve_motion(
                         view,
                         px,
                         pz,
-                        h,
+                        dir,
                         y0,
                         mid,
                         r,
@@ -604,7 +607,7 @@ pub(crate) fn resolve_motion(
                         view,
                         px,
                         pz,
-                        h,
+                        dir,
                         y0,
                         lo,
                         r,
@@ -639,6 +642,7 @@ fn step_advance(
     view: &VoxelView<'_>,
     pose: &mut crate::Pose,
     standing_y: &mut u32,
+    dir: (f64, f64),
     step: f64,
     r: f64,
     wade_depth_m: f64,
@@ -649,7 +653,7 @@ fn step_advance(
         view,
         pose.x,
         pose.z,
-        pose.heading_rad,
+        dir,
         *standing_y,
         step,
         r,
@@ -692,7 +696,7 @@ fn advance_candidate(
     view: &VoxelView<'_>,
     px: f64,
     pz: f64,
-    heading: f64,
+    (fx, fz): (f64, f64),
     standing_y: u32,
     step: f64,
     r: f64,
@@ -704,7 +708,6 @@ fn advance_candidate(
     let v = c.voxel_m;
     let width_m = f64::from(c.width) * v;
     let depth_m = f64::from(c.depth) * v;
-    let (fx, fz) = (heading.sin(), heading.cos());
     let mut nx = px + fx * step;
     let mut nz = pz + fz * step;
     // Wrap on x; the strip's z ends are walls, not wraps.
@@ -723,10 +726,13 @@ fn advance_candidate(
     // layer, within the step. No such face is a wall or a cliff edge, and refuses.
     let ny = step_target_layer(view, cx, cz as u32, standing_y, step_limits)?;
     // The body rests on the highest ground under its disc while it straddles a riser,
-    // so the clearance is checked from there.
-    let clearance =
-        disc_ground_layer(view, nx, nz, r, standing_y, step_limits).max(standing_y.max(ny));
-    if (1..=headroom).any(|d| disc_hits_solid(view, nx, nz, clearance + d, r)) {
+    // so the clearance is checked from there: every one of the `headroom` layers over
+    // it, in one pass over the columns the disc can overlap.
+    let cells = disc_box(v, nx, nz, r);
+    let clearance = disc_ground_layer(view, cells, nx, nz, r, standing_y, step_limits)
+        .max(standing_y.max(ny));
+    if headroom > 0 && disc_hits_solid(view, cells, nx, nz, clearance + 1, clearance + headroom, r)
+    {
         return None;
     }
     let there = view.water_depth_m(cx, ny, cz as u32);
@@ -764,21 +770,9 @@ fn step_target_layer(
     standing_y: u32,
     step: StepLimits,
 ) -> Option<u32> {
-    let lo = standing_y.saturating_sub(step.down);
-    let hi = (standing_y + step.up).min(view.config.height.saturating_sub(1));
-    let mut best: Option<u32> = None;
-    for y in lo..=hi {
-        if !view.is_support(x, y, z) {
-            continue;
-        }
-        let d = |a: u32| (i64::from(a) - i64::from(standing_y)).abs();
-        best = match best {
-            None => Some(y),
-            Some(b) if d(y) < d(b) || (d(y) == d(b) && y > b) => Some(y),
-            keep => keep,
-        };
-    }
-    best
+    // The column's support mask answers it whole: the nearest face at or above and the
+    // nearest below, ties to the higher (`VoxelView::nearest_support`).
+    view.nearest_support(x, z, standing_y, step.down, step.up)
 }
 
 /// The highest within-step support face under the disc at `(cx, cz)`: the surface a
@@ -789,6 +783,7 @@ fn step_target_layer(
 /// the body merely grazes at exactly the radius does not lift it.
 fn disc_ground_layer(
     view: &VoxelView<'_>,
+    (x0, x1, z0, z1): (i64, i64, i64, i64),
     cx: f64,
     cz: f64,
     r: f64,
@@ -800,10 +795,6 @@ fn disc_ground_layer(
     }
     let c = view.config;
     let v = c.voxel_m;
-    let x0 = ((cx - r) / v).floor() as i64;
-    let x1 = ((cx + r) / v).floor() as i64;
-    let z0 = ((cz - r) / v).floor() as i64;
-    let z1 = ((cz + r) / v).floor() as i64;
     let mut best = standing_y;
     for x in x0..=x1 {
         for z in z0..=z1 {
@@ -816,8 +807,8 @@ fn disc_ground_layer(
             if ddx * ddx + ddz * ddz >= r * r {
                 continue;
             }
-            let wx = x.rem_euclid(i64::from(c.width));
-            if let Some(y) = step_target_layer(view, wx, z as u32, standing_y, step) {
+            // `x` is wrapped by the lookup itself.
+            if let Some(y) = step_target_layer(view, x, z as u32, standing_y, step) {
                 best = best.max(y);
             }
         }
@@ -825,25 +816,45 @@ fn disc_ground_layer(
     best
 }
 
-/// Whether the disc at `(cx, cz)` overlaps any solid voxel at `layer`. Strict: a
-/// grazing touch at exactly the radius does not block, it contacts.
-fn disc_hits_solid(view: &VoxelView<'_>, cx: f64, cz: f64, layer: u32, r: f64) -> bool {
+/// The columns a disc of radius `r` at `(cx, cz)` can overlap, `(x0, x1, z0, z1)`
+/// inclusive, `x` unwrapped.
+fn disc_box(v: f64, cx: f64, cz: f64, r: f64) -> (i64, i64, i64, i64) {
+    (
+        ((cx - r) / v).floor() as i64,
+        ((cx + r) / v).floor() as i64,
+        ((cz - r) / v).floor() as i64,
+        ((cz + r) / v).floor() as i64,
+    )
+}
+
+/// Whether the disc at `(cx, cz)` overlaps a solid voxel at any layer in `lo..=hi`
+/// (layers past the world's top hold nothing). Strict: a grazing touch at exactly the
+/// radius does not block, it contacts. `cells` is the disc's [`disc_box`].
+///
+/// One pass over the columns for the whole run of layers — a column's layers read as
+/// one mask ([`VoxelView::solid_in`]) — where the clearance check used to walk the
+/// columns once per layer; whether a column overlaps the disc does not depend on the
+/// layer, so the answer is the same.
+fn disc_hits_solid(
+    view: &VoxelView<'_>,
+    (x0, x1, z0, z1): (i64, i64, i64, i64),
+    cx: f64,
+    cz: f64,
+    lo: u32,
+    hi: u32,
+    r: f64,
+) -> bool {
     let c = view.config;
     let v = c.voxel_m;
-    if layer >= c.height {
+    if lo >= c.height || lo > hi {
         return false;
     }
-    let x0 = ((cx - r) / v).floor() as i64;
-    let x1 = ((cx + r) / v).floor() as i64;
-    let z0 = ((cz - r) / v).floor() as i64;
-    let z1 = ((cz + r) / v).floor() as i64;
     for x in x0..=x1 {
         for z in z0..=z1 {
             if z < 0 || z >= i64::from(c.depth) {
                 continue;
             }
-            let wx = x.rem_euclid(i64::from(c.width));
-            if !view.material_at(wx, layer, z as u32).is_solid() {
+            if !view.solid_in(x, z as u32, lo, hi) {
                 continue;
             }
             // Nearest point of the voxel's square to the disc centre.
@@ -900,17 +911,17 @@ pub fn wall_ascent(
         return Face::Not;
     }
     let (wx, wz) = ((x + dir.0).rem_euclid(i64::from(c.width)), wz as u32);
-    if !view.material_at(wx, y + 1, wz).is_solid() {
+    if !view.is_solid(wx, y + 1, wz) {
         return Face::Not;
     }
-    let Some(top) = (y + 1..c.height).find(|&yy| view.is_support(wx, yy, wz)) else {
+    let Some(top) = view.lowest_support_in(wx, wz, y + 1, c.height - 1) else {
         return Face::Not;
     };
     if top - y <= up {
         return Face::Not;
     }
     let ceiling = (top + headroom).min(c.height - 1);
-    if (y + 1..=ceiling).any(|yy| view.material_at(x, yy, z).is_solid())
+    if (y + 1..=ceiling).any(|yy| view.is_solid(x, yy, z))
         || !has_headroom(view, wx, top, wz, headroom)
     {
         return Face::Blocked;
@@ -944,18 +955,21 @@ pub fn wall_descent(
         return Face::Not;
     }
     let (ax, az) = ((x + dir.0).rem_euclid(i64::from(c.width)), az as u32);
-    if view.material_at(ax, y, az).is_solid() {
+    if view.is_solid(ax, y, az) {
         return Face::Not;
     }
-    let Some(foot) = (0..y).rev().find(|&yy| view.is_support(ax, yy, az)) else {
+    let Some(foot) = y
+        .checked_sub(1)
+        .and_then(|below| view.highest_support_in(ax, az, 0, below))
+    else {
         return Face::Not;
     };
     if y - foot <= down {
         return Face::Not;
     }
     let ceiling = (y + headroom).min(c.height - 1);
-    if !(foot + 1..=y).all(|yy| view.material_at(x, yy, z).is_solid())
-        || (y + 1..=ceiling).any(|yy| view.material_at(ax, yy, az).is_solid())
+    if !(foot + 1..=y).all(|yy| view.is_solid(x, yy, z))
+        || (y + 1..=ceiling).any(|yy| view.is_solid(ax, yy, az))
         || !has_headroom(view, ax, foot, az, headroom)
     {
         return Face::Blocked;
@@ -972,9 +986,8 @@ pub(crate) fn disc_clear(
     r: f64,
     layers: std::ops::RangeInclusive<u32>,
 ) -> bool {
-    layers
-        .into_iter()
-        .all(|l| !disc_hits_solid(view, cx, cz, l, r))
+    let (lo, hi) = (*layers.start(), *layers.end());
+    !disc_hits_solid(view, disc_box(view.config.voxel_m, cx, cz, r), cx, cz, lo, hi, r)
 }
 
 /// The contact and wet readings of one body, from its geometry right now. `resolved`
@@ -1266,7 +1279,7 @@ pub fn has_headroom(view: &VoxelView<'_>, x: i64, y: u32, z: u32, headroom: u32)
     let c = view.config;
     (1..=headroom).all(|d| {
         let yy = y + d;
-        yy < c.height && !view.material_at(x, yy, z).is_solid()
+        yy < c.height && !view.is_solid(x, yy, z)
     })
 }
 
@@ -1303,14 +1316,13 @@ pub(crate) fn mouth_foliage_stand(
 ) -> Option<(Site, f64)> {
     let layers = mouth_crown_layers(standing_y, body, view.config.voxel_m);
     let mut best: Option<(Site, f64)> = None;
-    for stand in fv
-        .stands
-        .iter()
-        .filter(|s| s.foliage > 0.0 && diet.accepts(fv.config.species(s.species).trophic))
-    {
+    let mut consider = |stand: &cubarium_voxel_flora::Stand| {
+        if !(stand.foliage > 0.0 && diet.accepts(fv.config.species(stand.species).trophic)) {
+            return;
+        }
         let reachable = reachable_layer_stock(fv, view, stand, cols, &layers);
         if !(reachable > 0.0) {
-            continue;
+            return;
         }
         let better = match best {
             None => true,
@@ -1319,8 +1331,53 @@ pub(crate) fn mouth_foliage_stand(
         if better {
             best = Some((stand.site, reachable));
         }
+    };
+    // The most stock wins, ties to the smallest site: a total order, so visiting only
+    // the stands near the mouth picks what the scan of every stand picked.
+    match stands_near_mouth(fv, view, cols) {
+        Some(near) => near.iter().for_each(|&i| consider(&fv.stands[i as usize])),
+        None => fv.stands.iter().for_each(&mut consider),
     }
     best
+}
+
+/// The stands whose crowns could reach any of the mouth columns `cols`, as ascending
+/// indices into `fv.stands`: the flora's reach index ([`FloraView::stands_near`]) for
+/// each column, merged. `None` when the view holds no current index, and the caller
+/// visits every stand.
+///
+/// A stand left out cannot touch the mouth: the index lists every stand at every column
+/// its widest layer disc boxes, and [`each_reachable_layer`] needs a layer disc to cover
+/// a mouth column.
+fn stands_near_mouth(
+    fv: &FloraView<'_>,
+    view: &VoxelView<'_>,
+    cols: &[(i64, u32)],
+) -> Option<Vec<u32>> {
+    let (w, d) = (view.config.width, view.config.depth);
+    let mut near: Vec<u32> = Vec::new();
+    for &(cx, cz) in cols {
+        near.extend_from_slice(fv.stands_near(cx, cz, w, d)?);
+    }
+    near.sort_unstable();
+    near.dedup();
+    #[cfg(debug_assertions)]
+    {
+        // The index against the scan it replaces: every stand that touches the mouth at
+        // any band is in it.
+        let every = 0..=i64::from(view.config.height);
+        for (i, stand) in fv.stands.iter().enumerate() {
+            if !reachable_layers(fv, view, stand, cols, &every).is_empty() {
+                debug_assert!(
+                    near.binary_search(&(i as u32)).is_ok(),
+                    "the reach index missed {:?} at {:?} for {cols:?}",
+                    stand.species,
+                    stand.site
+                );
+            }
+        }
+    }
+    Some(near)
 }
 
 /// What a mouth over `cols` whose band selects the cell range `layers` can take from
@@ -1339,10 +1396,9 @@ pub(crate) fn reachable_layer_stock(
     cols: &[(i64, u32)],
     layers: &std::ops::RangeInclusive<i64>,
 ) -> f64 {
-    reachable_layers(fv, view, stand, cols, layers)
-        .iter()
-        .map(|(_, stock)| *stock)
-        .sum()
+    let mut sum = 0.0;
+    each_reachable_layer(fv, view, stand, cols, layers, |_, stock| sum += stock);
+    sum
 }
 
 /// The same, **per layer**: `(index among the stand's foliage layers, stock)`, which is
@@ -1355,20 +1411,60 @@ pub(crate) fn reachable_layers(
     layers: &std::ops::RangeInclusive<i64>,
 ) -> Vec<(usize, f64)> {
     let mut out = Vec::new();
-    // A cheap bound before the profile is built at all: every layer of a stand sits
-    // between the first cell over its support face and its crown cell, so a mouth
-    // whose range misses that span can skip the stand without resolving its anatomy.
-    // This scan runs over every stand for every mouth on every tick.
-    let sc = fv.config.species(stand.species);
+    each_reachable_layer(fv, view, stand, cols, layers, |i, stock| out.push((i, stock)));
+    out
+}
+
+/// [`reachable_layers`] one layer at a time, in profile order, with no vector: the scan
+/// every mouth runs over every stand on every tick.
+///
+/// The stand's geometry — its `crown_voxels` and its layers' disc cells and radii — is
+/// read through the flora's cached crown ([`FloraView::crown_voxels`],
+/// [`FloraView::layers`]), which is a fresh computation to the bit
+/// (`design/handoffs/voxel-hot-path-geometry-2026-09-24.md`, item 4); only the stocks move
+/// on a bite. Whether a layer's disc covers a mouth column is asked of each column
+/// ([`disc_covers`]) instead of by walking the disc's cells against the column list.
+fn each_reachable_layer(
+    fv: &FloraView<'_>,
+    view: &VoxelView<'_>,
+    stand: &cubarium_voxel_flora::Stand,
+    cols: &[(i64, u32)],
+    layers: &std::ops::RangeInclusive<i64>,
+    mut f: impl FnMut(usize, f64),
+) {
+    // A cheap bound before the layers are read at all: every layer of a stand sits
+    // between the first cell over its support face and its crown cell, so a mouth whose
+    // range misses that span can skip the stand. This scan runs over every stand for
+    // every mouth on every tick.
+    let crown = fv.cached_crown(stand);
+    let crown_voxels = match crown {
+        Some(c) => c.crown_voxels(),
+        None => fv.crown_voxels(stand),
+    };
     let lowest = i64::from(stand.site.y) + 1;
-    let highest =
-        i64::from(stand.site.y) + i64::from(sc.crown_voxels(stand.wood, fv.config.voxel_m));
+    let highest = i64::from(stand.site.y) + i64::from(crown_voxels);
     if *layers.end() < lowest || *layers.start() > highest {
-        return out;
+        return;
     }
     let width = i64::from(view.config.width);
     let depth = i64::from(view.config.depth);
-    for layer in fv.layers(stand) {
+    let (sx, sz) = (i64::from(stand.site.x), i64::from(stand.site.z));
+    // The same bound across: no layer's disc reaches past the crown's widest span, so a
+    // mouth with no column that near is skipped without reading a layer.
+    if let Some(c) = crown {
+        let span = c.max_disc_span();
+        if !cols
+            .iter()
+            .any(|&(cx, cz)| within_span(sx, sz, span, width, depth, cx, cz))
+        {
+            return;
+        }
+    }
+    let every = match crown {
+        Some(c) => c.layers(fv.config, stand),
+        None => cubarium_voxel_flora::layer_iter(fv.config, stand, fv.config.voxel_m),
+    };
+    for layer in every.filter(|l| l.kind.bears_foliage()) {
         // What a mouth could take is what stands above the grazing floor: the flora
         // layer's one reading of food (package G).
         let edible = layer.edible();
@@ -1377,28 +1473,61 @@ pub(crate) fn reachable_layers(
         }
         let span = layer.radius_v.floor() as i64;
         let r2 = layer.radius_v * layer.radius_v;
-        let mut touching = false;
-        'cells: for dz in -span..=span {
-            for dx in -span..=span {
-                if (dx * dx + dz * dz) as f64 > r2 {
-                    continue;
-                }
-                let cx = (i64::from(stand.site.x) + dx).rem_euclid(width);
-                let cz = i64::from(stand.site.z) + dz;
-                if cz < 0 || cz >= depth {
-                    continue;
-                }
-                if cols.contains(&(cx, cz as u32)) {
-                    touching = true;
-                    break 'cells;
-                }
-            }
-        }
-        if touching {
-            out.push((layer.foliage_index.unwrap_or(0), edible));
+        if cols
+            .iter()
+            .any(|&(cx, cz)| disc_covers(sx, sz, span, r2, width, depth, cx, cz))
+        {
+            f(layer.foliage_index.unwrap_or(0), edible);
         }
     }
-    out
+}
+
+/// Whether the integer disc of cells a layer of radius² `r2` covers around the column
+/// `(sx, sz)` — every offset `(dx, dz)` within `±span` whose `dx² + dz²` is not over
+/// `r2`, `x` wrapped, `z` inside the strip — holds the column `(cx, cz)`.
+///
+/// The disc walk it replaces asked, cell by cell, whether the mouth's column list held
+/// the cell; this asks the one question per mouth column. They agree exactly: the offsets
+/// that land on `cx` are `d`, `d − width`, … for `d = (cx − sx) mod width`, the nearest
+/// of them to the stand has the least `dx²`, and the disc test only gets harder as `|dx|`
+/// grows — so the column is covered exactly when that nearest offset is within the span
+/// and passes the disc test. A column the walk could never produce (an unwrapped `x`, a
+/// `z` off the strip) is covered by nothing, as before.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn disc_covers(sx: i64, sz: i64, span: i64, r2: f64, width: i64, depth: i64, cx: i64, cz: u32) -> bool {
+    let Some((dx, dz)) = nearest_offset(sx, sz, width, depth, cx, cz) else {
+        return false;
+    };
+    dx <= span && dz.abs() <= span && !((dx * dx + dz * dz) as f64 > r2)
+}
+
+/// Whether the column `(cx, cz)` is within `span` cells of `(sx, sz)` in wrapped `x` and
+/// in `z`: the box every disc of that span lies in ([`disc_covers`] without the disc).
+#[inline]
+fn within_span(sx: i64, sz: i64, span: i64, width: i64, depth: i64, cx: i64, cz: u32) -> bool {
+    nearest_offset(sx, sz, width, depth, cx, cz).is_some_and(|(dx, dz)| dx <= span && dz.abs() <= span)
+}
+
+/// The offset of the column `(cx, cz)` from `(sx, sz)` with the least `|dx|` of the
+/// `x` offsets that land on it, as `(|dx|, dz)`; `None` for a column no cell walk could
+/// produce (an unwrapped `x`, a `z` off the strip).
+#[inline]
+fn nearest_offset(sx: i64, sz: i64, width: i64, depth: i64, cx: i64, cz: u32) -> Option<(i64, i64)> {
+    let cz = i64::from(cz);
+    if cx < 0 || cx >= width || cz >= depth {
+        return None;
+    }
+    // `(cx - sx) mod width`: both are on the strip, so one correction does it.
+    let d = cx - sx;
+    let d = if (0..width).contains(&d) {
+        d
+    } else if (-width..0).contains(&d) {
+        d + width
+    } else {
+        d.rem_euclid(width)
+    };
+    Some((d.min(width - d), cz - sz))
 }
 
 /// Every foliage-bearing stand whose crown touches the actual mouth probe columns.
@@ -1437,15 +1566,19 @@ pub(crate) fn foliage_stands_touching(
     diet: crate::Diet,
 ) -> Vec<(Site, f64)> {
     let mut out = Vec::new();
-    for stand in fv
-        .stands
-        .iter()
-        .filter(|s| s.foliage > 0.0 && diet.accepts(fv.config.species(s.species).trophic))
-    {
+    let mut consider = |stand: &cubarium_voxel_flora::Stand| {
+        if !(stand.foliage > 0.0 && diet.accepts(fv.config.species(stand.species).trophic)) {
+            return;
+        }
         let reachable = reachable_layer_stock(fv, view, stand, cols, layers);
         if reachable > 0.0 {
             out.push((stand.site, reachable));
         }
+    };
+    // In stand order either way: the index lists ascending stand indices.
+    match stands_near_mouth(fv, view, cols) {
+        Some(near) => near.iter().for_each(|&i| consider(&fv.stands[i as usize])),
+        None => fv.stands.iter().for_each(&mut consider),
     }
     out
 }

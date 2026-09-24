@@ -65,6 +65,9 @@ pub use target::{GpuTarget, GpuTargetKind};
 #[path = "gpu/light.rs"]
 mod light;
 
+#[path = "gpu/wayland.rs"]
+mod wayland;
+
 #[path = "gpu/voxel.rs"]
 pub mod voxel;
 pub use voxel::{VoxelGpuSink, VoxelGpuSinkOptions};
