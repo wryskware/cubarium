@@ -681,10 +681,12 @@ impl Packer {
             stands.track_owners();
             stands.set_emission(emission.on);
         }
+        let mut animals = Animals::empty(p.width, p.height, p.depth);
+        animals.set_emission(p.lit && emission.on);
         Packer {
             stands,
             vine_tiles: tiles,
-            animals: Animals::empty(p.width, p.height, p.depth),
+            animals,
             models,
             styles: Vec::new(),
             species,
@@ -797,6 +799,11 @@ impl Packer {
                     let rgb = stands.emission(stands.at(i64::from(x), i64::from(y), z))?;
                     Some(((x, y, z), rgb))
                 }));
+                let animals = &self.animals;
+                l.emitters.extend(animals.cells().filter_map(|(x, y, z)| {
+                    let rgb = animals.emission(animals.at(i64::from(x), i64::from(y), z))?;
+                    Some(((x, y, z), rgb))
+                }));
                 for c in self.vines.iter().filter(|c| c.kind.tiled()) {
                     if let Some(rgb) = colours::vine_emission(c.accent) {
                         l.emitters.push(((c.x, c.y, c.z), srgb_linear(rgb)));
@@ -869,11 +876,18 @@ impl Packer {
             // In the lit tier a stand's cell carries its canopy and crown pass in `b`.
             let mut plant = None;
             let (part, glyph, slot) = if let Some(style) = animals.style(beast) {
+                // An emitting part (lit tier, `colours::animal_emission`) draws the
+                // emissive animal glyph in its emissive colour.
+                let emit = animals.emission(beast);
+                let glyph = match emit {
+                    Some(_) => appearance::animal_emissive_glyph(beast.glyph()),
+                    None => beast.glyph(),
+                };
                 (
                     PART_ANIMAL_INTERIM,
-                    beast.glyph().0,
+                    glyph.0,
                     slot_for_style(
-                        (style, 0, [None; 2], None),
+                        (style, 0, [None; 2], emit.map(|e| emit_key(e, false))),
                         &mut self.styles,
                         &mut self.style_overflow,
                     ),
@@ -926,7 +940,8 @@ impl Packer {
             out.styles[slot] = VoxelStyle::new(style.wood, style.crown, style.heart)
                 .with_role(*role)
                 .with_faces(*faces)
-                .with_emit(emit.map(|e| e.map(f32::from_bits)));
+                .with_emit(emit.map(|e| [e[0], e[1], e[2]].map(f32::from_bits)))
+                .emit_whole(emit.is_some_and(|e| e[3] != 0));
         }
         if out.write[PLANE_ROOF] {
             out.roof.copy_from_slice(&self.roof);
@@ -992,9 +1007,15 @@ fn roof_table(material: &[Material], w: u32, h: u32, d: u32, out: &mut [u8]) {
     }
 }
 
-/// One GPU style slot's contents: the colours, the texture role (`ROLE_*`) and the
-/// species face slots (`VoxelStyle::with_faces`).
-type StyleKey = (Style, u8, [Option<u16>; 2], Option<[u32; 3]>);
+/// One GPU style slot's contents: the colours, the texture role (`ROLE_*`), the species
+/// face slots (`VoxelStyle::with_faces`) and the emission ([`emit_key`]).
+type StyleKey = (Style, u8, [Option<u16>; 2], Option<[u32; 4]>);
+
+/// An emissive colour and its whole-cell flag as a style key: the colour's bits, then 1
+/// for a whole-cell emitter (`VoxelStyle::emit_whole`).
+fn emit_key(rgb: [f32; 3], whole: bool) -> [u32; 4] {
+    [rgb[0].to_bits(), rgb[1].to_bits(), rgb[2].to_bits(), u32::from(whole)]
+}
 
 /// The GPU slot for a style that has no plant part index to cache under (an animal's),
 /// deduplicated by value against the same table the plants fill.
@@ -1047,7 +1068,7 @@ fn slot_for(
     };
     let cell = stands.model_cell(part);
     let faces = cell.map_or([None; 2], |(sp, tag)| species.faces(sp, tag));
-    let emit = stands.emission(part).map(|e| e.map(f32::to_bits));
+    let emit = stands.emission(part).map(|e| emit_key(e, stands.emits_whole(part)));
     let style = (style, role_of(cell.map(|(_, tag)| tag)), faces, emit);
     let slot = match styles.iter().position(|s| *s == style) {
         Some(at) => at as u8,
@@ -1151,6 +1172,13 @@ pub fn params_of(cfg: &VoxelConfig, proj: Projection, roof_from_texture: bool) -
         reflect_gain: cfg.light.water_reflect.max(0.0),
         ripple: cfg.light.water_ripple.max(0.0),
         reflect_cells: cfg.light.water_reflect_cells,
+        // Nothing to bloom without emitters: the passes are skipped.
+        bloom: if cfg.lighting == Lighting::Lit && cfg.light.emission {
+            cfg.light.bloom.max(0.0)
+        } else {
+            0.0
+        },
+        bloom_radius: cfg.light.bloom_radius,
         debug_flow: false,
     }
 }

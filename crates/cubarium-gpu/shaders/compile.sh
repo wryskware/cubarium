@@ -4,7 +4,7 @@
 # have, and the brief allows pre-compiled SPIR-V with the GLSL beside it.
 set -eu
 cd "$(dirname "$0")"
-for s in background.frag water.frag sprite.vert sprite.frag present.frag fullscreen.vert voxel.frag; do
+for s in background.frag water.frag sprite.vert sprite.frag present.frag fullscreen.vert voxel.frag bloom.frag; do
     glslc --target-env=vulkan1.1 -O -I. -o "$s.spv" "$s"
     echo "  $s -> $s.spv"
 done

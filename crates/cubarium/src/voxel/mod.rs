@@ -242,6 +242,8 @@ pub enum Lighting {
 /// emission = true     # the dossiers' luminous parts glow (lit tier)
 /// glow = 0.5          # one emitting voxel's light at its own 4³ cell, in full-ambient units
 /// glow_reach = 3      # 4³ cells the light spreads before it is gone
+/// bloom = 0.3         # the emitters' blocky halo: how much of their colour it adds at full step
+/// bloom_radius = 2    # voxel cells the halo reaches from the emitter's own cell
 /// water_absorb = 0.1  # water absorption a voxel of path, in units of the deep water colour
 /// water_reflect = 6.0  # the surface's Fresnel reflectance times this (physical is ~5 %)
 /// water_ripple = 0.2   # how far a ripple tilts the quantised surface normal
@@ -285,6 +287,13 @@ pub struct LightConfig {
     /// How many glow cells the light spreads from its source through open terrain,
     /// falling off linearly to nothing one cell further.
     pub glow_reach: u32,
+    /// The lit tier's bloom (package L5, `cubarium_gpu::bloom`): a pixel-art halo around
+    /// the emitters, made of whole voxel cells at three strengths (1, 2/3, 1/3 of this
+    /// times the emitter's colour, falling off with distance), added to what is behind;
+    /// the emitters themselves stay crisp. `0` turns it off. Needs `emission`.
+    pub bloom: f32,
+    /// How many voxel cells the halo reaches from the emitter's own cell (Euclidean).
+    pub bloom_radius: u32,
     /// The lit tier's water (package W). Absorption per voxel of water path, in units of
     /// the palette's deep water colour: after `1 / water_absorb` voxels, what is left of
     /// the light from behind is that colour itself (per channel, Beer–Lambert). The same
@@ -315,6 +324,8 @@ impl Default for LightConfig {
             emission: true,
             glow: 0.5,
             glow_reach: 3,
+            bloom: 0.3,
+            bloom_radius: 2,
             water_absorb: 0.1,
             water_reflect: 6.0,
             water_ripple: 0.2,

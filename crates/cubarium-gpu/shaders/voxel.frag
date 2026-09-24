@@ -80,6 +80,11 @@ layout(set = 0, binding = 8) uniform usampler2D canopyTex;
 layout(set = 0, binding = 9) uniform sampler3D glowTex;
 
 layout(location = 0) out vec4 outColour;
+// Lit tier only (the flat tier's pass has no attachment here, so the writes are dropped):
+// the light this pixel emits, for the bloom (`cubarium_gpu::bloom`). An emitting texel's
+// emissive colour, less the haze in front of it and times the water's transmission in
+// front of it; zero for every pixel that is not an emitter.
+layout(location = 1) out vec4 emitOut;
 
 // The plant part classes, as `crate::voxel`'s PART_* constants number them.
 const int TRUNK = 1;
@@ -253,8 +258,22 @@ int roofGap(int x, int y, int z) {
 
 vec3 styleAt(int style, int part) { return texelFetch(styleTex, ivec2(part, style), 0).rgb; }
 
-// A style's emissive colour in linear light (`VoxelStyle::with_emit`), zero for none.
+// A style's emissive colour is its fourth column (`VoxelStyle::with_emit`) in linear
+// light, zero for none. A **whole-cell** emitter (`VoxelStyle::emit_whole`), whose every
+// visible texel emits whatever its glyph's tones, carries a quarter in the fractional part
+// of its three pigment columns' alphas, so the pigment fetch every texel makes already
+// says so.
 vec3 styleEmit(int style) { return texelFetch(styleTex, ivec2(3, style), 0).rgb; }
+bool emitsWhole(float pigmentAlpha) { return fract(pigmentAlpha) > 0.125; }
+
+// The walk's `trans` once it has ended on an emitter: the light the emitter sends to the
+// camera through what is in front of it (`trans` times its colour less the haze), negated
+// and less one, so that every channel is at most -1. Nothing else makes `trans` negative,
+// and after the walk this is where the emission for the bloom is read from: carrying it
+// in a variable of its own through the walk costs the slab walk's occupancy.
+vec3 emitterTrans(vec3 trans, vec3 drawn, float haze) {
+    return -(trans * max(drawn - clamp(haze, 0.0, 1.0) * u.hazeC.rgb, vec3(0.0))) - 1.0;
+}
 
 // The glyph atlas's emissive tone (`appearance::TONE_EMIT`): a texel that draws its
 // style's emissive colour, unlit and at full value, in the lit tier. A style with no
@@ -676,18 +695,21 @@ bool plantTexel(int x, int y, int z, uvec4 v, bool top, int dx, int dy, inout ve
 // Organism anatomy and markings are already resolved in glyphTex by the shared
 // appearance layer. This is deliberately generic: the shader knows only pigment slots
 // and treatments, never bodies, heads, eyes or facing.
-bool glyphFront(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb) {
+bool glyphFront(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb, out bool lum) {
+    lum = false;
     int localY = S - 1 - r;
     int atlasY = (partOf(v) * 8 + glyphOf(v)) * (S + RISE) + localY;
     uint q = texelFetch(glyphTex, ivec2(dx, atlasY), 0).r;
-    vec3 base = glyphPigment(v, q);
+    vec4 pigment = texelFetch(styleTex, ivec2(int(q & 3u), int(v.a)), 0);
+    vec3 base = pigment.rgb;
     int tone = int(q >> 2);
     if (tone == 63) { return false; }
-    if (LIT && tone == TONE_EMIT) {
+    if (LIT && (tone == TONE_EMIT || emitsWhole(pigment.a))) {
         // An emitter: its style's emissive colour, unshadowed and at full value.
         vec3 e = styleEmit(int(v.a));
         if (any(greaterThan(e, vec3(0.0)))) {
             rgb = hazed(e, hazeAt(float(z)));
+            lum = true;
             return true;
         }
     }
@@ -738,16 +760,19 @@ bool glyphFront(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb) {
     return true;
 }
 
-bool glyphCap(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb) {
+bool glyphCap(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb, out bool lum) {
+    lum = false;
     int localY = RISE - 1 - r;
     int atlasY = (partOf(v) * 8 + glyphOf(v)) * (S + RISE) + S + localY;
     uint q = texelFetch(glyphTex, ivec2(dx, atlasY), 0).r;
-    vec3 base = glyphPigment(v, q);
+    vec4 pigment = texelFetch(styleTex, ivec2(int(q & 3u), int(v.a)), 0);
+    vec3 base = pigment.rgb;
     int tone = int(q >> 2);
-    if (LIT && tone == TONE_EMIT) {
+    if (LIT && (tone == TONE_EMIT || emitsWhole(pigment.a))) {
         vec3 e = styleEmit(int(v.a));
         if (any(greaterThan(e, vec3(0.0)))) {
             rgb = hazed(e, hazeAt(float(z) + float(r) / float(RISE)));
+            lum = true;
             return true;
         }
     }
@@ -1221,11 +1246,12 @@ vec3 reflectionShade(bool found, ivec3 c, vec3 hp, int axis, vec3 r) {
     } else {
         int atlasY = (partOf(v) * 8 + glyphOf(v)) * (S + RISE) + dy;
         uint q = texelFetch(glyphTex, ivec2(t.y, atlasY), 0).r;
+        vec4 pigment = texelFetch(styleTex, ivec2(int(q & 3u), int(v.a)), 0);
         vec3 e = styleEmit(int(v.a));
-        if (int(q >> 2) == TONE_EMIT && any(greaterThan(e, vec3(0.0)))) {
+        if ((int(q >> 2) == TONE_EMIT || emitsWhole(pigment.a)) && any(greaterThan(e, vec3(0.0)))) {
             return hazed(e, hazeAt(float(c.z)));
         }
-        base = glyphPigment(v, q);
+        base = pigment.rgb;
         // A texture's leaf hole: the cell's crown pigment.
         if (!plantTexel(c.x, c.y, c.z, v, false, t.y, dy, base)) { base = styleAt(int(v.a), 1); }
         canopy = partOf(v) == ANIMAL_INTERIM ? canopyAt(c.x, c.z - 1, c.y) : plantCanopy(v);
@@ -1370,8 +1396,10 @@ void main() {
                                 t.rgb = shadeFront(t.rgb, x, level, z, dx, S - 1 - r,
                                                    canopyAt(x, z - 1, level));
                             }
-                            acc += trans * hazed(t.rgb, hazeAt(float(z)));
-                            trans = vec3(0.0);
+                            float h = hazeAt(float(z));
+                            acc += trans * hazed(t.rgb, h);
+                            trans = LIT && vineEmits(t) ? emitterTrans(trans, hazed(t.rgb, h), h)
+                                                        : vec3(0.0);
                             break;
                         }
                     }
@@ -1394,8 +1422,10 @@ void main() {
                             t.rgb = shadeFront(t.rgb, x, level, z, dx, S - 1 - r,
                                                canopyAt(x, z - 1, level));
                         }
-                        acc += trans * hazed(t.rgb, hazeAt(float(z)));
-                        trans = vec3(0.0);
+                        float h = hazeAt(float(z));
+                        acc += trans * hazed(t.rgb, h);
+                        trans = LIT && vineEmits(t) ? emitterTrans(trans, hazed(t.rgb, h), h)
+                                                    : vec3(0.0);
                         break;
                     }
                 }
@@ -1403,9 +1433,10 @@ void main() {
             int p = partOf(v);
             if (p != 0) {
                 vec3 art;
-                if (glyphFront(x, level, z, v, r, dx, art)) {
+                bool lum;
+                if (glyphFront(x, level, z, v, r, dx, art, lum)) {
                     acc += trans * art;
-                    trans = vec3(0.0);
+                    trans = LIT && lum ? emitterTrans(trans, art, hazeAt(float(z))) : vec3(0.0);
                     break;
                 }
             }
@@ -1431,15 +1462,26 @@ void main() {
             if (v.g != 0u) { waterAt(x, below, z, v, px.y, acc, trans); }
             int p = partOf(v);
             vec3 cap;
-            if (isBlockPart(p) && glyphCap(x, below, z, v, r, dx, cap)) {
+            bool lum;
+            if (isBlockPart(p) && glyphCap(x, below, z, v, r, dx, cap, lum)) {
                 acc += trans * cap;
-                trans = vec3(0.0);
+                trans = LIT && lum
+                    ? emitterTrans(trans, cap, hazeAt(float(z) + float(r) / float(RISE)))
+                    : vec3(0.0);
                 break;
             }
         }
 
         if (all(lessThanEqual(trans, vec3(0.0)))) { break; }
     }
+
+    // An emitter ended the walk: what it sends the camera is the bloom's.
+    vec3 emitted = vec3(0.0);
+    if (LIT && trans.x < -0.5) {
+        emitted = -trans - 1.0;
+        trans = vec3(0.0);
+    }
+    emitOut = vec4(emitted, 1.0);
 
     // The presenter clears to the sky and paints over it; front to back, the sky is
     // whatever light is left.

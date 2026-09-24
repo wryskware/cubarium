@@ -1111,18 +1111,40 @@ pub(crate) fn colour_pass(
     load: vk::AttachmentLoadOp,
     final_layout: vk::ImageLayout,
 ) -> Result<vk::RenderPass> {
-    let attachments = [vk::AttachmentDescription::default()
-        .format(format)
-        .samples(vk::SampleCountFlags::TYPE_1)
-        .load_op(load)
-        .store_op(vk::AttachmentStoreOp::STORE)
-        .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
-        .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
-        .initial_layout(vk::ImageLayout::UNDEFINED)
-        .final_layout(final_layout)];
-    let refs = [vk::AttachmentReference::default()
-        .attachment(0)
-        .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)];
+    colour_pass_n(d, &[format], load, vk::ImageLayout::UNDEFINED, final_layout)
+}
+
+/// A one-subpass pass over `formats.len()` colour attachments (location `i` is
+/// attachment `i`), each loaded by `load` from `initial` and left in `final_layout`.
+/// `initial` must be `UNDEFINED` unless `load` is `LOAD`.
+pub(crate) fn colour_pass_n(
+    d: &ash::Device,
+    formats: &[vk::Format],
+    load: vk::AttachmentLoadOp,
+    initial: vk::ImageLayout,
+    final_layout: vk::ImageLayout,
+) -> Result<vk::RenderPass> {
+    let attachments: Vec<_> = formats
+        .iter()
+        .map(|&format| {
+            vk::AttachmentDescription::default()
+                .format(format)
+                .samples(vk::SampleCountFlags::TYPE_1)
+                .load_op(load)
+                .store_op(vk::AttachmentStoreOp::STORE)
+                .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
+                .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+                .initial_layout(initial)
+                .final_layout(final_layout)
+        })
+        .collect();
+    let refs: Vec<_> = (0..formats.len() as u32)
+        .map(|i| {
+            vk::AttachmentReference::default()
+                .attachment(i)
+                .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+        })
+        .collect();
     let subpasses = [vk::SubpassDescription::default()
         .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
         .color_attachments(&refs)];
@@ -1151,6 +1173,27 @@ pub fn framebuffer(
             &vk::FramebufferCreateInfo::default()
                 .render_pass(pass)
                 .attachments(&views)
+                .width(width)
+                .height(height)
+                .layers(1),
+            None,
+        )
+    }?)
+}
+
+/// A framebuffer over several views, attachment `i` being `views[i]`.
+pub(crate) fn framebuffer_n(
+    d: &ash::Device,
+    pass: vk::RenderPass,
+    views: &[vk::ImageView],
+    width: u32,
+    height: u32,
+) -> Result<vk::Framebuffer> {
+    Ok(unsafe {
+        d.create_framebuffer(
+            &vk::FramebufferCreateInfo::default()
+                .render_pass(pass)
+                .attachments(views)
                 .width(width)
                 .height(height)
                 .layers(1),
@@ -1242,6 +1285,22 @@ pub(crate) fn fullscreen_pipeline_specialised(
     blend: bool,
     fragment: Option<&vk::SpecializationInfo>,
 ) -> Result<vk::Pipeline> {
+    fullscreen_pipeline_n(d, pass, layout, vs, fs, blend, fragment, 1)
+}
+
+/// [`fullscreen_pipeline_specialised`] for a subpass with `attachments` colour
+/// attachments, every one written unblended (or all with the same blend).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn fullscreen_pipeline_n(
+    d: &ash::Device,
+    pass: vk::RenderPass,
+    layout: vk::PipelineLayout,
+    vs: vk::ShaderModule,
+    fs: vk::ShaderModule,
+    blend: bool,
+    fragment: Option<&vk::SpecializationInfo>,
+    attachments: usize,
+) -> Result<vk::Pipeline> {
     let vi = vk::PipelineVertexInputStateCreateInfo::default();
     build_pipeline(
         d,
@@ -1253,6 +1312,7 @@ pub(crate) fn fullscreen_pipeline_specialised(
         vk::PrimitiveTopology::TRIANGLE_LIST,
         blend,
         fragment,
+        attachments,
     )
 }
 
@@ -1302,6 +1362,7 @@ fn sprite_pipeline(
         vk::PrimitiveTopology::TRIANGLE_STRIP,
         true,
         None,
+        1,
     )
 }
 
@@ -1316,6 +1377,7 @@ fn build_pipeline(
     topology: vk::PrimitiveTopology,
     blend: bool,
     fragment: Option<&vk::SpecializationInfo>,
+    attachments: usize,
 ) -> Result<vk::Pipeline> {
     let mut fs_stage = vk::PipelineShaderStageCreateInfo::default()
         .stage(vk::ShaderStageFlags::FRAGMENT)
@@ -1342,12 +1404,15 @@ fn build_pipeline(
         .line_width(1.0);
     let ms = vk::PipelineMultisampleStateCreateInfo::default()
         .rasterization_samples(vk::SampleCountFlags::TYPE_1);
-    let attachments = [if blend {
-        premultiplied_blend()
-    } else {
-        vk::PipelineColorBlendAttachmentState::default()
-            .color_write_mask(vk::ColorComponentFlags::RGBA)
-    }];
+    let attachments = vec![
+        if blend {
+            premultiplied_blend()
+        } else {
+            vk::PipelineColorBlendAttachmentState::default()
+                .color_write_mask(vk::ColorComponentFlags::RGBA)
+        };
+        attachments
+    ];
     let cb = vk::PipelineColorBlendStateCreateInfo::default().attachments(&attachments);
     let dynamic = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
     let dy = vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic);

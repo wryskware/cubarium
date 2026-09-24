@@ -175,6 +175,16 @@ pub const CROPPING_FLASH: Rgb = 0xFF_F27A;
 /// The starving tint of a sense patch (dossier D3/D4).
 pub const STARVED_ACCENT: Rgb = 0x7A_2A78;
 
+/// Bloomcrown's core (D9's rounded mass between the vanes), the blush of
+/// `design/art-direction/species-colours-2026-09-24.md`, which supersedes the dossier's hex.
+/// Its unripe bloom paints the same colour. It glows (package L5).
+pub const BLOOMCROWN_CORE: Rgb = 0xFF_D2F2;
+/// The bake's foliage layer that holds bloomcrown's core (material `p1`).
+const BLOOMCROWN_CORE_LAYER: u8 = 1;
+/// Bloomcrown's ripe bloom: D9's "ripe: the core turns the warm accent", in the colour
+/// file's ripe hex.
+pub const BLOOMCROWN_BLOOM: Rgb = 0xFF_8A3A;
+
 /// One species' colours.
 struct Recipe {
     /// Stem or bark, `(base, top)`.
@@ -209,10 +219,10 @@ fn recipe(species: Species) -> Recipe {
         Species::Bloomcrown => Recipe {
             bark: (0x4A_1250, 0x6E_1E6A),
             leaf: (0x9A_1080, 0xFF_52D0),
-            core: Some((1, model::named_index("p1"), 0xFF_D2F2)),
+            core: Some((BLOOMCROWN_CORE_LAYER, model::named_index("p1"), BLOOMCROWN_CORE)),
             leaf_glint: Some(0xFF_E0F6),
-            ripe: (0xFF_8A3A, 0xFF_E890),
-            unripe: 0xFF_D2F2,
+            ripe: (BLOOMCROWN_BLOOM, 0xFF_E890),
+            unripe: BLOOMCROWN_CORE,
             ..plain
         },
         // Sea-glass tiers: deep teal at the lowest tier to aquamarine at the top.
@@ -301,7 +311,11 @@ pub fn vine(density: super::vine::Density, accent: super::vine::Accent) -> Swatc
 // hex for that part (design/art-direction/species-dossiers-2026-09-21.md,
 // species-dossier-D15-latticevine-2026-09-23.md). Not the colour pass's placeholders
 // above: these are the dossiers' numbers. The renderer's lit tier draws an emitting texel
-// in this colour, unlit, and lets it light the open cells around it.
+// in this colour, unlit, lets it light the open cells around it, and blooms around it.
+//
+// Package L5 (Wrysk, 2026-09-24) adds bloomcrown's core, which glows whole in its own
+// colour (the colour file's blush, orange once ripe), and the animal path
+// ([`animal_emission`]). Sense patches never glow.
 
 /// A glowcap's lip, by the colony state the dossier draws it in (D1): absent on a button
 /// or a spent colony, half intensity while fruiting, full when ripe.
@@ -322,22 +336,61 @@ pub const LANTERN_RIPE: Rgb = 0xFF_9B50;
 /// D15 latticevine flower: "its lip flaring into a glowing `#42C5F8` mouth".
 pub const BELL_MOUTH: Rgb = 0x42_C5F8;
 
-/// The emissive colour of a baked model cell, or `None`: a glowcap's lip tissue (the
-/// bake's `p2` foliage, the cyan it builds the lip from) in its colony state, and a
-/// lanternberry's lantern (its warm accent) while ripe fruit hangs. `ripe` is the cell's
-/// accent state as [`plant`] takes it.
-pub fn plant_emission(species: Species, tag: Tag, material: u8, ripe: bool, lip: Lip) -> Option<Rgb> {
+/// How one emitting part glows: its colour, and whether its **whole** cell emits (a
+/// bloomcrown core) or only the texels its glyph marks with the emissive tone (a glowcap's
+/// lip rows, a lantern's or a bell's heart stripe).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Glow {
+    pub rgb: Rgb,
+    pub whole: bool,
+}
+
+impl Glow {
+    const fn marked(rgb: Rgb) -> Glow {
+        Glow { rgb, whole: false }
+    }
+}
+
+/// The emission of a baked model cell, or `None`: a glowcap's lip tissue (the bake's `p2`
+/// foliage, the cyan it builds the lip from) in its colony state, a lanternberry's
+/// lantern (its warm accent) while ripe fruit hangs, and bloomcrown's core (its `p1`
+/// core foliage and its bloom accent) whole, blush, or orange once the bloom is ripe.
+/// `ripe` is the cell's accent state as [`plant`] takes it.
+pub fn plant_emission(species: Species, tag: Tag, material: u8, ripe: bool, lip: Lip) -> Option<Glow> {
     match (species, tag) {
         (Species::Glowcap, Tag::Foliage(_)) if material == model::named_index("p2") => match lip {
             Lip::None => None,
-            Lip::Fruiting => Some(LIP_FRUITING),
-            Lip::Ripe => Some(LIP_RIPE),
+            Lip::Fruiting => Some(Glow::marked(LIP_FRUITING)),
+            Lip::Ripe => Some(Glow::marked(LIP_RIPE)),
         },
         (Species::Lanternberry, Tag::Accent) if material == model::WARM && ripe => {
-            Some(LANTERN_RIPE)
+            Some(Glow::marked(LANTERN_RIPE))
         }
+        (Species::Bloomcrown, Tag::Foliage(BLOOMCROWN_CORE_LAYER))
+            if material == model::named_index("p1") =>
+        {
+            Some(Glow {
+                rgb: BLOOMCROWN_CORE,
+                whole: true,
+            })
+        }
+        (Species::Bloomcrown, Tag::Accent) if material == model::WARM => Some(Glow {
+            rgb: if ripe { BLOOMCROWN_BLOOM } else { BLOOMCROWN_CORE },
+            whole: true,
+        }),
         _ => None,
     }
+}
+
+/// The emission of an animal's model cell, or `None`. **No current founder has a
+/// luminous part**: the frondgrazer's cyan eyes and the littershredder's magenta feelers
+/// are pigment, and sense patches never glow (Wrysk, 2026-09-24). An animal whose design
+/// calls a part luminous (the chorister, when it reaches the engine) names that part here
+/// by its bake material; the renderer then draws the cell with the emissive animal glyph
+/// (`appearance::animal_emissive_glyph`) and it lights, glows and blooms like a plant's.
+pub fn animal_emission(founder: Founder, material: u8, accent: bool) -> Option<Rgb> {
+    let _ = (founder, material, accent);
+    None
 }
 
 /// The emissive colour of a latticevine accent: the flower's bell mouth.

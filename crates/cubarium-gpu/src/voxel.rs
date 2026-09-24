@@ -48,7 +48,8 @@ use anyhow::{Context, Result, bail};
 use ash::vk;
 
 use crate::present::{FrameSource, PresentPass, TargetSlot};
-use crate::render::{RASTER_FORMAT, framebuffer};
+use crate::bloom::{Bloom, EMIT_FORMAT};
+use crate::render::{RASTER_FORMAT, framebuffer, framebuffer_n};
 use crate::vk::{Gpu, HostBuffer, barrier};
 
 const FULLSCREEN_VERT: &[u8] = include_bytes!("../shaders/fullscreen.vert.spv");
@@ -412,7 +413,11 @@ fn quantise(v: f32) -> u8 {
 /// are its **face slots**, the named atlas slot its side and top faces draw with, plus
 /// one (`0` is none: the role's generic slot, tinted by the style colour). `emit` is the
 /// lit tier's emissive colour in linear light, zero for none: a texel of the glyph atlas's
-/// emissive tone draws it unlit at full value (package L step 4).
+/// emissive tone draws it unlit at full value (package L step 4); `emit`'s alpha 1 makes
+/// every texel of the style's cells emit ([`VoxelStyle::emit_whole`], package L5).
+/// The fractional part of a whole-cell emitter's pigment alphas ([`VoxelStyle::emit_whole`]).
+const WHOLE_EMITTER: f32 = 0.25;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct VoxelStyle {
@@ -438,6 +443,26 @@ impl VoxelStyle {
     pub fn with_emit(mut self, emit: Option<[f32; 3]>) -> VoxelStyle {
         self.emit = emit.map_or([0.0; 4], |c| [c[0], c[1], c[2], 0.0]);
         self
+    }
+
+    /// The same style emitting on **every** visible texel of its cells, not only the
+    /// emissive-tone texels its glyph marks (a bloomcrown core glows whole). No effect
+    /// without an emissive colour. Call it after [`VoxelStyle::with_role`] and
+    /// [`VoxelStyle::with_faces`]: the flag is a quarter in the fractional part of the three
+    /// pigment columns' alphas (whose whole parts are the role and the face slots), so the
+    /// shader's pigment fetch, which every texel makes, carries it.
+    pub fn emit_whole(mut self, whole: bool) -> VoxelStyle {
+        let frac = if whole { WHOLE_EMITTER } else { 0.0 };
+        for a in [&mut self.wood[3], &mut self.crown[3], &mut self.heart[3]] {
+            *a = a.floor() + frac;
+        }
+        self.emit[3] = if whole { 1.0 } else { 0.0 };
+        self
+    }
+
+    /// Whether every texel of this style's cells emits ([`VoxelStyle::emit_whole`]).
+    pub fn emits_whole(&self) -> bool {
+        self.crown[3].fract() > WHOLE_EMITTER / 2.0
     }
 
     /// The same style, its side and top faces drawn with these named atlas slots
@@ -557,6 +582,11 @@ pub struct VoxelParams {
     pub ripple: f32,
     /// Cells a reflected ray is marched before it counts as sky.
     pub reflect_cells: u32,
+    /// The lit tier's bloom (package L5, [`crate::bloom`]): how much of an emitter's
+    /// colour its halo adds at full step, `0` for none (the passes are skipped).
+    pub bloom: f32,
+    /// How many voxel cells the halo reaches from the emitter's own cell.
+    pub bloom_radius: u32,
     /// Capture-only: draw the water's derived flow field instead of the water (never
     /// set by the live display).
     pub debug_flow: bool,
@@ -1088,6 +1118,9 @@ pub struct VoxelRenderer {
     glow_view: vk::ImageView,
     /// The glow volume's trilinear sampler: wraps in x like the strip, clamps in y and z.
     linear: vk::Sampler,
+    /// The lit tier's emission attachment and bloom passes ([`crate::bloom`]); `None` in
+    /// the flat tier, whose raster pass has the one attachment it always had.
+    bloom: Option<Bloom>,
     staging: Vec<HostBuffer>,
     /// Which staging buffer the next pack may use and which the GPU is still reading.
     ring: StagingRing,
@@ -1185,12 +1218,23 @@ impl VoxelRenderer {
             )
         }?;
 
-        let raster_pass = crate::render::colour_pass(
-            d,
-            RASTER_FORMAT,
-            vk::AttachmentLoadOp::DONT_CARE,
-            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-        )?;
+        // The lit tier's pass also writes the emission (location 1) for the bloom.
+        let raster_pass = if params.lit {
+            crate::render::colour_pass_n(
+                d,
+                &[RASTER_FORMAT, EMIT_FORMAT],
+                vk::AttachmentLoadOp::DONT_CARE,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            )?
+        } else {
+            crate::render::colour_pass(
+                d,
+                RASTER_FORMAT,
+                vk::AttachmentLoadOp::DONT_CARE,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            )?
+        };
         let (raster_image, raster_memory) = gpu.image(
             params.raster_w,
             params.raster_h,
@@ -1201,13 +1245,6 @@ impl VoxelRenderer {
                 | vk::ImageUsageFlags::TRANSFER_SRC,
         )?;
         let raster_view = gpu.view(raster_image, RASTER_FORMAT)?;
-        let raster_framebuffer = framebuffer(
-            d,
-            raster_pass,
-            raster_view,
-            params.raster_w,
-            params.raster_h,
-        )?;
 
         let limit = unsafe { gpu.instance.get_physical_device_properties(gpu.pdev) }
             .limits
@@ -1445,6 +1482,22 @@ impl VoxelRenderer {
             )
         }?;
 
+        let bloom = if params.lit {
+            Some(Bloom::new(gpu, &params, raster_view, nearest)?)
+        } else {
+            None
+        };
+        let raster_framebuffer = match &bloom {
+            Some(b) => framebuffer_n(
+                d,
+                raster_pass,
+                &[raster_view, b.emit_view],
+                params.raster_w,
+                params.raster_h,
+            )?,
+            None => framebuffer(d, raster_pass, raster_view, params.raster_w, params.raster_h)?,
+        };
+
         let linear = unsafe {
             d.create_sampler(
                 &vk::SamplerCreateInfo::default()
@@ -1572,7 +1625,7 @@ impl VoxelRenderer {
         let spec = vk::SpecializationInfo::default()
             .map_entries(&entries)
             .data(bytemuck::bytes_of(&lit));
-        let pipeline = crate::render::fullscreen_pipeline_specialised(
+        let pipeline = crate::render::fullscreen_pipeline_n(
             d,
             raster_pass,
             pipeline_layout,
@@ -1580,6 +1633,7 @@ impl VoxelRenderer {
             fs,
             false,
             Some(&spec),
+            if params.lit { 2 } else { 1 },
         )?;
         unsafe {
             d.destroy_shader_module(vs, None);
@@ -1623,6 +1677,7 @@ impl VoxelRenderer {
             glow_memory,
             glow_view,
             linear,
+            bloom,
             staging,
             uniform_stride,
             last_done: None,
@@ -1989,6 +2044,11 @@ impl VoxelRenderer {
                 d.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
                 d.cmd_draw(cb, 3, 1, 0, 0);
                 d.cmd_end_render_pass(cb);
+                if let Some(b) = &self.bloom
+                    && self.params.bloom > 0.0
+                {
+                    b.record(d, cb, &self.params);
+                }
             }
             d.cmd_write_timestamp(
                 cb,
@@ -2089,6 +2149,9 @@ impl VoxelRenderer {
     /// Release everything. The device must be idle.
     pub fn destroy(&mut self, gpu: &Gpu) {
         self.present.destroy(gpu);
+        if let Some(b) = &mut self.bloom {
+            b.destroy(gpu);
+        }
         let d = &gpu.device;
         unsafe {
             d.destroy_pipeline(self.pipeline, None);
@@ -2342,10 +2405,10 @@ fn sampled_write<'a>(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn params() -> VoxelParams {
+    pub(crate) fn params() -> VoxelParams {
         VoxelParams {
             s: 4,
             rise: 2,
@@ -2402,6 +2465,8 @@ mod tests {
             reflect_gain: 6.0,
             ripple: 0.2,
             reflect_cells: 64,
+            bloom: 0.0,
+            bloom_radius: 2,
             debug_flow: false,
         }
     }
@@ -2424,6 +2489,27 @@ mod tests {
 
     /// Any water at all packs to a non-zero fraction, so the presenter's "at least one
     /// row of water is visible" survives the quantisation; a dry cell packs to zero.
+    #[test]
+    fn a_whole_emitter_keeps_its_role_and_face_slots() {
+        let s = VoxelStyle::new([0.1; 3], [0.2; 3], [0.3; 3])
+            .with_role(ROLE_LEAF)
+            .with_faces([Some(3), None])
+            .with_emit(Some([1.0, 0.5, 0.2]))
+            .emit_whole(true);
+        assert!(s.emits_whole());
+        assert_eq!((s.role(), s.faces()), (ROLE_LEAF, [Some(3), None]));
+        // The shader's reads: `int(a + 0.5)` for the role and the slots, `fract(a)` for the flag.
+        assert_eq!((s.wood[3] + 0.5) as i32, i32::from(ROLE_LEAF));
+        assert_eq!((s.crown[3] + 0.5) as i32 - 1, 3);
+        assert_eq!((s.heart[3] + 0.5) as i32 - 1, -1);
+        for a in [s.wood[3], s.crown[3], s.heart[3]] {
+            assert!(a.fract() > 0.125);
+        }
+        let off = s.emit_whole(false);
+        assert!(!off.emits_whole());
+        assert_eq!((off.role(), off.faces()), (ROLE_LEAF, [Some(3), None]));
+    }
+
     #[test]
     fn the_texel_packing_round_trips_a_voxel() {
         let t = VoxelTexel::pack(3, PART_TRUNK, 0.0, true, 0.75, 9);
