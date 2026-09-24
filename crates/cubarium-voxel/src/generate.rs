@@ -1638,6 +1638,7 @@ pub fn repair_isolated(world: &mut World) -> usize {
     let pockets = isolated_voids(world);
     for &i in &pockets {
         world.material[i] = Material::Rock;
+        world.solid.set(&world.config, i, Material::Rock);
         world.free[i] = 0.0;
     }
     if !pockets.is_empty() {

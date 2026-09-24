@@ -2464,6 +2464,8 @@ fn rain_pulse(w: &mut World, volume_m3: f64) -> f64 {
 fn set_material(w: &mut World, i: usize, material: Material) -> f64 {
     let water = free_m3(w, i) + pore_m3(w, i);
     w.material[i] = material;
+    // The support-face lookup follows the one cell.
+    w.solid.set(&w.config, i, material);
     w.free[i] = 0.0;
     w.pore[i] = 0.0;
     // The one place outside the store primitives that writes the arrays, so the one place
