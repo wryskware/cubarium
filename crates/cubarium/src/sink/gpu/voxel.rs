@@ -1179,6 +1179,10 @@ pub fn params_of(cfg: &VoxelConfig, proj: Projection, roof_from_texture: bool) -
             0.0
         },
         bloom_radius: cfg.light.bloom_radius,
+        bloom_style: match cfg.light.bloom_style {
+            crate::voxel::BloomStyle::Smooth => cubarium_gpu::bloom::BloomStyle::Smooth,
+            crate::voxel::BloomStyle::Blocky => cubarium_gpu::bloom::BloomStyle::Blocky,
+        },
         debug_flow: false,
     }
 }

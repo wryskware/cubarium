@@ -582,11 +582,15 @@ pub struct VoxelParams {
     pub ripple: f32,
     /// Cells a reflected ray is marched before it counts as sky.
     pub reflect_cells: u32,
-    /// The lit tier's bloom (package L5, [`crate::bloom`]): how much of an emitter's
-    /// colour its halo adds at full step, `0` for none (the passes are skipped).
+    /// The lit tier's bloom ([`crate::bloom`]): how much of an emitter's colour its halo
+    /// adds (smooth: times the blurred emission; blocky: at full step), `0` for none (the
+    /// passes are skipped).
     pub bloom: f32,
-    /// How many voxel cells the halo reaches from the emitter's own cell.
-    pub bloom_radius: u32,
+    /// How far the halo reaches, in voxel cells (smooth: twice the Gaussian's sigma;
+    /// blocky: whole cells, rounded).
+    pub bloom_radius: f32,
+    /// Smooth (a blurred glow) or blocky (L5's whole-cell halo).
+    pub bloom_style: crate::bloom::BloomStyle,
     /// Capture-only: draw the water's derived flow field instead of the water (never
     /// set by the live display).
     pub debug_flow: bool,
@@ -2466,7 +2470,8 @@ pub(crate) mod tests {
             ripple: 0.2,
             reflect_cells: 64,
             bloom: 0.0,
-            bloom_radius: 2,
+            bloom_radius: 2.0,
+            bloom_style: crate::bloom::BloomStyle::Smooth,
             debug_flow: false,
         }
     }

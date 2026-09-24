@@ -61,6 +61,12 @@ ambient_tint = 0.15 # how far the ambient leans toward the sky's hue
 # A texel it reaches is one ladder rung brighter than one in shadow; crowns dapple it.
 sun = [-1.0, 2.0, -1.0]
 sun_tint = 0.18     # how far a sunlit texel leans toward the palette's light, times N·L
+# The emitters' halo (lit tier): its strength (smooth: 20 times this of their blurred
+# colour; blocky: this of their colour at full step), how far it reaches in voxel cells
+# (smooth: twice the blur's sigma; blocky: rounded), and "smooth" or "blocky".
+bloom = 0.3
+bloom_radius = 1.5
+bloom_style = "smooth"
 # The water (lit tier): absorption a voxel of path in units of the deep water colour,
 # the reflection gain over Fresnel, the ripple tilt, the animation rate and the reflection
 # march.
