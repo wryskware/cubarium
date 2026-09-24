@@ -524,8 +524,8 @@ fn sys_outlet(mut w: ResMut<VoxelWorld>) {
     water::outlet(&mut w.0);
 }
 
-fn sys_flora(mut w: ResMut<VoxelWorld>, mut flora: ResMut<FloraLayer>) {
-    flora.0.step(&mut w.0);
+fn sys_flora(mut w: ResMut<VoxelWorld>, mut flora: ResMut<FloraLayer>, config: Res<SimConfig>) {
+    flora.0.step_with(&mut w.0, config.threads);
 }
 
 /// The **live** fauna leg. With a [`SenseField`] in the world — the seeded habitat's

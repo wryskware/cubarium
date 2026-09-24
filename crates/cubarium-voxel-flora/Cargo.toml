@@ -6,6 +6,11 @@ rust-version.workspace = true
 description = "Producers on the voxel strip: stands rooted in support faces, fed by geometric light and pore water through the core's bounded commands. No drawing."
 
 [features]
+default = ["parallel"]
+# The light and root-box reads split across the `bevy_tasks` compute pool when a caller
+# steps with more than one thread (`Flora::step_with`). Chunks are folded back in stand
+# order, so the split changes no number; `default-features = false` builds without it.
+parallel = ["dep:bevy_tasks"]
 # Per-phase timers for the tick profile, forwarding to the core's accumulator. Measurement
 # only; see `design/7_Research/voxel-tick-profile-2026-09-18.md`.
 profile = ["cubarium-voxel/profile"]
@@ -15,6 +20,7 @@ anyhow = { workspace = true }
 cubarium-voxel = { workspace = true }
 postcard = { version = "1", features = ["use-std"] }
 serde = { version = "1", features = ["derive"] }
+bevy_tasks = { workspace = true, optional = true }
 
 [dev-dependencies]
 

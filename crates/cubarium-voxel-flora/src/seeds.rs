@@ -376,25 +376,25 @@ fn germinate(
             winners.push((gi, species));
         }
     }
+    // The births join `stands` in one merge after the loop; each winner's site is its own
+    // ground entry, so no two births share a site.
+    let mut born: Vec<Stand> = Vec::with_capacity(winners.len());
     for (gi, species) in winners {
         let g = &mut ground[gi];
         let sc = config.species(species);
         // The slot first and the bank second: a seed is never spent on a birth that does
         // not happen.
-        let at = match stands.binary_search_by_key(&g.site, |s| s.site) {
-            Ok(_) => continue,
-            Err(at) => at,
-        };
+        if stands.binary_search_by_key(&g.site, |s| s.site).is_ok() {
+            continue;
+        }
         let Some((organic, mineral)) = spend_seed(g, species, package_of(sc)) else {
             continue;
         };
-        stands.insert(
-            at,
-            newborn(config, ledger, g.site, species, organic, mineral),
-        );
+        born.push(newborn(config, ledger, g.site, species, organic, mineral));
         ledger.establishments += 1;
         ledger.seeds_germinated[species.index()] += 1;
     }
+    crate::step::insert_sorted(stands, born);
 }
 
 /// A stand built out of one funded package: the seed that germinated or the runner that
@@ -645,34 +645,34 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World) {
         }
     }
 
-    // ---- the daughters, now that the sweep is over.
+    // ---- the daughters, now that the sweep is over. They join `stands` in one merge:
+    // `runner_target` skips occupied and claimed faces, so no two share a site.
+    let mut born: Vec<Stand> = Vec::with_capacity(daughters.len());
     for d in daughters {
         let slot = d.species.index();
         let gi = provisioned_slot(config, ground, d.site, ledger);
-        let at = match stands.binary_search_by_key(&d.site, |s| s.site) {
-            Ok(_) => {
-                // Unreachable — `runner_target` skips occupied and claimed faces — and
-                // harmless if that changes: the paid package is banked where it fell.
-                if ground[gi].seeds.is_empty() {
-                    bank_wheel[check_phase(d.site, period) as usize].push(d.site);
-                }
-                add_cohort(
-                    &mut ground[gi],
-                    d.species,
-                    d.organic,
-                    d.mineral,
-                    tick,
-                    config.species(d.species),
-                );
-                ledger.seeds_landed[slot] += 1;
-                continue;
+        let taken = stands.binary_search_by_key(&d.site, |s| s.site).is_ok()
+            || born.iter().any(|b| b.site == d.site);
+        if taken {
+            // Unreachable — `runner_target` skips occupied and claimed faces — and
+            // harmless if that changes: the paid package is banked where it fell.
+            if ground[gi].seeds.is_empty() {
+                bank_wheel[check_phase(d.site, period) as usize].push(d.site);
             }
-            Err(at) => at,
-        };
-        stands.insert(
-            at,
-            newborn(config, ledger, d.site, d.species, d.organic, d.mineral),
-        );
+            add_cohort(
+                &mut ground[gi],
+                d.species,
+                d.organic,
+                d.mineral,
+                tick,
+                config.species(d.species),
+            );
+            ledger.seeds_landed[slot] += 1;
+            continue;
+        }
+        born.push(newborn(
+            config, ledger, d.site, d.species, d.organic, d.mineral,
+        ));
         ledger.establishments += 1;
         ledger.clonal_births[slot] += 1;
         deliveries.push(DeliveryReceipt {
@@ -684,6 +684,7 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World) {
             mineral: d.mineral,
         });
     }
+    crate::step::insert_sorted(stands, born);
 }
 
 /// The face a runner roots on: one of the eight neighbouring columns' support faces
