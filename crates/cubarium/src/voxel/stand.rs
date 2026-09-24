@@ -1193,6 +1193,50 @@ mod tests {
         }
     }
 
+    /// Package SM: the seed mark draws only a **recent** landing or a site **about to
+    /// sprout**. A bank that is merely waiting — an old landing, gates not yet passing —
+    /// draws nothing, however much seed it holds.
+    #[test]
+    fn only_a_recent_landing_or_a_site_about_to_sprout_draws_a_seed_mark() {
+        use cubarium_voxel_flora::{FloraLedger, Ground, SEED_MARK_RECENT_S, SeedCohort};
+        let world = world();
+        let config = FloraConfig::default();
+        let tick = 100_000u64;
+        let recent = (SEED_MARK_RECENT_S * f64::from(cubarium_voxel::TICK_HZ)) as u64;
+        let bank = |x: u32, landed: u64, sprouting: Option<Species>| {
+            let mut g = Ground::new(Site { x, y: 3, z: 1 }, 1.0);
+            g.seeds.push(SeedCohort {
+                species: Species::Bloomcrown,
+                organic: 0.05,
+                mineral: 0.001,
+                bin_start_tick: 0,
+            });
+            g.last_landing = Some((Species::Bloomcrown, landed));
+            g.sprouting = sprouting;
+            g
+        };
+        let ground = vec![
+            bank(4, tick - 10, None),                        // recent
+            bank(8, tick - recent - 1, None),                // waiting
+            bank(12, 0, Some(Species::Bloomcrown)),          // about to sprout
+        ];
+        let ledger = FloraLedger::default();
+        let fv = FloraView {
+            config: &config,
+            tick,
+            stands: &[],
+            ground: &ground,
+            ledger: &ledger,
+        };
+        let view = world.view();
+        let mut stands = Stands::empty(32, 16, 4);
+        stands.rebuild(&view, fv);
+        let at = |x: i64| stands.at(x, 4, 1);
+        assert!(matches!(at(4), Part::Sprout(_)), "recent: {:?}", at(4));
+        assert_eq!(at(8), Part::None, "a waiting bank draws nothing");
+        assert!(matches!(at(12), Part::Sprout(_)), "about to sprout: {:?}", at(12));
+    }
+
     /// Two species' cohorts can share one site now, and the picture has one glyph per
     /// site: the species holding the most organic matter there is the one drawn.
     #[test]

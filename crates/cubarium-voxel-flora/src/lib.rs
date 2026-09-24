@@ -46,6 +46,8 @@
 #![forbid(unsafe_code)]
 
 mod layers;
+#[cfg(test)]
+mod seed_marks_tests;
 mod seeds;
 pub mod snapshot;
 mod step;
