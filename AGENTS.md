@@ -31,12 +31,16 @@ relevant entries in design/0_Canon/DECISIONS.md.
   - Take pictures headless: `--gpu-target headless`, `--gpu-capture DIR`,
     `voxel_specimens --gpu`, `blender -b`.
   - If a window is truly needed, launch it through `scripts/hidden.sh <command…>`.
-    It puts every window the command maps on Hyprland's hidden `special:agents`
-    workspace from its first frame, keeps your env, output and exit status, and kills
-    the command on interrupt. `./scripts/run-voxel.sh` does this by itself under an
-    agent.
-  - Never launch a window any other way. `--background` floats and title or class
-    window rules don't hide it: minifb maps before it sets a title and has no app id.
+    - By default that runs the command on its own Xvfb display with Wayland unset,
+      so no window it opens can appear anywhere. `./scripts/run-voxel.sh` does this
+      by itself under an agent.
+    - Only a test that needs Hyprland itself uses `scripts/hidden.sh --hyprland …`.
+      That puts the first window on the hidden `special:agents` workspace, and a
+      watchdog moves any later window of the command's process tree there as it
+      maps.
+  - Never launch a window any other way. `--background` floating, launch-time exec
+    rules (they reach only a program's first window), and title or class rules (minifb
+    maps before it sets a title and has no app id) have all let windows through.
   - The cubarium binary enforces this: under `CLAUDECODE=1` or `CODEX_*` it refuses to
     open a window unless `scripts/hidden.sh` launched it
     (`crates/cubarium/src/sink/hidden.rs`). Any new window code calls
