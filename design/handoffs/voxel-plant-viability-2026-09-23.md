@@ -250,3 +250,51 @@ asked for a fan-out. Four packages run in parallel. Fable integrates.
 5. Then run the 24 h terrarium colonisation study.
 
 The `retrain` branch must merge main after this lands, before the next training round.
+
+## Follow-up round (Wrysk, 2026-09-23, after the merge at 1c70ee0)
+
+Wrysk: "shrubs and trees should hold more"; seed marks: "draw only recent seeds and about to
+sprout ones"; pace is his to revisit later. He approved all four succession suggestions.
+
+### SU · succession (seed worker, branch `succession`)
+1. **Woody seedlings come up through ground cover.**
+   - Bloomcrown, vaulttree and lanternberry banked seeds can germinate on a site held by a
+     ground cover (springturf, velvetpad, stonecushion) when the establishment gates pass
+     as if the site were free.
+   - The ground cover is replaced. Its tissue goes to litter/dead wood as a booked death
+     (a new cause, "overtopped"), and the woody seedling establishes as usual.
+   - This is harder than taking a bare gap: a per-check chance below 1, chosen and
+     justified.
+   - One stand per site stays.
+   - Species roles are config fields, not name checks.
+2. **Seed size counts, not just seed number.**
+   - A per-species seed mass: shrubs and trees carry fewer, bigger seeds. A bigger seed
+     starts a bigger seedling, so the parent pays more per seed.
+   - The gap lottery is weighted by seed count × seed mass (or a stated vigour function of
+     mass).
+   - Ground covers keep minimal packages.
+3. **Rein in the ground covers' shortcuts.**
+   - Spore tries become per-species: velvetpad 8 → 2, others unchanged unless measured.
+   - Springturf clonal share 0.5 → 0.3.
+- **Measure:**
+  - default seeds 1–4 coupled, 4 h; terrarium seed 1, 2 h (slow until dense-cost lands);
+  - read off: woody share of stands and foliage, ground-cover share, total stands,
+    overtopped count, before and after.
+
+### SM · seed marks (plant-water worker, branch `seed-marks`)
+- The D5 seed mark draws only two kinds of site:
+  - **recent:** a cohort landed within the last 2 sim-min;
+  - **about to sprout:** the gates pass for a banked species on a free site, so it sprouts
+    at the next check.
+- Preferred mechanism: set a flag when the gates pass at a check, and germinate at the
+  following check. That delays germination by one check (30 s) and gives the presenter a
+  flag to read, with no gate evaluation per frame. Choosing otherwise needs a stated reason.
+- The mark's look is unchanged (art direction; D5).
+- Report the share of ground sites showing marks at 1 h / 4 h on default and the terrarium.
+
+### LB · lanternberry decline (plant-water worker, branch `lanternberry`)
+- Lanternberry donors fall over 4 h (seed 2: 18 → 2, seed 4: 19 → 6) without competing for
+  sites.
+- Diagnose it: shade, water, grazing, or the cost of its repeated fruit.
+- If the cause is clear and lives in lanternberry's own numbers, fix it with the reason in
+  the doc comment. Otherwise report.
