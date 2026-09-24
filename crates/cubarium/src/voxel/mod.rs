@@ -46,6 +46,8 @@ pub mod placement;
 pub mod present;
 pub mod project;
 pub mod stand;
+pub mod textures;
+pub mod vine;
 
 // The seeded habitat, the authored fixture and the founding loop live in
 // `cubarium-voxel-sim` since P5-B, so the search crate founds the worlds this host founds;
@@ -132,7 +134,10 @@ pub struct VoxelConfig {
     /// chosen camera is 30°.
     pub tilt_degrees: f64,
     /// Pixels per voxel edge. The chosen camera is 4: below that the sprite atlas stops
-    /// reading.
+    /// reading. `"auto"` (stored as [`PX_AUTO`]) is resolved once at start-up by
+    /// [`auto_px_per_voxel`]: the largest that fits the output — the desktop's screen, or
+    /// the panel — with the whole strip in view.
+    #[serde(with = "px_serde")]
     pub px_per_voxel: u32,
     /// Ring raster height in pixels; `0` derives it so the whole strip fits. The width is
     /// always `world.width · px_per_voxel`, so the strip fills it exactly.
@@ -153,6 +158,15 @@ pub struct VoxelConfig {
     /// is from the working directory: the repository on the desktop, `/var/lib/cubarium`
     /// under the panel's unit. Missing models are said once and drawn as glyphs.
     pub models_dir: PathBuf,
+    /// Draw the GPU renderer's face textures and the latticevine's tile layer.
+    /// **Experimental and off by default** (Wrysk, 2026-09-24: voxels stay the main
+    /// look): off, every face is a solid voxel as before textures and the latticevine is
+    /// plain voxel cells. `--textures` turns it on for one run.
+    pub textures: bool,
+    /// The GPU renderer's face textures ([`textures`]): `masters/`, `lod/<px>/` and
+    /// `override/<px>/`. Relative as `models_dir` is. Missing textures are said once and
+    /// the faces drawn solid. The CPU presenter never reads them.
+    pub textures_dir: PathBuf,
     /// Worker threads for the in-phase splits of the tick
     /// (`cubarium_voxel_sim::SimConfig::threads`); `0` means
     /// [`std::thread::available_parallelism`]. Execution only — it reaches no rule, no
@@ -177,6 +191,8 @@ impl Default for VoxelConfig {
             sky_gradient: true,
             organisms: OrganismLook::Models,
             models_dir: PathBuf::from("assets/voxel-models"),
+            textures: false,
+            textures_dir: PathBuf::from("assets/voxel-textures"),
             threads: 0,
             // The shipped `default` landscape, ring and all: a `cubarium voxel` with no
             // TOML generates a staged world, not the ridge. `Config::default()` stays
@@ -187,6 +203,99 @@ impl Default for VoxelConfig {
                 .config(),
         }
     }
+}
+
+/// `px_per_voxel = "auto"`, as the config holds it until start-up resolves it.
+pub const PX_AUTO: u32 = 0;
+
+/// `px_per_voxel`: a whole number, or `"auto"` ([`PX_AUTO`]).
+mod px_serde {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(px: &u32, s: S) -> Result<S::Ok, S::Error> {
+        if *px == super::PX_AUTO {
+            s.serialize_str("auto")
+        } else {
+            s.serialize_u32(*px)
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Px {
+            N(u32),
+            S(String),
+        }
+        match Px::deserialize(d)? {
+            Px::N(0) => Err(serde::de::Error::custom(
+                "px_per_voxel must be at least 1, or \"auto\"",
+            )),
+            Px::N(n) => Ok(n),
+            Px::S(s) if s == "auto" => Ok(super::PX_AUTO),
+            Px::S(s) => Err(serde::de::Error::custom(format!(
+                "px_per_voxel is a whole number or \"auto\", not {s:?}"
+            ))),
+        }
+    }
+}
+
+/// The largest `px_per_voxel` whose strip fits `out` (`width × height` pixels): the ring
+/// `width · s` wide, and the whole strip, `height · s + depth · rise`, uncropped — in
+/// `out`'s height, or in `raster_height` where that is fixed (and smaller). At least 1.
+pub fn auto_px_per_voxel(
+    tilt_degrees: f64,
+    raster_height: u16,
+    world: &cubarium_voxel::Config,
+    out: (u32, u32),
+) -> u32 {
+    let limit = match raster_height {
+        0 => out.1,
+        h => out.1.min(u32::from(h)),
+    };
+    let fits = |s: u32| {
+        let rise = project::rise_for(tilt_degrees, s);
+        let tall =
+            u64::from(world.height) * u64::from(s) + u64::from(world.depth) * u64::from(rise);
+        u64::from(world.width) * u64::from(s) <= u64::from(out.0) && tall <= u64::from(limit)
+    };
+    (1..=256).take_while(|&s| fits(s)).last().unwrap_or(1)
+}
+
+/// The desktop's screen in pixels, for `px_per_voxel = "auto"`: `CUBARIUM_SCREEN=WxH`,
+/// else Hyprland's focused monitor, else the first connected output `xrandr` reports.
+/// `None` when none of them answers.
+pub fn desktop_screen() -> Option<(u32, u32)> {
+    let wxh = |t: &str| -> Option<(u32, u32)> {
+        let (w, h) = t.split_once('x')?;
+        Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
+    };
+    if let Ok(v) = std::env::var("CUBARIUM_SCREEN") {
+        return wxh(&v);
+    }
+    let run = |cmd: &str, args: &[&str]| -> Option<String> {
+        let out = std::process::Command::new(cmd).args(args).output().ok()?;
+        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    };
+    if let Some(json) = run("hyprctl", &["monitors", "-j"])
+        && let Ok(serde_json::Value::Array(monitors)) = serde_json::from_str(&json)
+    {
+        let size = |m: &serde_json::Value| -> Option<(u32, u32)> {
+            let scale = m["scale"].as_f64().unwrap_or(1.0).max(0.1);
+            Some((
+                (m["width"].as_f64()? / scale) as u32,
+                (m["height"].as_f64()? / scale) as u32,
+            ))
+        };
+        let focused = monitors.iter().find(|m| m["focused"].as_bool() == Some(true));
+        if let Some(size) = focused.or(monitors.first()).and_then(size) {
+            return Some(size);
+        }
+    }
+    let text = run("xrandr", &["--current"])?;
+    text.lines()
+        .filter(|l| l.contains(" connected"))
+        .find_map(|l| l.split_whitespace().find_map(|w| wxh(w.split('+').next()?)))
 }
 
 /// `organisms` in the config: which drawing of plants and animals.
@@ -672,7 +781,7 @@ fn load_world(args: &Voxel) -> Result<Option<(World, String, bool)>> {
 
 /// Run `cubarium voxel`.
 pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
-    let cfg = match &args.config {
+    let mut cfg = match &args.config {
         Some(path) => load_config(path)?,
         None => VoxelConfig::default(),
     };
@@ -690,6 +799,28 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     // Before any pool exists and before the thread count is read, so both follow it.
     if !args.pin_loop && !args.all_chiplets {
         chiplet::keep_to_one_chiplet();
+    }
+    if args.textures {
+        cfg.textures = true;
+    }
+    if cfg.px_per_voxel == PX_AUTO {
+        // Once, here: the renderer's projection is fixed for the life of the process.
+        let panel = args.sink == VoxelSinkArg::Gpu
+            && args.gpu_target.unwrap_or_else(GpuTargetKind::detect) == GpuTargetKind::Shim;
+        let (out, what) = if panel {
+            let (w, h) = cubarium_gpu::target::SHIM_PANEL;
+            ((h, w), "the panel")
+        } else {
+            match desktop_screen() {
+                Some(size) => (size, "the screen"),
+                None => ((1920, 1080), "an assumed 1920x1080 screen (none detected)"),
+            }
+        };
+        cfg.px_per_voxel = auto_px_per_voxel(cfg.tilt_degrees, cfg.raster_height, &cfg.world, out);
+        eprintln!(
+            "cubarium voxel: px_per_voxel auto -> {} (fits {what}, {}x{})",
+            cfg.px_per_voxel, out.0, out.1
+        );
     }
 
     // The regular display remains its own coupled world. `--arena` is an explicit
@@ -2963,6 +3094,39 @@ mod tests {
         World::load(&std::fs::read(&snaps[0]).unwrap()).unwrap();
     }
 
+    /// `px_per_voxel = "auto"` is the largest scale whose whole strip fits the output.
+    #[test]
+    fn px_per_voxel_auto_is_the_largest_whole_strip_that_fits() {
+        let cfg: VoxelConfig = toml::from_str(
+            "px_per_voxel = \"auto\"\n[world]\nwidth = 256\nheight = 128\ndepth = 48\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.px_per_voxel, PX_AUTO);
+        assert!(toml::to_string(&cfg).unwrap().contains("px_per_voxel = \"auto\""));
+        assert!(toml::from_str::<VoxelConfig>("px_per_voxel = 0").is_err());
+        assert!(toml::from_str::<VoxelConfig>("px_per_voxel = \"big\"").is_err());
+        assert_eq!(
+            toml::from_str::<VoxelConfig>("px_per_voxel = 6").unwrap().px_per_voxel,
+            6
+        );
+        let w = &cfg.world;
+        // 9: 2304 x (1152 + 48 * 5) = 1392. 10 is 1568 rows.
+        assert_eq!(auto_px_per_voxel(30.0, 0, w, (2560, 1440)), 9);
+        // 13: 3328 x 2048. 14 is 1792 + 48 * 8 = 2176 rows.
+        assert_eq!(auto_px_per_voxel(30.0, 0, w, (3840, 2160)), 13);
+        assert_eq!(auto_px_per_voxel(30.0, 0, w, (100, 100)), 1);
+        // The panel's config: its fixed 540-row raster holds the strip at 6, not the 12
+        // the panel's width alone would allow.
+        let panel = cubarium_voxel::Config {
+            width: 160,
+            height: 72,
+            depth: 24,
+            ..w.clone()
+        };
+        assert_eq!(auto_px_per_voxel(30.0, 540, &panel, (1920, 1080)), 6);
+        assert_eq!(auto_px_per_voxel(30.0, 0, &panel, (1920, 1080)), 12);
+    }
+
     /// The documented defaults, and a partial config file that only overrides some of
     /// them: everything else keeps the default rather than being refused.
     #[test]
@@ -3154,6 +3318,7 @@ mod tests {
             gpu_capture: None,
             gpu_web_rate: 0.0,
             gpu_roof_walk: false,
+            textures: false,
         };
         // A snapshot of a schema this build does not speak: postcard's varint for the tag.
         let stale = |n: u8| vec![n, 0, 0, 0, 0, 0, 0, 0];
@@ -3940,6 +4105,7 @@ mod tests {
             gpu_capture: None,
             gpu_web_rate: 0.0,
             gpu_roof_walk: false,
+            textures: false,
         };
 
         // Explicit seed is respected
@@ -3991,6 +4157,7 @@ mod tests {
             gpu_capture: None,
             gpu_web_rate: 0.0,
             gpu_roof_walk: false,
+            textures: false,
         };
 
         // 1. Initial run into empty state dir creates a fresh world

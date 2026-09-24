@@ -46,12 +46,13 @@
 //! per voxel.
 
 use cubarium_voxel::VoxelView;
-use cubarium_voxel_flora::{FloraView, MAX_FOLIAGE_LAYERS, Species, Stand};
+use cubarium_voxel_flora::{FaceDraw, FloraView, MAX_FOLIAGE_LAYERS, Species, Stand};
 
 use crate::present::{mix, srgb_linear};
 
 use super::colours;
 use super::model::{self, ModelCell, ModelLibrary, Tag};
+use super::vine;
 
 // --- The five palettes ---------------------------------------------------------------
 //
@@ -298,6 +299,14 @@ pub struct Stands {
     /// This rebuild's style index for each `(model material, wilt level)`, or
     /// [`NO_STYLE`]: the model path's styles are shared across stands.
     model_styles: Vec<u16>,
+    /// For each style a baked model's cells paint with, the kind of cell it is (the
+    /// GPU renderer's texture role); shorter than `styles` or `None` for every other.
+    model_tags: Vec<Option<Tag>>,
+    /// Whether the latticevine's covered faces are drawn here as plain voxel cells (the
+    /// default). The GPU renderer with textures on draws them as its tile layer instead.
+    vine_cells: bool,
+    /// Covered faces to draw instead of the flora's own: a fixture posing spur phases.
+    cover_override: Option<Vec<FaceDraw>>,
 }
 
 /// No style yet (and the one index a style never takes).
@@ -377,6 +386,9 @@ impl Stands {
             stamped: Vec::new(),
             styles: Vec::new(),
             model_styles: vec![NO_STYLE; ModelKey::COUNT],
+            model_tags: Vec::new(),
+            vine_cells: true,
+            cover_override: None,
         }
     }
 
@@ -404,13 +416,17 @@ impl Stands {
     ) {
         let c = view.config;
         if (self.width, self.height, self.depth) != (c.width, c.height, c.depth) {
+            let (vine_cells, cover_override) = (self.vine_cells, self.cover_override.take());
             *self = Stands::empty(c.width, c.height, c.depth);
+            self.vine_cells = vine_cells;
+            self.cover_override = cover_override;
         } else {
             // Only what the last rebuild stamped: the grid is otherwise all empty.
             for i in self.stamped.drain(..) {
                 self.grid[i as usize] = Part::None;
             }
             self.styles.clear();
+            self.model_tags.clear();
         }
         self.model_styles.fill(NO_STYLE);
         // Stands arrive in site order, which is the order the styles are pushed in, so
@@ -508,6 +524,70 @@ impl Stands {
                     z: g.site.z,
                 },
                 Part::Sprout(style),
+            );
+        }
+        if self.vine_cells {
+            self.place_vines(view, flora);
+        }
+    }
+
+    /// Draw the latticevine as plain voxels or not (see [`Stands::vine_cells`]).
+    pub fn set_vine_cells(&mut self, on: bool) {
+        self.vine_cells = on;
+    }
+
+    /// Draw these covered faces instead of the flora's own; `None` goes back to them.
+    pub fn set_cover_draws(&mut self, draws: Option<Vec<FaceDraw>>) {
+        self.cover_override = draws;
+    }
+
+    /// The latticevine's covered faces as plain voxel cells, last: each is a crown cell
+    /// in the air voxel in front of its face ([`vine::cells`]), in [`colours::vine`]'s
+    /// colours, and a cell anything else already stands in keeps what it has — the
+    /// organism wins. A face whose spur is in bud, flower or fruit is a heart cell, so the
+    /// accent's glint runs down its middle.
+    fn place_vines(&mut self, view: &VoxelView<'_>, flora: FloraView<'_>) {
+        let draws = match &self.cover_override {
+            Some(d) => d.clone(),
+            None => flora.cover.draw(),
+        };
+        if draws.is_empty() {
+            return;
+        }
+        let cells = vine::cells(&draws, view.config, |id| flora.cover.vine(id).map(|v| v.root));
+        let mut styles = [None::<u16>; 3 * 4];
+        for c in cells {
+            let i = self.index(i64::from(c.x), c.y, c.z);
+            if self.grid[i] != Part::None {
+                continue;
+            }
+            let key = c.density as usize * 4 + c.accent as usize;
+            let style = match styles[key] {
+                Some(s) => s,
+                None => {
+                    let Some(s) = u16::try_from(self.styles.len()).ok().filter(|&s| s != NO_STYLE)
+                    else {
+                        return;
+                    };
+                    let sw = colours::vine(c.density, c.accent);
+                    self.styles.push(Style {
+                        wood: srgb_linear(sw.shadow),
+                        crown: srgb_linear(sw.body),
+                        heart: srgb_linear(sw.glint),
+                    });
+                    styles[key] = Some(s);
+                    s
+                }
+            };
+            let heart = c.accent != vine::Accent::None;
+            self.place(
+                view,
+                Cell {
+                    x: i64::from(c.x),
+                    y: c.y,
+                    z: c.z,
+                },
+                Part::Crown { style, heart },
             );
         }
     }
@@ -629,6 +709,8 @@ impl Stands {
             crown: c(sw.body),
             heart: c(sw.glint),
         });
+        self.model_tags.resize(self.styles.len(), None);
+        self.model_tags[usize::from(style)] = Some(key.tag);
         self.model_styles[index] = style;
         Some(style)
     }
@@ -689,6 +771,13 @@ impl Stands {
     #[inline]
     pub fn style(&self, part: Part) -> Option<Style> {
         part.style().map(|s| self.styles[usize::from(s)])
+    }
+
+    /// Which kind of baked model cell `part` is — trunk, foliage, drape or accent — or
+    /// `None` for a glyph, a log or a mark. Only the GPU renderer's textures ask.
+    pub fn model_tag(&self, part: Part) -> Option<Tag> {
+        part.style()
+            .and_then(|s| self.model_tags.get(usize::from(s)).copied().flatten())
     }
 
     /// Is the cell beside `(x, y, z)` part of the same canopy? Used for the crown's

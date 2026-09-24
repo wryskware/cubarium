@@ -840,7 +840,7 @@ fn a_terrain_edit_that_buries_a_support_books_the_stand_out() {
 /// exactly one of them receives.
 #[test]
 fn a_donor_saves_a_parcel_and_lands_one_whole_package_on_one_site() {
-    let mut config = FloraConfig::default();
+    let mut config = FloraConfig::default().minimum_seeds();
     config.bloomcrown.senescence = 0.0;
     config.bloomcrown.maintenance = 0.0;
     config.bloomcrown.assimilation = 0.0;
@@ -1027,7 +1027,9 @@ fn a_donor_saves_a_parcel_and_lands_one_whole_package_on_one_site() {
 /// neighbours, so the test finds the bank rather than naming the column.
 #[test]
 fn a_cohort_on_a_site_that_fails_the_predicate_decays_to_litter_and_never_stands() {
-    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
+    let mut config = FloraConfig::default()
+        .drop_seeds_checked_each_tick()
+        .minimum_seeds();
     config.bloomcrown.establish_water_min = 100.0;
     config.bloomcrown.seed_max_age_s = 1.0;
     config.bloomcrown.propagule_rate = 0.18;
@@ -1127,7 +1129,9 @@ fn a_cohort_on_a_site_that_fails_the_predicate_decays_to_litter_and_never_stands
 /// reserve is exactly what `Seed` gave it minus what reproduction cost.
 #[test]
 fn a_bank_over_the_threshold_germinates_into_a_stand_of_its_own_pooled_cohorts() {
-    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
+    let mut config = FloraConfig::default()
+        .drop_seeds_checked_each_tick()
+        .minimum_seeds();
     config.bloomcrown.propagule_rate = 3.0;
     config.bloomcrown.hop = 1;
     config.bloomcrown.reserve_cap = 4.0;

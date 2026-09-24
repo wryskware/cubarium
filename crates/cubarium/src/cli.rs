@@ -200,6 +200,11 @@ pub struct Voxel {
     /// were measured with.
     #[arg(long, default_value_t = false)]
     pub gpu_roof_walk: bool,
+    /// Draw the GPU renderer's face textures and the latticevine's tile layer
+    /// (**experimental**, `textures = true` in the config does the same). Off, every face
+    /// is a solid voxel, as before textures, and the latticevine is plain voxel cells.
+    #[arg(long, default_value_t = false)]
+    pub textures: bool,
 }
 
 impl Voxel {

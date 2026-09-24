@@ -707,7 +707,7 @@ fn two_species_banks_share_one_site_and_each_donor_pays_only_its_own() {
 #[test]
 fn nothing_outside_hop_ever_receives_and_the_patch_does_not_creep() {
     let mut world = plain(16, 8, 0.6);
-    let mut flora = Flora::new(FloraConfig::default());
+    let mut flora = Flora::new(FloraConfig::default().minimum_seeds());
     assert!(flora.apply(
         &world,
         Command::Seed {
@@ -813,7 +813,7 @@ fn nothing_outside_hop_ever_receives_and_the_patch_does_not_creep() {
 /// in the bank to be read.
 #[test]
 fn a_donor_is_debited_exactly_what_arrives_plus_its_construction() {
-    let mut config = FloraConfig::default();
+    let mut config = FloraConfig::default().minimum_seeds();
     config.bloomcrown.propagule_rate = 0.18;
     config.bloomcrown.establish_light_min = 2.0;
     frozen(&mut config.bloomcrown);

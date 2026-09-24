@@ -316,7 +316,43 @@ impl SeedWindow {
             "seedmodes: h={:.2} banked_seeds={banked:.0}{modes}",
             tick as f64 / (3600.0 * f64::from(TICK_HZ))
         );
+        // Succession (package SU), measurement only and named here rather than read off
+        // config roles so the same line runs on a build before them: the woody species'
+        // share of stands and of standing foliage, the ground covers' share, and the
+        // ground covers the woody seedlings overtopped.
+        let woody = [Plant::Bloomcrown, Plant::Vaulttree, Plant::Lanternberry];
+        let cover = [Plant::Springturf, Plant::Velvetpad, Plant::Stonecushion];
+        let (mut n, mut nw, mut nc) = (0usize, 0usize, 0usize);
+        let (mut p, mut pw, mut pc) = (0.0f64, 0.0f64, 0.0f64);
+        for st in f.stands {
+            n += 1;
+            p += st.foliage;
+            if woody.contains(&st.species) {
+                nw += 1;
+                pw += st.foliage;
+            }
+            if cover.contains(&st.species) {
+                nc += 1;
+                pc += st.foliage;
+            }
+        }
+        let share = |a: f64, b: f64| if b > 0.0 { a / b } else { 0.0 };
+        eprintln!(
+            "succession: h={:.2} stands={n} woody={:.3} woody_foliage={:.3} cover={:.3} \
+             cover_foliage={:.3} overtopped={}",
+            tick as f64 / (3600.0 * f64::from(TICK_HZ)),
+            share(nw as f64, n as f64),
+            share(pw, p),
+            share(nc as f64, n as f64),
+            share(pc, p),
+            overtopped(f.ledger),
+        );
     }
+}
+
+/// Ground covers overtopped so far (package SU's ledger counter).
+fn overtopped(l: &cubarium_voxel_flora::FloraLedger) -> u64 {
+    l.overtopped.iter().sum()
 }
 
 /// The CSV header: `sim_min`, then per plant species `stands_<name>`, then per animal

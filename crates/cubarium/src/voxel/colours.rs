@@ -274,6 +274,26 @@ fn recipe(species: Species) -> Recipe {
     }
 }
 
+/// A latticevine cell's colours (D15's dossier hexes): the shingled blue ramp when full,
+/// its dark base when thinned, the deep-plum runner when bare or dormant. A cell whose
+/// spur is in bud, flower or fruit is tinted whole by that accent — a pale-lilac bell, a
+/// magenta bead bunch, a violet bud — and its `glint` is the heart stripe down its middle:
+/// the bell's cyan mouth, the beads' cyan seeds, the bud's lilac tip.
+pub fn vine(density: super::vine::Density, accent: super::vine::Accent) -> Swatch {
+    use super::vine::{Accent, Density};
+    match accent {
+        Accent::Flower => return shaded(0xB9_9BE6, Some(0x42_C5F8)),
+        Accent::Fruit => return shaded(0xFF_2AFC, Some(0x42_C5F8)),
+        Accent::Bud => return shaded(0x3A_1A7A, Some(0xB9_9BE6)),
+        Accent::None => {}
+    }
+    match density {
+        Density::Full => shaded(0x2B_6AD0, Some(0x42_C5F8)),
+        Density::Thin => shaded(0x1E_2798, Some(0x2B_6AD0)),
+        Density::Bare => shaded(0x2A_0E4A, Some(0x3A_1A7A)),
+    }
+}
+
 /// A body colour with its hue-shifted shadow and a glint.
 fn shaded(body: Rgb, glint: Option<Rgb>) -> Swatch {
     Swatch {

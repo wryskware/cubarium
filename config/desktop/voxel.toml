@@ -9,7 +9,7 @@
 # The recipe is written in metres, so the landscape itself is the same one.
 
 tilt_degrees = 30.0
-px_per_voxel = 4
+px_per_voxel = "auto"   # the largest that fits the screen, the whole strip in view
 raster_height = 0
 haze = 0.55
 water_alpha = 0.5

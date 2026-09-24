@@ -51,7 +51,11 @@ use crate::Flora;
 /// `design/handoffs/latticevine-cover-sim-2026-09-23.md`): `Flora` gains its vines and
 /// covered faces, `FloraConfig` the `latticevine` section, and the ledger the vine
 /// counters. Refused, not migrated.
-pub const SCHEMA: u32 = 6;
+///
+/// Schema 7: package SU (succession): four species fields (`spore_tries`, `seed_mass`,
+/// `ground_cover`, `overtop_per_check`) and the ledger's `overtopped` counts, and a seed is
+/// `seed_mass` minimum packages. Refused, not migrated.
+pub const SCHEMA: u32 = 7;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

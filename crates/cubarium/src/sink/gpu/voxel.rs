@@ -38,20 +38,21 @@ use anyhow::{Context, Result, bail};
 use cubarium_gpu::vk::Gpu;
 use cubarium_gpu::voxel::{
     MAX_GLYPHS, MAX_STYLES, PART_ANIMAL_INTERIM, PART_NONE, PLANE_GLYPHS, PLANE_ROOF, VoxelParams,
-    VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel,
+    VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel, VoxelTextures,
 };
 use cubarium_voxel::{Material, VoxelView, World};
-use cubarium_voxel_flora::Flora;
+use cubarium_voxel_flora::{FaceDraw, Flora, FloraView};
 
 use crate::sink::{FrameSink, Output, WebSink};
 use crate::voxel::VoxelConfig;
 use crate::voxel::animal::{AnimalPart, Animals};
 use crate::voxel::appearance;
-use crate::voxel::model::ModelLibrary;
+use crate::voxel::model::{ModelLibrary, Tag};
 use crate::voxel::present as cpu;
 use crate::voxel::project::Projection;
 use crate::voxel::stand::{Part, Stands, Style};
-use cubarium_voxel_fauna::Fauna;
+use crate::voxel::vine::{self, VineCell};
+use cubarium_voxel_fauna::{Fauna, FaunaView};
 
 use super::target::{GpuTarget, GpuTargetKind};
 
@@ -136,7 +137,8 @@ impl VoxelGpuSink {
             gpu.name,
             params.upload_bytes() as f64 / 1024.0
         );
-        let mut renderer = VoxelRenderer::new(&gpu, params)?;
+        let textures = load_textures(cfg, &params);
+        let mut renderer = VoxelRenderer::new(&gpu, params, &textures)?;
         // The panel is presented on its own thread: the queue submit and the fence wait
         // are 8 ms the run loop has better things to do with. Every other target is
         // unchanged (`sink/gpu/target.rs`).
@@ -151,7 +153,7 @@ impl VoxelGpuSink {
             gpu,
             renderer,
             target,
-            packer: Packer::new(&params, options.models.clone()),
+            packer: Packer::new(&params, options.models.clone(), textures.vine_on),
             capture: options.capture,
             founding_sky: None,
             web: None,
@@ -201,17 +203,27 @@ impl VoxelGpuSink {
     /// rather than a wrong one. Nothing is rebuilt in that case, so a refused pack costs
     /// nothing but the check.
     pub fn stage_world(&mut self, world: &World, flora: &Flora, fauna: &Fauna) -> bool {
+        self.stage_view(&world.view(), flora.view(), fauna.view())
+    }
+
+    /// [`VoxelGpuSink::stage_world`] from views: what a tool drawing a posed flora (its
+    /// stands' moisture or parcel set by hand) stages.
+    pub fn stage_view(
+        &mut self,
+        view: &VoxelView<'_>,
+        flora: FloraView<'_>,
+        fauna: FaunaView<'_>,
+    ) -> bool {
         if !self.renderer.can_stage() {
             self.packs_skipped += 1;
             return false;
         }
         let started = Instant::now();
-        let view = world.view();
         let p = self.renderer.params();
-        let slow = self.packer.prepare(&view, flora, fauna);
+        let slow = self.packer.prepare(view, flora, fauna);
         let packer = &mut self.packer;
         self.renderer.stage(slow, |out| {
-            packer.fill(&view, p.width, p.height, p.depth, out)
+            packer.fill(view, p.width, p.height, p.depth, out)
         });
         let atmosphere = if p.sky_gradient && view.atmosphere_m3 > 0.0 {
             (view.atmosphere_m3 as f32 / 1.5).clamp(0.1, 1.0)
@@ -227,6 +239,14 @@ impl VoxelGpuSink {
         self.ticks_staged += 1;
         self.pack_ms += (Instant::now() - started).as_secs_f64() * 1e3;
         true
+    }
+
+    /// Draw these covered faces instead of the flora's own (`None` goes back to the
+    /// flora's): a fixture that poses spur phases and dormancy the simulation would take
+    /// hours to reach.
+    pub fn set_cover_draws(&mut self, draws: Option<Vec<FaceDraw>>) {
+        self.packer.stands.set_cover_draws(draws.clone());
+        self.packer.cover_override = draws;
     }
 
     /// What the panel has actually been shown, where the target knows: presented frames
@@ -444,8 +464,9 @@ struct Packer {
     animals: Animals,
     /// The baked voxel models, or `None` for the dev-mode glyphs.
     models: Option<Arc<ModelLibrary>>,
-    /// GPU style slots, in the order they were first needed this tick.
-    styles: Vec<Style>,
+    /// GPU style slots, in the order they were first needed this tick, with the texture
+    /// role each draws with (`ROLE_*`).
+    styles: Vec<(Style, u8)>,
     /// `Stands` style index → GPU slot for this tick, so the dedup costs one linear scan
     /// per stand and not one per voxel.
     slot_of: Vec<Option<u8>>,
@@ -466,20 +487,32 @@ struct Packer {
     glyphs: Vec<u8>,
     /// Scratch: the overlay's texture indices.
     overlay: Vec<u32>,
+    /// This tick's latticevine cells (`crate::voxel::vine`), for the tile layer.
+    vines: Vec<VineCell>,
+    /// Whether the latticevine is the tile layer (textures on) rather than plain cells.
+    vine_tiles: bool,
+    /// Faces to draw instead of the flora's own cover: a fixture posing spur phases and
+    /// dormancy by hand.
+    cover_override: Option<Vec<FaceDraw>>,
 }
 
 /// The glyph plane never changes after construction: one key for the life of a renderer.
 const GLYPHS_KEY: u64 = 0;
 
 impl Packer {
-    fn new(p: &VoxelParams, models: Option<Arc<ModelLibrary>>) -> Packer {
+    /// `tiles`: the vine tile atlas is loaded, so the latticevine is drawn as the tile
+    /// layer; otherwise it is plain voxel cells in the stands' grid.
+    fn new(p: &VoxelParams, models: Option<Arc<ModelLibrary>>, tiles: bool) -> Packer {
         let mut glyphs = vec![0u8; p.glyph_bytes()];
         let used = appearance::atlas_len(p.s, p.rise);
         debug_assert!(used <= glyphs.len());
         debug_assert!(appearance::ATLAS_GLYPHS <= MAX_GLYPHS);
         appearance::write_atlas(p.s, p.rise, &mut glyphs[..used]);
+        let mut stands = Stands::empty(p.width, p.height, p.depth);
+        stands.set_vine_cells(!tiles);
         Packer {
-            stands: Stands::empty(p.width, p.height, p.depth),
+            stands,
+            vine_tiles: tiles,
             animals: Animals::empty(p.width, p.height, p.depth),
             models,
             styles: Vec::new(),
@@ -491,21 +524,38 @@ impl Packer {
             roof_key: 0,
             glyphs,
             overlay: Vec::new(),
+            vines: Vec::new(),
+            cover_override: None,
         }
     }
 
     /// Everything that is not a write into the staging buffer: the plant and animal
     /// grids, and the roof if the terrain moved. Returns the slow planes' keys.
-    fn prepare(&mut self, view: &VoxelView<'_>, flora: &Flora, fauna: &Fauna) -> [u64; 2] {
+    fn prepare(
+        &mut self,
+        view: &VoxelView<'_>,
+        flora: FloraView<'_>,
+        fauna: FaunaView<'_>,
+    ) -> [u64; 2] {
         match self.models.as_deref() {
             Some(lib) => {
-                self.stands.rebuild_with(view, flora.view(), lib);
-                self.animals.rebuild_with(view, Some(fauna.view()), lib);
+                self.stands.rebuild_with(view, flora, lib);
+                self.animals.rebuild_with(view, Some(fauna), lib);
             }
             None => {
-                self.stands.rebuild(view, flora.view());
-                self.animals.rebuild(view, Some(fauna.view()));
+                self.stands.rebuild(view, flora);
+                self.animals.rebuild(view, Some(fauna));
             }
+        }
+        self.vines.clear();
+        if self.vine_tiles {
+            let draws = match &self.cover_override {
+                Some(d) => d.clone(),
+                None => flora.cover.draw(),
+            };
+            self.vines = vine::cells(&draws, view.config, |id| {
+                flora.cover.vine(id).map(|v| v.root)
+            });
         }
         if self.roof_version != Some(view.terrain_version)
             || self.roof_materials.as_slice() != view.material
@@ -579,7 +629,7 @@ impl Packer {
                 (
                     PART_ANIMAL_INTERIM,
                     beast.glyph().0,
-                    slot_for_style(style, &mut self.styles, &mut self.style_overflow),
+                    slot_for_style((style, 0), &mut self.styles, &mut self.style_overflow),
                 )
             } else {
                 let p = stands.at(xi, i64::from(y), z);
@@ -604,8 +654,19 @@ impl Packer {
             };
             out.voxels[i] = texel_of(m, view.free[src], view.pore[src], part, glyph, slot);
         }
-        for (slot, style) in self.styles.iter().enumerate() {
-            out.styles[slot] = VoxelStyle::new(style.wood, style.crown, style.heart);
+        // The vines last, into the air cells nothing else claimed: an organism, a stand or
+        // a ground mark in the same voxel wins.
+        for c in self.vines.iter().filter(|c| c.kind.tiled()) {
+            let i = VoxelStaging::index(w, h, c.x, c.y, c.z);
+            let t = out.voxels[i];
+            if t.material() == 0 && t.part() == PART_NONE {
+                let (glyph, b, a) = c.texel_bytes();
+                out.voxels[i] = t.with_vine(glyph, b, a);
+            }
+        }
+        for (slot, (style, role)) in self.styles.iter().enumerate() {
+            out.styles[slot] =
+                VoxelStyle::new(style.wood, style.crown, style.heart).with_role(*role);
         }
         if out.write[PLANE_ROOF] {
             out.roof.copy_from_slice(&self.roof);
@@ -664,7 +725,7 @@ fn roof_table(material: &[Material], w: u32, h: u32, d: u32, out: &mut [u8]) {
 
 /// The GPU slot for a style that has no plant part index to cache under (an animal's),
 /// deduplicated by value against the same table the plants fill.
-fn slot_for_style(style: Style, styles: &mut Vec<Style>, overflow: &mut u64) -> u8 {
+fn slot_for_style(style: (Style, u8), styles: &mut Vec<(Style, u8)>, overflow: &mut u64) -> u8 {
     match styles.iter().position(|s| *s == style) {
         Some(at) => at as u8,
         None if styles.len() < MAX_STYLES => {
@@ -678,11 +739,24 @@ fn slot_for_style(style: Style, styles: &mut Vec<Style>, overflow: &mut u64) -> 
     }
 }
 
+/// The texture role of a baked model cell (`cubarium_gpu::voxel::ROLE_*`); anything that
+/// is not a model cell draws untextured.
+fn role_of(tag: Option<Tag>) -> u8 {
+    use cubarium_gpu::voxel::{ROLE_ACCENT, ROLE_BARK, ROLE_DRAPE, ROLE_LEAF, ROLE_NONE};
+    match tag {
+        None => ROLE_NONE,
+        Some(Tag::Trunk) => ROLE_BARK,
+        Some(Tag::Foliage(_)) => ROLE_LEAF,
+        Some(Tag::Drape(_)) => ROLE_DRAPE,
+        Some(Tag::Accent) => ROLE_ACCENT,
+    }
+}
+
 /// The GPU slot for one plant part's style, deduplicated by value.
 fn slot_for(
     stands: &Stands,
     part: Part,
-    styles: &mut Vec<Style>,
+    styles: &mut Vec<(Style, u8)>,
     slot_of: &mut Vec<Option<u8>>,
     overflow: &mut u64,
 ) -> u8 {
@@ -697,6 +771,7 @@ fn slot_for(
     let Some(style) = stands.style(part) else {
         return 0;
     };
+    let style = (style, role_of(stands.model_tag(part)));
     let slot = match styles.iter().position(|s| *s == style) {
         Some(at) => at as u8,
         None if styles.len() < MAX_STYLES => {
@@ -790,6 +865,49 @@ pub fn params_of(cfg: &VoxelConfig, proj: Projection, roof_from_texture: bool) -
     }
 }
 
+/// The face textures at this projection's level, from `cfg.textures_dir`, said once on
+/// stderr. Anything wrong with them draws the faces solid rather than refusing to run.
+pub fn load_textures(cfg: &VoxelConfig, params: &VoxelParams) -> VoxelTextures {
+    if !cfg.textures {
+        return VoxelTextures::empty(params.s, params.rise);
+    }
+    let dir = &cfg.textures_dir;
+    if !dir.exists() {
+        eprintln!(
+            "cubarium voxel: no face textures at {}; drawing solid faces",
+            dir.display()
+        );
+        return VoxelTextures::empty(params.s, params.rise);
+    }
+    match crate::voxel::textures::load(dir, params.s, params.rise) {
+        Ok((atlas, p)) => {
+            let slots = atlas.mask().count_ones();
+            eprintln!(
+                "cubarium voxel: face textures at {} px from {}: {slots} of {} faces \
+                 ({} override, {} level, {} derived here, {} repeated variants); \
+                 {} vine tiles ({} missing)",
+                params.s,
+                dir.display(),
+                cubarium_gpu::voxel::TEXTURE_SLOTS.len(),
+                p.overrides,
+                p.levels,
+                p.derived,
+                p.repeated,
+                p.vine_tiles,
+                p.vine_missing,
+            );
+            atlas
+        }
+        Err(e) => {
+            eprintln!(
+                "cubarium voxel: the face textures in {} did not load ({e:#}); drawing solid faces",
+                dir.display()
+            );
+            VoxelTextures::empty(params.s, params.rise)
+        }
+    }
+}
+
 /// Refuse a world the renderer cannot hold, before the device is opened.
 pub fn check(proj: Projection) -> Result<()> {
     if proj.cropped {
@@ -856,7 +974,7 @@ mod tests {
                         (
                             PART_ANIMAL_INTERIM,
                             beast.glyph().0,
-                            slot_for_style(style, styles, overflow),
+                            slot_for_style((style, 0), styles, overflow),
                         )
                     } else {
                         let p = stands.at(xi, i64::from(y), z);
@@ -891,8 +1009,9 @@ mod tests {
                 }
             }
         }
-        for (slot, style) in styles.iter().enumerate() {
-            out.styles[slot] = VoxelStyle::new(style.wood, style.crown, style.heart);
+        for (slot, (style, role)) in styles.iter().enumerate() {
+            out.styles[slot] =
+                VoxelStyle::new(style.wood, style.crown, style.heart).with_role(*role);
         }
         out.glyphs.fill(0);
         let used = appearance::atlas_len(p.s, p.rise);
@@ -953,7 +1072,7 @@ mod tests {
                 Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, c).unwrap();
             let params = params_of(&cfg, proj, true);
             Rig {
-                packer: Packer::new(&params, None),
+                packer: Packer::new(&params, None, false),
                 slow: SlowPlanes::new(2),
                 buffers: [Planes::junk(&params), Planes::junk(&params)],
                 images: Planes::junk(&params),
@@ -968,7 +1087,7 @@ mod tests {
             let view = world.view();
             let b = self.ticks % 2;
             self.ticks += 1;
-            let keys = self.packer.prepare(&view, flora, fauna);
+            let keys = self.packer.prepare(&view, flora.view(), fauna.view());
             let write = self.slow.pack(b, keys);
             self.packer.fill(
                 &view,

@@ -30,6 +30,14 @@ use anyhow::{Result, ensure};
 
 use cubarium_voxel::Config as WorldConfig;
 
+/// `rise` for a tilt and a pixel scale: `round(s · tan(tilt))`, at least 1 and at most `s`.
+pub fn rise_for(tilt_degrees: f64, px_per_voxel: u32) -> u32 {
+    let s = px_per_voxel.max(1);
+    (f64::from(s) * tilt_degrees.to_radians().tan())
+        .round()
+        .clamp(1.0, f64::from(s)) as u32
+}
+
 /// One fixed mapping from voxel coordinates to ring pixels, plus the raster it needs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Projection {
@@ -71,9 +79,7 @@ impl Projection {
             tilt_degrees.is_finite() && tilt_degrees > 0.0 && tilt_degrees < 90.0,
             "tilt_degrees must be in (0, 90), got {tilt_degrees}"
         );
-        let rise = (f64::from(s) * tilt_degrees.to_radians().tan())
-            .round()
-            .clamp(1.0, f64::from(s)) as u32;
+        let rise = rise_for(tilt_degrees, s);
 
         let raster_w = u64::from(world.width) * u64::from(s);
         ensure!(

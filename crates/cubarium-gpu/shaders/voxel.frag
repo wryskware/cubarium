@@ -39,12 +39,21 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
     vec4 waterK;        // SKIN_ALPHA_GAIN, WATER_TOP_ALPHA, -, -
     vec4 plantA;        // PLANT_TOP_GAIN, PLANT_TOP_TINT, PLANT_RIM, CROWN_EDGE
     vec4 plantB;        // CROWN_UNDER, TRUNK_SHADE[0], TRUNK_SHADE[1], TRUNK_LIGHT_AT
+    ivec4 tex;          // the face textures present, one bit per slot; vine tiles present; -, -
 } u;
 
 layout(set = 0, binding = 1) uniform usampler3D voxels;  // rgba8ui, one texel per voxel
 layout(set = 0, binding = 2) uniform usampler3D roofTex; // r8ui, voxels to the solid above
 layout(set = 0, binding = 3) uniform sampler2D styleTex; // 3 x MAX_STYLES: wood, crown, heart
 layout(set = 0, binding = 4) uniform usampler2D glyphTex; // shared organism face texels
+// The face textures at this px_per_voxel (`cubarium_gpu::voxel::VoxelTextures`): slot k,
+// variant v is the S x S cell at (v*S, k*S), a top face in its first RISE rows. Texels
+// are sRGB-encoded.
+layout(set = 0, binding = 5) uniform sampler2D faceTex;
+// The latticevine tiles at this px_per_voxel (`VoxelTextures::vine_rgba`): row
+// 3*set + density (plain, climbing, hanging), column 16*mask + exits; row 9 the accents.
+// Direct colour, sRGB.
+layout(set = 0, binding = 6) uniform sampler2D vineTex;
 
 layout(location = 0) out vec4 outColour;
 
@@ -99,6 +108,87 @@ bool waterOpenUp(int x, int y, int z) {
 
 int frontRow(int y, int z) { return BASE - (y + 1) * S - z * RISE; }
 
+// --- face textures --------------------------------------------------------------------
+
+// `TEXTURE_SLOTS`: terrain material m has its side at 2(m-1) and its top at 2(m-1)+1.
+const int TEX_TURF_SIDE = 6;
+// A style's texture role (`ROLE_*`, the alpha of its wood column): bark, leaf and drape
+// have a side slot and a top slot from TEX_BARK_SIDE on; the accent is untextured.
+const int ROLE_BARK = 1;
+const int ROLE_DRAPE = 3;
+const int TEX_BARK_SIDE = 7;
+
+bool texOn(int slot) { return slot >= 0 && (u.tex.x & (1 << slot)) != 0; }
+
+// Which of a face's four variants a voxel shows: a hash of its position, so a wall is not
+// one tile repeating, and the same voxel shows the same variant every frame.
+uint cellHash(int x, int y, int z, int salt) {
+    uint h = uint(x) * 0x9E3779B1u ^ uint(y) * 0x85EBCA77u ^ uint(z) * 0xC2B2AE3Du
+        ^ uint(salt) * 0x27D4EB2Fu;
+    h ^= h >> 15;
+    h *= 0x2C1B3C6Du;
+    h ^= h >> 12;
+    return h;
+}
+
+int texVariant(int x, int y, int z, int salt) {
+    return int(cellHash(x, y, z, salt) & 3u);
+}
+
+// Face texel (dx, dy) of `slot`: dx across the face, dy down a side face from its top row
+// or across a top face from its back edge. The level is px_per_voxel itself, so this is
+// one texel per screen pixel and never filtered.
+vec4 faceTexel(int slot, int x, int y, int z, int salt, int dx, int dy) {
+    int v = texVariant(x, y, z, salt);
+    return texelFetch(faceTex, ivec2(v * S + dx, slot * S + dy), 0);
+}
+
+vec3 srgbToLinear(vec3 c) {
+    return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+}
+
+// --- the latticevine tile layer (`cubarium::voxel::vine`) --------------------------------
+
+// How a vine cell shows its face: flush on the rock behind it (a face looking at the
+// camera), a curtain on its own front (an underside), or a quarter-width sliver against
+// the wall on its left or right (a +x or -x face, seen edge-on).
+const int VINE_FLUSH = 0;
+const int VINE_CURTAIN = 1;
+const int VINE_SLIVER_L = 2;
+const int VINE_SLIVER_R = 3;
+
+// An air voxel with no part and a nonzero glyph id carries a vine cell; the glyph id is
+// its kind plus one.
+bool isVine(uvec4 v) {
+    return u.tex.y != 0 && (v.r & 31u) == 0u && (v.r >> 5) != 0u;
+}
+
+int vineKind(uvec4 v) { return int(v.r >> 5) - 1; }
+
+// The cell's tile at face pixel (dx, dy), row 0 at the top, in linear light; alpha is the
+// cutout. The host resolved which tile (`VineCell::tile`): row in a's low nibble, column
+// 16*mask + exits from b. The accent (bud, flower, fruit) goes over it, jittered a little
+// per cell.
+vec4 vineTexel(uvec4 v, int x, int y, int z, int dx, int dy) {
+    int row = int(v.a & 15u);
+    int col = int(v.b & 15u) * 16 + int(v.b >> 4);
+    vec4 t = texelFetch(vineTex, ivec2(col * S + dx, row * S + dy), 0);
+    int accent = int((v.a >> 4) & 3u);
+    if (accent != 0) {
+        int j = S / 8;
+        uint h = cellHash(x, y, z, 9);
+        int ox = j > 0 ? int(h % uint(2 * j + 1)) - j : 0;
+        int oy = j > 0 ? int((h >> 8) % uint(2 * j + 1)) - j : 0;
+        int ax = dx - ox;
+        int ay = dy - oy;
+        if (ax >= 0 && ax < S && ay >= 0 && ay < S) {
+            vec4 a = texelFetch(vineTex, ivec2((accent - 1) * S + ax, 9 * S + ay), 0);
+            if (a.a >= 0.5) { t = a; }
+        }
+    }
+    return vec4(srgbToLinear(t.rgb), t.a);
+}
+
 // --- colour ---------------------------------------------------------------------------
 
 vec3 strataOf(int m) {
@@ -144,10 +234,17 @@ vec3 plantLit(vec3 c, float shade) {
     return shade < 1.0 ? mix(c, lit, shade) : lit;
 }
 
-vec3 blockBody(uvec4 v) {
+// A solid face's colour before wetness and light: its texture's texel where the slot is
+// present, the material's strata colour where it is not.
+vec3 faceBase(int m, int slot, int x, int y, int z, int salt, int dx, int dy) {
+    if (!texOn(slot)) { return strataOf(m); }
+    return srgbToLinear(faceTexel(slot, x, y, z, salt, dx, dy).rgb);
+}
+
+vec3 blockBody(uvec4 v, vec3 base) {
     int m = matOf(v);
     float wet = holdsPore(m) ? clamp(float(v.b) / 255.0, 0.0, 1.0) : 0.0;
-    return mix(strataOf(m), u.waterDeepC.rgb, wet * u.shadeB.w);
+    return mix(base, u.waterDeepC.rgb, wet * u.shadeB.w);
 }
 
 vec3 blockLit(vec3 body, float shade) {
@@ -174,8 +271,10 @@ vec3 blockFront(int x, int y, int z, uvec4 v, int r, int dx) {
     bool riser = openUp && z > 0 && !solidAt(x, y, z - 1) && solidAt(x, y - 1, z - 1);
     bool onSide = (dx == 0 && openLeft) || (dx + 1 == S && openRight);
 
-    vec3 body = blockBody(v);
     int m = matOf(v);
+    // Soil under open sky wears the turf: the same soil, with a fringe over its top rows.
+    int slot = (m == 3 && openUp && texOn(TEX_TURF_SIDE)) ? TEX_TURF_SIDE : 2 * (m - 1);
+    vec3 body = blockBody(v, faceBase(m, slot, x, y, z, 0, dx, dy));
     if (m != 0 && u.roofK.z > 0.0) {
         body = body * (1.0 + faceGrain(x, y, z, dx, dy) * (u.roofK.z / 0.04));
     }
@@ -207,8 +306,8 @@ vec3 blockTop(int x, int y, int z, uvec4 v, int r, int dx) {
     bool dropRight = openRight && !solidAt(x + 1, y - 1, z);
     bool backContinues = z + 1 < D && solidAt(x, y, z + 1) && !solidAt(x, y + 1, z + 1);
 
-    vec3 body = blockBody(v);
     int m = matOf(v);
+    vec3 body = blockBody(v, faceBase(m, 2 * (m - 1) + 1, x, y, z, 1, dx, dy));
     if (m != 0 && u.roofK.z > 0.0) {
         body = body * (1.0 + faceGrain(x, y, z, dx, dy + 100) * (u.roofK.z / 0.04));
     }
@@ -223,6 +322,26 @@ vec3 glyphPigment(uvec4 v, uint q) {
     return styleAt(int(v.a), int(q & 3u));
 }
 
+// The texture slot a style's cells draw with on this face, or -1: only a baked model's
+// trunk, foliage and drape have one.
+int roleSlot(uvec4 v, bool top) {
+    int role = int(texelFetch(styleTex, ivec2(0, int(v.a)), 0).a + 0.5);
+    if (role < ROLE_BARK || role > ROLE_DRAPE) { return -1; }
+    return TEX_BARK_SIDE + 2 * (role - ROLE_BARK) + (top ? 1 : 0);
+}
+
+// A model cell's texture over its pigment: `r / 128` multiplies the style colour, so the
+// colour pass still decides the hue. False where a leaf or drape cutout has a hole: that
+// texel is not this cell's, and the walk goes on to whatever is behind it.
+bool plantTexel(int x, int y, int z, uvec4 v, bool top, int dx, int dy, inout vec3 base) {
+    int slot = roleSlot(v, top);
+    if (!texOn(slot)) { return true; }
+    vec4 t = faceTexel(slot, x, y, z, top ? 1 : 0, dx, dy);
+    if (slot > TEX_BARK_SIDE + 1 && t.a < 0.5) { return false; }
+    base *= t.r * (255.0 / 128.0);
+    return true;
+}
+
 // Organism anatomy and markings are already resolved in glyphTex by the shared
 // appearance layer. This is deliberately generic: the shader knows only pigment slots
 // and treatments, never bodies, heads, eyes or facing.
@@ -233,6 +352,7 @@ bool glyphFront(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb) {
     vec3 base = glyphPigment(v, q);
     int tone = int(q >> 2);
     if (tone == 63) { return false; }
+    if (!plantTexel(x, y, z, v, false, dx, localY, base)) { return false; }
     bool coveredUp = solidAt(x, y + 1, z)
         || (inY(y + 1) && isBlockPart(partOf(at(x, y + 1, z))));
     if (tone == 1) {
@@ -251,11 +371,12 @@ bool glyphFront(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb) {
     return true;
 }
 
-vec3 glyphCap(int x, int y, int z, uvec4 v, int r, int dx) {
+bool glyphCap(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb) {
     int localY = RISE - 1 - r;
     int atlasY = (partOf(v) * 8 + glyphOf(v)) * (S + RISE) + S + localY;
     uint q = texelFetch(glyphTex, ivec2(dx, atlasY), 0).r;
     vec3 base = glyphPigment(v, q);
+    if (!plantTexel(x, y, z, v, true, dx, localY, base)) { return false; }
     int tone = int(q >> 2);
     float shade = roofShade(roofGap(x, y, z));
     vec3 cap = plantLit(base, shade);
@@ -265,7 +386,8 @@ vec3 glyphCap(int x, int y, int z, uvec4 v, int r, int dx) {
         float gain = 0.5 + float(tone & 15) / 16.0;
         cap = mix(cap, base * gain, u.shadeB.y);
     }
-    return hazed(cap, hazeAt(float(z) + float(r) / float(RISE)));
+    rgb = hazed(cap, hazeAt(float(z) + float(r) / float(RISE)));
+    return true;
 }
 
 // --- water ----------------------------------------------------------------------------
@@ -395,6 +517,19 @@ void main() {
         if (level < H) {
             uvec4 v = at(x, level, z);
             if (solidV(v)) {
+                // A covered rock face looking at the camera: its vine, carried by the air
+                // cell in front, is drawn flush on the rock, which shows through its holes.
+                if (z > 0 && u.tex.y != 0) {
+                    uvec4 f = at(x, level, z - 1);
+                    if (isVine(f) && vineKind(f) == VINE_FLUSH) {
+                        vec4 t = vineTexel(f, x, level, z - 1, dx, S - 1 - r);
+                        if (t.a >= 0.5) {
+                            acc += trans * hazed(t.rgb, hazeAt(float(z)));
+                            trans = 0.0;
+                            break;
+                        }
+                    }
+                }
                 acc += trans * blockFront(x, level, z, v, r, dx);
                 trans = 0.0;
                 break;
@@ -402,6 +537,19 @@ void main() {
             // A plant stands in the void and the water of its own cell blends over it: a
             // trunk in a pool is submerged, so the water is nearer than the plant.
             if (v.g != 0u) { waterAt(x, level, z, v, px.y, acc, trans); }
+            if (isVine(v)) {
+                int k = vineKind(v);
+                int q = max(1, S / 4);
+                if (k == VINE_CURTAIN || (k == VINE_SLIVER_L && dx < q)
+                    || (k == VINE_SLIVER_R && dx >= S - q)) {
+                    vec4 t = vineTexel(v, x, level, z, dx, S - 1 - r);
+                    if (t.a >= 0.5) {
+                        acc += trans * hazed(t.rgb, hazeAt(float(z)));
+                        trans = 0.0;
+                        break;
+                    }
+                }
+            }
             int p = partOf(v);
             if (p != 0) {
                 vec3 art;
@@ -414,8 +562,9 @@ void main() {
         }
 
         // The cap of the voxel below the band, which reaches its bottom `rise` rows.
-        // Getting here means the band's own voxel is air and holds no block plant, so
-        // the CPU's `open_up` and `!covered_up` are both true by construction.
+        // Getting here means the band's own voxel is air, holds no block plant, or holds
+        // a model's leaf or drape with a hole at this pixel - so the cap is what shows
+        // through, which for the terrain is the CPU's `open_up` and `!covered_up`.
         int below = level - 1;
         if (r < RISE && below >= 0 && below < H) {
             uvec4 v = at(x, below, z);
@@ -431,8 +580,9 @@ void main() {
             // crown is seen through that surface, not instead of it.
             if (v.g != 0u) { waterAt(x, below, z, v, px.y, acc, trans); }
             int p = partOf(v);
-            if (isBlockPart(p)) {
-                acc += trans * glyphCap(x, below, z, v, r, dx);
+            vec3 cap;
+            if (isBlockPart(p) && glyphCap(x, below, z, v, r, dx, cap)) {
+                acc += trans * cap;
                 trans = 0.0;
                 break;
             }

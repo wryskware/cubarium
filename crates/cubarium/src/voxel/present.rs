@@ -114,7 +114,7 @@ use std::sync::{Arc, LazyLock};
 use cubarium_render::Canvas;
 use cubarium_voxel::{Material, VoxelView};
 use cubarium_voxel_fauna::FaunaView;
-use cubarium_voxel_flora::FloraView;
+use cubarium_voxel_flora::{FaceDraw, FloraView};
 use cube_proto::Face;
 
 use crate::present::{mix, srgb_linear};
@@ -373,6 +373,13 @@ impl VoxelPresenter {
             animals: Animals::empty(0, 0, 0),
             models: None,
         }
+    }
+
+    /// Draw these covered faces instead of the flora's own; `None` goes back to them. The
+    /// latticevine is drawn as plain voxel cells in the stands' grid
+    /// ([`super::stand::Stands::set_cover_draws`]).
+    pub fn set_cover_draws(&mut self, draws: Option<Vec<FaceDraw>>) {
+        self.stands.set_cover_draws(draws);
     }
 
     /// Draw organisms with these baked models ([`super::model`]); `None` draws the
