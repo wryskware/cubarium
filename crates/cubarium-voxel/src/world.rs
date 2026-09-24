@@ -539,17 +539,10 @@ impl Default for VoidRuns {
 /// The tallest world whose columns fit one [`VoidRuns::mask`] word: the water exchange's
 /// bitmask path covers heights up to this, and the dense scan is the fallback above it.
 /// The panel's ring is 72 rows, so a 64-bit word was not enough.
-pub(crate) const MASK_ROWS: usize = 128;
+pub(crate) const MASK_ROWS: usize = cubarium_rules::water::MASK_ROWS;
 
 /// `len` set bits starting at row `y`: one run of rows in a column mask.
-#[inline]
-pub(crate) fn run_bits(y: usize, len: usize) -> u128 {
-    if len >= MASK_ROWS {
-        u128::MAX
-    } else {
-        ((1u128 << len) - 1) << y
-    }
-}
+pub(crate) use cubarium_rules::water::run_bits;
 
 /// One maximal stack of non-solid cells in one column: rows `y0..=top` inclusive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -827,10 +820,9 @@ impl World {
         self.step_with(default_threads());
     }
 
-    /// [`World::step`] with a thread count. Execution only, and since package PA
-    /// (2026-09-22) ignored: the one phase that split, the exchange's column scan, is
-    /// serial again — the pool sat on the board's little cores and the scan was 1.7 ms of
-    /// the tick. The parameter stays so callers need not change if a phase splits again.
+    /// [`World::step`] with a thread count. Execution only: it sizes the rayon pool the
+    /// water phases split their columns across (`crate::water::exchange`), and `1` runs
+    /// every phase on the calling thread.
     pub fn step_with(&mut self, threads: usize) {
         crate::water::step(self, threads);
         self.advance_tick();
@@ -955,7 +947,12 @@ impl World {
     /// full scan; the step calls it when a set says it is stale.
     pub(crate) fn rebuild_active_sets(&mut self) {
         let n = self.config.cells();
-        self.wet.reset(n);
+        let plane = self.config.width as usize * self.config.depth as usize;
+        if self.config.height as usize <= MASK_ROWS {
+            self.wet.reset_with_columns(n, plane);
+        } else {
+            self.wet.reset(n);
+        }
         self.damp.reset(n);
         self.drainable.reset(n);
         for i in 0..n {

@@ -31,6 +31,13 @@ pub(crate) struct CellSet {
     /// Set when something wrote the water arrays directly — a snapshot, generation, a
     /// resize — so the next step rebuilds instead of trusting the cache.
     dirty: bool,
+    /// Per column (`index % plane`), the rows that are members, bit `index / plane`: kept
+    /// only when `plane` is nonzero ([`CellSet::reset_with_columns`]), for a world at most
+    /// 128 cells tall. The single-source exchange reads the wet set this way
+    /// (`cubarium_rules::water`), so it walks columns and never sorts the members.
+    /// Updated only when membership actually changes, so the division is paid per flip.
+    cols: Vec<u128>,
+    plane: usize,
 }
 
 impl Default for CellSet {
@@ -39,6 +46,8 @@ impl Default for CellSet {
             cells: Vec::new(),
             slot: Vec::new(),
             dirty: true,
+            cols: Vec::new(),
+            plane: 0,
         }
     }
 }
@@ -75,6 +84,21 @@ impl CellSet {
         self.slot.clear();
         self.slot.resize(n, 0);
         self.dirty = false;
+        self.cols.clear();
+        self.plane = 0;
+    }
+
+    /// [`CellSet::reset`], keeping the per-column row masks of a world with `plane`
+    /// columns (at most 128 rows).
+    pub(crate) fn reset_with_columns(&mut self, n: usize, plane: usize) {
+        self.reset(n);
+        self.plane = plane;
+        self.cols.resize(plane, 0);
+    }
+
+    /// The per-column row masks, or empty when this set keeps none.
+    pub(crate) fn columns(&self) -> &[u128] {
+        &self.cols
     }
 
     pub(crate) fn insert(&mut self, i: usize) {
@@ -83,6 +107,9 @@ impl CellSet {
         }
         self.cells.push(i);
         self.slot[i] = self.cells.len() as u32;
+        if self.plane != 0 {
+            self.cols[i % self.plane] |= 1u128 << (i / self.plane);
+        }
     }
 
     pub(crate) fn remove(&mut self, i: usize) {
@@ -96,6 +123,9 @@ impl CellSet {
             self.slot[last] = at as u32 + 1;
         }
         self.slot[i] = 0;
+        if self.plane != 0 {
+            self.cols[i % self.plane] &= !(1u128 << (i / self.plane));
+        }
     }
 
     /// Insert or remove by a predicate the caller has just made true or false.

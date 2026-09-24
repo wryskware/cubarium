@@ -168,15 +168,14 @@
 use std::cell::RefCell;
 
 use crate::material::REFERENCE_VOXEL_M;
-use crate::world::{MASK_ROWS, VoidRun, run_bits};
+use crate::world::{MASK_ROWS, VoidRun};
 use crate::{Command, Config, DT, Material, World};
 
-/// The fraction of a head difference that crosses one face in one substep.
-///
-/// **Placeholder** (`design/backlog.md`): 0.5 is the largest coefficient that cannot make
-/// a pair overshoot — moving half of a difference leaves both ends level — and nothing
-/// measured it. It is the only number in the local exchange.
-const FLOW_PER_SUBSTEP: f64 = 0.5;
+// `FLOW_PER_SUBSTEP` (0.5, the fraction of a head difference that crosses one face in
+// one substep), `ROOM_EPS` and `HEAD_PASSES` (4) are the exchange's own numbers and live
+// with its rule in `cubarium_rules::water` (the single-source trial). Both are
+// **placeholders** (`design/backlog.md`).
+use cubarium_rules::water::{FLOW_PER_SUBSTEP, HEAD_PASSES, ROOM_EPS};
 
 /// **Minimum spreading depth** (package C, agreed by Wrysk 2026-09-22): free water
 /// shallower than this — metres of depth in its own cell, so `free < MIN_SPREAD_DEPTH_M /
@@ -196,19 +195,6 @@ const FLOW_PER_SUBSTEP: f64 = 0.5;
 /// shipped `small` landform's spring-route fixture fails, because what it counts at the
 /// spring is invisible spray; see the package C commit.
 const MIN_SPREAD_DEPTH_M: f64 = 1.25e-7;
-
-/// A cell with less than this much room left counts as full, so a float hair of room
-/// cannot make the displacement target a cell that cannot actually take anything.
-const ROOM_EPS: f64 = 1e-12;
-
-/// How many local passes carry head through **submerged** water in one substep: how far
-/// pressure travels sideways before anything moves.
-///
-/// **Placeholder** (`design/backlog.md`). Four passes per substep and four substeps means
-/// pressure reaches sixteen cells a tick, so a wide lake levels over a few ticks instead of
-/// instantly, and a U-tube whose connection is two cells long feels the far column's weight
-/// on the first substep. It is the one number that replaces the old region search.
-const HEAD_PASSES: u32 = 4;
 
 // ---------------------------------------------------------------- store primitives
 //
@@ -284,25 +270,23 @@ fn add_free(w: &mut World, i: usize, vol: f64) -> f64 {
     if vol <= 0.0 || w.material[i].is_solid() {
         return 0.0;
     }
-    let v = voxel(w);
-    let before = w.free[i];
-    w.free[i] = (before + vol / v).min(1.0);
+    let (after, moved) = cubarium_rules::water::fill(w.free[i], vol, voxel(w));
+    w.free[i] = after;
     // The active set is maintained here because this is one of the two places free water
     // is written: a phase that iterates the wet set can only be right if the primitives
     // keep it right.
-    w.wet.set(i, w.free[i] > 0.0);
-    (w.free[i] - before).max(0.0) * v
+    w.wet.set(i, after > 0.0);
+    moved
 }
 
 fn take_free(w: &mut World, i: usize, vol: f64) -> f64 {
     if vol <= 0.0 || w.material[i].is_solid() {
         return 0.0;
     }
-    let v = voxel(w);
-    let before = w.free[i];
-    w.free[i] = (before - vol / v).max(0.0);
-    w.wet.set(i, w.free[i] > 0.0);
-    (before - w.free[i]).max(0.0) * v
+    let (after, moved) = cubarium_rules::water::empty(w.free[i], vol, voxel(w));
+    w.free[i] = after;
+    w.wet.set(i, after > 0.0);
+    moved
 }
 
 fn add_pore(w: &mut World, i: usize, vol: f64) -> f64 {
@@ -310,12 +294,11 @@ fn add_pore(w: &mut World, i: usize, vol: f64) -> f64 {
     if vol <= 0.0 || cap <= 0.0 {
         return 0.0;
     }
-    let unit = voxel(w) * cap;
-    let before = w.pore[i];
-    w.pore[i] = (before + vol / unit).min(1.0);
-    w.damp.set(i, w.pore[i] > 0.0);
+    let (after, moved) = cubarium_rules::water::fill(w.pore[i], vol, voxel(w) * cap);
+    w.pore[i] = after;
+    w.damp.set(i, after > 0.0);
     w.drainable.set(i, drains(w, i));
-    (w.pore[i] - before).max(0.0) * unit
+    moved
 }
 
 fn take_pore(w: &mut World, i: usize, vol: f64) -> f64 {
@@ -323,12 +306,11 @@ fn take_pore(w: &mut World, i: usize, vol: f64) -> f64 {
     if vol <= 0.0 || cap <= 0.0 {
         return 0.0;
     }
-    let unit = voxel(w) * cap;
-    let before = w.pore[i];
-    w.pore[i] = (before - vol / unit).max(0.0);
-    w.damp.set(i, w.pore[i] > 0.0);
+    let (after, moved) = cubarium_rules::water::empty(w.pore[i], vol, voxel(w) * cap);
+    w.pore[i] = after;
+    w.damp.set(i, after > 0.0);
     w.drainable.set(i, drains(w, i));
-    (before - w.pore[i]).max(0.0) * unit
+    moved
 }
 
 /// Whether `drain` can move pore water out of cell `i`: a porous, permeable cell holding
@@ -385,7 +367,7 @@ fn transfer(w: &mut World, from: (usize, Store), to: (usize, Store), vol: f64) -
         (i, Store::Free) => free_room_m3(w, i),
         (i, Store::Pore) => pore_room_m3(w, i),
     };
-    let want = vol.min(have).min(room);
+    let want = cubarium_rules::water::transfer_want(vol, have, room);
     if want <= 0.0 {
         return 0.0;
     }
@@ -546,7 +528,8 @@ pub fn begin(world: &mut World) {
 /// One tick of water, as one call. **The phase order is the rule** and it is written out
 /// once, here; `cubarium-voxel-sim`'s schedule chains the same public phases in the same
 /// order and this stays as the three-call sequence's water leg for tests and warm-ups.
-/// `threads` reaches only [`exchange`], which ignores it since package PA.
+/// `threads` sizes the pool the phases split their columns across ([`exchange`]); `1`
+/// runs them all on the calling thread.
 pub fn step(world: &mut World, threads: usize) {
     begin(world);
     crate::voxel_phase!(WorldStep, {
@@ -973,7 +956,7 @@ pub fn water_table(w: &mut World) {
 #[derive(Default)]
 struct Scratch {
     /// A wet cell's head, in cell units: the surface of the full stack it sits at the foot
-    /// of (package H, [`scan_column_mask`]) — its own `y + free` if it is not full. Valid
+    /// of (package H, [`scan_column`]) — its own `y + free` if it is not full. Valid
     /// for the wet cells of this substep's active columns.
     head: Vec<f64>,
     /// Dense fallback only (worlds taller than [`MASK_ROWS`]): for every non-solid cell of
@@ -984,9 +967,6 @@ struct Scratch {
     /// Dense fallback only: the top cell of each non-solid cell's own void run, where a
     /// displacement stops. A world cell index.
     run_top: Vec<u32>,
-    /// Wet and effectively-full rows in each column, for the mask path.
-    wet_mask: Vec<u128>,
-    full_mask: Vec<u128>,
     /// One cell's offers this pass, `(destination, volume)`, before the giver's own stock
     /// scales them.
     offers: Vec<(usize, f64)>,
@@ -1068,8 +1048,6 @@ impl Scratch {
         }
         if self.col_stamp.len() != plane {
             self.col_stamp = vec![0; plane];
-            self.wet_mask = vec![0; plane];
-            self.full_mask = vec![0; plane];
             self.stamp = 0;
         }
         if self.nbr_dims != (width, depth) {
@@ -1162,7 +1140,7 @@ fn rows_of(cells: &[usize], plane: usize, rows: &mut Vec<u32>) {
 ///
 /// Each substep every wet cell offers water to its four horizontal neighbours and to the
 /// cell below, driven by the difference in **column head** — the surface level of the
-/// packed full stack the cell sits at the foot of ([`scan_column_mask`]): its own
+/// packed full stack the cell sits at the foot of (`cubarium_rules::water::column_heads`): its own
 /// `y + free` if it is not full. That one
 /// definition is what carries pressure without any connectivity search: the bottom cell of
 /// a deep column has its whole column's head, so it pushes hard sideways; a full cell in a
@@ -1189,8 +1167,12 @@ fn rows_of(cells: &[usize], plane: usize, rows: &mut Vec<u32>) {
 /// substep, which is a travelling wave rather than an instant re-level. `FLOW_PER_SUBSTEP`
 /// is a placeholder and the only number in the rule.
 ///
-/// `threads` is unused since package PA: the scan it split is serial again (see
-/// [`Scratch`]). It stays in the signature so the schedule's callers are unchanged.
+/// **`threads`** picks the driver (`design/handoffs/voxel-water-parallel-2026-09-24.md`):
+/// `1` runs the per-column rule serially on the calling thread ([`Serial`]); more runs it
+/// on the process's rayon pool of that many workers ([`Parallel`] on
+/// [`cubarium_rules::water::host::pool`]) when the `parallel` feature is on. The schedule
+/// passes `SimConfig::threads`. Worlds taller than [`MASK_ROWS`] take the dense serial path
+/// whatever `threads` says.
 pub fn exchange(w: &mut World, threads: usize) {
     #[cfg(feature = "profile")]
     let census = crate::profile::census::before(w, crate::profile::census::Tag::Exchange);
@@ -1200,10 +1182,178 @@ pub fn exchange(w: &mut World, threads: usize) {
 }
 
 fn exchange_inner(w: &mut World, threads: usize) {
-    exchange_inner_with_masks(w, threads, w.config.height as usize <= MASK_ROWS);
+    if w.config.height as usize > MASK_ROWS {
+        exchange_dense(w);
+        return;
+    }
+    #[cfg(feature = "parallel")]
+    if threads > 1 {
+        PARALLEL.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            if slot.as_ref().is_none_or(|p| p.threads() != threads) {
+                *slot = Some(Parallel::new(threads));
+            }
+            exchange_with(w, slot.as_mut().expect("just made"));
+        });
+        return;
+    }
+    let _ = threads;
+    SERIAL.with(|b| exchange_with(w, &mut *b.borrow_mut()));
 }
 
-fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
+pub use cubarium_rules::water::host::{ExchangeBackend, Serial};
+#[cfg(feature = "parallel")]
+pub use cubarium_rules::water::host::Parallel;
+
+/// Build the process's water pool of `threads` workers now, if the phases will use one
+/// (`threads > 1` and the `parallel` feature). The phases build it on first use anyway;
+/// a host calls this first so the workers exist before it pins its own threads, since a
+/// thread inherits the affinity of the one that spawns it (`Sim::new` does, beside the
+/// compute pool). `threads = 1` builds nothing: every phase runs on the caller.
+pub fn prepare_pool(threads: usize) {
+    #[cfg(feature = "parallel")]
+    if threads > 1 {
+        let _ = cubarium_rules::water::host::pool(threads);
+    }
+    let _ = threads;
+}
+
+thread_local! {
+    /// The live exchange on one thread: the per-column rule, driven on the calling thread.
+    /// Its scratch is per calling thread, like [`SCRATCH`].
+    static SERIAL: RefCell<Serial> = RefCell::new(Serial::default());
+    /// The live exchange on the process's pool: the calling thread's scratch, and a handle
+    /// on the shared pool of the thread count it was last asked for.
+    #[cfg(feature = "parallel")]
+    static PARALLEL: RefCell<Option<Parallel>> = const { RefCell::new(None) };
+    /// The wet set's flips an exchange reports, reused.
+    static FLIPS: RefCell<Vec<(usize, bool)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// **The exchange through `cubarium_rules::water`** (from the single-source trial,
+/// `design/handoffs/voxel-single-source-gpu-trial-2026-09-23.md`): one per-column rule,
+/// driven by `backend` — [`Serial`] or [`Parallel`] (what [`exchange`] picks by its thread
+/// count), or any other [`ExchangeBackend`] (the trial's GPU driver was one). Worlds at
+/// most [`MASK_ROWS`] tall; [`exchange`] keeps the dense path for taller ones.
+///
+/// The rule is the one [`exchange_dense`] implements over the ascending wet list,
+/// restructured per column: see `cubarium_rules::water`. It agrees with that path to
+/// rounding, not to the bit.
+pub fn exchange_with(w: &mut World, backend: &mut dyn ExchangeBackend) {
+    if w.wet.len() == 0 {
+        return;
+    }
+    let (width, depth, height) = (
+        w.config.width as usize,
+        w.config.depth as usize,
+        w.config.height as usize,
+    );
+    assert!(
+        height <= MASK_ROWS,
+        "the per-column exchange covers worlds up to {MASK_ROWS} rows, not {height}"
+    );
+    if w.wet.columns().len() != width * depth {
+        w.rebuild_active_sets();
+    }
+    w.ensure_void_runs();
+    let grid = cubarium_rules::water::Grid {
+        width,
+        depth,
+        height,
+    };
+    let p = cubarium_rules::water::Params {
+        min_spread: MIN_SPREAD_DEPTH_M / w.config.voxel_m,
+        transfer_cap: w.config.free_transfer_cap,
+    };
+    #[cfg(feature = "profile")]
+    census_substep(w);
+    FLIPS.with(|slot| {
+        let flips = &mut *slot.borrow_mut();
+        flips.clear();
+        backend.exchange(
+            grid,
+            &mut w.free,
+            &w.void_runs.mask,
+            w.wet.columns(),
+            &p,
+            flips,
+        );
+        for &(i, now) in flips.iter() {
+            w.wet.set(i, now);
+        }
+    });
+}
+
+/// The census's view of one substep of the per-column exchange (profile builds only,
+/// and only while a census tick is open): its proposals recomputed serially from the
+/// state it starts from, which cells an accepted proposal touched, and the water's runs.
+/// The same counts the ascending-list exchange reported from inside itself.
+#[cfg(feature = "profile")]
+fn census_substep(w: &mut World) {
+    use crate::profile::census::{self, BINS, Substep};
+    use rustc_hash::{FxHashMap, FxHashSet};
+    if !census::open() {
+        return;
+    }
+    let edges = rules_proposals(w);
+    let plane = w.config.width as usize * w.config.depth as usize;
+    let mut proposed: FxHashMap<usize, f64> = FxHashMap::default();
+    for &(_, to, q) in &edges {
+        *proposed.entry(to).or_default() += q;
+    }
+    let mut moved: FxHashSet<usize> = FxHashSet::default();
+    let (mut edge_depth, mut edge_depth_unpacked) = ([0u64; BINS], [0u64; BINS]);
+    let masks = w.wet.columns().to_vec();
+    for &(from, to, q) in &edges {
+        let acc = cubarium_rules::water::accept(proposed[&to], w.free[to]);
+        if q * acc > 0.0 {
+            moved.insert(from);
+            moved.insert(to);
+        }
+        let b = census::bin(w.free[from]);
+        edge_depth[b] += 1;
+        let (y, col) = (from / plane, from % plane);
+        let above = masks[col].checked_shr(y as u32 + 1).unwrap_or(0) & 1;
+        if !cubarium_rules::water::is_full(w.free[from]) && above != 0 {
+            edge_depth_unpacked[b] += 1;
+        }
+    }
+    let (mut runs, mut columns, mut unpacked) = (0u64, 0u64, 0u64);
+    for (col, &m) in masks.iter().enumerate() {
+        if m == 0 {
+            continue;
+        }
+        let mut full = 0u128;
+        let mut rest = m;
+        while rest != 0 {
+            let y = rest.trailing_zeros() as usize;
+            rest &= rest - 1;
+            if cubarium_rules::water::is_full(w.free[y * plane + col]) {
+                full |= 1u128 << y;
+            }
+        }
+        columns += 1;
+        runs += u64::from((m & !(m << 1)).count_ones());
+        unpacked += u64::from((m & !full & (m >> 1)).count_ones());
+    }
+    let wet = w.wet.cells();
+    census::exchange_substep(Substep {
+        wet: wet.len() as u64,
+        no_edge: wet.iter().filter(|i| !moved.contains(i)).count() as u64,
+        runs,
+        columns,
+        unpacked,
+        edge_depth,
+        edge_depth_unpacked,
+    });
+}
+
+/// **The dense fallback** for worlds taller than [`MASK_ROWS`], serial: the exchange's rule
+/// over the ascending wet list, with each active column's displacement targets filled by a
+/// dense walk of its cached void runs ([`scan_column`]). The same rule as
+/// `cubarium_rules::water`'s per-column one; the two agree to rounding
+/// (`the_rules_exchange_follows_the_dense_path_within_rounding`). No preset is this tall.
+fn exchange_dense(w: &mut World) {
     if w.wet.len() == 0 {
         return;
     }
@@ -1229,19 +1379,6 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
         // horizontal neighbours live in. Dry rock and dry air are never looked at.
         w.wet.sorted_into(&mut sc.bits, &mut sc.active);
         rows_of(&sc.active, plane, &mut sc.rows);
-        if use_masks {
-            sc.wet_mask.fill(0);
-            sc.full_mask.fill(0);
-            for k in 0..sc.active.len() {
-                let (i, y) = (sc.active[k], sc.rows[k] as usize);
-                let col = i - y * plane;
-                let bit = 1u128 << y;
-                sc.wet_mask[col] |= bit;
-                if w.free[i] >= 1.0 - ROOM_EPS {
-                    sc.full_mask[col] |= bit;
-                }
-            }
-        }
         for k in 0..sc.active.len() {
             let col = sc.active[k] - sc.rows[k] as usize * plane;
             sc.col_stamp[col] = stamp;
@@ -1273,7 +1410,7 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
         // displaces to.
         #[cfg(feature = "profile")]
         lap.next(crate::profile::Phase::ExchangeScan);
-        scan_columns(w, plane, use_masks, sc);
+        scan_columns(w, plane, sc);
         #[cfg(feature = "profile")]
         lap.next(crate::profile::Phase::ExchangeHeads);
 
@@ -1414,11 +1551,7 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
                 }
                 let q = cap_flux(transfer_cap, FLOW_PER_SUBSTEP * drop);
                 let before = sc.offers.len();
-                let placed = if use_masks {
-                    offer_up_the_run_mask(w, plane, nb as usize, y, q, sc)
-                } else {
-                    offer_up_the_run(w, plane, j, q, sc)
-                };
+                let placed = offer_up_the_run(w, plane, j, q, sc);
                 for &(target, q) in &sc.offers[before..] {
                     sc.offer_list.push((target as u32, q, face as u8));
                 }
@@ -1527,7 +1660,7 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
             let total = total * share;
             let scale = share * if total > have { have / total } else { 1.0 };
             #[cfg(feature = "profile")]
-            let (y, base, edges_before) = (g.y as usize, g.y as usize * plane, sc.edges.len());
+            let (base, edges_before) = (g.y as usize * plane, sc.edges.len());
             for oi in g.start as usize..g.end as usize {
                 let (target, q, face) = sc.offer_list[oi];
                 let target = target as usize;
@@ -1554,16 +1687,8 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
             }
             #[cfg(feature = "profile")]
             if census {
-                let col = i - base;
                 let b = crate::profile::census::bin(have);
-                let made = (sc.edges.len() - edges_before) as u64;
-                edge_depth[b] += made;
-                // Unpacked: not full, with a wet cell above it in its own column, so its
-                // head is its run's top however little water lies between.
-                let above = sc.wet_mask[col].checked_shr(y as u32 + 1).unwrap_or(0) & 1;
-                if use_masks && have < 1.0 - ROOM_EPS && above != 0 {
-                    edge_depth_unpacked[b] += made;
-                }
+                edge_depth[b] += (sc.edges.len() - edges_before) as u64;
             }
         }
 
@@ -1637,17 +1762,8 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
                     .iter()
                     .filter(|&&i| sc.moved_stamp[i] != stamp)
                     .count() as u64;
-                let (mut runs, mut columns, mut unpacked) = (0u64, 0u64, 0u64);
-                if use_masks {
-                    for &col in &sc.columns {
-                        let (m, f) = (sc.wet_mask[col], sc.full_mask[col]);
-                        if m != 0 {
-                            columns += 1;
-                            runs += u64::from((m & !(m << 1)).count_ones());
-                            unpacked += u64::from((m & !f & (m >> 1)).count_ones());
-                        }
-                    }
-                }
+                // The dense path keeps no row masks, so it reports no run shape.
+                let (runs, columns, unpacked) = (0u64, 0u64, 0u64);
                 crate::profile::census::exchange_substep(crate::profile::census::Substep {
                     wet: sc.active.len() as u64,
                     no_edge,
@@ -1705,38 +1821,6 @@ fn offer_from(
     placed
 }
 
-/// Mask-backed displacement lookup for worlds no taller than [`MASK_ROWS`]. The first
-/// target still uses `ROOM_EPS`; once found, the unchanged upward walk accepts every
-/// positive sliver of room, including one smaller than `ROOM_EPS`.
-fn offer_up_the_run_mask(
-    w: &World,
-    plane: usize,
-    col: usize,
-    y: usize,
-    q: f64,
-    sc: &mut Scratch,
-) -> f64 {
-    let void = w.void_runs.mask[col];
-    let run_len = (void >> y).trailing_ones() as usize;
-    if run_len == 0 {
-        return 0.0;
-    }
-    let available = run_bits(y, run_len) & !sc.full_mask[col];
-    if available == 0 {
-        return 0.0;
-    }
-    let first_y = available.trailing_zeros() as usize;
-    let top_y = y + run_len - 1;
-    offer_from(
-        w,
-        plane,
-        first_y * plane + col,
-        top_y * plane + col,
-        q,
-        &mut sc.offers,
-    )
-}
-
 /// `free_transfer_cap`, when the config sets one: the most one face may move in one
 /// substep, in cell units. Zero leaves the flux uncapped, which is the default.
 #[inline]
@@ -1744,24 +1828,10 @@ fn cap_flux(cap: f64, q: f64) -> f64 {
     if cap > 0.0 { q.min(cap) } else { q }
 }
 
-/// The column scan over every active column, serial. Worlds up to [`MASK_ROWS`] rows fill
-/// heads from the wet-row masks; taller worlds take the dense walk over the cached void
-/// runs, which also fills the displacement tables the mask path reads from its masks.
-fn scan_columns(w: &World, plane: usize, use_masks: bool, sc: &mut Scratch) {
+/// The column scan over every active column, serial: the dense walk over the cached void
+/// runs, heads and displacement tables together.
+fn scan_columns(w: &World, plane: usize, sc: &mut Scratch) {
     let free = &w.free[..];
-    if use_masks {
-        for &col in &sc.columns {
-            scan_column_mask(
-                free,
-                plane,
-                col,
-                sc.wet_mask[col],
-                sc.full_mask[col],
-                &mut sc.head,
-            );
-        }
-        return;
-    }
     let offset = &w.void_runs.offset[..];
     let runs = &w.void_runs.runs[..];
     for &col in &sc.columns {
@@ -1777,60 +1847,14 @@ fn scan_columns(w: &World, plane: usize, use_masks: bool, sc: &mut Scratch) {
     }
 }
 
-/// **Head from the packed full stack** (package H, 2026-09-22). A wet cell at row `y`
-/// takes the surface of the full stack it sits at the foot of: with `s` the first row at
-/// or above `y` that is not full, the head is `s + free[s]` when row `s` is wet — the
-/// partial cell capping the stack — so a partial cell is its own `s` and its head is its
-/// own level. A full stack capped by a dry cell, a roof or the world top keeps its top
-/// cell's own surface, `top + free[top]`: the old run-top answer, which is `s` to within
-/// `ROOM_EPS`. A packed run (full cells under one partial top) therefore has exactly the
-/// head it always had, and a lake, a U-tube and a full-to-the-roof passage are unchanged.
-///
-/// What changed is a **hollow** run, wet cells that are not full stacked on each other:
-/// until H every cell of it carried the run top's surface, so the bottom film of a falling
-/// stack pushed at a dry neighbour with a drop the height of the stack and displaced
-/// slivers up the neighbour's column (the census at 382ef3a: 78 % of a shower's active
-/// wet cells, 96 % of its proposals).
-///
-/// Per wet run, from the top down: the top cell carries its own surface, and each cell
-/// below carries the head of the cell above it if it is full, or its own level if it is
-/// not. `full` is the exchange's own full mask (`free >= 1 - ROOM_EPS`). Writes `head` at
-/// the column's own world indices.
-#[inline]
-fn scan_column_mask(
-    free: &[f64],
-    plane: usize,
-    col: usize,
-    mut wet: u128,
-    full: u128,
-    head: &mut [f64],
-) {
-    while wet != 0 {
-        let y = wet.trailing_zeros() as usize;
-        let run = (wet >> y).trailing_ones() as usize;
-        let top = y + run - 1;
-        let mut at = top * plane + col;
-        let mut surface = top as f64 + free[at];
-        head[at] = surface;
-        for r in (y..top).rev() {
-            at -= plane;
-            if (full >> r) & 1 == 0 {
-                surface = r as f64 + free[at];
-            }
-            head[at] = surface;
-        }
-        wet &= !run_bits(y, run);
-    }
-}
-
 /// One pass over a column: the head of every wet cell, and the displacement target of
 /// every non-solid cell. The dense fallback.
 ///
 /// A **void run** is a maximal stack of non-solid cells; the displacement target of a cell
 /// is the lowest cell with room at or above it *within its own run*, because a solid
 /// ceiling is where a push stops. A **water run** is a maximal stack of wet cells inside a
-/// void run; its heads follow [`scan_column_mask`]'s rule, from the packed full stack,
-/// with the same operations in the same order so the two paths stay bit-identical.
+/// void run; its heads follow `cubarium_rules::water::column_heads`' rule (package H),
+/// from the packed full stack.
 ///
 /// The runs themselves are **static geometry**, handed in from [`World::void_runs`], so
 /// this pass never rediscovers them from `material`; only the water-dependent values —
@@ -2477,6 +2501,63 @@ fn spill_to_nearest_void(w: &mut World, from: usize, volume_m3: f64) -> f64 {
         shell = next;
     }
     placed
+}
+
+/// Every proposal the single-source exchange would make in `w`'s next substep, as
+/// `(from, to, q)` world cells in cell units: the rules crate's phases A and B, serially.
+/// For the tests that look inside a substep, and the census.
+#[cfg(any(test, feature = "profile"))]
+pub(crate) fn rules_proposals(w: &mut World) -> Vec<(usize, usize, f64)> {
+    use cubarium_rules::water::{
+        Field, Grid, Params, column_drive_pass, column_edges, column_heads,
+    };
+    begin(w);
+    w.ensure_void_runs();
+    let grid = Grid {
+        width: w.config.width as usize,
+        depth: w.config.depth as usize,
+        height: w.config.height as usize,
+    };
+    let (n, plane) = (grid.cells(), grid.plane());
+    let wet = w.wet.columns().to_vec();
+    let mut full = vec![0u128; plane];
+    let mut head = vec![0.0; n];
+    for col in 0..plane {
+        if wet[col] != 0 {
+            full[col] = column_heads(grid, col, wet[col], &w.free, |i, h| head[i] = h);
+        }
+    }
+    let mut drive = head.clone();
+    for _ in 0..HEAD_PASSES {
+        let src = drive.clone();
+        for col in 0..plane {
+            if full[col] != 0 {
+                column_drive_pass(grid, col, &wet, &full, &src, |i, h| drive[i] = h);
+            }
+        }
+    }
+    let field = Field {
+        grid,
+        free: &w.free,
+        void: &w.void_runs.mask,
+        wet: &wet,
+        full: &full,
+        head: &head,
+        drive: &drive,
+    };
+    let p = Params {
+        min_spread: MIN_SPREAD_DEPTH_M / w.config.voxel_m,
+        transfer_cap: w.config.free_transfer_cap,
+    };
+    let mut out = Vec::new();
+    for col in 0..plane {
+        if wet[col] != 0 {
+            column_edges(&field, &p, col, |from, to_col, to_row, q| {
+                out.push((from * plane + col, to_row * plane + to_col, q));
+            });
+        }
+    }
+    out
 }
 
 /// Tiny function fixtures for [`fall`] alone: the sparse snapshot must move water exactly

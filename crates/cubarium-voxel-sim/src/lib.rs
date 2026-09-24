@@ -211,6 +211,11 @@ impl Sim {
         let threads = config.threads.max(1);
         if threads > 1 {
             ComputeTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(threads).build());
+            // The water phases' rayon pool of the same size, built now rather than on the
+            // first exchange so its workers exist before a host pins its loop (a spawned
+            // thread inherits its spawner's affinity). The two pools never run at once:
+            // the schedule is a chain, so while water runs the compute pool is idle.
+            water::prepare_pool(threads);
         }
 
         let mut ecs = World::new();

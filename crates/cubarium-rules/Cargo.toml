@@ -1,0 +1,15 @@
+[package]
+name = "cubarium-rules"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Simulation rules written once as plain, allocation-free functions over plain data (the water exchange and column phases), with serial and rayon host drivers. no_std-compatible so a GPU driver can compile the same source."
+
+[features]
+default = []
+# The multi-threaded host drivers of the water phases (rayon over columns).
+par = ["dep:rayon"]
+
+[dependencies]
+rayon = { version = "1", optional = true }

@@ -11,14 +11,14 @@ default = ["parallel"]
 # (`design/7_Research/voxel-tick-profile-2026-09-18.md`). Measurement only: it adds no
 # rule, changes no number, and with the feature off every call site is compiled away.
 profile = []
-# Formerly in-phase multithreading for `water::exchange`'s column scan on a `bevy_tasks`
-# pool. Package PA (2026-09-22) made that scan serial again — on the board the pool sat on
-# the little cores at an IPC of 0.1 and the scan was 1.7 ms of the tick — so the feature
-# pulls nothing in. Kept so `cubarium-voxel-sim`'s `features = ["parallel"]` still resolves.
-parallel = []
+# The water phases on a rayon pool (`cubarium-rules`' host drivers), sized by the caller's
+# `threads` (`SimConfig::threads` in the schedule). Without it every phase runs serially
+# whatever `threads` says. `design/handoffs/voxel-water-parallel-2026-09-24.md`.
+parallel = ["cubarium-rules/par"]
 
 [dependencies]
 anyhow = { workspace = true }
+cubarium-rules = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 postcard = { version = "1", features = ["use-std"] }

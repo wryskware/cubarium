@@ -13,6 +13,7 @@ members = [
     "crates/cubarium-voxel-flora",
     "crates/cubarium-voxel-fauna",
     "crates/cubarium-voxel-sim",
+    "crates/cubarium-rules",
 ]
 
 [workspace.package]
@@ -31,6 +32,7 @@ cubarium-voxel = { path = "crates/cubarium-voxel" }
 cubarium-voxel-flora = { path = "crates/cubarium-voxel-flora" }
 cubarium-voxel-fauna = { path = "crates/cubarium-voxel-fauna" }
 cubarium-voxel-sim = { path = "crates/cubarium-voxel-sim" }
+cubarium-rules = { path = "crates/cubarium-rules" }
 # The tick's backbone (`crates/cubarium-voxel-sim`) and the in-phase task pool. Kept to
 # `std` only: `bevy_reflect`, `backtrace` and the multi-threaded *system* executor are all
 # off, because the schedule is a fixed chain and the parallelism lives inside phases
