@@ -1295,8 +1295,17 @@ def render_geo(sc, g, path):
     bpy.data.collections.remove(col)
 
 
+# The tiles' leaf ramp, lifted from the model's (Wrysk, 2026-09-24: full tiles were
+# mostly #1E2798 and vanished against the rock): the outer and middle scales are the body
+# #2B6AD0, the centre (newest) scales #42C5F8, and #1E2798 is only the 1-px shadow edge
+# that vine_tiles_sheet.py draws under the body afterwards. (Shifting every ring one step,
+# middle ring to #42C5F8 too, made the full tiles more cyan than body.)
+TILE_SHINGLES = {"lv_shingle0": "#2B6AD0", "lv_shingle1": "#2B6AD0", "lv_shingle2": "#42C5F8"}
+
+
 def render_tiles(out_dir):
     import subprocess
+    L.PAL.update(TILE_SHINGLES)
     os.makedirs(out_dir, exist_ok=True)
     for f in os.listdir(out_dir):  # the set is replaced whole
         if f.startswith("vine-") and f.endswith(".png"):
