@@ -169,4 +169,30 @@ mod tests {
         set.sorted_into(&mut bits, &mut out);
         assert_eq!(out, [3, 63, 64, 77, 128, 150, 199]);
     }
+
+    /// The row-mask storage holds the same set as the list: the same members ascending,
+    /// the same count through inserts, repeats and removals, and it compares equal to a
+    /// list holding them.
+    #[test]
+    fn row_masks_hold_the_same_set_as_the_list() {
+        let (plane, n) = (7, 7 * 128);
+        let (mut list, mut masks) = (CellSet::default(), CellSet::default());
+        list.reset(n);
+        masks.reset_columns(n, plane);
+        for i in [0, 6, 7, 300, 127 * 7 + 6, 63 * 7 + 2, 64 * 7 + 2, 300, 5] {
+            list.insert(i);
+            masks.insert(i);
+        }
+        for i in [300, 5, 11] {
+            list.remove(i);
+            masks.remove(i);
+        }
+        assert_eq!(masks.len(), list.len());
+        assert_eq!(masks.members(), list.members());
+        assert_eq!(masks.members(), [0, 6, 7, 63 * 7 + 2, 64 * 7 + 2, 127 * 7 + 6]);
+        assert!(masks.contains(127 * 7 + 6) && !masks.contains(300));
+        assert_eq!(masks, list);
+        masks.insert(8);
+        assert_ne!(masks, list);
+    }
 }

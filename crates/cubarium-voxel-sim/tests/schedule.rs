@@ -194,11 +194,13 @@ fn read(world: &World, flora: &Flora, fauna: &Fauna) -> Reading {
     }
 }
 
-/// The three-call sequence, which is still what the core fixtures drive.
+/// The three-call sequence, which is still what the core fixtures drive, with the water
+/// on one thread like the schedule it is compared with: `World::step` splits the water
+/// phases across its default pool, whose sums land in a different order.
 fn three_calls(ticks: u64) -> Reading {
     let (mut world, mut flora, mut fauna) = conditioned();
     for _ in 0..ticks {
-        world.step();
+        world.step_with(1);
         flora.step(&mut world);
         fauna.step(&world, &mut flora);
     }
@@ -293,10 +295,9 @@ fn the_schedule_is_the_three_call_sequence() {
 
 /// The brief's own check: stored water and per-species mean root-box pore after 200
 /// coupled ticks agree across thread counts within 1e-6 relative, and every residual
-/// still closes. There is no reduction inside either parallel phase — a column's scan and
-/// an animal's plan are independent, and nothing is summed across chunks — so the
-/// agreement observed is exact; the tolerance is what is *asserted*, because a future
-/// parallel phase with a fold in it may only manage that much.
+/// still closes. The water phases on a pool do fold (a proposal into a neighbour's cell is
+/// an atomic add, drainage sums the aquifer's share per chunk), so the agreement is to
+/// rounding and what grows from it, not exact; the tolerance is what is asserted.
 #[test]
 fn the_thread_count_does_not_move_the_soil() {
     let one = schedule(200, 1);

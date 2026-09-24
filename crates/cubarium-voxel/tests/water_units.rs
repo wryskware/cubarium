@@ -125,7 +125,7 @@ fn a_draining_column_moves_the_pre_1c_volume_on_the_reference_grid() {
 
     let before = pore_m3(&w, 1);
     let aquifer_before = w.aquifer_head_m();
-    water::drain(&mut w);
+    water::drain(&mut w, 1);
     let moved = before - pore_m3(&w, 1);
 
     assert_rel(
@@ -155,7 +155,7 @@ fn surface_infiltration_moves_the_pre_1c_volume_on_the_reference_grid() {
     });
 
     let before = free_m3(&w, 2);
-    water::infiltrate(&mut w, DT);
+    water::infiltrate(&mut w, DT, 1);
     let moved = before - free_m3(&w, 2);
 
     assert_rel(
@@ -182,7 +182,7 @@ fn the_aquifer_exchange_moves_the_pre_1c_volume_on_the_reference_grid() {
     // Uptake: dry soil inside the saturated band takes one transfer from the store.
     let mut w = column(5, 0.25, 1e4, 0.7);
     wet_soil(&mut w, 1, 0.0);
-    water::water_table(&mut w);
+    water::water_table(&mut w, 1);
     assert_rel(pore_m3(&w, 1), want(&w), "one tick of aquifer uptake");
     assert!(residual(&w).abs() < 1e-12, "residual {}", residual(&w));
 
@@ -190,7 +190,7 @@ fn the_aquifer_exchange_moves_the_pre_1c_volume_on_the_reference_grid() {
     // transfer up into it, at the support's rate.
     let mut w = column(5, 0.25, 1e4, 0.7);
     wet_soil(&mut w, 1, 1.0);
-    water::water_table(&mut w);
+    water::water_table(&mut w, 1);
     assert_rel(free_m3(&w, 2), want(&w), "one tick of aquifer seepage");
     assert!(residual(&w).abs() < 1e-12, "residual {}", residual(&w));
 }
@@ -264,7 +264,7 @@ fn slab_drained_m_per_m2(voxel_m: f64, ticks: u32) -> (f64, f64) {
     let store = |w: &World| w.config().aquifer_volume_for_head(w.aquifer_head_m());
     let before = store(&w);
     for _ in 0..ticks {
-        water::drain(&mut w);
+        water::drain(&mut w, 1);
     }
     let gained = store(&w) - before;
     (gained / footprint, residual(&w))
@@ -347,7 +347,7 @@ fn standing_water_soaks_in_at_the_same_depth_on_both_grids() {
         });
         let before = free_m3(&w, cells + 1);
         for _ in 0..TICKS {
-            water::infiltrate(&mut w, DT);
+            water::infiltrate(&mut w, DT, 1);
         }
         ((before - free_m3(&w, cells + 1)) / area, residual(&w))
     };
