@@ -297,6 +297,55 @@ fn the_mouths_reach_through_the_cache_is_the_uncached_scan() {
     }
 }
 
+/// End to end: a mouth reading the flora's view — cached crowns and its reach index —
+/// picks exactly what it picks from a view with neither (every crown computed, every
+/// stand visited), for both diets, at every face and eight headings, and the diagnostic
+/// list matches too.
+#[test]
+fn a_mouth_through_the_index_and_the_cache_picks_what_the_full_scan_picks() {
+    use crate::Diet;
+    for seed in [3, 29] {
+        let (world, flora, _) = strip(seed);
+        let view = world.view();
+        let fv = flora.view();
+        let bare = FloraView {
+            crowns: cubarium_voxel_flora::CrownCache::none(),
+            ..fv
+        };
+        let body = crate::FounderPhysiology::frozen(crate::Founder::Browser).adult_body();
+        let mut hits = 0usize;
+        for face in faces(&view) {
+            for k in 0..8 {
+                let pose = Pose {
+                    x: (f64::from(face.x) + 0.5) * V,
+                    z: (f64::from(face.z) + 0.5) * V,
+                    heading_rad: std::f64::consts::TAU * f64::from(k) / 8.0,
+                };
+                let cols = crate::body::mouth_columns(&view, &pose, &body);
+                for diet in [Diet::Vascular, Diet::Fungal] {
+                    let indexed = crate::body::mouth_foliage_stand(&fv, &view, &cols, face.y, &body, diet);
+                    let scanned =
+                        crate::body::mouth_foliage_stand(&bare, &view, &cols, face.y, &body, diet);
+                    assert_eq!(
+                        indexed.map(|(s, v)| (s, v.to_bits())),
+                        scanned.map(|(s, v)| (s, v.to_bits())),
+                        "seed {seed}, {face:?} heading {k}, {diet:?}"
+                    );
+                    hits += usize::from(indexed.is_some());
+                    let list = |f: &FloraView<'_>| {
+                        crate::body::mouth_foliage_stands(f, &view, &cols, face.y, &body, diet)
+                            .into_iter()
+                            .map(|(s, v)| (s, v.to_bits()))
+                            .collect::<Vec<_>>()
+                    };
+                    assert_eq!(list(&fv), list(&bare), "seed {seed}, {face:?}, {diet:?}");
+                }
+            }
+        }
+        assert!(hits > 20, "the mouths found food ({hits})");
+    }
+}
+
 // --------------------------------------------------------- item 5: the detritus field
 
 /// The support-layer graph as it stood at `main` a31ecdc.

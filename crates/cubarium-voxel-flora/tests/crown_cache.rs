@@ -137,6 +137,39 @@ fn check(view: &FloraView<'_>, what: &str) -> usize {
     view.stands.len()
 }
 
+/// The reach index against its definition: at every column of the world, the stands
+/// listed are exactly those whose widest layer disc boxes it — within `max_disc_span`
+/// in wrapped `x` and in `z` — ascending; off the strip, none.
+fn check_index(view: &FloraView<'_>, world: &World, what: &str) {
+    let c = world.config();
+    let (w, d) = (i64::from(c.width), i64::from(c.depth));
+    for z in 0..c.depth {
+        for x in 0..w {
+            let got = view
+                .stands_near(x, z, c.width, c.depth)
+                .unwrap_or_else(|| panic!("{what}: no current reach index"));
+            let want: Vec<u32> = view
+                .stands
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| {
+                    let span = Crown::of(view.config, s, view.config.voxel_m).max_disc_span();
+                    let dx = (x - i64::from(s.site.x)).rem_euclid(w);
+                    let dx = dx.min(w - dx);
+                    let dz = (i64::from(z) - i64::from(s.site.z)).abs();
+                    dx <= span && dz <= span
+                })
+                .map(|(i, _)| i as u32)
+                .collect();
+            assert_eq!(got, &want[..], "{what}: column ({x}, {z})");
+        }
+    }
+    assert_eq!(view.stands_near(-1, 0, c.width, c.depth), Some(&[][..]), "{what}");
+    assert_eq!(view.stands_near(0, c.depth, c.width, c.depth), Some(&[][..]), "{what}");
+    assert_eq!(view.stands_near(0, 0, c.width + 1, c.depth), None, "{what}: another world");
+    let _ = d;
+}
+
 fn seed(flora: &mut Flora, world: &World, x: i64, species: Species, fraction: f64) -> bool {
     let wood = flora.config().species(species).wood_max * fraction;
     flora.apply(
@@ -182,6 +215,7 @@ fn the_cache_is_a_fresh_computation_through_growth_bites_deaths_a_fall_and_a_see
             }
         }
         assert_eq!(check(&flora.view(), "seeded"), Species::ALL.len());
+        check_index(&flora.view(), &world, "seeded");
 
         // Growth and dieback: the wood moves every tick, and the cache with it.
         let before: Vec<f64> = flora.view().stands.iter().map(|s| s.wood).collect();
@@ -189,6 +223,7 @@ fn the_cache_is_a_fresh_computation_through_growth_bites_deaths_a_fall_and_a_see
             world.step_with(1);
             flora.step(&mut world);
             check(&flora.view(), &format!("tick {t}"));
+            check_index(&flora.view(), &world, &format!("tick {t}"));
         }
         let moved = flora
             .view()
@@ -223,6 +258,7 @@ fn the_cache_is_a_fresh_computation_through_growth_bites_deaths_a_fall_and_a_see
         ));
         assert!(flora.view().stand_at(middle).is_none());
         check(&flora.view(), "after a clear");
+        check_index(&flora.view(), &world, "after a clear");
 
         // The vaulttree's fall: drowned, its wood laid along the fall line.
         let tree = flora
@@ -241,11 +277,13 @@ fn the_cache_is_a_fresh_computation_through_growth_bites_deaths_a_fall_and_a_see
             "it left logs"
         );
         check(&flora.view(), "after the fall");
+        check_index(&flora.view(), &world, "after the fall");
 
         // A new seedling at the front of the list: every stand moves up one.
         assert!(seed(&mut flora, &world, 0, Species::Bloomcrown, 0.05));
         assert_eq!(flora.view().stands[0].site.x, 0);
         check(&flora.view(), "after a seedling");
+        check_index(&flora.view(), &world, "after a seedling");
         for t in 0..10 {
             world.step_with(1);
             flora.step(&mut world);
@@ -273,4 +311,11 @@ fn a_loaded_or_cloned_flora_reads_the_same_crowns() {
     let loaded = cubarium_voxel_flora::snapshot::decode(&cubarium_voxel_flora::snapshot::encode(&flora))
         .expect("round trip");
     check(&loaded.view(), "loaded");
+    // A decode has no world in hand: no index until the next tick or command, and a
+    // reader is told so rather than handed a stale one.
+    let c = world.config();
+    assert_eq!(loaded.view().stands_near(0, 0, c.width, c.depth), None);
+    let mut loaded = loaded;
+    loaded.step(&mut world);
+    check_index(&loaded.view(), &world, "loaded, stepped");
 }
