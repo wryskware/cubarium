@@ -1287,6 +1287,7 @@ fn feed(flora: &mut Flora, world: &World, drink: &[Drink]) -> Vec<Substrate> {
         ..
     } = flora;
     let view = world.view();
+    let index = GroundIndex::build(ground, view.config.width, view.config.depth);
     // Sorted, so the withdrawal order is the ground's own site order, dead wood before
     // litter at a site, and nothing depends on how the stands were reached.
     let mut wants: Vec<Want> = Vec::new();
@@ -1301,7 +1302,7 @@ fn feed(flora: &mut Flora, world: &World, drink: &[Drink]) -> Vec<Substrate> {
         }
         let mut pools: Vec<(usize, Pool, f64)> = Vec::new();
         for s in mycelium_sites(&view, stand.site, sc) {
-            if let Ok(gi) = ground.binary_search_by_key(&s, |g| g.site) {
+            if let Some(gi) = index.get(s) {
                 for pool in [Pool::DeadWood, Pool::Litter] {
                     let held = pool.held(&ground[gi]);
                     if held > 0.0 {
@@ -1357,6 +1358,64 @@ fn feed(flora: &mut Flora, world: &World, drink: &[Drink]) -> Vec<Substrate> {
         ledger.substrate_uptake[stand.species.index()] += out[si].taken.organic;
     }
     out
+}
+
+/// Every ground entry filed by its column, ascending `y` within a column (the ground is
+/// site-sorted, and a stable counting sort keeps that): a site lookup reads one short
+/// column instead of binary-searching the whole ground, which is what a mycelium box of a
+/// hundred-odd sites per saprotroph was doing.
+struct GroundIndex {
+    width: usize,
+    depth: usize,
+    start: Vec<u32>,
+    /// `(y, ground index)`.
+    entries: Vec<(u32, u32)>,
+}
+
+impl GroundIndex {
+    fn build(ground: &[Ground], width: u32, depth: u32) -> GroundIndex {
+        let (width, depth) = (width as usize, depth as usize);
+        let column = |site: Site| {
+            let (x, z) = (site.x as usize, site.z as usize);
+            (x < width && z < depth).then_some(z * width + x)
+        };
+        let mut start = vec![0u32; width * depth + 1];
+        for g in ground {
+            if let Some(c) = column(g.site) {
+                start[c + 1] += 1;
+            }
+        }
+        for c in 0..width * depth {
+            start[c + 1] += start[c];
+        }
+        let mut fill = start.clone();
+        let mut entries = vec![(0u32, 0u32); start[width * depth] as usize];
+        for (gi, g) in ground.iter().enumerate() {
+            if let Some(c) = column(g.site) {
+                entries[fill[c] as usize] = (g.site.y, gi as u32);
+                fill[c] += 1;
+            }
+        }
+        GroundIndex {
+            width,
+            depth,
+            start,
+            entries,
+        }
+    }
+
+    /// The ground index of `site`, as `ground.binary_search_by_key(&site, ..).ok()`.
+    fn get(&self, site: Site) -> Option<usize> {
+        let (x, z) = (site.x as usize, site.z as usize);
+        if x >= self.width || z >= self.depth {
+            return None;
+        }
+        let c = z * self.width + x;
+        self.entries[self.start[c] as usize..self.start[c + 1] as usize]
+            .iter()
+            .find(|e| e.0 == site.y)
+            .map(|e| e.1 as usize)
+    }
 }
 
 /// Which of a site's two dead pools a saprotroph's withdrawal reads. Ordered, because the
@@ -2999,5 +3058,29 @@ mod tests {
         assert_eq!(merged, all);
         insert_sorted(&mut merged, Vec::new());
         assert_eq!(merged, all);
+    }
+
+    #[test]
+    fn the_ground_index_finds_what_the_binary_search_finds() {
+        let (mut flora, world) = crowded(20, 7, 0.5, 12);
+        // Ground on stand sites, plus litter dropped on sites with no stand.
+        for (x, z) in [(0i64, 0u32), (19, 6), (7, 3), (7, 4)] {
+            let site = crate::highest_support(&world.view(), x, z).expect("a face");
+            ground_slot(&mut flora.ground, site);
+        }
+        let c = world.view().config;
+        let index = GroundIndex::build(&flora.ground, c.width, c.depth);
+        for x in 0..c.width + 1 {
+            for z in 0..c.depth + 1 {
+                for y in 0..c.height {
+                    let site = Site { x, y, z };
+                    assert_eq!(
+                        index.get(site),
+                        flora.ground.binary_search_by_key(&site, |g| g.site).ok(),
+                        "{site:?}"
+                    );
+                }
+            }
+        }
     }
 }

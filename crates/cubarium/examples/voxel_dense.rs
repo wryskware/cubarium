@@ -276,6 +276,27 @@ fn profile_run(mut sim: Sim, ticks: u64) {
             println!("  {:<48} {:8.3} ms/tick", p.name(), per(p));
         }
     }
+    // The water's leaves, the flora and fauna totals, and what is left of the tick.
+    let water: f64 = [
+        Phase::Begin,
+        Phase::Rain,
+        Phase::Evaporate,
+        Phase::Infiltrate,
+        Phase::Fall,
+        Phase::Exchange,
+        Phase::Drain,
+        Phase::WaterTable,
+        Phase::Spring,
+        Phase::Outlet,
+    ]
+    .into_iter()
+    .map(per)
+    .sum();
+    let (flora, fauna) = (per(Phase::FloraStep), per(Phase::FaunaStep));
+    println!(
+        "summary water={water:.2} flora={flora:.2} fauna={fauna:.2} other={:.2} ms/tick",
+        wall * 1e3 / ticks as f64 - water - flora - fauna
+    );
     // A digest of the state the run ended in, for comparing two builds on one snapshot:
     // the same rules give the same bits (the stands' observational `water_m3` is left out).
     {
