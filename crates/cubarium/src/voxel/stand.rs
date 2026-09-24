@@ -299,9 +299,10 @@ pub struct Stands {
     /// This rebuild's style index for each `(model material, wilt level)`, or
     /// [`NO_STYLE`]: the model path's styles are shared across stands.
     model_styles: Vec<u16>,
-    /// For each style a baked model's cells paint with, the kind of cell it is (the
-    /// GPU renderer's texture role); shorter than `styles` or `None` for every other.
-    model_tags: Vec<Option<Tag>>,
+    /// For each style a baked model's cells paint with, the species and the kind of cell
+    /// it is (the GPU renderer's texture set and role); shorter than `styles` or `None`
+    /// for every other.
+    model_tags: Vec<Option<(Species, Tag)>>,
     /// Whether the latticevine's covered faces are drawn here as plain voxel cells (the
     /// default). The GPU renderer with textures on draws them as its tile layer instead.
     vine_cells: bool,
@@ -710,7 +711,7 @@ impl Stands {
             heart: c(sw.glint),
         });
         self.model_tags.resize(self.styles.len(), None);
-        self.model_tags[usize::from(style)] = Some(key.tag);
+        self.model_tags[usize::from(style)] = Some((key.species, key.tag));
         self.model_styles[index] = style;
         Some(style)
     }
@@ -776,6 +777,11 @@ impl Stands {
     /// Which kind of baked model cell `part` is — trunk, foliage, drape or accent — or
     /// `None` for a glyph, a log or a mark. Only the GPU renderer's textures ask.
     pub fn model_tag(&self, part: Part) -> Option<Tag> {
+        self.model_cell(part).map(|(_, tag)| tag)
+    }
+
+    /// The species and kind of baked model cell `part` is, or `None` as [`Self::model_tag`].
+    pub fn model_cell(&self, part: Part) -> Option<(Species, Tag)> {
         part.style()
             .and_then(|s| self.model_tags.get(usize::from(s)).copied().flatten())
     }

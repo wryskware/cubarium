@@ -330,10 +330,26 @@ int roleSlot(uvec4 v, bool top) {
     return TEX_BARK_SIDE + 2 * (role - ROLE_BARK) + (top ? 1 : 0);
 }
 
-// A model cell's texture over its pigment: `r / 128` multiplies the style colour, so the
-// colour pass still decides the hue. False where a leaf or drape cutout has a hole: that
-// texel is not this cell's, and the walk goes on to whatever is behind it.
+// A style's species face slot on this face (`VoxelStyle::with_faces`: the alpha of its
+// crown column for the side, of its heart column for the top, slot + 1), or -1.
+int speciesSlot(uvec4 v, bool top) {
+    return int(texelFetch(styleTex, ivec2(top ? 2 : 1, int(v.a)), 0).a + 0.5) - 1;
+}
+
+// A model cell's texture over its pigment. A species face (`species/<species>/`) is
+// direct colour and replaces the pigment; a generic one's `r / 128` multiplies the style
+// colour, so the colour pass still decides the hue. False where a leaf or drape cutout
+// has a hole: that texel is not this cell's, and the walk goes on to whatever is behind
+// it.
 bool plantTexel(int x, int y, int z, uvec4 v, bool top, int dx, int dy, inout vec3 base) {
+    int own = speciesSlot(v, top);
+    if (own >= 0) {
+        vec4 t = faceTexel(own, x, y, z, top ? 1 : 0, dx, dy);
+        int role = int(texelFetch(styleTex, ivec2(0, int(v.a)), 0).a + 0.5);
+        if (role >= ROLE_BARK + 1 && role <= ROLE_DRAPE && t.a < 0.5) { return false; }
+        base = srgbToLinear(t.rgb);
+        return true;
+    }
     int slot = roleSlot(v, top);
     if (!texOn(slot)) { return true; }
     vec4 t = faceTexel(slot, x, y, z, top ? 1 : 0, dx, dy);
