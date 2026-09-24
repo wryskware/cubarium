@@ -1253,12 +1253,17 @@ impl SpeciesConfig {
             // working day for a gap, not a pioneer's.
             hop: 2,
             // Package SU, the woody roles. A seed of **2** minimum packages: a forb-shrub's
-            // seed, half as many for the same effort, each seedling twice the material.
-            // It comes up through a ground cover at **0.02 per check**: a mean of 50
-            // checks, 25 min under a mat, against at most one check (30 s) in a bare gap —
-            // clearly harder, and still well inside even the shortest woody bank (6 h).
+            // seed, each seedling twice the material. `propagule_rate` is scaled by the
+            // same 2 (0.0002 → 0.0004), so seeds per unit time are what they were and the
+            // parent invests twice as much in each: a large woody plant puts more absolute
+            // mass into reproduction than a turf does. It comes up through a ground cover
+            // at **0.1 per check**: a mean of 10 checks, 5 min under a mat, against at most
+            // one check (30 s) in a bare gap — harder, and well inside even the shortest
+            // woody bank (6 h). 0.02 (25 min) left the terrarium's woody share falling at
+            // 2 h (Fable's tuning round).
             seed_mass: 2,
-            overtop_per_check: 0.02,
+            overtop_per_check: 0.1,
+            propagule_rate: 0.0004,
             crown_height_m: [0.375, 1.0],
             crown_radius_m: [0.125, 0.3125],
             // Anatomy document §3, with decisions §5's corrections. A seedling is a
@@ -1629,10 +1634,12 @@ impl SpeciesConfig {
             // Package SU: **2** spore tries, not 8 — with eight the pad's rain found
             // almost every damp face in reach and it took the terrarium's damp ground
             // (121 → 659 stands in 3 h, springturf 54 → 4); with two, the half of the rain
-            // that misses a patchy floor is lost as it would be. A ground cover.
+            // that misses a patchy floor is lost as it would be. Runners 0.3 of the
+            // packages, springturf's share (was 0.5; Fable's tuning round: the pad still
+            // held ~60 % of the terrarium's stands on two tries). A ground cover.
             hop: 6,
             dispersal: Dispersal::Spores,
-            clonal_share: 0.5,
+            clonal_share: 0.3,
             spore_tries: 2,
             ground_cover: true,
             seed_max_age_s: 10_800.0,
@@ -1807,8 +1814,8 @@ impl SpeciesConfig {
     /// - **Slow, long-lived, large reserve.** `wood_max` 5.0 (bloomcrown 0.6),
     ///   `wood_rate` 0.0003 and `foliage_rate` 0.001, `maintenance` 0.0001 and
     ///   `senescence` 0.0005, half the base; `reserve_cap` 1.5, three times the base.
-    ///   `alive_min` 0.02 (the base's 0.05 package, 300 s of a funded donor at
-    ///   `propagule_rate` 0.0002), `donor_min` 2.5, `hop` 4.
+    ///   `alive_min` 0.02 (a 0.05 minimum package; package SU makes a seed four of them at
+    ///   `propagule_rate` 0.0008, still 300 s of a funded donor), `donor_min` 2.5, `hop` 4.
     /// - **Shape.** Crown `[2.25, 3.5]` m × `[0.625, 1.0]` m, grown from the capped seedling
     ///   (package L §2); the profile is anatomy §3's table.
     pub fn vaulttree() -> SpeciesConfig {
@@ -1829,13 +1836,13 @@ impl SpeciesConfig {
             // (1 m): most land under or beside the crown and a few percent 10 m out. 6 h,
             // the bottom of the range: a large tree seed does not keep, and the tree's
             // bet is a seedling in the next gap, not a long bank. Package SU: a seed of
-            // **4** minimum packages (0.2 of material, 30 min of a funded donor's saving),
-            // the biggest seedling of the nine, and bloomcrown's 0.02 per check through a
-            // ground cover.
+            // **4** minimum packages (0.2 of material), the biggest seedling of the nine;
+            // `propagule_rate` ×4 with it (0.0002 → 0.0008), so a funded donor still sends
+            // a seed every 300 s, and bloomcrown's 0.1 per check through a ground cover.
             hop: 4,
             dispersal: Dispersal::Wind,
             seed_mass: 4,
-            overtop_per_check: 0.02,
+            overtop_per_check: 0.1,
             seed_max_age_s: 21_600.0,
             seed_attrition_per_s: 1.0 / 21_600.0,
             wood_max: 5.0,
@@ -1846,7 +1853,7 @@ impl SpeciesConfig {
             senescence: 0.0005,
             foliage_rate: 0.001,
             wood_rate: 0.0003,
-            propagule_rate: 0.0002,
+            propagule_rate: 0.0008,
             crown_height_m: [2.25, 3.5],
             crown_radius_m: [0.625, 1.0],
             // Anatomy document §3. The limbs are a sparse Trunk (structure, no foliage);
@@ -1905,7 +1912,8 @@ impl SpeciesConfig {
     ///   (a 0.2 / 0.6 ramp: 9 at seeds 2 and 4); no fauna, seed 2: 5 → 14.
     ///   `establish_saturated_max` 0.5, `drown_depth_m` 0.1.
     /// - **Repeated paid fruit**: `donor_reserve_floor` 0.7 (base 0.5) and `propagule_rate`
-    ///   0.0004; `wood_max` 1.0, `alive_min` 0.02, `donor_min` 0.4, `hop` 2.
+    ///   0.0004 per minimum package — 0.0012 for package SU's three-package fruit stone;
+    ///   `wood_max` 1.0, `alive_min` 0.02, `donor_min` 0.4, `hop` 2.
     /// - **Shape.** Crown `[0.625, 1.125]` m × `[0.25, 0.4375]` m from the capped seedling.
     ///
     /// **The browse line.** Anatomy §3 gives the adult one foliage layer `0.3–1.0`. A
@@ -1931,16 +1939,17 @@ impl SpeciesConfig {
             drown_depth_m: 0.1,
             // Seeds (package S): the fruit **drops beneath** the crown, `hop` 2 (the
             // seedporter that carries it further is a later package), into the base's 8 h
-            // bank. Package SU: a fruit stone of **3** minimum packages, and bloomcrown's
-            // 0.02 per check through a ground cover.
+            // bank. Package SU: a fruit stone of **3** minimum packages, `propagule_rate`
+            // ×3 with it (0.0004 → 0.0012) so the crop's seed count holds, and
+            // bloomcrown's 0.1 per check through a ground cover.
             hop: 2,
             seed_mass: 3,
-            overtop_per_check: 0.02,
+            overtop_per_check: 0.1,
             wood_max: 1.0,
             alive_min: 0.02,
             donor_min: 0.4,
             donor_reserve_floor: 0.7,
-            propagule_rate: 0.0004,
+            propagule_rate: 0.0012,
             crown_height_m: [0.625, 1.125],
             crown_radius_m: [0.25, 0.4375],
             profile: vec![
@@ -2536,8 +2545,9 @@ impl FloraConfig {
         self
     }
 
-    /// Every species' seed back to **one minimum package**, and no woody seedling coming up
-    /// through ground cover: the seed as it was before package SU.
+    /// Every species' seed back to **one minimum package** at the rate that paid for one,
+    /// and no woody seedling coming up through ground cover: the seed as it was before
+    /// package SU (`propagule_rate` divided by the `seed_mass` it was scaled by).
     ///
     /// For a **fixture whose subject is a package's arithmetic or the lottery's**, written
     /// when one seed was exactly the material of a stand at `alive_min` and a covered site
@@ -2545,6 +2555,7 @@ impl FloraConfig {
     pub fn minimum_seeds(mut self) -> FloraConfig {
         for species in Species::ALL {
             let sc = self.species_mut(species);
+            sc.propagule_rate /= f64::from(sc.seed_mass.max(1));
             sc.seed_mass = 1;
             sc.overtop_per_check = 0.0;
         }

@@ -707,7 +707,7 @@ fn two_species_banks_share_one_site_and_each_donor_pays_only_its_own() {
 #[test]
 fn nothing_outside_hop_ever_receives_and_the_patch_does_not_creep() {
     let mut world = plain(16, 8, 0.6);
-    let mut flora = Flora::new(FloraConfig::default());
+    let mut flora = Flora::new(FloraConfig::default().minimum_seeds());
     assert!(flora.apply(
         &world,
         Command::Seed {
