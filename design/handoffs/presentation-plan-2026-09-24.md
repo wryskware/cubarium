@@ -273,3 +273,29 @@ Common to all three:
   the time uniform through `crates/cubarium/src/sink/gpu/voxel.rs`.
 - *Order:* depth absorption and the boundary test first, then surface and
   reflection, then refraction, foam and glints, each a commit with screenshots.
+
+## L checkpoint 1 review (2026-09-24)
+
+Landed on branch `worktree-agent-a7dfd042149480812` at `fa5b94a8` (not merged).
+
+- Lit costs +0.06 ms GPU at 6 px and +0.22 ms at 13 px on the 5080, and +0.1–0.17 ms
+  of pack a tick.
+- Flat at the panel config is byte-identical to main.
+- Screenshots: `.claude/worktrees/agent-a7dfd042149480812/captures/presentation/L-1/`.
+
+Calls made at the checkpoint:
+
+- **Self-shade:** a stand's own layers don't shade its own cells, because the model
+  never lets a stand shade itself. Terrain under a crown is still attenuated.
+- **Sky pop-in:** the first world frame waits for the sky plane (the founding pulse
+  covers the ~2 s). After a development `SetMaterial` edit it may pop in.
+- **Budget device:** the budget is held on the GPU the app actually runs on (the
+  5080, which `Gpu::open` picks first).
+- **Open for Wrysk (look): the sunlit term.** Lit drops the flat tier's lean of tops
+  toward `lightC`, so terraces lose their lavender and read flatter (luminance −25 %).
+  Step 3 builds the sunlit term in the flat tier's own form, a mix toward `lightC`
+  gated by the binary sun term, with a `sun_tint` knob where 0 is purely
+  multiplicative. Checkpoint 2 shows both, and Wrysk picks.
+- **Also for Wrysk's eye:** AO at 0.5 gives every riser a darker lower band, which
+  reads as horizontal striping on terraces at 13 px. Quantised bilinear AO makes
+  diagonal wedges inside faces.
