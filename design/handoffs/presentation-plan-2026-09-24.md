@@ -334,3 +334,22 @@ Step 4 (emissive) proceeds meanwhile, without touching those knobs.
 - **Dapples → whole-block spots:** a crown cell passes or blocks the sun as a whole
   cell (a hash per cell), with the same mean transmission.
 - **Front brightness:** not raised; it stays as built.
+
+## L merged (2026-09-24)
+
+L merged to main as `b5809f7c`.
+
+- **Lit GPU time** after the crease and dapple change: 1.16 ms at 6 px, 3.82 ms at
+  13 px, 4.13 ms at 13 px textured (5080).
+- **Emission:** marks the glowcap lip (bake step only), ripe lanternberry lanterns and
+  latticevine bell mouths.
+- **Skipped:** the bloomcrown core and sense patches, since their dossiers don't call
+  them luminous. Also the spent glowcap, since the model keeps no peak wood.
+- **Textured leaf holes** no longer pass sun, because dapples are whole-cell.
+- **Open for Wrysk:** glow strength (`glow = 0.5`, pools 12–16 voxels, with a faint
+  round edge), whether the bloomcrown core and sense patches should glow anyway, the
+  glowcap lip as a whole cell, and bloom.
+
+W starts now, from the brief above, off `b5809f7c`. Its first checkpoint is depth
+absorption, the boundary test, the surface normal and the reflection. The second is
+refraction, foam, glints and rain ripples.
