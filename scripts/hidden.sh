@@ -1,23 +1,38 @@
 #!/usr/bin/env bash
 # Run a command whose windows must never reach Wrysk's screen (AGENTS.md, "Windows").
 #
-# Hyprland launches the command with a per-process rule, so every window it maps lands
-# floating and unfocused on the hidden `special:agents` workspace from its first frame.
-# Title and class rules can't do this for our windows: minifb maps its window before it
-# sets a title, and sets no app id. The command keeps this shell's environment and working
-# directory, its output streams here, its exit status is this script's, and an interrupt
-# or timeout here kills it.
+#   scripts/hidden.sh COMMAND [ARGS...]             # default: a private virtual display
+#   scripts/hidden.sh --hyprland COMMAND [ARGS...]  # the real compositor, hidden workspace
 #
-#   scripts/hidden.sh target/release/cubarium voxel --sink gpu --gpu-target window
+# Default: the command runs on its own Xvfb display with Wayland unset, so no number of
+# windows it opens can appear anywhere. Its output, exit status and environment are this
+# shell's. Use this for everything that doesn't need the real compositor.
 #
-# To look at what's there: `hyprctl dispatch togglespecialworkspace agents`.
+# --hyprland: for the rare test that needs Hyprland itself (Wayland presentation, a
+# hidden window's frame pacing). Hyprland launches the command with a rule that puts its
+# first window on the hidden `special:agents` workspace, and a watchdog moves any later
+# window of the command's process tree there the moment it maps. That's needed because
+# a launch rule only reaches the first window, and title or class rules can't catch
+# minifb (it maps before it sets a title and has no app id). Look with
+# `hyprctl dispatch togglespecialworkspace agents`.
 set -euo pipefail
 
-[ $# -gt 0 ] || { echo "usage: scripts/hidden.sh COMMAND [ARGS...]" >&2; exit 2; }
+mode=xvfb
+if [ "${1:-}" = --hyprland ]; then
+  mode=hyprland
+  shift
+fi
+[ $# -gt 0 ] || { echo "usage: scripts/hidden.sh [--hyprland] COMMAND [ARGS...]" >&2; exit 2; }
+export CUBARIUM_HIDDEN_LAUNCH=1
 
-# The live Hyprland: the exported signature if its socket answers, otherwise the first
-# instance under the runtime dir that answers. Stale instance directories are common
-# (every Hyprland restart leaves one), so never take the first one listed.
+if [ "$mode" = xvfb ]; then
+  exec env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET -u HYPRLAND_INSTANCE_SIGNATURE \
+    XDG_SESSION_TYPE=x11 \
+    xvfb-run -a -s "-screen 0 3840x2160x24" "$@"
+fi
+
+# The live Hyprland: the exported signature if its socket answers, otherwise the newest
+# instance that answers. Every Hyprland restart leaves a stale directory behind.
 runtime="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr"
 live=""
 for sig in "${HYPRLAND_INSTANCE_SIGNATURE:-}" $(ls -1t "$runtime" 2>/dev/null); do
@@ -28,17 +43,17 @@ for sig in "${HYPRLAND_INSTANCE_SIGNATURE:-}" $(ls -1t "$runtime" 2>/dev/null); 
   fi
 done
 if [ -z "$live" ]; then
-  echo "scripts/hidden.sh: no live Hyprland; refusing to open a window it can't hide." >&2
-  echo "Use a headless target instead (--gpu-target headless, --gpu-capture DIR)." >&2
+  echo "scripts/hidden.sh: no live Hyprland for --hyprland; use the default mode." >&2
   exit 1
 fi
 export HYPRLAND_INSTANCE_SIGNATURE="$live"
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/cubarium-hidden.XXXXXX")
+token=$(basename "$tmp")
+export CUBARIUM_HIDDEN_TOKEN="$token"
 export -p > "$tmp/env"
 {
   echo 'source "$1/env"'
-  echo 'export CUBARIUM_HIDDEN_LAUNCH=1'
   printf 'cd %q\n' "$PWD"
   printf '%q ' "$@"
   echo '> "$1/log" 2>&1 &'
@@ -47,16 +62,59 @@ export -p > "$tmp/env"
 } > "$tmp/run.sh"
 : > "$tmp/log"
 
+# The watchdog: every window that maps anywhere but special:agents and belongs to a
+# process carrying this run's token in its environment is moved there at once.
+python3 - "$runtime/$live/.socket2.sock" "$token" <<'PY' &
+import json, os, socket, subprocess, sys
+
+sock_path, token = sys.argv[1], sys.argv[2].encode()
+
+def ours(pid):
+    try:
+        with open(f"/proc/{pid}/environ", "rb") as f:
+            return b"CUBARIUM_HIDDEN_TOKEN=" + token in f.read().split(b"\0")
+    except OSError:
+        return False
+
+s = socket.socket(socket.AF_UNIX)
+s.connect(sock_path)
+buf = b""
+while True:
+    data = s.recv(65536)
+    if not data:
+        break
+    buf += data
+    while b"\n" in buf:
+        line, buf = buf.split(b"\n", 1)
+        if not line.startswith(b"openwindow>>"):
+            continue
+        fields = line[len(b"openwindow>>"):].decode(errors="replace").split(",")
+        addr, ws = "0x" + fields[0], fields[1] if len(fields) > 1 else ""
+        if ws == "special:agents":
+            continue
+        clients = json.loads(subprocess.run(["hyprctl", "clients", "-j"],
+                                            capture_output=True).stdout or b"[]")
+        pid = next((c["pid"] for c in clients if c["address"] == addr), None)
+        if pid and ours(pid):
+            subprocess.run(["hyprctl", "dispatch",
+                            f'hl.dsp.window.move({{ workspace = "special:agents", '
+                            f'window = "address:{addr}", follow = false }})'],
+                           capture_output=True)
+PY
+watchdog=$!
+
 child=""
 cleanup() {
   if [ -n "$child" ] && kill -0 "$child" 2>/dev/null; then
     kill -TERM "$child" 2>/dev/null || true
   fi
+  kill "$watchdog" 2>/dev/null || true
   rm -rf "$tmp"
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
+sleep 0.2
 hyprctl eval "hl.exec_cmd(\"bash $tmp/run.sh $tmp\", { workspace = \"special:agents silent\", float = true, no_initial_focus = true })" >/dev/null
 
 for _ in $(seq 100); do

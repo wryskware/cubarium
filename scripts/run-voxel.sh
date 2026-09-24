@@ -6,7 +6,7 @@
 #
 # Agent runs are hidden: under an agent (CLAUDECODE=1 or CODEX_*), or with `--hidden`,
 # `--background` or `--float` (or CUBARIUM_FLOAT=1), the window goes through
-# scripts/hidden.sh onto Hyprland's hidden `special:agents` workspace and never reaches
+# scripts/hidden.sh onto a private Xvfb display and never reaches
 # the screen. A person's own run tiles normally.
 #
 # The CPU presenter's loopback viewer is the fallback where no GPU window is wanted:
