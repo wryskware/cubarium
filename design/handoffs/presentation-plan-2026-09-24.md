@@ -385,3 +385,21 @@ the chorister. glowcap can have a lip i guess."
 
 Queued behind W checkpoint 1: both live in `voxel.frag`, and the lean policy keeps
 one worker per crate unless Wrysk asks for parallel work.
+
+## W checkpoint 1 review (2026-09-24)
+
+W-1 is at `5da09099` (not merged). It has depth absorption, a quantised animated
+surface, a reflection march and a derived flow field (surface gradient plus falling
+cells, in the shader, with no solver change). It costs +0.67 ms of lit GPU at 13 px.
+
+Wrysk's calls:
+
+- **Calmer ripples:** thin horizontal ripple lines instead of round noise blobs, and
+  no blinking specks from tiny reflected objects.
+- **Dark lake edge:** the lake's front face at the world edge goes back to deep indigo.
+- **Brighter waterfall:** falling water stays bright cyan, as in flat and L, instead of
+  dimming with the cliff's shade. The downward streaks stay.
+- **Reflection strength:** unchanged (`water_reflect` 6.0, about 40 %).
+
+These go in after L5, in the same worktree, and W checkpoint 2 (refraction, foam,
+glints, rain ripples) follows.
