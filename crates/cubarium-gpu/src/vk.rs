@@ -34,6 +34,9 @@ pub struct Gpu {
     /// Whether `VK_EXT_external_memory_dma_buf` and friends came up, i.e. whether
     /// [`crate::target::Scanout`] can work at all.
     pub has_dma_buf: bool,
+    /// The `extra_instance_extensions` the loader had, and which were therefore enabled:
+    /// how the desktop window learns whether it can make a surface at all.
+    extra_instance: Vec<String>,
     /// **The queue is externally synchronised.** One device, one queue, and since the
     /// presenter runs on its own thread there are two threads that submit to it: the
     /// presenter for every frame, and whoever reads the raster back for the viewer or a
@@ -55,7 +58,28 @@ impl Gpu {
             ash::khr::get_physical_device_properties2::NAME.as_ptr(),
             ash::khr::external_memory_capabilities::NAME.as_ptr(),
         ];
-        inst_exts.extend(extra_instance_extensions.iter().map(|e| e.as_ptr()));
+        // Only the extras the loader has: a window's surface extensions are asked for on
+        // every machine, and one without a Wayland or an X11 surface still opens the
+        // device (the window then falls back to reading the raster back).
+        let loader: Vec<String> = unsafe { entry.enumerate_instance_extension_properties(None) }
+            .unwrap_or_default()
+            .iter()
+            .map(|e| {
+                unsafe { CStr::from_ptr(e.extension_name.as_ptr()) }
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        let extras: Vec<&CStr> = extra_instance_extensions
+            .iter()
+            .copied()
+            .filter(|n| loader.iter().any(|a| a.as_str() == n.to_str().unwrap_or("")))
+            .collect();
+        inst_exts.extend(extras.iter().map(|e| e.as_ptr()));
+        let extra_instance: Vec<String> = extras
+            .iter()
+            .map(|e| e.to_string_lossy().into_owned())
+            .collect();
         let instance = unsafe {
             entry.create_instance(
                 &vk::InstanceCreateInfo::default()
@@ -137,8 +161,26 @@ impl Gpu {
             queue_family,
             name,
             has_dma_buf,
+            extra_instance,
             queue_guard: Mutex::new(()),
         })
+    }
+
+    /// Whether `name`, one of the extras [`Gpu::open`] was asked for, is enabled.
+    pub fn has_instance_extension(&self, name: &CStr) -> bool {
+        let name = name.to_string_lossy();
+        self.extra_instance.iter().any(|e| *e == name)
+    }
+
+    /// Run `f` on the queue with its lock held: a queue operation that is not a submit,
+    /// such as a swapchain's `vkQueuePresentKHR` or a `vkQueueWaitIdle` before a swapchain
+    /// is rebuilt. The queue is externally synchronised for those too.
+    pub fn with_queue<R>(&self, f: impl FnOnce(vk::Queue) -> R) -> R {
+        let _held = self
+            .queue_guard
+            .lock()
+            .expect("the queue lock is never poisoned");
+        f(self.queue)
     }
 
     /// The first memory type in `bits` with all of `want`.

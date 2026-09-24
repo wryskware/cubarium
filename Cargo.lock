@@ -570,10 +570,13 @@ dependencies = [
  "libc",
  "minifb",
  "png",
+ "raw-window-handle",
  "rustc-hash",
  "serde",
  "serde_json",
  "toml",
+ "wayland-client",
+ "wayland-protocols",
 ]
 
 [[package]]

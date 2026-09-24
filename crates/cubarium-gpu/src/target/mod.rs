@@ -10,11 +10,14 @@
 //! * [`Scanout`] (feature `scanout`) — the same images flipped by *this* process, which
 //!   needs DRM master and therefore the daemon stopped. Kept because it is the path the
 //!   spike measured end to end, so it is the control when a socket frame looks wrong.
-//! * A desktop **window** — a `winit` window and an `ash` swapchain — which lives in
-//!   the standalone `crates/cubarium-gpu/window` crate. It drives exactly the passes
-//!   below through [`Renderer::record`](crate::render::Renderer::record); it is out of
-//!   this crate only so that `winit`'s 110-package tail stays out of the workspace's
-//!   shared lockfile and off the board.
+//! * [`window::WindowPresenter`] — the desktop development window: a swapchain on a
+//!   window the host opened (`minifb`'s, through its raw handles), presented on a thread
+//!   of its own so that a present that blocks — a hidden window on Wayland — stops the
+//!   picture and not the world.
+//! * A second desktop window — a `winit` window and an `ash` swapchain — lives in the
+//!   standalone `crates/cubarium-gpu/window` crate, for the ring's synthetic scene. It is
+//!   out of this crate only so that `winit`'s 110-package tail stays out of the
+//!   workspace's shared lockfile and off the board.
 
 use anyhow::Result;
 use ash::vk;
@@ -23,6 +26,7 @@ use crate::present::FrameSource;
 use crate::vk::Gpu;
 
 pub mod presenter;
+pub mod window;
 
 #[cfg(feature = "scanout")]
 pub mod dmabuf;
