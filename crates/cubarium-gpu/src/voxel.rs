@@ -160,7 +160,20 @@ pub struct VoxelTextures {
     pub rgba: Vec<u8>,
     /// Per slot, a bit per variant already put.
     filled: [u8; TEXTURE_SLOTS.len()],
+    /// The latticevine tiles at this level, [`VoxelTextures::vine_size`]: row
+    /// `3 · set + density` (plain, climbing root, hanging root; bare, thin, full), column
+    /// `16 · mask + exits`; row 9 holds the accents (bud, flower, fruit) in columns 0–2.
+    /// **Direct colour**, sRGB-encoded, alpha a cutout.
+    pub vine_rgba: Vec<u8>,
+    /// Whether any vine tile was put: the shader draws the tile layer only then.
+    pub vine_on: bool,
 }
+
+/// Columns of the vine atlas: sixteen per neighbour mask, one per exits pattern.
+pub const VINE_COLS: u32 = 256;
+/// Rows of the vine atlas: three densities of plain, climbing and hanging tiles, then the
+/// accents.
+pub const VINE_ROWS: u32 = 10;
 
 impl VoxelTextures {
     /// An atlas with nothing in it: every face draws as it did before textures.
@@ -171,7 +184,31 @@ impl VoxelTextures {
             rise,
             rgba: vec![0; (w * h * 4) as usize],
             filled: [0; TEXTURE_SLOTS.len()],
+            vine_rgba: vec![0; (VINE_COLS * VINE_ROWS * s * s * 4) as usize],
+            vine_on: false,
         }
+    }
+
+    /// The vine atlas's size in texels for `s` px per voxel.
+    pub fn vine_size(s: u32) -> (u32, u32) {
+        (VINE_COLS * s, VINE_ROWS * s)
+    }
+
+    /// Copy one `s × s` vine tile (RGBA8) into row `row`, column `col`.
+    pub fn put_vine(&mut self, row: u32, col: u32, rgba: &[u8]) -> Result<()> {
+        let s = self.s;
+        if row >= VINE_ROWS || col >= VINE_COLS || rgba.len() != (s * s * 4) as usize {
+            bail!("no vine tile at row {row} column {col} of {} bytes", rgba.len());
+        }
+        let aw = VINE_COLS * s;
+        for r in 0..s {
+            let src = (r * s * 4) as usize;
+            let dst = (((row * s + r) * aw + col * s) * 4) as usize;
+            self.vine_rgba[dst..dst + (s * 4) as usize]
+                .copy_from_slice(&rgba[src..src + (s * 4) as usize]);
+        }
+        self.vine_on = true;
+        Ok(())
     }
 
     /// Bit `k` set: slot `k` holds every variant, and the shader samples it.
@@ -291,6 +328,18 @@ impl VoxelTexel {
 
     pub fn style(self) -> u8 {
         self.0[3]
+    }
+
+    /// An **air** voxel with no part, carrying a latticevine cell in the fields such a
+    /// voxel leaves unused: the glyph id (nonzero marks the vine), `b` (pore water, which
+    /// air has none of) and `a` (the style, read only under a part). The layout is
+    /// `cubarium::voxel::vine::VineCell::texel_bytes`'s, and `voxel.frag` reads it back.
+    pub fn with_vine(self, glyph: u8, b: u8, a: u8) -> VoxelTexel {
+        let mut t = self;
+        t.0[0] = (t.0[0] & 0x1f) | (glyph & 7) << 5;
+        t.0[2] = b;
+        t.0[3] = a;
+        t
     }
 }
 
@@ -441,7 +490,7 @@ impl VoxelParams {
 
     /// The uniform block, in the layout `voxel.frag` declares, for an atlas holding the
     /// slots in `tex_mask`.
-    fn uniforms(&self, tex_mask: u32) -> VoxelUniforms {
+    fn uniforms(&self, tex_mask: u32, vine_on: bool) -> VoxelUniforms {
         let v = |c: [f32; 3]| [c[0], c[1], c[2], 0.0];
         VoxelUniforms {
             geom: [
@@ -487,7 +536,7 @@ impl VoxelParams {
                 self.trunk_shade[1],
                 self.trunk_light_at,
             ],
-            tex: [tex_mask as i32, 0, 0, 0],
+            tex: [tex_mask as i32, i32::from(vine_on), 0, 0],
         }
     }
 }
@@ -513,7 +562,8 @@ struct VoxelUniforms {
     water: [f32; 4],
     plant_a: [f32; 4],
     plant_b: [f32; 4],
-    /// The face textures present (`VoxelTextures::mask`), then padding.
+    /// The face textures present (`VoxelTextures::mask`), whether the vine tiles are, then
+    /// padding.
     tex: [i32; 4],
 }
 
@@ -740,6 +790,11 @@ pub struct VoxelRenderer {
     tex_view: vk::ImageView,
     /// Which of its slots the shader samples.
     tex_mask: u32,
+    /// The vine tile atlas at this `s`, uploaded once beside it.
+    vine_image: vk::Image,
+    vine_memory: vk::DeviceMemory,
+    vine_view: vk::ImageView,
+    vine_on: bool,
     staging: Vec<HostBuffer>,
     /// Which staging buffer the next pack may use and which the GPU is still reading.
     ring: StagingRing,
@@ -903,10 +958,22 @@ impl VoxelRenderer {
             vk::ImageTiling::OPTIMAL,
             vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST,
         )?;
-        // The atlas goes up once, through a buffer that lives only for this copy.
-        let tex_staging =
-            gpu.host_buffer(textures.rgba.len() as u64, vk::BufferUsageFlags::TRANSFER_SRC)?;
+        let (vine_w, vine_h) = VoxelTextures::vine_size(params.s);
+        let (vine_image, vine_memory) = gpu.image(
+            vine_w,
+            vine_h,
+            vk::Format::R8G8B8A8_UNORM,
+            vk::ImageTiling::OPTIMAL,
+            vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST,
+        )?;
+        // Both atlases go up once, through a buffer that lives only for this copy.
+        let vine_at = align16(textures.rgba.len() as u64);
+        let tex_staging = gpu.host_buffer(
+            vine_at + textures.vine_rgba.len() as u64,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+        )?;
         tex_staging.write(&textures.rgba);
+        tex_staging.write_bytes_at(vine_at, &textures.vine_rgba);
         gpu.one_shot(command_pool, |cb| unsafe {
             for image in [voxel_image, roof_image, style_image, glyph_image] {
                 barrier(
@@ -948,10 +1015,44 @@ impl VoxelRenderer {
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             );
+            barrier(
+                d,
+                cb,
+                vine_image,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            );
+            d.cmd_copy_buffer_to_image(
+                cb,
+                tex_staging.buffer,
+                vine_image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &[vk::BufferImageCopy::default()
+                    .buffer_offset(vine_at)
+                    .image_subresource(
+                        vk::ImageSubresourceLayers::default()
+                            .aspect_mask(vk::ImageAspectFlags::COLOR)
+                            .layer_count(1),
+                    )
+                    .image_extent(vk::Extent3D {
+                        width: vine_w,
+                        height: vine_h,
+                        depth: 1,
+                    })],
+            );
+            barrier(
+                d,
+                cb,
+                vine_image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            );
         })?;
         tex_staging.destroy(gpu);
         let tex_view = gpu.view(tex_image, vk::Format::R8G8B8A8_UNORM)?;
         let tex_mask = textures.mask();
+        let vine_view = gpu.view(vine_image, vk::Format::R8G8B8A8_UNORM)?;
+        let vine_on = textures.vine_on;
         let voxel_view = view_3d(gpu, voxel_image, vk::Format::R8G8B8A8_UINT)?;
         let roof_view = view_3d(gpu, roof_image, vk::Format::R8_UINT)?;
         let style_view = gpu.view(style_image, vk::Format::R32G32B32A32_SFLOAT)?;
@@ -992,7 +1093,7 @@ impl VoxelRenderer {
             vk::BufferUsageFlags::UNIFORM_BUFFER,
         )?;
         for slot in 0..STAGING_RING as u64 {
-            uniforms.write_bytes_at(uniform_stride * slot, &[params.uniforms(tex_mask)]);
+            uniforms.write_bytes_at(uniform_stride * slot, &[params.uniforms(tex_mask, vine_on)]);
         }
 
         let nearest = unsafe {
@@ -1025,6 +1126,7 @@ impl VoxelRenderer {
             sampled(3),
             sampled(4),
             sampled(5),
+            sampled(6),
         ];
         let set_layout = unsafe {
             d.create_descriptor_set_layout(
@@ -1038,7 +1140,7 @@ impl VoxelRenderer {
                 .descriptor_count(1),
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .descriptor_count(5),
+                .descriptor_count(6),
         ];
         let pool = unsafe {
             d.create_descriptor_pool(
@@ -1065,12 +1167,13 @@ impl VoxelRenderer {
                 .image_view(view)
                 .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]
         };
-        let (iv, ir, is, ig, it) = (
+        let (iv, ir, is, ig, it, ivn) = (
             image_info(voxel_view),
             image_info(roof_view),
             image_info(style_view),
             image_info(glyph_view),
             image_info(tex_view),
+            image_info(vine_view),
         );
         unsafe {
             d.update_descriptor_sets(
@@ -1085,6 +1188,7 @@ impl VoxelRenderer {
                     sampled_write(set, 3, &is),
                     sampled_write(set, 4, &ig),
                     sampled_write(set, 5, &it),
+                    sampled_write(set, 6, &ivn),
                 ],
                 &[],
             )
@@ -1130,6 +1234,10 @@ impl VoxelRenderer {
             tex_memory,
             tex_view,
             tex_mask,
+            vine_image,
+            vine_memory,
+            vine_view,
+            vine_on,
             staging,
             uniform_stride,
             last_done: None,
@@ -1334,7 +1442,7 @@ impl VoxelRenderer {
         // `set_params` and `update_weather` only moved `self.params`.
         self.uniforms.write_bytes_at(
             self.uniform_stride * frame.slot as u64,
-            &[self.params.uniforms(self.tex_mask)],
+            &[self.params.uniforms(self.tex_mask, self.vine_on)],
         );
         // and its own four timestamps.
         let q = frame.slot as u32 * QUERY_SLOTS;
@@ -1557,6 +1665,7 @@ impl VoxelRenderer {
                 (self.style_view, self.style_image, self.style_memory),
                 (self.glyph_view, self.glyph_image, self.glyph_memory),
                 (self.tex_view, self.tex_image, self.tex_memory),
+                (self.vine_view, self.vine_image, self.vine_memory),
             ] {
                 d.destroy_image_view(view, None);
                 d.destroy_image(image, None);

@@ -41,7 +41,7 @@ use cubarium_gpu::voxel::{
     VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel, VoxelTextures,
 };
 use cubarium_voxel::{Material, VoxelView, World};
-use cubarium_voxel_flora::{Flora, FloraView};
+use cubarium_voxel_flora::{FaceDraw, Flora, FloraView};
 
 use crate::sink::{FrameSink, Output, WebSink};
 use crate::voxel::VoxelConfig;
@@ -51,6 +51,7 @@ use crate::voxel::model::{ModelLibrary, Tag};
 use crate::voxel::present as cpu;
 use crate::voxel::project::Projection;
 use crate::voxel::stand::{Part, Stands, Style};
+use crate::voxel::vine::{self, VineCell};
 use cubarium_voxel_fauna::{Fauna, FaunaView};
 
 use super::target::{GpuTarget, GpuTargetKind};
@@ -152,7 +153,7 @@ impl VoxelGpuSink {
             gpu,
             renderer,
             target,
-            packer: Packer::new(&params, options.models.clone()),
+            packer: Packer::new(&params, options.models.clone(), textures.vine_on),
             capture: options.capture,
             founding_sky: None,
             web: None,
@@ -238,6 +239,14 @@ impl VoxelGpuSink {
         self.ticks_staged += 1;
         self.pack_ms += (Instant::now() - started).as_secs_f64() * 1e3;
         true
+    }
+
+    /// Draw these covered faces instead of the flora's own (`None` goes back to the
+    /// flora's): a fixture that poses spur phases and dormancy the simulation would take
+    /// hours to reach.
+    pub fn set_cover_draws(&mut self, draws: Option<Vec<FaceDraw>>) {
+        self.packer.stands.set_cover_draws(draws.clone());
+        self.packer.cover_override = draws;
     }
 
     /// What the panel has actually been shown, where the target knows: presented frames
@@ -478,20 +487,32 @@ struct Packer {
     glyphs: Vec<u8>,
     /// Scratch: the overlay's texture indices.
     overlay: Vec<u32>,
+    /// This tick's latticevine cells (`crate::voxel::vine`), for the tile layer.
+    vines: Vec<VineCell>,
+    /// Whether the latticevine is the tile layer (textures on) rather than plain cells.
+    vine_tiles: bool,
+    /// Faces to draw instead of the flora's own cover: a fixture posing spur phases and
+    /// dormancy by hand.
+    cover_override: Option<Vec<FaceDraw>>,
 }
 
 /// The glyph plane never changes after construction: one key for the life of a renderer.
 const GLYPHS_KEY: u64 = 0;
 
 impl Packer {
-    fn new(p: &VoxelParams, models: Option<Arc<ModelLibrary>>) -> Packer {
+    /// `tiles`: the vine tile atlas is loaded, so the latticevine is drawn as the tile
+    /// layer; otherwise it is plain voxel cells in the stands' grid.
+    fn new(p: &VoxelParams, models: Option<Arc<ModelLibrary>>, tiles: bool) -> Packer {
         let mut glyphs = vec![0u8; p.glyph_bytes()];
         let used = appearance::atlas_len(p.s, p.rise);
         debug_assert!(used <= glyphs.len());
         debug_assert!(appearance::ATLAS_GLYPHS <= MAX_GLYPHS);
         appearance::write_atlas(p.s, p.rise, &mut glyphs[..used]);
+        let mut stands = Stands::empty(p.width, p.height, p.depth);
+        stands.set_vine_cells(!tiles);
         Packer {
-            stands: Stands::empty(p.width, p.height, p.depth),
+            stands,
+            vine_tiles: tiles,
             animals: Animals::empty(p.width, p.height, p.depth),
             models,
             styles: Vec::new(),
@@ -503,6 +524,8 @@ impl Packer {
             roof_key: 0,
             glyphs,
             overlay: Vec::new(),
+            vines: Vec::new(),
+            cover_override: None,
         }
     }
 
@@ -523,6 +546,16 @@ impl Packer {
                 self.stands.rebuild(view, flora);
                 self.animals.rebuild(view, Some(fauna));
             }
+        }
+        self.vines.clear();
+        if self.vine_tiles {
+            let draws = match &self.cover_override {
+                Some(d) => d.clone(),
+                None => flora.cover.draw(),
+            };
+            self.vines = vine::cells(&draws, view.config, |id| {
+                flora.cover.vine(id).map(|v| v.root)
+            });
         }
         if self.roof_version != Some(view.terrain_version)
             || self.roof_materials.as_slice() != view.material
@@ -620,6 +653,16 @@ impl Packer {
                 }
             };
             out.voxels[i] = texel_of(m, view.free[src], view.pore[src], part, glyph, slot);
+        }
+        // The vines last, into the air cells nothing else claimed: an organism, a stand or
+        // a ground mark in the same voxel wins.
+        for c in self.vines.iter().filter(|c| c.kind.tiled()) {
+            let i = VoxelStaging::index(w, h, c.x, c.y, c.z);
+            let t = out.voxels[i];
+            if t.material() == 0 && t.part() == PART_NONE {
+                let (glyph, b, a) = c.texel_bytes();
+                out.voxels[i] = t.with_vine(glyph, b, a);
+            }
         }
         for (slot, (style, role)) in self.styles.iter().enumerate() {
             out.styles[slot] =
@@ -825,6 +868,9 @@ pub fn params_of(cfg: &VoxelConfig, proj: Projection, roof_from_texture: bool) -
 /// The face textures at this projection's level, from `cfg.textures_dir`, said once on
 /// stderr. Anything wrong with them draws the faces solid rather than refusing to run.
 pub fn load_textures(cfg: &VoxelConfig, params: &VoxelParams) -> VoxelTextures {
+    if !cfg.textures {
+        return VoxelTextures::empty(params.s, params.rise);
+    }
     let dir = &cfg.textures_dir;
     if !dir.exists() {
         eprintln!(
@@ -838,7 +884,8 @@ pub fn load_textures(cfg: &VoxelConfig, params: &VoxelParams) -> VoxelTextures {
             let slots = atlas.mask().count_ones();
             eprintln!(
                 "cubarium voxel: face textures at {} px from {}: {slots} of {} faces \
-                 ({} override, {} level, {} derived here, {} repeated variants)",
+                 ({} override, {} level, {} derived here, {} repeated variants); \
+                 {} vine tiles ({} missing)",
                 params.s,
                 dir.display(),
                 cubarium_gpu::voxel::TEXTURE_SLOTS.len(),
@@ -846,6 +893,8 @@ pub fn load_textures(cfg: &VoxelConfig, params: &VoxelParams) -> VoxelTextures {
                 p.levels,
                 p.derived,
                 p.repeated,
+                p.vine_tiles,
+                p.vine_missing,
             );
             atlas
         }
@@ -1023,7 +1072,7 @@ mod tests {
                 Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, c).unwrap();
             let params = params_of(&cfg, proj, true);
             Rig {
-                packer: Packer::new(&params, None),
+                packer: Packer::new(&params, None, false),
                 slow: SlowPlanes::new(2),
                 buffers: [Planes::junk(&params), Planes::junk(&params)],
                 images: Planes::junk(&params),

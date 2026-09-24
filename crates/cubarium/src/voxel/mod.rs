@@ -46,6 +46,7 @@ pub mod present;
 pub mod project;
 pub mod stand;
 pub mod textures;
+pub mod vine;
 
 // The seeded habitat, the authored fixture and the founding loop live in
 // `cubarium-voxel-sim` since P5-B, so the search crate founds the worlds this host founds;
@@ -156,6 +157,11 @@ pub struct VoxelConfig {
     /// is from the working directory: the repository on the desktop, `/var/lib/cubarium`
     /// under the panel's unit. Missing models are said once and drawn as glyphs.
     pub models_dir: PathBuf,
+    /// Draw the GPU renderer's face textures and the latticevine's tile layer.
+    /// **Experimental and off by default** (Wrysk, 2026-09-24: voxels stay the main
+    /// look): off, every face is a solid voxel as before textures and the latticevine is
+    /// plain voxel cells. `--textures` turns it on for one run.
+    pub textures: bool,
     /// The GPU renderer's face textures ([`textures`]): `masters/`, `lod/<px>/` and
     /// `override/<px>/`. Relative as `models_dir` is. Missing textures are said once and
     /// the faces drawn solid. The CPU presenter never reads them.
@@ -184,6 +190,7 @@ impl Default for VoxelConfig {
             sky_gradient: true,
             organisms: OrganismLook::Models,
             models_dir: PathBuf::from("assets/voxel-models"),
+            textures: false,
             textures_dir: PathBuf::from("assets/voxel-textures"),
             threads: 0,
             // The shipped `default` landscape, ring and all: a `cubarium voxel` with no
@@ -788,6 +795,9 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         Some(path) => format!("the `[world]` in {}", path.display()),
         None => "the built-in world defaults".to_string(),
     })?;
+    if args.textures {
+        cfg.textures = true;
+    }
     if cfg.px_per_voxel == PX_AUTO {
         // Once, here: the renderer's projection is fixed for the life of the process.
         let panel = args.sink == VoxelSinkArg::Gpu
@@ -3302,6 +3312,7 @@ mod tests {
             gpu_capture: None,
             gpu_web_rate: 0.0,
             gpu_roof_walk: false,
+            textures: false,
         };
         // A snapshot of a schema this build does not speak: postcard's varint for the tag.
         let stale = |n: u8| vec![n, 0, 0, 0, 0, 0, 0, 0];
@@ -4087,6 +4098,7 @@ mod tests {
             gpu_capture: None,
             gpu_web_rate: 0.0,
             gpu_roof_walk: false,
+            textures: false,
         };
 
         // Explicit seed is respected
@@ -4137,6 +4149,7 @@ mod tests {
             gpu_capture: None,
             gpu_web_rate: 0.0,
             gpu_roof_walk: false,
+            textures: false,
         };
 
         // 1. Initial run into empty state dir creates a fresh world

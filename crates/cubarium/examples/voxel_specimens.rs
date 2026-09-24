@@ -182,6 +182,7 @@ fn main() -> Result<()> {
     if gpu {
         let cfg = VoxelConfig {
             px_per_voxel: px,
+            textures: true,
             textures_dir: textures.unwrap_or_else(|| cfg.textures_dir.clone()),
             ..cfg
         };

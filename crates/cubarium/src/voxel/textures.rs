@@ -16,6 +16,11 @@
 //! `<stem>` is one of [`TEXTURE_SLOTS`] (`rock-side`, `soil-top`, `leaf-side`, …) and
 //! `<variant>` is `0..TEX_VARIANTS`.
 //!
+//! The latticevine tiles live one directory down, `masters/vine/<stem>.png` (and
+//! `lod/<px>/vine/`, `override/<px>/vine/`), one file per tile with no variants: the stems
+//! are [`vine_tiles`]'s (`crate::voxel::vine`). They are direct colour with a cutout
+//! alpha, derived the same way.
+//!
 //! # Levels
 //!
 //! A level is `px_per_voxel` itself: the renderer shows one texel per screen pixel, never
@@ -184,6 +189,51 @@ pub fn derive(master: &Image, w: u32, h: u32) -> Image {
     Image { w, h, rgba }
 }
 
+/// Every latticevine tile the renderer's vine atlas holds, as `(row, column, stem,
+/// fallback)`: rows [`super::vine::tile_row`] (plain, climbing root, hanging root; bare,
+/// thin, full), columns [`super::vine::tile_column`] (mask, and the exits inside it), and
+/// row [`super::vine::ACCENT_ROW`] the three accents. `fallback` is the older stem with no
+/// exits digit, drawn while a per-exit file is missing.
+pub fn vine_tiles() -> Vec<(u32, u32, String, Option<String>)> {
+    use super::vine::{
+        ACCENT_ROW, Accent, Density, TileSet, accent_name, tile_column, tile_name, tile_row,
+    };
+    let mut out = Vec::new();
+    for set in TileSet::ALL {
+        for d in Density::ALL {
+            for m in 0..16u8 {
+                for e in (0..16u8).filter(|e| e & !m == 0) {
+                    out.push((
+                        tile_row(set, d),
+                        tile_column(m, e),
+                        tile_name(set, d, m, Some(e)),
+                        Some(tile_name(set, d, m, None)),
+                    ));
+                }
+            }
+        }
+    }
+    for (i, a) in Accent::DRAWN.into_iter().enumerate() {
+        out.push((ACCENT_ROW, i as u32, accent_name(a), None));
+    }
+    out
+}
+
+/// A hanging-root tile with no file of its own: the climbing tile of the flipped mask,
+/// upside down.
+fn hanging_fallback(stem: &str) -> Option<String> {
+    let body = stem.strip_suffix("-hang")?;
+    let (head, mask) = body.rsplit_once('-')?;
+    let m = u8::from_str_radix(mask, 16).ok()?;
+    Some(format!("{head}-{:x}", super::vine::flip_mask(m)))
+}
+
+fn flip_rows(img: &Image) -> Image {
+    let row = (img.w * 4) as usize;
+    let rgba = img.rgba.chunks_exact(row).rev().flatten().copied().collect();
+    Image { rgba, ..*img }
+}
+
 /// Where each face of a loaded atlas came from.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Provenance {
@@ -194,6 +244,9 @@ pub struct Provenance {
     pub repeated: usize,
     /// Slots with nothing, drawn untextured.
     pub absent: usize,
+    /// Vine tiles loaded, and vine tiles with no file at all (drawn as holes).
+    pub vine_tiles: usize,
+    pub vine_missing: usize,
 }
 
 fn file(root: &Path, dir: &str, s: Option<u32>, stem: &str, v: u32) -> PathBuf {
@@ -262,7 +315,56 @@ pub fn load(root: &Path, s: u32, rise: u32) -> Result<(VoxelTextures, Provenance
             atlas.put(slot, v as u32, &img.rgba)?;
         }
     }
+    let vine_level = |stem: &str| -> Result<Option<Image>> {
+        let exact = |path: PathBuf| -> Result<Option<Image>> {
+            if !path.exists() {
+                return Ok(None);
+            }
+            let img = read_png(&path)?;
+            Ok(((img.w, img.h) == (s, s)).then_some(img))
+        };
+        if let Some(img) = exact(vine_file(root, "override", Some(s), stem))? {
+            return Ok(Some(img));
+        }
+        if let Some(img) = exact(vine_file(root, "lod", Some(s), stem))? {
+            return Ok(Some(img));
+        }
+        let master = vine_file(root, "masters", None, stem);
+        Ok(match master.exists() {
+            true => Some(derive(&read_png(&master)?, s, s)),
+            false => None,
+        })
+    };
+    for (row, col, stem, legacy) in vine_tiles() {
+        let mut img = vine_level(&stem)?;
+        if img.is_none()
+            && let Some(legacy) = &legacy
+        {
+            img = match vine_level(legacy)? {
+                Some(img) => Some(img),
+                None => match hanging_fallback(legacy) {
+                    Some(climb) => vine_level(&climb)?.map(|img| flip_rows(&img)),
+                    None => None,
+                },
+            };
+        }
+        match img {
+            Some(img) => {
+                atlas.put_vine(row, col, &img.rgba)?;
+                prov.vine_tiles += 1;
+            }
+            None => prov.vine_missing += 1,
+        }
+    }
     Ok((atlas, prov))
+}
+
+fn vine_file(root: &Path, dir: &str, s: Option<u32>, stem: &str) -> PathBuf {
+    let mut p = root.join(dir);
+    if let Some(s) = s {
+        p = p.join(s.to_string());
+    }
+    p.join("vine").join(format!("{stem}.png"))
 }
 
 /// Write `lod/<s>/` for every level in `levels` from the masters under `root`, at this
@@ -282,6 +384,21 @@ pub fn write_levels(root: &Path, levels: &[u32], tilt_degrees: f64) -> Result<us
                 write_png(&file(root, "lod", Some(s), stem, v), &img)?;
                 n += 1;
             }
+        }
+        let mut stems: Vec<String> = vine_tiles()
+            .into_iter()
+            .flat_map(|(_, _, stem, legacy)| std::iter::once(stem).chain(legacy))
+            .collect();
+        stems.sort_unstable();
+        stems.dedup();
+        for stem in stems {
+            let master = vine_file(root, "masters", None, &stem);
+            if !master.exists() {
+                continue;
+            }
+            let img = derive(&read_png(&master)?, s, s);
+            write_png(&vine_file(root, "lod", Some(s), &stem), &img)?;
+            n += 1;
         }
     }
     Ok(n)
@@ -345,6 +462,40 @@ mod tests {
         assert_eq!(derive(&m, 4, 4).px(2, 0)[3], 0, "4 of its 12 columns opaque");
     }
 
+    /// The vine atlas holds each set and density by `(mask, exits)` — 81 exit patterns
+    /// inside the 16 masks — and the three accents. A per-exit file wins; without one the
+    /// older mask-only file is drawn in every exits column of its mask.
+    #[test]
+    fn a_vine_tile_lands_in_its_row_and_mask_column() {
+        let tiles = vine_tiles();
+        assert_eq!(tiles.len(), 9 * 81 + 3);
+        let stems: Vec<&str> = tiles.iter().map(|t| t.2.as_str()).collect();
+        assert!(stems.contains(&"vine-root-thin-a-8"));
+        assert!(stems.contains(&"vine-root-full-c-4-hang"));
+        assert!(!stems.contains(&"vine-full-1-2"), "an exit outside the mask is never drawn");
+        assert!(tiles.contains(&(9, 1, "vine-accent-flower".to_string(), None)));
+        assert_eq!(hanging_fallback("vine-root-full-1-hang").unwrap(), "vine-root-full-4");
+        let root = std::env::temp_dir().join(format!("cubarium-vine-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let green = solid(48, 48, |_, _| [0, 200, 0, 255]);
+        let red = solid(48, 48, |_, _| [200, 0, 0, 255]);
+        write_png(&root.join("masters/vine/vine-full-5.png"), &green).unwrap();
+        write_png(&root.join("masters/vine/vine-full-5-4.png"), &red).unwrap();
+        let (atlas, prov) = load(&root, 4, 2).unwrap();
+        assert!(atlas.vine_on);
+        // Mask 5 has four exit patterns: one per-exit file, three from the older file.
+        assert_eq!(prov.vine_tiles, 4);
+        let aw = VoxelTextures::vine_size(4).0;
+        let px = |x: u32, y: u32| {
+            let i = ((y * aw + x) * 4) as usize;
+            atlas.vine_rgba[i..i + 4].to_vec()
+        };
+        assert_eq!(px((5 * 16 + 4) * 4, 2 * 4), [200, 0, 0, 255], "the per-exit file");
+        assert_eq!(px((5 * 16 + 1) * 4, 2 * 4), [0, 200, 0, 255], "the older file");
+        assert_eq!(px((4 * 16) * 4, 2 * 4)[3], 0, "mask 4 has no file");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// An override of the right size wins over the derived level; one of the wrong size
     /// is ignored; a missing variant repeats one that exists; a slot with no files is
     /// absent from the mask.
@@ -374,6 +525,7 @@ mod tests {
         assert_eq!(at(1), [255, 0, 0]);
         assert_eq!(at(2), [100, 100, 100], "variant 2 repeats variant 0");
         assert_eq!(at(3), [255, 0, 0], "variant 3 repeats variant 1");
+        assert!(!atlas.vine_on, "no vine tiles, no vine layer");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -39,7 +39,7 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
     vec4 waterK;        // SKIN_ALPHA_GAIN, WATER_TOP_ALPHA, -, -
     vec4 plantA;        // PLANT_TOP_GAIN, PLANT_TOP_TINT, PLANT_RIM, CROWN_EDGE
     vec4 plantB;        // CROWN_UNDER, TRUNK_SHADE[0], TRUNK_SHADE[1], TRUNK_LIGHT_AT
-    ivec4 tex;          // the face textures present, one bit per slot; -, -, -
+    ivec4 tex;          // the face textures present, one bit per slot; vine tiles present; -, -
 } u;
 
 layout(set = 0, binding = 1) uniform usampler3D voxels;  // rgba8ui, one texel per voxel
@@ -50,6 +50,10 @@ layout(set = 0, binding = 4) uniform usampler2D glyphTex; // shared organism fac
 // variant v is the S x S cell at (v*S, k*S), a top face in its first RISE rows. Texels
 // are sRGB-encoded.
 layout(set = 0, binding = 5) uniform sampler2D faceTex;
+// The latticevine tiles at this px_per_voxel (`VoxelTextures::vine_rgba`): row
+// 3*set + density (plain, climbing, hanging), column 16*mask + exits; row 9 the accents.
+// Direct colour, sRGB.
+layout(set = 0, binding = 6) uniform sampler2D vineTex;
 
 layout(location = 0) out vec4 outColour;
 
@@ -118,13 +122,17 @@ bool texOn(int slot) { return slot >= 0 && (u.tex.x & (1 << slot)) != 0; }
 
 // Which of a face's four variants a voxel shows: a hash of its position, so a wall is not
 // one tile repeating, and the same voxel shows the same variant every frame.
-int texVariant(int x, int y, int z, int salt) {
+uint cellHash(int x, int y, int z, int salt) {
     uint h = uint(x) * 0x9E3779B1u ^ uint(y) * 0x85EBCA77u ^ uint(z) * 0xC2B2AE3Du
         ^ uint(salt) * 0x27D4EB2Fu;
     h ^= h >> 15;
     h *= 0x2C1B3C6Du;
     h ^= h >> 12;
-    return int(h & 3u);
+    return h;
+}
+
+int texVariant(int x, int y, int z, int salt) {
+    return int(cellHash(x, y, z, salt) & 3u);
 }
 
 // Face texel (dx, dy) of `slot`: dx across the face, dy down a side face from its top row
@@ -137,6 +145,48 @@ vec4 faceTexel(int slot, int x, int y, int z, int salt, int dx, int dy) {
 
 vec3 srgbToLinear(vec3 c) {
     return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+}
+
+// --- the latticevine tile layer (`cubarium::voxel::vine`) --------------------------------
+
+// How a vine cell shows its face: flush on the rock behind it (a face looking at the
+// camera), a curtain on its own front (an underside), or a quarter-width sliver against
+// the wall on its left or right (a +x or -x face, seen edge-on).
+const int VINE_FLUSH = 0;
+const int VINE_CURTAIN = 1;
+const int VINE_SLIVER_L = 2;
+const int VINE_SLIVER_R = 3;
+
+// An air voxel with no part and a nonzero glyph id carries a vine cell; the glyph id is
+// its kind plus one.
+bool isVine(uvec4 v) {
+    return u.tex.y != 0 && (v.r & 31u) == 0u && (v.r >> 5) != 0u;
+}
+
+int vineKind(uvec4 v) { return int(v.r >> 5) - 1; }
+
+// The cell's tile at face pixel (dx, dy), row 0 at the top, in linear light; alpha is the
+// cutout. The host resolved which tile (`VineCell::tile`): row in a's low nibble, column
+// 16*mask + exits from b. The accent (bud, flower, fruit) goes over it, jittered a little
+// per cell.
+vec4 vineTexel(uvec4 v, int x, int y, int z, int dx, int dy) {
+    int row = int(v.a & 15u);
+    int col = int(v.b & 15u) * 16 + int(v.b >> 4);
+    vec4 t = texelFetch(vineTex, ivec2(col * S + dx, row * S + dy), 0);
+    int accent = int((v.a >> 4) & 3u);
+    if (accent != 0) {
+        int j = S / 8;
+        uint h = cellHash(x, y, z, 9);
+        int ox = j > 0 ? int(h % uint(2 * j + 1)) - j : 0;
+        int oy = j > 0 ? int((h >> 8) % uint(2 * j + 1)) - j : 0;
+        int ax = dx - ox;
+        int ay = dy - oy;
+        if (ax >= 0 && ax < S && ay >= 0 && ay < S) {
+            vec4 a = texelFetch(vineTex, ivec2((accent - 1) * S + ax, 9 * S + ay), 0);
+            if (a.a >= 0.5) { t = a; }
+        }
+    }
+    return vec4(srgbToLinear(t.rgb), t.a);
 }
 
 // --- colour ---------------------------------------------------------------------------
@@ -467,6 +517,19 @@ void main() {
         if (level < H) {
             uvec4 v = at(x, level, z);
             if (solidV(v)) {
+                // A covered rock face looking at the camera: its vine, carried by the air
+                // cell in front, is drawn flush on the rock, which shows through its holes.
+                if (z > 0 && u.tex.y != 0) {
+                    uvec4 f = at(x, level, z - 1);
+                    if (isVine(f) && vineKind(f) == VINE_FLUSH) {
+                        vec4 t = vineTexel(f, x, level, z - 1, dx, S - 1 - r);
+                        if (t.a >= 0.5) {
+                            acc += trans * hazed(t.rgb, hazeAt(float(z)));
+                            trans = 0.0;
+                            break;
+                        }
+                    }
+                }
                 acc += trans * blockFront(x, level, z, v, r, dx);
                 trans = 0.0;
                 break;
@@ -474,6 +537,19 @@ void main() {
             // A plant stands in the void and the water of its own cell blends over it: a
             // trunk in a pool is submerged, so the water is nearer than the plant.
             if (v.g != 0u) { waterAt(x, level, z, v, px.y, acc, trans); }
+            if (isVine(v)) {
+                int k = vineKind(v);
+                int q = max(1, S / 4);
+                if (k == VINE_CURTAIN || (k == VINE_SLIVER_L && dx < q)
+                    || (k == VINE_SLIVER_R && dx >= S - q)) {
+                    vec4 t = vineTexel(v, x, level, z, dx, S - 1 - r);
+                    if (t.a >= 0.5) {
+                        acc += trans * hazed(t.rgb, hazeAt(float(z)));
+                        trans = 0.0;
+                        break;
+                    }
+                }
+            }
             int p = partOf(v);
             if (p != 0) {
                 vec3 art;
