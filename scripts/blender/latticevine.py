@@ -2,6 +2,8 @@
 rock face and voxelized by the bake's own rule.
 
     blender -b -P scripts/blender/latticevine.py -- [--out DIR] [--seed N]
+    blender -b -P scripts/blender/latticevine.py -- --thin          (fix 1 voxel shots)
+    blender -b -P scripts/blender/latticevine.py -- --tiles assets/voxel-textures/masters/vine
 
 Spec: design/art-direction/species-dossier-D15-latticevine-2026-09-23.md (O4, Revision 1).
 Brief: design/handoffs/latticevine-model-2026-09-23.md. Nothing here is wired into the
@@ -56,6 +58,7 @@ def arg(name, default=None):
 
 OUT = arg("--out", os.path.join(REPO, "runs", "latticevine-model-2026-09-23"))
 SEED = int(arg("--seed", "2309"))
+TILES_DIR = arg("--tiles")  # vine tile masters for the presenter
 THIN_ONLY = "--thin" in ARGS  # fix 1: only the dense thin-rule shots (*-thin.png)
 VOX = 0.125
 
@@ -991,8 +994,286 @@ def frame(name, col, ppm, pad=0.12):
     return ob, w, h
 
 
+# --- vine tile masters (--tiles OUT_DIR) ------------------------------------------------
+#
+# One 0.125 m square of rock face seen face-on, 48 px, flat material colour (the dossier
+# hexes), transparent film, alpha cut out. Mask bits: 0 up, 1 right, 2 down, 3 left.
+#
+# Joins. A runner leaves the tile through the midpoint of every edge whose bit is set,
+# square to the edge, at the same radius and colour (young violet), and runs a little past
+# it (cropped), so the neighbour's runner meets it pixel for pixel. Each set edge also
+# carries one "edge rosette" defined in the edge's own coordinates (along / across), so
+# the two tiles that share the edge each draw the same rosette and each keep their half.
+# Edge rosettes sit in front of everything else, vertical-edge ones in front of
+# horizontal-edge ones, so the halves agree in both tiles. Interior rosettes stay inside
+# the tile, at a random margin from each edge (the ragged side of a clear edge).
+
+TILE = VOX
+TPX = 48
+EDGE_MID = {0: (0.5, 1.0), 1: (1.0, 0.5), 2: (0.5, 0.0), 3: (0.0, 0.5)}
+EDGE_N = {0: (0, 1), 1: (1, 0), 2: (0, -1), 3: (-1, 0)}
+R_EDGE, R_CORE = 0.0085, 0.0105
+# edge rosettes: (along offset, across offset, radius) in metres, one spec per orientation
+EDGE_ROSETTE = {"h": (0.012, 0.002, 0.044), "v": (-0.010, -0.003, 0.041)}
+TILE_MATS = {"lv_den": "#12093A"}
+L.PAL.update(TILE_MATS)
+
+
+class TileCtx:
+    """Quacks like a Stand for Stand._rosette / Stand._pad."""
+
+    def __init__(self):
+        self.geo = Geo()
+        self.leaf_rng = random.Random(0)
+        self.rosettes = []
+
+    def rosette(self, x, z, R, yb, seed):
+        self.leaf_rng = random.Random(seed)
+        Stand._rosette(self, x, z, R, yb)
+
+
+def _bez(p0, p1, p2, p3, t):
+    u = 1 - t
+    return p0 * u ** 3 + p1 * 3 * u * u * t + p2 * 3 * u * t * t + p3 * t ** 3
+
+
+def _tube(g, pts, r0, r1, mat):
+    n = len(pts) - 1
+    for k in range(n):
+        ra, rb = r0 + (r1 - r0) * k / n, r0 + (r1 - r0) * (k + 1) / n
+        a = Vector((pts[k].x, -(ra + BACK), pts[k].y))
+        b = Vector((pts[k + 1].x, -(rb + BACK), pts[k + 1].y))
+        g.cyl(a, b, ra, rb, mat, seg=10)
+        g.ell(b, (rb, rb, rb), mat, u=10, v=6)
+
+
+def _runner_to_edge(g, c, e, mat_core="lv_runner_young"):
+    from mathutils import Vector as V2
+    E = V2((EDGE_MID[e][0] * TILE, EDGE_MID[e][1] * TILE))
+    n = V2(EDGE_N[e])
+    perp = V2((-n.y, n.x))
+    p2 = E - n * 0.35 * TILE
+    p1 = c + (p2 - c) * 0.35 + perp * (0.006 if e % 2 else -0.005)
+    pts = [_bez(c, p1, p2, E, k / 12) for k in range(13)]
+    _tube(g, pts, R_CORE, R_EDGE, mat_core if mat_core else "lv_runner_young")
+    _tube(g, [E, E + n * 0.014], R_EDGE, R_EDGE, "lv_runner_young")
+
+
+def _braid(g, c):
+    """Two strands twisting once between the bottom and top edge midpoints, pinched to
+    one runner at each edge so the braid joins the next tile's."""
+    x0 = 0.5 * TILE
+    for s_i in (0, 1):
+        prev = None
+        for m in range(25):
+            s = m / 24
+            ph = 2 * math.pi * s + s_i * math.pi
+            env = math.sin(math.pi * s)
+            x = x0 + 0.011 * env * math.sin(ph)
+            y = -(0.007 + BACK) - 0.01 * env * (0.5 + 0.5 * math.cos(ph))
+            p = Vector((x, y, s * TILE))
+            r = 0.0068 + 0.0017 * (1 - env)
+            if prev is not None:
+                g.cyl(prev, p, r, r, "lv_runner_young", seg=10)
+                g.ell(p, (r, r, r), "lv_runner_young", u=10, v=6)
+            prev = p
+    for e in (0, 2):
+        E = Vector((EDGE_MID[e][0] * TILE, -(R_EDGE + BACK), EDGE_MID[e][1] * TILE))
+        g.cyl(E, E + Vector((0, 0, 0.014 * EDGE_N[e][1])), R_EDGE, R_EDGE, "lv_runner_young", seg=10)
+
+
+def _root_arch(g, hang):
+    """The root arch across the bottom edge (climbing) or hanging from the top (hang),
+    a dark den under it, claws running out past the edge, and the old runner rising
+    from its apex to the tile centre."""
+    def z(v):
+        return TILE - v if hang else v
+    w, h, ra = 0.8 * TILE, 0.4 * TILE, 0.009
+    x0 = 0.5 * TILE
+    g.ell((x0, 0.0005, z(0.0)), (0.36 * w, 0.002, 0.85 * h), "lv_den", u=20, v=10)
+    prev = None
+    for k in range(17):
+        t = k / 16
+        p = Vector((x0 + (t - 0.5) * w, -(ra + BACK) - 0.012 * math.sin(math.pi * t), z(h * math.sin(math.pi * t))))
+        if prev is not None:
+            g.cyl(prev, p, ra, ra, "lv_root", seg=10)
+            g.ell(p, (ra, ra, ra), "lv_root", u=10, v=6)
+        prev = p
+    for side in (-1, 1):
+        lx = x0 + side * w / 2
+        for sp in (-1, 0.4):
+            g.cyl((lx, -(ra + BACK), z(0.006)), (lx + sp * 0.012 + side * 0.006, -(ra + BACK), z(-0.02)),
+                  ra * 0.7, ra * 0.5, "lv_root", seg=8)
+    apex = Vector((x0, z(h)))
+    c = Vector((0.5 * TILE, 0.5 * TILE))
+    _tube(g, [apex.lerp(c, k / 4) for k in range(5)], R_CORE + 0.002, R_CORE, "lv_runner_old")
+
+
+def build_tile(density, mask, root=None):
+    """root: None, 'climb' or 'hang'."""
+    ctx = TileCtx()
+    g = ctx.geo
+    rng = random.Random(f"tile:{density}:{mask}:{root}")
+    bits = [e for e in range(4) if mask >> e & 1]
+    c = Vector((0.5 * TILE, 0.5 * TILE))
+    braided = 0 in bits and 2 in bits
+    # runners
+    if braided:
+        _braid(g, c)
+        for e in bits:
+            if e in (1, 3):
+                _runner_to_edge(g, c, e)
+    else:
+        for e in bits:
+            _runner_to_edge(g, c, e)
+    if not bits and root is None:  # an isolated face: a short curling runner
+        pts = [c + Vector((0.018 * math.sin(a), -0.02 + 0.03 * (1 - math.cos(a)) * 0.6))
+               for a in [k * 0.35 for k in range(7)]]
+        _tube(g, pts, R_CORE, 0.006, "lv_runner_young")
+    if root:
+        _root_arch(g, root == "hang")
+    # the holdfast at the junction, scaled to the tile (the model's 3 px pad would be 24 px here)
+    g.cyl((c.x, -0.004, c.y), (c.x, -0.006, c.y), 0.0145, 0.0145, "lv_pad_rim", seg=16)
+    g.cyl((c.x, -0.0045, c.y), (c.x, -0.009, c.y), 0.011, 0.011, "lv_pad", seg=16)
+    if density == "bare":
+        return ctx
+    # edge rosettes (identical in full and thin, so mixed-density neighbours still join)
+    for e in bits:
+        o = "h" if e in (0, 2) else "v"
+        a, d, R = EDGE_ROSETTE[o]
+        Ex, Ez = EDGE_MID[e][0] * TILE, EDGE_MID[e][1] * TILE
+        if o == "h":
+            x, z = Ex + a, Ez + d
+        else:
+            x, z = Ex + d, Ez + a
+        ctx.rosette(x, z, R, -0.05 if o == "v" else -0.043, f"edge-{o}")
+    # interior clump: full always; thin only where the face is a tip or isolated
+    if density == "full" or len(bits) <= 1:
+        n = {"full": 4 if len(bits) >= 2 else 3, "thin": 1}[density]
+        zlo, zhi = (0.45 * TILE, TILE) if root == "climb" else ((0.0, 0.55 * TILE) if root == "hang" else (0.0, TILE))
+        placed = 0
+        for _ in range(200):
+            if placed == n:
+                break
+            R = rng.uniform(0.036, 0.048) if density == "full" else rng.uniform(0.028, 0.036)
+            # margins: tight on a covered edge (the edge rosette takes over), ragged on a clear one
+            m = [rng.uniform(0.0, 0.004) if e in bits else rng.uniform(0.003, 0.014) for e in range(4)]
+            x = rng.uniform(R + m[3], TILE - R - m[1])
+            z = rng.uniform(max(R + m[2], zlo + R * 0.6), min(TILE - R - m[0], zhi - R * 0.6))
+            if x != x or z != z or not (R + m[3] <= x <= TILE - R - m[1] and R + m[2] <= z <= TILE - R - m[0]):
+                continue
+            if any((x - px) ** 2 + (z - pz) ** 2 < (0.75 * R) ** 2 for px, pz, _ in ctx.rosettes):
+                continue
+            ctx.rosette(x, z, R, -0.03 - 0.004 * placed, f"tile:{density}:{mask}:{root}:{placed}")
+            placed += 1
+    return ctx
+
+
+def build_accent(phase):
+    g = Geo()
+    c = Vector((0.5 * TILE, 0.0, 0.5 * TILE))
+    base = c + Vector((0.0, -0.03, 0.022))
+    end = base + Vector((0.002, -0.02, -0.014))
+    sr = 0.004
+    if phase == "bud":
+        g.cyl(base, end, sr, sr, "lv_spur", seg=8)
+        g.ell(end + Vector((0, 0, -0.018)), (0.013, 0.013, 0.02), "lv_spur", u=12, v=8)
+        g.ell(end + Vector((0, -0.004, -0.036)), (0.006, 0.006, 0.006), "lv_bud_tip", u=8, v=6)
+    elif phase == "flower":
+        g.cyl(base, end, sr, sr, "lv_spur", seg=8)
+        axis = Vector((0, -0.57, -0.82))
+        top = end + Vector((0, 0, -0.002))
+        bot = top + axis * 0.05
+        tilt = Vector((0, 0, 1)).rotation_difference(axis).to_matrix().to_4x4()
+        g.cyl(top, bot, 0.008, 0.02, "lv_bell", seg=16)
+        g.ell(bot + axis * 0.002, (0.022, 0.022, 0.005), "lv_mouth", rot=tilt, u=16, v=6)
+    elif phase == "fruit":
+        g.cyl(base, end, sr, sr, "lv_spur", seg=8)
+        cc = end + Vector((0, -0.004, -0.026))
+        beads = [Vector(v) * 0.017 for v in ((0, 0, 0.55), (-0.85, 0.2, -0.1), (0.85, 0.1, -0.1),
+                                             (-0.3, -0.5, -0.8), (0.4, -0.4, -0.75), (0.0, -0.9, 0.05))]
+        for v in beads:
+            p = cc + v
+            g.ell(p, (0.0115, 0.0115, 0.0115), "lv_bead", u=14, v=10)
+            g.ell(p + Vector((0.002, -0.012, 0.002)), (0.0028, 0.0028, 0.0028), "lv_mouth", u=8, v=6)  # seed dot
+    return g
+
+
+def tile_scene():
+    for ob in list(bpy.data.objects):
+        bpy.data.objects.remove(ob, do_unlink=True)
+    sc = bpy.context.scene
+    sc.render.engine = "BLENDER_WORKBENCH"
+    sh = sc.display.shading
+    sh.light = "FLAT"
+    sh.color_type = "MATERIAL"
+    sh.show_cavity = False
+    sh.show_object_outline = False
+    sh.show_shadows = False
+    sh.show_specular_highlight = False
+    sc.display.render_aa = "OFF"
+    sc.view_settings.view_transform = "Standard"
+    sc.view_settings.look = "None"
+    sc.view_settings.exposure = 0
+    sc.view_settings.gamma = 1
+    sc.render.dither_intensity = 0
+    sc.render.film_transparent = True
+    sc.render.image_settings.file_format = "PNG"
+    sc.render.image_settings.color_mode = "RGBA"
+    sc.render.image_settings.color_depth = "8"
+    sc.render.resolution_x = sc.render.resolution_y = TPX
+    sc.render.resolution_percentage = 100
+    cam = bpy.data.cameras.new("tile")
+    cam.type = "ORTHO"
+    cam.ortho_scale = TILE
+    cam.clip_end = 10
+    ob = bpy.data.objects.new("tile", cam)
+    sc.collection.objects.link(ob)
+    ob.location = (0.5 * TILE, -2.0, 0.5 * TILE)
+    ob.rotation_euler = (math.radians(90), 0, 0)
+    sc.camera = ob
+    return sc
+
+
+def render_geo(sc, g, path):
+    col = bpy.data.collections.new("tile-geo")
+    sc.collection.children.link(col)
+    objs = g.objects(col, "t")
+    sc.render.filepath = path
+    bpy.ops.render.render(write_still=True)
+    for ob in objs:
+        me = ob.data
+        bpy.data.objects.remove(ob, do_unlink=True)
+        bpy.data.meshes.remove(me)
+    bpy.data.collections.remove(col)
+
+
+def render_tiles(out_dir):
+    import subprocess
+    os.makedirs(out_dir, exist_ok=True)
+    sc = tile_scene()
+    n = 0
+    for density in ("full", "thin", "bare"):
+        for mask in range(16):
+            for root, name in ((None, f"vine-{density}-{mask:x}.png"),
+                               ("climb", f"vine-root-{density}-{mask:x}.png"),
+                               ("hang", f"vine-root-{density}-{mask:x}-hang.png")):
+                render_geo(sc, build_tile(density, mask, root).geo, os.path.join(out_dir, name))
+                n += 1
+    for phase in ("bud", "flower", "fruit"):
+        render_geo(sc, build_accent(phase), os.path.join(out_dir, f"vine-accent-{phase}.png"))
+        n += 1
+    print(f"rendered {n} vine tiles into {out_dir}", flush=True)
+    sheet = os.path.join(HERE, "vine_tiles_sheet.py")
+    out_sheet = arg("--sheet", os.path.join(REPO, "runs", "latticevine-model-2026-09-23", "tiles-sheet.png"))
+    subprocess.run(["python3", sheet, out_dir, out_sheet], check=True)
+
+
 def main():
     global SRC
+    if TILES_DIR:
+        render_tiles(TILES_DIR)
+        return
     os.makedirs(OUT, exist_ok=True)
     sc = L.setup_scene()
     # flat hexes: studio specular washes the dark dossier colours to grey on the face-on
