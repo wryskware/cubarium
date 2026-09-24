@@ -276,13 +276,17 @@ fn slab_drained_m_per_m2(voxel_m: f64, ticks: u32) -> (f64, f64) {
 /// **Tolerance.** The only thing that can differ is *which cell* the drainage
 /// front is standing in when the run stops, so the bound is one coarse cell's
 /// drainable store expressed as a depth: `(1 - field_capacity) · pore_capacity ·
-/// 0.25 m = 0.0656 m³/m²`. That is a real bound and not a fudge: before this
-/// package the fine grid drained at exactly half the rate, which over 200 ticks
-/// is a shortfall of 0.0875 m³/m² — larger than the bound, so this test fails on
+/// 0.25 m = 0.0306 m³/m²`. That is a real bound and not a fudge: before this
+/// package the fine grid drained at exactly half the rate, which over 100 ticks
+/// is a shortfall of 0.0438 m³/m² — larger than the bound, so this test fails on
 /// the old code and passes on the new.
+///
+/// 100 ticks and not 200 since soil retention: a metre of soil at field capacity
+/// 0.65 has only 0.1225 m³/m² to give, and 200 ticks of `K · dt` (0.175) would run
+/// the slab out of drainable water before the clock stopped.
 #[test]
 fn a_metre_of_soil_drains_the_same_depth_on_both_grids() {
-    const TICKS: u32 = 200;
+    const TICKS: u32 = 100;
     let soil = Material::Soil;
     let tol = (1.0 - soil.field_capacity()) * soil.pore_capacity() * 0.25;
 
@@ -409,6 +413,10 @@ fn saturated_soil_drains_to_its_field_capacity_and_keeps_it() {
             "{voxel_m} m: the aquifer took {} of the {drained} m³ that drained",
             w.view().aquifer_m3
         );
-        assert!(residual(&w).abs() < 1e-12, "{voxel_m} m residual {}", residual(&w));
+        assert!(
+            residual(&w).abs() < 1e-12,
+            "{voxel_m} m residual {}",
+            residual(&w)
+        );
     }
 }

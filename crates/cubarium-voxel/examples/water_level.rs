@@ -55,7 +55,9 @@ fn main() {
         "{name} seed {seed}: gate {gate:.1} m2 visible against {want:.1} ({})",
         if gate >= want { "pass" } else { "REJECT" }
     );
-    println!("min,lake_level_v,lake_m3,lake_m2,pooled_m3,pore_m3,aquifer_m3,atmosphere_m3,stored_m3,ms_per_tick,residual");
+    println!(
+        "min,lake_level_v,lake_m3,lake_m2,pooled_m3,pore_m3,aquifer_m3,atmosphere_m3,stored_m3,ms_per_tick,residual"
+    );
     let per_min = 60 * TICK_HZ as u64;
     let mut minute = 0u64;
     let mut ms = 0.0;

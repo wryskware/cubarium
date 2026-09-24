@@ -79,23 +79,33 @@ impl Material {
     /// Fraction of the pore capacity the material holds against gravity. Only pore
     /// water above this drains downward; the rest stays put until it evaporates or a
     /// plant takes it.
+    ///
+    /// Soil **0.65**: drained soil keeps 0.65 × 0.35 = 22.75 % of its volume in water,
+    /// the middle of the 20–25 % a loam holds
+    /// (`design/handoffs/voxel-plant-viability-2026-09-23.md`, W). It was 0.25, 8.75 % —
+    /// sand — and plants starved in full light on drained ground. Rock keeps its crevice
+    /// 0.5: nothing measured argues for moving it.
     pub fn field_capacity(self) -> f64 {
         match self {
             Material::Air | Material::Bedrock => 0.0,
             Material::Rock => 0.5,
-            Material::Soil => 0.25,
+            Material::Soil => 0.65,
         }
     }
 
     /// Fraction of the pore capacity held too tightly for roots to draw. Pore water
     /// between this and [`Material::field_capacity`] is what drained ground offers a
-    /// plant. Provisional numbers (sand-like, a bit under half of the retained water);
-    /// the soil-retention package sets them.
+    /// plant.
+    ///
+    /// Soil **0.28**: 0.28 × 0.35 = 9.8 % of the volume is held below it, the ~10 % a
+    /// loam keeps from roots, which leaves 13 % of the volume — 0.37 of the pores — for
+    /// plants between a shower and the wilting point. Rock's 0.2 is the provisional
+    /// crevice number, under its field capacity as the rule needs.
     pub fn wilting_point(self) -> f64 {
         match self {
             Material::Air | Material::Bedrock => 0.0,
             Material::Rock => 0.2,
-            Material::Soil => 0.1,
+            Material::Soil => 0.28,
         }
     }
 }
