@@ -1801,9 +1801,18 @@ impl SpeciesConfig {
     ///
     /// - **Light** between umbrellafrond and bloomcrown: `light_half` 0.4,
     ///   `establish_light_min` 0.35.
-    /// - **Moist**, a damp-lover on package F's available-water scale (1 = field
-    ///   capacity): `establish_water_min` 0.4, `wilt_water` 0.2, `full_water` 0.9 — full
-    ///   moisture on drained ground, earning badly once a dry spell takes a fifth of it —
+    /// - **Moist to germinate, upland once grown** (package F's available-water scale, 1 =
+    ///   field capacity). `establish_water_min` 0.4: a seed still waits for moist ground,
+    ///   which is where the shrub of moist gaps starts. `wilt_water` 0.1 and `full_water`
+    ///   0.5 are the upland ramp (package LB, 2026-09-23). The damp-lover ramp it had
+    ///   (0.2 / 0.9) was what emptied its donors: on the default preset its root boxes dry
+    ///   from 1.0 to 0.3–0.7 within 100 min between showers, `μ` fell from 1 to 0.16–0.7
+    ///   and its income from 15× its maintenance to a deficit — in the plants-only arm as
+    ///   much as the coupled one, so not grazing — while light stayed 0.6–0.9 and the
+    ///   bloomcrowns beside it, on the upland ramp, held. Its break-even is bloomcrown's
+    ///   (`L · μ` ≈ 0.49 at full foliage), so the ramp was the only difference. Coupled
+    ///   default census, donors at 4 h, seeds 2 / 3 / 4: 2 / 10 / 6 → 12 / 18 / 12
+    ///   (a 0.2 / 0.6 ramp: 9 at seeds 2 and 4); no fauna, seed 2: 5 → 14.
     ///   `establish_saturated_max` 0.5, `drown_depth_m` 0.1.
     /// - **Repeated paid fruit**: `donor_reserve_floor` 0.7 (base 0.5) and `propagule_rate`
     ///   0.0004; `wood_max` 1.0, `alive_min` 0.02, `donor_min` 0.4, `hop` 2.
@@ -1823,8 +1832,8 @@ impl SpeciesConfig {
             establish_light_min: 0.35,
             rooting_depth: 3,
             rooting_radius: 1,
-            wilt_water: 0.2,
-            full_water: 0.9,
+            wilt_water: 0.1,
+            full_water: 0.5,
             establish_water_min: 0.4,
             establish_saturated_max: 0.5,
             stress_rate_per_s: 0.1,
