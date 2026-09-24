@@ -46,6 +46,8 @@
 #![forbid(unsafe_code)]
 
 mod layers;
+#[cfg(test)]
+mod seed_marks_tests;
 mod seeds;
 pub mod snapshot;
 mod step;
@@ -54,6 +56,11 @@ use cubarium_voxel::{Material, VoxelView, World};
 use serde::{Deserialize, Serialize};
 
 pub use cubarium_voxel::{DT, TICK_HZ};
+
+/// How long a seed landing keeps its site's D5 mark: **two simulated minutes** (package
+/// SM, the brief's "recent"). Long enough to see a donor's fall of seed arrive; short
+/// enough that a bank waiting hours for its gap is not drawn for hours.
+pub const SEED_MARK_RECENT_S: f64 = 120.0;
 pub use layers::{
     Layer, LayerKind, MAX_FOLIAGE_LAYERS, MIN_LAYER_AREA_M2, Profile, StandLayer, disc_offset,
     trunk_offsets,
@@ -474,6 +481,15 @@ pub struct Ground {
     /// energy comes from a consumer's own books rather than from a species'
     /// `energy_density`, and a cap here would be a second knob with nothing measuring it.
     pub carrion_energy: f64,
+    /// The species and tick of the latest seed **landing** here (package SM): what the D5
+    /// seed mark reads as "recent" ([`Ground::seed_mark`]). A cohort's `bin_start_tick`
+    /// cannot say this — a bin is hours wide — so the landing path writes it.
+    pub last_landing: Option<(Species, u64)>,
+    /// The species this site's bank will **sprout at its next check** (package SM): its
+    /// gates passed and it won the lottery at the last check, and it germinates at the
+    /// next one if they still pass. A one-check delay, so the presenter reads a flag and
+    /// evaluates no gate per frame.
+    pub sprouting: Option<Species>,
 }
 
 impl Ground {
@@ -492,6 +508,31 @@ impl Ground {
             carrion: 0.0,
             carrion_mineral: 0.0,
             carrion_energy: 0.0,
+            last_landing: None,
+            sprouting: None,
+        }
+    }
+
+    /// The species whose D5 seed mark this site shows at `tick`, if any (package SM, Wrysk
+    /// 2026-09-23: "draw only recent seeds and about to sprout ones"): the species about
+    /// to sprout, or else the species of a landing within [`SEED_MARK_RECENT_S`] — and in
+    /// either case only while the bank still holds that species' seed. A bank that is
+    /// simply waiting shows nothing.
+    pub fn seed_mark(&self, tick: u64) -> Option<Species> {
+        let held = |sp: Species| {
+            self.seeds
+                .iter()
+                .any(|c| c.species == sp && c.organic > 0.0)
+        };
+        if let Some(sp) = self.sprouting
+            && held(sp)
+        {
+            return Some(sp);
+        }
+        let recent = (SEED_MARK_RECENT_S * f64::from(TICK_HZ)).round() as u64;
+        match self.last_landing {
+            Some((sp, at)) if tick.saturating_sub(at) <= recent && held(sp) => Some(sp),
+            _ => None,
         }
     }
 
@@ -2289,6 +2330,14 @@ pub struct FloraConfig {
     /// Rounded to whole ticks, at least one; a fixture that wants the old every-tick bank
     /// sets it to `DT` ([`FloraConfig::drop_seeds_checked_each_tick`]).
     pub seed_check_s: f64,
+    /// **Whether a passing bank waits one check before it sprouts** (package SM): `true`,
+    /// the shipped rule — the check that finds the gates passing draws the lottery and
+    /// **arms** the site ([`Ground::sprouting`], what the D5 seed mark reads as "about to
+    /// sprout"), and the next check germinates the armed species if it still passes.
+    /// `false` germinates at the check that finds it passing, the pre-SM rule, for a
+    /// fixture whose subject is not the bank's clock
+    /// ([`FloraConfig::drop_seeds_checked_each_tick`]).
+    pub sprout_after_arming: bool,
     /// The world's cell size in metres, recorded so that geometry authored in **metres** can
     /// be applied to a grid stored in **voxels**: every crown is in metres since package
     /// L, and the voxel readings ([`SpeciesConfig::crown_height`]) divide by this. Set by
@@ -2316,6 +2365,7 @@ impl Default for FloraConfig {
             initial_mineral: 1.0,
             provision: Provision::Lazy,
             seed_check_s: 30.0,
+            sprout_after_arming: true,
             voxel_m: 0.25,
         }
     }
@@ -2387,7 +2437,8 @@ impl FloraConfig {
     /// For a **fixture whose subject is not dispersal or the bank's clock** — an
     /// establishment gate, a birth's stoichiometry, the lottery's weights — written when a
     /// landing on a passing site germinated on the next tick and a spore landed where a
-    /// seed did. Not a shipped configuration; nothing in the tick uses it.
+    /// seed did — and a passing bank sprouts at the check that finds it passing, without
+    /// package SM's arming check. Not a shipped configuration; nothing in the tick uses it.
     pub fn drop_seeds_checked_each_tick(mut self) -> FloraConfig {
         let scale = (0.25 / self.voxel_m).max(1.0);
         for species in Species::ALL {
@@ -2402,6 +2453,7 @@ impl FloraConfig {
             }
         }
         self.seed_check_s = DT;
+        self.sprout_after_arming = false;
         self
     }
 

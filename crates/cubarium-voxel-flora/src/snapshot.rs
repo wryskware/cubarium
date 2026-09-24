@@ -43,7 +43,10 @@ use crate::Flora;
 /// Package S joins it: whole seeds banked for hours on a staggered check clock — two
 /// species fields (`dispersal`, `clonal_share`), the config's `seed_check_s`, five
 /// per-species seed counters in the ledger and the shower flag the bank's flush reads.
-pub const SCHEMA: u32 = 4;
+///
+/// Schema 5: package SM (the follow-up round) adds two fields to every `Ground` — the latest
+/// landing and the about-to-sprout flag the D5 seed mark reads: refused, not migrated.
+pub const SCHEMA: u32 = 5;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
