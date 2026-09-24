@@ -41,6 +41,15 @@
 //!   distance to food.
 //! - `DEATH` — one row per body that leaves: the tick, the lineage, the cause, the age it
 //!   reached and what it was holding a tick earlier.
+//! - `DROWN` — one more row per drowning (package S): whether the body was a founder or
+//!   born in the run, the face, the depth the rule read there
+//!   (`VoxelView::water_depth_m`) and how many cells it summed, the fill of the bottom
+//!   one, whether rain fell that tick, and the same face's depth 100 ticks earlier. A
+//!   rain column counted as depth reads many part-filled cells over a dry-ish bottom and
+//!   was shallow a moment before; rising water fills the bottom cell and was already
+//!   deepening. A drowned body cannot have stepped that tick — a step is refused past
+//!   `wade_depth_m`, below `drown_depth_m`, on the same view the death clause reads — so
+//!   the face is the one it was last seen on.
 //! - `SUMMARY` — the closing totals, including the ledger's own per-cause split, which is
 //!   the authoritative one.
 //!
@@ -70,7 +79,7 @@ use cubarium_voxel_fauna::{
     Animal, ConeCensus, ConeHit, Departure, Fauna, FaunaConfig, Food, Founder, Senses, TICK_HZ,
     browser_cone_census, browser_cone_readings, browser_mouth_candidates, effective_config,
 };
-use cubarium_voxel_flora::{Flora, FloraConfig, FloraView, Species as Plant};
+use cubarium_voxel_flora::{Flora, FloraConfig, FloraView, Site, Species as Plant};
 use cubarium_voxel_sim::{Sim, SimConfig};
 
 /// One simulated minute, in ticks.
@@ -149,6 +158,8 @@ struct Seen {
     /// standing layer, which they do **not**), `wet` (deeper than `wade_depth_m`, which
     /// they do not either), or `open`.
     ahead: &'static str,
+    /// The support face it stood on.
+    site: Site,
 }
 
 fn main() {
@@ -368,6 +379,9 @@ fn main() {
     println!(
         "HEADER,DEATH,tick,minute,id,lineage,cause,age_ticks,body,reserve,nearest_dist_m,nearest_species,nearest_foliage,crown_in_mouth,same_height_supports_2m,travelled_m,exits"
     );
+    println!(
+        "HEADER,DROWN,tick,minute,id,lineage,origin,x,y,z,depth_m,cells,bottom_fill,raining,depth_100_ticks_earlier_m"
+    );
     println!("HEADER,CAUSE,tick,minute,lineage,starved,drowned,removed");
     println!(
         "HEADER,REPRO,tick,minute,born,hatched,clutches_laid,eggs_laid,eggs_standing,eggs_lost,gestations_opened,gestations_failed"
@@ -393,6 +407,12 @@ fn main() {
     );
     println!("HEADER,SUMMARY,ticks,what,values");
     let mut prev: Vec<(u64, Seen)> = snapshot(&sim, &[]);
+    // Who was placed at the start, as against born in the run; and the last 100 ticks
+    // of free water, for the `DROWN` rows.
+    let founders_at_start: Vec<u64> = prev.iter().map(|(id, _)| *id).collect();
+    let mut water_history = WaterHistory::default();
+    water_history.observe(0, &sim.world().view());
+    let mut rain_in = sim.world().view().ledger.rain_in;
     let mut wander: std::collections::HashMap<u64, Wander> = std::collections::HashMap::new();
     let mut cones: std::collections::HashMap<u64, LastCone> = std::collections::HashMap::new();
     // A body is in its terminal band when its reserve is under this many joules-equivalent
@@ -415,6 +435,13 @@ fn main() {
     let total_ticks = (minutes * 60.0 * f64::from(TICK_HZ)) as u64;
     for tick in 1..=total_ticks {
         sim.step();
+        water_history.observe(tick, &sim.world().view());
+        let rained = {
+            let now = sim.world().view().ledger.rain_in;
+            let fell = now > rain_in;
+            rain_in = now;
+            fell
+        };
         let now = snapshot(&sim, &prev);
         observe_crowns(&sim, &mut crown_history);
         // Wander, every tick: the ground one browser actually covers, against the ground
@@ -521,6 +548,21 @@ fn main() {
             );
         }
         ledger_causes = now_causes;
+        let drowned: Vec<(u64, Option<Founder>, Site)> = departed
+            .iter()
+            .filter(|(id, _)| labels.contains(&(*id, Departure::Drowned)))
+            .map(|(id, was)| (*id, was.founder, was.site))
+            .collect();
+        for line in drowning_lines(
+            tick,
+            &drowned,
+            &founders_at_start,
+            &sim.world().view(),
+            rained,
+            &water_history,
+        ) {
+            println!("{line}");
+        }
         for (id, was) in &departed {
             {
                 let cause = labels
@@ -965,6 +1007,7 @@ fn snapshot(sim: &Sim, prev: &[(u64, Seen)]) -> Vec<(u64, Seen)> {
                     held_feed: a.founder_state.held.feed,
                     state: a.state,
                     exits: exits(&view, a, &sc),
+                    site: a.site,
                     ahead: ahead(&view, a, &sc),
                 },
             )
@@ -1508,6 +1551,130 @@ fn summary(sim: &Sim, ticks: u64) {
         l.deaths_accounted(),
         "the cause counters must account for every death"
     );
+}
+
+/// What `VoxelView::water_depth_m` read at a support face, and how it got there: the
+/// cells it summed going up from the face while each held water, and the fill of the
+/// first of them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct DepthRead {
+    depth_m: f64,
+    cells: u32,
+    bottom_fill: f64,
+}
+
+/// [`VoxelView::water_depth_m`]'s own walk, counting as it goes: from `y + 1` up, while
+/// the cell is not solid and holds water. `free` reads a cell's fill by index, so the
+/// same walk runs on the live world or on a remembered one.
+fn depth_read_with(view: &VoxelView<'_>, site: Site, free: impl Fn(usize) -> f64) -> DepthRead {
+    let c = view.config;
+    let mut read = DepthRead {
+        depth_m: 0.0,
+        cells: 0,
+        bottom_fill: 0.0,
+    };
+    if site.z >= c.depth {
+        return read;
+    }
+    let mut depth = 0.0;
+    for y in site.y + 1..c.height {
+        if view.material_at(i64::from(site.x), y, site.z).is_solid() {
+            break;
+        }
+        let f = free(c.index(i64::from(site.x), y, site.z));
+        if !(f > 0.0) {
+            break;
+        }
+        if read.cells == 0 {
+            read.bottom_fill = f;
+        }
+        read.cells += 1;
+        depth += f;
+    }
+    read.depth_m = depth * c.voxel_m;
+    read
+}
+
+fn depth_read(view: &VoxelView<'_>, site: Site) -> DepthRead {
+    depth_read_with(view, site, |i| view.free[i])
+}
+
+/// The last 100 ticks of free water, one sparse snapshot (cell index, fill) per tick:
+/// enough to read any face's depth as it was 100 ticks before a drowning.
+#[derive(Default)]
+struct WaterHistory {
+    ticks: std::collections::VecDeque<(u64, Vec<(u32, f64)>)>,
+}
+
+impl WaterHistory {
+    const BACK: u64 = 100;
+
+    fn observe(&mut self, tick: u64, view: &VoxelView<'_>) {
+        let wet: Vec<(u32, f64)> = view
+            .free
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| **f > 0.0)
+            .map(|(i, f)| (i as u32, *f))
+            .collect();
+        self.ticks.push_back((tick, wet));
+        while self
+            .ticks
+            .front()
+            .is_some_and(|(t, _)| *t + Self::BACK < tick)
+        {
+            self.ticks.pop_front();
+        }
+    }
+
+    /// The depth read at `site` at tick `tick − 100`, on the terrain as it is now; `None`
+    /// before the history reaches that far.
+    fn depth_back(&self, tick: u64, view: &VoxelView<'_>, site: Site) -> Option<f64> {
+        let want = tick.checked_sub(Self::BACK)?;
+        let (_, wet) = self.ticks.iter().find(|(t, _)| *t == want)?;
+        let fill = |i: usize| {
+            wet.binary_search_by_key(&(i as u32), |(j, _)| *j)
+                .map_or(0.0, |k| wet[k].1)
+        };
+        Some(depth_read_with(view, site, fill).depth_m)
+    }
+}
+
+/// One `DROWN` row per body the tick drowned: `(id, lineage, the face it stood on)`.
+fn drowning_lines(
+    tick: u64,
+    drowned: &[(u64, Option<Founder>, Site)],
+    founders_at_start: &[u64],
+    view: &VoxelView<'_>,
+    raining: bool,
+    history: &WaterHistory,
+) -> Vec<String> {
+    drowned
+        .iter()
+        .map(|&(id, founder, site)| {
+            let read = depth_read(view, site);
+            let origin = if founders_at_start.contains(&id) {
+                "founder"
+            } else {
+                "born"
+            };
+            format!(
+                "DROWN,{tick},{:.2},{id},{},{origin},{},{},{},{:.4},{},{:.4},{},{}",
+                tick as f64 / TICKS_PER_MIN as f64,
+                lineage(founder),
+                site.x,
+                site.y,
+                site.z,
+                read.depth_m,
+                read.cells,
+                read.bottom_fill,
+                u8::from(raining),
+                history
+                    .depth_back(tick, view, site)
+                    .map_or("na".to_string(), |d| format!("{d:.4}")),
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]
