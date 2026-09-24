@@ -157,6 +157,23 @@ impl SkyWorker {
     }
 }
 
+/// A fraction in `0..=1` as a nibble.
+#[inline]
+fn nibble(v: f32) -> u8 {
+    (v.clamp(0.0, 1.0) * 15.0).round() as u8
+}
+
+/// One foliage layer's disc as [`Canopy`] keeps it: the stand's column, the disc's radius
+/// squared and drawn cell, and what it lets through.
+#[derive(Clone, Copy, Debug)]
+struct Disc {
+    x: i64,
+    z: i64,
+    r2: f64,
+    cell: i64,
+    t: f32,
+}
+
 /// One foliage step over a column: the drawn cell of the layer's disc and what it lets
 /// through.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -180,6 +197,15 @@ pub(crate) struct Canopy {
     depth: u32,
     steps: Vec<[Step; CANOPY_STEPS + 1]>,
     count: Vec<u8>,
+    /// Every stand's foliage discs this build, and each stand's run of them (indexed as
+    /// `FloraView::stands`): what [`Canopy::plant_byte`] divides a stand's own shade out
+    /// with.
+    discs: Vec<Disc>,
+    of_stand: Vec<(u32, u32)>,
+    /// Crown cells drawn in each column, `z · width + x` ([`Canopy::count_crowns`]), and
+    /// the pass nibble they share, worked out once per column that has any.
+    crowns: Vec<u16>,
+    pass: Vec<u8>,
 }
 
 impl Canopy {
@@ -190,6 +216,10 @@ impl Canopy {
             depth,
             steps: vec![[Step::default(); CANOPY_STEPS + 1]; n],
             count: vec![0; n],
+            discs: Vec::new(),
+            of_stand: Vec::new(),
+            crowns: vec![0; n],
+            pass: vec![0; n],
         }
     }
 
@@ -197,9 +227,12 @@ impl Canopy {
     /// ([`cubarium_gpu::voxel::VoxelStaging::canopy`]'s layout).
     pub(crate) fn build(&mut self, flora: FloraView<'_>, out: &mut [u8]) {
         self.count.fill(0);
+        self.discs.clear();
+        self.of_stand.clear();
         let k = flora.config.shade_k_per_m2;
         let (w, d) = (i64::from(self.width), i64::from(self.depth));
         for stand in flora.stands {
+            let first = self.discs.len() as u32;
             for layer in flora.layers(stand) {
                 let t = (-k * (1.0 - layer.porosity) * layer.stock / layer.area_m2).exp();
                 if t.is_nan() || t >= 1.0 || layer.cell <= 0 {
@@ -209,6 +242,13 @@ impl Canopy {
                 let r = layer.radius_v.max(0.0);
                 let reach = r.floor() as i64;
                 let (x0, z0) = (i64::from(stand.site.x), i64::from(stand.site.z));
+                self.discs.push(Disc {
+                    x: x0,
+                    z: z0,
+                    r2: r * r,
+                    cell: i64::from(cell),
+                    t: t as f32,
+                });
                 for dz in -reach..=reach {
                     let z = z0 + dz;
                     if z < 0 || z >= d {
@@ -223,8 +263,89 @@ impl Canopy {
                     }
                 }
             }
+            self.of_stand.push((first, self.discs.len() as u32));
         }
         self.write(out);
+    }
+
+    /// Count the crown cells drawn in each column, for [`Canopy::plant_byte`]'s pass
+    /// chance.
+    pub(crate) fn count_crowns(&mut self, crowns: impl Iterator<Item = (u32, u32)>) {
+        self.crowns.fill(0);
+        let w = self.width as usize;
+        for (x, z) in crowns {
+            let c = &mut self.crowns[z as usize * w + x as usize];
+            *c = c.saturating_add(1);
+        }
+        for col in 0..self.crowns.len() {
+            let n = self.crowns[col];
+            if n == 0 {
+                continue;
+            }
+            let (x, z) = ((col % w) as u32, (col / w) as u32);
+            self.pass[col] = nibble(self.through(x, z, -1).powf(1.0 / f32::from(n)));
+        }
+    }
+
+    /// What column `(x, z)`'s foliage lets through to a face of a voxel at height `y`:
+    /// every layer whose disc is drawn above `y`, as the plane holds it (a `y` below 0 is
+    /// the whole column).
+    fn through(&self, x: u32, z: u32, y: i64) -> f32 {
+        let col = z as usize * self.width as usize + x as usize;
+        self.steps[col][..self.count[col] as usize]
+            .iter()
+            .take_while(|s| i64::from(s.cell) > y)
+            .map(|s| s.t)
+            .product()
+    }
+
+    /// What stand `stand`'s own layers let through to a face of a voxel at `y` in column
+    /// `(x, z)`.
+    fn own(&self, stand: usize, x: u32, z: u32, y: i64) -> f32 {
+        let Some(&(a, b)) = self.of_stand.get(stand) else {
+            return 1.0;
+        };
+        let w = i64::from(self.width);
+        let mut t = 1.0;
+        for disc in &self.discs[a as usize..b as usize] {
+            let mut dx = (i64::from(x) - disc.x).rem_euclid(w);
+            if dx > w / 2 {
+                dx -= w;
+            }
+            let dz = i64::from(z) - disc.z;
+            if disc.cell > y && ((dx * dx + dz * dz) as f64) <= disc.r2 {
+                t *= disc.t;
+            }
+        }
+        t
+    }
+
+    /// The lit tier's byte for a plant cell at `(x, y, z)` (the voxel texel's `b`, which a
+    /// plant cell's air never uses): in the low nibble, the canopy over the cell's faces
+    /// without its own stand's layers (`owner`), since the model never lets a stand shade
+    /// itself; in the high nibble, for a crown cell, the chance a shadow ray gets through
+    /// it: the column's whole transmission spread evenly over the crown cells drawn in the
+    /// column, so a ray straight down through all of them keeps what the model lets
+    /// through.
+    pub(crate) fn plant_byte(&self, owner: Option<usize>, crown: bool, x: u32, y: u32, z: u32) -> u8 {
+        let y = i64::from(y);
+        let all = self.through(x, z, y);
+        let canopy = match owner {
+            Some(stand) => {
+                let own = self.own(stand, x, z, y);
+                if own > 0.0 { (all / own).min(1.0) } else { 1.0 }
+            }
+            None => all,
+        };
+        let col = z as usize * self.width as usize + x as usize;
+        let pass = if crown && self.crowns[col] > 0 {
+            self.pass[col]
+        } else if crown {
+            15
+        } else {
+            0
+        };
+        pass << 4 | nibble(canopy)
     }
 
     fn add(&mut self, col: usize, cell: u8, t: f32) {
@@ -470,6 +591,71 @@ mod tests {
         assert_eq!(Canopy::read(&plane, c.width, 8, 6, top as u32), 1.0);
         // Far from both, open.
         assert_eq!(Canopy::read(&plane, c.width, 24, 1, 1), 1.0);
+    }
+
+    /// A stand's own cells are shaded by every other stand's layers above them and never
+    /// by its own (the model never lets a stand shade itself); a mark (no stand) takes the
+    /// whole column. A crown cell's pass chance spreads the column's transmission over its
+    /// crown cells.
+    #[test]
+    fn a_plant_cell_is_not_shaded_by_its_own_stand() {
+        let c = Config {
+            width: 32,
+            height: 40,
+            depth: 12,
+            ..Config::default()
+        };
+        let mut world = World::empty(c.clone());
+        for z in 0..c.depth {
+            for x in 0..i64::from(c.width) {
+                set(&mut world, x, 0, z, Material::Bedrock);
+                set(&mut world, x, 1, z, Material::Soil);
+            }
+        }
+        let flora = flora(
+            &world,
+            &[(8, 6, Species::Umbrellafrond), (9, 6, Species::Bloomcrown)],
+        );
+        let view = flora.view();
+        let mut canopy = Canopy::new(c.width, c.depth);
+        let mut plane = vec![0u8; c.width as usize * c.depth as usize * CANOPY_STEPS * 2];
+        canopy.build(view, &mut plane);
+        let k = view.config.shade_k_per_m2;
+        // The model's product over the layers of every stand but `skip` above `y`.
+        let model = |skip: Option<usize>, x: i64, z: i64, y: i64| -> f64 {
+            let mut t = 1.0;
+            for (i, s) in view.stands.iter().enumerate() {
+                if Some(i) == skip {
+                    continue;
+                }
+                for l in view.layers(s) {
+                    let (dx, dz) = (x - i64::from(s.site.x), z - i64::from(s.site.z));
+                    if ((dx * dx + dz * dz) as f64) <= l.radius_v * l.radius_v && l.cell > y {
+                        t *= (-k * (1.0 - l.porosity) * l.stock / l.area_m2).exp();
+                    }
+                }
+            }
+            t
+        };
+        let nibble = |v: f64| (v * 15.0).round() as u8;
+        let (x, z, y) = (9u32, 6u32, 2u32);
+        let all = model(None, 9, 6, 2);
+        assert!(all < 0.9, "the fixture's column is shaded: {all}");
+        for stand in 0..view.stands.len() {
+            let others = model(Some(stand), 9, 6, 2);
+            let byte = canopy.plant_byte(Some(stand), false, x, y, z);
+            assert_eq!(byte & 15, nibble(others), "stand {stand}'s own cell");
+            assert_eq!(byte >> 4, 0, "not a crown: no pass chance");
+            assert!(others > all, "its own layers are divided out");
+        }
+        assert_eq!(canopy.plant_byte(None, false, x, y, z) & 15, nibble(all));
+        // Three crown cells in the column share its transmission.
+        canopy.count_crowns([(x, z), (x, z), (x, z)].into_iter());
+        let ground = model(None, 9, 6, -1);
+        assert_eq!(
+            canopy.plant_byte(Some(0), true, x, y, z) >> 4,
+            nibble(ground.powf(1.0 / 3.0))
+        );
     }
 
     /// Five distinct layers over one column: the ground under all of them keeps the whole

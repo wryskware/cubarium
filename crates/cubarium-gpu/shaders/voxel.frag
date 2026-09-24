@@ -42,6 +42,7 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
     ivec4 tex;          // the face textures present, one bit per slot; vine tiles present; -, -
     vec4 lightK;        // lit: ambient gain, ambient floor, ladder rungs, AO strength
     vec4 ambientC;      // lit: the ambient light's colour, the sky's hue at unit luminance
+    vec4 sunK;          // lit: the unit direction toward the sun (zero: none), sun tint
 } u;
 
 // The lighting tier (`lighting = "flat" | "lit"`), fixed when the pipeline is built. The
@@ -352,21 +353,126 @@ float canopyAt(int x, int z, int yv) {
     return float(b.a) / 255.0;
 }
 
-// The ambient product snapped to the ladder, as a light colour.
-vec3 ambientLight(float a) {
+// The model's canopy over a plant cell's own faces, from the packer: the foliage layers
+// above it in its own column **but its own stand's**, since the model never lets a stand
+// shade itself (v.b's low nibble; `Packer::fill`). An animal's cell carries no such byte
+// and reads the column plane like the terrain.
+float plantCanopy(uvec4 v) { return float(v.b & 15u) / 15.0; }
+
+// A crown cell's chance of letting a shadow ray through, from the packer: the model's
+// transmission down its column spread evenly over the column's crown cells (v.b's high
+// nibble), so a ray straight down through all of them keeps what the model lets through.
+float crownPass(uvec4 v) { return float(v.b >> 4) / 15.0; }
+
+// The quantised light: the ambient product's rung on the ladder, one rung higher where
+// the sun reaches (so a shadow is exactly one rung darker than the sunlit texel beside
+// it, and never below the floor), times the gain, in the ambient colour.
+vec3 ladderLight(float a, float sun) {
     float n = max(u.lightK.z - 1.0, 1.0);
-    float rung = floor(clamp(a, 0.0, 1.0) * n + 0.5) / n;
-    return u.ambientC.rgb * (u.lightK.x * (u.lightK.y + (1.0 - u.lightK.y) * rung));
+    float rung = floor(clamp(a, 0.0, 1.0) * n + 0.5) + sun;
+    return u.ambientC.rgb * (u.lightK.x * (u.lightK.y + (1.0 - u.lightK.y) * rung / n));
 }
 
-// The light on the front face of (x, y, z) at texel (dx, dy).
-vec3 lightFront(int x, int y, int z, int dx, int dy) {
-    return ambientLight(skyOpen(x, y, z - 1) * aoFront(x, y, z, dx, dy) * canopyAt(x, z - 1, y));
+// --- the sun (the lit tier) --------------------------------------------------------------
+//
+// The sun term is binary per texel: a ray from the texel's world point toward the sun
+// (`sunK.xyz`), walked cell by cell, either leaves the world (lit) or meets something in
+// the way (one rung darker). Terrain and block parts (trunk, log, animal) stop it. A crown
+// cell lets it through where a hash of the cell and of which half-voxel of the cell the
+// ray crosses falls under the cell's pass chance, so crown shade is dappled in half-voxel
+// patches with the model's transmission as its mean; with textures on, a ray leaving the
+// cell through a hole in its leaf cutout passes too. Sprouts, floor marks, vine cells and
+// water do not stop it.
+
+// Cells a shadow ray crosses before it gives up and counts as lit.
+const int SUN_MARCH = 128;
+
+bool plantTexel(int x, int y, int z, uvec4 v, bool top, int dx, int dy, inout vec3 base);
+
+// Does a ray crossing crown cell `c` get through it? `fm` is where it crosses the middle
+// of its path through the cell and `fe` where it leaves, both in the cell's own 0..1, and
+// `axis` which face it leaves by (0 the -x side, 1 the top, 2 the front).
+bool crownLets(uvec4 v, ivec3 c, vec3 fm, vec3 fe, int axis) {
+    bool top = axis == 1;
+    int dx = clamp(int((axis == 0 ? fe.z : fe.x) * float(S)), 0, S - 1);
+    int dy = top ? clamp(int((1.0 - fe.z) * float(RISE)), 0, RISE - 1)
+                 : clamp(int((1.0 - fe.y) * float(S)), 0, S - 1);
+    vec3 scratch = vec3(0.0);
+    if (!plantTexel(c.x, c.y, c.z, v, top, dx, dy, scratch)) { return true; }
+    ivec3 half_ = clamp(ivec3(fm * 2.0), ivec3(0), ivec3(1));
+    uint h = cellHash(wrapX(c.x), c.y, c.z, 32 + half_.x + 2 * half_.y + 4 * half_.z);
+    return float(h & 0xFFFFu) / 65536.0 < crownPass(v);
 }
 
-// The light on the top face of (x, y, z) at texel (dx, dy).
-vec3 lightTop(int x, int y, int z, int dx, int dy) {
-    return ambientLight(skyOpen(x, y + 1, z) * aoTop(x, y, z, dx, dy) * canopyAt(x, z, y));
+// 1 where the sun reaches world point `p`, which lies on the boundary of open cell `c`
+// (the cell in front of the face it is on); 0 where anything opaque is in the way.
+float sunReaches(vec3 p, ivec3 c) {
+    vec3 L = u.sunK.xyz;
+    ivec3 dir = ivec3(sign(L));
+    vec3 inv = vec3(
+        abs(L.x) > 1e-6 ? 1.0 / abs(L.x) : 1e30,
+        abs(L.y) > 1e-6 ? 1.0 / abs(L.y) : 1e30,
+        abs(L.z) > 1e-6 ? 1.0 / abs(L.z) : 1e30);
+    // How far along the ray each axis's next cell boundary is.
+    vec3 next = vec3(
+        (dir.x > 0 ? float(c.x + 1) - p.x : p.x - float(c.x)) * inv.x,
+        (dir.y > 0 ? float(c.y + 1) - p.y : p.y - float(c.y)) * inv.y,
+        (dir.z > 0 ? float(c.z + 1) - p.z : p.z - float(c.z)) * inv.z);
+    float tIn = 0.0;
+    for (int i = 0; i < SUN_MARCH; ++i) {
+        if (c.y >= H || c.z < 0 || c.z >= D) { return 1.0; }
+        if (c.y < 0) { return 0.0; }
+        int axis = (next.x < next.y && next.x < next.z) ? 0 : (next.y < next.z ? 1 : 2);
+        float tOut = axis == 0 ? next.x : (axis == 1 ? next.y : next.z);
+        uvec4 v = at(c.x, c.y, c.z);
+        if (solidV(v)) { return 0.0; }
+        int part = partOf(v);
+        if (part == TRUNK || part == LOG || part == ANIMAL_INTERIM) { return 0.0; }
+        if (part == CROWN || part == CROWN_HEART) {
+            vec3 cell = vec3(c);
+            if (!crownLets(v, c, p + L * (0.5 * (tIn + tOut)) - cell, p + L * tOut - cell, axis)) {
+                return 0.0;
+            }
+        }
+        tIn = tOut;
+        if (axis == 0) { c.x += dir.x; next.x += inv.x; }
+        else if (axis == 1) { c.y += dir.y; next.y += inv.y; }
+        else { c.z += dir.z; next.z += inv.z; }
+    }
+    return 1.0;
+}
+
+// A lit colour: the base under the quantised light, and where the sun reaches, leaning
+// toward the palette's light by the sun tint times N·L (the flat tier's lean of a top
+// face toward `lightC`, now gated by the sun).
+vec3 litBy(vec3 base, float ambient, float sun, float ndl) {
+    vec3 c = base * ladderLight(ambient, sun);
+    return mix(c, u.lightC.rgb, clamp(u.sunK.w * sun * ndl, 0.0, 1.0));
+}
+
+// The front face of (x, y, z) at texel (dx, dy), lit, with `canopy` over it.
+vec3 shadeFront(vec3 base, int x, int y, int z, int dx, int dy, float canopy) {
+    float ndl = max(-u.sunK.z, 0.0);
+    float sun = 0.0;
+    if (ndl > 0.0 && u.sunK.y > 0.0) {
+        vec3 p = vec3(float(x) + (float(dx) + 0.5) / float(S),
+                      float(y + 1) - (float(dy) + 0.5) / float(S), float(z));
+        sun = sunReaches(p, ivec3(x, y, z - 1));
+    }
+    return litBy(base, skyOpen(x, y, z - 1) * aoFront(x, y, z, dx, dy) * canopy, sun, ndl);
+}
+
+// The top face of (x, y, z) at texel (dx, dy), dy = 0 at the back, lit, with `canopy`
+// over it.
+vec3 shadeTop(vec3 base, int x, int y, int z, int dx, int dy, float canopy) {
+    float ndl = max(u.sunK.y, 0.0);
+    float sun = 0.0;
+    if (ndl > 0.0) {
+        vec3 p = vec3(float(x) + (float(dx) + 0.5) / float(S), float(y + 1),
+                      float(z + 1) - (float(dy) + 0.5) / float(RISE));
+        sun = sunReaches(p, ivec3(x, y + 1, z));
+    }
+    return litBy(base, skyOpen(x, y + 1, z) * aoTop(x, y, z, dx, dy) * canopy, sun, ndl);
 }
 
 // --- the faces ------------------------------------------------------------------------
@@ -396,9 +502,9 @@ vec3 blockFrontLit(int x, int y, int z, uvec4 v, int r, int dx) {
     if (m != 0 && u.roofK.z > 0.0) {
         body = body * (1.0 + faceGrain(x, y, z, dx, dy) * (u.roofK.z / 0.04));
     }
-    vec3 own = body * lightFront(x, y, z, dx, dy);
+    vec3 own = shadeFront(body, x, y, z, dx, dy, canopyAt(x, z - 1, y));
     if (riser) {
-        vec3 lit = body * lightTop(x, y, z, dx, RISE - 1);
+        vec3 lit = shadeTop(body, x, y, z, dx, RISE - 1, canopyAt(x, z, y));
         float t = S > 1 ? float(dy) / float(S - 1) : 0.0;
         vec3 slope = mix(lit, own, u.shadeB.z * t);
         float hz = hazeAt(float(z) - t);
@@ -407,7 +513,7 @@ vec3 blockFrontLit(int x, int y, int z, uvec4 v, int r, int dx) {
     float haze = hazeAt(float(z));
     vec3 c;
     if (dy == 0 && openUp) {
-        vec3 lit = body * lightTop(x, y, z, dx, RISE - 1);
+        vec3 lit = shadeTop(body, x, y, z, dx, RISE - 1, canopyAt(x, z, y));
         c = onSide ? lit : mix(own, lit, u.shadeA.w);
     } else {
         c = onSide ? own * u.shadeB.x : own;
@@ -469,7 +575,7 @@ vec3 blockTopLit(int x, int y, int z, uvec4 v, int r, int dx) {
     if (m != 0 && u.roofK.z > 0.0) {
         body = body * (1.0 + faceGrain(x, y, z, dx, dy + 100) * (u.roofK.z / 0.04));
     }
-    vec3 own = body * lightTop(x, y, z, dx, dy);
+    vec3 own = shadeTop(body, x, y, z, dx, dy, canopyAt(x, z, y));
     vec3 dark = own / u.shadeA.x;
     float hz = hazeAt(float(z) + float(r) / float(RISE));
     vec3 plane = (dy == 0 && RISE > 2 && !backContinues) ? mix(own, dark, u.shadeA.z) : own;
@@ -557,12 +663,16 @@ bool glyphFront(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb) {
         // The atlas's tones on the lit base: the rim and the lit column lean toward the
         // base under the cell's top light, every other tone keeps its pigment rule under
         // this face's light.
+        // A plant cell's own stand does not shade it; an animal reads the column.
+        bool animal = partOf(v) == ANIMAL_INTERIM;
+        float cf = animal ? canopyAt(x, z - 1, y) : plantCanopy(v);
+        float ct = animal ? canopyAt(x, z, y) : plantCanopy(v);
         vec3 c;
         if (tone == 2 && !coveredUp) {
-            c = mix(base * lightFront(x, y, z, dx, localY),
-                    base * lightTop(x, y, z, dx, RISE - 1), u.plantA.z);
+            c = mix(shadeFront(base, x, y, z, dx, localY, cf),
+                    shadeTop(base, x, y, z, dx, RISE - 1, ct), u.plantA.z);
         } else if (tone == 3) {
-            c = base * lightTop(x, y, z, dx, RISE - 1);
+            c = shadeTop(base, x, y, z, dx, RISE - 1, ct);
         } else {
             if (tone == 1) {
                 base *= u.shadeB.x;
@@ -572,7 +682,7 @@ bool glyphFront(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb) {
             } else if (tone >= 16 && tone <= 31) {
                 base *= 0.5 + float(tone & 15) / 16.0;
             }
-            c = base * lightFront(x, y, z, dx, localY);
+            c = shadeFront(base, x, y, z, dx, localY, cf);
         }
         rgb = hazed(c, hazeAt(float(z)));
         return true;
@@ -603,7 +713,8 @@ bool glyphCap(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb) {
     if (LIT) {
         // The cap's own tone is the base under its light; the edge tones lean toward it
         // over PLANT_TOP_GAIN, as the flat tier leans toward the unlit base.
-        vec3 own = base * lightTop(x, y, z, dx, localY);
+        float ct = partOf(v) == ANIMAL_INTERIM ? canopyAt(x, z, y) : plantCanopy(v);
+        vec3 own = shadeTop(base, x, y, z, dx, localY, ct);
         vec3 lc = own;
         if (tone == 1) {
             lc *= u.plantA.w;
@@ -760,7 +871,10 @@ void main() {
                     if (isVine(f) && vineKind(f) == VINE_FLUSH) {
                         vec4 t = vineTexel(f, x, level, z - 1, dx, S - 1 - r);
                         if (t.a >= 0.5) {
-                            if (LIT) { t.rgb *= lightFront(x, level, z, dx, S - 1 - r); }
+                            if (LIT) {
+                                t.rgb = shadeFront(t.rgb, x, level, z, dx, S - 1 - r,
+                                                   canopyAt(x, z - 1, level));
+                            }
                             acc += trans * hazed(t.rgb, hazeAt(float(z)));
                             trans = 0.0;
                             break;
@@ -781,7 +895,10 @@ void main() {
                     || (k == VINE_SLIVER_R && dx >= S - q)) {
                     vec4 t = vineTexel(v, x, level, z, dx, S - 1 - r);
                     if (t.a >= 0.5) {
-                        if (LIT) { t.rgb *= lightFront(x, level, z, dx, S - 1 - r); }
+                        if (LIT) {
+                            t.rgb = shadeFront(t.rgb, x, level, z, dx, S - 1 - r,
+                                               canopyAt(x, z - 1, level));
+                        }
                         acc += trans * hazed(t.rgb, hazeAt(float(z)));
                         trans = 0.0;
                         break;

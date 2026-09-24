@@ -237,6 +237,8 @@ pub enum Lighting {
 /// ambient_floor = 0.2 # the lowest rung, as a fraction of full
 /// ao = 0.5            # how far a fully occluded face corner darkens
 /// ambient_tint = 0.15 # how far the ambient leans toward the sky's hue
+/// sun = [-1.0, 2.0, -1.0] # toward the sun: x right, y up, z into the scene
+/// sun_tint = 0.18     # how far a sunlit face leans toward the palette's light, at N·L = 1
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -253,6 +255,16 @@ pub struct LightConfig {
     pub ao: f32,
     /// How far the ambient light leans toward the sky's hue, `0..=1`, at unit luminance.
     pub ambient_tint: f32,
+    /// The direction **toward** the sun, in world axes: x to the right, y up, z into the
+    /// scene (away from the camera). Normalised when used. It must sit in the front
+    /// hemisphere (z < 0): light travels away from the camera, so the front faces the
+    /// picture shows are lit and shadows fall back into the scene. A y at or below 0
+    /// turns the sun off (every texel takes the shadow step).
+    pub sun: [f32; 3],
+    /// How far a sunlit texel leans toward the palette's light colour (`lightC`), scaled
+    /// by N·L: the flat tier's top-face lean, gated by the sun. `0` is purely
+    /// multiplicative (base × quantised light).
+    pub sun_tint: f32,
 }
 
 impl Default for LightConfig {
@@ -263,6 +275,8 @@ impl Default for LightConfig {
             ambient_floor: 0.2,
             ao: 0.5,
             ambient_tint: 0.15,
+            sun: [-1.0, 2.0, -1.0],
+            sun_tint: 0.18,
         }
     }
 }

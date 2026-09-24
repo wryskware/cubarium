@@ -527,6 +527,13 @@ pub struct VoxelParams {
     pub ao_strength: f32,
     /// The ambient light's colour, in linear light: the sky's hue at unit luminance.
     pub ambient_colour: [f32; 3],
+    /// The lit tier's sun: the unit direction **toward** it (x right, y up, z into the
+    /// scene), or zero for no sun. A texel the sun reaches keeps its ambient rung; one it
+    /// does not (a cast shadow, or a face turned away) is one rung darker.
+    pub sun: [f32; 3],
+    /// How far a sunlit texel leans toward `light`, times N·L. `0` is purely
+    /// multiplicative.
+    pub sun_tint: f32,
 }
 
 /// Foliage steps the canopy plane holds per column ([`VoxelStaging::canopy`]).
@@ -672,6 +679,7 @@ impl VoxelParams {
                 self.ao_strength,
             ],
             ambient: v(self.ambient_colour),
+            sun: [self.sun[0], self.sun[1], self.sun[2], self.sun_tint],
         }
     }
 }
@@ -704,6 +712,8 @@ struct VoxelUniforms {
     light_k: [f32; 4],
     /// The lit tier's ambient colour.
     ambient: [f32; 4],
+    /// The lit tier's sun: the unit direction toward it, and the sunlit tint.
+    sun: [f32; 4],
 }
 
 /// Where one tick's world is written, straight into mapped memory.
@@ -2192,6 +2202,8 @@ mod tests {
             light_levels: 4,
             ao_strength: 0.5,
             ambient_colour: [1.0; 3],
+            sun: [0.0; 3],
+            sun_tint: 0.0,
         }
     }
 

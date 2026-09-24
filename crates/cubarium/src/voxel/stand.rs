@@ -308,6 +308,12 @@ pub struct Stands {
     vine_cells: bool,
     /// Covered faces to draw instead of the flora's own: a fixture posing spur phases.
     cover_override: Option<Vec<FaceDraw>>,
+    /// Which flora stand (its index in `FloraView::stands`, plus one) placed each cell,
+    /// 0 for a ground mark, a log or a vine; empty unless [`Stands::track_owners`] asked.
+    /// The GPU renderer's lit tier reads it: the model never lets a stand shade itself.
+    owner: Vec<u32>,
+    /// The owner [`Stands::place`] writes: the stand being stamped, or 0.
+    placing: u32,
 }
 
 /// No style yet (and the one index a style never takes).
@@ -390,7 +396,25 @@ impl Stands {
             model_tags: Vec::new(),
             vine_cells: true,
             cover_override: None,
+            owner: Vec::new(),
+            placing: 0,
         }
+    }
+
+    /// Record which stand placed each cell ([`Stands::owner`]) from the next rebuild on.
+    pub fn track_owners(&mut self) {
+        self.owner = vec![0; self.grid.len()];
+    }
+
+    /// The index in `FloraView::stands` of the stand that placed the part in this voxel,
+    /// or `None` for an empty cell, a mark, a log or a vine, or when owners are not
+    /// tracked.
+    #[inline]
+    pub fn owner(&self, x: i64, y: u32, z: u32) -> Option<usize> {
+        if self.owner.is_empty() || y >= self.height || z >= self.depth {
+            return None;
+        }
+        self.owner[self.index(x, y, z)].checked_sub(1).map(|k| k as usize)
     }
 
     /// Rebuild from a flora view with the **dev-mode glyphs**: every stand drawn by
@@ -418,9 +442,13 @@ impl Stands {
         let c = view.config;
         if (self.width, self.height, self.depth) != (c.width, c.height, c.depth) {
             let (vine_cells, cover_override) = (self.vine_cells, self.cover_override.take());
+            let owners = !self.owner.is_empty();
             *self = Stands::empty(c.width, c.height, c.depth);
             self.vine_cells = vine_cells;
             self.cover_override = cover_override;
+            if owners {
+                self.track_owners();
+            }
         } else {
             // Only what the last rebuild stamped: the grid is otherwise all empty.
             for i in self.stamped.drain(..) {
@@ -432,7 +460,8 @@ impl Stands {
         self.model_styles.fill(NO_STYLE);
         // Stands arrive in site order, which is the order the styles are pushed in, so
         // the grid is a pure function of the view and not of any iteration accident.
-        for stand in flora.stands {
+        for (k, stand) in flora.stands.iter().enumerate() {
+            self.placing = k as u32 + 1;
             if let Some(cells) = lib.and_then(|lib| model_cells(lib, flora, stand)) {
                 if !self.stamp_model(view, flora, stand, cells) {
                     break;
@@ -448,6 +477,7 @@ impl Stands {
                 self.place(view, cell, part);
             }
         }
+        self.placing = 0;
         // Dead wood (fallen logs): rendered where dead_wood is above threshold.
         for g in flora.ground {
             if g.dead_wood >= 0.05 {
@@ -739,6 +769,9 @@ impl Stands {
                 self.stamped.push(i as u32);
             }
             self.grid[i] = part;
+            if !self.owner.is_empty() {
+                self.owner[i] = self.placing;
+            }
         }
     }
 
