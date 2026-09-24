@@ -26,6 +26,11 @@ yet, stop and say so.
 
 ## What is decided (read these; they bind)
 
+- **Colour comes from `design/art-direction/species-colours-2026-09-24.md`.** It
+  overrides every hex in the dossiers and in Astra's prose: plants in the 2026-09-23
+  colour-pass hues, animals in colourway 1, bellwing in its original colours. Use the
+  dossiers for parts, counts and shapes only. Kept alternates are a second deliverable.
+
 - The art direction: `design/art-direction/Cubarium_Art_Direction_v0.1.md` (and
   `design/art-direction/README.md`). The look belongs to Wrysk. You never decide it:
   every candidate is `unjudged` until he judges it.
@@ -34,7 +39,7 @@ yet, stop and say so.
   - Generators render **clean graphic illustration, never pixel art**. Pixelation is
     ours: the level tool reduces 48 px masters to each display size.
   - Positive phrasing only.
-  - Palette hexes are in the dossiers.
+  - Colours: `design/art-direction/species-colours-2026-09-24.md` (not the dossier hexes).
 - The designs: `design/art-direction/species-dossiers-2026-09-21.md` (D1–D14) and
   `design/art-direction/species-dossier-D15-latticevine-2026-09-23.md`. Each subject's
   parts, counts, colours and states are there.
@@ -102,9 +107,9 @@ plants → terrain materials → animals (animals only once their body plans are
 2. For each role the species uses (see its dossier and the model builder
    `scripts/blender/organism_lineup.py`: which parts are trunk, foliage, drape or
    accent), generate a **high-resolution, seamless, tileable** material image, flat and
-   face-on, in the dossier hexes. That's `top` and `side` for each role. Make 4
+   face-on, in the species's colours from species-colours. That's `top` and `side` for each role. Make 4
    variants that tile with each other.
-3. Reduce each to a 48 × 48 master. Snap to the dossier hexes (see
+3. Reduce each to a 48 × 48 master. Snap to the species' colours from species-colours (see
    `art/gen/tools/palette_quantise.py`), and cut foliage and drape alpha to 0/255.
    Keep leaf holes large and few. Wrysk found fine speckle unreadable at 4–6 px.
 4. Derive the levels with the level tool. Look at 4, 6, 9 and 13 px. Hand-fix the 4 and
@@ -134,8 +139,7 @@ For each, the **references** are:
 - **Look and character:** the concept image Wrysk picked, where there is one:
   `art/gen/runs/2026-09-24-reimagining-concepts/CH-A2-2401-b0.png`, `RS-D2-2401-b0.png`,
   `CG-D2-2401-b0.png`. The rows in `runs/animal-bodies-2026-09-24/` show the poses.
-- **Colour:** colourway 1, with the hexes and marking logic from that folder's
-  `README.md`. Bellwing keeps its original dossier colours (D14). The kept alternates
+- **Colour:** colourway 1, from `design/art-direction/species-colours-2026-09-24.md`. Bellwing keeps its original dossier colours (D14). The kept alternates
   (orchid seedporter, periwinkle frondgrazer, and the rest of colourway 2) are a second
   deliverable only after colourway 1 is approved.
 - **Prose:** `design/animal-body-reimagining-2026-09-24.md` for CH, RS, CG and SP, and the
