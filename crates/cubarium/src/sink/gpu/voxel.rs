@@ -51,6 +51,7 @@ use crate::voxel::model::{ModelLibrary, Tag};
 use crate::voxel::present as cpu;
 use crate::voxel::project::Projection;
 use crate::voxel::stand::{Part, Stands, Style};
+use crate::voxel::textures::SpeciesFaces;
 use crate::voxel::vine::{self, VineCell};
 use cubarium_voxel_fauna::{Fauna, FaunaView};
 
@@ -70,6 +71,10 @@ pub struct VoxelGpuSinkOptions {
     /// The baked voxel models organisms are drawn with (package V), or `None` for the
     /// dev-mode glyphs.
     pub models: Option<Arc<ModelLibrary>>,
+    /// A face-texture directory under `cfg.textures_dir`, filling whatever it lacks
+    /// ([`crate::voxel::textures::load_layers`]): a preview of a few candidate species over
+    /// the repository's full set.
+    pub textures_under: Option<PathBuf>,
 }
 
 impl Default for VoxelGpuSinkOptions {
@@ -79,6 +84,7 @@ impl Default for VoxelGpuSinkOptions {
             capture: None,
             roof_from_texture: true,
             models: None,
+            textures_under: None,
         }
     }
 }
@@ -137,7 +143,8 @@ impl VoxelGpuSink {
             gpu.name,
             params.upload_bytes() as f64 / 1024.0
         );
-        let textures = load_textures(cfg, &params);
+        let textures = load_textures(cfg, options.textures_under.as_deref(), &params);
+        let species = SpeciesFaces::of(&textures);
         let mut renderer = VoxelRenderer::new(&gpu, params, &textures)?;
         // The panel is presented on its own thread: the queue submit and the fence wait
         // are 8 ms the run loop has better things to do with. Every other target is
@@ -153,7 +160,7 @@ impl VoxelGpuSink {
             gpu,
             renderer,
             target,
-            packer: Packer::new(&params, options.models.clone(), textures.vine_on),
+            packer: Packer::new(&params, options.models.clone(), textures.vine_on, species),
             capture: options.capture,
             founding_sky: None,
             web: None,
@@ -465,8 +472,10 @@ struct Packer {
     /// The baked voxel models, or `None` for the dev-mode glyphs.
     models: Option<Arc<ModelLibrary>>,
     /// GPU style slots, in the order they were first needed this tick, with the texture
-    /// role each draws with (`ROLE_*`).
-    styles: Vec<(Style, u8)>,
+    /// role each draws with (`ROLE_*`) and its species face slots.
+    styles: Vec<StyleKey>,
+    /// Which species face slots each model cell draws with ([`SpeciesFaces`]).
+    species: SpeciesFaces,
     /// `Stands` style index → GPU slot for this tick, so the dedup costs one linear scan
     /// per stand and not one per voxel.
     slot_of: Vec<Option<u8>>,
@@ -502,7 +511,12 @@ const GLYPHS_KEY: u64 = 0;
 impl Packer {
     /// `tiles`: the vine tile atlas is loaded, so the latticevine is drawn as the tile
     /// layer; otherwise it is plain voxel cells in the stands' grid.
-    fn new(p: &VoxelParams, models: Option<Arc<ModelLibrary>>, tiles: bool) -> Packer {
+    fn new(
+        p: &VoxelParams,
+        models: Option<Arc<ModelLibrary>>,
+        tiles: bool,
+        species: SpeciesFaces,
+    ) -> Packer {
         let mut glyphs = vec![0u8; p.glyph_bytes()];
         let used = appearance::atlas_len(p.s, p.rise);
         debug_assert!(used <= glyphs.len());
@@ -516,6 +530,7 @@ impl Packer {
             animals: Animals::empty(p.width, p.height, p.depth),
             models,
             styles: Vec::new(),
+            species,
             slot_of: Vec::new(),
             style_overflow: 0,
             roof: vec![0; p.voxel_count()],
@@ -629,7 +644,11 @@ impl Packer {
                 (
                     PART_ANIMAL_INTERIM,
                     beast.glyph().0,
-                    slot_for_style((style, 0), &mut self.styles, &mut self.style_overflow),
+                    slot_for_style(
+                        (style, 0, [None; 2]),
+                        &mut self.styles,
+                        &mut self.style_overflow,
+                    ),
                 )
             } else {
                 let p = stands.at(xi, i64::from(y), z);
@@ -638,6 +657,7 @@ impl Packer {
                     class => {
                         let s = slot_for(
                             stands,
+                            &self.species,
                             p,
                             &mut self.styles,
                             &mut self.slot_of,
@@ -664,9 +684,10 @@ impl Packer {
                 out.voxels[i] = t.with_vine(glyph, b, a);
             }
         }
-        for (slot, (style, role)) in self.styles.iter().enumerate() {
-            out.styles[slot] =
-                VoxelStyle::new(style.wood, style.crown, style.heart).with_role(*role);
+        for (slot, (style, role, faces)) in self.styles.iter().enumerate() {
+            out.styles[slot] = VoxelStyle::new(style.wood, style.crown, style.heart)
+                .with_role(*role)
+                .with_faces(*faces);
         }
         if out.write[PLANE_ROOF] {
             out.roof.copy_from_slice(&self.roof);
@@ -723,9 +744,13 @@ fn roof_table(material: &[Material], w: u32, h: u32, d: u32, out: &mut [u8]) {
     }
 }
 
+/// One GPU style slot's contents: the colours, the texture role (`ROLE_*`) and the
+/// species face slots (`VoxelStyle::with_faces`).
+type StyleKey = (Style, u8, [Option<u16>; 2]);
+
 /// The GPU slot for a style that has no plant part index to cache under (an animal's),
 /// deduplicated by value against the same table the plants fill.
-fn slot_for_style(style: (Style, u8), styles: &mut Vec<(Style, u8)>, overflow: &mut u64) -> u8 {
+fn slot_for_style(style: StyleKey, styles: &mut Vec<StyleKey>, overflow: &mut u64) -> u8 {
     match styles.iter().position(|s| *s == style) {
         Some(at) => at as u8,
         None if styles.len() < MAX_STYLES => {
@@ -755,8 +780,9 @@ fn role_of(tag: Option<Tag>) -> u8 {
 /// The GPU slot for one plant part's style, deduplicated by value.
 fn slot_for(
     stands: &Stands,
+    species: &SpeciesFaces,
     part: Part,
-    styles: &mut Vec<(Style, u8)>,
+    styles: &mut Vec<StyleKey>,
     slot_of: &mut Vec<Option<u8>>,
     overflow: &mut u64,
 ) -> u8 {
@@ -771,7 +797,9 @@ fn slot_for(
     let Some(style) = stands.style(part) else {
         return 0;
     };
-    let style = (style, role_of(stands.model_tag(part)));
+    let cell = stands.model_cell(part);
+    let faces = cell.map_or([None; 2], |(sp, tag)| species.faces(sp, tag));
+    let style = (style, role_of(cell.map(|(_, tag)| tag)), faces);
     let slot = match styles.iter().position(|s| *s == style) {
         Some(at) => at as u8,
         None if styles.len() < MAX_STYLES => {
@@ -867,7 +895,11 @@ pub fn params_of(cfg: &VoxelConfig, proj: Projection, roof_from_texture: bool) -
 
 /// The face textures at this projection's level, from `cfg.textures_dir`, said once on
 /// stderr. Anything wrong with them draws the faces solid rather than refusing to run.
-pub fn load_textures(cfg: &VoxelConfig, params: &VoxelParams) -> VoxelTextures {
+pub fn load_textures(
+    cfg: &VoxelConfig,
+    under: Option<&std::path::Path>,
+    params: &VoxelParams,
+) -> VoxelTextures {
     if !cfg.textures {
         return VoxelTextures::empty(params.s, params.rise);
     }
@@ -879,20 +911,26 @@ pub fn load_textures(cfg: &VoxelConfig, params: &VoxelParams) -> VoxelTextures {
         );
         return VoxelTextures::empty(params.s, params.rise);
     }
-    match crate::voxel::textures::load(dir, params.s, params.rise) {
+    let roots: Vec<&std::path::Path> = std::iter::once(dir.as_path()).chain(under).collect();
+    match crate::voxel::textures::load_layers(&roots, params.s, params.rise) {
         Ok((atlas, p)) => {
             let slots = atlas.mask().count_ones();
             eprintln!(
                 "cubarium voxel: face textures at {} px from {}: {slots} of {} faces \
                  ({} override, {} level, {} derived here, {} repeated variants); \
-                 {} vine tiles ({} missing)",
+                 {} species faces; {} vine tiles ({} missing)",
                 params.s,
-                dir.display(),
+                roots
+                    .iter()
+                    .map(|r| r.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(" over "),
                 cubarium_gpu::voxel::TEXTURE_SLOTS.len(),
                 p.overrides,
                 p.levels,
                 p.derived,
                 p.repeated,
+                p.species_faces,
                 p.vine_tiles,
                 p.vine_missing,
             );
@@ -974,14 +1012,21 @@ mod tests {
                         (
                             PART_ANIMAL_INTERIM,
                             beast.glyph().0,
-                            slot_for_style((style, 0), styles, overflow),
+                            slot_for_style((style, 0, [None; 2]), styles, overflow),
                         )
                     } else {
                         let p = stands.at(xi, i64::from(y), z);
                         match appearance::plant_class(p) {
                             PART_NONE => (PART_NONE, 0, 0),
                             class => {
-                                let s = slot_for(stands, p, styles, slot_of, overflow);
+                                let s = slot_for(
+                                    stands,
+                                    &SpeciesFaces::default(),
+                                    p,
+                                    styles,
+                                    slot_of,
+                                    overflow,
+                                );
                                 let glyph = appearance::plant_glyph(
                                     p,
                                     !stands.crown_continues(p, xi - 1, y, z),
@@ -1009,9 +1054,10 @@ mod tests {
                 }
             }
         }
-        for (slot, (style, role)) in styles.iter().enumerate() {
-            out.styles[slot] =
-                VoxelStyle::new(style.wood, style.crown, style.heart).with_role(*role);
+        for (slot, (style, role, faces)) in styles.iter().enumerate() {
+            out.styles[slot] = VoxelStyle::new(style.wood, style.crown, style.heart)
+                .with_role(*role)
+                .with_faces(*faces);
         }
         out.glyphs.fill(0);
         let used = appearance::atlas_len(p.s, p.rise);
@@ -1072,7 +1118,7 @@ mod tests {
                 Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, c).unwrap();
             let params = params_of(&cfg, proj, true);
             Rig {
-                packer: Packer::new(&params, None, false),
+                packer: Packer::new(&params, None, false, SpeciesFaces::default()),
                 slow: SlowPlanes::new(2),
                 buffers: [Planes::junk(&params), Planes::junk(&params)],
                 images: Planes::junk(&params),

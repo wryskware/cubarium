@@ -25,9 +25,26 @@ relevant entries in design/0_Canon/DECISIONS.md.
   mapping. Consult its current contract and reuse its geometry helpers.
 - Keep the normal display free of analytical UI. Development diagnostics belong
   in explicit tools, captures, or logs.
-- Development windows opened in autonomous/agent runs must not steal focus or
-  re-tile the desktop workspace: pass `--background` (or set `CUBARIUM_FLOAT=1`)
-  to `./scripts/run-voxel.sh`.
+- **Windows: an agent never puts a window on Wrysk's screen.** This applies to every
+  agent (Claude, Codex, subagents) and every program: cubarium, examples, Blender,
+  image viewers, browsers.
+  - Take pictures headless: `--gpu-target headless`, `--gpu-capture DIR`,
+    `voxel_specimens --gpu`, `blender -b`.
+  - If a window is truly needed, launch it through `scripts/hidden.sh <command…>`.
+    - By default that runs the command on its own Xvfb display with Wayland unset,
+      so no window it opens can appear anywhere. `./scripts/run-voxel.sh` does this
+      by itself under an agent.
+    - Only a test that needs Hyprland itself uses `scripts/hidden.sh --hyprland …`.
+      That puts the first window on the hidden `special:agents` workspace, and a
+      watchdog moves any later window of the command's process tree there as it
+      maps.
+  - Never launch a window any other way. `--background` floating, launch-time exec
+    rules (they reach only a program's first window), and title or class rules (minifb
+    maps before it sets a title and has no app id) have all let windows through.
+  - The cubarium binary enforces this: under `CLAUDECODE=1` or `CODEX_*` it refuses to
+    open a window unless `scripts/hidden.sh` launched it
+    (`crates/cubarium/src/sink/hidden.rs`). Any new window code calls
+    `sink::hidden::window_allowed()` before mapping.
 
 <!-- graft:start -->
 ## Graft — repo context graph

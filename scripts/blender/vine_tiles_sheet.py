@@ -50,13 +50,37 @@ def old_name(kind, dens, mask):
             "hang": f"vine-root-{dens}-{mask:x}-hang.png"}[kind]
 
 
+# The leaf body and the shadow edge under it (latticevine.py TILE_SHINGLES).
+BODY = (0x2B, 0x6A, 0xD0)
+LEAF = (BODY, (0x42, 0xC5, 0xF8))
+SHADOW = (0x1E, 0x27, 0x98, 255)
+
+
+def near(c, ref, tol=3):
+    return all(abs(c[k] - ref[k]) <= tol for k in range(3))
+
+
 def cutout(path):
+    """Straight cutout alpha, then the shadow edge: a body texel whose texel below is no
+    leaf (a hole, a runner) turns #1E2798. The tile's bottom row is left alone: what is
+    below it belongs to the next tile."""
     im = Image.open(path).convert("RGBA")
     px = im.load()
     for y in range(im.height):
         for x in range(im.width):
             r, g, b, a = px[x, y]
             px[x, y] = (r, g, b, 255) if a >= 128 else (0, 0, 0, 0)
+    shade = []
+    for y in range(im.height - 1):
+        for x in range(im.width):
+            c = px[x, y]
+            if c[3] == 255 and near(c, BODY):
+                below = px[x, y + 1]
+                # (the shadow counts as leaf, so running this twice changes nothing)
+                if below[3] == 0 or not any(near(below, l) for l in (*LEAF, SHADOW)):
+                    shade.append((x, y))
+    for x, y in shade:
+        px[x, y] = SHADOW
     im.save(path)
     return im
 

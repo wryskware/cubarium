@@ -59,18 +59,27 @@ Read `crates/cubarium/src/voxel/textures.rs` (module doc) for the contract. In s
   sampled per role: bark (trunk), leaf (foliage), drape, and accent.
 - **Latticevine** uses direct-colour tiles by neighbour mask in `masters/vine/`,
   documented in `design/handoffs/latticevine-visual-2026-09-24.md`.
-- **Per-species sets (being added on the engine side now, package S of
-  `design/handoffs/presentation-plan-2026-09-24.md`):**
+- **Per-species sets (package S, landed; contract in the module doc of
+  `crates/cubarium/src/voxel/textures.rs`):**
   `assets/voxel-textures/masters/species/<species>/<role>-<face>-<variant>.png`.
   - species uses the flora names (`bloomcrown`, `umbrellafrond`, `springturf`,
     `velvetpad`, `stonecushion`, `vaulttree`, `lanternberry`, `siphonreed`, `glowcap`).
-  - role ∈ `bark`, `leaf`, `drape`, `accent`. A species with several foliage layers may
-    add `leaf1`, `leaf2`, … (inner to outer).
+  - role ∈ `bark` (the model's trunk cells), `leaf`, `drape`, `accent`. `leaf1`,
+    `leaf2`, … name one foliage layer each: `leaf<i+1>` is the model's foliage index
+    `i`, **bottom-up** among the stand's foliage layers (bloomcrown: `leaf1` is the low
+    rosette, `leaf2` the vanes and the core). A layer with no file of its own uses `leaf`.
   - face ∈ `top`, `side`; variant ∈ `0..4`.
-  - Direct colour, cutout alpha for leaf and drape. Anything missing falls back to the
-    generic set.
-  - Until package S lands, preview by rendering specimens with a textures directory you
-    assemble (below).
+  - Direct colour (it replaces the colour pass's hue for that role; lighting still
+    shades it), cutout alpha for leaf and drape. Anything missing falls back per role
+    and per face to the generic tinted set.
+  - Which roles a species' model uses: `bloomcrown` bark, leaf1, leaf2, accent;
+    `lanternberry` bark, leaf (two layers), accent; `springturf`, `stonecushion`,
+    `siphonreed` leaf only (`assets/voxel-models/125`).
+  - Interim masters for the six signed-off plants are in the repository
+    (`scripts/voxel-textures/species_masters.py`); a candidate set replaces them.
+  - Preview: `voxel_specimens --gpu --textures DIR` puts `DIR` over
+    `assets/voxel-textures`, so `DIR` need hold only the candidate species
+    (`DIR/masters/species/<species>/…`); `--textures-only DIR` draws with `DIR` alone.
 
 ## The plan
 

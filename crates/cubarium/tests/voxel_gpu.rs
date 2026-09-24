@@ -110,6 +110,7 @@ fn the_gpu_draws_the_same_small_world_as_the_cpu_presenter() {
             capture: None,
             roof_from_texture: true,
             models: None,
+            textures_under: None,
         },
     ) {
         Ok(sink) => sink,

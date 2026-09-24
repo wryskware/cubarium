@@ -21,6 +21,48 @@
 //! are [`vine_tiles`]'s (`crate::voxel::vine`). They are direct colour with a cutout
 //! alpha, derived the same way.
 //!
+//! # Species sets
+//!
+//! A baked organism model's cells can draw with their own species' faces instead of the
+//! generic `bark-*`, `leaf-*` and `drape-*` slots
+//! (`design/handoffs/species-texture-sets-2026-09-24.md`):
+//!
+//! ```text
+//! masters/species/<species>/<role>-<face>-<variant>.png
+//! lod/<px>/species/<species>/…   override/<px>/species/<species>/…   (derived; override wins)
+//! ```
+//!
+//! - `<species>` is `Species::name()` (`bloomcrown`, `siphonreed`, …); a directory for a
+//!   name that is no species is loaded and never drawn.
+//! - `<role>` is `bark` (the model's trunk cells), `leaf` (every foliage cell),
+//!   `leaf1`…`leaf16` (foliage index 0…15 only: [`super::model::Tag::Foliage`], bottom-up
+//!   among the stand's foliage layers — for the baked models the inner layer first),
+//!   `drape`, or `accent` (blooms and fruit).
+//! - `<face>` is `side` or `top`, `<variant>` `0..TEX_VARIANTS`, 48 × 48 like every master.
+//!
+//! Species faces are **direct colour**: the texel replaces the cell's pigment (and with it
+//! the wilt and height-band tints the style carries); the part's lighting still shades
+//! it. `leaf*` and `drape` alpha is a cutout, `bark` and `accent` are opaque. Every
+//! other file under a species directory is ignored.
+//!
+//! **Fallback is per role and per face.** A foliage cell of index `i` draws with
+//! `leaf<i+1>`, else `leaf`, else the generic tinted `leaf` slot; `bark`, `drape` and
+//! `accent` fall back to the generic slot straight away (the accent's is untextured). So a
+//! directory with one species' `leaf-side` files changes that species' leaf sides and
+//! nothing else.
+//!
+//! **How the shader finds them.** Each species face present becomes one **named slot**
+//! of the atlas, after the [`TEXTURE_SLOTS`] ([`VoxelTextures::add_slot`]). [`SpeciesFaces`]
+//! resolves `(species, tag)` to a side slot and a top slot once, at load; the GPU sink puts
+//! them into the cell's style, the crown and heart alphas
+//! (`cubarium_gpu::voxel::VoxelStyle::with_faces`), which were free. A model style is
+//! already one per species and tag, so the voxel texel is unchanged and the style count
+//! barely moves.
+//!
+//! **Layers.** [`load_layers`] reads several roots, the first that has a face (any of its
+//! files) winning for all of that face's variants: `voxel_specimens --gpu --textures DIR`
+//! puts a scratch `DIR` holding a few candidate species over `assets/voxel-textures`.
+//!
 //! # Levels
 //!
 //! A level is `px_per_voxel` itself: the renderer shows one texel per screen pixel, never
@@ -44,6 +86,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 pub use cubarium_gpu::voxel::{TEX_VARIANTS, TEXTURE_SLOTS, TexFace, VoxelTextures};
+use cubarium_voxel_flora::Species;
+
+use super::model::Tag;
 
 /// The side of a master face image.
 pub const MASTER_PX: u32 = 48;
@@ -247,6 +292,8 @@ pub struct Provenance {
     /// Vine tiles loaded, and vine tiles with no file at all (drawn as holes).
     pub vine_tiles: usize,
     pub vine_missing: usize,
+    /// Species faces loaded (`species/<species>/<role>-<face>`), one per named slot.
+    pub species_faces: usize,
 }
 
 fn file(root: &Path, dir: &str, s: Option<u32>, stem: &str, v: u32) -> PathBuf {
@@ -257,83 +304,148 @@ fn file(root: &Path, dir: &str, s: Option<u32>, stem: &str, v: u32) -> PathBuf {
     p.join(format!("{stem}-{v}.png"))
 }
 
+/// Whether `root` has any file at all for `stem` at level `s`: the root that answers a
+/// face is the first that has one, and every variant then comes from that root.
+fn has_face(root: &Path, s: u32, stem: &str) -> bool {
+    (0..TEX_VARIANTS).any(|v| {
+        file(root, "override", Some(s), stem, v).exists()
+            || file(root, "lod", Some(s), stem, v).exists()
+            || file(root, "masters", None, stem, v).exists()
+    })
+}
+
+/// Every variant of one face at level `s`, `w × h`, from `root`: the override if it is the
+/// right size, else the level file if it is, else derived from the master; `None` where
+/// the variant has no file.
+fn face_variants(
+    root: &Path,
+    s: u32,
+    stem: &str,
+    (w, h): (u32, u32),
+    prov: &mut Provenance,
+) -> Result<Vec<Option<Image>>> {
+    let exact = |path: PathBuf| -> Result<Option<Image>> {
+        if !path.exists() {
+            return Ok(None);
+        }
+        let img = read_png(&path)?;
+        Ok(((img.w, img.h) == (w, h)).then_some(img))
+    };
+    let mut found = Vec::new();
+    for v in 0..TEX_VARIANTS {
+        let over = file(root, "override", Some(s), stem, v);
+        let img = if let Some(img) = exact(over.clone())? {
+            prov.overrides += 1;
+            Some(img)
+        } else {
+            if over.exists() {
+                eprintln!(
+                    "cubarium voxel: {} is not {w}x{h}; ignoring the override",
+                    over.display()
+                );
+            }
+            if let Some(img) = exact(file(root, "lod", Some(s), stem, v))? {
+                prov.levels += 1;
+                Some(img)
+            } else {
+                let master = file(root, "masters", None, stem, v);
+                if master.exists() {
+                    prov.derived += 1;
+                    Some(derive(&read_png(&master)?, w, h))
+                } else {
+                    None
+                }
+            }
+        };
+        found.push(img);
+    }
+    Ok(found)
+}
+
+/// Put one slot's variants, a missing variant repeating one that exists. False (and
+/// nothing put) when there is none.
+fn put_variants(
+    atlas: &mut VoxelTextures,
+    slot: usize,
+    found: &[Option<Image>],
+    prov: &mut Provenance,
+) -> Result<bool> {
+    let have: Vec<&Image> = found.iter().flatten().collect();
+    if have.is_empty() {
+        return Ok(false);
+    }
+    for (v, img) in found.iter().enumerate() {
+        let img = match img {
+            Some(img) => img,
+            None => {
+                prov.repeated += 1;
+                have[v % have.len()]
+            }
+        };
+        atlas.put(slot, v as u32, &img.rgba)?;
+    }
+    Ok(true)
+}
+
 /// Load every face at level `s` (with this `rise`) from `root`. A missing directory is
 /// not an error: every slot is absent and the picture is the untextured one.
 pub fn load(root: &Path, s: u32, rise: u32) -> Result<(VoxelTextures, Provenance)> {
+    load_layers(&[root], s, rise)
+}
+
+/// [`load`] from several roots, the first one that has a face (or a vine tile) winning:
+/// a scratch directory holding a few candidate species over the repository's full set.
+pub fn load_layers(roots: &[&Path], s: u32, rise: u32) -> Result<(VoxelTextures, Provenance)> {
     let mut atlas = VoxelTextures::empty(s, rise);
     let mut prov = Provenance::default();
+    let first = |stem: &str| roots.iter().copied().find(|r| has_face(r, s, stem));
     for (slot, &(stem, face)) in TEXTURE_SLOTS.iter().enumerate() {
-        let (w, h) = face_size(face, s, rise);
-        let mut found: Vec<Option<Image>> = Vec::new();
-        for v in 0..TEX_VARIANTS {
+        let found = match first(stem) {
+            Some(root) => face_variants(root, s, stem, face_size(face, s, rise), &mut prov)?,
+            None => Vec::new(),
+        };
+        if !put_variants(&mut atlas, slot, &found, &mut prov)? {
+            prov.absent += 1;
+        }
+    }
+    let mut species: Vec<SpeciesStem> = roots
+        .iter()
+        .flat_map(|r| species_stems(r, Some(s)))
+        .collect();
+    species.sort_unstable();
+    species.dedup();
+    for stem in species {
+        let name = stem.stem();
+        let Some(root) = first(&name) else { continue };
+        let found = face_variants(root, s, &name, face_size(stem.face, s, rise), &mut prov)?;
+        if found.iter().all(Option::is_none) {
+            continue;
+        }
+        let slot = atlas.add_slot(&name, stem.face);
+        put_variants(&mut atlas, slot, &found, &mut prov)?;
+        prov.species_faces += 1;
+    }
+    let vine_level = |stem: &str| -> Result<Option<Image>> {
+        for root in roots {
             let exact = |path: PathBuf| -> Result<Option<Image>> {
                 if !path.exists() {
                     return Ok(None);
                 }
                 let img = read_png(&path)?;
-                Ok(((img.w, img.h) == (w, h)).then_some(img))
+                Ok(((img.w, img.h) == (s, s)).then_some(img))
             };
-            let over = file(root, "override", Some(s), stem, v);
-            let img = if let Some(img) = exact(over.clone())? {
-                prov.overrides += 1;
-                Some(img)
-            } else {
-                if over.exists() {
-                    eprintln!(
-                        "cubarium voxel: {} is not {w}x{h}; ignoring the override",
-                        over.display()
-                    );
-                }
-                if let Some(img) = exact(file(root, "lod", Some(s), stem, v))? {
-                    prov.levels += 1;
-                    Some(img)
-                } else {
-                    let master = file(root, "masters", None, stem, v);
-                    if master.exists() {
-                        prov.derived += 1;
-                        Some(derive(&read_png(&master)?, w, h))
-                    } else {
-                        None
-                    }
-                }
-            };
-            found.push(img);
-        }
-        let have: Vec<Image> = found.iter().flatten().cloned().collect();
-        if have.is_empty() {
-            prov.absent += 1;
-            continue;
-        }
-        for (v, img) in found.iter().enumerate() {
-            let img = match img {
-                Some(img) => img,
-                None => {
-                    prov.repeated += 1;
-                    &have[v % have.len()]
-                }
-            };
-            atlas.put(slot, v as u32, &img.rgba)?;
-        }
-    }
-    let vine_level = |stem: &str| -> Result<Option<Image>> {
-        let exact = |path: PathBuf| -> Result<Option<Image>> {
-            if !path.exists() {
-                return Ok(None);
+            if let Some(img) = exact(vine_file(root, "override", Some(s), stem))? {
+                return Ok(Some(img));
             }
-            let img = read_png(&path)?;
-            Ok(((img.w, img.h) == (s, s)).then_some(img))
-        };
-        if let Some(img) = exact(vine_file(root, "override", Some(s), stem))? {
-            return Ok(Some(img));
+            if let Some(img) = exact(vine_file(root, "lod", Some(s), stem))? {
+                return Ok(Some(img));
+            }
+            let master = vine_file(root, "masters", None, stem);
+            if master.exists() {
+                return Ok(Some(derive(&read_png(&master)?, s, s)));
+            }
         }
-        if let Some(img) = exact(vine_file(root, "lod", Some(s), stem))? {
-            return Ok(Some(img));
-        }
-        let master = vine_file(root, "masters", None, stem);
-        Ok(match master.exists() {
-            true => Some(derive(&read_png(&master)?, s, s)),
-            false => None,
-        })
+        Ok(None)
     };
     for (row, col, stem, legacy) in vine_tiles() {
         let mut img = vine_level(&stem)?;
@@ -367,21 +479,183 @@ fn vine_file(root: &Path, dir: &str, s: Option<u32>, stem: &str) -> PathBuf {
     p.join("vine").join(format!("{stem}.png"))
 }
 
+// --- species sets --------------------------------------------------------------------
+
+/// The foliage layers a species set can name one by one, `leaf1` to `leaf16`: every
+/// foliage index a model tag can carry.
+const LEAF_LAYERS: u8 = 16;
+
+/// One face of one species set: `species/<species>/<role>-<face>`, variants aside.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct SpeciesStem {
+    species: String,
+    role: String,
+    face: TexFace,
+}
+
+impl SpeciesStem {
+    fn stem(&self) -> String {
+        let face = match self.face {
+            TexFace::Side => "side",
+            TexFace::Top => "top",
+        };
+        species_stem(&self.species, &self.role, face)
+    }
+
+    /// `<role>-<face>-<variant>.png`, if the name is one: the role one the renderer knows
+    /// (`bark`, `leaf`, `leaf1`…, `drape`, `accent`), the variant in range.
+    fn parse(species: &str, file: &str) -> Option<SpeciesStem> {
+        let body = file.strip_suffix(".png")?;
+        let (rest, v) = body.rsplit_once('-')?;
+        if v.parse::<u32>().ok()? >= TEX_VARIANTS {
+            return None;
+        }
+        let (role, face) = rest.rsplit_once('-')?;
+        let face = match face {
+            "side" => TexFace::Side,
+            "top" => TexFace::Top,
+            _ => return None,
+        };
+        let known = matches!(role, "bark" | "leaf" | "drape" | "accent")
+            || role
+                .strip_prefix("leaf")
+                .and_then(|n| n.parse::<u8>().ok())
+                .is_some_and(|n| (1..=LEAF_LAYERS).contains(&n));
+        known.then(|| SpeciesStem {
+            species: species.to_string(),
+            role: role.to_string(),
+            face,
+        })
+    }
+}
+
+/// `species/<species>/<role>-<face>`: a species face's stem, under `masters/`, `lod/<px>/`
+/// and `override/<px>/` alike.
+pub fn species_stem(species: &str, role: &str, face: &str) -> String {
+    format!("species/{species}/{role}-{face}")
+}
+
+/// Every species face with a file under `root`: its masters, and with `Some(s)` its
+/// level and override files at `s` too.
+fn species_stems(root: &Path, s: Option<u32>) -> Vec<SpeciesStem> {
+    let mut dirs = vec![root.join("masters").join("species")];
+    if let Some(s) = s {
+        dirs.push(root.join("lod").join(s.to_string()).join("species"));
+        dirs.push(root.join("override").join(s.to_string()).join("species"));
+    }
+    let mut out = Vec::new();
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for sp in entries.flatten() {
+            let Some(species) = sp.file_name().to_str().map(str::to_string) else { continue };
+            let Ok(files) = std::fs::read_dir(sp.path()) else { continue };
+            for f in files.flatten() {
+                if let Some(name) = f.file_name().to_str()
+                    && let Some(stem) = SpeciesStem::parse(&species, name)
+                {
+                    out.push(stem);
+                }
+            }
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// The roles a baked model cell looks for in its species set, most specific first. A
+/// foliage cell of foliage index `i` (`model::Tag::Foliage`, bottom-up among the stand's
+/// foliage layers) is `leaf<i+1>`, else `leaf`.
+fn roles_of(tag: Tag) -> Vec<String> {
+    match tag {
+        Tag::Trunk => vec!["bark".into()],
+        Tag::Foliage(i) => vec![format!("leaf{}", u16::from(i) + 1), "leaf".into()],
+        Tag::Drape(_) => vec!["drape".into()],
+        Tag::Accent => vec!["accent".into()],
+    }
+}
+
+/// Which named atlas slots each species' model cells draw with, per tag, side and top
+/// (`VoxelStyle::with_faces`). Built once from a loaded atlas; `None` on a face is that
+/// role's generic, tinted slot.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SpeciesFaces {
+    /// `Species::index() · TAGS + tag_key(tag)`.
+    table: Vec<[Option<u16>; 2]>,
+}
+
+/// Trunk, accent, and sixteen each of foliage and drape.
+const TAGS: usize = 2 + 2 * LEAF_LAYERS as usize;
+
+fn tag_key(tag: Tag) -> usize {
+    match tag {
+        Tag::Trunk => 0,
+        Tag::Accent => 1,
+        Tag::Foliage(i) => 2 + usize::from(i.min(LEAF_LAYERS - 1)),
+        Tag::Drape(i) => 2 + LEAF_LAYERS as usize + usize::from(i.min(LEAF_LAYERS - 1)),
+    }
+}
+
+impl SpeciesFaces {
+    /// The species sets `atlas` holds.
+    pub fn of(atlas: &VoxelTextures) -> SpeciesFaces {
+        if atlas.named().next().is_none() {
+            return SpeciesFaces::default();
+        }
+        let mut table = vec![[None; 2]; Species::ALL.len() * TAGS];
+        let mut tags = vec![Tag::Trunk, Tag::Accent];
+        tags.extend((0..LEAF_LAYERS).map(Tag::Foliage));
+        tags.extend((0..LEAF_LAYERS).map(Tag::Drape));
+        for species in Species::ALL {
+            for &tag in &tags {
+                let roles = roles_of(tag);
+                let slot = |face: &str| {
+                    roles.iter().find_map(|role| {
+                        atlas
+                            .slot_named(&species_stem(species.name(), role, face))
+                            .and_then(|s| u16::try_from(s).ok())
+                    })
+                };
+                table[species.index() * TAGS + tag_key(tag)] = [slot("side"), slot("top")];
+            }
+        }
+        SpeciesFaces { table }
+    }
+
+    /// The side and top slots of `species`' cells tagged `tag`.
+    pub fn faces(&self, species: Species, tag: Tag) -> [Option<u16>; 2] {
+        self.table
+            .get(species.index() * TAGS + tag_key(tag))
+            .copied()
+            .unwrap_or([None; 2])
+    }
+
+    /// Whether any species has a set.
+    pub fn is_empty(&self) -> bool {
+        self.table.iter().all(|f| *f == [None; 2])
+    }
+}
+
 /// Write `lod/<s>/` for every level in `levels` from the masters under `root`, at this
 /// tilt. Returns the number of files written.
 pub fn write_levels(root: &Path, levels: &[u32], tilt_degrees: f64) -> Result<usize> {
     let mut n = 0;
+    let species = species_stems(root, None);
     for &s in levels {
         let rise = super::project::rise_for(tilt_degrees, s);
-        for &(stem, face) in TEXTURE_SLOTS.iter() {
+        let faces = TEXTURE_SLOTS
+            .iter()
+            .map(|&(stem, face)| (stem.to_string(), face))
+            .chain(species.iter().map(|st| (st.stem(), st.face)));
+        for (stem, face) in faces {
             let (w, h) = face_size(face, s, rise);
             for v in 0..TEX_VARIANTS {
-                let master = file(root, "masters", None, stem, v);
+                let master = file(root, "masters", None, &stem, v);
                 if !master.exists() {
                     continue;
                 }
                 let img = derive(&read_png(&master)?, w, h);
-                write_png(&file(root, "lod", Some(s), stem, v), &img)?;
+                write_png(&file(root, "lod", Some(s), &stem, v), &img)?;
                 n += 1;
             }
         }
@@ -527,5 +801,105 @@ mod tests {
         assert_eq!(at(3), [255, 0, 0], "variant 3 repeats variant 1");
         assert!(!atlas.vine_on, "no vine tiles, no vine layer");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The first texel of `slot`'s variant `v` in the atlas.
+    fn first_texel(atlas: &VoxelTextures, slot: usize, v: u32) -> [u8; 4] {
+        let (aw, _) = atlas.atlas_size();
+        let i = (((slot as u32 * atlas.s) * aw + v * atlas.s) * 4) as usize;
+        atlas.rgba[i..i + 4].try_into().unwrap()
+    }
+
+    /// A species set is looked up per role and per face: `leaf2` wins for foliage index 1,
+    /// `leaf` serves every other index, a face with no file keeps the generic slot, and a
+    /// species with no directory has no set at all.
+    #[test]
+    fn a_species_face_falls_back_per_role_and_face() {
+        let root = std::env::temp_dir().join(format!("cubarium-species-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let m = |rel: &str, c: [u8; 4]| write_png(&root.join(rel), &solid(48, 48, |_, _| c)).unwrap();
+        m("masters/species/bloomcrown/leaf-side-0.png", [10, 20, 30, 255]);
+        m("masters/species/bloomcrown/leaf2-side-0.png", [40, 50, 60, 255]);
+        m("masters/species/bloomcrown/bark-top-1.png", [70, 80, 90, 255]);
+        m("masters/species/bloomcrown/leaf-side-9.png", [1, 1, 1, 255]); // no such variant
+        m("masters/species/bloomcrown/stem-side-0.png", [1, 1, 1, 255]); // no such role
+        m("masters/species/notaplant/leaf-side-0.png", [1, 1, 1, 255]);
+        let (atlas, prov) = load(&root, 6, 3).unwrap();
+        assert_eq!(prov.species_faces, 4, "leaf-side, leaf2-side, bark-top, notaplant's leaf");
+        assert_eq!(atlas.mask(), 0, "no generic slot has a file");
+        let sf = SpeciesFaces::of(&atlas);
+        let slot = |stem: &str| atlas.slot_named(stem).map(|s| s as u16);
+        let leaf = slot("species/bloomcrown/leaf-side");
+        let leaf2 = slot("species/bloomcrown/leaf2-side");
+        assert!(leaf.is_some() && leaf2.is_some() && leaf != leaf2);
+        assert_eq!(sf.faces(Species::Bloomcrown, Tag::Foliage(1)), [leaf2, None]);
+        assert_eq!(sf.faces(Species::Bloomcrown, Tag::Foliage(0)), [leaf, None]);
+        assert_eq!(sf.faces(Species::Bloomcrown, Tag::Foliage(5)), [leaf, None]);
+        assert_eq!(
+            sf.faces(Species::Bloomcrown, Tag::Trunk),
+            [None, slot("species/bloomcrown/bark-top")]
+        );
+        assert_eq!(sf.faces(Species::Bloomcrown, Tag::Drape(0)), [None, None]);
+        assert_eq!(sf.faces(Species::Bloomcrown, Tag::Accent), [None, None]);
+        assert_eq!(sf.faces(Species::Siphonreed, Tag::Foliage(0)), [None, None]);
+        // The one variant there is fills all four; the texels are the file's own colours.
+        let bark = slot("species/bloomcrown/bark-top").unwrap() as usize;
+        assert_eq!(atlas.face_size(bark), (6, 3));
+        for v in 0..TEX_VARIANTS {
+            assert_eq!(first_texel(&atlas, bark, v), [70, 80, 90, 255]);
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A species face's override of the right size wins over its level and its master,
+    /// exactly as a generic face's does, and the level files `write_levels` derives are
+    /// found in their own place.
+    #[test]
+    fn a_species_override_wins_and_levels_are_derived() {
+        let root = std::env::temp_dir().join(format!("cubarium-sp-over-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let blue = solid(48, 48, |_, _| [0, 0, 200, 255]);
+        write_png(&root.join("masters/species/springturf/leaf-side-0.png"), &blue).unwrap();
+        write_png(&root.join("masters/species/springturf/leaf-top-0.png"), &blue).unwrap();
+        assert_eq!(write_levels(&root, &[6], 30.0).unwrap(), 2);
+        assert!(root.join("lod/6/species/springturf/leaf-side-0.png").exists());
+        let red = solid(6, 6, |_, _| [255, 0, 0, 255]);
+        write_png(&root.join("override/6/species/springturf/leaf-side-0.png"), &red).unwrap();
+        let (atlas, prov) = load(&root, 6, 3).unwrap();
+        assert_eq!((prov.overrides, prov.levels), (1, 1));
+        let side = atlas.slot_named("species/springturf/leaf-side").unwrap();
+        let top = atlas.slot_named("species/springturf/leaf-top").unwrap();
+        assert_eq!(first_texel(&atlas, side, 0), [255, 0, 0, 255]);
+        assert_eq!(first_texel(&atlas, top, 2), [0, 0, 200, 255]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Layers: a scratch root with one species' leaf over a full root takes that face, and
+    /// every face it lacks — generic slots, the full root's other species — comes from
+    /// underneath.
+    #[test]
+    fn a_scratch_layer_overrides_only_what_it_holds() {
+        let base = std::env::temp_dir().join(format!("cubarium-base-{}", std::process::id()));
+        let top = std::env::temp_dir().join(format!("cubarium-scratch-{}", std::process::id()));
+        for d in [&base, &top] {
+            let _ = std::fs::remove_dir_all(d);
+        }
+        let c = |rgb: [u8; 3]| solid(48, 48, move |_, _| [rgb[0], rgb[1], rgb[2], 255]);
+        write_png(&base.join("masters/rock-side-0.png"), &c([90, 90, 90])).unwrap();
+        write_png(&base.join("masters/species/siphonreed/leaf-side-0.png"), &c([1, 2, 3])).unwrap();
+        write_png(&base.join("masters/species/stonecushion/leaf-side-0.png"), &c([4, 5, 6])).unwrap();
+        write_png(&top.join("masters/species/siphonreed/leaf-side-3.png"), &c([7, 8, 9])).unwrap();
+        let (atlas, _) = load_layers(&[&top, &base], 6, 3).unwrap();
+        let rock = TEXTURE_SLOTS.iter().position(|s| s.0 == "rock-side").unwrap();
+        assert_eq!(atlas.mask(), 1 << rock, "the generic set from underneath");
+        let reed = atlas.slot_named("species/siphonreed/leaf-side").unwrap();
+        let cushion = atlas.slot_named("species/stonecushion/leaf-side").unwrap();
+        for v in 0..TEX_VARIANTS {
+            assert_eq!(first_texel(&atlas, reed, v), [7, 8, 9, 255], "the scratch face, whole");
+        }
+        assert_eq!(first_texel(&atlas, cushion, 0), [4, 5, 6, 255]);
+        for d in [&base, &top] {
+            let _ = std::fs::remove_dir_all(d);
+        }
     }
 }
