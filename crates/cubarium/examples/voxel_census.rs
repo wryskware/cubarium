@@ -338,8 +338,8 @@ impl SeedWindow {
 }
 
 /// Ground covers overtopped so far (package SU's ledger counter).
-fn overtopped(_l: &cubarium_voxel_flora::FloraLedger) -> u64 {
-    0
+fn overtopped(l: &cubarium_voxel_flora::FloraLedger) -> u64 {
+    l.overtopped.iter().sum()
 }
 
 /// The CSV header: `sim_min`, then per plant species `stands_<name>`, then per animal

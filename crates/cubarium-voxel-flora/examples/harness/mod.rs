@@ -1024,7 +1024,9 @@ mod cap_tests {
         // fixture config).
         let mut config = FloraConfig {
             initial_mineral: 500.0,
-            ..FloraConfig::default().drop_seeds_checked_each_tick()
+            ..FloraConfig::default()
+                .drop_seeds_checked_each_tick()
+                .minimum_seeds()
         };
         {
             let sc = config.species_mut(Species::Bloomcrown);

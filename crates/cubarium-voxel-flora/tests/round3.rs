@@ -426,7 +426,7 @@ fn respiration_is_the_only_organic_leak_and_it_takes_its_energy_with_it() {
 /// there are two candidate recipients on a four-column ring and one of them receives.
 #[test]
 fn a_package_keeps_all_its_mineral_through_construction_respiration() {
-    let mut config = FloraConfig::default();
+    let mut config = FloraConfig::default().minimum_seeds();
     let sc = &mut config.bloomcrown;
     sc.assimilation = 0.0;
     sc.maintenance = 0.0;
@@ -1143,7 +1143,9 @@ fn a_drowned_stand_s_gap_is_filled_by_its_bank_in_the_same_tick() {
 /// (placeholder 2) so both donors reach the contested column and no other.
 #[test]
 fn a_contested_gap_is_drawn_by_weight_and_the_losing_bank_stays() {
-    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
+    let mut config = FloraConfig::default()
+        .drop_seeds_checked_each_tick()
+        .minimum_seeds();
     config.bloomcrown.propagule_rate = 3.0;
     config.bloomcrown.hop = 1;
     config.bloomcrown.reserve_cap = 40.0;
@@ -1310,7 +1312,9 @@ fn a_contested_gap_is_drawn_by_weight_and_the_losing_bank_stays() {
 /// spans four bins, which is what makes "oldest first" observable.
 #[test]
 fn an_oversized_bank_spends_one_package_out_of_its_oldest_bins() {
-    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
+    let mut config = FloraConfig::default()
+        .drop_seeds_checked_each_tick()
+        .minimum_seeds();
     config.bloomcrown.propagule_rate = 3.0;
     config.bloomcrown.hop = 1;
     config.bloomcrown.reserve_cap = 40.0;
@@ -1437,7 +1441,9 @@ fn an_oversized_bank_spends_one_package_out_of_its_oldest_bins() {
 /// pay for a hundred of them. The fixture's void column leaves exactly one recipient.
 #[test]
 fn a_fed_bank_holds_one_cohort_per_arrival_bin_and_its_age_never_stops_rising() {
-    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
+    let mut config = FloraConfig::default()
+        .drop_seeds_checked_each_tick()
+        .minimum_seeds();
     config.bloomcrown.hop = 1;
     config.bloomcrown.seed_max_age_s = 2.0;
     config.bloomcrown.propagule_rate = 2.0;
@@ -1676,7 +1682,9 @@ fn tiny_continuing_arrivals_cannot_keep_old_seed_material_alive() {
 fn a_pulsing_donor_cannot_rejuvenate_a_bank_and_the_bins_bound_it() {
     let pulses = 50u64;
     for cap in [1usize, 4, 8] {
-        let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
+        let mut config = FloraConfig::default()
+        .drop_seeds_checked_each_tick()
+        .minimum_seeds();
         config.bloomcrown.hop = 1;
         config.bloomcrown.establish_light_min = 2.0;
         config.bloomcrown.seed_max_age_s = 2.0;
@@ -1770,7 +1778,9 @@ fn a_pulsing_donor_cannot_rejuvenate_a_bank_and_the_bins_bound_it() {
 /// few ticks. The donor, twenty times its wood, outlives the window.
 #[test]
 fn a_descendant_born_and_dead_inside_the_window_is_still_a_birth() {
-    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
+    let mut config = FloraConfig::default()
+        .drop_seeds_checked_each_tick()
+        .minimum_seeds();
     config.bloomcrown.propagule_rate = 3.0;
     config.bloomcrown.hop = 1;
     config.bloomcrown.assimilation = 0.0;
@@ -1890,7 +1900,9 @@ fn a_descendant_born_and_dead_inside_the_window_is_still_a_birth() {
 /// exactly one bin.
 #[test]
 fn an_expiring_bin_gets_one_last_germination_and_then_goes_to_litter() {
-    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
+    let mut config = FloraConfig::default()
+        .drop_seeds_checked_each_tick()
+        .minimum_seeds();
     config.bloomcrown.seed_max_age_s = 0.1;
     config.bloomcrown.seed_cohorts_max = 1;
     config.bloomcrown.seed_attrition_per_s = 0.0;
@@ -2099,7 +2111,9 @@ fn an_expiring_bin_gets_one_last_germination_and_then_goes_to_litter() {
 /// reads.
 #[test]
 fn a_founder_replaced_by_its_own_species_in_one_tick_is_still_a_death_and_a_birth() {
-    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
+    let mut config = FloraConfig::default()
+        .drop_seeds_checked_each_tick()
+        .minimum_seeds();
     config.bloomcrown.assimilation = 0.0;
     config.bloomcrown.maintenance = 0.4;
     config.bloomcrown.propagule_rate = 3.0;

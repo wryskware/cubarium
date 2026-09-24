@@ -124,6 +124,7 @@ pub(crate) const DOMAIN_WATER: u64 = 6;
 pub(crate) const DOMAIN_CLONAL: u64 = 7;
 pub(crate) const DOMAIN_RUNNER: u64 = 8;
 pub(crate) const DOMAIN_ATTRITION: u64 = 9;
+pub(crate) const DOMAIN_OVERTOP: u64 = 10;
 
 /// A deterministic scalar stream (splitmix64), keyed by the values that **identify** a
 /// draw rather than seeded from stored state: the same world, the same place and the same
@@ -1383,7 +1384,7 @@ pub(crate) fn pull_mineral(stand: &mut Stand, before: f64, moved: f64) -> f64 {
 /// [`crate::SpeciesConfig::falls`] (the vaulttree, package N) the wood, its mineral and
 /// its energy are laid in equal shares along its [`fall_line`] instead of on its own site;
 /// the litter stays where the stand stood. Every other species' line is its own site.
-fn die(
+pub(crate) fn die(
     config: &FloraConfig,
     view: &VoxelView<'_>,
     stand: &Stand,

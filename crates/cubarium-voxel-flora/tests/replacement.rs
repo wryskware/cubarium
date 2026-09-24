@@ -620,7 +620,7 @@ fn a_cloned_conditioned_state_steps_identically_for_ten_ticks() {
 /// two different sites.
 fn two_donors_one_tick() -> (World, Flora) {
     let world = pillars(6, &[0, 1, 3, 4], 0.5);
-    let mut config = FloraConfig::default();
+    let mut config = FloraConfig::default().minimum_seeds();
     fast_donor(&mut config, Species::Bloomcrown);
     let mut flora = Flora::new(config);
     plant(&mut flora, &world, 0, Species::Bloomcrown);

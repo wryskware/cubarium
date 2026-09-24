@@ -839,6 +839,29 @@ pub struct SpeciesConfig {
     /// seed. Drawn per package from the donor's keyed stream; a runner with nowhere to go
     /// leaves as a seed. `0..=1`, zero at the base. **Placeholder**.
     pub clonal_share: f64,
+    /// A [`Dispersal::Spores`] package's tries at a face whose ground passes before the
+    /// rain falls as litter (package S's `SPORE_TRIES`, now per species, package SU). 8 at
+    /// the base — under a tenth of the rain lost where a quarter of the ground passes —
+    /// and each try is one gate reading. Inert on every other mode. At least 1.
+    pub spore_tries: u32,
+    /// **Seed mass**, in minimum packages (package SU): one seed is
+    /// `seed_mass · alive_min / w_frac` of organic matter, the parent pays for all of it,
+    /// and the seedling it starts is that much bigger (wood `w_frac` of the seed, not the
+    /// bare `alive_min`). The gap lottery weighs **count × mass**, so a bank weighs what
+    /// it cost: a shrub or tree carries fewer, bigger seeds at the same weight per unit
+    /// of material, and its seedling starts ahead. 1 — the minimum package — at the base
+    /// and for the ground covers. At least 1.
+    pub seed_mass: u32,
+    /// **A ground cover** (package SU): a stand a woody seedling can come up through. The
+    /// role, not a name: springturf, velvetpad and stonecushion carry it.
+    pub ground_cover: bool,
+    /// **Woody**: the chance, per check of its site, that this species' banked seed comes
+    /// up through a [`SpeciesConfig::ground_cover`] holding the site (package SU). The
+    /// site's gates must pass for it as if the site were free, its bank must win the gap
+    /// lottery among the woody banks there, and then this draw; on a success the cover
+    /// dies an *overtopped* death ([`FloraLedger::overtopped`]) and the seedling
+    /// establishes as usual. Zero — cannot — at the base; `0..=1`.
+    pub overtop_per_check: f64,
     /// Crown geometry from wood, shared by the shade model and the presenter so what
     /// shades is exactly what is drawn: crown top above the support face and crown
     /// half-width, both **in metres**, `[min, max]` (package L,
@@ -1138,6 +1161,10 @@ impl SpeciesConfig {
             hop: 1,
             dispersal: Dispersal::Drop,
             clonal_share: 0.0,
+            spore_tries: 8,
+            seed_mass: 1,
+            ground_cover: false,
+            overtop_per_check: 0.0,
             crown_height_m: [0.25, 0.75],
             crown_radius_m: [0.125, 0.375],
             // The refuge a plant the brief does not name keeps (`graze_refuge`'s doc).
@@ -1184,6 +1211,13 @@ impl SpeciesConfig {
             // package — into the base's 8 h bank. A meadow forb's seed that waits a
             // working day for a gap, not a pioneer's.
             hop: 2,
+            // Package SU, the woody roles. A seed of **2** minimum packages: a forb-shrub's
+            // seed, half as many for the same effort, each seedling twice the material.
+            // It comes up through a ground cover at **0.02 per check**: a mean of 50
+            // checks, 25 min under a mat, against at most one check (30 s) in a bare gap —
+            // clearly harder, and still well inside even the shortest woody bank (6 h).
+            seed_mass: 2,
+            overtop_per_check: 0.02,
             crown_height_m: [0.375, 1.0],
             crown_radius_m: [0.125, 0.3125],
             // Anatomy document §3, with decisions §5's corrections. A seedling is a
@@ -1373,12 +1407,15 @@ impl SpeciesConfig {
             establish_saturated_max: 0.3,
             drown_depth_m: 0.03,
             // Seeds (package S): dropped within the pioneer's wide `hop` 3, and **runners**
-            // for half the packages (the brief's ~0.5), so a turf closes its own patch
-            // while its seed goes looking. The longest bank, 12 h, the top of the brief's
-            // 6–12 h: a pioneer's seed bank is the persistent one, waiting under whatever
-            // replaced it for the next bare ground.
+            // for 0.3 of the packages (package SU: 0.5 let the turf close every patch it
+            // touched before anything else could seed in), so a turf still closes its own
+            // patch while most of its seed goes looking. The longest bank, 12 h, the top
+            // of the brief's 6–12 h: a pioneer's seed bank is the persistent one, waiting
+            // under whatever replaced it for the next bare ground. A ground cover: a woody
+            // seedling can come up through it (package SU).
             hop: 3,
-            clonal_share: 0.5,
+            clonal_share: 0.3,
+            ground_cover: true,
             seed_max_age_s: 43_200.0,
             seed_attrition_per_s: 1.0 / 43_200.0,
             wood_max: 0.06,
@@ -1462,9 +1499,10 @@ impl SpeciesConfig {
             // Seeds (package S): **wind**, at a kernel scale of `hop` 1 — the cushion is
             // tiny and its seed is dust — so most stay within a metre and a few percent
             // cross the rock to the next crack. 12 h, the top of the range: a seed on
-            // bare rock waits for a crack to wet.
+            // bare rock waits for a crack to wet. A ground cover (package SU).
             hop: 1,
             dispersal: Dispersal::Wind,
+            ground_cover: true,
             seed_max_age_s: 43_200.0,
             seed_attrition_per_s: 1.0 / 43_200.0,
             wood_max: 0.1,
@@ -1547,9 +1585,15 @@ impl SpeciesConfig {
             // Seeds (package S): **spores to damp ground** within a wide `hop` 6, and
             // **runners** for half the packages — a pad spreads across the floor it is on
             // and spores reach the next damp patch. 3 h, the middle of the spores' 2–4 h.
+            // Package SU: **2** spore tries, not 8 — with eight the pad's rain found
+            // almost every damp face in reach and it took the terrarium's damp ground
+            // (121 → 659 stands in 3 h, springturf 54 → 4); with two, the half of the rain
+            // that misses a patchy floor is lost as it would be. A ground cover.
             hop: 6,
             dispersal: Dispersal::Spores,
             clonal_share: 0.5,
+            spore_tries: 2,
+            ground_cover: true,
             seed_max_age_s: 10_800.0,
             seed_attrition_per_s: 1.0 / 10_800.0,
             wood_max: 0.2,
@@ -1743,9 +1787,14 @@ impl SpeciesConfig {
             // Seeds (package S): a **winged seed on the wind** at a kernel scale of `hop` 4
             // (1 m): most land under or beside the crown and a few percent 10 m out. 6 h,
             // the bottom of the range: a large tree seed does not keep, and the tree's
-            // bet is a seedling in the next gap, not a long bank.
+            // bet is a seedling in the next gap, not a long bank. Package SU: a seed of
+            // **4** minimum packages (0.2 of material, 30 min of a funded donor's saving),
+            // the biggest seedling of the nine, and bloomcrown's 0.02 per check through a
+            // ground cover.
             hop: 4,
             dispersal: Dispersal::Wind,
+            seed_mass: 4,
+            overtop_per_check: 0.02,
             seed_max_age_s: 21_600.0,
             seed_attrition_per_s: 1.0 / 21_600.0,
             wood_max: 5.0,
@@ -1832,8 +1881,11 @@ impl SpeciesConfig {
             drown_depth_m: 0.1,
             // Seeds (package S): the fruit **drops beneath** the crown, `hop` 2 (the
             // seedporter that carries it further is a later package), into the base's 8 h
-            // bank.
+            // bank. Package SU: a fruit stone of **3** minimum packages, and bloomcrown's
+            // 0.02 per check through a ground cover.
             hop: 2,
+            seed_mass: 3,
+            overtop_per_check: 0.02,
             wood_max: 1.0,
             alive_min: 0.02,
             donor_min: 0.4,
@@ -2129,6 +2181,19 @@ impl SpeciesConfig {
                 self.clonal_share
             ));
         }
+        // A chance per check, so a probability too.
+        if !(0.0..=1.0).contains(&self.overtop_per_check) {
+            return fail(&format!(
+                "overtop_per_check is {}, not a chance in 0..=1",
+                self.overtop_per_check
+            ));
+        }
+        if self.seed_mass == 0 {
+            return fail("seed_mass is 0: a seed is at least one minimum package");
+        }
+        if self.spore_tries == 0 {
+            return fail("spore_tries is 0: a spore rain tries at least one face");
+        }
         // The water and aeration thresholds and the crown geometry: fractions and lengths,
         // read as bounds rather than multiplied by a stock, so only finiteness is checked.
         let bounds: [(&str, f64); 7] = [
@@ -2410,6 +2475,21 @@ impl FloraConfig {
         self
     }
 
+    /// Every species' seed back to **one minimum package**, and no woody seedling coming up
+    /// through ground cover: the seed as it was before package SU.
+    ///
+    /// For a **fixture whose subject is a package's arithmetic or the lottery's**, written
+    /// when one seed was exactly the material of a stand at `alive_min` and a covered site
+    /// was closed. Not a shipped configuration; nothing in the tick uses it.
+    pub fn minimum_seeds(mut self) -> FloraConfig {
+        for species in Species::ALL {
+            let sc = self.species_mut(species);
+            sc.seed_mass = 1;
+            sc.overtop_per_check = 0.0;
+        }
+        self
+    }
+
     /// Every crown — both ranges and each stage's seedling ceiling — multiplied by `k`.
     ///
     /// For a **fixture on a coarse grid** whose subject is a rule and not a plant's
@@ -2664,6 +2744,10 @@ pub struct FloraLedger {
     pub seeds_died: [u64; Species::COUNT],
     pub seeds_lost: [u64; Species::COUNT],
     pub clonal_births: [u64; Species::COUNT],
+    /// Ground covers killed by a woody seedling coming up through them (package SU), per
+    /// **cover** species: a death, counted in `deaths` too, with its tissue booked to
+    /// dead wood and litter like any other.
+    pub overtopped: [u64; Species::COUNT],
 }
 
 impl FloraLedger {
