@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! cargo run -p cubarium --release --example voxel_specimens -- OUT.png [--glyphs] [--wilt W]
-//!     [--gpu [--px N] [--textures DIR | --textures-only DIR]]
+//!     [--gpu [--px N] [--textures DIR | --textures-only DIR] [--lit]]
 //! ```
 //!
 //! `--gpu` draws the same strip with the GPU renderer instead (headless), at `--px`
@@ -28,7 +28,7 @@ use cubarium::sink::gpu::{VoxelGpuSink, VoxelGpuSinkOptions};
 use cubarium::voxel::model::ModelLibrary;
 use cubarium::voxel::present::VoxelPresenter;
 use cubarium::voxel::project::Projection;
-use cubarium::voxel::{OrganismLook, VoxelConfig};
+use cubarium::voxel::{Lighting, OrganismLook, VoxelConfig};
 use cubarium_render::Canvas;
 use cubarium_surface::{Scale, Topology};
 use cubarium_voxel::{Command as VoxelCommand, Config, Material, World};
@@ -46,10 +46,12 @@ fn main() -> Result<()> {
     let mut px = 6u32;
     let mut textures: Option<PathBuf> = None;
     let mut layered = false;
+    let mut lit = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--glyphs" => glyphs = true,
+            "--lit" => lit = true,
             "--gpu" => gpu = true,
             "--px" => px = args.next().context("--px N")?.parse()?,
             "--textures" => {
@@ -196,6 +198,7 @@ fn main() -> Result<()> {
             px_per_voxel: px,
             textures: true,
             textures_dir: textures.unwrap_or_else(|| cfg.textures_dir.clone()),
+            lighting: if lit { Lighting::Lit } else { Lighting::Flat },
             ..cfg
         };
         let proj = Projection::new(cfg.tilt_degrees, px, 0, &world_cfg)?;
@@ -212,6 +215,14 @@ fn main() -> Result<()> {
             sink.stage_view(&world.view(), view, fauna.view()),
             "no staging buffer"
         );
+        // The lit tier's sky plane is computed off this thread.
+        while sink.light_pending() {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            anyhow::ensure!(
+                sink.stage_view(&world.view(), view, fauna.view()),
+                "no staging buffer"
+            );
+        }
         sink.render()?;
         let rgba = sink.read_raster()?;
         let rgb: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();

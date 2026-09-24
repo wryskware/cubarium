@@ -40,7 +40,17 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
     vec4 plantA;        // PLANT_TOP_GAIN, PLANT_TOP_TINT, PLANT_RIM, CROWN_EDGE
     vec4 plantB;        // CROWN_UNDER, TRUNK_SHADE[0], TRUNK_SHADE[1], TRUNK_LIGHT_AT
     ivec4 tex;          // the face textures present, one bit per slot; vine tiles present; -, -
+    vec4 lightK;        // lit: ambient gain, ambient floor, ladder rungs, AO strength
+    vec4 ambientC;      // lit: the ambient light's colour, the sky's hue at unit luminance
 } u;
+
+// The lighting tier (`lighting = "flat" | "lit"`), fixed when the pipeline is built. The
+// flat tier's pipeline has it off: every `if (LIT)` below is dead code there, and what
+// runs is the flat shader as it was. The lit tier replaces the flat tier's stand-ins for
+// light (the column roof shade, and the TOP_* / PLANT_TOP_* gain-and-tint mixes) with a
+// light value that multiplies each texel's base colour; the edge treatments are the
+// flat tier's, leaning between the lit tones instead of the flat ones.
+layout(constant_id = 0) const bool LIT = false;
 
 layout(set = 0, binding = 1) uniform usampler3D voxels;  // rgba8ui, one texel per voxel
 layout(set = 0, binding = 2) uniform usampler3D roofTex; // r8ui, voxels to the solid above
@@ -54,6 +64,13 @@ layout(set = 0, binding = 5) uniform sampler2D faceTex;
 // 3*set + density (plain, climbing, hanging), column 16*mask + exits; row 9 the accents.
 // Direct colour, sRGB.
 layout(set = 0, binding = 6) uniform sampler2D vineTex;
+// Lit tier only. The sky plane: at each open cell, the core's `sky_visibility` of the
+// cell under it (the fan from the open cell's foot), 255 for open sky. Keyed on the
+// terrain and computed off the loop thread.
+layout(set = 0, binding = 7) uniform usampler3D skyTex;
+// Lit tier only. The model's canopy per column: texels (x, 2z) and (x, 2z+1) hold four
+// (cell, cumulative transmission) steps, highest cell first; a cell of 0 ends the list.
+layout(set = 0, binding = 8) uniform usampler2D canopyTex;
 
 layout(location = 0) out vec4 outColour;
 
@@ -252,6 +269,106 @@ vec3 blockLit(vec3 body, float shade) {
     return shade < 1.0 ? mix(body, lit, shade) : lit;
 }
 
+// --- light (the lit tier) ---------------------------------------------------------------
+//
+// Only two faces of a voxel are ever drawn: the front (normal -z) and the top (+y). A
+// front face's open cell is (x, y, z-1) and a top face's is (x, y+1, z); its texel (dx, dy)
+// lies at (x + (dx+1/2)/S, y+1 - (dy+1/2)/S, z) on a front face and at
+// (x + (dx+1/2)/S, y+1, z+1 - (dy+1/2)/RISE) on a top face.
+//
+// The ambient is sky x AO x canopy, snapped to a ladder of `lightK.z` rungs between the
+// floor `lightK.y` and one, times the gain `lightK.x`, in the ambient colour. The light
+// is quantised; the base colour it multiplies is not.
+
+// A cell that darkens the corners of a face beside it: terrain and block parts (trunk,
+// crown, heart, log, animal). Sprouts, floor marks and vine cells do not. Outside the
+// world in y or z is open.
+float occluder(int x, int y, int z) {
+    if (!inY(y) || z < 0 || z >= D) { return 0.0; }
+    uvec4 v = at(x, y, z);
+    return (solidV(v) || isBlockPart(partOf(v))) ? 1.0 : 0.0;
+}
+
+// One corner of a face, classic voxel AO from its two sides and its diagonal in the
+// face's open plane: 3 is open, 0 is both sides occluded.
+float cornerAO(float side1, float side2, float corner) {
+    return (side1 + side2 > 1.5) ? 0.0 : 3.0 - (side1 + side2 + corner);
+}
+
+// The four corners interpolated bilinearly to the texel at (fu, fv) in 0..1 of the face,
+// as a light factor: 1 open, 1 - strength fully occluded.
+float aoBlend(float c00, float c10, float c01, float c11, float fu, float fv) {
+    float a = mix(mix(c00, c10, fu), mix(c01, c11, fu), fv);
+    return 1.0 - u.lightK.w * (3.0 - a) / 3.0;
+}
+
+// AO of a front face of (x, y, z) at texel (dx, dy): the open plane is z-1, u runs +x
+// and v runs +y.
+float aoFront(int x, int y, int z, int dx, int dy) {
+    int p = z - 1;
+    float l = occluder(x - 1, y, p), r = occluder(x + 1, y, p);
+    float b = occluder(x, y - 1, p), t = occluder(x, y + 1, p);
+    float fu = (float(dx) + 0.5) / float(S);
+    float fv = 1.0 - (float(dy) + 0.5) / float(S);
+    return aoBlend(
+        cornerAO(l, b, occluder(x - 1, y - 1, p)), cornerAO(r, b, occluder(x + 1, y - 1, p)),
+        cornerAO(l, t, occluder(x - 1, y + 1, p)), cornerAO(r, t, occluder(x + 1, y + 1, p)),
+        fu, fv);
+}
+
+// AO of a top face of (x, y, z) at texel (dx, dy), dy = 0 at the back: the open plane is
+// y+1, u runs +x and w runs +z.
+float aoTop(int x, int y, int z, int dx, int dy) {
+    int p = y + 1;
+    float l = occluder(x - 1, p, z), r = occluder(x + 1, p, z);
+    float n = occluder(x, p, z - 1), f = occluder(x, p, z + 1);
+    float fu = (float(dx) + 0.5) / float(S);
+    float fw = 1.0 - (float(dy) + 0.5) / float(RISE);
+    return aoBlend(
+        cornerAO(l, n, occluder(x - 1, p, z - 1)), cornerAO(r, n, occluder(x + 1, p, z - 1)),
+        cornerAO(l, f, occluder(x - 1, p, z + 1)), cornerAO(r, f, occluder(x + 1, p, z + 1)),
+        fu, fw);
+}
+
+// The sky plane at open cell (x, y, z). Above the world, and in front of it (a front
+// face at z = 0, whose fan leaves through the world's near side at once), is open sky.
+float skyOpen(int x, int y, int z) {
+    if (y >= H || z < 0) { return 1.0; }
+    if (y < 0 || z >= D) { return 0.0; }
+    return float(texelFetch(skyTex, ivec3(wrapX(x), y, z), 0).r) / 255.0;
+}
+
+// The model's canopy over column (x, z) for a face of a voxel at height yv: the product
+// of every foliage layer whose disc sits in a cell above yv (`shade_layers_into`'s
+// attenuation, straight down).
+float canopyAt(int x, int z, int yv) {
+    if (z < 0 || z >= D) { return 1.0; }
+    uvec4 a = texelFetch(canopyTex, ivec2(wrapX(x), 2 * z), 0);
+    if (int(a.r) <= yv) { return 1.0; }
+    if (int(a.b) <= yv) { return float(a.g) / 255.0; }
+    uvec4 b = texelFetch(canopyTex, ivec2(wrapX(x), 2 * z + 1), 0);
+    if (int(b.r) <= yv) { return float(a.a) / 255.0; }
+    if (int(b.b) <= yv) { return float(b.g) / 255.0; }
+    return float(b.a) / 255.0;
+}
+
+// The ambient product snapped to the ladder, as a light colour.
+vec3 ambientLight(float a) {
+    float n = max(u.lightK.z - 1.0, 1.0);
+    float rung = floor(clamp(a, 0.0, 1.0) * n + 0.5) / n;
+    return u.ambientC.rgb * (u.lightK.x * (u.lightK.y + (1.0 - u.lightK.y) * rung));
+}
+
+// The light on the front face of (x, y, z) at texel (dx, dy).
+vec3 lightFront(int x, int y, int z, int dx, int dy) {
+    return ambientLight(skyOpen(x, y, z - 1) * aoFront(x, y, z, dx, dy) * canopyAt(x, z - 1, y));
+}
+
+// The light on the top face of (x, y, z) at texel (dx, dy).
+vec3 lightTop(int x, int y, int z, int dx, int dy) {
+    return ambientLight(skyOpen(x, y + 1, z) * aoTop(x, y, z, dx, dy) * canopyAt(x, z, y));
+}
+
 // --- the faces ------------------------------------------------------------------------
 
 // Micro-dithering grain across solid voxel faces to break up flat surfaces
@@ -261,9 +378,47 @@ float faceGrain(int x, int y, int z, int dx, int dy) {
     return float(int(h & 15u) - 7) * 0.005;
 }
 
+// The lit tier's front rectangle: `blockFront`'s rules with its two tones lit. The face's
+// own tone is the base under this face's light; where the flat tier leans toward the top
+// face's light (the rim row, the chamfer, the riser's head) this leans toward the base
+// under the top face's light at its front edge.
+vec3 blockFrontLit(int x, int y, int z, uvec4 v, int r, int dx) {
+    int dy = S - 1 - r;
+    bool openUp = !solidAt(x, y + 1, z);
+    bool openLeft = !solidAt(x - 1, y, z);
+    bool openRight = !solidAt(x + 1, y, z);
+    bool riser = openUp && z > 0 && !solidAt(x, y, z - 1) && solidAt(x, y - 1, z - 1);
+    bool onSide = (dx == 0 && openLeft) || (dx + 1 == S && openRight);
+
+    int m = matOf(v);
+    int slot = (m == 3 && openUp && texOn(TEX_TURF_SIDE)) ? TEX_TURF_SIDE : 2 * (m - 1);
+    vec3 body = blockBody(v, faceBase(m, slot, x, y, z, 0, dx, dy));
+    if (m != 0 && u.roofK.z > 0.0) {
+        body = body * (1.0 + faceGrain(x, y, z, dx, dy) * (u.roofK.z / 0.04));
+    }
+    vec3 own = body * lightFront(x, y, z, dx, dy);
+    if (riser) {
+        vec3 lit = body * lightTop(x, y, z, dx, RISE - 1);
+        float t = S > 1 ? float(dy) / float(S - 1) : 0.0;
+        vec3 slope = mix(lit, own, u.shadeB.z * t);
+        float hz = hazeAt(float(z) - t);
+        return hazed(onSide ? slope * u.shadeB.x : slope, hz);
+    }
+    float haze = hazeAt(float(z));
+    vec3 c;
+    if (dy == 0 && openUp) {
+        vec3 lit = body * lightTop(x, y, z, dx, RISE - 1);
+        c = onSide ? lit : mix(own, lit, u.shadeA.w);
+    } else {
+        c = onSide ? own * u.shadeB.x : own;
+    }
+    return hazed(c, haze);
+}
+
 // `VoxelPresenter::block`'s front rectangle: rim row, side bevel, chamfered corner, or
 // — where the ground steps one voxel into depth — the riser's lean with no rim at all.
 vec3 blockFront(int x, int y, int z, uvec4 v, int r, int dx) {
+    if (LIT) { return blockFrontLit(x, y, z, v, r, dx); }
     int dy = S - 1 - r;
     bool openUp = !solidAt(x, y + 1, z);
     bool openLeft = !solidAt(x - 1, y, z);
@@ -296,9 +451,36 @@ vec3 blockFront(int x, int y, int z, uvec4 v, int r, int dx) {
     return hazed(c, haze);
 }
 
+// The lit tier's top rectangle: `blockTop`'s rules with its two tones lit. The face's own
+// tone is the base under this face's light; where the flat tier leans back toward the
+// unlit body (the contour row, the bevel at a drop) this leans toward the own tone over
+// TOP_GAIN, the flat tier's own ratio of a top to the front it caps, so both keep their
+// flat-tier contrast at every rung of the ladder.
+vec3 blockTopLit(int x, int y, int z, uvec4 v, int r, int dx) {
+    int dy = RISE - 1 - r;
+    bool openLeft = !solidAt(x - 1, y, z);
+    bool openRight = !solidAt(x + 1, y, z);
+    bool dropLeft = openLeft && !solidAt(x - 1, y - 1, z);
+    bool dropRight = openRight && !solidAt(x + 1, y - 1, z);
+    bool backContinues = z + 1 < D && solidAt(x, y, z + 1) && !solidAt(x, y + 1, z + 1);
+
+    int m = matOf(v);
+    vec3 body = blockBody(v, faceBase(m, 2 * (m - 1) + 1, x, y, z, 1, dx, dy));
+    if (m != 0 && u.roofK.z > 0.0) {
+        body = body * (1.0 + faceGrain(x, y, z, dx, dy + 100) * (u.roofK.z / 0.04));
+    }
+    vec3 own = body * lightTop(x, y, z, dx, dy);
+    vec3 dark = own / u.shadeA.x;
+    float hz = hazeAt(float(z) + float(r) / float(RISE));
+    vec3 plane = (dy == 0 && RISE > 2 && !backContinues) ? mix(own, dark, u.shadeA.z) : own;
+    bool onDrop = (dx == 0 && dropLeft) || (dx + 1 == S && dropRight);
+    return hazed(onDrop ? mix(plane, dark, u.shadeB.y) : plane, hz);
+}
+
 // `VoxelPresenter::block`'s top rectangle: the contour row only where the ground really
 // ends going back, and a bevel only at a real drop.
 vec3 blockTop(int x, int y, int z, uvec4 v, int r, int dx) {
+    if (LIT) { return blockTopLit(x, y, z, v, r, dx); }
     int dy = RISE - 1 - r;
     bool openLeft = !solidAt(x - 1, y, z);
     bool openRight = !solidAt(x + 1, y, z);
@@ -371,6 +553,30 @@ bool glyphFront(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb) {
     if (!plantTexel(x, y, z, v, false, dx, localY, base)) { return false; }
     bool coveredUp = solidAt(x, y + 1, z)
         || (inY(y + 1) && isBlockPart(partOf(at(x, y + 1, z))));
+    if (LIT) {
+        // The atlas's tones on the lit base: the rim and the lit column lean toward the
+        // base under the cell's top light, every other tone keeps its pigment rule under
+        // this face's light.
+        vec3 c;
+        if (tone == 2 && !coveredUp) {
+            c = mix(base * lightFront(x, y, z, dx, localY),
+                    base * lightTop(x, y, z, dx, RISE - 1), u.plantA.z);
+        } else if (tone == 3) {
+            c = base * lightTop(x, y, z, dx, RISE - 1);
+        } else {
+            if (tone == 1) {
+                base *= u.shadeB.x;
+            } else if (tone == 4 || tone == 5) {
+                base = mix(base, styleAt(int(v.a), 0), u.plantB.x);
+                if (tone == 5) { base *= u.plantA.w; }
+            } else if (tone >= 16 && tone <= 31) {
+                base *= 0.5 + float(tone & 15) / 16.0;
+            }
+            c = base * lightFront(x, y, z, dx, localY);
+        }
+        rgb = hazed(c, hazeAt(float(z)));
+        return true;
+    }
     if (tone == 1) {
         base *= u.shadeB.x;
     } else if (tone == 2 && !coveredUp) {
@@ -394,6 +600,20 @@ bool glyphCap(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb) {
     vec3 base = glyphPigment(v, q);
     if (!plantTexel(x, y, z, v, true, dx, localY, base)) { return false; }
     int tone = int(q >> 2);
+    if (LIT) {
+        // The cap's own tone is the base under its light; the edge tones lean toward it
+        // over PLANT_TOP_GAIN, as the flat tier leans toward the unlit base.
+        vec3 own = base * lightTop(x, y, z, dx, localY);
+        vec3 lc = own;
+        if (tone == 1) {
+            lc *= u.plantA.w;
+        } else if (tone >= 32 && tone <= 47) {
+            float gain = 0.5 + float(tone & 15) / 16.0;
+            lc = mix(lc, own / u.plantA.x * gain, u.shadeB.y);
+        }
+        rgb = hazed(lc, hazeAt(float(z) + float(r) / float(RISE)));
+        return true;
+    }
     float shade = roofShade(roofGap(x, y, z));
     vec3 cap = plantLit(base, shade);
     if (tone == 1) {
@@ -540,6 +760,7 @@ void main() {
                     if (isVine(f) && vineKind(f) == VINE_FLUSH) {
                         vec4 t = vineTexel(f, x, level, z - 1, dx, S - 1 - r);
                         if (t.a >= 0.5) {
+                            if (LIT) { t.rgb *= lightFront(x, level, z, dx, S - 1 - r); }
                             acc += trans * hazed(t.rgb, hazeAt(float(z)));
                             trans = 0.0;
                             break;
@@ -560,6 +781,7 @@ void main() {
                     || (k == VINE_SLIVER_R && dx >= S - q)) {
                     vec4 t = vineTexel(v, x, level, z, dx, S - 1 - r);
                     if (t.a >= 0.5) {
+                        if (LIT) { t.rgb *= lightFront(x, level, z, dx, S - 1 - r); }
                         acc += trans * hazed(t.rgb, hazeAt(float(z)));
                         trans = 0.0;
                         break;

@@ -37,14 +37,14 @@ use anyhow::{Context, Result, bail};
 
 use cubarium_gpu::vk::Gpu;
 use cubarium_gpu::voxel::{
-    MAX_GLYPHS, MAX_STYLES, PART_ANIMAL_INTERIM, PART_NONE, PLANE_GLYPHS, PLANE_ROOF, VoxelParams,
-    VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel, VoxelTextures,
+    MAX_GLYPHS, MAX_STYLES, PART_ANIMAL_INTERIM, PART_NONE, PLANE_GLYPHS, PLANE_ROOF, PLANE_SKY,
+    SLOW_PLANES, VoxelParams, VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel, VoxelTextures,
 };
 use cubarium_voxel::{Material, VoxelView, World};
 use cubarium_voxel_flora::{FaceDraw, Flora, FloraView};
 
 use crate::sink::{FrameSink, Output, WebSink};
-use crate::voxel::VoxelConfig;
+use crate::voxel::{Lighting, VoxelConfig};
 use crate::voxel::animal::{AnimalPart, Animals};
 use crate::voxel::appearance;
 use crate::voxel::model::{ModelLibrary, Tag};
@@ -55,6 +55,7 @@ use crate::voxel::textures::SpeciesFaces;
 use crate::voxel::vine::{self, VineCell};
 use cubarium_voxel_fauna::{Fauna, FaunaView};
 
+use super::light::{Canopy, SkyWorker};
 use super::target::{GpuTarget, GpuTargetKind};
 
 /// The knobs `cubarium voxel --sink gpu` takes.
@@ -248,6 +249,14 @@ impl VoxelGpuSink {
         true
     }
 
+    /// Whether the lit tier's sky plane for the terrain last staged is still being
+    /// computed off the loop thread; until it arrives the picture keeps the sky it had.
+    /// Always false in the flat tier. A capture that must show the finished light stages
+    /// again until this is false.
+    pub fn light_pending(&self) -> bool {
+        self.packer.light_pending()
+    }
+
     /// Draw these covered faces instead of the flora's own (`None` goes back to the
     /// flora's): a fixture that poses spur phases and dormancy the simulation would take
     /// hours to reach.
@@ -267,6 +276,12 @@ impl VoxelGpuSink {
     /// run loop prints the difference between two of these.
     pub fn draw_split(&self) -> (f64, f64) {
         (self.pack_ms, self.present_ms)
+    }
+
+    /// Frames drawn, and the GPU's milliseconds over them, cumulatively: uploads, the
+    /// slab walk, the present pass. A tool prints the difference between two of these.
+    pub fn gpu_stage_totals(&self) -> (u64, [f64; 3]) {
+        (self.frames, self.gpu_stages)
     }
 
     /// Where a present's time went over the last `seconds`, and what never became one.
@@ -503,6 +518,27 @@ struct Packer {
     /// Faces to draw instead of the flora's own cover: a fixture posing spur phases and
     /// dormancy by hand.
     cover_override: Option<Vec<FaceDraw>>,
+    /// The lit tier's planes (`super::light`), or `None` in the flat tier, which packs
+    /// neither.
+    light: Option<LightPlanes>,
+}
+
+/// What the packer keeps for the lit tier.
+struct LightPlanes {
+    /// The sky plane the images should hold, in texture order: open sky everywhere until
+    /// the worker's first plane arrives.
+    sky: Vec<u8>,
+    /// Bumped whenever `sky` changes: the key its plane is uploaded under.
+    sky_key: u64,
+    /// The id of the newest terrain submitted to the worker; a plane under any other id is
+    /// for a terrain that has since moved.
+    submitted: u64,
+    /// Whether the plane for the newest terrain has arrived.
+    current: bool,
+    worker: SkyWorker,
+    canopy: Canopy,
+    /// This tick's canopy plane, built in `prepare` from the flora and copied in `fill`.
+    canopy_plane: Vec<u8>,
 }
 
 /// The glyph plane never changes after construction: one key for the life of a renderer.
@@ -541,17 +577,34 @@ impl Packer {
             overlay: Vec::new(),
             vines: Vec::new(),
             cover_override: None,
+            light: p.lit.then(|| LightPlanes {
+                sky: vec![255; p.voxel_count()],
+                sky_key: 0,
+                submitted: 0,
+                current: false,
+                worker: SkyWorker::spawn(),
+                canopy: Canopy::new(p.width, p.depth),
+                canopy_plane: vec![0; p.canopy_bytes()],
+            }),
         }
     }
 
+    /// Whether the lit tier's sky plane is still being computed for the terrain last
+    /// packed. Always false in the flat tier.
+    fn light_pending(&self) -> bool {
+        self.light.as_ref().is_some_and(|l| !l.current)
+    }
+
     /// Everything that is not a write into the staging buffer: the plant and animal
-    /// grids, and the roof if the terrain moved. Returns the slow planes' keys.
+    /// grids, the roof if the terrain moved, and in the lit tier the canopy, the terrain
+    /// handed to the sky's thread if it moved, and the sky plane if one has arrived.
+    /// Returns the slow planes' keys.
     fn prepare(
         &mut self,
         view: &VoxelView<'_>,
         flora: FloraView<'_>,
         fauna: FaunaView<'_>,
-    ) -> [u64; 2] {
+    ) -> [u64; SLOW_PLANES] {
         match self.models.as_deref() {
             Some(lib) => {
                 self.stands.rebuild_with(view, flora, lib);
@@ -581,8 +634,26 @@ impl Packer {
             self.roof_materials.extend_from_slice(view.material);
             self.roof_version = Some(view.terrain_version);
             self.roof_key += 1;
+            if let Some(l) = &mut self.light {
+                l.submitted += 1;
+                l.current = false;
+                l.worker.submit(l.submitted, view.config, view.material);
+            }
         }
-        let mut keys = [0; 2];
+        let mut keys = [0; SLOW_PLANES];
+        if let Some(l) = &mut self.light {
+            // The sky keeps the plane it has until the one for this terrain arrives: a
+            // tick or two of the last terrain's sky after an edit, never a blank one.
+            if let Some((id, plane)) = l.worker.poll()
+                && id == l.submitted
+            {
+                l.sky = plane;
+                l.sky_key += 1;
+                l.current = true;
+            }
+            l.canopy.build(flora, &mut l.canopy_plane);
+            keys[PLANE_SKY] = l.sky_key;
+        }
         keys[PLANE_ROOF] = self.roof_key;
         keys[PLANE_GLYPHS] = GLYPHS_KEY;
         keys
@@ -694,6 +765,12 @@ impl Packer {
         }
         if out.write[PLANE_GLYPHS] {
             out.glyphs.copy_from_slice(&self.glyphs);
+        }
+        if let Some(l) = &self.light {
+            if out.write[PLANE_SKY] {
+                out.sky.copy_from_slice(&l.sky);
+            }
+            out.canopy.copy_from_slice(&l.canopy_plane);
         }
     }
 }
@@ -890,7 +967,27 @@ pub fn params_of(cfg: &VoxelConfig, proj: Projection, roof_from_texture: bool) -
         crown_under: cpu::CROWN_UNDER,
         trunk_shade: cpu::TRUNK_SHADE,
         trunk_light_at: cpu::TRUNK_LIGHT_AT,
+        lit: cfg.lighting == Lighting::Lit,
+        ambient_gain: cfg.light.ambient_gain,
+        ambient_floor: cfg.light.ambient_floor.clamp(0.0, 1.0),
+        light_levels: cfg.light.levels.max(2),
+        ao_strength: cfg.light.ao.clamp(0.0, 1.0),
+        ambient_colour: ambient_colour(cpu::sky(), cfg.light.ambient_tint),
     }
+}
+
+/// The lit tier's ambient colour: white leaning `tint` of the way toward the sky's hue
+/// (its colour over its brightest channel), rescaled to unit luminance so the tint moves
+/// the hue and not the brightness. The palette's sky is the only colour it reads.
+fn ambient_colour(sky: [f32; 3], tint: f32) -> [f32; 3] {
+    let peak = sky[0].max(sky[1]).max(sky[2]);
+    if peak.is_nan() || peak <= 0.0 {
+        return [1.0; 3];
+    }
+    let t = tint.clamp(0.0, 1.0);
+    let c = sky.map(|k| 1.0 + (k / peak - 1.0) * t);
+    let luma = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    if luma > 0.0 { c.map(|k| k / luma) } else { [1.0; 3] }
 }
 
 /// The face textures at this projection's level, from `cfg.textures_dir`, said once on
@@ -1084,14 +1181,17 @@ mod tests {
             }
         }
 
-        /// As `VoxelRenderer::stage` hands it over: the styles zeroed first.
-        fn staging(&mut self, write: [bool; 2]) -> VoxelStaging<'_> {
+        /// As `VoxelRenderer::stage` hands it over: the styles zeroed first. The flat
+        /// tier's pack has no sky or canopy plane.
+        fn staging(&mut self, write: [bool; SLOW_PLANES]) -> VoxelStaging<'_> {
             self.styles.fill(VoxelStyle::default());
             VoxelStaging {
                 voxels: &mut self.voxels,
                 roof: &mut self.roof,
                 styles: &mut self.styles,
                 glyphs: &mut self.glyphs,
+                sky: &mut [],
+                canopy: &mut [],
                 write,
             }
         }
@@ -1154,7 +1254,7 @@ mod tests {
             }
 
             let mut want = Planes::junk(&p);
-            reference(&view, flora, fauna, &p, want.staging([true; 2]));
+            reference(&view, flora, fauna, &p, want.staging([true; SLOW_PLANES]));
             let differ =
                 |a: &[VoxelTexel], b: &[VoxelTexel]| a.iter().zip(b).position(|(a, b)| a != b);
             if let Some(i) = differ(&self.images.voxels, &want.voxels) {
