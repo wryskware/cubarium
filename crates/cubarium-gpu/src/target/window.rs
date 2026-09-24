@@ -865,6 +865,37 @@ fn describe(swap: &Swapchain, mode: vk::PresentModeKHR) -> String {
     )
 }
 
+/// Whether this device can present to a Wayland surface on `display`, asked of the
+/// connection alone — **before** the host makes a surface or a toplevel.
+///
+/// A window that fails after it exists is replaced by the readback window, and that is a
+/// second window from one process. `scripts/hidden.sh`'s per-process rule reaches only
+/// the first window a process maps, so a second one lands on the desktop. Everything
+/// that can be decided without a window is decided here, first.
+pub fn check_wayland(gpu: &Gpu, display: *mut c_void) -> Result<()> {
+    if !gpu.has_instance_extension(ash::khr::surface::NAME)
+        || !gpu.has_instance_extension(ash::khr::wayland_surface::NAME)
+    {
+        bail!("the Vulkan loader has no VK_KHR_wayland_surface");
+    }
+    let f = ash::khr::wayland_surface::Instance::new(&gpu.entry, &gpu.instance);
+    // SAFETY of the cast: `display` is the host's live `wl_display *`.
+    let supported = unsafe {
+        f.get_physical_device_wayland_presentation_support(
+            gpu.pdev,
+            gpu.queue_family,
+            &mut *(display as *mut vk::wl_display),
+        )
+    };
+    if !supported {
+        bail!(
+            "{}'s graphics queue cannot present to this Wayland display",
+            gpu.name
+        );
+    }
+    Ok(())
+}
+
 /// A Vulkan surface on the native window.
 fn create_surface(gpu: &Gpu, native: NativeWindow) -> Result<vk::SurfaceKHR> {
     match native {

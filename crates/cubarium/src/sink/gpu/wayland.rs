@@ -63,8 +63,21 @@ impl WaylandWindow {
     /// Open a toplevel titled `title` at `size` pixels, until the compositor says
     /// otherwise. Fails where there is no Wayland display or no xdg-shell, and the caller
     /// falls back.
-    pub fn open(title: &str, size: (u32, u32)) -> Result<WaylandWindow> {
+    ///
+    /// `check` is handed the `wl_display *` as soon as the connection exists, and before
+    /// any surface does: whatever can refuse this window without one (can the GPU present
+    /// here at all?) refuses it there, so that a fallback window is this process's first
+    /// window and not its second (`cubarium_gpu::target::window::check_wayland`).
+    pub fn open(
+        title: &str,
+        size: (u32, u32),
+        check: impl FnOnce(*mut c_void) -> Result<()>,
+    ) -> Result<WaylandWindow> {
+        // An agent's window only through `scripts/hidden.sh`, checked before anything is
+        // committed (`sink::hidden`).
+        crate::sink::hidden::window_allowed()?;
         let display = Display::connect_to_env().context("connecting to the Wayland display")?;
+        check(display.get_display_ptr() as *mut c_void)?;
         let mut queue = display.create_event_queue();
         let attached = (*display).clone().attach(queue.token());
         let globals = GlobalManager::new(&attached);

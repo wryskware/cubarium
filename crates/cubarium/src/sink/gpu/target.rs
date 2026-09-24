@@ -101,21 +101,45 @@ impl GpuTarget {
                 Ok(GpuTarget::Shim(Box::new(shim)))
             }
             GpuTargetKind::Window if present_thread => {
+                // A refused window is not a swapchain that failed: it must not fall back
+                // to the readback window, and it must not look like it did.
+                crate::sink::hidden::window_allowed()?;
                 match SwapchainWindow::open(gpu, src, title) {
                     Ok(window) => Ok(GpuTarget::WindowThread(Box::new(window))),
-                    Err(e) => {
+                    // The readback window takes over the window that is already open, if
+                    // there is one: a second window from this process would escape
+                    // `scripts/hidden.sh`, whose rule reaches only the first.
+                    Err((e, left)) => {
+                        let open = match left {
+                            Leftover::Nothing => None,
+                            Leftover::Minifb(window) => Some(window),
+                            // A toplevel existed, though it never had a buffer. Whether the
+                            // compositor counted it is not ours to know, so a hidden launch
+                            // (`sink::hidden`'s marker) stops here rather than risk a
+                            // second window that its rule would not reach.
+                            Leftover::Toplevel
+                                if std::env::var("CUBARIUM_HIDDEN_LAUNCH").as_deref()
+                                    == Ok("1") =>
+                            {
+                                return Err(e.context(
+                                    "no swapchain for the development window, and a \
+                                     readback window now would be this process's second",
+                                ));
+                            }
+                            Leftover::Toplevel => None,
+                        };
                         eprintln!(
                             "cubarium: no swapchain for the development window ({e:#}); \
                              reading the raster back instead"
                         );
                         Ok(GpuTarget::Window(Box::new(WindowTarget::open(
-                            gpu, src, title,
+                            gpu, src, title, open,
                         )?)))
                     }
                 }
             }
             GpuTargetKind::Window => Ok(GpuTarget::Window(Box::new(WindowTarget::open(
-                gpu, src, title,
+                gpu, src, title, None,
             )?))),
             GpuTargetKind::Headless => Ok(GpuTarget::Headless(Box::new(Headless::new(gpu, src)?))),
         }
@@ -131,7 +155,12 @@ impl GpuTarget {
         match self {
             GpuTarget::Shim(t) => Ok(t.draw(gpu, src, frame)?.0),
             GpuTarget::ShimThread(t) => t.draw(gpu, src, frame),
-            GpuTarget::WindowThread(t) => t.draw(gpu, src, frame),
+            // The timestamps are the last *retired* frame's, and none has retired for the
+            // first frame or two: that is 0 here, not a NaN that turns the sink's average
+            // into NaN for the whole run.
+            GpuTarget::WindowThread(t) => t
+                .draw(gpu, src, frame)
+                .map(|ms| if ms.is_finite() { ms } else { 0.0 }),
             GpuTarget::Window(t) => t.draw(gpu, src, frame),
             GpuTarget::Headless(t) => t.draw(gpu, src, frame),
         }
@@ -205,6 +234,16 @@ pub struct SwapchainWindow {
     pump_max_ns: u64,
 }
 
+/// What a swapchain window that could not be made leaves for the readback window.
+enum Leftover {
+    /// No window was made: the readback window will be this process's first.
+    Nothing,
+    /// A `minifb` window, open and mapped, for the readback window to take over.
+    Minifb(minifb::Window),
+    /// A Wayland toplevel was made and dropped without ever having had a buffer.
+    Toplevel,
+}
+
 /// The native window under the swapchain.
 enum Host {
     Wayland(WaylandWindow),
@@ -239,14 +278,29 @@ impl Host {
 }
 
 impl SwapchainWindow {
-    fn open<S: FrameSource>(gpu: &Arc<Gpu>, src: &mut S, title: &str) -> Result<SwapchainWindow> {
+    /// Open the window and its presenter. On failure the error comes back with the
+    /// `minifb` window, if one was opened, for the readback window to take over: one
+    /// process, one window (`scripts/hidden.sh` hides only the first).
+    fn open<S: FrameSource>(
+        gpu: &Arc<Gpu>,
+        src: &mut S,
+        title: &str,
+    ) -> std::result::Result<SwapchainWindow, (anyhow::Error, Leftover)> {
+        // Before anything is committed or mapped (`sink::hidden`).
+        crate::sink::hidden::window_allowed().map_err(|e| (e, Leftover::Nothing))?;
         let (rw, rh) = src.raster_size();
         // The size it opens at is the readback window's; after that it is whatever the
         // person or the compositor makes it, and the picture follows.
         let zoom = ((1600 / rw).min(900 / rh)).max(1);
         let size = (rw * zoom, rh * zoom);
-        let (host, native) = if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-            let window = WaylandWindow::open(title, size)?;
+        let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some_and(|d| !d.is_empty());
+        let (host, native) = if wayland {
+            // Whether this GPU can present here is asked of the connection, before a
+            // surface exists; a toplevel that then fails has never had a buffer.
+            let window = WaylandWindow::open(title, size, |display| {
+                cubarium_gpu::target::window::check_wayland(gpu, display)
+            })
+            .map_err(|e| (e, Leftover::Nothing))?;
             let (display, surface) = window.handles();
             (Host::Wayland(window), NativeWindow::Wayland { display, surface })
         } else {
@@ -259,14 +313,28 @@ impl SwapchainWindow {
                     ..minifb::WindowOptions::default()
                 },
             )
-            .context("opening the --gpu-target window")?;
+            .context("opening the --gpu-target window")
+            .map_err(|e| (e, Leftover::Nothing))?;
             // Pump events only: `minifb` otherwise sleeps in `update` to pace a window
             // this path does not draw with, on the loop.
             window.set_target_fps(0);
-            let native = xlib_window(&window)?;
-            (Host::Xlib(window), native)
+            match xlib_window(&window) {
+                Ok(native) => (Host::Xlib(window), native),
+                Err(e) => return Err((e, Leftover::Minifb(window))),
+            }
         };
-        let presenter = WindowPresenter::open(gpu.clone(), src, native, host.size())?;
+        let presenter = match WindowPresenter::open(gpu.clone(), src, native, host.size()) {
+            Ok(presenter) => presenter,
+            Err(e) => {
+                return Err((
+                    e,
+                    match host {
+                        Host::Xlib(window) => Leftover::Minifb(window),
+                        Host::Wayland(_) => Leftover::Toplevel,
+                    },
+                ));
+            }
+        };
         eprintln!(
             "cubarium: development window presented on its own thread — {}",
             presenter.describe()
@@ -363,7 +431,14 @@ pub struct WindowTarget {
 }
 
 impl WindowTarget {
-    fn open<S: FrameSource>(gpu: &Gpu, src: &mut S, title: &str) -> Result<WindowTarget> {
+    /// Open the readback window, or take over `open` — a `minifb` window a swapchain
+    /// could not be made on — rather than open a second one.
+    fn open<S: FrameSource>(
+        gpu: &Gpu,
+        src: &mut S,
+        title: &str,
+        open: Option<minifb::Window>,
+    ) -> Result<WindowTarget> {
         let (rw, rh) = src.raster_size();
         let (w, h) = (rw as usize, rh as usize);
         // The largest whole upscale that fits a 1,600 x 900 desktop area: nearest and
@@ -371,8 +446,11 @@ impl WindowTarget {
         let zoom = ((1600 / w).min(900 / h)).max(1);
         let size = (w * zoom, h * zoom);
         crate::sink::hidden::window_allowed()?;
-        let window = minifb::Window::new(title, size.0, size.1, minifb::WindowOptions::default())
-            .context("opening the --gpu-target window")?;
+        let window = match open {
+            Some(window) => window,
+            None => minifb::Window::new(title, size.0, size.1, minifb::WindowOptions::default())
+                .context("opening the --gpu-target window")?,
+        };
         Ok(WindowTarget {
             window,
             headless: Headless::new(gpu, src)?,
