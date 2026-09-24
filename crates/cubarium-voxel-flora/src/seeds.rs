@@ -1148,7 +1148,7 @@ mod tests {
             config.bloomcrown.seed_max_age_s >= 3.0 * 3600.0,
             "bloomcrown's bank must outlive the wait"
         );
-        let mut world = slab(3, 1, 0.05); // under bloomcrown's establish_pore_min 0.1
+        let mut world = slab(3, 1, 0.05); // under the wilting point: no available water, the gate is shut
         let mut flora = Flora::new(config);
         let site = Site { x: 1, y: 2, z: 0 };
         inject(&mut flora, site, Species::Bloomcrown, 1);

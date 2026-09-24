@@ -1,16 +1,17 @@
 # Cubarium on the Tachyon: voxel presentation and world configuration.
 #
 # Installed to /var/lib/cubarium/voxel.toml by scripts/tachyon-install.sh.
-# 160 voxels wide * 4 px/voxel = 640 px raster width; 360 px raster height rotated
-# 90 degrees with 3x nearest-neighbour upscale fills the 1080x1920 panel exactly.
+# 160 voxels wide * 6 px/voxel = 960 px raster width; 540 px raster height rotated
+# 90 degrees with 2x nearest-neighbour upscale fills the 1080x1920 panel exactly
+# (organism roster §7 decision 1). 6 px * 72 + 3 px of depth step * 24 = 504 of 540 rows.
 #
 # The world is the designed **terrarium** (Wrysk, 2026-09-23): 160 x 72 x 24 at
 # 0.125 m, a ring 20 m round, 9 m tall, 3 m deep. `natural.toml` beside this is the
 # natural `small` ring; to run that instead, copy it over this file before deploying.
 
 tilt_degrees = 30.0
-px_per_voxel = 4
-raster_height = 360
+px_per_voxel = 6
+raster_height = 540
 haze = 0.55
 water_alpha = 0.5
 dither = 0.04

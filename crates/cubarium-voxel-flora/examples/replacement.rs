@@ -2463,7 +2463,10 @@ mod tests {
     /// is why no arm may re-derive it (R7.2, package L's note).
     #[test]
     fn the_declared_site_list_is_one_list_and_an_arm_would_derive_another() {
-        let world = strip(12, 0.5);
+        // Wet enough for the wetland newcomer on any soil: available water 1.5 on
+        // package F's scale.
+        let wp = Material::Soil.wilting_point();
+        let world = strip(12, wp + 1.5 * (Material::Soil.field_capacity() - wp));
         let skyline = skyline_of(&world);
         let mut flora = Flora::in_world(&world, eager());
         // A bloomcrown resident cohort, then umbrellafrond's sites among what is left.

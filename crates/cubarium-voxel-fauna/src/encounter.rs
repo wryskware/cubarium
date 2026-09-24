@@ -406,7 +406,7 @@ impl RouteMap {
         diet: Diet,
     ) -> Vec<usize> {
         let mut out = Vec::new();
-        if !diet.accepts(fv.config.species(stand.species).trophic) || !(layer.stock > 0.0) {
+        if !diet.accepts(fv.config.species(stand.species).trophic) || !(layer.edible() > 0.0) {
             return out;
         }
         let li = layer.foliage_index.unwrap_or(0);

@@ -132,6 +132,18 @@ fn assert_residuals(flora: &Flora, when: &str) {
     );
 }
 
+/// The default plant layer with **no grazing refuge** (package G's `graze_refuge` at 0
+/// for every species): these cases are about reach geometry and a stripped canopy, which
+/// were written before a plant kept a floor no bite can take, and the floor has its own
+/// tests (`graze_refuge.rs`).
+fn no_refuge() -> FloraConfig {
+    let mut config = FloraConfig::default();
+    for s in Species::ALL {
+        config.species_mut(s).graze_refuge = 0.0;
+    }
+    config
+}
+
 fn species_mut(config: &mut FloraConfig, species: Species) -> &mut SpeciesConfig {
     match species {
         Species::Bloomcrown => &mut config.bloomcrown,
@@ -188,7 +200,7 @@ fn plant(flora: &mut Flora, world: &World, x: i64, species: Species) -> Site {
 #[test]
 fn taking_more_than_a_stand_holds_takes_its_foliage_and_leaves_the_wood_and_the_reserve() {
     let world = pillars(8, &[0], 0.6);
-    let mut flora = Flora::new(FloraConfig::default());
+    let mut flora = Flora::new(no_refuge());
     let site = plant(&mut flora, &world, 0, Species::Springturf);
 
     let before = *flora.view().stand_at(site).expect("just planted");
@@ -692,7 +704,7 @@ fn a_crown_two_voxels_up_is_out_of_reach_and_one_across_the_seam_is_not() {
     // Eight columns: the eater's own face at `y = 2`, a neighbour at `y = 2`, one raised to
     // `y = 3`, one four columns away, and the column on the other side of the seam.
     let world = ledges(8, &[(0, 2), (1, 2), (2, 3), (4, 2), (7, 2)]);
-    let mut flora = Flora::new(FloraConfig::default());
+    let mut flora = Flora::new(no_refuge());
     let turf = 0.5 * flora.config().springturf.wood_max;
     // A springturf crown at this wood is one cell, one voxel above its own face.
     assert_eq!(flora.config().springturf.crown_voxels(turf, 0.25), 1);
@@ -772,7 +784,7 @@ fn the_same_crown_is_out_of_reach_from_its_own_face_and_in_reach_from_the_one_ab
     // Three columns: the low eater's face, the bloomcrown's own face beside it, and a
     // raised face on the other side for the high eater to stand on.
     let world = ledges(8, &[(0, 2), (1, 2), (2, 3)]);
-    let mut flora = Flora::new(FloraConfig::default());
+    let mut flora = Flora::new(no_refuge());
     let wood = 0.5 * flora.config().bloomcrown.wood_max;
     let bloom = plant_wood(&mut flora, &world, 1, Species::Bloomcrown, wood);
     assert_eq!(bloom, at(1), "the founder stands on the low face");
@@ -833,7 +845,7 @@ fn the_same_crown_is_out_of_reach_from_its_own_face_and_in_reach_from_the_one_ab
 #[test]
 fn a_broad_crown_is_reached_by_its_cells_and_a_stripped_stand_is_not_listed() {
     let world = ledges(12, &[(0, 2), (4, 2)]);
-    let mut flora = Flora::new(FloraConfig::default());
+    let mut flora = Flora::new(no_refuge());
     // Velvetpad at its own `wood_max` is a broad, flat crown: on package L's ladder
     // radius 0.375 m, 1.5 of the config's 0.25 m cells, and one cell tall, so its cells
     // run from column 3 to column 5.
@@ -892,7 +904,7 @@ fn a_broad_crown_is_reached_by_its_cells_and_a_stripped_stand_is_not_listed() {
 #[test]
 fn a_stand_stripped_every_tick_burns_reserve_and_grows_no_wood_and_regrows_when_left_alone() {
     let mut world = pillars(8, &[0, 2], 0.6);
-    let mut flora = Flora::new(FloraConfig::default());
+    let mut flora = Flora::new(no_refuge());
     let grazed = plant(&mut flora, &world, 0, Species::Springturf);
     let quiet = plant(&mut flora, &world, 2, Species::Springturf);
 

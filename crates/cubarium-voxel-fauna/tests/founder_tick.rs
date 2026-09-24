@@ -43,6 +43,18 @@ fn site(x: u32, z: u32) -> Site {
     Site { x, y: 2, z }
 }
 
+/// The shipped founders with **no diminishing bite** (`bite_half_stock` 0), for the cases
+/// that measure one whole bite of the frozen rate: package G's `E / (E + K)` would
+/// shrink it by the stock at the mouth. Those cases start their bodies with an empty
+/// reserve, so package G's satiety asks for the whole bite too.
+fn exact_bites() -> FaunaConfig {
+    let mut c = FaunaConfig::default();
+    for f in Founder::ALL {
+        c.founders[f.index()].core.bite_half_stock = 0.0;
+    }
+    c
+}
+
 /// A controller that records every observation it is given and always answers with one
 /// bounded action. It is the policy-boundary probe: what it holds is what the sampler
 /// handed it, and nothing else exists for it to read. The log lives in the controller's
@@ -201,9 +213,9 @@ fn a_litter_bite_debits_the_real_stock_exactly_once_per_interval() {
             energy: 0.2 * 2.0,
         },
     );
-    let mut fauna = Fauna::new(FaunaConfig::default());
-    // A body below its adult maximum, so a bite has tissue to build into (an adult at
-    // its reference has a full reserve and converts nothing — the standing rule).
+    let mut fauna = Fauna::new(exact_bites());
+    // A body below its adult maximum with an empty reserve: hungry, so the bite is a
+    // whole one (package G's satiety), and there is room to store what it builds.
     assert!(fauna.apply(
         &world,
         FaunaCommand::IntroduceFounder {
@@ -212,7 +224,7 @@ fn a_litter_bite_debits_the_real_stock_exactly_once_per_interval() {
             founder: Founder::Blind,
             stores: StartingStores {
                 body: 0.8,
-                reserve: 1.0
+                reserve: 0.0
             },
             heading_rad: 0.0,
         },
@@ -253,9 +265,10 @@ fn a_litter_bite_debits_the_real_stock_exactly_once_per_interval() {
         "the real Taken composition: mineral pro rata at the litter's fraction"
     );
     let a = fauna.view().animal(id).expect("alive");
+    let _ = before_body;
     assert!(
-        a.body > before_body,
-        "the funded share of the bite became tissue"
+        a.reserve > 0.0,
+        "the funded share of the bite was stored, for growth to build from"
     );
     assert!(
         (a.founder_state.feedback.intake - 0.5 * want).abs() < 1e-12,
@@ -268,7 +281,15 @@ fn a_litter_bite_debits_the_real_stock_exactly_once_per_interval() {
         fauna.step(&world, &mut flora);
     }
     assert_eq!(fauna.view().ledger.bites, 2);
-    assert!((litter_of(&flora) - (before_stock - 2.0 * want)).abs() < 1e-12);
+    // The second bite is a hungry one too, but less hungry than the first: package G's
+    // satiety scales it by the reserve's shortfall, so it is smaller than a whole bite,
+    // and the stock fell by exactly what the ledger booked.
+    let eaten = fauna.view().ledger.eaten_organic_in;
+    assert!(
+        eaten > want && eaten < 2.0 * want,
+        "a whole bite and a smaller one: {eaten}"
+    );
+    assert!((litter_of(&flora) - (before_stock - eaten)).abs() < 1e-12);
 }
 
 /// A feed attempt with nothing in the mouth transfers nothing: no withdrawal, no
@@ -343,7 +364,7 @@ fn a_browser_bite_crops_the_stand_it_touches() {
     let foliage_of = |flora: &Flora| flora.view().stand_at(site(2, 2)).unwrap().foliage;
     let before_stock = foliage_of(&flora);
 
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(exact_bites());
     assert!(fauna.apply(
         &world,
         FaunaCommand::IntroduceFounder {
@@ -352,7 +373,7 @@ fn a_browser_bite_crops_the_stand_it_touches() {
             founder: Founder::Browser,
             stores: StartingStores {
                 body: 0.8,
-                reserve: 1.0
+                reserve: 0.0
             },
             heading_rad: 0.0,
         },
@@ -382,7 +403,7 @@ fn a_browser_bite_crops_the_stand_it_touches() {
     assert_eq!(ledger.bites_by_plant[turf], 1);
     assert!((ledger.eaten_by_plant[turf] - want).abs() < 1e-12);
     let a = fauna.view().animal(id).expect("alive");
-    assert!(a.body > 0.04, "the funded share built tissue");
+    assert!(a.reserve > 0.0, "the funded share was stored");
 }
 
 /// The `Self` feedback channels are the prior interval's outcomes, reset once: the

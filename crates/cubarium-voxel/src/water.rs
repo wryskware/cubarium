@@ -53,7 +53,7 @@
 //! a film downhill within the same tick it landed in and the soil under it is never
 //! asked. It is not a small effect: on the eight-column staircase in `tests/core.rs`,
 //! under rain at a seventh of what the soil could absorb, the flat foot of the stairs
-//! reached field capacity (pore 0.25) while the top step held 0.0001 — the whole
+//! reached field capacity (then pore 0.25) while the top step held 0.0001 — the whole
 //! staircase was dry in proportion to its slope, and a plant layer reading pore water
 //! would have found no soil moisture anywhere but in the hollows.
 //!
@@ -3542,7 +3542,9 @@ mod drain_set_tests {
             );
             assert!((fast.aquifer_m3 - reference.aquifer_m3).abs() <= 1e-15);
         }
-        assert!(drained_ticks > 250, "the drain was idle: {drained_ticks}");
+        // Fresh soil has to be rained up to its field capacity (0.65 of its pores) before
+        // it drains at all, so the first few dozen ticks are idle.
+        assert!(drained_ticks > 200, "the drain was idle: {drained_ticks}");
         for w in [&fast, &reference] {
             let r = w.view().stored_m3() - w.view().ledger.expected_stored();
             assert!(r.abs() < 1e-12, "residual {r}");

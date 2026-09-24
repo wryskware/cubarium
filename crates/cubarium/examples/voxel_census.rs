@@ -218,14 +218,17 @@ fn main() {
 fn run(sim: &mut Sim, hours: f64) {
     let total_ticks = (hours * 3600.0 * f64::from(TICK_HZ)) as u64;
     print_header();
-    print_row(0, sim);
+    print_row(0, sim, 0.0);
     let mut tick = 0u64;
     let mut window = SeedWindow::default();
+    let mut since = std::time::Instant::now();
     while tick < total_ticks {
         sim.step();
         tick += 1;
         if tick % TICKS_PER_MIN == 0 {
-            print_row(tick / TICKS_PER_MIN, sim);
+            let ms = since.elapsed().as_secs_f64() * 1e3 / TICKS_PER_MIN as f64;
+            print_row(tick / TICKS_PER_MIN, sim, ms);
+            since = std::time::Instant::now();
         }
         if tick % (60 * TICKS_PER_MIN) == 0 || tick == total_ticks {
             window.report(tick, sim);
@@ -330,13 +333,16 @@ fn print_header() {
     for s in Plant::ALL {
         header.push_str(&format!(",donors_{}", s.name()));
     }
+    // The water's own reading: the lake's mean surface in voxels (`y + free` of its open
+    // surface cells), its volume and visible area, and the in-world stores beside it.
+    header.push_str(",lake_level_v,lake_m3,lake_m2,free_m3,pore_m3,aquifer_m3,tick_ms");
     println!("{header}");
 }
 
 /// One CSV row: `sim_min`, then per plant species the stand count, then per animal
 /// species the animal count and mean body, then per lineage its count, mean body, eggs
 /// and gestations, then the ledger counters, then the total litter.
-fn print_row(minute: u64, sim: &Sim) {
+fn print_row(minute: u64, sim: &Sim, tick_ms: f64) {
     let f = sim.flora().view();
     let a = sim.fauna().view();
 
@@ -399,5 +405,23 @@ fn print_row(minute: u64, sim: &Sim) {
         let n = f.stands.iter().filter(|st| st.species == s && st.wood >= donor_min).count();
         row.push(n.to_string());
     }
+    let world = sim.world();
+    let lake = cubarium_voxel::hydrate::lake(world);
+    let level = if lake.surface_cells.is_empty() {
+        f64::from(lake.level_y)
+    } else {
+        lake.surface_cells
+            .iter()
+            .map(|&i| f64::from(world.config().coords(i).1) + w.free[i])
+            .sum::<f64>()
+            / lake.surface_cells.len() as f64
+    };
+    row.push(format!("{level:.3}"));
+    row.push(format!("{:.4}", lake.volume_m3));
+    row.push(format!("{:.2}", lake.visible_m2));
+    row.push(format!("{:.4}", world.pooled_m3()));
+    row.push(format!("{:.4}", world.pore_m3()));
+    row.push(format!("{:.4}", w.aquifer_m3));
+    row.push(format!("{tick_ms:.3}"));
     println!("{}", row.join(","));
 }

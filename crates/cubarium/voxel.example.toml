@@ -33,6 +33,14 @@ water_alpha = 0.5
 dither = 0.04
 sky_gradient = true
 
+# How plants and animals are drawn: "models", the voxel models Blender bakes from the
+# simulation's own numbers (`scripts/blender/bake_voxel_models.py`), or "glyphs", the
+# dev-mode glyphs any species without a model falls back to. `models_dir` holds one
+# directory per voxel size (`125/`, `250/`); a relative path is from the working
+# directory, and missing models are said once on stderr and drawn as glyphs.
+organisms = "models"
+models_dir = "assets/voxel-models"
+
 [world]
 # `cubarium_voxel::Config`. x wraps; y is up from the foundation; z runs into the habitat.
 width = 128

@@ -109,7 +109,7 @@
 //! Depth tint: every colour in slice `z` is mixed toward the haze colour by
 //! `haze · z / (depth − 1)`, so the back wall recedes and the front reads as the front.
 
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use cubarium_render::Canvas;
 use cubarium_voxel::{Material, VoxelView};
@@ -122,6 +122,7 @@ use crate::present::{mix, srgb_linear};
 use super::VoxelConfig;
 use super::animal::{AnimalPart, Animals};
 use super::appearance::{self, FaceTexel, Pigment};
+use super::model::ModelLibrary;
 use super::project::Projection;
 use super::stand::{Part, Stands};
 
@@ -357,6 +358,8 @@ pub struct VoxelPresenter {
     /// The frame's animals, as voxels, on the same grid and in the same traversal. Empty
     /// for a run with no animal layer, which is every run before voxel round 5c.
     animals: Animals,
+    /// The baked voxel models (package V), or `None` for the dev-mode glyphs.
+    models: Option<Arc<ModelLibrary>>,
 }
 
 impl VoxelPresenter {
@@ -368,7 +371,15 @@ impl VoxelPresenter {
             roof: Vec::new(),
             stands: Stands::empty(0, 0, 0),
             animals: Animals::empty(0, 0, 0),
+            models: None,
         }
+    }
+
+    /// Draw organisms with these baked models ([`super::model`]); `None` draws the
+    /// dev-mode glyphs.
+    pub fn with_models(mut self, models: Option<Arc<ModelLibrary>>) -> VoxelPresenter {
+        self.models = models;
+        self
     }
 
     pub fn projection(&self) -> Projection {
@@ -453,9 +464,17 @@ impl VoxelPresenter {
         let water_alpha = self.cfg.water_alpha.clamp(0.0, 1.0);
 
         self.build_roof(view);
-        self.stands.rebuild(view, flora);
+        match self.models.as_deref() {
+            Some(lib) => {
+                self.stands.rebuild_with(view, flora, lib);
+                self.animals.rebuild_with(view, fauna, lib);
+            }
+            None => {
+                self.stands.rebuild(view, flora);
+                self.animals.rebuild(view, fauna);
+            }
+        }
         let plants = !self.stands.is_empty();
-        self.animals.rebuild(view, fauna);
         let beasts = !self.animals.is_empty();
 
         for z in (0..p.depth).rev() {

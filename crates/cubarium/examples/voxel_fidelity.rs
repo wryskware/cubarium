@@ -124,6 +124,7 @@ fn main() -> Result<()> {
             target: GpuTargetKind::Headless,
             capture: None,
             roof_from_texture: !args.roof_walk,
+            models: None,
         },
     ) {
         Ok(sink) => sink,
