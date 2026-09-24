@@ -294,6 +294,60 @@ pub fn vine(density: super::vine::Density, accent: super::vine::Accent) -> Swatc
     }
 }
 
+// --- emission (package L step 4) ----------------------------------------------------------
+//
+// Which parts glow, and in which colour, is data: only parts the species dossiers name as
+// luminous **and** that today's models or appearance data draw, each in the dossier's own
+// hex for that part (design/art-direction/species-dossiers-2026-09-21.md,
+// species-dossier-D15-latticevine-2026-09-23.md). Not the colour pass's placeholders
+// above: these are the dossiers' numbers. The renderer's lit tier draws an emitting texel
+// in this colour, unlit, and lets it light the open cells around it.
+
+/// A glowcap's lip, by the colony state the dossier draws it in (D1): absent on a button
+/// or a spent colony, half intensity while fruiting, full when ripe.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Lip {
+    None = 0,
+    Fruiting = 1,
+    Ripe = 2,
+}
+
+/// D1 glowcap `[lip]`: "the luminous tissue ... electric cyan", full when ripe.
+pub const LIP_RIPE: Rgb = 0x42_C5F8;
+/// D1 glowcap, fruiting: "lip at half intensity".
+pub const LIP_FRUITING: Rgb = 0x2A_86B8;
+/// D12 lanternberry, ripe: the open lantern's "warm interior seen through the opening"
+/// (the roster names the fruit luminous: organism-scale-and-roster-2026-09-21.md).
+pub const LANTERN_RIPE: Rgb = 0xFF_9B50;
+/// D15 latticevine flower: "its lip flaring into a glowing `#42C5F8` mouth".
+pub const BELL_MOUTH: Rgb = 0x42_C5F8;
+
+/// The emissive colour of a baked model cell, or `None`: a glowcap's lip tissue (the
+/// bake's `p2` foliage, the cyan it builds the lip from) in its colony state, and a
+/// lanternberry's lantern (its warm accent) while ripe fruit hangs. `ripe` is the cell's
+/// accent state as [`plant`] takes it.
+pub fn plant_emission(species: Species, tag: Tag, material: u8, ripe: bool, lip: Lip) -> Option<Rgb> {
+    match (species, tag) {
+        (Species::Glowcap, Tag::Foliage(_)) if material == model::named_index("p2") => match lip {
+            Lip::None => None,
+            Lip::Fruiting => Some(LIP_FRUITING),
+            Lip::Ripe => Some(LIP_RIPE),
+        },
+        (Species::Lanternberry, Tag::Accent) if material == model::WARM && ripe => {
+            Some(LANTERN_RIPE)
+        }
+        _ => None,
+    }
+}
+
+/// The emissive colour of a latticevine accent: the flower's bell mouth.
+pub fn vine_emission(accent: super::vine::Accent) -> Option<Rgb> {
+    match accent {
+        super::vine::Accent::Flower => Some(BELL_MOUTH),
+        _ => None,
+    }
+}
+
 /// A body colour with its hue-shifted shadow and a glint.
 fn shaded(body: Rgb, glint: Option<Rgb>) -> Swatch {
     Swatch {

@@ -62,6 +62,9 @@ use cube_proto::Raster;
 mod target;
 pub use target::{GpuTarget, GpuTargetKind};
 
+#[path = "gpu/light.rs"]
+mod light;
+
 #[path = "gpu/wayland.rs"]
 mod wayland;
 

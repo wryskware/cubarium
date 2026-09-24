@@ -167,6 +167,14 @@ pub struct VoxelConfig {
     /// `override/<px>/`. Relative as `models_dir` is. Missing textures are said once and
     /// the faces drawn solid. The CPU presenter never reads them.
     pub textures_dir: PathBuf,
+    /// The GPU renderer's lighting tier. `"flat"`, the default, is the flat tier's
+    /// stand-ins for light (the column roof shade, the top-face gain and tint), which the
+    /// panel and the cube keep; `"lit"` shades each face texel by the ambient light
+    /// (sky × AO × canopy, on a ladder) instead, which `config/desktop/*.toml` ask for.
+    /// The CPU presenter ignores it. Package L, `design/handoffs/presentation-plan-2026-09-24.md`.
+    pub lighting: Lighting,
+    /// The lit tier's numbers ([`LightConfig`]); ignored by the flat tier.
+    pub light: LightConfig,
     /// Worker threads for the in-phase splits of the tick
     /// (`cubarium_voxel_sim::SimConfig::threads`); `0` means
     /// [`std::thread::available_parallelism`]. Execution only — it reaches no rule, no
@@ -193,6 +201,8 @@ impl Default for VoxelConfig {
             models_dir: PathBuf::from("assets/voxel-models"),
             textures: false,
             textures_dir: PathBuf::from("assets/voxel-textures"),
+            lighting: Lighting::Flat,
+            light: LightConfig::default(),
             threads: 0,
             // The shipped `default` landscape, ring and all: a `cubarium voxel` with no
             // TOML generates a staged world, not the ridge. `Config::default()` stays
@@ -201,6 +211,90 @@ impl Default for VoxelConfig {
             world: cubarium_voxel::Preset::find("default")
                 .expect("the shipped presets include `default`")
                 .config(),
+        }
+    }
+}
+
+/// `lighting` in the config: the GPU renderer's lighting tier.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Lighting {
+    /// The flat tier: the panel's and the cube's, and the code default.
+    #[default]
+    Flat,
+    /// The lit tier: the desktop's.
+    Lit,
+}
+
+/// `[light]` in the config: the lit tier's numbers. New numbers with stated defaults,
+/// knobs rather than decisions (`design/handoffs/presentation-plan-2026-09-24.md`,
+/// "No new look"). Colours are not here: the ambient's hue is the palette's sky.
+///
+/// ```toml
+/// [light]
+/// levels = 4          # rungs on the ambient ladder, floor to full
+/// ambient_gain = 1.4  # what full ambient light multiplies a base colour by
+/// ambient_floor = 0.2 # the lowest rung, as a fraction of full
+/// ao = 0.5            # how far an AO crease line darkens the light
+/// ambient_tint = 0.15 # how far the ambient leans toward the sky's hue
+/// sun = [-1.0, 2.0, -1.0] # toward the sun: x right, y up, z into the scene
+/// sun_tint = 0.18     # how far a sunlit face leans toward the palette's light, at N·L = 1
+/// emission = true     # the dossiers' luminous parts glow (lit tier)
+/// glow = 0.5          # one emitting voxel's light at its own 4³ cell, in full-ambient units
+/// glow_reach = 3      # 4³ cells the light spreads before it is gone
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LightConfig {
+    /// Rungs on the ambient ladder, the floor and full included; at least 2.
+    pub levels: u32,
+    /// What full ambient light (open sky, no occlusion, no canopy) multiplies a base
+    /// colour by. The default puts an open top near the flat tier's lit top and a wall
+    /// under open sky (sky visibility about two thirds) near the flat tier's front.
+    pub ambient_gain: f32,
+    /// The lowest rung, as a fraction of full: what a face that sees no sky still gets.
+    pub ambient_floor: f32,
+    /// How far an AO crease line (a band along a face edge whose neighbour occludes, or a
+    /// corner square where only the diagonal does) darkens the light, `0..=1`.
+    pub ao: f32,
+    /// How far the ambient light leans toward the sky's hue, `0..=1`, at unit luminance.
+    pub ambient_tint: f32,
+    /// The direction **toward** the sun, in world axes: x to the right, y up, z into the
+    /// scene (away from the camera). Normalised when used. It must sit in the front
+    /// hemisphere (z < 0): light travels away from the camera, so the front faces the
+    /// picture shows are lit and shadows fall back into the scene. A y at or below 0
+    /// turns the sun off (every texel takes the shadow step).
+    pub sun: [f32; 3],
+    /// How far a sunlit texel leans toward the palette's light colour (`lightC`), scaled
+    /// by N·L: the flat tier's top-face lean, gated by the sun. `0` is purely
+    /// multiplicative (base × quantised light).
+    pub sun_tint: f32,
+    /// Whether the parts the species dossiers name as luminous emit
+    /// (`crate::voxel::colours::plant_emission`, `vine_emission`): drawn unlit at full
+    /// value in their dossier colour, and lighting the open cells around them. Off, the
+    /// lit tier is exactly what it was without emission.
+    pub emission: bool,
+    /// One emitting voxel's light at its own glow cell (4³ voxels), in units of full
+    /// ambient light, per channel of its emissive colour. Light from several emitters adds.
+    pub glow: f32,
+    /// How many glow cells the light spreads from its source through open terrain,
+    /// falling off linearly to nothing one cell further.
+    pub glow_reach: u32,
+}
+
+impl Default for LightConfig {
+    fn default() -> LightConfig {
+        LightConfig {
+            levels: 4,
+            ambient_gain: 1.4,
+            ambient_floor: 0.2,
+            ao: 0.5,
+            ambient_tint: 0.15,
+            sun: [-1.0, 2.0, -1.0],
+            sun_tint: 0.18,
+            emission: true,
+            glow: 0.5,
+            glow_reach: 3,
         }
     }
 }

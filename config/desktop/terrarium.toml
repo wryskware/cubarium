@@ -10,6 +10,7 @@ haze = 0.55
 water_alpha = 0.5
 dither = 0.04
 sky_gradient = true
+lighting = "lit"        # the desktop's tier; the panel and the cube keep the flat default
 
 [world]
 width = 256

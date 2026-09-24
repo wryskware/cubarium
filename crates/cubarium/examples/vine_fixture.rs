@@ -4,6 +4,7 @@
 //!
 //! ```text
 //! cargo run -p cubarium --release --example vine_fixture -- OUT_DIR [--px 4,6,12] [--no-vines]
+//!     [--lit]
 //! ```
 //!
 //! The wall faces the camera. On it: a vine climbing from a foot pocket, thinner low down
@@ -14,7 +15,8 @@
 //! Writes `gpu-<px>px.png` per level — the default look, textures off, the latticevine as
 //! plain voxel cells — then `gpu-<px>px-textured.png` with the experimental textures and
 //! the vine tile layer, and `cpu-6px.png`; each upscaled to about 1400 px wide.
-//! `--no-vines` draws the same wall with no cover.
+//! `--no-vines` draws the same wall with no cover. `--lit` draws the GPU pictures in the
+//! lit tier (package L), named `lit-gpu-*.png`.
 //!
 //! `--terrarium WORLD.voxel` draws a saved world instead: its terrain, with
 //! [`TERRARIUM_FOUNDERS`] latticevine founders rooted by the flora's own founder rule and
@@ -320,6 +322,7 @@ fn main() -> Result<()> {
     let mut dir: Option<PathBuf> = None;
     let mut pxs = vec![4u32, 6, 12];
     let mut no_vines = false;
+    let mut lit = false;
     let mut terrarium: Option<PathBuf> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -333,6 +336,7 @@ fn main() -> Result<()> {
                     .collect::<Result<_, _>>()?
             }
             "--no-vines" => no_vines = true,
+            "--lit" => lit = true,
             "--terrarium" => {
                 terrarium = Some(PathBuf::from(args.next().context("--terrarium WORLD.voxel")?))
             }
@@ -380,6 +384,11 @@ fn main() -> Result<()> {
         let cfg = VoxelConfig {
             px_per_voxel: px,
             textures,
+            lighting: if lit {
+                cubarium::voxel::Lighting::Lit
+            } else {
+                cubarium::voxel::Lighting::Flat
+            },
             ..base.clone()
         };
         let proj = Projection::new(cfg.tilt_degrees, px, 0, &wc)?;
@@ -396,14 +405,23 @@ fn main() -> Result<()> {
             sink.stage_view(&world.view(), flora.view(), fauna.view()),
             "no staging buffer"
         );
+        // The lit tier's sky plane is computed off this thread.
+        while sink.light_pending() {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            anyhow::ensure!(
+                sink.stage_view(&world.view(), flora.view(), fauna.view()),
+                "no staging buffer"
+            );
+        }
         sink.render()?;
         let rgba = sink.read_raster()?;
         let rgb: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
         let (w, h) = (u32::from(proj.raster_w), u32::from(proj.raster_h));
+        let tier = if lit { "lit-" } else { "" };
         let name = if textures {
-            format!("{prefix}gpu-{px}px-textured.png")
+            format!("{prefix}{tier}gpu-{px}px-textured.png")
         } else {
-            format!("{prefix}gpu-{px}px.png")
+            format!("{prefix}{tier}gpu-{px}px.png")
         };
         write_zoomed(&dir.join(name), w, h, &rgb)?;
     }
