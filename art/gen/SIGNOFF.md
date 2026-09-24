@@ -84,3 +84,18 @@ From `art/gen/runs/2026-09-24-reimagining-concepts/` (options described in
   depict it."
 - **Still open:** lanternjaw, loftstrider, umbrellafrond, velvetpad, vaulttree,
   glowcap. "Either the pictures don't really work for it or the new body plan is bad."
+
+## Blockout review (Wrysk, 2026-09-24)
+
+Blockouts in `runs/animal-bodies-2026-09-24/`:
+
+- **Seedporter SP-AB2:** blockout is good.
+- **Chorister:** the blockout "still reads like a bug". The look to follow is
+  `art/gen/runs/2026-09-24-reimagining-concepts/CH-A2-2401-b0.png`, but with **six legs**
+  and **no blob-shaped tail**.
+- **Ripple-snail:** follow `RS-D2-2401-b0.png` (dome case, foot skirt, two pink-tipped
+  lobes out front, trail behind).
+- **Capgnawer:** follow `CG-D2-2401-b0.png` ("this little dude": squat, fringed mantle,
+  pink eyes, short legs, on a log).
+- **All animals:** "we need more colour variety and texture on all the animals in
+  general." The 2026-09-23 colour pass reads well in the world; keep its spirit.
