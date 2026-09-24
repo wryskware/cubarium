@@ -2956,64 +2956,103 @@ pub struct FloraView<'a> {
 /// has no world in hand. The tick passes the world's directly, so that a fixture whose
 /// config and world disagree shades exactly as it did before layers existed.
 pub fn layers_of(config: &FloraConfig, stand: &Stand, voxel_m: f64) -> Vec<StandLayer> {
+    layer_iter(config, stand, voxel_m).collect()
+}
+
+/// [`layers_of`], one layer at a time and without its vector: the per-tick readers
+/// (a mouth scanning every stand in reach, every body, every tick) iterate a stand's
+/// layers far more often than they keep them, and the vector was the tick's one
+/// allocation per stand read (cache study C,
+/// `design/handoffs/voxel-cache-and-pinning-2026-09-24.md`). The same arithmetic in the
+/// same order, so the same layers to the bit.
+pub fn layer_iter<'c>(config: &'c FloraConfig, stand: &Stand, voxel_m: f64) -> LayerIter<'c> {
     let sc = config.species(stand.species);
     let stage = sc.profile_at(stand.wood);
-    let height_v = sc.crown_height(stand.wood, voxel_m);
-    let radius_v = sc.crown_radius(stand.wood, voxel_m).max(0.0);
-    let cap = sc.alpha * stand.wood.max(0.0);
-    let base = f64::from(stand.site.y);
-    let mut out = Vec::with_capacity(stage.layers.len());
-    let mut foliage_index = 0usize;
-    for (index, layer) in stage.layers.iter().enumerate() {
-        let is_foliage = layer.kind.bears_foliage();
-        let fi = if is_foliage {
-            let i = foliage_index;
-            foliage_index += 1;
-            (i < MAX_FOLIAGE_LAYERS).then_some(i)
-        } else {
-            None
-        };
-        if is_foliage && fi.is_none() {
-            continue;
-        }
-        let lo_v = base + layer.band[0] * height_v;
-        let hi_v = base + layer.band[1] * height_v;
-        let r_v = (layer.radius * radius_v).max(0.0);
-        let r_m = r_v * voxel_m;
-        let cell =
-            i64::from(stand.site.y) + i64::from(layers::disc_offset(layer.band[1], height_v));
-        let cells = if is_foliage {
-            (cell, cell)
-        } else {
-            let (lo, hi) = layers::trunk_offsets(layer.band, height_v);
-            (
-                i64::from(stand.site.y) + i64::from(lo),
-                i64::from(stand.site.y) + i64::from(hi),
-            )
-        };
-        out.push(StandLayer {
-            index,
-            foliage_index: fi,
-            kind: layer.kind,
-            band_v: [lo_v, hi_v],
-            band_m: [lo_v * voxel_m, hi_v * voxel_m],
-            radius_v: r_v,
-            radius_m: r_m,
-            cell,
-            cells,
-            share: if is_foliage { layer.share } else { 0.0 },
-            capacity: if is_foliage { layer.share * cap } else { 0.0 },
-            stock: fi.map_or(0.0, |i| stand.layer_stock[i]),
-            floor: if is_foliage {
-                sc.graze_refuge * layer.share * cap
-            } else {
-                0.0
-            },
-            porosity: layer.porosity,
-            area_m2: (std::f64::consts::PI * r_m * r_m).max(MIN_LAYER_AREA_M2),
-        });
+    LayerIter {
+        graze_refuge: sc.graze_refuge,
+        layers: stage.layers.iter().enumerate(),
+        height_v: sc.crown_height(stand.wood, voxel_m),
+        radius_v: sc.crown_radius(stand.wood, voxel_m).max(0.0),
+        cap: sc.alpha * stand.wood.max(0.0),
+        site_y: stand.site.y,
+        layer_stock: stand.layer_stock,
+        voxel_m,
+        foliage_index: 0,
     }
-    out
+}
+
+/// The iterator [`layer_iter`] returns.
+#[derive(Clone, Debug)]
+pub struct LayerIter<'c> {
+    graze_refuge: f64,
+    layers: std::iter::Enumerate<std::slice::Iter<'c, Layer>>,
+    height_v: f64,
+    radius_v: f64,
+    cap: f64,
+    site_y: u32,
+    layer_stock: [f64; MAX_FOLIAGE_LAYERS],
+    voxel_m: f64,
+    foliage_index: usize,
+}
+
+impl Iterator for LayerIter<'_> {
+    type Item = StandLayer;
+
+    fn next(&mut self) -> Option<StandLayer> {
+        let voxel_m = self.voxel_m;
+        let (height_v, radius_v, cap) = (self.height_v, self.radius_v, self.cap);
+        let base = f64::from(self.site_y);
+        for (index, layer) in self.layers.by_ref() {
+            let is_foliage = layer.kind.bears_foliage();
+            let fi = if is_foliage {
+                let i = self.foliage_index;
+                self.foliage_index += 1;
+                (i < MAX_FOLIAGE_LAYERS).then_some(i)
+            } else {
+                None
+            };
+            if is_foliage && fi.is_none() {
+                continue;
+            }
+            let lo_v = base + layer.band[0] * height_v;
+            let hi_v = base + layer.band[1] * height_v;
+            let r_v = (layer.radius * radius_v).max(0.0);
+            let r_m = r_v * voxel_m;
+            let cell =
+                i64::from(self.site_y) + i64::from(layers::disc_offset(layer.band[1], height_v));
+            let cells = if is_foliage {
+                (cell, cell)
+            } else {
+                let (lo, hi) = layers::trunk_offsets(layer.band, height_v);
+                (
+                    i64::from(self.site_y) + i64::from(lo),
+                    i64::from(self.site_y) + i64::from(hi),
+                )
+            };
+            return Some(StandLayer {
+                index,
+                foliage_index: fi,
+                kind: layer.kind,
+                band_v: [lo_v, hi_v],
+                band_m: [lo_v * voxel_m, hi_v * voxel_m],
+                radius_v: r_v,
+                radius_m: r_m,
+                cell,
+                cells,
+                share: if is_foliage { layer.share } else { 0.0 },
+                capacity: if is_foliage { layer.share * cap } else { 0.0 },
+                stock: fi.map_or(0.0, |i| self.layer_stock[i]),
+                floor: if is_foliage {
+                    self.graze_refuge * layer.share * cap
+                } else {
+                    0.0
+                },
+                porosity: layer.porosity,
+                area_m2: (std::f64::consts::PI * r_m * r_m).max(MIN_LAYER_AREA_M2),
+            });
+        }
+        None
+    }
 }
 
 impl<'a> FloraView<'a> {
@@ -3023,10 +3062,8 @@ impl<'a> FloraView<'a> {
     /// [`layers_of`] for the whole profile, which the presenter and the cone do.
     ///
     /// The stocks it yields **sum to the stand's `foliage`**, always.
-    pub fn layers(&self, stand: &Stand) -> impl Iterator<Item = StandLayer> + use<> {
-        layers_of(self.config, stand, self.config.voxel_m)
-            .into_iter()
-            .filter(|l| l.kind.bears_foliage())
+    pub fn layers(&self, stand: &Stand) -> impl Iterator<Item = StandLayer> + use<'a> {
+        layer_iter(self.config, stand, self.config.voxel_m).filter(|l| l.kind.bears_foliage())
     }
 
     /// [`FloraView::layers`] of whatever stands on `site`; empty if nothing does.
