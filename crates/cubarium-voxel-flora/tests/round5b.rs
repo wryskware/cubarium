@@ -566,7 +566,7 @@ fn germination_needs_a_log_and_never_needs_light() {
 fn one_spore_package_births_a_glowcap_at_exactly_alive_min_and_only_over_the_substrate() {
     let birth = |substrate_min: f64| -> (Flora, World, f64) {
         let mut world = pillars(4, &[1, 2], 0.5);
-        let mut config = config();
+        let mut config = config().drop_seeds_checked_each_tick();
         // A fast donor, so the 0.025 package is saved in tens of ticks rather than 60 s.
         // It changes the saving rate only: the reserve, its floor and every other stock
         // are the preset's.
@@ -795,26 +795,22 @@ fn validate_covers_the_three_new_fields() {
 }
 
 /// The glowcap's own shape, in the model rather than in the picture: **one crown cell at
-/// every size**, and the lowest crown top of the six, so it shades nothing.
+/// every size** on the 0.25 m grid. Package L put its crown on the ladder, 0.125–0.25 m
+/// tall and 0.0625 m in radius, so it is no longer the lowest crown of the six — a
+/// full-grown cap stands over a velvetpad's 0.125 m pad — and that old half of this
+/// test went with the old size.
 #[test]
 fn a_glowcap_crown_is_one_cell_high_at_every_size() {
     let config = config();
     let sc = &config.glowcap;
     for wood in [sc.alive_min, 0.5 * sc.wood_max, sc.wood_max] {
-        assert_eq!(sc.crown_voxels(wood), 1, "at wood {wood}");
-        assert_eq!(sc.crown_height(wood), 0.5, "at wood {wood}");
-        assert_eq!(sc.crown_radius(wood), 0.5, "at wood {wood}");
-    }
-    for species in Species::ALL {
-        if species == Species::Glowcap {
-            continue;
-        }
-        let other = config.species(species);
+        let t = wood / sc.wood_max;
+        assert_eq!(sc.crown_voxels(wood, 0.25), 1, "at wood {wood}");
         assert!(
-            other.crown_height(other.alive_min) >= sc.crown_height(sc.wood_max),
-            "{} starts lower than a full-grown glowcap",
-            species.name()
+            (sc.crown_height_m_at(wood) - (0.125 + t * 0.125)).abs() < 1e-12,
+            "at wood {wood}"
         );
+        assert_eq!(sc.crown_radius_m_at(wood), 0.0625, "at wood {wood}");
     }
 }
 
@@ -1131,7 +1127,7 @@ fn budget_config() -> FloraConfig {
 /// of: that is the standing R4.3 limitation, and this fixture is where it bites.
 #[test]
 fn a_mineral_free_log_pays_the_upkeep_and_builds_nothing() {
-    let mut world = pillars(4, &[1], 0.5);
+    let mut world = pillars(4, &[1], Material::Soil.field_capacity());
     let mut flora = Flora::new(budget_config());
     let site = plant_glowcap(&mut flora, &world, 1);
     let (organic, _, energy) = log_with(&mut flora, site, 1.0, 0.0);
@@ -1207,7 +1203,7 @@ fn a_partly_mineralised_log_builds_exactly_what_its_mineral_funds() {
     /// One tick on a log of `organic` holding `mineral`: the wood built, and the site's
     /// mineral pool and the log's own mineral afterwards.
     fn one_tick(mineral: f64) -> (f64, f64, f64) {
-        let mut world = pillars(4, &[1], 0.5);
+        let mut world = pillars(4, &[1], Material::Soil.field_capacity());
         let mut flora = Flora::new(budget_config());
         let site = plant_glowcap(&mut flora, &world, 1);
         log_with(&mut flora, site, 1.0, mineral);
@@ -1503,7 +1499,7 @@ fn a_glowcap_on_litter_alone_gains_tissue_and_the_pool_falls_by_what_it_took() {
 /// below both pools, so nothing but the split is being measured.
 #[test]
 fn the_draw_splits_pro_rata_between_the_two_pools_and_sums_to_the_rate_bound() {
-    let mut world = pillars(4, &[1], 0.5);
+    let mut world = pillars(4, &[1], Material::Soil.field_capacity());
     let mut flora = Flora::new(isolating());
     let site = plant_glowcap(&mut flora, &world, 1);
     let sc = flora.config().species(Species::Glowcap).clone();

@@ -1,0 +1,559 @@
+{
+  "voxel_sizes_m": [
+    0.125,
+    0.25
+  ],
+  "species": [
+    {
+      "name": "bloomcrown",
+      "crown_height_m": [
+        0.375,
+        1.0
+      ],
+      "crown_radius_m": [
+        0.125,
+        0.3125
+      ],
+      "profile": [
+        {
+          "wood_fraction_max": 0.2,
+          "height_m_max": 0.125,
+          "layers": [
+            {
+              "kind": "Foliage",
+              "band": [
+                0.0,
+                1.0
+              ],
+              "radius": 1.0,
+              "share": 1.0,
+              "porosity": 0.4
+            }
+          ]
+        },
+        {
+          "wood_fraction_max": 0.5,
+          "height_m_max": null,
+          "layers": [
+            {
+              "kind": "Trunk",
+              "band": [
+                0.0,
+                0.4
+              ],
+              "radius": 0.15,
+              "share": 0.0,
+              "porosity": 0.0
+            },
+            {
+              "kind": "Foliage",
+              "band": [
+                0.0,
+                0.25
+              ],
+              "radius": 0.7,
+              "share": 0.4,
+              "porosity": 0.4
+            },
+            {
+              "kind": "Foliage",
+              "band": [
+                0.5,
+                1.0
+              ],
+              "radius": 1.0,
+              "share": 0.6,
+              "porosity": 0.3
+            }
+          ]
+        },
+        {
+          "wood_fraction_max": "inf",
+          "height_m_max": null,
+          "layers": [
+            {
+              "kind": "Trunk",
+              "band": [
+                0.0,
+                0.5
+              ],
+              "radius": 0.15,
+              "share": 0.0,
+              "porosity": 0.0
+            },
+            {
+              "kind": "Foliage",
+              "band": [
+                0.0,
+                0.15
+              ],
+              "radius": 0.6,
+              "share": 0.25,
+              "porosity": 0.4
+            },
+            {
+              "kind": "Foliage",
+              "band": [
+                0.55,
+                1.0
+              ],
+              "radius": 1.0,
+              "share": 0.75,
+              "porosity": 0.3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "umbrellafrond",
+      "crown_height_m": [
+        1.0,
+        2.0
+      ],
+      "crown_radius_m": [
+        0.375,
+        0.75
+      ],
+      "profile": [
+        {
+          "wood_fraction_max": 0.15,
+          "height_m_max": 0.125,
+          "layers": [
+            {
+              "kind": "Foliage",
+              "band": [
+                0.0,
+                1.0
+              ],
+              "radius": 1.0,
+              "share": 1.0,
+              "porosity": 0.4
+            }
+          ]
+        },
+        {
+          "wood_fraction_max": 0.5,
+          "height_m_max": null,
+          "layers": [
+            {
+              "kind": "Trunk",
+              "band": [
+                0.0,
+                0.5
+              ],
+              "radius": 0.15,
+              "share": 0.0,
+              "porosity": 0.0
+            },
+            {
+              "kind": "Foliage",
+              "band": [
+                0.5,
+                0.65
+              ],
+              "radius": 1.0,
+              "share": 0.6,
+              "porosity": 0.4
+            },
+            {
+              "kind": "Foliage",
+              "band": [
+                0.85,
+                1.0
+              ],
+              "radius": 0.6,
+              "share": 0.4,
+              "porosity": 0.5
+            }
+          ]
+        },
+        {
+          "wood_fraction_max": "inf",
+          "height_m_max": null,
+          "layers": [
+            {
+              "kind": "Trunk",
+              "band": [
+                0.0,
+                0.4
+              ],
+              "radius": 0.2,
+              "share": 0.0,
+              "porosity": 0.0
+            },
+            {
+              "kind": "Foliage",
+              "band": [
+                0.4,
+                0.55
+              ],
+              "radius": 1.0,
+              "share": 0.4,
+              "porosity": 0.4
+            },
+            {
+              "kind": "Foliage",
+              "band": [
+                0.65,
+                0.8
+              ],
+              "radius": 0.8,
+              "share": 0.35,
+              "porosity": 0.4
+            },
+            {
+              "kind": "Foliage",
+              "band": [
+                0.9,
+                1.0
+              ],
+              "radius": 0.5,
+              "share": 0.25,
+              "porosity": 0.5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "springturf",
+      "crown_height_m": [
+        0.125,
+        0.1875
+      ],
+      "crown_radius_m": [
+        0.125,
+        0.25
+      ],
+      "profile": [
+        {
+          "wood_fraction_max": "inf",
+          "height_m_max": null,
+          "layers": [
+            {
+              "kind": "Mat",
+              "band": [
+                0.0,
+                1.0
+              ],
+              "radius": 1.0,
+              "share": 1.0,
+              "porosity": 0.3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "stonecushion",
+      "crown_height_m": [
+        0.125,
+        0.1875
+      ],
+      "crown_radius_m": [
+        0.125,
+        0.15625
+      ],
+      "profile": [
+        {
+          "wood_fraction_max": "inf",
+          "height_m_max": null,
+          "layers": [
+            {
+              "kind": "Foliage",
+              "band": [
+                0.0,
+                0.6
+              ],
+              "radius": 1.0,
+              "share": 0.7,
+              "porosity": 0.2
+            },
+            {
+              "kind": "Foliage",
+              "band": [
+                0.6,
+                1.0
+              ],
+              "radius": 0.6,
+              "share": 0.3,
+              "porosity": 0.2
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "velvetpad",
+      "crown_height_m": [
+        0.125,
+        0.125
+      ],
+      "crown_radius_m": [
+        0.1875,
+        0.375
+      ],
+      "profile": [
+        {
+          "wood_fraction_max": "inf",
+          "height_m_max": null,
+          "layers": [
+            {
+              "kind": "Mat",
+              "band": [
+                0.0,
+                1.0
+              ],
+              "radius": 1.0,
+              "share": 1.0,
+              "porosity": 0.6
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "glowcap",
+      "crown_height_m": [
+        0.125,
+        0.25
+      ],
+      "crown_radius_m": [
+        0.0625,
+        0.0625
+      ],
+      "profile": [
+        {
+          "wood_fraction_max": "inf",
+          "height_m_max": null,
+          "layers": [
+            {
+              "kind": "Foliage",
+              "band": [
+                0.0,
+                1.0
+              ],
+              "radius": 1.0,
+              "share": 1.0,
+              "porosity": 0.5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "vaulttree",
+      "crown_height_m": [
+        2.25,
+        3.5
+      ],
+      "crown_radius_m": [
+        0.625,
+        1.0
+      ],
+      "profile": [
+        {
+          "wood_fraction_max": 0.1,
+          "height_m_max": 0.125,
+          "layers": [
+            {
+              "kind": "Foliage",
+              "band": [
+                0.0,
+                1.0
+              ],
+              "radius": 1.0,
+              "share": 1.0,
+              "porosity": 0.4
+            }
+          ]
+        },
+        {
+          "wood_fraction_max": 0.4,
+          "height_m_max": null,
+          "layers": [
+            {
+              "kind": "Trunk",
+              "band": [
+                0.0,
+                0.6
+              ],
+              "radius": 0.15,
+              "share": 0.0,
+              "porosity": 0.0
+            },
+            {
+              "kind": "Foliage",
+              "band": [
+                0.6,
+                1.0
+              ],
+              "radius": 1.0,
+              "share": 1.0,
+              "porosity": 0.4
+            }
+          ]
+        },
+        {
+          "wood_fraction_max": "inf",
+          "height_m_max": null,
+          "layers": [
+            {
+              "kind": "Trunk",
+              "band": [
+                0.0,
+                0.5
+              ],
+              "radius": 0.15,
+              "share": 0.0,
+              "porosity": 0.0
+            },
+            {
+              "kind": "Trunk",
+              "band": [
+                0.5,
+                0.7
+              ],
+              "radius": 0.6,
+              "share": 0.0,
+              "porosity": 0.85
+            },
+            {
+              "kind": "Drape",
+              "band": [
+                0.35,
+                0.5
+              ],
+              "radius": 0.7,
+              "share": 0.15,
+              "porosity": 0.9
+            },
+            {
+              "kind": "Foliage",
+              "band": [
+                0.7,
+                1.0
+              ],
+              "radius": 1.0,
+              "share": 0.85,
+              "porosity": 0.45
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "lanternberry",
+      "crown_height_m": [
+        0.625,
+        1.125
+      ],
+      "crown_radius_m": [
+        0.25,
+        0.4375
+      ],
+      "profile": [
+        {
+          "wood_fraction_max": 0.2,
+          "height_m_max": 0.125,
+          "layers": [
+            {
+              "kind": "Foliage",
+              "band": [
+                0.0,
+                1.0
+              ],
+              "radius": 1.0,
+              "share": 1.0,
+              "porosity": 0.5
+            }
+          ]
+        },
+        {
+          "wood_fraction_max": "inf",
+          "height_m_max": null,
+          "layers": [
+            {
+              "kind": "Trunk",
+              "band": [
+                0.0,
+                0.3
+              ],
+              "radius": 0.4,
+              "share": 0.0,
+              "porosity": 0.7
+            },
+            {
+              "kind": "Foliage",
+              "band": [
+                0.3,
+                0.45
+              ],
+              "radius": 1.0,
+              "share": 0.21428571428571427,
+              "porosity": 0.5
+            },
+            {
+              "kind": "Foliage",
+              "band": [
+                0.45,
+                1.0
+              ],
+              "radius": 1.0,
+              "share": 0.7857142857142857,
+              "porosity": 0.5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "siphonreed",
+      "crown_height_m": [
+        0.75,
+        1.5
+      ],
+      "crown_radius_m": [
+        0.0625,
+        0.125
+      ],
+      "profile": [
+        {
+          "wood_fraction_max": "inf",
+          "height_m_max": null,
+          "layers": [
+            {
+              "kind": "Foliage",
+              "band": [
+                0.0,
+                1.0
+              ],
+              "radius": 1.0,
+              "share": 1.0,
+              "porosity": 0.7
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "founders": [
+    {
+      "name": "littershredder",
+      "adult_length_m": 0.375,
+      "adult_width_m": 0.125,
+      "adult_height_m": 0.125,
+      "body_min": 0.003125,
+      "body_max": 0.0125
+    },
+    {
+      "name": "frondgrazer",
+      "adult_length_m": 0.75,
+      "adult_width_m": 0.375,
+      "adult_height_m": 0.375,
+      "body_min": 0.005,
+      "body_max": 0.05
+    }
+  ]
+}

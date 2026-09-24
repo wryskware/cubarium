@@ -695,15 +695,21 @@ impl Reproduction {
     /// ceiling of 0.025 at `body_max`): eligibility at 0.015 is 60 % of a full reserve,
     /// so it is a real surplus and not a full tank; the escrow fills at
     /// `0.01 / 180 s` = 5.6e-5 /s against a basal upkeep of 5e-5 /s at `body_max`, so
-    /// gestating roughly doubles what the parent is paying out; and hold + gestation +
-    /// interval put at least 10 minutes between one parent's offspring.
+    /// gestating roughly doubles what the parent is paying out.
+    ///
+    /// **On plant time** (package G, decision 4): `surplus_hold_s` 900 and
+    /// `birth_interval_s` 1,800 put hold + gestation + interval = 2,880 s (48 min)
+    /// between one parent's offspring — the brief's "at least ~30 min apart" — and, with
+    /// `growth_max_per_s`, a newborn's first birth an hour after its own. A founder that
+    /// arrives full gives birth at ~18 min and not again before ~66 min, so a meadow of
+    /// founders is at most doubled by the hour.
     pub const LIVE_BIRTH_PLACEHOLDER: Reproduction = Reproduction {
         mode: BirthMode::Gestation,
         surplus_floor: 0.005,
-        surplus_hold_s: 120.0,
+        surplus_hold_s: 900.0,
         gestation_s: 180.0,
         gestation_loss_fraction: 0.25,
-        birth_interval_s: 300.0,
+        birth_interval_s: 1800.0,
         clutch_size: 0,
         egg_organic: 0.0,
         incubation_s: 0.0,
@@ -718,13 +724,19 @@ impl Reproduction {
     /// reserve at all. Raising it needs the blind body's reserve ceiling or its
     /// `body_min` revisited, which is a physiology decision and not this round's
     /// (`design/backlog.md` §1). The rule itself is written for any count.
+    ///
+    /// **On plant time** (package G, decision 4, "the same in their own terms"):
+    /// `surplus_hold_s` 900 and `birth_interval_s` 1,800 put 2,700 s (45 min) between one
+    /// parent's clutches, and with the shredder's `growth_max_per_s` a hatchling lays its
+    /// first clutch no sooner than an hour after it hatched. A founder that arrives full
+    /// lays at ~15 min (hatching at ~20) and not again before ~60 min.
     pub const EGGS_PLACEHOLDER: Reproduction = Reproduction {
         mode: BirthMode::Eggs,
         surplus_floor: 0.000_625,
-        surplus_hold_s: 120.0,
+        surplus_hold_s: 900.0,
         gestation_s: 0.0,
         gestation_loss_fraction: 0.25,
-        birth_interval_s: 300.0,
+        birth_interval_s: 1800.0,
         clutch_size: 1,
         egg_organic: 0.004,
         incubation_s: 300.0,
@@ -861,7 +873,19 @@ pub struct SpeciesConfig {
     pub maintenance_per_s: f64,
     /// Organic matter a mouth can take per second, spread over the stands in reach in site
     /// order. The bound on what a bite *asks* for; the plant layer bounds what it gets.
+    ///
+    /// Since package G (`design/handoffs/voxel-plant-viability-2026-09-23.md` §G) it is
+    /// the *hungry* rate: a bite asks for `bite_per_s · period · effort · hunger`, where
+    /// hunger is the reserve's shortfall from `reserve_cap · body`, then takes
+    /// `E / (E + bite_half_stock)` of that from food holding `E`, and never more than
+    /// `room / yield`, the reserve's room after yield — so nothing it eats is respired as
+    /// surplus.
     pub bite_per_s: f64,
+    /// **`K`, the stock at which a bite is half of what the mouth asked for** (package G,
+    /// decision 2): a bite from food holding `E` at the mouth — a plant's edible foliage
+    /// in the mouth band, or a detritus pool's stock — is `want · E / (E + K)`. A stripped
+    /// plant gives crumbs, so moving on pays.
+    pub bite_half_stock: f64,
     /// The fraction of a bite that becomes tissue. The rest is respired, with the energy
     /// that was in it leaving as heat and the mineral staying behind.
     pub yield_fraction: f64,
@@ -879,6 +903,13 @@ pub struct SpeciesConfig {
     pub n_tissue: f64,
     /// Structure it grows to and no further.
     pub body_max: f64,
+    /// **The fastest structure can grow**, organic matter per second (package G,
+    /// decision 4). Intake goes to the reserve; each tick the reserve pays for
+    /// `growth_max_per_s · DT · fullness` of new structure, `fullness` being the reserve
+    /// over `reserve_cap · body` (at most 1), until `body_max`. A juvenile cannot outgrow
+    /// it however much it eats, and a hungry one grows slower rather than spending the
+    /// buffer it needs to live on.
+    pub growth_max_per_s: f64,
     /// Structure below which it is dead. Also a newborn's body.
     pub body_min: f64,
     /// Structure at which it can pay for a birth.
@@ -952,9 +983,19 @@ impl SpeciesConfig {
         SpeciesConfig {
             maintenance_per_s: 0.001,
             bite_per_s: 0.002,
+            // A turf grazed nearly to its floor: 0.005 is 6 % of a full-grown springturf's
+            // edible foliage (0.7 · 2 · 0.06 = 0.084), so any plant worth the name gives
+            // ~90 % of a bite and only one stripped to within crumbs of its refuge gives
+            // half. Measured on the default preset, seed 2: 4 of 8 founders alive at
+            // 60 min at K = 0.02, 6 at 0.005, with offtake under 10 % either way.
+            bite_half_stock: 0.005,
             yield_fraction: 0.5,
             n_tissue: 0.05,
             body_max: 0.05,
+            // From body_min to birth_body (0.025) in ≥ 2,632 s, so that with the 900 s hold
+            // and 180 s gestation a newborn's first birth is ≥ 3,712 s — the brief's "no
+            // sooner than ~1 h after being born".
+            growth_max_per_s: 9.5e-6,
             body_min: 0.005,
             birth_body: 0.03,
             birth_cost: 0.01,
@@ -997,9 +1038,11 @@ impl SpeciesConfig {
     /// the values known to be arbitrary, and refusing them here would be tuning in a
     /// validator's clothes.
     pub fn validate(&self, name: &str) -> Result<(), String> {
-        let fields: [(&str, f64); 12] = [
+        let fields: [(&str, f64); 14] = [
             ("maintenance_per_s", self.maintenance_per_s),
             ("bite_per_s", self.bite_per_s),
+            ("bite_half_stock", self.bite_half_stock),
+            ("growth_max_per_s", self.growth_max_per_s),
             ("yield_fraction", self.yield_fraction),
             ("n_tissue", self.n_tissue),
             ("body_max", self.body_max),

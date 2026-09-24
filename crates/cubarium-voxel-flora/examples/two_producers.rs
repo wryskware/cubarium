@@ -555,7 +555,7 @@ fn gate_diagnosis(world: &World, flora: &Flora, skyline: &[Site], when: &str, sk
             if g.soil_voxels == 0 {
                 no_soil += 1;
             }
-            if let Some(mean) = g.mean_pore {
+            if let Some(mean) = g.mean_water {
                 mean_pore_sum += mean;
                 mean_pore_n += 1;
             }
@@ -588,9 +588,9 @@ fn gate_diagnosis(world: &World, flora: &Flora, skyline: &[Site], when: &str, sk
             f64::NAN
         };
         println!(
-            "  {:>14}: {eligible} eligible; shut gates (a column can fail several): no soil in the root box {no_soil}, mean pore < {:.2} {pore}, saturated fraction > {:.2} {aeration}, water over {:.2} m {depth}, sky < {:.2} {light}{}",
+            "  {:>14}: {eligible} eligible; shut gates (a column can fail several): no soil in the root box {no_soil}, mean available water < {:.2} {pore}, saturated fraction > {:.2} {aeration}, water over {:.2} m {depth}, sky < {:.2} {light}{}",
             species.name(),
-            sc.establish_pore_min,
+            sc.establish_water_min,
             sc.establish_saturated_max,
             sc.drown_depth_m,
             sc.establish_light_min,
@@ -604,7 +604,7 @@ fn gate_diagnosis(world: &World, flora: &Flora, skyline: &[Site], when: &str, sk
             }
         );
         println!(
-            "  {:>14}: sole cause — pore alone {only_pore}, saturation alone {only_aeration}, light alone {only_light}; mean root-box pore over the {mean_pore_n} columns with soil {mean_pore:.3}",
+            "  {:>14}: sole cause — pore alone {only_pore}, saturation alone {only_aeration}, light alone {only_light}; mean root-box available water over the {mean_pore_n} columns with soil {mean_pore:.3}",
             ""
         );
         // The dispersal side of eligibility: a donor's packages can only recruit where they
@@ -2359,6 +2359,20 @@ mod tests {
     /// Two ledges and a wrap: column 0's support face is at `y = 2`, column 1's at `y = 4`,
     /// and column 7's at `y = 2`, which is one step from column 0 across the world's `x`
     /// wrap. Nothing is ever stepped, so no water moves and the faces stay where they are.
+    /// The shipped flora with the **pre-ladder bloomcrown crown** these placement tests
+    /// were written around: `[0.25, 0.75]` m tall and `[0.125, 0.375]` m wide, linear in
+    /// wood with no seedling cap — a half-grown founder two 0.25 m cells tall and one
+    /// wide. Package L's ladder bloomcrown is narrower (0.78 cells at half wood) and
+    /// covers no neighbouring column, and the subject here is the helper's geometry, not
+    /// the ladder, so the fixture states its own crown.
+    fn fixture_flora() -> FloraConfig {
+        let mut config = FloraConfig::default();
+        config.bloomcrown.crown_height_m = [0.25, 0.75];
+        config.bloomcrown.crown_radius_m = [0.125, 0.375];
+        config.bloomcrown.profile[0].height_m_max = None;
+        config
+    }
+
     fn two_ledges() -> World {
         let mut w = World::empty(VoxelConfig {
             width: 8,
@@ -2393,16 +2407,16 @@ mod tests {
 
     /// **The two-height case.** A half-grown bloomcrown planned on the low ledge tops out
     /// at an absolute 4.0 with radius 1, so it covers both neighbouring columns. The
-    /// velvetpad candidate on the **high** ledge would top out at 4.75 and the model applies
+    /// velvetpad candidate on the **high** ledge would top out at 4.5 and the model applies
     /// no shade to it, so the rule must refuse that site; the one on the level ledge tops
-    /// out at 2.75 and is genuinely under the crown.
+    /// out at 2.5 and is genuinely under the crown.
     ///
     /// The old level-face test admitted both, because it compared 2.0 against 0.75 and never
     /// looked at either support height.
     #[test]
     fn a_crown_lower_than_the_site_it_covers_does_not_shade_it() {
         let world = two_ledges();
-        let flora = Flora::new(FloraConfig::default());
+        let flora = Flora::new(fixture_flora());
         let planned = [Founder {
             species: Species::Bloomcrown,
             x: 0,
@@ -2432,7 +2446,7 @@ mod tests {
         // The premise of the old test, so the case cannot rot: over their own faces the
         // bloomcrown crown is the taller of the two.
         assert!(
-            bloom.crown_height(founder_wood(bloom)) > velvet.crown_height(founder_wood(velvet)),
+            bloom.crown_height(founder_wood(bloom), flora.config().voxel_m) > velvet.crown_height(founder_wood(velvet), flora.config().voxel_m),
             "the level-face comparison the old helper made"
         );
         // Both columns are inside the crown's footprint, so it is the height that decides.
@@ -2447,11 +2461,11 @@ mod tests {
 
         assert!(
             !under_a_crown(&canopy, 8, &flora, Species::Velvetpad, high),
-            "a crown topping out at 4.0 cannot shade a velvetpad whose own top is 4.75"
+            "a crown topping out at 4.0 cannot shade a velvetpad whose own top is 4.5"
         );
         assert!(
             under_a_crown(&canopy, 8, &flora, Species::Velvetpad, level),
-            "on the level ledge the same crown does top it, at 4.0 against 2.75"
+            "on the level ledge the same crown does top it, at 4.0 against 2.5"
         );
     }
 
@@ -2463,8 +2477,8 @@ mod tests {
     #[test]
     fn an_existing_stand_is_measured_at_its_own_wood_and_not_as_a_founder() {
         let world = two_ledges();
-        let sc = FloraConfig::default().bloomcrown.clone();
-        let mut flora = Flora::new(FloraConfig::default());
+        let sc = fixture_flora().bloomcrown.clone();
+        let mut flora = Flora::new(fixture_flora());
         assert!(flora.apply(
             &world,
             Command::Seed {
@@ -2478,18 +2492,18 @@ mod tests {
         let canopy = canopy_over(&world, &flora, &[]);
         assert_eq!(canopy.len(), 1, "one standing crown: {canopy:?}");
         assert!(
-            (canopy[0].radius - sc.crown_radius(sc.alive_min)).abs() < 1e-12,
+            (canopy[0].radius - sc.crown_radius(sc.alive_min, flora.config().voxel_m)).abs() < 1e-12,
             "radius {} is not the stand's own",
             canopy[0].radius
         );
         assert!(
-            canopy[0].radius < sc.crown_radius(founder_wood(&sc)),
+            canopy[0].radius < sc.crown_radius(founder_wood(&sc), flora.config().voxel_m),
             "a newborn is not a half-grown founder: {} against {}",
             canopy[0].radius,
-            sc.crown_radius(founder_wood(&sc))
+            sc.crown_radius(founder_wood(&sc), flora.config().voxel_m)
         );
         assert!(
-            (canopy[0].top - (2.0 + sc.crown_height(sc.alive_min))).abs() < 1e-12,
+            (canopy[0].top - (2.0 + sc.crown_height(sc.alive_min, flora.config().voxel_m))).abs() < 1e-12,
             "absolute top {}",
             canopy[0].top
         );
@@ -2500,13 +2514,13 @@ mod tests {
             "a newborn's 0.533 radius does not reach the next column"
         );
         // The same column, read as the founder-sized crown the old helper assumed: it is
-        // covered, and its top does clear a velvetpad's 2.75, so the two readings disagree
+        // covered, and its top does clear a velvetpad's 2.5, so the two readings disagree
         // and the resident's actual wood is what decides.
         let as_founder = [Canopy {
             x: 0.0,
             z: 0.0,
-            top: 2.0 + sc.crown_height(founder_wood(&sc)),
-            radius: sc.crown_radius(founder_wood(&sc)),
+            top: 2.0 + sc.crown_height(founder_wood(&sc), flora.config().voxel_m),
+            radius: sc.crown_radius(founder_wood(&sc), flora.config().voxel_m),
             foliage: sc.alpha * founder_wood(&sc),
         }];
         assert!(

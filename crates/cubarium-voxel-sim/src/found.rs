@@ -299,6 +299,7 @@ pub fn generate_with_a_lake(
 ) -> (World, u64, usize) {
     let (want, want_tiers) = match &cfg.landform {
         Landform::Staged(r) => (r.water.min_lake_m2, r.water.min_tier_pools as usize),
+        Landform::Terrarium(t) => (t.water.min_lake_m2, t.water.min_tier_pools as usize),
         Landform::Ridge => (0.0, 0),
     };
     let build = |seed: u64| {

@@ -180,7 +180,12 @@ fn shipped_landform_composes_chambers_shelves_and_a_local_cascade() {
                     falling += 1;
                     fall_x.insert(x);
                     let dx = x.abs_diff(spring_x).min(c.width - x.abs_diff(spring_x));
-                    source_fall |= y > outlet_y && y <= spring_y && dx <= 1;
+                    // Within five columns (0.6 m) of the spring, not one: what fell right
+                    // beside it was spray the water solver used to fling sideways — films of
+                    // a millionth of a cell, gone after packages H, C and P — while the
+                    // stream itself leaves the spring's shelf three to five columns along
+                    // (measured on this seed, 2026-09-22).
+                    source_fall |= y > outlet_y && y <= spring_y && dx <= 5;
                 }
             }
         }

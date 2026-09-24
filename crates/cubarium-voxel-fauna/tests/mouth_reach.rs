@@ -5,19 +5,19 @@
 //! for (`design/handoffs/voxel-browser-reach-2026-09-21.md`) is gone; the field survives
 //! on the `Manifest` as the trained contract's record and is not read.
 //!
-//! The arithmetic on this fixture: the browser here is 0.8 of `body_max`, so its height
-//! is `0.1875 · 0.8^(1/3) = 0.174` m and its ceiling `1.33 ×` that, 0.2315 m — inside
-//! one 0.25 m cell. On a 0.25 m world the mouth therefore takes its own head layer and
-//! nothing above it, and a crown one voxel up is 0.25 m of air away from a 0.23 m
-//! mouth. That is the succession story decisions §2 asks for and the basal rosette of
-//! the layers package is the answer to it.
+//! The arithmetic on this fixture: the browser here is 0.8 of `body_max`, so on package
+//! L's ladder its height is `0.375 · 0.8^(1/3) = 0.348` m and its ceiling `1.33 ×` that,
+//! 0.463 m — into the second 0.25 m cell. On a 0.25 m world the mouth therefore takes
+//! its own head layer and the one above it, and a crown two voxels up is 0.5 m of air
+//! away from a 0.46 m mouth. That is the succession story decisions §2 asks for and the
+//! basal rosette of the layers package is the answer to it.
 //!
 //! Short function tests on a flat 0.25 m world whose ground support face is `y = 2`, so
 //! a body stands in layer 3 (`head`), `head + 1` is layer 4 and `head + 2` is layer 5.
-//! Crown layers are made with **bloomcrown** wood, whose `crown_height_voxels` spans
-//! `[1, 3]`: wood 0.12 rounds to one voxel, 0.30 to two and 0.60 to three. Nothing here
-//! pins a trajectory; the amounts asserted are the frozen bite rate and the plant
-//! layer's own stock.
+//! Crown layers are made with a half-grown **springturf** (one voxel) and **bloomcrown**
+//! wood, whose one-layer crown spans `[0.375, 1.0]` m: wood 0.12 rounds to two 0.25 m
+//! voxels and 0.30 to three. Nothing here pins a trajectory; the amounts asserted are the
+//! frozen bite rate and the plant layer's own stock.
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
 use cubarium_voxel_flora::{
@@ -63,37 +63,65 @@ fn site(x: u32, z: u32) -> Site {
     Site { x, y: 2, z }
 }
 
-/// Seed a bloomcrown of `wood` at one column and return the crown layer it stands at,
-/// asserting it is the `rise` the caller asked for above the body's head layer.
-fn crown_at(flora: &mut Flora, world: &World, x: i64, z: u32, wood: f64, rise: i64) -> f64 {
+/// The plant and wood whose one-layer crown stands `rise` voxels above the head layer
+/// on this 0.25 m world: a half-grown springturf at the head, then bloomcrown.
+fn crown_for(rise: i64) -> (Plant, f64) {
+    match rise {
+        0 => (
+            Plant::Springturf,
+            0.5 * FloraConfig::default().springturf.wood_max,
+        ),
+        1 => (Plant::Bloomcrown, 0.12),
+        _ => (Plant::Bloomcrown, 0.30),
+    }
+}
+
+/// Seed the crown of [`crown_for`]`(rise)` at one column and return its foliage,
+/// asserting its crown layer is the `rise` the caller asked for above the body's head
+/// layer.
+fn crown_at(flora: &mut Flora, world: &World, x: i64, z: u32, rise: i64) -> f64 {
+    let (species, wood) = crown_for(rise);
     assert!(flora.apply(
         world,
         FloraCommand::Seed {
             x,
             z,
-            species: Plant::Bloomcrown,
+            species,
             wood,
         },
     ));
     let s = site(x as u32, z);
-    let stand = flora.view().stand_at(s).expect("the seeded bloomcrown");
+    let stand = flora.view().stand_at(s).expect("the seeded crown");
     let layer = i64::from(stand.site.y)
         + i64::from(
             flora
                 .config()
-                .species(Plant::Bloomcrown)
-                .crown_voxels(stand.wood),
+                .species(species)
+                .crown_voxels(stand.wood, flora.config().voxel_m),
         );
     // The body stands in `site.y + 1`; `rise` is how far above that the crown sits.
     assert_eq!(
         layer,
         i64::from(s.y) + 1 + rise,
-        "wood {wood} did not put the crown {rise} above the head layer"
+        "{species:?} wood {wood} did not put the crown {rise} above the head layer"
     );
     stand.foliage
 }
 
-/// Place a browser founder at one column, facing `+z`, and give it a full feed action.
+/// The shipped founders with **no diminishing bite** (`bite_half_stock` 0): these cases
+/// measure one whole bite of the frozen rate, which package G's `E / (E + K)` would
+/// shrink by whatever stock is at the mouth. Their bodies start with an empty reserve,
+/// so package G's satiety asks for the whole bite too.
+fn exact_bites() -> FaunaConfig {
+    let mut c = FaunaConfig::default();
+    for f in Founder::ALL {
+        c.founders[f.index()].core.bite_half_stock = 0.0;
+    }
+    c
+}
+
+/// Place a hungry browser founder at one column, facing `+z`, and give it a full feed
+/// action.
 fn browser_feeding(fauna: &mut Fauna, world: &World, x: i64, z: u32) -> u64 {
     assert!(fauna.apply(
         world,
@@ -103,7 +131,7 @@ fn browser_feeding(fauna: &mut Fauna, world: &World, x: i64, z: u32) -> u64 {
             founder: Founder::Browser,
             stores: StartingStores {
                 body: 0.8,
-                reserve: 1.0,
+                reserve: 0.0,
             },
             heading_rad: 0.0,
         },
@@ -130,9 +158,9 @@ const ONE_BITE: f64 = 0.002 * 0.25;
 fn a_browser_bites_a_crown_at_its_head_layer() {
     let world = flat_world();
     let mut flora = Flora::new(FloraConfig::default().one_layer_species());
-    let before = crown_at(&mut flora, &world, 2, 2, 0.12, 0);
+    let before = crown_at(&mut flora, &world, 2, 2, 0);
 
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(exact_bites());
     let id = browser_feeding(&mut fauna, &world, 2, 2);
     let reached = {
         let av = fauna.view();
@@ -161,16 +189,18 @@ fn a_browser_bites_a_crown_at_its_head_layer() {
     );
 }
 
-/// (a2) And the same browser no longer reaches a crown one 0.25 m voxel above its head:
-/// its physical ceiling is 0.2315 m. This is the rule that changed on 2026-09-22 — the
-/// manifest still records the old `mouth_reach_up_voxels` of one, and nothing reads it.
+/// (a2) The same browser reaches a crown one 0.25 m voxel above its head because its
+/// physical ceiling, 0.463 m, overlaps that cell — and not because of a voxel count:
+/// the manifest still records the old `mouth_reach_up_voxels` of one, and nothing
+/// reads it. (Before package L's ladder the ceiling was 0.2315 m and this crown was out
+/// of the band; the band did not change, the body did.)
 #[test]
-fn a_crown_one_voxel_above_the_head_is_out_of_the_physical_band() {
+fn a_crown_one_voxel_above_the_head_is_inside_the_physical_band() {
     let world = flat_world();
     let mut flora = Flora::new(FloraConfig::default().one_layer_species());
-    let before = crown_at(&mut flora, &world, 2, 2, 0.30, 1);
+    let before = crown_at(&mut flora, &world, 2, 2, 1);
 
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(exact_bites());
     let id = browser_feeding(&mut fauna, &world, 2, 2);
     let reached = {
         let av = fauna.view();
@@ -181,14 +211,22 @@ fn a_crown_one_voxel_above_the_head_is_out_of_the_physical_band() {
             av.animal(id).expect("the placed browser"),
         )
     };
-    assert_eq!(reached, None, "0.25 m of air is over a 0.2315 m mouth");
+    assert_eq!(
+        reached.map(|(s, _)| s),
+        Some(site(2, 2)),
+        "a cell starting 0.25 m up is under a 0.463 m mouth"
+    );
 
     for _ in 0..5 {
         fauna.step(&world, &mut flora);
     }
     let after = flora.view().stand_at(site(2, 2)).expect("alive").foliage;
-    assert_eq!(fauna.view().ledger.bites, 0, "no contact, no bite");
-    assert_eq!(before, after, "an unreachable crown is not cropped");
+    assert_eq!(fauna.view().ledger.bites, 1, "one attempt, one bite");
+    assert!(
+        ((before - after) - ONE_BITE).abs() < 1e-12,
+        "foliage one voxel up moved by {}",
+        before - after
+    );
     assert_eq!(
         Founder::Browser.manifest().mouth_reach_up_voxels,
         1,
@@ -196,15 +234,16 @@ fn a_crown_one_voxel_above_the_head_is_out_of_the_physical_band() {
     );
 }
 
-/// (b) The same browser still cannot bite a crown at `y + 3`: two voxels above its head
-/// is past the declared reach, the mouth reads air, and the stock does not move.
+/// (b) The same browser still cannot bite a crown two voxels above its head: that cell
+/// starts 0.5 m over the surface, past the 0.463 m band, the mouth reads air, and the
+/// stock does not move.
 #[test]
 fn a_browser_cannot_bite_a_crown_two_voxels_above_its_head() {
     let world = flat_world();
     let mut flora = Flora::new(FloraConfig::default().one_layer_species());
-    let before = crown_at(&mut flora, &world, 2, 2, 0.60, 2);
+    let before = crown_at(&mut flora, &world, 2, 2, 2);
 
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(exact_bites());
     let id = browser_feeding(&mut fauna, &world, 2, 2);
     let reached = {
         let av = fauna.view();
@@ -246,7 +285,7 @@ fn the_blind_founders_litter_mouth_and_digest_are_unchanged() {
     ));
     let before = flora.view().ground_at(site(2, 2)).expect("ground").litter;
 
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(exact_bites());
     assert!(fauna.apply(
         &world,
         FaunaCommand::IntroduceFounder {
@@ -255,7 +294,7 @@ fn the_blind_founders_litter_mouth_and_digest_are_unchanged() {
             founder: Founder::Blind,
             stores: StartingStores {
                 body: 0.8,
-                reserve: 1.0,
+                reserve: 0.0,
             },
             heading_rad: 0.0,
         },
@@ -292,16 +331,16 @@ fn the_blind_founders_litter_mouth_and_digest_are_unchanged() {
 fn the_mouth_diagnostic_agrees_with_the_stepping_rule_at_three_crown_heights() {
     let world = flat_world();
     // Three columns two apart, so no crown disc reaches its neighbour's mouth probes.
-    let cases = [(1i64, 0.12, 0i64), (3, 0.30, 1), (5, 0.60, 2)];
+    let cases = [(1i64, 0i64), (3, 1), (5, 2)];
     let mut flora = Flora::new(FloraConfig::default().one_layer_species());
     let mut before = Vec::new();
-    for (x, wood, rise) in cases {
-        before.push(crown_at(&mut flora, &world, x, 2, wood, rise));
+    for (x, rise) in cases {
+        before.push(crown_at(&mut flora, &world, x, 2, rise));
     }
 
-    for (i, (x, _, rise)) in cases.into_iter().enumerate() {
+    for (i, (x, rise)) in cases.into_iter().enumerate() {
         let mut flora = flora.clone();
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(exact_bites());
         let id = browser_feeding(&mut fauna, &world, x, 2);
         let (diagnosed, candidates) = {
             let av = fauna.view();
@@ -343,12 +382,12 @@ fn the_mouth_diagnostic_agrees_with_the_stepping_rule_at_three_crown_heights() {
             bit,
             "crown at head + {rise}: the candidate list disagrees with the tick"
         );
-        // The band, not a voxel count: this body's ceiling is under one 0.25 m cell,
-        // so only the head layer is in reach.
+        // The band, not a voxel count: this body's ceiling is into the second 0.25 m
+        // cell, so the head layer and the one above it are in reach.
         assert_eq!(
             bit,
-            rise == 0,
-            "crown at head + {rise} against a 0.2315 m physical mouth band"
+            rise <= 1,
+            "crown at head + {rise} against a 0.463 m physical mouth band"
         );
         if bit {
             assert!(

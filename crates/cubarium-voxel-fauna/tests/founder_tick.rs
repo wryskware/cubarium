@@ -43,6 +43,18 @@ fn site(x: u32, z: u32) -> Site {
     Site { x, y: 2, z }
 }
 
+/// The shipped founders with **no diminishing bite** (`bite_half_stock` 0), for the cases
+/// that measure one whole bite of the frozen rate: package G's `E / (E + K)` would
+/// shrink it by the stock at the mouth. Those cases start their bodies with an empty
+/// reserve, so package G's satiety asks for the whole bite too.
+fn exact_bites() -> FaunaConfig {
+    let mut c = FaunaConfig::default();
+    for f in Founder::ALL {
+        c.founders[f.index()].core.bite_half_stock = 0.0;
+    }
+    c
+}
+
 /// A controller that records every observation it is given and always answers with one
 /// bounded action. It is the policy-boundary probe: what it holds is what the sampler
 /// handed it, and nothing else exists for it to read. The log lives in the controller's
@@ -204,9 +216,9 @@ fn a_litter_bite_debits_the_real_stock_exactly_once_per_interval() {
             energy: 0.2 * 2.0,
         },
     );
-    let mut fauna = Fauna::new(FaunaConfig::default());
-    // A body below its adult maximum, so a bite has tissue to build into (an adult at
-    // its reference has a full reserve and converts nothing — the standing rule).
+    let mut fauna = Fauna::new(exact_bites());
+    // A body below its adult maximum with an empty reserve: hungry, so the bite is a
+    // whole one (package G's satiety), and there is room to store what it builds.
     assert!(fauna.apply(
         &world,
         FaunaCommand::IntroduceFounder {
@@ -215,7 +227,7 @@ fn a_litter_bite_debits_the_real_stock_exactly_once_per_interval() {
             founder: Founder::Blind,
             stores: StartingStores {
                 body: 0.8,
-                reserve: 1.0
+                reserve: 0.0
             },
             heading_rad: 0.0,
         },
@@ -256,9 +268,10 @@ fn a_litter_bite_debits_the_real_stock_exactly_once_per_interval() {
         "the real Taken composition: mineral pro rata at the litter's fraction"
     );
     let a = fauna.view().animal(id).expect("alive");
+    let _ = before_body;
     assert!(
-        a.body > before_body,
-        "the funded share of the bite became tissue"
+        a.reserve > 0.0,
+        "the funded share of the bite was stored, for growth to build from"
     );
     assert!(
         (a.founder_state.feedback.intake - 0.5 * want).abs() < 1e-12,
@@ -271,7 +284,15 @@ fn a_litter_bite_debits_the_real_stock_exactly_once_per_interval() {
         fauna.step(&world, &mut flora);
     }
     assert_eq!(fauna.view().ledger.bites, 2);
-    assert!((litter_of(&flora) - (before_stock - 2.0 * want)).abs() < 1e-12);
+    // The second bite is a hungry one too, but less hungry than the first: package G's
+    // satiety scales it by the reserve's shortfall, so it is smaller than a whole bite,
+    // and the stock fell by exactly what the ledger booked.
+    let eaten = fauna.view().ledger.eaten_organic_in;
+    assert!(
+        eaten > want && eaten < 2.0 * want,
+        "a whole bite and a smaller one: {eaten}"
+    );
+    assert!((litter_of(&flora) - (before_stock - eaten)).abs() < 1e-12);
 }
 
 /// A feed attempt with nothing in the mouth transfers nothing: no withdrawal, no
@@ -346,7 +367,7 @@ fn a_browser_bite_crops_the_stand_it_touches() {
     let foliage_of = |flora: &Flora| flora.view().stand_at(site(2, 2)).unwrap().foliage;
     let before_stock = foliage_of(&flora);
 
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(exact_bites());
     assert!(fauna.apply(
         &world,
         FaunaCommand::IntroduceFounder {
@@ -355,7 +376,7 @@ fn a_browser_bite_crops_the_stand_it_touches() {
             founder: Founder::Browser,
             stores: StartingStores {
                 body: 0.8,
-                reserve: 1.0
+                reserve: 0.0
             },
             heading_rad: 0.0,
         },
@@ -385,7 +406,7 @@ fn a_browser_bite_crops_the_stand_it_touches() {
     assert_eq!(ledger.bites_by_plant[turf], 1);
     assert!((ledger.eaten_by_plant[turf] - want).abs() < 1e-12);
     let a = fauna.view().animal(id).expect("alive");
-    assert!(a.body > 0.04, "the funded share built tissue");
+    assert!(a.reserve > 0.0, "the funded share was stored");
 }
 
 /// The `Self` feedback channels are the prior interval's outcomes, reset once: the
@@ -603,8 +624,9 @@ fn a_blocked_attempt_still_pays_the_motor_budget() {
             < 1e-12
     );
     // The pressed body stands at the wall's face, and the wall is its front contact.
+    // Package L's shredder is 0.125 m wide: its footprint radius is 0.0625 m.
     assert!(
-        (blocked.pose.x - (3.0 * 0.25 - 0.03125)).abs() < 1e-6,
+        (blocked.pose.x - (3.0 * 0.25 - 0.0625)).abs() < 1e-6,
         "pressed against the wall at x = {}",
         blocked.pose.x
     );
@@ -814,11 +836,24 @@ fn the_self_motion_channels_flow_from_resolved_motion() {
     );
 
     // A wall-blocked interval delivers less than it attempted: the delivery ratio is
-    // what reports the wall to a blind body. The cruise needs four intervals to reach
-    // the wall two columns east, so the last sampling is the blocked one.
+    // what reports the wall to a blind body. The wall is two voxels tall, two columns
+    // east: the shredder's 0.125 m climb is one 0.25 m voxel, so the one-voxel riser
+    // above is a step it takes, not a wall (with the pre-package-L 0.19 m body this
+    // case passed on float dust, having climbed it). The run goes on one interval at a
+    // time until the cruise reaches the wall — how many that takes follows the body
+    // length (1 BL/s, D2) — and the first interval is free.
+    let mut tall = flat_world();
+    for y in 3..=4 {
+        tall.apply(WorldCommand::SetMaterial {
+            x: 4,
+            y,
+            z: 2,
+            material: Material::Soil,
+        });
+    }
     let mut fauna = Fauna::new(FaunaConfig::default());
     assert!(fauna.apply(
-        &walled,
+        &tall,
         FaunaCommand::IntroduceFounder {
             x: 2,
             z: 2,
@@ -837,26 +872,41 @@ fn the_self_motion_channels_flow_from_resolved_motion() {
         feed: 0.0,
     });
     assert!(fauna.set_controller(id, Box::new(cruiser)));
-    for _ in 0..26 {
-        fauna.step(&walled, &mut flora);
+    let cadence = Founder::Blind.manifest().cadence_ticks();
+    let mut ticks = 0;
+    loop {
+        for _ in 0..cadence {
+            fauna.step(&tall, &mut flora);
+        }
+        ticks += cadence;
+        let obs = log.lock().unwrap();
+        if obs.len() >= 2 && obs.last().unwrap()[7] < 1.0 - 1e-9 {
+            break;
+        }
+        assert!(ticks < 200, "the cruise never reached the wall");
     }
     let obs = log.lock().unwrap();
-    assert_eq!(obs.len(), 5, "samplings at ages 5, 10, 15, 20 and 25");
-    // The first three intervals cruise freely; the fourth runs into the wall.
+    assert!(
+        obs.len() >= 3,
+        "the initial sampling, a free interval, then the blocked one: {}",
+        obs.len()
+    );
     assert!(
         (obs[1][7] - 1.0).abs() < 1e-9,
         "the first interval was delivered in full"
     );
     let last = obs.last().unwrap();
     assert!(
-        last[7] < 1.0,
+        last[7] < 1.0 - 1e-9,
         "a blocked interval's delivery ratio is below one, got {}",
         last[7]
     );
     assert!(
-        last[5] < 1.0,
+        last[5] < 1.0 - 1e-9,
         "the blocked cruise covered less than its reference"
     );
+    let a = fauna.view().animal(id).expect("alive");
+    assert_eq!(a.site.x, 3, "stopped short of the wall, not over it");
 }
 
 /// The motor budget is visible twice, per animal and on the ledger: one blocked interval

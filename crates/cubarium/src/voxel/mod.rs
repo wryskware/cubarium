@@ -39,6 +39,8 @@
 
 pub mod animal;
 pub mod appearance;
+pub mod colours;
+pub mod model;
 pub mod placement;
 pub mod present;
 pub mod project;
@@ -142,6 +144,14 @@ pub struct VoxelConfig {
     pub dither: f32,
     /// Whether to render a vertical sky gradient.
     pub sky_gradient: bool,
+    /// How organisms are drawn: `"models"`, the voxel models baked from the simulation's
+    /// numbers (package V, `assets/voxel-models`), or `"glyphs"`, the dev-mode glyphs that
+    /// every species and founder without a model falls back to anyway.
+    pub organisms: OrganismLook,
+    /// Where the baked models are: `<models_dir>/<voxel mm>/manifest.json`. A relative path
+    /// is from the working directory: the repository on the desktop, `/var/lib/cubarium`
+    /// under the panel's unit. Missing models are said once and drawn as glyphs.
+    pub models_dir: PathBuf,
     /// Worker threads for the in-phase splits of the tick
     /// (`cubarium_voxel_sim::SimConfig::threads`); `0` means
     /// [`std::thread::available_parallelism`]. Execution only — it reaches no rule, no
@@ -164,6 +174,8 @@ impl Default for VoxelConfig {
             water_alpha: 0.5,
             dither: 0.04,
             sky_gradient: true,
+            organisms: OrganismLook::Models,
+            models_dir: PathBuf::from("assets/voxel-models"),
             threads: 0,
             // The shipped `default` landscape, ring and all: a `cubarium voxel` with no
             // TOML generates a staged world, not the ridge. `Config::default()` stays
@@ -172,6 +184,41 @@ impl Default for VoxelConfig {
             world: cubarium_voxel::Preset::find("default")
                 .expect("the shipped presets include `default`")
                 .config(),
+        }
+    }
+}
+
+/// `organisms` in the config: which drawing of plants and animals.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OrganismLook {
+    /// The baked voxel models.
+    #[default]
+    Models,
+    /// The dev-mode glyphs (`stand::parts_of`, `animal::cells_of`).
+    Glyphs,
+}
+
+/// The model library a run with `cfg` draws with, or `None` for the glyphs: asked for,
+/// or asked for models that are not there, which is said on stderr.
+pub fn load_models(cfg: &VoxelConfig) -> Option<std::sync::Arc<model::ModelLibrary>> {
+    if cfg.organisms == OrganismLook::Glyphs {
+        eprintln!("cubarium voxel: organisms = \"glyphs\": drawing the dev-mode glyphs");
+        return None;
+    }
+    match model::ModelLibrary::load(&cfg.models_dir, cfg.world.voxel_m) {
+        Ok(lib) => {
+            eprintln!(
+                "cubarium voxel: {} voxel models from {}/{}",
+                lib.len(),
+                cfg.models_dir.display(),
+                model::voxel_dir(cfg.world.voxel_m)
+            );
+            Some(std::sync::Arc::new(lib))
+        }
+        Err(e) => {
+            eprintln!("cubarium voxel: no voxel models ({e:#}); drawing the glyphs");
+            None
         }
     }
 }
@@ -231,8 +278,24 @@ fn expand_landform_preset(world: &mut toml::Table) -> std::result::Result<(), St
         }
         None => unreachable!("the key is there"),
     };
+    // A terrarium preset names the other generator: `landform = { terrarium = { .. } }`.
+    if let Some(terrarium) = cubarium_voxel::Terrarium::preset(&name) {
+        let mut table = match toml::Value::try_from(terrarium) {
+            Ok(toml::Value::Table(t)) => t,
+            _ => return Err("a terrarium is a table".into()),
+        };
+        merge_over(&mut table, landform);
+        let mut wrapped = toml::Table::new();
+        wrapped.insert("terrarium".into(), toml::Value::Table(table));
+        world.insert("landform".into(), toml::Value::Table(wrapped));
+        return Ok(());
+    }
     let preset = cubarium_voxel::Preset::find(&name).ok_or_else(|| {
-        let known: Vec<&str> = cubarium_voxel::PRESETS.iter().map(|p| p.name).collect();
+        let known: Vec<&str> = cubarium_voxel::PRESETS
+            .iter()
+            .map(|p| p.name)
+            .chain(cubarium_voxel::Terrarium::PRESETS.iter().map(|(n, _)| *n))
+            .collect();
         format!("no landform preset is called {name:?}; the shipped ones are {known:?}")
     })?;
     let mut staged = match toml::Value::try_from(preset.recipe) {
@@ -240,13 +303,25 @@ fn expand_landform_preset(world: &mut toml::Table) -> std::result::Result<(), St
         _ => return Err("a recipe is a table".into()),
     };
     // Whatever else the table said overrides the preset, field by field.
-    for (key, value) in landform {
-        staged.insert(key, value);
-    }
+    merge_over(&mut staged, landform);
     let mut wrapped = toml::Table::new();
     wrapped.insert("staged".into(), toml::Value::Table(staged));
     world.insert("landform".into(), toml::Value::Table(wrapped));
     Ok(())
+}
+
+/// Lay `over` onto `base` field by field, into nested tables too: a config that says
+/// `[world.landform.water] inventory_m = 2.0` changes that one field of the preset's
+/// water and keeps the rest, rather than replacing the whole table with a dry default.
+fn merge_over(base: &mut toml::Table, over: toml::Table) {
+    for (key, value) in over {
+        match (base.get_mut(&key), value) {
+            (Some(toml::Value::Table(inner)), toml::Value::Table(value)) => merge_over(inner, value),
+            (_, value) => {
+                base.insert(key, value);
+            }
+        }
+    }
 }
 
 /// `[world]`: [`cubarium_voxel::Config`] with every field optional.
@@ -1524,14 +1599,19 @@ enum Out {
 }
 
 impl Out {
-    fn cpu(sink: Box<dyn FrameSink>, cfg: VoxelConfig, proj: Projection) -> Out {
+    fn cpu(
+        sink: Box<dyn FrameSink>,
+        cfg: VoxelConfig,
+        proj: Projection,
+        models: Option<std::sync::Arc<model::ModelLibrary>>,
+    ) -> Out {
         let topology = Topology::Ring {
             w: proj.raster_w,
             h: proj.raster_h,
         };
         Out::Cpu {
             sink,
-            presenter: VoxelPresenter::new(cfg, proj),
+            presenter: VoxelPresenter::new(cfg, proj).with_models(models),
             canvas: Canvas::new(topology, Scale::ONE),
             raster: cube_proto::Raster::black(proj.raster_w, proj.raster_h),
         }
@@ -1887,8 +1967,14 @@ fn open_out(args: &Voxel, cfg: &VoxelConfig, proj: Projection, speed: f64) -> Re
             Box::new(PngSink::new(&args.out, args.every)?),
             cfg.clone(),
             proj,
+            load_models(cfg),
         ),
-        VoxelSinkArg::Web => Out::cpu(Box::new(web(args.web_port)?), cfg.clone(), proj),
+        VoxelSinkArg::Web => Out::cpu(
+            Box::new(web(args.web_port)?),
+            cfg.clone(),
+            proj,
+            load_models(cfg),
+        ),
         VoxelSinkArg::Gpu => {
             crate::sink::gpu::voxel::check(proj)?;
             let mut gpu = VoxelGpuSink::new(
@@ -1898,6 +1984,7 @@ fn open_out(args: &Voxel, cfg: &VoxelConfig, proj: Projection, speed: f64) -> Re
                     target: args.gpu_target.unwrap_or_else(GpuTargetKind::detect),
                     capture: args.gpu_capture.clone(),
                     roof_from_texture: !args.gpu_roof_walk,
+                    models: load_models(cfg),
                 },
             )?;
             if args.gpu_web_rate > 0.0 {
@@ -1991,12 +2078,19 @@ fn report_water_cycle(world: &World, flora: &Flora, threads: usize) -> Option<Jo
         );
         return None;
     }
-    // The bands are the plant layer's own establishment gate. `establish_pore_min` is a
-    // floor, so the band's ceiling is saturation: too wet is drowning, which the plant
-    // layer judges from standing water and not from pore.
+    // The bands are the plant layer's own establishment gate, read back as a soil pore
+    // fraction (the gate itself reads available water, package F). It is a floor, so
+    // the band's ceiling is saturation: too wet is drowning, which the plant layer
+    // judges from standing water and not from pore.
     let bands: Vec<PoreBand> = Species::ALL
         .iter()
-        .map(|&s| PoreBand::new(s.name(), flora.config().species(s).establish_pore_min, 1.0))
+        .map(|&s| {
+            let floor = flora
+                .config()
+                .species(s)
+                .establish_pore_min_on(cubarium_voxel::Material::Soil);
+            PoreBand::new(s.name(), floor, 1.0)
+        })
         .collect();
     let spec = ViabilitySpec {
         // The same again as a warm-up: a cycle that has not started yet is not a cycle
@@ -2607,6 +2701,7 @@ mod tests {
             }),
             cfg,
             proj,
+            None,
         );
 
         // The "world" is not built until four founding frames have gone out.
@@ -2964,19 +3059,33 @@ mod tests {
         assert!(text.contains("tilt_degrees = 30.0") && text.contains("px_per_voxel = 4"));
     }
 
-    /// The panel's own config selects the shipped `small` landscape on the ring it was
-    /// written for, and states no water keys: the recipe decides those now.
+    /// The panel's own config selects the designed terrarium (Wrysk, 2026-09-23), and
+    /// `natural.toml` beside it keeps the shipped `small` landscape, both on the ring they
+    /// were written for. Neither states water keys: the recipe decides those now.
     #[test]
-    fn the_tachyon_config_names_the_small_landscape() {
+    fn the_tachyon_configs_name_the_terrarium_and_the_small_landscape() {
+        for (file, landform) in [
+            (
+                "voxel.toml",
+                cubarium_voxel::Landform::Terrarium(cubarium_voxel::Terrarium::SMALL),
+            ),
+            (
+                "natural.toml",
+                cubarium_voxel::Landform::Staged(cubarium_voxel::Recipe::SMALL),
+            ),
+        ] {
+            tachyon_config_names(file, landform);
+        }
+    }
+
+    fn tachyon_config_names(file: &str, landform: cubarium_voxel::Landform) {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../config/tachyon/voxel.toml")
+            .join("../../config/tachyon")
+            .join(file)
             .canonicalize()
             .expect("the panel config is committed");
         let cfg = load_config(&path).unwrap();
-        assert_eq!(
-            cfg.world.landform,
-            cubarium_voxel::Landform::Staged(cubarium_voxel::Recipe::SMALL)
-        );
+        assert_eq!(cfg.world.landform, landform, "{file}");
         assert_eq!(
             (
                 cfg.world.width,
@@ -2985,7 +3094,7 @@ mod tests {
                 cfg.world.voxel_m
             ),
             (160, 72, 24, 0.125),
-            "the Tachyon ring: 20 m around at 4 px per voxel"
+            "the Tachyon ring: 20 m around, 9 m tall, 3 m deep"
         );
         let text = std::fs::read_to_string(&path).unwrap();
         for key in [

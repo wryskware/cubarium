@@ -11,7 +11,11 @@
 //!   death equals a fresh build, and stepping with it held changes nothing.
 //!
 //! The reference map below is the pre-package `build_occupancy`, kept verbatim here as the
-//! oracle; nothing outside this file uses it.
+//! oracle — except its crown class, which reads [`StandLayer::edible`] (stock above the
+//! grazing floor, package G) as the live occupancy does since `main`'s plant-viability
+//! merge; nothing outside this file uses it.
+//!
+//! [`StandLayer::edible`]: cubarium_voxel_flora::StandLayer::edible
 
 use std::collections::HashMap;
 
@@ -56,9 +60,11 @@ impl MapOccupancy {
                     if layer.kind.bears_foliage() != foliage_pass {
                         continue;
                     }
+                    // A crown stripped to its grazing floor still holds stock, and
+                    // shows the eye a stripped crown: what a mouth could take is gone.
                     let class = if !layer.kind.bears_foliage() {
                         Fine::Trunk
-                    } else if layer.stock > 0.0 {
+                    } else if layer.edible() > 0.0 {
                         Fine::FoliageCrown
                     } else {
                         Fine::StrippedCrown
@@ -266,7 +272,7 @@ fn landscape(seed: u64) -> (World, Flora, Fauna) {
     for (i, &site) in sites.iter().enumerate() {
         match i % 4 {
             0 => {
-                let _ = flora.take_foliage(site, 1e9); // stripped bare
+                let _ = flora.take_foliage(site, 1e9); // stripped to the grazing floor
             }
             1 => {
                 let _ = flora.take_foliage(site, 0.02); // the lowest layer nibbled
@@ -716,16 +722,23 @@ fn a_held_occupancy_patched_after_a_bite_and_a_death_equals_a_fresh_build() {
         fresh(&flora, &fauna)
     );
 
-    // A bite that strips a crown: a stand with foliage left loses all of it.
+    // A bite that strips a crown: a stand with edible foliage left loses all of it down
+    // to its grazing floor (a stand the fixture already stripped keeps only its floor,
+    // which no bite takes).
     let before = fresh(&flora, &fauna);
-    let site = flora
-        .view()
-        .stands
-        .iter()
-        .find(|s| s.foliage > 0.0)
-        .map(|s| s.site)
-        .expect("a stand with foliage");
+    let site = {
+        let fv = flora.view();
+        fv.stands
+            .iter()
+            .find(|s| fv.layers(s).any(|l| l.edible() > 0.0))
+            .map(|s| s.site)
+            .expect("a stand with edible foliage")
+    };
     assert!(flora.take_foliage(site, 1e9).is_some());
+    assert!(
+        flora.view().layers_at(site).all(|l| l.edible() == 0.0),
+        "the bite left edible foliage"
+    );
     let after = fresh(&flora, &fauna);
     assert_ne!(before, after, "stripping a crown changes the eye's classes");
     assert_eq!(

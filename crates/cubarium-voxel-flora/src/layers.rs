@@ -86,6 +86,11 @@ pub struct Profile {
     /// A ceiling on the stand's physical crown height **in metres** while this stage
     /// applies, overriding the interpolated height. Decisions §5: a woody seedling is a
     /// ground rosette no taller than 0.125 m, whatever the wood interpolation says.
+    ///
+    /// On a species' **first** stage it makes the stage a capped seedling (package L,
+    /// [`crate::SpeciesConfig::capped_seedling`]): the ceiling bounds the crown's radius
+    /// too, and growth after the seedling starts from it rather than from the range's
+    /// minimum. On a later stage it is read by nothing.
     pub height_m_max: Option<f64>,
     /// Bottom-up. Regrowth fills the foliage-bearing ones in this order.
     pub layers: Vec<Layer>,
@@ -142,11 +147,34 @@ pub struct StandLayer {
     pub capacity: f64,
     /// What it holds now. Zero for a [`LayerKind::Trunk`].
     pub stock: f64,
+    /// The **grazing floor**: `graze_refuge × capacity`, what no bite may take from this
+    /// layer ([`crate::SpeciesConfig::graze_refuge`]). Zero for a [`LayerKind::Trunk`].
+    pub floor: f64,
     pub porosity: f64,
     /// The layer's horizontal area in m², floored at one reference cell — the divisor
     /// of the shade exponent.
     pub area_m2: f64,
 }
+
+impl StandLayer {
+    /// **Edible foliage**: what this layer holds above its grazing floor, never negative.
+    ///
+    /// The one reading of "food" in a plant. Every consumer that asks how much a mouth
+    /// could take — a bite, the mouth's taste, the cone's foliage-or-stripped class, a
+    /// heuristic's reach and smell — reads this and not [`StandLayer::stock`], and
+    /// [`crate::Flora::take_foliage_in_layers`] withdraws no more than it reports, so a
+    /// plant at its floor is bare to every eye and gives every mouth nothing.
+    pub fn edible(&self) -> f64 {
+        let above = self.stock - self.floor;
+        // A layer taken to its floor keeps the float residue `settle_layers` hands back
+        // to the lowest layer a bite touched; that dust is not food.
+        if above > EDIBLE_DUST { above } else { 0.0 }
+    }
+}
+
+/// Organic matter above a grazing floor that still reads as none: the float residue of
+/// a withdrawal, some ten orders under the smallest bite a mouth asks for.
+pub const EDIBLE_DUST: f64 = 1e-12;
 
 /// The floor on a layer's area in the shade exponent: one 0.25 m reference cell, which
 /// is what the pre-layer crown model floored at.

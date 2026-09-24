@@ -112,6 +112,17 @@ fn config_with(edit: impl FnOnce(&mut SpeciesConfig)) -> FaunaConfig {
     c
 }
 
+/// A grazer **hungry on its first tick** (package G's satiety): an upkeep of
+/// `reserve_cap / DT` spends the whole reserve `Introduce` gives it in that tick's
+/// maintenance, before it eats, so the bite it takes is a whole hungry one; and no
+/// diminishing bite (`bite_half_stock` 0), so that bite is exactly `bite_per_s · DT`. For
+/// the cases about what one bite is and what it builds, which were written when a full
+/// animal still ate a whole mouthful.
+fn hungry(s: &mut SpeciesConfig) {
+    s.maintenance_per_s = s.reserve_cap / DT;
+    s.bite_half_stock = 0.0;
+}
+
 /// The gestation rule at its **shortest**: a one-tick hold, a one-tick gestation and a
 /// one-tick interval, so a birth lands on the tick a body becomes eligible and the
 /// arithmetic of one paid parcel is visible in one step.
@@ -185,7 +196,7 @@ fn a_grazer_beside_reachable_foliage_crops_exactly_one_bite() {
     let world = plain(8, 2, 0.3, 5);
     let mut flora = Flora::new(FloraConfig::default());
     turf(&mut flora, &world, 3);
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(config_with(hungry));
     let id = grazer(&mut fauna, &world, 2, 0.02);
 
     let sc = *fauna.config().species(Species::Frondgrazer);
@@ -280,7 +291,7 @@ fn a_mineral_free_bite_builds_nothing_and_is_respired_whole() {
     let world = plain(8, 2, 0.3, 5);
     let mut flora = flora_with_plant_mineral(0.0);
     turf(&mut flora, &world, 3);
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(config_with(hungry));
     let id = grazer(&mut fauna, &world, 2, 0.02);
     let sc = *fauna.config().species(Species::Frondgrazer);
     let before = *fauna.view().animal(id).unwrap();
@@ -302,7 +313,12 @@ fn a_mineral_free_bite_builds_nothing_and_is_respired_whole() {
         v.ledger.eaten_mineral_in, 0.0,
         "and the bite carried no mineral"
     );
-    assert_eq!(a.body, before.body, "nothing was built");
+    assert!(
+        (a.body - before.body).abs() <= 1e-15,
+        "nothing was built: {} -> {}",
+        before.body,
+        a.body
+    );
     let upkeep = sc.maintenance_per_s * before.body * DT;
     assert!(
         (a.reserve - (before.reserve - upkeep)).abs() <= 1e-12 * before.reserve,
@@ -348,7 +364,7 @@ fn a_partly_mineralised_bite_builds_exactly_what_its_mineral_funds() {
     let world = plain(8, 2, 0.3, 5);
     let mut flora = Flora::new(FloraConfig::default());
     turf(&mut flora, &world, 3);
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(config_with(hungry));
     let id = grazer(&mut fauna, &world, 2, 0.02);
     let sc = *fauna.config().species(Species::Frondgrazer);
     let before = *fauna.view().animal(id).unwrap();
@@ -370,15 +386,17 @@ fn a_partly_mineralised_bite_builds_exactly_what_its_mineral_funds() {
         "the mineral funds {funded} of the {} the yield would build",
         sc.yield_fraction * bite
     );
-    // All of it went into the body, which had room for it.
-    let built = a.body - before.body;
+    // All of it went into the reserve, which the upkeep had just emptied: intake is
+    // stored, and structure is built out of the reserve at the growth rate (package G),
+    // which found nothing to build from before this bite.
+    let built = a.reserve;
     assert!(
         (built - funded).abs() <= 1e-9 * funded,
-        "it built {built} and not {funded}"
+        "it stored {built} and not {funded}"
     );
-    assert_eq!(
-        a.reserve,
-        before.reserve - sc.maintenance_per_s * before.body * DT
+    assert!(
+        (a.body - before.body).abs() <= 1e-15,
+        "the body waits for growth"
     );
     // The mineral: all of it kept, none excreted, none created.
     assert!((a.mineral - (before.mineral + mineral)).abs() <= 1e-12 * a.mineral);
@@ -408,7 +426,12 @@ fn maintenance_drains_the_reserve_and_then_the_body() {
     // 4 /s against the placeholder 0.001 /s, so one tick's upkeep is a readable 0.004 of
     // organic matter instead of 5e-7. What is tested is the order of payment; the body is
     // 0.02, under `birth_body`, so nothing else is spending the reserve.
-    let mut fauna = Fauna::new(config_with(|s| s.maintenance_per_s = 4.0));
+    // No growth (package G builds structure out of the reserve), so the reserve pays the
+    // upkeep and nothing else.
+    let mut fauna = Fauna::new(config_with(|s| {
+        s.maintenance_per_s = 4.0;
+        s.growth_max_per_s = 0.0;
+    }));
     let id = grazer(&mut fauna, &world, 1, 0.02);
     let start = *fauna.view().animal(id).unwrap();
     assert_eq!(
@@ -569,11 +592,13 @@ fn a_step_crosses_neither_a_wall_nor_a_pool() {
 
 // ------------------------------------------------- R9.5: sensing in face coordinates
 
-/// A bloomcrown founder at half its own `wood_max`: wood 0.3, foliage `α · W` = 0.6, and a
-/// crown whose lowest cell is **two** voxels above its support face, so a browser with
-/// `reach.up` 1 can only eat it from a face at least one voxel higher than the stand's.
+/// A one-layer bloomcrown at a fifth of its own `wood_max`: wood 0.12, foliage `α · W` =
+/// 0.24, and on package L's ladder a 0.5 m crown whose cell is **two** 0.25 m voxels above
+/// its support face, so a browser with `reach.up` 1 can only eat it from a face at least
+/// one voxel higher than the stand's. (Half its `wood_max` was two voxels before the
+/// ladder; it is three now.)
 fn bloom(flora: &mut Flora, world: &World, x: i64) {
-    let wood = 0.5 * flora.config().bloomcrown.wood_max;
+    let wood = 0.2 * flora.config().bloomcrown.wood_max;
     assert!(
         flora.apply(
             world,
@@ -587,7 +612,7 @@ fn bloom(flora: &mut Flora, world: &World, x: i64) {
         "a bloomcrown founder at x {x}"
     );
     assert_eq!(
-        flora.config().bloomcrown.crown_voxels(wood),
+        flora.config().bloomcrown.crown_voxels(wood, flora.config().voxel_m),
         2,
         "the fixture's premise"
     );
@@ -807,13 +832,14 @@ fn a_birth_pays_birth_cost_and_the_newborn_is_at_body_min() {
 /// **R9.4: `reserve_cap` is the ceiling on new intake, and a newborn's endowment sits
 /// above it.** Two halves of one contract.
 ///
-/// The ceiling: an adult at `body_max` with a full reserve eats and stays at exactly
-/// `reserve_cap · body` — its body cannot take the matter and its reserve will not, so the
-/// surplus is respired. Nothing ever raises a reserve past the ceiling.
+/// The ceiling: an adult at `body_max` with a full reserve eats only the little its upkeep
+/// has just made room for (package G's satiety), so its reserve never passes
+/// `reserve_cap · body` and nothing it eats is respired as surplus.
 ///
 /// The exception: a newborn's paid endowment starts at twice it, no intake raises that
-/// excess, and maintenance spends it like any other reserve — no clamp anywhere, which
-/// would have destroyed organic matter the parent paid for.
+/// excess — a body above its ceiling is sated — and maintenance and growth spend it like
+/// any other reserve: no clamp anywhere, which would have destroyed organic matter the
+/// parent paid for.
 #[test]
 fn a_newborn_s_endowment_sits_above_the_intake_ceiling_and_is_spent_normally() {
     let sc = *FaunaConfig::default().species(Species::Frondgrazer);
@@ -838,25 +864,31 @@ fn a_newborn_s_endowment_sits_above_the_intake_ceiling_and_is_spent_normally() {
             "tick {tick}: it had nowhere to put a body"
         );
         assert!(
-            a.reserve <= sc.reserve_of(a.body) + 1e-18
-                && (a.reserve - sc.reserve_of(a.body)).abs() <= 1e-12 * a.reserve,
-            "tick {tick}: intake refilled the reserve to the ceiling and no further: {a:?}"
+            a.reserve <= sc.reserve_of(a.body) + 1e-18,
+            "tick {tick}: intake never takes the reserve past the ceiling: {a:?}"
         );
     }
+    let l = *fauna.view().ledger;
+    assert!(l.bites > 0, "it was eating the whole time");
+    let assimilated =
+        (sc.yield_fraction * l.eaten_organic_in).min(l.eaten_mineral_in / sc.n_tissue);
     assert!(
-        fauna.view().ledger.bites > 0,
-        "it was eating the whole time"
-    );
-    assert!(
-        fauna.view().ledger.respired_out > 0.0,
-        "and respiring what it could not hold"
+        (l.respired_digestion_out - (l.eaten_organic_in - assimilated)).abs()
+            <= 1e-12 * l.eaten_organic_in,
+        "and digestion respired only the undigested share, none as surplus: {} of {}",
+        l.respired_digestion_out,
+        l.eaten_organic_in
     );
     assert_residual_pair(&flora, &fauna, "an adult held at the ceiling");
 
-    // ---- the exception, on a newborn in a world with nothing to eat.
+    // ---- the exception, on a newborn in a world with nothing to eat. No growth, so the
+    // reserve pays the upkeep and nothing else.
     let world = plain(4, 2, 0.3, 5);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(config_with(fast_births));
+    let mut fauna = Fauna::new(config_with(|s| {
+        fast_births(s);
+        s.growth_max_per_s = 0.0;
+    }));
     let parent = grazer(&mut fauna, &world, 1, sc.body_max);
     fauna.step(&world, &mut flora);
     let newborn = fauna
@@ -895,9 +927,9 @@ fn a_newborn_s_endowment_sits_above_the_intake_ceiling_and_is_spent_normally() {
     }
     assert_fauna_residuals(&fauna, "a newborn above the ceiling");
 
-    // And no intake raises the excess: with food in reach the newborn's reserve still only
-    // falls, because `room` is zero while it is above the ceiling and the assimilated
-    // matter goes into the body instead.
+    // And no intake raises the excess: with food in reach a newborn above its ceiling is
+    // sated and takes nothing, its reserve only falls, and what it loses beyond the
+    // upkeep is the structure growth builds out of it.
     let world = plain(8, 2, 0.3, 5);
     let mut flora = Flora::new(FloraConfig::default());
     turf(&mut flora, &world, 3);
@@ -921,8 +953,9 @@ fn a_newborn_s_endowment_sits_above_the_intake_ceiling_and_is_spent_normally() {
         );
         assert!(
             a.body > last.body,
-            "tick {tick}: the intake went into the body"
+            "tick {tick}: growth built structure out of the reserve"
         );
+        assert_eq!(a.state, State::Resting, "tick {tick}: sated, it does not crop");
         assert!(
             a.reserve > sc.reserve_of(a.body),
             "tick {tick}: and it is still above it"
@@ -1114,10 +1147,9 @@ fn excess_mineral_is_excreted_as_litter() {
         "a fresh founder's first bite has somewhere to put every unit it can fund"
     );
 
-    // An animal with nowhere to put it **does** excrete, at the placeholders and with no
-    // knob touched anywhere: at `body_max` with a full reserve, the only room the bite
-    // finds is what this tick's upkeep just made, so the tissue placed is `2.5e-6` and the
-    // mineral it needs is a sixteenth of what the bite brought.
+    // A full animal no longer has a surplus to excrete (package G): at `body_max` with a
+    // full reserve it takes only the little its upkeep made room for, every unit of it the
+    // mineral funds is placed, and the bite's mineral is exactly what that tissue needs.
     let mut flora = Flora::new(FloraConfig::default());
     turf(&mut flora, &world, 3);
     let mut fauna = Fauna::new(FaunaConfig::default());
@@ -1132,13 +1164,16 @@ fn excess_mineral_is_excreted_as_litter() {
     let upkeep = sc.maintenance_per_s * before.body * DT;
     let placed = v.ledger.eaten_organic_in + upkeep - v.ledger.respired_out;
     assert!(
-        (placed - upkeep).abs() <= 1e-9 * upkeep,
-        "it placed only what the upkeep freed: {placed} against {upkeep}"
+        v.ledger.bites > 0 && placed > 0.0 && placed <= upkeep,
+        "it placed {placed}, within the {upkeep} its upkeep freed"
     );
-    let excess = v.ledger.eaten_mineral_in - sc.n_tissue * placed;
     assert!(
-        (v.ledger.deposited_mineral_out - excess).abs() <= 1e-12 * excess && excess > 0.0,
-        "a full animal excretes {} of {excess}",
+        (placed - v.ledger.eaten_mineral_in / sc.n_tissue).abs() <= 1e-9 * placed,
+        "all of what the mineral funds was placed"
+    );
+    assert!(
+        v.ledger.deposited_mineral_out <= 1e-12 * v.ledger.eaten_mineral_in,
+        "a full animal has nothing to excrete: {}",
         v.ledger.deposited_mineral_out
     );
     assert_eq!(
@@ -1158,15 +1193,18 @@ fn excess_mineral_is_excreted_as_litter() {
     let before = *fauna.view().animal(id).unwrap();
     fauna.step(&world, &mut flora);
     let v = fauna.view();
-    let a = *v.animal(id).unwrap();
+    // Whatever the sated bite came to, the food is a fifth mineral.
+    let eaten = v.ledger.eaten_organic_in;
     assert!(
-        (v.ledger.eaten_mineral_in - 2e-5).abs() < 1e-18,
-        "{}",
+        eaten > 0.0 && (v.ledger.eaten_mineral_in - 0.2 * eaten).abs() <= 1e-12 * eaten,
+        "{} of {eaten}",
         v.ledger.eaten_mineral_in
     );
-    // The yield is what binds here, not the mineral: half the bite is built.
-    let built = a.body - before.body;
-    assert!((built - 0.5e-4).abs() <= 1e-9 * built, "it built {built}");
+    // The yield is what binds here, not the mineral: half the bite is built, all of it
+    // placed (read off the ledger: the reserve also pays for growth this tick).
+    let upkeep = sc.maintenance_per_s * before.body * DT;
+    let built = eaten + upkeep - v.ledger.respired_out;
+    assert!((built - 0.5 * eaten).abs() <= 1e-9 * built, "it built {built}");
     let excess = v.ledger.eaten_mineral_in - sc.n_tissue * built;
     assert!(
         (v.ledger.deposited_mineral_out - excess).abs() <= 1e-9 * excess,

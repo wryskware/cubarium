@@ -835,7 +835,7 @@ impl ConeOccupancy {
 fn layer_class(layer: &StandLayer) -> Fine {
     if !layer.kind.bears_foliage() {
         Fine::Trunk
-    } else if layer.stock > 0.0 {
+    } else if layer.edible() > 0.0 {
         Fine::FoliageCrown
     } else {
         Fine::StrippedCrown
@@ -1037,16 +1037,18 @@ struct HeldStand {
     site: Site,
     species: cubarium_voxel_flora::Species,
     wood: u64,
-    /// Bit `i`: foliage layer `i` holds stock.
+    /// Bit `i`: foliage layer `i` holds edible foliage (above its grazing floor).
     stocked: u8,
 }
 
 impl HeldStand {
-    fn of(stand: &cubarium_voxel_flora::Stand) -> HeldStand {
+    fn of(stand: &cubarium_voxel_flora::Stand, fv: &FloraView<'_>) -> HeldStand {
         let mut stocked = 0u8;
-        for (i, &s) in stand.layer_stock.iter().enumerate() {
-            if s > 0.0 {
-                stocked |= 1 << i;
+        for layer in fv.profile_layers(stand) {
+            if let Some(i) = layer.foliage_index {
+                if layer.edible() > 0.0 {
+                    stocked |= 1 << i;
+                }
             }
         }
         HeldStand {
@@ -1083,7 +1085,7 @@ impl HeldCone {
             c.depth,
             c.voxel_m.to_bits(),
         );
-        let stands: Vec<HeldStand> = fv.stands.iter().map(HeldStand::of).collect();
+        let stands: Vec<HeldStand> = fv.stands.iter().map(|s| HeldStand::of(s, fv)).collect();
         let geometry_held = self.built
             && self.shape == shape
             && self.stands.len() == stands.len()

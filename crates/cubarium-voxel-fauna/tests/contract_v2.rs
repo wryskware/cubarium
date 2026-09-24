@@ -483,8 +483,11 @@ fn the_manifest_carries_the_physiologys_anchors_and_cruises_at_one_body_length()
             "{founder:?}: the forward reference follows the cruise"
         );
     }
-    assert_eq!(Founder::Browser.manifest().cruise_m_per_s, 0.375);
-    assert_eq!(Founder::Blind.manifest().cruise_m_per_s, 0.19);
+    // D2 is one body length per second, whatever the ladder's lengths are (package L:
+    // the 0.75 m browser cruises 0.75 m/s, the 0.375 m shredder 0.375 m/s). The speeds
+    // are derived above from the physiology rather than pinned here, so a ladder move
+    // cannot leave a stale speed behind; the rate itself is the decision.
+    assert_eq!(cubarium_voxel_fauna::CRUISE_BODY_LENGTHS_PER_S, 1.0);
     let blind = Founder::Blind.manifest();
     assert!(blind.modules.iter().any(|m| m.name == "Chem(detritus)"));
     assert!(!blind.canonical_text().contains("Chem(litter)"));

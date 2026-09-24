@@ -276,13 +276,17 @@ fn slab_drained_m_per_m2(voxel_m: f64, ticks: u32) -> (f64, f64) {
 /// **Tolerance.** The only thing that can differ is *which cell* the drainage
 /// front is standing in when the run stops, so the bound is one coarse cell's
 /// drainable store expressed as a depth: `(1 - field_capacity) · pore_capacity ·
-/// 0.25 m = 0.0656 m³/m²`. That is a real bound and not a fudge: before this
-/// package the fine grid drained at exactly half the rate, which over 200 ticks
-/// is a shortfall of 0.0875 m³/m² — larger than the bound, so this test fails on
+/// 0.25 m = 0.0306 m³/m²`. That is a real bound and not a fudge: before this
+/// package the fine grid drained at exactly half the rate, which over 100 ticks
+/// is a shortfall of 0.0438 m³/m² — larger than the bound, so this test fails on
 /// the old code and passes on the new.
+///
+/// 100 ticks and not 200 since soil retention: a metre of soil at field capacity
+/// 0.65 has only 0.1225 m³/m² to give, and 200 ticks of `K · dt` (0.175) would run
+/// the slab out of drainable water before the clock stopped.
 #[test]
 fn a_metre_of_soil_drains_the_same_depth_on_both_grids() {
-    const TICKS: u32 = 200;
+    const TICKS: u32 = 100;
     let soil = Material::Soil;
     let tol = (1.0 - soil.field_capacity()) * soil.pore_capacity() * 0.25;
 
@@ -371,4 +375,48 @@ fn standing_water_soaks_in_at_the_same_depth_on_both_grids() {
         fine_residual.abs() < 1e-12,
         "0.125 m residual {fine_residual}"
     );
+}
+
+// ------------------------------------------------------------ 3. retention
+
+/// Soil drained from saturation keeps exactly its field capacity: a metre of
+/// saturated soil over the foundation, under a table that cannot rise, drains
+/// until every voxel holds `field_capacity · pore_capacity · voxel volume` and the
+/// rest has joined the aquifer. On both grids, since the retained share is a
+/// property of the soil and not of the cell.
+#[test]
+fn saturated_soil_drains_to_its_field_capacity_and_keeps_it() {
+    let soil = Material::Soil;
+    for voxel_m in [0.25, 0.125] {
+        let cells = (1.0 / voxel_m) as u32;
+        let mut w = column(cells + 2, voxel_m, 1e4, 0.0);
+        for y in 1..=cells {
+            wet_soil(&mut w, y, 1.0);
+        }
+        let charged = w.view().stored_m3();
+        // A metre drains `(1 - fc) · pore` metres at `K · dt` a tick: under 300
+        // ticks at any field capacity the brief allows. 800 is well past it.
+        for _ in 0..800 {
+            w.step();
+        }
+        let want = soil.field_capacity() * soil.pore_capacity() * w.config().voxel_volume();
+        for y in 1..=cells {
+            let held = pore_m3(&w, y);
+            assert!(
+                (held - want).abs() <= 1e-9 * want,
+                "{voxel_m} m, y={y}: holds {held} m³, field capacity is {want} m³"
+            );
+        }
+        let drained = charged - f64::from(cells) * want;
+        assert!(
+            (w.view().aquifer_m3 - drained).abs() <= 1e-9,
+            "{voxel_m} m: the aquifer took {} of the {drained} m³ that drained",
+            w.view().aquifer_m3
+        );
+        assert!(
+            residual(&w).abs() < 1e-12,
+            "{voxel_m} m residual {}",
+            residual(&w)
+        );
+    }
 }

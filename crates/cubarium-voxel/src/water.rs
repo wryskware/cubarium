@@ -53,7 +53,7 @@
 //! a film downhill within the same tick it landed in and the soil under it is never
 //! asked. It is not a small effect: on the eight-column staircase in `tests/core.rs`,
 //! under rain at a seventh of what the soil could absorb, the flat foot of the stairs
-//! reached field capacity (pore 0.25) while the top step held 0.0001 — the whole
+//! reached field capacity (then pore 0.25) while the top step held 0.0001 — the whole
 //! staircase was dry in proportion to its slope, and a plant layer reading pore water
 //! would have found no soil moisture anywhere but in the hollows.
 //!
@@ -97,10 +97,13 @@
 //!
 //! There is no region search and no connected-component solve. Each substep, every **wet**
 //! cell offers water across its four horizontal faces and to the cell below, and the drive
-//! is the difference in **column head**: the surface level `y + free` at the top of the
-//! contiguous water column the cell belongs to. A dry cell's head is its own floor, so
-//! water runs into an empty neighbour and off a ledge; a deep column's bottom cell carries
-//! its whole column's head, so it pushes hard sideways; and a **full** cell carries the
+//! is the difference in **column head**: the surface level `s + free[s]` of the packed
+//! full stack the cell sits at the foot of, `s` being the first row at or above it that is
+//! not full — a partial cell's own level, a full cell's the partial cell capping its stack
+//! (package H; until then it was the top of the whole wet run, packed or not). A dry
+//! cell's head is its own floor, so water runs into an empty neighbour and off a ledge; a
+//! deep column's bottom cell carries its whole column's head, so it pushes hard sideways;
+//! and a **full** cell carries the
 //! highest head that reaches it across its horizontal faces ([`HEAD_PASSES`] local passes
 //! per substep), which is how the weight of one column arrives at the foot of another
 //! through a flooded passage.
@@ -131,10 +134,12 @@
 //! same answer at half a head difference per substep per face: a U-tube levels in about a
 //! second, a ten-column roofed passage in a few, and the answers the fixtures in
 //! `tests/core.rs` pin — the spill thresholds, the mirrored shelf, the symmetric spill,
-//! the U-tube's own levels — come out the same. A **closed, surcharged** passage is the one
-//! case that does not settle flat: a local rule with no pressure solve leaves the surface
-//! above a flooded roof uneven by a few tenths of a cell, which
-//! `a_roofed_passage_pushes_the_far_shaft_above_the_roof` states rather than asserts away.
+//! the U-tube's own levels — come out the same. A **closed, surcharged** passage used to be
+//! the one case that did not settle flat: two columns facing each other over several full
+//! rows each sent half their head difference per row, so they swapped levels every substep
+//! and the surface above a flooded roof stayed uneven by a few tenths of a cell. Package P
+//! caps what a stack sends across one face at one row's worth, and that fixture now levels
+//! (`a_roofed_passage_pushes_the_far_shaft_above_the_roof`).
 //!
 //! Both numbers in it — `FLOW_PER_SUBSTEP` and `HEAD_PASSES` — are **placeholders**
 //! (`design/backlog.md`), and so is `water_substeps` 4, which is unchanged.
@@ -150,8 +155,9 @@
 //!   difference, so a wide body relaxes over ticks. `Config::free_transfer_cap` above zero
 //!   caps what one face may pass and slows it further without changing where the water ends
 //!   up.
-//! - **A surcharged closed passage does not settle flat.** See above: the one case where
-//!   the local rule visibly differs from the old region solver.
+//! - **Still water settles by relaxation, not at once.** Two columns side by side level in
+//!   one substep; a pool six columns wide agrees to the last bit after a few hundred
+//!   (package P). There is no pressure solve: head reaches `HEAD_PASSES` cells a substep.
 //! - **Water above the level is not carried down at once.** A film running down a slope
 //!   descends a cell per substep.
 //! - **`f64` stores.** `free` and `pore` are `f64` fractions, so an internal transfer
@@ -171,6 +177,25 @@ use crate::{Command, Config, DT, Material, World};
 /// a pair overshoot — moving half of a difference leaves both ends level — and nothing
 /// measured it. It is the only number in the local exchange.
 const FLOW_PER_SUBSTEP: f64 = 0.5;
+
+/// **Minimum spreading depth** (package C, agreed by Wrysk 2026-09-22): free water
+/// shallower than this — metres of depth in its own cell, so `free < MIN_SPREAD_DEPTH_M /
+/// voxel_m` — makes no **horizontal** offers in the exchange. It stays where it is and still
+/// infiltrates, evaporates, falls and offers downward; nothing is deleted. It is the
+/// shallow-water solvers' wet/dry threshold. The test is on the giver's **own** `free`,
+/// never its head or drive, so the thin surface cell of a lake does not stop the full
+/// cells under it from pushing.
+///
+/// Without it every film spreads into every empty neighbour on its row, because an empty
+/// cell's head is its own floor, and rain multiplies near-empty wet cells.
+///
+/// **Placeholder** (`design/backlog.md`). 0.125 µm, a millionth of a 0.125 m cell: the
+/// smallest decade past which the shower stops getting steeply cheaper on the desktop
+/// world (census, 2026-09-22 — proposals per tick 303 k with no threshold, 171 k here,
+/// 135 k and 125 k at ten and a hundred times it). The next decade is also where the
+/// shipped `small` landform's spring-route fixture fails, because what it counts at the
+/// spring is invisible spray; see the package C commit.
+const MIN_SPREAD_DEPTH_M: f64 = 1.25e-7;
 
 /// A cell with less than this much room left counts as full, so a float hair of room
 /// cannot make the displacement target a cell that cannot actually take anything.
@@ -289,6 +314,7 @@ fn add_pore(w: &mut World, i: usize, vol: f64) -> f64 {
     let before = w.pore[i];
     w.pore[i] = (before + vol / unit).min(1.0);
     w.damp.set(i, w.pore[i] > 0.0);
+    w.drainable.set(i, drains(w, i));
     (w.pore[i] - before).max(0.0) * unit
 }
 
@@ -301,7 +327,21 @@ fn take_pore(w: &mut World, i: usize, vol: f64) -> f64 {
     let before = w.pore[i];
     w.pore[i] = (before - vol / unit).max(0.0);
     w.damp.set(i, w.pore[i] > 0.0);
+    w.drainable.set(i, drains(w, i));
     (before - w.pore[i]).max(0.0) * unit
+}
+
+/// Whether `drain` can move pore water out of cell `i`: a porous, permeable cell holding
+/// more than its material's field capacity (package D's set). The same arithmetic as the
+/// drain's own `excess > 0` test, so the set and the phase can never disagree about a cell.
+pub(crate) fn drains(w: &World, i: usize) -> bool {
+    let m = w.material[i];
+    let cap = m.pore_capacity();
+    if cap <= 0.0 || w.pore[i] <= 0.0 || m.permeability_per_s() <= 0.0 {
+        return false;
+    }
+    let unit = cap * w.config.voxel_volume();
+    pore_m3(w, i) - m.field_capacity() * unit > 0.0
 }
 
 /// Hand water a loss phase took out of the in-world stores to wherever this world's
@@ -496,6 +536,7 @@ pub fn begin(world: &mut World) {
     crate::voxel_phase!(Begin, {
         if world.wet.needs_rebuild(world.config.cells())
             || world.damp.needs_rebuild(world.config.cells())
+            || world.drainable.needs_rebuild(world.config.cells())
         {
             world.rebuild_active_sets();
         }
@@ -885,6 +926,14 @@ pub fn water_table(w: &mut World) {
                     if w.material[i].is_solid() || w.free[i] >= level {
                         continue;
                     }
+                    // Only a **surface** seeps: a cell with water standing over it is under
+                    // that water's own pressure, and a shortfall there is the solver moving
+                    // it along, gone by the next substep. Topping those up from the aquifer
+                    // pumped it into any lake the table stood over, tick after tick.
+                    let above = i + (c.width as usize * c.depth as usize);
+                    if y + 1 < c.height && !w.material[above].is_solid() && w.free[above] > 1e-9 {
+                        continue;
+                    }
                     let below = c.index(x, y - 1, z);
                     let m = w.material[below];
                     if m.pore_capacity() <= 0.0 || m.permeability_per_s() <= 0.0 {
@@ -923,9 +972,9 @@ pub fn water_table(w: &mut World) {
 /// board's little cores at an IPC of 0.1 and the scan was 1.7 ms of the tick).
 #[derive(Default)]
 struct Scratch {
-    /// Surface level of the contiguous water column a wet cell belongs to, in cell units
-    /// (`y + free` of the run's top cell). Valid for the wet cells of this substep's
-    /// active columns.
+    /// A wet cell's head, in cell units: the surface of the full stack it sits at the foot
+    /// of (package H, [`scan_column_mask`]) — its own `y + free` if it is not full. Valid
+    /// for the wet cells of this substep's active columns.
     head: Vec<f64>,
     /// Dense fallback only (worlds taller than [`MASK_ROWS`]): for every non-solid cell of
     /// an active column, the lowest cell **at or above** it, inside its own void run, that
@@ -941,6 +990,15 @@ struct Scratch {
     /// One cell's offers this pass, `(destination, volume)`, before the giver's own stock
     /// scales them.
     offers: Vec<(usize, f64)>,
+    /// Package P: every giver's offers this substep, `(destination, volume, face)` with
+    /// face 0-3 horizontal and 4 down, kept until its stack's totals are known; and the
+    /// givers themselves, in the active set's order.
+    offer_list: Vec<(u32, f64, u8)>,
+    givers: Vec<Giver>,
+    /// Package P: each wet cell's stack this substep (an index into `stacks`), and each
+    /// stack's per-face totals.
+    stack_of: Vec<u32>,
+    stacks: Vec<StackFaces>,
     /// The **driving** head: a cell's own surface head, raised to the highest head that
     /// reaches it through submerged water. A giver pushes with its `drive`; a receiver
     /// resists with its own `head`, because what a neighbour presents to the water arriving
@@ -997,6 +1055,7 @@ impl Scratch {
             self.drive_next = vec![0.0; n];
             self.room_target = vec![u32::MAX; n];
             self.run_top = vec![u32::MAX; n];
+            self.stack_of = vec![0; n];
             self.touch_stamp = vec![0; n];
             self.proposed_in = vec![0.0; n];
             self.accept = vec![0.0; n];
@@ -1030,6 +1089,29 @@ impl Scratch {
             self.stamp = 1;
         }
     }
+}
+
+/// One giver's offers in [`Scratch::offer_list`] (`start..end`), and what it placed across
+/// each horizontal face and down, before its stack's cap and the Jacobi division.
+struct Giver {
+    i: u32,
+    #[cfg(feature = "profile")]
+    y: u32,
+    stack: u32,
+    start: u32,
+    end: u32,
+    have: f64,
+    placed: [f64; 4],
+    down: f64,
+}
+
+/// A **stack**'s offers across each horizontal face (package P): the sum over its rows and
+/// the most any single row placed, and whether its bottom cell offers down out of it.
+#[derive(Default)]
+struct StackFaces {
+    placed: [f64; 4],
+    best: [f64; 4],
+    down: bool,
 }
 
 thread_local! {
@@ -1080,7 +1162,8 @@ fn rows_of(cells: &[usize], plane: usize, rows: &mut Vec<u32>) {
 ///
 /// Each substep every wet cell offers water to its four horizontal neighbours and to the
 /// cell below, driven by the difference in **column head** — the surface level of the
-/// contiguous water column the cell belongs to, `y + free` at the run's top. That one
+/// packed full stack the cell sits at the foot of ([`scan_column_mask`]): its own
+/// `y + free` if it is not full. That one
 /// definition is what carries pressure without any connectivity search: the bottom cell of
 /// a deep column has its whole column's head, so it pushes hard sideways; a full cell in a
 /// submerged gap has the head of the body it is part of and passes the push along; and a
@@ -1130,6 +1213,8 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
     let plane = width * depth;
     let n = plane * height;
     let transfer_cap = w.config.free_transfer_cap;
+    // The spreading depth in this world's cell units (package C).
+    let min_spread = MIN_SPREAD_DEPTH_M / w.config.voxel_m;
     // The void-run geometry the scan needs is terrain-only, so it is built once per
     // terrain version and not per substep.
     w.ensure_void_runs();
@@ -1268,6 +1353,9 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
         );
         sc.edges.clear();
         sc.touched.clear();
+        sc.offer_list.clear();
+        sc.givers.clear();
+        sc.stacks.clear();
         for k in 0..sc.active.len() {
             let i = sc.active[k];
             let have = w.free[i];
@@ -1278,22 +1366,35 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
             let base = y * plane;
             let col = i - base;
             let here = sc.drive[i];
+            // **The stack** (package P): a wet cell continues the stack of the wet cell under
+            // it when the two carry the same head — the full cells under a partial top share
+            // that top's surface (package H) — and starts a stack of its own otherwise. The
+            // set is walked ascending, so the cell below has its stack already.
+            let continues = y > 0 && {
+                let below = i - plane;
+                w.free[below] > 0.0 && sc.head[below] == sc.head[i]
+            };
+            let stack = if continues {
+                sc.stack_of[i - plane] as usize
+            } else {
+                sc.stacks.push(StackFaces::default());
+                sc.stacks.len() - 1
+            };
+            sc.stack_of[i] = stack as u32;
             sc.offers.clear();
-            let mut total = 0.0;
-            // How many faces this cell is offering across. Its offers are divided by that
-            // count below: `FLOW_PER_SUBSTEP` is safe for **one** pair — half a difference
-            // levels a pair exactly — and a cell with two low neighbours would otherwise
-            // hand each of them half its head and empty itself, which flip-flops instead
-            // of relaxing. This is the ordinary Jacobi damping and it is what makes the
-            // exchange settle rather than ring.
-            let mut faces = 0usize;
+            let start = sc.offer_list.len() as u32;
+            let mut placed_by_face = [0.0f64; 4];
 
             // The four horizontal faces. A push against a **full** neighbour is not
             // refused, it is displaced: the water goes into the lowest cells with room at
             // or above that neighbour, inside the neighbour's own void run, bottom first.
             // That is what lifts a submerged column's surface instead of throttling the
             // flow to the hair of room its floor cell has left.
-            for face in 0..4 {
+            //
+            // A giver shallower than the spreading depth offers across none of them
+            // (package C): it keeps its water, and still offers downward below.
+            let horizontal = if have < min_spread { 0 } else { 4 };
+            for face in 0..horizontal {
                 let nb = sc.nbr[col][face];
                 if nb == u32::MAX {
                     continue;
@@ -1312,19 +1413,28 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
                     continue;
                 }
                 let q = cap_flux(transfer_cap, FLOW_PER_SUBSTEP * drop);
+                let before = sc.offers.len();
                 let placed = if use_masks {
                     offer_up_the_run_mask(w, plane, nb as usize, y, q, sc)
                 } else {
                     offer_up_the_run(w, plane, j, q, sc)
                 };
+                for &(target, q) in &sc.offers[before..] {
+                    sc.offer_list.push((target as u32, q, face as u8));
+                }
                 if placed > 0.0 {
-                    faces += 1;
-                    total += placed;
+                    placed_by_face[face] = placed;
+                    let st = &mut sc.stacks[stack];
+                    st.placed[face] += placed;
+                    if placed > st.best[face] {
+                        st.best[face] = placed;
+                    }
                 }
             }
 
             // And straight down, into the cell's own room below: the same rule, and the
             // reason a film keeps moving when `fall` has already taken what it can.
+            let mut down = 0.0;
             if y > 0 {
                 let below = i - plane;
                 if !w.material[below].is_solid() {
@@ -1338,9 +1448,13 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
                     if drop > 0.0 && room > 0.0 {
                         let q = cap_flux(transfer_cap, FLOW_PER_SUBSTEP * drop).min(room);
                         if q > 0.0 {
-                            sc.offers.push((below, q));
-                            faces += 1;
-                            total += q;
+                            sc.offer_list.push((below as u32, q, 4));
+                            down = q;
+                            // Only a stack's bottom cell offers *out* of it downward; a
+                            // sliver into the stack's own cell below is inside it.
+                            if !continues {
+                                sc.stacks[stack].down = true;
+                            }
                         }
                     }
                 }
@@ -1352,20 +1466,76 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
             // Lifting a cell's own water into the cell above it instead only shuffles a
             // column against `fall` — the two fight, and a roofed passage never fills.
 
-            if sc.offers.is_empty() || total <= 0.0 {
+            let end = sc.offer_list.len() as u32;
+            if end > start {
+                sc.givers.push(Giver {
+                    i: i as u32,
+                    #[cfg(feature = "profile")]
+                    y: y as u32,
+                    stack: stack as u32,
+                    start,
+                    end,
+                    have,
+                    placed: placed_by_face,
+                    down,
+                });
+            }
+        }
+
+        // ---- the stack's caps and the Jacobi division, then the edges.
+        //
+        // **One face, one row's worth** (package P, 2026-09-22). What a stack sends across
+        // one horizontal face into one neighbouring column is capped at what the best single
+        // row of it would send: its rows share that amount in proportion to their offers.
+        // `FLOW_PER_SUBSTEP` is safe for one pair of cells — half a difference levels them
+        // exactly — but a stack facing its neighbour over `k` rows used to send `k` halves,
+        // so two columns side by side over two full rows swapped levels every substep and
+        // never settled (the shimmer on still water). A one-row interface, a film and a
+        // lone cell are unchanged.
+        //
+        // Then the ordinary Jacobi damping, **counted per stack**: every offer is divided by
+        // the number of faces the stack offers across — its horizontal faces and, if its
+        // bottom cell offers down out of it, that one — so a stack with two low neighbours
+        // hands each half of what one would get, and relaxes instead of ringing. Finally a
+        // cell cannot give more than it holds: its offers are scaled together if they still
+        // ask for more, so no face is ever preferred.
+        for gi in 0..sc.givers.len() {
+            let g = &sc.givers[gi];
+            let (i, have) = (g.i as usize, g.have);
+            let st = &sc.stacks[g.stack as usize];
+            let mut cap = [1.0f64; 4];
+            let mut faces = usize::from(st.down);
+            for face in 0..4 {
+                if st.placed[face] > 0.0 {
+                    faces += 1;
+                    if st.placed[face] > st.best[face] {
+                        cap[face] = st.best[face] / st.placed[face];
+                    }
+                }
+            }
+            let mut total = 0.0;
+            for face in 0..4 {
+                if g.placed[face] > 0.0 {
+                    total += g.placed[face] * cap[face];
+                }
+            }
+            total += g.down;
+            if total <= 0.0 {
                 continue;
             }
-            // A cell cannot give more than it holds, and no one face may drain it: its
-            // offers are divided by the faces it offers across and then scaled together if
-            // they still ask for more than it has, so no face is ever preferred.
             let share = 1.0 / faces.max(1) as f64;
             let total = total * share;
             let scale = share * if total > have { have / total } else { 1.0 };
             #[cfg(feature = "profile")]
-            let edges_before = sc.edges.len();
-            for oi in 0..sc.offers.len() {
-                let (target, q) = sc.offers[oi];
-                let q = q * scale;
+            let (y, base, edges_before) = (g.y as usize, g.y as usize * plane, sc.edges.len());
+            for oi in g.start as usize..g.end as usize {
+                let (target, q, face) = sc.offer_list[oi];
+                let target = target as usize;
+                let q = q * if face < 4 {
+                    scale * cap[face as usize]
+                } else {
+                    scale
+                };
                 if q <= 0.0 {
                     continue;
                 }
@@ -1384,6 +1554,7 @@ fn exchange_inner_with_masks(w: &mut World, _threads: usize, use_masks: bool) {
             }
             #[cfg(feature = "profile")]
             if census {
+                let col = i - base;
                 let b = crate::profile::census::bin(have);
                 let made = (sc.edges.len() - edges_before) as u64;
                 edge_depth[b] += made;
@@ -1580,7 +1751,14 @@ fn scan_columns(w: &World, plane: usize, use_masks: bool, sc: &mut Scratch) {
     let free = &w.free[..];
     if use_masks {
         for &col in &sc.columns {
-            scan_column_mask(free, plane, col, sc.wet_mask[col], &mut sc.head);
+            scan_column_mask(
+                free,
+                plane,
+                col,
+                sc.wet_mask[col],
+                sc.full_mask[col],
+                &mut sc.head,
+            );
         }
         return;
     }
@@ -1599,19 +1777,47 @@ fn scan_columns(w: &World, plane: usize, use_masks: bool, sc: &mut Scratch) {
     }
 }
 
-/// Every wet run of one column carries its top cell's surface, `top + free[top]`. Writes
-/// `head` at the column's own world indices.
+/// **Head from the packed full stack** (package H, 2026-09-22). A wet cell at row `y`
+/// takes the surface of the full stack it sits at the foot of: with `s` the first row at
+/// or above `y` that is not full, the head is `s + free[s]` when row `s` is wet — the
+/// partial cell capping the stack — so a partial cell is its own `s` and its head is its
+/// own level. A full stack capped by a dry cell, a roof or the world top keeps its top
+/// cell's own surface, `top + free[top]`: the old run-top answer, which is `s` to within
+/// `ROOM_EPS`. A packed run (full cells under one partial top) therefore has exactly the
+/// head it always had, and a lake, a U-tube and a full-to-the-roof passage are unchanged.
+///
+/// What changed is a **hollow** run, wet cells that are not full stacked on each other:
+/// until H every cell of it carried the run top's surface, so the bottom film of a falling
+/// stack pushed at a dry neighbour with a drop the height of the stack and displaced
+/// slivers up the neighbour's column (the census at 382ef3a: 78 % of a shower's active
+/// wet cells, 96 % of its proposals).
+///
+/// Per wet run, from the top down: the top cell carries its own surface, and each cell
+/// below carries the head of the cell above it if it is full, or its own level if it is
+/// not. `full` is the exchange's own full mask (`free >= 1 - ROOM_EPS`). Writes `head` at
+/// the column's own world indices.
 #[inline]
-fn scan_column_mask(free: &[f64], plane: usize, col: usize, mut wet: u128, head: &mut [f64]) {
+fn scan_column_mask(
+    free: &[f64],
+    plane: usize,
+    col: usize,
+    mut wet: u128,
+    full: u128,
+    head: &mut [f64],
+) {
     while wet != 0 {
         let y = wet.trailing_zeros() as usize;
         let run = (wet >> y).trailing_ones() as usize;
         let top = y + run - 1;
-        let surface = top as f64 + free[top * plane + col];
-        let mut at = y * plane + col;
-        for _ in 0..run {
+        let mut at = top * plane + col;
+        let mut surface = top as f64 + free[at];
+        head[at] = surface;
+        for r in (y..top).rev() {
+            at -= plane;
+            if (full >> r) & 1 == 0 {
+                surface = r as f64 + free[at];
+            }
             head[at] = surface;
-            at += plane;
         }
         wet &= !run_bits(y, run);
     }
@@ -1623,7 +1829,8 @@ fn scan_column_mask(free: &[f64], plane: usize, col: usize, mut wet: u128, head:
 /// A **void run** is a maximal stack of non-solid cells; the displacement target of a cell
 /// is the lowest cell with room at or above it *within its own run*, because a solid
 /// ceiling is where a push stops. A **water run** is a maximal stack of wet cells inside a
-/// void run, and every cell of it carries the run's own surface level.
+/// void run; its heads follow [`scan_column_mask`]'s rule, from the packed full stack,
+/// with the same operations in the same order so the two paths stay bit-identical.
 ///
 /// The runs themselves are **static geometry**, handed in from [`World::void_runs`], so
 /// this pass never rediscovers them from `material`; only the water-dependent values —
@@ -1662,9 +1869,17 @@ fn scan_column(
                 while t + 1 <= top && free[(t + 1) * plane + col] > 0.0 {
                     t += 1;
                 }
-                let surface = t as f64 + free[t * plane + col];
-                for m in k..=t {
-                    head[m * plane + col] = surface;
+                // From the top down: a full cell carries the head above it, a partial
+                // cell its own level (package H).
+                let mut at = t * plane + col;
+                let mut surface = t as f64 + free[at];
+                head[at] = surface;
+                for m in (k..t).rev() {
+                    at -= plane;
+                    if free[at] < 1.0 - ROOM_EPS {
+                        surface = m as f64 + free[at];
+                    }
+                    head[at] = surface;
                 }
                 k = t + 1;
             } else {
@@ -1720,18 +1935,23 @@ pub fn drain(w: &mut World) {
         // The table as it stands at the start of the step: a voxel inside the saturated
         // zone has nowhere lower to drain to, because the aquifer is what is holding it up.
         let table = c.aquifer_head_m(w.aquifer_m3);
-        // Over the damp set — the cells that hold any pore water — instead of the grid
-        // (`design/7_Research/voxel-tick-profile-2026-09-18.md`): a cell with no pore water
-        // can never drain, so nothing is lost. The set is read back **ascending**, which is
-        // bottom-up, so a stack of wet soil passes water down one cell a tick exactly as
-        // the grid walk did (until package PA the walk was in swap-removal order and could
-        // pass it several).
+        // Over the **drainable** set — the porous cells over their field capacity
+        // (package D) — rather than every damp cell, and before that the grid
+        // (`design/7_Research/voxel-tick-profile-2026-09-18.md`): a cell at or under field
+        // capacity never drains, so nothing is lost. The set is read back **ascending**,
+        // which is bottom-up, so a stack of wet soil passes water down one cell a tick as
+        // the grid walk did. The snapshot visits the cells the damp scan drained, and in
+        // the same order: a cell only gains pore water from the cell above it, which the
+        // ascending walk reaches later, so none is over capacity when visited that was not
+        // over it at the start.
         SCRATCH.with(|slot| {
             let sc = &mut *slot.borrow_mut();
-            w.damp.sorted_into(&mut sc.bits, &mut sc.fall);
+            w.drainable.sorted_into(&mut sc.bits, &mut sc.fall);
             rows_of(&sc.fall, plane, &mut sc.rows);
             #[cfg(feature = "profile")]
             crate::profile::add(crate::profile::Count::DrainCells, sc.fall.len() as u64);
+            #[cfg(feature = "profile")]
+            let (mut over, mut moved) = (0u64, 0u64);
             for k in 0..sc.fall.len() {
                 let (i, y) = (sc.fall[k], sc.rows[k]);
                 if submerged(&c, y, table) {
@@ -1748,25 +1968,42 @@ pub fn drain(w: &mut World) {
                     continue;
                 }
                 let want = excess.min(pore_flux_m3(m, &c, DT));
-                if y == 0 {
+                let _drained = if y == 0 {
                     // Sitting on the foundation: what drains joins the aquifer.
                     let lost = take_pore(w, i, want);
                     w.aquifer_m3 += lost;
-                    continue;
+                    lost
+                } else if submerged(&c, y - 1, table) && w.material[i - plane].pore_capacity() > 0.0 {
+                    // Reaching the water table: what drains **recharges** the aquifer. The
+                    // saturated cell below has no room, and without this the water above
+                    // a table raised near the surface perched there for good.
+                    let lost = take_pore(w, i, want);
+                    w.aquifer_m3 += lost;
+                    lost
+                } else {
+                    let below = i - plane;
+                    match w.material[below] {
+                        Material::Bedrock => {
+                            let lost = take_pore(w, i, want);
+                            w.aquifer_m3 += lost;
+                            lost
+                        }
+                        Material::Air => transfer(w, (i, Store::Pore), (below, Store::Free), want),
+                        _ => transfer(w, (i, Store::Pore), (below, Store::Pore), want),
+                    }
+                };
+                #[cfg(feature = "profile")]
+                {
+                    over += 1;
+                    if _drained > 0.0 {
+                        moved += 1;
+                    }
                 }
-                let below = i - plane;
-                match w.material[below] {
-                    Material::Bedrock => {
-                        let lost = take_pore(w, i, want);
-                        w.aquifer_m3 += lost;
-                    }
-                    Material::Air => {
-                        transfer(w, (i, Store::Pore), (below, Store::Free), want);
-                    }
-                    _ => {
-                        transfer(w, (i, Store::Pore), (below, Store::Pore), want);
-                    }
-                }
+            }
+            #[cfg(feature = "profile")]
+            {
+                crate::profile::add(crate::profile::Count::DrainOver, over);
+                crate::profile::add(crate::profile::Count::DrainMoved, moved);
             }
         });
     });
@@ -1852,13 +2089,31 @@ fn emerge(w: &mut World, (x, y, z): (u32, u32, u32), want: f64) -> f64 {
 /// is rain, so `is_raining` does not see it. The open budget has no store and is ignored.
 pub fn reentry(w: &mut World) {
     {
-        if !w.config.closed_water_budget || w.config.reentry_m3_per_s <= 0.0 {
+        if w.config.reentry_m3_per_s <= 0.0 {
             return;
         }
         let Some((x, y, z)) = w.spring_cell else {
             return;
         };
         if y >= w.config.height || z >= w.config.depth {
+            return;
+        }
+        // **Groundwater**, when the world asks for it: the stream is the aquifer emerging,
+        // an internal transfer the ledger has nothing to say about, and the weather keeps
+        // every drop of its own store. It stops at the floor the world set, so it cannot
+        // pump the water table out from under the lake.
+        if w.config.reentry_from_aquifer {
+            let floor = w.config.aquifer_volume_for_head(w.config.reentry_floor_head_m);
+            let spare = w.aquifer_m3 - floor;
+            if spare <= 0.0 {
+                return;
+            }
+            let want = (w.config.reentry_m3_per_s * DT).min(spare);
+            let got = emerge(w, (x, y, z), want);
+            w.aquifer_m3 -= got;
+            return;
+        }
+        if !w.config.closed_water_budget {
             return;
         }
         let floor = w.config.shower_trigger_fraction * w.ledger.expected_total();
@@ -1884,6 +2139,59 @@ pub fn reentry(w: &mut World) {
 /// of the cell, so it means the same on a 0.125 m ring and a 0.25 m one.
 const OUTLET_WEIR: f64 = 0.05;
 
+/// **The lake's floor drain**: a lake joined to the aquifer through its bed, at every
+/// cell of [`World::lake_drain`]. Water passes whichever way the heads say — down into the
+/// aquifer while the lake stands above the water table, up into it while the table stands
+/// above the lake — at [`crate::Config::lake_drain_m2_per_s`] per metre of difference,
+/// shared across the floor so no one column has to carry it. So the lake is the water
+/// table showing, and it rises and falls with it rather than standing at a sill. With the
+/// aquifer-fed stream ([`reentry`]) it closes the river's loop underground: out through
+/// the lake floor, up at the spring.
+///
+/// Run inside the outlet phase, so `cubarium-voxel-sim`'s schedule keeps its chain of
+/// public phases. Internal both ways, so the ledger has nothing to book.
+fn lake_drain(w: &mut World) {
+    let n = w.lake_drain.len();
+    let k = w.config.lake_drain_m2_per_s;
+    if n == 0 || k <= 0.0 {
+        return;
+    }
+    let (h, d, vm) = (w.config.height, w.config.depth, w.config.voxel_m);
+    let share = k / n as f64;
+    let table_m = w.config.aquifer_head_m(w.aquifer_m3);
+    for c in 0..n {
+        let (x, y, z) = w.lake_drain[c];
+        if y >= h || z >= d {
+            continue;
+        }
+        let at = |w: &World, yy: u32| w.config.index(x as i64, yy, z);
+        // The surface over this cell: the top of the water standing in its column.
+        let mut top = y;
+        while top + 1 < h && w.free[at(w, top)] >= 0.99 && !w.material[at(w, top + 1)].is_solid() {
+            top += 1;
+        }
+        let surface_m = (top as f64 + w.free[at(w, top)].clamp(0.0, 1.0)) * vm;
+        let flow = share * (surface_m - table_m) * DT;
+        if flow > 0.0 {
+            // Down: taken off the top of the column.
+            let mut left = flow;
+            for yy in (y..=top).rev() {
+                let i = at(w, yy);
+                left -= take_free(w, i, left);
+                if left <= 1e-15 {
+                    break;
+                }
+            }
+            w.aquifer_m3 += flow - left.max(0.0);
+        } else if flow < 0.0 {
+            // Up: the aquifer pushes into the lake through its floor.
+            let want = (-flow).min(w.aquifer_m3);
+            let got = emerge(w, (x, y, z), want);
+            w.aquifer_m3 -= got;
+        }
+    }
+}
+
 /// Whether `CUBARIUM_OUTLET_TRACE` asked the outlet to say what it takes and what stands
 /// around it. Read once: this sits in the tick.
 ///
@@ -1901,6 +2209,7 @@ pub fn outlet(w: &mut World) {
     #[cfg(feature = "profile")]
     let census = crate::profile::census::before(w, crate::profile::census::Tag::Outlet);
     crate::voxel_phase!(Outlet, {
+        lake_drain(w);
         if !w.outlet_open {
             return;
         }
@@ -2099,6 +2408,7 @@ fn set_material(w: &mut World, i: usize, material: Material) -> f64 {
     // the material below decides what it can keep.
     w.wet.remove(i);
     w.damp.remove(i);
+    w.drainable.remove(i);
     if water <= 0.0 {
         return 0.0;
     }
@@ -2357,8 +2667,8 @@ mod fall_tests {
 #[cfg(test)]
 mod exchange_geometry_tests {
     use super::{
-        MASK_ROWS, ROOM_EPS, Scratch, exchange, exchange_inner_with_masks, offer_up_the_run,
-        offer_up_the_run_mask, scan_column, scan_column_mask,
+        MASK_ROWS, ROOM_EPS, SCRATCH, Scratch, exchange, exchange_inner_with_masks,
+        offer_up_the_run, offer_up_the_run_mask, scan_column, scan_column_mask,
     };
     use crate::{Command, Config, Material, World};
 
@@ -2455,8 +2765,15 @@ mod exchange_geometry_tests {
                     while t + 1 <= top && free[(t + 1) * plane + col] > 0.0 {
                         t += 1;
                     }
-                    let surface = t as f64 + free[t * plane + col];
-                    for m in k..=t {
+                    // Package H: from the top down, a full cell carries the head above
+                    // it and a partial cell its own level.
+                    let mut surface = t as f64 + free[t * plane + col];
+                    head[t] = surface;
+                    for m in (k..t).rev() {
+                        let f = free[m * plane + col];
+                        if f < 1.0 - ROOM_EPS {
+                            surface = m as f64 + f;
+                        }
                         head[m] = surface;
                     }
                     k = t + 1;
@@ -2890,7 +3207,9 @@ mod exchange_geometry_tests {
             };
             assert_eq!(w.void_runs.mask, [expected_mask]);
             let mut head = vec![0.0; height as usize];
-            scan_column_mask(&w.free, 1, 0, expected_mask, &mut head);
+            // Every row full but the top one.
+            let full = expected_mask & !(1u128 << (height - 1));
+            scan_column_mask(&w.free, 1, 0, expected_mask, full, &mut head);
             assert!(
                 head.iter().all(|&h| h == f64::from(height - 1) + 0.25),
                 "wrong head at height {height}: {head:?}"
@@ -2910,6 +3229,126 @@ mod exchange_geometry_tests {
                 assert_offer_paths_match(&w, last, 0.75);
             }
         }
+    }
+
+    /// One column, `cfg(1, 8)`, with `fills` poured from row 1 up and rock at `roof`:
+    /// its heads by the mask scan and by the dense walk, for the wet rows only.
+    fn heads_both_ways(fills: &[f64], roof: Option<u32>) -> (Vec<f64>, Vec<f64>) {
+        let mut w = World::empty(cfg(1, 8));
+        if let Some(y) = roof {
+            w.apply(Command::SetMaterial {
+                x: 0,
+                y,
+                z: 0,
+                material: Material::Rock,
+            });
+        }
+        for (k, &volume_m3) in fills.iter().enumerate() {
+            w.apply(Command::AddWater {
+                x: 0,
+                y: 1 + k as u32,
+                z: 0,
+                volume_m3,
+            });
+        }
+        w.ensure_void_runs();
+        // One column, so a world index is a row. The masks as the exchange builds them.
+        let (mut wet, mut full) = (0u128, 0u128);
+        for (y, &f) in w.free.iter().enumerate() {
+            if f > 0.0 {
+                wet |= 1 << y;
+                if f >= 1.0 - ROOM_EPS {
+                    full |= 1 << y;
+                }
+            }
+        }
+        let mut masked = vec![0.0; w.free.len()];
+        scan_column_mask(&w.free, 1, 0, wet, full, &mut masked);
+        let dense = cached_scan(&w, 0).0;
+        let rows = 1..=fills.len();
+        (masked[rows.clone()].to_vec(), dense[rows].to_vec())
+    }
+
+    /// **Head from the packed full stack** (package H). A wet cell's head is the surface
+    /// of the full stack it sits at the foot of — `s + free[s]` for the first row `s` at
+    /// or above it that is not full — so a partial cell is its own level and a full
+    /// stack takes the partial cell capping it. A stack capped by a roof (or a dry cell,
+    /// or the world top) keeps its top cell's own surface, the old answer. Masks and the
+    /// dense walk agree on every column.
+    #[test]
+    fn a_wet_cell_takes_the_head_of_the_full_stack_it_is_under() {
+        for (fills, roof, expected) in [
+            // Hollow: films under a half cell. Each is its own level.
+            (
+                vec![1e-10, 1e-10, 0.5],
+                None,
+                vec![1.0 + 1e-10, 2.0 + 1e-10, 3.5],
+            ),
+            // Packed: the old run-top answer, unchanged.
+            (vec![1.0, 1.0, 0.5], None, vec![3.5, 3.5, 3.5]),
+            // Full to a roof at row 4: the roof row.
+            (vec![1.0, 1.0, 1.0], Some(4), vec![4.0, 4.0, 4.0]),
+            // Unpacked: a partial cell under a full stack capped by a partial one.
+            (vec![0.3, 1.0, 1.0, 0.2], None, vec![1.3, 4.2, 4.2, 4.2]),
+        ] {
+            let (masked, dense) = heads_both_ways(&fills, roof);
+            assert_eq!(masked, expected, "mask scan of {fills:?}");
+            assert_eq!(dense, expected, "dense walk of {fills:?}");
+        }
+    }
+
+    /// The defect the census found (382ef3a): the bottom film of a hollow stack used to
+    /// push with the stack top's head and displace slivers up a dry neighbour's column.
+    /// Now it offers only across its own row. Read off the proposals the exchange made.
+    #[test]
+    fn a_hollow_stack_does_not_push_its_bottom_film_up_a_dry_neighbour() {
+        // Column 0 holds the stack, column 1 is dry, column 2 is rock to the top so the
+        // stack has exactly one horizontal neighbour.
+        let mut w = World::empty(cfg(3, 8));
+        for y in 1..8 {
+            w.apply(Command::SetMaterial {
+                x: 2,
+                y,
+                z: 0,
+                material: Material::Rock,
+            });
+        }
+        // Films deeper than the spreading depth (package C), so the bottom one still
+        // offers sideways and the test is about its head.
+        for (y, volume_m3) in [(1, 1e-3), (2, 1e-3), (3, 0.5)] {
+            w.apply(Command::AddWater {
+                x: 0,
+                y,
+                z: 0,
+                volume_m3,
+            });
+        }
+        let plane = 3;
+        let bottom = plane; // (0, 1)
+        exchange(&mut w, 1);
+        let from_bottom: Vec<(u32, u32, f64)> = SCRATCH.with(|s| {
+            s.borrow()
+                .edges
+                .iter()
+                .copied()
+                .filter(|&(from, _, _)| from as usize == bottom)
+                .collect()
+        });
+        assert!(
+            from_bottom
+                .iter()
+                .any(|&(_, to, _)| to as usize == bottom + 1),
+            "the bottom film offered nothing across its own row: {from_bottom:?}"
+        );
+        let raised: Vec<_> = from_bottom
+            .iter()
+            .filter(|&&(_, to, _)| to as usize >= 2 * plane)
+            .collect();
+        assert!(
+            raised.is_empty(),
+            "the bottom film pushed up the neighbour's column: {raised:?}"
+        );
+        assert!(residual(&w).abs() < 1e-12);
     }
 
     fn assert_offer_paths_match(w: &World, y: usize, q: f64) {
@@ -2940,6 +3379,529 @@ mod exchange_geometry_tests {
         assert_eq!(masked.offers, reference.offers, "offers from y={y}");
     }
 }
+/// **The drainable set** (package D): `drain` walks the porous cells over their field
+/// capacity instead of every damp cell. A pure optimisation, so the oracle is the drain it
+/// replaced, kept here verbatim over the damp set.
+#[cfg(test)]
+mod drain_set_tests {
+    use super::{
+        DT, SCRATCH, Store, begin, drains, evaporate, exchange, fall, infiltrate, outlet, pore_m3,
+        rain, rows_of, spring, submerged, take_pore, transfer, water_table,
+    };
+    use crate::{Command, Config, Material, World};
+
+    /// The drain before package D: every damp cell, ascending.
+    fn drain_by_damp_scan(w: &mut World) {
+        let c = w.config.clone();
+        let plane = c.width as usize * c.depth as usize;
+        let table = c.aquifer_head_m(w.aquifer_m3);
+        SCRATCH.with(|slot| {
+            let sc = &mut *slot.borrow_mut();
+            w.damp.sorted_into(&mut sc.bits, &mut sc.fall);
+            rows_of(&sc.fall, plane, &mut sc.rows);
+            for k in 0..sc.fall.len() {
+                let (i, y) = (sc.fall[k], sc.rows[k]);
+                if submerged(&c, y, table) {
+                    continue;
+                }
+                let m = w.material[i];
+                let cap = m.pore_capacity();
+                if cap <= 0.0 || w.pore[i] <= 0.0 || m.permeability_per_s() <= 0.0 {
+                    continue;
+                }
+                let unit = cap * c.voxel_volume();
+                let excess = pore_m3(w, i) - m.field_capacity() * unit;
+                if excess <= 0.0 {
+                    continue;
+                }
+                let want = excess.min(super::pore_flux_m3(m, &c, DT));
+                if y == 0 {
+                    let lost = take_pore(w, i, want);
+                    w.aquifer_m3 += lost;
+                    continue;
+                }
+                let below = i - plane;
+                match w.material[below] {
+                    Material::Bedrock => {
+                        let lost = take_pore(w, i, want);
+                        w.aquifer_m3 += lost;
+                    }
+                    Material::Air => {
+                        transfer(w, (i, Store::Pore), (below, Store::Free), want);
+                    }
+                    _ => {
+                        transfer(w, (i, Store::Pore), (below, Store::Pore), want);
+                    }
+                }
+            }
+        });
+    }
+
+    /// `water::step`, with the oracle's drain in it.
+    fn step_by_damp_scan(w: &mut World) {
+        begin(w);
+        rain(w);
+        evaporate(w);
+        let substeps = w.config.water_substeps.max(1);
+        for _ in 0..substeps {
+            infiltrate(w, DT / substeps as f64);
+            fall(w);
+            exchange(w, 1);
+        }
+        drain_by_damp_scan(w);
+        water_table(w);
+        spring(w);
+        outlet(w);
+        w.advance_tick();
+    }
+
+    fn set(w: &mut World, x: i64, y: u32, z: u32, material: Material) {
+        w.apply(Command::SetMaterial { x, y, z, material });
+    }
+
+    /// Soil and rock side by side over bedrock, a soil roof over an air pocket (a drip),
+    /// a water table half a metre up (the band the drain skips), rain on it all and a
+    /// pond poured on the soil.
+    fn fixture() -> World {
+        let mut w = World::empty(Config {
+            width: 6,
+            height: 8,
+            depth: 2,
+            voxel_m: 0.25,
+            seed: 7,
+            rain_m_per_s: 2e-4,
+            initial_aquifer_head_m: 0.5,
+            ..Config::default()
+        });
+        for z in 0..2 {
+            for x in 0..6i64 {
+                for y in 1..=4 {
+                    let m = if x >= 4 && y <= 3 {
+                        Material::Rock
+                    } else {
+                        Material::Soil
+                    };
+                    set(&mut w, x, y, z, m);
+                }
+            }
+            // The drip: an air pocket under the soil.
+            set(&mut w, 2, 2, z, Material::Air);
+        }
+        for x in 0..3 {
+            w.apply(Command::AddWater {
+                x,
+                y: 5,
+                z: 0,
+                volume_m3: 0.01,
+            });
+        }
+        w
+    }
+
+    /// The set is exactly the porous cells over their field capacity.
+    fn assert_drainable_is_true(w: &World, when: &str) {
+        let mut got = w.drainable.cells().to_vec();
+        got.sort_unstable();
+        let want: Vec<usize> = (0..w.config.cells()).filter(|&i| drains(w, i)).collect();
+        assert_eq!(got, want, "drainable set wrong {when}");
+    }
+
+    #[test]
+    fn the_drainable_set_drains_exactly_as_the_damp_scan_did() {
+        let mut fast = fixture();
+        let mut reference = fast.clone();
+        let mut drained_ticks = 0;
+        for tick in 0..300 {
+            if tick == 100 {
+                // Mid-run material edits: wet soil to rock, rock to soil, soil to air.
+                for w in [&mut fast, &mut reference] {
+                    set(w, 1, 3, 0, Material::Rock);
+                    set(w, 4, 2, 1, Material::Soil);
+                    set(w, 3, 4, 1, Material::Air);
+                }
+            }
+            if !fast.drainable.cells().is_empty() {
+                drained_ticks += 1;
+            }
+            fast.step();
+            step_by_damp_scan(&mut reference);
+            assert_drainable_is_true(&fast, &format!("after tick {tick}"));
+            let worst = |a: &[f64], b: &[f64]| {
+                a.iter()
+                    .zip(b)
+                    .map(|(x, y)| (x - y).abs())
+                    .fold(0.0, f64::max)
+            };
+            assert!(
+                worst(&fast.pore, &reference.pore) <= 1e-15,
+                "pore diverged at tick {tick}"
+            );
+            assert!(
+                worst(&fast.free, &reference.free) <= 1e-15,
+                "free diverged at tick {tick}"
+            );
+            assert!((fast.aquifer_m3 - reference.aquifer_m3).abs() <= 1e-15);
+        }
+        // Fresh soil has to be rained up to its field capacity (0.65 of its pores) before
+        // it drains at all, so the first few dozen ticks are idle.
+        assert!(drained_ticks > 200, "the drain was idle: {drained_ticks}");
+        for w in [&fast, &reference] {
+            let r = w.view().stored_m3() - w.view().ledger.expected_stored();
+            assert!(r.abs() < 1e-12, "residual {r}");
+        }
+    }
+}
+
+/// **Still water settles** (package P): what one column's stack sends across one face into
+/// one neighbouring column is capped at what that face would send from a single row, so a
+/// deep interface levels instead of swapping the two columns' levels every substep.
+#[cfg(test)]
+mod settle_tests {
+    use super::{SCRATCH, exchange, fall};
+    use crate::{Command, Config, Material, World};
+
+    fn cfg(width: u32, height: u32) -> Config {
+        Config {
+            width,
+            height,
+            depth: 1,
+            voxel_m: 1.0,
+            seed: 7,
+            ..Config::default()
+        }
+    }
+
+    fn rock_column(w: &mut World, x: i64) {
+        for y in 1..w.config.height {
+            w.apply(Command::SetMaterial {
+                x,
+                y,
+                z: 0,
+                material: Material::Rock,
+            });
+        }
+    }
+
+    /// Pour `units` into column `x` from the floor up, as settled water.
+    fn pour(w: &mut World, x: i64, mut units: f64) {
+        for y in 1..w.config.height {
+            if units <= 0.0 {
+                break;
+            }
+            let got = w.apply(Command::AddWater {
+                x,
+                y,
+                z: 0,
+                volume_m3: units.min(1.0),
+            });
+            units -= got;
+        }
+    }
+
+    fn column(w: &World, x: i64) -> f64 {
+        (1..w.config.height)
+            .map(|y| w.view().free_at(x, y, 0))
+            .sum()
+    }
+
+    fn residual(w: &World) -> f64 {
+        w.view().stored_m3() - w.view().ledger.expected_stored()
+    }
+
+    /// Two columns side by side on a bedrock floor, walled on their other sides, with
+    /// `k` full rows each under a partial top: 0.8 on the left, 0.2 on the right. They
+    /// face each other across `k + 1` wet rows. The level is `k + 0.5` above the floor.
+    fn pair(k: u32) -> World {
+        let mut w = World::empty(cfg(4, k + 4));
+        rock_column(&mut w, 2);
+        rock_column(&mut w, 3);
+        pour(&mut w, 0, f64::from(k) + 0.8);
+        pour(&mut w, 1, f64::from(k) + 0.2);
+        w
+    }
+
+    /// The two-column cycle the C tests found: joined over one row or four, the high
+    /// column only ever loses water, the heads never cross, and the pair levels and stops.
+    #[test]
+    fn two_columns_joined_over_several_rows_level_without_swapping() {
+        for k in [1, 2, 4] {
+            let mut w = pair(k);
+            let mut last = column(&w, 0);
+            let mut still = None;
+            for substep in 0..400 {
+                fall(&mut w);
+                exchange(&mut w, 1);
+                let (a, b) = (column(&w, 0), column(&w, 1));
+                assert!(
+                    a - b >= -1e-12,
+                    "k = {k}: the heads crossed at substep {substep}: {a} against {b}"
+                );
+                let change = a - last;
+                assert!(
+                    change <= 1e-15,
+                    "k = {k}: the high column gained {change} at substep {substep}"
+                );
+                if change.abs() < 1e-12 {
+                    still.get_or_insert(substep);
+                } else {
+                    still = None;
+                }
+                last = a;
+            }
+            let (a, b) = (column(&w, 0), column(&w, 1));
+            assert!((a - b).abs() < 1e-9, "k = {k}: not level: {a} against {b}");
+            assert!(
+                (a - (f64::from(k) + 0.5)).abs() < 1e-9,
+                "k = {k}: level {a}, not {}",
+                f64::from(k) + 0.5
+            );
+            let still = still.expect("still moving at the end");
+            assert!(still < 100, "k = {k}: still only from substep {still}");
+            assert!(residual(&w).abs() < 1e-12);
+        }
+    }
+
+    /// A pool six columns wide, two rows deep with a heap in one column, and nothing
+    /// forcing it: it spreads, levels, and then the exchange proposes nothing at all,
+    /// substep after substep. The slowest mode of a six-column pool relaxes by about 6 %
+    /// a substep, so the columns agree to the last bit after roughly 550 substeps (under
+    /// half a minute of world time); before package P two full rows swapped forever.
+    #[test]
+    fn a_pool_at_rest_proposes_nothing() {
+        let mut w = World::empty(cfg(8, 6));
+        rock_column(&mut w, 6);
+        rock_column(&mut w, 7);
+        for x in 0..6 {
+            pour(&mut w, x, if x == 0 { 3.5 } else { 2.0 });
+        }
+        let mut quiet_from = None;
+        for substep in 0..900 {
+            fall(&mut w);
+            exchange(&mut w, 1);
+            let edges = SCRATCH.with(|s| s.borrow().edges.len());
+            if edges == 0 {
+                quiet_from.get_or_insert(substep);
+            } else {
+                assert!(
+                    substep < 700,
+                    "{edges} proposals at substep {substep}, after the pool should be still"
+                );
+                quiet_from = None;
+            }
+        }
+        assert!(
+            quiet_from.is_some_and(|s| s < 700),
+            "never still: {quiet_from:?}"
+        );
+        let level = column(&w, 0);
+        for x in 1..6 {
+            assert!((column(&w, x) - level).abs() < 1e-9, "column {x}");
+        }
+        assert!(residual(&w).abs() < 1e-12);
+    }
+}
+
+/// **Minimum spreading depth** (package C): a giver whose own free water is shallower than
+/// [`MIN_SPREAD_DEPTH_M`] makes no horizontal offer. Everything else it does is unchanged,
+/// and nothing is deleted. The fixtures are 1 m cells, so the threshold in cell units is
+/// the constant itself.
+#[cfg(test)]
+mod spread_tests {
+    use super::{MIN_SPREAD_DEPTH_M, evaporate, exchange, fall, infiltrate};
+    use crate::{Command, Config, DT, Material, World};
+
+    fn cfg(width: u32, height: u32) -> Config {
+        Config {
+            width,
+            height,
+            depth: 1,
+            voxel_m: 1.0,
+            seed: 7,
+            ..Config::default()
+        }
+    }
+
+    /// The threshold in cell units on a 1 m fixture.
+    fn threshold() -> f64 {
+        MIN_SPREAD_DEPTH_M / 1.0
+    }
+
+    fn rock(w: &mut World, x: i64, y: u32, material: Material) {
+        w.apply(Command::SetMaterial {
+            x,
+            y,
+            z: 0,
+            material,
+        });
+    }
+
+    fn add(w: &mut World, x: i64, y: u32, volume_m3: f64) {
+        w.apply(Command::AddWater {
+            x,
+            y,
+            z: 0,
+            volume_m3,
+        });
+    }
+
+    fn free_at(w: &World, x: i64, y: u32) -> f64 {
+        w.view().free_at(x, y, 0)
+    }
+
+    fn residual(w: &World) -> f64 {
+        w.view().stored_m3() - w.view().ledger.expected_stored()
+    }
+
+    /// A film on the bedrock of column 0; column 1 is dry and column 2 is rock, so the
+    /// film has exactly one horizontal neighbour and nothing below it to fall into.
+    fn film_beside_a_dry_cell(film: f64) -> World {
+        let mut w = World::empty(cfg(3, 4));
+        for y in 1..4 {
+            rock(&mut w, 2, y, Material::Rock);
+        }
+        add(&mut w, 0, 1, film);
+        w
+    }
+
+    #[test]
+    fn a_film_below_the_threshold_stays_beside_a_dry_cell() {
+        let film = 0.5 * threshold();
+        let mut w = film_beside_a_dry_cell(film);
+        assert_eq!(free_at(&w, 0, 1), film);
+        exchange(&mut w, 1);
+        assert_eq!(free_at(&w, 0, 1), film, "the film moved");
+        assert_eq!(free_at(&w, 1, 1), 0.0, "the dry neighbour got water");
+    }
+
+    #[test]
+    fn a_film_just_above_the_threshold_spreads_as_before() {
+        let film = 1.01 * threshold();
+        let mut w = film_beside_a_dry_cell(film);
+        exchange(&mut w, 1);
+        assert!(free_at(&w, 1, 1) > 0.0, "the film did not spread");
+        assert!(free_at(&w, 0, 1) < film);
+        assert!(residual(&w).abs() < 1e-15);
+    }
+
+    #[test]
+    fn a_film_below_the_threshold_still_soaks_in_evaporates_and_falls() {
+        let film = 0.5 * threshold();
+
+        // Soaks in: the film on a soil cell.
+        let mut w = World::empty(cfg(1, 4));
+        rock(&mut w, 0, 1, Material::Soil);
+        add(&mut w, 0, 2, film);
+        infiltrate(&mut w, DT / 4.0);
+        assert!(free_at(&w, 0, 2) < film, "the film did not soak in");
+
+        // Evaporates: on the bedrock of an open column.
+        let mut w = World::empty(Config {
+            evaporation_m_per_s: 1e-6,
+            ..cfg(1, 4)
+        });
+        add(&mut w, 0, 1, film);
+        evaporate(&mut w);
+        assert!(free_at(&w, 0, 1) < film, "the film did not evaporate");
+
+        // Falls, and offers downward in the exchange: the film in the air over an empty
+        // cell.
+        let mut w = World::empty(cfg(1, 5));
+        add(&mut w, 0, 3, film);
+        fall(&mut w);
+        assert_eq!(free_at(&w, 0, 2), film, "the film did not fall");
+        exchange(&mut w, 1);
+        assert_eq!(free_at(&w, 0, 1), film, "the exchange did not move it down");
+        assert_eq!(free_at(&w, 0, 2), 0.0);
+    }
+
+    /// The thin top cell of a lake does not hold back the full cells under it: they push by
+    /// their own `free`, and the lake levels against a lower pool.
+    ///
+    /// The lake and the pool are joined by a one-row passage, as the U-tube fixtures are.
+    /// Two columns side by side over two or more full rows would not do: each row pushes
+    /// half of the same head difference, so two rows move the whole of it and the pair
+    /// swaps back and forth every substep — a 2-cycle the exchange has with or without the
+    /// spreading depth, which this test is not about.
+    #[test]
+    fn a_lake_with_a_thin_surface_cell_still_levels_against_a_lower_pool() {
+        // Column 0 is the lake shaft, column 1 a dry passage along row 1, column 2 the
+        // pool's shaft and column 3 rock.
+        let mut w = World::empty(cfg(4, 7));
+        for y in 1..7 {
+            rock(&mut w, 3, y, Material::Rock);
+            if y >= 2 {
+                rock(&mut w, 1, y, Material::Rock);
+            }
+        }
+        for y in 1..4 {
+            add(&mut w, 0, y, 1.0);
+        }
+        add(&mut w, 0, 4, 0.5 * threshold());
+        add(&mut w, 2, 1, 0.5);
+        exchange(&mut w, 1);
+        assert!(
+            free_at(&w, 1, 1) > 0.0,
+            "the lake's full cells did not push into the passage"
+        );
+        for _ in 0..200 {
+            w.step();
+        }
+        let column = |x: i64| (1..7).map(|y| free_at(&w, x, y)).sum::<f64>();
+        assert!(
+            (free_at(&w, 1, 1) - 1.0).abs() < 1e-9,
+            "the passage is not full"
+        );
+        assert!(
+            (column(0) - column(2)).abs() < 1e-3,
+            "not level: {} against {}",
+            column(0),
+            column(2)
+        );
+        assert!(residual(&w).abs() < 1e-12);
+    }
+
+    /// Rain in films on a staircase of rock and soil — much of it shallower than the
+    /// threshold, some of it deeper — conserves water.
+    #[test]
+    fn a_shower_of_films_conserves_water() {
+        let mut w = World::empty(Config {
+            evaporation_m_per_s: 1e-7,
+            ..cfg(8, 6)
+        });
+        for x in 0..8i64 {
+            for y in 1..=(x as u32 % 4) {
+                rock(
+                    &mut w,
+                    x,
+                    y,
+                    if y == 1 {
+                        Material::Soil
+                    } else {
+                        Material::Rock
+                    },
+                );
+            }
+        }
+        for tick in 0..200 {
+            let per_column = if tick % 5 == 0 { 30.0 } else { 0.3 } * threshold();
+            w.apply(Command::RainPulse {
+                volume_m3: 8.0 * per_column,
+            });
+            w.step();
+        }
+        let thin = w
+            .free
+            .iter()
+            .filter(|&&f| f > 0.0 && f < threshold())
+            .count();
+        assert!(
+            thin > 0,
+            "no film under the threshold: the rule went unexercised"
+        );
+        assert!(residual(&w).abs() < 1e-12, "residual {}", residual(&w));
+    }
+}
+
 /// The cached sky (package PA): the per-column sky floor from the terrain cache plus the
 /// wet set give the same cells the ceiling-down walk found, on every kind of column and
 /// across terrain edits; and a real shower on the shipped `small` ring conserves water.

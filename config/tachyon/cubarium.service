@@ -64,9 +64,10 @@ ExecStartPre=-+/bin/sh -c 'echo 3 > /sys/devices/system/cpu/cpu4/core_ctl/min_cp
 # says whether it took.
 AmbientCapabilities=CAP_SYS_NICE
 
-# `cubarium voxel`: a 160x48x24 voxel world presented through the GPU cutaway
+# `cubarium voxel`: a 160x72x24 voxel world presented through the GPU cutaway
 # renderer straight into scanout dma-bufs for cube-screen-shim.
-# 640x360 raster rotated 90 degrees with 3x upscale fills the 1080x1920 panel exactly.
+# 960x540 raster (6 px per voxel) rotated 90 degrees with 2x upscale fills the
+# 1080x1920 panel exactly.
 #
 # `--gpu-web-rate 2` serves the GPU raster to http://127.0.0.1:7393/ twice a second;
 # reach it via `ssh -N -L 7393:127.0.0.1:7393 root@192.168.68.68`.

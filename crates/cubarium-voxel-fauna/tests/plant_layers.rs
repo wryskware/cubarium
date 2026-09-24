@@ -3,7 +3,7 @@
 //! the rule.
 //!
 //! Package 1b put the mouth in metres and reach fell: a 0.23 m mouth cannot eat a
-//! one-cell crown that sits above 0.25 m, which is every adult bloomcrown on the
+//! one-cell crown that sits above 0.25 m, which was every adult bloomcrown on the
 //! 0.25 m presets (`design/handoffs/voxel-body-anchors-2026-09-22.md`, integration
 //! note). Decisions §5's answer is anatomy, not a taller animal: an adult bloomcrown
 //! keeps a renewable basal rosette holding a quarter of its foliage, woody seedlings
@@ -11,12 +11,13 @@
 //!
 //! The claims, on the same flat 0.25 m fixture `mouth_reach.rs` uses (support face at
 //! `y = 2`, a body standing in layer 3, a browser at 0.8 of `body_max` whose ceiling is
-//! 0.2315 m — inside one cell):
+//! 0.463 m on package L's ladder — into the second cell):
 //!
 //! 1. An adult bloomcrown's reachable stock is **its rosette's stock**, not its whole
 //!    foliage and not zero.
 //! 2. A seedling bloomcrown is wholly reachable.
-//! 3. A juvenile umbrellafrond has no reachable layer at all.
+//! 3. A juvenile umbrellafrond offers its lowest tier (package L's accepted
+//!    consequence); a grown one offers nothing.
 //! 4. A bite takes from the reached layer and leaves the crown alone, and the fauna
 //!    ledger books exactly what left the stand.
 //! 5. A cone ray fired at a rosette cell reads foliage.
@@ -78,9 +79,10 @@ fn browser_feeding(fauna: &mut Fauna, world: &World, x: i64, z: u32) -> u64 {
             x,
             z,
             founder: Founder::Browser,
+            // An empty reserve: hungry, so package G's satiety asks for a real bite.
             stores: StartingStores {
                 body: 0.8,
-                reserve: 1.0,
+                reserve: 0.0,
             },
             heading_rad: 0.0,
         },
@@ -111,6 +113,12 @@ fn reached(fauna: &Fauna, world: &World, flora: &Flora, id: u64) -> Option<(Site
 /// The per-layer stocks of the stand at `s`.
 fn stocks(flora: &Flora, s: Site) -> Vec<f64> {
     flora.view().layers_at(s).map(|l| l.stock).collect()
+}
+
+/// The per-layer **edible** stocks of the stand at `s`: what stands above each layer's
+/// grazing floor (package G), which is what a mouth is offered.
+fn edible(flora: &Flora, s: Site) -> Vec<f64> {
+    flora.view().layers_at(s).map(|l| l.edible()).collect()
 }
 
 // ------------------------------------------------------------------ the claims
@@ -150,11 +158,12 @@ fn an_adult_bloomcrowns_reachable_stock_is_its_rosette() {
     let id = browser_feeding(&mut fauna, &world, 2, 2);
     let got = reached(&fauna, &world, &flora, id).expect("a reachable rosette");
     assert_eq!(got.0, s);
+    let rosette = edible(&flora, s)[0];
     assert!(
-        (got.1 - layers[0].1).abs() < 1e-12,
-        "the mouth was offered {} and the rosette holds {}",
+        (got.1 - rosette).abs() < 1e-12,
+        "the mouth was offered {} and the rosette holds {} above its floor",
         got.1,
-        layers[0].1
+        rosette
     );
     assert!(
         got.1 < stand.foliage,
@@ -181,18 +190,23 @@ fn a_seedling_bloomcrown_is_wholly_reachable() {
     let mut fauna = Fauna::new(FaunaConfig::default());
     let id = browser_feeding(&mut fauna, &world, 2, 2);
     let got = reached(&fauna, &world, &flora, id).expect("a reachable seedling");
+    let above_floor: f64 = edible(&flora, s).iter().sum();
     assert!(
-        (got.1 - stand.foliage).abs() < 1e-12,
-        "a seedling offered {} of its {}",
+        (got.1 - above_floor).abs() < 1e-12,
+        "a seedling offered {} of the {} it holds above its floor",
         got.1,
-        stand.foliage
+        above_floor
     );
+    assert!(above_floor < stand.foliage, "the floor stays on the plant");
 }
 
-/// (3) A juvenile umbrellafrond has escaped: its lowest tier is above the band and it
-/// has no ground rosette, so the mouth finds nothing.
+/// (3) Package L's accepted consequence (`design/handoffs/voxel-ladder-growth-2026-09-23.md`
+/// §2): a young umbrellafrond's lowest tier stays inside the browser's band until the
+/// frond is about 1 m tall, so a juvenile at 0.4 of `wood_max` (0.68 m) offers its
+/// lowest tier and nothing else; a full-grown 2 m frond has escaped, and the mouth
+/// finds nothing. (Before the ladder the 0.23 m mouth reached no juvenile at all.)
 #[test]
-fn a_juvenile_umbrellafrond_has_no_reachable_layer() {
+fn a_juvenile_umbrellafrond_offers_its_lowest_tier_and_an_adult_nothing() {
     let world = flat_world();
     let mut flora = Flora::new(FloraConfig::default());
     let sc = flora.config().species(Plant::Umbrellafrond).clone();
@@ -202,14 +216,30 @@ fn a_juvenile_umbrellafrond_has_no_reachable_layer() {
         "the fixture must be in the juvenile stage"
     );
     let s = seed(&mut flora, &world, 2, 2, Plant::Umbrellafrond, wood);
-    assert!(flora.view().stand_at(s).expect("the stand").foliage > 0.0);
+    let stand = flora.view().stand_at(s).expect("the stand").clone();
+    assert!(stand.foliage > 0.0);
+    let layers = stocks(&flora, s);
+    assert_eq!(layers.len(), 2, "a juvenile frond has two tiers");
 
     let mut fauna = Fauna::new(FaunaConfig::default());
     let id = browser_feeding(&mut fauna, &world, 2, 2);
+    let got = reached(&fauna, &world, &flora, id).expect("the lowest tier is in band");
+    assert_eq!(got.0, s);
+    let lowest = edible(&flora, s)[0];
+    assert!(
+        (got.1 - lowest).abs() < 1e-12,
+        "the mouth was offered {} and the lowest tier holds {} above its floor",
+        got.1,
+        lowest
+    );
+    assert!(got.1 < stand.foliage, "and not the upper tier");
+
+    let mut grown = Flora::new(FloraConfig::default());
+    seed(&mut grown, &world, 2, 2, Plant::Umbrellafrond, sc.wood_max);
     assert_eq!(
-        reached(&fauna, &world, &flora, id),
+        reached(&fauna, &world, &grown, id),
         None,
-        "a juvenile frond's lowest tier is over a 0.2315 m mouth"
+        "a 2 m frond's lowest tier is over a 0.463 m mouth"
     );
 }
 
@@ -235,8 +265,9 @@ fn a_bite_empties_the_rosette_and_never_the_crown() {
         after[0] < before[0],
         "the rosette was cropped: {before:?} -> {after:?}"
     );
-    assert_eq!(
-        after[1], before[1],
+    // Untouched up to the float residue `settle_layers` parks on the largest layer.
+    assert!(
+        (after[1] - before[1]).abs() <= 1e-15,
         "the crown must be untouched: {before:?} -> {after:?}"
     );
     let lost = organic_before - flora.view().organic();

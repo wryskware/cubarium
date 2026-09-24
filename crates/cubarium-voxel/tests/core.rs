@@ -3,7 +3,7 @@
 //! full cell.
 
 use cubarium_voxel::generate;
-use cubarium_voxel::{Command, Config, Material, World};
+use cubarium_voxel::{Command, Config, DT, Material, World};
 
 fn cfg(width: u32, height: u32) -> Config {
     Config {
@@ -364,12 +364,13 @@ fn a_roofed_passage_fills_and_the_far_side_rises() {
 /// up through the submerged gap.
 ///
 /// The claim is qualitative on purpose. A local exchange carries head one cell per pass and
-/// has no pressure solve in it, so a *closed, surcharged* passage does not settle to one
-/// flat surface the way the old region solver made it: the surface above the roof stays
-/// uneven by a few tenths of a cell and keeps relaxing. That is a stated limitation of the
-/// first-pass local model, not a conservation fault — the residual below is the check that
-/// matters — and it is recorded in
-/// `design/7_Research/voxel-tick-profile-2026-09-18.md`.
+/// has no pressure solve in it, so a *closed, surcharged* passage did not settle to one
+/// flat surface the way the old region solver made it: the surface above the roof stayed
+/// uneven by a few tenths of a cell (0.40 at 200 ticks; 0.26 after package H). Package P,
+/// which caps what a stack sends across one face at one row's worth, ended the swapping
+/// behind that: at 200 ticks the surface over the roof is flat to 1e-4 and every passage
+/// cell is full. The residual below is still the check that matters; see
+/// `design/7_Research/voxel-tick-profile-2026-09-18.md` for the history.
 #[test]
 fn a_roofed_passage_pushes_the_far_shaft_above_the_roof() {
     let w = roofed(7.0, 7.0);
@@ -1014,9 +1015,12 @@ fn the_transfer_cap_makes_a_fill_travel_more_slowly() {
 
     // One tick spreads a fill a few cells and nowhere near its level: the far side of an
     // eight-column ring is a long way short of 2 / 8 either way, and the cap is behind.
+    // (Package P moved the far column's first-tick fill from 0.094 to 0.125, half its
+    // level: the two-row fill no longer overshoots out of column 0, so the two fronts
+    // meet at column 4 a little fuller. The bound was 0.1.)
     let (quick, slow) = (ring(0.0, 1), ring(0.02, 1));
     assert!(
-        column(&quick, 4) < 0.1,
+        column(&quick, 4) < 0.15,
         "uncapped levelled in one tick: {}",
         column(&quick, 4)
     );
@@ -1814,10 +1818,14 @@ fn water_table_basin(head_m: f64) -> World {
 /// the aquifer and a voxel, so the ledger is untouched and the residual must not move.
 #[test]
 fn the_water_table_saturates_the_basin_and_leaves_the_ridge_to_drain() {
-    let mut w = water_table_basin(3.5);
+    // 3.75 m and not 3.5 since soil retention: saturating the basin's eight soil voxels
+    // costs 0.7 m of this aquifer's head, and the ridge caps now return only 0.12 m of
+    // it as they drain to field capacity 0.65 (0.26 m at 0.25), so 3.5 settled at
+    // 2.92 m, under the pond's floor.
+    let mut w = water_table_basin(3.75);
     let charged = w.view().stored_m3();
     assert!(
-        (w.aquifer_head_m() - 3.5).abs() < 1e-12,
+        (w.aquifer_head_m() - 3.75).abs() < 1e-12,
         "head {}",
         w.aquifer_head_m()
     );
@@ -1843,7 +1851,7 @@ fn the_water_table_saturates_the_basin_and_leaves_the_ridge_to_drain() {
     for x in [0, 1, 6, 7] {
         let pore = v.pore_at(x, 6, 0);
         assert!(
-            pore <= 0.25 + 1e-9,
+            pore <= Material::Soil.field_capacity() + 1e-9,
             "the ridge cap at x {x} held {pore}, above field capacity"
         );
     }
@@ -1871,11 +1879,18 @@ fn a_table_at_zero_changes_nothing() {
     // and put every support past its field capacity with drainage carrying the rest.
     // The claim — a table at zero leaves the staircase exactly where it stood without
     // one, down to the last bit — is unchanged, and this is still a settled state.
-    run(&mut w, 1600);
+    // 2400 since soil retention: a support at field capacity 0.65 holds 0.2275 m3, more
+    // than 1600 ticks' 0.2 m3 of rain, so it takes 0.3 m3 to put every one past it.
+    const TICKS: u32 = 2400;
+    run(&mut w, TICKS);
     let v = w.view();
     for x in 0..8i64 {
         let top = if x < 2 { 1 } else { x as u32 };
-        assert_eq!(v.pore_at(x, top, 0), 0.25, "x {x} moved");
+        let (pore, fc) = (v.pore_at(x, top, 0), Material::Soil.field_capacity());
+        assert!(
+            (pore - fc).abs() < 1e-12,
+            "x {x} moved: {pore} against {fc}"
+        );
         // The pore fraction is still exact; the free crumb above it is 8e-18 rather
         // than a hard zero since package 1c, because the tick now delivers the rain in
         // four times as many, four times smaller infiltration steps and the last one
@@ -1887,7 +1902,14 @@ fn a_table_at_zero_changes_nothing() {
         );
     }
     // The aquifer took the rest, and its head stayed under the soil it would saturate.
-    assert!((v.aquifer_m3 - 0.9).abs() < 1e-9, "{}", v.aquifer_m3);
+    let soil = Material::Soil;
+    let rained = w.config().rain_m_per_s * DT * f64::from(TICKS);
+    let rest = 8.0 * (rained - soil.field_capacity() * soil.pore_capacity());
+    assert!(
+        (v.aquifer_m3 - rest).abs() < 1e-9,
+        "{} against {rest}",
+        v.aquifer_m3
+    );
     assert!(
         w.aquifer_head_m() < 1.5,
         "the table reached the soil: {}",

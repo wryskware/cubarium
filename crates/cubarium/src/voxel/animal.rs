@@ -38,7 +38,20 @@ use cubarium_voxel_fauna::{Animal, FaunaConfig, FaunaView, Founder, Species, Sta
 use crate::present::srgb_linear;
 
 use super::appearance::{self, GlyphId};
-use super::stand::{Cell, Style};
+use super::colours;
+use super::model::{self, ModelCell, ModelLibrary, Tag};
+use super::stand::{Cell, Style, wilted};
+
+/// The cells of `animal`'s founder model at its body's length, if the library has one.
+fn model_cells<'l>(
+    lib: &'l ModelLibrary,
+    config: &FaunaConfig,
+    animal: &Animal,
+) -> Option<&'l [ModelCell]> {
+    let founder = animal.founder?;
+    let length = config.founder(founder).body_at(animal.body).length_m;
+    lib.animal(founder)?.select(length)
+}
 
 /// The interim body colour: a placeholder, and chosen to look like one.
 ///
@@ -82,6 +95,9 @@ pub enum AnimalPart {
     },
     /// An articulated head cell.
     Head { style: u16, facing_right: bool },
+    /// One cell of a baked voxel model ([`crate::voxel::model`]): a plain lit block in
+    /// its palette material.
+    Model(u16),
 }
 
 impl AnimalPart {
@@ -89,7 +105,10 @@ impl AnimalPart {
     pub fn is_block(self) -> bool {
         matches!(
             self,
-            AnimalPart::Interim(_) | AnimalPart::Body { .. } | AnimalPart::Head { .. }
+            AnimalPart::Interim(_)
+                | AnimalPart::Body { .. }
+                | AnimalPart::Head { .. }
+                | AnimalPart::Model(_)
         )
     }
 
@@ -99,7 +118,8 @@ impl AnimalPart {
             AnimalPart::None => None,
             AnimalPart::Interim(s)
             | AnimalPart::Body { style: s, .. }
-            | AnimalPart::Head { style: s, .. } => Some(s),
+            | AnimalPart::Head { style: s, .. }
+            | AnimalPart::Model(s) => Some(s),
         }
     }
 
@@ -123,6 +143,43 @@ pub fn interim_style(species: Species) -> Style {
     }
 }
 
+/// Everything a model cell's colours depend on, as a dense index for the per-rebuild
+/// cache.
+#[derive(Clone, Copy)]
+struct AnimalKey {
+    founder: Founder,
+    material: u8,
+    band: u8,
+    accent: bool,
+    starving: bool,
+    cropping: bool,
+}
+
+impl AnimalKey {
+    const MATERIALS: usize = model::PALETTE.len();
+    const COUNT: usize = 2 * Self::MATERIALS * colours::BANDS as usize * 8;
+
+    fn index(self) -> usize {
+        let founder = match self.founder {
+            Founder::Blind => 0,
+            Founder::Browser => 1,
+        };
+        let material = usize::from(self.material).min(Self::MATERIALS - 1);
+        let mut i = founder * Self::MATERIALS + material;
+        i = i * colours::BANDS as usize + usize::from(self.band.min(colours::BANDS - 1));
+        i * 8
+            + usize::from(self.accent) * 4
+            + usize::from(self.starving) * 2
+            + usize::from(self.cropping)
+    }
+}
+
+/// Whether an animal shows as starving: reserve empty and body under 0.015 (D3's
+/// starving flag).
+pub fn is_starving(animal: &Animal) -> bool {
+    animal.reserve <= 0.001 && animal.body <= 0.015
+}
+
 /// One animal's style this frame: distinct palettes for founders, cropping flash,
 /// starvation desaturation, or interim fallback.
 pub fn animal_style(animal: &Animal) -> Style {
@@ -131,7 +188,7 @@ pub fn animal_style(animal: &Animal) -> Style {
     };
 
     let is_cropping = animal.state == State::Cropping;
-    let is_starving = animal.reserve <= 0.001 && animal.body <= 0.015;
+    let is_starving = is_starving(animal);
 
     match founder {
         Founder::Blind => {
@@ -223,9 +280,9 @@ pub fn cells_of(
     // **The presenter draws the model body** (decisions §1;
     // `design/handoffs/voxel-body-anchors-2026-09-22.md`): the 2x readability shell is
     // retired, and what is drawn is the animal's own dimensions in metres, rounded up
-    // to whole cells. At 0.125 m the adult browser is 3x2x2 and the adult shredder
-    // 2x1x1; at 0.25 m they are 2x1x1 and 1x1x1. A juvenile is drawn smaller, because
-    // it is smaller.
+    // to whole cells. On package L's ladder at 0.125 m the adult browser is 6x3x3 and
+    // the adult shredder 3x1x1; at 0.25 m they are 3x2x2 and 2x1x1. A juvenile is drawn
+    // smaller, because it is smaller.
     let body = config.founder(founder).body_at(animal.body);
     let length = ((body.length_m / voxel_m).ceil() as i64).max(1);
     let width = ((body.width_m / voxel_m).ceil() as i64).max(1);
@@ -300,22 +357,24 @@ pub fn cells_of(
                         },
                     ));
                     // Legs under the two ends, so the belly between them is a real
-                    // projected gap at every drawn length — including the three cells
-                    // the model body is at 0.125 m, where "the last but one" would
-                    // have put the two legs side by side.
+                    // projected gap at every drawn length. They run from the ground to
+                    // the torso: package L's 0.375 m browser is three cells tall at
+                    // 0.125 m, and a one-cell leg left its torso floating.
                     if height > 1 && (along == 0 || along + 1 == length) {
-                        out.push((
-                            Cell {
-                                x,
-                                y: site.y + 1,
-                                z,
-                            },
-                            AnimalPart::Body {
-                                style,
-                                head: false,
-                                facing_right,
-                            },
-                        ));
+                        for leg_y in 1..height {
+                            out.push((
+                                Cell {
+                                    x,
+                                    y: site.y + leg_y,
+                                    z,
+                                },
+                                AnimalPart::Body {
+                                    style,
+                                    head: false,
+                                    facing_right,
+                                },
+                            ));
+                        }
                     }
                 }
             }
@@ -337,7 +396,14 @@ pub struct Animals {
     /// instead of the whole grid, and what a packer walks instead of every voxel.
     stamped: Vec<u32>,
     styles: Vec<Style>,
+    /// This rebuild's style index for each `(model material, starving)`, or `u16::MAX`:
+    /// the model path's styles are shared across animals.
+    model_styles: Vec<u16>,
 }
+
+/// How far a starving animal's body falls toward grey and dark: the wilt tint at half
+/// strength. Its accent turns D3/D4's `#7A2A78` instead.
+pub const STARVING_TINT: f32 = 0.5;
 
 impl Animals {
     /// An empty grid for a world of this shape.
@@ -349,12 +415,36 @@ impl Animals {
             grid: vec![AnimalPart::None; width as usize * height as usize * depth as usize],
             stamped: Vec::new(),
             styles: Vec::new(),
+            model_styles: vec![u16::MAX; AnimalKey::COUNT],
         }
     }
 
-    /// Rebuild from an animal view, or clear when a run has no animal layer. Reuses the
-    /// allocation: the presenter calls this every frame.
+    /// Rebuild from an animal view with the **dev-mode glyphs** ([`cells_of`]), or clear
+    /// when a run has no animal layer. Reuses the allocation: the presenter calls this
+    /// every frame.
     pub fn rebuild(&mut self, view: &VoxelView<'_>, fauna: Option<FaunaView<'_>>) {
+        self.rebuild_inner(view, fauna, None);
+    }
+
+    /// Rebuild with the **baked models** ([`crate::voxel::model`]): a founder with a
+    /// model stamps the size bin nearest its body's length, turned to the nearest quarter
+    /// heading; one without draws [`cells_of`] exactly as [`Animals::rebuild`] does.
+    pub fn rebuild_with(
+        &mut self,
+        view: &VoxelView<'_>,
+        fauna: Option<FaunaView<'_>>,
+        lib: &ModelLibrary,
+    ) {
+        let lib = lib.serves(view.config.voxel_m).then_some(lib);
+        self.rebuild_inner(view, fauna, lib);
+    }
+
+    fn rebuild_inner(
+        &mut self,
+        view: &VoxelView<'_>,
+        fauna: Option<FaunaView<'_>>,
+        lib: Option<&ModelLibrary>,
+    ) {
         let c = view.config;
         if (self.width, self.height, self.depth) != (c.width, c.height, c.depth) {
             *self = Animals::empty(c.width, c.height, c.depth);
@@ -365,12 +455,19 @@ impl Animals {
             }
             self.styles.clear();
         }
+        self.model_styles.fill(u16::MAX);
         let Some(fauna) = fauna else { return };
         // Animals arrive in id order, which is the order the styles are pushed in, so the
         // grid is a pure function of the view and not of any iteration accident. Two
         // animals on one face paint the same cells and the later id wins; which of two
         // identical interim blocks won is not a visible fact.
         for animal in fauna.animals {
+            if let Some(cells) = lib.and_then(|lib| model_cells(lib, fauna.config, animal)) {
+                if !self.stamp_model(view, animal, c.voxel_m, cells) {
+                    break;
+                }
+                continue;
+            }
             let style = self.styles.len().min(u16::MAX as usize) as u16;
             if usize::from(style) != self.styles.len() {
                 break; // more than 65 535 animals in one strip: refuse to alias styles.
@@ -380,6 +477,89 @@ impl Animals {
                 self.place(view, cell, part);
             }
         }
+    }
+
+    /// Stamp one animal's model cells. False when the styles would alias.
+    fn stamp_model(
+        &mut self,
+        view: &VoxelView<'_>,
+        animal: &Animal,
+        voxel_m: f64,
+        cells: &[ModelCell],
+    ) -> bool {
+        if !(voxel_m > 0.0) || !animal.pose.is_finite() {
+            return true;
+        }
+        let anchor = Cell {
+            x: (animal.pose.x / voxel_m).floor() as i64,
+            y: animal.site.y + 1,
+            z: (animal.pose.z / voxel_m).floor().max(0.0) as u32,
+        };
+        let starving = is_starving(animal);
+        let cropping = animal.state == State::Cropping;
+        let Some(founder) = animal.founder else {
+            return true;
+        };
+        // The body's highest cell: the back is lit and the belly dark.
+        let top = cells.iter().map(|m| m.offset[1]).max().unwrap_or(0);
+        let mut ok = true;
+        model::each_animal_cell(cells, anchor, animal.pose.heading_rad, view, |cell, m| {
+            if !ok {
+                return;
+            }
+            let key = AnimalKey {
+                founder,
+                material: m.material,
+                band: colours::band(m.offset[1], top),
+                accent: m.tag == Tag::Accent,
+                starving,
+                cropping,
+            };
+            let Some(style) = self.model_style(key) else {
+                ok = false;
+                return;
+            };
+            self.place(view, cell, AnimalPart::Model(style));
+        });
+        ok
+    }
+
+    /// The style of one model cell's colour key, shared across animals. The colours are
+    /// [`colours::animal`]'s; a starving body takes the wilt tint and its sense patch
+    /// the starved accent.
+    fn model_style(&mut self, key: AnimalKey) -> Option<u16> {
+        let index = key.index();
+        let cached = self.model_styles[index];
+        if cached != u16::MAX {
+            return Some(cached);
+        }
+        let style = u16::try_from(self.styles.len())
+            .ok()
+            .filter(|&s| s != u16::MAX)?;
+        let sw = colours::animal(
+            key.founder,
+            key.material,
+            key.band,
+            key.accent,
+            key.cropping,
+        );
+        let paint = |rgb| {
+            let c = srgb_linear(rgb);
+            if key.starving {
+                wilted(c, STARVING_TINT)
+            } else {
+                c
+            }
+        };
+        let (wood, crown, heart) = if key.starving && key.accent {
+            let c = srgb_linear(colours::STARVED_ACCENT);
+            (c, c, c)
+        } else {
+            (paint(sw.shadow), paint(sw.body), paint(sw.glint))
+        };
+        self.styles.push(Style { wood, crown, heart });
+        self.model_styles[index] = style;
+        Some(style)
     }
 
     /// Write one cell, unless it is outside the world or inside solid terrain: a body does
@@ -591,23 +771,31 @@ mod tests {
         let browser = cells_of(&animals[0], av.config, 0, c.voxel_m);
         let blind = cells_of(&animals[1], av.config, 1, c.voxel_m);
 
-        // The **model body** since 2026-09-22: the adult browser is 0.375 × 0.1875 ×
-        // 0.1875 m, so three cells long and two wide at 0.125 m, and the adult
-        // shredder 0.19 × 0.0625 × 0.0625 m, so two cells long and one wide.
-        assert_eq!(browser.len(), 10, "3×2 raised torso plus four end legs");
-        assert_eq!(blind.len(), 2, "two low crawler segments at 0.125 m");
+        // The **model body** on package L's ladder: the adult browser is 0.75 × 0.375 ×
+        // 0.375 m, so six cells long, three wide and three tall at 0.125 m, and the adult
+        // shredder 0.375 × 0.125 × 0.125 m, so three cells long and one wide.
+        assert_eq!(
+            browser.len(),
+            6 * 3 + 2 * 3 * 2,
+            "6×3 raised torso plus two-cell legs under both ends"
+        );
+        assert_eq!(blind.len(), 3, "three low crawler segments at 0.125 m");
         assert!(
             browser
                 .iter()
-                .any(|(c, p)| { c.x == 7 && c.y == 2 && matches!(p, AnimalPart::Head { .. }) }),
-            "the browser head is one front column from its pose, on the mouth layer"
+                .any(|(c, p)| { c.x == 8 && c.y == 3 && matches!(p, AnimalPart::Head { .. }) }),
+            "the browser head is the front column, on the torso layer"
         );
         assert!(browser.iter().any(|(c, _)| c.y == 1));
-        assert!(browser.iter().all(|(c, _)| c.y <= 2));
-        assert!(browser.iter().any(|(c, _)| c.x == 5 && c.y == 1));
-        assert!(browser.iter().any(|(c, _)| c.x == 7 && c.y == 1));
+        assert!(browser.iter().all(|(c, _)| c.y <= 3));
+        for leg_y in 1..=2 {
+            assert!(browser.iter().any(|(c, _)| c.x == 3 && c.y == leg_y));
+            assert!(browser.iter().any(|(c, _)| c.x == 8 && c.y == leg_y));
+        }
         assert!(
-            !browser.iter().any(|(c, _)| c.x == 6 && c.y == 1),
+            !browser
+                .iter()
+                .any(|(c, _)| (4..=7).contains(&c.x) && c.y < 3),
             "the torso leaves a visible belly gap between its legs"
         );
     }

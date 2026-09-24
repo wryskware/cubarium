@@ -1,4 +1,4 @@
-# Cubarium prompt kit — v0.3 (2026-09-21)
+# Cubarium prompt kit — v0.4 (2026-09-21)
 
 Working material for the Stage 2 art pass. Condensed from
 `design/art-direction/Cubarium_Art_Direction_v0.1.md` (Wrysk, decided); when they disagree the
@@ -12,23 +12,45 @@ until `art/gen/artbook/` exists and becomes the image reference instead.
 
 ## 1. Style block
 
-### 1a. Prose form (GPT-image, Gemini, Qwen-Image; ~110 words)
+**v0.4 (Wrysk, 2026-09-21): the pixel-art requirement is removed from generation.**
+Generators render a clean graphic illustration at 1024² or larger; pixelation is done by
+us, in post-processing (`pixel_snap.py` nearest-downsample to the sprite's logical size at
+6 px per voxel, then `palette_quantise.py`) or in the Godot atelier. Asking a model for
+pixel art bought an inconsistent fake grid and a lower quality of form. Arm A in §2 is
+retired; arm B is the path.
 
-> Cubarium concept art: a lush, visibly pixelated alien ecology, science-fiction and
-> psychedelic biology rather than fantasy or magic. Clean pixel art with flat solid colours,
-> crisp stepped edges, no gradients, no blur, no haze. Palette: deep indigo, blue-violet and
-> dark purple masses supporting electric cyan, blue, violet and magenta, with at most one small
-> warm orange accent. Bioluminescent colour comes from the forms themselves, not from fog or
-> glow effects. Strong readable silhouette, detail gathered in clusters with quiet dark negative
-> space between them. Organic shapes: slopes, banks, pads, fronds, caps, never visible cubes.
-> Side-on cutaway diorama view, seen slightly from above. No text, no watermark, no border.
+### 1a. Prose form, **scene** (plates and tiles; ~100 words)
+
+> Cubarium concept art: a lush alien ecology, science-fiction and psychedelic biology
+> rather than fantasy or magic. Clean flat-colour graphic illustration: hard edges, cel
+> shading in two tones plus one highlight, large simple shapes that survive being shrunk
+> to a thumbnail. Palette: deep indigo, blue-violet and dark purple masses supporting
+> electric cyan, blue, violet and magenta, with at most one small warm orange accent.
+> Bioluminescent colour comes from the forms themselves. Strong readable silhouette,
+> detail gathered in clusters with quiet dark negative space between them. Organic
+> shapes: slopes, banks, pads, fronds, caps. Side-on cutaway diorama view, seen slightly
+> from above.
+
+### 1a′. Prose form, **sprite** (organisms, parts; ~80 words)
+
+The held-seed probe of 2026-09-21 showed the habitat vignette under every sprite comes
+from the scene block's "ecology" and "diorama" clauses, so sprites get their own block
+with neither:
+
+> Cubarium creature and plant design: a single alien organism from a science-fiction,
+> psychedelic biology, drawn as a clean flat-colour graphic illustration with hard edges,
+> cel shading in two tones plus one highlight, and large simple shapes that survive being
+> shrunk to a thumbnail. Palette: deep indigo, blue-violet and dark purple body masses
+> with electric cyan, blue, violet or magenta accents. Luminous tissue is a flat bright
+> colour on the form itself. The whole organism is visible, isolated and centred, seen
+> from the side, slightly from above, its base resting on the lower part of the frame.
 
 ### 1b. Compact form (Midjourney, tag-style models; put it first)
 
-> pixel art, alien ecology, psychedelic sci-fi biology, flat solid colours, crisp stepped
-> edges, deep indigo and violet masses, electric cyan and magenta accents, one warm orange
-> accent, bioluminescent forms, strong silhouette, clustered detail, dark negative space,
-> organic not blocky, side-on cutaway diorama, slightly from above, no gradients, no haze
+> flat colour graphic illustration, alien ecology, psychedelic sci-fi biology, hard
+> edges, cel shading, deep indigo and violet masses, electric cyan and magenta accents,
+> one warm orange accent, bioluminescent forms, strong silhouette, clustered detail, dark
+> negative space, organic shapes, side-on cutaway diorama, slightly from above
 
 ### 1c. Say what you want (Wrysk, 2026-09-21)
 
@@ -41,6 +63,36 @@ proportions in voxels and logical pixels, every part, every colour by hex, surfa
 treatment, pose, view angle, ground contact). The creative pass that writes those
 descriptions is Fable + Astra + Wrysk; the generator only renders them.
 
+
+Phrasings that Qwen-Image 2.1 measurably obeys or ignores (batch-1 roughs, 2026-09-21;
+one variable per probe, seed held):
+
+- **Silhouette as outline moves, not heights.** "Front shoulder 8 px, dip 5 px, rear 7
+  px" comes back as *shading*; "the top outline falls 3 px between the two shoulders and
+  rises again" comes back as shape.
+- **Emissive tissue by its neighbour.** "On the lower-facing edge" lit the top rim on
+  5 of 5 caps. Say "the cyan strip lies where the crown meets the shadow beneath it".
+- **Heading loses to anatomy.** A stated "facing right" was mirrored on both seeds when
+  the front-to-back anatomy was described head-last. Describe the animal front to back,
+  and say "its head is at the right edge of the frame".
+- **Tiles are crops of a named whole.** The model renders the whole object; a 1-voxel
+  slice of a log is not drawn. Ask for the whole log and cut the tile in prep.
+- **Shadows.** "No cast shadow" was ignored. Say "the base rests on a thin dark contact
+  line and the ground around it is empty".
+- **A sprite gets block 1a′,** never 1a: the ecology and diorama words put a habitat
+  under every animal.
+- **Aspect beats measurement** (batch 2): tall subjects on a square canvas came back
+  ~1:1 (vaulttree 96×94 for 96×168). State the aspect as a ratio in the size line and set
+  the ResolutionSelector to a tall canvas (multiples of 32, e.g. 768×1280) for anything
+  taller than wide.
+- **Gaps, not counts.** "A set of 5 fronds" gave nine; "open sky shows between one
+  frond and the next" is what holds. State the space between repeated parts.
+- **No similes.** "Like a petal seen edge-on" gave petals. Describe the shape itself.
+- **Surfaces and flyers are not sprites.** Block 1a′'s "base resting on the lower part
+  of the frame" made Qwen invent an animal to sit on a carpet and a mass for a hovering
+  bellwing to rest against. A surface uses the tile framing; a flyer gets "in the air,
+  the frame empty all around it, nothing beneath it".
+
 ### 1d. What the block deliberately does *not* say
 
 - No pixel scale or sprite resolution (open decision). Scale lives in the subject card.
@@ -52,26 +104,17 @@ descriptions is Fable + Astra + Wrysk; the generator only renders them.
 
 ---
 
-## 2. Two arms, two phrasings
+## 2. One arm: clean graphic, then pixelate (v0.4)
 
-Every provider gets both until we know which wins (the plan's phase 1 experiment).
+**Arm A (pixel-look direct) is retired** (Wrysk, 2026-09-21): models fake grids, at
+scales that differ between assets, and the form quality drops. Every provider gets the
+v0.4 block and the card; the result is a clean graphic illustration.
 
-**Arm A, pixel-look direct.** Add to the style block:
-> rendered as genuine pixel art on a uniform pixel grid of about [64×64 / 96×96] logical
-> pixels, each pixel a single flat colour, limited palette of about 16 colours, 1-pixel
-> darker outline on the silhouette, no anti-aliasing
-Then `pixel_snap` to a true grid. Models fake grids; expect to snap and quantise.
-
-Wrysk's expectation (2026-09-21): A looks good but its logical scale is off and inconsistent
-between assets, so every candidate is scale-normalised to the card's voxel size before it
-goes on the sheet, and B (or A + snap + downsample) is the likely final-asset path.
-
-**Arm B, clean graphic then downsample.** Replace "pixel art" wording with:
-> flat vector-like illustration, hard edges, cel shading in two tones plus one highlight,
-> no outline noise, simple large shapes that survive being shrunk to a thumbnail
-Downsample with nearest / area filter to sprite scale and quantise to the palette.
-
----
+**Pixelation is ours.** `pixel_snap.py` nearest-downsamples the candidate to its logical
+size (6 px per voxel of the card's stated size; check at 4), `palette_quantise.py` snaps
+to the palette family; or the atelier imports the clean part art and the bake pixelates
+at export. Which of the two gives the better Cubarium pixel character is the next
+experiment, judged on the same candidate both ways.
 
 ## 3. Subject-card template
 
@@ -93,9 +136,9 @@ states and sway, not angles. Wrysk may also hand in **full sprite overrides** ma
 reference photos; they skip generation and go straight to prep.
 
 Framing suffixes:
-- **sprite**: "a single [subject], isolated and centred, full body visible, side view facing
-  right, base touching an invisible ground line, no cast shadow, no scene, no other objects."
-  Qwen 2.1: inside the RGBA wrapper (§5) and **never mention a background at all**; a
+- **sprite**: block 1a′ carries the framing. Add only the heading sentence ("its head is at
+  the right edge of the frame") and the contact sentence ("the base rests on a thin dark
+  contact line and the ground around it is empty"). Qwen 2.1: inside the RGBA wrapper (§5) and **never mention a background at all**; a
   background phrase contradicts the wrapper and the alpha comes back opaque (verified
   2026-09-21: 0 % vs 71 % transparent pixels on the same seed). GPT-image: ask for a
   transparent background. Providers without alpha: "on a plain solid black background",
@@ -187,7 +230,10 @@ captions. Keep one change per turn.
 **ComfyUI local (agent lane).** Wrysk (2026-09-21): **Qwen-Image 2.1 only.** The other
 installed checkpoints (Flux, Z-Image, HiDream) are not as good and not worth using; do not
 build workflows for them. Models by job:
-- New designs: Qwen-Image 2.1 text-to-image, prose block, 1024².
+- New designs: Qwen-Image 2.1 text-to-image, block 1a′ for sprites, 1024² (2048² native
+  2K when the subject has parts smaller than a voxel). Wrysk's read of the batch-1
+  roughs (2026-09-21): Qwen is a direction sketcher, not an asset source; usable assets
+  come from the GPT lane or manual drops, when Wrysk says.
 - Next pose / growth state / body angle / part of an accepted design: Qwen-Image 2.1
   reference-to-image (Qwen-Image-Edit 2509 + Lightning 4-step LoRA where wired), input =
   the accepted sprite or artbook plate.
@@ -222,9 +268,10 @@ pixel-art-specific is installed; a pixel-art LoRA for Qwen is pre-authorised to 
   "workflow": "workflows/qwen21-sprite.json", "seed": 0, "size": [1024,1024],
   "style_block": "v0.1", "prompt": "…", "negative": "…", "params": {"steps": 40, "sampler": "euler", "cfg": 1, "rgba": true},
   "file": "0007.png", "in_scene": ["0007@8px.png","0007@4px.png"],
-  "verdict": "keep|iterate|reject", "largest_failure": "one sentence", "by": "wrysk|agent" }
+  "verdict": "unjudged|keep|iterate|reject", "largest_failure": "one sentence", "by": "wrysk|agent" }
 ```
 
-Round protocol: one subject, ≤ 8 per provider, contact sheet, in-scene at 8 and 4 px per
-voxel, Wrysk marks verdicts, then revise the style block and that provider's dialect and
+An agent writes `"unjudged"`; only Wrysk writes the other three. Round protocol: one
+subject, ≤ 8 per provider, contact sheet, in-scene at 8 and 4 px per voxel (the working
+scale is 6), Wrysk marks verdicts, then revise the style block and that provider's dialect and
 bump the version. Keep rejects and their logs until the round closes.

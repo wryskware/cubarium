@@ -41,6 +41,20 @@ pub enum Landform {
     /// warped into rocky regions, and restrained fine detail, voxelised through the same
     /// layering and camera pass.
     Staged(Recipe),
+    /// The designed terrarium: a ring of tree and tower built up from parts
+    /// ([`crate::terrarium`]).
+    Terrarium(crate::terrarium::Terrarium),
+}
+
+impl Landform {
+    /// The water a landscape states for itself, if it states any.
+    pub fn water(&self) -> Option<&Water> {
+        match self {
+            Landform::Ridge => None,
+            Landform::Staged(r) => Some(&r.water),
+            Landform::Terrarium(t) => Some(&t.water),
+        }
+    }
 }
 
 /// One deterministic stream per generation pass. Distinct constants, xored into the
@@ -191,6 +205,19 @@ pub struct Tiers {
     /// How far back from a shelf's front edge the bowl starts, metres: the lip the
     /// notch is cut into.
     pub front_setback_m: f64,
+    /// How far out from the lake its **wet shore** reaches, metres. Tier-0 ground this
+    /// close to the lake is cut down to a soil bank that rises from just above the
+    /// waterline ([`Tiers::shore_slope`]), so the water table under the lake has ground
+    /// near enough to it to wet. Zero, the default, is no shore: the lake cut into the
+    /// ground as it stands. Package SW, for `small`.
+    pub shore_m: f64,
+    /// The shore's rise, metres per metre out from the water.
+    pub shore_slope: f64,
+    /// Width of the shore's **dry lip**, metres: next to the water its soil starts at the
+    /// waterline instead of under it, wide enough that a root box on the lake's bed
+    /// reaches no soil, so the wettest ground a founder is offered is the bank and not
+    /// the shallows a shower floods.
+    pub shore_lip_m: f64,
 }
 
 impl Default for Tiers {
@@ -212,6 +239,9 @@ impl Tiers {
         pool_depth_m: 0.75,
         notch_width_m: 0.5,
         front_setback_m: 0.25,
+        shore_m: 0.0,
+        shore_slope: 0.25,
+        shore_lip_m: 0.0,
     };
 
     /// `default` and `wide`: four elevations, each one 2 m stratum apart.
@@ -232,6 +262,15 @@ impl Tiers {
         pool_depth_m: 0.375,
         notch_width_m: 0.25,
         front_setback_m: 0.125,
+        // Package SW: three metres of shore rising a voxel per half metre, so the bank
+        // stands one to five voxels over the waterline for its first two metres. At seed
+        // 1 the columns an umbrellafrond may establish on at seeding go from 0.4 % to
+        // 21.5 % and a velvetpad's from 0.2 % to 5.9 %; the other four judged seeds were
+        // already there and stay there (21.3-25.5 % and 4.2-7.1 %).
+        shore_m: 3.0,
+        shore_slope: 0.25,
+        // Three cells: an umbrellafrond's root box on `small` reaches two either side.
+        shore_lip_m: 0.375,
         ..Tiers::NONE
     };
 
@@ -267,6 +306,9 @@ impl Tiers {
             ("flat", self.flat),
             ("notch_width_m", self.notch_width_m),
             ("front_setback_m", self.front_setback_m),
+            ("shore_m", self.shore_m),
+            ("shore_slope", self.shore_slope),
+            ("shore_lip_m", self.shore_lip_m),
         ] {
             anyhow::ensure!(
                 v.is_finite() && v >= 0.0,
@@ -605,6 +647,11 @@ pub struct Water {
     /// How many open-sky pools **above the lake** a generated world must hold water in
     /// to be accepted, beside `min_lake_m2`. Zero asks for none.
     pub min_tier_pools: u32,
+    /// The stream at the spring is **groundwater**: [`crate::Config::reentry_from_aquifer`].
+    pub reentry_from_aquifer: bool,
+    /// The lake is joined to the aquifer through its floor:
+    /// [`crate::Config::lake_drain_m2_per_s`]. Zero is no drain.
+    pub lake_drain_m2_per_s: f64,
 }
 
 impl Default for Water {
@@ -633,6 +680,8 @@ impl Water {
         min_lake_m2: 0.0,
         reentry_m3_per_s: 0.0,
         min_tier_pools: 0,
+        reentry_from_aquifer: false,
+        lake_drain_m2_per_s: 0.0,
     };
 
     /// The staged presets' inventory: half a metre of water over the footprint, six per
@@ -640,8 +689,8 @@ impl Water {
     /// atmosphere store), and a metre of water table.
     ///
     /// A metre of head costs `aquifer_porosity` metres of the inventory -- 0.35 -- and
-    /// bringing every soil voxel to field capacity costs another 0.025 to 0.035 on these
-    /// rings, so this leaves roughly 0.09 m for the pools: on `default` that is 16 m³ in
+    /// bringing every soil voxel to field capacity costs another 0.08 to 0.09 on these
+    /// rings (0.04 before soil retention raised field capacity from 0.25 to 0.65), so this leaves roughly 0.09 m for the pools: on `default` that is 16 m³ in
     /// the basins against the 142 m³ it would take to fill every one of them to its spill.
     /// Ponds in the low ground, not a flooded ring.
     /// The weather, chosen against package W3's hour-long study on all three presets.
@@ -693,6 +742,8 @@ impl Water {
         min_lake_m2: 6.0,
         reentry_m3_per_s: 1.0e-3,
         min_tier_pools: 1,
+        reentry_from_aquifer: false,
+        lake_drain_m2_per_s: 0.0,
     };
 
     /// `small`'s ring is 60 m² of footprint against `default`'s 192, and both the store's
@@ -756,6 +807,7 @@ impl Water {
             ("water.lake_depth_m", self.lake_depth_m),
             ("water.min_lake_m2", self.min_lake_m2),
             ("water.reentry_m3_per_s", self.reentry_m3_per_s),
+            ("water.lake_drain_m2_per_s", self.lake_drain_m2_per_s),
         ] {
             anyhow::ensure!(
                 v.is_finite() && v >= 0.0,
@@ -790,6 +842,8 @@ impl Water {
         c.shower_interval_min_s = self.shower_interval_min_s;
         c.shower_interval_max_s = self.shower_interval_max_s;
         c.reentry_m3_per_s = self.reentry_m3_per_s;
+        c.reentry_from_aquifer = self.reentry_from_aquifer;
+        c.lake_drain_m2_per_s = self.lake_drain_m2_per_s;
     }
 }
 

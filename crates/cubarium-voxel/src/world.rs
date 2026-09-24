@@ -1,7 +1,6 @@
 use anyhow::{bail, ensure};
 use serde::{Deserialize, Serialize};
 
-use crate::recipe::Landform;
 use crate::{Config, Ledger, Material};
 
 /// The sky-visibility fan: `(dx, dy, dz, weight)` for each of 17 rays. The zenith
@@ -116,6 +115,12 @@ pub enum Command {
     SetOutlet { open: bool },
 }
 
+/// The fill a cell must hold for the water above it to count as **standing** on it:
+/// [`VoxelView::standing_depth_m`]'s one threshold. Half a cell: a pool's cells sit
+/// 0.87–0.96 full, a shower's falling column a third or less. A placeholder
+/// (`design/backlog.md` §1).
+pub const STANDING_SUPPORT_FILL: f64 = 0.5;
+
 /// Read-only access to the world for drawing and inspection. Borrowed from a `World`;
 /// never owned by a renderer.
 #[derive(Clone, Copy, Debug)]
@@ -225,6 +230,43 @@ impl<'a> VoxelView<'a> {
                 break;
             }
             depth += f;
+        }
+        depth * c.voxel_m
+    }
+
+    /// Depth of the **settled standing water** on the support face `(x, y, z)`, metres:
+    /// water held up from below, and not water in transit
+    /// (`design/handoffs/voxel-terrain-note-standing-depth-2026-09-22.md`).
+    ///
+    /// The same walk as [`VoxelView::water_depth_m`], with one more stop: a cell's water
+    /// counts only while the cell **under** it is the face itself or at least
+    /// [`STANDING_SUPPORT_FILL`] full. A pool's cells sit 0.87–0.96 full with water on
+    /// them and read whole; a shower's falling column (fills 0.11 / 0.25 / 0.37 … over a
+    /// film) reads as its bottom cell and nothing above it, because a third-full cell is
+    /// not holding up the water over it.
+    ///
+    /// A **reader over the fills, not solver state.** The solver has no per-cell
+    /// "at rest" flag, so moving water that is deeper than half a cell — a full stream
+    /// channel — reads as standing here, and the partial top cell of a pool sitting on a
+    /// half-full cell counts. What it does refuse is the case the note measured: a falling
+    /// column read as depth over a film.
+    pub fn standing_depth_m(&self, x: i64, y: u32, z: u32) -> f64 {
+        let c = self.config;
+        if z >= c.depth {
+            return 0.0;
+        }
+        let mut depth = 0.0;
+        let mut below = 1.0;
+        for yy in y + 1..c.height {
+            if self.material_at(x, yy, z).is_solid() {
+                break;
+            }
+            let f = self.free_at(x, yy, z);
+            if !(f > 0.0) || below < STANDING_SUPPORT_FILL {
+                break;
+            }
+            depth += f;
+            below = f;
         }
         depth * c.voxel_m
     }
@@ -414,6 +456,15 @@ pub struct World {
     /// Where the aquifer discharges when its head rises above the cell. Generation
     /// picks a low void cell part way up the basin flank.
     pub(crate) spring_cell: Option<(u32, u32, u32)>,
+    /// A lake's floor drain, joining it to the aquifer (see
+    /// [`Config::lake_drain_m2_per_s`]): the void cells on the lake's floor, the
+    /// conductance shared among them. Empty is no drain.
+    #[serde(default)]
+    pub(crate) lake_drain: Vec<(u32, u32, u32)>,
+    /// The row a generator asks its lake filled to — the lake holds the rows below it —
+    /// when no outlet marks it. Read once, by [`crate::hydrate::hydrate`].
+    #[serde(default)]
+    pub(crate) lake_datum_y: Option<u32>,
     /// **A cache, not state:** the void cells that hold free water, and the porous cells
     /// that hold pore water — the active sets the water phases iterate instead of the
     /// grid (`design/7_Research/voxel-tick-profile-2026-09-18.md`). Maintained by the
@@ -423,6 +474,11 @@ pub struct World {
     pub(crate) wet: crate::sparse::CellSet,
     #[serde(skip)]
     pub(crate) damp: crate::sparse::CellSet,
+    /// **A cache, not state:** the porous cells whose pore water is over their material's
+    /// field capacity — the cells `drain` can move water out of (package D), a subset of
+    /// `damp`. Maintained by the same pore primitives and rebuilt with the other two.
+    #[serde(skip)]
+    pub(crate) drainable: crate::sparse::CellSet,
     /// **A cache, not state:** every column's void runs, derived from `material` alone.
     /// Rebuilt lazily when [`World::terrain_version`] moves and never otherwise. Not
     /// serialized, so a decoded world starts dirty. World-owned rather than thread-local:
@@ -575,8 +631,8 @@ impl World {
         // states it before anything is built, so the config the world runs on — and the
         // config its snapshot carries — is the one the recipe asked for.
         let mut config = config;
-        if let Landform::Staged(recipe) = config.landform.clone() {
-            recipe.water.cycle_into(&mut config);
+        if let Some(water) = config.landform.water().copied() {
+            water.cycle_into(&mut config);
         }
         let n = config.cells();
         let mut world = World {
@@ -593,8 +649,11 @@ impl World {
             ledger: Ledger::default(),
             outlet_cell: None,
             spring_cell: None,
+            lake_drain: Vec::new(),
+            lake_datum_y: None,
             wet: crate::sparse::CellSet::default(),
             damp: crate::sparse::CellSet::default(),
+            drainable: crate::sparse::CellSet::default(),
             void_runs: VoidRuns::default(),
             config,
         };
@@ -614,8 +673,8 @@ impl World {
         // holds water. This world does not: it has just been generated, so the inventory
         // **is** what it began with, and the booking is dropped in favour of recording it
         // as the initial stores below.
-        if let Landform::Staged(recipe) = world.config.landform.clone() {
-            crate::hydrate::hydrate(&mut world, &recipe.water);
+        if let Some(water) = world.config.landform.water().copied() {
+            crate::hydrate::hydrate(&mut world, &water);
             world.ledger = Ledger::default();
         }
         world.ledger.initial_stored = world.view().stored_m3();
@@ -654,8 +713,11 @@ impl World {
             ledger: Ledger::default(),
             outlet_cell: None,
             spring_cell: None,
+            lake_drain: Vec::new(),
+            lake_datum_y: None,
             wet: crate::sparse::CellSet::default(),
             damp: crate::sparse::CellSet::default(),
+            drainable: crate::sparse::CellSet::default(),
             void_runs: VoidRuns::default(),
             material,
             config,
@@ -705,6 +767,11 @@ impl World {
     }
 
     /// The cell the aquifer discharges into, if the world has one.
+    /// The lake's floor drain: the cells on its floor, empty if the world has none.
+    pub fn lake_drain(&self) -> &[(u32, u32, u32)] {
+        &self.lake_drain
+    }
+
     pub fn spring_cell(&self) -> Option<(u32, u32, u32)> {
         self.spring_cell
     }
@@ -890,12 +957,16 @@ impl World {
         let n = self.config.cells();
         self.wet.reset(n);
         self.damp.reset(n);
+        self.drainable.reset(n);
         for i in 0..n {
             if !self.material[i].is_solid() && self.free[i] > 0.0 {
                 self.wet.insert(i);
             }
             if self.material[i].pore_capacity() > 0.0 && self.pore[i] > 0.0 {
                 self.damp.insert(i);
+            }
+            if crate::water::drains(self, i) {
+                self.drainable.insert(i);
             }
         }
     }
@@ -1063,7 +1134,8 @@ impl World {
         ] {
             ensure!(flux.is_finite(), "the ledger's {name} is {flux}");
         }
-        for (name, cell) in [("outlet", self.outlet_cell), ("spring", self.spring_cell)] {
+        let drains = self.lake_drain.iter().map(|&c| ("lake drain", Some(c)));
+        for (name, cell) in [("outlet", self.outlet_cell), ("spring", self.spring_cell)].into_iter().chain(drains) {
             if let Some((x, y, z)) = cell {
                 ensure!(
                     x < self.config.width && y < self.config.height && z < self.config.depth,

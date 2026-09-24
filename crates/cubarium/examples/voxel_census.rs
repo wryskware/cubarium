@@ -84,24 +84,41 @@ fn main() {
     // the world that ships, not the seeder's bare heuristics. `heuristic` as a trailing
     // argument keeps the old, observation-only control.
     let heuristic = args.iter().any(|a| a == "heuristic");
+    // `config=<path>` is a landscape arm from a host TOML (the Tachyon terrarium, say),
+    // founded exactly like a preset arm. `nofauna` seeds no founders: the plants alone.
+    let file_arm: Option<(String, cubarium_voxel::Config)> = args
+        .iter()
+        .find_map(|a| a.strip_prefix("config="))
+        .map(|p| {
+            let cfg = cubarium::voxel::load_config(std::path::Path::new(p))
+                .unwrap_or_else(|e| panic!("config {p:?}: {e}"));
+            (p.to_string(), cfg.world)
+        });
+    let arm: Option<(String, cubarium_voxel::Config)> =
+        file_arm.or_else(|| preset.map(|p| (p.name.to_string(), p.config())));
+    let founder_counts = if args.iter().any(|a| a == "nofauna") {
+        [0; habitat::FOUNDER_COUNTS.len()]
+    } else {
+        habitat::FOUNDER_COUNTS
+    };
 
     let cfg = VoxelConfig::default();
-    if let Some(preset) = preset {
+    if let Some((arm_name, arm_config)) = arm {
         assert!(!generated, "a preset arm builds its own world");
         // The host's founding loop, verbatim: lake gate, pre-roll with the opening
         // shower, seeding and the acceptance check, redrawn on a refusal. The world
         // comes back already seeded.
         let founded = cubarium::voxel::ambient_habitat(
-            &preset.config(),
+            &arm_config,
             seed_base,
             FloraConfig::for_voxel_size,
-            habitat::FOUNDER_COUNTS,
+            founder_counts,
         );
         let (world, flora, mut fauna, seeded) =
             (founded.world, founded.flora, founded.fauna, founded.seeded);
         eprintln!(
             "scene: preset {} ({}x{}x{} at {} m, seed {}, {} lake / {} habitat rejected, {})",
-            preset.name,
+            arm_name,
             world.config().width,
             world.config().height,
             world.config().depth,
@@ -204,14 +221,91 @@ fn main() {
 fn run(sim: &mut Sim, hours: f64) {
     let total_ticks = (hours * 3600.0 * f64::from(TICK_HZ)) as u64;
     print_header();
-    print_row(0, sim);
+    print_row(0, sim, 0.0);
     let mut tick = 0u64;
+    let mut window = SeedWindow::default();
+    let mut since = std::time::Instant::now();
     while tick < total_ticks {
         sim.step();
         tick += 1;
         if tick % TICKS_PER_MIN == 0 {
-            print_row(tick / TICKS_PER_MIN, sim);
+            let ms = since.elapsed().as_secs_f64() * 1e3 / TICKS_PER_MIN as f64;
+            print_row(tick / TICKS_PER_MIN, sim, ms);
+            since = std::time::Instant::now();
         }
+        if tick % (60 * TICKS_PER_MIN) == 0 || tick == total_ticks {
+            window.report(tick, sim);
+        }
+    }
+}
+
+/// The seed-bank line on stderr, once a simulated hour: how many sites hold a bank (what
+/// D5's seed marks draw), recruits so far, and the SeedBank / Propagate phases' cost per
+/// tick over the hour just past. Measurement only.
+#[derive(Default)]
+struct SeedWindow {
+    nanos: [u64; 3],
+    calls: [u64; 3],
+}
+
+impl SeedWindow {
+    fn report(&mut self, tick: u64, sim: &Sim) {
+        use cubarium_voxel::profile::{Phase, calls, nanos};
+        let f = sim.flora().view();
+        let sites = f.ground.iter().filter(|g| !g.seeds.is_empty()).count();
+        let mut ms = [0.0; 3];
+        for (i, p) in [Phase::SeedBank, Phase::Propagate, Phase::FloraStep]
+            .into_iter()
+            .enumerate()
+        {
+            let (n, c) = (nanos(p), calls(p));
+            let dc = c.saturating_sub(self.calls[i]).max(1);
+            ms[i] = n.saturating_sub(self.nanos[i]) as f64 / dc as f64 / 1e6;
+            self.nanos[i] = n;
+            self.calls[i] = c;
+        }
+        eprintln!(
+            "seedbank: h={:.2} bank_sites={sites} ground={} stands={} establishments={} \
+             seed_bank_ms={:.4} propagate_ms={:.4} flora_ms={:.3}",
+            tick as f64 / (3600.0 * f64::from(TICK_HZ)),
+            f.ground.len(),
+            f.stands.len(),
+            f.ledger.establishments,
+            ms[0],
+            ms[1],
+            ms[2],
+        );
+        // Package S's counters: per species, g seeds germinated, c runner/rhizome
+        // daughters, l seeds landed in a bank, d seeds died in it, x spore/water seeds
+        // that found no ground; and the whole seeds banked now.
+        let l = f.ledger;
+        let mut modes = String::new();
+        for s in Plant::ALL {
+            let i = s.index();
+            let (g, c, ld, d, x) = (
+                l.seeds_germinated[i],
+                l.clonal_births[i],
+                l.seeds_landed[i],
+                l.seeds_died[i],
+                l.seeds_lost[i],
+            );
+            if g + c + ld + d + x > 0 {
+                modes.push_str(&format!(" {}:g{g}/c{c}/l{ld}/d{d}/x{x}", s.name()));
+            }
+        }
+        let banked: f64 = f
+            .ground
+            .iter()
+            .flat_map(|g| g.seeds.iter())
+            .map(|c| {
+                let sc = f.config.species(c.species);
+                c.organic / (sc.alive_min / sc.propagule_split[0])
+            })
+            .sum();
+        eprintln!(
+            "seedmodes: h={:.2} banked_seeds={banked:.0}{modes}",
+            tick as f64 / (3600.0 * f64::from(TICK_HZ))
+        );
     }
 }
 
@@ -238,13 +332,20 @@ fn print_header() {
     }
     header.push_str(",flora_births,flora_deaths,fauna_births,fauna_deaths,fauna_hatched,litter");
     header.push_str(",stored,atmosphere,showers,residual");
+    header.push_str(",fixed_in,consumed_organic,standing_foliage");
+    for s in Plant::ALL {
+        header.push_str(&format!(",donors_{}", s.name()));
+    }
+    // The water's own reading: the lake's mean surface in voxels (`y + free` of its open
+    // surface cells), its volume and visible area, and the in-world stores beside it.
+    header.push_str(",lake_level_v,lake_m3,lake_m2,free_m3,pore_m3,aquifer_m3,tick_ms");
     println!("{header}");
 }
 
 /// One CSV row: `sim_min`, then per plant species the stand count, then per animal
 /// species the animal count and mean body, then per lineage its count, mean body, eggs
 /// and gestations, then the ledger counters, then the total litter.
-fn print_row(minute: u64, sim: &Sim) {
+fn print_row(minute: u64, sim: &Sim, tick_ms: f64) {
     let f = sim.flora().view();
     let a = sim.fauna().view();
 
@@ -297,5 +398,33 @@ fn print_row(minute: u64, sim: &Sim) {
     row.push(format!("{:.4}", w.atmosphere_m3));
     row.push(w.ledger.showers.to_string());
     row.push(format!("{:.3e}", w.total_residual()));
+    // Production and offtake, cumulative: consumed / fixed is the herbivores' share.
+    row.push(format!("{:.4}", f.ledger.fixed_in));
+    row.push(format!("{:.4}", f.ledger.consumed_organic_out));
+    let foliage: f64 = f.stands.iter().map(|st| st.foliage).sum();
+    row.push(format!("{foliage:.4}"));
+    for s in Plant::ALL {
+        let donor_min = f.config.species(s).donor_min;
+        let n = f.stands.iter().filter(|st| st.species == s && st.wood >= donor_min).count();
+        row.push(n.to_string());
+    }
+    let world = sim.world();
+    let lake = cubarium_voxel::hydrate::lake(world);
+    let level = if lake.surface_cells.is_empty() {
+        f64::from(lake.level_y)
+    } else {
+        lake.surface_cells
+            .iter()
+            .map(|&i| f64::from(world.config().coords(i).1) + w.free[i])
+            .sum::<f64>()
+            / lake.surface_cells.len() as f64
+    };
+    row.push(format!("{level:.3}"));
+    row.push(format!("{:.4}", lake.volume_m3));
+    row.push(format!("{:.2}", lake.visible_m2));
+    row.push(format!("{:.4}", world.pooled_m3()));
+    row.push(format!("{:.4}", world.pore_m3()));
+    row.push(format!("{:.4}", w.aquifer_m3));
+    row.push(format!("{tick_ms:.3}"));
     println!("{}", row.join(","));
 }

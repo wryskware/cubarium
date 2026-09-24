@@ -69,7 +69,7 @@ impl FaceTexel {
 pub fn animal_glyph(part: AnimalPart) -> GlyphId {
     match part {
         AnimalPart::None => GLYPH_NONE,
-        AnimalPart::Interim(_) => GLYPH_INTERIM,
+        AnimalPart::Interim(_) | AnimalPart::Model(_) => GLYPH_INTERIM,
         AnimalPart::Body { head: false, .. } => GLYPH_BODY,
         AnimalPart::Body { head: true, .. } => GLYPH_FRONT_BODY,
         AnimalPart::Head {

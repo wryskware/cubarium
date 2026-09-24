@@ -511,8 +511,8 @@ fn anchors(founder: Founder) -> Anchors {
 }
 
 impl Manifest {
-    /// The blind littershredder: 23 inputs, no eyes. The ladder's 0.19 m body, cruising
-    /// at one body length per second.
+    /// The blind littershredder: 23 inputs, no eyes. The ladder's 0.375 m body (package
+    /// L), cruising at one body length per second.
     pub fn blind() -> Manifest {
         let a = anchors(Founder::Blind);
         Manifest {
@@ -555,8 +555,8 @@ impl Manifest {
         }
     }
 
-    /// The sighted browser: 37 inputs with a three-sector cone. The ladder's 0.375 m
-    /// body, cruising at one body length per second; 2 m ray range and 45 rays.
+    /// The sighted browser: 37 inputs with a three-sector cone. The ladder's 0.75 m body
+    /// (package L), cruising at one body length per second; 2 m ray range and 45 rays.
     pub fn browser() -> Manifest {
         let a = anchors(Founder::Browser);
         Manifest {

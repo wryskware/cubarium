@@ -119,15 +119,15 @@ fn run(flora: &mut Flora, world: &mut World, ticks: u32) {
 /// its light is open sky to the bit. The attenuation the covered stand receives is the
 /// brief's formula in the crown's own published geometry, not an approximation of it.
 ///
-/// `umbrellafrond.crown_radius_voxels` is `[2.0, 2.0]` here against the placeholder
-/// `[1.0, 2.5]`, so the boundary falls on a whole voxel and "exactly at the radius" is a
+/// `umbrellafrond.crown_radius_m` is `[2.0, 2.0]` (two 1 m voxels) here against the placeholder
+/// `[0.375, 0.75]`, so the boundary falls on a whole voxel and "exactly at the radius" is a
 /// thing a fixture can express; `shade_k` is 30 against the placeholder 1.5, so one
 /// crown's attenuation is unmistakable in a single tick. Nothing else is changed.
 #[test]
 fn shade_covers_exactly_the_crown_radius_the_presenter_draws() {
     let mut config = FloraConfig::default();
     config.shade_k_per_m2 = 30.0;
-    config.umbrellafrond.crown_radius_voxels = [2.0, 2.0];
+    config.umbrellafrond.crown_radius_m = [2.0, 2.0];
     // These two tests predate layers and are about the shade rule's **geometry** and
     // the strictness of its inequality, both of which are stated over one disc. The
     // shading species is therefore given the one-layer, zero-porosity profile the rule
@@ -180,22 +180,22 @@ fn shade_covers_exactly_the_crown_radius_the_presenter_draws() {
     let uc = flora.config().species(Species::Umbrellafrond).clone();
     let bc = flora.config().species(Species::Bloomcrown).clone();
     assert_eq!(
-        uc.crown_radius(0.6),
+        uc.crown_radius(0.6, 1.0),
         2.0,
         "the fixture's premise: a whole-voxel radius"
     );
     assert!(
-        uc.crown_height(0.6) > bc.crown_height(0.1),
+        uc.crown_height(0.6, 1.0) > bc.crown_height(0.1, 1.0),
         "the shading crown has to be the taller one: {} against {}",
-        uc.crown_height(0.6),
-        bc.crown_height(0.1)
+        uc.crown_height(0.6, 1.0),
+        bc.crown_height(0.1, 1.0)
     );
 
     flora.step(&mut world);
 
     // The exact attenuation the brief asks for, in the crown's published geometry: the
     // shading stand's foliage is `α · W` as `Seed` left it, spread over `π r²`.
-    let area = (std::f64::consts::PI * uc.crown_radius(0.6).powi(2)).max(1.0);
+    let area = (std::f64::consts::PI * uc.crown_radius(0.6, 1.0).powi(2)).max(1.0);
     let l = (-30.0 * (uc.alpha * 0.6) / area).exp();
     let expect = l * (1.0 + bc.light_half) / (l + bc.light_half);
     let covered = flora
@@ -235,7 +235,7 @@ fn shade_covers_exactly_the_crown_radius_the_presenter_draws() {
 fn a_crown_level_with_another_does_not_shade_it_but_a_higher_one_does() {
     let mut config = FloraConfig::default();
     config.shade_k_per_m2 = 30.0;
-    config.umbrellafrond.crown_radius_voxels = [2.0, 2.0];
+    config.umbrellafrond.crown_radius_m = [2.0, 2.0];
     // These two tests predate layers and are about the shade rule's **geometry** and
     // the strictness of its inequality, both of which are stated over one disc. The
     // shading species is therefore given the one-layer, zero-porosity profile the rule
@@ -292,11 +292,11 @@ fn a_crown_level_with_another_does_not_shade_it_but_a_higher_one_does() {
     // The level pair covers itself — one voxel apart against a two-voxel radius — so
     // "not shaded" can only be the strictness of the inequality on the tops.
     assert!(
-        1.0 <= uc.crown_radius(0.6),
+        1.0 <= uc.crown_radius(0.6, 1.0),
         "the level pair must cover each other"
     );
     assert!(
-        uc.crown_height(0.3) < uc.crown_height(0.6),
+        uc.crown_height(0.3, 1.0) < uc.crown_height(0.6, 1.0),
         "and the unequal pair is not level"
     );
 
@@ -318,7 +318,7 @@ fn a_crown_level_with_another_does_not_shade_it_but_a_higher_one_does() {
         "nor does a lower crown shade a higher"
     );
     // The lower crown is shaded, by exactly the taller crown's own attenuation.
-    let area = (std::f64::consts::PI * uc.crown_radius(0.6).powi(2)).max(1.0);
+    let area = (std::f64::consts::PI * uc.crown_radius(0.6, 1.0).powi(2)).max(1.0);
     let l = (-30.0 * (uc.alpha * 0.6) / area).exp();
     let expect = l * (1.0 + uc.light_half) / (l + uc.light_half);
     let lower = v.stand_at(site(11)).unwrap().light;
@@ -379,7 +379,11 @@ fn one_voxel_shared_by_two_species_splits_exactly_by_demand() {
     config.bloomcrown.transpiration_m3_per_s = 500.0;
     config.umbrellafrond.transpiration_m3_per_s = 500.0;
 
-    let pore = 0.6;
+    // Wet enough that bloomcrown is at full moisture and umbrellafrond, a wetland plant,
+    // is part way up its ramp: available water 1.3 on package F's scale.
+    let a = 1.3;
+    let wp = Material::Soil.wilting_point();
+    let pore = wp + a * (Material::Soil.field_capacity() - wp);
     let mut world = one_shared_voxel(pore);
     let mut flora = Flora::new(config);
     assert!(flora.apply(
@@ -402,10 +406,12 @@ fn one_voxel_shared_by_two_species_splits_exactly_by_demand() {
     ));
 
     // One voxel's stock, and the whole strip's: four two-voxel columns and one of one.
-    let per_voxel = pore * Material::Soil.pore_capacity() * world.config().voxel_volume();
+    // What a root may drink of it is the water above the wilting point.
+    let held = pore * Material::Soil.pore_capacity() * world.config().voxel_volume();
+    let per_voxel = (pore - wp) * Material::Soil.pore_capacity() * world.config().voxel_volume();
     let stock0 = pore_stock(&world);
     assert!(
-        (stock0 - 9.0 * per_voxel).abs() < 1e-12,
+        (stock0 - 9.0 * held).abs() < 1e-12,
         "{stock0} is not nine voxels of soil"
     );
 
@@ -419,11 +425,11 @@ fn one_voxel_shared_by_two_species_splits_exactly_by_demand() {
     let us = flora.config().species(Species::Umbrellafrond).clone();
     assert_eq!(
         b.moisture, 1.0,
-        "pore 0.6 is past bloomcrown's sat_pore of {}",
-        bs.sat_pore
+        "available water {a} is past bloomcrown's full_water of {}",
+        bs.full_water
     );
     assert!(
-        (u.moisture - 0.6).abs() < 1e-12,
+        (u.moisture - us.moisture_at(a)).abs() < 1e-12 && u.moisture > 0.0 && u.moisture < 1.0,
         "umbrellafrond's ramp: {}",
         u.moisture
     );
@@ -470,14 +476,15 @@ fn one_voxel_shared_by_two_species_splits_exactly_by_demand() {
         "the shares do not sum to what was taken: {} against {total}",
         flora.view().ledger.transpired_m3
     );
-    assert!(pore_stock(&world) >= 0.0, "the soil went negative");
+    // Every root voxel is drawn down to its wilting point and no further.
+    let floor = 9.0 * wp * Material::Soil.pore_capacity() * world.config().voxel_volume();
     assert!(
-        pore_stock(&world) < 1e-15,
-        "every root voxel should be dry: {}",
+        (pore_stock(&world) - floor).abs() < 1e-12,
+        "every root voxel should be at the wilting point: {} against {floor}",
         pore_stock(&world)
     );
     assert!(
-        (stock0 - total).abs() < 1e-12 * stock0,
+        (stock0 - floor - total).abs() < 1e-12 * stock0,
         "the soil lost {} for {total} taken",
         stock0 - pore_stock(&world)
     );
@@ -535,7 +542,7 @@ fn frozen(sc: &mut cubarium_voxel_flora::SpeciesConfig) {
 /// read against what landed — nine packages on two sites would otherwise recruit.
 #[test]
 fn two_species_banks_share_one_site_and_each_donor_pays_only_its_own() {
-    let mut config = FloraConfig::default();
+    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
     config.bloomcrown.propagule_rate = 0.36;
     config.bloomcrown.hop = 1;
     config.bloomcrown.reserve_cap = 4.0;
@@ -956,7 +963,9 @@ fn a_canopy_changes_no_sky_visibility_and_all_of_the_plant_s_light() {
         "the fixture is an open plain: {before:?}"
     );
 
-    let mut flora = Flora::new(FloraConfig::default());
+    // Package L: crowns are metres; this 1 m-cell fixture keeps the crowns it was
+    // written against, four times the 0.25 m-cell ladder (`FloraConfig::crowns_scaled`).
+    let mut flora = Flora::new(FloraConfig::default().crowns_scaled(4.0));
     assert!(flora.apply(
         &world,
         Command::Seed {

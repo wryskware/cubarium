@@ -186,6 +186,21 @@ fn main() {
         }
     }
     print_summary(&first, &last);
+    // Bites and organic eaten per plant species over the whole run, from the fauna
+    // ledger: what the browser actually took, next to what the stock says it could.
+    let ledger = &sim.fauna().view().ledger;
+    for s in Plant::ALL {
+        println!(
+            "summary,bites_{},0,{}",
+            s.name(),
+            ledger.bites_by_plant[s.index()]
+        );
+        println!(
+            "summary,eaten_{},0,{:.6}",
+            s.name(),
+            ledger.eaten_by_plant[s.index()]
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -414,6 +414,7 @@ pub fn section(config: &Config) -> Hollows {
     match &config.landform {
         Landform::Ridge => Hollows::NONE,
         Landform::Staged(r) => r.hollows,
+        Landform::Terrarium(_) => Hollows::NONE,
     }
 }
 

@@ -26,7 +26,24 @@ use crate::Flora;
 /// `design/handoffs/voxel-plant-layers-2026-09-22.md`. Postcard is not
 /// self-describing, so a new field is a new format: other tags are refused, never
 /// migrated.
-pub const SCHEMA: u32 = 1;
+///
+/// Schema 2: package L (`design/handoffs/voxel-ladder-growth-2026-09-23.md`) states every
+/// crown in metres (`SpeciesConfig::crown_height_m` / `crown_radius_m`) at the size
+/// ladder, with the capped-seedling growth rule. The serialised config's fields changed,
+/// and a schema-1 stand's wood would grow a different plant: refused, not migrated.
+///
+/// Schema 3: package N (`design/handoffs/voxel-new-plants-2026-09-23.md`) appends three
+/// species (the per-species ledger arrays grow to nine) and two config fields
+/// (`water_depth_min_m`, `falls`): refused, not migrated.
+///
+/// Schema 4: the plant-viability packages (`design/handoffs/voxel-plant-viability-2026-09-23.md`).
+/// G adds `SpeciesConfig::graze_refuge` to the serialised config; F moves every species'
+/// water thresholds from pore fraction to available water (`wilt_water`, `full_water`,
+/// `establish_water_min`), same bytes, new meaning. Refused, not migrated.
+/// Package S joins it: whole seeds banked for hours on a staggered check clock — two
+/// species fields (`dispersal`, `clonal_share`), the config's `seed_check_s`, five
+/// per-species seed counters in the ledger and the shower flag the bank's flush reads.
+pub const SCHEMA: u32 = 4;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

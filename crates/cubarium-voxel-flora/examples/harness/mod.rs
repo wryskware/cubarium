@@ -97,6 +97,11 @@ pub fn habitat_of(species: Species) -> Habitat {
         Species::Stonecushion => Habitat::RockWithAPocket,
         Species::Velvetpad => Habitat::UnderACrown,
         Species::Glowcap => Habitat::OnALog,
+        // Package N: the canopy on the high open ground, the shrub on open soil, the reed
+        // in the wet hollow. Harness placement only; the gates still decide.
+        Species::Vaulttree => Habitat::Ridge,
+        Species::Lanternberry => Habitat::OpenSoil,
+        Species::Siphonreed => Habitat::Hollow,
     }
 }
 
@@ -282,8 +287,8 @@ pub fn canopy_over(world: &World, flora: &Flora, planned: &[Founder]) -> Vec<Can
         out.push(Canopy {
             x: f64::from(stand.site.x),
             z: f64::from(stand.site.z),
-            top: f64::from(stand.site.y) + sc.crown_height(stand.wood),
-            radius: sc.crown_radius(stand.wood),
+            top: f64::from(stand.site.y) + sc.crown_height(stand.wood, flora.config().voxel_m),
+            radius: sc.crown_radius(stand.wood, flora.config().voxel_m),
             foliage: stand.foliage,
         });
     }
@@ -304,8 +309,8 @@ pub fn canopy_over(world: &World, flora: &Flora, planned: &[Founder]) -> Vec<Can
         out.push(Canopy {
             x: f64::from(f.x),
             z: f64::from(f.z),
-            top: f64::from(site.y) + sc.crown_height(wood),
-            radius: sc.crown_radius(wood),
+            top: f64::from(site.y) + sc.crown_height(wood, flora.config().voxel_m),
+            radius: sc.crown_radius(wood, flora.config().voxel_m),
             // What `Command::Seed` will give it: `alpha · wood`, full foliage.
             foliage: sc.alpha * wood,
         });
@@ -363,12 +368,12 @@ pub fn gate_line(world: &World, flora: &Flora, species: Species, site: Site) -> 
         .view()
         .establishment_gates(&world.view(), site, species);
     format!(
-        "mean pore {} (>= {:.2}), saturated fraction {:.3} (<= {:.2}), water {:.3} m \
+        "mean available water {} (>= {:.2}), saturated fraction {:.3} (<= {:.2}), water {:.3} m \
          (<= {:.2}), sky {:.3} (>= {:.2}), {} soil voxels, dead wood in the box {:.3} \
          (>= {:.3})",
-        g.mean_pore
+        g.mean_water
             .map_or_else(|| "none".to_string(), |m| format!("{m:.3}")),
-        sc.establish_pore_min,
+        sc.establish_water_min,
         g.saturated_fraction,
         sc.establish_saturated_max,
         g.water_depth_m,
@@ -404,7 +409,7 @@ pub fn under_a_crown(
     site: Site,
 ) -> bool {
     let sc = flora.config().species(species);
-    let own_top = f64::from(site.y) + sc.crown_height(founder_wood(sc));
+    let own_top = f64::from(site.y) + sc.crown_height(founder_wood(sc), flora.config().voxel_m);
     covered_by(canopy, width, site, own_top)
 }
 
@@ -1014,10 +1019,12 @@ mod cap_tests {
         }
         // Accelerated, and stated as such: a hundredfold assimilation, a rich pool, a fast
         // parcel and fast wood. Nothing here is a preset proposal — the point is to walk all
-        // four stages inside a short test.
+        // four stages inside a short test. The timeline's germination stage is the next
+        // tick, so the bank is checked every tick and the seeds are dropped (package S's
+        // fixture config).
         let mut config = FloraConfig {
             initial_mineral: 500.0,
-            ..FloraConfig::default()
+            ..FloraConfig::default().drop_seeds_checked_each_tick()
         };
         {
             let sc = config.species_mut(Species::Bloomcrown);

@@ -355,7 +355,7 @@ fn at_creation_keeps_the_imported_mineral_equal_across_arms_where_lazy_does_not(
 /// is the only face either of them can reach and both packages land on it.
 fn two_banks_on_one_site() -> (World, Flora) {
     let world = pillars(4, &[0, 1, 2], 0.5);
-    let mut config = FloraConfig::default();
+    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
     fast_donor(&mut config, Species::Bloomcrown);
     fast_donor(&mut config, Species::Umbrellafrond);
     let mut flora = Flora::new(config);
@@ -696,7 +696,7 @@ fn two_donors_delivering_in_one_tick_name_two_different_recipients() {
 #[test]
 fn a_bank_emptied_and_refilled_in_one_tick_still_names_its_recipient() {
     let world = pillars(6, &[0, 1], 0.5);
-    let mut config = FloraConfig::default();
+    let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
     fast_donor(&mut config, Species::Bloomcrown);
     let mut flora = Flora::new(config);
     plant(&mut flora, &world, 0, Species::Bloomcrown);

@@ -199,11 +199,12 @@ pub struct FounderPhysiology {
     pub climb_m: f64,
     /// The **adult** body, in metres: length, width and height
     /// (`design/handoffs/voxel-body-anchors-2026-09-22.md`; decisions §1). The ladder's
-    /// animal — browser 0.375 × 0.1875 × 0.1875 m, shredder 0.19 × 0.0625 × 0.0625 m —
-    /// and *not* the [`Manifest`](crate::Manifest)'s `body_length_m` / `body_width_m`,
-    /// which are part of the trained-policy digest and must not move. A living body's
-    /// dimensions are these times `(body / body_max)^(1/3)`
-    /// ([`FounderPhysiology::body_at`]). Placeholders, `design/backlog.md` §1.
+    /// animal at package L's sizes — browser 0.75 × 0.375 × 0.375 m, shredder 0.375 ×
+    /// 0.125 × 0.125 m. Contract v2 (D1) reads the [`Manifest`](crate::Manifest)'s
+    /// `body_length_m` / `body_width_m` / `body_height_m` and its 1 BL/s cruise off these,
+    /// so moving them moves the trained-policy digest. A living body's dimensions are
+    /// these times `(body / body_max)^(1/3)` ([`FounderPhysiology::body_at`]).
+    /// Placeholders, `design/backlog.md` §1.
     pub adult_length_m: f64,
     pub adult_width_m: f64,
     pub adult_height_m: f64,
@@ -262,9 +263,16 @@ impl FounderPhysiology {
                 core: SpeciesConfig {
                     maintenance_per_s: 0.001,
                     bite_per_s: 0.0005,
+                    // The browser's K scaled by body (0.0125 / 0.05): a fortieth of the
+                    // litter cue's reference stock `M_EMIT`, so a litter film gives crumbs
+                    // and a real pile nearly a whole bite.
+                    bite_half_stock: 0.00125,
                     yield_fraction: 0.5,
                     n_tissue: 0.02,
                     body_max: 0.0125,
+                    // From body_min to birth_body (0.009375) in ≥ 2,757 s, so that with the
+                    // 900 s hold a hatchling's first clutch is ≥ 3,657 s after it hatched.
+                    growth_max_per_s: 3.4e-6,
                     body_min: 0.003125,
                     birth_body: 0.0125,
                     birth_cost: 0.00625,
@@ -289,10 +297,12 @@ impl FounderPhysiology {
                 // A ground feeder's placeholder climb: half a browser's, one voxel on
                 // either shipped grid (`design/backlog.md` §1).
                 climb_m: 0.125,
-                // The ladder's littershredder: 0.19 m long, a third of that in section.
-                adult_length_m: 0.19,
-                adult_width_m: 0.0625,
-                adult_height_m: 0.0625,
+                // The ladder's littershredder (package L,
+                // `design/handoffs/voxel-ladder-growth-2026-09-23.md` §3): 0.375 m long,
+                // a third of that in section — 3 x 1 x 1 cells of 0.125 m.
+                adult_length_m: 0.375,
+                adult_width_m: 0.125,
+                adult_height_m: 0.125,
                 eye_height_fraction: EYE_HEIGHT_FRACTION,
                 mouth_ceiling_fraction: MOUTH_CEILING_FRACTION,
                 contact_height_fraction: CONTACT_HEIGHT_FRACTION,
@@ -315,10 +325,11 @@ impl FounderPhysiology {
                 // The browser's placeholder climb, one body length's worth of leg:
                 // two voxels on `small`, one on `default` and `wide`.
                 climb_m: 0.25,
-                // The ladder's frondgrazer: 6 x 3 x 3 cells of 0.125 m.
-                adult_length_m: 0.375,
-                adult_width_m: 0.1875,
-                adult_height_m: 0.1875,
+                // The ladder's frondgrazer (package L, same brief §3): 0.75 x 0.375 x
+                // 0.375 m, 6 x 3 x 3 cells of 0.125 m.
+                adult_length_m: 0.75,
+                adult_width_m: 0.375,
+                adult_height_m: 0.375,
                 eye_height_fraction: EYE_HEIGHT_FRACTION,
                 mouth_ceiling_fraction: MOUTH_CEILING_FRACTION,
                 contact_height_fraction: CONTACT_HEIGHT_FRACTION,
@@ -834,10 +845,14 @@ fn boundary_arc(view: &VoxelView<'_>, pose: &crate::Pose, r: f64, layer: u32, ce
     0.0
 }
 
-/// The columns the mouth region covers: the footprint and its short forward reach,
-/// sampled at the capsule's extreme points (centre, reach tip, and the tip's forward
-/// and lateral extremes). At most the four columns around the body can be involved at
-/// these body sizes, and the five probes reach all of them.
+/// The columns the mouth region covers: the footprint and its short forward reach —
+/// the axis from the body's centre to the reach tip's forward extreme, and the tip's
+/// lateral extent — probed at the capsule's extreme points (centre, reach tip, the
+/// tip's forward and lateral extremes) **and at no more than half a voxel between
+/// them**. The five extreme probes alone were enough while a body fitted in about a
+/// cell; package L's 0.75 m browser spans more than two 0.25 m cells from centre to
+/// tip, and five probes skipped the column in the middle — the one a crown beside the
+/// head stands in.
 pub(crate) fn mouth_columns(
     view: &VoxelView<'_>,
     pose: &crate::Pose,
@@ -850,13 +865,20 @@ pub(crate) fn mouth_columns(
     let (fx, fz) = pose.forward();
     let (rx, rz) = (fz, -fx);
     let tip = (pose.x + (r + reach) * fx, pose.z + (r + reach) * fz);
-    let probes = [
-        (pose.x, pose.z),
-        tip,
-        (tip.0 + r * fx, tip.1 + r * fz),
-        (tip.0 + r * rx, tip.1 + r * rz),
-        (tip.0 - r * rx, tip.1 - r * rz),
-    ];
+    // Along the axis, centre to the tip's forward extreme; then across the tip, one
+    // lateral extreme to the other. Each run's endpoints are the old extreme probes.
+    let axis = 2.0 * r + reach;
+    let axis_steps = ((axis / (0.5 * v)).ceil() as usize).max(1);
+    let side_steps = ((2.0 * r / (0.5 * v)).ceil() as usize).max(1);
+    let mut probes: Vec<(f64, f64)> = Vec::with_capacity(axis_steps + side_steps + 2);
+    for k in 0..=axis_steps {
+        let d = axis * (k as f64) / (axis_steps as f64);
+        probes.push((pose.x + d * fx, pose.z + d * fz));
+    }
+    for k in 0..=side_steps {
+        let d = -r + 2.0 * r * (k as f64) / (side_steps as f64);
+        probes.push((tip.0 + d * rx, tip.1 + d * rz));
+    }
     let mut cols: Vec<(i64, u32)> = Vec::with_capacity(probes.len());
     for &(px, pz) in &probes {
         let z = (pz / v).floor();
@@ -1055,9 +1077,10 @@ pub(crate) fn mouth_foliage_stand(
 }
 
 /// What a mouth over `cols` whose band selects the cell range `layers` can take from
-/// **one stand**: the sum of the stocks of its foliage layers whose disc cell is in
-/// range and whose own disc — its own radius, which is a fraction of the crown's —
-/// covers one of the columns.
+/// **one stand**: the sum of the edible stocks ([`cubarium_voxel_flora::StandLayer::edible`],
+/// above the grazing floor) of its foliage layers whose disc cell is in range and whose
+/// own disc — its own radius, which is a fraction of the crown's — covers one of the
+/// columns.
 ///
 /// This is the whole of what layers changed about reach. Before, a stand was in reach
 /// or it was not and the answer was its whole `foliage`; now an adult bloomcrown offers
@@ -1091,14 +1114,17 @@ pub(crate) fn reachable_layers(
     // This scan runs over every stand for every mouth on every tick.
     let sc = fv.config.species(stand.species);
     let lowest = i64::from(stand.site.y) + 1;
-    let highest = i64::from(stand.site.y) + i64::from(sc.crown_voxels(stand.wood));
+    let highest = i64::from(stand.site.y) + i64::from(sc.crown_voxels(stand.wood, fv.config.voxel_m));
     if *layers.end() < lowest || *layers.start() > highest {
         return out;
     }
     let width = i64::from(view.config.width);
     let depth = i64::from(view.config.depth);
     for layer in fv.layers(stand) {
-        if !(layer.stock > 0.0) || !layers.contains(&layer.cell) {
+        // What a mouth could take is what stands above the grazing floor: the flora
+        // layer's one reading of food (package G).
+        let edible = layer.edible();
+        if !(edible > 0.0) || !layers.contains(&layer.cell) {
             continue;
         }
         let span = layer.radius_v.floor() as i64;
@@ -1121,7 +1147,7 @@ pub(crate) fn reachable_layers(
             }
         }
         if touching {
-            out.push((layer.foliage_index.unwrap_or(0), layer.stock));
+            out.push((layer.foliage_index.unwrap_or(0), edible));
         }
     }
     out
@@ -1553,8 +1579,10 @@ mod tests {
             total
         );
         assert!((pose.x - (0.5 + manifest.forward_reference_m)).abs() < 1e-12);
-        // Wrap on x: starting just before the seam, the same period lands past it.
-        let mut seam = pose_at(8.0 * 0.25 - 0.01, 0.5, H);
+        // Wrap on x: starting just before the seam, the same period lands past it, one
+        // forward reference on from the start less the ring's circumference.
+        let ring_m = 8.0 * 0.25;
+        let mut seam = pose_at(ring_m - 0.01, 0.5, H);
         for _ in 0..manifest.cadence_ticks() {
             resolve_motion(
                 &view,
@@ -1571,9 +1599,12 @@ mod tests {
                 },
             );
         }
+        // Derived, not pinned: package L's 0.375 m shredder cruises 0.375 m/s (1 BL/s),
+        // so the landing point moves with the body length.
+        let landing = ring_m - 0.01 + manifest.forward_reference_m - ring_m;
         assert!(
-            seam.x < 0.05,
-            "the pose wrapped past the seam to {}, it did not turn or stop",
+            landing > 0.0 && (seam.x - landing).abs() < 1e-12,
+            "the pose wrapped past the seam to {}, not {landing}: it turned or stopped",
             seam.x
         );
     }
@@ -1648,9 +1679,14 @@ mod tests {
         let manifest = Founder::Blind.manifest();
         let body = adult(Founder::Blind);
         // Heading east at z row 3, close enough to the wall that the period would
-        // cross into it.
+        // cross into it: the disc's front 0.02 m short of the face (package L's
+        // shredder is 0.125 m wide, so the old fixed 0.95 m start was already inside).
         let mut standing = 2u32;
-        let mut pose = pose_at(4.0 * 0.25 - 0.05, 3.0 * 0.25 + 0.125, H);
+        let mut pose = pose_at(
+            4.0 * 0.25 - body.footprint_radius() - 0.02,
+            3.0 * 0.25 + 0.125,
+            H,
+        );
         let mut blocked = false;
         let mut attempted = 0.0;
         let mut delivered = 0.0;
@@ -1710,14 +1746,14 @@ mod tests {
 
     /// A body needs **its own height** of void over the face it stands on
     /// (`design/handoffs/voxel-body-anchors-2026-09-22.md`), not the voxels its mouth
-    /// lifts through: the 0.1875 m browser asks for one cell at 0.25 m and two at
-    /// 0.125 m, and the 0.0625 m shredder asks for one at either. A void one cell
-    /// shorter is not a place to stand and not a place to walk to.
+    /// lifts through: package L's 0.375 m browser asks for two cells at 0.25 m and
+    /// three at 0.125 m, and the 0.125 m shredder asks for one at either. A void one
+    /// cell shorter is not a place to stand and not a place to walk to.
     #[test]
     fn a_slot_shorter_than_the_body_is_not_a_place_to_stand() {
         let browser = adult(Founder::Browser);
-        assert_eq!(browser.headroom_voxels(0.25), 1);
-        assert_eq!(browser.headroom_voxels(0.125), 2);
+        assert_eq!(browser.headroom_voxels(0.25), 2);
+        assert_eq!(browser.headroom_voxels(0.125), 3);
         assert_eq!(
             adult(Founder::Blind).headroom_voxels(0.125),
             1,
@@ -1725,7 +1761,7 @@ mod tests {
         );
 
         // A 0.125 m world: ground at y = 2, then a roof over two columns — x = 4 at
-        // y = 5, leaving two cells of room, and x = 5 at y = 4, leaving one.
+        // y = 6, leaving three cells of room, and x = 5 at y = 5, leaving two.
         let mut world = World::empty(VoxelConfig {
             width: 8,
             height: 8,
@@ -1745,7 +1781,7 @@ mod tests {
                 }
             }
         }
-        for (x, roof) in [(4i64, 5u32), (5, 4)] {
+        for (x, roof) in [(4i64, 6u32), (5, 5)] {
             world.apply(WorldCommand::SetMaterial {
                 x,
                 y: roof,
@@ -1755,16 +1791,16 @@ mod tests {
         }
         let view = world.view();
         let need = browser.headroom_voxels(view.config.voxel_m);
-        assert_eq!(need, 2);
+        assert_eq!(need, 3);
         assert!(
             has_headroom(&view, 4, 2, 2, need),
-            "two cells under the roof is the browser's height"
+            "three cells under the roof is the browser's height"
         );
         assert!(
             !has_headroom(&view, 5, 2, 2, need),
             "one cell less is a slot, not a floor"
         );
-        // The shredder is half the browser's height and the same slot is a corridor
+        // The shredder is a third of the browser's height and the same slot is a corridor
         // for it: the clearance is the animal's, not the grid's.
         assert!(has_headroom(
             &view,
@@ -1774,8 +1810,8 @@ mod tests {
             adult(Founder::Blind).headroom_voxels(view.config.voxel_m)
         ));
 
-        // And the walk agrees: from the open face at x = 3 the two-cell slot is
-        // steppable and the one-cell slot is not.
+        // And the walk agrees: from the open face at x = 3 the three-cell slot is
+        // steppable and the two-cell slot is not.
         let sc = *crate::FaunaConfig::default().founder(Founder::Browser);
         let from = Site { x: 3, y: 2, z: 2 };
         assert_eq!(
@@ -2171,10 +2207,11 @@ mod tests {
             },
         ));
         let mut flora = Flora::new(FloraConfig::default());
-        // Litter one column east of the body, so the settled field has a gradient the
-        // cue channels can read.
+        // Litter one column west of the body, behind it, so the settled field has a
+        // gradient the cue channels can read and the mouth is not over it. (It was one
+        // column east until package L: the 0.375 m shredder's mouth reaches that column.)
         flora.deposit(
-            site(3, 2),
+            site(1, 2),
             Deposit {
                 kind: DepositKind::Litter,
                 organic: 0.2,
@@ -2205,7 +2242,7 @@ mod tests {
         assert_eq!(obs[12], 1.0, "contact validity");
         assert_eq!(obs[13], 0.0, "dry");
         assert_eq!(obs[14], 1.0, "wet validity");
-        // The litter one column ahead is outside the short mouth reach: bare-ground
+        // The litter one column behind is outside the forward mouth reach: bare-ground
         // Taste is valid zero. Chem remains unavailable; Light reads the real sky.
         assert_eq!(obs[15], 0.0, "unreached litter is not taste");
         assert_eq!(obs[16], 0.5, "ground resistance");
@@ -2282,31 +2319,35 @@ mod tests {
     }
 
     /// The mouth band is a **length**, so the same animal selects the same physical
-    /// layers on either grid: the adult browser's `1.33 × 0.1875 = 0.249375` m ceiling
-    /// is one 0.25 m cell and two 0.125 m cells, which are the same 0.25 m of air. The
-    /// shredder's 0.0831 m ceiling is the standing layer alone on both.
+    /// layers on either grid: package L's adult browser's `1.33 × 0.375 = 0.49875` m
+    /// ceiling is two 0.25 m cells and four 0.125 m cells, which are the same 0.5 m of
+    /// air. The shredder's `1.33 × 0.125 = 0.16625` m ceiling is the standing layer
+    /// alone on the 0.25 m grid and — being over one 0.125 m cell — the standing layer
+    /// and the one above it on the 0.125 m grid: a band that is not a whole number of
+    /// cells selects every cell it overlaps.
     #[test]
     fn the_mouth_band_selects_the_same_physical_layers_on_both_grids() {
         let browser = adult(Founder::Browser);
         let blind = adult(Founder::Blind);
-        assert!((browser.mouth_ceiling_m - 0.249375).abs() < 1e-12);
-        assert_eq!(mouth_crown_layers(2, &browser, 0.25), 3..=3);
-        assert_eq!(mouth_crown_layers(2, &browser, 0.125), 3..=4);
+        assert!((browser.mouth_ceiling_m - 0.49875).abs() < 1e-12);
+        assert_eq!(mouth_crown_layers(2, &browser, 0.25), 3..=4);
+        assert_eq!(mouth_crown_layers(2, &browser, 0.125), 3..=6);
         assert_eq!(mouth_crown_layers(2, &blind, 0.25), 3..=3);
-        assert_eq!(mouth_crown_layers(2, &blind, 0.125), 3..=3);
+        assert_eq!(mouth_crown_layers(2, &blind, 0.125), 3..=4);
         // A touch at exactly the ceiling contributes nothing: a body whose ceiling is
-        // one whole cell reaches that cell and not the one starting there.
+        // two whole cells reaches those cells and not the one starting there.
         let mut exact = browser;
-        exact.mouth_ceiling_m = 0.25;
-        assert_eq!(mouth_crown_layers(2, &exact, 0.25), 3..=3);
+        exact.mouth_ceiling_m = 0.5;
+        assert_eq!(mouth_crown_layers(2, &exact, 0.25), 3..=4);
     }
 
     /// The counterfactual behind the band: the **same** fixture, the same mouth columns
-    /// and the same two crowns, read with the adult browser's 0.249 m ceiling and again
-    /// with a half-metre one. The crown one 0.25 m voxel above the head — which the old
-    /// whole-voxel reach of one accepted — is out of the adult's physical band, and the
-    /// crown at the head layer is in it either way. The band is what decides, and the
-    /// manifest's `mouth_reach_up_voxels` is not read at all.
+    /// and the same two crowns, read with the adult browser's 0.49875 m ceiling and again
+    /// with a 0.75 m one. The crown two 0.25 m voxels above the head layer is out of the
+    /// adult's physical band, and the crown at the head layer is in it either way. The
+    /// band is what decides, and the manifest's `mouth_reach_up_voxels` is not read at
+    /// all. (Package L doubled the browser; before it the ceiling was 0.249 m and the
+    /// out-of-band crown was one voxel up.)
     #[test]
     fn the_band_and_not_a_voxel_count_decides_what_the_mouth_takes() {
         use cubarium_voxel_flora::{Command as FloraCommand, Species as Plant};
@@ -2317,19 +2358,24 @@ mod tests {
         // test was written against: what an adult bloomcrown's basal rosette does under
         // the same band is `tests/plant_layers.rs`'s claim.
         let mut flora = Flora::new(FloraConfig::default().one_layer_species());
-        // bloomcrown wood 0.30 rounds to a two-voxel crown, so its crown layer is the
-        // body's head layer plus one; wood 0.12 rounds to one and sits at the head.
-        for (x, wood) in [(2i64, 0.30), (5, 0.12)] {
+        // A bloomcrown at wood 0.30 is 0.6875 m tall, a three-voxel crown whose cell is
+        // the body's head layer plus two; a half-grown springturf rounds to one voxel and
+        // sits at the head.
+        let turf = 0.5 * flora.config().springturf.wood_max;
+        for (x, species, wood) in [(2i64, Plant::Bloomcrown, 0.30), (5, Plant::Springturf, turf)] {
             assert!(flora.apply(
                 &world,
                 FloraCommand::Seed {
                     x,
                     z: 2,
-                    species: Plant::Bloomcrown,
+                    species,
                     wood,
                 },
             ));
         }
+        let v = flora.config().voxel_m;
+        assert_eq!(flora.config().bloomcrown.crown_voxels(0.30, v), 3);
+        assert_eq!(flora.config().springturf.crown_voxels(turf, v), 1);
         let fv = flora.view();
         let browser = adult(Founder::Browser);
 
@@ -2339,7 +2385,7 @@ mod tests {
         assert_eq!(
             mouth_foliage_stand(&fv, &view, &cols_over, 2, &browser, crate::Diet::Vascular),
             None,
-            "0.25 m of crown is above a 0.249375 m ceiling"
+            "a crown cell starting 0.5 m over the face is above a 0.49875 m ceiling"
         );
         assert_eq!(
             mouth_foliage_stand(&fv, &view, &cols_head, 2, &browser, crate::Diet::Vascular)
@@ -2351,12 +2397,12 @@ mod tests {
         // A taller animal, same fixture: the band rises with the body and the crown
         // over the head comes into reach. Nothing else about the mouth changed.
         let mut tall = browser;
-        tall.mouth_ceiling_m = 0.5;
+        tall.mouth_ceiling_m = 0.75;
         assert_eq!(
             mouth_foliage_stand(&fv, &view, &cols_over, 2, &tall, crate::Diet::Vascular)
                 .map(|(s, _)| s),
             Some(site(2, 2)),
-            "a 0.5 m band reaches the crown one voxel up"
+            "a 0.75 m band reaches the crown two voxels up"
         );
         assert_eq!(
             mouth_foliage_stand(&fv, &view, &cols_head, 2, &tall, crate::Diet::Vascular)

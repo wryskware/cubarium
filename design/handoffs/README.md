@@ -1,6 +1,6 @@
 ---
 design_status: exploration
-last_reviewed: 2026-09-18
+last_reviewed: 2026-09-22
 decision_refs: []
 ---
 
@@ -14,12 +14,22 @@ date and are never a current task list.
 
 ## Open now
 
-- **Voxel performance follow-up (2026-09-18):**
-  [Sparse falling water](voxel-sparse-fall-2026-09-18.md), then
-  [cached exchange geometry](voxel-exchange-geometry-2026-09-18.md), on the
-  same water worker; [study observer caching](voxel-study-observer-cache-2026-09-18.md)
-  is separate flora/harness work. Animal sensing optimization is deferred
-  while sensing is actively redesigned. These are handoffs, not landed gains.
+- **Organism design, 2026-09-23:** plant packages in order
+  [L: sizes to the ladder + growth fix](voxel-ladder-growth-2026-09-23.md),
+  [N: vaulttree, lanternberry, siphonreed](voxel-new-plants-2026-09-23.md),
+  [V: voxel organism models baked from Blender](voxel-organism-models-2026-09-23.md);
+  dispatch waits for Wrysk's look at the plant illustration round and anatomy tables.
+  Thread handoffs: [predation and flight](predation-and-flight-2026-09-23.md),
+  [environment render plan](environment-render-plan-2026-09-23.md).
+- **Water algorithm findings (2026-09-22):**
+  [Game/literature comparison and next experiments](voxel-water-algorithms-2026-09-22.md).
+  Current solver and measured PA gains; sleeping water and layered-column
+  candidates. Research handoff, not an accepted replacement algorithm. The
+  earlier sparse-fall and geometry-cache work is already present in the code.
+- **Study performance follow-up (2026-09-18):**
+  [Study observer caching](voxel-study-observer-cache-2026-09-18.md) is separate
+  flora/harness work. Animal sensing optimization is deferred while sensing
+  is actively redesigned.
 - **2026-09-16 new-world planning handoff:**
   [Fable: voxel ringworld, engine choice and first wave](fable-voxel-world-first-wave-2026-09-16.md).
   Review the local-desktop terrain/water direction and prepare a small first wave.
