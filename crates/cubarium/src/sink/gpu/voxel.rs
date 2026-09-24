@@ -136,7 +136,8 @@ impl VoxelGpuSink {
     ) -> Result<VoxelGpuSink> {
         let params = params_of(cfg, proj, options.roof_from_texture);
         let gpu = std::sync::Arc::new(
-            Gpu::open(&[]).context("opening the Vulkan device for --sink gpu")?,
+            Gpu::open(options.target.instance_extensions())
+                .context("opening the Vulkan device for --sink gpu")?,
         );
         eprintln!(
             "cubarium voxel: --sink gpu on {} ({:.0} KiB per tick)",

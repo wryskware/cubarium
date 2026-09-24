@@ -1810,6 +1810,10 @@ impl FrameSource for VoxelRenderer {
         Some(VoxelRenderer::content_version(self))
     }
 
+    fn raster_view(&self) -> Option<vk::ImageView> {
+        Some(self.raster_view)
+    }
+
     fn gpu_ms(&self, gpu: &Gpu) -> f64 {
         self.gpu_split(gpu).map_or(f64::NAN, |s| s[0] + s[1] + s[2])
     }

@@ -169,6 +169,25 @@ impl PresentPass {
         pass: vk::RenderPass,
         pipeline: vk::Pipeline,
     ) {
+        unsafe { self.record_push(d, cb, image, extent, xform.push(extent), pass, pipeline) }
+    }
+
+    /// [`PresentPass::record`] with the push constants given outright: how a desktop
+    /// window hands over its [`WindowFit`], which is not a quarter-turn and a factor.
+    ///
+    /// # Safety
+    /// `cb` must be recording and outside a render pass.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn record_push(
+        &self,
+        d: &ash::Device,
+        cb: vk::CommandBuffer,
+        image: &TargetImage,
+        extent: (u32, u32),
+        push: [f32; 8],
+        pass: vk::RenderPass,
+        pipeline: vk::Pipeline,
+    ) {
         unsafe {
             crate::render::begin(d, cb, pass, image.framebuffer, extent.0, extent.1);
             d.cmd_bind_descriptor_sets(
@@ -184,7 +203,7 @@ impl PresentPass {
                 self.pipeline_layout,
                 vk::ShaderStageFlags::FRAGMENT,
                 0,
-                bytemuck::cast_slice(&xform.push(extent)),
+                bytemuck::cast_slice(&push),
             );
             d.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipeline);
             d.cmd_draw(cb, 3, 1, 0, 0);
@@ -285,9 +304,181 @@ pub trait FrameSource {
         true
     }
 
+    /// The world raster's view, for a target that runs the present pass itself — on
+    /// another thread, onto an image it acquires there — rather than asking
+    /// [`FrameSource::record_frame`] to. The raster is left in `SHADER_READ_ONLY_OPTIMAL`
+    /// by every frame. `None` from a renderer that does not lend it; such a target then
+    /// cannot be used with it.
+    fn raster_view(&self) -> Option<vk::ImageView> {
+        None
+    }
+
     /// Milliseconds the last frame's timestamps saw, or `NaN` if they are not ready.
     fn gpu_ms(&self, gpu: &Gpu) -> f64;
 
     /// The world raster as `w · h · 4` bytes, already sRGB-encoded.
     fn read_raster(&self, gpu: &Gpu) -> Result<Vec<u8>>;
+}
+
+/// How the world raster lands in a **desktop window**: the largest whole upscale that
+/// fits, centred, with black bars — or, in a window smaller than the raster, a nearest
+/// downscale that fits, centred the same way. It is a development window, so it has no
+/// quarter-turn and no rule about what a person may resize it to.
+///
+/// The present pass maps a window pixel to a raster pixel through its push constants, so
+/// this is a second way of building them next to [`PresentTransform::push`]. The two
+/// differ in one respect the panel must never see: `offset.w` is 1 here, which tells
+/// `present.frag` to paint a pixel black when it maps outside the raster. The panel's
+/// transform leaves it 0 and its picture is exactly what it was.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WindowFit {
+    /// The whole upscale `k`, or 0 when the window is too small for even 1x and the
+    /// raster is downscaled.
+    pub factor: u32,
+    /// Raster pixels per window pixel: `1 / k` for an upscale, more than 1 for a
+    /// downscale.
+    pub step: f32,
+    /// The window pixel the raster's top-left corner lands on.
+    pub origin: (u32, u32),
+    /// The picture's size in window pixels; everything else is the black bars.
+    pub size: (u32, u32),
+    /// True when the swapchain is a UNORM format and the shader must encode sRGB itself.
+    pub encode_srgb: bool,
+}
+
+impl WindowFit {
+    /// The fit of a `raster` into a `window`, both in pixels. A window of zero area fits
+    /// nothing and the caller does not present to it.
+    pub fn fit(raster: (u32, u32), window: (u32, u32), encode_srgb: bool) -> WindowFit {
+        let (rw, rh) = (raster.0.max(1), raster.1.max(1));
+        let (ww, wh) = (window.0.max(1), window.1.max(1));
+        let k = (ww / rw).min(wh / rh);
+        let (step, size) = if k >= 1 {
+            (1.0 / k as f32, (rw * k, rh * k))
+        } else {
+            // The smallest step that fits both axes, so the aspect is kept and the long
+            // side fills the window.
+            let s = (f64::from(rw) / f64::from(ww)).max(f64::from(rh) / f64::from(wh));
+            let side = |r: u32, w: u32| ((f64::from(r) / s).round() as u32).clamp(1, w);
+            (s as f32, (side(rw, ww), side(rh, wh)))
+        };
+        WindowFit {
+            factor: k,
+            step,
+            origin: ((ww - size.0) / 2, (wh - size.1) / 2),
+            size,
+            encode_srgb,
+        }
+    }
+
+    /// The present pass's push constants: two columns of the window-to-raster matrix,
+    /// the offset, the sRGB flag, and the letterbox flag.
+    ///
+    /// The shader floors `gl_FragCoord` to the pixel's corner; the offset puts the sample
+    /// back at the pixel's **centre** before it is scaled. At a whole upscale `k` that
+    /// centre is `(n + 0.5) / k` raster pixels in, which is never a whole number, so a
+    /// rounding error in `1 / k` can never move a pixel onto the neighbouring texel.
+    pub fn push(&self) -> [f32; 8] {
+        let s = self.step;
+        let (ox, oy) = (self.origin.0 as f32, self.origin.1 as f32);
+        [
+            s,
+            0.0,
+            0.0,
+            s,
+            (0.5 - ox) * s,
+            (0.5 - oy) * s,
+            if self.encode_srgb { 1.0 } else { 0.0 },
+            1.0,
+        ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `present.frag`'s own arithmetic along one axis: the raster pixel window pixel `p`
+    /// reads, or `None` where the letterbox paints black.
+    fn read(push: &[f32; 8], axis: usize, p: u32, raster: u32) -> Option<u32> {
+        let (scale, offset) = (push[axis * 3], push[4 + axis]);
+        let src = (scale * p as f32 + offset).floor();
+        (src >= 0.0 && src < raster as f32).then_some(src as u32)
+    }
+
+    /// The window pixels that show the raster along one axis, and what each one reads.
+    fn axis(fit: &WindowFit, axis: usize, window: u32, raster: u32) -> Vec<(u32, u32)> {
+        let push = fit.push();
+        (0..window)
+            .filter_map(|p| read(&push, axis, p, raster).map(|s| (p, s)))
+            .collect()
+    }
+
+    /// A raster that fits is drawn at the largest whole upscale, centred: every raster
+    /// pixel becomes exactly `k` window pixels in each direction, in order, and the bars
+    /// either side read nothing.
+    #[test]
+    fn a_raster_that_fits_is_upscaled_by_the_largest_whole_factor_and_centred() {
+        let fit = WindowFit::fit((320, 180), (1000, 600), false);
+        assert_eq!(fit.factor, 3);
+        assert_eq!(fit.size, (960, 540));
+        assert_eq!(fit.origin, (20, 30));
+        for (a, window, raster, origin) in [(0, 1000, 320, 20), (1, 600, 180, 30)] {
+            let shown = axis(&fit, a, window, raster);
+            assert_eq!(shown.len() as u32, raster * 3, "axis {a}");
+            for (i, (p, s)) in shown.iter().enumerate() {
+                assert_eq!(*p, origin + i as u32, "axis {a}: one unbroken run");
+                assert_eq!(*s, i as u32 / 3, "axis {a}: pixel {p} reads the wrong texel");
+            }
+        }
+    }
+
+    /// The same at the factor the desktop really uses, 1x and at a large `k`, where a
+    /// rounding error in `1 / k` would first show as a doubled or a missing column.
+    #[test]
+    fn every_whole_factor_gives_every_texel_exactly_k_pixels() {
+        for (raster, window) in [((3328, 2048), (3328, 2048)), ((256, 128), (3840, 2160))] {
+            let fit = WindowFit::fit(raster, window, false);
+            let k = fit.factor;
+            assert!(k >= 1);
+            let shown = axis(&fit, 0, window.0, raster.0);
+            assert_eq!(shown.len() as u32, raster.0 * k);
+            for (i, (_, s)) in shown.iter().enumerate() {
+                assert_eq!(*s, i as u32 / k, "k = {k}");
+            }
+        }
+    }
+
+    /// A window smaller than the raster downscales nearest, keeps the aspect, and fills
+    /// the long side; the picture's reported size is exactly the run of pixels that read
+    /// the raster, and every read is inside it.
+    #[test]
+    fn a_window_smaller_than_the_raster_downscales_nearest_and_keeps_the_aspect() {
+        let (raster, window) = ((3328, 2048), (640, 400));
+        let fit = WindowFit::fit(raster, window, true);
+        assert_eq!(fit.factor, 0);
+        assert!((fit.step - 5.2).abs() < 1e-6, "{}", fit.step);
+        assert_eq!(fit.size.0, 640, "the long side fills the window");
+        for (a, w, r) in [(0, window.0, raster.0), (1, window.1, raster.1)] {
+            let shown = axis(&fit, a, w, r);
+            let first = shown.first().unwrap().0;
+            assert_eq!(first, [fit.origin.0, fit.origin.1][a], "axis {a}");
+            assert_eq!(shown.len() as u32, [fit.size.0, fit.size.1][a], "axis {a}");
+            assert!(shown.windows(2).all(|p| p[1].0 == p[0].0 + 1 && p[1].1 > p[0].1));
+        }
+        assert_eq!(fit.push()[6], 1.0, "a UNORM swapchain encodes in the shader");
+    }
+
+    /// The letterbox is the window's alone: the panel's push constants leave the flag at
+    /// 0, so `present.frag` runs for it exactly as before.
+    #[test]
+    fn only_the_window_asks_for_the_letterbox() {
+        let panel = PresentTransform {
+            factor: 6,
+            quarter_turns: 1,
+            encode_srgb: false,
+        };
+        assert_eq!(panel.push((1080, 1920))[7], 0.0);
+        assert_eq!(WindowFit::fit((320, 180), (640, 360), false).push()[7], 1.0);
+    }
 }
