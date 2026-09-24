@@ -132,6 +132,12 @@ figure{margin:0;background:#0a0b0d;padding:4px}
 img{width:100%;height:auto;display:block;image-rendering:pixelated}
 figcaption{font-size:11px;color:#888;word-break:break-all;margin-top:2px}
 summary{cursor:pointer;color:#aaa;margin-top:8px}
+#lb{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;overflow:auto;
+z-index:9;cursor:zoom-out;padding:2vh 2vw;box-sizing:border-box;text-align:center}
+#lb.on{display:block}
+#lb img{display:block;margin:0 auto;max-width:100%;width:auto;height:auto;
+image-rendering:pixelated;background:#222}
+#lb div{color:#ccc;font-size:12px;margin:6px 0;word-break:break-all}
 """
 
 JS = """
@@ -139,6 +145,34 @@ document.getElementById('filter').addEventListener('input',function(){
   var q=this.value.toLowerCase();
   document.querySelectorAll('section').forEach(function(s){s.hidden=!s.dataset.name.includes(q)});
   document.querySelectorAll('nav a').forEach(function(a){a.hidden=!a.dataset.name.includes(q)});
+});
+// Lightbox: click an image to view it here; Esc or a click closes it, arrows cycle
+// through every image on the page (past the filter; wraps). Ctrl/middle-click opens the file.
+var lb=document.createElement('div');lb.id='lb';
+function lock(on){document.body.style.overflow=on?'hidden':'';}
+lb.innerHTML='<img alt=""><div></div>';document.body.appendChild(lb);
+var cur=null;
+// Small images are enlarged by a whole-number factor (crisp pixels) to fill the
+// view; large ones fit the width and scroll. The aspect ratio is always kept.
+lb.firstChild.onload=function(){var im=this,w=im.naturalWidth,h=im.naturalHeight;
+  var k=Math.floor(Math.min(innerWidth*0.94/w,innerHeight*0.88/h));
+  im.style.width=(k>1?w*k:Math.min(w,innerWidth*0.94))+'px';};
+function show(a){cur=a;lb.scrollTop=0;lb.firstChild.src=a.getAttribute('href');
+  lb.lastChild.textContent=a.getAttribute('href');lb.classList.add('on');lock(true);}
+function step(d){if(!cur)return;
+  var all=[].slice.call(document.querySelectorAll('section:not([hidden]) figure a'));
+  var i=all.indexOf(cur);if(i<0||!all.length)return;
+  var n=all[(i+d+all.length)%all.length];var det=n.closest('details');
+  if(det)det.open=true;show(n);}
+document.addEventListener('click',function(e){
+  var a=e.target.closest('figure a');
+  if(a&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey&&e.button===0){e.preventDefault();show(a);return;}
+  if(lb.classList.contains('on')&&lb.contains(e.target)){lb.classList.remove('on');cur=null;lock(false);}
+});
+document.addEventListener('keydown',function(e){
+  if(!lb.classList.contains('on'))return;
+  if(e.key==='Escape'){lb.classList.remove('on');cur=null;lock(false);}
+  else if(e.key==='ArrowRight')step(1);else if(e.key==='ArrowLeft')step(-1);
 });
 """
 

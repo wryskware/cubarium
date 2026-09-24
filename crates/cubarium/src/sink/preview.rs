@@ -77,6 +77,7 @@ impl PreviewSink {
         let cube_size = CUBE_PIXELS * scale;
         let width = net_w + SEPARATOR + cube_size;
         let height = net_h.max(cube_size);
+        super::hidden::window_allowed()?;
         let window = Window::new(
             "cubarium",
             width,

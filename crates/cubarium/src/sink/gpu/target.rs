@@ -163,6 +163,7 @@ impl WindowTarget {
         // integer, exactly as the panel gets it.
         let zoom = ((1600 / w).min(900 / h)).max(1);
         let size = (w * zoom, h * zoom);
+        crate::sink::hidden::window_allowed()?;
         let window = minifb::Window::new(title, size.0, size.1, minifb::WindowOptions::default())
             .context("opening the --gpu-target window")?;
         Ok(WindowTarget {

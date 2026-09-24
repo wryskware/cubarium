@@ -70,3 +70,17 @@ Wrysk: "4/5 means I'd be okay with this shipping, but it could still be improved
   - **SP**: combine A and B, an alien monkey with gliding skin flaps.
   - **FG** and **LT** stay settled.
 - **Terrain materials:** not yet reviewed.
+
+## Reimagining picks (Wrysk, 2026-09-24)
+
+From `art/gen/runs/2026-09-24-reimagining-concepts/` (options described in
+`design/animal-body-reimagining-2026-09-24.md`):
+
+- **Chorister: CH-A2** (six-footed split-jaw runner). "Works for me. The images aren't
+  great but the idea is good."
+- **Ripple-snail: RS-D2** (open-front folded case). Works.
+- **Capgnawer: leaning CG-D2** (folded spore mantle).
+- **Seedporter: probably SP-AB2** (six-limbed grove glider). "The image doesn't really
+  depict it."
+- **Still open:** lanternjaw, loftstrider, umbrellafrond, velvetpad, vaulttree,
+  glowcap. "Either the pictures don't really work for it or the new body plan is bad."
