@@ -181,11 +181,21 @@ pub struct PresentStats {
     /// Slots the recorder was holding at each present, summed: the pipeline's depth, and
     /// the number that says whether the panel's rate is a slot supply problem.
     lent_sum: AtomicU64,
+    /// Presents that went through the loop but never reached the screen: a desktop
+    /// window with no swapchain image to give in time, or no area to show. Always 0 on
+    /// the panel.
+    unshown: AtomicU64,
 }
 
 impl PresentStats {
     fn add(&self, field: &AtomicU64, ns: u64) {
         field.fetch_add(ns, Ordering::Relaxed);
+    }
+
+    /// A present that did not reach the screen. The loop still counts it as presented —
+    /// the frame is done with either way — so the report takes these back out.
+    pub fn add_unshown(&self) {
+        self.add(&self.unshown, 1);
     }
 
     pub fn snapshot(&self) -> PresentSample {
@@ -202,6 +212,7 @@ impl PresentStats {
             reshow_ns: g(&self.reshow_ns),
             starved: g(&self.starved),
             lent_sum: g(&self.lent_sum),
+            unshown: g(&self.unshown),
             held: 0,
             skipped: 0,
             refused_packs: 0,
@@ -210,6 +221,13 @@ impl PresentStats {
 
     pub fn presented(&self) -> u64 {
         self.presented.load(Ordering::Relaxed)
+    }
+
+    /// Presents that reached the screen: [`PresentStats::presented`] less the ones a
+    /// window could not show.
+    pub fn shown(&self) -> u64 {
+        self.presented()
+            .saturating_sub(self.unshown.load(Ordering::Relaxed))
     }
 }
 
@@ -228,6 +246,10 @@ pub struct PresentSample {
     pub starved: u64,
     /// Slots the recorder held at each present, summed.
     pub lent_sum: u64,
+    /// Presents a desktop window could not put on the screen (no swapchain image in
+    /// time, or no area). Counted in `presented` and taken back out of what the line
+    /// calls shown.
+    pub unshown: u64,
     /// Frames the recorder did not record because the one already waiting showed the
     /// same world.
     pub held: u64,
@@ -253,6 +275,7 @@ impl PresentSample {
             reshow_ns: d(self.reshow_ns, earlier.reshow_ns),
             starved: d(self.starved, earlier.starved),
             lent_sum: d(self.lent_sum, earlier.lent_sum),
+            unshown: d(self.unshown, earlier.unshown),
             held: d(self.held, earlier.held),
             skipped: d(self.skipped, earlier.skipped),
             refused_packs: d(self.refused_packs, earlier.refused_packs),
@@ -279,14 +302,20 @@ impl PresentSample {
             }
         };
         let reshown = self.presented.saturating_sub(self.redrawn);
+        let shown = self.presented.saturating_sub(self.unshown);
+        // Only a desktop window ever fails to show a present; the panel's line is as it was.
+        let unshown = if self.unshown > 0 {
+            format!(" ({} never reached the screen)", self.unshown)
+        } else {
+            String::new()
+        };
         format!(
-            "presenter — {} shown ({:.1}/s), {} redrew the world; per present idle {:.1}, \
+            "presenter — {shown} shown ({:.1}/s){unshown}, {} redrew the world; per present idle {:.1}, \
              submit {:.1}, fence {:.1}, show {:.1}, slots {:.1} ms; \
              redraw {:.1} ms vs re-present {:.1} ms ({reshown}); \
              {} frames had no slot, {} already current, {} packs refused, {} starved of a slot, \
              {:.1} slots in hand; on {device}",
-            self.presented,
-            self.presented as f64 / seconds.max(1e-9),
+            shown as f64 / seconds.max(1e-9),
             self.redrawn,
             per(self.idle_ns),
             per(self.submit_ns),
@@ -963,6 +992,7 @@ mod report {
             reshow_ns: ms(8.1, 17),
             starved: 12,
             lent_sum: 2 * 1197,
+            unshown: 0,
             held: 402,
             skipped: 1853,
             refused_packs: 0,
