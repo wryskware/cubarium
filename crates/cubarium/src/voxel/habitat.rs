@@ -445,6 +445,8 @@ pub fn seed_pre_rolled(
     let width = world.config().width;
     let voxel_m = world.config().voxel_m;
     let mut taken: Vec<Site> = Vec::new();
+    // The lake, read once: a species that needs standing water is offered only its banks.
+    let lake = lake_cells(world);
 
     // The producers. Suitability is the **flora layer's own** establishment gates
     // plus its adult-upkeep check — a seed gate alone does not establish that a founder
@@ -457,6 +459,11 @@ pub fn seed_pre_rolled(
             let view = world.view();
             for (i, site) in sites.iter().enumerate() {
                 if wettest[i] > sc.drown_depth_m || !suitable(&view, *site, &sc, sky[i]) {
+                    continue;
+                }
+                // Standing water that lasts: the lake's margins, and not a puddle the
+                // pre-roll left that drains within the hour ([`lake_margin`]).
+                if sc.water_depth_min_m > 0.0 && !lake_margin(&view, &lake, *site) {
                     continue;
                 }
                 seeded.eligible_by_species[species.index()] += 1;
@@ -741,7 +748,8 @@ pub fn lineage_food(
 
 /// The food each component of `map` holds for `founder`'s mouth.
 ///
-/// - **Browser**: the foliage stock of every vascular stand's layers a mouth reaches
+/// - **Browser**: the **edible** foliage ([`cubarium_voxel_flora::StandLayer::edible`],
+///   above the grazing floor) of every vascular stand's layers a mouth reaches
 ///   from a face in the component ([`RouteMap::faces_reaching_layer`], the tick's own
 ///   band and per-layer scan with the diet gate). Every such stand is its own producer.
 /// - **Shredder**: litter and carrion a mouth reaches at a face's own height
@@ -770,8 +778,10 @@ fn food_on(
                 .into_iter()
                 .map(|i| map.components[i])
                 .collect();
+            // What a mouth could take: the layer's edible foliage above its grazing
+            // floor, not the refuge under it that no bite reaches (package G).
             for c in comps {
-                food.entry(c).or_default().stock += layer.stock;
+                food.entry(c).or_default().stock += layer.edible();
                 reached.insert(c);
             }
         }
@@ -1001,6 +1011,53 @@ fn support_sites(world: &World) -> Vec<Site> {
 fn suitable(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig, sky: f64) -> bool {
     establishment_gates_with_sky(view, site, sc, sky, 0.0, 0.0).passes()
         && adult_light_cover(sc, sky) >= 1.0
+}
+
+/// The ring's **lake** as a per-cell mask: the cells of [`cubarium_voxel::hydrate::lake`],
+/// the lowest standing water the sky sees, read off the world as it stands.
+fn lake_cells(world: &World) -> Vec<bool> {
+    let mut mask = vec![false; world.config().cells()];
+    for i in cubarium_voxel::hydrate::lake(world).cells {
+        mask[i] = true;
+    }
+    mask
+}
+
+/// Whether `site` is a **lake margin**: lake water stands on its face, or on the highest
+/// face at or below it in one of its four neighbouring columns — the flora layer's
+/// standing-water-beside rule with the water restricted to the lake.
+///
+/// Why the lake and nothing else (seeder-sites, 2026-09-23). A siphonreed needs settled
+/// standing water beside it for life, and after the pre-roll the rings hold two kinds:
+/// the lake, which the outlet's datum, the water table and the river keep, and puddles
+/// the hydrated sheet and the opening shower leave on the loam above it, which drain into
+/// the soil. Measured with no plants on `default` seeds 1–4 and `small` 1: of the reed's
+/// eligible faces, the lake's margins kept their water 99–100 % at 2 h (s4 63 % at 4 h),
+/// while the puddle banks the seeder used to pick went 0.20 → 0.07 m (s1) and
+/// 0.16 → 0.05 m (s3) inside the hour and the reeds on them died. A longer settle would
+/// find the same thing at a minute or more of startup on the larger worlds; the lake is
+/// already a derived reading. The desk terrarium's reeds were all on lake margins
+/// already (s1 64/64, s2 57/57), so it is unchanged.
+fn lake_margin(view: &VoxelView<'_>, lake: &[bool], site: Site) -> bool {
+    let c = view.config;
+    let wet = |x: i64, y: u32, z: u32| y + 1 < c.height && lake[c.index(x, y + 1, z)];
+    let x = i64::from(site.x);
+    if wet(x, site.y, site.z) {
+        return true;
+    }
+    for (dx, dz) in [(-1i64, 0i64), (1, 0), (0, -1), (0, 1)] {
+        let z = i64::from(site.z) + dz;
+        if z < 0 || z >= i64::from(c.depth) {
+            continue;
+        }
+        let (nx, nz) = (x + dx, z as u32);
+        if let Some(y) = (0..=site.y).rev().find(|&y| view.is_support(nx, y, nz))
+            && wet(nx, y, nz)
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// Which producer *prefers* a support face: the wetland one where water stands on it, the
@@ -1876,5 +1933,100 @@ mod tests {
             water.abs() < 1e-9 * scale,
             "water residual {water:e} after 40 ticks"
         );
+    }
+
+    /// **The food check counts edible foliage** (seeder-sites item 2): a browser's
+    /// component holds what its mouths could take — each reached layer's
+    /// [`StandLayer::edible`], above the grazing floor — and not the refuge under it,
+    /// which no bite can reach.
+    #[test]
+    fn the_browser_food_check_counts_edible_foliage_not_the_refuge() {
+        let world = plain(24, 6);
+        let mut flora = Flora::new(cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25));
+        plant(&mut flora, &world, 6, 3, Species::Bloomcrown, 0.85);
+        plant(&mut flora, &world, 16, 3, Species::Bloomcrown, 0.85);
+        let fauna = Fauna::new(Default::default());
+        let phys = *fauna.config().founder(Founder::Browser);
+        let (map, food) = lineage_food(&world.view(), &flora.view(), &phys, Founder::Browser);
+        let diet = cubarium_voxel_fauna::Diet::of(Founder::Browser);
+        let (fv, view) = (flora.view(), world.view());
+        let (mut edible, mut stock) = (0.0, 0.0);
+        for stand in fv.stands.iter() {
+            for layer in fv.layers(stand) {
+                if !map.faces_reaching_layer(&fv, &view, stand, &layer, diet).is_empty() {
+                    edible += layer.edible();
+                    stock += layer.stock;
+                }
+            }
+        }
+        assert!(edible > 0.0 && edible < stock, "the fixture needs a refuge: {edible} of {stock}");
+        let counted: f64 = food.values().map(|f| f.stock).sum();
+        assert!(
+            (counted - edible).abs() < 1e-12,
+            "the food check counted {counted}: edible {edible}, stock {stock}"
+        );
+    }
+
+    /// A 16 × 4 soil block at 0.25 m, faces at `y = 6`, with a **lake** — the lowest
+    /// standing water, `x` 2..=4, its floor at `y = 2` and water to the brim — and a
+    /// **puddle** well above it, `x` 10..=11, floor at `y = 5` and one cell of water.
+    fn lake_and_puddle() -> World {
+        let cfg = Config {
+            width: 16,
+            height: 12,
+            depth: 4,
+            ..Config::default()
+        };
+        let mut world = World::empty(cfg.clone());
+        for z in 0..cfg.depth {
+            for x in 0..cfg.width as i64 {
+                let top = match x {
+                    2..=4 => 2,
+                    10..=11 => 5,
+                    _ => 6,
+                };
+                for y in 1..=top {
+                    world.apply(cubarium_voxel::Command::SetMaterial {
+                        x,
+                        y,
+                        z,
+                        material: Material::Soil,
+                    });
+                }
+                for y in top + 1..=6 {
+                    let v = world.config().voxel_volume();
+                    world.apply(cubarium_voxel::Command::AddWater {
+                        x,
+                        y,
+                        z,
+                        volume_m3: v,
+                    });
+                }
+            }
+        }
+        world
+    }
+
+    /// **Siphonreed sites are lake margins** (seeder-sites item 1): the bank of the lake
+    /// is a margin; the bank of a puddle above it — standing water that drains — is not,
+    /// though the reed's own standing-water gate reads water beside both.
+    #[test]
+    fn the_lake_bank_is_a_margin_and_a_puddle_bank_is_not() {
+        let world = lake_and_puddle();
+        let lake = lake_cells(&world);
+        let view = world.view();
+        let reed = cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25)
+            .species(Species::Siphonreed)
+            .clone();
+        let lake_bank = Site { x: 5, y: 6, z: 1 };
+        let puddle_bank = Site { x: 9, y: 6, z: 1 };
+        for bank in [lake_bank, puddle_bank] {
+            let g = cubarium_voxel_flora::establishment_gates(&view, bank, &reed);
+            assert!(g.standing_ok, "{bank:?} has water beside it: {g:?}");
+        }
+        assert!(lake_margin(&view, &lake, lake_bank));
+        assert!(lake_margin(&view, &lake, Site { x: 3, y: 2, z: 1 }), "the lake floor");
+        assert!(!lake_margin(&view, &lake, puddle_bank), "a puddle is not the lake");
+        assert!(!lake_margin(&view, &lake, Site { x: 13, y: 6, z: 1 }), "dry ground");
     }
 }
