@@ -32,6 +32,8 @@
 //!   own foraging heuristic on the training layouts, and the teacher-forced fit of a GRU
 //!   to them, saved as an ordinary centre a search can warm-start from.
 //! - [`store`]: the exported policy file and checkpoint formats.
+//! - [`remote`]: remote episode workers over an ssh pipe — the `voxel-eval-worker`
+//!   command, the connect and fixture checks, and the pool a generation dispatches to.
 //! - [`commands`]: the `voxel-check` / `voxel-bench` / `voxel-train` / `voxel-evaluate`
 //!   command family.
 //!
@@ -69,6 +71,7 @@ pub mod controller;
 pub mod driver;
 pub mod imitate;
 pub mod landscape;
+pub mod remote;
 pub mod score;
 pub mod store;
 pub mod task;

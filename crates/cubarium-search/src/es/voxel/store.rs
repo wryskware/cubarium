@@ -113,6 +113,16 @@ impl VoxelPolicyFile {
     /// declared founder: wrong schema token, unknown founder, wrong-length vector, a
     /// non-finite weight, or a digest that is not that founder manifest's.
     pub fn load(path: &Path) -> Result<VoxelPolicyFile, String> {
+        let file = VoxelPolicyFile::read(path)?;
+        file.validate_common(&path.display().to_string())?;
+        Ok(file)
+    }
+
+    /// Read a file and check its schema token, and nothing else: the caller validates.
+    /// Only a **transfer start** ([`super::trainer::InitCenter::transfer`]) reads a
+    /// centre this way, because it alone may take weights authored against another
+    /// manifest digest; every other reader goes through [`VoxelPolicyFile::load`].
+    pub fn read(path: &Path) -> Result<VoxelPolicyFile, String> {
         let bytes =
             std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
         let file: VoxelPolicyFile =
@@ -124,7 +134,6 @@ impl VoxelPolicyFile {
                 file.schema
             ));
         }
-        file.validate_common(&path.display().to_string())?;
         Ok(file)
     }
 
@@ -162,6 +171,19 @@ impl VoxelPolicyFile {
 
     /// The founder, shape, digest and start-convention checks every load makes.
     fn validate_common(&self, name: &str) -> Result<(), String> {
+        self.validate_checks(name, true)
+    }
+
+    /// Every check [`VoxelPolicyFile::load`] makes **except the manifest digest**: the
+    /// founder, the vector length, finite weights, and the starting-stores and
+    /// start-heading conventions. A transfer start only
+    /// ([`super::trainer::InitCenter::transfer`]); the live loader, `--init-center` and
+    /// the shipped-centre checks stay strict.
+    pub fn validate_for_transfer(&self, name: &str) -> Result<(), String> {
+        self.validate_checks(name, false)
+    }
+
+    fn validate_checks(&self, name: &str, digest_too: bool) -> Result<(), String> {
         let founder = super::parse_founder(&self.founder).map_err(|e| format!("{name}: {e}"))?;
         let manifest = founder.manifest();
         let want = manifest.parameter_count();
@@ -176,7 +198,7 @@ impl VoxelPolicyFile {
             return Err(format!("{name}: theta[{i}] is not finite"));
         }
         let digest = voxel_schema_digest(founder);
-        if self.digest != digest {
+        if digest_too && self.digest != digest {
             return Err(format!(
                 "{name}: policy digest {:#018x} is not this build's {} manifest digest \
                  {digest:#018x}: the schemas differ and the weights cannot be reinterpreted",

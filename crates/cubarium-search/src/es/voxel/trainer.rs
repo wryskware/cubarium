@@ -42,8 +42,10 @@ use super::super::optimizer::{self, Adam};
 use super::super::rng::perturbation;
 use super::controller::EpisodeDriver;
 use super::driver::{self, Episode, EpisodeError, Limits};
+use super::remote::RemotePool;
 use super::task::{self, Prepared, Stage};
 use super::voxel_schema_digest;
+use rustc_hash::FxHashMap;
 
 /// The checkpoint's schema token.
 pub const CHECKPOINT_SCHEMA: &str = "cub-voxel-es-checkpoint-1";
@@ -234,6 +236,13 @@ pub struct GenerationReport {
     pub episodes_run: u64,
     pub ticks_run: u64,
     pub wall_seconds: f64,
+    /// Who ran the generation, when remotes took part: `local` first, then each
+    /// remote. Empty on a local-only generation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shares: Vec<Share>,
+    /// Units a lost remote handed back to the local workers.
+    #[serde(default)]
+    pub requeued: u64,
 }
 
 /// Work a discarded generation actually performed, counted against the budget and
@@ -301,6 +310,31 @@ pub struct GenerationPlan<'a> {
     pub workers: usize,
     pub evaluate_center: bool,
     pub deadline: Option<Instant>,
+    /// Remote workers that take units alongside the local ones, and the index every
+    /// layout has in the fixture list they founded. `None` runs local-only.
+    pub remote: Option<RemotePlan<'a>>,
+}
+
+/// The remote half of a [`GenerationPlan`].
+#[derive(Clone, Copy)]
+pub struct RemotePlan<'a> {
+    pub pool: &'a RemotePool,
+    /// Per layout of the plan, its index in the fixture list the remotes founded
+    /// ([`super::remote::FixtureSpec::build`]).
+    pub fixture_ids: &'a [usize],
+}
+
+/// Who ran how much of one generation: `local`, or a remote's name. Only the results
+/// the reduction used are counted.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Share {
+    pub executor: String,
+    /// Units: both signs of one pair on one fixture, or the centre on one.
+    pub units: u64,
+    pub episodes: u64,
+    pub ticks: u64,
+    /// Thread-seconds the units took where they ran: ticks / busy is one thread's rate.
+    pub busy_seconds: f64,
 }
 
 /// The seed one generation's episodes on one layout draw their body sizes from (D11):
@@ -316,10 +350,83 @@ pub fn episode_seed(train_seed: u64, generation: u32, layout_index: usize) -> u6
     z ^ (z >> 31)
 }
 
+/// One candidate's parameter vector: the centre, or the centre plus or minus `sigma`
+/// times the pair's positional perturbation. The one place it is computed — the
+/// coordinator and a remote worker ([`super::remote`]) both call it, so a pair evaluated
+/// anywhere evaluates the same weights. `eps` is scratch of the centre's length.
+pub fn candidate_theta(
+    theta: &[f64],
+    train_seed: u64,
+    sigma: f64,
+    generation: u32,
+    candidate: Candidate,
+    eps: &mut [f64],
+) -> Vec<f64> {
+    match candidate {
+        Candidate::Center => theta.to_vec(),
+        Candidate::Plus(p) | Candidate::Minus(p) => {
+            perturbation(train_seed, u64::from(generation), p as u64, eps);
+            let sign = if matches!(candidate, Candidate::Plus(_)) {
+                1.0
+            } else {
+                -1.0
+            };
+            theta
+                .iter()
+                .zip(eps.iter())
+                .map(|(t, e)| t + sign * sigma * e)
+                .collect()
+        }
+    }
+}
+
+/// One unit of dispatch: **both signs of one pair on one fixture**, or the centre on one.
+/// A pair never splits across machines, so whatever one machine's floats do, they do to
+/// both signs of the difference the gradient is made of.
+#[derive(Clone, Copy, Debug)]
+struct Unit {
+    pair: Option<usize>,
+    layout: usize,
+}
+
+impl Unit {
+    fn candidates(self) -> Vec<Candidate> {
+        match self.pair {
+            Some(p) => vec![Candidate::Plus(p), Candidate::Minus(p)],
+            None => vec![Candidate::Center],
+        }
+    }
+}
+
+/// The generation's shared board: who may take which unit, and the results.
+struct Board {
+    /// Units anyone may take, longest first.
+    pending: std::collections::VecDeque<usize>,
+    /// Units a lost remote had in hand: local workers only.
+    local_only: std::collections::VecDeque<usize>,
+    /// Units out on remotes right now. A local worker with nothing to take waits while
+    /// this is non-zero, because a remote that dies hands its units back.
+    on_remote: usize,
+    slots: Vec<Option<Episode>>,
+    /// `local`, then each active remote in pool order.
+    shares: Vec<Share>,
+    requeued: u64,
+}
+
 /// Run one generation and, if every job completed, apply the Adam ascent to `theta`.
 ///
 /// Returns `Err(Cancelled)` without touching `theta` or `adam` when the run was stopped;
 /// the work it did is carried in the error for the budget.
+///
+/// # Dispatch
+///
+/// The generation is cut into [`Unit`]s — both signs of one pair on one fixture, or the
+/// centre on one — queued longest first (a landscape's horizon before an arena's) so the
+/// generation's tail is short. Local workers and each active remote in the plan take
+/// units from the same queue, so jobs go to whichever machine is idle. A remote that
+/// dies or stalls hands its outstanding units back to the local workers, with one loud
+/// line, and the generation completes. Every result lands at its fixed index, so the
+/// reduction cannot see who ran what.
 pub fn run_generation(
     theta: &mut [f64],
     adam: &mut Adam,
@@ -354,25 +461,14 @@ pub fn run_generation(
     let mut eps = vec![0.0; params];
     let mut drivers: Vec<EpisodeDriver> = Vec::with_capacity(candidates.len());
     for c in &candidates {
-        let theta_c = match c {
-            Candidate::Center => theta.to_vec(),
-            Candidate::Plus(p) | Candidate::Minus(p) => {
-                perturbation(
-                    protocol.train_seed,
-                    u64::from(generation),
-                    *p as u64,
-                    &mut eps,
-                );
-                let sign = if matches!(c, Candidate::Plus(_)) {
-                    1.0
-                } else {
-                    -1.0
-                };
-                (0..params)
-                    .map(|j| theta[j] + sign * protocol.sigma * eps[j])
-                    .collect()
-            }
-        };
+        let theta_c = candidate_theta(
+            theta,
+            protocol.train_seed,
+            protocol.sigma,
+            generation,
+            *c,
+            &mut eps,
+        );
         drivers.push(EpisodeDriver::gru(&theta_c, founder).map_err(|e| {
             GenerationError::Invalid {
                 job: format!("gen{generation}/{}", c.label()),
@@ -382,19 +478,60 @@ pub fn run_generation(
         })?);
     }
 
-    // 2. One job per (candidate, layout), at its stable index, into a pre-sized slot.
-    let jobs_total = candidates.len() * layouts.len();
+    // 2. The units, longest first, and the fixed slot every episode lands in:
+    //    `candidate · layouts + layout`.
+    let lcount = layouts.len();
+    let jobs_total = candidates.len() * lcount;
     let names: Vec<String> = (0..jobs_total)
         .map(|i| {
             format!(
                 "gen{generation}/{}/seed{}",
-                candidates[i / layouts.len()].label(),
-                layouts[i % layouts.len()].layout_seed()
+                candidates[i / lcount].label(),
+                layouts[i % lcount].layout_seed()
             )
         })
         .collect();
-    let slots: Mutex<Vec<Option<Episode>>> = Mutex::new(vec![None; jobs_total]);
-    let cursor = AtomicUsize::new(0);
+    let slot_of = |c: Candidate, layout: usize| c.index(n) * lcount + layout;
+    let horizon_of = |layout: usize| layouts[layout].horizon().unwrap_or(plan.horizon);
+    let units: Vec<Unit> = (0..n)
+        .flat_map(|p| {
+            (0..lcount).map(move |layout| Unit {
+                pair: Some(p),
+                layout,
+            })
+        })
+        .chain(
+            (0..lcount)
+                .filter(|_| plan.evaluate_center)
+                .map(|layout| Unit { pair: None, layout }),
+        )
+        .collect();
+    let mut order: Vec<usize> = (0..units.len()).collect();
+    order.sort_by_key(|&u| {
+        std::cmp::Reverse(horizon_of(units[u].layout) * units[u].candidates().len() as u64)
+    });
+
+    let remotes: Vec<&super::remote::Remote> = plan
+        .remote
+        .map(|r| r.pool.active_remotes())
+        .unwrap_or_default();
+    let mut shares = vec![Share {
+        executor: "local".into(),
+        ..Share::default()
+    }];
+    shares.extend(remotes.iter().map(|r| Share {
+        executor: r.name().to_string(),
+        ..Share::default()
+    }));
+    let board = Mutex::new(Board {
+        pending: order.into_iter().collect(),
+        local_only: std::collections::VecDeque::new(),
+        on_remote: 0,
+        slots: vec![None; jobs_total],
+        shares,
+        requeued: 0,
+    });
+    let wakeup = std::sync::Condvar::new();
     let attempted = AtomicU64::new(0);
     let completed = AtomicU64::new(0);
     let ticks = AtomicU64::new(0);
@@ -403,55 +540,276 @@ pub fn run_generation(
         cancel,
         deadline: plan.deadline,
     };
+
+    // Land one unit's episodes in their slots, once, and count who ran them.
+    let fill = |b: &mut Board, unit: usize, episodes: Vec<Episode>, share: usize, busy: f64| {
+        let u = units[unit];
+        let slots: Vec<usize> = u
+            .candidates()
+            .into_iter()
+            .map(|c| slot_of(c, u.layout))
+            .collect();
+        if slots.iter().any(|&s| b.slots[s].is_some()) {
+            return;
+        }
+        let s = &mut b.shares[share];
+        s.units += 1;
+        s.episodes += episodes.len() as u64;
+        s.ticks += episodes.iter().map(|e| e.ticks).sum::<u64>();
+        s.busy_seconds += busy;
+        for (slot, e) in slots.into_iter().zip(episodes) {
+            b.slots[slot] = Some(e);
+        }
+    };
+
+    // 3. Remotes first: each is told the generation's centre, then claims its first
+    //    batch of units before the local workers start.
+    let mut batches: Vec<Vec<usize>> = Vec::with_capacity(remotes.len());
+    {
+        let mut b = board.lock().expect("board");
+        for r in &remotes {
+            let mut batch = Vec::new();
+            while batch.len() < r.capacity() {
+                let Some(u) = b.pending.pop_front() else {
+                    break;
+                };
+                batch.push(u);
+            }
+            b.on_remote += batch.len();
+            batches.push(batch);
+        }
+    }
+    let remote_unit = |id: u64, u: usize| super::remote::UnitJob {
+        id,
+        generation,
+        pair: units[u].pair,
+        fixture: plan
+            .remote
+            .expect("remote units have a remote plan")
+            .fixture_ids[units[u].layout],
+        horizon: horizon_of(units[u].layout),
+        episode_seed: episode_seed(protocol.train_seed, generation, units[u].layout),
+        names: units[u]
+            .candidates()
+            .into_iter()
+            .map(|c| names[slot_of(c, units[u].layout)].clone())
+            .collect(),
+    };
+
     let workers = plan
         .workers
         .max(1)
         .min(task::episode_worker_limit())
-        .min(jobs_total.max(1));
+        .min(units.len().max(1));
+    let centre: &[f64] = theta;
     std::thread::scope(|scope| {
-        for _ in 0..workers {
-            scope.spawn(|| {
-                loop {
-                    let index = cursor.fetch_add(1, Ordering::SeqCst);
-                    if index >= jobs_total {
-                        return;
+        for (k, (remote, batch)) in remotes.iter().zip(batches).enumerate() {
+            let (board, wakeup, attempted, completed, ticks) =
+                (&board, &wakeup, &attempted, &completed, &ticks);
+            let fill = &fill;
+            let remote_unit = &remote_unit;
+            let units = &units;
+            scope.spawn(move || {
+                use super::remote::{FromWorker, Incoming};
+                let mut out: FxHashMap<u64, (usize, Instant)> = FxHashMap::default();
+                // Hand every unit this remote holds back to the local workers.
+                let lose = |out: &mut FxHashMap<u64, (usize, Instant)>, reason: String| {
+                    remote.lose(&reason);
+                    let back: Vec<usize> = out.drain().map(|(_, (u, _))| u).collect();
+                    let episodes: usize = back.iter().map(|&u| units[u].candidates().len()).sum();
+                    {
+                        let mut b = board.lock().expect("board");
+                        b.on_remote -= back.len();
+                        b.requeued += back.len() as u64;
+                        b.local_only.extend(back.iter().copied());
                     }
+                    wakeup.notify_all();
+                    println!(
+                        "# REMOTE {} LOST in generation {generation}: {reason}; {} outstanding \
+                         units ({episodes} episodes) re-queued locally, the run goes on",
+                        remote.name(),
+                        back.len(),
+                    );
+                };
+                let send = |out: &mut FxHashMap<u64, (usize, Instant)>, u: usize| {
+                    let id = remote.next_id();
+                    out.insert(id, (u, Instant::now()));
+                    attempted.fetch_add(units[u].candidates().len() as u64, Ordering::SeqCst);
+                    remote.send_unit(&remote_unit(id, u))
+                };
+                if let Err(e) = remote.send_generation(generation, protocol, centre) {
+                    for u in batch {
+                        out.insert(remote.next_id(), (u, Instant::now()));
+                    }
+                    return lose(&mut out, e);
+                }
+                for u in batch {
+                    if let Err(e) = send(&mut out, u) {
+                        return lose(&mut out, e);
+                    }
+                }
+                loop {
                     if limits.expired() {
                         return;
                     }
-                    attempted.fetch_add(1, Ordering::SeqCst);
-                    let candidate = candidates[index / layouts.len()];
-                    let layout = &layouts[index % layouts.len()];
-                    match driver::run_prepared_seeded(
-                        layout,
-                        &drivers[index / layouts.len()],
-                        layout.horizon().unwrap_or(plan.horizon),
-                        limits,
-                        &names[index],
-                        episode_seed(protocol.train_seed, generation, index % layouts.len()),
-                    ) {
-                        Ok(e) => {
-                            completed.fetch_add(1, Ordering::SeqCst);
-                            ticks.fetch_add(e.ticks, Ordering::SeqCst);
-                            slots.lock().expect("slots")[index] = Some(e);
+                    // Top up to the remote's thread count from the shared queue.
+                    let mut claimed = Vec::new();
+                    {
+                        let mut b = board.lock().expect("board");
+                        while out.len() + claimed.len() < remote.capacity() {
+                            let Some(u) = b.pending.pop_front() else {
+                                break;
+                            };
+                            claimed.push(u);
                         }
-                        Err(EpisodeError::Cancelled { ticks: t }) => {
-                            ticks.fetch_add(t, Ordering::SeqCst);
-                            return;
-                        }
-                        Err(EpisodeError::Invalid { ticks: t, detail }) => {
-                            ticks.fetch_add(t, Ordering::SeqCst);
-                            // Stop every other worker: an invalid episode ends the
-                            // experiment, and continuing would burn budget on a broken run.
-                            cancel.store(true, Ordering::SeqCst);
-                            let mut slot = failure.lock().expect("failure");
-                            if slot.is_none() {
-                                *slot = Some((names[index].clone(), detail));
-                            }
-                            return;
+                        b.on_remote += claimed.len();
+                    }
+                    for u in claimed {
+                        if let Err(e) = send(&mut out, u) {
+                            return lose(&mut out, e);
                         }
                     }
-                    let _ = candidate;
+                    if out.is_empty() {
+                        return;
+                    }
+                    match remote.recv_timeout(Duration::from_millis(100)) {
+                        Some(Incoming::Message(FromWorker::Result {
+                            id,
+                            episodes,
+                            busy_seconds,
+                        })) => {
+                            let Some((u, _)) = out.remove(&id) else {
+                                continue; // a unit of an earlier generation
+                            };
+                            if episodes.len() != units[u].candidates().len() {
+                                out.insert(id, (u, Instant::now()));
+                                return lose(
+                                    &mut out,
+                                    format!("unit {id} came back with {} episodes", episodes.len()),
+                                );
+                            }
+                            completed.fetch_add(episodes.len() as u64, Ordering::SeqCst);
+                            ticks.fetch_add(
+                                episodes.iter().map(|e| e.ticks).sum::<u64>(),
+                                Ordering::SeqCst,
+                            );
+                            {
+                                let mut b = board.lock().expect("board");
+                                b.on_remote -= 1;
+                                fill(&mut b, u, episodes, 1 + k, busy_seconds);
+                            }
+                            wakeup.notify_all();
+                        }
+                        Some(Incoming::Message(FromWorker::Failed { id, detail })) => {
+                            if out.contains_key(&id) {
+                                // Whether the episode is really invalid is for a local run
+                                // to say: re-queued, it stops the run there if it is.
+                                return lose(&mut out, format!("unit {id} failed there: {detail}"));
+                            }
+                        }
+                        Some(Incoming::Unreadable { id, detail }) => {
+                            if let Some((u, _)) = id.and_then(|id| out.remove(&id)) {
+                                {
+                                    let mut b = board.lock().expect("board");
+                                    b.on_remote -= 1;
+                                    b.requeued += 1;
+                                    b.local_only.push_back(u);
+                                }
+                                wakeup.notify_all();
+                                println!(
+                                    "# remote {}: an unreadable result ({detail}); that unit \
+                                     re-queued locally",
+                                    remote.name()
+                                );
+                            }
+                        }
+                        Some(Incoming::Closed(reason)) => return lose(&mut out, reason),
+                        Some(Incoming::Message(_)) => {}
+                        None => {
+                            let options = remote.options();
+                            let silent = remote.silence();
+                            if silent > options.stall {
+                                return lose(
+                                    &mut out,
+                                    format!("no word for {:.1} s", silent.as_secs_f64()),
+                                );
+                            }
+                            if let Some(oldest) = out.values().map(|(_, t)| t.elapsed()).max()
+                                && oldest > options.unit_timeout
+                            {
+                                return lose(
+                                    &mut out,
+                                    format!("a unit outstanding for {:.0} s", oldest.as_secs_f64()),
+                                );
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        for _ in 0..workers {
+            scope.spawn(|| {
+                loop {
+                    let unit = {
+                        let mut b = board.lock().expect("board");
+                        loop {
+                            if limits.expired() {
+                                return;
+                            }
+                            if let Some(u) =
+                                b.local_only.pop_front().or_else(|| b.pending.pop_front())
+                            {
+                                break u;
+                            }
+                            if b.on_remote == 0 {
+                                return;
+                            }
+                            b = wakeup
+                                .wait_timeout(b, Duration::from_millis(100))
+                                .expect("board")
+                                .0;
+                        }
+                    };
+                    let u = units[unit];
+                    let t = Instant::now();
+                    let mut episodes = Vec::with_capacity(2);
+                    for c in u.candidates() {
+                        attempted.fetch_add(1, Ordering::SeqCst);
+                        let slot = slot_of(c, u.layout);
+                        match driver::run_prepared_seeded(
+                            &layouts[u.layout],
+                            &drivers[c.index(n)],
+                            horizon_of(u.layout),
+                            limits,
+                            &names[slot],
+                            episode_seed(protocol.train_seed, generation, u.layout),
+                        ) {
+                            Ok(e) => {
+                                completed.fetch_add(1, Ordering::SeqCst);
+                                ticks.fetch_add(e.ticks, Ordering::SeqCst);
+                                episodes.push(e);
+                            }
+                            Err(EpisodeError::Cancelled { ticks: t }) => {
+                                ticks.fetch_add(t, Ordering::SeqCst);
+                                return;
+                            }
+                            Err(EpisodeError::Invalid { ticks: t, detail }) => {
+                                ticks.fetch_add(t, Ordering::SeqCst);
+                                // Stop every other worker: an invalid episode ends the
+                                // experiment, and continuing would burn budget on a broken run.
+                                cancel.store(true, Ordering::SeqCst);
+                                let mut first = failure.lock().expect("failure");
+                                if first.is_none() {
+                                    *first = Some((names[slot].clone(), detail));
+                                }
+                                wakeup.notify_all();
+                                return;
+                            }
+                        }
+                    }
+                    let busy = t.elapsed().as_secs_f64();
+                    fill(&mut board.lock().expect("board"), unit, episodes, 0, busy);
+                    wakeup.notify_all();
                 }
             });
         }
@@ -468,12 +826,17 @@ pub fn run_generation(
             discarded,
         });
     }
-    let slots = slots.into_inner().expect("slots");
+    let Board {
+        slots,
+        shares,
+        requeued,
+        ..
+    } = board.into_inner().expect("board");
     if slots.iter().any(Option::is_none) {
         return Err(GenerationError::Cancelled(discarded));
     }
 
-    // 3. The update is committed only if the run stayed inside its limits: a generation
+    // 4. The update is committed only if the run stayed inside its limits: a generation
     //    that finished its last episode *after* the deadline has not earned an update.
     if limits.expired() {
         return Err(GenerationError::Cancelled(Discarded {
@@ -483,13 +846,13 @@ pub fn run_generation(
         }));
     }
 
-    // 4. Reduce in the fixed index order; scheduling cannot reach this. A candidate's
+    // 5. Reduce in the fixed index order; scheduling cannot reach this. A candidate's
     //    score is the mean of its episodes' scores over its layouts.
     let episodes: Vec<Episode> = slots.into_iter().map(|s| s.expect("checked")).collect();
     let mut jobs = Vec::with_capacity(jobs_total);
     let mut scores = vec![0.0; candidates.len()];
     for (ci, c) in candidates.iter().enumerate() {
-        let slice = &episodes[ci * layouts.len()..(ci + 1) * layouts.len()];
+        let slice = &episodes[ci * lcount..(ci + 1) * lcount];
         scores[ci] = slice.iter().map(|e| e.score.score).sum::<f64>() / slice.len() as f64;
         for (li, e) in slice.iter().enumerate() {
             jobs.push(Job {
@@ -514,7 +877,7 @@ pub fn run_generation(
         .fold(f64::NEG_INFINITY, f64::max);
     let score_spread = if hi > lo { hi - lo } else { 0.0 };
 
-    // 5. The antithetic gradient estimate and the Adam ascent, the flat trainer's own
+    // 6. The antithetic gradient estimate and the Adam ascent, the flat trainer's own
     //    arithmetic, over this shape's parameter count.
     let g = optimizer::gradient(&plus, &minus, params, protocol.sigma, |i, out| {
         perturbation(protocol.train_seed, u64::from(generation), i as u64, out);
@@ -541,6 +904,12 @@ pub fn run_generation(
         episodes_run: jobs_total as u64,
         ticks_run: episodes.iter().map(|e| e.ticks).sum(),
         wall_seconds: started.elapsed().as_secs_f64(),
+        shares: if remotes.is_empty() {
+            Vec::new()
+        } else {
+            shares
+        },
+        requeued,
     })
 }
 
@@ -606,6 +975,11 @@ pub struct InitProvenance {
     pub arena_protocol: String,
     pub generation: Option<u64>,
     pub score: Option<f64>,
+    /// A **transfer start** (`--transfer-from`): the manifest digest the source weights
+    /// were authored against, which is not this build's. Absent on an ordinary warm
+    /// start, whose digest is this build's by construction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transfer_digest: Option<u64>,
 }
 
 /// A loaded warm-start centre: the weights plus what to record about them.
@@ -644,6 +1018,54 @@ impl InitCenter {
                 arena_protocol: file.arena_protocol.clone(),
                 generation: file.generation,
                 score: file.score,
+                transfer_digest: None,
+            },
+            theta: file.theta,
+        })
+    }
+
+    /// Load `path` as a **transfer start** for `founder` (`--transfer-from`): a centre
+    /// whose vector is this manifest's length, taken even when the manifest digest it was
+    /// authored against is not this build's — the anchors moved, the shape did not. The
+    /// source file and its digest go into the run's provenance, and the run itself is
+    /// this build's in every other respect: its protocol, its digest, the centres it
+    /// writes. A training start only; `--init-center`, the live loader and the
+    /// shipped-centre checks stay strict, and the gate judges what comes out.
+    ///
+    /// Refused by name: another lineage's centre, and a vector of another length.
+    pub fn transfer(path: &std::path::Path, founder: Founder) -> Result<InitCenter, String> {
+        let name = path.display().to_string();
+        let file = super::store::VoxelPolicyFile::read(path)?;
+        let named = super::parse_founder(&file.founder).map_err(|e| format!("{name}: {e}"))?;
+        if named != founder {
+            return Err(format!(
+                "{name}: --transfer-from is a {} centre but this run trains {}: the \
+                 weights are another lineage's and cannot be reinterpreted",
+                named.name(),
+                founder.name()
+            ));
+        }
+        let want = founder.manifest().parameter_count();
+        if file.theta.len() != want {
+            return Err(format!(
+                "{name}: --transfer-from holds {} weights but this build's {} manifest has \
+                 {want} parameters: a transfer start needs the same vector length",
+                file.theta.len(),
+                founder.name()
+            ));
+        }
+        file.validate_for_transfer(&name)?;
+        let protocol_hash = file.protocol_hash.or_else(|| sibling_protocol_hash(path));
+        Ok(InitCenter {
+            provenance: InitProvenance {
+                file: name,
+                weights_fnv1a: fnv1a_hex(&file.theta),
+                protocol_hash,
+                stage: file.stage.clone(),
+                arena_protocol: file.arena_protocol.clone(),
+                generation: file.generation,
+                score: file.score,
+                transfer_digest: Some(file.digest),
             },
             theta: file.theta,
         })
@@ -769,6 +1191,9 @@ pub struct TrainSpec {
     /// P5-C's mixed set and held-out checkpoints. `None` trains on the arena layouts
     /// alone, as every run before P5-C did.
     pub mix: Option<LandscapeMix>,
+    /// Remote episode workers (`--remote`), connected and founding their fixtures
+    /// before this run founds its own ([`super::remote`]). `None` runs local-only.
+    pub remotes: Option<RemotePool>,
 }
 
 /// P5-C's per-generation landscapes (C1) and held-out checkpoints (C2). With a mix, the
@@ -785,6 +1210,64 @@ pub struct LandscapeMix {
     /// C5: stop when the held-out score has fallen at every one of this many consecutive
     /// checkpoints (4 × 32 = 128 updates). Zero never stops.
     pub collapse_checkpoints: usize,
+    /// Stop when the held-out best has stopped rising ([`Plateau`]). `None` never stops.
+    pub plateau: Option<Plateau>,
+}
+
+/// The plateau stop (`--plateau N,g`): the run ends when the held-out best has not
+/// risen by a relative `gain` over the last `checkpoints` checkpoints
+/// ([`held_out_plateaued`]). Most of a run's gain arrives in its first ~100 updates
+/// (P5-C: browser 0.80 / 1.02 / 1.04 / 1.165 at updates 0 / 32 / 96 / 512), so a run
+/// that has stopped gaining stops paying for it. A stop rule only: not in the
+/// protocol hash, and C5's fall rule still applies beside it.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Plateau {
+    pub checkpoints: usize,
+    pub gain: f64,
+}
+
+impl Plateau {
+    /// The default for a `--p5` run: three checkpoints, two percent.
+    pub const P5_DEFAULT: Plateau = Plateau {
+        checkpoints: 3,
+        gain: 0.02,
+    };
+
+    /// `N,g` (say `3,0.02`), or `off`.
+    pub fn parse(s: &str) -> Result<Option<Plateau>, String> {
+        let t = s.trim();
+        if t.eq_ignore_ascii_case("off") || t.eq_ignore_ascii_case("none") {
+            return Ok(None);
+        }
+        let bad =
+            || format!("--plateau wants `N,g` (checkpoints, relative gain) or `off`, not `{t}`");
+        let (n, g) = t.split_once(',').ok_or_else(bad)?;
+        let checkpoints: usize = n.trim().parse().map_err(|_| bad())?;
+        let gain: f64 = g.trim().parse().map_err(|_| bad())?;
+        if checkpoints == 0 || !gain.is_finite() || gain < 0.0 {
+            return Err(bad());
+        }
+        Ok(Some(Plateau { checkpoints, gain }))
+    }
+}
+
+/// The plateau rule over the held-out scores so far, oldest first: with `b_k` the best
+/// of the first `k + 1` checkpoints, the run has plateaued at the latest checkpoint `k`
+/// when `k >= n` and `b_k < b_{k-n} + g · |b_{k-n}|` — over the last `n` checkpoints the
+/// best has not risen by a relative `g`. A fall is no rise; `n = 0` never stops.
+pub fn held_out_plateaued(scores: &[f64], n: usize, g: f64) -> bool {
+    if n == 0 || scores.len() <= n {
+        return false;
+    }
+    let best = |upto: usize| {
+        scores[..=upto]
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max)
+    };
+    let k = scores.len() - 1;
+    let then = best(k - n);
+    best(k) < then + g * then.abs()
 }
 
 /// Why a training run stopped.
@@ -798,6 +1281,8 @@ pub enum TrainStop {
     EpisodeLimit,
     /// C5: the held-out score fell at every one of the last checkpoints.
     Collapse,
+    /// The held-out best stopped rising ([`Plateau`]).
+    Plateau(Plateau),
 }
 
 impl std::fmt::Display for TrainStop {
@@ -809,6 +1294,12 @@ impl std::fmt::Display for TrainStop {
             TrainStop::Collapse => write!(
                 f,
                 "STOPPED: the held-out score fell at every one of the last checkpoints (C5)"
+            ),
+            TrainStop::Plateau(p) => write!(
+                f,
+                "stopped at a plateau: the held-out best rose by less than {} over the last \
+                 {} checkpoints",
+                p.gain, p.checkpoints
             ),
         }
     }
@@ -869,11 +1360,14 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
         spec.train_seed,
         &task::TRAINING_LAYOUT_SEEDS[..spec.layouts],
     );
-    let layouts = match &spec.mix {
-        Some(_) => task::p5_arena_layouts(spec.founder, spec.stage, spec.band),
-        None => task::training_layouts(spec.founder, spec.stage, spec.band),
-    };
-    let arena_layouts = &layouts[..spec.layouts];
+    let arena_half = task::arena_half(
+        spec.founder,
+        spec.stage,
+        spec.band,
+        spec.mix.is_some(),
+        spec.layouts,
+    );
+    let arena_layouts = &arena_half[..];
     if let Some(mix) = &spec.mix {
         if mix.pool.is_empty() || mix.per_generation == 0 {
             return Err("a landscape mix needs a pool and a per-generation draw".into());
@@ -903,9 +1397,11 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
             held_out_every: mix.held_out_every,
         });
     }
-    // One generation's fixtures: the arena half, then (with a mix) that generation's draw.
-    let generation_set = |generation: u32| -> Vec<Prepared> {
+    // One generation's fixtures: the arena half, then (with a mix) that generation's draw;
+    // and each one's index in the list a remote founded (the arena half, then the pool).
+    let generation_set = |generation: u32| -> (Vec<Prepared>, Vec<usize>) {
         let mut set = arena_layouts.to_vec();
+        let mut ids: Vec<usize> = (0..arena_layouts.len()).collect();
         if let Some(mix) = &spec.mix {
             for i in super::landscape::generation_draw(
                 spec.train_seed,
@@ -914,10 +1410,18 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
                 mix.per_generation,
             ) {
                 set.push(mix.pool[i].clone());
+                ids.push(arena_layouts.len() + i);
             }
         }
-        set
+        (set, ids)
     };
+    // The remotes founded the same list for themselves while this machine founded its
+    // own; each joins once its per-fixture summary matches this machine's, and is refused
+    // loudly when it does not.
+    if let Some(pool) = &spec.remotes {
+        let pool_fixtures = spec.mix.iter().flat_map(|m| m.pool.iter());
+        pool.verify(arena_layouts.iter().chain(pool_fixtures), pool.ready_wait());
+    }
     let run_dir = spec.out.clone();
     std::fs::create_dir_all(run_dir.join("centers"))
         .map_err(|e| format!("cannot create {}: {e}", run_dir.display()))?;
@@ -930,6 +1434,19 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
         cp.theta.clone_from(&init.theta);
         cp.adam = Adam::new(cp.theta.len());
         cp.init_center = Some(init.provenance.clone());
+        if let Some(digest) = init.provenance.transfer_digest {
+            println!(
+                "# TRANSFER start from {}: its weights were authored against manifest digest \
+                 {digest:#018x}, this build's is {:#018x}; same length ({} parameters), \
+                 taken as they are. Weights {:#018x}; Adam state fresh, this run's protocol \
+                 {:#018x}",
+                init.provenance.file,
+                cp.protocol.digest,
+                cp.theta.len(),
+                init.provenance.weights_fnv1a,
+                cp.protocol_hash,
+            );
+        }
         println!(
             "# warm start from {} (stage {}, arena {}, protocol {}), weights {:#018x}; \
              Adam state fresh, this run's protocol {:#018x}",
@@ -993,6 +1510,12 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
             held_out_collapsed(&scores, mix.collapse_checkpoints)
         })
     };
+    let plateaued = |cp: &VoxelCheckpoint| -> Option<Plateau> {
+        let mix = spec.mix.as_ref()?;
+        let p = mix.plateau?;
+        let scores: Vec<f64> = cp.held_out.iter().map(|h| h.score).collect();
+        held_out_plateaued(&scores, p.checkpoints, p.gain).then_some(p)
+    };
 
     // 0. The initial centre evaluation — generation 0's centre record. The plan's episode
     //    accounting starts here ("2,180 episodes including the initial centre").
@@ -1001,7 +1524,7 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
         let mut scores = Vec::new();
         let mut attempted = 0u64;
         let mut ticks = 0u64;
-        let set = generation_set(0);
+        let (set, _) = generation_set(0);
         for (li, layout) in set.iter().enumerate() {
             if cancel.load(Ordering::Relaxed) {
                 break;
@@ -1060,12 +1583,16 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
             stop = TrainStop::Wall;
             break;
         }
-        let set = generation_set(generation);
+        let (set, fixture_ids) = generation_set(generation);
         let next_generation_episodes =
             (2 * spec.pairs as u64 + u64::from(spec.evaluate_center)) * set.len() as u64;
         if cp.episodes_attempted + next_generation_episodes > spec.episode_limit {
             stop = TrainStop::EpisodeLimit;
             break;
+        }
+        // A remote that finished founding since the last generation joins here.
+        if let Some(pool) = &spec.remotes {
+            pool.admit();
         }
         let plan = GenerationPlan {
             layouts: &set,
@@ -1073,6 +1600,10 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
             workers: spec.workers,
             evaluate_center: spec.evaluate_center,
             deadline: Some(deadline),
+            remote: spec.remotes.as_ref().map(|pool| RemotePlan {
+                pool,
+                fixture_ids: &fixture_ids,
+            }),
         };
         // The centre a generation scores is the one it started from; the file written
         // for it holds exactly those weights, not the updated ones.
@@ -1112,6 +1643,25 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
                     report.episodes_run,
                     report.wall_seconds,
                 );
+                if !report.shares.is_empty() {
+                    println!(
+                        "        {}{}",
+                        report
+                            .shares
+                            .iter()
+                            .map(|s| format!(
+                                "{} {} units {} ep {} ticks {:.1} busy-s",
+                                s.executor, s.units, s.episodes, s.ticks, s.busy_seconds
+                            ))
+                            .collect::<Vec<_>>()
+                            .join(" | "),
+                        if report.requeued > 0 {
+                            format!(" | {} units re-queued", report.requeued)
+                        } else {
+                            String::new()
+                        }
+                    );
+                }
             }
             Err(GenerationError::Cancelled(d)) => {
                 cp.discarded.add(d);
@@ -1137,6 +1687,11 @@ pub fn train(spec: &TrainSpec, cancel: &AtomicBool) -> Result<TrainReport, Strin
             if collapsed(&cp) {
                 save_checkpoint(&checkpoint_path, &cp)?;
                 stop = TrainStop::Collapse;
+                break;
+            }
+            if let Some(p) = plateaued(&cp) {
+                save_checkpoint(&checkpoint_path, &cp)?;
+                stop = TrainStop::Plateau(p);
                 break;
             }
         }
@@ -1755,7 +2310,10 @@ mod tests {
     fn the_plateau_rule_stops_a_flat_series_and_not_a_rising_one() {
         // P5-C's browser shape: most of the gain by the first checkpoints, then a creep.
         let flat = [0.80, 1.02, 1.03, 1.035, 1.04];
-        assert!(!held_out_plateaued(&flat[..4], 3, 0.02), "too few checkpoints");
+        assert!(
+            !held_out_plateaued(&flat[..4], 3, 0.02),
+            "too few checkpoints"
+        );
         assert!(held_out_plateaued(&flat, 3, 0.02), "1.04 < 1.02 · 1.02");
         let rising = [0.80, 0.90, 1.00, 1.10, 1.20, 1.30, 1.40];
         for k in 1..=rising.len() {
@@ -1781,6 +2339,9 @@ mod tests {
         assert!(Plateau::parse("3").is_err());
         assert!(Plateau::parse("0,0.02").is_err());
         assert!(Plateau::parse("3,-0.1").is_err());
-        assert_eq!(Some(Plateau::P5_DEFAULT), Plateau::parse("3,0.02").expect("ok"));
+        assert_eq!(
+            Some(Plateau::P5_DEFAULT),
+            Plateau::parse("3,0.02").expect("ok")
+        );
     }
 }

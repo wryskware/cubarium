@@ -796,9 +796,49 @@ enum Command {
         /// Training landscapes drawn per generation (with `--p5`).
         #[arg(long, default_value_t = 16)]
         landscapes_per_generation: usize,
-        /// Updates between held-out checkpoints (with `--p5`).
-        #[arg(long, default_value_t = 32)]
+        /// Updates between held-out checkpoints (with `--p5`); a fine-tune can check
+        /// every 16.
+        #[arg(long, default_value_t = 32, alias = "heldout-every")]
         held_out_every: u32,
+        /// Transfer start: a saved centre whose vector is this manifest's length,
+        /// taken even though its manifest digest is another build's (package L moved
+        /// the anchors, not the shape). The source file and digest go into the run's
+        /// provenance. A training start only: `--init-center` stays strict.
+        #[arg(long, conflicts_with = "init_center")]
+        transfer_from: Option<PathBuf>,
+        /// `N,g`: stop when the held-out best has not risen by a relative `g` over the
+        /// last `N` checkpoints, or `off`. Default for `--p5` runs: 3,0.02. The C5
+        /// fall rule applies beside it.
+        #[arg(long)]
+        plateau: Option<String>,
+        /// A remote worker, `host:threads` (repeatable): runs `ssh host <remote-bin>
+        /// voxel-eval-worker --threads N` and sends it pairs over the pipe. The remote
+        /// binary must be this build (`scripts/voxel-remote-ship.sh`).
+        #[arg(long = "remote")]
+        remotes: Vec<String>,
+        /// The worker binary's path on the remote machines.
+        #[arg(long, default_value = cubarium_search::es::voxel::remote::DEFAULT_REMOTE_BIN)]
+        remote_bin: String,
+        /// Seconds to wait, once this machine's fixtures are founded, for a remote still
+        /// founding its own before starting without it (it joins later when ready).
+        #[arg(long, default_value_t = 900)]
+        remote_wait: u64,
+    },
+    /// Package S: a remote episode worker. Speaks `voxel-train --remote`'s protocol on
+    /// stdin and stdout — started by it over ssh, never by hand.
+    VoxelEvalWorker {
+        /// Episode threads: units run at once.
+        #[arg(long)]
+        threads: usize,
+        /// Milliseconds between heartbeats.
+        #[arg(long, default_value_t = 2_000)]
+        heartbeat_ms: u64,
+        /// Test hook: exit abruptly after sending this many results.
+        #[arg(long, hide = true)]
+        die_after: Option<u64>,
+        /// Test hook: go silent, pipe open, after sending this many results.
+        #[arg(long, hide = true)]
+        hang_after: Option<u64>,
     },
     /// P5-C S1: a shredder landscape episode's cost with the plant leg off and on.
     VoxelFloraCost {
@@ -1244,15 +1284,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             p5,
             landscapes_per_generation,
             held_out_every,
+            transfer_from,
+            plateau,
+            remotes,
+            remote_bin,
+            remote_wait,
         } => {
             if overwrite {
                 let _ = std::fs::remove_dir_all(&out);
             }
-            es::voxel::commands::train(
+            es::voxel::commands::train(es::voxel::commands::TrainArgs {
                 founder,
                 stage,
                 band,
                 init_center,
+                transfer_from,
                 controller,
                 pairs,
                 layouts,
@@ -1265,10 +1311,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 center_eval,
                 out,
                 p5,
-                landscapes_per_generation,
+                per_generation: landscapes_per_generation,
                 held_out_every,
-            )
+                plateau,
+                remotes,
+                remote_bin,
+                remote_wait,
+            })
         }
+        Command::VoxelEvalWorker {
+            threads,
+            heartbeat_ms,
+            die_after,
+            hang_after,
+        } => es::voxel::remote::serve(es::voxel::remote::WorkerOptions {
+            threads,
+            heartbeat: std::time::Duration::from_millis(heartbeat_ms.max(1)),
+            die_after,
+            hang_after,
+        })
+        .map_err(Into::into),
         Command::VoxelEvaluate {
             policy,
             founder,

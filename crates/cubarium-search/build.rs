@@ -14,6 +14,37 @@ fn main() {
         .ok()
         .unwrap_or_else(git_id);
     println!("cargo:rustc-env=CUBARIUM_SEARCH_BUILD={id}");
+    println!("cargo:rerun-if-env-changed=CARGO_ENCODED_RUSTFLAGS");
+    println!("cargo:rustc-env=CUBARIUM_SEARCH_FLAGS={}", build_flags());
+}
+
+/// How this build was compiled, for a remote worker's connect check
+/// (`es::voxel::remote`): profile, optimisation level, target, the rustflags, and a
+/// digest of the target features they enabled (`-C target-cpu=znver5` shows there).
+fn build_flags() -> String {
+    let var = |k: &str| std::env::var(k).unwrap_or_default();
+    let rustflags = var("CARGO_ENCODED_RUSTFLAGS")
+        .split('\x1f')
+        .filter(|f| !f.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut features: Vec<String> = var("CARGO_CFG_TARGET_FEATURE")
+        .split(',')
+        .map(str::to_string)
+        .collect();
+    features.sort();
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in features.join(",").bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!(
+        "profile={} opt={} target={} rustflags=[{rustflags}] features={}:{h:016x}",
+        var("PROFILE"),
+        var("OPT_LEVEL"),
+        var("TARGET"),
+        features.len(),
+    )
 }
 
 fn git_id() -> String {

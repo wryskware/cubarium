@@ -663,14 +663,23 @@ pub fn training_layouts(founder: Founder, stage: Stage, band: Band) -> Vec<Prepa
 /// `band`, the first eight on the standard 0.25 m grid and the last eight on the
 /// 0.125 m grid (D11's variant) — sixteen distinct layouts, both grids equally.
 pub fn p5_arena_layouts(founder: Founder, stage: Stage, band: Band) -> Vec<Prepared> {
+    arena_half(founder, stage, band, true, TRAINING_LAYOUT_SEEDS.len())
+}
+
+/// The first `n` training arenas a run trains on, built and nothing more: P5-C's
+/// ([`p5_arena_layouts`]) when `p5`, the standard grid's ([`training_layouts`])
+/// otherwise. Layout `i` is the same fixture whether or not the ones after it are built,
+/// which is what lets a remote worker build exactly a run's arena half.
+pub fn arena_half(founder: Founder, stage: Stage, band: Band, p5: bool, n: usize) -> Vec<Prepared> {
     TRAINING_LAYOUT_SEEDS
         .iter()
+        .take(n)
         .enumerate()
         .map(|(i, &seed)| {
-            let grid = if i < TRAINING_LAYOUT_SEEDS.len() / 2 {
-                ArenaGrid::Standard
-            } else {
+            let grid = if p5 && i >= TRAINING_LAYOUT_SEEDS.len() / 2 {
                 ArenaGrid::Fine
+            } else {
+                ArenaGrid::Standard
             };
             PreparedArena::build_stage_on(founder, seed, stage, band, grid).into()
         })

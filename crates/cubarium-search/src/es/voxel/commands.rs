@@ -25,13 +25,14 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use cubarium_voxel_fauna::Founder;
 
 use super::controller::{EpisodeDriver, VoxelControl};
 use super::driver::{self, EpisodeError, ScoreCounters};
 use super::imitate;
+use super::remote::{FixtureSpec, RemoteOptions, RemotePool, RemoteSpec};
 use super::task;
 use super::task::Stage;
 use super::trainer::{self, TrainSpec};
@@ -318,30 +319,65 @@ pub fn bench(
     Ok(())
 }
 
+/// `voxel-train`'s arguments, as the command line gave them.
+pub struct TrainArgs {
+    pub founder: String,
+    pub stage: String,
+    pub band: String,
+    pub init_center: Option<PathBuf>,
+    /// A transfer start ([`trainer::InitCenter::transfer`]).
+    pub transfer_from: Option<PathBuf>,
+    pub controller: String,
+    pub pairs: usize,
+    pub layouts: usize,
+    pub updates: u32,
+    pub horizon: Option<u64>,
+    pub workers: usize,
+    pub wall_seconds: u64,
+    pub episode_limit: u64,
+    pub train_seed: u64,
+    pub center_eval: bool,
+    pub out: PathBuf,
+    pub p5: bool,
+    pub per_generation: usize,
+    pub held_out_every: u32,
+    /// `N,g` or `off`; `None` is the `--p5` default.
+    pub plateau: Option<String>,
+    /// `host:threads`, each.
+    pub remotes: Vec<String>,
+    pub remote_bin: String,
+    pub remote_wait: u64,
+}
+
 /// `voxel-train`: the bounded ES run. Requires founder, controller, seed, episode limit,
 /// worker count and wall cap; the heuristic slot carries no evolvable parameters, so it
 /// is refused as a training controller by name.
-#[allow(clippy::too_many_arguments)]
-pub fn train(
-    founder: String,
-    stage: String,
-    band: String,
-    init_center: Option<PathBuf>,
-    controller: String,
-    pairs: usize,
-    layouts: usize,
-    updates: u32,
-    horizon: Option<u64>,
-    workers: usize,
-    wall_seconds: u64,
-    episode_limit: u64,
-    train_seed: u64,
-    center_eval: bool,
-    out: PathBuf,
-    p5: bool,
-    per_generation: usize,
-    held_out_every: u32,
-) -> Result<(), Boxed> {
+pub fn train(args: TrainArgs) -> Result<(), Boxed> {
+    let TrainArgs {
+        founder,
+        stage,
+        band,
+        init_center,
+        transfer_from,
+        controller,
+        pairs,
+        layouts,
+        updates,
+        horizon,
+        workers,
+        wall_seconds,
+        episode_limit,
+        train_seed,
+        center_eval,
+        out,
+        p5,
+        per_generation,
+        held_out_every,
+        plateau,
+        remotes,
+        remote_bin,
+        remote_wait,
+    } = args;
     let controller = controller.trim().to_ascii_lowercase();
     if controller != "gru" {
         return Err(format!(
@@ -355,9 +391,23 @@ pub fn train(
     let stage = task::parse_stage(&stage)?;
     let band = task::parse_band(&band)?;
     let horizon = horizon.unwrap_or_else(|| stage.horizon());
-    let init_center = init_center
-        .map(|path| trainer::InitCenter::load(&path, founder))
-        .transpose()?;
+    let init_center = match (init_center, transfer_from) {
+        (Some(_), Some(_)) => {
+            return Err(
+                "--init-center and --transfer-from are two different starts; pass one".into(),
+            );
+        }
+        (Some(path), None) => Some(trainer::InitCenter::load(&path, founder)?),
+        (None, Some(path)) => Some(trainer::InitCenter::transfer(&path, founder)?),
+        (None, None) => None,
+    };
+    let plateau = match &plateau {
+        Some(text) => trainer::Plateau::parse(text)?,
+        None => p5.then_some(trainer::Plateau::P5_DEFAULT),
+    };
+    if plateau.is_some() && !p5 {
+        return Err("--plateau reads the held-out checkpoints, which only a --p5 run has".into());
+    }
     if out.exists() && std::fs::read_dir(&out).map_or(false, |d| d.count() > 0) {
         return Err(format!(
             "{} already holds a run; pass --overwrite to discard it",
@@ -365,16 +415,40 @@ pub fn train(
         )
         .into());
     }
+    // The remotes start first, so they found their fixtures while this machine founds its
+    // own.
+    let remotes = if remotes.is_empty() {
+        None
+    } else {
+        let specs = remotes
+            .iter()
+            .map(|r| RemoteSpec::parse(r, &remote_bin))
+            .collect::<Result<Vec<_>, _>>()?;
+        let fixtures = FixtureSpec {
+            founder: founder.name().into(),
+            stage: stage.as_str().into(),
+            band: band.as_str().into(),
+            layouts,
+            p5,
+        };
+        let mut pool = RemotePool::connect(&specs, &fixtures, RemoteOptions::default());
+        pool.set_ready_wait(Duration::from_secs(remote_wait));
+        Some(pool)
+    };
     let mix = if p5 {
         let t = Instant::now();
         let pool = super::landscape::training_pool(founder, workers)?;
         let held_out = super::landscape::held_out_pool(founder, workers)?;
         println!(
             "# P5-C mix: {} training landscape fixtures, {per_generation} drawn per \
-             generation; {} held-out fixtures every {held_out_every} updates; founded in \
-             {:.1} s",
+             generation; {} held-out fixtures every {held_out_every} updates; plateau stop \
+             {}; founded in {:.1} s",
             pool.len(),
             held_out.len(),
+            plateau.map_or("off".to_string(), |p| format!(
+                "{},{}",
+                p.checkpoints, p.gain
+            )),
             t.elapsed().as_secs_f64()
         );
         Some(trainer::LandscapeMix {
@@ -383,6 +457,7 @@ pub fn train(
             held_out,
             held_out_every,
             collapse_checkpoints: 4,
+            plateau,
         })
     } else {
         None
@@ -403,6 +478,7 @@ pub fn train(
         evaluate_center: center_eval,
         out: out.clone(),
         mix,
+        remotes,
     };
     let cancel = AtomicBool::new(false);
     let report = trainer::train(&spec, &cancel)?;
