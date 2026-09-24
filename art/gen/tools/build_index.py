@@ -155,8 +155,8 @@ var cur=null;
 // Small images are enlarged by a whole-number factor (crisp pixels) to fill the
 // view; large ones fit the width and scroll. The aspect ratio is always kept.
 lb.firstChild.onload=function(){var im=this,w=im.naturalWidth,h=im.naturalHeight;
-  var k=Math.floor(Math.min(lb.clientWidth*0.96/w,lb.clientHeight*0.9/h));
-  im.style.width=(k>1?w*k:Math.min(w,lb.clientWidth*0.96))+'px';};
+  var k=Math.floor(Math.min(innerWidth*0.94/w,innerHeight*0.88/h));
+  im.style.width=(k>1?w*k:Math.min(w,innerWidth*0.94))+'px';};
 function show(a){cur=a;lb.scrollTop=0;lb.firstChild.src=a.getAttribute('href');
   lb.lastChild.textContent=a.getAttribute('href');lb.classList.add('on');lock(true);}
 function step(d){if(!cur)return;
