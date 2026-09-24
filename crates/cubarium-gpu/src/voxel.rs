@@ -2065,4 +2065,35 @@ mod tests {
             128 * 48 * 24 * 5 + 256 * 48 + 4 * (4 + 2) * MAX_GLYPHS
         );
     }
+
+    /// A face lands in its slot's row and its variant's column, a top face in the first
+    /// `rise` rows of its cell; a slot is sampled only once every variant is in.
+    #[test]
+    fn the_texture_atlas_puts_a_face_in_its_cell_and_switches_a_slot_on_when_whole() {
+        let (s, rise) = (6, 3);
+        let mut t = VoxelTextures::empty(s, rise);
+        let (aw, ah) = VoxelTextures::size(s);
+        assert_eq!((aw, ah), (4 * 6, TEXTURE_SLOTS.len() as u32 * 6));
+        let top = TEXTURE_SLOTS.iter().position(|f| f.0 == "rock-top").unwrap();
+        assert_eq!(t.face_size(top), (6, 3));
+        assert!(t.put(top, 0, &[0; 6 * 6 * 4]).is_err(), "a side-sized top is refused");
+        for v in 0..TEX_VARIANTS {
+            assert_eq!(t.mask(), 0, "{v} of 4 variants is not a slot");
+            t.put(top, v, &[v as u8 + 1; 6 * 3 * 4]).unwrap();
+        }
+        assert_eq!(t.mask(), 1 << top);
+        let at = |x: u32, y: u32| t.rgba[((y * aw + x) * 4) as usize];
+        let row = top as u32 * 6;
+        assert_eq!(at(2 * 6, row), 3, "variant 2's first texel");
+        assert_eq!(at(2 * 6 + 5, row + 2), 3, "and its last");
+        assert_eq!(at(2 * 6, row + 3), 0, "a top face leaves its cell's lower rows");
+    }
+
+    #[test]
+    fn a_style_carries_its_texture_role_in_the_wood_alpha() {
+        let st = VoxelStyle::new([0.1; 3], [0.2; 3], [0.3; 3]);
+        assert_eq!(st.role(), ROLE_NONE);
+        assert_eq!(st.with_role(ROLE_LEAF).role(), ROLE_LEAF);
+        assert_eq!(st.with_role(ROLE_LEAF).wood[..3], [0.1; 3]);
+    }
 }

@@ -23,6 +23,7 @@ alpha is a cutout: 0 is a hole the next voxel shows through.
 from __future__ import annotations
 
 import argparse
+import math
 import pathlib
 import random
 
@@ -239,7 +240,118 @@ TERRAIN = {
     "turf-side": turf_side,
 }
 
-MAKERS = dict(TERRAIN)
+# --- plants: grey multipliers on the style colour (128 = the colour), alpha a cutout ------
+
+HOLE = (0, 0, 0, 0)
+
+
+def g(v: int) -> tuple[int, int, int, int]:
+    return (v, v, v, 255)
+
+
+def bark_side(rng):
+    """Vertical grain: dark furrows and lit ridges, opaque."""
+    px = canvas(g(128))
+    x = rng.randrange(0, 4)
+    while x < N:
+        w = rng.randrange(2, 5)
+        dark = rng.random() < 0.6
+        y = rng.randrange(-20, 0)
+        while y < N:
+            run = rng.randrange(10, 30)
+            for yy in range(max(0, y), min(N, y + run)):
+                for xx in range(x, min(N, x + w)):
+                    px[yy][xx] = g(102) if dark else g(148)
+            y += run + rng.randrange(3, 10)
+        x += w + rng.randrange(3, 8)
+    return px
+
+
+def bark_top(rng):
+    """The cut end: rings about the centre, opaque."""
+    px = canvas(g(128))
+    cx, cy = 23.5 + rng.uniform(-3, 3), 23.5 + rng.uniform(-3, 3)
+    wobble = rng.uniform(0, 6.28)
+    for y in range(N):
+        for x in range(N):
+            d = ((x - cx) ** 2 + (y - cy) ** 2) ** 0.5
+            d += 1.5 * math.sin(wobble + x * 0.2)
+            ring = int(d / 6)
+            px[y][x] = g(112) if ring % 2 else g(140)
+    return px
+
+
+def cluster(rng, cover: float, rmin: int, rmax: int):
+    """Leaf blobs until `cover` of the face is leaf: lit on their upper side, a darker
+    underside, and holes between them that the renderer shows through."""
+    px = canvas(HOLE)
+    filled = 0
+    first = True
+    while filled / (N * N) < cover:
+        if first:
+            cx, cy = rng.uniform(16, 32), rng.uniform(16, 32)
+            first = False
+        else:
+            cx, cy = rng.uniform(-4, N + 4), rng.uniform(-4, N + 4)
+        rx, ry = rng.uniform(rmin, rmax), rng.uniform(rmin, rmax) * 0.8
+        for y in range(max(0, int(cy - ry)), min(N, int(cy + ry) + 1)):
+            for x in range(max(0, int(cx - rx)), min(N, int(cx + rx) + 1)):
+                t = ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2
+                if t > 1.0:
+                    continue
+                if px[y][x][3] == 0:
+                    filled += 1
+                # Lit above the blob's middle, shaded below, a dark rim at the bottom.
+                if y > cy and t > 0.6:
+                    v = 96
+                elif y < cy - ry * 0.3:
+                    v = 156
+                else:
+                    v = 126
+                px[y][x] = g(v)
+    return px
+
+
+def leaf_side(rng):
+    return cluster(rng, rng.uniform(0.56, 0.62), 7, 12)
+
+
+def leaf_top(rng):
+    return cluster(rng, rng.uniform(0.58, 0.64), 7, 12)
+
+
+def drape_side(rng):
+    """Hanging strands from the top edge, of uneven length, with gaps between them."""
+    px = canvas(HOLE)
+    x = rng.randrange(-3, 3)
+    while x < N:
+        w = rng.randrange(6, 11)
+        length = rng.randrange(32, N + 1)
+        for y in range(length):
+            for xx in range(max(0, x), min(N, x + w)):
+                edge = xx in (x, x + w - 1)
+                v = 100 if edge else (150 if y < 6 else 128)
+                if y >= length - 4:
+                    v = 108  # the strand's tip
+                px[y][xx] = g(v)
+        x += w + rng.randrange(2, 5)
+    return px
+
+
+def drape_top(rng):
+    return cluster(rng, rng.uniform(0.55, 0.62), 6, 10)
+
+
+PLANTS = {
+    "bark-side": bark_side,
+    "bark-top": bark_top,
+    "leaf-side": leaf_side,
+    "leaf-top": leaf_top,
+    "drape-side": drape_side,
+    "drape-top": drape_top,
+}
+
+MAKERS = {**TERRAIN, **PLANTS}
 
 
 def main() -> None:

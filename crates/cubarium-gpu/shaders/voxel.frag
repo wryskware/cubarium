@@ -108,6 +108,11 @@ int frontRow(int y, int z) { return BASE - (y + 1) * S - z * RISE; }
 
 // `TEXTURE_SLOTS`: terrain material m has its side at 2(m-1) and its top at 2(m-1)+1.
 const int TEX_TURF_SIDE = 6;
+// A style's texture role (`ROLE_*`, the alpha of its wood column): bark, leaf and drape
+// have a side slot and a top slot from TEX_BARK_SIDE on; the accent is untextured.
+const int ROLE_BARK = 1;
+const int ROLE_DRAPE = 3;
+const int TEX_BARK_SIDE = 7;
 
 bool texOn(int slot) { return slot >= 0 && (u.tex.x & (1 << slot)) != 0; }
 
@@ -267,6 +272,26 @@ vec3 glyphPigment(uvec4 v, uint q) {
     return styleAt(int(v.a), int(q & 3u));
 }
 
+// The texture slot a style's cells draw with on this face, or -1: only a baked model's
+// trunk, foliage and drape have one.
+int roleSlot(uvec4 v, bool top) {
+    int role = int(texelFetch(styleTex, ivec2(0, int(v.a)), 0).a + 0.5);
+    if (role < ROLE_BARK || role > ROLE_DRAPE) { return -1; }
+    return TEX_BARK_SIDE + 2 * (role - ROLE_BARK) + (top ? 1 : 0);
+}
+
+// A model cell's texture over its pigment: `r / 128` multiplies the style colour, so the
+// colour pass still decides the hue. False where a leaf or drape cutout has a hole: that
+// texel is not this cell's, and the walk goes on to whatever is behind it.
+bool plantTexel(int x, int y, int z, uvec4 v, bool top, int dx, int dy, inout vec3 base) {
+    int slot = roleSlot(v, top);
+    if (!texOn(slot)) { return true; }
+    vec4 t = faceTexel(slot, x, y, z, top ? 1 : 0, dx, dy);
+    if (slot > TEX_BARK_SIDE + 1 && t.a < 0.5) { return false; }
+    base *= t.r * (255.0 / 128.0);
+    return true;
+}
+
 // Organism anatomy and markings are already resolved in glyphTex by the shared
 // appearance layer. This is deliberately generic: the shader knows only pigment slots
 // and treatments, never bodies, heads, eyes or facing.
@@ -277,6 +302,7 @@ bool glyphFront(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb) {
     vec3 base = glyphPigment(v, q);
     int tone = int(q >> 2);
     if (tone == 63) { return false; }
+    if (!plantTexel(x, y, z, v, false, dx, localY, base)) { return false; }
     bool coveredUp = solidAt(x, y + 1, z)
         || (inY(y + 1) && isBlockPart(partOf(at(x, y + 1, z))));
     if (tone == 1) {
@@ -295,11 +321,12 @@ bool glyphFront(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb) {
     return true;
 }
 
-vec3 glyphCap(int x, int y, int z, uvec4 v, int r, int dx) {
+bool glyphCap(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb) {
     int localY = RISE - 1 - r;
     int atlasY = (partOf(v) * 8 + glyphOf(v)) * (S + RISE) + S + localY;
     uint q = texelFetch(glyphTex, ivec2(dx, atlasY), 0).r;
     vec3 base = glyphPigment(v, q);
+    if (!plantTexel(x, y, z, v, true, dx, localY, base)) { return false; }
     int tone = int(q >> 2);
     float shade = roofShade(roofGap(x, y, z));
     vec3 cap = plantLit(base, shade);
@@ -309,7 +336,8 @@ vec3 glyphCap(int x, int y, int z, uvec4 v, int r, int dx) {
         float gain = 0.5 + float(tone & 15) / 16.0;
         cap = mix(cap, base * gain, u.shadeB.y);
     }
-    return hazed(cap, hazeAt(float(z) + float(r) / float(RISE)));
+    rgb = hazed(cap, hazeAt(float(z) + float(r) / float(RISE)));
+    return true;
 }
 
 // --- water ----------------------------------------------------------------------------
@@ -458,8 +486,9 @@ void main() {
         }
 
         // The cap of the voxel below the band, which reaches its bottom `rise` rows.
-        // Getting here means the band's own voxel is air and holds no block plant, so
-        // the CPU's `open_up` and `!covered_up` are both true by construction.
+        // Getting here means the band's own voxel is air, holds no block plant, or holds
+        // a model's leaf or drape with a hole at this pixel - so the cap is what shows
+        // through, which for the terrain is the CPU's `open_up` and `!covered_up`.
         int below = level - 1;
         if (r < RISE && below >= 0 && below < H) {
             uvec4 v = at(x, below, z);
@@ -475,8 +504,9 @@ void main() {
             // crown is seen through that surface, not instead of it.
             if (v.g != 0u) { waterAt(x, below, z, v, px.y, acc, trans); }
             int p = partOf(v);
-            if (isBlockPart(p)) {
-                acc += trans * glyphCap(x, below, z, v, r, dx);
+            vec3 cap;
+            if (isBlockPart(p) && glyphCap(x, below, z, v, r, dx, cap)) {
+                acc += trans * cap;
                 trans = 0.0;
                 break;
             }

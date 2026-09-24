@@ -298,6 +298,9 @@ pub struct Stands {
     /// This rebuild's style index for each `(model material, wilt level)`, or
     /// [`NO_STYLE`]: the model path's styles are shared across stands.
     model_styles: Vec<u16>,
+    /// For each style a baked model's cells paint with, the kind of cell it is (the
+    /// GPU renderer's texture role); shorter than `styles` or `None` for every other.
+    model_tags: Vec<Option<Tag>>,
 }
 
 /// No style yet (and the one index a style never takes).
@@ -377,6 +380,7 @@ impl Stands {
             stamped: Vec::new(),
             styles: Vec::new(),
             model_styles: vec![NO_STYLE; ModelKey::COUNT],
+            model_tags: Vec::new(),
         }
     }
 
@@ -411,6 +415,7 @@ impl Stands {
                 self.grid[i as usize] = Part::None;
             }
             self.styles.clear();
+            self.model_tags.clear();
         }
         self.model_styles.fill(NO_STYLE);
         // Stands arrive in site order, which is the order the styles are pushed in, so
@@ -629,6 +634,8 @@ impl Stands {
             crown: c(sw.body),
             heart: c(sw.glint),
         });
+        self.model_tags.resize(self.styles.len(), None);
+        self.model_tags[usize::from(style)] = Some(key.tag);
         self.model_styles[index] = style;
         Some(style)
     }
@@ -689,6 +696,13 @@ impl Stands {
     #[inline]
     pub fn style(&self, part: Part) -> Option<Style> {
         part.style().map(|s| self.styles[usize::from(s)])
+    }
+
+    /// Which kind of baked model cell `part` is — trunk, foliage, drape or accent — or
+    /// `None` for a glyph, a log or a mark. Only the GPU renderer's textures ask.
+    pub fn model_tag(&self, part: Part) -> Option<Tag> {
+        part.style()
+            .and_then(|s| self.model_tags.get(usize::from(s)).copied().flatten())
     }
 
     /// Is the cell beside `(x, y, z)` part of the same canopy? Used for the crown's

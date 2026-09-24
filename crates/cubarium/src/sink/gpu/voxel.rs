@@ -47,7 +47,7 @@ use crate::sink::{FrameSink, Output, WebSink};
 use crate::voxel::VoxelConfig;
 use crate::voxel::animal::{AnimalPart, Animals};
 use crate::voxel::appearance;
-use crate::voxel::model::ModelLibrary;
+use crate::voxel::model::{ModelLibrary, Tag};
 use crate::voxel::present as cpu;
 use crate::voxel::project::Projection;
 use crate::voxel::stand::{Part, Stands, Style};
@@ -455,8 +455,9 @@ struct Packer {
     animals: Animals,
     /// The baked voxel models, or `None` for the dev-mode glyphs.
     models: Option<Arc<ModelLibrary>>,
-    /// GPU style slots, in the order they were first needed this tick.
-    styles: Vec<Style>,
+    /// GPU style slots, in the order they were first needed this tick, with the texture
+    /// role each draws with (`ROLE_*`).
+    styles: Vec<(Style, u8)>,
     /// `Stands` style index → GPU slot for this tick, so the dedup costs one linear scan
     /// per stand and not one per voxel.
     slot_of: Vec<Option<u8>>,
@@ -595,7 +596,7 @@ impl Packer {
                 (
                     PART_ANIMAL_INTERIM,
                     beast.glyph().0,
-                    slot_for_style(style, &mut self.styles, &mut self.style_overflow),
+                    slot_for_style((style, 0), &mut self.styles, &mut self.style_overflow),
                 )
             } else {
                 let p = stands.at(xi, i64::from(y), z);
@@ -620,8 +621,9 @@ impl Packer {
             };
             out.voxels[i] = texel_of(m, view.free[src], view.pore[src], part, glyph, slot);
         }
-        for (slot, style) in self.styles.iter().enumerate() {
-            out.styles[slot] = VoxelStyle::new(style.wood, style.crown, style.heart);
+        for (slot, (style, role)) in self.styles.iter().enumerate() {
+            out.styles[slot] =
+                VoxelStyle::new(style.wood, style.crown, style.heart).with_role(*role);
         }
         if out.write[PLANE_ROOF] {
             out.roof.copy_from_slice(&self.roof);
@@ -680,7 +682,7 @@ fn roof_table(material: &[Material], w: u32, h: u32, d: u32, out: &mut [u8]) {
 
 /// The GPU slot for a style that has no plant part index to cache under (an animal's),
 /// deduplicated by value against the same table the plants fill.
-fn slot_for_style(style: Style, styles: &mut Vec<Style>, overflow: &mut u64) -> u8 {
+fn slot_for_style(style: (Style, u8), styles: &mut Vec<(Style, u8)>, overflow: &mut u64) -> u8 {
     match styles.iter().position(|s| *s == style) {
         Some(at) => at as u8,
         None if styles.len() < MAX_STYLES => {
@@ -694,11 +696,24 @@ fn slot_for_style(style: Style, styles: &mut Vec<Style>, overflow: &mut u64) -> 
     }
 }
 
+/// The texture role of a baked model cell (`cubarium_gpu::voxel::ROLE_*`); anything that
+/// is not a model cell draws untextured.
+fn role_of(tag: Option<Tag>) -> u8 {
+    use cubarium_gpu::voxel::{ROLE_ACCENT, ROLE_BARK, ROLE_DRAPE, ROLE_LEAF, ROLE_NONE};
+    match tag {
+        None => ROLE_NONE,
+        Some(Tag::Trunk) => ROLE_BARK,
+        Some(Tag::Foliage(_)) => ROLE_LEAF,
+        Some(Tag::Drape(_)) => ROLE_DRAPE,
+        Some(Tag::Accent) => ROLE_ACCENT,
+    }
+}
+
 /// The GPU slot for one plant part's style, deduplicated by value.
 fn slot_for(
     stands: &Stands,
     part: Part,
-    styles: &mut Vec<Style>,
+    styles: &mut Vec<(Style, u8)>,
     slot_of: &mut Vec<Option<u8>>,
     overflow: &mut u64,
 ) -> u8 {
@@ -713,6 +728,7 @@ fn slot_for(
     let Some(style) = stands.style(part) else {
         return 0;
     };
+    let style = (style, role_of(stands.model_tag(part)));
     let slot = match styles.iter().position(|s| *s == style) {
         Some(at) => at as u8,
         None if styles.len() < MAX_STYLES => {
@@ -909,7 +925,7 @@ mod tests {
                         (
                             PART_ANIMAL_INTERIM,
                             beast.glyph().0,
-                            slot_for_style(style, styles, overflow),
+                            slot_for_style((style, 0), styles, overflow),
                         )
                     } else {
                         let p = stands.at(xi, i64::from(y), z);
@@ -944,8 +960,9 @@ mod tests {
                 }
             }
         }
-        for (slot, style) in styles.iter().enumerate() {
-            out.styles[slot] = VoxelStyle::new(style.wood, style.crown, style.heart);
+        for (slot, (style, role)) in styles.iter().enumerate() {
+            out.styles[slot] =
+                VoxelStyle::new(style.wood, style.crown, style.heart).with_role(*role);
         }
         out.glyphs.fill(0);
         let used = appearance::atlas_len(p.s, p.rise);
