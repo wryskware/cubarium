@@ -1926,12 +1926,16 @@ fn run_line(sim: &Sim, ticks: u64, frames: u64, elapsed: f64, presented: Option<
         "{ticks} ticks, {frames} frames in {elapsed:.2} s ({:.1} fps); \
          {:.1} ticks/s{shown}; \
          stored {:.3} m3, residual {:.3e} m3; \
-         {} stands, flora residual {:.3e} organic, {:.3e} mineral, {:.3e} energy",
+         {} stands, {} latticevines on {} faces ({} dormant), \
+         flora residual {:.3e} organic, {:.3e} mineral, {:.3e} energy",
         per_s(frames),
         per_s(ticks),
         view.stored_m3(),
         view.stored_m3() - view.ledger.expected_stored(),
         fv.stands.len(),
+        fv.cover.vines().len(),
+        fv.cover.face_count(),
+        fv.cover.vines().iter().filter(|v| v.dormant).count(),
         fv.organic() - fv.ledger.expected_organic(),
         fv.mineral() - fv.ledger.expected_mineral(),
         fv.energy() - fv.ledger.expected_energy(),
