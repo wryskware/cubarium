@@ -957,9 +957,14 @@ impl Arena {
 
     /// Settle a reusable cue field for this exact frozen source layout. Episode-private
     /// trend history is still reset when the field enters a simulation.
+    ///
+    /// The `Light` memo is held and warmed here too: the arena's terrain is frozen, so
+    /// every episode's clone starts with every face's sky read.
     pub fn prepare_senses(&self) -> Senses {
         let mut senses = Senses::new();
         senses.settle(&self.world.view(), &self.flora.view());
+        senses.hold_light();
+        senses.warm_light(&self.world.view());
         senses
     }
 
