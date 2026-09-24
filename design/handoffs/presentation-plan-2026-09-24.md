@@ -353,3 +353,35 @@ L merged to main as `b5809f7c`.
 W starts now, from the brief above, off `b5809f7c`. Its first checkpoint is depth
 absorption, the boundary test, the surface normal and the reflection. The second is
 refraction, foam, glints and rain ripples.
+
+## L5: bloom and more emitters (Wrysk, 2026-09-24)
+
+Wrysk: "glow is fine. it barely reads though without any bloom. bloomcrown, maybe yeah.
+animal sense patch, i dont think so.. but some animals will have glowing parts, like
+the chorister. glowcap can have a lip i guess."
+
+- **Bloom, lit only.**
+  - Emitting texels mark themselves (an emission output from `voxel.frag`). A bloom
+    pass adds a restrained, pixel-art halo around them: the emitted colour gathered
+    at voxel-cell resolution, spread a few cells, quantised to 2–3 steps, and added
+    back with nearest sampling, so the halo is blocky.
+  - The art direction applies: glow supports forms, never haze. The emitter itself
+    stays crisp.
+  - Knobs: `bloom` (strength) and `bloom_radius` (cells), with stated defaults.
+  - Flat is untouched and byte-identical at the Tachyon config. Stay inside the lit
+    budget.
+- **Bloomcrown core glows**, in D9's own core hex (the alternates B and C describe it
+  glowing).
+- **Animals:**
+  - No sense patches.
+  - Animals will have glowing parts, starting with the chorister (CH-A2; see
+    `design/animal-body-reimagining-2026-09-24.md` and `art/gen/SIGNOFF.md`), which is
+    not in the engine yet.
+  - Make sure the animal appearance path can mark emitting texels (the reserved glyph
+    tone), and document how in the appearance module.
+  - Mark an existing voxel animal's part only if its current design calls that part
+    luminous.
+- **Glowcap lip:** unchanged.
+
+Queued behind W checkpoint 1: both live in `voxel.frag`, and the lean policy keeps
+one worker per crate unless Wrysk asks for parallel work.
