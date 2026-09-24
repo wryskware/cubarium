@@ -44,9 +44,11 @@ use crate::Flora;
 /// species fields (`dispersal`, `clonal_share`), the config's `seed_check_s`, five
 /// per-species seed counters in the ledger and the shower flag the bank's flush reads.
 ///
-/// Schema 5: package SU (succession) adds four species fields (`spore_tries`,
-/// `seed_mass`, `ground_cover`, `overtop_per_check`) and the ledger's `overtopped`
-/// counts; a seed is now `seed_mass` minimum packages. Refused, not migrated.
+/// Schema 5: package SM (the follow-up round) adds two fields to every `Ground` — the latest
+/// landing and the about-to-sprout flag the D5 seed mark reads: refused, not migrated.
+/// Package SU (succession) joins it: four species fields (`spore_tries`, `seed_mass`,
+/// `ground_cover`, `overtop_per_check`) and the ledger's `overtopped` counts, and a seed is
+/// `seed_mass` minimum packages.
 pub const SCHEMA: u32 = 5;
 
 #[derive(Serialize, Deserialize)]

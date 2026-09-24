@@ -372,6 +372,10 @@ fn print_header() {
     // The water's own reading: the lake's mean surface in voxels (`y + free` of its open
     // surface cells), its volume and visible area, and the in-world stores beside it.
     header.push_str(",lake_level_v,lake_m3,lake_m2,free_m3,pore_m3,aquifer_m3,tick_ms");
+    // Package SM: sites holding a seed bank, free sites showing a D5 seed mark (a recent
+    // landing or about to sprout), the marked sites that are about to sprout, and every
+    // support face in the world, the share's denominator.
+    header.push_str(",banked_sites,marked_sites,sprouting_sites,support_sites");
     println!("{header}");
 }
 
@@ -459,5 +463,28 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64) {
     row.push(format!("{:.4}", world.pore_m3()));
     row.push(format!("{:.4}", w.aquifer_m3));
     row.push(format!("{tick_ms:.3}"));
+    let banked = f.ground.iter().filter(|g| !g.seeds.is_empty()).count();
+    // Showing: a mark on a site with no stand on it (a stand's own cells outrank it).
+    let marked = f
+        .ground
+        .iter()
+        .filter(|g| g.seed_mark(f.tick).is_some() && f.stand_at(g.site).is_none())
+        .count();
+    let c = world.config();
+    let mut supports = 0usize;
+    for z in 0..c.depth {
+        for x in 0..i64::from(c.width) {
+            supports += w.supports_in_column(x, z).len();
+        }
+    }
+    let sprouting = f
+        .ground
+        .iter()
+        .filter(|g| g.sprouting.is_some() && g.seed_mark(f.tick) == g.sprouting)
+        .count();
+    row.push(banked.to_string());
+    row.push(marked.to_string());
+    row.push(sprouting.to_string());
+    row.push(supports.to_string());
     println!("{}", row.join(","));
 }

@@ -2653,6 +2653,9 @@ fn the_root_box_sees_soil_only_so_saturated_rock_is_neither_wet_nor_waterlogged(
     // need before any of them holds two. At the placeholder the two donors could afford
     // two packages between them in the whole run.
     cfg.bloomcrown.reserve_cap = 40.0;
+    // The subject is the root box, not the bank's clock: the control sprouts at the check
+    // that finds it passing, without package SM's arming check.
+    cfg.sprout_after_arming = false;
     let mut flora = Flora::new(cfg);
     assert!(flora.apply(
         &world,

@@ -212,7 +212,7 @@ pub(crate) fn bin_start(tick: u64, sc: &SpeciesConfig) -> u64 {
 /// Land material on a site's bank, in the bin whose window covers `tick`: a bin already
 /// there sums the organic matter and the mineral and keeps its start, and one that is not
 /// is inserted. `seeds` stays sorted by species then `bin_start_tick`, oldest first.
-fn add_cohort(
+pub(crate) fn add_cohort(
     g: &mut Ground,
     species: Species,
     organic: f64,
@@ -223,6 +223,8 @@ fn add_cohort(
     if organic <= 0.0 && mineral <= 0.0 {
         return;
     }
+    // Package SM: the D5 mark shows a recent landing.
+    g.last_landing = Some((species, tick));
     let start = bin_start(tick, sc);
     match g
         .seeds
@@ -360,9 +362,11 @@ pub(crate) fn seed_bank(flora: &mut Flora, world: &World) {
 /// **A site held by a ground cover** (package SU) is not closed: its lottery is among the
 /// **woody** banks alone ([`SpeciesConfig::overtop_per_check`] above zero) whose gates
 /// pass as if the site were free, and the winner then needs its own per-check draw
-/// ([`overtops`]). On a success the cover dies an *overtopped* death — the ordinary §4.7
-/// death, its wood to dead wood and the rest to litter — and the seedling takes the
-/// site. Any other stand holds its site against every seed.
+/// ([`overtops`]). Under package SM's arming the draw is taken at the arming check and
+/// the arm survives the cover; at the next check the seedling comes up if its gates still
+/// pass. Then the cover dies an *overtopped* death — the ordinary §4.7 death, its wood to
+/// dead wood and the rest to litter — and the seedling takes the site. Any other stand
+/// holds its site against every seed and clears the site's arm.
 #[allow(clippy::too_many_arguments)]
 fn germinate(
     config: &FloraConfig,
@@ -379,10 +383,17 @@ fn germinate(
     let mut winners: Vec<(Site, Species, bool)> = Vec::new();
     for &gi in tested {
         let site = ground[gi].site;
+        // A bare site takes any seed that passes; a site held by a **ground cover** takes
+        // only a woody one, on its own draw, and keeps an arm across checks — that is an
+        // overtopping arm; any other stand holds its site, and a site that has gained such
+        // a stand clears its arm.
         let under_cover = match stands.binary_search_by_key(&site, |s| s.site) {
             Err(_) => false,
             Ok(si) if config.species(stands[si].species).ground_cover => true,
-            Ok(_) => continue,
+            Ok(_) => {
+                ground[gi].sprouting = None;
+                continue;
+            }
         };
         let mut counts = [0u64; Species::COUNT];
         for c in &ground[gi].seeds {
@@ -401,21 +412,32 @@ fn germinate(
             candidates.push((species, lottery_weight(n, sc)));
         }
         let site_index = view.config.index(site.x as i64, site.y, site.z) as u64;
-        let Some(species) = lottery(world_seed, site_index, tick, &candidates) else {
-            continue;
+        // Under a cover the lottery's winner must also win its per-check draw to arm (or,
+        // without arming, to sprout): coming up through a mat is harder than a gap.
+        let drawn = || {
+            lottery(world_seed, site_index, tick, &candidates).filter(|&sp| {
+                !under_cover
+                    || overtops(
+                        world_seed,
+                        site_index,
+                        tick,
+                        config.species(sp).overtop_per_check,
+                    )
+            })
         };
-        if under_cover
-            && !overtops(
-                world_seed,
-                site_index,
-                tick,
-                config.species(species).overtop_per_check,
-            )
-        {
-            continue;
+        let now = if config.sprout_after_arming {
+            arm_or_sprout(&mut ground[gi], &candidates, drawn)
+        } else {
+            drawn()
+        };
+        if let Some(species) = now {
+            winners.push((site, species, under_cover));
         }
-        winners.push((site, species, under_cover));
     }
+    // The births join `stands` in one merge after the loop; each winner's site is its own
+    // ground entry, so no two births share a site. A ground cover a winner comes up
+    // through leaves `stands` first.
+    let mut born: Vec<Stand> = Vec::with_capacity(winners.len());
     for (site, species, under_cover) in winners {
         let sc = config.species(species);
         let Ok(gi) = ground.binary_search_by_key(&site, |g| g.site) else {
@@ -435,12 +457,33 @@ fn germinate(
             die(config, view, &cover, ground, ledger);
             ledger.overtopped[cover.species.index()] += 1;
         }
-        // The site is free now, whichever way it came to be.
-        let at = stands.partition_point(|s| s.site < site);
-        stands.insert(at, newborn(config, ledger, site, species, organic, mineral));
+        born.push(newborn(config, ledger, site, species, organic, mineral));
         ledger.establishments += 1;
         ledger.seeds_germinated[species.index()] += 1;
     }
+    crate::step::insert_sorted(stands, born);
+}
+
+/// Package SM's one-check delay, for one tested site with no stand on it — or one a ground
+/// cover holds, where `passing` is the woody banks alone (package SU). A site armed at
+/// the last check sprouts its armed species now if that species still passes
+/// (`passing`); otherwise this check's lottery (`draw`) arms the site for the next one, or
+/// clears it when nothing passes. Returns the species to germinate now.
+///
+/// The lottery is drawn once, at the arming check, and not again at the sprouting one: a
+/// second draw would make a winner win twice running, which squares the lottery's weights.
+pub(crate) fn arm_or_sprout(
+    g: &mut Ground,
+    passing: &[(Species, u64)],
+    draw: impl FnOnce() -> Option<Species>,
+) -> Option<Species> {
+    if let Some(armed) = g.sprouting.take()
+        && passing.iter().any(|&(s, _)| s == armed)
+    {
+        return Some(armed);
+    }
+    g.sprouting = draw();
+    None
 }
 
 /// A stand built out of one funded package: the seed that germinated or the runner that
@@ -691,34 +734,34 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World) {
         }
     }
 
-    // ---- the daughters, now that the sweep is over.
+    // ---- the daughters, now that the sweep is over. They join `stands` in one merge:
+    // `runner_target` skips occupied and claimed faces, so no two share a site.
+    let mut born: Vec<Stand> = Vec::with_capacity(daughters.len());
     for d in daughters {
         let slot = d.species.index();
         let gi = provisioned_slot(config, ground, d.site, ledger);
-        let at = match stands.binary_search_by_key(&d.site, |s| s.site) {
-            Ok(_) => {
-                // Unreachable — `runner_target` skips occupied and claimed faces — and
-                // harmless if that changes: the paid package is banked where it fell.
-                if ground[gi].seeds.is_empty() {
-                    bank_wheel[check_phase(d.site, period) as usize].push(d.site);
-                }
-                add_cohort(
-                    &mut ground[gi],
-                    d.species,
-                    d.organic,
-                    d.mineral,
-                    tick,
-                    config.species(d.species),
-                );
-                ledger.seeds_landed[slot] += 1;
-                continue;
+        let taken = stands.binary_search_by_key(&d.site, |s| s.site).is_ok()
+            || born.iter().any(|b| b.site == d.site);
+        if taken {
+            // Unreachable — `runner_target` skips occupied and claimed faces — and
+            // harmless if that changes: the paid package is banked where it fell.
+            if ground[gi].seeds.is_empty() {
+                bank_wheel[check_phase(d.site, period) as usize].push(d.site);
             }
-            Err(at) => at,
-        };
-        stands.insert(
-            at,
-            newborn(config, ledger, d.site, d.species, d.organic, d.mineral),
-        );
+            add_cohort(
+                &mut ground[gi],
+                d.species,
+                d.organic,
+                d.mineral,
+                tick,
+                config.species(d.species),
+            );
+            ledger.seeds_landed[slot] += 1;
+            continue;
+        }
+        born.push(newborn(
+            config, ledger, d.site, d.species, d.organic, d.mineral,
+        ));
         ledger.establishments += 1;
         ledger.clonal_births[slot] += 1;
         deliveries.push(DeliveryReceipt {
@@ -730,6 +773,7 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World) {
             mineral: d.mineral,
         });
     }
+    crate::step::insert_sorted(stands, born);
 }
 
 /// The face a runner roots on: one of the eight neighbouring columns' support faces
@@ -1188,8 +1232,10 @@ mod tests {
     #[test]
     fn a_lone_seed_waits_hours_and_germinates_at_the_first_check_after_the_gate_opens() {
         let mut config = FloraConfig::default();
-        // This test is about waiting, not about attrition.
+        // This test is about waiting, not about attrition — nor about package SM's arming
+        // check (`seed_marks_tests`), so a passing check sprouts.
         config.bloomcrown.seed_attrition_per_s = 0.0;
+        config.sprout_after_arming = false;
         assert!(
             config.bloomcrown.seed_max_age_s >= 3.0 * 3600.0,
             "bloomcrown's bank must outlive the wait"
@@ -1504,6 +1550,8 @@ mod tests {
     fn a_site_is_not_tested_between_checks_except_on_a_shower_flush() {
         let mut config = FloraConfig::default();
         config.bloomcrown.seed_attrition_per_s = 0.0;
+        // When a site is tested, not package SM's arming (`seed_marks_tests`).
+        config.sprout_after_arming = false;
         let mut world = slab(4, 1, 0.6); // open: a bloomcrown passes everywhere
         let mut flora = Flora::new(config);
 
@@ -1781,14 +1829,16 @@ mod tests {
         ));
     }
 
-    /// SU 1. A woody seed banked under a **ground cover** comes up through it at a check
-    /// whose draw says so: the cover dies an "overtopped" death, booked like any other —
-    /// its wood to dead wood, its foliage and reserve to litter — and the woody seedling
-    /// stands on the site. One stand per site, and every unit accounted for.
+    /// SU 1. A woody seed banked under a **ground cover** comes up through it on a check
+    /// whose draw says so — armed at that check (package SM), sprouting at the next — and
+    /// the cover dies an "overtopped" death, booked like any other: its wood to dead
+    /// wood, its foliage and reserve to litter. One stand per site, every unit accounted
+    /// for. The arm **survives the cover** between the two checks: a site held by a
+    /// ground cover is not a site that "gained a stand".
     #[test]
     fn a_woody_seed_comes_up_through_ground_cover_and_the_cover_is_overtopped() {
         let mut config = FloraConfig::default();
-        // The test's own: a certain draw, so the check names the tick; no attrition, and a
+        // The test's own: a certain draw, so the checks are named; no attrition, and a
         // cover that sends nothing, so the site holds exactly what the test put there.
         config.bloomcrown.overtop_per_check = 1.0;
         config.bloomcrown.seed_attrition_per_s = 0.0;
@@ -1797,16 +1847,29 @@ mod tests {
             config.springturf.ground_cover,
             "springturf is a ground cover"
         );
+        assert!(config.sprout_after_arming, "the shipped bank arms first");
         let mut world = slab(4, 1, 0.6);
         let mut flora = Flora::new(config);
         let site = Site { x: 1, y: 2, z: 0 };
         founder(&mut flora, &world, 1, Species::Springturf, 0.05);
         inject(&mut flora, site, Species::Bloomcrown, 1);
-        let t = next_check(site, flora.tick);
-        run_to(&mut flora, &mut world, t - 1);
+        let arm = next_check(site, flora.tick);
+        run_to(&mut flora, &mut world, arm);
+        {
+            let v = flora.view();
+            assert_eq!(v.stand_at(site).unwrap().species, Species::Springturf);
+            assert_eq!(
+                v.ground_at(site).and_then(|g| g.sprouting),
+                Some(Species::Bloomcrown),
+                "armed under the cover"
+            );
+        }
+        let sprout = next_check(site, arm);
+        run_to(&mut flora, &mut world, sprout - 1);
         assert_eq!(
-            flora.view().stand_at(site).unwrap().species,
-            Species::Springturf
+            flora.view().ground_at(site).and_then(|g| g.sprouting),
+            Some(Species::Bloomcrown),
+            "the arm survives the cover between checks"
         );
         flora.step(&mut world);
         let v = flora.view();
@@ -1825,7 +1888,47 @@ mod tests {
             g.dead_wood > 0.0 && g.litter > 0.0,
             "the cover's tissue: {g:?}"
         );
+        assert_eq!(g.sprouting, None, "the arm is spent");
         assert_conserved(&flora, "after the overtopping");
+    }
+
+    /// SU × SM: an arm under a stand that is **not** a ground cover is cleared at the
+    /// site's check — a site that gained such a stand holds it — while the same woody
+    /// arm under a ground cover stays.
+    #[test]
+    fn a_stand_that_is_not_a_cover_clears_an_arm_and_a_cover_does_not() {
+        let mut config = FloraConfig::default();
+        config.bloomcrown.overtop_per_check = 1.0;
+        config.bloomcrown.seed_attrition_per_s = 0.0;
+        config.umbrellafrond.propagule_rate = 0.0;
+        config.springturf.propagule_rate = 0.0;
+        let mut world = slab(6, 1, 0.6);
+        let mut flora = Flora::new(config);
+        founder(&mut flora, &world, 1, Species::Springturf, 0.05);
+        founder(&mut flora, &world, 4, Species::Umbrellafrond, 0.3);
+        let (cover, frond) = (Site { x: 1, y: 2, z: 0 }, Site { x: 4, y: 2, z: 0 });
+        for site in [cover, frond] {
+            inject(&mut flora, site, Species::Bloomcrown, 1);
+            let gi = flora
+                .ground
+                .binary_search_by_key(&site, |g| g.site)
+                .unwrap();
+            flora.ground[gi].sprouting = Some(Species::Bloomcrown);
+        }
+        let t = next_check(cover, flora.tick).max(next_check(frond, flora.tick));
+        run_to(&mut flora, &mut world, t);
+        let v = flora.view();
+        assert_eq!(
+            v.ground_at(frond).and_then(|g| g.sprouting),
+            None,
+            "cleared"
+        );
+        assert_eq!(v.stand_at(frond).unwrap().species, Species::Umbrellafrond);
+        assert!(
+            v.stand_at(cover).unwrap().species == Species::Bloomcrown
+                || v.ground_at(cover).and_then(|g| g.sprouting) == Some(Species::Bloomcrown),
+            "under the cover the arm stood, or it has sprouted through"
+        );
     }
 
     /// SU 1, the other half: only a **woody** seed overtops, and only a **ground cover**
