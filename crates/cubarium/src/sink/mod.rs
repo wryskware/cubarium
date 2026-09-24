@@ -3,6 +3,7 @@
 
 pub mod fanout;
 pub mod gpu;
+pub mod hidden;
 pub mod png;
 pub mod preview;
 pub mod shim;
