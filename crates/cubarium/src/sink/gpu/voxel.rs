@@ -38,7 +38,7 @@ use anyhow::{Context, Result, bail};
 use cubarium_gpu::vk::Gpu;
 use cubarium_gpu::voxel::{
     MAX_GLYPHS, MAX_STYLES, PART_ANIMAL_INTERIM, PART_NONE, PLANE_GLOW, PLANE_GLYPHS, PLANE_ROOF,
-    PLANE_SKY, SLOW_PLANES, VoxelParams, VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel, VoxelTextures,
+    PLANE_SKY, SLOW_PLANES, FrameClock, VoxelParams, VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel, VoxelTextures,
 };
 use cubarium_voxel::{Material, VoxelView, World};
 use cubarium_voxel_flora::{FaceDraw, Flora, FloraView};
@@ -100,6 +100,8 @@ pub struct VoxelGpuSink {
     /// Turns a tick's world into texels.
     packer: Packer,
     capture: Option<PathBuf>,
+    /// The lit tier's water animation rate (`[light] water_hz`).
+    water_hz: f32,
     /// The sky this world is drawn under, kept while the founding frame dims it.
     founding_sky: Option<([f32; 3], [f32; 3])>,
     /// When the founding frame's pulse started, so a held founding frame keeps its phase.
@@ -177,6 +179,7 @@ impl VoxelGpuSink {
                 Emission::of(cfg),
             ),
             capture: options.capture,
+            water_hz: cfg.light.water_hz,
             founding_sky: None,
             founding_since: None,
             awaiting_light: false,
@@ -272,9 +275,31 @@ impl VoxelGpuSink {
             0.0
         };
         self.renderer.update_weather(atmosphere, rain_tick);
+        self.renderer.set_water_visible(self.packer.wet);
         self.ticks_staged += 1;
         self.pack_ms += (Instant::now() - started).as_secs_f64() * 1e3;
         true
+    }
+
+    /// The frame's time: the sim's `tick` plus the `fraction` of the next tick elapsed.
+    /// The lit tier's water animates on it (`[light] water_hz` steps a second of sim
+    /// time), and redraws a frame whose step has moved while there is water; the flat
+    /// tier ignores it.
+    pub fn set_clock(&mut self, tick: u64, fraction: f64) {
+        self.renderer.set_clock(FrameClock::at(
+            tick,
+            fraction,
+            f64::from(self.water_hz),
+            f64::from(cubarium_voxel::TICK_HZ),
+        ));
+    }
+
+    /// Capture-only: draw the lit tier's derived water flow field over the water instead
+    /// of the water (`VoxelParams::debug_flow`). Never set by the live display.
+    pub fn set_debug_flow(&mut self, on: bool) -> Result<()> {
+        let mut params = self.renderer.params();
+        params.debug_flow = on;
+        self.renderer.set_params(params)
     }
 
     /// Whether the lit tier's sky plane for the terrain last staged is still being
@@ -577,6 +602,8 @@ struct Packer {
     /// The lit tier's planes (`super::light`), or `None` in the flat tier, which packs
     /// neither.
     light: Option<LightPlanes>,
+    /// Whether the last fill wrote any free water (the lit tier animates it).
+    wet: bool,
 }
 
 /// The lit tier's emitters ([`crate::voxel::LightConfig`]'s `emission`, `glow`,
@@ -671,6 +698,7 @@ impl Packer {
             overlay: Vec::new(),
             vines: Vec::new(),
             cover_override: None,
+            wet: false,
             light: p.lit.then(|| LightPlanes {
                 sky: vec![255; p.voxel_count()],
                 sky_key: 0,
@@ -788,6 +816,7 @@ impl Packer {
         self.styles.clear();
         self.slot_of.clear();
         let (wu, hu, du) = (w as usize, h as usize, d as usize);
+        let mut wet = 0u8;
         // Material and water, every voxel, walking the world's `(y · depth + z) · width
         // + x` rows into the texture's `(z · height + y) · width + x` rows: both run x
         // fastest, so each row is one contiguous read and one contiguous write.
@@ -800,9 +829,11 @@ impl Packer {
                 let pore = &view.pore[src..src + wu];
                 for (x, texel) in out.voxels[dst..dst + wu].iter_mut().enumerate() {
                     *texel = texel_of(material[x], free[x], pore[x], PART_NONE, 0, 0);
+                    wet |= texel.0[1];
                 }
             }
         }
+        self.wet = wet != 0;
         // Then the plants and animals, only where they stand, in texture order.
         let stands = &self.stands;
         let animals = &self.animals;
@@ -1116,6 +1147,11 @@ pub fn params_of(cfg: &VoxelConfig, proj: Projection, roof_from_texture: bool) -
         ambient_colour: ambient_colour(cpu::sky(), cfg.light.ambient_tint),
         sun: sun_direction(cfg.light.sun),
         sun_tint: cfg.light.sun_tint.clamp(0.0, 1.0),
+        water_absorb: cfg.light.water_absorb.max(0.0),
+        reflect_gain: cfg.light.water_reflect.max(0.0),
+        ripple: cfg.light.water_ripple.max(0.0),
+        reflect_cells: cfg.light.water_reflect_cells,
+        debug_flow: false,
     }
 }
 

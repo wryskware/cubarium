@@ -242,6 +242,11 @@ pub enum Lighting {
 /// emission = true     # the dossiers' luminous parts glow (lit tier)
 /// glow = 0.5          # one emitting voxel's light at its own 4³ cell, in full-ambient units
 /// glow_reach = 3      # 4³ cells the light spreads before it is gone
+/// water_absorb = 0.1  # water absorption a voxel of path, in units of the deep water colour
+/// water_reflect = 6.0  # the surface's Fresnel reflectance times this (physical is ~5 %)
+/// water_ripple = 0.2   # how far a ripple tilts the quantised surface normal
+/// water_hz = 12.0      # the water's animation steps a second
+/// water_reflect_cells = 64 # cells a reflected ray is marched before it is sky
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -280,6 +285,21 @@ pub struct LightConfig {
     /// How many glow cells the light spreads from its source through open terrain,
     /// falling off linearly to nothing one cell further.
     pub glow_reach: u32,
+    /// The lit tier's water (package W). Absorption per voxel of water path, in units of
+    /// the palette's deep water colour: after `1 / water_absorb` voxels, what is left of
+    /// the light from behind is that colour itself (per channel, Beer–Lambert). The same
+    /// number sets how fast the in-scatter runs from the surface colour to the deep one.
+    pub water_absorb: f32,
+    /// What the surface's Fresnel reflectance is multiplied by (clamped to 1): physical
+    /// Fresnel at this camera is about 5-7 %, too weak to read.
+    pub water_reflect: f32,
+    /// How far a ripple tilts the quantised surface normal (its horizontal part; 0 is a
+    /// still mirror).
+    pub water_ripple: f32,
+    /// The water's animation rate, steps a second of sim time (ripples, streaks).
+    pub water_hz: f32,
+    /// Cells a reflected ray is marched before it counts as sky.
+    pub water_reflect_cells: u32,
 }
 
 impl Default for LightConfig {
@@ -295,6 +315,11 @@ impl Default for LightConfig {
             emission: true,
             glow: 0.5,
             glow_reach: 3,
+            water_absorb: 0.1,
+            water_reflect: 6.0,
+            water_ripple: 0.2,
+            water_hz: 12.0,
+            water_reflect_cells: 64,
         }
     }
 }
@@ -1361,12 +1386,12 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                     s.save_in_background(world);
                 }
             }
-            Step::Render { .. } => {
+            Step::Render { f } => {
                 let (world, flora, fauna) = sim.layers();
                 // A pack the renderer refused is still owed: the flag goes straight back
                 // up rather than being lost with the tick that set it.
                 let at = Instant::now();
-                moved = out.render(world, flora, fauna, std::mem::take(&mut moved))?;
+                moved = out.render(world, flora, fauna, std::mem::take(&mut moved), f)?;
                 budget.frame(at.elapsed().as_nanos() as u64);
                 frames += 1;
                 since_frames += 1;
@@ -1860,6 +1885,7 @@ impl Out {
         flora: &Flora,
         fauna: &Fauna,
         moved: bool,
+        fraction: f64,
     ) -> Result<bool> {
         match self {
             Out::Cpu {
@@ -1875,6 +1901,7 @@ impl Out {
             }
             Out::Gpu(gpu) => {
                 let owed = moved && !gpu.stage_world(world, flora, fauna);
+                gpu.set_clock(world.tick(), fraction);
                 gpu.render()?;
                 Ok(owed)
             }

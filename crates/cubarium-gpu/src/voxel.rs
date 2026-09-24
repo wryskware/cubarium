@@ -545,6 +545,21 @@ pub struct VoxelParams {
     /// How far a sunlit texel leans toward `light`, times N·L. `0` is purely
     /// multiplicative.
     pub sun_tint: f32,
+    /// The lit tier's water (package W): absorption per voxel of water path, in units of
+    /// the deep colour's optical depth (after `1 / water_absorb` voxels what is left of the
+    /// light behind is the palette's deep colour), which also sets the surface-to-deep
+    /// in-scatter ramp.
+    pub water_absorb: f32,
+    /// What the surface's Fresnel reflectance (about 5-7 % at this camera) is multiplied
+    /// by, clamped to 1.
+    pub reflect_gain: f32,
+    /// How far a ripple tilts the quantised surface normal (its horizontal part).
+    pub ripple: f32,
+    /// Cells a reflected ray is marched before it counts as sky.
+    pub reflect_cells: u32,
+    /// Capture-only: draw the water's derived flow field instead of the water (never
+    /// set by the live display).
+    pub debug_flow: bool,
 }
 
 /// Texels per style in the style texture: wood, crown, heart, emit.
@@ -668,7 +683,7 @@ impl VoxelParams {
 
     /// The uniform block, in the layout `voxel.frag` declares, for an atlas holding the
     /// slots in `tex_mask`.
-    fn uniforms(&self, tex_mask: u32, vine_on: bool) -> VoxelUniforms {
+    fn uniforms(&self, tex_mask: u32, vine_on: bool, clock: FrameClock) -> VoxelUniforms {
         let v = |c: [f32; 3]| [c[0], c[1], c[2], 0.0];
         VoxelUniforms {
             geom: [
@@ -723,6 +738,51 @@ impl VoxelParams {
             ],
             ambient: v(self.ambient_colour),
             sun: [self.sun[0], self.sun[1], self.sun[2], self.sun_tint],
+            water_l: [
+                self.water_absorb.max(0.0),
+                self.reflect_gain.max(0.0),
+                self.ripple,
+                self.reflect_cells as f32,
+            ],
+            clock: [
+                clock.time,
+                clock.step as f32,
+                if self.debug_flow { 1.0 } else { 0.0 },
+                0.0,
+            ],
+        }
+    }
+}
+
+/// The frame's clock, as the lit tier's water reads it: sim time in ticks (the tick plus
+/// the fraction of it elapsed), and the water's animation step, both wrapped where the
+/// shader's patterns repeat so a long run keeps its precision.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FrameClock {
+    /// Ticks, wrapped at [`FrameClock::TICK_WRAP`].
+    pub time: f32,
+    /// Animation steps, wrapped at [`FrameClock::STEP_WRAP`].
+    pub step: u32,
+}
+
+impl FrameClock {
+    /// Every period `voxel.frag`'s water patterns have in steps divides this.
+    pub const STEP_WRAP: u64 = 2048;
+    /// Sim time wraps here (about 14.5 h at 20 Hz), well inside an f32's whole ticks.
+    pub const TICK_WRAP: u64 = 1 << 20;
+
+    /// The clock at `tick` plus `fraction` of the next, for water animated at `hz` steps a
+    /// second over a sim running `tick_hz` ticks a second.
+    pub fn at(tick: u64, fraction: f64, hz: f64, tick_hz: f64) -> FrameClock {
+        let t = tick as f64 + fraction.clamp(0.0, 1.0);
+        let step = if hz > 0.0 && tick_hz > 0.0 {
+            (t * hz / tick_hz).floor() as u64
+        } else {
+            0
+        };
+        FrameClock {
+            time: ((tick % Self::TICK_WRAP) as f64 + fraction.clamp(0.0, 1.0)) as f32,
+            step: (step % Self::STEP_WRAP) as u32,
         }
     }
 }
@@ -757,6 +817,10 @@ struct VoxelUniforms {
     ambient: [f32; 4],
     /// The lit tier's sun: the unit direction toward it, and the sunlit tint.
     sun: [f32; 4],
+    /// The lit tier's water: absorption, reflection gain, ripple tilt, reflection cells.
+    water_l: [f32; 4],
+    /// Sim time in ticks, the water's animation step, the flow overlay flag, padding.
+    clock: [f32; 4],
 }
 
 /// Where one tick's world is written, straight into mapped memory.
@@ -1045,6 +1109,10 @@ pub struct VoxelRenderer {
     /// changes the picture — a pack, a parameter, the weather, the founding pulse —
     /// clears this.
     raster_current: bool,
+    /// The frame's clock ([`VoxelRenderer::set_clock`]).
+    clock: FrameClock,
+    /// Whether the last pack held any free water ([`VoxelRenderer::set_water_visible`]).
+    water_visible: bool,
     /// What a frame recorded now would show, as a number that moves whenever the picture
     /// would: a pack, a parameter, the weather. Two recordings at the same version are
     /// the same frame, so the second one is not worth making.
@@ -1358,7 +1426,7 @@ impl VoxelRenderer {
             vk::BufferUsageFlags::UNIFORM_BUFFER,
         )?;
         for slot in 0..STAGING_RING as u64 {
-            uniforms.write_bytes_at(uniform_stride * slot, &[params.uniforms(tex_mask, vine_on)]);
+            uniforms.write_bytes_at(uniform_stride * slot, &[params.uniforms(tex_mask, vine_on, FrameClock::default())]);
         }
 
         let nearest = unsafe {
@@ -1563,6 +1631,8 @@ impl VoxelRenderer {
             offsets,
             dirty: false,
             raster_current: false,
+            clock: FrameClock::default(),
+            water_visible: false,
             redrew: true,
             version: 0,
             staged: false,
@@ -1613,6 +1683,26 @@ impl VoxelRenderer {
         self.params.rain_tick = rain_tick;
         self.raster_current = false;
         self.version += 1;
+    }
+
+    /// Move the frame's clock. **Animated water means redrawing**: in the lit tier, while
+    /// the last pack held water, a clock whose animation step has moved clears the redraw
+    /// skip, so the water animates at its step rate between ticks (the picture changes
+    /// only when the step does, so a frame at the same step is still skipped). The flat
+    /// tier draws nothing from the clock and keeps its redraw skip.
+    pub fn set_clock(&mut self, clock: FrameClock) {
+        let moved = clock.step != self.clock.step;
+        self.clock = clock;
+        if moved && self.params.lit && self.water_visible {
+            self.raster_current = false;
+            self.version += 1;
+        }
+    }
+
+    /// Whether the world last staged holds any free water: the lit tier redraws on its
+    /// clock only while it does.
+    pub fn set_water_visible(&mut self, visible: bool) {
+        self.water_visible = visible;
     }
 
     /// Whether a pack has a staging buffer to go into. False while every one of them is
@@ -1773,7 +1863,7 @@ impl VoxelRenderer {
         // `set_params` and `update_weather` only moved `self.params`.
         self.uniforms.write_bytes_at(
             self.uniform_stride * frame.slot as u64,
-            &[self.params.uniforms(self.tex_mask, self.vine_on)],
+            &[self.params.uniforms(self.tex_mask, self.vine_on, self.clock)],
         );
         // and its own four timestamps.
         let q = frame.slot as u32 * QUERY_SLOTS;
@@ -2308,7 +2398,28 @@ mod tests {
             ambient_colour: [1.0; 3],
             sun: [0.0; 3],
             sun_tint: 0.0,
+            water_absorb: 0.1,
+            reflect_gain: 6.0,
+            ripple: 0.2,
+            reflect_cells: 64,
+            debug_flow: false,
         }
+    }
+
+    /// The water's clock steps at its own rate over sim time (12 steps a second over 20
+    /// ticks a second: a step every 5/3 ticks, fractions included), and wraps its step
+    /// and its time where the shader's patterns repeat.
+    #[test]
+    fn the_frame_clock_steps_at_the_water_rate_and_wraps() {
+        let at = |tick: u64, f: f64| FrameClock::at(tick, f, 12.0, 20.0);
+        assert_eq!(at(0, 0.0).step, 0);
+        assert_eq!(at(1, 0.6).step, 0);
+        assert_eq!(at(1, 0.7).step, 1);
+        assert_eq!(at(5, 0.0).step, 3);
+        assert_eq!(at(100, 0.25).time, 100.25);
+        // 3415 ticks are 2049 steps: one past the wrap.
+        assert_eq!(at(3415, 0.0).step, 1);
+        assert_eq!(at(FrameClock::TICK_WRAP + 3, 0.5).time, 3.5);
     }
 
     /// Any water at all packs to a non-zero fraction, so the presenter's "at least one

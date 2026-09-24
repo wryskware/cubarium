@@ -61,6 +61,14 @@ ambient_tint = 0.15 # how far the ambient leans toward the sky's hue
 # A texel it reaches is one ladder rung brighter than one in shadow; crowns dapple it.
 sun = [-1.0, 2.0, -1.0]
 sun_tint = 0.18     # how far a sunlit texel leans toward the palette's light, times N·L
+# The water (lit tier): absorption a voxel of path in units of the deep water colour,
+# the reflection gain over Fresnel, the ripple tilt, the animation rate and the reflection
+# march.
+water_absorb = 0.1
+water_reflect = 6.0
+water_ripple = 0.2
+water_hz = 12.0
+water_reflect_cells = 64
 
 [world]
 # `cubarium_voxel::Config`. x wraps; y is up from the foundation; z runs into the habitat.

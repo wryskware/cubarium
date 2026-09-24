@@ -43,6 +43,8 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
     vec4 lightK;        // lit: ambient gain, ambient floor, ladder rungs, AO strength
     vec4 ambientC;      // lit: the ambient light's colour, the sky's hue at unit luminance
     vec4 sunK;          // lit: the unit direction toward the sun (zero: none), sun tint
+    vec4 waterL;        // lit: absorption per voxel of path, reflection gain, ripple tilt, reflection cells
+    vec4 clock;         // sim time in ticks (tick + the fraction elapsed), the water's animation step, -, -
 } u;
 
 // The lighting tier (`lighting = "flat" | "lit"`), fixed when the pipeline is built. The
@@ -803,9 +805,116 @@ bool nearerOwns(int x, int y, int z, int row) {
     return false;
 }
 
+// --- water, the lit tier -------------------------------------------------------------------
+//
+// The boundary is the flat tier's, exactly: `waterAtLit` runs the same row tests
+// (`fillPxQ`, the skin rows, `nearerOwns`, `stop`), and a pixel is water in the lit tier
+// if and only if one of them marks it. Only the colour inside changes:
+//
+// - Depth absorption: from the slab that first marks the pixel on, the walk's ray is
+//   followed through the water it really crosses, cell by cell (the part of each slab's
+//   segment, √(1 + (RISE/S)²) voxels long, under the cell's water line), and each piece
+//   absorbs per channel by Beer–Lambert with σ = `absorb` × −ln(deep colour): after
+//   1 / `absorb` voxels of water what is left of the light behind is the palette's deep
+//   colour itself. What the water scatters in runs from the palette's surface colour at
+//   the surface to its deep colour at depth under it (the same `absorb` sets that ramp,
+//   over the view ray's path to the depth). The
+//   in-scatter is lit by the ladder at the water's entry, as a ratio to open sunlit sky,
+//   so open water keeps the palette's colours and water under cover darkens with it.
+// - The surface (a pixel whose first mark is a skin top-face row): an animated, quantised
+//   normal and a Fresnel mix with a reflection marched through the volume.
+// - Falling water (a water cell over a cell that is neither solid nor full) has no ripple
+//   and no reflection, but streaks that scroll down.
+//
+// Everything that needs more than a few texel fetches (the light, the flow, the normal,
+// the reflection, the streaks) runs once per pixel after the walk, from what the entry
+// recorded: front to back is linear, so the surface can be put in front afterwards.
+// Nothing reaches the pixel before its first water (every other contribution ends the
+// walk), so in front of the entry the walk has gathered nothing and let everything
+// through. **The walk carries as little as it can**: one int for the entry, from which
+// everything else about it is recomputed afterwards (state carried through the loop
+// costs every pixel occupancy, water or not: +1.7 ms at 13 px with the entry point, its
+// open cell and its canopy carried).
+
+int wEntry;         // the first water: y | z << 12 | top-row << 24, or -1 for none
+vec3 wScatter;      // in-scatter so far, unlit and unhazed, weighted by transmission
+float wHaze;        // the haze share of that in-scatter (its weight, averaged over the channels)
+float wSurf;        // the height of the entered water's surface
+int PX;             // this pixel's raster column
+int PY;             // and row
+
+void waterLitReset() {
+    wEntry = -1;
+    wScatter = vec3(0.0);
+    wHaze = 0.0;
+    wSurf = 0.0;
+}
+
+// Per-channel absorption per voxel of water path.
+vec3 waterSigma() { return -log(max(u.waterDeepC.rgb, vec3(1.0 / 4096.0))) * u.waterL.x; }
+
+void waterAtLit(int x, int y, int z, uvec4 v, int row, inout vec3 acc, inout vec3 trans) {
+    int fill = fillPxQ(int(v.g));
+    int R = frontRow(y, z);
+    int bottom = R + S;
+    int skinRow = bottom - fill;
+    bool openUp = waterOpenUp(x, y, z);
+    bool topRow = openUp && row >= skinRow - RISE && row < skinRow && !nearerOwns(x, y, z, row);
+    bool nearSolid = z > 0 && solidAt(x, y, z - 1);
+    int nearFill = z > 0 ? fillPxAt(x, y, z - 1) : 0;
+    int nearSkin = R + RISE + S - nearFill;
+    int stop = bottom;
+    if (nearSolid) {
+        stop = skinRow;
+    } else if (nearFill > 0) {
+        bool nearOpenUp = waterOpenUp(x, y, z - 1);
+        stop = min(bottom, nearOpenUp ? nearSkin - RISE : nearSkin);
+    }
+    bool bodyRow = row >= skinRow && row < stop;
+
+    float k = float(RISE) / float(S);
+    // The pixel's height on this slab's front plane; the ray falls k voxels a slab.
+    float yf = (float(BASE - z * RISE - row - 1) + 0.5) / float(S);
+    float h = hazeAt(float(z) + 0.5);
+    if (wEntry < 0) {
+        if (!topRow && !bodyRow) { return; }
+        wEntry = y | (z << 12) | (topRow ? 1 << 24 : 0);
+        // The surface over the entry: its own top face, or up the column a front face
+        // belongs to.
+        int ys = y;
+        for (int i = 0; i < 8 && !topRow; ++i) {
+            if (solidAt(x, ys + 1, z) || freeQ(x, ys + 1, z) == 0) { break; }
+            ++ys;
+        }
+        wSurf = float(ys) + float(topRow ? fill : fillPxAt(x, ys, z)) / float(S);
+        if (bodyRow && row == skinRow && openUp) {
+            // The front's top row: the flat tier's skin line, in the surface colour.
+            float a = min(clamp(u.knobs.y, 0.0, 1.0) * u.waterK.x, 0.95);
+            wScatter += trans * a * (1.0 - h) * u.waterSurfaceC.rgb;
+            wHaze += dot(trans, vec3(a * h / 3.0));
+            trans *= 1.0 - a;
+        }
+    }
+    // The ray's piece in this cell's water, in this slab.
+    float top = float(y) + float(fill) / float(S);
+    float hi = min(yf, top);
+    float lo = max(yf - k, float(y));
+    float l = max(hi - lo, 0.0) / k * sqrt(1.0 + k * k);
+    if (l <= 0.0) { return; }
+    vec3 T = exp(-waterSigma() * l);
+    // The in-scatter ramp runs on depth under the surface, as the view ray's path to
+    // that depth (l / (hi - lo) voxels of path a voxel of depth).
+    float depth = max(wSurf - 0.5 * (hi + lo), 0.0) * sqrt(1.0 + k * k) / k;
+    vec3 cin = mix(u.waterSurfaceC.rgb, u.waterDeepC.rgb, 1.0 - exp(-u.waterL.x * depth));
+    wScatter += trans * (1.0 - T) * (1.0 - h) * cin;
+    wHaze += dot(trans * (1.0 - T), vec3(h / 3.0));
+    trans *= T;
+}
+
 // `VoxelPresenter::water`, for one screen row: the surface's own receding top face and
 // the body below it, each blended at most once.
-void waterAt(int x, int y, int z, uvec4 v, int row, inout vec3 acc, inout float trans) {
+void waterAt(int x, int y, int z, uvec4 v, int row, inout vec3 acc, inout vec3 trans) {
+    if (LIT) { waterAtLit(x, y, z, v, row, acc, trans); return; }
     int fill = fillPxQ(int(v.g));
     int R = frontRow(y, z);
     int bottom = R + S;
@@ -876,6 +985,347 @@ vec3 skyColor(int px_x, int px_y) {
     return sky;
 }
 
+// --- water after the walk (the lit tier) --------------------------------------------------
+
+// The flow field, derived from the water state alone (the solver hands the renderer no
+// velocity): lateral flow runs down the gradient of the free-surface height y + free
+// against the four lateral neighbours' surfaces, and a water cell over a cell that is
+// neither solid nor full is falling. Computed here, per water pixel, from the free bytes
+// the walk already reads: at most 17 texel fetches, once per pixel.
+
+// A neighbour that is a wall (solid, or outside the world in z): no flow across it.
+const float WALL = -1.0e6;
+// The surface drop per voxel that is full speed, and the steps the speed is quantised to
+// (0, 1/3, 2/3, 1: a drop under a sixth of FLOW_FULL per voxel is still water).
+const float FLOW_FULL = 0.5;
+const float FLOW_STEPS = 3.0;
+
+// The free surface near level y in column (x, z): the water over it, in it, or the water
+// or ground at most two cells under it.
+float surfaceNear(int x, int y, int z) {
+    if (z < 0 || z >= D || solidAt(x, y, z)) { return WALL; }
+    int ga = solidAt(x, y + 1, z) ? 0 : freeQ(x, y + 1, z);
+    if (ga > 0) { return float(y + 1) + float(ga) / 255.0; }
+    int g = freeQ(x, y, z);
+    if (g > 0) { return float(y) + float(g) / 255.0; }
+    for (int yy = y - 1; yy >= max(y - 2, 0); --yy) {
+        if (solidAt(x, yy, z)) { return float(yy + 1); }
+        int gg = freeQ(x, yy, z);
+        if (gg > 0) { return float(yy) + float(gg) / 255.0; }
+    }
+    return float(max(y - 2, 0));
+}
+
+// The surface's slope along one axis from its two neighbours: central where both are
+// water or open, one-sided against a wall, flat between two walls.
+float slope1(float a, float h0, float b) {
+    bool wa = a < WALL * 0.5;
+    bool wb = b < WALL * 0.5;
+    if (wa && wb) { return 0.0; }
+    if (wa) { return b - h0; }
+    if (wb) { return h0 - a; }
+    return 0.5 * (b - a);
+}
+
+// xy: the flow's direction (world x, z) times its quantised speed; z: 1 where falling.
+vec3 flowAt(ivec3 c) {
+    int x = c.x;
+    int y = c.y;
+    int z = c.z;
+    if (y > 0 && !solidAt(x, y - 1, z) && fillPxAt(x, y - 1, z) < S) {
+        return vec3(0.0, 0.0, 1.0);
+    }
+    // The cell's own column by the same rule as its neighbours': a submerged cell (a
+    // front face's lower rows) reads the surface over it, as they do.
+    float h0 = surfaceNear(x, y, z);
+    float gx = slope1(surfaceNear(x - 1, y, z), h0, surfaceNear(x + 1, y, z));
+    float gz = slope1(surfaceNear(x, y, z - 1), h0, surfaceNear(x, y, z + 1));
+    vec2 f = -vec2(gx, gz);
+    float m = length(f);
+    float q = floor(clamp(m / FLOW_FULL, 0.0, 1.0) * FLOW_STEPS + 0.5) / FLOW_STEPS;
+    return vec3(m > 0.0 ? f / m * q : vec2(0.0), 0.0);
+}
+
+int wrapI(int a, int m) {
+    int r = a % m;
+    return r < 0 ? r + m : r;
+}
+
+float latticeValue(int x, int z, int t, int salt) {
+    return float(cellHash(x, z, t, salt) & 0xFFFFu) / 65535.0;
+}
+
+// Value noise over (x, z, time), its lattice tiled in x with period `px` (so the ring has
+// no seam) and in time with period `pt` (so the animation step's wrap has none).
+float vnoise3(vec3 p, int px, int pt, int salt) {
+    vec3 f = floor(p);
+    vec3 t = p - f;
+    t = t * t * (3.0 - 2.0 * t);
+    ivec3 c = ivec3(f);
+    int x0 = wrapI(c.x, px);
+    int x1 = wrapI(c.x + 1, px);
+    int t0 = wrapI(c.z, pt);
+    int t1 = wrapI(c.z + 1, pt);
+    float a = mix(mix(latticeValue(x0, c.y, t0, salt), latticeValue(x1, c.y, t0, salt), t.x),
+                  mix(latticeValue(x0, c.y + 1, t0, salt), latticeValue(x1, c.y + 1, t0, salt), t.x),
+                  t.y);
+    float b = mix(mix(latticeValue(x0, c.y, t1, salt), latticeValue(x1, c.y, t1, salt), t.x),
+                  mix(latticeValue(x0, c.y + 1, t1, salt), latticeValue(x1, c.y + 1, t1, salt), t.x),
+                  t.y);
+    return mix(a, b, t.z);
+}
+
+// Lattice cells across the ring for a noise `cells_per_voxel` fine: a whole number, so the
+// pattern meets itself at the ring's seam.
+int ringCells(float cellsPerVoxel) { return max(1, int(float(W) * cellsPerVoxel + 0.5)); }
+
+// The ripple height field at world (x, z) and animation step `st`: two octaves, two
+// voxels and one voxel across, evolving in place (the step is the noise's third axis).
+// The step wraps at 2048 (`VoxelRenderer::set_clock`); both time periods divide it.
+float rippleHeight(vec2 w, float st) {
+    int na = ringCells(0.5);
+    int nb = ringCells(1.0);
+    float a = vnoise3(vec3(w.x * float(na) / float(W), w.y * 0.5, st / 4.0), na, 512, 40);
+    float b = vnoise3(vec3(w.x * float(nb) / float(W), w.y, st / 2.0), nb, 1024, 41);
+    return a + 0.5 * b;
+}
+
+// Steps in one flow-map cycle, and voxels the ripples move a step at full speed (one
+// voxel a second at 12 Hz). Two copies half a cycle apart cross-fade, so the advection
+// never runs away and a cycle's restart is never seen.
+const float FLOW_CYCLE = 64.0;
+const float FLOW_ADVECT = 1.0 / 12.0;
+// The slope under which a texel's normal stays straight up.
+const float RIPPLE_FLAT = 0.45;
+
+// The quantised surface normal at world (x, z) under flow `flow`: straight up, or tilted
+// by the ripple knob toward one of the four axis directions.
+vec3 rippleNormal(vec2 w, vec2 flow) {
+    float st = u.clock.y;
+    float e = 0.125;
+    vec2 g;
+    if (dot(flow, flow) > 0.0) {
+        float p1 = fract(st / FLOW_CYCLE);
+        float p2 = fract(st / FLOW_CYCLE + 0.5);
+        float w1 = 1.0 - abs(1.0 - 2.0 * p1);
+        float w2 = 1.0 - w1;
+        vec2 o1 = w - flow * p1 * FLOW_CYCLE * FLOW_ADVECT;
+        vec2 o2 = w - flow * p2 * FLOW_CYCLE * FLOW_ADVECT + vec2(0.5, 0.5);
+        vec2 g1 = vec2(rippleHeight(o1 + vec2(e, 0.0), st) - rippleHeight(o1 - vec2(e, 0.0), st),
+                       rippleHeight(o1 + vec2(0.0, e), st) - rippleHeight(o1 - vec2(0.0, e), st));
+        vec2 g2 = vec2(rippleHeight(o2 + vec2(e, 0.0), st) - rippleHeight(o2 - vec2(e, 0.0), st),
+                       rippleHeight(o2 + vec2(0.0, e), st) - rippleHeight(o2 - vec2(0.0, e), st));
+        // The blend's slope keeps its contrast through the cross-fade.
+        g = (w1 * g1 + w2 * g2) / (2.0 * e) / sqrt(w1 * w1 + w2 * w2);
+    } else {
+        g = vec2(rippleHeight(w + vec2(e, 0.0), st) - rippleHeight(w - vec2(e, 0.0), st),
+                 rippleHeight(w + vec2(0.0, e), st) - rippleHeight(w - vec2(0.0, e), st))
+            / (2.0 * e);
+    }
+    if (max(abs(g.x), abs(g.y)) < RIPPLE_FLAT) { return vec3(0.0, 1.0, 0.0); }
+    vec2 s = abs(g.x) >= abs(g.y) ? vec2(sign(g.x), 0.0) : vec2(0.0, sign(g.y));
+    float tilt = u.waterL.z;
+    return normalize(vec3(-s.x * tilt, 1.0, -s.y * tilt));
+}
+
+// A ceiling seen in a reflection: the underside of a solid, which the picture never
+// draws; the ambient ladder's floor rung and whatever local light reaches it.
+vec3 undersideLit(ivec3 c, uvec4 v, vec3 hp) {
+    vec3 body = blockBody(v, strataOf(matOf(v)));
+    return hazed(body * ladderLight(0.0, 0.0, glowAt(hp - vec3(0.0, 0.5, 0.0))),
+                 hazeAt(float(c.z)));
+}
+
+// The front-face texel (r rows up from its bottom, dx across) a reflected ray entering
+// cell `c` through `axis` at `hp` lands on: a side face (axis 0) is drawn as the front's
+// edge column on that side, an underside (axis 1) as its bottom row.
+ivec2 reflectTexel(vec3 hp, ivec3 c, int axis, float dirX) {
+    int dx = clamp(int(floor(fract(hp.x) * float(S))), 0, S - 1);
+    int dy = clamp(int(floor((float(c.y + 1) - hp.y) * float(S))), 0, S - 1);
+    if (axis == 0) { dx = dirX > 0.0 ? 0 : S - 1; }
+    if (axis == 1) { dy = S - 1; }
+    return ivec2(S - 1 - dy, dx);
+}
+
+bool glyphTexelAt(uvec4 v, vec3 hp, ivec3 c, int axis, float dirX) {
+    ivec2 t = reflectTexel(hp, c, axis, dirX);
+    int atlasY = (partOf(v) * 8 + glyphOf(v)) * (S + RISE) + S - 1 - t.x;
+    return (texelFetch(glyphTex, ivec2(t.y, atlasY), 0).r >> 2) != 63u;
+}
+
+// What the surface at `p` mirrors along `r`: a DDA through the volume, at most
+// `reflect_cells` cells, to the first terrain or block part (`hit`, entered through
+// `axis` at `hp`); false when the ray leaves the world or is still going at the cap
+// (`hp` is then where it went). The march only finds the hit; `reflectionShade` shades
+// it once the march's own state is dead, which keeps this pass's register count (and so
+// the whole shader's occupancy) near the walk's own.
+bool reflectMarch(vec3 p, vec3 r, out ivec3 hit, out vec3 hp, out int axis) {
+    ivec3 c = ivec3(floor(p + r * 1e-3));
+    ivec3 dir = ivec3(sign(r));
+    vec3 inv = vec3(
+        abs(r.x) > 1e-6 ? 1.0 / abs(r.x) : 1e30,
+        abs(r.y) > 1e-6 ? 1.0 / abs(r.y) : 1e30,
+        abs(r.z) > 1e-6 ? 1.0 / abs(r.z) : 1e30);
+    vec3 next = vec3(
+        (dir.x > 0 ? float(c.x + 1) - p.x : p.x - float(c.x)) * inv.x,
+        (dir.y > 0 ? float(c.y + 1) - p.y : p.y - float(c.y)) * inv.y,
+        (dir.z > 0 ? float(c.z + 1) - p.z : p.z - float(c.z)) * inv.z);
+    int cap = int(u.waterL.w);
+    float tIn = 0.0;
+    axis = -1;
+    hit = c;
+    for (int i = 0; i < cap; ++i) {
+        if (c.y >= H || c.y < 0 || c.z < 0 || c.z >= D) { break; }
+        if (i > 0) {
+            uvec4 v = at(c.x, c.y, c.z);
+            // A block part counts where its glyph has a texel (the atlas's own holes let
+            // the ray on); a texture's leaf cutout does not (`reflectionShade`).
+            if (solidV(v) || (isBlockPart(partOf(v)) && glyphTexelAt(v, p + r * tIn, c, axis, r.x))) {
+                hit = c;
+                hp = p + r * tIn;
+                return true;
+            }
+        }
+        axis = (next.x < next.y && next.x < next.z) ? 0 : (next.y < next.z ? 1 : 2);
+        if (axis == 0) { tIn = next.x; c.x += dir.x; next.x += inv.x; }
+        else if (axis == 1) { tIn = next.y; c.y += dir.y; next.y += inv.y; }
+        else { tIn = next.z; c.z += dir.z; next.z += inv.z; }
+    }
+    hp = p + r * tIn;
+    return false;
+}
+
+// The reflection's colour: the hit's face under L's light (`shadeFront`: the ladder, AO,
+// the sun and its shadows, the glow), from its base colour (terrain: the material or its
+// texture, wet; a block part: its glyph texel's pigment or texture, and an emitter at
+// full value), without the picture's edge treatments (rims, bevels, tones), which a
+// ripple-broken mirror image at 40 % would not show and which cost the whole shader
+// occupancy to inline a second time; a solid's underside at the ladder's floor; or the
+// sky gradient at the raster row where the ray left.
+vec3 reflectionShade(bool found, ivec3 c, vec3 hp, int axis, vec3 r) {
+    if (!found) {
+        int row = int(floor(float(BASE) - hp.y * float(S) - hp.z * float(RISE)));
+        return skyAt(max(row, 0));
+    }
+    uvec4 v = at(c.x, c.y, c.z);
+    ivec2 t = reflectTexel(hp, c, axis, r.x);
+    int dy = S - 1 - t.x;
+    bool solid = solidV(v);
+    if (solid && axis == 1) { return undersideLit(c, v, hp); }
+    vec3 base;
+    float canopy;
+    if (solid) {
+        int m = matOf(v);
+        base = blockBody(v, faceBase(m, 2 * (m - 1), c.x, c.y, c.z, 0, t.y, dy));
+        canopy = canopyAt(c.x, c.z - 1, c.y);
+    } else {
+        int atlasY = (partOf(v) * 8 + glyphOf(v)) * (S + RISE) + dy;
+        uint q = texelFetch(glyphTex, ivec2(t.y, atlasY), 0).r;
+        vec3 e = styleEmit(int(v.a));
+        if (int(q >> 2) == TONE_EMIT && any(greaterThan(e, vec3(0.0)))) {
+            return hazed(e, hazeAt(float(c.z)));
+        }
+        base = glyphPigment(v, q);
+        // A texture's leaf hole: the cell's crown pigment.
+        if (!plantTexel(c.x, c.y, c.z, v, false, t.y, dy, base)) { base = styleAt(int(v.a), 1); }
+        canopy = partOf(v) == ANIMAL_INTERIM ? canopyAt(c.x, c.z - 1, c.y) : plantCanopy(v);
+    }
+    return hazed(shadeFront(base, c.x, c.y, c.z, t.y, dy, canopy), hazeAt(float(c.z)));
+}
+
+// A falling-water streak at raster pixel (px, py): a third of the pixel columns carry
+// one, S/3 rows long (at least 2) once every 16 rows (32 from 8 px a voxel up), moving
+// down S/4 rows (at least 1) an animation step. The periods divide the step's wrap.
+bool fallStreak(int px, int py, float st) {
+    uint h = cellHash(wrapI(px, W * S), 0, 0, 50);
+    if (h % 3u != 0u) { return false; }
+    int period = S >= 8 ? 32 : 16;
+    int len = max(2, S / 3) + int((h >> 8) & 1u);
+    int speed = max(1, S / 4);
+    int ph = wrapI(py - int(st) * speed + int(h >> 16), period);
+    return ph < len;
+}
+
+// The capture-only flow overlay (`VoxelParams::debug_flow`): still water dark blue,
+// moving water hued by its direction (+x red, +z green, -x cyan, -z violet) and brighter
+// with speed, falling water white-on-violet stripes; from 8 px a voxel, a white line (its
+// head yellow) from each top face's centre along its flow.
+vec3 flowDebug(vec3 fl, bool top, vec3 p) {
+    if (fl.z > 0.5) {
+        return fallStreak(PX, PY, u.clock.y) ? vec3(1.0) : vec3(0.35, 0.05, 0.5);
+    }
+    float q = length(fl.xy);
+    if (q < 0.01) { return vec3(0.01, 0.02, 0.2); }
+    float a = atan(fl.y, fl.x);
+    vec3 hue = 0.5 + 0.5 * vec3(cos(a), cos(a - 2.0944), cos(a + 2.0944));
+    vec3 c = hue * (0.25 + 0.75 * q);
+    if (top && S >= 8) {
+        vec2 lp = vec2(fract(p.x) * float(S), (1.0 - fract(p.z)) * float(RISE));
+        vec2 o = vec2(0.5 * float(S), 0.5 * float(RISE));
+        vec2 d = normalize(vec2(fl.x * float(S), -fl.y * float(RISE)));
+        vec2 e = o + d * 0.45 * float(S) * vec2(1.0, float(RISE) / float(S));
+        vec2 pa = lp - o;
+        vec2 ba = e - o;
+        float t = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-4), 0.0, 1.0);
+        if (length(pa - ba * t) < 0.75) { c = t > 0.6 ? vec3(1.0, 1.0, 0.3) : vec3(1.0); }
+    }
+    return c;
+}
+
+// The lit water, put together once the walk is over: `colour` is what the walk made of
+// the pixel with the water's absorption in it and its in-scatter still out. The entry is
+// recomputed from `wEntry`: its cell, whether it is the surface, the point where the ray
+// entered, and the open cell whose light it reads.
+vec3 litWaterFinish(vec3 colour) {
+    int y = wEntry & 0xFFF;
+    int z = (wEntry >> 12) & 0xFFF;
+    bool top = (wEntry >> 24) != 0;
+    int x = PX / S;
+    int fill = fillPxAt(x, y, z);
+    float k = float(RISE) / float(S);
+    float yf = (float(BASE - z * RISE - PY - 1) + 0.5) / float(S);
+    float xw = (float(PX) + 0.5) / float(S);
+    float ys = float(y) + float(fill) / float(S);
+    vec3 p = top ? vec3(xw, ys, float(z) + clamp((yf - ys) / k, 0.0, 1.0)) : vec3(xw, yf, float(z));
+    ivec3 open = top ? ivec3(x, fill < S ? y : y + 1, z) : ivec3(x, y, z - 1);
+    float canopy = top ? canopyAt(x, z, y) : canopyAt(x, z - 1, y);
+
+    vec3 fl = flowAt(ivec3(x, y, z));
+    if (u.clock.z > 0.5) { return flowDebug(fl, top, p); }
+    // The ladder's light at the entry, as a ratio to open sunlit sky.
+    float sunOn = u.sunK.y > 0.0 ? 1.0 : 0.0;
+    float ndl = top ? u.sunK.y : -u.sunK.z;
+    float sun = (sunOn > 0.0 && ndl > 0.0) ? sunReaches(p, open) : 0.0;
+    vec3 glow = glowAt(top ? p + vec3(0.0, 0.5, 0.0) : p - vec3(0.0, 0.0, 0.5));
+    vec3 here = ladderLight(skyOpen(open.x, open.y, open.z) * canopy, sun, glow);
+    vec3 ratio = here / max(ladderLight(1.0, sunOn, vec3(0.0)), vec3(1e-4));
+    colour += wScatter * ratio + wHaze * u.hazeC.rgb;
+    if (fl.z > 0.5) {
+        // Falling water is a film too thin to scatter much by its path, so it keeps the
+        // flat tier's reading of it (the surface colour at the skin's opacity, here under
+        // the ladder's light): at that opacity on the streaks, and at half of it between
+        // them, so the streaks run down a translucent sheet.
+        float a = min(clamp(u.knobs.y, 0.0, 1.0) * u.waterK.x, 0.95);
+        a *= fallStreak(PX, PY, u.clock.y) ? 1.0 : 0.5;
+        return mix(colour, hazed(u.waterSurfaceC.rgb * ratio, hazeAt(p.z)), a);
+    }
+    if (!top) { return colour; }
+    vec3 n = rippleNormal(p.xz, fl.xy);
+    vec3 d = normalize(vec3(0.0, -k, 1.0));
+    float cosi = clamp(-dot(d, n), 0.0, 1.0);
+    float f = clamp(u.waterL.y * (0.02 + 0.98 * pow(1.0 - cosi, 5.0)), 0.0, 1.0);
+    vec3 r = reflect(d, n);
+    r.y = max(r.y, 0.05);
+    r = normalize(r);
+    // What is behind the surface first, so the march and the shading carry little state.
+    vec3 under = (1.0 - f) * colour;
+    ivec3 hc;
+    vec3 hp;
+    int axis;
+    bool found = reflectMarch(p, r, hc, hp, axis);
+    return under + f * reflectionShade(found, hc, hp, axis, r);
+}
+
 void main() {
     S = u.geom.x;
     RISE = u.geom.y;
@@ -889,7 +1339,12 @@ void main() {
     int dx = px.x - x * S;
 
     vec3 acc = vec3(0.0);
-    float trans = 1.0;
+    vec3 trans = vec3(1.0);
+    if (LIT) {
+        PX = px.x;
+        PY = px.y;
+        waterLitReset();
+    }
 
     for (int z = 0; z < D; ++z) {
         int q = BASE - z * RISE - px.y - 1;
@@ -916,13 +1371,13 @@ void main() {
                                                    canopyAt(x, z - 1, level));
                             }
                             acc += trans * hazed(t.rgb, hazeAt(float(z)));
-                            trans = 0.0;
+                            trans = vec3(0.0);
                             break;
                         }
                     }
                 }
                 acc += trans * blockFront(x, level, z, v, r, dx);
-                trans = 0.0;
+                trans = vec3(0.0);
                 break;
             }
             // A plant stands in the void and the water of its own cell blends over it: a
@@ -940,7 +1395,7 @@ void main() {
                                                canopyAt(x, z - 1, level));
                         }
                         acc += trans * hazed(t.rgb, hazeAt(float(z)));
-                        trans = 0.0;
+                        trans = vec3(0.0);
                         break;
                     }
                 }
@@ -950,7 +1405,7 @@ void main() {
                 vec3 art;
                 if (glyphFront(x, level, z, v, r, dx, art)) {
                     acc += trans * art;
-                    trans = 0.0;
+                    trans = vec3(0.0);
                     break;
                 }
             }
@@ -965,7 +1420,7 @@ void main() {
             uvec4 v = at(x, below, z);
             if (solidV(v)) {
                 acc += trans * blockTop(x, below, z, v, r, dx);
-                trans = 0.0;
+                trans = vec3(0.0);
                 break;
             }
             // The cell's own water before its own plant, here as at the level above: the
@@ -978,18 +1433,20 @@ void main() {
             vec3 cap;
             if (isBlockPart(p) && glyphCap(x, below, z, v, r, dx, cap)) {
                 acc += trans * cap;
-                trans = 0.0;
+                trans = vec3(0.0);
                 break;
             }
         }
 
-        if (trans <= 0.0) { break; }
+        if (all(lessThanEqual(trans, vec3(0.0)))) { break; }
     }
 
     // The presenter clears to the sky and paints over it; front to back, the sky is
     // whatever light is left.
     vec3 sky = skyColor(px.x, px.y);
-    outColour = vec4(acc + trans * sky, 1.0);
+    vec3 colour = acc + trans * sky;
+    if (LIT && wEntry >= 0) { colour = litWaterFinish(colour); }
+    outColour = vec4(colour, 1.0);
 
     // Falling rain animation streaks when active
     if (u.knobs.w > 0.0) {
