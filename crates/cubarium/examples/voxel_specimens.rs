@@ -3,12 +3,15 @@
 //!
 //! ```text
 //! cargo run -p cubarium --release --example voxel_specimens -- OUT.png [--glyphs] [--wilt W]
-//!     [--gpu [--px N] [--textures DIR]]
+//!     [--gpu [--px N] [--textures DIR | --textures-only DIR]]
 //! ```
 //!
 //! `--gpu` draws the same strip with the GPU renderer instead (headless), at `--px`
-//! (default 6) with the face textures in `--textures` (default `assets/voxel-textures`;
-//! a directory that does not exist draws untextured). The CPU picture is always at 6.
+//! (default 6) with the face textures in `assets/voxel-textures`. `--textures DIR` puts
+//! `DIR` over that set, so a scratch directory holding only a few candidate species
+//! (`DIR/masters/species/<species>/…`) previews them among everything else;
+//! `--textures-only DIR` draws with `DIR` alone (a directory that does not exist draws
+//! untextured). The CPU picture is always at 6.
 //!
 //! Each producer stands at three sizes (wood at 10 %, 40 % and 100 % of its maximum),
 //! left to right, in the front slab. Bloomcrown and lanternberry get a fourth, adult and
@@ -42,13 +45,21 @@ fn main() -> Result<()> {
     let mut gpu = false;
     let mut px = 6u32;
     let mut textures: Option<PathBuf> = None;
+    let mut layered = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--glyphs" => glyphs = true,
             "--gpu" => gpu = true,
             "--px" => px = args.next().context("--px N")?.parse()?,
-            "--textures" => textures = Some(PathBuf::from(args.next().context("--textures DIR")?)),
+            "--textures" => {
+                textures = Some(PathBuf::from(args.next().context("--textures DIR")?));
+                layered = true;
+            }
+            "--textures-only" => {
+                textures = Some(PathBuf::from(args.next().context("--textures-only DIR")?));
+                layered = false;
+            }
             "--wilt" => wilt = args.next().context("--wilt W")?.parse()?,
             _ if out.is_none() => out = Some(PathBuf::from(a)),
             _ => bail!("unexpected argument {a}"),
@@ -180,6 +191,7 @@ fn main() -> Result<()> {
         ))
     };
     if gpu {
+        let under = layered.then(|| cfg.textures_dir.clone());
         let cfg = VoxelConfig {
             px_per_voxel: px,
             textures: true,
@@ -192,6 +204,7 @@ fn main() -> Result<()> {
             proj,
             VoxelGpuSinkOptions {
                 models,
+                textures_under: under,
                 ..Default::default()
             },
         )?;

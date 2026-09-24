@@ -125,6 +125,7 @@ fn main() -> Result<()> {
             capture: None,
             roof_from_texture: !args.roof_walk,
             models: None,
+            textures_under: None,
         },
     ) {
         Ok(sink) => sink,

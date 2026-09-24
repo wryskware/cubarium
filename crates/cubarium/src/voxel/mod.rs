@@ -2125,6 +2125,7 @@ fn open_out(args: &Voxel, cfg: &VoxelConfig, proj: Projection, speed: f64) -> Re
                     capture: args.gpu_capture.clone(),
                     roof_from_texture: !args.gpu_roof_walk,
                     models: load_models(cfg),
+                    textures_under: None,
                 },
             )?;
             if args.gpu_web_rate > 0.0 {

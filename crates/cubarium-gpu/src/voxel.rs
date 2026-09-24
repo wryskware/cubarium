@@ -96,7 +96,7 @@ pub const PART_FLOOR_MARK: u8 = 7;
 
 /// Which face of a voxel a texture is drawn on. The elevated camera never shows an
 /// underside, so there is no third face.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TexFace {
     /// A front face: `s × s` pixels on screen, row 0 at the top.
     Side,
@@ -150,16 +150,23 @@ pub const ROLE_ACCENT: u8 = 4;
 ///
 /// Slot `k`, variant `v` is the `s × s` cell at `(v · s, k · s)`; a top face uses its
 /// first `rise` rows. The texels are **sRGB-encoded**: a terrain texel is the face's
-/// colour and replaces the material's strata colour; a plant texel's red channel is a
-/// multiplier on the style colour, `r / 128` (so 128 leaves it alone), and its alpha
+/// colour and replaces the material's strata colour; a generic plant texel's red channel
+/// is a multiplier on the style colour, `r / 128` (so 128 leaves it alone), and its alpha
 /// below 128 is a hole in a cutout.
+///
+/// The [`TEXTURE_SLOTS`] come first. **Named slots** follow them, one per face a caller
+/// adds with [`VoxelTextures::add_slot`] (the species sets, `species/<species>/<role>-<face>`):
+/// those are **direct colour** and are reached only through a style's face slots
+/// ([`VoxelStyle::with_faces`]), never by arithmetic.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VoxelTextures {
     pub s: u32,
     pub rise: u32,
     pub rgba: Vec<u8>,
     /// Per slot, a bit per variant already put.
-    filled: [u8; TEXTURE_SLOTS.len()],
+    filled: Vec<u8>,
+    /// The named slots after the fixed ones, in slot order: `(stem, face)`.
+    named: Vec<(String, TexFace)>,
     /// The latticevine tiles at this level, [`VoxelTextures::vine_size`]: row
     /// `3 · set + density` (plain, climbing root, hanging root; bare, thin, full), column
     /// `16 · mask + exits`; row 9 holds the accents (bud, flower, fruit) in columns 0–2.
@@ -183,7 +190,8 @@ impl VoxelTextures {
             s,
             rise,
             rgba: vec![0; (w * h * 4) as usize],
-            filled: [0; TEXTURE_SLOTS.len()],
+            filled: vec![0; TEXTURE_SLOTS.len()],
+            named: Vec::new(),
             vine_rgba: vec![0; (VINE_COLS * VINE_ROWS * s * s * 4) as usize],
             vine_on: false,
         }
@@ -211,24 +219,72 @@ impl VoxelTextures {
         Ok(())
     }
 
-    /// Bit `k` set: slot `k` holds every variant, and the shader samples it.
+    /// Bit `k` set: fixed slot `k` ([`TEXTURE_SLOTS`]) holds every variant, and the
+    /// shader samples it. Named slots are not in the mask: a style names them.
     pub fn mask(&self) -> u32 {
         let all = (1u8 << TEX_VARIANTS) - 1;
-        self.filled
+        self.filled[..TEXTURE_SLOTS.len()]
             .iter()
             .enumerate()
             .filter(|(_, f)| **f == all)
             .fold(0, |m, (k, _)| m | 1 << k)
     }
 
-    /// The atlas's size in texels for `s` px per voxel.
+    /// The fixed atlas's size in texels for `s` px per voxel: the [`TEXTURE_SLOTS`] alone.
     pub fn size(s: u32) -> (u32, u32) {
         (TEX_VARIANTS * s, TEXTURE_SLOTS.len() as u32 * s)
     }
 
+    /// This atlas's size in texels, named slots and all: what the renderer uploads.
+    pub fn atlas_size(&self) -> (u32, u32) {
+        (TEX_VARIANTS * self.s, self.slots() as u32 * self.s)
+    }
+
+    /// Fixed and named slots.
+    pub fn slots(&self) -> usize {
+        TEXTURE_SLOTS.len() + self.named.len()
+    }
+
+    /// Add an empty named slot after every other and return its index: its texels are
+    /// zero (a hole) until its variants are put.
+    pub fn add_slot(&mut self, stem: &str, face: TexFace) -> usize {
+        let slot = self.slots();
+        self.named.push((stem.to_string(), face));
+        self.filled.push(0);
+        let (aw, ah) = self.atlas_size();
+        self.rgba.resize((aw * ah * 4) as usize, 0);
+        slot
+    }
+
+    /// The slot of a named face, if one was added.
+    pub fn slot_named(&self, stem: &str) -> Option<usize> {
+        self.named
+            .iter()
+            .position(|(n, _)| n == stem)
+            .map(|k| TEXTURE_SLOTS.len() + k)
+    }
+
+    /// Every named slot, as `(slot, stem)`.
+    pub fn named(&self) -> impl Iterator<Item = (usize, &str)> {
+        self.named
+            .iter()
+            .enumerate()
+            .map(|(k, (n, _))| (TEXTURE_SLOTS.len() + k, n.as_str()))
+    }
+
+    fn slot_face(&self, slot: usize) -> (&str, TexFace) {
+        match TEXTURE_SLOTS.get(slot) {
+            Some(&(stem, face)) => (stem, face),
+            None => {
+                let (stem, face) = &self.named[slot - TEXTURE_SLOTS.len()];
+                (stem.as_str(), *face)
+            }
+        }
+    }
+
     /// The size of one face image of `slot` at this level.
     pub fn face_size(&self, slot: usize) -> (u32, u32) {
-        match TEXTURE_SLOTS[slot].1 {
+        match self.slot_face(slot).1 {
             TexFace::Side => (self.s, self.s),
             TexFace::Top => (self.s, self.rise),
         }
@@ -237,18 +293,18 @@ impl VoxelTextures {
     /// Copy one face image (RGBA8, [`VoxelTextures::face_size`]) into its cell. The slot
     /// is switched on once all its variants have been put.
     pub fn put(&mut self, slot: usize, variant: u32, rgba: &[u8]) -> Result<()> {
-        if slot >= TEXTURE_SLOTS.len() || variant >= TEX_VARIANTS {
+        if slot >= self.slots() || variant >= TEX_VARIANTS {
             bail!("no texture slot {slot} variant {variant}");
         }
         let (fw, fh) = self.face_size(slot);
         if rgba.len() != (fw * fh * 4) as usize {
             bail!(
                 "{} variant {variant} is {} bytes, not the {fw}x{fh} face this level draws",
-                TEXTURE_SLOTS[slot].0,
+                self.slot_face(slot).0,
                 rgba.len()
             );
         }
-        let (aw, _) = Self::size(self.s);
+        let (aw, _) = self.atlas_size();
         let (x0, y0) = (variant * self.s, slot as u32 * self.s);
         for row in 0..fh {
             let src = (row * fw * 4) as usize;
@@ -352,7 +408,9 @@ fn quantise(v: f32) -> u8 {
 }
 
 /// One plant style as the style texture carries it: wood, crown, heart, in linear light.
-/// `wood`'s alpha is the style's texture role (`ROLE_*`).
+/// `wood`'s alpha is the style's texture role (`ROLE_*`); `crown`'s and `heart`'s alphas
+/// are its **face slots**, the named atlas slot its side and top faces draw with, plus
+/// one (`0` is none: the role's generic slot, tinted by the style colour).
 #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct VoxelStyle {
@@ -363,12 +421,26 @@ pub struct VoxelStyle {
 
 impl VoxelStyle {
     pub fn new(wood: [f32; 3], crown: [f32; 3], heart: [f32; 3]) -> VoxelStyle {
-        let v = |c: [f32; 3]| [c[0], c[1], c[2], 1.0];
+        let v = |c: [f32; 3]| [c[0], c[1], c[2], 0.0];
         VoxelStyle {
             wood: [wood[0], wood[1], wood[2], f32::from(ROLE_NONE)],
             crown: v(crown),
             heart: v(heart),
         }
+    }
+
+    /// The same style, its side and top faces drawn with these named atlas slots
+    /// ([`VoxelTextures::add_slot`]) in direct colour. `None` keeps the role's generic slot.
+    pub fn with_faces(mut self, faces: [Option<u16>; 2]) -> VoxelStyle {
+        self.crown[3] = faces[0].map_or(0.0, |s| f32::from(s) + 1.0);
+        self.heart[3] = faces[1].map_or(0.0, |s| f32::from(s) + 1.0);
+        self
+    }
+
+    /// The named slots the side and top faces draw with.
+    pub fn faces(&self) -> [Option<u16>; 2] {
+        let f = |a: f32| (a >= 0.5).then(|| a as u16 - 1);
+        [f(self.crown[3]), f(self.heart[3])]
     }
 
     /// The same colours, drawn with the textures of `role` (`ROLE_*`).
@@ -854,7 +926,7 @@ impl VoxelRenderer {
         params.validate()?;
         if (textures.s, textures.rise) != (params.s, params.rise)
             || textures.rgba.len() != {
-                let (w, h) = VoxelTextures::size(params.s);
+                let (w, h) = textures.atlas_size();
                 (w * h * 4) as usize
             }
         {
@@ -950,7 +1022,7 @@ impl VoxelRenderer {
             vk::ImageTiling::OPTIMAL,
             vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST,
         )?;
-        let (tex_w, tex_h) = VoxelTextures::size(params.s);
+        let (tex_w, tex_h) = textures.atlas_size();
         let (tex_image, tex_memory) = gpu.image(
             tex_w,
             tex_h,
@@ -2204,5 +2276,30 @@ mod tests {
         assert_eq!(st.role(), ROLE_NONE);
         assert_eq!(st.with_role(ROLE_LEAF).role(), ROLE_LEAF);
         assert_eq!(st.with_role(ROLE_LEAF).wood[..3], [0.1; 3]);
+        assert_eq!(st.faces(), [None, None], "no species faces by default");
+        let f = st.with_faces([Some(0), Some(14)]);
+        assert_eq!(f.faces(), [Some(0), Some(14)]);
+        assert_eq!((&f.crown[..3], &f.heart[..3]), (&[0.2f32; 3][..], &[0.3f32; 3][..]));
+    }
+
+    /// A named slot goes after the fixed ones, grows the atlas by one row of cells, is
+    /// found by name, and stays out of the fixed mask.
+    #[test]
+    fn a_named_slot_grows_the_atlas_after_the_fixed_slots() {
+        let (s, rise) = (6, 3);
+        let mut t = VoxelTextures::empty(s, rise);
+        let slot = t.add_slot("species/siphonreed/leaf-top", TexFace::Top);
+        assert_eq!(slot, TEXTURE_SLOTS.len());
+        assert_eq!(t.atlas_size(), (4 * 6, (TEXTURE_SLOTS.len() as u32 + 1) * 6));
+        assert_eq!(t.rgba.len(), (4 * 6 * (TEXTURE_SLOTS.len() + 1) * 6 * 4) as usize);
+        assert_eq!(t.face_size(slot), (6, 3));
+        for v in 0..TEX_VARIANTS {
+            t.put(slot, v, &[9; 6 * 3 * 4]).unwrap();
+        }
+        assert_eq!(t.slot_named("species/siphonreed/leaf-top"), Some(slot));
+        assert_eq!(t.slot_named("species/siphonreed/leaf-side"), None);
+        assert_eq!(t.mask(), 0);
+        let (aw, _) = t.atlas_size();
+        assert_eq!(t.rgba[((slot as u32 * 6 * aw) * 4) as usize], 9);
     }
 }
