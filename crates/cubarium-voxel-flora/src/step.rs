@@ -210,6 +210,9 @@ pub(crate) fn step(flora: &mut Flora, world: &mut World, threads: usize) {
         cubarium_voxel::voxel_phase!(Decompose, { decompose(flora, &pre) });
         cubarium_voxel::voxel_phase!(SeedBank, { crate::seeds::seed_bank(flora, world) });
         cubarium_voxel::voxel_phase!(Propagate, { crate::seeds::propagate(flora, world) });
+        // Growth, dieback, deaths, falls and germinations have all happened: the cached
+        // crowns follow the stands they now describe.
+        flora.refresh_crowns(Some(&*world));
         #[cfg(feature = "profile")]
         {
             use cubarium_voxel::profile::{Count, add};

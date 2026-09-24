@@ -159,6 +159,7 @@ fn main() -> Result<()> {
     }
     let view = FloraView {
         stands: &stands,
+        crowns: cubarium_voxel_flora::CrownCache::none(),
         ..view
     };
 

@@ -87,7 +87,10 @@ pub fn decode(bytes: &[u8]) -> anyhow::Result<Flora> {
     envelope.flora.config().validate().map_err(|e| {
         anyhow::anyhow!("the saved flora config is not one a plant can live under: {e}")
     })?;
-    Ok(envelope.flora)
+    let mut flora = envelope.flora;
+    // The crowns are derived and not saved.
+    flora.refresh_crowns(None);
+    Ok(flora)
 }
 
 #[cfg(test)]

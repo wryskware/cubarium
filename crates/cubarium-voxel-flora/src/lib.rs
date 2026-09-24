@@ -3037,6 +3037,11 @@ pub struct FloraView<'a> {
     /// The latticevines and their covered faces: what the tile layer draws from
     /// ([`Cover::draw`]).
     pub cover: &'a Cover,
+    /// The stands' cached crown geometry and the columns each can reach
+    /// ([`CrownCache`]). Read through [`FloraView::cached_crown`], which checks each entry
+    /// against its stand, and [`FloraView::stands_near`]; a view built by hand passes
+    /// [`CrownCache::none`] and computes every crown.
+    pub crowns: &'a CrownCache,
 }
 
 /// Every layer of `stand`, bottom-up, with its geometry resolved and its stock read.
@@ -3073,6 +3078,7 @@ pub fn layer_iter<'c>(config: &'c FloraConfig, stand: &Stand, voxel_m: f64) -> L
         layer_stock: stand.layer_stock,
         voxel_m,
         foliage_index: 0,
+        crown: None,
     }
 }
 
@@ -3088,6 +3094,282 @@ pub struct LayerIter<'c> {
     layer_stock: [f64; MAX_FOLIAGE_LAYERS],
     voxel_m: f64,
     foliage_index: usize,
+    /// The stand's cached crown, whose cell offsets replace the per-layer rounding.
+    crown: Option<&'c Crown>,
+}
+
+/// The most profile layers, trunks included, whose cell offsets a [`Crown`] holds. A
+/// stage with more is read uncached.
+pub const CROWN_LAYERS: usize = 8;
+
+/// A stand's **crown geometry**, cached where the flora keeps its stands
+/// (`design/handoffs/voxel-hot-path-geometry-2026-09-24.md`, item 2).
+///
+/// Everything about a stand's layers that follows from its species, its wood and the
+/// voxel size alone — the profile stage, the crown's height and radius in voxels, the
+/// foliage cap `α · W`, [`SpeciesConfig::crown_voxels`], and every layer's disc cell and
+/// trunk run as offsets over the site — and nothing that is state: the stocks are read
+/// off the stand every time. A mouth scanning every stand for every body on every tick
+/// read all of this from scratch, rounding included, although wood changes slowly (and
+/// never in a frozen episode).
+///
+/// [`Crown::of`] is the one computation, with [`layer_iter`]'s own arithmetic in its own
+/// order, so a layer read through a crown is [`layers_of`]' layer to the bit. The flora
+/// keeps one per stand ([`Flora`]'s `crowns`) and refreshes an entry whenever the
+/// stand's wood, species or site no longer match it: at the end of every tick and every
+/// command — growth, dieback, a death, a fall, a germination, a founder — and after a
+/// snapshot's decode. A reader checks the match itself ([`FloraView::cached_crown`]), so
+/// a stale entry is never read, only recomputed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Crown {
+    site: Site,
+    species: Species,
+    /// The key: the wood and voxel size this was computed for, as bits.
+    wood_bits: u64,
+    voxel_bits: u64,
+    /// The profile stage's index in the species' `profile`.
+    stage: u16,
+    /// The stage's layer count, trunks included; the offsets below hold them all when it
+    /// is at most [`CROWN_LAYERS`].
+    count: u16,
+    crown_voxels: u32,
+    /// The widest disc of any layer, in whole cells: `floor` of the largest layer
+    /// radius in voxels ([`Crown::max_disc_span`]).
+    max_disc_span: i64,
+    height_v: f64,
+    radius_v: f64,
+    cap: f64,
+    /// Per profile layer: its disc cell's offset over the site (`disc_offset` of its band
+    /// top), and a trunk's run of offsets (`trunk_offsets`; zero for foliage).
+    disc: [u32; CROWN_LAYERS],
+    trunk: [(u32, u32); CROWN_LAYERS],
+}
+
+impl Crown {
+    /// The crown of `stand` at cells of `voxel_m`, computed from scratch.
+    pub fn of(config: &FloraConfig, stand: &Stand, voxel_m: f64) -> Crown {
+        let sc = config.species(stand.species);
+        let stage = sc.profile_index(stand.wood).min(sc.profile.len().saturating_sub(1));
+        let layers = sc.profile.get(stage).map_or(&[][..], |p| &p.layers[..]);
+        let height_v = sc.crown_height(stand.wood, voxel_m);
+        let radius_v = sc.crown_radius(stand.wood, voxel_m).max(0.0);
+        let mut disc = [0u32; CROWN_LAYERS];
+        let mut trunk = [(0u32, 0u32); CROWN_LAYERS];
+        for (i, layer) in layers.iter().take(CROWN_LAYERS).enumerate() {
+            disc[i] = layers::disc_offset(layer.band[1], height_v);
+            if !layer.kind.bears_foliage() {
+                trunk[i] = layers::trunk_offsets(layer.band, height_v);
+            }
+        }
+        // A layer's disc radius is `layer_iter`'s `(radius · radius_v).max(0)`, and its
+        // span in cells that radius floored.
+        let max_disc_span = layers
+            .iter()
+            .map(|l| (l.radius * radius_v).max(0.0).floor() as i64)
+            .max()
+            .unwrap_or(0);
+        Crown {
+            site: stand.site,
+            species: stand.species,
+            wood_bits: stand.wood.to_bits(),
+            voxel_bits: voxel_m.to_bits(),
+            stage: stage as u16,
+            count: layers.len().min(usize::from(u16::MAX)) as u16,
+            crown_voxels: sc.crown_voxels(stand.wood, voxel_m),
+            max_disc_span,
+            height_v,
+            radius_v,
+            cap: sc.alpha * stand.wood.max(0.0),
+            disc,
+            trunk,
+        }
+    }
+
+    /// Whether this is `stand`'s crown: its site, species and wood (to the bit).
+    #[inline]
+    pub fn matches(&self, stand: &Stand) -> bool {
+        self.site == stand.site
+            && self.species == stand.species
+            && self.wood_bits == stand.wood.to_bits()
+    }
+
+    /// [`SpeciesConfig::crown_voxels`] of the stand's wood.
+    #[inline]
+    pub fn crown_voxels(&self) -> u32 {
+        self.crown_voxels
+    }
+
+    /// The widest of the crown's layer discs in whole cells, `floor` of its largest
+    /// layer radius in voxels: no layer's disc covers a column more than this many cells
+    /// from the stand's own in `x` or in `z`. A reader asking which columns a crown
+    /// touches can rule out a stand with it before reading a layer.
+    #[inline]
+    pub fn max_disc_span(&self) -> i64 {
+        self.max_disc_span
+    }
+
+    /// The crown's height in voxels, [`SpeciesConfig::crown_height`].
+    pub fn height_v(&self) -> f64 {
+        self.height_v
+    }
+
+    /// The crown's half-width in voxels, [`SpeciesConfig::crown_radius`], never negative.
+    pub fn radius_v(&self) -> f64 {
+        self.radius_v
+    }
+
+    /// Whether every layer's offsets are held (the stage has at most [`CROWN_LAYERS`]).
+    fn complete(&self) -> bool {
+        usize::from(self.count) <= CROWN_LAYERS
+    }
+
+    /// Every layer of `stand` — which must be the stand this crown [`matches`] —
+    /// bottom-up, trunks included: [`layer_iter`] with the geometry read from here and
+    /// the stocks from the stand.
+    ///
+    /// [`matches`]: Crown::matches
+    #[inline]
+    pub fn layers<'c>(&'c self, config: &'c FloraConfig, stand: &Stand) -> LayerIter<'c> {
+        debug_assert!(self.matches(stand));
+        let voxel_m = f64::from_bits(self.voxel_bits);
+        if !self.complete() {
+            return layer_iter(config, stand, voxel_m);
+        }
+        let sc = config.species(stand.species);
+        LayerIter {
+            graze_refuge: sc.graze_refuge,
+            layers: sc.profile[usize::from(self.stage)].layers.iter().enumerate(),
+            height_v: self.height_v,
+            radius_v: self.radius_v,
+            cap: self.cap,
+            site_y: stand.site.y,
+            layer_stock: stand.layer_stock,
+            voxel_m,
+            foliage_index: 0,
+            crown: Some(self),
+        }
+    }
+}
+
+/// A flora's cached crowns: one [`Crown`] per stand, entry for entry, and a **reach
+/// index** — per column of the world, every stand whose widest layer disc
+/// ([`Crown::max_disc_span`]) boxes it — so a mouth asks for the stands near its columns
+/// instead of scanning them all (`design/handoffs/voxel-hot-path-geometry-2026-09-24.md`,
+/// items 2 and 4).
+///
+/// Derived, never saved, refreshed with the crowns: an entry is recomputed when its stand
+/// no longer [`matches`](Crown::matches) it, and the index rebuilt when a stand is added
+/// or removed or a crown's site or widest span moves. The index needs the world's width
+/// and depth, so it is built by a tick or a command and is absent after a decode until
+/// the next of either; [`FloraView::stands_near`] says so, and the caller scans.
+#[derive(Clone, Debug, Default)]
+pub struct CrownCache {
+    crowns: Vec<Crown>,
+    /// The index's world, and the stand count it was built for.
+    width: u32,
+    depth: u32,
+    indexed: Option<usize>,
+    /// Per column `z * width + x`, its first entry in `near`; `plane + 1` entries.
+    col_start: Vec<u32>,
+    /// Stand indices, ascending within each column.
+    near: Vec<u32>,
+}
+
+impl CrownCache {
+    /// No crowns and no index, for a view built by hand: every reader computes.
+    pub fn none() -> &'static CrownCache {
+        static NONE: CrownCache = CrownCache {
+            crowns: Vec::new(),
+            width: 0,
+            depth: 0,
+            indexed: None,
+            col_start: Vec::new(),
+            near: Vec::new(),
+        };
+        &NONE
+    }
+
+    /// Bring the entries up to `stands`, reusing every entry that still matches and
+    /// computing the rest (both lists are sorted by site, so an insertion or a removal in
+    /// the middle moves no other entry out of reach), and rebuild the reach index for a
+    /// world of `dims` if anything it records moved. `dims` is `None` where no world is in
+    /// hand, and the index is then dropped.
+    fn refresh(&mut self, config: &FloraConfig, stands: &[Stand], dims: Option<(u32, u32)>) {
+        let voxel_bits = config.voxel_m.to_bits();
+        let current = |c: &Crown, s: &Stand| c.matches(s) && c.voxel_bits == voxel_bits;
+        let mut moved = self.crowns.len() != stands.len();
+        if moved || !self.crowns.iter().zip(stands).all(|(c, s)| current(c, s)) {
+            let old = std::mem::take(&mut self.crowns);
+            let mut k = 0;
+            self.crowns.reserve(stands.len());
+            for (i, stand) in stands.iter().enumerate() {
+                while k < old.len() && old[k].site < stand.site {
+                    k += 1;
+                }
+                let crown = match old.get(k) {
+                    Some(c) if current(c, stand) => *c,
+                    _ => Crown::of(config, stand, config.voxel_m),
+                };
+                // The index records each stand's site and widest span, by position.
+                moved |= old
+                    .get(i)
+                    .is_none_or(|o| o.site != crown.site || o.max_disc_span != crown.max_disc_span);
+                self.crowns.push(crown);
+            }
+        }
+        match dims {
+            None => self.indexed = None,
+            Some((w, d)) => {
+                if moved || self.indexed != Some(stands.len()) || (self.width, self.depth) != (w, d) {
+                    self.build_index(w, d);
+                }
+            }
+        }
+    }
+
+    /// Every stand's box of columns, `site ± max_disc_span` in wrapped `x` and in `z`.
+    fn build_index(&mut self, width: u32, depth: u32) {
+        let (w, d) = (i64::from(width), i64::from(depth));
+        let plane = width as usize * depth as usize;
+        // A column list per stand: its box's distinct columns.
+        let each = |c: &Crown, f: &mut dyn FnMut(usize)| {
+            if w == 0 || d == 0 {
+                return;
+            }
+            let span = c.max_disc_span.clamp(0, w.max(d));
+            let (sx, sz) = (i64::from(c.site.x), i64::from(c.site.z));
+            let xs: Vec<i64> = if 2 * span + 1 >= w {
+                (0..w).collect()
+            } else {
+                (sx - span..=sx + span).map(|x| x.rem_euclid(w)).collect()
+            };
+            for z in (sz - span).max(0)..=(sz + span).min(d - 1) {
+                for &x in &xs {
+                    f(z as usize * width as usize + x as usize);
+                }
+            }
+        };
+        let mut count = vec![0u32; plane + 1];
+        for c in &self.crowns {
+            each(c, &mut |col| count[col + 1] += 1);
+        }
+        for k in 0..plane {
+            count[k + 1] += count[k];
+        }
+        let mut fill = count.clone();
+        let mut near = vec![0u32; count[plane] as usize];
+        for (i, c) in self.crowns.iter().enumerate() {
+            each(c, &mut |col| {
+                near[fill[col] as usize] = i as u32;
+                fill[col] += 1;
+            });
+        }
+        self.width = width;
+        self.depth = depth;
+        self.col_start = count;
+        self.near = near;
+        self.indexed = Some(self.crowns.len());
+    }
 }
 
 impl Iterator for LayerIter<'_> {
@@ -3113,12 +3395,22 @@ impl Iterator for LayerIter<'_> {
             let hi_v = base + layer.band[1] * height_v;
             let r_v = (layer.radius * radius_v).max(0.0);
             let r_m = r_v * voxel_m;
-            let cell =
-                i64::from(self.site_y) + i64::from(layers::disc_offset(layer.band[1], height_v));
+            let (disc, trunk) = match self.crown {
+                Some(c) => (c.disc[index], c.trunk[index]),
+                None => (
+                    layers::disc_offset(layer.band[1], height_v),
+                    if is_foliage {
+                        (0, 0)
+                    } else {
+                        layers::trunk_offsets(layer.band, height_v)
+                    },
+                ),
+            };
+            let cell = i64::from(self.site_y) + i64::from(disc);
             let cells = if is_foliage {
                 (cell, cell)
             } else {
-                let (lo, hi) = layers::trunk_offsets(layer.band, height_v);
+                let (lo, hi) = trunk;
                 (
                     i64::from(self.site_y) + i64::from(lo),
                     i64::from(self.site_y) + i64::from(hi),
@@ -3157,8 +3449,72 @@ impl<'a> FloraView<'a> {
     /// [`layers_of`] for the whole profile, which the presenter and the cone do.
     ///
     /// The stocks it yields **sum to the stand's `foliage`**, always.
+    ///
+    /// Read through the stand's cached [`Crown`] when the view holds a current one.
     pub fn layers(&self, stand: &Stand) -> impl Iterator<Item = StandLayer> + use<'a> {
-        layer_iter(self.config, stand, self.config.voxel_m).filter(|l| l.kind.bears_foliage())
+        self.layer_iter_of(stand)
+            .filter(|l| l.kind.bears_foliage())
+    }
+
+    /// Every layer of `stand`, through its cached crown when there is a current one.
+    fn layer_iter_of(&self, stand: &Stand) -> LayerIter<'a> {
+        match self.cached_crown(stand) {
+            Some(crown) => crown.layers(self.config, stand),
+            None => layer_iter(self.config, stand, self.config.voxel_m),
+        }
+    }
+
+    /// The **current** cached crown of `stand` — which must be one of this view's own
+    /// stands, borrowed from [`FloraView::stands`], not a copy — or `None` when the view
+    /// holds none for it (a copy, a hand-built view, an entry the flora has not refreshed).
+    #[inline]
+    pub fn cached_crown(&self, stand: &Stand) -> Option<&'a Crown> {
+        // Where `stand` sits in `stands`, by address: a reader iterating the view's stands
+        // hands back the view's own references, and anything else is not found.
+        let base = self.stands.as_ptr() as usize;
+        let at = (stand as *const Stand as usize).checked_sub(base)?;
+        let size = std::mem::size_of::<Stand>();
+        if at % size != 0 {
+            return None;
+        }
+        let i = at / size;
+        if i >= self.stands.len() {
+            return None;
+        }
+        let crown = self.crowns.crowns.get(i)?;
+        (crown.matches(stand) && crown.voxel_bits == self.config.voxel_m.to_bits())
+            .then_some(crown)
+    }
+
+    /// The indices in [`FloraView::stands`] of every stand whose crown could reach the
+    /// column `(x, z)` of a world `width × depth` — every stand whose widest layer disc
+    /// ([`Crown::max_disc_span`]) boxes that column, ascending — or `None` when the view
+    /// holds no current index for that world, and the caller has to scan every stand. A
+    /// column off the strip (`x` outside `0..width`, `z` past the end) has none.
+    #[inline]
+    pub fn stands_near(&self, x: i64, z: u32, width: u32, depth: u32) -> Option<&'a [u32]> {
+        let cache = self.crowns;
+        if cache.indexed != Some(self.stands.len()) || (cache.width, cache.depth) != (width, depth) {
+            return None;
+        }
+        if !(0..i64::from(width)).contains(&x) || z >= depth {
+            return Some(&[]);
+        }
+        let col = z as usize * width as usize + x as usize;
+        let (a, b) = (cache.col_start[col] as usize, cache.col_start[col + 1] as usize);
+        Some(&cache.near[a..b])
+    }
+
+    /// [`SpeciesConfig::crown_voxels`] of `stand`'s wood at the view's voxel size, read
+    /// from its cached crown when there is a current one.
+    pub fn crown_voxels(&self, stand: &Stand) -> u32 {
+        match self.cached_crown(stand) {
+            Some(crown) => crown.crown_voxels(),
+            None => self
+                .config
+                .species(stand.species)
+                .crown_voxels(stand.wood, self.config.voxel_m),
+        }
     }
 
     /// [`FloraView::layers`] of whatever stands on `site`; empty if nothing does.
@@ -3173,7 +3529,7 @@ impl<'a> FloraView<'a> {
 
     /// Every layer of `stand`, trunks included, bottom-up.
     pub fn profile_layers(&self, stand: &Stand) -> Vec<StandLayer> {
-        layers_of(self.config, stand, self.config.voxel_m)
+        self.layer_iter_of(stand).collect()
     }
 
     pub fn stand_at(&self, site: Site) -> Option<&'a Stand> {
@@ -3578,6 +3934,10 @@ pub struct Flora {
     /// shower's end, when every bank is tested at once.
     #[serde(default)]
     pub(crate) was_raining: bool,
+    /// Every stand's crown geometry, entry for entry with `stands` ([`Crown`]). Derived
+    /// and not saved: refreshed at the end of every tick and command and after a decode.
+    #[serde(skip)]
+    crowns: CrownCache,
 }
 
 impl Flora {
@@ -3668,7 +4028,16 @@ impl Flora {
             deliveries: Vec::new(),
             bank_wheel: Vec::new(),
             was_raining: false,
+            crowns: CrownCache::default(),
         }
+    }
+
+    /// Bring every stand's cached [`Crown`] up to date, and the reach index for `world`'s
+    /// columns: after anything that can add, remove, move or regrow a stand. With no
+    /// world in hand (a decode) the index is dropped until the next tick or command.
+    pub(crate) fn refresh_crowns(&mut self, world: Option<&World>) {
+        let dims = world.map(|w| (w.config().width, w.config().depth));
+        self.crowns.refresh(&self.config, &self.stands, dims);
     }
 
     pub fn config(&self) -> &FloraConfig {
@@ -3704,6 +4073,7 @@ impl Flora {
             ground: &self.ground,
             ledger: &self.ledger,
             cover: &self.cover,
+            crowns: &self.crowns,
         }
     }
 
@@ -3733,6 +4103,14 @@ impl Flora {
 
     /// Apply a command now. Returns whether it was accepted.
     pub fn apply(&mut self, world: &World, command: Command) -> bool {
+        let applied = self.apply_command(world, command);
+        // A founder or a clear moves the stand list; the crowns follow it.
+        self.refresh_crowns(Some(world));
+        applied
+    }
+
+    /// [`Flora::apply`]'s commands.
+    fn apply_command(&mut self, world: &World, command: Command) -> bool {
         let view = world.view();
         match command {
             Command::Seed {
