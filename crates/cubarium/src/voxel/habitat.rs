@@ -1877,4 +1877,99 @@ mod tests {
             "water residual {water:e} after 40 ticks"
         );
     }
+
+    /// **The food check counts edible foliage** (seeder-sites item 2): a browser's
+    /// component holds what its mouths could take — each reached layer's
+    /// [`StandLayer::edible`], above the grazing floor — and not the refuge under it,
+    /// which no bite can reach.
+    #[test]
+    fn the_browser_food_check_counts_edible_foliage_not_the_refuge() {
+        let world = plain(24, 6);
+        let mut flora = Flora::new(cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25));
+        plant(&mut flora, &world, 6, 3, Species::Bloomcrown, 0.85);
+        plant(&mut flora, &world, 16, 3, Species::Bloomcrown, 0.85);
+        let fauna = Fauna::new(Default::default());
+        let phys = *fauna.config().founder(Founder::Browser);
+        let (map, food) = lineage_food(&world.view(), &flora.view(), &phys, Founder::Browser);
+        let diet = cubarium_voxel_fauna::Diet::of(Founder::Browser);
+        let (fv, view) = (flora.view(), world.view());
+        let (mut edible, mut stock) = (0.0, 0.0);
+        for stand in fv.stands.iter() {
+            for layer in fv.layers(stand) {
+                if !map.faces_reaching_layer(&fv, &view, stand, &layer, diet).is_empty() {
+                    edible += layer.edible();
+                    stock += layer.stock;
+                }
+            }
+        }
+        assert!(edible > 0.0 && edible < stock, "the fixture needs a refuge: {edible} of {stock}");
+        let counted: f64 = food.values().map(|f| f.stock).sum();
+        assert!(
+            (counted - edible).abs() < 1e-12,
+            "the food check counted {counted}: edible {edible}, stock {stock}"
+        );
+    }
+
+    /// A 16 × 4 soil block at 0.25 m, faces at `y = 6`, with a **lake** — the lowest
+    /// standing water, `x` 2..=4, its floor at `y = 2` and water to the brim — and a
+    /// **puddle** well above it, `x` 10..=11, floor at `y = 5` and one cell of water.
+    fn lake_and_puddle() -> World {
+        let cfg = Config {
+            width: 16,
+            height: 12,
+            depth: 4,
+            ..Config::default()
+        };
+        let mut world = World::empty(cfg.clone());
+        for z in 0..cfg.depth {
+            for x in 0..cfg.width as i64 {
+                let top = match x {
+                    2..=4 => 2,
+                    10..=11 => 5,
+                    _ => 6,
+                };
+                for y in 1..=top {
+                    world.apply(cubarium_voxel::Command::SetMaterial {
+                        x,
+                        y,
+                        z,
+                        material: Material::Soil,
+                    });
+                }
+                for y in top + 1..=6 {
+                    let v = world.config().voxel_volume();
+                    world.apply(cubarium_voxel::Command::AddWater {
+                        x,
+                        y,
+                        z,
+                        volume_m3: v,
+                    });
+                }
+            }
+        }
+        world
+    }
+
+    /// **Siphonreed sites are lake margins** (seeder-sites item 1): the bank of the lake
+    /// is a margin; the bank of a puddle above it — standing water that drains — is not,
+    /// though the reed's own standing-water gate reads water beside both.
+    #[test]
+    fn the_lake_bank_is_a_margin_and_a_puddle_bank_is_not() {
+        let world = lake_and_puddle();
+        let lake = lake_cells(&world);
+        let view = world.view();
+        let reed = cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25)
+            .species(Species::Siphonreed)
+            .clone();
+        let lake_bank = Site { x: 5, y: 6, z: 1 };
+        let puddle_bank = Site { x: 9, y: 6, z: 1 };
+        for bank in [lake_bank, puddle_bank] {
+            let g = cubarium_voxel_flora::establishment_gates(&view, bank, &reed);
+            assert!(g.standing_ok, "{bank:?} has water beside it: {g:?}");
+        }
+        assert!(lake_margin(&view, &lake, lake_bank));
+        assert!(lake_margin(&view, &lake, Site { x: 3, y: 2, z: 1 }), "the lake floor");
+        assert!(!lake_margin(&view, &lake, puddle_bank), "a puddle is not the lake");
+        assert!(!lake_margin(&view, &lake, Site { x: 13, y: 6, z: 1 }), "dry ground");
+    }
 }
