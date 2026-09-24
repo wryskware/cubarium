@@ -10,7 +10,11 @@
 //!   them, update after update, through deposits, meals and a terrain edit;
 //! - item 6: the light memo, warmed whole for a frozen episode or filled lazily, answers
 //!   every support face's sky visibility exactly as the direct call does, a ledge and the
-//!   floor under it in one column included, and follows a terrain edit.
+//!   floor under it in one column included, and follows a terrain edit;
+//! - item 3 in the body: the motion sweep on the support lookup — the step rule's nearest
+//!   face, the disc's ground and its clearance — moves every body exactly as the sweep at
+//!   `main` a31ecdc did (kept verbatim below, reading `material` directly), walls,
+//!   risers, ledges, water and the bisection against a wall included.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -344,6 +348,392 @@ fn a_mouth_through_the_index_and_the_cache_picks_what_the_full_scan_picks() {
         }
         assert!(hits > 20, "the mouths found food ({hits})");
     }
+}
+
+// ------------------------------------------------------ item 3 in the body: motion
+
+use crate::body::{Body, Motion, StepLimits};
+use crate::controller::Actions;
+use crate::manifest::Manifest;
+use cubarium_voxel::DT;
+
+// The sweep at `main` a31ecdc, verbatim but for the `ref_` names, its doc comments and
+// its support test reading `material` (`is_support_direct`).
+#[allow(clippy::too_many_arguments)]
+fn ref_resolve_motion(
+    view: &VoxelView<'_>,
+    pose: &mut crate::Pose,
+    standing_y: &mut u32,
+    manifest: &Manifest,
+    body: &Body,
+    wade_depth_m: f64,
+    step_limits: StepLimits,
+    held: Actions,
+) -> Motion {
+    let r = body.footprint_radius();
+    let headroom = body.headroom_voxels(view.config.voxel_m);
+    let v_req = held.forward * manifest.cruise_m_per_s;
+    let yaw_rate = held.turn * manifest.yaw_cap_rad_per_s;
+    let attempted = (v_req.abs() + r * yaw_rate.abs()) * DT;
+
+    // Turn first; the sweep then runs along the heading the body now faces.
+    let dyaw = yaw_rate * DT;
+    pose.heading_rad = (pose.heading_rad + dyaw).rem_euclid(std::f64::consts::TAU);
+
+    // Bounded sub-steps of at most one footprint radius: the overlap window of a
+    // one-voxel wall is `voxel + 2r` wide and the sub-step is `r`, so no endpoint can
+    // skip past it. A refused step is followed by a bisection that presses the body up
+    // to the obstruction — a body stands against a wall at the wall's face, not a
+    // sub-step short of it — and the sweep stops there: the rest of the request was
+    // attempted and is paid for, but is not delivered.
+    let mut moved = 0.0;
+    let mut blocked = false;
+    let mut left = v_req * DT;
+    while left > 1e-12 {
+        let step = left.min(r);
+        match ref_step_advance(
+            view,
+            pose,
+            standing_y,
+            step,
+            r,
+            wade_depth_m,
+            headroom,
+            step_limits,
+        ) {
+            Some(actual) => {
+                moved += actual;
+                left -= step;
+                if actual < step - 1e-9 {
+                    // A clamp at the strip's `z` ends: the world edge is a wall too.
+                    blocked = true;
+                }
+            }
+            None => {
+                blocked = true;
+                // Press the body up to the obstruction: bisect the largest still-valid
+                // advance from where the sweep stopped, without committing the probes,
+                // then take it once. The gap left under a wall is a few hundredths of
+                // the footprint radius.
+                let (px, pz, h) = (pose.x, pose.z, pose.heading_rad);
+                let y0 = *standing_y;
+                let mut lo = 0.0;
+                let mut hi = step;
+                for _ in 0..24 {
+                    let mid = (lo + hi) / 2.0;
+                    if mid <= 1e-12 {
+                        break;
+                    }
+                    if ref_advance_candidate(
+                        view,
+                        px,
+                        pz,
+                        h,
+                        y0,
+                        mid,
+                        r,
+                        wade_depth_m,
+                        headroom,
+                        step_limits,
+                    )
+                    .is_some()
+                    {
+                        lo = mid;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                if lo > 1e-12 {
+                    let (nx, nz, actual, ny) = ref_advance_candidate(
+                        view,
+                        px,
+                        pz,
+                        h,
+                        y0,
+                        lo,
+                        r,
+                        wade_depth_m,
+                        headroom,
+                        step_limits,
+                    )
+                    .expect("the bisection's best advance is valid");
+                    pose.x = nx;
+                    pose.z = nz;
+                    *standing_y = ny;
+                    moved += actual;
+                }
+                break;
+            }
+        }
+    }
+    Motion {
+        attempted_equivalent: attempted,
+        delivered_equivalent: moved + r * dyaw.abs(),
+        delivered_forward: moved,
+        delivered_turn: dyaw,
+        blocked,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn ref_step_advance(
+    view: &VoxelView<'_>,
+    pose: &mut crate::Pose,
+    standing_y: &mut u32,
+    step: f64,
+    r: f64,
+    wade_depth_m: f64,
+    headroom: u32,
+    step_limits: StepLimits,
+) -> Option<f64> {
+    let (nx, nz, actual, ny) = ref_advance_candidate(
+        view,
+        pose.x,
+        pose.z,
+        pose.heading_rad,
+        *standing_y,
+        step,
+        r,
+        wade_depth_m,
+        headroom,
+        step_limits,
+    )?;
+    pose.x = nx;
+    pose.z = nz;
+    *standing_y = ny;
+    Some(actual)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn ref_advance_candidate(
+    view: &VoxelView<'_>,
+    px: f64,
+    pz: f64,
+    heading: f64,
+    standing_y: u32,
+    step: f64,
+    r: f64,
+    wade_depth_m: f64,
+    headroom: u32,
+    step_limits: StepLimits,
+) -> Option<(f64, f64, f64, u32)> {
+    let c = view.config;
+    let v = c.voxel_m;
+    let width_m = f64::from(c.width) * v;
+    let depth_m = f64::from(c.depth) * v;
+    let (fx, fz) = (heading.sin(), heading.cos());
+    let mut nx = px + fx * step;
+    let mut nz = pz + fz * step;
+    // Wrap on x; the strip's z ends are walls, not wraps.
+    nx = nx.rem_euclid(width_m);
+    if nz < r {
+        nz = r;
+    } else if nz > depth_m - r {
+        nz = depth_m - r;
+    }
+    let cz = (nz / v).floor();
+    if cz < 0.0 || cz >= f64::from(c.depth) {
+        return None;
+    }
+    let cx = ((nx / v).floor() as i64).rem_euclid(i64::from(c.width));
+    // The step rule: the centre column's support face nearest the body's own standing
+    // layer, within the step. No such face is a wall or a cliff edge, and refuses.
+    let ny = ref_step_target_layer(view, cx, cz as u32, standing_y, step_limits)?;
+    // The body rests on the highest ground under its disc while it straddles a riser,
+    // so the clearance is checked from there.
+    let clearance =
+        ref_disc_ground_layer(view, nx, nz, r, standing_y, step_limits).max(standing_y.max(ny));
+    if (1..=headroom).any(|d| ref_disc_hits_solid(view, nx, nz, clearance + d, r)) {
+        return None;
+    }
+    let there = view.water_depth_m(cx, ny, cz as u32);
+    if there > wade_depth_m {
+        // The escape: within the face it stands on, or to a face shallower than it.
+        let hz = ((pz / v).floor().max(0.0) as u32).min(c.depth.saturating_sub(1));
+        let hx = ((px / v).floor() as i64).rem_euclid(i64::from(c.width));
+        let same_face = (hx, hz) == (cx, cz as u32) && ny == standing_y;
+        if !same_face && !(there < view.water_depth_m(hx, standing_y, hz)) {
+            return None;
+        }
+    }
+    // The projection of the move onto the heading, wrap-aware, so a clamp at the z
+    // ends is delivered as the short move it is.
+    let mut dx = nx - px;
+    if dx > width_m / 2.0 {
+        dx -= width_m;
+    } else if dx < -width_m / 2.0 {
+        dx += width_m;
+    }
+    Some((nx, nz, (dx * fx + (nz - pz) * fz).max(0.0), ny))
+}
+
+fn ref_step_target_layer(
+    view: &VoxelView<'_>,
+    x: i64,
+    z: u32,
+    standing_y: u32,
+    step: StepLimits,
+) -> Option<u32> {
+    let lo = standing_y.saturating_sub(step.down);
+    let hi = (standing_y + step.up).min(view.config.height.saturating_sub(1));
+    let mut best: Option<u32> = None;
+    for y in lo..=hi {
+        if !view.is_support_direct(x, y, z) {
+            continue;
+        }
+        let d = |a: u32| (i64::from(a) - i64::from(standing_y)).abs();
+        best = match best {
+            None => Some(y),
+            Some(b) if d(y) < d(b) || (d(y) == d(b) && y > b) => Some(y),
+            keep => keep,
+        };
+    }
+    best
+}
+
+fn ref_disc_ground_layer(
+    view: &VoxelView<'_>,
+    cx: f64,
+    cz: f64,
+    r: f64,
+    standing_y: u32,
+    step: StepLimits,
+) -> u32 {
+    if step.up == 0 {
+        return standing_y;
+    }
+    let c = view.config;
+    let v = c.voxel_m;
+    let x0 = ((cx - r) / v).floor() as i64;
+    let x1 = ((cx + r) / v).floor() as i64;
+    let z0 = ((cz - r) / v).floor() as i64;
+    let z1 = ((cz + r) / v).floor() as i64;
+    let mut best = standing_y;
+    for x in x0..=x1 {
+        for z in z0..=z1 {
+            if z < 0 || z >= i64::from(c.depth) {
+                continue;
+            }
+            let qx = cx.clamp(x as f64 * v, (x as f64 + 1.0) * v);
+            let qz = cz.clamp(z as f64 * v, (z as f64 + 1.0) * v);
+            let (ddx, ddz) = (cx - qx, cz - qz);
+            if ddx * ddx + ddz * ddz >= r * r {
+                continue;
+            }
+            let wx = x.rem_euclid(i64::from(c.width));
+            if let Some(y) = ref_step_target_layer(view, wx, z as u32, standing_y, step) {
+                best = best.max(y);
+            }
+        }
+    }
+    best
+}
+
+fn ref_disc_hits_solid(view: &VoxelView<'_>, cx: f64, cz: f64, layer: u32, r: f64) -> bool {
+    let c = view.config;
+    let v = c.voxel_m;
+    if layer >= c.height {
+        return false;
+    }
+    let x0 = ((cx - r) / v).floor() as i64;
+    let x1 = ((cx + r) / v).floor() as i64;
+    let z0 = ((cz - r) / v).floor() as i64;
+    let z1 = ((cz + r) / v).floor() as i64;
+    for x in x0..=x1 {
+        for z in z0..=z1 {
+            if z < 0 || z >= i64::from(c.depth) {
+                continue;
+            }
+            let wx = x.rem_euclid(i64::from(c.width));
+            if !view.material_at(wx, layer, z as u32).is_solid() {
+                continue;
+            }
+            // Nearest point of the voxel's square to the disc centre.
+            let qx = cx.clamp(x as f64 * v, (x as f64 + 1.0) * v);
+            let qz = cz.clamp(z as f64 * v, (z as f64 + 1.0) * v);
+            let (ddx, ddz) = (cx - qx, cz - qz);
+            if ddx * ddx + ddz * ddz < r * r {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn motion_bits(m: &Motion) -> [u64; 5] {
+    [
+        m.attempted_equivalent.to_bits(),
+        m.delivered_equivalent.to_bits(),
+        m.delivered_forward.to_bits(),
+        m.delivered_turn.to_bits(),
+        u64::from(m.blocked),
+    ]
+}
+
+#[test]
+fn the_sweep_on_the_lookup_moves_every_body_as_the_walk_did() {
+    let mut blocked = 0usize;
+    let mut climbed = 0usize;
+    let mut compared = 0usize;
+    for seed in [3, 41] {
+        let (mut world, _, top) = strip(seed);
+        // Water in a few hollows, some deeper than either lineage wades.
+        for (k, (x, z)) in [(4u32, 1u32), (9, 5), (15, 2), (26, 6)].into_iter().enumerate() {
+            let h = top[(z * W + x) as usize];
+            world.apply(WorldCommand::AddWater {
+                x: i64::from(x),
+                y: h + 1,
+                z,
+                volume_m3: [0.3, 0.9, 1.6, 2.4][k] * V * V * V,
+            });
+        }
+        let view = world.view();
+        for founder in [crate::Founder::Browser, crate::Founder::Blind] {
+            let phys = crate::FounderPhysiology::frozen(founder);
+            let manifest = founder.manifest();
+            for grown in [0.3, 1.0] {
+                let body: Body = phys.body_at(phys.core.body_max * grown);
+                let wade = phys.wade_depth_m(&body);
+                let limits: StepLimits = phys.step_limits(V);
+                for (f, face) in faces(&view).iter().enumerate().step_by(3) {
+                    for k in 0..6 {
+                        let held = Actions {
+                            forward: [1.0, 0.6, 0.25][k % 3],
+                            turn: [0.0, 0.4, -1.0][(k + f) % 3],
+                            feed: 0.0,
+                        };
+                        let start = Pose {
+                            x: (f64::from(face.x) + 0.1 + 0.13 * k as f64) * V,
+                            z: (f64::from(face.z) + 0.8 - 0.11 * k as f64) * V,
+                            heading_rad: std::f64::consts::TAU * (f + k) as f64 / 7.0,
+                        };
+                        let (mut a, mut b) = (start, start);
+                        let (mut ya, mut yb) = (face.y, face.y);
+                        for t in 0..30 {
+                            let ma = crate::body::resolve_motion(
+                                &view, &mut a, &mut ya, &manifest, &body, wade, limits, held,
+                            );
+                            let mb = ref_resolve_motion(
+                                &view, &mut b, &mut yb, &manifest, &body, wade, limits, held,
+                            );
+                            assert_eq!(
+                                (motion_bits(&ma), a.x.to_bits(), a.z.to_bits(), a.heading_rad.to_bits(), ya),
+                                (motion_bits(&mb), b.x.to_bits(), b.z.to_bits(), b.heading_rad.to_bits(), yb),
+                                "seed {seed} {founder:?} grown {grown}: {face:?} action {k}, tick {t}"
+                            );
+                            blocked += usize::from(ma.blocked);
+                            climbed += usize::from(ya != face.y);
+                            compared += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        compared > 10_000 && blocked > 500 && climbed > 500,
+        "{compared} ticks, {blocked} blocked, {climbed} off the start layer"
+    );
 }
 
 // --------------------------------------------------------- item 5: the detritus field
