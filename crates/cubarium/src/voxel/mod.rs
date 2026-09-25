@@ -1387,10 +1387,17 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                         format!("NOT accepted: {}", seeded.acceptance.reasons())
                     },
                 );
-            } else if !restored {
-                // An empty world grows its founders by hand; the lineages still need
-                // their recipes registered so anything born is driven.
-                habitat::install_heuristics(&mut fauna);
+            } else {
+                if restored {
+                    // A restored layer's controllers are not saved: every standing body
+                    // gets its lineage's heuristic back, and the policy-driven lineages
+                    // are re-installed over it just below.
+                    habitat::reinstall_heuristics(&mut fauna);
+                } else {
+                    // An empty world grows its founders by hand; the lineages still need
+                    // their recipes registered so anything born is driven.
+                    habitat::install_heuristics(&mut fauna);
+                }
             }
             install_founder_controllers(&mut fauna, &drivers)?;
             // Say what is actually driving each lineage, every run: the default is now a

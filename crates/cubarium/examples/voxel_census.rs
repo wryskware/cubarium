@@ -479,6 +479,8 @@ fn load_run(
         flora.view().stands.len(),
         fauna.view().animals.len()
     );
+    // Controllers are not saved: the loaded bodies get their heuristics back first.
+    habitat::reinstall_heuristics(&mut fauna);
     if heuristic {
         eprintln!("founders: the observation-only heuristic (control)");
     } else {
