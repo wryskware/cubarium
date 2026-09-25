@@ -83,7 +83,7 @@ water_reflect_cells = 64
 water_foam = 0.6
 water_glint = 0.6
 water_rain_rings = 0.5
-water_highlight = 0.0  # glints and rain rings: 0 palette colour .. 1 white
+water_highlight = 0.5  # glints and rain rings: 0 palette colour .. 1 white
 
 [world]
 # `cubarium_voxel::Config`. x wraps; y is up from the foundation; z runs into the habitat.
