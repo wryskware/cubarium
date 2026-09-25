@@ -3340,14 +3340,15 @@ impl CrownCache {
             }
             let span = c.max_disc_span.clamp(0, w.max(d));
             let (sx, sz) = (i64::from(c.site.x), i64::from(c.site.z));
-            let xs: Vec<i64> = if 2 * span + 1 >= w {
-                (0..w).collect()
+            // The box's distinct columns, `x` wrapped, in the order they were listed.
+            let (x0, xn) = if 2 * span + 1 >= w {
+                (0, w)
             } else {
-                (sx - span..=sx + span).map(|x| x.rem_euclid(w)).collect()
+                (sx - span, 2 * span + 1)
             };
             for z in (sz - span).max(0)..=(sz + span).min(d - 1) {
-                for &x in &xs {
-                    f(z as usize * width as usize + x as usize);
+                for x in x0..x0 + xn {
+                    f(z as usize * width as usize + x.rem_euclid(w) as usize);
                 }
             }
         };

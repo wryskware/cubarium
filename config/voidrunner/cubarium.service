@@ -1,0 +1,18 @@
+[Unit]
+Description=Cubarium voxel terrarium (desktop config, lit tier) on the Legion Go screen
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/cubarium
+Environment=RUST_LOG=info
+# CPUs, arguments and state come from config/hosts/voidrunner.env.
+ExecStart=%h/cubarium/scripts/run-live.sh voidrunner
+KillSignal=SIGINT
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target

@@ -171,6 +171,49 @@ fn main() {
         run(&mut sim, hours, minute0, save.as_ref(), &timing);
         return;
     }
+    let nofauna = args.iter().any(|a| a == "nofauna");
+    let founder_counts = || {
+        if nofauna {
+            [0; habitat::FOUNDER_COUNTS.len()]
+        } else {
+            habitat::FOUNDER_COUNTS
+        }
+    };
+    // `world=<file>` starts from a live host's world snapshot (terrain and water only), and
+    // seeds it the way `cubarium voxel` seeds a resumed world: pre-roll without the opening
+    // shower, then the standard habitat.
+    if let Some(path) = args.iter().find_map(|a| a.strip_prefix("world=")) {
+        let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("world {path}: {e}"));
+        let mut world = World::load(&bytes).unwrap_or_else(|e| panic!("load world: {e:#}"));
+        let mut flora = Flora::new(FloraConfig::for_voxel_size(world.config().voxel_m));
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        let pre = habitat::pre_roll(&mut world, false);
+        let seeded =
+            habitat::seed_pre_rolled(&mut world, &mut flora, &mut fauna, &pre, founder_counts());
+        eprintln!(
+            "scene: world {path} ({}x{}x{} at {} m, tick {}); seeded stands={} animals={}",
+            world.config().width,
+            world.config().height,
+            world.config().depth,
+            world.config().voxel_m,
+            world.tick(),
+            seeded.stands,
+            seeded.animals()
+        );
+        if heuristic {
+            eprintln!("founders: the observation-only heuristic (control)");
+        } else {
+            install_founders_with(&mut fauna, &policies).expect("the founder centres validate");
+        }
+        let mut senses = Senses::new();
+        senses.settle(&world.view(), &flora.view());
+        if world.config().closed_water_budget && !world.outlet_open() {
+            world.apply(WorldCommand::SetOutlet { open: true });
+        }
+        let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
+        run(&mut sim, hours, 0, save.as_ref(), &timing);
+        return;
+    }
     // `config=<path>` is a landscape arm from a host TOML (the Tachyon terrarium, say),
     // founded exactly like a preset arm. `nofauna` seeds no founders: the plants alone.
     let file_arm: Option<(String, cubarium_voxel::Config)> = args
@@ -183,11 +226,7 @@ fn main() {
         });
     let arm: Option<(String, cubarium_voxel::Config)> =
         file_arm.or_else(|| preset.map(|p| (p.name.to_string(), p.config())));
-    let founder_counts = if args.iter().any(|a| a == "nofauna") {
-        [0; habitat::FOUNDER_COUNTS.len()]
-    } else {
-        habitat::FOUNDER_COUNTS
-    };
+    let founder_counts = founder_counts();
 
     let cfg = VoxelConfig::default();
     // `gap=off`: the climate's dry gap at 0 / 0, so every natural start is the weather's
@@ -623,6 +662,30 @@ impl PhaseWindow {
             ms(Phase::FaunaSense),
             ms(Phase::Settle),
         );
+        // The plant step phase by phase (`Cover` is its prep and its growth together).
+        let flora = [
+            ("prune", Phase::Prune),
+            ("sky", Phase::SkyCache),
+            ("cover", Phase::Cover),
+            ("drown", Phase::Drown),
+            ("light", Phase::Light),
+            ("drink", Phase::Drink),
+            ("feed", Phase::Feed),
+            ("grow", Phase::Grow),
+            ("decompose", Phase::Decompose),
+            ("seed_bank", Phase::SeedBank),
+            ("propagate", Phase::Propagate),
+            ("crowns", Phase::Crowns),
+        ];
+        let mut line = format!(
+            "flora: min={minute} overlap={} total={:.3}",
+            u8::from(overlap),
+            ms(Phase::FloraStep)
+        );
+        for (name, p) in flora {
+            line.push_str(&format!(" {name}={:.3}", ms(p)));
+        }
+        eprintln!("{line} stands={}", sim.flora().view().stands.len());
         self.nanos = now;
     }
 }

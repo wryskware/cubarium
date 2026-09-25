@@ -1489,7 +1489,10 @@ fn t17_three_hours_cover_sixty_faces_when_watered_and_a_dry_root_plateaus_below(
     );
     let vc = FloraConfig::default().latticevine;
     let w3 = wet[17];
-    assert!(w3 >= 60, "three watered hours cover at least 60 faces: {wet:?}");
+    assert!(
+        w3 >= 60,
+        "three watered hours cover at least 60 faces: {wet:?}"
+    );
     assert!(
         w3 > wet[14] || w3 >= 190,
         "and are still growing in the last half hour, or have filled the wall: {wet:?}"
@@ -1509,4 +1512,367 @@ fn t17_three_hours_cover_sixty_faces_when_watered_and_a_dry_root_plateaus_below(
         "water is the limit: the dry root reads {dry_water:.3} (under {low:.3}), the \
          watered root {wet_water:.3}"
     );
+}
+
+// ------------------------------------------------------------------ 18–22. stairs
+
+/// A rock staircase whose risers look `dir` (a side): `steps` steps, each one voxel higher
+/// than the last and `tread` voxels deep, climbing away from `dir`. Step `k`'s columns top
+/// out at `y = 3 + k` over the soil floor and run across the whole other horizontal axis;
+/// step 0's riser column is `at` along the climbing axis (x wrapped with the ring). Only the
+/// top voxel of each step's first column carries an eligible `dir` face: its riser.
+fn stair_into(p: &mut Plan, dir: FaceDir, at: i64, steps: u32, tread: u32) {
+    let (ox, _, oz) = dir.offset();
+    let (sign, along_x) = (-(ox + oz), ox != 0);
+    let across = if along_x { p.depth } else { p.width };
+    for k in 0..steps {
+        for t in 0..tread {
+            let along = at + sign * i64::from(k * tread + t);
+            for a in 0..across {
+                for y in 3..=3 + k {
+                    if along_x {
+                        let x = along.rem_euclid(i64::from(p.width));
+                        p.set(x, y, a, Material::Rock);
+                    } else {
+                        p.set(i64::from(a), y, along as u32, Material::Rock);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Step `k`'s riser on row `across` (z for an x staircase, x for a z staircase), for a
+/// staircase built by [`stair_into`].
+fn riser(p: &Plan, dir: FaceDir, at: i64, tread: u32, k: u32, across: u32) -> Face {
+    let (ox, _, oz) = dir.offset();
+    let along = at - (ox + oz) * i64::from(k * tread);
+    if ox != 0 {
+        Face::new(
+            along.rem_euclid(i64::from(p.width)) as u32,
+            3 + k,
+            across,
+            dir,
+        )
+    } else {
+        Face::new(across, 3 + k, along as u32, dir)
+    }
+}
+
+/// The soil support face at the foot of step 0's riser: under the riser's front voxel.
+fn stair_foot(first: Face, p: &Plan) -> Site {
+    let (ox, _, oz) = first.dir.offset();
+    Site {
+        x: (i64::from(first.x) + ox).rem_euclid(i64::from(p.width)) as u32,
+        y: 2,
+        z: (i64::from(first.z) + oz) as u32,
+    }
+}
+
+/// Step `steps` times or until `stop` holds.
+fn step_until(flora: &mut Flora, world: &mut World, steps: usize, stop: impl Fn(&Flora) -> bool) {
+    for _ in 0..steps {
+        if stop(flora) {
+            return;
+        }
+        flora.step(world);
+    }
+}
+
+/// A founder at the foot of a rock staircase of one-voxel steps and one-voxel treads climbs
+/// it riser by riser: stair adjacency carries the runner from each riser to the one above,
+/// across the tread whose air voxel sits on the lower riser's own voxel. The treads are
+/// rock (no free soil for a sister, and the floor soil at the foot is the founder's own
+/// root), so every riser it covers is the founder's own: one plant, not a colony. And no
+/// other face is reachable — the risers are the only eligible faces the cover can walk to —
+/// so the cover is exactly the risers climbed.
+///
+/// ```text
+///   y 8                   R      step 5's riser (11, 8) NegX, fronting (10, 8)
+///   y 5         R R R R R R
+///   y 4       R R R R R R R      step 1's riser (7, 4) NegX, fronting (6, 4) on step 0
+///   y 3     R R R R R R R R      step 0's riser (6, 3) NegX, fronting (5, 3)
+///   y 2   S S S S S S S S S      root: the foot (5, 2)
+///        x=5 6 7 8 9 ...
+/// ```
+#[test]
+fn t18_a_founder_at_a_staircase_foot_climbs_one_voxel_steps_as_one_plant() {
+    let (dir, at, steps) = (FaceDir::NegX, 6, 6);
+    let mut plan = Plan::new(20, 16, 1);
+    stair_into(&mut plan, dir, at, steps, 1);
+    let risers: Vec<Face> = (0..steps).map(|k| riser(&plan, dir, at, 1, k, 0)).collect();
+    let mut world = plan.world(1.0, false);
+    let view = world.view();
+    for &r in &risers {
+        assert!(
+            face_eligible(&view, r),
+            "fixture: {r:?} is an eligible riser"
+        );
+    }
+    let mut flora = Flora::new(fast());
+    let id = seed(
+        &mut flora,
+        &world,
+        stair_foot(risers[0], &plan),
+        risers[0],
+        1.0,
+    );
+    let top = *risers.last().unwrap();
+    step_until(&mut flora, &mut world, 400, |f| owner(f, top).is_some());
+    let covered: BTreeSet<Face> = flora.view().cover.faces().iter().map(|c| c.face).collect();
+    assert!(
+        covered.contains(&risers[3]),
+        "a watered, lit founder must climb at least three one-voxel steps in 400 ticks; it \
+         covers {covered:?}"
+    );
+    assert!(
+        covered.contains(&top),
+        "and nothing stops it short of the top riser {top:?}: it covers {covered:?}"
+    );
+    let expect: BTreeSet<Face> = risers.iter().copied().collect();
+    assert_eq!(covered, expect, "the cover is exactly the risers");
+    for r in &risers {
+        assert_eq!(
+            owner(&flora, *r),
+            Some(id),
+            "{r:?} belongs to the founder itself"
+        );
+    }
+    assert_eq!(
+        flora.view().cover.vines().len(),
+        1,
+        "rock treads root no sister: one plant"
+    );
+    assert_residuals(&flora, "after the staircase climb");
+}
+
+/// Crossing a step is an ordinary spread: a vine whose economy is stopped (no income, no
+/// upkeep) and whose purse buys exactly three new faces at the ordinary price — the runner
+/// `spread_cost` plus leaf up to `contest_threshold` — covers exactly three more risers, and
+/// its reserve drops by exactly three prices. No surcharge for the tread.
+#[test]
+fn t19_crossing_a_step_costs_the_ordinary_spread_cost_and_nothing_more() {
+    let (dir, at, steps) = (FaceDir::NegX, 6, 6);
+    let mut plan = Plan::new(20, 16, 1);
+    stair_into(&mut plan, dir, at, steps, 1);
+    let risers: Vec<Face> = (0..steps).map(|k| riser(&plan, dir, at, 1, k, 0)).collect();
+    let mut world = plan.world(1.0, false);
+    let mut config = frozen();
+    config.latticevine.spread_cost = 0.2;
+    let v = &config.latticevine;
+    let price = v.spread_cost + v.contest_threshold * v.leaf_mass;
+    let start = 3.5 * price;
+    let mut flora = Flora::new(config);
+    let id = seed(
+        &mut flora,
+        &world,
+        stair_foot(risers[0], &plan),
+        risers[0],
+        start,
+    );
+    for _ in 0..40 {
+        flora.step(&mut world);
+    }
+    let covered: BTreeSet<Face> = flora.view().cover.faces().iter().map(|c| c.face).collect();
+    let expect: BTreeSet<Face> = risers[..4].iter().copied().collect();
+    assert_eq!(
+        covered, expect,
+        "three prices buy exactly the three risers above the root"
+    );
+    let left = vine(&flora, id).reserve;
+    assert!(
+        (left - (start - 3.0 * price)).abs() < 1e-12,
+        "three step crossings cost three ordinary prices ({price} each): {start} → {left}"
+    );
+    assert_residuals(&flora, "after buying three steps");
+}
+
+/// A tread two voxels deep is not crossed: the next riser's front voxel sits on the tread,
+/// not on the lower riser's voxel, so it is not stair-adjacent. The cover spreads along the
+/// bottom riser row (three slabs, proof that the vine is growing and has reserve to spend)
+/// and never leaves it.
+#[test]
+fn t20_a_tread_two_voxels_deep_is_not_crossed() {
+    let (dir, at, steps, tread, depth) = (FaceDir::NegX, 6, 4, 2, 3);
+    let mut plan = Plan::new(24, 16, depth);
+    stair_into(&mut plan, dir, at, steps, tread);
+    let mut world = plan.world(1.0, false);
+    let view = world.view();
+    for k in 0..steps {
+        let r = riser(&plan, dir, at, tread, k, 1);
+        assert!(
+            face_eligible(&view, r),
+            "fixture: {r:?} is an eligible riser"
+        );
+    }
+    let bottom: BTreeSet<Face> = (0..depth)
+        .map(|z| riser(&plan, dir, at, tread, 0, z))
+        .collect();
+    let first = riser(&plan, dir, at, tread, 0, 1);
+    let mut flora = Flora::new(fast());
+    let id = seed(&mut flora, &world, stair_foot(first, &plan), first, 1.0);
+    let lineage = vine(&flora, id).lineage;
+    for _ in 0..400 {
+        flora.step(&mut world);
+        let covered = lineage_faces(&flora, lineage);
+        assert!(
+            covered.is_subset(&bottom),
+            "the cover left the bottom riser row across a two-voxel tread: {covered:?}"
+        );
+    }
+    assert_eq!(
+        lineage_faces(&flora, lineage),
+        bottom,
+        "the vine grew along the whole bottom row, so it had the reserve to cross"
+    );
+}
+
+/// No wall anywhere in `world` is three eligible faces tall: the pre-stair founder rule
+/// (a foot under three stacked faces) finds nothing.
+fn assert_no_tall_wall(world: &World) {
+    let view = world.view();
+    let c = view.config;
+    for x in 0..c.width {
+        for z in 0..c.depth {
+            for y in 0..c.height.saturating_sub(2) {
+                for d in FaceDir::SIDES {
+                    let tall = (0..3).all(|dy| face_eligible(&view, Face::new(x, y + dy, z, d)));
+                    assert!(
+                        !tall,
+                        "fixture: a wall three faces tall at ({x}, {y}, {z}) {d:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// A world whose only relief is a stepped mound of one-voxel steps — no wall two faces
+/// tall — gets founders: the foot rule climbs its chain of three faces up the stair
+/// (planar up where eligible, else stair up), so the floor soil at either foot is a
+/// candidate. And a soil summit over rock steps, on a rock floor (no soil anywhere else),
+/// roots its founder on the lip: the ledge's own side with the stair-down riser as the face
+/// below it.
+///
+/// ```text
+///   y 6         R R          the summit, two columns (soil in the lip variant)
+///   y 5       R R R R
+///   y 4     R R R R R R
+///   y 3   R R R R R R R R    x = 4..=11, a NegX stair up and a PosX stair down
+///   y 2   floor (soil; rock in the lip variant)
+/// ```
+#[test]
+fn t21_founders_root_at_the_foot_of_a_staircase_and_on_a_lip_over_one() {
+    let (steps, up, down) = (4u32, 4i64, 11i64);
+    let mut plan = Plan::new(24, 16, 1);
+    stair_into(&mut plan, FaceDir::NegX, up, steps, 1);
+    stair_into(&mut plan, FaceDir::PosX, down, steps, 1);
+    let mut config = fast();
+    config.latticevine.founders = 4;
+    config.latticevine.founder_reserve = 1.0;
+
+    // Foot: rock steps on the soil floor.
+    let world = plan.world(1.0, false);
+    assert_no_tall_wall(&world);
+    let mut flora = Flora::new(config.clone());
+    let rooted = flora.seed_vine_founders(&world);
+    assert!(
+        rooted >= 1,
+        "a one-voxel staircase must root a founder at its foot; rooted {rooted}"
+    );
+    let feet = [
+        stair_foot(riser(&plan, FaceDir::NegX, up, 1, 0, 0), &plan),
+        stair_foot(riser(&plan, FaceDir::PosX, down, 1, 0, 0), &plan),
+    ];
+    for v in flora.view().cover.vines() {
+        assert!(feet.contains(&v.root), "a founder roots at a foot: {v:?}");
+        assert_eq!(v.root_face.y, 3, "on the bottom riser: {v:?}");
+    }
+    assert_eq!(flora.view().cover.vines().len(), rooted);
+
+    // Lip: a soil summit over rock steps on a rock floor.
+    let mut lip = plan.clone();
+    for x in 0..lip.width as i64 {
+        for y in 1..=2 {
+            lip.set(x, y, 0, Material::Rock);
+        }
+    }
+    let summit = 3 + steps - 1;
+    let tops = [
+        riser(&lip, FaceDir::NegX, up, 1, steps - 1, 0),
+        riser(&lip, FaceDir::PosX, down, 1, steps - 1, 0),
+    ];
+    for t in tops {
+        assert_eq!(t.y, summit);
+        lip.set(i64::from(t.x), t.y, 0, Material::Soil);
+    }
+    let world = lip.world(1.0, false);
+    assert_no_tall_wall(&world);
+    let mut flora = Flora::new(config);
+    let rooted = flora.seed_vine_founders(&world);
+    assert!(
+        rooted >= 1,
+        "a soil summit over one-voxel steps must root a founder on its lip; rooted {rooted}"
+    );
+    for v in flora.view().cover.vines() {
+        assert!(
+            tops.contains(&v.root_face),
+            "the lip founder starts on the summit's own riser: {v:?}"
+        );
+        assert_eq!(
+            (v.root.x, v.root.y, v.root.z),
+            (v.root_face.x, v.root_face.y, v.root_face.z),
+            "rooted on the lip, the riser's own voxel: {v:?}"
+        );
+    }
+}
+
+/// Stair adjacency is the same rule for all four sides: a three-step staircase with its
+/// risers looking each way is climbed to the top. The x staircases stand one across the
+/// ring's seam (x wraps); the z staircases end flush against the world's z walls, where the
+/// step beyond the top riser leaves the world and is dropped (no wrap in z), so the cover
+/// stays on eligible faces inside the world.
+#[test]
+fn t22_every_side_direction_climbs_stairs_across_the_x_seam_and_stops_at_the_z_walls() {
+    let steps = 3;
+    let cases: [(FaceDir, u32, u32, i64); 5] = [
+        (FaceDir::NegX, 16, 1, 6),
+        (FaceDir::PosX, 16, 1, 10),
+        (FaceDir::NegX, 16, 1, 15), // columns 15, 0, 1: across the seam
+        (FaceDir::NegZ, 3, 6, 3),   // columns z = 3, 4, 5: the top at the far wall
+        (FaceDir::PosZ, 3, 6, 2),   // columns z = 2, 1, 0: the top at the near wall
+    ];
+    for (dir, width, depth, at) in cases {
+        let mut plan = Plan::new(width, 12, depth);
+        stair_into(&mut plan, dir, at, steps, 1);
+        let risers: Vec<Face> = (0..steps).map(|k| riser(&plan, dir, at, 1, k, 0)).collect();
+        let mut world = plan.world(1.0, false);
+        let mut flora = Flora::new(fast());
+        let id = seed(
+            &mut flora,
+            &world,
+            stair_foot(risers[0], &plan),
+            risers[0],
+            1.0,
+        );
+        let top = risers[steps as usize - 1];
+        step_until(&mut flora, &mut world, 300, |f| owner(f, top).is_some());
+        assert_eq!(
+            owner(&flora, top),
+            Some(id),
+            "{dir:?} stair from {at}: the founder must climb to {top:?}; it covers {:?}",
+            flora.view().cover.faces_of(id)
+        );
+        for r in &risers {
+            assert_eq!(owner(&flora, *r), Some(id), "{dir:?}: {r:?} climbed");
+        }
+        let view = world.view();
+        for c in flora.view().cover.faces() {
+            assert!(
+                face_eligible(&view, c.face) && c.face.dir == dir,
+                "{dir:?}: the cover holds only this staircase's eligible risers, not {:?}",
+                c.face
+            );
+        }
+    }
 }

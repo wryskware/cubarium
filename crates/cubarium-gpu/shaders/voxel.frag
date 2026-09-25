@@ -46,6 +46,37 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
     vec4 waterL;        // lit: absorption per voxel of path, reflection gain, ripple tilt, reflection cells
     vec4 clock;         // sim time in ticks (tick + the fraction elapsed), the water's animation step, -, -
     vec4 waterM;        // lit: foam, glint, rain rings, highlight (toward white)
+    vec4 volK;          // lit: light shafts' density, glow weight, falloff (voxels), fade
+    // The weather and the time of day (`cubarium_gpu::weather::Look`, package WX2). At a
+    // clear noon every one of these leaves today's picture as it was.
+    vec4 dayK;          // lit: the sun's share of a rung (ladder, smooth) over the ambient
+                        // level, that level (ambientC is already times it); the twilight band
+    vec4 dayL;          // lit: the unlit water's level (1 by day), the sun's strength, -, -
+    vec4 sunLean;       // lit: what a sunlit texel leans toward; which side the sun is on (-1..1)
+    vec4 cloudK;        // lit sky: cloud cover, drift (voxels), storm, twinkle clock (seconds)
+    vec4 cloudBody;     // lit sky: the clouds' body colour; the stars' brightness
+    vec4 cloudLit;      // lit sky: the clouds' sunlit edge colour, and its strength
+    vec4 bandA;         // the twilight band's colours, top to bottom
+    vec4 bandB;
+    vec4 bandC;
+    vec4 tint;          // flat: the whole picture's day/night tint (1 by day)
+    vec4 dayA;          // lit sky: the day sky's zenith; how much of the day sky shows
+    vec4 dayB;          // lit sky: its middle; the stars' share into the bloom
+    vec4 dayC;          // lit sky: its horizon
+    vec4 cloudDay;      // lit sky: the clouds' body by day
+    vec4 cloudShade;    // lit sky: the clouds' shadowed underside by day
+    // Rain, fog and lightning (WX2 checkpoint 2, `cubarium_gpu::weather::Look`). All zero at
+    // a clear noon.
+    vec4 rainK;         // how much drizzle, shower and downpour is falling (0..1 each); the
+                        // rain rings' density on open water (0..1, from the rate)
+    vec4 rainC;         // the streaks' colour (linear); how much of the sun the fog sends back
+    vec4 fogK;          // the fog's density a voxel of path at its floor (0: none), the floor
+                        // (voxels up), its full-density band above that, its falloff (voxels)
+    vec4 fogC;          // the ambient light on the fog (linear); the emitters' glow it scatters
+    vec4 flashC;        // a lightning flash's fill light (linear, already times the flash); the
+                        // flash (0..1)
+    vec4 strikeK;       // the bolt: its column's x centre, top y and z (voxels), its brightness
+    vec4 strikeL;       // the bolt's seed, as two 16-bit halves
 } u;
 
 // The lighting tier (`lighting = "flat" | "lit"`), fixed when the pipeline is built. The
@@ -55,6 +86,30 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
 // light value that multiplies each texel's base colour; the edge treatments are the
 // flat tier's, leaning between the lit tones instead of the flat ones.
 layout(constant_id = 0) const bool LIT = false;
+// The lit tier's effect switches (`cubarium_gpu::sunvis::Effects`), all off in the flat
+// tier: an effect switched off is dead code and costs nothing.
+layout(constant_id = 1) const bool SHADOWS = true;      // the sun march
+layout(constant_id = 2) const bool REFLECTIONS = true;  // the water's reflection march
+layout(constant_id = 3) const bool VOLUMETRIC = false;  // the light shafts (volumetric.glsl)
+layout(constant_id = 4) const bool GLOW = true;         // the emitters' local light
+layout(constant_id = 5) const bool AO = true;           // the AO crease (`[light] ao` > 0)
+// The lit tier's sky pass (package WX2): this shader again, specialised to draw only the
+// sky (`litSky`: the gradient, the twilight band, the stars, the clouds) into the backdrop
+// image, just before the walk reads it. Kept out of the walk's own pipeline on purpose: the
+// walk sits at an occupancy cliff, and the clouds' noise compiled into it cost 0.4 ms at
+// 13 px before a single cloud was drawn.
+layout(constant_id = 6) const bool SKY = false;
+// The lit tier's weather pass (WX2 checkpoint 2): this shader again, specialised to draw
+// only the weather (`weatherOver`: fog, rain, splashes, the lightning bolt) over the raster
+// after the walk, premultiplied, before the bloom. Out of the walk for the same reason as
+// the sky; its pipeline keeps the walk's effect switches, so it knows whether the fog is
+// already in the volumetric march.
+layout(constant_id = 7) const bool WEATHER = false;
+// The lit walk writes its end depth for the weather pass (in the emission's alpha). A
+// second walk pipeline, used only on frames that draw weather: keeping the walk's end
+// slab to the end of the shader costs the walk about 0.1 ms at 13 px, which a clear sky
+// does not pay.
+layout(constant_id = 8) const bool WEATHER_DEPTH = false;
 
 layout(set = 0, binding = 1) uniform usampler3D voxels;  // rgba8ui, one texel per voxel
 layout(set = 0, binding = 2) uniform usampler3D roofTex; // r8ui, voxels to the solid above
@@ -79,6 +134,13 @@ layout(set = 0, binding = 8) uniform usampler2D canopyTex;
 // (`GLOW_CELL`), in units of full ambient light: built on the CPU from the emitter list,
 // spread a few cells through open terrain, and sampled trilinearly here.
 layout(set = 0, binding = 9) uniform sampler3D glowTex;
+// Lit tier only. The sky behind the world, from the sky pass (`SKY`), in linear light, one
+// texel a raster pixel; the flat tier's is a single texel it never reads.
+layout(set = 0, binding = 11) uniform sampler2D backdropTex;
+// Lit tier only, read by the weather pass alone: the emission attachment, whose alpha the
+// walk sets to the slab its ray ended in (over 255; the water surface where there is one),
+// the weather's depth. The flat tier binds its one backdrop texel here.
+layout(set = 0, binding = 12) uniform sampler2D depthTex;
 
 layout(location = 0) out vec4 outColour;
 // Lit tier only (the flat tier's pass has no attachment here, so the writes are dropped):
@@ -352,6 +414,7 @@ float crease(float l, float r, float lo, float hi,
 // AO of a front face of (x, y, z) at texel (dx, dy), dy = 0 at the top: the open plane is
 // z-1.
 float aoFront(int x, int y, int z, int dx, int dy) {
+    if (!AO) { return 1.0; }
     int p = z - 1;
     return crease(
         occluder(x - 1, y, p), occluder(x + 1, y, p), occluder(x, y - 1, p), occluder(x, y + 1, p),
@@ -363,6 +426,7 @@ float aoFront(int x, int y, int z, int dx, int dy) {
 // AO of a top face of (x, y, z) at texel (dx, dy), dy = 0 at the back: the open plane is
 // y+1; its near side (z-1) is the face's bottom rows.
 float aoTop(int x, int y, int z, int dx, int dy) {
+    if (!AO) { return 1.0; }
     int p = y + 1;
     return crease(
         occluder(x - 1, p, z), occluder(x + 1, p, z), occluder(x, p, z - 1), occluder(x, p, z + 1),
@@ -418,6 +482,14 @@ const float SMOOTH_SUN = 1.0 / 3.0;
 // before any snapping: its luminance raises the product, and the light's hue leans from
 // the ambient colour toward the emitters' by their share of the sum (on a ladder, itself
 // snapped to the ladder's steps). With no local light this is exactly the ambient term.
+//
+// The time of day adds nothing to this function's work (every extra live value in the walk
+// costs occupancy: 0.3-0.6 ms at 13 px, measured): the ambient colour the CPU sets is
+// already times the ambient level (1 by day), and the sun's share of a rung (`dayK.x` on a
+// ladder, `dayK.y` smooth: exactly 1 and SMOOTH_SUN at a clear noon) is already times the
+// sun's strength over that level. So the ambient and the floor dim at night, the sun or
+// the moon keeps its own strength, and the emitters' light, mixed in by its share of the
+// sum, comes to carry the dark.
 vec3 ladderLight(float a, float sun, vec3 local) {
     bool smoothLight = u.lightK.z < 1.5;
     float n = max(u.lightK.z - 1.0, 1.0);
@@ -429,14 +501,25 @@ vec3 ladderLight(float a, float sun, vec3 local) {
         hue = mix(hue, local / l, share);
         a = sum;
     }
-    float t = smoothLight ? clamp(a, 0.0, 1.0) + sun * SMOOTH_SUN
-                          : (floor(clamp(a, 0.0, 1.0) * n + 0.5) + sun) / n;
+    float t = smoothLight ? clamp(a, 0.0, 1.0) + sun * u.dayK.y
+                          : (floor(clamp(a, 0.0, 1.0) * n + 0.5) + sun * u.dayK.x) / n;
     return hue * (u.lightK.x * (u.lightK.y + (1.0 - u.lightK.y) * t));
+}
+
+// The ladder's light on open, sunlit ground at a clear noon, in this light's hue (the
+// ambient colour over its level): what the water's in-scatter is taken as a ratio to, so
+// water darkens at night as the ground does.
+vec3 ladderRef(float sunOn) {
+    bool smoothLight = u.lightK.z < 1.5;
+    float n = max(u.lightK.z - 1.0, 1.0);
+    float t = smoothLight ? 1.0 + sunOn * SMOOTH_SUN : (floor(n + 0.5) + sunOn) / n;
+    return u.ambientC.rgb / u.dayK.z * (u.lightK.x * (u.lightK.y + (1.0 - u.lightK.y) * t));
 }
 
 // The emitters' light at world point `p` (voxel units), trilinear over the glow volume
 // whose texel i covers voxels 4i .. 4i + 4.
 vec3 glowAt(vec3 p) {
+    if (!GLOW) { return vec3(0.0); }
     vec3 n = vec3(textureSize(glowTex, 0)) * 4.0;
     // Explicit level: the walk is divergent per pixel, and an implicit-derivative sample
     // there costs as much as the rest of the lit shading together.
@@ -464,6 +547,7 @@ bool crownLets(uvec4 v, ivec3 c) {
 // 1 where the sun reaches world point `p`, which lies on the boundary of open cell `c`
 // (the cell in front of the face it is on); 0 where anything opaque is in the way.
 float sunReaches(vec3 p, ivec3 c) {
+    if (!SHADOWS) { return 1.0; }
     vec3 L = u.sunK.xyz;
     ivec3 dir = ivec3(sign(L));
     vec3 inv = vec3(
@@ -494,11 +578,13 @@ float sunReaches(vec3 p, ivec3 c) {
 }
 
 // A lit colour: the base under the quantised light, and where the sun reaches, leaning
-// toward the palette's light by the sun tint times N·L (the flat tier's lean of a top
-// face toward `lightC`, now gated by the sun).
+// toward the sun's colour by the sun tint times N·L (the flat tier's lean of a top face
+// toward `lightC`, now gated by the sun). The sun's colour (`sunLean`) is the palette's
+// light by day, warm low down, the moon's at night; the lean's strength (`sunK.w`) is the
+// tint times the sun's strength, raised for a low sun (`cubarium_gpu::weather::Look`).
 vec3 litBy(vec3 base, float ambient, float sun, float ndl, vec3 local) {
     vec3 c = base * ladderLight(ambient, sun, local);
-    return mix(c, u.lightC.rgb, clamp(u.sunK.w * sun * ndl, 0.0, 1.0));
+    return mix(c, u.sunLean.rgb, clamp(u.sunK.w * sun * ndl, 0.0, 1.0));
 }
 
 // The front face of (x, y, z) at texel (dx, dy), lit, with `canopy` over it.
@@ -1036,17 +1122,32 @@ void waterAt(int x, int y, int z, uvec4 v, int row, inout vec3 acc, inout vec3 t
 
 // --- the walk -------------------------------------------------------------------------
 
-// Vertical sky gradient from zenith down to horizon
+// The twilight band (`dayK.w`, zero away from dawn and dusk), `t` of the way down the
+// raster: purple fading in from above, magenta, then the palette's warm orange low down,
+// where the sky meets the far ridge.
+vec3 bandAt(float t) {
+    float b = smoothstep(0.04, 0.56, t);
+    vec3 c = mix(u.bandA.rgb, u.bandB.rgb, smoothstep(0.0, 0.5, b));
+    c = mix(c, u.bandC.rgb, smoothstep(0.5, 1.0, b));
+    return c * (b * b * u.dayK.w);
+}
+
+// Vertical sky gradient from zenith down to horizon (the time of day's: the palette's by
+// day), with the twilight band over it at dawn and dusk.
 vec3 skyAt(int py) {
     if (u.roofK.w > 0.5) {
         float t = clamp(float(py) / float(max(u.extent.w, 1)), 0.0, 1.0);
-        return mix(u.skyC.rgb, u.skyHorizon.rgb, t);
+        vec3 c = mix(u.skyC.rgb, u.skyHorizon.rgb, t);
+        if (u.dayK.w > 0.0) { c += bandAt(t); }
+        return c;
     }
     return u.skyC.rgb;
 }
 
-// Atmospheric sky with drifting moisture cloud wisps
+// Atmospheric sky with drifting moisture cloud wisps. The lit tier's is the sky pass's
+// (stars and clouds instead of wisps).
 vec3 skyColor(int px_x, int px_y) {
+    if (LIT) { return texelFetch(backdropTex, ivec2(px_x, px_y), 0).rgb; }
     vec3 sky = skyAt(px_y);
     float moisture = clamp(u.knobs.z, 0.0, 1.0);
     int mistRows = min(u.extent.w / 3, 56);
@@ -1245,6 +1346,190 @@ float vnoiseT(vec2 w, float freq, float t, int salt) {
     return mix(vnoise(w, freq, l0, salt), vnoise(w, freq, l1, salt), ft);
 }
 
+
+// --- the sky (the lit tier's sky pass, `SKY`; package WX2) ----------------------------------
+//
+// Interim look. Everything moves on the every-frame clock (the drift and the twinkle clock
+// come from `cubarium_gpu::weather`, eased there), so nothing pops.
+
+// Stars (WX2 checkpoint 1b): at most one in each square of STAR_CELL voxels of the
+// raster, STAR_SHARE of them. Brightness is a power-law draw (many faint, a few bright:
+// the share brighter than b falls as b^-STAR_POWER), from STAR_MIN up to STAR_MAX; the
+// colour a temperature from bluish white to warm, a rare few in the palette's cyan or
+// magenta. One pixel, two from 10 px a voxel; the brightest also get a soft cross. Each
+// twinkles smoothly on its own two rates and phases (whole periods in the twinkle
+// clock's 3600 s wrap), deeper for the faint ones and near the horizon (`t`, 0 at the
+// top of the raster). `.a` is how much of it is bright enough to feed the bloom.
+const float STAR_CELL = 1.0;
+const float STAR_SHARE = 0.16;
+const float STAR_GAIN = 0.9;
+const float STAR_MIN = 0.09;
+const float STAR_MAX = 3.0;
+const float STAR_POWER = 1.5;
+// Above this brightness a star has a cross and feeds the bloom.
+const float STAR_BRIGHT = 0.9;
+
+vec4 starAt(int px, int py, float t) {
+    int C = max(4, int(float(S) * STAR_CELL + 0.5));
+    ivec2 cell = ivec2(px / C, py / C);
+    uint h = cellHash(cell.x, cell.y, 0, 71);
+    if (float(h & 0xFFFFu) / 65536.0 >= STAR_SHARE) { return vec4(0.0); }
+    uint g = cellHash(cell.x, cell.y, 1, 72);
+    uint f = cellHash(cell.x, cell.y, 2, 73);
+    // r in (0, 1]: the power law's draw.
+    float r = (float(f & 0xFFFFu) + 1.0) / 65536.0;
+    float b = min(STAR_MIN * pow(r, -1.0 / STAR_POWER), STAR_MAX);
+    int sz = S >= 10 ? 2 : 1;
+    // Kept a pixel in from the cell's edge, so a cross stays inside it.
+    int span = max(C - sz - 1, 1);
+    ivec2 at = ivec2(1 + int(g % uint(span)), 1 + int((g >> 8) % uint(span)));
+    ivec2 d = ivec2(px, py) - cell * C - at;
+    float k;
+    if (d.x >= 0 && d.y >= 0 && d.x < sz && d.y < sz) {
+        k = 1.0;
+    } else if (b > STAR_BRIGHT && ((d.x == -1 || d.x == sz) && d.y >= 0 && d.y < sz
+                                || (d.y == -1 || d.y == sz) && d.x >= 0 && d.x < sz)) {
+        k = 0.22 * min((b - STAR_BRIGHT) / STAR_BRIGHT, 1.0);
+    } else {
+        return vec4(0.0);
+    }
+    // Twinkle: two sines, each a whole number of periods in the 3600 s wrap (0.2-0.9 Hz
+    // and 0.07-0.3 Hz), deeper for a faint star and toward the horizon.
+    float w1 = 6.28318530718 * float(720u + (g >> 16) % 2520u) / 3600.0;
+    float w2 = 6.28318530718 * float(250u + (f >> 16) % 830u) / 3600.0;
+    float ph1 = float(h >> 16) * 0.0000958738;
+    float ph2 = float(g >> 24) * 0.0245436926;
+    float wave = 0.5 + 0.5 * (0.65 * sin(u.cloudK.w * w1 + ph1) + 0.35 * sin(u.cloudK.w * w2 + ph2));
+    float faint = 1.0 - smoothstep(STAR_MIN, STAR_BRIGHT, b);
+    float depth = clamp(mix(0.18, 0.55, faint) * (1.0 + 1.2 * smoothstep(0.1, 0.5, t)), 0.0, 0.9);
+    float tw = 1.0 - depth * wave;
+    // Colour: a temperature, and a rare palette tint.
+    float temp = float((f >> 16) & 0xFFu) / 255.0;
+    vec3 c = temp < 0.55 ? mix(vec3(0.72, 0.84, 1.0), vec3(1.0), temp / 0.55)
+                         : mix(vec3(1.0), vec3(1.0, 0.82, 0.62), (temp - 0.55) / 0.45);
+    uint rare = (f >> 24) % 16u;
+    if (rare == 0u) { c = mix(c, u.lightC.rgb / max(max(u.lightC.r, u.lightC.g), max(u.lightC.b, 1e-3)), 0.5); }
+    if (rare == 1u) { c = mix(c, u.bandB.rgb / max(max(u.bandB.r, u.bandB.g), max(u.bandB.b, 1e-3)), 0.4); }
+    float lum = b * tw * k;
+    return vec4(c * lum, k * max(b - STAR_BRIGHT, 0.0) / (STAR_MAX - STAR_BRIGHT));
+}
+
+// The cloud layer's noise: value-noise fbm over the raster in voxel units, x round the ring
+// (so it meets itself at the seam), y stretched CLOUD_FLAT times so clouds are wide and
+// flat, domain-warped by a slower field that drifts at half the clouds' speed (so shapes
+// change as they go).
+const float CLOUD_FREQ = 1.0 / 36.0;
+const float CLOUD_FLAT = 3.0;
+const float CLOUD_WARP = 20.0;
+
+float cloudFbm(vec2 q, int octaves, int salt) {
+    float sum = 0.0;
+    float amp = 0.5;
+    float norm = 0.0;
+    float freq = CLOUD_FREQ;
+    for (int i = 0; i < octaves; ++i) {
+        sum += amp * vnoise(q, freq, i, salt);
+        norm += amp;
+        amp *= 0.5;
+        freq *= 2.0;
+    }
+    return sum / norm;
+}
+
+float cloudNoise(vec2 q) {
+    vec2 wq = q - vec2(0.5 * u.cloudK.y, 0.0);
+    vec2 warp = vec2(cloudFbm(wq, 3, 120), cloudFbm(wq + vec2(64.0, 23.0), 3, 121)) - 0.5;
+    return cloudFbm(q + warp * CLOUD_WARP, 5, 122);
+}
+
+// The day sky (WX2 checkpoint 1b), `t` of the way down the raster: zenith, middle, and the
+// lightest at the horizon, which sits about where the far ridge does (the twilight band's
+// own reach).
+const float DAY_HORIZON_T = 0.55;
+
+vec3 daySkyAt(float t) {
+    float g = smoothstep(0.0, DAY_HORIZON_T, t);
+    vec3 c = mix(u.dayA.rgb, u.dayB.rgb, smoothstep(0.0, 0.55, g));
+    return mix(c, u.dayC.rgb, smoothstep(0.45, 1.0, g));
+}
+
+// The lit sky: the gradient (the day sky's over the palette's by `dayA.w`), the twilight
+// band, the stars, the clouds. `.a` is the light the pixel sends the bloom (a bright
+// star's, times `dayB.w`).
+vec4 litSky(int px, int py) {
+    float t = clamp(float(py) / float(max(u.extent.w, 1)), 0.0, 1.0);
+    bool gradient = u.roofK.w > 0.5;
+    vec3 sky = gradient ? mix(u.skyC.rgb, u.skyHorizon.rgb, t) : u.skyC.rgb;
+    float day = u.dayA.w;
+    if (day > 0.0) {
+        // Coming in (and going out) through the twilight band's own colours, so the sky
+        // brightens rose and orange into the day's rather than through a grey: a linear
+        // mix of near-black and a pale colour is a grey.
+        float b = smoothstep(0.04, 0.56, t);
+        vec3 warm = mix(mix(u.bandA.rgb, u.bandB.rgb, smoothstep(0.0, 0.5, b)), u.bandC.rgb,
+                        smoothstep(0.5, 1.0, b));
+        sky = mix(sky, mix(warm, daySkyAt(t), smoothstep(0.0, 1.0, day)), day);
+    }
+    if (gradient && u.dayK.w > 0.0) {
+        // The band, a little brighter on the sun's side.
+        float xs = float(px) / float(max(W * S, 1)) * 2.0 - 1.0;
+        sky += bandAt(t) * (1.0 + 0.4 * u.sunLean.w * xs);
+    }
+    float glow = 0.0;
+    if (u.cloudBody.w > 0.001) {
+        vec4 st = starAt(px, py, t) * (u.cloudBody.w * (1.0 - smoothstep(0.25, 0.6, t)));
+        sky += st.rgb * STAR_GAIN;
+        glow = st.a * u.dayB.w;
+    }
+    // A lightning flash lifts the sky a little everywhere, and lights the clouds from
+    // within (below), most over the strike.
+    float flash = u.flashC.w;
+    float nearStrike = 0.0;
+    if (flash > 0.0) {
+        float ringPx = float(W * S);
+        float dx = abs(float(px) + 0.5 - u.strikeK.x * float(S));
+        dx = min(dx, ringPx - dx) / (28.0 * float(S));
+        nearStrike = exp(-dx * dx);
+        sky += u.flashC.rgb * (0.04 + 0.06 * nearStrike);
+    }
+    float cover = u.cloudK.x;
+    if (cover < 0.001) { return vec4(sky, glow); }
+    float storm = u.cloudK.z;
+    // The layer: down from the top of the sky, thinning toward the horizon; a storm brings
+    // it lower.
+    float env = 1.0 - smoothstep(mix(0.22, 0.5, storm), mix(0.52, 0.8, storm), t);
+    if (env <= 0.0) { return vec4(sky, glow); }
+    vec2 q = vec2((float(px) + 0.5) / float(S) + u.cloudK.y,
+                  (float(py) + 0.5) / float(S) * CLOUD_FLAT);
+    float n = cloudNoise(q);
+    float thr = mix(0.74, 0.36, cover) - 0.16 * storm;
+    float d = smoothstep(thr, thr + 0.08, n) * env * smoothstep(0.0, 0.2, cover);
+    if (d <= 0.0) { return vec4(sky, glow); }
+    // Lit where the cloud thins toward the sun: the sun is on the camera's side, so on the
+    // screen its light comes from above and from its own side.
+    vec2 toSun = normalize(vec2(u.sunK.x, -max(u.sunK.y, 0.25) * CLOUD_FLAT));
+    float n2 = cloudNoise(q + toSun * 2.0);
+    float edge = clamp((n - n2) * 10.0 + 0.2, 0.0, 1.0);
+    float lit = edge * u.cloudLit.w;
+    // Thick cores and the shaded side darker.
+    vec3 body = u.cloudBody.rgb * (1.15 - 0.45 * d * (1.0 - lit)) * (1.0 - 0.5 * storm);
+    vec3 col = body + u.cloudLit.rgb * lit;
+    if (day > 0.0) {
+        // By day: near white where the sun reaches and through the body, violet on the
+        // shadowed underside (where the cloud thins away from the sun); heavy cover and a
+        // storm push toward the shade.
+        // A storm's clouds are mostly underside, and dark (checkpoint 2).
+        float sunward = clamp(edge * 2.0 + 0.3 - 0.4 * cover * cover, 0.0, 1.0) * (1.0 - 0.7 * storm);
+        vec3 dayCol = mix(u.cloudShade.rgb, u.cloudDay.rgb, sunward) * (1.0 - 0.72 * storm);
+        col = mix(col, dayCol, day);
+    }
+    if (flash > 0.0) {
+        // Lit from within: thick cores glow most, the strike's own clouds far more.
+        col += u.flashC.rgb * (0.12 + 0.5 * nearStrike) * (0.4 + 0.6 * d);
+    }
+    return vec4(mix(sky, col, d * 0.92), glow * (1.0 - d));
+}
+
 // Foam: a band about FOAM_WIDTH voxels wide along a shore (breathing between FOAM_BREATHE
 // and 1 + FOAM_BREATHE of that), and a disc PLUNGE_RADIUS voxels round where a fall meets
 // the pool. Its noise moves a layer every FOAM_STEPS animation steps (PLUNGE_STEPS where a
@@ -1318,13 +1603,12 @@ float foamAt(ivec3 c, vec3 p, int fill) {
 }
 
 // Rain rings: the surface is cut into cells about RAIN_CELL voxels on a side, and in each
-// time slot of RAIN_SLOT animation steps a cell holds a drop with chance RAIN_CHANCE, at a
+// time slot of RAIN_SLOT animation steps a cell holds a drop with the chance `rainK.w` (the rain rate's), at a
 // random place and moment in the slot. Its ring grows to RING_RADIUS voxels over RING_LIFE
 // of the slot, easing out, fading in fast and out slowly. Two copies, offset half a cell
 // and half a slot, overlap. A ring stays inside its cell, so a pixel asks only its own.
 const float RAIN_CELL = 2.0;
 const float RAIN_SLOT = 8.0;
-const float RAIN_CHANCE = 0.55;
 const float RING_RADIUS = 0.6;
 const float RING_LIFE = 0.7;
 
@@ -1338,7 +1622,13 @@ float rainRing(vec2 w, int copy) {
     vec2 g = vec2(w.x / cellW, w.y / RAIN_CELL) + 0.5 * float(copy);
     ivec2 cell = ivec2(floor(g));
     uint h = cellHash(wrapI(cell.x, cellsX), cell.y, slot, 90 + copy);
-    if (float(h & 0xFFFFu) / 65535.0 >= RAIN_CHANCE) { return 0.0; }
+    // The density follows the rain rate (`rainK.w`: W-2's 0.55 in a shower, more in a
+    // downpour, few in a drizzle). A drop whose draw is near the density is faint, so as the
+    // rate eases a ring fades rather than appearing or vanishing mid-life.
+    float chance = min(u.rainK.w, 0.98);
+    float hv = float(h & 0xFFFFu) / 65535.0;
+    if (hv >= chance) { return 0.0; }
+    float margin = clamp((chance - hv) / 0.06, 0.0, 1.0);
     float age = (phase - float((h >> 16) & 0xFFu) / 255.0 * (1.0 - RING_LIFE)) / RING_LIFE;
     if (age <= 0.0 || age >= 1.0) { return 0.0; }
     // The drop's place in its cell, far enough in that its ring stays there.
@@ -1354,7 +1644,7 @@ float rainRing(vec2 w, int copy) {
     float px = abs(l - r) / max(length(grad), 1e-6);
     float edge = max(1.0 - px / 0.8, 0.0);
     float fade = smoothstep(0.0, 0.12, age) * (1.0 - age) * (1.0 - age);
-    return edge * fade;
+    return edge * fade * margin;
 }
 
 // A ceiling seen in a reflection: the underside of a solid, which the picture never
@@ -1447,7 +1737,8 @@ bool reflectMarch(vec3 p, vec3 r, out ivec3 hit, out vec3 hp, out int axis) {
 vec3 reflectionShade(bool found, ivec3 c, vec3 hp, int axis, vec3 r) {
     if (!found) {
         int row = int(floor(float(BASE) - hp.y * float(S) - hp.z * float(RISE)));
-        return skyAt(max(row, 0));
+        int col = wrapI(int(floor(hp.x * float(S))), max(W * S, 1));
+        return texelFetch(backdropTex, ivec2(col, clamp(row, 0, u.extent.w - 1)), 0).rgb;
     }
     uvec4 v = at(c.x, c.y, c.z);
     ivec2 t = reflectTexel(hp, c, axis, r.x);
@@ -1521,14 +1812,15 @@ vec3 flowDebug(vec3 fl, bool top, vec3 p) {
 // entered, and the open cell whose light it reads.
 vec3 litWaterFinish(vec3 colour) {
     if ((wEntry & ENTRY_FLAT) != 0) {
-        colour += wScatter + wHaze * u.hazeC.rgb;
+        colour += wScatter * u.dayL.x + wHaze * u.hazeC.rgb;
         if ((wEntry & ENTRY_FALLING) == 0) { return colour; }
         if (u.clock.z > 0.5) { return fallStreak(PX, PY, u.clock.y) ? vec3(1.0) : vec3(0.35, 0.05, 0.5); }
         // A fall's streaks over the flat tier's sheet: the surface colour itself (opaque,
         // hazed), a third of the columns, moving down. The palette has nothing brighter,
         // and the sheet between them keeps the flat tier's brightness.
         int zf = (wEntry >> 12) & 0xFFF;
-        return fallStreak(PX, PY, u.clock.y) ? hazed(u.waterSurfaceC.rgb, hazeAt(float(zf))) : colour;
+        return fallStreak(PX, PY, u.clock.y)
+            ? hazed(u.waterSurfaceC.rgb * u.dayL.x, hazeAt(float(zf))) : colour;
     }
     int y = wEntry & 0xFFF;
     int z = (wEntry >> 12) & 0xFFF;
@@ -1551,7 +1843,7 @@ vec3 litWaterFinish(vec3 colour) {
     float sun = (sunOn > 0.0 && ndl > 0.0) ? sunReaches(p, open) : 0.0;
     vec3 glow = glowAt(top ? p + vec3(0.0, 0.5, 0.0) : p - vec3(0.0, 0.0, 0.5));
     vec3 here = ladderLight(skyOpen(open.x, open.y, open.z) * canopy, sun, glow);
-    vec3 ratio = here / max(ladderLight(1.0, sunOn, vec3(0.0)), vec3(1e-4));
+    vec3 ratio = here / max(ladderRef(sunOn), vec3(1e-4));
     colour += wScatter * ratio + wHaze * u.hazeC.rgb;
     if (!top) { return colour; }
     float glint;
@@ -1563,22 +1855,25 @@ vec3 litWaterFinish(vec3 colour) {
     r.y = max(r.y, 0.05);
     r = normalize(r);
     // What is behind the surface first, so the march and the shading carry little state.
-    vec3 under = (1.0 - f) * colour;
-    ivec3 hc;
-    vec3 hp;
-    int axis;
-    bool found = reflectMarch(p, r, hc, hp, axis);
-    colour = under + f * reflectionShade(found, hc, hp, axis, r);
+    if (REFLECTIONS) {
+        vec3 under = (1.0 - f) * colour;
+        ivec3 hc;
+        vec3 hp;
+        int axis;
+        bool found = reflectMarch(p, r, hc, hp, axis);
+        colour = under + f * reflectionShade(found, hc, hp, axis, r);
+    }
     // The surface's details over the reflection: rain rings and foam in the palette's
     // surface colour, off the light as the falls' streaks are (lit, foam in a shaded
     // crevice went a muddy grey), and glints in the palette's light. Foam and rings only
     // lighten: where the water is already brighter they leave it be. Rings and glints lean
     // from their palette colour toward white by the highlight knob (waterM.w).
     float hz = hazeAt(float(z) + 0.5);
-    vec3 froth = max(colour, hazed(u.waterSurfaceC.rgb, hz));
-    if (u.waterM.z > 0.0 && u.knobs.w > 0.0 && skyOpen(open.x, open.y, open.z) > 0.0) {
+    vec3 surf = u.waterSurfaceC.rgb * u.dayL.x;
+    vec3 froth = max(colour, hazed(surf, hz));
+    if (u.waterM.z > 0.0 && u.rainK.w > 0.0 && skyOpen(open.x, open.y, open.z) > 0.0) {
         float ring = max(rainRing(p.xz, 0), rainRing(p.xz, 1));
-        vec3 ringC = max(colour, hazed(mix(u.waterSurfaceC.rgb, vec3(1.0), u.waterM.w), hz));
+        vec3 ringC = max(colour, hazed(mix(surf, vec3(u.dayL.x), u.waterM.w), hz));
         colour = mix(colour, ringC, clamp(u.waterM.z * ring, 0.0, 1.0));
     }
     if (u.waterM.x > 0.0) {
@@ -1586,11 +1881,379 @@ vec3 litWaterFinish(vec3 colour) {
         colour = mix(colour, froth, clamp(u.waterM.x * foam, 0.0, 1.0));
     }
     if (u.waterM.y > 0.0 && glint > 0.0 && sun > 0.0) {
-        vec3 glintC = hazed(mix(u.lightC.rgb, vec3(1.0), u.waterM.w), hz);
-        colour = mix(colour, glintC, clamp(u.waterM.y * glint, 0.0, 1.0));
+        vec3 glintC = hazed(mix(u.sunLean.rgb, vec3(1.0), u.waterM.w), hz);
+        colour = mix(colour, glintC, clamp(u.waterM.y * glint * u.dayL.y, 0.0, 1.0));
     }
     return colour;
 }
+
+
+// --- the weather over the world (WX2 checkpoint 2) -----------------------------------------
+//
+// Interim look. Rain, fog and lightning, drawn by the lit tier's weather pass (`WEATHER`)
+// over the raster, with the walk's end depth from `depthTex`; the flat tier's rain and
+// flash are the cheap stand-ins in the walk itself (`flatRain`, the tint). Everything moves
+// on the every-frame clock (`cloudK.w`, sim seconds wrapped at 3600 with every period here
+// whole in it) and eases in and out through the look's weights, so nothing pops.
+
+// The weather clock, seconds.
+float wxTime() { return u.cloudK.w; }
+
+// A speed (units a second) nudged so that it moves a whole number of `period`s in the
+// clock's 3600 s wrap: the pattern is the same on both sides of the wrap.
+float wholeIn3600(float speed, float period) {
+    return max(1.0, floor(speed * 3600.0 / period + 0.5)) * period / 3600.0;
+}
+
+// --- fog ---
+//
+// Height fog over the low ground: full density in a band `fogK.z` voxels deep over its
+// floor (`fogK.y`, the sink's low ground: basins and the lake), thinning by e every
+// `fogK.w` voxels above. A drifting noise over the ground plane thickens and thins it, one
+// value per pixel (where its ray reaches the fog), so it drifts in banks without costing a
+// march.
+
+// The fog's shape at height y: 1 in its band, falling off above.
+float fogShape(float y) {
+    float h = y - (u.fogK.y + u.fogK.z);
+    return h <= 0.0 ? 1.0 : exp(-h / max(u.fogK.w, 1e-3));
+}
+
+// The noise's layers go by at this rate (a whole 256 of them in the 3600 s wrap), and it
+// drifts with the clouds.
+const float FOG_EVOLVE = 256.0 / 3600.0;
+const float FOG_FREQ = 1.0 / 9.0;
+
+// The drifting density at ground point (x, z): 0.35 to 1.65, about 1.
+float fogNoise(float x, float z) {
+    vec2 w = vec2(x - u.cloudK.y, z * 1.6);
+    float n = 0.65 * vnoiseT(w, FOG_FREQ, wxTime() * FOG_EVOLVE, 140)
+            + 0.35 * vnoise(w, FOG_FREQ * 2.3, 7, 141);
+    return 0.35 + 1.3 * n;
+}
+
+// The slab the pixel's ray reaches the fog's band in, and the slabs of band it crosses up
+// to `zEnd`: the ray falls k voxels a slab from height y0 at z = 0.
+vec2 fogSpan(float y0, float k, float zEnd) {
+    float top = u.fogK.y + u.fogK.z;
+    float zb = clamp((y0 - top) / k, 0.0, zEnd);
+    return vec2(zb, zEnd - zb);
+}
+
+// The fog's optical depth along the ray from z = 0 to `zEnd` slabs, at the pixel's noise:
+// the band part, plus the exponential tail above it, integrated in closed form.
+float fogDepth(float y0, float k, float zEnd, float noise) {
+    vec2 span = fogSpan(y0, k, zEnd);
+    float top = u.fogK.y + u.fogK.z;
+    float fw = max(u.fogK.w, 1e-3);
+    float above = y0 > top
+        ? (fw / k) * (exp(-(y0 - k * span.x - top) / fw) - exp(-(y0 - top) / fw))
+        : 0.0;
+    return u.fogK.x * noise * (above + span.y) * sqrt(1.0 + k * k);
+}
+
+// The pixel's fog noise, where its ray first reaches the band (the middle of what it
+// crosses there).
+float fogNoiseFor(float xw, float y0, float k, float zEnd) {
+    vec2 span = fogSpan(y0, k, zEnd);
+    return fogNoise(xw, span.x + 0.5 * span.y);
+}
+
+// --- rain ---
+//
+// Three looks, one per mode, cross-faded by the look's weights (`rainK.xyz`):
+//   drizzle: fine, short and slow, sparse, with a thin haze;
+//   shower: streaks;
+//   downpour: long, dense, slanted, in gusting sheets, with a heavier haze.
+// Each falls in three layers at fixed depths (RAIN_DEPTH shares of the world's depth),
+// nearer layers a little faster and longer (the orthographic camera's only parallax). A
+// layer shows at a pixel only where the walk ended behind it and its point on the ray is
+// open to the sky (no solid over it in its column): rain stops at a roof and behind nearer
+// terrain. Streaks are one-pixel lines (antialiased, so they move smoothly), in lanes of
+// the raster sheared by the slant; each lane has its own speed and offset, and each streak
+// cell along a lane its own draw, so the pattern never repeats in view.
+
+const vec3 RAIN_DEPTH = vec3(0.1, 0.32, 0.66);
+const vec3 RAIN_LAYER_SPEED = vec3(1.0, 0.82, 0.66);
+const vec3 RAIN_LAYER_ALPHA = vec3(1.0, 0.72, 0.48);
+
+// Per mode (drizzle, shower, downpour): fall speed (voxels a second), streak length
+// (voxels), lane width (voxels), share of streak cells occupied, alpha, slant (x per y), and
+// the haze veil it lays over the depth of the scene.
+const vec3 RAIN_SPEED = vec3(5.0, 24.0, 34.0);
+const vec3 RAIN_LEN = vec3(0.2, 1.1, 2.4);
+const vec3 RAIN_LANE = vec3(0.55, 0.7, 0.5);
+const vec3 RAIN_FILL = vec3(0.28, 0.3, 0.55);
+const vec3 RAIN_ALPHA = vec3(0.4, 0.3, 0.32);
+const vec3 RAIN_SLANT = vec3(0.04, 0.1, 0.24);
+const vec3 RAIN_VEIL = vec3(0.1, 0.05, 0.16);
+
+// The downpour's gusts: bands of heavier rain sweeping along the ring (whole periods round
+// it and in the clock's wrap), between GUST_LOW and 1.
+const float GUST_LOW = 0.35;
+
+float gustAt(float xv) {
+    float t = wxTime();
+    float n1 = max(1.0, floor(float(W) / 38.0 + 0.5));
+    float n2 = max(1.0, floor(float(W) / 17.0 + 0.5));
+    float a = sin(6.28318530718 * (xv * n1 / float(W) - t * 0.05));
+    float b = sin(6.28318530718 * (xv * n2 / float(W) - t * 0.11) + 1.7);
+    return mix(GUST_LOW, 1.0, clamp(0.5 + 0.35 * a + 0.25 * b, 0.0, 1.0));
+}
+
+// One layer of one mode at raster pixel (px, py): its coverage times its brightness along
+// the streak (the head brighter than the tail), 0 where there is no streak.
+float rainStreak(float px, float py, int mode, int layer) {
+    float Sf = float(S);
+    float speed = RAIN_SPEED[mode] * RAIN_LAYER_SPEED[layer];
+    float len = RAIN_LEN[mode] * mix(1.0, RAIN_LAYER_SPEED[layer], 0.6);
+    float period = len / 0.4;
+    // Lanes across the ring: a whole number of them round it, so the seam is seamless.
+    float ringPx = float(W) * Sf;
+    float lanes = max(1.0, floor(ringPx / (RAIN_LANE[mode] * Sf) + 0.5));
+    float laneW = ringPx / lanes;
+    float xs = px + 0.5 - RAIN_SLANT[mode] * (py + 0.5);
+    float lf = floor(xs / laneW);
+    int lane = wrapI(int(lf), int(lanes));
+    uint h = cellHash(lane, layer, mode, 170);
+    float off = (0.15 + 0.7 * float(h & 0xFFu) / 255.0) * laneW;
+    float width = max(1.0, Sf / 10.0);
+    float cx = clamp(0.5 * width + 0.5 - abs(xs - lf * laneW - off), 0.0, 1.0);
+    if (cx <= 0.0) { return 0.0; }
+    // Down the lane, in voxels: y' = v - t·speed, so a streak moves down the screen.
+    float s = wholeIn3600(speed * (0.85 + 0.3 * float((h >> 8) & 0xFFu) / 255.0), period);
+    float yp = (py + 0.5) / Sf - wxTime() * s + period * float((h >> 16) & 0xFFu) / 255.0;
+    float cell = floor(yp / period);
+    uint hc = cellHash(lane, int(cell), layer * 3 + mode, 171);
+    if (float(hc & 0xFFFFu) / 65535.0 >= RAIN_FILL[mode]) { return 0.0; }
+    float pos = yp - cell * period;
+    float l = len * (0.75 + 0.5 * float((hc >> 16) & 0xFFu) / 255.0);
+    float cy = clamp((l - pos) * Sf, 0.0, 1.0) * clamp(pos * Sf + 0.5, 0.0, 1.0);
+    return cx * cy * (0.35 + 0.65 * clamp(pos / l, 0.0, 1.0));
+}
+
+// Whether rain falls at the world point on this pixel's ray `zl` slabs in: open to the sky
+// straight up (above the world, or in air with no solid over it in its column).
+bool rainOpen(int x, float y0, float k, float zl) {
+    float y = y0 - k * zl;
+    if (y >= float(H)) { return true; }
+    if (y < 0.0) { return false; }
+    int yi = int(y);
+    int zi = int(zl);
+    return !solidAt(x, yi, zi) && roofGap(x, yi, zi) == 0;
+}
+
+// --- splashes on open tops ---
+//
+// On a solid top open to the sky, each voxel cell holds a drop now and then (SPLASH_SLOT
+// seconds a slot, a chance from the modes' weights): a bright dot that opens into a small
+// crown and fades within SPLASH_LIFE of its slot.
+const float SPLASH_SLOT = 0.5;
+const float SPLASH_LIFE = 0.36;
+const vec3 SPLASH_CHANCE = vec3(0.08, 0.22, 0.4);
+
+// The splash at world point (x, z) on a top: 0..1.
+float splashAt(vec2 w, int copy) {
+    float tt = wxTime() / SPLASH_SLOT + 0.5 * float(copy);
+    float slot = floor(tt);
+    float phase = tt - slot;
+    ivec2 c = ivec2(floor(w + 0.5 * float(copy)));
+    uint h = cellHash(wrapI(c.x, W), c.y, int(slot), 180 + copy);
+    float chance = dot(u.rainK.xyz, SPLASH_CHANCE);
+    float hv = float(h & 0xFFFFu) / 65535.0;
+    if (hv >= chance) { return 0.0; }
+    float age = (phase - float((h >> 16) & 0xFFu) / 255.0 * (1.0 - SPLASH_LIFE)) / SPLASH_LIFE;
+    if (age <= 0.0 || age >= 1.0) { return 0.0; }
+    vec2 at = vec2(0.2) + 0.6 * vec2(float((h >> 24) & 0xFu), float((h >> 28) & 0xFu)) / 15.0;
+    vec2 e = (w + 0.5 * float(copy) - vec2(c) - at) * vec2(float(S), float(RISE));
+    float d = length(e);
+    float r = (0.08 + 0.22 * sqrt(age)) * float(S);
+    float ring = max(1.0 - abs(d - r) / 0.9, 0.0) * (1.0 - age);
+    float dot_ = max(1.0 - d / 1.2, 0.0) * (1.0 - smoothstep(0.0, 0.35, age));
+    float fade = smoothstep(0.0, 0.08, age) * clamp((chance - hv) / 0.08, 0.0, 1.0);
+    return max(ring, dot_) * fade;
+}
+
+// --- lightning ---
+//
+// The bolt: a jagged path in the vertical plane of the struck column, from above the frame
+// to the middle of the column's top face, with two forks, drawn as a thin near-white core
+// and a violet glow (its own halo: the bloom reads the walk's emission, not this pass).
+// Seeded by the strike, so every strike differs and one strike is the same on every frame.
+const int BOLT_SEGS = 18;
+const int FORK_SEGS = 5;
+// How far the path swings sideways a segment, as a share of the segment's height, and how
+// far each segment's middle kinks.
+const float BOLT_SWING = 0.5;
+const float BOLT_KINK = 0.18;
+
+float segDist(vec2 p, vec2 a, vec2 b) {
+    vec2 pa = p - a;
+    vec2 ba = b - a;
+    float t = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-4), 0.0, 1.0);
+    return length(pa - ba * t);
+}
+
+float boltHash(int i, int salt) {
+    uint h = cellHash(int(u.strikeL.x), int(u.strikeL.y), i, salt);
+    return float(h & 0xFFFFu) / 65535.0 - 0.5;
+}
+
+// The distance from p to the kinked segment a..b (its middle pushed sideways by `kink`).
+float kinkDist(vec2 p, vec2 a, vec2 b, float kink) {
+    vec2 m = 0.5 * (a + b) + vec2(kink, 0.0);
+    return min(segDist(p, a, m), segDist(p, m, b));
+}
+
+// The bolt's light at raster pixel p (linear, additive), or zero.
+vec3 boltAt(vec2 p) {
+    float Sf = float(S);
+    vec2 end = vec2(u.strikeK.x * Sf,
+                    float(BASE) - u.strikeK.z * float(RISE) - (u.strikeK.y + 1.0) * Sf
+                        - 0.5 * float(RISE));
+    // The copy of the strike nearest the pixel round the ring.
+    float ringPx = float(W) * Sf;
+    end.x += ringPx * floor((p.x - end.x) / ringPx + 0.5);
+    if (abs(p.x - end.x) > 24.0 * Sf || p.y > end.y + 2.0 * Sf) { return vec3(0.0); }
+    vec2 top = vec2(end.x + boltHash(0, 192) * 8.0 * Sf, -0.03 * float(u.extent.w));
+    float segH = (end.y - top.y) / float(BOLT_SEGS);
+    float swing = BOLT_SWING * segH * 2.0;
+    // A random walk sideways from the top, bent so that it ends on the strike.
+    float drift = 0.0;
+    for (int j = 1; j <= BOLT_SEGS; ++j) { drift += boltHash(j, 190) * swing; }
+    int forkAt0 = 3 + int((boltHash(0, 193) + 0.5) * 5.0);
+    int forkAt1 = forkAt0 + 3 + int((boltHash(1, 193) + 0.5) * 5.0);
+    vec2 fork0 = top;
+    vec2 fork1 = top;
+    float d = 1e9;
+    vec2 a = top;
+    float walk = 0.0;
+    for (int i = 1; i <= BOLT_SEGS; ++i) {
+        walk += boltHash(i, 190) * swing;
+        float f = float(i) / float(BOLT_SEGS);
+        float y = top.y + segH * float(i);
+        if (i < BOLT_SEGS) { y += boltHash(i, 191) * 0.5 * segH; }
+        vec2 b = vec2(top.x + walk + (end.x - top.x - drift) * f, y);
+        // Skip segments far from the pixel: only the distance to near ones matters.
+        if (abs(p.y - 0.5 * (a.y + b.y)) < segH + 2.0 * Sf) {
+            d = min(d, kinkDist(p, a, b, boltHash(i, 197) * 2.0 * BOLT_KINK * segH));
+        }
+        if (i == forkAt0) { fork0 = b; }
+        if (i == forkAt1) { fork1 = b; }
+        a = b;
+    }
+    // Two forks, weaker, thinning toward their ends.
+    float fd = 1e9;
+    for (int f = 0; f < 2; ++f) {
+        float side = boltHash(f, 194) < 0.0 ? -1.0 : 1.0;
+        vec2 fa = f == 0 ? fork0 : fork1;
+        for (int j = 1; j <= FORK_SEGS; ++j) {
+            vec2 fb = fa + vec2(side * (0.3 + 0.9 * (boltHash(10 * f + j, 195) + 0.5)) * 0.6 * segH,
+                                segH * (0.45 + 0.4 * (boltHash(10 * f + j, 196) + 0.5)));
+            fd = min(fd, kinkDist(p, fa, fb, boltHash(10 * f + j, 198) * 0.3 * segH)
+                             + float(j) * 0.4);
+            fa = fb;
+        }
+    }
+    float w = max(0.75, Sf / 9.0);
+    float core = clamp(w + 0.5 - d, 0.0, 1.0) + 0.55 * clamp(0.5 * w + 0.5 - fd, 0.0, 1.0);
+    float glow = exp(-d / (0.9 * Sf)) + 0.4 * exp(-fd / (0.6 * Sf));
+    vec3 coreC = vec3(0.92, 0.9, 1.0);
+    vec3 glowC = mix(u.lightC.rgb, vec3(0.62, 0.42, 1.0), 0.6);
+    return u.strikeK.w * (2.2 * core * coreC + 0.6 * glow * glowC);
+}
+
+// --- the weather pass ---
+
+// Premultiplied "over": a layer of colour `lc` and coverage `la` in front of (c, a).
+void over(inout vec3 c, inout float a, vec3 lc, float la) {
+    c = c * (1.0 - la) + lc * la;
+    a = a + la * (1.0 - a);
+}
+
+// What the weather lays over the raster at pixel px, premultiplied (colour, coverage): fog
+// (unless the volumetric march carries it), the rain's haze, splashes, the streaks far to
+// near, then the bolt, added.
+vec4 weatherOver(ivec2 px) {
+    float zEnd = floor(texelFetch(depthTex, px, 0).a * 255.0 + 0.5);
+    float k = float(RISE) / float(S);
+    float xw = (float(px.x) + 0.5) / float(S);
+    float y0 = (float(BASE - px.y - 1) + 0.5) / float(S);
+    int x = px.x / S;
+    vec3 c = vec3(0.0);
+    float a = 0.0;
+
+    if (!VOLUMETRIC && u.fogK.x > 0.0) {
+        float n = fogNoiseFor(xw, y0, k, zEnd);
+        float t = exp(-fogDepth(y0, k, zEnd, n));
+        if (t < 0.999) {
+            // The light it sends back: the ambient and the sun, and near an emitter its glow.
+            vec3 fl = u.fogC.rgb + u.rainC.w * u.dayL.y * u.sunLean.rgb;
+            if (GLOW && u.fogC.w > 0.0) {
+                float zg = max(zEnd - 1.5, 0.5);
+                fl += u.fogC.w * glowAt(vec3(xw, max(y0 - k * zg, 0.5), zg));
+            }
+            over(c, a, fl, 1.0 - t);
+        }
+    }
+
+    float wsum = u.rainK.x + u.rainK.y + u.rainK.z;
+    if (wsum > 0.0) {
+        float depth = min(zEnd, float(D)) / float(max(D, 1));
+        float gust = u.rainK.z > 0.0 ? gustAt(xw - 0.24 * y0) : 1.0;
+        // The rain's own haze over the depth of the scene.
+        float veil = dot(u.rainK.xyz, RAIN_VEIL * vec3(1.0, 1.0, gust)) * depth;
+        if (veil > 0.0) { over(c, a, hazed(u.rainC.rgb, 0.5), veil); }
+        // Splashes where the ray ended on an open solid top.
+        int zi = int(zEnd);
+        if (zi < D) {
+            int q = BASE - zi * RISE - px.y - 1;
+            int level = q >= 0 ? q / S : -1;
+            int r = q - level * S;
+            if (level >= 1 && r < RISE && level - 1 < H && solidAt(x, level - 1, zi)
+                && !(level < H && solidAt(x, level, zi)) && roofGap(x, level - 1, zi) == 0) {
+                vec2 w = vec2(xw, float(zi) + 1.0 - (float(RISE - 1 - r) + 0.5) / float(RISE));
+                float sp = max(splashAt(w, 0), splashAt(w, 1));
+                if (sp > 0.0) {
+                    vec3 sc = hazed(mix(u.rainC.rgb, vec3(u.dayL.x), 0.15), hazeAt(zEnd));
+                    over(c, a, sc, 0.5 * sp);
+                }
+            }
+        }
+        // The streaks, far layers first.
+        for (int l = 2; l >= 0; --l) {
+            float zl = RAIN_DEPTH[l] * float(D);
+            if (zEnd <= zl || !rainOpen(x, y0, k, zl)) { continue; }
+            vec3 rc = hazed(u.rainC.rgb, hazeAt(zl));
+            for (int m = 0; m < 3; ++m) {
+                float wm = u.rainK[m];
+                if (wm <= 0.0) { continue; }
+                float st = rainStreak(float(px.x), float(px.y), m, l);
+                if (st <= 0.0) { continue; }
+                float g = m == 2 ? gust : 1.0;
+                over(c, a, rc, clamp(st * wm * g * RAIN_ALPHA[m] * RAIN_LAYER_ALPHA[l], 0.0, 1.0));
+            }
+        }
+    }
+
+    if (u.strikeK.w > 0.0 && zEnd >= u.strikeK.z) {
+        c += boltAt(vec2(px) + 0.5);
+    }
+    return vec4(c, a);
+}
+
+// The flat tier's rain (the panel's): one layer of streaks, the heaviest mode's look, in the
+// rain's colour over the whole picture, faded by the modes' weights; on the look's clock,
+// which the flat tier moves once a tick, so it redraws no more often than it did.
+vec3 flatRain(int px, int py, vec3 colour) {
+    float wsum = u.rainK.x + u.rainK.y + u.rainK.z;
+    int m = u.rainK.z >= max(u.rainK.x, u.rainK.y) ? 2 : (u.rainK.y >= u.rainK.x ? 1 : 0);
+    float st = rainStreak(float(px), float(py), m, 0);
+    if (st <= 0.0) { return colour; }
+    return mix(colour, u.rainC.rgb, clamp(st * min(wsum, 1.0) * RAIN_ALPHA[m] * 0.8, 0.0, 1.0));
+}
+
+#include "volumetric.glsl"
 
 void main() {
     S = u.geom.x;
@@ -1601,6 +2264,16 @@ void main() {
     D = u.extent.z;
 
     ivec2 px = ivec2(gl_FragCoord.xy);
+    if (WEATHER) {
+        PX = px.x;
+        PY = px.y;
+        outColour = weatherOver(px);
+        return;
+    }
+    if (SKY) {
+        outColour = litSky(px.x, px.y);
+        return;
+    }
     int x = px.x / S;
     int dx = px.x - x * S;
 
@@ -1612,7 +2285,9 @@ void main() {
         waterLitReset();
     }
 
-    for (int z = 0; z < D; ++z) {
+    // The slab the walk ends in outlives the walk: the light shafts stop there.
+    int z = 0;
+    for (; z < D; ++z) {
         int q = BASE - z * RISE - px.y - 1;
         // q falls by `rise` a slab: once the pixel is below this slab's y = 0 front face
         // it is below every deeper slab's too.
@@ -1721,37 +2396,32 @@ void main() {
         emitted = -trans - 1.0;
         trans = vec3(0.0);
     }
-    emitOut = vec4(emitted, 1.0);
 
     // The presenter clears to the sky and paints over it; front to back, the sky is
     // whatever light is left.
     vec3 sky = skyColor(px.x, px.y);
-    vec3 colour = acc + trans * sky;
+    // The brightest stars' share of the bloom (the sky pass's alpha, `[light] star_bloom`),
+    // through whatever is in front of them.
+    if (LIT && u.dayB.w > 0.0) { emitted += trans * sky * texelFetch(backdropTex, px, 0).a; }
+    // The weather pass's depth, in the emission's alpha (`WEATHER_DEPTH` only): the slab the
+    // ray ended in, or the water surface in front of it (the fog and the rain stop there).
+    int zEnd = LIT && wEntry >= 0 ? min(z, (wEntry >> 12) & 0xFFF) : z;
+    emitOut = vec4(emitted, WEATHER_DEPTH ? float(min(zEnd, 255)) / 255.0 : 1.0);
+    // The flat tier has no light to scale: its day and night are a tint over the world (1
+    // by day), under the sky's own gradient.
+    vec3 colour = (LIT ? acc : acc * u.tint.rgb) + trans * sky;
     if (LIT && wEntry >= 0) { colour = litWaterFinish(colour); }
+    if (LIT && VOLUMETRIC) {
+        // Through the open air in front of the walk's end, and never past a water surface;
+        // fog in that air also hides what is behind it.
+        vec4 sc = inScatter(zEnd);
+        colour = colour * sc.a + sc.rgb;
+    }
     outColour = vec4(colour, 1.0);
 
-    // Falling rain animation streaks when active
-    if (u.knobs.w > 0.0) {
-        int tick = int(u.knobs.w);
-        int speed = 4;
-        vec3 rainC = u.waterSurfaceC.rgb;
-        for (int len = 0; len < 4; ++len) {
-            int c = px.x - (len / 2);
-            uint hash = ((uint(c) * 1664525u + 1013904223u) >> 16);
-            if ((hash % 5u) == 0u) {
-                int streakLen = 3 + int(hash & 1u);
-                if (len < streakLen) {
-                    int yOffset = int((uint(tick * speed) + hash) % 32u);
-                    int period = 32 + int(hash % 16u);
-                    int r = (px.y - len - yOffset) % period;
-                    if (r < 0) { r += period; }
-                    if (r == 0) {
-                        float a = (len == streakLen - 1) ? 0.40 : 0.20;
-                        outColour.rgb = mix(outColour.rgb, rainC, a);
-                        break;
-                    }
-                }
-            }
-        }
+    // The flat tier's rain: streaks over the whole picture (the lit tier's are the weather
+    // pass's, depth-aware).
+    if (!LIT && u.rainK.x + u.rainK.y + u.rainK.z > 0.0) {
+        outColour.rgb = flatRain(px.x, px.y, outColour.rgb);
     }
 }

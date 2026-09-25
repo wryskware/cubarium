@@ -31,7 +31,9 @@
 //! 6. **Per stand**, in site order: §4.1–4.4 income, maintenance and growth, §4.5
 //!    senescence, §4.6 dieback, §4.7 death. These three subphases are purely local once
 //!    light and water are in hand, so running them per stand in one pass is the same
-//!    arithmetic as three passes over every stand.
+//!    arithmetic as three passes over every stand — and chunks of stands run side by side,
+//!    each stand's ledger lines folded afterwards in site order, so the ledger adds the
+//!    same numbers in the same order (`grow`).
 //! 7. **Decomposition** (§5), on the stocks the site held *before* this tick: litter,
 //!    dead wood and carrion respire their organic matter out of the system and release
 //!    their mineral to the site's pool at the same fraction; each pool's energy leaves as
@@ -113,9 +115,7 @@
 
 use cubarium_voxel::{Command as WorldCommand, DT, Material, VoxelView, World};
 
-use crate::{
-    Flora, FloraConfig, FloraLedger, Ground, Site, SpeciesConfig, Stand, Taken, Trophic,
-};
+use crate::{Flora, FloraConfig, FloraLedger, Ground, Site, SpeciesConfig, Stand, Taken, Trophic};
 
 /// Stream keys, so two draws in one tick cannot be the same draw. One per rule that
 /// draws; the seed bank's and dispersal's are drawn in `seeds.rs`.
@@ -231,14 +231,15 @@ fn run(flora: &mut Flora, mut target: Target<'_>, threads: usize) {
         cubarium_voxel::voxel_phase!(Prune, { prune_unsupported(flora, world) });
         cubarium_voxel::voxel_phase!(SkyCache, { refresh_sky_cache(flora, world) });
         cubarium_voxel::voxel_phase!(Cover, { crate::cover::prep(flora, world) });
-        cubarium_voxel::voxel_phase!(Drown, { drown(flora, world) });
+        cubarium_voxel::voxel_phase!(Drown, { drown(flora, world, threads) });
 
         let light = cubarium_voxel::voxel_phase!(Light, { light_per_stand(flora, world, threads) });
         let moisture = cubarium_voxel::voxel_phase!(Drink, { drink(flora, &mut target, threads) });
         let world = target.world();
-        let substrate = cubarium_voxel::voxel_phase!(Feed, { feed(flora, world, &moisture) });
+        let substrate =
+            cubarium_voxel::voxel_phase!(Feed, { feed(flora, world, &moisture, threads) });
         cubarium_voxel::voxel_phase!(Grow, {
-            grow(flora, world, &light, &moisture, &substrate)
+            grow(flora, world, &light, &moisture, &substrate, threads)
         });
         cubarium_voxel::voxel_phase!(Cover, { crate::cover::grow(flora, world) });
         cubarium_voxel::voxel_phase!(Decompose, { decompose(flora, &pre) });
@@ -246,7 +247,7 @@ fn run(flora: &mut Flora, mut target: Target<'_>, threads: usize) {
         cubarium_voxel::voxel_phase!(Propagate, { crate::seeds::propagate(flora, world) });
         // Growth, dieback, deaths, falls and germinations have all happened: the cached
         // crowns follow the stands they now describe.
-        flora.refresh_crowns(Some(world));
+        cubarium_voxel::voxel_phase!(Crowns, { flora.refresh_crowns(Some(world)) });
         #[cfg(feature = "profile")]
         {
             use cubarium_voxel::profile::{Count, add};
@@ -403,9 +404,72 @@ pub(crate) fn sky_at(cache: &mut Vec<(Site, f64)>, view: &VoxelView<'_>, site: S
     }
 }
 
+/// [`sky_at`] for every stand, in `stands` order, in one pass: the stands and the cache
+/// are both site-sorted, so one merge walk finds every cached site, the missing sites'
+/// visibility is computed (split over `threads` when there are enough of them — a moved
+/// terrain misses every site), and they are merged in. The same values, and the same
+/// cache entries in the same order, as one [`sky_at`] per stand.
+pub(crate) fn sky_all(
+    cache: &mut Vec<(Site, f64)>,
+    view: &VoxelView<'_>,
+    stands: &[Stand],
+    threads: usize,
+) -> Vec<f64> {
+    let mut open = vec![0.0; stands.len()];
+    let mut missing: Vec<usize> = Vec::new();
+    let mut k = 0;
+    for (i, s) in stands.iter().enumerate() {
+        while k < cache.len() && cache[k].0 < s.site {
+            k += 1;
+        }
+        if k < cache.len() && cache[k].0 == s.site {
+            open[i] = cache[k].1;
+        } else {
+            missing.push(i);
+        }
+    }
+    if missing.is_empty() {
+        return open;
+    }
+    #[cfg(feature = "profile")]
+    cubarium_voxel::profile::add(
+        cubarium_voxel::profile::Count::SkyRays,
+        missing.len() as u64,
+    );
+    let values: Vec<f64> = for_chunks(
+        missing.len(),
+        threads,
+        &mut Vec::new(),
+        || (),
+        |r, _| {
+            r.map(|m| {
+                let site = stands[missing[m]].site;
+                view.sky_visibility(site.x as i64, site.y, site.z)
+            })
+            .collect::<Vec<f64>>()
+        },
+    )
+    .concat();
+    let old = std::mem::take(cache);
+    cache.reserve(old.len() + missing.len());
+    let mut fresh = missing.iter().zip(&values).peekable();
+    for entry in old {
+        while let Some((&i, &v)) = fresh.next_if(|(i, _)| stands[**i].site < entry.0) {
+            open[i] = v;
+            cache.push((stands[i].site, v));
+        }
+        cache.push(entry);
+    }
+    for (&i, &v) in fresh {
+        open[i] = v;
+        cache.push((stands[i].site, v));
+    }
+    open
+}
+
 // ----------------------------------------------------------------- 3. drowning
 
-fn drown(flora: &mut Flora, world: &World) {
+fn drown(flora: &mut Flora, world: &World, threads: usize) {
     let Flora {
         config,
         stands,
@@ -414,13 +478,25 @@ fn drown(flora: &mut Flora, world: &World) {
         ..
     } = flora;
     let view = world.view();
-    let mut doomed: Vec<usize> = Vec::new();
-    for (i, stand) in stands.iter().enumerate() {
-        let limit = config.species(stand.species).drown_depth_m;
-        if view.water_depth_m(stand.site.x as i64, stand.site.y, stand.site.z) > limit {
-            doomed.push(i);
-        }
-    }
+    // Who drowns is a read per stand, split over threads; the deaths are booked in order.
+    let doomed: Vec<usize> = {
+        let (config, stands, view) = (&*config, &stands[..], &view);
+        for_chunks(
+            stands.len(),
+            threads,
+            &mut Vec::new(),
+            || (),
+            |r, _| {
+                r.filter(|&i| {
+                    let stand = &stands[i];
+                    let limit = config.species(stand.species).drown_depth_m;
+                    view.water_depth_m(stand.site.x as i64, stand.site.y, stand.site.z) > limit
+                })
+                .collect::<Vec<usize>>()
+            },
+        )
+        .concat()
+    };
     for &i in doomed.iter().rev() {
         die(config, &view, &stands[i], ground, ledger);
     }
@@ -510,12 +586,30 @@ fn light_per_stand(flora: &mut Flora, world: &World, threads: usize) -> Vec<f64>
     let view = world.view();
     let voxel_m = view.config.voxel_m;
     // Every stand's foliage layers, flat: stand `j`'s are `layers[span[j].0..span[j].1]`.
-    let mut layers: Vec<Shade> = Vec::with_capacity(stands.len() * 2);
+    // Built per chunk of stands and joined in stand order: each stand's layers are its
+    // own arithmetic, so the split changes nothing.
+    let parts = for_chunks(
+        stands.len(),
+        threads,
+        &mut Vec::new(),
+        || (),
+        |r, _| {
+            let mut layers: Vec<Shade> = Vec::with_capacity(r.len() * 2);
+            let mut span: Vec<(u32, u32)> = Vec::with_capacity(r.len());
+            for s in &stands[r] {
+                let from = layers.len() as u32;
+                shade_layers_into(config, s, voxel_m, &mut layers);
+                span.push((from, layers.len() as u32));
+            }
+            (layers, span)
+        },
+    );
+    let mut layers: Vec<Shade> = Vec::with_capacity(parts.iter().map(|p| p.0.len()).sum());
     let mut span: Vec<(u32, u32)> = Vec::with_capacity(stands.len());
-    for s in stands.iter() {
-        let from = layers.len() as u32;
-        shade_layers_into(config, s, voxel_m, &mut layers);
-        span.push((from, layers.len() as u32));
+    for (l, sp) in parts {
+        let base = layers.len() as u32;
+        span.extend(sp.into_iter().map(|(a, b)| (a + base, b + base)));
+        layers.extend(l);
     }
     // A conservative bound per **stand**, so the pair loop below stays the O(n²) it was
     // before layers instead of O(n² · layers²): no layer of a stand can shade above the
@@ -538,10 +632,16 @@ fn light_per_stand(flora: &mut Flora, world: &World, threads: usize) -> Vec<f64>
     // in the world. The buckets hold stand indices in ascending order, which is the order
     // the full sweep visited them in: the same factors multiply in the same order, and
     // the result is the full sweep's to the bit (`the_bucketed_light_is_the_full_sweep`).
-    let index = ShadeIndex::build(stands, &envelope, view.config.width, view.config.depth);
+    let index = ShadeIndex::build(
+        stands,
+        &envelope,
+        view.config.width,
+        view.config.depth,
+        threads,
+    );
 
-    // The sky first, serially: it is the one read that fills a cache.
-    let open: Vec<f64> = stands.iter().map(|s| sky_at(sky, &view, s.site)).collect();
+    // The sky first, in one pass: it is the one read that fills a cache.
+    let open: Vec<f64> = sky_all(sky, &view, stands, threads);
     let stands = &stands[..];
     let receive = |i: usize| -> f64 {
         let stand = &stands[i];
@@ -620,25 +720,83 @@ struct Candidate {
 /// Every stand filed under each bucket of `SHADE_BUCKET²` columns that its widest layer's
 /// footprint reaches, in ascending stand order: a superset of the stands that can shade any
 /// receiver in that bucket, and exactly the stands the full sweep would not have skipped
-/// on its envelope test. Stored flat (CSR): bucket `b`'s stands are
-/// `stands[start[b]..start[b + 1]]`.
+/// on its envelope test. Stored flat (CSR) per **segment** of bucket rows: bucket `b` of a
+/// segment holds `stands[start[b]..start[b + 1]]`. The segments are built side by side,
+/// each walking every stand in order and filing only its own rows, so a bucket's stands are
+/// the one-segment build's, in the same order.
 struct ShadeIndex {
     nbx: usize,
+    /// Bucket rows per segment.
+    rows: usize,
+    segments: Vec<ShadeSegment>,
+}
+
+/// One segment of a [`ShadeIndex`]: its buckets' stands, CSR.
+struct ShadeSegment {
     start: Vec<u32>,
     stands: Vec<Candidate>,
 }
 
 impl ShadeIndex {
-    fn build(stands: &[Stand], envelope: &[(f64, f64)], width: u32, depth: u32) -> ShadeIndex {
+    fn build(
+        stands: &[Stand],
+        envelope: &[(f64, f64)],
+        width: u32,
+        depth: u32,
+        threads: usize,
+    ) -> ShadeIndex {
         let b = SHADE_BUCKET as usize;
         let nbx = (width as usize).div_ceil(b).max(1);
         let nbz = (depth as usize).div_ceil(b).max(1);
+        // One segment on one thread; with more, twice as many as threads, so an uneven
+        // row does not hold the rest up. Small plains are not worth splitting.
+        let segments = if chunk_count(stands.len(), threads) > 1 {
+            (2 * threads).min(nbz)
+        } else {
+            1
+        };
+        let rows = nbz.div_ceil(segments);
+        let segments = nbz.div_ceil(rows);
+        let segments = par_map(segments, threads, |seg| {
+            let lo = seg * rows;
+            let hi = ((seg + 1) * rows).min(nbz);
+            ShadeSegment::build(stands, envelope, width, depth, nbx, lo..hi)
+        });
+        ShadeIndex {
+            nbx,
+            rows,
+            segments,
+        }
+    }
+
+    /// The stands filed under `site`'s bucket, ascending.
+    fn near(&self, site: Site) -> &[Candidate] {
+        let b = SHADE_BUCKET as usize;
+        let bz = site.z as usize / b;
+        let seg = &self.segments[bz / self.rows];
+        let k = (bz % self.rows) * self.nbx + site.x as usize / b;
+        &seg.stands[seg.start[k] as usize..seg.start[k + 1] as usize]
+    }
+}
+
+impl ShadeSegment {
+    /// The buckets of rows `bz`, from every stand in ascending order.
+    fn build(
+        stands: &[Stand],
+        envelope: &[(f64, f64)],
+        width: u32,
+        depth: u32,
+        nbx: usize,
+        bz: std::ops::Range<usize>,
+    ) -> ShadeSegment {
+        let b = SHADE_BUCKET as usize;
         let w = i64::from(width.max(1));
         let d = i64::from(depth.max(1));
-        // (bucket, stand) for every bucket a stand's footprint touches, generated in
-        // ascending stand order. A footprint of radius `r` cells holds the receiver
-        // columns at integer offsets `|dx|, |dz| <= floor(r)` — the envelope test compares
-        // integer offsets against `r²` — with `x` wrapped and `z` clipped.
+        let buckets = bz.len() * nbx;
+        // (bucket, stand) for every bucket of these rows a stand's footprint touches,
+        // generated in ascending stand order. A footprint of radius `r` cells holds the
+        // receiver columns at integer offsets `|dx|, |dz| <= floor(r)` — the envelope test
+        // compares integer offsets against `r²` — with `x` wrapped and `z` clipped.
         let mut pairs: Vec<(u32, u32)> = Vec::new();
         let mut seen = vec![u32::MAX; nbx];
         let mut xs: Vec<usize> = Vec::with_capacity(nbx);
@@ -653,6 +811,12 @@ impl ShadeIndex {
             } else {
                 w
             };
+            let z0 = i64::from(stand.site.z);
+            let lo = ((z0 - reach).clamp(0, d - 1) as usize / b).max(bz.start);
+            let hi = ((z0 + reach).clamp(0, d - 1) as usize / b).min(bz.end - 1);
+            if lo > hi {
+                continue;
+            }
             xs.clear();
             if 2 * reach + 1 >= w {
                 xs.extend(0..nbx);
@@ -666,21 +830,18 @@ impl ShadeIndex {
                     }
                 }
             }
-            let z0 = i64::from(stand.site.z);
-            let lo = (z0 - reach).clamp(0, d - 1) as usize / b;
-            let hi = (z0 + reach).clamp(0, d - 1) as usize / b;
-            for bz in lo..=hi {
+            for row in lo..=hi {
                 for &bx in &xs {
-                    pairs.push(((bz * nbx + bx) as u32, j as u32));
+                    pairs.push((((row - bz.start) * nbx + bx) as u32, j as u32));
                 }
             }
         }
         // A stable counting sort by bucket keeps each bucket's stands ascending.
-        let mut start = vec![0u32; nbx * nbz + 1];
+        let mut start = vec![0u32; buckets + 1];
         for &(k, _) in &pairs {
             start[k as usize + 1] += 1;
         }
-        for k in 0..nbx * nbz {
+        for k in 0..buckets {
             start[k + 1] += start[k];
         }
         let mut fill = start.clone();
@@ -704,19 +865,34 @@ impl ShadeIndex {
             };
             fill[k as usize] += 1;
         }
-        ShadeIndex {
-            nbx,
+        ShadeSegment {
             start,
             stands: filed,
         }
     }
+}
 
-    /// The stands filed under `site`'s bucket, ascending.
-    fn near(&self, site: Site) -> &[Candidate] {
-        let b = SHADE_BUCKET as usize;
-        let k = (site.z as usize / b) * self.nbx + site.x as usize / b;
-        &self.stands[self.start[k] as usize..self.start[k + 1] as usize]
+/// `f(0..k)` over up to `threads` workers of the compute pool (the `parallel` feature), in
+/// index order.
+fn par_map<T: Send + 'static>(k: usize, threads: usize, f: impl Fn(usize) -> T + Sync) -> Vec<T> {
+    #[cfg(feature = "parallel")]
+    if threads > 1 && k > 1 {
+        let pool = bevy_tasks::ComputeTaskPool::get_or_init(|| {
+            bevy_tasks::TaskPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+        });
+        let f = &f;
+        let mut parts: Vec<(usize, T)> = pool.scope(|scope| {
+            for i in 0..k {
+                scope.spawn(async move { (i, f(i)) });
+            }
+        });
+        parts.sort_by_key(|&(i, _)| i);
+        return parts.into_iter().map(|(_, t)| t).collect();
     }
+    let _ = threads;
+    (0..k).map(f).collect()
 }
 
 /// One foliage layer as the shade model sees it: where its top is, what it covers, and
@@ -740,8 +916,7 @@ struct Shade {
 /// A stand's foliage layers as the shade model sees them, appended to `out`.
 fn shade_layers_into(config: &FloraConfig, stand: &Stand, voxel_m: f64, out: &mut Vec<Shade>) {
     out.extend(
-        crate::layers_of(config, stand, voxel_m)
-            .into_iter()
+        crate::layer_iter(config, stand, voxel_m)
             .filter(|l| l.kind.bears_foliage())
             .map(|l| Shade {
                 x: stand.site.x as f64,
@@ -860,15 +1035,74 @@ pub(crate) struct DrinkScratch {
     receipts: Vec<f64>,
 }
 
+/// Cells per **band** of the drink's per-cell scratch: the wants are filed by band as they
+/// are read, so the per-voxel totals and the plan split over bands, and a stand's shares
+/// are credited band by band. A fixed partition, the same at every thread count; a
+/// multiple of 64, so a band owns whole words of the touched bits.
+const DRINK_BAND: usize = 1 << 14;
+
 /// What one chunk of stands read out of its root boxes.
 #[derive(Default)]
 struct DrinkChunk {
     /// The chunk's own stands' [`Drink`]s, in stand order.
     out: Vec<Drink>,
-    /// (voxel, stand, wanted), in stand order.
-    wants: Vec<(u32, u32, f64)>,
+    /// (voxel, stand, wanted) per [`DRINK_BAND`] of voxels, each in stand order.
+    bands: Vec<Vec<(u32, u32, f64)>>,
     box_: Vec<usize>,
     drinkable: Vec<f64>,
+}
+
+impl DrinkChunk {
+    /// Every want of the chunk, band by band.
+    fn wants(&self) -> impl Iterator<Item = &(u32, u32, f64)> {
+        self.bands.iter().flatten()
+    }
+}
+
+/// `f(band, its cells, its touched words)` for every [`DRINK_BAND`] of the scratch, split
+/// over up to `threads` workers of the compute pool (the `parallel` feature). The bands are
+/// disjoint, so the split is free.
+fn for_bands<F>(cell: &mut [[f64; 2]], touched: &mut [u64], threads: usize, f: F)
+where
+    F: Fn(usize, &mut [[f64; 2]], &mut [u64]) + Sync,
+{
+    let bands: Vec<(usize, &mut [[f64; 2]], &mut [u64])> = cell
+        .chunks_mut(DRINK_BAND)
+        .zip(touched.chunks_mut(DRINK_BAND / 64))
+        .enumerate()
+        .map(|(b, (c, t))| (b, c, t))
+        .collect();
+    #[cfg(feature = "parallel")]
+    if threads > 1 && bands.len() > 1 {
+        let pool = bevy_tasks::ComputeTaskPool::get_or_init(|| {
+            bevy_tasks::TaskPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+        });
+        // More groups than workers, so one dense band does not hold the rest up.
+        let groups = (4 * threads).min(bands.len());
+        let per = bands.len().div_ceil(groups);
+        let f = &f;
+        let mut bands = bands.into_iter();
+        pool.scope(|scope| {
+            loop {
+                let group: Vec<_> = bands.by_ref().take(per).collect();
+                if group.is_empty() {
+                    break;
+                }
+                scope.spawn(async move {
+                    for (b, c, t) in group {
+                        f(b, c, t);
+                    }
+                });
+            }
+        });
+        return;
+    }
+    let _ = threads;
+    for (b, c, t) in bands {
+        f(b, c, t);
+    }
 }
 
 impl DrinkScratch {
@@ -891,26 +1125,67 @@ fn read_root_box(
     box_: &mut Vec<usize>,
     drinkable: &mut Vec<f64>,
 ) -> (f64, f64, usize) {
-    root_box_into(view, site, sc, box_);
+    box_.clear();
     drinkable.clear();
-    let volume = view.config.voxel_volume();
+    let (rooting_depth, rooting_radius) = (sc.rooting_depth, sc.rooting_radius);
+    #[cfg(feature = "profile")]
+    cubarium_voxel::profile::add(
+        cubarium_voxel::profile::Count::BoxVoxels,
+        u64::from(rooting_depth.min(site.y + 1))
+            * u64::from(2 * rooting_radius + 1)
+            * u64::from(2 * rooting_radius + 1),
+    );
     let (mut water, mut band, mut saturated) = (0.0, 0.0, 0usize);
-    for &i in box_.iter() {
-        let m = view.material[i];
-        let pore = view.pore[i];
-        let w = (m.field_capacity() - m.wilting_point()).max(0.0) * m.pore_capacity();
-        water += available_water(m, pore) * w;
-        band += w;
-        if pore >= sc.saturated_pore {
-            saturated += 1;
+    let c = view.config;
+    let span = rooting_depth.min(site.y + 1);
+    if span == 0 {
+        return (water, band, saturated);
+    }
+    // A root box holds soil cells only, so every cell's material constants are soil's:
+    // the same numbers the per-cell reads took, looked up once.
+    let m = Material::Soil;
+    let (wp, cap) = (m.wilting_point(), m.pore_capacity());
+    let w = (m.field_capacity() - wp).max(0.0) * cap;
+    let volume = c.voxel_volume();
+    // [`root_box_dims_into`]'s walk, reading each soil cell as it is found: the same
+    // cells in the same order, one pass instead of two.
+    let y_lo = site.y + 1 - span;
+    let r = rooting_radius as i64;
+    let width = c.width as usize;
+    let x_west = (site.x as i64 - r).rem_euclid(c.width as i64) as usize;
+    let row_len = (2 * r + 1) as usize;
+    for dz in -r..=r {
+        let z = site.z as i64 + dz;
+        if z < 0 || z >= c.depth as i64 {
+            continue;
         }
-        drinkable.push((pore - m.wilting_point()).max(0.0) * m.pore_capacity() * volume);
+        for y in y_lo..=site.y {
+            let row = (y as usize * c.depth as usize + z as usize) * width;
+            let mut x = x_west;
+            for _ in 0..row_len {
+                let i = row + x;
+                if view.material[i] == Material::Soil {
+                    let pore = view.pore[i];
+                    water += available_water(m, pore) * w;
+                    band += w;
+                    if pore >= sc.saturated_pore {
+                        saturated += 1;
+                    }
+                    box_.push(i);
+                    drinkable.push((pore - wp).max(0.0) * cap * volume);
+                }
+                x += 1;
+                if x == width {
+                    x = 0;
+                }
+            }
+        }
     }
     (water, band, saturated)
 }
 
 /// Step 5's read for stands `range`: each one's moisture, saturation and demand, and its
-/// demand shared over its box into `chunk.wants`.
+/// demand shared over its box into `chunk.bands`.
 fn drink_read(
     flora: &Flora,
     view: &VoxelView<'_>,
@@ -919,12 +1194,16 @@ fn drink_read(
 ) {
     let DrinkChunk {
         out,
-        wants,
+        bands,
         box_,
         drinkable,
     } = chunk;
     out.clear();
-    wants.clear();
+    let nb = view.config.cells().div_ceil(DRINK_BAND);
+    bands.resize_with(nb, Vec::new);
+    for b in bands.iter_mut() {
+        b.clear();
+    }
     for i in range {
         let stand = &flora.stands[i];
         let sc = flora.config.species(stand.species);
@@ -964,7 +1243,7 @@ fn drink_read(
         for (&v, &d) in box_.iter().zip(drinkable.iter()) {
             let share = demand * d / stock;
             if share > 0.0 {
-                wants.push((v as u32, i as u32, share));
+                bands[v / DRINK_BAND].push((v as u32, i as u32, share));
             }
         }
     }
@@ -1001,16 +1280,21 @@ fn drink_with(
         });
     }
     *used = chunk_count(n, threads);
-    // Each voxel's total, summed in ascending stand order: the chunks are in stand order.
-    for chunk in chunks.iter().take(*used) {
-        for &(v, _, share) in chunk.wants.iter() {
-            let v = v as usize;
-            touched[v / 64] |= 1 << (v % 64);
-            cell[v][0] += share;
-        }
+    // Each voxel's total, summed in ascending stand order: the chunks are in stand order,
+    // and every want on a voxel is in that voxel's band. Band by band, over threads.
+    {
+        let chunks = &chunks[..*used];
+        for_bands(cell, touched, threads, |b, cell, touched| {
+            let base = b * DRINK_BAND;
+            for chunk in chunks {
+                for &(v, _, share) in &chunk.bands[b] {
+                    let v = v as usize - base;
+                    touched[v / 64] |= 1 << (v % 64);
+                    cell[v][0] += share;
+                }
+            }
+        });
     }
-    // Then the latticevines' demands, in vine order, into the same totals: a vine and a
-    // stand over one cell share its one withdrawal.
     {
         let view = target.world().view();
         crate::cover::drink_wants(flora, &view, vine_box, vine_drinkable, vine_wants);
@@ -1022,18 +1306,20 @@ fn drink_with(
     }
 
     // One bounded withdrawal per voxel, in ascending voxel order — or, against a read
-    // copy, the same bound planned and held for the settle.
-    for (word_at, word) in touched.iter().enumerate() {
-        let mut bits = *word;
-        while bits != 0 {
-            let voxel = word_at * 64 + bits.trailing_zeros() as usize;
-            bits &= bits - 1;
-            // Never below the wilting point, however many stands asked: the voxel's first
-            // and only withdrawal this tick, so the reading is still the pre-withdrawal one.
-            let volume = cell[voxel][0].min(drinkable_m3(&target.world().view(), voxel));
-            let got = match target {
-                // One bounded operation for the whole voxel, whatever asked for it.
-                Target::Now(world) => {
+    // copy, the same bound planned and held for the settle: a read of the copy per voxel,
+    // band by band over threads.
+    match target {
+        Target::Now(world) => {
+            for (word_at, word) in touched.iter().enumerate() {
+                let mut bits = *word;
+                while bits != 0 {
+                    let voxel = word_at * 64 + bits.trailing_zeros() as usize;
+                    bits &= bits - 1;
+                    // Never below the wilting point, however many stands asked: the
+                    // voxel's first and only withdrawal this tick, so the reading is still
+                    // the pre-withdrawal one.
+                    let volume = cell[voxel][0].min(drinkable_m3(&world.view(), voxel));
+                    // One bounded operation for the whole voxel, whatever asked for it.
                     let got = if volume > 0.0 {
                         let (x, y, z) = world.config().coords(voxel);
                         -world.apply(WorldCommand::WithdrawPore {
@@ -1046,23 +1332,35 @@ fn drink_with(
                         0.0
                     };
                     flora.ledger.transpired_m3 += got;
-                    got
+                    cell[voxel][1] = got;
                 }
-                Target::Planned(_) => volume.max(0.0),
-            };
-            cell[voxel][1] = got;
+            }
+        }
+        Target::Planned(world) => {
+            let view = world.view();
+            for_bands(cell, touched, threads, |b, cell, touched| {
+                let base = b * DRINK_BAND;
+                for (word_at, word) in touched.iter().enumerate() {
+                    let mut bits = *word;
+                    while bits != 0 {
+                        let local = word_at * 64 + bits.trailing_zeros() as usize;
+                        bits &= bits - 1;
+                        let volume = cell[local][0].min(drinkable_m3(&view, base + local));
+                        cell[local][1] = volume.max(0.0);
+                    }
+                }
+            });
         }
     }
-    // What each stand got: its own shares of what each of its voxels gave up.
     {
         // The same split as the read, so each chunk's `out` is its own stands'.
         let cell = &cell[..];
         for_chunks(n, threads, chunks, DrinkChunk::default, |range, chunk| {
             let first = range.start;
-            for &(v, stand, want) in chunk.wants.iter() {
+            let DrinkChunk { out, bands, .. } = chunk;
+            for &(v, stand, want) in bands.iter().flatten() {
                 let [total, got] = cell[v as usize];
-                chunk.out[stand as usize - first].taken_m3 +=
-                    split_proportional(got, want, total);
+                out[stand as usize - first].taken_m3 += split_proportional(got, want, total);
             }
         });
     }
@@ -1212,7 +1510,7 @@ pub(crate) fn finish(flora: &mut Flora, plan: DrinkPlan) {
             Some(split_proportional(planned, want, total) - split_proportional(got, want, total))
         };
         for chunk in chunks.iter().take(*used) {
-            for &(v, stand, want) in chunk.wants.iter() {
+            for &(v, stand, want) in chunk.wants() {
                 let Some(d) = debit(v, want) else { continue };
                 let (site, id) = stand_ids[stand as usize];
                 if let Ok(j) = flora.stands.binary_search_by_key(&site, |s| s.site)
@@ -1438,6 +1736,14 @@ pub(crate) fn ramp(value: f64, lo: f64, hi: f64) -> f64 {
 /// could not actually grow through it, exactly as [`crate::Reach`] is a box with no line of
 /// sight in it.
 fn mycelium_sites(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> Vec<Site> {
+    let mut out = Vec::new();
+    mycelium_sites_into(view, site, sc, &mut out);
+    out
+}
+
+/// [`mycelium_sites`] into a buffer the caller keeps: the same sites in the same order.
+fn mycelium_sites_into(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig, out: &mut Vec<Site>) {
+    out.clear();
     let c = view.config;
     let up_down = i64::from(sc.substrate_reach_up_down);
     let y_lo = (i64::from(site.y) - up_down).max(0) as u32;
@@ -1447,7 +1753,6 @@ fn mycelium_sites(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> Vec<S
     // Only a box wider than the world can meet a column twice (the `x` wrap); otherwise
     // every site generated is new and the dedup scan is skipped.
     let may_repeat = 2 * r + 1 > width;
-    let mut out: Vec<Site> = Vec::new();
     for dz in -r..=r {
         let z = site.z as i64 + dz;
         if z < 0 || z >= c.depth as i64 {
@@ -1463,7 +1768,6 @@ fn mycelium_sites(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> Vec<S
             }
         }
     }
-    out
 }
 
 /// The **substrate** a saprotroph's mycelium box holds — dead wood **and litter**, as the
@@ -1545,8 +1849,77 @@ pub(crate) fn substrate_in_box(
 /// to a stand, both inside this layer, so the only ledger term it touches is the
 /// per-species diagnostic [`FloraLedger::substrate_uptake`]; the organic matter the fungus
 /// does **not** keep is respired in [`grow`], where every other respiration is.
-fn feed(flora: &mut Flora, world: &World, drink: &[Drink]) -> Vec<Substrate> {
+fn feed(flora: &mut Flora, world: &World, drink: &[Drink], threads: usize) -> Vec<Substrate> {
     let mut out = vec![Substrate::default(); flora.stands.len()];
+    let view = world.view();
+    let index = GroundIndex::build(&flora.ground, view.config.width, view.config.depth);
+    // Every fungus's wants, gathered per chunk of stands in stand order: what each asks of
+    // each pool of its box. A read of the ground alone, so the chunks split cleanly.
+    let parts: Vec<Vec<Want>> = {
+        let Flora {
+            config,
+            stands,
+            ground,
+            ..
+        } = &*flora;
+        let (index, view) = (&index, &view);
+        for_chunks(
+            stands.len(),
+            threads,
+            &mut Vec::new(),
+            || (),
+            |range, _| {
+                let mut wants: Vec<Want> = Vec::new();
+                let mut sites: Vec<Site> = Vec::new();
+                let mut pools: Vec<(usize, Pool, f64)> = Vec::new();
+                for si in range {
+                    let stand = &stands[si];
+                    let sc = config.species(stand.species);
+                    if sc.trophic != Trophic::Saprotroph {
+                        continue;
+                    }
+                    let want =
+                        (sc.substrate_uptake_per_s * stand.wood * drink[si].moisture * DT).max(0.0);
+                    if !(want > 0.0) {
+                        continue;
+                    }
+                    pools.clear();
+                    mycelium_sites_into(view, stand.site, sc, &mut sites);
+                    for &s in &sites {
+                        if let Some(gi) = index.get(s) {
+                            for pool in [Pool::DeadWood, Pool::Litter] {
+                                let held = pool.held(&ground[gi]);
+                                if held > 0.0 {
+                                    pools.push((gi, pool, held));
+                                }
+                            }
+                        }
+                    }
+                    let total: f64 = pools.iter().map(|&(_, _, w)| w).sum();
+                    if !(total > 0.0) {
+                        continue;
+                    }
+                    for &(gi, pool, held) in &pools {
+                        let share = split_proportional(want, held, total);
+                        if share > 0.0 {
+                            wants.push(Want {
+                                gi,
+                                pool,
+                                si,
+                                want: share,
+                            });
+                        }
+                    }
+                }
+                wants
+            },
+        )
+    };
+    // Filed by `(site, pool)`: a stable counting sort of wants generated in ascending
+    // stand order is the sort by `(ground index, pool, stand)` — no stand asks one pool
+    // twice — so the withdrawal order is the ground's own site order, dead wood before
+    // litter at a site, and nothing depends on how the stands were reached or split.
+    let wants = file_by_pool(&parts, flora.ground.len());
     let Flora {
         config,
         stands,
@@ -1554,48 +1927,6 @@ fn feed(flora: &mut Flora, world: &World, drink: &[Drink]) -> Vec<Substrate> {
         ledger,
         ..
     } = flora;
-    let view = world.view();
-    let index = GroundIndex::build(ground, view.config.width, view.config.depth);
-    // Sorted, so the withdrawal order is the ground's own site order, dead wood before
-    // litter at a site, and nothing depends on how the stands were reached.
-    let mut wants: Vec<Want> = Vec::new();
-    for (si, stand) in stands.iter().enumerate() {
-        let sc = config.species(stand.species);
-        if sc.trophic != Trophic::Saprotroph {
-            continue;
-        }
-        let want = (sc.substrate_uptake_per_s * stand.wood * drink[si].moisture * DT).max(0.0);
-        if !(want > 0.0) {
-            continue;
-        }
-        let mut pools: Vec<(usize, Pool, f64)> = Vec::new();
-        for s in mycelium_sites(&view, stand.site, sc) {
-            if let Some(gi) = index.get(s) {
-                for pool in [Pool::DeadWood, Pool::Litter] {
-                    let held = pool.held(&ground[gi]);
-                    if held > 0.0 {
-                        pools.push((gi, pool, held));
-                    }
-                }
-            }
-        }
-        let total: f64 = pools.iter().map(|&(_, _, w)| w).sum();
-        if !(total > 0.0) {
-            continue;
-        }
-        for (gi, pool, held) in pools {
-            let share = split_proportional(want, held, total);
-            if share > 0.0 {
-                wants.push(Want {
-                    gi,
-                    pool,
-                    si,
-                    want: share,
-                });
-            }
-        }
-    }
-    wants.sort_unstable_by_key(|w| (w.gi, w.pool, w.si));
 
     // Reused across pools so a tick with many fungi allocates once.
     let mut shares: Vec<Taken> = Vec::new();
@@ -1624,6 +1955,43 @@ fn feed(flora: &mut Flora, world: &World, drink: &[Drink]) -> Vec<Substrate> {
     }
     for (si, stand) in stands.iter().enumerate() {
         ledger.substrate_uptake[stand.species.index()] += out[si].taken.organic;
+    }
+    out
+}
+
+/// [`feed`]'s wants, filed by `(ground index, pool)` and within one pool in the order the
+/// parts hold them.
+fn file_by_pool(parts: &[Vec<Want>], grounds: usize) -> Vec<Want> {
+    let key = |w: &Want| {
+        2 * w.gi
+            + match w.pool {
+                Pool::DeadWood => 0,
+                Pool::Litter => 1,
+            }
+    };
+    let n: usize = parts.iter().map(Vec::len).sum();
+    let mut out = Vec::with_capacity(n);
+    if n == 0 {
+        return out;
+    }
+    let mut start = vec![0u32; 2 * grounds + 1];
+    for w in parts.iter().flatten() {
+        start[key(w) + 1] += 1;
+    }
+    for k in 0..2 * grounds {
+        start[k + 1] += start[k];
+    }
+    let blank = Want {
+        gi: 0,
+        pool: Pool::DeadWood,
+        si: 0,
+        want: 0.0,
+    };
+    out.resize(n, blank);
+    for w in parts.iter().flatten() {
+        let k = key(w);
+        out[start[k] as usize] = *w;
+        start[k] += 1;
     }
     out
 }
@@ -1807,6 +2175,7 @@ fn grow(
     light: &[f64],
     drink: &[Drink],
     substrate: &[Substrate],
+    threads: usize,
 ) {
     let Flora {
         config,
@@ -1815,283 +2184,462 @@ fn grow(
         ledger,
         ..
     } = flora;
-    let mut dead: Vec<usize> = Vec::new();
+    // Every stand's ground slot first — a stand's growth draws on its site's pool and
+    // drops its litter there — then each stand's slot index. Both lists are site-sorted,
+    // so one walk finds them all, and a stand's slot index rises with its own.
+    ensure_slots(ground, stands);
+    let slots = slot_indices(ground, stands);
 
-    for si in 0..stands.len() {
-        let site = stands[si].site;
-        let species = stands[si].species;
-        let sc = config.species(species);
-        let e_v = sc.energy_density;
-        let gi = ground_slot(ground, site);
-
-        let (w0, p0, q0) = (stands[si].wood, stands[si].foliage, stands[si].reserve);
-        let l_eff = light[si];
-        let mu = drink[si].moisture;
-        stands[si].light = l_eff;
-        stands[si].moisture = mu;
-        stands[si].water_m3 = drink[si].taken_m3;
-
-        // ---- aeration stress, from the same pre-withdrawal read `μ` came from. It
-        // closes on the level the root box's saturated fraction asks for — up at
-        // `stress_rate_per_s`, down at `relax_rate_per_s`, both as a fraction of the
-        // gap per second — and it is applied to *this* tick's income: the water was read
-        // before anything was withdrawn, so the stress and the moisture describe one
-        // moment.
-        let saturated = drink[si].saturated;
-        let target = aeration_target(saturated, sc);
-        let was = stands[si].aeration_stress;
-        let stress = if target > was {
-            (was + sc.stress_rate_per_s * DT * (target - was)).clamp(0.0, 1.0)
-        } else if target < was {
-            (was - sc.relax_rate_per_s * DT * (was - target)).clamp(0.0, 1.0)
-        } else {
-            was
-        };
-        stands[si].aeration_stress = stress;
-
-        // ---- 4.1 potential income, 4.2 demands
-        //
-        // The mineral cap replaces v1's `.min(n0)`: income is organic matter, and what
-        // the pool limits is the *tissue* it can pay `n_tissue` per unit for, so the
-        // pool's own units bound `A` through `mineral / n_tissue`. The
-        // Michaelis-Menten and the `f_max` rate cap are unchanged.
-        //
-        // All three read the **site's** pool, and they gate the whole of `A` — including
-        // the part that pays maintenance. So a stand whose own tissue is rich in mineral
-        // still fixes nothing on a bare pool, which is stronger than "mineral caps new
-        // tissue" and is a stated limitation of this round rather than a physiological
-        // claim: `Stand::mineral` is an inventory, not a usable reserve (Astra R4.3, and
-        // the doc on that field). At the placeholders the `f_max` rate cap is the binding
-        // one by five orders of magnitude — `0.0005 · N` against the stock cap's
-        // `50 · N` — so moving `n_tissue` would not change which limit bites.
-        let n0 = ground[gi].mineral;
-        let monod = if n0 + sc.nutrient_half > 0.0 {
-            n0 / (n0 + sc.nutrient_half)
-        } else {
-            0.0
-        };
-        let mineral_cap = if sc.n_tissue > 0.0 {
-            n0 / sc.n_tissue
-        } else {
-            f64::INFINITY
-        };
-        let p_cap = sc.alpha * w0;
-        let q_max = sc.reserve_cap * w0;
-        let m = sc.maintenance * w0 * DT;
-        let d_p = (p_cap - p0).max(0.0).min(sc.foliage_rate * w0 * DT);
-        let d_w = (sc.wood_max - w0).max(0.0).min(sc.wood_rate * w0 * DT);
-        let d_q = (q_max - q0).max(0.0);
-        let build = 1.0 + sc.build;
-        // The income, by trophic mode. Everything below this is one set of rules.
-        let (a, arrived_mineral) = match sc.trophic {
-            Trophic::Photo => {
-                let a_pot = (sc.assimilation * l_eff * mu * (1.0 - stress) * p0 * monod * DT)
-                    .min(sc.nutrient_draw_max * n0 * DT)
-                    .min(mineral_cap)
-                    .max(0.0);
-                // Capped by what the stand can actually spend: light not captured is
-                // simply never fixed, so there is nothing to respire.
-                let a = a_pot.min(m + build * (d_p + d_w) + d_q);
-                ledger.fixed_in += a;
-                ledger.light_in += e_v * a;
-                (a, 0.0)
-            }
-            // A saprotroph's income is the dead wood and litter step 5b already took out
-            // of the pools for it. `substrate_yield` of it is income and the rest is
-            // respired **at once**: it has left the pool and it is not tissue, so it
-            // cannot be left unaccounted the way an uncaptured photon is, and there is no
-            // demand cap here for the same reason — anything the stand cannot spend falls
-            // through to the leftover `rem` below and is respired there.
-            //
-            // The tissue was computed pool by pool in [`feed`] ([`yield_of`]), because the
-            // two pools carry their own energy per unit; here it is only spent. It is
-            // bounded again by `taken.organic` against float dust, and the energy bound it
-            // already obeys per pool keeps `taken.energy - e_v · gross` non-negative.
-            Trophic::Saprotroph => {
-                let Substrate { taken, gross } = substrate[si];
-                let gross = gross.max(0.0).min(taken.organic);
-                let waste = (taken.organic - gross).max(0.0);
-                ledger.respired_out += waste;
-                ledger.heat_out += (taken.energy - e_v * gross).max(0.0);
-                (gross, taken.mineral)
-            }
-        };
-
-        // ---- 4.3 maintenance from income first, then reserve
-        let paid_a = a.min(m);
-        let mut rem = a - paid_a;
-        let short = m - paid_a;
-        let paid_q = stands[si].reserve.min(short);
-        stands[si].reserve -= paid_q;
-        let unpaid = short - paid_q;
-        // Both are respiration: the organic matter leaves the system as heat, and no
-        // mineral moves. `paid_a` was never tissue, and the mineral of the reserve
-        // `paid_q` burned stays in the stand — what is still standing keeps its mineral.
-        ledger.respired_out += paid_a + paid_q;
-        ledger.heat_out += e_v * (paid_a + paid_q);
-
-        // ---- 4.4a the mineral budget, **before** a unit of tissue is allocated
-        //
-        // Astra R9.1. The mineral used to be netted against the tissue *after* it was
-        // built, which capped the **debit** and not the growth: a moist half-grown glowcap
-        // on an energy-bearing, mineral-free log with a bare site pool still grew
-        // `5e-6` of wood whose `1e-7` of mineral did not exist, so the tissue it built
-        // held less than `n_tissue` and the promise that `n_tissue` is the density of what
-        // is built was only true for the five plants. The budget now comes first and
-        // bounds what may be built at all.
-        //
-        // What is spendable this tick is what **arrived** with the income plus what the
-        // site's pool can give up: `arrived_mineral` — the mineral that came out of the
-        // log with the wood, zero for a `Photo` stand — plus the pool `n0` itself. The
-        // pool is the bound a plant's own draw obeys: §4.2's stock cap `N / n_tissue` is
-        // exactly `N` of mineral read in tissue units, and `nutrient_draw_max` bounds
-        // **assimilation**, which a saprotroph does not do. A *rate* cap on a fungal pool
-        // draw is a rule decision and a `design/backlog.md` row, not one this round
-        // invents.
-        //
-        // For a `Photo` stand this cap is provably non-binding and is written once for
-        // both modes rather than branched: §4.2 caps `A` by `mineral_cap = N / n_tissue`
-        // and every unit built costs at least one unit of `rem <= A`, so
-        // `n_tissue · built <= N` already. For a saprotroph it is the whole of R9.1.
-        let mineral_budget = arrived_mineral + n0.max(0.0);
-        let mut tissue_left = if sc.n_tissue > 0.0 {
-            (mineral_budget / sc.n_tissue).max(0.0)
-        } else {
-            f64::INFINITY
-        };
-
-        // ---- 4.4 growth: reserve share, foliage, wood, then the rest to reserve
-        //
-        // Every increment is floored at zero as well as capped by its demand **and by the
-        // mineral budget left**. Unfunded income is not held anywhere: it falls through to
-        // the leftover `rem` below and is respired there, with its energy as heat, which
-        // is where a capped income has always gone. The caps above already keep `rem`
-        // non-negative in exact arithmetic; in f64 a `rem - build * (rem / build)` can
-        // land a few ulps below it, and a negative "growth" would take a stock down
-        // instead of up.
-        let dq_s = (sc.reserve_share * rem).min(d_q).min(tissue_left).max(0.0);
-        rem -= dq_s;
-        tissue_left -= dq_s;
-        stands[si].reserve += dq_s;
-
-        let dp_a = (rem / build).min(d_p).min(tissue_left).max(0.0);
-        rem -= build * dp_a;
-        tissue_left -= dp_a;
-        let dp_q = if p0 < sc.reflush_below * p_cap {
-            (stands[si].reserve / build)
-                .min(d_p - dp_a)
-                .min((sc.reflush_below * p_cap - p0 - dp_a).max(0.0))
-                .max(0.0)
-        } else {
-            0.0
-        };
-        stands[si].reserve -= build * dp_q;
-        stands[si].foliage += dp_a + dp_q;
-        // Where the new foliage goes: **bottom-up to each layer's capacity**, in
-        // profile order, which is what makes a browsed plant refill its floor tissue
-        // first and look browsed from below (decisions §4). The capacities are read at
-        // the wood this tick started with, because `dw` below has not been applied yet.
-        {
-            let sc = config.species(species);
-            let caps = sc.layer_capacities(stands[si].wood);
-            let n = caps.len();
-            crate::layers::fill_bottom_up(stands[si].layer_stocks_mut(n), &caps, dp_a + dp_q);
-            stands[si].settle_layers(n);
-        }
-
-        let dw = (rem / build).min(d_w).min(tissue_left).max(0.0);
-        rem -= build * dw;
-        tissue_left -= dw;
-        stands[si].wood += dw;
-
-        let dq_r = rem.min((d_q - dq_s).max(0.0)).min(tissue_left).max(0.0);
-        stands[si].reserve += dq_r;
-        rem -= dq_r;
-        // The leftover itself: never respire a negative residue. With the §4.2 cap on
-        // `A` this is float residue only.
-        let rem = rem.max(0.0);
-        // Construction respiration on every unit built, whichever stock paid for it, and
-        // the leftover of a capped income: organic matter out of the system, energy to
-        // heat, no mineral.
-        let respired = sc.build * (dp_a + dp_q + dw) + rem;
-        ledger.respired_out += respired;
-        ledger.heat_out += e_v * respired;
-
-        // New tissue built out of this tick's income draws `n_tissue` per unit from the
-        // site's pool. The reflush `dp_q` is not new tissue — it is reserve turned into
-        // foliage — so its mineral is already in the stand and is not drawn again. This is
-        // now a **settlement** of §4.4a's budget and not a cap of its own: `need` is at
-        // most `mineral_budget` by construction, so the draw below is always fully funded
-        // and the `min`s are float insurance. Only this stand draws on this site.
-        let built = dq_s + dp_a + dw + dq_r;
-        let need = (sc.n_tissue * built).max(0.0);
-        // A saprotroph's mineral arrives **with the wood**, at the log's own density, and
-        // is netted against what the tissue it built actually needs: the excess is released
-        // to the site's pool and a shortfall is drawn from the pool the budget counted.
-        // Mineral only ever moves between stocks, so both directions conserve it exactly.
-        // A `Photo` stand has no arrival and this is the draw it always was.
-        stands[si].mineral += arrived_mineral;
-        if arrived_mineral > need {
-            let release = (arrived_mineral - need).min(stands[si].mineral.max(0.0));
-            stands[si].mineral -= release;
-            ground[gi].mineral += release;
-        } else {
-            let draw = (need - arrived_mineral).min(ground[gi].mineral.max(0.0));
-            ground[gi].mineral -= draw;
-            stands[si].mineral += draw;
-        }
-
-        // ---- 4.5 senescence
-        let shed = (sc.senescence * stands[si].foliage * DT).min(stands[si].foliage);
-        let organic_before = stands[si].material();
-        stands[si].foliage -= shed;
-        // Senescence loses from the **top** foliage layer first: a plant drops its
-        // canopy before its rosette, and the rosette persists
-        // (`design/organism-anatomy-2026-09-21.md` §3, bloomcrown).
-        {
-            let n = sc.foliage_layer_count(stands[si].wood);
-            crate::layers::shed_from_top(stands[si].layer_stocks_mut(n), shed);
-            stands[si].settle_layers(n);
-        }
-        let shed_mineral = pull_mineral(&mut stands[si], organic_before, shed);
-        add_litter(
-            config,
-            &mut ground[gi],
-            shed,
-            shed_mineral,
-            e_v * shed,
-            ledger,
+    // Every stand grows on its own stand and its own site's ground, so chunks of stands
+    // split cleanly: a chunk's slots are a run of the ground no other chunk touches. Each
+    // stand's ledger lines are kept in the order it booked them and folded below in stand
+    // order, which is the one-pass loop's order.
+    let n = stands.len();
+    let mut books = vec![Booked::default(); n];
+    let mut dying = vec![false; n];
+    {
+        let config = &*config;
+        let chunks = chunk_count(n, threads);
+        let per = n.div_ceil(chunks.max(1)).max(1);
+        let mut work: Vec<(
+            usize,
+            &mut [Stand],
+            &mut [Ground],
+            usize,
+            &mut [Booked],
+            &mut [bool],
+        )> = Vec::with_capacity(chunks);
+        let (mut st, mut gr, mut bk, mut dy) = (
+            &mut stands[..],
+            &mut ground[..],
+            &mut books[..],
+            &mut dying[..],
         );
-
-        // ---- 4.6 dieback
-        let die_back = stands[si].wood.min(sc.dieback * unpaid);
-        let organic_before = stands[si].material();
-        stands[si].wood -= die_back;
-        let die_back_mineral = pull_mineral(&mut stands[si], organic_before, die_back);
-        ground[gi].dead_wood += die_back;
-        ground[gi].dead_wood_mineral += die_back_mineral;
-        ground[gi].dead_wood_energy += e_v * die_back;
-
-        // ---- 4.6b the stage, after every change to the wood
-        //
-        // Growth and dieback both move `W`, and the profile is staged by `W / W_max`.
-        // A stand that has crossed a threshold re-bins the tissue it **already holds**
-        // into the new stage's layers, bottom-up: a seedling rosette that has grown a
-        // stem does not conjure a crown, it lifts what it had. Nothing is created and
-        // nothing is destroyed (decisions §4).
-        stands[si].resync_layers(config.species(species));
-
-        // ---- 4.7 death
-        if stands[si].wood < sc.alive_min {
-            dead.push(si);
+        let mut first = 0;
+        let mut ground_base = 0;
+        while first < n {
+            let last = (first + per).min(n);
+            let (s_here, s_rest) = std::mem::take(&mut st).split_at_mut(last - first);
+            let (b_here, b_rest) = std::mem::take(&mut bk).split_at_mut(last - first);
+            let (d_here, d_rest) = std::mem::take(&mut dy).split_at_mut(last - first);
+            // This chunk's ground runs up to the next chunk's first slot.
+            let ground_end = if last < n {
+                slots[last]
+            } else {
+                ground_base + gr.len()
+            };
+            let (g_here, g_rest) = std::mem::take(&mut gr).split_at_mut(ground_end - ground_base);
+            work.push((first, s_here, g_here, ground_base, b_here, d_here));
+            st = s_rest;
+            bk = b_rest;
+            dy = d_rest;
+            gr = g_rest;
+            ground_base = ground_end;
+            first = last;
+        }
+        let slots = &slots[..];
+        let run = |(first, stands, ground, base, books, dying): (
+            usize,
+            &mut [Stand],
+            &mut [Ground],
+            usize,
+            &mut [Booked],
+            &mut [bool],
+        )| {
+            for (k, stand) in stands.iter_mut().enumerate() {
+                let si = first + k;
+                dying[k] = grow_stand(
+                    config,
+                    stand,
+                    &mut ground[slots[si] - base],
+                    light[si],
+                    drink[si],
+                    substrate[si],
+                    &mut books[k],
+                );
+            }
+        };
+        #[cfg(feature = "parallel")]
+        if work.len() > 1 {
+            let pool = bevy_tasks::ComputeTaskPool::get_or_init(|| {
+                bevy_tasks::TaskPoolBuilder::new()
+                    .num_threads(threads)
+                    .build()
+            });
+            let run = &run;
+            pool.scope(|scope| {
+                for w in work.drain(..) {
+                    scope.spawn(async move { run(w) });
+                }
+            });
+        }
+        for w in work {
+            run(w);
         }
     }
+    for b in &books {
+        b.apply(ledger);
+    }
+    let dead: Vec<usize> = (0..n).filter(|&si| dying[si]).collect();
 
     let view = world.view();
     for &si in dead.iter().rev() {
         die(config, &view, &stands[si], ground, ledger);
     }
     remove_at(stands, &dead);
+}
+
+/// One stand's ledger lines from [`grow_stand`], in the order it booked them, so that
+/// folding them stand by stand adds every number to the ledger exactly where the one-pass
+/// loop did.
+#[derive(Clone, Copy, Default)]
+struct Booked {
+    fixed: f64,
+    light: f64,
+    respired: [f64; 3],
+    respired_n: u8,
+    heat: [f64; 4],
+    heat_n: u8,
+}
+
+impl Booked {
+    fn respired(&mut self, v: f64) {
+        self.respired[self.respired_n as usize] = v;
+        self.respired_n += 1;
+    }
+
+    fn heat(&mut self, v: f64) {
+        self.heat[self.heat_n as usize] = v;
+        self.heat_n += 1;
+    }
+
+    fn apply(&self, ledger: &mut FloraLedger) {
+        // A saprotroph books no assimilation: adding its zero changes nothing.
+        ledger.fixed_in += self.fixed;
+        ledger.light_in += self.light;
+        for &r in &self.respired[..self.respired_n as usize] {
+            ledger.respired_out += r;
+        }
+        for &h in &self.heat[..self.heat_n as usize] {
+            ledger.heat_out += h;
+        }
+    }
+}
+
+/// Make a ground slot for every stand's site that has none: a merge of the two
+/// site-sorted lists.
+fn ensure_slots(ground: &mut Vec<Ground>, stands: &[Stand]) {
+    let mut missing: Vec<Site> = Vec::new();
+    let mut k = 0;
+    for s in stands {
+        while k < ground.len() && ground[k].site < s.site {
+            k += 1;
+        }
+        if k >= ground.len() || ground[k].site != s.site {
+            missing.push(s.site);
+        }
+    }
+    if missing.is_empty() {
+        return;
+    }
+    let old = std::mem::take(ground);
+    ground.reserve(old.len() + missing.len());
+    let mut fresh = missing.into_iter().peekable();
+    for g in old {
+        while let Some(site) = fresh.next_if(|site| *site < g.site) {
+            ground.push(Ground::new(site, 0.0));
+        }
+        ground.push(g);
+    }
+    ground.extend(fresh.map(|site| Ground::new(site, 0.0)));
+}
+
+/// Every stand's ground slot index, given that every stand has one.
+fn slot_indices(ground: &[Ground], stands: &[Stand]) -> Vec<usize> {
+    let mut out = Vec::with_capacity(stands.len());
+    let mut k = 0;
+    for s in stands {
+        while ground[k].site < s.site {
+            k += 1;
+        }
+        debug_assert_eq!(ground[k].site, s.site);
+        out.push(k);
+    }
+    out
+}
+
+/// §4.1–4.6 for one stand on its own site's ground `g`: the loop body of [`grow`]. Its
+/// ledger lines go into `book`. Returns whether the stand dies (§4.7).
+fn grow_stand(
+    config: &FloraConfig,
+    stand: &mut Stand,
+    g: &mut Ground,
+    light: f64,
+    drink: Drink,
+    substrate: Substrate,
+    book: &mut Booked,
+) -> bool {
+    let species = stand.species;
+    let sc = config.species(species);
+    let e_v = sc.energy_density;
+    let (w0, p0, q0) = (stand.wood, stand.foliage, stand.reserve);
+    let l_eff = light;
+    let mu = drink.moisture;
+    stand.light = l_eff;
+    stand.moisture = mu;
+    stand.water_m3 = drink.taken_m3;
+
+    // ---- aeration stress, from the same pre-withdrawal read `μ` came from. It
+    // closes on the level the root box's saturated fraction asks for — up at
+    // `stress_rate_per_s`, down at `relax_rate_per_s`, both as a fraction of the
+    // gap per second — and it is applied to *this* tick's income: the water was read
+    // before anything was withdrawn, so the stress and the moisture describe one
+    // moment.
+    let saturated = drink.saturated;
+    let target = aeration_target(saturated, sc);
+    let was = stand.aeration_stress;
+    let stress = if target > was {
+        (was + sc.stress_rate_per_s * DT * (target - was)).clamp(0.0, 1.0)
+    } else if target < was {
+        (was - sc.relax_rate_per_s * DT * (was - target)).clamp(0.0, 1.0)
+    } else {
+        was
+    };
+    stand.aeration_stress = stress;
+
+    // ---- 4.1 potential income, 4.2 demands
+    //
+    // The mineral cap replaces v1's `.min(n0)`: income is organic matter, and what
+    // the pool limits is the *tissue* it can pay `n_tissue` per unit for, so the
+    // pool's own units bound `A` through `mineral / n_tissue`. The
+    // Michaelis-Menten and the `f_max` rate cap are unchanged.
+    //
+    // All three read the **site's** pool, and they gate the whole of `A` — including
+    // the part that pays maintenance. So a stand whose own tissue is rich in mineral
+    // still fixes nothing on a bare pool, which is stronger than "mineral caps new
+    // tissue" and is a stated limitation of this round rather than a physiological
+    // claim: `Stand::mineral` is an inventory, not a usable reserve (Astra R4.3, and
+    // the doc on that field). At the placeholders the `f_max` rate cap is the binding
+    // one by five orders of magnitude — `0.0005 · N` against the stock cap's
+    // `50 · N` — so moving `n_tissue` would not change which limit bites.
+    let n0 = g.mineral;
+    let monod = if n0 + sc.nutrient_half > 0.0 {
+        n0 / (n0 + sc.nutrient_half)
+    } else {
+        0.0
+    };
+    let mineral_cap = if sc.n_tissue > 0.0 {
+        n0 / sc.n_tissue
+    } else {
+        f64::INFINITY
+    };
+    let p_cap = sc.alpha * w0;
+    let q_max = sc.reserve_cap * w0;
+    let m = sc.maintenance * w0 * DT;
+    let d_p = (p_cap - p0).max(0.0).min(sc.foliage_rate * w0 * DT);
+    let d_w = (sc.wood_max - w0).max(0.0).min(sc.wood_rate * w0 * DT);
+    let d_q = (q_max - q0).max(0.0);
+    let build = 1.0 + sc.build;
+    // The income, by trophic mode. Everything below this is one set of rules.
+    let (a, arrived_mineral) = match sc.trophic {
+        Trophic::Photo => {
+            let a_pot = (sc.assimilation * l_eff * mu * (1.0 - stress) * p0 * monod * DT)
+                .min(sc.nutrient_draw_max * n0 * DT)
+                .min(mineral_cap)
+                .max(0.0);
+            // Capped by what the stand can actually spend: light not captured is
+            // simply never fixed, so there is nothing to respire.
+            let a = a_pot.min(m + build * (d_p + d_w) + d_q);
+            book.fixed = a;
+            book.light = e_v * a;
+            (a, 0.0)
+        }
+        // A saprotroph's income is the dead wood and litter step 5b already took out
+        // of the pools for it. `substrate_yield` of it is income and the rest is
+        // respired **at once**: it has left the pool and it is not tissue, so it
+        // cannot be left unaccounted the way an uncaptured photon is, and there is no
+        // demand cap here for the same reason — anything the stand cannot spend falls
+        // through to the leftover `rem` below and is respired there.
+        //
+        // The tissue was computed pool by pool in [`feed`] ([`yield_of`]), because the
+        // two pools carry their own energy per unit; here it is only spent. It is
+        // bounded again by `taken.organic` against float dust, and the energy bound it
+        // already obeys per pool keeps `taken.energy - e_v · gross` non-negative.
+        Trophic::Saprotroph => {
+            let Substrate { taken, gross } = substrate;
+            let gross = gross.max(0.0).min(taken.organic);
+            let waste = (taken.organic - gross).max(0.0);
+            book.respired(waste);
+            book.heat((taken.energy - e_v * gross).max(0.0));
+            (gross, taken.mineral)
+        }
+    };
+
+    // ---- 4.3 maintenance from income first, then reserve
+    let paid_a = a.min(m);
+    let mut rem = a - paid_a;
+    let short = m - paid_a;
+    let paid_q = stand.reserve.min(short);
+    stand.reserve -= paid_q;
+    let unpaid = short - paid_q;
+    // Both are respiration: the organic matter leaves the system as heat, and no
+    // mineral moves. `paid_a` was never tissue, and the mineral of the reserve
+    // `paid_q` burned stays in the stand — what is still standing keeps its mineral.
+    book.respired(paid_a + paid_q);
+    book.heat(e_v * (paid_a + paid_q));
+
+    // ---- 4.4a the mineral budget, **before** a unit of tissue is allocated
+    //
+    // Astra R9.1. The mineral used to be netted against the tissue *after* it was
+    // built, which capped the **debit** and not the growth: a moist half-grown glowcap
+    // on an energy-bearing, mineral-free log with a bare site pool still grew
+    // `5e-6` of wood whose `1e-7` of mineral did not exist, so the tissue it built
+    // held less than `n_tissue` and the promise that `n_tissue` is the density of what
+    // is built was only true for the five plants. The budget now comes first and
+    // bounds what may be built at all.
+    //
+    // What is spendable this tick is what **arrived** with the income plus what the
+    // site's pool can give up: `arrived_mineral` — the mineral that came out of the
+    // log with the wood, zero for a `Photo` stand — plus the pool `n0` itself. The
+    // pool is the bound a plant's own draw obeys: §4.2's stock cap `N / n_tissue` is
+    // exactly `N` of mineral read in tissue units, and `nutrient_draw_max` bounds
+    // **assimilation**, which a saprotroph does not do. A *rate* cap on a fungal pool
+    // draw is a rule decision and a `design/backlog.md` row, not one this round
+    // invents.
+    //
+    // For a `Photo` stand this cap is provably non-binding and is written once for
+    // both modes rather than branched: §4.2 caps `A` by `mineral_cap = N / n_tissue`
+    // and every unit built costs at least one unit of `rem <= A`, so
+    // `n_tissue · built <= N` already. For a saprotroph it is the whole of R9.1.
+    let mineral_budget = arrived_mineral + n0.max(0.0);
+    let mut tissue_left = if sc.n_tissue > 0.0 {
+        (mineral_budget / sc.n_tissue).max(0.0)
+    } else {
+        f64::INFINITY
+    };
+
+    // ---- 4.4 growth: reserve share, foliage, wood, then the rest to reserve
+    //
+    // Every increment is floored at zero as well as capped by its demand **and by the
+    // mineral budget left**. Unfunded income is not held anywhere: it falls through to
+    // the leftover `rem` below and is respired there, with its energy as heat, which
+    // is where a capped income has always gone. The caps above already keep `rem`
+    // non-negative in exact arithmetic; in f64 a `rem - build * (rem / build)` can
+    // land a few ulps below it, and a negative "growth" would take a stock down
+    // instead of up.
+    let dq_s = (sc.reserve_share * rem).min(d_q).min(tissue_left).max(0.0);
+    rem -= dq_s;
+    tissue_left -= dq_s;
+    stand.reserve += dq_s;
+
+    let dp_a = (rem / build).min(d_p).min(tissue_left).max(0.0);
+    rem -= build * dp_a;
+    tissue_left -= dp_a;
+    let dp_q = if p0 < sc.reflush_below * p_cap {
+        (stand.reserve / build)
+            .min(d_p - dp_a)
+            .min((sc.reflush_below * p_cap - p0 - dp_a).max(0.0))
+            .max(0.0)
+    } else {
+        0.0
+    };
+    stand.reserve -= build * dp_q;
+    stand.foliage += dp_a + dp_q;
+    // Where the new foliage goes: **bottom-up to each layer's capacity**, in
+    // profile order, which is what makes a browsed plant refill its floor tissue
+    // first and look browsed from below (decisions §4). The capacities are read at
+    // the wood this tick started with, because `dw` below has not been applied yet.
+    {
+        let sc = config.species(species);
+        let caps = sc.layer_capacities(stand.wood);
+        let n = caps.len();
+        crate::layers::fill_bottom_up(stand.layer_stocks_mut(n), &caps, dp_a + dp_q);
+        stand.settle_layers(n);
+    }
+
+    let dw = (rem / build).min(d_w).min(tissue_left).max(0.0);
+    rem -= build * dw;
+    tissue_left -= dw;
+    stand.wood += dw;
+
+    let dq_r = rem.min((d_q - dq_s).max(0.0)).min(tissue_left).max(0.0);
+    stand.reserve += dq_r;
+    rem -= dq_r;
+    // The leftover itself: never respire a negative residue. With the §4.2 cap on
+    // `A` this is float residue only.
+    let rem = rem.max(0.0);
+    // Construction respiration on every unit built, whichever stock paid for it, and
+    // the leftover of a capped income: organic matter out of the system, energy to
+    // heat, no mineral.
+    let respired = sc.build * (dp_a + dp_q + dw) + rem;
+    book.respired(respired);
+    book.heat(e_v * respired);
+
+    // New tissue built out of this tick's income draws `n_tissue` per unit from the
+    // site's pool. The reflush `dp_q` is not new tissue — it is reserve turned into
+    // foliage — so its mineral is already in the stand and is not drawn again. This is
+    // now a **settlement** of §4.4a's budget and not a cap of its own: `need` is at
+    // most `mineral_budget` by construction, so the draw below is always fully funded
+    // and the `min`s are float insurance. Only this stand draws on this site.
+    let built = dq_s + dp_a + dw + dq_r;
+    let need = (sc.n_tissue * built).max(0.0);
+    // A saprotroph's mineral arrives **with the wood**, at the log's own density, and
+    // is netted against what the tissue it built actually needs: the excess is released
+    // to the site's pool and a shortfall is drawn from the pool the budget counted.
+    // Mineral only ever moves between stocks, so both directions conserve it exactly.
+    // A `Photo` stand has no arrival and this is the draw it always was.
+    stand.mineral += arrived_mineral;
+    if arrived_mineral > need {
+        let release = (arrived_mineral - need).min(stand.mineral.max(0.0));
+        stand.mineral -= release;
+        g.mineral += release;
+    } else {
+        let draw = (need - arrived_mineral).min(g.mineral.max(0.0));
+        g.mineral -= draw;
+        stand.mineral += draw;
+    }
+
+    // ---- 4.5 senescence
+    let shed = (sc.senescence * stand.foliage * DT).min(stand.foliage);
+    let organic_before = stand.material();
+    stand.foliage -= shed;
+    // Senescence loses from the **top** foliage layer first: a plant drops its
+    // canopy before its rosette, and the rosette persists
+    // (`design/organism-anatomy-2026-09-21.md` §3, bloomcrown).
+    {
+        let n = sc.foliage_layer_count(stand.wood);
+        crate::layers::shed_from_top(stand.layer_stocks_mut(n), shed);
+        stand.settle_layers(n);
+    }
+    let shed_mineral = pull_mineral(stand, organic_before, shed);
+    {
+        let mut heat = FloraLedger::default();
+        add_litter(config, g, shed, shed_mineral, e_v * shed, &mut heat);
+        if heat.heat_out != 0.0 {
+            book.heat(heat.heat_out);
+        }
+    }
+
+    // ---- 4.6 dieback
+    let die_back = stand.wood.min(sc.dieback * unpaid);
+    let organic_before = stand.material();
+    stand.wood -= die_back;
+    let die_back_mineral = pull_mineral(stand, organic_before, die_back);
+    g.dead_wood += die_back;
+    g.dead_wood_mineral += die_back_mineral;
+    g.dead_wood_energy += e_v * die_back;
+
+    // ---- 4.6b the stage, after every change to the wood
+    //
+    // Growth and dieback both move `W`, and the profile is staged by `W / W_max`.
+    // A stand that has crossed a threshold re-bins the tissue it **already holds**
+    // into the new stage's layers, bottom-up: a seedling rosette that has grown a
+    // stem does not conjure a crown, it lifts what it had. Nothing is created and
+    // nothing is destroyed (decisions §4).
+    stand.resync_layers(config.species(species));
+
+    // ---- 4.7 death
+    stand.wood < sc.alive_min
 }
 
 /// The mineral belonging to `moved` units of a stand's organic matter, taken out of the
@@ -2955,7 +3503,7 @@ mod tests {
             };
             2
         ];
-        let out = feed(&mut flora, &world, &moisture);
+        let out = feed(&mut flora, &world, &moisture, 1);
 
         assert_eq!(out.len(), 2);
         // A quarter and three quarters, in every currency.
@@ -3098,6 +3646,12 @@ mod tests {
     /// A soil plain `width × depth` at 0.125 m with a ragged skyline, densely seeded with
     /// every species at keyed sizes between `alive_min` and `wood_max`.
     fn crowded(width: u32, depth: u32, fill: f64, seed: u64) -> (Flora, World) {
+        crowded_on(width, depth, fill, seed, 2)
+    }
+
+    /// [`crowded`] with the soil `base` rows deep before its random top: a deep one puts
+    /// the root boxes in several [`DRINK_BAND`]s.
+    fn crowded_on(width: u32, depth: u32, fill: f64, seed: u64, base: u32) -> (Flora, World) {
         let voxel_m = 0.125;
         let mut world = World::empty(cubarium_voxel::Config {
             width,
@@ -3110,7 +3664,7 @@ mod tests {
         let mut rng = Rng::keyed(99, seed, 0, 0);
         for z in 0..depth {
             for x in 0..width as i64 {
-                let top = 2 + rng.below(4) as u32;
+                let top = base + rng.below(4) as u32;
                 for y in 1..=top {
                     let pore = 0.05 + 0.9 * rng.unit();
                     let cap = Material::Soil.pore_capacity() * world.config().voxel_volume();
@@ -3280,6 +3834,276 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The overlapped tick's plan, split over threads, is the one-thread plan: the same
+    /// reads, the same per-voxel totals and caps, so the same withdrawals once settled.
+    #[test]
+    fn the_split_plan_is_the_serial_plan() {
+        for (seed, threads) in [(21u64, 2usize), (22, 4)] {
+            // Soil thirty rows deep: the root boxes span three bands.
+            let (flora, world) = crowded_on(64, 24, 0.7, seed, 30);
+            let bands: std::collections::BTreeSet<usize> = flora
+                .stands
+                .iter()
+                .map(|s| {
+                    world
+                        .config()
+                        .index(i64::from(s.site.x), s.site.y, s.site.z)
+                        / DRINK_BAND
+                })
+                .collect();
+            assert!(bands.len() >= 2, "the boxes span bands {bands:?}");
+            assert!(
+                flora.stands.len() >= 2 * MIN_CHUNK,
+                "enough stands to split"
+            );
+            let (mut one, mut split) = (flora.clone(), flora.clone());
+            let a = drink(&mut one, &mut Target::Planned(&world), 1);
+            let b = drink(&mut split, &mut Target::Planned(&world), threads);
+            assert!(a.iter().any(|d| d.taken_m3 > 0.0), "stands drank");
+            for (x, y) in a.iter().zip(&b) {
+                assert_eq!(
+                    (x.moisture, x.saturated, x.taken_m3),
+                    (y.moisture, y.saturated, y.taken_m3)
+                );
+            }
+            let (mut wa, mut wb) = (world.clone(), world.clone());
+            settle_drink(&mut one, &mut wa);
+            settle_drink(&mut split, &mut wb);
+            assert_eq!(
+                wa.view().pore,
+                wb.view().pore,
+                "{threads} threads: the same withdrawals"
+            );
+            assert_eq!(one.ledger.transpired_m3, split.ledger.transpired_m3);
+            assert_eq!(
+                wa.view().ledger.transpiration_out,
+                wb.view().ledger.transpiration_out
+            );
+        }
+    }
+
+    /// The sky read for every stand in one pass fills the cache with exactly the entries,
+    /// in exactly the order, that one lookup per stand did — from empty and from a cache
+    /// that already holds every other site.
+    #[test]
+    fn the_sky_pass_fills_the_cache_the_lookups_did() {
+        let (flora, world) = crowded(64, 24, 0.7, 31);
+        let view = world.view();
+        let mut want = Vec::new();
+        let open: Vec<f64> = flora
+            .stands
+            .iter()
+            .map(|s| sky_at(&mut want, &view, s.site))
+            .collect();
+        for partial in [false, true] {
+            let mut cache: Vec<(Site, f64)> = if partial {
+                want.iter().copied().step_by(2).collect()
+            } else {
+                Vec::new()
+            };
+            let got = sky_all(&mut cache, &view, &flora.stands, 4);
+            assert_eq!(got, open, "partial {partial}: the values");
+            assert_eq!(cache, want, "partial {partial}: the cache");
+        }
+    }
+
+    /// A crowded plain whose every stand's site holds a log and litter: about one stand in
+    /// nine is a glowcap, and over a thousand stands in all, so four threads split the feed.
+    fn crowded_with_dead_pools(seed: u64) -> (Flora, World) {
+        let (mut flora, world) = crowded(64, 24, 0.7, seed);
+        let sites: Vec<Site> = flora.stands.iter().map(|s| s.site).collect();
+        let mut rng = Rng::keyed(98, seed, 0, 0);
+        for site in sites {
+            for kind in [crate::DepositKind::DeadWood, crate::DepositKind::Litter] {
+                let organic = 1e-5 * (0.1 + rng.unit());
+                assert!(flora.deposit(
+                    site,
+                    crate::Deposit {
+                        kind,
+                        organic,
+                        mineral: 0.05 * organic,
+                        energy: 10.0 * organic,
+                    }
+                ));
+            }
+        }
+        (flora, world)
+    }
+
+    /// The feed's wants gathered over threads and filed by pool are the one-thread sorted
+    /// wants: every fungus gets the same substrate, every pool gives up the same amount.
+    #[test]
+    fn the_split_feed_is_the_serial_feed() {
+        for seed in [41u64, 42] {
+            let (flora, world) = crowded_with_dead_pools(seed);
+            let fungi = flora
+                .stands
+                .iter()
+                .filter(|s| flora.config.species(s.species).trophic == Trophic::Saprotroph)
+                .count();
+            assert!(
+                fungi > 20 && flora.stands.len() >= 2 * MIN_CHUNK,
+                "{fungi} fungi"
+            );
+            let moisture: Vec<Drink> = (0..flora.stands.len())
+                .map(|i| Drink {
+                    moisture: 0.2 + 0.08 * (i % 10) as f64,
+                    ..Drink::default()
+                })
+                .collect();
+            let (mut one, mut split) = (flora.clone(), flora.clone());
+            let a = feed(&mut one, &world, &moisture, 1);
+            let b = feed(&mut split, &world, &moisture, 4);
+            assert!(a.iter().any(|s| s.taken.organic > 0.0), "fungi fed");
+            for (x, y) in a.iter().zip(&b) {
+                assert_eq!(
+                    (x.taken.organic, x.taken.mineral, x.taken.energy, x.gross),
+                    (y.taken.organic, y.taken.mineral, y.taken.energy, y.gross)
+                );
+            }
+            for (g, h) in one.ground.iter().zip(&split.ground) {
+                assert_eq!(
+                    (
+                        g.dead_wood,
+                        g.dead_wood_mineral,
+                        g.dead_wood_energy,
+                        g.litter
+                    ),
+                    (
+                        h.dead_wood,
+                        h.dead_wood_mineral,
+                        h.dead_wood_energy,
+                        h.litter
+                    )
+                );
+            }
+            assert_eq!(one.ledger.substrate_uptake, split.ledger.substrate_uptake);
+        }
+    }
+
+    /// Growth split over threads is one-thread growth to the bit: every stand, every ground
+    /// stock, every ledger line, and the same deaths — each stand's ledger lines are folded
+    /// in stand order, in the order it booked them. Light, water and substrate vary by stand
+    /// so every branch runs: rich and starving stands, fungi on logs, some dying.
+    #[test]
+    fn the_split_growth_is_the_serial_growth() {
+        for (seed, threads) in [(51u64, 2usize), (52, 4)] {
+            let (mut flora, world) = crowded_with_dead_pools(seed);
+            // Some sites with no ground yet, so the growth has slots to make.
+            let bare: Vec<Site> = flora.stands.iter().map(|s| s.site).step_by(5).collect();
+            flora.ground.retain(|g| !bare.contains(&g.site));
+            let n = flora.stands.len();
+            assert!(n >= 2 * MIN_CHUNK);
+            // One stand in seven on the edge of death with nothing in reserve.
+            for s in flora.stands.iter_mut().step_by(7) {
+                let alive_min = flora.config.species(s.species).alive_min;
+                s.wood = alive_min * (1.0 + 1e-9);
+                s.reserve = 0.0;
+            }
+            let light: Vec<f64> = (0..n).map(|i| [0.0, 0.3, 1.0][i % 3]).collect();
+            let drink: Vec<Drink> = (0..n)
+                .map(|i| Drink {
+                    moisture: [0.0, 0.5, 1.0, 0.9][i % 4],
+                    taken_m3: 1e-9 * i as f64,
+                    saturated: [0.0, 0.7][i % 2],
+                })
+                .collect();
+            let substrate = feed(&mut flora, &world, &drink, 1);
+            let (mut one, mut split) = (flora.clone(), flora.clone());
+            grow(&mut one, &world, &light, &drink, &substrate, 1);
+            grow(&mut split, &world, &light, &drink, &substrate, threads);
+            assert!(one.stands.len() < n, "some stands died");
+            assert_eq!(one.stands.len(), split.stands.len());
+            for (a, b) in one.stands.iter().zip(&split.stands) {
+                assert_eq!(
+                    (
+                        a.site,
+                        a.wood,
+                        a.foliage,
+                        a.reserve,
+                        a.mineral,
+                        a.layer_stock
+                    ),
+                    (
+                        b.site,
+                        b.wood,
+                        b.foliage,
+                        b.reserve,
+                        b.mineral,
+                        b.layer_stock
+                    )
+                );
+                assert_eq!(
+                    (a.light, a.moisture, a.aeration_stress),
+                    (b.light, b.moisture, b.aeration_stress)
+                );
+            }
+            assert_eq!(one.ground.len(), split.ground.len());
+            for (g, h) in one.ground.iter().zip(&split.ground) {
+                assert_eq!(
+                    (
+                        g.site,
+                        g.mineral,
+                        g.litter,
+                        g.litter_energy,
+                        g.litter_mineral
+                    ),
+                    (
+                        h.site,
+                        h.mineral,
+                        h.litter,
+                        h.litter_energy,
+                        h.litter_mineral
+                    )
+                );
+                assert_eq!(
+                    (
+                        g.dead_wood,
+                        g.dead_wood_mineral,
+                        g.dead_wood_energy,
+                        g.carrion
+                    ),
+                    (
+                        h.dead_wood,
+                        h.dead_wood_mineral,
+                        h.dead_wood_energy,
+                        h.carrion
+                    )
+                );
+            }
+            let (l, m) = (&one.ledger, &split.ledger);
+            assert_eq!(
+                (l.fixed_in, l.light_in, l.respired_out, l.heat_out),
+                (m.fixed_in, m.light_in, m.respired_out, m.heat_out)
+            );
+            assert_eq!(format!("{l:?}"), format!("{m:?}"), "every ledger line");
+        }
+    }
+
+    /// Drowning split over threads kills the same stands, booked the same way.
+    #[test]
+    fn the_split_drowning_is_the_serial_drowning() {
+        let (flora, mut world) = crowded(64, 24, 0.7, 71);
+        // Flood one column in three a cell deep over its face.
+        let sites: Vec<Site> = flora.stands.iter().map(|s| s.site).step_by(3).collect();
+        for s in sites {
+            world.apply(WorldCommand::AddWater {
+                x: i64::from(s.x),
+                y: s.y + 1,
+                z: s.z,
+                volume_m3: world.config().voxel_volume(),
+            });
+        }
+        let (mut one, mut split) = (flora.clone(), flora.clone());
+        drown(&mut one, &world, 1);
+        drown(&mut split, &world, 4);
+        assert!(one.stands.len() < flora.stands.len(), "some drowned");
+        let sites = |f: &Flora| f.stands.iter().map(|s| s.site).collect::<Vec<_>>();
+        assert_eq!(sites(&one), sites(&split));
+        assert_eq!(format!("{:?}", one.ledger), format!("{:?}", split.ledger));
+        assert_eq!(format!("{:?}", one.ground), format!("{:?}", split.ground));
     }
 
     #[test]

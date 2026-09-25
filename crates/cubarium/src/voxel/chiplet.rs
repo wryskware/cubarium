@@ -1,44 +1,15 @@
-//! **The live loop on one chiplet** (cache study D,
-//! `design/handoffs/voxel-cache-and-pinning-2026-09-24.md`).
-//!
-//! On a machine whose CPUs share more than one L3 — the desktop's 9950X3D has two
-//! chiplets — the process keeps itself to one of them before the simulation builds its
-//! pools, so every pool thread inherits it and `default_threads` counts that chiplet's
-//! CPUs. The water phases hand columns from thread to thread at every phase, and across
-//! chiplets that costs more than the extra cores return: on the terrarium the water tick
-//! took 1.64 ms steady / 2.50 ms in a shower on the V-cache chiplet's 15 threads against
-//! 2.02 / 3.04 ms on 31 threads over both, and the live step 4.0 against 4.6 ms/tick for
-//! less than half the cycles. The other chiplet stays free.
-//!
-//! No effect on a one-L3 machine, where the affinity mask is already one chiplet, under
-//! `--pin-loop` (the Tachyon's own placement, `placement.rs`, is untouched), or with
-//! `--all-chiplets`.
+//! **Per-thread CPU placement for the live loop's pools** (overlap measurement,
+//! `design/handoffs/voxel-phase-overlap-2026-09-24.md`). Which CPUs the process keeps to
+//! at all is the host's choice, made outside the program (`taskset` in
+//! `scripts/run-live.sh`, per `config/hosts/<host>.env`; `CPUAffinity=` in the Tachyon's
+//! unit): the pools are sized to that mask. The desktop's measurement for keeping to one
+//! chiplet (cache study D, `design/handoffs/voxel-cache-and-pinning-2026-09-24.md`): the
+//! terrarium's water tick took 1.64 / 2.50 ms (steady / shower) on the V-cache chiplet's
+//! 15 threads against 2.02 / 3.04 ms on 31 threads over both.
 
 use std::path::Path;
 
-use cubarium_voxel::cpus::{SYSFS_CPU, chiplet_plan, format_cpu_list};
-
-/// Keep this thread — and so every thread it starts from now on — to the chiplet
-/// [`chiplet_plan`] names, and say so. Returns the CPUs kept to, if any.
-pub fn keep_to_one_chiplet() -> Option<Vec<usize>> {
-    let mask = own_affinity().ok()?;
-    let cpus = chiplet_plan(Path::new(SYSFS_CPU), &mask)?;
-    match set_affinity(&cpus) {
-        Ok(()) => {
-            eprintln!(
-                "cubarium voxel: the simulation keeps to one chiplet, CPUs {} of {} \
-                 (`--all-chiplets` spreads it)",
-                format_cpu_list(&cpus),
-                format_cpu_list(&mask)
-            );
-            Some(cpus)
-        }
-        Err(e) => {
-            eprintln!("cubarium voxel: could not keep to one chiplet ({e}); running unpinned");
-            None
-        }
-    }
-}
+use cubarium_voxel::cpus::{SYSFS_CPU, format_cpu_list};
 
 /// **The overlapped tick's two legs on cores of their own** (measurement,
 /// `design/handoffs/voxel-phase-overlap-2026-09-24.md`): the last `bio_cores` physical
