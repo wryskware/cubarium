@@ -231,8 +231,9 @@ pub const STAR_BLOOM_DEFAULT: f32 = 0.15;
 /// sky (Wrysk, 2026-09-24: blue behind blue-violet terrain loses the ridge).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DaySky {
-    /// A pale apricot horizon rising to a soft rose-lavender zenith: the terrain's
-    /// complement, kin to the sunsets.
+    /// Wrysk's pick (2026-09-25): a red dwarf's day. A coral-apricot horizon through a
+    /// salmon-rose middle to a pale lilac zenith; dimmer and redder than the first
+    /// apricot haze, the terrain's complement, kin to the sunsets.
     #[default]
     Warm,
     /// A pale electric mint horizon to an aqua-teal zenith.
@@ -245,7 +246,7 @@ impl DaySky {
     /// Zenith, middle and horizon (sRGB).
     pub fn srgb(self) -> [u32; 3] {
         match self {
-            DaySky::Warm => [0xD2_B6_E4, 0xF6_D0_D4, 0xFF_E6_CC],
+            DaySky::Warm => [0xCC_B0_D8, 0xE0_A8_A8, 0xF2_BC_96],
             DaySky::Mint => [0x55_C6_CE, 0x98_EC_E0, 0xD8_FF_F2],
             DaySky::Lilac => [0xC2_B6_EA, 0xDD_D4_F6, 0xF6_F1_FF],
         }
@@ -254,7 +255,7 @@ impl DaySky {
     /// The clouds by day: their near-white body and their shadowed underside (sRGB).
     pub fn cloud_srgb(self) -> [u32; 2] {
         match self {
-            DaySky::Warm => [0xFF_F8_F4, 0x8E_74_C4],
+            DaySky::Warm => [0xF7_E0_D6, 0x7E_64_B4],
             DaySky::Mint => [0xF6_FF_FC, 0x84_78_C8],
             DaySky::Lilac => [0xFF_FF_FF, 0x86_72_C6],
         }
