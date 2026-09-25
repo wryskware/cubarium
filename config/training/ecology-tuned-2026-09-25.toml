@@ -1,0 +1,9 @@
+# Ecology search 2026-09-25 (runs/es2, generation 3, candidate c6): the lowest-penalty vector.
+# TRAINING ONLY. The live defaults are unchanged; load with --arm tuned=<this file> or EcologyParams::load.
+[ecology]
+"flora.foliage_rate" = 0.42978844102157104
+"flora.senescence" = 0.987922555874324
+"flora.decomposition" = 3.8828707239964175
+"founder.yield_by_food" = 0.3620822822151667
+"founder.reproduction.surplus_floor" = 1.7869870907906003
+"founder.maintenance_per_s" = 1.0675900078196197
