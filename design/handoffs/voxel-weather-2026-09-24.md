@@ -510,6 +510,50 @@ clouds, and the terrain's noon lighting exactly as it is.
 3. **Cost:** the sky pass only. Report lit ms at 13 px and 6 px. The flat tier stays
    byte-identical.
 
+## WX1 repair round (WX1b)
+
+WX1 landed on branch `worktree-agent-a59f66055b203890d` (`6e86c05c..8417b0df`; its report
+is the commit messages). Round 3 left four problems. Fable's calls:
+
+1. **The staged presets' founding sky.**
+   - Problem: `hydrate` sends the unplaced spare to the sky, so default, small and wide
+     found with 58–67 % of their water aloft: RH 15–22 against the 3 % sky, forced
+     downpours back to back, and stands −63 % on default seed 1.
+   - Fix: the founding sky holds **RH 0.6 at the starting temperature**, and the spare
+     beyond it is not created. That is the terrarium's inventory-as-ceiling rule.
+   - Visible effect: the ground water at founding is unchanged; the sky is small.
+2. **The atmosphere-fed stream's floor:** RH 0.5 of the capacity, replacing the old
+   shower-trigger fraction (`reentry_floor_fraction`).
+3. **Convective rain reads moisture, not RH.**
+   - Problem: with one store, RH is lowest in the afternoon (the capacity peaks with the
+     temperature), so the afternoon bump fought the RH gate. Round 3 put 0–35 % of the
+     rain in 12–18 and started storms at RH 0.65–0.77, which drained them in 2–5 min.
+   - Fix: showers and downpours use `M = atmosphere / C(temperature_c)`, the air's
+     moisture against the capacity at the climate's mean temperature, both to start (the
+     logistic) and to stop. Drizzle, fog, the soft evaporation limit and the hard 1.5
+     limit keep RH, since those are saturation effects.
+   - Undo the round-3 workarounds (`g_aft` 8 and 30, `rh50` 0.8–0.9, negative `g_cool`)
+     and recalibrate from the brief's shape in M.
+4. **Targets, revised:**
+   - ≥ 40 % of the rain volume between 12:00 and 18:00 (that is a quarter of the day);
+   - downpours 4–10 min on the 2 h day (the rate may drop to 2 R₀);
+   - the rest as briefed.
+5. **Terrarium seed 2 (−27 % stands):** A/B it against main at the merge point, the same
+   seed and the same code apart from the weather, to separate the weather's effect from
+   code drift since the 86e5ed6 baseline. If the weather causes it, find the mechanism
+   (drowning, the lake, rain timing) and report it. Don't tune it away blind.
+6. **Stream swell gain:** Wrysk picks from the gain 0 | 2 | 4 video (at 4 the channel
+   overflows into a second fall). Keep 2.0 until told.
+
+**Order:**
+1. Merge main into the branch first. Main has WX2 and V, the flora changes, the CPU
+   placement move, and the census changes; resolve the conflicts.
+2. Make the fixes.
+3. Measure, 4 h each:
+   - WX1b arms: default seeds 1–4 and terrarium seeds 1–2, each with the gap on and off;
+   - main (the merge point) arms: terrarium seed 2 and default seed 1.
+4. Report: round 3's table columns, plus the gap-off answer.
+
 ## Integration notes
 
 - **WX2 checkpoint 1** (`1aac1abb`, branch `worktree-agent-a305b95986d3f88e4`): day/night,
