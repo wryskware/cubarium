@@ -125,7 +125,19 @@ fn main() {
             (p.to_string(), cfg.world)
         });
     let arm: Option<(String, cubarium_voxel::Config)> =
-        file_arm.or_else(|| preset.map(|p| (p.name.to_string(), p.config())));
+        file_arm.or_else(|| {
+            preset.map(|p| {
+                // `still`: the live-training world's water (`live::world::still_water`).
+                if args.iter().any(|a| a == "still") {
+                    (
+                        format!("{} (still)", p.name),
+                        cubarium_search::es::voxel::live::world::still_water(p.config()),
+                    )
+                } else {
+                    (p.name.to_string(), p.config())
+                }
+            })
+        });
     let founder_counts = if args.iter().any(|a| a == "nofauna") {
         [0; habitat::FOUNDER_COUNTS.len()]
     } else {
