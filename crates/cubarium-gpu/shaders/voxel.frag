@@ -1987,6 +1987,17 @@ const vec3 RAIN_FILL = vec3(0.28, 0.3, 0.55);
 const vec3 RAIN_ALPHA = vec3(0.4, 0.3, 0.32);
 const vec3 RAIN_SLANT = vec3(0.04, 0.1, 0.24);
 const vec3 RAIN_VEIL = vec3(0.1, 0.05, 0.16);
+// Against a sky brighter than the rain, the rain is drawn this much of the sky behind it:
+// darker than the sky, as rain curtains are (Wrysk, 2026-09-25: pale streaks vanished
+// against the bright day sky and the rain seemed to appear from nowhere over the land).
+const float RAIN_CURTAIN = 0.45;
+// The rain keeps its own pale colour only where it is clearly brighter than the sky behind
+// it (in luma, by this much: a night sky); against a sky as bright as it or brighter (the
+// day sky, the same luma as pale rain) it turns to the curtain.
+const float RAIN_CURTAIN_RAMP = 0.25;
+// A curtain's streaks are this much more opaque than the rain's own: thin dark lines on a
+// bright sky need more cover to read than pale ones on dark terrain.
+const float RAIN_CURTAIN_ALPHA = 1.8;
 
 // The downpour's gusts: bands of heavier rain sweeping along the ring (whole periods round
 // it and in the clock's wrap), between GUST_LOW and 1.
@@ -2201,9 +2212,20 @@ vec4 weatherOver(ivec2 px) {
     if (wsum > 0.0) {
         float depth = min(zEnd, float(D)) / float(max(D, 1));
         float gust = u.rainK.z > 0.0 ? gustAt(xw - 0.24 * y0) : 1.0;
+        // Where the ray ends in a sky that is not clearly darker than the rain, the rain (its
+        // haze and its streaks) darkens toward a curtain of the sky itself; over the terrain
+        // and a night sky, both darker than the rain, it stays the rain's own pale colour.
+        vec3 curtain = vec3(0.0);
+        float dark = 0.0;
+        if (zEnd >= float(D)) {
+            vec3 bg = texelFetch(backdropTex, px, 0).rgb;
+            const vec3 Y = vec3(0.2126, 0.7152, 0.0722);
+            dark = 1.0 - smoothstep(0.0, RAIN_CURTAIN_RAMP, dot(u.rainC.rgb, Y) - dot(bg, Y));
+            curtain = bg * RAIN_CURTAIN;
+        }
         // The rain's own haze over the depth of the scene.
         float veil = dot(u.rainK.xyz, RAIN_VEIL * vec3(1.0, 1.0, gust)) * depth;
-        if (veil > 0.0) { over(c, a, hazed(u.rainC.rgb, 0.5), veil); }
+        if (veil > 0.0) { over(c, a, mix(hazed(u.rainC.rgb, 0.5), curtain, dark), veil); }
         // Splashes where the ray ended on an open solid top.
         int zi = int(zEnd);
         if (zi < D) {
@@ -2224,14 +2246,15 @@ vec4 weatherOver(ivec2 px) {
         for (int l = 2; l >= 0; --l) {
             float zl = RAIN_DEPTH[l] * float(D);
             if (zEnd <= zl || !rainOpen(x, y0, k, zl)) { continue; }
-            vec3 rc = hazed(u.rainC.rgb, hazeAt(zl));
+            vec3 rc = mix(hazed(u.rainC.rgb, hazeAt(zl)), curtain, dark);
             for (int m = 0; m < 3; ++m) {
                 float wm = u.rainK[m];
                 if (wm <= 0.0) { continue; }
                 float st = rainStreak(float(px.x), float(px.y), m, l);
                 if (st <= 0.0) { continue; }
                 float g = m == 2 ? gust : 1.0;
-                over(c, a, rc, clamp(st * wm * g * RAIN_ALPHA[m] * RAIN_LAYER_ALPHA[l], 0.0, 1.0));
+                float cover = st * wm * g * RAIN_ALPHA[m] * RAIN_LAYER_ALPHA[l];
+                over(c, a, rc, clamp(cover * mix(1.0, RAIN_CURTAIN_ALPHA, dark), 0.0, 1.0));
             }
         }
     }
