@@ -856,6 +856,8 @@ pub(crate) struct DrinkScratch {
     vine_ids: Vec<u64>,
     /// The settle's cells that gave less than planned, `(voxel, got)`, ascending.
     short: Vec<(u32, f64)>,
+    /// The settle's receipts, one per withdrawn voxel, ascending.
+    receipts: Vec<f64>,
 }
 
 /// What one chunk of stands read out of its root boxes.
@@ -988,6 +990,7 @@ fn drink_with(
         stand_ids,
         vine_ids,
         short: _,
+        receipts: _,
     } = scratch;
     let n = flora.stands.len();
     {
@@ -1099,17 +1102,87 @@ fn clear_cells(cell: &mut [[f64; 2]], touched: &mut [u64]) {
     }
 }
 
-/// [`crate::Flora::settle_drink`]: apply a planned drink to the live world.
+/// [`crate::Flora::settle_drink`]: apply a planned drink to the live world, all three steps
+/// on the calling thread.
 pub(crate) fn settle_drink(flora: &mut Flora, world: &mut World) {
-    if !flora.drink.0.pending {
-        return;
+    if let Some(mut plan) = take_plan(flora) {
+        plan.withdraw(world);
+        finish(flora, plan);
     }
-    let mut scratch = std::mem::take(&mut flora.drink.0);
-    settle_with(flora, world, &mut scratch);
-    flora.drink.0 = scratch;
 }
 
-fn settle_with(flora: &mut Flora, world: &mut World, scratch: &mut DrinkScratch) {
+/// The planned drink, out of the layer; `None` when nothing is planned.
+pub(crate) fn take_plan(flora: &mut Flora) -> Option<DrinkPlan> {
+    if !flora.drink.0.pending {
+        return None;
+    }
+    Some(DrinkPlan(std::mem::take(&mut flora.drink.0)))
+}
+
+/// A drink [`crate::Flora::step_planned`] planned against a read copy, out of the layer
+/// ([`crate::Flora::take_drink_plan`]) so the live world can take it
+/// ([`DrinkPlan::withdraw`]) while the rest of the plant and animal leg still runs, and
+/// then handed back ([`crate::Flora::finish_drink`]) to book it. Holds the drink's scratch,
+/// which goes back to the layer with it.
+pub struct DrinkPlan(DrinkScratch);
+
+impl std::fmt::Debug for DrinkPlan {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DrinkPlan")
+    }
+}
+
+impl DrinkPlan {
+    /// The world's half: one `WithdrawPore` per planned voxel, in ascending voxel order —
+    /// the order the chained tick withdraws in — each bounded by what the cell holds above
+    /// its wilting point **now**. Books the world's `transpiration_out` (and, under a
+    /// closed budget, the atmosphere) as each command does, and keeps every receipt for
+    /// [`crate::Flora::finish_drink`]. Touches no plant.
+    pub fn withdraw(&mut self, world: &mut World) {
+        let DrinkScratch {
+            cell,
+            touched,
+            receipts,
+            short,
+            ..
+        } = &mut self.0;
+        receipts.clear();
+        short.clear();
+        for (word_at, word) in touched.iter().enumerate() {
+            let mut bits = *word;
+            while bits != 0 {
+                let voxel = word_at * 64 + bits.trailing_zeros() as usize;
+                bits &= bits - 1;
+                let planned = cell[voxel][1];
+                if !(planned > 0.0) {
+                    continue;
+                }
+                let volume = planned.min(drinkable_m3(&world.view(), voxel));
+                let got = if volume > 0.0 {
+                    let (x, y, z) = world.config().coords(voxel);
+                    -world.apply(WorldCommand::WithdrawPore {
+                        x: x as i64,
+                        y,
+                        z,
+                        volume_m3: volume,
+                    })
+                } else {
+                    0.0
+                };
+                receipts.push(got);
+                // Short only where the water left less than the plan: a receipt a
+                // rounding below its request is the chained tick's receipt too.
+                if volume < planned {
+                    short.push((voxel as u32, got));
+                }
+            }
+        }
+    }
+}
+
+/// [`crate::Flora::finish_drink`]: book what the world gave and debit the shortfalls.
+pub(crate) fn finish(flora: &mut Flora, plan: DrinkPlan) {
+    let mut scratch = plan.0;
     let DrinkScratch {
         cell,
         touched,
@@ -1120,41 +1193,16 @@ fn settle_with(flora: &mut Flora, world: &mut World, scratch: &mut DrinkScratch)
         stand_ids,
         vine_ids,
         short,
+        receipts,
         ..
-    } = scratch;
+    } = &mut scratch;
     *pending = false;
-    short.clear();
-    // The plan's withdrawals, in the order the chained tick makes them: ascending voxels,
-    // each bounded by what the cell holds above its wilting point **now**.
-    for (word_at, word) in touched.iter().enumerate() {
-        let mut bits = *word;
-        while bits != 0 {
-            let voxel = word_at * 64 + bits.trailing_zeros() as usize;
-            bits &= bits - 1;
-            let planned = cell[voxel][1];
-            if !(planned > 0.0) {
-                continue;
-            }
-            let volume = planned.min(drinkable_m3(&world.view(), voxel));
-            let got = if volume > 0.0 {
-                let (x, y, z) = world.config().coords(voxel);
-                -world.apply(WorldCommand::WithdrawPore {
-                    x: x as i64,
-                    y,
-                    z,
-                    volume_m3: volume,
-                })
-            } else {
-                0.0
-            };
-            flora.ledger.transpired_m3 += got;
-            // Short only where the water left less than the plan: a receipt a rounding
-            // below its request is the chained tick's receipt too.
-            if volume < planned {
-                short.push((voxel as u32, got));
-            }
-        }
+    // The receipts in the world's own order, so the two ledgers add the same numbers in
+    // the same sequence and agree to the bit.
+    for &got in receipts.iter() {
+        flora.ledger.transpired_m3 += got;
     }
+    receipts.clear();
     // A shortfall comes off whoever asked, by the same split that credited them.
     if !short.is_empty() {
         let debit = |v: u32, want: f64| -> Option<f64> {
@@ -1179,8 +1227,10 @@ fn settle_with(flora: &mut Flora, world: &mut World, scratch: &mut DrinkScratch)
             let Some(d) = debit(v, want) else { continue };
             crate::cover::drink_debit(flora, vine_ids[vine as usize], d);
         }
+        short.clear();
     }
     clear_cells(cell, touched);
+    flora.drink.0 = scratch;
 }
 
 /// One demander's share of what the core accepted. A zero total means a zero share:

@@ -79,7 +79,8 @@ pub enum Phase {
     WaterLeg,
     /// The overlapped tick's water copied back from the read copy, inside the water leg.
     ReadCopy,
-    /// The overlapped tick's barrier: the plants' planned drink applied.
+    /// The overlapped tick's planned drink withdrawn from the live world, beside the
+    /// animal step.
     Settle,
 }
 
@@ -193,7 +194,7 @@ impl Phase {
             Phase::FaunaDeaths => "  deaths",
             Phase::WaterLeg => "water leg (total, overlapped tick)",
             Phase::ReadCopy => "  water copy-back from the read copy (part of the water leg)",
-            Phase::Settle => "drink settle (overlapped tick's barrier)",
+            Phase::Settle => "drink withdrawal (overlapped tick, beside the animal step)",
         }
     }
 }

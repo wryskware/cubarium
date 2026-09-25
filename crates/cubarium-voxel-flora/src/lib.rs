@@ -85,6 +85,8 @@ pub use step::{Gates, establishment_gates, establishment_gates_on_substrate};
 pub use step::{adult_light_cover, establishment_gates_with_sky};
 /// Where a falling stand's wood lands (package N's fall), for a diagnostic.
 pub use step::fall_line;
+/// The overlapped tick's planned drink, between the plant step and the barrier.
+pub use step::DrinkPlan;
 /// What one cell of ground offers a root (package F): the scale `μ` and the establishment
 /// water gate read.
 pub use step::available_water;
@@ -4126,6 +4128,22 @@ impl Flora {
     /// Whether a planned drink is waiting for [`Flora::settle_drink`].
     pub fn drink_pending(&self) -> bool {
         self.drink.0.pending
+    }
+
+    /// [`Flora::settle_drink`] in three steps, for a schedule that lets the live world take
+    /// the drink while the rest of the tick's reads still run: take the plan out of the
+    /// layer (`None` with nothing planned), [`DrinkPlan::withdraw`] it from the world, then
+    /// hand it back here. Between the take and the finish this layer's `transpired_m3`
+    /// lacks this tick's drink, and the next plan needs the finish first.
+    pub fn take_drink_plan(&mut self) -> Option<DrinkPlan> {
+        step::take_plan(self)
+    }
+
+    /// Book a [`DrinkPlan`] the world has withdrawn: `transpired_m3` receipt by receipt in
+    /// the world's order, each shortfall off whoever asked, and the scratch back in the
+    /// layer.
+    pub fn finish_drink(&mut self, plan: DrinkPlan) {
+        step::finish(self, plan);
     }
 
     /// One tick of the **dead pools only**: litter, dead wood and carrion decompose at

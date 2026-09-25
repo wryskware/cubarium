@@ -113,6 +113,13 @@ pub struct VoxelWorld(pub cubarium_voxel::World);
 #[derive(Resource)]
 pub struct LaggedWorld(pub cubarium_voxel::World);
 
+/// The overlapped tick's planned drink between the plant step and the barrier: taken out
+/// of the plant layer when its step ends, withdrawn from the live world as soon as both
+/// the water leg and the plant step are done — beside the animal step — and handed back
+/// to the layer at the barrier ([`cubarium_voxel_flora::DrinkPlan`]).
+#[derive(Resource, Default)]
+pub struct PendingDrink(pub Option<cubarium_voxel_flora::DrinkPlan>);
+
 /// The plant layer, with its own sorted stand and ground stores.
 #[derive(Resource)]
 pub struct FloraLayer(pub Flora);
@@ -405,6 +412,12 @@ impl Sim {
         overlap.add_systems(sys_water_leg.in_set(TickPhase::Water));
         overlap.add_systems(sys_flora_lagged.in_set(TickPhase::Flora));
         overlap.add_systems(sys_fauna_lagged.in_set(TickPhase::Fauna));
+        overlap.add_systems(
+            sys_withdraw
+                .after(TickPhase::Water)
+                .after(TickPhase::Flora)
+                .before(TickPhase::Settle),
+        );
         overlap.add_systems(sys_settle.in_set(TickPhase::Settle));
         overlap.add_systems(sys_advance.in_set(TickPhase::Advance));
         ecs.add_schedule(overlap);
@@ -545,6 +558,7 @@ impl Sim {
                 if !self.ecs.contains_resource::<LaggedWorld>() {
                     let copy = self.world().clone();
                     self.ecs.insert_resource(LaggedWorld(copy));
+                    self.ecs.init_resource::<PendingDrink>();
                 }
                 self.ecs.run_schedule(OverlapTick)
             }
@@ -859,13 +873,16 @@ fn sys_water_leg(
     });
 }
 
-/// The plant leg against the read copy: the drink planned, not applied.
+/// The plant leg against the read copy: the drink planned, not applied, and handed out
+/// for the live world to take.
 fn sys_flora_lagged(
     lagged: Res<LaggedWorld>,
     mut flora: ResMut<FloraLayer>,
+    mut pending: ResMut<PendingDrink>,
     config: Res<SimConfig>,
 ) {
     flora.0.step_planned(&lagged.0, config.overlap_split().1);
+    pending.0 = flora.0.take_drink_plan();
 }
 
 /// [`sys_fauna`] against the read copy. The animal layer only ever reads the world.
@@ -885,8 +902,19 @@ fn sys_fauna_lagged(
     }
 }
 
-/// The barrier: the plants' planned drink applied to the live world, bounded by what each
-/// cell holds after this tick's water.
-fn sys_settle(mut w: ResMut<VoxelWorld>, mut flora: ResMut<FloraLayer>) {
-    cubarium_voxel::voxel_phase!(Settle, { flora.0.settle_drink(&mut w.0) });
+/// The planned drink withdrawn from the live world once this tick's water is done, each
+/// voxel bounded by what it holds now. Runs beside the animal step, which reads only the
+/// read copy; on the schedule's thread, like the water leg.
+fn sys_withdraw(_main: NonSendMarker, mut w: ResMut<VoxelWorld>, mut pending: ResMut<PendingDrink>) {
+    if let Some(plan) = pending.0.as_mut() {
+        cubarium_voxel::voxel_phase!(Settle, { plan.withdraw(&mut w.0) });
+    }
+}
+
+/// The barrier: the withdrawn drink booked in the plant layer, each shortfall off whoever
+/// asked.
+fn sys_settle(mut flora: ResMut<FloraLayer>, mut pending: ResMut<PendingDrink>) {
+    if let Some(plan) = pending.0.take() {
+        flora.0.finish_drink(plan);
+    }
 }
