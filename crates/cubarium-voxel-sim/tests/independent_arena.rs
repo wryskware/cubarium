@@ -183,10 +183,11 @@ fn an_arena_bite_closes_the_three_currencies_across_stock_animal_and_respiration
         "the plant layer's consumed_* and the animal layer's eaten_* are different numbers"
     );
 
-    // What the animal holds is what came in, less what it respired and put back.
+    // What the animal holds (its gut included) is what came in, less what it respired and
+    // put back.
     assert!(
         close(
-            after_animal.organic() - before_animal.organic(),
+            after_animal.stored_organic() - before_animal.stored_organic(),
             ledger.eaten_organic_in - ledger.respired_out - ledger.deposited_organic_out,
             1e-12
         ),
@@ -194,7 +195,7 @@ fn an_arena_bite_closes_the_three_currencies_across_stock_animal_and_respiration
     );
     assert!(
         close(
-            after_animal.mineral - before_animal.mineral,
+            after_animal.stored_mineral() - before_animal.stored_mineral(),
             ledger.eaten_mineral_in - ledger.deposited_mineral_out,
             1e-12
         ),
@@ -202,22 +203,19 @@ fn an_arena_bite_closes_the_three_currencies_across_stock_animal_and_respiration
     );
     assert!(
         close(
-            after_animal.energy - before_animal.energy,
+            after_animal.stored_energy() - before_animal.stored_energy(),
             ledger.eaten_energy_in - ledger.heat_out - ledger.deposited_energy_out,
             1e-12
         ),
         "energy residual does not close"
     );
     // Mineral is conserved across the two layers: none is respired and none is created.
+    // What respiration sheds and what a bite brings beyond its tissue waits in the gut.
     let mineral_moved = (before_pools.1 - after_pools.1) + (before_pools.3 - after_pools.3);
+    let mineral_gained = after_animal.stored_mineral() - before_animal.stored_mineral();
     assert!(
-        close(
-            mineral_moved,
-            after_animal.mineral - before_animal.mineral,
-            1e-12
-        ),
-        "the ground lost {mineral_moved} of mineral and the animal gained {}",
-        after_animal.mineral - before_animal.mineral
+        close(mineral_moved, mineral_gained, 1e-12),
+        "the ground lost {mineral_moved} of mineral and the animal gained {mineral_gained}"
     );
     // The three respiration splits sum to the total.
     assert!(

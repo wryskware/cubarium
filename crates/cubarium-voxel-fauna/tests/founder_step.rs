@@ -96,9 +96,9 @@ fn a_founder_that_steps_a_terrace_creates_no_matter() {
     // of standing layer is not a transfer and must not appear anywhere.
     let v = fauna.view();
     let l = v.ledger;
-    let held_organic: f64 = v.animals.iter().map(|a| a.body + a.reserve).sum();
-    let held_mineral: f64 = v.animals.iter().map(|a| a.mineral).sum();
-    let held_energy: f64 = v.animals.iter().map(|a| a.energy).sum();
+    let held_organic: f64 = v.animals.iter().map(|a| a.stored_organic()).sum();
+    let held_mineral: f64 = v.animals.iter().map(|a| a.stored_mineral()).sum();
+    let held_energy: f64 = v.animals.iter().map(|a| a.stored_energy()).sum();
     let organic_residual = l.introduced_organic_in + l.eaten_organic_in
         - l.respired_out
         - l.deposited_organic_out

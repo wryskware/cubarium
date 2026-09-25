@@ -193,8 +193,8 @@ fn a_hungry_bite_is_capped_by_its_room_and_none_of_it_is_respired_as_surplus() {
         "the bite is the room after yield, {limit}, not {eaten}"
     );
     // What the bite built, by the assimilation rule: the yield, or what its mineral pays
-    // for. All of it is placed; the rest of the bite is the undigested share and nothing
-    // more.
+    // for. All of it is placed; the rest of the bite is the undigested share (egested)
+    // and the absorbed share its mineral cannot fund (respired), and nothing more.
     let assimilated = (yield_fraction * eaten).min(ledger.eaten_mineral_in / sc.n_tissue);
     let a = fauna.view().animal(id).expect("alive");
     assert!(
@@ -207,11 +207,19 @@ fn a_hungry_bite_is_capped_by_its_room_and_none_of_it_is_respired_as_surplus() {
         a.reserve <= cap * (1.0 + 1e-12),
         "the reserve is within its cap"
     );
+    // The share the yield never absorbs is egested to the gut; only the absorbed share
+    // the bite's mineral cannot fund is respired. Nothing is respired as surplus.
+    let egested = ((1.0 - yield_fraction) * eaten).clamp(0.0, eaten - assimilated);
     assert!(
-        (ledger.respired_digestion_out - (eaten - assimilated)).abs() < 1e-15,
-        "digestion respired {} of a bite whose undigested share is {}: no surplus",
+        (a.gut.organic - egested).abs() < 1e-15,
+        "the gut holds the undigested share {egested}, not {}",
+        a.gut.organic
+    );
+    let unfunded = eaten - assimilated - egested;
+    assert!(
+        (ledger.respired_digestion_out - unfunded).abs() < 1e-15,
+        "digestion respired {} of a bite whose unfunded absorbed share is {unfunded}: no surplus",
         ledger.respired_digestion_out,
-        eaten - assimilated
     );
 }
 

@@ -48,7 +48,8 @@ use anyhow::{Context, Result, bail};
 use ash::vk;
 
 use crate::present::{FrameSource, PresentPass, TargetSlot};
-use crate::render::{RASTER_FORMAT, framebuffer};
+use crate::bloom::{Bloom, EMIT_FORMAT};
+use crate::render::{RASTER_FORMAT, framebuffer, framebuffer_n};
 use crate::vk::{Gpu, HostBuffer, barrier};
 
 const FULLSCREEN_VERT: &[u8] = include_bytes!("../shaders/fullscreen.vert.spv");
@@ -412,7 +413,11 @@ fn quantise(v: f32) -> u8 {
 /// are its **face slots**, the named atlas slot its side and top faces draw with, plus
 /// one (`0` is none: the role's generic slot, tinted by the style colour). `emit` is the
 /// lit tier's emissive colour in linear light, zero for none: a texel of the glyph atlas's
-/// emissive tone draws it unlit at full value (package L step 4).
+/// emissive tone draws it unlit at full value (package L step 4); `emit`'s alpha 1 makes
+/// every texel of the style's cells emit ([`VoxelStyle::emit_whole`], package L5).
+/// The fractional part of a whole-cell emitter's pigment alphas ([`VoxelStyle::emit_whole`]).
+const WHOLE_EMITTER: f32 = 0.25;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct VoxelStyle {
@@ -438,6 +443,26 @@ impl VoxelStyle {
     pub fn with_emit(mut self, emit: Option<[f32; 3]>) -> VoxelStyle {
         self.emit = emit.map_or([0.0; 4], |c| [c[0], c[1], c[2], 0.0]);
         self
+    }
+
+    /// The same style emitting on **every** visible texel of its cells, not only the
+    /// emissive-tone texels its glyph marks (a bloomcrown core glows whole). No effect
+    /// without an emissive colour. Call it after [`VoxelStyle::with_role`] and
+    /// [`VoxelStyle::with_faces`]: the flag is a quarter in the fractional part of the three
+    /// pigment columns' alphas (whose whole parts are the role and the face slots), so the
+    /// shader's pigment fetch, which every texel makes, carries it.
+    pub fn emit_whole(mut self, whole: bool) -> VoxelStyle {
+        let frac = if whole { WHOLE_EMITTER } else { 0.0 };
+        for a in [&mut self.wood[3], &mut self.crown[3], &mut self.heart[3]] {
+            *a = a.floor() + frac;
+        }
+        self.emit[3] = if whole { 1.0 } else { 0.0 };
+        self
+    }
+
+    /// Whether every texel of this style's cells emits ([`VoxelStyle::emit_whole`]).
+    pub fn emits_whole(&self) -> bool {
+        self.crown[3].fract() > WHOLE_EMITTER / 2.0
     }
 
     /// The same style, its side and top faces drawn with these named atlas slots
@@ -530,8 +555,8 @@ pub struct VoxelParams {
     pub lit: bool,
     /// The lit tier's ambient: what full light is worth (`ambient_gain`), the darkest
     /// rung as a fraction of it (`ambient_floor`), how many rungs the ladder has
-    /// (`light_levels`, at least 2), and how far an AO crease line darkens the light
-    /// (`ao_strength`).
+    /// (`light_levels`: 0 or 1 for smooth, continuous light; 2 or more for a ladder), and
+    /// how far an AO crease line darkens the light (`ao_strength`).
     pub ambient_gain: f32,
     pub ambient_floor: f32,
     pub light_levels: u32,
@@ -545,6 +570,30 @@ pub struct VoxelParams {
     /// How far a sunlit texel leans toward `light`, times N·L. `0` is purely
     /// multiplicative.
     pub sun_tint: f32,
+    /// The lit tier's water (package W): absorption per voxel of water path, in units of
+    /// the deep colour's optical depth (after `1 / water_absorb` voxels what is left of the
+    /// light behind is the palette's deep colour), which also sets the surface-to-deep
+    /// in-scatter ramp.
+    pub water_absorb: f32,
+    /// What the surface's Fresnel reflectance (about 5-7 % at this camera) is multiplied
+    /// by, clamped to 1.
+    pub reflect_gain: f32,
+    /// How far a ripple tilts the quantised surface normal (its horizontal part).
+    pub ripple: f32,
+    /// Cells a reflected ray is marched before it counts as sky.
+    pub reflect_cells: u32,
+    /// The lit tier's bloom ([`crate::bloom`]): how much of an emitter's colour its halo
+    /// adds (smooth: times the blurred emission; blocky: at full step), `0` for none (the
+    /// passes are skipped).
+    pub bloom: f32,
+    /// How far the halo reaches, in voxel cells (smooth: twice the Gaussian's sigma;
+    /// blocky: whole cells, rounded).
+    pub bloom_radius: f32,
+    /// Smooth (a blurred glow) or blocky (L5's whole-cell halo).
+    pub bloom_style: crate::bloom::BloomStyle,
+    /// Capture-only: draw the water's derived flow field instead of the water (never
+    /// set by the live display).
+    pub debug_flow: bool,
 }
 
 /// Texels per style in the style texture: wood, crown, heart, emit.
@@ -668,7 +717,7 @@ impl VoxelParams {
 
     /// The uniform block, in the layout `voxel.frag` declares, for an atlas holding the
     /// slots in `tex_mask`.
-    fn uniforms(&self, tex_mask: u32, vine_on: bool) -> VoxelUniforms {
+    fn uniforms(&self, tex_mask: u32, vine_on: bool, clock: FrameClock) -> VoxelUniforms {
         let v = |c: [f32; 3]| [c[0], c[1], c[2], 0.0];
         VoxelUniforms {
             geom: [
@@ -718,11 +767,61 @@ impl VoxelParams {
             light_k: [
                 self.ambient_gain,
                 self.ambient_floor,
-                self.light_levels.max(2) as f32,
+                if self.light_levels < 2 { 0.0 } else { self.light_levels as f32 },
                 self.ao_strength,
             ],
             ambient: v(self.ambient_colour),
             sun: [self.sun[0], self.sun[1], self.sun[2], self.sun_tint],
+            water_l: [
+                self.water_absorb.max(0.0),
+                self.reflect_gain.max(0.0),
+                self.ripple,
+                self.reflect_cells as f32,
+            ],
+            clock: [
+                clock.time,
+                clock.step,
+                if self.debug_flow { 1.0 } else { 0.0 },
+                0.0,
+            ],
+        }
+    }
+}
+
+/// The frame's clock, as the lit tier's water reads it: sim time in ticks (the tick plus
+/// the fraction of it elapsed), and the water's animation step, both wrapped where the
+/// shader's patterns repeat so a long run keeps its precision. The step is whole (the
+/// water moves in steps) unless the clock is smooth, when it runs on between them and
+/// the water moves every frame at the same speed.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FrameClock {
+    /// Ticks, wrapped at [`FrameClock::TICK_WRAP`].
+    pub time: f32,
+    /// Animation steps, wrapped at [`FrameClock::STEP_WRAP`]: whole, or fractional when
+    /// smooth.
+    pub step: f32,
+}
+
+impl FrameClock {
+    /// Every period `voxel.frag`'s water patterns have in steps divides this.
+    pub const STEP_WRAP: u64 = 2048;
+    /// Sim time wraps here (about 14.5 h at 20 Hz), well inside an f32's whole ticks.
+    pub const TICK_WRAP: u64 = 1 << 20;
+
+    /// The clock at `tick` plus `fraction` of the next, for water animated at `hz` steps a
+    /// second over a sim running `tick_hz` ticks a second; `smooth` keeps the step's
+    /// fraction.
+    pub fn at(tick: u64, fraction: f64, hz: f64, tick_hz: f64, smooth: bool) -> FrameClock {
+        let t = tick as f64 + fraction.clamp(0.0, 1.0);
+        let step = if hz > 0.0 && tick_hz > 0.0 {
+            let s = t * hz / tick_hz;
+            if smooth { s } else { s.floor() }
+        } else {
+            0.0
+        };
+        FrameClock {
+            time: ((tick % Self::TICK_WRAP) as f64 + fraction.clamp(0.0, 1.0)) as f32,
+            step: step.rem_euclid(Self::STEP_WRAP as f64) as f32,
         }
     }
 }
@@ -757,6 +856,10 @@ struct VoxelUniforms {
     ambient: [f32; 4],
     /// The lit tier's sun: the unit direction toward it, and the sunlit tint.
     sun: [f32; 4],
+    /// The lit tier's water: absorption, reflection gain, ripple tilt, reflection cells.
+    water_l: [f32; 4],
+    /// Sim time in ticks, the water's animation step, the flow overlay flag, padding.
+    clock: [f32; 4],
 }
 
 /// Where one tick's world is written, straight into mapped memory.
@@ -1024,6 +1127,9 @@ pub struct VoxelRenderer {
     glow_view: vk::ImageView,
     /// The glow volume's trilinear sampler: wraps in x like the strip, clamps in y and z.
     linear: vk::Sampler,
+    /// The lit tier's emission attachment and bloom passes ([`crate::bloom`]); `None` in
+    /// the flat tier, whose raster pass has the one attachment it always had.
+    bloom: Option<Bloom>,
     staging: Vec<HostBuffer>,
     /// Which staging buffer the next pack may use and which the GPU is still reading.
     ring: StagingRing,
@@ -1045,6 +1151,10 @@ pub struct VoxelRenderer {
     /// changes the picture — a pack, a parameter, the weather, the founding pulse —
     /// clears this.
     raster_current: bool,
+    /// The frame's clock ([`VoxelRenderer::set_clock`]).
+    clock: FrameClock,
+    /// Whether the last pack held any free water ([`VoxelRenderer::set_water_visible`]).
+    water_visible: bool,
     /// What a frame recorded now would show, as a number that moves whenever the picture
     /// would: a pack, a parameter, the weather. Two recordings at the same version are
     /// the same frame, so the second one is not worth making.
@@ -1117,12 +1227,23 @@ impl VoxelRenderer {
             )
         }?;
 
-        let raster_pass = crate::render::colour_pass(
-            d,
-            RASTER_FORMAT,
-            vk::AttachmentLoadOp::DONT_CARE,
-            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-        )?;
+        // The lit tier's pass also writes the emission (location 1) for the bloom.
+        let raster_pass = if params.lit {
+            crate::render::colour_pass_n(
+                d,
+                &[RASTER_FORMAT, EMIT_FORMAT],
+                vk::AttachmentLoadOp::DONT_CARE,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            )?
+        } else {
+            crate::render::colour_pass(
+                d,
+                RASTER_FORMAT,
+                vk::AttachmentLoadOp::DONT_CARE,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            )?
+        };
         let (raster_image, raster_memory) = gpu.image(
             params.raster_w,
             params.raster_h,
@@ -1133,13 +1254,6 @@ impl VoxelRenderer {
                 | vk::ImageUsageFlags::TRANSFER_SRC,
         )?;
         let raster_view = gpu.view(raster_image, RASTER_FORMAT)?;
-        let raster_framebuffer = framebuffer(
-            d,
-            raster_pass,
-            raster_view,
-            params.raster_w,
-            params.raster_h,
-        )?;
 
         let limit = unsafe { gpu.instance.get_physical_device_properties(gpu.pdev) }
             .limits
@@ -1358,7 +1472,7 @@ impl VoxelRenderer {
             vk::BufferUsageFlags::UNIFORM_BUFFER,
         )?;
         for slot in 0..STAGING_RING as u64 {
-            uniforms.write_bytes_at(uniform_stride * slot, &[params.uniforms(tex_mask, vine_on)]);
+            uniforms.write_bytes_at(uniform_stride * slot, &[params.uniforms(tex_mask, vine_on, FrameClock::default())]);
         }
 
         let nearest = unsafe {
@@ -1376,6 +1490,22 @@ impl VoxelRenderer {
                 None,
             )
         }?;
+
+        let bloom = if params.lit {
+            Some(Bloom::new(gpu, &params, raster_view, nearest)?)
+        } else {
+            None
+        };
+        let raster_framebuffer = match &bloom {
+            Some(b) => framebuffer_n(
+                d,
+                raster_pass,
+                &[raster_view, b.emit_view],
+                params.raster_w,
+                params.raster_h,
+            )?,
+            None => framebuffer(d, raster_pass, raster_view, params.raster_w, params.raster_h)?,
+        };
 
         let linear = unsafe {
             d.create_sampler(
@@ -1504,7 +1634,7 @@ impl VoxelRenderer {
         let spec = vk::SpecializationInfo::default()
             .map_entries(&entries)
             .data(bytemuck::bytes_of(&lit));
-        let pipeline = crate::render::fullscreen_pipeline_specialised(
+        let pipeline = crate::render::fullscreen_pipeline_n(
             d,
             raster_pass,
             pipeline_layout,
@@ -1512,6 +1642,7 @@ impl VoxelRenderer {
             fs,
             false,
             Some(&spec),
+            if params.lit { 2 } else { 1 },
         )?;
         unsafe {
             d.destroy_shader_module(vs, None);
@@ -1555,6 +1686,7 @@ impl VoxelRenderer {
             glow_memory,
             glow_view,
             linear,
+            bloom,
             staging,
             uniform_stride,
             last_done: None,
@@ -1563,6 +1695,8 @@ impl VoxelRenderer {
             offsets,
             dirty: false,
             raster_current: false,
+            clock: FrameClock::default(),
+            water_visible: false,
             redrew: true,
             version: 0,
             staged: false,
@@ -1613,6 +1747,26 @@ impl VoxelRenderer {
         self.params.rain_tick = rain_tick;
         self.raster_current = false;
         self.version += 1;
+    }
+
+    /// Move the frame's clock. **Animated water means redrawing**: in the lit tier, while
+    /// the last pack held water, a clock whose animation step has moved clears the redraw
+    /// skip, so the water animates at its step rate between ticks (the picture changes
+    /// only when the step does, so a frame at the same step is still skipped). The flat
+    /// tier draws nothing from the clock and keeps its redraw skip.
+    pub fn set_clock(&mut self, clock: FrameClock) {
+        let moved = clock.step != self.clock.step;
+        self.clock = clock;
+        if moved && self.params.lit && self.water_visible {
+            self.raster_current = false;
+            self.version += 1;
+        }
+    }
+
+    /// Whether the world last staged holds any free water: the lit tier redraws on its
+    /// clock only while it does.
+    pub fn set_water_visible(&mut self, visible: bool) {
+        self.water_visible = visible;
     }
 
     /// Whether a pack has a staging buffer to go into. False while every one of them is
@@ -1773,7 +1927,7 @@ impl VoxelRenderer {
         // `set_params` and `update_weather` only moved `self.params`.
         self.uniforms.write_bytes_at(
             self.uniform_stride * frame.slot as u64,
-            &[self.params.uniforms(self.tex_mask, self.vine_on)],
+            &[self.params.uniforms(self.tex_mask, self.vine_on, self.clock)],
         );
         // and its own four timestamps.
         let q = frame.slot as u32 * QUERY_SLOTS;
@@ -1899,6 +2053,11 @@ impl VoxelRenderer {
                 d.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
                 d.cmd_draw(cb, 3, 1, 0, 0);
                 d.cmd_end_render_pass(cb);
+                if let Some(b) = &self.bloom
+                    && self.params.bloom > 0.0
+                {
+                    b.record(d, cb, &self.params);
+                }
             }
             d.cmd_write_timestamp(
                 cb,
@@ -1999,6 +2158,9 @@ impl VoxelRenderer {
     /// Release everything. The device must be idle.
     pub fn destroy(&mut self, gpu: &Gpu) {
         self.present.destroy(gpu);
+        if let Some(b) = &mut self.bloom {
+            b.destroy(gpu);
+        }
         let d = &gpu.device;
         unsafe {
             d.destroy_pipeline(self.pipeline, None);
@@ -2252,10 +2414,10 @@ fn sampled_write<'a>(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn params() -> VoxelParams {
+    pub(crate) fn params() -> VoxelParams {
         VoxelParams {
             s: 4,
             rise: 2,
@@ -2308,11 +2470,60 @@ mod tests {
             ambient_colour: [1.0; 3],
             sun: [0.0; 3],
             sun_tint: 0.0,
+            water_absorb: 0.1,
+            reflect_gain: 6.0,
+            ripple: 0.2,
+            reflect_cells: 64,
+            bloom: 0.0,
+            bloom_radius: 2.0,
+            bloom_style: crate::bloom::BloomStyle::Smooth,
+            debug_flow: false,
         }
+    }
+
+    /// The water's clock steps at its own rate over sim time (12 steps a second over 20
+    /// ticks a second: a step every 5/3 ticks, fractions included), and wraps its step
+    /// and its time where the shader's patterns repeat.
+    #[test]
+    fn the_frame_clock_steps_at_the_water_rate_and_wraps() {
+        let at = |tick: u64, f: f64| FrameClock::at(tick, f, 12.0, 20.0, false);
+        assert_eq!(at(0, 0.0).step, 0.0);
+        assert_eq!(at(1, 0.6).step, 0.0);
+        assert_eq!(at(1, 0.7).step, 1.0);
+        assert_eq!(at(5, 0.0).step, 3.0);
+        assert_eq!(at(100, 0.25).time, 100.25);
+        // 3415 ticks are 2049 steps: one past the wrap.
+        assert_eq!(at(3415, 0.0).step, 1.0);
+        assert_eq!(at(FrameClock::TICK_WRAP + 3, 0.5).time, 3.5);
+        // Smooth, the step runs on between whole steps, and wraps the same.
+        let smooth = |tick: u64, f: f64| FrameClock::at(tick, f, 12.0, 20.0, true).step;
+        assert!((smooth(1, 0.5) - 0.9).abs() < 1e-6);
+        assert!((smooth(3415, 0.5) - 1.3).abs() < 1e-3);
     }
 
     /// Any water at all packs to a non-zero fraction, so the presenter's "at least one
     /// row of water is visible" survives the quantisation; a dry cell packs to zero.
+    #[test]
+    fn a_whole_emitter_keeps_its_role_and_face_slots() {
+        let s = VoxelStyle::new([0.1; 3], [0.2; 3], [0.3; 3])
+            .with_role(ROLE_LEAF)
+            .with_faces([Some(3), None])
+            .with_emit(Some([1.0, 0.5, 0.2]))
+            .emit_whole(true);
+        assert!(s.emits_whole());
+        assert_eq!((s.role(), s.faces()), (ROLE_LEAF, [Some(3), None]));
+        // The shader's reads: `int(a + 0.5)` for the role and the slots, `fract(a)` for the flag.
+        assert_eq!((s.wood[3] + 0.5) as i32, i32::from(ROLE_LEAF));
+        assert_eq!((s.crown[3] + 0.5) as i32 - 1, 3);
+        assert_eq!((s.heart[3] + 0.5) as i32 - 1, -1);
+        for a in [s.wood[3], s.crown[3], s.heart[3]] {
+            assert!(a.fract() > 0.125);
+        }
+        let off = s.emit_whole(false);
+        assert!(!off.emits_whole());
+        assert_eq!((off.role(), off.faces()), (ROLE_LEAF, [Some(3), None]));
+    }
+
     #[test]
     fn the_texel_packing_round_trips_a_voxel() {
         let t = VoxelTexel::pack(3, PART_TRUNK, 0.0, true, 0.75, 9);

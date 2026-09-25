@@ -641,7 +641,9 @@ fn a_bite_debits_the_stock_once_per_interval_and_conserves_the_three_currencies(
 
     // What the animal holds is what it was given, minus what it respired and what it put
     // back. This is the "taken == gained + respired" residual, one currency at a time.
-    let gained_organic = after_animal.organic() - before_animal.organic();
+    // What it holds includes its gut: the undigested share and shed mineral wait there
+    // until the next void.
+    let gained_organic = after_animal.stored_organic() - before_animal.stored_organic();
     assert!(
         close(
             gained_organic,
@@ -653,7 +655,7 @@ fn a_bite_debits_the_stock_once_per_interval_and_conserves_the_three_currencies(
         ledger.respired_out,
         ledger.deposited_organic_out
     );
-    let gained_mineral = after_animal.mineral - before_animal.mineral;
+    let gained_mineral = after_animal.stored_mineral() - before_animal.stored_mineral();
     assert!(
         close(
             gained_mineral,
@@ -664,7 +666,7 @@ fn a_bite_debits_the_stock_once_per_interval_and_conserves_the_three_currencies(
         ledger.eaten_mineral_in,
         ledger.deposited_mineral_out
     );
-    let gained_energy = after_animal.energy - before_animal.energy;
+    let gained_energy = after_animal.stored_energy() - before_animal.stored_energy();
     assert!(
         close(
             gained_energy,
@@ -676,15 +678,17 @@ fn a_bite_debits_the_stock_once_per_interval_and_conserves_the_three_currencies(
         ledger.heat_out,
         ledger.deposited_energy_out
     );
-    // Mineral is never respired and never created: the excess came back as dung on the
-    // site the animal stood on.
+    // Mineral is never respired and never created: the excess and the mineral shed by
+    // respiration wait in the gut. Ten ticks is far short of a void, so nothing has come
+    // back to the ground yet.
     assert!(
-        close(
-            after_ground.3 - before_ground.3,
-            ledger.deposited_mineral_out,
-            1e-12
-        ),
-        "the excreted mineral did not land on the ground"
+        after_animal.gut.mineral > before_animal.gut.mineral,
+        "the gut holds no mineral after two bites and ten ticks of upkeep"
+    );
+    assert_eq!(ledger.deposited_mineral_out, 0.0, "nothing voided before the period");
+    assert_eq!(
+        after_ground.3, before_ground.3,
+        "no mineral reached the soluble pool before the gut was voided"
     );
     // And the three splits of respiration add up to the total.
     assert!(

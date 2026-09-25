@@ -445,6 +445,12 @@ pub struct Animals {
     /// This rebuild's style index for each `(model material, starving)`, or `u16::MAX`:
     /// the model path's styles are shared across animals.
     model_styles: Vec<u16>,
+    /// Whether model styles carry emissive colours ([`Animals::set_emission`]): the GPU
+    /// renderer's lit tier with emission on.
+    emission: bool,
+    /// Each style's emissive colour in linear light, beside `styles`; shorter than it, or
+    /// `None`, for a style that does not emit ([`colours::animal_emission`]).
+    emits: Vec<Option<[f32; 3]>>,
 }
 
 /// How far a starving animal's body falls toward grey and dark: the wilt tint at half
@@ -462,7 +468,23 @@ impl Animals {
             stamped: Vec::new(),
             styles: Vec::new(),
             model_styles: vec![u16::MAX; AnimalKey::COUNT],
+            emission: false,
+            emits: Vec::new(),
         }
+    }
+
+    /// Give model styles their emissive colours ([`colours::animal_emission`]) from the
+    /// next rebuild on. This is the animal half of the emission path; see
+    /// `appearance::animal_emissive_glyph` for how an emitting cell is drawn.
+    pub fn set_emission(&mut self, on: bool) {
+        self.emission = on;
+    }
+
+    /// The emissive colour an animal part's cell glows in, in linear light, or `None`.
+    #[inline]
+    pub fn emission(&self, part: AnimalPart) -> Option<[f32; 3]> {
+        let s = usize::from(part.style()?);
+        self.emits.get(s).copied().flatten()
     }
 
     /// Rebuild from an animal view with the **dev-mode glyphs** ([`cells_of`]), or clear
@@ -493,13 +515,16 @@ impl Animals {
     ) {
         let c = view.config;
         if (self.width, self.height, self.depth) != (c.width, c.height, c.depth) {
+            let emission = self.emission;
             *self = Animals::empty(c.width, c.height, c.depth);
+            self.emission = emission;
         } else {
             // Only what the last rebuild stamped: the grid is otherwise all empty.
             for i in self.stamped.drain(..) {
                 self.grid[i as usize] = AnimalPart::None;
             }
             self.styles.clear();
+            self.emits.clear();
         }
         self.model_styles.fill(u16::MAX);
         let Some(fauna) = fauna else { return };
@@ -622,6 +647,13 @@ impl Animals {
             (paint(sw.shadow), paint(sw.body), paint(sw.glint))
         };
         self.styles.push(Style { wood, crown, heart });
+        if self.emission
+            && let Some(rgb) = colours::animal_emission(key.founder, key.material, key.accent)
+        {
+            let s = usize::from(style);
+            self.emits.resize(s + 1, None);
+            self.emits[s] = Some(srgb_linear(rgb));
+        }
         self.model_styles[index] = style;
         Some(style)
     }

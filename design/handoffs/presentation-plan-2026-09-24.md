@@ -424,3 +424,39 @@ A fresh worker does both in the W worktree.
   (smooth) is the new default. Hard sun-shadow edges, crease AO and `sun_tint` stay.
 - **Water animation:** "id have to see. 12fps might have a charm". It stays at 12 Hz
   until Wrysk compares real-time clips of 12 Hz stepped against every-frame.
+
+## W, round 2 merged; W checkpoint 2 (2026-09-24)
+
+Wrysk after the 12 Hz vs smooth clips: "smooth waterfall is good. ripples still look
+kinda random and just pop in and out of existence." Fable changed that at `37c7038b`. Each
+ripple line now fades in and out over its own lifetime (sin²), grows from its middle and
+glides with a breeze. `water_smooth = true` is the default. Wrysk: "acceptable. lets move
+on". The W branch (W-1, L5, smooth bloom, the water fixes, smooth light, the ripples) is
+merged to main.
+
+**Standing rule for every animated effect:** nothing pops. Things fade in and out, or move
+continuously, on the every-frame clock.
+
+**W checkpoint 2** (fresh renderer-worker, own worktree off main):
+
+- **Refraction:** behind a tilted surface texel, the walk continues from a pixel offset by
+  the normal. Ripple lines are the only tilted texels now, so this may not read at all. If
+  it doesn't show at 13 px, drop it and say so.
+- **Shore foam:** on skin texels beside a solid, plus plunge foam where falling water meets
+  a pool surface (the derived flow already knows the falling cells). The foam breathes
+  (fades and shifts smoothly), with no blinking.
+- **Glints:** the sun (`[light] sun`) sits on the camera's side, so a true mirror glint
+  never lines up with this view. The default is a small sun-coloured highlight on ripple
+  lines tilted toward the sun, scaled by the line's fade, in sunlit, unshadowed water only.
+  Show it; Wrysk judges.
+- **Rain ripples:** rings on open-sky water (the sky plane > 0) while it rains
+  (`knobs.w`, rain_tick, is already in the uniform). Random drop sites per time slot; a
+  ring grows and fades. Ring density may later follow the weather handoff's rain intensity
+  (`design/handoffs/voxel-weather-2026-09-24.md`), but that isn't wired now.
+- **Budget:** at most +0.5 ms lit GPU at 13 px for all four. Flat stays byte-identical at
+  `config/tachyon/voxel.toml` 6 px, plain and textured.
+- **Evidence:** 60 fps GIFs, old on the left and new on the right, cropped to the lake,
+  the waterfall base and one shore. Make them with `light_capture --anim 240 --anim-hz 60`,
+  then ffmpeg palettegen/paletteuse. Rain needs a raining state; add a capture-only
+  override if needed.
+- **Stop:** once, with all four done.

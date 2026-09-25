@@ -8,8 +8,9 @@
 //!    collapsing floor does to a body.
 //! 2. **Maintenance.** `maintenance_per_s · body · dt` of organic matter is respired from
 //!    the reserve, and from the body once the reserve is empty (dieback). The energy in it
-//!    leaves as heat at the animal's own current density; the **mineral stays**, as it
-//!    does in a plant: respiration takes organic matter and leaves mineral behind. Ages
+//!    leaves as heat at the animal's own current density; the mineral it held is **shed
+//!    to the gut** by the same fraction, and every `GUT_VOID_S` the gut is voided onto
+//!    the ground as litter (dung). Ages
 //!    advance here, so `age_ticks` is the number of maintenance payments it has made.
 //!    Then **growth**: the reserve pays for new structure at no more than
 //!    `growth_max_per_s`, scaled by how full it is, until `body_max` (package G).
@@ -83,7 +84,8 @@ enum Respiration {
     /// The founder's paid motion, `motor_respiration_per_s` scaled by the requested
     /// equivalent displacement.
     Motor,
-    /// Digestion: the undigested fraction of a bite. Anything assimilated that the reserve
+    /// Digestion: the absorbed share of a bite its mineral cannot fund (the undigested
+    /// share is egested to the gut, not respired). Anything assimilated that the reserve
     /// could not hold would be booked here too, but the sated bite (package G) never takes
     /// more than the room after yield, so that share is zero by construction.
     Digestion,
@@ -172,6 +174,7 @@ fn tick_inner(
         cubarium_voxel::voxel_phase!(FaunaMaintenance, {
             maintenance(fauna);
             grow(fauna);
+            void_guts(fauna, flora);
         });
         // Maintenance and age settle first. A due field update then reads the litter as
         // it stands after the previous tick's feeding, before this tick's controllers.
@@ -228,7 +231,7 @@ fn terrain(fauna: &mut Fauna, view: &VoxelView<'_>) {
 ///
 /// Respiration is one helper shared with the motor budget: organic matter from the
 /// reserve and then from the body, the energy leaving with it at the animal's own
-/// current density, the mineral staying behind. It returns what was paid and how much
+/// current density, the mineral it held shed to the gut. It returns what was paid and how much
 /// of it came out of the body — the body's share is the structural loss a founder's
 /// `Self` channel reports, and it is internal tissue loss, not a fictitious injury
 /// model.
@@ -256,6 +259,15 @@ fn respire(fauna: &mut Fauna, i: usize, want: f64, kind: Respiration) -> (f64, f
         (a.energy * (paid / before)).min(a.energy)
     };
     a.energy -= e;
+    // The mineral that organic matter held is shed to the gut by the same fraction rule,
+    // so a body's mineral stays in proportion to its tissue instead of banking for life.
+    let m = if paid >= before {
+        a.mineral
+    } else {
+        (a.mineral * (paid / before)).min(a.mineral)
+    };
+    a.mineral -= m;
+    a.gut.mineral += m;
     book_respired(fauna, paid, kind);
     fauna.ledger.heat_out += e;
     (paid, from_body)
@@ -270,6 +282,25 @@ fn book_respired(fauna: &mut Fauna, paid: f64, kind: Respiration) {
         Respiration::Motor => fauna.ledger.respired_motor_out += paid,
         Respiration::Digestion => fauna.ledger.respired_digestion_out += paid,
         Respiration::Gestation => fauna.ledger.respired_gestation_out += paid,
+    }
+}
+
+/// How often an animal voids its gut, seconds. Review-tunable placeholder.
+pub(crate) const GUT_VOID_S: f64 = 30.0;
+
+/// Step 2, last: every animal whose age is a multiple of [`GUT_VOID_S`] empties its gut
+/// onto its own face as litter. Birth ticks stagger the voids; a gut holding only mineral
+/// goes straight to the soluble pool (the flora layer's zero-organic deposit rule).
+fn void_guts(fauna: &mut Fauna, flora: &mut Flora) {
+    let period = ((GUT_VOID_S / DT).round() as u64).max(1);
+    for i in 0..fauna.animals.len() {
+        let a = &mut fauna.animals[i];
+        if a.age_ticks % period != 0 {
+            continue;
+        }
+        let dung = std::mem::take(&mut a.gut);
+        let site = a.site;
+        fauna.book_deposit(flora, site, DepositKind::Litter, dung);
     }
 }
 
@@ -1244,7 +1275,7 @@ fn founder_feed(
         fauna.ledger.bites_by_plant[plant.index()] += 1;
         fauna.ledger.eaten_by_plant[plant.index()] += taken.organic;
     }
-    let placed = assimilate(fauna, flora, i, sc, taken, yield_fraction);
+    let placed = assimilate(fauna, i, sc, taken, yield_fraction);
     fauna.ledger.bites_by_founder[founder.index()] += 1;
     fauna.ledger.assimilated_by_founder[founder.index()] += placed;
     fauna.animals[i].founder_state.feedback.intake += placed;
@@ -1298,14 +1329,15 @@ fn crop(
             fauna.ledger.eaten_by_plant[plant.index()] += taken.organic;
         }
         left -= taken.organic;
-        assimilate(fauna, flora, i, sc, taken, sc.yield_fraction);
+        assimilate(fauna, i, sc, taken, sc.yield_fraction);
     }
 }
 
 /// A bite becoming tissue: the food class's own `yield_fraction` of it is built **as far as the bite's own
-/// mineral pays for**, the rest is respired, the energy follows the organic matter at the
-/// bite's own density, and the mineral that came with more tissue than was built is
-/// excreted.
+/// mineral pays for**, the undigested `(1 − yield)` share is egested, the unfunded rest is
+/// respired, the energy follows the organic matter at the
+/// bite's own density, and the undigested share and the mineral that came with more
+/// tissue than was built go to the gut, voided later as dung ([`void_guts`]).
 ///
 /// **The mineral budget comes before the tissue (Astra R9.1).** `n_tissue` is mineral per
 /// unit of tissue *built*, so a bite can only build `t.mineral / n_tissue` of it. At the
@@ -1330,7 +1362,6 @@ fn crop(
 /// organic matter.
 fn assimilate(
     fauna: &mut Fauna,
-    flora: &mut Flora,
     i: usize,
     sc: &SpeciesConfig,
     t: Taken,
@@ -1344,7 +1375,11 @@ fn assimilate(
         f64::INFINITY
     };
     let assimilated = (yield_fraction * t.organic).min(funded);
-    let mut respired = t.organic - assimilated;
+    // Egested: the share the yield never absorbs goes to the gut, not to heat. Only the
+    // absorbed matter the bite's mineral cannot fund (and the reserve backstop) is
+    // respired.
+    let egested = ((1.0 - yield_fraction) * t.organic).clamp(0.0, t.organic - assimilated);
+    let mut respired = (t.organic - assimilated - egested).max(0.0);
 
     // Store: into the reserve, up to `reserve_cap · body`. Structure is built out of the
     // reserve at the growth rate ([`grow`]), never straight from a bite. What the reserve
@@ -1365,29 +1400,23 @@ fn assimilate(
     };
     let kept_energy = kept_energy.min(t.energy);
     a.energy += kept_energy;
-    let heat = t.energy - kept_energy;
+    let egested_energy = if t.organic > 0.0 {
+        (t.energy * (egested / t.organic)).min(t.energy - kept_energy)
+    } else {
+        0.0
+    };
+    let heat = t.energy - kept_energy - egested_energy;
 
-    // Mineral: what the new tissue needs is kept and the excess is dung, which is litter
-    // this round. Mineral is never respired and never created.
+    // Mineral: what the new tissue needs is kept and the excess joins the gut, voided
+    // with the undigested matter as dung. Mineral is never respired and never created.
     let keep_mineral = t.mineral.min(sc.n_tissue * placed);
     a.mineral += keep_mineral;
-    let excess = t.mineral - keep_mineral;
-    let site = a.site;
+    a.gut.organic += egested;
+    a.gut.mineral += t.mineral - keep_mineral;
+    a.gut.energy += egested_energy;
 
     book_respired(fauna, respired, Respiration::Digestion);
     fauna.ledger.heat_out += heat;
-    if excess > 0.0 {
-        fauna.book_deposit(
-            flora,
-            site,
-            DepositKind::Litter,
-            Taken {
-                organic: 0.0,
-                mineral: excess,
-                energy: 0.0,
-            },
-        );
-    }
     placed
 }
 
@@ -1657,16 +1686,16 @@ fn gestate(
         mineral: e.mineral,
         energy: e.energy,
         age_ticks: 0,
+        gut: Taken::default(),
         state: State::Resting,
         mobility: crate::Mobility::default(),
     })
 }
 
 /// An interrupted gestation: the loss fraction of the escrowed organic matter is
-/// respired with the energy that was in it, and everything else — organic matter,
-/// **all** the mineral, the rest of the energy — goes back to the parent. The mineral
-/// comes back in full because respiration in this layer never takes mineral: it takes
-/// organic matter and leaves the mineral behind, in an animal as in a plant.
+/// respired with the energy that was in it, the mineral it held is shed to the parent's
+/// gut by the same fraction, and everything else — organic matter, mineral, the rest of
+/// the energy — goes back to the parent.
 fn fail_gestation(fauna: &mut Fauna, i: usize, rule: &crate::Reproduction) {
     let Some(e) = fauna.animals[i].reproduction.escrow.take() else {
         return;
@@ -1678,9 +1707,16 @@ fn fail_gestation(fauna: &mut Fauna, i: usize, rule: &crate::Reproduction) {
     } else {
         0.0
     };
+    // The lost share's mineral is shed to the gut, as every respiration sheds it.
+    let shed = if e.organic > 0.0 {
+        (e.mineral * (lost / e.organic)).min(e.mineral)
+    } else {
+        0.0
+    };
     let a = &mut fauna.animals[i];
     a.reserve += e.organic - lost;
-    a.mineral += e.mineral;
+    a.mineral += e.mineral - shed;
+    a.gut.mineral += shed;
     a.energy += e.energy - heat;
     if lost > 0.0 || heat > 0.0 {
         book_respired(fauna, lost, Respiration::Gestation);
@@ -1840,6 +1876,7 @@ fn hatch(fauna: &mut Fauna, view: &VoxelView<'_>, newborns: &mut Vec<Animal>) {
                 mineral: m,
                 energy: e,
                 age_ticks: 0,
+                gut: Taken::default(),
                 state: State::Resting,
                 mobility: crate::Mobility::default(),
             });
@@ -1931,12 +1968,16 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
             a.site,
             DepositKind::Carrion,
             Taken {
-                organic: a.organic(),
-                mineral: a.mineral,
-                energy: a.energy,
+                organic: a.organic() + a.gut.organic,
+                mineral: a.mineral + a.gut.mineral,
+                energy: a.energy + a.gut.energy,
             },
         );
         fauna.ledger.deaths += 1;
         fauna.book_departure(a, *cause);
     }
 }
+
+#[cfg(test)]
+#[path = "dung_tests.rs"]
+mod dung_tests;

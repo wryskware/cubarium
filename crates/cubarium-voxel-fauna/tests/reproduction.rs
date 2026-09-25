@@ -358,8 +358,8 @@ fn the_escrow_instalments_sum_to_the_birth_cost_and_the_reserve_falls_by_the_sam
 /// 0.001 — so that on the sixth tick maintenance empties the reserve and the instalment
 /// cannot be paid. The escrow is five instalments deep at that point; a quarter of its
 /// organic matter is respired with the energy that was in it, and the rest comes back,
-/// **all** of the mineral included, because respiration in this layer never takes
-/// mineral.
+/// **all** of the escrow's mineral included (the gestation loss sheds none; the parent's
+/// own upkeep sheds its share to the gut).
 #[test]
 fn a_reserve_that_cannot_pay_loses_the_loss_fraction_and_returns_the_rest() {
     let gest = 10u64;
@@ -432,11 +432,27 @@ fn a_reserve_that_cannot_pay_loses_the_loss_fraction_and_returns_the_rest() {
         "the reserve came back to {} and not {expected_reserve}",
         now.reserve
     );
+    // The tick's upkeep sheds the mineral its burned organic matter held to the gut, by
+    // the same fraction as its heat; the escrow's lost share sheds its mineral to the gut
+    // the same way, and the rest of the escrow's mineral comes back.
+    let maintenance_shed = if prev.organic() > 0.0 {
+        prev.mineral * (upkeep.min(prev.organic()) / prev.organic())
+    } else {
+        0.0
+    };
+    let escrow_shed = loss * e.mineral;
+    let expected_mineral = prev.mineral - maintenance_shed + e.mineral - escrow_shed;
     assert!(
-        (now.mineral - (prev.mineral + e.mineral)).abs() <= 1e-18,
-        "every unit of the escrow's mineral came back: {} against {}",
+        (now.mineral - expected_mineral).abs() <= 1e-15 * expected_mineral,
+        "the escrow's unlost mineral came back: {} against {expected_mineral}",
         now.mineral,
-        prev.mineral + e.mineral
+    );
+    assert!(
+        (now.gut.mineral - (prev.gut.mineral + maintenance_shed + escrow_shed)).abs()
+            <= 1e-15 * now.gut.mineral.max(1e-12),
+        "the upkeep's and the lost escrow's shed mineral is in the gut: {} against {}",
+        now.gut.mineral,
+        prev.gut.mineral + maintenance_shed + escrow_shed
     );
     let expected_energy = prev.energy - maintenance_heat + (1.0 - loss) * e.energy;
     assert!(
@@ -552,9 +568,17 @@ fn a_clutch_costs_the_parent_exactly_what_it_holds() {
         before.reserve - a.reserve,
         upkeep + cost
     );
+    // The upkeep sheds the mineral its burned organic matter held to the gut, by the
+    // same fraction as its heat; the rest of the fall is the clutch's.
+    let shed = before.mineral * (upkeep / before.organic());
     assert!(
-        (before.mineral - a.mineral - c.mineral).abs() <= 1e-18,
+        (before.mineral - a.mineral - shed - c.mineral).abs() <= 1e-15 * before.mineral,
         "the clutch's mineral is the parent's"
+    );
+    assert!(
+        (a.gut.mineral - shed).abs() <= 1e-15 * before.mineral,
+        "and the upkeep's share went to the gut: {} against {shed}",
+        a.gut.mineral
     );
     let heat = before.energy * (upkeep / before.organic());
     assert!(

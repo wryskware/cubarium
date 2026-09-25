@@ -38,7 +38,7 @@ use anyhow::{Context, Result, bail};
 use cubarium_gpu::vk::Gpu;
 use cubarium_gpu::voxel::{
     MAX_GLYPHS, MAX_STYLES, PART_ANIMAL_INTERIM, PART_NONE, PLANE_GLOW, PLANE_GLYPHS, PLANE_ROOF,
-    PLANE_SKY, SLOW_PLANES, VoxelParams, VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel, VoxelTextures,
+    PLANE_SKY, SLOW_PLANES, FrameClock, VoxelParams, VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel, VoxelTextures,
 };
 use cubarium_voxel::{Material, VoxelView, World};
 use cubarium_voxel_flora::{FaceDraw, Flora, FloraView};
@@ -100,6 +100,10 @@ pub struct VoxelGpuSink {
     /// Turns a tick's world into texels.
     packer: Packer,
     capture: Option<PathBuf>,
+    /// The lit tier's water animation rate (`[light] water_hz`).
+    water_hz: f32,
+    /// Whether the water moves every frame rather than in steps (`[light] water_smooth`).
+    water_smooth: bool,
     /// The sky this world is drawn under, kept while the founding frame dims it.
     founding_sky: Option<([f32; 3], [f32; 3])>,
     /// When the founding frame's pulse started, so a held founding frame keeps its phase.
@@ -177,6 +181,8 @@ impl VoxelGpuSink {
                 Emission::of(cfg),
             ),
             capture: options.capture,
+            water_hz: cfg.light.water_hz,
+            water_smooth: cfg.light.water_smooth,
             founding_sky: None,
             founding_since: None,
             awaiting_light: false,
@@ -272,9 +278,32 @@ impl VoxelGpuSink {
             0.0
         };
         self.renderer.update_weather(atmosphere, rain_tick);
+        self.renderer.set_water_visible(self.packer.wet);
         self.ticks_staged += 1;
         self.pack_ms += (Instant::now() - started).as_secs_f64() * 1e3;
         true
+    }
+
+    /// The frame's time: the sim's `tick` plus the `fraction` of the next tick elapsed.
+    /// The lit tier's water animates on it (`[light] water_hz` steps a second of sim
+    /// time), and redraws a frame whose step has moved while there is water; the flat
+    /// tier ignores it.
+    pub fn set_clock(&mut self, tick: u64, fraction: f64) {
+        self.renderer.set_clock(FrameClock::at(
+            tick,
+            fraction,
+            f64::from(self.water_hz),
+            f64::from(cubarium_voxel::TICK_HZ),
+            self.water_smooth,
+        ));
+    }
+
+    /// Capture-only: draw the lit tier's derived water flow field over the water instead
+    /// of the water (`VoxelParams::debug_flow`). Never set by the live display.
+    pub fn set_debug_flow(&mut self, on: bool) -> Result<()> {
+        let mut params = self.renderer.params();
+        params.debug_flow = on;
+        self.renderer.set_params(params)
     }
 
     /// Whether the lit tier's sky plane for the terrain last staged is still being
@@ -577,6 +606,8 @@ struct Packer {
     /// The lit tier's planes (`super::light`), or `None` in the flat tier, which packs
     /// neither.
     light: Option<LightPlanes>,
+    /// Whether the last fill wrote any free water (the lit tier animates it).
+    wet: bool,
 }
 
 /// The lit tier's emitters ([`crate::voxel::LightConfig`]'s `emission`, `glow`,
@@ -654,10 +685,12 @@ impl Packer {
             stands.track_owners();
             stands.set_emission(emission.on);
         }
+        let mut animals = Animals::empty(p.width, p.height, p.depth);
+        animals.set_emission(p.lit && emission.on);
         Packer {
             stands,
             vine_tiles: tiles,
-            animals: Animals::empty(p.width, p.height, p.depth),
+            animals,
             models,
             styles: Vec::new(),
             species,
@@ -671,6 +704,7 @@ impl Packer {
             overlay: Vec::new(),
             vines: Vec::new(),
             cover_override: None,
+            wet: false,
             light: p.lit.then(|| LightPlanes {
                 sky: vec![255; p.voxel_count()],
                 sky_key: 0,
@@ -769,6 +803,11 @@ impl Packer {
                     let rgb = stands.emission(stands.at(i64::from(x), i64::from(y), z))?;
                     Some(((x, y, z), rgb))
                 }));
+                let animals = &self.animals;
+                l.emitters.extend(animals.cells().filter_map(|(x, y, z)| {
+                    let rgb = animals.emission(animals.at(i64::from(x), i64::from(y), z))?;
+                    Some(((x, y, z), rgb))
+                }));
                 for c in self.vines.iter().filter(|c| c.kind.tiled()) {
                     if let Some(rgb) = colours::vine_emission(c.accent) {
                         l.emitters.push(((c.x, c.y, c.z), srgb_linear(rgb)));
@@ -788,6 +827,7 @@ impl Packer {
         self.styles.clear();
         self.slot_of.clear();
         let (wu, hu, du) = (w as usize, h as usize, d as usize);
+        let mut wet = 0u8;
         // Material and water, every voxel, walking the world's `(y · depth + z) · width
         // + x` rows into the texture's `(z · height + y) · width + x` rows: both run x
         // fastest, so each row is one contiguous read and one contiguous write.
@@ -800,9 +840,11 @@ impl Packer {
                 let pore = &view.pore[src..src + wu];
                 for (x, texel) in out.voxels[dst..dst + wu].iter_mut().enumerate() {
                     *texel = texel_of(material[x], free[x], pore[x], PART_NONE, 0, 0);
+                    wet |= texel.0[1];
                 }
             }
         }
+        self.wet = wet != 0;
         // Then the plants and animals, only where they stand, in texture order.
         let stands = &self.stands;
         let animals = &self.animals;
@@ -838,11 +880,18 @@ impl Packer {
             // In the lit tier a stand's cell carries its canopy and crown pass in `b`.
             let mut plant = None;
             let (part, glyph, slot) = if let Some(style) = animals.style(beast) {
+                // An emitting part (lit tier, `colours::animal_emission`) draws the
+                // emissive animal glyph in its emissive colour.
+                let emit = animals.emission(beast);
+                let glyph = match emit {
+                    Some(_) => appearance::animal_emissive_glyph(beast.glyph()),
+                    None => beast.glyph(),
+                };
                 (
                     PART_ANIMAL_INTERIM,
-                    beast.glyph().0,
+                    glyph.0,
                     slot_for_style(
-                        (style, 0, [None; 2], None),
+                        (style, 0, [None; 2], emit.map(|e| emit_key(e, false))),
                         &mut self.styles,
                         &mut self.style_overflow,
                     ),
@@ -895,7 +944,8 @@ impl Packer {
             out.styles[slot] = VoxelStyle::new(style.wood, style.crown, style.heart)
                 .with_role(*role)
                 .with_faces(*faces)
-                .with_emit(emit.map(|e| e.map(f32::from_bits)));
+                .with_emit(emit.map(|e| [e[0], e[1], e[2]].map(f32::from_bits)))
+                .emit_whole(emit.is_some_and(|e| e[3] != 0));
         }
         if out.write[PLANE_ROOF] {
             out.roof.copy_from_slice(&self.roof);
@@ -961,9 +1011,15 @@ fn roof_table(material: &[Material], w: u32, h: u32, d: u32, out: &mut [u8]) {
     }
 }
 
-/// One GPU style slot's contents: the colours, the texture role (`ROLE_*`) and the
-/// species face slots (`VoxelStyle::with_faces`).
-type StyleKey = (Style, u8, [Option<u16>; 2], Option<[u32; 3]>);
+/// One GPU style slot's contents: the colours, the texture role (`ROLE_*`), the species
+/// face slots (`VoxelStyle::with_faces`) and the emission ([`emit_key`]).
+type StyleKey = (Style, u8, [Option<u16>; 2], Option<[u32; 4]>);
+
+/// An emissive colour and its whole-cell flag as a style key: the colour's bits, then 1
+/// for a whole-cell emitter (`VoxelStyle::emit_whole`).
+fn emit_key(rgb: [f32; 3], whole: bool) -> [u32; 4] {
+    [rgb[0].to_bits(), rgb[1].to_bits(), rgb[2].to_bits(), u32::from(whole)]
+}
 
 /// The GPU slot for a style that has no plant part index to cache under (an animal's),
 /// deduplicated by value against the same table the plants fill.
@@ -1016,7 +1072,7 @@ fn slot_for(
     };
     let cell = stands.model_cell(part);
     let faces = cell.map_or([None; 2], |(sp, tag)| species.faces(sp, tag));
-    let emit = stands.emission(part).map(|e| e.map(f32::to_bits));
+    let emit = stands.emission(part).map(|e| emit_key(e, stands.emits_whole(part)));
     let style = (style, role_of(cell.map(|(_, tag)| tag)), faces, emit);
     let slot = match styles.iter().position(|s| *s == style) {
         Some(at) => at as u8,
@@ -1111,11 +1167,27 @@ pub fn params_of(cfg: &VoxelConfig, proj: Projection, roof_from_texture: bool) -
         lit: cfg.lighting == Lighting::Lit,
         ambient_gain: cfg.light.ambient_gain,
         ambient_floor: cfg.light.ambient_floor.clamp(0.0, 1.0),
-        light_levels: cfg.light.levels.max(2),
+        light_levels: cfg.light.levels,
         ao_strength: cfg.light.ao.clamp(0.0, 1.0),
         ambient_colour: ambient_colour(cpu::sky(), cfg.light.ambient_tint),
         sun: sun_direction(cfg.light.sun),
         sun_tint: cfg.light.sun_tint.clamp(0.0, 1.0),
+        water_absorb: cfg.light.water_absorb.max(0.0),
+        reflect_gain: cfg.light.water_reflect.max(0.0),
+        ripple: cfg.light.water_ripple.max(0.0),
+        reflect_cells: cfg.light.water_reflect_cells,
+        // Nothing to bloom without emitters: the passes are skipped.
+        bloom: if cfg.lighting == Lighting::Lit && cfg.light.emission {
+            cfg.light.bloom.max(0.0)
+        } else {
+            0.0
+        },
+        bloom_radius: cfg.light.bloom_radius,
+        bloom_style: match cfg.light.bloom_style {
+            crate::voxel::BloomStyle::Smooth => cubarium_gpu::bloom::BloomStyle::Smooth,
+            crate::voxel::BloomStyle::Blocky => cubarium_gpu::bloom::BloomStyle::Blocky,
+        },
+        debug_flow: false,
     }
 }
 

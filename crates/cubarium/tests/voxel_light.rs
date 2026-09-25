@@ -230,6 +230,17 @@ fn voxel_ao_is_a_crease_band_along_occluded_edges() {
 /// rounding.
 #[test]
 fn a_pillar_casts_its_analytic_shadow_one_rung_down() {
+    pillar_shadow(2, |sky, sun| sky.round() + sun);
+}
+
+/// The same pillar in smooth light (`levels = 0`): a floor texel is its base times
+/// `GAIN × (sky + sun / 3)`, the sky unrounded, and the shadow keeps its hard texel edge.
+#[test]
+fn in_smooth_light_the_pillar_shadow_is_a_third_of_full_light_down() {
+    pillar_shadow(0, |sky, sun| sky + sun / 3.0);
+}
+
+fn pillar_shadow(levels: u32, light_of: impl Fn(f32, f32) -> f32) {
     const GAIN: f32 = 2.0;
     let c = Config {
         width: 16,
@@ -260,7 +271,7 @@ fn a_pillar_casts_its_analytic_shadow_one_rung_down() {
         sky_gradient: false,
         lighting: Lighting::Lit,
         light: LightConfig {
-            levels: 2,
+            levels,
             ambient_gain: GAIN,
             ambient_floor: 0.0,
             ao: 0.0,
@@ -324,7 +335,7 @@ fn a_pillar_casts_its_analytic_shadow_one_rung_down() {
                     } else {
                         lit += 1;
                     }
-                    let light = GAIN * ((sky as f32).round() + sun);
+                    let light = GAIN * light_of(sky as f32, sun);
                     let want: Vec<u8> = rock
                         .iter()
                         .map(|b| (srgb(b * light) * 255.0).round() as u8)
@@ -379,4 +390,96 @@ fn lit_frame(cfg: &VoxelConfig, proj: Projection, world: &World) -> Option<Vec<u
     }
     gpu.render().expect("one GPU frame");
     Some(gpu.read_raster().expect("the raster reads back"))
+}
+
+/// Package W's boundary rule: the lit tier changes the water's colour only inside the
+/// flat tier's water pixels. A pixel is "water" in a tier where its colour differs between
+/// the world with its free water and the same world dry; on a fixture with a pool (and a
+/// brim-full cell in it, open above), a falling column and a thin sheet, `flat` and `lit`
+/// (with the sun, reflection and ripples at their defaults) mark exactly the same pixels.
+#[test]
+fn lit_water_marks_exactly_the_flat_tiers_water_pixels() {
+    let c = Config {
+        width: 16,
+        height: 10,
+        depth: 6,
+        ..Config::default()
+    };
+    let mut dry = World::empty(c.clone());
+    let mut set = |x: i64, y: u32, z: u32, material: Material| {
+        dry.apply(Command::SetMaterial { x, y, z, material });
+    };
+    for z in 0..c.depth {
+        for x in 0..i64::from(c.width) {
+            set(x, 0, z, Material::Bedrock);
+            set(x, 1, z, Material::Rock);
+        }
+    }
+    // A basin two deep at x 3..7, z 1..4, walled at y 2..3; a ledge at x 11 for the falling
+    // column to leave from.
+    for z in 0..5 {
+        for x in 2..9 {
+            let inside = (3..8).contains(&x) && (1..4).contains(&z);
+            if !inside {
+                set(x, 2, z, Material::Rock);
+                set(x, 3, z, Material::Rock);
+            }
+        }
+    }
+    for y in 2..7 {
+        set(12, y, 3, Material::Rock);
+    }
+    let cell = c.voxel_m.powi(3);
+    let mut wet = dry.clone();
+    let mut add = |x: i64, y: u32, z: u32, fraction: f64| {
+        wet.apply(Command::AddWater {
+            x,
+            y,
+            z,
+            volume_m3: fraction * cell,
+        });
+    };
+    for z in 1..4 {
+        for x in 3..8 {
+            add(x, 2, z, 1.0);
+            // The top layer: part-full, and brim-full at (5, 3, 2) with air over it.
+            add(x, 3, z, if (x, z) == (5, 2) { 1.0 } else { 0.6 });
+        }
+    }
+    // A falling column in front of the ledge: every other cell, over air.
+    for y in [3u32, 5, 7] {
+        add(11, y, 3, 0.05);
+    }
+    // A thin sheet on the open floor.
+    for x in 10..14 {
+        add(x, 2, 1, 0.1);
+    }
+
+    let mut masks = Vec::new();
+    for lighting in [Lighting::Flat, Lighting::Lit] {
+        let cfg = VoxelConfig {
+            world: c.clone(),
+            px_per_voxel: 8,
+            lighting,
+            ..VoxelConfig::default()
+        };
+        let proj =
+            Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, &c).unwrap();
+        let (Some(with), Some(without)) = (
+            lit_frame(&cfg, proj, &wet),
+            lit_frame(&cfg, proj, &dry),
+        ) else {
+            return;
+        };
+        let mask: Vec<bool> = with
+            .chunks(4)
+            .zip(without.chunks(4))
+            .map(|(a, b)| a[..3] != b[..3])
+            .collect();
+        masks.push(mask);
+    }
+    let count = masks[0].iter().filter(|&&m| m).count();
+    assert!(count > 300, "the fixture's water covers only {count} pixels");
+    let differ = masks[0].iter().zip(&masks[1]).filter(|(a, b)| a != b).count();
+    assert_eq!(differ, 0, "{differ} of {count} water pixels differ between flat and lit");
 }

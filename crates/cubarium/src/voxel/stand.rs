@@ -318,9 +318,10 @@ pub struct Stands {
     /// the GPU renderer's lit tier with emission on. Off, no style emits and the styles are
     /// exactly what they were before emission existed.
     emission: bool,
-    /// Each style's emissive colour in linear light, beside `styles`; shorter than it, or
-    /// `None`, for a style that does not emit.
-    emits: Vec<Option<[f32; 3]>>,
+    /// Each style's emissive colour in linear light and whether its whole cell emits
+    /// ([`colours::Glow`]), beside `styles`; shorter than it, or `None`, for a style that
+    /// does not emit.
+    emits: Vec<Option<([f32; 3], bool)>>,
 }
 
 /// A glowcap at or below this wood is a button, which the dossier draws without its lip
@@ -428,17 +429,29 @@ impl Stands {
     /// `None`.
     #[inline]
     pub fn emission(&self, part: Part) -> Option<[f32; 3]> {
+        self.glow(part).map(|g| g.0)
+    }
+
+    /// Whether every texel of an emitting part's cell emits, not only the ones its glyph
+    /// marks ([`colours::Glow::whole`]).
+    #[inline]
+    pub fn emits_whole(&self, part: Part) -> bool {
+        self.glow(part).is_some_and(|g| g.1)
+    }
+
+    #[inline]
+    fn glow(&self, part: Part) -> Option<([f32; 3], bool)> {
         let s = usize::from(part.style()?);
         self.emits.get(s).copied().flatten()
     }
 
-    fn set_emit(&mut self, style: u16, rgb: Option<colours::Rgb>) {
-        if let Some(rgb) = rgb {
+    fn set_emit(&mut self, style: u16, glow: Option<colours::Glow>) {
+        if let Some(g) = glow {
             let s = usize::from(style);
             if self.emits.len() <= s {
                 self.emits.resize(s + 1, None);
             }
-            self.emits[s] = Some(srgb_linear(rgb));
+            self.emits[s] = Some((srgb_linear(g.rgb), g.whole));
         }
     }
 
@@ -651,7 +664,9 @@ impl Stands {
                         heart: srgb_linear(sw.glint),
                     });
                     if self.emission {
-                        self.set_emit(s, colours::vine_emission(c.accent));
+                        let glow = colours::vine_emission(c.accent)
+                            .map(|rgb| colours::Glow { rgb, whole: false });
+                        self.set_emit(s, glow);
                     }
                     styles[key] = Some(s);
                     s
@@ -811,8 +826,8 @@ impl Stands {
         self.model_tags.resize(self.styles.len(), None);
         self.model_tags[usize::from(style)] = Some((key.species, key.tag));
         if self.emission {
-            let rgb = colours::plant_emission(key.species, key.tag, key.material, key.ripe, key.lip);
-            self.set_emit(style, rgb);
+            let glow = colours::plant_emission(key.species, key.tag, key.material, key.ripe, key.lip);
+            self.set_emit(style, glow);
         }
         self.model_styles[index] = style;
         Some(style)
