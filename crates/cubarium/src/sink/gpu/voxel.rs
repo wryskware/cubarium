@@ -1310,6 +1310,7 @@ pub fn params_of(cfg: &VoxelConfig, proj: Projection, roof_from_texture: bool) -
             crate::voxel::DaySky::Lilac => cubarium_gpu::weather::DaySky::Lilac,
         },
         star_bloom: cfg.light.star_bloom.max(0.0),
+        day_sky_brightness: cfg.light.day_sky_brightness.clamp(0.0, 2.0),
     }
 }
 
