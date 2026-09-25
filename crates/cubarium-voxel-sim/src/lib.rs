@@ -183,7 +183,15 @@ impl SimConfig {
     ///
     /// The water's rayon pool and the compute pool the plants and animals split their
     /// reads over are separate, and the two legs run at once, so both at `threads` can
-    /// put twice as many busy threads as cores.
+    /// put twice as many busy threads as cores. **Both at `threads` anyway**: it was the
+    /// fastest split measured (eidolon, terrarium seed 1, 3 cores / 6 threads, minutes
+    /// 242-290, ms/tick): 6:6 12.80, 6:3 13.19, 4:2 13.19, 6:2 13.63, 4:1 15.32, 5:1 15.39,
+    /// chained 14.01. The plant leg is the long one on a grown world and its light and
+    /// drink reads need their workers; fewer water workers buy it nothing. Giving it a
+    /// physical core of its own (`cubarium::voxel::chiplet::split_overlap_pools`) was 4 %
+    /// faster at hour 6 and 40 % slower while the young world is water-bound; renicing
+    /// the water pool changed nothing. `CUBARIUM_OVERLAP_SPLIT=W,B` and
+    /// [`set_overlap_split`] override it for measurement.
     pub fn overlap_split(&self) -> (usize, usize) {
         let n = self.threads.max(1);
         if let Some((w, b)) = split_override() {
