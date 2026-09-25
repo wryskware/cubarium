@@ -140,6 +140,8 @@ pub const RH_MAX: f64 = 1.5;
 /// Evaporation from open water scales with `max(0, 1 − RH) / EVAPORATION_RH_SPAN`: the
 /// configured rate at RH 0.6, none at saturation.
 pub const EVAPORATION_RH_SPAN: f64 = 0.4;
+/// The atmosphere-fed stream draws only while the sky stands above this RH (WX1b).
+pub const STREAM_FLOOR_RH: f64 = 0.5;
 /// The sun's elevation at noon, degrees.
 pub const NOON_ELEVATION_DEG: f64 = 70.0;
 /// Civil twilight: daylight is a smoothstep of the elevation over ±this many degrees.
@@ -491,15 +493,17 @@ pub fn afternoon_bump(sun: &Sun, width: f64) -> f64 {
 
 /// One rain mode's row of the climate: its hazard, its rate, and when it stops.
 ///
-/// `λ = lambda_max_per_h · σ((RH − rh50) / width) · max(0, 1 + g_aft·A + g_cool·K + g_front·F)`
-/// events per simulated hour ([`hazard`]).
+/// `λ = lambda_max_per_h · σ((H − rh50) / width) · max(0, 1 + g_aft·A + g_cool·K + g_front·F)`
+/// events per simulated hour ([`hazard`]). `H` is the mode's humidity reading
+/// ([`reads_moisture`]): RH for drizzle, a saturation effect; the moisture `M` for the
+/// convective modes, shower and downpour (WX1b).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RainParams {
     /// Events per simulated hour at saturation of the logistic and no boosts.
     pub lambda_max_per_h: f64,
-    /// The RH at which the logistic is half.
+    /// The humidity (RH, or `M` for a convective mode) at which the logistic is half.
     pub rh50: f64,
-    /// The logistic's width in RH.
+    /// The logistic's width in the same reading.
     pub width: f64,
     /// Gains on the afternoon bump `A`, the cooling rate `K` (°C per simulated hour,
     /// capped) and a fresh front `F`.
@@ -508,7 +512,7 @@ pub struct RainParams {
     pub g_front: f64,
     /// The rate it rains at, in multiples of [`crate::Config::rain_m_per_s`] (R₀).
     pub rate_r0: f64,
-    /// The event ends when RH falls to this.
+    /// The event ends when its humidity reading (RH, or `M`) falls to this.
     pub stop_rh: f64,
     /// Or when it has rained this long, minutes of nature (the weather speed divides it).
     pub longest_min: f64,
@@ -854,15 +858,10 @@ impl Climate {
     /// Lowland tropical rainforest (`design/handoffs/voxel-weather-2026-09-24.md`, "The
     /// model"): the brief's starting values, calibrated in WX1.
     ///
-    /// **Calibration (WX1).** At the brief's values every terrarium arm rained at night
-    /// and dawn (0–3 % of the volume between 12:00 and 18:00): a fixed store under a
-    /// warming sky reads its lowest RH in the afternoon, and `g_cool > 0` fed the
-    /// evening. So showers and downpours are made **convective**: a small base hazard
-    /// with a large afternoon gain (8 and 30) and a mild suppression while the air cools
-    /// (`g_cool` −0.2, so 0.4× at the 3 °C/h cap), and a downpour that fires at a
-    /// moister-than-average afternoon (rh50 0.8). Drizzle keeps the brief's nocturnal
-    /// shape, a little rarer (λ 0.8, rh50 0.95). The diurnal swing is ±3 °C (nature's
-    /// 6–10 °C range, low end), which keeps nights from pushing RH to the forced limit.
+    /// **Calibration (WX1b).** Showers and downpours read the moisture `M`
+    /// ([`reads_moisture`]), so they start from the brief's shape in `M`; round 3's
+    /// workarounds for the RH gate (afternoon gains 8 and 30, rh50 0.8–0.9, negative
+    /// cooling gains) are undone. The recalibrated values follow in their own commit.
     pub fn tropical_jungle() -> Climate {
         Climate {
             preset: ClimatePreset::TropicalJungle,
@@ -910,11 +909,11 @@ impl Climate {
                 cool_c: 0.5,
             },
             shower: RainParams {
-                lambda_max_per_h: 0.5,
-                rh50: 0.9,
-                width: 0.05,
-                g_aft: 8.0,
-                g_cool: -0.2,
+                lambda_max_per_h: 2.0,
+                rh50: 1.0,
+                width: 0.04,
+                g_aft: 1.0,
+                g_cool: 0.5,
                 g_front: 1.0,
                 rate_r0: 1.0,
                 stop_rh: 0.7,
@@ -922,11 +921,11 @@ impl Climate {
                 cool_c: 1.5,
             },
             downpour: RainParams {
-                lambda_max_per_h: 0.15,
-                rh50: 0.8,
-                width: 0.05,
-                g_aft: 30.0,
-                g_cool: -0.2,
+                lambda_max_per_h: 1.5,
+                rh50: 1.15,
+                width: 0.04,
+                g_aft: 3.0,
+                g_cool: 0.5,
                 g_front: 3.0,
                 rate_r0: 2.5,
                 stop_rh: 0.5,
@@ -1016,8 +1015,21 @@ pub fn evaporation_scale(c: &Climate, rh: f64, t_c: f64) -> f64 {
     (1.0 - rh).max(0.0) / EVAPORATION_RH_SPAN * (CC_PER_C * (t_c - c.temperature_c)).exp()
 }
 
-/// A mode's hazard, events per simulated hour. Zero at or under the mode's stop RH: an
-/// event that would end the tick it starts is not drawn.
+/// Whether a mode's start and stop read the moisture `M` rather than RH (WX1b).
+///
+/// With one lumped store, RH is lowest in the afternoon, when the capacity peaks with the
+/// temperature, so an RH gate fought the afternoon bump: round 3 put 0–35 % of the rain
+/// in 12–18 and started storms at RH 0.65–0.77. Convection is fed by how much water the
+/// air carries, not by how near it is to saturation, so showers and downpours read
+/// `M = atmosphere / C(temperature_c)`. Drizzle, fog, the soft evaporation limit and the
+/// hard limit keep RH: those are saturation effects.
+pub fn reads_moisture(mode: RainMode) -> bool {
+    matches!(mode, RainMode::Shower | RainMode::Downpour)
+}
+
+/// A mode's hazard, events per simulated hour, at its humidity reading `rh` (RH, or `M`
+/// for a convective mode). Zero at or under the mode's stop value: an event that would
+/// end the tick it starts is not drawn.
 pub fn hazard(p: &RainParams, rh: f64, a: f64, k: f64, f: f64) -> f64 {
     if rh <= p.stop_rh || !(p.lambda_max_per_h > 0.0) {
         return 0.0;
@@ -1070,8 +1082,9 @@ pub struct EventRecord {
     pub start_tick: u64,
     /// The first tick without its rain. Equal to `start_tick` while it runs.
     pub end_tick: u64,
-    /// RH, °C and the day's phase at the start.
+    /// RH, the moisture `M`, °C and the day's phase at the start.
     pub rh: f64,
+    pub moisture: f64,
     pub temperature_c: f64,
     pub day_phase: f64,
     /// Seconds since the previous event ended; `None` for the world's first.
@@ -1346,8 +1359,11 @@ fn events(w: &mut World, c: &Climate, a: f64, f: f64) {
         start(w, c, RainMode::Downpour, Cause::Forced);
     } else if w.weather.event.is_none() && tick % TICKS_PER_MIN == 0 {
         let k = w.weather.cooling_c_per_h;
-        let p = [&c.drizzle, &c.shower, &c.downpour].map(|m| {
-            let l = hazard(m, rh, a, k, f);
+        let moist = w.moisture();
+        let p = MODES.map(|mode| {
+            let m = c.mode(mode).expect("a rain mode");
+            let h = if reads_moisture(mode) { moist } else { rh };
+            let l = hazard(m, h, a, k, f);
             1.0 - (-l / 60.0).exp()
         });
         let scale = p.iter().sum::<f64>().max(1.0);
@@ -1385,7 +1401,8 @@ fn events(w: &mut World, c: &Climate, a: f64, f: f64) {
 
     let opening = (c.opening_min_s * f64::from(TICK_HZ)).round() as u64;
     let early = e.cause == Cause::Opening && tick + 1 - e.start_tick < opening;
-    if !(fell > 0.0) || w.atmosphere_m3 <= 0.0 || (w.rh() <= params.stop_rh && !early) {
+    let reading = if reads_moisture(e.mode) { w.moisture() } else { w.rh() };
+    if !(fell > 0.0) || w.atmosphere_m3 <= 0.0 || (reading <= params.stop_rh && !early) {
         end(w, c, tick + 1);
     }
 }
@@ -1408,6 +1425,7 @@ fn swell(w: &mut World, c: &Climate) {
 fn start(w: &mut World, c: &Climate, mode: RainMode, cause: Cause) {
     let tick = w.tick;
     let rh = w.rh();
+    let moisture = w.moisture();
     let wx = &mut w.weather;
     wx.event = Some(EventRecord {
         mode,
@@ -1415,6 +1433,7 @@ fn start(w: &mut World, c: &Climate, mode: RainMode, cause: Cause) {
         start_tick: tick,
         end_tick: tick,
         rh,
+        moisture,
         temperature_c: wx.temp_c,
         day_phase: wx.sun.phase,
         since_previous_s: wx.last_end.map(|e| tick.saturating_sub(e) as f64 * DT),
@@ -1568,6 +1587,32 @@ impl World {
         } else {
             0.0
         }
+    }
+
+    /// The air's moisture `M`: the atmosphere store over what the air holds at the
+    /// climate's **mean** temperature, so it moves only with the store, not with the day's
+    /// warmth. What showers and downpours start and stop on ([`reads_moisture`]). Zero
+    /// under the open budget.
+    pub fn moisture(&self) -> f64 {
+        let cap = self
+            .config
+            .climate
+            .capacity_m3(self.ledger.expected_total(), self.config.climate.temperature_c);
+        if cap > 0.0 {
+            self.atmosphere_m3 / cap
+        } else {
+            0.0
+        }
+    }
+
+    /// What the atmosphere-fed stream leaves aloft, cubic metres: RH
+    /// [`STREAM_FLOOR_RH`] of what the air holds at its temperature now.
+    pub fn stream_floor_m3(&self) -> f64 {
+        STREAM_FLOOR_RH
+            * self
+                .config
+                .climate
+                .capacity_m3(self.ledger.expected_total(), self.weather.temp_c)
     }
 
     /// The simulation's daylight, 0..1 — what plants and animals live by. Always 1 with

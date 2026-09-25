@@ -123,7 +123,7 @@ pub struct Viability {
     /// one, a probe window shorter than the shortest gap can contain no rain event however
     /// healthy the cycle is, so `showers_enough` stops being a count and becomes "the store
     /// can still pay for the next one": the atmosphere at the end of the window against
-    /// the floor the stream keeps aloft ([`crate::Config::reentry_floor_fraction`]).
+    /// the floor the stream keeps aloft ([`crate::World::stream_floor_m3`], RH 0.5).
     pub scheduled: bool,
     pub store_end: f64,
     pub store_floor: f64,
@@ -230,7 +230,7 @@ pub fn measure(world: &mut World, spec: &ViabilitySpec) -> Viability {
     // matters is whether the store can still pay for the next one when it comes due.
     let scheduled = world.config.climate.dry_gap_max_s > 0.0;
     let store_end = world.atmosphere_m3;
-    let store_floor = world.config.reentry_floor_fraction * world.ledger.expected_total();
+    let store_floor = world.stream_floor_m3();
     let showers_enough = if scheduled {
         store_end >= store_floor
     } else {
@@ -400,7 +400,6 @@ mod tests {
             evaporation_m_per_s: 3.0e-5,
             closed_water_budget: true,
             initial_atmosphere_m3: atmosphere_m3,
-            reentry_floor_fraction: 0.01,
             // The climate's own gap, five minutes at least: longer than the probe's own
             // window, which is the whole point.
             initial_aquifer_head_m: 0.4,

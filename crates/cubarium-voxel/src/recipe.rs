@@ -620,9 +620,6 @@ pub struct Water {
     /// Evaporation from open free-water surfaces at the mean temperature and RH 0.6,
     /// metres per second (`crate::weather::evaporation_scale`).
     pub evaporation_m_per_s: f64,
-    /// The share of the world's water the atmosphere-fed stream leaves aloft:
-    /// [`crate::Config::reentry_floor_fraction`].
-    pub reentry_floor_fraction: f64,
 
     /// How deep the ring's **lake** — the lowest open-sky basin — stands before it
     /// overflows into the outlet, metres above its floor. The outlet sits at this level on
@@ -637,7 +634,7 @@ pub struct Water {
     /// **River re-entry**, cubic metres per second: under the closed budget the water the
     /// outlet sends aloft comes back not only as showers but as a stream emerging at the
     /// spring cell, drawn from the atmosphere store while it stands above
-    /// `reentry_floor_fraction`. The ring is a slice of a wider world; the river that leaves at the bottom
+    /// RH [`crate::weather::STREAM_FLOOR_RH`]. The ring is a slice of a wider world; the river that leaves at the bottom
     /// lake re-enters at the top. Zero is showers only, the 2026-09-20 route B cycle.
     /// Wrysk's decision, 2026-09-21.
     pub reentry_m3_per_s: f64,
@@ -669,7 +666,6 @@ impl Water {
         closed_cycle: false,
         rain_m_per_s: 0.0,
         evaporation_m_per_s: 0.0,
-        reentry_floor_fraction: 0.02,
         lake_depth_m: 0.0,
         min_lake_m2: 0.0,
         reentry_m3_per_s: 0.0,
@@ -702,7 +698,6 @@ impl Water {
         closed_cycle: true,
         rain_m_per_s: 3.5e-5,
         evaporation_m_per_s: 3.0e-5,
-        reentry_floor_fraction: 0.01,
         // Three voxels at 0.25 m. The lake holds the rows **below** the datum — the outlet
         // sits in the datum row, on a rim column whose ground tops out just under it — so
         // this is a two-voxel, half-metre pond. Two voxels of ask leaves one voxel of
@@ -772,7 +767,6 @@ impl Water {
             ("water.aquifer_head_m", self.aquifer_head_m),
             ("water.rain_m_per_s", self.rain_m_per_s),
             ("water.evaporation_m_per_s", self.evaporation_m_per_s),
-            ("water.reentry_floor_fraction", self.reentry_floor_fraction),
             ("water.lake_depth_m", self.lake_depth_m),
             ("water.min_lake_m2", self.min_lake_m2),
             ("water.reentry_m3_per_s", self.reentry_m3_per_s),
@@ -788,11 +782,6 @@ impl Water {
             "water.atmosphere_fraction is a share of the inventory, not {}",
             self.atmosphere_fraction
         );
-        anyhow::ensure!(
-            self.reentry_floor_fraction <= 1.0,
-            "water.reentry_floor_fraction is a share of the world's water, not {}",
-            self.reentry_floor_fraction
-        );
         Ok(())
     }
 
@@ -806,7 +795,6 @@ impl Water {
         c.closed_water_budget = self.closed_cycle;
         c.rain_m_per_s = self.rain_m_per_s;
         c.evaporation_m_per_s = self.evaporation_m_per_s;
-        c.reentry_floor_fraction = self.reentry_floor_fraction;
         c.reentry_m3_per_s = self.reentry_m3_per_s;
         c.reentry_from_aquifer = self.reentry_from_aquifer;
         c.lake_drain_m2_per_s = self.lake_drain_m2_per_s;
@@ -1420,7 +1408,6 @@ mod tests {
             closed_cycle: true,
             rain_m_per_s: 3e-5,
             evaporation_m_per_s: 1e-5,
-            reentry_floor_fraction: 0.07,
             ..Water::DRY
         };
         let mut c = Config::default();
@@ -1428,7 +1415,6 @@ mod tests {
         assert!(c.closed_water_budget);
         assert_eq!(c.rain_m_per_s, 3e-5);
         assert_eq!(c.evaporation_m_per_s, 1e-5);
-        assert_eq!(c.reentry_floor_fraction, 0.07);
 
         // And the dry recipe leaves a config exactly as it found it.
         let mut untouched = Config::default();

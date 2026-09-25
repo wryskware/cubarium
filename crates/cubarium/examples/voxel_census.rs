@@ -44,10 +44,11 @@
 //! `gap=off` turns the climate's dry gap off on a `preset=` or `config=` arm.
 //! `--weather-log FILE` writes one CSV row per rain event that ends during the run (start
 //! and end tick, mode, cause, RH, °C and day phase at the start, seconds since the
-//! previous event, volume), and the run ends with a `weather:` line on stderr: events per
+//! previous event, volume, and the moisture `M` at the start), and the run ends with a `weather:` line on stderr: events per
 //! mode, forced starts, gap-blocked draws per mode, strikes, rain by mode and by quarter
 //! of the day, and the highest RH, all over the run alone. The rows gain the weather's
-//! own columns (`temp_c` … `day_phase`; `design/handoffs/voxel-weather-2026-09-24.md`).
+//! own columns (`temp_c` … `day_phase`, `stream_m3_s`, `moist`;
+//! `design/handoffs/voxel-weather-2026-09-24.md`).
 //!
 //! `overlap=0` runs the chained tick instead of the overlapped one (`SimConfig::overlap`),
 //! and `ab=MIN` flips between the two every simulated minute from minute `MIN` on, so the
@@ -435,7 +436,7 @@ impl WeatherLog {
             );
             writeln!(
                 f,
-                "start_tick,end_tick,mode,cause,rh,temp_c,day_phase,since_prev_s,volume_m3"
+                "start_tick,end_tick,mode,cause,rh,temp_c,day_phase,since_prev_s,volume_m3,moist"
             )
             .expect("the weather log");
             f
@@ -460,7 +461,7 @@ impl WeatherLog {
         };
         writeln!(
             out,
-            "{},{},{:?},{:?},{:.4},{:.3},{:.4},{},{:.5}",
+            "{},{},{:?},{:?},{:.4},{:.3},{:.4},{},{:.5},{:.4}",
             e.start_tick,
             e.end_tick,
             e.mode,
@@ -470,6 +471,7 @@ impl WeatherLog {
             e.day_phase,
             e.since_previous_s.map_or(String::new(), |s| format!("{s:.1}")),
             e.volume_m3,
+            e.moisture,
         )
         .expect("the weather log");
         // A few rows an hour: flush each, so a run cut short keeps its log.
@@ -845,7 +847,7 @@ fn print_header() {
     }
     // WX1's weather, cumulative counts since the world began.
     header.push_str(
-        ",temp_c,rh,mode,fog,rain_in,drizzles,showers,downpours,forced,gap_blocked,strikes,day_phase,stream_m3_s",
+        ",temp_c,rh,mode,fog,rain_in,drizzles,showers,downpours,forced,gap_blocked,strikes,day_phase,stream_m3_s,moist",
     );
     println!("{header}");
 }
@@ -992,5 +994,6 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64) {
     row.push(c.strikes.to_string());
     row.push(format!("{:.4}", world.day_phase()));
     row.push(format!("{:.6}", wx.stream_m3_s()));
+    row.push(format!("{:.4}", world.moisture()));
     println!("{}", row.join(","));
 }

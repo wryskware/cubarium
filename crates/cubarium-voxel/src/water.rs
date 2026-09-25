@@ -2081,7 +2081,7 @@ fn emerge(w: &mut World, (x, y, z): (u32, u32, u32), want: f64) -> f64 {
 /// wider world: the river that leaves at the bottom lake re-enters at the top.
 ///
 /// It draws [`crate::Config::reentry_m3_per_s`] per second while the store stands **above
-/// [`crate::Config::reentry_floor_fraction`]** of the world's water, and never below it,
+/// RH [`crate::weather::STREAM_FLOOR_RH`]** ([`World::stream_floor_m3`]), and never below it,
 /// so the stream can never take the whole sky. Booked as
 /// [`crate::Ledger::reentry_in`] and `atmosphere_out`, so the conservation identity holds
 /// term for term. The aquifer-driven [`spring`] is untouched and adds to it. Nothing here
@@ -2117,7 +2117,7 @@ pub fn reentry(w: &mut World) {
         if !w.config.closed_water_budget {
             return;
         }
-        let floor = w.config.reentry_floor_fraction * w.ledger.expected_total();
+        let floor = w.stream_floor_m3();
         let spare = w.atmosphere_m3 - floor;
         if spare <= 0.0 {
             return;
@@ -4383,7 +4383,6 @@ mod closed_budget_tests {
                 capacity_share: 2.0,
                 ..no_natural_rain()
             },
-            reentry_floor_fraction: 0.01,
             reentry_m3_per_s: rate,
             ..Config::default()
         };

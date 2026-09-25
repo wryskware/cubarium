@@ -517,6 +517,9 @@ fn the_stream_swells_in_a_downpour_and_is_gone_two_and_a_half_minutes_after() {
     let mut c = calm();
     c.capacity_share = 1.0;
     c.storm_stream_gain = 2.0;
+    // The downpour stops with the sky well above the stream's floor (RH 0.5), so the
+    // stream can still pay for the swell after it.
+    c.downpour.stop_rh = 0.8;
     let mut w = World::empty(Config {
         width: 8,
         height: 8,
@@ -525,7 +528,6 @@ fn the_stream_swells_in_a_downpour_and_is_gone_two_and_a_half_minutes_after() {
         initial_atmosphere_m3: 0.5,
         rain_m_per_s: 1e-2,
         reentry_m3_per_s: 0.002,
-        reentry_floor_fraction: 0.01,
         day: DayClock {
             mode: DayMode::Off,
             ..DayClock::default()
@@ -569,4 +571,116 @@ fn the_stream_swells_in_a_downpour_and_is_gone_two_and_a_half_minutes_after() {
         w.weather().swell()
     );
     assert!(w.view().total_residual().abs() < 1e-12);
+}
+
+/// WX1b: showers and downpours start and stop on the moisture `M` (the store against the
+/// capacity at the **mean** temperature); drizzle keeps RH. At the afternoon peak of a
+/// ±5 °C day the same store reads M 1.0 and RH 0.70.
+#[test]
+fn convective_rain_reads_moisture_and_drizzle_reads_rh() {
+    let at_peak = |mut climate: Climate| {
+        climate.diurnal_c = 5.0;
+        climate.capacity_share = 1.0; // every drop aloft: M = 1
+        let day = DayClock::default();
+        let (rise, set) = day.cycle_rise_set();
+        World::empty(Config {
+            width: 8,
+            height: 6,
+            depth: 4,
+            closed_water_budget: true,
+            initial_atmosphere_m3: 1.0,
+            rain_m_per_s: 1e-2,
+            day: DayClock {
+                start_hour: 24.0 * (rise + (set - rise) * 2.0 / 3.0),
+                ..day
+            },
+            climate,
+            ..Config::default()
+        })
+    };
+    let mut c = calm();
+    c.shower.lambda_max_per_h = f64::INFINITY;
+    c.shower.rh50 = 0.9;
+    c.shower.width = 0.01;
+    c.shower.stop_rh = 0.8;
+    c.shower.longest_min = 60.0;
+    let mut w = at_peak(c);
+    assert!((w.moisture() - 1.0).abs() < 1e-9, "M {}", w.moisture());
+    assert!(w.rh() < 0.72, "the warm afternoon reads RH {}", w.rh());
+    w.step();
+    assert_eq!(w.weather().mode(), RainMode::Shower, "M over rh50 starts it");
+    let start = w.weather().event().copied().expect("a shower");
+    assert!((start.moisture - 1.0).abs() < 1e-6 && start.rh < 0.72);
+    let mut ticks = 1;
+    while w.weather().mode() != RainMode::Clear && ticks < 2000 {
+        w.step();
+        ticks += 1;
+    }
+    let m = w.moisture();
+    assert!(ticks > 1, "RH under the stop value does not end it");
+    assert!(m <= 0.8 && m > 0.7, "it stopped at M 0.8: M {m}, RH {}", w.rh());
+    assert!(residual(&w) < 1e-12);
+
+    // Drizzle at the same store and the same gate stays dry: RH is 0.70.
+    let mut c = calm();
+    c.drizzle.lambda_max_per_h = f64::INFINITY;
+    c.drizzle.rh50 = 0.9;
+    c.drizzle.width = 0.01;
+    c.drizzle.stop_rh = 0.8;
+    let mut w = at_peak(c);
+    for _ in 0..2 * MIN + 1 {
+        w.step();
+    }
+    assert_eq!(w.weather().counts.drizzles, 0, "RH 0.70 is under the stop value");
+    // With the clock off RH is M, 1.0, and the same drizzle starts at once.
+    let mut w = sky_world(c, 1.0);
+    w.config.climate.capacity_share = 1.0;
+    w.step();
+    assert_eq!(w.weather().mode(), RainMode::Drizzle);
+}
+
+/// WX1b: the atmosphere-fed stream draws only while the sky stands above RH 0.5, and
+/// never takes it below.
+#[test]
+fn the_atmosphere_fed_stream_stops_at_rh_one_half() {
+    let mut c = calm();
+    c.capacity_share = 1.0 / 0.6; // every drop aloft: RH 0.6
+    let mut w = World::empty(Config {
+        width: 8,
+        height: 8,
+        depth: 2,
+        closed_water_budget: true,
+        initial_atmosphere_m3: 1.0,
+        rain_m_per_s: 1e-2,
+        reentry_m3_per_s: 0.01,
+        day: DayClock {
+            mode: DayMode::Off,
+            ..DayClock::default()
+        },
+        climate: c,
+        ..Config::default()
+    });
+    for x in 0..8 {
+        for z in 0..2 {
+            w.apply(Command::SetMaterial {
+                x,
+                y: 1,
+                z,
+                material: crate::Material::Soil,
+            });
+        }
+    }
+    w.set_spring_cell(Some((3, 2, 0)));
+    assert!((w.rh() - 0.6).abs() < 1e-9, "{}", w.rh());
+    assert!((w.stream_floor_m3() - 0.5 / 0.6).abs() < 1e-9);
+    w.step();
+    assert!(w.weather().stream_m3_s() > 0.0, "above the floor it runs");
+    // 0.1 of the capacity above the floor at 0.01 m³/s: gone in well under a minute.
+    for _ in 0..60 * crate::TICK_HZ {
+        w.step();
+        assert!(w.rh() >= 0.5 - 1e-9, "never below the floor: {}", w.rh());
+    }
+    assert!(w.rh() < 0.5 + 1e-6, "it drew down to it: {}", w.rh());
+    assert_eq!(w.weather().stream_m3_s(), 0.0, "and stopped");
+    assert!(residual(&w) < 1e-12);
 }

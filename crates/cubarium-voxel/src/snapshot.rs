@@ -27,10 +27,10 @@ use crate::World;
 /// cell, and to **16** for the lake's wet shore (`Tiers::shore_m`, `shore_slope` and
 /// `shore_lip_m`, package SW), and to **18** for the weather model (WX1: `World::weather`
 /// replaces the shower allowance and schedule; `Config` gains `day` and `climate` and
-/// loses the four shower knobs; `Water` and `Config` gain `reentry_floor_fraction`;
-/// `Ledger::showers` is `rain_events`). Postcard is not self-describing, so a new field is
+/// loses the four shower knobs; `Ledger::showers` is `rain_events`), and to **19** for WX1b (`Water` and `Config`
+/// lose `reentry_floor_fraction`: the stream's floor is RH 0.5). Postcard is not self-describing, so a new field is
 /// a new format: earlier tags are refused, never migrated.
-pub const SCHEMA: u32 = 18;
+pub const SCHEMA: u32 = 19;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

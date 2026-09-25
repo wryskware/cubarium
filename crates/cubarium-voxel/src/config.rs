@@ -73,16 +73,11 @@ pub struct Config {
     /// rains; under the open budget it still sets the temperature.
     pub climate: crate::weather::Climate,
     /// Closed budget: water returned from the atmosphere store as a **stream at the spring
-    /// cell**, cubic metres per second, while the store stands above
-    /// [`Config::reentry_floor_fraction`] of the world's water. The river that leaves at
+    /// cell**, cubic metres per second, while the store stands above RH
+    /// [`crate::weather::STREAM_FLOOR_RH`] (WX1b). The river that leaves at
     /// the outlet re-enters upstream. Zero — the default — is rain only. Ignored under the
     /// open budget.
     pub reentry_m3_per_s: f64,
-    /// The share of the world's total water the atmosphere store keeps back from the
-    /// atmosphere-fed stream: it draws only above it. (Until WX1 this was the shower
-    /// trigger, which the stream shared; the weather model has no trigger, so the stream
-    /// keeps its floor under its own name, at the same values.)
-    pub reentry_floor_fraction: f64,
     /// Where that stream draws from: the atmosphere store (false, the default), or the
     /// **aquifer** (true) — groundwater emerging at the spring, which leaves the weather
     /// alone. From the aquifer it runs under either budget while the water table stands
@@ -128,7 +123,6 @@ impl Default for Config {
             day: crate::weather::DayClock::default(),
             climate: crate::weather::Climate::tropical_jungle(),
             reentry_m3_per_s: 0.0,
-            reentry_floor_fraction: 0.02,
             reentry_from_aquifer: false,
             reentry_floor_head_m: 0.0,
             lake_drain_m2_per_s: 0.0,
@@ -183,18 +177,12 @@ impl Config {
             ("lake_drain_m2_per_s", self.lake_drain_m2_per_s),
             ("initial_aquifer_head_m", self.initial_aquifer_head_m),
             ("initial_atmosphere_m3", self.initial_atmosphere_m3),
-            ("reentry_floor_fraction", self.reentry_floor_fraction),
         ] {
             ensure!(
                 rate.is_finite() && rate >= 0.0,
                 "{name} must be finite and not negative, not {rate}"
             );
         }
-        ensure!(
-            self.reentry_floor_fraction <= 1.0,
-            "reentry_floor_fraction is a fraction of the world's water, not {}",
-            self.reentry_floor_fraction
-        );
         ensure!(
             self.water_substeps >= 1,
             "water_substeps must be at least 1, not 0"
