@@ -8,7 +8,7 @@
 //!     [--seed 1] [--ticks 0] [--state DIR] [--px 6 --px 13 | --px auto] [--textures] \
 //!     [--frames 60] [--name NAME] [--anim 12 [--anim-hz 60]] [--flow] [--rain]
 //!     [--crop NAME=X0,Y0,X1,Y1]... [--sun-sweep DEG_PER_S] [--frame-times]
-//!     [--weather-preview loop|day|fixed:PHASE[,CLOUD]]
+//!     [--weather-preview loop|day|fixed:PHASE[,CLOUD[,RAIN[,FOG]]]]
 //! ```
 //!
 //! The world is founded exactly as the live run founds one from a seed
@@ -16,7 +16,8 @@
 //! one state, so two pictures differ only by what they were asked to differ by.
 //! `--state DIR` saves that state on the first run and loads it on the next, so a second
 //! build (main, say) draws the same world. Each `--set` line replaces that top-level key
-//! of the config file (or adds it) for one run. Each variant writes
+//! of the config file (or adds it) for one run; a dotted key (`light.volumetric = true`)
+//! replaces that one key of its table. Each variant writes
 //! `NAME-<px>px[-tex].png` into `--out` and prints its mean pack and GPU times over
 //! `--frames` packed-and-drawn frames. `--anim N` also writes `NAME-<px>px[-tex]-anim-KK.png`,
 //! N frames one water animation step apart (`[light] water_hz`) from the state's tick, or
@@ -143,11 +144,24 @@ fn config(a: &Args) -> Result<VoxelConfig> {
         .with_context(|| format!("parsing {}", a.config.display()))?;
     for line in &a.set {
         let set: toml::Table = line.parse().with_context(|| format!("--set {line:?}"))?;
-        table.extend(set);
+        merge(&mut table, set);
     }
     toml::Value::Table(table)
         .try_into()
         .with_context(|| format!("{} with {:?}", a.config.display(), a.set))
+}
+
+/// `set` over `table`: a key in both whose values are both tables merges key by key (so
+/// `--set 'light.volumetric = true'` changes that one key); any other value replaces.
+fn merge(table: &mut toml::Table, set: toml::Table) {
+    for (k, v) in set {
+        match (table.get_mut(&k), v) {
+            (Some(toml::Value::Table(t)), toml::Value::Table(s)) => merge(t, s),
+            (_, v) => {
+                table.insert(k, v);
+            }
+        }
+    }
 }
 
 fn found(a: &Args, cfg: &VoxelConfig) -> Result<(World, Flora, Fauna)> {

@@ -33,9 +33,7 @@ fn at(phase: f32, cloud: f32) -> Eased {
         daylight: dl,
         sun_elevation: el,
         cloud_cover: cloud,
-        storm: 0.0,
-        drift: 0.0,
-        seconds: 0.0,
+        ..Eased::DRY
     }
 }
 
@@ -48,6 +46,7 @@ fn a_clear_noon_is_todays_picture() {
     assert_eq!((l.ambient_level, l.sun_strength, l.sun_tint), (1.0, 1.0, p.sun_tint));
     assert_eq!((l.tint, l.unlit), ([1.0; 3], 1.0));
     assert_eq!((l.stars, l.band, l.cloud_cover), (0.0, 0.0, 0.0));
+    assert_eq!((l.rain, l.rings, l.fog, l.flash, l.bolt), ([0.0; 3], 0.0, 0.0, 0.0, 0.0));
     assert!(!l.animated());
 }
 
@@ -95,12 +94,12 @@ fn dawn_is_warm_low_and_banded() {
 #[test]
 fn easing_moves_every_frame_and_never_jumps() {
     let mut e = WeatherEase::default();
-    let first = e.advance(&Weather::CLEAR_NOON, 0.0, 256);
+    let first = e.advance(&Weather::CLEAR_NOON, 0.0, 256, 0.0);
     assert_eq!(first.cloud_cover, 0.0);
     let overcast = Weather { cloud_cover: 1.0, ..Weather::CLEAR_NOON };
     let mut last = 0.0;
     for _ in 0..60 * 60 {
-        let c = e.advance(&overcast, 1.0 / 60.0, 256).cloud_cover;
+        let c = e.advance(&overcast, 1.0 / 60.0, 256, 0.0).cloud_cover;
         assert!(c > last && c - last < 0.01);
         last = c;
     }
@@ -110,16 +109,16 @@ fn easing_moves_every_frame_and_never_jumps() {
 #[test]
 fn the_phase_eases_the_short_way_round() {
     let mut e = WeatherEase::default();
-    e.advance(&Weather { day_phase: 0.99, ..Weather::CLEAR_NOON }, 0.0, 256);
-    let p = e.advance(&Weather { day_phase: 0.01, ..Weather::CLEAR_NOON }, 0.1, 256).day_phase;
+    e.advance(&Weather { day_phase: 0.99, ..Weather::CLEAR_NOON }, 0.0, 256, 0.0);
+    let p = e.advance(&Weather { day_phase: 0.01, ..Weather::CLEAR_NOON }, 0.1, 256, 0.0).day_phase;
     assert!(!(0.02..0.99).contains(&p), "went the long way: {p}");
 }
 
 #[test]
 fn clouds_drift_round_the_ring() {
     let mut e = WeatherEase::default();
-    e.advance(&Weather::CLEAR_NOON, 0.0, 10);
-    let d = (0..100).map(|_| e.advance(&Weather::CLEAR_NOON, 1.0, 10).drift).fold(0.0, f32::max);
+    e.advance(&Weather::CLEAR_NOON, 0.0, 10, 0.0);
+    let d = (0..100).map(|_| e.advance(&Weather::CLEAR_NOON, 1.0, 10, 0.0).drift).fold(0.0, f32::max);
     assert!(d < 10.0 && d > 0.0);
 }
 
@@ -137,4 +136,76 @@ fn the_day_sky_leaves_twilight_and_night_alone() {
         assert!((d - last).abs() < 0.02, "day sky jumps at step {i}: {last} -> {d}");
         last = d;
     }
+}
+
+/// A strike: dark before it, a fast attack to a calm peak, gone within about 300 ms of
+/// each stroke, one or two re-strokes, and never more than three flashes in a second.
+#[test]
+fn a_strike_flashes_fast_decays_smoothly_and_stays_calm() {
+    for seed in [0u32, 1, 0xDEAD_BEEF, 0x1234_5677] {
+        assert_eq!(strike_light(-0.01, seed), (0.0, 0.0));
+        let (peak, _) = strike_light(STROKE_ATTACK_S, seed);
+        assert!(peak > 0.9 && peak <= 1.0, "peak {peak}");
+        let (tail, _) = strike_light(STROKE_ATTACK_S + 0.3, seed);
+        assert!(tail < 0.05, "seed {seed:x}: {tail} left 300 ms after the stroke");
+        // Count the flashes: rises of the fill by more than a tenth.
+        let (mut flashes, mut low, mut rising) = (0, 1.0f32, false);
+        let mut last = 0.0f32;
+        for k in 0..=4000 {
+            let (f, _) = strike_light(k as f64 * 0.001, seed);
+            if f < last && rising { rising = false; low = f; }
+            if f > low + 0.1 && !rising { rising = true; flashes += 1; }
+            low = low.min(f);
+            last = f;
+        }
+        assert!((2..=3).contains(&flashes), "seed {seed:x}: {flashes} flashes");
+        assert_eq!(strike_light(4.0, seed), (0.0, 0.0));
+    }
+}
+
+/// Rain comes in and goes out over seconds, a change of mode cross-fades, and nothing jumps
+/// between two frames.
+#[test]
+fn rain_fades_in_and_out_and_modes_cross_fade() {
+    let mut e = WeatherEase::default();
+    e.advance(&Weather::CLEAR_NOON, 0.0, 256, 0.0);
+    let shower = Weather { rain: Rain::Shower, rain_m_per_s: R0, ..Weather::CLEAR_NOON };
+    let pour = Weather { rain: Rain::Downpour, rain_m_per_s: 2.5 * R0, ..Weather::CLEAR_NOON };
+    let mut last = [0.0f32; 3];
+    let mut half = None;
+    for k in 1..=60 * 30 {
+        let w = if k < 60 * 15 { &shower } else { &pour };
+        let r = e.advance(w, 1.0 / 60.0, 256, 0.0).rain;
+        for i in 0..3 {
+            assert!((r[i] - last[i]).abs() < 0.02, "frame {k}: {last:?} -> {r:?}");
+        }
+        if half.is_none() && r[1] > 0.5 { half = Some(k); }
+        last = r;
+    }
+    let half = half.expect("the shower came in") as f32 / 60.0;
+    assert!((0.5..5.0).contains(&half), "half in after {half} s");
+    assert!(last[1] < 0.01 && last[2] > 0.99, "{last:?}");
+}
+
+/// The rings on open water follow the rain rate: sparse in a drizzle, W-2's density in a
+/// shower, denser in a downpour, none when it is dry.
+#[test]
+fn ring_density_follows_the_rain_rate() {
+    let p = params();
+    let rings = |rate: f32| look(&Eased { rain_rate: rate * R0, ..Eased::DRY }, &p).rings;
+    assert_eq!(rings(0.0), 0.0);
+    assert!(rings(0.1) < 0.15);
+    assert!((0.45..0.6).contains(&rings(1.0)));
+    assert!(rings(2.5) > 0.8 && rings(2.5) < 1.0);
+}
+
+/// Fog glows in the sun's colour: at dawn it leans warm, at noon it does not.
+#[test]
+fn dawn_fog_glows_warm() {
+    let p = params();
+    let fog = |phase: f32| look(&Eased { fog: 1.0, ..at(phase, 0.0) }, &p);
+    let dawn = fog(0.2);
+    assert!(dawn.fog > 0.0 && dawn.animated());
+    let warmth = |c: [f32; 3]| c[0] / c[2];
+    assert!(warmth(dawn.fog_light()) > warmth(fog(0.5).fog_light()));
 }

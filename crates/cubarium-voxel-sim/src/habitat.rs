@@ -952,6 +952,23 @@ pub fn install_heuristics(fauna: &mut Fauna) {
     );
 }
 
+/// A **loaded** layer's heuristics: the recipes, and a fresh controller on every standing
+/// founder body. Controllers and recipes are not saved (`Fauna`'s `serde(skip)`), so a
+/// layer read back from bytes has animals with nothing driving them until this runs. A
+/// policy-driven lineage is re-installed over it by its driver afterwards.
+pub fn reinstall_heuristics(fauna: &mut Fauna) {
+    install_heuristics(fauna);
+    let bodies: Vec<(u64, Founder)> = fauna
+        .view()
+        .animals
+        .iter()
+        .filter_map(|a| a.founder.map(|f| (a.id, f)))
+        .collect();
+    for (id, founder) in bodies {
+        fauna.install_founder_controller(id, founder);
+    }
+}
+
 /// One founder body on a support face, hungry, with its own heuristic installed. Returns
 /// whether the layer accepted it.
 fn introduce_founder(
@@ -1806,6 +1823,31 @@ mod tests {
             a.litter_tiles >= a.founders[Founder::Blind.index()],
             "every littershredder got its starter tile: {a:?}"
         );
+    }
+
+    /// A layer read back from its bytes has bodies but no controllers (they are not
+    /// saved); `reinstall_heuristics` puts one back on every founder body.
+    #[test]
+    fn a_loaded_layer_gets_a_controller_back_on_every_founder_body() {
+        let (_, _, fauna, seeded) = seeded(crate::scene::authored(config()));
+        assert!(seeded.animals() > 0);
+        let mut loaded = Fauna::load(&fauna.save()).expect("the layer round-trips");
+        let ids: Vec<u64> = loaded
+            .view()
+            .animals
+            .iter()
+            .filter(|a| a.founder.is_some())
+            .map(|a| a.id)
+            .collect();
+        assert!(!ids.is_empty());
+        assert!(
+            loaded.clone().take_controller(ids[0]).is_none(),
+            "a loaded body has no controller"
+        );
+        reinstall_heuristics(&mut loaded);
+        for id in ids {
+            assert!(loaded.take_controller(id).is_some(), "body {id} is driven");
+        }
     }
 
     /// **Both founder lineages eat in the seeded habitat.** The bodies are the seeder's
