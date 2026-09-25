@@ -232,7 +232,7 @@ pub enum Lighting {
 ///
 /// ```toml
 /// [light]
-/// levels = 4          # rungs on the ambient ladder, floor to full
+/// levels = 0          # 0: smooth light; 2 or more: rungs on an ambient ladder, floor to full
 /// ambient_gain = 1.4  # what full ambient light multiplies a base colour by
 /// ambient_floor = 0.2 # the lowest rung, as a fraction of full
 /// ao = 0.5            # how far an AO crease line darkens the light
@@ -242,11 +242,23 @@ pub enum Lighting {
 /// emission = true     # the dossiers' luminous parts glow (lit tier)
 /// glow = 0.5          # one emitting voxel's light at its own 4³ cell, in full-ambient units
 /// glow_reach = 3      # 4³ cells the light spreads before it is gone
+/// bloom = 0.3         # the halo's strength (smooth: times 20 the blurred emission; blocky: at full step)
+/// bloom_radius = 1.5  # voxel cells the halo reaches (twice the smooth blur's sigma)
+/// bloom_style = "smooth" # or "blocky": L5's halo of whole voxel cells at three strengths
+/// water_absorb = 0.1  # water absorption a voxel of path, in units of the deep water colour
+/// water_reflect = 6.0  # the surface's Fresnel reflectance times this (physical is ~5 %)
+/// water_ripple = 0.2   # how far a ripple tilts the quantised surface normal
+/// water_hz = 12.0      # the water's animation speed, steps a second (its steps if not smooth)
+/// water_smooth = true  # false: the water moves in water_hz steps instead of every frame
+/// water_reflect_cells = 64 # cells a reflected ray is marched before it is sky
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LightConfig {
-    /// Rungs on the ambient ladder, the floor and full included; at least 2.
+    /// `0` (or `1`): the light is smooth, sky x AO x canopy, the glow and the sun applied as
+    /// continuous values (the default; Wrysk, 2026-09-24). `2` or more: the ambient is
+    /// snapped to a ladder of this many rungs, the floor and full included, and the sun
+    /// adds one rung (package L's look at 4).
     pub levels: u32,
     /// What full ambient light (open sky, no occlusion, no canopy) multiplies a base
     /// colour by. The default puts an open top near the flat tier's lit top and a wall
@@ -280,12 +292,45 @@ pub struct LightConfig {
     /// How many glow cells the light spreads from its source through open terrain,
     /// falling off linearly to nothing one cell further.
     pub glow_reach: u32,
+    /// The lit tier's bloom (`cubarium_gpu::bloom`): a halo around the emitters, added to
+    /// what is behind; the emitters themselves stay crisp. Smooth, this times
+    /// `cubarium_gpu::bloom::SMOOTH_GAIN` (20) times the emission blurred by a Gaussian (the
+    /// blur spreads a small emitter's light thin, so the same number reads about as strong
+    /// in both styles); blocky, whole voxel cells at 1, 2/3 and 1/3 of this times the
+    /// emitter's colour. `0` turns it off. Needs `emission`.
+    pub bloom: f32,
+    /// How far the halo reaches, in voxel cells: smooth, twice the Gaussian's sigma (where
+    /// it has fallen to about an eighth); blocky, whole cells from the emitter's own
+    /// (Euclidean, rounded).
+    pub bloom_radius: f32,
+    /// `"smooth"`, blurred down a mip chain and added bilinear, or `"blocky"`, L5's
+    /// whole-cell halo added nearest.
+    pub bloom_style: BloomStyle,
+    /// The lit tier's water (package W). Absorption per voxel of water path, in units of
+    /// the palette's deep water colour: after `1 / water_absorb` voxels, what is left of
+    /// the light from behind is that colour itself (per channel, Beer–Lambert). The same
+    /// number sets how fast the in-scatter runs from the surface colour to the deep one.
+    pub water_absorb: f32,
+    /// What the surface's Fresnel reflectance is multiplied by (clamped to 1): physical
+    /// Fresnel at this camera is about 5-7 %, too weak to read.
+    pub water_reflect: f32,
+    /// How far a ripple tilts the quantised surface normal (its horizontal part; 0 is a
+    /// still mirror).
+    pub water_ripple: f32,
+    /// The water's animation rate, steps a second of sim time (ripples, streaks).
+    pub water_hz: f32,
+    /// The water moves every frame instead of in `water_hz` steps, at the same speed (the
+    /// clock's step keeps its fraction). On by default: Wrysk, 2026-09-24, after the 12 Hz
+    /// and smooth clips: "smooth waterfall is good".
+    pub water_smooth: bool,
+    /// Cells a reflected ray is marched before it counts as sky.
+    pub water_reflect_cells: u32,
 }
 
 impl Default for LightConfig {
     fn default() -> LightConfig {
         LightConfig {
-            levels: 4,
+            levels: 0,
             ambient_gain: 1.4,
             ambient_floor: 0.2,
             ao: 0.5,
@@ -295,9 +340,33 @@ impl Default for LightConfig {
             emission: true,
             glow: 0.5,
             glow_reach: 3,
+            bloom: BLOOM_DEFAULT,
+            bloom_radius: BLOOM_RADIUS_DEFAULT,
+            bloom_style: BloomStyle::Smooth,
+            water_absorb: 0.1,
+            water_reflect: 6.0,
+            water_ripple: 0.2,
+            water_hz: 12.0,
+            water_smooth: true,
+            water_reflect_cells: 64,
         }
     }
 }
+
+/// `[light] bloom_style`: how the emitters' halo is made.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BloomStyle {
+    /// Blurred down a mip chain and added bilinear: a soft glow.
+    #[default]
+    Smooth,
+    /// Whole voxel cells at three strengths, added nearest (package L5's).
+    Blocky,
+}
+
+/// `[light] bloom` and `bloom_radius` by default.
+pub const BLOOM_DEFAULT: f32 = 0.3;
+pub const BLOOM_RADIUS_DEFAULT: f32 = 1.5;
 
 /// `px_per_voxel = "auto"`, as the config holds it until start-up resolves it.
 pub const PX_AUTO: u32 = 0;
@@ -1362,12 +1431,12 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                     s.save_in_background(world);
                 }
             }
-            Step::Render { .. } => {
+            Step::Render { f } => {
                 let (world, flora, fauna) = sim.layers();
                 // A pack the renderer refused is still owed: the flag goes straight back
                 // up rather than being lost with the tick that set it.
                 let at = Instant::now();
-                moved = out.render(world, flora, fauna, std::mem::take(&mut moved))?;
+                moved = out.render(world, flora, fauna, std::mem::take(&mut moved), f)?;
                 budget.frame(at.elapsed().as_nanos() as u64);
                 frames += 1;
                 since_frames += 1;
@@ -1861,6 +1930,7 @@ impl Out {
         flora: &Flora,
         fauna: &Fauna,
         moved: bool,
+        fraction: f64,
     ) -> Result<bool> {
         match self {
             Out::Cpu {
@@ -1876,6 +1946,7 @@ impl Out {
             }
             Out::Gpu(gpu) => {
                 let owed = moved && !gpu.stage_world(world, flora, fauna);
+                gpu.set_clock(world.tick(), fraction);
                 gpu.render()?;
                 Ok(owed)
             }

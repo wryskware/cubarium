@@ -35,6 +35,7 @@
 
 pub mod adapter;
 pub mod atlas;
+pub mod bloom;
 pub mod palette;
 pub mod present;
 pub mod render;

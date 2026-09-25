@@ -6,7 +6,7 @@
 //! cargo run --release -p cubarium --example light_capture -- --out DIR \
 //!     [--config config/desktop/terrarium.toml] [--set 'lighting = "lit"']... \
 //!     [--seed 1] [--ticks 0] [--state DIR] [--px 6 --px 13 | --px auto] [--textures] \
-//!     [--frames 60] [--name NAME]
+//!     [--frames 60] [--name NAME] [--anim 12 [--anim-hz 60]] [--flow]
 //! ```
 //!
 //! The world is founded exactly as the live run founds one from a seed
@@ -16,7 +16,11 @@
 //! build (main, say) draws the same world. Each `--set` line replaces that top-level key
 //! of the config file (or adds it) for one run. Each variant writes
 //! `NAME-<px>px[-tex].png` into `--out` and prints its mean pack and GPU times over
-//! `--frames` packed-and-drawn frames. No window is ever opened.
+//! `--frames` packed-and-drawn frames. `--anim N` also writes `NAME-<px>px[-tex]-anim-KK.png`,
+//! N frames one water animation step apart (`[light] water_hz`) from the state's tick, or
+//! `1 / --anim-hz` seconds of sim time apart (a real-time clip at that frame rate);
+//! `--flow` writes `NAME-<px>px[-tex]-flow.png`, the lit tier's derived water flow field
+//! drawn over the water (capture-only). No window is ever opened.
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -43,6 +47,9 @@ struct Args {
     textures: bool,
     frames: u32,
     name: String,
+    anim: u32,
+    anim_hz: Option<f64>,
+    flow: bool,
 }
 
 fn args() -> Result<Args> {
@@ -57,6 +64,9 @@ fn args() -> Result<Args> {
         textures: false,
         frames: 60,
         name: "world".into(),
+        anim: 0,
+        anim_hz: None,
+        flow: false,
     };
     let mut out = None;
     let mut it = std::env::args().skip(1);
@@ -76,6 +86,9 @@ fn args() -> Result<Args> {
             "--textures" => a.textures = true,
             "--frames" => a.frames = v()?.parse()?,
             "--name" => a.name = v()?,
+            "--anim" => a.anim = v()?.parse()?,
+            "--anim-hz" => a.anim_hz = Some(v()?.parse()?),
+            "--flow" => a.flow = true,
             _ => bail!("unexpected argument {k}"),
         }
     }
@@ -242,11 +255,34 @@ fn capture(
         }
         println!("{tag}: {} emitting voxels: {}", emitters.len(), at.join(" "));
     }
+    let tick = world.tick();
+    sink.set_clock(tick, 0.0);
     sink.render()?;
     let p = sink.params();
     let rgba = sink.read_raster()?;
     let path = a.out.join(format!("{tag}.png"));
     cubarium_gpu::target::write_png(&path, p.raster_w, p.raster_h, &rgba)?;
+    // The water's animation: one frame per step, from the state's tick.
+    let per_step = f64::from(cubarium_voxel::TICK_HZ)
+        / a.anim_hz.unwrap_or(f64::from(cfg.light.water_hz)).max(1e-3);
+    for k in 0..a.anim {
+        let t = f64::from(k) * per_step;
+        sink.set_clock(tick + t.floor() as u64, t.fract());
+        sink.render()?;
+        let rgba = sink.read_raster()?;
+        let path = a.out.join(format!("{tag}-anim-{k:0w$}.png", w = if a.anim > 100 { 3 } else { 2 }));
+        cubarium_gpu::target::write_png(&path, p.raster_w, p.raster_h, &rgba)?;
+    }
+    if a.flow {
+        sink.set_clock(tick, 0.0);
+        sink.set_debug_flow(true)?;
+        sink.render()?;
+        let rgba = sink.read_raster()?;
+        let path = a.out.join(format!("{tag}-flow.png"));
+        cubarium_gpu::target::write_png(&path, p.raster_w, p.raster_h, &rgba)?;
+        println!("{tag}: flow field -> {}", display(&path));
+        sink.set_debug_flow(false)?;
+    }
 
     // Timing: every frame packs the world and draws it, as a tick's frame does.
     let (pack0, _) = sink.draw_split();

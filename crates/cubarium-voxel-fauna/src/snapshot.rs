@@ -88,9 +88,11 @@ use crate::Fauna;
 /// an [`crate::Animal`] carries its [`crate::Mobility`] (the wall it is on, its time under
 /// water), the [`crate::FounderPhysiology`] its step up/down, wall climbing and water
 /// fractions, and the ledger six movement counters: refused, not migrated.
+/// Schema 17 is **dung**: an [`crate::Animal`] carries its `gut` (the undigested share of
+/// its bites and the mineral it sheds), voided as litter every 30 s: refused, not migrated.
 /// Postcard is not self-describing, so older worlds are **refused**, not migrated
 /// (`always-fresh-never-migrate`): start a fresh world.
-pub const SCHEMA: u32 = 16;
+pub const SCHEMA: u32 = 17;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -299,6 +301,7 @@ mod tests {
             mineral: 0.05 * body,
             energy: 2.0 * body,
             age_ticks: 0,
+            gut: cubarium_voxel_flora::Taken::default(),
             state: State::Resting,
             mobility: crate::Mobility::default(),
         }

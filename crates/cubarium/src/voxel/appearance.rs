@@ -3,6 +3,27 @@
 //! Organism anatomy is resolved here into small face glyphs. Renderers only sample the
 //! resulting texels and apply projection, visibility, light and haze; neither backend
 //! knows where an eye, marking or outline belongs.
+//!
+//! # Emission
+//!
+//! An emitting texel carries the reserved tone [`TONE_EMIT`]. The GPU renderer's lit tier
+//! draws it in its cell's style's emissive colour, unlit and at full value; the cell then
+//! lights the glow volume around it and blooms. Two things must hold for a texel to glow:
+//! its glyph marks it with [`TONE_EMIT`], **and** its style has an emissive colour. The
+//! flat tier and the CPU presenter draw the tone as a plain texel.
+//!
+//! - **Plants:** a crown or heart cell whose style emits draws its glyph's emissive
+//!   variant ([`emissive_glyph`]): a crown's lip rows, a heart's stripe. A style can also
+//!   emit **whole** (`VoxelStyle::emit_whole`: bloomcrown's core), whatever its tones.
+//! - **Animals** (package L5): an animal part emits when
+//!   `colours::animal_emission` gives its model material an emissive colour (the style
+//!   side, stored by `Animals::set_emission`) **and** the packer draws its cell with
+//!   [`animal_emissive_glyph`] (the glyph side), whose texels carry [`TONE_EMIT`]. Today
+//!   that glyph is [`GLYPH_ANIMAL_EMIT`], the whole block. A body whose glow is a pattern
+//!   (the chorister's lit parts, a spot, a stripe) adds its own glyph in the animal
+//!   class's one free slot (7) marking only those texels, and names it in
+//!   [`animal_emissive_glyph`]. No current founder part emits, and sense patches never do
+//!   (Wrysk, 2026-09-24).
 
 use super::animal::AnimalPart;
 use super::stand::Part;
@@ -22,6 +43,9 @@ pub const GLYPH_BODY: GlyphId = GlyphId(2);
 pub const GLYPH_FRONT_BODY: GlyphId = GlyphId(3);
 pub const GLYPH_HEAD_LEFT: GlyphId = GlyphId(4);
 pub const GLYPH_HEAD_RIGHT: GlyphId = GlyphId(5);
+/// An emitting animal cell (package L5): the interim block with every front and cap texel
+/// [`TONE_EMIT`]. Only the lit tier's packer draws it, for a part whose style emits.
+pub const GLYPH_ANIMAL_EMIT: GlyphId = GlyphId(6);
 
 /// Which of an organism style's three authored colours a face texel uses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -97,6 +121,13 @@ pub const GLYPH_EMIT_BIT: u8 = 4;
 /// The emissive variant of a crown or heart glyph.
 pub fn emissive_glyph(glyph: GlyphId) -> GlyphId {
     GlyphId(glyph.0 | GLYPH_EMIT_BIT)
+}
+
+/// The glyph an emitting animal cell draws with, in place of `glyph`: see the module's
+/// "Emission" section. Every animal glyph maps to the whole emitting block today.
+pub fn animal_emissive_glyph(glyph: GlyphId) -> GlyphId {
+    let _ = glyph;
+    GLYPH_ANIMAL_EMIT
 }
 
 fn emits(glyph: GlyphId) -> bool {
@@ -210,6 +241,9 @@ pub fn front_texel(part: u8, glyph: GlyphId, x: u32, y: u32, s: u32) -> FaceTexe
         );
     }
 
+    if part == ANIMAL_PART_CLASS && glyph == GLYPH_ANIMAL_EMIT {
+        return FaceTexel::new(Pigment::Primary, TONE_EMIT);
+    }
     match glyph {
         GLYPH_INTERIM => FaceTexel::new(
             Pigment::Primary,
@@ -273,6 +307,9 @@ pub fn cap_texel(part: u8, glyph: GlyphId, x: u32, _y: u32, s: u32) -> FaceTexel
     }
     if part == 6 {
         return FaceTexel::new(Pigment::Secondary, TONE_PLAIN);
+    }
+    if part == ANIMAL_PART_CLASS && glyph == GLYPH_ANIMAL_EMIT {
+        return FaceTexel::new(Pigment::Primary, TONE_EMIT);
     }
     match glyph {
         GLYPH_INTERIM => FaceTexel::new(Pigment::Primary, TONE_PLAIN),
@@ -386,6 +423,9 @@ mod tests {
                 if (part == 2 || part == 3) && g & GLYPH_EMIT_BIT != 0 {
                     continue;
                 }
+                if part == ANIMAL_PART_CLASS && GlyphId(g) == GLYPH_ANIMAL_EMIT {
+                    continue;
+                }
                 assert!(!tones(part, GlyphId(g)).contains(&TONE_EMIT), "part {part} glyph {g}");
             }
         }
@@ -400,6 +440,31 @@ mod tests {
             let stripe = front_texel(3, GlyphId(0), x, 4, s).pigment() == Pigment::Accent;
             assert_eq!(front_texel(3, heart, x, 4, s).tone() == TONE_EMIT, stripe);
             assert_eq!(cap_texel(3, heart, x, 0, s).tone() == TONE_EMIT, stripe);
+        }
+    }
+
+    #[test]
+    fn an_emitting_animal_cell_emits_on_every_texel_and_no_other_animal_glyph_does() {
+        let s = 8;
+        for part in [
+            AnimalPart::Model(0),
+            AnimalPart::Interim(0),
+            AnimalPart::Head {
+                style: 0,
+                facing_right: true,
+            },
+        ] {
+            let g = animal_emissive_glyph(animal_glyph(part));
+            for y in 0..s {
+                for x in 0..s {
+                    assert_eq!(front_texel(ANIMAL_PART_CLASS, g, x, y, s).tone(), TONE_EMIT);
+                    assert_eq!(cap_texel(ANIMAL_PART_CLASS, g, x, y, s).tone(), TONE_EMIT);
+                }
+            }
+            assert_ne!(
+                front_texel(ANIMAL_PART_CLASS, animal_glyph(part), 1, 1, s).tone(),
+                TONE_EMIT
+            );
         }
     }
 
