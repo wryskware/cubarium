@@ -860,9 +860,15 @@ impl Climate {
     /// model"): the brief's starting values, calibrated in WX1.
     ///
     /// **Calibration (WX1b).** Showers and downpours read the moisture `M`
-    /// ([`reads_moisture`]), so they start from the brief's shape in `M`; round 3's
-    /// workarounds for the RH gate (afternoon gains 8 and 30, rh50 0.8–0.9, negative
-    /// cooling gains) are undone. The recalibrated values follow in their own commit.
+    /// ([`reads_moisture`]); round 3's workarounds for the RH gate are undone and the
+    /// values are fitted from the brief's shape in `M` on a 0-D mirror of this model (one
+    /// store at the terrarium's capacity, evaporation and transpiration fitted to the
+    /// round-3 census; 24 seeds x 4 h young and lush, 4 x 24 h lush). Convection is the
+    /// afternoon gain: shower 4 (brief 1), downpour 20 (brief 3), with wider logistics
+    /// (0.08) so a moist afternoon fires below rh50. Downpour 2 R0 (the brief's floor),
+    /// shower λ 1.5, downpour λ 1.0 and rh50 1.13, drizzle rh50 0.98 (it stays nocturnal).
+    /// Mirror: 0.40 / 0.51 of the volume in 12–18 (terrarium seeds 1 / 2), downpours
+    /// 5.3 / 4.1 min, showers 4.3 / 3.1 min, downpours 56 / 43 % of the volume.
     pub fn tropical_jungle() -> Climate {
         Climate {
             preset: ClimatePreset::TropicalJungle,
@@ -900,8 +906,8 @@ impl Climate {
             storm_stream_gain: 4.0,
             opening_min_s: 60.0,
             drizzle: RainParams {
-                lambda_max_per_h: 0.8,
-                rh50: 0.95,
+                lambda_max_per_h: 1.5,
+                rh50: 0.98,
                 width: 0.03,
                 g_aft: -0.8,
                 g_cool: 1.0,
@@ -912,11 +918,11 @@ impl Climate {
                 cool_c: 0.5,
             },
             shower: RainParams {
-                lambda_max_per_h: 2.0,
+                lambda_max_per_h: 1.5,
                 rh50: 1.0,
-                width: 0.04,
-                g_aft: 1.0,
-                g_cool: 0.5,
+                width: 0.08,
+                g_aft: 4.0,
+                g_cool: 0.25,
                 g_front: 1.0,
                 rate_r0: 1.0,
                 stop_rh: 0.7,
@@ -924,13 +930,13 @@ impl Climate {
                 cool_c: 1.5,
             },
             downpour: RainParams {
-                lambda_max_per_h: 1.5,
-                rh50: 1.15,
-                width: 0.04,
-                g_aft: 3.0,
+                lambda_max_per_h: 1.0,
+                rh50: 1.13,
+                width: 0.08,
+                g_aft: 20.0,
                 g_cool: 0.5,
                 g_front: 3.0,
-                rate_r0: 2.5,
+                rate_r0: 2.0,
                 stop_rh: 0.5,
                 longest_min: 50.0,
                 cool_c: 3.0,
