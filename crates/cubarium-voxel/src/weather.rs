@@ -103,3 +103,7 @@ impl Default for WeatherView {
         WeatherView::CLEAR_NOON
     }
 }
+
+#[cfg(test)]
+#[path = "weather_tests.rs"]
+mod tests;

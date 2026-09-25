@@ -27,3 +27,4 @@ postcard = { version = "1", features = ["use-std"] }
 png = { workspace = true }
 
 [dev-dependencies]
+toml = "0.8"
