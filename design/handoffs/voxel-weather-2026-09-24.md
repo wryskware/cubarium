@@ -28,6 +28,12 @@ and he can veto any of it.
    temperature, time of day and so on, "according to the climate preset and estimates
    from nature / what works for our ecology".
 7. **The placeholder visuals get real effort**: "dont be afraid to use shaders" (WX2).
+8. **On a short day, weather runs faster than nature, but not 12× faster** (later the
+   same day): "10-20 minutes could be long … for a 2hr cycle, we might want weather
+   conditions to cycle relatively faster (maybe not 12x faster but something)". See
+   *Weather speed*.
+9. **Storms that make streams** are an exploratory notion, "unless theres a viable path".
+   See *Storm streams* under Packages.
 
 ## Why (measured, main 86e5ed6, eidolon, heuristic founders)
 
@@ -141,17 +147,33 @@ events per simulated hour:
 | mode | λmax /h | rh50 | width | g_aft | g_cool | g_front | rate (× R₀) | stops at RH | longest |
 |---|---|---|---|---|---|---|---|---|---|
 | drizzle | 1.5 | 0.93 | 0.03 | −0.8 | 1.0 | 0.5 | 0.1 | 0.8 | 90 min |
-| shower | 2.0 | 1.00 | 0.04 | 1.0 | 0.5 | 1.0 | 1.0 | 0.7 | 15 min |
-| downpour | 1.5 | 1.15 | 0.04 | 3.0 | 0.5 | 3.0 | **calibrate** (start 1.5) | 0.5 | 30 min |
+| shower | 2.0 | 1.00 | 0.04 | 1.0 | 0.5 | 1.0 | 1.0 | 0.7 | 30 min |
+| downpour | 1.5 | 1.15 | 0.04 | 3.0 | 0.5 | 3.0 | 2.5 (≥ 2) | 0.5 | 50 min |
 
-- **The downpour rate is the one number known to need work.** At a terrarium capacity of
-  ~6.5 m³ and 2.5 R₀ (0.4 m³/min per R₀ on 192 m²), a downpour empties 1.25 → 0.5 in
-  about 5 min. A storm should last 10–30 min, so the rate must come down. The drawn
-  intensity follows the mode, not the rate alone, so a storm still reads as the heaviest
-  rain.
+- **Storms stay short and intense.** At a terrarium capacity of ~6.5 m³ and 2.5 R₀
+  (0.4 m³/min per R₀ on 192 m²), a downpour empties 1.25 → 0.5 in about 5 min. That is
+  about right for a 2 h day (see *Weather speed*). Keep the downpour at ≥ 2 R₀; do not
+  lower it to stretch storms. Heavy, short storms are also what could feed streams.
+- The "longest" column is in **nature minutes**, divided by the weather speed: 18, 6 and
+  10 min on the default 2 h day.
 - Placement is unchanged: even over every cell open to the sky, with the existing
   reserve, spread and refund, and the ledger exact.
 - The seed bank's end-of-shower flush fires at the end of every event.
+
+### Weather speed
+
+`weather_speed` in `[world.climate]`, default `"auto"`: `(24 h / cycle length)^0.65`.
+That is **5× nature on a 2 h day**, and 1 on a 24 h cycle and in `local` mode (`off`
+uses `length_min`).
+
+- **Divided by it** (nature values in the preset): the events' longest durations, the
+  fog and rain-cooling time constants, a front's ramp and recovery, the drift's time
+  scale, and the 30 min front window. The hazards' `λmax` are multiplied by it.
+- **Tied to the cycle** (fully compressed): the diurnal temperature, the afternoon bump,
+  the dawn fog window.
+- **Not scaled:** the dry gap (Wrysk's number, being measured), the lightning interval
+  (a visual rhythm), and the rain rates (physical).
+- Targets on the 2 h day: downpour 5–10 min, shower 2–6 min, drizzle 5–20 min.
 
 ### The dry gap, and the metrics to judge it
 
@@ -233,6 +255,16 @@ and `VoxelView::weather` carries one per tick:
     round needs one anyway).
   - Starting picks: browsers diurnal, shredders nocturnal, lanternjaw nocturnal, bellwing
     diurnal. After WX1.
+- **Storm streams** (exploratory, not dispatched; Wrysk's call). Soil takes water at
+  `K = 0.2 · 0.35 · 0.25 = 0.0175 m/s`, about 500× R₀, so rain on soil never runs off;
+  only rock (5e-6 m/s) sheds it. Two paths:
+  - **Stream swell** (cheap, O(1), conserved): a linear "upstream catchment" reservoir
+    takes a share of each event's rain and drains through the spring cell over ~10–20
+    min. The existing stream and its falls swell after a storm, and foam follows.
+  - **Storm runoff** (a probe first): a surface infiltration cap on the top soil face,
+    near R₀, so showers soak in and downpours run off as sheets that collect in low
+    ground and reach the lake. Whether it reads as streams depends on the terrain having
+    channels. It is also a hydrology rule change (plant water, lake level, solver cost).
 - **WX5: more climates** (later), when there are species for them.
 - **WX6: local weather feed** (someday): a `WeatherSource` that sets temperature and turns
   real rain into a mode.
@@ -317,7 +349,11 @@ Wrysk and the art direction. This is effortful placeholder work, not a stage-2 d
   at a glance);
 - the presentation plan, `design/handoffs/presentation-plan-2026-09-24.md` (lit tier, sun
   in the front hemisphere, bloom, lit water with rain rings);
-- the pinned `crates/cubarium-voxel/src/weather.rs`.
+- the pinned `crates/cubarium-voxel/src/weather.rs`;
+- presentation plan §V (volumetric light, in flight in another worktree). V builds the
+  sun-visibility volume and in-scatter, and exposes `airDensity(p)` and `sunInAir(p)` for
+  your fog. It keys its rebake off the sun direction the sink hands the renderer each
+  frame, which is how your moving sun reaches it.
 
 **Where:**
 - `crates/cubarium-gpu/shaders/` (`voxel.frag`, `scene.glsl`, `background.frag`, the bloom
@@ -363,7 +399,8 @@ Wrysk and the art direction. This is effortful placeholder work, not a stage-2 d
    - **Keep it calm:** a moderate peak, and never more than ~3 flashes a second.
    - Thunder has no sound. A delayed rumble (shake) is an open art question; leave it
      out.
-6. **Fog.** Height fog along the ground and water, thicker in low basins and over the
+6. **Fog** (checkpoint 2, built on V's `airDensity` / `sunInAir` once V merges, not a
+   second in-scatter). Height fog along the ground and water, thicker in low basins and over the
    lake, drifting noise, density from `fog`. Lit by the ambient light and the sun (it
    glows at dawn), with a halo around emitters inside it.
 7. **Optional, if the rest is done:** tops darken and gain a sheen while wet, drying over
