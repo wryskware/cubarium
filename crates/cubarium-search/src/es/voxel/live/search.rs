@@ -666,17 +666,13 @@ pub fn check(
             .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
         let mut header = vec!["minute".to_string(), "world_seed".into(), "animals".into()];
         for l in Founder::ALL {
-            for c in [
-                "population",
-                "births",
-                "starved",
-                "drowned",
-                "other_deaths",
-                "moving_share",
-                "pace_bl_per_s",
-            ] {
-                header.push(format!("{}.{c}", l.name()));
+            header.push(format!("{}.population", l.name()));
+            header.push(format!("{}.births", l.name()));
+            for d in cubarium_voxel_fauna::Departure::ALL {
+                header.push(format!("{}.{}", l.name(), d.name()));
             }
+            header.push(format!("{}.moving_share", l.name()));
+            header.push(format!("{}.pace_bl_per_s", l.name()));
         }
         for s in Species::ALL {
             header.push(format!("stands.{}", s.name()));

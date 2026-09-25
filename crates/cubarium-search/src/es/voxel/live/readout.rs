@@ -194,6 +194,9 @@ pub const LINEAGE_FACTORS: &[LineageFactor] = &[
     ("drowned_per_h", Pool::Mean, |c, f| {
         c.lineages[f.index()].deaths[Departure::Drowned.index()] as f64 / c.hours
     }),
+    ("aged_per_h", Pool::Mean, |c, f| {
+        c.lineages[f.index()].deaths[Departure::Aged.index()] as f64 / c.hours
+    }),
     ("other_deaths_per_h", Pool::Mean, |c, f| {
         c.lineages[f.index()].deaths[Departure::Removed.index()] as f64 / c.hours
     }),

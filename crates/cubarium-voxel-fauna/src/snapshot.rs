@@ -92,7 +92,10 @@ use crate::Fauna;
 /// its bites and the mineral it sheds), voided as litter every 30 s: refused, not migrated.
 /// Postcard is not self-describing, so older worlds are **refused**, not migrated
 /// (`always-fresh-never-migrate`): start a fresh world.
-pub const SCHEMA: u32 = 17;
+/// Schema 18: bodies carry a drawn lifespan (`Animal::lifespan_ticks`), species a median
+/// (`SpeciesConfig::lifespan_median_s`), and the departure arrays grew `Aged`
+/// (`design/handoffs/voxel-lifespan-defence-2026-09-25.md`). Refused, not migrated.
+pub const SCHEMA: u32 = 18;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -301,6 +304,7 @@ mod tests {
             mineral: 0.05 * body,
             energy: 2.0 * body,
             age_ticks: 0,
+            lifespan_ticks: 0,
             gut: cubarium_voxel_flora::Taken::default(),
             state: State::Resting,
             mobility: crate::Mobility::default(),
