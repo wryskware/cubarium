@@ -87,6 +87,43 @@ pub fn split_overlap_pools(bio_cores: usize) -> Option<(Vec<usize>, Vec<usize>)>
     Some((water, bio))
 }
 
+/// **The overlapped tick's water yields to the plants and animals** (measurement): every
+/// thread of this process named `water-*` — the water pools' workers — gets nice `n`, so
+/// when the two legs compete for a CPU the plant and animal leg, the longer one on a grown
+/// world, wins it. Returns how many threads it reniced.
+pub fn nice_water_pools(n: i32) -> usize {
+    let Ok(tasks) = std::fs::read_dir("/proc/self/task") else {
+        return 0;
+    };
+    let mut done = 0;
+    for task in tasks.flatten() {
+        let comm = std::fs::read_to_string(task.path().join("comm")).unwrap_or_default();
+        if !comm.starts_with("water-") {
+            continue;
+        }
+        let Some(tid) = task.file_name().to_str().and_then(|t| t.parse::<i32>().ok()) else {
+            continue;
+        };
+        if set_nice(tid, n) {
+            done += 1;
+        }
+    }
+    eprintln!("cubarium voxel: {done} water-pool threads at nice {n}");
+    done
+}
+
+#[cfg(target_os = "linux")]
+#[allow(unsafe_code)] // Audited: setpriority on one thread of this process.
+fn set_nice(tid: i32, n: i32) -> bool {
+    // SAFETY: plain syscall on a thread id read from /proc/self/task.
+    unsafe { libc::setpriority(libc::PRIO_PROCESS, tid as libc::id_t, n) == 0 }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn set_nice(_tid: i32, _n: i32) -> bool {
+    false
+}
+
 #[cfg(target_os = "linux")]
 #[allow(unsafe_code)] // Audited: sched_getaffinity on the calling thread only.
 fn own_affinity() -> std::io::Result<Vec<usize>> {

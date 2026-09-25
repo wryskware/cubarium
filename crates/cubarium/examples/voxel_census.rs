@@ -132,6 +132,9 @@ fn main() {
         ab_from_min: args
             .iter()
             .find_map(|a| a.strip_prefix("ab=").and_then(|s| s.parse().ok())),
+        nice_water: args
+            .iter()
+            .find_map(|a| a.strip_prefix("nice_water=").and_then(|s| s.parse().ok())),
         modes: args
             .iter()
             .find_map(|a| a.strip_prefix("modes="))
@@ -293,6 +296,7 @@ fn main() {
 struct Timing {
     overlap: Option<bool>,
     ab_from_min: Option<u64>,
+    nice_water: Option<i32>,
     /// The `ab=` rotation: `None` the chained tick, `Some(split)` the overlapped one
     /// (`Some(None)` at its default split).
     modes: Vec<Option<Option<(usize, usize)>>>,
@@ -304,6 +308,11 @@ struct Timing {
 fn run(sim: &mut Sim, hours: f64, minute0: u64, save: Option<&SaveAt>, timing: &Timing) {
     if let Some(on) = timing.overlap {
         sim.set_overlap(on);
+    }
+    // `nice_water=N`: the water pools' workers at nice N (measurement). `Sim::new`
+    // built the pools.
+    if let Some(n) = timing.nice_water {
+        cubarium::voxel::chiplet::nice_water_pools(n);
     }
     let total_ticks = (hours * 3600.0 * f64::from(TICK_HZ)) as u64;
     let save_min = save.map(|s| s.minute.unwrap_or(minute0 + total_ticks / TICKS_PER_MIN));
