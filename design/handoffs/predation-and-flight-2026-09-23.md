@@ -7,6 +7,14 @@ mechanisms the roster now needs, and neither exists in the voxel line:
 - **Flight**, for the bellwing (and possibly a flying capgnawer or a gliding seedporter,
   depending on which body plans Wrysk picks).
 
+**Wrysk, 2026-09-24:** seedporters **glide** and **climb latticevine and woody plants**;
+bellwings **truly fly**. So flight is two mechanisms: powered flight (bellwing) and
+climb-then-glide (seedporter, the SP-B four-sail glider's pattern: up a vaulttree, down
+to the next grove). Climbing on plants is new too: today's climbing is shredders on
+terrain walls only (`voxel-mobility-2026-09-23.md`). Night and day come from the weather
+thread's day clock (`voxel-weather-2026-09-24.md`, WX4 animal circadian rhythms); a
+predator's long, cheap rest and sleeping prey belong to that same rest state.
+
 The job: design both as substrates (model mechanics, not species tuning), write the
 package briefs, and bring the decisions that are Wrysk's to him. Body plans are **not**
 settled for the new animals and are not needed here. Design for the niche and size, not

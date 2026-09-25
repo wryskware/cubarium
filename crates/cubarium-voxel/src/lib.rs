@@ -55,6 +55,7 @@ mod sparse;
 pub mod viability;
 pub mod walk;
 pub mod water;
+pub mod weather;
 pub mod world;
 /// The overlapped tick's water lend: a read copy's water swapped in, and back.
 mod lend;
