@@ -54,7 +54,7 @@
 //!   the pluggable point moved into the fauna with the controller stage.
 //! - **One simulation thread per episode; the runtime worker ceiling reserves ten percent
 //!   of logical CPUs and stops at sixteen; no nested parallelism.** Every episode runs its
-//!   [`cubarium_voxel_sim::Sim`] with `SimConfig { threads: 1 }`, so the fauna leg never
+//!   [`cubarium_voxel_sim::Sim`] with `SimConfig::with_threads(1)`, so the fauna leg never
 //!   enters the process-wide task pool while episode workers are running.
 //!
 //! # What the digest plug-in is

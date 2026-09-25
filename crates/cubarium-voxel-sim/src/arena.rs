@@ -1418,7 +1418,7 @@ mod tests {
         let resources = arena.resources.clone();
         let before_animal = *arena.fauna.view().animal(arena.animal_id.unwrap()).unwrap();
 
-        let mut sim = arena.into_sim(SimConfig { threads: 1 });
+        let mut sim = arena.into_sim(SimConfig::with_threads(1));
         assert_eq!(sim.mode(), ScheduleMode::Static);
         for _ in 0..10 {
             sim.step();
@@ -1530,7 +1530,7 @@ mod tests {
         let initial_obs = first_sample_of_a_founder_on_the_tile(
             stage
                 .arena
-                .into_sim_prepared(SimConfig { threads: 1 }, prepared),
+                .into_sim_prepared(SimConfig::with_threads(1), prepared),
             initial,
         );
 
@@ -1539,7 +1539,7 @@ mod tests {
         let successor_obs = first_sample_of_a_founder_on_the_tile(
             stage
                 .arena
-                .into_sim_prepared(SimConfig { threads: 1 }, prepared),
+                .into_sim_prepared(SimConfig::with_threads(1), prepared),
             successor,
         );
         assert_eq!(
@@ -1582,7 +1582,7 @@ mod tests {
             VoxelConfig::default(),
             FloraConfig::default(),
             FaunaConfig::default(),
-            SimConfig { threads: 1 },
+            SimConfig::with_threads(1),
         );
         assert_eq!(sim.mode(), ScheduleMode::Live);
     }
@@ -1606,7 +1606,7 @@ mod tests {
 
         // A founder body standing in the stand it will crop, off the arena's own idle
         // body (which has no controller and stays exactly where P1-A left it).
-        let mut sim = arena.into_sim(SimConfig { threads: 1 });
+        let mut sim = arena.into_sim(SimConfig::with_threads(1));
         let (feeder, cruiser) = sim.with_layers_mut(|world, _, fauna| {
             let mut introduce = |z: u32| {
                 assert!(fauna.apply(
@@ -1820,7 +1820,7 @@ mod tests {
                 match founder {
                     Founder::Blind => {
                         let obs = first_sample_of_built_founder(
-                            arena.into_sim(SimConfig { threads: 1 }),
+                            arena.into_sim(SimConfig::with_threads(1)),
                             id,
                         );
                         assert_eq!(obs[20], 1.0, "seed {seed}: chemical receptor valid");
@@ -1831,7 +1831,7 @@ mod tests {
                         let mut edible = Arena::build(founder, seed);
                         strip_inedible_foliage(&mut edible, false);
                         let first = first_sample_of_built_founder(
-                            edible.into_sim(SimConfig { threads: 1 }),
+                            edible.into_sim(SimConfig::with_threads(1)),
                             id,
                         );
                         // The revolution, with the food and the crowns over it.
@@ -1839,7 +1839,7 @@ mod tests {
                         strip_inedible_foliage(&mut marked, true);
                         // 80 ticks is 4 s: more than the pi seconds one revolution costs.
                         let samples = samples_of_built_founder(
-                            marked.into_sim(SimConfig { threads: 1 }),
+                            marked.into_sim(SimConfig::with_threads(1)),
                             id,
                             80,
                             1.0,
@@ -1936,7 +1936,7 @@ mod tests {
     fn the_static_tick_samples_the_settled_field() {
         let arena = Arena::build(Founder::Blind, 1);
         let site = arena.resources[0];
-        let sim = arena.into_sim(SimConfig { threads: 1 });
+        let sim = arena.into_sim(SimConfig::with_threads(1));
         assert!(
             sim.senses().is_some(),
             "a static arena holds its settled field"
@@ -1959,7 +1959,7 @@ mod tests {
             VoxelConfig::default(),
             cubarium_voxel_flora::FloraConfig::default(),
             cubarium_voxel_fauna::FaunaConfig::default(),
-            SimConfig { threads: 1 },
+            SimConfig::with_threads(1),
         );
         assert!(live.senses().is_none());
         assert_eq!(live.mode(), ScheduleMode::Live);
@@ -1975,7 +1975,7 @@ mod tests {
         let site = arena.resources[0];
         // Settle once through the same API the search fixture caches.
         let prepared = arena.prepare_senses();
-        let sim = arena.into_sim_prepared(SimConfig { threads: 1 }, prepared);
+        let sim = arena.into_sim_prepared(SimConfig::with_threads(1), prepared);
         let obs = first_sample_of_a_founder_on_the_tile(sim, site);
         assert_eq!(obs[20], 1.0, "chem validity");
         assert!(
@@ -2009,7 +2009,7 @@ mod tests {
             let settle = t1.elapsed();
 
             let t2 = Instant::now();
-            let mut sim = arena.into_sim(SimConfig { threads: 1 });
+            let mut sim = arena.into_sim(SimConfig::with_threads(1));
             let into_sim = t2.elapsed();
 
             // One driven founder on an interior column: every controller period samples

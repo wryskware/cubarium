@@ -26,6 +26,13 @@
 //! ```text
 //! cargo run --release -p cubarium --example voxel_census -- 1 generated closed heuristic
 //! ```
+//!
+//! `overlap=0` runs the chained tick instead of the overlapped one (`SimConfig::overlap`),
+//! and `ab=MIN` flips between the two every simulated minute from minute `MIN` on, so the
+//! two ticks are timed on one world. `modes=c,6:6,5:1` makes that rotation a list: `c` is
+//! the chained tick and `W:B` the overlapped one with `W` water and `B` plant-and-animal
+//! workers (`cubarium_voxel_sim::set_overlap_split`). Every minute a `phases:` line on
+//! stderr gives that minute's milliseconds per tick by phase.
 
 use cubarium::voxel::VoxelConfig;
 use cubarium::voxel::habitat;
@@ -112,6 +119,33 @@ fn main() {
         habitat::FOUNDER_COUNTS
     };
 
+    let timing = Timing {
+        overlap: args
+            .iter()
+            .find_map(|a| a.strip_prefix("overlap="))
+            .map(|v| v != "0"),
+        ab_from_min: args
+            .iter()
+            .find_map(|a| a.strip_prefix("ab=").and_then(|s| s.parse().ok())),
+        modes: args
+            .iter()
+            .find_map(|a| a.strip_prefix("modes="))
+            .map_or_else(
+                || vec![None, Some(None)],
+                |list| {
+                    list.split(',')
+                        .map(|m| {
+                            if m == "c" {
+                                return None;
+                            }
+                            let (w, b) = m.split_once(':').expect("a mode is c or W:B");
+                            Some(Some((w.parse().expect("W"), b.parse().expect("B"))))
+                        })
+                        .collect()
+                },
+            ),
+    };
+
     let cfg = VoxelConfig::default();
     if let Some((arm_name, arm_config)) = arm {
         assert!(!generated, "a preset arm builds its own world");
@@ -160,7 +194,7 @@ fn main() {
             sim.world_mut()
                 .apply(WorldCommand::SetOutlet { open: true });
         }
-        run(&mut sim, hours);
+        run(&mut sim, hours, timing);
         return;
     }
     let mut world = if generated {
@@ -223,29 +257,114 @@ fn main() {
     senses.settle(&world.view(), &flora.view());
     let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
 
-    run(&mut sim, hours);
+    run(&mut sim, hours, timing);
+}
+
+/// How the tick is run and timed: `overlap=`, `ab=` and `modes=`.
+#[derive(Clone)]
+struct Timing {
+    overlap: Option<bool>,
+    ab_from_min: Option<u64>,
+    /// The `ab=` rotation: `None` the chained tick, `Some(split)` the overlapped one
+    /// (`Some(None)` at its default split).
+    modes: Vec<Option<Option<(usize, usize)>>>,
 }
 
 /// Step the coupled layers for the asked-for hours, writing one row a simulated minute.
 /// Both arms end here, so a preset world is measured by the same code path as the ridge.
-fn run(sim: &mut Sim, hours: f64) {
+fn run(sim: &mut Sim, hours: f64, timing: Timing) {
+    if let Some(on) = timing.overlap {
+        sim.set_overlap(on);
+    }
     let total_ticks = (hours * 3600.0 * f64::from(TICK_HZ)) as u64;
     print_header();
     print_row(0, sim, 0.0);
     let mut tick = 0u64;
     let mut window = SeedWindow::default();
+    let mut phases = PhaseWindow::default();
     let mut since = std::time::Instant::now();
     while tick < total_ticks {
         sim.step();
         tick += 1;
         if tick % TICKS_PER_MIN == 0 {
             let ms = since.elapsed().as_secs_f64() * 1e3 / TICKS_PER_MIN as f64;
-            print_row(tick / TICKS_PER_MIN, sim, ms);
+            let minute = tick / TICKS_PER_MIN;
+            print_row(minute, sim, ms);
+            phases.report(minute, sim, ms);
+            if let Some(from) = timing.ab_from_min.filter(|from| minute >= *from) {
+                let n = timing.modes.len() as u64;
+                match timing.modes[((minute - from + 1) % n) as usize] {
+                    None => sim.set_overlap(false),
+                    Some(split) => {
+                        cubarium_voxel_sim::set_overlap_split(split);
+                        sim.set_overlap(true);
+                    }
+                }
+            }
             since = std::time::Instant::now();
         }
         if tick % (60 * TICKS_PER_MIN) == 0 || tick == total_ticks {
             window.report(tick, sim);
         }
+    }
+}
+
+/// The `phases:` line on stderr, once a simulated minute: that minute's milliseconds per
+/// tick by phase. Water is the sum of its leaves on the chained tick and the leg's own
+/// total on the overlapped one. Measurement only.
+#[derive(Default)]
+struct PhaseWindow {
+    nanos: Vec<u64>,
+}
+
+impl PhaseWindow {
+    fn report(&mut self, minute: u64, sim: &Sim, tick_ms: f64) {
+        use cubarium_voxel::profile::{Phase, nanos};
+        let now: Vec<u64> = Phase::ALL.iter().map(|p| nanos(*p)).collect();
+        if self.nanos.len() != now.len() {
+            self.nanos = vec![0; now.len()];
+        }
+        let ms = |p: Phase| {
+            now[p.index()].saturating_sub(self.nanos[p.index()]) as f64 / TICKS_PER_MIN as f64 / 1e6
+        };
+        let leaves = [
+            Phase::Rain,
+            Phase::Evaporate,
+            Phase::Infiltrate,
+            Phase::Fall,
+            Phase::Exchange,
+            Phase::Drain,
+            Phase::WaterTable,
+            Phase::Spring,
+            Phase::Outlet,
+        ];
+        let overlap = sim.config().overlap;
+        let water: f64 = if overlap {
+            ms(Phase::WaterLeg)
+        } else {
+            leaves.iter().map(|p| ms(*p)).sum()
+        };
+        let split = sim.config().overlap_split();
+        eprintln!(
+            "phases: min={minute} overlap={} split={}:{} tick_ms={tick_ms:.3} begin={:.3} read_copy={:.3} \
+             water={water:.3} exchange={:.3} flora={:.3} light={:.3} drink={:.3} grow={:.3} \
+             cover={:.3} fauna={:.3} sense={:.3} settle={:.3}",
+            u8::from(overlap),
+            split.0,
+            split.1,
+            ms(Phase::Begin),
+            ms(Phase::ReadCopy),
+            ms(Phase::Exchange),
+            ms(Phase::FloraStep),
+            ms(Phase::Light),
+            ms(Phase::Drink),
+            ms(Phase::Grow),
+            ms(Phase::Cover),
+            ms(Phase::FaunaStep),
+            ms(Phase::FaunaSense),
+            ms(Phase::Settle),
+        );
+        self.nanos = now;
     }
 }
 

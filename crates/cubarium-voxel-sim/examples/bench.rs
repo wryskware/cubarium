@@ -121,7 +121,7 @@ fn main() {
         Species::COUNT
     );
 
-    let mut sim = Sim::new(world, flora, fauna, SimConfig { threads }, None);
+    let mut sim = Sim::new(world, flora, fauna, SimConfig::with_threads(threads), None);
 
     // Nothing before this line is in the numbers.
     profile::reset();
