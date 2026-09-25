@@ -80,6 +80,16 @@ pub const PARAMS: &[ParamSpec] = &[
         max: 4.0,
         what: "breeding reserve threshold: every founder's surplus floor",
     },
+    // Added by the ecology search (2026-09-24): with no mortality but starvation and
+    // drowning, the five above cannot bring a world's carrying capacity near the band;
+    // an animal's upkeep sets it directly (capacity ~ production · yield / upkeep).
+    ParamSpec {
+        name: "founder.maintenance_per_s",
+        kind: Kind::Scale,
+        min: 0.25,
+        max: 4.0,
+        what: "animal upkeep: every founder's maintenance_per_s",
+    },
 ];
 
 /// One world's parameter vector, aligned with [`PARAMS`].
@@ -222,12 +232,14 @@ impl EcologyParams {
         let mut c = FaunaConfig::default();
         let y = self.v("founder.yield_by_food");
         let floor = self.v("founder.reproduction.surplus_floor");
+        let upkeep = self.v("founder.maintenance_per_s");
         for f in Founder::ALL {
             let phys = &mut c.founders[f.index()];
             for v in phys.yield_by_food.iter_mut() {
                 *v *= y;
             }
             phys.core.reproduction.surplus_floor *= floor;
+            phys.core.maintenance_per_s *= upkeep;
         }
         c
     }

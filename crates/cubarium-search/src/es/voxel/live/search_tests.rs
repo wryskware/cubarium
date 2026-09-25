@@ -231,6 +231,39 @@ fn surplus_floor_raises_the_breeding_threshold() {
     }
 }
 
+/// `founder.maintenance_per_s`: a body at rest respires more upkeep at twice the rate.
+#[test]
+fn maintenance_raises_upkeep() {
+    let upkeep = |scale: f64| {
+        let e = with("founder.maintenance_per_s", scale);
+        let world = flat_world();
+        let mut flora = Flora::new(e.flora_config(base_flora()));
+        let mut fauna = Fauna::new(e.fauna_config());
+        assert!(fauna.apply(
+            &world,
+            FaunaCommand::IntroduceFounder {
+                x: 3,
+                z: 3,
+                founder: Founder::Browser,
+                stores: StartingStores::FULL,
+                heading_rad: 0.0,
+            }
+        ));
+        let id = fauna.view().animals[0].id;
+        let rest: Box<dyn Controller> = Box::new(crate::es::voxel::controller::NoIntake);
+        assert!(fauna.set_controller(id, rest));
+        for _ in 0..200 {
+            fauna.step(&world, &mut flora);
+        }
+        fauna.view().ledger.respired_maintenance_out
+    };
+    let (one, two) = (upkeep(1.0), upkeep(2.0));
+    assert!(
+        one > 0.0 && (two / one - 2.0).abs() < 0.05,
+        "x2 {two} vs x1 {one}"
+    );
+}
+
 /// The live app's defaults are unchanged: the default vector builds exactly the shipped
 /// configs, a tuned vector never writes back into them, and a log vector of zeros is the
 /// defaults.
@@ -239,7 +272,7 @@ fn the_live_defaults_are_unchanged() {
     let e = EcologyParams::defaults();
     assert_eq!(e.fauna_config(), FaunaConfig::default());
     assert_eq!(e.flora_config(base_flora()), base_flora());
-    let tuned = EcologyParams::from_log(&[0.7, -0.4, 0.2, -0.3, 1.0]);
+    let tuned = EcologyParams::from_log(&[0.7, -0.4, 0.2, -0.3, 1.0, 0.5]);
     let _ = (tuned.fauna_config(), tuned.flora_config(base_flora()));
     assert_eq!(FaunaConfig::default(), e.fauna_config());
     assert_eq!(EcologyParams::from_log(&vec![0.0; PARAMS.len()]), e);
