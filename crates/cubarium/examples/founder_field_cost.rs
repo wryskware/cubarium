@@ -63,7 +63,7 @@ fn arm(threads: usize, with_field: bool) -> (f64, String) {
         s.settle(&world.view(), &flora.view());
         s
     });
-    let mut sim = Sim::new(world, flora, fauna, SimConfig { threads }, senses);
+    let mut sim = Sim::new(world, flora, fauna, SimConfig::with_threads(threads), senses);
     for _ in 0..WARMUP {
         sim.step();
     }
@@ -98,7 +98,7 @@ fn field_update_us(threads: usize) -> f64 {
     eprintln!("settle: {updates} updates, converged {converged}");
     // Run the habitat for a while so the field's sources are the live ones — litterfall
     // and the founders' own leavings, not only the seeder's starter tiles.
-    let mut sim = Sim::new(world, flora, fauna, SimConfig { threads }, Some(senses));
+    let mut sim = Sim::new(world, flora, fauna, SimConfig::with_threads(threads), Some(senses));
     for _ in 0..(WARMUP + TICKS) {
         sim.step();
     }

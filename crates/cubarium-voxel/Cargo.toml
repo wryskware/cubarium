@@ -14,11 +14,13 @@ profile = []
 # The water phases on a rayon pool (`cubarium-rules`' host drivers), sized by the caller's
 # `threads` (`SimConfig::threads` in the schedule). Without it every phase runs serially
 # whatever `threads` says. `design/handoffs/voxel-water-parallel-2026-09-24.md`.
-parallel = ["cubarium-rules/par"]
+parallel = ["cubarium-rules/par", "dep:rayon"]
 
 [dependencies]
 anyhow = { workspace = true }
 cubarium-rules = { workspace = true }
+# The overlapped tick's water copy-back (`World::restore_water_from`), on the water pool.
+rayon = { version = "1", optional = true }
 rustc-hash = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 postcard = { version = "1", features = ["use-std"] }

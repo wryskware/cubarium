@@ -74,10 +74,18 @@ pub enum Phase {
     FaunaAct,
     FaunaBirths,
     FaunaDeaths,
+    /// The overlapped tick's water leg: rain through outlet, on the calling thread while
+    /// the plants and animals run beside it. Contains the water leaves.
+    WaterLeg,
+    /// The overlapped tick's water copied back from the read copy, inside the water leg.
+    ReadCopy,
+    /// The overlapped tick's planned drink withdrawn from the live world, beside the
+    /// animal step.
+    Settle,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 41] = [
+    pub const ALL: [Phase; 44] = [
         Phase::WorldStep,
         Phase::Begin,
         Phase::Rain,
@@ -119,6 +127,9 @@ impl Phase {
         Phase::FaunaAct,
         Phase::FaunaBirths,
         Phase::FaunaDeaths,
+        Phase::WaterLeg,
+        Phase::ReadCopy,
+        Phase::Settle,
     ];
     pub const COUNT: usize = Phase::ALL.len();
 
@@ -130,7 +141,11 @@ impl Phase {
     pub fn is_total(self) -> bool {
         matches!(
             self,
-            Phase::WorldStep | Phase::FloraStep | Phase::FaunaStep | Phase::Substeps
+            Phase::WorldStep
+                | Phase::FloraStep
+                | Phase::FaunaStep
+                | Phase::Substeps
+                | Phase::WaterLeg
         )
     }
 
@@ -177,6 +192,9 @@ impl Phase {
             Phase::FaunaAct => "  act",
             Phase::FaunaBirths => "  births",
             Phase::FaunaDeaths => "  deaths",
+            Phase::WaterLeg => "water leg (total, overlapped tick)",
+            Phase::ReadCopy => "  water copy-back from the read copy (part of the water leg)",
+            Phase::Settle => "drink withdrawal (overlapped tick, beside the animal step)",
         }
     }
 }

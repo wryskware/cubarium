@@ -282,12 +282,14 @@ fn flora_with_plant_mineral(n_tissue: f64) -> Flora {
 }
 
 /// **R9.1, the zero-mineral bite.** A turf whose tissue holds no mineral at all is food
-/// with no nutrient in it: the grazer takes its whole mouthful, respires every unit of it
-/// with the energy that came in it, pays its upkeep out of its reserve, and **builds
-/// nothing** — although it is itself carrying `n_tissue · organic` of mineral from the day
-/// it was introduced. That inventory is not a reserve growth may draw on.
+/// with no nutrient in it: the grazer takes its whole mouthful, egests the share its yield
+/// never absorbs to its gut (with the energy that came in it), respires the absorbed share
+/// its mineral cannot fund, pays its upkeep out of its reserve, and **builds nothing** —
+/// although it is itself carrying `n_tissue · organic` of mineral from the day it was
+/// introduced. That inventory is not a reserve growth may draw on; the only mineral it
+/// loses is the share its upkeep's burned tissue held, shed to the gut.
 #[test]
-fn a_mineral_free_bite_builds_nothing_and_is_respired_whole() {
+fn a_mineral_free_bite_builds_nothing_and_its_undigested_share_is_egested() {
     let world = plain(8, 2, 0.3, 5);
     let mut flora = flora_with_plant_mineral(0.0);
     turf(&mut flora, &world, 3);
@@ -324,13 +326,40 @@ fn a_mineral_free_bite_builds_nothing_and_is_respired_whole() {
         (a.reserve - (before.reserve - upkeep)).abs() <= 1e-12 * before.reserve,
         "the reserve paid the upkeep and gained nothing: {a:?}"
     );
-    assert_eq!(
-        a.mineral, before.mineral,
-        "its own mineral is an inventory, not a reserve"
+    // Its own mineral is an inventory, not a reserve: it built nothing from it, and it
+    // lost only what the upkeep's burned tissue held, by the upkeep's own fraction.
+    let shed = before.mineral * (upkeep / before.organic());
+    assert!(
+        (a.mineral - (before.mineral - shed)).abs() <= 1e-12 * before.mineral,
+        "its own mineral is an inventory, not a reserve: {} -> {}",
+        before.mineral,
+        a.mineral
     );
     assert!(
-        (v.ledger.respired_out - (bite + upkeep)).abs() <= 1e-12 * bite,
-        "the whole bite and the upkeep were respired: {}",
+        (a.gut.mineral - shed).abs() <= 1e-12 * before.mineral,
+        "the upkeep's shed mineral is in the gut"
+    );
+    // The share the yield never absorbs is egested with its energy; the absorbed share,
+    // which no mineral funds, is respired.
+    let y = sc.yield_fraction;
+    assert!(
+        (a.gut.organic - (1.0 - y) * bite).abs() <= 1e-12 * bite,
+        "the undigested share is in the gut: {}",
+        a.gut.organic
+    );
+    assert!(
+        (a.gut.energy - (1.0 - y) * v.ledger.eaten_energy_in).abs()
+            <= 1e-12 * v.ledger.eaten_energy_in,
+        "with the energy that came in it"
+    );
+    assert!(
+        (v.ledger.respired_digestion_out - y * bite).abs() <= 1e-12 * bite,
+        "digestion respired the unfunded absorbed share: {}",
+        v.ledger.respired_digestion_out
+    );
+    assert!(
+        (v.ledger.respired_out - (y * bite + upkeep)).abs() <= 1e-12 * bite,
+        "the absorbed share and the upkeep were respired: {}",
         v.ledger.respired_out
     );
     // Its own energy fell only by the upkeep's own heat, at its own density: none of the
@@ -340,7 +369,7 @@ fn a_mineral_free_bite_builds_nothing_and_is_respired_whole() {
         (a.energy - (before.energy - e_density * upkeep)).abs() <= 1e-12 * before.energy,
         "{a:?}"
     );
-    let heat = v.ledger.eaten_energy_in + e_density * upkeep;
+    let heat = y * v.ledger.eaten_energy_in + e_density * upkeep;
     assert!(
         (v.ledger.heat_out - heat).abs() <= 1e-12 * heat,
         "heat {}",
@@ -348,7 +377,7 @@ fn a_mineral_free_bite_builds_nothing_and_is_respired_whole() {
     );
     assert_eq!(
         v.ledger.deposited_mineral_out, 0.0,
-        "there was nothing to excrete"
+        "nothing is voided before the gut's period"
     );
     assert_residual_pair(&flora, &fauna, "after a mineral-free bite");
 }
@@ -356,9 +385,10 @@ fn a_mineral_free_bite_builds_nothing_and_is_respired_whole() {
 /// **R9.1, the partially funded bite.** The placeholders themselves: a plant's foliage
 /// holds `n_tissue` 0.02 and this animal's tissue wants 0.05, so a `1e-4` bite brings
 /// `2e-6` of mineral and funds `4e-5` of tissue where `yield_fraction` 0.5 would have
-/// built `5e-5`. The growth is exactly `mineral / n_tissue`, the difference is respired
-/// with its energy, and every unit of the bite's mineral ends up in the new tissue with
-/// nothing left over to excrete. **No grazer knob is touched.**
+/// built `5e-5`. The growth is exactly `mineral / n_tissue`, the unfunded `1e-5` is
+/// respired with its energy, the unabsorbed half is egested to the gut, and every unit of
+/// the bite's mineral ends up in the new tissue with none left over for the gut. **No
+/// grazer knob is touched.**
 #[test]
 fn a_partly_mineralised_bite_builds_exactly_what_its_mineral_funds() {
     let world = plain(8, 2, 0.3, 5);
@@ -398,19 +428,34 @@ fn a_partly_mineralised_bite_builds_exactly_what_its_mineral_funds() {
         (a.body - before.body).abs() <= 1e-15,
         "the body waits for growth"
     );
-    // The mineral: all of it kept, none excreted, none created.
-    assert!((a.mineral - (before.mineral + mineral)).abs() <= 1e-12 * a.mineral);
+    // The mineral: all of the bite's kept, none to the gut, none created. The body's own
+    // mineral falls only by the share the upkeep's burned tissue held, which is shed to
+    // the gut.
+    let upkeep = sc.maintenance_per_s * before.body * DT;
+    let shed = before.mineral * (upkeep / before.organic());
+    assert!((a.mineral - (before.mineral - shed + mineral)).abs() <= 1e-12 * a.mineral);
+    assert!(
+        (a.gut.mineral - shed).abs() <= 1e-12 * a.mineral,
+        "no bite mineral was left over for the gut: {} against the shed {shed}",
+        a.gut.mineral
+    );
     assert_eq!(
         v.ledger.deposited_mineral_out, 0.0,
-        "nothing was left over to excrete"
+        "nothing is voided before the gut's period"
     );
-    // And what was not built was respired with the energy that came in with it.
-    let upkeep = sc.maintenance_per_s * before.body * DT;
+    // The unabsorbed half is egested; what was absorbed but not built was respired with
+    // the energy that came in with it.
+    let egested = (1.0 - sc.yield_fraction) * bite;
     assert!(
-        (v.ledger.respired_out - (bite - built + upkeep)).abs() <= 1e-12 * bite,
+        (a.gut.organic - egested).abs() <= 1e-12 * bite,
+        "the gut holds {} and not {egested}",
+        a.gut.organic
+    );
+    assert!(
+        (v.ledger.respired_out - (bite - built - egested + upkeep)).abs() <= 1e-12 * bite,
         "respired {} of {}",
         v.ledger.respired_out,
-        bite - built + upkeep
+        bite - built - egested + upkeep
     );
     assert_residual_pair(&flora, &fauna, "after a partly funded bite");
 }
@@ -450,7 +495,18 @@ fn maintenance_drains_the_reserve_and_then_the_body() {
             (a.reserve - (0.01 - 0.004 * f64::from(tick))).abs() < 1e-15,
             "{a:?}"
         );
-        assert_eq!(a.mineral, start.mineral, "respiration moves no mineral");
+        // Respiration sheds the mineral its burned tissue held to the gut, so the body's
+        // mineral stays in proportion to its organic matter and none is lost.
+        let expected = start.mineral * (a.organic() / start.organic());
+        assert!(
+            (a.mineral - expected).abs() <= 1e-12 * start.mineral,
+            "tick {tick}: the mineral:organic ratio held: {} against {expected}",
+            a.mineral
+        );
+        assert!(
+            (a.mineral + a.gut.mineral - start.mineral).abs() <= 1e-15 * start.mineral,
+            "tick {tick}: the shed mineral is in the gut"
+        );
         assert_eq!(
             a.state,
             State::Resting,
@@ -468,11 +524,18 @@ fn maintenance_drains_the_reserve_and_then_the_body() {
     );
     // Three ticks of the whole upkeep: the shortfall is paid, not skipped.
     assert!((fauna.view().ledger.respired_out - 0.012).abs() < 1e-15);
+    // The body paying keeps the same rule: the ratio holds through dieback.
+    assert!(
+        (a.mineral - start.mineral * (a.organic() / start.organic())).abs()
+            <= 1e-12 * start.mineral
+    );
+    assert!((a.mineral + a.gut.mineral - start.mineral).abs() <= 1e-15 * start.mineral);
     assert_fauna_residuals(&fauna, "three ticks of upkeep");
 }
 
 /// A grazer with nothing to eat dies when its body falls below `body_min`, and what is
-/// left of it is on its own site as carrion with the mineral it never respired.
+/// left of it is on its own site as carrion with all of its mineral: what its tissue still
+/// held and what respiration had shed into its gut.
 #[test]
 fn a_starving_grazer_dies_at_body_min_and_leaves_its_carrion() {
     let world = plain(4, 2, 0.3, 5);
@@ -806,11 +869,21 @@ fn a_birth_pays_birth_cost_and_the_newborn_is_at_body_min() {
     // matter did, and the layer's total moved only by the tick's own respiration.
     // The fraction is of the parent as the birth found it: after this tick's upkeep, which
     // is paid first.
+    // The upkeep sheds its burned tissue's mineral to the parent's gut first.
     let f = sc.birth_cost / (before.organic() - upkeep);
-    assert!((newborn.mineral - before.mineral * f).abs() < 1e-15 * before.mineral);
+    let shed = before.mineral * (upkeep / before.organic());
     assert!(
-        (newborn.mineral + after.mineral - before.mineral).abs() < 1e-18,
-        "mineral moved"
+        (newborn.mineral - (before.mineral - shed) * f).abs() < 1e-12 * before.mineral,
+        "the newborn's mineral is its fraction of the parent's after the upkeep"
+    );
+    assert!(
+        (after.gut.mineral - shed).abs() < 1e-12 * before.mineral,
+        "the upkeep's shed mineral is in the parent's gut"
+    );
+    assert!(
+        (newborn.mineral + after.mineral + after.gut.mineral - before.mineral).abs()
+            <= 1e-15 * before.mineral,
+        "mineral moved, none created or lost"
     );
     let heat = upkeep * before.energy / before.organic();
     assert!(
@@ -872,10 +945,18 @@ fn a_newborn_s_endowment_sits_above_the_intake_ceiling_and_is_spent_normally() {
     assert!(l.bites > 0, "it was eating the whole time");
     let assimilated =
         (sc.yield_fraction * l.eaten_organic_in).min(l.eaten_mineral_in / sc.n_tissue);
+    // The unabsorbed share is egested to the gut; digestion respires only the absorbed
+    // share the mineral cannot fund, none as surplus.
+    let egested = (1.0 - sc.yield_fraction) * l.eaten_organic_in;
     assert!(
-        (l.respired_digestion_out - (l.eaten_organic_in - assimilated)).abs()
+        (fauna.view().animal(id).unwrap().gut.organic - egested).abs()
             <= 1e-12 * l.eaten_organic_in,
-        "and digestion respired only the undigested share, none as surplus: {} of {}",
+        "the gut holds the unabsorbed share"
+    );
+    assert!(
+        (l.respired_digestion_out - (l.eaten_organic_in - assimilated - egested)).abs()
+            <= 1e-12 * l.eaten_organic_in,
+        "and digestion respired only the unfunded share, none as surplus: {} of {}",
         l.respired_digestion_out,
         l.eaten_organic_in
     );
@@ -1084,97 +1165,101 @@ fn the_two_ledgers_close_together_over_a_hundred_coupled_ticks() {
     assert_fauna_residuals(&starver, "100 coupled ticks");
 }
 
-/// Dung: the mineral a bite carries in excess of the tissue it built is excreted as a
-/// litter deposit on the animal's own face.
+/// Dung: the mineral a bite carries in excess of the tissue it built goes to the animal's
+/// gut, with the bite's unabsorbed share, and waits there for the next void (the void
+/// itself, and where it lands, are the crate's `dung_tests`). Nothing reaches the ground
+/// on the tick of the bite.
 ///
 /// **What the placeholders do and do not make inert (Astra R9.2).** The excess depends on
 /// the tissue **actually placed**, not on `yield_fraction`, so "there is never any excess
 /// at the defaults" was wrong: it is true only of a *fresh founder's first bite*, where
 /// the whole mouthful has somewhere to go. This test keeps that narrow arm, and adds the
-/// two cases that do excrete — an animal with nowhere left to put the matter, at the
-/// placeholders with **no knob touched**, and mineral-rich food with the grazer's own
+/// two cases that do have an excess — an animal with nowhere left to put the matter, at
+/// the placeholders with **no knob touched**, and mineral-rich food with the grazer's own
 /// numbers unchanged. The forced `n_tissue` 0 arm stays as the path's extreme.
+///
+/// In every arm the gut's mineral is the bite's excess plus what the tick's upkeep shed:
+/// `before.mineral · upkeep / before.organic()`, maintenance being paid before the bite.
 #[test]
-fn excess_mineral_is_excreted_as_litter() {
+fn excess_mineral_goes_to_the_gut_until_the_void() {
     let world = plain(8, 2, 0.3, 5);
     let mut flora = Flora::new(FloraConfig::default());
     turf(&mut flora, &world, 3);
     let mut fauna = Fauna::new(config_with(|s| s.n_tissue = 0.0));
     let id = grazer(&mut fauna, &world, 2, 0.02);
-    let mineral_before = fauna.view().animal(id).unwrap().mineral;
+    let before = *fauna.view().animal(id).unwrap();
+    assert_eq!(before.mineral, 0.0, "a tissue that needs no mineral holds none");
+    let y = fauna.config().species(Species::Frondgrazer).yield_fraction;
 
     fauna.step(&world, &mut flora);
 
     let v = fauna.view();
+    let a = *v.animal(id).unwrap();
     assert!(v.ledger.eaten_mineral_in > 0.0, "the bite carried mineral");
+    assert_eq!(a.mineral, 0.0, "the animal kept none of it");
     assert_eq!(
-        v.ledger.deposited_mineral_out, v.ledger.eaten_mineral_in,
-        "all of it excreted"
+        a.gut.mineral, v.ledger.eaten_mineral_in,
+        "all of it went to the gut"
     );
-    assert_eq!(
-        v.animal(id).unwrap().mineral,
-        mineral_before,
-        "the animal kept none of it"
+    assert!(
+        (a.gut.organic - (1.0 - y) * v.ledger.eaten_organic_in).abs()
+            <= 1e-12 * v.ledger.eaten_organic_in,
+        "with the unabsorbed share of the bite"
     );
-    let g = flora
-        .view()
-        .ground_at(at(2, 2))
-        .expect("the dung provisioned the site");
-    // A zero-organic deposit settles at once (Astra R8.2, round 5b): the mineral goes
-    // straight to the site's soluble pool on top of the lazy provisioning, and nothing
-    // waits in litter for organic matter that never comes.
-    let provisioned = flora.config().initial_mineral;
-    assert!((g.mineral - provisioned - v.ledger.deposited_mineral_out).abs() < 1e-15);
-    assert_eq!(g.litter_mineral, 0.0, "nothing is stranded in litter");
-    assert_eq!(
-        g.litter, 0.0,
-        "dung is mineral only this round: the rest was respired"
-    );
-    assert_residual_pair(&flora, &fauna, "after excretion");
+    assert_eq!(v.ledger.deposited_mineral_out, 0.0, "none of it is on the ground yet");
+    assert_eq!(v.ledger.deposited_organic_out, 0.0);
+    assert_eq!(flora.view().ledger.deposited_mineral_in, 0.0);
+    assert_residual_pair(&flora, &fauna, "after a bite with no tissue to fund");
 
     // The narrow true claim: a **fresh founder's first bite** carries no excess. Half a
     // bite assimilated is funded to 0.4 of it by a plant's own 0.02 of mineral, and a
     // young animal's body has room for all of that, so every unit of the mineral is
-    // needed. This is not a property of the placeholders in general.
-    let mut flora = Flora::new(FloraConfig::default());
-    turf(&mut flora, &world, 3);
-    let mut fauna = Fauna::new(FaunaConfig::default());
-    grazer(&mut fauna, &world, 2, 0.02);
-    fauna.step(&world, &mut flora);
-    assert_eq!(
-        fauna.view().ledger.deposited_mineral_out,
-        0.0,
-        "a fresh founder's first bite has somewhere to put every unit it can fund"
-    );
-
-    // A full animal no longer has a surplus to excrete (package G): at `body_max` with a
-    // full reserve it takes only the little its upkeep made room for, every unit of it the
-    // mineral funds is placed, and the bite's mineral is exactly what that tissue needs.
+    // needed: the gut holds only the upkeep's shed mineral.
     let mut flora = Flora::new(FloraConfig::default());
     turf(&mut flora, &world, 3);
     let mut fauna = Fauna::new(FaunaConfig::default());
     let sc = *fauna.config().species(Species::Frondgrazer);
+    let id = grazer(&mut fauna, &world, 2, 0.02);
+    let before = *fauna.view().animal(id).unwrap();
+    fauna.step(&world, &mut flora);
+    let v = fauna.view();
+    let upkeep = sc.maintenance_per_s * before.body * DT;
+    let shed = before.mineral * (upkeep / before.organic());
+    assert!(v.ledger.eaten_mineral_in > 0.0, "it bit");
+    assert!(
+        (v.animal(id).unwrap().gut.mineral - shed).abs() <= 1e-12 * v.ledger.eaten_mineral_in,
+        "a fresh founder's first bite has somewhere to put every unit it can fund"
+    );
+
+    // A full animal no longer has a surplus (package G): at `body_max` with a full reserve
+    // it takes only the little its upkeep made room for, every unit of it the mineral
+    // funds is placed, and the bite's mineral is exactly what that tissue needs.
+    let mut flora = Flora::new(FloraConfig::default());
+    turf(&mut flora, &world, 3);
+    let mut fauna = Fauna::new(FaunaConfig::default());
     let id = grazer(&mut fauna, &world, 2, sc.body_max);
     let before = *fauna.view().animal(id).unwrap();
     fauna.step(&world, &mut flora);
     let v = fauna.view();
-    // Read the tissue placed off the ledger rather than off the animal: a birth is an
-    // internal transfer, so `respired_out = upkeep + bite - placed` is the only reading
-    // that is about the bite.
+    let a = *v.animal(id).unwrap();
+    // Read the tissue placed off the ledger and the gut rather than off the reserve: a
+    // birth is an internal transfer, so `upkeep + bite − respired − egested` is the only
+    // reading that is about the bite.
     let upkeep = sc.maintenance_per_s * before.body * DT;
-    let placed = v.ledger.eaten_organic_in + upkeep - v.ledger.respired_out;
+    let placed = v.ledger.eaten_organic_in + upkeep - v.ledger.respired_out - a.gut.organic;
     assert!(
-        v.ledger.bites > 0 && placed > 0.0 && placed <= upkeep,
+        v.ledger.bites > 0 && placed > 0.0 && placed <= upkeep * (1.0 + 1e-9),
         "it placed {placed}, within the {upkeep} its upkeep freed"
     );
     assert!(
         (placed - v.ledger.eaten_mineral_in / sc.n_tissue).abs() <= 1e-9 * placed,
         "all of what the mineral funds was placed"
     );
+    let shed = before.mineral * (upkeep / before.organic());
     assert!(
-        v.ledger.deposited_mineral_out <= 1e-12 * v.ledger.eaten_mineral_in,
-        "a full animal has nothing to excrete: {}",
-        v.ledger.deposited_mineral_out
+        (a.gut.mineral - shed).abs() <= 1e-12 * v.ledger.eaten_mineral_in.max(shed),
+        "a full animal's bite leaves no excess mineral: gut {} against the shed {shed}",
+        a.gut.mineral
     );
     assert_eq!(
         v.ledger.born, 0,
@@ -1183,9 +1268,9 @@ fn excess_mineral_is_excreted_as_litter() {
     );
     assert_residual_pair(&flora, &fauna, "after a full animal's bite");
 
-    // And mineral-rich food excretes with the **grazer's** numbers untouched: a turf whose
-    // own `n_tissue` is 0.2 brings `2e-5` of mineral in a `1e-4` bite, ten times what the
-    // tissue it funds can hold, and the remainder is dung.
+    // And mineral-rich food has an excess with the **grazer's** numbers untouched: a turf
+    // whose own `n_tissue` is 0.2 brings `2e-5` of mineral in a `1e-4` bite, ten times
+    // what the tissue it funds can hold, and the remainder goes to the gut.
     let mut flora = flora_with_plant_mineral(0.2);
     turf(&mut flora, &world, 3);
     let mut fauna = Fauna::new(FaunaConfig::default());
@@ -1193,6 +1278,7 @@ fn excess_mineral_is_excreted_as_litter() {
     let before = *fauna.view().animal(id).unwrap();
     fauna.step(&world, &mut flora);
     let v = fauna.view();
+    let a = *v.animal(id).unwrap();
     // Whatever the sated bite came to, the food is a fifth mineral.
     let eaten = v.ledger.eaten_organic_in;
     assert!(
@@ -1201,24 +1287,23 @@ fn excess_mineral_is_excreted_as_litter() {
         v.ledger.eaten_mineral_in
     );
     // The yield is what binds here, not the mineral: half the bite is built, all of it
-    // placed (read off the ledger: the reserve also pays for growth this tick).
+    // placed, the other half egested (read off the ledger: the reserve also pays for
+    // growth this tick).
+    assert!(
+        (a.gut.organic - 0.5 * eaten).abs() <= 1e-12 * eaten,
+        "the unabsorbed half is in the gut"
+    );
     let upkeep = sc.maintenance_per_s * before.body * DT;
-    let built = eaten + upkeep - v.ledger.respired_out;
+    let built = eaten + upkeep - v.ledger.respired_out - a.gut.organic;
     assert!((built - 0.5 * eaten).abs() <= 1e-9 * built, "it built {built}");
     let excess = v.ledger.eaten_mineral_in - sc.n_tissue * built;
+    let shed = before.mineral * (upkeep / before.organic());
     assert!(
-        (v.ledger.deposited_mineral_out - excess).abs() <= 1e-9 * excess,
-        "excreted {} of {excess}",
-        v.ledger.deposited_mineral_out
+        excess > 0.0 && (a.gut.mineral - (excess + shed)).abs() <= 1e-9 * excess,
+        "the gut holds {} of the excess {excess} and the shed {shed}",
+        a.gut.mineral
     );
-    let g = flora
-        .view()
-        .ground_at(at(2, 2))
-        .expect("the dung provisioned the site");
-    assert!(
-        g.mineral > flora.config().initial_mineral,
-        "and it is in the site's pool"
-    );
+    assert_eq!(v.ledger.deposited_mineral_out, 0.0, "and none is on the ground yet");
     assert_residual_pair(&flora, &fauna, "after a mineral-rich bite");
 }
 

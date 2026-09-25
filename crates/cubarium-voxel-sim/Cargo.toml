@@ -8,7 +8,9 @@ rust-version.workspace = true
 cubarium-voxel = { workspace = true, features = ["parallel"] }
 cubarium-voxel-flora.workspace = true
 cubarium-voxel-fauna = { workspace = true, features = ["parallel"] }
-bevy_ecs.workspace = true
+# The multi-threaded system executor runs the overlapped tick's two legs side by side
+# (`design/handoffs/voxel-phase-overlap-2026-09-24.md`).
+bevy_ecs = { workspace = true, features = ["multi_threaded"] }
 bevy_tasks.workspace = true
 
 [features]

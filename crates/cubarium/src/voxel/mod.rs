@@ -1025,6 +1025,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         } else {
             cfg.threads
         },
+        ..SimConfig::default()
     };
     let speed = args.speed.clamp(MIN_SPEED, MAX_SPEED);
     // **The output is opened before the world exists.** Founding one is minutes of work
@@ -1085,7 +1086,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                 },
             );
             (
-                arena.into_sim_prepared(SimConfig { threads: 1 }, senses),
+                arena.into_sim_prepared(SimConfig::with_threads(1), senses),
                 format!("sensing {} arena seed {}", founder.name(), args.arena_seed),
             )
         }
@@ -3076,7 +3077,7 @@ mod tests {
             World::empty(c.clone()),
             Flora::new(FloraConfig::for_voxel_size(c.voxel_m)),
             Fauna::new(FaunaConfig::default()),
-            SimConfig { threads: 1 },
+            SimConfig::with_threads(1),
             None,
         );
         let line = run_line(&sim, 1_200, 3_600, 60.0, None);
@@ -3107,7 +3108,7 @@ mod tests {
             World::empty(c.clone()),
             Flora::new(FloraConfig::for_voxel_size(c.voxel_m)),
             Fauna::new(FaunaConfig::default()),
-            SimConfig { threads: 1 },
+            SimConfig::with_threads(1),
             None,
         );
         let line = run_line(&sim, 1_200, 3_600, 60.0, Some(3_580));
@@ -3148,7 +3149,7 @@ mod tests {
             World::new(c.clone()),
             Flora::new(FloraConfig::for_voxel_size(c.voxel_m)),
             Fauna::new(FaunaConfig::default()),
-            SimConfig { threads: 1 },
+            SimConfig::with_threads(1),
             None,
         );
         let mut budget = Budget::default();

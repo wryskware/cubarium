@@ -13,7 +13,8 @@
 //! `examples/voxel_census.rs` uses — steps it for the given number of simulated minutes
 //! (default 60) and writes every event the question needs. Add `half` for the founder-count
 //! comparison or `heuristic` for the disclosed control, and `threads=N` to run on `N`
-//! threads instead of every core (for runs side by side).
+//! threads instead of every core (for runs side by side). `overlap=0` runs the chained
+//! tick instead of the overlapped one (`SimConfig::overlap`).
 //!
 //! **It is read-only on the model.** Nothing here changes a birth, feeding, movement or
 //! physiology rule, the seeder, or a constant.
@@ -355,6 +356,10 @@ fn main() {
     let mut senses = Senses::new();
     senses.settle(&world.view(), &flora.view());
     let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
+    // `overlap=0`: the chained tick instead of the overlapped one, for a before/after.
+    if args.iter().any(|a| a == "overlap=0") {
+        sim.set_overlap(false);
+    }
     // The host opens a closed world's outlet here — after the layers are built and
     // before the first tick — because under a closed budget the outlet is the return
     // flow into the atmosphere, not an export (`voxel/mod.rs`). The `generated closed`

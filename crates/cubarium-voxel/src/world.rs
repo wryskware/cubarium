@@ -687,6 +687,26 @@ pub fn default_threads() -> usize {
     })
 }
 
+/// `dst.copy_from_slice(src)`, cut into contiguous pieces across the process's water pool
+/// of `threads` workers when there are enough bytes to pay for the hand-off (the
+/// `parallel` feature); else on the calling thread. [`World::restore_water_from`]'s copy.
+pub(crate) fn copy_dense<T: Copy + Send + Sync>(dst: &mut [T], src: &[T], threads: usize) {
+    #[cfg(feature = "parallel")]
+    if threads > 1 && std::mem::size_of_val(src) >= 1 << 20 {
+        use rayon::prelude::*;
+        let pool = cubarium_rules::water::host::pool(threads);
+        let piece = src.len().div_ceil(threads * 2).max(1);
+        pool.install(|| {
+            dst.par_chunks_mut(piece)
+                .zip(src.par_chunks(piece))
+                .for_each(|(d, s)| d.copy_from_slice(s));
+        });
+        return;
+    }
+    let _ = threads;
+    dst.copy_from_slice(src);
+}
+
 /// Set by [`set_thread_override`]; `0` is unset.
 static THREAD_OVERRIDE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
@@ -801,7 +821,7 @@ pub struct World {
 /// world taller than [`SOLID_MASK_ROWS`].
 #[derive(Clone, Debug, Default)]
 pub(crate) struct SolidColumns {
-    bits: Vec<u128>,
+    pub(crate) bits: Vec<u128>,
 }
 
 /// A cache compares equal to anything: `material`, which `World`'s equality compares,

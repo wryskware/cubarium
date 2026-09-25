@@ -171,7 +171,7 @@ fn found(a: &Args, cfg: &VoxelConfig) -> Result<(World, Flora, Fauna)> {
     let (mut world, mut flora, mut fauna) = (founded.world, founded.flora, founded.fauna);
     if a.ticks > 0 {
         let threads = cubarium_voxel::default_threads();
-        let mut sim = Sim::new(world, flora, fauna, SimConfig { threads }, None);
+        let mut sim = Sim::new(world, flora, fauna, SimConfig::with_threads(threads), None);
         for _ in 0..a.ticks {
             sim.step();
         }

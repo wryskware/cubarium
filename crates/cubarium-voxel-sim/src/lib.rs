@@ -18,13 +18,18 @@
 //! is the **schedule**: a declared phase order, system sets a host can hang its own
 //! observers on, and one place that owns the thread pool.
 //!
-//! # Order is the rule; parallelism is inside a phase
+//! # Order is the rule; parallelism is inside a phase — and, overlapped, between two legs
 //!
 //! The tick is a dependency chain — rain feeds infiltration, infiltration feeds the
-//! exchange, the exchange feeds what the plants drink, the plants feed the animals — so
-//! **no two phases ever run at the same time**. The schedule is `.chain()`ed and its
-//! executor is the single-threaded one on purpose. Speed comes from splitting the work
-//! *inside* a phase:
+//! exchange, the exchange feeds what the plants drink, the plants feed the animals. On the
+//! **chained** tick ([`Tick`], `SimConfig::overlap` off) **no two phases ever run at the
+//! same time**: the schedule is `.chain()`ed and its executor is the single-threaded one.
+//! The **overlapped** tick ([`OverlapTick`], the default since
+//! `design/handoffs/voxel-phase-overlap-2026-09-24.md`) cuts exactly one link: the plants
+//! and animals read the [`LaggedWorld`], the world as it stood when the tick began, so
+//! `Water(t) ‖ (Flora(t) → Fauna(t))` run side by side on the multi-threaded executor and
+//! the plants' drink is applied at a barrier after both. Within each leg the order is the
+//! chained tick's. Speed otherwise comes from splitting the work *inside* a phase:
 //!
 //! | phase | parallel? | why |
 //! | --- | --- | --- |
@@ -53,8 +58,8 @@
 //! snapshot is still the three layers' own bytes, saved and loaded through them.
 
 use bevy_ecs::prelude::*;
-use bevy_ecs::schedule::{ScheduleLabel, SingleThreadedExecutor};
-use bevy_ecs::system::ScheduleSystem;
+use bevy_ecs::schedule::{MultiThreadedExecutor, ScheduleLabel, SingleThreadedExecutor};
+use bevy_ecs::system::{NonSendMarker, ScheduleSystem};
 use bevy_tasks::{ComputeTaskPool, TaskPoolBuilder};
 
 use cubarium_voxel::water;
@@ -92,6 +97,35 @@ pub struct SenseField(pub Senses);
 #[derive(Resource)]
 pub struct VoxelWorld(pub cubarium_voxel::World);
 
+/// **The overlapped tick's read copy** (`design/handoffs/voxel-phase-overlap-2026-09-24.md`):
+/// the world as it stood when the tick began — after the previous tick's water, its
+/// barrier and whatever a host commanded between ticks. At the start of every overlapped
+/// tick the live world's water arrays are **swapped** into it
+/// ([`World::take_readable_from`](cubarium_voxel::World::take_readable_from)), which costs
+/// nothing, and the water leg's first act copies them back
+/// ([`World::restore_water_from`](cubarium_voxel::World::restore_water_from)) while the
+/// plants and animals already read this: the copy is on the water leg, not ahead of
+/// both. It is never stepped or commanded. Made on the first overlapped tick.
+///
+/// **Between the swap and the restore the live [`VoxelWorld`]'s water is stale**: a
+/// host's own system in the overlapped tick that reads it belongs in
+/// [`TickPhase::Sample`], or at least after [`TickPhase::Water`].
+#[derive(Resource)]
+pub struct LaggedWorld(pub cubarium_voxel::World);
+
+/// What the overlapped tick's water leg needs to copy back only the cells that can have
+/// changed since the last lend ([`cubarium_voxel::WaterLend`]); the water side's, so the
+/// read copy stays shared with the plants and animals.
+#[derive(Resource, Default)]
+pub struct Lend(pub cubarium_voxel::WaterLend);
+
+/// The overlapped tick's planned drink between the plant step and the barrier: taken out
+/// of the plant layer when its step ends, withdrawn from the live world as soon as both
+/// the water leg and the plant step are done — beside the animal step — and handed back
+/// to the layer at the barrier ([`cubarium_voxel_flora::DrinkPlan`]).
+#[derive(Resource, Default)]
+pub struct PendingDrink(pub Option<cubarium_voxel_flora::DrinkPlan>);
+
 /// The plant layer, with its own sorted stand and ground stores.
 #[derive(Resource)]
 pub struct FloraLayer(pub Flora);
@@ -114,6 +148,15 @@ pub struct SimConfig {
     /// bench addendum in `design/7_Research/voxel-tick-profile-2026-09-18.md` is the only
     /// evidence there is about which count pays.
     pub threads: usize,
+    /// **Overlap the water with the plants and animals** (default on;
+    /// `design/handoffs/voxel-phase-overlap-2026-09-24.md`). On, the live tick runs
+    /// `Water(t) ‖ (Flora(t) → Fauna(t))` and then a barrier: the plants and animals read
+    /// the [`LaggedWorld`] — the world as it stood when the tick began, one tick (50 ms)
+    /// behind the water — and the plants' drink is applied to the live world at the
+    /// barrier. That lag is the one rule it changes. Off is the chained tick, water then
+    /// plants then animals, so two runs can be compared. The static and frozen-water
+    /// schedules ignore it.
+    pub overlap: bool,
 }
 
 impl Default for SimConfig {
@@ -122,8 +165,76 @@ impl Default for SimConfig {
             threads: cubarium_voxel::thread_override().unwrap_or_else(|| {
                 std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
             }),
+            overlap: true,
         }
     }
+}
+
+impl SimConfig {
+    /// `threads` workers for every phase, with the default [`SimConfig::overlap`].
+    pub fn with_threads(threads: usize) -> SimConfig {
+        SimConfig {
+            threads,
+            ..SimConfig::default()
+        }
+    }
+
+    /// Under overlap, the two legs' worker counts: `(water, plants and animals)`.
+    ///
+    /// The water's rayon pool and the compute pool the plants and animals split their
+    /// reads over are separate, and the two legs run at once, so both at `threads` can
+    /// put twice as many busy threads as cores. **Both at `threads` anyway**: it was the
+    /// fastest split measured (eidolon, terrarium seed 1, 3 cores / 6 threads, minutes
+    /// 242-290, ms/tick): 6:6 12.80, 6:3 13.19, 4:2 13.19, 6:2 13.63, 4:1 15.32, 5:1 15.39,
+    /// chained 14.01. The plant leg is the long one on a grown world and its light and
+    /// drink reads need their workers; fewer water workers buy it nothing. Giving it a
+    /// physical core of its own (`cubarium::voxel::chiplet::split_overlap_pools`) was 4 %
+    /// faster at hour 6 and 40 % slower while the young world is water-bound; renicing
+    /// the water pool changed nothing. `CUBARIUM_OVERLAP_SPLIT=W,B` and
+    /// [`set_overlap_split`] override it for measurement.
+    pub fn overlap_split(&self) -> (usize, usize) {
+        let n = self.threads.max(1);
+        if let Some((w, b)) = split_override() {
+            return (w.clamp(1, n), b.clamp(1, n));
+        }
+        (n, n)
+    }
+}
+
+/// Build the process's compute pool — the plant and animal leg's in-phase workers — of
+/// `threads` workers now, if it does not exist yet. [`Sim::new`] does this itself; a host
+/// that wants that pool's threads on CPUs of their own sets its thread's affinity first
+/// and calls this (a spawned thread inherits its spawner's affinity), then builds the
+/// water pool (`cubarium_voxel::water::prepare_pool`) under another.
+pub fn prepare_compute_pool(threads: usize) {
+    if threads > 1 {
+        ComputeTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(threads).build());
+    }
+}
+
+/// Set by [`set_overlap_split`]: `water << 16 | bio`, `0` unset.
+static SPLIT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// **Measurement only**: pin [`SimConfig::overlap_split`] for the whole process, `None`
+/// to clear, so one run can time several splits on one world. A water count the process
+/// has no pool for yet builds one on first use.
+pub fn set_overlap_split(split: Option<(usize, usize)>) {
+    let packed = split.map_or(0, |(w, b)| (w.clamp(1, 0xffff) << 16) | b.clamp(1, 0xffff));
+    SPLIT.store(packed, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// [`set_overlap_split`]'s, else `CUBARIUM_OVERLAP_SPLIT=W,B` from the environment.
+fn split_override() -> Option<(usize, usize)> {
+    match SPLIT.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => {}
+        p => return Some((p >> 16, p & 0xffff)),
+    }
+    static ENV: std::sync::OnceLock<Option<(usize, usize)>> = std::sync::OnceLock::new();
+    *ENV.get_or_init(|| {
+        let s = std::env::var("CUBARIUM_OVERLAP_SPLIT").ok()?;
+        let (w, b) = s.split_once(',')?;
+        Some((w.trim().parse().ok()?, b.trim().parse().ok()?))
+    })
 }
 
 /// The phases of one tick, as system sets, so a host can order its own systems against
@@ -140,6 +251,9 @@ pub enum TickPhase {
     Flora,
     /// [`Fauna::step`].
     Fauna,
+    /// The overlapped tick's barrier, after both legs: the plants' planned drink applied
+    /// to the live world. Empty on the chained tick.
+    Settle,
     /// The world's tick counter moves here, after every phase that reads it.
     Advance,
     /// **Empty in this crate.** Where a caller's observers go: they run after the tick and
@@ -150,6 +264,12 @@ pub enum TickPhase {
 /// The label of the tick schedule.
 #[derive(ScheduleLabel, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Tick;
+
+/// The label of the **overlapped** live tick ([`SimConfig::overlap`]): `Begin` (and the
+/// read copy), then `Water` beside `Flora → Fauna`, then `Settle`, `Advance` and `Sample`.
+/// [`Sim::step`] runs it instead of [`Tick`] while overlap is on.
+#[derive(ScheduleLabel, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct OverlapTick;
 
 /// The label of the inner free-water substep schedule, run `water_substeps` times by the
 /// [`TickPhase::Water`] leg.
@@ -221,9 +341,11 @@ impl Sim {
             ComputeTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(threads).build());
             // The water phases' rayon pool of the same size, built now rather than on the
             // first exchange so its workers exist before a host pins its loop (a spawned
-            // thread inherits its spawner's affinity). The two pools never run at once:
-            // the schedule is a chain, so while water runs the compute pool is idle.
+            // thread inherits its spawner's affinity). On the chained tick the two pools
+            // never run at once; the overlapped tick runs them side by side, its water on
+            // a pool of its own split's size (`SimConfig::overlap_split`).
             water::prepare_pool(threads);
+            water::prepare_pool(config.overlap_split().0);
         }
 
         let mut ecs = World::new();
@@ -271,6 +393,48 @@ impl Sim {
         tick.add_systems(sys_fauna.in_set(TickPhase::Fauna));
         tick.add_systems(sys_advance.in_set(TickPhase::Advance));
         ecs.add_schedule(tick);
+
+        // The overlapped tick: the water leg on the thread that runs the schedule (its
+        // exchange scratch is per thread and world-sized), the plant and animal leg on a
+        // compute-pool worker beside it, reading the read copy; the barrier after both.
+        let mut overlap = Schedule::new(OverlapTick);
+        if threads > 1 {
+            overlap.set_executor(MultiThreadedExecutor::new());
+        } else {
+            overlap.set_executor(SingleThreadedExecutor::new());
+        }
+        overlap.configure_sets(
+            (
+                TickPhase::Begin,
+                TickPhase::Water,
+                TickPhase::Settle,
+                TickPhase::Advance,
+                TickPhase::Sample,
+            )
+                .chain(),
+        );
+        overlap.configure_sets(
+            (
+                TickPhase::Begin,
+                TickPhase::Flora,
+                TickPhase::Fauna,
+                TickPhase::Settle,
+            )
+                .chain(),
+        );
+        overlap.add_systems((sys_begin, sys_read_copy).chain().in_set(TickPhase::Begin));
+        overlap.add_systems(sys_water_leg.in_set(TickPhase::Water));
+        overlap.add_systems(sys_flora_lagged.in_set(TickPhase::Flora));
+        overlap.add_systems(sys_fauna_lagged.in_set(TickPhase::Fauna));
+        overlap.add_systems(
+            sys_withdraw
+                .after(TickPhase::Water)
+                .after(TickPhase::Flora)
+                .before(TickPhase::Settle),
+        );
+        overlap.add_systems(sys_settle.in_set(TickPhase::Settle));
+        overlap.add_systems(sys_advance.in_set(TickPhase::Advance));
+        ecs.add_schedule(overlap);
 
         // The static arena: the same `sys_fauna` and `sys_advance`, with no `Begin`, no
         // `Water` and no `Flora`. Nothing in the skipped legs is a rule of the fauna tick,
@@ -402,6 +566,17 @@ impl Sim {
     ///   cache filled in a pass of its own first. Left serial, and measured that way.
     pub fn step(&mut self) {
         match self.mode {
+            ScheduleMode::Live if self.config().overlap => {
+                // The read copy is made on the first overlapped tick, so a sim that never
+                // runs one — every static arena the trainer builds — never pays for it.
+                if !self.ecs.contains_resource::<LaggedWorld>() {
+                    let copy = self.world().clone();
+                    self.ecs.insert_resource(LaggedWorld(copy));
+                    self.ecs.init_resource::<PendingDrink>();
+                    self.ecs.init_resource::<Lend>();
+                }
+                self.ecs.run_schedule(OverlapTick)
+            }
             ScheduleMode::Live => self.ecs.run_schedule(Tick),
             ScheduleMode::Static => self.ecs.run_schedule(StaticTick),
             ScheduleMode::FrozenWater => self.ecs.run_schedule(FrozenWaterTick),
@@ -449,12 +624,40 @@ impl Sim {
         }
     }
 
+    /// Turn [`SimConfig::overlap`] on or off between ticks. Nothing is pending at a tick
+    /// boundary, so either tick can follow either.
+    pub fn set_overlap(&mut self, on: bool) {
+        self.ecs.resource_mut::<SimConfig>().overlap = on;
+    }
+
     /// Add systems to [`TickPhase::Sample`]: a host's observers, run once per tick after
-    /// every layer has stepped. The live schedule only; [`Sim::add_static_samplers`] is the
-    /// static schedule's.
-    pub fn add_samplers<M>(&mut self, systems: impl IntoScheduleConfigs<ScheduleSystem, M>) {
+    /// every layer has stepped. The live schedules only — the chained and the overlapped
+    /// tick both get them, hence `Clone`; [`Sim::add_static_samplers`] is the static
+    /// schedule's.
+    pub fn add_samplers<M>(
+        &mut self,
+        systems: impl IntoScheduleConfigs<ScheduleSystem, M> + Clone,
+    ) {
+        let again = systems.clone();
         self.ecs.schedule_scope(Tick, |_, schedule| {
             schedule.add_systems(systems.in_set(TickPhase::Sample));
+        });
+        self.ecs.schedule_scope(OverlapTick, |_, schedule| {
+            schedule.add_systems(again.in_set(TickPhase::Sample));
+        });
+    }
+
+    /// Add systems to **both live schedules**, placed by the caller (`.in_set(...)`): a
+    /// harness's hook inside a phase. `make` is called once per schedule.
+    pub fn add_live_systems<M, S: IntoScheduleConfigs<ScheduleSystem, M>>(
+        &mut self,
+        make: impl Fn() -> S,
+    ) {
+        self.ecs.schedule_scope(Tick, |_, schedule| {
+            schedule.add_systems(make());
+        });
+        self.ecs.schedule_scope(OverlapTick, |_, schedule| {
+            schedule.add_systems(make());
         });
     }
 
@@ -644,4 +847,96 @@ fn sys_fauna_static(
 
 fn sys_advance(mut w: ResMut<VoxelWorld>) {
     w.0.advance_tick();
+}
+
+// ------------------------------------------------------- the overlapped tick's systems
+
+/// The read copy made to read as the live world does: its water swapped in, the rest
+/// copied. The live world's water is stale until the water leg restores it.
+fn sys_read_copy(
+    mut w: ResMut<VoxelWorld>,
+    mut lagged: ResMut<LaggedWorld>,
+    mut lend: ResMut<Lend>,
+) {
+    lagged.0.take_readable_from(&mut w.0, &mut lend.0);
+}
+
+/// The whole water leg, in the chained tick's phase order, as one system on the thread
+/// running the schedule ([`NonSendMarker`]): the exchange keeps a world-sized scratch per
+/// calling thread, so the leg must not wander across pool workers.
+fn sys_water_leg(
+    _main: NonSendMarker,
+    mut w: ResMut<VoxelWorld>,
+    lagged: Res<LaggedWorld>,
+    mut lend: ResMut<Lend>,
+    config: Res<SimConfig>,
+) {
+    let threads = config.overlap_split().0;
+    let w = &mut w.0;
+    cubarium_voxel::voxel_phase!(WaterLeg, {
+        // The water the read copy was lent at the tick's start, back before anything
+        // reads it; the plants and animals are reading the copy meanwhile.
+        cubarium_voxel::voxel_phase!(ReadCopy, {
+            w.restore_water_from(&lagged.0, &mut lend.0, threads)
+        });
+        water::rain(w);
+        water::evaporate(w);
+        let substeps = w.config().water_substeps.max(1);
+        let sub_dt = cubarium_voxel::DT / substeps as f64;
+        for _ in 0..substeps {
+            water::infiltrate(w, sub_dt, threads);
+            water::fall(w, threads);
+            water::exchange(w, threads);
+        }
+        water::drain(w, threads);
+        water::water_table(w, threads);
+        water::spring(w);
+        water::outlet(w);
+    });
+}
+
+/// The plant leg against the read copy: the drink planned, not applied, and handed out
+/// for the live world to take.
+fn sys_flora_lagged(
+    lagged: Res<LaggedWorld>,
+    mut flora: ResMut<FloraLayer>,
+    mut pending: ResMut<PendingDrink>,
+    config: Res<SimConfig>,
+) {
+    flora.0.step_planned(&lagged.0, config.overlap_split().1);
+    pending.0 = flora.0.take_drink_plan();
+}
+
+/// [`sys_fauna`] against the read copy. The animal layer only ever reads the world.
+fn sys_fauna_lagged(
+    lagged: Res<LaggedWorld>,
+    mut flora: ResMut<FloraLayer>,
+    mut fauna: ResMut<FaunaLayer>,
+    config: Res<SimConfig>,
+    mut senses: Option<ResMut<SenseField>>,
+) {
+    let threads = config.overlap_split().1;
+    match senses.as_deref_mut() {
+        Some(s) => fauna
+            .0
+            .step_with_senses(&lagged.0, &mut flora.0, threads, &mut s.0),
+        None => fauna.0.step_with(&lagged.0, &mut flora.0, threads),
+    }
+}
+
+/// The planned drink withdrawn from the live world once this tick's water is done, each
+/// voxel bounded by what it holds now. Runs beside the animal step, which reads only the
+/// read copy; on the schedule's thread, like the water leg.
+fn sys_withdraw(_main: NonSendMarker, mut w: ResMut<VoxelWorld>, mut pending: ResMut<PendingDrink>) {
+    if let Some(plan) = pending.0.as_mut() {
+        cubarium_voxel::voxel_phase!(Settle, { plan.withdraw(&mut w.0) });
+    }
+}
+
+/// The barrier: the withdrawn drink booked in the plant layer, each shortfall off whoever
+/// asked.
+fn sys_settle(mut flora: ResMut<FloraLayer>, mut pending: ResMut<PendingDrink>) {
+    if let Some(plan) = pending.0.take() {
+        flora.0.finish_drink(plan);
+    }
 }

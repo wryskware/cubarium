@@ -40,6 +40,13 @@
 //! cargo run --release -p cubarium --example voxel_census -- 6 preset=default save=runs/h6
 //! cargo run --release -p cubarium --example voxel_census -- 1 load=runs/h6 threads=16
 //! ```
+//!
+//! `overlap=0` runs the chained tick instead of the overlapped one (`SimConfig::overlap`),
+//! and `ab=MIN` flips between the two every simulated minute from minute `MIN` on, so the
+//! two ticks are timed on one world. `modes=c,6:6,5:1` makes that rotation a list: `c` is
+//! the chained tick and `W:B` the overlapped one with `W` water and `B` plant-and-animal
+//! workers (`cubarium_voxel_sim::set_overlap_split`). Every minute a `phases:` line on
+//! stderr gives that minute's milliseconds per tick by phase.
 
 use cubarium::voxel::VoxelConfig;
 use cubarium::voxel::habitat;
@@ -108,10 +115,48 @@ fn main() {
     // the world that ships, not the seeder's bare heuristics. `heuristic` as a trailing
     // argument keeps the old, observation-only control.
     let heuristic = args.iter().any(|a| a == "heuristic");
+    // `pin=B`: the overlapped tick's plant and animal leg on the last `B` physical cores,
+    // the water on the rest (`chiplet::split_overlap_pools`). Measurement.
+    if let Some(b) = args
+        .iter()
+        .find_map(|a| a.strip_prefix("pin=").and_then(|s| s.parse().ok()))
+    {
+        cubarium::voxel::chiplet::split_overlap_pools(b)
+            .expect("pin=B needs more than B physical cores");
+    }
+    let timing = Timing {
+        overlap: args
+            .iter()
+            .find_map(|a| a.strip_prefix("overlap="))
+            .map(|v| v != "0"),
+        ab_from_min: args
+            .iter()
+            .find_map(|a| a.strip_prefix("ab=").and_then(|s| s.parse().ok())),
+        nice_water: args
+            .iter()
+            .find_map(|a| a.strip_prefix("nice_water=").and_then(|s| s.parse().ok())),
+        modes: args
+            .iter()
+            .find_map(|a| a.strip_prefix("modes="))
+            .map_or_else(
+                || vec![None, Some(None)],
+                |list| {
+                    list.split(',')
+                        .map(|m| {
+                            if m == "c" {
+                                return None;
+                            }
+                            let (w, b) = m.split_once(':').expect("a mode is c or W:B");
+                            Some(Some((w.parse().expect("W"), b.parse().expect("B"))))
+                        })
+                        .collect()
+                },
+            ),
+    };
     let save = SaveAt::from_args(&args);
     if let Some(dir) = args.iter().find_map(|a| a.strip_prefix("load=")) {
         let (mut sim, minute0) = load_run(std::path::Path::new(dir), &args, heuristic, &policies);
-        run(&mut sim, hours, minute0, save.as_ref());
+        run(&mut sim, hours, minute0, save.as_ref(), &timing);
         return;
     }
     // `config=<path>` is a landscape arm from a host TOML (the Tachyon terrarium, say),
@@ -180,7 +225,7 @@ fn main() {
             sim.world_mut()
                 .apply(WorldCommand::SetOutlet { open: true });
         }
-        run(&mut sim, hours, 0, save.as_ref());
+        run(&mut sim, hours, 0, save.as_ref(), &timing);
         return;
     }
     let mut world = if generated {
@@ -243,13 +288,32 @@ fn main() {
     senses.settle(&world.view(), &flora.view());
     let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
 
-    run(&mut sim, hours, 0, save.as_ref());
+    run(&mut sim, hours, 0, save.as_ref(), &timing);
+}
+
+/// How the tick is run and timed: `overlap=`, `ab=` and `modes=`.
+#[derive(Clone)]
+struct Timing {
+    overlap: Option<bool>,
+    ab_from_min: Option<u64>,
+    nice_water: Option<i32>,
+    /// The `ab=` rotation: `None` the chained tick, `Some(split)` the overlapped one
+    /// (`Some(None)` at its default split).
+    modes: Vec<Option<Option<(usize, usize)>>>,
 }
 
 /// Step the coupled layers for the asked-for hours, writing one row a simulated minute.
 /// Both arms end here, so a preset world is measured by the same code path as the ridge.
 /// A loaded run starts at `minute0` and prints from the minute after it.
-fn run(sim: &mut Sim, hours: f64, minute0: u64, save: Option<&SaveAt>) {
+fn run(sim: &mut Sim, hours: f64, minute0: u64, save: Option<&SaveAt>, timing: &Timing) {
+    if let Some(on) = timing.overlap {
+        sim.set_overlap(on);
+    }
+    // `nice_water=N`: the water pools' workers at nice N (measurement). `Sim::new`
+    // built the pools.
+    if let Some(n) = timing.nice_water {
+        cubarium::voxel::chiplet::nice_water_pools(n);
+    }
     let total_ticks = (hours * 3600.0 * f64::from(TICK_HZ)) as u64;
     let save_min = save.map(|s| s.minute.unwrap_or(minute0 + total_ticks / TICKS_PER_MIN));
     print_header();
@@ -259,13 +323,26 @@ fn run(sim: &mut Sim, hours: f64, minute0: u64, save: Option<&SaveAt>) {
     let mut tick = minute0 * TICKS_PER_MIN;
     let total_ticks = tick + total_ticks;
     let mut window = SeedWindow::default();
+    let mut phases = PhaseWindow::default();
     let mut since = std::time::Instant::now();
     while tick < total_ticks {
         sim.step();
         tick += 1;
         if tick % TICKS_PER_MIN == 0 {
             let ms = since.elapsed().as_secs_f64() * 1e3 / TICKS_PER_MIN as f64;
-            print_row(tick / TICKS_PER_MIN, sim, ms);
+            let minute = tick / TICKS_PER_MIN;
+            print_row(minute, sim, ms);
+            phases.report(minute, sim, ms);
+            if let Some(from) = timing.ab_from_min.filter(|from| minute >= *from) {
+                let n = timing.modes.len() as u64;
+                match timing.modes[((minute - from + 1) % n) as usize] {
+                    None => sim.set_overlap(false),
+                    Some(split) => {
+                        cubarium_voxel_sim::set_overlap_split(split);
+                        sim.set_overlap(true);
+                    }
+                }
+            }
             if let Some(s) = save
                 && save_min == Some(tick / TICKS_PER_MIN)
             {
@@ -375,6 +452,65 @@ fn load_run(
     }
     let sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
     (sim, minute)
+}
+
+/// The `phases:` line on stderr, once a simulated minute: that minute's milliseconds per
+/// tick by phase. Water is the sum of its leaves on the chained tick and the leg's own
+/// total on the overlapped one. Measurement only.
+#[derive(Default)]
+struct PhaseWindow {
+    nanos: Vec<u64>,
+}
+
+impl PhaseWindow {
+    fn report(&mut self, minute: u64, sim: &Sim, tick_ms: f64) {
+        use cubarium_voxel::profile::{Phase, nanos};
+        let now: Vec<u64> = Phase::ALL.iter().map(|p| nanos(*p)).collect();
+        if self.nanos.len() != now.len() {
+            self.nanos = vec![0; now.len()];
+        }
+        let ms = |p: Phase| {
+            now[p.index()].saturating_sub(self.nanos[p.index()]) as f64 / TICKS_PER_MIN as f64 / 1e6
+        };
+        let leaves = [
+            Phase::Rain,
+            Phase::Evaporate,
+            Phase::Infiltrate,
+            Phase::Fall,
+            Phase::Exchange,
+            Phase::Drain,
+            Phase::WaterTable,
+            Phase::Spring,
+            Phase::Outlet,
+        ];
+        let overlap = sim.config().overlap;
+        let water: f64 = if overlap {
+            ms(Phase::WaterLeg)
+        } else {
+            leaves.iter().map(|p| ms(*p)).sum()
+        };
+        let split = sim.config().overlap_split();
+        eprintln!(
+            "phases: min={minute} overlap={} split={}:{} tick_ms={tick_ms:.3} begin={:.3} read_copy={:.3} \
+             water={water:.3} exchange={:.3} flora={:.3} light={:.3} drink={:.3} grow={:.3} \
+             cover={:.3} fauna={:.3} sense={:.3} settle={:.3}",
+            u8::from(overlap),
+            split.0,
+            split.1,
+            ms(Phase::Begin),
+            ms(Phase::ReadCopy),
+            ms(Phase::Exchange),
+            ms(Phase::FloraStep),
+            ms(Phase::Light),
+            ms(Phase::Drink),
+            ms(Phase::Grow),
+            ms(Phase::Cover),
+            ms(Phase::FaunaStep),
+            ms(Phase::FaunaSense),
+            ms(Phase::Settle),
+        );
+        self.nanos = now;
+    }
 }
 
 /// The seed-bank line on stderr, once a simulated hour: how many sites hold a bank (what
