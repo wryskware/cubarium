@@ -509,6 +509,30 @@ impl PhaseWindow {
             ms(Phase::FaunaSense),
             ms(Phase::Settle),
         );
+        // The plant step phase by phase (`Cover` is its prep and its growth together).
+        let flora = [
+            ("prune", Phase::Prune),
+            ("sky", Phase::SkyCache),
+            ("cover", Phase::Cover),
+            ("drown", Phase::Drown),
+            ("light", Phase::Light),
+            ("drink", Phase::Drink),
+            ("feed", Phase::Feed),
+            ("grow", Phase::Grow),
+            ("decompose", Phase::Decompose),
+            ("seed_bank", Phase::SeedBank),
+            ("propagate", Phase::Propagate),
+            ("crowns", Phase::Crowns),
+        ];
+        let mut line = format!(
+            "flora: min={minute} overlap={} total={:.3}",
+            u8::from(overlap),
+            ms(Phase::FloraStep)
+        );
+        for (name, p) in flora {
+            line.push_str(&format!(" {name}={:.3}", ms(p)));
+        }
+        eprintln!("{line} stands={}", sim.flora().view().stands.len());
         self.nanos = now;
     }
 }
