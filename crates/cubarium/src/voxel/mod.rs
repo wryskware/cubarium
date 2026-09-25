@@ -254,6 +254,7 @@ pub enum Lighting {
 /// water_foam = 0.6     # foam along shores and where a fall meets a pool (0: none)
 /// water_glint = 0.6    # sun-coloured highlight on sunlit ripple lines tilted sunward (0: none)
 /// water_rain_rings = 0.5 # rings on open-sky water while it rains (0: none)
+/// water_highlight = 0.0  # glints and rain rings: 0 palette colour .. 1 white
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -341,6 +342,9 @@ pub struct LightConfig {
     /// How strongly rain rings (a drop's ring growing and fading on water under open sky,
     /// while it rains) lean toward the palette's surface colour. `0` turns them off.
     pub water_rain_rings: f32,
+    /// How far glints and rain rings lean from their palette colour (the light, the water
+    /// surface; both near the lake's own cyan) toward white, 0 to 1.
+    pub water_highlight: f32,
 }
 
 impl Default for LightConfig {
@@ -368,6 +372,7 @@ impl Default for LightConfig {
             water_foam: 0.6,
             water_glint: 0.6,
             water_rain_rings: 0.5,
+            water_highlight: 0.0,
         }
     }
 }

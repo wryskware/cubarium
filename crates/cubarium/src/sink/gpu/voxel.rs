@@ -1189,6 +1189,7 @@ pub fn params_of(cfg: &VoxelConfig, proj: Projection, roof_from_texture: bool) -
         foam: cfg.light.water_foam.max(0.0),
         glint: cfg.light.water_glint.max(0.0),
         rain_rings: cfg.light.water_rain_rings.max(0.0),
+        highlight: cfg.light.water_highlight,
         // Nothing to bloom without emitters: the passes are skipped.
         bloom: if cfg.lighting == Lighting::Lit && cfg.light.emission {
             cfg.light.bloom.max(0.0)

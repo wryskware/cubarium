@@ -45,7 +45,7 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
     vec4 sunK;          // lit: the unit direction toward the sun (zero: none), sun tint
     vec4 waterL;        // lit: absorption per voxel of path, reflection gain, ripple tilt, reflection cells
     vec4 clock;         // sim time in ticks (tick + the fraction elapsed), the water's animation step, -, -
-    vec4 waterM;        // lit: foam, glint, rain rings, -
+    vec4 waterM;        // lit: foam, glint, rain rings, highlight (toward white)
 } u;
 
 // The lighting tier (`lighting = "flat" | "lit"`), fixed when the pipeline is built. The
@@ -1572,19 +1572,22 @@ vec3 litWaterFinish(vec3 colour) {
     // The surface's details over the reflection: rain rings and foam in the palette's
     // surface colour, off the light as the falls' streaks are (lit, foam in a shaded
     // crevice went a muddy grey), and glints in the palette's light. Foam and rings only
-    // lighten: where the water is already brighter they leave it be.
+    // lighten: where the water is already brighter they leave it be. Rings and glints lean
+    // from their palette colour toward white by the highlight knob (waterM.w).
     float hz = hazeAt(float(z) + 0.5);
     vec3 froth = max(colour, hazed(u.waterSurfaceC.rgb, hz));
     if (u.waterM.z > 0.0 && u.knobs.w > 0.0 && skyOpen(open.x, open.y, open.z) > 0.0) {
         float ring = max(rainRing(p.xz, 0), rainRing(p.xz, 1));
-        colour = mix(colour, froth, clamp(u.waterM.z * ring, 0.0, 1.0));
+        vec3 ringC = max(colour, hazed(mix(u.waterSurfaceC.rgb, vec3(1.0), u.waterM.w), hz));
+        colour = mix(colour, ringC, clamp(u.waterM.z * ring, 0.0, 1.0));
     }
     if (u.waterM.x > 0.0) {
         float foam = foamAt(ivec3(x, y, z), p, fill);
         colour = mix(colour, froth, clamp(u.waterM.x * foam, 0.0, 1.0));
     }
     if (u.waterM.y > 0.0 && glint > 0.0 && sun > 0.0) {
-        colour = mix(colour, hazed(u.lightC.rgb, hz), clamp(u.waterM.y * glint, 0.0, 1.0));
+        vec3 glintC = hazed(mix(u.lightC.rgb, vec3(1.0), u.waterM.w), hz);
+        colour = mix(colour, glintC, clamp(u.waterM.y * glint, 0.0, 1.0));
     }
     return colour;
 }

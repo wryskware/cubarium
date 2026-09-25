@@ -589,6 +589,9 @@ pub struct VoxelParams {
     pub foam: f32,
     pub glint: f32,
     pub rain_rings: f32,
+    /// How far glints and rain rings lean from their palette colour toward white (`0`:
+    /// the palette's light and surface colours, `1`: white).
+    pub highlight: f32,
     /// The lit tier's bloom ([`crate::bloom`]): how much of an emitter's colour its halo
     /// adds (smooth: times the blurred emission; blocky: at full step), `0` for none (the
     /// passes are skipped).
@@ -795,7 +798,7 @@ impl VoxelParams {
                 self.foam.max(0.0),
                 self.glint.max(0.0),
                 self.rain_rings.max(0.0),
-                0.0,
+                self.highlight.clamp(0.0, 1.0),
             ],
         }
     }
@@ -873,7 +876,7 @@ struct VoxelUniforms {
     water_l: [f32; 4],
     /// Sim time in ticks, the water's animation step, the flow overlay flag, padding.
     clock: [f32; 4],
-    /// The lit tier's water details: foam, glint, rain rings, padding.
+    /// The lit tier's water details: foam, glint, rain rings, highlight.
     water_m: [f32; 4],
 }
 
@@ -2492,6 +2495,7 @@ pub(crate) mod tests {
             foam: 0.0,
             glint: 0.0,
             rain_rings: 0.0,
+            highlight: 0.0,
             bloom: 0.0,
             bloom_radius: 2.0,
             bloom_style: crate::bloom::BloomStyle::Smooth,
@@ -2520,12 +2524,12 @@ pub(crate) mod tests {
     }
 
     /// The water's surface details reach the shader's `waterM` in order (foam, glint, rain
-    /// rings), a negative strength as none.
+    /// rings, highlight), a negative strength as none and the highlight clamped to 0..1.
     #[test]
     fn the_water_details_reach_their_uniform() {
-        let p = VoxelParams { foam: 0.6, glint: -1.0, rain_rings: 0.5, ..params() };
+        let p = VoxelParams { foam: 0.6, glint: -1.0, rain_rings: 0.5, highlight: 1.5, ..params() };
         let u = p.uniforms(0, false, FrameClock::default());
-        assert_eq!(u.water_m, [0.6, 0.0, 0.5, 0.0]);
+        assert_eq!(u.water_m, [0.6, 0.0, 0.5, 1.0]);
     }
 
     /// Any water at all packs to a non-zero fraction, so the presenter's "at least one
