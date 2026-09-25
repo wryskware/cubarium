@@ -1020,10 +1020,6 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         Some(path) => format!("the `[world]` in {}", path.display()),
         None => "the built-in world defaults".to_string(),
     })?;
-    // Before any pool exists and before the thread count is read, so both follow it.
-    if !args.pin_loop && !args.all_chiplets {
-        chiplet::keep_to_one_chiplet();
-    }
     if args.textures {
         cfg.textures = true;
     }
@@ -3540,7 +3536,6 @@ mod tests {
             every: 30,
             fps: 60,
             pin_loop: false,
-            all_chiplets: false,
             web_port: 7393,
             gpu_target: None,
             gpu_capture: None,
@@ -4327,7 +4322,6 @@ mod tests {
             every: 30,
             fps: 60,
             pin_loop: false,
-            all_chiplets: false,
             web_port: 7393,
             gpu_target: None,
             gpu_capture: None,
@@ -4379,7 +4373,6 @@ mod tests {
             every: 30,
             fps: 60,
             pin_loop: false,
-            all_chiplets: false,
             web_port: 7393,
             gpu_target: None,
             gpu_capture: None,

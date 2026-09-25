@@ -174,13 +174,6 @@ pub struct Voxel {
     /// capacity.
     #[arg(long)]
     pub pin_loop: bool,
-    /// Let the simulation spread over every chiplet. By default a machine whose CPUs share
-    /// more than one L3 (the desktop's 9950X3D) keeps the process on one chiplet — the one
-    /// with most of the affinity mask, the larger L3 on a tie — before the pools are
-    /// built: the terrarium's water tick is 20-25 % faster there than over both
-    /// (`voxel/chiplet.rs`). No effect on a one-L3 machine or under `--pin-loop`.
-    #[arg(long)]
-    pub all_chiplets: bool,
     /// Port for the `web` sink (a viewer page at http://127.0.0.1:<port>/).
     #[arg(long, default_value_t = 7393)]
     pub web_port: u16,

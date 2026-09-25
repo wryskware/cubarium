@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use cubarium_voxel::cpus::{
-    auto_order, chiplet_plan, format_cpu_list, parse_cpu_list, read_topology,
+    auto_order, format_cpu_list, parse_cpu_list, read_topology,
 };
 
 /// A scratch directory under the system temp dir, removed on drop.
@@ -202,45 +202,3 @@ fn a_tree_without_cache_files_falls_back_to_the_mask_in_order() {
     assert_eq!(auto_order(&read_topology(missing, &[5, 4])), vec![4, 5]);
 }
 
-#[test]
-fn the_live_loop_keeps_to_the_chiplet_with_most_of_the_mask_the_larger_l3_on_a_tie() {
-    let t = two_chiplets("98304K", "32768K");
-    assert_eq!(
-        chiplet_plan(&t.0, &range(0, 32)),
-        Some(cat(&[range(0, 8), range(16, 24)])),
-        "the whole 9950X3D: the V-cache chiplet"
-    );
-    let t2 = two_chiplets("32768K", "98304K");
-    assert_eq!(
-        chiplet_plan(&t2.0, &range(0, 32)),
-        Some(cat(&[range(8, 16), range(24, 32)])),
-        "the larger L3 wherever it is"
-    );
-    assert_eq!(
-        chiplet_plan(&t.0, &cat(&[vec![0, 1], range(8, 16), range(24, 32)])),
-        Some(cat(&[range(8, 16), range(24, 32)])),
-        "a mask mostly on the small chiplet stays there"
-    );
-    assert_eq!(
-        chiplet_plan(&t.0, &cat(&[range(0, 8), range(16, 24)])),
-        None,
-        "already one chiplet: nothing to do"
-    );
-    // One L3, and no L3 at all.
-    let sib: Vec<String> = (0..12)
-        .map(|c| format!("{},{}", c % 6, c % 6 + 6))
-        .collect();
-    let one: Vec<Spec<'_>> = (0..12)
-        .map(|c| Spec {
-            cpu: c,
-            siblings: &sib[c],
-            l3: Some(("0-11", "32768K")),
-        })
-        .collect();
-    let t = tree(&one);
-    assert_eq!(chiplet_plan(&t.0, &range(0, 12)), None);
-    assert_eq!(
-        chiplet_plan(Path::new("/nonexistent/cubarium/cpu"), &[0, 1]),
-        None
-    );
-}

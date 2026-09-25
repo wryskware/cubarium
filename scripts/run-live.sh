@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Run the live world on this host, as its profile config/hosts/<host>.env says: the
 # CPUs the process keeps to (RUN_CPUS, through taskset; the machine's placement lives
-# here, not in the program), the arguments (RUN_ARGS) and the state directory (STATE).
+# here, not in the program), the arguments (RUN_ARGS) and, if it names one, the state
+# directory the world persists in (STATE).
 # Extra arguments are forwarded to cubarium. A service's ExecStart calls this.
 #
 #     scripts/run-live.sh voidrunner
@@ -16,9 +17,12 @@ repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd -- "$repo_dir"
 # shellcheck source=/dev/null
 . "config/hosts/$host.env"
-mkdir -p "$STATE"
 read -r -a args <<<"$RUN_ARGS"
-cmd=("$repo_dir/target/release/cubarium" "${args[@]}" --state "$STATE" "$@")
+if [ -n "${STATE:-}" ]; then
+  mkdir -p "$STATE"
+  args+=(--state "$STATE")
+fi
+cmd=("$repo_dir/target/release/cubarium" "${args[@]}" "$@")
 if [ -n "${RUN_CPUS:-}" ]; then
   exec taskset -c "$RUN_CPUS" "${cmd[@]}"
 fi
