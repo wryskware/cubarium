@@ -113,6 +113,12 @@ pub struct VoxelWorld(pub cubarium_voxel::World);
 #[derive(Resource)]
 pub struct LaggedWorld(pub cubarium_voxel::World);
 
+/// What the overlapped tick's water leg needs to copy back only the cells that can have
+/// changed since the last lend ([`cubarium_voxel::WaterLend`]); the water side's, so the
+/// read copy stays shared with the plants and animals.
+#[derive(Resource, Default)]
+pub struct Lend(pub cubarium_voxel::WaterLend);
+
 /// The overlapped tick's planned drink between the plant step and the barrier: taken out
 /// of the plant layer when its step ends, withdrawn from the live world as soon as both
 /// the water leg and the plant step are done — beside the animal step — and handed back
@@ -559,6 +565,7 @@ impl Sim {
                     let copy = self.world().clone();
                     self.ecs.insert_resource(LaggedWorld(copy));
                     self.ecs.init_resource::<PendingDrink>();
+                    self.ecs.init_resource::<Lend>();
                 }
                 self.ecs.run_schedule(OverlapTick)
             }
@@ -838,8 +845,12 @@ fn sys_advance(mut w: ResMut<VoxelWorld>) {
 
 /// The read copy made to read as the live world does: its water swapped in, the rest
 /// copied. The live world's water is stale until the water leg restores it.
-fn sys_read_copy(mut w: ResMut<VoxelWorld>, mut lagged: ResMut<LaggedWorld>) {
-    lagged.0.take_readable_from(&mut w.0);
+fn sys_read_copy(
+    mut w: ResMut<VoxelWorld>,
+    mut lagged: ResMut<LaggedWorld>,
+    mut lend: ResMut<Lend>,
+) {
+    lagged.0.take_readable_from(&mut w.0, &mut lend.0);
 }
 
 /// The whole water leg, in the chained tick's phase order, as one system on the thread
@@ -849,6 +860,7 @@ fn sys_water_leg(
     _main: NonSendMarker,
     mut w: ResMut<VoxelWorld>,
     lagged: Res<LaggedWorld>,
+    mut lend: ResMut<Lend>,
     config: Res<SimConfig>,
 ) {
     let threads = config.overlap_split().0;
@@ -856,7 +868,9 @@ fn sys_water_leg(
     cubarium_voxel::voxel_phase!(WaterLeg, {
         // The water the read copy was lent at the tick's start, back before anything
         // reads it; the plants and animals are reading the copy meanwhile.
-        cubarium_voxel::voxel_phase!(ReadCopy, { w.restore_water_from(&lagged.0, threads) });
+        cubarium_voxel::voxel_phase!(ReadCopy, {
+            w.restore_water_from(&lagged.0, &mut lend.0, threads)
+        });
         water::rain(w);
         water::evaporate(w);
         let substeps = w.config().water_substeps.max(1);

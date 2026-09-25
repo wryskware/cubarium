@@ -56,6 +56,9 @@ pub mod viability;
 pub mod walk;
 pub mod water;
 pub mod world;
+/// The overlapped tick's water lend: a read copy's water swapped in, and back.
+mod lend;
+pub use lend::WaterLend;
 
 pub use config::Config;
 pub use generate::{Budget, Heightfield, LakeDatum, Volume};

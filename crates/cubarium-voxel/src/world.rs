@@ -690,7 +690,7 @@ pub fn default_threads() -> usize {
 /// `dst.copy_from_slice(src)`, cut into contiguous pieces across the process's water pool
 /// of `threads` workers when there are enough bytes to pay for the hand-off (the
 /// `parallel` feature); else on the calling thread. [`World::restore_water_from`]'s copy.
-fn copy_dense<T: Copy + Send + Sync>(dst: &mut [T], src: &[T], threads: usize) {
+pub(crate) fn copy_dense<T: Copy + Send + Sync>(dst: &mut [T], src: &[T], threads: usize) {
     #[cfg(feature = "parallel")]
     if threads > 1 && std::mem::size_of_val(src) >= 1 << 20 {
         use rayon::prelude::*;
@@ -821,7 +821,7 @@ pub struct World {
 /// world taller than [`SOLID_MASK_ROWS`].
 #[derive(Clone, Debug, Default)]
 pub(crate) struct SolidColumns {
-    bits: Vec<u128>,
+    pub(crate) bits: Vec<u128>,
 }
 
 /// A cache compares equal to anything: `material`, which `World`'s equality compares,
@@ -1174,58 +1174,6 @@ impl World {
 
     pub fn aquifer_head_m(&self) -> f64 {
         self.config.aquifer_head_m(self.aquifer_m3)
-    }
-
-    /// **The start of an overlapped tick** (`cubarium-voxel-sim`'s `LaggedWorld`): make
-    /// this world, a **read copy**, read exactly as `live` does through a [`VoxelView`] —
-    /// without copying the water. `live`'s free and pore arrays are **swapped** in, which
-    /// costs nothing, and every other field a view reads is copied: the stores, the clock,
-    /// the ledger, the named cells, and — when `terrain_version` says it moved — the
-    /// terrain with its solid-column mask. That is the trust flora's sky cache already
-    /// places in [`VoxelView::terrain_version`].
-    ///
-    /// `live` is left holding this copy's **stale** water until
-    /// [`World::restore_water_from`] copies it back: the overlapped tick does that first
-    /// thing on its water leg, so the copy runs beside the plants and animals rather than
-    /// ahead of both. Nothing may read `live` in between. The water phases' caches — the
-    /// active sets, the void runs — stay with `live`, where they still describe its water
-    /// once it is restored; a read copy is for readers, and stepping or commanding one is
-    /// a bug.
-    pub fn take_readable_from(&mut self, live: &mut World) {
-        let terrain = self.terrain_version != live.terrain_version
-            || self.material.len() != live.material.len();
-        self.config.clone_from(&live.config);
-        self.aquifer_m3 = live.aquifer_m3;
-        self.atmosphere_m3 = live.atmosphere_m3;
-        self.shower_left_m3 = live.shower_left_m3;
-        self.next_shower_tick = live.next_shower_tick;
-        self.outlet_open = live.outlet_open;
-        self.tick = live.tick;
-        self.terrain_version = live.terrain_version;
-        self.ledger.clone_from(&live.ledger);
-        self.outlet_cell = live.outlet_cell;
-        self.spring_cell = live.spring_cell;
-        self.lake_drain.clone_from(&live.lake_drain);
-        self.lake_datum_y = live.lake_datum_y;
-        if terrain {
-            self.material.clone_from(&live.material);
-            self.solid.bits.clone_from(&live.solid.bits);
-        }
-        std::mem::swap(&mut self.free, &mut live.free);
-        std::mem::swap(&mut self.pore, &mut live.pore);
-    }
-
-    /// The other half of [`World::take_readable_from`]: copy the water arrays back from
-    /// the read copy `copy`, split across `threads` workers of the water pool (the
-    /// `parallel` feature; `1` copies on the caller).
-    pub fn restore_water_from(&mut self, copy: &World, threads: usize) {
-        if self.free.len() != copy.free.len() {
-            self.free = copy.free.clone();
-            self.pore = copy.pore.clone();
-            return;
-        }
-        copy_dense(&mut self.free, &copy.free, threads);
-        copy_dense(&mut self.pore, &copy.pore, threads);
     }
 
     pub fn view(&self) -> VoxelView<'_> {
