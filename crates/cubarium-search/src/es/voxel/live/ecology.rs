@@ -68,7 +68,9 @@ pub const PARAMS: &[ParamSpec] = &[
         name: "founder.yield_by_food",
         kind: Kind::Scale,
         min: 0.25,
-        max: 1.9,
+        // The shipped yields are 0.5; twice that is a body keeping every bite, past which
+        // assimilation would create matter.
+        max: 2.0,
         what: "bite yield: every founder's assimilation yield, every food class",
     },
     ParamSpec {
@@ -132,6 +134,73 @@ impl EcologyParams {
 
     pub fn values(&self) -> &[f64] {
         &self.values
+    }
+
+    /// A vector from natural-log multipliers, in [`PARAMS`] order, each clamped to its
+    /// parameter's range. Only [`Kind::Scale`] parameters exist today, so `0` is the
+    /// shipped value.
+    pub fn from_log(log: &[f64]) -> EcologyParams {
+        assert_eq!(log.len(), PARAMS.len(), "one value per parameter");
+        EcologyParams {
+            values: PARAMS
+                .iter()
+                .zip(log)
+                .map(|(p, l)| {
+                    assert_eq!(p.kind, Kind::Scale, "{} is not a multiplier", p.name);
+                    l.exp().clamp(p.min, p.max)
+                })
+                .collect(),
+        }
+    }
+
+    /// The natural-log multipliers of this vector.
+    pub fn to_log(&self) -> Vec<f64> {
+        self.values.iter().map(|v| v.ln()).collect()
+    }
+
+    /// The search box in log space: `(ln min, ln max)` per parameter.
+    pub fn log_bounds() -> Vec<(f64, f64)> {
+        PARAMS.iter().map(|p| (p.min.ln(), p.max.ln())).collect()
+    }
+
+    /// Write this vector as a training-only TOML file: `[ecology]` with one
+    /// `"name" = multiplier` line per parameter.
+    pub fn save(&self, path: &std::path::Path, note: &str) -> Result<(), String> {
+        let mut text = String::new();
+        for line in note.lines() {
+            text.push_str(&format!("# {line}\n"));
+        }
+        text.push_str("[ecology]\n");
+        for (p, v) in PARAMS.iter().zip(&self.values) {
+            text.push_str(&format!("\"{}\" = {v}\n", p.name));
+        }
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        std::fs::write(path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))
+    }
+
+    /// Read a file [`EcologyParams::save`] wrote. Parameters it does not name keep their
+    /// defaults; an unknown name or an out-of-range value is refused.
+    pub fn load(path: &std::path::Path) -> Result<EcologyParams, String> {
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        let doc: toml::Table = text
+            .parse()
+            .map_err(|e| format!("{} is not TOML: {e}", path.display()))?;
+        let table = doc
+            .get("ecology")
+            .and_then(|t| t.as_table())
+            .ok_or_else(|| format!("{} has no [ecology] table", path.display()))?;
+        let mut e = EcologyParams::defaults();
+        for (name, value) in table {
+            let v = value
+                .as_float()
+                .or_else(|| value.as_integer().map(|i| i as f64))
+                .ok_or_else(|| format!("{name} is not a number"))?;
+            e.set(name, v)?;
+        }
+        Ok(e)
     }
 
     /// `name=value` pairs, for a log line.

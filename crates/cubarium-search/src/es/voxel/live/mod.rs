@@ -30,11 +30,14 @@ use super::EpisodeDriver;
 
 pub mod ecology;
 pub mod readout;
+pub mod search;
 pub mod trainer;
 pub mod variants;
 pub mod window;
 pub mod world;
 
+#[cfg(test)]
+mod search_tests;
 #[cfg(test)]
 mod tests;
 

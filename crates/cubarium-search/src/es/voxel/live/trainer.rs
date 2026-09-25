@@ -205,7 +205,11 @@ fn prepare(sim: &mut Sim, spec: &LiveSpec, lineages: &[Lineage]) {
 }
 
 /// Run `f` over every item on `threads` workers, results in item order.
-fn parallel<T: Send, R: Send>(items: Vec<T>, threads: usize, f: impl Fn(T) -> R + Sync) -> Vec<R> {
+pub(crate) fn parallel<T: Send, R: Send>(
+    items: Vec<T>,
+    threads: usize,
+    f: impl Fn(T) -> R + Sync,
+) -> Vec<R> {
     let n = items.len();
     let queue: Mutex<Vec<(usize, T)>> = Mutex::new(items.into_iter().enumerate().rev().collect());
     let out: Mutex<Vec<Option<R>>> = Mutex::new((0..n).map(|_| None).collect());

@@ -37,6 +37,7 @@
 pub mod antithetic;
 pub mod bits;
 pub mod budget;
+pub mod cma;
 pub mod commands;
 pub mod episode;
 pub mod export;

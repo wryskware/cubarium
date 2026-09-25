@@ -45,9 +45,29 @@ fn base_flora() -> FloraConfig {
     FloraConfig::for_voxel_size(0.25)
 }
 
-/// One photosynthetic stand on the flat world; returns its site.
-fn planted(e: &EcologyParams, species: Species) -> (World, Flora, Site) {
+/// Flat soil watered to field capacity and let drain, so a stand neither wilts nor
+/// drowns: a little water per column, stepped until it has soaked in.
+fn watered_world() -> World {
     let mut world = flat_world();
+    for z in 0..6 {
+        for x in 0..8 {
+            world.apply(WorldCommand::AddWater {
+                x,
+                y: 3,
+                z,
+                volume_m3: 0.004,
+            });
+        }
+    }
+    for _ in 0..150 {
+        world.step_with(1);
+    }
+    world
+}
+
+/// One photosynthetic stand on watered flat soil; returns its site.
+fn planted(e: &EcologyParams, species: Species) -> (World, Flora, Site) {
+    let world = watered_world();
     let mut flora = Flora::new(e.flora_config(base_flora()));
     let wood = flora.view().config.species(species).wood_max * 0.5;
     assert!(flora.apply(
@@ -59,17 +79,6 @@ fn planted(e: &EcologyParams, species: Species) -> (World, Flora, Site) {
             wood,
         }
     ));
-    // Water in the soil, so the stand can assimilate.
-    for z in 0..6 {
-        for x in 0..8 {
-            world.apply(WorldCommand::AddWater {
-                x,
-                y: 3,
-                z,
-                volume_m3: 0.01,
-            });
-        }
-    }
     let site = flora.view().stands[0].site;
     (world, flora, site)
 }
@@ -82,14 +91,30 @@ fn litter(flora: &Flora) -> f64 {
     flora.view().ground.iter().map(|g| g.litter).sum()
 }
 
-/// `flora.foliage_rate`: a cropped stand regrows faster at twice the rate.
+/// `flora.foliage_rate`: a stand cropped below its reflush threshold regrows from its
+/// reserve faster at twice the rate. The rate caps the reflush; income-funded regrowth is
+/// limited by the income. With the graze refuge on, a crop stops at 30 % of the foliage,
+/// above springturf's 25 % reflush line, so this fixture takes the refuge off to reach it.
 #[test]
 fn foliage_rate_speeds_regrowth() {
     let regrown = |scale: f64| {
         let e = with("flora.foliage_rate", scale);
-        let (mut world, mut flora, site) = planted(&e, Species::Springturf);
+        let world = watered_world();
+        let mut flora = Flora::new(e.flora_config(base_flora().without_graze_refuge()));
+        let wood = flora.view().config.species(Species::Springturf).wood_max * 0.5;
+        assert!(flora.apply(
+            &world,
+            cubarium_voxel_flora::Command::Seed {
+                x: 3,
+                z: 3,
+                species: Species::Springturf,
+                wood,
+            }
+        ));
+        let site = flora.view().stands[0].site;
+        let mut world = world;
         let before = foliage(&flora);
-        flora.take_foliage(site, before * 0.5).expect("cropped");
+        flora.take_foliage(site, before * 0.9).expect("cropped");
         let cropped = foliage(&flora);
         for _ in 0..200 {
             world.step_with(1);
@@ -125,13 +150,14 @@ fn decomposition_rots_litter_faster() {
         let e = with("flora.decomposition", scale);
         let mut world = flat_world();
         let mut flora = Flora::new(e.flora_config(base_flora()));
+        // A support voxel: the top soil cell.
         assert!(flora.deposit(
-            Site { x: 3, y: 3, z: 3 },
+            Site { x: 3, y: 2, z: 3 },
             Deposit {
                 kind: DepositKind::Litter,
                 organic: 0.1,
-                mineral: 0.0,
-                energy: 0.0,
+                mineral: 0.002,
+                energy: 0.2,
             }
         ));
         for _ in 0..200 {
@@ -172,8 +198,8 @@ fn yield_by_food_raises_assimilation() {
             Deposit {
                 kind: DepositKind::Litter,
                 organic: 0.05,
-                mineral: 0.0,
-                energy: 0.0,
+                mineral: 0.001,
+                energy: 0.1,
             }
         ));
         let feed: Box<dyn Controller> = Box::new(StationaryFeeding);
