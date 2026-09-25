@@ -157,6 +157,30 @@ pub struct VoxelView<'a> {
     solid: &'a [u128],
 }
 
+impl<'a> VoxelView<'a> {
+    /// A view of terrain alone, for a reader that holds a copy of `material` off the world
+    /// (the renderer's sky plane): no water, no stores, and no solid mask, so every support
+    /// and column query takes the direct test over `material`.
+    pub fn of_terrain(config: &'a Config, material: &'a [Material], ledger: &'a Ledger) -> Self {
+        VoxelView {
+            config,
+            material,
+            free: &[],
+            pore: &[],
+            tick: 0,
+            terrain_version: 0,
+            ledger,
+            aquifer_m3: 0.0,
+            atmosphere_m3: 0.0,
+            shower_left_m3: 0.0,
+            outlet_open: false,
+            outlet: None,
+            spring: None,
+            solid: &[],
+        }
+    }
+}
+
 /// The tallest world whose columns [`SolidColumns`] keeps as one bit mask each. Taller
 /// worlds answer the support queries from `material` directly.
 pub const SOLID_MASK_ROWS: u32 = 128;

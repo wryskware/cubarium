@@ -308,7 +308,24 @@ pub struct Stands {
     vine_cells: bool,
     /// Covered faces to draw instead of the flora's own: a fixture posing spur phases.
     cover_override: Option<Vec<FaceDraw>>,
+    /// Which flora stand (its index in `FloraView::stands`, plus one) placed each cell,
+    /// 0 for a ground mark, a log or a vine; empty unless [`Stands::track_owners`] asked.
+    /// The GPU renderer's lit tier reads it: the model never lets a stand shade itself.
+    owner: Vec<u32>,
+    /// The owner [`Stands::place`] writes: the stand being stamped, or 0.
+    placing: u32,
+    /// Whether styles carry the dossiers' emissive colours ([`Stands::set_emission`]):
+    /// the GPU renderer's lit tier with emission on. Off, no style emits and the styles are
+    /// exactly what they were before emission existed.
+    emission: bool,
+    /// Each style's emissive colour in linear light, beside `styles`; shorter than it, or
+    /// `None`, for a style that does not emit.
+    emits: Vec<Option<[f32; 3]>>,
 }
+
+/// A glowcap at or below this wood is a button, which the dossier draws without its lip
+/// (D1: "button | wood ≤ 0.02").
+const GLOWCAP_BUTTON_WOOD: f64 = 0.02;
 
 /// No style yet (and the one index a style never takes).
 const NO_STYLE: u16 = u16::MAX;
@@ -332,6 +349,9 @@ struct ModelKey {
     wilt: u8,
     heart: bool,
     ripe: bool,
+    /// A glowcap lip cell's colony state while emission is on; [`colours::Lip::None`] for
+    /// every other cell, so no other style splits.
+    lip: colours::Lip,
 }
 
 impl ModelKey {
@@ -341,7 +361,8 @@ impl ModelKey {
         * Self::MATERIALS
         * colours::BANDS as usize
         * model::WILT_LEVELS as usize
-        * 4;
+        * 4
+        * 3;
 
     fn index(self) -> usize {
         // The layer index does not change a colour; only the kind of cell does.
@@ -358,7 +379,7 @@ impl ModelKey {
         i = i * Self::MATERIALS + material;
         i = i * colours::BANDS as usize + usize::from(self.band.min(colours::BANDS - 1));
         i = i * model::WILT_LEVELS as usize + usize::from(self.wilt.min(model::WILT_LEVELS - 1));
-        i * 4 + usize::from(self.heart) * 2 + usize::from(self.ripe)
+        (i * 4 + usize::from(self.heart) * 2 + usize::from(self.ripe)) * 3 + self.lip as usize
     }
 }
 
@@ -390,7 +411,51 @@ impl Stands {
             model_tags: Vec::new(),
             vine_cells: true,
             cover_override: None,
+            owner: Vec::new(),
+            placing: 0,
+            emission: false,
+            emits: Vec::new(),
         }
+    }
+
+    /// Give styles the dossiers' emissive colours ([`colours::plant_emission`],
+    /// [`colours::vine_emission`]) from the next rebuild on.
+    pub fn set_emission(&mut self, on: bool) {
+        self.emission = on;
+    }
+
+    /// The emissive colour a part paints its emitting texels in, in linear light, or
+    /// `None`.
+    #[inline]
+    pub fn emission(&self, part: Part) -> Option<[f32; 3]> {
+        let s = usize::from(part.style()?);
+        self.emits.get(s).copied().flatten()
+    }
+
+    fn set_emit(&mut self, style: u16, rgb: Option<colours::Rgb>) {
+        if let Some(rgb) = rgb {
+            let s = usize::from(style);
+            if self.emits.len() <= s {
+                self.emits.resize(s + 1, None);
+            }
+            self.emits[s] = Some(srgb_linear(rgb));
+        }
+    }
+
+    /// Record which stand placed each cell ([`Stands::owner`]) from the next rebuild on.
+    pub fn track_owners(&mut self) {
+        self.owner = vec![0; self.grid.len()];
+    }
+
+    /// The index in `FloraView::stands` of the stand that placed the part in this voxel,
+    /// or `None` for an empty cell, a mark, a log or a vine, or when owners are not
+    /// tracked.
+    #[inline]
+    pub fn owner(&self, x: i64, y: u32, z: u32) -> Option<usize> {
+        if self.owner.is_empty() || y >= self.height || z >= self.depth {
+            return None;
+        }
+        self.owner[self.index(x, y, z)].checked_sub(1).map(|k| k as usize)
     }
 
     /// Rebuild from a flora view with the **dev-mode glyphs**: every stand drawn by
@@ -418,9 +483,15 @@ impl Stands {
         let c = view.config;
         if (self.width, self.height, self.depth) != (c.width, c.height, c.depth) {
             let (vine_cells, cover_override) = (self.vine_cells, self.cover_override.take());
+            let owners = !self.owner.is_empty();
+            let emission = self.emission;
             *self = Stands::empty(c.width, c.height, c.depth);
             self.vine_cells = vine_cells;
+            self.emission = emission;
             self.cover_override = cover_override;
+            if owners {
+                self.track_owners();
+            }
         } else {
             // Only what the last rebuild stamped: the grid is otherwise all empty.
             for i in self.stamped.drain(..) {
@@ -428,11 +499,13 @@ impl Stands {
             }
             self.styles.clear();
             self.model_tags.clear();
+            self.emits.clear();
         }
         self.model_styles.fill(NO_STYLE);
         // Stands arrive in site order, which is the order the styles are pushed in, so
         // the grid is a pure function of the view and not of any iteration accident.
-        for stand in flora.stands {
+        for (k, stand) in flora.stands.iter().enumerate() {
+            self.placing = k as u32 + 1;
             if let Some(cells) = lib.and_then(|lib| model_cells(lib, flora, stand)) {
                 if !self.stamp_model(view, flora, stand, cells) {
                     break;
@@ -448,6 +521,7 @@ impl Stands {
                 self.place(view, cell, part);
             }
         }
+        self.placing = 0;
         // Dead wood (fallen logs): rendered where dead_wood is above threshold.
         for g in flora.ground {
             if g.dead_wood >= 0.05 {
@@ -576,6 +650,9 @@ impl Stands {
                         crown: srgb_linear(sw.body),
                         heart: srgb_linear(sw.glint),
                     });
+                    if self.emission {
+                        self.set_emit(s, colours::vine_emission(c.accent));
+                    }
                     styles[key] = Some(s);
                     s
                 }
@@ -630,6 +707,20 @@ impl Stands {
             0.0
         };
         let fruit = stand.species == Species::Lanternberry;
+        // A glowcap's lip by its colony state (D1): none on a button (wood at most
+        // 0.02), full once the parcel holds half a package, half while fruiting between.
+        // The model keeps no peak, so a spent colony reads as fruiting.
+        let lip = if self.emission && stand.species == Species::Glowcap {
+            if stand.wood <= GLOWCAP_BUTTON_WOOD {
+                colours::Lip::None
+            } else if ripe >= model::RIPE_AT {
+                colours::Lip::Ripe
+            } else {
+                colours::Lip::Fruiting
+            }
+        } else {
+            colours::Lip::None
+        };
         // The model's highest cell: each cell's colour comes from its height in the model.
         let top = cells.iter().map(|m| m.offset[1]).max().unwrap_or(0);
         // A glowcap on dead wood perches on the log, as the glyph does: the log is drawn
@@ -672,6 +763,13 @@ impl Stands {
                 wilt: tint,
                 heart: part == PartKind::Heart,
                 ripe: shown,
+                lip: if matches!(m.tag, Tag::Foliage(_))
+                    && m.material == model::named_index("p2")
+                {
+                    lip
+                } else {
+                    colours::Lip::None
+                },
             };
             let Some(style) = self.model_style(key) else {
                 ok = false;
@@ -712,6 +810,10 @@ impl Stands {
         });
         self.model_tags.resize(self.styles.len(), None);
         self.model_tags[usize::from(style)] = Some((key.species, key.tag));
+        if self.emission {
+            let rgb = colours::plant_emission(key.species, key.tag, key.material, key.ripe, key.lip);
+            self.set_emit(style, rgb);
+        }
         self.model_styles[index] = style;
         Some(style)
     }
@@ -739,6 +841,9 @@ impl Stands {
                 self.stamped.push(i as u32);
             }
             self.grid[i] = part;
+            if !self.owner.is_empty() {
+                self.owner[i] = self.placing;
+            }
         }
     }
 

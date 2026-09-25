@@ -1229,6 +1229,19 @@ pub(crate) fn fullscreen_pipeline(
     fs: vk::ShaderModule,
     blend: bool,
 ) -> Result<vk::Pipeline> {
+    fullscreen_pipeline_specialised(d, pass, layout, vs, fs, blend, None)
+}
+
+/// [`fullscreen_pipeline`] with the fragment stage's specialisation constants set.
+pub(crate) fn fullscreen_pipeline_specialised(
+    d: &ash::Device,
+    pass: vk::RenderPass,
+    layout: vk::PipelineLayout,
+    vs: vk::ShaderModule,
+    fs: vk::ShaderModule,
+    blend: bool,
+    fragment: Option<&vk::SpecializationInfo>,
+) -> Result<vk::Pipeline> {
     let vi = vk::PipelineVertexInputStateCreateInfo::default();
     build_pipeline(
         d,
@@ -1239,6 +1252,7 @@ pub(crate) fn fullscreen_pipeline(
         vi,
         vk::PrimitiveTopology::TRIANGLE_LIST,
         blend,
+        fragment,
     )
 }
 
@@ -1287,9 +1301,11 @@ fn sprite_pipeline(
         vi,
         vk::PrimitiveTopology::TRIANGLE_STRIP,
         true,
+        None,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_pipeline(
     d: &ash::Device,
     pass: vk::RenderPass,
@@ -1299,16 +1315,21 @@ fn build_pipeline(
     vi: vk::PipelineVertexInputStateCreateInfo,
     topology: vk::PrimitiveTopology,
     blend: bool,
+    fragment: Option<&vk::SpecializationInfo>,
 ) -> Result<vk::Pipeline> {
+    let mut fs_stage = vk::PipelineShaderStageCreateInfo::default()
+        .stage(vk::ShaderStageFlags::FRAGMENT)
+        .module(fs)
+        .name(c"main");
+    if let Some(spec) = fragment {
+        fs_stage = fs_stage.specialization_info(spec);
+    }
     let stages = [
         vk::PipelineShaderStageCreateInfo::default()
             .stage(vk::ShaderStageFlags::VERTEX)
             .module(vs)
             .name(c"main"),
-        vk::PipelineShaderStageCreateInfo::default()
-            .stage(vk::ShaderStageFlags::FRAGMENT)
-            .module(fs)
-            .name(c"main"),
+        fs_stage,
     ];
     let ia = vk::PipelineInputAssemblyStateCreateInfo::default().topology(topology);
     let vp = vk::PipelineViewportStateCreateInfo::default()

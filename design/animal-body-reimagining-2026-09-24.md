@@ -6,6 +6,10 @@ decision_refs: []
 
 # Body reimagining: six animals and four plant revisions
 
+> **Colour note (2026-09-24):** the hexes in this document are superseded by
+> `design/art-direction/species-colours-2026-09-24.md`. Parts, counts, shapes and
+> states here still bind.
+
 Astra's prose proposals for Wrysk's next Qwen exploration. Every option is open
 for rejection, combination or revision. Codes identify alternatives, not selections.
 The sizes and niches stand by Wrysk's instruction; the anatomy proposed here does

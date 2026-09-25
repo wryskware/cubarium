@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! cargo run -p cubarium --release --example voxel_specimens -- OUT.png [--glyphs] [--wilt W]
-//!     [--gpu [--px N] [--textures DIR | --textures-only DIR]]
+//!     [--gpu [--px N] [--textures DIR | --textures-only DIR] [--lit]]
 //! ```
 //!
 //! `--gpu` draws the same strip with the GPU renderer instead (headless), at `--px`
@@ -14,8 +14,8 @@
 //! untextured). The CPU picture is always at 6.
 //!
 //! Each producer stands at three sizes (wood at 10 %, 40 % and 100 % of its maximum),
-//! left to right, in the front slab. Bloomcrown and lanternberry get a fourth, adult and
-//! ripe. Both founders stand at the end, facing each way. Every stand is drawn at full
+//! left to right, in the front slab. Bloomcrown, lanternberry and glowcap get a fourth,
+//! adult and ripe. Both founders stand at the end, facing each way. Every stand is drawn at full
 //! moisture (or at `--wilt W`, a moisture of `1 − W`), with full foliage. The picture is
 //! written at 2× nearest, the panel's own upscale.
 
@@ -28,7 +28,7 @@ use cubarium::sink::gpu::{VoxelGpuSink, VoxelGpuSinkOptions};
 use cubarium::voxel::model::ModelLibrary;
 use cubarium::voxel::present::VoxelPresenter;
 use cubarium::voxel::project::Projection;
-use cubarium::voxel::{OrganismLook, VoxelConfig};
+use cubarium::voxel::{Lighting, OrganismLook, VoxelConfig};
 use cubarium_render::Canvas;
 use cubarium_surface::{Scale, Topology};
 use cubarium_voxel::{Command as VoxelCommand, Config, Material, World};
@@ -46,10 +46,12 @@ fn main() -> Result<()> {
     let mut px = 6u32;
     let mut textures: Option<PathBuf> = None;
     let mut layered = false;
+    let mut lit = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--glyphs" => glyphs = true,
+            "--lit" => lit = true,
             "--gpu" => gpu = true,
             "--px" => px = args.next().context("--px N")?.parse()?,
             "--textures" => {
@@ -75,7 +77,7 @@ fn main() -> Result<()> {
         for f in [0.1, 0.4, 1.0] {
             plan.push((species, f, false));
         }
-        if matches!(species, Species::Bloomcrown | Species::Lanternberry) {
+        if matches!(species, Species::Bloomcrown | Species::Lanternberry | Species::Glowcap) {
             plan.push((species, 1.0, true));
         }
     }
@@ -197,6 +199,7 @@ fn main() -> Result<()> {
             px_per_voxel: px,
             textures: true,
             textures_dir: textures.unwrap_or_else(|| cfg.textures_dir.clone()),
+            lighting: if lit { Lighting::Lit } else { Lighting::Flat },
             ..cfg
         };
         let proj = Projection::new(cfg.tilt_degrees, px, 0, &world_cfg)?;
@@ -213,6 +216,26 @@ fn main() -> Result<()> {
             sink.stage_view(&world.view(), view, fauna.view()),
             "no staging buffer"
         );
+        // The lit tier's sky plane is computed off this thread.
+        while sink.light_pending() {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            anyhow::ensure!(
+                sink.stage_view(&world.view(), view, fauna.view()),
+                "no staging buffer"
+            );
+        }
+        if lit {
+            let e = sink.emitters();
+            let mut kinds: Vec<([u32; 3], usize)> = Vec::new();
+            for (_, rgb) in e {
+                let k = rgb.map(|c| (c * 1000.0) as u32);
+                match kinds.iter_mut().find(|(c, _)| *c == k) {
+                    Some((_, n)) => *n += 1,
+                    None => kinds.push((k, 1)),
+                }
+            }
+            println!("voxel_specimens: {} emitting voxels by colour (linear x1000): {kinds:?}", e.len());
+        }
         sink.render()?;
         let rgba = sink.read_raster()?;
         let rgb: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();

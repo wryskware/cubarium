@@ -6,6 +6,10 @@ decision_refs: []
 
 # Species dossiers (Wrysk's design session, part 2)
 
+> **Colour note (2026-09-24):** the hexes in this document are superseded by
+> `design/art-direction/species-colours-2026-09-24.md`. Parts, counts, shapes and
+> states here still bind.
+
 Xenobiologist's field documentation for each Cubarium organism and substrate family,
 written for Wrysk to pick from, mark, or mix. Each dossier proposes one **primary body
 plan** in full and one or two alternates in brief; sprite-forge roughs of the primary

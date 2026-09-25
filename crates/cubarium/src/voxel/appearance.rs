@@ -39,6 +39,11 @@ pub const TONE_OPEN_RIM: u8 = 2;
 pub const TONE_LIT: u8 = 3;
 pub const TONE_UNDER: u8 = 4;
 pub const TONE_UNDER_EDGE: u8 = 5;
+/// An **emitting** texel (package L step 4): in the lit tier it draws its style's emissive
+/// colour (`VoxelStyle::with_emit`) unlit and at full value; a style with none, and the
+/// flat tier, draw it as [`TONE_PLAIN`]. Only the emissive glyph variants
+/// ([`emissive_glyph`]) carry it.
+pub const TONE_EMIT: u8 = 6;
 pub const TONE_CAP_GAIN_BASE: u8 = 32;
 pub const TONE_TRANSPARENT: u8 = 63;
 
@@ -80,6 +85,28 @@ pub fn animal_glyph(part: AnimalPart) -> GlyphId {
             facing_right: true, ..
         } => GLYPH_HEAD_RIGHT,
     }
+}
+
+/// The bit of a crown or heart glyph id that selects its **emissive** variant: the same
+/// face with the texels an emitting cell lights marked [`TONE_EMIT`]. A crown cell (a
+/// glowcap's lip tissue) emits along its front face's lowest rows, the lower-facing edge
+/// the dossier puts the lip on (D1: a 1-px strip at 6 px a voxel); a heart cell (a
+/// latticevine bell, a lanternberry lantern) emits its accent stripe, front and cap.
+pub const GLYPH_EMIT_BIT: u8 = 4;
+
+/// The emissive variant of a crown or heart glyph.
+pub fn emissive_glyph(glyph: GlyphId) -> GlyphId {
+    GlyphId(glyph.0 | GLYPH_EMIT_BIT)
+}
+
+fn emits(glyph: GlyphId) -> bool {
+    glyph.0 & GLYPH_EMIT_BIT != 0
+}
+
+/// Rows of a crown's front face its lip emits along: one at 6 px a voxel, in proportion
+/// above that.
+fn lip_rows(s: u32) -> u32 {
+    (s / 6).max(1)
 }
 
 /// Resolve one flora cell to an atlas variant. Crown bits name exposed left/right edges;
@@ -135,7 +162,10 @@ pub fn front_texel(part: u8, glyph: GlyphId, x: u32, y: u32, s: u32) -> FaceTexe
     }
     if part == 2 || part == 3 {
         let heart = part == 3 && x * 2 >= s.saturating_sub(2) && x * 2 < s + 2;
-        let tone = if edge_variant(glyph, x, s) {
+        let lip = part == 2 && y + lip_rows(s) >= s;
+        let tone = if emits(glyph) && (heart || lip) {
+            TONE_EMIT
+        } else if edge_variant(glyph, x, s) {
             TONE_UNDER_EDGE
         } else {
             TONE_UNDER
@@ -232,7 +262,9 @@ pub fn cap_texel(part: u8, glyph: GlyphId, x: u32, _y: u32, s: u32) -> FaceTexel
             } else {
                 Pigment::Secondary
             },
-            if edge_variant(glyph, x, s) {
+            if heart && emits(glyph) {
+                TONE_EMIT
+            } else if edge_variant(glyph, x, s) {
                 TONE_OUTLINE
             } else {
                 TONE_PLAIN
@@ -334,6 +366,41 @@ mod tests {
             atlas[(row * s + 4) as usize],
             FaceTexel::new(Pigment::Accent, TONE_PLAIN).0
         );
+    }
+
+    #[test]
+    fn only_the_emissive_variants_carry_the_emitting_tone() {
+        let s = 12;
+        let tones = |part: u8, glyph: GlyphId| -> Vec<u8> {
+            let mut t = Vec::new();
+            for y in 0..s {
+                for x in 0..s {
+                    t.push(front_texel(part, glyph, x, y, s).tone());
+                    t.push(cap_texel(part, glyph, x, y, s).tone());
+                }
+            }
+            t
+        };
+        for part in 0..8 {
+            for g in 0..GLYPHS_PER_PART {
+                if (part == 2 || part == 3) && g & GLYPH_EMIT_BIT != 0 {
+                    continue;
+                }
+                assert!(!tones(part, GlyphId(g)).contains(&TONE_EMIT), "part {part} glyph {g}");
+            }
+        }
+        // A lip emits along the front's lowest rows only, never on its cap.
+        let lip = emissive_glyph(GlyphId(0));
+        assert_eq!(front_texel(2, lip, 3, s - 1, s).tone(), TONE_EMIT);
+        assert_eq!(front_texel(2, lip, 3, s - 3, s).tone(), TONE_UNDER);
+        assert_ne!(cap_texel(2, lip, 3, 0, s).tone(), TONE_EMIT);
+        // A heart emits its accent stripe, front and cap, and nothing else.
+        let heart = emissive_glyph(GlyphId(0));
+        for x in 0..s {
+            let stripe = front_texel(3, GlyphId(0), x, 4, s).pigment() == Pigment::Accent;
+            assert_eq!(front_texel(3, heart, x, 4, s).tone() == TONE_EMIT, stripe);
+            assert_eq!(cap_texel(3, heart, x, 0, s).tone() == TONE_EMIT, stripe);
+        }
     }
 
     #[test]

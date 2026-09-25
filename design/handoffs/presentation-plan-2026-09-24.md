@@ -19,9 +19,11 @@ visual all merged.
 - **Textures stay experimental** (`textures = false` by default). Plain voxels remain
   the main look, so every package below must also improve, or at least not break, the
   untextured picture.
-- **Pixel art is still the look.** Lighting shades the px-per-voxel picture and never
-  replaces it with smooth 3D. Cel steps: two tones plus a highlight (kit v0.4). No
-  blur that dissolves pixels.
+- **Pixel art is the rule for illustration only** (Wrysk, 2026-09-24: "the pixel art rule
+  is only for illustration. nothing in our current scope falls under that category."):
+  sprites, textures and drawn art. Rendering effects — lighting, shadows, bloom, water —
+  are not bound by it and may be smooth. Quantisation stays only where Wrysk has seen
+  and accepted it (the light ladder, the ripple lines).
 - **The ecology's light model is the source of truth** (backlog §5): the picture may
   shade more finely than the model's sky-visibility fan, but never differently.
 - **Tiers:** a `lighting = "flat" | "lit"` key. The Tachyon panel and the cube keep
@@ -334,3 +336,91 @@ Step 4 (emissive) proceeds meanwhile, without touching those knobs.
 - **Dapples → whole-block spots:** a crown cell passes or blocks the sun as a whole
   cell (a hash per cell), with the same mean transmission.
 - **Front brightness:** not raised; it stays as built.
+
+## L merged (2026-09-24)
+
+L merged to main as `b5809f7c`.
+
+- **Lit GPU time** after the crease and dapple change: 1.16 ms at 6 px, 3.82 ms at
+  13 px, 4.13 ms at 13 px textured (5080).
+- **Emission:** marks the glowcap lip (bake step only), ripe lanternberry lanterns and
+  latticevine bell mouths.
+- **Skipped:** the bloomcrown core and sense patches, since their dossiers don't call
+  them luminous. Also the spent glowcap, since the model keeps no peak wood.
+- **Textured leaf holes** no longer pass sun, because dapples are whole-cell.
+- **Open for Wrysk:** glow strength (`glow = 0.5`, pools 12–16 voxels, with a faint
+  round edge), whether the bloomcrown core and sense patches should glow anyway, the
+  glowcap lip as a whole cell, and bloom.
+
+W starts now, from the brief above, off `b5809f7c`. Its first checkpoint is depth
+absorption, the boundary test, the surface normal and the reflection. The second is
+refraction, foam, glints and rain ripples.
+
+## L5: bloom and more emitters (Wrysk, 2026-09-24)
+
+Wrysk: "glow is fine. it barely reads though without any bloom. bloomcrown, maybe yeah.
+animal sense patch, i dont think so.. but some animals will have glowing parts, like
+the chorister. glowcap can have a lip i guess."
+
+- **Bloom, lit only.**
+  - Emitting texels mark themselves (an emission output from `voxel.frag`). A bloom
+    pass adds a restrained, pixel-art halo around them: the emitted colour gathered
+    at voxel-cell resolution, spread a few cells, quantised to 2–3 steps, and added
+    back with nearest sampling, so the halo is blocky.
+  - The art direction applies: glow supports forms, never haze. The emitter itself
+    stays crisp.
+  - Knobs: `bloom` (strength) and `bloom_radius` (cells), with stated defaults.
+  - Flat is untouched and byte-identical at the Tachyon config. Stay inside the lit
+    budget.
+- **Bloomcrown core glows**, in D9's own core hex (the alternates B and C describe it
+  glowing).
+- **Animals:**
+  - No sense patches.
+  - Animals will have glowing parts, starting with the chorister (CH-A2; see
+    `design/animal-body-reimagining-2026-09-24.md` and `art/gen/SIGNOFF.md`), which is
+    not in the engine yet.
+  - Make sure the animal appearance path can mark emitting texels (the reserved glyph
+    tone), and document how in the appearance module.
+  - Mark an existing voxel animal's part only if its current design calls that part
+    luminous.
+- **Glowcap lip:** unchanged.
+
+Queued behind W checkpoint 1: both live in `voxel.frag`, and the lean policy keeps
+one worker per crate unless Wrysk asks for parallel work.
+
+## W checkpoint 1 review (2026-09-24)
+
+W-1 is at `5da09099` (not merged). It has depth absorption, a quantised animated
+surface, a reflection march and a derived flow field (surface gradient plus falling
+cells, in the shader, with no solver change). It costs +0.67 ms of lit GPU at 13 px.
+
+Wrysk's calls:
+
+- **Calmer ripples:** thin horizontal ripple lines instead of round noise blobs, and
+  no blinking specks from tiny reflected objects.
+- **Dark lake edge:** the lake's front face at the world edge goes back to deep indigo.
+- **Brighter waterfall:** falling water stays bright cyan, as in flat and L, instead of
+  dimming with the cliff's shade. The downward streaks stay.
+- **Reflection strength:** unchanged (`water_reflect` 6.0, about 40 %).
+
+These go in after L5, in the same worktree, and W checkpoint 2 (refraction, foam,
+glints, rain ripples) follows.
+
+## L5 and W fixes, round 2 (2026-09-24)
+
+L5 is at `2a30d197` on the W branch: bloom, the bloomcrown core glowing, and the
+animal emission path. Its bloom was blocky, which followed my brief, not a limit of
+the technique.
+
+Wrysk: "yes" to both of these:
+
+- **Smooth bloom by default:** the emission buffer is downsampled, blurred and
+  upsampled with bilinear filtering, then added. Emitters stay crisp. The blocky halo
+  is kept as an option.
+- **The three W-1 fixes:** calmer ripple lines, dark lake edge, bright waterfall.
+
+A fresh worker does both in the W worktree.
+- **Smooth lighting** (Wrysk: "lighting yes"): the ambient ladder goes. `light_levels = 0`
+  (smooth) is the new default. Hard sun-shadow edges, crease AO and `sun_tint` stay.
+- **Water animation:** "id have to see. 12fps might have a charm". It stays at 12 Hz
+  until Wrysk compares real-time clips of 12 Hz stepped against every-frame.

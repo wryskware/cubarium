@@ -41,6 +41,27 @@ sky_gradient = true
 organisms = "models"
 models_dir = "assets/voxel-models"
 
+# The GPU renderer's lighting tier. "flat" is the flat tier's stand-ins for light (the
+# column roof shade, the top faces' gain and tint toward the light colour), which the
+# panel and the cube keep. "lit" shades each face texel by the ambient light instead: the
+# core's own sky visibility at the face's open cell, voxel ambient occlusion and the plant
+# layer's canopy, snapped to a short ladder. `config/desktop/*.toml` ask for "lit". The
+# CPU presenter ignores it.
+lighting = "flat"
+
+# The lit tier's numbers; the flat tier ignores them.
+[light]
+levels = 4          # rungs on the ambient ladder, floor to full
+ambient_gain = 1.4  # what full ambient light multiplies a base colour by
+ambient_floor = 0.2 # the lowest rung, as a fraction of full
+ao = 0.5            # how far a face corner with both sides occluded darkens
+ambient_tint = 0.15 # how far the ambient leans toward the sky's hue
+# The sun: the direction toward it (x right, y up, z into the scene; z < 0 keeps it in
+# front, so the faces the picture shows are lit and shadows fall back into the scene).
+# A texel it reaches is one ladder rung brighter than one in shadow; crowns dapple it.
+sun = [-1.0, 2.0, -1.0]
+sun_tint = 0.18     # how far a sunlit texel leans toward the palette's light, times N·L
+
 [world]
 # `cubarium_voxel::Config`. x wraps; y is up from the foundation; z runs into the habitat.
 width = 128
