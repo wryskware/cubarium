@@ -13,9 +13,8 @@
 //!   its bodies over all worlds (zero with none), and the lineage's update is the frozen
 //!   trainer's own centred-rank antithetic gradient and Adam step over those scores.
 //! - **Population bounds, training only**: a world that has lost a trained lineage, or
-//!   holds more animals than [`LiveSpec::population_cap`], is replaced by a copy of the
-//!   healthiest other world (all three layers cloned) or, with none healthy, a freshly
-//!   founded one. Every replacement is counted and logged.
+//!   holds more animals than [`LiveSpec::population_cap`], is replaced by a freshly
+//!   founded one on a new seed. Every replacement is counted and logged.
 //!
 //! Nothing is hard-wired to two lineages: centres are given per [`Founder`], a lineage
 //! without one is not trained (its bodies keep what the seeder gave them), and every
@@ -27,7 +26,7 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use cubarium_voxel_fauna::Founder;
-use cubarium_voxel_sim::{Sim, SimConfig};
+use cubarium_voxel_sim::Sim;
 use serde::Serialize;
 
 use super::ecology::EcologyParams;
@@ -203,26 +202,6 @@ fn prepare(sim: &mut Sim, spec: &LiveSpec, lineages: &[Lineage]) {
         })
         .collect();
     super::install_centres(sim.fauna_mut(), &drivers);
-}
-
-/// A copy of `from` for slot `slot`: all three layers and the sense field cloned.
-fn copy_world(from: &LiveWorld, slot: usize, spec: &LiveSpec, lineages: &[Lineage]) -> LiveWorld {
-    let s = &from.sim;
-    let mut sim = Sim::new(
-        s.world().clone(),
-        s.flora().clone(),
-        s.fauna().clone(),
-        SimConfig { threads: 1 },
-        s.senses().cloned(),
-    );
-    prepare(&mut sim, spec, lineages);
-    LiveWorld {
-        id: slot,
-        sim,
-        ecology: from.ecology.clone(),
-        info: from.info.clone(),
-        windows: 0,
-    }
 }
 
 /// Run `f` over every item on `threads` workers, results in item order.
@@ -406,25 +385,13 @@ pub fn train(spec: &LiveSpec) -> Result<Vec<GenerationRecord>, String> {
 
         // 5. Population bounds.
         let mut replaced = Vec::new();
-        let health: Vec<(bool, usize, usize)> = worlds
-            .iter()
-            .map(|w| {
-                let pop = window::population(&w.sim);
-                let lost = lineages.iter().any(|l| pop[l.founder.index()] == 0);
-                let total = w.sim.fauna().view().animals.len();
-                let weakest = lineages
-                    .iter()
-                    .map(|l| pop[l.founder.index()])
-                    .min()
-                    .unwrap_or(0);
-                (lost, total, weakest)
-            })
-            .collect();
-        let bad: Vec<(usize, String)> = health
+        let bad: Vec<(usize, String)> = worlds
             .iter()
             .enumerate()
-            .filter_map(|(i, &(lost, total, _))| {
-                if lost {
+            .filter_map(|(i, w)| {
+                let pop = window::population(&w.sim);
+                let total = w.sim.fauna().view().animals.len();
+                if lineages.iter().any(|l| pop[l.founder.index()] == 0) {
                     Some((i, "lost a lineage".to_string()))
                 } else if total > spec.population_cap {
                     Some((i, format!("{total} animals over the cap")))
@@ -433,32 +400,27 @@ pub fn train(spec: &LiveSpec) -> Result<Vec<GenerationRecord>, String> {
                 }
             })
             .collect();
-        for (i, reason) in bad {
-            let donor = health
-                .iter()
-                .enumerate()
-                .filter(|(j, h)| *j != i && !h.0 && h.1 <= spec.population_cap * 3 / 4 && h.2 >= 4)
-                .max_by_key(|(j, h)| (h.2, std::cmp::Reverse(*j)))
-                .map(|(j, _)| j);
-            let (new, with) = match donor {
-                Some(j) => (
-                    copy_world(&worlds[j], i, spec, &lineages),
-                    format!("copy of world {j}"),
-                ),
-                None => {
-                    let seed = next_fresh_seed;
-                    next_fresh_seed += WORLD_SEED_STRIDE;
-                    (
-                        found(spec, i, seed, &lineages),
-                        format!("fresh seed {seed}"),
-                    )
-                }
-            };
+        // Every replacement is a fresh founding, in parallel, on its own seed. (Copying
+        // the healthiest world, tried first, collapsed diversity: in the first trial the
+        // worlds boomed past the cap within a generation of each other and one donor
+        // ended up cloned into 11 of 16 slots.)
+        let fresh: Vec<(usize, u64)> = bad
+            .iter()
+            .map(|(i, _)| {
+                let seed = next_fresh_seed;
+                next_fresh_seed += WORLD_SEED_STRIDE;
+                (*i, seed)
+            })
+            .collect();
+        let founded: Vec<LiveWorld> = parallel(fresh.clone(), spec.threads, |(slot, seed)| {
+            found(spec, slot, seed, &lineages)
+        });
+        for (((i, reason), (_, seed)), new) in bad.into_iter().zip(fresh).zip(founded) {
             worlds[i] = new;
             replaced.push(Replacement {
                 world: i,
                 reason,
-                with,
+                with: format!("fresh seed {seed}"),
             });
         }
 
