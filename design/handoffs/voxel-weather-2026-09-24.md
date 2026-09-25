@@ -447,6 +447,24 @@ and open look questions.
 
 **Not yours:** anything under `crates/cubarium-voxel` except reading `weather.rs`.
 
+## Integration notes
+
+- **WX2 checkpoint 1** (`1aac1abb`, branch `worktree-agent-a305b95986d3f88e4`): day/night,
+  sky and clouds.
+  - The sky is its own lit-only pass (binding 11) because the slab walk is at its
+    occupancy limit.
+  - `VoxelRenderer::sun_direction()` is the single sun path. The moon takes that slot at
+    sunset with strength 0, so the direction jumps once there.
+  - Flat tier byte-identical; lit +0.3 ms worst case at 13 px.
+- **When V and WX2 meet:**
+  - V's sun term must be multiplied by the sun's strength (`dayL.y`) and may take
+    `sunLean` as its colour. Otherwise the shafts run at full strength at night.
+  - V's rebake must tolerate the one direction jump at sunset.
+  - A lightning term in V's in-scatter is an open item.
+- `WeatherView::CLEAR_NOON` and `legacy` give a sun elevation of 90°; the model peaks at
+  70°. WX2 rescales the drawn elevation, so either gives the same noon. WX1 sets the
+  constant to 70°.
+
 ## Not in this thread
 
 Clouds with positions and uneven rain (route C); wind tied to the weather (the wind
