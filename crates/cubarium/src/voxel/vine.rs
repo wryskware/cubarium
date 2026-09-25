@@ -114,22 +114,45 @@ pub fn plane_steps(dir: FaceDir) -> [(i64, i64, i64); 4] {
 }
 
 /// The neighbour mask of `face`: bit 0 up, bit 1 right, bit 2 down, bit 3 left, set where
-/// the face one voxel along that step, looking the same way, is covered. `x` wraps with
+/// the face one voxel along that step, looking the same way, is covered — or, up and down
+/// a side face, the face one step up or down a staircase ([`stair_step`]). `x` wraps with
 /// the ring; a step off the world's top, bottom or walls is uncovered.
 pub fn mask(face: Face, world: &WorldConfig, covered: impl Fn(Face) -> bool) -> u8 {
     let mut m = 0;
-    for (bit, (dx, dy, dz)) in plane_steps(face.dir).into_iter().enumerate() {
-        let y = i64::from(face.y) + dy;
-        let z = i64::from(face.z) + dz;
-        if y < 0 || y >= i64::from(world.height) || z < 0 || z >= i64::from(world.depth) {
-            continue;
-        }
-        let x = (i64::from(face.x) + dx).rem_euclid(i64::from(world.width));
-        if covered(Face::new(x as u32, y as u32, z as u32, face.dir)) {
+    for (bit, step) in plane_steps(face.dir).into_iter().enumerate() {
+        let stair = match bit {
+            0 => stair_step(face, 1, world),
+            2 => stair_step(face, -1, world),
+            _ => None,
+        };
+        if step_face(face, step, world).is_some_and(&covered) || stair.is_some_and(&covered) {
             m |= 1 << bit;
         }
     }
     m
+}
+
+/// The face one voxel along `(dx, dy, dz)` from `face`, looking the same way; `None` off
+/// the world's top, bottom or walls.
+fn step_face(face: Face, (dx, dy, dz): (i64, i64, i64), world: &WorldConfig) -> Option<Face> {
+    let y = i64::from(face.y) + dy;
+    let z = i64::from(face.z) + dz;
+    if y < 0 || y >= i64::from(world.height) || z < 0 || z >= i64::from(world.depth) {
+        return None;
+    }
+    let x = (i64::from(face.x) + dx).rem_euclid(i64::from(world.width));
+    Some(Face::new(x as u32, y as u32, z as u32, face.dir))
+}
+
+/// The side face one step up (`dy = 1`) or down (`dy = −1`) a staircase from `face`: one
+/// voxel up and one back from the face, the flora layer's stair adjacency, which carries a
+/// runner across a one-voxel tread. `None` for an underside.
+pub fn stair_step(face: Face, dy: i64, world: &WorldConfig) -> Option<Face> {
+    if face.dir.is_underside() {
+        return None;
+    }
+    let (ox, _, oz) = face.dir.offset();
+    step_face(face, (-ox * dy, dy, -oz * dy), world)
 }
 
 /// The mask of a tile flipped top to bottom: up and down swap. A hanging root with no
@@ -188,21 +211,28 @@ pub fn tile_column(mask: u8, exits: u8) -> u32 {
 
 /// Where a covered face's runners cross its covered edges: bit `k` (the mask's order)
 /// set means the two-thirds position along that edge, clear the one-third. Each shared
-/// edge's choice is a hash of **the edge itself** — its two voxels, unordered, and the
-/// faces' direction — so the faces on either side of it pick the same crossing and their
-/// runners meet. Bits outside `mask` are zero.
+/// edge's choice is a hash of **the edge itself** — its two voxels, unordered, with the
+/// coordinate along the faces' normal dropped, and the faces' direction — so the faces on
+/// either side of it pick the same crossing and their runners meet, a stair's included. Bits outside `mask` are zero.
 pub fn exits(face: Face, mask: u8, world: &WorldConfig) -> u8 {
     let mut e = 0;
     for (bit, (dx, dy, dz)) in plane_steps(face.dir).into_iter().enumerate() {
         if mask & (1 << bit) == 0 {
             continue;
         }
-        let a = (face.x, face.y, face.z);
-        let b = (
+        // The coordinate along the face's normal is left out, so a runner up a stair (one
+        // voxel back across the tread) crosses where the upper face expects it.
+        let flat = |(x, y, z): (u32, u32, u32)| match face.dir {
+            FaceDir::PosX | FaceDir::NegX => (0, y, z),
+            FaceDir::PosZ | FaceDir::NegZ => (x, y, 0),
+            FaceDir::Down => (x, 0, z),
+        };
+        let a = flat((face.x, face.y, face.z));
+        let b = flat((
             (i64::from(face.x) + dx).rem_euclid(i64::from(world.width)) as u32,
             (i64::from(face.y) + dy) as u32,
             (i64::from(face.z) + dz) as u32,
-        );
+        ));
         let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
         let mut h = 0x9E37_79B9_7F4A_7C15u64 ^ face.dir as u64;
         for v in [lo.0, lo.1, lo.2, hi.0, hi.1, hi.2] {
