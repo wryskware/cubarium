@@ -26,6 +26,20 @@
 //! ```text
 //! cargo run --release -p cubarium --example voxel_census -- 1 generated closed heuristic
 //! ```
+//!
+//! `save=<dir>` [`save_min=<m>`] writes the whole run once, at sim minute `m` (default:
+//! the run's last whole minute), as the three layers' own always-fresh envelopes —
+//! `world.bin`, `flora.bin`, `fauna.bin` — plus `minute`: the same directory
+//! `voxel_dense` writes and reads. `load=<dir>` starts from such a directory instead of
+//! founding a world: the founders' drivers are re-installed and the senses re-settled,
+//! as the host does at start, and the rows continue from the saved minute. A stale
+//! envelope is refused by the layer's own loader. The generation arguments (`preset=`,
+//! `config=`, `seed=`, `generated`, `closed`, `nofauna`) are refused beside `load=`.
+//!
+//! ```text
+//! cargo run --release -p cubarium --example voxel_census -- 6 preset=default save=runs/h6
+//! cargo run --release -p cubarium --example voxel_census -- 1 load=runs/h6 threads=16
+//! ```
 
 use cubarium::voxel::VoxelConfig;
 use cubarium::voxel::habitat;
@@ -94,6 +108,12 @@ fn main() {
     // the world that ships, not the seeder's bare heuristics. `heuristic` as a trailing
     // argument keeps the old, observation-only control.
     let heuristic = args.iter().any(|a| a == "heuristic");
+    let save = SaveAt::from_args(&args);
+    if let Some(dir) = args.iter().find_map(|a| a.strip_prefix("load=")) {
+        let (mut sim, minute0) = load_run(std::path::Path::new(dir), &args, heuristic, &policies);
+        run(&mut sim, hours, minute0, save.as_ref());
+        return;
+    }
     // `config=<path>` is a landscape arm from a host TOML (the Tachyon terrarium, say),
     // founded exactly like a preset arm. `nofauna` seeds no founders: the plants alone.
     let file_arm: Option<(String, cubarium_voxel::Config)> = args
@@ -160,7 +180,7 @@ fn main() {
             sim.world_mut()
                 .apply(WorldCommand::SetOutlet { open: true });
         }
-        run(&mut sim, hours);
+        run(&mut sim, hours, 0, save.as_ref());
         return;
     }
     let mut world = if generated {
@@ -223,16 +243,21 @@ fn main() {
     senses.settle(&world.view(), &flora.view());
     let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
 
-    run(&mut sim, hours);
+    run(&mut sim, hours, 0, save.as_ref());
 }
 
 /// Step the coupled layers for the asked-for hours, writing one row a simulated minute.
 /// Both arms end here, so a preset world is measured by the same code path as the ridge.
-fn run(sim: &mut Sim, hours: f64) {
+/// A loaded run starts at `minute0` and prints from the minute after it.
+fn run(sim: &mut Sim, hours: f64, minute0: u64, save: Option<&SaveAt>) {
     let total_ticks = (hours * 3600.0 * f64::from(TICK_HZ)) as u64;
+    let save_min = save.map(|s| s.minute.unwrap_or(minute0 + total_ticks / TICKS_PER_MIN));
     print_header();
-    print_row(0, sim, 0.0);
-    let mut tick = 0u64;
+    if minute0 == 0 {
+        print_row(0, sim, 0.0);
+    }
+    let mut tick = minute0 * TICKS_PER_MIN;
+    let total_ticks = tick + total_ticks;
     let mut window = SeedWindow::default();
     let mut since = std::time::Instant::now();
     while tick < total_ticks {
@@ -241,12 +266,115 @@ fn run(sim: &mut Sim, hours: f64) {
         if tick % TICKS_PER_MIN == 0 {
             let ms = since.elapsed().as_secs_f64() * 1e3 / TICKS_PER_MIN as f64;
             print_row(tick / TICKS_PER_MIN, sim, ms);
+            if let Some(s) = save
+                && save_min == Some(tick / TICKS_PER_MIN)
+            {
+                s.write(sim, tick / TICKS_PER_MIN);
+            }
             since = std::time::Instant::now();
         }
         if tick % (60 * TICKS_PER_MIN) == 0 || tick == total_ticks {
             window.report(tick, sim);
         }
     }
+}
+
+/// `save=<dir>` and `save_min=<m>`: where and when the run writes itself once.
+struct SaveAt {
+    dir: std::path::PathBuf,
+    minute: Option<u64>,
+}
+
+impl SaveAt {
+    fn from_args(args: &[String]) -> Option<SaveAt> {
+        let arg = |k: &str| args.iter().find_map(|a| a.strip_prefix(k));
+        let minute = arg("save_min=").map(|m| m.parse().expect("save_min=<sim minute>"));
+        let Some(dir) = arg("save=") else {
+            assert!(minute.is_none(), "save_min= needs save=<dir>");
+            return None;
+        };
+        Some(SaveAt {
+            dir: dir.into(),
+            minute,
+        })
+    }
+
+    /// The three layers' own envelopes and the minute, as `voxel_dense` lays them out.
+    fn write(&self, sim: &Sim, minute: u64) {
+        let (world, flora, fauna) = sim.layers();
+        let d = &self.dir;
+        std::fs::create_dir_all(d).unwrap_or_else(|e| panic!("save dir {}: {e}", d.display()));
+        let put = |name: &str, bytes: Vec<u8>| {
+            std::fs::write(d.join(name), bytes)
+                .unwrap_or_else(|e| panic!("writing {}: {e}", d.join(name).display()))
+        };
+        put("world.bin", world.save());
+        put("flora.bin", cubarium_voxel_flora::snapshot::encode(flora));
+        put("fauna.bin", fauna.save());
+        put("minute", minute.to_string().into_bytes());
+        eprintln!(
+            "saved {} at minute {minute}: stands {} animals {}",
+            d.display(),
+            flora.view().stands.len(),
+            fauna.view().animals.len()
+        );
+    }
+}
+
+/// `load=<dir>`: a saved run, re-assembled the way the founding arms assemble a new one.
+/// The world's shape, water and seed live in the file, so the generation arguments are
+/// refused rather than silently ignored.
+fn load_run(
+    dir: &std::path::Path,
+    args: &[String],
+    heuristic: bool,
+    policies: &[(Founder, std::path::PathBuf)],
+) -> (Sim, u64) {
+    let shaping: Vec<&str> = args
+        .iter()
+        .map(String::as_str)
+        .filter(|a| {
+            ["preset=", "config=", "seed="].iter().any(|k| a.starts_with(k))
+                || ["generated", "closed", "nofauna"].contains(a)
+        })
+        .collect();
+    assert!(
+        shaping.is_empty(),
+        "load= resumes a saved world; {shaping:?} only shape a new one — drop them"
+    );
+    let read = |name: &str| {
+        std::fs::read(dir.join(name))
+            .unwrap_or_else(|e| panic!("load: {}: {e}", dir.join(name).display()))
+    };
+    let mut world = World::load(&read("world.bin")).unwrap_or_else(|e| panic!("load world: {e:#}"));
+    let flora = cubarium_voxel_flora::snapshot::decode(&read("flora.bin"))
+        .unwrap_or_else(|e| panic!("load flora: {e:#}"));
+    let mut fauna = Fauna::load(&read("fauna.bin")).unwrap_or_else(|e| panic!("load fauna: {e:#}"));
+    let minute: u64 = String::from_utf8(read("minute"))
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .expect("load: `minute` holds the saved sim minute");
+    eprintln!(
+        "loaded {} at minute {minute}: {}x{}x{} stands {} animals {}",
+        dir.display(),
+        world.config().width,
+        world.config().height,
+        world.config().depth,
+        flora.view().stands.len(),
+        fauna.view().animals.len()
+    );
+    if heuristic {
+        eprintln!("founders: the observation-only heuristic (control)");
+    } else {
+        install_founders_with(&mut fauna, policies).expect("the founder centres validate");
+    }
+    let mut senses = Senses::new();
+    senses.settle(&world.view(), &flora.view());
+    if world.config().closed_water_budget && !world.outlet_open() {
+        world.apply(WorldCommand::SetOutlet { open: true });
+    }
+    let sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
+    (sim, minute)
 }
 
 /// The seed-bank line on stderr, once a simulated hour: how many sites hold a bank (what
