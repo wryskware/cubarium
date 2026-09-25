@@ -61,7 +61,7 @@ fn arena_sim(founder: Founder) -> Sim {
     let prepared = PreparedArena::build_stage(founder, seed, Stage::A);
     let mut arena = prepared.episode_arena();
     arena.refound(sampled_stores(founder, seed, seed, 0));
-    let mut sim = arena.into_sim_prepared(SimConfig { threads: 1 }, prepared.episode_senses());
+    let mut sim = arena.into_sim_prepared(SimConfig::with_threads(1), prepared.episode_senses());
     sim.set_mode(ScheduleMode::Static);
     sim
 }
@@ -334,7 +334,7 @@ fn coarse_water_conserves_and_refuses_to_be_the_default() {
         world,
         cubarium_voxel_flora::Flora::new(cubarium_voxel_flora::FloraConfig::default()),
         cubarium_voxel_fauna::Fauna::new(Default::default()),
-        SimConfig { threads: 1 },
+        SimConfig::with_threads(1),
         None,
     );
     for _ in 0..200 {

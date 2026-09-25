@@ -110,7 +110,17 @@ pub fn found_world(
     );
     let mut senses = Senses::new();
     senses.settle(&world.view(), &flora.view());
-    let mut sim = Sim::new(world, flora, fauna, SimConfig { threads: 1 }, Some(senses));
+    let mut sim = Sim::new(
+        world,
+        flora,
+        fauna,
+        // The chained tick: at one thread the overlapped one only adds its read copy.
+        SimConfig {
+            threads: 1,
+            overlap: false,
+        },
+        Some(senses),
+    );
     if sim.world().config().closed_water_budget && !sim.world().outlet_open() {
         sim.world_mut()
             .apply(cubarium_voxel::Command::SetOutlet { open: true });

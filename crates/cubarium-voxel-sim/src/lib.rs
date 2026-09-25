@@ -891,15 +891,22 @@ fn sys_water_leg(
         water::evaporate(w);
         let substeps = w.config().water_substeps.max(1);
         let sub_dt = cubarium_voxel::DT / substeps as f64;
+        // A training world's coarse water ([`cubarium_voxel::World::set_water_every`]):
+        // the lateral and groundwater phases on one tick in `every`, as the chained tick.
+        let due = w.water_due();
         for _ in 0..substeps {
             water::infiltrate(w, sub_dt, threads);
             water::fall(w, threads);
-            water::exchange(w, threads);
+            if due {
+                water::exchange(w, threads);
+            }
         }
-        water::drain(w, threads);
-        water::water_table(w, threads);
-        water::spring(w);
-        water::outlet(w);
+        if due {
+            water::drain(w, threads);
+            water::water_table(w, threads);
+            water::spring(w);
+            water::outlet(w);
+        }
     });
 }
 
