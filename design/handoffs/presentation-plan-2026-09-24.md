@@ -602,3 +602,29 @@ editing `voxel.frag`, `crates/cubarium-gpu/src/voxel.rs`, `sink/gpu/voxel.rs` an
 - the switch and cost table;
 - the bake design and its measured time;
 - open questions about the look.
+
+## V merged (2026-09-25)
+
+V is on main through `b19f9821`, with `volumetric = false`.
+
+**What's in it:**
+- **Switches:** `shadows`, `reflections`, `volumetric`, `emission` and `ao > 0` are
+  pipeline specialisation constants, so an effect that is off is dead code.
+- **The sun-visibility volume:** a CPU thread uses `sunReaches`' own walk to bake it, in
+  about 40 ms. It rebakes at most every `volumetric_rebake_s` (60 s), and the new bake fades
+  in.
+- **Cost:** volumetric on adds about 0.5 ms. Lit costs 4.9 ms by default, 2.1 ms with
+  shadows off, and 1.5 ms with everything off, on the 5080 at 13 px.
+
+**What it looks like:** there are no shafts at this camera, because the sun is always on the
+camera's side and each line of sight averages the lit and shaded air. Even a low side sun
+(14°) gives only a soft teal lift low in the frame.
+
+**Wrysk:** "the slight haze it makes does kind of make the scene blend a bit more with less
+harsh contrast. it might be a bit strong though. worth keeping around but yeah maybe we dont
+have to enable it right now. definitely get it merged".
+
+**Open:**
+- If it is turned on later, it needs a weaker density than 0.03.
+- Shafts are more likely in WX2's fog, which uses the `airDensity` / `sunInAir` seam.
+- The in-scatter colour is still `lightC`, which pulls the scene teal.
