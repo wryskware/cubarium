@@ -144,6 +144,46 @@ pub struct EvalSpec {
     /// Stop a world that holds more animals than this.
     pub abort_animals: usize,
     pub band: Band,
+    /// The horizon the band is scored on, ticks. Past what was run (`horizon_ticks`, or
+    /// an early stop) the animal count is projected on its last hour's trend
+    /// ([`project`]). Equal to `horizon_ticks` is no projection.
+    pub score_horizon_ticks: u64,
+}
+
+/// Extend a trace to `to_min` on the exponential trend of its last hour: rate
+/// `ln(n_end / n_end−60) / 60` per minute, clamped to ±0.05, the count capped at 2000.
+/// Returns the minute the projection starts from.
+pub fn project(t: &mut Trace, to_min: f64) -> f64 {
+    let Some(&last_min) = t.minutes.last() else {
+        return 0.0;
+    };
+    let n_end = *t.animals.last().expect("paired") as f64;
+    let back = t
+        .minutes
+        .iter()
+        .position(|m| *m >= last_min - 60.0)
+        .unwrap_or(0);
+    let span = (last_min - t.minutes[back]).max(1.0);
+    let rate = if span >= 30.0 {
+        ((n_end.max(1.0)) / (t.animals[back] as f64).max(1.0)).ln() / span
+    } else {
+        0.0
+    };
+    let rate = rate.clamp(-0.05, 0.05);
+    let step = if t.minutes.len() >= 2 {
+        t.minutes[1] - t.minutes[0]
+    } else {
+        1.0
+    };
+    let mut m = last_min;
+    while m + step <= to_min + 1e-9 {
+        m += step;
+        t.minutes.push(m);
+        t.animals
+            .push((n_end * (rate * (m - last_min)).exp()).min(2000.0).round() as usize);
+    }
+    t.horizon_min = to_min;
+    last_min
 }
 
 /// One candidate world's result.
@@ -155,6 +195,8 @@ pub struct Evaluation {
     pub penalty: Penalty,
     /// Why it stopped early, if it did.
     pub stopped: Option<String>,
+    /// The minute the scored trace turns from measured to projected, if it does.
+    pub projected_from_min: Option<f64>,
     /// Every readout factor, averaged over the windows it ran.
     pub readout_mean: Vec<(String, f64)>,
     /// And as the last window left it.
@@ -257,6 +299,9 @@ pub fn evaluate(
             .zip(&species_end)
             .filter(|(s, e)| **s > 0 && **e == 0)
             .count();
+    let score_min = spec.score_horizon_ticks.max(spec.horizon_ticks) as f64 / TICKS_PER_MIN as f64;
+    let projected_from_min = (trace.minutes.last().copied().unwrap_or(0.0) < score_min)
+        .then(|| project(&mut trace, score_min));
     let penalty = penalty(&trace, &spec.band);
     let readout_mean = super::readout::pool(&readouts)
         .into_iter()
@@ -286,6 +331,7 @@ pub fn evaluate(
         trace,
         penalty,
         stopped,
+        projected_from_min,
         readout_mean,
         readout_end,
         species_start,

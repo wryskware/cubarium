@@ -777,6 +777,10 @@ enum Command {
         water_every: u32,
         #[arg(long, default_value_t = 240)]
         abort_animals: usize,
+        /// Simulated hours the band is scored on; past `--hours` (or an early stop) the
+        /// count is projected on its last hour's trend. Defaults to `--hours`.
+        #[arg(long)]
+        score_hours: Option<f64>,
         /// Unified mode: brain antithetic pairs per lineage. 0 holds the brains.
         #[arg(long, default_value_t = 0)]
         brain_pairs: usize,
@@ -1441,6 +1445,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             window_min,
             water_every,
             abort_animals,
+            score_hours,
             brain_pairs,
             brain_sigma,
             brain_learning_rate,
@@ -1463,6 +1468,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     water_every,
                     abort_animals,
                     band: Default::default(),
+                    score_horizon_ticks: (score_hours.unwrap_or(hours) * 3600.0 * hz).round()
+                        as u64,
                 },
                 brain_pairs,
                 brain_sigma,

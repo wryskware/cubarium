@@ -303,6 +303,44 @@ fn the_penalty_is_zero_in_the_band_and_monotonic_outside() {
     );
 }
 
+/// The trend projection: a flat trace stays flat, a doubling one keeps doubling (up to
+/// the cap), and the projection reaches the scored horizon.
+#[test]
+fn a_short_trace_is_projected_on_its_last_hours_trend() {
+    let mut flat = trace_at(50, 0.3);
+    flat.minutes.truncate(180);
+    flat.animals.truncate(180);
+    assert_eq!(super::search::project(&mut flat, 360.0), 180.0);
+    assert_eq!(flat.animals.len(), 360);
+    assert!(flat.animals.iter().all(|&n| n == 50));
+    let mut growing = Trace {
+        horizon_min: 180.0,
+        minutes: (1..=180).map(f64::from).collect(),
+        animals: (1..=180)
+            .map(|m| (20.0 * (f64::from(m) * 2f64.ln() / 60.0).exp()) as usize)
+            .collect(),
+        browser_moving: 0.3,
+        missing: 0,
+    };
+    let end = *growing.animals.last().unwrap();
+    super::search::project(&mut growing, 360.0);
+    let at_240 = growing.animals[239];
+    assert!(
+        (at_240 as f64 / end as f64 - 2.0).abs() < 0.1,
+        "one hour later it doubled again: {end} -> {at_240}"
+    );
+    let last = *growing.animals.last().unwrap() as f64;
+    assert!(
+        (last / end as f64 - 8.0).abs() < 0.5,
+        "three hours on: {end} -> {last}"
+    );
+    let mut boom = growing.clone();
+    boom.minutes.truncate(180);
+    boom.animals.truncate(180);
+    super::search::project(&mut boom, 900.0);
+    assert_eq!(*boom.animals.last().unwrap(), 2000, "capped");
+}
+
 /// On a toy objective with a known optimum inside the box, the search's mean moves toward
 /// it and its best candidate beats the start.
 #[test]
