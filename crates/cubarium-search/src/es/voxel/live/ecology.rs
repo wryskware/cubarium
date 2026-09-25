@@ -90,6 +90,28 @@ pub const PARAMS: &[ParamSpec] = &[
         max: 4.0,
         what: "animal upkeep: every founder's maintenance_per_s",
     },
+    // Added with the lifespan and the grazing defence (2026-09-25).
+    ParamSpec {
+        name: "founder.lifespan_median_s",
+        kind: Kind::Scale,
+        min: 0.25,
+        max: 4.0,
+        what: "median lifespan: every body kind's lifespan_median_s (4 h shipped)",
+    },
+    ParamSpec {
+        name: "flora.defence_per_bite",
+        kind: Kind::Scale,
+        min: 0.25,
+        max: 4.0,
+        what: "grazing defence rise per bite, every species",
+    },
+    ParamSpec {
+        name: "flora.defence_half_life_s",
+        kind: Kind::Scale,
+        min: 0.25,
+        max: 4.0,
+        what: "grazing defence half-life, every species (1.5 h shipped)",
+    },
 ];
 
 /// One world's parameter vector, aligned with [`PARAMS`].
@@ -233,6 +255,8 @@ impl EcologyParams {
         let y = self.v("founder.yield_by_food");
         let floor = self.v("founder.reproduction.surplus_floor");
         let upkeep = self.v("founder.maintenance_per_s");
+        let life = self.v("founder.lifespan_median_s");
+        c.frondgrazer.lifespan_median_s *= life;
         for f in Founder::ALL {
             let phys = &mut c.founders[f.index()];
             for v in phys.yield_by_food.iter_mut() {
@@ -240,6 +264,7 @@ impl EcologyParams {
             }
             phys.core.reproduction.surplus_floor *= floor;
             phys.core.maintenance_per_s *= upkeep;
+            phys.core.lifespan_median_s *= life;
         }
         c
     }
@@ -250,6 +275,13 @@ impl EcologyParams {
         let regrow = self.v("flora.foliage_rate");
         let fall = self.v("flora.senescence");
         base.decomposition *= self.v("flora.decomposition");
+        let rise = self.v("flora.defence_per_bite");
+        let half = self.v("flora.defence_half_life_s");
+        for s in Species::ALL {
+            let sc = base.species_mut(s);
+            sc.defence_per_bite *= rise;
+            sc.defence_half_life_s *= half;
+        }
         for s in Species::ALL {
             let sc = base.species_mut(s);
             if sc.trophic == Trophic::Photo {

@@ -264,6 +264,30 @@ fn maintenance_raises_upkeep() {
     );
 }
 
+/// The lifespan and defence parameters reach their layers.
+#[test]
+fn the_lifespan_and_defence_parameters_reach_their_layers() {
+    let f = with("founder.lifespan_median_s", 0.5).fauna_config();
+    for l in Founder::ALL {
+        assert_eq!(
+            f.founder(l).core.lifespan_median_s,
+            0.5 * FaunaConfig::default().founder(l).core.lifespan_median_s
+        );
+    }
+    let fl = with("flora.defence_per_bite", 2.0).flora_config(base_flora());
+    let fh = with("flora.defence_half_life_s", 0.5).flora_config(base_flora());
+    for s in Species::ALL {
+        assert_eq!(
+            fl.species(s).defence_per_bite,
+            2.0 * base_flora().species(s).defence_per_bite
+        );
+        assert_eq!(
+            fh.species(s).defence_half_life_s,
+            0.5 * base_flora().species(s).defence_half_life_s
+        );
+    }
+}
+
 /// The live app's defaults are unchanged: the default vector builds exactly the shipped
 /// configs, a tuned vector never writes back into them, and a log vector of zeros is the
 /// defaults.
@@ -272,7 +296,7 @@ fn the_live_defaults_are_unchanged() {
     let e = EcologyParams::defaults();
     assert_eq!(e.fauna_config(), FaunaConfig::default());
     assert_eq!(e.flora_config(base_flora()), base_flora());
-    let tuned = EcologyParams::from_log(&[0.7, -0.4, 0.2, -0.3, 1.0, 0.5]);
+    let tuned = EcologyParams::from_log(&[0.7, -0.4, 0.2, -0.3, 1.0, 0.5, 0.3, -0.2, 0.4]);
     let _ = (tuned.fauna_config(), tuned.flora_config(base_flora()));
     assert_eq!(FaunaConfig::default(), e.fauna_config());
     assert_eq!(EcologyParams::from_log(&vec![0.0; PARAMS.len()]), e);
@@ -290,6 +314,7 @@ fn trace_at(n: usize, moving: f64) -> Trace {
         animals: vec![n; 360],
         browser_moving: moving,
         missing: 0,
+        silent_lineages: 0,
     }
 }
 
@@ -327,6 +352,10 @@ fn the_penalty_is_zero_in_the_band_and_monotonic_outside() {
     let mut gone = trace_at(50, 0.3);
     gone.missing = 1;
     assert!(penalty(&gone, &band).total > p(299, 0.0));
+    // A lineage that stopped breeding in the second half costs as much as a lost one.
+    let mut silent = trace_at(50, 0.3);
+    silent.silent_lineages = 1;
+    assert_eq!(penalty(&silent, &band).total, band.missing_cost);
     // A trace that stopped early carries its last count to the horizon.
     let mut short = trace_at(200, 0.3);
     short.minutes.truncate(100);
@@ -354,6 +383,7 @@ fn a_short_trace_is_projected_on_its_last_hours_trend() {
             .collect(),
         browser_moving: 0.3,
         missing: 0,
+        silent_lineages: 0,
     };
     let end = *growing.animals.last().unwrap();
     super::search::project(&mut growing, 360.0);
