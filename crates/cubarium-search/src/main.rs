@@ -744,6 +744,47 @@ enum Command {
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         write_streams: bool,
     },
+    /// Live-world training (`design/handoffs/voxel-live-world-training-2026-09-24.md`):
+    /// every body of every lineage given a centre runs its own antithetic variant inside
+    /// persistent live worlds (the `small` preset, still water), one ES update per lineage
+    /// per window, with the ecology readout every generation.
+    VoxelLiveTrain {
+        /// `<lineage>=<centre.json>`, once per trained lineage (`browser=…`,
+        /// `littershredder=…`).
+        #[arg(long = "centre", required = true)]
+        centres: Vec<String>,
+        #[arg(long, default_value_t = 16)]
+        worlds: usize,
+        #[arg(long, default_value_t = 16)]
+        threads: usize,
+        #[arg(long, default_value_t = 16)]
+        pairs: usize,
+        /// Window length, simulated minutes.
+        #[arg(long, default_value_t = 10.0)]
+        window_min: f64,
+        #[arg(long, default_value_t = 1000)]
+        generations: u32,
+        #[arg(long, default_value_t = 7000.0)]
+        wall_seconds: f64,
+        #[arg(long, default_value_t = cubarium_search::es::optimizer::SIGMA)]
+        sigma: f64,
+        #[arg(long, default_value_t = cubarium_search::es::optimizer::LEARNING_RATE)]
+        learning_rate: f64,
+        #[arg(long, default_value_t = 20260924)]
+        train_seed: u64,
+        #[arg(long, default_value_t = 3001)]
+        world_seed: u64,
+        /// Training-only coarse water: the lateral and groundwater phases on one tick in
+        /// this many. `1` is the live water.
+        #[arg(long, default_value_t = 4)]
+        water_every: u32,
+        #[arg(long, default_value_t = 240)]
+        population_cap: usize,
+        #[arg(long, default_value_t = 10)]
+        save_every: u32,
+        #[arg(long, default_value = "runs/live-train")]
+        out: PathBuf,
+    },
     /// Phase-one voxel slice (P1-D): the bounded ES run over one founder's manifest, with
     /// shape-aware antithetic pairs, the initial centre evaluation, and the plan's caps.
     VoxelTrain {
@@ -1308,6 +1349,51 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } => set_pin(&pin).and_then(|_| {
             es::voxel::commands::holdout(founder, policy, controls, workers, per_fixture)
         }),
+        Command::VoxelLiveTrain {
+            centres,
+            worlds,
+            threads,
+            pairs,
+            window_min,
+            generations,
+            wall_seconds,
+            sigma,
+            learning_rate,
+            train_seed,
+            world_seed,
+            water_every,
+            population_cap,
+            save_every,
+            out,
+        } => {
+            let mut parsed = Vec::new();
+            for c in &centres {
+                let (name, path) = c
+                    .split_once('=')
+                    .ok_or_else(|| format!("--centre takes <lineage>=<file>, not {c}"))?;
+                parsed.push((es::voxel::parse_founder(name)?, PathBuf::from(path)));
+            }
+            let spec = es::voxel::live::trainer::LiveSpec {
+                centres: parsed,
+                worlds,
+                threads,
+                pairs,
+                window_ticks: (window_min * 60.0 * f64::from(cubarium_voxel_fauna::TICK_HZ))
+                    .round() as u64,
+                generations,
+                wall_seconds,
+                sigma,
+                learning_rate,
+                train_seed,
+                world_seed,
+                water_every,
+                population_cap,
+                save_every,
+                out,
+            };
+            es::voxel::live::trainer::train(&spec)?;
+            Ok(())
+        }
         Command::VoxelTrain {
             founder,
             stage,
