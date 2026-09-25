@@ -349,7 +349,16 @@ pub const DAY_SKY_TO_DEG: f32 = 28.0;
 /// How far a full overcast greys and dims the day sky, and how far a storm darkens it.
 pub const OVERCAST_SKY_GREY: f32 = 0.4;
 pub const OVERCAST_SKY_DIM: f32 = 0.25;
-pub const STORM_SKY_DIM: f32 = 0.7;
+/// How far a storm turns the day sky to [`STORM_SLATE_SRGB`]: a downpour's sky is slate,
+/// with no peach left in the cloud gaps (Fable, 2026-09-25, with Wrysk's checkpoint 2 look).
+pub const STORM_SKY_SLATE: f32 = 0.85;
+/// A storm's sky: a dark slate violet.
+pub const STORM_SLATE_SRGB: u32 = 0x3A3454;
+/// How far a storm turns the day clouds to its own: a grey-violet body over a dark slate
+/// underside, so a downpour's sky reads heavy rather than a pale overcast.
+pub const STORM_CLOUD: f32 = 0.8;
+pub const STORM_CLOUD_SRGB: u32 = 0x6E6690;
+pub const STORM_CLOUD_SHADE_SRGB: u32 = 0x2A2540;
 /// How far a downpour dims the ambient light, on top of its cloud cover.
 pub const STORM_AMBIENT: f32 = 0.3;
 
@@ -717,22 +726,30 @@ pub fn look(e: &Eased, p: &VoxelParams) -> Look {
     } else {
         0.0
     };
-    let dim = (1.0 - OVERCAST_SKY_DIM * c) * (1.0 - STORM_SKY_DIM * storm);
+    let dim = 1.0 - OVERCAST_SKY_DIM * c;
+    let slate = srgb(STORM_SLATE_SRGB);
     let day_sky = p.day_sky.srgb().map(|h| {
         let k = srgb(h);
         let grey = [luma(k); 3];
-        scale3(lerp3(k, grey, OVERCAST_SKY_GREY * c), dim)
+        lerp3(scale3(lerp3(k, grey, OVERCAST_SKY_GREY * c), dim), slate, STORM_SKY_SLATE * storm)
     });
     let [cloud_day, cloud_shade] = p.day_sky.cloud_srgb().map(srgb);
+    let cloud_day = lerp3(cloud_day, srgb(STORM_CLOUD_SRGB), STORM_CLOUD * storm);
+    let cloud_shade = lerp3(cloud_shade, srgb(STORM_CLOUD_SHADE_SRGB), STORM_CLOUD * storm);
 
     // --- rain, fog, lightning (checkpoint 2) ---
     let flash_colour = scale3(cool, FLASH_FILL * flash);
     let rain = e.rain.map(|r| r.clamp(0.0, 1.0));
     let rate = e.rain_rate.max(0.0) / R0;
     let rings = if rate > 0.0 { 1.0 - (-RING_RATE * rate).exp() } else { 0.0 };
-    // The streaks catch the light of the sky: brighter by day, never gone at night.
+    // The streaks catch the light of the sky: brighter by day, never gone at night. By day
+    // the palette's water surface toward its light; at night the ambient's own lavender
+    // indigo at the same brightness, since the water's cyan laid a teal veil over a dark sky.
     let rain_colour = {
-        let c = lerp3(p.water_surface, lerp3(p.light, [1.0; 3], 0.5), RAIN_LIGHT);
+        let day_rain = lerp3(p.water_surface, lerp3(p.light, [1.0; 3], 0.5), RAIN_LIGHT);
+        let night_hue = unit(lerp3(ambient, unit(srgb(FOG_LAVENDER_SRGB)), 0.5));
+        // A storm leans it that way too, so a downpour's veil keeps the sky slate violet.
+        let c = lerp3(scale3(night_hue, luma(day_rain)), day_rain, dl * (1.0 - 0.6 * storm));
         let lit = RAIN_FLOOR + (1.0 - RAIN_FLOOR) * ambient_level;
         [0, 1, 2].map(|i| c[i] * lit + RAIN_FLASH * flash_colour[i])
     };
