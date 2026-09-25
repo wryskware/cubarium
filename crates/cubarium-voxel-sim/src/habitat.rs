@@ -1873,7 +1873,7 @@ mod tests {
 
         let mut senses = Senses::new();
         senses.settle(&world.view(), &flora.view());
-        let mut sim = Sim::new(world, flora, fauna, SimConfig { threads: 1 }, Some(senses));
+        let mut sim = Sim::new(world, flora, fauna, SimConfig::with_threads(1), Some(senses));
         for _ in 0..200 {
             sim.step();
         }

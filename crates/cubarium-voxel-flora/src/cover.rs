@@ -1192,6 +1192,20 @@ pub(crate) fn drink_credit(flora: &mut Flora, vi: usize, got: f64) {
     flora.cover.rt.aux[vi].drank += got;
 }
 
+/// Every vine's id, in vine order: who a planned drink's vine indices name.
+pub(crate) fn vine_ids(flora: &Flora) -> impl Iterator<Item = VineId> + '_ {
+    flora.cover.vines.iter().map(|v| v.id)
+}
+
+/// A planned drink's shortfall off vine `id`'s `drank_m3`, if the vine still stands (the
+/// overlapped tick's settle; `step.rs`). Vines are sorted by id.
+pub(crate) fn drink_debit(flora: &mut Flora, id: VineId, debit: f64) {
+    let vines = &mut flora.cover.vines;
+    if let Ok(i) = vines.binary_search_by_key(&id, |v| v.id) {
+        vines[i].drank_m3 = (vines[i].drank_m3 - debit).max(0.0);
+    }
+}
+
 /// After the drink's split: the vines' `drank_m3`.
 pub(crate) fn drink_done(flora: &mut Flora) {
     let cover = &mut flora.cover;

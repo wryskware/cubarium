@@ -826,7 +826,7 @@ pub fn record_production(
         world.clone(),
         flora.clone(),
         Fauna::new(FaunaConfig::default()),
-        cubarium_voxel_sim::SimConfig { threads: 1 },
+        cubarium_voxel_sim::SimConfig::with_threads(1),
         None,
     );
     let k = flora.config().decomposition * cubarium_voxel::DT;

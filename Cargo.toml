@@ -34,9 +34,10 @@ cubarium-voxel-fauna = { path = "crates/cubarium-voxel-fauna" }
 cubarium-voxel-sim = { path = "crates/cubarium-voxel-sim" }
 cubarium-rules = { path = "crates/cubarium-rules" }
 # The tick's backbone (`crates/cubarium-voxel-sim`) and the in-phase task pool. Kept to
-# `std` only: `bevy_reflect`, `backtrace` and the multi-threaded *system* executor are all
-# off, because the schedule is a fixed chain and the parallelism lives inside phases
-# (`design/handoffs/voxel-schedule-brief-2026-09-18.md`).
+# `std` only: `bevy_reflect` and `backtrace` are off, and the parallelism lives inside
+# phases (`design/handoffs/voxel-schedule-brief-2026-09-18.md`) — except the overlapped
+# tick's two legs, for which `cubarium-voxel-sim` turns the multi-threaded *system*
+# executor on (`design/handoffs/voxel-phase-overlap-2026-09-24.md`).
 bevy_ecs = { version = "0.19", default-features = false, features = ["std"] }
 bevy_tasks = { version = "0.19", default-features = false, features = ["multi_threaded"] }
 anyhow = "1"

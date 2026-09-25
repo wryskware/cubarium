@@ -86,7 +86,7 @@ fn assemble(mut world: World, flora: Flora, mut fauna: Fauna, threads: usize) ->
     if world.config().closed_water_budget && !world.outlet_open() {
         world.apply(cubarium_voxel::Command::SetOutlet { open: true });
     }
-    Sim::new(world, flora, fauna, SimConfig { threads }, Some(senses))
+    Sim::new(world, flora, fauna, SimConfig::with_threads(threads), Some(senses))
 }
 
 fn load(dir: &Path, threads: usize) -> (Sim, u64) {

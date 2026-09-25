@@ -663,6 +663,7 @@ dependencies = [
  "cubarium-rules",
  "png",
  "postcard",
+ "rayon",
  "rustc-hash",
  "serde",
 ]

@@ -210,10 +210,10 @@ fn three_calls(ticks: u64) -> Reading {
     read(&world, &flora, &fauna)
 }
 
-/// The schedule, at a thread count.
-fn schedule(ticks: u64, threads: usize) -> Reading {
+/// The schedule, at a thread count, chained or overlapped.
+fn schedule(ticks: u64, threads: usize, overlap: bool) -> Reading {
     let (world, flora, fauna) = conditioned();
-    let mut sim = Sim::new(world, flora, fauna, SimConfig { threads }, None);
+    let mut sim = Sim::new(world, flora, fauna, SimConfig { threads, overlap }, None);
     for _ in 0..ticks {
         sim.step();
     }
@@ -285,28 +285,29 @@ fn conserves(name: &str, r: &Reading) {
     );
 }
 
-/// The schedule is the three-call sequence. Not asserted bit for bit — the claim is that
-/// the two agree to well inside anything the ecology reads.
+/// The chained schedule is the three-call sequence. Not asserted bit for bit — the claim
+/// is that the two agree to well inside anything the ecology reads.
 #[test]
 fn the_schedule_is_the_three_call_sequence() {
     let expected = three_calls(60);
-    let got = schedule(60, 1);
+    let got = schedule(60, 1, false);
     conserves("three calls", &expected);
     conserves("schedule, 1 thread", &got);
     agree("schedule against three calls", &expected, &got, 1e-12);
 }
 
-/// The brief's own check: stored water and per-species mean root-box pore after 200
+/// The brief's own check, on the overlapped tick (the default): stored water and
+/// per-species mean root-box pore after 200
 /// coupled ticks agree across thread counts within 1e-6 relative, and every residual
 /// still closes. The water phases on a pool do fold (a proposal into a neighbour's cell is
 /// an atomic add, drainage sums the aquifer's share per chunk), so the agreement is to
 /// rounding and what grows from it, not exact; the tolerance is what is asserted.
 #[test]
 fn the_thread_count_does_not_move_the_soil() {
-    let one = schedule(200, 1);
+    let one = schedule(200, 1, true);
     conserves("1 thread", &one);
     for threads in [4usize, 16] {
-        let got = schedule(200, threads);
+        let got = schedule(200, threads, true);
         conserves(&format!("{threads} threads"), &got);
         agree(&format!("{threads} threads against 1"), &one, &got, 1e-6);
     }
@@ -321,7 +322,7 @@ fn the_schedule_advances_the_clock_once_per_tick() {
         VoxelConfig::default(),
         FloraConfig::default(),
         FaunaConfig::default(),
-        SimConfig { threads: 1 },
+        SimConfig::with_threads(1),
     );
     assert_eq!(sim.world().tick(), 0);
     for expected in 1..=5u64 {
@@ -340,7 +341,7 @@ fn a_caller_can_hold_all_three_layers_at_once() {
         VoxelConfig::default(),
         FloraConfig::default(),
         FaunaConfig::default(),
-        SimConfig { threads: 1 },
+        SimConfig::with_threads(1),
     );
     let seeded = sim.with_layers_mut(|world, flora, _fauna| {
         // `Command::Seed` is the declared founder and does not ask the establishment
@@ -384,7 +385,7 @@ fn a_sampler_runs_once_per_tick_after_the_layers() {
         VoxelConfig::default(),
         FloraConfig::default(),
         FaunaConfig::default(),
-        SimConfig { threads: 1 },
+        SimConfig::with_threads(1),
     );
     sim.ecs().insert_resource(Seen::default());
     sim.add_samplers(observe);
@@ -486,7 +487,7 @@ fn the_live_schedule_senses_the_litter_only_when_it_holds_a_field() {
             s.settle(&world.view(), &flora.view());
             s
         });
-        let mut sim = Sim::new(world, flora, fauna, SimConfig { threads: 1 }, senses);
+        let mut sim = Sim::new(world, flora, fauna, SimConfig::with_threads(1), senses);
         assert_eq!(sim.senses().is_some(), with_field);
         for _ in 0..40 {
             sim.step();

@@ -11,7 +11,7 @@
 //! 2. [`EpisodeDriver::fresh`] — a fresh controller with fresh memory, `reset()` called —
 //!    attached through `Fauna::set_controller(animal_id, …)`. Refusal is an experiment
 //!    error, never a silent rest episode.
-//! 3. `arena.into_sim_prepared(SimConfig { threads: 1 }, senses)` — one **simulation
+//! 3. `arena.into_sim_prepared(SimConfig::with_threads(1), senses)` — one **simulation
 //!    thread** per episode, seeded from the fixture's settled cue field.
 //! 4. [`Sim::step`] until the horizon or the animal is gone. The **fauna tick** owns the
 //!    whole controller path: at each due tick it builds the observation, drives the
@@ -556,7 +556,7 @@ fn arena_episode(
         .map(|(&id, p)| (id, p.founder))
         .collect();
     let grid = prepared.grid;
-    let mut sim = arena.into_sim_prepared(SimConfig { threads: 1 }, prepared.episode_senses());
+    let mut sim = arena.into_sim_prepared(SimConfig::with_threads(1), prepared.episode_senses());
     let stage_b = prepared.patches().map(|(initial, successor)| StageB {
         founder,
         grid,
@@ -636,7 +636,7 @@ fn landscape_episode(
         world,
         prepared.flora().clone(),
         fauna,
-        SimConfig { threads: 1 },
+        SimConfig::with_threads(1),
         prepared.episode_senses(),
     );
     if prepared.live_plants() {
@@ -1162,7 +1162,7 @@ mod tests {
                 arena.refound(sampled_stores(founder, seed, seed, 0));
                 let id = arena.animal_id.expect("placed");
                 let mut sim =
-                    arena.into_sim_prepared(SimConfig { threads: 1 }, prepared.episode_senses());
+                    arena.into_sim_prepared(SimConfig::with_threads(1), prepared.episode_senses());
                 let before = sim.fauna().view().ledger.assimilated_by_founder[founder.index()];
                 drop(sim.fauna_mut().take_controller(id));
                 let teacher = EpisodeDriver::control(VoxelControl::Heuristic, founder);

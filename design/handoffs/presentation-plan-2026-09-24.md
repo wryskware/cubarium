@@ -460,3 +460,20 @@ continuously, on the every-frame clock.
   then ffmpeg palettegen/paletteuse. Rain needs a raining state; add a capture-only
   override if needed.
 - **Stop:** once, with all four done.
+
+## W checkpoint 2 merged (2026-09-24)
+
+W-2 is on main through `2c5b7ac2`: shore and plunge foam, sunward glints and rain rings,
+with no measurable GPU cost. Refraction was dropped because it doesn't show at 13 px.
+
+Wrysk's calls:
+
+- **Waterfall:** "waterfall approved", including the foam on every step of the cascade.
+- **Glints and rain rings:** they now lean halfway to white, `water_highlight = 0.5`. Wrysk
+  saw 0, 0.7, and 0.7 with more strength, and said "just under middle. maybe 50%?".
+
+Still open:
+
+- Foam stays unlit bright cyan in shade (dimmed, it went grey).
+- The screen-wide rain streaks step at the 20 Hz tick, not the every-frame clock.
+- Ring density waits on rain intensity from the weather handoff.

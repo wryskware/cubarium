@@ -85,6 +85,8 @@ pub use step::{Gates, establishment_gates, establishment_gates_on_substrate};
 pub use step::{adult_light_cover, establishment_gates_with_sky};
 /// Where a falling stand's wood lands (package N's fall), for a diagnostic.
 pub use step::fall_line;
+/// The overlapped tick's planned drink, between the plant step and the barrier.
+pub use step::DrinkPlan;
 /// What one cell of ground offers a root (package F): the scale `μ` and the establishment
 /// water gate read.
 pub use step::available_water;
@@ -3938,6 +3940,12 @@ pub struct Flora {
     /// and not saved: refreshed at the end of every tick and command and after a decode.
     #[serde(skip)]
     crowns: CrownCache,
+    /// The drink's per-cell scratch, kept between ticks so a tick does not allocate and
+    /// zero a world-sized array, and — under the overlapped tick — holding the drink this
+    /// tick **planned** against a read copy until [`Flora::settle_drink`] applies it
+    /// to the live world. Not state: not saved, and a clone starts empty.
+    #[serde(skip)]
+    pub(crate) drink: step::DrinkSlot,
 }
 
 impl Flora {
@@ -4029,6 +4037,7 @@ impl Flora {
             bank_wheel: Vec::new(),
             was_raining: false,
             crowns: CrownCache::default(),
+            drink: step::DrinkSlot::default(),
         }
     }
 
@@ -4089,6 +4098,52 @@ impl Flora {
     /// The chunks are folded back in stand order, so every number is the serial step's.
     pub fn step_with(&mut self, world: &mut World, threads: usize) {
         step::step(self, world, threads);
+    }
+
+    /// **The overlapped tick's plant step** (`design/handoffs/voxel-phase-overlap-2026-09-24.md`):
+    /// [`Flora::step_with`] reading `world` — a read copy of the live world as it stood
+    /// when the tick began — and writing nothing to it. The one write the plant layer makes
+    /// to the world, the drink's `Command::WithdrawPore`s, is **planned** here, off the
+    /// copy, exactly as [`Flora::step_with`] would take it, and held until
+    /// [`Flora::settle_drink`] applies it to the live world at the tick's barrier. Every
+    /// phase after the drink reads the copy, so it sees the pore water before this tick's
+    /// withdrawal (the chained tick's later phases see it after).
+    ///
+    /// `transpired_m3` is booked at the settle, voxel by voxel, as the world books it.
+    pub fn step_planned(&mut self, world: &World, threads: usize) {
+        step::step_planned(self, world, threads);
+    }
+
+    /// Apply the drink [`Flora::step_planned`] planned to the live `world`: one
+    /// `Command::WithdrawPore` per voxel for `min(planned, what the cell holds above its
+    /// wilting point now)`, in ascending voxel order. What the water took out of a cell
+    /// since the plan is a **shortfall**: it is never withdrawn, never booked as
+    /// transpired, and comes off the observational `water_m3` (a stand) or `drank_m3` (a
+    /// latticevine) of whoever asked, in proportion to what each asked — their income this
+    /// tick was already earned on the plan, the one-tick lag. A no-op with nothing planned.
+    pub fn settle_drink(&mut self, world: &mut World) {
+        step::settle_drink(self, world);
+    }
+
+    /// Whether a planned drink is waiting for [`Flora::settle_drink`].
+    pub fn drink_pending(&self) -> bool {
+        self.drink.0.pending
+    }
+
+    /// [`Flora::settle_drink`] in three steps, for a schedule that lets the live world take
+    /// the drink while the rest of the tick's reads still run: take the plan out of the
+    /// layer (`None` with nothing planned), [`DrinkPlan::withdraw`] it from the world, then
+    /// hand it back here. Between the take and the finish this layer's `transpired_m3`
+    /// lacks this tick's drink, and the next plan needs the finish first.
+    pub fn take_drink_plan(&mut self) -> Option<DrinkPlan> {
+        step::take_plan(self)
+    }
+
+    /// Book a [`DrinkPlan`] the world has withdrawn: `transpired_m3` receipt by receipt in
+    /// the world's order, each shortfall off whoever asked, and the scratch back in the
+    /// layer.
+    pub fn finish_drink(&mut self, plan: DrinkPlan) {
+        step::finish(self, plan);
     }
 
     /// One tick of the **dead pools only**: litter, dead wood and carrion decompose at

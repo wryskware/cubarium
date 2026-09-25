@@ -251,6 +251,10 @@ pub enum Lighting {
 /// water_hz = 12.0      # the water's animation speed, steps a second (its steps if not smooth)
 /// water_smooth = true  # false: the water moves in water_hz steps instead of every frame
 /// water_reflect_cells = 64 # cells a reflected ray is marched before it is sky
+/// water_foam = 0.6     # foam along shores and where a fall meets a pool (0: none)
+/// water_glint = 0.6    # sun-coloured highlight on sunlit ripple lines tilted sunward (0: none)
+/// water_rain_rings = 0.5 # rings on open-sky water while it rains (0: none)
+/// water_highlight = 0.5  # glints and rain rings: 0 palette colour .. 1 white
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -325,6 +329,23 @@ pub struct LightConfig {
     pub water_smooth: bool,
     /// Cells a reflected ray is marched before it counts as sky.
     pub water_reflect_cells: u32,
+    /// How strongly foam covers the water (W checkpoint 2): a band along each shore
+    /// (skin texels beside a solid) and a disc where a fall meets a pool, in the palette's
+    /// surface colour off the light (as the falls' streaks are), only ever lightening. It
+    /// breathes: its width and lace drift smoothly on the water's clock. `0` turns it off.
+    pub water_foam: f32,
+    /// How strongly a ripple line tilted toward the sun leans toward the palette's light
+    /// (`lightC`), times the line's fade and a taper from its middle to its ends, in
+    /// sunlit water only. The sun sits on the camera's side, so no true mirror glint
+    /// lines up with this view. `0` turns it off.
+    pub water_glint: f32,
+    /// How strongly rain rings (a drop's ring growing and fading on water under open sky,
+    /// while it rains) lean toward the palette's surface colour. `0` turns them off.
+    pub water_rain_rings: f32,
+    /// How far glints and rain rings lean from their palette colour (the light, the water
+    /// surface; both near the lake's own cyan) toward white, 0 to 1. 0.5 by default
+    /// (Wrysk, 2026-09-24, after 0 / 0.7 / 0.7-stronger clips: "just under middle. maybe 50%?").
+    pub water_highlight: f32,
 }
 
 impl Default for LightConfig {
@@ -349,6 +370,10 @@ impl Default for LightConfig {
             water_hz: 12.0,
             water_smooth: true,
             water_reflect_cells: 64,
+            water_foam: 0.6,
+            water_glint: 0.6,
+            water_rain_rings: 0.5,
+            water_highlight: 0.5,
         }
     }
 }
@@ -1000,6 +1025,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         } else {
             cfg.threads
         },
+        ..SimConfig::default()
     };
     let speed = args.speed.clamp(MIN_SPEED, MAX_SPEED);
     // **The output is opened before the world exists.** Founding one is minutes of work
@@ -1060,7 +1086,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                 },
             );
             (
-                arena.into_sim_prepared(SimConfig { threads: 1 }, senses),
+                arena.into_sim_prepared(SimConfig::with_threads(1), senses),
                 format!("sensing {} arena seed {}", founder.name(), args.arena_seed),
             )
         }
@@ -3060,7 +3086,7 @@ mod tests {
             World::empty(c.clone()),
             Flora::new(FloraConfig::for_voxel_size(c.voxel_m)),
             Fauna::new(FaunaConfig::default()),
-            SimConfig { threads: 1 },
+            SimConfig::with_threads(1),
             None,
         );
         let line = run_line(&sim, 1_200, 3_600, 60.0, None);
@@ -3091,7 +3117,7 @@ mod tests {
             World::empty(c.clone()),
             Flora::new(FloraConfig::for_voxel_size(c.voxel_m)),
             Fauna::new(FaunaConfig::default()),
-            SimConfig { threads: 1 },
+            SimConfig::with_threads(1),
             None,
         );
         let line = run_line(&sim, 1_200, 3_600, 60.0, Some(3_580));
@@ -3132,7 +3158,7 @@ mod tests {
             World::new(c.clone()),
             Flora::new(FloraConfig::for_voxel_size(c.voxel_m)),
             Fauna::new(FaunaConfig::default()),
-            SimConfig { threads: 1 },
+            SimConfig::with_threads(1),
             None,
         );
         let mut budget = Budget::default();

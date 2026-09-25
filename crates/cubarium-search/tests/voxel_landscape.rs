@@ -449,7 +449,7 @@ fn replayed_production_matches_the_live_litter_and_is_booked() {
         prepared.world().clone(),
         prepared.flora().clone(),
         Fauna::new(FaunaConfig::default()),
-        cubarium_voxel_sim::SimConfig { threads: 1 },
+        cubarium_voxel_sim::SimConfig::with_threads(1),
         None,
     );
     for _ in 0..ticks {

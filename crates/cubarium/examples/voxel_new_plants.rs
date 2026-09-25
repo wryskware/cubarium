@@ -63,7 +63,7 @@ fn main() {
     install_default_founders(&mut fauna).expect("the built-in centres validate");
     let mut senses = Senses::new();
     senses.settle(&world.view(), &flora.view());
-    let mut sim = Sim::new(world, flora, fauna, SimConfig { threads }, Some(senses));
+    let mut sim = Sim::new(world, flora, fauna, SimConfig::with_threads(threads), Some(senses));
     if sim.world().config().closed_water_budget && !sim.world().outlet_open() {
         sim.world_mut()
             .apply(WorldCommand::SetOutlet { open: true });

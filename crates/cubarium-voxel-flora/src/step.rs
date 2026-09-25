@@ -16,7 +16,11 @@
 //!    volume is split among its demanders proportional to demand. `μ` for income is the
 //!    one read taken before any withdrawal: a stand that got less than it asked for does
 //!    not get a second read. The root box's **saturated fraction** comes off the same
-//!    one read, for step 6's aeration stress.
+//!    one read, for step 6's aeration stress. On the overlapped tick
+//!    ([`crate::Flora::step_planned`]) the withdrawals are planned against a read copy and
+//!    applied at the barrier ([`crate::Flora::settle_drink`]), each bounded by what the
+//!    cell still holds after the same tick's water; the shortfall comes off the
+//!    observational `water_m3` / `drank_m3` of whoever asked.
 //! 5b. **Substrate**, for the saprotrophs only, and on the same shape as the water: every
 //!    saprotroph's demand on every dead-wood pool of its **mycelium box** is collected
 //!    first, then each pool is drawn on **once** for the total and what it gave up is split
@@ -166,6 +170,35 @@ pub(crate) fn mix(mut z: u64) -> u64 {
 }
 
 pub(crate) fn step(flora: &mut Flora, world: &mut World, threads: usize) {
+    // A plan an overlapped tick left unsettled is applied first, so the ledger still
+    // closes if a host switches schedules between ticks.
+    settle_drink(flora, world);
+    run(flora, Target::Now(world), threads);
+}
+
+/// [`step`] against a read copy: the drink is planned and held for [`settle_drink`].
+pub(crate) fn step_planned(flora: &mut Flora, world: &World, threads: usize) {
+    run(flora, Target::Planned(world), threads);
+}
+
+/// The world a tick runs against: the live one, which the drink withdraws from as it goes
+/// (the chained tick), or a read copy, against which the drink is only planned (the
+/// overlapped tick). Every other phase only reads it.
+pub(crate) enum Target<'a> {
+    Now(&'a mut World),
+    Planned(&'a World),
+}
+
+impl Target<'_> {
+    fn world(&self) -> &World {
+        match self {
+            Target::Now(w) => w,
+            Target::Planned(w) => w,
+        }
+    }
+}
+
+fn run(flora: &mut Flora, mut target: Target<'_>, threads: usize) {
     // The tick counter moves **first**, so that `flora.tick` is the tick this step
     // produces: the one whose state the caller will read when the step returns. Everything
     // dated inside a tick — an arrival bin's start, a bin's age, the germination lottery's
@@ -194,14 +227,15 @@ pub(crate) fn step(flora: &mut Flora, world: &mut World, threads: usize) {
         .collect();
 
     cubarium_voxel::voxel_phase!(FloraStep, {
+        let world = target.world();
         cubarium_voxel::voxel_phase!(Prune, { prune_unsupported(flora, world) });
         cubarium_voxel::voxel_phase!(SkyCache, { refresh_sky_cache(flora, world) });
         cubarium_voxel::voxel_phase!(Cover, { crate::cover::prep(flora, world) });
         cubarium_voxel::voxel_phase!(Drown, { drown(flora, world) });
 
-        let light =
-            cubarium_voxel::voxel_phase!(Light, { light_per_stand(flora, world, threads) });
-        let moisture = cubarium_voxel::voxel_phase!(Drink, { drink(flora, world, threads) });
+        let light = cubarium_voxel::voxel_phase!(Light, { light_per_stand(flora, world, threads) });
+        let moisture = cubarium_voxel::voxel_phase!(Drink, { drink(flora, &mut target, threads) });
+        let world = target.world();
         let substrate = cubarium_voxel::voxel_phase!(Feed, { feed(flora, world, &moisture) });
         cubarium_voxel::voxel_phase!(Grow, {
             grow(flora, world, &light, &moisture, &substrate)
@@ -212,7 +246,7 @@ pub(crate) fn step(flora: &mut Flora, world: &mut World, threads: usize) {
         cubarium_voxel::voxel_phase!(Propagate, { crate::seeds::propagate(flora, world) });
         // Growth, dieback, deaths, falls and germinations have all happened: the cached
         // crowns follow the stands they now describe.
-        flora.refresh_crowns(Some(&*world));
+        flora.refresh_crowns(Some(world));
         #[cfg(feature = "profile")]
         {
             use cubarium_voxel::profile::{Count, add};
@@ -767,30 +801,63 @@ pub(crate) struct Drink {
 /// voxels in ascending index order, as before, so every total, every withdrawal and every
 /// ledger sum is the sorted sweep's to the bit. Only the order a stand's own shares are
 /// added into its observational `taken_m3` differs (`the_scratch_drink_is_the_sorted_sweep`).
-fn drink(flora: &mut Flora, world: &mut World, threads: usize) -> Vec<Drink> {
-    DRINK_SCRATCH.with_borrow_mut(|scratch| drink_with(flora, world, threads, scratch))
+fn drink(flora: &mut Flora, target: &mut Target<'_>, threads: usize) -> Vec<Drink> {
+    // Out of the layer for the call, so the phase can hold the layer and its scratch at
+    // once; `take` leaves empty vectors behind and allocates nothing.
+    let mut scratch = std::mem::take(&mut flora.drink.0);
+    let out = drink_with(flora, target, threads, &mut scratch);
+    flora.drink.0 = scratch;
+    out
 }
 
-thread_local! {
-    /// [`drink`]'s per-cell scratch, kept between ticks so a tick does not allocate and
-    /// zero a world-sized array. All zero between calls.
-    static DRINK_SCRATCH: std::cell::RefCell<DrinkScratch> =
-        std::cell::RefCell::new(DrinkScratch::default());
+/// [`Flora::drink`]'s slot: the scratch, kept between ticks so a tick does not allocate
+/// and zero a world-sized array (it was a thread-local; the overlapped tick runs the plant
+/// step on whichever pool worker the executor picks, and one copy per worker is one
+/// world-sized array per worker). **Not state**: a clone starts empty and a debug print
+/// names it.
+#[derive(Default)]
+pub(crate) struct DrinkSlot(pub(crate) DrinkScratch);
+
+impl Clone for DrinkSlot {
+    fn clone(&self) -> DrinkSlot {
+        DrinkSlot::default()
+    }
+}
+
+impl std::fmt::Debug for DrinkSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DrinkSlot")
+    }
 }
 
 /// Per-cell demand totals, what each touched cell gave up, and which cells were touched.
+/// All zero between ticks, except while a planned drink waits for its settle.
 #[derive(Default)]
-struct DrinkScratch {
-    /// `[total asked, accepted]` per cell, side by side so one read fetches both.
+pub(crate) struct DrinkScratch {
+    /// `[total asked, accepted]` per cell, side by side so one read fetches both. Under a
+    /// plan, "accepted" is what the read copy could give: the plan.
     cell: Vec<[f64; 2]>,
     /// One bit per cell: set when a demand first lands on it.
     touched: Vec<u64>,
     /// One per chunk of stands, reused tick to tick.
     chunks: Vec<DrinkChunk>,
+    /// How many of `chunks` the last drink used.
+    used: usize,
     /// The latticevines' (voxel, vine index, wanted), in vine order, and their box scratch.
     vine_wants: Vec<(u32, u32, f64)>,
     vine_box: Vec<usize>,
     vine_drinkable: Vec<f64>,
+    /// A planned drink is waiting for [`settle_drink`].
+    pub(crate) pending: bool,
+    /// Under a plan, who the stand and vine indices in the wants were when it was made:
+    /// each stand's `(site, id)` and each vine's id. The rest of the tick grows, kills and
+    /// germinates, so an index is only a name through these.
+    stand_ids: Vec<(Site, u64)>,
+    vine_ids: Vec<u64>,
+    /// The settle's cells that gave less than planned, `(voxel, got)`, ascending.
+    short: Vec<(u32, f64)>,
+    /// The settle's receipts, one per withdrawn voxel, ascending.
+    receipts: Vec<f64>,
 }
 
 /// What one chunk of stands read out of its root boxes.
@@ -905,30 +972,37 @@ fn drink_read(
 
 fn drink_with(
     flora: &mut Flora,
-    world: &mut World,
+    target: &mut Target<'_>,
     threads: usize,
     scratch: &mut DrinkScratch,
 ) -> Vec<Drink> {
-    scratch.fit(world.config().cells());
+    debug_assert!(!scratch.pending, "a planned drink was never settled");
+    scratch.fit(target.world().config().cells());
     let DrinkScratch {
         cell,
         touched,
         chunks,
+        used,
         vine_wants,
         vine_box,
         vine_drinkable,
+        pending,
+        stand_ids,
+        vine_ids,
+        short: _,
+        receipts: _,
     } = scratch;
     let n = flora.stands.len();
     {
-        let view = world.view();
+        let view = target.world().view();
         let flora = &*flora;
         for_chunks(n, threads, chunks, DrinkChunk::default, |range, chunk| {
             drink_read(flora, &view, range, chunk)
         });
     }
-    let used = chunk_count(n, threads);
+    *used = chunk_count(n, threads);
     // Each voxel's total, summed in ascending stand order: the chunks are in stand order.
-    for chunk in chunks.iter().take(used) {
+    for chunk in chunks.iter().take(*used) {
         for &(v, _, share) in chunk.wants.iter() {
             let v = v as usize;
             touched[v / 64] |= 1 << (v % 64);
@@ -938,7 +1012,7 @@ fn drink_with(
     // Then the latticevines' demands, in vine order, into the same totals: a vine and a
     // stand over one cell share its one withdrawal.
     {
-        let view = world.view();
+        let view = target.world().view();
         crate::cover::drink_wants(flora, &view, vine_box, vine_drinkable, vine_wants);
     }
     for &(v, _, share) in vine_wants.iter() {
@@ -947,28 +1021,35 @@ fn drink_with(
         cell[v][0] += share;
     }
 
-    // One bounded withdrawal per voxel, in ascending voxel order.
+    // One bounded withdrawal per voxel, in ascending voxel order — or, against a read
+    // copy, the same bound planned and held for the settle.
     for (word_at, word) in touched.iter().enumerate() {
         let mut bits = *word;
         while bits != 0 {
             let voxel = word_at * 64 + bits.trailing_zeros() as usize;
             bits &= bits - 1;
-            let (x, y, z) = world.config().coords(voxel);
             // Never below the wilting point, however many stands asked: the voxel's first
             // and only withdrawal this tick, so the reading is still the pre-withdrawal one.
-            let volume = cell[voxel][0].min(drinkable_m3(&world.view(), voxel));
-            // One bounded operation for the whole voxel, whatever asked for it.
-            let got = if volume > 0.0 {
-                -world.apply(WorldCommand::WithdrawPore {
-                    x: x as i64,
-                    y,
-                    z,
-                    volume_m3: volume,
-                })
-            } else {
-                0.0
+            let volume = cell[voxel][0].min(drinkable_m3(&target.world().view(), voxel));
+            let got = match target {
+                // One bounded operation for the whole voxel, whatever asked for it.
+                Target::Now(world) => {
+                    let got = if volume > 0.0 {
+                        let (x, y, z) = world.config().coords(voxel);
+                        -world.apply(WorldCommand::WithdrawPore {
+                            x: x as i64,
+                            y,
+                            z,
+                            volume_m3: volume,
+                        })
+                    } else {
+                        0.0
+                    };
+                    flora.ledger.transpired_m3 += got;
+                    got
+                }
+                Target::Planned(_) => volume.max(0.0),
             };
-            flora.ledger.transpired_m3 += got;
             cell[voxel][1] = got;
         }
     }
@@ -990,7 +1071,27 @@ fn drink_with(
         crate::cover::drink_credit(flora, vine as usize, split_proportional(got, want, total));
     }
     crate::cover::drink_done(flora);
-    // Leave the scratch all zero for the next call.
+    let mut out = Vec::with_capacity(n);
+    for chunk in chunks.iter().take(*used) {
+        out.extend_from_slice(&chunk.out);
+    }
+    match target {
+        // Leave the scratch all zero for the next call.
+        Target::Now(_) => clear_cells(cell, touched),
+        // Hold the plan, and who it was made for, until the settle.
+        Target::Planned(_) => {
+            *pending = true;
+            stand_ids.clear();
+            stand_ids.extend(flora.stands.iter().map(|s| (s.site, s.id)));
+            vine_ids.clear();
+            vine_ids.extend(crate::cover::vine_ids(flora));
+        }
+    }
+    out
+}
+
+/// Zero every touched cell and the touched bits.
+fn clear_cells(cell: &mut [[f64; 2]], touched: &mut [u64]) {
     for (word_at, word) in touched.iter_mut().enumerate() {
         let mut bits = *word;
         while bits != 0 {
@@ -999,11 +1100,137 @@ fn drink_with(
         }
         *word = 0;
     }
-    let mut out = Vec::with_capacity(n);
-    for chunk in chunks.iter().take(used) {
-        out.extend_from_slice(&chunk.out);
+}
+
+/// [`crate::Flora::settle_drink`]: apply a planned drink to the live world, all three steps
+/// on the calling thread.
+pub(crate) fn settle_drink(flora: &mut Flora, world: &mut World) {
+    if let Some(mut plan) = take_plan(flora) {
+        plan.withdraw(world);
+        finish(flora, plan);
     }
-    out
+}
+
+/// The planned drink, out of the layer; `None` when nothing is planned.
+pub(crate) fn take_plan(flora: &mut Flora) -> Option<DrinkPlan> {
+    if !flora.drink.0.pending {
+        return None;
+    }
+    Some(DrinkPlan(std::mem::take(&mut flora.drink.0)))
+}
+
+/// A drink [`crate::Flora::step_planned`] planned against a read copy, out of the layer
+/// ([`crate::Flora::take_drink_plan`]) so the live world can take it
+/// ([`DrinkPlan::withdraw`]) while the rest of the plant and animal leg still runs, and
+/// then handed back ([`crate::Flora::finish_drink`]) to book it. Holds the drink's scratch,
+/// which goes back to the layer with it.
+pub struct DrinkPlan(DrinkScratch);
+
+impl std::fmt::Debug for DrinkPlan {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DrinkPlan")
+    }
+}
+
+impl DrinkPlan {
+    /// The world's half: one `WithdrawPore` per planned voxel, in ascending voxel order —
+    /// the order the chained tick withdraws in — each bounded by what the cell holds above
+    /// its wilting point **now**. Books the world's `transpiration_out` (and, under a
+    /// closed budget, the atmosphere) as each command does, and keeps every receipt for
+    /// [`crate::Flora::finish_drink`]. Touches no plant.
+    pub fn withdraw(&mut self, world: &mut World) {
+        let DrinkScratch {
+            cell,
+            touched,
+            receipts,
+            short,
+            ..
+        } = &mut self.0;
+        receipts.clear();
+        short.clear();
+        for (word_at, word) in touched.iter().enumerate() {
+            let mut bits = *word;
+            while bits != 0 {
+                let voxel = word_at * 64 + bits.trailing_zeros() as usize;
+                bits &= bits - 1;
+                let planned = cell[voxel][1];
+                if !(planned > 0.0) {
+                    continue;
+                }
+                let volume = planned.min(drinkable_m3(&world.view(), voxel));
+                let got = if volume > 0.0 {
+                    let (x, y, z) = world.config().coords(voxel);
+                    -world.apply(WorldCommand::WithdrawPore {
+                        x: x as i64,
+                        y,
+                        z,
+                        volume_m3: volume,
+                    })
+                } else {
+                    0.0
+                };
+                receipts.push(got);
+                // Short only where the water left less than the plan: a receipt a
+                // rounding below its request is the chained tick's receipt too.
+                if volume < planned {
+                    short.push((voxel as u32, got));
+                }
+            }
+        }
+    }
+}
+
+/// [`crate::Flora::finish_drink`]: book what the world gave and debit the shortfalls.
+pub(crate) fn finish(flora: &mut Flora, plan: DrinkPlan) {
+    let mut scratch = plan.0;
+    let DrinkScratch {
+        cell,
+        touched,
+        chunks,
+        used,
+        vine_wants,
+        pending,
+        stand_ids,
+        vine_ids,
+        short,
+        receipts,
+        ..
+    } = &mut scratch;
+    *pending = false;
+    // The receipts in the world's own order, so the two ledgers add the same numbers in
+    // the same sequence and agree to the bit.
+    for &got in receipts.iter() {
+        flora.ledger.transpired_m3 += got;
+    }
+    receipts.clear();
+    // A shortfall comes off whoever asked, by the same split that credited them.
+    if !short.is_empty() {
+        let debit = |v: u32, want: f64| -> Option<f64> {
+            let k = short.binary_search_by_key(&v, |p| p.0).ok()?;
+            let [total, planned] = cell[v as usize];
+            let got = short[k].1;
+            Some(split_proportional(planned, want, total) - split_proportional(got, want, total))
+        };
+        for chunk in chunks.iter().take(*used) {
+            for &(v, stand, want) in chunk.wants.iter() {
+                let Some(d) = debit(v, want) else { continue };
+                let (site, id) = stand_ids[stand as usize];
+                if let Ok(j) = flora.stands.binary_search_by_key(&site, |s| s.site)
+                    && flora.stands[j].id == id
+                {
+                    let s = &mut flora.stands[j];
+                    s.water_m3 = (s.water_m3 - d).max(0.0);
+                }
+            }
+        }
+        for &(v, vine, want) in vine_wants.iter() {
+            let Some(d) = debit(v, want) else { continue };
+            crate::cover::drink_debit(flora, vine_ids[vine as usize], d);
+        }
+        short.clear();
+    }
+    clear_cells(cell, touched);
+    flora.drink.0 = scratch;
 }
 
 /// One demander's share of what the core accepted. A zero total means a zero share:
@@ -3032,7 +3259,7 @@ mod tests {
             let (mut ref_flora, mut ref_world) = (flora.clone(), world.clone());
             // Twice, so the second call runs on the scratch the first one left behind.
             for round in 0..2 {
-                let got = drink(&mut flora, &mut world, threads);
+                let got = drink(&mut flora, &mut Target::Now(&mut world), threads);
                 let want = drink_sorted_sweep(&mut ref_flora, &mut ref_world);
                 assert_eq!(got.len(), want.len());
                 assert!(want.iter().any(|d| d.taken_m3 > 0.0), "stands drank");
