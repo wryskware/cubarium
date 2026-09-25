@@ -585,6 +585,11 @@ pub struct Animal {
     pub mineral: f64,
     /// The energy in its tissue, as its food handed it over.
     pub energy: f64,
+    /// Waste held until the next void: the undigested share of every bite, the mineral a
+    /// bite brought beyond what its tissue needs, and the mineral shed with the organic
+    /// matter respiration burns. Emptied onto the ground as litter every
+    /// `GUT_VOID_S` (30 s), and into the corpse at death. Counted in the stored totals.
+    pub gut: Taken,
     /// Ticks since it was born or introduced. Also its step phase: an animal steps on the
     /// ticks where `age_ticks` is a multiple of its species' step period, so two animals
     /// born on different ticks do not step in lockstep.
@@ -627,17 +632,17 @@ impl Animal {
     /// so a conservation check that ignored it would see matter vanish at the first
     /// instalment.
     pub fn stored_organic(&self) -> f64 {
-        self.organic() + self.reproduction.escrow.map_or(0.0, |e| e.organic)
+        self.organic() + self.gut.organic + self.reproduction.escrow.map_or(0.0, |e| e.organic)
     }
 
-    /// Mineral in this body, the escrowed offspring's included.
+    /// Mineral in this body, its gut and the escrowed offspring's included.
     pub fn stored_mineral(&self) -> f64 {
-        self.mineral + self.reproduction.escrow.map_or(0.0, |e| e.mineral)
+        self.mineral + self.gut.mineral + self.reproduction.escrow.map_or(0.0, |e| e.mineral)
     }
 
-    /// Energy in this body, the escrowed offspring's included.
+    /// Energy in this body, its gut and the escrowed offspring's included.
     pub fn stored_energy(&self) -> f64 {
-        self.energy + self.reproduction.escrow.map_or(0.0, |e| e.energy)
+        self.energy + self.gut.energy + self.reproduction.escrow.map_or(0.0, |e| e.energy)
     }
 }
 
@@ -2166,6 +2171,7 @@ impl Fauna {
             mineral: sc.n_tissue * organic,
             energy: sc.energy_density * organic,
             age_ticks: 0,
+            gut: Taken::default(),
             state: State::Resting,
             mobility: crate::Mobility::default(),
         };
