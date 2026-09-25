@@ -477,3 +477,154 @@ Still open:
 - Foam stays unlit bright cyan in shade (dimmed, it went grey).
 - The screen-wide rain streaks step at the 20 Hz tick, not the every-frame clock.
 - Ring density waits on rain intensity from the weather handoff.
+
+## V: volumetric light and effect switches (2026-09-24)
+
+Wrysk, 2026-09-24: "k do it. have we been gating any of these render effects behind
+config flags? we probably should for a few and definitely this one. just "lit" / "no
+lit" might not be enough. ... do plan it for recompute when the sun moves. if we can do
+the recompute async and no more than once a minute, thats probably fine."
+
+**Objective:**
+- **Light shafts** in the lit tier's air: sunlight scatters where the sun reaches the air
+  and not where terrain, trunks or crowns shade it. It shows through canopy gaps, arches,
+  skylights and halls.
+- **Emitter glow** scattered in the air.
+- A **switch for each lit effect** that skips the effect's cost, not just its weight.
+
+The design below is Fable's call. If you depart from it, give the reason in your return.
+
+1. **Sun-visibility volume.**
+   - A 3D texture with one texel per voxel, so shafts pass one-voxel slots and skylights.
+     Each texel is 0..1: how much sun reaches that cell's open air.
+   - Occluders are exactly those of `sunReaches`: terrain, trunks, logs, animals, and crown
+     cells by the same `crownLets` hash. That keeps the shafts lined up with the shadows on
+     surfaces.
+   - Build it off the render thread from a snapshot of the grid. Either works; choose,
+     measure and report:
+     - on the CPU on a background thread, as `glowTex` is built on the CPU;
+     - in a GPU pass that does not stall the frame.
+   - For the algorithm, a sweep along the sun direction (each cell's own pass times the
+     visibility of the cell upstream) costs O(cells). A march per cell is the fallback.
+2. **Recompute:**
+   - Async, **at most once a minute**. Add a `[light] volumetric_rebake_s` knob, default 60.
+   - Trigger it when the sun has moved more than a small angle, or the world has changed,
+     since the last bake.
+   - **Nothing pops.** Keep two volumes. The new bake fades in over the interval on the
+     every-frame clock.
+   - Bake for where the sun will be when the fade ends, so the shafts follow a moving sun
+     rather than trailing it by a minute.
+   - The sun is static today (`[light] sun`). WX2, in flight, moves it with the day clock.
+     Key the trigger off the sun direction the sink hands the renderer each frame, so both
+     cases work.
+   - Prove it with a capture-only sun sweep, e.g. `light_capture --sun-sweep`, with the
+     rebake interval shortened for the capture.
+3. **In-scatter along the view ray,** through open air in front of the walk's hit and
+   nothing behind it:
+   - **Density:** a strength knob times a height falloff, so the air is thicker low down.
+   - **Sun term:** `lightC` times the sun visibility.
+   - **Emitter term:** `glowTex` times its own weight.
+   - Both are hazed like the rest of the frame.
+   - The camera is orthographic, so every pixel's ray has the same direction. Accumulate
+     during the slab walk if that is cheaper than a separate march, and take no more than
+     about 16–24 samples either way.
+   - **No shimmer:** any jitter must be stable per pixel, with no noise that changes frame
+     to frame.
+   - The in-scatter stops at a water surface. Underwater shafts are out of scope.
+4. **Fog seam:** WX2 checkpoint 2 adds height fog that the sun lights. Don't build fog, but
+   make it easy for WX2 to reuse this work:
+   - Put the air density in one function, e.g. `airDensity(p)`, that fog can add to.
+   - Expose the sun-visibility lookup as a function, e.g. `sunInAir(p)`, that fog can call.
+
+**Effect switches:**
+
+- In `[light]`, add bools that skip each effect's cost, not just zero its weight:
+  - at least `shadows` (the sun march), `reflections` (the water reflection march) and
+    `volumetric`;
+  - `volumetric` defaults to `false` until Wrysk picks it from the GIFs.
+- Check that `bloom = 0`, `emission = false`, `ao = 0` and water foam, glint and rings at
+  0 each skip their work. Fix any that don't.
+- The other defaults keep today's look.
+- Implement them as uniform-coherent branches or as specialization constants, your choice.
+  `LIT` is already a specialization constant built from config.
+- Add numeric knobs as needed, e.g. `volumetric_density`, `volumetric_glow` and
+  `volumetric_rebake_s`, with defaults.
+
+**Isolation from WX2:** WX2 is in flight in worktree `agent-a305b95986d3f88e4` and is
+editing `voxel.frag`, `crates/cubarium-gpu/src/voxel.rs`, `sink/gpu/voxel.rs` and
+`light_capture.rs` heavily.
+
+- Put new code in new files:
+  - a shader include, e.g. `shaders/volumetric.glsl`;
+  - a volume module, e.g. `crates/cubarium-gpu/src/sunvis.rs`;
+  - the CPU bake, if you choose one, under `crates/cubarium/src/sink/gpu/`.
+- Keep edits to the shared files small:
+  - append the uniform fields;
+  - add one binding (10);
+  - add one call site in the composition;
+  - add the switch branches.
+- Fable integrates the two.
+
+**Budgets:**
+
+- **Volumetric on:** at most 1.0 ms a frame of lit cost at the desktop config on the 5080.
+- **Volumetric off:** no measurable cost.
+- **Bake:**
+  - off the render thread;
+  - report its wall time and thread count;
+  - no frame hitch when a bake lands: measure the frame times around one.
+- **Flat tier:** byte-identical at `config/tachyon/voxel.toml` 6 px, plain and textured.
+  Volumetric is lit-only.
+- **Agent CPUs:** build and run with `taskset -c 8-15,24-31` and `-j 8`.
+
+**Evidence (checkpoint 1, then stop):**
+
+- Stills of volumetric off and on, side by side, from the terrarium state.
+- A 60 fps real-time GIF of the lit terrarium with volumetric on, showing that nothing
+  shimmers.
+- A sun-sweep GIF, sped up with a shortened rebake, showing the shafts moving and the fade
+  between bakes with no pop.
+- A table of the switches with the measured lit cost of each, on and off. Include the bake
+  time.
+- Make the GIFs with ffmpeg: palettegen, `paletteuse=dither=none`, `-loop 0`.
+
+**Rules:**
+
+- Nothing pops.
+- Rendering effects may be smooth; the pixel-art rule binds illustration only.
+- Never open a window on Wrysk's screen. Capture headless or through `scripts/hidden.sh`.
+- Commit with explicit paths. Never merge or deploy.
+
+**Return (≤ 40 lines):**
+
+- commits;
+- the absolute path of each GIF and still;
+- the switch and cost table;
+- the bake design and its measured time;
+- open questions about the look.
+
+## V merged (2026-09-25)
+
+V is on main through `b19f9821`, with `volumetric = false`.
+
+**What's in it:**
+- **Switches:** `shadows`, `reflections`, `volumetric`, `emission` and `ao > 0` are
+  pipeline specialisation constants, so an effect that is off is dead code.
+- **The sun-visibility volume:** a CPU thread uses `sunReaches`' own walk to bake it, in
+  about 40 ms. It rebakes at most every `volumetric_rebake_s` (60 s), and the new bake fades
+  in.
+- **Cost:** volumetric on adds about 0.5 ms. Lit costs 4.9 ms by default, 2.1 ms with
+  shadows off, and 1.5 ms with everything off, on the 5080 at 13 px.
+
+**What it looks like:** there are no shafts at this camera, because the sun is always on the
+camera's side and each line of sight averages the lit and shaded air. Even a low side sun
+(14°) gives only a soft teal lift low in the frame.
+
+**Wrysk:** "the slight haze it makes does kind of make the scene blend a bit more with less
+harsh contrast. it might be a bit strong though. worth keeping around but yeah maybe we dont
+have to enable it right now. definitely get it merged".
+
+**Open:**
+- If it is turned on later, it needs a weaker density than 0.03.
+- Shafts are more likely in WX2's fog, which uses the `airDensity` / `sunInAir` seam.
+- The in-scatter colour is still `lightC`, which pulls the scene teal.

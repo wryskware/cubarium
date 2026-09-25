@@ -2,8 +2,7 @@
 //! thread count in this crate (`design/handoffs/voxel-cache-and-pinning-2026-09-24.md`).
 //!
 //! Two callers: the voxel trainer's worker pinning (`cubarium-search`'s `es::voxel::pin`,
-//! `--pin auto`), and the live loop, which keeps its pools on one chiplet
-//! ([`chiplet_plan`]). Nothing here makes a system call: the callers own the affinity
+//! `--pin auto`), and the live loop's per-thread pool placement. Nothing here makes a system call: the callers own the affinity
 //! syscalls, and every function takes the sysfs root so it can be tested on a synthetic
 //! tree rather than on the machine running the test.
 
@@ -153,38 +152,3 @@ pub fn auto_order(topology: &[Cpu]) -> Vec<usize> {
     cpus.into_iter().map(|c| c.cpu).collect()
 }
 
-/// The live loop's chiplet: when `mask` spans **more than one** L3 group, the CPUs of the
-/// group with the most of the mask's CPUs, ascending — ties to the larger L3, then to
-/// the group with the lowest CPU, so the whole 9950X3D gives the V-cache chiplet; `None`
-/// when the mask is already one group or sysfs shows no L3.
-///
-/// Measured on the 9950X3D (cache study D): the terrarium's water tick on the V-cache
-/// chiplet's 15 threads took 1.64 ms steady / 2.50 ms in a shower, against 2.02 / 3.04 ms
-/// on 31 threads over both chiplets and 2.08 / 3.33 ms on 8 cores of each — the water
-/// phases hand columns between threads every phase, and across chiplets that costs more
-/// than the extra cores return.
-pub fn chiplet_plan(cpu_root: &Path, mask: &[usize]) -> Option<Vec<usize>> {
-    let topology = read_topology(cpu_root, mask);
-    let mut groups: Vec<(usize, u64, Vec<usize>)> = Vec::new();
-    for c in &topology {
-        if c.l3_group == usize::MAX {
-            return None;
-        }
-        match groups.iter_mut().find(|(g, _, _)| *g == c.l3_group) {
-            Some((_, _, v)) => v.push(c.cpu),
-            None => groups.push((c.l3_group, c.l3_bytes, vec![c.cpu])),
-        }
-    }
-    if groups.len() < 2 {
-        return None;
-    }
-    groups.sort_by(|a, b| {
-        b.2.len()
-            .cmp(&a.2.len())
-            .then(b.1.cmp(&a.1))
-            .then(a.0.cmp(&b.0))
-    });
-    let mut cpus = groups.swap_remove(0).2;
-    cpus.sort_unstable();
-    Some(cpus)
-}

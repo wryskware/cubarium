@@ -38,7 +38,7 @@
 //! | `exchange` | **yes**, by column | read-old/write-new; a proposal into a neighbour's cell is an atomic add |
 //! | `water_table` | **yes**, by column, when the aquifer can pay | it shares a scarce stock in index order **by rule**, so when the stock binds it runs in that order on one thread |
 //! | `spring`, `outlet` | no | one cell each |
-//! | `flora` | no | 0.6 % of the tick; see [`Sim::step`] |
+//! | `flora` | **yes**, per stand and per voxel band | see [`Sim::step`] |
 //! | `fauna` | **yes**, its `sense` | one read-only plan per animal, applied serially in id order |
 //!
 //! Everything that is left serial is left serial for a stated reason and not for want of
@@ -558,12 +558,12 @@ impl Sim {
     ///   shared in". Parallelising it would change who gets the last of a nearly empty
     ///   aquifer, which is a rule change and not mine.
     /// - `spring`, `outlet`: one cell each.
-    /// - `flora`: its two read-then-apply phases *do* split cleanly — `light_per_stand`
-    ///   and `drink`'s root-box read are per stand and touch nothing else — but the whole
-    ///   plant layer is 40 µs of a 5,000 µs tick (0.6 %, six species and 48 stands), which
-    ///   is at the scale of the task-spawn overhead itself. `light_per_stand` also writes
-    ///   the sky cache as it reads it (`sky_at` takes `&mut Vec`), so it would need the
-    ///   cache filled in a pass of its own first. Left serial, and measured that way.
+    /// - `flora`: split since the plant-phase package
+    ///   (`design/handoffs/voxel-phase-overlap-2026-09-24.md`, option 1) — light (layers,
+    ///   shade index, sky pass, receivers), the drink (read, per-voxel totals and plan by
+    ///   voxel band, credits), the feed's wants, growth, drowning and the crown cache run
+    ///   over `threads`. Left serial: the chained tick's withdrawals (each a world command),
+    ///   the feed's pool withdrawals, deaths, decomposition, the seed bank and propagation.
     pub fn step(&mut self) {
         match self.mode {
             ScheduleMode::Live if self.config().overlap => {

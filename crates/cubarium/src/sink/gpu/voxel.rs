@@ -57,6 +57,7 @@ use crate::voxel::vine::{self, VineCell};
 use cubarium_voxel_fauna::{Fauna, FaunaView};
 
 use super::light::{Canopy, Glow, SkyWorker};
+use super::sunvis::{Snapshot, SunVisDriver};
 use super::target::{GpuTarget, GpuTargetKind};
 
 /// The knobs `cubarium voxel --sink gpu` takes.
@@ -117,6 +118,10 @@ pub struct VoxelGpuSink {
     /// but until the sky plane for its terrain arrives every pack is refused (the world
     /// stays owed) and the founding frame goes on pulsing.
     awaiting_light: bool,
+    /// The light shafts' sun-visibility bakes (`[light] volumetric`), or `None`.
+    sunvis: Option<SunVisDriver>,
+    /// The frame clock in seconds of sim time ([`VoxelGpuSink::set_clock`]).
+    clock_s: f64,
     /// The operator's viewer, fed from this renderer's own readback.
     web: Option<(WebSink, f64)>,
     web_raster: Option<cube_proto::Raster>,
@@ -193,6 +198,11 @@ impl VoxelGpuSink {
             founding_sky: None,
             founding_since: None,
             awaiting_light: false,
+            sunvis: params
+                .effects
+                .volume_on(params.lit)
+                .then(|| SunVisDriver::new(f64::from(cfg.light.volumetric_rebake_s))),
+            clock_s: 0.0,
             web: None,
             web_raster: None,
             web_last: None,
@@ -260,8 +270,16 @@ impl VoxelGpuSink {
         let started = Instant::now();
         let p = self.renderer.params();
         let slow = self.packer.prepare(view, flora, fauna);
+        if let Some(sv) = &mut self.sunvis {
+            let packer = &self.packer;
+            let snapshot = || {
+                let canopy = packer.light.as_ref().map(|l| &l.canopy);
+                Snapshot::of(view, &packer.stands, &packer.animals, canopy)
+            };
+            sv.after_pack(self.clock_s, p.sun, snapshot, &mut self.renderer);
+        }
         if self.awaiting_light {
-            if self.packer.light_pending() {
+            if self.light_pending() {
                 self.pack_ms += (Instant::now() - started).as_secs_f64() * 1e3;
                 return false;
             }
@@ -304,6 +322,7 @@ impl VoxelGpuSink {
     /// The weather eases on it (`cubarium_gpu::weather`); a preview
     /// ([`Self::set_weather_preview`]) sets the weather here, every frame, from its script.
     pub fn set_clock(&mut self, tick: u64, fraction: f64) {
+        self.clock_s = (tick as f64 + fraction) / f64::from(cubarium_voxel::TICK_HZ);
         if let Some((preview, start)) = &mut self.weather_preview {
             let hz = f64::from(cubarium_voxel::TICK_HZ);
             let now = (tick as f64 + fraction) / hz;
@@ -347,7 +366,24 @@ impl VoxelGpuSink {
     /// Always false in the flat tier. A capture that must show the finished light stages
     /// again until this is false.
     pub fn light_pending(&self) -> bool {
-        self.packer.light_pending()
+        self.packer.light_pending() || self.sunvis.as_ref().is_some_and(|s| s.pending())
+    }
+
+    /// Capture-only: point the lit tier's sun somewhere else (normalised; at or below the
+    /// horizon, no sun), as a moving sun would. The light shafts' volume follows it by
+    /// rebaking (`[light] volumetric_rebake_s`).
+    pub fn set_sun(&mut self, sun: [f32; 3]) -> Result<()> {
+        let mut params = self.renderer.params();
+        params.sun = sun_direction(sun);
+        self.renderer.set_params(params)
+    }
+
+    /// The light shafts' bakes so far: how many, their mean wall time in milliseconds, how
+    /// many were skipped as unchanged, and the threads a bake runs on.
+    pub fn sunvis_bakes(&self) -> Option<(u64, f64, u64, usize)> {
+        self.sunvis.as_ref().map(|s| {
+            (s.baked, s.bake_ms / s.baked.max(1) as f64, s.unchanged, s.threads)
+        })
     }
 
     /// The lit tier's emitting voxels in the last pack, with their emissive colours in
@@ -451,6 +487,9 @@ impl VoxelGpuSink {
             && let Some(since) = self.founding_since
         {
             self.pulse(since.elapsed().as_secs_f64())?;
+        }
+        if let Some(sv) = &mut self.sunvis {
+            sv.frame(self.clock_s, self.renderer.params().sun, &mut self.renderer);
         }
         let started = Instant::now();
         let ms = self.target.draw(&self.gpu, &mut self.renderer, ())?;
@@ -562,6 +601,12 @@ impl VoxelGpuSink {
                 run,
                 self.frames,
                 all.line(run, &self.gpu.name),
+            );
+        }
+        if let Some((n, ms, same, threads)) = self.sunvis_bakes() {
+            eprintln!(
+                "cubarium voxel --sink gpu: sun-visibility volume baked {n} times, \
+                 {ms:.1} ms each on {threads} threads ({same} rebakes skipped as unchanged)"
             );
         }
         if self.packer.style_overflow > 0 {
@@ -1228,6 +1273,16 @@ pub fn params_of(cfg: &VoxelConfig, proj: Projection, roof_from_texture: bool) -
             crate::voxel::BloomStyle::Blocky => cubarium_gpu::bloom::BloomStyle::Blocky,
         },
         debug_flow: false,
+        effects: cubarium_gpu::sunvis::Effects {
+            shadows: cfg.light.shadows,
+            reflections: cfg.light.reflections,
+            volumetric: cfg.light.volumetric,
+            glow: cfg.light.emission,
+            ao: cfg.light.ao > 0.0,
+            density: cfg.light.volumetric_density,
+            falloff: cfg.light.volumetric_falloff,
+            glow_weight: cfg.light.volumetric_glow,
+        },
         day_sky: match cfg.light.day_sky {
             crate::voxel::DaySky::Warm => cubarium_gpu::weather::DaySky::Warm,
             crate::voxel::DaySky::Mint => cubarium_gpu::weather::DaySky::Mint,

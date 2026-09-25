@@ -28,6 +28,19 @@ and he can veto any of it.
    temperature, time of day and so on, "according to the climate preset and estimates
    from nature / what works for our ecology".
 7. **The placeholder visuals get real effort**: "dont be afraid to use shaders" (WX2).
+8. **On a short day, weather runs faster than nature, but not 12× faster** (later the
+   same day): "10-20 minutes could be long … for a 2hr cycle, we might want weather
+   conditions to cycle relatively faster (maybe not 12x faster but something)". See
+   *Weather speed*.
+9. **Storms that make streams** are an exploratory notion, "unless theres a viable path".
+   See *Storm streams* under Packages. Then, once the budget was clear: "lets make the
+   flow change happen during the storm and then fall off over the next 2-3 minutes after
+   the storm". This is the **stream swell**, now part of WX1.
+10. **Checkpoint 1's look:** "day/night looks amazing … the sunsets - perfect. yes we need
+    to fix the skybox to look like its daytime. the nighttime one is good, but make the
+    stars brighter, with variance, and have some twinkle, and probably the brightest ones
+    affected by bloom (unsure on that - if it is, it should be very subtle)". This is
+    WX2 checkpoint 1b.
 
 ## Why (measured, main 86e5ed6, eidolon, heuristic founders)
 
@@ -141,17 +154,33 @@ events per simulated hour:
 | mode | λmax /h | rh50 | width | g_aft | g_cool | g_front | rate (× R₀) | stops at RH | longest |
 |---|---|---|---|---|---|---|---|---|---|
 | drizzle | 1.5 | 0.93 | 0.03 | −0.8 | 1.0 | 0.5 | 0.1 | 0.8 | 90 min |
-| shower | 2.0 | 1.00 | 0.04 | 1.0 | 0.5 | 1.0 | 1.0 | 0.7 | 15 min |
-| downpour | 1.5 | 1.15 | 0.04 | 3.0 | 0.5 | 3.0 | **calibrate** (start 1.5) | 0.5 | 30 min |
+| shower | 2.0 | 1.00 | 0.04 | 1.0 | 0.5 | 1.0 | 1.0 | 0.7 | 30 min |
+| downpour | 1.5 | 1.15 | 0.04 | 3.0 | 0.5 | 3.0 | 2.5 (≥ 2) | 0.5 | 50 min |
 
-- **The downpour rate is the one number known to need work.** At a terrarium capacity of
-  ~6.5 m³ and 2.5 R₀ (0.4 m³/min per R₀ on 192 m²), a downpour empties 1.25 → 0.5 in
-  about 5 min. A storm should last 10–30 min, so the rate must come down. The drawn
-  intensity follows the mode, not the rate alone, so a storm still reads as the heaviest
-  rain.
+- **Storms stay short and intense.** At a terrarium capacity of ~6.5 m³ and 2.5 R₀
+  (0.4 m³/min per R₀ on 192 m²), a downpour empties 1.25 → 0.5 in about 5 min. That is
+  about right for a 2 h day (see *Weather speed*). Keep the downpour at ≥ 2 R₀; do not
+  lower it to stretch storms. Heavy, short storms are also what could feed streams.
+- The "longest" column is in **nature minutes**, divided by the weather speed: 18, 6 and
+  10 min on the default 2 h day.
 - Placement is unchanged: even over every cell open to the sky, with the existing
   reserve, spread and refund, and the ledger exact.
 - The seed bank's end-of-shower flush fires at the end of every event.
+
+### Weather speed
+
+`weather_speed` in `[world.climate]`, default `"auto"`: `(24 h / cycle length)^0.65`.
+That is **5× nature on a 2 h day**, and 1 on a 24 h cycle and in `local` mode (`off`
+uses `length_min`).
+
+- **Divided by it** (nature values in the preset): the events' longest durations, the
+  fog and rain-cooling time constants, a front's ramp and recovery, the drift's time
+  scale, and the 30 min front window. The hazards' `λmax` are multiplied by it.
+- **Tied to the cycle** (fully compressed): the diurnal temperature, the afternoon bump,
+  the dawn fog window.
+- **Not scaled:** the dry gap (Wrysk's number, being measured), the lightning interval
+  (a visual rhythm), and the rain rates (physical).
+- Targets on the 2 h day: downpour 5–10 min, shower 2–6 min, drizzle 5–20 min.
 
 ### The dry gap, and the metrics to judge it
 
@@ -233,6 +262,19 @@ and `VoxelView::weather` carries one per tick:
     round needs one anyway).
   - Starting picks: browsers diurnal, shredders nocturnal, lanternjaw nocturnal, bellwing
     diurnal. After WX1.
+- **Stream swell: decided, part of WX1** (see *Brief WX1 addendum*). The rain budget
+  cannot pay for a visible swell: one storm is ~5 m³, while the desk terrarium's stream is
+  a groundwater loop at 8 L/s (~29 m³/h). So the storm turns up the loop instead.
+- **Storm streams** (background). Soil takes water at
+  `K = 0.2 · 0.35 · 0.25 = 0.0175 m/s`, about 500× R₀, so rain on soil never runs off;
+  only rock (5e-6 m/s) sheds it. Two paths:
+  - **Stream swell** (cheap, O(1), conserved): a linear "upstream catchment" reservoir
+    takes a share of each event's rain and drains through the spring cell over ~10–20
+    min. The existing stream and its falls swell after a storm, and foam follows.
+  - **Storm runoff** (a probe first): a surface infiltration cap on the top soil face,
+    near R₀, so showers soak in and downpours run off as sheets that collect in low
+    ground and reach the lake. Whether it reads as streams depends on the terrain having
+    channels. It is also a hydrology rule change (plant water, lake level, solver cost).
 - **WX5: more climates** (later), when there are species for them.
 - **WX6: local weather feed** (someday): a `WeatherSource` that sets temperature and turns
   real rain into a mode.
@@ -303,6 +345,27 @@ and volume.
 **Not yours:** transpiration, WX3, WX4, anything under `crates/cubarium-gpu` or
 `crates/cubarium/src/sink`.
 
+### Brief WX1 addendum: the stream swell
+
+- **Flow:** while it rains, the spring's flow rises to `reentry_m3_per_s · (1 + s)`.
+  - `s` relaxes toward `storm_stream_gain · clamp(rain_rate / downpour_rate, 0, 1)` with
+    a 45 s time constant.
+  - After the event ends, it falls back to 0 with a 50 s time constant, so it is ~95 %
+    gone in 2.5 min.
+  - These time constants are Wrysk's numbers: not scaled by the weather speed.
+- **Gain:** `storm_stream_gain` in `[world.climate]`, 2.0 for tropical_jungle (3× the flow
+  at a downpour's peak). Wrysk judges it from the GIF.
+- **Who pays:** the store the stream already draws from, above the floor it already
+  respects. That is the aquifer for groundwater streams (the terrariums; the lake drain
+  returns it) and the atmosphere store for the default rings. The ledger stays exact.
+- **Census:** `stream_m3_s`.
+- **Test:** the swell rises during a forced downpour, is ≤ 5 % of its peak 150 s after
+  the event ends, and the residual stays 0.
+- **Dev flag:** `--weather-force MODE` starts that event at once, for captures.
+- **Evidence:** one side-by-side real-time GIF of the desk terrarium's stream and falls
+  through a forced downpour and the 3 min after, at gain 0, 2 and 4. Capture headless
+  only. Make it with ffmpeg: palettegen, `paletteuse=dither=none`, `-loop 0`.
+
 ---
 
 ## Brief WX2: weather and day/night visuals
@@ -317,7 +380,11 @@ Wrysk and the art direction. This is effortful placeholder work, not a stage-2 d
   at a glance);
 - the presentation plan, `design/handoffs/presentation-plan-2026-09-24.md` (lit tier, sun
   in the front hemisphere, bloom, lit water with rain rings);
-- the pinned `crates/cubarium-voxel/src/weather.rs`.
+- the pinned `crates/cubarium-voxel/src/weather.rs`;
+- presentation plan §V (volumetric light, in flight in another worktree). V builds the
+  sun-visibility volume and in-scatter, and exposes `airDensity(p)` and `sunInAir(p)` for
+  your fog. It keys its rebake off the sun direction the sink hands the renderer each
+  frame, which is how your moving sun reaches it.
 
 **Where:**
 - `crates/cubarium-gpu/shaders/` (`voxel.frag`, `scene.glsl`, `background.frag`, the bloom
@@ -363,7 +430,8 @@ Wrysk and the art direction. This is effortful placeholder work, not a stage-2 d
    - **Keep it calm:** a moderate peak, and never more than ~3 flashes a second.
    - Thunder has no sound. A delayed rumble (shake) is an open art question; leave it
      out.
-6. **Fog.** Height fog along the ground and water, thicker in low basins and over the
+6. **Fog** (checkpoint 2, built on V's `airDensity` / `sunInAir` once V merges, not a
+   second in-scatter). Height fog along the ground and water, thicker in low basins and over the
    lake, drifting noise, density from `fog`. Lit by the ambient light and the sun (it
    glows at dawn), with a halo around emitters inside it.
 7. **Optional, if the rest is done:** tops darken and gain a sheen while wet, drying over
@@ -409,6 +477,57 @@ It drives every capture without waiting on the simulation, and stays as a tool.
 and open look questions.
 
 **Not yours:** anything under `crates/cubarium-voxel` except reading `weather.rs`.
+
+## WX2 checkpoint 1b: a daytime sky, and stars
+
+On the checkpoint 1 branch (`worktree-agent-a305b95986d3f88e4`, `1aac1abb`). **Keep:**
+the dawn and dusk bands and the warm lean ("perfect"), the night light level, the
+clouds, and the terrain's noon lighting exactly as it is.
+
+1. **Daytime sky.** At full daylight the sky must read as day.
+   - **Not blue** (Wrysk: "blue sky" won't read against the purple-blue terrain). The
+     day reads through value, with hue separating sky from terrain, lightest at the
+     horizon. Three variants:
+     - **A · warm haze:** pale apricot to rose-lavender. The complement of the terrain's
+       violet, kin to the sunsets.
+     - **B · mint:** pale electric cyan to aqua-teal. Watch that it doesn't compete with
+       the water and plants.
+     - **C · lilac mist:** near-white lavender. Separation by value alone.
+   - By day, clouds are near-white with violet shadowed undersides.
+   - It blends continuously with the existing dawn/dusk band and the night sky, so
+     nothing pops.
+   - Clouds keep contrast against it (they may brighten by day).
+   - The sky only: the terrain's ambient light and sun at noon stay as they are.
+   - Give Wrysk **two or three day-sky variants** as noon stills side by side, then one
+     day GIF with the chosen default.
+2. **Stars.**
+   - Brighter, with a spread of brightness: many faint, few bright, a power-law draw.
+     Slight colour variance (bluish-white to warm).
+   - Smooth per-star twinkle, stronger for the dimmer ones and near the horizon. Each
+     star has its own phase and rate on the every-frame clock.
+   - They fade in at dusk and out at dawn with the daylight, hidden where clouds cover.
+   - The brightest few feed the bloom input **very subtly**, behind a knob (`star_bloom`,
+     small default, 0 skips it). Show it on and off.
+3. **Cost:** the sky pass only. Report lit ms at 13 px and 6 px. The flat tier stays
+   byte-identical.
+
+## Integration notes
+
+- **WX2 checkpoint 1** (`1aac1abb`, branch `worktree-agent-a305b95986d3f88e4`): day/night,
+  sky and clouds.
+  - The sky is its own lit-only pass (binding 11) because the slab walk is at its
+    occupancy limit.
+  - `VoxelRenderer::sun_direction()` is the single sun path. The moon takes that slot at
+    sunset with strength 0, so the direction jumps once there.
+  - Flat tier byte-identical; lit +0.3 ms worst case at 13 px.
+- **When V and WX2 meet:**
+  - V's sun term must be multiplied by the sun's strength (`dayL.y`) and may take
+    `sunLean` as its colour. Otherwise the shafts run at full strength at night.
+  - V's rebake must tolerate the one direction jump at sunset.
+  - A lightning term in V's in-scatter is an open item.
+- `WeatherView::CLEAR_NOON` and `legacy` give a sun elevation of 90°; the model peaks at
+  70°. WX2 rescales the drawn elevation, so either gives the same noon. WX1 sets the
+  constant to 70°.
 
 ## Not in this thread
 

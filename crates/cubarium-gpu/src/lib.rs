@@ -40,6 +40,7 @@ pub mod palette;
 pub mod present;
 pub mod render;
 pub mod scene;
+pub mod sunvis;
 pub mod synthetic;
 pub mod target;
 pub mod vk;

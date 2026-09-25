@@ -7,7 +7,8 @@
 //!     [--config config/desktop/terrarium.toml] [--set 'lighting = "lit"']... \
 //!     [--seed 1] [--ticks 0] [--state DIR] [--px 6 --px 13 | --px auto] [--textures] \
 //!     [--frames 60] [--name NAME] [--anim 12 [--anim-hz 60]] [--flow] [--rain]
-//!     [--crop NAME=X0,Y0,X1,Y1]... [--weather-preview loop|day|fixed:PHASE[,CLOUD]]
+//!     [--crop NAME=X0,Y0,X1,Y1]... [--sun-sweep DEG_PER_S] [--frame-times]
+//!     [--weather-preview loop|day|fixed:PHASE[,CLOUD]]
 //! ```
 //!
 //! The world is founded exactly as the live run founds one from a seed
@@ -23,9 +24,12 @@
 //! `--flow` writes `NAME-<px>px[-tex]-flow.png`, the lit tier's derived water flow field
 //! drawn over the water (capture-only). `--rain` draws the world as if it were raining
 //! (capture-only). Each `--crop` writes the animation's frames only as that crop,
-//! `NAME-<px>px[-tex]-CROP-anim-KK.png`, instead of whole. `--weather-preview` draws the
-//! weather from a scripted loop starting at the state's tick (the still is its first
-//! frame, the animation runs on through it). No window is ever opened.
+//! `NAME-<px>px[-tex]-CROP-anim-KK.png`, instead of whole. `--sun-sweep` turns the sun about
+//! the vertical at that many degrees a second of the animation's clock (capture-only; the
+//! light shafts rebake after it, `[light] volumetric_rebake_s`); `--frame-times` prints each
+//! animation frame's draw time and GPU split. `--weather-preview` draws the weather from a
+//! scripted loop starting at the state's tick (the still is its first frame, the animation
+//! runs on through it). No window is ever opened.
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -57,6 +61,8 @@ struct Args {
     flow: bool,
     rain: bool,
     crops: Vec<(String, [u32; 4])>,
+    sun_sweep: Option<f64>,
+    frame_times: bool,
     weather: Option<cubarium::sink::gpu::weather::WeatherPreview>,
 }
 
@@ -77,6 +83,8 @@ fn args() -> Result<Args> {
         flow: false,
         rain: false,
         crops: Vec::new(),
+        sun_sweep: None,
+        frame_times: false,
         weather: None,
     };
     let mut out = None;
@@ -101,6 +109,8 @@ fn args() -> Result<Args> {
             "--anim-hz" => a.anim_hz = Some(v()?.parse()?),
             "--flow" => a.flow = true,
             "--rain" => a.rain = true,
+            "--sun-sweep" => a.sun_sweep = Some(v()?.parse()?),
+            "--frame-times" => a.frame_times = true,
             "--weather-preview" => a.weather = Some(v()?.parse()?),
             "--crop" => {
                 let s = v()?;
@@ -295,8 +305,24 @@ fn capture(
         / a.anim_hz.unwrap_or(f64::from(cfg.light.water_hz)).max(1e-3);
     for k in 0..a.anim {
         let t = f64::from(k) * per_step;
+        if let Some(rate) = a.sun_sweep {
+            let th = (rate * t / f64::from(cubarium_voxel::TICK_HZ)).to_radians() as f32;
+            let [x, y, z] = cfg.light.sun;
+            sink.set_sun([x * th.cos() - z * th.sin(), y, x * th.sin() + z * th.cos()])?;
+        }
         sink.set_clock(tick + t.floor() as u64, t.fract());
+        let (_, before) = sink.gpu_stage_totals();
+        let drawn = Instant::now();
         sink.render()?;
+        if a.frame_times {
+            let ms = drawn.elapsed().as_secs_f64() * 1e3;
+            let (_, after) = sink.gpu_stage_totals();
+            println!(
+                "{tag}: frame {k}: draw {ms:.2} ms, GPU upload {:.3} + slab walk {:.3} ms",
+                after[0] - before[0],
+                after[1] - before[1],
+            );
+        }
         let rgba = sink.read_raster()?;
         let w = a.anim.saturating_sub(1).max(9).to_string().len();
         if a.crops.is_empty() {
@@ -335,6 +361,9 @@ fn capture(
     }
     let (pack1, _) = sink.draw_split();
     let (frames1, stages1) = sink.gpu_stage_totals();
+    if let Some((n, ms, same, threads)) = sink.sunvis_bakes() {
+        println!("{tag}: sun-visibility volume: {n} bakes, {ms:.1} ms each on {threads} threads, {same} unchanged");
+    }
     let n = (frames1 - frames0).max(1) as f64;
     println!(
         "{tag}: {}x{} — pack {:.3} ms/tick, GPU upload {:.3} + slab walk {:.3} + present {:.3} ms/frame \

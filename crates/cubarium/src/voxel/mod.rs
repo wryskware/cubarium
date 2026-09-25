@@ -255,6 +255,13 @@ pub enum Lighting {
 /// water_glint = 0.6    # sun-coloured highlight on sunlit ripple lines tilted sunward (0: none)
 /// water_rain_rings = 0.5 # rings on open-sky water while it rains (0: none)
 /// water_highlight = 0.5  # glints and rain rings: 0 palette colour .. 1 white
+/// shadows = true       # the sun march (false: every face turned to the sun is sunlit)
+/// reflections = true   # the water's reflection march (false: no reflection)
+/// volumetric = false   # light shafts: sunlit and glowing air scatters light (package V)
+/// volumetric_density = 0.03  # lit air's in-scatter a voxel of path, at the floor
+/// volumetric_falloff = 12.0  # voxels up over which the air thins by e
+/// volumetric_glow = 1.0      # the emitters' light in the air, times the glow volume
+/// volumetric_rebake_s = 60.0 # the sun-visibility volume's rebake, at most once this often
 /// day_sky = "warm"     # the lit sky by day: "warm", "mint" or "lilac" (interim variants)
 /// star_bloom = 0.15    # the brightest stars' share into the bloom (0: none)
 /// ```
@@ -348,6 +355,28 @@ pub struct LightConfig {
     /// surface; both near the lake's own cyan) toward white, 0 to 1. 0.5 by default
     /// (Wrysk, 2026-09-24, after 0 / 0.7 / 0.7-stronger clips: "just under middle. maybe 50%?").
     pub water_highlight: f32,
+    /// The sun march (`voxel.frag`'s `sunReaches`). Off, its cost is gone: no cast
+    /// shadows, and every face turned toward the sun takes the sunlit term.
+    pub shadows: bool,
+    /// The water's reflection march. Off, its cost is gone and the water reflects nothing.
+    pub reflections: bool,
+    /// Light shafts (package V): the lit tier's open air scatters the sun where the sun
+    /// reaches it (the sun-visibility volume, `sink::gpu::sunvis`) and the emitters' glow,
+    /// toward the camera. Off, the volume is never built and the shader never marches.
+    pub volumetric: bool,
+    /// How much light a voxel of view path through fully sunlit air at the world's floor
+    /// scatters toward the camera, as a fraction of the palette's light colour.
+    pub volumetric_density: f32,
+    /// Voxels up over which the air's density falls by a factor of e: the air is thicker
+    /// low down.
+    pub volumetric_falloff: f32,
+    /// What the emitters' glow (the lit tier's glow volume) scatters in the air, per unit of
+    /// density, relative to full sun. `0` leaves the glow out.
+    pub volumetric_glow: f32,
+    /// Seconds (on the frame clock) between two bakes of the sun-visibility volume, at
+    /// most: a rebake starts only when the sun has moved or the world has changed, and the
+    /// new volume fades in over this long.
+    pub volumetric_rebake_s: f32,
     /// The lit tier's daytime sky (WX2 checkpoint 1b, interim variants for Wrysk to choose
     /// between): `"warm"` (apricot horizon, rose-lavender zenith), `"mint"` (mint horizon,
     /// aqua-teal zenith) or `"lilac"` (a near-white lavender haze).
@@ -392,6 +421,13 @@ impl Default for LightConfig {
             water_glint: 0.6,
             water_rain_rings: 0.5,
             water_highlight: 0.5,
+            shadows: true,
+            reflections: true,
+            volumetric: false,
+            volumetric_density: 0.03,
+            volumetric_falloff: 12.0,
+            volumetric_glow: 1.0,
+            volumetric_rebake_s: 60.0,
             day_sky: DaySky::Warm,
             star_bloom: cubarium_gpu::weather::STAR_BLOOM_DEFAULT,
         }
@@ -1004,10 +1040,6 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         Some(path) => format!("the `[world]` in {}", path.display()),
         None => "the built-in world defaults".to_string(),
     })?;
-    // Before any pool exists and before the thread count is read, so both follow it.
-    if !args.pin_loop && !args.all_chiplets {
-        chiplet::keep_to_one_chiplet();
-    }
     if args.textures {
         cfg.textures = true;
     }
@@ -3525,7 +3557,6 @@ mod tests {
             every: 30,
             fps: 60,
             pin_loop: false,
-            all_chiplets: false,
             web_port: 7393,
             gpu_target: None,
             gpu_capture: None,
@@ -4313,7 +4344,6 @@ mod tests {
             every: 30,
             fps: 60,
             pin_loop: false,
-            all_chiplets: false,
             web_port: 7393,
             gpu_target: None,
             gpu_capture: None,
@@ -4366,7 +4396,6 @@ mod tests {
             every: 30,
             fps: 60,
             pin_loop: false,
-            all_chiplets: false,
             web_port: 7393,
             gpu_target: None,
             gpu_capture: None,

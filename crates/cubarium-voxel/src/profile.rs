@@ -82,10 +82,12 @@ pub enum Phase {
     /// The overlapped tick's planned drink withdrawn from the live world, beside the
     /// animal step.
     Settle,
+    /// The plant layer's crown cache and reach index, refreshed at the end of its step.
+    Crowns,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 44] = [
+    pub const ALL: [Phase; 45] = [
         Phase::WorldStep,
         Phase::Begin,
         Phase::Rain,
@@ -130,6 +132,7 @@ impl Phase {
         Phase::WaterLeg,
         Phase::ReadCopy,
         Phase::Settle,
+        Phase::Crowns,
     ];
     pub const COUNT: usize = Phase::ALL.len();
 
@@ -195,6 +198,7 @@ impl Phase {
             Phase::WaterLeg => "water leg (total, overlapped tick)",
             Phase::ReadCopy => "  water copy-back from the read copy (part of the water leg)",
             Phase::Settle => "drink withdrawal (overlapped tick, beside the animal step)",
+            Phase::Crowns => "  crown cache refresh",
         }
     }
 }

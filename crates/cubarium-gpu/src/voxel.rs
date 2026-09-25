@@ -609,6 +609,9 @@ pub struct VoxelParams {
     /// Capture-only: draw the water's derived flow field instead of the water (never
     /// set by the live display).
     pub debug_flow: bool,
+    /// The lit tier's effect switches and the light shafts' numbers ([`crate::sunvis`]).
+    /// The switches are fixed for a renderer's life; the numbers are not.
+    pub effects: crate::sunvis::Effects,
     /// The lit tier's daytime sky (`[light] day_sky`, [`crate::weather::DaySky`]).
     pub day_sky: crate::weather::DaySky,
     /// How much of the brightest stars' light feeds the bloom (`[light] star_bloom`; 0
@@ -817,6 +820,7 @@ impl VoxelParams {
                 self.rain_rings.max(0.0),
                 self.highlight.clamp(0.0, 1.0),
             ],
+            vol: self.effects.uniform(1.0),
             // The sun's share of a rung over the ambient level (1 and the smooth share at a
             // clear noon: exactly the walk's old constants).
             day_k: [
@@ -920,6 +924,8 @@ struct VoxelUniforms {
     clock: [f32; 4],
     /// The lit tier's water details: foam, glint, rain rings, highlight.
     water_m: [f32; 4],
+    /// The light shafts: density, glow weight, falloff, the volume's fade.
+    vol: [f32; 4],
     /// The weather and the time of day (`crate::weather::Look`): ambient level, sun
     /// strength, stars, twilight band.
     day_k: [f32; 4],
@@ -1217,6 +1223,9 @@ pub struct VoxelRenderer {
     glow_view: vk::ImageView,
     /// The glow volume's trilinear sampler: wraps in x like the strip, clamps in y and z.
     linear: vk::Sampler,
+    /// The light shafts' sun-visibility volume (binding 10); a 1-texel stand-in unless the
+    /// lit tier has `volumetric` on.
+    sunvis: crate::sunvis::SunVisVolume,
     /// The lit tier's emission attachment and bloom passes ([`crate::bloom`]); `None` in
     /// the flat tier, whose raster pass has the one attachment it always had.
     bloom: Option<Bloom>,
@@ -1636,6 +1645,7 @@ impl VoxelRenderer {
             sampled(7),
             sampled(8),
             sampled(9),
+            sampled(10),
             sampled(11),
         ];
         let set_layout = unsafe {
@@ -1691,6 +1701,17 @@ impl VoxelRenderer {
             .sampler(linear)
             .image_view(glow_view)
             .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
+        let sunvis = crate::sunvis::SunVisVolume::new(
+            gpu,
+            params.effects.volume_on(params.lit),
+            params.width,
+            params.height,
+            params.depth,
+        )?;
+        let isv = [vk::DescriptorImageInfo::default()
+            .sampler(linear)
+            .image_view(sunvis.view)
+            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
         unsafe {
             d.update_descriptor_sets(
                 &[
@@ -1708,6 +1729,7 @@ impl VoxelRenderer {
                     sampled_write(set, 7, &isk),
                     sampled_write(set, 8, &ica),
                     sampled_write(set, 9, &igl),
+                    sampled_write(set, 10, &isv),
                     sampled_write(set, 11, &ibd),
                 ],
                 &[],
@@ -1726,15 +1748,20 @@ impl VoxelRenderer {
             .context("the voxel fragment shader")?;
         // `voxel.frag`'s `LIT` (constant_id 0, a 32-bit bool): the flat tier's pipeline is
         // specialised with it off, so the lit branches are dead code there and the panel's
-        // GPU runs the flat shader code alone.
-        let lit = u32::from(params.lit);
-        let entries = [vk::SpecializationMapEntry::default()
-            .constant_id(0)
-            .offset(0)
-            .size(4)];
+        // GPU runs the flat shader code alone. The lit effects' switches follow it
+        // (`crate::sunvis::Effects::spec_constants`), all off in the flat tier.
+        let constants = params.effects.spec_constants(params.lit);
+        let entries: Vec<_> = (0..crate::sunvis::SPEC_CONSTANTS)
+            .map(|i| {
+                vk::SpecializationMapEntry::default()
+                    .constant_id(i)
+                    .offset(i * 4)
+                    .size(4)
+            })
+            .collect();
         let spec = vk::SpecializationInfo::default()
             .map_entries(&entries)
-            .data(bytemuck::bytes_of(&lit));
+            .data(bytemuck::cast_slice(&constants));
         let pipeline = crate::render::fullscreen_pipeline_n(
             d,
             raster_pass,
@@ -1793,6 +1820,7 @@ impl VoxelRenderer {
             glow_memory,
             glow_view,
             linear,
+            sunvis,
             bloom,
             staging,
             uniform_stride,
@@ -1835,12 +1863,13 @@ impl VoxelRenderer {
         let fixed = |p: &VoxelParams| {
             (
                 p.s, p.rise, p.base, p.width, p.height, p.depth, p.raster_w, p.raster_h, p.lit,
+                p.effects.spec_constants(p.lit),
             )
         };
         if fixed(&params) != fixed(&self.params) {
             bail!(
-                "the projection, the world's extent and the lighting tier are fixed for a \
-                 VoxelRenderer"
+                "the projection, the world's extent, the lighting tier and its effect \
+                 switches are fixed for a VoxelRenderer"
             );
         }
         self.params = params;
@@ -1918,6 +1947,31 @@ impl VoxelRenderer {
     /// clock only while it does.
     pub fn set_water_visible(&mut self, visible: bool) {
         self.water_visible = visible;
+    }
+
+    /// The light shafts' sun-visibility volume ([`crate::sunvis::SunVisVolume`]): whether
+    /// it takes new data now, and how many bytes.
+    pub fn sunvis_accepts(&self) -> Option<usize> {
+        self.sunvis.accepts().then(|| self.sunvis.bytes())
+    }
+
+    /// New sun-visibility data (the bake fading out in red, in green the one fading in),
+    /// starting at `fade`. False when refused ([`VoxelRenderer::sunvis_accepts`]).
+    pub fn put_sunvis(&mut self, rg: &[u8], fade: f32) -> bool {
+        let put = self.sunvis.put(rg, fade);
+        if put {
+            self.raster_current = false;
+            self.version += 1;
+        }
+        put
+    }
+
+    /// Move the volume's fade; the picture redraws when the step shows.
+    pub fn set_sunvis_fade(&mut self, fade: f32) {
+        if self.sunvis.set_fade(fade) {
+            self.raster_current = false;
+            self.version += 1;
+        }
     }
 
     /// Whether a pack has a staging buffer to go into. False while every one of them is
@@ -1998,6 +2052,7 @@ impl VoxelRenderer {
     pub fn retire_frame(&mut self) {
         if let Some(frame) = self.ring.retire() {
             self.last_done = Some(frame.slot);
+            self.sunvis.retired(frame.slot);
         }
     }
 
@@ -2005,7 +2060,11 @@ impl VoxelRenderer {
     /// comes back and its upload is owed again — without this the world it carried would
     /// never reach the GPU, because recording cleared the dirty flag.
     pub fn discard_frame(&mut self) {
-        if let Some(frame) = self.ring.discard()
+        let frame = self.ring.discard();
+        if let Some(f) = frame {
+            self.sunvis.discarded(f.slot);
+        }
+        if let Some(frame) = frame
             && frame.staging.is_some()
         {
             self.dirty = true;
@@ -2071,15 +2130,14 @@ impl VoxelRenderer {
         };
         // The raster already holds this picture unless something changed it, and the
         // upload only ever comes with a change.
-        let redraw = !self.raster_current;
+        let redraw = !self.raster_current || self.sunvis.owed();
         self.raster_current = true;
         self.redrew = redraw;
         // This frame's own uniform block, written now and read by the GPU when it runs:
         // `set_params` and `update_weather` only moved `self.params`.
-        self.uniforms.write_bytes_at(
-            self.uniform_stride * frame.slot as u64,
-            &[self.params.uniforms(self.tex_mask, self.vine_on, self.clock, &self.look)],
-        );
+        let mut block = self.params.uniforms(self.tex_mask, self.vine_on, self.clock, &self.look);
+        block.vol[3] = self.sunvis.fade();
+        self.uniforms.write_bytes_at(self.uniform_stride * frame.slot as u64, &[block]);
         // and its own four timestamps.
         let q = frame.slot as u32 * QUERY_SLOTS;
 
@@ -2172,6 +2230,9 @@ impl VoxelRenderer {
                         vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                     );
                 }
+            }
+            if redraw {
+                self.sunvis.record_upload(d, cb, frame.slot);
             }
             d.cmd_write_timestamp(
                 cb,
@@ -2346,6 +2407,7 @@ impl VoxelRenderer {
                 buffer.destroy(gpu);
             }
             self.uniforms.destroy(gpu);
+            self.sunvis.destroy(gpu);
             for (view, image, memory) in [
                 (self.voxel_view, self.voxel_image, self.voxel_memory),
                 (self.roof_view, self.roof_image, self.roof_memory),
@@ -2505,7 +2567,7 @@ fn align_to(n: u64, to: u64) -> u64 {
     (n + to - 1) & !(to - 1)
 }
 
-fn image_3d(
+pub(crate) fn image_3d(
     gpu: &Gpu,
     width: u32,
     height: u32,
@@ -2548,7 +2610,7 @@ fn image_3d(
     Ok((image, memory))
 }
 
-fn view_3d(gpu: &Gpu, image: vk::Image, format: vk::Format) -> Result<vk::ImageView> {
+pub(crate) fn view_3d(gpu: &Gpu, image: vk::Image, format: vk::Format) -> Result<vk::ImageView> {
     Ok(unsafe {
         gpu.device.create_image_view(
             &vk::ImageViewCreateInfo::default()
@@ -2586,7 +2648,7 @@ fn sampled_write<'a>(
         .image_info(info)
 }
 
-/// The lit tier's sky pass: `voxel.frag` specialised `SKY` (constant_id 1) into an image of
+/// The lit tier's sky pass: `voxel.frag` specialised `SKY` (constant_id 6) into an image of
 /// its own, the slab walk's backdrop (package WX2). The same shader, so the sky shares the
 /// walk's uniforms and helpers; its own pipeline, so the clouds' noise costs the walk no
 /// occupancy. In the flat tier the image is a single texel, bound so the descriptor set
@@ -2646,11 +2708,13 @@ impl Backdrop {
         fs: vk::ShaderModule,
     ) -> Result<Backdrop> {
         let d = &gpu.device;
-        // LIT and SKY, both 32-bit bools.
+        // LIT (0) and SKY (6), both 32-bit bools; 1-5 are the walk's effect switches
+        // (`crate::sunvis::Effects`), left at their shader defaults since the sky draws none
+        // of them.
         let flags = [1u32, 1u32];
         let entries = [
             vk::SpecializationMapEntry::default().constant_id(0).offset(0).size(4),
-            vk::SpecializationMapEntry::default().constant_id(1).offset(4).size(4),
+            vk::SpecializationMapEntry::default().constant_id(6).offset(4).size(4),
         ];
         let spec = vk::SpecializationInfo::default()
             .map_entries(&entries)
@@ -2768,6 +2832,7 @@ pub(crate) mod tests {
             bloom_radius: 2.0,
             bloom_style: crate::bloom::BloomStyle::Smooth,
             debug_flow: false,
+            effects: crate::sunvis::Effects::default(),
             day_sky: crate::weather::DaySky::Warm,
             star_bloom: 0.0,
         }

@@ -65,6 +65,9 @@ pub use target::{GpuTarget, GpuTargetKind};
 #[path = "gpu/light.rs"]
 mod light;
 
+#[path = "gpu/sunvis.rs"]
+mod sunvis;
+
 #[path = "gpu/wayland.rs"]
 mod wayland;
 
