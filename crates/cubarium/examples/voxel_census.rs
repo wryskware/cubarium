@@ -119,6 +119,15 @@ fn main() {
         habitat::FOUNDER_COUNTS
     };
 
+    // `pin=B`: the overlapped tick's plant and animal leg on the last `B` physical cores,
+    // the water on the rest (`chiplet::split_overlap_pools`). Measurement.
+    if let Some(b) = args
+        .iter()
+        .find_map(|a| a.strip_prefix("pin=").and_then(|s| s.parse().ok()))
+    {
+        cubarium::voxel::chiplet::split_overlap_pools(b)
+            .expect("pin=B needs more than B physical cores");
+    }
     let timing = Timing {
         overlap: args
             .iter()

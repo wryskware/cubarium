@@ -180,6 +180,17 @@ impl SimConfig {
     }
 }
 
+/// Build the process's compute pool — the plant and animal leg's in-phase workers — of
+/// `threads` workers now, if it does not exist yet. [`Sim::new`] does this itself; a host
+/// that wants that pool's threads on CPUs of their own sets its thread's affinity first
+/// and calls this (a spawned thread inherits its spawner's affinity), then builds the
+/// water pool (`cubarium_voxel::water::prepare_pool`) under another.
+pub fn prepare_compute_pool(threads: usize) {
+    if threads > 1 {
+        ComputeTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(threads).build());
+    }
+}
+
 /// Set by [`set_overlap_split`]: `water << 16 | bio`, `0` unset.
 static SPLIT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
