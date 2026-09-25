@@ -6,7 +6,8 @@
 //! cargo run --release -p cubarium --example light_capture -- --out DIR \
 //!     [--config config/desktop/terrarium.toml] [--set 'lighting = "lit"']... \
 //!     [--seed 1] [--ticks 0] [--state DIR] [--px 6 --px 13 | --px auto] [--textures] \
-//!     [--frames 60] [--name NAME] [--anim 12 [--anim-hz 60]] [--flow]
+//!     [--frames 60] [--name NAME] [--anim 12 [--anim-hz 60]] [--flow] [--rain]
+//!     [--crop NAME=X0,Y0,X1,Y1]...
 //! ```
 //!
 //! The world is founded exactly as the live run founds one from a seed
@@ -20,7 +21,9 @@
 //! N frames one water animation step apart (`[light] water_hz`) from the state's tick, or
 //! `1 / --anim-hz` seconds of sim time apart (a real-time clip at that frame rate);
 //! `--flow` writes `NAME-<px>px[-tex]-flow.png`, the lit tier's derived water flow field
-//! drawn over the water (capture-only). No window is ever opened.
+//! drawn over the water (capture-only). `--rain` draws the world as if it were raining
+//! (capture-only). Each `--crop` writes the animation's frames only as that crop,
+//! `NAME-<px>px[-tex]-CROP-anim-KK.png`, instead of whole. No window is ever opened.
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -50,6 +53,8 @@ struct Args {
     anim: u32,
     anim_hz: Option<f64>,
     flow: bool,
+    rain: bool,
+    crops: Vec<(String, [u32; 4])>,
 }
 
 fn args() -> Result<Args> {
@@ -67,6 +72,8 @@ fn args() -> Result<Args> {
         anim: 0,
         anim_hz: None,
         flow: false,
+        rain: false,
+        crops: Vec::new(),
     };
     let mut out = None;
     let mut it = std::env::args().skip(1);
@@ -89,6 +96,20 @@ fn args() -> Result<Args> {
             "--anim" => a.anim = v()?.parse()?,
             "--anim-hz" => a.anim_hz = Some(v()?.parse()?),
             "--flow" => a.flow = true,
+            "--rain" => a.rain = true,
+            "--crop" => {
+                let s = v()?;
+                let (name, rect) = s.split_once('=').context("--crop NAME=X0,Y0,X1,Y1")?;
+                let n: Vec<u32> = rect
+                    .split(',')
+                    .map(str::parse)
+                    .collect::<Result<_, _>>()
+                    .with_context(|| format!("--crop {s:?}"))?;
+                let [x0, y0, x1, y1] = n[..] else {
+                    bail!("--crop NAME=X0,Y0,X1,Y1, not {s:?}");
+                };
+                a.crops.push((name.to_string(), [x0, y0, x1, y1]));
+            }
             _ => bail!("unexpected argument {k}"),
         }
     }
@@ -224,6 +245,7 @@ fn capture(
             ..VoxelGpuSinkOptions::default()
         },
     )?;
+    sink.set_force_rain(a.rain);
     // The lit tier's sky plane is computed off this thread: pack until it has arrived,
     // so the picture shows the finished light.
     let started = Instant::now();
@@ -270,8 +292,22 @@ fn capture(
         sink.set_clock(tick + t.floor() as u64, t.fract());
         sink.render()?;
         let rgba = sink.read_raster()?;
-        let path = a.out.join(format!("{tag}-anim-{k:0w$}.png", w = if a.anim > 100 { 3 } else { 2 }));
-        cubarium_gpu::target::write_png(&path, p.raster_w, p.raster_h, &rgba)?;
+        let w = if a.anim > 100 { 3 } else { 2 };
+        if a.crops.is_empty() {
+            let path = a.out.join(format!("{tag}-anim-{k:0w$}.png"));
+            cubarium_gpu::target::write_png(&path, p.raster_w, p.raster_h, &rgba)?;
+        }
+        for (name, [x0, y0, x1, y1]) in &a.crops {
+            let (x1, y1) = ((*x1).min(p.raster_w), (*y1).min(p.raster_h));
+            let (cw, ch) = (x1.saturating_sub(*x0), y1.saturating_sub(*y0));
+            let mut crop = Vec::with_capacity(cw as usize * ch as usize * 4);
+            for y in *y0..y1 {
+                let row = (y * p.raster_w + x0) as usize * 4;
+                crop.extend_from_slice(&rgba[row..row + cw as usize * 4]);
+            }
+            let path = a.out.join(format!("{tag}-{name}-anim-{k:0w$}.png"));
+            cubarium_gpu::target::write_png(&path, cw, ch, &crop)?;
+        }
     }
     if a.flow {
         sink.set_clock(tick, 0.0);

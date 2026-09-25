@@ -582,6 +582,13 @@ pub struct VoxelParams {
     pub ripple: f32,
     /// Cells a reflected ray is marched before it counts as sky.
     pub reflect_cells: u32,
+    /// The lit tier's water surface details (W checkpoint 2), each a strength, `0` for
+    /// none: foam along shores and where a fall meets a pool (`foam`), a highlight in the
+    /// palette's light on sunlit ripple lines tilted toward the sun (`glint`), and rings
+    /// on open-sky water while it rains (`rain_rings`).
+    pub foam: f32,
+    pub glint: f32,
+    pub rain_rings: f32,
     /// The lit tier's bloom ([`crate::bloom`]): how much of an emitter's colour its halo
     /// adds (smooth: times the blurred emission; blocky: at full step), `0` for none (the
     /// passes are skipped).
@@ -784,6 +791,12 @@ impl VoxelParams {
                 if self.debug_flow { 1.0 } else { 0.0 },
                 0.0,
             ],
+            water_m: [
+                self.foam.max(0.0),
+                self.glint.max(0.0),
+                self.rain_rings.max(0.0),
+                0.0,
+            ],
         }
     }
 }
@@ -860,6 +873,8 @@ struct VoxelUniforms {
     water_l: [f32; 4],
     /// Sim time in ticks, the water's animation step, the flow overlay flag, padding.
     clock: [f32; 4],
+    /// The lit tier's water details: foam, glint, rain rings, padding.
+    water_m: [f32; 4],
 }
 
 /// Where one tick's world is written, straight into mapped memory.
@@ -2474,6 +2489,9 @@ pub(crate) mod tests {
             reflect_gain: 6.0,
             ripple: 0.2,
             reflect_cells: 64,
+            foam: 0.0,
+            glint: 0.0,
+            rain_rings: 0.0,
             bloom: 0.0,
             bloom_radius: 2.0,
             bloom_style: crate::bloom::BloomStyle::Smooth,
@@ -2499,6 +2517,15 @@ pub(crate) mod tests {
         let smooth = |tick: u64, f: f64| FrameClock::at(tick, f, 12.0, 20.0, true).step;
         assert!((smooth(1, 0.5) - 0.9).abs() < 1e-6);
         assert!((smooth(3415, 0.5) - 1.3).abs() < 1e-3);
+    }
+
+    /// The water's surface details reach the shader's `waterM` in order (foam, glint, rain
+    /// rings), a negative strength as none.
+    #[test]
+    fn the_water_details_reach_their_uniform() {
+        let p = VoxelParams { foam: 0.6, glint: -1.0, rain_rings: 0.5, ..params() };
+        let u = p.uniforms(0, false, FrameClock::default());
+        assert_eq!(u.water_m, [0.6, 0.0, 0.5, 0.0]);
     }
 
     /// Any water at all packs to a non-zero fraction, so the presenter's "at least one

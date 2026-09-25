@@ -77,6 +77,12 @@ water_ripple = 0.2
 water_hz = 12.0
 water_smooth = true  # false: the water moves in water_hz steps instead of every frame
 water_reflect_cells = 64
+# The surface's details (lit tier), each a strength, 0 for none: foam along shores and
+# where a fall meets a pool, a highlight in the palette's light on sunlit ripple lines
+# tilted toward the sun, and rings on open-sky water while it rains.
+water_foam = 0.6
+water_glint = 0.6
+water_rain_rings = 0.5
 
 [world]
 # `cubarium_voxel::Config`. x wraps; y is up from the foundation; z runs into the habitat.

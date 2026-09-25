@@ -104,6 +104,8 @@ pub struct VoxelGpuSink {
     water_hz: f32,
     /// Whether the water moves every frame rather than in steps (`[light] water_smooth`).
     water_smooth: bool,
+    /// Capture-only: draw every staged world as if it were raining ([`Self::set_force_rain`]).
+    force_rain: bool,
     /// The sky this world is drawn under, kept while the founding frame dims it.
     founding_sky: Option<([f32; 3], [f32; 3])>,
     /// When the founding frame's pulse started, so a held founding frame keeps its phase.
@@ -183,6 +185,7 @@ impl VoxelGpuSink {
             capture: options.capture,
             water_hz: cfg.light.water_hz,
             water_smooth: cfg.light.water_smooth,
+            force_rain: false,
             founding_sky: None,
             founding_since: None,
             awaiting_light: false,
@@ -272,7 +275,7 @@ impl VoxelGpuSink {
         } else {
             0.0
         };
-        let rain_tick = if p.sky_gradient && view.is_raining() {
+        let rain_tick = if p.sky_gradient && (view.is_raining() || self.force_rain) {
             view.tick as f32
         } else {
             0.0
@@ -304,6 +307,13 @@ impl VoxelGpuSink {
         let mut params = self.renderer.params();
         params.debug_flow = on;
         self.renderer.set_params(params)
+    }
+
+    /// Capture-only: draw every world staged from now on as if it were raining (the rain
+    /// streaks, and the lit tier's rain rings), whatever its weather. Never set by the
+    /// live display.
+    pub fn set_force_rain(&mut self, on: bool) {
+        self.force_rain = on;
     }
 
     /// Whether the lit tier's sky plane for the terrain last staged is still being
@@ -1176,6 +1186,9 @@ pub fn params_of(cfg: &VoxelConfig, proj: Projection, roof_from_texture: bool) -
         reflect_gain: cfg.light.water_reflect.max(0.0),
         ripple: cfg.light.water_ripple.max(0.0),
         reflect_cells: cfg.light.water_reflect_cells,
+        foam: cfg.light.water_foam.max(0.0),
+        glint: cfg.light.water_glint.max(0.0),
+        rain_rings: cfg.light.water_rain_rings.max(0.0),
         // Nothing to bloom without emitters: the passes are skipped.
         bloom: if cfg.lighting == Lighting::Lit && cfg.light.emission {
             cfg.light.bloom.max(0.0)

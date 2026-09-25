@@ -45,6 +45,7 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
     vec4 sunK;          // lit: the unit direction toward the sun (zero: none), sun tint
     vec4 waterL;        // lit: absorption per voxel of path, reflection gain, ripple tilt, reflection cells
     vec4 clock;         // sim time in ticks (tick + the fraction elapsed), the water's animation step, -, -
+    vec4 waterM;        // lit: foam, glint, rain rings, -
 } u;
 
 // The lighting tier (`lighting = "flat" | "lit"`), fixed when the pipeline is built. The
@@ -1153,9 +1154,11 @@ const float BREEZE_MIN = 0.1;
 const float BREEZE_MAX = 0.3;
 
 // One copy of the ripple lines at world (x, z), `phase` of the way through cycle `cycle`:
-// 0 for none, else the tilt along z, signed, times the line's fade (0 to 1). A line is one
-// raster row of a top face (RISE rows a voxel of z) and part of a LINE_SEG-voxel segment.
-float rippleLine(vec2 w, vec2 flow, float phase, int cycle, int salt) {
+// x is 0 for none, else the tilt along z, signed, times the line's fade (0 to 1); y is the
+// line's glint weight, its fade times a taper from the line's middle (1) to its ends (0).
+// A line is one raster row of a top face (RISE rows a voxel of z) and part of a
+// LINE_SEG-voxel segment.
+vec2 rippleLine(vec2 w, vec2 flow, float phase, int cycle, int salt) {
     float t = phase * FLOW_CYCLE * FLOW_ADVECT;
     vec2 a = w - flow * t;
     int row = int(floor(a.y * float(RISE)));
@@ -1166,35 +1169,192 @@ float rippleLine(vec2 w, vec2 flow, float phase, int cycle, int salt) {
     float sx = a.x * float(segs) / float(W) + float(hr & 0xFFu) / 256.0;
     int seg = int(floor(sx));
     uint h = cellHash(wrapI(seg, segs), row, cycle, salt + 1);
-    if (float(h & 0xFFFFu) / 65535.0 >= LINE_DENSITY) { return 0.0; }
+    if (float(h & 0xFFFFu) / 65535.0 >= LINE_DENSITY) { return vec2(0.0); }
     uint hl = cellHash(wrapI(seg, segs), row, cycle, salt + 2);
     float life = mix(LINE_LIFE_MIN, LINE_LIFE_MAX, float(hl & 0xFFu) / 255.0);
     float age = (phase - float((hl >> 8) & 0xFFu) / 255.0 * (1.0 - life)) / life;
-    if (age <= 0.0 || age >= 1.0) { return 0.0; }
+    if (age <= 0.0 || age >= 1.0) { return vec2(0.0); }
     float fade = sin(3.14159265 * age);
     fade *= fade;
     float f = sx - float(seg);
     float mid = 0.25 + float((h >> 16) & 0xFFu) / 255.0 * 0.5;
     float halfLen = (0.1 + float((h >> 24) & 0x7Fu) / 127.0 * 0.15) * sqrt(fade);
-    if (abs(f - mid) >= halfLen) { return 0.0; }
-    return ((h & 0x80000000u) != 0u ? 1.0 : -1.0) * fade;
+    if (abs(f - mid) >= halfLen) { return vec2(0.0); }
+    float along = (f - mid) / halfLen;
+    float taper = 1.0 - along * along;
+    return vec2(((h & 0x80000000u) != 0u ? 1.0 : -1.0) * fade, fade * taper * taper);
 }
 
 // The surface normal at world (x, z) under flow `flow`: straight up, or, on a ripple line,
 // tilted along z (toward or away from the camera) by up to the ripple knob. Lines are
 // sparse, thin and horizontal; they fade in, glide with the breeze (and the flow, on
-// moving water) and fade out.
-vec3 rippleNormal(vec2 w, vec2 flow) {
+// moving water) and fade out. `glint` is the line's glint weight where it tilts toward
+// the sun (the normal leans the sun's way along z), else 0.
+vec3 rippleNormal(vec2 w, vec2 flow, out float glint) {
     float st = u.clock.y;
     float c1 = st / FLOW_CYCLE;
     float c2 = c1 + 0.5;
     // The step wraps at 2048 (`VoxelRenderer::set_clock`): 32 cycles.
-    float s = rippleLine(w, flow, fract(c1), wrapI(int(floor(c1)), 32), 60);
-    if (s == 0.0) {
+    vec2 s = rippleLine(w, flow, fract(c1), wrapI(int(floor(c1)), 32), 60);
+    if (s.x == 0.0) {
         s = rippleLine(w + vec2(0.37, 0.0), flow, fract(c2), wrapI(int(floor(c2)), 32), 62);
     }
-    if (s == 0.0) { return vec3(0.0, 1.0, 0.0); }
-    return normalize(vec3(0.0, 1.0, -s * u.waterL.z));
+    glint = 0.0;
+    if (s.x == 0.0) { return vec3(0.0, 1.0, 0.0); }
+    vec3 n = normalize(vec3(0.0, 1.0, -s.x * u.waterL.z));
+    if (n.z * u.sunK.z > 0.0) { glint = s.y; }
+    return n;
+}
+
+// --- the surface's details (W checkpoint 2) ------------------------------------------------
+//
+// Everything here moves on the water's clock (`u.clock.y`, every frame by default) and
+// fades or moves continuously: nothing appears or vanishes between two frames.
+
+float hash01(int x, int y, int z, int salt) {
+    return float(cellHash(x, y, z, salt) & 0xFFFFu) / 65535.0;
+}
+
+// Smooth value noise over the world's (x, z) plane at about `freq` lattice cells a voxel
+// (a whole number of them round the ring, so it meets itself at the seam), on noise
+// layer `layer`.
+float vnoise(vec2 w, float freq, int layer, int salt) {
+    int period = max(1, int(float(W) * freq + 0.5));
+    vec2 q = vec2(w.x * float(period) / float(W), w.y * freq);
+    vec2 i = floor(q);
+    vec2 f = q - i;
+    f = f * f * (3.0 - 2.0 * f);
+    int x0 = wrapI(int(i.x), period);
+    int x1 = wrapI(int(i.x) + 1, period);
+    int y0 = int(i.y);
+    float a = hash01(x0, y0, layer, salt);
+    float b = hash01(x1, y0, layer, salt);
+    float c = hash01(x0, y0 + 1, layer, salt);
+    float d = hash01(x1, y0 + 1, layer, salt);
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+// The same noise evolving in time: `t` layers on from the first, cross-faded (smoothstep)
+// from each layer to the next. Layers wrap at 256, so `t` must too.
+float vnoiseT(vec2 w, float freq, float t, int salt) {
+    float lt = floor(t);
+    float ft = t - lt;
+    ft = ft * ft * (3.0 - 2.0 * ft);
+    int l0 = wrapI(int(lt), 256);
+    int l1 = wrapI(int(lt) + 1, 256);
+    return mix(vnoise(w, freq, l0, salt), vnoise(w, freq, l1, salt), ft);
+}
+
+// Foam: a band about FOAM_WIDTH voxels wide along a shore (breathing between FOAM_BREATHE
+// and 1 + FOAM_BREATHE of that), and a disc PLUNGE_RADIUS voxels round where a fall meets
+// the pool. Its noise moves a layer every FOAM_STEPS animation steps (PLUNGE_STEPS where a
+// fall churns it); both divide the step's wrap of 2048 into a whole multiple of 256 layers.
+const float FOAM_WIDTH = 0.4;
+const float FOAM_BREATHE = 0.45;
+const float FOAM_STEPS = 8.0;
+const float PLUNGE_RADIUS = 1.4;
+const float PLUNGE_STEPS = 4.0;
+
+// The distance (voxels, in x and z) from surface point `p` in water cell `c` to the
+// nearest solid beside it at the surface's level (and the level over it for a brim-full
+// cell), or a large number for none: the four sides by the face between, the four corners
+// by the corner point.
+float shoreDist(ivec3 c, vec3 p, bool brim) {
+    float fx = p.x - float(c.x);
+    float fz = p.z - float(c.z);
+    float d = 9.0;
+    for (int dz = -1; dz <= 1; ++dz) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            if (dx == 0 && dz == 0) { continue; }
+            int nx = c.x + dx;
+            int nz = c.z + dz;
+            if (nz < 0 || nz >= D) { continue; }
+            if (!solidAt(nx, c.y, nz) && !(brim && solidAt(nx, c.y + 1, nz))) { continue; }
+            float ex = dx < 0 ? fx : (dx > 0 ? 1.0 - fx : 0.0);
+            float ez = dz < 0 ? fz : (dz > 0 ? 1.0 - fz : 0.0);
+            d = min(d, length(vec2(ex, ez)));
+        }
+    }
+    return d;
+}
+
+// The distance (voxels, in x and z) from surface point `p` to the nearest fall landing
+// on the pool around column (x, z) of cell `c`: a water cell at level `yp` over a cell
+// that is neither solid nor full (`fallingAt`), measured to its column's centre; a large
+// number for none.
+float plungeDist(ivec3 c, vec3 p, int yp) {
+    float d = 9.0;
+    for (int dz = -1; dz <= 1; ++dz) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            int nx = c.x + dx;
+            int nz = c.z + dz;
+            if (nz < 0 || nz >= D || freeQ(nx, yp, nz) == 0 || !fallingAt(nx, yp, nz)) {
+                continue;
+            }
+            d = min(d, length(p.xz - vec2(float(nx) + 0.5, float(nz) + 0.5)));
+        }
+    }
+    return d;
+}
+
+// The foam's cover (0 to 1) at surface point `p` of water cell `c`, `fill` pixels full.
+float foamAt(ivec3 c, vec3 p, int fill) {
+    bool brim = fill >= S;
+    float st = u.clock.y;
+    float cover = 0.0;
+    float ds = shoreDist(c, p, brim);
+    if (ds < FOAM_WIDTH * (1.0 + FOAM_BREATHE)) {
+        float t = st / FOAM_STEPS;
+        float w = FOAM_WIDTH * (FOAM_BREATHE + vnoiseT(p.xz, 1.0, t, 80));
+        float lace = smoothstep(0.3, 0.7, vnoiseT(p.xz, 3.0, t, 81));
+        cover = (1.0 - smoothstep(0.35 * w, w, ds)) * mix(0.45, 1.0, lace);
+    }
+    float dp = plungeDist(c, p, (brim ? c.y + 1 : c.y) + 1);
+    if (dp < PLUNGE_RADIUS) {
+        float churn = vnoiseT(p.xz, 3.0, st / PLUNGE_STEPS, 82);
+        cover = max(cover, (1.0 - smoothstep(0.25, PLUNGE_RADIUS, dp)) * mix(0.5, 1.0, churn));
+    }
+    return cover;
+}
+
+// Rain rings: the surface is cut into cells about RAIN_CELL voxels on a side, and in each
+// time slot of RAIN_SLOT animation steps a cell holds a drop with chance RAIN_CHANCE, at a
+// random place and moment in the slot. Its ring grows to RING_RADIUS voxels over RING_LIFE
+// of the slot, easing out, fading in fast and out slowly. Two copies, offset half a cell
+// and half a slot, overlap. A ring stays inside its cell, so a pixel asks only its own.
+const float RAIN_CELL = 2.0;
+const float RAIN_SLOT = 8.0;
+const float RAIN_CHANCE = 0.55;
+const float RING_RADIUS = 0.6;
+const float RING_LIFE = 0.7;
+
+float rainRing(vec2 w, int copy) {
+    float tt = u.clock.y / RAIN_SLOT + 0.5 * float(copy);
+    // The step wraps at 2048: 256 slots.
+    int slot = wrapI(int(floor(tt)), 256);
+    float phase = fract(tt);
+    int cellsX = max(1, int(float(W) / RAIN_CELL + 0.5));
+    float cellW = float(W) / float(cellsX);
+    vec2 g = vec2(w.x / cellW, w.y / RAIN_CELL) + 0.5 * float(copy);
+    ivec2 cell = ivec2(floor(g));
+    uint h = cellHash(wrapI(cell.x, cellsX), cell.y, slot, 90 + copy);
+    if (float(h & 0xFFFFu) / 65535.0 >= RAIN_CHANCE) { return 0.0; }
+    float age = (phase - float((h >> 16) & 0xFFu) / 255.0 * (1.0 - RING_LIFE)) / RING_LIFE;
+    if (age <= 0.0 || age >= 1.0) { return 0.0; }
+    // The drop's place in its cell, far enough in that its ring stays there.
+    vec2 m = vec2(RING_RADIUS / cellW, RING_RADIUS / RAIN_CELL);
+    vec2 at = vec2(float((h >> 24) & 0xFu), float((h >> 28) & 0xFu)) / 15.0;
+    vec2 centre = m + at * (1.0 - 2.0 * m);
+    // Voxels from the drop, and the ring's distance in raster pixels (a voxel is S pixels
+    // across and RISE rows deep), so it is as thin at its top as at its sides.
+    vec2 e = (g - floor(g) - centre) * vec2(cellW, RAIN_CELL);
+    float l = length(e);
+    float r = RING_RADIUS * (1.0 - (1.0 - age) * (1.0 - age));
+    vec2 grad = l > 1e-4 ? e / l / vec2(float(S), float(RISE)) : vec2(1.0 / float(S), 0.0);
+    float px = abs(l - r) / max(length(grad), 1e-6);
+    float edge = max(1.0 - px / 0.8, 0.0);
+    float fade = smoothstep(0.0, 0.12, age) * (1.0 - age) * (1.0 - age);
+    return edge * fade;
 }
 
 // A ceiling seen in a reflection: the underside of a solid, which the picture never
@@ -1394,7 +1554,8 @@ vec3 litWaterFinish(vec3 colour) {
     vec3 ratio = here / max(ladderLight(1.0, sunOn, vec3(0.0)), vec3(1e-4));
     colour += wScatter * ratio + wHaze * u.hazeC.rgb;
     if (!top) { return colour; }
-    vec3 n = rippleNormal(p.xz, fl.xy);
+    float glint;
+    vec3 n = rippleNormal(p.xz, fl.xy, glint);
     vec3 d = normalize(vec3(0.0, -k, 1.0));
     float cosi = clamp(-dot(d, n), 0.0, 1.0);
     float f = clamp(u.waterL.y * (0.02 + 0.98 * pow(1.0 - cosi, 5.0)), 0.0, 1.0);
@@ -1407,7 +1568,25 @@ vec3 litWaterFinish(vec3 colour) {
     vec3 hp;
     int axis;
     bool found = reflectMarch(p, r, hc, hp, axis);
-    return under + f * reflectionShade(found, hc, hp, axis, r);
+    colour = under + f * reflectionShade(found, hc, hp, axis, r);
+    // The surface's details over the reflection: rain rings and foam in the palette's
+    // surface colour, off the light as the falls' streaks are (lit, foam in a shaded
+    // crevice went a muddy grey), and glints in the palette's light. Foam and rings only
+    // lighten: where the water is already brighter they leave it be.
+    float hz = hazeAt(float(z) + 0.5);
+    vec3 froth = max(colour, hazed(u.waterSurfaceC.rgb, hz));
+    if (u.waterM.z > 0.0 && u.knobs.w > 0.0 && skyOpen(open.x, open.y, open.z) > 0.0) {
+        float ring = max(rainRing(p.xz, 0), rainRing(p.xz, 1));
+        colour = mix(colour, froth, clamp(u.waterM.z * ring, 0.0, 1.0));
+    }
+    if (u.waterM.x > 0.0) {
+        float foam = foamAt(ivec3(x, y, z), p, fill);
+        colour = mix(colour, froth, clamp(u.waterM.x * foam, 0.0, 1.0));
+    }
+    if (u.waterM.y > 0.0 && glint > 0.0 && sun > 0.0) {
+        colour = mix(colour, hazed(u.lightC.rgb, hz), clamp(u.waterM.y * glint, 0.0, 1.0));
+    }
+    return colour;
 }
 
 void main() {
