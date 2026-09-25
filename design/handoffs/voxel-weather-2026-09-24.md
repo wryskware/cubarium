@@ -485,8 +485,15 @@ the dawn and dusk bands and the warm lean ("perfect"), the night light level, th
 clouds, and the terrain's noon lighting exactly as it is.
 
 1. **Daytime sky.** At full daylight the sky must read as day.
-   - A brighter, clearly lit gradient, zenith to horizon, in the art direction's palette:
-     electric blues, violets and cyans, not realistic pale blue.
+   - **Not blue** (Wrysk: "blue sky" won't read against the purple-blue terrain). The
+     day reads through value, with hue separating sky from terrain, lightest at the
+     horizon. Three variants:
+     - **A · warm haze:** pale apricot to rose-lavender. The complement of the terrain's
+       violet, kin to the sunsets.
+     - **B · mint:** pale electric cyan to aqua-teal. Watch that it doesn't compete with
+       the water and plants.
+     - **C · lilac mist:** near-white lavender. Separation by value alone.
+   - By day, clouds are near-white with violet shadowed undersides.
    - It blends continuously with the existing dawn/dusk band and the night sky, so
      nothing pops.
    - Clouds keep contrast against it (they may brighten by day).
