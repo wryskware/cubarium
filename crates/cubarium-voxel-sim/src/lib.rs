@@ -237,7 +237,7 @@ impl Sim {
 
         let mut substep = Schedule::new(Substep);
         substep.set_executor(SingleThreadedExecutor::new());
-        substep.add_systems((sys_infiltrate, sys_fall, sys_exchange).chain());
+        substep.add_systems((sys_infiltrate, sys_fall, sys_exchange.run_if(water_due)).chain());
         ecs.add_schedule(substep);
 
         let mut tick = Schedule::new(Tick);
@@ -253,16 +253,20 @@ impl Sim {
             )
                 .chain(),
         );
+        // A training world may coarsen the lateral and groundwater phases
+        // ([`cubarium_voxel::World::set_water_every`]): they then run on one tick in
+        // `every`, and the vertical ones every tick as always. The run condition is the
+        // world's own, so a live world pays one test per coarse phase.
         tick.add_systems(sys_begin.in_set(TickPhase::Begin));
         tick.add_systems(
             (
                 sys_rain,
                 sys_evaporate,
                 sys_substeps,
-                sys_drain,
-                sys_water_table,
-                sys_spring,
-                sys_outlet,
+                sys_drain.run_if(water_due),
+                sys_water_table.run_if(water_due),
+                sys_spring.run_if(water_due),
+                sys_outlet.run_if(water_due),
             )
                 .chain()
                 .in_set(TickPhase::Water),
@@ -537,6 +541,10 @@ impl Sim {
 //
 // One per phase, each a thin call into the layer that owns the rule. The phase order is
 // the chain above; nothing here decides anything.
+
+fn water_due(w: Res<VoxelWorld>) -> bool {
+    w.0.water_due()
+}
 
 fn sys_begin(mut w: ResMut<VoxelWorld>) {
     water::begin(&mut w.0);

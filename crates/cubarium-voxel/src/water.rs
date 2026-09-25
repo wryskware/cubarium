@@ -555,7 +555,13 @@ fn ensure_sets(world: &mut World) {
 /// order and this stays as the three-call sequence's water leg for tests and warm-ups.
 /// `threads` sizes the pool the phases split their columns across ([`exchange`]); `1`
 /// runs them all on the calling thread.
+///
+/// A training world's coarse water ([`World::set_water_every`]) runs the vertical phases —
+/// rain, evaporation, infiltration and fall — every tick as always, and the lateral and
+/// groundwater phases — the exchange, drainage, the water table, the spring and the
+/// outlet — on one tick in `every`, at `every` ticks' worth of their rates.
 pub fn step(world: &mut World, threads: usize) {
+    let due = world.water_due();
     begin(world);
     crate::voxel_phase!(WorldStep, {
         rain(world);
@@ -569,13 +575,17 @@ pub fn step(world: &mut World, threads: usize) {
                 // the module doc on why runoff is what infiltration refuses.
                 infiltrate(world, sub_dt, threads);
                 fall(world, threads);
-                exchange(world, threads);
+                if due {
+                    exchange(world, threads);
+                }
             }
         });
-        drain(world, threads);
-        water_table(world, threads);
-        spring(world);
-        outlet(world);
+        if due {
+            drain(world, threads);
+            water_table(world, threads);
+            spring(world);
+            outlet(world);
+        }
     });
 }
 
@@ -790,7 +800,8 @@ pub fn fall(w: &mut World, threads: usize) {
     #[cfg(feature = "profile")]
     let census = crate::profile::census::before(w, crate::profile::census::Tag::Fall);
     crate::voxel_phase!(Fall, {
-        column_phase(w, threads, ColumnPhase::Fall, DT);
+        let dt = DT;
+        column_phase(w, threads, ColumnPhase::Fall, dt);
     });
     #[cfg(feature = "profile")]
     crate::profile::census::after(w, census);
@@ -1077,7 +1088,8 @@ pub fn water_table(w: &mut World, threads: usize) {
                 * Table::new(table, w.config.voxel_m, w.config.height as usize).band as u64,
         );
         let charged = w.aquifer_m3;
-        let taken = column_phase(w, threads, ColumnPhase::WaterTable, DT);
+        let dt = w.water_dt();
+        let taken = column_phase(w, threads, ColumnPhase::WaterTable, dt);
         w.aquifer_m3 = (charged - taken).max(0.0);
     });
     #[cfg(feature = "profile")]
@@ -2067,7 +2079,8 @@ pub fn drain(w: &mut World, threads: usize) {
     crate::voxel_phase!(Drain, {
         #[cfg(feature = "profile")]
         crate::profile::add(crate::profile::Count::DrainCells, w.drainable.len() as u64);
-        let gained = column_phase(w, threads, ColumnPhase::Drain, DT);
+        let dt = w.water_dt();
+        let gained = column_phase(w, threads, ColumnPhase::Drain, dt);
         w.aquifer_m3 += gained;
     });
     #[cfg(feature = "profile")]
@@ -2108,7 +2121,7 @@ fn aquifer_seep(w: &mut World) {
     if drive <= 0.0 {
         return;
     }
-    let want = (w.config.spring_k_m2_per_s * drive * DT).min(w.aquifer_m3);
+    let want = (w.config.spring_k_m2_per_s * drive * w.water_dt()).min(w.aquifer_m3);
     let got = emerge(w, (x, y, z), want);
     w.aquifer_m3 -= got;
 }
@@ -2171,7 +2184,7 @@ pub fn reentry(w: &mut World) {
             if spare <= 0.0 {
                 return;
             }
-            let want = (w.config.reentry_m3_per_s * DT).min(spare);
+            let want = (w.config.reentry_m3_per_s * w.water_dt()).min(spare);
             let got = emerge(w, (x, y, z), want);
             w.aquifer_m3 -= got;
             return;
@@ -2184,7 +2197,7 @@ pub fn reentry(w: &mut World) {
         if spare <= 0.0 {
             return;
         }
-        let want = (w.config.reentry_m3_per_s * DT).min(spare);
+        let want = (w.config.reentry_m3_per_s * w.water_dt()).min(spare);
         let got = emerge(w, (x, y, z), want);
         if got > 0.0 {
             w.atmosphere_m3 -= got;
@@ -2234,7 +2247,7 @@ fn lake_drain(w: &mut World) {
             top += 1;
         }
         let surface_m = (top as f64 + w.free[at(w, top)].clamp(0.0, 1.0)) * vm;
-        let flow = share * (surface_m - table_m) * DT;
+        let flow = share * (surface_m - table_m) * w.water_dt();
         if flow > 0.0 {
             // Down: taken off the top of the column.
             let mut left = flow;
@@ -2283,7 +2296,7 @@ pub fn outlet(w: &mut World) {
             return;
         }
         let i = w.config.index(x as i64, y, z);
-        let want = w.config.outlet_m3_per_s * DT;
+        let want = w.config.outlet_m3_per_s * w.water_dt();
         if outlet_trace() && w.free[i] > 0.0 {
             let c = &w.config;
             let plane = c.width as usize * c.depth as usize;
@@ -2318,7 +2331,12 @@ pub fn outlet(w: &mut World) {
         // faster than it was. A sill the water does not reach still exports nothing,
         // which is the whole contract.
         let head = w.free[i].clamp(0.0, 1.0);
-        let weir = OUTLET_WEIR * head * head.sqrt() * w.config.voxel_volume();
+        // Per tick, so a coarse training step passes `water_every` ticks' worth.
+        let weir = OUTLET_WEIR
+            * head
+            * head.sqrt()
+            * w.config.voxel_volume()
+            * f64::from(w.water_every());
         let lost = take_free(w, i, want.min(weir));
         w.ledger.outlet_out += lost;
         release(w, lost);
