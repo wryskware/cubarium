@@ -203,6 +203,24 @@ Constraints: pixel art is still the look, so the lighting pass shades the
 this tractable (a single view, precomputable visibility); the cube and the
 panel must never depend on it.
 
+### 5a. Cached surface shadows (Wrysk, 2026-09-25: "backlog it for the next round")
+
+Today every lit pixel traces up to 128 cells toward the sun (`sunReaches`), every frame.
+That is 2.8 of 4.9 ms per lit frame on the 5080 at 13 px (V's switch table). The shadows
+barely change, so trace them only when the sun or the world moves.
+
+- **Shadow map.** Bake a light-space shadow map (the depth of the first occluder, a few
+  texels per voxel), and have each pixel do one lookup. V's per-voxel sun-visibility volume
+  (`sunvis`) is too coarse: surfaces would get blocky shadow edges. Crowns are still
+  deterministic per cell through `crownLets`, so the map stays exact.
+- **Moving things.** Animals cast shadows, and those would lag behind them between bakes.
+  Keep a cheap every-frame check for animals only, or drop animal shadows.
+- **A moving sun.** Fading between bakes a minute apart can ghost a double shadow at dawn
+  and dusk. The bake is cheap on the GPU, so rebake every few seconds while the sun moves
+  and never while it holds still. Nothing pops.
+- **The panel.** This may be the main lever for lit on the Tachyon. Lit there was 288 ms
+  per redraw against 42 ms flat. Measure how much of that is shadows before counting on it.
+
 ## 6. Deferred decisions
 
 - Shoulder 0.85 vs 0.95: Wrysk does not want to tune now; 0.95 stays on the cube by env

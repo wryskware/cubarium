@@ -354,7 +354,7 @@ and volume.
     gone in 2.5 min.
   - These time constants are Wrysk's numbers: not scaled by the weather speed.
 - **Gain:** `storm_stream_gain` in `[world.climate]`, 2.0 for tropical_jungle (3× the flow
-  at a downpour's peak). Wrysk judges it from the GIF.
+  at a downpour's peak). Wrysk judges it from the video.
 - **Who pays:** the store the stream already draws from, above the floor it already
   respects. That is the aquifer for groundwater streams (the terrariums; the lake drain
   returns it) and the atmosphere store for the default rings. The ledger stays exact.
@@ -362,16 +362,16 @@ and volume.
 - **Test:** the swell rises during a forced downpour, is ≤ 5 % of its peak 150 s after
   the event ends, and the residual stays 0.
 - **Dev flag:** `--weather-force MODE` starts that event at once, for captures.
-- **Evidence:** one side-by-side real-time GIF of the desk terrarium's stream and falls
+- **Evidence:** one side-by-side real-time MP4 of the desk terrarium's stream and falls
   through a forced downpour and the 3 min after, at gain 0, 2 and 4. Capture headless
-  only. Make it with ffmpeg: palettegen, `paletteuse=dither=none`, `-loop 0`.
+  only. Encode it as full-colour MP4: `ffmpeg … -c:v libx264 -preset slow -crf 12 -pix_fmt yuv444p`.
 
 ---
 
 ## Brief WX2: weather and day/night visuals
 
 **Objective:** make the weather and the time of day look good in the lit tier, with
-shaders, as **interim** visuals that Wrysk judges from GIFs. The real look stays with
+shaders, as **interim** visuals that Wrysk judges from videos. The real look stays with
 Wrysk and the art direction. This is effortful placeholder work, not a stage-2 decision.
 
 **Read:**
@@ -467,13 +467,12 @@ Wrysk and the art direction. This is effortful placeholder work, not a stage-2 d
 It drives every capture without waiting on the simulation, and stays as a tool.
 
 **Checkpoints:**
-- **Checkpoint 1** (day/night, sky, clouds): stop and return looping GIFs at real-time
-  speed (ffmpeg palettegen + `paletteuse=dither=none`, `-loop 0`) of the full day with no
-  rain, plus stills of noon beside today's main. Fable shows Wrysk.
-- **Checkpoint 2:** rain, storm, lightning, fog; a GIF of the preview loop, and the
+- **Checkpoint 1** (day/night, sky, clouds): stop and return real-time MP4s (`ffmpeg … -c:v libx264 -preset slow -crf 12 -pix_fmt yuv444p`; GIFs
+  retired 2026-09-25 for banding) of the full day with no rain, plus stills of noon beside today's main. Fable shows Wrysk.
+- **Checkpoint 2:** rain, storm, lightning, fog; an MP4 of the preview loop, and the
   measured frame costs.
 
-**Return (≤ 40 lines):** commits, GIF paths (absolute), the frame costs (lit and flat),
+**Return (≤ 40 lines):** commits, video paths (absolute), the frame costs (lit and flat),
 and open look questions.
 
 **Not yours:** anything under `crates/cubarium-voxel` except reading `weather.rs`.
@@ -499,7 +498,7 @@ clouds, and the terrain's noon lighting exactly as it is.
    - Clouds keep contrast against it (they may brighten by day).
    - The sky only: the terrain's ambient light and sun at noon stay as they are.
    - Give Wrysk **two or three day-sky variants** as noon stills side by side, then one
-     day GIF with the chosen default.
+     day MP4 with the chosen default.
 2. **Stars.**
    - Brighter, with a spread of brightness: many faint, few bright, a power-law draw.
      Slight colour variance (bluish-white to warm).
