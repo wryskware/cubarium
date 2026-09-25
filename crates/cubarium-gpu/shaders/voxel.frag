@@ -59,6 +59,11 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
     vec4 bandB;
     vec4 bandC;
     vec4 tint;          // flat: the whole picture's day/night tint (1 by day)
+    vec4 dayA;          // lit sky: the day sky's zenith; how much of the day sky shows
+    vec4 dayB;          // lit sky: its middle; the stars' share into the bloom
+    vec4 dayC;          // lit sky: its horizon
+    vec4 cloudDay;      // lit sky: the clouds' body by day
+    vec4 cloudShade;    // lit sky: the clouds' shadowed underside by day
 } u;
 
 // The lighting tier (`lighting = "flat" | "lit"`), fixed when the pipeline is built. The
@@ -1308,30 +1313,66 @@ float vnoiseT(vec2 w, float freq, float t, int salt) {
 // Interim look. Everything moves on the every-frame clock (the drift and the twinkle clock
 // come from `cubarium_gpu::weather`, eased there), so nothing pops.
 
-// Stars: at most one in each square of about 1.5 voxels of the raster, STAR_SHARE of them,
-// one pixel (two from 10 px a voxel), in a colour of the palette's, twinkling smoothly
-// with a whole number of periods in the twinkle clock's wrap (3600 s).
-const float STAR_CELL = 1.5;
-const float STAR_SHARE = 0.11;
-const float STAR_GAIN = 0.55;
+// Stars (WX2 checkpoint 1b): at most one in each square of STAR_CELL voxels of the
+// raster, STAR_SHARE of them. Brightness is a power-law draw (many faint, a few bright:
+// the share brighter than b falls as b^-STAR_POWER), from STAR_MIN up to STAR_MAX; the
+// colour a temperature from bluish white to warm, a rare few in the palette's cyan or
+// magenta. One pixel, two from 10 px a voxel; the brightest also get a soft cross. Each
+// twinkles smoothly on its own two rates and phases (whole periods in the twinkle
+// clock's 3600 s wrap), deeper for the faint ones and near the horizon (`t`, 0 at the
+// top of the raster). `.a` is how much of it is bright enough to feed the bloom.
+const float STAR_CELL = 1.0;
+const float STAR_SHARE = 0.16;
+const float STAR_GAIN = 0.9;
+const float STAR_MIN = 0.09;
+const float STAR_MAX = 3.0;
+const float STAR_POWER = 1.5;
+// Above this brightness a star has a cross and feeds the bloom.
+const float STAR_BRIGHT = 0.9;
 
-vec3 starAt(int px, int py) {
+vec4 starAt(int px, int py, float t) {
     int C = max(4, int(float(S) * STAR_CELL + 0.5));
     ivec2 cell = ivec2(px / C, py / C);
     uint h = cellHash(cell.x, cell.y, 0, 71);
-    if (float(h & 0xFFFFu) / 65536.0 >= STAR_SHARE) { return vec3(0.0); }
-    int sz = S >= 10 ? 2 : 1;
+    if (float(h & 0xFFFFu) / 65536.0 >= STAR_SHARE) { return vec4(0.0); }
     uint g = cellHash(cell.x, cell.y, 1, 72);
-    ivec2 at = ivec2(int(g % uint(C - sz + 1)), int((g >> 8) % uint(C - sz + 1)));
+    uint f = cellHash(cell.x, cell.y, 2, 73);
+    // r in (0, 1]: the power law's draw.
+    float r = (float(f & 0xFFFFu) + 1.0) / 65536.0;
+    float b = min(STAR_MIN * pow(r, -1.0 / STAR_POWER), STAR_MAX);
+    int sz = S >= 10 ? 2 : 1;
+    // Kept a pixel in from the cell's edge, so a cross stays inside it.
+    int span = max(C - sz - 1, 1);
+    ivec2 at = ivec2(1 + int(g % uint(span)), 1 + int((g >> 8) % uint(span)));
     ivec2 d = ivec2(px, py) - cell * C - at;
-    if (d.x < 0 || d.y < 0 || d.x >= sz || d.y >= sz) { return vec3(0.0); }
-    float b = 0.25 + 0.75 * float((g >> 16) & 0xFFu) / 255.0;
-    b *= b;
-    float w = 6.28318530718 * float(700u + (g >> 24) * 7u) / 3600.0;
-    float tw = 0.6 + 0.4 * sin(u.cloudK.w * w + float(h >> 16));
-    uint k = (h >> 20) % 8u;
-    vec3 c = k < 5u ? vec3(0.85, 0.88, 1.0) : (k < 7u ? u.lightC.rgb : u.bandB.rgb);
-    return c * (b * tw);
+    float k;
+    if (d.x >= 0 && d.y >= 0 && d.x < sz && d.y < sz) {
+        k = 1.0;
+    } else if (b > STAR_BRIGHT && ((d.x == -1 || d.x == sz) && d.y >= 0 && d.y < sz
+                                || (d.y == -1 || d.y == sz) && d.x >= 0 && d.x < sz)) {
+        k = 0.22 * min((b - STAR_BRIGHT) / STAR_BRIGHT, 1.0);
+    } else {
+        return vec4(0.0);
+    }
+    // Twinkle: two sines, each a whole number of periods in the 3600 s wrap (0.2-0.9 Hz
+    // and 0.07-0.3 Hz), deeper for a faint star and toward the horizon.
+    float w1 = 6.28318530718 * float(720u + (g >> 16) % 2520u) / 3600.0;
+    float w2 = 6.28318530718 * float(250u + (f >> 16) % 830u) / 3600.0;
+    float ph1 = float(h >> 16) * 0.0000958738;
+    float ph2 = float(g >> 24) * 0.0245436926;
+    float wave = 0.5 + 0.5 * (0.65 * sin(u.cloudK.w * w1 + ph1) + 0.35 * sin(u.cloudK.w * w2 + ph2));
+    float faint = 1.0 - smoothstep(STAR_MIN, STAR_BRIGHT, b);
+    float depth = clamp(mix(0.18, 0.55, faint) * (1.0 + 1.2 * smoothstep(0.1, 0.5, t)), 0.0, 0.9);
+    float tw = 1.0 - depth * wave;
+    // Colour: a temperature, and a rare palette tint.
+    float temp = float((f >> 16) & 0xFFu) / 255.0;
+    vec3 c = temp < 0.55 ? mix(vec3(0.72, 0.84, 1.0), vec3(1.0), temp / 0.55)
+                         : mix(vec3(1.0), vec3(1.0, 0.82, 0.62), (temp - 0.55) / 0.45);
+    uint rare = (f >> 24) % 16u;
+    if (rare == 0u) { c = mix(c, u.lightC.rgb / max(max(u.lightC.r, u.lightC.g), max(u.lightC.b, 1e-3)), 0.5); }
+    if (rare == 1u) { c = mix(c, u.bandB.rgb / max(max(u.bandB.r, u.bandB.g), max(u.bandB.b, 1e-3)), 0.4); }
+    float lum = b * tw * k;
+    return vec4(c * lum, k * max(b - STAR_BRIGHT, 0.0) / (STAR_MAX - STAR_BRIGHT));
 }
 
 // The cloud layer's noise: value-noise fbm over the raster in voxel units, x round the ring
@@ -1362,39 +1403,76 @@ float cloudNoise(vec2 q) {
     return cloudFbm(q + warp * CLOUD_WARP, 5, 122);
 }
 
-vec3 litSky(int px, int py) {
-    vec3 sky = skyAt(py);
+// The day sky (WX2 checkpoint 1b), `t` of the way down the raster: zenith, middle, and the
+// lightest at the horizon, which sits about where the far ridge does (the twilight band's
+// own reach).
+const float DAY_HORIZON_T = 0.55;
+
+vec3 daySkyAt(float t) {
+    float g = smoothstep(0.0, DAY_HORIZON_T, t);
+    vec3 c = mix(u.dayA.rgb, u.dayB.rgb, smoothstep(0.0, 0.55, g));
+    return mix(c, u.dayC.rgb, smoothstep(0.45, 1.0, g));
+}
+
+// The lit sky: the gradient (the day sky's over the palette's by `dayA.w`), the twilight
+// band, the stars, the clouds. `.a` is the light the pixel sends the bloom (a bright
+// star's, times `dayB.w`).
+vec4 litSky(int px, int py) {
     float t = clamp(float(py) / float(max(u.extent.w, 1)), 0.0, 1.0);
-    if (u.dayK.w > 0.0) {
-        // The band a little brighter on the sun's side.
-        float xs = float(px) / float(max(W * S, 1)) * 2.0 - 1.0;
-        sky += bandAt(t) * (0.4 * u.sunLean.w * xs);
+    bool gradient = u.roofK.w > 0.5;
+    vec3 sky = gradient ? mix(u.skyC.rgb, u.skyHorizon.rgb, t) : u.skyC.rgb;
+    float day = u.dayA.w;
+    if (day > 0.0) {
+        // Coming in (and going out) through the twilight band's own colours, so the sky
+        // brightens rose and orange into the day's rather than through a grey: a linear
+        // mix of near-black and a pale colour is a grey.
+        float b = smoothstep(0.04, 0.56, t);
+        vec3 warm = mix(mix(u.bandA.rgb, u.bandB.rgb, smoothstep(0.0, 0.5, b)), u.bandC.rgb,
+                        smoothstep(0.5, 1.0, b));
+        sky = mix(sky, mix(warm, daySkyAt(t), smoothstep(0.0, 1.0, day)), day);
     }
+    if (gradient && u.dayK.w > 0.0) {
+        // The band, a little brighter on the sun's side.
+        float xs = float(px) / float(max(W * S, 1)) * 2.0 - 1.0;
+        sky += bandAt(t) * (1.0 + 0.4 * u.sunLean.w * xs);
+    }
+    float glow = 0.0;
     if (u.cloudBody.w > 0.001) {
-        sky += starAt(px, py) * (STAR_GAIN * u.cloudBody.w * (1.0 - smoothstep(0.25, 0.6, t)));
+        vec4 st = starAt(px, py, t) * (u.cloudBody.w * (1.0 - smoothstep(0.25, 0.6, t)));
+        sky += st.rgb * STAR_GAIN;
+        glow = st.a * u.dayB.w;
     }
     float cover = u.cloudK.x;
-    if (cover < 0.001) { return sky; }
+    if (cover < 0.001) { return vec4(sky, glow); }
     float storm = u.cloudK.z;
     // The layer: down from the top of the sky, thinning toward the horizon; a storm brings
     // it lower.
     float env = 1.0 - smoothstep(mix(0.22, 0.5, storm), mix(0.52, 0.8, storm), t);
-    if (env <= 0.0) { return sky; }
+    if (env <= 0.0) { return vec4(sky, glow); }
     vec2 q = vec2((float(px) + 0.5) / float(S) + u.cloudK.y,
                   (float(py) + 0.5) / float(S) * CLOUD_FLAT);
     float n = cloudNoise(q);
     float thr = mix(0.74, 0.36, cover) - 0.08 * storm;
     float d = smoothstep(thr, thr + 0.08, n) * env * smoothstep(0.0, 0.2, cover);
-    if (d <= 0.0) { return sky; }
+    if (d <= 0.0) { return vec4(sky, glow); }
     // Lit where the cloud thins toward the sun: the sun is on the camera's side, so on the
     // screen its light comes from above and from its own side.
     vec2 toSun = normalize(vec2(u.sunK.x, -max(u.sunK.y, 0.25) * CLOUD_FLAT));
     float n2 = cloudNoise(q + toSun * 2.0);
-    float lit = clamp((n - n2) * 10.0 + 0.2, 0.0, 1.0) * u.cloudLit.w;
+    float edge = clamp((n - n2) * 10.0 + 0.2, 0.0, 1.0);
+    float lit = edge * u.cloudLit.w;
     // Thick cores and the shaded side darker.
     vec3 body = u.cloudBody.rgb * (1.15 - 0.45 * d * (1.0 - lit)) * (1.0 - 0.5 * storm);
     vec3 col = body + u.cloudLit.rgb * lit;
-    return mix(sky, col, d * 0.92);
+    if (day > 0.0) {
+        // By day: near white where the sun reaches and through the body, violet on the
+        // shadowed underside (where the cloud thins away from the sun); heavy cover and a
+        // storm push toward the shade.
+        float sunward = clamp(edge * 2.0 + 0.3 - 0.4 * cover * cover, 0.0, 1.0);
+        vec3 dayCol = mix(u.cloudShade.rgb, u.cloudDay.rgb, sunward) * (1.0 - 0.55 * storm);
+        col = mix(col, dayCol, day);
+    }
+    return vec4(mix(sky, col, d * 0.92), glow * (1.0 - d));
 }
 
 // Foam: a band about FOAM_WIDTH voxels wide along a shore (breathing between FOAM_BREATHE
@@ -1757,7 +1835,7 @@ void main() {
 
     ivec2 px = ivec2(gl_FragCoord.xy);
     if (SKY) {
-        outColour = vec4(litSky(px.x, px.y), 1.0);
+        outColour = litSky(px.x, px.y);
         return;
     }
     int x = px.x / S;
@@ -1880,11 +1958,14 @@ void main() {
         emitted = -trans - 1.0;
         trans = vec3(0.0);
     }
-    emitOut = vec4(emitted, 1.0);
 
     // The presenter clears to the sky and paints over it; front to back, the sky is
     // whatever light is left.
     vec3 sky = skyColor(px.x, px.y);
+    // The brightest stars' share of the bloom (the sky pass's alpha, `[light] star_bloom`),
+    // through whatever is in front of them.
+    if (LIT && u.dayB.w > 0.0) { emitted += trans * sky * texelFetch(backdropTex, px, 0).a; }
+    emitOut = vec4(emitted, 1.0);
     // The flat tier has no light to scale: its day and night are a tint over the world (1
     // by day), under the sky's own gradient.
     vec3 colour = (LIT ? acc : acc * u.tint.rgb) + trans * sky;

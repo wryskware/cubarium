@@ -255,6 +255,8 @@ pub enum Lighting {
 /// water_glint = 0.6    # sun-coloured highlight on sunlit ripple lines tilted sunward (0: none)
 /// water_rain_rings = 0.5 # rings on open-sky water while it rains (0: none)
 /// water_highlight = 0.5  # glints and rain rings: 0 palette colour .. 1 white
+/// day_sky = "warm"     # the lit sky by day: "warm", "mint" or "lilac" (interim variants)
+/// star_bloom = 0.15    # the brightest stars' share into the bloom (0: none)
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -346,6 +348,22 @@ pub struct LightConfig {
     /// surface; both near the lake's own cyan) toward white, 0 to 1. 0.5 by default
     /// (Wrysk, 2026-09-24, after 0 / 0.7 / 0.7-stronger clips: "just under middle. maybe 50%?").
     pub water_highlight: f32,
+    /// The lit tier's daytime sky (WX2 checkpoint 1b, interim variants for Wrysk to choose
+    /// between): `"warm"` (apricot horizon, rose-lavender zenith), `"mint"` (mint horizon,
+    /// aqua-teal zenith) or `"lilac"` (a near-white lavender haze).
+    pub day_sky: DaySky,
+    /// How much of the brightest stars' light feeds the bloom, very subtly; `0` skips it.
+    pub star_bloom: f32,
+}
+
+/// `[light] day_sky`: [`LightConfig::day_sky`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DaySky {
+    #[default]
+    Warm,
+    Mint,
+    Lilac,
 }
 
 impl Default for LightConfig {
@@ -374,6 +392,8 @@ impl Default for LightConfig {
             water_glint: 0.6,
             water_rain_rings: 0.5,
             water_highlight: 0.5,
+            day_sky: DaySky::Warm,
+            star_bloom: cubarium_gpu::weather::STAR_BLOOM_DEFAULT,
         }
     }
 }

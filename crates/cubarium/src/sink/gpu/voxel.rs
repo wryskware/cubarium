@@ -1228,6 +1228,12 @@ pub fn params_of(cfg: &VoxelConfig, proj: Projection, roof_from_texture: bool) -
             crate::voxel::BloomStyle::Blocky => cubarium_gpu::bloom::BloomStyle::Blocky,
         },
         debug_flow: false,
+        day_sky: match cfg.light.day_sky {
+            crate::voxel::DaySky::Warm => cubarium_gpu::weather::DaySky::Warm,
+            crate::voxel::DaySky::Mint => cubarium_gpu::weather::DaySky::Mint,
+            crate::voxel::DaySky::Lilac => cubarium_gpu::weather::DaySky::Lilac,
+        },
+        star_bloom: cfg.light.star_bloom.max(0.0),
     }
 }
 

@@ -122,3 +122,19 @@ fn clouds_drift_round_the_ring() {
     let d = (0..100).map(|_| e.advance(&Weather::CLEAR_NOON, 1.0, 10).drift).fold(0.0, f32::max);
     assert!(d < 10.0 && d > 0.0);
 }
+
+/// The day sky (checkpoint 1b) is whole at noon, absent at night and on the horizon (so
+/// the dawn and dusk band are checkpoint 1's), and comes in without a jump.
+#[test]
+fn the_day_sky_leaves_twilight_and_night_alone() {
+    let p = params();
+    assert_eq!(noon(&p).day, 1.0);
+    assert_eq!(look(&at(0.0, 0.0), &p).day, 0.0);
+    assert_eq!(look(&at(0.165, 0.0), &p).day, 0.0);
+    let mut last = 0.0f32;
+    for i in 0..=1000 {
+        let d = look(&at(0.1 + 0.4 * i as f32 / 1000.0, 0.0), &p).day;
+        assert!((d - last).abs() < 0.02, "day sky jumps at step {i}: {last} -> {d}");
+        last = d;
+    }
+}

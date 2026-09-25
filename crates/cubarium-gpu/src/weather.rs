@@ -212,6 +212,55 @@ pub const WARM_LEAN: f32 = 0.22;
 /// How far a moonlit texel leans toward the moon's cool light.
 pub const MOON_LEAN: f32 = 0.05;
 
+/// The day sky's weight comes in as the sun climbs from here (degrees; the twilight band
+/// has faded most of the way) ...
+pub const DAY_SKY_FROM_DEG: f32 = 6.0;
+/// ... and is whole from here.
+pub const DAY_SKY_TO_DEG: f32 = 28.0;
+/// How far a full overcast greys and dims the day sky, and how far a storm darkens it.
+pub const OVERCAST_SKY_GREY: f32 = 0.4;
+pub const OVERCAST_SKY_DIM: f32 = 0.25;
+pub const STORM_SKY_DIM: f32 = 0.55;
+/// `[light] star_bloom` by default: how much of the brightest stars' light feeds the
+/// bloom (0 skips it).
+pub const STAR_BLOOM_DEFAULT: f32 = 0.15;
+
+/// The lit tier's daytime sky (WX2 checkpoint 1b, `[light] day_sky`): interim variants
+/// for Wrysk to choose between. Every one reads as day by **value** (pale, high-key, the
+/// horizon lightest) and parts from the violet-blue terrain by **hue**; none is a blue
+/// sky (Wrysk, 2026-09-24: blue behind blue-violet terrain loses the ridge).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DaySky {
+    /// A pale apricot horizon rising to a soft rose-lavender zenith: the terrain's
+    /// complement, kin to the sunsets.
+    #[default]
+    Warm,
+    /// A pale electric mint horizon to an aqua-teal zenith.
+    Mint,
+    /// A near-white lavender haze: the ridge a darker silhouette against it.
+    Lilac,
+}
+
+impl DaySky {
+    /// Zenith, middle and horizon (sRGB).
+    pub fn srgb(self) -> [u32; 3] {
+        match self {
+            DaySky::Warm => [0xD2_B6_E4, 0xF6_D0_D4, 0xFF_E6_CC],
+            DaySky::Mint => [0x55_C6_CE, 0x98_EC_E0, 0xD8_FF_F2],
+            DaySky::Lilac => [0xC2_B6_EA, 0xDD_D4_F6, 0xF6_F1_FF],
+        }
+    }
+
+    /// The clouds by day: their near-white body and their shadowed underside (sRGB).
+    pub fn cloud_srgb(self) -> [u32; 2] {
+        match self {
+            DaySky::Warm => [0xFF_F8_F4, 0x8E_74_C4],
+            DaySky::Mint => [0xF6_FF_FC, 0x84_78_C8],
+            DaySky::Lilac => [0xFF_FF_FF, 0x86_72_C6],
+        }
+    }
+}
+
 /// Palette colours the weather adds (sRGB), all already in the game's palette.
 pub const MAGENTA_SRGB: u32 = 0xFF2AFC;
 pub const ORANGE_SRGB: u32 = 0xFF9B50;
@@ -313,6 +362,16 @@ pub struct Look {
     pub tint: [f32; 3],
     /// What the lit tier's unlit water keeps (1 by day).
     pub unlit: f32,
+    /// The lit tier's day sky ([`DaySky`]): how much of it shows (1 once the sun is well
+    /// up, 0 at twilight and night), and its zenith, middle and horizon (linear, already
+    /// greyed and dimmed by the cloud cover and the storm).
+    pub day: f32,
+    pub day_sky: [[f32; 3]; 3],
+    /// The clouds by day: their body and their shadowed underside (linear).
+    pub cloud_day: [f32; 3],
+    pub cloud_shade: [f32; 3],
+    /// How much of the brightest stars' light feeds the bloom (`[light] star_bloom`).
+    pub star_bloom: f32,
 }
 
 impl Look {
@@ -451,6 +510,23 @@ pub fn look(e: &Eased, p: &VoxelParams) -> Look {
     let tint = if dl >= 1.0 && tw == 0.0 && c == 0.0 { [1.0; 3] } else { tint };
     let unlit = lerp(NIGHT_UNLIT, 1.0, dl);
 
+    // --- the lit tier's day sky ---
+    // It comes in only once the twilight band has mostly gone, so dawn and dusk are
+    // exactly checkpoint 1's; clouds grey and dim it, a storm darkens it.
+    let day = if e.sun_elevation > 0.0 {
+        smoothstep(DAY_SKY_FROM_DEG, DAY_SKY_TO_DEG, el_deg) * dl
+    } else {
+        0.0
+    };
+    let storm = e.storm.clamp(0.0, 1.0);
+    let dim = (1.0 - OVERCAST_SKY_DIM * c) * (1.0 - STORM_SKY_DIM * storm);
+    let day_sky = p.day_sky.srgb().map(|h| {
+        let k = srgb(h);
+        let grey = [luma(k); 3];
+        scale3(lerp3(k, grey, OVERCAST_SKY_GREY * c), dim)
+    });
+    let [cloud_day, cloud_shade] = p.day_sky.cloud_srgb().map(srgb);
+
     Look {
         sky,
         sky_horizon,
@@ -474,6 +550,11 @@ pub fn look(e: &Eased, p: &VoxelParams) -> Look {
         cloud_edge,
         tint,
         unlit,
+        day,
+        day_sky,
+        cloud_day,
+        cloud_shade,
+        star_bloom: p.star_bloom.max(0.0),
     }
 }
 

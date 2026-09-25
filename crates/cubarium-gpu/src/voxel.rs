@@ -609,6 +609,11 @@ pub struct VoxelParams {
     /// Capture-only: draw the water's derived flow field instead of the water (never
     /// set by the live display).
     pub debug_flow: bool,
+    /// The lit tier's daytime sky (`[light] day_sky`, [`crate::weather::DaySky`]).
+    pub day_sky: crate::weather::DaySky,
+    /// How much of the brightest stars' light feeds the bloom (`[light] star_bloom`; 0
+    /// skips it).
+    pub star_bloom: f32,
 }
 
 /// Texels per style in the style texture: wood, crown, heart, emit.
@@ -829,6 +834,11 @@ impl VoxelParams {
             band_b: v(look.band_colours[1]),
             band_c: v(look.band_colours[2]),
             tint: v(look.tint),
+            day_a: [look.day_sky[0][0], look.day_sky[0][1], look.day_sky[0][2], look.day],
+            day_b: [look.day_sky[1][0], look.day_sky[1][1], look.day_sky[1][2], look.star_bloom * look.stars],
+            day_c: v(look.day_sky[2]),
+            cloud_day: v(look.cloud_day),
+            cloud_shade: v(look.cloud_shade),
         }
     }
 }
@@ -928,6 +938,14 @@ struct VoxelUniforms {
     band_c: [f32; 4],
     /// The flat tier's whole-picture tint.
     tint: [f32; 4],
+    /// The lit sky's day gradient (zenith, middle, horizon) and how much of it shows; the
+    /// stars' bloom share rides in `day_b.w`.
+    day_a: [f32; 4],
+    day_b: [f32; 4],
+    day_c: [f32; 4],
+    /// The clouds by day: body and shadowed underside.
+    cloud_day: [f32; 4],
+    cloud_shade: [f32; 4],
 }
 
 /// Where one tick's world is written, straight into mapped memory.
@@ -2750,6 +2768,8 @@ pub(crate) mod tests {
             bloom_radius: 2.0,
             bloom_style: crate::bloom::BloomStyle::Smooth,
             debug_flow: false,
+            day_sky: crate::weather::DaySky::Warm,
+            star_bloom: 0.0,
         }
     }
 
