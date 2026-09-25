@@ -40,10 +40,12 @@ pub mod palette;
 pub mod present;
 pub mod render;
 pub mod scene;
+pub mod sunvis;
 pub mod synthetic;
 pub mod target;
 pub mod vk;
 pub mod voxel;
+pub mod weather;
 
 pub use adapter::{MAX_POSES, PoseRef, ScratchFrame, Stamp, StampMask, StampTone};
 pub use atlas::{Atlas, Clip, FrameRect, PlantClip};

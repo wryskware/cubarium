@@ -46,6 +46,25 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
     vec4 waterL;        // lit: absorption per voxel of path, reflection gain, ripple tilt, reflection cells
     vec4 clock;         // sim time in ticks (tick + the fraction elapsed), the water's animation step, -, -
     vec4 waterM;        // lit: foam, glint, rain rings, highlight (toward white)
+    vec4 volK;          // lit: light shafts' density, glow weight, falloff (voxels), fade
+    // The weather and the time of day (`cubarium_gpu::weather::Look`, package WX2). At a
+    // clear noon every one of these leaves today's picture as it was.
+    vec4 dayK;          // lit: the sun's share of a rung (ladder, smooth) over the ambient
+                        // level, that level (ambientC is already times it); the twilight band
+    vec4 dayL;          // lit: the unlit water's level (1 by day), the sun's strength, -, -
+    vec4 sunLean;       // lit: what a sunlit texel leans toward; which side the sun is on (-1..1)
+    vec4 cloudK;        // lit sky: cloud cover, drift (voxels), storm, twinkle clock (seconds)
+    vec4 cloudBody;     // lit sky: the clouds' body colour; the stars' brightness
+    vec4 cloudLit;      // lit sky: the clouds' sunlit edge colour, and its strength
+    vec4 bandA;         // the twilight band's colours, top to bottom
+    vec4 bandB;
+    vec4 bandC;
+    vec4 tint;          // flat: the whole picture's day/night tint (1 by day)
+    vec4 dayA;          // lit sky: the day sky's zenith; how much of the day sky shows
+    vec4 dayB;          // lit sky: its middle; the stars' share into the bloom
+    vec4 dayC;          // lit sky: its horizon
+    vec4 cloudDay;      // lit sky: the clouds' body by day
+    vec4 cloudShade;    // lit sky: the clouds' shadowed underside by day
 } u;
 
 // The lighting tier (`lighting = "flat" | "lit"`), fixed when the pipeline is built. The
@@ -55,6 +74,19 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
 // light value that multiplies each texel's base colour; the edge treatments are the
 // flat tier's, leaning between the lit tones instead of the flat ones.
 layout(constant_id = 0) const bool LIT = false;
+// The lit tier's effect switches (`cubarium_gpu::sunvis::Effects`), all off in the flat
+// tier: an effect switched off is dead code and costs nothing.
+layout(constant_id = 1) const bool SHADOWS = true;      // the sun march
+layout(constant_id = 2) const bool REFLECTIONS = true;  // the water's reflection march
+layout(constant_id = 3) const bool VOLUMETRIC = false;  // the light shafts (volumetric.glsl)
+layout(constant_id = 4) const bool GLOW = true;         // the emitters' local light
+layout(constant_id = 5) const bool AO = true;           // the AO crease (`[light] ao` > 0)
+// The lit tier's sky pass (package WX2): this shader again, specialised to draw only the
+// sky (`litSky`: the gradient, the twilight band, the stars, the clouds) into the backdrop
+// image, just before the walk reads it. Kept out of the walk's own pipeline on purpose: the
+// walk sits at an occupancy cliff, and the clouds' noise compiled into it cost 0.4 ms at
+// 13 px before a single cloud was drawn.
+layout(constant_id = 6) const bool SKY = false;
 
 layout(set = 0, binding = 1) uniform usampler3D voxels;  // rgba8ui, one texel per voxel
 layout(set = 0, binding = 2) uniform usampler3D roofTex; // r8ui, voxels to the solid above
@@ -79,6 +111,9 @@ layout(set = 0, binding = 8) uniform usampler2D canopyTex;
 // (`GLOW_CELL`), in units of full ambient light: built on the CPU from the emitter list,
 // spread a few cells through open terrain, and sampled trilinearly here.
 layout(set = 0, binding = 9) uniform sampler3D glowTex;
+// Lit tier only. The sky behind the world, from the sky pass (`SKY`), in linear light, one
+// texel a raster pixel; the flat tier's is a single texel it never reads.
+layout(set = 0, binding = 11) uniform sampler2D backdropTex;
 
 layout(location = 0) out vec4 outColour;
 // Lit tier only (the flat tier's pass has no attachment here, so the writes are dropped):
@@ -352,6 +387,7 @@ float crease(float l, float r, float lo, float hi,
 // AO of a front face of (x, y, z) at texel (dx, dy), dy = 0 at the top: the open plane is
 // z-1.
 float aoFront(int x, int y, int z, int dx, int dy) {
+    if (!AO) { return 1.0; }
     int p = z - 1;
     return crease(
         occluder(x - 1, y, p), occluder(x + 1, y, p), occluder(x, y - 1, p), occluder(x, y + 1, p),
@@ -363,6 +399,7 @@ float aoFront(int x, int y, int z, int dx, int dy) {
 // AO of a top face of (x, y, z) at texel (dx, dy), dy = 0 at the back: the open plane is
 // y+1; its near side (z-1) is the face's bottom rows.
 float aoTop(int x, int y, int z, int dx, int dy) {
+    if (!AO) { return 1.0; }
     int p = y + 1;
     return crease(
         occluder(x - 1, p, z), occluder(x + 1, p, z), occluder(x, p, z - 1), occluder(x, p, z + 1),
@@ -418,6 +455,14 @@ const float SMOOTH_SUN = 1.0 / 3.0;
 // before any snapping: its luminance raises the product, and the light's hue leans from
 // the ambient colour toward the emitters' by their share of the sum (on a ladder, itself
 // snapped to the ladder's steps). With no local light this is exactly the ambient term.
+//
+// The time of day adds nothing to this function's work (every extra live value in the walk
+// costs occupancy: 0.3-0.6 ms at 13 px, measured): the ambient colour the CPU sets is
+// already times the ambient level (1 by day), and the sun's share of a rung (`dayK.x` on a
+// ladder, `dayK.y` smooth: exactly 1 and SMOOTH_SUN at a clear noon) is already times the
+// sun's strength over that level. So the ambient and the floor dim at night, the sun or
+// the moon keeps its own strength, and the emitters' light, mixed in by its share of the
+// sum, comes to carry the dark.
 vec3 ladderLight(float a, float sun, vec3 local) {
     bool smoothLight = u.lightK.z < 1.5;
     float n = max(u.lightK.z - 1.0, 1.0);
@@ -429,14 +474,25 @@ vec3 ladderLight(float a, float sun, vec3 local) {
         hue = mix(hue, local / l, share);
         a = sum;
     }
-    float t = smoothLight ? clamp(a, 0.0, 1.0) + sun * SMOOTH_SUN
-                          : (floor(clamp(a, 0.0, 1.0) * n + 0.5) + sun) / n;
+    float t = smoothLight ? clamp(a, 0.0, 1.0) + sun * u.dayK.y
+                          : (floor(clamp(a, 0.0, 1.0) * n + 0.5) + sun * u.dayK.x) / n;
     return hue * (u.lightK.x * (u.lightK.y + (1.0 - u.lightK.y) * t));
+}
+
+// The ladder's light on open, sunlit ground at a clear noon, in this light's hue (the
+// ambient colour over its level): what the water's in-scatter is taken as a ratio to, so
+// water darkens at night as the ground does.
+vec3 ladderRef(float sunOn) {
+    bool smoothLight = u.lightK.z < 1.5;
+    float n = max(u.lightK.z - 1.0, 1.0);
+    float t = smoothLight ? 1.0 + sunOn * SMOOTH_SUN : (floor(n + 0.5) + sunOn) / n;
+    return u.ambientC.rgb / u.dayK.z * (u.lightK.x * (u.lightK.y + (1.0 - u.lightK.y) * t));
 }
 
 // The emitters' light at world point `p` (voxel units), trilinear over the glow volume
 // whose texel i covers voxels 4i .. 4i + 4.
 vec3 glowAt(vec3 p) {
+    if (!GLOW) { return vec3(0.0); }
     vec3 n = vec3(textureSize(glowTex, 0)) * 4.0;
     // Explicit level: the walk is divergent per pixel, and an implicit-derivative sample
     // there costs as much as the rest of the lit shading together.
@@ -464,6 +520,7 @@ bool crownLets(uvec4 v, ivec3 c) {
 // 1 where the sun reaches world point `p`, which lies on the boundary of open cell `c`
 // (the cell in front of the face it is on); 0 where anything opaque is in the way.
 float sunReaches(vec3 p, ivec3 c) {
+    if (!SHADOWS) { return 1.0; }
     vec3 L = u.sunK.xyz;
     ivec3 dir = ivec3(sign(L));
     vec3 inv = vec3(
@@ -494,11 +551,13 @@ float sunReaches(vec3 p, ivec3 c) {
 }
 
 // A lit colour: the base under the quantised light, and where the sun reaches, leaning
-// toward the palette's light by the sun tint times N·L (the flat tier's lean of a top
-// face toward `lightC`, now gated by the sun).
+// toward the sun's colour by the sun tint times N·L (the flat tier's lean of a top face
+// toward `lightC`, now gated by the sun). The sun's colour (`sunLean`) is the palette's
+// light by day, warm low down, the moon's at night; the lean's strength (`sunK.w`) is the
+// tint times the sun's strength, raised for a low sun (`cubarium_gpu::weather::Look`).
 vec3 litBy(vec3 base, float ambient, float sun, float ndl, vec3 local) {
     vec3 c = base * ladderLight(ambient, sun, local);
-    return mix(c, u.lightC.rgb, clamp(u.sunK.w * sun * ndl, 0.0, 1.0));
+    return mix(c, u.sunLean.rgb, clamp(u.sunK.w * sun * ndl, 0.0, 1.0));
 }
 
 // The front face of (x, y, z) at texel (dx, dy), lit, with `canopy` over it.
@@ -1036,17 +1095,32 @@ void waterAt(int x, int y, int z, uvec4 v, int row, inout vec3 acc, inout vec3 t
 
 // --- the walk -------------------------------------------------------------------------
 
-// Vertical sky gradient from zenith down to horizon
+// The twilight band (`dayK.w`, zero away from dawn and dusk), `t` of the way down the
+// raster: purple fading in from above, magenta, then the palette's warm orange low down,
+// where the sky meets the far ridge.
+vec3 bandAt(float t) {
+    float b = smoothstep(0.04, 0.56, t);
+    vec3 c = mix(u.bandA.rgb, u.bandB.rgb, smoothstep(0.0, 0.5, b));
+    c = mix(c, u.bandC.rgb, smoothstep(0.5, 1.0, b));
+    return c * (b * b * u.dayK.w);
+}
+
+// Vertical sky gradient from zenith down to horizon (the time of day's: the palette's by
+// day), with the twilight band over it at dawn and dusk.
 vec3 skyAt(int py) {
     if (u.roofK.w > 0.5) {
         float t = clamp(float(py) / float(max(u.extent.w, 1)), 0.0, 1.0);
-        return mix(u.skyC.rgb, u.skyHorizon.rgb, t);
+        vec3 c = mix(u.skyC.rgb, u.skyHorizon.rgb, t);
+        if (u.dayK.w > 0.0) { c += bandAt(t); }
+        return c;
     }
     return u.skyC.rgb;
 }
 
-// Atmospheric sky with drifting moisture cloud wisps
+// Atmospheric sky with drifting moisture cloud wisps. The lit tier's is the sky pass's
+// (stars and clouds instead of wisps).
 vec3 skyColor(int px_x, int px_y) {
+    if (LIT) { return texelFetch(backdropTex, ivec2(px_x, px_y), 0).rgb; }
     vec3 sky = skyAt(px_y);
     float moisture = clamp(u.knobs.z, 0.0, 1.0);
     int mistRows = min(u.extent.w / 3, 56);
@@ -1243,6 +1317,174 @@ float vnoiseT(vec2 w, float freq, float t, int salt) {
     int l0 = wrapI(int(lt), 256);
     int l1 = wrapI(int(lt) + 1, 256);
     return mix(vnoise(w, freq, l0, salt), vnoise(w, freq, l1, salt), ft);
+}
+
+
+// --- the sky (the lit tier's sky pass, `SKY`; package WX2) ----------------------------------
+//
+// Interim look. Everything moves on the every-frame clock (the drift and the twinkle clock
+// come from `cubarium_gpu::weather`, eased there), so nothing pops.
+
+// Stars (WX2 checkpoint 1b): at most one in each square of STAR_CELL voxels of the
+// raster, STAR_SHARE of them. Brightness is a power-law draw (many faint, a few bright:
+// the share brighter than b falls as b^-STAR_POWER), from STAR_MIN up to STAR_MAX; the
+// colour a temperature from bluish white to warm, a rare few in the palette's cyan or
+// magenta. One pixel, two from 10 px a voxel; the brightest also get a soft cross. Each
+// twinkles smoothly on its own two rates and phases (whole periods in the twinkle
+// clock's 3600 s wrap), deeper for the faint ones and near the horizon (`t`, 0 at the
+// top of the raster). `.a` is how much of it is bright enough to feed the bloom.
+const float STAR_CELL = 1.0;
+const float STAR_SHARE = 0.16;
+const float STAR_GAIN = 0.9;
+const float STAR_MIN = 0.09;
+const float STAR_MAX = 3.0;
+const float STAR_POWER = 1.5;
+// Above this brightness a star has a cross and feeds the bloom.
+const float STAR_BRIGHT = 0.9;
+
+vec4 starAt(int px, int py, float t) {
+    int C = max(4, int(float(S) * STAR_CELL + 0.5));
+    ivec2 cell = ivec2(px / C, py / C);
+    uint h = cellHash(cell.x, cell.y, 0, 71);
+    if (float(h & 0xFFFFu) / 65536.0 >= STAR_SHARE) { return vec4(0.0); }
+    uint g = cellHash(cell.x, cell.y, 1, 72);
+    uint f = cellHash(cell.x, cell.y, 2, 73);
+    // r in (0, 1]: the power law's draw.
+    float r = (float(f & 0xFFFFu) + 1.0) / 65536.0;
+    float b = min(STAR_MIN * pow(r, -1.0 / STAR_POWER), STAR_MAX);
+    int sz = S >= 10 ? 2 : 1;
+    // Kept a pixel in from the cell's edge, so a cross stays inside it.
+    int span = max(C - sz - 1, 1);
+    ivec2 at = ivec2(1 + int(g % uint(span)), 1 + int((g >> 8) % uint(span)));
+    ivec2 d = ivec2(px, py) - cell * C - at;
+    float k;
+    if (d.x >= 0 && d.y >= 0 && d.x < sz && d.y < sz) {
+        k = 1.0;
+    } else if (b > STAR_BRIGHT && ((d.x == -1 || d.x == sz) && d.y >= 0 && d.y < sz
+                                || (d.y == -1 || d.y == sz) && d.x >= 0 && d.x < sz)) {
+        k = 0.22 * min((b - STAR_BRIGHT) / STAR_BRIGHT, 1.0);
+    } else {
+        return vec4(0.0);
+    }
+    // Twinkle: two sines, each a whole number of periods in the 3600 s wrap (0.2-0.9 Hz
+    // and 0.07-0.3 Hz), deeper for a faint star and toward the horizon.
+    float w1 = 6.28318530718 * float(720u + (g >> 16) % 2520u) / 3600.0;
+    float w2 = 6.28318530718 * float(250u + (f >> 16) % 830u) / 3600.0;
+    float ph1 = float(h >> 16) * 0.0000958738;
+    float ph2 = float(g >> 24) * 0.0245436926;
+    float wave = 0.5 + 0.5 * (0.65 * sin(u.cloudK.w * w1 + ph1) + 0.35 * sin(u.cloudK.w * w2 + ph2));
+    float faint = 1.0 - smoothstep(STAR_MIN, STAR_BRIGHT, b);
+    float depth = clamp(mix(0.18, 0.55, faint) * (1.0 + 1.2 * smoothstep(0.1, 0.5, t)), 0.0, 0.9);
+    float tw = 1.0 - depth * wave;
+    // Colour: a temperature, and a rare palette tint.
+    float temp = float((f >> 16) & 0xFFu) / 255.0;
+    vec3 c = temp < 0.55 ? mix(vec3(0.72, 0.84, 1.0), vec3(1.0), temp / 0.55)
+                         : mix(vec3(1.0), vec3(1.0, 0.82, 0.62), (temp - 0.55) / 0.45);
+    uint rare = (f >> 24) % 16u;
+    if (rare == 0u) { c = mix(c, u.lightC.rgb / max(max(u.lightC.r, u.lightC.g), max(u.lightC.b, 1e-3)), 0.5); }
+    if (rare == 1u) { c = mix(c, u.bandB.rgb / max(max(u.bandB.r, u.bandB.g), max(u.bandB.b, 1e-3)), 0.4); }
+    float lum = b * tw * k;
+    return vec4(c * lum, k * max(b - STAR_BRIGHT, 0.0) / (STAR_MAX - STAR_BRIGHT));
+}
+
+// The cloud layer's noise: value-noise fbm over the raster in voxel units, x round the ring
+// (so it meets itself at the seam), y stretched CLOUD_FLAT times so clouds are wide and
+// flat, domain-warped by a slower field that drifts at half the clouds' speed (so shapes
+// change as they go).
+const float CLOUD_FREQ = 1.0 / 36.0;
+const float CLOUD_FLAT = 3.0;
+const float CLOUD_WARP = 20.0;
+
+float cloudFbm(vec2 q, int octaves, int salt) {
+    float sum = 0.0;
+    float amp = 0.5;
+    float norm = 0.0;
+    float freq = CLOUD_FREQ;
+    for (int i = 0; i < octaves; ++i) {
+        sum += amp * vnoise(q, freq, i, salt);
+        norm += amp;
+        amp *= 0.5;
+        freq *= 2.0;
+    }
+    return sum / norm;
+}
+
+float cloudNoise(vec2 q) {
+    vec2 wq = q - vec2(0.5 * u.cloudK.y, 0.0);
+    vec2 warp = vec2(cloudFbm(wq, 3, 120), cloudFbm(wq + vec2(64.0, 23.0), 3, 121)) - 0.5;
+    return cloudFbm(q + warp * CLOUD_WARP, 5, 122);
+}
+
+// The day sky (WX2 checkpoint 1b), `t` of the way down the raster: zenith, middle, and the
+// lightest at the horizon, which sits about where the far ridge does (the twilight band's
+// own reach).
+const float DAY_HORIZON_T = 0.55;
+
+vec3 daySkyAt(float t) {
+    float g = smoothstep(0.0, DAY_HORIZON_T, t);
+    vec3 c = mix(u.dayA.rgb, u.dayB.rgb, smoothstep(0.0, 0.55, g));
+    return mix(c, u.dayC.rgb, smoothstep(0.45, 1.0, g));
+}
+
+// The lit sky: the gradient (the day sky's over the palette's by `dayA.w`), the twilight
+// band, the stars, the clouds. `.a` is the light the pixel sends the bloom (a bright
+// star's, times `dayB.w`).
+vec4 litSky(int px, int py) {
+    float t = clamp(float(py) / float(max(u.extent.w, 1)), 0.0, 1.0);
+    bool gradient = u.roofK.w > 0.5;
+    vec3 sky = gradient ? mix(u.skyC.rgb, u.skyHorizon.rgb, t) : u.skyC.rgb;
+    float day = u.dayA.w;
+    if (day > 0.0) {
+        // Coming in (and going out) through the twilight band's own colours, so the sky
+        // brightens rose and orange into the day's rather than through a grey: a linear
+        // mix of near-black and a pale colour is a grey.
+        float b = smoothstep(0.04, 0.56, t);
+        vec3 warm = mix(mix(u.bandA.rgb, u.bandB.rgb, smoothstep(0.0, 0.5, b)), u.bandC.rgb,
+                        smoothstep(0.5, 1.0, b));
+        sky = mix(sky, mix(warm, daySkyAt(t), smoothstep(0.0, 1.0, day)), day);
+    }
+    if (gradient && u.dayK.w > 0.0) {
+        // The band, a little brighter on the sun's side.
+        float xs = float(px) / float(max(W * S, 1)) * 2.0 - 1.0;
+        sky += bandAt(t) * (1.0 + 0.4 * u.sunLean.w * xs);
+    }
+    float glow = 0.0;
+    if (u.cloudBody.w > 0.001) {
+        vec4 st = starAt(px, py, t) * (u.cloudBody.w * (1.0 - smoothstep(0.25, 0.6, t)));
+        sky += st.rgb * STAR_GAIN;
+        glow = st.a * u.dayB.w;
+    }
+    float cover = u.cloudK.x;
+    if (cover < 0.001) { return vec4(sky, glow); }
+    float storm = u.cloudK.z;
+    // The layer: down from the top of the sky, thinning toward the horizon; a storm brings
+    // it lower.
+    float env = 1.0 - smoothstep(mix(0.22, 0.5, storm), mix(0.52, 0.8, storm), t);
+    if (env <= 0.0) { return vec4(sky, glow); }
+    vec2 q = vec2((float(px) + 0.5) / float(S) + u.cloudK.y,
+                  (float(py) + 0.5) / float(S) * CLOUD_FLAT);
+    float n = cloudNoise(q);
+    float thr = mix(0.74, 0.36, cover) - 0.08 * storm;
+    float d = smoothstep(thr, thr + 0.08, n) * env * smoothstep(0.0, 0.2, cover);
+    if (d <= 0.0) { return vec4(sky, glow); }
+    // Lit where the cloud thins toward the sun: the sun is on the camera's side, so on the
+    // screen its light comes from above and from its own side.
+    vec2 toSun = normalize(vec2(u.sunK.x, -max(u.sunK.y, 0.25) * CLOUD_FLAT));
+    float n2 = cloudNoise(q + toSun * 2.0);
+    float edge = clamp((n - n2) * 10.0 + 0.2, 0.0, 1.0);
+    float lit = edge * u.cloudLit.w;
+    // Thick cores and the shaded side darker.
+    vec3 body = u.cloudBody.rgb * (1.15 - 0.45 * d * (1.0 - lit)) * (1.0 - 0.5 * storm);
+    vec3 col = body + u.cloudLit.rgb * lit;
+    if (day > 0.0) {
+        // By day: near white where the sun reaches and through the body, violet on the
+        // shadowed underside (where the cloud thins away from the sun); heavy cover and a
+        // storm push toward the shade.
+        float sunward = clamp(edge * 2.0 + 0.3 - 0.4 * cover * cover, 0.0, 1.0);
+        vec3 dayCol = mix(u.cloudShade.rgb, u.cloudDay.rgb, sunward) * (1.0 - 0.55 * storm);
+        col = mix(col, dayCol, day);
+    }
+    return vec4(mix(sky, col, d * 0.92), glow * (1.0 - d));
 }
 
 // Foam: a band about FOAM_WIDTH voxels wide along a shore (breathing between FOAM_BREATHE
@@ -1447,7 +1689,8 @@ bool reflectMarch(vec3 p, vec3 r, out ivec3 hit, out vec3 hp, out int axis) {
 vec3 reflectionShade(bool found, ivec3 c, vec3 hp, int axis, vec3 r) {
     if (!found) {
         int row = int(floor(float(BASE) - hp.y * float(S) - hp.z * float(RISE)));
-        return skyAt(max(row, 0));
+        int col = wrapI(int(floor(hp.x * float(S))), max(W * S, 1));
+        return texelFetch(backdropTex, ivec2(col, clamp(row, 0, u.extent.w - 1)), 0).rgb;
     }
     uvec4 v = at(c.x, c.y, c.z);
     ivec2 t = reflectTexel(hp, c, axis, r.x);
@@ -1521,14 +1764,15 @@ vec3 flowDebug(vec3 fl, bool top, vec3 p) {
 // entered, and the open cell whose light it reads.
 vec3 litWaterFinish(vec3 colour) {
     if ((wEntry & ENTRY_FLAT) != 0) {
-        colour += wScatter + wHaze * u.hazeC.rgb;
+        colour += wScatter * u.dayL.x + wHaze * u.hazeC.rgb;
         if ((wEntry & ENTRY_FALLING) == 0) { return colour; }
         if (u.clock.z > 0.5) { return fallStreak(PX, PY, u.clock.y) ? vec3(1.0) : vec3(0.35, 0.05, 0.5); }
         // A fall's streaks over the flat tier's sheet: the surface colour itself (opaque,
         // hazed), a third of the columns, moving down. The palette has nothing brighter,
         // and the sheet between them keeps the flat tier's brightness.
         int zf = (wEntry >> 12) & 0xFFF;
-        return fallStreak(PX, PY, u.clock.y) ? hazed(u.waterSurfaceC.rgb, hazeAt(float(zf))) : colour;
+        return fallStreak(PX, PY, u.clock.y)
+            ? hazed(u.waterSurfaceC.rgb * u.dayL.x, hazeAt(float(zf))) : colour;
     }
     int y = wEntry & 0xFFF;
     int z = (wEntry >> 12) & 0xFFF;
@@ -1551,7 +1795,7 @@ vec3 litWaterFinish(vec3 colour) {
     float sun = (sunOn > 0.0 && ndl > 0.0) ? sunReaches(p, open) : 0.0;
     vec3 glow = glowAt(top ? p + vec3(0.0, 0.5, 0.0) : p - vec3(0.0, 0.0, 0.5));
     vec3 here = ladderLight(skyOpen(open.x, open.y, open.z) * canopy, sun, glow);
-    vec3 ratio = here / max(ladderLight(1.0, sunOn, vec3(0.0)), vec3(1e-4));
+    vec3 ratio = here / max(ladderRef(sunOn), vec3(1e-4));
     colour += wScatter * ratio + wHaze * u.hazeC.rgb;
     if (!top) { return colour; }
     float glint;
@@ -1563,22 +1807,25 @@ vec3 litWaterFinish(vec3 colour) {
     r.y = max(r.y, 0.05);
     r = normalize(r);
     // What is behind the surface first, so the march and the shading carry little state.
-    vec3 under = (1.0 - f) * colour;
-    ivec3 hc;
-    vec3 hp;
-    int axis;
-    bool found = reflectMarch(p, r, hc, hp, axis);
-    colour = under + f * reflectionShade(found, hc, hp, axis, r);
+    if (REFLECTIONS) {
+        vec3 under = (1.0 - f) * colour;
+        ivec3 hc;
+        vec3 hp;
+        int axis;
+        bool found = reflectMarch(p, r, hc, hp, axis);
+        colour = under + f * reflectionShade(found, hc, hp, axis, r);
+    }
     // The surface's details over the reflection: rain rings and foam in the palette's
     // surface colour, off the light as the falls' streaks are (lit, foam in a shaded
     // crevice went a muddy grey), and glints in the palette's light. Foam and rings only
     // lighten: where the water is already brighter they leave it be. Rings and glints lean
     // from their palette colour toward white by the highlight knob (waterM.w).
     float hz = hazeAt(float(z) + 0.5);
-    vec3 froth = max(colour, hazed(u.waterSurfaceC.rgb, hz));
+    vec3 surf = u.waterSurfaceC.rgb * u.dayL.x;
+    vec3 froth = max(colour, hazed(surf, hz));
     if (u.waterM.z > 0.0 && u.knobs.w > 0.0 && skyOpen(open.x, open.y, open.z) > 0.0) {
         float ring = max(rainRing(p.xz, 0), rainRing(p.xz, 1));
-        vec3 ringC = max(colour, hazed(mix(u.waterSurfaceC.rgb, vec3(1.0), u.waterM.w), hz));
+        vec3 ringC = max(colour, hazed(mix(surf, vec3(u.dayL.x), u.waterM.w), hz));
         colour = mix(colour, ringC, clamp(u.waterM.z * ring, 0.0, 1.0));
     }
     if (u.waterM.x > 0.0) {
@@ -1586,11 +1833,13 @@ vec3 litWaterFinish(vec3 colour) {
         colour = mix(colour, froth, clamp(u.waterM.x * foam, 0.0, 1.0));
     }
     if (u.waterM.y > 0.0 && glint > 0.0 && sun > 0.0) {
-        vec3 glintC = hazed(mix(u.lightC.rgb, vec3(1.0), u.waterM.w), hz);
-        colour = mix(colour, glintC, clamp(u.waterM.y * glint, 0.0, 1.0));
+        vec3 glintC = hazed(mix(u.sunLean.rgb, vec3(1.0), u.waterM.w), hz);
+        colour = mix(colour, glintC, clamp(u.waterM.y * glint * u.dayL.y, 0.0, 1.0));
     }
     return colour;
 }
+
+#include "volumetric.glsl"
 
 void main() {
     S = u.geom.x;
@@ -1601,6 +1850,10 @@ void main() {
     D = u.extent.z;
 
     ivec2 px = ivec2(gl_FragCoord.xy);
+    if (SKY) {
+        outColour = litSky(px.x, px.y);
+        return;
+    }
     int x = px.x / S;
     int dx = px.x - x * S;
 
@@ -1612,7 +1865,9 @@ void main() {
         waterLitReset();
     }
 
-    for (int z = 0; z < D; ++z) {
+    // The slab the walk ends in outlives the walk: the light shafts stop there.
+    int z = 0;
+    for (; z < D; ++z) {
         int q = BASE - z * RISE - px.y - 1;
         // q falls by `rise` a slab: once the pixel is below this slab's y = 0 front face
         // it is below every deeper slab's too.
@@ -1721,13 +1976,22 @@ void main() {
         emitted = -trans - 1.0;
         trans = vec3(0.0);
     }
-    emitOut = vec4(emitted, 1.0);
 
     // The presenter clears to the sky and paints over it; front to back, the sky is
     // whatever light is left.
     vec3 sky = skyColor(px.x, px.y);
-    vec3 colour = acc + trans * sky;
+    // The brightest stars' share of the bloom (the sky pass's alpha, `[light] star_bloom`),
+    // through whatever is in front of them.
+    if (LIT && u.dayB.w > 0.0) { emitted += trans * sky * texelFetch(backdropTex, px, 0).a; }
+    emitOut = vec4(emitted, 1.0);
+    // The flat tier has no light to scale: its day and night are a tint over the world (1
+    // by day), under the sky's own gradient.
+    vec3 colour = (LIT ? acc : acc * u.tint.rgb) + trans * sky;
     if (LIT && wEntry >= 0) { colour = litWaterFinish(colour); }
+    if (LIT && VOLUMETRIC) {
+        // Through the open air in front of the walk's end, and never past a water surface.
+        colour += inScatter(wEntry >= 0 ? min(z, (wEntry >> 12) & 0xFFF) : z);
+    }
     outColour = vec4(colour, 1.0);
 
     // Falling rain animation streaks when active

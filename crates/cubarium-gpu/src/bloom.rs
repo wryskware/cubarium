@@ -478,7 +478,7 @@ impl Bloom {
 
 /// What the last pass wrote as a colour attachment is visible to the next pass's
 /// fragment reads and attachment loads.
-unsafe fn colour_to_read(d: &ash::Device, cb: vk::CommandBuffer) {
+pub(crate) unsafe fn colour_to_read(d: &ash::Device, cb: vk::CommandBuffer) {
     unsafe {
         d.cmd_pipeline_barrier(
             cb,

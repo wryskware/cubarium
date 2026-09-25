@@ -174,13 +174,6 @@ pub struct Voxel {
     /// capacity.
     #[arg(long)]
     pub pin_loop: bool,
-    /// Let the simulation spread over every chiplet. By default a machine whose CPUs share
-    /// more than one L3 (the desktop's 9950X3D) keeps the process on one chiplet — the one
-    /// with most of the affinity mask, the larger L3 on a tie — before the pools are
-    /// built: the terrarium's water tick is 20-25 % faster there than over both
-    /// (`voxel/chiplet.rs`). No effect on a one-L3 machine or under `--pin-loop`.
-    #[arg(long)]
-    pub all_chiplets: bool,
     /// Port for the `web` sink (a viewer page at http://127.0.0.1:<port>/).
     #[arg(long, default_value_t = 7393)]
     pub web_port: u16,
@@ -191,6 +184,12 @@ pub struct Voxel {
     /// Write a PNG of every `--sink gpu` frame into this directory.
     #[arg(long)]
     pub gpu_capture: Option<PathBuf>,
+    /// Capture-only dev tool: draw `--sink gpu`'s weather and time of day from a scripted
+    /// loop instead of the world's (`loop`: 90 s through dawn fog, a storm, dusk, night
+    /// drizzle; `day`: 60 s of a dry day; `fixed:PHASE[,CLOUD]`: a still). The world itself
+    /// is untouched. Not for the live display.
+    #[arg(long)]
+    pub weather_preview: Option<crate::sink::gpu::weather::WeatherPreview>,
     /// Serve the operator's viewer from `--sink gpu`'s own raster, at this many frames a
     /// second. 0 (the default) attaches no viewer and reads nothing back.
     #[arg(long, default_value_t = 0.0)]

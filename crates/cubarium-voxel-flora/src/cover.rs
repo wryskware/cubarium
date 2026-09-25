@@ -20,7 +20,10 @@
 //!      corner of a pillar, or off a wall's bottom edge onto the underside beneath it);
 //!   3. *concave corner*: two faces with perpendicular directions whose **front voxels
 //!      coincide** (a wall meeting the underside of the ledge above it, or an inside
-//!      corner of two walls).
+//!      corner of two walls);
+//!   4. *stair*: two side faces with the same direction, one voxel up and one voxel back,
+//!      so the upper one's front voxel sits on the lower one's voxel — a runner crossing a
+//!      one-voxel tread up a stepped slope ([`stair_up`]). A deeper tread is not crossed.
 //! - **Root relation** (where a founder or a sister may root, and which face it starts on):
 //!   a root on support face `s` is next to (a) any face whose front voxel is the voxel
 //!   directly above `s` — the **foot** of a wall — and (b) any side face of `s`'s own
@@ -236,8 +239,28 @@ pub fn face_light(config: &VineConfig, dir: FaceDir, sky: f64) -> f64 {
     }
 }
 
-/// Every face cover-adjacent to `f` (planar, convex edge, concave corner), in a fixed
-/// order, into `out`. Not screened for eligibility.
+/// The side face one step up a staircase from `f`, the same direction: the riser whose
+/// front voxel sits on top of `f`'s own voxel, across a one-voxel tread. `None` for an
+/// underside or off the world. Not screened.
+pub(crate) fn stair_up(c: &WorldConfig, f: Face) -> Option<Face> {
+    if f.dir.is_underside() {
+        return None;
+    }
+    let o = f.dir.offset();
+    step_voxel(c, f.x, f.y, f.z, (-o.0, 1, -o.2)).map(|(x, y, z)| Face::new(x, y, z, f.dir))
+}
+
+/// The side face one step down a staircase from `f`: [`stair_up`] the other way.
+pub(crate) fn stair_down(c: &WorldConfig, f: Face) -> Option<Face> {
+    if f.dir.is_underside() {
+        return None;
+    }
+    let o = f.dir.offset();
+    step_voxel(c, f.x, f.y, f.z, (o.0, -1, o.2)).map(|(x, y, z)| Face::new(x, y, z, f.dir))
+}
+
+/// Every face cover-adjacent to `f` (planar, convex edge, concave corner, stair), in a
+/// fixed order, into `out`. Not screened for eligibility.
 pub(crate) fn neighbours(c: &WorldConfig, f: Face, out: &mut Vec<Face>) {
     out.clear();
     for s in f.dir.plane_steps() {
@@ -245,6 +268,8 @@ pub(crate) fn neighbours(c: &WorldConfig, f: Face, out: &mut Vec<Face>) {
             out.push(Face::new(x, y, z, f.dir));
         }
     }
+    out.extend(stair_up(c, f));
+    out.extend(stair_down(c, f));
     for &d in f.dir.perpendicular() {
         out.push(Face::new(f.x, f.y, f.z, d));
     }
@@ -1978,7 +2003,7 @@ impl Flora {
     /// Root [`VineConfig::founders`] founder vines on a fresh world, each with
     /// [`VineConfig::founder_reserve`]: on soil support faces at the **foot** of a wall at
     /// least three faces tall, or on the **lip** of a soil ledge with at least two faces of
-    /// drop below it, drawn by the world seed and kept [`FOUNDER_SPACING`] voxels apart.
+    /// drop below it (a stepped slope's risers count, joined by [`stair_up`]), drawn by the world seed and kept [`FOUNDER_SPACING`] voxels apart.
     /// Returns how many rooted.
     pub fn seed_vine_founders(&mut self, world: &World) -> usize {
         let want = self.config.latticevine.founders as usize;
@@ -1988,6 +2013,13 @@ impl Flora {
         let view = world.view();
         let c = view.config;
         let ok = |f: Face| face_eligible(&view, f);
+        // The next eligible face up from `f`, straight up the wall or up a stair.
+        let up = |f: Face| {
+            step_voxel(c, f.x, f.y, f.z, (0, 1, 0))
+                .map(|(x, y, z)| Face::new(x, y, z, f.dir))
+                .filter(|&n| ok(n))
+                .or_else(|| stair_up(c, f).filter(|&n| ok(n)))
+        };
         let mut candidates: Vec<(Site, Face)> = Vec::new();
         for z in 0..c.depth {
             for x in 0..c.width {
@@ -1999,16 +2031,21 @@ impl Flora {
                     for d in FaceDir::SIDES {
                         let o = d.offset();
                         // Foot: the wall voxel beside the air over `s`, looking back at it.
+                        // At least three faces tall, counting a stepped slope's risers.
                         if let Some((wx, wy, wz)) = step_voxel(c, x, y + 1, z, (-o.0, -o.1, -o.2))
                             && ok(Face::new(wx, wy, wz, d))
-                            && wy + 2 < c.height
-                            && ok(Face::new(wx, wy + 1, wz, d))
-                            && ok(Face::new(wx, wy + 2, wz, d))
+                            && up(Face::new(wx, wy, wz, d)).and_then(up).is_some()
                         {
                             candidates.push((s, Face::new(wx, wy, wz, d)));
                         }
-                        // Lip: the ledge's own side, with a drop below it.
-                        if y >= 1 && ok(Face::new(x, y, z, d)) && ok(Face::new(x, y - 1, z, d)) {
+                        // Lip: the ledge's own side, with a drop below it, straight or
+                        // down a stair.
+                        let lip = Face::new(x, y, z, d);
+                        if y >= 1
+                            && ok(lip)
+                            && (ok(Face::new(x, y - 1, z, d))
+                                || stair_down(c, lip).is_some_and(|n| ok(n)))
+                        {
                             candidates.push((s, Face::new(x, y, z, d)));
                         }
                     }

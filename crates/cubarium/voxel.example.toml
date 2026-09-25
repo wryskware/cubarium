@@ -84,6 +84,16 @@ water_foam = 0.6
 water_glint = 0.6
 water_rain_rings = 0.5
 water_highlight = 0.5  # glints and rain rings: 0 palette colour .. 1 white
+# Effect switches (lit tier): each off skips its cost, not only its weight.
+shadows = true      # the sun march; off, every face turned to the sun is sunlit
+reflections = true  # the water's reflection march; off, the water reflects nothing
+# Light shafts: open air scatters the sun where the sun reaches it (a sun-visibility volume
+# baked off the render thread) and the emitters' glow, thicker low down.
+volumetric = false
+volumetric_density = 0.03   # in-scatter a voxel of path through sunlit air at the floor
+volumetric_falloff = 12.0   # voxels up over which the air thins by a factor of e
+volumetric_glow = 1.0       # the emitters' glow in the air, relative to the sun's
+volumetric_rebake_s = 60.0  # rebake the volume at most this often; a new one fades in over it
 
 [world]
 # `cubarium_voxel::Config`. x wraps; y is up from the foundation; z runs into the habitat.
