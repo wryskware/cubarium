@@ -33,7 +33,14 @@ and he can veto any of it.
    conditions to cycle relatively faster (maybe not 12x faster but something)". See
    *Weather speed*.
 9. **Storms that make streams** are an exploratory notion, "unless theres a viable path".
-   See *Storm streams* under Packages.
+   See *Storm streams* under Packages. Then, once the budget was clear: "lets make the
+   flow change happen during the storm and then fall off over the next 2-3 minutes after
+   the storm". This is the **stream swell**, now part of WX1.
+10. **Checkpoint 1's look:** "day/night looks amazing … the sunsets - perfect. yes we need
+    to fix the skybox to look like its daytime. the nighttime one is good, but make the
+    stars brighter, with variance, and have some twinkle, and probably the brightest ones
+    affected by bloom (unsure on that - if it is, it should be very subtle)". This is
+    WX2 checkpoint 1b.
 
 ## Why (measured, main 86e5ed6, eidolon, heuristic founders)
 
@@ -255,7 +262,10 @@ and `VoxelView::weather` carries one per tick:
     round needs one anyway).
   - Starting picks: browsers diurnal, shredders nocturnal, lanternjaw nocturnal, bellwing
     diurnal. After WX1.
-- **Storm streams** (exploratory, not dispatched; Wrysk's call). Soil takes water at
+- **Stream swell: decided, part of WX1** (see *Brief WX1 addendum*). The rain budget
+  cannot pay for a visible swell: one storm is ~5 m³, while the desk terrarium's stream is
+  a groundwater loop at 8 L/s (~29 m³/h). So the storm turns up the loop instead.
+- **Storm streams** (background). Soil takes water at
   `K = 0.2 · 0.35 · 0.25 = 0.0175 m/s`, about 500× R₀, so rain on soil never runs off;
   only rock (5e-6 m/s) sheds it. Two paths:
   - **Stream swell** (cheap, O(1), conserved): a linear "upstream catchment" reservoir
@@ -334,6 +344,27 @@ and volume.
 
 **Not yours:** transpiration, WX3, WX4, anything under `crates/cubarium-gpu` or
 `crates/cubarium/src/sink`.
+
+### Brief WX1 addendum: the stream swell
+
+- **Flow:** while it rains, the spring's flow rises to `reentry_m3_per_s · (1 + s)`.
+  - `s` relaxes toward `storm_stream_gain · clamp(rain_rate / downpour_rate, 0, 1)` with
+    a 45 s time constant.
+  - After the event ends, it falls back to 0 with a 50 s time constant, so it is ~95 %
+    gone in 2.5 min.
+  - These time constants are Wrysk's numbers: not scaled by the weather speed.
+- **Gain:** `storm_stream_gain` in `[world.climate]`, 2.0 for tropical_jungle (3× the flow
+  at a downpour's peak). Wrysk judges it from the GIF.
+- **Who pays:** the store the stream already draws from, above the floor it already
+  respects. That is the aquifer for groundwater streams (the terrariums; the lake drain
+  returns it) and the atmosphere store for the default rings. The ledger stays exact.
+- **Census:** `stream_m3_s`.
+- **Test:** the swell rises during a forced downpour, is ≤ 5 % of its peak 150 s after
+  the event ends, and the residual stays 0.
+- **Dev flag:** `--weather-force MODE` starts that event at once, for captures.
+- **Evidence:** one side-by-side real-time GIF of the desk terrarium's stream and falls
+  through a forced downpour and the 3 min after, at gain 0, 2 and 4. Capture headless
+  only. Make it with ffmpeg: palettegen, `paletteuse=dither=none`, `-loop 0`.
 
 ---
 
@@ -446,6 +477,32 @@ It drives every capture without waiting on the simulation, and stays as a tool.
 and open look questions.
 
 **Not yours:** anything under `crates/cubarium-voxel` except reading `weather.rs`.
+
+## WX2 checkpoint 1b: a daytime sky, and stars
+
+On the checkpoint 1 branch (`worktree-agent-a305b95986d3f88e4`, `1aac1abb`). **Keep:**
+the dawn and dusk bands and the warm lean ("perfect"), the night light level, the
+clouds, and the terrain's noon lighting exactly as it is.
+
+1. **Daytime sky.** At full daylight the sky must read as day.
+   - A brighter, clearly lit gradient, zenith to horizon, in the art direction's palette:
+     electric blues, violets and cyans, not realistic pale blue.
+   - It blends continuously with the existing dawn/dusk band and the night sky, so
+     nothing pops.
+   - Clouds keep contrast against it (they may brighten by day).
+   - The sky only: the terrain's ambient light and sun at noon stay as they are.
+   - Give Wrysk **two or three day-sky variants** as noon stills side by side, then one
+     day GIF with the chosen default.
+2. **Stars.**
+   - Brighter, with a spread of brightness: many faint, few bright, a power-law draw.
+     Slight colour variance (bluish-white to warm).
+   - Smooth per-star twinkle, stronger for the dimmer ones and near the horizon. Each
+     star has its own phase and rate on the every-frame clock.
+   - They fade in at dusk and out at dawn with the daylight, hidden where clouds cover.
+   - The brightest few feed the bloom input **very subtly**, behind a knob (`star_bloom`,
+     small default, 0 skips it). Show it on and off.
+3. **Cost:** the sky pass only. Report lit ms at 13 px and 6 px. The flat tier stays
+   byte-identical.
 
 ## Integration notes
 
