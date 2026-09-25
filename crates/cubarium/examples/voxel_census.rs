@@ -433,6 +433,8 @@ impl WeatherLog {
             e.volume_m3,
         )
         .expect("the weather log");
+        // A few rows an hour: flush each, so a run cut short keeps its log.
+        out.flush().expect("the weather log");
     }
 
     fn summary(&mut self, sim: &Sim) {

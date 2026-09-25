@@ -1915,6 +1915,11 @@ mod tests {
             ..preset.config()
         };
         config.climate.opening_min_s = 1.0;
+        // The staged presets start with most of their water aloft (RH ~20 against this
+        // climate's 3 % sky), which forces storms for hours; a sky that holds it keeps the
+        // pre-roll to its opening shower: at RH ~0.4 it ends after its one-second minimum.
+        // The ledgers are the question, not the weather.
+        config.climate.capacity_share = 1.5;
         let world = World::new(config);
         assert!(world.config().closed_water_budget, "a closed cycle");
         steps_with_closed_ledgers(world);

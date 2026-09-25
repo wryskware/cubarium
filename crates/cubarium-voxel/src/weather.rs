@@ -502,7 +502,7 @@ pub struct RainParams {
     pub rate_r0: f64,
     /// The event ends when RH falls to this.
     pub stop_rh: f64,
-    /// Or when it has rained this long, simulated minutes.
+    /// Or when it has rained this long, minutes of nature (the weather speed divides it).
     pub longest_min: f64,
     /// While it rains the air relaxes toward this much cooler, °C.
     pub cool_c: f64,
@@ -545,6 +545,93 @@ rain_keys!(
     cool_c,
 );
 
+/// How much faster than nature the weather runs: `[world.climate] weather_speed`, a
+/// number or `"auto"` (Wrysk's decision 8, 2026-09-24: on a short day, faster than
+/// nature, but not by the whole compression of the day).
+///
+/// `auto` is `(24 h / cycle length)^0.65`: 5.0 on the default 2 h day, 1 on a 24 h
+/// cycle and under the `local` clock (`off` counts `length_min`).
+/// [`Climate::at_speed`] says what it scales and what it leaves alone.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum WeatherSpeed {
+    #[default]
+    Auto,
+    Fixed(f64),
+}
+
+/// The exponent of `auto`: `(24 h / cycle)^AUTO_SPEED_EXPONENT`.
+pub const AUTO_SPEED_EXPONENT: f64 = 0.65;
+
+/// Seconds in a day of nature: what the preset's "days" (the drift's time scale, a
+/// front's recovery) count before the weather speed divides them.
+pub const NATURE_DAY_S: f64 = 86_400.0;
+
+impl WeatherSpeed {
+    /// The factor on this clock.
+    pub fn factor(self, day: &DayClock) -> f64 {
+        match self {
+            WeatherSpeed::Fixed(x) => x,
+            WeatherSpeed::Auto => match day.mode {
+                DayMode::Local => 1.0,
+                DayMode::Cycle | DayMode::Off => {
+                    (1440.0 / day.length_min).powf(AUTO_SPEED_EXPONENT)
+                }
+            },
+        }
+    }
+}
+
+/// `"auto"` or a number in a TOML file; a number in a snapshot (`auto` as −1), because
+/// postcard cannot tell a string from a number without being told.
+impl Serialize for WeatherSpeed {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match (self, s.is_human_readable()) {
+            (WeatherSpeed::Auto, true) => s.serialize_str("auto"),
+            (WeatherSpeed::Auto, false) => s.serialize_f64(-1.0),
+            (WeatherSpeed::Fixed(x), _) => s.serialize_f64(*x),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for WeatherSpeed {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<WeatherSpeed, D::Error> {
+        struct V;
+        impl serde::de::Visitor<'_> for V {
+            type Value = WeatherSpeed;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("\"auto\" or a positive number")
+            }
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<WeatherSpeed, E> {
+                if v == "auto" {
+                    Ok(WeatherSpeed::Auto)
+                } else {
+                    Err(E::custom(format!(
+                        "weather_speed is \"auto\" or a number, not {v:?}"
+                    )))
+                }
+            }
+            fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<WeatherSpeed, E> {
+                Ok(if v < 0.0 {
+                    WeatherSpeed::Auto
+                } else {
+                    WeatherSpeed::Fixed(v)
+                })
+            }
+            fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<WeatherSpeed, E> {
+                self.visit_f64(v as f64)
+            }
+            fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<WeatherSpeed, E> {
+                self.visit_f64(v as f64)
+            }
+        }
+        if d.is_human_readable() {
+            d.deserialize_any(V)
+        } else {
+            d.deserialize_f64(V)
+        }
+    }
+}
+
 /// The named climates: `[world.climate] preset`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ClimatePreset {
@@ -580,12 +667,15 @@ impl ClimatePreset {
 #[serde(try_from = "ClimateSpec", into = "ClimateSpec")]
 pub struct Climate {
     pub preset: ClimatePreset,
+    /// How much faster than nature the weather runs ([`WeatherSpeed`]). The time
+    /// constants below are **nature's**; [`Climate::at_speed`] applies it.
+    pub weather_speed: WeatherSpeed,
     /// Mean air temperature, °C.
     pub temperature_c: f64,
     /// The diurnal swing, ± °C: coolest at sunrise, warmest two thirds through the day.
     pub diurnal_c: f64,
     /// Day-to-day drift: a mean-reverting random walk with this standard deviation, °C,
-    /// over `drift_days` days.
+    /// over `drift_days` days of nature.
     pub drift_sd_c: f64,
     pub drift_days: f64,
     /// Cold fronts per day; each cools by a depth drawn from `front_min_c..front_max_c`
@@ -646,6 +736,7 @@ macro_rules! climate_keys {
         #[serde(default, deny_unknown_fields)]
         pub struct ClimateSpec {
             pub preset: Option<String>,
+            pub weather_speed: Option<WeatherSpeed>,
             $(pub $k: Option<f64>,)*
             pub drizzle: Option<RainSpec>,
             pub shower: Option<RainSpec>,
@@ -653,6 +744,7 @@ macro_rules! climate_keys {
         }
         impl ClimateSpec {
             fn apply(&self, to: &mut Climate) {
+                if let Some(v) = self.weather_speed { to.weather_speed = v; }
                 $(if let Some(v) = self.$k { to.$k = v; })*
                 if let Some(s) = &self.drizzle { s.apply(&mut to.drizzle); }
                 if let Some(s) = &self.shower { s.apply(&mut to.shower); }
@@ -663,6 +755,7 @@ macro_rules! climate_keys {
             fn from(c: Climate) -> ClimateSpec {
                 ClimateSpec {
                     preset: Some(c.preset.name().to_string()),
+                    weather_speed: Some(c.weather_speed),
                     $($k: Some(c.$k),)*
                     drizzle: Some(RainSpec::capture(&c.drizzle)),
                     shower: Some(RainSpec::capture(&c.shower)),
@@ -672,6 +765,12 @@ macro_rules! climate_keys {
         }
         impl Climate {
             fn check_keys(&self) -> anyhow::Result<()> {
+                if let WeatherSpeed::Fixed(x) = self.weather_speed {
+                    anyhow::ensure!(
+                        x.is_finite() && x > 0.0,
+                        "climate.weather_speed must be positive, not {x}"
+                    );
+                }
                 $(anyhow::ensure!(
                     !self.$k.is_nan() && self.$k >= 0.0,
                     "climate.{} must not be negative, not {}",
@@ -743,6 +842,7 @@ impl Climate {
     pub fn tropical_jungle() -> Climate {
         Climate {
             preset: ClimatePreset::TropicalJungle,
+            weather_speed: WeatherSpeed::Auto,
             temperature_c: 26.0,
             diurnal_c: 4.0,
             drift_sd_c: 1.0,
@@ -793,7 +893,7 @@ impl Climate {
                 g_front: 1.0,
                 rate_r0: 1.0,
                 stop_rh: 0.7,
-                longest_min: 15.0,
+                longest_min: 30.0,
                 cool_c: 1.5,
             },
             downpour: RainParams {
@@ -803,9 +903,9 @@ impl Climate {
                 g_aft: 3.0,
                 g_cool: 0.5,
                 g_front: 3.0,
-                rate_r0: 1.5,
+                rate_r0: 2.5,
                 stop_rh: 0.5,
-                longest_min: 30.0,
+                longest_min: 50.0,
                 cool_c: 3.0,
             },
         }
@@ -843,6 +943,29 @@ impl Climate {
             "climate: a range runs from its low end to its high end"
         );
         Ok(())
+    }
+
+    /// The climate as the model runs it on `day`: nature's time scales divided by the
+    /// weather speed — the events' longest durations, the fog and rain-cooling time
+    /// constants, a front's ramp, recovery and fresh window, the drift's time scale —
+    /// and the hazards' `λmax` multiplied by it. The diurnal curve, the afternoon bump
+    /// and the dawn window stay tied to the cycle; the dry gap, the lightning interval,
+    /// the rain rates and the fronts per day are not scaled.
+    pub fn at_speed(&self, day: &DayClock) -> Climate {
+        let k = self.weather_speed.factor(day).max(1e-9);
+        let mut c = *self;
+        c.drift_days /= k;
+        c.front_onset_min /= k;
+        c.front_recovery_days /= k;
+        c.front_window_min /= k;
+        c.rain_cool_min /= k;
+        c.fog_form_min /= k;
+        c.fog_clear_min /= k;
+        for m in [&mut c.drizzle, &mut c.shower, &mut c.downpour] {
+            m.longest_min /= k;
+            m.lambda_max_per_h *= k;
+        }
+        c
     }
 
     /// What the air holds at `t_c`, cubic metres, in a world of `total_m3`:
@@ -1065,10 +1188,10 @@ fn diurnal_c(config: &crate::Config, sun: &Sun) -> f64 {
 
 /// A front's term at `tick`, °C (negative), and whether it is still fresh (`F`). `None`
 /// once it has recovered.
-fn front_term(c: &Climate, front: Front, tick: u64, day_s: f64) -> Option<(f64, bool)> {
+fn front_term(c: &Climate, front: Front, tick: u64) -> Option<(f64, bool)> {
     let min = tick.saturating_sub(front.start_tick) as f64 * DT / 60.0;
     let onset = c.front_onset_min.max(1e-9);
-    let recovery = (c.front_recovery_days * day_s / 60.0).max(1e-9);
+    let recovery = (c.front_recovery_days * NATURE_DAY_S / 60.0).max(1e-9);
     let fresh = min < c.front_window_min;
     if min < onset {
         Some((-front.depth_c * min / onset, fresh))
@@ -1087,8 +1210,8 @@ fn front_term(c: &Climate, front: Front, tick: u64, day_s: f64) -> Option<(f64, 
 pub(crate) fn step(w: &mut World) {
     let tick = w.tick;
     let seed = w.config.seed;
-    let c = w.config.climate;
     let clock = w.config.day;
+    let c = w.config.climate.at_speed(&clock);
     let day_s = clock.day_s();
     let off = clock.mode == DayMode::Off;
 
@@ -1101,7 +1224,7 @@ pub(crate) fn step(w: &mut World) {
     if tick % TICKS_PER_MIN == 0 {
         let wx = &mut w.weather;
         if c.drift_sd_c > 0.0 && c.drift_days > 0.0 {
-            let a = (-60.0 / (c.drift_days * day_s)).exp();
+            let a = (-60.0 / (c.drift_days * NATURE_DAY_S)).exp();
             wx.drift_c =
                 wx.drift_c * a + c.drift_sd_c * (1.0 - a * a).sqrt() * normal(seed, minute);
         } else {
@@ -1121,8 +1244,7 @@ pub(crate) fn step(w: &mut World) {
     }
 
     // The temperature.
-    let (front_c, fresh_front) = match w.weather.front.and_then(|f| front_term(&c, f, tick, day_s))
-    {
+    let (front_c, fresh_front) = match w.weather.front.and_then(|f| front_term(&c, f, tick)) {
         Some(t) => t,
         None => {
             w.weather.front = None;

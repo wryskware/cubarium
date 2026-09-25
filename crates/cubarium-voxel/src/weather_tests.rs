@@ -10,6 +10,7 @@ const MIN: u64 = TICKS_PER_MIN;
 /// zero, so nothing starts on its own.
 fn calm() -> Climate {
     let mut c = Climate::tropical_jungle();
+    c.weather_speed = WeatherSpeed::Fixed(1.0);
     c.drift_sd_c = 0.0;
     c.fronts_per_day = 0.0;
     for m in [&mut c.drizzle, &mut c.shower, &mut c.downpour] {
@@ -450,4 +451,63 @@ fn the_tropical_jungle_parses_from_a_toml_with_one_override() {
     let bytes = postcard::to_stdvec(&c).expect("serializes");
     let back: Config = postcard::from_bytes(&bytes).expect("round trips");
     assert_eq!(back.climate, c.climate);
+}
+
+#[test]
+fn auto_speed_is_nature_on_a_24_hour_day_and_five_on_a_2_hour_one() {
+    let clock = |mode, length_min| DayClock {
+        mode,
+        length_min,
+        ..DayClock::default()
+    };
+    let auto = WeatherSpeed::Auto;
+    assert!((auto.factor(&clock(DayMode::Cycle, 1440.0)) - 1.0).abs() < 1e-12);
+    let two_hours = auto.factor(&clock(DayMode::Cycle, 120.0));
+    assert!((two_hours - 5.0).abs() < 0.05, "{two_hours}");
+    assert_eq!(
+        auto.factor(&clock(DayMode::Local, 120.0)),
+        1.0,
+        "local is nature"
+    );
+    assert_eq!(
+        auto.factor(&clock(DayMode::Off, 120.0)),
+        two_hours,
+        "off counts length_min"
+    );
+    assert_eq!(
+        WeatherSpeed::Fixed(2.0).factor(&clock(DayMode::Local, 120.0)),
+        2.0
+    );
+
+    // The longest durations shrink by it, the hazards grow by it, the gap does not move.
+    let nature = Climate::tropical_jungle();
+    let fast = nature.at_speed(&clock(DayMode::Cycle, 120.0));
+    for (n, f) in [
+        (&nature.drizzle, &fast.drizzle),
+        (&nature.shower, &fast.shower),
+        (&nature.downpour, &fast.downpour),
+    ] {
+        assert!((f.longest_min * two_hours - n.longest_min).abs() < 1e-9);
+        assert!((f.lambda_max_per_h - n.lambda_max_per_h * two_hours).abs() < 1e-9);
+        assert_eq!(f.rate_r0, n.rate_r0);
+    }
+    assert!(
+        (fast.downpour.longest_min - 10.0).abs() < 0.1,
+        "{}",
+        fast.downpour.longest_min
+    );
+    assert_eq!(fast.dry_gap_max_s, nature.dry_gap_max_s);
+    assert_eq!(fast.strike_mean_s, nature.strike_mean_s);
+
+    // A snapshot keeps `auto` as auto, and a TOML may say either.
+    let c: crate::Config = toml::from_str("[climate]\nweather_speed = \"auto\"\n").unwrap();
+    assert_eq!(c.climate.weather_speed, WeatherSpeed::Auto);
+    let c: crate::Config = toml::from_str("[climate]\nweather_speed = 3\n").unwrap();
+    assert_eq!(c.climate.weather_speed, WeatherSpeed::Fixed(3.0));
+    let back: crate::Config = postcard::from_bytes(&postcard::to_stdvec(&c).unwrap()).unwrap();
+    assert_eq!(back.climate.weather_speed, WeatherSpeed::Fixed(3.0));
+    let auto_cfg = crate::Config::default();
+    let back: crate::Config =
+        postcard::from_bytes(&postcard::to_stdvec(&auto_cfg).unwrap()).unwrap();
+    assert_eq!(back.climate.weather_speed, WeatherSpeed::Auto);
 }
