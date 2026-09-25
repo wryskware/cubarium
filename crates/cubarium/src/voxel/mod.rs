@@ -742,8 +742,54 @@ fn prune_voxel_snapshots(dir: &Path, keep: usize) {
         }
     }
     candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    let kept: Vec<u64> = candidates.iter().take(keep).map(|c| c.0).collect();
     for (_, old_path) in candidates.into_iter().skip(keep) {
         let _ = std::fs::remove_file(old_path);
+    }
+    // The layers go with their world: any whose world was pruned (or never landed) goes.
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for p in entries.flatten().map(|e| e.path()) {
+        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let tick = ["flora-", "fauna-"]
+            .iter()
+            .find_map(|k| name.strip_prefix(k))
+            .and_then(|n| n.strip_suffix(".bin"))
+            .and_then(|n| n.parse::<u64>().ok());
+        if tick.is_some_and(|t| !kept.contains(&t)) {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+}
+
+/// The plant and animal layers saved beside `world-N.voxel`: each layer's own
+/// always-fresh envelope (the same bytes `voxel_census save=` writes as `flora.bin` and
+/// `fauna.bin`).
+fn layer_files(dir: &Path, tick: u64) -> (PathBuf, PathBuf) {
+    (
+        dir.join(format!("flora-{tick}.bin")),
+        dir.join(format!("fauna-{tick}.bin")),
+    )
+}
+
+/// Write `bytes` to `path` through a synced `tmp-` file and a rename: whole or absent.
+fn write_whole(dir: &Path, path: &Path, bytes: &[u8]) -> bool {
+    use std::io::Write;
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("snapshot");
+    let tmp_file = dir.join(format!("tmp-{name}"));
+    let written = std::fs::File::create(&tmp_file).and_then(|mut f| {
+        f.write_all(bytes)?;
+        f.sync_all()
+    });
+    if written.is_ok() && std::fs::rename(&tmp_file, path).is_ok() {
+        true
+    } else {
+        let _ = std::fs::remove_file(&tmp_file);
+        false
     }
 }
 
@@ -751,22 +797,51 @@ fn prune_voxel_snapshots(dir: &Path, keep: usize) {
 ///
 /// The bytes reach the disk before the rename makes them the snapshot: a
 /// `world-N.voxel` is either whole or absent, even across a power cut, and a crash
-/// mid-write leaves only a `tmp-` file nothing reads.
-fn save_voxel_snapshot(dir: &Path, world: &World) {
-    use std::io::Write;
+/// mid-write leaves only a `tmp-` file nothing reads. The plant and animal layers
+/// (`flora-N.bin`, `fauna-N.bin`) are written first, so a world file never appears
+/// before the layers that go with it.
+fn save_voxel_snapshot(dir: &Path, world: &World, layers: Option<(&Flora, &Fauna)>) {
     let tick = world.tick();
+    if let Some((flora, fauna)) = layers {
+        let (flora_file, fauna_file) = layer_files(dir, tick);
+        let _ = write_whole(
+            dir,
+            &flora_file,
+            &cubarium_voxel_flora::snapshot::encode(flora),
+        ) && write_whole(dir, &fauna_file, &fauna.save());
+    }
     let snap_file = dir.join(format!("world-{tick}.voxel"));
-    let tmp_file = dir.join(format!("tmp-{tick}.voxel"));
-    let bytes = world.save();
-    let written = std::fs::File::create(&tmp_file).and_then(|mut f| {
-        f.write_all(&bytes)?;
-        f.sync_all()
-    });
-    if written.is_ok() && std::fs::rename(&tmp_file, &snap_file).is_ok() {
+    if write_whole(dir, &snap_file, &world.save()) {
         eprintln!("cubarium voxel: saved snapshot {}", snap_file.display());
         prune_voxel_snapshots(dir, 5);
-    } else {
-        let _ = std::fs::remove_file(&tmp_file);
+    }
+}
+
+/// The plant and animal layers saved with `world-N.voxel`, if both are there and load.
+/// `None` (said on stderr when the files exist) means the caller seeds afresh.
+fn load_layers(dir: &Path, tick: u64) -> Option<(Flora, Fauna)> {
+    let (flora_file, fauna_file) = layer_files(dir, tick);
+    if !flora_file.is_file() || !fauna_file.is_file() {
+        return None;
+    }
+    let loaded = std::fs::read(&flora_file)
+        .map_err(anyhow::Error::from)
+        .and_then(|b| cubarium_voxel_flora::snapshot::decode(&b))
+        .and_then(|flora| {
+            let fauna = std::fs::read(&fauna_file)
+                .map_err(anyhow::Error::from)
+                .and_then(|b| Fauna::load(&b))?;
+            Ok((flora, fauna))
+        });
+    match loaded {
+        Ok(layers) => Some(layers),
+        Err(e) => {
+            eprintln!(
+                "cubarium voxel: the plants and animals saved at tick {tick} do not load \
+                 ({e:#}); seeding afresh"
+            );
+            None
+        }
     }
 }
 
@@ -797,10 +872,10 @@ impl SnapshotWriter {
 
     /// Start writing `world` in the background, unless the last write is still going.
     /// Returns whether it started.
-    fn save_in_background(&mut self, world: &World) -> bool {
-        let world = world.clone();
+    fn save_in_background(&mut self, world: &World, flora: &Flora, fauna: &Fauna) -> bool {
+        let (world, flora, fauna) = (world.clone(), flora.clone(), fauna.clone());
         let dir = self.dir.clone();
-        self.spawn(move || save_voxel_snapshot(&dir, &world))
+        self.spawn(move || save_voxel_snapshot(&dir, &world, Some((&flora, &fauna))))
     }
 
     /// Run `job` as the one write in flight. The seam the tests hold a write open with.
@@ -828,14 +903,22 @@ impl SnapshotWriter {
     }
 
     /// The exit save: synchronous, after whatever was already writing.
-    fn save_now(&mut self, world: &World) {
+    fn save_now(&mut self, world: &World, flora: &Flora, fauna: &Fauna) {
         self.wait();
-        save_voxel_snapshot(&self.dir, world);
+        save_voxel_snapshot(&self.dir, world, Some((flora, fauna)));
     }
 }
 
 /// A fresh generated world's founding: the layers the founding loop seeded it with.
 type Seeding = (Flora, Fauna, habitat::Seeded);
+
+/// The layers a run starts with, when they do not have to be seeded here.
+enum StartLayers {
+    /// A fresh generated world, seeded and judged by the founding loop.
+    Founded(Seeding),
+    /// A resumed world's own plants and animals, saved beside it.
+    Restored(Flora, Fauna),
+}
 
 /// Resume from a file/directory or create a fresh world according to CLI and config.
 ///
@@ -845,9 +928,12 @@ type Seeding = (Flora, Fauna, habitat::Seeded);
 fn load_or_create_world(
     args: &Voxel,
     cfg: &VoxelConfig,
-) -> Result<(World, String, bool, Option<Seeding>)> {
+) -> Result<(World, String, bool, Option<StartLayers>)> {
     let (world, label, resumed) = match load_world(args)? {
-        Some(found) => found,
+        Some((world, label, resumed, layers)) => {
+            let layers = layers.map(|(flora, fauna)| StartLayers::Restored(flora, fauna));
+            return Ok((world, label, resumed, layers));
+        }
         None => {
             let world_cfg = cfg.world.clone();
             match args.scene {
@@ -891,7 +977,11 @@ fn load_or_create_world(
                             founded.world,
                             label,
                             false,
-                            Some((founded.flora, founded.fauna, founded.seeded)),
+                            Some(StartLayers::Founded((
+                                founded.flora,
+                                founded.fauna,
+                                founded.seeded,
+                            ))),
                         ));
                     }
                 }
@@ -902,7 +992,10 @@ fn load_or_create_world(
 }
 
 /// Resume a world from `--load`, if there is one to resume: `None` means found a new one.
-fn load_world(args: &Voxel) -> Result<Option<(World, String, bool)>> {
+/// A resumed world, its label, and its saved plants and animals when they load.
+type Resumed = (World, String, bool, Option<(Flora, Fauna)>);
+
+fn load_world(args: &Voxel) -> Result<Option<Resumed>> {
     if let Some(path) = &args.load {
         if path.is_file() {
             let bytes = std::fs::read(path)
@@ -911,7 +1004,7 @@ fn load_world(args: &Voxel) -> Result<Option<(World, String, bool)>> {
                 World::load(&bytes).with_context(|| format!("loading {}", path.display()))?;
             let label = path.display().to_string();
             eprintln!("cubarium voxel: resumed world from {}", path.display());
-            return Ok(Some((world, label, true)));
+            return Ok(Some((world, label, true, None)));
         } else if path.is_dir() {
             let mut candidates: Vec<(u64, std::time::SystemTime, PathBuf)> = Vec::new();
             for entry in std::fs::read_dir(path)
@@ -946,7 +1039,17 @@ fn load_world(args: &Voxel) -> Result<Option<(World, String, bool)>> {
                                     cand_path.display()
                                 );
                                 let label = format!("resumed from {}", cand_path.display());
-                                return Ok(Some((world, label, true)));
+                                let layers = load_layers(path, *tick);
+                                if let Some((flora, fauna)) = &layers {
+                                    eprintln!(
+                                        "cubarium voxel: resumed its plants and animals — \
+                                         {} stands, {} latticevines, {} animals",
+                                        flora.view().stands.len(),
+                                        flora.view().cover.vines().len(),
+                                        fauna.view().animals.len(),
+                                    );
+                                }
+                                return Ok(Some((world, label, true, layers)));
                             }
                             Err(e) => {
                                 eprintln!(
@@ -1157,8 +1260,13 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
             // A fresh generated world comes out of the founding loop **already seeded**
             // and judged; an authored or resumed one is pre-rolled and seeded here — a
             // resumed one without the opening shower, which it has had, and never redrawn.
+            let restored = matches!(founded, Some(StartLayers::Restored(..)));
             let (flora, mut fauna, seeded) = match founded {
-                Some((flora, fauna, seeded)) => (flora, fauna, Some(seeded)),
+                Some(StartLayers::Founded((flora, fauna, seeded))) => {
+                    (flora, fauna, Some(seeded))
+                }
+                // Resumed with its own plants and animals: nothing to seed.
+                Some(StartLayers::Restored(flora, fauna)) => (flora, fauna, None),
                 None => {
                     let mut flora =
                         Flora::new(FloraConfig::for_voxel_size(world.config().voxel_m));
@@ -1279,7 +1387,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                         format!("NOT accepted: {}", seeded.acceptance.reasons())
                     },
                 );
-            } else {
+            } else if !restored {
                 // An empty world grows its founders by hand; the lineages still need
                 // their recipes registered so anything born is driven.
                 habitat::install_heuristics(&mut fauna);
@@ -1504,8 +1612,8 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                     && ticks > 0
                     && ticks % 1200 == 0
                 {
-                    let (world, _, _) = sim.layers();
-                    s.save_in_background(world);
+                    let (world, flora, fauna) = sim.layers();
+                    s.save_in_background(world, flora, fauna);
                 }
             }
             Step::Render { f } => {
@@ -1538,8 +1646,8 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
 
     out.finish()?;
     if let Some(s) = snapshots.as_mut() {
-        let (world, _, _) = sim.layers();
-        s.save_now(world);
+        let (world, flora, fauna) = sim.layers();
+        s.save_now(world, flora, fauna);
     }
     let elapsed = clock.elapsed(Instant::now()).as_secs_f64();
     let shown = out.presented().map(|(shown, _)| shown);
@@ -3263,6 +3371,10 @@ mod tests {
             ..Default::default()
         };
         let mut world = World::new(c);
+        let (flora, fauna) = (
+            Flora::new(FloraConfig::default()),
+            Fauna::new(FaunaConfig::default()),
+        );
         let mut writer = SnapshotWriter::new(dir.0.clone());
         let stop = std::sync::Arc::new(AtomicBool::new(false));
         let reader = {
@@ -3290,11 +3402,11 @@ mod tests {
             })
         };
         for _ in 0..3 {
-            assert!(writer.save_in_background(&world));
+            assert!(writer.save_in_background(&world, &flora, &fauna));
             writer.wait();
             world.step();
         }
-        writer.save_now(&world);
+        writer.save_now(&world, &flora, &fauna);
         stop.store(true, Ordering::Relaxed);
         assert!(reader.join().unwrap() > 0, "the reader saw snapshots");
         assert_eq!(dir.snapshots().len(), 4);
@@ -3327,12 +3439,16 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
             flag.store(true, Ordering::SeqCst);
         }));
+        let (flora, fauna) = (
+            Flora::new(FloraConfig::default()),
+            Fauna::new(FaunaConfig::default()),
+        );
         assert!(
-            !writer.save_in_background(&world),
+            !writer.save_in_background(&world, &flora, &fauna),
             "one write in flight at a time"
         );
         release.send(()).unwrap();
-        writer.save_now(&world);
+        writer.save_now(&world, &flora, &fauna);
         assert!(finished.load(Ordering::SeqCst), "the exit save waited");
         let snaps = dir.snapshots();
         assert_eq!(snaps.len(), 1);
@@ -4418,7 +4534,7 @@ mod tests {
             z: 0,
             material: cubarium_voxel::Material::Soil,
         });
-        save_voxel_snapshot(&dir, &saved_world);
+        save_voxel_snapshot(&dir, &saved_world, None);
 
         // Verify snapshot was created
         let snap_file = dir.join(format!("world-{}.voxel", saved_world.tick()));
@@ -4433,6 +4549,48 @@ mod tests {
         );
         assert_eq!(resumed_world.config().seed, saved_world.config().seed);
         assert_eq!(resumed_world.tick(), saved_world.tick());
+        let (_, _, _, layers) = load_or_create_world(&base_args, &cfg).unwrap();
+        assert!(
+            layers.is_none(),
+            "a world saved alone resumes with nothing to restore"
+        );
+
+        // 3. Saved with its plants and animals, a resume restores them instead of seeding.
+        let flora = Flora::new(FloraConfig::for_voxel_size(0.125));
+        let fauna = Fauna::new(FaunaConfig::default());
+        save_voxel_snapshot(&dir, &saved_world, Some((&flora, &fauna)));
+        let (_, _, _, layers) = load_or_create_world(&base_args, &cfg).unwrap();
+        match layers {
+            Some(StartLayers::Restored(f, _)) => {
+                assert_eq!(
+                    f.config().voxel_m,
+                    0.125,
+                    "the saved plant layer, not a new one"
+                )
+            }
+            _ => panic!("the saved layers are restored"),
+        }
+
+        // 4. A damaged layer file falls back to seeding; it does not refuse the world.
+        let (flora_file, _) = layer_files(&dir, saved_world.tick());
+        std::fs::write(&flora_file, b"not a flora").unwrap();
+        let (_, _, resumed3, layers) = load_or_create_world(&base_args, &cfg).unwrap();
+        assert!(resumed3 && layers.is_none());
+
+        // 5. Pruning takes a world's layers with it.
+        for _ in 0..6 {
+            saved_world.step();
+            save_voxel_snapshot(&dir, &saved_world, Some((&flora, &fauna)));
+        }
+        let names: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        for kind in ["world-", "flora-", "fauna-"] {
+            let n = names.iter().filter(|n| n.starts_with(kind)).count();
+            assert_eq!(n, 5, "{kind}: {names:?}");
+        }
 
         std::fs::remove_dir_all(&dir).unwrap();
     }
