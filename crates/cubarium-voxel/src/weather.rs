@@ -65,7 +65,8 @@ pub struct WeatherView {
     pub rain_m_per_s: f32,
     /// Ground fog density, 0 (none) to 1 (thick).
     pub fog: f32,
-    /// Cloud cover, 0 (clear) to 1 (overcast).
+    /// Cloud cover, 0 (clear) to 1 (overcast): `clamp((RH − 0.4) / 0.6)`, and at least
+    /// 0.6 / 0.75 / 0.9 while it drizzles / showers / pours ([`cloud_floor`]).
     pub cloud_cover: f32,
     /// Where in the day, `0..1`: 0 midnight, 0.5 noon, wrapping.
     pub day_phase: f32,
@@ -894,7 +895,9 @@ impl Climate {
             strike_mean_s: 30.0,
             strike_min_s: 10.0,
             strike_max_s: 60.0,
-            storm_stream_gain: 2.0,
+            // Wrysk's pick from the gain 0 | 2 | 4 video (2026-09-25): 5x the flow at a
+            // downpour's peak.
+            storm_stream_gain: 4.0,
             opening_min_s: 60.0,
             drizzle: RainParams {
                 lambda_max_per_h: 0.8,
@@ -1534,6 +1537,16 @@ fn fog(w: &mut World, c: &Climate, off: bool) {
     wx.fog += (target - wx.fog) * (1.0 - (-DT / (tau_min.max(1e-9) * 60.0)).exp());
 }
 
+/// The least cloud cover a rain mode falls from: drizzle 0.6, shower 0.75, downpour 0.9.
+pub fn cloud_floor(mode: RainMode) -> f64 {
+    match mode {
+        RainMode::Clear => 0.0,
+        RainMode::Drizzle => 0.6,
+        RainMode::Shower => 0.75,
+        RainMode::Downpour => 0.9,
+    }
+}
+
 /// The view the presenter draws.
 pub(crate) fn view(w: &World) -> WeatherView {
     let wx = &w.weather;
@@ -1551,10 +1564,9 @@ pub(crate) fn view(w: &World) -> WeatherView {
         (DayMode::Off, Look::Night) => Sun::at(0.0, 0.25, 0.75),
         _ => wx.sun,
     };
-    let mut cloud = ((rh - 0.4) / 0.6).clamp(0.0, 1.0);
-    if wx.mode == RainMode::Downpour {
-        cloud = cloud.max(0.9);
-    }
+    // Rain falls from cloud: while it rains the cover has a floor by mode, so an
+    // afternoon shower (when RH reads low) does not fall from a clear sky.
+    let cloud = ((rh - 0.4) / 0.6).clamp(0.0, 1.0).max(cloud_floor(wx.mode));
     WeatherView {
         temperature_c: wx.temp_c as f32,
         rh: rh as f32,

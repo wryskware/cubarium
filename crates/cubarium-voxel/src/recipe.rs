@@ -718,8 +718,14 @@ impl Water {
         min_lake_m2: 6.0,
         reentry_m3_per_s: 1.0e-3,
         min_tier_pools: 1,
-        reentry_from_aquifer: false,
-        lake_drain_m2_per_s: 0.0,
+        // **Groundwater** (WX1b), as the terrariums: the stream is the aquifer coming up
+        // at the spring, and the lake's floor drain returns it, so the river's loop is
+        // underground and the sky carries only evaporation and transpiration. Drawn from
+        // the sky, the stream took everything over its floor and no ring rained.
+        reentry_from_aquifer: true,
+        // A hundred times the stream: 1 L/s passes the floor at a centimetre of head
+        // between the lake and the table, so the lake holds its level while it runs.
+        lake_drain_m2_per_s: 0.1,
     };
 
     /// What a **hand-built fixture** is charged with: the cycle and the rates, at the
@@ -729,6 +735,9 @@ impl Water {
     /// fixture has its own authored pool and no lake datum, so it needs none of it.
     pub const AUTHORED: Water = Water {
         inventory_m: 0.5,
+        // No lake datum, so no floor to drain: its stream (if any) keeps the sky's.
+        reentry_from_aquifer: false,
+        lake_drain_m2_per_s: 0.0,
         ..Water::DEFAULT
     };
 
@@ -737,6 +746,8 @@ impl Water {
         // threshold, and a 0.125 m voxel holds an eighth of a 0.25 m one, so an eighth of
         // the rate gives the same fill fraction. Ten times the margin, sky within ±5 %.
         reentry_m3_per_s: 1.2e-4,
+        // The drain scales with the stream: a hundred times it.
+        lake_drain_m2_per_s: 0.012,
         // Three voxels at 0.125 m: a two-voxel, quarter-metre pond. Deeper reads better —
         // four voxels lifts the median from 5.2 to 7.1 m² — but four is where this ring's
         // grottos start dying: 5 habitable hollows over eight seeds becomes 3, and the

@@ -267,6 +267,10 @@ fn open_to_sky(world: &World, b: &Basin) -> bool {
         })
 }
 
+/// How far under its founding water table a ring's aquifer-fed stream may draw it, when
+/// the table stands below the lake (WX1b).
+pub const RING_STREAM_FLOOR_M: f64 = 0.25;
+
 /// The relative humidity a closed world's sky is founded at (WX1b).
 pub const FOUNDING_RH: f64 = 0.6;
 
@@ -447,6 +451,25 @@ pub fn hydrate(world: &mut World, w: &Water) -> Hydrated {
     };
     let to_aquifer = spare;
     world.aquifer_m3 += charged + to_aquifer;
+    // **A ring whose table cannot reach its lake** (WX1b). The terrariums raise the
+    // water table to the lake, so the lake is the table showing and the drain carries
+    // only the stream's return at a centimetre of head. A staged ring's lake stands 3–4 m
+    // up, and a table there would cost more than the inventory holds (`default`: ~270 m³
+    // against 265). So the table stays where the inventory put it, the stream keeps
+    // 0.25 m of it (its floor), and the drain becomes seepage sized at the real head
+    // difference: the lake leaks the stream's flow through its floor while the stream
+    // brings it back up. The terrarium rule stands wherever the table does reach the lake.
+    if connected && c.reentry_from_aquifer {
+        let table_m = c.aquifer_head_m(world.aquifer_m3);
+        if let Some(level) = level_y
+            && table_m + 1e-9 < lake_head_m
+        {
+            let surface_m = f64::from(level) * c.voxel_m;
+            world.config.reentry_floor_head_m = (table_m - RING_STREAM_FLOOR_M).max(0.0);
+            world.config.lake_drain_m2_per_s =
+                c.reentry_m3_per_s / (surface_m - table_m).max(c.voxel_m);
+        }
+    }
     // **The founding sky holds RH 0.6 at the starting temperature** (WX1b), whatever the
     // recipe's `atmosphere_fraction` (which still sets how much of the inventory is kept
     // off the ground, so the ground a world founds with is unchanged). A store is raised
@@ -2057,5 +2080,78 @@ mod tests {
         let out = hydrate(&mut world, &Water::DRY);
         assert_eq!(out, Hydrated::default());
         assert!(world.free.iter().all(|&f| f == 0.0));
+    }
+
+    /// WX1b: a ring whose water table cannot reach its lake. The table stays where the
+    /// inventory put it, the stream keeps 0.25 m of it, and the drain is seepage at the
+    /// real head difference — so with the stream running the lake and the aquifer both
+    /// hold.
+    #[test]
+    fn a_ring_lake_over_a_low_table_holds_with_the_stream_running() {
+        let c = Config {
+            width: 16,
+            height: 12,
+            depth: 2,
+            voxel_m: 0.25,
+            closed_water_budget: true,
+            rain_m_per_s: 3.5e-5,
+            evaporation_m_per_s: 0.0,
+            reentry_m3_per_s: 2.0e-4,
+            reentry_from_aquifer: true,
+            lake_drain_m2_per_s: 0.1,
+            climate: {
+                let mut c = crate::weather::Climate::tropical_jungle();
+                for m in [&mut c.drizzle, &mut c.shower, &mut c.downpour] {
+                    m.lambda_max_per_h = 0.0;
+                }
+                c
+            },
+            ..Config::default()
+        };
+        let mut w = World::empty(c.clone());
+        // Rock to y = 5; the lake a bowl in it, x 2..=5, floor at y = 3 (water in rows
+        // 4 and 5), with the outlet on its rim a row over the water.
+        for z in 0..c.depth {
+            for x in 0..c.width as i64 {
+                for y in 1..=5 {
+                    w.material[c.index(x, y, z)] = Material::Rock;
+                }
+            }
+            for x in 2..=5i64 {
+                for y in 4..=5 {
+                    w.material[c.index(x, y, z)] = Material::Air;
+                }
+            }
+        }
+        w.rebuild_active_sets();
+        w.set_outlet_cell(Some((6, 6, 0)));
+        w.lake_drain = (2..=5u32).flat_map(|x| (0..2u32).map(move |z| (x, 4, z))).collect();
+        w.set_spring_cell(Some((3, 4, 0)));
+        hydrate(
+            &mut w,
+            &Water {
+                inventory_m: 0.3,
+                aquifer_head_m: 0.3,
+                closed_cycle: true,
+                ..Water::DRY
+            },
+        );
+        let table = w.config().aquifer_head_m(w.aquifer_m3);
+        assert!(table < 1.25, "the table is under the lake: {table}");
+        assert!((w.config().reentry_floor_head_m - (table - 0.25).max(0.0)).abs() < 1e-9);
+        let k = w.config().lake_drain_m2_per_s;
+        assert!((k - 2.0e-4 / (1.5 - table)).abs() < 1e-12, "seepage sized: {k}");
+
+        let (lake0, aq0) = (lake(&w).volume_m3, w.aquifer_m3);
+        assert!(lake0 > 0.1, "{lake0}");
+        for _ in 0..400 {
+            w.step();
+            assert!(w.weather().stream_m3_s() > 0.0, "the stream runs");
+        }
+        let (lake1, aq1) = (lake(&w).volume_m3, w.aquifer_m3);
+        assert!((lake1 / lake0 - 1.0).abs() < 0.03, "the lake holds: {lake0} -> {lake1}");
+        assert!((aq1 / aq0 - 1.0).abs() < 0.03, "the aquifer holds: {aq0} -> {aq1}");
+        let v = w.view();
+        assert!(v.total_residual().abs() <= 1e-9 * v.total_water_m3().max(1.0));
     }
 }

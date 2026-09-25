@@ -684,3 +684,27 @@ fn the_atmosphere_fed_stream_stops_at_rh_one_half() {
     assert_eq!(w.weather().stream_m3_s(), 0.0, "and stopped");
     assert!(residual(&w) < 1e-12);
 }
+
+/// Rain falls from cloud: a shower on a dry afternoon sky (RH ~0.3, which alone reads
+/// clear) still shows at least 0.75 cover; drizzle 0.6, a downpour 0.9, clear sky none.
+#[test]
+fn rain_falls_from_at_least_its_modes_cloud() {
+    let mut c = calm();
+    c.capacity_share = 1.0 / 0.3; // every drop aloft: RH 0.3, cover 0 by the RH rule
+    for m in [&mut c.drizzle, &mut c.shower, &mut c.downpour] {
+        m.stop_rh = 0.0; // falls on however dry the sky
+    }
+    for (mode, floor) in [
+        (RainMode::Drizzle, 0.6),
+        (RainMode::Shower, 0.75),
+        (RainMode::Downpour, 0.9),
+    ] {
+        let mut w = sky_world(c, 1.0);
+        assert_eq!(w.view().weather.cloud_cover, 0.0, "a dry sky is clear");
+        assert!(w.force_rain(mode));
+        w.step();
+        assert_eq!(w.weather().mode(), mode);
+        let cover = w.view().weather.cloud_cover;
+        assert!((cover - floor).abs() < 1e-6, "{mode:?}: {cover}");
+    }
+}
