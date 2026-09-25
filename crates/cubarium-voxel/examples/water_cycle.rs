@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! cargo run --release -p cubarium-voxel --example water_cycle -- \
-//!     [HOURS] [SEED] [TRIGGER_FRACTION] [SHOWER_M3] [EVAP_M_PER_S] [THREADS] \
+//!     [HOURS] [SEED] [EVAP_M_PER_S] [THREADS] \
 //!     [preset=<small|default|wide>]
 //! ```
 //!
@@ -14,7 +14,8 @@
 //! rather than only on the default box.
 //!
 //! One CSV row per simulated ten minutes on stdout — stored, free, pore, aquifer,
-//! atmosphere, showers so far, the residual — and a verdict on stderr. Twenty-four
+//! atmosphere, relative humidity, the rain mode, rain events so far, the residual — and a
+//! verdict on stderr. The weather is the default climate's (`crate::weather`). Twenty-four
 //! simulated hours is 1,728,000 ticks.
 //!
 //! **Experiment conditions**, not model defaults, printed in the header of every run:
@@ -45,12 +46,10 @@ fn arg<T: std::str::FromStr>(n: usize) -> Option<T> {
 fn main() {
     let hours: f64 = arg(1).unwrap_or(24.0);
     let seed: u64 = arg(2).unwrap_or(1);
-    let trigger: f64 = arg(3).unwrap_or(0.02);
-    let shower_m3: f64 = arg(4).unwrap_or(5.0);
-    let evaporation: f64 = arg(5).unwrap_or(0.0001);
+    let evaporation: f64 = arg(3).unwrap_or(0.0001);
     // Execution only. This world is small enough that the exchange's column scan barely
     // splits, so seeds run in parallel *processes* rather than threads.
-    let threads: usize = arg(6).unwrap_or(2);
+    let threads: usize = arg(4).unwrap_or(2);
 
     // Generate once dry to find where the generator put the basin, then generate the
     // world the run uses with the table charged a metre above that floor. Generation is
@@ -80,8 +79,6 @@ fn main() {
         initial_aquifer_head_m: basin_floor_m + 1.0,
         evaporation_m_per_s: evaporation,
         closed_water_budget: true,
-        shower_trigger_fraction: trigger,
-        shower_volume_m3: shower_m3,
         ..dry
     };
     let mut world = World::new(config.clone());
@@ -93,8 +90,8 @@ fn main() {
         "water_cycle: preset {}, seed {seed}, {hours} h closed budget, \
          {}x{}x{} at {} m; \
          shower rate {HARNESS_RAIN_M_PER_S} m/s over {footprint:.0} m2 \
-         ({:.4} m3/s while raining), shower volume {shower_m3} m3, trigger {trigger} of \
-         total water {total:.2} m3 ({:.3} m3 aloft), evaporation {evaporation} m/s, \
+         ({:.4} m3/s while raining), total water {total:.2} m3 ({:.3} m3 aloft), \
+         evaporation {evaporation} m/s, \
          outlet {} m3/s OPEN (the return flow), aquifer head {:.2} m",
         preset.map_or("none (the default box)", |p| p.name),
         config.width,
@@ -102,13 +99,13 @@ fn main() {
         config.depth,
         config.voxel_m,
         HARNESS_RAIN_M_PER_S * footprint,
-        trigger * total,
+        world.atmosphere_m3(),
         config.outlet_m3_per_s,
         config.initial_aquifer_head_m,
     );
 
     println!(
-        "sim_min,stored,free,pore,aquifer,atmosphere,shower_left,showers,rain_in,evap,outlet,residual"
+        "sim_min,stored,free,pore,aquifer,atmosphere,rh,mode,rain_events,rain_in,evap,outlet,residual"
     );
     let total_ticks = (hours * 3600.0 * f64::from(TICK_HZ)) as u64;
     row(&world);
@@ -131,7 +128,7 @@ fn main() {
     eprintln!(
         "water_cycle: preset {}, seed {seed} after {hours} h — stored {lo:.2}–{hi:.2} m3 \
          (swing {:.2}, drift {:+.3}% of total), pooled {:.3} m3, pore {:.3} m3, \
-         atmosphere {:.3} m3, {} showers, \
+         atmosphere {:.3} m3, {} rain events, \
          residual {:.2e} / atmosphere {:.2e} / total {:.2e}; {}",
         preset.map_or("none (the default box)", |p| p.name),
         hi - lo,
@@ -139,7 +136,7 @@ fn main() {
         world.pooled_m3(),
         world.pore_m3(),
         v.atmosphere_m3,
-        v.ledger.showers,
+        v.ledger.rain_events,
         v.water_residual(),
         v.atmosphere_residual(),
         v.total_residual(),
@@ -148,13 +145,11 @@ fn main() {
 }
 
 fn verdict(v: &cubarium_voxel::VoxelView<'_>, drift: f64) -> String {
-    let locked = v.ledger.showers == 0 || v.atmosphere_m3 < 1e-9;
+    let locked = v.ledger.rain_events == 0 || v.atmosphere_m3 < 1e-9;
     if locked {
         format!(
-            "LOCKED DRY: {} shower(s) and {:.3e} m3 aloft against a trigger of {:.3} m3",
-            v.ledger.showers,
-            v.atmosphere_m3,
-            v.config.shower_trigger_fraction * v.ledger.expected_total()
+            "LOCKED DRY: {} rain event(s) and {:.3e} m3 aloft",
+            v.ledger.rain_events, v.atmosphere_m3,
         )
     } else if drift.abs() <= 0.02 {
         format!(
@@ -188,15 +183,16 @@ fn row(world: &World) {
         pore += v.pore[i] * vol * m.pore_capacity();
     }
     println!(
-        "{},{:.4},{:.4},{:.4},{:.4},{:.5},{:.5},{},{:.4},{:.4},{:.4},{:.3e}",
+        "{},{:.4},{:.4},{:.4},{:.4},{:.5},{:.3},{:?},{},{:.4},{:.4},{:.4},{:.3e}",
         v.tick / (60 * u64::from(TICK_HZ)),
         v.stored_m3(),
         free,
         pore,
         v.aquifer_m3,
         v.atmosphere_m3,
-        world.shower_left_m3(),
-        v.ledger.showers,
+        world.rh(),
+        world.weather().mode(),
+        v.ledger.rain_events,
         v.ledger.rain_in,
         v.ledger.evaporation_out,
         v.ledger.outlet_out,

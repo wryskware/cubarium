@@ -41,6 +41,14 @@
 //! cargo run --release -p cubarium --example voxel_census -- 1 load=runs/h6 threads=16
 //! ```
 //!
+//! `gap=off` turns the climate's dry gap off on a `preset=` or `config=` arm.
+//! `--weather-log FILE` writes one CSV row per rain event that ends during the run (start
+//! and end tick, mode, cause, RH, °C and day phase at the start, seconds since the
+//! previous event, volume), and the run ends with a `weather:` line on stderr: events per
+//! mode, forced starts, gap-blocked draws per mode, strikes, rain by mode and by quarter
+//! of the day, and the highest RH, all over the run alone. The rows gain the weather's
+//! own columns (`temp_c` … `day_phase`; `design/handoffs/voxel-weather-2026-09-24.md`).
+//!
 //! `overlap=0` runs the chained tick instead of the overlapped one (`SimConfig::overlap`),
 //! and `ab=MIN` flips between the two every simulated minute from minute `MIN` on, so the
 //! two ticks are timed on one world. `modes=c,6:6,5:1` makes that rotation a list: `c` is
@@ -125,6 +133,10 @@ fn main() {
             .expect("pin=B needs more than B physical cores");
     }
     let timing = Timing {
+        weather_log: args
+            .iter()
+            .position(|a| a == "--weather-log")
+            .map(|i| args.get(i + 1).expect("--weather-log FILE").clone()),
         overlap: args
             .iter()
             .find_map(|a| a.strip_prefix("overlap="))
@@ -178,7 +190,14 @@ fn main() {
     };
 
     let cfg = VoxelConfig::default();
-    if let Some((arm_name, arm_config)) = arm {
+    // `gap=off`: the climate's dry gap at 0 / 0, so every natural start is the weather's
+    // own (WX1's gap-off arms).
+    let gap_off = args.iter().any(|a| a == "gap=off");
+    if let Some((arm_name, mut arm_config)) = arm {
+        if gap_off {
+            arm_config.climate.dry_gap_min_s = 0.0;
+            arm_config.climate.dry_gap_max_s = 0.0;
+        }
         assert!(!generated, "a preset arm builds its own world");
         // The host's founding loop, verbatim: lake gate, pre-roll with the opening
         // shower, seeding and the acceptance check, redrawn on a refusal. The world
@@ -294,6 +313,8 @@ fn main() {
 /// How the tick is run and timed: `overlap=`, `ab=` and `modes=`.
 #[derive(Clone)]
 struct Timing {
+    /// `--weather-log FILE`: one row per finished rain event.
+    weather_log: Option<String>,
     overlap: Option<bool>,
     ab_from_min: Option<u64>,
     nice_water: Option<i32>,
@@ -325,9 +346,11 @@ fn run(sim: &mut Sim, hours: f64, minute0: u64, save: Option<&SaveAt>, timing: &
     let mut window = SeedWindow::default();
     let mut phases = PhaseWindow::default();
     let mut since = std::time::Instant::now();
+    let mut weather = WeatherLog::new(sim, timing.weather_log.as_deref());
     while tick < total_ticks {
         sim.step();
         tick += 1;
+        weather.poll(sim);
         if tick % TICKS_PER_MIN == 0 {
             let ms = since.elapsed().as_secs_f64() * 1e3 / TICKS_PER_MIN as f64;
             let minute = tick / TICKS_PER_MIN;
@@ -353,6 +376,95 @@ fn run(sim: &mut Sim, hours: f64, minute0: u64, save: Option<&SaveAt>, timing: &
         if tick % (60 * TICKS_PER_MIN) == 0 || tick == total_ticks {
             window.report(tick, sim);
         }
+    }
+    weather.summary(sim);
+}
+
+/// `--weather-log`: the finished events, and the run's weather totals.
+struct WeatherLog {
+    out: Option<std::io::BufWriter<std::fs::File>>,
+    seen: u64,
+    start: cubarium_voxel::weather::WeatherCounts,
+}
+
+impl WeatherLog {
+    fn new(sim: &Sim, path: Option<&str>) -> WeatherLog {
+        use std::io::Write;
+        let out = path.map(|p| {
+            let mut f = std::io::BufWriter::new(
+                std::fs::File::create(p).unwrap_or_else(|e| panic!("--weather-log {p}: {e}")),
+            );
+            writeln!(
+                f,
+                "start_tick,end_tick,mode,cause,rh,temp_c,day_phase,since_prev_s,volume_m3"
+            )
+            .expect("the weather log");
+            f
+        });
+        let counts = sim.world().weather().counts;
+        WeatherLog {
+            out,
+            seen: counts.events_finished,
+            start: counts,
+        }
+    }
+
+    fn poll(&mut self, sim: &Sim) {
+        use std::io::Write;
+        let wx = sim.world().weather();
+        if wx.counts.events_finished == self.seen {
+            return;
+        }
+        self.seen = wx.counts.events_finished;
+        let (Some(out), Some(e)) = (self.out.as_mut(), wx.last_finished()) else {
+            return;
+        };
+        writeln!(
+            out,
+            "{},{},{:?},{:?},{:.4},{:.3},{:.4},{},{:.5}",
+            e.start_tick,
+            e.end_tick,
+            e.mode,
+            e.cause,
+            e.rh,
+            e.temperature_c,
+            e.day_phase,
+            e.since_previous_s.map_or(String::new(), |s| format!("{s:.1}")),
+            e.volume_m3,
+        )
+        .expect("the weather log");
+    }
+
+    fn summary(&mut self, sim: &Sim) {
+        use std::io::Write;
+        if let Some(out) = self.out.as_mut() {
+            out.flush().expect("the weather log");
+        }
+        let (c, s) = (sim.world().weather().counts, self.start);
+        let d = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+        let q = |a: [f64; 4], b: [f64; 4]| [a[0] - b[0], a[1] - b[1], a[2] - b[2], a[3] - b[3]];
+        let g = |a: [u64; 3], b: [u64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+        let by_mode = d(c.rain_by_mode_m3, s.rain_by_mode_m3);
+        let by_quarter = q(c.rain_by_quarter_m3, s.rain_by_quarter_m3);
+        eprintln!(
+            "weather: drizzles={} showers={} downpours={} forced={} gap_blocked={:?} \
+             strikes={} rain_mode_m3={:.3}/{:.3}/{:.3} rain_quarter_m3={:.3}/{:.3}/{:.3}/{:.3} \
+             max_rh={:.3}",
+            c.drizzles - s.drizzles,
+            c.showers - s.showers,
+            c.downpours - s.downpours,
+            c.forced - s.forced,
+            g(c.gap_blocked, s.gap_blocked),
+            c.strikes - s.strikes,
+            by_mode[0],
+            by_mode[1],
+            by_mode[2],
+            by_quarter[0],
+            by_quarter[1],
+            by_quarter[2],
+            by_quarter[3],
+            c.max_rh,
+        );
     }
 }
 
@@ -641,7 +753,7 @@ fn print_header() {
         header.push_str(&format!(",gestating_{}", f.name()));
     }
     header.push_str(",flora_births,flora_deaths,fauna_births,fauna_deaths,fauna_hatched,litter");
-    header.push_str(",stored,atmosphere,showers,residual");
+    header.push_str(",stored,atmosphere,rain_events,residual");
     header.push_str(",fixed_in,consumed_organic,standing_foliage");
     for s in Plant::ALL {
         header.push_str(&format!(",donors_{}", s.name()));
@@ -666,6 +778,10 @@ fn print_header() {
             f.name()
         ));
     }
+    // WX1's weather, cumulative counts since the world began.
+    header.push_str(
+        ",temp_c,rh,mode,fog,rain_in,drizzles,showers,downpours,forced,gap_blocked,strikes,day_phase",
+    );
     println!("{header}");
 }
 
@@ -723,7 +839,7 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64) {
     let w = sim.world().view();
     row.push(format!("{:.4}", w.stored_m3()));
     row.push(format!("{:.4}", w.atmosphere_m3));
-    row.push(w.ledger.showers.to_string());
+    row.push(w.ledger.rain_events.to_string());
     row.push(format!("{:.3e}", w.total_residual()));
     // Production and offtake, cumulative: consumed / fixed is the herbivores' share.
     row.push(format!("{:.4}", f.ledger.fixed_in));
@@ -795,5 +911,20 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64) {
             row.push(n.to_string());
         }
     }
+    let world = sim.world();
+    let wx = world.weather();
+    let c = wx.counts;
+    row.push(format!("{:.3}", wx.temperature_c()));
+    row.push(format!("{:.4}", world.rh()));
+    row.push(format!("{:?}", wx.mode()));
+    row.push(format!("{:.3}", wx.fog()));
+    row.push(format!("{:.4}", world.view().ledger.rain_in));
+    row.push(c.drizzles.to_string());
+    row.push(c.showers.to_string());
+    row.push(c.downpours.to_string());
+    row.push(c.forced.to_string());
+    row.push(c.gap_blocked.iter().sum::<u64>().to_string());
+    row.push(c.strikes.to_string());
+    row.push(format!("{:.4}", world.day_phase()));
     println!("{}", row.join(","));
 }

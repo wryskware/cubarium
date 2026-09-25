@@ -50,9 +50,15 @@ fn capacity_halves_with_ten_degrees_of_cooling() {
     let c = Climate::tropical_jungle();
     let warm = c.capacity_m3(100.0, c.temperature_c);
     let cold = c.capacity_m3(100.0, c.temperature_c - 10.0);
-    assert!((warm - 0.03 * 100.0).abs() < 1e-12, "3 % of the world at the mean");
+    assert!(
+        (warm - 0.03 * 100.0).abs() < 1e-12,
+        "3 % of the world at the mean"
+    );
     let ratio = cold / warm;
-    assert!((0.45..0.55).contains(&ratio), "10 °C of cooling halves it: {ratio}");
+    assert!(
+        (0.45..0.55).contains(&ratio),
+        "10 °C of cooling halves it: {ratio}"
+    );
 }
 
 #[test]
@@ -113,9 +119,16 @@ fn an_event_stops_at_its_stop_rh() {
         w.step();
         ticks += 1;
     }
-    assert_eq!(w.weather().mode(), RainMode::Clear, "stopped within {ticks} ticks");
+    assert_eq!(
+        w.weather().mode(),
+        RainMode::Clear,
+        "stopped within {ticks} ticks"
+    );
     let rh = w.rh();
-    assert!(rh <= 0.7 && rh > 0.6, "stopped at the stop RH, not past it: {rh}");
+    assert!(
+        rh <= 0.7 && rh > 0.6,
+        "stopped at the stop RH, not past it: {rh}"
+    );
     let last = w.weather().last_finished().expect("an event finished");
     assert_eq!(last.mode, RainMode::Shower);
     assert!(last.volume_m3 > 0.0);
@@ -165,18 +178,26 @@ fn lightning_strikes_only_in_a_downpour_and_the_last_strike_persists() {
         w.step();
     }
     assert_eq!(w.weather().mode(), RainMode::Downpour);
-    let strikes = w.weather().counts.strikes;
-    assert!(strikes > 0);
-    let strike = w.view().weather.last_strike.expect("a strike");
-    assert!(strike.x < 8 && strike.z < 4);
+    assert!(w.weather().counts.strikes > 0);
     while w.weather().mode() == RainMode::Downpour {
         w.step();
     }
+    let strikes = w.weather().counts.strikes;
+    let strike = w.view().weather.last_strike.expect("a strike");
+    assert!(strike.x < 8 && strike.z < 4);
     for _ in 0..40 {
         w.step();
     }
-    assert_eq!(w.weather().counts.strikes, strikes, "none outside the downpour");
-    assert_eq!(w.view().weather.last_strike, Some(strike), "the last one persists");
+    assert_eq!(
+        w.weather().counts.strikes,
+        strikes,
+        "none outside the downpour"
+    );
+    assert_eq!(
+        w.view().weather.last_strike,
+        Some(strike),
+        "the last one persists"
+    );
 }
 
 #[test]
@@ -195,7 +216,11 @@ fn a_front_raises_rh_at_a_fixed_store() {
         w.step();
     }
     assert_eq!(w.atmosphere_m3(), store, "nothing rained or evaporated");
-    assert!(w.weather().temperature_c() < t0 - 2.5, "{}", w.weather().temperature_c());
+    assert!(
+        w.weather().temperature_c() < t0 - 2.5,
+        "{}",
+        w.weather().temperature_c()
+    );
     assert!(w.rh() > rh0 * 1.15, "{} against {rh0}", w.rh());
 }
 
@@ -240,8 +265,14 @@ fn evaporation_is_zero_at_saturation() {
     assert!(pond(0.9) < pond(0.5), "less as it fills");
     assert!(pond(1.0) < pond(0.5) * 1e-9, "none at saturation");
     assert_eq!(pond(1.2), 0.0, "none past it");
-    assert_eq!(evaporation_scale(&Climate::tropical_jungle(), 1.0, 26.0), 0.0);
-    assert_eq!(evaporation_scale(&Climate::tropical_jungle(), 1.3, 26.0), 0.0);
+    assert_eq!(
+        evaporation_scale(&Climate::tropical_jungle(), 1.0, 26.0),
+        0.0
+    );
+    assert_eq!(
+        evaporation_scale(&Climate::tropical_jungle(), 1.3, 26.0),
+        0.0
+    );
     assert!((evaporation_scale(&Climate::tropical_jungle(), 0.6, 26.0) - 1.0).abs() < 1e-12);
 }
 
@@ -260,9 +291,17 @@ fn the_diurnal_low_is_at_sunrise() {
             high = (d, p);
         }
     }
-    assert!((low.1 - rise).abs() < 1e-3, "coolest at sunrise, not {}", low.1);
+    assert!(
+        (low.1 - rise).abs() < 1e-3,
+        "coolest at sunrise, not {}",
+        low.1
+    );
     let peak = rise + (set - rise) * 2.0 / 3.0;
-    assert!((high.1 - peak).abs() < 1e-3, "warmest two thirds into the day, not {}", high.1);
+    assert!(
+        (high.1 - peak).abs() < 1e-3,
+        "warmest two thirds into the day, not {}",
+        high.1
+    );
     assert!((low.0 + 1.0).abs() < 1e-6 && (high.0 - 1.0).abs() < 1e-6);
 }
 
@@ -275,7 +314,10 @@ fn a_cycle_clock_has_its_sunrise_noon_and_midnight() {
         start_hour: 8.0,
         ..DayClock::default()
     };
-    assert!((clock.cycle_phase(0) - 8.0 / 24.0).abs() < 1e-12, "starts at 08:00");
+    assert!(
+        (clock.cycle_phase(0) - 8.0 / 24.0).abs() < 1e-12,
+        "starts at 08:00"
+    );
     // Half a cycle later is 20:00.
     assert!((clock.cycle_phase(60 * MIN) - 20.0 / 24.0).abs() < 1e-9);
     let (rise, set) = clock.cycle_rise_set();
@@ -326,7 +368,10 @@ fn a_local_clock_reads_the_injected_wall_time() {
     };
     let (phase, rise, set) = clock(0.0).local_phase(t);
     assert!((phase - 0.5).abs() < 0.01, "{phase}");
-    assert!(((set - rise) - 0.5).abs() < 0.02, "an equinox day is half the day: {rise}..{set}");
+    assert!(
+        ((set - rise) - 0.5).abs() < 0.02,
+        "an equinox day is half the day: {rise}..{set}"
+    );
     let (phase, ..) = clock(-90.0).local_phase(t);
     assert!((phase - 0.25).abs() < 0.01, "{phase}");
 
@@ -391,7 +436,10 @@ fn the_tropical_jungle_parses_from_a_toml_with_one_override() {
     let preset = Climate::tropical_jungle();
     assert_eq!(c.climate.temperature_c, 27.0);
     assert_eq!(c.climate.downpour.rate_r0, 1.2);
-    assert_eq!(c.climate.downpour.rh50, preset.downpour.rh50, "the rest is the preset");
+    assert_eq!(
+        c.climate.downpour.rh50, preset.downpour.rh50,
+        "the rest is the preset"
+    );
     assert_eq!(c.climate.diurnal_c, preset.diurnal_c);
     assert_eq!(c.climate.dry_gap_max_s, 900.0);
 

@@ -1150,21 +1150,13 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                             "closed cycle, {:.2} m³ aloft, {}, {:.0} mm/h rain, \
                              {:.0} mm/h evaporation",
                             world.atmosphere_m3(),
-                            if wc.shower_interval_max_s > 0.0 {
-                                // Scheduled: the calendar says when, and the fraction is
-                                // only the floor the store has to clear to pay for it.
-                                format!(
-                                    "showers every {:.0}-{:.0} min above a {:.0} % floor",
-                                    wc.shower_interval_min_s / 60.0,
-                                    wc.shower_interval_max_s / 60.0,
-                                    wc.shower_trigger_fraction * 100.0,
-                                )
-                            } else {
-                                format!(
-                                    "showers at {:.0} % of total",
-                                    wc.shower_trigger_fraction * 100.0
-                                )
-                            },
+                            format!(
+                                "climate {}, RH {:.2}, dry gap {:.0}-{:.0} min",
+                                wc.climate.preset.name(),
+                                world.rh(),
+                                wc.climate.dry_gap_min_s / 60.0,
+                                wc.climate.dry_gap_max_s / 60.0,
+                            ),
                             wc.rain_m_per_s * 3600.0 * 1000.0,
                             wc.evaporation_m_per_s * 3600.0 * 1000.0,
                         )

@@ -25,15 +25,16 @@ fn tiny() -> cubarium_voxel::Config {
     let mut recipe = cubarium_voxel::Recipe::DEFAULT;
     recipe.water.min_lake_m2 = 0.0;
     recipe.water.min_tier_pools = 0;
-    recipe.water.shower_volume_m3 = 0.005;
-    cubarium_voxel::Config {
+    let mut config = cubarium_voxel::Config {
         width: 64,
         height: 24,
         depth: 8,
         voxel_m: 0.25,
         landform: Landform::Staged(recipe),
         ..cubarium_voxel::Config::default()
-    }
+    };
+    config.climate.opening_min_s = 1.0;
+    config
 }
 
 /// The tiny ring founded on an asked-for seed, mid-shower water captured.

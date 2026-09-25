@@ -614,18 +614,15 @@ pub struct Water {
     /// the outlet's export go into the lumped atmosphere store and come back as showers,
     /// and nothing leaves. False keeps the open flow-through budget every fixture has.
     pub closed_cycle: bool,
-    /// Rain onto exposed top surfaces while a shower is falling, metres per second.
+    /// R₀: the rate a shower falls at, metres per second. The weather's modes rain at
+    /// multiples of it (`[world.climate] <mode>.rate_r0`).
     pub rain_m_per_s: f64,
-    /// Evaporation from open free-water surfaces, metres per second.
+    /// Evaporation from open free-water surfaces at the mean temperature and RH 0.6,
+    /// metres per second (`crate::weather::evaporation_scale`).
     pub evaporation_m_per_s: f64,
-    /// Share of the world's total water the atmosphere must hold before a shower starts.
-    pub shower_trigger_fraction: f64,
-    /// How much one shower delivers, cubic metres.
-    pub shower_volume_m3: f64,
-    /// Shortest and longest gap between showers, seconds of simulated time. `0 / 0` is
-    /// no schedule: showers fire whenever the store crosses the trigger.
-    pub shower_interval_min_s: f64,
-    pub shower_interval_max_s: f64,
+    /// The share of the world's water the atmosphere-fed stream leaves aloft:
+    /// [`crate::Config::reentry_floor_fraction`].
+    pub reentry_floor_fraction: f64,
 
     /// How deep the ring's **lake** — the lowest open-sky basin — stands before it
     /// overflows into the outlet, metres above its floor. The outlet sits at this level on
@@ -639,8 +636,8 @@ pub struct Water {
     pub min_lake_m2: f64,
     /// **River re-entry**, cubic metres per second: under the closed budget the water the
     /// outlet sends aloft comes back not only as showers but as a stream emerging at the
-    /// spring cell, drawn from the atmosphere store while it stands above the shower
-    /// floor. The ring is a slice of a wider world; the river that leaves at the bottom
+    /// spring cell, drawn from the atmosphere store while it stands above
+    /// `reentry_floor_fraction`. The ring is a slice of a wider world; the river that leaves at the bottom
     /// lake re-enters at the top. Zero is showers only, the 2026-09-20 route B cycle.
     /// Wrysk's decision, 2026-09-21.
     pub reentry_m3_per_s: f64,
@@ -672,10 +669,7 @@ impl Water {
         closed_cycle: false,
         rain_m_per_s: 0.0,
         evaporation_m_per_s: 0.0,
-        shower_trigger_fraction: 0.02,
-        shower_volume_m3: 5.0,
-        shower_interval_min_s: 0.0,
-        shower_interval_max_s: 0.0,
+        reentry_floor_fraction: 0.02,
         lake_depth_m: 0.0,
         min_lake_m2: 0.0,
         reentry_m3_per_s: 0.0,
@@ -693,19 +687,9 @@ impl Water {
     /// rings (0.04 before soil retention raised field capacity from 0.25 to 0.65), so this leaves roughly 0.09 m for the pools: on `default` that is 16 m³ in
     /// the basins against the 142 m³ it would take to fill every one of them to its spill.
     /// Ponds in the low ground, not a flooded ring.
-    /// The weather, chosen against package W3's hour-long study on all three presets.
-    ///
-    /// **When** it rains is the schedule: 300 to 900 s, Wrysk's 5-to-15-minute cadence,
-    /// drawn per gap from the world's own seed. The **trigger is no longer a trigger**:
-    /// at 0.01 of the world's water it is an availability floor a healthy store clears
-    /// easily, so the calendar decides and the store only ever vetoes. It sits well under
-    /// `atmosphere_fraction` 0.08, which is what the world starts aloft.
-    ///
-    /// **Rain rate and shower volume are one choice.** A shower lasts
-    /// `shower_volume_m3 / (rain_m_per_s × sky area)`, so 3.5e-5 m/s (126 mm/h) against
-    /// 0.4 m³ is a minute of visible rain on `default`'s 192 m². The volume is therefore
-    /// **per preset**, scaled to footprint ([`Water::SMALL`], [`Water::WIDE`]), so the
-    /// same rate gives every ring the same minute.
+    /// **When** and **how** it rains is the climate's business (`[world.climate]`,
+    /// `crate::weather`), not the landscape's. The recipe keeps R₀, the rate a shower
+    /// falls at: 3.5e-5 m/s (126 mm/h), which the modes scale.
     ///
     /// Evaporation is as high as the rule allows — it must stay below the shower rate,
     /// because `evaporate` runs straight after `rain` and would otherwise lift fresh rain
@@ -718,10 +702,7 @@ impl Water {
         closed_cycle: true,
         rain_m_per_s: 3.5e-5,
         evaporation_m_per_s: 3.0e-5,
-        shower_trigger_fraction: 0.01,
-        shower_volume_m3: 0.4,
-        shower_interval_min_s: 300.0,
-        shower_interval_max_s: 900.0,
+        reentry_floor_fraction: 0.01,
         // Three voxels at 0.25 m. The lake holds the rows **below** the datum — the outlet
         // sits in the datum row, on a rim column whose ground tops out just under it — so
         // this is a two-voxel, half-metre pond. Two voxels of ask leaves one voxel of
@@ -746,10 +727,6 @@ impl Water {
         lake_drain_m2_per_s: 0.0,
     };
 
-    /// `small`'s ring is 60 m² of footprint against `default`'s 192, and both the store's
-    /// refill and one tick of rain scale with that area. So the **shower scales with it
-    /// too**: the same rain rate then puts the same minute of rain on every preset, and a
-    /// shower costs the same share of what the interval lifted.
     /// What a **hand-built fixture** is charged with: the cycle and the rates, at the
     /// inventory the presets carried before the lake. A preset's inventory is now sized
     /// to lift a whole ring's water table up to its lake floor, and pouring that into the
@@ -761,7 +738,6 @@ impl Water {
     };
 
     pub const SMALL: Water = Water {
-        shower_volume_m3: 0.125,
         // T2's sweep: the stream's thinnest cell must clear the presenter's water
         // threshold, and a 0.125 m voxel holds an eighth of a 0.25 m one, so an eighth of
         // the rate gives the same fill fraction. Ten times the margin, sky within ±5 %.
@@ -784,7 +760,6 @@ impl Water {
 
     /// `wide` is 384 m², twice `default`.
     pub const WIDE: Water = Water {
-        shower_volume_m3: 0.8,
         // Twice the ring, and its tier-0 trough is wider with it: 6.3 m² at seed 1.
         min_lake_m2: 6.0,
         ..Water::DEFAULT
@@ -797,13 +772,7 @@ impl Water {
             ("water.aquifer_head_m", self.aquifer_head_m),
             ("water.rain_m_per_s", self.rain_m_per_s),
             ("water.evaporation_m_per_s", self.evaporation_m_per_s),
-            (
-                "water.shower_trigger_fraction",
-                self.shower_trigger_fraction,
-            ),
-            ("water.shower_volume_m3", self.shower_volume_m3),
-            ("water.shower_interval_min_s", self.shower_interval_min_s),
-            ("water.shower_interval_max_s", self.shower_interval_max_s),
+            ("water.reentry_floor_fraction", self.reentry_floor_fraction),
             ("water.lake_depth_m", self.lake_depth_m),
             ("water.min_lake_m2", self.min_lake_m2),
             ("water.reentry_m3_per_s", self.reentry_m3_per_s),
@@ -820,9 +789,9 @@ impl Water {
             self.atmosphere_fraction
         );
         anyhow::ensure!(
-            self.shower_trigger_fraction <= 1.0,
-            "water.shower_trigger_fraction is a share of the world's water, not {}",
-            self.shower_trigger_fraction
+            self.reentry_floor_fraction <= 1.0,
+            "water.reentry_floor_fraction is a share of the world's water, not {}",
+            self.reentry_floor_fraction
         );
         Ok(())
     }
@@ -837,10 +806,7 @@ impl Water {
         c.closed_water_budget = self.closed_cycle;
         c.rain_m_per_s = self.rain_m_per_s;
         c.evaporation_m_per_s = self.evaporation_m_per_s;
-        c.shower_trigger_fraction = self.shower_trigger_fraction;
-        c.shower_volume_m3 = self.shower_volume_m3;
-        c.shower_interval_min_s = self.shower_interval_min_s;
-        c.shower_interval_max_s = self.shower_interval_max_s;
+        c.reentry_floor_fraction = self.reentry_floor_fraction;
         c.reentry_m3_per_s = self.reentry_m3_per_s;
         c.reentry_from_aquifer = self.reentry_from_aquifer;
         c.lake_drain_m2_per_s = self.lake_drain_m2_per_s;
@@ -1447,17 +1413,14 @@ mod tests {
     }
 
     /// The recipe decides the weather, so every number it holds has to arrive on the
-    /// config the world runs on — the schedule included.
+    /// config the world runs on.
     #[test]
     fn a_recipes_water_writes_the_whole_cycle_onto_the_config() {
         let w = Water {
             closed_cycle: true,
             rain_m_per_s: 3e-5,
             evaporation_m_per_s: 1e-5,
-            shower_trigger_fraction: 0.07,
-            shower_volume_m3: 0.4,
-            shower_interval_min_s: 300.0,
-            shower_interval_max_s: 900.0,
+            reentry_floor_fraction: 0.07,
             ..Water::DRY
         };
         let mut c = Config::default();
@@ -1465,10 +1428,7 @@ mod tests {
         assert!(c.closed_water_budget);
         assert_eq!(c.rain_m_per_s, 3e-5);
         assert_eq!(c.evaporation_m_per_s, 1e-5);
-        assert_eq!(c.shower_trigger_fraction, 0.07);
-        assert_eq!(c.shower_volume_m3, 0.4);
-        assert_eq!(c.shower_interval_min_s, 300.0);
-        assert_eq!(c.shower_interval_max_s, 900.0);
+        assert_eq!(c.reentry_floor_fraction, 0.07);
 
         // And the dry recipe leaves a config exactly as it found it.
         let mut untouched = Config::default();

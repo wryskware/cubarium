@@ -327,9 +327,9 @@ pub fn seed_with_founder_counts_capturing(
     seed_pre_rolled(world, flora, fauna, &pre, founder_counts)
 }
 
-/// Hard cap on the opening shower, in ticks: five simulated minutes. A preset's shower
-/// is sized to fall in about a minute on its own footprint (`cubarium_voxel::Water`), so
-/// this only ends a shower that could not finish.
+/// Hard cap on the opening rain, in ticks: five simulated minutes. The opening shower
+/// falls at least the climate's `opening_min_s` (a minute) and then stops by the weather's
+/// own rules, so this only ends rain that would not.
 const SHOWER_CAP: u32 = 6000;
 
 /// Hard cap on the drain after the opening shower, in ticks: two simulated minutes. The
@@ -342,10 +342,11 @@ const DRAIN_CAP: u32 = 2400;
 /// The startup pre-roll, before anything is seeded.
 ///
 /// 1. **Settle** as the startup always has ([`SETTLE_CAP`]).
-/// 2. For a fresh world with a scheduled cycle, **open with a shower**: the first shower
-///    is made due now instead of at its drawn 5–15 minutes (later ones are drawn exactly
-///    as before, from where this one ends), falls, and the water **drains** to rest
-///    again under the settle's own convergence, capped at [`DRAIN_CAP`]. A closed
+/// 2. For a fresh closed world, **open with a shower**
+///    (`cubarium_voxel::World::open_with_rain`): a shower starts now, gap or no gap, and
+///    rains until the weather ends it (a forced downpour it turns into included), and the
+///    water **drains** to rest again under the settle's own convergence, capped at
+///    [`DRAIN_CAP`]. A closed
 ///    world's outlet is opened first, as the live run opens it before its first tick:
 ///    the shower the founders are judged against is the shower the running world has.
 /// 3. **Watch the stream** for [`STREAM_WATCH_TICKS`], as before.
@@ -362,9 +363,8 @@ pub fn pre_roll(world: &mut World, open_with_a_shower: bool) -> PreRoll {
 }
 
 /// [`pre_roll`], and when `mid_shower` is given, a copy of the world **half way through
-/// the opening shower** put into it: the first tick after the shower started on which
-/// the allowance left has fallen to half of what it was after the shower's first tick,
-/// or the shower's last tick if it ends sooner. Left `None` when the world did not rain.
+/// the opening shower** put into it: the tick half its guaranteed minimum
+/// (`opening_min_s`) into it. Left `None` when the world did not rain.
 /// The copy is taken, never stepped: the pre-roll itself runs exactly as [`pre_roll`].
 pub fn pre_roll_capturing(
     world: &mut World,
@@ -387,36 +387,33 @@ pub fn pre_roll_capturing(
         ticks: settle.ticks,
         ..PreRollReport::default()
     };
-    if open_with_a_shower && world.config().shower_interval_max_s > 0.0 {
-        if world.config().closed_water_budget && !world.outlet_open() {
+    if open_with_a_shower && world.config().closed_water_budget {
+        if !world.outlet_open() {
             world.apply(cubarium_voxel::Command::SetOutlet { open: true });
         }
-        let before = world.view().ledger.showers;
-        world.bring_shower_forward();
+        let before = world.view().ledger.rain_events;
+        // An empty sky cannot open with rain; it rains when it can, in the running world.
+        let started = world.open_with_rain();
+        let half = (world.config().climate.opening_min_s * 0.5 * f64::from(cubarium_voxel::TICK_HZ))
+            .round()
+            .max(1.0) as u32;
         let mut ticks = 0u32;
-        let mut half_left: Option<f64> = None;
-        while ticks < SHOWER_CAP {
+        while started && ticks < SHOWER_CAP {
             world.step();
             ticks += 1;
             watch(world, &mut wettest);
-            let started = world.view().ledger.showers > before;
-            if started
+            let raining = world.view().is_raining();
+            if (ticks >= half || !raining)
                 && let Some(slot) = mid_shower.as_deref_mut()
                 && slot.is_none()
             {
-                let left = world.shower_left_m3();
-                let half = *half_left.get_or_insert(0.5 * left);
-                if left <= half {
-                    *slot = Some(world.clone());
-                }
+                *slot = Some(world.clone());
             }
-            // A store under its floor cannot pay for the shower on its due tick; it
-            // stays due and falls when the store can, in the running world.
-            if !started || world.shower_left_m3() <= 0.0 {
+            if !raining {
                 break;
             }
         }
-        report.opening_shower = world.view().ledger.showers > before;
+        report.opening_shower = started || world.view().ledger.rain_events > before;
         report.shower_ticks = ticks;
         report.drain = world.settle_watching(DRAIN_CAP, |w| watch(w, &mut wettest));
         report.ticks += ticks + report.drain.ticks;
@@ -1685,10 +1682,13 @@ mod tests {
             closed_water_budget: true,
             initial_atmosphere_m3: 0.5,
             rain_m_per_s: 0.04,
-            shower_volume_m3: 0.25,
-            shower_trigger_fraction: 0.01,
-            shower_interval_min_s: 300.0,
-            shower_interval_max_s: 900.0,
+            // A second and a half of guaranteed shower out of a sky at RH ~0.4 (it holds
+            // the world's water once over), so nothing forces a storm before it.
+            climate: cubarium_voxel::weather::Climate {
+                opening_min_s: 1.5,
+                capacity_share: 1.0,
+                ..cubarium_voxel::weather::Climate::tropical_jungle()
+            },
             ..Config::default()
         };
         let mut world = World::empty(cfg.clone());
@@ -1714,18 +1714,17 @@ mod tests {
     }
 
     /// **The pre-roll** (item 1). The world opens with its shower: by the time anything
-    /// is planted it has fallen and ended, and the next one is drawn. A face that stood
+    /// is planted it has fallen and ended, and a dry gap is drawn. A face that stood
     /// under more than a species' drown depth **during** the shower is not offered to
     /// that species, even though it is dry again when the founders are placed.
     #[test]
     fn the_world_opens_with_a_shower_and_a_face_it_flooded_is_not_offered() {
         let mut world = showery_plain();
-        assert!(world.next_shower_tick() > 1000, "the drawn gap is minutes away");
         let pre = pre_roll(&mut world, true);
         assert!(pre.report.opening_shower, "{:?}", pre.report);
-        assert_eq!(world.view().ledger.showers, 1, "exactly the opening shower fell");
-        assert!(world.shower_left_m3() <= 0.0, "and it ended");
-        assert!(world.next_shower_tick() > world.tick(), "the next one is drawn");
+        assert!(world.view().ledger.rain_events >= 1, "the opening shower fell");
+        assert!(!world.view().is_raining(), "and it ended");
+        assert!(world.weather().gap_until() > world.tick(), "a dry gap is drawn");
 
         // The plain stood under water and is dry again.
         let view = world.view();
@@ -1909,22 +1908,22 @@ mod tests {
         // The opening shower is shortened to a few seconds so the pre-roll fits; the
         // ledgers are what is being asked, through the shower, the drain and the seeding.
         let preset = cubarium_voxel::Preset::find("default").unwrap();
-        let mut recipe = preset.recipe;
-        recipe.water.shower_volume_m3 = 0.01;
-        let world = World::new(Config {
+        let mut config = Config {
             seed: 1,
             width: 48,
-            landform: cubarium_voxel::Landform::Staged(recipe),
+            landform: cubarium_voxel::Landform::Staged(preset.recipe),
             ..preset.config()
-        });
-        assert!(world.config().shower_interval_max_s > 0.0, "a scheduled cycle");
+        };
+        config.climate.opening_min_s = 1.0;
+        let world = World::new(config);
+        assert!(world.config().closed_water_budget, "a closed cycle");
         steps_with_closed_ledgers(world);
     }
 
     fn steps_with_closed_ledgers(world: World) {
         let (mut world, mut flora, mut fauna, seeded) = seeded(world);
         assert!(seeded.stands > 0, "a habitat with plants in it: {seeded:?}");
-        if world.config().shower_interval_max_s > 0.0 {
+        if world.config().closed_water_budget {
             assert!(seeded.pre_roll.opening_shower, "{:?}", seeded.pre_roll);
         }
         let water = world.view().total_residual();

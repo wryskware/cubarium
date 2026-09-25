@@ -31,3 +31,25 @@ preset = "terrarium-small"
 #
 # [world.landform.water]
 # reentry_m3_per_s = 2.0e-3    # the stream at the spring
+
+# The day clock (`design/handoffs/voxel-weather-2026-09-24.md`, Wrysk's decision 1).
+[world.day]
+mode = "cycle"      # "cycle" | "local" | "off"
+length_min = 120    # cycle: one day and night, minutes of simulated time
+daylight = 0.67     # cycle: the share of it the sun is up
+start_hour = 8.0    # cycle: where a fresh world starts, on a 24-hour clock of its day
+# local: the wall clock, with today's sunrise and sunset at this place
+# (06:00 and 18:00 on the local clock when these are absent)
+# latitude = 47.6
+# longitude = -122.3
+# off: no night in the simulation (plants always lit, animals never sleep)
+# look = "day"      # off only: "day" or "night", the picture alone
+
+# The climate: temperature and wetness, and so when and how it rains. Any key of the
+# preset can be overridden here one by one (crates/cubarium-voxel/src/weather.rs).
+[world.climate]
+preset = "tropical_jungle"
+# dry_gap_min_s = 300   # the shortest wait after a rain event before a natural one;
+# dry_gap_max_s = 900   # 0 / 0 turns the gap off
+# [world.climate.downpour]
+# rate_r0 = 1.5         # a mode's key, e.g. the rate it rains at in multiples of R0

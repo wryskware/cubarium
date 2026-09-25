@@ -57,8 +57,7 @@ impl World {
         self.config.clone_from(&live.config);
         self.aquifer_m3 = live.aquifer_m3;
         self.atmosphere_m3 = live.atmosphere_m3;
-        self.shower_left_m3 = live.shower_left_m3;
-        self.next_shower_tick = live.next_shower_tick;
+        self.weather.clone_from(&live.weather);
         self.outlet_open = live.outlet_open;
         self.tick = live.tick;
         self.terrain_version = live.terrain_version;

@@ -54,7 +54,7 @@ pub struct Config {
     pub outlet_m3_per_s: f64,
     /// Whether the world runs a **closed** water budget: evaporation, transpiration and
     /// the outlet's export are deposited into [`crate::World::atmosphere_m3`] instead of
-    /// leaving the world, and rain falls only as showers drawn back out of that store.
+    /// leaving the world, and rain falls only as the weather model's events drawn back out of that store.
     /// Nothing but [`crate::Ledger::displaced_out`] leaves a closed world.
     ///
     /// False — the default — is the **open** flow-through budget every world had before:
@@ -62,39 +62,27 @@ pub struct Config {
     /// The flora study harness and every water fixture run on it, unchanged.
     pub closed_water_budget: bool,
     /// Water aloft at creation, cubic metres. A closed world with a dry atmosphere and a
-    /// dry outlet cell has nothing to start a shower with; this is the water the cycle
+    /// dry outlet cell has nothing to rain with; this is the water the cycle
     /// begins holding. Counted in [`crate::Ledger::initial_atmosphere`], never in
     /// `initial_stored`. Ignored under the open budget.
     pub initial_atmosphere_m3: f64,
-    /// Closed budget: the fraction of the world's **total** water the atmosphere store
-    /// must hold before a shower starts. Between showers no rain falls at all.
-    ///
-    /// Not tuned. It is the one knob that decides whether a world cycles or locks dry:
-    /// set it above the share of the world's water the return flows can actually lift,
-    /// and the last shower is the last shower.
-    pub shower_trigger_fraction: f64,
-    /// Closed budget: how much water one shower delivers, cubic metres, falling at
-    /// [`Config::rain_m_per_s`]. The shower ends when this much has fallen, when the
-    /// store empties, or when a brim-full world stops accepting any of it.
-    pub shower_volume_m3: f64,
-    /// Closed budget: the shortest and longest gap between showers, in **seconds of
-    /// simulated time**. `0 / 0`, the default, is **no scheduler**: showers fire whenever
-    /// the store crosses the trigger, which is what every fixture had before.
-    ///
-    /// With a positive maximum the world draws its next shower time from its own seed —
-    /// `end of the last shower + U[min, max]` — and
-    /// [`Config::shower_trigger_fraction`] stops being a *trigger* and becomes an
-    /// **availability floor**: a due shower falls if the store can pay for it and waits
-    /// for the first later tick it can otherwise. A timer decides *when* it rains; the
-    /// store still decides *whether* it can. An empty sky never rains, which is the
-    /// drought lock kept as a feature.
-    pub shower_interval_min_s: f64,
-    pub shower_interval_max_s: f64,
+    /// The day clock: `[world.day]` (`crate::weather::DayClock`).
+    pub day: crate::weather::DayClock,
+    /// The climate: `[world.climate]`, a named preset with per-key overrides
+    /// (`crate::weather::Climate`). Under the closed budget it decides when and how it
+    /// rains; under the open budget it still sets the temperature.
+    pub climate: crate::weather::Climate,
     /// Closed budget: water returned from the atmosphere store as a **stream at the spring
-    /// cell**, cubic metres per second, while the store stands above the shower floor.
-    /// The river that leaves at the outlet re-enters upstream. Zero — the default — is
-    /// showers only. Ignored under the open budget.
+    /// cell**, cubic metres per second, while the store stands above
+    /// [`Config::reentry_floor_fraction`] of the world's water. The river that leaves at
+    /// the outlet re-enters upstream. Zero — the default — is rain only. Ignored under the
+    /// open budget.
     pub reentry_m3_per_s: f64,
+    /// The share of the world's total water the atmosphere store keeps back from the
+    /// atmosphere-fed stream: it draws only above it. (Until WX1 this was the shower
+    /// trigger, which the stream shared; the weather model has no trigger, so the stream
+    /// keeps its floor under its own name, at the same values.)
+    pub reentry_floor_fraction: f64,
     /// Where that stream draws from: the atmosphere store (false, the default), or the
     /// **aquifer** (true) — groundwater emerging at the spring, which leaves the weather
     /// alone. From the aquifer it runs under either budget while the water table stands
@@ -137,11 +125,10 @@ impl Default for Config {
             outlet_m3_per_s: 0.05,
             closed_water_budget: false,
             initial_atmosphere_m3: 0.0,
-            shower_trigger_fraction: 0.02,
-            shower_volume_m3: 5.0,
-            shower_interval_min_s: 0.0,
-            shower_interval_max_s: 0.0,
+            day: crate::weather::DayClock::default(),
+            climate: crate::weather::Climate::tropical_jungle(),
             reentry_m3_per_s: 0.0,
+            reentry_floor_fraction: 0.02,
             reentry_from_aquifer: false,
             reentry_floor_head_m: 0.0,
             lake_drain_m2_per_s: 0.0,
@@ -196,10 +183,7 @@ impl Config {
             ("lake_drain_m2_per_s", self.lake_drain_m2_per_s),
             ("initial_aquifer_head_m", self.initial_aquifer_head_m),
             ("initial_atmosphere_m3", self.initial_atmosphere_m3),
-            ("shower_trigger_fraction", self.shower_trigger_fraction),
-            ("shower_volume_m3", self.shower_volume_m3),
-            ("shower_interval_min_s", self.shower_interval_min_s),
-            ("shower_interval_max_s", self.shower_interval_max_s),
+            ("reentry_floor_fraction", self.reentry_floor_fraction),
         ] {
             ensure!(
                 rate.is_finite() && rate >= 0.0,
@@ -207,20 +191,16 @@ impl Config {
             );
         }
         ensure!(
-            self.shower_trigger_fraction <= 1.0,
-            "shower_trigger_fraction is a fraction of the world's water, not {}",
-            self.shower_trigger_fraction
+            self.reentry_floor_fraction <= 1.0,
+            "reentry_floor_fraction is a fraction of the world's water, not {}",
+            self.reentry_floor_fraction
         );
         ensure!(
             self.water_substeps >= 1,
             "water_substeps must be at least 1, not 0"
         );
-        ensure!(
-            self.shower_interval_min_s <= self.shower_interval_max_s,
-            "the shortest gap between showers cannot be longer than the longest: {} > {}",
-            self.shower_interval_min_s,
-            self.shower_interval_max_s
-        );
+        self.day.validate().context("[world.day]")?;
+        self.climate.validate().context("[world.climate]")?;
         if let Landform::Staged(recipe) = &self.landform {
             recipe.validate().context("the staged landform recipe")?;
         }
@@ -288,45 +268,24 @@ impl Config {
 mod tests {
     use super::*;
 
-    /// The shower interval is a range, so it has to be one: no negatives, nothing
-    /// backwards, and zero to zero is the "no schedule" every fixture runs on.
+    /// The dry gap is a range, so it has to be one: no negatives, nothing backwards, and
+    /// zero to zero is the gap turned off.
     #[test]
-    fn the_shower_interval_must_be_a_range() {
-        let with = |min, max| Config {
-            shower_interval_min_s: min,
-            shower_interval_max_s: max,
-            ..Config::default()
+    fn the_dry_gap_must_be_a_range() {
+        let with = |min, max| {
+            let mut c = Config::default();
+            c.climate.dry_gap_min_s = min;
+            c.climate.dry_gap_max_s = max;
+            c
         };
-        with(0.0, 0.0)
-            .validate()
-            .expect("no schedule is a schedule");
-        with(300.0, 900.0)
-            .validate()
-            .expect("five to fifteen minutes");
+        with(0.0, 0.0).validate().expect("no gap");
+        with(300.0, 900.0).validate().expect("five to fifteen minutes");
         with(600.0, 600.0).validate().expect("a fixed gap");
 
-        let err = format!("{:#}", with(900.0, 300.0).unwrap_err_msg());
+        let err = format!("{:#}", with(900.0, 300.0).validate().unwrap_err());
         assert!(err.contains("cannot be longer"), "{err}");
-        assert!(
-            with(-1.0, 300.0).validate().is_err(),
-            "a negative shortest gap"
-        );
-        assert!(
-            with(300.0, -1.0).validate().is_err(),
-            "a negative longest gap"
-        );
-        assert!(
-            with(f64::NAN, 300.0).validate().is_err(),
-            "a gap that is not a number"
-        );
-    }
-
-    trait UnwrapErrMsg {
-        fn unwrap_err_msg(self) -> anyhow::Error;
-    }
-    impl UnwrapErrMsg for Config {
-        fn unwrap_err_msg(self) -> anyhow::Error {
-            self.validate().expect_err("this config is invalid")
-        }
+        assert!(with(-1.0, 300.0).validate().is_err(), "a negative shortest gap");
+        assert!(with(300.0, -1.0).validate().is_err(), "a negative longest gap");
+        assert!(with(f64::NAN, 300.0).validate().is_err(), "a gap that is not a number");
     }
 }
