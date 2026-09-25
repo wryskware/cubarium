@@ -343,6 +343,11 @@ pub struct Stand {
     /// value throughout the crate and the host.
     #[serde(default)]
     pub layer_stock: [f64; MAX_FOLIAGE_LAYERS],
+    /// **Induced grazing defence**, `0..1`: raised by every bite
+    /// ([`SpeciesConfig::defence_per_bite`]), decaying at the species' half-life once
+    /// grazing stops. A bite takes `(1 − defence)` of what was asked.
+    #[serde(default)]
+    pub defence: f64,
     /// Which entry of the species' `profile` the stocks above are binned for. When the
     /// stand's wood crosses a stage threshold, the tick re-bins the **existing** total
     /// into the new stage bottom-up and updates this; nothing is created
@@ -626,6 +631,14 @@ pub enum Dispersal {
     /// with no margin in reach it is litter under the parent.
     Water,
 }
+
+/// The shipped defence rise per bite (`defence_per_bite`). Measured 2026-09-25 on the
+/// training world (`examples/defence_probe.rs`, seeds 1-4): a browser at a crown bites
+/// on 15-20 % of ticks (once per controller sample), so 15 min of continuous grazing is
+/// 2,700-3,600 bites and this leaves 12-20 % of the bite; 30 min leaves 2-4 %.
+pub const DEFENCE_PER_BITE: f64 = 6e-4;
+/// The shipped defence half-life once grazing stops: 1.5 h (`defence_half_life_s`).
+pub const DEFENCE_HALF_LIFE_S: f64 = 5400.0;
 
 /// The plant model of one species: `design/ecology-v1-contract.md` §4 parameters, plus
 /// the terrain couplings that replace the old noise fields.
@@ -937,6 +950,14 @@ pub struct SpeciesConfig {
     /// income is substrate, not cap, so its refuge only protects the tissue that fruits
     /// again, and the shredder has litter to fall back on.
     pub graze_refuge: f64,
+    /// **Induced grazing defence**, the rise: every bite that takes anything moves the
+    /// stand's defence this fraction of the way to 1
+    /// (`design/handoffs/voxel-lifespan-defence-2026-09-25.md`, B). A bite takes
+    /// `(1 − defence)` of what was asked, so a crown grazed without pause gives less and
+    /// less. Zero is no defence. The same for every species at the defaults.
+    pub defence_per_bite: f64,
+    /// The defence's **half-life** once grazing stops, seconds. Zero or less: no decay.
+    pub defence_half_life_s: f64,
     /// **What is in that volume**: the species' anatomy, staged by `wood / wood_max`.
     /// The first entry whose `wood_fraction_max` is at or above the fraction applies;
     /// the last must catch a full-grown stand. Its foliage-bearing layers are the
@@ -1219,6 +1240,8 @@ impl SpeciesConfig {
             crown_radius_m: [0.125, 0.375],
             // The refuge a plant the brief does not name keeps (`graze_refuge`'s doc).
             graze_refuge: 0.15,
+            defence_per_bite: DEFENCE_PER_BITE,
+            defence_half_life_s: DEFENCE_HALF_LIFE_S,
             // The v1 base carries no anatomy of its own: every preset states one.
             profile: SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer(
                 [0.0, 1.0],
@@ -2557,6 +2580,16 @@ impl FloraConfig {
     /// fixed stock with the ordinary withdrawal and eaten down to nothing by policies
     /// trained before the refuge existed; the retrain decides whether its arenas keep a
     /// floor. Not a shipped configuration: the live world's plants keep theirs.
+    /// Every species with **no induced grazing defence**: for the frozen training arenas,
+    /// whose finite patches are settled by the fixture's own withdrawal and whose
+    /// policies were trained before the defence existed. Not a shipped configuration.
+    pub fn without_defence(mut self) -> FloraConfig {
+        for species in Species::ALL {
+            self.species_mut(species).defence_per_bite = 0.0;
+        }
+        self
+    }
+
     pub fn without_graze_refuge(mut self) -> FloraConfig {
         for species in Species::ALL {
             self.species_mut(species).graze_refuge = 0.0;
@@ -4267,6 +4300,7 @@ impl Flora {
             parcel: 0.0,
             layer_stock: [0.0; MAX_FOLIAGE_LAYERS],
             profile_stage: 0,
+            defence: 0.0,
         };
         // A founder arrives full, so its layers arrive at their capacities.
         stand.bin_foliage(sc, self.config.voxel_m);
@@ -4349,6 +4383,13 @@ impl Flora {
         }
         let i = self.stands.binary_search_by_key(&site, |s| s.site).ok()?;
         let e_v = self.config.species(self.stands[i].species).energy_density;
+        // The induced defence: the bite takes `(1 − defence)` of what was asked, and a
+        // bite that took anything raises the defence (below, once it is known).
+        let rise = self.config.species(self.stands[i].species).defence_per_bite;
+        let want = want * (1.0 - self.stands[i].defence.clamp(0.0, 1.0));
+        if !(want > 0.0) {
+            return None;
+        }
         // Which layers the mouth may take from, lowest first, and what each offers: its
         // edible stock, above the grazing floor, and never the floor itself.
         let offered: Vec<(usize, f64)> =
@@ -4395,6 +4436,10 @@ impl Flora {
             mineral,
             energy: e_v * organic,
         });
+        if rise > 0.0 {
+            let d = &mut self.stands[i].defence;
+            *d += rise.min(1.0) * (1.0 - *d);
+        }
         Some(TakenFoliage { taken, per_layer })
     }
 

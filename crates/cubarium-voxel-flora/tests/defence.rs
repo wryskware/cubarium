@@ -28,12 +28,12 @@ fn flat() -> World {
     world
 }
 
-/// A fast-inducing, fast-relaxing test config: `rate` per second of grazing, `half` s.
-fn config(rate: f64, half: f64) -> FloraConfig {
+/// A fast-inducing, fast-relaxing test config: `rise` per bite, `half` s.
+fn config(rise: f64, half: f64) -> FloraConfig {
     let mut c = FloraConfig::for_voxel_size(0.25);
     for s in Species::ALL {
         let sc = c.species_mut(s);
-        sc.defence_rate_per_s = rate;
+        sc.defence_per_bite = rise;
         sc.defence_half_life_s = half;
     }
     c
@@ -68,9 +68,9 @@ fn defence(flora: &Flora, site: Site) -> f64 {
 fn the_defaults_are_shared_and_on() {
     let c = FloraConfig::default();
     let first = c.species(Species::ALL[0]);
-    assert!(first.defence_rate_per_s > 0.0 && first.defence_half_life_s > 0.0);
+    assert!(first.defence_per_bite > 0.0 && first.defence_half_life_s > 0.0);
     for s in Species::ALL {
-        assert_eq!(c.species(s).defence_rate_per_s, first.defence_rate_per_s);
+        assert_eq!(c.species(s).defence_per_bite, first.defence_per_bite);
         assert_eq!(c.species(s).defence_half_life_s, first.defence_half_life_s);
     }
 }
@@ -79,7 +79,7 @@ fn the_defaults_are_shared_and_on() {
 /// whole bite, and the grazed stand's defence has risen.
 #[test]
 fn repeated_bites_shrink_and_a_fresh_neighbour_gives_a_full_bite() {
-    let (_, mut flora, grazed, fresh) = two_crowns(config(0.5, 3600.0));
+    let (_, mut flora, grazed, fresh) = two_crowns(config(0.025, 3600.0));
     let want = 1e-5;
     let mut last = f64::INFINITY;
     for bite in 0..150 {
@@ -103,7 +103,7 @@ fn repeated_bites_shrink_and_a_fresh_neighbour_gives_a_full_bite() {
 /// The defence decays toward zero once grazing stops, at its half-life.
 #[test]
 fn the_defence_decays_after_grazing_stops() {
-    let (mut world, mut flora, grazed, _) = two_crowns(config(0.5, 2.0));
+    let (mut world, mut flora, grazed, _) = two_crowns(config(0.025, 2.0));
     for _ in 0..100 {
         flora.take_foliage(grazed, 1e-5);
     }
@@ -125,7 +125,7 @@ fn the_defence_decays_after_grazing_stops() {
 /// ledger's three residuals stay at rounding.
 #[test]
 fn the_plant_ledger_closes_with_the_defence_on() {
-    let (mut world, mut flora, grazed, fresh) = two_crowns(config(0.5, 30.0));
+    let (mut world, mut flora, grazed, fresh) = two_crowns(config(0.025, 30.0));
     for t in 0..150 {
         flora.take_foliage(grazed, 2e-4);
         if t % 3 == 0 {

@@ -55,7 +55,10 @@ use crate::Flora;
 /// Schema 7: package SU (succession): four species fields (`spore_tries`, `seed_mass`,
 /// `ground_cover`, `overtop_per_check`) and the ledger's `overtopped` counts, and a seed is
 /// `seed_mass` minimum packages. Refused, not migrated.
-pub const SCHEMA: u32 = 7;
+/// Schema 8: the induced grazing defence — `Stand::defence` and the species'
+/// `defence_per_bite` / `defence_half_life_s`
+/// (`design/handoffs/voxel-lifespan-defence-2026-09-25.md`). Refused, not migrated.
+pub const SCHEMA: u32 = 8;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
