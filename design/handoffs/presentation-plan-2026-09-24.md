@@ -420,3 +420,7 @@ Wrysk: "yes" to both of these:
 - **The three W-1 fixes:** calmer ripple lines, dark lake edge, bright waterfall.
 
 A fresh worker does both in the W worktree.
+- **Smooth lighting** (Wrysk: "lighting yes"): the ambient ladder goes. `light_levels = 0`
+  (smooth) is the new default. Hard sun-shadow edges, crease AO and `sun_tint` stay.
+- **Water animation:** "id have to see. 12fps might have a charm". It stays at 12 Hz
+  until Wrysk compares real-time clips of 12 Hz stepped against every-frame.
