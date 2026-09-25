@@ -54,6 +54,11 @@ use crate::vk::{Gpu, HostBuffer, barrier};
 
 const FULLSCREEN_VERT: &[u8] = include_bytes!("../shaders/fullscreen.vert.spv");
 const VOXEL_FRAG: &[u8] = include_bytes!("../shaders/voxel.frag.spv");
+/// `voxel.frag`'s SMOOTH_SUN: the sun's share of the light when it is smooth.
+const SMOOTH_SUN: f32 = 1.0 / 3.0;
+/// The lit tier's sky image (`voxel.frag` specialised `SKY`): linear light, with the
+/// precision a near-black gradient needs.
+const BACKDROP_FORMAT: vk::Format = vk::Format::R16G16B16A16_SFLOAT;
 
 /// Timestamp slots: top of pipe, after the uploads, after the world raster, bottom.
 const QUERY_SLOTS: u32 = 4;
@@ -727,7 +732,13 @@ impl VoxelParams {
 
     /// The uniform block, in the layout `voxel.frag` declares, for an atlas holding the
     /// slots in `tex_mask`.
-    fn uniforms(&self, tex_mask: u32, vine_on: bool, clock: FrameClock) -> VoxelUniforms {
+    fn uniforms(
+        &self,
+        tex_mask: u32,
+        vine_on: bool,
+        clock: FrameClock,
+        look: &crate::weather::Look,
+    ) -> VoxelUniforms {
         let v = |c: [f32; 3]| [c[0], c[1], c[2], 0.0];
         VoxelUniforms {
             geom: [
@@ -743,15 +754,16 @@ impl VoxelParams {
                 self.raster_h as i32,
             ],
             knobs: [self.haze, self.water_alpha, self.atmosphere, self.rain_tick],
-            sky: v(self.sky),
-            sky_horizon: v(self.sky_horizon),
+            sky: v(look.sky),
+            sky_horizon: v(look.sky_horizon),
             bedrock: v(self.bedrock),
             rock: v(self.rock),
             soil: v(self.soil),
             water_deep: v(self.water_deep),
             water_surface: v(self.water_surface),
             light: v(self.light),
-            haze_colour: v(self.haze_colour),
+            // The flat tier keeps the palette's haze and tints the whole picture instead.
+            haze_colour: v(if self.lit { look.haze } else { self.haze_colour }),
             shade_a: [self.top_gain, self.top_tint, self.top_back, self.rim],
             shade_b: [self.edge_dark, self.top_edge, self.riser_lean, self.wet],
             roof: [
@@ -780,8 +792,8 @@ impl VoxelParams {
                 if self.light_levels < 2 { 0.0 } else { self.light_levels as f32 },
                 self.ao_strength,
             ],
-            ambient: v(self.ambient_colour),
-            sun: [self.sun[0], self.sun[1], self.sun[2], self.sun_tint],
+            ambient: v(look.ambient.map(|c| c * look.ambient_level)),
+            sun: [look.sun[0], look.sun[1], look.sun[2], look.sun_tint],
             water_l: [
                 self.water_absorb.max(0.0),
                 self.reflect_gain.max(0.0),
@@ -800,6 +812,23 @@ impl VoxelParams {
                 self.rain_rings.max(0.0),
                 self.highlight.clamp(0.0, 1.0),
             ],
+            // The sun's share of a rung over the ambient level (1 and the smooth share at a
+            // clear noon: exactly the walk's old constants).
+            day_k: [
+                look.sun_strength / look.ambient_level.max(1e-3),
+                SMOOTH_SUN * look.sun_strength / look.ambient_level.max(1e-3),
+                look.ambient_level.max(1e-3),
+                look.band,
+            ],
+            day_l: [look.unlit, look.sun_strength, 0.0, 0.0],
+            sun_lean: [look.sun_lean[0], look.sun_lean[1], look.sun_lean[2], look.sun_side],
+            cloud_k: [look.cloud_cover, look.drift, look.storm, look.seconds],
+            cloud_body: [look.cloud_body[0], look.cloud_body[1], look.cloud_body[2], look.stars],
+            cloud_lit: [look.cloud_lit[0], look.cloud_lit[1], look.cloud_lit[2], look.cloud_edge],
+            band_a: v(look.band_colours[0]),
+            band_b: v(look.band_colours[1]),
+            band_c: v(look.band_colours[2]),
+            tint: v(look.tint),
         }
     }
 }
@@ -816,6 +845,8 @@ pub struct FrameClock {
     /// Animation steps, wrapped at [`FrameClock::STEP_WRAP`]: whole, or fractional when
     /// smooth.
     pub step: f32,
+    /// Sim seconds, unwrapped: what the weather eases on (`crate::weather::WeatherEase`).
+    pub seconds: f64,
 }
 
 impl FrameClock {
@@ -838,6 +869,7 @@ impl FrameClock {
         FrameClock {
             time: ((tick % Self::TICK_WRAP) as f64 + fraction.clamp(0.0, 1.0)) as f32,
             step: step.rem_euclid(Self::STEP_WRAP as f64) as f32,
+            seconds: if tick_hz > 0.0 { t / tick_hz } else { 0.0 },
         }
     }
 }
@@ -878,6 +910,24 @@ struct VoxelUniforms {
     clock: [f32; 4],
     /// The lit tier's water details: foam, glint, rain rings, highlight.
     water_m: [f32; 4],
+    /// The weather and the time of day (`crate::weather::Look`): ambient level, sun
+    /// strength, stars, twilight band.
+    day_k: [f32; 4],
+    /// The unlit water's level, then padding.
+    day_l: [f32; 4],
+    /// The colour a sunlit texel leans toward; which side the sun is on.
+    sun_lean: [f32; 4],
+    /// Cloud cover, drift (voxels), storm, twinkle clock (seconds).
+    cloud_k: [f32; 4],
+    cloud_body: [f32; 4],
+    /// The clouds' lit edge colour, and its strength.
+    cloud_lit: [f32; 4],
+    /// The twilight band's colours, top to bottom.
+    band_a: [f32; 4],
+    band_b: [f32; 4],
+    band_c: [f32; 4],
+    /// The flat tier's whole-picture tint.
+    tint: [f32; 4],
 }
 
 /// Where one tick's world is written, straight into mapped memory.
@@ -1105,6 +1155,10 @@ pub struct VoxelRenderer {
     raster_view: vk::ImageView,
     raster_framebuffer: vk::Framebuffer,
     raster_pass: vk::RenderPass,
+    /// The lit tier's sky pass (`voxel.frag` specialised `SKY`): drawn into the backdrop
+    /// image just before the slab walk, which fetches it where the sky shows. The flat tier's backdrop is one
+    /// texel it never reads, and it has no sky pass.
+    backdrop: Backdrop,
     // --- the uploaded world ---
     voxel_image: vk::Image,
     voxel_memory: vk::DeviceMemory,
@@ -1171,6 +1225,13 @@ pub struct VoxelRenderer {
     raster_current: bool,
     /// The frame's clock ([`VoxelRenderer::set_clock`]).
     clock: FrameClock,
+    /// The weather to draw ([`VoxelRenderer::set_weather`]), eased toward on the frame
+    /// clock, and the look the uniforms carry (`crate::weather`).
+    weather: crate::weather::Weather,
+    weather_ease: crate::weather::WeatherEase,
+    /// The clock's sim seconds when the weather last eased.
+    weather_at: f64,
+    look: crate::weather::Look,
     /// Whether the last pack held any free water ([`VoxelRenderer::set_water_visible`]).
     water_visible: bool,
     /// What a frame recorded now would show, as a number that moves whenever the picture
@@ -1272,6 +1333,7 @@ impl VoxelRenderer {
                 | vk::ImageUsageFlags::TRANSFER_SRC,
         )?;
         let raster_view = gpu.view(raster_image, RASTER_FORMAT)?;
+        let backdrop = Backdrop::new(gpu, &params)?;
 
         let limit = unsafe { gpu.instance.get_physical_device_properties(gpu.pdev) }
             .limits
@@ -1490,7 +1552,7 @@ impl VoxelRenderer {
             vk::BufferUsageFlags::UNIFORM_BUFFER,
         )?;
         for slot in 0..STAGING_RING as u64 {
-            uniforms.write_bytes_at(uniform_stride * slot, &[params.uniforms(tex_mask, vine_on, FrameClock::default())]);
+            uniforms.write_bytes_at(uniform_stride * slot, &[params.uniforms(tex_mask, vine_on, FrameClock::default(), &crate::weather::noon(&params))]);
         }
 
         let nearest = unsafe {
@@ -1556,6 +1618,7 @@ impl VoxelRenderer {
             sampled(7),
             sampled(8),
             sampled(9),
+            sampled(11),
         ];
         let set_layout = unsafe {
             d.create_descriptor_set_layout(
@@ -1569,7 +1632,7 @@ impl VoxelRenderer {
                 .descriptor_count(1),
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .descriptor_count(9),
+                .descriptor_count(10),
         ];
         let pool = unsafe {
             d.create_descriptor_pool(
@@ -1605,6 +1668,7 @@ impl VoxelRenderer {
             image_info(vine_view),
         );
         let (isk, ica) = (image_info(sky_view), image_info(canopy_view));
+        let ibd = image_info(backdrop.view);
         let igl = [vk::DescriptorImageInfo::default()
             .sampler(linear)
             .image_view(glow_view)
@@ -1626,6 +1690,7 @@ impl VoxelRenderer {
                     sampled_write(set, 7, &isk),
                     sampled_write(set, 8, &ica),
                     sampled_write(set, 9, &igl),
+                    sampled_write(set, 11, &ibd),
                 ],
                 &[],
             )
@@ -1662,6 +1727,11 @@ impl VoxelRenderer {
             Some(&spec),
             if params.lit { 2 } else { 1 },
         )?;
+        let backdrop = if params.lit {
+            backdrop.with_pipeline(gpu, pipeline_layout, vs, fs)?
+        } else {
+            backdrop
+        };
         unsafe {
             d.destroy_shader_module(vs, None);
             d.destroy_shader_module(fs, None);
@@ -1674,6 +1744,7 @@ impl VoxelRenderer {
             raster_view,
             raster_framebuffer,
             raster_pass,
+            backdrop,
             voxel_image,
             voxel_memory,
             voxel_view,
@@ -1714,6 +1785,10 @@ impl VoxelRenderer {
             dirty: false,
             raster_current: false,
             clock: FrameClock::default(),
+            weather: crate::weather::Weather::CLEAR_NOON,
+            weather_ease: crate::weather::WeatherEase::default(),
+            weather_at: 0.0,
+            look: crate::weather::noon(&params),
             water_visible: false,
             redrew: true,
             version: 0,
@@ -1751,6 +1826,11 @@ impl VoxelRenderer {
             );
         }
         self.params = params;
+        // The look reads the palette (the founding pulse dims the sky through here).
+        self.look = match self.weather_ease.current() {
+            Some(e) => crate::weather::look(&e, &self.params),
+            None => crate::weather::noon(&self.params),
+        };
         self.raster_current = false;
         self.version += 1;
         Ok(())
@@ -1772,13 +1852,48 @@ impl VoxelRenderer {
     /// skip, so the water animates at its step rate between ticks (the picture changes
     /// only when the step does, so a frame at the same step is still skipped). The flat
     /// tier draws nothing from the clock and keeps its redraw skip.
+    ///
+    /// **The weather eases on it too** ([`VoxelRenderer::set_weather`]). The lit tier
+    /// takes the eased look every frame and redraws while it changes or while the sky
+    /// animates (drifting clouds, twinkling stars). The flat tier takes it only when the
+    /// clock crosses a tick, so its redraw rate stays the tick rate whatever the sky does.
     pub fn set_clock(&mut self, clock: FrameClock) {
         let moved = clock.step != self.clock.step;
+        let new_tick = clock.time.floor() != self.clock.time.floor();
+        let first = self.weather_ease.current().is_none();
         self.clock = clock;
-        if moved && self.params.lit && self.water_visible {
+        let mut redraw = moved && self.params.lit && self.water_visible;
+        if self.params.lit || new_tick || first {
+            let dt = (clock.seconds - self.weather_at) as f32;
+            self.weather_at = clock.seconds;
+            let eased = self.weather_ease.advance(&self.weather, dt, self.params.width);
+            let look = crate::weather::look(&eased, &self.params);
+            redraw |= !look.same_picture(&self.look);
+            self.look = look;
+        }
+        if redraw {
             self.raster_current = false;
             self.version += 1;
         }
+    }
+
+    /// The weather to draw from now on: the world's (`WeatherView`, once a tick) or a
+    /// preview's (every frame). Nothing changes until the next [`VoxelRenderer::set_clock`]
+    /// eases toward it.
+    pub fn set_weather(&mut self, weather: crate::weather::Weather) {
+        self.weather = weather;
+    }
+
+    /// The look the next frame draws.
+    pub fn look(&self) -> crate::weather::Look {
+        self.look
+    }
+
+    /// The unit direction toward the sun (the moon at night) this frame draws with, zero
+    /// for none: `sunK`, moved by the day clock through [`VoxelRenderer::set_clock`]. The
+    /// one sun path: anything keyed on the sun (shadows, volumetric light) reads this.
+    pub fn sun_direction(&self) -> [f32; 3] {
+        self.look.sun
     }
 
     /// Whether the world last staged holds any free water: the lit tier redraws on its
@@ -1945,7 +2060,7 @@ impl VoxelRenderer {
         // `set_params` and `update_weather` only moved `self.params`.
         self.uniforms.write_bytes_at(
             self.uniform_stride * frame.slot as u64,
-            &[self.params.uniforms(self.tex_mask, self.vine_on, self.clock)],
+            &[self.params.uniforms(self.tex_mask, self.vine_on, self.clock, &self.look)],
         );
         // and its own four timestamps.
         let q = frame.slot as u32 * QUERY_SLOTS;
@@ -2047,6 +2162,27 @@ impl VoxelRenderer {
                 q + 1,
             );
 
+            if !self.params.lit && !self.backdrop.ready {
+                // The flat tier's texel is never drawn or read; it only has to be in the
+                // layout its descriptor names.
+                barrier(
+                    d,
+                    cb,
+                    self.backdrop.image,
+                    vk::ImageLayout::UNDEFINED,
+                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                );
+                self.backdrop.ready = true;
+            }
+            if redraw && self.params.lit {
+                self.backdrop.record(
+                    d,
+                    cb,
+                    self.pipeline_layout,
+                    self.set,
+                    (self.uniform_stride * frame.slot as u64) as u32,
+                );
+            }
             if redraw {
                 // The pass leaves the raster in `SHADER_READ_ONLY_OPTIMAL`, which is
                 // where the present pass wants it — so a frame that skips this one finds
@@ -2182,6 +2318,7 @@ impl VoxelRenderer {
         let d = &gpu.device;
         unsafe {
             d.destroy_pipeline(self.pipeline, None);
+            self.backdrop.destroy(d);
             d.destroy_pipeline_layout(self.pipeline_layout, None);
             d.destroy_descriptor_pool(self.pool, None);
             d.destroy_descriptor_set_layout(self.set_layout, None);
@@ -2431,6 +2568,119 @@ fn sampled_write<'a>(
         .image_info(info)
 }
 
+/// The lit tier's sky pass: `voxel.frag` specialised `SKY` (constant_id 1) into an image of
+/// its own, the slab walk's backdrop (package WX2). The same shader, so the sky shares the
+/// walk's uniforms and helpers; its own pipeline, so the clouds' noise costs the walk no
+/// occupancy. In the flat tier the image is a single texel, bound so the descriptor set
+/// is whole, and nothing draws it.
+struct Backdrop {
+    image: vk::Image,
+    memory: vk::DeviceMemory,
+    view: vk::ImageView,
+    pass: vk::RenderPass,
+    framebuffer: vk::Framebuffer,
+    pipeline: vk::Pipeline,
+    w: u32,
+    h: u32,
+    /// The flat tier's texel has been put in its read layout.
+    ready: bool,
+}
+
+impl Backdrop {
+    fn new(gpu: &Gpu, params: &VoxelParams) -> Result<Backdrop> {
+        let d = &gpu.device;
+        let (w, h) = if params.lit { (params.raster_w, params.raster_h) } else { (1, 1) };
+        let (image, memory) = gpu.image(
+            w,
+            h,
+            BACKDROP_FORMAT,
+            vk::ImageTiling::OPTIMAL,
+            vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::SAMPLED,
+        )?;
+        let view = gpu.view(image, BACKDROP_FORMAT)?;
+        let pass = crate::render::colour_pass(
+            d,
+            BACKDROP_FORMAT,
+            vk::AttachmentLoadOp::DONT_CARE,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        )?;
+        let framebuffer = framebuffer(d, pass, view, w, h)?;
+        Ok(Backdrop {
+            image,
+            memory,
+            view,
+            pass,
+            framebuffer,
+            pipeline: vk::Pipeline::null(),
+            w,
+            h,
+            ready: false,
+        })
+    }
+
+    /// Build the sky pipeline on the slab walk's layout (the same descriptor set). Lit tier
+    /// only: the flat tier (the panel) never compiles it.
+    fn with_pipeline(
+        mut self,
+        gpu: &Gpu,
+        layout: vk::PipelineLayout,
+        vs: vk::ShaderModule,
+        fs: vk::ShaderModule,
+    ) -> Result<Backdrop> {
+        let d = &gpu.device;
+        // LIT and SKY, both 32-bit bools.
+        let flags = [1u32, 1u32];
+        let entries = [
+            vk::SpecializationMapEntry::default().constant_id(0).offset(0).size(4),
+            vk::SpecializationMapEntry::default().constant_id(1).offset(4).size(4),
+        ];
+        let spec = vk::SpecializationInfo::default()
+            .map_entries(&entries)
+            .data(bytemuck::cast_slice(&flags));
+        self.pipeline = crate::render::fullscreen_pipeline_n(
+            d,
+            self.pass,
+            layout,
+            vs,
+            fs,
+            false,
+            Some(&spec),
+            1,
+        )?;
+        Ok(self)
+    }
+
+    /// Draw the sky, and make it visible to the slab walk's fragment reads.
+    fn record(
+        &self,
+        d: &ash::Device,
+        cb: vk::CommandBuffer,
+        layout: vk::PipelineLayout,
+        set: vk::DescriptorSet,
+        offset: u32,
+    ) {
+        unsafe {
+            crate::render::begin(d, cb, self.pass, self.framebuffer, self.w, self.h);
+            d.cmd_bind_descriptor_sets(cb, vk::PipelineBindPoint::GRAPHICS, layout, 0, &[set], &[offset]);
+            d.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
+            d.cmd_draw(cb, 3, 1, 0, 0);
+            d.cmd_end_render_pass(cb);
+            crate::bloom::colour_to_read(d, cb);
+        }
+    }
+
+    fn destroy(&mut self, d: &ash::Device) {
+        unsafe {
+            d.destroy_pipeline(self.pipeline, None);
+            d.destroy_framebuffer(self.framebuffer, None);
+            d.destroy_render_pass(self.pass, None);
+            d.destroy_image_view(self.view, None);
+            d.destroy_image(self.image, None);
+            d.free_memory(self.memory, None);
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -2528,7 +2778,7 @@ pub(crate) mod tests {
     #[test]
     fn the_water_details_reach_their_uniform() {
         let p = VoxelParams { foam: 0.6, glint: -1.0, rain_rings: 0.5, highlight: 1.5, ..params() };
-        let u = p.uniforms(0, false, FrameClock::default());
+        let u = p.uniforms(0, false, FrameClock::default(), &crate::weather::noon(&p));
         assert_eq!(u.water_m, [0.6, 0.0, 0.5, 1.0]);
     }
 
@@ -2842,3 +3092,4 @@ pub(crate) mod tests {
         assert_eq!(t.rgba[((slot as u32 * 6 * aw) * 4) as usize], 9);
     }
 }
+

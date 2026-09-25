@@ -70,6 +70,7 @@ mod wayland;
 
 #[path = "gpu/voxel.rs"]
 pub mod voxel;
+pub mod weather;
 pub use voxel::{VoxelGpuSink, VoxelGpuSinkOptions};
 
 /// `--sink gpu`.

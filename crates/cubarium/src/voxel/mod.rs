@@ -2322,6 +2322,7 @@ fn open_out(args: &Voxel, cfg: &VoxelConfig, proj: Projection, speed: f64) -> Re
             if args.gpu_web_rate > 0.0 {
                 gpu = gpu.with_web(web(args.web_port)?, args.gpu_web_rate);
             }
+            gpu.set_weather_preview(args.weather_preview);
             Out::Gpu(Box::new(gpu))
         }
     })
@@ -3508,6 +3509,7 @@ mod tests {
             web_port: 7393,
             gpu_target: None,
             gpu_capture: None,
+            weather_preview: None,
             gpu_web_rate: 0.0,
             gpu_roof_walk: false,
             textures: false,
@@ -4295,6 +4297,7 @@ mod tests {
             web_port: 7393,
             gpu_target: None,
             gpu_capture: None,
+            weather_preview: None,
             gpu_web_rate: 0.0,
             gpu_roof_walk: false,
             textures: false,
@@ -4347,6 +4350,7 @@ mod tests {
             web_port: 7393,
             gpu_target: None,
             gpu_capture: None,
+            weather_preview: None,
             gpu_web_rate: 0.0,
             gpu_roof_walk: false,
             textures: false,

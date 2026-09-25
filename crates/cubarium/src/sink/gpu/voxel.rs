@@ -106,6 +106,9 @@ pub struct VoxelGpuSink {
     water_smooth: bool,
     /// Capture-only: draw every staged world as if it were raining ([`Self::set_force_rain`]).
     force_rain: bool,
+    /// Capture-only: a scripted weather loop over the world's own
+    /// ([`Self::set_weather_preview`]), and the sim time and tick its first frame drew.
+    weather_preview: Option<(super::weather::WeatherPreview, Option<(f64, u64)>)>,
     /// The sky this world is drawn under, kept while the founding frame dims it.
     founding_sky: Option<([f32; 3], [f32; 3])>,
     /// When the founding frame's pulse started, so a held founding frame keeps its phase.
@@ -186,6 +189,7 @@ impl VoxelGpuSink {
             water_hz: cfg.light.water_hz,
             water_smooth: cfg.light.water_smooth,
             force_rain: false,
+            weather_preview: None,
             founding_sky: None,
             founding_since: None,
             awaiting_light: false,
@@ -275,12 +279,17 @@ impl VoxelGpuSink {
         } else {
             0.0
         };
-        let rain_tick = if p.sky_gradient && (view.is_raining() || self.force_rain) {
+        // A weather preview draws its own weather, not the world's shower.
+        let raining = view.is_raining() && self.weather_preview.is_none();
+        let rain_tick = if p.sky_gradient && (raining || self.force_rain) {
             view.tick as f32
         } else {
             0.0
         };
         self.renderer.update_weather(atmosphere, rain_tick);
+        if self.weather_preview.is_none() {
+            self.renderer.set_weather(super::weather::weather_of(&view.weather));
+        }
         self.renderer.set_water_visible(self.packer.wet);
         self.ticks_staged += 1;
         self.pack_ms += (Instant::now() - started).as_secs_f64() * 1e3;
@@ -291,7 +300,17 @@ impl VoxelGpuSink {
     /// The lit tier's water animates on it (`[light] water_hz` steps a second of sim
     /// time), and redraws a frame whose step has moved while there is water; the flat
     /// tier ignores it.
+    ///
+    /// The weather eases on it (`cubarium_gpu::weather`); a preview
+    /// ([`Self::set_weather_preview`]) sets the weather here, every frame, from its script.
     pub fn set_clock(&mut self, tick: u64, fraction: f64) {
+        if let Some((preview, start)) = &mut self.weather_preview {
+            let hz = f64::from(cubarium_voxel::TICK_HZ);
+            let now = (tick as f64 + fraction) / hz;
+            let (t0, tick0) = *start.get_or_insert((now, tick));
+            let view = preview.at(now - t0, tick0, hz);
+            self.renderer.set_weather(super::weather::weather_of(&view));
+        }
         self.renderer.set_clock(FrameClock::at(
             tick,
             fraction,
@@ -314,6 +333,13 @@ impl VoxelGpuSink {
     /// live display.
     pub fn set_force_rain(&mut self, on: bool) {
         self.force_rain = on;
+    }
+
+    /// Capture-only (`--weather-preview`): draw the weather from a scripted loop starting
+    /// at the next frame, whatever the world's own weather is. `None` goes back to the
+    /// world's. Never set by the live display.
+    pub fn set_weather_preview(&mut self, preview: Option<super::weather::WeatherPreview>) {
+        self.weather_preview = preview.map(|p| (p, None));
     }
 
     /// Whether the lit tier's sky plane for the terrain last staged is still being

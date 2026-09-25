@@ -7,7 +7,7 @@
 //!     [--config config/desktop/terrarium.toml] [--set 'lighting = "lit"']... \
 //!     [--seed 1] [--ticks 0] [--state DIR] [--px 6 --px 13 | --px auto] [--textures] \
 //!     [--frames 60] [--name NAME] [--anim 12 [--anim-hz 60]] [--flow] [--rain]
-//!     [--crop NAME=X0,Y0,X1,Y1]...
+//!     [--crop NAME=X0,Y0,X1,Y1]... [--weather-preview loop|day|fixed:PHASE[,CLOUD]]
 //! ```
 //!
 //! The world is founded exactly as the live run founds one from a seed
@@ -23,7 +23,9 @@
 //! `--flow` writes `NAME-<px>px[-tex]-flow.png`, the lit tier's derived water flow field
 //! drawn over the water (capture-only). `--rain` draws the world as if it were raining
 //! (capture-only). Each `--crop` writes the animation's frames only as that crop,
-//! `NAME-<px>px[-tex]-CROP-anim-KK.png`, instead of whole. No window is ever opened.
+//! `NAME-<px>px[-tex]-CROP-anim-KK.png`, instead of whole. `--weather-preview` draws the
+//! weather from a scripted loop starting at the state's tick (the still is its first
+//! frame, the animation runs on through it). No window is ever opened.
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -55,6 +57,7 @@ struct Args {
     flow: bool,
     rain: bool,
     crops: Vec<(String, [u32; 4])>,
+    weather: Option<cubarium::sink::gpu::weather::WeatherPreview>,
 }
 
 fn args() -> Result<Args> {
@@ -74,6 +77,7 @@ fn args() -> Result<Args> {
         flow: false,
         rain: false,
         crops: Vec::new(),
+        weather: None,
     };
     let mut out = None;
     let mut it = std::env::args().skip(1);
@@ -97,6 +101,7 @@ fn args() -> Result<Args> {
             "--anim-hz" => a.anim_hz = Some(v()?.parse()?),
             "--flow" => a.flow = true,
             "--rain" => a.rain = true,
+            "--weather-preview" => a.weather = Some(v()?.parse()?),
             "--crop" => {
                 let s = v()?;
                 let (name, rect) = s.split_once('=').context("--crop NAME=X0,Y0,X1,Y1")?;
@@ -246,6 +251,7 @@ fn capture(
         },
     )?;
     sink.set_force_rain(a.rain);
+    sink.set_weather_preview(a.weather);
     // The lit tier's sky plane is computed off this thread: pack until it has arrived,
     // so the picture shows the finished light.
     let started = Instant::now();
@@ -292,7 +298,7 @@ fn capture(
         sink.set_clock(tick + t.floor() as u64, t.fract());
         sink.render()?;
         let rgba = sink.read_raster()?;
-        let w = if a.anim > 100 { 3 } else { 2 };
+        let w = a.anim.saturating_sub(1).max(9).to_string().len();
         if a.crops.is_empty() {
             let path = a.out.join(format!("{tag}-anim-{k:0w$}.png"));
             cubarium_gpu::target::write_png(&path, p.raster_w, p.raster_h, &rgba)?;
