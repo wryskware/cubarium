@@ -88,7 +88,8 @@ impl WeatherView {
         cloud_cover: 0.0,
         day_phase: 0.5,
         daylight: 1.0,
-        sun_elevation: core::f32::consts::FRAC_PI_2,
+        // The model's noon peak, 70° (`NOON_ELEVATION_DEG`).
+        sun_elevation: 1.221_730_5,
         last_strike: None,
     };
 
@@ -143,6 +144,13 @@ pub const EVAPORATION_RH_SPAN: f64 = 0.4;
 pub const NOON_ELEVATION_DEG: f64 = 70.0;
 /// Civil twilight: daylight is a smoothstep of the elevation over ±this many degrees.
 pub const TWILIGHT_DEG: f64 = 6.0;
+/// The stream swell's time constants, seconds of simulated time: it rises toward its
+/// target over `SWELL_RISE_S` while it rains and falls back over `SWELL_FALL_S` after (so
+/// it is ~95 % gone 2.5 min after the event). Wrysk's numbers, not scaled by the weather
+/// speed.
+pub const SWELL_RISE_S: f64 = 45.0;
+pub const SWELL_FALL_S: f64 = 50.0;
+
 /// A lightning strike picks the highest of this many random sky-open columns.
 pub const STRIKE_COLUMNS: usize = 4;
 
@@ -720,6 +728,11 @@ pub struct Climate {
     pub strike_mean_s: f64,
     pub strike_min_s: f64,
     pub strike_max_s: f64,
+    /// The **stream swell** (WX1 addendum): while it rains, the spring's stream runs at
+    /// `reentry_m3_per_s · (1 + s)`, with `s` relaxing toward
+    /// `storm_stream_gain · clamp(rate / downpour rate, 0, 1)`; 0 turns it off. Paid for
+    /// by the store the stream already draws on, above its floor.
+    pub storm_stream_gain: f64,
     /// The host's opening rain ([`World::open_with_rain`]) falls at least this long,
     /// seconds, before its stop humidity may end it.
     pub opening_min_s: f64,
@@ -811,6 +824,7 @@ climate_keys!(
     strike_mean_s,
     strike_min_s,
     strike_max_s,
+    storm_stream_gain,
     opening_min_s,
 );
 
@@ -871,6 +885,7 @@ impl Climate {
             strike_mean_s: 30.0,
             strike_min_s: 10.0,
             strike_max_s: 60.0,
+            storm_stream_gain: 2.0,
             opening_min_s: 60.0,
             drizzle: RainParams {
                 lambda_max_per_h: 1.5,
@@ -1033,6 +1048,8 @@ pub enum Cause {
     Forced,
     /// The host's opening rain ([`World::open_with_rain`]).
     Opening,
+    /// A development command ([`World::force_rain`]).
+    Commanded,
 }
 
 /// One rain event, running or finished: the `--weather-log` row.
@@ -1096,6 +1113,10 @@ pub struct Weather {
     pub(crate) last_strike: Option<Strike>,
     pub(crate) next_strike: u64,
     pub(crate) last_finished: Option<EventRecord>,
+    /// The stream swell `s`: the spring's stream runs at `reentry_m3_per_s · (1 + s)`.
+    pub(crate) swell: f64,
+    /// What the stream actually brought up last tick, cubic metres per second.
+    pub(crate) stream_m3_s: f64,
     pub counts: WeatherCounts,
     /// A wall time injected in place of the machine's clock, for a `local` day clock.
     #[serde(skip)]
@@ -1129,6 +1150,8 @@ impl Weather {
             last_strike: None,
             next_strike: 0,
             last_finished: None,
+            swell: 0.0,
+            stream_m3_s: 0.0,
             counts: WeatherCounts::default(),
             wall_clock_s,
         }
@@ -1164,6 +1187,14 @@ impl Weather {
     }
     pub fn last_strike(&self) -> Option<Strike> {
         self.last_strike
+    }
+    /// The stream swell `s` ([`Climate::storm_stream_gain`]).
+    pub fn swell(&self) -> f64 {
+        self.swell
+    }
+    /// What the spring's stream brought up last tick, cubic metres per second.
+    pub fn stream_m3_s(&self) -> f64 {
+        self.stream_m3_s
     }
     /// The tick natural starts wait for; zero or past when there is no gap.
     pub fn gap_until(&self) -> u64 {
@@ -1267,6 +1298,7 @@ pub(crate) fn step(w: &mut World) {
             afternoon_bump(&sun, c.afternoon_width)
         };
         events(w, &c, a, if fresh_front { 1.0 } else { 0.0 });
+        swell(w, &c);
     } else {
         w.weather.mode = if w.config.rain_m_per_s > 0.0 {
             RainMode::Shower
@@ -1346,6 +1378,20 @@ fn events(w: &mut World, c: &Climate, a: f64, f: f64) {
     if !(fell > 0.0) || w.atmosphere_m3 <= 0.0 || (w.rh() <= params.stop_rh && !early) {
         end(w, c, tick + 1);
     }
+}
+
+/// The stream swell: toward the gain times how hard it is raining, against a downpour,
+/// while it rains; back toward nothing after.
+fn swell(w: &mut World, c: &Climate) {
+    let (target, tau) = match c.mode(w.weather.mode) {
+        Some(m) if c.downpour.rate_r0 > 0.0 => (
+            c.storm_stream_gain * (m.rate_r0 / c.downpour.rate_r0).clamp(0.0, 1.0),
+            SWELL_RISE_S,
+        ),
+        _ => (0.0, SWELL_FALL_S),
+    };
+    let s = &mut w.weather.swell;
+    *s += (target - *s) * (1.0 - (-DT / tau).exp());
 }
 
 /// Start an event of `mode` now.
@@ -1539,6 +1585,27 @@ impl World {
     pub fn set_wall_clock(&mut self, unix_s: Option<f64>) {
         self.weather.wall_clock_s = unix_s;
         self.weather.sun = self.config.day.sun(self.tick, unix_s);
+    }
+
+    /// Start an event of `mode` now, whatever is falling and whatever the gap: the
+    /// development flag `--weather-force MODE`, for captures. It stops by the ordinary
+    /// rules. `Clear` ends whatever is falling. Returns whether anything changed; an open
+    /// world or an empty sky cannot rain.
+    pub fn force_rain(&mut self, mode: RainMode) -> bool {
+        let c = self.config.climate.at_speed(&self.config.day);
+        if mode == RainMode::Clear {
+            let was = self.weather.event.is_some();
+            end(self, &c, self.tick);
+            return was;
+        }
+        if !self.config.closed_water_budget || !(self.atmosphere_m3 > 0.0) {
+            return false;
+        }
+        if self.weather.event.is_some() {
+            end(self, &c, self.tick);
+        }
+        start(self, &c, mode, Cause::Commanded);
+        true
     }
 
     /// Start a shower now, gap or no gap: the host's opening rain, so a fresh world is

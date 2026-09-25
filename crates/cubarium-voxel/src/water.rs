@@ -2088,6 +2088,7 @@ fn emerge(w: &mut World, (x, y, z): (u32, u32, u32), want: f64) -> f64 {
 /// is rain, so `is_raining` does not see it. The open budget has no store and is ignored.
 pub fn reentry(w: &mut World) {
     {
+        w.weather.stream_m3_s = 0.0;
         if w.config.reentry_m3_per_s <= 0.0 {
             return;
         }
@@ -2107,9 +2108,10 @@ pub fn reentry(w: &mut World) {
             if spare <= 0.0 {
                 return;
             }
-            let want = (w.config.reentry_m3_per_s * DT).min(spare);
+            let want = (stream_m3_per_s(w) * DT).min(spare);
             let got = emerge(w, (x, y, z), want);
             w.aquifer_m3 -= got;
+            w.weather.stream_m3_s = got / DT;
             return;
         }
         if !w.config.closed_water_budget {
@@ -2120,14 +2122,21 @@ pub fn reentry(w: &mut World) {
         if spare <= 0.0 {
             return;
         }
-        let want = (w.config.reentry_m3_per_s * DT).min(spare);
+        let want = (stream_m3_per_s(w) * DT).min(spare);
         let got = emerge(w, (x, y, z), want);
+        w.weather.stream_m3_s = got / DT;
         if got > 0.0 {
             w.atmosphere_m3 -= got;
             w.ledger.atmosphere_out += got;
             w.ledger.reentry_in += got;
         }
     }
+}
+
+/// The stream's asked-for flow: [`crate::Config::reentry_m3_per_s`] swollen by the storm
+/// (`crate::weather`, the stream swell).
+fn stream_m3_per_s(w: &World) -> f64 {
+    w.config.reentry_m3_per_s * (1.0 + w.weather.swell.max(0.0))
 }
 
 /// Fraction of a brim-full sill cell a weir passes in one tick, falling off as the head

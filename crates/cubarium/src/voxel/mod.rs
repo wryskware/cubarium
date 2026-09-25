@@ -1317,6 +1317,19 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
              into the atmosphere, not an export"
         );
     }
+    // `--weather-force MODE`: a development capture's rain, starting now.
+    if let Some(mode) = &args.weather_force {
+        use cubarium_voxel::weather::RainMode;
+        let mode = match mode.as_str() {
+            "drizzle" => RainMode::Drizzle,
+            "shower" => RainMode::Shower,
+            "downpour" => RainMode::Downpour,
+            "clear" => RainMode::Clear,
+            other => bail!("--weather-force is drizzle, shower, downpour or clear, not {other:?}"),
+        };
+        let started = sim.world_mut().force_rain(mode);
+        eprintln!("cubarium voxel: --weather-force {mode:?} ({})", if started { "started" } else { "nothing to rain" });
+    }
     // Off the loop: the run starts now, and this line arrives when it arrives.
     let _probe = report_water_cycle(sim.world(), sim.flora(), sim.config().threads);
     eprintln!("cubarium voxel: stdin commands — {COMMANDS}");
@@ -3503,6 +3516,7 @@ mod tests {
             gpu_web_rate: 0.0,
             gpu_roof_walk: false,
             textures: false,
+            weather_force: None,
         };
         // A snapshot of a schema this build does not speak: postcard's varint for the tag.
         let stale = |n: u8| vec![n, 0, 0, 0, 0, 0, 0, 0];
@@ -4290,6 +4304,7 @@ mod tests {
             gpu_web_rate: 0.0,
             gpu_roof_walk: false,
             textures: false,
+            weather_force: None,
         };
 
         // Explicit seed is respected
@@ -4342,6 +4357,7 @@ mod tests {
             gpu_web_rate: 0.0,
             gpu_roof_walk: false,
             textures: false,
+            weather_force: None,
         };
 
         // 1. Initial run into empty state dir creates a fresh world

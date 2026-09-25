@@ -782,7 +782,7 @@ fn print_header() {
     }
     // WX1's weather, cumulative counts since the world began.
     header.push_str(
-        ",temp_c,rh,mode,fog,rain_in,drizzles,showers,downpours,forced,gap_blocked,strikes,day_phase",
+        ",temp_c,rh,mode,fog,rain_in,drizzles,showers,downpours,forced,gap_blocked,strikes,day_phase,stream_m3_s",
     );
     println!("{header}");
 }
@@ -928,5 +928,6 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64) {
     row.push(c.gap_blocked.iter().sum::<u64>().to_string());
     row.push(c.strikes.to_string());
     row.push(format!("{:.4}", world.day_phase()));
+    row.push(format!("{:.6}", wx.stream_m3_s()));
     println!("{}", row.join(","));
 }

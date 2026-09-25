@@ -511,3 +511,62 @@ fn auto_speed_is_nature_on_a_24_hour_day_and_five_on_a_2_hour_one() {
         postcard::from_bytes(&postcard::to_stdvec(&auto_cfg).unwrap()).unwrap();
     assert_eq!(back.climate.weather_speed, WeatherSpeed::Auto);
 }
+
+#[test]
+fn the_stream_swells_in_a_downpour_and_is_gone_two_and_a_half_minutes_after() {
+    let mut c = calm();
+    c.capacity_share = 1.0;
+    c.storm_stream_gain = 2.0;
+    let mut w = World::empty(Config {
+        width: 8,
+        height: 8,
+        depth: 2,
+        closed_water_budget: true,
+        initial_atmosphere_m3: 0.5,
+        rain_m_per_s: 1e-2,
+        reentry_m3_per_s: 0.002,
+        reentry_floor_fraction: 0.01,
+        day: DayClock {
+            mode: DayMode::Off,
+            ..DayClock::default()
+        },
+        climate: c,
+        ..Config::default()
+    });
+    for x in 0..8 {
+        for z in 0..2 {
+            w.apply(Command::SetMaterial {
+                x,
+                y: 1,
+                z,
+                material: crate::Material::Soil,
+            });
+        }
+    }
+    w.set_spring_cell(Some((3, 2, 0)));
+    w.step();
+    let calm_flow = w.weather().stream_m3_s();
+    assert!((calm_flow - 0.002).abs() < 1e-12, "{calm_flow}");
+
+    assert!(w.force_rain(RainMode::Downpour));
+    let mut peak = 0.0f64;
+    while w.weather().mode() == RainMode::Downpour {
+        w.step();
+        peak = peak.max(w.weather().swell());
+        assert!(w.view().total_residual().abs() < 1e-12);
+    }
+    assert!(peak > 0.1, "the swell rose: {peak}");
+    assert!(
+        w.weather().stream_m3_s() > calm_flow * 1.1,
+        "and the stream with it"
+    );
+    for _ in 0..150 * crate::TICK_HZ {
+        w.step();
+    }
+    assert!(
+        w.weather().swell() <= 0.05 * peak,
+        "{} of {peak}",
+        w.weather().swell()
+    );
+    assert!(w.view().total_residual().abs() < 1e-12);
+}
