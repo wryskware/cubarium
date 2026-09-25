@@ -185,9 +185,10 @@ pub struct Voxel {
     #[arg(long)]
     pub gpu_capture: Option<PathBuf>,
     /// Capture-only dev tool: draw `--sink gpu`'s weather and time of day from a scripted
-    /// loop instead of the world's (`loop`: 90 s through dawn fog, a storm, dusk, night
-    /// drizzle; `day`: 60 s of a dry day; `fixed:PHASE[,CLOUD]`: a still). The world itself
-    /// is untouched. Not for the live display.
+    /// loop instead of the world's (`loop`: 90 s through dawn fog, a shower, a storm, dusk,
+    /// night drizzle; `day`: 60 s of a dry day; `fixed:PHASE[,CLOUD[,RAIN[,FOG]]]`: a
+    /// steady state, RAIN one of clear, drizzle, shower, downpour, a downpour striking every
+    /// 4 s). The world itself is untouched. Not for the live display.
     #[arg(long)]
     pub weather_preview: Option<crate::sink::gpu::weather::WeatherPreview>,
     /// Serve the operator's viewer from `--sink gpu`'s own raster, at this many frames a

@@ -32,12 +32,16 @@ pub enum Rain {
     Downpour,
 }
 
-/// The most recent lightning strike (`cubarium_voxel::weather::Strike`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The most recent lightning strike (`cubarium_voxel::weather::Strike`), placed for
+/// drawing: when it struck on the frame clock, and the struck column with its top.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Strike {
-    pub tick: u64,
+    /// Sim seconds when it struck (the view's tick over the tick rate).
+    pub at_s: f64,
     pub x: u32,
     pub z: u32,
+    /// The struck column's highest solid voxel (the sink looks it up).
+    pub y: u32,
     pub seed: u32,
 }
 
@@ -90,8 +94,69 @@ pub const STORM_TAU_S: f32 = 8.0;
 /// How far clouds drift, voxels a second of sim time (along +x, round the ring).
 pub const CLOUD_DRIFT: f64 = 0.35;
 /// The shader's twinkle clock wraps at this many seconds; every twinkle has a whole
-/// number of periods in it, so the wrap is invisible.
+/// number of periods in it, so the wrap is invisible. The rain runs on it too.
 pub const TWINKLE_WRAP_S: f64 = 3600.0;
+/// Seconds for a rain mode to fade in or out (checkpoint 2): a shower comes in over a few
+/// seconds, and one mode cross-fades into the next.
+pub const RAIN_TAU_S: f32 = 2.5;
+/// Seconds for the fog to follow the view. The model moves fog over minutes; this only
+/// smooths a jump (a new world, a preview).
+pub const FOG_TAU_S: f32 = 3.0;
+/// The weather model's reference rain rate, m/s (a shower; `water::shower`'s R₀).
+pub const R0: f32 = 3.5e-5;
+
+// --- lightning ------------------------------------------------------------------------------
+
+/// A stroke's rise to its peak, seconds: the one fast attack in the weather.
+pub const STROKE_ATTACK_S: f64 = 0.025;
+/// The fill flash's decay (e-folding), seconds: about 8 % left after 200 ms, 2 % after 300.
+pub const FLASH_DECAY_S: f64 = 0.08;
+/// The bolt's own decay, a little longer than the fill's: it lingers as an afterimage.
+pub const BOLT_DECAY_S: f64 = 0.13;
+/// The re-strokes' strengths as shares of the first stroke's.
+pub const RESTROKE: [f32; 2] = [0.6, 0.38];
+/// Every stroke comes at least this long after the one before: at most three flashes (the
+/// stroke and two re-strokes) in any second.
+pub const STROKE_GAP_S: f64 = 0.34;
+/// How strong a flash is at its peak: the fill light it adds, as a share of the day's
+/// ambient (a moderate peak: the storm-dark world lifts to about a bright day, not white).
+pub const FLASH_FILL: f32 = 0.75;
+/// The flat tier's flash: how far its tint lifts at the peak.
+pub const FLAT_FLASH: f32 = 0.55;
+
+/// The light of a strike `age` seconds after it struck: the fill flash (0..1) and the
+/// bolt's brightness (0..1). The first stroke, then one or two re-strokes (by `seed`), each
+/// a fast attack and a smooth exponential decay, never closer than [`STROKE_GAP_S`]. Zero
+/// before the strike and once it has faded.
+pub fn strike_light(age: f64, seed: u32) -> (f32, f32) {
+    if !(0.0..4.0).contains(&age) {
+        return (0.0, 0.0);
+    }
+    let r = |k: u32| f64::from((seed >> (8 * k)) & 0xFF) / 255.0;
+    let restrokes = 1 + (seed & 1) as usize;
+    let mut at = [0.0f64; 3];
+    let mut amp = [1.0f32, 0.0, 0.0];
+    for k in 0..restrokes {
+        at[k + 1] = at[k] + STROKE_GAP_S + 0.14 * r(k as u32 + 1);
+        amp[k + 1] = RESTROKE[k];
+    }
+    let (mut flash, mut bolt) = (0.0f64, 0.0f64);
+    for k in 0..=restrokes {
+        let t = age - at[k];
+        if t < 0.0 {
+            continue;
+        }
+        let rise = (t / STROKE_ATTACK_S).min(1.0);
+        let rise = rise * rise * (3.0 - 2.0 * rise);
+        let past = (t - STROKE_ATTACK_S).max(0.0);
+        let a = f64::from(amp[k]) * rise;
+        flash += a * (-past / FLASH_DECAY_S).exp();
+        bolt += a * (-past / BOLT_DECAY_S).exp();
+    }
+    // Below a few thousandths a flash is gone: say so, so the sky stops animating.
+    let cut = |v: f64| if v < 0.004 { 0.0 } else { v.min(1.0) as f32 };
+    (cut(flash), cut(bolt))
+}
 
 /// The weather as drawn this frame: every quantity eased toward the view.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -106,6 +171,36 @@ pub struct Eased {
     pub drift: f32,
     /// Sim seconds, wrapped at [`TWINKLE_WRAP_S`].
     pub seconds: f32,
+    /// How much of each rain mode is falling (drizzle, shower, downpour), each 0..1,
+    /// fading over [`RAIN_TAU_S`]: a change of mode cross-fades.
+    pub rain: [f32; 3],
+    /// The rain rate, m/s, eased as the modes are.
+    pub rain_rate: f32,
+    /// Ground fog, 0..1.
+    pub fog: f32,
+    /// The most recent strike's fill flash and bolt ([`strike_light`]), and the strike.
+    pub flash: f32,
+    pub bolt: f32,
+    pub strike: Option<Strike>,
+}
+
+impl Eased {
+    /// Nothing falling, no fog, no strike.
+    pub const DRY: Eased = Eased {
+        day_phase: 0.5,
+        daylight: 1.0,
+        sun_elevation: core::f32::consts::FRAC_PI_2,
+        cloud_cover: 0.0,
+        storm: 0.0,
+        drift: 0.0,
+        seconds: 0.0,
+        rain: [0.0; 3],
+        rain_rate: 0.0,
+        fog: 0.0,
+        flash: 0.0,
+        bolt: 0.0,
+        strike: None,
+    };
 }
 
 /// Follows a [`Weather`] on the frame clock.
@@ -126,10 +221,22 @@ fn ease(from: f32, to: f32, dt: f32, tau: f32) -> f32 {
 impl WeatherEase {
     /// Move `dt` seconds of sim time toward `target` and return the eased weather. The
     /// first call takes the target as it is (nothing to ease from). `width` is the ring's
-    /// width in voxels, where the cloud drift wraps.
-    pub fn advance(&mut self, target: &Weather, dt: f32, width: u32) -> Eased {
+    /// width in voxels, where the cloud drift wraps; `now_s` is the frame's sim time in
+    /// seconds, unwrapped, which the lightning's flash is timed against.
+    pub fn advance(&mut self, target: &Weather, dt: f32, width: u32, now_s: f64) -> Eased {
         let dt = if dt.is_finite() { dt.clamp(0.0, 1.0) } else { 0.0 };
         let storm = if target.rain == Rain::Downpour { 1.0 } else { 0.0 };
+        let modes = match target.rain {
+            Rain::Clear => [0.0; 3],
+            Rain::Drizzle => [1.0, 0.0, 0.0],
+            Rain::Shower => [0.0, 1.0, 0.0],
+            Rain::Downpour => [0.0, 0.0, 1.0],
+        };
+        let rate = if target.rain == Rain::Clear { 0.0 } else { target.rain_m_per_s.max(0.0) };
+        let (flash, bolt) = match target.last_strike {
+            Some(s) => strike_light(now_s - s.at_s, s.seed),
+            None => (0.0, 0.0),
+        };
         self.seconds = (self.seconds + f64::from(dt)).rem_euclid(TWINKLE_WRAP_S);
         self.drift =
             (self.drift + f64::from(dt) * CLOUD_DRIFT).rem_euclid(f64::from(width.max(1)));
@@ -142,6 +249,12 @@ impl WeatherEase {
                 storm,
                 drift: 0.0,
                 seconds: 0.0,
+                rain: modes,
+                rain_rate: rate,
+                fog: target.fog.clamp(0.0, 1.0),
+                flash,
+                bolt,
+                strike: target.last_strike,
             },
             Some(s) => {
                 // The phase wraps: ease along the shorter way round.
@@ -154,6 +267,22 @@ impl WeatherEase {
                     storm: ease(s.storm, storm, dt, STORM_TAU_S),
                     drift: 0.0,
                     seconds: 0.0,
+                    rain: [0, 1, 2].map(|i| {
+                        let r = ease(s.rain[i], modes[i], dt, RAIN_TAU_S);
+                        // The tail of an exponential is invisible: end it.
+                        if modes[i] == 0.0 && r < 1e-3 { 0.0 } else { r }
+                    }),
+                    rain_rate: {
+                        let r = ease(s.rain_rate, rate, dt, RAIN_TAU_S);
+                        if rate == 0.0 && r < 1e-3 * R0 { 0.0 } else { r }
+                    },
+                    fog: {
+                        let f = ease(s.fog, target.fog.clamp(0.0, 1.0), dt, FOG_TAU_S);
+                        if target.fog <= 0.0 && f < 1e-3 { 0.0 } else { f }
+                    },
+                    flash,
+                    bolt,
+                    strike: target.last_strike,
                 }
             }
         };
@@ -220,7 +349,29 @@ pub const DAY_SKY_TO_DEG: f32 = 28.0;
 /// How far a full overcast greys and dims the day sky, and how far a storm darkens it.
 pub const OVERCAST_SKY_GREY: f32 = 0.4;
 pub const OVERCAST_SKY_DIM: f32 = 0.25;
-pub const STORM_SKY_DIM: f32 = 0.55;
+pub const STORM_SKY_DIM: f32 = 0.7;
+/// How far a downpour dims the ambient light, on top of its cloud cover.
+pub const STORM_AMBIENT: f32 = 0.3;
+
+/// The rain rings' density on open water: `1 − e^(−RING_RATE · rate/R₀)`, so a shower
+/// (R₀) has about the density W-2 chose (0.55 of the cells) and a downpour more.
+pub const RING_RATE: f32 = 0.8;
+/// The streaks: the palette's water surface this far toward its light (half white), their
+/// light's floor at night (a share of the day's), and how much of a flash they catch.
+pub const RAIN_LIGHT: f32 = 0.55;
+pub const RAIN_FLOOR: f32 = 0.35;
+pub const RAIN_FLASH: f32 = 0.5;
+/// The fog: density a voxel of path at its floor when the view's fog is 1, how much of the
+/// ambient and of the sun it sends back (lit by both, it glows at dawn), the flash's share,
+/// and how much emitter glow it scatters (their halo in it).
+pub const FOG_DENSITY: f32 = 0.1;
+pub const FOG_AMBIENT: f32 = 0.3;
+pub const FOG_SUN: f32 = 0.35;
+pub const FOG_FLASH: f32 = 0.4;
+pub const FOG_GLOW: f32 = 0.5;
+/// The fog's own hue, which the ambient leans a third of the way to: a pale lavender.
+pub const FOG_LAVENDER_SRGB: u32 = 0xC8B8F0;
+
 /// `[light] star_bloom` by default: how much of the brightest stars' light feeds the
 /// bloom (0 skips it).
 pub const STAR_BLOOM_DEFAULT: f32 = 0.15;
@@ -373,13 +524,49 @@ pub struct Look {
     pub cloud_shade: [f32; 3],
     /// How much of the brightest stars' light feeds the bloom (`[light] star_bloom`).
     pub star_bloom: f32,
+    /// The rain (checkpoint 2): how much of each mode is falling (drizzle, shower,
+    /// downpour), the rain rings' density on open water (0..1, from the rate), and the
+    /// streaks' colour (linear: the palette's water surface toward its light, lit by the
+    /// time of day and the flash).
+    pub rain: [f32; 3],
+    pub rings: f32,
+    pub rain_colour: [f32; 3],
+    /// Ground fog: its density a voxel of path at the fog's floor (0: none), the light it
+    /// sends the camera (the ambient and the sun on it, linear), and how much of the
+    /// emitters' glow it scatters.
+    pub fog: f32,
+    pub fog_colour: [f32; 3],
+    pub fog_glow: f32,
+    /// How much of the sun's light (`sun_lean` times `sun_strength`) the fog sends back.
+    pub fog_sun: f32,
+    /// Lightning: the fill flash (0..1) and its light (added to the ambient, linear), the
+    /// bolt's brightness, and the strike it belongs to.
+    pub flash: f32,
+    pub flash_colour: [f32; 3],
+    pub bolt: f32,
+    pub strike: Option<Strike>,
 }
 
 impl Look {
-    /// Whether anything in the sky moves on its own from frame to frame (drifting clouds,
-    /// twinkling stars): the lit tier then redraws every frame.
+    /// Whether anything in the picture moves on its own from frame to frame (drifting
+    /// clouds, twinkling stars, rain, drifting fog, a flash): the lit tier then redraws
+    /// every frame.
     pub fn animated(&self) -> bool {
-        self.cloud_cover > 1e-3 || self.stars > 1e-3
+        self.cloud_cover > 1e-3
+            || self.stars > 1e-3
+            || self.rain.iter().any(|&r| r > 0.0)
+            || self.rings > 0.0
+            || self.fog > 0.0
+            || self.flash > 0.0
+            || self.bolt > 0.0
+    }
+
+    /// The light the fog sends the camera where the sun reaches it: its ambient light and
+    /// the sun's share, as the shader adds them without volumetric light.
+    pub fn fog_light(&self) -> [f32; 3] {
+        [0, 1, 2].map(|i| {
+            self.fog_colour[i] + self.fog_sun * self.sun_strength * self.sun_lean[i]
+        })
     }
 
     /// Whether `self` and `other` draw the same picture: equal, but for the drift and the
@@ -394,7 +581,7 @@ impl Look {
 
 /// The look of a clear noon: today's picture.
 pub fn noon(p: &VoxelParams) -> Look {
-    look(&WeatherEase::default().advance(&Weather::CLEAR_NOON, 0.0, p.width), p)
+    look(&WeatherEase::default().advance(&Weather::CLEAR_NOON, 0.0, p.width, 0.0), p)
 }
 
 /// The picture's weather and time of day for `e`, over the palette and the `[light]`
@@ -477,7 +664,9 @@ pub fn look(e: &Eased, p: &VoxelParams) -> Look {
         p.sun_tint * sun_strength
     };
 
-    let ambient_level = lerp(NIGHT_AMBIENT, 1.0, dl) * (1.0 - OVERCAST_AMBIENT * c);
+    let storm = e.storm.clamp(0.0, 1.0);
+    let ambient_level =
+        lerp(NIGHT_AMBIENT, 1.0, dl) * (1.0 - OVERCAST_AMBIENT * c) * (1.0 - STORM_AMBIENT * storm);
 
     // --- the sky ---
     let sky = lerp3(scale3(p.sky, NIGHT_SKY), p.sky, dl);
@@ -508,7 +697,16 @@ pub fn look(e: &Eased, p: &VoxelParams) -> Look {
 
     // --- the flat tier's tint and the lit tier's unlit water ---
     let tint = [0, 1, 2].map(|i| ambient_level * ambient[i] / day_hue[i].max(1e-6));
-    let tint = if dl >= 1.0 && tw == 0.0 && c == 0.0 { [1.0; 3] } else { tint };
+    let tint = if dl >= 1.0 && tw == 0.0 && c == 0.0 && storm == 0.0 { [1.0; 3] } else { tint };
+    // A flash lifts the flat tier's tint toward a cool white (nothing added without one, so
+    // a clear noon's tint stays exactly one).
+    let flash = e.flash.clamp(0.0, 1.0);
+    let cool = unit(lerp3(day_hue, [1.0; 3], 0.6));
+    let tint = if flash > 0.0 {
+        [0, 1, 2].map(|i| tint[i] + FLAT_FLASH * flash * cool[i] / day_hue[i].max(1e-6))
+    } else {
+        tint
+    };
     let unlit = lerp(NIGHT_UNLIT, 1.0, dl);
 
     // --- the lit tier's day sky ---
@@ -519,7 +717,6 @@ pub fn look(e: &Eased, p: &VoxelParams) -> Look {
     } else {
         0.0
     };
-    let storm = e.storm.clamp(0.0, 1.0);
     let dim = (1.0 - OVERCAST_SKY_DIM * c) * (1.0 - STORM_SKY_DIM * storm);
     let day_sky = p.day_sky.srgb().map(|h| {
         let k = srgb(h);
@@ -527,6 +724,26 @@ pub fn look(e: &Eased, p: &VoxelParams) -> Look {
         scale3(lerp3(k, grey, OVERCAST_SKY_GREY * c), dim)
     });
     let [cloud_day, cloud_shade] = p.day_sky.cloud_srgb().map(srgb);
+
+    // --- rain, fog, lightning (checkpoint 2) ---
+    let flash_colour = scale3(cool, FLASH_FILL * flash);
+    let rain = e.rain.map(|r| r.clamp(0.0, 1.0));
+    let rate = e.rain_rate.max(0.0) / R0;
+    let rings = if rate > 0.0 { 1.0 - (-RING_RATE * rate).exp() } else { 0.0 };
+    // The streaks catch the light of the sky: brighter by day, never gone at night.
+    let rain_colour = {
+        let c = lerp3(p.water_surface, lerp3(p.light, [1.0; 3], 0.5), RAIN_LIGHT);
+        let lit = RAIN_FLOOR + (1.0 - RAIN_FLOOR) * ambient_level;
+        [0, 1, 2].map(|i| c[i] * lit + RAIN_FLASH * flash_colour[i])
+    };
+    let fog = e.fog.clamp(0.0, 1.0);
+    // Lit by the ambient (its hue and level, a little toward the palette's lavender) and a
+    // flash; the shader adds the sun in its own colour ([`FOG_SUN`] of `sun_lean` times its
+    // strength, or of the sun in the air with volumetric light on), so it glows at dawn.
+    let fog_colour = {
+        let hue = unit(lerp3(ambient, unit(srgb(FOG_LAVENDER_SRGB)), 0.35));
+        [0, 1, 2].map(|i| FOG_AMBIENT * ambient_level * hue[i] + FOG_FLASH * flash_colour[i])
+    };
 
     Look {
         sky,
@@ -556,6 +773,17 @@ pub fn look(e: &Eased, p: &VoxelParams) -> Look {
         cloud_day,
         cloud_shade,
         star_bloom: p.star_bloom.max(0.0),
+        rain,
+        rings,
+        rain_colour,
+        fog: FOG_DENSITY * fog,
+        fog_colour,
+        fog_glow: FOG_GLOW,
+        fog_sun: FOG_SUN,
+        flash,
+        flash_colour,
+        bolt: e.bolt.clamp(0.0, 1.0),
+        strike: if e.bolt > 0.0 || flash > 0.0 { e.strike } else { None },
     }
 }
 

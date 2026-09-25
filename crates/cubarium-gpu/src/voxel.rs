@@ -800,7 +800,11 @@ impl VoxelParams {
                 if self.light_levels < 2 { 0.0 } else { self.light_levels as f32 },
                 self.ao_strength,
             ],
-            ambient: v(look.ambient.map(|c| c * look.ambient_level)),
+            // A lightning flash is fill light: added to the ambient, it lifts every lit texel.
+            ambient: {
+                let a = look.ambient.map(|c| c * look.ambient_level);
+                [a[0] + look.flash_colour[0], a[1] + look.flash_colour[1], a[2] + look.flash_colour[2], 0.0]
+            },
             sun: [look.sun[0], look.sun[1], look.sun[2], look.sun_tint],
             water_l: [
                 self.water_absorb.max(0.0),
@@ -843,9 +847,33 @@ impl VoxelParams {
             day_c: v(look.day_sky[2]),
             cloud_day: v(look.cloud_day),
             cloud_shade: v(look.cloud_shade),
+            rain_k: [look.rain[0], look.rain[1], look.rain[2], look.rings],
+            rain_c: [look.rain_colour[0], look.rain_colour[1], look.rain_colour[2], look.fog_sun],
+            // The fog's floor is the renderer's (`VoxelRenderer::set_fog_floor`).
+            fog_k: [look.fog, 0.0, FOG_DEPTH, FOG_FALLOFF],
+            fog_c: [look.fog_colour[0], look.fog_colour[1], look.fog_colour[2], look.fog_glow],
+            flash_c: [
+                look.flash_colour[0],
+                look.flash_colour[1],
+                look.flash_colour[2],
+                look.flash,
+            ],
+            strike_k: match look.strike {
+                Some(s) => [s.x as f32 + 0.5, s.y as f32, s.z as f32, look.bolt],
+                None => [0.0; 4],
+            },
+            strike_l: match look.strike {
+                Some(s) => [(s.seed & 0xFFFF) as f32, ((s.seed >> 16) & 0xFFFF) as f32, 0.0, 0.0],
+                None => [0.0; 4],
+            },
         }
     }
 }
+
+/// The fog's full-density band above its floor, voxels, and how many voxels over it the
+/// fog thins by a factor of e (interim).
+pub const FOG_DEPTH: f32 = 4.0;
+pub const FOG_FALLOFF: f32 = 5.0;
 
 /// The frame's clock, as the lit tier's water reads it: sim time in ticks (the tick plus
 /// the fraction of it elapsed), and the water's animation step, both wrapped where the
@@ -952,6 +980,19 @@ struct VoxelUniforms {
     /// The clouds by day: body and shadowed underside.
     cloud_day: [f32; 4],
     cloud_shade: [f32; 4],
+    /// The rain (checkpoint 2): drizzle, shower, downpour, and the rings' density; the
+    /// streaks' colour.
+    rain_k: [f32; 4],
+    rain_c: [f32; 4],
+    /// The fog: density at its floor, the floor (voxels), the full band, the falloff; its
+    /// light and its glow weight.
+    fog_k: [f32; 4],
+    fog_c: [f32; 4],
+    /// Lightning: the fill flash's light and level; the bolt's column (x centre, top y, z)
+    /// and brightness; its seed in two 16-bit halves.
+    flash_c: [f32; 4],
+    strike_k: [f32; 4],
+    strike_l: [f32; 4],
 }
 
 /// Where one tick's world is written, straight into mapped memory.
@@ -1229,6 +1270,12 @@ pub struct VoxelRenderer {
     /// The lit tier's emission attachment and bloom passes ([`crate::bloom`]); `None` in
     /// the flat tier, whose raster pass has the one attachment it always had.
     bloom: Option<Bloom>,
+    /// The lit tier's weather pass (`voxel.frag` specialised `WEATHER`): rain, fog and the
+    /// lightning bolt over the raster after the walk, before the bloom. `None` in the flat
+    /// tier, which draws its rain and flash in the walk and gets no new pass.
+    weather_pass: Option<WeatherPass>,
+    /// The fog's floor, voxels up ([`VoxelRenderer::set_fog_floor`]).
+    fog_floor: f32,
     staging: Vec<HostBuffer>,
     /// Which staging buffer the next pack may use and which the GPU is still reading.
     ring: StagingRing,
@@ -1286,6 +1333,9 @@ pub struct VoxelRenderer {
     pool: vk::DescriptorPool,
     pipeline_layout: vk::PipelineLayout,
     pipeline: vk::Pipeline,
+    /// The lit walk that also writes its end depth for the weather pass (null in the flat
+    /// tier): bound instead of `pipeline` on frames that draw weather.
+    depth_pipeline: vk::Pipeline,
     present: PresentPass,
     pub command_pool: vk::CommandPool,
     queries: vk::QueryPool,
@@ -1647,6 +1697,7 @@ impl VoxelRenderer {
             sampled(9),
             sampled(10),
             sampled(11),
+            sampled(12),
         ];
         let set_layout = unsafe {
             d.create_descriptor_set_layout(
@@ -1660,7 +1711,7 @@ impl VoxelRenderer {
                 .descriptor_count(1),
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .descriptor_count(10),
+                .descriptor_count(12),
         ];
         let pool = unsafe {
             d.create_descriptor_pool(
@@ -1697,6 +1748,12 @@ impl VoxelRenderer {
         );
         let (isk, ica) = (image_info(sky_view), image_info(canopy_view));
         let ibd = image_info(backdrop.view);
+        // The walk's end depth, which the lit tier's walk writes in the emission's alpha for
+        // the weather pass; the flat tier binds its one backdrop texel, never read.
+        let idp = image_info(match &bloom {
+            Some(b) => b.emit_view,
+            None => backdrop.view,
+        });
         let igl = [vk::DescriptorImageInfo::default()
             .sampler(linear)
             .image_view(glow_view)
@@ -1731,6 +1788,7 @@ impl VoxelRenderer {
                     sampled_write(set, 9, &igl),
                     sampled_write(set, 10, &isv),
                     sampled_write(set, 11, &ibd),
+                    sampled_write(set, 12, &idp),
                 ],
                 &[],
             )
@@ -1772,10 +1830,30 @@ impl VoxelRenderer {
             Some(&spec),
             if params.lit { 2 } else { 1 },
         )?;
+        // The lit walk again, writing its end depth for the weather pass (`WEATHER_DEPTH`,
+        // constant_id 8): used only on frames that draw weather.
+        let depth_pipeline = if params.lit {
+            let mut flags: Vec<u32> = constants.to_vec();
+            flags.extend([0, 0, 1]);
+            let entries: Vec<_> = (0..flags.len() as u32)
+                .map(|i| vk::SpecializationMapEntry::default().constant_id(i).offset(i * 4).size(4))
+                .collect();
+            let spec = vk::SpecializationInfo::default()
+                .map_entries(&entries)
+                .data(bytemuck::cast_slice(&flags));
+            crate::render::fullscreen_pipeline_n(d, raster_pass, pipeline_layout, vs, fs, false, Some(&spec), 2)?
+        } else {
+            vk::Pipeline::null()
+        };
         let backdrop = if params.lit {
             backdrop.with_pipeline(gpu, pipeline_layout, vs, fs)?
         } else {
             backdrop
+        };
+        let weather_pass = if params.lit {
+            Some(WeatherPass::new(gpu, &params, raster_view, pipeline_layout, vs, fs, &constants)?)
+        } else {
+            None
         };
         unsafe {
             d.destroy_shader_module(vs, None);
@@ -1822,6 +1900,8 @@ impl VoxelRenderer {
             linear,
             sunvis,
             bloom,
+            weather_pass,
+            fog_floor: params.height as f32 * 0.25,
             staging,
             uniform_stride,
             last_done: None,
@@ -1846,6 +1926,7 @@ impl VoxelRenderer {
             pool,
             pipeline_layout,
             pipeline,
+            depth_pipeline,
             present: PresentPass::new(gpu, raster_view, nearest)?,
             command_pool,
             queries,
@@ -1901,9 +1982,10 @@ impl VoxelRenderer {
     /// tier draws nothing from the clock and keeps its redraw skip.
     ///
     /// **The weather eases on it too** ([`VoxelRenderer::set_weather`]). The lit tier
-    /// takes the eased look every frame and redraws while it changes or while the sky
-    /// animates (drifting clouds, twinkling stars). The flat tier takes it only when the
-    /// clock crosses a tick, so its redraw rate stays the tick rate whatever the sky does.
+    /// takes the eased look every frame and redraws while it changes or while the weather
+    /// animates (drifting clouds, twinkling stars, rain, fog, a flash). The flat tier takes
+    /// it only when the clock crosses a tick, so its redraw rate stays the tick rate
+    /// whatever the sky does (its rain and flash step at the tick).
     pub fn set_clock(&mut self, clock: FrameClock) {
         let moved = clock.step != self.clock.step;
         let new_tick = clock.time.floor() != self.clock.time.floor();
@@ -1913,7 +1995,8 @@ impl VoxelRenderer {
         if self.params.lit || new_tick || first {
             let dt = (clock.seconds - self.weather_at) as f32;
             self.weather_at = clock.seconds;
-            let eased = self.weather_ease.advance(&self.weather, dt, self.params.width);
+            let eased =
+                self.weather_ease.advance(&self.weather, dt, self.params.width, clock.seconds);
             let look = crate::weather::look(&eased, &self.params);
             redraw |= !look.same_picture(&self.look);
             self.look = look;
@@ -1929,6 +2012,19 @@ impl VoxelRenderer {
     /// eases toward it.
     pub fn set_weather(&mut self, weather: crate::weather::Weather) {
         self.weather = weather;
+    }
+
+    /// Where the ground fog lies: its floor, voxels up (the low ground: the sink takes a
+    /// low percentile of the terrain's column tops). The picture moves only while there
+    /// is fog.
+    pub fn set_fog_floor(&mut self, y: f32) {
+        if y != self.fog_floor {
+            self.fog_floor = y;
+            if self.look.fog > 0.0 {
+                self.raster_current = false;
+                self.version += 1;
+            }
+        }
     }
 
     /// The look the next frame draws.
@@ -2137,6 +2233,7 @@ impl VoxelRenderer {
         // `set_params` and `update_weather` only moved `self.params`.
         let mut block = self.params.uniforms(self.tex_mask, self.vine_on, self.clock, &self.look);
         block.vol[3] = self.sunvis.fade();
+        block.fog_k[1] = self.fog_floor;
         self.uniforms.write_bytes_at(self.uniform_stride * frame.slot as u64, &[block]);
         // and its own four timestamps.
         let q = frame.slot as u32 * QUERY_SLOTS;
@@ -2283,9 +2380,22 @@ impl VoxelRenderer {
                     &[self.set],
                     &[(self.uniform_stride * frame.slot as u64) as u32],
                 );
-                d.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
+                let weather = self.weather_pass.is_some() && weather_drawn(&self.look, &self.params);
+                let walk = if weather { self.depth_pipeline } else { self.pipeline };
+                d.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, walk);
                 d.cmd_draw(cb, 3, 1, 0, 0);
                 d.cmd_end_render_pass(cb);
+                if let Some(w) = &self.weather_pass
+                    && weather
+                {
+                    w.record(
+                        d,
+                        cb,
+                        self.pipeline_layout,
+                        self.set,
+                        (self.uniform_stride * frame.slot as u64) as u32,
+                    );
+                }
                 if let Some(b) = &self.bloom
                     && self.params.bloom > 0.0
                 {
@@ -2397,7 +2507,13 @@ impl VoxelRenderer {
         let d = &gpu.device;
         unsafe {
             d.destroy_pipeline(self.pipeline, None);
+            if self.depth_pipeline != vk::Pipeline::null() {
+                d.destroy_pipeline(self.depth_pipeline, None);
+            }
             self.backdrop.destroy(d);
+            if let Some(w) = &mut self.weather_pass {
+                w.destroy(d);
+            }
             d.destroy_pipeline_layout(self.pipeline_layout, None);
             d.destroy_descriptor_pool(self.pool, None);
             d.destroy_descriptor_set_layout(self.set_layout, None);
@@ -2759,6 +2875,96 @@ impl Backdrop {
             d.destroy_image_view(self.view, None);
             d.destroy_image(self.image, None);
             d.free_memory(self.memory, None);
+        }
+    }
+}
+
+/// Whether the lit tier's weather pass has anything to draw: rain, the bolt, or fog the
+/// walk's own in-scatter does not already carry (volumetric on, the fog is in the march).
+fn weather_drawn(look: &crate::weather::Look, params: &VoxelParams) -> bool {
+    look.rain.iter().any(|&r| r > 0.0)
+        || look.bolt > 0.0
+        || (look.fog > 0.0 && !params.effects.volume_on(params.lit))
+}
+
+/// The lit tier's weather pass (checkpoint 2): `voxel.frag` again, specialised `WEATHER`
+/// (constant_id 7), drawn over the raster with premultiplied blending between the walk and
+/// the bloom. It reads the walk's end depth (the emission's alpha) so the fog thickens with
+/// the ray's length through low air, rain layers stop at nearer terrain, and the bolt hides
+/// behind what stands in front of it. Kept out of the walk's pipeline, like the sky, for
+/// the walk's occupancy; skipped outright when there is nothing to draw.
+struct WeatherPass {
+    pass: vk::RenderPass,
+    framebuffer: vk::Framebuffer,
+    pipeline: vk::Pipeline,
+    w: u32,
+    h: u32,
+}
+
+impl WeatherPass {
+    fn new(
+        gpu: &Gpu,
+        params: &VoxelParams,
+        raster_view: vk::ImageView,
+        layout: vk::PipelineLayout,
+        vs: vk::ShaderModule,
+        fs: vk::ShaderModule,
+        walk: &[u32],
+    ) -> Result<WeatherPass> {
+        let d = &gpu.device;
+        let pass = crate::render::colour_pass_n(
+            d,
+            &[RASTER_FORMAT],
+            vk::AttachmentLoadOp::LOAD,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        )?;
+        let framebuffer = framebuffer(d, pass, raster_view, params.raster_w, params.raster_h)?;
+        // The walk's own switches (so the fog knows whether the march carries it), SKY off,
+        // WEATHER on.
+        let mut flags: Vec<u32> = walk.to_vec();
+        flags.push(0);
+        flags.push(1);
+        let entries: Vec<_> = (0..flags.len() as u32)
+            .map(|i| {
+                vk::SpecializationMapEntry::default()
+                    .constant_id(i)
+                    .offset(i * 4)
+                    .size(4)
+            })
+            .collect();
+        let spec = vk::SpecializationInfo::default()
+            .map_entries(&entries)
+            .data(bytemuck::cast_slice(&flags));
+        let pipeline = crate::render::fullscreen_pipeline_n(d, pass, layout, vs, fs, true, Some(&spec), 1)?;
+        Ok(WeatherPass { pass, framebuffer, pipeline, w: params.raster_w, h: params.raster_h })
+    }
+
+    /// Draw the weather over the raster the walk has just drawn.
+    fn record(
+        &self,
+        d: &ash::Device,
+        cb: vk::CommandBuffer,
+        layout: vk::PipelineLayout,
+        set: vk::DescriptorSet,
+        offset: u32,
+    ) {
+        unsafe {
+            crate::bloom::colour_to_read(d, cb);
+            crate::render::begin(d, cb, self.pass, self.framebuffer, self.w, self.h);
+            d.cmd_bind_descriptor_sets(cb, vk::PipelineBindPoint::GRAPHICS, layout, 0, &[set], &[offset]);
+            d.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
+            d.cmd_draw(cb, 3, 1, 0, 0);
+            d.cmd_end_render_pass(cb);
+            crate::bloom::colour_to_read(d, cb);
+        }
+    }
+
+    fn destroy(&mut self, d: &ash::Device) {
+        unsafe {
+            d.destroy_pipeline(self.pipeline, None);
+            d.destroy_framebuffer(self.framebuffer, None);
+            d.destroy_render_pass(self.pass, None);
         }
     }
 }

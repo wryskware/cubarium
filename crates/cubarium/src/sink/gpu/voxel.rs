@@ -110,6 +110,10 @@ pub struct VoxelGpuSink {
     /// Capture-only: a scripted weather loop over the world's own
     /// ([`Self::set_weather_preview`]), and the sim time and tick its first frame drew.
     weather_preview: Option<(super::weather::WeatherPreview, Option<(f64, u64)>)>,
+    /// Every column's top (highest solid voxel, +1; 0 for an all-air column), `x + z·width`,
+    /// for the terrain of this `terrain_version`: where a lightning strike lands, and the
+    /// fog's floor.
+    tops: (Option<u64>, Vec<u16>),
     /// The sky this world is drawn under, kept while the founding frame dims it.
     founding_sky: Option<([f32; 3], [f32; 3])>,
     /// When the founding frame's pulse started, so a held founding frame keeps its phase.
@@ -195,6 +199,7 @@ impl VoxelGpuSink {
             water_smooth: cfg.light.water_smooth,
             force_rain: false,
             weather_preview: None,
+            tops: (None, Vec::new()),
             founding_sky: None,
             founding_since: None,
             awaiting_light: false,
@@ -305,8 +310,21 @@ impl VoxelGpuSink {
             0.0
         };
         self.renderer.update_weather(atmosphere, rain_tick);
+        if self.tops.0 != Some(view.terrain_version) {
+            let (tops, floor) = super::weather::column_tops(view);
+            self.tops = (Some(view.terrain_version), tops);
+            self.renderer.set_fog_floor(floor);
+        }
         if self.weather_preview.is_none() {
-            self.renderer.set_weather(super::weather::weather_of(&view.weather));
+            let mut w = view.weather;
+            if self.force_rain && w.mode == cubarium_voxel::weather::RainMode::Clear {
+                w.mode = cubarium_voxel::weather::RainMode::Shower;
+                w.rain_m_per_s = cubarium_gpu::weather::R0;
+            }
+            let tops = &self.tops.1;
+            self.renderer.set_weather(super::weather::weather_of(&w, |x, z| {
+                super::weather::top_of(tops, p.width, x, z)
+            }));
         }
         self.renderer.set_water_visible(self.packer.wet);
         self.ticks_staged += 1;
@@ -328,7 +346,10 @@ impl VoxelGpuSink {
             let now = (tick as f64 + fraction) / hz;
             let (t0, tick0) = *start.get_or_insert((now, tick));
             let view = preview.at(now - t0, tick0, hz);
-            self.renderer.set_weather(super::weather::weather_of(&view));
+            let (tops, width) = (&self.tops.1, self.renderer.params().width);
+            self.renderer.set_weather(super::weather::weather_of(&view, |x, z| {
+                super::weather::top_of(tops, width, x, z)
+            }));
         }
         self.renderer.set_clock(FrameClock::at(
             tick,

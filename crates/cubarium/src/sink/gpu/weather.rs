@@ -11,8 +11,9 @@ use std::str::FromStr;
 use cubarium_gpu::weather::{Rain, Strike, Weather};
 use cubarium_voxel::weather::{RainMode, WeatherView};
 
-/// The renderer's copy of the view's weather.
-pub fn weather_of(v: &WeatherView) -> Weather {
+/// The renderer's copy of the view's weather. `top` gives a column's highest solid voxel,
+/// where a strike lands.
+pub fn weather_of(v: &WeatherView, top: impl Fn(u32, u32) -> u32) -> Weather {
     Weather {
         rain: match v.mode {
             RainMode::Clear => Rain::Clear,
@@ -27,11 +28,45 @@ pub fn weather_of(v: &WeatherView) -> Weather {
         daylight: v.daylight,
         sun_elevation: v.sun_elevation,
         last_strike: v.last_strike.map(|s| Strike {
-            tick: s.tick,
+            at_s: s.tick as f64 / f64::from(cubarium_voxel::TICK_HZ),
             x: s.x,
             z: s.z,
+            y: top(s.x, s.z),
             seed: s.seed,
         }),
+    }
+}
+
+/// Every column's top as [`VoxelGpuSink`](super::voxel::VoxelGpuSink) keeps them (the
+/// highest solid voxel + 1, 0 for an all-air column, `x + z·width`), and the ground fog's
+/// floor: the low ground, a low percentile of the tops (the lake's bed and the basins).
+pub fn column_tops(view: &cubarium_voxel::VoxelView<'_>) -> (Vec<u16>, f32) {
+    let (w, d) = (view.config.width, view.config.depth);
+    let mut tops = Vec::with_capacity((w * d) as usize);
+    for z in 0..d {
+        for x in 0..w {
+            tops.push(view.surface_y(i64::from(x), z).map_or(0, |y| y as u16 + 1));
+        }
+    }
+    let mut sorted: Vec<u16> = tops.iter().copied().filter(|&t| t > 0).collect();
+    sorted.sort_unstable();
+    let floor = sorted
+        .get(sorted.len() * FOG_FLOOR_PERCENTILE / 100)
+        .map_or(0.0, |&t| f32::from(t));
+    (tops, floor)
+}
+
+/// The fog's floor is this percentile of the columns' tops.
+pub const FOG_FLOOR_PERCENTILE: usize = 10;
+
+/// A column's highest solid voxel from [`column_tops`]' table (the world's middle height
+/// before there is one).
+pub fn top_of(tops: &[u16], width: u32, x: u32, z: u32) -> u32 {
+    let i = (x % width.max(1) + z * width) as usize;
+    match tops.get(i) {
+        Some(&t) if t > 0 => u32::from(t) - 1,
+        Some(_) => 0,
+        None => 16,
     }
 }
 
@@ -43,9 +78,16 @@ pub enum WeatherPreview {
     Loop,
     /// 60 s: one whole day and night with no rain, the clouds coming and going.
     Day,
-    /// A still: this day phase and cloud cover, no rain, no fog (`fixed:PHASE[,CLOUD]`).
-    Fixed { phase: f32, cloud: f32 },
+    /// A still or a steady state: this day phase and cloud cover, rain mode and fog
+    /// (`fixed:PHASE[,CLOUD[,RAIN[,FOG]]]`, RAIN one of `clear`, `drizzle`, `shower`,
+    /// `downpour`). A downpour strikes every [`FIXED_STRIKE_EVERY_S`], the first just
+    /// before the preview's first frame (so a still or a timing run holds a flash).
+    Fixed { phase: f32, cloud: f32, rain: RainMode, fog: f32 },
 }
+
+/// A fixed downpour's strikes: this often, the first this long before the first frame.
+pub const FIXED_STRIKE_EVERY_S: f64 = 4.0;
+pub const FIXED_STRIKE_LEAD_S: f64 = 0.05;
 
 impl FromStr for WeatherPreview {
     type Err = anyhow::Error;
@@ -54,12 +96,27 @@ impl FromStr for WeatherPreview {
             "loop" => Ok(WeatherPreview::Loop),
             "day" => Ok(WeatherPreview::Day),
             _ => {
-                let bad = || anyhow::anyhow!("--weather-preview is `loop`, `day` or `fixed:PHASE[,CLOUD]`, not {s:?}");
+                let bad = || {
+                    anyhow::anyhow!(
+                        "--weather-preview is `loop`, `day` or `fixed:PHASE[,CLOUD[,RAIN[,FOG]]]`, not {s:?}"
+                    )
+                };
                 let rest = s.strip_prefix("fixed:").ok_or_else(bad)?;
-                let mut it = rest.split(',').map(str::parse::<f32>);
-                let phase = it.next().ok_or_else(bad)?.map_err(|_| bad())?;
-                let cloud = it.next().transpose().map_err(|_| bad())?.unwrap_or(0.0);
-                Ok(WeatherPreview::Fixed { phase, cloud })
+                let mut it = rest.split(',');
+                let num = |v: Option<&str>, default: f32| -> anyhow::Result<f32> {
+                    v.map_or(Ok(default), |v| v.parse::<f32>().map_err(|_| bad()))
+                };
+                let phase = num(Some(it.next().ok_or_else(bad)?), 0.0)?;
+                let cloud = num(it.next(), 0.0)?;
+                let rain = match it.next() {
+                    None | Some("clear") => Clear,
+                    Some("drizzle") => Drizzle,
+                    Some("shower") => RainMode::Shower,
+                    Some("downpour") => Downpour,
+                    Some(_) => return Err(bad()),
+                };
+                let fog = num(it.next(), 0.0)?;
+                Ok(WeatherPreview::Fixed { phase, cloud, rain, fog })
             }
         }
     }
@@ -104,10 +161,11 @@ const fn key(t: f64, phase: f64, cloud: f32, fog: f32, rain: RainMode) -> Key {
 use RainMode::{Clear, Downpour, Drizzle};
 
 /// The loop, 90 s. The last key is the first a whole day later, so it wraps seamlessly.
-const LOOP: [Key; 11] = [
+const LOOP: [Key; 12] = [
     key(0.0, 0.17, 0.25, 0.8, Clear),    // dawn fog
     key(10.0, 0.23, 0.2, 0.45, Clear),   // clear morning
     key(20.0, 0.38, 0.12, 0.0, Clear),   // clouds building
+    key(25.0, 0.45, 0.55, 0.0, RainMode::Shower), // a shower
     key(32.0, 0.54, 0.95, 0.0, Downpour), // a downpour with strikes
     key(48.0, 0.62, 1.0, 0.0, Clear),    // clearing
     key(58.0, 0.74, 0.3, 0.0, Clear),    // dusk
@@ -140,7 +198,7 @@ fn rate(mode: RainMode) -> f32 {
             Clear => 0.0,
             Drizzle => 0.1,
             RainMode::Shower => 1.0,
-            Downpour => 1.5,
+            Downpour => 2.5,
         }
 }
 
@@ -160,13 +218,24 @@ impl WeatherPreview {
     /// The weather `t` seconds into the preview (wrapping), whose first second was sim
     /// tick `start_tick` at `tick_hz` ticks a second (the strikes are stamped in ticks).
     pub fn at(self, t: f64, start_tick: u64, tick_hz: f64) -> WeatherView {
-        if let WeatherPreview::Fixed { phase, cloud } = self {
+        if let WeatherPreview::Fixed { phase, cloud, rain, fog } = self {
             let (sun_elevation, daylight) = day_clock(phase);
+            let cloud = if rain == Downpour { cloud.max(0.9) } else { cloud }.clamp(0.0, 1.0);
+            let last_strike = (rain == Downpour).then(|| {
+                let k = ((t.max(0.0) + FIXED_STRIKE_LEAD_S) / FIXED_STRIKE_EVERY_S).floor();
+                let at = k * FIXED_STRIKE_EVERY_S - FIXED_STRIKE_LEAD_S;
+                preview_strike(k as u32, (start_tick as f64 + at * tick_hz).round().max(0.0) as u64)
+            });
             return WeatherView {
-                cloud_cover: cloud.clamp(0.0, 1.0),
+                rh: 0.4 + 0.6 * cloud,
+                mode: rain,
+                rain_m_per_s: rate(rain),
+                fog: fog.clamp(0.0, 1.0),
+                cloud_cover: cloud,
                 day_phase: phase.rem_euclid(1.0),
                 daylight,
                 sun_elevation,
+                last_strike,
                 ..WeatherView::CLEAR_NOON
             };
         }
@@ -213,8 +282,9 @@ fn preview_strike(k: u32, tick: u64) -> cubarium_voxel::weather::Strike {
     let h = k.wrapping_mul(0x9E37_79B9) ^ 0x5bd1_e995;
     cubarium_voxel::weather::Strike {
         tick,
-        x: 40 + (h % 180),
-        z: 10 + (h >> 8) % 30,
+        // Inside the smallest world a preview draws (the panel's 160 x 24).
+        x: 20 + (h % 120),
+        z: 4 + (h >> 8) % 16,
         seed: h,
     }
 }
@@ -243,6 +313,21 @@ mod tests {
             assert!((a.cloud_cover - b.cloud_cover).abs() < 1e-3, "{p:?} cloud");
             assert!((a.fog - b.fog).abs() < 1e-3, "{p:?} fog");
         }
+    }
+
+    #[test]
+    fn a_fixed_preview_holds_rain_fog_and_a_fresh_strike() {
+        let p: WeatherPreview = "fixed:0.55,0.5,downpour,0.3".parse().unwrap();
+        let v = p.at(0.0, 1000, 20.0);
+        assert_eq!((v.mode, v.fog), (Downpour, 0.3));
+        assert!(v.cloud_cover >= 0.9 && v.rain_m_per_s > 0.0);
+        // The first strike is just before the first frame: a still holds its flash.
+        assert_eq!(v.last_strike.map(|s| s.tick), Some(999));
+        let later = p.at(FIXED_STRIKE_EVERY_S + 0.1, 1000, 20.0).last_strike.unwrap();
+        assert!(later.tick > 1000);
+        let dry: WeatherPreview = "fixed:0.2".parse().unwrap();
+        assert_eq!(dry.at(0.0, 0, 20.0).mode, Clear);
+        assert!("fixed:0.2,0,hail".parse::<WeatherPreview>().is_err());
     }
 
     #[test]
