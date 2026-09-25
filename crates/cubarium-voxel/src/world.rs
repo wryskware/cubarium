@@ -150,6 +150,9 @@ pub struct VoxelView<'a> {
     pub outlet: Option<(u32, u32, u32)>,
     /// The spring cell `(x, y, z)`, if the world names one.
     pub spring: Option<(u32, u32, u32)>,
+    /// The weather and the time of day, for drawing: the pinned seam
+    /// ([`crate::weather`]).
+    pub weather: crate::weather::WeatherView,
     /// Every column's solid cells as bits, the world's [`SolidColumns`]: what
     /// [`VoxelView::is_support`], [`VoxelView::is_solid`] and the column queries read.
     /// Empty while a world is being generated and on a world taller than
@@ -176,6 +179,7 @@ impl<'a> VoxelView<'a> {
             outlet_open: false,
             outlet: None,
             spring: None,
+            weather: crate::weather::WeatherView::CLEAR_NOON,
             solid: &[],
         }
     }
@@ -1191,6 +1195,16 @@ impl World {
             outlet_open: self.outlet_open,
             outlet: self.outlet_cell,
             spring: self.spring_cell,
+            weather: crate::weather::WeatherView::legacy(
+                self.atmosphere_m3,
+                self.ledger.expected_total(),
+                if self.config.closed_water_budget {
+                    self.shower_left_m3 > 0.0
+                } else {
+                    self.config.rain_m_per_s > 0.0
+                },
+                self.config.rain_m_per_s,
+            ),
             solid: &self.solid.bits,
         }
     }
