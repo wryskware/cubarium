@@ -46,6 +46,7 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
     vec4 waterL;        // lit: absorption per voxel of path, reflection gain, ripple tilt, reflection cells
     vec4 clock;         // sim time in ticks (tick + the fraction elapsed), the water's animation step, -, -
     vec4 waterM;        // lit: foam, glint, rain rings, highlight (toward white)
+    vec4 volK;          // lit: light shafts' density, glow weight, falloff (voxels), fade
 } u;
 
 // The lighting tier (`lighting = "flat" | "lit"`), fixed when the pipeline is built. The
@@ -55,6 +56,13 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
 // light value that multiplies each texel's base colour; the edge treatments are the
 // flat tier's, leaning between the lit tones instead of the flat ones.
 layout(constant_id = 0) const bool LIT = false;
+// The lit tier's effect switches (`cubarium_gpu::sunvis::Effects`), all off in the flat
+// tier: an effect switched off is dead code and costs nothing.
+layout(constant_id = 1) const bool SHADOWS = true;      // the sun march
+layout(constant_id = 2) const bool REFLECTIONS = true;  // the water's reflection march
+layout(constant_id = 3) const bool VOLUMETRIC = false;  // the light shafts (volumetric.glsl)
+layout(constant_id = 4) const bool GLOW = true;         // the emitters' local light
+layout(constant_id = 5) const bool AO = true;           // the AO crease (`[light] ao` > 0)
 
 layout(set = 0, binding = 1) uniform usampler3D voxels;  // rgba8ui, one texel per voxel
 layout(set = 0, binding = 2) uniform usampler3D roofTex; // r8ui, voxels to the solid above
@@ -352,6 +360,7 @@ float crease(float l, float r, float lo, float hi,
 // AO of a front face of (x, y, z) at texel (dx, dy), dy = 0 at the top: the open plane is
 // z-1.
 float aoFront(int x, int y, int z, int dx, int dy) {
+    if (!AO) { return 1.0; }
     int p = z - 1;
     return crease(
         occluder(x - 1, y, p), occluder(x + 1, y, p), occluder(x, y - 1, p), occluder(x, y + 1, p),
@@ -363,6 +372,7 @@ float aoFront(int x, int y, int z, int dx, int dy) {
 // AO of a top face of (x, y, z) at texel (dx, dy), dy = 0 at the back: the open plane is
 // y+1; its near side (z-1) is the face's bottom rows.
 float aoTop(int x, int y, int z, int dx, int dy) {
+    if (!AO) { return 1.0; }
     int p = y + 1;
     return crease(
         occluder(x - 1, p, z), occluder(x + 1, p, z), occluder(x, p, z - 1), occluder(x, p, z + 1),
@@ -437,6 +447,7 @@ vec3 ladderLight(float a, float sun, vec3 local) {
 // The emitters' light at world point `p` (voxel units), trilinear over the glow volume
 // whose texel i covers voxels 4i .. 4i + 4.
 vec3 glowAt(vec3 p) {
+    if (!GLOW) { return vec3(0.0); }
     vec3 n = vec3(textureSize(glowTex, 0)) * 4.0;
     // Explicit level: the walk is divergent per pixel, and an implicit-derivative sample
     // there costs as much as the rest of the lit shading together.
@@ -464,6 +475,7 @@ bool crownLets(uvec4 v, ivec3 c) {
 // 1 where the sun reaches world point `p`, which lies on the boundary of open cell `c`
 // (the cell in front of the face it is on); 0 where anything opaque is in the way.
 float sunReaches(vec3 p, ivec3 c) {
+    if (!SHADOWS) { return 1.0; }
     vec3 L = u.sunK.xyz;
     ivec3 dir = ivec3(sign(L));
     vec3 inv = vec3(
@@ -1563,12 +1575,14 @@ vec3 litWaterFinish(vec3 colour) {
     r.y = max(r.y, 0.05);
     r = normalize(r);
     // What is behind the surface first, so the march and the shading carry little state.
-    vec3 under = (1.0 - f) * colour;
-    ivec3 hc;
-    vec3 hp;
-    int axis;
-    bool found = reflectMarch(p, r, hc, hp, axis);
-    colour = under + f * reflectionShade(found, hc, hp, axis, r);
+    if (REFLECTIONS) {
+        vec3 under = (1.0 - f) * colour;
+        ivec3 hc;
+        vec3 hp;
+        int axis;
+        bool found = reflectMarch(p, r, hc, hp, axis);
+        colour = under + f * reflectionShade(found, hc, hp, axis, r);
+    }
     // The surface's details over the reflection: rain rings and foam in the palette's
     // surface colour, off the light as the falls' streaks are (lit, foam in a shaded
     // crevice went a muddy grey), and glints in the palette's light. Foam and rings only
@@ -1592,6 +1606,8 @@ vec3 litWaterFinish(vec3 colour) {
     return colour;
 }
 
+#include "volumetric.glsl"
+
 void main() {
     S = u.geom.x;
     RISE = u.geom.y;
@@ -1612,7 +1628,9 @@ void main() {
         waterLitReset();
     }
 
-    for (int z = 0; z < D; ++z) {
+    // The slab the walk ends in outlives the walk: the light shafts stop there.
+    int z = 0;
+    for (; z < D; ++z) {
         int q = BASE - z * RISE - px.y - 1;
         // q falls by `rise` a slab: once the pixel is below this slab's y = 0 front face
         // it is below every deeper slab's too.
@@ -1728,6 +1746,10 @@ void main() {
     vec3 sky = skyColor(px.x, px.y);
     vec3 colour = acc + trans * sky;
     if (LIT && wEntry >= 0) { colour = litWaterFinish(colour); }
+    if (LIT && VOLUMETRIC) {
+        // Through the open air in front of the walk's end, and never past a water surface.
+        colour += inScatter(wEntry >= 0 ? min(z, (wEntry >> 12) & 0xFFF) : z);
+    }
     outColour = vec4(colour, 1.0);
 
     // Falling rain animation streaks when active
