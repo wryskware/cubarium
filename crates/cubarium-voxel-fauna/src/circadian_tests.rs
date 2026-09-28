@@ -287,6 +287,9 @@ fn a_browser_sleeps_and_wakes_over_a_day_and_the_ledgers_stay_closed() {
         }
     }
     assert!(slept > 60 && woke > 60, "slept {slept}, awake {woke}");
-    assert!(changes >= 4, "only {changes} changes of state in three days");
+    assert!(
+        changes >= 4,
+        "only {changes} changes of state in three days"
+    );
     assert_closes(&fauna, "end");
 }

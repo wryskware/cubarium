@@ -172,6 +172,13 @@ fn tick_inner(
     cubarium_voxel::voxel_phase!(FaunaStep, {
         cubarium_voxel::voxel_phase!(FaunaTerrain, { terrain(fauna, &view) });
         cubarium_voxel::voxel_phase!(FaunaMaintenance, {
+            // WX4: who is asleep this tick is settled before anything is paid, so the
+            // upkeep, the controller stage and the act all read the same answer.
+            circadian(
+                fauna,
+                view.config.day.mode != cubarium_voxel::weather::DayMode::Off,
+                world.life_daylight(),
+            );
             maintenance(fauna);
             grow(fauna);
             void_guts(fauna, flora);
@@ -304,14 +311,51 @@ fn void_guts(fauna: &mut Fauna, flora: &mut Flora) {
     }
 }
 
+/// Step 1b (WX4): who sleeps this tick. A founder sleeps when its lineage's
+/// [`Activity`](crate::Activity) says it is not its hour, unless a wake rule fires: it is
+/// hungry (its reserve short of its cap by at least `wake_hunger`), it is on a wall face,
+/// or it is under water. It sleeps where it stands. Waking is the same test failing, so
+/// there is nothing else to time: the phase's own change, or a rule, wakes it at once.
+/// A body that falls asleep drops its held actions, so waking does not replay a stale
+/// stride; heuristic bodies carry no lineage and never sleep.
+fn circadian(fauna: &mut Fauna, clock_on: bool, daylight: f64) {
+    for i in 0..fauna.animals.len() {
+        let Some(founder) = fauna.animals[i].founder else {
+            continue;
+        };
+        let phys = fauna.config.founder(founder);
+        let a = &fauna.animals[i];
+        let asleep = !phys.active.awake(clock_on, daylight)
+            && hunger(a, &phys.core) < phys.wake_hunger
+            && a.mobility.climb.is_none()
+            && a.mobility.submerged_ticks == 0;
+        let a = &mut fauna.animals[i];
+        if asleep {
+            if a.state != State::Asleep {
+                a.state = State::Asleep;
+                a.founder_state.held = Actions::REST;
+            }
+        } else if a.state == State::Asleep {
+            a.state = State::Resting;
+        }
+    }
+}
+
 fn maintenance(fauna: &mut Fauna) {
     for i in 0..fauna.animals.len() {
         // A founder body pays upkeep under its own physiology's rate.
         let sc = body::effective_config(&fauna.config, &fauna.animals[i]);
         let is_founder = fauna.animals[i].founder.is_some();
+        // Asleep it pays the lineage's fraction of it (WX4).
+        let rest = match fauna.animals[i].founder {
+            Some(founder) if fauna.animals[i].state == State::Asleep => {
+                fauna.config.founder(founder).sleep_upkeep
+            }
+            _ => 1.0,
+        };
         let a = &mut fauna.animals[i];
         a.age_ticks = a.age_ticks.saturating_add(1);
-        let want = sc.maintenance_per_s * a.body * DT;
+        let want = sc.maintenance_per_s * rest * a.body * DT;
         let (_, from_body) = respire(fauna, i, want, Respiration::Maintenance);
         if is_founder && from_body > 0.0 {
             fauna.animals[i].founder_state.feedback.structural_loss += from_body;
@@ -417,7 +461,10 @@ fn controllers(
             let Some(founder) = a.founder else {
                 return false;
             };
-            a.age_ticks % founder.manifest().cadence_ticks() == 0
+            // An asleep body's controller is not consulted (WX4).
+            // WX4: a phase input for trained brains is the next training round's job; the
+            // sensor manifest gains it there, not here.
+            a.state != State::Asleep && a.age_ticks % founder.manifest().cadence_ticks() == 0
         })
         .map(|(i, _)| i)
         .collect();
@@ -737,6 +784,13 @@ fn act(
     tick: u64,
 ) {
     for i in 0..fauna.animals.len() {
+        if fauna.animals[i].state == State::Asleep {
+            // WX4: no movement, no feeding; the founder's tick is still counted alive.
+            if let Some(founder) = fauna.animals[i].founder {
+                fauna.ledger.founder_ticks_by_founder[founder.index()] += 1;
+            }
+            continue;
+        }
         if fauna.animals[i].founder.is_some() {
             founder_act(fauna, i, view, flora);
             continue;
@@ -1979,8 +2033,8 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
 }
 
 #[cfg(test)]
-#[path = "dung_tests.rs"]
-mod dung_tests;
-#[cfg(test)]
 #[path = "circadian_tests.rs"]
 mod circadian_tests;
+#[cfg(test)]
+#[path = "dung_tests.rs"]
+mod dung_tests;

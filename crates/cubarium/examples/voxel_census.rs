@@ -851,6 +851,10 @@ fn print_header() {
     header.push_str(
         ",temp_c,rh,mode,fog,rain_in,drizzles,showers,downpours,forced,gap_blocked,strikes,day_phase,stream_m3_s,moist",
     );
+    // WX4: how many of each lineage are asleep at the sample.
+    for f in Founder::ALL {
+        header.push_str(&format!(",asleep_{}", f.name()));
+    }
     println!("{header}");
 }
 
@@ -997,5 +1001,15 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64) {
     row.push(format!("{:.4}", world.day_phase()));
     row.push(format!("{:.6}", wx.stream_m3_s()));
     row.push(format!("{:.4}", world.moisture()));
+    for founder in Founder::ALL {
+        let asleep = a
+            .animals
+            .iter()
+            .filter(|an| {
+                an.founder == Some(founder) && an.state == cubarium_voxel_fauna::State::Asleep
+            })
+            .count();
+        row.push(asleep.to_string());
+    }
     println!("{}", row.join(","));
 }

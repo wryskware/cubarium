@@ -10,6 +10,10 @@ fn world(voxel_m: f64) -> World {
         height: 8,
         depth: 4,
         voxel_m,
+        day: cubarium_voxel::weather::DayClock {
+            mode: cubarium_voxel::weather::DayMode::Off,
+            ..Default::default()
+        },
         ..Config::default()
     });
     for z in 0..4 {

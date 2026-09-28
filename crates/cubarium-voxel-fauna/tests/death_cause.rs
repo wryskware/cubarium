@@ -27,6 +27,10 @@ fn plain(width: u32, top: u32) -> World {
         depth: 1,
         voxel_m: 1.0,
         seed: 5,
+        day: cubarium_voxel::weather::DayClock {
+            mode: cubarium_voxel::weather::DayMode::Off,
+            ..Default::default()
+        },
         ..VoxelConfig::default()
     });
     for x in 0..width as i64 {

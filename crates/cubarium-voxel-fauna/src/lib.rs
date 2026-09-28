@@ -487,6 +487,49 @@ pub enum State {
     Resting,
     /// On a terrain face, going up or down it ([`Mobility::climb`]).
     Climbing,
+    /// The rest state (WX4): its phase is not now and it is not hungry, so it stands where
+    /// it is, its controller is not consulted, it does not move or feed, and it pays
+    /// [`FounderPhysiology::sleep_upkeep`] × its basal upkeep. Kept general, a rest with an
+    /// upkeep factor and not a thing tied to night: a predator's long rest is the same state.
+    Asleep,
+}
+
+/// When a lineage is awake (WX4), read against the world's `life_daylight`. With the day
+/// clock off everyone is awake, so the clock's own switch reaches here as `clock_on`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Activity {
+    /// Awake whatever the hour.
+    Always,
+    /// Awake by day: daylight above [`Activity::DAY_LINE`].
+    Diurnal,
+    /// Awake by night: daylight below [`Activity::DAY_LINE`].
+    Nocturnal,
+    /// Awake in the twilight of either end of the day: daylight strictly inside
+    /// [`Activity::TWILIGHT`].
+    Crepuscular,
+}
+
+impl Activity {
+    /// The daylight a diurnal animal wakes above and a nocturnal one sleeps above.
+    pub const DAY_LINE: f64 = 0.3;
+    /// The daylight band that counts as twilight, for a crepuscular animal.
+    pub const TWILIGHT: (f64, f64) = (0.05, 0.95);
+
+    /// Whether this rhythm is awake at `daylight` (0 night, 1 full day). With the clock
+    /// off (`clock_on` false) every rhythm is awake.
+    pub fn awake(self, clock_on: bool, daylight: f64) -> bool {
+        if !clock_on {
+            return true;
+        }
+        match self {
+            Activity::Always => true,
+            Activity::Diurnal => daylight > Activity::DAY_LINE,
+            Activity::Nocturnal => daylight < Activity::DAY_LINE,
+            Activity::Crepuscular => {
+                daylight > Activity::TWILIGHT.0 && daylight < Activity::TWILIGHT.1
+            }
+        }
+    }
 }
 
 /// A body's movement state that outlives a tick (package mobility,
@@ -1235,6 +1278,17 @@ impl FaunaConfig {
                     founder.name(),
                     phys.organ_structure_fraction
                 ));
+            }
+            for (name, value) in [
+                ("sleep_upkeep", phys.sleep_upkeep),
+                ("wake_hunger", phys.wake_hunger),
+            ] {
+                if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                    return Err(format!(
+                        "{}.{name} must be finite, within 0..=1, not {value}",
+                        founder.name()
+                    ));
+                }
             }
             // The body is a physical object: every dimension positive, every anchor a
             // finite nonnegative fraction of one. A zero-height animal has no eye, no

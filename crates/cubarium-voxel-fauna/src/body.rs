@@ -105,6 +105,11 @@ const MOUTH_REACH_LENGTH_FRACTION: f64 = 0.25;
 const WALL_CLIMB_COST_FACTOR: f64 = 2.0;
 /// [`FounderPhysiology::drown_after_s`], both lineages.
 const DROWN_AFTER_S: f64 = 60.0;
+/// [`FounderPhysiology::sleep_upkeep`], both lineages (WX4, Fable).
+const SLEEP_UPKEEP: f64 = 0.5;
+/// [`FounderPhysiology::wake_hunger`], both lineages: awake once the reserve is under half
+/// its cap.
+const WAKE_HUNGER: f64 = 0.5;
 
 /// What a shredder builds out of a unit of litter — and, by the decision, of carrion.
 const LITTER_YIELD: f64 = 0.5;
@@ -289,6 +294,15 @@ pub struct FounderPhysiology {
     /// raised paid structure when the founder was sized from a core budget; it came
     /// with no free reserve or energy.
     pub organ_structure_fraction: f64,
+    /// When this lineage is awake (WX4): the browser is diurnal, the shredder nocturnal.
+    /// Placeholders, `design/backlog.md` §1.
+    pub active: crate::Activity,
+    /// What upkeep costs while it sleeps, **× its basal upkeep** (0.5, Fable's call).
+    pub sleep_upkeep: f64,
+    /// Hunger overrides sleep: a body whose hunger (the reserve's shortfall from its cap,
+    /// 0 full to 1 empty) is at or above this stays awake and forages. 0.5, a placeholder:
+    /// there was no earlier threshold to reuse.
+    pub wake_hunger: f64,
 }
 
 impl FounderPhysiology {
@@ -365,6 +379,9 @@ impl FounderPhysiology {
                 // fungal foliage does.
                 yield_by_food: [LITTER_YIELD, FOLIAGE_YIELD, LITTER_YIELD, FOLIAGE_YIELD],
                 organ_structure_fraction: 0.05,
+                active: crate::Activity::Nocturnal,
+                sleep_upkeep: SLEEP_UPKEEP,
+                wake_hunger: WAKE_HUNGER,
             },
             Founder::Browser => FounderPhysiology {
                 // The browser founder *is* the frondgrazer: the landed round-4 numbers
@@ -396,6 +413,9 @@ impl FounderPhysiology {
                 // same number so that a class it cannot reach is never a silent zero.
                 yield_by_food: [FOLIAGE_YIELD; crate::Food::COUNT],
                 organ_structure_fraction: 0.10,
+                active: crate::Activity::Diurnal,
+                sleep_upkeep: SLEEP_UPKEEP,
+                wake_hunger: WAKE_HUNGER,
             },
         }
     }

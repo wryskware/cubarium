@@ -90,9 +90,12 @@ use crate::Fauna;
 /// fractions, and the ledger six movement counters: refused, not migrated.
 /// Schema 17 is **dung**: an [`crate::Animal`] carries its `gut` (the undigested share of
 /// its bites and the mineral it sheds), voided as litter every 30 s: refused, not migrated.
+/// Schema 18 is **circadian rhythms** (WX4): [`crate::State`] gained `Asleep` and
+/// [`crate::FounderPhysiology`] its `active`, `sleep_upkeep` and `wake_hunger`: refused,
+/// not migrated.
 /// Postcard is not self-describing, so older worlds are **refused**, not migrated
 /// (`always-fresh-never-migrate`): start a fresh world.
-pub const SCHEMA: u32 = 17;
+pub const SCHEMA: u32 = 18;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

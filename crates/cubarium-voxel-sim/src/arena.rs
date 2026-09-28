@@ -558,6 +558,12 @@ impl Arena {
             depth: grid.depth(),
             voxel_m: grid.voxel_m(),
             seed: layout_seed,
+            // A trial arena has no night: WX4's sleep must not reach a trained or
+            // scripted body's episode.
+            day: cubarium_voxel::weather::DayClock {
+                mode: cubarium_voxel::weather::DayMode::Off,
+                ..Default::default()
+            },
             ..VoxelConfig::default()
         };
         let mut world = World::empty(config);

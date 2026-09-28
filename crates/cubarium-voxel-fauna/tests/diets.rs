@@ -36,6 +36,10 @@ fn flat_world() -> World {
         height: 8,
         depth: 6,
         voxel_m: 0.25,
+        day: cubarium_voxel::weather::DayClock {
+            mode: cubarium_voxel::weather::DayMode::Off,
+            ..Default::default()
+        },
         ..VoxelConfig::default()
     });
     for z in 0..6 {

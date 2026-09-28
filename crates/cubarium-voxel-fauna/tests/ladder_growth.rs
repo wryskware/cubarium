@@ -59,6 +59,10 @@ fn plain(voxel_m: f64) -> World {
         depth: 1,
         voxel_m,
         seed: 29,
+        day: cubarium_voxel::weather::DayClock {
+            mode: cubarium_voxel::weather::DayMode::Off,
+            ..Default::default()
+        },
         ..VoxelConfig::default()
     });
     for x in 0..4 {
