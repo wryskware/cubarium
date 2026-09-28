@@ -121,12 +121,12 @@ fn main() {
         sim.step();
     }
     println!(
-        "warm-up: {warmup} ticks in {:.1} s, world tick {}, {} showers so far, next due at \
-         tick {}",
+        "warm-up: {warmup} ticks in {:.1} s, world tick {}, {} rain events so far, dry gap \
+         until tick {}",
         t.elapsed().as_secs_f64(),
         sim.world().tick(),
-        sim.world().view().ledger.showers,
-        sim.world().next_shower_tick(),
+        sim.world().view().ledger.rain_events,
+        sim.world().weather().gap_until(),
     );
     if quiet > 0 {
         window(&mut sim, "quiet", quiet, 0.0, every, budget);
@@ -183,10 +183,10 @@ fn window(sim: &mut Sim, name: &str, ticks: u64, pulse: f64, every: u64, budget:
     let water: u64 = WATER.iter().map(|p| acc[p.index()]).sum();
     println!(
         "\n## {name}: world ticks {from}..{}, {n} ticks in {wall:.1} s ({:.1} ticks/s), pulse \
-         {pulse:e} m³/tick, {} showers by the end; timings over the {timed} non-census ticks",
+         {pulse:e} m³/tick, {} rain events by the end; timings over the {timed} non-census ticks",
         sim.world().tick(),
         n as f64 / wall,
-        sim.world().view().ledger.showers,
+        sim.world().view().ledger.rain_events,
     );
     println!(
         "at the close: {} wet cells, {:.4} m³ free (pooled), {:.4} m³ pore",

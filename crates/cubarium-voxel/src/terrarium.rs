@@ -230,12 +230,9 @@ impl Terrarium {
         stream_width_m: 0.75,
         stream_depth_m: 0.25,
         water: Water {
-            // The stream no longer returns the sky's water, so the showers must. A shower
-            // rains whatever the sky holds, up to more than it ever holds, so rain follows
-            // evaporation; the low trigger sets how often. A small sky: the level is set by
-            // the ground, not by what is aloft.
-            shower_volume_m3: 1.0,
-            shower_trigger_fraction: 0.005,
+            // The stream no longer returns the sky's water, so the rain must; the climate
+            // decides when (`[world.climate]`). A small sky: the level is set by the
+            // ground, not by what is aloft.
             // Evaporation well under the rain rate, so a shower reaches the ground rather
             // than lifting straight back off the films it wets. It no longer has to power
             // the stream, only the weather.
@@ -305,12 +302,9 @@ impl Terrarium {
         stream_width_m: 1.0,
         stream_depth_m: 0.25,
         water: Water {
-            // The stream no longer returns the sky's water, so the showers must. A shower
-            // rains whatever the sky holds, up to more than it ever holds, so rain follows
-            // evaporation; the low trigger sets how often. A small sky: the level is set by
-            // the ground, not by what is aloft.
-            shower_volume_m3: 3.0,
-            shower_trigger_fraction: 0.005,
+            // The stream no longer returns the sky's water, so the rain must; the climate
+            // decides when (`[world.climate]`). A small sky: the level is set by the
+            // ground, not by what is aloft.
             // Evaporation well under the rain rate, so a shower reaches the ground rather
             // than lifting straight back off the films it wets. It no longer has to power
             // the stream, only the weather.

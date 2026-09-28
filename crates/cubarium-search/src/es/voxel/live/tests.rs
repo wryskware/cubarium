@@ -273,7 +273,7 @@ fn the_training_world_is_still_and_conserves_its_water() {
         ..Config::default()
     }));
     assert!(is_still(&world));
-    world.bring_shower_forward();
+    world.force_rain(cubarium_voxel::weather::RainMode::Shower);
     let total = |w: &World| {
         let v = w.view();
         v.stored_m3() + v.atmosphere_m3
@@ -311,7 +311,7 @@ fn coarse_water_conserves_and_refuses_to_be_the_default() {
     let mut world = World::new(cfg.clone());
     assert_eq!(world.water_every(), 1, "built live");
     world.set_water_every(4);
-    world.bring_shower_forward();
+    world.force_rain(cubarium_voxel::weather::RainMode::Shower);
     let t0 = total(&world);
     for _ in 0..200 {
         world.step_with(1);
@@ -328,7 +328,7 @@ fn coarse_water_conserves_and_refuses_to_be_the_default() {
 
     let mut world = World::new(cfg);
     world.set_water_every(4);
-    world.bring_shower_forward();
+    world.force_rain(cubarium_voxel::weather::RainMode::Shower);
     let t0 = total(&world);
     let mut sim = Sim::new(
         world,

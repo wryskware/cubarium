@@ -666,6 +666,7 @@ dependencies = [
  "rayon",
  "rustc-hash",
  "serde",
+ "toml",
 ]
 
 [[package]]

@@ -142,8 +142,6 @@ pub struct VoxelView<'a> {
     pub aquifer_m3: f64,
     /// The lumped atmosphere store in cubic metres; zero under the open budget.
     pub atmosphere_m3: f64,
-    /// Allowance left in the current shower, in cubic metres. Zero when not raining.
-    pub shower_left_m3: f64,
     /// Whether the named outlet is exporting.
     pub outlet_open: bool,
     /// The outlet cell `(x, y, z)`, if the world names one.
@@ -175,7 +173,6 @@ impl<'a> VoxelView<'a> {
             ledger,
             aquifer_m3: 0.0,
             atmosphere_m3: 0.0,
-            shower_left_m3: 0.0,
             outlet_open: false,
             outlet: None,
             spring: None,
@@ -220,21 +217,18 @@ fn row_range(lo: u32, hi: u32) -> u128 {
 }
 
 impl<'a> VoxelView<'a> {
-    /// True if rain is **falling** this tick.
+    /// True if rain is **falling** this tick: the weather's mode is not
+    /// [`crate::weather::RainMode::Clear`].
     ///
-    /// Under the closed cycle that is a shower and nothing else:
+    /// Under the closed cycle that is a rain event and nothing else:
     /// [`Config::rain_m_per_s`] is the rate a shower falls *at*, not a statement that one
     /// is falling, and it is always positive on a cycling world. Reading it as weather
     /// drew rain streaks on the deployed panel every tick of a world that actually rained
     /// one minute in ten (Wrysk, 2026-09-21). Under the open budget the rain really is
-    /// prescribed every tick, so there the rate is the answer.
+    /// prescribed every tick, and the weather calls it a shower.
     #[inline]
     pub fn is_raining(&self) -> bool {
-        if self.config.closed_water_budget {
-            self.shower_left_m3 > 0.0
-        } else {
-            self.config.rain_m_per_s > 0.0
-        }
+        self.weather.mode != crate::weather::RainMode::Clear
     }
 
     #[inline]
@@ -752,15 +746,10 @@ pub struct World {
     /// open budget. Route C will give the water in here a place to be; route B only
     /// counts it.
     pub(crate) atmosphere_m3: f64,
-    /// How much of the shower now falling is still to come, cubic metres. Zero between
-    /// showers. **Not a store**: the water is still in `atmosphere_m3` and this is only
-    /// the allowance this shower has left against it.
-    pub(crate) shower_left_m3: f64,
-    /// The tick the next shower is **due**, when
-    /// [`Config::shower_interval_max_s`] asks for a schedule. Drawn from the world's own
-    /// seed at creation and again every time a shower ends, so the weather is a property
-    /// of the world and not of the clock. Zero, and ignored, with no schedule.
-    pub(crate) next_shower_tick: u64,
+    /// The weather: the day clock's sun, the temperature, the rain event now falling, the
+    /// dry gap, fog, lightning and the counts ([`crate::weather`]). Drawn from the
+    /// world's own seed, so the weather is a property of the world.
+    pub(crate) weather: crate::weather::Weather,
     pub(crate) outlet_open: bool,
     pub(crate) tick: u64,
     /// Bumped by every material change a command actually commits. See
@@ -1003,8 +992,7 @@ pub struct Settle {
     /// Change in total stored water over the last [`SETTLE_WINDOW`] ticks: storage drift,
     /// which should be nothing at all in a world with no rain and no evaporation.
     pub drift_m3_per_100: f64,
-    /// Settled **and** uninhabitable: water aloft past the shower trigger and not one
-    /// pool on the ground. A stable dry state is not a wet habitat (plan §4.4).
+    /// Settled **and** uninhabitable: water aloft and not one pool on the ground. A stable dry state is not a wet habitat (plan §4.4).
     pub dry_locked: bool,
 }
 
@@ -1027,8 +1015,7 @@ impl World {
             pore: vec![0.0; n],
             aquifer_m3: 0.0,
             atmosphere_m3: 0.0,
-            shower_left_m3: 0.0,
-            next_shower_tick: 0,
+            weather: crate::weather::Weather::default(),
             outlet_open: false,
             tick: 0,
             water_every: 1,
@@ -1067,7 +1054,7 @@ impl World {
         }
         world.ledger.initial_stored = world.view().stored_m3();
         world.ledger.initial_atmosphere = world.atmosphere_m3;
-        world.next_shower_tick = crate::water::next_shower_tick(&world.config, 0, 0);
+        world.weather = crate::weather::Weather::fresh(&world.config, 0, None);
         // The active sets are built here rather than lazily so that a world is never in a
         // state where its cache disagrees with its arrays.
         world.rebuild_active_sets();
@@ -1093,8 +1080,7 @@ impl World {
             pore: vec![0.0; n],
             aquifer_m3: 0.0,
             atmosphere_m3: 0.0,
-            shower_left_m3: 0.0,
-            next_shower_tick: 0,
+            weather: crate::weather::Weather::default(),
             outlet_open: false,
             tick: 0,
             water_every: 1,
@@ -1122,7 +1108,7 @@ impl World {
         };
         world.ledger.initial_stored = world.view().stored_m3();
         world.ledger.initial_atmosphere = world.atmosphere_m3;
-        world.next_shower_tick = crate::water::next_shower_tick(&world.config, 0, 0);
+        world.weather = crate::weather::Weather::fresh(&world.config, 0, None);
         world.rebuild_active_sets();
         world
     }
@@ -1177,17 +1163,6 @@ impl World {
         self.atmosphere_m3
     }
 
-    /// The tick the next shower is due. Meaningless without
-    /// [`Config::shower_interval_max_s`].
-    pub fn next_shower_tick(&self) -> u64 {
-        self.next_shower_tick
-    }
-
-    /// Cubic metres left to fall in the shower now running; zero between showers.
-    pub fn shower_left_m3(&self) -> f64 {
-        self.shower_left_m3
-    }
-
     pub fn aquifer_head_m(&self) -> f64 {
         self.config.aquifer_head_m(self.aquifer_m3)
     }
@@ -1203,20 +1178,10 @@ impl World {
             ledger: &self.ledger,
             aquifer_m3: self.aquifer_m3,
             atmosphere_m3: self.atmosphere_m3,
-            shower_left_m3: self.shower_left_m3,
             outlet_open: self.outlet_open,
             outlet: self.outlet_cell,
             spring: self.spring_cell,
-            weather: crate::weather::WeatherView::legacy(
-                self.atmosphere_m3,
-                self.ledger.expected_total(),
-                if self.config.closed_water_budget {
-                    self.shower_left_m3 > 0.0
-                } else {
-                    self.config.rain_m_per_s > 0.0
-                },
-                self.config.rain_m_per_s,
-            ),
+            weather: crate::weather::view(self),
             solid: &self.solid.bits,
         }
     }
@@ -1291,22 +1256,8 @@ impl World {
             free_cells: history.last().map(|h| h.1).unwrap_or(0),
             pore_m3: self.pore_m3(),
             drift_m3_per_100: drift,
-            dry_locked: pooled_m3 <= 0.0
-                && self.atmosphere_m3
-                    > self.config.shower_trigger_fraction * self.view().total_water_m3(),
+            dry_locked: pooled_m3 <= 0.0 && self.atmosphere_m3 > 0.0,
         }
-    }
-
-    /// Make the next scheduled shower **due now**: the world opens with a shower instead
-    /// of waiting out its first drawn gap. Later gaps are drawn exactly as before, from
-    /// where this shower ends. Returns whether the world has a schedule at all; a world
-    /// without one ([`Config::shower_interval_max_s`] zero) is untouched.
-    pub fn bring_shower_forward(&mut self) -> bool {
-        if !(self.config.shower_interval_max_s > 0.0) {
-            return false;
-        }
-        self.next_shower_tick = self.tick;
-        true
     }
 
     /// Step until the water has stopped moving, or until `cap_ticks`: see
@@ -1562,15 +1513,11 @@ impl World {
             "the aquifer store is {}, not a volume",
             self.aquifer_m3
         );
-        for (name, store) in [
-            ("atmosphere", self.atmosphere_m3),
-            ("shower allowance", self.shower_left_m3),
-        ] {
-            ensure!(
-                store.is_finite() && store >= 0.0,
-                "the {name} store is {store}, not a volume"
-            );
-        }
+        ensure!(
+            self.atmosphere_m3.is_finite() && self.atmosphere_m3 >= 0.0,
+            "the atmosphere store is {}, not a volume",
+            self.atmosphere_m3
+        );
         ensure!(
             self.config.closed_water_budget || self.atmosphere_m3 == 0.0,
             "an open-budget world holds no atmosphere, but this one holds {}",
