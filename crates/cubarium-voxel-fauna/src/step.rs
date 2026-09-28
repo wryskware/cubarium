@@ -1981,3 +1981,6 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
 #[cfg(test)]
 #[path = "dung_tests.rs"]
 mod dung_tests;
+#[cfg(test)]
+#[path = "circadian_tests.rs"]
+mod circadian_tests;
