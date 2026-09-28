@@ -849,6 +849,9 @@ enum Command {
         population_cap: usize,
         #[arg(long, default_value_t = 10)]
         save_every: u32,
+        /// A training-only ecology file (`[ecology]` multipliers); the defaults without.
+        #[arg(long)]
+        ecology: Option<PathBuf>,
         #[arg(long, default_value = "runs/live-train")]
         out: PathBuf,
     },
@@ -1533,8 +1536,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             population_cap,
             save_every,
             out,
+            ecology,
         } => {
+            let ecology = match ecology {
+                Some(p) => es::voxel::live::ecology::EcologyParams::load(&p)?,
+                None => es::voxel::live::ecology::EcologyParams::defaults(),
+            };
             let spec = es::voxel::live::trainer::LiveSpec {
+                ecology,
                 centres: parse_centres(&centres)?,
                 worlds,
                 threads,

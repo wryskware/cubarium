@@ -70,6 +70,9 @@ pub struct LiveSpec {
     /// Write the centres every this many generations (and at the end).
     pub save_every: u32,
     pub out: PathBuf,
+    /// The ecology every world is founded under (training only; defaults: the shipped
+    /// world).
+    pub ecology: EcologyParams,
 }
 
 /// One lineage's side of a generation.
@@ -169,7 +172,7 @@ pub fn ascend(
 
 fn found(spec: &LiveSpec, slot: usize, base: u64, lineages: &[Lineage]) -> LiveWorld {
     let cfg = world::training_config();
-    let ecology = EcologyParams::defaults();
+    let ecology = spec.ecology.clone();
     let (mut sim, info) = world::found_world(
         &cfg,
         base,
