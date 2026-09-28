@@ -617,6 +617,8 @@ pub struct VoxelParams {
     /// How much of the brightest stars' light feeds the bloom (`[light] star_bloom`; 0
     /// skips it).
     pub star_bloom: f32,
+    /// The day sky and its clouds by day, times this (`[light] day_sky_brightness`).
+    pub day_sky_brightness: f32,
 }
 
 /// Texels per style in the style texture: wood, crown, heart, emit.
@@ -3041,6 +3043,7 @@ pub(crate) mod tests {
             effects: crate::sunvis::Effects::default(),
             day_sky: crate::weather::DaySky::Warm,
             star_bloom: 0.0,
+            day_sky_brightness: 1.0,
         }
     }
 

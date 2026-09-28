@@ -1,0 +1,27 @@
+# Cubarium on voidrunner (the Legion Go): the desktop terrarium, with a dimmer day sky.
+#
+# `cubarium voxel --config config/voidrunner/terrarium.toml`
+# Keep the world and camera keys in step with config/desktop/terrarium.toml.
+
+tilt_degrees = 30.0
+px_per_voxel = "auto"   # the largest that fits the screen, the whole strip in view
+raster_height = 0
+haze = 0.55
+water_alpha = 0.5
+dither = 0.04
+sky_gradient = true
+lighting = "lit"        # the desktop's tier; the panel and the cube keep the flat default
+
+[world]
+width = 256
+height = 128
+depth = 48
+voxel_m = 0.125
+
+[world.landform]
+preset = "terrarium"
+
+[light]
+# Wrysk, 2026-09-25: the red-dwarf day sky is too bright on this screen. 1 is the look as
+# chosen; lower dims the day sky and its clouds, hues kept. The terrain is not touched.
+day_sky_brightness = 0.7
