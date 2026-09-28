@@ -233,13 +233,17 @@ fn run(flora: &mut Flora, mut target: Target<'_>, threads: usize) {
         cubarium_voxel::voxel_phase!(Cover, { crate::cover::prep(flora, world) });
         cubarium_voxel::voxel_phase!(Drown, { drown(flora, world, threads) });
 
+        // WX3: what the world's day lets a plant use of the light it stands in. The light
+        // above is where the stand sits (a view); this is the clock. Twilight is smooth,
+        // and it is always 1 with the day clock off.
+        let life_daylight = world.life_daylight();
         let light = cubarium_voxel::voxel_phase!(Light, { light_per_stand(flora, world, threads) });
         let moisture = cubarium_voxel::voxel_phase!(Drink, { drink(flora, &mut target, threads) });
         let world = target.world();
         let substrate =
             cubarium_voxel::voxel_phase!(Feed, { feed(flora, world, &moisture, threads) });
         cubarium_voxel::voxel_phase!(Grow, {
-            grow(flora, world, &light, &moisture, &substrate, threads)
+            grow(flora, world, &light, life_daylight, &moisture, &substrate, threads)
         });
         cubarium_voxel::voxel_phase!(Cover, { crate::cover::grow(flora, world) });
         cubarium_voxel::voxel_phase!(Decompose, { decompose(flora, &pre) });
@@ -2173,6 +2177,7 @@ fn grow(
     flora: &mut Flora,
     world: &World,
     light: &[f64],
+    daylight: f64,
     drink: &[Drink],
     substrate: &[Substrate],
     threads: usize,
@@ -2253,6 +2258,7 @@ fn grow(
                     stand,
                     &mut ground[slots[si] - base],
                     light[si],
+                    daylight,
                     drink[si],
                     substrate[si],
                     &mut books[k],
@@ -2375,6 +2381,7 @@ fn grow_stand(
     stand: &mut Stand,
     g: &mut Ground,
     light: f64,
+    daylight: f64,
     drink: Drink,
     substrate: Substrate,
     book: &mut Booked,
@@ -2443,7 +2450,9 @@ fn grow_stand(
     // The income, by trophic mode. Everything below this is one set of rules.
     let (a, arrived_mineral) = match sc.trophic {
         Trophic::Photo => {
-            let a_pot = (sc.assimilation * l_eff * mu * (1.0 - stress) * p0 * monod * DT)
+            // WX3: income is the light response times the day. Maintenance and
+            // respiration below do not care what time it is.
+            let a_pot = (sc.assimilation * l_eff * daylight * mu * (1.0 - stress) * p0 * monod * DT)
                 .min(sc.nutrient_draw_max * n0 * DT)
                 .min(mineral_cap)
                 .max(0.0);
@@ -4012,8 +4021,8 @@ mod tests {
                 .collect();
             let substrate = feed(&mut flora, &world, &drink, 1);
             let (mut one, mut split) = (flora.clone(), flora.clone());
-            grow(&mut one, &world, &light, &drink, &substrate, 1);
-            grow(&mut split, &world, &light, &drink, &substrate, threads);
+            grow(&mut one, &world, &light, 1.0, &drink, &substrate, 1);
+            grow(&mut split, &world, &light, 1.0, &drink, &substrate, threads);
             assert!(one.stands.len() < n, "some stands died");
             assert_eq!(one.stands.len(), split.stands.len());
             for (a, b) in one.stands.iter().zip(&split.stands) {

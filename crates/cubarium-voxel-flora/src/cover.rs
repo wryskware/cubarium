@@ -1265,6 +1265,8 @@ pub(crate) fn grow(flora: &mut Flora, world: &World) {
     let vc = &config.latticevine;
     let e = vc.energy_density;
     let thr = vc.contest_threshold;
+    // WX3: a vine's leaves earn only what the world's day lets them.
+    let daylight = world.life_daylight();
 
     // ---- 1. dormancy and the economy, per vine
     for vi in 0..cover.vines.len() {
@@ -1295,7 +1297,7 @@ pub(crate) fn grow(flora: &mut Flora, world: &World) {
         let income = if v.dormant {
             0.0
         } else {
-            (vc.assimilation * a.mu * water * a.light_leaf * DT).max(0.0)
+            (vc.assimilation * a.mu * water * a.light_leaf * daylight * DT).max(0.0)
         };
         v.reserve += income;
         ledger.fixed_in += income;

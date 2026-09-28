@@ -5,7 +5,16 @@ use cubarium_voxel::weather::{DayClock, DayMode};
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
 use cubarium_voxel_flora::{Command, Flora, FloraConfig, Species};
 
-/// A strip of soil at field capacity under open sky, on a day clock `day`.
+/// Soil this dry keeps a velvetpad's moisture factor small, so its income stays well under
+/// its demand caps and follows the light.
+fn dry_pore() -> f64 {
+    let sc = FloraConfig::default().species(Species::Velvetpad).clone();
+    let a = sc.wilt_water + 0.002 * (sc.full_water - sc.wilt_water);
+    let (wp, fc) = (Material::Soil.wilting_point(), Material::Soil.field_capacity());
+    wp + a * (fc - wp)
+}
+
+/// A strip of soil under open sky, on a day clock `day`.
 fn world_on(day: DayClock) -> World {
     let mut w = World::empty(VoxelConfig {
         width: 6,
@@ -23,7 +32,7 @@ fn world_on(day: DayClock) -> World {
                 x,
                 y,
                 z: 0,
-                volume_m3: Material::Soil.field_capacity() * cap,
+                volume_m3: dry_pore() * cap,
             });
             w.apply(WorldCommand::SetMaterial {
                 x,
