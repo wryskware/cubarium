@@ -728,12 +728,14 @@ pub fn look(e: &Eased, p: &VoxelParams) -> Look {
     };
     let dim = 1.0 - OVERCAST_SKY_DIM * c;
     let slate = srgb(STORM_SLATE_SRGB);
+    // `[light] day_sky_brightness` scales the chosen look, hues kept.
+    let bright = p.day_sky_brightness.max(0.0);
     let day_sky = p.day_sky.srgb().map(|h| {
-        let k = srgb(h);
+        let k = scale3(srgb(h), bright);
         let grey = [luma(k); 3];
         lerp3(scale3(lerp3(k, grey, OVERCAST_SKY_GREY * c), dim), slate, STORM_SKY_SLATE * storm)
     });
-    let [cloud_day, cloud_shade] = p.day_sky.cloud_srgb().map(srgb);
+    let [cloud_day, cloud_shade] = p.day_sky.cloud_srgb().map(|h| scale3(srgb(h), bright));
     let cloud_day = lerp3(cloud_day, srgb(STORM_CLOUD_SRGB), STORM_CLOUD * storm);
     let cloud_shade = lerp3(cloud_shade, srgb(STORM_CLOUD_SHADE_SRGB), STORM_CLOUD * storm);
 

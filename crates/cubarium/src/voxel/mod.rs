@@ -264,6 +264,7 @@ pub enum Lighting {
 /// volumetric_rebake_s = 60.0 # the sun-visibility volume's rebake, at most once this often
 /// day_sky = "warm"     # the lit sky by day: "warm", "mint" or "lilac" (interim variants)
 /// star_bloom = 0.15    # the brightest stars' share into the bloom (0: none)
+/// day_sky_brightness = 1.0  # the day sky and its clouds, times this (dimmer below 1)
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -383,6 +384,10 @@ pub struct LightConfig {
     pub day_sky: DaySky,
     /// How much of the brightest stars' light feeds the bloom, very subtly; `0` skips it.
     pub star_bloom: f32,
+    /// The day sky's brightness: its gradient and its clouds by day, times this, hues kept
+    /// (Wrysk, 2026-09-25: the red-dwarf day is too bright on some screens). `1` is the
+    /// look as chosen; the terrain's light is not touched.
+    pub day_sky_brightness: f32,
 }
 
 /// `[light] day_sky`: [`LightConfig::day_sky`].
@@ -430,6 +435,7 @@ impl Default for LightConfig {
             volumetric_rebake_s: 60.0,
             day_sky: DaySky::Warm,
             star_bloom: cubarium_gpu::weather::STAR_BLOOM_DEFAULT,
+            day_sky_brightness: 1.0,
         }
     }
 }
