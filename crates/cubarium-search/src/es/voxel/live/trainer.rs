@@ -361,7 +361,9 @@ pub fn train(spec: &LiveSpec) -> Result<Vec<GenerationRecord>, String> {
                 .flat_map(|r| r.scores.iter())
                 .filter(|b| b.founder == l.founder)
                 .collect();
-            let (gradient_norm, update_rms) = if mine.len() >= 2 {
+            // σ = 0 is the placement-noise control: every variant is the centre, so
+            // there is no direction to estimate and the centre is left alone.
+            let (gradient_norm, update_rms) = if mine.len() >= 2 && spec.sigma > 0.0 {
                 ascend(
                     &mut l.theta,
                     &mut l.adam,
