@@ -1849,7 +1849,7 @@ pub fn birth_readiness(
     let cost = rule.package_cost(&sc);
     let eligible =
         cost > 0.0 && animal.body >= sc.birth_body && animal.reserve >= rule.surplus_reserve(&sc);
-    if !eligible || state.surplus_ticks + 1 < rule.hold_ticks() {
+    if !eligible || state.surplus_ticks + 1 < rule.hold_required() {
         return false;
     }
     match rule.mode {
