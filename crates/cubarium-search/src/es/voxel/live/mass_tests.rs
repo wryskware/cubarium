@@ -304,39 +304,64 @@ fn self_readings(e: &EcologyParams) -> (f64, f64) {
     (o[0], o[1])
 }
 
-/// Under the contract as it stands (A) the `Self` references are the manifest's fixed
-/// absolutes, so a x100 body reads full whatever its reserve; with the opt-in
-/// mass-relative senses (B) it reads the same fraction of an adult as a x1 body.
+/// The contract (audit round, second package): the `Self` references are read at the
+/// body's mass scale, so a x100 body reads the same fraction of an adult as a x1 body.
 #[test]
-fn mass_relative_self_senses_read_a_fraction_of_the_adult() {
+fn self_senses_read_a_fraction_of_the_adult_at_any_mass() {
     let (energy1, reserve1) = self_readings(&EcologyParams::defaults());
     assert!(
         (reserve1 - 0.4).abs() < 0.02,
-        "x1 reads 40 % of an adult reserve: {reserve1}"
+        "reads 40 % of an adult reserve: {reserve1}"
     );
-    assert!(energy1 > 0.5 && energy1 < 0.95, "x1 energy {energy1}");
-
-    let heavy = with("founder.mass_scale@frondgrazer", 100.0);
-    let (energy_a, reserve_a) = self_readings(&heavy);
-    assert_eq!(
-        (energy_a, reserve_a),
-        (1.0, 1.0),
-        "A: a x100 body reads full"
-    );
-
-    let (energy_b, reserve_b) = self_readings(&heavy.clone().with_mass_relative_self());
+    assert!(energy1 > 0.5 && energy1 < 0.95, "energy {energy1}");
+    let (energy, reserve) = self_readings(&with("founder.mass_scale@frondgrazer", 100.0));
     assert!(
-        (reserve_b - reserve1).abs() < 1e-6 && (energy_b - energy1).abs() < 1e-6,
-        "B: x100 reads ({energy_b}, {reserve_b}) as x1 reads ({energy1}, {reserve1})"
+        (reserve - reserve1).abs() < 1e-6 && (energy - energy1).abs() < 1e-6,
+        "x100 reads ({energy}, {reserve}) as the shipped mass reads ({energy1}, {reserve1})"
     );
-    // B is opt-in: the defaults and a plain scaled vector keep the contract's references.
-    assert_eq!(
-        EcologyParams::defaults()
-            .with_mass_relative_self()
-            .fauna_config(),
-        FaunaConfig::default(),
-        "at x1 the mass-relative references are the manifest's"
-    );
+}
+
+/// The manifest carries the shipped mass scale and both reference rules, so a centre
+/// trained at one mass cannot silently load at another: a GRU centre in a world whose
+/// lineage mass differs from its manifest's is refused, a heuristic is not.
+#[test]
+fn a_centre_is_refused_at_another_mass() {
+    for f in Founder::ALL {
+        let m = f.manifest();
+        assert_eq!(m.mass_scale, FaunaConfig::default().founder(f).mass_scale);
+        let text = m.canonical_text();
+        assert!(text.contains("|mass:"), "{text}");
+        assert!(text.contains("self_ref:") && text.contains("taste_ref:"), "{text}");
+        let mut other = m.clone();
+        other.mass_scale *= 2.0;
+        assert_ne!(other.digest(), m.digest(), "the mass is in the digest");
+    }
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/training/centres");
+    let r2 = format!("transfer:{}", dir.join("r2-frondgrazer-upd160.json").display());
+    let gru = brain_driver(Founder::Browser, &r2).expect("a transferred centre");
+    let heur = brain_driver(Founder::Browser, "heuristic").expect("h");
+    let shipped = EcologyParams::defaults();
+    let heavy = with("founder.mass_scale@frondgrazer", 2.0);
+    assert!(super::search::check_mass(&[(Founder::Browser, gru.clone())], &shipped).is_ok());
+    assert!(super::search::check_mass(&[(Founder::Browser, gru)], &heavy).is_err());
+    assert!(super::search::check_mass(&[(Founder::Browser, heur)], &heavy).is_ok());
+}
+
+/// Round 2's centres were written against the old digest: they load only as a transfer
+/// (`transfer:<file>`, same vector length, restamped to this build's digest).
+#[test]
+fn round_two_centres_load_only_as_a_transfer() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/training/centres");
+    for (file, f) in [
+        ("r2-frondgrazer-upd160.json", Founder::Browser),
+        ("r2-littershredder-upd512.json", Founder::Blind),
+    ] {
+        let path = dir.join(file);
+        assert!(brain_driver(f, &path.display().to_string()).is_err(), "{file}: strict load refused");
+        let d = brain_driver(f, &format!("transfer:{}", path.display())).expect("transfer");
+        assert!(d.name().contains("gru"), "{file}");
+        assert!(brain_driver(Founder::ALL[1 - f.index()], &format!("transfer:{}", path.display())).is_err());
+    }
 }
 
 /// The scale sweep runs the world the desktop host runs: `voxel-ecology-check --world
