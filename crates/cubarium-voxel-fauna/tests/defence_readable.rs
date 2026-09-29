@@ -192,7 +192,8 @@ fn taste_reports_what_the_stand_would_give() {
         for _ in 0..5 {
             fauna.step(&world, &mut flora);
         }
-        (taste(&log), response((1.0 - d) * stock), d)
+        let base = FaunaConfig::default().founder(Founder::Browser).mass_scale;
+        (taste(&log), response((1.0 - d) * stock / base), d)
     };
     let (open, want_open, _) = read(0.0);
     assert!(
@@ -237,5 +238,39 @@ fn the_defence_shrinks_the_bite_once() {
         (ratio - (1.0 - d)).abs() < 0.01,
         "defence {d}: the bite kept {ratio}, not {}",
         1.0 - d
+    );
+}
+
+/// Taste's reference is `M_EMIT x mass_scale` (audit round, second package): a body k
+/// times heavier tastes a turf as a shipped one tastes a k-th of it, so "full" means the
+/// same share of its need at any mass.
+#[test]
+fn taste_reads_the_offer_against_the_bodys_mass() {
+    let read = |k: f64| {
+        let world = flat_world();
+        let mut flora = Flora::new(FloraConfig::for_voxel_size(0.25));
+        turf(&mut flora, &world, 2, 3);
+        let mut config = FaunaConfig::default();
+        config.founders[Founder::Browser.index()].scale_mass(k);
+        let base = FaunaConfig::default().founder(Founder::Browser).mass_scale;
+        let mut fauna = Fauna::new(config);
+        let log = browser(&mut fauna, &world, StartingStores::FULL, 0.0);
+        let (_, stock) = mouth(&world, &flora, &fauna).expect("on food");
+        for _ in 0..5 {
+            fauna.step(&world, &mut flora);
+        }
+        (taste(&log), stock, base)
+    };
+    let (one, stock, base) = read(1.0);
+    let (heavy, _, _) = read(30.0);
+    assert!(
+        (one - response(stock / base)).abs() < 1e-3,
+        "{one} vs {}",
+        response(stock / base)
+    );
+    assert!(
+        (heavy - response(stock / (30.0 * base))).abs() < 1e-3,
+        "x30 tastes {heavy}, want {}",
+        response(stock / (30.0 * base))
     );
 }

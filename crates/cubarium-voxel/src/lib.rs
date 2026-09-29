@@ -57,6 +57,8 @@ pub mod walk;
 pub mod water;
 pub mod weather;
 pub mod world;
+pub mod world_table;
+pub use world_table::{expand_landform_preset, world_config_from_file, world_config_from_table};
 /// The overlapped tick's water lend: a read copy's water swapped in, and back.
 mod lend;
 pub use lend::WaterLend;

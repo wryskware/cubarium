@@ -33,7 +33,7 @@ fn plain(width: u32, top: u32) -> World {
 
 /// Every body kind's median lifespan set to `median_s`.
 fn short_lived(median_s: f64) -> FaunaConfig {
-    let mut c = FaunaConfig::default();
+    let mut c = FaunaConfig::placeholder();
     c.frondgrazer.lifespan_median_s = median_s;
     for f in Founder::ALL {
         c.founders[f.index()].core.lifespan_median_s = median_s;
@@ -74,7 +74,7 @@ fn residuals(fauna: &Fauna, flora: &Flora) {
 /// The shipped median is four simulated hours for every body kind.
 #[test]
 fn the_shipped_median_is_four_hours() {
-    let c = FaunaConfig::default();
+    let c = FaunaConfig::placeholder();
     assert_eq!(c.frondgrazer.lifespan_median_s, 4.0 * 3600.0);
     for f in Founder::ALL {
         assert_eq!(c.founder(f).core.lifespan_median_s, 4.0 * 3600.0);
@@ -204,7 +204,7 @@ fn a_newborn_gets_its_own_lifespan() {
             energy: 0.4,
         }
     ));
-    let mut c = FaunaConfig::default();
+    let mut c = FaunaConfig::placeholder();
     {
         let core = &mut c.founders[Founder::Blind.index()].core;
         core.reserve_cap = 1.0;

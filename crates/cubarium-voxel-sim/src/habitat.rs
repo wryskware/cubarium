@@ -1437,7 +1437,7 @@ mod tests {
             }
         }
         let mut flora = Flora::new(Default::default());
-        let mut fauna = Fauna::new(Default::default());
+        let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
         let sc = flora.config().species(Species::Springturf).clone();
         assert!(flora.apply(
             &mut world,
@@ -1584,7 +1584,7 @@ mod tests {
             },
         ));
 
-        let mut fauna = Fauna::new(Default::default());
+        let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
         introduce(&mut fauna, &world, Founder::Browser, under(1));
         let a = fauna.view().animals[0];
         assert_eq!(a.site, under(1), "the body stands on the floor, not the roof");
@@ -1607,7 +1607,7 @@ mod tests {
     fn a_browser_face_is_admitted_by_a_stocked_layer_in_its_band_not_the_crown_top() {
         let world = plain(24, 6);
         let mut flora = Flora::new(cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25));
-        let fauna = Fauna::new(Default::default());
+        let fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
         // Two stands, so the "a second patch" rule is not what is being tested.
         plant(&mut flora, &world, 6, 3, Species::Bloomcrown, 0.85);
         plant(&mut flora, &world, 16, 3, Species::Bloomcrown, 0.85);
@@ -1663,7 +1663,7 @@ mod tests {
     fn two_patches_joined_by_bare_ground_are_one_component() {
         let world = plain(32, 4);
         let mut flora = Flora::new(cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25));
-        let fauna = Fauna::new(Default::default());
+        let fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
         plant(&mut flora, &world, 3, 1, Species::Springturf, 0.8);
         plant(&mut flora, &world, 20, 2, Species::Springturf, 0.8);
         let phys = *fauna.config().founder(Founder::Browser);
@@ -1686,7 +1686,7 @@ mod tests {
         let mut flora = Flora::new(cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25));
         plant(&mut flora, &world, 6, 3, Species::Bloomcrown, 0.85);
         plant(&mut flora, &world, 16, 3, Species::Bloomcrown, 0.85);
-        let probe = Fauna::new(Default::default());
+        let probe = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
         let phys = *probe.config().founder(Founder::Browser);
         let u = upkeep_per_hour(&phys);
         assert!(
@@ -1699,7 +1699,7 @@ mod tests {
         assert!(fits >= 1, "the fixture feeds at least one founder: {stock} vs {u}");
 
         let with = |n: usize| {
-            let mut fauna = Fauna::new(Default::default());
+            let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
             for _ in 0..n {
                 introduce(&mut fauna, &world, Founder::Browser, Site { x: 6, y: 2, z: 3 });
             }
@@ -1729,7 +1729,7 @@ mod tests {
                 energy: LITTER_ORGANIC * LITTER_ENERGY_DENSITY,
             },
         ));
-        let mut fauna = Fauna::new(Default::default());
+        let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
         introduce(&mut fauna, &world, Founder::Blind, at_site);
         let got = accept(&world, &bare, &fauna, [1, 0]);
         let v = &got.lineages[Founder::Blind.index()];
@@ -1927,7 +1927,7 @@ mod tests {
             flora_cfg.species_mut(species).establish_water_min = 0.0;
         }
         let mut flora = Flora::new(flora_cfg.clone());
-        let mut fauna = Fauna::new(Default::default());
+        let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
         let seeded = seed_pre_rolled(&mut world, &mut flora, &mut fauna, &pre, [0, 0]);
         assert_eq!(seeded.pre_roll, pre.report);
         let drowned_on = |species: Species, site: Site| {
@@ -1946,7 +1946,7 @@ mod tests {
         let mut calm = showery_plain();
         let calm_pre = pre_roll(&mut calm, false);
         let mut calm_flora = Flora::new(flora_cfg.clone());
-        let mut calm_fauna = Fauna::new(Default::default());
+        let mut calm_fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
         seed_pre_rolled(&mut calm, &mut calm_flora, &mut calm_fauna, &calm_pre, [0, 0]);
         assert!(
             calm_flora
@@ -1961,7 +1961,7 @@ mod tests {
     fn seeded(world: World) -> (World, Flora, Fauna, Seeded) {
         let mut world = world;
         let mut flora = Flora::new(Default::default());
-        let mut fauna = Fauna::new(Default::default());
+        let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
         let summary = seed(&mut world, &mut flora, &mut fauna);
         (world, flora, fauna, summary)
     }
@@ -2200,7 +2200,7 @@ mod tests {
         let mut flora = Flora::new(cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25));
         plant(&mut flora, &world, 6, 3, Species::Bloomcrown, 0.85);
         plant(&mut flora, &world, 16, 3, Species::Bloomcrown, 0.85);
-        let fauna = Fauna::new(Default::default());
+        let fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
         let phys = *fauna.config().founder(Founder::Browser);
         let (map, food) = lineage_food(&world.view(), &flora.view(), &phys, Founder::Browser);
         let diet = cubarium_voxel_fauna::Diet::of(Founder::Browser);
@@ -2294,10 +2294,10 @@ mod tests {
         let world = plain(24, 6);
         let mut flora = Flora::new(cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25));
         plant(&mut flora, &world, 6, 3, Species::Bloomcrown, 0.85);
-        let light = *Fauna::new(Default::default())
+        let light = *Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder())
             .config()
             .founder(Founder::Browser);
-        let mut config = cubarium_voxel_fauna::FaunaConfig::default();
+        let mut config = cubarium_voxel_fauna::FaunaConfig::placeholder();
         {
             let heavy = &mut config.founders[Founder::Browser.index()];
             let c = &mut heavy.core;

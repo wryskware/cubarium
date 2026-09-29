@@ -303,20 +303,13 @@ pub struct FounderPhysiology {
     /// 0 full to 1 empty) is at or above this stays awake and forages. 0.5, a placeholder:
     /// there was no earlier threshold to reuse.
     pub wake_hunger: f64,
-    /// **What the `Self` channels' fixed references are multiplied by** when a body's
-    /// energy, reserve, structural loss and intake are encoded. `1` is the manifest's
-    /// contract: those references are absolute organic masses. The audit round's mass
-    /// test (`design/handoffs/voxel-audit-round-2026-09-28.md` §2) sets it to the
-    /// lineage's `mass_scale` in its opt-in arm B, so a heavier body still reads "a
-    /// fraction of an adult". The manifest digest does not record it; any other value
-    /// is a diagnostic, not a trained-policy contract.
-    #[serde(default = "one")]
-    pub self_reference_scale: f64,
-    /// **The org-unit mass scale this physiology was built at**: `1` shipped. The
-    /// ecology search's `founder.mass_scale` multiplies the nine absolute quantities of
-    /// [`FounderPhysiology::core`] and records the factor here, so a rule that must judge
-    /// a body as a x1 one can (the founding gate, `cubarium_voxel_sim::habitat`). Every
-    /// ordinary rule reads the scaled quantities and never this.
+    /// **The org-unit mass scale this physiology was built at** ([`FounderPhysiology::scale_mass`]
+    /// multiplies the nine absolute quantities of [`FounderPhysiology::core`] and records
+    /// the factor here). The senses read it: the `Self` references and taste's reference
+    /// are the manifest's times this (`manifest::SELF_REFERENCE_RULE`,
+    /// `TASTE_REFERENCE_RULE`), so a heavier body reads "a fraction of an adult" and a
+    /// "full" taste means the same share of its need. The founding gate judges a body as
+    /// a x1 one with it (`cubarium_voxel_sim::habitat`).
     #[serde(default = "one")]
     pub mass_scale: f64,
 }
@@ -326,6 +319,14 @@ fn one() -> f64 {
 }
 
 impl FounderPhysiology {
+    /// Make this lineage `k` times heavier in org-units: the nine absolute quantities of
+    /// its core ([`crate::SpeciesConfig::scale_mass`]) times `k`, and the recorded
+    /// [`FounderPhysiology::mass_scale`] with them. Per-unit rates, clocks and metres stay.
+    pub fn scale_mass(&mut self, k: f64) {
+        self.core.scale_mass(k);
+        self.mass_scale *= k;
+    }
+
     /// The frozen phase-one table, one entry per founder.
     ///
     /// The blind littershredder's digestive configuration is set **deliberately, once,
@@ -339,6 +340,15 @@ impl FounderPhysiology {
     /// make that so. The bite rate keeps the frondgrazer's placeholder ratio of 0.04
     /// body per second at the founder's smaller body.
     pub fn frozen(founder: Founder) -> FounderPhysiology {
+        let mut p = FounderPhysiology::placeholder(founder);
+        p.scale_mass(crate::SHIPPED_MASS_SCALE);
+        p
+    }
+
+    /// The placeholder table before the shipped mass scale: every absolute quantity at
+    /// the value its comment derives, `mass_scale` 1. [`FounderPhysiology::frozen`] is
+    /// this x [`crate::SHIPPED_MASS_SCALE`].
+    pub fn placeholder(founder: Founder) -> FounderPhysiology {
         match founder {
             Founder::Blind => FounderPhysiology {
                 core: SpeciesConfig {
@@ -403,7 +413,6 @@ impl FounderPhysiology {
                 active: crate::Activity::Nocturnal,
                 sleep_upkeep: SLEEP_UPKEEP,
                 wake_hunger: WAKE_HUNGER,
-                self_reference_scale: 1.0,
                 mass_scale: 1.0,
             },
             Founder::Browser => FounderPhysiology {
@@ -439,7 +448,6 @@ impl FounderPhysiology {
                 active: crate::Activity::Diurnal,
                 sleep_upkeep: SLEEP_UPKEEP,
                 wake_hunger: WAKE_HUNGER,
-                self_reference_scale: 1.0,
                 mass_scale: 1.0,
             },
         }
@@ -1685,6 +1693,7 @@ impl TasteReading {
 ///
 /// The browser's taste moves the other way: a glowcap cap is no longer offered to its
 /// mouth at all, so it no longer tastes one.
+#[cfg(test)]
 pub(crate) fn taste_reading(
     fv: &FloraView<'_>,
     view: &VoxelView<'_>,
@@ -1694,12 +1703,39 @@ pub(crate) fn taste_reading(
     body: &Body,
     founder: Founder,
 ) -> TasteReading {
+    taste_reading_at(
+        fv,
+        view,
+        pose,
+        standing_y,
+        manifest,
+        body,
+        founder,
+        // The unit tests' bodies are the placeholder tables' (mass 1).
+        1.0,
+    )
+}
+
+/// [`taste_reading`] for a body of `mass_scale`: the reference is `M_EMIT × mass_scale`
+/// (`manifest::TASTE_REFERENCE_RULE`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn taste_reading_at(
+    fv: &FloraView<'_>,
+    view: &VoxelView<'_>,
+    pose: &crate::Pose,
+    standing_y: u32,
+    manifest: &Manifest,
+    body: &Body,
+    founder: Founder,
+    mass_scale: f64,
+) -> TasteReading {
     let sat = manifest.tunings.chem_saturation;
-    // The contact-material response: `amount / M_EMIT` cue units through the same curve
-    // the field's concentration reads through. The browser's foliage cue is still this —
-    // there is no foliage field to sample.
+    // The contact-material response: `amount / (M_EMIT × mass_scale)` cue units through
+    // the same curve the field's concentration reads through. The browser's foliage cue
+    // is still this — there is no foliage field to sample.
+    let reference = M_EMIT * mass_scale;
     let response = |amount: f64| {
-        let c = (amount / M_EMIT).min(1.0);
+        let c = (amount / reference).min(1.0);
         c / (c + sat)
     };
     let cols = mouth_columns(view, pose, body);
@@ -1776,7 +1812,7 @@ pub(crate) fn observation(
     // Self: real body state against the manifest's fixed references (times the
     // physiology's `self_reference_scale`, 1 under the contract).
     let fb = &a.founder_state.feedback;
-    let k = phys.self_reference_scale;
+    let k = phys.mass_scale;
     obs[0] = clamp01(a.energy / (manifest.adult_energy_reference * k));
     obs[1] = clamp01(a.reserve / (manifest.adult_reserve_reference * k));
     obs[2] = f64::from(birth_readiness(&fauna.config, a, fv));
@@ -1809,7 +1845,16 @@ pub(crate) fn observation(
     obs[cm.offset + 4] = valid;
     obs[wm.offset] = reading.wet;
     obs[wm.offset + 1] = valid;
-    let taste = taste_reading(fv, view, &a.pose, standing_y, manifest, &body, founder);
+    let taste = taste_reading_at(
+        fv,
+        view,
+        &a.pose,
+        standing_y,
+        manifest,
+        &body,
+        founder,
+        phys.mass_scale,
+    );
     obs[tm.offset] = taste.cue;
     obs[tm.offset + 1] = taste.resistance;
     obs[tm.offset + 2] = f64::from(taste.valid);
@@ -1997,7 +2042,7 @@ mod tests {
 
     /// One lineage's adult geometry, the body every fixture below places.
     pub(super) fn adult(founder: Founder) -> Body {
-        crate::FounderPhysiology::frozen(founder).adult_body()
+        crate::FounderPhysiology::placeholder(founder).adult_body()
     }
 
     /// Full cruise over one controller period (five ticks of held action) is exactly
@@ -2268,7 +2313,7 @@ mod tests {
 
         // And the walk agrees: from the open face at x = 3 the three-cell slot is
         // steppable and the two-cell slot is not.
-        let sc = *crate::FaunaConfig::default().founder(Founder::Browser);
+        let sc = *crate::FaunaConfig::placeholder().founder(Founder::Browser);
         let from = Site { x: 3, y: 2, z: 2 };
         assert_eq!(
             crate::steppable(&view, from, 4, 2, &sc.core, need).len(),
@@ -2590,7 +2635,7 @@ mod tests {
     fn the_first_sample_reports_no_prior_interval_from_a_depleted_start() {
         for founder in [Founder::Blind, Founder::Browser] {
             let world = flat_world();
-            let mut fauna = Fauna::new(crate::FaunaConfig::default());
+            let mut fauna = Fauna::new(crate::FaunaConfig::placeholder());
             assert!(fauna.apply(
                 &world,
                 crate::Command::IntroduceFounder {
@@ -2651,7 +2696,7 @@ mod tests {
             z: 2,
             material: Material::Soil,
         });
-        let mut fauna = Fauna::new(crate::FaunaConfig::default());
+        let mut fauna = Fauna::new(crate::FaunaConfig::placeholder());
         assert!(fauna.apply(
             &world,
             crate::Command::IntroduceFounder {
@@ -2725,7 +2770,7 @@ mod tests {
 
         // The browser's observation is 37 wide and its Cone reads the real world: valid,
         // and the wall two columns east shades the front sector at the eye's layer.
-        let mut browser = Fauna::new(crate::FaunaConfig::default());
+        let mut browser = Fauna::new(crate::FaunaConfig::placeholder());
         assert!(browser.apply(
             &world,
             crate::Command::IntroduceFounder {
@@ -2761,8 +2806,8 @@ mod tests {
     /// 5% and 10%.
     #[test]
     fn the_organ_allocation_counts_the_sensor_share_once() {
-        let blind = FounderPhysiology::frozen(Founder::Blind);
-        let browser = FounderPhysiology::frozen(Founder::Browser);
+        let blind = FounderPhysiology::placeholder(Founder::Blind);
+        let browser = FounderPhysiology::placeholder(Founder::Browser);
         assert_eq!(blind.organ_structure_fraction, 0.05);
         assert_eq!(browser.organ_structure_fraction, 0.10);
         let core = 0.011875;
@@ -3001,8 +3046,8 @@ mod step_rule_tests {
     /// the coarse one.
     #[test]
     fn the_step_converts_to_whole_voxels_rounding_down() {
-        let browser = crate::FounderPhysiology::frozen(Founder::Browser);
-        let shredder = crate::FounderPhysiology::frozen(Founder::Blind);
+        let browser = crate::FounderPhysiology::placeholder(Founder::Browser);
+        let shredder = crate::FounderPhysiology::placeholder(Founder::Blind);
         assert_eq!((browser.step_up_m, browser.step_down_m), (0.375, 0.375));
         assert_eq!((shredder.step_up_m, shredder.step_down_m), (0.25, 0.25));
         let l = |p: &crate::FounderPhysiology, v| {
@@ -3046,7 +3091,7 @@ mod step_rule_tests {
     /// `tests/mobility.rs`).
     #[test]
     fn a_shredder_steps_a_quarter_metre_and_meets_half_a_metre_as_a_wall() {
-        let phys = crate::FounderPhysiology::frozen(Founder::Blind);
+        let phys = crate::FounderPhysiology::placeholder(Founder::Blind);
         for (v, rise, steps) in [(0.125, 2, true), (0.25, 1, true), (0.25, 2, false)] {
             let world = terrace(v, 12, 2, 5..8, rise);
             let manifest = Founder::Blind.manifest();

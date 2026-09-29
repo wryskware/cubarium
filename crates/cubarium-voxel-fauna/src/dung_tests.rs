@@ -41,7 +41,7 @@ fn plain(width: u32) -> World {
 }
 
 fn config_with(edit: impl FnOnce(&mut SpeciesConfig)) -> FaunaConfig {
-    let mut c = FaunaConfig::default();
+    let mut c = FaunaConfig::placeholder();
     edit(c.species_mut(Species::Frondgrazer));
     c
 }
@@ -189,7 +189,7 @@ fn a_mineral_only_gut_voids_into_the_soluble_pool() {
 #[test]
 fn respiration_keeps_the_body_s_mineral_to_organic_ratio() {
     let world = plain(6);
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     let i = grazer(&mut fauna, &world, 2, 0.02);
     let start = fauna.animals[i];
     assert!(start.reserve > 0.0 && start.mineral > 0.0);
@@ -287,7 +287,7 @@ fn a_feed_and_void_cycle_conserves_the_three_currencies() {
             wood
         }
     ));
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     let i = grazer(&mut fauna, &world, 2, 0.02);
     // Void on the third tick: two ticks of bites before it, two after.
     fauna.animals[i].age_ticks = period() - 3;

@@ -111,7 +111,7 @@ fn grazer(fauna: &mut Fauna, world: &World, x: i64, body: f64) -> u64 {
 }
 
 fn config_with(edit: impl FnOnce(&mut SpeciesConfig)) -> FaunaConfig {
-    let mut c = FaunaConfig::default();
+    let mut c = FaunaConfig::placeholder();
     edit(c.species_mut(Species::Frondgrazer));
     c
 }
@@ -255,7 +255,7 @@ fn foliage_two_voxels_up_is_not_eaten() {
         at(3, 4),
         "the founder is on the raised face"
     );
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     let id = grazer(&mut fauna, &world, 2, 0.02);
 
     let before = flora.view().stands[0].foliage;
@@ -595,7 +595,7 @@ fn a_step_crosses_neither_a_wall_nor_a_pool() {
     raise(&mut world, 5, 2, 4, 0.3);
     let mut flora = Flora::new(FloraConfig::default());
     turf(&mut flora, &world, 5);
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     let id = grazer(&mut fauna, &world, 3, 0.02);
     for _ in 0..120 {
         fauna.step(&world, &mut flora);
@@ -614,7 +614,7 @@ fn a_step_crosses_neither_a_wall_nor_a_pool() {
     let mut world = plain(12, 2, 0.3, 7);
     let mut flora = Flora::new(FloraConfig::default());
     turf(&mut flora, &world, 6);
-    let sc = *FaunaConfig::default().species(Species::Frondgrazer);
+    let sc = *FaunaConfig::placeholder().species(Species::Frondgrazer);
     let depth = 2.0 * sc.wade_depth_m;
     world.apply(WorldCommand::AddWater {
         x: 4,
@@ -627,7 +627,7 @@ fn a_step_crosses_neither_a_wall_nor_a_pool() {
         "the fixture's pool must be deeper than the wade: {}",
         world.view().water_depth_m(4, 2, 0)
     );
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     let id = grazer(&mut fauna, &world, 3, 0.02);
     for _ in 0..120 {
         fauna.step(&world, &mut flora);
@@ -644,7 +644,7 @@ fn a_step_crosses_neither_a_wall_nor_a_pool() {
     raise(&mut world, 5, 2, 3, 0.3);
     let mut flora = Flora::new(FloraConfig::default());
     turf(&mut flora, &world, 5);
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     let id = grazer(&mut fauna, &world, 3, 0.02);
     for _ in 0..120 {
         fauna.step(&world, &mut flora);
@@ -782,7 +782,7 @@ fn a_stand_outside_the_radius_is_found_through_a_face_inside_it() {
     let world = plain(40, 2, 0.3, 5);
     let mut flora = Flora::new(FloraConfig::default());
     turf(&mut flora, &world, 19);
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     let sc = *fauna.config().species(Species::Frondgrazer);
     let id = grazer(&mut fauna, &world, 10, 0.02);
     // The premise: nothing is in reach where it stands, the stand is nine columns away,
@@ -919,7 +919,7 @@ fn a_birth_pays_birth_cost_and_the_newborn_is_at_body_min() {
 /// parent paid for.
 #[test]
 fn a_newborn_s_endowment_sits_above_the_intake_ceiling_and_is_spent_normally() {
-    let sc = *FaunaConfig::default().species(Species::Frondgrazer);
+    let sc = *FaunaConfig::placeholder().species(Species::Frondgrazer);
 
     // ---- the ceiling, on an adult that is already full.
     let world = plain(8, 2, 0.3, 5);
@@ -1119,7 +1119,7 @@ fn the_two_ledgers_close_together_over_a_hundred_coupled_ticks() {
     // species would be the honest way to say that; one config is what this round has, so
     // the second grazer is introduced into a second layer stepped against the same
     // world and plant layer — which is also the only way one fixture can hold both.
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     let mut starver = Fauna::new(config_with(|s| s.maintenance_per_s = 5.0));
     grazer(&mut fauna, &world, 2, 0.02);
     grazer(&mut starver, &world, 13, 0.02);
@@ -1221,7 +1221,7 @@ fn excess_mineral_goes_to_the_gut_until_the_void() {
     // needed: the gut holds only the upkeep's shed mineral.
     let mut flora = Flora::new(FloraConfig::default());
     turf(&mut flora, &world, 3);
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     let sc = *fauna.config().species(Species::Frondgrazer);
     let id = grazer(&mut fauna, &world, 2, 0.02);
     let before = *fauna.view().animal(id).unwrap();
@@ -1240,7 +1240,7 @@ fn excess_mineral_goes_to_the_gut_until_the_void() {
     // funds is placed, and the bite's mineral is exactly what that tissue needs.
     let mut flora = Flora::new(FloraConfig::default());
     turf(&mut flora, &world, 3);
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     let id = grazer(&mut fauna, &world, 2, sc.body_max);
     let before = *fauna.view().animal(id).unwrap();
     fauna.step(&world, &mut flora);
@@ -1277,7 +1277,7 @@ fn excess_mineral_goes_to_the_gut_until_the_void() {
     // what the tissue it funds can hold, and the remainder goes to the gut.
     let mut flora = flora_with_plant_mineral(0.2);
     turf(&mut flora, &world, 3);
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     let id = grazer(&mut fauna, &world, 2, 0.02);
     let before = *fauna.view().animal(id).unwrap();
     fauna.step(&world, &mut flora);
@@ -1324,7 +1324,7 @@ fn the_keyed_stream_repeats_and_a_different_world_seed_does_not() {
         let mut flora = Flora::new(FloraConfig::default());
         turf(&mut flora, &world, 1);
         turf(&mut flora, &world, 9);
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::placeholder());
         let id = grazer(&mut fauna, &world, 5, 0.02);
         let mut out = Vec::new();
         for _ in 0..60 {
@@ -1347,7 +1347,7 @@ fn the_keyed_stream_repeats_and_a_different_world_seed_does_not() {
 /// panicking.
 #[test]
 fn validate_covers_the_new_fields() {
-    assert!(FaunaConfig::default().validate().is_ok());
+    assert!(FaunaConfig::placeholder().validate().is_ok());
     let cases: [(&str, fn(&mut SpeciesConfig)); 7] = [
         ("maintenance_per_s", |s| s.maintenance_per_s = -1.0),
         ("yield_fraction", |s| s.yield_fraction = 1.5),
@@ -1381,7 +1381,7 @@ fn the_snapshot_round_trips_and_another_schema_is_refused() {
     let world = plain(6, 2, 0.3, 5);
     let mut flora = Flora::new(FloraConfig::default());
     turf(&mut flora, &world, 3);
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     grazer(&mut fauna, &world, 2, 0.02);
     for _ in 0..5 {
         fauna.step(&world, &mut flora);

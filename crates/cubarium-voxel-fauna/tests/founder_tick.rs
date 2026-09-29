@@ -52,7 +52,7 @@ fn site(x: u32, z: u32) -> Site {
 /// shrink it by the stock at the mouth. Those cases start their bodies with an empty
 /// reserve, so package G's satiety asks for the whole bite too.
 fn exact_bites() -> FaunaConfig {
-    let mut c = FaunaConfig::default();
+    let mut c = FaunaConfig::placeholder();
     for f in Founder::ALL {
         c.founders[f.index()].core.bite_half_stock = 0.0;
     }
@@ -99,7 +99,7 @@ impl Controller for Record {
 fn a_full_founder_pays_and_moves_on_the_held_actions() {
     let world = flat_world();
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     assert!(fauna.apply(
         &world,
         FaunaCommand::IntroduceFounder {
@@ -172,7 +172,7 @@ fn a_due_field_update_reaches_the_controller_before_it_drives() {
             energy: 0.2 * 2.0,
         },
     );
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     assert!(fauna.apply(
         &world,
         FaunaCommand::IntroduceFounder {
@@ -315,7 +315,7 @@ fn a_feed_off_food_transfers_nothing() {
             energy: 0.2 * 2.0,
         },
     );
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     assert!(fauna.apply(
         &world,
         FaunaCommand::IntroduceFounder {
@@ -421,7 +421,7 @@ fn a_browser_bite_crops_the_stand_it_touches() {
 fn the_self_feedback_is_the_prior_interval_and_reset_once() {
     let world = flat_world();
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     assert!(fauna.apply(
         &world,
         FaunaCommand::IntroduceFounder {
@@ -481,7 +481,7 @@ fn the_self_feedback_is_the_prior_interval_and_reset_once() {
 fn full_cruise_motor_respiration_equals_the_basal_rate() {
     let world = flat_world();
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     for x in [2u32, 5] {
         assert!(fauna.apply(
             &world,
@@ -561,7 +561,7 @@ fn a_blocked_attempt_still_pays_the_motor_budget() {
     let mut flora = Flora::new(FloraConfig::default());
     // The shredder does not climb here: the claim is the sweep's (package mobility's
     // climb is `tests/mobility.rs`'s).
-    let mut config = FaunaConfig::default();
+    let mut config = FaunaConfig::placeholder();
     config.founders[Founder::Blind.index()].climbs_walls = false;
     let mut fauna = Fauna::new(config);
     // One founder heading into the wall, one heading into open ground.
@@ -656,7 +656,7 @@ fn the_controller_receives_only_the_vector_and_it_stays_finite() {
             energy: 0.2 * 2.0,
         },
     );
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     assert!(fauna.apply(
         &world,
         FaunaCommand::IntroduceFounder {
@@ -701,7 +701,7 @@ fn the_controller_receives_only_the_vector_and_it_stays_finite() {
 fn the_snapshot_round_trips_a_founders_state_and_refuses_out_of_bounds_held_actions() {
     let world = flat_world();
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     assert!(fauna.apply(
         &world,
         FaunaCommand::IntroduceFounder {
@@ -751,7 +751,7 @@ fn the_snapshot_round_trips_a_founders_state_and_refuses_out_of_bounds_held_acti
 fn the_self_motion_channels_flow_from_resolved_motion() {
     let world = flat_world();
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     assert!(fauna.apply(
         &world,
         FaunaCommand::IntroduceFounder {
@@ -806,7 +806,7 @@ fn the_self_motion_channels_flow_from_resolved_motion() {
         z: 2,
         material: Material::Soil,
     });
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     assert!(fauna.apply(
         &walled,
         FaunaCommand::IntroduceFounder {
@@ -859,7 +859,7 @@ fn the_self_motion_channels_flow_from_resolved_motion() {
             material: Material::Soil,
         });
     }
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     assert!(fauna.apply(
         &tall,
         FaunaCommand::IntroduceFounder {
@@ -932,7 +932,7 @@ fn the_motor_respiration_counter_and_the_ledger_split_track_one_interval() {
         material: Material::Soil,
     });
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     assert_eq!(
         fauna.view().ledger.respired_out,
         0.0,
@@ -1041,7 +1041,7 @@ fn a_born_founder_gets_a_fresh_controller_of_its_parents_kind() {
 
     let world = flat_world();
     let mut flora = Flora::new(FloraConfig::default());
-    let mut config = FaunaConfig::default();
+    let mut config = FaunaConfig::placeholder();
     let browser = Founder::Browser.index();
     config.founders[browser].core.reproduction = cubarium_voxel_fauna::Reproduction {
         surplus_floor: 0.001,
@@ -1148,7 +1148,7 @@ fn a_born_founder_gets_a_fresh_controller_of_its_parents_kind() {
 #[test]
 fn a_removed_body_takes_its_controller_with_it() {
     let world = flat_world();
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     assert!(fauna.apply(
         &world,
         FaunaCommand::IntroduceFounder {
