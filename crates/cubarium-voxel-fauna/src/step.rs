@@ -596,26 +596,12 @@ fn controllers(
     // the whole world, and a stage with one browser due indexes one browser's share of
     // the ring. A static episode's senses hold it instead (cone-speed item 4): built
     // once, patched from bites and deaths, bodies re-indexed — the same grid either way.
+    // The v2 cone (the browsers') reads one cell per body, exactly as before predation.
     let observers: Vec<f64> = due
         .iter()
-        .filter(|&&i| {
-            fauna.animals[i]
-                .founder
-                .is_some_and(|f| f.manifest().cone_range_m > 0.0)
-        })
+        .filter(|&&i| fauna.animals[i].founder == Some(Founder::Browser))
         .map(|&i| fauna.animals[i].pose.x)
         .collect();
-    // A heuristic prey looks for threats out to `FLEE_SIGHT_M`, farther than its cone:
-    // the window covers it whenever there is a hunter in the world to look for.
-    let hunters_here = fauna
-        .animals
-        .iter()
-        .any(|a| a.founder.is_some_and(|f| fauna.config.founder(f).hunter.is_some()));
-    let window_m = if hunters_here {
-        Founder::Browser.manifest().cone_range_m.max(FLEE_SIGHT_M)
-    } else {
-        Founder::Browser.manifest().cone_range_m
-    };
     let mut held = senses.as_deref_mut().and_then(|s| s.take_cone());
     let windowed;
     let cone_occupancy = if observers.is_empty() {
@@ -628,10 +614,34 @@ fn controllers(
             &fv,
             &fauna.view(),
             observers.iter().copied(),
-            window_m,
+            Founder::Browser.manifest().cone_range_m,
         );
         Some(&windowed)
     };
+    // The **predation** occupancy (bodies with volume, predation §2.2) is built only while
+    // a hunter is in the world: the lanternjaw's own sight and a heuristic prey's look for
+    // a threat, out to `FLEE_SIGHT_M`. It becomes the cone's at contract v3 (P2).
+    let hunters_here = fauna
+        .animals
+        .iter()
+        .any(|a| a.founder.is_some_and(|f| fauna.config.founder(f).hunter.is_some()));
+    let predators: Vec<f64> = if hunters_here {
+        due.iter()
+            .filter(|&&i| fauna.animals[i].founder.is_some_and(|f| f.manifest().cone_range_m > 0.0))
+            .map(|&i| fauna.animals[i].pose.x)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let predation_occupancy = (!predators.is_empty()).then(|| {
+        crate::senses::predation_occupancy_window(
+            view,
+            &fv,
+            &fauna.view(),
+            predators.iter().copied(),
+            Founder::Browser.manifest().cone_range_m.max(FLEE_SIGHT_M),
+        )
+    });
     for i in due {
         let id = fauna.animals[i].id;
         let founder = fauna.animals[i].founder.expect("a due founder");
@@ -649,6 +659,11 @@ fn controllers(
         if fauna.animals[i].age_ticks == manifest.cadence_ticks() {
             fauna.animals[i].founder_state.feedback = IntervalFeedback::default();
         }
+        let occupancy = if founder == Founder::Browser {
+            cone_occupancy
+        } else {
+            predation_occupancy.as_ref()
+        };
         let obs = body::observation(
             fauna,
             i,
@@ -656,7 +671,7 @@ fn controllers(
             &fv,
             &manifest,
             senses.as_deref_mut(),
-            cone_occupancy,
+            occupancy,
         );
         // Reject rather than train through: an observation with a non-finite channel
         // holds rest instead of reaching the controller at all.
@@ -680,7 +695,7 @@ fn controllers(
         // Only while a hunter is in the world: a teacher in a world with none behaves as
         // it always did.
         if driven && hunters_here && fauna.controllers.flees(id) {
-            if let Some(flee) = flee(fauna, i, view, cone_occupancy) {
+            if let Some(flee) = flee(fauna, i, view, predation_occupancy.as_ref()) {
                 actions = flee;
                 lure = 0.0;
             }
@@ -1485,7 +1500,7 @@ fn strike_tick(
             if crate::dodges(chance, seed, a.id, p.id, tick) {
                 fauna.ledger.dodges_by_founder[founder.index()] += 1;
             } else {
-                fauna.ledger.hits_by_founder[founder.index()] += 1;
+                // Counted when `apply_hit` lands it on a live prey, not here.
                 let damage = if p.body > 0.0 {
                     h.strike_power * (a.body / p.body) * (1.0 - pp.armour)
                 } else {
@@ -1514,6 +1529,8 @@ pub(crate) fn apply_hit(fauna: &mut Fauna, flora: &mut Flora, prey: u64, damage:
     let Ok(j) = fauna.animals.binary_search_by_key(&prey, |a| a.id) else {
         return;
     };
+    // A hit is counted where it lands: on a prey still alive.
+    fauna.ledger.hits_by_founder[by.index()] += 1;
     let a = &mut fauna.animals[j];
     if damage.is_finite() && damage > 0.0 {
         a.wound += damage;
@@ -2213,6 +2230,10 @@ fn wrapped_dx(width: i64, a: i64, b: i64) -> i64 {
 /// factory registered breeds resting bodies, which is the pre-existing behaviour.
 fn reproduce(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora, dusk: bool) {
     if !fauna.births_enabled {
+        // A dormant egg still hears, runs out of viability and dies to the litter with
+        // births off; only its hatching waits for births to be on.
+        let mut none = Vec::new();
+        dormant_eggs(fauna, view, flora, false, &mut none);
         return;
     }
     clutch_fate(fauna, view, flora);

@@ -17,7 +17,7 @@
 //!   not one cell.
 
 use super::predation_fixture::*;
-use crate::senses::{Fine, cone_occupancy, ray_first_hit};
+use crate::senses::{Fine, predation_occupancy, ray_first_hit};
 use crate::{BodyKind, DT, Fauna, FaunaConfig, Founder, StartingStores, kind_of};
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
 use cubarium_voxel_flora::{Flora, FloraConfig};
@@ -181,7 +181,9 @@ fn a_ray_at_the_height_of_a_lanternjaws_back_hits_it() {
     let lj = put(Founder::Lanternjaw, 4);
     let grazer = put(Founder::Browser, 11);
     let view = world.view();
-    let occupancy = cone_occupancy(&view, &flora.view(), &fauna.view());
+    // Re-pointed at the predation occupancy: bodies have volume in the predation queries
+    // until contract v3; the v2 cone keeps one cell per body (the coordinator's call).
+    let occupancy = predation_occupancy(&view, &flora.view(), &fauna.view());
     let ray = |id: u64, above: f64| {
         let p = animal(&fauna, id).pose;
         ray_first_hit(

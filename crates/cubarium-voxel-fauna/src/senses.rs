@@ -936,17 +936,30 @@ impl ConeOccupancy {
         self.bodies.clear();
     }
 
-    /// **Bodies with volume** (`design/predation-and-flight-2026-09-28.md` §2.2): every
-    /// body fills its footprint disc — the columns whose centres lie within its radius,
-    /// and always its own — times its current height, from the layer over its standing
-    /// face up through `ceil(height / voxel)` layers, in animal order. A 0.45 m lanternjaw
-    /// is four cells tall at 0.125 m. A heuristic body with no geometry is the one cell
-    /// over its face it always was. Movement still ignores other animals.
+    /// Every body's occupied cell (the layer over its standing face), in animal order:
+    /// what the v2 cone reads.
     fn lay_bodies(
         &mut self,
         view: &VoxelView<'_>,
         fauna: &crate::FaunaView<'_>,
         window: Option<&[bool]>,
+    ) {
+        self.lay_bodies_as(view, fauna, window, false);
+    }
+
+    /// `volume` false is [`ConeOccupancy::lay_bodies`]'s one cell per body. `volume` true
+    /// is **bodies with volume** (`design/predation-and-flight-2026-09-28.md` §2.2), the
+    /// predation queries' occupancy until contract v3: every body fills its footprint disc
+    /// — the columns whose centres lie within its radius, and always its own — times its
+    /// current height, from the layer over its standing face up through
+    /// `ceil(height / voxel)` layers, in animal order. A 0.45 m lanternjaw is four cells
+    /// tall at 0.125 m. Movement still ignores other animals.
+    fn lay_bodies_as(
+        &mut self,
+        view: &VoxelView<'_>,
+        fauna: &crate::FaunaView<'_>,
+        window: Option<&[bool]>,
+        volume: bool,
     ) {
         let c = view.config;
         let v = c.voxel_m;
@@ -955,7 +968,8 @@ impl ConeOccupancy {
                 continue;
             };
             let base = i64::from(a.sense_layer(v)) + 1;
-            let (radius, tall) = match crate::body_of(fauna.config, a) {
+            let geometry = if volume { crate::body_of(fauna.config, a) } else { None };
+            let (radius, tall) = match geometry {
                 Some(b) => (
                     b.footprint_radius(),
                     (b.height_m / v).ceil().max(1.0).min(f64::from(c.height)) as i64,
@@ -1123,14 +1137,64 @@ pub(crate) fn build_occupancy(
     pools_occlude: bool,
     window: Option<&[bool]>,
 ) -> ConeOccupancy {
+    build_occupancy_as(view, fv, fauna, pools_occlude, window, false)
+}
+
+fn build_occupancy_as(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    fauna: &crate::FaunaView<'_>,
+    pools_occlude: bool,
+    window: Option<&[bool]>,
+    volume: bool,
+) -> ConeOccupancy {
     let mut occ = ConeOccupancy::empty(view.config.cells());
     occ.lay_stands(view, fv, window, |_, _, _| {});
     if pools_occlude {
         occ.lay_pools(view, fv.ground.iter(), window);
         occ.pools.sort_unstable_by_key(|&(cell, _)| cell);
     }
-    occ.lay_bodies(view, fauna, window);
+    occ.lay_bodies_as(view, fauna, window, volume);
     occ
+}
+
+/// **The predation occupancy** (predation §2.2): the cone's geometry with **bodies with
+/// volume**, over the whole ring. What the predation queries' sight lines read — the
+/// lanternjaw's cone, a heuristic prey's look for a threat — until contract v3 makes it
+/// the cone's own; the v2 cone keeps [`cone_occupancy`]'s one cell per body.
+pub(crate) fn predation_occupancy(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    fauna: &crate::FaunaView<'_>,
+) -> ConeOccupancy {
+    build_occupancy_as(view, fv, fauna, true, None, true)
+}
+
+/// [`predation_occupancy`] windowed around observers, as [`cone_occupancy_window`] is.
+pub(crate) fn predation_occupancy_window(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    fauna: &crate::FaunaView<'_>,
+    observer_x_m: impl IntoIterator<Item = f64>,
+    range_m: f64,
+) -> ConeOccupancy {
+    let c = view.config;
+    let width = i64::from(c.width);
+    let mut window = vec![false; c.width as usize];
+    for x in observer_x_m {
+        if !x.is_finite() || !range_m.is_finite() {
+            return predation_occupancy(view, fv, fauna);
+        }
+        let lo = ((x - range_m) / c.voxel_m).floor() as i64 - 1;
+        let hi = ((x + range_m) / c.voxel_m).floor() as i64 + 1;
+        if hi - lo + 1 >= width {
+            return predation_occupancy(view, fv, fauna);
+        }
+        for cx in lo..=hi {
+            window[cx.rem_euclid(width) as usize] = true;
+        }
+    }
+    build_occupancy_as(view, fv, fauna, true, Some(&window), true)
 }
 
 /// The `Light` receptor's memo for a frozen world (cone-speed follow-up): the sky
