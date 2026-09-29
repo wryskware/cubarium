@@ -101,7 +101,9 @@ fn lanternjaws_arrive_only_in_a_prey_component_and_only_by_the_controls() {
         assert_eq!(a.founder, Some(Founder::Lanternjaw));
         assert!(in_prey_half(a.site), "a lanternjaw at {:?}, away from the prey", a.site);
         assert_eq!(a.body, phys.core.body_max, "an adult");
-        assert_eq!(a.reserve, phys.core.reserve_of(a.body), "full stores");
+        let wake_at = phys.hunter.expect("the lanternjaw hunts").wake_at;
+        assert_eq!(a.reserve, wake_at * phys.core.reserve_of(a.body), "hungry, at the wake line");
+        assert_ne!(a.state, cubarium_voxel_fauna::State::Asleep, "awake");
     }
     let eggs = bury_founding_clutches(&world, &flora, &mut fauna, 2).expect("prey live here");
     assert!(eggs > 0);
