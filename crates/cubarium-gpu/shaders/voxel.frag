@@ -77,8 +77,8 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
                         // flash (0..1)
     vec4 strikeK;       // the bolt: its column's x centre, top y and z (voxels), its brightness
     vec4 strikeL;       // the bolt's seed, as two 16-bit halves
-    // The sleep pose this frame (WX4, `cubarium_gpu::voxel::pose_rows`): entry k's settle
-    // and breath dip, in pixel rows, evaluated on the frame's clock.
+    // The pose this frame (WX4, `cubarium_gpu::voxel::pose_rows`): entry k's settle and
+    // breath dip, in pixel rows, evaluated on the frame's clock.
     vec4 poseK[64];
 } u;
 
@@ -113,9 +113,10 @@ layout(constant_id = 7) const bool WEATHER = false;
 // slab to the end of the shader costs the walk about 0.1 ms at 13 px, which a clear sky
 // does not pay.
 layout(constant_id = 8) const bool WEATHER_DEPTH = false;
-// The sleep pose (WX4, `posedFind`): a second walk pipeline, bound only on frames whose
-// pack has an animal posing. The search costs the walk registers (a step of occupancy on
-// the desktop's RDNA) even where no animal is, so the rest of the time it is dead code.
+// The sleep and idle poses (WX4, `posedFind`): a second walk pipeline, bound only on
+// frames whose pack has an animal posing. The search costs the walk registers (a step of
+// occupancy on the desktop's RDNA) even where no animal is, so the rest of the time it is
+// dead code.
 layout(constant_id = 9) const bool POSE = false;
 
 layout(set = 0, binding = 1) uniform usampler3D voxels;  // rgba8ui, one texel per voxel
@@ -184,6 +185,13 @@ int matOf(uvec4 v) { return int(v.r & 3u); }
 int partOf(uvec4 v) { return int((v.r >> 2) & 7u); }
 int glyphOf(uvec4 v) { return int(v.r >> 5); }
 bool isBlockPart(int p) { return p == TRUNK || p == CROWN || p == CROWN_HEART || p == ANIMAL_INTERIM || p == LOG; }
+// A faceless animal cell of class torso (WX4 idle): an empty voxel under a dipping head,
+// there only so the walk looks for the head from it. It is air to everything else (no
+// crease, no shadow, no cover), so it can come and go with a head move unseen. The sleep's
+// belly cells (class leg) keep counting as the settled body.
+bool softMark(uvec4 v) {
+    return POSE && partOf(v) == ANIMAL_INTERIM && glyphOf(v) == 0 && v.b != 0u && (v.b >> 6) < 2u;
+}
 bool solidV(uvec4 v) { return matOf(v) != 0; }
 
 // Out-of-range y reads as air, which is what makes the top of the world an open sky and
@@ -395,7 +403,7 @@ vec3 blockLit(vec3 body, float shade) {
 float occluder(int x, int y, int z) {
     if (!inY(y) || z < 0 || z >= D) { return 0.0; }
     uvec4 v = at(x, y, z);
-    return (solidV(v) || isBlockPart(partOf(v))) ? 1.0 : 0.0;
+    return (solidV(v) || (isBlockPart(partOf(v)) && !softMark(v))) ? 1.0 : 0.0;
 }
 
 // The AO is a **crease line** (Wrysk, checkpoint 2): a face stays flat, and only a thin
@@ -573,7 +581,7 @@ float sunReaches(vec3 p, ivec3 c) {
         uvec4 v = at(c.x, c.y, c.z);
         if (solidV(v)) { return 0.0; }
         int part = partOf(v);
-        if (part == TRUNK || part == LOG || part == ANIMAL_INTERIM) { return 0.0; }
+        if (part == TRUNK || part == LOG || (part == ANIMAL_INTERIM && !softMark(v))) { return 0.0; }
         if ((part == CROWN || part == CROWN_HEART) && !crownLets(v, c)) {
             return 0.0;
         }
@@ -825,7 +833,7 @@ bool glyphFrontAt(int x, int y, int z, uvec4 v, int row, int dx, out vec3 rgb, o
     if (!plantTexel(x, y, z, v, top, dx, localY, base)) { return false; }
     if (LIT) {
         bool coveredUp = !top && (solidAt(x, y + 1, z)
-            || (inY(y + 1) && isBlockPart(partOf(at(x, y + 1, z)))));
+            || (inY(y + 1) && isBlockPart(partOf(at(x, y + 1, z))) && !softMark(at(x, y + 1, z))));
         // The atlas's tones on the lit base: the rim and the lit column lean toward the
         // base under the cell's top light, every other tone keeps its pigment rule under
         // this face's light. A cap is the base under its top light, its edge tones leaning
@@ -876,7 +884,7 @@ bool glyphFrontAt(int x, int y, int z, uvec4 v, int row, int dx, out vec3 rgb, o
         return true;
     }
     bool coveredUp = solidAt(x, y + 1, z)
-        || (inY(y + 1) && isBlockPart(partOf(at(x, y + 1, z))));
+        || (inY(y + 1) && isBlockPart(partOf(at(x, y + 1, z))) && !softMark(at(x, y + 1, z)));
     if (tone == 1) {
         base *= u.shadeB.x;
     } else if (tone == 2 && !coveredUp) {
@@ -938,7 +946,7 @@ bool glyphCapAt(int x, int y, int z, uvec4 v, int localY, int dx, out vec3 rgb, 
     return true;
 }
 
-// --- the sleep pose (WX4, `cubarium::voxel::sleep`) ----------------------------------------
+// --- the sleep and idle poses (WX4, `cubarium::voxel::sleep`, `cubarium::voxel::idle`) ------
 //
 // A sleeping body is stamped where it stands awake. Each of its cells carries its class
 // (b's top two bits) and its pose entry (b's low six; b = 0 is a body not posing, drawn as
@@ -950,6 +958,10 @@ bool glyphCapAt(int x, int y, int z, uvec4 v, int localY, int dx, out vec3 rgb, 
 // settling torso are faceless leg cells (glyph 0): they draw nothing and only send the walk
 // looking for the torso. Nothing is drawn above its own voxel's top, so the walk's own
 // voxel and the cap under it are the only places a search starts.
+//
+// An idle body (awake and standing still) breathes the same way, and now and then dips its
+// head: the head cells take an entry of their own whose settle is the dip. The empty voxels
+// a dipping head reaches into are faceless torso-class cells (`softMark`).
 
 bool isPosed(uvec4 v) { return POSE && partOf(v) == ANIMAL_INTERIM && v.b != 0u; }
 
