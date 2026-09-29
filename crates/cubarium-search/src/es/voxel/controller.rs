@@ -268,6 +268,93 @@ impl Controller for RecordingController {
     }
 }
 
+/// **Herding, a prototype arm** (`design/handoffs/voxel-browser-movement-2026-09-28.md`,
+/// 3): the fauna's own [`BrowserForager`], plus cohesion toward the bodies its cone
+/// already sees and a little separation from any too close. Observation-only — the same
+/// `Cone(3, foliage/body)` channels the trained browser reads, no sense or contract
+/// change. The cone's `body` class does not tell lineages apart, so a shredder in view
+/// draws a herder too.
+///
+/// Food first: whenever foliage is in view, or the forager is feeding or escaping, its
+/// answer stands. Otherwise, a body closer than [`HERD_SEPARATION`] of the cone's range
+/// turns the herder away from it, and any other body in view turns it toward the sector
+/// that holds the most.
+#[derive(Clone, Debug, Default)]
+pub struct HerdingBrowser {
+    inner: BrowserForager,
+    cone: usize,
+}
+
+/// A body's cone proximity above this (within a quarter of the 2 m range, 0.5 m) is too
+/// close: turn away. A prototype placeholder.
+pub const HERD_SEPARATION: f64 = 0.75;
+/// A sector must show at least this share of body rays to draw the herder.
+pub const HERD_SEEN: f64 = 0.02;
+/// The turn effort a herding decision asks for, as the forager's gaze does.
+pub const HERD_TURN: f64 = 0.8;
+
+impl HerdingBrowser {
+    pub fn new() -> HerdingBrowser {
+        let cone = Founder::Browser
+            .manifest()
+            .modules
+            .iter()
+            .find(|m| m.name == "Cone(3, foliage/body)")
+            .expect("the browser manifest has its cone")
+            .offset;
+        HerdingBrowser {
+            inner: BrowserForager::new(),
+            cone,
+        }
+    }
+}
+
+impl Controller for HerdingBrowser {
+    fn drive(&mut self, o: &[f64]) -> Response {
+        let answer = self.inner.drive(o);
+        let Response::Bounded(mut a) = answer else {
+            return answer;
+        };
+        let c = self.cone;
+        let foliage = (0..3).any(|k| o[c + 6 * k + 2] > 0.02);
+        // Feeding, food in view, or an escape (anything short of full-effort walking):
+        // the forager's answer stands.
+        if a.feed > 0.0 || foliage || a.forward < 0.99 {
+            return Response::Bounded(a);
+        }
+        let body = [o[c + 4], o[c + 10], o[c + 16]];
+        let near = [o[c + 5], o[c + 11], o[c + 17]];
+        let side = |k: usize| match k {
+            0 => -HERD_TURN,
+            2 => HERD_TURN,
+            _ => 0.0,
+        };
+        // Separation: the closest body in view, if it is too close.
+        if let Some(k) = (0..3)
+            .filter(|&k| body[k] > HERD_SEEN && near[k] > HERD_SEPARATION)
+            .max_by(|&x, &y| near[x].total_cmp(&near[y]))
+        {
+            a.turn = match k {
+                1 => HERD_TURN,
+                k => -side(k),
+            };
+            return Response::Bounded(a);
+        }
+        // Cohesion: toward the sector with the most bodies in it.
+        if let Some(k) = (0..3)
+            .filter(|&k| body[k] > HERD_SEEN)
+            .max_by(|&x, &y| body[x].total_cmp(&body[y]))
+        {
+            a.turn = side(k);
+        }
+        Response::Bounded(a)
+    }
+
+    fn reset(&mut self) {
+        self.inner.reset();
+    }
+}
+
 /// What drives the body for one episode. Built per episode through
 /// [`EpisodeDriver::fresh`] so the controller's memory — hidden state, turn preference —
 /// is never carried between episodes.
@@ -311,6 +398,9 @@ pub enum VoxelControl {
     /// `BrowserForager` (browser) — real chem/gaze heuristics shipped with the seam,
     /// interchangeable here behind the same [`Controller`] trait.
     Heuristic,
+    /// The browser's heuristic plus herding ([`HerdingBrowser`]): a prototype arm of
+    /// `design/handoffs/voxel-browser-movement-2026-09-28.md`, browser only.
+    Herding,
 }
 
 impl EpisodeDriver {
@@ -399,6 +489,10 @@ impl EpisodeDriver {
                 Founder::Blind => Box::new(BlindForager::new()),
                 Founder::Browser => Box::new(BrowserForager::new()),
             },
+            EpisodeKind::Control(VoxelControl::Herding) => match self.founder {
+                Founder::Browser => Box::new(HerdingBrowser::new()),
+                Founder::Blind => Box::new(BlindForager::new()),
+            },
         };
         if let Some(sink) = &self.record {
             controller = Box::new(RecordingController::new(
@@ -420,6 +514,7 @@ impl EpisodeDriver {
             EpisodeKind::Control(VoxelControl::StationaryFeeding) => "stationary-feeding".into(),
             EpisodeKind::Control(VoxelControl::Cruise) => "cruise".into(),
             EpisodeKind::Control(VoxelControl::Heuristic) => "heuristic".into(),
+            EpisodeKind::Control(VoxelControl::Herding) => "herding".into(),
         }
     }
 

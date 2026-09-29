@@ -114,10 +114,38 @@ pub const PARAMS: &[ParamSpec] = &[
     },
 ];
 
-/// One world's parameter vector, aligned with [`PARAMS`].
+/// The founder parameters that also take a **per-lineage** multiplier
+/// (`name@<lineage>`, or an `[ecology.<lineage>]` table in a file), on top of the shared
+/// one (`design/handoffs/voxel-browser-movement-2026-09-28.md`, 2). The two multiply.
+pub const LINEAGE_PARAMS: [&str; 3] = [
+    "founder.yield_by_food",
+    "founder.maintenance_per_s",
+    "founder.lifespan_median_s",
+];
+
+/// One world's parameter vector, aligned with [`PARAMS`], plus the per-lineage
+/// multipliers of [`LINEAGE_PARAMS`] (every one `1.0` by default).
 #[derive(Clone, Debug, PartialEq)]
 pub struct EcologyParams {
     values: Vec<f64>,
+    per_lineage: Vec<[f64; LINEAGE_PARAMS.len()]>,
+}
+
+/// `name@lineage` split into the shared name, the lineage and its slot in
+/// [`LINEAGE_PARAMS`].
+fn split_lineage(name: &str) -> Result<Option<(&str, Founder, usize)>, String> {
+    let Some((base, lineage)) = name.split_once('@') else {
+        return Ok(None);
+    };
+    let f = Founder::ALL
+        .into_iter()
+        .find(|f| f.name() == lineage)
+        .ok_or_else(|| format!("{name}: no lineage is called {lineage:?}"))?;
+    let slot = LINEAGE_PARAMS
+        .iter()
+        .position(|p| *p == base)
+        .ok_or_else(|| format!("{name}: {base} has no per-lineage setting"))?;
+    Ok(Some((base, f, slot)))
 }
 
 impl Default for EcologyParams {
@@ -137,10 +165,14 @@ impl EcologyParams {
                     Kind::Absolute => unreachable!("{} needs its shipped default read", p.name),
                 })
                 .collect(),
+            per_lineage: vec![[1.0; LINEAGE_PARAMS.len()]; Founder::COUNT],
         }
     }
 
     pub fn get(&self, name: &str) -> Option<f64> {
+        if let Ok(Some((_, f, slot))) = split_lineage(name) {
+            return Some(self.per_lineage[f.index()][slot]);
+        }
         PARAMS
             .iter()
             .position(|p| p.name == name)
@@ -149,6 +181,20 @@ impl EcologyParams {
 
     /// Set one parameter, refusing an unknown name or a value outside its range.
     pub fn set(&mut self, name: &str, value: f64) -> Result<(), String> {
+        if let Some((base, f, slot)) = split_lineage(name)? {
+            let p = PARAMS
+                .iter()
+                .find(|p| p.name == base)
+                .expect("a listed parameter");
+            if !(value.is_finite() && (p.min..=p.max).contains(&value)) {
+                return Err(format!(
+                    "{name} = {value} is outside [{}, {}]",
+                    p.min, p.max
+                ));
+            }
+            self.per_lineage[f.index()][slot] = value;
+            return Ok(());
+        }
         let i = PARAMS
             .iter()
             .position(|p| p.name == name)
@@ -182,7 +228,49 @@ impl EcologyParams {
                     l.exp().clamp(p.min, p.max)
                 })
                 .collect(),
+            per_lineage: vec![[1.0; LINEAGE_PARAMS.len()]; Founder::COUNT],
         }
+    }
+
+    /// The search's dimensions: every shared parameter except the [`LINEAGE_PARAMS`],
+    /// then each of those once per lineage (`name@lineage`).
+    pub fn search_names() -> Vec<String> {
+        let mut out: Vec<String> = PARAMS
+            .iter()
+            .filter(|p| !LINEAGE_PARAMS.contains(&p.name))
+            .map(|p| p.name.to_string())
+            .collect();
+        for f in Founder::ALL {
+            for p in LINEAGE_PARAMS {
+                out.push(format!("{p}@{}", f.name()));
+            }
+        }
+        out
+    }
+
+    /// `(ln min, ln max)` per [`EcologyParams::search_names`] entry.
+    pub fn search_bounds() -> Vec<(f64, f64)> {
+        EcologyParams::search_names()
+            .iter()
+            .map(|n| {
+                let base = n.split('@').next().expect("a name");
+                let p = PARAMS.iter().find(|p| p.name == base).expect("listed");
+                (p.min.ln(), p.max.ln())
+            })
+            .collect()
+    }
+
+    /// A vector from natural-log multipliers over [`EcologyParams::search_names`], each
+    /// clamped to its range; zeros are the defaults.
+    pub fn from_search_log(log: &[f64]) -> EcologyParams {
+        let names = EcologyParams::search_names();
+        assert_eq!(log.len(), names.len(), "one value per search dimension");
+        let mut e = EcologyParams::defaults();
+        for ((n, l), (lo, hi)) in names.iter().zip(log).zip(EcologyParams::search_bounds()) {
+            e.set(n, l.clamp(lo, hi).exp().clamp(lo.exp(), hi.exp()))
+                .expect("clamped into range");
+        }
+        e
     }
 
     /// The natural-log multipliers of this vector.
@@ -206,6 +294,12 @@ impl EcologyParams {
         for (p, v) in PARAMS.iter().zip(&self.values) {
             text.push_str(&format!("\"{}\" = {v}\n", p.name));
         }
+        for f in Founder::ALL {
+            text.push_str(&format!("[ecology.{}]\n", f.name()));
+            for (p, v) in LINEAGE_PARAMS.iter().zip(&self.per_lineage[f.index()]) {
+                text.push_str(&format!("\"{p}\" = {v}\n"));
+            }
+        }
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
@@ -226,6 +320,17 @@ impl EcologyParams {
             .ok_or_else(|| format!("{} has no [ecology] table", path.display()))?;
         let mut e = EcologyParams::defaults();
         for (name, value) in table {
+            // An `[ecology.<lineage>]` table: that lineage's own multipliers.
+            if let Some(sub) = value.as_table() {
+                for (k, v) in sub {
+                    let v = v
+                        .as_float()
+                        .or_else(|| v.as_integer().map(|i| i as f64))
+                        .ok_or_else(|| format!("{name}.{k} is not a number"))?;
+                    e.set(&format!("{k}@{name}"), v)?;
+                }
+                continue;
+            }
             let v = value
                 .as_float()
                 .or_else(|| value.as_integer().map(|i| i as f64))
@@ -257,14 +362,17 @@ impl EcologyParams {
         let upkeep = self.v("founder.maintenance_per_s");
         let life = self.v("founder.lifespan_median_s");
         c.frondgrazer.lifespan_median_s *= life;
+        // The placeholder species is the browser's body.
+        c.frondgrazer.lifespan_median_s *= self.per_lineage[Founder::Browser.index()][2];
         for f in Founder::ALL {
+            let own = self.per_lineage[f.index()];
             let phys = &mut c.founders[f.index()];
             for v in phys.yield_by_food.iter_mut() {
-                *v *= y;
+                *v *= y * own[0];
             }
             phys.core.reproduction.surplus_floor *= floor;
-            phys.core.maintenance_per_s *= upkeep;
-            phys.core.lifespan_median_s *= life;
+            phys.core.maintenance_per_s *= upkeep * own[1];
+            phys.core.lifespan_median_s *= life * own[2];
         }
         c
     }
