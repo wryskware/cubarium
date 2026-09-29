@@ -128,16 +128,21 @@ fn mass_scale_is_a_per_lineage_search_dimension_on_1_to_1000() {
             .position(|x| *x == n)
             .unwrap_or_else(|| panic!("{n} is searched"));
         assert!(bounds[i].0.abs() < 1e-12, "{n}: low end ln 1");
-        assert!((bounds[i].1 - 1000f64.ln()).abs() < 1e-12, "{n}: high end ln 1000");
+        assert!(
+            (bounds[i].1 - 1000f64.ln()).abs() < 1e-12,
+            "{n}: high end ln 1000"
+        );
     }
     assert!(!names.iter().any(|n| n == "founder.mass_scale"));
     assert_eq!(
         EcologyParams::defaults().get("founder.mass_scale@frondgrazer"),
         Some(1.0)
     );
-    assert!(EcologyParams::defaults()
-        .set("founder.mass_scale", 0.5)
-        .is_err());
+    assert!(
+        EcologyParams::defaults()
+            .set("founder.mass_scale", 0.5)
+            .is_err()
+    );
 }
 
 /// A reserve fraction after `ticks` at rest with no food.
@@ -173,7 +178,10 @@ fn a_heavier_body_starves_on_the_same_clock() {
     for f in Founder::ALL {
         let one = resting_reserve_fraction(&EcologyParams::defaults(), f, 200);
         let heavy = resting_reserve_fraction(&with("founder.mass_scale", 100.0), f, 200);
-        assert!(one < 1.0 && one > 0.5, "{f:?}: it burned some reserve: {one}");
+        assert!(
+            one < 1.0 && one > 0.5,
+            "{f:?}: it burned some reserve: {one}"
+        );
         assert!(
             (one - heavy).abs() < 1e-9,
             "{f:?}: x1 keeps {one} of its reserve, x100 {heavy}"
@@ -230,7 +238,12 @@ fn the_parker_stands_on_food_and_walks_like_the_heuristic_off_it() {
                 "{f:?} sample {k}: off food the parker walks as the walker does"
             );
         }
-        assert!(brain_driver(f, "parker").expect("named").name().contains("parker"));
+        assert!(
+            brain_driver(f, "parker")
+                .expect("named")
+                .name()
+                .contains("parker")
+        );
     }
 }
 
@@ -285,7 +298,9 @@ fn self_readings(e: &EcologyParams) -> (f64, f64) {
         }
     }
     let log = log.lock().unwrap();
-    let o = log.first().expect("the controller was asked within 40 ticks");
+    let o = log
+        .first()
+        .expect("the controller was asked within 40 ticks");
     (o[0], o[1])
 }
 
@@ -303,7 +318,11 @@ fn mass_relative_self_senses_read_a_fraction_of_the_adult() {
 
     let heavy = with("founder.mass_scale@frondgrazer", 100.0);
     let (energy_a, reserve_a) = self_readings(&heavy);
-    assert_eq!((energy_a, reserve_a), (1.0, 1.0), "A: a x100 body reads full");
+    assert_eq!(
+        (energy_a, reserve_a),
+        (1.0, 1.0),
+        "A: a x100 body reads full"
+    );
 
     let (energy_b, reserve_b) = self_readings(&heavy.clone().with_mass_relative_self());
     assert!(

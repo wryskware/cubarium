@@ -156,7 +156,10 @@ fn the_mouth_chooses_the_stand_by_what_it_would_give() {
         browser_mouth_candidates(&world.view(), &flora.view(), fauna.config(), &av.animals[0])
             .expect("a browser")
     };
-    assert!(candidates.len() >= 2, "the fixture puts two stands in reach: {candidates:?}");
+    assert!(
+        candidates.len() >= 2,
+        "the fixture puts two stands in reach: {candidates:?}"
+    );
     let (first, _) = mouth(&world, &flora, &fauna).expect("on food");
     defend(&mut flora, first, 0.9);
     let (second, stock) = mouth(&world, &flora, &fauna).expect("still on food");
@@ -192,7 +195,10 @@ fn taste_reports_what_the_stand_would_give() {
         (taste(&log), response((1.0 - d) * stock), d)
     };
     let (open, want_open, _) = read(0.0);
-    assert!((open - want_open).abs() < 1e-3, "undefended: {open} vs {want_open}");
+    assert!(
+        (open - want_open).abs() < 1e-3,
+        "undefended: {open} vs {want_open}"
+    );
     let (shut, want_shut, d) = read(0.9);
     assert!(
         (shut - want_shut).abs() < 1e-3 && shut < 0.5 * open,
