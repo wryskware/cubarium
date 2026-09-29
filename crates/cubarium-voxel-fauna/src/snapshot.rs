@@ -215,6 +215,39 @@ fn validate(fauna: &Fauna) -> Result<(), String> {
                 ));
             }
         }
+        // Predation (schema 20): the wound stock, the body's speed, and a strike's phase.
+        if !a.wound.is_finite() || !(0.0..=1.0).contains(&a.wound) {
+            return Err(format!(
+                "animal #{}'s wound is {}, not a finite stock within 0..=1",
+                a.id, a.wound
+            ));
+        }
+        if !a.speed_m_s.is_finite() || a.speed_m_s < 0.0 {
+            return Err(format!(
+                "animal #{}'s speed is {}, not finite nonnegative",
+                a.id, a.speed_m_s
+            ));
+        }
+        if let Some(st) = a.strike {
+            let hunter = a
+                .founder
+                .and_then(|f| fauna.config().founder(f).hunter)
+                .ok_or_else(|| format!("animal #{} is striking and is no hunter", a.id))?;
+            let most = match st.phase {
+                crate::StrikePhase::Windup => crate::Hunter::ticks(hunter.windup_s),
+                crate::StrikePhase::Lunge => crate::Hunter::ticks(hunter.lunge_s),
+                crate::StrikePhase::Recovery => crate::Hunter::ticks(hunter.recovery_s),
+            };
+            if !(st.from_x.is_finite() && st.from_z.is_finite())
+                || st.ticks_left == 0
+                || st.ticks_left > most
+            {
+                return Err(format!(
+                    "animal #{}'s strike is malformed: {:?} with {} ticks left (at most {most})",
+                    a.id, st.phase, st.ticks_left
+                ));
+            }
+        }
         let r = a.reproduction;
         if let Some(e) = r.escrow {
             for (field, value) in [
@@ -270,6 +303,17 @@ fn validate(fauna: &Fauna) -> Result<(), String> {
                 ));
             }
         }
+        if let Some(d) = c.dormancy {
+            let heard_late = d.heard.iter().any(|&(id, t)| id != 0 && t > v.tick);
+            if c.count != 1 || d.threshold == 0 || d.viable_until_tick < c.laid_tick || heard_late
+            {
+                return Err(format!(
+                    "the dormant egg at {:?} is malformed: count {}, threshold {}, viable \
+                     until {} (laid {}), a footfall heard after tick {}",
+                    c.site, c.count, d.threshold, d.viable_until_tick, c.laid_tick, v.tick
+                ));
+            }
+        }
         if c.laid_tick > v.tick {
             return Err(format!(
                 "the clutch at {:?} was laid on tick {} and the layer is on tick {}: a \
@@ -285,6 +329,19 @@ fn validate(fauna: &Fauna) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::{Animal, FaunaConfig, FaunaLedger, Site, Species, State};
+
+    /// Predation's state is checked too: a NaN wound is refused, and a wound in range
+    /// loads.
+    #[test]
+    fn a_nan_wound_is_refused() {
+        let mut bad = animal(0, 0.05);
+        bad.wound = f64::NAN;
+        let err = decode(&encode(&layer(vec![bad], 1))).expect_err("a NaN wound");
+        assert!(format!("{err:#}").contains("wound"), "{err:#}");
+        let mut ok = animal(0, 0.05);
+        ok.wound = 0.4;
+        decode(&encode(&layer(vec![ok], 1))).expect("a wound in range loads");
+    }
 
     /// A layer built by hand, which is the only way to write a snapshot this module has to
     /// refuse: a live layer's own bytes cannot fail these checks.
