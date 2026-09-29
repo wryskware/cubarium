@@ -1416,6 +1416,13 @@ impl FaunaConfig {
                     ));
                 }
             }
+            if !(phys.self_reference_scale.is_finite() && phys.self_reference_scale > 0.0) {
+                return Err(format!(
+                    "{}.self_reference_scale must be finite and positive, not {}",
+                    founder.name(),
+                    phys.self_reference_scale
+                ));
+            }
             // The body is a physical object: every dimension positive, every anchor a
             // finite nonnegative fraction of one. A zero-height animal has no eye, no
             // mouth band and no clearance, so it is refused rather than clamped.

@@ -303,6 +303,19 @@ pub struct FounderPhysiology {
     /// 0 full to 1 empty) is at or above this stays awake and forages. 0.5, a placeholder:
     /// there was no earlier threshold to reuse.
     pub wake_hunger: f64,
+    /// **What the `Self` channels' fixed references are multiplied by** when a body's
+    /// energy, reserve, structural loss and intake are encoded. `1` is the manifest's
+    /// contract: those references are absolute organic masses. The audit round's mass
+    /// test (`design/handoffs/voxel-audit-round-2026-09-28.md` §2) sets it to the
+    /// lineage's `mass_scale` in its opt-in arm B, so a heavier body still reads "a
+    /// fraction of an adult". The manifest digest does not record it; any other value
+    /// is a diagnostic, not a trained-policy contract.
+    #[serde(default = "one")]
+    pub self_reference_scale: f64,
+}
+
+fn one() -> f64 {
+    1.0
 }
 
 impl FounderPhysiology {
@@ -383,6 +396,7 @@ impl FounderPhysiology {
                 active: crate::Activity::Nocturnal,
                 sleep_upkeep: SLEEP_UPKEEP,
                 wake_hunger: WAKE_HUNGER,
+                self_reference_scale: 1.0,
             },
             Founder::Browser => FounderPhysiology {
                 // The browser founder *is* the frondgrazer: the landed round-4 numbers
@@ -417,6 +431,7 @@ impl FounderPhysiology {
                 active: crate::Activity::Diurnal,
                 sleep_upkeep: SLEEP_UPKEEP,
                 wake_hunger: WAKE_HUNGER,
+                self_reference_scale: 1.0,
             },
         }
     }
@@ -1725,13 +1740,15 @@ pub(crate) fn observation(
     // reached (package mobility: "its senses read from where it is").
     let standing_y = a.sense_layer(view.config.voxel_m);
 
-    // Self: real body state against the manifest's fixed references.
+    // Self: real body state against the manifest's fixed references (times the
+    // physiology's `self_reference_scale`, 1 under the contract).
     let fb = &a.founder_state.feedback;
-    obs[0] = clamp01(a.energy / manifest.adult_energy_reference);
-    obs[1] = clamp01(a.reserve / manifest.adult_reserve_reference);
+    let k = phys.self_reference_scale;
+    obs[0] = clamp01(a.energy / (manifest.adult_energy_reference * k));
+    obs[1] = clamp01(a.reserve / (manifest.adult_reserve_reference * k));
     obs[2] = f64::from(birth_readiness(&fauna.config, a, fv));
-    obs[3] = clamp01(fb.structural_loss / manifest.structural_reference);
-    obs[4] = clamp01(fb.intake / manifest.body_reference);
+    obs[3] = clamp01(fb.structural_loss / (manifest.structural_reference * k));
+    obs[4] = clamp01(fb.intake / (manifest.body_reference * k));
     obs[5] = clamp01(fb.delivered_forward / manifest.forward_reference_m);
     obs[6] = clamp_sym(fb.delivered_turn / manifest.turn_reference_rad);
     obs[7] = if fb.attempted_equivalent > NONE_REQUESTED {

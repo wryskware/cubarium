@@ -810,6 +810,10 @@ enum Command {
         threads: usize,
         #[arg(long, default_value = "runs/ecology-check")]
         out: PathBuf,
+        /// Read every founder's `Self` references at its mass scale (the audit round's
+        /// opt-in arm B), so a heavier body keeps reading "a fraction of an adult".
+        #[arg(long)]
+        mass_relative_self: bool,
     },
     /// Live-world training (`design/handoffs/voxel-live-world-training-2026-09-24.md`):
     /// every body of every lineage given a centre runs its own antithetic variant inside
@@ -1491,6 +1495,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             water_every,
             threads,
             out,
+            mass_relative_self,
         } => {
             let mut parsed = Vec::new();
             for a in &arms {
@@ -1501,6 +1506,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     es::voxel::live::ecology::EcologyParams::defaults()
                 } else {
                     es::voxel::live::ecology::EcologyParams::load(std::path::Path::new(src))?
+                };
+                let params = if mass_relative_self {
+                    params.with_mass_relative_self()
+                } else {
+                    params
                 };
                 parsed.push((name.to_string(), params));
             }
