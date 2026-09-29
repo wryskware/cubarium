@@ -154,3 +154,60 @@ fn maintenance_goes_on_at_night() {
     assert!(after < before, "no income, upkeep paid: {before} -> {after}");
     assert_closed(&flora);
 }
+
+/// A bloomcrown below `donor_min` (so no propagule draws on its reserve), browsed below
+/// its reflush line, on the day clock `day`: its stocks before and after one tick.
+fn browsed_tick(world: &mut World) -> ((f64, f64), (f64, f64), f64) {
+    let mut flora = Flora::new(FloraConfig::default());
+    let sc = flora.config().species(Species::Bloomcrown).clone();
+    let wood = 0.5 * sc.donor_min;
+    assert!(flora.apply(
+        world,
+        Command::Seed {
+            x: 2,
+            z: 0,
+            species: Species::Bloomcrown,
+            wood,
+        }
+    ));
+    let site = flora.view().stands[0].site;
+    let s = flora.view().stands[0];
+    // Browse it to a tenth of its cap, well under `reflush_below`.
+    let want = s.foliage - 0.1 * sc.alpha * s.wood;
+    assert!(flora.take_foliage(site, want).is_some());
+    let s = flora.view().stands[0];
+    assert!(s.foliage < sc.reflush_below * sc.alpha * s.wood);
+    let before = (s.foliage, s.reserve);
+    flora.step(world);
+    let s = flora.view().stands[0];
+    assert_closed(&flora);
+    (before, (s.foliage, s.reserve), sc.maintenance * s.wood)
+}
+
+/// Reflushing a browsed stand out of its reserve builds leaves to earn with. At night
+/// they earn nothing and senesce before dawn, and the reserve they cost is the one the
+/// night's maintenance is paid from: a stand browsed low at dusk reflushed its reserve
+/// to nothing and starved before sunrise. At midnight the reserve pays maintenance only.
+#[test]
+fn a_browsed_stand_does_not_reflush_its_reserve_in_the_dark() {
+    let mut w = world_on(clock(0.0));
+    assert_eq!(w.life_daylight(), 0.0);
+    let ((p0, q0), (p1, q1), m) = browsed_tick(&mut w);
+    assert!(p1 <= p0, "no leaves built at midnight: foliage {p0} -> {p1}");
+    // Maintenance at most (the night is cooler than the mean, so the factor is <= ~1.5).
+    let dt = cubarium_voxel_flora::DT;
+    assert!(
+        q0 - q1 <= 1.5 * m * dt,
+        "the reserve pays upkeep only: {q0} -> {q1}, upkeep {}",
+        m * dt
+    );
+}
+
+/// The same browsed stand at noon does reflush: the gate is the day, not the rule.
+#[test]
+fn the_same_browsed_stand_reflushes_at_noon() {
+    let mut w = world_on(clock(12.0));
+    assert_eq!(w.life_daylight(), 1.0);
+    let ((p0, _), (p1, _), _) = browsed_tick(&mut w);
+    assert!(p1 > p0, "leaves rebuilt at noon: foliage {p0} -> {p1}");
+}
