@@ -234,6 +234,14 @@ fn main() {
     // own (WX1's gap-off arms).
     let gap_off = args.iter().any(|a| a == "gap=off");
     if let Some((arm_name, mut arm_config)) = arm {
+        // `night=F`: the plant night factor, `[world.day] plant_night_factor` (WX3 round 4).
+        if let Some(f) = args
+            .iter()
+            .find_map(|a| a.strip_prefix("night=").and_then(|s| s.parse::<f64>().ok()))
+        {
+            arm_config.day.plant_night_factor = f;
+            eprintln!("plant_night_factor {f}");
+        }
         if gap_off {
             arm_config.climate.dry_gap_min_s = 0.0;
             arm_config.climate.dry_gap_max_s = 0.0;
