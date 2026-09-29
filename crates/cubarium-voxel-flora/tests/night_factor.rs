@@ -104,7 +104,7 @@ fn the_scale_is_the_factor_at_midnight_one_at_noon_and_one_with_the_clock_off() 
         0.0,
     );
     assert_eq!(off.plant_night_scale(), 1.0);
-    assert_eq!(DayClock::default().plant_night_factor, 1.0, "no rule by default");
+    assert_eq!(DayClock::default().plant_night_factor, 0.05, "Wrysk's default (2026-09-29)");
 }
 
 #[test]
