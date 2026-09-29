@@ -744,8 +744,6 @@ const NEAR_CROWN: f64 = 0.6;
 const WAIT_SAMPLES: u32 = 240;
 /// Samples it walks off after a fruitless wait, not turning to foliage: 5 s.
 const LEAVE_SAMPLES: u32 = 20;
-/// A reserve this full (`Self.reserve`) does not hunt: the satiated rest is near.
-const SATED: f64 = 0.85;
 
 /// What the ambush teacher is doing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -777,6 +775,10 @@ pub struct LanternjawAmbush {
     wander_ticks: u32,
     escape: u32,
     lure: f64,
+    /// `Self.reserve` at which it stops eating and hunting: the physiology's own
+    /// `rest_at`, where the tick's satiated rest takes it (an adult's `Self.reserve` is
+    /// its fraction of its cap).
+    sated: f64,
     contact: crate::manifest::Module,
     taste: crate::manifest::Module,
     cone: crate::manifest::Module,
@@ -794,6 +796,9 @@ impl LanternjawAmbush {
             wander_ticks: 0,
             escape: 0,
             lure: 0.0,
+            sated: crate::FounderPhysiology::frozen(Founder::Lanternjaw)
+                .hunter
+                .map_or(1.0, |h| h.rest_at),
             contact: module_slot(&manifest, "Contact(4)"),
             taste: module_slot(&manifest, "Taste(1)"),
             cone: module_slot(&manifest, "Cone(3, foliage/body)"),
@@ -829,10 +834,10 @@ impl Controller for LanternjawAmbush {
         let foliage_near = o[base + 9];
 
         // Carrion at the mouth: eat it until full.
-        if taste_valid > 0.5 && taste_cue > 0.0 && reserve < SATED {
+        if taste_valid > 0.5 && taste_cue > 0.0 && reserve < self.sated {
             return self.act(Ambush::Idle, 0.0, 0.0, 1.0);
         }
-        if reserve >= SATED {
+        if reserve >= self.sated {
             return self.act(Ambush::Idle, 0.0, 0.0, 0.0);
         }
         // A body in sight: face it, and creep up on one ahead with feed held.

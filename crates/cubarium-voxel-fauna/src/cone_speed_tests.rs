@@ -120,43 +120,16 @@ impl MapOccupancy {
                 }
             }
         }
-        // Bodies with volume (predation §2.2): the footprint disc — columns whose
-        // centres are within its radius, and its own — times ceil(height / voxel) layers.
         let mut bodies: HashMap<usize, Vec<u64>> = HashMap::new();
         for a in fauna.animals {
             if let Some((ax, az)) = a.pose.column(c.voxel_m, c.depth) {
-                let (radius, tall) = crate::body_of(fauna.config, a).map_or((0.0, 1), |b| {
-                    (
-                        b.footprint_radius(),
-                        (b.height_m / c.voxel_m).ceil().max(1.0) as i64,
-                    )
-                });
-                let span = (radius / c.voxel_m).ceil() as i64;
-                for dz in -span..=span {
-                    for dx in -span..=span {
-                        let (x, z) = (ax + dx, i64::from(az) + dz);
-                        if z < 0 || z >= i64::from(c.depth) {
-                            continue;
-                        }
-                        let (cx, cz) = (
-                            (x as f64 + 0.5) * c.voxel_m - a.pose.x,
-                            (z as f64 + 0.5) * c.voxel_m - a.pose.z,
-                        );
-                        if (dx != 0 || dz != 0) && cx * cx + cz * cz > radius * radius {
-                            continue;
-                        }
-                        let wx = x.rem_euclid(i64::from(c.width));
-                        if !seen(wx) {
-                            continue;
-                        }
-                        let base = i64::from(a.site.y) + 1;
-                        for layer in base..base + tall {
-                            if layer > 0 && layer < i64::from(c.height) {
-                                let cell = c.index(wx, layer as u32, z as u32);
-                                bodies.entry(cell).or_default().push(a.id);
-                            }
-                        }
-                    }
+                if !seen(ax) {
+                    continue;
+                }
+                let layer = i64::from(a.site.y) + 1;
+                if layer > 0 && layer < i64::from(c.height) {
+                    let cell = c.index(ax, layer as u32, az);
+                    bodies.entry(cell).or_default().push(a.id);
                 }
             }
         }

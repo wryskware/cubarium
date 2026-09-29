@@ -177,6 +177,44 @@ fn a_full_lanternjaw_rests_at_the_torpor_factor_and_wakes_at_half_its_cap() {
     assert_ne!(animal(&fauna, awake).state, State::Asleep);
 }
 
+/// Under its own heuristic, a lanternjaw beside a carcass eats until the satiated rest
+/// takes it: the teacher eats up to `rest_at`, not short of it. Started just under the
+/// line (0.885 of its cap) so the hunger-scaled bite reaches 0.9 inside the test's ticks.
+#[test]
+fn the_ambush_heuristic_eats_a_carcass_into_the_satiated_rest() {
+    let world = clock_off(10);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let lj = introduce(
+        &mut fauna,
+        &world,
+        Founder::Lanternjaw,
+        StartingStores {
+            body: 1.0,
+            reserve: 0.885,
+        },
+    );
+    let site = animal(&fauna, lj).site;
+    assert!(flora.deposit(
+        site,
+        cubarium_voxel_flora::Deposit {
+            kind: cubarium_voxel_flora::DepositKind::Carrion,
+            organic: 0.075,
+            mineral: 0.05 * 0.075,
+            energy: 2.0 * 0.075,
+        }
+    ));
+    fauna
+        .controllers
+        .set(lj, Box::new(crate::LanternjawAmbush::new()));
+    let rested = step_until(&mut fauna, &world, &mut flora, 200, |f| {
+        f.view().animal(lj).is_some_and(|a| a.rest == Some(Rest::Satiated))
+    });
+    assert!(rested.is_some(), "it never ate its way into the satiated rest");
+    assert!(fauna.ledger.eaten_carrion_by_founder[Founder::Lanternjaw.index()] > 0.0);
+    assert_closes(&fauna, "fed and resting");
+}
+
 /// WX4's sleep is the other reason on the same state: a diurnal grazer asleep at
 /// midnight rests for `Sleep`.
 #[test]
