@@ -2952,6 +2952,7 @@ fn decompose(flora: &mut Flora, pre: &[Pre]) {
             carrion0,
             ledger,
         );
+        g.clear_spent_carcass();
     }
 }
 

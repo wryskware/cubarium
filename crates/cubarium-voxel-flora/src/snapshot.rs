@@ -58,7 +58,10 @@ use crate::Flora;
 /// Schema 8: the induced grazing defence — `Stand::defence` and the species'
 /// `defence_per_bite` / `defence_half_life_s`
 /// (`design/handoffs/voxel-lifespan-defence-2026-09-25.md`). Refused, not migrated.
-pub const SCHEMA: u32 = 8;
+/// Schema 9: the carcass record on every `Ground` (`Ground::carcass`,
+/// `design/predation-and-flight-2026-09-28.md` §2.5) and carrion's new hour-long decay.
+/// Refused, not migrated.
+pub const SCHEMA: u32 = 9;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

@@ -88,7 +88,12 @@ fn carrion_decays_at_the_new_rate_and_its_mineral_goes_to_the_soil() {
     );
     // Mineral: out of the carrion and into the soil, at the pool's own fraction.
     let released = g0.carrion_mineral - g.carrion_mineral;
-    assert!(((g.mineral - g0.mineral) - released).abs() <= 1e-15);
+    // One rounding of the soil pool (≈ 1.0 of initial mineral) per tick: the bound is
+    // that, not 1e-15 absolute, which 200 additions onto 1.0 cannot meet.
+    assert!(
+        ((g.mineral - g0.mineral) - released).abs()
+            <= f64::from(TICKS) * f64::EPSILON * g.mineral
+    );
     assert!((released - 0.02 * gone).abs() <= 1e-12 * released);
     assert!((g.carrion_mineral / g.carrion - 0.02).abs() < 1e-12);
     assert_closes(&flora, "decayed");

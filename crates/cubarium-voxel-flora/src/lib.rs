@@ -442,6 +442,32 @@ impl Stand {
     }
 }
 
+/// A dead animal's record on a ground pool (`design/predation-and-flight-2026-09-28.md`
+/// §2.5): which lineage it was, which way it lay, and the organic matter it died with. A
+/// drawing aid and nothing else — the carrion pool holds the matter.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Carcass {
+    /// The dead body's lineage code: the fauna's `Founder::index`.
+    pub lineage: u8,
+    /// Its heading when it died, radians.
+    pub heading_rad: f64,
+    /// The organic matter the body went into the pool with.
+    pub organic: f64,
+}
+
+impl Carcass {
+    /// Whether the pool holding `carrion` is **remains** rather than the body: below 30 %
+    /// of what the body died with (dossier D2's "collapsed body, then bone").
+    pub fn remains(&self, carrion: f64) -> bool {
+        carrion < CARCASS_REMAINS_FRACTION * self.organic
+    }
+}
+
+/// The share of a carcass's organic matter below which it is drawn as remains.
+pub const CARCASS_REMAINS_FRACTION: f64 = 0.3;
+/// The share below which the record is dropped: the remains have gone into the soil.
+pub const CARCASS_GONE_FRACTION: f64 = 0.02;
+
 /// Non-living stocks that sit on a site: the mineral pool and the stand's own detritus.
 /// One entry per site that has ever held a stand or received litter.
 ///
@@ -497,6 +523,13 @@ pub struct Ground {
     /// energy comes from a consumer's own books rather than from a species'
     /// `energy_density`, and a cap here would be a second knob with nothing measuring it.
     pub carrion_energy: f64,
+    /// The **carcass record** (`design/predation-and-flight-2026-09-28.md` §2.5): the dead
+    /// animal whose body lies in `carrion` here, so the presenter can draw it — its model
+    /// lying flat, then remains below 30 % ([`Carcass::remains`]). It carries **no
+    /// mass**: the carrion pool does. Laid by a kill ([`Flora::lay_carcass`]) and cleared
+    /// once the pool has fallen below [`CARCASS_GONE_FRACTION`] of what the body died
+    /// with.
+    pub carcass: Option<Carcass>,
     /// The species and tick of the latest seed **landing** here (package SM): what the D5
     /// seed mark reads as "recent" ([`Ground::seed_mark`]). A cohort's `bin_start_tick`
     /// cannot say this — a bin is hours wide — so the landing path writes it.
@@ -509,6 +542,16 @@ pub struct Ground {
 }
 
 impl Ground {
+    /// Drop the carcass record once its pool has gone below [`CARCASS_GONE_FRACTION`] of
+    /// what the body died with.
+    pub(crate) fn clear_spent_carcass(&mut self) {
+        if let Some(c) = self.carcass {
+            if self.carrion <= CARCASS_GONE_FRACTION * c.organic {
+                self.carcass = None;
+            }
+        }
+    }
+
     /// An empty site holding `mineral` and nothing else.
     pub fn new(site: Site, mineral: f64) -> Ground {
         Ground {
@@ -524,6 +567,7 @@ impl Ground {
             carrion: 0.0,
             carrion_mineral: 0.0,
             carrion_energy: 0.0,
+            carcass: None,
             last_landing: None,
             sprouting: None,
         }
@@ -2407,11 +2451,11 @@ pub struct FloraConfig {
     /// `k_w`: dead-wood decomposition per second, the same two flows, slow.
     pub wood_decomposition: f64,
     /// `k_c`: **carrion** decomposition per second ([`Ground::carrion`]), the same two
-    /// flows. **A placeholder, and nothing has measured it**
-    /// (`design/backlog.md` §1): 0.005 /s is five times `decomposition`, which is the only
-    /// thing it claims — a corpse goes faster than a leaf, an e-folding in 200 s against
-    /// litter's 1,000 s and dead wood's 10,000 s. It is not tuned and no result in this
-    /// round depends on its value.
+    /// flows. **A placeholder** (`design/backlog.md` §1): 0.00028 /s, an e-folding of
+    /// about an hour — half a day on the 2 h clock — so one kill feeds its killer, other
+    /// lanternjaws and shredders over time (`design/predation-and-flight-2026-09-28.md`,
+    /// decision 2). It was 0.005 /s (200 s), which nothing had measured and which spent a
+    /// grazer before a lanternjaw had finished its first mouthful.
     pub carrion_decomposition: f64,
     /// `e_d_max`: retained energy cap per unit of litter.
     pub litter_energy_cap: f64,
@@ -2472,7 +2516,7 @@ impl Default for FloraConfig {
             shade_k_per_m2: 0.09375,
             decomposition: 0.001,
             wood_decomposition: 0.0001,
-            carrion_decomposition: 0.005,
+            carrion_decomposition: 0.00028,
             litter_energy_cap: 2.0,
             initial_mineral: 1.0,
             provision: Provision::Lazy,
@@ -4497,7 +4541,25 @@ impl Flora {
             &mut g.carrion_energy,
             want,
         )?;
+        g.clear_spent_carcass();
         Some(self.book_consumed(taken))
+    }
+
+    /// Lay a **carcass record** on `site`'s ground pool (§2.5 of the predation note): the
+    /// dead body the carrion there came from, for the presenter. Massless — nothing is
+    /// booked — and it replaces any record already there. `false` when the site has no
+    /// ground entry (the body's deposit makes one) or the record is not finite.
+    pub fn lay_carcass(&mut self, site: Site, carcass: Carcass) -> bool {
+        if !(carcass.heading_rad.is_finite() && carcass.organic.is_finite()) {
+            return false;
+        }
+        match self.ground.binary_search_by_key(&site, |g| g.site) {
+            Ok(i) => {
+                self.ground[i].carcass = Some(carcass);
+                true
+            }
+            Err(_) => false,
+        }
     }
 
     /// A consumer puts material **back** on `site`: a corpse into the carrion pool,
