@@ -77,8 +77,9 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
                         // flash (0..1)
     vec4 strikeK;       // the bolt: its column's x centre, top y and z (voxels), its brightness
     vec4 strikeL;       // the bolt's seed, as two 16-bit halves
-    // The sleep pose this frame (WX4, `cubarium_gpu::voxel::pose_rows`): entry k's settle
-    // and breath dip, in pixel rows, evaluated on the frame's clock.
+    // The pose this frame (WX4, `cubarium_gpu::voxel::pose_rows`): entry k's settle and
+    // breath dip in pixel rows and its glance in pixels (signed), evaluated on the frame's
+    // clock. Entry 0's x is 1 when any entry glances (the walk then looks beside a cell).
     vec4 poseK[64];
 } u;
 
@@ -113,8 +114,8 @@ layout(constant_id = 7) const bool WEATHER = false;
 // slab to the end of the shader costs the walk about 0.1 ms at 13 px, which a clear sky
 // does not pay.
 layout(constant_id = 8) const bool WEATHER_DEPTH = false;
-// The sleep pose (WX4, `posedFind`): a second walk pipeline, bound only on frames whose
-// pack has an animal posing. The search costs the walk registers (a step of occupancy on
+// The sleep and idle poses (WX4, `posedFind`): a second walk pipeline, bound only on
+// frames whose pack has an animal posing. The search costs the walk registers (a step of occupancy on
 // the desktop's RDNA) even where no animal is, so the rest of the time it is dead code.
 layout(constant_id = 9) const bool POSE = false;
 
@@ -184,6 +185,13 @@ int matOf(uvec4 v) { return int(v.r & 3u); }
 int partOf(uvec4 v) { return int((v.r >> 2) & 7u); }
 int glyphOf(uvec4 v) { return int(v.r >> 5); }
 bool isBlockPart(int p) { return p == TRUNK || p == CROWN || p == CROWN_HEART || p == ANIMAL_INTERIM || p == LOG; }
+// A faceless animal cell of class torso (WX4 idle): an empty voxel beside or under a moving
+// head, there only so the walk looks for the head from it. It is air to everything else
+// (no crease, no shadow, no cover), so it can come and go with a head move unseen. The
+// sleep's belly cells (class leg) keep counting as the settled body.
+bool softMark(uvec4 v) {
+    return POSE && partOf(v) == ANIMAL_INTERIM && glyphOf(v) == 0 && v.b != 0u && (v.b >> 6) < 2u;
+}
 bool solidV(uvec4 v) { return matOf(v) != 0; }
 
 // Out-of-range y reads as air, which is what makes the top of the world an open sky and
@@ -395,7 +403,7 @@ vec3 blockLit(vec3 body, float shade) {
 float occluder(int x, int y, int z) {
     if (!inY(y) || z < 0 || z >= D) { return 0.0; }
     uvec4 v = at(x, y, z);
-    return (solidV(v) || isBlockPart(partOf(v))) ? 1.0 : 0.0;
+    return (solidV(v) || (isBlockPart(partOf(v)) && !softMark(v))) ? 1.0 : 0.0;
 }
 
 // The AO is a **crease line** (Wrysk, checkpoint 2): a face stays flat, and only a thin
@@ -573,7 +581,7 @@ float sunReaches(vec3 p, ivec3 c) {
         uvec4 v = at(c.x, c.y, c.z);
         if (solidV(v)) { return 0.0; }
         int part = partOf(v);
-        if (part == TRUNK || part == LOG || part == ANIMAL_INTERIM) { return 0.0; }
+        if (part == TRUNK || part == LOG || (part == ANIMAL_INTERIM && !softMark(v))) { return 0.0; }
         if ((part == CROWN || part == CROWN_HEART) && !crownLets(v, c)) {
             return 0.0;
         }
@@ -825,7 +833,7 @@ bool glyphFrontAt(int x, int y, int z, uvec4 v, int row, int dx, out vec3 rgb, o
     if (!plantTexel(x, y, z, v, top, dx, localY, base)) { return false; }
     if (LIT) {
         bool coveredUp = !top && (solidAt(x, y + 1, z)
-            || (inY(y + 1) && isBlockPart(partOf(at(x, y + 1, z)))));
+            || (inY(y + 1) && isBlockPart(partOf(at(x, y + 1, z))) && !softMark(at(x, y + 1, z))));
         // The atlas's tones on the lit base: the rim and the lit column lean toward the
         // base under the cell's top light, every other tone keeps its pigment rule under
         // this face's light. A cap is the base under its top light, its edge tones leaning
@@ -876,7 +884,7 @@ bool glyphFrontAt(int x, int y, int z, uvec4 v, int row, int dx, out vec3 rgb, o
         return true;
     }
     bool coveredUp = solidAt(x, y + 1, z)
-        || (inY(y + 1) && isBlockPart(partOf(at(x, y + 1, z))));
+        || (inY(y + 1) && isBlockPart(partOf(at(x, y + 1, z))) && !softMark(at(x, y + 1, z)));
     if (tone == 1) {
         base *= u.shadeB.x;
     } else if (tone == 2 && !coveredUp) {
@@ -938,7 +946,7 @@ bool glyphCapAt(int x, int y, int z, uvec4 v, int localY, int dx, out vec3 rgb, 
     return true;
 }
 
-// --- the sleep pose (WX4, `cubarium::voxel::sleep`) ----------------------------------------
+// --- the sleep and idle poses (WX4, `cubarium::voxel::sleep`, `cubarium::voxel::idle`) ------
 //
 // A sleeping body is stamped where it stands awake. Each of its cells carries its class
 // (b's top two bits) and its pose entry (b's low six; b = 0 is a body not posing, drawn as
@@ -950,6 +958,12 @@ bool glyphCapAt(int x, int y, int z, uvec4 v, int localY, int dx, out vec3 rgb, 
 // settling torso are faceless leg cells (glyph 0): they draw nothing and only send the walk
 // looking for the torso. Nothing is drawn above its own voxel's top, so the walk's own
 // voxel and the cap under it are the only places a search starts.
+//
+// An idle body (awake and standing still) breathes the same way, and now and then moves its
+// head: the head cells take an entry of their own whose settle is the head's dip and whose
+// glance shifts them along screen x by up to half a voxel. While any head glances, the
+// search also looks at the cells beside the pixel's column. The empty voxels a moving head
+// reaches into are faceless torso-class cells (`softMark`).
 
 bool isPosed(uvec4 v) { return POSE && partOf(v) == ANIMAL_INTERIM && v.b != 0u; }
 
@@ -973,41 +987,83 @@ int posedRow(uvec4 c, int sy, ivec2 sp, int q) {
     return t > 0 ? t + S - (sp.y - sp.x) : 0;
 }
 
-// Which posing cell owns row r of band `level`, and which of its rows (a cap's from S on,
-// for `glyphFrontAt`): from the rows a settling cell can reach the band from, two over it
-// (a torso settles up to two rows) and the band's own. A front face wins, since they all
-// lie in the slab's front plane with every cap behind; else the highest cap. The cell
-// under the band shows only its cap, which the walk's cap site draws.
-bool posedFind(int x, int level, int z, int r, out int gy, out int row) {
+// A posing cell's glance, in pixels along screen x: a moving head's; 0 for every other cell.
+int posedShift(uvec4 c) { return int(u.poseK[int(c.b & 63u)].z); }
+
+// How many columns a search looks in: the pixel's own, and while a head glances the two
+// beside it (a glance is under a voxel, so it reaches one column at most).
+int posedColumns() { return u.poseK[0].x > 0.0 ? 3 : 1; }
+
+// Column j of a search: the pixel's own column last, so a head glancing over its own body
+// is drawn over it.
+int posedColumn(int x, int j, int n) { return j == n - 1 ? x : x + (j == 0 ? -1 : 1); }
+
+// Which posing cell owns pixel (dx, r) of band `level`, where it is (gx, gy), and which of
+// its pixels (gdx, and its row: a cap's from S on, for `glyphFrontAt`): from the rows a
+// settling cell can reach the band from, two over it (a torso settles up to two rows) and
+// the band's own. A front face wins, since they all lie in the slab's front plane with every
+// cap behind; else the highest cap. The cell under the band shows only its cap, which the
+// walk's cap site draws (`posedCap`).
+bool posedFind(int x, int level, int z, int r, int dx, out int gx, out int gy, out int gdx,
+               out int row) {
     int q = level * S + r;
+    int n = posedColumns();
+    gx = x;
     gy = level;
+    gdx = dx;
     row = -1;
     for (int i = 0; i < 3; ++i) {
         int sy = level + 2 - i;
         if (!inY(sy)) { continue; }
-        uvec4 c = at(x, sy, z);
-        if (!isPosed(c) || glyphOf(c) == 0) { continue; }
-        ivec2 sp = posedSpan(c, sy);
-        if (q >= sp.x && q < sp.y) {
-            gy = sy;
-            row = posedRow(c, sy, sp, q);
-            return true;
-        }
-        if (row < 0 && q >= sp.y && q < sp.y + RISE) {
-            gy = sy;
-            row = S + RISE - 1 - (q - sp.y);
+        for (int j = 0; j < n; ++j) {
+            int cx = posedColumn(x, j, n);
+            uvec4 c = at(cx, sy, z);
+            if (!isPosed(c) || glyphOf(c) == 0) { continue; }
+            int cdx = dx + (x - cx) * S - posedShift(c);
+            if (cdx < 0 || cdx >= S) { continue; }
+            ivec2 sp = posedSpan(c, sy);
+            if (q >= sp.x && q < sp.y) {
+                gx = cx;
+                gy = sy;
+                gdx = cdx;
+                row = posedRow(c, sy, sp, q);
+                return true;
+            }
+            if (row < 0 && q >= sp.y && q < sp.y + RISE) {
+                gx = cx;
+                gy = sy;
+                gdx = cdx;
+                row = S + RISE - 1 - (q - sp.y);
+            }
         }
     }
     return row >= 0;
 }
 
-// The cap row of posing cell v under band `level` at row r, or -1: where its settle and
-// breath put its cap.
-int posedCapRow(uvec4 v, int level, int r) {
-    if (glyphOf(v) == 0) { return -1; }
-    ivec2 sp = posedSpan(v, level - 1);
+// The cap of a posing cell under band `level` at pixel (dx, r), or false: where its settle,
+// breath and glance put it, the cell (gx) and its cap pixel (gdx, row).
+bool posedCap(int x, int level, int z, int r, int dx, out int gx, out int gdx, out int row) {
     int q = level * S + r;
-    return q >= sp.y && q < sp.y + RISE ? RISE - 1 - (q - sp.y) : -1;
+    int sy = level - 1;
+    int n = posedColumns();
+    gx = x;
+    gdx = dx;
+    row = -1;
+    for (int j = 0; j < n; ++j) {
+        int cx = posedColumn(x, j, n);
+        uvec4 c = at(cx, sy, z);
+        if (!isPosed(c) || glyphOf(c) == 0) { continue; }
+        int cdx = dx + (x - cx) * S - posedShift(c);
+        if (cdx < 0 || cdx >= S) { continue; }
+        ivec2 sp = posedSpan(c, sy);
+        if (q >= sp.y && q < sp.y + RISE) {
+            gx = cx;
+            gdx = cdx;
+            row = RISE - 1 - (q - sp.y);
+            return true;
+        }
+    }
+    return false;
 }
 
 // --- water ----------------------------------------------------------------------------
@@ -2482,16 +2538,18 @@ void main() {
             if (p != 0) {
                 // A posing body (WX4): whichever of its cells (or their caps) the settle
                 // has moved over this pixel, if any, instead of the band's own voxel.
+                int fx = x;
                 int fy = level;
+                int fdx = dx;
                 int fl = S - 1 - r;
                 bool found = true;
                 if (isPosed(v)) {
-                    found = posedFind(x, level, z, r, fy, fl);
-                    v = at(x, fy, z);
+                    found = posedFind(x, level, z, r, dx, fx, fy, fdx, fl);
+                    v = at(fx, fy, z);
                 }
                 vec3 art;
                 bool lum;
-                if (found && glyphFrontAt(x, fy, z, v, fl, dx, art, lum)) {
+                if (found && glyphFrontAt(fx, fy, z, v, fl, fdx, art, lum)) {
                     acc += trans * art;
                     trans = LIT && lum ? emitterTrans(trans, art, hazeAt(float(z))) : vec3(0.0);
                     break;
@@ -2520,9 +2578,18 @@ void main() {
             int p = partOf(v);
             vec3 cap;
             bool lum;
-            // A posing cell's cap is where its settle and breath put it (WX4).
-            int cl = isPosed(v) ? posedCapRow(v, level, r) : RISE - 1 - r;
-            if (isBlockPart(p) && cl >= 0 && glyphCapAt(x, below, z, v, cl, dx, cap, lum)) {
+            // A posing cell's cap is where its settle, breath and glance put it (WX4).
+            int cx = x;
+            int cdx = dx;
+            int cl = RISE - 1 - r;
+            if (isPosed(v)) {
+                if (posedCap(x, level, z, r, dx, cx, cdx, cl)) {
+                    v = at(cx, below, z);
+                } else {
+                    cl = -1;
+                }
+            }
+            if (isBlockPart(p) && cl >= 0 && glyphCapAt(cx, below, z, v, cl, cdx, cap, lum)) {
                 acc += trans * cap;
                 trans = LIT && lum
                     ? emitterTrans(trans, cap, hazeAt(float(z) + float(r) / float(RISE)))

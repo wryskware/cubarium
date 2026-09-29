@@ -40,6 +40,7 @@
 pub mod animal;
 pub mod appearance;
 pub mod chiplet;
+pub mod idle;
 pub mod colours;
 pub mod model;
 pub mod placement;

@@ -10,9 +10,9 @@
 //! # Where the motion happens
 //!
 //! Nothing here moves a cell. The body is stamped where it stands awake, and every cell of
-//! a posing body carries a [`Class`] (how it moves) and the index of its animal's
-//! [`PoseEntry`] (how far it has moved). The GPU walk (`voxel.frag`, `posedFind`) draws each
-//! such cell displaced by a fraction of a voxel, recomputed from the frame's clock, so the
+//! a posing body carries a [`Class`] (how it moves) and the index of its animal's pose
+//! entry (`cubarium_gpu::voxel::PoseEntry`, how far it has moved). The GPU walk
+//! (`voxel.frag`, `posedFind`) draws each such cell displaced by a fraction of a voxel, recomputed from the frame's clock, so the
 //! settle and the breath are continuous and never add or remove a whole cell:
 //!
 //! * a **torso** cell (the fullest row and everything above it) comes down by the settle
@@ -30,6 +30,8 @@
 
 use std::collections::BTreeMap;
 
+use cubarium_gpu::voxel::{Breath, PoseTable};
+
 /// The most rows a body comes down. As far as its own legs allow: a body whose torso is
 /// already on the ground (a crawler) does not move.
 pub const MAX_DROP_ROWS: i32 = 2;
@@ -43,7 +45,7 @@ pub const BREATH_AMP_VOXELS: f32 = 0.2;
 /// phase is quantised. Eight keeps a herd out of step (1 in 8 share a phase) and the
 /// asleep entries to at most `3 · 8`.
 pub const BREATH_PHASES: u64 = 8;
-/// Pose entries a frame may use, index 0 being the header ([`header`]); the GPU uniform's
+/// Pose entries a frame may use, index 0 unused ([`table`]); the GPU uniform's
 /// `poseK` array and the texel's six entry bits.
 pub const POSE_ENTRIES: usize = 64;
 /// The part of the body's length, front to back, that breathes: the middle of the back.
@@ -68,6 +70,15 @@ impl Class {
         debug_assert!(entry != 0 && usize::from(entry) < POSE_ENTRIES);
         (self as u8) << 6 | (entry & 63)
     }
+}
+
+/// Whether the pose byte of a **faceless** cell (an empty voxel a posing body moves into) is
+/// a soft mark: class torso, the voxels under and beside an idle body's moving head
+/// ([`super::idle`]). A soft mark gives way to a plant or a vine in its voxel (the head is
+/// then hidden there) and is air to the walk's creases and shadows (`voxel.frag`,
+/// `softMark`). The sleep's belly cells are class leg and settle over what is there.
+pub fn is_soft_mark(byte: u8) -> bool {
+    byte != 0 && byte >> 6 < Class::Leg1 as u8
 }
 
 /// One cell of a body in its own frame. `bump` says a breath may raise it (the back, not a
@@ -157,45 +168,31 @@ pub fn classify(cells: &[Local]) -> Classified {
     Classified { torso, drop, class }
 }
 
-/// One animal's pose as the GPU reads it, `poseK[entry]`: its sleep weight at the staged
-/// tick, the weight's change per tick, the rows it settles, and its breath phase (0..1).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PoseEntry {
-    pub weight: f32,
-    pub rate: f32,
-    pub drop: f32,
-    pub phase: f32,
-}
-
-impl PoseEntry {
-    pub fn to_array(self) -> [f32; 4] {
-        [self.weight, self.rate, self.drop, self.phase]
-    }
-
-    /// The sleep weight `ticks` after the staged tick: what the shader computes every frame.
-    /// Clamped, so extrapolating past the end of a blend holds.
-    pub fn weight_at(self, ticks: f32) -> f32 {
-        (self.weight + self.rate * ticks.clamp(0.0, 8.0)).clamp(0.0, 1.0)
-    }
-}
-
 /// The weight's change per tick of `dt_s` seconds while falling asleep.
 pub fn rate_per_tick(dt_s: f64) -> f32 {
     (dt_s / BLEND_S) as f32
 }
 
-/// The pose table's header, `poseK[0]`: the staged tick (wrapped as the frame clock wraps
-/// it), the breath's own phase at that tick (0..1, so the clock's wrap never shows), the
-/// breath period in ticks, and its amplitude in voxels.
-pub fn header(tick: u64, tick_wrap: u64, dt_s: f64) -> [f32; 4] {
-    let period_ticks = BREATH_PERIOD_S / dt_s;
-    let base = (tick as f64 / period_ticks).fract();
-    [
-        (tick % tick_wrap) as f32,
-        base as f32,
-        period_ticks as f32,
-        BREATH_AMP_VOXELS,
-    ]
+/// The sleep breath at the staged `tick`: its phase then (0..1, so the clock's wrap never
+/// shows), its period in ticks, its dip in voxels.
+pub fn breath(tick: u64, dt_s: f64) -> Breath {
+    let period = BREATH_PERIOD_S / dt_s;
+    Breath {
+        base: (tick as f64 / period).fract() as f32,
+        period: period as f32,
+        amp: BREATH_AMP_VOXELS,
+    }
+}
+
+/// An empty pose table for a pack staged at `tick`: the tick wrapped as the frame clock
+/// wraps it, and the sleep and idle breaths then.
+pub fn table(tick: u64, tick_wrap: u64, dt_s: f64) -> PoseTable {
+    PoseTable {
+        tick: (tick % tick_wrap) as f32,
+        sleep: breath(tick, dt_s),
+        idle: super::idle::breath(tick, dt_s),
+        ..PoseTable::EMPTY
+    }
 }
 
 /// The breath phase of animal `id`, one of [`BREATH_PHASES`], out of step between animals.
@@ -221,13 +218,6 @@ pub fn smooth(w: f32) -> f32 {
     w * w * (3.0 - 2.0 * w)
 }
 
-/// The settle (voxels down) and the breath's dip (voxels down from a full breath) of
-/// `entry`, `ticks` after the staged tick, with `header` from [`header`]: the renderer's
-/// own per-frame evaluation ([`cubarium_gpu::voxel::pose_at`]).
-pub fn settle_and_breath(entry: PoseEntry, header: [f32; 4], ticks: f32) -> (f32, f32) {
-    cubarium_gpu::voxel::pose_at(entry.to_array(), header, ticks)
-}
-
 /// Where a posing cell at row `sy` is drawn, as `(bottom, top)` pixel rows over the
 /// bottom of row 0 at `s` pixels a voxel, under a settle `d` and a breath's dip `b`
 /// (voxels). The shader's `posedSpan`. A leg's top may fall to its bottom: it is folded
@@ -250,7 +240,7 @@ pub fn span(class: Class, sy: i32, d: f32, b: f32, s: i32) -> (i32, i32) {
     }
 }
 
-fn splitmix(mut z: u64) -> u64 {
+pub(crate) fn splitmix(mut z: u64) -> u64 {
     z = z.wrapping_add(0x9E37_79B9_7F4A_7C15);
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
@@ -334,18 +324,29 @@ mod tests {
         assert!(k.class.contains(&Some(Class::Breathing)));
     }
 
+    use cubarium_gpu::voxel::{PoseEntry, pose_at};
+
+    fn asleep(weight: f32, rate: f32, drop: f32, phase: f32) -> PoseEntry {
+        PoseEntry {
+            sleep: weight,
+            sleep_rate: rate,
+            drop,
+            sleep_phase: phase,
+            ..PoseEntry::ZERO
+        }
+    }
+
+    fn settle_and_breath(e: PoseEntry, tick: u64, ticks: f32) -> (f32, f32) {
+        let p = pose_at(&table(tick, 1 << 20, 0.05), &e, ticks);
+        (p.settle, p.breath)
+    }
+
     /// Weight 0 is no offset at all: every class draws exactly its own voxel.
     #[test]
     fn an_awake_weight_is_no_offset() {
-        let e = PoseEntry {
-            weight: 0.0,
-            rate: 0.0,
-            drop: 2.0,
-            phase: 0.5,
-        };
-        let h = header(1234, 1 << 20, 0.05);
+        let e = asleep(0.0, 0.0, 2.0, 0.5);
         for f in [0.0, 0.3, 0.9] {
-            let (d, b) = settle_and_breath(e, h, f);
+            let (d, b) = settle_and_breath(e, 1234, f);
             assert_eq!((d, b), (0.0, 0.0));
             for class in [Class::Torso, Class::Breathing, Class::Leg1, Class::Leg2] {
                 assert_eq!(span(class, 3, d, b, 7), (21, 28));
@@ -355,28 +356,20 @@ mod tests {
 
     #[test]
     fn the_breath_has_a_four_second_period_and_dips_a_fifth_of_a_voxel() {
-        let e = PoseEntry {
-            weight: 1.0,
-            rate: 0.0,
-            drop: 0.0,
-            phase: 0.25,
-        };
-        let h = header(40, 1 << 20, 0.05);
-        let at = |ticks: f32| settle_and_breath(e, h, ticks).1;
-        let later = header(40 + 80, 1 << 20, 0.05);
-        assert!((at(0.0) - settle_and_breath(e, later, 0.0).1).abs() < 1e-5);
+        let e = asleep(1.0, 0.0, 0.0, 0.25);
+        let at = |ticks: f32| settle_and_breath(e, 40, ticks).1;
+        assert!((at(0.0) - settle_and_breath(e, 40 + 80, 0.0).1).abs() < 1e-5);
         // Over one period, a staged tick at a time (a frame only extrapolates a few ticks).
         let peak = (40..120u64)
-            .map(|t| settle_and_breath(e, header(t, 1 << 20, 0.05), 0.0).1)
+            .map(|t| settle_and_breath(e, t, 0.0).1)
             .fold(0.0f32, f32::max);
         assert!(peak <= BREATH_AMP_VOXELS + 1e-6 && peak > 0.9 * BREATH_AMP_VOXELS);
         // A breathing cell never reaches above its own voxel.
         let (_, top) = span(Class::Breathing, 2, 0.0, at(0.0), 10);
         assert!(top <= 30);
-        // Across the staged tick the header carries the phase on: tick 41's frame 0 is tick
+        // Across the staged tick the table carries the phase on: tick 41's frame 0 is tick
         // 40's frame at +1.
-        let h2 = header(41, 1 << 20, 0.05);
-        assert!((settle_and_breath(e, h2, 0.0).1 - at(1.0)).abs() < 1e-5);
+        assert!((settle_and_breath(e, 41, 0.0).1 - at(1.0)).abs() < 1e-5);
     }
 
     #[test]

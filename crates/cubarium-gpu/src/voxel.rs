@@ -98,44 +98,182 @@ pub const PART_LOG: u8 = 6;
 /// Floor marks: leaf litter or carrion remnants.
 pub const PART_FLOOR_MARK: u8 = 7;
 
-/// One pose entry's settle and breath dip, in voxels, `ticks` after the staged tick: the
-/// weight runs on from the staged one at its rate (clamped to `0..=1`), eased by a
-/// smoothstep; the dip follows a cosine of the breath's phase, full at a breath's bottom.
-/// `entry` and `header` are as [`POSE_ENTRIES`] describes.
-pub fn pose_at(entry: [f32; 4], header: [f32; 4], ticks: f32) -> (f32, f32) {
-    let ticks = ticks.clamp(0.0, 8.0);
-    let w = (entry[0] + entry[1] * ticks).clamp(0.0, 1.0);
-    let ws = w * w * (3.0 - 2.0 * w);
-    let period = if header[2] > 0.0 { header[2] } else { 1.0 };
-    let t = header[1] + ticks / period + entry[3];
-    let dip = 0.5 + 0.5 * (std::f32::consts::TAU * t).cos();
-    (entry[2] * ws, header[3] * ws * dip)
+/// One breath of the pose table: its phase at the staged tick (0..1, so the frame clock's
+/// wrap never shows), its period in ticks and its dip in voxels.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Breath {
+    pub base: f32,
+    pub period: f32,
+    pub amp: f32,
 }
 
-/// The pose table as the walk reads it this frame: entry `k`'s settle and breath dip in
-/// whole pixel rows at `s` pixels a voxel, at frame clock `time` (ticks, as
-/// [`FrameClock::time`]). Unused entries stay zero.
-pub fn pose_rows(table: &[[f32; 4]; POSE_ENTRIES], time: f32, s: u32) -> [[f32; 4]; POSE_ENTRIES] {
+impl Breath {
+    pub const ZERO: Breath = Breath {
+        base: 0.0,
+        period: 0.0,
+        amp: 0.0,
+    };
+
+    /// The dip `ticks` after the staged tick at an entry's own phase offset: a cosine, full
+    /// at a breath's bottom.
+    fn dip(self, phase: f32, ticks: f32) -> f32 {
+        let period = if self.period > 0.0 { self.period } else { 1.0 };
+        let t = self.base + ticks / period + phase;
+        self.amp * (0.5 + 0.5 * (std::f32::consts::TAU * t).cos())
+    }
+}
+
+/// One head move of an idle body (`cubarium::voxel::idle`): out and back once, eased in
+/// and out, starting `start` ticks after the staged tick (negative when under way) and
+/// lasting `ticks`. `dip` brings the head cells down (voxels); `glance` shifts them along
+/// screen x (voxels, signed). Both zero: no move (a body entry).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct HeadMove {
+    pub start: f32,
+    pub ticks: f32,
+    pub dip: f32,
+    pub glance: f32,
+}
+
+impl HeadMove {
+    pub const NONE: HeadMove = HeadMove {
+        start: 0.0,
+        ticks: 0.0,
+        dip: 0.0,
+        glance: 0.0,
+    };
+
+    /// How far out the move is `ticks` after the staged tick, 0 to 1 and back to 0:
+    /// `sin²(π u)` over the move's own time `u`, so it leaves and returns with no speed.
+    pub fn out(self, ticks: f32) -> f32 {
+        if self.ticks <= 0.0 {
+            return 0.0;
+        }
+        let u = (ticks - self.start) / self.ticks;
+        if u <= 0.0 || u >= 1.0 {
+            return 0.0;
+        }
+        let s = (std::f32::consts::PI * u).sin();
+        s * s
+    }
+}
+
+/// One entry of the pose table (WX4): a posing body, or its head while it moves.
+///
+/// - `sleep` is the sleep weight at the staged tick, `sleep_rate` its change per tick,
+///   `drop` the rows the body settles when fully asleep, `sleep_phase` its breath's offset.
+/// - `idle` is the idle weight (an awake body standing still) at the staged tick,
+///   `idle_rate` its change per tick, `idle_phase` its breath's offset.
+/// - `head` is a head move under way or due: the head cells of a body in a move take an
+///   entry of their own with it, the rest of the body one with [`HeadMove::NONE`].
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PoseEntry {
+    pub sleep: f32,
+    pub sleep_rate: f32,
+    pub drop: f32,
+    pub sleep_phase: f32,
+    pub idle: f32,
+    pub idle_rate: f32,
+    pub idle_phase: f32,
+    pub head: HeadMove,
+}
+
+impl PoseEntry {
+    pub const ZERO: PoseEntry = PoseEntry {
+        sleep: 0.0,
+        sleep_rate: 0.0,
+        drop: 0.0,
+        sleep_phase: 0.0,
+        idle: 0.0,
+        idle_rate: 0.0,
+        idle_phase: 0.0,
+        head: HeadMove::NONE,
+    };
+}
+
+/// A pack's pose table (`poseK` in `voxel.frag`, WX4): the staged tick (wrapped as
+/// [`FrameClock::time`] wraps it), the sleep and idle breaths, and the entries. Entry 0 is
+/// never used by a cell (a posing animal cell's `b` byte is its class in the top two bits
+/// and its entry, 1 to 63, below; `b = 0` is a body not posing, drawn as it always was).
+/// An animal texel of glyph 0 is faceless: an empty voxel a posing body can move into,
+/// which only sends the walk looking for it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PoseTable {
+    pub tick: f32,
+    pub sleep: Breath,
+    pub idle: Breath,
+    pub entries: [PoseEntry; POSE_ENTRIES],
+}
+
+impl PoseTable {
+    pub const EMPTY: PoseTable = PoseTable {
+        tick: 0.0,
+        sleep: Breath::ZERO,
+        idle: Breath::ZERO,
+        entries: [PoseEntry::ZERO; POSE_ENTRIES],
+    };
+
+    /// Whether any body poses in this pack.
+    pub fn posing(&self) -> bool {
+        self.entries[1..].iter().any(|e| *e != PoseEntry::ZERO)
+    }
+}
+
+/// Where one entry's cells are drawn `ticks` after the staged tick, in voxels.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PoseAt {
+    /// Down: the sleep's settle, plus a head's dip.
+    pub settle: f32,
+    /// The breath's dip of the top of the back: the sleep's and the idle's.
+    pub breath: f32,
+    /// Along screen x: a head's glance.
+    pub glance: f32,
+}
+
+/// One entry, `ticks` after the staged tick: each weight runs on from the staged one at its
+/// rate (clamped to `0..=1`) and is eased by a smoothstep; the settle is the drop at the
+/// sleep weight; each breath dips at its own weight; a head move goes out and back at the
+/// idle weight.
+pub fn pose_at(table: &PoseTable, entry: &PoseEntry, ticks: f32) -> PoseAt {
+    let ticks = ticks.clamp(0.0, 8.0);
+    let smooth = |w: f32, r: f32| {
+        let w = (w + r * ticks).clamp(0.0, 1.0);
+        w * w * (3.0 - 2.0 * w)
+    };
+    let ws = smooth(entry.sleep, entry.sleep_rate);
+    let wi = smooth(entry.idle, entry.idle_rate);
+    let head = entry.head.out(ticks) * wi;
+    PoseAt {
+        settle: entry.drop * ws + entry.head.dip * head,
+        breath: ws * table.sleep.dip(entry.sleep_phase, ticks)
+            + wi * table.idle.dip(entry.idle_phase, ticks),
+        glance: entry.head.glance * head,
+    }
+}
+
+/// The pose table as the walk reads it this frame, at frame clock `time` (ticks, as
+/// [`FrameClock::time`]) and `s` pixels a voxel: entry `k`'s settle and breath dip in whole
+/// pixel rows (the settle at most two voxels, as far as the walk looks) and its glance in
+/// whole pixels. Entry 0 says whether any entry glances this frame (the walk only looks
+/// beside a cell then). Unused entries stay zero.
+pub fn pose_rows(table: &PoseTable, time: f32, s: u32) -> [[f32; 4]; POSE_ENTRIES] {
     let mut out = [[0.0; 4]; POSE_ENTRIES];
-    let header = table[0];
-    let px = |v: f32| (v * s as f32 + 0.5).floor();
-    for (o, e) in out.iter_mut().zip(table).skip(1) {
-        if *e != [0.0; 4] {
-            let (d, dip) = pose_at(*e, header, time - header[0]);
-            *o = [px(d), px(dip), 0.0, 0.0];
+    let s = s as f32;
+    let px = |v: f32| (v * s + 0.5).floor();
+    let mut glancing = false;
+    for (o, e) in out.iter_mut().zip(&table.entries).skip(1) {
+        if *e != PoseEntry::ZERO {
+            let p = pose_at(table, e, time - table.tick);
+            let glance = (p.glance * s).round().clamp(1.0 - s, s - 1.0);
+            glancing |= glance != 0.0;
+            *o = [px(p.settle).min(2.0 * s), px(p.breath), glance, 0.0];
         }
     }
+    out[0][0] = f32::from(u8::from(glancing));
     out
 }
 
-/// Entries in the frame's **pose table** (`poseK` in `voxel.frag`, WX4). Entry 0 is the
-/// header: the staged tick (wrapped as [`FrameClock::time`] wraps it), the breath's phase at
-/// that tick, the breath period in ticks, its amplitude in voxels. Entry `k` is one pose:
-/// the sleep weight at the staged tick, its change per tick, the rows the body settles, its
-/// breath phase. A posing animal cell's `b` byte is its class (top two bits) and entry
-/// (`cubarium::voxel::sleep`); `b = 0` is a body not posing, drawn as it always was. An
-/// animal texel of glyph 0 is faceless: an empty voxel under a settling torso, which only
-/// sends the walk looking for it.
+/// Entries in the frame's pose table ([`PoseTable`]): the texel's six entry bits.
 pub const POSE_ENTRIES: usize = 64;
 
 // --- face textures -------------------------------------------------------------------
@@ -1067,9 +1205,9 @@ pub struct VoxelStaging<'a> {
     /// [`VoxelParams::glow_extent`], in units of full ambient light. A slow plane
     /// ([`PLANE_GLOW`]): written only when its key moves. Empty in the flat tier.
     pub glow: &'a mut [u8],
-    /// The pose table ([`POSE_ENTRIES`]), all zeros when handed over: a pack with no animal
-    /// posing leaves it so.
-    pub poses: &'a mut [[f32; 4]; POSE_ENTRIES],
+    /// The pose table ([`PoseTable`]), [`PoseTable::EMPTY`] when handed over: a pack with no
+    /// animal posing leaves it so.
+    pub poses: &'a mut PoseTable,
     /// Whether this pack must write [`VoxelStaging::roof`], [`VoxelStaging::glyphs`],
     /// [`VoxelStaging::sky`] and [`VoxelStaging::glow`] (indexed [`PLANE_ROOF`],
     /// [`PLANE_GLYPHS`], [`PLANE_SKY`], [`PLANE_GLOW`]). A
@@ -1374,8 +1512,8 @@ pub struct VoxelRenderer {
     uniform_stride: u64,
     /// Each staging buffer's pose table, written by its pack; and the one the images hold,
     /// which every frame's uniform block carries.
-    pose_tables: Vec<[[f32; 4]; POSE_ENTRIES]>,
-    drawn_poses: [[f32; 4]; POSE_ENTRIES],
+    pose_tables: Vec<PoseTable>,
+    drawn_poses: PoseTable,
     /// Whether any animal poses in the drawn pack: the lit tier then redraws every frame,
     /// because the settle and the breath move on the frame clock.
     posing: bool,
@@ -1958,8 +2096,8 @@ impl VoxelRenderer {
             fog_floor: params.height as f32 * 0.25,
             staging,
             uniform_stride,
-            pose_tables: vec![[[0.0; 4]; POSE_ENTRIES]; STAGING_RING],
-            drawn_poses: [[0.0; 4]; POSE_ENTRIES],
+            pose_tables: vec![PoseTable::EMPTY; STAGING_RING],
+            drawn_poses: PoseTable::EMPTY,
             posing: false,
             last_done: None,
             ring: StagingRing::new(STAGING_RING),
@@ -2189,7 +2327,7 @@ impl VoxelRenderer {
         };
         styles.fill(VoxelStyle::default());
         let poses = &mut self.pose_tables[into];
-        *poses = [[0.0; 4]; POSE_ENTRIES];
+        *poses = PoseTable::EMPTY;
         fill(VoxelStaging {
             voxels,
             roof,
@@ -2299,7 +2437,7 @@ impl VoxelRenderer {
         // `set_params` and `update_weather` only moved `self.params`.
         if upload && let Some(i) = frame.staging {
             self.drawn_poses = self.pose_tables[i];
-            self.posing = self.drawn_poses[1..].iter().any(|e| *e != [0.0; 4]);
+            self.posing = self.drawn_poses.posing();
         }
         let mut block = self.params.uniforms(self.tex_mask, self.vine_on, self.clock, &self.look);
         if self.posing {
