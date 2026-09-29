@@ -31,7 +31,7 @@
 //!
 //! `--wet` runs the **counterfactual probe**, and it changes nothing in the repository:
 //! the same authored terrain and the same seeder, under the study arena's own water
-//! supply — `rain_m_per_s` 2e-4 (`cubarium-voxel-flora/examples/harness`'s
+//! supply — `rain_m_per_s` 2e-4 (retired `cubarium-voxel-flora/examples/harness`'s
 //! `HARNESS_RAIN_M_PER_S`) and an aquifer charged to a metre above the lowest support
 //! face. It is the experiment condition that tells a dry world from a dry plant model,
 //! and it is here so the proposal at the end of the diagnosis has a measurement under it.
@@ -55,7 +55,7 @@ const TICKS_PER_MIN: u64 = 60 * TICK_HZ as u64;
 const REPORT_MIN: u64 = 30;
 
 /// The study arena's rain tap, for the `--wet` probe: `HARNESS_RAIN_M_PER_S` of
-/// `crates/cubarium-voxel-flora/examples/harness`, restated rather than depended on.
+/// retired `crates/cubarium-voxel-flora/examples/harness`, restated rather than depended on.
 const PROBE_RAIN_M_PER_S: f64 = 0.0002;
 
 /// First seed a `preset=` arm offers the host's lake gate, exactly as
