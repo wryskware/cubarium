@@ -27,6 +27,10 @@
 //!   when a nocturnal lineage wakes; footfall is distinct prey heard (the tremor rule)
 //!   within 2 m over the last clock-day.
 //!
+//! - `apply_hit(fauna: &mut Fauna, flora: &mut Flora, prey: u64, damage: f64, by:
+//!   Founder)` (predation.rs, re-exported): the serial pass's application of one `Hit`
+//!   event, called directly by a case; a hit wakes the prey, ending any rest.
+//!
 //! The snapshot case also names `Animal::{wound, strike}` and `StrikePhase` (see
 //! `predation_tests.rs`) and expects the fauna `SCHEMA` bumped past 19.
 
@@ -37,7 +41,7 @@ use super::predation_fixture::*;
 use crate::controller::{Actions, Controller, Response};
 use crate::senses::{Fine, cone_occupancy, ray_first_hit};
 use crate::{
-    Activity, Command, DT, Fauna, FaunaConfig, Founder, EGG_UPKEEP_PER_S, Rest, SCHEMA,
+    Activity, Command, DT, Fauna, apply_hit, FaunaConfig, Founder, EGG_UPKEEP_PER_S, Rest, SCHEMA,
     StartingStores, State, StrikePhase, egg_hatches,
 };
 use cubarium_voxel::weather::DayClock;
@@ -146,6 +150,15 @@ fn a_full_lanternjaw_rests_at_the_torpor_factor_and_wakes_at_half_its_cap() {
     fauna.step_with(&world, &mut flora, 1);
     let a = animal(&fauna, lj);
     assert_ne!(a.state, State::Asleep, "below half its cap it wakes");
+    assert_eq!(a.rest, None);
+
+    // A satiated lanternjaw that is struck leaves its rest.
+    let struck = introduce(&mut fauna, &world, Founder::Lanternjaw, StartingStores::FULL);
+    fauna.step_with(&world, &mut flora, 1);
+    assert_eq!(animal(&fauna, struck).rest, Some(Rest::Satiated));
+    apply_hit(&mut fauna, &mut flora, struck, 0.1, Founder::Lanternjaw);
+    let a = animal(&fauna, struck);
+    assert_ne!(a.state, State::Asleep, "a hit ends a satiated rest");
     assert_eq!(a.rest, None);
 
     // An awake lanternjaw at 0.7 of its cap does not lie down.
@@ -502,7 +515,6 @@ fn a_snapshot_keeps_wounds_rest_strikes_and_eggs() {
     assert!(get(grazer).wound > 0.0);
     assert_eq!(get(striker).strike.map(|s| s.phase), Some(StrikePhase::Recovery));
     assert_eq!(get(full).rest, Some(Rest::Satiated));
-    assert_eq!(get(grazer).rest, Some(Rest::Sleep));
     assert_eq!(eggs(&loaded).len(), 3);
     assert!(eggs(&loaded).iter().all(|c| c.dormancy.is_some()));
 }

@@ -31,8 +31,9 @@
 //!   u8 (the dead body's Founder::index), heading_rad: f64, organic: f64 }`, written by
 //!   a kill.
 //!
-//! Readings of the note these cases rely on: a hit does not wake a sleeping prey (so a
-//! sleeping grazer is struck three times at awareness 0); the lunge's own motion is paid
+//! Readings of the note these cases rely on: a hit wakes the prey, ending any rest,
+//! sleep or satiated (an adult grazer is hard, and big prey can get away); the lunge's
+//! own motion is paid
 //! inside the strike cost (the case allows at most a tenth more); a prey that leaves the
 //! capsule during the windup is still lunged at, and that miss pays the cost.
 
@@ -153,8 +154,10 @@ fn the_dodge_chance_is_the_tables_product() {
 
 // ------------------------------------------------------------------ case 1
 
-/// Case 1: a sleeping adult grazer in the capsule is hit for 0.37 a time, and the third
-/// hit kills it. Three lanternjaws take one strike each, one after the other.
+/// Case 1: a sleeping adult grazer in the capsule is surely hit (awareness 0) for 0.37,
+/// and the hit wakes it. With its agility then set to 0, so that no dodge is possible,
+/// the wounds of two more hits add and the third kills. Three lanternjaws take one strike
+/// each, one after the other.
 #[test]
 fn a_sleeping_adult_grazer_is_hit_for_037_and_the_third_hit_kills() {
     let (world, mut flora, mut fauna) = arena(Some(0.0), 1);
@@ -176,9 +179,17 @@ fn a_sleeping_adult_grazer_is_hit_for_037_and_the_third_hit_kills() {
         step_until(&mut fauna, &world, &mut flora, 40, |f| hits(f) > before)
             .unwrap_or_else(|| panic!("lanternjaw {k} never hit the sleeping grazer"));
         feed.store(false, Ordering::Relaxed);
+        if k == 0 {
+            let g = animal(&fauna, grazer);
+            assert!((g.wound - 0.37).abs() < 0.005, "the first hit wounds {}", g.wound);
+            assert_ne!(g.state, State::Asleep, "a hit wakes it");
+            assert_eq!(g.rest, None, "a hit ends its rest");
+            assert_eq!(dodged(&fauna), 0, "asleep, it could not dodge");
+            // Awake now: take its dodge away so the next two hits are certain.
+            fauna.config.founders[Founder::Browser.index()].agility = 0.0;
+        }
         if k < 2 {
             let g = animal(&fauna, grazer);
-            assert_eq!(g.state, State::Asleep, "a hit does not wake it");
             let want = (k as f64 + 1.0) * per_hit;
             assert!(
                 (g.wound - want).abs() < 1e-4,
@@ -190,7 +201,7 @@ fn a_sleeping_adult_grazer_is_hit_for_037_and_the_third_hit_kills() {
             assert!(fauna.view().animal(grazer).is_none(), "the third hit kills");
         }
     }
-    assert_eq!(dodged(&fauna), 0, "a sleeping animal never dodges");
+    assert_eq!(dodged(&fauna), 0, "no dodge was possible");
     assert_eq!(
         fauna
             .ledger
@@ -489,8 +500,10 @@ fn in_the_world_dodges_follow_awareness_and_aspect() {
 /// simultaneous hits would each kill dies once.
 #[test]
 fn a_kill_departs_killed_leaves_the_whole_body_and_two_wounds_add() {
-    // Two lanternjaws strike a sleeping adult grazer together: the wounds add.
+    // Two lanternjaws strike a sleeping adult grazer together: the wounds add. The first
+    // hit wakes it, so its dodge is taken away (agility 0) to make the second certain.
     let (world, mut flora, mut fauna) = arena(Some(0.0), 7);
+    fauna.config.founders[Founder::Browser.index()].agility = 0.0;
     let grazer = introduce(&mut fauna, &world, Founder::Browser, StartingStores::FULL);
     place(&mut fauna, grazer, STRIKER_X + IN_CAPSULE_M, LANE_Z, WEST);
     let pair: Vec<u64> = (0..2)
@@ -508,6 +521,7 @@ fn a_kill_departs_killed_leaves_the_whole_body_and_two_wounds_add() {
 
     // Already wounded 0.7: either hit alone kills. It dies once.
     let (world, mut flora, mut fauna) = arena(Some(0.0), 7);
+    fauna.config.founders[Founder::Browser.index()].agility = 0.0;
     let grazer = introduce(&mut fauna, &world, Founder::Browser, StartingStores::FULL);
     place(&mut fauna, grazer, STRIKER_X + IN_CAPSULE_M, LANE_Z, WEST);
     animal_mut(&mut fauna, grazer).wound = 0.7;
