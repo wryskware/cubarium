@@ -3183,7 +3183,7 @@ mod tests {
         let sim = Sim::new(
             World::empty(c.clone()),
             Flora::new(FloraConfig::for_voxel_size(c.voxel_m)),
-            Fauna::new(FaunaConfig::default()),
+            Fauna::new(FaunaConfig::placeholder()),
             SimConfig::with_threads(1),
             None,
         );
@@ -3214,7 +3214,7 @@ mod tests {
         let sim = Sim::new(
             World::empty(c.clone()),
             Flora::new(FloraConfig::for_voxel_size(c.voxel_m)),
-            Fauna::new(FaunaConfig::default()),
+            Fauna::new(FaunaConfig::placeholder()),
             SimConfig::with_threads(1),
             None,
         );
@@ -3255,7 +3255,7 @@ mod tests {
         let mut sim = Sim::new(
             World::new(c.clone()),
             Flora::new(FloraConfig::for_voxel_size(c.voxel_m)),
-            Fauna::new(FaunaConfig::default()),
+            Fauna::new(FaunaConfig::placeholder()),
             SimConfig::with_threads(1),
             None,
         );
@@ -3319,7 +3319,7 @@ mod tests {
         let mut world = World::new(c);
         let (flora, fauna) = (
             Flora::new(FloraConfig::default()),
-            Fauna::new(FaunaConfig::default()),
+            Fauna::new(FaunaConfig::placeholder()),
         );
         let mut writer = SnapshotWriter::new(dir.0.clone());
         let stop = std::sync::Arc::new(AtomicBool::new(false));
@@ -3387,7 +3387,7 @@ mod tests {
         }));
         let (flora, fauna) = (
             Flora::new(FloraConfig::default()),
-            Fauna::new(FaunaConfig::default()),
+            Fauna::new(FaunaConfig::placeholder()),
         );
         assert!(
             !writer.save_in_background(&world, &flora, &fauna),
@@ -3707,7 +3707,7 @@ mod tests {
         };
         let mut world = World::empty(c.clone());
         let mut flora = Flora::new(FloraConfig::default());
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::placeholder());
         let mut ctl = Control::new(1.0, Projection::new(30.0, 4, 0, &c).unwrap());
 
         ctl.handle(&mut world, &mut flora, &mut fauna, "p");
@@ -3785,7 +3785,7 @@ mod tests {
             depth: 4,
             ..cubarium_voxel::Config::default()
         });
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::placeholder());
         crate::voxel::habitat::install_heuristics(&mut fauna);
         let placed = (0..32i64).any(|x| {
             fauna.apply(
@@ -3853,7 +3853,7 @@ mod tests {
             depth: 4,
             ..cubarium_voxel::Config::default()
         });
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::placeholder());
         crate::voxel::habitat::install_heuristics(&mut fauna);
         let placed = (0..32i64).any(|x| {
             fauna.apply(
@@ -3904,7 +3904,7 @@ mod tests {
             depth: 4,
             ..cubarium_voxel::Config::default()
         });
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::placeholder());
         crate::voxel::habitat::install_heuristics(&mut fauna);
         let placed = (0..32i64).any(|x| {
             fauna.apply(
@@ -3967,7 +3967,7 @@ mod tests {
             policy_args(&args(&["x", "policy=browser=a", "policy=frondgrazer=b"])).is_err(),
             "one per lineage"
         );
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::placeholder());
         let err = install_founders_with(
             &mut fauna,
             &[(Founder::Browser, PathBuf::from("/nonexistent/centre.json"))],
@@ -4080,7 +4080,7 @@ mod tests {
 
         let mut world = World::empty(c.clone());
         let mut flora = Flora::new(FloraConfig::default());
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::placeholder());
         let mut ctl = Control::new(1.0, proj);
         assert_eq!(
             ecology_state(&flora, &fauna),
@@ -4123,7 +4123,7 @@ mod tests {
 
         // The same bytes into a run with no ecology in it: accepted, and the edit is gone.
         let mut fresh_flora = Flora::new(FloraConfig::default());
-        let mut fresh_fauna = Fauna::new(FaunaConfig::default());
+        let mut fresh_fauna = Fauna::new(FaunaConfig::placeholder());
         ctl.handle(
             &mut world,
             &mut fresh_flora,
@@ -4143,7 +4143,7 @@ mod tests {
             &mut fresh_fauna,
             "m 3 2 1 soil",
         );
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::placeholder());
         assert!(fauna.apply(
             &world,
             FaunaCommand::Introduce {
@@ -4180,7 +4180,7 @@ mod tests {
         };
         let mut world = World::empty(c.clone());
         let mut flora = Flora::new(FloraConfig::default());
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::placeholder());
         let mut ctl = Control::new(1.0, Projection::new(30.0, 4, 0, &c).unwrap());
 
         ctl.handle(&mut world, &mut flora, &mut fauna, "p");
@@ -4247,7 +4247,7 @@ mod tests {
             }
         }
         let mut flora = Flora::new(FloraConfig::default());
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::placeholder());
         let mut ctl = Control::new(1.0, Projection::new(30.0, 4, 0, &c).unwrap());
         let site = Site { x: 3, y: 2, z: 1 };
 
@@ -4342,7 +4342,7 @@ mod tests {
 
         let before = world.view().stored_m3();
         let mut flora = Flora::new(FloraConfig::default());
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::placeholder());
         let mut ctl = Control::new(1.0, proj);
         ctl.handle(
             &mut world,
@@ -4506,7 +4506,7 @@ mod tests {
 
         // 3. Saved with its plants and animals, a resume restores them instead of seeding.
         let flora = Flora::new(FloraConfig::for_voxel_size(0.125));
-        let fauna = Fauna::new(FaunaConfig::default());
+        let fauna = Fauna::new(FaunaConfig::placeholder());
         save_voxel_snapshot(&dir, &saved_world, Some((&flora, &fauna)));
         let (_, _, _, layers) = load_or_create_world(&base_args, &cfg).unwrap();
         match layers {

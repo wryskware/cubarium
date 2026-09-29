@@ -1185,7 +1185,7 @@ mod tests {
     #[test]
     fn the_interim_glyph_is_a_two_by_one_by_two_block_over_its_support_face() {
         let w = world();
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::placeholder());
         assert!(fauna.apply(
             &w,
             Command::Introduce {
@@ -1237,7 +1237,7 @@ mod tests {
     #[test]
     fn the_glyph_wraps_in_x_and_clips_at_the_back_wall() {
         let w = world();
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::placeholder());
         // The last column, so the block's second half is column 0.
         assert!(fauna.apply(
             &w,
@@ -1277,7 +1277,7 @@ mod tests {
                 });
             }
         }
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::placeholder());
         assert!(fauna.apply(
             &w,
             Command::IntroduceFounder {
@@ -1351,7 +1351,7 @@ mod tests {
                 });
             }
         }
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::placeholder());
         assert!(fauna.apply(
             &w,
             Command::IntroduceFounder {
@@ -1424,7 +1424,7 @@ mod tests {
                 material: Material::Soil,
             });
         }
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::placeholder());
         assert!(fauna.apply(
             &soil,
             Command::IntroduceFounder {
@@ -1477,7 +1477,7 @@ mod tests {
                 });
             }
         }
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::placeholder());
         assert!(fauna.apply(
             &w,
             Command::IntroduceFounder {
@@ -1555,7 +1555,7 @@ mod tests {
     #[test]
     fn an_idle_littershredder_breathes_and_moves_no_head() {
         let (w, _) = standing_browser();
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::placeholder());
         assert!(fauna.apply(
             &w,
             Command::IntroduceFounder {

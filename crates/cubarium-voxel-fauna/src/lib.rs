@@ -1368,10 +1368,20 @@ pub struct FaunaConfig {
     pub founders: [FounderPhysiology; Founder::COUNT],
 }
 
+/// **The shipped org-unit mass scale** (Wrysk, 2026-09-29; audit
+/// `design/7_Research/ecology-parameter-audit-2026-09-28.md` §1.4): both lineages are
+/// built this many times heavier against the plants than the placeholder tables
+/// ([`SpeciesConfig::scale_mass`]: the nine absolute quantities, nothing per unit), so one
+/// plant no longer feeds a parked animal for ever. Plants are to be re-tuned for day and
+/// night later; this is not a measured optimum.
+pub const SHIPPED_MASS_SCALE: f64 = 30.0;
+
 impl Default for FaunaConfig {
     fn default() -> FaunaConfig {
+        let mut frondgrazer = SpeciesConfig::frondgrazer();
+        frondgrazer.scale_mass(SHIPPED_MASS_SCALE);
         FaunaConfig {
-            frondgrazer: SpeciesConfig::frondgrazer(),
+            frondgrazer,
             founders: [
                 FounderPhysiology::frozen(Founder::Blind),
                 FounderPhysiology::frozen(Founder::Browser),
@@ -1381,6 +1391,19 @@ impl Default for FaunaConfig {
 }
 
 impl FaunaConfig {
+    /// The placeholder tables before [`SHIPPED_MASS_SCALE`]: every lineage at mass 1. For
+    /// fixtures whose numbers were derived from the placeholders; the shipped world is
+    /// [`FaunaConfig::default`].
+    pub fn placeholder() -> FaunaConfig {
+        FaunaConfig {
+            frondgrazer: SpeciesConfig::frondgrazer(),
+            founders: [
+                FounderPhysiology::placeholder(Founder::Blind),
+                FounderPhysiology::placeholder(Founder::Browser),
+            ],
+        }
+    }
+
     pub fn species(&self, s: Species) -> &SpeciesConfig {
         match s {
             Species::Frondgrazer => &self.frondgrazer,

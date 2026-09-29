@@ -153,7 +153,7 @@ fn adult_browser_feeding(fauna: &mut Fauna, world: &World, x: i64, z: u32) -> u6
 /// a body at `body_min`, a tenth of `body_max` — is 0.46 of the adult's length.
 #[test]
 fn adult_and_newborn_dimensions_are_metres_on_the_physiology() {
-    let browser = FounderPhysiology::frozen(Founder::Browser);
+    let browser = FounderPhysiology::placeholder(Founder::Browser);
     let adult = browser.adult_body();
     assert_eq!(
         (adult.length_m, adult.width_m, adult.height_m),
@@ -161,7 +161,7 @@ fn adult_and_newborn_dimensions_are_metres_on_the_physiology() {
         "the browser adult is the ladder's 6 × 3 × 3 animal (package L)"
     );
 
-    let shredder = FounderPhysiology::frozen(Founder::Blind);
+    let shredder = FounderPhysiology::placeholder(Founder::Blind);
     let adult_s = shredder.adult_body();
     assert_eq!(
         (adult_s.length_m, adult_s.width_m, adult_s.height_m),
@@ -201,7 +201,7 @@ fn adult_and_newborn_dimensions_are_metres_on_the_physiology() {
 /// origin could not do (the contract's §2, "twice as high on a coarser grid").
 #[test]
 fn the_eye_is_the_same_height_in_metres_on_both_grids() {
-    let browser = FounderPhysiology::frozen(Founder::Browser);
+    let browser = FounderPhysiology::placeholder(Founder::Browser);
     let adult = browser.adult_body();
     let want = 0.8 * 0.375;
 
@@ -235,7 +235,7 @@ fn the_eye_is_the_same_height_in_metres_on_both_grids() {
 /// The bite is the judge, not a helper: the stock moves only where the band reaches.
 #[test]
 fn a_crown_at_0_20_m_is_reachable_on_both_grids_and_one_at_0_30_m_is_not() {
-    let adult = FounderPhysiology::frozen(Founder::Browser).adult_body();
+    let adult = FounderPhysiology::placeholder(Founder::Browser).adult_body();
     assert!(
         (adult.mouth_ceiling_m - 0.49875).abs() < 1e-12,
         "the adult ceiling is 1.33 × 0.375"
@@ -247,7 +247,7 @@ fn a_crown_at_0_20_m_is_reachable_on_both_grids_and_one_at_0_30_m_is_not() {
             let mut flora = Flora::new(FloraConfig::for_voxel_size(v).one_layer_species());
             let before = crown_containing(&mut flora, &world, 4, 4, support, target);
 
-            let mut fauna = Fauna::new(FaunaConfig::default());
+            let mut fauna = Fauna::new(FaunaConfig::placeholder());
             let id = adult_browser_feeding(&mut fauna, &world, 4, 4);
             let seen = {
                 let av = fauna.view();
@@ -298,7 +298,7 @@ fn a_crown_at_0_20_m_is_reachable_on_both_grids_and_one_at_0_30_m_is_not() {
 /// further: across two 0.25 m columns ahead of its own, and not a third.
 #[test]
 fn the_horizontal_reach_is_a_quarter_of_the_body_length() {
-    let adult = FounderPhysiology::frozen(Founder::Browser).adult_body();
+    let adult = FounderPhysiology::placeholder(Founder::Browser).adult_body();
     assert!((adult.mouth_reach_m - 0.1875).abs() < 1e-12);
 
     let v = 0.25;
@@ -334,14 +334,14 @@ fn the_horizontal_reach_is_a_quarter_of_the_body_length() {
 /// reach.
 #[test]
 fn a_body_cannot_enter_a_void_shorter_than_its_height() {
-    let adult = FounderPhysiology::frozen(Founder::Browser).adult_body();
+    let adult = FounderPhysiology::placeholder(Founder::Browser).adult_body();
     assert_eq!(
         adult.headroom_voxels(0.125),
         3,
         "0.375 m of body at 0.125 m"
     );
     assert_eq!(adult.headroom_voxels(0.25), 2, "and two cells at 0.25 m");
-    let newborn = FounderPhysiology::frozen(Founder::Browser).body_at(0.005);
+    let newborn = FounderPhysiology::placeholder(Founder::Browser).body_at(0.005);
     assert_eq!(
         newborn.headroom_voxels(0.125),
         2,
@@ -362,7 +362,7 @@ fn a_body_cannot_enter_a_void_shorter_than_its_height() {
                 });
             }
         }
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::placeholder());
         assert!(fauna.apply(
             &world,
             FaunaCommand::IntroduceFounder {
@@ -416,7 +416,7 @@ fn the_ledgers_conserve_across_a_bite_under_the_band() {
     let mut flora = Flora::new(FloraConfig::default().one_layer_species());
     // 0.40 m: a two-cell bloomcrown, the lowest the ladder's crown can be.
     crown_containing(&mut flora, &world, 4, 4, 2, 0.40);
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     adult_browser_feeding(&mut fauna, &world, 4, 4);
 
     for _ in 0..40 {
@@ -454,7 +454,7 @@ fn the_input_widths_are_unchanged_and_the_contract_carries_the_body() {
     let browser = Founder::Browser.manifest();
     assert_eq!(browser.inputs(), 37, "the browser's observation width");
     assert_eq!(blind.inputs(), 23, "the shredder's observation width");
-    let adult = FounderPhysiology::frozen(Founder::Browser);
+    let adult = FounderPhysiology::placeholder(Founder::Browser);
     assert_eq!(
         (
             browser.body_length_m,

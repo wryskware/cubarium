@@ -1420,7 +1420,8 @@ mod tests {
     fn the_stage_b_initial_patch_is_half_the_successor() {
         for founder in Founder::ALL {
             let stage = Arena::build_reacquisition(founder, 6);
-            let config = cubarium_voxel_fauna::FaunaConfig::default();
+            // The patches are sized in the placeholder body's bites (mass 1).
+            let config = cubarium_voxel_fauna::FaunaConfig::placeholder();
             let bite_per_s = config.founder(founder).core.bite_per_s;
             let initial = stage.arena.patch_stock(stage.initial_patch);
             let successor = stage.arena.patch_stock(stage.successor_patch);

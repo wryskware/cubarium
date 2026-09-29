@@ -102,7 +102,7 @@ fn turf(flora: &mut Flora, world: &World, x: i64) {
 
 /// A config whose founders run the reproduction tables this case needs.
 fn config(edit: impl FnOnce(&mut FaunaConfig)) -> FaunaConfig {
-    let mut c = FaunaConfig::default();
+    let mut c = FaunaConfig::placeholder();
     edit(&mut c);
     c
 }

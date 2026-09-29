@@ -340,6 +340,15 @@ impl FounderPhysiology {
     /// make that so. The bite rate keeps the frondgrazer's placeholder ratio of 0.04
     /// body per second at the founder's smaller body.
     pub fn frozen(founder: Founder) -> FounderPhysiology {
+        let mut p = FounderPhysiology::placeholder(founder);
+        p.scale_mass(crate::SHIPPED_MASS_SCALE);
+        p
+    }
+
+    /// The placeholder table before the shipped mass scale: every absolute quantity at
+    /// the value its comment derives, `mass_scale` 1. [`FounderPhysiology::frozen`] is
+    /// this x [`crate::SHIPPED_MASS_SCALE`].
+    pub fn placeholder(founder: Founder) -> FounderPhysiology {
         match founder {
             Founder::Blind => FounderPhysiology {
                 core: SpeciesConfig {
@@ -1702,7 +1711,8 @@ pub(crate) fn taste_reading(
         manifest,
         body,
         founder,
-        manifest.mass_scale,
+        // The unit tests' bodies are the placeholder tables' (mass 1).
+        1.0,
     )
 }
 
@@ -2032,7 +2042,7 @@ mod tests {
 
     /// One lineage's adult geometry, the body every fixture below places.
     pub(super) fn adult(founder: Founder) -> Body {
-        crate::FounderPhysiology::frozen(founder).adult_body()
+        crate::FounderPhysiology::placeholder(founder).adult_body()
     }
 
     /// Full cruise over one controller period (five ticks of held action) is exactly
@@ -2303,7 +2313,7 @@ mod tests {
 
         // And the walk agrees: from the open face at x = 3 the three-cell slot is
         // steppable and the two-cell slot is not.
-        let sc = *crate::FaunaConfig::default().founder(Founder::Browser);
+        let sc = *crate::FaunaConfig::placeholder().founder(Founder::Browser);
         let from = Site { x: 3, y: 2, z: 2 };
         assert_eq!(
             crate::steppable(&view, from, 4, 2, &sc.core, need).len(),
@@ -2625,7 +2635,7 @@ mod tests {
     fn the_first_sample_reports_no_prior_interval_from_a_depleted_start() {
         for founder in [Founder::Blind, Founder::Browser] {
             let world = flat_world();
-            let mut fauna = Fauna::new(crate::FaunaConfig::default());
+            let mut fauna = Fauna::new(crate::FaunaConfig::placeholder());
             assert!(fauna.apply(
                 &world,
                 crate::Command::IntroduceFounder {
@@ -2686,7 +2696,7 @@ mod tests {
             z: 2,
             material: Material::Soil,
         });
-        let mut fauna = Fauna::new(crate::FaunaConfig::default());
+        let mut fauna = Fauna::new(crate::FaunaConfig::placeholder());
         assert!(fauna.apply(
             &world,
             crate::Command::IntroduceFounder {
@@ -2760,7 +2770,7 @@ mod tests {
 
         // The browser's observation is 37 wide and its Cone reads the real world: valid,
         // and the wall two columns east shades the front sector at the eye's layer.
-        let mut browser = Fauna::new(crate::FaunaConfig::default());
+        let mut browser = Fauna::new(crate::FaunaConfig::placeholder());
         assert!(browser.apply(
             &world,
             crate::Command::IntroduceFounder {
@@ -2796,8 +2806,8 @@ mod tests {
     /// 5% and 10%.
     #[test]
     fn the_organ_allocation_counts_the_sensor_share_once() {
-        let blind = FounderPhysiology::frozen(Founder::Blind);
-        let browser = FounderPhysiology::frozen(Founder::Browser);
+        let blind = FounderPhysiology::placeholder(Founder::Blind);
+        let browser = FounderPhysiology::placeholder(Founder::Browser);
         assert_eq!(blind.organ_structure_fraction, 0.05);
         assert_eq!(browser.organ_structure_fraction, 0.10);
         let core = 0.011875;
@@ -3036,8 +3046,8 @@ mod step_rule_tests {
     /// the coarse one.
     #[test]
     fn the_step_converts_to_whole_voxels_rounding_down() {
-        let browser = crate::FounderPhysiology::frozen(Founder::Browser);
-        let shredder = crate::FounderPhysiology::frozen(Founder::Blind);
+        let browser = crate::FounderPhysiology::placeholder(Founder::Browser);
+        let shredder = crate::FounderPhysiology::placeholder(Founder::Blind);
         assert_eq!((browser.step_up_m, browser.step_down_m), (0.375, 0.375));
         assert_eq!((shredder.step_up_m, shredder.step_down_m), (0.25, 0.25));
         let l = |p: &crate::FounderPhysiology, v| {
@@ -3081,7 +3091,7 @@ mod step_rule_tests {
     /// `tests/mobility.rs`).
     #[test]
     fn a_shredder_steps_a_quarter_metre_and_meets_half_a_metre_as_a_wall() {
-        let phys = crate::FounderPhysiology::frozen(Founder::Blind);
+        let phys = crate::FounderPhysiology::placeholder(Founder::Blind);
         for (v, rise, steps) in [(0.125, 2, true), (0.25, 1, true), (0.25, 2, false)] {
             let world = terrace(v, 12, 2, 5..8, rise);
             let manifest = Founder::Blind.manifest();
