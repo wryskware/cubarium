@@ -2084,4 +2084,68 @@ mod tests {
             );
         }
     }
+
+    /// The audit round's step 5 (`design/handoffs/voxel-audit-round-2026-09-28.md` §5):
+    /// the arena is the live world — the shipped plant layer, graze refuge and defence
+    /// on, and the day clock running from an hour drawn per layout, so that some layouts
+    /// are at night.
+    #[test]
+    fn the_arena_is_the_live_world_with_a_night() {
+        let arena = Arena::build(Founder::Browser, 1);
+        let live = FloraConfig::for_voxel_size(arena.grid.voxel_m());
+        assert_eq!(arena.flora.config(), &live, "the shipped plant layer");
+        for s in cubarium_voxel_flora::Species::ALL {
+            assert!(live.species(s).graze_refuge > 0.0 || live.species(s).trophic != cubarium_voxel_flora::Trophic::Photo);
+            assert!(live.species(s).defence_per_bite > 0.0);
+        }
+        assert_eq!(arena.fauna.config(), &FaunaConfig::default());
+        assert_ne!(
+            arena.world.config().day.mode,
+            cubarium_voxel::weather::DayMode::Off,
+            "the day clock runs"
+        );
+        let (mut night, mut day) = (0, 0);
+        for seed in 0..24 {
+            let a = Arena::build(Founder::Browser, seed);
+            let (rise, set) = a.world.config().day.cycle_rise_set();
+            let p = a.world.day_phase();
+            if p < rise || p > set {
+                night += 1;
+            } else {
+                day += 1;
+            }
+        }
+        assert!(night >= 4 && day >= 8, "{night} layouts start at night, {day} by day");
+    }
+
+    /// A caller's layers (the ecology vector's configs) are what an arena is built and
+    /// refounded on, for both kinds of layout.
+    #[test]
+    fn an_arena_takes_the_callers_layers_and_refounds_on_them() {
+        let grid = ArenaGrid::Standard;
+        let mut fauna = FaunaConfig::default();
+        fauna.founders[Founder::Browser.index()].core.maintenance_per_s *= 2.0;
+        let mut flora = FloraConfig::for_voxel_size(grid.voxel_m());
+        flora.decomposition *= 3.0;
+        let layers = ArenaLayers {
+            flora: flora.clone(),
+            fauna,
+        };
+        let mut a = Arena::build_on_with(Founder::Browser, 1, grid, layers.clone());
+        assert_eq!(a.flora.config(), &flora);
+        assert_eq!(a.fauna.config(), &fauna);
+        a.refound(cubarium_voxel_fauna::StartingStores::HUNGRY);
+        assert_eq!(a.fauna.config(), &fauna, "refound keeps the layers");
+        let b = Arena::build_reacquisition_on_with(
+            Founder::Browser,
+            1,
+            SuccessorBand::Landed,
+            grid,
+            layers,
+        )
+        .into_arena();
+        assert_eq!(b.flora.config(), &flora);
+        assert_eq!(b.fauna.config(), &fauna);
+        assert_eq!(ArenaLayers::live(grid).fauna, FaunaConfig::default());
+    }
 }
