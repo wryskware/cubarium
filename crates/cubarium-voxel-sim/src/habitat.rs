@@ -658,8 +658,8 @@ pub fn seed_pre_rolled(
     seeded.vines = flora.seed_vine_founders(world);
 
     // The two **sensed founder lineages**, which is what walks this habitat now. Both
-    // arrive hungry (`StartingStores::HUNGRY`, the arenas' P2-C start): a body placed
-    // full has nowhere to put what it eats, so eating would be worth nothing to it.
+    // arrive grown with half a reserve ([`FOUNDER_ARRIVAL`]): room to eat, and a body's
+    // worth of buffer to find food with at the shipped mass.
     // The seeder installs each lineage's own observation-only heuristic through the
     // fauna layer's ordinary controller boundary, and registers it as that lineage's
     // **birth factory** too, so a founder born here is handed a fresh controller of its
@@ -1020,8 +1020,18 @@ pub fn reinstall_heuristics(fauna: &mut Fauna) {
     }
 }
 
-/// One founder body on a support face, hungry, with its own heuristic installed. Returns
-/// whether the layer accepted it.
+/// How a seeded founder arrives: **grown, with half a reserve** (the mass round,
+/// 2026-09-29). At the shipped x30 mass the old half-grown, empty arrival (the arenas'
+/// `StartingStores::HUNGRY`) starved founders on the terrarium before they settled; a
+/// full reserve would leave no appetite (hunger 0, and asleep at its lineage's night).
+/// Half a reserve is hunger 0.5: awake, eating, with the whole body as buffer.
+pub const FOUNDER_ARRIVAL: StartingStores = StartingStores {
+    body: 1.0,
+    reserve: 0.5,
+};
+
+/// One founder body on a support face, arriving as [`FOUNDER_ARRIVAL`], with its own
+/// heuristic installed. Returns whether the layer accepted it.
 fn introduce_founder(
     world: &World,
     fauna: &mut Fauna,
@@ -1034,7 +1044,7 @@ fn introduce_founder(
         FaunaCommand::IntroduceFounderOnFace {
             site,
             founder,
-            stores: StartingStores::HUNGRY,
+            stores: FOUNDER_ARRIVAL,
             heading_rad,
         },
     ) {
@@ -2339,6 +2349,7 @@ mod tests {
         let world = plain(24, 6);
         for founder in Founder::ALL {
             let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::default());
+            install_heuristics(&mut fauna);
             assert!(introduce_founder(&world, &mut fauna, founder, Site { x: 6, y: 2, z: 3 }, 0.0));
             let a = fauna.view().animals[0];
             let sc = fauna.config().founder(founder).core;
