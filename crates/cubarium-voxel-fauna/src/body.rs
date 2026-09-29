@@ -1249,20 +1249,22 @@ pub(crate) enum Meal {
 /// brief allows as long as it is stated. Ties go in [`crate::Food::ALL`] order — litter,
 /// then cap tissue, then carrion — so the answer is a pure function of the state.
 ///
-/// The stock it reports is the same quantity the taste channel encodes and the same one
-/// the comparison is made on: a pool's whole stock at the site, or the stand's stock in
-/// the layers the band reaches (not its whole cap).
+/// It reports two amounts: the **stock** a bite diminishes on (a pool's whole stock at
+/// the site, or the stand's stock in the layers the band reaches, not its whole cap), and
+/// the **offer** the comparison is made on and the taste channel encodes — the stock, or
+/// for a stand `(1 − defence) ×` its stock (audit round §4: the defence is readable). A
+/// pool has no defence, so its offer is its stock.
 pub(crate) fn mouth_detritus(
     fv: &FloraView<'_>,
     view: &VoxelView<'_>,
     cols: &[(i64, u32)],
     standing_y: u32,
     body: &Body,
-) -> Option<(Meal, f64)> {
-    let mut best: Option<(Meal, f64)> = None;
-    let mut consider = |meal: Meal, stock: f64| {
-        if stock > 0.0 && best.is_none_or(|(_, b)| stock > b) {
-            best = Some((meal, stock));
+) -> Option<(Meal, f64, f64)> {
+    let mut best: Option<(Meal, f64, f64)> = None;
+    let mut consider = |meal: Meal, stock: f64, offer: f64| {
+        if stock > 0.0 && best.is_none_or(|(_, _, b)| offer > b) {
+            best = Some((meal, stock, offer));
         }
     };
     if let Some((site, stock)) = mouth_pool_site(fv, cols, standing_y, crate::Food::Litter) {
@@ -1272,12 +1274,13 @@ pub(crate) fn mouth_detritus(
                 food: crate::Food::Litter,
             },
             stock,
+            stock,
         );
     }
-    if let Some((root, stock)) =
-        mouth_foliage_stand(fv, view, cols, standing_y, body, crate::Diet::Fungal)
+    if let Some((root, stock, offer)) =
+        mouth_foliage_offer(fv, view, cols, standing_y, body, crate::Diet::Fungal)
     {
-        consider(Meal::Stand { root }, stock);
+        consider(Meal::Stand { root }, stock, offer);
     }
     if let Some((site, stock)) = mouth_pool_site(fv, cols, standing_y, crate::Food::Carrion) {
         consider(
@@ -1285,6 +1288,7 @@ pub(crate) fn mouth_detritus(
                 site,
                 food: crate::Food::Carrion,
             },
+            stock,
             stock,
         );
     }
@@ -1359,8 +1363,25 @@ pub(crate) fn mouth_foliage_stand(
     body: &Body,
     diet: crate::Diet,
 ) -> Option<(Site, f64)> {
+    mouth_foliage_offer(fv, view, cols, standing_y, body, diet).map(|(s, stock, _)| (s, stock))
+}
+
+/// [`mouth_foliage_stand`]'s rule with the **offer** it chose by: among the stands the
+/// mouth touches, the one with the most `(1 − defence) × reachable stock` — what a bite
+/// would actually get, since the plant layer takes `(1 − defence)` of the ask (audit
+/// round, `design/handoffs/voxel-audit-round-2026-09-28.md` §4). Returns the stand, its
+/// reachable stock (the `E` a bite diminishes on: the defence shrinks the bite once, at
+/// the withdrawal, and not again here) and its offer (what taste encodes).
+pub(crate) fn mouth_foliage_offer(
+    fv: &FloraView<'_>,
+    view: &VoxelView<'_>,
+    cols: &[(i64, u32)],
+    standing_y: u32,
+    body: &Body,
+    diet: crate::Diet,
+) -> Option<(Site, f64, f64)> {
     let layers = mouth_crown_layers(standing_y, body, view.config.voxel_m);
-    let mut best: Option<(Site, f64)> = None;
+    let mut best: Option<(Site, f64, f64)> = None;
     let mut consider = |stand: &cubarium_voxel_flora::Stand| {
         if !(stand.foliage > 0.0 && diet.accepts(fv.config.species(stand.species).trophic)) {
             return;
@@ -1369,15 +1390,16 @@ pub(crate) fn mouth_foliage_stand(
         if !(reachable > 0.0) {
             return;
         }
+        let offer = (1.0 - stand.defence.clamp(0.0, 1.0)) * reachable;
         let better = match best {
             None => true,
-            Some((site, stock)) => reachable > stock || (reachable == stock && stand.site < site),
+            Some((site, _, o)) => offer > o || (offer == o && stand.site < site),
         };
         if better {
-            best = Some((stand.site, reachable));
+            best = Some((stand.site, reachable, offer));
         }
     };
-    // The most stock wins, ties to the smallest site: a total order, so visiting only
+    // The best offer wins, ties to the smallest site: a total order, so visiting only
     // the stands near the mouth picks what the scan of every stand picked.
     match stands_near_mouth(fv, view, cols) {
         Some(near) => near.iter().for_each(|&i| consider(&fv.stands[i as usize])),
@@ -1683,8 +1705,8 @@ pub(crate) fn taste_reading(
     let cols = mouth_columns(view, pose, body);
     match founder {
         Founder::Blind => match mouth_detritus(fv, view, &cols, standing_y, body) {
-            Some((_, stock)) => TasteReading {
-                cue: response(stock),
+            Some((_, _, offer)) => TasteReading {
+                cue: response(offer),
                 resistance: resistance_of(manifest, "litter"),
                 valid: true,
             },
@@ -1695,9 +1717,11 @@ pub(crate) fn taste_reading(
             },
         },
         Founder::Browser => {
-            match mouth_foliage_stand(fv, view, &cols, standing_y, body, crate::Diet::Vascular) {
-                Some((_, foliage)) => TasteReading {
-                    cue: response(foliage),
+            // What the stand would give, `(1 − defence) ×` its stock: a defended plant
+            // tastes thin (audit round §4; the digest names only the `foliage` cue).
+            match mouth_foliage_offer(fv, view, &cols, standing_y, body, crate::Diet::Vascular) {
+                Some((_, _, offer)) => TasteReading {
+                    cue: response(offer),
                     resistance: resistance_of(manifest, "foliage"),
                     valid: true,
                 },

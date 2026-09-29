@@ -1270,7 +1270,8 @@ fn founder_feed(
     // Which food is at this mouth, and how much of it — the `E` the bite diminishes
     // with — before anything is withdrawn.
     let meal = match founder {
-        Founder::Blind => body::mouth_detritus(&flora.view(), view, &cols, site_y, geometry),
+        Founder::Blind => body::mouth_detritus(&flora.view(), view, &cols, site_y, geometry)
+            .map(|(meal, stock, _)| (meal, stock)),
         Founder::Browser => body::mouth_foliage_stand(
             &flora.view(),
             view,
