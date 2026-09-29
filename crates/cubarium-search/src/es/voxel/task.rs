@@ -253,9 +253,15 @@ pub const MAX_UPDATES: u32 = 512;
 /// saturation point measured before the P5 landscapes; the cache study (2026-09-24,
 /// `design/handoffs/voxel-cache-and-pinning-2026-09-24.md`) measured browser landscapes
 /// at 258-265k ticks/s on 16 workers spread over both chiplets and 297-310k on 32, so
-/// the cap is now the desktop's thread count and the ten-percent reserve and the
-/// affinity mask (`taskset`) are what bound a run.
-pub const MAX_EPISODE_WORKERS: usize = 32;
+/// the cap was the desktop's thread count and the ten-percent reserve and the
+/// affinity mask (`taskset`) are what bound a run. It is now 64 for the Graviton hosts
+/// (`docs/graviton-training.md`): 32 Graviton2 cores scaled at 92-96 %, and a 64-core host
+/// would otherwise leave half its cores idle.
+pub const MAX_EPISODE_WORKERS: usize = 64;
+
+/// Env var naming how many CPUs to leave free instead of the ten-percent reserve. A
+/// dedicated training host sets `0`; the desktop and the Tachyon leave it unset.
+pub const WORKER_RESERVE_ENV: &str = "CUBARIUM_WORKER_RESERVE";
 
 /// The available voxel episode workers: obey the machine-wide CPU reserve and the
 /// workload-specific saturation cap. Every episode itself stays single-threaded.
@@ -271,7 +277,23 @@ pub fn episode_worker_limit() -> usize {
         .ok()
         .and_then(|s| super::pin::parse_cpu_list(&s).ok())
         .map_or(mask, |cpus| cpus.len());
-    worker_limit_within(machine, mask).min(MAX_EPISODE_WORKERS)
+    let reserve = std::env::var(WORKER_RESERVE_ENV)
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok());
+    worker_limit_with_reserve(machine, mask, reserve).min(MAX_EPISODE_WORKERS)
+}
+
+/// [`worker_limit_within`], or, given an explicit `reserve`, the machine's CPUs less that
+/// many (at least one), capped at the process's own CPUs.
+fn worker_limit_with_reserve(machine: usize, mask: usize, reserve: Option<usize>) -> usize {
+    match reserve {
+        Some(reserve) => machine
+            .max(mask)
+            .saturating_sub(reserve)
+            .max(1)
+            .min(mask.max(1)),
+        None => worker_limit_within(machine, mask),
+    }
 }
 
 /// [`worker_limit_for`] the machine, capped at the process's own CPUs.
@@ -1076,7 +1098,18 @@ mod tests {
         assert_eq!(worker_limit_for(2), 1);
         assert_eq!(worker_limit_for(10), 9);
         assert_eq!(worker_limit_for(32).min(MAX_EPISODE_WORKERS), 28);
-        assert_eq!(worker_limit_for(128).min(MAX_EPISODE_WORKERS), 32);
+        assert_eq!(worker_limit_for(64).min(MAX_EPISODE_WORKERS), 57);
+        assert_eq!(worker_limit_for(128).min(MAX_EPISODE_WORKERS), 64);
+    }
+
+    /// A dedicated host leaves nothing free; the mask still caps and one worker remains.
+    #[test]
+    fn an_explicit_reserve_replaces_the_ten_percent() {
+        assert_eq!(worker_limit_with_reserve(64, 64, Some(0)), 64);
+        assert_eq!(worker_limit_with_reserve(64, 64, Some(2)), 62);
+        assert_eq!(worker_limit_with_reserve(64, 16, Some(0)), 16);
+        assert_eq!(worker_limit_with_reserve(4, 4, Some(9)), 1);
+        assert_eq!(worker_limit_with_reserve(64, 64, None), 57);
     }
 
     /// The reserve is the machine's, the cap the process's own CPUs (cache study B).

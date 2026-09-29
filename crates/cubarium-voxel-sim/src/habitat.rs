@@ -139,7 +139,10 @@ pub struct PreRollReport {
     pub shower_ticks: u32,
     /// The drain after it: the same convergence as the startup settle.
     pub drain: Settle,
-    /// Every tick the pre-roll stepped: settle, shower, drain and the stream watch.
+    /// Ticks stepped after the drain until the lake stopped moving ([`LAKE_REST_WINDOW`]).
+    pub lake_rest_ticks: u32,
+    /// Every tick the pre-roll stepped: settle, shower, drain, the lake's rest and the
+    /// stream watch.
     pub ticks: u32,
 }
 
@@ -339,6 +342,43 @@ const SHOWER_CAP: u32 = 6000;
 /// one-minute cap stopped both larger rings still moving.
 const DRAIN_CAP: u32 = 2400;
 
+/// The lake's rest after the drain (WX1d): one simulated minute, the window its volume
+/// is compared over. `World::settle` asks for under one per cent per five seconds, and a
+/// lake fed by slow seepage passes that while it is still rising by a third a minute:
+/// the desk terrarium at seed 2 ended its drain at 17.8 m³ and stood at 42.8 m³ eight
+/// minutes later, its perched pools draining through the aquifer and up its floor.
+const LAKE_REST_WINDOW: u32 = 1200;
+
+/// The lake is at rest when its volume moved by under this share of itself across a
+/// [`LAKE_REST_WINDOW`].
+const LAKE_REST_TOLERANCE: f64 = 0.01;
+
+/// Hard cap on the lake's rest, in ticks: ten simulated minutes. Seed 2 of the desk
+/// terrarium needs seven; before WX1b every terrarium spent five of them in its capped
+/// opening shower, which is what hid this.
+const LAKE_REST_CAP: u32 = 12_000;
+
+/// Step until the lake's volume moves by under [`LAKE_REST_TOLERANCE`] across a
+/// [`LAKE_REST_WINDOW`], or until [`LAKE_REST_CAP`]; the ticks stepped. A world with no
+/// lake is at rest after one window.
+fn rest_the_lake(world: &mut World, mut watch: impl FnMut(&World)) -> u32 {
+    let mut before = cubarium_voxel::hydrate::lake(world).volume_m3;
+    let mut ticks = 0;
+    while ticks < LAKE_REST_CAP {
+        for _ in 0..LAKE_REST_WINDOW {
+            world.step();
+            watch(world);
+        }
+        ticks += LAKE_REST_WINDOW;
+        let now = cubarium_voxel::hydrate::lake(world).volume_m3;
+        if (now - before).abs() <= LAKE_REST_TOLERANCE * now.max(before) {
+            break;
+        }
+        before = now;
+    }
+    ticks
+}
+
 /// The startup pre-roll, before anything is seeded.
 ///
 /// 1. **Settle** as the startup always has ([`SETTLE_CAP`]).
@@ -346,7 +386,7 @@ const DRAIN_CAP: u32 = 2400;
 ///    (`cubarium_voxel::World::open_with_rain`): a shower starts now, gap or no gap, and
 ///    rains until the weather ends it (a forced downpour it turns into included), and the
 ///    water **drains** to rest again under the settle's own convergence, capped at
-///    [`DRAIN_CAP`]. A closed
+///    [`DRAIN_CAP`], and then the **lake** comes to rest ([`LAKE_REST_WINDOW`]). A closed
 ///    world's outlet is opened first, as the live run opens it before its first tick:
 ///    the shower the founders are judged against is the shower the running world has.
 /// 3. **Watch the stream** for [`STREAM_WATCH_TICKS`], as before.
@@ -417,6 +457,10 @@ pub fn pre_roll_capturing(
         report.shower_ticks = ticks;
         report.drain = world.settle_watching(DRAIN_CAP, |w| watch(w, &mut wettest));
         report.ticks += ticks + report.drain.ticks;
+        // **Then the lake comes to rest**, however slowly: founders are placed by the
+        // lake the world will have, not by one still filling from under its floor.
+        report.lake_rest_ticks = rest_the_lake(world, |w| watch(w, &mut wettest));
+        report.ticks += report.lake_rest_ticks;
     }
     // **Watch the stream before planting in its way.** `settle` converges on the world's
     // stored volume and its wet-cell count, and under river re-entry both are constant
@@ -1728,6 +1772,116 @@ mod tests {
         };
         cubarium_voxel::hydrate(&mut world, &water);
         world
+    }
+
+    /// A closed world whose lake is still **filling slowly** from below: a rock bowl with
+    /// the aquifer's spring in its floor and the table half a metre over it, emptying
+    /// with a time constant of about 200 s (`p·F / k` = 0.7 m³/m over 0.0035 m²/s). No
+    /// sky, so no opening rain. The desk terrarium's founding in miniature: its perched
+    /// pools seep into the aquifer and lift the lake through its floor for six minutes
+    /// after `World::settle` has called the water settled.
+    fn a_lake_still_filling() -> World {
+        let cfg = Config {
+            width: 16,
+            height: 12,
+            depth: 2,
+            voxel_m: 0.25,
+            closed_water_budget: true,
+            initial_atmosphere_m3: 0.0,
+            evaporation_m_per_s: 0.0,
+            initial_aquifer_head_m: 1.5,
+            spring_k_m2_per_s: 0.0035,
+            ..Config::default()
+        };
+        let mut world = World::empty(cfg.clone());
+        for z in 0..cfg.depth {
+            for x in 0..cfg.width as i64 {
+                for y in 1..=5 {
+                    if (2..=13).contains(&x) && y >= 4 {
+                        continue;
+                    }
+                    world.apply(cubarium_voxel::Command::SetMaterial {
+                        x,
+                        y,
+                        z,
+                        material: Material::Rock,
+                    });
+                }
+            }
+        }
+        world.set_spring_cell(Some((3, 4, 0)));
+        world
+    }
+
+    /// **The founding lake is at rest** (WX1d). A fresh closed world is founded only once
+    /// its lake has stopped moving, not when `World::settle`'s one-per-cent-per-five-seconds
+    /// test first passes: a lake rising for minutes by less than that per window (the desk
+    /// terrarium at seed 2 founded at 17.8 m³ and rose to 42.8 m³ over the next eight
+    /// minutes, drowning every lake-edge founder) is not a lake anything can be planted
+    /// by. Its volume at founding is within ten per cent of where it stands ten simulated
+    /// minutes later.
+    #[test]
+    fn a_fresh_closed_world_is_founded_with_its_lake_at_rest() {
+        let mut world = a_lake_still_filling();
+        let pre = pre_roll(&mut world, true);
+        let founded = cubarium_voxel::hydrate::lake(&world).volume_m3;
+        for _ in 0..10 * 60 * cubarium_voxel::TICK_HZ {
+            world.step();
+        }
+        let later = cubarium_voxel::hydrate::lake(&world).volume_m3;
+        assert!(later > 0.1, "the spring filled a lake: {later}");
+        assert!(
+            (founded - later).abs() <= 0.1 * later,
+            "founded at {founded:.4} m³, {later:.4} m³ ten minutes on: {:?}",
+            pre.report
+        );
+    }
+
+    /// **Study, not a test** (four minutes in release): the WX1d regression itself. The
+    /// desk terrarium at seed 2 (`config/desktop/terrarium.toml`) is founded with its lake
+    /// at rest, and its water table reaches the lake, so WX1b's low-table ring rule never
+    /// touched its re-entry floor or its lake drain.
+    #[test]
+    #[ignore = "study: run by name"]
+    fn the_desk_terrarium_at_seed_2_is_founded_with_its_lake_at_rest() {
+        let cfg = Config {
+            width: 256,
+            height: 128,
+            depth: 48,
+            voxel_m: 0.125,
+            seed: 2,
+            landform: cubarium_voxel::Landform::Terrarium(cubarium_voxel::Terrarium::DESK),
+            ..Config::default()
+        };
+        let mut world = World::new(cfg);
+        let lake0 = cubarium_voxel::hydrate::lake(&world);
+        let table = world.aquifer_head_m();
+        let lake_head = f64::from(lake0.level_y.saturating_sub(1)) * world.config().voxel_m;
+        assert!(
+            table + 1e-9 >= lake_head,
+            "the terrarium's table reaches its lake: {table} against {lake_head}"
+        );
+        let (floor, drain) = (
+            world.config().reentry_floor_head_m,
+            world.config().lake_drain_m2_per_s,
+        );
+        let pre = pre_roll(&mut world, true);
+        let founded = cubarium_voxel::hydrate::lake(&world).volume_m3;
+        for _ in 0..10 * 60 * cubarium_voxel::TICK_HZ {
+            world.step();
+        }
+        let later = cubarium_voxel::hydrate::lake(&world).volume_m3;
+        eprintln!(
+            "founded at {founded:.2} m³ (tick {}), {later:.2} m³ ten minutes on; floor \
+             {floor}, drain {drain}; {:?}",
+            pre.report.ticks, pre.report
+        );
+        assert_eq!(world.config().reentry_floor_head_m, floor);
+        assert_eq!(world.config().lake_drain_m2_per_s, drain);
+        assert!(
+            (founded - later).abs() <= 0.1 * later,
+            "founded at {founded:.2} m³, {later:.2} m³ ten minutes on"
+        );
     }
 
     /// **The pre-roll** (item 1). The world opens with its shower: by the time anything
