@@ -1484,6 +1484,10 @@ mod tests {
 }
 
 #[cfg(test)]
+#[path = "cli_introduce_tests.rs"]
+mod introduce_tests;
+
+#[cfg(test)]
 mod topology_tests {
     use super::*;
     use clap::Parser;

@@ -2052,3 +2052,15 @@ mod circadian_tests;
 #[cfg(test)]
 #[path = "dung_tests.rs"]
 mod dung_tests;
+#[cfg(test)]
+#[path = "predation_fixture.rs"]
+mod predation_fixture;
+#[cfg(test)]
+#[path = "predation_tests.rs"]
+mod predation_tests;
+#[cfg(test)]
+#[path = "predation_senses_tests.rs"]
+mod predation_senses_tests;
+#[cfg(test)]
+#[path = "predation_life_tests.rs"]
+mod predation_life_tests;

@@ -49,6 +49,8 @@ pub mod cover;
 mod layers;
 #[cfg(test)]
 mod seed_marks_tests;
+#[cfg(test)]
+mod carrion_tests;
 mod seeds;
 pub mod snapshot;
 mod step;

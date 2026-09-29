@@ -69,6 +69,8 @@ use cubarium_voxel_flora::Flora;
 mod arena;
 pub mod found;
 pub mod habitat;
+#[cfg(test)]
+mod introduce_tests;
 pub mod scene;
 pub use arena::{
     ARENA_BYSTANDERS, ARENA_DEPTH, ARENA_HEIGHT, ARENA_VOXEL_M, ARENA_WIDTH, Arena, ArenaGrid,
