@@ -34,6 +34,11 @@ use cubarium_search::search::{self, Budget, TRAINING_SEEDS, Variation};
 struct Cli {
     #[command(subcommand)]
     command: Command,
+    /// The ecology vector (`[ecology]` TOML, as `voxel-ecology-check --arm` reads) the
+    /// frozen trainer's arenas and landscapes are built on; the live defaults when absent
+    /// (audit round step 5).
+    #[arg(long, global = true)]
+    training_ecology: Option<PathBuf>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -1086,7 +1091,12 @@ fn parse_centres(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    match Cli::parse().command {
+    let cli = Cli::parse();
+    if let Some(path) = &cli.training_ecology {
+        let e = es::voxel::live::ecology::EcologyParams::load(path)?;
+        es::voxel::training_world::set_training_ecology(e)?;
+    }
+    match cli.command {
         Command::Params => print_params(),
         Command::Baseline {
             ticks,
@@ -1601,6 +1611,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             remote_wait,
             pin,
         } => {
+            es::voxel::training_world::check_remote(remotes.len())?;
             if overwrite {
                 let _ = std::fs::remove_dir_all(&out);
             }

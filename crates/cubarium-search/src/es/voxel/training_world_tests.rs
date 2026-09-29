@@ -4,7 +4,7 @@
 
 use cubarium_voxel_fauna::{FaunaConfig, Founder};
 use cubarium_voxel_flora::FloraConfig;
-use cubarium_voxel_sim::arena::{ArenaGrid, ArenaLayers, arena_start_hour};
+use cubarium_voxel_sim::{ArenaGrid, ArenaLayers, arena_start_hour};
 
 use super::live::ecology::EcologyParams;
 use super::task::{PreparedArena, Stage};
@@ -12,7 +12,8 @@ use super::training_world::{arena_layers_for, landscape_config, landscape_layers
 
 fn heavy() -> EcologyParams {
     let mut e = EcologyParams::defaults();
-    e.set("founder.mass_scale@frondgrazer", 100.0).expect("in range");
+    e.set("founder.mass_scale@frondgrazer", 100.0)
+        .expect("in range");
     e.set("flora.foliage_rate", 2.0).expect("in range");
     e
 }
@@ -36,7 +37,10 @@ fn the_training_layers_are_the_ecology_vectors() {
     }
     let (flora, fauna) = landscape_layers_for(&heavy(), 0.125);
     assert_eq!(fauna, heavy().fauna_config());
-    assert_eq!(flora, heavy().flora_config(FloraConfig::for_voxel_size(0.125)));
+    assert_eq!(
+        flora,
+        heavy().flora_config(FloraConfig::for_voxel_size(0.125))
+    );
 }
 
 /// A prepared arena is built on the layers it is handed, and rebuilds on them too.

@@ -18,7 +18,7 @@
 //! ([`Prepared::rebuilt`]) so the bench can measure the two setup paths against each other.
 
 use cubarium_voxel_fauna::{Founder, Senses};
-use cubarium_voxel_sim::{Arena, ArenaGrid, Site, SuccessorBand};
+use cubarium_voxel_sim::{Arena, ArenaGrid, ArenaLayers, Site, SuccessorBand};
 
 use super::landscape::PreparedLandscape;
 
@@ -401,6 +401,8 @@ pub struct PreparedArena {
     /// The arena's settled cue field. Every episode clones it into its private simulator;
     /// field settlement belongs to fixture preparation, never to every candidate rollout.
     senses: Senses,
+    /// The layers it was built on, so a rebuild is the same arena.
+    layers: ArenaLayers,
 }
 
 impl PreparedArena {
@@ -432,11 +434,40 @@ impl PreparedArena {
         band: Band,
         grid: ArenaGrid,
     ) -> PreparedArena {
+        PreparedArena::build_stage_with(
+            founder,
+            layout_seed,
+            stage,
+            band,
+            grid,
+            super::training_world::arena_layers(grid),
+        )
+    }
+
+    /// [`PreparedArena::build_stage_on`] on explicit `layers` (the training ecology's
+    /// by default, [`super::training_world::arena_layers`]).
+    pub fn build_stage_with(
+        founder: Founder,
+        layout_seed: u64,
+        stage: Stage,
+        band: Band,
+        grid: ArenaGrid,
+        layers: ArenaLayers,
+    ) -> PreparedArena {
         let (arena, patches) = match stage {
-            Stage::A => (Arena::build_on(founder, layout_seed, grid), None),
+            Stage::A => (
+                Arena::build_on_with(founder, layout_seed, grid, layers.clone()),
+                None,
+            ),
             Stage::B => {
-                let (arena, initial, successor) =
-                    Arena::build_reacquisition_on(founder, layout_seed, band, grid).into_parts();
+                let (arena, initial, successor) = Arena::build_reacquisition_on_with(
+                    founder,
+                    layout_seed,
+                    band,
+                    grid,
+                    layers.clone(),
+                )
+                .into_parts();
                 (arena, Some((initial, successor)))
             }
         };
@@ -449,6 +480,7 @@ impl PreparedArena {
             patches,
             senses: arena.prepare_senses(),
             arena,
+            layers,
         }
     }
 
@@ -471,6 +503,7 @@ impl PreparedArena {
             patches: Some((initial, successor)),
             senses: arena.prepare_senses(),
             arena,
+            layers: ArenaLayers::live(ArenaGrid::Standard),
         }
     }
 
@@ -527,11 +560,20 @@ impl PreparedArena {
     /// clone path by the bench. Both must prepare the identical arena.
     pub fn rebuilt(&self) -> Arena {
         match self.stage {
-            Stage::A => Arena::build_on(self.founder, self.layout_seed, self.grid),
-            Stage::B => {
-                Arena::build_reacquisition_on(self.founder, self.layout_seed, self.band, self.grid)
-                    .into_arena()
-            }
+            Stage::A => Arena::build_on_with(
+                self.founder,
+                self.layout_seed,
+                self.grid,
+                self.layers.clone(),
+            ),
+            Stage::B => Arena::build_reacquisition_on_with(
+                self.founder,
+                self.layout_seed,
+                self.band,
+                self.grid,
+                self.layers.clone(),
+            )
+            .into_arena(),
         }
     }
 

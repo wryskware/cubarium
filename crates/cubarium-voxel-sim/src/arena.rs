@@ -304,9 +304,11 @@ pub fn edible_stock(
     });
     pools
         + stand.map_or(0.0, |s| {
+            // What a bite can lower: each band layer's stock above its graze floor
+            // (the arena has the live refuge since the audit round's step 5).
             fv.layers(s)
                 .filter(|l| band.contains(&l.cell))
-                .map(|l| l.stock)
+                .map(|l| l.edible())
                 .sum()
         })
 }
@@ -373,6 +375,37 @@ pub struct Arena {
     pub animal_id: Option<u64>,
     /// The bystanders' ids in the current animal layer, in `bystanders` order.
     pub bystander_ids: Vec<u64>,
+    /// The animal config every (re)founding of this arena populates with.
+    fauna_config: FaunaConfig,
+}
+
+/// **The layers an arena is built on**: its plant config (already at the grid's cell
+/// size) and its animal config. [`ArenaLayers::live`] is the shipped world's — graze
+/// refuge and defence on — and a trainer that applies an ecology vector passes that
+/// vector's configs instead (audit round step 5,
+/// `design/handoffs/voxel-audit-round-2026-09-28.md` §5).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ArenaLayers {
+    pub flora: FloraConfig,
+    pub fauna: FaunaConfig,
+}
+
+impl ArenaLayers {
+    /// The shipped layers on `grid`.
+    pub fn live(grid: ArenaGrid) -> ArenaLayers {
+        ArenaLayers {
+            flora: FloraConfig::for_voxel_size(grid.voxel_m()),
+            fauna: FaunaConfig::default(),
+        }
+    }
+}
+
+/// The hour of the day a layout's clock starts at, drawn from its seed apart from the
+/// layout's own draws (so the layout is what it always was): uniform over the day, so
+/// about a third of the layouts begin at night under the shipped 67 % daylight.
+pub fn arena_start_hour(layout_seed: u64) -> f64 {
+    let h = (layout_seed ^ 0xA5A5_5A5A_D1CE_0001).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    (h >> 11) as f64 / (1u64 << 53) as f64 * 24.0
 }
 
 /// Stage B's two real, finite patches. The metadata is fixture-facing only: it never
@@ -456,7 +489,17 @@ impl Arena {
 
     /// [`Arena::build`] on `grid`: the same layout, laid on 0.25 m or 0.125 m cells.
     pub fn build_on(founder: Founder, layout_seed: u64, grid: ArenaGrid) -> Arena {
-        Self::build_kind(founder, layout_seed, LayoutKind::StageA, None, grid).0
+        Self::build_on_with(founder, layout_seed, grid, ArenaLayers::live(grid))
+    }
+
+    /// [`Arena::build_on`] on the caller's `layers` (an ecology vector's configs).
+    pub fn build_on_with(
+        founder: Founder,
+        layout_seed: u64,
+        grid: ArenaGrid,
+        layers: ArenaLayers,
+    ) -> Arena {
+        Self::build_kind(founder, layout_seed, LayoutKind::StageA, None, grid, layers).0
     }
 
     /// Build Stage B with the successor in `band` ([`SuccessorBand`]).
@@ -475,7 +518,18 @@ impl Arena {
         band: SuccessorBand,
         grid: ArenaGrid,
     ) -> ReacquisitionArena {
-        Self::build_reacquisition_kind(founder, layout_seed, band, None, grid)
+        Self::build_reacquisition_on_with(founder, layout_seed, band, grid, ArenaLayers::live(grid))
+    }
+
+    /// [`Arena::build_reacquisition_on`] on the caller's `layers`.
+    pub fn build_reacquisition_on_with(
+        founder: Founder,
+        layout_seed: u64,
+        band: SuccessorBand,
+        grid: ArenaGrid,
+        layers: ArenaLayers,
+    ) -> ReacquisitionArena {
+        Self::build_reacquisition_kind(founder, layout_seed, band, None, grid, layers)
     }
 
     /// Build Stage B's smallest real continuation task: one reachable finite patch and
@@ -507,6 +561,7 @@ impl Arena {
             SuccessorBand::Landed,
             Some(turn_to_initial_rad),
             ArenaGrid::Standard,
+            ArenaLayers::live(ArenaGrid::Standard),
         )
     }
 
@@ -516,6 +571,7 @@ impl Arena {
         band: SuccessorBand,
         start_turn_override: Option<f64>,
         grid: ArenaGrid,
+        layers: ArenaLayers,
     ) -> ReacquisitionArena {
         let (arena, initial_patch) = Self::build_kind(
             founder,
@@ -523,6 +579,7 @@ impl Arena {
             LayoutKind::Reacquisition(band),
             start_turn_override,
             grid,
+            layers,
         );
         let initial_patch = initial_patch.expect("the two-patch layout records its initial patch");
         let successor_patch = arena
@@ -549,6 +606,7 @@ impl Arena {
         kind: LayoutKind,
         start_turn_override: Option<f64>,
         grid: ArenaGrid,
+        layers: ArenaLayers,
     ) -> (Arena, Option<Site>) {
         let scale = grid.scale();
         let ground_y = grid.ground_y();
@@ -558,10 +616,11 @@ impl Arena {
             depth: grid.depth(),
             voxel_m: grid.voxel_m(),
             seed: layout_seed,
-            // A trial arena has no night: WX4's sleep must not reach a trained or
-            // scripted body's episode.
+            // The live day clock, from an hour drawn per layout: a training arena meets
+            // the night the live world has (audit round step 5; it had none, so that
+            // WX4's sleep never reached a trained body).
             day: cubarium_voxel::weather::DayClock {
-                mode: cubarium_voxel::weather::DayMode::Off,
+                start_hour: arena_start_hour(layout_seed),
                 ..Default::default()
             },
             ..VoxelConfig::default()
@@ -623,11 +682,9 @@ impl Arena {
             }
         }
 
-        let mut flora = Flora::new(
-            FloraConfig::for_voxel_size(grid.voxel_m())
-                .without_graze_refuge()
-                .without_defence(),
-        );
+        // The caller's plant layer: the live one, graze refuge and defence on, unless an
+        // ecology vector says otherwise (audit round step 5; the arena had neither).
+        let mut flora = Flora::new(layers.flora);
 
         // Candidate support faces: soil ground, not the pond, and — unless this layout is
         // the seam layout — at least two columns off the wrapped seam, so a default layout
@@ -854,13 +911,14 @@ impl Arena {
             grid,
             world,
             flora,
-            fauna: Fauna::new(FaunaConfig::default()),
+            fauna: Fauna::new(layers.fauna),
             resources: resources.iter().map(|&r| laid(r)).collect(),
             resource_kinds: kinds,
             start,
             bystanders,
             animal_id: None,
             bystander_ids: Vec::new(),
+            fauna_config: layers.fauna,
         };
         arena.refound(FOUNDER_START);
         let initial_patch = initial_patch.map(laid);
@@ -877,7 +935,7 @@ impl Arena {
                 .iter()
                 .map(|p| (*p, cubarium_voxel_fauna::StartingStores::HUNGRY)),
         );
-        let (fauna, ids) = populate(&self.world, FaunaConfig::default(), bodies);
+        let (fauna, ids) = populate(&self.world, self.fauna_config, bodies);
         let mut ids = ids.into_iter();
         self.animal_id = if self.start.is_some() {
             ids.next().flatten()
@@ -1028,13 +1086,15 @@ fn lay_patch(flora: &mut Flora, world: &World, site: Site, kind: PatchKind, orga
             .min()
             .expect("a seeded stand has a foliage layer")
     };
-    // Trim a stand's layers in `cells` down to `keep`.
+    // Trim a stand's layers in `cells` down to `keep` of **edible** foliage: a patch's
+    // size is food a mouth can take, and under the live graze refuge (audit round step
+    // 5) each layer keeps its floor below that.
     let trim = |flora: &mut Flora, cells: std::ops::RangeInclusive<i64>, keep: f64| {
         let held: f64 = flora
             .view()
             .layers_at(site)
             .filter(|l| cells.contains(&l.cell))
-            .map(|l| l.stock)
+            .map(|l| l.edible())
             .sum();
         assert!(
             held >= keep - 1e-15,
@@ -1338,7 +1398,12 @@ mod tests {
                     .take(stage.initial_patch, initial_stock)
                     .expect("each finite patch depletes through its founder's real source");
                 assert!(taken.organic > 0.0, "{founder:?} seed {seed}");
-                assert_eq!(patch_stock(&stage.arena, stage.initial_patch), 0.0);
+                // The live defence (audit round step 5) shrinks a withdrawal by the
+                // little the layout's own trimming raised it: one take leaves under 1 %.
+                assert!(
+                    patch_stock(&stage.arena, stage.initial_patch) < 0.01 * initial_stock,
+                    "{founder:?} seed {seed}: the initial patch was not emptied"
+                );
                 assert_eq!(
                     patch_stock(&stage.arena, stage.successor_patch),
                     successor_stock,
@@ -1625,9 +1690,11 @@ mod tests {
                         x: i64::from(stand_site.x),
                         z,
                         founder: Founder::Browser,
+                        // Hungrier than the wake line, so neither body sleeps whatever
+                        // hour the layout's clock starts at (audit round step 5).
                         stores: cubarium_voxel_fauna::StartingStores {
                             body: 0.8,
-                            reserve: 1.0,
+                            reserve: 0.4,
                         },
                         heading_rad: 0.0,
                     },
@@ -1901,9 +1968,11 @@ mod tests {
             if foliage > 0.0 {
                 let _ = arena.flora.take_foliage_in_layers(site, foliage, &above);
             }
-            let left = arena.flora.view().stand_at(site).map_or(0.0, |s| s.foliage);
+            // Edible foliage left, above every layer's graze floor: the band's patch, to
+            // within what the trimming's defence kept back.
+            let left: f64 = arena.flora.view().layers_at(site).map(|l| l.edible()).sum();
             assert!(
-                (left - arena.patch_stock(site)).abs() < 1e-12,
+                (left - arena.patch_stock(site)).abs() <= 1e-2 * left.max(1e-9),
                 "{site:?}: {left} left against an edible {}",
                 arena.patch_stock(site)
             );
@@ -1920,7 +1989,11 @@ mod tests {
                     x: i64::from(site.x),
                     z: site.z,
                     founder: Founder::Blind,
-                    stores: cubarium_voxel_fauna::StartingStores::FULL,
+                    // Past the wake line, so it samples at any hour of the layout's day.
+                    stores: cubarium_voxel_fauna::StartingStores {
+                        body: 1.0,
+                        reserve: 0.4,
+                    },
                     heading_rad: 0.0,
                 },
             ));
@@ -2095,7 +2168,10 @@ mod tests {
         let live = FloraConfig::for_voxel_size(arena.grid.voxel_m());
         assert_eq!(arena.flora.config(), &live, "the shipped plant layer");
         for s in cubarium_voxel_flora::Species::ALL {
-            assert!(live.species(s).graze_refuge > 0.0 || live.species(s).trophic != cubarium_voxel_flora::Trophic::Photo);
+            assert!(
+                live.species(s).graze_refuge > 0.0
+                    || live.species(s).trophic != cubarium_voxel_flora::Trophic::Photo
+            );
             assert!(live.species(s).defence_per_bite > 0.0);
         }
         assert_eq!(arena.fauna.config(), &FaunaConfig::default());
@@ -2115,7 +2191,10 @@ mod tests {
                 day += 1;
             }
         }
-        assert!(night >= 4 && day >= 8, "{night} layouts start at night, {day} by day");
+        assert!(
+            night >= 4 && day >= 8,
+            "{night} layouts start at night, {day} by day"
+        );
     }
 
     /// A caller's layers (the ecology vector's configs) are what an arena is built and
@@ -2124,7 +2203,9 @@ mod tests {
     fn an_arena_takes_the_callers_layers_and_refounds_on_them() {
         let grid = ArenaGrid::Standard;
         let mut fauna = FaunaConfig::default();
-        fauna.founders[Founder::Browser.index()].core.maintenance_per_s *= 2.0;
+        fauna.founders[Founder::Browser.index()]
+            .core
+            .maintenance_per_s *= 2.0;
         let mut flora = FloraConfig::for_voxel_size(grid.voxel_m());
         flora.decomposition *= 3.0;
         let layers = ArenaLayers {
