@@ -28,7 +28,7 @@ use cubarium_voxel_fauna::Founder;
 use cubarium_voxel_flora::Species;
 use serde::Serialize;
 
-use super::ecology::{EcologyParams, PARAMS};
+use super::ecology::EcologyParams;
 use super::readout::Scan;
 use super::trainer::{ascend, parallel, pooled_scores};
 use super::variants::VariantTable;
@@ -404,11 +404,25 @@ pub struct SearchRecord {
 }
 
 fn multipliers(e: &EcologyParams) -> Vec<(String, f64)> {
-    PARAMS
-        .iter()
-        .zip(e.values())
-        .map(|(p, v)| (p.name.to_string(), *v))
+    EcologyParams::search_names()
+        .into_iter()
+        .map(|n| {
+            let v = e.get(&n).expect("a search name");
+            (n, v)
+        })
         .collect()
+}
+
+/// Whether a plant species counts as **lost** in a candidate world against the default
+/// world on the same seed: the candidate started with it, the default kept it, and the
+/// candidate either lost it or — where the default holds four stands or more — kept
+/// under a quarter of the default's stands of it. The quarter catches the near-losses
+/// held-out seeds turn into losses (siphonreed, es3's best, 2026-09-28).
+pub fn species_lost(start: usize, end: usize, default_end: usize) -> bool {
+    if start == 0 || default_end == 0 {
+        return false;
+    }
+    end == 0 || (default_end >= 4 && 4 * end < default_end)
 }
 
 /// Re-score `e` with persistence judged against `reference`, the **default** vector's
@@ -422,7 +436,7 @@ pub fn rescore(e: &mut Evaluation, reference: &Evaluation, band: &Band) {
         .iter()
         .zip(&e.species_end)
         .zip(&reference.species_end)
-        .filter(|((start, end), kept)| **start > 0 && **kept > 0 && **end == 0)
+        .filter(|((start, end), kept)| species_lost(**start, **end, **kept))
         .count();
     e.trace.missing = lineages + species;
     e.penalty = penalty(&e.trace, band);
@@ -430,7 +444,7 @@ pub fn rescore(e: &mut Evaluation, reference: &Evaluation, band: &Band) {
 
 /// The box penalty for a log vector outside the search box: squared log distance.
 fn box_penalty(x: &[f64]) -> f64 {
-    EcologyParams::log_bounds()
+    EcologyParams::search_bounds()
         .iter()
         .zip(x)
         .map(|((lo, hi), v)| (lo - v).max(0.0).powi(2) + (v - hi).max(0.0).powi(2))
@@ -493,7 +507,7 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
         })
         .collect();
     let mut cma = Cma::new(
-        vec![0.0; PARAMS.len()],
+        vec![0.0; EcologyParams::search_names().len()],
         spec.sigma0,
         spec.lambda,
         spec.cma_seed,
@@ -524,7 +538,10 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
             .collect();
         // The default vector on the same seeds: the persistence reference and the
         // baseline, in the slot the search mean held.
-        candidates.push(("default".into(), vec![0.0; PARAMS.len()]));
+        candidates.push((
+            "default".into(),
+            vec![0.0; EcologyParams::search_names().len()],
+        ));
         let drivers: Vec<(Founder, EpisodeDriver)> = thetas
             .iter()
             .map(|(f, t, _)| (*f, EpisodeDriver::gru(t, *f).expect("a validated centre")))
@@ -547,7 +564,7 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
             .collect();
         let params: Vec<EcologyParams> = candidates
             .iter()
-            .map(|(_, x)| EcologyParams::from_log(x))
+            .map(|(_, x)| EcologyParams::from_search_log(x))
             .collect();
         let mut evals: Vec<Evaluation> = parallel(jobs.clone(), spec.threads, |(k, seed)| {
             evaluate(&params[k], seed, &drivers, &tables, &spec.eval)
@@ -634,7 +651,7 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
             serde_json::to_string(&record).map_err(|e| e.to_string())?
         );
         let _ = log.flush();
-        let mean = EcologyParams::from_log(cma.mean());
+        let mean = EcologyParams::from_search_log(cma.mean());
         mean.save(
             &spec.out.join("mean.toml"),
             &format!("Ecology search mean after generation {generation}. Training only."),
