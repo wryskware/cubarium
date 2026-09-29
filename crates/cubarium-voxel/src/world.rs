@@ -797,6 +797,16 @@ pub struct World {
     /// its active sets.
     #[serde(skip)]
     pub(crate) solid: SolidColumns,
+    /// **Training only, and not state:** how many ticks one water step stands for
+    /// ([`World::set_water_every`]). `1` — what every world is built and decoded with — is
+    /// the live tick: the water leg every tick at [`crate::DT`]. Not serialized, so no
+    /// snapshot can carry the coarse mode into a live run.
+    #[serde(skip, default = "one_tick")]
+    pub(crate) water_every: u32,
+}
+
+fn one_tick() -> u32 {
+    1
 }
 
 /// Every column's **solid cells**, one bit per row (bit `y` of entry `z * width + x`):
@@ -1008,6 +1018,7 @@ impl World {
             weather: crate::weather::Weather::default(),
             outlet_open: false,
             tick: 0,
+            water_every: 1,
             terrain_version: 0,
             ledger: Ledger::default(),
             outlet_cell: None,
@@ -1072,6 +1083,7 @@ impl World {
             weather: crate::weather::Weather::default(),
             outlet_open: false,
             tick: 0,
+            water_every: 1,
             terrain_version: 0,
             ledger: Ledger::default(),
             outlet_cell: None,
@@ -1279,6 +1291,40 @@ impl World {
     /// the clock, and it moves exactly once per tick either way.
     pub fn advance_tick(&mut self) {
         self.tick += 1;
+    }
+
+    /// **Training-only coarse water** (`design/handoffs/voxel-live-world-training-2026-09-24.md`,
+    /// "Fast water"): the lateral and groundwater phases — the exchange, drainage, the
+    /// water table, the spring and the outlet — run on one tick in `every`, as one step of
+    /// `every` ticks' worth at the same per-second rates, while the vertical phases — rain,
+    /// evaporation, infiltration and fall — still run every tick. `1` is the live tick and
+    /// the only value a world is built or decoded with; the ambient host refuses anything
+    /// else. The exchange relaxes once per coarse step, so free water spreads sideways
+    /// `every` times slower in simulated time.
+    ///
+    /// Honoured by [`World::step_with`] and by `cubarium-voxel-sim`'s schedule.
+    pub fn set_water_every(&mut self, every: u32) {
+        self.water_every = every.max(1);
+    }
+
+    /// How many ticks one water step stands for: `1` except in a training world.
+    pub fn water_every(&self) -> u32 {
+        self.water_every
+    }
+
+    /// Whether this tick runs the coarse water phases: every tick in a live world, one in
+    /// [`World::water_every`] in a training one.
+    pub fn water_due(&self) -> bool {
+        self.water_every <= 1 || self.tick.is_multiple_of(u64::from(self.water_every))
+    }
+
+    /// The seconds one coarse water step covers: [`crate::DT`] exactly in a live world.
+    pub fn water_dt(&self) -> f64 {
+        if self.water_every <= 1 {
+            crate::DT
+        } else {
+            crate::DT * f64::from(self.water_every)
+        }
     }
 
     /// Apply a command now — immediately, including while a frontend has the world

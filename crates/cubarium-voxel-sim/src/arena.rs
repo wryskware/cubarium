@@ -623,7 +623,11 @@ impl Arena {
             }
         }
 
-        let mut flora = Flora::new(FloraConfig::for_voxel_size(grid.voxel_m()).without_graze_refuge());
+        let mut flora = Flora::new(
+            FloraConfig::for_voxel_size(grid.voxel_m())
+                .without_graze_refuge()
+                .without_defence(),
+        );
 
         // Candidate support faces: soil ground, not the pond, and — unless this layout is
         // the seam layout — at least two columns off the wrapped seam, so a default layout

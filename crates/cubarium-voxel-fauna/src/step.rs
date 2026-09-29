@@ -1740,6 +1740,12 @@ fn gestate(
         mineral: e.mineral,
         energy: e.energy,
         age_ticks: 0,
+        lifespan_ticks: crate::draw_lifespan_ticks(
+            sc.lifespan_median_s,
+            id,
+            crate::lifespan_salt(site, fauna.tick),
+            false,
+        ),
         gut: Taken::default(),
         state: State::Resting,
         mobility: crate::Mobility::default(),
@@ -1930,6 +1936,12 @@ fn hatch(fauna: &mut Fauna, view: &VoxelView<'_>, newborns: &mut Vec<Animal>) {
                 mineral: m,
                 energy: e,
                 age_ticks: 0,
+                lifespan_ticks: crate::draw_lifespan_ticks(
+                    sc.lifespan_median_s,
+                    id,
+                    crate::lifespan_salt(c.site, fauna.tick),
+                    false,
+                ),
                 gut: Taken::default(),
                 state: State::Resting,
                 mobility: crate::Mobility::default(),
@@ -1951,7 +1963,7 @@ fn water_over_feet(view: &VoxelView<'_>, a: &Animal) -> f64 {
     }
 }
 
-/// Step 7: starvation and drowning, and the carrion they leave.
+/// Step 7: starvation, drowning and old age, and the carrion they leave.
 fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
     // A founder drowns **by its own height and over time** (package mobility, decision
     // 3): each tick the water over its feet is deeper than its drown depth advances its
@@ -1987,6 +1999,8 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
                 Some((i, Departure::Starved))
             } else if drowning[i] {
                 Some((i, Departure::Drowned))
+            } else if a.lifespan_ticks > 0 && a.age_ticks >= a.lifespan_ticks {
+                Some((i, Departure::Aged))
             } else {
                 None
             }

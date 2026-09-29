@@ -744,6 +744,117 @@ enum Command {
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         write_streams: bool,
     },
+    /// The ecology half (`design/handoffs/voxel-ecology-search-2026-09-24.md`): CMA-ES
+    /// over the ecology parameter vector, each candidate scored on freshly founded
+    /// training worlds against the population and liveliness band, brains held fixed.
+    VoxelEcologySearch {
+        /// `<lineage>=<centre.json>`, once per lineage.
+        #[arg(long = "centre", required = true)]
+        centres: Vec<String>,
+        #[arg(long, default_value_t = 7)]
+        lambda: usize,
+        #[arg(long, default_value_t = 2)]
+        seeds_per_generation: usize,
+        #[arg(long, default_value_t = 100)]
+        generations: u32,
+        #[arg(long, default_value_t = 10_800.0)]
+        wall_seconds: f64,
+        /// Initial step size, natural-log units.
+        #[arg(long, default_value_t = 0.5)]
+        sigma0: f64,
+        #[arg(long, default_value_t = 16)]
+        threads: usize,
+        #[arg(long, default_value_t = 50_001)]
+        seed_base: u64,
+        #[arg(long, default_value_t = 20260924)]
+        cma_seed: u64,
+        /// Simulated hours per candidate world.
+        #[arg(long, default_value_t = 6.0)]
+        hours: f64,
+        #[arg(long, default_value_t = 10.0)]
+        window_min: f64,
+        #[arg(long, default_value_t = 4)]
+        water_every: u32,
+        #[arg(long, default_value_t = 240)]
+        abort_animals: usize,
+        /// Simulated hours the band is scored on; past `--hours` (or an early stop) the
+        /// count is projected on its last hour's trend. Defaults to `--hours`.
+        #[arg(long)]
+        score_hours: Option<f64>,
+        /// Unified mode: brain antithetic pairs per lineage. 0 holds the brains.
+        #[arg(long, default_value_t = 0)]
+        brain_pairs: usize,
+        #[arg(long, default_value_t = cubarium_search::es::optimizer::SIGMA)]
+        brain_sigma: f64,
+        #[arg(long, default_value_t = cubarium_search::es::optimizer::LEARNING_RATE)]
+        brain_learning_rate: f64,
+        #[arg(long, default_value = "runs/ecology-search")]
+        out: PathBuf,
+    },
+    /// The ecology search's held-out check: arms (`name=default` or `name=<file.toml>`)
+    /// × seeds, one CSV per world with one row per window.
+    VoxelEcologyCheck {
+        #[arg(long = "centre", required = true)]
+        centres: Vec<String>,
+        #[arg(long = "arm", required = true)]
+        arms: Vec<String>,
+        #[arg(long, default_value = "1,2,3,4")]
+        seeds: String,
+        #[arg(long, default_value_t = 6.0)]
+        hours: f64,
+        #[arg(long, default_value_t = 10.0)]
+        window_min: f64,
+        #[arg(long, default_value_t = 1)]
+        water_every: u32,
+        #[arg(long, default_value_t = 8)]
+        threads: usize,
+        #[arg(long, default_value = "runs/ecology-check")]
+        out: PathBuf,
+    },
+    /// Live-world training (`design/handoffs/voxel-live-world-training-2026-09-24.md`):
+    /// every body of every lineage given a centre runs its own antithetic variant inside
+    /// persistent live worlds (the `small` preset, still water), one ES update per lineage
+    /// per window, with the ecology readout every generation.
+    VoxelLiveTrain {
+        /// `<lineage>=<centre.json>`, once per trained lineage (`browser=…`,
+        /// `littershredder=…`).
+        #[arg(long = "centre", required = true)]
+        centres: Vec<String>,
+        #[arg(long, default_value_t = 16)]
+        worlds: usize,
+        #[arg(long, default_value_t = 16)]
+        threads: usize,
+        #[arg(long, default_value_t = 16)]
+        pairs: usize,
+        /// Window length, simulated minutes.
+        #[arg(long, default_value_t = 10.0)]
+        window_min: f64,
+        #[arg(long, default_value_t = 1000)]
+        generations: u32,
+        #[arg(long, default_value_t = 7000.0)]
+        wall_seconds: f64,
+        #[arg(long, default_value_t = cubarium_search::es::optimizer::SIGMA)]
+        sigma: f64,
+        #[arg(long, default_value_t = cubarium_search::es::optimizer::LEARNING_RATE)]
+        learning_rate: f64,
+        #[arg(long, default_value_t = 20260924)]
+        train_seed: u64,
+        #[arg(long, default_value_t = 3001)]
+        world_seed: u64,
+        /// Training-only coarse water: the lateral and groundwater phases on one tick in
+        /// this many. `1` is the live water.
+        #[arg(long, default_value_t = 4)]
+        water_every: u32,
+        #[arg(long, default_value_t = 240)]
+        population_cap: usize,
+        #[arg(long, default_value_t = 10)]
+        save_every: u32,
+        /// A training-only ecology file (`[ecology]` multipliers); the defaults without.
+        #[arg(long)]
+        ecology: Option<PathBuf>,
+        #[arg(long, default_value = "runs/live-train")]
+        out: PathBuf,
+    },
     /// Phase-one voxel slice (P1-D): the bounded ES run over one founder's manifest, with
     /// shape-aware antithetic pairs, the initial centre evaluation, and the plan's caps.
     VoxelTrain {
@@ -953,6 +1064,21 @@ enum Command {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+}
+
+/// `<lineage>=<centre.json>` arguments.
+fn parse_centres(
+    centres: &[String],
+) -> Result<Vec<(cubarium_voxel_fauna::Founder, PathBuf)>, String> {
+    centres
+        .iter()
+        .map(|c| {
+            let (name, path) = c
+                .split_once('=')
+                .ok_or_else(|| format!("--centre takes <lineage>=<file>, not {c}"))?;
+            Ok((es::voxel::parse_founder(name)?, PathBuf::from(path)))
+        })
+        .collect()
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -1308,6 +1434,136 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } => set_pin(&pin).and_then(|_| {
             es::voxel::commands::holdout(founder, policy, controls, workers, per_fixture)
         }),
+        Command::VoxelEcologySearch {
+            centres,
+            lambda,
+            seeds_per_generation,
+            generations,
+            wall_seconds,
+            sigma0,
+            threads,
+            seed_base,
+            cma_seed,
+            hours,
+            window_min,
+            water_every,
+            abort_animals,
+            score_hours,
+            brain_pairs,
+            brain_sigma,
+            brain_learning_rate,
+            out,
+        } => {
+            let hz = f64::from(cubarium_voxel_fauna::TICK_HZ);
+            let spec = es::voxel::live::search::SearchSpec {
+                centres: parse_centres(&centres)?,
+                lambda,
+                seeds_per_generation,
+                generations,
+                wall_seconds,
+                sigma0,
+                threads,
+                seed_base,
+                cma_seed,
+                eval: es::voxel::live::search::EvalSpec {
+                    horizon_ticks: (hours * 3600.0 * hz).round() as u64,
+                    window_ticks: (window_min * 60.0 * hz).round() as u64,
+                    water_every,
+                    abort_animals,
+                    band: Default::default(),
+                    score_horizon_ticks: (score_hours.unwrap_or(hours) * 3600.0 * hz).round()
+                        as u64,
+                },
+                brain_pairs,
+                brain_sigma,
+                brain_learning_rate,
+                out,
+            };
+            es::voxel::live::search::search(&spec)?;
+            Ok(())
+        }
+        Command::VoxelEcologyCheck {
+            centres,
+            arms,
+            seeds,
+            hours,
+            window_min,
+            water_every,
+            threads,
+            out,
+        } => {
+            let mut parsed = Vec::new();
+            for a in &arms {
+                let (name, src) = a
+                    .split_once('=')
+                    .ok_or_else(|| format!("--arm takes <name>=default|<file.toml>, not {a}"))?;
+                let params = if src == "default" {
+                    es::voxel::live::ecology::EcologyParams::defaults()
+                } else {
+                    es::voxel::live::ecology::EcologyParams::load(std::path::Path::new(src))?
+                };
+                parsed.push((name.to_string(), params));
+            }
+            let seeds: Vec<u64> = seeds
+                .split(',')
+                .map(|s| s.trim().parse::<u64>().map_err(|e| format!("seed {s}: {e}")))
+                .collect::<Result<_, _>>()?;
+            es::voxel::live::search::check(
+                &parsed,
+                &seeds,
+                hours,
+                window_min,
+                water_every,
+                &parse_centres(&centres)?,
+                threads,
+                &out,
+            )?;
+            Ok(())
+        }
+        Command::VoxelLiveTrain {
+            centres,
+            worlds,
+            threads,
+            pairs,
+            window_min,
+            generations,
+            wall_seconds,
+            sigma,
+            learning_rate,
+            train_seed,
+            world_seed,
+            water_every,
+            population_cap,
+            save_every,
+            out,
+            ecology,
+        } => {
+            let ecology = match ecology {
+                Some(p) => es::voxel::live::ecology::EcologyParams::load(&p)?,
+                None => es::voxel::live::ecology::EcologyParams::defaults(),
+            };
+            let spec = es::voxel::live::trainer::LiveSpec {
+                ecology,
+                centres: parse_centres(&centres)?,
+                worlds,
+                threads,
+                pairs,
+                window_ticks: (window_min * 60.0 * f64::from(cubarium_voxel_fauna::TICK_HZ))
+                    .round() as u64,
+                generations,
+                wall_seconds,
+                sigma,
+                learning_rate,
+                train_seed,
+                world_seed,
+                water_every,
+                population_cap,
+                save_every,
+                out,
+            };
+            es::voxel::live::trainer::train(&spec)?;
+            Ok(())
+        }
         Command::VoxelTrain {
             founder,
             stage,

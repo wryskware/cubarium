@@ -72,6 +72,7 @@ pub mod counters;
 pub mod driver;
 pub mod imitate;
 pub mod landscape;
+pub mod live;
 pub mod pin;
 pub mod remote;
 pub mod score;

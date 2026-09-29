@@ -353,6 +353,7 @@ impl FounderPhysiology {
                     energy_density: 2.0,
                     // The littershredder lays a clutch on the litter it lives in.
                     reproduction: Reproduction::EGGS_PLACEHOLDER,
+                    lifespan_median_s: crate::LIFESPAN_MEDIAN_S,
                 },
                 motor_respiration_per_s: 0.001,
                 // Two thirds of its length both ways; everything taller is a wall.
