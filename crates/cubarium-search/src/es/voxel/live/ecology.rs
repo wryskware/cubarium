@@ -240,7 +240,7 @@ impl EcologyParams {
             .filter(|p| !LINEAGE_PARAMS.contains(&p.name))
             .map(|p| p.name.to_string())
             .collect();
-        for f in Founder::ALL {
+        for f in crate::es::voxel::TRAINED_LINEAGES {
             for p in LINEAGE_PARAMS {
                 out.push(format!("{p}@{}", f.name()));
             }

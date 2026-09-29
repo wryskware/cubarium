@@ -203,6 +203,10 @@ const BYSTANDER_SALT: u64 = 0x_B157_A4DE_5EED_0002;
 /// (`StartingStores::HUNGRY`). Placeholder, `design/backlog.md` §1.
 pub const ARENA_BYSTANDERS: usize = 2;
 
+/// The lineages the frozen sensing arena is built for: the two grazing lineages. The
+/// lanternjaw has no arena until P2 (predation note §2.11).
+pub const ARENA_FOUNDERS: [Founder; 2] = [Founder::Blind, Founder::Browser];
+
 /// Squared standard columns a bystander keeps from the start and from every resource,
 /// so it is never placed in the candidate's mouth or on its food. Placeholder.
 const BYSTANDER_CLEARANCE: i64 = 9;
@@ -227,6 +231,7 @@ fn patch_kinds(
         (Founder::Browser, LayoutKind::Reacquisition(_)) => {
             &[PatchKind::Seedling, PatchKind::Rosette]
         }
+        (Founder::Lanternjaw, _) => panic!("the sensing arena is built for the two grazing lineages; the lanternjaw has none until P2"),
     };
     let mut rng = Rng::new(layout_seed ^ PATCH_KIND_SALT);
     let rotation = rng.below(palette.len());
@@ -297,6 +302,7 @@ pub fn edible_stock(
     let pools = match founder {
         Founder::Blind => fv.ground_at(site).map_or(0.0, |g| g.litter + g.carrion),
         Founder::Browser => 0.0,
+        Founder::Lanternjaw => fv.ground_at(site).map_or(0.0, |g| g.carrion),
     };
     let stand = fv.stand_at(site).filter(|s| {
         let fungal = fv.config.species(s.species).trophic == Trophic::Saprotroph;
@@ -717,6 +723,7 @@ impl Arena {
                 (Founder::Blind, LayoutKind::StageA) => LITTER_PER_TILE,
                 (Founder::Blind, LayoutKind::Reacquisition(_)) => REACQUISITION_LITTER_PER_PATCH,
                 (Founder::Browser, _) => BROWSER_FOLIAGE_PER_STAND,
+                (Founder::Lanternjaw, _) => panic!("the sensing arena is built for the two grazing lineages; the lanternjaw has none until P2"),
             };
             let organic = if Some(planned) == initial_patch {
                 REACQUISITION_INITIAL_PATCH_FRACTION * full
@@ -804,6 +811,7 @@ impl Arena {
                     Founder::Browser => {
                         toward + (2.0 * rng.unit() - 1.0) * std::f64::consts::FRAC_PI_2
                     }
+                    Founder::Lanternjaw => panic!("the sensing arena is built for the two grazing lineages; the lanternjaw has none until P2"),
                 }
             };
             // In the fauna's own `[0, 2pi)`, which its motion step wraps every heading
@@ -820,6 +828,7 @@ impl Arena {
         let other = match founder {
             Founder::Blind => Founder::Browser,
             Founder::Browser => Founder::Blind,
+            Founder::Lanternjaw => panic!("the sensing arena is built for the two grazing lineages; the lanternjaw has none until P2"),
         };
         let mut brng = Rng::new(layout_seed ^ BYSTANDER_SALT);
         let mut pool: Vec<Site> = candidates
@@ -961,6 +970,7 @@ impl Arena {
                 let t = self.flora.take_foliage_in_layers(site, want, &band);
                 add(&mut got, t.map(|t| t.taken));
             }
+            Founder::Lanternjaw => add(&mut got, self.flora.take_carrion(site, want)),
         }
         (got.organic > 0.0).then_some(got)
     }
@@ -1108,7 +1118,7 @@ mod tests {
     /// bystanders are the other lineage, placed and alive.
     #[test]
     fn the_rebuilt_arena_lays_every_kind_on_both_grids_with_bystanders() {
-        for founder in Founder::ALL {
+        for founder in ARENA_FOUNDERS {
             for seed in [1u64, 6, 20] {
                 let standard = Arena::build(founder, seed);
                 let fine = Arena::build_on(founder, seed, ArenaGrid::Fine);
@@ -1150,7 +1160,7 @@ mod tests {
     #[test]
     fn resource_sites_are_unique_across_seeds() {
         for seed in SEEDS {
-            for founder in Founder::ALL {
+            for founder in ARENA_FOUNDERS {
                 let arena = Arena::build(founder, seed);
                 let mut sorted = arena.resources.clone();
                 sorted.sort();
@@ -1174,7 +1184,7 @@ mod tests {
     #[test]
     fn the_arena_is_the_frozen_size_with_finite_food() {
         for seed in SEEDS {
-            for founder in Founder::ALL {
+            for founder in ARENA_FOUNDERS {
                 let arena = Arena::build(founder, seed);
                 let c = arena.world.config();
                 assert_eq!((c.width, c.height, c.depth, c.voxel_m), (32, 16, 12, 0.25));
@@ -1210,7 +1220,7 @@ mod tests {
         let mut blind_errors: Vec<f64> = Vec::new();
         let mut browser_errors: Vec<f64> = Vec::new();
         for seed in STAGE_A_SEEDS {
-            for founder in Founder::ALL {
+            for founder in ARENA_FOUNDERS {
                 let arena = Arena::build(founder, seed);
                 let animal = arena
                     .animal_id
@@ -1236,6 +1246,7 @@ mod tests {
                     .sin()
                     .atan2((animal.pose.heading_rad - toward).cos());
                 match founder {
+                    Founder::Lanternjaw => unreachable!("no lanternjaw arena"),
                     Founder::Blind => blind_errors.push(error),
                     Founder::Browser => {
                         assert!(
@@ -1284,7 +1295,7 @@ mod tests {
     #[test]
     fn the_start_heading_is_deterministic_per_seed() {
         for seed in STAGE_A_SEEDS {
-            for founder in Founder::ALL {
+            for founder in ARENA_FOUNDERS {
                 let a = Arena::build(founder, seed).animal_pose().expect("placed");
                 let b = Arena::build(founder, seed).animal_pose().expect("placed");
                 assert_eq!(a.heading_rad, b.heading_rad, "{founder:?} seed {seed}");
@@ -1299,7 +1310,7 @@ mod tests {
     #[test]
     fn reacquisition_layouts_are_two_finite_deterministic_patches() {
         for seed in REACQUISITION_SEEDS {
-            for founder in Founder::ALL {
+            for founder in ARENA_FOUNDERS {
                 let mut stage = Arena::build_reacquisition(founder, seed);
                 let again = Arena::build_reacquisition(founder, seed);
                 assert_eq!(stage.arena.resources, again.arena.resources);
@@ -1353,7 +1364,7 @@ mod tests {
     /// for the browser; only its edible foliage is halved.
     #[test]
     fn the_stage_b_initial_patch_is_half_the_successor() {
-        for founder in Founder::ALL {
+        for founder in ARENA_FOUNDERS {
             let stage = Arena::build_reacquisition(founder, 6);
             let config = cubarium_voxel_fauna::FaunaConfig::default();
             let bite_per_s = config.founder(founder).core.bite_per_s;
@@ -1389,7 +1400,7 @@ mod tests {
     #[test]
     fn reacquisition_placement_is_safe_across_a_broad_seed_sample() {
         for seed in 0..256 {
-            for founder in Founder::ALL {
+            for founder in ARENA_FOUNDERS {
                 let stage = Arena::build_reacquisition(founder, seed);
                 assert_eq!(stage.arena.resources.len(), 2, "{founder:?} seed {seed}");
                 assert!(
@@ -1824,10 +1835,11 @@ mod tests {
     fn stage_a_starts_present_the_promised_initial_signal() {
         let mut browser_immediate = 0usize;
         for seed in STAGE_A_SEEDS {
-            for founder in Founder::ALL {
+            for founder in ARENA_FOUNDERS {
                 let arena = Arena::build(founder, seed);
                 let id = arena.animal_id.expect("the Stage A founder is placed");
                 match founder {
+                    Founder::Lanternjaw => unreachable!("no lanternjaw arena"),
                     Founder::Blind => {
                         let obs = first_sample_of_built_founder(
                             arena.into_sim(SimConfig::with_threads(1)),
@@ -2006,7 +2018,7 @@ mod tests {
     fn the_setup_and_sampling_costs_are_measured() {
         use std::time::Instant;
 
-        for founder in Founder::ALL {
+        for founder in ARENA_FOUNDERS {
             let t0 = Instant::now();
             let arena = Arena::build(founder, 1);
             let build = t0.elapsed();

@@ -59,7 +59,7 @@ pub fn check(
     let stage = task::parse_stage(&stage)?;
     let founders: Vec<Founder> = match founder.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(name) => vec![parse_founder(name)?],
-        None => Founder::ALL.into(),
+        None => super::TRAINED_LINEAGES.into(),
     };
     let seeds = seeds.clamp(1, task::TRAINING_LAYOUT_SEEDS.len());
 
@@ -1836,6 +1836,7 @@ pub fn start_probe(founder: String, horizons: String, workers: usize) -> Result<
     let foods: Vec<Food> = match founder {
         Founder::Blind => vec![Food::Litter, Food::CapTissue, Food::Carrion],
         Founder::Browser => vec![Food::Foliage],
+        Founder::Lanternjaw => vec![Food::Carrion],
     };
     println!(
         "probe,bystanders,horizon,arm,score,survived,starved,drowned,{},motor,maintenance,\

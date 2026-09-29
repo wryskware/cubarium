@@ -18,6 +18,7 @@ fn centre(founder: Founder) -> Vec<f64> {
     match founder {
         Founder::Blind => initial_center_shape::<23, 3>(5),
         Founder::Browser => initial_center_shape::<37, 3>(5),
+        Founder::Lanternjaw => unreachable!("the lanternjaw trains from P2"),
     }
 }
 
@@ -32,7 +33,7 @@ fn logits(r: Response) -> [f64; 3] {
 /// observation; two on the same variant act identically.
 #[test]
 fn different_variants_act_differently_and_the_same_variant_identically() {
-    for founder in Founder::ALL {
+    for founder in crate::es::voxel::TRAINED_LINEAGES {
         let table =
             VariantTable::antithetic(founder, &centre(founder), 7, 0.5, 0, 2).expect("valid");
         assert_eq!(table.len(), 4);
@@ -67,9 +68,14 @@ fn arena_sim(founder: Founder) -> Sim {
 }
 
 fn tables(pairs: usize) -> Vec<Option<VariantTable>> {
+    // One slot per lineage; the lanternjaw trains from P2, so its slot is empty.
     Founder::ALL
         .iter()
-        .map(|&f| Some(VariantTable::antithetic(f, &centre(f), 3, 0.05, 0, pairs).expect("valid")))
+        .map(|&f| {
+            crate::es::voxel::TRAINED_LINEAGES.contains(&f).then(|| {
+                VariantTable::antithetic(f, &centre(f), 3, 0.05, 0, pairs).expect("valid")
+            })
+        })
         .collect()
 }
 
@@ -122,7 +128,7 @@ fn a_newborn_gets_a_variant_and_its_own_window() {
 /// the bodies' summed motor is the ledger's motor over that window alone.
 #[test]
 fn a_bodys_score_counts_only_its_own_window() {
-    for founder in Founder::ALL {
+    for founder in crate::es::voxel::TRAINED_LINEAGES {
         let mut sim = arena_sim(founder);
         let tables = tables(2);
         let mut motor_by_window = Vec::new();

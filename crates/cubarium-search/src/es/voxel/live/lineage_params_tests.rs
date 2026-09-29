@@ -94,7 +94,7 @@ fn the_search_dimensions_split_the_lineage_parameters() {
     let names = EcologyParams::search_names();
     for p in LINEAGE_PARAMS {
         assert!(!names.iter().any(|n| n == p), "{p} is split, not shared");
-        for f in Founder::ALL {
+        for f in crate::es::voxel::TRAINED_LINEAGES {
             assert!(
                 names.contains(&format!("{p}@{}", f.name())),
                 "{p}@{}",

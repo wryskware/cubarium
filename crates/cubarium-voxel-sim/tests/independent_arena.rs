@@ -239,7 +239,7 @@ fn an_arena_bite_closes_the_three_currencies_across_stock_animal_and_respiration
 /// drifted apart, or a channel escapes its normalization and is trained through.
 #[test]
 fn every_arena_sampling_hands_the_controller_exactly_its_manifest_width() {
-    for founder in Founder::ALL {
+    for founder in cubarium_voxel_sim::ARENA_FOUNDERS {
         let manifest = founder.manifest();
         let arena = Arena::build(founder, 2);
         let id = arena.animal_id.expect("the arena placed its founder");

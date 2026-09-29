@@ -230,7 +230,7 @@ pub fn evaluate(
     let (mut sim, info) = world::found_world(
         &cfg,
         base,
-        cubarium_voxel_sim::habitat::FOUNDER_COUNTS,
+        cubarium_voxel_sim::habitat::NO_EGG_BANK,
         params,
     );
     super::install_centres(sim.fauna_mut(), drivers);
@@ -268,7 +268,10 @@ pub fn evaluate(
                         "{total} animals at minute {}",
                         elapsed / TICKS_PER_MIN
                     ));
-                } else if let Some(f) = Founder::ALL.iter().find(|f| pop[f.index()] == 0) {
+                } else if let Some(f) = crate::es::voxel::TRAINED_LINEAGES
+                    .iter()
+                    .find(|f| pop[f.index()] == 0)
+                {
                     halt = Some(format!("the {} lineage died out", f.name()));
                 }
                 if halt.is_some() {
@@ -303,7 +306,10 @@ pub fn evaluate(
     };
     let pop = window::population(&sim);
     let species_end = Scan::of(&sim).stands.to_vec();
-    trace.missing = Founder::ALL.iter().filter(|f| pop[f.index()] == 0).count()
+    trace.missing = crate::es::voxel::TRAINED_LINEAGES
+        .iter()
+        .filter(|f| pop[f.index()] == 0)
+        .count()
         + species_start
             .iter()
             .zip(&species_end)
@@ -313,10 +319,13 @@ pub fn evaluate(
     let projected_from_min = (trace.minutes.last().copied().unwrap_or(0.0) < score_min)
         .then(|| project(&mut trace, score_min));
     trace.silent_lineages = if elapsed >= half_ticks {
-        late_births.iter().filter(|b| **b == 0).count()
+        crate::es::voxel::TRAINED_LINEAGES
+            .iter()
+            .filter(|f| late_births[f.index()] == 0)
+            .count()
     } else {
         // Stopped before the second half: judged by the lineages it still has.
-        Founder::ALL.len()
+        crate::es::voxel::TRAINED_LINEAGES.len()
     };
     let penalty = penalty(&trace, &spec.band);
     let readout_mean = super::readout::pool(&readouts)
@@ -747,7 +756,7 @@ pub fn check(
         let (mut sim, info) = world::found_world(
             &cfg,
             seed,
-            cubarium_voxel_sim::habitat::FOUNDER_COUNTS,
+            cubarium_voxel_sim::habitat::NO_EGG_BANK,
             params,
         );
         super::install_centres(sim.fauna_mut(), &drivers);

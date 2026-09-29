@@ -524,6 +524,7 @@ fn heuristic(founder: Founder) -> Box<dyn Controller> {
     match founder {
         Founder::Blind => Box::new(BlindForager::new()),
         Founder::Browser => Box::new(BrowserForager::new()),
+        Founder::Lanternjaw => Box::new(cubarium_voxel_fauna::LanternjawAmbush::new()),
     }
 }
 
@@ -921,6 +922,7 @@ fn drive(
     let classes: Vec<usize> = match founder {
         Founder::Blind => vec![Food::Litter, Food::CapTissue, Food::Carrion],
         Founder::Browser => vec![Food::Foliage],
+        Founder::Lanternjaw => vec![Food::Carrion],
     }
     .into_iter()
     .map(Food::index)
@@ -1155,7 +1157,7 @@ mod tests {
     #[test]
     fn the_per_body_intake_is_the_ledgers_lineage_assimilation() {
         let cancel = AtomicBool::new(false);
-        for founder in Founder::ALL {
+        for founder in crate::es::voxel::TRAINED_LINEAGES {
             for seed in TRAINING_LAYOUT_SEEDS.into_iter().take(3) {
                 let prepared = PreparedArena::build_stage(founder, seed, Stage::A);
                 let mut arena = prepared.episode_arena();
@@ -1195,7 +1197,7 @@ mod tests {
     #[test]
     fn an_arena_episode_samples_the_body_and_scores_only_the_founder() {
         let cancel = AtomicBool::new(false);
-        for founder in Founder::ALL {
+        for founder in crate::es::voxel::TRAINED_LINEAGES {
             let prepared = Prepared::build(founder, TRAINING_LAYOUT_SEEDS[0]);
             let rest = EpisodeDriver::control(VoxelControl::NoIntake, founder);
             let sc = FaunaConfig::default().founder(founder).core;
@@ -1258,7 +1260,7 @@ mod tests {
     fn an_episode_runs_the_controller_and_survives_the_horizon() {
         let cancel = AtomicBool::new(false);
         let limits = Limits::new(&cancel);
-        for founder in Founder::ALL {
+        for founder in crate::es::voxel::TRAINED_LINEAGES {
             let prepared = Prepared::build(founder, TRAINING_LAYOUT_SEEDS[0]);
             for driver in [
                 gru(founder),
@@ -1374,7 +1376,7 @@ mod tests {
     fn stage_b_reports_both_patches_and_stage_a_reports_nothing() {
         let cancel = AtomicBool::new(false);
         let limits = Limits::new(&cancel);
-        for founder in Founder::ALL {
+        for founder in crate::es::voxel::TRAINED_LINEAGES {
             let a = Prepared::build_stage(founder, TRAINING_LAYOUT_SEEDS[0], Stage::A);
             let e = run_prepared(
                 &a,

@@ -56,7 +56,7 @@ pub const SHREDDER_LANDSCAPE_HORIZON_TICKS: u64 = 24_000;
 pub fn lineage_horizon(founder: Founder) -> u64 {
     match founder {
         Founder::Blind => SHREDDER_LANDSCAPE_HORIZON_TICKS,
-        Founder::Browser => LANDSCAPE_HORIZON_TICKS,
+        Founder::Browser | Founder::Lanternjaw => LANDSCAPE_HORIZON_TICKS,
     }
 }
 
@@ -154,7 +154,7 @@ impl Landscape {
                     Fauna::new(FaunaConfig::default()),
                 )
             },
-            habitat::FOUNDER_COUNTS,
+            habitat::NO_EGG_BANK,
             |s: &habitat::Seeded| s.acceptance.accepted,
         );
         Ok(Landscape::from_founded(preset, seed_base, founded))

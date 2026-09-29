@@ -222,7 +222,7 @@ fn surplus_floor_raises_the_breeding_threshold() {
         with("founder.reproduction.surplus_floor", 1.0).fauna_config(),
         with("founder.reproduction.surplus_floor", 2.0).fauna_config(),
     );
-    for f in Founder::ALL {
+    for f in crate::es::voxel::TRAINED_LINEAGES {
         let (a, b) = (one.founder(f).core, two.founder(f).core);
         assert!(
             b.reproduction.surplus_reserve(&b) > a.reproduction.surplus_reserve(&a),
@@ -268,7 +268,7 @@ fn maintenance_raises_upkeep() {
 #[test]
 fn the_lifespan_and_defence_parameters_reach_their_layers() {
     let f = with("founder.lifespan_median_s", 0.5).fauna_config();
-    for l in Founder::ALL {
+    for l in crate::es::voxel::TRAINED_LINEAGES {
         assert_eq!(
             f.founder(l).core.lifespan_median_s,
             0.5 * FaunaConfig::default().founder(l).core.lifespan_median_s

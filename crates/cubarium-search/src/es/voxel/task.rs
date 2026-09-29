@@ -172,7 +172,7 @@ pub fn arena_protocol(founder: Founder, stage: Stage, band: Band) -> String {
     };
     let base = format!("{base}+{P5_ARENA_REVISION}");
     match founder {
-        Founder::Blind => base,
+        Founder::Blind | Founder::Lanternjaw => base,
         Founder::Browser => format!("{base}+{BROWSER_CROWN_HEIGHT_REVISION}"),
     }
 }
@@ -218,7 +218,7 @@ pub const BLIND_CUE_REACH_M: f64 = 1.5;
 pub fn sensed_radius_m(founder: Founder) -> f64 {
     match founder {
         Founder::Blind => BLIND_CUE_REACH_M,
-        Founder::Browser => founder.manifest().cone_range_m,
+        Founder::Browser | Founder::Lanternjaw => founder.manifest().cone_range_m,
     }
 }
 
@@ -824,7 +824,7 @@ mod tests {
             .into_iter()
             .chain(EVALUATION_LAYOUT_SEEDS)
         {
-            for founder in Founder::ALL {
+            for founder in crate::es::voxel::TRAINED_LINEAGES {
                 let p = PreparedArena::build_stage_in(founder, seed, Stage::B, Band::Near);
                 let (initial, successor) = p.patches().expect("Stage B names its patches");
                 let separation = columns(initial, successor);
@@ -879,7 +879,7 @@ mod tests {
     fn every_frozen_layout_lays_its_kinds_at_the_arenas_stock() {
         use cubarium_voxel_sim::{BROWSER_FOLIAGE_PER_STAND, PatchKind};
 
-        for founder in Founder::ALL {
+        for founder in crate::es::voxel::TRAINED_LINEAGES {
             for seed in TRAINING_LAYOUT_SEEDS
                 .into_iter()
                 .chain(EVALUATION_LAYOUT_SEEDS)
@@ -899,6 +899,7 @@ mod tests {
                         (_, PatchKind::Stripped) => 0.0,
                         (Founder::Browser, _) => BROWSER_FOLIAGE_PER_STAND,
                         (Founder::Blind, _) => 0.2,
+                        (Founder::Lanternjaw, _) => unreachable!("no lanternjaw arena"),
                     };
                     assert!(
                         (arena.patch_stock(site) - want).abs() < 1e-12,
@@ -932,7 +933,7 @@ mod tests {
             .into_iter()
             .chain(EVALUATION_LAYOUT_SEEDS)
         {
-            for founder in Founder::ALL {
+            for founder in crate::es::voxel::TRAINED_LINEAGES {
                 let p = PreparedArena::build_stage_in(founder, seed, Stage::B, Band::Landed);
                 let (initial, successor) = p.patches().expect("patches");
                 assert!(site_separation_m(initial, successor, ArenaGrid::Standard) >= 2.0);
@@ -1027,7 +1028,7 @@ mod tests {
             .into_iter()
             .chain(EVALUATION_LAYOUT_SEEDS)
         {
-            for founder in Founder::ALL {
+            for founder in crate::es::voxel::TRAINED_LINEAGES {
                 for stage in [Stage::A, Stage::B] {
                     let p = PreparedArena::build_stage(founder, seed, stage);
                     assert!(
@@ -1141,7 +1142,7 @@ mod tests {
     /// world material.
     #[test]
     fn clone_and_rebuild_prepare_identical_arenas() {
-        for founder in Founder::ALL {
+        for founder in crate::es::voxel::TRAINED_LINEAGES {
             let p = PreparedArena::build(founder, TRAINING_LAYOUT_SEEDS[2]);
             let cloned = p.episode_arena();
             let rebuilt = p.rebuilt();
@@ -1163,7 +1164,7 @@ mod tests {
     #[test]
     fn the_start_geometry_is_the_placement_the_arena_made() {
         for seed in EVALUATION_LAYOUT_SEEDS {
-            for founder in Founder::ALL {
+            for founder in crate::es::voxel::TRAINED_LINEAGES {
                 for stage in [Stage::A, Stage::B] {
                     let p = PreparedArena::build_stage(founder, seed, stage);
                     let g = p.start_geometry().expect("a placed body has a geometry");

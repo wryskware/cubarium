@@ -32,7 +32,7 @@ fn in_band_stock(
                 ..patch
             })
             .map_or(0.0, |g| g.litter + g.carrion),
-        Founder::Browser => 0.0,
+        Founder::Browser | Founder::Lanternjaw => 0.0,
     };
     let stands: f64 = fv
         .stand_at(patch)
@@ -40,7 +40,7 @@ fn in_band_stock(
             let trophic = fv.config.species(s.species).trophic;
             match founder {
                 Founder::Blind => trophic == Trophic::Saprotroph,
-                Founder::Browser => trophic != Trophic::Saprotroph,
+                Founder::Browser | Founder::Lanternjaw => trophic != Trophic::Saprotroph,
             }
         })
         .map_or(0.0, |s| {
@@ -55,7 +55,7 @@ fn in_band_stock(
 #[test]
 fn stage_b_patches_are_reachable_by_the_band_from_the_start_face_on_every_layout() {
     for grid in [ArenaGrid::Standard, ArenaGrid::Fine] {
-        for founder in Founder::ALL {
+        for founder in cubarium_voxel_sim::ARENA_FOUNDERS {
             for band in [SuccessorBand::Near, SuccessorBand::Landed] {
                 for seed in 0..32u64 {
                     let (arena, initial, successor) =

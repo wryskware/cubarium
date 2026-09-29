@@ -109,15 +109,22 @@ pub fn voxel_schema_digest(founder: Founder) -> u64 {
 /// A founder from a command-line name. Accepts the lineage name, its role word, and the
 /// two obvious shorthand spellings, so `--founder blind`, `--founder littershredder` and
 /// `--founder Browser` all resolve.
+/// The lineages the arenas, the landscapes and the live search **train**: the two grazing
+/// lineages. The lanternjaw (predation P1) has no brain, no arena and no place in a
+/// training world until its contract v3 (P2); every lineage loop here that means "a
+/// lineage being trained" walks this, not `Founder::ALL`.
+pub const TRAINED_LINEAGES: [Founder; 2] = [Founder::Blind, Founder::Browser];
+
 pub fn parse_founder(s: &str) -> Result<Founder, String> {
     let t = s.trim().to_ascii_lowercase();
     Ok(match t.as_str() {
         "blind" | "littershredder" | "litter" => Founder::Blind,
         "browser" | "frondgrazer" | "sighted" | "foliage" => Founder::Browser,
+        "lanternjaw" => Founder::Lanternjaw,
         other => {
             return Err(format!(
-                "unknown founder `{other}`; use `blind` (littershredder) or `browser` \
-                 (frondgrazer)"
+                "unknown founder `{other}`; use `blind` (littershredder), `browser` \
+                 (frondgrazer) or `lanternjaw`"
             ));
         }
     })
@@ -131,7 +138,7 @@ mod tests {
     /// separate the lineages.
     #[test]
     fn the_voxel_schema_digest_is_the_manifest_digest() {
-        for founder in Founder::ALL {
+        for founder in crate::es::voxel::TRAINED_LINEAGES {
             let a = voxel_schema_digest(founder);
             let b = voxel_schema_digest(founder);
             assert_ne!(a, 0);

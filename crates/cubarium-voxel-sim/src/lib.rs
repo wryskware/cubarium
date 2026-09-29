@@ -73,7 +73,7 @@ pub mod habitat;
 mod introduce_tests;
 pub mod scene;
 pub use arena::{
-    ARENA_BYSTANDERS, ARENA_DEPTH, ARENA_HEIGHT, ARENA_VOXEL_M, ARENA_WIDTH, Arena, ArenaGrid,
+    ARENA_BYSTANDERS, ARENA_FOUNDERS, ARENA_DEPTH, ARENA_HEIGHT, ARENA_VOXEL_M, ARENA_WIDTH, Arena, ArenaGrid,
     BROWSER_FOLIAGE_PER_STAND, FOUNDER_START, GROUND_Y, PatchKind, Placement,
     REACQUISITION_INITIAL_PATCH_FRACTION, REACQUISITION_LITTER_PER_PATCH, ReacquisitionArena,
     SuccessorBand, edible_stock, populate,

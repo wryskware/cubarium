@@ -415,6 +415,12 @@ impl EpisodeDriver {
             Founder::Browser => {
                 EpisodeGru::Browser(Box::new(tensor::shape_policy::<37, 3>(theta, digest)?))
             }
+            Founder::Lanternjaw => {
+                return Err(
+                    "the lanternjaw has no GRU policy until its contract v3 (predation P2)"
+                        .to_string(),
+                );
+            }
         };
         Ok(EpisodeDriver {
             founder,
@@ -488,10 +494,12 @@ impl EpisodeDriver {
             EpisodeKind::Control(VoxelControl::Heuristic) => match self.founder {
                 Founder::Blind => Box::new(BlindForager::new()),
                 Founder::Browser => Box::new(BrowserForager::new()),
+                Founder::Lanternjaw => Box::new(cubarium_voxel_fauna::LanternjawAmbush::new()),
             },
             EpisodeKind::Control(VoxelControl::Herding) => match self.founder {
                 Founder::Browser => Box::new(HerdingBrowser::new()),
                 Founder::Blind => Box::new(BlindForager::new()),
+                Founder::Lanternjaw => Box::new(cubarium_voxel_fauna::LanternjawAmbush::new()),
             },
         };
         if let Some(sink) = &self.record {

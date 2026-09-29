@@ -31,7 +31,7 @@ use std::collections::BTreeMap;
 use cubarium_voxel::{Material, Settle, VoxelView, World};
 use cubarium_voxel_fauna::{
     BlindForager, BrowserForager, Command as FaunaCommand, Controller, Fauna, Founder,
-    FounderPhysiology, RouteMap, StartingStores, has_headroom,
+    FounderPhysiology, LanternjawAmbush, RouteMap, StartingStores, has_headroom,
 };
 use cubarium_voxel_flora::{
     Command as FloraCommand, Deposit, DepositKind, Flora, FloraView, Site, Species, SpeciesConfig,
@@ -108,6 +108,13 @@ const STEP_M: f64 = 0.5;
 /// stops placing it.
 const SHREDDERS: usize = 8;
 const BROWSERS: usize = 8;
+
+/// **The founding egg bank** (`design/predation-and-flight-2026-09-28.md` §2.9, §2.13):
+/// how many lanternjaw clutches a fresh world buries in its prey components — no adults.
+/// Three clutches of the lineage's own three eggs: "a few", nine eggs whose thresholds
+/// (2–10) and viabilities (6–24 h) spread the first hatchings over several dusks.
+/// `founder_counts[Founder::Lanternjaw]` is this count of **clutches**, not bodies.
+const FOUNDING_CLUTCHES: usize = 3;
 
 /// Leaf litter laid under each littershredder, in organic-matter units.
 ///
@@ -276,6 +283,11 @@ pub struct Seeded {
     pub vines: usize,
     /// Founder stands planted, by [`Species::index`].
     pub stands_by_species: [usize; Species::COUNT],
+    /// Lanternjaw eggs the founding bank buried ([`bury_founding_clutches`]).
+    pub founding_eggs: usize,
+    /// Why the founding bank buried nothing, when it was asked for and could not: a world
+    /// with no prey component founds no clutches and says so (§2.9).
+    pub founding_bank_refused: Option<String>,
     /// Faces each species was eligible for after the pre-roll (its establishment gates,
     /// adult upkeep and the water it would have stood in), by [`Species::index`]. A zero
     /// is an unmet niche.
@@ -297,11 +309,18 @@ impl Seeded {
 /// the ordinary founder, deposit and introduction inflows the layers already name.
 /// Deterministic for a given world.
 pub fn seed(world: &mut World, flora: &mut Flora, fauna: &mut Fauna) -> Seeded {
-    seed_with_founder_counts(world, flora, fauna, [SHREDDERS, BROWSERS])
+    seed_with_founder_counts(world, flora, fauna, FOUNDER_COUNTS)
 }
 
-/// The default founder count per lineage: what [`seed`] places.
-pub const FOUNDER_COUNTS: [usize; Founder::COUNT] = [SHREDDERS, BROWSERS];
+/// The default founder count per lineage: what [`seed`] places — littershredders and
+/// frondgrazers as bodies, and for the lanternjaw the founding bank's **clutches**
+/// ([`FOUNDING_CLUTCHES`]; §2.9: a fresh world is founded with a buried egg bank, not
+/// adults).
+pub const FOUNDER_COUNTS: [usize; Founder::COUNT] = [SHREDDERS, BROWSERS, FOUNDING_CLUTCHES];
+
+/// [`FOUNDER_COUNTS`] with **no egg bank**: the predation measurement's control arm, and
+/// the training worlds until the lanternjaw has a brain (P2).
+pub const NO_EGG_BANK: [usize; Founder::COUNT] = [SHREDDERS, BROWSERS, 0];
 
 /// Seed the example habitat with a caller-selected number of bodies per sensed lineage.
 /// The normal ambient scene uses [`seed`]; this variant exists for bounded diagnosis arms
@@ -773,6 +792,15 @@ pub fn seed_pre_rolled(
     seeded.shortfall[Founder::Browser.index()] =
         want.saturating_sub(seeded.founders[Founder::Browser.index()]);
 
+    // The founding egg bank, in the prey's components (§2.9, §2.13): no adults.
+    let clutches = founder_counts[Founder::Lanternjaw.index()];
+    if clutches > 0 {
+        match bury_founding_clutches(world, flora, fauna, clutches) {
+            Ok(eggs) => seeded.founding_eggs = eggs,
+            Err(why) => seeded.founding_bank_refused = Some(why),
+        }
+    }
+
     seeded.imported_organic = flora.view().ledger.seeded_organic_in
         + flora.view().ledger.deposited_organic_in
         + fauna.view().ledger.introduced_organic_in
@@ -932,8 +960,15 @@ pub fn accept(
         let phys = *fauna.config().founder(founder);
         let (map, food) = lineage_food(&view, &fv, &phys, founder);
         let u = upkeep_per_hour(&phys);
+        // A carnivore arrives from its egg bank, not as a placed body: the seeder places
+        // none of it and the verdict asks for none (its count is the bank's clutches).
+        let wanted_bodies = if phys.hunter.is_some() {
+            0
+        } else {
+            wanted[founder.index()]
+        };
         let mut v = LineageVerdict {
-            wanted: wanted[founder.index()],
+            wanted: wanted_bodies,
             upkeep_per_h: u,
             ..LineageVerdict::default()
         };
@@ -991,6 +1026,132 @@ pub fn install_heuristics(fauna: &mut Fauna) {
         Founder::Browser,
         Arc::new(|| -> Box<dyn Controller> { Box::new(BrowserForager::new()) }),
     );
+    // The lanternjaw's ambush teacher (predation §2.12): it has no trained centre, so
+    // this drives every one of them, hatched or introduced.
+    fauna.set_founder_factory(
+        Founder::Lanternjaw,
+        Arc::new(|| -> Box<dyn Controller> { Box::new(LanternjawAmbush::new()) }),
+    );
+}
+
+/// The **prey components** of a carnivore lineage (§2.9): the walkable components of its
+/// own route map that hold at least one living body on its prey list, each with the prey
+/// faces in it, in route-map order — and the route map itself. Empty when the lineage
+/// hunts nothing or no prey body stands anywhere it could walk.
+fn prey_components(
+    world: &World,
+    fauna: &Fauna,
+    hunter: Founder,
+) -> (RouteMap, BTreeMap<usize, Vec<Site>>) {
+    let phys = *fauna.config().founder(hunter);
+    let map = RouteMap::for_founder(&world.view(), &phys);
+    let mut out: BTreeMap<usize, Vec<Site>> = BTreeMap::new();
+    let Some(h) = phys.hunter else {
+        return (map, out);
+    };
+    for a in fauna.view().animals {
+        let Some(f) = a.founder else { continue };
+        if !h.hunts(f) {
+            continue;
+        }
+        if let Some(c) = map.component_of(a.site) {
+            out.entry(c).or_default().push(a.site);
+        }
+    }
+    (map, out)
+}
+
+/// **The introduction control** (`design/predation-and-flight-2026-09-28.md` §2.9, the
+/// `--introduce lanternjaw:N` flag and its viewer twin): `n` adult lanternjaws with full
+/// stores, each on a standable face of a **prey component**, spread over those faces,
+/// with the lineage's controller installed when a factory is registered. The ids placed,
+/// or why none could be: nothing is placed where no prey lives.
+pub fn introduce_lanternjaws(
+    world: &World,
+    flora: &Flora,
+    fauna: &mut Fauna,
+    n: usize,
+) -> Result<Vec<u64>, String> {
+    let _ = flora;
+    let (map, prey) = prey_components(world, fauna, Founder::Lanternjaw);
+    if prey.is_empty() {
+        return Err(
+            "no prey component: no frondgrazer or littershredder stands anywhere a              lanternjaw could walk, so none is introduced"
+                .to_string(),
+        );
+    }
+    let faces: Vec<Site> = map
+        .faces
+        .iter()
+        .zip(&map.components)
+        .filter(|(_, c)| prey.contains_key(c))
+        .map(|(f, _)| *f)
+        .collect();
+    let mut ids = Vec::new();
+    for (k, site) in strided(&faces, n).into_iter().enumerate() {
+        if fauna.apply(
+            world,
+            FaunaCommand::IntroduceFounderOnFace {
+                site,
+                founder: Founder::Lanternjaw,
+                stores: StartingStores::FULL,
+                heading_rad: spread_heading(k, n),
+            },
+        ) {
+            let id = fauna.view().ledger.births - 1;
+            fauna.install_founder_controller(id, Founder::Lanternjaw);
+            ids.push(id);
+        }
+    }
+    if ids.is_empty() {
+        return Err("the prey components had no face a lanternjaw fits on".to_string());
+    }
+    Ok(ids)
+}
+
+/// **The founding egg bank** (§2.9, §2.13): `clutches` lanternjaw clutches of the
+/// lineage's own size, buried on faces where its prey stand — spread over the prey, so a
+/// component with more prey gets more of the bank — and nowhere else. The eggs buried, or
+/// why none could be.
+pub fn bury_founding_clutches(
+    world: &World,
+    flora: &Flora,
+    fauna: &mut Fauna,
+    clutches: usize,
+) -> Result<usize, String> {
+    let _ = flora;
+    let (_, prey) = prey_components(world, fauna, Founder::Lanternjaw);
+    if prey.is_empty() {
+        return Err(
+            "no prey component: no frondgrazer or littershredder stands anywhere a              lanternjaw could walk, so no egg bank is buried"
+                .to_string(),
+        );
+    }
+    let faces: Vec<Site> = prey.values().flatten().copied().collect();
+    let eggs = fauna
+        .config()
+        .founder(Founder::Lanternjaw)
+        .core
+        .reproduction
+        .clutch_size
+        .max(1);
+    let mut buried = 0usize;
+    for site in strided(&faces, clutches) {
+        if fauna.apply(
+            world,
+            FaunaCommand::BuryClutch {
+                site,
+                lineage: Founder::Lanternjaw,
+                eggs,
+            },
+        ) {
+            buried += eggs as usize;
+        }
+    }
+    if buried == 0 {
+        return Err("no prey face would take a clutch".to_string());
+    }
+    Ok(buried)
 }
 
 /// A **loaded** layer's heuristics: the recipes, and a fresh controller on every standing
@@ -1442,7 +1603,7 @@ mod tests {
             browser_faces(&world.view(), &flora.view(), &fauna).is_empty(),
             "one patch is not a route to a second one"
         );
-        let out = seed_with_founder_counts(&mut world, &mut flora, &mut fauna, [0, 4]);
+        let out = seed_with_founder_counts(&mut world, &mut flora, &mut fauna, [0, 4, 0]);
         assert_eq!(out.founders[Founder::Browser.index()], 0);
         assert_eq!(
             out.shortfall[Founder::Browser.index()],
@@ -1693,7 +1854,7 @@ mod tests {
             for _ in 0..n {
                 introduce(&mut fauna, &world, Founder::Browser, Site { x: 6, y: 2, z: 3 });
             }
-            accept(&world, &flora, &fauna, [0, n])
+            accept(&world, &flora, &fauna, [0, n, 0])
         };
         let at = with(fits);
         let v = &at.lineages[Founder::Browser.index()];
@@ -1721,12 +1882,12 @@ mod tests {
         ));
         let mut fauna = Fauna::new(Default::default());
         introduce(&mut fauna, &world, Founder::Blind, at_site);
-        let got = accept(&world, &bare, &fauna, [1, 0]);
+        let got = accept(&world, &bare, &fauna, [1, 0, 0]);
         let v = &got.lineages[Founder::Blind.index()];
         assert!(v.components[0].food.stock >= LITTER_ORGANIC - 1e-12, "{got:?}");
         assert!(!v.accepted && !got.accepted, "litter with no producer: {got:?}");
         plant(&mut bare, &world, 12, 2, Species::Springturf, 0.8);
-        let got = accept(&world, &bare, &fauna, [1, 0]);
+        let got = accept(&world, &bare, &fauna, [1, 0, 0]);
         assert!(
             got.lineages[Founder::Blind.index()].accepted && got.accepted,
             "a litter-shedding stand rooted in the component: {got:?}"
@@ -1918,7 +2079,7 @@ mod tests {
         }
         let mut flora = Flora::new(flora_cfg.clone());
         let mut fauna = Fauna::new(Default::default());
-        let seeded = seed_pre_rolled(&mut world, &mut flora, &mut fauna, &pre, [0, 0]);
+        let seeded = seed_pre_rolled(&mut world, &mut flora, &mut fauna, &pre, [0, 0, 0]);
         assert_eq!(seeded.pre_roll, pre.report);
         let drowned_on = |species: Species, site: Site| {
             let i = index_of(&pre.sites, site).expect("a support face");
@@ -1937,7 +2098,7 @@ mod tests {
         let calm_pre = pre_roll(&mut calm, false);
         let mut calm_flora = Flora::new(flora_cfg.clone());
         let mut calm_fauna = Fauna::new(Default::default());
-        seed_pre_rolled(&mut calm, &mut calm_flora, &mut calm_fauna, &calm_pre, [0, 0]);
+        seed_pre_rolled(&mut calm, &mut calm_flora, &mut calm_fauna, &calm_pre, [0, 0, 0]);
         assert!(
             calm_flora
                 .view()
@@ -1965,7 +2126,10 @@ mod tests {
         assert!(a.stands >= 10, "a populated picture, not a specimen: {a:?}");
         assert!(a.logs > 0, "the glowcap grove has its wood: {a:?}");
         assert!(a.animals() > 0, "something moves: {a:?}");
-        for founder in Founder::ALL {
+        // The two grazing lineages are placed as bodies; the lanternjaw arrives as a
+        // founding egg bank.
+        assert!(a.founding_eggs > 0, "the habitat buries its egg bank: {a:?}");
+        for founder in [Founder::Blind, Founder::Browser] {
             assert!(
                 a.founders[founder.index()] > 0,
                 "the habitat introduces {}: {a:?}",
@@ -2072,7 +2236,7 @@ mod tests {
         for _ in 0..200 {
             sim.step();
         }
-        for founder in Founder::ALL {
+        for founder in [Founder::Blind, Founder::Browser] {
             let seen = *best[founder.index()].lock().expect("the sink");
             assert!(
                 seen > 0.0,

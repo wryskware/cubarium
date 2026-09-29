@@ -288,7 +288,7 @@ mod tests {
     /// A policy round-trips exactly and loads into a validated driver.
     #[test]
     fn a_policy_round_trips_exactly_and_drives() {
-        for founder in Founder::ALL {
+        for founder in crate::es::voxel::TRAINED_LINEAGES {
             let file = sample(founder);
             let dir =
                 std::env::temp_dir().join(format!("cubarium-voxel-policy-{}", std::process::id()));

@@ -26,7 +26,7 @@ fn arena_sim(founder: Founder) -> Sim {
 /// the same ticks, whoever drives the bodies (here the heuristic, with no tables).
 #[test]
 fn a_windows_intake_is_the_ledgers_assimilation() {
-    for founder in Founder::ALL {
+    for founder in crate::es::voxel::TRAINED_LINEAGES {
         let mut sim = arena_sim(founder);
         let tables = vec![None; Founder::COUNT];
         let before = sim.fauna().view().ledger.assimilated_by_founder[founder.index()];

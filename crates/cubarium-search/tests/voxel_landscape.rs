@@ -51,7 +51,7 @@ fn landscape() -> Landscape {
                 Fauna::new(FaunaConfig::default()),
             )
         },
-        [3, 3],
+        [3, 3, 0],
         |_| true,
     );
     Landscape::from_founded("tiny", TINY_SEED, founded)
@@ -69,7 +69,7 @@ fn run(prepared: &Prepared, driver: &EpisodeDriver, seed: u64) -> driver::Episod
 #[test]
 fn a_landscape_episode_is_deterministic_given_its_seed() {
     let land = landscape();
-    for founder in Founder::ALL {
+    for founder in cubarium_search::es::voxel::TRAINED_LINEAGES {
         let prepared = Prepared::Landscape(Box::new(
             land.prepare(founder, WaterState::Drained)
                 .expect("the drained state always exists"),
@@ -116,7 +116,7 @@ fn frozen_water_does_not_move_during_a_landscape_episode() {
 #[test]
 fn every_founder_in_a_landscape_episode_runs_the_candidate() {
     let land = landscape();
-    for founder in Founder::ALL {
+    for founder in cubarium_search::es::voxel::TRAINED_LINEAGES {
         let prepared = land
             .prepare(founder, WaterState::Drained)
             .expect("the drained state always exists");
@@ -163,7 +163,7 @@ fn every_founder_in_a_landscape_episode_runs_the_candidate() {
 #[test]
 fn landscape_teacher_recording_keeps_one_stream_per_body() {
     let land = landscape();
-    for founder in Founder::ALL {
+    for founder in cubarium_search::es::voxel::TRAINED_LINEAGES {
         let prepared = Prepared::Landscape(Box::new(
             land.prepare(founder, WaterState::Drained)
                 .expect("the drained state always exists"),
@@ -323,11 +323,11 @@ fn acting_bodies_start_on_drawn_faces_of_the_judged_components() {
                 Fauna::new(FaunaConfig::default()),
             )
         },
-        [3, 3],
+        [3, 3, 0],
         |_| true,
     );
     let cfg = FaunaConfig::default();
-    for founder in Founder::ALL {
+    for founder in cubarium_search::es::voxel::TRAINED_LINEAGES {
         let map = RouteMap::for_founder(&founded.world.view(), cfg.founder(founder));
         let verdict = &founded.seeded.acceptance.lineages[founder.index()];
         let habitable: Vec<usize> = verdict
@@ -361,7 +361,7 @@ fn acting_bodies_start_on_drawn_faces_of_the_judged_components() {
     }
 
     let land = Landscape::from_founded("tiny", TINY_SEED, founded);
-    for founder in Founder::ALL {
+    for founder in cubarium_search::es::voxel::TRAINED_LINEAGES {
         for water in WaterState::ALL {
             let prepared = land.prepare(founder, water).expect("the tiny ring rains");
             let a = prepared.acting_starts(11);
@@ -408,7 +408,7 @@ fn acting_bodies_start_on_drawn_faces_of_the_judged_components() {
 fn a_fixture_without_bystanders_holds_only_the_acting_lineage() {
     let land = landscape();
     let cancel = AtomicBool::new(false);
-    for founder in Founder::ALL {
+    for founder in cubarium_search::es::voxel::TRAINED_LINEAGES {
         let prepared = land.prepare(founder, WaterState::Drained).expect("drained");
         let acting = prepared.acting().count();
         let others = prepared.bystanders().count();

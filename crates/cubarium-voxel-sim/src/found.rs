@@ -500,7 +500,7 @@ mod tests {
             4,
             seeds(vec![5, 6]),
             layers,
-            [2, 2],
+            [2, 2, 0],
             first_fails,
         );
         assert_eq!(judged.get(), 2, "two worlds were judged");
@@ -535,7 +535,7 @@ mod tests {
             4,
             seeds(vec![]),
             layers,
-            [2, 2],
+            [2, 2, 0],
             |_: &habitat::Seeded| false,
         );
         assert_eq!(founded.seed, 6);
