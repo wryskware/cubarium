@@ -387,10 +387,12 @@ fn run(sim: &mut Sim, hours: f64, minute0: u64, save: Option<&SaveAt>, timing: &
     let mut phases = PhaseWindow::default();
     let mut since = std::time::Instant::now();
     let mut weather = WeatherLog::new(sim, timing.weather_log.as_deref());
+    let mut deaths = DeathLog::new(sim);
     while tick < total_ticks {
         sim.step();
         tick += 1;
         weather.poll(sim);
+        deaths.poll(sim, tick);
         if tick % TICKS_PER_MIN == 0 {
             let ms = since.elapsed().as_secs_f64() * 1e3 / TICKS_PER_MIN as f64;
             let minute = tick / TICKS_PER_MIN;
@@ -998,4 +1000,116 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64) {
     row.push(format!("{:.6}", wx.stream_m3_s()));
     row.push(format!("{:.4}", world.moisture()));
     println!("{}", row.join(","));
+}
+
+/// `DEATHLOG=path` / `STANDLOG=path` (env): diagnosis of plant deaths. Every stand that
+/// disappears, with its last state; and per minute per species the stands' reserve and
+/// foliage against their caps.
+struct DeathLog {
+    out: Option<std::io::BufWriter<std::fs::File>>,
+    stands_out: Option<std::io::BufWriter<std::fs::File>>,
+    last: std::collections::HashMap<u64, (cubarium_voxel_flora::Stand, u64)>,
+}
+
+impl DeathLog {
+    fn new(sim: &Sim) -> DeathLog {
+        use std::io::Write;
+        let open = |var: &str, header: &str| {
+            std::env::var(var).ok().map(|p| {
+                let mut f = std::io::BufWriter::new(std::fs::File::create(p).expect("log"));
+                writeln!(f, "{header}").unwrap();
+                f
+            })
+        };
+        let out = open(
+            "DEATHLOG",
+            "tick,day_phase,daylight,species,age_s,wood,alive_min,foliage,p_cap,reserve,q_cap,light,moisture,stress",
+        );
+        let stands_out = open(
+            "STANDLOG",
+            "minute,day_phase,daylight,species,n,mean_q_over_w,mean_p_over_cap,frac_q_lt_1pct,frac_newborn",
+        );
+        let mut last = std::collections::HashMap::new();
+        for st in sim.flora().view().stands {
+            last.insert(st.id, (*st, 0));
+        }
+        DeathLog { out, stands_out, last }
+    }
+
+    fn poll(&mut self, sim: &Sim, tick: u64) {
+        use std::io::Write;
+        if self.out.is_none() && self.stands_out.is_none() {
+            return;
+        }
+        let f = sim.flora().view();
+        let w = sim.world();
+        let mut next = std::collections::HashMap::with_capacity(f.stands.len());
+        for st in f.stands {
+            let born = self.last.get(&st.id).map_or(tick, |(_, b)| *b);
+            next.insert(st.id, (*st, born));
+        }
+        if let Some(out) = self.out.as_mut() {
+            for (id, (st, born)) in &self.last {
+                if next.contains_key(id) {
+                    continue;
+                }
+                let sc = f.config.species(st.species);
+                writeln!(
+                    out,
+                    "{tick},{:.4},{:.3},{:?},{:.0},{:.5},{:.5},{:.5},{:.5},{:.5},{:.5},{:.4},{:.4},{:.4}",
+                    w.day_phase(),
+                    w.life_daylight(),
+                    st.species,
+                    (tick - born) as f64 / TICK_HZ as f64,
+                    st.wood,
+                    sc.alive_min,
+                    st.foliage,
+                    sc.alpha * st.wood,
+                    st.reserve,
+                    sc.reserve_cap * st.wood,
+                    st.light,
+                    st.moisture,
+                    st.aeration_stress
+                )
+                .unwrap();
+            }
+        }
+        if tick % TICKS_PER_MIN == 0
+            && let Some(out) = self.stands_out.as_mut()
+        {
+            for s in Plant::ALL {
+                let sc = f.config.species(s);
+                let v: Vec<&(cubarium_voxel_flora::Stand, u64)> =
+                    next.values().filter(|(st, _)| st.species == s).collect();
+                let n = v.len().max(1) as f64;
+                let q: f64 = v.iter().map(|(st, _)| st.reserve / st.wood.max(1e-12)).sum::<f64>() / n;
+                let p: f64 = v
+                    .iter()
+                    .map(|(st, _)| st.foliage / (sc.alpha * st.wood).max(1e-12))
+                    .sum::<f64>()
+                    / n;
+                let low = v.iter().filter(|(st, _)| st.reserve < 0.01 * st.wood).count() as f64 / n;
+                let young = v
+                    .iter()
+                    .filter(|(_, b)| tick - b < 600 * TICK_HZ as u64)
+                    .count() as f64
+                    / n;
+                writeln!(
+                    out,
+                    "{},{:.4},{:.3},{:?},{},{:.4},{:.4},{:.4},{:.4}",
+                    tick / TICKS_PER_MIN,
+                    w.day_phase(),
+                    w.life_daylight(),
+                    s,
+                    v.len(),
+                    q,
+                    p,
+                    low,
+                    young
+                )
+                .unwrap();
+            }
+        }
+        self.last = next;
+    }
 }
