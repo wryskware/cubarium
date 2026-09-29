@@ -188,7 +188,8 @@ pub struct ComponentVerdict {
 pub struct LineageVerdict {
     pub wanted: usize,
     pub placed: usize,
-    /// Adult basal upkeep per founder per hour ([`upkeep_per_hour`]).
+    /// Adult basal upkeep per founder per hour, as the founding gate judges it
+    /// ([`founding_upkeep_per_hour`]: a x1 body's).
     pub upkeep_per_h: f64,
     /// Every component holding at least one of this lineage's founders.
     pub components: Vec<ComponentVerdict>,
@@ -684,7 +685,7 @@ pub fn seed_pre_rolled(
     // too, and it is counted.
     let blind = *fauna.config().founder(Founder::Blind);
     let blind_room = blind.adult_body().headroom_voxels(world.config().voxel_m);
-    let blind_need = ACCEPT_FOUNDER_HOURS * upkeep_per_hour(&blind);
+    let blind_need = ACCEPT_FOUNDER_HOURS * founding_upkeep_per_hour(&blind);
     let (blind_map, blind_food) =
         lineage_food(&world.view(), &flora.view(), &blind, Founder::Blind);
     let pool: Vec<Site> = {
@@ -744,7 +745,7 @@ pub fn seed_pre_rolled(
     // walkable route to a second stand. There is no foodless fallback: a lineage with
     // nowhere to live is a shortfall in `Seeded` and nothing is placed (plan §5).
     let browser = *fauna.config().founder(Founder::Browser);
-    let browser_need = ACCEPT_FOUNDER_HOURS * upkeep_per_hour(&browser);
+    let browser_need = ACCEPT_FOUNDER_HOURS * founding_upkeep_per_hour(&browser);
     let browser_map = RouteMap::for_founder(&world.view(), &browser);
     let browser_food = food_on(&browser_map, &world.view(), &flora.view(), Founder::Browser);
     let mut meadow = browser_faces_on(&browser_map, &browser_food, &world.view(), &flora.view());
@@ -818,6 +819,15 @@ fn place(
 /// respiration, no gestation — of a body at the size a founder grows into.
 pub fn upkeep_per_hour(phys: &FounderPhysiology) -> f64 {
     phys.core.maintenance_per_s * phys.core.body_max * 3600.0
+}
+
+/// The upkeep the **founding gate** judges a lineage's stock against: a x1 body's,
+/// [`upkeep_per_hour`] over the physiology's recorded `mass_scale` (1 shipped, where the
+/// two are the same). A heavier body lives on regrowth rather than on what stands at the
+/// start (audit round, `design/handoffs/voxel-audit-round-2026-09-28.md` §2), so the gate
+/// puts its founders where a x1 body's would go and the run says whether they live.
+pub fn founding_upkeep_per_hour(phys: &FounderPhysiology) -> f64 {
+    upkeep_per_hour(phys) / phys.mass_scale
 }
 
 /// Each walkable component's food for a lineage, and the route map it was read on.
@@ -931,7 +941,7 @@ pub fn accept(
     for founder in Founder::ALL {
         let phys = *fauna.config().founder(founder);
         let (map, food) = lineage_food(&view, &fv, &phys, founder);
-        let u = upkeep_per_hour(&phys);
+        let u = founding_upkeep_per_hour(&phys);
         let mut v = LineageVerdict {
             wanted: wanted[founder.index()],
             upkeep_per_h: u,
@@ -2273,5 +2283,50 @@ mod tests {
         assert!(lake_margin(&view, &lake, Site { x: 3, y: 2, z: 1 }), "the lake floor");
         assert!(!lake_margin(&view, &lake, puddle_bank), "a puddle is not the lake");
         assert!(!lake_margin(&view, &lake, Site { x: 13, y: 6, z: 1 }), "dry ground");
+    }
+
+    /// The audit round's mass scale: a lineage built `mass_scale` times heavier is
+    /// founded against a x1 body's upkeep, so the founders go to the same faces at every
+    /// scale and the run, not the founding gate, says whether regrowth feeds them. The
+    /// upkeep it really pays is still the heavy one.
+    #[test]
+    fn a_heavier_lineage_is_founded_against_a_x1_bodys_upkeep() {
+        let world = plain(24, 6);
+        let mut flora = Flora::new(cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25));
+        plant(&mut flora, &world, 6, 3, Species::Bloomcrown, 0.85);
+        let light = *Fauna::new(Default::default())
+            .config()
+            .founder(Founder::Browser);
+        let mut config = cubarium_voxel_fauna::FaunaConfig::default();
+        {
+            let heavy = &mut config.founders[Founder::Browser.index()];
+            let c = &mut heavy.core;
+            for v in [
+                &mut c.body_max,
+                &mut c.body_min,
+                &mut c.birth_body,
+                &mut c.birth_cost,
+                &mut c.reproduction.surplus_floor,
+                &mut c.bite_per_s,
+                &mut c.bite_half_stock,
+                &mut c.growth_max_per_s,
+            ] {
+                *v *= 100.0;
+            }
+            heavy.mass_scale = 100.0;
+        }
+        config.validate().expect("a heavy config validates");
+        let heavy = config.founders[Founder::Browser.index()];
+        assert!((upkeep_per_hour(&heavy) - 100.0 * upkeep_per_hour(&light)).abs() < 1e-9);
+        assert!((founding_upkeep_per_hour(&heavy) - upkeep_per_hour(&light)).abs() < 1e-12);
+        assert_eq!(founding_upkeep_per_hour(&light), upkeep_per_hour(&light));
+
+        let mut fauna = Fauna::new(config);
+        introduce(&mut fauna, &world, Founder::Browser, Site { x: 6, y: 2, z: 3 });
+        let at = accept(&world, &flora, &fauna, [0, 1]);
+        assert!(
+            at.lineages[Founder::Browser.index()].accepted,
+            "one heavy founder by a bloomcrown is founded as a light one would be: {at:?}"
+        );
     }
 }

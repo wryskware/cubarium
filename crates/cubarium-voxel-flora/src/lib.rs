@@ -632,13 +632,16 @@ pub enum Dispersal {
     Water,
 }
 
-/// The shipped defence rise per bite (`defence_per_bite`). Measured 2026-09-25 on the
-/// training world (`examples/defence_probe.rs`, seeds 1-4): a browser at a crown bites
-/// on 15-20 % of ticks (once per controller sample), so 15 min of continuous grazing is
-/// 2,700-3,600 bites and this leaves 12-20 % of the bite; 30 min leaves 2-4 %.
-pub const DEFENCE_PER_BITE: f64 = 6e-4;
-/// The shipped defence half-life once grazing stops: 1.5 h (`defence_half_life_s`).
-pub const DEFENCE_HALF_LIFE_S: f64 = 5400.0;
+/// The shipped defence rise per bite (`defence_per_bite`). A browser at a crown bites on
+/// 15-20 % of ticks (once per controller sample, `examples/defence_probe.rs`), 3-4 bites
+/// a second, so continuous grazing moves the defence with a time constant of 80-110 s:
+/// 0.8 within 2.5-3.5 min, where the bite keeps a fifth. The audit round moved it from
+/// 6e-4 (15 min to the same point) onto the biological clock
+/// (`design/handoffs/voxel-audit-round-2026-09-28.md` §4, audit §1.3.3, §2).
+pub const DEFENCE_PER_BITE: f64 = 3e-3;
+/// The shipped defence half-life once grazing stops: 20 min (`defence_half_life_s`),
+/// "relaxes over tens of minutes" (audit round §4; was 1.5 h).
+pub const DEFENCE_HALF_LIFE_S: f64 = 1200.0;
 
 /// The plant model of one species: `design/ecology-v1-contract.md` §4 parameters, plus
 /// the terrain couplings that replace the old noise fields.

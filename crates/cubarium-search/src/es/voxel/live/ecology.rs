@@ -121,16 +121,54 @@ pub const PARAMS: &[ParamSpec] = &[
         max: 4.0,
         what: "walking cost as a multiple of upkeep, on the shipped ratio (1)",
     },
+    // The audit round (2026-09-28, audit §1.4, §8.2): the animal's size in org-units
+    // against the plants'. It multiplies the nine absolute animal quantities
+    // (`MASS_SCALED`) and leaves every per-unit rate, clock and metre alone, so one spot
+    // can run out while walking still pays.
+    ParamSpec {
+        name: "founder.mass_scale",
+        kind: Kind::Scale,
+        min: 1.0,
+        max: 1000.0,
+        what: "animal org-unit mass: the nine absolute animal quantities (x1 shipped)",
+    },
 ];
+
+/// The absolute animal quantities `founder.mass_scale` multiplies (audit §1.4), by name.
+pub const MASS_SCALED: [&str; 9] = [
+    "body_max",
+    "body_min",
+    "birth_body",
+    "birth_cost",
+    "surplus_floor",
+    "egg_organic",
+    "bite_per_s",
+    "bite_half_stock",
+    "growth_max_per_s",
+];
+
+/// Multiply one body kind's [`MASS_SCALED`] quantities by `k`.
+fn scale_mass(sc: &mut cubarium_voxel_fauna::SpeciesConfig, k: f64) {
+    sc.body_max *= k;
+    sc.body_min *= k;
+    sc.birth_body *= k;
+    sc.birth_cost *= k;
+    sc.reproduction.surplus_floor *= k;
+    sc.reproduction.egg_organic *= k;
+    sc.bite_per_s *= k;
+    sc.bite_half_stock *= k;
+    sc.growth_max_per_s *= k;
+}
 
 /// The founder parameters that also take a **per-lineage** multiplier
 /// (`name@<lineage>`, or an `[ecology.<lineage>]` table in a file), on top of the shared
 /// one (`design/handoffs/voxel-browser-movement-2026-09-28.md`, 2). The two multiply.
-pub const LINEAGE_PARAMS: [&str; 4] = [
+pub const LINEAGE_PARAMS: [&str; 5] = [
     "founder.yield_by_food",
     "founder.maintenance_per_s",
     "founder.lifespan_median_s",
     "founder.motor_factor",
+    "founder.mass_scale",
 ];
 
 /// One world's parameter vector, aligned with [`PARAMS`], plus the per-lineage
@@ -139,6 +177,10 @@ pub const LINEAGE_PARAMS: [&str; 4] = [
 pub struct EcologyParams {
     values: Vec<f64>,
     per_lineage: Vec<[f64; LINEAGE_PARAMS.len()]>,
+    /// The audit round's opt-in arm B: each founder's `Self` references are read at its
+    /// mass scale, so they keep meaning "a fraction of an adult". Off (the contract's
+    /// fixed references) unless a check asks for it; never searched, never saved.
+    mass_relative_self: bool,
 }
 
 /// `name@lineage` split into the shared name, the lineage and its slot in
@@ -176,7 +218,20 @@ impl EcologyParams {
                 })
                 .collect(),
             per_lineage: vec![[1.0; LINEAGE_PARAMS.len()]; Founder::COUNT],
+            mass_relative_self: false,
         }
+    }
+
+    /// The same vector with the `Self` references read at each founder's mass scale
+    /// (arm B of the audit round's mass test). Opt-in; see the field.
+    pub fn with_mass_relative_self(mut self) -> EcologyParams {
+        self.mass_relative_self = true;
+        self
+    }
+
+    /// Whether this vector reads the `Self` references at the mass scale.
+    pub fn mass_relative_self(&self) -> bool {
+        self.mass_relative_self
     }
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -239,6 +294,7 @@ impl EcologyParams {
                 })
                 .collect(),
             per_lineage: vec![[1.0; LINEAGE_PARAMS.len()]; Founder::COUNT],
+            mass_relative_self: false,
         }
     }
 
@@ -374,6 +430,11 @@ impl EcologyParams {
         c.frondgrazer.lifespan_median_s *= life;
         // The placeholder species is the browser's body.
         c.frondgrazer.lifespan_median_s *= self.per_lineage[Founder::Browser.index()][2];
+        let mass = self.v("founder.mass_scale");
+        scale_mass(
+            &mut c.frondgrazer,
+            mass * self.per_lineage[Founder::Browser.index()][4],
+        );
         for f in Founder::ALL {
             let own = self.per_lineage[f.index()];
             let phys = &mut c.founders[f.index()];
@@ -387,6 +448,12 @@ impl EcologyParams {
             phys.motor_respiration_per_s *=
                 upkeep * own[1] * self.v("founder.motor_factor") * own[3];
             phys.core.lifespan_median_s *= life * own[2];
+            let k = mass * own[4];
+            scale_mass(&mut phys.core, k);
+            phys.mass_scale = k;
+            if self.mass_relative_self {
+                phys.self_reference_scale = k;
+            }
         }
         c
     }

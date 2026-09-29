@@ -34,6 +34,11 @@ use cubarium_search::search::{self, Budget, TRAINING_SEEDS, Variation};
 struct Cli {
     #[command(subcommand)]
     command: Command,
+    /// The ecology vector (`[ecology]` TOML, as `voxel-ecology-check --arm` reads) the
+    /// frozen trainer's arenas and landscapes are built on; the live defaults when absent
+    /// (audit round step 5).
+    #[arg(long, global = true)]
+    training_ecology: Option<PathBuf>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -810,6 +815,10 @@ enum Command {
         threads: usize,
         #[arg(long, default_value = "runs/ecology-check")]
         out: PathBuf,
+        /// Read every founder's `Self` references at its mass scale (the audit round's
+        /// opt-in arm B), so a heavier body keeps reading "a fraction of an adult".
+        #[arg(long)]
+        mass_relative_self: bool,
     },
     /// Live-world training (`design/handoffs/voxel-live-world-training-2026-09-24.md`):
     /// every body of every lineage given a centre runs its own antithetic variant inside
@@ -1082,7 +1091,12 @@ fn parse_centres(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    match Cli::parse().command {
+    let cli = Cli::parse();
+    if let Some(path) = &cli.training_ecology {
+        let e = es::voxel::live::ecology::EcologyParams::load(path)?;
+        es::voxel::training_world::set_training_ecology(e)?;
+    }
+    match cli.command {
         Command::Params => print_params(),
         Command::Baseline {
             ticks,
@@ -1491,6 +1505,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             water_every,
             threads,
             out,
+            mass_relative_self,
         } => {
             let mut parsed = Vec::new();
             for a in &arms {
@@ -1501,6 +1516,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     es::voxel::live::ecology::EcologyParams::defaults()
                 } else {
                     es::voxel::live::ecology::EcologyParams::load(std::path::Path::new(src))?
+                };
+                let params = if mass_relative_self {
+                    params.with_mass_relative_self()
+                } else {
+                    params
                 };
                 parsed.push((name.to_string(), params));
             }
@@ -1591,6 +1611,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             remote_wait,
             pin,
         } => {
+            es::voxel::training_world::check_remote(remotes.len())?;
             if overwrite {
                 let _ = std::fs::remove_dir_all(&out);
             }

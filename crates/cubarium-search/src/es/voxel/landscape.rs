@@ -34,7 +34,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use cubarium_voxel::World;
 use cubarium_voxel_fauna::{Fauna, FaunaConfig, Founder, RouteMap, Senses};
 use cubarium_voxel_flora::Site;
-use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraConfig};
+use cubarium_voxel_flora::{Deposit, DepositKind, Flora};
 use cubarium_voxel_sim::Placement;
 use cubarium_voxel_sim::found::{self, Founded};
 use cubarium_voxel_sim::habitat;
@@ -134,9 +134,9 @@ impl Landscape {
     /// the live bounds, plant layer and animal config), drawing `seed_base` first and
     /// [`LANDSCAPE_REDRAW_STRIDE`] apart after a refusal.
     pub fn found(preset: &str, seed_base: u64) -> Result<Landscape, String> {
-        let cfg = cubarium_voxel::Preset::find(preset)
-            .ok_or_else(|| format!("no landform preset is called {preset:?}"))?
-            .config();
+        // The live world, at an hour of the day drawn from the seed base (audit round
+        // step 5): the preset's day clock and the training ecology's layers.
+        let cfg = super::training_world::landscape_config(preset, seed_base)?;
         let mut next = seed_base;
         let founded = found::found_a_landscape(
             &cfg,
@@ -149,10 +149,11 @@ impl Landscape {
                 seed
             },
             |w: &World| {
-                (
-                    Flora::new(FloraConfig::for_voxel_size(w.config().voxel_m)),
-                    Fauna::new(FaunaConfig::default()),
-                )
+                let (flora, fauna) = super::training_world::landscape_layers_for(
+                    super::training_world::training_ecology(),
+                    w.config().voxel_m,
+                );
+                (Flora::new(flora), Fauna::new(fauna))
             },
             habitat::FOUNDER_COUNTS,
             |s: &habitat::Seeded| s.acceptance.accepted,
@@ -163,7 +164,7 @@ impl Landscape {
     /// A landscape out of a founding the caller ran itself (a test's small ring, say).
     /// The founders' faces and headings are read off the seeded animal layer.
     pub fn from_founded(preset: &str, seed_base: u64, founded: Founded) -> Landscape {
-        let cfg = FaunaConfig::default();
+        let cfg = super::training_world::training_fauna_config();
         let start_faces = Founder::ALL.map(|f| start_faces_of(&founded, &cfg, f));
         let mid_shower_standable = founded.mid_shower.as_ref().map(|w| {
             Founder::ALL.map(|f| {

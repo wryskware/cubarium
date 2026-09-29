@@ -453,13 +453,15 @@ fn box_penalty(x: &[f64]) -> f64 {
 }
 
 /// One lineage's brain for a check arm: `heuristic` (the fauna's own observation-only
-/// forager), `herding` (the browser's forager with cohesion,
+/// forager), `parker` (the same forager, standing still while it feeds,
+/// [`crate::es::voxel::controller::Parker`]), `herding` (the browser's forager with cohesion,
 /// [`crate::es::voxel::controller::HerdingBrowser`]), or a centre file validated against
 /// this build and the lineage.
 pub fn brain_driver(founder: Founder, spec: &str) -> Result<EpisodeDriver, String> {
     use crate::es::voxel::controller::VoxelControl;
     match spec {
         "heuristic" => Ok(EpisodeDriver::control(VoxelControl::Heuristic, founder)),
+        "parker" => Ok(EpisodeDriver::control(VoxelControl::Parker, founder)),
         "herding" if founder == Founder::Browser => {
             Ok(EpisodeDriver::control(VoxelControl::Herding, founder))
         }
