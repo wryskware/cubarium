@@ -863,6 +863,10 @@ enum Command {
         ecology: Option<PathBuf>,
         #[arg(long, default_value = "runs/live-train")]
         out: PathBuf,
+        /// Found the training worlds from this config file's `[world]` (a host's, e.g.
+        /// config/desktop/terrarium.toml) instead of the still-water `small` preset.
+        #[arg(long)]
+        world: Option<PathBuf>,
     },
     /// Phase-one voxel slice (P1-D): the bounded ES run over one founder's manifest, with
     /// shape-aware antithetic pairs, the initial centre evaluation, and the plan's caps.
@@ -1554,6 +1558,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             population_cap,
             save_every,
             out,
+            world,
             ecology,
         } => {
             let ecology = match ecology {
@@ -1561,6 +1566,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 None => es::voxel::live::ecology::EcologyParams::defaults(),
             };
             let spec = es::voxel::live::trainer::LiveSpec {
+                world: match &world {
+                    Some(p) => Some(cubarium_voxel::world_config_from_file(p)?),
+                    None => None,
+                },
                 ecology,
                 centres: parse_centres(&centres)?,
                 worlds,
